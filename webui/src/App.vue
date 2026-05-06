@@ -7,6 +7,7 @@ import { useBootstrap } from './composables/useBootstrap'
 import { useRuntime } from './composables/useRuntime'
 import { provideAppContext } from './composables/useAppContext'
 import type { CompactResult, TokenStatsRow } from './types'
+import { brandAssets } from './assets'
 import { formatNumber, usageTypeLabel } from './utils/format'
 
 const router = useRouter()
@@ -125,7 +126,7 @@ async function executeSlashCommand(raw: string, name: string, command: SlashComm
     return
   }
   if (command.name === '/compact') {
-    showToast('/compact 正在压缩未归档会话，会写入 memory/MEMORY.md')
+    showToast('/compact 正在压缩未归档会话，会写入 memory/MEMORY.local.md')
     try {
       const result = await compactMemory()
       addLocalCommand(raw, renderCompactResult(result))
@@ -341,6 +342,7 @@ provideAppContext({
   </div>
 
   <div v-else class="app-shell">
+    <img class="app-cover-watermark" :src="brandAssets.ogCover" alt="" aria-hidden="true" />
     <NavRail />
     <router-view v-slot="{ Component }">
       <keep-alive>

@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { cloneJson } from '../../api/http'
 import type { ModelConfigPayload, ModelConfigRaw, ProviderOption } from '../../types'
+import { actionAssets, brandAssets } from '../../assets'
 
 const props = defineProps<{ payload: ModelConfigPayload | null }>()
 const emit = defineEmits<{ save: [config: ModelConfigRaw]; error: [message: string] }>()
@@ -94,10 +95,16 @@ function save() {
   <div class="panel-content">
     <div class="panel-toolbar model-toolbar">
       <span class="status-pill"><span class="dot" />{{ current?.provider || 'provider' }} / {{ current?.model || 'model' }}</span>
-      <button class="tool-button ink" @click="save">保存模型</button>
+      <button class="tool-button ink asset-button primary-action" @click="save">
+        <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+        <span>保存模型</span>
+      </button>
     </div>
 
-    <div v-if="!props.payload" class="empty-state">暂无模型配置。</div>
+    <div v-if="!props.payload" class="empty-state illustrated-empty seal-empty">
+      <img :src="brandAssets.logoMark" alt="" />
+      <span>暂无模型配置。</span>
+    </div>
     <div v-else class="model-form">
       <label>
         <span>Provider</span>
@@ -149,6 +156,7 @@ function save() {
         <textarea v-model="draft.extraBody" rows="3" placeholder='{"enable_thinking": false}' />
       </label>
       <div class="span-2 empty-note">
+        <img class="note-mark" :src="brandAssets.logoMark" alt="" width="28" height="28" />
         默认推荐 <strong>deepseek / deepseek-v4-flash</strong>。主 Agent、子代理和记忆压缩共用这里的模型配置。
       </div>
     </div>

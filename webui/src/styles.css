@@ -38,9 +38,12 @@ body::before {
   pointer-events: none;
   z-index: -2;
   background-image:
+    url('../../assets/textures/texture-paper.png'),
     radial-gradient(circle at 12% 8%, rgb(var(--amber) / 0.18), transparent 32%),
     radial-gradient(circle at 85% 4%, rgb(var(--jade) / 0.12), transparent 27%),
     linear-gradient(135deg, rgb(var(--paper)), rgb(var(--paper-2)));
+  background-size: 260px 260px, auto, auto, auto;
+  background-blend-mode: multiply, normal, normal, normal;
 }
 
 body::after {
@@ -51,9 +54,12 @@ body::after {
   z-index: -1;
   opacity: 0.28;
   background-image:
+    url('../../assets/textures/texture-seal.png'),
     linear-gradient(90deg, rgb(var(--ink) / 0.04) 1px, transparent 1px),
     linear-gradient(rgb(var(--ink) / 0.03) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-position: right 5vw top 6vh, 0 0, 0 0;
+  background-repeat: no-repeat, repeat, repeat;
+  background-size: min(34vw, 420px) auto, 28px 28px, 28px 28px;
   mask-image: radial-gradient(circle at center, black, transparent 78%);
 }
 
@@ -94,13 +100,22 @@ body::after {
 
 @layer components {
   .app-shell {
-    @apply grid min-h-dvh gap-4 p-4;
+    @apply relative grid min-h-dvh gap-4 p-4;
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .app-cover-watermark {
+    @apply pointer-events-none fixed bottom-0 right-0 hidden mix-blend-multiply lg:block;
+    z-index: 0;
+    width: min(42vw, 560px);
+    opacity: 0.075;
+    image-rendering: pixelated;
+    transform: translate(12%, 12%) rotate(-4deg);
   }
 
   .nav-rail,
   .main-view {
-    @apply min-h-0 rounded-[2rem] border border-line/70 bg-paper/75 shadow-imperial backdrop-blur-xl;
+    @apply relative z-10 min-h-0 rounded-[2rem] border border-line/70 bg-paper/75 shadow-imperial backdrop-blur-xl;
   }
 
   .nav-rail {
@@ -112,8 +127,14 @@ body::after {
   }
 
   .view-head {
-    @apply flex shrink-0 items-center justify-between gap-3 border-b border-line/70 px-6 py-4;
+    @apply relative flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-line/70 px-6 py-4;
     background: linear-gradient(135deg, rgb(var(--paper-2) / 0.7), rgb(var(--paper) / 0.68));
+  }
+
+  .view-head::after {
+    content: '';
+    @apply pointer-events-none absolute -right-8 -top-12 h-36 w-36 opacity-10;
+    background: url('../../assets/textures/texture-seal.png') center / contain no-repeat;
   }
 
   .view-head h1 {
@@ -141,11 +162,25 @@ body::after {
   }
 
   .rail-status {
-    @apply flex items-center justify-between gap-2 px-1;
+    @apply flex items-center justify-between gap-1.5 px-1;
   }
 
   .brand-panel {
-    @apply flex items-center gap-3 rounded-[1.5rem] border border-line/70 bg-paper2/70 p-3 shadow-insetPaper;
+    @apply flex flex-col gap-3 rounded-[1.65rem] border border-line/70 bg-paper2/75 p-4 shadow-insetPaper;
+  }
+
+  .brand-main {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .brand-orb {
+    @apply relative grid size-[4.35rem] shrink-0 place-items-center overflow-hidden rounded-[1.35rem] border border-seal/25 bg-seal/10 shadow-lg shadow-seal/10;
+  }
+
+  .brand-orb::after {
+    content: '';
+    @apply pointer-events-none absolute inset-0 rounded-[1.35rem] border border-paper/40;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
   }
 
   .seal-block {
@@ -167,11 +202,87 @@ body::after {
   }
 
   .brand-title {
-    @apply font-display text-lg font-black tracking-wide text-ink;
+    @apply font-display text-[1.05rem] font-black leading-tight tracking-wide text-ink;
+  }
+
+  .brand-subtitle {
+    @apply mt-1 text-xs font-semibold tracking-[0.08em] text-muted;
+  }
+
+  .brand-model-row {
+    @apply grid grid-cols-1 gap-2;
+  }
+
+  .brand-provider-pill {
+    @apply min-w-0 rounded-[1.05rem] border border-line/70 bg-paper/75 px-3 py-3 text-center font-mono text-[11px] font-bold text-muted shadow-sm;
+    max-width: 100%;
   }
 
   .icon-button {
-    @apply grid size-10 shrink-0 place-items-center rounded-2xl border border-line/70 bg-paper/80 text-sm font-bold text-muted transition hover:border-seal/40 hover:text-seal;
+    @apply grid size-11 shrink-0 place-items-center rounded-2xl border border-line/70 bg-paper/80 text-sm font-bold text-muted transition hover:border-seal/40 hover:text-seal;
+  }
+
+  .action-icon,
+  .status-icon,
+  .tool-image,
+  .mini-tool-icon,
+  .resource-icon,
+  .usage-mark,
+  .welcome-hero,
+  .subagent-avatar,
+  .note-mark {
+    image-rendering: pixelated;
+    display: block;
+    object-fit: contain;
+  }
+
+  .asset-button {
+    @apply gap-2;
+  }
+
+  .tool-button.asset-button {
+    @apply min-h-12 shrink-0 px-4 py-2.5;
+  }
+
+  .icon-button .action-icon {
+    @apply size-6;
+  }
+
+  .tool-button.asset-button .action-icon {
+    @apply size-8;
+    transform: scale(1.16);
+  }
+
+  .tool-button.asset-button.primary-action {
+    @apply min-h-14 rounded-[1.2rem] px-5 py-3 text-[15px] shadow-sm;
+  }
+
+  .tool-button.asset-button.primary-action .action-icon {
+    @apply size-10;
+    transform: scale(1.28);
+  }
+
+  .rail-clear-button {
+    @apply min-h-12 rounded-[1.1rem] text-sm;
+  }
+
+  .rail-clear-button .action-icon {
+    @apply size-8;
+    transform: scale(1.14);
+  }
+
+  .refresh-action {
+    @apply min-h-14 rounded-[1.2rem] px-5 py-3 text-[15px] shadow-sm;
+  }
+
+  .refresh-action .action-icon {
+    @apply size-7;
+    transform: scale(1);
+  }
+
+  .status-icon {
+    @apply size-4 shrink-0;
+    transform: scale(1.12);
   }
 
   .agent-card {
@@ -192,7 +303,7 @@ body::after {
   }
 
   .status-pill {
-    @apply inline-flex items-center gap-2 rounded-full border border-line/70 bg-paper/75 px-3 py-1.5 text-xs font-semibold text-muted;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line/70 bg-paper/75 px-2.5 py-1 text-[11px] font-semibold text-muted;
   }
 
   .agent-card .status-pill {
@@ -227,23 +338,23 @@ body::after {
   }
 
   .mini-code {
-    @apply rounded-full border border-paper/20 bg-ink/20 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-paper/75;
+    @apply rounded-full border border-line/60 bg-ink/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted;
   }
 
   .rail-metrics {
-    @apply grid grid-cols-2 gap-2;
+    @apply grid grid-cols-2 gap-1.5;
   }
 
   .metric {
-    @apply rounded-[1.25rem] border border-line/70 bg-paper2/60 p-3;
+    @apply rounded-[0.95rem] border border-line/60 bg-paper2/40 px-2 py-2;
   }
 
   .metric strong {
-    @apply block font-display text-2xl font-black text-ink;
+    @apply block font-display text-lg font-black leading-none text-ink;
   }
 
   .metric span {
-    @apply text-xs uppercase tracking-[0.16em] text-muted;
+    @apply mt-1 block text-[9px] uppercase tracking-[0.12em] text-muted;
   }
 
   .rail-actions {
@@ -251,14 +362,26 @@ body::after {
   }
 
   .rail-action {
-    @apply flex items-center justify-between rounded-[1.2rem] border border-transparent bg-paper/40 px-4 py-3 text-left transition hover:border-line/70 hover:bg-paper/80;
+    @apply flex items-center gap-3.5 rounded-[1.25rem] border border-transparent bg-paper/40 px-4 py-4 text-left transition hover:border-line/70 hover:bg-paper/80;
   }
 
-  .rail-action span {
-    @apply font-display text-base font-bold text-ink;
+  .nav-icon {
+    @apply size-12 shrink-0;
+    image-rendering: pixelated;
+    transform: scale(1.32);
   }
 
-  .rail-action small {
+  .brand-seal {
+    @apply absolute left-1/2 top-1/2 size-[6rem] max-w-none drop-shadow;
+    transform: translate(-50%, -50%) scale(1.51);
+    transform-origin: center;
+  }
+
+  .nav-label span {
+    @apply block font-display text-base font-bold text-ink;
+  }
+
+  .nav-label small {
     @apply text-xs text-muted;
   }
 
@@ -267,11 +390,11 @@ body::after {
   }
 
   .rail-footer {
-    @apply rounded-[1.4rem] border border-line/70 bg-paper2/60 p-3;
+    @apply rounded-[1.2rem] border border-line/60 bg-paper2/45 p-2.5;
   }
 
   .rail-footer p {
-    @apply mt-2 text-xs leading-5 text-muted;
+    @apply mt-2 px-0.5 text-[10px] leading-4 text-muted;
   }
 
   .tool-button {
@@ -300,7 +423,15 @@ body::after {
   }
 
   .welcome-card {
-    @apply mx-auto mt-[9vh] max-w-2xl rounded-[2rem] border border-line/70 bg-paper/80 p-8 shadow-imperial;
+    @apply mx-auto mt-[9vh] max-w-3xl overflow-hidden rounded-[2rem] border border-line/70 bg-paper/80 p-8 shadow-imperial;
+  }
+
+  .welcome-layout {
+    @apply grid items-center gap-6 md:grid-cols-[minmax(0,1fr)_180px];
+  }
+
+  .welcome-hero {
+    @apply mx-auto w-40 opacity-95 drop-shadow-xl md:w-44;
   }
 
   .welcome-card h1 {
@@ -312,7 +443,7 @@ body::after {
   }
 
   .message-row {
-    @apply flex items-start gap-3;
+    @apply flex items-start gap-4;
   }
 
   .message-row.user {
@@ -324,7 +455,7 @@ body::after {
   }
 
   .avatar {
-    @apply grid size-10 shrink-0 place-items-center rounded-2xl font-display text-lg font-black shadow-lg;
+    @apply grid size-12 shrink-0 place-items-center rounded-2xl font-display text-lg font-black shadow-lg overflow-hidden;
   }
 
   .avatar.user {
@@ -333,6 +464,25 @@ body::after {
 
   .avatar.assistant {
     @apply bg-seal text-paper shadow-seal/20;
+  }
+
+  .pixel-avatar {
+    image-rendering: pixelated;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .brand-seal,
+  .brand-seal-sm {
+    image-rendering: pixelated;
+    display: block;
+  }
+
+  .brand-seal-sm {
+    @apply size-10;
+    transform: scale(1.18);
   }
 
   .bubble {
@@ -357,11 +507,31 @@ body::after {
   }
 
   .flow-body {
-    @apply flex max-w-4xl flex-col gap-3;
+    @apply flex max-w-4xl flex-col items-start gap-3;
+  }
+
+  .copy-message-button {
+    @apply ml-1 inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line/60 bg-paper/80 px-3 py-1 text-[11px] font-semibold text-muted opacity-0 shadow-sm transition hover:border-seal/35 hover:bg-seal/10 hover:text-seal;
+  }
+
+  .copy-message-button .action-icon {
+    @apply size-5;
+    transform: scale(1.12);
+    transform-origin: center;
+  }
+
+  .message-row.assistant:hover .copy-message-button,
+  .copy-message-button:focus-visible {
+    @apply opacity-100;
   }
 
   .tool-event {
     @apply flex max-w-3xl items-start gap-3 rounded-[1.35rem] border border-line/70 bg-paper2/70 p-4 text-sm shadow-insetPaper;
+  }
+
+  .tool-image {
+    @apply size-12 shrink-0 rounded-[1rem] border border-line/50 bg-paper/70 p-1 shadow-sm;
+    transform: scale(1.16);
   }
 
   .tool-event.done {
@@ -485,6 +655,16 @@ body::after {
     @apply flex items-start gap-2 rounded-xl border border-line/60 bg-paper2/60 px-3 py-2;
   }
 
+  .mini-tool-icon {
+    @apply size-9 shrink-0 rounded-xl border border-line/50 bg-paper/75 p-1;
+    transform: scale(1.18);
+  }
+
+  .subagent-avatar {
+    @apply size-9 shrink-0 rounded-xl border border-line/60 bg-paper/80;
+    transform: scale(1.12);
+  }
+
   .todo-panel {
     @apply max-w-3xl rounded-[1.4rem] border border-amber/30 bg-amber/10 p-4;
   }
@@ -543,7 +723,16 @@ body::after {
   }
 
   .send-button {
-    @apply grid size-12 shrink-0 place-items-center rounded-[1.25rem] bg-seal font-display font-black text-paper transition hover:bg-ink disabled:bg-muted/50;
+    @apply grid shrink-0 place-items-center overflow-hidden border border-seal/30 bg-seal/90 font-display font-black text-paper shadow-sm transition hover:bg-ink disabled:border-line/70 disabled:bg-paper2 disabled:text-muted;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 1rem;
+  }
+
+  .send-button .send-icon {
+    @apply size-7;
+    transform: scale(1);
+    transform-origin: center;
   }
 
   .panel-content {
@@ -551,7 +740,7 @@ body::after {
   }
 
   .panel-toolbar {
-    @apply flex shrink-0 items-center gap-2;
+    @apply flex shrink-0 items-center gap-3;
   }
 
   .panel-toolbar input,
@@ -593,7 +782,17 @@ body::after {
   }
 
   .list-item {
-    @apply flex w-full items-start justify-between gap-3 rounded-[1.15rem] border border-line/60 bg-paper/60 p-3 transition hover:border-seal/30 hover:bg-paper;
+    @apply flex w-full items-start justify-between gap-4 rounded-[1.25rem] border border-line/60 bg-paper/60 p-4 transition hover:border-seal/30 hover:bg-paper;
+  }
+
+  .resource-icon {
+    @apply size-14 shrink-0 rounded-[1.15rem] border border-line/50 bg-paper2/70 p-1.5 shadow-sm;
+    transform: scale(1.14);
+  }
+
+  .tool-card .resource-icon {
+    @apply size-16;
+    transform: scale(1.18);
   }
 
   .list-item.active {
@@ -628,6 +827,46 @@ body::after {
     @apply border-amber/30 bg-amber/10 text-amber;
   }
 
+  .filter-wrap {
+    @apply relative flex-1;
+  }
+
+  .filter-wrap input {
+    @apply w-full pr-20;
+  }
+
+  .filter-badge {
+    @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-paper2 px-2 py-0.5 font-mono text-[10px] font-bold text-muted;
+  }
+
+  .skill-list .list-item {
+    @apply flex-col gap-2;
+  }
+
+  .skill-card {
+    @apply text-left;
+  }
+
+  .skill-card .resource-icon {
+    @apply size-12;
+  }
+
+  .skill-header {
+    @apply flex items-start justify-between gap-2;
+  }
+
+  .skill-path {
+    @apply mt-1 truncate font-mono text-[10px] text-muted/60;
+  }
+
+  .skill-tags {
+    @apply mt-2 flex flex-wrap gap-1;
+  }
+
+  .skill-tags .badge {
+    @apply text-[9px];
+  }
+
   .editor {
     @apply flex min-h-0 flex-col overflow-hidden rounded-[1.4rem] border border-line/70 bg-paper/70 shadow-insetPaper;
   }
@@ -644,8 +883,52 @@ body::after {
     @apply flex shrink-0 items-center justify-between gap-2 border-t border-line/70 p-3;
   }
 
+  .skill-editor-header {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  .skill-editor-meta {
+    @apply flex items-center gap-2;
+  }
+
+  .skill-editor-name {
+    @apply font-display text-sm font-black text-ink;
+  }
+
+  .skill-editor-file {
+    @apply rounded-full bg-paper2 px-2 py-0.5 font-mono text-[10px] text-muted;
+  }
+
+  .skill-editor-badges {
+    @apply flex shrink-0 flex-wrap items-center gap-1;
+  }
+
   .empty-state {
     @apply grid min-h-48 place-items-center rounded-[1.5rem] border border-dashed border-line/80 bg-paper/50 p-6 text-center text-sm leading-7 text-muted;
+  }
+
+  .illustrated-empty {
+    @apply gap-3;
+  }
+
+  .illustrated-empty img {
+    @apply mx-auto max-h-44 max-w-48 opacity-90 drop-shadow-md;
+    image-rendering: pixelated;
+    transform: scale(1.08);
+  }
+
+  .compact-illustration {
+    @apply flex min-h-0 items-center justify-start text-left;
+  }
+
+  .compact-illustration img {
+    @apply mx-0 size-20 shrink-0;
+    transform: scale(1.14);
+  }
+
+  .seal-empty img {
+    @apply max-h-36 max-w-36;
+    transform: scale(1.12);
   }
 
   .empty-note {
@@ -656,8 +939,23 @@ body::after {
     @apply p-2;
   }
 
+  .note-mark {
+    @apply mr-3 inline-block size-11 align-middle;
+    transform: scale(1.22);
+  }
+
   .usage-board {
-    @apply rounded-[1.7rem] border border-seal/20 bg-seal/95 p-5 text-paper shadow-lg shadow-seal/20;
+    @apply relative overflow-hidden rounded-[1.7rem] border border-seal/20 bg-seal/95 p-5 text-paper shadow-lg shadow-seal/20;
+  }
+
+  .usage-board::after {
+    content: '';
+    @apply pointer-events-none absolute -bottom-16 -right-10 size-44 rounded-full bg-paper/10;
+  }
+
+  .usage-mark {
+    @apply absolute right-5 top-4 size-24 opacity-35;
+    transform: scale(1.22);
   }
 
   .usage-total span {

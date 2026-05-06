@@ -333,17 +333,18 @@ npm run build</code>
     def configs(self) -> list[dict[str, str]]:
         candidates = [
             self.root / "templates" / "TOOL.md",
-            self.root / "templates" / "USER.md",
+            self._user_config_path(),
         ]
+        visible_paths = ["templates/TOOL.md", "templates/USER.md"]
         return [
-            {"path": self._rel(path), "name": path.name}
-            for path in candidates
+            {"path": visible_paths[index], "name": Path(visible_paths[index]).name}
+            for index, path in enumerate(candidates)
             if path.exists() and path.is_file()
         ]
 
     def read_config(self, rel_path: str) -> dict[str, str]:
         path = self._safe_config_path(rel_path)
-        return {"path": self._rel(path), "content": path.read_text(encoding="utf-8")}
+        return {"path": rel_path, "content": path.read_text(encoding="utf-8")}
 
     def write_config(self, rel_path: str, content: str) -> dict[str, str]:
         path = self._safe_config_path(rel_path)
@@ -358,7 +359,7 @@ npm run build</code>
             episodes = [
                 self._rel(path)
                 for path in sorted(memory_dir.glob("*.md"))
-                if path.name != "MEMORY.md"
+                if path.name not in {"MEMORY.md", "MEMORY.local.md"}
             ]
         return {
             "long_term": self.loop.memory.read_memory(),
@@ -398,15 +399,26 @@ npm run build</code>
 
     def _safe_config_path(self, rel_path: str) -> Path:
         path = (self.root / rel_path).resolve()
-        allowed = [
-            self.root / "templates" / "TOOL.md",
-            self.root / "templates" / "USER.md",
-        ]
-        if not any(path == item.resolve() for item in allowed):
+        tool_path = (self.root / "templates" / "TOOL.md").resolve()
+        user_template_path = (self.root / "templates" / "USER.md").resolve()
+        user_init_path = (self.root / "templates" / "init" / "USER.md").resolve()
+        if path == user_template_path:
+            path = self._user_config_path().resolve()
+        elif path == user_init_path:
+            raise web.HTTPForbidden(reason="USER init template is not editable from WebUI")
+        elif path != tool_path:
             raise web.HTTPForbidden(reason="Path is outside editable config files")
         if not path.exists() or not path.is_file():
             raise web.HTTPNotFound(reason=rel_path)
         return path
+
+    def _user_config_path(self) -> Path:
+        template = self.root / "templates" / "init" / "USER.md"
+        local = self.root / "templates" / "USER.local.md"
+        if not local.exists() and template.exists():
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        return local
 
     def _rel(self, path: str | Path) -> str:
         return Path(path).resolve().relative_to(self.root).as_posix()

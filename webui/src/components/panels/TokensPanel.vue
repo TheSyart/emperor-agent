@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { MemoryPayload, TokenStatsRow } from '../../types'
 import { formatNumber, usageTypeLabel } from '../../utils/format'
+import { actionAssets, navAssets } from '../../assets'
 
 const props = defineProps<{ memory: MemoryPayload | null }>()
 const emit = defineEmits<{ refresh: [] }>()
@@ -29,11 +30,15 @@ function label(key: string, kind: 'model' | 'usage' | 'date') {
   <div class="panel-content">
     <div class="panel-toolbar">
       <span class="status-pill"><span class="dot" />Token 用量账本</span>
-      <button class="tool-button" @click="emit('refresh')">刷新统计</button>
+      <button class="tool-button asset-button refresh-action" @click="emit('refresh')">
+        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <span>刷新统计</span>
+      </button>
     </div>
 
     <section class="usage-board">
       <div class="usage-total">
+        <img class="usage-mark" :src="navAssets.tokensActive" alt="" width="72" height="72" />
         <span>Token 总量</span>
         <strong>{{ formatNumber(totals.total || 0) }}</strong>
         <small>{{ formatNumber(totals.calls || 0) }} 次模型调用 · input {{ formatNumber(totals.input || 0) }} · output {{ formatNumber(totals.output || 0) }}</small>

@@ -1,25 +1,28 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAppContext } from '../../composables/useAppContext'
 import { formatCompactNumber } from '../../utils/format'
 import { navOrder } from '../../router'
+import { actionAssets, brandAssets, navIcon as resolveNavIcon } from '../../assets'
 
 const ctx = useAppContext()
+const route = useRoute()
 
 const navItems = computed(() => {
-  const labels: Record<(typeof navOrder)[number], { label: string; hint: string }> = {
-    chat: { label: 'Chat', hint: '御前对话' },
-    model: { label: 'Model', hint: '模型厂家' },
-    tokens: { label: 'Tokens', hint: '用量账本' },
-    skills: { label: 'Skills', hint: '能力包' },
-    tools: { label: 'Tools', hint: '工具权限' },
-    configs: { label: 'Config', hint: '工具 / 用户' },
-    memory: { label: 'Memory', hint: '记忆层' },
+  const hints: Record<(typeof navOrder)[number], string> = {
+    chat: '御前对话',
+    model: '模型厂家',
+    tokens: '用量账本',
+    skills: '能力包',
+    tools: '工具权限',
+    configs: '工具 / 用户',
+    memory: '记忆层',
   }
   return navOrder.map((name) => ({
     name,
     to: name === 'chat' ? '/chat' : `/${name}`,
-    ...labels[name],
+    hint: hints[name],
   }))
 })
 
@@ -31,32 +34,37 @@ const counts = computed(() => ({
 }))
 
 const current = computed(() => ctx.boot.value?.modelConfig?.current)
-
-function dotClass() {
-  if (ctx.busy.value) return 'busy'
-  if (ctx.status.value === 'error') return 'error'
-  return ''
-}
+const statusIcon = computed(() => {
+  if (ctx.busy.value) return actionAssets.statusBusy
+  if (ctx.status.value === 'error') return actionAssets.statusError
+  return actionAssets.statusOnline
+})
 </script>
 
 <template>
   <aside class="nav-rail">
     <div class="brand-panel">
-      <div class="seal-block">
-        <div class="seal">令</div>
-        <div class="seal-lines" aria-hidden="true" />
+      <div class="brand-main">
+        <div class="brand-orb">
+          <img class="brand-seal" :src="brandAssets.logoMark" alt="Emperor Agent" width="72" height="72" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="brand-title">Emperor Agent</p>
+          <p class="brand-subtitle">本地智能体工作台</p>
+        </div>
       </div>
-      <div class="min-w-0 flex-1">
-        <p class="brand-title">Emperor Agent</p>
-        <p class="truncate text-xs text-muted">
+      <div class="brand-model-row">
+        <p class="brand-provider-pill truncate">
           {{ current?.provider || ctx.boot.value?.provider || 'provider' }} / {{ current?.model || ctx.boot.value?.model || 'model' }}
         </p>
       </div>
-      <button class="icon-button" title="刷新" @click="ctx.refreshAll()">刷</button>
     </div>
 
     <div class="rail-status">
-      <span class="status-pill"><span class="dot" :class="dotClass()" />{{ ctx.runtimeText() }}</span>
+      <span class="status-pill">
+        <img class="status-icon" :src="statusIcon" alt="" width="16" height="16" />
+        {{ ctx.runtimeText() }}
+      </span>
       <span class="mini-code">single context</span>
     </div>
 
@@ -73,15 +81,27 @@ function dotClass() {
         :key="item.name"
         :to="item.to"
         class="rail-action"
-        active-class="active"
+        :class="{ active: route.name === item.name }"
       >
-        <span>{{ item.label }}</span>
-        <small>{{ item.hint }}</small>
+        <img
+          :src="resolveNavIcon(item.name, route.name === item.name)"
+          :alt="item.name"
+          class="nav-icon"
+          width="32"
+          height="32"
+        />
+        <div class="nav-label">
+          <span>{{ item.name.charAt(0).toUpperCase() + item.name.slice(1) }}</span>
+          <small>{{ item.hint }}</small>
+        </div>
       </router-link>
     </nav>
 
     <div class="rail-footer">
-      <button class="tool-button wide" @click="ctx.clearChat()">清空当前屏幕</button>
+      <button class="tool-button wide asset-button primary-action rail-clear-button" @click="ctx.clearChat()">
+        <img class="action-icon" :src="actionAssets.clear" alt="" width="20" height="20" />
+        <span>清空当前屏幕</span>
+      </button>
       <p>清空只影响网页显示，不会删除运行期记忆。</p>
     </div>
   </aside>

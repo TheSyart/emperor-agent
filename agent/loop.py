@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import shutil
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -41,10 +42,12 @@ class AgentLoop:
         self.root = root or Path(__file__).parent.parent
         self.verbose = verbose
         self._model_override = model
+        self.user_file = self._ensure_local_user_file()
 
         self.memory = MemoryStore(
             memory_dir=self.root / "memory",
-            user_file=self.root / "templates" / "USER.md",
+            user_file=self.user_file,
+            memory_template=self.root / "templates" / "init" / "MEMORY.md",
         )
         self.token_tracker = TokenTracker(self.root / "memory" / "tokens.jsonl")
 
@@ -87,6 +90,14 @@ class AgentLoop:
             unarchived = []
 
         self.history: list = list(unarchived)
+
+    def _ensure_local_user_file(self) -> Path:
+        template = self.root / "templates" / "init" / "USER.md"
+        local = self.root / "templates" / "USER.local.md"
+        if not local.exists() and template.exists():
+            local.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template, local)
+        return local
 
     def refresh_model_config(self, *, initial: bool = False) -> None:
         snapshot = build_provider_snapshot(self.root, model_override=self._model_override)

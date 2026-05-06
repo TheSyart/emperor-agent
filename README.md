@@ -64,12 +64,15 @@ webui/                      本地网页工作台（单一聊天主线 / model /
 templates/
 ├── SOUL.md                 智能体灵魂档案
 ├── TOOL.md                 工具使用配置
-├── USER.md                 用户偏好档案
+├── init/
+│   ├── MEMORY.md           仓库初始化版长期记忆模板
+│   └── USER.md             仓库初始化版用户偏好模板
+├── USER.local.md           本地个人用户偏好档案，已被 gitignore，首次启动自动生成
 ├── agent/                  主智能体 prompt 模板
 └── subagents/              子代理身份模板
 
 skills/                     可插拔技能包
-memory/                     运行期记忆产物，已被 gitignore
+memory/                     运行期记忆产物，已被 gitignore（含 MEMORY.local.md / history / tokens / episodes）
 model_config.json           本地私密模型配置，已被 gitignore
 ```
 
@@ -108,9 +111,14 @@ Token 用量在独立的 `Tokens` 面板查看，包含总量、按 provider/mod
 |----|------|----------|----------|
 | 工作记忆 | `history` 列表 | 每轮对话追加 | 全量传给模型 |
 | 情景记忆 | `memory/YYYY-MM-DD.md` | 压缩触发时生成 | 按需检索 |
-| 长期记忆 | `memory/MEMORY.md` | 压缩或启动归档时更新 | 每轮注入 system prompt |
+| 长期记忆模板 | `templates/init/MEMORY.md` | 仓库初始化格式 | 首次启动复制到本地长期记忆 |
+| 长期记忆 | `memory/MEMORY.local.md` | 压缩或启动归档时更新 | 每轮注入 system prompt |
+| 用户档案模板 | `templates/init/USER.md` | 仓库初始化格式 | 首次启动复制到本地用户档案 |
+| 用户档案 | `templates/USER.local.md` | 压缩或 WebUI Config 编辑时更新 | 优先注入 system prompt |
 
 当上一次调用的 input tokens 超过阈值时，系统会把较旧对话压缩成情景记忆，并更新长期记忆，只保留最近对话作为当前工作上下文。
+
+`memory/`、`templates/USER.local.md`、`model_config.json` 都是本地私密运行期文件，默认不提交。仓库中的 `templates/init/MEMORY.md` 和 `templates/init/USER.md` 应保持通用初始化格式。
 
 ---
 

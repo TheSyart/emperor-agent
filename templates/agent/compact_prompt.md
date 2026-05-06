@@ -29,7 +29,7 @@
 </episode>
 
 <updated_memory>
-MEMORY.md 的**完整新版本**。严格要求：
+MEMORY.local.md 的**完整新版本**。严格要求：
 1. 保留 <current_memory> 中所有仍然有效的条目；不要删除你不理解的内容
 2. 从 <old_conversation> 中提炼"当前核心目标 / 未完成任务 / 关键事实"合并进来
 3. 合并重复、归并同类
@@ -38,7 +38,7 @@ MEMORY.md 的**完整新版本**。严格要求：
 </updated_memory>
 
 <updated_user>
-USER.md 的**完整新版本**。严格要求：
+USER.local.md 的**完整新版本**。严格要求：
 - 仅当 <old_conversation> 中有明确的用户偏好信号（如"我喜欢/不喜欢/以后都这样做"）时才修改对应章节
 - 否则原样返回 <current_user> 的内容
 </updated_user>

@@ -11,17 +11,24 @@ _UTC8 = timezone(timedelta(hours=8))
 
 
 class MemoryStore:
-    def __init__(self, memory_dir: Path, user_file: Path):
+    def __init__(self, memory_dir: Path, user_file: Path, memory_template: Path | None = None):
         self.memory_dir = memory_dir
-        self.memory_file = memory_dir / "MEMORY.md"
+        self.memory_file = memory_dir / "MEMORY.local.md"
         self.history_file = memory_dir / "history.jsonl"
         self.user_file = user_file
+        self.memory_template = memory_template
         self._ensure()
 
     def _ensure(self) -> None:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
+        legacy_memory = self.memory_dir / "MEMORY.md"
+        if not self.memory_file.exists() and legacy_memory.exists():
+            legacy_memory.replace(self.memory_file)
         if not self.memory_file.exists():
-            self.memory_file.write_text("# 长期记忆\n\n此文件常驻上下文，记录核心目标、当前任务与关键事实。\n")
+            if self.memory_template and self.memory_template.exists():
+                self.memory_file.write_text(self.memory_template.read_text(encoding="utf-8"), encoding="utf-8")
+            else:
+                self.memory_file.write_text("# 长期记忆\n\n此文件常驻上下文，记录核心目标、当前任务与关键事实。\n", encoding="utf-8")
         if not self.history_file.exists():
             self.history_file.write_text("")
 

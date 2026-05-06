@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ToolSegment, ToolStatus } from '../../types'
 import { compactJson } from '../../utils/format'
+import { toolIcon } from '../../assets'
 import ExpandableText from './ExpandableText.vue'
 import SubagentTrail from './SubagentTrail.vue'
 
@@ -27,7 +28,7 @@ function fullJson(value: unknown) {
 
 <template>
   <div class="tool-event" :class="props.segment.status">
-    <span class="tool-dot" />
+    <img class="tool-image" :src="toolIcon(props.segment.name)" alt="" width="34" height="34" />
     <div class="min-w-0 flex-1">
       <div class="tool-name">
         <span class="truncate">{{ props.segment.name }}</span>

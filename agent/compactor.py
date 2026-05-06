@@ -1,4 +1,4 @@
-"""Compactor: summarize old history into today's episode + update MEMORY.md / USER.md."""
+"""Compactor: summarize old history into today's episode + update MEMORY.local.md / USER.local.md."""
 from __future__ import annotations
 
 import re

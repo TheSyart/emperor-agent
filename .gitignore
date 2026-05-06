@@ -7,6 +7,9 @@ __pycache__/
 model_config.json
 webui/dist/
 webui/node_modules/
+webui/public/assets/
+templates/USER.local.md
+templates/*.local.md
 
-# 运行期产生的私人数据（含用户档案 / 会话历史 / token 用量）
+# 运行期产生的私人数据（长期记忆 / 会话历史 / token 用量）
 memory/

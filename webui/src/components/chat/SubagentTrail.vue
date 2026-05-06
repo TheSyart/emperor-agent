@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SubagentState, ToolStatus } from '../../types'
 import { compactJson } from '../../utils/format'
+import { avatarAssets, toolIcon } from '../../assets'
 import ExpandableText from './ExpandableText.vue'
 import MarkdownBlock from './MarkdownBlock.vue'
 
@@ -27,7 +28,7 @@ function fullJson(value: unknown) {
   <div class="mt-3 space-y-2 border-l border-amber/30 pl-3">
     <details v-for="sub in props.subagents" :key="sub.id || sub.agent_type" class="subagent-card" open>
       <summary class="flex cursor-pointer items-center gap-2 text-xs text-ink">
-        <span class="tool-dot" :class="sub.status" />
+        <img class="subagent-avatar" :src="avatarAssets.subagent" alt="" width="24" height="24" />
         <span class="font-semibold">{{ sub.agent_type || 'subagent' }}</span>
         <span class="min-w-0 flex-1 truncate text-muted">{{ sub.purpose }}</span>
         <span class="rounded-full bg-paper2 px-2 py-0.5 text-[10px] text-muted">{{ statusLabel(sub.status) }}</span>
@@ -39,7 +40,7 @@ function fullJson(value: unknown) {
         </div>
         <div v-if="sub.tools?.length" class="mt-3 space-y-2">
           <div v-for="tool in sub.tools" :key="tool.id || tool.name" class="mini-tool" :class="tool.status">
-            <span class="tool-dot" />
+            <img class="mini-tool-icon" :src="toolIcon(tool.name)" alt="" width="22" height="22" />
             <div class="min-w-0">
               <div class="flex items-center gap-2 font-semibold">
                 <span class="truncate">{{ tool.name }}</span>

@@ -39,9 +39,9 @@ class ContextBuilder:
         parts = []
 
         bootstrap = "\n\n".join(
-            (self.docs_dir / name).read_text().strip()
+            self._bootstrap_path(name).read_text(encoding="utf-8").strip()
             for name in self._BOOTSTRAP_FILES
-            if (self.docs_dir / name).exists()
+            if self._bootstrap_path(name).exists()
         )
         if bootstrap:
             parts.append(bootstrap)
@@ -68,3 +68,13 @@ class ContextBuilder:
             )
 
         return "\n\n---\n\n".join(parts)
+
+    def _bootstrap_path(self, name: str) -> Path:
+        if name == "USER.md":
+            local = self.docs_dir / "USER.local.md"
+            if local.exists():
+                return local
+            init = self.docs_dir / "init" / "USER.md"
+            if init.exists():
+                return init
+        return self.docs_dir / name

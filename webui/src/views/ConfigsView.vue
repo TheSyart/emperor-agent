@@ -3,6 +3,7 @@ import { watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppContext } from '../composables/useAppContext'
 import ConfigPanel from '../components/panels/ConfigPanel.vue'
+import { actionAssets } from '../assets'
 
 const ctx = useAppContext()
 const route = useRoute()
@@ -35,7 +36,10 @@ function onSave(content: string) {
         <h1>工具与用户配置</h1>
         <p>当前可编辑：templates/TOOL.md、templates/USER.md</p>
       </div>
-      <button class="icon-button" title="刷新" @click="ctx.refreshAll()">刷</button>
+      <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
+        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <span>刷新</span>
+      </button>
     </header>
     <div class="view-body view-body-fill">
       <ConfigPanel

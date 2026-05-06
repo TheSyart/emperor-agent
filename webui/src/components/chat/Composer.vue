@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { SlashCommand } from '../../commands'
+import { actionAssets } from '../../assets'
 
 const props = defineProps<{ busy: boolean; commands: SlashCommand[] }>()
 const emit = defineEmits<{ send: [content: string] }>()
@@ -68,7 +69,8 @@ function applySuggestion(command: SlashCommand) {
         @keydown="handleKeydown"
       />
       <button class="send-button" :disabled="props.busy || !value.trim()" type="submit">
-        {{ props.busy ? '候' : '发' }}
+        <img class="action-icon send-icon" :src="props.busy ? actionAssets.statusBusy : actionAssets.send" alt="" width="24" height="24" />
+        <span class="sr-only">{{ props.busy ? '等待' : '发送' }}</span>
       </button>
     </form>
   </div>
