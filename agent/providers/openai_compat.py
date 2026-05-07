@@ -245,8 +245,11 @@ class AzureOpenAIProvider(OpenAICompatProvider):
 
 
 class OpenAICodexProvider(OpenAICompatProvider):
+    """OAuth-based 通过 ChatGPT backend-api。当前作为占位子类，
+    完整 OAuth 流程留待实现。"""
     pass
 
 
 class GitHubCopilotProvider(OpenAICompatProvider):
+    """OAuth-based 通过 GitHub Copilot endpoint。当前作为占位子类。"""
     pass

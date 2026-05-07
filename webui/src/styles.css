@@ -819,6 +819,199 @@ body::after {
     @apply col-span-2;
   }
 
+  /* ── ModelPanel v2: simplified vertical layout + advanced collapse ── */
+  .model-form-v2 {
+    @apply flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1;
+  }
+
+  .model-form-v2 .form-row {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .model-form-v2 .form-row.span-2 {
+    @apply col-span-2;
+  }
+
+  .model-form-v2 .form-label {
+    @apply text-xs font-semibold uppercase tracking-[0.12em] text-muted;
+  }
+
+  .model-form-v2 .form-input,
+  .model-form-v2 .form-select {
+    @apply rounded-2xl border border-line/70 bg-paper2/50 px-3 py-2 text-sm text-ink shadow-insetPaper;
+  }
+
+  .model-form-v2 .form-select option {
+    @apply bg-paper text-ink;
+  }
+
+  .advanced-panel {
+    @apply mt-2 rounded-[1.4rem] border border-line/70 bg-paper2/40 p-3 shadow-insetPaper;
+  }
+
+  .advanced-panel[open] {
+    @apply bg-paper2/60;
+  }
+
+  .advanced-toggle {
+    @apply flex cursor-pointer items-baseline justify-between gap-3 px-1 py-1 font-display text-sm font-bold text-ink;
+    list-style: none;
+  }
+
+  .advanced-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  .advanced-toggle small {
+    @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-muted;
+  }
+
+  .advanced-grid {
+    @apply mt-3 grid grid-cols-2 gap-3;
+  }
+
+  .advanced-grid .form-row.span-2 {
+    @apply col-span-2;
+  }
+
+  .advanced-grid textarea {
+    @apply rounded-2xl border border-line/70 bg-paper/60 px-3 py-2 font-mono text-xs leading-5 text-ink shadow-insetPaper;
+  }
+
+  /* ── ModelPanel v3: 多条目布局 ── */
+  .model-panel-shell {
+    @apply relative;
+  }
+
+  .entry-layout {
+    @apply grid min-h-0 flex-1 gap-4 overflow-hidden;
+    grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  }
+
+  .entry-list-pane {
+    @apply flex min-h-0 flex-col gap-3 overflow-hidden;
+  }
+
+  .entry-list-head {
+    @apply flex shrink-0 items-end justify-between gap-3 px-1;
+  }
+
+  .entry-list-title {
+    @apply flex flex-col gap-0.5;
+  }
+
+  .entry-list-title span {
+    @apply font-display text-sm font-bold text-ink;
+  }
+
+  .entry-list-title small {
+    @apply font-mono text-[10px] uppercase tracking-[0.12em] text-muted;
+  }
+
+  .tool-button.compact {
+    @apply px-3 py-1 text-xs;
+  }
+
+  .entry-list {
+    @apply flex min-h-0 flex-col gap-2 overflow-y-auto pr-1;
+  }
+
+  /* ── 底部 sticky 操作栏 ── */
+  .model-action-bar {
+    @apply sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[1.4rem] border border-line/70 bg-paper2/85 px-4 py-3 shadow-imperial backdrop-blur;
+    z-index: 10;
+  }
+
+  .model-action-bar.dirty {
+    @apply border-amber/40 bg-amber/10;
+  }
+
+  .action-bar-status {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .dirty-badge {
+    @apply inline-flex items-center gap-1 rounded-full border border-amber/40 bg-amber/15 px-3 py-1 font-mono text-xs font-bold text-amber;
+  }
+
+  .saved-badge {
+    @apply inline-flex items-center gap-1 rounded-full border border-jade/30 bg-jade/10 px-3 py-1 font-mono text-xs font-bold text-jade;
+  }
+
+  .save-action[disabled] {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  .entry-item {
+    @apply flex cursor-pointer items-start gap-3 rounded-[1.25rem] border border-line/70 bg-paper/60 p-3 transition hover:border-seal/30 hover:bg-paper;
+  }
+
+  .entry-item.active {
+    @apply border-ink/40 bg-paper2/80 shadow-insetPaper;
+  }
+
+  .entry-item.default {
+    @apply border-seal/30 bg-seal/5;
+  }
+
+  .entry-item.active.default {
+    @apply border-seal/50 bg-seal/10;
+  }
+
+  .entry-meta {
+    @apply min-w-0 flex-1;
+  }
+
+  .entry-active-badge {
+    @apply inline-flex shrink-0 items-center rounded-full border border-jade/40 bg-jade/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-jade;
+  }
+
+  .entry-activate-btn {
+    @apply shrink-0 rounded-full border border-line/70 bg-paper px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-muted opacity-0 transition hover:border-seal/40 hover:text-seal;
+  }
+
+  /* hover 任意条目时露出激活按钮；当前编辑也露出，方便快速切 */
+  .entry-item:hover .entry-activate-btn,
+  .entry-item.active .entry-activate-btn {
+    @apply opacity-100;
+  }
+
+  .entry-active-inline {
+    @apply inline-flex shrink-0 items-center rounded-full border border-jade/40 bg-jade/15 px-3 py-1 font-mono text-xs font-bold text-jade;
+  }
+
+  .entry-editor-title {
+    @apply flex min-w-0 flex-wrap items-center gap-3;
+  }
+
+  .entry-title {
+    @apply truncate font-display text-sm font-bold text-ink;
+  }
+
+  .entry-sub {
+    @apply mt-1 truncate font-mono text-[11px] text-muted;
+  }
+
+  .entry-sub code {
+    @apply rounded bg-paper2 px-1 py-0.5;
+  }
+
+  .entry-editor {
+    @apply flex min-h-0 flex-col gap-3 overflow-y-auto rounded-[1.4rem] border border-line/70 bg-paper2/40 p-4 shadow-insetPaper;
+  }
+
+  .entry-editor-head {
+    @apply flex items-center justify-between gap-3 border-b border-line/60 pb-3;
+  }
+
+  .entry-editor-head h3 {
+    @apply truncate font-display text-base font-bold text-ink;
+  }
+
+  .tool-button.danger {
+    @apply border-seal/50 bg-seal/10 text-seal hover:border-seal hover:bg-seal hover:text-paper;
+  }
+
   .split-panel {
     @apply min-h-0;
   }
@@ -1590,13 +1783,24 @@ body::after {
     @apply grid-cols-1;
   }
 
-  .model-form {
+  .model-form,
+  .advanced-grid {
     @apply grid-cols-1;
   }
 
   .model-form .span-2,
+  .advanced-grid .form-row.span-2,
   .span-2 {
     @apply col-span-1;
+  }
+
+  .entry-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .entry-list {
+    @apply max-h-48;
   }
 
   .bubble {

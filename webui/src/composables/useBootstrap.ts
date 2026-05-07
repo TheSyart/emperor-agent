@@ -50,7 +50,14 @@ export function useBootstrap(showToast: (message: string) => void) {
       boot.value.providerLabel = data.current?.providerLabel || boot.value.providerLabel
     }
     modelDraftProvider.value = data.config?.agents?.defaults?.provider || null
-    showToast('模型配置已保存')
+    const label = data.current?.entryLabel || data.current?.entryName
+    const provider = data.current?.provider || boot.value?.provider || 'provider'
+    const model = data.current?.model || boot.value?.model || 'model'
+    if (label) {
+      showToast(`已切换到「${label}」· ${provider}/${model}`)
+    } else {
+      showToast(`已切换到 ${provider} / ${model}`)
+    }
   }
 
   async function compactMemory() {

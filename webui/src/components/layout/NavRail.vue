@@ -64,8 +64,11 @@ const statusIcon = computed(() => {
         </div>
       </div>
       <div class="brand-model-row">
-        <p class="brand-provider-pill truncate">
-          {{ current?.provider || ctx.boot.value?.provider || 'provider' }} / {{ current?.model || ctx.boot.value?.model || 'model' }}
+        <p
+          class="brand-provider-pill truncate"
+          :title="`${current?.provider || ''} / ${current?.model || ''}`"
+        >
+          {{ current?.entryLabel || current?.entryName || `${current?.provider || 'provider'} / ${current?.model || 'model'}` }}
         </p>
       </div>
     </div>

@@ -2,7 +2,6 @@
 import { useAppContext } from '../composables/useAppContext'
 import ModelPanel from '../components/panels/ModelPanel.vue'
 import type { ModelConfigRaw } from '../types'
-import { actionAssets } from '../assets'
 
 const ctx = useAppContext()
 
@@ -16,12 +15,8 @@ function onSave(config: ModelConfigRaw) {
     <header class="view-head">
       <div class="min-w-0">
         <h1>模型与厂家</h1>
-        <p>切换 Provider、模型、上下文窗口与推理配置</p>
+        <p>多条目管理；激活的条目决定后续主 Agent / 子代理 / 压缩任务用哪份凭证</p>
       </div>
-      <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
-        <span>刷新</span>
-      </button>
     </header>
     <div class="view-body">
       <ModelPanel

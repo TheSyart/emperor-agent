@@ -262,12 +262,30 @@ class WebUIState:
         config = body.get("config") if isinstance(body.get("config"), dict) else body
         async with self.lock:
             existing = load_model_config(self.root).raw
+
+            # 1) providers 兜底层：占位 "***" 还原原值
             incoming_providers = config.get("providers") or {}
             existing_providers = existing.get("providers") or {}
             for name, prov in incoming_providers.items():
                 if isinstance(prov, dict) and isinstance(prov.get("apiKey"), str) and prov["apiKey"].startswith("***"):
                     original = existing_providers.get(name, {}).get("apiKey", "")
                     prov["apiKey"] = original
+
+            # 2) models[] 条目：按 name 匹配旧条目，占位还原
+            incoming_models = config.get("models") or []
+            existing_models = {
+                m.get("name"): m for m in (existing.get("models") or [])
+                if isinstance(m, dict) and m.get("name")
+            }
+            for entry in incoming_models:
+                if not isinstance(entry, dict):
+                    continue
+                ak = entry.get("apiKey")
+                if isinstance(ak, str) and ak.startswith("***"):
+                    name = entry.get("name")
+                    original = existing_models.get(name, {}).get("apiKey", "")
+                    entry["apiKey"] = original
+
             save_model_config(self.root, config)
             self.loop.refresh_model_config()
         return self._json(self.model_config())
@@ -502,6 +520,9 @@ npm run build</code>
 
     def model_config(self) -> dict[str, Any]:
         config = load_model_config(self.root)
+        # 找出当前激活 entry 用于 current 区块
+        from .model_config import _resolve_active_entry
+        entry = _resolve_active_entry(config, None)
         return {
             "current": {
                 "provider": self.loop.provider_name,
@@ -512,6 +533,8 @@ npm run build</code>
                 "temperature": self.loop.temperature,
                 "reasoningEffort": self.loop.reasoning_effort,
                 "contextWindowTokens": self.loop.max_context,
+                "entryName": entry.name,
+                "entryLabel": entry.label or entry.name,
             },
             "config": self._redact_apikeys(config.raw),
             "providerOptions": provider_options(),
@@ -519,12 +542,18 @@ npm run build</code>
 
     @staticmethod
     def _redact_apikeys(raw: dict) -> dict:
-        """Deep-copy config and mask all provider apiKey values."""
+        """Deep-copy config and mask apiKey in both providers[] and models[]."""
         out = copy.deepcopy(raw)
+
+        def _mask(key: str) -> str:
+            return "***" + key[-4:] if len(key) > 4 else "***"
+
         for prov in out.get("providers", {}).values():
             if isinstance(prov, dict) and isinstance(prov.get("apiKey"), str) and prov["apiKey"]:
-                key = prov["apiKey"]
-                prov["apiKey"] = "***" + key[-4:] if len(key) > 4 else "***"
+                prov["apiKey"] = _mask(prov["apiKey"])
+        for entry in out.get("models", []) or []:
+            if isinstance(entry, dict) and isinstance(entry.get("apiKey"), str) and entry["apiKey"]:
+                entry["apiKey"] = _mask(entry["apiKey"])
         return out
 
     def _user_config_path(self) -> Path:

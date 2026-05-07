@@ -62,11 +62,35 @@ export interface TokensPayload {
 export type TokensRange = 'all' | '30d' | '7d'
 export type TokensTab = 'overview' | 'models'
 
+export type ProviderRegion = 'foreign' | 'aggregator' | 'cloud' | 'cn' | 'local' | 'other'
+
 export interface ProviderOption {
   name: string
   displayName?: string
   display_name?: string
   backend?: string
+  defaultApiBase?: string
+  region?: ProviderRegion
+  isGateway?: boolean
+  isLocal?: boolean
+  isOauth?: boolean
+  isDirect?: boolean
+  thinkingStyle?: string | null
+}
+
+export interface ModelEntry {
+  name: string                     // 唯一 key（agents.defaults.model 引用）
+  id: string                       // 真实 model id（发给 API）
+  provider: string                 // registry name
+  apiKey?: string | null           // "***last4" 占位 / 空 / 真值
+  apiBase?: string | null
+  extraHeaders?: Record<string, unknown> | null
+  extraBody?: Record<string, unknown> | null
+  maxTokens?: number | null
+  temperature?: number | null
+  contextWindowTokens?: number | null
+  reasoningEffort?: string | null
+  label?: string
 }
 
 export interface AgentDefaults {
@@ -91,6 +115,7 @@ export interface ModelConfigRaw {
     defaults?: AgentDefaults
     [key: string]: unknown
   }
+  models?: ModelEntry[]
   providers?: Record<string, ProviderConfig>
   [key: string]: unknown
 }
@@ -104,6 +129,8 @@ export interface CurrentModelConfig {
   temperature?: number | null
   reasoningEffort?: string | null
   contextWindowTokens?: number | null
+  entryName?: string | null
+  entryLabel?: string | null
 }
 
 export interface ModelConfigPayload {
