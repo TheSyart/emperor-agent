@@ -15,6 +15,7 @@ class MemoryStore:
         self.memory_dir = memory_dir
         self.memory_file = memory_dir / "MEMORY.local.md"
         self.history_file = memory_dir / "history.jsonl"
+        self.checkpoint_file = memory_dir / "_checkpoint.json"
         self.user_file = user_file
         self.memory_template = memory_template
         self._ensure()
@@ -100,6 +101,37 @@ class MemoryStore:
 
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content.strip() + "\n", encoding="utf-8")
+
+    # ── 中断恢复 Checkpoint ─────────────────────────────────
+    def write_checkpoint(self, history: list[dict[str, Any]]) -> None:
+        """原子写入当前 turn 的工作历史快照；失败静默（绝不能影响主流程）。"""
+        try:
+            payload = {
+                "ts": datetime.now(_UTC8).isoformat(timespec="seconds"),
+                "history": _json_safe(history),
+            }
+            tmp = self.checkpoint_file.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self.checkpoint_file)
+        except Exception:
+            pass
+
+    def read_checkpoint(self) -> list[dict[str, Any]] | None:
+        """启动时读回上次未完成 turn 的 history；不存在或损坏返回 None。"""
+        if not self.checkpoint_file.exists():
+            return None
+        try:
+            data = json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        history = data.get("history") if isinstance(data, dict) else None
+        return history if isinstance(history, list) else None
+
+    def clear_checkpoint(self) -> None:
+        try:
+            self.checkpoint_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _json_safe(obj: Any) -> Any:

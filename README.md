@@ -101,6 +101,7 @@ python webui.py
 - **历史保护** — `runner._pair_tool_calls` 保证 OpenAI 格式 history 中 assistant `tool_calls` 与 tool 消息严格配对，运行时异常或压缩切边都不会污染下一次请求。
 - **上下文治理** — 每次 LLM 调用前自动跑两步：单条工具结果硬截断（`_cap_tool_result`，留头尾，默认 8KB 上限）+ 旧大体积工具消息摘要化（`_shrink_old_tool_results`，最近 10 条保留原文，更早的替换为 `[shrunk] name → N chars omitted`）。让长对话从 8-10 轮稳定到 30+ 轮不撞 token 上限。
 - **LLM 错误恢复** — `step_async` 内置两个状态机：模型偶发空响应时自动注入 nudge 重试（≤2 次）；`finish_reason="length" / "max_tokens"` 时自动续写并拼接（≤3 次）。前端通过既有 `tool_error` 事件可见 `_empty_response` / `_length_truncation` 提示。
+- **中断恢复 Checkpoint** — `MemoryStore.write_checkpoint` 在每次工具批次完成后把 history 原子写到 `memory/_checkpoint.json`（gitignore），关 tab / Ctrl-C / 模型超时都不丢。`AgentLoop` 启动时 `read_checkpoint` 优先于 `history.jsonl` 未归档段恢复 in-memory history，再 `clear_checkpoint`；`_pair_tool_calls` 兜底处理任何 orphan tool_call。turn 正常落地时自动清理。
 
 ---
 
@@ -113,7 +114,7 @@ webui.py                        WebUI 启动入口
 agent/
 ├── loop.py                     主循环、组件装配、CLI 命令处理
 ├── runner.py                   单轮模型调用、tool_use 循环、并发安全工具组合、tool_call 配对保护、上下文治理（cap/shrink）、空响应+截断重试
-├── memory.py                   三层记忆存储与未归档历史载入
+├── memory.py                   三层记忆存储、未归档历史载入、中断恢复 checkpoint
 ├── compactor.py                历史压缩与长期记忆 / 用户档案更新
 ├── model_config.py             多 provider 模型配置读写
 ├── context.py                  system prompt 组装（SOUL.md / TOOL.md / USER.md / MEMORY / Skills）

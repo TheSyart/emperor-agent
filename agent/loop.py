@@ -82,16 +82,23 @@ class AgentLoop:
 
         self.refresh_model_config(initial=True)
 
-        unarchived = self.memory.load_unarchived_history()
-        if startup_compaction and len(unarchived) >= 2:
-            logger.info(f"[Startup: found {len(unarchived)} unarchived turns, compacting...]")
-            try:
-                self.compactor.compact_startup(unarchived)
-            except Exception as exc:
-                logger.warning(f"startup compaction failed: {exc}")
-            unarchived = []
-
-        self.history: list = list(unarchived)
+        # 优先恢复上次未完成 turn 的 checkpoint（含 tool_calls / tool 消息成对的中间状态）；
+        # 没有 checkpoint 才回退到 history.jsonl 的未归档段。
+        checkpoint = self.memory.read_checkpoint()
+        if checkpoint:
+            logger.info(f"[Startup: restored checkpoint with {len(checkpoint)} messages]")
+            self.history: list = list(checkpoint)
+            self.memory.clear_checkpoint()
+        else:
+            unarchived = self.memory.load_unarchived_history()
+            if startup_compaction and len(unarchived) >= 2:
+                logger.info(f"[Startup: found {len(unarchived)} unarchived turns, compacting...]")
+                try:
+                    self.compactor.compact_startup(unarchived)
+                except Exception as exc:
+                    logger.warning(f"startup compaction failed: {exc}")
+                unarchived = []
+            self.history: list = list(unarchived)
 
     def _ensure_local_user_file(self) -> Path:
         template = self.root / "templates" / "init" / "USER.md"

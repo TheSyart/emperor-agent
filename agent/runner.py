@@ -80,12 +80,16 @@ class AgentRunner:
         final_parts: list[str] = []
         empty_retries = 0
         length_retries = 0
+        # 进入 turn 时先记一次快照，防止 LLM 还没回应就被杀
+        if self.memory_store is not None:
+            self.memory_store.write_checkpoint(history)
         while True:
             if self.max_turns is not None and turns >= self.max_turns:
                 reply = f"（达到 max_turns={self.max_turns} 上限，未办妥；history 中已有部分进展）"
                 history.append({"role": "assistant", "content": reply})
                 if self.memory_store:
                     self.memory_store.append_history("assistant", reply)
+                    self.memory_store.clear_checkpoint()
                 return reply
             turns += 1
 
@@ -127,6 +131,10 @@ class AgentRunner:
                 history.append(assistant_message)
                 tool_messages = await self._execute_tool_calls(response.tool_calls, emit)
                 history.extend(tool_messages)
+                # 工具批次刚完成 → 此刻 history 处于"tool_calls 与 tool 消息严格配对"的一致点，
+                # 写入 checkpoint；如果 LLM 下一次调用前进程被杀，重启可从此处续命。
+                if self.memory_store is not None:
+                    self.memory_store.write_checkpoint(history)
                 continue
 
             reply = response.content or ""
@@ -192,6 +200,9 @@ class AgentRunner:
                 self.todo_store.todos = []
 
             await self._maybe_compact(history)
+            # turn 正常落地 → 清掉 checkpoint
+            if self.memory_store is not None:
+                self.memory_store.clear_checkpoint()
             return final_reply
 
     async def _ask_model(self, history: list[dict[str, Any]], emit: StreamEmitter | None):
