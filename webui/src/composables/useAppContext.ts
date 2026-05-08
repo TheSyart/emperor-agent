@@ -1,5 +1,6 @@
 import { inject, provide, type InjectionKey, type Ref } from 'vue'
 import type {
+  AttachmentRef,
   BootstrapPayload,
   ChatMessage,
   CompactResult,
@@ -41,9 +42,9 @@ export interface AppContext {
   loadEpisode: (date: string) => Promise<{ date: string; content: string }>
   saveEpisode: (date: string, content: string) => Promise<void>
 
-  sendMessage: (content: string) => boolean
+  sendMessage: (payload: string | { content: string; attachments?: AttachmentRef[] }) => boolean
   clearChat: () => void
-  submitFromComposer: (raw: string) => void
+  submitFromComposer: (payload: string | { content: string; attachments?: AttachmentRef[] }) => void
 
   showToast: (message: string) => void
   runSafely: (task: () => Promise<void>) => Promise<void>

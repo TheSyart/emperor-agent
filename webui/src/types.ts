@@ -91,6 +91,31 @@ export interface ModelEntry {
   contextWindowTokens?: number | null
   reasoningEffort?: string | null
   label?: string
+  supportsVision?: boolean         // 仅由"测试视觉"成功时自动 true；UI 用 👁 徽章渲染
+}
+
+export interface AttachmentRef {
+  id: string                       // "att_2026-05_abc12345"
+  name: string
+  mime: string
+  size: number
+  kind: 'image' | 'document' | 'text'
+  hasText: boolean
+  hasImage: boolean
+  path: string
+  textPath?: string | null
+}
+
+export interface ModelTestResult {
+  ok: boolean
+  kind: 'text' | 'vision'
+  latencyMs?: number
+  model?: string
+  provider?: string
+  sample?: string
+  finishReason?: string
+  error?: string
+  visionMarked?: boolean           // 视觉测试通过且后端已持久化 supportsVision
 }
 
 export interface AgentDefaults {
@@ -131,6 +156,7 @@ export interface CurrentModelConfig {
   contextWindowTokens?: number | null
   entryName?: string | null
   entryLabel?: string | null
+  supportsVision?: boolean
 }
 
 export interface ModelConfigPayload {
@@ -163,6 +189,7 @@ export interface CompactResult {
 export interface RuntimeHistoryItem {
   role: 'user' | 'assistant'
   content: string
+  attachments?: AttachmentRef[]
 }
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'error_aborted'
@@ -215,6 +242,7 @@ export interface UserMessage {
   id: string
   role: 'user'
   content: string
+  attachments?: AttachmentRef[]
   local?: boolean
 }
 

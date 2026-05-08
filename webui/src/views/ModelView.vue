@@ -8,6 +8,10 @@ const ctx = useAppContext()
 function onSave(config: ModelConfigRaw) {
   void ctx.runSafely(() => ctx.saveModelConfig(config))
 }
+
+function onRefresh() {
+  void ctx.runSafely(() => ctx.refreshAll())
+}
 </script>
 
 <template>
@@ -23,6 +27,7 @@ function onSave(config: ModelConfigRaw) {
         :payload="ctx.boot.value?.modelConfig || null"
         @save="onSave"
         @error="ctx.showToast"
+        @refresh="onRefresh"
       />
     </div>
   </section>

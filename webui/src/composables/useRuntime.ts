@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
-import type { AssistantMessage, BootstrapPayload, ChatMessage, PendingState, RuntimeHistoryItem, RuntimeStatus, SubagentState, ToolSegment, ToolStatus, WsEvent } from '../types'
+import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, PendingState, RuntimeHistoryItem, RuntimeStatus, SubagentState, ToolSegment, ToolStatus, WsEvent } from '../types'
 
 const RUNTIME_STORAGE_KEY = 'emperor-agent:runtime-view'
 const LEGACY_IN_FLIGHT_STORAGE_KEY = 'emperor-agent:in-flight-runtime'
@@ -95,9 +95,12 @@ export function useRuntime(options: {
     }, delay)
   }
 
-  function sendMessage(content: string) {
-    const text = content.trim()
-    if (!text || busy.value) return false
+  function sendMessage(payload: string | { content: string; attachments?: AttachmentRef[] }) {
+    const normalized = typeof payload === 'string' ? { content: payload, attachments: [] as AttachmentRef[] } : { content: payload.content, attachments: payload.attachments || [] }
+    const text = normalized.content.trim()
+    const attachments = normalized.attachments
+    if (busy.value) return false
+    if (!text && attachments.length === 0) return false
     if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
       connectSocket()
       options.showToast('WebSocket 还没连上，请稍后再发')
@@ -105,14 +108,20 @@ export function useRuntime(options: {
     }
 
     const assistantId = nextId('assistant')
-    messages.value.push({ id: nextId('user'), role: 'user', content: text })
+    const userMsg: ChatMessage = { id: nextId('user'), role: 'user', content: text }
+    if (attachments.length) userMsg.attachments = attachments
+    messages.value.push(userMsg)
     messages.value.push({ id: assistantId, role: 'assistant', content: '', segments: [], todos: null, streaming: true })
     currentAssistantId.value = assistantId
     busy.value = true
     status.value = 'ready'
 
     try {
-      socket.value.send(JSON.stringify({ type: 'message', content: text }))
+      socket.value.send(JSON.stringify({
+        type: 'message',
+        content: text,
+        attachments: attachments.map((a) => a.id),
+      }))
       return true
     } catch (err) {
       handleChatError(err instanceof Error ? err.message : String(err))
@@ -157,7 +166,9 @@ export function useRuntime(options: {
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map((item) => {
         if (item.role === 'user') {
-          return { id: nextId('user'), role: 'user', content: item.content } satisfies ChatMessage
+          const msg: ChatMessage = { id: nextId('user'), role: 'user', content: item.content }
+          if (item.attachments?.length) msg.attachments = item.attachments
+          return msg
         }
         return {
           id: nextId('assistant'),

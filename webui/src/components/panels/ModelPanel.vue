@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { cloneJson } from '../../api/http'
+import { testModelEntry } from '../../api/model'
 import type {
   ModelConfigPayload,
   ModelConfigRaw,
   ModelEntry,
+  ModelTestResult,
   ProviderOption,
   ProviderRegion,
 } from '../../types'
 import { actionAssets, brandAssets } from '../../assets'
 
 const props = defineProps<{ payload: ModelConfigPayload | null }>()
-const emit = defineEmits<{ save: [config: ModelConfigRaw]; error: [message: string] }>()
+const emit = defineEmits<{
+  save: [config: ModelConfigRaw]
+  error: [message: string]
+  refresh: []
+}>()
 
 // ────────────────────────────────────────────────────────────
 // 状态：本地 entries 副本 + 当前编辑下标 + defaults
@@ -115,6 +121,7 @@ function cloneEntry(e: ModelEntry): ModelEntry {
     contextWindowTokens: e.contextWindowTokens ?? null,
     reasoningEffort: e.reasoningEffort ?? null,
     label: e.label || '',
+    supportsVision: !!e.supportsVision,
   }
 }
 
@@ -238,6 +245,7 @@ function entryToWire(e: ModelEntry): ModelEntry {
     contextWindowTokens: e.contextWindowTokens || null,
     reasoningEffort: e.reasoningEffort || null,
     label: e.label?.trim() || '',
+    supportsVision: !!e.supportsVision,
   }
 }
 
@@ -327,6 +335,7 @@ const dirtySignature = computed(() => JSON.stringify({
     contextWindowTokens: e.contextWindowTokens ?? null,
     reasoningEffort: e.reasoningEffort ?? null,
     label: e.label || '',
+    supportsVision: !!e.supportsVision,
   })),
   default: defaultName.value,
   defaults: { ...defaults },
@@ -341,6 +350,47 @@ watch(() => props.payload, () => {
 }, { immediate: true, deep: true })
 
 const hasChanges = computed(() => serverSignature.value !== '' && serverSignature.value !== dirtySignature.value)
+
+// ────────────────────────────────────────────────────────────
+// 连通测试 + 视觉徽章
+// ────────────────────────────────────────────────────────────
+
+const testing = reactive({ text: false, vision: false })
+const lastResult = ref<ModelTestResult | null>(null)
+
+async function runTest(kind: 'text' | 'vision') {
+  if (!editing.value?.name) return
+  if (hasChanges.value) {
+    emit('error', '请先保存配置再测试')
+    return
+  }
+  testing[kind] = true
+  lastResult.value = null
+  try {
+    const result = await testModelEntry(editing.value.name, kind)
+    lastResult.value = result
+    if (!result.ok && result.error) {
+      // 失败也展示在 chip 上，不再重复 toast
+    }
+    // 视觉测试通过 → 后端已写入 supportsVision，刷新让 entry 列表 👁 立刻点亮
+    if (result.ok && kind === 'vision' && result.visionMarked) {
+      emit('refresh')
+    }
+  } catch (err) {
+    lastResult.value = {
+      ok: false,
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  } finally {
+    testing[kind] = false
+  }
+}
+
+function truncate(s: string | undefined, n: number): string {
+  if (!s) return ''
+  return s.length > n ? s.slice(0, n) + '…' : s
+}
 </script>
 
 <template>
@@ -374,7 +424,15 @@ const hasChanges = computed(() => serverSignature.value !== '' && serverSignatur
             @click="pickEditing(idx)"
           >
             <div class="entry-meta">
-              <div class="entry-title">{{ e.label || e.name }}</div>
+              <div class="entry-title">
+                <span>{{ e.label || e.name }}</span>
+                <span
+                  v-if="e.supportsVision"
+                  class="entry-vision-eye"
+                  title="此条目已通过视觉测试，可接收图片附件"
+                  aria-label="视觉已激活"
+                >👁</span>
+              </div>
               <div class="entry-sub">
                 <code>{{ e.provider }}</code> · <code>{{ e.id || '(no id)' }}</code>
               </div>
@@ -531,6 +589,64 @@ const hasChanges = computed(() => serverSignature.value !== '' && serverSignatur
               </label>
             </div>
           </details>
+
+          <!-- 连通测试：文本 / 视觉 ─ 视觉通过后自动给本条目打 👁 -->
+          <div class="test-row">
+            <div class="test-label">
+              <span>连通测试</span>
+              <small class="hint">
+                用一次最小请求验证 entry 是否能跑；视觉测试通过会自动给本条目打 👁 视觉标记
+              </small>
+            </div>
+            <div class="test-actions">
+              <button
+                type="button"
+                class="tool-button"
+                :disabled="hasChanges || testing.text"
+                :title="hasChanges ? '请先保存配置再测试' : '发一次 ping（约消耗几十 token）'"
+                @click="runTest('text')"
+              >
+                <span v-if="testing.text">…测试中</span>
+                <span v-else>测试文本</span>
+              </button>
+              <button
+                type="button"
+                class="tool-button"
+                :disabled="hasChanges || testing.vision"
+                :title="hasChanges
+                  ? '请先保存配置再测试'
+                  : '发一张红色测试图（约几十 token）；通过即标 👁'"
+                @click="runTest('vision')"
+              >
+                <span v-if="testing.vision">…测试中</span>
+                <span v-else>测试视觉</span>
+              </button>
+            </div>
+            <div
+              v-if="lastResult"
+              class="test-result"
+              :class="{ ok: lastResult.ok, fail: !lastResult.ok }"
+            >
+              <template v-if="lastResult.ok">
+                <span class="badge">✓ {{ lastResult.kind === 'vision' ? '视觉通' : '文本通' }}</span>
+                <span class="meta">
+                  {{ lastResult.latencyMs }}ms · {{ lastResult.model }}
+                </span>
+                <code class="sample">{{ lastResult.sample }}</code>
+                <span
+                  v-if="lastResult.kind === 'vision' && lastResult.visionMarked"
+                  class="meta jade"
+                >已自动写入 👁 视觉标记</span>
+              </template>
+              <template v-else>
+                <span class="badge">✗ 失败</span>
+                <span class="meta" :title="lastResult.error">
+                  {{ truncate(lastResult.error, 100) }}
+                </span>
+                <code v-if="lastResult.sample" class="sample">{{ lastResult.sample }}</code>
+              </template>
+            </div>
+          </div>
         </div>
       </section>
     </div>

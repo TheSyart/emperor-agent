@@ -34,12 +34,16 @@ class MemoryStore:
             self.history_file.write_text("")
 
     # ── 原始层 ──────────────────────────────────────────────
-    def append_history(self, role: str, content: Any) -> None:
-        row = {
+    def append_history(self, role: str, content: Any, *, extra: dict[str, Any] | None = None) -> None:
+        row: dict[str, Any] = {
             "ts": datetime.now(_UTC8).isoformat(timespec="seconds"),
             "role": role,
             "content": content if isinstance(content, str) else _json_safe(content),
         }
+        if extra:
+            for k, v in _json_safe(extra).items():
+                if k not in row:
+                    row[k] = v
         with self.history_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -89,11 +93,15 @@ class MemoryStore:
         for i, row in enumerate(rows):
             if row.get("type") == "compact_event":
                 last_marker = i
-        return [
-            {"role": r["role"], "content": r["content"]}
-            for r in rows[last_marker + 1:]
-            if "role" in r and "content" in r
-        ]
+        out: list[dict[str, Any]] = []
+        for r in rows[last_marker + 1:]:
+            if "role" not in r or "content" not in r:
+                continue
+            item: dict[str, Any] = {"role": r["role"], "content": r["content"]}
+            if isinstance(r.get("attachments"), list):
+                item["attachments"] = r["attachments"]
+            out.append(item)
+        return out
 
     # ── 用户偏好 ────────────────────────────────────────────
     def read_user(self) -> str:

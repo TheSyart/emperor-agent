@@ -94,6 +94,7 @@ class ModelEntry:
     context_window_tokens: int | None = None
     reasoning_effort: str | None = None
     label: str = ""                              # UI 展示名；空则用 name
+    supports_vision: bool = False                 # 仅由"测试视觉"成功时自动写入 true
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,24 @@ def save_model_config(root: Path, data: dict[str, Any]) -> ModelConfig:
     return config
 
 
+def mark_entry_vision(root: Path, entry_name: str, value: bool = True) -> ModelConfig:
+    """把指定 entry 的 supportsVision 字段写入 model_config.json，原子保存。
+
+    供 `/api/model-test` 视觉测试成功后调用，让 entry 在前端列表 👁 立即点亮。
+    """
+    config = load_model_config(root)
+    raw = copy.deepcopy(config.raw)
+    found = False
+    for m in raw.get("models", []) or []:
+        if isinstance(m, dict) and m.get("name") == entry_name:
+            m["supportsVision"] = bool(value)
+            found = True
+            break
+    if not found:
+        raise ValueError(f"entry {entry_name!r} not found in model_config.json")
+    return save_model_config(root, raw)
+
+
 # ─────────────────── snapshot 装配 ────────────────────
 
 
@@ -205,6 +224,8 @@ def build_provider_snapshot(root: Path, *, model_override: str | None = None) ->
         generation=generation,
         context_window_tokens=entry.context_window_tokens or config.defaults.context_window_tokens,
         config=config.raw,
+        supports_vision=entry.supports_vision,
+        entry_name=entry.name,
     )
 
 
@@ -295,6 +316,7 @@ def model_config_payload(root: Path) -> dict[str, Any]:
             "contextWindowTokens": snapshot.context_window_tokens,
             "entryName": entry.name,
             "entryLabel": entry.label or entry.name,
+            "supportsVision": snapshot.supports_vision,
         },
         "config": snapshot.config,
         "providerOptions": provider_options(),
@@ -350,6 +372,7 @@ def _parse_entry(item: dict[str, Any]) -> ModelEntry:
         context_window_tokens=_optional_int(item.get("contextWindowTokens")),
         reasoning_effort=_nullable_str(item.get("reasoningEffort")),
         label=str(item.get("label") or ""),
+        supports_vision=bool(item.get("supportsVision", False)),
     )
 
 

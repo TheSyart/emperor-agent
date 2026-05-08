@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import copy
 import json
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -15,9 +17,28 @@ from typing import Any
 from aiohttp import WSMsgType, web
 from loguru import logger
 
+from .attachments import (
+    AttachmentRef,
+    AttachmentStore,
+    encode_for_openai_block,
+    ref_to_json,
+)
 from .logger import configure as configure_logging
 from .loop import AgentLoop
-from .model_config import load_model_config, provider_options, save_model_config
+from .model_config import (
+    build_provider_snapshot,
+    load_model_config,
+    mark_entry_vision,
+    provider_options,
+    save_model_config,
+)
+
+
+# 2x2 纯红 PNG（约 70 bytes base64），视觉探测样本
+_PROBE_PNG_RED_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4AWPwl3jzn4HhPwM2D"
+    "JVAaQAJ7QgRZD2vqQAAAABJRU5ErkJggg=="
+)
 
 
 _SKILL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,80}$")
@@ -31,6 +52,7 @@ class WebUIState:
         self._ensure_tool_config()
         self.loop = AgentLoop(root=self.root, verbose=False, startup_compaction=False)
         self.history = self.loop.history
+        self.attachments = AttachmentStore(self.root)
         self.lock = asyncio.Lock()
         self.clients: set[web.WebSocketResponse] = set()
         self.event_log: list[dict[str, Any]] = []
@@ -91,11 +113,24 @@ class WebUIState:
             if payload.get("type") != "message":
                 raise ValueError("Unsupported WebSocket message type")
             text = str(payload.get("content") or "").strip()
-            if not text:
+            attachment_ids = payload.get("attachments") or []
+            if not isinstance(attachment_ids, list):
+                attachment_ids = []
+            attachment_ids = [str(a) for a in attachment_ids if isinstance(a, (str, int))]
+            if not text and not attachment_ids:
                 raise ValueError("Message is empty")
+            content = self._build_user_content(text, attachment_ids)
+            user_msg: dict[str, Any] = {"role": "user", "content": content}
+            if attachment_ids:
+                user_msg["attachments"] = attachment_ids
             async with self.lock:
-                self.history.append({"role": "user", "content": text})
-                self.loop.memory.append_history("user", text)
+                self.history.append(user_msg)
+                if attachment_ids:
+                    self.loop.memory.append_history(
+                        "user", content, extra={"attachments": attachment_ids},
+                    )
+                else:
+                    self.loop.memory.append_history("user", content)
                 started = True
                 self.active_turn = True
 
@@ -116,6 +151,180 @@ class WebUIState:
                     await self._send_ws(ws, payload)
                 except ConnectionResetError:
                     pass
+
+    def _build_user_content(self, text: str, attachment_ids: list[str]) -> Any:
+        """把用户文本 + 附件 IDs 装配成内部统一格式。
+
+        - 无附件：返回 str（不打破任何旧路径）
+        - 有图片且当前 entry supports_vision：返回 OpenAI 多模态 list[block]
+        - 有文档：sidecar 文本拼进 text 部分，磁盘路径附后供 read_file 兜底
+        - 不支持 vision 时图片：替换为占位文字
+        """
+        if not attachment_ids:
+            return text
+        refs: list[AttachmentRef] = []
+        for aid in attachment_ids:
+            ref = self.attachments.get(aid)
+            if ref is not None:
+                refs.append(ref)
+        if not refs:
+            return text
+
+        image_blocks: list[dict[str, Any]] = []
+        text_pieces: list[str] = [text] if text else []
+        supports_vision = bool(getattr(self.loop, "supports_vision", False))
+        for ref in refs:
+            if ref.kind == "image":
+                if supports_vision:
+                    try:
+                        image_blocks.append(encode_for_openai_block(ref, self.attachments))
+                    except Exception as exc:
+                        logger.warning(f"failed to encode image {ref.id}: {exc}")
+                        text_pieces.append(
+                            f"\n[图片附件 {ref.name} 编码失败：{exc}]"
+                        )
+                else:
+                    text_pieces.append(
+                        f"\n[图片附件 {ref.name}（当前模型未标记视觉，已忽略；"
+                        f"可在 /model 测试视觉激活）]"
+                    )
+            elif ref.has_text:
+                txt = self.attachments.read_text(ref)
+                if txt:
+                    text_pieces.append(
+                        f"\n\n[附件 {ref.name} 提取文本]\n{txt}\n[/附件 {ref.name}]"
+                    )
+                else:
+                    text_pieces.append(
+                        f"\n[附件 {ref.name} 已落盘但抽取文本为空]"
+                    )
+            else:
+                text_pieces.append(
+                    f"\n[附件 {ref.name} 已落盘: {ref.rel_path}（用 read_file 读取）]"
+                )
+            text_pieces.append(f"\n[已落盘: {ref.rel_path}]")
+
+        full_text = "".join(text_pieces).strip()
+        if image_blocks:
+            blocks: list[dict[str, Any]] = []
+            if full_text:
+                blocks.append({"type": "text", "text": full_text})
+            blocks.extend(image_blocks)
+            return blocks
+        return full_text or text
+
+    async def upload_attachment(self, request: web.Request) -> web.Response:
+        try:
+            reader = await request.multipart()
+        except Exception as exc:
+            return self._json({"error": f"multipart parse failed: {exc}"}, status=400)
+        field = await reader.next()
+        if field is None or field.name != "file":
+            return self._json({"error": "missing 'file' multipart field"}, status=400)
+        raw = await field.read(decode=False)
+        name = field.filename or "unnamed"
+        mime = (field.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
+        try:
+            ref = self.attachments.save(raw=raw, name=name, mime=mime)
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, status=400)
+        return self._json(ref_to_json(ref))
+
+    async def attachment_raw(self, request: web.Request) -> web.StreamResponse:
+        att_id = request.match_info.get("id", "")
+        ref = self.attachments.get(att_id)
+        if ref is None:
+            return web.Response(status=404, text="attachment not found")
+        target = (self.attachments.root / ref.rel_path).resolve()
+        if not _is_relative_to(target, self.attachments.root):
+            return web.Response(status=403, text="forbidden")
+        if not target.exists():
+            return web.Response(status=404, text="file missing on disk")
+        return web.FileResponse(target, headers={"Content-Type": ref.mime})
+
+    async def model_test(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        entry_name = str(body.get("entryName") or "").strip()
+        kind = str(body.get("kind") or "text").lower()
+        if kind not in {"text", "vision"}:
+            return self._json(
+                {"ok": False, "kind": kind, "error": "kind must be 'text' or 'vision'"},
+                status=400,
+            )
+        if not entry_name:
+            return self._json(
+                {"ok": False, "kind": kind, "error": "entryName required"},
+                status=400,
+            )
+
+        try:
+            snap = build_provider_snapshot(self.root, model_override=entry_name)
+        except Exception as exc:
+            return self._json({
+                "ok": False, "kind": kind,
+                "error": f"snapshot failed: {exc}",
+            })
+
+        if kind == "vision":
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "text",
+                     "text": "Reply with ONE English word only: what is the dominant color of this image?"},
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{_PROBE_PNG_RED_BASE64}"}},
+                ],
+            }]
+        else:
+            messages = [{"role": "user", "content": "Reply with exactly one word: pong"}]
+
+        started = time.monotonic()
+        try:
+            resp = await snap.provider.chat(
+                messages=messages,
+                tools=None,
+                model=snap.model,
+                max_tokens=64,
+                temperature=0.0,
+                reasoning_effort=None,
+            )
+        except Exception as exc:
+            return self._json({
+                "ok": False, "kind": kind,
+                "error": str(exc),
+                "latencyMs": int((time.monotonic() - started) * 1000),
+                "model": snap.model,
+                "provider": snap.provider_name,
+            })
+
+        latency = int((time.monotonic() - started) * 1000)
+        sample = (resp.content or "").strip()[:200]
+        if kind == "vision":
+            ok = bool(sample) and any(k in sample.lower() for k in ("red", "红"))
+        else:
+            ok = bool(sample) and "pong" in sample.lower()
+
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "kind": kind,
+            "latencyMs": latency,
+            "model": snap.model,
+            "provider": snap.provider_name,
+            "sample": sample,
+            "finishReason": getattr(resp, "finish_reason", "stop"),
+        }
+
+        # 视觉测试通过 → 自动把 entry.supports_vision 持久化为 true
+        if kind == "vision" and ok:
+            try:
+                mark_entry_vision(self.root, entry_name, value=True)
+                self.loop.refresh_model_config()
+                payload["visionMarked"] = True
+            except Exception as exc:
+                logger.warning(f"failed to mark entry vision: {exc}")
+                payload["visionMarked"] = False
+
+        return self._json(payload)
 
     async def _broadcast_event(self, event: dict[str, Any]) -> None:
         async with self.broadcast_lock:
@@ -509,14 +718,41 @@ npm run build</code>
             logger.warning(f"history.jsonl read failed: {exc}")
         return count
 
-    def unarchived_history(self) -> list[dict[str, str]]:
-        items = []
+    def unarchived_history(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
         for item in self.loop.memory.load_unarchived_history():
             role = item.get("role")
             content = item.get("content")
-            if role in {"user", "assistant"} and isinstance(content, str):
-                items.append({"role": role, "content": content})
+            if role not in {"user", "assistant"}:
+                continue
+            text = self._extract_text_content(content)
+            out: dict[str, Any] = {"role": role, "content": text}
+            ids = item.get("attachments")
+            if isinstance(ids, list) and ids:
+                refs = []
+                for aid in ids:
+                    if not isinstance(aid, str):
+                        continue
+                    ref = self.attachments.get(aid)
+                    if ref is not None:
+                        refs.append(ref_to_json(ref))
+                if refs:
+                    out["attachments"] = refs
+            items.append(out)
         return items
+
+    @staticmethod
+    def _extract_text_content(content: Any) -> str:
+        """从 string / OpenAI 多模态 list 中抽出可读 text 部分。"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            return "".join(parts)
+        return ""
 
     def model_config(self) -> dict[str, Any]:
         config = load_model_config(self.root)
@@ -535,6 +771,7 @@ npm run build</code>
                 "contextWindowTokens": self.loop.max_context,
                 "entryName": entry.name,
                 "entryLabel": entry.label or entry.name,
+                "supportsVision": bool(getattr(self.loop, "supports_vision", False)),
             },
             "config": self._redact_apikeys(config.raw),
             "providerOptions": provider_options(),
@@ -650,6 +887,9 @@ def create_app(root: Path) -> web.Application:
     app.router.add_get("/api/tokens", state.get_tokens)
     app.router.add_get("/api/model-config", state.get_model_config)
     app.router.add_post("/api/model-config", state.post_model_config)
+    app.router.add_post("/api/model-test", state.model_test)
+    app.router.add_post("/api/attachments", state.upload_attachment)
+    app.router.add_get("/api/attachments/{id}/raw", state.attachment_raw)
     app.router.add_post("/api/compact", state.post_compact)
     app.router.add_get("/{tail:.*}", state.static)
     return app

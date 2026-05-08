@@ -278,11 +278,24 @@ class AgentRunner:
         return cleaned
 
     @staticmethod
+    def _content_text_size(content: Any) -> int:
+        """按 text 实际长度估算消息体积；list 形式只算 text block，跳过 base64 image_url。"""
+        if isinstance(content, str):
+            return len(content)
+        if isinstance(content, list):
+            return sum(
+                len(str(b.get("text", "")))
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        return len(str(content or ""))
+
+    @staticmethod
     def _cap_tool_result(
         history: list[dict[str, Any]],
         per_call_limit: int = _TOOL_RESULT_BUDGET,
     ) -> list[dict[str, Any]]:
-        """单条工具结果硬截断，留头尾，避免单次返回撑爆窗口。"""
+        """单条工具结果硬截断，留头尾。仅作用于 role=tool；user 多模态原样保留。"""
         out: list[dict[str, Any]] = []
         for msg in history:
             if msg.get("role") == "tool":
@@ -304,17 +317,17 @@ class AgentRunner:
         history: list[dict[str, Any]],
         keep_recent: int = _SHRINK_KEEP_RECENT,
     ) -> list[dict[str, Any]]:
-        """把 keep_recent 之外的大体积工具消息替换为一行摘要。"""
+        """把 keep_recent 之外的大体积工具消息替换为一行摘要。仅 role=tool；user 多模态不动。"""
         cutoff = max(0, len(history) - keep_recent)
         out: list[dict[str, Any]] = []
         for i, msg in enumerate(history):
             if (
                 msg.get("role") == "tool"
                 and i < cutoff
-                and len(str(msg.get("content", ""))) > _SHRINK_MIN_BYTES
+                and AgentRunner._content_text_size(msg.get("content")) > _SHRINK_MIN_BYTES
             ):
                 name = msg.get("name") or msg.get("tool_call_id") or "tool"
-                size = len(str(msg["content"]))
+                size = AgentRunner._content_text_size(msg.get("content"))
                 out.append({**msg, "content": f"[shrunk] {name} → {size} chars omitted"})
             else:
                 out.append(msg)

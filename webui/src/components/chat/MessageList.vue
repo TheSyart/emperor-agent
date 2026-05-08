@@ -3,6 +3,7 @@ import { nextTick, ref, watch } from 'vue'
 import type { ChatMessage } from '../../types'
 import { avatarAssets, brandAssets, emptyAssets } from '../../assets'
 import AssistantFlow from './AssistantFlow.vue'
+import AttachmentChip from './AttachmentChip.vue'
 
 const props = defineProps<{ messages: ChatMessage[] }>()
 const scroller = ref<HTMLElement | null>(null)
@@ -43,7 +44,14 @@ watch(
           </div>
           <div class="message-cluster user">
             <div class="message-meta user"><span>皇</span><small>圣旨</small></div>
-            <div class="bubble user whitespace-pre-wrap">{{ message.content }}</div>
+            <div v-if="message.attachments?.length" class="user-attach-row">
+              <AttachmentChip
+                v-for="attachment in message.attachments"
+                :key="attachment.id"
+                :data="attachment"
+              />
+            </div>
+            <div v-if="message.content" class="bubble user whitespace-pre-wrap">{{ message.content }}</div>
           </div>
         </article>
         <AssistantFlow v-else :message="message" />

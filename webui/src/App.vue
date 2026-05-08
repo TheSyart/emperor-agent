@@ -86,10 +86,16 @@ async function runSafely(task: () => Promise<void>) {
   }
 }
 
-function submitFromComposer(content: string) {
-  const parsed = parseSlashCommand(content)
+function submitFromComposer(payload: string | { content: string; attachments?: import('./types').AttachmentRef[] }) {
+  const obj = typeof payload === 'string' ? { content: payload, attachments: [] } : { content: payload.content, attachments: payload.attachments || [] }
+  // 带附件时直接走真实消息，不解析斜杠命令（避免误把 "/foo" 当命令）
+  if (obj.attachments.length) {
+    sendMessage(obj)
+    return
+  }
+  const parsed = parseSlashCommand(obj.content)
   if (!parsed) {
-    sendMessage(content)
+    sendMessage(obj.content)
     return
   }
   void executeSlashCommand(parsed.raw, parsed.name, parsed.command)

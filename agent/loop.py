@@ -119,6 +119,8 @@ class AgentLoop:
         self.temperature = snapshot.generation.temperature
         self.reasoning_effort = snapshot.generation.reasoning_effort
         self.max_context = snapshot.context_window_tokens
+        self.supports_vision = snapshot.supports_vision
+        self.entry_name = snapshot.entry_name
 
         self.compactor = Compactor(
             self.provider,

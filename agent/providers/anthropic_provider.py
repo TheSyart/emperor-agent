@@ -118,9 +118,50 @@ class AnthropicProvider(LLMProvider):
                 converted.append(assistant_msg)
                 continue
             if role == "user":
-                converted.append({"role": "user", "content": content or "(empty)"})
+                converted.append({
+                    "role": "user",
+                    "content": self._content_to_anthropic(content) or "(empty)",
+                })
 
         return "\n\n".join(p for p in system_parts if p), self._merge_roles(converted)
+
+    @staticmethod
+    def _content_to_anthropic(content: Any) -> Any:
+        """把 OpenAI 风格 content（str 或 list[block]）翻译成 Anthropic 风格。
+
+        - str 原样返回（Anthropic 也接受 string）
+        - list[block]: text → {type:text}; image_url(data:URL) → {type:image, source:{base64...}}
+        - 其它类型转 str
+        """
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content) if content is not None else ""
+        out: list[dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                out.append({"type": "text", "text": str(block.get("text", ""))})
+            elif btype == "image_url":
+                url = (block.get("image_url") or {}).get("url", "")
+                if isinstance(url, str) and url.startswith("data:"):
+                    try:
+                        meta, data = url.split(",", 1)
+                        media_type = meta.split(";")[0].split(":", 1)[1]
+                    except (ValueError, IndexError):
+                        continue
+                    out.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data,
+                        },
+                    })
+                # 远程 URL（非 data:）暂不支持，静默丢弃
+        return out
 
     @staticmethod
     def _append_tool_result(converted: list[dict[str, Any]], msg: dict[str, Any]) -> None:

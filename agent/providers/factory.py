@@ -17,6 +17,8 @@ class ProviderSnapshot:
     generation: GenerationSettings
     context_window_tokens: int
     config: dict[str, Any]
+    supports_vision: bool = False
+    entry_name: str = ""
 
 
 def create_provider(
