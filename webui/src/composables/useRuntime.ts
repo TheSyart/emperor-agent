@@ -292,6 +292,11 @@ export function useRuntime(options: {
       return
     }
 
+    if (data.event.startsWith('team_')) {
+      handleTeamEvent(data)
+      return
+    }
+
     handleSubagentEvent(data)
   }
 
@@ -400,6 +405,134 @@ export function useRuntime(options: {
         sub.error = data.message
       }
       updatePending(`小太监 ${data.agent_type || ''} 出错`, data.message || '')
+    }
+  }
+
+  function handleTeamEvent(data: WsEvent) {
+    updateTeamBootstrap(data)
+    const assistant = currentAssistant.value
+
+    if (data.event === 'team_member_update') {
+      updatePending(data.member?.status === 'working' ? `队友 ${data.member.name} 正在办差` : '', '')
+      return
+    }
+
+    if (data.event === 'team_message') {
+      if (data.message?.to === 'lead') updatePending('队友有新回禀', data.message.from)
+      return
+    }
+
+    if (!assistant) return
+
+    if (data.event === 'team_run_start') {
+      const seg = findToolSegment(assistant, data.parent_id)
+      if (seg) {
+        seg.subagents ||= []
+        seg.subagents.push({
+          id: data.teammate,
+          kind: 'team',
+          agent_type: data.teammate,
+          role: data.role,
+          purpose: data.purpose,
+          status: 'running',
+          content: '',
+          tools: [],
+        })
+      }
+      updatePending(`队友 ${data.teammate || ''} 已唤醒`, data.purpose || '')
+      return
+    }
+
+    if (data.event === 'team_run_delta') {
+      const sub = findSubagent(assistant, data.parent_id, data.teammate)
+      if (sub) sub.content = `${sub.content || ''}${data.delta || ''}`
+      updatePending(`队友 ${data.teammate || ''} 处理中...`, '')
+      return
+    }
+
+    if (data.event === 'team_run_tool_call') {
+      const sub = findSubagent(assistant, data.parent_id, data.teammate)
+      if (sub) {
+        sub.tools ||= []
+        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running' })
+      }
+      updatePending(`队友调用: ${data.name}`, data.teammate || '')
+      return
+    }
+
+    if (data.event === 'team_run_tool_result') {
+      const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
+      if (tool) {
+        tool.summary = data.summary || '已完成'
+        tool.status = 'done'
+      }
+      return
+    }
+
+    if (data.event === 'team_run_tool_error') {
+      const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
+      if (tool) {
+        tool.summary = data.message || '工具执行出错'
+        tool.status = 'error'
+      }
+      updatePending(`队友工具 ${data.name || ''} 出错`, data.message || '')
+      return
+    }
+
+    if (data.event === 'team_run_done') {
+      const sub = findSubagent(assistant, data.parent_id, data.teammate)
+      if (sub) {
+        sub.status = 'done'
+        sub.summary = data.summary
+      }
+      updatePending('AI 正在整理队友回禀...', '')
+      return
+    }
+
+    if (data.event === 'team_run_error') {
+      const sub = findSubagent(assistant, data.parent_id, data.teammate)
+      if (sub) {
+        sub.status = 'error'
+        sub.error = data.message
+      }
+      updatePending(`队友 ${data.teammate || ''} 出错`, data.message || '')
+    }
+  }
+
+  function updateTeamBootstrap(data: WsEvent) {
+    const boot = options.boot.value
+    if (!boot) return
+    boot.team ||= { members: [], leadInbox: [], leadUnread: 0, config: { members: [] } }
+
+    if (data.event === 'team_member_update' && data.member) {
+      const index = boot.team.members.findIndex((member) => member.name === data.member!.name)
+      if (index >= 0) {
+        boot.team.members[index] = { ...boot.team.members[index], ...data.member }
+      } else {
+        boot.team.members.push(data.member)
+      }
+      if (boot.team.config) boot.team.config.members = boot.team.members
+      return
+    }
+
+    if (data.event === 'team_message' && data.message) {
+      if (data.message.to === 'lead') {
+        boot.team.leadInbox ||= []
+        if (!boot.team.leadInbox.some((msg) => msg.id === data.message!.id)) {
+          boot.team.leadInbox.push(data.message)
+          boot.team.leadInbox = boot.team.leadInbox.slice(-50)
+        }
+        boot.team.leadUnread = (boot.team.leadUnread || 0) + 1
+      }
+      const target = boot.team.members.find((member) => member.name === data.message!.to)
+      if (target) {
+        target.recent_messages ||= []
+        if (!target.recent_messages.some((msg) => msg.id === data.message!.id)) {
+          target.recent_messages.push(data.message)
+          target.recent_messages = target.recent_messages.slice(-5)
+        }
+        target.unread = (target.unread || 0) + 1
+      }
     }
   }
 

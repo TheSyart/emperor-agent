@@ -36,7 +36,7 @@ function fullJson(value: unknown) {
       </div>
       <ExpandableText class="tool-summary" :text="detail" :limit="180" />
       <SubagentTrail
-        v-if="props.segment.name === 'dispatch_subagent' && props.segment.subagents?.length"
+        v-if="props.segment.subagents?.length"
         :subagents="props.segment.subagents"
       />
     </div>

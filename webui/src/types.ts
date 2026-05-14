@@ -195,6 +195,7 @@ export interface BootstrapPayload {
   skills: SkillInfo[]
   memory: MemoryPayload
   modelConfig: ModelConfigPayload
+  team?: TeamPayload
   context_used?: number
   unarchivedHistory?: RuntimeHistoryItem[]
 }
@@ -251,6 +252,8 @@ export interface SubagentToolState {
 export interface SubagentState {
   id?: string
   agent_type?: string
+  kind?: 'subagent' | 'team'
+  role?: string
   purpose?: string
   status: ToolStatus
   content?: string
@@ -286,6 +289,52 @@ export interface PendingState {
 
 export type RuntimeStatus = 'connecting' | 'ready' | 'error'
 
+export type TeamStatus = 'idle' | 'working' | 'offline' | 'shutdown' | 'error' | string
+
+export interface TeamMessage {
+  id: string
+  type: 'message' | 'task' | 'result' | 'status' | 'error' | string
+  from: string
+  to: string
+  content: string
+  timestamp: number
+  task_id?: string | null
+  in_reply_to?: string | null
+  meta?: Record<string, unknown>
+}
+
+export interface TeamMember {
+  name: string
+  role: string
+  agent_type: string
+  status: TeamStatus
+  created_at?: number
+  updated_at?: number
+  last_error?: string | null
+  unread?: number
+  recent_messages?: TeamMessage[]
+  thread_count?: number
+  tools?: string[]
+}
+
+export interface TeamPayload {
+  config?: {
+    version?: number
+    team_name?: string
+    members?: TeamMember[]
+  }
+  members: TeamMember[]
+  leadUnread?: number
+  leadInbox?: TeamMessage[]
+}
+
+export interface TeamMemberPayload {
+  member: TeamMember
+  inbox: TeamMessage[]
+  leadInbox: TeamMessage[]
+  thread: Array<{ role?: string; content?: string }>
+}
+
 export type WsEvent = ({ seq?: number } & (
   | { event: 'ready'; model?: string; provider?: string; latest_seq?: number; replay_count?: number; resume_from?: number; busy?: boolean }
   | { event: 'message_delta'; delta?: string }
@@ -302,4 +351,13 @@ export type WsEvent = ({ seq?: number } & (
   | { event: 'subagent_tool_error'; parent_id?: string; subagent_id?: string; id?: string; name?: string; message?: string }
   | { event: 'subagent_done'; parent_id?: string; subagent_id?: string; agent_type?: string; summary?: string }
   | { event: 'subagent_error'; parent_id?: string; subagent_id?: string; agent_type?: string; message?: string }
+  | { event: 'team_member_update'; member?: TeamMember }
+  | { event: 'team_message'; message?: TeamMessage }
+  | { event: 'team_run_start'; parent_id?: string; teammate?: string; role?: string; agent_type?: string; purpose?: string }
+  | { event: 'team_run_delta'; parent_id?: string; teammate?: string; delta?: string }
+  | { event: 'team_run_tool_call'; parent_id?: string; teammate?: string; id?: string; name: string; arguments?: Record<string, unknown> }
+  | { event: 'team_run_tool_result'; parent_id?: string; teammate?: string; id?: string; name?: string; summary?: string }
+  | { event: 'team_run_tool_error'; parent_id?: string; teammate?: string; id?: string; name?: string; message?: string }
+  | { event: 'team_run_done'; parent_id?: string; teammate?: string; summary?: string }
+  | { event: 'team_run_error'; parent_id?: string; teammate?: string; message?: string }
 ))

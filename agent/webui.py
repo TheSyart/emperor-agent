@@ -72,6 +72,7 @@ class WebUIState:
             "skills": self.skills(),
             "memory": self.memory(),
             "modelConfig": self.model_config(),
+            "team": self.team(),
             "context_used": self.loop.token_tracker.last_input_tokens(),
             "unarchivedHistory": self.unarchived_history(),
         })
@@ -468,6 +469,94 @@ class WebUIState:
     async def get_tokens(self, request: web.Request) -> web.Response:
         return self._json(self.tokens())
 
+    async def get_team(self, request: web.Request) -> web.Response:
+        return self._json(self.team())
+
+    async def get_team_member(self, request: web.Request) -> web.Response:
+        name = request.match_info.get("name", "")
+        try:
+            return self._json(self.loop.team_manager.member_payload(name))
+        except ValueError as exc:
+            return self._json({"error": str(exc)}, status=404)
+
+    async def post_team_member(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        name = str(body.get("name") or "")
+        role = str(body.get("role") or "")
+        task = body.get("task")
+        agent_type = body.get("agent_type")
+        if not name or not role:
+            raise web.HTTPBadRequest(reason="'name' and 'role' are required")
+
+        async def emit(event: dict[str, Any]) -> None:
+            await self._broadcast_event(event)
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.to_thread(
+            self.loop.team_manager.spawn_teammate,
+            name=name,
+            role=role,
+            task=str(task) if task else None,
+            agent_type=str(agent_type) if agent_type else None,
+            emit=emit,
+            loop=loop,
+        )
+        return self._json({"result": result, "team": self.team()})
+
+
+    async def post_team_message(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        to = str(body.get("to") or "")
+        content = str(body.get("content") or "")
+        wake = bool(body.get("wake", True))
+        if not to or not content:
+            raise web.HTTPBadRequest(reason="'to' and 'content' are required")
+
+        async def emit(event: dict[str, Any]) -> None:
+            await self._broadcast_event(event)
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.to_thread(
+            self.loop.team_manager.send_message,
+            to=to,
+            content=content,
+            wake=wake,
+            emit=emit,
+            loop=loop,
+        )
+        return self._json({"result": result, "team": self.team()})
+
+    async def post_team_wake(self, request: web.Request) -> web.Response:
+        name = request.match_info.get("name", "")
+
+        async def emit(event: dict[str, Any]) -> None:
+            await self._broadcast_event(event)
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.to_thread(
+            self.loop.team_manager.wake_teammate,
+            name,
+            emit=emit,
+            loop=loop,
+            purpose="manual wake",
+        )
+        return self._json({"result": result, "team": self.team()})
+
+    async def post_team_shutdown(self, request: web.Request) -> web.Response:
+        name = request.match_info.get("name", "")
+
+        async def emit(event: dict[str, Any]) -> None:
+            await self._broadcast_event(event)
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.to_thread(
+            self.loop.team_manager.shutdown_teammate,
+            name=name,
+            emit=emit,
+            loop=loop,
+        )
+        return self._json({"result": result, "team": self.team()})
+
     async def get_model_config(self, request: web.Request) -> web.Response:
         return self._json(self.model_config())
 
@@ -736,6 +825,9 @@ npm run build</code>
             "generatedAt": datetime.now().isoformat(timespec="seconds"),
         }
 
+    def team(self) -> dict[str, Any]:
+        return self.loop.team_manager.payload()
+
     def _count_history_messages(self) -> int:
         history_file = self.loop.memory.history_file
         if not history_file.exists():
@@ -948,6 +1040,12 @@ def create_app(root: Path) -> web.Application:
     app.router.add_get("/api/memory/episode", state.get_memory_episode)
     app.router.add_post("/api/memory/episode", state.post_memory_episode)
     app.router.add_get("/api/tokens", state.get_tokens)
+    app.router.add_get("/api/team", state.get_team)
+    app.router.add_post("/api/team/members", state.post_team_member)
+    app.router.add_get("/api/team/members/{name}", state.get_team_member)
+    app.router.add_post("/api/team/messages", state.post_team_message)
+    app.router.add_post("/api/team/members/{name}/wake", state.post_team_wake)
+    app.router.add_post("/api/team/members/{name}/shutdown", state.post_team_shutdown)
     app.router.add_get("/api/model-config", state.get_model_config)
     app.router.add_post("/api/model-config", state.post_model_config)
     app.router.add_post("/api/model-test", state.model_test)

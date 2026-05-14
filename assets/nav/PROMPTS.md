@@ -1,6 +1,6 @@
 # 一级导航图标 Prompts
 
-> 规格：32×32 PNG · 默认+激活两份 = 14 张
+> 规格：32×32 PNG · 默认+激活两份 = 18 张
 
 ---
 
@@ -180,6 +180,42 @@ output as exact pixel grid size specified,
 32x32 pixel art icon of an open wooden toolbox,
 jade-green ruyi (玉如意) and a small brown chisel crossing inside, lid open at top,
 outline #7A1F1F, fill #B53A3A / #D9776E.
+```
+
+---
+
+### nav-team.png（默认色）
+
+```
+16-bit pixel art, crisp pixel-perfect rendering, no anti-aliasing, no blur,
+strict limited palette only from: #1A1612 #2A2622 #5A5048 #6B6058 #F5EFE0 #EBE3D0 #FBF7E8
+#7A1F1F #B53A3A #D9776E #2D6B4F #3F8C6E #6FB39A #9C6925 #C68A3A #E5B568,
+sharp 1px black-ink outline (#2A2622) on subjects, dithering allowed for shading,
+transparent background, centered composition, no text, no signature, no watermark,
+style reference: Stardew Valley × Eastward × Octopath, ancient imperial Chinese theme,
+output as exact pixel grid size specified,
+32x32 pixel art icon of an imperial agent team roster:
+three small court attendants standing behind a parchment command scroll,
+tiny jade seal at the lower-right of the scroll, readable as "team / teammates" at nav size,
+outline #2A2622, fill #5A5048 / #6B6058 with parchment and jade accents.
+```
+
+---
+
+### nav-team-active.png（激活色）
+
+```
+16-bit pixel art, crisp pixel-perfect rendering, no anti-aliasing, no blur,
+strict limited palette only from: #1A1612 #2A2622 #5A5048 #6B6058 #F5EFE0 #EBE3D0 #FBF7E8
+#7A1F1F #B53A3A #D9776E #2D6B4F #3F8C6E #6FB39A #9C6925 #C68A3A #E5B568,
+sharp 1px black-ink outline (#2A2622) on subjects, dithering allowed for shading,
+transparent background, centered composition, no text, no signature, no watermark,
+style reference: Stardew Valley × Eastward × Octopath, ancient imperial Chinese theme,
+output as exact pixel grid size specified,
+32x32 pixel art icon of an imperial agent team roster:
+three small court attendants standing behind a parchment command scroll,
+tiny gold seal at the lower-right of the scroll, readable as "team / teammates" at nav size,
+outline #7A1F1F, fill #B53A3A / #D9776E with gold parchment highlights.
 ```
 
 ---

@@ -15,6 +15,7 @@ class DispatchSubagentTool(Tool):
 
     name = "dispatch_subagent"
     exclusive = False
+    requires_runtime_context = True
 
     @property
     def concurrency_safe(self) -> bool:

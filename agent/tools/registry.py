@@ -69,7 +69,7 @@ class ToolRegistry:
         if err:
             return f"{err}\n{self._HINT}"
         try:
-            if name == "dispatch_subagent":
+            if getattr(tool, "requires_runtime_context", False):
                 result = tool.execute(**cast, emit=emit, loop=loop, parent_call_id=parent_call_id)
             else:
                 result = tool.execute(**cast)

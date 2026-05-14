@@ -438,7 +438,8 @@ class AgentRunner:
         ]
 
     async def _run_tool(self, call: ToolCallRequest, emit: StreamEmitter | None = None) -> str:
-        if emit and call.name == "dispatch_subagent":
+        tool = self.registry.get(call.name)
+        if emit and tool is not None and getattr(tool, "requires_runtime_context", False):
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(
                 self.registry.execute, call.name, call.arguments,

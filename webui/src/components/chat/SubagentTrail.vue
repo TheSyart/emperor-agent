@@ -29,7 +29,8 @@ function fullJson(value: unknown) {
     <details v-for="sub in props.subagents" :key="sub.id || sub.agent_type" class="subagent-card" open>
       <summary class="flex cursor-pointer items-center gap-2 text-xs text-ink">
         <img class="subagent-avatar" :src="avatarAssets.subagent" alt="" width="24" height="24" />
-        <span class="font-semibold">{{ sub.agent_type || 'subagent' }}</span>
+        <span class="font-semibold">{{ sub.kind === 'team' ? `队友 ${sub.agent_type || ''}` : (sub.agent_type || 'subagent') }}</span>
+        <span v-if="sub.kind === 'team' && sub.role" class="rounded-full bg-paper px-2 py-0.5 font-mono text-[10px] text-muted">{{ sub.role }}</span>
         <span class="min-w-0 flex-1 truncate text-muted">{{ sub.purpose }}</span>
         <span class="rounded-full bg-paper2 px-2 py-0.5 text-[10px] text-muted">{{ statusLabel(sub.status) }}</span>
       </summary>

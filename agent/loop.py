@@ -15,6 +15,15 @@ from .model_config import build_provider_snapshot
 from .runner import AgentRunner
 from .skills import SkillsLoader
 from .subagents import SubagentRegistry
+from .team import (
+    TeamBroadcastTool,
+    TeamListTool,
+    TeamManager,
+    TeamReadInboxTool,
+    TeamSendMessageTool,
+    TeamShutdownTool,
+    TeamSpawnTool,
+)
 from .telemetry import TokenTracker
 from .tools import (
     DispatchSubagentTool,
@@ -80,6 +89,7 @@ class AgentLoop:
             skills_loader=self.skills,
         )
         self._install_subagent_tool()
+        self._install_team_tools()
 
         self.mcp_client: MCPClient | None = None
         try:
@@ -276,3 +286,43 @@ class AgentLoop:
             subagent_registry=self.subagent_registry,
             runner_factory=_make_subagent_runner,
         ))
+
+    def _install_team_tools(self) -> None:
+        def _make_team_runner(*, member, spec, sub_registry):
+            system_prompt = (
+                f"{spec.system_prompt}\n\n"
+                "## Agent Team 协作规则\n\n"
+                f"- 你的队友名是 `{member.name}`, role 是 `{member.role}`。\n"
+                "- 你拥有自己的持久 thread 与 inbox, 不需要向用户直接发言。\n"
+                "- 收到任务后先理解 inbox 内容, 必要时调用工具完成差事。\n"
+                "- 完成后必须用 send_message(to=\"lead\", content=\"...\") 回禀关键结果。\n"
+                "- 只能处理本队友职责内的任务, 不要创建或唤醒其他队友。\n"
+            )
+            return AgentRunner(
+                provider=self.provider,
+                model=self.model,
+                registry=sub_registry,
+                system_prompt=system_prompt,
+                max_tokens=min(4000, self.max_tokens),
+                temperature=self.temperature,
+                reasoning_effort=self.reasoning_effort,
+                provider_name=self.provider_name,
+                usage_type=f"team:{member.name}",
+                memory_store=None,
+                token_tracker=self.token_tracker,
+                compactor=None,
+                max_turns=spec.max_turns,
+            )
+
+        self.team_manager = TeamManager(
+            root=self.root,
+            parent_registry=self.registry,
+            subagent_registry=self.subagent_registry,
+            runner_factory=_make_team_runner,
+        )
+        self.registry.register(TeamSpawnTool(self.team_manager))
+        self.registry.register(TeamListTool(self.team_manager))
+        self.registry.register(TeamSendMessageTool(self.team_manager))
+        self.registry.register(TeamReadInboxTool(self.team_manager))
+        self.registry.register(TeamBroadcastTool(self.team_manager))
+        self.registry.register(TeamShutdownTool(self.team_manager))

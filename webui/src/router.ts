@@ -33,6 +33,12 @@ const routes: RouteRecordRaw[] = [
     meta: { label: 'Tools', hint: '工具权限' },
   },
   {
+    path: '/team',
+    name: 'team',
+    component: () => import('./views/TeamView.vue'),
+    meta: { label: 'Team', hint: '队友协作' },
+  },
+  {
     path: '/configs',
     name: 'configs',
     component: () => import('./views/ConfigsView.vue'),
@@ -58,5 +64,5 @@ export const router = createRouter({
   routes,
 })
 
-export const navOrder = ['chat', 'model', 'tokens', 'skills', 'tools', 'configs', 'mcp', 'memory'] as const
+export const navOrder = ['chat', 'model', 'tokens', 'skills', 'tools', 'team', 'configs', 'mcp', 'memory'] as const
 export type NavRouteName = (typeof navOrder)[number]

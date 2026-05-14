@@ -45,6 +45,8 @@ const navSkills = new URL('../../assets/nav/nav-skills.png', import.meta.url).hr
 const navSkillsActive = new URL('../../assets/nav/nav-skills-active.png', import.meta.url).href
 const navTools = new URL('../../assets/nav/nav-tools.png', import.meta.url).href
 const navToolsActive = new URL('../../assets/nav/nav-tools-active.png', import.meta.url).href
+const navTeam = new URL('../../assets/nav/nav-team.png', import.meta.url).href
+const navTeamActive = new URL('../../assets/nav/nav-team-active.png', import.meta.url).href
 const navConfigs = new URL('../../assets/nav/nav-configs.png', import.meta.url).href
 const navConfigsActive = new URL('../../assets/nav/nav-configs-active.png', import.meta.url).href
 const navMcp = new URL('../../assets/nav/nav-mcp.png', import.meta.url).href
@@ -124,6 +126,8 @@ export const navAssets = {
   skillsActive: navSkillsActive,
   tools: navTools,
   toolsActive: navToolsActive,
+  team: navTeam,
+  teamActive: navTeamActive,
   configs: navConfigs,
   configsActive: navConfigsActive,
   mcp: navMcp,
@@ -154,6 +158,7 @@ export function navIcon(name: string, active: boolean) {
 export function toolIcon(name: string) {
   const lower = name.toLowerCase()
   if (lower.includes('dispatch') || lower.includes('subagent')) return toolAssets.subagent
+  if (lower.includes('team') || lower.includes('teammate') || lower.includes('broadcast')) return toolAssets.subagent
   if (lower.includes('todo')) return toolAssets.todo
   if (lower.includes('grep')) return toolAssets.grep
   if (lower.includes('glob')) return toolAssets.glob

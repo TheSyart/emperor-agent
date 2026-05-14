@@ -121,6 +121,7 @@ def _validate_one(value: Any, schema: dict, path: str = "") -> None:
 class Tool(ABC):
     read_only: bool = False
     exclusive: bool = False
+    requires_runtime_context: bool = False
 
     @property
     def concurrency_safe(self) -> bool:

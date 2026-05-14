@@ -11,6 +11,7 @@
 
 - 多 Provider LLM 调用层
 - 工具调用与子代理派遣
+- Agent Team 持久队友协作
 - 三层记忆 + 自动压缩
 - WebSocket 流式 WebUI（Vue3 + Vite + Tailwind）
 - 附件上传（图像/文档）与多模态输入链路
@@ -26,7 +27,8 @@
 5. `agent/memory.py` + `agent/compactor.py`（记忆与压缩）
 6. `agent/model_config.py` + `agent/providers/*`（模型配置与 provider 实现）
 7. `agent/tools/*` + `agent/subagents/*`（工具与子代理能力边界）
-8. `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue`
+8. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
+9. `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
@@ -40,6 +42,7 @@
 - `agent/model_config.py`：新旧 schema 兼容、entry 激活、保存与脱敏
 - `agent/providers/`：OpenAI-compatible / Anthropic / Bedrock
 - `agent/tools/`：内建工具实现（命令、读写、搜索、todo、子代理）
+- `agent/team/`：Agent Team 子系统（持久队友、inbox、thread、状态机、team tools）
 - `agent/attachments.py`：附件落盘、MIME 校验、PDF/文本抽取、图片 base64 编码
 - `agent/memory.py`：长期记忆、历史日志、checkpoint 恢复
 - `agent/compactor.py`：历史压缩，更新 `MEMORY.local.md` / `USER.local.md`
@@ -51,7 +54,8 @@
 - `webui/src/composables/useBootstrap.ts`：bootstrap 与 CRUD API 客户端
 - `webui/src/components/chat/Composer.vue`：输入框、附件上传、上下文用量环
 - `webui/src/components/panels/ModelPanel.vue`：模型条目管理、文本/视觉连通测试
-- `webui/src/views/*`：7 个一级路由页面
+- `webui/src/components/panels/TeamPanel.vue`：Agent Team 队友工作台
+- `webui/src/views/*`：一级路由页面
 
 ### 配置与模板
 
@@ -133,6 +137,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - `message_delta`
 - `tool_call` / `tool_result` / `tool_error`
 - `subagent_*`（start/delta/tool_call/tool_result/done/error）
+- `team_*`（member_update/message/run_start/run_delta/run_tool_call/run_tool_result/run_done/run_error）
 - `assistant_done`
 - `ready`
 - `context_usage`
@@ -175,6 +180,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 ### 内建工具
 
 - `run_command`, `web_fetch`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `load_skill`, `update_todos`, `dispatch_subagent`
+- Agent Team：`spawn_teammate`, `list_teammates`, `send_message`, `read_inbox`, `broadcast`, `shutdown_teammate`
 
 ### 并发规则
 
@@ -185,6 +191,13 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 
 由 `agent/subagents/registry.py` 内置白名单控制能力，模板只负责口吻和职责，不承载权限。
 
+### Agent Team
+
+- `.team/config.json` 记录队友 roster，`.team/inbox/*.jsonl` 是 append-only 消息总线，`.team/threads/*.json` 保存队友独立上下文。
+- v1 采用“按消息唤醒”：Lead 通过 `send_message(..., wake=true)` 或 `broadcast(..., wake=true)` 驱动队友执行一次，不启动后台常驻轮询。
+- Teammate 只能使用自身 `agent_type` 白名单工具 + `send_message` / `read_inbox`，不能再派遣 subagent 或创建队友。
+- 启动时 stale `working` 会变为 `offline`，下次 wake 再恢复。
+
 ## 10. 修改代码时的项目内规
 
 ### 10.1 不应提交的文件
@@ -192,6 +205,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 严格不要提交：
 
 - `memory/`
+- `.team/`
 - `model_config.json`
 - `templates/USER.local.md`
 - `.env`
@@ -202,6 +216,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 
 - 新 provider：`agent/providers/registry.py` + `factory.py` + 对应 provider 文件
 - 新工具：`agent/tools/` 新建类 + `agent/loop.py` 注册
+- 新 Team 能力：优先放在 `agent/team/`，同步 `agent/webui.py` API、`webui/src/types.ts` 与 `TeamPanel.vue`
 - 新子代理：`templates/subagents/*.md` + `subagents/registry.py` 白名单
 - 新技能：`skills/<name>/SKILL.md`
 
@@ -228,6 +243,35 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - 涉及行为变化时，必须同时更新 README 或本文件对应章节。
 - 做完改动至少做一次“路径验证”：能启动、能发消息、关键 API 不 500。
 - 若发现代码与 README 不一致，以“当前代码行为”为准并回写文档。
+
+## 13. 项目素材生成规范（imagegen）
+
+- 项目内所有位图素材生成/编辑（插画、贴图、mockup、透明抠图等）统一使用技能：`$imagegen`（`/Users/anhuike/.codex/skills/.system/imagegen/SKILL.md`）。
+- 默认走内置 `image_gen` 工具；除非用户明确要求 CLI fallback，或透明背景场景经确认需要 `gpt-image-1.5`。
+
+### 13.1 素材保存地址
+
+- 内置工具默认输出目录：`$CODEX_HOME/generated_images/...`（中间产物）。
+- 本项目素材根目录（原始路径）：`/Users/anhuike/Documents/workspace/emperor-agent/assets`。
+- 生成素材必须最终落在上述 `assets/` 根目录下。
+- 若该素材明确属于现有分类（如 `assets/nav/`、`assets/actions/`、`assets/brand/`），保存到对应分类目录。
+- 若暂不属于既有分类，保存到 `assets/generated/`。
+
+### 13.2 落盘规则
+
+- 不要让“项目要用的最终素材”只留在 `$CODEX_HOME/generated_images/...`，必须复制或移动回仓库目录。
+- 默认不覆盖已有文件；若未明确要求替换，使用版本化命名（如 `hero-v2.png`、`icon-send-v3.png`）。
+- 完成后在回复中给出最终仓库内绝对路径。
+
+### 13.3 提示词同步规则（必须执行）
+
+- 每次素材生成/编辑完成后，必须把“最终采用的提示词”同步记录到对应目录的 `PROMPTS.md`：
+  - `assets/nav/*` -> `assets/nav/PROMPTS.md`
+  - `assets/actions/*` -> `assets/actions/PROMPTS.md`
+  - 其他同理
+  - `assets/generated/*` -> `assets/generated/PROMPTS.md`
+- 记录至少包含：日期、输出文件名、工具模式（built-in / CLI fallback）、最终 prompt（含关键约束）。
+- 若目标目录不存在 `PROMPTS.md`，先创建再记录。
 
 ---
 

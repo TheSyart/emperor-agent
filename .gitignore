@@ -14,3 +14,6 @@ logs/
 
 # 运行期产生的私人数据（长期记忆 / 会话历史 / token 用量）
 memory/
+
+# Agent Team 运行期状态（队友配置 / inbox / 独立 thread）
+.team/
