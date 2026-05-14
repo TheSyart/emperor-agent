@@ -237,6 +237,9 @@ export interface ToolSegment {
   status: ToolStatus
   summary?: string
   subagents?: SubagentState[]
+  startedAt?: number
+  endedAt?: number
+  durationMs?: number
 }
 
 export type AssistantSegment = TextSegment | ToolSegment
@@ -247,6 +250,9 @@ export interface SubagentToolState {
   arguments?: Record<string, unknown>
   status: ToolStatus
   summary?: string
+  startedAt?: number
+  endedAt?: number
+  durationMs?: number
 }
 
 export interface SubagentState {
@@ -260,6 +266,10 @@ export interface SubagentState {
   summary?: string
   error?: string
   tools?: SubagentToolState[]
+  messages?: TeamMessage[]
+  startedAt?: number
+  endedAt?: number
+  durationMs?: number
 }
 
 export interface UserMessage {
@@ -285,6 +295,7 @@ export type ChatMessage = UserMessage | AssistantMessage
 export interface PendingState {
   label: string
   detail: string
+  tone?: 'running' | 'done' | 'error'
 }
 
 export type RuntimeStatus = 'connecting' | 'ready' | 'error'

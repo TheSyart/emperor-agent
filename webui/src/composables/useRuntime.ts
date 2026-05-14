@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
-import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, PendingState, RuntimeHistoryItem, RuntimeStatus, SubagentState, ToolSegment, ToolStatus, WsEvent } from '../types'
+import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, PendingState, RuntimeHistoryItem, RuntimeStatus, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
 
 const RUNTIME_STORAGE_KEY = 'emperor-agent:runtime-view'
 const LEGACY_IN_FLIGHT_STORAGE_KEY = 'emperor-agent:in-flight-runtime'
@@ -47,9 +47,10 @@ export function useRuntime(options: {
     return '连接中'
   }
 
-  function updatePending(label = '', detail = '') {
+  function updatePending(label = '', detail = '', tone: PendingState['tone'] = 'running') {
     pending.label = label
     pending.detail = detail
+    pending.tone = label ? tone : undefined
   }
 
   function connectSocket() {
@@ -233,6 +234,7 @@ export function useRuntime(options: {
     if (data.event === 'tool_call') {
       const assistant = currentAssistant.value
       if (assistant) {
+        const startedAt = Date.now()
         assistant.segments.push({
           id: nextId('segment'),
           type: 'tool',
@@ -242,6 +244,7 @@ export function useRuntime(options: {
           status: 'running',
           summary: '',
           subagents: [],
+          startedAt,
         })
       }
       updatePending(`正在执行: ${data.name}`, compactJson(data.arguments))
@@ -252,6 +255,7 @@ export function useRuntime(options: {
       const assistant = currentAssistant.value
       const seg = findToolSegment(assistant, data.id)
       if (seg) {
+        finishTimedState(seg)
         seg.summary = data.summary || '已完成'
         seg.status = 'done'
         if (data.name === 'update_todos' && data.todos) assistant!.todos = data.todos
@@ -265,10 +269,11 @@ export function useRuntime(options: {
       const assistant = currentAssistant.value
       const seg = findToolSegment(assistant, data.id)
       if (seg) {
+        finishTimedState(seg)
         seg.status = 'error'
         seg.summary = data.message || '工具执行出错'
       }
-      updatePending(`工具 ${data.name || ''} 执行出错`, data.message || '')
+      updatePending(`工具 ${data.name || ''} 执行出错`, data.message || '', 'error')
       return
     }
 
@@ -342,10 +347,12 @@ export function useRuntime(options: {
         seg.subagents.push({
           id: data.subagent_id,
           agent_type: data.agent_type,
+          kind: 'subagent',
           purpose: data.purpose,
           status: 'running',
           content: '',
           tools: [],
+          startedAt: Date.now(),
         })
       }
       updatePending(`派遣小太监: ${data.agent_type || 'subagent'}`, data.purpose || '')
@@ -363,7 +370,7 @@ export function useRuntime(options: {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
         sub.tools ||= []
-        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running' })
+        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: Date.now() })
       }
       updatePending(`小太监调用: ${data.name}`, '')
       return
@@ -372,6 +379,7 @@ export function useRuntime(options: {
     if (data.event === 'subagent_tool_result') {
       const tool = findSubagentTool(assistant, data.parent_id, data.subagent_id, data.id)
       if (tool) {
+        finishTimedState(tool)
         tool.summary = data.summary || '已完成'
         tool.status = 'done'
       }
@@ -381,16 +389,18 @@ export function useRuntime(options: {
     if (data.event === 'subagent_tool_error') {
       const tool = findSubagentTool(assistant, data.parent_id, data.subagent_id, data.id)
       if (tool) {
+        finishTimedState(tool)
         tool.summary = data.message || '工具执行出错'
         tool.status = 'error'
       }
-      updatePending(`小太监工具 ${data.name || ''} 出错`, data.message || '')
+      updatePending(`小太监工具 ${data.name || ''} 出错`, data.message || '', 'error')
       return
     }
 
     if (data.event === 'subagent_done') {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
+        finishTimedState(sub)
         sub.status = 'done'
         sub.summary = data.summary
       }
@@ -401,10 +411,11 @@ export function useRuntime(options: {
     if (data.event === 'subagent_error') {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
+        finishTimedState(sub)
         sub.status = 'error'
         sub.error = data.message
       }
-      updatePending(`小太监 ${data.agent_type || ''} 出错`, data.message || '')
+      updatePending(`小太监 ${data.agent_type || ''} 出错`, data.message || '', 'error')
     }
   }
 
@@ -418,7 +429,10 @@ export function useRuntime(options: {
     }
 
     if (data.event === 'team_message') {
-      if (data.message?.to === 'lead') updatePending('队友有新回禀', data.message.from)
+      if (assistant && data.message) {
+        attachTeamMessage(assistant, data.message)
+      }
+      if (data.message?.to === 'lead') updatePending('队友有新回禀', data.message.from, 'done')
       return
     }
 
@@ -431,12 +445,14 @@ export function useRuntime(options: {
         seg.subagents.push({
           id: data.teammate,
           kind: 'team',
-          agent_type: data.teammate,
+          agent_type: data.agent_type,
           role: data.role,
           purpose: data.purpose,
           status: 'running',
           content: '',
           tools: [],
+          messages: [],
+          startedAt: Date.now(),
         })
       }
       updatePending(`队友 ${data.teammate || ''} 已唤醒`, data.purpose || '')
@@ -454,7 +470,7 @@ export function useRuntime(options: {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
         sub.tools ||= []
-        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running' })
+        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: Date.now() })
       }
       updatePending(`队友调用: ${data.name}`, data.teammate || '')
       return
@@ -463,6 +479,7 @@ export function useRuntime(options: {
     if (data.event === 'team_run_tool_result') {
       const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
       if (tool) {
+        finishTimedState(tool)
         tool.summary = data.summary || '已完成'
         tool.status = 'done'
       }
@@ -472,16 +489,18 @@ export function useRuntime(options: {
     if (data.event === 'team_run_tool_error') {
       const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
       if (tool) {
+        finishTimedState(tool)
         tool.summary = data.message || '工具执行出错'
         tool.status = 'error'
       }
-      updatePending(`队友工具 ${data.name || ''} 出错`, data.message || '')
+      updatePending(`队友工具 ${data.name || ''} 出错`, data.message || '', 'error')
       return
     }
 
     if (data.event === 'team_run_done') {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
+        finishTimedState(sub)
         sub.status = 'done'
         sub.summary = data.summary
       }
@@ -492,10 +511,11 @@ export function useRuntime(options: {
     if (data.event === 'team_run_error') {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
+        finishTimedState(sub)
         sub.status = 'error'
         sub.error = data.message
       }
-      updatePending(`队友 ${data.teammate || ''} 出错`, data.message || '')
+      updatePending(`队友 ${data.teammate || ''} 出错`, data.message || '', 'error')
     }
   }
 
@@ -559,11 +579,20 @@ export function useRuntime(options: {
     assistant.streaming = false
     for (const seg of assistant.segments) {
       if (seg.type !== 'tool') continue
-      if (seg.status === 'running') seg.status = 'error_aborted'
+      if (seg.status === 'running') {
+        finishTimedState(seg)
+        seg.status = 'error_aborted'
+      }
       for (const sub of seg.subagents || []) {
-        if (sub.status === 'running') sub.status = 'error_aborted'
+        if (sub.status === 'running') {
+          finishTimedState(sub)
+          sub.status = 'error_aborted'
+        }
         for (const tool of sub.tools || []) {
-          if (tool.status === 'running') tool.status = 'error_aborted'
+          if (tool.status === 'running') {
+            finishTimedState(tool)
+            tool.status = 'error_aborted'
+          }
         }
       }
     }
@@ -587,6 +616,33 @@ export function useRuntime(options: {
 
   function findSubagentTool(assistant: AssistantMessage, parentId?: string, subId?: string, toolId?: string) {
     return findSubagent(assistant, parentId, subId)?.tools?.find((tool) => tool.id === toolId)
+  }
+
+  function findTeamSubagent(assistant: AssistantMessage, teammate: string) {
+    for (const segment of assistant.segments) {
+      if (segment.type !== 'tool') continue
+      const sub = segment.subagents?.find((item) => item.kind === 'team' && item.id === teammate)
+      if (sub) return sub
+    }
+    return undefined
+  }
+
+  function attachTeamMessage(assistant: AssistantMessage, message: TeamMessage) {
+    const teammate = message.to === 'lead' ? message.from : message.to
+    if (!teammate || teammate === 'lead') return
+    const sub = findTeamSubagent(assistant, teammate)
+    if (!sub) return
+    sub.messages ||= []
+    if (!sub.messages.some((item) => item.id === message.id)) {
+      sub.messages.push(message)
+      sub.messages = sub.messages.slice(-8)
+    }
+  }
+
+  function finishTimedState(state: { startedAt?: number; endedAt?: number; durationMs?: number }) {
+    const endedAt = Date.now()
+    state.endedAt = endedAt
+    if (state.startedAt) state.durationMs = Math.max(0, endedAt - state.startedAt)
   }
 
   function persistRuntimeSnapshot() {
