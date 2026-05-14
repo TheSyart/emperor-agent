@@ -14,6 +14,27 @@ function statusLabel(status?: ToolStatus) {
   return '执行中'
 }
 
+function agentTitle(sub: SubagentState) {
+  if (sub.kind === 'team') return `队友 ${sub.id || sub.agent_type || ''}`.trim()
+  return sub.agent_type || 'subagent'
+}
+
+function agentKind(sub: SubagentState) {
+  return sub.kind === 'team' ? 'Agent Team' : 'Subagent'
+}
+
+function durationLabel(ms?: number) {
+  if (!ms && ms !== 0) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+}
+
+function messageTitle(msg: { from: string; to: string; type: string }) {
+  if (msg.to === 'lead') return `${msg.from} 回禀`
+  if (msg.from === 'lead') return 'Lead 指令'
+  return `${msg.from} -> ${msg.to}`
+}
+
 function fullJson(value: unknown) {
   if (!value || typeof value !== 'object') return ''
   try {
@@ -25,27 +46,53 @@ function fullJson(value: unknown) {
 </script>
 
 <template>
-  <div class="mt-3 space-y-2 border-l border-amber/30 pl-3">
-    <details v-for="sub in props.subagents" :key="sub.id || sub.agent_type" class="subagent-card" open>
-      <summary class="flex cursor-pointer items-center gap-2 text-xs text-ink">
+  <div class="agent-timeline">
+    <details
+      v-for="sub in props.subagents"
+      :key="sub.id || sub.agent_type"
+      class="agent-node"
+      :class="[sub.status, sub.kind || 'subagent']"
+      open
+    >
+      <summary class="agent-node-head">
         <img class="subagent-avatar" :src="avatarAssets.subagent" alt="" width="24" height="24" />
-        <span class="font-semibold">{{ sub.kind === 'team' ? `队友 ${sub.agent_type || ''}` : (sub.agent_type || 'subagent') }}</span>
-        <span v-if="sub.kind === 'team' && sub.role" class="rounded-full bg-paper px-2 py-0.5 font-mono text-[10px] text-muted">{{ sub.role }}</span>
-        <span class="min-w-0 flex-1 truncate text-muted">{{ sub.purpose }}</span>
-        <span class="rounded-full bg-paper2 px-2 py-0.5 text-[10px] text-muted">{{ statusLabel(sub.status) }}</span>
+        <span class="agent-node-title">
+          <span>{{ agentKind(sub) }}</span>
+          <strong>{{ agentTitle(sub) }}</strong>
+          <small v-if="sub.purpose">{{ sub.purpose }}</small>
+        </span>
+        <span v-if="sub.role" class="agent-role-badge">{{ sub.role }}</span>
+        <span class="agent-state-badge">{{ statusLabel(sub.status) }}</span>
+        <time v-if="durationLabel(sub.durationMs)" class="agent-duration">{{ durationLabel(sub.durationMs) }}</time>
       </summary>
-      <div class="mt-2 rounded-2xl bg-paper/75 p-3 text-xs leading-6 text-ink shadow-insetPaper">
-        <MarkdownBlock :content="sub.content || sub.error || '思考中...'" />
-        <div v-if="sub.summary" class="mt-2 border-t border-line pt-2 text-muted">
+
+      <div class="agent-node-body">
+        <div v-if="sub.content || sub.error" class="agent-thinking">
+          <MarkdownBlock :content="sub.content || sub.error || ''" />
+        </div>
+
+        <div v-if="sub.messages?.length" class="agent-message-stack">
+          <div v-for="msg in sub.messages" :key="msg.id" class="agent-message" :class="[msg.type, msg.to === 'lead' ? 'to-lead' : 'to-member']">
+            <div class="agent-message-head">
+              <strong>{{ messageTitle(msg) }}</strong>
+              <span>{{ msg.type }}</span>
+            </div>
+            <p>{{ msg.content }}</p>
+          </div>
+        </div>
+
+        <div v-if="sub.summary" class="agent-summary">
           <MarkdownBlock :content="sub.summary" />
         </div>
-        <div v-if="sub.tools?.length" class="mt-3 space-y-2">
+
+        <div v-if="sub.tools?.length" class="agent-tool-list">
           <div v-for="tool in sub.tools" :key="tool.id || tool.name" class="mini-tool" :class="tool.status">
             <img class="mini-tool-icon" :src="toolIcon(tool.name)" alt="" width="22" height="22" />
-            <div class="min-w-0">
-              <div class="flex items-center gap-2 font-semibold">
-                <span class="truncate">{{ tool.name }}</span>
-                <em class="not-italic text-muted">{{ statusLabel(tool.status) }}</em>
+            <div class="mini-tool-main">
+              <div class="mini-tool-head">
+                <span>{{ tool.name }}</span>
+                <em>{{ statusLabel(tool.status) }}</em>
+                <time v-if="durationLabel(tool.durationMs)">{{ durationLabel(tool.durationMs) }}</time>
               </div>
               <ExpandableText class="text-muted" :text="tool.summary || fullJson(tool.arguments) || '等待结果...'" :limit="120" />
             </div>

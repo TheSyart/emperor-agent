@@ -341,6 +341,16 @@ body::after {
     box-shadow: 0 0 0 4px rgb(var(--seal) / 0.14);
   }
 
+  .pending-bar.done .pending-dot {
+    @apply bg-jade;
+    box-shadow: 0 0 0 4px rgb(var(--jade) / 0.12);
+  }
+
+  .pending-bar.error .pending-dot {
+    @apply bg-seal;
+    box-shadow: 0 0 0 4px rgb(var(--seal) / 0.14);
+  }
+
   .mini-code {
     @apply rounded-full border border-line/60 bg-ink/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted;
   }
@@ -633,38 +643,122 @@ body::after {
     @apply opacity-100;
   }
 
-  .tool-event {
-    @apply flex min-w-0 max-w-full items-start gap-3 rounded-[1.25rem] border border-line/70 bg-paper2/65 p-3.5 text-sm shadow-insetPaper;
+  .activity-card {
+    @apply relative w-full max-w-full overflow-hidden rounded-[1.35rem] border border-line/70 bg-paper2/60 text-sm shadow-insetPaper;
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.35),
-      0 0.65rem 1.4rem rgb(var(--ink) / 0.05);
+      inset 0 1px 0 rgb(255 255 255 / 0.42),
+      0 0.9rem 1.8rem rgb(var(--ink) / 0.06);
   }
 
-  .tool-image {
-    @apply size-11 shrink-0 rounded-[0.95rem] border border-line/50 bg-paper/80 p-1 shadow-sm;
+  .activity-card[open] {
+    @apply bg-paper/75;
+  }
+
+  .activity-card.running {
+    @apply border-amber/35 bg-amber/10;
+  }
+
+  .activity-card.done {
+    @apply border-jade/30 bg-jade/10;
+  }
+
+  .activity-card.error,
+  .activity-card.error_aborted {
+    @apply border-seal/30 bg-seal/10;
+  }
+
+  .activity-summary {
+    @apply grid cursor-pointer items-center gap-3 px-3.5 py-3;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    list-style: none;
+  }
+
+  .activity-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .activity-rail {
+    @apply relative grid size-12 shrink-0 place-items-center rounded-[1rem] border border-line/55 bg-paper/80;
+  }
+
+  .activity-icon {
+    @apply size-10;
     image-rendering: pixelated;
     transform: scale(1.12);
   }
 
-  .tool-event.done {
-    @apply border-jade/25 bg-jade/10;
+  .activity-status-dot {
+    @apply absolute -bottom-1 -right-1 size-3 rounded-full border border-paper bg-muted;
   }
 
-  .tool-event.error,
-  .tool-event.error_aborted {
-    @apply border-seal/25 bg-seal/10;
+  .activity-card.running .activity-status-dot {
+    @apply bg-amber animate-pulse-seal;
   }
 
-  .tool-name {
-    @apply flex min-w-0 items-center gap-2 font-mono text-xs font-bold text-ink;
+  .activity-card.done .activity-status-dot {
+    @apply bg-jade;
   }
 
-  .tool-name em {
-    @apply rounded-full bg-paper px-2 py-0.5 text-[10px] not-italic text-muted;
+  .activity-card.error .activity-status-dot,
+  .activity-card.error_aborted .activity-status-dot {
+    @apply bg-seal;
+  }
+
+  .activity-main {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .activity-kicker {
+    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+  }
+
+  .activity-main strong {
+    @apply truncate font-mono text-sm font-black text-ink;
+  }
+
+  .activity-main small {
+    @apply truncate text-xs leading-5 text-muted;
+  }
+
+  .activity-meta {
+    @apply flex shrink-0 items-center gap-2;
+  }
+
+  .activity-meta em,
+  .activity-meta time {
+    @apply rounded-full border border-line/55 bg-paper/75 px-2 py-1 font-mono text-[10px] not-italic text-muted;
+  }
+
+  .activity-card.running .activity-meta em {
+    @apply border-amber/35 bg-amber/15 text-amber;
+  }
+
+  .activity-card.done .activity-meta em {
+    @apply border-jade/30 bg-jade/10 text-jade;
+  }
+
+  .activity-card.error .activity-meta em,
+  .activity-card.error_aborted .activity-meta em {
+    @apply border-seal/30 bg-seal/10 text-seal;
+  }
+
+  .activity-body {
+    @apply border-t border-line/55 px-4 pb-4 pt-3;
+    background:
+      linear-gradient(90deg, rgb(var(--seal) / 0.06), transparent 0.28rem),
+      linear-gradient(180deg, rgb(var(--paper) / 0.58), rgb(var(--paper-2) / 0.22));
+  }
+
+  .activity-detail {
+    @apply rounded-[1rem] border border-line/55 bg-paper/60 px-3 py-2.5;
+  }
+
+  .activity-detail > span {
+    @apply mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
   }
 
   .tool-summary {
-    @apply mt-1 text-xs leading-6 text-muted;
+    @apply text-xs leading-6 text-muted;
   }
 
   .expandable-text {
@@ -756,21 +850,163 @@ body::after {
     @apply border-b border-line/50 px-3 py-2 text-left;
   }
 
-  .subagent-card .markdown-body {
+  .agent-timeline .markdown-body {
     @apply text-xs leading-6;
   }
 
-  .subagent-card {
-    @apply rounded-2xl border border-line/60 bg-paper2/50 p-3;
+  .agent-timeline {
+    @apply relative mt-3 space-y-3 border-l border-amber/35 pl-4;
+  }
+
+  .agent-node {
+    @apply relative min-w-0;
+  }
+
+  .agent-node::before {
+    content: '';
+    @apply absolute -left-[1.36rem] top-4 size-2.5 rounded-full border border-paper bg-muted;
+  }
+
+  .agent-node.running::before {
+    @apply bg-amber animate-pulse-seal;
+  }
+
+  .agent-node.done::before {
+    @apply bg-jade;
+  }
+
+  .agent-node.error::before,
+  .agent-node.error_aborted::before {
+    @apply bg-seal;
+  }
+
+  .agent-node-head {
+    @apply grid cursor-pointer items-center gap-2 rounded-[1rem] border border-line/55 bg-paper2/50 px-3 py-2.5;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    list-style: none;
+  }
+
+  .agent-node-head::-webkit-details-marker {
+    display: none;
+  }
+
+  .agent-node-title {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .agent-node-title > span {
+    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+  }
+
+  .agent-node-title strong {
+    @apply truncate font-display text-sm font-black text-ink;
+  }
+
+  .agent-node-title small {
+    @apply truncate text-xs text-muted;
+  }
+
+  .agent-role-badge,
+  .agent-state-badge,
+  .agent-duration {
+    @apply shrink-0 rounded-full border border-line/55 bg-paper/75 px-2 py-1 font-mono text-[10px] text-muted;
+  }
+
+  .agent-node.running .agent-state-badge {
+    @apply border-amber/35 bg-amber/15 text-amber;
+  }
+
+  .agent-node.done .agent-state-badge {
+    @apply border-jade/30 bg-jade/10 text-jade;
+  }
+
+  .agent-node.error .agent-state-badge,
+  .agent-node.error_aborted .agent-state-badge {
+    @apply border-seal/30 bg-seal/10 text-seal;
+  }
+
+  .agent-node-body {
+    @apply ml-1 mt-2 space-y-3 rounded-[1rem] border border-line/45 bg-paper/40 px-3 py-3;
+  }
+
+  .agent-thinking,
+  .agent-summary {
+    @apply min-w-0 break-words rounded-[0.9rem] border border-line/45 bg-paper/60 px-3 py-2 text-xs leading-6 text-ink;
+  }
+
+  .agent-summary {
+    @apply border-jade/25 bg-jade/10 text-muted;
+  }
+
+  .agent-message-stack {
+    @apply space-y-2;
+  }
+
+  .agent-message {
+    @apply min-w-0 rounded-[0.9rem] border border-line/45 bg-paper2/45 px-3 py-2;
+  }
+
+  .agent-message.to-lead {
+    @apply border-jade/25 bg-jade/10;
+  }
+
+  .agent-message.to-member {
+    @apply border-amber/25 bg-amber/10;
+  }
+
+  .agent-message.error {
+    @apply border-seal/30 bg-seal/10;
+  }
+
+  .agent-message-head {
+    @apply flex items-center justify-between gap-2 font-mono text-[10px] text-muted;
+  }
+
+  .agent-message-head strong {
+    @apply min-w-0 truncate text-ink;
+  }
+
+  .agent-message p {
+    @apply mt-1 whitespace-pre-wrap break-words text-xs leading-6 text-ink;
+  }
+
+  .agent-tool-list {
+    @apply space-y-2;
   }
 
   .mini-tool {
-    @apply flex items-start gap-2 rounded-xl border border-line/60 bg-paper2/60 px-3 py-2;
+    @apply flex min-w-0 items-start gap-2 rounded-[0.9rem] border border-line/55 bg-paper2/50 px-3 py-2;
+  }
+
+  .mini-tool.done {
+    @apply border-jade/25 bg-jade/10;
+  }
+
+  .mini-tool.error,
+  .mini-tool.error_aborted {
+    @apply border-seal/25 bg-seal/10;
   }
 
   .mini-tool-icon {
     @apply size-9 shrink-0 rounded-xl border border-line/50 bg-paper/75 p-1;
     transform: scale(1.18);
+  }
+
+  .mini-tool-main {
+    @apply min-w-0 flex-1;
+  }
+
+  .mini-tool-head {
+    @apply flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs font-bold text-ink;
+  }
+
+  .mini-tool-head span {
+    @apply min-w-0 max-w-full truncate;
+  }
+
+  .mini-tool-head em,
+  .mini-tool-head time {
+    @apply shrink-0 rounded-full bg-paper/70 px-2 py-0.5 text-[10px] not-italic text-muted;
   }
 
   .subagent-avatar {
@@ -800,7 +1036,47 @@ body::after {
   }
 
   .pending-bar {
-    @apply mx-5 mb-3 flex items-center gap-3 rounded-[1.2rem] border border-amber/30 bg-amber/10 px-4 py-3 shadow-insetPaper;
+    @apply mx-5 mb-3 grid items-center gap-3 rounded-[1.2rem] border border-amber/30 bg-amber/10 px-4 py-3 shadow-insetPaper;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.42),
+      0 0.75rem 1.6rem rgb(var(--ink) / 0.05);
+  }
+
+  .pending-bar.done {
+    @apply border-jade/30 bg-jade/10;
+  }
+
+  .pending-bar.error {
+    @apply border-seal/30 bg-seal/10;
+  }
+
+  .pending-seal {
+    @apply grid size-9 place-items-center rounded-[0.8rem] border border-line/55 bg-paper/75;
+  }
+
+  .pending-title {
+    @apply truncate text-sm font-semibold text-ink;
+  }
+
+  .pending-detail {
+    @apply truncate font-mono text-xs text-muted;
+  }
+
+  .pending-label {
+    @apply shrink-0 rounded-full border border-line/55 bg-paper/75 px-2.5 py-1 font-mono text-[10px] text-muted;
+  }
+
+  .pending-bar.running .pending-label {
+    @apply border-amber/35 bg-amber/15 text-amber;
+  }
+
+  .pending-bar.done .pending-label {
+    @apply border-jade/30 bg-jade/10 text-jade;
+  }
+
+  .pending-bar.error .pending-label {
+    @apply border-seal/30 bg-seal/10 text-seal;
   }
 
   .composer-wrap {
@@ -2217,10 +2493,52 @@ body::after {
     @apply max-w-[calc(100vw-6rem)] px-4;
   }
 
+  .flow-body,
+  .message-cluster {
+    max-width: calc(100vw - 5.5rem);
+  }
+
+  .activity-summary,
+  .agent-node-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .activity-meta,
+  .agent-role-badge,
+  .agent-state-badge,
+  .agent-duration {
+    @apply col-start-2 justify-self-start;
+  }
+
+  .activity-body {
+    @apply px-3;
+  }
+
+  .agent-node-body {
+    @apply ml-0;
+  }
+
+  .pending-bar {
+    @apply mx-3;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .pending-label {
+    @apply col-start-2 justify-self-start;
+  }
+
   .attach-button,
   .send-button {
     width: 2.8rem;
     height: 2.8rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-card.running .activity-status-dot,
+  .agent-node.running::before,
+  .pending-dot {
+    animation: none;
   }
 }
 
