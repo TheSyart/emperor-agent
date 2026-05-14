@@ -265,50 +265,102 @@ class TeamManager:
         self._emit(events.member_update(working), emit, loop)
         self._emit(events.run_start(parent_id=parent_call_id, member=working, purpose=purpose), emit, loop)
 
-        unread = self.bus.read(working.name, limit=50, mark_read=True)
-        if not unread:
+        checkpoint = self.store.read_checkpoint_payload(working.name)
+        pending_cursor_start: int | None = None
+        pending_cursor_end: int | None = None
+        pending_message_ids: list[str] = []
+        if checkpoint:
+            history = checkpoint["messages"]
+            pending_cursor_start = checkpoint.get("pending_cursor_start")
+            pending_cursor_end = checkpoint.get("pending_cursor_end")
+            pending_message_ids = list(checkpoint.get("pending_message_ids") or [])
+            inbox_by_id = {msg.id: msg for msg in self.bus.all_messages(working.name)}
+            unread = [inbox_by_id[msg_id] for msg_id in pending_message_ids if msg_id in inbox_by_id]
+        else:
+            inbox = self.bus.all_messages(working.name)
+            pending_cursor_start = min(self.store.read_cursor(working.name), len(inbox))
+            unread = inbox[pending_cursor_start:pending_cursor_start + 50]
+            pending_cursor_end = pending_cursor_start + len(unread)
+            pending_message_ids = [msg.id for msg in unread]
+            history = self.store.read_thread(working.name)
+
+        if not checkpoint and not unread:
             idle = self.store.update_member(working.name, status=TeamStatus.IDLE.value, last_error=None)
             self._emit(events.member_update(idle), emit, loop)
             self._emit(events.run_done(parent_id=parent_call_id, member=idle, summary="没有未读消息。"), emit, loop)
             return "没有未读消息。"
 
-        history = self.store.read_checkpoint(working.name) or self.store.read_thread(working.name)
-        history.append({"role": "user", "content": self._render_inbox_for_runner(working, unread)})
-        self.store.write_checkpoint(working.name, history)
+        if not checkpoint:
+            history.append({"role": "user", "content": self._render_inbox_for_runner(working, unread)})
+        self.store.write_checkpoint(
+            working.name,
+            history,
+            pending_cursor_start=pending_cursor_start,
+            pending_cursor_end=pending_cursor_end,
+            pending_message_ids=pending_message_ids,
+        )
 
         spec = self._require_spec(working.agent_type)
         sub_registry = self._registry_for_member(working, spec)
         runner = self.runner_factory(member=working, spec=spec, sub_registry=sub_registry)
+        lead_before_ids = {msg.id for msg in self.bus.all_messages(LEAD_ACTOR)}
 
         async def team_emit(evt: dict[str, Any]) -> None:
+            evt_type = str(evt.get("event") or "")
+            if evt_type.startswith("team_"):
+                if emit is None:
+                    return
+                if loop is not None:
+                    self._emit(evt, emit, loop)
+                    return
+                await emit(evt)
+                return
             mapped = self._map_runner_event(evt, working, parent_call_id)
             if mapped:
-                self._emit(mapped, emit, loop)
+                if emit is None:
+                    return
+                if loop is not None:
+                    self._emit(mapped, emit, loop)
+                    return
+                await emit(mapped)
 
         try:
-            if emit is not None and loop is not None:
+            if emit is not None:
                 final = run_sync(runner.step_stream(history, team_emit))
             else:
                 final = runner.step(history)
             self.store.write_thread(working.name, history)
             self.store.clear_checkpoint(working.name)
+            if pending_cursor_end is not None:
+                self.store.write_cursor(working.name, pending_cursor_end)
             idle = self.store.update_member(working.name, status=TeamStatus.IDLE.value, last_error=None)
             self._emit(events.member_update(idle), emit, loop)
-            result_msg = self.bus.send(
-                from_actor=working.name,
-                to=LEAD_ACTOR,
-                content=final,
-                type="result",
-                in_reply_to=unread[-1].id if unread else None,
-                meta={"role": working.role, "agent_type": working.agent_type},
+            explicit_reply = any(
+                msg.id not in lead_before_ids and msg.from_actor == working.name
+                for msg in self.bus.all_messages(LEAD_ACTOR)
             )
-            self._emit(events.message_event(result_msg), emit, loop)
+            if not explicit_reply:
+                result_msg = self.bus.send(
+                    from_actor=working.name,
+                    to=LEAD_ACTOR,
+                    content=final,
+                    type="result",
+                    in_reply_to=(pending_message_ids[-1] if pending_message_ids else None),
+                    meta={"role": working.role, "agent_type": working.agent_type},
+                )
+                self._emit(events.message_event(result_msg), emit, loop)
             logger.info(f"[队友回禀 · {working.name}]: {final[:500]}")
             return final
         except Exception as exc:
             err = str(exc)
             logger.exception(f"team wake failed: {working.name}")
-            self.store.write_checkpoint(working.name, history)
+            self.store.write_checkpoint(
+                working.name,
+                history,
+                pending_cursor_start=pending_cursor_start,
+                pending_cursor_end=pending_cursor_end,
+                pending_message_ids=pending_message_ids,
+            )
             error_member = self.store.update_member(
                 working.name,
                 status=TeamStatus.ERROR.value,
