@@ -74,6 +74,22 @@ class TokenTracker:
             last = row
         return _input_total(last or {})
 
+    def recent_calls(self, limit: int = 20) -> list[dict[str, int | str]]:
+        if limit <= 0:
+            return []
+        rows = [_normalize_row(r) for r in self._iter_rows()]
+        return rows[-limit:][::-1]
+
+    def recent_cache_calls(self, limit: int = 20) -> list[dict[str, int | str]]:
+        if limit <= 0:
+            return []
+        rows = [
+            row
+            for row in (_normalize_row(r) for r in self._iter_rows())
+            if int(row.get("cache_read", 0) or 0) > 0 or int(row.get("cache_create", 0) or 0) > 0
+        ]
+        return rows[-limit:][::-1]
+
     def stats_by_date(self) -> dict[str, dict[str, int]]:
         out: dict[str, dict[str, int]] = defaultdict(_empty_stats)
         for r in self._iter_rows():
@@ -208,8 +224,36 @@ def _add_row(bucket: dict, row: dict) -> None:
     bucket["total"] = int(bucket.get("total", 0)) + total
 
 
+def _normalize_row(row: dict) -> dict[str, int | str]:
+    input_tokens = _row_int(row, "input", "prompt_tokens")
+    output_tokens = _row_int(row, "output", "completion_tokens")
+    cache_read = _row_int(row, "cache_read", "cache_read_input_tokens")
+    cache_create = _row_int(row, "cache_create", "cache_creation_input_tokens")
+    return {
+        "ts": str(row.get("ts") or ""),
+        "provider": str(row.get("provider") or "unknown"),
+        "model": str(row.get("model") or "unknown"),
+        "usage_type": str(row.get("usage_type") or "main_agent"),
+        "input": input_tokens,
+        "output": output_tokens,
+        "cache_read": cache_read,
+        "cache_create": cache_create,
+        "total": input_tokens + output_tokens + cache_read + cache_create,
+    }
+
+
+def _row_int(row: dict, *keys: str) -> int:
+    for key in keys:
+        if key in row:
+            try:
+                return int(row.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
 def _input_total(row: dict) -> int:
-    input_tokens = int(row.get("input", row.get("prompt_tokens", 0)) or 0)
-    cache_read = int(row.get("cache_read", row.get("cache_read_input_tokens", 0)) or 0)
-    cache_create = int(row.get("cache_create", row.get("cache_creation_input_tokens", 0)) or 0)
+    input_tokens = _row_int(row, "input", "prompt_tokens")
+    cache_read = _row_int(row, "cache_read", "cache_read_input_tokens")
+    cache_create = _row_int(row, "cache_create", "cache_creation_input_tokens")
     return input_tokens + cache_read + cache_create

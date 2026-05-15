@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TokensPayload, TokensRange } from '../../../types'
-import { formatNumber } from '../../../utils/format'
+import { formatNumber, formatTokenCompact } from '../../../utils/format'
 import {
+  buildTokenComposition,
   buildHeatmap,
   filterByRange,
+  formatPercent,
   peakHourLabel,
   topModelDisplay,
-  rangeDays,
 } from '../../../utils/tokens'
 
 const props = defineProps<{ tokens: TokensPayload | null; range: TokensRange }>()
@@ -22,42 +23,65 @@ const rangedTotals = computed(() => {
   const buckets = rangedBuckets.value
   let total = 0
   let active = 0
+  let input = 0
+  let output = 0
+  let cacheRead = 0
+  let cacheCreate = 0
   for (const b of buckets) {
     total += b.total
+    input += b.input
+    output += b.output
+    cacheRead += b.cacheRead
+    cacheCreate += b.cacheCreate
     if (b.total > 0) active += 1
   }
-  return { total, active }
+  return { total, active, input, output, cacheRead, cacheCreate, cacheTotal: cacheRead + cacheCreate }
 })
+
+const composition = computed(() => buildTokenComposition({
+  input: rangedTotals.value.input,
+  output: rangedTotals.value.output,
+  cache_read: rangedTotals.value.cacheRead,
+  cache_create: rangedTotals.value.cacheCreate,
+  total: rangedTotals.value.total,
+}))
 
 const cards = computed(() => {
   const tokens = props.tokens
   if (!tokens) {
     const empty = '—'
     return [
-      { label: 'Sessions', value: empty, hint: '会话次数' },
-      { label: 'Messages', value: empty, hint: '历史消息条数' },
-      { label: 'Total tokens', value: empty, hint: '累计 Token 用量' },
-      { label: 'Active days', value: empty, hint: '活跃天数' },
-      { label: 'Current streak', value: empty, hint: '当前连续天数' },
-      { label: 'Longest streak', value: empty, hint: '最长连续天数' },
-      { label: 'Peak hour', value: empty, hint: '高峰时段' },
-      { label: 'Favorite model', value: empty, hint: '使用最多模型' },
+      { label: '输入缓存命中', value: empty, hint: 'cache_read', raw: 0, tone: 'hit' },
+      { label: '输入缓存未命中', value: empty, hint: 'input + cache_create', raw: 0, tone: 'miss' },
+      { label: '输出', value: empty, hint: 'output', raw: 0, tone: 'output' },
+      { label: '总 Token', value: empty, hint: 'input + cache + output', raw: 0, tone: 'total' },
     ]
   }
-  const days = rangeDays(props.range)
-  const totalLabel = days == null ? '累计 Token' : `近 ${days} 天 Token`
-  const activeLabel = days == null ? '出现过的天数' : `近 ${days} 天活跃天数`
+  const c = composition.value
   return [
-    { label: 'Sessions', value: formatNumber(tokens.sessions), hint: '相邻调用 > 30 分钟视为新会话' },
-    { label: 'Messages', value: formatNumber(tokens.messages), hint: 'history.jsonl 中的对话条数' },
-    { label: 'Total tokens', value: formatNumber(rangedTotals.value.total), hint: totalLabel },
-    { label: 'Active days', value: formatNumber(rangedTotals.value.active), hint: activeLabel },
-    { label: 'Current streak', value: `${tokens.streak.current_streak} 天`, hint: '截至今天的连续天数' },
-    { label: 'Longest streak', value: `${tokens.streak.longest_streak} 天`, hint: '历史最长连续天数' },
-    { label: 'Peak hour', value: peakHourLabel(tokens.byHour), hint: '消耗最多 Token 的时段' },
-    { label: 'Favorite model', value: topModelDisplay(tokens.byModel), hint: '总量最高的模型' },
+    { label: '输入缓存命中', value: formatTokenCompact(c.cacheHit), hint: `命中率 ${formatPercent(c.cacheHit, c.inputTotal)}`, raw: c.cacheHit, tone: 'hit' },
+    { label: '输入缓存未命中', value: formatTokenCompact(c.cacheMiss), hint: '普通输入 + 写入缓存', raw: c.cacheMiss, tone: 'miss' },
+    { label: '输出', value: formatTokenCompact(c.output), hint: '模型生成消耗', raw: c.output, tone: 'output' },
+    { label: '总 Token', value: formatTokenCompact(c.total), hint: '输入命中 + 未命中 + 输出', raw: c.total, tone: 'total' },
   ]
 })
+
+const quickStats = computed(() => {
+  const tokens = props.tokens
+  if (!tokens) return []
+  return [
+    { label: 'Sessions', value: formatTokenCompact(tokens.sessions), title: `${formatNumber(tokens.sessions)} sessions` },
+    { label: 'Messages', value: formatTokenCompact(tokens.messages), title: `${formatNumber(tokens.messages)} messages` },
+    { label: 'Active days', value: formatTokenCompact(rangedTotals.value.active), title: `${formatNumber(rangedTotals.value.active)} active days` },
+    { label: 'Peak hour', value: peakHourLabel(tokens.byHour), title: '消耗最多 Token 的时段' },
+    { label: 'Favorite model', value: topModelDisplay(tokens.byModel), title: '总量最高的模型' },
+  ]
+})
+
+function partWidth(value: number, total: number) {
+  if (!total) return '0%'
+  return `${Math.max(3, (value / total) * 100)}%`
+}
 
 const weekdayLabels = ['一', '三', '五']
 
@@ -73,9 +97,42 @@ function cellTitle(date: string | null, total: number, calls: number) {
     <section class="stat-grid">
       <article v-for="card in cards" :key="card.label" class="stat-card">
         <span class="stat-card-label">{{ card.label }}</span>
-        <strong class="stat-card-value">{{ card.value }}</strong>
+        <strong class="stat-card-value compact-value" :data-tone="card.tone" :title="`${formatNumber(card.raw)} tokens`">
+          {{ card.value }}
+        </strong>
         <small class="stat-card-hint">{{ card.hint }}</small>
       </article>
+    </section>
+
+    <section class="token-composition-card">
+      <header class="cache-section-head">
+        <div>
+          <strong>Token 构成</strong>
+          <p>输入缓存命中、输入缓存未命中与输出的实际占比。</p>
+        </div>
+        <span :title="`${formatNumber(composition.total)} tokens`">{{ formatTokenCompact(composition.total) }}</span>
+      </header>
+      <div class="token-composition-meter">
+        <span
+          v-for="part in composition.parts"
+          :key="part.key"
+          :style="{ width: partWidth(part.value, composition.total), background: part.color }"
+          :title="`${part.label}: ${formatNumber(part.value)} tokens`"
+        />
+      </div>
+      <div class="token-composition-legend">
+        <span v-for="part in composition.parts" :key="part.key">
+          <i :style="{ background: part.color }" />
+          <em>{{ part.label }}</em>
+          <strong :title="`${formatNumber(part.value)} tokens`">{{ formatTokenCompact(part.value) }}</strong>
+        </span>
+      </div>
+      <div v-if="quickStats.length" class="tokens-quick-grid">
+        <span v-for="item in quickStats" :key="item.label" :title="item.title">
+          <em>{{ item.label }}</em>
+          <strong>{{ item.value }}</strong>
+        </span>
+      </div>
     </section>
 
     <section class="activity-heatmap-card">

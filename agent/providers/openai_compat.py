@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from loguru import logger
+
 from .base import LLMProvider, LLMResponse, ToolCallRequest
 from .registry import ProviderSpec
 
@@ -167,10 +169,7 @@ class OpenAICompatProvider(LLMProvider):
             ))
         usage = {}
         if getattr(response, "usage", None):
-            usage = {
-                "input": getattr(response.usage, "prompt_tokens", 0) or 0,
-                "output": getattr(response.usage, "completion_tokens", 0) or 0,
-            }
+            usage = self._parse_usage(response.usage)
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
@@ -180,14 +179,24 @@ class OpenAICompatProvider(LLMProvider):
         )
 
     async def chat_stream(self, *, on_content_delta=None, **kwargs) -> LLMResponse:
-        stream = await self.client.chat.completions.create(
-            **self._kwargs(stream=True, **kwargs)
-        )
+        stream_kwargs = self._kwargs(stream=True, **kwargs)
+        stream_kwargs["stream_options"] = {"include_usage": True}
+        try:
+            stream = await self.client.chat.completions.create(**stream_kwargs)
+        except Exception as exc:
+            if not self._stream_usage_unsupported(exc):
+                raise
+            logger.debug(f"Provider does not support stream usage, retrying without it: {exc}")
+            stream_kwargs.pop("stream_options", None)
+            stream = await self.client.chat.completions.create(**stream_kwargs)
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_chunks: dict[int, dict[str, str]] = {}
         finish_reason = "stop"
+        usage: dict[str, int] = {}
         async for chunk in stream:
+            if getattr(chunk, "usage", None):
+                usage = self._parse_usage(chunk.usage)
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -222,8 +231,62 @@ class OpenAICompatProvider(LLMProvider):
             content="".join(content_parts) or None,
             tool_calls=tool_calls,
             finish_reason="tool_calls" if tool_calls else finish_reason,
+            usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
         )
+
+    @classmethod
+    def _parse_usage(cls, usage: Any) -> dict[str, int]:
+        prompt_tokens = cls._usage_int(usage, "prompt_tokens")
+        completion_tokens = cls._usage_int(usage, "completion_tokens")
+        details = cls._usage_field(usage, "prompt_tokens_details")
+        cached_tokens = cls._usage_int(details, "cached_tokens")
+        cache_create = (
+            cls._usage_int(details, "cache_creation_tokens")
+            or cls._usage_int(details, "cache_creation_input_tokens")
+            or cls._usage_int(usage, "cache_creation_input_tokens")
+        )
+        input_tokens = max(0, prompt_tokens - cached_tokens - cache_create)
+        return {
+            "input": input_tokens,
+            "output": completion_tokens,
+            "cache_read": cached_tokens,
+            "cache_create": cache_create,
+        }
+
+    @staticmethod
+    def _usage_field(value: Any, key: str) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value.get(key)
+        direct = getattr(value, key, None)
+        if direct is not None:
+            return direct
+        extra = getattr(value, "model_extra", None)
+        if isinstance(extra, dict):
+            return extra.get(key)
+        if hasattr(value, "model_dump"):
+            try:
+                dumped = value.model_dump()
+            except Exception:
+                dumped = None
+            if isinstance(dumped, dict):
+                return dumped.get(key)
+        return None
+
+    @classmethod
+    def _usage_int(cls, value: Any, key: str) -> int:
+        raw = cls._usage_field(value, key)
+        try:
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _stream_usage_unsupported(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "stream_options" in text or "include_usage" in text
 
     @staticmethod
     def _message_reasoning_content(message: Any) -> str | None:

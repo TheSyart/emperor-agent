@@ -10,6 +10,21 @@ export function formatCompactNumber(value: unknown) {
   return String(number)
 }
 
+export function formatTokenCompact(value: unknown) {
+  const parsed = Number(value || 0)
+  const number = Number.isFinite(parsed) ? parsed : 0
+  const sign = number < 0 ? '-' : ''
+  const abs = Math.abs(number)
+  if (abs < 1000) return `${number}`
+  if (abs >= 1_000_000) return `${sign}${trimUnit(abs / 1_000_000)}M`
+  if (abs >= 10_000) return `${sign}${trimUnit(abs / 10_000)}W`
+  return `${sign}${trimUnit(abs / 1000)}K`
+}
+
+function trimUnit(value: number) {
+  return value.toFixed(1).replace(/\.0$/, '')
+}
+
 export function compactJson(value: unknown, limit = 160) {
   if (!value || typeof value !== 'object') return ''
   const text = JSON.stringify(value)

@@ -4,6 +4,12 @@ export interface DateBucket {
   date: string
   total: number
   calls: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreate: number
+  cacheTotal: number
+  cacheMiss: number
 }
 
 export interface HeatmapCell {
@@ -42,8 +48,30 @@ export interface ModelRow {
   calls: number
   input: number
   output: number
+  cacheRead: number
+  cacheCreate: number
+  cacheTotal: number
+  cacheMiss: number
   total: number
   color: string
+}
+
+export interface TokenCompositionPart {
+  key: 'cache_hit' | 'cache_miss' | 'output'
+  label: string
+  value: number
+  color: string
+}
+
+export interface TokenComposition {
+  cacheHit: number
+  cacheMiss: number
+  output: number
+  cacheCreate: number
+  total: number
+  inputTotal: number
+  hitRate: number
+  parts: TokenCompositionPart[]
 }
 
 const DAY = 24 * 60 * 60 * 1000
@@ -58,6 +86,10 @@ const PALETTE = [
 ]
 
 const MONTH_LABELS_CN = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+
+function tokenTotal(row?: TokenStatsRow | null): number {
+  return (row?.input ?? 0) + (row?.cache_read ?? 0) + (row?.cache_create ?? 0) + (row?.output ?? 0)
+}
 
 function hashKey(input: string): number {
   let h = 5381
@@ -111,10 +143,20 @@ export function filterByRange(byDate: Record<string, TokenStatsRow>, range: Toke
   for (let cursor = new Date(startDate); cursor.getTime() <= today.getTime(); cursor = new Date(cursor.getTime() + DAY)) {
     const date = isoDate(cursor)
     const row = byDate[date]
+    const input = row?.input ?? 0
+    const output = row?.output ?? 0
+    const cacheRead = row?.cache_read ?? 0
+    const cacheCreate = row?.cache_create ?? 0
     buckets.push({
       date,
-      total: row?.total ?? 0,
+      total: input + cacheRead + cacheCreate + output,
       calls: row?.calls ?? 0,
+      input,
+      output,
+      cacheRead,
+      cacheCreate,
+      cacheTotal: cacheRead + cacheCreate,
+      cacheMiss: input + cacheCreate,
     })
   }
   return buckets
@@ -140,7 +182,7 @@ export function buildHeatmap(byDate: Record<string, TokenStatsRow>, weeks = 53):
   startSunday.setDate(lastSunday.getDate() - (weeks - 1) * 7)
 
   const sortedTotals = Object.values(byDate)
-    .map((row) => row.total ?? 0)
+    .map((row) => tokenTotal(row))
     .filter((v) => v > 0)
     .sort((a, b) => a - b)
 
@@ -158,7 +200,7 @@ export function buildHeatmap(byDate: Record<string, TokenStatsRow>, weeks = 53):
       }
       const date = isoDate(cursor)
       const row = byDate[date]
-      const total = row?.total ?? 0
+      const total = tokenTotal(row)
       const calls = row?.calls ?? 0
       column.push({ date, total, calls, level: quantileLevel(total, sortedTotals) })
     }
@@ -194,7 +236,7 @@ function modelTotalsAcrossDates(byDateModel: TokensPayload['byDateModel']): Map<
   const totals = new Map<string, number>()
   for (const dateMap of Object.values(byDateModel)) {
     for (const [key, row] of Object.entries(dateMap)) {
-      totals.set(key, (totals.get(key) ?? 0) + (row.total ?? 0))
+      totals.set(key, (totals.get(key) ?? 0) + tokenTotal(row))
     }
   }
   return totals
@@ -228,13 +270,14 @@ export function buildStackedBars(
 
     for (const key of top) {
       const row = dateRows[key]
-      if (row && (row.total ?? 0) > 0) {
-        segments.push({ model: key, total: row.total ?? 0, color: pickColor(key) })
+      const total = tokenTotal(row)
+      if (total > 0) {
+        segments.push({ model: key, total, color: pickColor(key) })
       }
     }
     for (const [key, row] of Object.entries(dateRows)) {
       if (topSet.has(key)) continue
-      const total = row.total ?? 0
+      const total = tokenTotal(row)
       if (total > 0) otherTotal += total
     }
     if (otherTotal > 0) {
@@ -250,22 +293,32 @@ export function buildStackedBars(
 export function buildModelRows(
   byModel: Record<string, TokenStatsRow>,
 ): ModelRow[] {
-  const rows = Object.entries(byModel).map(([key, row]) => ({
-    key,
-    model: modelLabel(key, row),
-    provider: providerLabel(key, row),
-    calls: row.calls ?? 0,
-    input: row.input ?? 0,
-    output: row.output ?? 0,
-    total: row.total ?? 0,
-    color: pickColor(key),
-  }))
+  const rows = Object.entries(byModel).map(([key, row]) => {
+    const input = row.input ?? 0
+    const output = row.output ?? 0
+    const cacheRead = row.cache_read ?? 0
+    const cacheCreate = row.cache_create ?? 0
+    return {
+      key,
+      model: modelLabel(key, row),
+      provider: providerLabel(key, row),
+      calls: row.calls ?? 0,
+      input,
+      output,
+      cacheRead,
+      cacheCreate,
+      cacheTotal: cacheRead + cacheCreate,
+      cacheMiss: input + cacheCreate,
+      total: input + cacheRead + cacheCreate + output,
+      color: pickColor(key),
+    }
+  })
   rows.sort((a, b) => b.total - a.total)
   return rows
 }
 
 export function topModelDisplay(byModel: Record<string, TokenStatsRow>): string {
-  const sorted = Object.entries(byModel).sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0))
+  const sorted = Object.entries(byModel).sort((a, b) => tokenTotal(b[1]) - tokenTotal(a[1]))
   if (!sorted.length) return '—'
   const [key, info] = sorted[0]
   return modelLabel(key, info)
@@ -274,7 +327,7 @@ export function topModelDisplay(byModel: Record<string, TokenStatsRow>): string 
 export function peakHourLabel(byHour: Record<string, TokenStatsRow>): string {
   let best: [string, number] | null = null
   for (const [hour, row] of Object.entries(byHour)) {
-    const total = row.total ?? 0
+    const total = tokenTotal(row)
     if (best == null || total > best[1]) {
       best = [hour, total]
     }
@@ -288,6 +341,33 @@ export function formatPercent(part: number, total: number): string {
   const v = (part / total) * 100
   if (v >= 10) return `${v.toFixed(0)}%`
   return `${v.toFixed(1)}%`
+}
+
+export function cacheTotal(row?: TokenStatsRow | null): number {
+  return (row?.cache_read ?? 0) + (row?.cache_create ?? 0)
+}
+
+export function buildTokenComposition(row?: TokenStatsRow | null): TokenComposition {
+  const cacheHit = row?.cache_read ?? 0
+  const cacheCreate = row?.cache_create ?? 0
+  const cacheMiss = (row?.input ?? 0) + cacheCreate
+  const output = row?.output ?? 0
+  const total = cacheHit + cacheMiss + output
+  const inputTotal = cacheHit + cacheMiss
+  return {
+    cacheHit,
+    cacheMiss,
+    output,
+    cacheCreate,
+    total,
+    inputTotal,
+    hitRate: inputTotal ? cacheHit / inputTotal : 0,
+    parts: [
+      { key: 'cache_hit', label: '输入缓存命中', value: cacheHit, color: 'rgb(var(--jade) / 0.9)' },
+      { key: 'cache_miss', label: '输入缓存未命中', value: cacheMiss, color: 'rgb(var(--seal) / 0.42)' },
+      { key: 'output', label: '输出', value: output, color: 'rgb(var(--amber) / 0.9)' },
+    ].filter((part) => part.value > 0) as TokenCompositionPart[],
+  }
 }
 
 export function modelDisplayName(key: string, info?: TokenStatsRow): string {

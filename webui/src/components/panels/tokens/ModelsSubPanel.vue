@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { TokenStatsRow, TokensPayload, TokensRange } from '../../../types'
-import { formatNumber } from '../../../utils/format'
+import { formatNumber, formatTokenCompact } from '../../../utils/format'
 import {
   buildModelRows,
   buildStackedBars,
@@ -14,7 +14,7 @@ import {
 
 const props = defineProps<{ tokens: TokensPayload | null; range: TokensRange }>()
 
-type SortKey = 'total' | 'calls' | 'input' | 'output' | 'model'
+type SortKey = 'total' | 'calls' | 'output' | 'cacheRead' | 'cacheMiss' | 'hitRate' | 'model'
 const sortKey = ref<SortKey>('total')
 const sortAsc = ref(false)
 
@@ -41,6 +41,9 @@ const sortedModelRows = computed<ModelRow[]>(() => {
   rows.sort((a, b) => {
     if (key === 'model') {
       return a.model.localeCompare(b.model) * dir
+    }
+    if (key === 'hitRate') {
+      return (hitRate(a) - hitRate(b)) * dir
     }
     return ((a[key] ?? 0) - (b[key] ?? 0)) * dir
   })
@@ -126,6 +129,11 @@ function segmentLabel(model: string, info?: TokenStatsRow): string {
 function emptyState() {
   return !props.tokens || allModelRows.value.length === 0
 }
+
+function hitRate(row: ModelRow): number {
+  const inputTotal = row.cacheRead + row.cacheMiss
+  return inputTotal ? row.cacheRead / inputTotal : 0
+}
 </script>
 
 <template>
@@ -180,10 +188,10 @@ function emptyState() {
               <li v-for="seg in hovered.segments" :key="seg.model">
                 <i class="tooltip-swatch" :style="{ background: seg.color }" />
                 <span>{{ segmentLabel(seg.model, props.tokens?.byModel?.[seg.model]) }}</span>
-                <em>{{ formatNumber(seg.total) }}</em>
+                <em>{{ formatTokenCompact(seg.total) }}</em>
               </li>
             </ul>
-            <footer>合计 {{ formatNumber(hovered.total) }} tokens</footer>
+            <footer>合计 {{ formatTokenCompact(hovered.total) }} tokens</footer>
           </div>
         </div>
       </div>
@@ -210,9 +218,11 @@ function emptyState() {
             <th class="col-rank">#</th>
             <th class="sortable" @click="setSort('model')">模型 / 厂家 {{ sortIndicator('model') }}</th>
             <th class="sortable num" @click="setSort('calls')">Calls {{ sortIndicator('calls') }}</th>
-            <th class="sortable num" @click="setSort('input')">Input {{ sortIndicator('input') }}</th>
-            <th class="sortable num" @click="setSort('output')">Output {{ sortIndicator('output') }}</th>
-            <th class="sortable num" @click="setSort('total')">Total {{ sortIndicator('total') }}</th>
+            <th class="sortable num cache-col" @click="setSort('cacheRead')">缓存命中 {{ sortIndicator('cacheRead') }}</th>
+            <th class="sortable num cache-col" @click="setSort('cacheMiss')">缓存未命中 {{ sortIndicator('cacheMiss') }}</th>
+            <th class="sortable num" @click="setSort('output')">输出 {{ sortIndicator('output') }}</th>
+            <th class="sortable num" @click="setSort('total')">总 Token {{ sortIndicator('total') }}</th>
+            <th class="sortable num cache-col" @click="setSort('hitRate')">命中率 {{ sortIndicator('hitRate') }}</th>
             <th class="col-share">占比</th>
           </tr>
         </thead>
@@ -226,10 +236,12 @@ function emptyState() {
               <strong class="row-model">{{ row.model }}</strong>
               <small v-if="row.provider">{{ row.provider }}</small>
             </td>
-            <td class="num">{{ formatNumber(row.calls) }}</td>
-            <td class="num">{{ formatNumber(row.input) }}</td>
-            <td class="num">{{ formatNumber(row.output) }}</td>
-            <td class="num strong">{{ formatNumber(row.total) }}</td>
+            <td class="num">{{ formatTokenCompact(row.calls) }}</td>
+            <td class="num cache-value" :title="`${formatNumber(row.cacheRead)} tokens`">{{ formatTokenCompact(row.cacheRead) }}</td>
+            <td class="num cache-value miss" :title="`${formatNumber(row.cacheMiss)} tokens`">{{ formatTokenCompact(row.cacheMiss) }}</td>
+            <td class="num cache-value create" :title="`${formatNumber(row.output)} tokens`">{{ formatTokenCompact(row.output) }}</td>
+            <td class="num strong" :title="`${formatNumber(row.total)} tokens`">{{ formatTokenCompact(row.total) }}</td>
+            <td class="num cache-value">{{ formatPercent(row.cacheRead, row.cacheRead + row.cacheMiss) }}</td>
             <td class="col-share">
               <div class="model-list-bar">
                 <span :style="{ width: `${totalTokens ? (row.total / totalTokens) * 100 : 0}%` }" />

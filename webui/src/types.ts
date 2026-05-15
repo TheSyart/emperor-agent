@@ -43,7 +43,9 @@ export interface TokenStatsRow {
   cache_create?: number
   total?: number
   calls?: number
-  [key: string]: number | undefined
+  provider?: string
+  model?: string
+  [key: string]: number | string | undefined
 }
 
 export interface TokenTotals extends TokenStatsRow {
@@ -77,11 +79,25 @@ export interface TokensPayload {
   streak: TokensStreak
   sessions: number
   messages: number
+  recentCalls?: TokenUsageRecord[]
+  recentCacheCalls?: TokenUsageRecord[]
   generatedAt: string
 }
 
 export type TokensRange = 'all' | '30d' | '7d'
-export type TokensTab = 'overview' | 'models'
+export type TokensTab = 'overview' | 'models' | 'cache'
+
+export interface TokenUsageRecord {
+  ts: string
+  provider: string
+  model: string
+  usage_type: string
+  input: number
+  output: number
+  cache_read: number
+  cache_create: number
+  total: number
+}
 
 export type ProviderRegion = 'foreign' | 'aggregator' | 'cloud' | 'cn' | 'local' | 'other'
 

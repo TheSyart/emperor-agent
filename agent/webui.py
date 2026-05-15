@@ -822,6 +822,8 @@ npm run build</code>
             "streak": tracker.streak_metrics(),
             "sessions": tracker.session_count(),
             "messages": self._count_history_messages(),
+            "recentCalls": tracker.recent_calls(),
+            "recentCacheCalls": tracker.recent_cache_calls(),
             "generatedAt": datetime.now().isoformat(timespec="seconds"),
         }
 

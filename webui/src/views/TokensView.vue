@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useAppContext } from '../composables/useAppContext'
 import OverviewSubPanel from '../components/panels/tokens/OverviewSubPanel.vue'
 import ModelsSubPanel from '../components/panels/tokens/ModelsSubPanel.vue'
+import CacheSubPanel from '../components/panels/tokens/CacheSubPanel.vue'
 import { actionAssets } from '../assets'
 import type { TokensRange, TokensTab } from '../types'
 
@@ -14,6 +15,7 @@ const range = ref<TokensRange>('all')
 const tabs: { key: TokensTab; label: string }[] = [
   { key: 'overview', label: '概览' },
   { key: 'models', label: '模型' },
+  { key: 'cache', label: '缓存' },
 ]
 
 const ranges: { key: TokensRange; label: string }[] = [
@@ -77,6 +79,11 @@ function refresh() {
         :range="range"
       />
       <ModelsSubPanel
+        v-else-if="tab === 'models'"
+        :tokens="ctx.tokens.value"
+        :range="range"
+      />
+      <CacheSubPanel
         v-else
         :tokens="ctx.tokens.value"
         :range="range"
