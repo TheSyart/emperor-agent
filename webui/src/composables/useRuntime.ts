@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
-import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
+import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
 
 const RUNTIME_STORAGE_KEY = 'emperor-agent:runtime-view'
 const LEGACY_IN_FLIGHT_STORAGE_KEY = 'emperor-agent:in-flight-runtime'
@@ -97,9 +97,17 @@ export function useRuntime(options: {
     }, delay)
   }
 
-  function sendMessage(payload: string | { content: string; attachments?: AttachmentRef[] }) {
-    const normalized = typeof payload === 'string' ? { content: payload, attachments: [] as AttachmentRef[] } : { content: payload.content, attachments: payload.attachments || [] }
+  function sendMessage(payload: string | ChatSendPayload) {
+    const normalized = typeof payload === 'string'
+      ? { content: payload, attachments: [] as AttachmentRef[], requestedSkills: [], displayContent: payload }
+      : {
+          content: payload.content,
+          attachments: payload.attachments || [],
+          requestedSkills: payload.requestedSkills || [],
+          displayContent: payload.displayContent || payload.content,
+        }
     const text = normalized.content.trim()
+    const displayText = normalized.displayContent.trim()
     const attachments = normalized.attachments
     if (busy.value) return false
     if (!text && attachments.length === 0) return false
@@ -110,7 +118,11 @@ export function useRuntime(options: {
     }
 
     const assistantId = nextId('assistant')
-    const userMsg: ChatMessage = { id: nextId('user'), role: 'user', content: text }
+    const userMsg: ChatMessage = {
+      id: nextId('user'),
+      role: 'user',
+      content: displayText || text,
+    }
     if (attachments.length) userMsg.attachments = attachments
     messages.value.push(userMsg)
     messages.value.push({ id: assistantId, role: 'assistant', content: '', segments: [], todos: null, streaming: true })
@@ -123,6 +135,8 @@ export function useRuntime(options: {
         type: 'message',
         content: text,
         attachments: attachments.map((a) => a.id),
+        requested_skills: normalized.requestedSkills,
+        display_content: displayText !== text ? displayText : undefined,
         client_message_id: userMsg.id,
       }))
       return true
@@ -201,7 +215,12 @@ export function useRuntime(options: {
   }
 
   function addLocalCommand(command: string, content: string) {
-    messages.value.push({ id: nextId('command'), role: 'user', content: command, local: true })
+    messages.value.push({
+      id: nextId('command'),
+      role: 'user',
+      content: command,
+      local: true,
+    })
     messages.value.push({
       id: nextId('command-result'),
       role: 'assistant',
@@ -233,7 +252,11 @@ export function useRuntime(options: {
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map((item) => {
         if (item.role === 'user') {
-          const msg: ChatMessage = { id: nextId('user'), role: 'user', content: item.content }
+          const msg: ChatMessage = {
+            id: nextId('user'),
+            role: 'user',
+            content: item.content,
+          }
           if (item.attachments?.length) msg.attachments = item.attachments
           return msg
         }

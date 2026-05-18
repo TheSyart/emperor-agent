@@ -236,6 +236,13 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - Plan 需要显式开启（WebUI toggle 或 `/plan on`）：只读探索、提问、提交计划；用户可评论修订，批准后自动切回 normal 并继续执行。Plan 模式必须产出 PlanCard，不能用普通文字最终答复绕过。
 - v1 同一时间只允许一个 pending ask 或 plan；扩展时优先保持 `agent/control/` 的模型、store、manager、policy 分层。
 
+### Slash Skill Picker
+
+- WebUI Composer 的 `/` 菜单展示静态斜杠命令和当前项目 `skills/` 下的全部 Skill。
+- 用户输入 `/<skill-name> 任务` 或 `/<skill-name>-skill 任务` 时，前端发送 `requested_skills`，后端校验后把 Skill 内容强制注入本轮上下文。
+- 点击 Skill 候选会补全 `/<skill-name> ` 前缀；Composer 和 Chat 气泡中非系统命令的 `/skill` 前缀会用特殊颜色字体高亮，普通用户文字仍保持原样。
+- 聊天气泡和 `displayContent` 保留用户原始输入；真实模型输入和 `history.jsonl` 保存已注入 Skill 的内容，保证 checkpoint 与重启恢复一致。
+
 ## 10. 修改代码时的项目内规
 
 ### 10.1 不应提交的文件

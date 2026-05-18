@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import type { SlashCommand } from '../../commands'
+import type { SlashPaletteItem } from '../../commands'
 import type { AttachmentRef } from '../../types'
 import { actionAssets, toolAssets } from '../../assets'
 import { uploadAttachment } from '../../api/attachments'
@@ -8,7 +8,7 @@ import AttachmentChip from './AttachmentChip.vue'
 
 const props = defineProps<{
   busy: boolean
-  commands: SlashCommand[]
+  commands: SlashPaletteItem[]
   contextUsed: number
   contextMax: number
   controlMode?: string
@@ -21,6 +21,7 @@ const emit = defineEmits<{
 }>()
 const value = ref('')
 const input = ref<HTMLTextAreaElement | null>(null)
+const highlightLayer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const drafts = ref<AttachmentRef[]>([])
 const uploading = ref<Set<string>>(new Set())
@@ -32,11 +33,36 @@ const ACCEPT_LIST =
 const MAX_DRAFTS = 5
 
 const suggestions = computed(() => {
-  const text = value.value.trim().toLowerCase()
+  const text = value.value
   if (!text.startsWith('/')) return []
+  if (/^\/\S+\s/.test(text)) return []
+  const query = text.slice(1).split(/\s+/, 1)[0].toLowerCase()
   return props.commands
-    .filter((command) => command.name.startsWith(text) || command.aliases?.some((alias) => alias.startsWith(text)))
-    .slice(0, 6)
+    .filter((item) => {
+      if (!query) return true
+      const haystack = [
+        item.name,
+        item.usage,
+        item.description,
+        item.tags || '',
+        ...(item.aliases || []),
+      ].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+})
+const commandSuggestions = computed(() => suggestions.value.filter((item) => item.kind === 'command'))
+const skillSuggestions = computed(() => suggestions.value.filter((item) => item.kind === 'skill'))
+const composerSlashParts = computed((): { token: string; rest: string } | null => {
+  const text = value.value
+  if (!text.startsWith('/')) return null
+  const token = text.match(/^\/\S+/)?.[0]
+  if (!token || token === '/') return null
+  const normalized = token.toLowerCase()
+  const isSystemCommand = props.commands.some((item) =>
+    item.kind === 'command' && (item.name === normalized || item.aliases?.includes(normalized)),
+  )
+  if (isSystemCommand) return null
+  return { token, rest: text.slice(token.length) }
 })
 
 const attachTitle = computed(() => {
@@ -70,13 +96,22 @@ function resize() {
   if (!el) return
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+  syncHighlightScroll()
+}
+
+function syncHighlightScroll() {
+  if (!input.value || !highlightLayer.value) return
+  highlightLayer.value.scrollTop = input.value.scrollTop
 }
 
 function submit() {
   const content = value.value.trim()
   if (props.busy) return
   if (!content && drafts.value.length === 0) return
-  emit('send', { content, attachments: [...drafts.value] })
+  emit('send', {
+    content,
+    attachments: [...drafts.value],
+  })
   value.value = ''
   drafts.value = []
   modeMenuOpen.value = false
@@ -86,8 +121,7 @@ function submit() {
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Tab' && suggestions.value.length) {
     event.preventDefault()
-    value.value = suggestions.value[0].usage
-    void nextTick(resize)
+    applySuggestion(suggestions.value[0])
     return
   }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
@@ -95,8 +129,8 @@ function handleKeydown(event: KeyboardEvent) {
   submit()
 }
 
-function applySuggestion(command: SlashCommand) {
-  value.value = command.usage
+function applySuggestion(command: SlashPaletteItem) {
+  value.value = command.completion
   modeMenuOpen.value = false
   input.value?.focus()
   void nextTick(resize)
@@ -222,10 +256,42 @@ const sendDisabled = computed(() => props.busy || (!value.value.trim() && drafts
     @drop="onDrop"
   >
     <div v-if="suggestions.length" class="slash-menu">
-      <button v-for="command in suggestions" :key="command.name" type="button" @click="applySuggestion(command)">
-        <strong>{{ command.name }}</strong>
-        <span>{{ command.description }}</span>
-      </button>
+      <div class="slash-menu-head">
+        <span>斜杠命令</span>
+        <em>Tab 补全第一项</em>
+      </div>
+
+      <div v-if="commandSuggestions.length" class="slash-menu-group">
+        <div class="slash-menu-label">命令</div>
+        <button
+          v-for="command in commandSuggestions"
+          :key="command.id"
+          type="button"
+          class="slash-menu-item"
+          :data-kind="command.kind"
+          @click="applySuggestion(command)"
+        >
+          <strong>{{ command.name }}</strong>
+          <span>{{ command.description }}</span>
+          <b>{{ command.usage }}</b>
+        </button>
+      </div>
+
+      <div v-if="skillSuggestions.length" class="slash-menu-group">
+        <div class="slash-menu-label">Skills</div>
+        <button
+          v-for="skill in skillSuggestions"
+          :key="skill.id"
+          type="button"
+          class="slash-menu-item"
+          :data-kind="skill.kind"
+          @click="applySuggestion(skill)"
+        >
+          <strong>{{ skill.name }}</strong>
+          <span>{{ skill.description }}</span>
+          <b>{{ skill.tags || 'Skill' }}</b>
+        </button>
+      </div>
     </div>
 
     <div v-if="drafts.length || uploading.size" class="composer-drafts">
@@ -256,16 +322,22 @@ const sendDisabled = computed(() => props.busy || (!value.value.trim() && drafts
       />
 
       <div class="composer-input-row">
-        <textarea
-          ref="input"
-          v-model="value"
-          rows="2"
-          :disabled="props.busy"
-          :placeholder="props.busy ? 'AI 正在执行...' : '向李公公交办一件差事... 输入 / 查看命令；可拖入图片或文档'"
-          @focus="modeMenuOpen = false"
-          @input="resize"
-          @keydown="handleKeydown"
-        />
+        <div class="composer-textarea-wrap" :class="{ 'has-skill-slash': composerSlashParts }">
+          <div v-if="composerSlashParts" ref="highlightLayer" class="composer-highlight-layer" aria-hidden="true">
+            <span class="composer-skill-slash">{{ composerSlashParts.token }}</span><span>{{ composerSlashParts.rest }}</span>
+          </div>
+          <textarea
+            ref="input"
+            v-model="value"
+            rows="2"
+            :disabled="props.busy"
+            :placeholder="props.busy ? 'AI 正在执行...' : '向李公公交办一件差事... 输入 / 查看命令；可拖入图片或文档'"
+            @focus="modeMenuOpen = false"
+            @input="resize"
+            @scroll="syncHighlightScroll"
+            @keydown="handleKeydown"
+          />
+        </div>
       </div>
 
       <div class="composer-action-row">

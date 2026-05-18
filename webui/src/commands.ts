@@ -1,8 +1,23 @@
+import type { RequestedSkill, SkillInfo } from './types'
+
 export interface SlashCommand {
   name: string
   usage: string
   description: string
   aliases?: string[]
+}
+
+export interface SlashPaletteItem {
+  id: string
+  kind: 'command' | 'skill'
+  name: string
+  usage: string
+  completion: string
+  description: string
+  aliases?: string[]
+  tags?: string
+  always?: boolean
+  skillName?: string
 }
 
 export const slashCommands: SlashCommand[] = [
@@ -20,6 +35,33 @@ export const slashCommands: SlashCommand[] = [
   { name: '/reload', usage: '/reload', description: '刷新 bootstrap、模型、skills、tools、memory' },
 ]
 
+export function buildSlashPaletteItems(skills: SkillInfo[] = []): SlashPaletteItem[] {
+  const commandItems = slashCommands.map((command) => ({
+    id: `command:${command.name}`,
+    kind: 'command' as const,
+    name: command.name,
+    usage: command.usage,
+    completion: command.usage,
+    description: command.description,
+    aliases: command.aliases,
+  }))
+  const skillItems = [...skills]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((skill) => ({
+      id: `skill:${skill.name}`,
+      kind: 'skill' as const,
+      name: `/${skill.name}`,
+      usage: `/${skill.name}`,
+      completion: `/${skill.name} `,
+      description: skill.description || skill.path,
+      aliases: [`/${skill.name}-skill`],
+      tags: skill.tags,
+      always: skill.always,
+      skillName: skill.name,
+    }))
+  return [...commandItems, ...skillItems]
+}
+
 export function parseSlashCommand(input: string) {
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
@@ -27,4 +69,25 @@ export function parseSlashCommand(input: string) {
   const normalized = name.toLowerCase()
   const command = slashCommands.find((item) => item.name === normalized || item.aliases?.includes(normalized))
   return { raw: trimmed, name: normalized, command, args }
+}
+
+export function parseSkillSlashCommand(input: string, skills: SkillInfo[] = []) {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith('/')) return null
+  const [token, ...rest] = trimmed.split(/\s+/)
+  const normalized = token.slice(1).toLowerCase()
+  const exact = skills.find((skill) => skill.name.toLowerCase() === normalized)
+  const alias = !exact && normalized.endsWith('-skill')
+    ? skills.find((skill) => skill.name.toLowerCase() === normalized.slice(0, -'-skill'.length))
+    : undefined
+  const skill = exact || alias
+  if (!skill) return null
+  const requestedSkill: RequestedSkill = { name: skill.name, source: 'slash' }
+  return {
+    raw: trimmed,
+    name: skill.name,
+    token,
+    task: rest.join(' ').trim(),
+    requestedSkill,
+  }
 }

@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NavRail from './components/layout/NavRail.vue'
-import { parseSlashCommand, slashCommands, type SlashCommand } from './commands'
+import { buildSlashPaletteItems, parseSkillSlashCommand, parseSlashCommand, slashCommands, type SlashCommand } from './commands'
 import { useBootstrap } from './composables/useBootstrap'
 import { useRuntime } from './composables/useRuntime'
 import { useTokens } from './composables/useTokens'
 import { provideAppContext } from './composables/useAppContext'
-import type { CompactResult, TokenStatsRow } from './types'
+import type { ChatSendPayload, CompactResult, TokenStatsRow } from './types'
 import { brandAssets } from './assets'
 import { formatNumber, usageTypeLabel } from './utils/format'
 
@@ -68,6 +68,7 @@ const {
 
 const tokensClient = useTokens(showToast)
 const { data: tokensData, loading: tokensLoading, load: loadTokens } = tokensClient
+const slashPaletteItems = computed(() => buildSlashPaletteItems(boot.value?.skills || []))
 
 onMounted(async () => {
   await loadBootstrap()
@@ -93,19 +94,38 @@ async function runSafely(task: () => Promise<void>) {
   }
 }
 
-function submitFromComposer(payload: string | { content: string; attachments?: import('./types').AttachmentRef[] }) {
-  const obj = typeof payload === 'string' ? { content: payload, attachments: [] } : { content: payload.content, attachments: payload.attachments || [] }
-  // 带附件时直接走真实消息，不解析斜杠命令（避免误把 "/foo" 当命令）
-  if (obj.attachments.length) {
-    sendMessage(obj)
-    return
-  }
+function submitFromComposer(payload: string | ChatSendPayload) {
+  const obj = typeof payload === 'string'
+    ? { content: payload, attachments: [] }
+    : { content: payload.content, attachments: payload.attachments || [] }
   const parsed = parseSlashCommand(obj.content)
-  if (!parsed) {
-    sendMessage(obj.content)
+  if (!obj.attachments.length && parsed?.command) {
+    void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
     return
   }
-  void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
+  const skillRequest = parseSkillSlashCommand(obj.content, boot.value?.skills || [])
+  if (skillRequest) {
+    if (!skillRequest.task && !obj.attachments.length) {
+      addLocalCommand(
+        skillRequest.raw,
+        `请在 ${inlineCode(`/${skillRequest.name}`)} 后面补上要办的事，例如：${inlineCode(`/${skillRequest.name} 帮我设计一个设置页`)}`,
+      )
+      return
+    }
+    const outgoing: ChatSendPayload = {
+      content: skillRequest.task,
+      attachments: obj.attachments,
+      requestedSkills: [skillRequest.requestedSkill],
+      displayContent: skillRequest.raw,
+    }
+    sendMessage(outgoing)
+    return
+  }
+  if (!obj.attachments.length && parsed) {
+    void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
+    return
+  }
+  sendMessage(obj)
 }
 
 async function executeSlashCommand(raw: string, name: string, command: SlashCommand | undefined) {
@@ -184,6 +204,11 @@ function renderCommandHelp() {
     '## 斜杠命令',
     '',
     ...slashCommands.map((command) => `- ${inlineCode(command.usage)}：${command.description}`),
+    '',
+    '### Skill 快捷调用',
+    '',
+    `- ${inlineCode('/<skill-name> 任务')}：强制本轮预加载并使用指定 Skill`,
+    `- ${inlineCode('/<skill-name>-skill 任务')}：当名称与系统命令冲突时使用 Skill 别名`,
     '',
     '提示：输入 `/` 会显示候选，按 `Tab` 可补全第一项。',
   ].join('\n')
@@ -380,7 +405,7 @@ provideAppContext({
   status,
   pending,
   runtimeText,
-  commands: slashCommands,
+  commands: slashPaletteItems,
   refreshAll,
   refreshMemory,
   saveModelConfig,

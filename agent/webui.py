@@ -36,6 +36,12 @@ from .model_config import (
     save_model_config,
 )
 from .runtime import RuntimeEventStore
+from .skill_requests import (
+    SkillRequestError,
+    build_requested_skills_block,
+    inject_requested_skills,
+    parse_requested_skills,
+)
 
 
 # 2x2 JPEG（已验证在 kimi-for-coding anthropic 兼容端可解码）
@@ -128,6 +134,11 @@ class WebUIState:
             attachment_ids = [str(a) for a in attachment_ids if isinstance(a, (str, int))]
             if not text and not attachment_ids:
                 raise ValueError("Message is empty")
+            requested_skill_names = parse_requested_skills(
+                payload.get("requested_skills"),
+                set(self.loop.skills.skills.keys()),
+            )
+            display_content = str(payload.get("display_content") or text).strip()
             if self.control().get("pending"):
                 if attachment_ids:
                     raise ValueError("当前有 Ask / Plan 正在等待处理，请先回答、评论、批准或取消后再发送附件。")
@@ -138,6 +149,9 @@ class WebUIState:
                     )
                     return
             content = self._build_user_content(text, attachment_ids)
+            if requested_skill_names:
+                skill_block = build_requested_skills_block(self.loop.skills, requested_skill_names)
+                content = inject_requested_skills(content, skill_block)
             turn_id = self._new_turn_id()
             client_message_id = str(payload.get("client_message_id") or "")
             user_msg: dict[str, Any] = {"role": "user", "content": content}
@@ -147,8 +161,12 @@ class WebUIState:
             async with self.lock:
                 self.history.append(user_msg)
                 extra: dict[str, Any] = {"turn_id": turn_id}
+                if requested_skill_names:
+                    extra["requestedSkills"] = requested_skill_names
+                if display_content != text or requested_skill_names:
+                    extra["displayContent"] = display_content
                 if attachment_ids:
-                    extra.update({"attachments": attachment_ids, "displayContent": text})
+                    extra.update({"attachments": attachment_ids})
                     self.loop.memory.append_history(
                         "user", content, extra=extra,
                     )
@@ -157,7 +175,7 @@ class WebUIState:
                 await self._broadcast_event(
                     {
                         "event": "user_message",
-                        "content": text,
+                        "content": display_content,
                         "attachments": self._attachment_refs(attachment_ids),
                         "client_message_id": client_message_id,
                     },
@@ -177,6 +195,15 @@ class WebUIState:
                     self.active_turn = False
         except TurnPaused:
             self.active_turn = False
+        except SkillRequestError as exc:
+            payload = {"event": "error", "message": str(exc), "partial": True}
+            if started:
+                await self._broadcast_event(payload, turn_id=turn_id or None)
+            elif not ws.closed:
+                try:
+                    await self._send_ws(ws, payload)
+                except ConnectionResetError:
+                    pass
         except Exception as exc:
             logger.exception("WebSocket message handler error")
             payload = {"event": "error", "message": str(exc), "partial": True}

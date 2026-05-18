@@ -24,7 +24,7 @@ const ctx = useAppContext()
     <div class="composer-wrap">
       <Composer
         :busy="ctx.busy.value"
-        :commands="ctx.commands"
+        :commands="ctx.commands.value"
         :context-used="ctx.boot.value?.context_used ?? 0"
         :context-max="ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0"
         :control-mode="ctx.boot.value?.control?.mode || 'normal'"

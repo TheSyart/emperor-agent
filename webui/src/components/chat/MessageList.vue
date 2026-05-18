@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import type { ChatMessage } from '../../types'
+import { slashCommands } from '../../commands'
+import type { ChatMessage, UserMessage } from '../../types'
 import { avatarAssets, brandAssets, emptyAssets } from '../../assets'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
@@ -18,6 +19,19 @@ watch(
   () => nextTick(pinToBottom),
   { deep: true, flush: 'post' },
 )
+
+function skillSlashParts(message: UserMessage): { token: string; rest: string } | null {
+  const text = message.content.trim()
+  if (!text.startsWith('/')) return null
+  const [token] = text.split(/\s+/, 1)
+  if (!token || token === '/') return null
+  const normalized = token.toLowerCase()
+  const isSystemCommand = slashCommands.some((command) =>
+    command.name === normalized || command.aliases?.includes(normalized),
+  )
+  if (isSystemCommand) return null
+  return { token, rest: text.slice(token.length).trimStart() }
+}
 </script>
 
 <template>
@@ -51,7 +65,13 @@ watch(
                 :data="attachment"
               />
             </div>
-            <div v-if="message.content" class="bubble user whitespace-pre-wrap">{{ message.content }}</div>
+            <div v-if="message.content" class="bubble user whitespace-pre-wrap">
+              <template v-if="skillSlashParts(message)">
+                <span class="user-skill-slash">{{ skillSlashParts(message)?.token }}</span>
+                <span v-if="skillSlashParts(message)?.rest"> {{ skillSlashParts(message)?.rest }}</span>
+              </template>
+              <template v-else>{{ message.content }}</template>
+            </div>
           </div>
         </article>
         <AssistantFlow v-else :message="message" />

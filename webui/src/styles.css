@@ -573,6 +573,10 @@ body::after {
       inset 0 1px 0 rgb(255 255 255 / 0.08);
   }
 
+  .user-skill-slash {
+    @apply font-mono font-black text-jade;
+  }
+
   .bubble.assistant {
     @apply rounded-[1.55rem] rounded-tl-[0.65rem] border-line/75 text-ink;
     background:
@@ -1231,19 +1235,47 @@ body::after {
   }
 
   .slash-menu {
-    @apply absolute bottom-[calc(100%+0.8rem)] left-0 z-20 w-full max-w-xl overflow-hidden rounded-[1.35rem] border border-line/70 bg-paper/95 p-2 shadow-imperial backdrop-blur-xl;
+    @apply absolute bottom-[calc(100%+0.8rem)] left-0 z-20 flex max-h-[min(28rem,65vh)] w-full max-w-2xl flex-col overflow-x-hidden overflow-y-auto rounded-[1.35rem] border border-line/70 bg-paper/95 p-2 shadow-imperial backdrop-blur-xl;
   }
 
-  .slash-menu button {
-    @apply flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2 text-left transition hover:bg-seal/10;
+  .slash-menu-head {
+    @apply mb-1 flex items-center justify-between gap-3 border-b border-line/50 px-3 pb-2 pt-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted;
   }
 
-  .slash-menu strong {
-    @apply font-mono text-xs text-seal;
+  .slash-menu-head em {
+    @apply not-italic text-muted/75;
   }
 
-  .slash-menu span {
-    @apply min-w-0 flex-1 truncate text-xs text-muted;
+  .slash-menu-group {
+    @apply py-1;
+  }
+
+  .slash-menu-label {
+    @apply sticky top-0 z-10 bg-paper/95 px-3 py-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted/80;
+  }
+
+  .slash-menu-item {
+    @apply grid w-full grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-3 py-2 text-left transition hover:bg-seal/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-seal/35;
+  }
+
+  .slash-menu-item strong {
+    @apply min-w-0 truncate font-mono text-xs text-seal;
+  }
+
+  .slash-menu-item span {
+    @apply min-w-0 truncate text-xs text-muted;
+  }
+
+  .slash-menu-item b {
+    @apply max-w-[8rem] truncate rounded-full border border-line/60 bg-paper2/80 px-2 py-1 font-mono text-[0.65rem] font-bold text-muted;
+  }
+
+  .slash-menu-item[data-kind='skill'] strong {
+    @apply text-jade;
+  }
+
+  .slash-menu-item[data-kind='skill'] b {
+    @apply border-jade/25 bg-jade/10 text-jade;
   }
 
   .composer {
@@ -1263,9 +1295,42 @@ body::after {
     @apply min-w-0 px-1 pb-1 pt-1;
   }
 
-  .composer textarea {
-    @apply max-h-44 min-h-[5.2rem] w-full rounded-[1.15rem] border border-transparent bg-paper2/45 px-4 py-3 text-[15px] leading-7 shadow-none ring-0 transition focus:border-line/60 focus:bg-paper/70 focus:ring-0;
+  .composer-textarea-wrap {
+    @apply relative min-w-0;
+  }
+
+  .composer-textarea-wrap.has-skill-slash {
+    @apply rounded-[1.15rem] bg-paper2/45 transition;
+  }
+
+  .composer-textarea-wrap.has-skill-slash:focus-within {
+    @apply bg-paper/70;
+  }
+
+  .composer-highlight-layer {
+    @apply pointer-events-none absolute inset-0 max-h-44 min-h-[5.2rem] overflow-hidden rounded-[1.15rem] border border-transparent px-4 py-3 text-[15px] leading-7 text-ink;
+    overflow-wrap: anywhere;
+    font: inherit;
+    letter-spacing: 0;
     text-wrap: pretty;
+    white-space: pre-wrap;
+  }
+
+  .composer-skill-slash {
+    @apply text-jade;
+    font: inherit;
+  }
+
+  .composer textarea {
+    @apply relative z-10 max-h-44 min-h-[5.2rem] w-full rounded-[1.15rem] border border-transparent bg-paper2/45 px-4 py-3 text-[15px] leading-7 shadow-none ring-0 transition focus:border-line/60 focus:bg-paper/70 focus:ring-0;
+    text-wrap: pretty;
+  }
+
+  .composer-textarea-wrap.has-skill-slash textarea,
+  .composer-textarea-wrap.has-skill-slash textarea:focus {
+    background: transparent;
+    color: transparent;
+    caret-color: rgb(var(--ink));
   }
 
   .composer-action-row {
@@ -3073,6 +3138,18 @@ body::after {
 
   .composer-action-row {
     @apply flex-wrap items-start gap-y-2;
+  }
+
+  .slash-menu {
+    @apply max-h-[58vh] max-w-none;
+  }
+
+  .slash-menu-item {
+    @apply grid-cols-[minmax(6.5rem,0.8fr)_minmax(0,1fr)];
+  }
+
+  .slash-menu-item b {
+    @apply col-span-2 justify-self-start;
   }
 
   .composer-left-actions {

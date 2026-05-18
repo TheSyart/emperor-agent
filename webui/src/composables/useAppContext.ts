@@ -1,15 +1,15 @@
-import { inject, provide, type InjectionKey, type Ref } from 'vue'
+import { inject, provide, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 import type {
-  AttachmentRef,
   BootstrapPayload,
   ChatMessage,
+  ChatSendPayload,
   CompactResult,
   ModelConfigRaw,
   PendingState,
   RuntimeStatus,
   TokensPayload,
 } from '../types'
-import type { SlashCommand } from '../commands'
+import type { SlashPaletteItem } from '../commands'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -25,7 +25,7 @@ export interface AppContext {
   pending: PendingState
   runtimeText: () => string
 
-  commands: SlashCommand[]
+  commands: ComputedRef<SlashPaletteItem[]>
 
   refreshAll: () => Promise<void>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
@@ -46,13 +46,13 @@ export interface AppContext {
   saveEpisode: (date: string, content: string) => Promise<void>
 
   setControlMode: (mode: 'normal' | 'plan') => Promise<void>
-  sendMessage: (payload: string | { content: string; attachments?: AttachmentRef[] }) => boolean
+  sendMessage: (payload: string | ChatSendPayload) => boolean
   sendInteractionAnswer: (interactionId: string, answers: Record<string, unknown>) => boolean
   sendPlanComment: (interactionId: string, comment: string) => boolean
   approvePlan: (interactionId: string) => boolean
   cancelInteraction: (interactionId: string) => boolean
   clearChat: () => void
-  submitFromComposer: (payload: string | { content: string; attachments?: AttachmentRef[] }) => void
+  submitFromComposer: (payload: string | ChatSendPayload) => void
 
   showToast: (message: string) => void
   runSafely: (task: () => Promise<void>) => Promise<void>

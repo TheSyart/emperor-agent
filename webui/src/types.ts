@@ -36,6 +36,11 @@ export interface SkillInfo {
   always?: boolean
 }
 
+export interface RequestedSkill {
+  name: string
+  source: 'slash'
+}
+
 export interface TokenStatsRow {
   input?: number
   output?: number
@@ -163,6 +168,13 @@ export interface AttachmentRef {
   hasImage: boolean
   path: string
   textPath?: string | null
+}
+
+export interface ChatSendPayload {
+  content: string
+  attachments?: AttachmentRef[]
+  requestedSkills?: RequestedSkill[]
+  displayContent?: string
 }
 
 export interface ModelTestResult {
