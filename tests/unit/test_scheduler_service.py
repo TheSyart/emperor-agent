@@ -177,6 +177,26 @@ def test_at_job_delete_after_run(tmp_path: Path) -> None:
     assert service.get_job(job.id) is None
 
 
+def test_start_registers_protected_system_jobs(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+
+    asyncio.run(service.start())
+    try:
+        jobs = service.list_jobs(include_disabled=True)
+        system_jobs = [job for job in jobs if job.protected]
+
+        assert {job.id for job in system_jobs} >= {
+            "memory-maintenance",
+            "runtime-maintenance",
+            "team-stale-recovery",
+            "token-ledger-maintenance",
+        }
+        assert all(job.payload.kind == "system_event" for job in system_jobs)
+        assert service.remove_job("memory-maintenance") == "protected"
+    finally:
+        service.stop()
+
+
 def test_remove_protected_job_refuses(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     job = service.add_job(

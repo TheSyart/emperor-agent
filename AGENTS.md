@@ -257,6 +257,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - Plan 需要显式开启（WebUI Composer 模式选择器、`/mode plan` 或 `/plan on`）：只读探索、提问、提交计划；用户可评论修订，批准或取消后自动恢复进入 Plan 前的 `ask_before_edit` / `auto` 模式。Plan 模式必须产出 PlanCard，不能用普通文字最终答复绕过。
 - Scheduler 在 Plan 模式下只允许 `scheduler(action=list)`，创建/修改/删除/运行长期任务必须等待计划批准；`ask_before_edit` 下 scheduler 写操作会进入 AskCard 审批；`auto` 下仍保留 schema、timezone、protected job 等安全校验。
 - Scheduler job 执行时会设置 scheduler context，禁止递归创建新的 scheduler job；`agent_turn` 会写入 history/runtime，`team_wake` 会走 TeamManager inbox+wake，`system_event` 只能由系统代码注册。
+- WebUI 启动会登记受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`。它们可见、可手动运行、可暂停/恢复，但不能删除；Memory 页展示维护任务状态摘要。
 - v1 同一时间只允许一个 pending ask 或 plan；扩展时优先保持 `agent/control/` 的模型、store、manager、policy 分层。
 
 ### Slash Skill Picker

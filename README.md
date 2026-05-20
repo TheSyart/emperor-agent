@@ -413,6 +413,8 @@ Scheduler 相关 HTTP API 已接入 Web 后端：`GET /api/scheduler`、`POST /a
 
 当前可执行 payload：`agent_turn` 会作为“司时台触发”的主动 turn 写入 history 与 runtime；`team_wake` 会向目标 teammate 写入 task 消息并唤醒；`system_event` 仅允许系统代码注册，普通 API / tool 创建会被拒绝。
 
+WebUI 启动时会自动登记 4 个受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`。它们在 Scheduler 页可见、可暂停/恢复/手动运行，但不能删除；Memory 页会显示这些维护任务的数量、启用数、下次维护时间与最近错误。
+
 WebUI 相关接口：
 
 | 类型 | 名称 |

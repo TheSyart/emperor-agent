@@ -59,6 +59,7 @@ const sortedEpisodes = computed(() => {
 
 const historyStats = computed(() => props.memory?.history || null)
 const runtimeStats = computed(() => props.memory?.runtime || null)
+const schedulerMaintenance = computed(() => props.memory?.schedulerMaintenance || null)
 
 function formatBytes(value?: number) {
   const bytes = Math.max(0, Number(value || 0))
@@ -126,6 +127,19 @@ function formatNumber(value?: number) {
         <span>最新事件</span>
         <strong>{{ runtimeStats.latestTs ? new Date(runtimeStats.latestTs * 1000).toLocaleDateString('zh-CN') : '暂无' }}</strong>
         <small>{{ runtimeStats.path || 'memory/runtime/events.jsonl' }}</small>
+      </div>
+    </div>
+
+    <div v-if="schedulerMaintenance" class="memory-stats-grid">
+      <div class="memory-stat-card" :class="{ warning: schedulerMaintenance.lastError }">
+        <span>系统维护任务</span>
+        <strong>{{ formatNumber(schedulerMaintenance.enabled) }} / {{ formatNumber(schedulerMaintenance.jobs) }}</strong>
+        <small>{{ schedulerMaintenance.lastError || '受保护 Scheduler jobs' }}</small>
+      </div>
+      <div class="memory-stat-card">
+        <span>下次维护</span>
+        <strong>{{ schedulerMaintenance.nextRunAtMs ? new Date(schedulerMaintenance.nextRunAtMs).toLocaleDateString('zh-CN') : '暂无' }}</strong>
+        <small>{{ schedulerMaintenance.nextRunAtMs ? new Date(schedulerMaintenance.nextRunAtMs).toLocaleTimeString('zh-CN', { hour12: false }) : 'Scheduler 未安排' }}</small>
       </div>
     </div>
 

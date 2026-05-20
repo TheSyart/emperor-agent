@@ -68,6 +68,14 @@ export interface MemoryPayload {
   tokensByUsageType?: Record<string, TokenStatsRow>
   tokenTotals?: TokenTotals
   runtime?: RuntimeStats
+  schedulerMaintenance?: SchedulerMaintenanceStats
+}
+
+export interface SchedulerMaintenanceStats {
+  jobs?: number
+  enabled?: number
+  nextRunAtMs?: number | null
+  lastError?: string | null
 }
 
 export interface RuntimeStats {

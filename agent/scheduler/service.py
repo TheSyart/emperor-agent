@@ -16,6 +16,7 @@ from .models import (
     now_ms,
 )
 from .store import SchedulerStore, SchedulerStoreCorrupt, SchedulerStoreData
+from .system_jobs import default_system_jobs
 
 
 def compute_next_run_ms(schedule: SchedulerSchedule, current_ms: int) -> int | None:
@@ -95,6 +96,7 @@ class SchedulerService:
         if self._running:
             return
         data = self.store.load(allow_last_good=False)
+        self._register_system_jobs(data)
         self._running = True
         self._recompute_next_runs(data)
         self.store.save(data)
@@ -226,6 +228,25 @@ class SchedulerService:
                 job.state.next_run_at_ms = compute_next_run_ms(job.schedule, current)
             else:
                 job.state.next_run_at_ms = None
+
+    def _register_system_jobs(self, data: SchedulerStoreData) -> None:
+        current = self.time_func()
+        existing = {job.id: job for job in data.jobs}
+        for default in default_system_jobs(now=current):
+            found = existing.get(default.id)
+            if found is None:
+                default.state.next_run_at_ms = compute_next_run_ms(default.schedule, current)
+                data.jobs.append(default)
+                continue
+            found.name = default.name
+            found.schedule = default.schedule
+            found.payload = default.payload
+            found.protected = True
+            found.purpose = default.purpose
+            found.delete_after_run = False
+            found.updated_at_ms = current
+            if found.enabled:
+                found.state.next_run_at_ms = compute_next_run_ms(found.schedule, current)
 
     def _next_wake_ms(self, jobs: list[SchedulerJob] | None = None) -> int | None:
         jobs = jobs if jobs is not None else self.store.list_jobs(include_disabled=True)

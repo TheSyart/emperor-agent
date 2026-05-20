@@ -27,8 +27,7 @@ class SchedulerJobExecutor:
             if job.payload.kind == "team_wake":
                 return await self._run_team_wake(job)
             if job.payload.kind == "system_event":
-                logger.info("Scheduler system_event '{}' acknowledged", job.name)
-                return "system_event acknowledged"
+                return self._run_system_event(job)
             raise ValueError(f"unsupported scheduler payload kind: {job.payload.kind}")
         finally:
             reset_scheduler_run(token)
@@ -97,6 +96,41 @@ class SchedulerJobExecutor:
             emit=emit,
             loop=loop,
         )
+
+    def _run_system_event(self, job: SchedulerJob) -> str:
+        event_name = str(job.payload.meta.get("system_event") or job.payload.message or job.id)
+        if event_name == "memory-maintenance":
+            stats = self.state.loop.memory.history_stats()
+            return (
+                "memory-maintenance checked: "
+                f"hot={stats.get('active_lines', 0)} lines / {stats.get('active_bytes', 0)} bytes, "
+                f"archives={stats.get('archive_files', 0)}"
+            )
+        if event_name == "runtime-maintenance":
+            stats = self.state.runtime_events.stats(
+                active_turn_ids=self.state.loop.memory.load_unarchived_turn_ids(),
+            )
+            return (
+                "runtime-maintenance checked: "
+                f"events={stats.get('events', 0)}, bytes={stats.get('bytes', 0)}, "
+                f"latestSeq={stats.get('latestSeq', 0)}"
+            )
+        if event_name == "team-stale-recovery":
+            before = [
+                member.name
+                for member in self.state.loop.team_manager.store.list_members()
+                if member.status == "working"
+            ]
+            self.state.loop.team_manager.store.mark_stale_working_offline()
+            return f"team-stale-recovery checked: recovered={len(before)}"
+        if event_name == "token-ledger-maintenance":
+            totals = self.state.loop.token_tracker.totals()
+            return (
+                "token-ledger-maintenance checked: "
+                f"calls={totals.get('calls', 0)}, total={totals.get('total', 0)}"
+            )
+        logger.info("Scheduler system_event '{}' acknowledged", job.name)
+        return f"system_event acknowledged: {event_name}"
 
     @staticmethod
     def _agent_turn_content(job: SchedulerJob) -> str:

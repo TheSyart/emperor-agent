@@ -77,6 +77,7 @@ class MemoryService:
             "tokenTotals": self.state.loop.token_tracker.totals(),
             "history": self.state.loop.memory.history_stats(),
             "runtime": self.state.runtime_events.stats(active_turn_ids=turn_ids),
+            "schedulerMaintenance": self._scheduler_maintenance(),
         }
 
     def tokens(self) -> dict[str, Any]:
@@ -104,6 +105,24 @@ class MemoryService:
             "events": self.state.runtime_events.events_for_turns(
                 turn_ids,
                 limit=self.state.max_event_log,
+            ),
+        }
+
+    def _scheduler_maintenance(self) -> dict[str, Any]:
+        jobs = [
+            job for job in self.state.loop.scheduler_service.list_jobs(include_disabled=True)
+            if job.protected
+        ]
+        return {
+            "jobs": len(jobs),
+            "enabled": len([job for job in jobs if job.enabled]),
+            "nextRunAtMs": min(
+                (job.state.next_run_at_ms for job in jobs if job.enabled and job.state.next_run_at_ms),
+                default=None,
+            ),
+            "lastError": next(
+                (job.state.last_error for job in jobs if job.state.last_status == "error" and job.state.last_error),
+                None,
             ),
         }
 
