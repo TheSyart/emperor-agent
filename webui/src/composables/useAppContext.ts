@@ -8,6 +8,7 @@ import type {
   PendingState,
   RuntimeStatus,
   TokensPayload,
+  WatchlistDecision,
 } from '../types'
 import type { SlashPaletteItem } from '../commands'
 
@@ -44,6 +45,8 @@ export interface AppContext {
   saveMemory: (content: string) => Promise<void>
   loadEpisode: (date: string) => Promise<{ date: string; content: string }>
   saveEpisode: (date: string, content: string) => Promise<void>
+  saveWatchlist: (content: string) => Promise<void>
+  checkWatchlist: () => Promise<WatchlistDecision>
 
   setControlMode: (mode: 'ask_before_edit' | 'auto' | 'plan') => Promise<void>
   sendMessage: (payload: string | ChatSendPayload) => boolean

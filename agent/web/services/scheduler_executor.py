@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,7 +28,7 @@ class SchedulerJobExecutor:
             if job.payload.kind == "team_wake":
                 return await self._run_team_wake(job)
             if job.payload.kind == "system_event":
-                return self._run_system_event(job)
+                return await self._run_system_event(job)
             raise ValueError(f"unsupported scheduler payload kind: {job.payload.kind}")
         finally:
             reset_scheduler_run(token)
@@ -97,7 +98,7 @@ class SchedulerJobExecutor:
             loop=loop,
         )
 
-    def _run_system_event(self, job: SchedulerJob) -> str:
+    async def _run_system_event(self, job: SchedulerJob) -> str:
         event_name = str(job.payload.meta.get("system_event") or job.payload.message or job.id)
         if event_name == "memory-maintenance":
             stats = self.state.loop.memory.history_stats()
@@ -129,6 +130,24 @@ class SchedulerJobExecutor:
                 "token-ledger-maintenance checked: "
                 f"calls={totals.get('calls', 0)}, total={totals.get('total', 0)}"
             )
+        if event_name == "watchlist-check":
+            self.state.watchlist_service.model_router = self.state.loop.model_router
+            decision = await self.state.watchlist_service.check()
+            if decision.action != "run":
+                return f"watchlist-check skipped: {decision.reason}"
+            proactive = replace(
+                job,
+                payload=replace(
+                    job.payload,
+                    kind="agent_turn",
+                    message=(
+                        "[WATCHLIST_TRIGGER]\n"
+                        f"reason: {decision.reason}\n\n"
+                        f"{decision.message}"
+                    ),
+                ),
+            )
+            return await self._run_agent_turn(proactive)
         logger.info("Scheduler system_event '{}' acknowledged", job.name)
         return f"system_event acknowledged: {event_name}"
 

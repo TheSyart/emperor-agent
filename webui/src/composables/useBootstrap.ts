@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { api, cloneJson } from '../api/http'
-import type { BootstrapPayload, CompactResult, MemoryPayload, ModelConfigPayload, ModelConfigRaw, McpConfigPayload, SkillInfo } from '../types'
+import type { BootstrapPayload, CompactResult, MemoryPayload, ModelConfigPayload, ModelConfigRaw, McpConfigPayload, SkillInfo, WatchlistDecision, WatchlistPayload } from '../types'
 
 export function useBootstrap(showToast: (message: string) => void) {
   const boot = ref<BootstrapPayload | null>(null)
@@ -174,6 +174,26 @@ export function useBootstrap(showToast: (message: string) => void) {
     showToast(`情景记忆 ${date} 已保存`)
   }
 
+  async function saveWatchlist(content: string) {
+    const payload = await api<WatchlistPayload>('/api/watchlist', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    })
+    if (boot.value?.memory) boot.value.memory.watchlist = payload
+    showToast('Watchlist 已保存')
+  }
+
+  async function checkWatchlist() {
+    const payload = await api<{ decision: WatchlistDecision; watchlist: WatchlistPayload }>('/api/watchlist/check', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    if (boot.value?.memory) boot.value.memory.watchlist = payload.watchlist
+    const action = payload.decision.action === 'run' ? '建议主动执行' : '跳过'
+    showToast(`Watchlist 检查完成：${action}`)
+    return payload.decision
+  }
+
   return {
     boot,
     loading,
@@ -200,6 +220,8 @@ export function useBootstrap(showToast: (message: string) => void) {
     saveMemory,
     loadEpisode,
     saveEpisode,
+    saveWatchlist,
+    checkWatchlist,
     cloneJson,
   }
 }

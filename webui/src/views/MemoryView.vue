@@ -12,6 +12,14 @@ function onSaveLongTerm(content: string) {
 function onSaveEpisode(date: string, content: string) {
   void ctx.runSafely(() => ctx.saveEpisode(date, content))
 }
+
+function onSaveWatchlist(content: string) {
+  void ctx.runSafely(() => ctx.saveWatchlist(content))
+}
+
+function onCheckWatchlist() {
+  void ctx.runSafely(() => ctx.checkWatchlist().then(() => ctx.refreshMemory(false)))
+}
 </script>
 
 <template>
@@ -32,6 +40,8 @@ function onSaveEpisode(date: string, content: string) {
         :load-episode="ctx.loadEpisode"
         @save-long-term="onSaveLongTerm"
         @save-episode="onSaveEpisode"
+        @save-watchlist="onSaveWatchlist"
+        @check-watchlist="onCheckWatchlist"
         @refresh="ctx.runSafely(() => ctx.refreshMemory(true))"
       />
     </div>

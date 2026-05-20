@@ -8,6 +8,7 @@ SYSTEM_JOB_IDS = {
     "runtime-maintenance",
     "team-stale-recovery",
     "token-ledger-maintenance",
+    "watchlist-check",
 }
 
 
@@ -63,6 +64,19 @@ def default_system_jobs(*, now: int) -> list[SchedulerJob]:
             ),
             protected=True,
             purpose="检查 tokens.jsonl 账本规模与缓存统计，后续可挂载归档策略。",
+            now=now,
+        ),
+        SchedulerJob.create(
+            job_id="watchlist-check",
+            name="Watchlist heartbeat",
+            schedule=SchedulerSchedule(kind="every", every_ms=6 * 60 * 60 * 1000),
+            payload=SchedulerPayload(
+                kind="system_event",
+                message="watchlist-check",
+                meta={"system_event": "watchlist-check"},
+            ),
+            protected=True,
+            purpose="周期检查 memory/watchlist.md，必要时触发本地主动 turn。",
             now=now,
         ),
     ]

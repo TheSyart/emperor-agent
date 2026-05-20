@@ -87,6 +87,8 @@ python webui.py
 | `memory/runtime/events.jsonl` | `RuntimeEventStore` 首次启动 | Chat 行为事件冷记录 |
 | `memory/scheduler/jobs.json` | `SchedulerStore` 首次启动 | 本地持久定时任务热配置 |
 | `memory/scheduler/action.jsonl` | `SchedulerStore` 写操作 | 跨入口 action log，用于合并任务变更 |
+| `memory/watchlist.md` | `WatchlistStore` 首次启动 | 主动检查清单，供 Scheduler heartbeat 周期判断 |
+| `memory/watchlist_state.json` | Watchlist 检查后写入 | 最近一次 skip/run 决策与模型信息 |
 | `templates/USER.local.md` | `AgentLoop._ensure_local_user_file()` | 复制 `templates/init/USER.md` |
 | `model_config.json` | **需要手动** `cp model_config.example.json model_config.json` 并填 apiKey |  |
 | `webui/dist/` | **需要手动** `cd webui && npm install && npm run build` | Vite 构建 |
@@ -104,7 +106,8 @@ python webui.py
 - **MCP 外部工具** — 通过 stdio 或 SSE 连接外部 MCP 服务器，自动发现工具并注册为 `mcp_{server}_{tool}`，与内置工具统一调度。
 - **流式 WebUI** — 网页聊天通过 WebSocket 接收 `message_delta`、`tool_call`、`tool_result`、`subagent_*` 等事件；事件持久化到 `memory/runtime/events.jsonl`，刷新或后端重启后按 seq 回放未压缩会话细节。
 - **三模式权限与 Ask / Plan 控制流** — 默认 `ask_before_edit` 会在危险或不确定动作前审批；`auto` 走最高自动权限；`plan` 只允许只读探索、提问和提交 PlanCard，批准或取消后恢复进入 Plan 前的模式。
-- **本地 Scheduler** — 持久保存 `at` / `every` / `cron` 任务，启动 WebUI 后后台 timer 自动恢复；支持触发本地主动 Agent turn 与 Team wake；Agent 可通过 `scheduler` 工具查看任务，创建/修改/删除/手动运行长期任务会走权限审批。
+- **本地 Scheduler** — 持久保存 `at` / `every` / `cron` 任务，启动 WebUI 后后台 timer 自动恢复；支持触发本地主动 Agent turn、Team wake 与系统维护 heartbeat；Agent 可通过 `scheduler` 工具查看任务，创建/修改/删除/手动运行长期任务会走权限审批。
+- **Watchlist Heartbeat** — `memory/watchlist.md` 记录希望系统主动留意的事项；受保护的 `watchlist-check` 定期用次模型判断 `skip/run`，只有必要时才投递完整主动 turn。
 - **Token 统计** — 按日期、provider/model、使用种类（main_agent / subagent / memory_compaction）汇总，并按“输入缓存命中 / 输入缓存未命中 / 输出 / 总 Token”展示。
 - **工具调用** — 命令执行、网页抓取、文件读写、Glob/Grep 搜索、技能加载、todo 维护、子代理派遣。
 - **任务规划** — 内置 todolist，未完成时自动 nudge 模型继续执行。
@@ -140,6 +143,7 @@ agent/
 ├── permissions/                Claude Code 风格三模式权限策略：ask_before_edit / auto / plan
 ├── runtime/                    WebUI 行为事件冷记录、event payload、seq replay
 ├── scheduler/                  本地长期自动运行中枢：job store / timer service / scheduler tool
+├── watchlist/                  Watchlist heartbeat：本地清单、次模型 skip/run 决策、主动 turn 过滤
 ├── web/                        aiohttp Web 后端：app/state/routes/services 分层
 │   ├── app.py                  aiohttp app 与中间件
 │   ├── state.py                共享依赖、广播、bootstrap glue
@@ -185,6 +189,8 @@ memory/                         运行期产物（gitignore，首启自动创建
 ├── scheduler/
 │   ├── jobs.json               持久 Scheduler jobs：at / every / cron
 │   └── action.jsonl            append-only action log，用于跨入口写入合并
+├── watchlist.md                主动检查清单：每行一个希望系统定期留意的事项
+├── watchlist_state.json        最近一次 Watchlist skip/run 决策
 ├── _checkpoint.json            未完成 turn 的 history 快照（中断恢复用）
 ├── attachments/                上传附件落盘：YYYY-MM/{hash8}-{name}.{ext} + sidecar .txt
 └── YYYY-MM-DD.md               每日情景记忆
@@ -413,7 +419,9 @@ Scheduler 相关 HTTP API 已接入 Web 后端：`GET /api/scheduler`、`POST /a
 
 当前可执行 payload：`agent_turn` 会作为“司时台触发”的主动 turn 写入 history 与 runtime；`team_wake` 会向目标 teammate 写入 task 消息并唤醒；`system_event` 仅允许系统代码注册，普通 API / tool 创建会被拒绝。
 
-WebUI 启动时会自动登记 4 个受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`。它们在 Scheduler 页可见、可暂停/恢复/手动运行，但不能删除；Memory 页会显示这些维护任务的数量、启用数、下次维护时间与最近错误。
+WebUI 启动时会自动登记 5 个受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`、`watchlist-check`。它们在 Scheduler 页可见、可暂停/恢复/手动运行，但不能删除；Memory 页会显示维护任务状态，并提供 `memory/watchlist.md` 编辑与手动检查入口。
+
+Watchlist 不是后台常驻聊天，而是“先过滤再投递”：`watchlist-check` 会读取 `memory/watchlist.md` 的有效条目，用次模型判断是否需要运行；`skip` 只记录状态，`run` 才把可投递消息包装成一次本地主动 `agent_turn`。这样可以保留长期自主性，同时避免清单项每次心跳都污染 Chat。
 
 WebUI 相关接口：
 

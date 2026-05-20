@@ -21,6 +21,7 @@ from ..loop import AgentLoop
 from ..mcp.config import load_mcp_config, save_mcp_config
 from ..runtime import RuntimeEventStore
 from ..runtime import events as runtime_events
+from ..watchlist import WatchlistService
 from .services import ChatService, MemoryService, ModelService, SchedulerJobExecutor, SchedulerWebService, TeamService
 
 _SKILL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,80}$")
@@ -45,6 +46,11 @@ class WebUIState:
         self.lock = asyncio.Lock()
         self.clients: set[web.WebSocketResponse] = set()
         self.runtime_events = RuntimeEventStore(self.root)
+        self.watchlist_service = WatchlistService(
+            self.root,
+            model_router=self.loop.model_router,
+            token_tracker=self.loop.token_tracker,
+        )
         self.broadcast_lock = asyncio.Lock()
         self.max_event_log = 5000
         self.event_log: list[dict[str, Any]] = self.runtime_events.recent(self.max_event_log)

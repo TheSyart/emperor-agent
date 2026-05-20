@@ -190,6 +190,7 @@ def test_start_registers_protected_system_jobs(tmp_path: Path) -> None:
             "runtime-maintenance",
             "team-stale-recovery",
             "token-ledger-maintenance",
+            "watchlist-check",
         }
         assert all(job.payload.kind == "system_event" for job in system_jobs)
         assert service.remove_job("memory-maintenance") == "protected"

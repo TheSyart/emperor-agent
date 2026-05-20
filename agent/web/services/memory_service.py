@@ -54,6 +54,21 @@ class MemoryService:
         path.write_text(content.rstrip() + "\n", encoding="utf-8")
         return self.state._json({"date": date, "content": path.read_text(encoding="utf-8")})
 
+    async def get_watchlist(self, request: web.Request) -> web.Response:
+        return self.state._json(self.state.watchlist_service.payload())
+
+    async def post_watchlist(self, request: web.Request) -> web.Response:
+        body = await self.state._body(request)
+        return self.state._json(self.state.watchlist_service.write(str(body.get("content") or "")))
+
+    async def post_watchlist_check(self, request: web.Request) -> web.Response:
+        self.state.watchlist_service.model_router = self.state.loop.model_router
+        decision = await self.state.watchlist_service.check()
+        return self.state._json({
+            "decision": decision.to_dict(),
+            "watchlist": self.state.watchlist_service.payload(),
+        })
+
     async def get_tokens(self, request: web.Request) -> web.Response:
         return self.state._json(self.tokens())
 
@@ -78,6 +93,7 @@ class MemoryService:
             "history": self.state.loop.memory.history_stats(),
             "runtime": self.state.runtime_events.stats(active_turn_ids=turn_ids),
             "schedulerMaintenance": self._scheduler_maintenance(),
+            "watchlist": self.state.watchlist_service.payload(),
         }
 
     def tokens(self) -> dict[str, Any]:

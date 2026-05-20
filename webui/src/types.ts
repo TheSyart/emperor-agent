@@ -69,6 +69,7 @@ export interface MemoryPayload {
   tokenTotals?: TokenTotals
   runtime?: RuntimeStats
   schedulerMaintenance?: SchedulerMaintenanceStats
+  watchlist?: WatchlistPayload
 }
 
 export interface SchedulerMaintenanceStats {
@@ -76,6 +77,21 @@ export interface SchedulerMaintenanceStats {
   enabled?: number
   nextRunAtMs?: number | null
   lastError?: string | null
+}
+
+export interface WatchlistDecision {
+  action?: 'skip' | 'run' | string
+  reason?: string
+  message?: string
+  checkedAt?: number
+  model?: string | null
+  provider?: string | null
+  modelRole?: string | null
+}
+
+export interface WatchlistPayload {
+  content?: string
+  lastDecision?: WatchlistDecision | null
 }
 
 export interface RuntimeStats {

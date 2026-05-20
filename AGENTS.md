@@ -33,8 +33,9 @@
 9. `agent/permissions/*`（三模式权限与审批策略）
 10. `agent/runtime/*`（WebUI 行为事件冷记录与刷新重放）
 11. `agent/scheduler/*`（持久 jobs、timer service、scheduler tool）
-12. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
-13. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
+12. `agent/watchlist/*`（Watchlist heartbeat、次模型 skip/run 决策）
+13. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
+14. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
@@ -53,6 +54,7 @@
 - `agent/permissions/`：Claude Code 风格 `ask_before_edit` / `auto` / `plan` 权限判断
 - `agent/runtime/`：Chat 行为事件冷记录与 payload 构造，支持刷新/重启后恢复工具、队友、Ask/Plan 细节
 - `agent/scheduler/`：本地长期自动运行中枢，持久保存 `at` / `every` / `cron` jobs，WebUI 启动后恢复 timer，Agent 通过 `scheduler` 工具管理任务；执行侧由 `agent/web/services/scheduler_executor.py` 把 job payload 投递到本地主动 turn 或 Team wake
+- `agent/watchlist/`：Watchlist heartbeat，读取 `memory/watchlist.md`，用次模型先判断 `skip/run`，只有 `run` 才投递完整主动 turn
 - `agent/team/`：Agent Team 子系统（持久队友、inbox、thread、状态机、team tools）
 - `agent/attachments.py`：附件落盘、MIME 校验、PDF/文本抽取、图片 base64 编码
 - `agent/memory.py`：长期记忆、历史日志、checkpoint 恢复
@@ -257,7 +259,8 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - Plan 需要显式开启（WebUI Composer 模式选择器、`/mode plan` 或 `/plan on`）：只读探索、提问、提交计划；用户可评论修订，批准或取消后自动恢复进入 Plan 前的 `ask_before_edit` / `auto` 模式。Plan 模式必须产出 PlanCard，不能用普通文字最终答复绕过。
 - Scheduler 在 Plan 模式下只允许 `scheduler(action=list)`，创建/修改/删除/运行长期任务必须等待计划批准；`ask_before_edit` 下 scheduler 写操作会进入 AskCard 审批；`auto` 下仍保留 schema、timezone、protected job 等安全校验。
 - Scheduler job 执行时会设置 scheduler context，禁止递归创建新的 scheduler job；`agent_turn` 会写入 history/runtime，`team_wake` 会走 TeamManager inbox+wake，`system_event` 只能由系统代码注册。
-- WebUI 启动会登记受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`。它们可见、可手动运行、可暂停/恢复，但不能删除；Memory 页展示维护任务状态摘要。
+- WebUI 启动会登记受保护系统任务：`memory-maintenance`、`runtime-maintenance`、`team-stale-recovery`、`token-ledger-maintenance`、`watchlist-check`。它们可见、可手动运行、可暂停/恢复，但不能删除；Memory 页展示维护任务状态摘要，并提供 `memory/watchlist.md` 编辑与手动检查入口。
+- Watchlist heartbeat 先用次模型做 deliverability filter：空清单或不及时的事项只记录 `skip`；只有 `run` 决策才包装为本地主动 `agent_turn`，避免长期心跳污染 Chat。
 - v1 同一时间只允许一个 pending ask 或 plan；扩展时优先保持 `agent/control/` 的模型、store、manager、policy 分层。
 
 ### Slash Skill Picker

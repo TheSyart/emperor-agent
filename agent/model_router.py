@@ -54,8 +54,8 @@ class ModelRouter:
         key = str(use_case or "main_agent")
         if key == "main_agent":
             return self._main("main_agent")
-        if key == "memory_compaction":
-            return self._secondary("memory_compaction")
+        if key in {"memory_compaction", "watchlist_check"}:
+            return self._secondary(key)
         if key in {"subagent", "team"}:
             normalized_agent = str(agent_type or "").strip()
             if normalized_agent in WRITING_AGENT_TYPES:

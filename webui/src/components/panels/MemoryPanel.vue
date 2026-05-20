@@ -12,16 +12,23 @@ const emit = defineEmits<{
   refresh: []
   saveLongTerm: [content: string]
   saveEpisode: [date: string, content: string]
+  saveWatchlist: [content: string]
+  checkWatchlist: []
 }>()
 
-type MemoryTab = 'long_term' | 'episodes'
+type MemoryTab = 'long_term' | 'episodes' | 'watchlist'
 const tab = ref<MemoryTab>('long_term')
 
 const longTermDraft = ref('')
 const longTermPreview = ref(false)
+const watchlistDraft = ref('')
 
 watch(() => props.memory?.long_term, (val) => {
   longTermDraft.value = val || ''
+}, { immediate: true })
+
+watch(() => props.memory?.watchlist?.content, (val) => {
+  watchlistDraft.value = val || ''
 }, { immediate: true })
 
 const selectedEpisode = ref<{ date: string; content: string } | null>(null)
@@ -52,6 +59,10 @@ function saveEpisode() {
   emit('saveEpisode', selectedEpisode.value.date, episodeDraft.value)
 }
 
+function saveWatchlist() {
+  emit('saveWatchlist', watchlistDraft.value)
+}
+
 const sortedEpisodes = computed(() => {
   const eps = props.memory?.episodes || []
   return [...eps].sort((a, b) => b.localeCompare(a))
@@ -60,6 +71,7 @@ const sortedEpisodes = computed(() => {
 const historyStats = computed(() => props.memory?.history || null)
 const runtimeStats = computed(() => props.memory?.runtime || null)
 const schedulerMaintenance = computed(() => props.memory?.schedulerMaintenance || null)
+const watchlistDecision = computed(() => props.memory?.watchlist?.lastDecision || null)
 
 function formatBytes(value?: number) {
   const bytes = Math.max(0, Number(value || 0))
@@ -89,7 +101,14 @@ function formatNumber(value?: number) {
           :data-active="tab === 'episodes' ? 'true' : 'false'"
           @click="tab = 'episodes'"
         >
-          情景记忆
+        情景记忆
+        </button>
+        <button
+          class="memory-tab"
+          :data-active="tab === 'watchlist' ? 'true' : 'false'"
+          @click="tab = 'watchlist'"
+        >
+          Watchlist
         </button>
       </div>
     </div>
@@ -162,6 +181,33 @@ function formatNumber(value?: number) {
       <div class="editor-actions">
         <span class="status-pill">保存后刷新 Agent 上下文</span>
         <button class="tool-button ink asset-button primary-action" @click="saveLongTerm">
+          <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+          <span>保存</span>
+        </button>
+      </div>
+    </div>
+
+    <div v-else-if="tab === 'watchlist'" class="editor flex-1">
+      <div class="editor-title">
+        <span>memory/watchlist.md</span>
+        <button class="badge preview-toggle" @click="emit('checkWatchlist')">手动检查</button>
+      </div>
+      <div v-if="watchlistDecision" class="memory-stats-grid">
+        <div class="memory-stat-card" :class="{ warning: watchlistDecision.action === 'run' }">
+          <span>最近决策</span>
+          <strong>{{ watchlistDecision.action || 'skip' }}</strong>
+          <small>{{ watchlistDecision.reason || '暂无原因' }}</small>
+        </div>
+        <div class="memory-stat-card">
+          <span>决策模型</span>
+          <strong>{{ watchlistDecision.modelRole || 'unknown' }}</strong>
+          <small>{{ watchlistDecision.provider || '-' }} · {{ watchlistDecision.model || '-' }}</small>
+        </div>
+      </div>
+      <textarea v-model="watchlistDraft" />
+      <div class="editor-actions">
+        <span class="status-pill">Scheduler 会周期检查 Watchlist</span>
+        <button class="tool-button ink asset-button primary-action" @click="saveWatchlist">
           <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
           <span>保存</span>
         </button>

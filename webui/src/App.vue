@@ -46,6 +46,8 @@ const {
   saveMemory,
   loadEpisode,
   saveEpisode,
+  saveWatchlist,
+  checkWatchlist,
 } = bootstrap
 
 const runtime = useRuntime({ boot, refreshMemory, showToast })
@@ -463,6 +465,8 @@ provideAppContext({
   saveMemory,
   loadEpisode,
   saveEpisode,
+  saveWatchlist,
+  checkWatchlist,
   setControlMode,
   sendMessage,
   sendInteractionAnswer,
