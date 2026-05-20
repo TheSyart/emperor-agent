@@ -15,6 +15,28 @@ if TYPE_CHECKING:
     from ..state import WebUIState
 
 
+_EPISODE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def validate_episode_date(date: str) -> str:
+    safe = str(date or "").strip()
+    if not _EPISODE_DATE_RE.match(safe):
+        raise ValueError("episode date must be YYYY-MM-DD")
+    try:
+        datetime.strptime(safe, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("episode date must be YYYY-MM-DD") from exc
+    return safe
+
+
+def is_episode_file(path: Path) -> bool:
+    try:
+        validate_episode_date(path.stem)
+        return path.name == f"{path.stem}.md"
+    except ValueError:
+        return False
+
+
 class MemoryService:
     def __init__(self, state: WebUIState):
         self.state = state
@@ -33,9 +55,10 @@ class MemoryService:
         })
 
     async def get_memory_episode(self, request: web.Request) -> web.Response:
-        date = request.query.get("date", "")
-        if not date or ".." in date or "/" in date or "\\" in date:
-            raise web.HTTPBadRequest(reason="Invalid date")
+        try:
+            date = validate_episode_date(request.query.get("date", ""))
+        except ValueError as exc:
+            raise web.HTTPBadRequest(reason=str(exc)) from None
         path = self.state.root / "memory" / f"{date}.md"
         if not path.exists():
             raise web.HTTPNotFound(reason=f"Episode not found: {date}")
@@ -43,10 +66,11 @@ class MemoryService:
 
     async def post_memory_episode(self, request: web.Request) -> web.Response:
         body = await self.state._body(request)
-        date = str(body.get("date") or "")
+        try:
+            date = validate_episode_date(str(body.get("date") or ""))
+        except ValueError as exc:
+            raise web.HTTPBadRequest(reason=str(exc)) from None
         content = str(body.get("content") or "")
-        if not date or ".." in date or "/" in date or "\\" in date:
-            raise web.HTTPBadRequest(reason="Invalid date")
         path = self.state.root / "memory" / f"{date}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
@@ -101,7 +125,12 @@ class MemoryService:
 
     async def post_watchlist_check(self, request: web.Request) -> web.Response:
         self.state.watchlist_service.model_router = self.state.loop.model_router
-        decision = await self.state.watchlist_service.check()
+        decision = await self.state.active_tasks.run(
+            task_id="watchlist:manual-check",
+            kind="watchlist",
+            label="Watchlist manual check",
+            awaitable=self.state.watchlist_service.check(),
+        )
         return self.state._json({
             "decision": decision.to_dict(),
             "watchlist": self.state.watchlist_service.payload(),
@@ -117,7 +146,7 @@ class MemoryService:
             episodes = [
                 self.state._rel(path)
                 for path in sorted(memory_dir.glob("*.md"))
-                if path.name not in {"MEMORY.md", "MEMORY.local.md"}
+                if is_episode_file(path)
             ]
         turn_ids = self.state.loop.memory.load_unarchived_turn_ids()
         return {

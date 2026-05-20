@@ -52,6 +52,23 @@ def test_runtime_event_store_stats_include_active_turns(tmp_path: Path) -> None:
     assert stats["path"] == "memory/runtime/events.jsonl"
 
 
+def test_runtime_event_store_compacts_inactive_turns_to_archive(tmp_path: Path) -> None:
+    store = RuntimeEventStore(tmp_path)
+    store.append({"event": "user_message", "content": "a", "ts": 1_700_000_000.0}, turn_id="turn_a")
+    store.append({"event": "tool_call", "name": "read_file", "ts": 1_700_000_001.0}, turn_id="turn_a")
+    store.append({"event": "user_message", "content": "b", "ts": 1_700_000_002.0}, turn_id="turn_b")
+
+    stats = store.compact(["turn_b"])
+
+    hot = store.replay_after(0)
+    assert [event["turn_id"] for event in hot] == ["turn_b"]
+    assert stats["events"] == 1
+    assert stats["archiveFiles"] == 1
+    assert stats["archiveBytes"] > 0
+    assert store.latest_seq == 3
+    assert RuntimeEventStore(tmp_path).latest_seq == 3
+
+
 def test_scheduler_runtime_event_payloads() -> None:
     job = {"id": "job-1", "name": "demo"}
 

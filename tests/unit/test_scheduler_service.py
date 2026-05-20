@@ -99,6 +99,55 @@ def test_manual_run_records_success(tmp_path: Path) -> None:
     assert loaded.state.run_history[0].duration_ms == 25
 
 
+def test_job_state_is_persisted_as_running_before_callback(tmp_path: Path) -> None:
+    clock = FakeClock()
+    observed: list[str | None] = []
+
+    async def on_job(job):
+        loaded = service.store.get_job(job.id)
+        observed.append(loaded.state.last_status if loaded else None)
+        clock.advance(10)
+
+    service = make_service(tmp_path, clock=clock, on_job=on_job)
+    job = service.add_job(
+        name="persist-running",
+        schedule=SchedulerSchedule(kind="every", every_ms=60_000),
+        payload=SchedulerPayload(message="hello"),
+    )
+
+    assert asyncio.run(service.run_job(job.id, force=True))
+    loaded = service.get_job(job.id)
+
+    assert observed == [SchedulerStatus.RUNNING.value]
+    assert loaded is not None
+    assert loaded.state.last_status == SchedulerStatus.OK.value
+
+
+def test_start_marks_stale_running_job_as_error(tmp_path: Path) -> None:
+    clock = FakeClock()
+    service = make_service(tmp_path, clock=clock)
+    job = service.add_job(
+        name="stale",
+        schedule=SchedulerSchedule(kind="every", every_ms=60_000),
+        payload=SchedulerPayload(message="hello"),
+    )
+    job.state.last_run_at_ms = clock.value - 250
+    job.state.last_status = SchedulerStatus.RUNNING.value
+    service.store.upsert_job(job)
+    clock.advance(500)
+
+    asyncio.run(service.start())
+    try:
+        loaded = service.get_job(job.id)
+
+        assert loaded is not None
+        assert loaded.state.last_status == SchedulerStatus.ERROR.value
+        assert loaded.state.last_error == "interrupted by scheduler restart"
+        assert loaded.state.run_history[-1].status == SchedulerStatus.ERROR.value
+    finally:
+        service.stop()
+
+
 def test_manual_run_records_errors(tmp_path: Path) -> None:
     async def fail(_job):
         raise RuntimeError("boom")

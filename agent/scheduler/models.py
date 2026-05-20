@@ -14,6 +14,7 @@ _MAX_RUN_HISTORY = 20
 
 
 class SchedulerStatus(StrEnum):
+    RUNNING = "running"
     OK = "ok"
     ERROR = "error"
     SKIPPED = "skipped"

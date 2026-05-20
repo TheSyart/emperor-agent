@@ -151,6 +151,7 @@ class ChatService:
                     logger.info("Chat turn {} cancelled", turn_id)
                 finally:
                     self.state.active_turn = False
+                    self.state.compact_runtime_events()
         except TurnPaused:
             self.state.active_turn = False
         except SkillRequestError as exc:
@@ -318,6 +319,7 @@ class ChatService:
                 logger.info("Control resume turn {} cancelled", turn_id)
             finally:
                 self.state.active_turn = False
+                self.state.compact_runtime_events()
 
     def _build_user_content(self, text: str, attachment_ids: list[str]) -> Any:
         if not attachment_ids:

@@ -97,6 +97,7 @@ class SchedulerService:
             return
         data = self.store.load(allow_last_good=False)
         self._register_system_jobs(data)
+        self._mark_stale_running(data)
         self._running = True
         self._recompute_next_runs(data)
         self.store.save(data)
@@ -293,7 +294,6 @@ class SchedulerService:
             ]
             for job in due:
                 await self._execute_job(job, data)
-            self.store.save(data)
         finally:
             self._timer_active = False
         self._arm_timer()
@@ -308,6 +308,12 @@ class SchedulerService:
         start = self.time_func()
         error: str | None = None
         status = SchedulerStatus.OK.value
+        job.state.last_run_at_ms = start
+        job.state.last_status = SchedulerStatus.RUNNING.value
+        job.state.last_error = None
+        job.state.next_run_at_ms = None
+        job.updated_at_ms = start
+        self.store.save(data)
         await self._emit(runtime_events.scheduler_run_start(job.to_dict()))
         try:
             if self.on_job:
@@ -350,3 +356,19 @@ class SchedulerService:
             )
         else:
             await self._emit(runtime_events.scheduler_run_done(job.to_dict()))
+        self.store.save(data)
+
+    def _mark_stale_running(self, data: SchedulerStoreData) -> None:
+        current = self.time_func()
+        for job in data.jobs:
+            if job.state.last_status != SchedulerStatus.RUNNING.value:
+                continue
+            started = job.state.last_run_at_ms or current
+            error = "interrupted by scheduler restart"
+            job.state.record_run(
+                run_at_ms=started,
+                status=SchedulerStatus.ERROR.value,
+                duration_ms=max(0, current - started),
+                error=error,
+            )
+            job.updated_at_ms = current

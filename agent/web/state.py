@@ -138,6 +138,12 @@ class WebUIState:
     async def _broadcast_scheduler_event(self, event: dict[str, Any]) -> None:
         await self._broadcast_event(event)
 
+    def compact_runtime_events(self) -> dict[str, Any]:
+        stats = self.runtime_events.compact(self.loop.memory.load_unarchived_turn_ids())
+        self.event_log = self.runtime_events.recent(self.max_event_log)
+        self.event_seq = self.runtime_events.latest_seq
+        return stats
+
     def ready_event(self, *, last_seq: int = 0, replay_count: int = 0) -> dict[str, Any]:
         return runtime_events.ready_event(
             model=self.loop.model,
@@ -153,7 +159,7 @@ class WebUIState:
         body = await self._body(request) if request.can_read_body else {}
         task_id = str(body.get("task_id") or "") or None
         kind = str(body.get("kind") or "") or None
-        if kind not in {None, "", "turn", "scheduler", "team"}:
+        if kind not in {None, "", "turn", "scheduler", "team", "watchlist"}:
             raise web.HTTPBadRequest(reason="Invalid task kind")
         cancelled = await self.active_tasks.cancel(
             task_id=task_id,
@@ -295,6 +301,7 @@ class WebUIState:
                 })
 
             await self.loop.compactor.compact_startup_async(unarchived)
+            self.compact_runtime_events()
             self.loop.history = []
             self.history = self.loop.history
             self.loop.refresh_runtime_context()
