@@ -6,7 +6,7 @@ from pathlib import Path
 from aiohttp import web
 from loguru import logger
 
-from .routes import assets, chat, control, memory, model, scheduler, skills, team
+from .routes import assets, chat, control, external, memory, model, scheduler, skills, team
 from .state import WebUIState
 
 
@@ -44,6 +44,7 @@ def create_app(root: Path) -> web.Application:
         control.register,
         team.register,
         scheduler.register,
+        external.register,
         model.register,
         chat.register,
     ):
@@ -55,9 +56,11 @@ def create_app(root: Path) -> web.Application:
 
 async def _startup(app: web.Application) -> None:
     state: WebUIState = app["state"]
+    await state.external_bridge.start()
     await state.loop.scheduler_service.start()
 
 
 async def _cleanup(app: web.Application) -> None:
     state: WebUIState = app["state"]
     state.loop.scheduler_service.stop()
+    await state.external_bridge.stop()

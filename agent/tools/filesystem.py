@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import difflib
-import os
+import stat
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +30,11 @@ class _FsTool(Tool):
             ws = self._workspace.resolve()
             try:
                 p.relative_to(ws)
-            except ValueError:
+            except ValueError as exc:
                 raise ValueError(
                     f"Path outside workspace: {path} -> {p} "
                     f"(workspace: {ws})"
-                )
+                ) from exc
         return p
 
 
@@ -48,9 +49,10 @@ class _FsTool(Tool):
 })
 class ReadFileTool(_FsTool):
     name = "read_file"
-    description = "读取文本文件内容，支持 offset/limit 分页。输出格式：行号|内容。"
+    description = "安全读取文本/PDF/附件 sidecar 内容，支持 offset/limit 分页。输出格式：行号|内容。"
     _DEFAULT_LIMIT = 2000
     _MAX_CHARS = 128_000
+    _MAX_FILE_BYTES = 5 * 1024 * 1024
 
     @property
     def read_only(self) -> bool:
@@ -63,10 +65,23 @@ class ReadFileTool(_FsTool):
                 return f"Error: File not found: {path}"
             if not fp.is_file():
                 return f"Error: Not a file: {path}"
-
             try:
-                text = fp.read_text(encoding="utf-8").replace("\r\n", "\n")
-            except UnicodeDecodeError:
+                mode = fp.stat().st_mode
+            except OSError as exc:
+                return f"Error: Cannot stat file: {exc}"
+            if not stat.S_ISREG(mode):
+                return f"Error: Not a regular file: {path}"
+
+            read_path = _sidecar_path(fp) or fp
+            size = read_path.stat().st_size
+            if size > self._MAX_FILE_BYTES:
+                return (
+                    f"Error: File too large: {read_path} has {size} bytes "
+                    f"(limit {self._MAX_FILE_BYTES})"
+                )
+
+            text = _read_text_like(read_path)
+            if text is None:
                 return f"Error: Cannot read binary file: {path}"
 
             lines = text.splitlines()
@@ -101,6 +116,43 @@ class ReadFileTool(_FsTool):
         except Exception as e:
             logger.warning(f"[read_file] {e}")
             return f"Error reading file: {e}"
+
+
+def _sidecar_path(path: Path) -> Path | None:
+    if path.name.endswith(".txt"):
+        return None
+    sidecar = path.with_name(path.name + ".txt")
+    return sidecar if sidecar.is_file() else None
+
+
+def _read_text_like(path: Path) -> str | None:
+    if path.suffix.lower() == ".pdf":
+        return _extract_pdf_text(path.read_bytes())
+    try:
+        return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError:
+        return None
+
+
+def _extract_pdf_text(raw: bytes) -> str | None:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError:
+        logger.warning("pypdf not installed; PDF text extraction skipped")
+        return None
+    try:
+        reader = PdfReader(BytesIO(raw))
+        parts = []
+        for page in reader.pages:
+            try:
+                parts.append(page.extract_text() or "")
+            except Exception as exc:
+                logger.debug(f"pdf page extract failed: {exc}")
+        text = "\n\n".join(part for part in parts if part).strip()
+        return text or None
+    except Exception as exc:
+        logger.warning(f"pdf parse failed: {exc}")
+        return None
 
 
 @tool_parameters({
@@ -168,7 +220,7 @@ def _find_trimmed(content: str, old: str, normalize: bool = False) -> list[tuple
     offsets.append(pos)
 
     prep = (lambda s: _normalize_quotes(s.strip())) if normalize else str.strip
-    stripped_old = [prep(l) for l in old_lines]
+    stripped_old = [prep(line) for line in old_lines]
     w = len(old_lines)
     matches = []
     for i in range(len(content_lines) - w + 1):

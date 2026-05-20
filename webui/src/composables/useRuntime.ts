@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
-import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
+import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SchedulerMessageMeta, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
 import {
   clearRuntimeSnapshotRaw,
   IN_FLIGHT_MAX_AGE_MS,
@@ -23,6 +23,41 @@ function compactJson(value: unknown, limit = 180) {
   return text.length > limit ? `${text.slice(0, limit)}...` : text
 }
 
+const SCHEDULER_CLIENT_ID_PREFIX = 'scheduler:'
+const SCHEDULER_TRIGGER_PREFIXES = ['定时任务触发 ·', '司时台触发 ·']
+const SCHEDULER_DONE_PENDING_MS = 2500
+
+function schedulerTriggerPrefix(content: string) {
+  const text = content.trimStart()
+  return SCHEDULER_TRIGGER_PREFIXES.find((prefix) => text.startsWith(prefix)) || ''
+}
+
+function schedulerMessageMeta(
+  content: string,
+  clientId = '',
+  source?: string,
+  scheduler?: SchedulerMessageMeta,
+): { source?: string; scheduler?: SchedulerMessageMeta } {
+  const displayPrefix = schedulerTriggerPrefix(content)
+  const isScheduler = source === 'scheduler' ||
+    clientId.startsWith(SCHEDULER_CLIENT_ID_PREFIX) ||
+    Boolean(displayPrefix)
+  if (!isScheduler) return source ? { source } : {}
+
+  const meta: SchedulerMessageMeta = { ...(scheduler || {}) }
+  if (!meta.jobName) {
+    const firstLine = content.trimStart().split(/\r?\n/, 1)[0] || ''
+    const parsedName = displayPrefix && firstLine.startsWith(displayPrefix)
+      ? firstLine.slice(displayPrefix.length).trim()
+      : ''
+    if (parsedName) meta.jobName = parsedName
+  }
+  return {
+    source: 'scheduler',
+    scheduler: Object.keys(meta).length ? meta : undefined,
+  }
+}
+
 export function useRuntime(options: {
   boot: Ref<BootstrapPayload | null>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
@@ -37,6 +72,8 @@ export function useRuntime(options: {
   const socket = ref<WebSocket | null>(null)
   const lastSeq = ref(0)
   let reconnectTimer: number | undefined
+  let pendingClearTimer: number | undefined
+  let pendingVersion = 0
   let rehydrating = false
 
   const currentAssistant = computed(() => messages.value.find((message) => message.id === currentAssistantId.value && message.role === 'assistant') as AssistantMessage | undefined)
@@ -54,10 +91,21 @@ export function useRuntime(options: {
     return '连接中'
   }
 
-  function updatePending(label = '', detail = '', tone: PendingState['tone'] = 'running') {
+  function updatePending(label = '', detail = '', tone: PendingState['tone'] = 'running', autoClearMs = 0) {
+    pendingVersion += 1
+    const version = pendingVersion
+    if (pendingClearTimer) {
+      window.clearTimeout(pendingClearTimer)
+      pendingClearTimer = undefined
+    }
     pending.label = label
     pending.detail = detail
     pending.tone = label ? tone : undefined
+    if (label && autoClearMs > 0) {
+      pendingClearTimer = window.setTimeout(() => {
+        if (pendingVersion === version) updatePending()
+      }, autoClearMs)
+    }
   }
 
   function connectSocket() {
@@ -286,12 +334,15 @@ export function useRuntime(options: {
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map((item) => {
         if (item.role === 'user') {
+          const meta = schedulerMessageMeta(item.content, '', item.source, item.scheduler)
           const msg: ChatMessage = {
             id: nextId('user'),
             role: 'user',
             content: item.content,
           }
           if (item.attachments?.length) msg.attachments = item.attachments
+          if (meta.source) msg.source = meta.source
+          if (meta.scheduler) msg.scheduler = meta.scheduler
           return msg
         }
         return {
@@ -494,12 +545,18 @@ export function useRuntime(options: {
       return
     }
 
+    if (data.event.startsWith('external_')) {
+      return
+    }
+
     handleSubagentEvent(data)
   }
 
   function handleUserMessageEvent(data: Extract<WsEvent, { event: 'user_message' }>) {
     const turnId = data.turn_id || ''
     const clientId = data.client_message_id || ''
+    const content = data.content || ''
+    const meta = schedulerMessageMeta(content, clientId, data.source, data.scheduler)
     const existing = messages.value.find((message) =>
       message.role === 'user' && (
         (clientId && message.id === clientId) ||
@@ -508,17 +565,21 @@ export function useRuntime(options: {
     )
     if (existing && existing.role === 'user') {
       existing.turn_id = turnId || existing.turn_id
-      existing.content = data.content || existing.content
+      existing.content = content || existing.content
       existing.attachments = data.attachments || existing.attachments
+      if (meta.source) existing.source = meta.source
+      if (meta.scheduler) existing.scheduler = meta.scheduler
       return
     }
     const msg: ChatMessage = {
       id: clientId || nextId('user'),
       role: 'user',
-      content: data.content || '',
+      content,
       turn_id: turnId || undefined,
     }
     if (data.attachments?.length) msg.attachments = data.attachments
+    if (meta.source) msg.source = meta.source
+    if (meta.scheduler) msg.scheduler = meta.scheduler
     messages.value.push(msg)
   }
 
@@ -818,7 +879,7 @@ export function useRuntime(options: {
       return
     }
     if (data.event === 'scheduler_run_done') {
-      updatePending('Scheduler 任务已完成', data.job?.name || data.job?.id || '', 'done')
+      updatePending('Scheduler 任务已完成', data.job?.name || data.job?.id || '', 'done', SCHEDULER_DONE_PENDING_MS)
       return
     }
     if (data.event === 'scheduler_run_error') {
@@ -826,11 +887,11 @@ export function useRuntime(options: {
       return
     }
     if (data.event === 'scheduler_run_cancelled') {
-      updatePending('Scheduler 任务已停止', data.job?.name || data.job?.id || data.reason || '', 'done')
+      updatePending('Scheduler 任务已停止', data.job?.name || data.job?.id || data.reason || '', 'done', SCHEDULER_DONE_PENDING_MS)
       return
     }
     if (data.event === 'scheduler_job_update') {
-      updatePending('Scheduler 任务已更新', data.action || '', 'done')
+      updatePending('Scheduler 任务已更新', data.action || '', 'done', SCHEDULER_DONE_PENDING_MS)
     }
   }
 

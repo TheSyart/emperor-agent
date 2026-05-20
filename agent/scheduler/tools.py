@@ -3,13 +3,11 @@ from __future__ import annotations
 import asyncio
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any
 
 from ..providers.base import run_sync
 from ..tools.base import Tool
 from .models import SchedulerPayload, SchedulerSchedule
 from .service import SchedulerService
-
 
 _IN_SCHEDULER_RUN: ContextVar[bool] = ContextVar("in_scheduler_run", default=False)
 
@@ -43,7 +41,8 @@ class SchedulerTool(Tool):
         return (
             "Create, inspect, update, pause, resume, remove, or manually run local scheduled jobs. "
             "Use list for read-only inspection. Use add/update/remove/run only when the user has clearly asked "
-            "for a durable future task."
+            "for a durable future task. If this tool fails, report the Scheduler error instead of falling back "
+            "to OS-level cron or crontab."
         )
 
     @property

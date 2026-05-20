@@ -16,14 +16,23 @@ from ..attachments import (
     AttachmentStore,
     ref_to_json,
 )
+from ..external import ExternalBridgeService
 from ..logger import configure as configure_logging
 from ..loop import AgentLoop
 from ..mcp.config import load_mcp_config, save_mcp_config
-from ..runtime.active import ActiveTaskInfo, ActiveTaskRegistry
 from ..runtime import RuntimeEventStore
 from ..runtime import events as runtime_events
+from ..runtime.active import ActiveTaskInfo, ActiveTaskRegistry
 from ..watchlist import WatchlistService
-from .services import ChatService, MemoryService, ModelService, SchedulerJobExecutor, SchedulerWebService, TeamService
+from .services import (
+    ChatService,
+    MainlineTurnService,
+    MemoryService,
+    ModelService,
+    SchedulerJobExecutor,
+    SchedulerWebService,
+    TeamService,
+)
 
 _SKILL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,80}$")
 
@@ -36,6 +45,12 @@ class WebUIState:
         self._ensure_tool_config()
         self.loop = AgentLoop(root=self.root, verbose=False, startup_compaction=False)
         self.loop.init_mcp()
+        self.mainline_turn_service = MainlineTurnService(self)
+        self.external_bridge = ExternalBridgeService(
+            submit_turn=self.mainline_turn_service.submit,
+            can_accept_turn=self._external_can_accept_turn,
+            event_sink=self._broadcast_event,
+        )
         self.chat_service = ChatService(self)
         self.memory_service = MemoryService(self)
         self.model_service = ModelService(self)
@@ -138,6 +153,9 @@ class WebUIState:
     async def _broadcast_scheduler_event(self, event: dict[str, Any]) -> None:
         await self._broadcast_event(event)
 
+    def _external_can_accept_turn(self) -> bool:
+        return not self.active_turn and not bool(self.control().get("pending"))
+
     def compact_runtime_events(self) -> dict[str, Any]:
         stats = self.runtime_events.compact(self.loop.memory.load_unarchived_turn_ids())
         self.event_log = self.runtime_events.recent(self.max_event_log)
@@ -182,6 +200,9 @@ class WebUIState:
 
     async def get_tools(self, request: web.Request) -> web.Response:
         return self._json(self.tools())
+
+    async def get_external(self, request: web.Request) -> web.Response:
+        return self._json(self.external_bridge.payload())
 
     async def get_skills(self, request: web.Request) -> web.Response:
         return self._json(self.skills())

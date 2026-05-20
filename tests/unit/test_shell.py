@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.tools.shell import RunCommand, _DENY_PATTERNS
+from agent.tools.shell import _DENY_PATTERNS, RunCommand
 
 
 class TestDenyPatterns:
@@ -51,7 +51,6 @@ class TestDenyPatterns:
     )
     def test_safe_commands_allowed(self, command: str) -> None:
         """Safe commands should execute without being blocked by deny patterns."""
-        tool = RunCommand()
         # Verify no deny pattern matches
         for pattern in _DENY_PATTERNS:
             assert not pattern.search(command), f"Pattern {pattern.pattern!r} wrongly matched {command!r}"
@@ -82,4 +81,11 @@ class TestShellExecution:
         """stderr should be returned when stdout is empty."""
         tool = RunCommand()
         result = tool.execute(command="ls /nonexistent_path_12345")
+        assert result.startswith("Error: command exited with code")
         assert "No such file" in result or "not found" in result.lower()
+
+    def test_long_output_is_capped(self) -> None:
+        tool = RunCommand()
+        result = tool.execute(command="yes x | head -n 30000")
+        assert "truncated" in result
+        assert len(result) < 21_000

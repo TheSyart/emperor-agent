@@ -42,6 +42,10 @@
     @apply justify-end;
   }
 
+  .message-row.scheduler-trigger {
+    @apply justify-center;
+  }
+
   .message-row.user .avatar {
     @apply order-2;
   }
@@ -121,6 +125,35 @@
 
   .message-meta.assistant span {
     @apply border-seal/20 bg-seal/10 text-seal;
+  }
+
+  .scheduler-trigger-card {
+    @apply w-full max-w-[720px] rounded-lg border border-line/70 bg-paper/75 px-5 py-4 text-ink shadow-insetPaper;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      0 0.8rem 1.8rem rgb(var(--ink) / 0.06);
+  }
+
+  .scheduler-trigger-head {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .scheduler-trigger-icon {
+    @apply grid size-9 shrink-0 place-items-center rounded-lg border border-jade/25 bg-jade/10 font-display text-sm font-black text-jade;
+  }
+
+  .scheduler-trigger-title {
+    @apply truncate text-sm font-semibold text-ink;
+  }
+
+  .scheduler-trigger-name {
+    @apply truncate font-mono text-xs text-muted;
+  }
+
+  .scheduler-trigger-body {
+    @apply mt-3 border-t border-line/55 pt-3 text-sm leading-7 text-ink;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
   }
 
   .bubble {

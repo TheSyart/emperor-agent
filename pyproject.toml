@@ -21,6 +21,7 @@ dependencies = [
     "loguru>=0.7.0,<1.0.0",
     "mcp>=1.0.0",
     "openai>=1.50,<2.0",
+    "pypdf>=4.0,<6.0",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
 ]

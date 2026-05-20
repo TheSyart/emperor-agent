@@ -29,8 +29,9 @@ def compute_next_run_ms(schedule: SchedulerSchedule, current_ms: int) -> int | N
     if schedule.kind == "cron":
         if not schedule.expr:
             return None
-        from croniter import croniter
         from zoneinfo import ZoneInfo
+
+        from croniter import croniter
 
         tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
         base = datetime.fromtimestamp(current_ms / 1000, tz=tz)
@@ -55,8 +56,9 @@ def validate_schedule(schedule: SchedulerSchedule) -> None:
     if schedule.kind == "cron":
         if not schedule.expr:
             raise ValueError("cron schedule requires expr")
-        from croniter import croniter
         from zoneinfo import ZoneInfo
+
+        from croniter import croniter
 
         if schedule.tz:
             try:
@@ -87,6 +89,7 @@ class SchedulerService:
         self._running = False
         self._timer_task: asyncio.Task | None = None
         self._timer_active = False
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def _emit(self, event: dict[str, Any]) -> None:
         if self.event_sink:
@@ -95,6 +98,7 @@ class SchedulerService:
     async def start(self) -> None:
         if self._running:
             return
+        self._loop = asyncio.get_running_loop()
         data = self.store.load(allow_last_good=False)
         self._register_system_jobs(data)
         self._mark_stale_running(data)
@@ -106,9 +110,19 @@ class SchedulerService:
 
     def stop(self) -> None:
         self._running = False
-        if self._timer_task:
-            self._timer_task.cancel()
-            self._timer_task = None
+        task = self._timer_task
+        self._timer_task = None
+        if task and not task.done():
+            loop = self._loop
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+            if loop and not loop.is_closed() and running_loop is not loop:
+                loop.call_soon_threadsafe(task.cancel)
+            else:
+                task.cancel()
+        self._loop = None
 
     def list_jobs(self, *, include_disabled: bool = True) -> list[SchedulerJob]:
         return self.store.list_jobs(include_disabled=include_disabled)
@@ -258,6 +272,22 @@ class SchedulerService:
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
+        if not self._running:
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        target_loop = running_loop or self._loop
+        if target_loop is None or target_loop.is_closed():
+            logger.warning("Scheduler timer could not be armed: no active event loop")
+            return
+        if running_loop is target_loop:
+            self._arm_timer_on_loop()
+            return
+        target_loop.call_soon_threadsafe(self._arm_timer_on_loop)
+
+    def _arm_timer_on_loop(self) -> None:
         if not self._running:
             return
         if self._timer_task:

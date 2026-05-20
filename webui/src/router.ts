@@ -42,7 +42,7 @@ const routes: RouteRecordRaw[] = [
     path: '/scheduler',
     name: 'scheduler',
     component: () => import('./views/SchedulerView.vue'),
-    meta: { label: 'Scheduler', hint: '司时台' },
+    meta: { label: '定时任务', hint: '定时任务' },
   },
   {
     path: '/configs',

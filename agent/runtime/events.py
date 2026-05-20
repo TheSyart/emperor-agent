@@ -36,12 +36,16 @@ def user_message(
     content: str,
     attachments: list[dict[str, Any]],
     client_message_id: str = "",
+    source: str | None = None,
+    scheduler: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return runtime_event(
         "user_message",
         content=content,
         attachments=attachments,
         client_message_id=client_message_id,
+        source=source,
+        scheduler=scheduler,
     )
 
 
@@ -67,6 +71,26 @@ def model_route_fallback(
         reason=reason,
         usage_type=usage_type,
     )
+
+
+def external_inbound(message: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("external_inbound", message=message)
+
+
+def external_queued(message: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    return runtime_event("external_queued", message=message, reason=reason)
+
+
+def external_outbound_queued(message: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("external_outbound_queued", message=message)
+
+
+def external_outbound_sent(message: dict[str, Any], *, delivery: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("external_outbound_sent", message=message, delivery=delivery)
+
+
+def external_outbound_error(message: dict[str, Any], *, error: str) -> dict[str, Any]:
+    return runtime_event("external_outbound_error", message=message, error=error)
 
 
 def scheduler_job_update(job: dict[str, Any], *, action: str) -> dict[str, Any]:

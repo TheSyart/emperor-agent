@@ -8,6 +8,8 @@ import AttachmentChip from './AttachmentChip.vue'
 
 const props = defineProps<{ messages: ChatMessage[] }>()
 const scroller = ref<HTMLElement | null>(null)
+const schedulerClientIdPrefix = 'scheduler:'
+const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
 
 function pinToBottom() {
   const el = scroller.value
@@ -32,6 +34,38 @@ function skillSlashParts(message: UserMessage): { token: string; rest: string } 
   if (isSystemCommand) return null
   return { token, rest: text.slice(token.length).trimStart() }
 }
+
+function isSchedulerMessage(message: ChatMessage): boolean {
+  if (message.role !== 'user') return false
+  const displayPrefix = schedulerTriggerPrefix(message.content)
+  return message.source === 'scheduler' ||
+    message.id.startsWith(schedulerClientIdPrefix) ||
+    Boolean(displayPrefix)
+}
+
+function schedulerDisplayParts(message: ChatMessage): { jobName: string; body: string } {
+  if (message.role !== 'user') return { jobName: '定时任务', body: '' }
+  const text = message.content.trimStart()
+  const displayPrefix = schedulerTriggerPrefix(text)
+  let jobName = message.scheduler?.jobName || ''
+  let body = message.content
+  if (displayPrefix) {
+    const firstBreak = text.search(/\r?\n/)
+    const header = firstBreak >= 0 ? text.slice(0, firstBreak) : text
+    const parsedName = header.slice(displayPrefix.length).trim()
+    if (!jobName && parsedName) jobName = parsedName
+    const separator = text.match(/\r?\n\r?\n/)
+    body = separator?.index !== undefined
+      ? text.slice(separator.index + separator[0].length).trim()
+      : text.slice(header.length).trim()
+  }
+  return { jobName: jobName || '定时任务', body }
+}
+
+function schedulerTriggerPrefix(content: string) {
+  const text = content.trimStart()
+  return schedulerTriggerPrefixes.find((prefix) => text.startsWith(prefix)) || ''
+}
 </script>
 
 <template>
@@ -52,7 +86,21 @@ function skillSlashParts(message: UserMessage): { token: string; rest: string } 
 
     <div class="message-stack">
       <template v-for="message in props.messages" :key="message.id">
-        <article v-if="message.role === 'user'" class="message-row user">
+        <article v-if="isSchedulerMessage(message)" class="message-row scheduler-trigger">
+          <div class="scheduler-trigger-card">
+            <div class="scheduler-trigger-head">
+              <span class="scheduler-trigger-icon" aria-hidden="true">定</span>
+              <div class="min-w-0">
+                <div class="scheduler-trigger-title">定时任务触发</div>
+                <div class="scheduler-trigger-name">{{ schedulerDisplayParts(message).jobName }}</div>
+              </div>
+            </div>
+            <div v-if="schedulerDisplayParts(message).body" class="scheduler-trigger-body whitespace-pre-wrap">
+              {{ schedulerDisplayParts(message).body }}
+            </div>
+          </div>
+        </article>
+        <article v-else-if="message.role === 'user'" class="message-row user">
           <div class="avatar user" aria-hidden="true">
             <img class="pixel-avatar" :src="avatarAssets.emperor" alt="" />
           </div>

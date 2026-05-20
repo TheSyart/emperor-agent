@@ -85,7 +85,7 @@ async function createJob() {
     createName.value = ''
     createMessage.value = ''
     createTarget.value = ''
-    ctx.showToast(`Scheduler job 已创建：${result.job.name}`)
+    ctx.showToast(`定时任务已创建：${result.job.name}`)
   } finally {
     loading.value = false
   }
@@ -111,7 +111,7 @@ async function saveSelected() {
       },
     )
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
-    ctx.showToast('Scheduler job 已保存')
+    ctx.showToast('定时任务已保存')
   } finally {
     loading.value = false
   }
@@ -134,7 +134,7 @@ async function resumeSelected() {
 
 async function deleteSelected() {
   if (!selected.value || selected.value.protected) return
-  if (!window.confirm(`删除 Scheduler job「${selected.value.name}」？`)) return
+  if (!window.confirm(`删除定时任务「${selected.value.name}」？`)) return
   loading.value = true
   try {
     const result = await api<{ deleted: string; scheduler: SchedulerPayload }>(
@@ -143,7 +143,7 @@ async function deleteSelected() {
     )
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     selectedId.value = jobs.value[0]?.id || ''
-    ctx.showToast('Scheduler job 已删除')
+    ctx.showToast('定时任务已删除')
   } finally {
     loading.value = false
   }
@@ -174,27 +174,27 @@ function buildCreateSchedule(): SchedulerSchedule {
 }
 
 function defaultJobName() {
-  return createKind.value === 'team_wake' ? 'Team wake' : 'Agent turn'
+  return createKind.value === 'team_wake' ? '唤醒队友' : '主 Agent 任务'
 }
 
 function scheduleLabel(job: SchedulerJob) {
   const schedule = job.schedule || { kind: 'every' }
-  if (schedule.kind === 'at') return `at ${formatMs(schedule.atMs)}`
-  if (schedule.kind === 'cron') return `cron ${schedule.expr || '-'} · ${schedule.tz || 'local'}`
-  return `every ${formatDuration(schedule.everyMs || 0)}`
+  if (schedule.kind === 'at') return `指定时间：${formatMs(schedule.atMs)}`
+  if (schedule.kind === 'cron') return `Cron：${schedule.expr || '-'} · ${schedule.tz || '本地时区'}`
+  return `每隔 ${formatDuration(schedule.everyMs || 0)}`
 }
 
 function payloadLabel(job: SchedulerJob) {
-  if (job.payload.kind === 'team_wake') return `team_wake · ${job.payload.target || '-'}`
-  if (job.payload.kind === 'system_event') return 'system_event'
-  return 'agent_turn'
+  if (job.payload.kind === 'team_wake') return `唤醒队友 · ${job.payload.target || '-'}`
+  if (job.payload.kind === 'system_event') return '系统事件'
+  return '主 Agent 任务'
 }
 
 function statusLabel(job: SchedulerJob) {
-  if (!job.enabled) return 'Paused'
-  if (job.state?.lastStatus === 'error') return 'Error'
-  if (job.protected) return 'Protected'
-  return 'Enabled'
+  if (!job.enabled) return '已暂停'
+  if (job.state?.lastStatus === 'error') return '异常'
+  if (job.protected) return '受保护'
+  return '已启用'
 }
 
 function statusClass(job: SchedulerJob) {
@@ -202,18 +202,19 @@ function statusClass(job: SchedulerJob) {
 }
 
 function runStatusLabel(status?: string) {
-  if (status === 'ok') return 'OK'
-  if (status === 'error') return 'Error'
-  if (status === 'skipped') return 'Skipped'
-  if (status === 'cancelled') return 'Cancelled'
+  if (status === 'ok') return '成功'
+  if (status === 'error') return '失败'
+  if (status === 'skipped') return '已跳过'
+  if (status === 'cancelled') return '已取消'
+  if (status === 'running') return '运行中'
   return status || '-'
 }
 
 function formatDuration(ms?: number) {
   const value = Math.max(0, Number(ms || 0))
-  if (value >= 60_000) return `${Math.round(value / 60_000)}m`
-  if (value >= 1000) return `${Math.round(value / 1000)}s`
-  return `${value}ms`
+  if (value >= 60_000) return `${Math.round(value / 60_000)} 分钟`
+  if (value >= 1000) return `${Math.round(value / 1000)} 秒`
+  return `${value} 毫秒`
 }
 
 function formatMs(ms?: number | null) {
@@ -228,20 +229,20 @@ function formatMs(ms?: number | null) {
       <section class="scheduler-roster">
         <div class="team-section-head">
           <div>
-            <h2>Jobs</h2>
-            <p>{{ jobs.length }} jobs · {{ enabledCount }} enabled</p>
+            <h2>任务</h2>
+            <p>{{ jobs.length }} 个任务 · {{ enabledCount }} 个已启用</p>
           </div>
           <button class="icon-button" title="刷新" :disabled="loading" @click="refreshScheduler">↻</button>
         </div>
 
         <div class="scheduler-summary">
           <div>
-            <span>Next Run</span>
+            <span>下次运行</span>
             <strong>{{ nextRunLabel }}</strong>
           </div>
           <div>
-            <span>Service</span>
-            <strong>{{ scheduler.status.running ? 'Running' : 'Stopped' }}</strong>
+            <span>服务状态</span>
+            <strong>{{ scheduler.status.running ? '运行中' : '已停止' }}</strong>
           </div>
         </div>
 
@@ -260,32 +261,32 @@ function formatMs(ms?: number | null) {
             </span>
             <em>{{ statusLabel(job) }}</em>
           </button>
-          <div v-if="!jobs.length" class="scheduler-empty">No scheduler jobs yet.</div>
+          <div v-if="!jobs.length" class="scheduler-empty">还没有定时任务。</div>
         </div>
 
         <form class="scheduler-create" @submit.prevent="createJob">
           <div class="team-form-row">
-            <input v-model="createName" placeholder="job name" autocomplete="off" />
+            <input v-model="createName" placeholder="任务名称" autocomplete="off" />
             <select v-model="createKind">
-              <option value="agent_turn">agent_turn</option>
-              <option value="team_wake">team_wake</option>
+              <option value="agent_turn">主 Agent 任务</option>
+              <option value="team_wake">唤醒队友</option>
             </select>
           </div>
-          <textarea v-model="createMessage" rows="3" placeholder="message / prompt" />
-          <input v-if="createKind === 'team_wake'" v-model="createTarget" placeholder="teammate name" autocomplete="off" />
+          <textarea v-model="createMessage" rows="3" placeholder="任务内容 / 提示词" />
+          <input v-if="createKind === 'team_wake'" v-model="createTarget" placeholder="队友名称" autocomplete="off" />
           <div class="team-form-row">
             <select v-model="scheduleKind">
-              <option value="every">every</option>
-              <option value="at">at</option>
-              <option value="cron">cron</option>
+              <option value="every">每隔</option>
+              <option value="at">指定时间</option>
+              <option value="cron">Cron 表达式</option>
             </select>
             <input v-if="scheduleKind === 'every'" v-model.number="everyMinutes" min="1" type="number" />
             <input v-else-if="scheduleKind === 'at'" v-model="atLocal" type="datetime-local" />
             <input v-else v-model="cronExpr" placeholder="0 9 * * *" />
           </div>
           <input v-if="scheduleKind === 'cron'" v-model="cronTz" placeholder="Asia/Shanghai" />
-          <label class="scheduler-check"><input v-model="createDeliver" type="checkbox" /> deliver result to runtime</label>
-          <label class="scheduler-check"><input v-model="createDeleteAfterRun" type="checkbox" /> delete one-time job after run</label>
+          <label class="scheduler-check"><input v-model="createDeliver" type="checkbox" /> 将运行结果显示到当前对话</label>
+          <label class="scheduler-check"><input v-model="createDeleteAfterRun" type="checkbox" /> 一次性任务运行后删除</label>
           <button class="tool-button wide ink" :disabled="loading || !createMessage.trim()">创建任务</button>
         </form>
       </section>
@@ -293,7 +294,7 @@ function formatMs(ms?: number | null) {
       <section class="scheduler-timeline">
         <div class="team-section-head">
           <div>
-            <h2>{{ selected?.name || 'Run History' }}</h2>
+            <h2>{{ selected?.name || '运行历史' }}</h2>
             <p>{{ selected ? `${selected.id} · ${payloadLabel(selected)}` : '最近运行记录' }}</p>
           </div>
           <span v-if="selected" class="team-status-pill" :class="{ working: selected.enabled, error: selected.state?.lastStatus === 'error' }">
@@ -309,7 +310,7 @@ function formatMs(ms?: number | null) {
             :class="run.status"
           >
             <div class="team-message-top">
-              <strong>{{ 'jobName' in run ? run.jobName : selected?.name || 'Scheduler' }}</strong>
+              <strong>{{ 'jobName' in run ? run.jobName : selected?.name || '定时任务' }}</strong>
               <span>{{ formatMs(run.runAtMs) }}</span>
             </div>
             <p>{{ runStatusLabel(run.status) }} · {{ formatDuration(run.durationMs) }}</p>
@@ -325,8 +326,8 @@ function formatMs(ms?: number | null) {
       <aside class="scheduler-detail">
         <div class="team-section-head">
           <div>
-            <h2>Details</h2>
-            <p>{{ selected ? scheduleLabel(selected) : 'Select a job' }}</p>
+            <h2>任务详情</h2>
+            <p>{{ selected ? scheduleLabel(selected) : '选择一个任务' }}</p>
           </div>
         </div>
 
@@ -335,26 +336,26 @@ function formatMs(ms?: number | null) {
             <img :src="navAssets.schedulerActive" alt="" width="64" height="64" />
             <div class="min-w-0">
               <strong>{{ selected.name }}</strong>
-              <span>{{ selected.protected ? 'protected job' : selected.id }}</span>
+              <span>{{ selected.protected ? '受保护任务' : selected.id }}</span>
             </div>
           </div>
 
           <div class="scheduler-meta-grid">
-            <span><b>Schedule</b>{{ scheduleLabel(selected) }}</span>
-            <span><b>Payload</b>{{ payloadLabel(selected) }}</span>
-            <span><b>Next</b>{{ formatMs(selected.state?.nextRunAtMs) }}</span>
-            <span><b>Last</b>{{ selected.state?.lastStatus || '-' }}</span>
+            <span><b>计划</b>{{ scheduleLabel(selected) }}</span>
+            <span><b>载荷</b>{{ payloadLabel(selected) }}</span>
+            <span><b>下次</b>{{ formatMs(selected.state?.nextRunAtMs) }}</span>
+            <span><b>上次</b>{{ runStatusLabel(selected.state?.lastStatus || undefined) }}</span>
           </div>
 
           <input v-model="editName" autocomplete="off" />
-          <textarea v-model="editMessage" rows="5" placeholder="message" />
-          <input v-if="selected.payload.kind === 'team_wake'" v-model="editTarget" autocomplete="off" placeholder="teammate name" />
-          <label class="scheduler-check"><input v-model="editDeliver" type="checkbox" /> deliver result to runtime</label>
+          <textarea v-model="editMessage" rows="5" placeholder="任务内容" />
+          <input v-if="selected.payload.kind === 'team_wake'" v-model="editTarget" autocomplete="off" placeholder="队友名称" />
+          <label class="scheduler-check"><input v-model="editDeliver" type="checkbox" /> 将运行结果显示到当前对话</label>
 
           <div class="team-tool-cloud">
-            <span><img :src="toolIcon('scheduler')" alt="" width="18" height="18" /> scheduler</span>
-            <span>{{ selected.deleteAfterRun ? 'delete after run' : 'persistent' }}</span>
-            <span>{{ selected.payload.kind }}</span>
+            <span><img :src="toolIcon('scheduler')" alt="" width="18" height="18" /> 定时任务</span>
+            <span>{{ selected.deleteAfterRun ? '运行后删除' : '持续保留' }}</span>
+            <span>{{ payloadLabel(selected) }}</span>
           </div>
 
           <div class="scheduler-action-grid">
@@ -369,7 +370,7 @@ function formatMs(ms?: number | null) {
         </div>
 
         <div v-else class="scheduler-detail-body muted">
-          <p>司时台尚未登记任务。</p>
+          <p>还没有登记定时任务。</p>
         </div>
       </aside>
     </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from agent.scheduler import (
@@ -132,3 +133,58 @@ def test_scheduler_tool_requires_team_target(tmp_path: Path) -> None:
 
     assert result.startswith("Error:")
     assert "target teammate" in result
+
+
+def test_scheduler_tool_started_service_accepts_threaded_mutations(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service = SchedulerService(SchedulerStore(tmp_path), max_sleep_ms=60_000)
+        tool = SchedulerTool(service)
+        await service.start()
+        try:
+            created = await asyncio.to_thread(
+                tool.execute,
+                action="add",
+                name="threaded",
+                payload_kind="agent_turn",
+                message="Run from worker thread",
+                every_seconds=60,
+            )
+            assert "Scheduler job created" in created
+            assert "no running event loop" not in created
+
+            job = next(job for job in service.list_jobs(include_disabled=True) if job.name == "threaded")
+
+            paused = await asyncio.to_thread(tool.execute, action="pause", job_id=job.id)
+            resumed = await asyncio.to_thread(tool.execute, action="resume", job_id=job.id)
+            removed = await asyncio.to_thread(tool.execute, action="remove", job_id=job.id)
+
+            assert "paused" in paused
+            assert "resumed" in resumed
+            assert "removed" in removed
+            assert service.get_job(job.id) is None
+        finally:
+            service.stop()
+
+    asyncio.run(scenario())
+
+
+def test_scheduler_tool_threaded_invalid_add_does_not_persist(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service = SchedulerService(SchedulerStore(tmp_path), max_sleep_ms=60_000)
+        tool = SchedulerTool(service)
+        await service.start()
+        try:
+            result = await asyncio.to_thread(
+                tool.execute,
+                action="add",
+                name="bad-threaded",
+                payload_kind="agent_turn",
+                message="Missing schedule",
+            )
+
+            assert result.startswith("Error:")
+            assert not any(job.name == "bad-threaded" for job in service.list_jobs(include_disabled=True))
+        finally:
+            service.stop()
+
+    asyncio.run(scenario())

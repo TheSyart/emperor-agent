@@ -71,7 +71,17 @@ def test_runtime_event_store_compacts_inactive_turns_to_archive(tmp_path: Path) 
 
 def test_scheduler_runtime_event_payloads() -> None:
     job = {"id": "job-1", "name": "demo"}
+    user = runtime_events.user_message(
+        content="hello",
+        attachments=[],
+        client_message_id="scheduler:job-1:turn-1",
+        source="scheduler",
+        scheduler={"jobId": "job-1", "jobName": "demo"},
+    )
 
+    assert user["event"] == "user_message"
+    assert user["source"] == "scheduler"
+    assert user["scheduler"] == {"jobId": "job-1", "jobName": "demo"}
     assert runtime_events.scheduler_job_update(job, action="created") == {
         "event": "scheduler_job_update",
         "job": job,
@@ -86,3 +96,23 @@ def test_scheduler_runtime_event_payloads() -> None:
     cancelled = runtime_events.runtime_task_cancelled({"id": "turn:1"}, reason="stop")
     assert cancelled["event"] == "runtime_task_cancelled"
     assert cancelled["reason"] == "stop"
+
+
+def test_external_runtime_event_payloads() -> None:
+    message = {"platform": "fake", "external_message_id": "m1"}
+    delivery = {"ok": True}
+
+    assert runtime_events.external_inbound(message) == {
+        "event": "external_inbound",
+        "message": message,
+    }
+    queued = runtime_events.external_queued(message, reason="busy")
+    assert queued["event"] == "external_queued"
+    assert queued["reason"] == "busy"
+    assert runtime_events.external_outbound_queued(message)["event"] == "external_outbound_queued"
+    sent = runtime_events.external_outbound_sent(message, delivery=delivery)
+    assert sent["event"] == "external_outbound_sent"
+    assert sent["delivery"] == delivery
+    error = runtime_events.external_outbound_error(message, error="boom")
+    assert error["event"] == "external_outbound_error"
+    assert error["error"] == "boom"

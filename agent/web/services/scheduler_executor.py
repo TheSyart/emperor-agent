@@ -52,7 +52,7 @@ class SchedulerJobExecutor:
         turn_id = self.state.new_turn_id()
         await self.state.active_tasks.update(f"scheduler:{job.id}", turn_id=turn_id)
         model_content = self._agent_turn_content(job)
-        display = f"司时台触发 · {job.name}\n\n{message}"
+        display = f"定时任务触发 · {job.name}\n\n{message}"
         deliver = bool(job.payload.deliver)
         working_history = self.state.history if deliver else [
             *self.state.history,
@@ -79,6 +79,8 @@ class SchedulerJobExecutor:
                         content=display,
                         attachments=[],
                         client_message_id=f"scheduler:{job.id}:{turn_id}",
+                        source="scheduler",
+                        scheduler={"jobId": job.id, "jobName": job.name},
                     ),
                     turn_id=turn_id,
                 )

@@ -1,12 +1,21 @@
 from __future__ import annotations
+
+import ipaddress
 import re
+import socket
+import urllib.error
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
 from loguru import logger
 
 from .base import Tool
-from .schema import StringSchema, IntegerSchema
+from .schema import IntegerSchema, StringSchema
+
+_MAX_RESPONSE_BYTES = 1_000_000
+_MAX_REDIRECTS = 5
+_BLOCKED_HOSTS = {"localhost", "localhost.localdomain"}
 
 
 class _TextExtractor(HTMLParser):
@@ -34,10 +43,26 @@ class _TextExtractor(HTMLParser):
 
 
 def _fetch(url: str, extract_mode: str = "text", max_chars: int = 8000) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
+        _validate_public_http_url(url)
+    except ValueError as exc:
+        return f"Error fetching {url}: {exc}"
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})  # noqa: S310 - URL is validated before request construction.
+    try:
+        opener = urllib.request.build_opener(_SafeRedirectHandler)
+        with opener.open(req, timeout=10) as resp:
+            content_type = (resp.headers.get("Content-Type") or "").split(";")[0].lower()
+            if content_type and not _is_textual_content_type(content_type):
+                return f"Error fetching {url}: unsupported content-type: {content_type}"
+            data = resp.read(_MAX_RESPONSE_BYTES + 1)
+            if len(data) > _MAX_RESPONSE_BYTES:
+                return f"Error fetching {url}: response too large (>{_MAX_RESPONSE_BYTES} bytes)"
+            charset = resp.headers.get_content_charset() or "utf-8"
+            raw = data.decode(charset, errors="replace")
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Web fetch failed: {url}: HTTP {e.code}")
+        return f"Error fetching {url}: HTTP {e.code}"
     except Exception as e:
         logger.warning(f"Web fetch failed: {url}: {e}")
         return f"Error fetching {url}: {e}"
@@ -50,6 +75,79 @@ def _fetch(url: str, extract_mode: str = "text", max_chars: int = 8000) -> str:
         text = raw
 
     return text[:max_chars]
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        old_count = getattr(req, "redirect_dict", {}).get(newurl, 0)
+        if old_count >= _MAX_REDIRECTS:
+            raise ValueError("too many redirects")
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _validate_public_http_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("only http/https URLs are allowed")
+    if not parsed.hostname:
+        raise ValueError("URL host is required")
+    host = parsed.hostname.strip().lower().rstrip(".")
+    if host in _BLOCKED_HOSTS:
+        raise ValueError(f"blocked host: {host}")
+    if "%" in host:
+        raise ValueError("zone identifiers are not allowed in hosts")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ips = _resolve_host_ips(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    else:
+        ips = [ip]
+    for ip in ips:
+        if _is_blocked_ip(ip):
+            raise ValueError(f"blocked non-public address: {ip}")
+
+
+def _resolve_host_ips(host: str, port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"host resolution failed: {exc}") from exc
+    ips = []
+    for info in infos:
+        address = info[4][0]
+        try:
+            ips.append(ipaddress.ip_address(address))
+        except ValueError:
+            continue
+    if not ips:
+        raise ValueError("host resolved to no addresses")
+    return ips
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any((
+        ip.is_private,
+        ip.is_loopback,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved,
+        ip.is_unspecified,
+    ))
+
+
+def _is_textual_content_type(content_type: str) -> bool:
+    return (
+        content_type.startswith("text/")
+        or content_type in {
+            "application/json",
+            "application/ld+json",
+            "application/xml",
+            "application/xhtml+xml",
+            "application/rss+xml",
+            "application/atom+xml",
+        }
+    )
 
 
 class WebFetch(Tool):

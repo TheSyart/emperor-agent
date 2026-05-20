@@ -104,54 +104,22 @@ class ChatService:
 
             turn_id = self.state.new_turn_id()
             client_message_id = str(payload.get("client_message_id") or "")
-            user_msg: dict[str, Any] = {"role": "user", "content": content, "turn_id": turn_id}
-            if attachment_ids:
-                user_msg["attachments"] = attachment_ids
-
-            async with self.state.lock:
-                self.state.history.append(user_msg)
-                extra: dict[str, Any] = {"turn_id": turn_id}
-                if requested_skill_names:
-                    extra["requestedSkills"] = requested_skill_names
-                if display_content != text or requested_skill_names:
-                    extra["displayContent"] = display_content
-                if attachment_ids:
-                    extra.update({"attachments": attachment_ids})
-                self.state.loop.memory.append_history("user", content, extra=extra)
-
-                await self.state._broadcast_event(
-                    runtime_events.user_message(
-                        content=display_content,
-                        attachments=self.state.attachment_refs(attachment_ids),
-                        client_message_id=client_message_id,
-                    ),
-                    turn_id=turn_id,
-                )
-                started = True
-                self.state.active_turn = True
-
-                async def emit(event: dict[str, Any]) -> None:
-                    await self.state._broadcast_event(event, turn_id=turn_id)
-
-                try:
-                    await self.state.active_tasks.run(
-                        task_id=f"turn:{turn_id}",
-                        kind="turn",
-                        label="Chat turn",
-                        awaitable=self.state.loop.runner.step_stream(
-                            self.state.history,
-                            emit,
-                            turn_id=turn_id,
-                        ),
-                        turn_id=turn_id,
-                    )
-                except TurnPaused:
-                    pass
-                except asyncio.CancelledError:
-                    logger.info("Chat turn {} cancelled", turn_id)
-                finally:
-                    self.state.active_turn = False
-                    self.state.compact_runtime_events()
+            extra: dict[str, Any] = {}
+            if requested_skill_names:
+                extra["requestedSkills"] = requested_skill_names
+            if display_content != text or requested_skill_names:
+                extra["displayContent"] = display_content
+            started = True
+            await self.state.mainline_turn_service.submit(
+                content=content,
+                display_content=display_content,
+                attachments=self.state.attachment_refs(attachment_ids),
+                attachment_ids=attachment_ids,
+                client_message_id=client_message_id,
+                memory_extra=extra,
+                turn_id=turn_id,
+                label="Chat turn",
+            )
         except TurnPaused:
             self.state.active_turn = False
         except SkillRequestError as exc:

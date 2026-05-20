@@ -17,6 +17,7 @@
 - 三层记忆 + 自动压缩
 - WebSocket 流式 WebUI（Vue3 + Vite + Tailwind）
 - 附件上传（图像/文档）与多模态输入链路
+- External Bridge 基础设施（外部平台只汇入唯一主线，不做多会话）
 
 ## 2. 先看哪里（最小阅读路径）
 
@@ -36,7 +37,8 @@
 12. `agent/scheduler/*`（持久 jobs、timer service、scheduler tool）
 13. `agent/watchlist/*`（Watchlist heartbeat、次模型 skip/run 决策）
 14. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
-15. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
+15. `agent/external/*`（外部平台 adapter 抽象、bridge service、inbox/outbox 状态）
+16. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
@@ -57,6 +59,7 @@
 - `agent/scheduler/`：本地长期自动运行中枢，持久保存 `at` / `every` / `cron` jobs，WebUI 启动后恢复 timer，Agent 通过 `scheduler` 工具管理任务；执行侧由 `agent/web/services/scheduler_executor.py` 把 job payload 投递到本地主动 turn 或 Team wake
 - `agent/watchlist/`：Watchlist heartbeat，读取 `memory/watchlist.md`，用次模型先判断 `skip/run`，只有 `run` 才投递完整主动 turn
 - `agent/team/`：Agent Team 子系统（持久队友、inbox、thread、状态机、team tools）
+- `agent/external/`：外部平台适配基础层；提供 `ExternalAdapter`、统一消息模型、入站去重、inbox/outbox 状态。当前不内置真实平台实现，外部消息必须进入唯一主线，不能引入多会话。
 - `agent/attachments.py`：附件落盘、MIME 校验、PDF/文本抽取、图片 base64 编码
 - `agent/memory.py`：长期记忆、历史日志、checkpoint 恢复
 - `agent/memory_versions.py`：记忆快照、diff 预览与恢复；本地数据在 `memory/versions/`
@@ -168,6 +171,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - 每个用户 turn 生成 `turn_id`，写入 `history.jsonl`、checkpoint 上下文和所有 runtime 事件
 - `/api/bootstrap.runtime.events` 只返回未压缩 turn 的事件；`useRuntime.ts` 用它重建工具调用、队友轨迹、AskCard、PlanCard 与错误状态
 - Chat turn、Scheduler run 与 Watchlist 手动检查会登记到 `agent/runtime/active.py` 的进程内 active task registry；`POST /api/runtime/stop`、WebUI 停止按钮和 `/stop` 共用它取消当前可见任务，并发出 `runtime_task_cancelled`
+- External Bridge 入站事件会记录 `external_inbound` / `external_queued`，出站基础状态会记录 `external_outbound_*`；真正进入模型时仍走主线 `user_message` + `turn_id`。
 - localStorage 只是热缓存兜底；后端冷记录是刷新/重启恢复的事实来源
 - 压缩前的细节会进入 `memory/runtime/archive/*.jsonl.gz`，但 Chat 当前页面只展示未压缩 turn
 
@@ -181,6 +185,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - `subagent_*`（start/delta/tool_call/tool_result/done/error）
 - `team_*`（member_update/message/run_start/run_delta/run_tool_call/run_tool_result/run_done/run_error）
 - `scheduler_*`（job_update/run_start/run_done/run_error/run_cancelled）
+- `external_*`（inbound/queued/outbound_queued/outbound_sent/outbound_error）
 - `runtime_task_cancelled`
 - `control_mode_update`
 - `ask_request` / `ask_answered`
@@ -256,6 +261,13 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - Team runner 同样通过 `ModelRouter` 选主/次模型：reader/reviewer/researcher/runner 类队友走次模型，coder 类队友走主模型。
 - 启动时 stale `working` 会变为 `offline`，下次 wake 再恢复。
 
+### External Bridge
+
+- External Bridge 是外部平台接入基础，不是多会话系统。所有外部入口都必须通过 `MainlineTurnService` 汇入唯一 `AgentLoop.history`。
+- 当前只允许通用 adapter 抽象、统一消息模型、入站去重、忙碌/Ask/Plan 时排队、只读状态 API 与 runtime 事件；不要在基础层直接实现飞书/Slack/Telegram 等具体平台。
+- 外部入站内容进入模型前必须带来源上下文和“不可信输入”标记；长期记忆写入仍由主 Agent 与既有记忆机制决定，不能让平台消息绕过主线。
+- 出站能力目前只保留 outbox 状态和 adapter `send()` 接口，不暴露模型可调用的 `send_external_message` 工具；真实外发平台后续必须接入权限/审批策略。
+
 ### 权限模式 / Ask / Plan
 
 - Ask 用于目标不清时主动发问：最多 3 个问题，每题 2-4 个选项，并允许自由补充。高影响歧义由 `ClarificationPolicy` 统一判断，避免把主动提问散落到 prompt 文案里。
@@ -298,6 +310,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - 新权限策略：优先放在 `agent/permissions/`，不要把审批规则散落到工具实现或 prompt 文案里
 - 新 Chat 行为事件：优先接入 `agent/runtime/` 持久化，事件需带 `turn_id`，并同步 `agent/runtime/events.py`、`webui/src/types.ts`、`webui/src/runtime/*` 与 `useRuntime.ts` replay 分支
 - 新 Team 能力：优先放在 `agent/team/`，同步 `agent/web/routes/team.py` API、`webui/src/types.ts` 与 `TeamPanel.vue`
+- 新外部平台接入：优先放在 `agent/external/`，通过 `ExternalAdapter` 标准化入站/出站，并复用 `ExternalBridgeService`；禁止引入 `session_id`、会话列表或 `channel:chat_id` 多会话模型。
 - 新子代理：`templates/subagents/*.md` + `subagents/registry.py` 白名单
 - 新技能：`skills/<name>/SKILL.md`
 

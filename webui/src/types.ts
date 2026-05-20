@@ -346,6 +346,8 @@ export interface RuntimeHistoryItem {
   content: string
   attachments?: AttachmentRef[]
   turn_id?: string
+  source?: string
+  scheduler?: SchedulerMessageMeta
 }
 
 export interface RuntimeEventEnvelope {
@@ -483,6 +485,8 @@ export interface UserMessage {
   content: string
   attachments?: AttachmentRef[]
   turn_id?: string
+  source?: string
+  scheduler?: SchedulerMessageMeta
   local?: boolean
 }
 
@@ -602,6 +606,11 @@ export interface SchedulerJob {
   purpose?: string | null
 }
 
+export interface SchedulerMessageMeta {
+  jobId?: string
+  jobName?: string
+}
+
 export interface SchedulerStatusPayload {
   running: boolean
   jobs: number
@@ -617,10 +626,15 @@ export interface SchedulerPayload {
 
 export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_message_id?: string } & (
   | { event: 'ready'; model?: string; provider?: string; latest_seq?: number; replay_count?: number; resume_from?: number; busy?: boolean; control?: ControlPayload }
-  | { event: 'user_message'; content?: string; attachments?: AttachmentRef[] }
+  | { event: 'user_message'; content?: string; attachments?: AttachmentRef[]; source?: string; scheduler?: SchedulerMessageMeta }
   | { event: 'message_delta'; delta?: string }
   | { event: 'context_usage'; used?: number; max?: number; threshold?: number; usage_type?: string; model_role?: string; model?: string; provider?: string }
   | { event: 'model_route_fallback'; from_model?: string; to_model?: string; reason?: string; usage_type?: string }
+  | { event: 'external_inbound'; message?: Record<string, unknown> }
+  | { event: 'external_queued'; message?: Record<string, unknown>; reason?: string }
+  | { event: 'external_outbound_queued'; message?: Record<string, unknown> }
+  | { event: 'external_outbound_sent'; message?: Record<string, unknown>; delivery?: Record<string, unknown> }
+  | { event: 'external_outbound_error'; message?: Record<string, unknown>; error?: string }
   | { event: 'tool_call'; id?: string; name: string; arguments?: Record<string, unknown> }
   | { event: 'tool_result'; id?: string; name?: string; summary?: string; todos?: TodoItem[] }
   | { event: 'tool_error'; id?: string; name?: string; message?: string }

@@ -103,7 +103,9 @@ def test_scheduler_executor_runs_agent_turn() -> None:
     assert state.history[0]["role"] == "user"
     assert "SCHEDULER_TRIGGER" in state.history[0]["content"]
     assert state.loop.memory.rows[0][2]["type"] == "scheduler_agent_turn"
-    assert any(event["event"] == "user_message" for event in state.events)
+    user_event = next(event for event in state.events if event["event"] == "user_message")
+    assert user_event["source"] == "scheduler"
+    assert user_event["scheduler"] == {"jobId": job.id, "jobName": "scheduled"}
     assert any(event["event"] == "assistant_done" for event in state.events)
 
 

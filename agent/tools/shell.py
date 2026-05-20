@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -23,6 +25,31 @@ _DENY_PATTERNS = (
     re.compile(r"\|.*\bbash\b"),
 )
 
+_MAX_OUTPUT_CHARS = 20_000
+_ALLOWED_ENV_KEYS = {
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "TERM",
+    "TMPDIR",
+    "USER",
+}
+
+
+def _minimal_env() -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if key in _ALLOWED_ENV_KEYS}
+    env.setdefault("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    env.setdefault("LANG", "C.UTF-8")
+    return env
+
+
+def _cap_output(text: str) -> str:
+    if len(text) <= _MAX_OUTPUT_CHARS:
+        return text
+    head = text[: _MAX_OUTPUT_CHARS - 200]
+    return f"{head}\n...[truncated, total {len(text)} chars]..."
+
 
 @tool_parameters(tool_parameters_schema(
     command=StringSchema("要执行的 shell 命令"),
@@ -44,17 +71,29 @@ class RunCommand(Tool):
                 return f"Error: command refused by safety policy (matches dangerous pattern: {pattern.pattern!r})"
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S602 - shell tool intentionally executes shell commands after policy checks.
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 timeout=120,
                 cwd=str(self._workspace) if self._workspace else None,
+                env=_minimal_env(),
             )
-            output = (result.stdout or result.stderr).strip()
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            if stdout and stderr:
+                output = f"stdout:\n{stdout}\n\nstderr:\n{stderr}"
+            else:
+                output = stdout or stderr
+            output = _cap_output(output.strip())
             logger.info(f"[命令输出]: {output[:500]}")
+            if result.returncode != 0:
+                return f"Error: command exited with code {result.returncode}\n{output}".strip()
             return output
         except subprocess.TimeoutExpired:
             logger.warning(f"Command timed out (>120s): {command[:80]}")
             return "Error: command timed out after 120 seconds"
+        except OSError as exc:
+            logger.warning(f"Command failed to start: {command[:80]}: {exc}")
+            return f"Error: command failed to start: {exc}"
