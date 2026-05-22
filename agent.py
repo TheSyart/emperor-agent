@@ -1,5 +1,4 @@
-from agent.loop import AgentLoop
-
+from agent.cli import main
 
 if __name__ == "__main__":
-    AgentLoop().run()
+    raise SystemExit(main())

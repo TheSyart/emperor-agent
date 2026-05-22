@@ -5,13 +5,23 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from .compactor import Compactor
 from .context import ContextBuilder
-from .control import AskUserTool, ControlManager, ControlMode, InteractionKind, ProposePlanTool, TurnPaused
+from .control import (
+    AskUserTool,
+    ControlManager,
+    ControlMode,
+    InteractionKind,
+    ProposePlanTool,
+    TurnPaused,
+)
 from .logger import configure as configure_logging
-from .memory import MemoryStore
 from .mcp import MCPClient
+from .memory import MemoryStore
 from .model_router import ModelRouter
 from .runner import AgentRunner
 from .scheduler import SchedulerService, SchedulerStore, SchedulerTool
@@ -50,11 +60,13 @@ class AgentLoop:
         model: str | None = None,
         verbose: bool = True,
         startup_compaction: bool = True,
+        console: Console | None = None,
     ):
         load_dotenv()
         self.root = root or Path(__file__).parent.parent
         configure_logging(self.root)
         self.verbose = verbose
+        self.console = console or Console()
         self._model_override = model
         self.user_file = self._ensure_local_user_file()
 
@@ -244,13 +256,16 @@ class AgentLoop:
             from .providers.base import run_sync
             try:
                 run_sync(self.mcp_client.close())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"MCP close ignored: {exc}")
 
     def run(self) -> None:
         self.init_mcp()
+        self._print_cli_banner()
         while True:
-            user_input = input("You🫅 : ")
+            user_input = self.console.input("[bold cyan]You[/bold cyan] : ")
+            if not user_input.strip():
+                continue
             if self._handle_cli_command(user_input):
                 continue
             self.history.append({"role": "user", "content": user_input})
@@ -260,7 +275,7 @@ class AgentLoop:
             except TurnPaused:
                 self._drive_cli_control()
                 continue
-            logger.info(f"大内总管: {reply}")
+            self._print_assistant(reply)
 
     def _handle_cli_command(self, user_input: str) -> bool:
         text = user_input.strip()
@@ -268,86 +283,74 @@ class AgentLoop:
             return False
         command = text.split()[0].lower()
         if command in {"/help", "/commands"}:
-            logger.info(
-                "\n可用命令:\n"
-                "  /help      显示命令列表\n"
-                "  /status    查看模型、Provider、Token、工具和技能数量\n"
-                "  /plan      查看 / 开关 Plan 模式：/plan on|off|status\n"
-                "  /mode      查看 / 切换权限模式：/mode ask|auto|plan|status\n"
-                "  /clear     清空当前 CLI 运行上下文, 不删除 memory/history.jsonl\n"
-                "  /exit      退出 CLI\n"
-            )
+            self._print_cli_help()
             return True
         if command == "/status":
-            totals = self.token_tracker.totals()
-            all_defs = self.registry.get_definitions()
-            mcp_count = len([d for d in all_defs if d["name"].startswith("mcp_")])
-            builtin_count = len(all_defs) - mcp_count
-            logger.info(
-                "\n当前状态:\n"
-                f"  provider: {self.provider_name}\n"
-                f"  model:    {self.model} (main)\n"
-                f"  secondary:{self.model_router.secondary.model if self.model_router.secondary.model_role == 'secondary' else '-'}\n"
-                f"  tokens:   {totals.get('total', 0)} total / {totals.get('calls', 0)} calls\n"
-                f"  skills:   {len(self.skills.skills)}\n"
-                f"  tools:    {len(all_defs)} (builtin: {builtin_count}, mcp: {mcp_count})\n"
-                f"  history:  {len(self.history)} in-memory turns\n"
-                f"  control:  {self.control_manager.mode}\n"
-            )
+            self._print_cli_status()
+            return True
+        if command in {"/init", "/config"}:
+            from .onboarding import run_onboarding
+
+            saved = run_onboarding(self.root, console=self.console)
+            if saved:
+                self.refresh_model_config()
+                self._print_cli_status()
             return True
         if command == "/plan":
             parts = text.split(maxsplit=1)
             arg = parts[1].strip().lower() if len(parts) > 1 else "status"
             if arg in {"on", "plan"}:
                 self.control_manager.set_mode(ControlMode.PLAN.value)
-                logger.info("\nPlan 模式已开启：只读探索 + 提问 + 计划预览；批准前不执行。")
+                self.console.print("[green]Plan 模式已开启：只读探索 + 提问 + 计划预览。[/green]")
                 return True
             if arg in {"off", "normal"}:
                 self.control_manager.set_mode(ControlMode.ASK_BEFORE_EDIT.value)
-                logger.info("\nPlan 模式已关闭，已回到编辑前询问模式。")
+                self.console.print("[green]Plan 模式已关闭，已回到编辑前询问模式。[/green]")
                 return True
             payload = self.control_manager.payload()
             pending = payload.get("pending")
             pending_label = "-"
             if pending:
                 pending_label = f"{pending.get('kind')}:{pending.get('id')}"
-            logger.info(
-                "\nControl 状态:\n"
-                f"  mode: {payload.get('mode')}\n"
-                f"  previous: {payload.get('previous_mode') or '-'}\n"
-                f"  pending: {pending_label}\n"
-            )
+            table = Table.grid(padding=(0, 2))
+            table.add_column(style="bold cyan")
+            table.add_column()
+            table.add_row("mode", str(payload.get("mode")))
+            table.add_row("previous", str(payload.get("previous_mode") or "-"))
+            table.add_row("pending", pending_label)
+            self.console.print(Panel(table, title="Control 状态", border_style="cyan"))
             return True
         if command == "/mode":
             parts = text.split(maxsplit=1)
             arg = parts[1].strip().lower() if len(parts) > 1 else "status"
             if arg in {"ask", "ask_before_edit", "edit_before_ask"}:
                 self.control_manager.set_mode(ControlMode.ASK_BEFORE_EDIT.value)
-                logger.info("\n权限模式：编辑前询问。")
+                self.console.print("[green]权限模式：编辑前询问。[/green]")
                 return True
             if arg == "auto":
                 self.control_manager.set_mode(ControlMode.AUTO.value)
-                logger.info("\n权限模式：自动执行。")
+                self.console.print("[green]权限模式：自动执行。[/green]")
                 return True
             if arg == "plan":
                 self.control_manager.set_mode(ControlMode.PLAN.value)
-                logger.info("\n权限模式：计划模式。")
+                self.console.print("[green]权限模式：计划模式。[/green]")
                 return True
             payload = self.control_manager.payload()
-            logger.info(
-                "\n权限模式:\n"
-                f"  mode: {payload.get('mode')}\n"
-                f"  previous: {payload.get('previous_mode') or '-'}\n"
-            )
+            table = Table.grid(padding=(0, 2))
+            table.add_column(style="bold cyan")
+            table.add_column()
+            table.add_row("mode", str(payload.get("mode")))
+            table.add_row("previous", str(payload.get("previous_mode") or "-"))
+            self.console.print(Panel(table, title="权限模式", border_style="cyan"))
             return True
         if command == "/clear":
             self.history.clear()
             self.todos.todos = []
-            logger.info("\n已清空当前 CLI 屏幕上下文；长期记忆和 history.jsonl 未删除。")
+            self.console.print("[green]已清空当前 CLI 屏幕上下文；长期记忆和 history.jsonl 未删除。[/green]")
             return True
         if command in {"/exit", "/quit"}:
             raise SystemExit(0)
-        logger.warning(f"\n未知命令: {command}。输入 /help 查看可用命令。")
+        self.console.print(f"[yellow]未知命令: {command}。输入 /help 查看可用命令。[/yellow]")
         return True
 
     def _drive_cli_control(self) -> None:
@@ -356,17 +359,17 @@ class AgentLoop:
             if not pending:
                 return
             if pending.get("kind") == InteractionKind.ASK.value:
-                logger.info(self._render_cli_ask(pending))
+                self.console.print(Panel(self._render_cli_ask(pending), title="需要定夺", border_style="yellow"))
                 answers = {}
                 for question in pending.get("questions") or []:
                     qid = question.get("id")
-                    raw = input(f"回答 {question.get('header') or qid}: ").strip()
+                    raw = self.console.input(f"回答 {question.get('header') or qid}: ").strip()
                     answers[qid] = {"choice": raw, "freeform": ""}
                 resume = self.control_manager.answer(pending["id"], answers)
             elif pending.get("kind") == InteractionKind.PLAN.value:
-                logger.info(self._render_cli_plan(pending))
+                self.console.print(Panel(self._render_cli_plan(pending), title="计划待预览", border_style="cyan"))
                 while True:
-                    raw = input("plan> approve / comment <内容> / cancel: ").strip()
+                    raw = self.console.input("plan> approve / comment <内容> / cancel: ").strip()
                     if raw == "approve":
                         resume = self.control_manager.approve(pending["id"])
                         break
@@ -380,9 +383,9 @@ class AgentLoop:
                             self.history.append({"role": "user", "content": message})
                             self.memory.append_history("user", message, extra={"type": "control_response"})
                         self.memory.clear_checkpoint()
-                        logger.info(f"已取消：{event.get('interaction', {}).get('id')}")
+                        self.console.print(f"[yellow]已取消：{event.get('interaction', {}).get('id')}[/yellow]")
                         return
-                    logger.info("请输入 approve、comment <内容> 或 cancel。")
+                    self.console.print("[yellow]请输入 approve、comment <内容> 或 cancel。[/yellow]")
             else:
                 return
 
@@ -392,8 +395,61 @@ class AgentLoop:
                 reply = self.runner.step(self.history)
             except TurnPaused:
                 continue
-            logger.info(f"大内总管: {reply}")
+            self._print_assistant(reply)
             return
+
+    def _print_cli_banner(self) -> None:
+        all_defs = self.registry.get_definitions()
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold cyan")
+        table.add_column()
+        table.add_row("Provider", self.provider_name)
+        table.add_row("Main model", self.model)
+        table.add_row("Secondary", self.model_router.secondary.model if self.model_router.secondary.model_role == "secondary" else "-")
+        table.add_row("Control", self.control_manager.mode)
+        table.add_row("Tools / Skills", f"{len(all_defs)} / {len(self.skills.skills)}")
+        table.add_row("Config", str(self.root / "model_config.json"))
+        self.console.print(Panel(table, title="Emperor Agent CLI", border_style="red"))
+        self.console.print("输入 [bold]/help[/bold] 查看命令，输入 [bold]/init[/bold] 打开初始化向导。")
+
+    def _print_cli_help(self) -> None:
+        rows = [
+            ("/help", "显示命令列表"),
+            ("/status", "查看模型、Provider、Token、工具和技能数量"),
+            ("/init", "打开终端初始化向导"),
+            ("/config", "同 /init，重新配置核心项"),
+            ("/plan on|off|status", "开关或查看 Plan 模式"),
+            ("/mode ask|auto|plan|status", "切换或查看三模式权限层"),
+            ("/clear", "清空当前 CLI 运行上下文，不删除 memory/history.jsonl"),
+            ("/exit", "退出 CLI"),
+        ]
+        table = Table(title="CLI Commands")
+        table.add_column("命令", style="bold cyan")
+        table.add_column("说明")
+        for command, description in rows:
+            table.add_row(command, description)
+        self.console.print(table)
+
+    def _print_cli_status(self) -> None:
+        totals = self.token_tracker.totals()
+        all_defs = self.registry.get_definitions()
+        mcp_count = len([d for d in all_defs if d["name"].startswith("mcp_")])
+        builtin_count = len(all_defs) - mcp_count
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold cyan")
+        table.add_column()
+        table.add_row("provider", self.provider_name)
+        table.add_row("model", f"{self.model} (main)")
+        table.add_row("secondary", self.model_router.secondary.model if self.model_router.secondary.model_role == "secondary" else "-")
+        table.add_row("tokens", f"{totals.get('total', 0)} total / {totals.get('calls', 0)} calls")
+        table.add_row("skills", str(len(self.skills.skills)))
+        table.add_row("tools", f"{len(all_defs)} (builtin: {builtin_count}, mcp: {mcp_count})")
+        table.add_row("history", f"{len(self.history)} in-memory turns")
+        table.add_row("control", self.control_manager.mode)
+        self.console.print(Panel(table, title="当前状态", border_style="cyan"))
+
+    def _print_assistant(self, reply: str) -> None:
+        self.console.print(Panel(str(reply or ""), title="大内总管", border_style="green"))
 
     @staticmethod
     def _render_cli_ask(interaction: dict) -> str:

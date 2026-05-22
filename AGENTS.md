@@ -24,27 +24,31 @@
 当你第一次接手任务，优先按这个顺序读：
 
 1. `README.md`
-2. `agent/loop.py`（装配与主循环）
-3. `agent/runner.py`（单轮执行、工具循环、容错）
-4. `agent/web/` + `agent/webui.py`（HTTP/WS API 与兼容入口）
-5. `agent/memory.py` + `agent/compactor.py`（记忆与压缩）
-6. `agent/memory_versions.py`（记忆快照、diff、restore）
-7. `agent/model_config.py` + `agent/providers/*`（模型配置与 provider 实现）
-8. `agent/tools/*` + `agent/subagents/*`（工具与子代理能力边界）
-9. `agent/control/*`（Ask / Plan pending 状态、暂停恢复）
-10. `agent/permissions/*`（三模式权限与审批策略）
-11. `agent/runtime/*`（WebUI 行为事件冷记录与刷新重放）
-12. `agent/scheduler/*`（持久 jobs、timer service、scheduler tool）
-13. `agent/watchlist/*`（Watchlist heartbeat、次模型 skip/run 决策）
-14. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
-15. `agent/external/*`（外部平台 adapter 抽象、bridge service、inbox/outbox 状态）
-16. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
+2. `agent/cli.py` + `agent/onboarding.py` + `agent/local_config.py`（CLI 命令层、初始化向导、本地偏好）
+3. `agent/loop.py`（装配与主循环）
+4. `agent/runner.py`（单轮执行、工具循环、容错）
+5. `agent/web/` + `agent/webui.py`（HTTP/WS API 与兼容入口）
+6. `agent/memory.py` + `agent/compactor.py`（记忆与压缩）
+7. `agent/memory_versions.py`（记忆快照、diff、restore）
+8. `agent/model_config.py` + `agent/providers/*`（模型配置与 provider 实现）
+9. `agent/tools/*` + `agent/subagents/*`（工具与子代理能力边界）
+10. `agent/control/*`（Ask / Plan pending 状态、暂停恢复）
+11. `agent/permissions/*`（三模式权限与审批策略）
+12. `agent/runtime/*`（WebUI 行为事件冷记录与刷新重放）
+13. `agent/scheduler/*`（持久 jobs、timer service、scheduler tool）
+14. `agent/watchlist/*`（Watchlist heartbeat、次模型 skip/run 决策）
+15. `agent/team/*`（持久队友、MessageBus、TeamStore、team tools）
+16. `agent/external/*`（外部平台 adapter 抽象、bridge service、inbox/outbox 状态）
+17. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
 ### 后端
 
-- `agent.py`：CLI 入口
+- `agent.py`：CLI 兼容入口，转发到 `agent.cli`
+- `agent/cli.py`：Python CLI 命令入口，提供 `init` / `chat` / `web` / `status` / `doctor`
+- `agent/onboarding.py`：Rich + Questionary 初始化向导、doctor 检查和模型配置构造
+- `agent/local_config.py`：`emperor.local.json` 本地 CLI/WebUI 偏好读写
 - `webui.py`：WebUI 服务入口
 - `agent/loop.py`：系统装配（memory / tools / subagents / runner）
 - `agent/runner.py`：LLM 调用循环、工具并发、空响应与截断恢复
@@ -93,8 +97,9 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp model_config.example.json model_config.json
-python agent.py
+pip install -e .
+emperor-agent init
+emperor-agent chat
 ```
 
 ### WebUI
@@ -104,7 +109,7 @@ cd webui
 npm install
 npm run build
 cd ..
-python webui.py
+emperor-agent web
 ```
 
 开发模式前端可单跑：
@@ -297,6 +302,7 @@ Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 - `memory/`
 - `.team/`
 - `model_config.json`
+- `emperor.local.json`
 - `templates/USER.local.md`
 - `.env`
 - `webui/dist/`

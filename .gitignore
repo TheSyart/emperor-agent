@@ -3,8 +3,10 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 .DS_Store
 model_config.json
+emperor.local.json
 webui/dist/
 webui/node_modules/
 webui/public/assets/

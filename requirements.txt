@@ -11,3 +11,5 @@ openai>=1.50,<2.0
 pypdf>=4.0,<6.0
 python-dotenv==1.2.2
 pyyaml==6.0.3
+questionary>=2.0,<3.0
+rich>=13.0,<15.0

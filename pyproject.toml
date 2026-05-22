@@ -24,7 +24,16 @@ dependencies = [
     "pypdf>=4.0,<6.0",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "questionary>=2.0,<3.0",
+    "rich>=13.0,<15.0",
 ]
+
+[project.scripts]
+emperor-agent = "agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+exclude = ["tests*", "webui*", "memory*", "assets*", "templates*", "skills*", "logs*"]
 
 [tool.ruff]
 line-length = 100
