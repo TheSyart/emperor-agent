@@ -1,0 +1,31 @@
+{
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "enabled": true,
+      "tool_overrides": {
+        "read_file": { "read_only": true }
+      }
+    },
+    "fetch": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "enabled": true
+    },
+    "remote": {
+      "transport": "sse",
+      "url": "http://localhost:3001/sse",
+      "headers": {
+        "Authorization": "Bearer ${MY_MCP_TOKEN}"
+      },
+      "enabled": false
+    }
+  },
+  "defaults": {
+    "read_only": false,
+    "exclusive": false
+  }
+}

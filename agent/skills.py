@@ -61,13 +61,28 @@ class SkillsLoader:
         for name, skill in self.skills.items():
             if name in exclude:
                 continue
-            desc = skill["meta"].get("description", "No description")
-            tags = skill["meta"].get("tags", "")
-            path = skill.get("path", "")
+            desc = _one_sentence(skill["meta"].get("description", "No description"))
+            tags = _tags_text(skill["meta"].get("tags", ""))
             line = f"- **{name}**: {desc}"
             if tags:
                 line += f" [{tags}]"
-            if path:
-                line += f" (load_skill name=`{name}`, source=`{path}`)"
             lines.append(line)
         return "\n".join(lines) if lines else ""
+
+
+def _one_sentence(value: object, *, limit: int = 180) -> str:
+    text = " ".join(str(value or "No description").split())
+    if not text:
+        return "No description"
+    match = re.search(r"^(.+?[。.!?！？])(?:\s|$)", text)
+    if match:
+        text = match.group(1).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _tags_text(value: object) -> str:
+    if isinstance(value, (list, tuple, set)):
+        return ",".join(str(item).strip() for item in value if str(item).strip())
+    return str(value or "").strip()

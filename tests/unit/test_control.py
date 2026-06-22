@@ -159,6 +159,25 @@ def test_clarification_policy_requires_ask_for_ambiguous_high_impact_work(tmp_pa
     assert assessment.questions
 
 
+def test_clarification_policy_requires_ask_for_project_level_prompt_workflow(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    assessment = manager.assess_clarification([
+        {"role": "user", "content": "从头到尾评估项目，优化 agent 的各种提示词和思考工作流程"},
+    ])
+
+    assert assessment.required
+    assert "scope" in assessment.categories
+
+
+def test_clarification_policy_skips_small_optimization(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    assessment = manager.assess_clarification([
+        {"role": "user", "content": "优化这个函数的变量命名，直接做"},
+    ])
+
+    assert not assessment.required
+
+
 def test_clarification_policy_skips_decision_complete_plan(tmp_path: Path) -> None:
     manager = ControlManager(tmp_path)
     assessment = manager.assess_clarification([

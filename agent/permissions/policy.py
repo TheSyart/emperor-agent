@@ -32,7 +32,8 @@ _SENSITIVE_PATH_PARTS = {
 }
 
 _SENSITIVE_PATH_PREFIXES = {
-    "webui/dist",
+    "desktop/out",
+    "desktop/dist",
 }
 
 _SENSITIVE_FILENAMES = {

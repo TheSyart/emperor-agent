@@ -62,6 +62,6 @@ class DiagnosticsService:
                 package: importlib.util.find_spec(package) is not None
                 for package in packages
             },
-            "webuiDist": (root / "webui" / "dist" / "index.html").exists(),
+            "desktopRenderer": (root / "desktop" / "out" / "renderer" / "index.html").exists(),
             "desktopPetNodeModules": desktop_pet_modules.exists(),
         }

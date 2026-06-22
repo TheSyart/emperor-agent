@@ -8,7 +8,13 @@ _IMPLEMENT_PLAN_RE = re.compile(r"please\s+implement\s+this\s+plan|#\s*(summary|
 _CONTROL_RESUME_RE = re.compile(r"^\[CONTROL:(ASK_ANSWERED|PLAN_APPROVED|PLAN_COMMENT|INTERACTION_CANCELLED)\]")
 _EXPLICIT_AUTONOMY_RE = re.compile(r"(不用问|不要问|直接做|按你判断|自行决定|你决定|无需确认)")
 _BROAD_SCOPE_RE = re.compile(
-    r"(工程化|架构|重构|重新设计|设计.*机制|完善|优化|美化|提升|解决以上问题|找到问题作出修改|通读项目|仔细阅读|审计.*修改)"
+    r"("
+    r"工程化|架构|重构|重新设计|设计.*机制|"
+    r"解决以上问题|找到问题作出修改|通读项目|仔细阅读|审计.*修改|"
+    r"从头到尾|全链路|全项目|整体.*(优化|完善|改造|提升)|"
+    r"(项目|系统|机制|工作流|提示词|agent|Agent).*(优化|完善|改造|评估|审计)|"
+    r"(优化|完善|改造|评估|审计).*(项目|系统|机制|工作流|提示词|agent|Agent)"
+    r")"
 )
 _HIGH_IMPACT_RE = re.compile(r"(提交|推送|发布|部署|删除|清空|重置|覆盖|迁移|密钥|权限|付款|成本|生产)")
 _LOW_RISK_RE = re.compile(r"(改错别字|修拼写|解释|说明|查看|查询|列出|读一下|review|审查)")
@@ -56,7 +62,7 @@ class ClarificationPolicy:
             return ClarificationAssessment()
         if _LOW_RISK_RE.search(latest) and "risk" not in categories:
             return ClarificationAssessment()
-        if _EXPLICIT_AUTONOMY_RE.search(latest) and "risk" not in categories and len(latest) < 120:
+        if _EXPLICIT_AUTONOMY_RE.search(latest) and "risk" not in categories:
             return ClarificationAssessment()
         if _looks_decision_complete(latest):
             return ClarificationAssessment()

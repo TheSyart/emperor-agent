@@ -69,10 +69,19 @@ def test_system_prompt_uses_code_backed_skill_and_subagent_contracts(tmp_path: P
 
     assert "调用 `load_skill` 工具" in prompt
     assert "read_file 工具读取其 SKILL.md" not in prompt
+    assert "source=`" not in prompt
+    assert str(skills_dir) not in prompt
     assert "由 `SubagentRegistry` 动态注入" in prompt
     assert "xiaohuangmen" in prompt
     assert "researcher.md" not in prompt
+    assert "奉天承运皇帝诏曰" in prompt
+    assert "轻量宫廷口吻" in prompt
     assert "机器可读内容不得加此前缀" in prompt
+    assert "结论：直接说明办成什么" in prompt
+    assert "不要向用户展示隐藏推理" in prompt
+    assert "复杂独立任务必须写清" in prompt
+    fixed_prompt_chars = sum(len(section.content) for section in sections if section.name != "long_term_memory")
+    assert fixed_prompt_chars < 5_000
     memory_section = next(section for section in sections if section.name == "long_term_memory")
     assert memory_section.budget_chars == 80
     assert "clipped by ContextBuilder" in memory_section.content

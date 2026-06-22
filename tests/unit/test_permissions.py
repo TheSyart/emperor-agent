@@ -89,7 +89,7 @@ def test_ask_before_edit_requires_approval_for_sensitive_path() -> None:
     )
     dist_decision = policy.assess(
         "write_file",
-        {"path": "webui/dist/index.html"},
+        {"path": "desktop/out/main/index.js"},
         PermissionMode.ASK_BEFORE_EDIT.value,
     )
 
