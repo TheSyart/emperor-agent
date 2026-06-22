@@ -44,7 +44,7 @@
 16. `agent/external/*`（外部平台 adapter 抽象、bridge service、inbox/outbox 状态）
 17. `agent/mcp/*`（MCP Client：config、connection、adapter、tool 注册）
 18. `agent/desktop_pet/*`（可选 Electron 桌宠进程管理）
-19. `webui/src/runtime/*` + `webui/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
+19. `desktop/src/renderer/src/runtime/*` + `desktop/src/renderer/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
@@ -54,7 +54,7 @@
 - `agent/cli.py`：Python CLI 命令入口，提供 `init` / `chat` / `web` / `status` / `doctor` / `pet`；`doctor --dev` 会复用统一质量门禁
 - `agent/onboarding.py`：Rich + Questionary 初始化向导、doctor 检查和模型配置构造
 - `agent/local_config.py`：`emperor.local.json` 本地 CLI/WebUI 偏好读写
-- `webui.py`：WebUI 服务入口
+- `webui.py`：API 服务器入口
 - `agent/loop.py`：系统装配（memory / tools / subagents / runner）
 - `agent/runner.py`：LLM 调用循环、工具并发、空响应与截断恢复
 - `agent/runner_factory.py` + `agent/runner_model.py`：子代理/Team runner 构造与模型调用（流式 delta、次模型失败升主一次）
@@ -78,24 +78,13 @@
 - `agent/memory_versions.py`：记忆快照、diff 预览与恢复；本地数据在 `memory/versions/`
 - `agent/compactor.py`：历史压缩，更新 `MEMORY.local.md` / `USER.local.md`
 
-### 前端
+### 前端（桌面应用）
 
-- `webui/src/App.vue`：全局注入、斜杠命令、页面壳
-- `webui/src/composables/useRuntime.ts`：WS 生命周期、发送消息、replay 调度
-- `webui/src/runtime/`：runtime event 类型、reducer、selectors 与 localStorage 热缓存
-- `webui/src/composables/useBootstrap.ts`：bootstrap 与 CRUD API 客户端
-- `webui/src/components/chat/Composer.vue`：输入框、附件上传、上下文用量环
-- `webui/src/components/chat/AskCard.vue` / `PlanCard.vue`：Ask / Plan 内联交互卡
-- `webui/src/components/panels/ModelPanel.vue`：模型条目管理、文本/视觉连通测试
-- `webui/src/components/panels/TeamPanel.vue`：Agent Team 队友工作台
-- `webui/src/views/*`：一级路由页面
-
-### 桌面壳（Electron）
-
-- `desktop/`：独立 Electron 子项目（CommonJS + `node --test`，与 `desktop-pet/` 并列、独立 `package.json` 与 `node_modules`）。把整套 WebUI 以桌面 App 交付；**网页端保留不动**。
-- 纯逻辑与 Electron 运行时分离，全部依赖注入单测：`config.js`（root/host/port → backendBaseUrl，读 `emperor.local.json`）、`backend-command.js`（spawn 命令，venv/`EMPEROR_BACKEND_CMD`/PATH 解析）、`health.js`（`probeBackend` / `waitForBackend` 轮询 `/api/bootstrap`）、`lifecycle.js`（attach vs spawn 与退出回收决策）、`window-bounds.js`（尺寸归一化，落盘 `memory/desktop/window.json`）。
-- `main.js` 只做装配（探测→附着或 spawn→等就绪→`loadURL(backendBaseUrl)`→退出回收），不含可隐藏分支；靠手动 E2E 覆盖。`preload.js` 仅 `contextBridge` 暴露 `version`/`platform`，前端不依赖它。
-- 启动逻辑：先探测后端，已运行则附着（退出不回收），未运行才 spawn `emperor-agent web`（退出 SIGTERM→2s 后 SIGKILL 回收）。需 Node ≥ 18。
+- `desktop/`：electron-vite 标准结构（`src/main` + `src/preload` + `src/renderer`），Vue 3 + TypeScript + Tailwind + vue-router 构建。后端 URL 注入链：preload `contextBridge` 暴露 `backendBaseUrl` → renderer `apiUrl()/wsUrl()` 封装所有 `/api`/`/ws` 调用。
+- 纯逻辑与 Electron 运行时分离，`src/main/*.ts` 全部 vitest 单测（`config` / `backend-command` / `health` / `lifecycle` / `window-bounds` / `protocol`），`main/index.ts` 只做装配，手动 E2E 覆盖。
+- 生产模式通过自定义 `app://` 协议从 `out/renderer/` 加载，支持 Vue Router `createWebHistory()` 深层路由；开发模式用 electron-vite HMR + Vite proxy。
+- `desktop/src/renderer/src/` 内：`App.vue` 全局注入、`router.ts` 10 条路由、`components/layout/NavRail.vue` 左侧导航、`components/chat/` 流式与工具事件组件、`components/panels/` 各功能面板、`views/` 页面、`composables/useRuntime.ts` WS 生命周期、`composables/useBootstrap.ts` bootstrap/CRUD 客户端、`runtime/` 事件 reducer/selectors/persistence、`api/` 后端调用封装。
+- 启动逻辑：先探测 `:8765`，已运行则附着（退出不回收），未运行才 spawn `emperor-agent web`（退出回收）。需 Node ≥ 18。打包：`electron-builder` 产出 macOS `.dmg`，仅含前端；后端依赖目标机 `emperor-agent`。
 
 ### 配置与模板
 
@@ -118,22 +107,22 @@ emperor-agent init
 emperor-agent chat
 ```
 
-### WebUI
+### Desktop（Electron 桌面应用）
 
 ```bash
-cd webui
+cd desktop
 npm install
 npm run build
 cd ..
 emperor-agent web
 ```
-
-开发模式前端可单跑：
+Cd to desktop and launch via Electron:
 
 ```bash
-cd webui
+cd desktop
 npm run dev
 ```
+
 
 Vite 会代理 `/api` 与 `/ws` 到 `127.0.0.1:8765`。
 
@@ -232,7 +221,7 @@ emperor-agent doctor --dev
 - `ready`
 - `context_usage`
 
-`webui/src/runtime/*` 与 `useRuntime.ts` 负责：
+`desktop/src/renderer/src/runtime/*` 与 `useRuntime.ts` 负责：
 
 - runtime event replay / reducer / selectors
 - 从 `/api/bootstrap.runtime.events` 重放未压缩 Chat 行为流
@@ -240,7 +229,7 @@ emperor-agent doctor --dev
 - localStorage 快照兜底
 - 未完成 assistant 的中断收尾
 
-凡是新增后端事件，必须同步更新 `agent/runtime/events.py`、前端 `types.ts`、`webui/src/runtime/*` 和 `useRuntime.ts` 分支逻辑。
+凡是新增后端事件，必须同步更新 `agent/runtime/events.py`、前端 `desktop/src/renderer/src/types.ts`、`desktop/src/renderer/src/runtime/*` 和 `useRuntime.ts` 分支逻辑。
 
 ## 7. 模型配置机制（常见改动区）
 
@@ -350,37 +339,37 @@ emperor-agent doctor --dev
 - `emperor.local.json`
 - `templates/USER.local.md`
 - `.env`
-- `webui/dist/`
-- `webui/node_modules/`
 - `desktop-pet/node_modules/`
 - `desktop/node_modules/`
+- `desktop/out/`
+- `desktop/dist/`
 
 ### 10.2 新能力扩展路径
 
 - 新 provider：`agent/providers/registry.py` + `factory.py` + 对应 provider 文件
 - 新工具：`agent/tools/` 新建类 + `agent/loop.py` 注册
-- 新 Control 能力：优先放在 `agent/control/`，同步 `runner` 暂停/恢复语义、`agent/web/routes/*` API/WS、`webui/src/types.ts` 与 chat 卡片组件
+- 新 Control 能力：优先放在 `agent/control/`，同步 `runner` 暂停/恢复语义、`agent/web/routes/*` API/WS、`desktop/src/renderer/src/types.ts` 与 chat 卡片组件
 - 新权限策略：优先放在 `agent/permissions/`，不要把审批规则散落到工具实现或 prompt 文案里
-- 新 Chat 行为事件：优先接入 `agent/runtime/` 持久化，事件需带 `turn_id`，并同步 `agent/runtime/events.py`、`webui/src/types.ts`、`webui/src/runtime/*` 与 `useRuntime.ts` replay 分支
-- 新 Team 能力：优先放在 `agent/team/`，同步 `agent/web/routes/team.py` API、`webui/src/types.ts` 与 `TeamPanel.vue`
+- 新 Chat 行为事件：优先接入 `agent/runtime/` 持久化，事件需带 `turn_id`，并同步 `agent/runtime/events.py`、`desktop/src/renderer/src/types.ts`、`desktop/src/renderer/src/runtime/*` 与 `useRuntime.ts` replay 分支
+- 新 Team 能力：优先放在 `agent/team/`，同步 `agent/web/routes/team.py` API、`desktop/src/renderer/src/types.ts` 与 `TeamPanel.vue`
 - 新外部平台接入：优先放在 `agent/external/`，通过 `ExternalAdapter` 标准化入站/出站，并复用 `ExternalBridgeService`；禁止引入 `session_id`、会话列表或 `channel:chat_id` 多会话模型。
 - 新 MCP 服务器：在 `mcp_config.json` 中配置即可，无需改代码；如需调整连接/发现行为再动 `agent/mcp/`
 - 新子代理：`templates/subagents/*.md` + `subagents/registry.py` 白名单
 - 新技能：`skills/<name>/SKILL.md`
-- 扩展桌面壳：可测纯逻辑放进 `desktop/*.js` 独立模块并配 `desktop/test/*.test.js`（`node --test`），`main.js` 只做装配，不在其中堆业务分支；不要让桌面壳改动 `webui/` 前端源码或后端 `agent/`（保持网页端不变 + 同源 loadURL）。
+- 扩展桌面应用：可测纯逻辑放进 `desktop/src/main/*.ts` 独立模块并配 `*.test.ts`（vitest），`main/index.ts` 只做装配，不在其中堆业务分支；renderer 前端改动放在 `desktop/src/renderer/src/`，API 字段同步看 §10.3。
 
 ### 10.3 前端改动注意
 
 - API 字段改动必须同步：
-  - `webui/src/types.ts`
+  - `desktop/src/renderer/src/types.ts`
   - `useBootstrap.ts` / `useRuntime.ts`
   - 相关 panel/view
-- runtime 状态机改动优先放在 `webui/src/runtime/`；`useRuntime.ts` 只承担 WebSocket 生命周期和调度 glue。
-- 新图标放仓库根 `assets/`，并在 `webui/src/assets.ts` 注册
+- runtime 状态机改动优先放在 `desktop/src/renderer/src/runtime/`；`useRuntime.ts` 只承担 WebSocket 生命周期和调度 glue。
+- 新图标放仓库根 `assets/`，并在 `desktop/src/renderer/src/assets.ts` 注册
 
 ## 11. 常见排查清单（出问题先看）
 
-1. 页面白屏：确认 `webui/dist/index.html` 是否存在，必要时 `npm run build`
+1. 页面白屏：确认 `desktop/out/renderer/index.html` 是否存在，必要时 `cd desktop && npm run build`
 2. 消息不流式：检查 `/ws` 连接状态与浏览器控制台 event
 3. 工具历史报错：优先看 `runner._pair_tool_calls` 保护是否被绕过
 4. 压缩异常：检查 `templates/agent/compact_prompt.md` 输出 XML 标签是否齐全，以及 `memory/compact_diagnostics.jsonl`
