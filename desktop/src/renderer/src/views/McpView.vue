@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useAppContext } from '../composables/useAppContext'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 const draft = ref('')
@@ -79,7 +79,7 @@ function formatJson() {
       </div>
       <div class="flex gap-2">
         <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.runSafely(() => ctx.loadMcpConfig())">
-          <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+          <component :is="actionIcons.refresh" class="action-icon" :size="16" />
           <span>刷新</span>
         </button>
         <button class="tool-button asset-button" title="格式化" @click="formatJson">
@@ -103,7 +103,7 @@ function formatJson() {
               <template v-if="mcpTools.length">· MCP 工具: {{ mcpTools.length }} 个</template>
             </span>
             <button class="tool-button ink asset-button primary-action" @click="save">
-              <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+              <component :is="actionIcons.save" class="action-icon" :size="16" />
               <span>保存配置</span>
             </button>
           </div>

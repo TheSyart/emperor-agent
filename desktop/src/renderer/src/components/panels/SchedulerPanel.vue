@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type { SchedulerJob, SchedulerPayload, SchedulerSchedule } from '../../types'
-import { navAssets, toolIcon } from '../../assets'
+import { navIcon, toolIcon } from '../../icons'
 
 const ctx = useAppContext()
 const selectedId = ref('')
@@ -253,7 +253,7 @@ function formatMs(ms?: number | null) {
             :class="statusClass(job)"
             @click="selectedId = job.id"
           >
-            <img class="scheduler-job-icon" :src="navAssets.schedulerActive" alt="" width="42" height="42" />
+            <component :is="navIcon('scheduler')" class="scheduler-job-icon" :size="22" />
             <span class="min-w-0 flex-1">
               <strong>{{ job.name }}</strong>
               <small>{{ scheduleLabel(job) }}</small>
@@ -317,7 +317,7 @@ function formatMs(ms?: number | null) {
             <small v-if="run.error">{{ run.error }}</small>
           </article>
           <div v-if="!runHistory.length" class="team-empty">
-            <img :src="navAssets.schedulerActive" alt="" width="96" height="96" />
+            <component :is="navIcon('scheduler')" :size="56" :stroke-width="1" />
             <span>尚无运行记录。</span>
           </div>
         </div>
@@ -333,7 +333,7 @@ function formatMs(ms?: number | null) {
 
         <div v-if="selected" class="scheduler-detail-body">
           <div class="team-stamp">
-            <img :src="navAssets.schedulerActive" alt="" width="64" height="64" />
+            <component :is="navIcon('scheduler')" :size="44" :stroke-width="1" />
             <div class="min-w-0">
               <strong>{{ selected.name }}</strong>
               <span>{{ selected.protected ? '受保护任务' : selected.id }}</span>
@@ -353,7 +353,7 @@ function formatMs(ms?: number | null) {
           <label class="scheduler-check"><input v-model="editDeliver" type="checkbox" /> 将运行结果显示到当前对话</label>
 
           <div class="team-tool-cloud">
-            <span><img :src="toolIcon('scheduler')" alt="" width="18" height="18" /> 定时任务</span>
+            <span><component :is="toolIcon('scheduler')" :size="14" /> 定时任务</span>
             <span>{{ selected.deleteAfterRun ? '运行后删除' : '持续保留' }}</span>
             <span>{{ payloadLabel(selected) }}</span>
           </div>

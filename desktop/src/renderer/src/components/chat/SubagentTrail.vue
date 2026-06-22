@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SubagentState, ToolStatus } from '../../types'
 import { compactJson } from '../../utils/format'
-import { avatarAssets, toolIcon } from '../../assets'
+import { avatarIcons, toolIcon } from '../../icons'
 import ExpandableText from './ExpandableText.vue'
 import MarkdownBlock from './MarkdownBlock.vue'
 
@@ -55,7 +55,7 @@ function fullJson(value: unknown) {
       open
     >
       <summary class="agent-node-head">
-        <img class="subagent-avatar" :src="avatarAssets.subagent" alt="" width="24" height="24" />
+        <component :is="avatarIcons.subagent" class="subagent-avatar" :size="16" />
         <span class="agent-node-title">
           <span>{{ agentKind(sub) }}</span>
           <strong>Agent: {{ agentTitle(sub) }}</strong>
@@ -87,7 +87,7 @@ function fullJson(value: unknown) {
 
         <div v-if="sub.tools?.length" class="agent-tool-list">
           <div v-for="tool in sub.tools" :key="tool.id || tool.name" class="mini-tool" :class="tool.status">
-            <img class="mini-tool-icon" :src="toolIcon(tool.name)" alt="" width="22" height="22" />
+            <component :is="toolIcon(tool.name)" class="mini-tool-icon" :size="14" />
             <div class="mini-tool-main">
               <div class="mini-tool-head">
                 <span>{{ tool.name }}</span>

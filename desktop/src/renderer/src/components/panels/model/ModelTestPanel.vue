@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModelEntry, ModelTestResult } from '../../../types'
-import { modelAssets } from '../../../assets'
+import { modelIcons } from '../../../icons'
 
 defineProps<{
   editing: ModelEntry
@@ -35,7 +35,7 @@ function truncate(value: string | undefined, limit: number): string {
         :title="hasChanges ? '请先保存配置再测试' : '发一次 ping（约消耗几十 token）'"
         @click="emit('runTest', 'text', 'main')"
       >
-        <img class="model-test-icon" :src="modelAssets.text" alt="" width="22" height="22" />
+        <component :is="modelIcons.text" class="model-test-icon" :size="16" />
         <span v-if="testing.mainText">…测试中</span>
         <span v-else>测试主模型</span>
       </button>
@@ -46,7 +46,7 @@ function truncate(value: string | undefined, limit: number): string {
         :title="!editing.secondaryModelId ? '请先填写 Secondary Model ID' : hasChanges ? '请先保存配置再测试' : '发一次 ping 验证次模型'"
         @click="emit('runTest', 'text', 'secondary')"
       >
-        <img class="model-test-icon" :src="modelAssets.text" alt="" width="22" height="22" />
+        <component :is="modelIcons.text" class="model-test-icon" :size="16" />
         <span v-if="testing.secondaryText">…测试中</span>
         <span v-else>测试次模型</span>
       </button>
@@ -59,7 +59,7 @@ function truncate(value: string | undefined, limit: number): string {
           : '发一张红色测试图（约几十 token）；通过即标视觉能力'"
         @click="emit('runTest', 'vision', 'main')"
       >
-        <img class="model-test-icon" :src="modelAssets.vision" alt="" width="22" height="22" />
+        <component :is="modelIcons.vision" class="model-test-icon" :size="16" />
         <span v-if="testing.vision">…测试中</span>
         <span v-else>测试视觉</span>
       </button>
@@ -71,7 +71,7 @@ function truncate(value: string | undefined, limit: number): string {
     >
       <template v-if="lastResult.ok">
         <span class="badge with-icon">
-          <img :src="modelAssets.testOk" alt="" width="18" height="18" />
+          <component :is="modelIcons.testOk" :size="14" />
           {{ lastResult.kind === 'vision' ? '视觉通' : '文本通' }}
         </span>
         <span class="meta">
@@ -85,7 +85,7 @@ function truncate(value: string | undefined, limit: number): string {
       </template>
       <template v-else>
         <span class="badge with-icon">
-          <img :src="modelAssets.testFail" alt="" width="18" height="18" />
+          <component :is="modelIcons.testFail" :size="14" />
           失败
         </span>
         <span class="meta" :title="lastResult.error">

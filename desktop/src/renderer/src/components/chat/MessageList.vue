@@ -2,7 +2,8 @@
 import { nextTick, ref, watch } from 'vue'
 import { slashCommands } from '../../commands'
 import type { ChatMessage, UserMessage } from '../../types'
-import { avatarAssets, brandAssets, emptyAssets } from '../../assets'
+import { brandAssets } from '../../assets'
+import { avatarIcons, emptyIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
 
@@ -80,7 +81,7 @@ function schedulerTriggerPrefix(content: string) {
           <h1>下旨即可开工。</h1>
           <p>这里是一条主线，不再区分会话。右侧工作台负责模型厂家、Token 账本、Skill、Tool 和配置文件。</p>
         </div>
-        <img class="welcome-hero" :src="emptyAssets.welcome" alt="御前智能体待命" />
+        <component :is="emptyIcons.welcome" class="welcome-hero" :size="96" :stroke-width="1" />
       </div>
     </div>
 
@@ -102,7 +103,7 @@ function schedulerTriggerPrefix(content: string) {
         </article>
         <article v-else-if="message.role === 'user'" class="message-row user">
           <div class="avatar user" aria-hidden="true">
-            <img class="pixel-avatar" :src="avatarAssets.emperor" alt="" />
+            <component :is="avatarIcons.emperor" :size="16" />
           </div>
           <div class="message-cluster user">
             <div class="message-meta user"><span>皇</span><small>圣旨</small></div>

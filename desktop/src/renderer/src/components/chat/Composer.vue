@@ -2,7 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import type { SlashPaletteItem } from '../../commands'
 import type { AttachmentRef } from '../../types'
-import { actionAssets } from '../../assets'
+import { actionIcons } from '../../icons'
 import { uploadAttachment } from '../../api/attachments'
 import AttachmentChip from './AttachmentChip.vue'
 
@@ -78,21 +78,21 @@ const modeOptions = [
     label: 'Ask Before Edit',
     short: 'Ask',
     description: 'Ask before risky or uncertain actions',
-    icon: actionAssets.modeAskBeforeEdit,
+    icon: actionIcons.modeAskBeforeEdit,
   },
   {
     value: 'auto',
     label: 'Auto',
     short: 'Auto',
     description: 'Run with maximum automatic permission',
-    icon: actionAssets.modeAuto,
+    icon: actionIcons.modeAuto,
   },
   {
     value: 'plan',
     label: 'Plan',
     short: 'Plan',
     description: 'Explore read-only, then present a plan',
-    icon: actionAssets.modePlan,
+    icon: actionIcons.modePlan,
   },
 ] as const
 
@@ -359,7 +359,7 @@ const sendDisabled = computed(() => !props.busy && !value.value.trim() && drafts
             :disabled="props.busy"
             @click="pickFiles"
           >
-            <img class="action-icon" :src="actionAssets.attach" alt="" width="24" height="24" />
+            <component :is="actionIcons.attach" class="action-icon" :size="18" />
           </button>
 
           <button
@@ -385,10 +385,10 @@ const sendDisabled = computed(() => !props.busy && !value.value.trim() && drafts
               :disabled="props.busy"
               @click="toggleModeMenu"
             >
-              <img class="mode-icon" :src="currentMode.icon" alt="" width="18" height="18" />
+              <component :is="currentMode.icon" class="mode-icon" :size="16" />
               <span>{{ currentMode.label }}</span>
               <em>{{ currentMode.value === 'plan' ? 'Plan first' : currentMode.value === 'auto' ? 'Full auto' : 'Ask first' }}</em>
-              <img class="mode-caret" :src="actionAssets.caretDown" alt="" width="14" height="14" />
+              <component :is="actionIcons.caretDown" class="mode-caret" :size="12" />
             </button>
 
             <div v-if="modeMenuOpen" class="mode-menu">
@@ -404,7 +404,7 @@ const sendDisabled = computed(() => !props.busy && !value.value.trim() && drafts
                 :data-active="currentMode.value === option.value"
                 @click="selectMode(option.value)"
               >
-                <img class="mode-option-icon" :src="option.icon" alt="" width="20" height="20" />
+                <component :is="option.icon" class="mode-option-icon" :size="16" />
                 <span>
                   <strong>{{ option.label }}</strong>
                   <small>{{ option.description }}</small>
@@ -445,7 +445,7 @@ const sendDisabled = computed(() => !props.busy && !value.value.trim() && drafts
             :type="props.busy ? 'button' : 'submit'"
             @click="props.busy ? emit('stop') : undefined"
           >
-            <img class="action-icon send-icon" :src="props.busy ? actionAssets.statusBusy : actionAssets.send" alt="" width="24" height="24" />
+            <component :is="props.busy ? actionIcons.statusBusy : actionIcons.send" class="action-icon send-icon" :class="{ 'animate-spin': props.busy }" :size="18" />
             <span class="sr-only">{{ props.busy ? '停止' : '发送' }}</span>
           </button>
         </div>

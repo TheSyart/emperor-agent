@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AssistantMessage, AssistantSegment, ThoughtSegment } from '../../types'
-import { actionAssets, avatarAssets } from '../../assets'
+import { actionIcons, avatarIcons } from '../../icons'
 import MarkdownBlock from './MarkdownBlock.vue'
 import TodoPanel from './TodoPanel.vue'
 import ToolEvent from './ToolEvent.vue'
@@ -69,19 +69,19 @@ async function copyMessage() {
       <div v-if="messageText" class="assistant-toolbar">
         <div class="message-meta assistant">
           <span aria-hidden="true">
-            <img class="assistant-mini-avatar" :src="avatarAssets.eunuch" alt="" />
+            <component :is="avatarIcons.eunuch" class="assistant-mini-avatar" :size="16" />
           </span>
           <small>李 · 回奏</small>
         </div>
         <button class="copy-message-button" type="button" @click="copyMessage">
-          <img class="action-icon" :src="actionAssets.copy" alt="" width="16" height="16" />
+          <component :is="actionIcons.copy" class="action-icon" :size="14" />
           <span>{{ copied ? '已复制' : '复制' }}</span>
         </button>
       </div>
       <div v-else class="assistant-toolbar ghost">
         <div class="message-meta assistant">
           <span aria-hidden="true">
-            <img class="assistant-mini-avatar" :src="avatarAssets.eunuch" alt="" />
+            <component :is="avatarIcons.eunuch" class="assistant-mini-avatar" :size="16" />
           </span>
           <small>李 · 候旨</small>
         </div>

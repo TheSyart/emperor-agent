@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { ToolSegment, ToolStatus } from '../../types'
 import { compactJson } from '../../utils/format'
-import { toolIcon } from '../../assets'
+import { toolIcon } from '../../icons'
 import ExpandableText from './ExpandableText.vue'
 import SubagentTrail from './SubagentTrail.vue'
 
@@ -87,7 +87,7 @@ function durationLabel(ms?: number) {
   <details class="timeline-node activity-card tool-step" :class="props.segment.status" :open="defaultOpen">
     <summary class="activity-summary">
       <span class="activity-rail" aria-hidden="true">
-        <img class="activity-icon" :src="toolIcon(props.segment.name)" alt="" width="26" height="26" />
+        <component :is="toolIcon(props.segment.name)" class="activity-icon" :size="16" />
         <span class="activity-status-dot" />
       </span>
       <span class="activity-main">

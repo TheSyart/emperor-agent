@@ -2,14 +2,14 @@
 import { computed } from 'vue'
 import type { AttachmentRef } from '../../types'
 import { attachmentRawUrl } from '../../api/attachments'
-import { attachmentIcon } from '../../assets'
+import { attachmentIcon } from '../../icons'
 
 const props = defineProps<{ data: AttachmentRef; removable?: boolean }>()
 const emit = defineEmits<{ (e: 'remove'): void }>()
 
 const isImage = computed(() => props.data.kind === 'image')
 const previewUrl = computed(() => (isImage.value ? attachmentRawUrl(props.data.id) : null))
-const iconUrl = computed(() => attachmentIcon(props.data.kind, props.data.mime, props.data.name))
+const iconComp = computed(() => attachmentIcon(props.data.kind, props.data.mime, props.data.name))
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -29,7 +29,7 @@ function formatBytes(n: number): string {
       loading="lazy"
     />
     <span v-else class="attach-doc-icon" aria-hidden="true">
-      <img :src="iconUrl" alt="" width="34" height="34" />
+      <component :is="iconComp" :size="22" />
     </span>
     <div class="attach-meta">
       <div class="attach-name">{{ data.name }}</div>

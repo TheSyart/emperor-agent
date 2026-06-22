@@ -3,7 +3,7 @@ import { watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppContext } from '../composables/useAppContext'
 import SkillsPanel from '../components/panels/SkillsPanel.vue'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 const route = useRoute()
@@ -50,7 +50,7 @@ async function onImport(formData: FormData) {
         <p>查看、编辑、导入与删除当前 Agent 可加载的 SKILL.md</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
       </button>
     </header>

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type { TeamMember, TeamMemberPayload, TeamPayload } from '../../types'
-import { avatarAssets, toolIcon } from '../../assets'
+import { avatarIcons, toolIcon } from '../../icons'
 
 const ctx = useAppContext()
 const selectedName = ref('')
@@ -168,7 +168,7 @@ function memberClasses(member: TeamMember) {
             :class="memberClasses(member)"
             @click="selectedName = member.name"
           >
-            <img class="team-avatar" :src="avatarAssets.subagent" alt="" width="38" height="38" />
+            <component :is="avatarIcons.subagent" class="team-avatar" :size="22" />
             <span class="min-w-0 flex-1">
               <strong>{{ member.name }}</strong>
               <small>{{ member.role }} · {{ member.agent_type }}</small>
@@ -216,7 +216,7 @@ function memberClasses(member: TeamMember) {
             <p>{{ msg.content }}</p>
           </article>
           <div v-if="!timeline.length" class="team-empty">
-            <img :src="avatarAssets.subagent" alt="" width="96" height="96" />
+            <component :is="avatarIcons.subagent" :size="56" :stroke-width="1" />
             <span>尚无队友消息。</span>
           </div>
         </div>
@@ -232,7 +232,7 @@ function memberClasses(member: TeamMember) {
 
         <div v-if="selected" class="team-detail-body">
           <div class="team-stamp">
-            <img :src="avatarAssets.subagent" alt="" width="64" height="64" />
+            <component :is="avatarIcons.subagent" :size="44" :stroke-width="1" />
             <div class="min-w-0">
               <strong>{{ selected.name }}</strong>
               <span>{{ selected.role }}</span>
@@ -241,7 +241,7 @@ function memberClasses(member: TeamMember) {
 
           <div class="team-tool-cloud">
             <span v-for="tool in selected.tools || detail?.member.tools || []" :key="tool">
-              <img :src="toolIcon(tool)" alt="" width="18" height="18" />
+              <component :is="toolIcon(tool)" :size="14" />
               {{ tool }}
             </span>
           </div>

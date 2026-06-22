@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAppContext } from '../composables/useAppContext'
 import ToolsPanel from '../components/panels/ToolsPanel.vue'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 </script>
@@ -14,7 +14,7 @@ const ctx = useAppContext()
         <p>当前注册的内建工具与 MCP 工具</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
       </button>
     </header>

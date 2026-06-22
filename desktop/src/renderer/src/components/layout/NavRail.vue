@@ -4,7 +4,8 @@ import { useRoute } from 'vue-router'
 import { useAppContext } from '../../composables/useAppContext'
 import { formatCompactNumber } from '../../utils/format'
 import { navOrder } from '../../router'
-import { actionAssets, brandAssets, navIcon as resolveNavIcon } from '../../assets'
+import { brandAssets } from '../../assets'
+import { actionIcons, navIcon as resolveNavIcon } from '../../icons'
 import { useTheme } from '../../composables/useTheme'
 
 const ctx = useAppContext()
@@ -53,9 +54,9 @@ const counts = computed(() => ({
 
 const current = computed(() => ctx.boot.value?.modelConfig?.current)
 const statusIcon = computed(() => {
-  if (ctx.busy.value) return actionAssets.statusBusy
-  if (ctx.status.value === 'error') return actionAssets.statusError
-  return actionAssets.statusOnline
+  if (ctx.busy.value) return actionIcons.statusBusy
+  if (ctx.status.value === 'error') return actionIcons.statusError
+  return actionIcons.statusOnline
 })
 </script>
 
@@ -83,7 +84,7 @@ const statusIcon = computed(() => {
 
     <div class="rail-status">
       <span class="status-pill">
-        <img class="status-icon" :src="statusIcon" alt="" width="16" height="16" />
+        <component :is="statusIcon" class="status-icon" :size="13" :class="{ 'animate-spin': ctx.busy.value }" />
         {{ ctx.runtimeText() }}
       </span>
       <span class="mini-code">single context</span>
@@ -104,13 +105,7 @@ const statusIcon = computed(() => {
         class="rail-action"
         :class="{ active: route.name === item.name }"
       >
-        <img
-          :src="resolveNavIcon(item.name, route.name === item.name)"
-          :alt="item.name"
-          class="nav-icon"
-          width="32"
-          height="32"
-        />
+        <component :is="resolveNavIcon(item.name)" class="nav-icon" :size="18" />
         <div class="nav-label">
           <span>{{ item.label }}</span>
           <small>{{ item.hint }}</small>
@@ -123,7 +118,7 @@ const statusIcon = computed(() => {
         <span>{{ theme === 'dark' ? '☾ 深色' : '☀ 浅色' }}</span>
       </button>
       <button class="tool-button wide asset-button primary-action rail-clear-button" @click="ctx.clearChat()">
-        <img class="action-icon" :src="actionAssets.clear" alt="" width="20" height="20" />
+        <component :is="actionIcons.clear" class="action-icon" :size="16" />
         <span>清空当前屏幕</span>
       </button>
       <p>清空只影响网页显示，不会删除运行期记忆。</p>

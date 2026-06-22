@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ToolInfo } from '../../types'
-import { emptyAssets, toolIcon } from '../../assets'
+import { emptyIcons, toolIcon } from '../../icons'
 
 const props = defineProps<{ tools: ToolInfo[] }>()
 const filter = ref('')
@@ -43,7 +43,7 @@ function paramNames(params?: Record<string, unknown>): string[] {
         class="tool-card"
       >
         <div class="tool-card-head">
-          <img class="tool-card-icon" :src="toolIcon(tool.name)" alt="" width="40" height="40" />
+          <component :is="toolIcon(tool.name)" class="tool-card-icon" :size="22" />
           <div class="min-w-0 flex-1">
             <div class="tool-card-name">{{ tool.name }}</div>
             <div class="tool-card-desc">{{ tool.description || '无描述' }}</div>
@@ -65,7 +65,7 @@ function paramNames(params?: Record<string, unknown>): string[] {
         </div>
       </div>
       <div v-if="!filtered.length" class="empty-state illustrated-empty tool-empty">
-        <img :src="emptyAssets.tools" alt="" />
+        <component :is="emptyIcons.tools" :size="64" :stroke-width="1" />
         <span>没有匹配的 tool。</span>
       </div>
     </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { SkillInfo } from '../../types'
-import { actionAssets, emptyAssets, toolAssets } from '../../assets'
+import { actionIcons, emptyIcons, toolIconMap } from '../../icons'
 import MarkdownBlock from '../chat/MarkdownBlock.vue'
 
 const props = defineProps<{ skills: SkillInfo[]; activeSkill: string | null; content: string }>()
@@ -69,11 +69,11 @@ function onImportFile(event: Event) {
         </span>
       </div>
       <button class="tool-button asset-button primary-action" @click="createSkill">
-        <img class="action-icon" :src="actionAssets.new" alt="" width="18" height="18" />
+        <component :is="actionIcons.new" class="action-icon" :size="16" />
         <span>新增</span>
       </button>
       <button class="tool-button asset-button" @click="importInput?.click()">
-        <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+        <component :is="actionIcons.save" class="action-icon" :size="16" />
         <span>导入 .zip</span>
       </button>
       <input ref="importInput" type="file" accept=".zip" class="hidden" @change="onImportFile" />
@@ -89,7 +89,7 @@ function onImportFile(event: Event) {
           @click="emit('load', skill.name)"
         >
           <div class="skill-card-head">
-            <img class="resource-icon skill-card-icon" :src="toolAssets.skill" alt="" width="40" height="40" />
+            <component :is="toolIconMap.skill" class="resource-icon skill-card-icon" :size="22" />
             <div class="min-w-0 flex-1">
               <div class="skill-card-name">{{ skill.name }}</div>
               <div class="skill-card-desc">{{ skill.description || '暂无描述' }}</div>
@@ -110,13 +110,13 @@ function onImportFile(event: Event) {
           </span>
         </div>
         <div v-if="!filtered.length" class="empty-state illustrated-empty compact-illustration">
-          <img :src="emptyAssets.skills" alt="" />
+          <component :is="emptyIcons.skills" :size="64" :stroke-width="1" />
           <span>还没有发现 skill。</span>
         </div>
       </div>
 
       <div v-if="!props.activeSkill" class="empty-state illustrated-empty">
-        <img :src="emptyAssets.skills" alt="" />
+        <component :is="emptyIcons.skills" :size="64" :stroke-width="1" />
         <span>选择一个 skill，或新建/导入一个能力包。</span>
       </div>
       <div v-else class="editor skill-editor">
@@ -145,7 +145,7 @@ function onImportFile(event: Event) {
         <div class="editor-actions">
           <span class="status-pill">保存后刷新 system prompt</span>
           <button class="tool-button ink asset-button primary-action" @click="emit('save', draft)">
-            <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+            <component :is="actionIcons.save" class="action-icon" :size="16" />
             <span>保存 skill</span>
           </button>
         </div>

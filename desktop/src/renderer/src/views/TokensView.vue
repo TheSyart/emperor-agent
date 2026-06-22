@@ -4,7 +4,7 @@ import { useAppContext } from '../composables/useAppContext'
 import OverviewSubPanel from '../components/panels/tokens/OverviewSubPanel.vue'
 import ModelsSubPanel from '../components/panels/tokens/ModelsSubPanel.vue'
 import CacheSubPanel from '../components/panels/tokens/CacheSubPanel.vue'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 import type { TokensRange, TokensTab } from '../types'
 
 const ctx = useAppContext()
@@ -66,7 +66,7 @@ function refresh() {
           </button>
         </div>
         <button class="tool-button asset-button refresh-action" title="刷新" @click="refresh">
-          <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+          <component :is="actionIcons.refresh" class="action-icon" :size="16" />
           <span>刷新</span>
         </button>
       </div>

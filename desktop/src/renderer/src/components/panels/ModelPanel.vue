@@ -10,7 +10,8 @@ import type {
   ProviderOption,
   ProviderRegion,
 } from '../../types'
-import { actionAssets, brandAssets } from '../../assets'
+import { brandAssets } from '../../assets'
+import { actionIcons } from '../../icons'
 import ModelEntryList from './model/ModelEntryList.vue'
 import ModelTestPanel from './model/ModelTestPanel.vue'
 
@@ -611,7 +612,7 @@ async function runTest(kind: 'text' | 'vision', role: 'main' | 'secondary' = 'ma
         :title="hasChanges ? '保存并切换到激活条目' : '当前已与服务端同步'"
         @click="save"
       >
-        <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+        <component :is="actionIcons.save" class="action-icon" :size="16" />
         <span>{{ hasChanges ? '保存配置' : '已保存' }}</span>
       </button>
     </div>

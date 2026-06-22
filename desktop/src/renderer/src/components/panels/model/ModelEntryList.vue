@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModelEntry } from '../../../types'
-import { modelAssets } from '../../../assets'
+import { modelIcons } from '../../../icons'
 
 defineProps<{
   entries: ModelEntry[]
@@ -41,7 +41,7 @@ const emit = defineEmits<{
               title="此条目已通过视觉测试，可接收图片附件"
               aria-label="视觉已激活"
             >
-              <img :src="modelAssets.vision" alt="" width="18" height="18" />
+              <component :is="modelIcons.vision" :size="14" />
             </span>
           </div>
           <div class="entry-sub">

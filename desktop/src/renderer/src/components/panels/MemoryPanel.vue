@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { MemoryPayload, MemoryVersionDetail } from '../../types'
-import { actionAssets, emptyAssets } from '../../assets'
+import { actionIcons, emptyIcons } from '../../icons'
 import MarkdownBlock from '../chat/MarkdownBlock.vue'
 
 const props = defineProps<{
@@ -184,7 +184,7 @@ function formatNumber(value?: number) {
     </div>
 
     <div v-if="!props.memory" class="empty-state illustrated-empty">
-      <img :src="emptyAssets.memory" alt="" />
+      <component :is="emptyIcons.memory" :size="64" :stroke-width="1" />
       <span>暂无记忆数据。</span>
     </div>
 
@@ -202,7 +202,7 @@ function formatNumber(value?: number) {
       <div class="editor-actions">
         <span class="status-pill">保存后刷新 Agent 上下文</span>
         <button class="tool-button ink asset-button primary-action" @click="saveLongTerm">
-          <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+          <component :is="actionIcons.save" class="action-icon" :size="16" />
           <span>保存</span>
         </button>
       </div>
@@ -229,7 +229,7 @@ function formatNumber(value?: number) {
       <div class="editor-actions">
         <span class="status-pill">Scheduler 会周期检查 Watchlist</span>
         <button class="tool-button ink asset-button primary-action" @click="saveWatchlist">
-          <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+          <component :is="actionIcons.save" class="action-icon" :size="16" />
           <span>保存</span>
         </button>
       </div>
@@ -258,7 +258,7 @@ function formatNumber(value?: number) {
         <span>加载中...</span>
       </div>
       <div v-else-if="!versionDetail" class="empty-state illustrated-empty">
-        <img :src="emptyAssets.memory" alt="" />
+        <component :is="emptyIcons.memory" :size="64" :stroke-width="1" />
         <span>选择一个版本以查看 diff。</span>
       </div>
       <div v-else class="editor flex-1">
@@ -289,7 +289,7 @@ function formatNumber(value?: number) {
         <span>加载中...</span>
       </div>
       <div v-else-if="!selectedEpisode" class="empty-state illustrated-empty">
-        <img :src="emptyAssets.memory" alt="" />
+        <component :is="emptyIcons.memory" :size="64" :stroke-width="1" />
         <span>选择一个情景记忆文件以查看或编辑。</span>
       </div>
       <div v-else class="editor flex-1">
@@ -306,7 +306,7 @@ function formatNumber(value?: number) {
         <div class="editor-actions">
           <span class="status-pill">{{ selectedEpisode.date }}</span>
           <button class="tool-button ink asset-button primary-action" @click="saveEpisode">
-            <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+            <component :is="actionIcons.save" class="action-icon" :size="16" />
             <span>保存</span>
           </button>
         </div>

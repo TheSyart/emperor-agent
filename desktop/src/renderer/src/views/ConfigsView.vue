@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useAppContext } from '../composables/useAppContext'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 const draft = ref('')
@@ -42,7 +42,7 @@ function toggleDesktopPet() {
         <p>templates/USER.local.md — 用户偏好与档案</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
       </button>
     </header>
@@ -55,7 +55,7 @@ function toggleDesktopPet() {
             <div class="editor-actions">
               <span class="status-pill">保存后刷新 Agent 上下文</span>
               <button class="tool-button ink asset-button primary-action" @click="save">
-                <img class="action-icon" :src="actionAssets.save" alt="" width="18" height="18" />
+                <component :is="actionIcons.save" class="action-icon" :size="16" />
                 <span>保存配置</span>
               </button>
             </div>

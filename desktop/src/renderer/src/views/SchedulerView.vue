@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAppContext } from '../composables/useAppContext'
 import SchedulerPanel from '../components/panels/SchedulerPanel.vue'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 </script>
@@ -14,7 +14,7 @@ const ctx = useAppContext()
         <p>本地定时任务、运行历史与自动化入口</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
       </button>
     </header>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAppContext } from '../composables/useAppContext'
 import MemoryPanel from '../components/panels/MemoryPanel.vue'
-import { actionAssets } from '../assets'
+import { actionIcons } from '../icons'
 
 const ctx = useAppContext()
 
@@ -34,7 +34,7 @@ function onRestoreVersion(id: string) {
         <p>长期记忆与情景记忆的查看、编辑与管理</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.runSafely(() => ctx.refreshMemory(true))">
-        <img class="action-icon" :src="actionAssets.refresh" alt="" width="26" height="26" />
+        <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
       </button>
     </header>
