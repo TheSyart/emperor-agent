@@ -2,13 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NavRail from './components/layout/NavRail.vue'
+import SessionSidebar from './components/layout/SessionSidebar.vue'
 import { buildSlashPaletteItems, parseSkillSlashCommand, parseSlashCommand, slashCommands, type SlashCommand } from './commands'
 import { useBootstrap } from './composables/useBootstrap'
 import { useRuntime } from './composables/useRuntime'
 import { useTokens } from './composables/useTokens'
 import { provideAppContext } from './composables/useAppContext'
 import type { ChatSendPayload, CompactResult, TokenStatsRow } from './types'
-import { brandAssets } from './assets'
 import { apiUrl } from './api/backend'
 import { formatNumber, usageTypeLabel } from './utils/format'
 
@@ -558,8 +558,8 @@ provideAppContext({
   </div>
 
   <div v-else class="app-shell">
-    <img class="app-cover-watermark" :src="brandAssets.ogCover" alt="" aria-hidden="true" />
     <NavRail />
+    <SessionSidebar />
     <router-view v-slot="{ Component }">
       <keep-alive>
         <component :is="Component" />

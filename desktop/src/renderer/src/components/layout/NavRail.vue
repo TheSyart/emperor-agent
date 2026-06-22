@@ -2,55 +2,20 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppContext } from '../../composables/useAppContext'
-import { formatCompactNumber } from '../../utils/format'
 import { navOrder } from '../../router'
-import { brandAssets } from '../../assets'
-import { actionIcons, navIcon as resolveNavIcon } from '../../icons'
+import { actionIcons, brandIcon, navIcon as resolveNavIcon } from '../../icons'
 import { useTheme } from '../../composables/useTheme'
 
 const ctx = useAppContext()
 const route = useRoute()
 const { theme, toggle: toggleTheme } = useTheme()
 
-const navItems = computed(() => {
-  const hints: Record<(typeof navOrder)[number], string> = {
-    chat: '御前对话',
-    model: '模型厂家',
-    tokens: '用量账本',
-    skills: '能力包',
-    tools: '工具权限',
-    team: '队友协作',
-    scheduler: '定时任务',
-    configs: '配置文件',
-    mcp: '外部工具',
-    memory: '记忆层',
-  }
-  const labels: Record<(typeof navOrder)[number], string> = {
-    chat: 'Chat',
-    model: 'Model',
-    tokens: 'Tokens',
-    skills: 'Skills',
-    tools: 'Tools',
-    team: 'Team',
-    scheduler: '定时任务',
-    configs: '配置文件',
-    mcp: 'MCP',
-    memory: 'Memory',
-  }
-  return navOrder.map((name) => ({
+const navItems = computed(() =>
+  navOrder.map((name) => ({
     name,
     to: name === 'chat' ? '/chat' : `/${name}`,
-    hint: hints[name],
-    label: labels[name],
-  }))
-})
-
-const counts = computed(() => ({
-  providers: ctx.boot.value?.modelConfig?.providerOptions?.length || 0,
-  tokens: ctx.boot.value?.memory?.tokenTotals?.total || 0,
-  skills: ctx.boot.value?.skills?.length || 0,
-  tools: ctx.boot.value?.tools?.length || 0,
-}))
+  })),
+)
 
 const current = computed(() => ctx.boot.value?.modelConfig?.current)
 const statusIcon = computed(() => {
@@ -58,70 +23,49 @@ const statusIcon = computed(() => {
   if (ctx.status.value === 'error') return actionIcons.statusError
   return actionIcons.statusOnline
 })
+const modelLabel = computed(
+  () =>
+    current.value?.entryLabel ||
+    current.value?.entryName ||
+    `${current.value?.provider || 'provider'} / ${current.value?.model || 'model'}`,
+)
 </script>
 
 <template>
-  <aside class="nav-rail">
-    <div class="brand-panel">
-      <div class="brand-main">
-        <div class="brand-orb">
-          <img class="brand-seal" :src="brandAssets.logoMark" alt="Emperor Agent" width="72" height="72" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="brand-title">Emperor Agent</p>
-          <p class="brand-subtitle">本地智能体工作台</p>
-        </div>
-      </div>
-      <div class="brand-model-row">
-        <p
-          class="brand-provider-pill truncate"
-          :title="`${current?.provider || ''} / ${current?.model || ''}`"
-        >
-          {{ current?.entryLabel || current?.entryName || `${current?.provider || 'provider'} / ${current?.model || 'model'}` }}
-        </p>
-      </div>
+  <aside class="nav-rail" aria-label="Primary navigation">
+    <div class="rail-brand" :title="modelLabel">
+      <component :is="brandIcon" :size="18" />
     </div>
 
-    <div class="rail-status">
-      <span class="status-pill">
-        <component :is="statusIcon" class="status-icon" :size="13" :class="{ 'animate-spin': ctx.busy.value }" />
-        {{ ctx.runtimeText() }}
-      </span>
-      <span class="mini-code">single context</span>
+    <div class="rail-status" :title="ctx.runtimeText()">
+      <component
+        :is="statusIcon"
+        class="status-icon"
+        :size="13"
+        :class="{ 'animate-spin': ctx.busy.value, error: ctx.status.value === 'error' }"
+      />
     </div>
 
-    <div class="rail-metrics" aria-label="Agent resources">
-      <div class="metric"><strong>{{ counts.providers }}</strong><span>Models</span></div>
-      <div class="metric"><strong>{{ formatCompactNumber(counts.tokens) }}</strong><span>Tokens</span></div>
-      <div class="metric"><strong>{{ counts.skills }}</strong><span>Skills</span></div>
-      <div class="metric"><strong>{{ counts.tools }}</strong><span>Tools</span></div>
-    </div>
-
-    <nav class="rail-actions" aria-label="Primary navigation">
+    <nav class="rail-actions">
       <router-link
         v-for="item in navItems"
         :key="item.name"
         :to="item.to"
         class="rail-action"
         :class="{ active: route.name === item.name }"
+        :title="item.name"
       >
-        <component :is="resolveNavIcon(item.name)" class="nav-icon" :size="18" />
-        <div class="nav-label">
-          <span>{{ item.label }}</span>
-          <small>{{ item.hint }}</small>
-        </div>
+        <component :is="resolveNavIcon(item.name)" :size="18" />
       </router-link>
     </nav>
 
     <div class="rail-footer">
-      <button class="tool-button wide" @click="toggleTheme()">
-        <span>{{ theme === 'dark' ? '☾ 深色' : '☀ 浅色' }}</span>
+      <button class="rail-icon-button" :title="theme === 'dark' ? '切换浅色' : '切换深色'" @click="toggleTheme()">
+        <component :is="theme === 'dark' ? actionIcons.statusOnline : actionIcons.statusBusy" :size="16" />
       </button>
-      <button class="tool-button wide asset-button primary-action rail-clear-button" @click="ctx.clearChat()">
-        <component :is="actionIcons.clear" class="action-icon" :size="16" />
-        <span>清空当前屏幕</span>
+      <button class="rail-icon-button" title="清空当前屏幕" @click="ctx.clearChat()">
+        <component :is="actionIcons.clear" :size="16" />
       </button>
-      <p>清空只影响网页显示，不会删除运行期记忆。</p>
     </div>
   </aside>
 </template>

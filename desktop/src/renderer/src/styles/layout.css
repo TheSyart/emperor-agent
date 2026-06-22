@@ -1,52 +1,99 @@
   .app-shell {
-    @apply relative grid min-h-dvh gap-3 p-4;
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    @apply relative grid h-dvh min-h-dvh;
+    grid-template-columns: 52px minmax(220px, 260px) minmax(0, 1fr);
   }
 
-  .app-cover-watermark {
-    @apply pointer-events-none fixed bottom-0 right-0 hidden mix-blend-multiply lg:block;
-    z-index: 0;
-    width: min(42vw, 560px);
-    opacity: 0.075;
-    image-rendering: pixelated;
-    transform: translate(12%, 12%) rotate(-4deg);
-  }
-
-  .nav-rail,
-  .main-view {
-    @apply relative z-10 min-h-0 rounded-[2rem] border border-line/75 bg-paper/85 shadow-imperial backdrop-blur-xl;
-    box-shadow:
-      0 1.5rem 4.5rem rgb(var(--ink) / 0.11),
-      inset 0 1px 0 rgb(255 255 255 / 0.52);
-  }
-
+  /* ── Icon rail ──────────────────────────────────────────────────────────── */
   .nav-rail {
-    @apply sticky top-4 flex h-[calc(100dvh-2rem)] flex-col gap-3.5 overflow-hidden p-4;
+    @apply flex h-dvh flex-col items-center gap-1 border-r py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
   }
 
+  .rail-brand {
+    @apply mb-2 grid size-9 shrink-0 place-items-center rounded-md;
+    color: rgb(var(--fg));
+  }
+
+  .rail-status {
+    @apply mb-2 grid size-9 shrink-0 place-items-center rounded-md;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .rail-status .status-icon.error {
+    color: rgb(var(--danger));
+  }
+
+  .rail-actions {
+    @apply flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto;
+  }
+
+  .rail-action {
+    @apply grid size-9 shrink-0 place-items-center rounded-md transition;
+    color: rgb(var(--fg-muted));
+  }
+
+  .rail-action:hover {
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
+  .rail-action.active {
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--accent));
+  }
+
+  .rail-footer {
+    @apply mt-1 flex flex-col items-center gap-1;
+  }
+
+  .rail-icon-button {
+    @apply grid size-9 place-items-center rounded-md transition;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .rail-icon-button:hover {
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
+  /* ── Session sidebar (placeholder layout; T14 fills content) ────────────── */
+  .session-sidebar {
+    @apply flex h-dvh min-h-0 flex-col border-r;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+  }
+
+  .session-sidebar-head {
+    @apply shrink-0 px-3 py-3 text-[11px] font-semibold uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .session-sidebar-empty {
+    @apply flex flex-1 items-center justify-center px-4 text-center text-xs;
+    color: rgb(var(--fg-subtle));
+  }
+
+  /* ── Main view ──────────────────────────────────────────────────────────── */
   .main-view {
-    @apply flex h-[calc(100dvh-2rem)] min-h-0 flex-col overflow-hidden;
+    @apply flex h-dvh min-h-0 flex-col overflow-hidden;
+    background: rgb(var(--bg));
   }
 
   .view-head {
-    @apply relative flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-line/70 px-6 py-3.5;
-    background:
-      linear-gradient(135deg, rgb(var(--paper-2) / 0.74), rgb(var(--paper) / 0.86)),
-      radial-gradient(circle at 92% 0%, rgb(var(--seal) / 0.06), transparent 12rem);
-  }
-
-  .view-head::after {
-    content: '';
-    @apply pointer-events-none absolute -right-8 -top-12 h-36 w-36 opacity-5;
-    background: url('../../../../../assets/textures/texture-seal.png') center / contain no-repeat;
+    @apply relative flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg));
   }
 
   .view-head h1 {
-    @apply font-display text-xl font-black text-ink;
+    @apply text-sm font-semibold;
+    color: rgb(var(--fg));
   }
 
   .view-head p {
-    @apply mt-1 text-xs text-muted;
+    @apply mt-0.5 text-xs;
+    color: rgb(var(--fg-subtle));
   }
 
   .view-body {
@@ -62,167 +109,29 @@
   }
 
   .view-readable .view-body > * {
-    @apply mx-auto w-full max-w-6xl;
+    @apply mx-auto w-full max-w-5xl;
   }
 
-  .rail-status {
-    @apply flex items-center justify-between gap-1.5 px-1;
-  }
-
-  .brand-panel {
-    @apply flex flex-col gap-2.5 rounded-[1.55rem] border border-line/65 bg-paper2/70 p-3.5 shadow-insetPaper;
-  }
-
-  .brand-main {
-    @apply flex min-w-0 items-center gap-2.5;
-  }
-
-  .brand-orb {
-    @apply relative grid size-[3.9rem] shrink-0 place-items-center overflow-hidden rounded-[1.25rem] border border-seal/25 bg-seal/10 shadow-lg shadow-seal/10;
-  }
-
-  .brand-orb::after {
-    content: '';
-    @apply pointer-events-none absolute inset-0 rounded-[1.35rem] border border-paper/40;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
-  }
-
-  .seal-block {
-    @apply relative grid size-14 place-items-center;
-  }
-
-  .seal {
-    @apply grid size-12 place-items-center rounded-2xl bg-seal font-display text-2xl font-black text-paper shadow-lg shadow-seal/20;
-    letter-spacing: 0.04em;
-  }
-
-  .seal.compact {
-    @apply size-9 rounded-xl text-base;
-  }
-
-  .seal-lines {
-    @apply absolute inset-0 -z-10 rounded-full border border-seal/30;
-    transform: rotate(12deg) scale(1.08);
-  }
-
-  .brand-title {
-    @apply font-display text-[1rem] font-black leading-tight tracking-wide text-ink;
-  }
-
-  .brand-subtitle {
-    @apply mt-0.5 text-[11px] font-semibold tracking-[0.08em] text-muted;
-  }
-
-  .brand-model-row {
-    @apply grid grid-cols-1 gap-2;
-  }
-
-  .brand-provider-pill {
-    @apply min-w-0 rounded-[1rem] border border-line/65 bg-paper/75 px-3 py-2.5 text-center font-mono text-[10px] font-bold text-muted shadow-sm;
-    max-width: 100%;
-  }
-
-  .icon-button {
-    @apply grid size-11 shrink-0 place-items-center rounded-2xl border border-line/70 bg-paper/80 text-sm font-bold text-muted transition hover:border-seal/40 hover:text-seal;
-  }
-
-  .action-icon,
-  .status-icon,
-  .tool-image,
-  .mini-tool-icon,
-  .resource-icon,
-  .usage-mark,
-  .welcome-hero,
-  .subagent-avatar,
-  .note-mark,
-  .attach-doc-icon img,
-  .entry-vision-eye img,
-  .model-test-icon,
-  .test-result .badge img {
-    image-rendering: pixelated;
-    display: block;
-    object-fit: contain;
-  }
-
-  .asset-button {
-    @apply gap-2;
-  }
-
-  .tool-button.asset-button {
-    @apply min-h-12 shrink-0 px-4 py-2.5;
-  }
-
-  .icon-button .action-icon {
-    @apply size-6;
-  }
-
-  .tool-button.asset-button .action-icon {
-    @apply size-8;
-    transform: scale(1.16);
-  }
-
-  .tool-button.asset-button.primary-action {
-    @apply min-h-14 rounded-[1.2rem] px-5 py-3 text-[15px] shadow-sm;
-  }
-
-  .tool-button.asset-button.primary-action .action-icon {
-    @apply size-10;
-    transform: scale(1.28);
-  }
-
-  .rail-clear-button {
-    @apply min-h-12 rounded-[1.1rem] text-sm;
-  }
-
-  .rail-clear-button .action-icon {
-    @apply size-8;
-    transform: scale(1.14);
-  }
-
-  .refresh-action {
-    @apply min-h-14 rounded-[1.2rem] px-5 py-3 text-[15px] shadow-sm;
-  }
-
-  .refresh-action .action-icon {
-    @apply size-7;
-    transform: scale(1);
-  }
-
-  .status-icon {
-    @apply size-4 shrink-0;
-    transform: scale(1.12);
-  }
-
-  .agent-card {
-    @apply relative overflow-hidden rounded-[1.75rem] border border-seal/20 bg-seal/95 p-5 text-paper shadow-lg shadow-seal/20;
-  }
-
-  .agent-card::after {
-    content: '皇';
-    @apply pointer-events-none absolute -right-3 -top-7 font-display text-[8rem] font-black text-paper/10;
-  }
-
-  .agent-card h2 {
-    @apply relative font-display text-2xl font-black leading-tight;
-  }
-
-  .agent-card p {
-    @apply relative mt-3 text-sm leading-7 text-paper/75;
-  }
-
+  /* ── Status / pills ─────────────────────────────────────────────────────── */
   .status-pill {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line/65 bg-paper/70 px-2.5 py-1 text-[10px] font-semibold text-muted;
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+    background: rgb(var(--bg-inset));
   }
 
-  .agent-card .status-pill {
-    @apply border-paper/20 bg-paper/10 text-paper;
+  .mini-code {
+    @apply rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
+  /* ── Dots ───────────────────────────────────────────────────────────────── */
   .dot,
   .tool-dot,
   .pending-dot {
-    @apply inline-block size-2.5 shrink-0 rounded-full bg-jade;
-    box-shadow: 0 0 0 4px rgb(var(--jade) / 0.12);
+    @apply inline-block size-2 shrink-0 rounded-full;
+    background: rgb(var(--ok));
   }
 
   .dot.busy,
@@ -230,8 +139,8 @@
   .tool-event.running .tool-dot,
   .mini-tool.running .tool-dot,
   .tool-dot.running {
-    @apply animate-pulse-seal bg-amber;
-    box-shadow: 0 0 0 4px rgb(var(--amber) / 0.15);
+    @apply animate-pulse-seal;
+    background: rgb(var(--warn));
   }
 
   .dot.error,
@@ -241,92 +150,79 @@
   .mini-tool.error_aborted .tool-dot,
   .tool-dot.error,
   .tool-dot.error_aborted {
-    @apply bg-seal;
-    box-shadow: 0 0 0 4px rgb(var(--seal) / 0.14);
+    background: rgb(var(--danger));
   }
 
   .pending-bar.done .pending-dot {
-    @apply bg-jade;
-    box-shadow: 0 0 0 4px rgb(var(--jade) / 0.12);
+    background: rgb(var(--ok));
   }
 
   .pending-bar.error .pending-dot {
-    @apply bg-seal;
-    box-shadow: 0 0 0 4px rgb(var(--seal) / 0.14);
+    background: rgb(var(--danger));
   }
 
-  .mini-code {
-    @apply rounded-full border border-line/60 bg-ink/10 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted;
-  }
-
-  .rail-metrics {
-    @apply grid grid-cols-2 gap-1.5;
-  }
-
-  .metric {
-    @apply rounded-[0.95rem] border border-line/55 bg-paper2/35 px-2 py-1.5;
-  }
-
-  .metric strong {
-    @apply block font-display text-base font-black leading-none text-ink;
-  }
-
-  .metric span {
-    @apply mt-1 block text-[8px] uppercase tracking-[0.12em] text-muted;
-  }
-
-  .rail-actions {
-    @apply flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1;
-  }
-
-  .rail-action {
-    @apply flex items-center gap-3 rounded-[1.1rem] border border-transparent bg-paper/35 px-3.5 py-2.5 text-left transition hover:border-line/70 hover:bg-paper/80;
-  }
-
-  .nav-icon {
-    @apply size-10 shrink-0;
-    image-rendering: pixelated;
-    transform: scale(1.24);
-  }
-
-  .brand-seal {
-    @apply absolute left-1/2 top-1/2 size-[6rem] max-w-none drop-shadow;
-    transform: translate(-50%, -50%) scale(1.51);
-    transform-origin: center;
-  }
-
-  .nav-label span {
-    @apply block font-display text-[15px] font-bold text-ink;
-  }
-
-  .nav-label small {
-    @apply text-xs text-muted;
-  }
-
-  .rail-action.active {
-    @apply border-seal/25 bg-seal/10 shadow-insetPaper;
-  }
-
-  .rail-footer {
-    @apply rounded-[1.15rem] border border-line/55 bg-paper2/40 p-2.5;
-  }
-
-  .rail-footer p {
-    @apply mt-1.5 px-0.5 text-[9px] leading-4 text-muted;
-  }
-
+  /* ── Buttons ────────────────────────────────────────────────────────────── */
   .tool-button {
-    @apply inline-flex items-center justify-center rounded-full border border-line/70 bg-paper/80 px-4 py-2 text-sm font-semibold text-ink transition hover:border-seal/40 hover:text-seal disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg));
+  }
+
+  .tool-button:hover {
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-inset));
+  }
+
+  .tool-button:disabled {
+    @apply opacity-50;
   }
 
   .tool-button.ink {
-    @apply border-ink/80 bg-ink text-paper hover:border-seal hover:bg-seal hover:text-paper;
+    border-color: transparent;
+    background: rgb(var(--fg));
+    color: rgb(var(--bg));
+  }
+
+  .tool-button.ink:hover {
+    background: rgb(var(--fg-muted));
   }
 
   .tool-button.danger {
-    @apply border-seal/35 bg-seal/10 text-seal hover:border-seal/60 hover:bg-seal hover:text-paper;
+    background: rgb(var(--danger) / 0.12);
+    border-color: rgb(var(--danger) / 0.4);
+    color: rgb(var(--danger));
+  }
+
+  .tool-button.danger:hover {
+    background: rgb(var(--danger));
+    color: rgb(var(--bg));
   }
 
   .tool-button.wide {
     @apply w-full;
+  }
+
+  .action-icon {
+    @apply shrink-0;
+    display: block;
+  }
+
+  .asset-button {
+    @apply gap-2;
+  }
+
+  .icon-button {
+    @apply grid size-9 shrink-0 place-items-center rounded-md border transition;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+  }
+
+  .icon-button:hover {
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
+  .icon-button .action-icon {
+    @apply size-4;
   }
