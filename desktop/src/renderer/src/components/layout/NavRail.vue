@@ -5,9 +5,11 @@ import { useAppContext } from '../../composables/useAppContext'
 import { formatCompactNumber } from '../../utils/format'
 import { navOrder } from '../../router'
 import { actionAssets, brandAssets, navIcon as resolveNavIcon } from '../../assets'
+import { useTheme } from '../../composables/useTheme'
 
 const ctx = useAppContext()
 const route = useRoute()
+const { theme, toggle: toggleTheme } = useTheme()
 
 const navItems = computed(() => {
   const hints: Record<(typeof navOrder)[number], string> = {
@@ -117,6 +119,9 @@ const statusIcon = computed(() => {
     </nav>
 
     <div class="rail-footer">
+      <button class="tool-button wide" @click="toggleTheme()">
+        <span>{{ theme === 'dark' ? '☾ 深色' : '☀ 浅色' }}</span>
+      </button>
       <button class="tool-button wide asset-button primary-action rail-clear-button" @click="ctx.clearChat()">
         <img class="action-icon" :src="actionAssets.clear" alt="" width="20" height="20" />
         <span>清空当前屏幕</span>
