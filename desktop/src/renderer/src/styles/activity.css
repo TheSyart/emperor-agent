@@ -1,42 +1,29 @@
+  /* ── Tool / activity cards ────────────────────────────────────────────────── */
   .activity-card {
-    @apply relative w-full max-w-full overflow-visible rounded-[1.05rem] border border-line/60 bg-paper/[0.52] text-sm shadow-insetPaper;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.38),
-      0 0.45rem 1.1rem rgb(var(--ink) / 0.04);
+    @apply relative w-full max-w-full overflow-visible rounded-md border text-sm;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
   }
 
   .activity-card[open] {
-    @apply bg-paper/[0.72];
+    background: rgb(var(--bg-elevated));
   }
 
   .activity-card.running {
-    @apply border-amber/35 bg-amber/10;
+    border-color: rgb(var(--warn) / 0.45);
   }
 
   .activity-card.done {
-    @apply border-jade/30 bg-jade/10;
+    border-color: rgb(var(--ok) / 0.4);
   }
 
   .activity-card.error,
   .activity-card.error_aborted {
-    @apply border-seal/30 bg-seal/10;
-  }
-
-  .activity-card.running::before {
-    @apply bg-amber animate-pulse-seal;
-  }
-
-  .activity-card.done::before {
-    @apply bg-jade;
-  }
-
-  .activity-card.error::before,
-  .activity-card.error_aborted::before {
-    @apply bg-seal;
+    border-color: rgb(var(--danger) / 0.45);
   }
 
   .activity-summary {
-    @apply grid cursor-pointer items-center gap-3 px-3.5 py-2.5;
+    @apply grid cursor-pointer items-center gap-2.5 px-3 py-2;
     grid-template-columns: auto minmax(0, 1fr) auto;
     list-style: none;
   }
@@ -46,30 +33,33 @@
   }
 
   .activity-rail {
-    @apply relative grid size-9 shrink-0 place-items-center rounded-[0.8rem] border border-line/55 bg-paper/80;
+    @apply relative grid size-7 shrink-0 place-items-center rounded border;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+    background: rgb(var(--bg-inset));
   }
 
   .activity-icon {
-    @apply size-7;
-    image-rendering: pixelated;
-    transform: scale(1.08);
+    @apply size-4;
   }
 
   .activity-status-dot {
-    @apply absolute -bottom-1 -right-1 size-3 rounded-full border border-paper bg-muted;
+    @apply absolute -bottom-1 -right-1 size-2 rounded-full;
+    background: rgb(var(--fg-subtle));
   }
 
   .activity-card.running .activity-status-dot {
-    @apply bg-amber animate-pulse-seal;
+    @apply animate-pulse-seal;
+    background: rgb(var(--warn));
   }
 
   .activity-card.done .activity-status-dot {
-    @apply bg-jade;
+    background: rgb(var(--ok));
   }
 
   .activity-card.error .activity-status-dot,
   .activity-card.error_aborted .activity-status-dot {
-    @apply bg-seal;
+    background: rgb(var(--danger));
   }
 
   .activity-main {
@@ -77,19 +67,23 @@
   }
 
   .activity-kicker {
-    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+    @apply font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
   }
 
   .activity-main strong {
-    @apply min-w-0 truncate font-mono text-sm font-black text-ink;
+    @apply min-w-0 truncate font-mono text-[13px] font-semibold;
+    color: rgb(var(--fg));
   }
 
   .activity-main strong em {
-    @apply ml-1 font-mono text-[10px] font-semibold not-italic text-muted;
+    @apply ml-1 font-mono text-[10px] font-normal not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
   .activity-main small {
-    @apply line-clamp-1 text-xs leading-5 text-muted;
+    @apply line-clamp-1 text-xs leading-5;
+    color: rgb(var(--fg-muted));
   }
 
   .activity-meta {
@@ -98,26 +92,27 @@
 
   .activity-meta em,
   .activity-meta time {
-    @apply rounded-full border border-line/55 bg-paper/75 px-2 py-1 font-mono text-[10px] not-italic text-muted;
+    @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .activity-card.running .activity-meta em {
-    @apply border-amber/35 bg-amber/15 text-amber;
+    color: rgb(var(--warn));
   }
 
   .activity-card.done .activity-meta em {
-    @apply border-jade/30 bg-jade/10 text-jade;
+    color: rgb(var(--ok));
   }
 
   .activity-card.error .activity-meta em,
   .activity-card.error_aborted .activity-meta em {
-    @apply border-seal/30 bg-seal/10 text-seal;
+    color: rgb(var(--danger));
   }
 
   .activity-body {
-    @apply space-y-3 border-t border-line/50 px-3.5 pb-3.5 pt-3;
-    background:
-      linear-gradient(180deg, rgb(var(--paper) / 0.56), rgb(var(--paper-2) / 0.18));
+    @apply space-y-2.5 border-t px-3 pb-3 pt-2.5;
+    border-color: rgb(var(--border));
   }
 
   .tool-io-grid {
@@ -125,15 +120,20 @@
   }
 
   .tool-io-panel {
-    @apply min-w-0 overflow-hidden rounded-[0.82rem] border border-line/50 bg-paper2/45;
+    @apply min-w-0 overflow-hidden rounded border;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
   }
 
   .tool-io-panel > span {
-    @apply block border-b border-line/45 bg-ink/[0.03] px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-muted;
+    @apply block border-b px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .tool-summary {
-    @apply px-3 py-2 text-xs leading-6 text-muted;
+    @apply px-2.5 py-2 text-xs leading-5;
+    color: rgb(var(--fg-muted));
   }
 
   .tool-code {
@@ -141,7 +141,9 @@
   }
 
   .tool-todo-list {
-    @apply rounded-[0.9rem] border border-amber/30 bg-amber/10 px-3 py-2.5;
+    @apply rounded border px-3 py-2.5;
+    border-color: rgb(var(--warn) / 0.35);
+    background: rgb(var(--warn) / 0.08);
   }
 
   .tool-todo-head {
@@ -149,11 +151,14 @@
   }
 
   .tool-todo-head strong {
-    @apply font-mono text-xs font-black text-ink;
+    @apply font-mono text-xs font-semibold;
+    color: rgb(var(--fg));
   }
 
   .tool-todo-head span {
-    @apply rounded-full border border-amber/30 bg-paper/65 px-2 py-0.5 font-mono text-[10px] text-muted;
+    @apply rounded border px-2 py-0.5 font-mono text-[10px];
+    border-color: rgb(var(--warn) / 0.35);
+    color: rgb(var(--fg-subtle));
   }
 
   .tool-todo-items {
@@ -161,16 +166,21 @@
   }
 
   .tool-todo-item {
-    @apply grid min-w-0 items-center gap-2 rounded-xl border border-line/45 bg-paper/[0.68] px-2.5 py-2 text-xs text-ink;
+    @apply grid min-w-0 items-center gap-2 rounded border px-2.5 py-1.5 text-xs;
     grid-template-columns: auto auto minmax(0, 1fr);
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
   }
 
   .tool-todo-item span {
-    @apply grid size-5 place-items-center rounded-md bg-paper2 font-mono text-[10px] font-black text-muted;
+    @apply grid size-4 place-items-center rounded font-mono text-[10px];
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg-subtle));
   }
 
   .tool-todo-item em {
-    @apply font-mono text-[10px] not-italic text-muted;
+    @apply font-mono text-[10px] not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
   .tool-todo-item p {
@@ -178,43 +188,44 @@
   }
 
   .tool-todo-item.completed {
-    @apply text-muted;
+    color: rgb(var(--fg-subtle));
   }
 
   .tool-todo-item.completed p {
-    @apply line-through decoration-line/80;
+    @apply line-through;
   }
 
   .tool-todo-item.completed span {
-    @apply bg-jade/10 text-jade;
+    color: rgb(var(--ok));
   }
 
   .tool-todo-item.in_progress {
-    @apply border-amber/40 bg-amber/15;
+    border-color: rgb(var(--warn) / 0.4);
+    background: rgb(var(--warn) / 0.08);
   }
 
   .tool-todo-item.in_progress span {
-    @apply bg-amber/20 text-amber;
+    color: rgb(var(--warn));
   }
 
+  /* ── Control cards (Ask / Plan) ──────────────────────────────────────────── */
   .control-card {
-    @apply w-full max-w-full overflow-hidden rounded-[1.35rem] border border-line/70 bg-paper/80 p-4 text-sm shadow-insetPaper;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.45),
-      0 0.9rem 1.8rem rgb(var(--ink) / 0.06);
+    @apply w-full max-w-full overflow-hidden rounded-md border p-4 text-sm;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
   }
 
   .control-card.waiting {
-    @apply border-amber/35 bg-amber/10;
+    border-color: rgb(var(--warn) / 0.45);
   }
 
   .control-card.answered,
   .control-card.approved {
-    @apply border-jade/30 bg-jade/10;
+    border-color: rgb(var(--ok) / 0.4);
   }
 
   .control-card.cancelled {
-    @apply border-seal/30 bg-seal/10;
+    border-color: rgb(var(--danger) / 0.45);
   }
 
   .control-card-head {
@@ -222,19 +233,24 @@
   }
 
   .control-card-head span {
-    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+    @apply font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
   }
 
   .control-card-head strong {
-    @apply min-w-0 flex-1 truncate font-display text-base font-black text-ink;
+    @apply min-w-0 flex-1 truncate text-sm font-semibold;
+    color: rgb(var(--fg));
   }
 
   .control-card-head em {
-    @apply rounded-full border border-line/55 bg-paper/75 px-2.5 py-1 font-mono text-[10px] not-italic text-muted;
+    @apply rounded border px-2 py-0.5 font-mono text-[10px] not-italic;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .control-context {
-    @apply mt-2 text-xs leading-6 text-muted;
+    @apply mt-2 text-xs leading-6;
+    color: rgb(var(--fg-muted));
   }
 
   .ask-question-list {
@@ -242,15 +258,19 @@
   }
 
   .ask-question {
-    @apply rounded-[1.1rem] border border-line/50 bg-paper/65 p-3;
+    @apply rounded-md border p-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
   }
 
   .ask-question-title span {
-    @apply block font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-seal;
+    @apply block font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--accent));
   }
 
   .ask-question-title strong {
-    @apply mt-1 block text-sm font-bold leading-6 text-ink;
+    @apply mt-1 block text-sm font-semibold leading-6;
+    color: rgb(var(--fg));
   }
 
   .ask-options {
@@ -258,24 +278,33 @@
   }
 
   .ask-options button {
-    @apply rounded-[1rem] border border-line/55 bg-paper/70 px-3 py-2 text-left transition hover:border-seal/35 hover:bg-seal/10 disabled:opacity-60;
+    @apply rounded-md border px-3 py-2 text-left transition disabled:opacity-60;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg));
+  }
+
+  .ask-options button:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .ask-options button[data-active='true'] {
-    @apply border-jade/40 bg-jade/10 text-jade;
+    border-color: rgb(var(--ok) / 0.5);
+    color: rgb(var(--ok));
   }
 
   .ask-options strong {
-    @apply block text-xs font-bold;
+    @apply block text-xs font-semibold;
   }
 
   .ask-options small {
-    @apply mt-1 block text-[11px] leading-5 text-muted;
+    @apply mt-1 block text-[11px] leading-5;
+    color: rgb(var(--fg-subtle));
   }
 
   .ask-question textarea,
   .plan-action-zone textarea {
-    @apply mt-2 rounded-[1rem] border-line/60 bg-paper/80 text-sm;
+    @apply mt-2 text-sm;
   }
 
   .control-actions {
@@ -284,61 +313,92 @@
 
   .control-primary,
   .control-secondary {
-    @apply inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-bold transition disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-md border px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-50;
+    border-color: rgb(var(--border));
   }
 
   .control-primary {
-    @apply border-seal/50 bg-seal text-paper hover:bg-ink;
+    background: rgb(var(--accent));
+    border-color: transparent;
+    color: rgb(var(--accent-fg));
+  }
+
+  .control-primary:hover {
+    background: rgb(var(--accent) / 0.85);
   }
 
   .control-secondary {
-    @apply border-line/70 bg-paper/80 text-muted hover:border-seal/35 hover:text-seal;
+    background: transparent;
+    color: rgb(var(--fg));
+  }
+
+  .control-secondary:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .control-footnote {
-    @apply mt-3 text-xs text-muted;
+    @apply mt-3 text-xs;
+    color: rgb(var(--fg-subtle));
   }
 
   .plan-markdown {
-    @apply mt-3 max-h-[36rem] overflow-y-auto rounded-[1.1rem] border border-line/50 bg-paper/70 px-4 py-3;
+    @apply mt-3 max-h-[32rem] overflow-y-auto rounded-md border px-3.5 py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
   }
 
   .plan-assumptions,
   .plan-comments {
-    @apply mt-3 rounded-[1rem] border border-line/45 bg-paper2/40 px-3 py-2;
+    @apply mt-3 rounded-md border px-3 py-2;
+    border-color: rgb(var(--border));
   }
 
   .plan-assumptions span,
   .plan-comments span {
-    @apply block font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+    @apply block font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
   }
 
   .plan-assumptions ul {
-    @apply mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-muted;
+    @apply mt-2 list-disc space-y-1 pl-5 text-xs leading-5;
+    color: rgb(var(--fg-muted));
   }
 
   .plan-comments p {
-    @apply mt-2 whitespace-pre-wrap break-words rounded-xl bg-paper/65 px-3 py-2 text-xs leading-5 text-muted;
+    @apply mt-2 whitespace-pre-wrap break-words rounded-md px-3 py-2 text-xs leading-5;
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg-muted));
   }
 
   .plan-toggle {
-    @apply relative z-10 inline-flex shrink-0 items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 py-2 text-left transition hover:border-seal/35 hover:text-seal disabled:opacity-50;
+    @apply relative z-10 inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-left transition disabled:opacity-50;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg));
+  }
+
+  .plan-toggle:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .plan-toggle[data-active='true'] {
-    @apply border-jade/35 bg-jade/10 text-jade;
+    border-color: rgb(var(--ok) / 0.45);
+    color: rgb(var(--ok));
   }
 
   .plan-toggle span {
-    @apply font-mono text-xs font-black;
+    @apply font-mono text-xs font-semibold;
   }
 
   .plan-toggle em {
-    @apply text-[11px] not-italic text-muted;
+    @apply text-[11px] not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
+  /* ── Expandable text ─────────────────────────────────────────────────────── */
   .expandable-text {
-    @apply min-w-0 text-xs leading-6 text-muted;
+    @apply min-w-0 text-xs leading-6;
+    color: rgb(var(--fg-muted));
   }
 
   .expandable-text span {
@@ -350,11 +410,19 @@
   }
 
   .expandable-text button {
-    @apply mt-1 rounded-full border border-line/70 bg-paper/70 px-2.5 py-1 text-[11px] font-semibold text-seal transition hover:border-seal/40 hover:bg-seal/10;
+    @apply mt-1 rounded border px-2 py-0.5 text-[11px] font-medium transition;
+    border-color: rgb(var(--border));
+    color: rgb(var(--accent));
   }
 
+  .expandable-text button:hover {
+    background: rgb(var(--accent) / 0.1);
+  }
+
+  /* ── Markdown ────────────────────────────────────────────────────────────── */
   .markdown-body {
-    @apply min-w-0 max-w-full text-[15px] leading-8 text-ink;
+    @apply min-w-0 max-w-full text-[14px] leading-7;
+    color: rgb(var(--fg));
     overflow-wrap: anywhere;
   }
 
@@ -369,23 +437,25 @@
   .markdown-body h1,
   .markdown-body h2,
   .markdown-body h3 {
-    @apply font-display font-black leading-tight text-ink;
+    @apply font-semibold leading-tight;
+    color: rgb(var(--fg));
   }
 
   .markdown-body h1 {
-    @apply text-2xl;
-  }
-
-  .markdown-body h2 {
     @apply text-xl;
   }
 
-  .markdown-body h3 {
+  .markdown-body h2 {
     @apply text-lg;
   }
 
+  .markdown-body h3 {
+    @apply text-base;
+  }
+
   .markdown-body a {
-    @apply font-semibold text-seal underline decoration-seal/30 underline-offset-4;
+    @apply font-medium underline underline-offset-4;
+    color: rgb(var(--accent));
   }
 
   .markdown-body ul,
@@ -402,36 +472,47 @@
   }
 
   .markdown-body blockquote {
-    @apply border-l-4 border-amber/40 bg-amber/10 py-2 pl-4 text-muted;
+    @apply border-l-2 py-1 pl-4;
+    border-color: rgb(var(--border-strong));
+    color: rgb(var(--fg-muted));
   }
 
   .markdown-body code {
-    @apply rounded-md bg-ink/10 px-1.5 py-0.5 font-mono text-[0.9em] text-seal;
+    @apply rounded px-1.5 py-0.5 font-mono text-[0.9em];
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
   }
 
   .markdown-body pre {
-    @apply max-w-full overflow-x-auto rounded-2xl border border-line/70 bg-ink p-4 text-paper;
+    @apply max-w-full overflow-x-auto rounded-md border p-3.5;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
   }
 
   .markdown-body pre code {
-    @apply bg-transparent p-0 text-paper;
+    @apply bg-transparent p-0;
   }
 
   .markdown-body table {
-    @apply block w-full max-w-full overflow-x-auto rounded-2xl border border-line/70 text-sm;
+    @apply block w-full max-w-full overflow-x-auto rounded-md border text-sm;
+    border-color: rgb(var(--border));
   }
 
   .markdown-body th,
   .markdown-body td {
-    @apply border-b border-line/50 px-3 py-2 text-left;
+    @apply border-b px-3 py-2 text-left;
+    border-color: rgb(var(--border));
   }
 
   .agent-timeline .markdown-body {
     @apply text-xs leading-6;
   }
 
+  /* ── Subagent timeline ───────────────────────────────────────────────────── */
   .agent-timeline {
-    @apply relative mt-3 space-y-3 border-l border-amber/35 pl-4;
+    @apply relative mt-3 space-y-3 border-l pl-4;
+    border-color: rgb(var(--border));
   }
 
   .agent-node {
@@ -440,25 +521,29 @@
 
   .agent-node::before {
     content: '';
-    @apply absolute -left-[1.36rem] top-4 size-2.5 rounded-full border border-paper bg-muted;
+    @apply absolute -left-[1.36rem] top-4 size-2 rounded-full;
+    background: rgb(var(--fg-subtle));
   }
 
   .agent-node.running::before {
-    @apply bg-amber animate-pulse-seal;
+    @apply animate-pulse-seal;
+    background: rgb(var(--warn));
   }
 
   .agent-node.done::before {
-    @apply bg-jade;
+    background: rgb(var(--ok));
   }
 
   .agent-node.error::before,
   .agent-node.error_aborted::before {
-    @apply bg-seal;
+    background: rgb(var(--danger));
   }
 
   .agent-node-head {
-    @apply grid cursor-pointer items-center gap-2 rounded-[1rem] border border-line/55 bg-paper2/50 px-3 py-2.5;
+    @apply grid cursor-pointer items-center gap-2 rounded-md border px-3 py-2;
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
     list-style: none;
   }
 
@@ -471,47 +556,56 @@
   }
 
   .agent-node-title > span {
-    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+    @apply font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
   }
 
   .agent-node-title strong {
-    @apply truncate font-display text-sm font-black text-ink;
+    @apply truncate text-[13px] font-semibold;
+    color: rgb(var(--fg));
   }
 
   .agent-node-title small {
-    @apply truncate text-xs text-muted;
+    @apply truncate text-xs;
+    color: rgb(var(--fg-muted));
   }
 
   .agent-role-badge,
   .agent-state-badge,
   .agent-duration {
-    @apply shrink-0 rounded-full border border-line/55 bg-paper/75 px-2 py-1 font-mono text-[10px] text-muted;
+    @apply shrink-0 rounded border px-2 py-0.5 font-mono text-[10px];
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .agent-node.running .agent-state-badge {
-    @apply border-amber/35 bg-amber/15 text-amber;
+    color: rgb(var(--warn));
   }
 
   .agent-node.done .agent-state-badge {
-    @apply border-jade/30 bg-jade/10 text-jade;
+    color: rgb(var(--ok));
   }
 
   .agent-node.error .agent-state-badge,
   .agent-node.error_aborted .agent-state-badge {
-    @apply border-seal/30 bg-seal/10 text-seal;
+    color: rgb(var(--danger));
   }
 
   .agent-node-body {
-    @apply ml-1 mt-2 space-y-3 rounded-[1rem] border border-line/45 bg-paper/40 px-3 py-3;
+    @apply ml-1 mt-2 space-y-3 rounded-md border px-3 py-3;
+    border-color: rgb(var(--border));
   }
 
   .agent-thinking,
   .agent-summary {
-    @apply min-w-0 break-words rounded-[0.9rem] border border-line/45 bg-paper/60 px-3 py-2 text-xs leading-6 text-ink;
+    @apply min-w-0 break-words rounded-md border px-3 py-2 text-xs leading-6;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
   }
 
   .agent-summary {
-    @apply border-jade/25 bg-jade/10 text-muted;
+    border-color: rgb(var(--ok) / 0.3);
+    color: rgb(var(--fg-muted));
   }
 
   .agent-message-stack {
@@ -519,31 +613,35 @@
   }
 
   .agent-message {
-    @apply min-w-0 rounded-[0.9rem] border border-line/45 bg-paper2/45 px-3 py-2;
+    @apply min-w-0 rounded-md border px-3 py-2;
+    border-color: rgb(var(--border));
   }
 
   .agent-message.to-lead {
-    @apply border-jade/25 bg-jade/10;
+    border-color: rgb(var(--ok) / 0.3);
   }
 
   .agent-message.to-member {
-    @apply border-amber/25 bg-amber/10;
+    border-color: rgb(var(--warn) / 0.3);
   }
 
   .agent-message.error {
-    @apply border-seal/30 bg-seal/10;
+    border-color: rgb(var(--danger) / 0.35);
   }
 
   .agent-message-head {
-    @apply flex items-center justify-between gap-2 font-mono text-[10px] text-muted;
+    @apply flex items-center justify-between gap-2 font-mono text-[10px];
+    color: rgb(var(--fg-subtle));
   }
 
   .agent-message-head strong {
-    @apply min-w-0 truncate text-ink;
+    @apply min-w-0 truncate;
+    color: rgb(var(--fg));
   }
 
   .agent-message p {
-    @apply mt-1 whitespace-pre-wrap break-words text-xs leading-6 text-ink;
+    @apply mt-1 whitespace-pre-wrap break-words text-xs leading-6;
+    color: rgb(var(--fg));
   }
 
   .agent-tool-list {
@@ -551,21 +649,22 @@
   }
 
   .mini-tool {
-    @apply flex min-w-0 items-start gap-2 rounded-[0.9rem] border border-line/55 bg-paper2/50 px-3 py-2;
+    @apply flex min-w-0 items-start gap-2 rounded-md border px-3 py-2;
+    border-color: rgb(var(--border));
   }
 
   .mini-tool.done {
-    @apply border-jade/25 bg-jade/10;
+    border-color: rgb(var(--ok) / 0.3);
   }
 
   .mini-tool.error,
   .mini-tool.error_aborted {
-    @apply border-seal/25 bg-seal/10;
+    border-color: rgb(var(--danger) / 0.3);
   }
 
   .mini-tool-icon {
-    @apply size-9 shrink-0 rounded-xl border border-line/50 bg-paper/75 p-1;
-    transform: scale(1.18);
+    @apply size-4 shrink-0;
+    color: rgb(var(--fg-muted));
   }
 
   .mini-tool-main {
@@ -573,7 +672,8 @@
   }
 
   .mini-tool-head {
-    @apply flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs font-bold text-ink;
+    @apply flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs font-semibold;
+    color: rgb(var(--fg));
   }
 
   .mini-tool-head span {
@@ -582,101 +682,122 @@
 
   .mini-tool-head em,
   .mini-tool-head time {
-    @apply shrink-0 rounded-full bg-paper/70 px-2 py-0.5 text-[10px] not-italic text-muted;
+    @apply shrink-0 rounded px-2 py-0.5 text-[10px] not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
   .subagent-avatar {
-    @apply size-9 shrink-0 rounded-xl border border-line/60 bg-paper/80;
-    transform: scale(1.12);
+    @apply shrink-0;
+    color: rgb(var(--fg-muted));
   }
 
+  /* ── Todo panel ──────────────────────────────────────────────────────────── */
   .todo-panel {
-    @apply max-w-[720px] rounded-[1.25rem] border border-amber/30 bg-amber/10 p-3.5;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35);
+    @apply max-w-[720px] rounded-md border p-3;
+    border-color: rgb(var(--warn) / 0.35);
+    background: rgb(var(--warn) / 0.06);
   }
 
   .todo-item {
-    @apply flex items-center gap-2 rounded-2xl border border-line/50 bg-paper/75 px-3 py-2 text-sm text-ink;
+    @apply flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
   }
 
   .todo-item.completed {
-    @apply text-muted line-through;
+    color: rgb(var(--fg-subtle));
+    @apply line-through;
   }
 
   .todo-item.in_progress {
-    @apply border-amber/40 bg-amber/10;
+    border-color: rgb(var(--warn) / 0.4);
+    background: rgb(var(--warn) / 0.08);
   }
 
   .todo-mark {
-    @apply grid size-7 shrink-0 place-items-center rounded-full bg-paper2 text-xs font-black text-seal;
+    @apply grid size-5 shrink-0 place-items-center rounded text-xs font-semibold;
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--accent));
   }
 
+  /* ── Pending bar ─────────────────────────────────────────────────────────── */
   .pending-bar {
-    @apply mx-5 mb-3 grid items-center gap-3 rounded-[1.2rem] border border-amber/30 bg-amber/10 px-4 py-3 shadow-insetPaper;
+    @apply mx-5 mb-3 grid items-center gap-3 rounded-md border px-4 py-2.5;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.42),
-      0 0.75rem 1.6rem rgb(var(--ink) / 0.05);
+    border-color: rgb(var(--warn) / 0.35);
+    background: rgb(var(--warn) / 0.08);
   }
 
   .pending-bar.done {
-    @apply border-jade/30 bg-jade/10;
+    border-color: rgb(var(--ok) / 0.35);
+    background: rgb(var(--ok) / 0.08);
   }
 
   .pending-bar.error {
-    @apply border-seal/30 bg-seal/10;
+    border-color: rgb(var(--danger) / 0.35);
+    background: rgb(var(--danger) / 0.08);
   }
 
   .pending-seal {
-    @apply grid size-9 place-items-center rounded-[0.8rem] border border-line/55 bg-paper/75;
+    @apply grid size-7 place-items-center rounded border;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
   }
 
   .pending-title {
-    @apply truncate text-sm font-semibold text-ink;
+    @apply truncate text-sm font-medium;
+    color: rgb(var(--fg));
   }
 
   .pending-detail {
-    @apply truncate font-mono text-xs text-muted;
+    @apply truncate font-mono text-xs;
+    color: rgb(var(--fg-muted));
   }
 
   .pending-label {
-    @apply shrink-0 rounded-full border border-line/55 bg-paper/75 px-2.5 py-1 font-mono text-[10px] text-muted;
+    @apply shrink-0 rounded border px-2 py-0.5 font-mono text-[10px];
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .pending-bar.running .pending-label {
-    @apply border-amber/35 bg-amber/15 text-amber;
+    color: rgb(var(--warn));
   }
 
   .pending-bar.done .pending-label {
-    @apply border-jade/30 bg-jade/10 text-jade;
+    color: rgb(var(--ok));
   }
 
   .pending-bar.error .pending-label {
-    @apply border-seal/30 bg-seal/10 text-seal;
+    color: rgb(var(--danger));
   }
 
+  /* ── Composer ────────────────────────────────────────────────────────────── */
   .composer-wrap {
-    @apply border-t border-line/70 px-4 py-3;
-    background:
-      linear-gradient(180deg, rgb(var(--paper) / 0.18), rgb(var(--paper-2) / 0.94)),
-      radial-gradient(circle at 50% 0%, rgb(var(--amber) / 0.085), transparent 26rem);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
+    @apply border-t px-4 py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg));
   }
 
   .composer-shell {
-    @apply relative mx-auto max-w-[900px];
+    @apply relative mx-auto max-w-[860px];
   }
 
   .slash-menu {
-    @apply absolute bottom-[calc(100%+0.8rem)] left-0 z-20 flex max-h-[min(28rem,65vh)] w-full max-w-2xl flex-col overflow-x-hidden overflow-y-auto rounded-[1.35rem] border border-line/70 bg-paper/95 p-2 shadow-imperial backdrop-blur-xl;
+    @apply absolute bottom-[calc(100%+0.5rem)] left-0 z-20 flex max-h-[min(28rem,65vh)] w-full max-w-2xl flex-col overflow-x-hidden overflow-y-auto rounded-md border p-1.5;
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-elevated));
   }
 
   .slash-menu-head {
-    @apply mb-1 flex items-center justify-between gap-3 border-b border-line/50 px-3 pb-2 pt-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted;
+    @apply mb-1 flex items-center justify-between gap-3 border-b px-3 pb-2 pt-1 font-mono text-[0.68rem] uppercase tracking-wider;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .slash-menu-head em {
-    @apply not-italic text-muted/75;
+    @apply not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
   .slash-menu-group {
@@ -684,44 +805,49 @@
   }
 
   .slash-menu-label {
-    @apply sticky top-0 z-10 bg-paper/95 px-3 py-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted/80;
+    @apply sticky top-0 z-10 px-3 py-1 font-mono text-[0.68rem] uppercase tracking-wider;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg-subtle));
   }
 
   .slash-menu-item {
-    @apply grid w-full grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-3 py-2 text-left transition hover:bg-seal/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-seal/35;
+    @apply grid w-full grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2;
+    color: rgb(var(--fg));
+  }
+
+  .slash-menu-item:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .slash-menu-item strong {
-    @apply min-w-0 truncate font-mono text-xs text-seal;
+    @apply min-w-0 truncate font-mono text-xs;
+    color: rgb(var(--accent));
   }
 
   .slash-menu-item span {
-    @apply min-w-0 truncate text-xs text-muted;
+    @apply min-w-0 truncate text-xs;
+    color: rgb(var(--fg-muted));
   }
 
   .slash-menu-item b {
-    @apply max-w-[8rem] truncate rounded-full border border-line/60 bg-paper2/80 px-2 py-1 font-mono text-[0.65rem] font-bold text-muted;
+    @apply max-w-[8rem] truncate rounded border px-2 py-0.5 font-mono text-[0.65rem] font-semibold;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .slash-menu-item[data-kind='skill'] strong {
-    @apply text-jade;
+    color: rgb(var(--ok));
   }
 
   .slash-menu-item[data-kind='skill'] b {
-    @apply border-jade/25 bg-jade/10 text-jade;
+    border-color: rgb(var(--ok) / 0.3);
+    color: rgb(var(--ok));
   }
 
   .composer {
-    @apply relative flex flex-col overflow-visible rounded-[1.45rem] border border-line/70 bg-paper/90 p-2.5 shadow-imperial;
-    box-shadow:
-      0 1rem 2.2rem rgb(var(--ink) / 0.095),
-      inset 0 1px 0 rgb(255 255 255 / 0.62),
-      inset 0 -1px 0 rgb(var(--line) / 0.28);
-  }
-
-  .composer::before {
-    content: '';
-    @apply pointer-events-none absolute left-5 right-5 top-1 h-px bg-line/55;
+    @apply relative flex flex-col overflow-visible rounded-md border p-2;
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-elevated));
   }
 
   .composer-input-row {
@@ -733,15 +859,12 @@
   }
 
   .composer-textarea-wrap.has-skill-slash {
-    @apply rounded-[1.15rem] bg-paper2/45 transition;
-  }
-
-  .composer-textarea-wrap.has-skill-slash:focus-within {
-    @apply bg-paper/70;
+    @apply rounded transition;
   }
 
   .composer-highlight-layer {
-    @apply pointer-events-none absolute inset-0 max-h-44 min-h-[5.2rem] overflow-hidden rounded-[1.15rem] border border-transparent px-4 py-3 text-[15px] leading-7 text-ink;
+    @apply pointer-events-none absolute inset-0 max-h-44 min-h-[5.2rem] overflow-hidden rounded border border-transparent px-4 py-3 text-[15px] leading-7;
+    color: rgb(var(--fg));
     overflow-wrap: anywhere;
     font: inherit;
     letter-spacing: 0;
@@ -750,24 +873,32 @@
   }
 
   .composer-skill-slash {
-    @apply text-jade;
+    color: rgb(var(--ok));
     font: inherit;
   }
 
   .composer textarea {
-    @apply relative z-10 max-h-44 min-h-[4.65rem] w-full rounded-[1.1rem] border border-transparent bg-paper2/40 px-4 py-3 text-[15px] leading-7 shadow-none ring-0 transition focus:border-line/60 focus:bg-paper/75 focus:ring-0;
+    @apply relative z-10 max-h-44 min-h-[4.65rem] w-full rounded border border-transparent px-4 py-3 text-[15px] leading-7 shadow-none ring-0 transition;
+    background: transparent;
+    color: rgb(var(--fg));
     text-wrap: pretty;
+  }
+
+  .composer textarea:focus {
+    border-color: transparent;
+    background: transparent;
   }
 
   .composer-textarea-wrap.has-skill-slash textarea,
   .composer-textarea-wrap.has-skill-slash textarea:focus {
     background: transparent;
     color: transparent;
-    caret-color: rgb(var(--ink));
+    caret-color: rgb(var(--fg));
   }
 
   .composer-action-row {
-    @apply mt-1.5 flex min-w-0 items-center justify-between gap-2 rounded-[1.1rem] border border-line/45 bg-paper2/40 px-2 py-2;
+    @apply mt-1.5 flex min-w-0 items-center justify-between gap-2 rounded border px-2 py-1.5;
+    border-color: rgb(var(--border));
   }
 
   .composer-left-actions,
@@ -786,115 +917,101 @@
   .attach-button,
   .send-button,
   .slash-hint-button {
-    @apply grid shrink-0 place-items-center overflow-hidden border font-display font-black transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:text-muted;
-    width: 2.8rem;
-    height: 2.8rem;
-    border-radius: 0.98rem;
+    @apply grid shrink-0 place-items-center overflow-hidden border font-semibold transition disabled:opacity-50;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-sm);
   }
 
   .send-button {
-    @apply border-seal/55 text-paper disabled:border-line/70;
-    background:
-      radial-gradient(circle at 34% 22%, rgb(var(--amber) / 0.45), transparent 46%),
-      linear-gradient(145deg, rgb(var(--seal)), rgb(var(--ink)));
-    box-shadow:
-      0 0.7rem 1.25rem rgb(var(--seal) / 0.24),
-      inset 0 1px 0 rgb(255 255 255 / 0.2),
-      inset 0 -0.25rem 0.55rem rgb(0 0 0 / 0.18);
+    background: rgb(var(--accent));
+    border-color: transparent;
+    color: rgb(var(--accent-fg));
   }
 
   .send-button:hover:not(:disabled) {
-    background:
-      radial-gradient(circle at 34% 22%, rgb(var(--amber) / 0.55), transparent 48%),
-      linear-gradient(145deg, rgb(178 50 35), rgb(var(--ink)));
-    box-shadow:
-      0 0.9rem 1.5rem rgb(var(--seal) / 0.28),
-      inset 0 1px 0 rgb(255 255 255 / 0.22),
-      inset 0 -0.25rem 0.55rem rgb(0 0 0 / 0.2);
+    background: rgb(var(--accent) / 0.85);
   }
 
   .send-button:disabled {
-    background:
-      linear-gradient(145deg, rgb(var(--line) / 0.52), rgb(var(--paper-2) / 0.9));
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.35),
-      0 0.35rem 0.8rem rgb(var(--ink) / 0.06);
+    background: rgb(var(--bg-inset));
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .send-button .send-icon {
-    @apply size-8;
-    image-rendering: pixelated;
-    transform: scale(1.15);
-    transform-origin: center;
+    @apply size-4;
   }
 
   .attach-button {
-    @apply self-center border-amber/55 text-ink hover:border-seal/35 hover:text-seal;
-    background:
-      radial-gradient(circle at 32% 18%, rgb(255 255 255 / 0.52), transparent 44%),
-      linear-gradient(145deg, rgb(var(--amber) / 0.58), rgb(var(--paper-2) / 0.98));
-    box-shadow:
-      0 0.65rem 1.15rem rgb(var(--amber) / 0.2),
-      inset 0 1px 0 rgb(255 255 255 / 0.54),
-      inset 0 -0.22rem 0.55rem rgb(var(--ink) / 0.08);
+    background: transparent;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
   }
 
   .attach-button:hover {
-    background:
-      radial-gradient(circle at 32% 18%, rgb(255 255 255 / 0.58), transparent 46%),
-      linear-gradient(145deg, rgb(var(--amber) / 0.72), rgb(var(--paper) / 0.98));
-    box-shadow:
-      0 0.8rem 1.35rem rgb(var(--amber) / 0.24),
-      inset 0 1px 0 rgb(255 255 255 / 0.52),
-      inset 0 -0.2rem 0.5rem rgb(var(--ink) / 0.07);
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
   }
 
   .attach-button .action-icon {
-    @apply size-8;
-    image-rendering: pixelated;
-    transform: scale(1.18);
+    @apply size-4;
   }
 
   .slash-hint-button {
-    @apply border-line/65 bg-paper2/55 text-seal hover:border-seal/35 hover:bg-seal/10;
+    background: transparent;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+  }
+
+  .slash-hint-button:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .slash-hint-button span {
-    @apply font-mono text-lg leading-none;
+    @apply font-mono text-base leading-none;
   }
 
   .slash-hint-button em {
     @apply sr-only;
   }
 
+  /* ── Mode picker ─────────────────────────────────────────────────────────── */
   .mode-picker {
     @apply relative shrink-0;
   }
 
   .mode-button {
-    @apply inline-flex h-[2.8rem] max-w-[13.75rem] items-center gap-2 rounded-[0.98rem] border border-line/65 bg-paper/60 px-3 text-left transition hover:-translate-y-0.5 hover:border-seal/35 hover:bg-seal/10 disabled:translate-y-0 disabled:opacity-60;
+    @apply inline-flex h-8 max-w-[13.75rem] items-center gap-2 rounded-md border px-2.5 text-left transition disabled:opacity-60;
+    border-color: rgb(var(--border));
+    background: transparent;
+    color: rgb(var(--fg));
+  }
+
+  .mode-button:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .mode-button[data-active='true'] {
-    @apply border-jade/35 bg-jade/10 text-jade;
+    border-color: rgb(var(--ok) / 0.45);
+    color: rgb(var(--ok));
   }
 
   .mode-icon {
-    @apply size-5 shrink-0;
-    image-rendering: pixelated;
+    @apply size-4 shrink-0;
   }
 
   .mode-button span {
-    @apply min-w-0 truncate font-mono text-xs font-black;
+    @apply min-w-0 truncate font-mono text-xs font-semibold;
   }
 
   .mode-button em {
-    @apply hidden shrink-0 text-[11px] not-italic text-muted sm:inline;
+    @apply hidden shrink-0 text-[11px] not-italic sm:inline;
+    color: rgb(var(--fg-subtle));
   }
 
   .mode-caret {
     @apply size-3.5 shrink-0 opacity-70;
-    image-rendering: pixelated;
   }
 
   .mode-button[aria-expanded='true'] .mode-caret {
@@ -902,11 +1019,9 @@
   }
 
   .mode-menu {
-    @apply absolute bottom-[calc(100%+0.75rem)] right-0 z-30 w-[22rem] overflow-hidden rounded-[1.25rem] border border-line/75 bg-paper/95 p-2 shadow-imperial backdrop-blur-xl;
-  }
-
-  .mode-menu::after {
-    @apply absolute -bottom-1.5 right-8 size-3 rotate-45 border-b border-r border-line/75 bg-paper/95 content-[''];
+    @apply absolute bottom-[calc(100%+0.5rem)] right-0 z-30 w-[22rem] overflow-hidden rounded-md border p-1.5;
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-elevated));
   }
 
   .mode-menu-head {
@@ -914,51 +1029,63 @@
   }
 
   .mode-menu-head span {
-    @apply font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+    @apply font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
   }
 
   .mode-menu-head em {
-    @apply text-[11px] not-italic text-muted;
+    @apply text-[11px] not-italic;
+    color: rgb(var(--fg-subtle));
   }
 
   .mode-option {
-    @apply relative z-10 grid w-full items-center gap-3 rounded-[1rem] px-3 py-2.5 text-left transition hover:bg-seal/10;
+    @apply relative z-10 grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition;
     grid-template-columns: auto minmax(0, 1fr) auto;
+    color: rgb(var(--fg));
+  }
+
+  .mode-option:hover {
+    background: rgb(var(--bg-inset));
   }
 
   .mode-option[data-active='true'] {
-    @apply bg-jade/10 text-jade;
+    color: rgb(var(--ok));
   }
 
   .mode-option-icon {
-    @apply size-6;
-    image-rendering: pixelated;
+    @apply size-4;
   }
 
   .mode-option strong {
-    @apply block text-sm font-black leading-tight text-ink;
+    @apply block text-sm font-semibold leading-tight;
+    color: rgb(var(--fg));
   }
 
   .mode-option[data-active='true'] strong {
-    @apply text-jade;
+    color: rgb(var(--ok));
   }
 
   .mode-option small {
-    @apply mt-1 block text-[11px] leading-5 text-muted;
+    @apply mt-1 block text-[11px] leading-5;
+    color: rgb(var(--fg-subtle));
   }
 
   .mode-option b {
-    @apply rounded-full border border-line/55 bg-paper/70 px-2 py-1 font-mono text-[10px] text-muted;
+    @apply rounded border px-2 py-0.5 font-mono text-[10px];
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
+  /* ── Context ring ────────────────────────────────────────────────────────── */
   .context-ring {
-    @apply relative grid shrink-0 place-items-center self-center rounded-full border border-line/45 bg-paper2/35 outline-none transition hover:-translate-y-0.5 hover:border-seal/25;
-    width: 2.55rem;
-    height: 2.55rem;
+    @apply relative grid shrink-0 place-items-center self-center rounded-full border outline-none transition;
+    width: 2rem;
+    height: 2rem;
+    border-color: rgb(var(--border));
   }
 
-  .context-ring:focus-visible {
-    @apply ring-2 ring-seal/35 ring-offset-2 ring-offset-paper;
+  .context-ring:hover {
+    border-color: rgb(var(--border-strong));
   }
 
   .ring-svg {
@@ -967,7 +1094,7 @@
 
   .ring-track {
     fill: none;
-    stroke: rgb(var(--line));
+    stroke: rgb(var(--border));
     stroke-width: 3.5;
   }
 
@@ -978,7 +1105,9 @@
   }
 
   .context-tooltip {
-    @apply pointer-events-none absolute bottom-[calc(100%+0.75rem)] right-0 z-30 min-w-44 rounded-2xl border border-line/80 bg-paper/95 px-4 py-3 text-left opacity-0 shadow-imperial backdrop-blur-xl transition;
+    @apply pointer-events-none absolute bottom-[calc(100%+0.5rem)] right-0 z-30 min-w-44 rounded-md border px-3.5 py-2.5 text-left opacity-0 transition;
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-elevated));
     transform: translateY(0.35rem) scale(0.98);
     transform-origin: bottom right;
   }
@@ -989,18 +1118,17 @@
     transform: translateY(0) scale(1);
   }
 
-  .context-tooltip::after {
-    @apply absolute -bottom-1.5 right-4 h-3 w-3 rotate-45 border-b border-r border-line/80 bg-paper/95 content-[''];
-  }
-
   .context-tooltip strong {
-    @apply block text-xs font-bold text-ink;
+    @apply block text-xs font-semibold;
+    color: rgb(var(--fg));
   }
 
   .context-tooltip span {
-    @apply mt-1 block font-mono text-sm font-black text-seal;
+    @apply mt-1 block font-mono text-sm font-semibold;
+    color: rgb(var(--accent));
   }
 
   .context-tooltip em {
-    @apply mt-1 block text-[11px] not-italic tracking-[0.18em] text-muted uppercase;
+    @apply mt-1 block text-[11px] not-italic tracking-wider uppercase;
+    color: rgb(var(--fg-subtle));
   }

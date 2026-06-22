@@ -10,8 +10,7 @@ import type {
   ProviderOption,
   ProviderRegion,
 } from '../../types'
-import { brandAssets } from '../../assets'
-import { actionIcons } from '../../icons'
+import { actionIcons, brandIcon } from '../../icons'
 import ModelEntryList from './model/ModelEntryList.vue'
 import ModelTestPanel from './model/ModelTestPanel.vue'
 
@@ -408,12 +407,12 @@ async function runTest(kind: 'text' | 'vision', role: 'main' | 'secondary' = 'ma
 <template>
   <div class="panel-content model-panel-shell">
     <div v-if="!props.payload" class="empty-state illustrated-empty seal-empty">
-      <img :src="brandAssets.logoMark" alt="" />
+      <component :is="brandIcon" :size="48" :stroke-width="1" />
       <span>暂无模型配置。</span>
     </div>
 
     <div v-else-if="entries.length === 0" class="empty-state illustrated-empty">
-      <img :src="brandAssets.logoMark" alt="" />
+      <component :is="brandIcon" :size="48" :stroke-width="1" />
       <span>暂无模型条目。点击下方「+ 添加模型条目」开始配置第一条。</span>
     </div>
 
@@ -586,7 +585,7 @@ async function runTest(kind: 'text' | 'vision', role: 'main' | 'secondary' = 'ma
     </div>
 
     <div class="empty-note">
-      <img class="note-mark" :src="brandAssets.logoMark" alt="" width="28" height="28" />
+      <component :is="brandIcon" class="note-mark" :size="20" />
       一个条目共享同一套 provider / apiKey / apiBase，并必须配置 Main 与 Secondary 两个 Model ID。所有 apiKey 仅保存在本地 model_config.json，前端展示时已脱敏。
     </div>
 

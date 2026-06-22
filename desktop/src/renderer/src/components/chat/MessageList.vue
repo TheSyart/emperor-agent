@@ -2,8 +2,7 @@
 import { nextTick, ref, watch } from 'vue'
 import { slashCommands } from '../../commands'
 import type { ChatMessage, UserMessage } from '../../types'
-import { brandAssets } from '../../assets'
-import { avatarIcons, emptyIcons } from '../../icons'
+import { avatarIcons, brandIcon, emptyIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
 
@@ -73,7 +72,7 @@ function schedulerTriggerPrefix(content: string) {
   <section ref="scroller" class="messages-pane">
     <div v-if="!props.messages.length" class="welcome-card animate-rise-in">
       <div class="mb-4 flex items-center gap-3 text-sm text-seal">
-        <img class="brand-seal-sm" :src="brandAssets.logoMark" alt="令" width="28" height="28" />
+        <component :is="brandIcon" class="brand-seal-sm" :size="18" />
         <span>大内总管待命</span>
       </div>
       <div class="welcome-layout">

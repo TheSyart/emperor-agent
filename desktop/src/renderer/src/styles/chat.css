@@ -3,49 +3,54 @@
   }
 
   .messages-pane {
-    @apply min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-5;
-    padding-inline: clamp(1rem, 3.2vw, 3.75rem);
-    background:
-      radial-gradient(circle at 50% 0%, rgb(var(--paper) / 0.72), transparent 34rem),
-      linear-gradient(90deg, transparent, rgb(var(--line) / 0.055) 49.7%, rgb(var(--line) / 0.055) 50.3%, transparent);
+    @apply min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-6;
+    padding-inline: clamp(1rem, 4vw, 4rem);
   }
 
   .message-stack {
-    @apply mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-6 pb-6;
+    @apply mx-auto flex w-full max-w-[860px] min-w-0 flex-col gap-5 pb-6;
   }
 
+  /* ── Welcome / empty ─────────────────────────────────────────────────────── */
   .welcome-card {
-    @apply mx-auto mt-[7vh] max-w-4xl overflow-hidden rounded-[1.8rem] border border-line/70 bg-paper/85 p-7 shadow-imperial;
+    @apply mx-auto mt-[10vh] max-w-3xl px-2;
   }
 
   .welcome-layout {
-    @apply grid items-center gap-6 md:grid-cols-[minmax(0,1fr)_180px];
+    @apply flex flex-col gap-4;
   }
 
   .welcome-hero {
-    @apply mx-auto w-40 opacity-95 drop-shadow-xl md:w-44;
+    @apply mb-2;
+    color: rgb(var(--fg-subtle));
   }
 
   .welcome-card h1 {
-    @apply font-display text-5xl font-black leading-tight text-ink;
+    @apply text-2xl font-semibold tracking-tight;
+    color: rgb(var(--fg));
   }
 
   .welcome-card p {
-    @apply mt-4 text-base leading-8 text-muted;
+    @apply mt-3 text-sm leading-6;
+    color: rgb(var(--fg-muted));
   }
 
+  .brand-seal-sm {
+    color: rgb(var(--accent));
+  }
+
+  /* ── Message rows ────────────────────────────────────────────────────────── */
   .message-row {
-    @apply relative flex w-full min-w-0 items-start gap-3.5;
+    @apply relative flex w-full min-w-0 items-start gap-3;
     container-type: inline-size;
   }
 
   .message-row.assistant {
-    padding-left: clamp(0rem, 1.2vw, 1.5rem);
+    @apply justify-start;
   }
 
   .message-row.user {
     @apply justify-end;
-    padding-right: clamp(0rem, 2vw, 2.5rem);
   }
 
   .message-row.scheduler-trigger {
@@ -57,177 +62,120 @@
   }
 
   .message-cluster {
-    @apply flex min-w-0 flex-col gap-2;
-    max-width: min(760px, calc(100% - 4.75rem));
+    @apply flex min-w-0 flex-col gap-1.5;
+    max-width: min(720px, calc(100% - 3rem));
   }
 
   .message-cluster.user {
     @apply items-end;
-    max-width: min(620px, calc(100% - 4.75rem));
+    max-width: min(560px, calc(100% - 3rem));
   }
 
   .avatar {
-    @apply relative grid size-16 shrink-0 place-items-center overflow-hidden rounded-[1.25rem] border font-display text-lg font-black shadow-lg;
+    @apply mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+    background: rgb(var(--bg-elevated));
   }
 
   .avatar.user {
-    @apply border-ink/15 bg-ink text-paper shadow-ink/10;
+    color: rgb(var(--accent));
   }
 
   .avatar.assistant {
-    @apply border-seal/25 bg-seal text-paper shadow-seal/20;
+    color: rgb(var(--fg));
   }
 
-  .avatar.assistant::after,
-  .avatar.user::after {
-    content: '';
-    @apply pointer-events-none absolute inset-0 rounded-[1.35rem];
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18), inset 0 -0.8rem 1.2rem rgb(0 0 0 / 0.16);
-  }
-
-  .pixel-avatar {
-    image-rendering: pixelated;
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .brand-seal,
-  .brand-seal-sm {
-    image-rendering: pixelated;
-    display: block;
-  }
-
-  .brand-seal-sm {
-    @apply size-10;
-    transform: scale(1.18);
+  .assistant-mini-avatar {
+    color: rgb(var(--fg-muted));
   }
 
   .message-meta {
-    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted;
-  }
-
-  .message-meta span {
-    @apply grid size-6 place-items-center rounded-full border bg-paper font-display text-xs font-black tracking-normal;
+    @apply inline-flex items-center gap-1.5 text-[11px] font-medium;
+    color: rgb(var(--fg-subtle));
   }
 
   .message-meta small {
-    @apply font-normal tracking-[0.2em];
+    @apply font-normal;
   }
 
   .message-meta.user {
-    @apply mr-1 text-paper/70;
-  }
-
-  .message-meta.user span {
-    @apply border-paper/20 bg-paper/10 text-paper;
+    color: rgb(var(--fg-subtle));
   }
 
   .message-meta.assistant {
-    @apply ml-1 text-seal/70;
+    color: rgb(var(--fg-subtle));
   }
 
-  .message-meta.assistant span {
-    @apply border-seal/20 bg-seal/10 text-seal;
-  }
-
+  /* ── Scheduler trigger card ──────────────────────────────────────────────── */
   .scheduler-trigger-card {
-    @apply w-full max-w-[720px] rounded-lg border border-line/70 bg-paper/75 px-5 py-4 text-ink shadow-insetPaper;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.5),
-      0 0.8rem 1.8rem rgb(var(--ink) / 0.06);
+    @apply w-full max-w-[640px] rounded-md border px-4 py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
   }
 
   .scheduler-trigger-head {
-    @apply flex min-w-0 items-center gap-3;
+    @apply flex min-w-0 items-center gap-2.5;
   }
 
   .scheduler-trigger-icon {
-    @apply grid size-9 shrink-0 place-items-center rounded-lg border border-jade/25 bg-jade/10 font-display text-sm font-black text-jade;
+    @apply grid size-6 shrink-0 place-items-center rounded text-[11px] font-semibold;
+    color: rgb(var(--ok));
+    background: rgb(var(--ok) / 0.12);
   }
 
   .scheduler-trigger-title {
-    @apply truncate text-sm font-semibold text-ink;
+    @apply truncate text-xs font-semibold;
+    color: rgb(var(--fg));
   }
 
   .scheduler-trigger-name {
-    @apply truncate font-mono text-xs text-muted;
+    @apply truncate font-mono text-[11px];
+    color: rgb(var(--fg-muted));
   }
 
   .scheduler-trigger-body {
-    @apply mt-3 border-t border-line/55 pt-3 text-sm leading-7 text-ink;
+    @apply mt-2.5 border-t pt-2.5 text-[13px] leading-6;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg));
     overflow-wrap: anywhere;
     text-wrap: pretty;
   }
 
+  /* ── Bubbles ─────────────────────────────────────────────────────────────── */
   .bubble {
-    @apply relative min-w-0 max-w-full border px-5 py-4 text-[15px] leading-8;
+    @apply relative min-w-0 max-w-full px-3.5 py-2.5 text-[14px] leading-6;
     overflow-wrap: anywhere;
     text-wrap: pretty;
-    box-shadow:
-      0 1.2rem 2.4rem rgb(var(--ink) / 0.08),
-      0 0.18rem 0.45rem rgb(var(--ink) / 0.06);
   }
 
   .bubble.user {
-    @apply rounded-[1.45rem] rounded-tr-[0.55rem] border-ink/20 text-paper;
-    max-width: min(620px, 100%);
-    background:
-      radial-gradient(circle at 16% 12%, rgb(var(--seal) / 0.24), transparent 13rem),
-      linear-gradient(145deg, rgb(var(--ink)), rgb(36 25 20));
-    box-shadow:
-      0 1rem 2rem rgb(var(--ink) / 0.16),
-      inset 0 1px 0 rgb(255 255 255 / 0.08);
+    @apply rounded-lg;
+    background: rgb(var(--accent) / 0.14);
+    color: rgb(var(--fg));
   }
 
   .user-skill-slash {
-    @apply font-mono font-black text-jade;
+    @apply font-mono font-semibold;
+    color: rgb(var(--accent));
   }
 
   .bubble.assistant {
-    @apply rounded-[1.55rem] rounded-tl-[0.65rem] border-line/75 text-ink;
-    background:
-      linear-gradient(90deg, rgb(var(--seal) / 0.08), transparent 0.36rem),
-      radial-gradient(circle at 100% 0%, rgb(var(--amber) / 0.075), transparent 15rem),
-      linear-gradient(180deg, rgb(var(--paper) / 0.98), rgb(var(--paper-2) / 0.72));
-    box-shadow:
-      0 1rem 2.4rem rgb(var(--ink) / 0.08),
-      inset 0 1px 0 rgb(255 255 255 / 0.58),
-      inset 0 -1px 0 rgb(var(--line) / 0.22);
-  }
-
-  .bubble.user::after,
-  .bubble.assistant::after {
-    content: '';
-    @apply absolute top-4 size-3 rotate-45 border;
-  }
-
-  .bubble.user::after {
-    @apply -right-1 border-ink/20 bg-ink;
-  }
-
-  .bubble.assistant::after {
-    @apply -left-1 border-line/70 bg-paper;
-  }
-
-  .bubble.assistant::before {
-    content: '回';
-    @apply pointer-events-none absolute right-5 top-4 font-display text-4xl font-black leading-none text-seal/5;
-  }
-
-  .bubble.streaming {
-    @apply relative pr-8;
+    @apply rounded-lg border;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg));
   }
 
   .bubble.streaming::after {
     content: '';
-    @apply absolute bottom-4 right-4 size-2 rounded-full bg-amber animate-pulse-seal;
+    @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-amber animate-pulse-seal;
   }
 
+  /* ── Assistant flow / timeline ───────────────────────────────────────────── */
   .flow-body {
-    @apply flex min-w-0 flex-col items-start gap-3;
-    max-width: min(920px, 100%);
+    @apply flex min-w-0 flex-col items-start gap-2;
+    max-width: min(860px, 100%);
   }
 
   .timeline-flow {
@@ -235,7 +183,7 @@
   }
 
   .assistant-toolbar {
-    @apply flex w-full items-center justify-between gap-3 px-1 pl-7;
+    @apply flex w-full items-center justify-between gap-2 px-1;
   }
 
   .assistant-toolbar.ghost {
@@ -243,15 +191,19 @@
   }
 
   .copy-message-button {
-    @apply inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line/55 bg-paper/75 px-2.5 py-1 text-[11px] font-semibold text-muted opacity-70 shadow-sm transition hover:border-seal/35 hover:bg-seal/10 hover:text-seal hover:opacity-100;
-    backdrop-filter: blur(10px);
+    @apply inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium transition;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
+    background: transparent;
+  }
+
+  .copy-message-button:hover {
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
   }
 
   .copy-message-button .action-icon {
-    @apply size-4;
-    image-rendering: pixelated;
-    transform: scale(1.2);
-    transform-origin: center;
+    @apply size-3.5;
   }
 
   .message-row.assistant:hover .copy-message-button,
@@ -259,20 +211,14 @@
     @apply opacity-100;
   }
 
-  .assistant-mini-avatar {
-    @apply size-full rounded-full object-cover;
-    image-rendering: pixelated;
-  }
-
   .assistant-timeline-shell {
-    @apply relative flex w-full min-w-0 flex-col gap-3 pl-7;
+    @apply relative flex w-full min-w-0 flex-col gap-2 pl-5;
   }
 
   .assistant-timeline-shell::before {
     content: '';
-    @apply absolute bottom-2 left-[0.68rem] top-1 w-px bg-line/70;
-    background:
-      linear-gradient(180deg, transparent, rgb(var(--line) / 0.78) 1.5rem, rgb(var(--line) / 0.5) calc(100% - 1rem), transparent);
+    @apply absolute bottom-2 left-[0.35rem] top-1 w-px;
+    background: rgb(var(--border));
   }
 
   .timeline-node {
@@ -281,36 +227,38 @@
 
   .timeline-node::before {
     content: '';
-    @apply absolute -left-[1.82rem] top-4 size-2.5 rounded-full border border-paper bg-muted;
-    box-shadow: 0 0 0 3px rgb(var(--paper) / 0.82);
+    @apply absolute -left-[1.35rem] top-3 size-2 rounded-full;
+    background: rgb(var(--fg-subtle));
   }
 
   .timeline-node.text-node {
-    @apply rounded-[1.05rem] border border-line/60 bg-paper/[0.58] px-5 py-4 text-ink;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.42),
-      0 0.45rem 1.15rem rgb(var(--ink) / 0.035);
+    @apply rounded-md border px-3.5 py-2.5 text-[14px] leading-6;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg));
   }
 
   .timeline-node.text-node::before {
-    @apply bg-seal/70;
+    background: rgb(var(--fg-muted));
   }
 
   .timeline-node.text-node.streaming {
-    @apply border-amber/40 bg-amber/5;
+    border-color: rgb(var(--accent) / 0.4);
   }
 
   .timeline-node.text-node.streaming::after {
     content: '';
-    @apply absolute bottom-4 right-4 size-2 rounded-full bg-amber animate-pulse-seal;
+    @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-amber animate-pulse-seal;
   }
 
   .thought-node {
-    @apply flex w-fit max-w-full items-center gap-2 rounded-full px-1.5 py-0.5 font-mono text-xs font-semibold text-muted;
+    @apply flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[11px];
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
   }
 
   .thought-node::before {
-    @apply top-2 bg-muted;
+    @apply top-2;
   }
 
   .thought-node.running::before {
@@ -318,20 +266,20 @@
   }
 
   .thought-node.done::before {
-    @apply bg-jade;
+    background: rgb(var(--ok));
   }
 
   .thought-node.error::before,
   .thought-node.error_aborted::before {
-    @apply bg-seal;
+    background: rgb(var(--danger));
   }
 
   .thought-label {
-    @apply text-muted;
+    color: rgb(var(--fg-subtle));
   }
 
   .thought-chevron {
-    @apply text-muted/70;
+    color: rgb(var(--fg-subtle));
   }
 
   .control-node > .control-card,
