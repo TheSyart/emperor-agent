@@ -1,0 +1,30 @@
+appId: com.emperor.agent.desktop
+productName: Emperor Agent
+
+directories:
+  output: dist
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  icon: build/icon.png
+  artifactName: Emperor-Agent-${version}-mac-${arch}.${ext}
+
+# win/linux targets can be added when needed:
+# win:
+#   target: nsis
+#   icon: build/icon.png
+# linux:
+#   target: AppImage
+#   icon: build/icon.png
+#   category: Utility
+
+# The Electron app bundles only the frontend. The Python backend is not
+# included in the installer — the target machine must have emperor-agent
+# available on PATH, or set EMPEROR_BACKEND_CMD to a custom launch command.
