@@ -16,10 +16,11 @@
 - 本地 Scheduler 长期自动运行中枢
 - Ask / Plan 会话控制与可暂停执行
 - 三层记忆 + 自动压缩
-- WebSocket 流式 WebUI（Vue3 + Vite + Tailwind）
-- 附件上传（图像/文档）与多模态输入链路
-- Electron 桌面壳（`desktop/`，自动拉起后端 + 同源加载完整 WebUI，前端零改动；网页端保留不动）
+- WebSocket 流式通信 + 附件上传（图像/文档）与多模态输入链路
+- electron-vite 桌面应用（`desktop/`：`src/main` + `src/preload` + `src/renderer`，Vue3 + TypeScript + Tailwind + lucide 图标 + 双主题，自动拉起后端，前端全量内嵌）
+- 多会话系统（独立并存、即时切换、`memory/sessions/<id>/` 持久化；共享记忆/scheduler/team 层）
 - 可选 Electron 桌宠 companion（默认关闭）
+- External Bridge 基础设施（外部平台汇总到默认会话）
 - External Bridge 基础设施（外部平台汇总到默认会话，支持多会话独立并存）
 
 ## 2. 先看哪里（最小阅读路径）
@@ -44,7 +45,8 @@
 16. `agent/external/*`（外部平台 adapter 抽象、bridge service、inbox/outbox 状态）
 17. `agent/mcp/*`（MCP Client：config、connection、adapter、tool 注册）
 18. `agent/desktop_pet/*`（可选 Electron 桌宠进程管理）
-19. `desktop/src/renderer/src/runtime/*` + `desktop/src/renderer/src/composables/useRuntime.ts` + `useBootstrap.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
+19. `agent/sessions/*`（多会话：ConversationStore 持久化 + SessionStore 注册表 + 首启迁移）
+20. `desktop/src/renderer/src/runtime/*` + `desktop/src/renderer/src/composables/useRuntime.ts` + `useBootstrap.ts` + `useSession.ts` + `components/panels/ModelPanel.vue` + `components/panels/TeamPanel.vue`
 
 ## 3. 关键目录地图
 
@@ -77,14 +79,14 @@
 - `agent/memory.py`：长期记忆、历史日志、checkpoint 恢复
 - `agent/memory_versions.py`：记忆快照、diff 预览与恢复；本地数据在 `memory/versions/`
 - `agent/compactor.py`：历史压缩，更新 `MEMORY.local.md` / `USER.local.md`
+- `agent/sessions/`：多会话子系统。`ConversationStore` 按会话持久 `memory/sessions/<id>/{history.jsonl,_checkpoint.json}`，复用 `HistoryLog`；`SessionStore` 管理 `index.json` 注册表（CRUD + 腐坏隔离）。`AgentLoop` 绑定活跃会话，首启自动迁移旧主线到默认会话。
 
 ### 前端（桌面应用）
 
-- `desktop/`：electron-vite 标准结构（`src/main` + `src/preload` + `src/renderer`），Vue 3 + TypeScript + Tailwind + vue-router 构建。后端 URL 注入链：preload `contextBridge` 暴露 `backendBaseUrl` → renderer `apiUrl()/wsUrl()` 封装所有 `/api`/`/ws` 调用。
-- 纯逻辑与 Electron 运行时分离，`src/main/*.ts` 全部 vitest 单测（`config` / `backend-command` / `health` / `lifecycle` / `window-bounds` / `protocol`），`main/index.ts` 只做装配，手动 E2E 覆盖。
-- 生产模式通过自定义 `app://` 协议从 `out/renderer/` 加载，支持 Vue Router `createWebHistory()` 深层路由；开发模式用 electron-vite HMR + Vite proxy。
-- `desktop/src/renderer/src/` 内：`App.vue` 全局注入、`router.ts` 10 条路由、`components/layout/NavRail.vue` 左侧导航、`components/chat/` 流式与工具事件组件、`components/panels/` 各功能面板、`views/` 页面、`composables/useRuntime.ts` WS 生命周期、`composables/useBootstrap.ts` bootstrap/CRUD 客户端、`runtime/` 事件 reducer/selectors/persistence、`api/` 后端调用封装。
-- 启动逻辑：先探测 `:8765`，已运行则附着（退出不回收），未运行才 spawn `emperor-agent web`（退出回收）。需 Node ≥ 18。打包：`electron-builder` 产出 macOS `.dmg`，仅含前端；后端依赖目标机 `emperor-agent`。
+- `desktop/`：electron-vite 标准结构（`src/main` + `src/preload` + `src/renderer`），Vue 3 + TypeScript + Tailwind + lucide 图标 + 深/浅双主题 + vue-router 构建。
+- 纯逻辑 vitest 单测：`src/main/config.ts` / `backend-command.ts` / `health.ts` / `lifecycle.ts` / `window-bounds.ts` / `protocol.ts`；`main/index.ts` 只做装配。
+- 生产：`app://` 协议加载 `out/renderer/`；开发：electron-vite HMR + Vite proxy `/api`→`:8765`。`preload` `contextBridge` 注入 `backendBaseUrl`，renderer `apiUrl()/wsUrl()` 绝对封装。
+- renderer 关键文件：`App.vue` 全局注入、`router.ts` 10 条路由、`components/layout/SessionSidebar.vue` 会话侧栏、`components/layout/NavRail.vue` 导航+主题切换、`composables/useSession.ts` 会话 CRUD、`composables/useRuntime.ts` WS（带 `?session=`）、`composables/useBootstrap.ts`、`composables/useTheme.ts` 深/浅、`icons.ts` lucide 映射、`theme/tokens.ts` 语义色板。
 
 ### 配置与模板
 
@@ -133,7 +135,7 @@ make check
 emperor-agent doctor --dev
 ```
 
-`make check` 会调用 `scripts/check.sh`，固定执行 `git diff --check`、Python 编译、`ruff`、`pytest` 和 WebUI build。不要用全局 ignore 掩盖 production 问题；tests 可以放宽 `S101`。
+`make check` 会调用 `scripts/check.sh`，固定执行 `git diff --check`、Python 编译、`ruff`、`pytest`、`vitest`、electron-vite 构建和 TypeScript 类型检查。不要用全局 ignore 掩盖 production 问题；tests 可以放宽 `S101`。
 
 ## 5. 运行时核心机制（必须理解）
 
@@ -143,10 +145,10 @@ emperor-agent doctor --dev
 
 重要细节：
 
-- 每个 turn 开始先写 `memory/_checkpoint.json`
+- 每个 turn 开始先写 `memory/sessions/<id>/_checkpoint.json`
 - 工具批次结束再写一次 checkpoint（保证 tool_calls 与 tool result 成对）
 - turn 正常落地后清 checkpoint
-- 重启时优先恢复 checkpoint，否则加载热 `history.jsonl` 活跃段；已压缩原始行在 `memory/history_archive/*.jsonl.gz`
+- 重启时优先恢复 checkpoint，否则加载热 `history.jsonl` 活跃段（多会话模式下在 `memory/sessions/<id>/` 下；旧主线首次启动自动迁移到默认会话）
 
 ### 5.2 上下文治理（防爆 token）
 
@@ -168,11 +170,11 @@ emperor-agent doctor --dev
   - `memory/YYYY-MM-DD.md`
   - `memory/MEMORY.local.md`
   - `templates/USER.local.md`
-- 压缩成功后 `HistoryLog` 会把已压缩原始行写入 `memory/history_archive/YYYY-MM.jsonl.gz`，再原子重写热 `memory/history.jsonl`
+- 压缩成功后 `HistoryLog` 把已压缩原始行写入归档，再原子重写热 `history.jsonl`
 
 ### 5.5 权限模式与 Ask / Plan 暂停恢复
 
-- `agent/control/` 统一管理当前 `mode` 与 pending interaction，状态写入 `memory/control/state.json`
+- `agent/control/` 统一管理当前 `mode` 与 pending interaction，状态按会话写入
 - `agent/permissions/` 统一评估工具风险，当前三种模式为：
   - `ask_before_edit`：默认模式；读操作直接执行，普通编辑可执行，危险/不确定/破坏性/高影响操作先进入 AskCard 审批。
   - `auto`：最高自动权限；工具层不主动审批，但仍受路径安全、schema 校验和工具自身异常保护约束。
@@ -186,11 +188,11 @@ emperor-agent doctor --dev
 
 ### 5.6 Chat 行为流持久化
 
-- `agent/runtime/RuntimeEventStore` 把活跃 WebUI runtime 事件 append 到 `memory/runtime/events.jsonl`，旧事件轮转到 `memory/runtime/archive/YYYY-MM.jsonl.gz`，索引写入 `memory/runtime/index.json`
+- `agent/runtime/RuntimeEventStore` 把活跃 runtime 事件 append 到 `memory/sessions/<id>/runtime/events.jsonl`（多会话按会话隔离），旧事件轮转到 `archive/`，索引写入 `index.json`
 - 每个用户 turn 生成 `turn_id`，写入 `history.jsonl`、checkpoint 上下文和所有 runtime 事件
 - `/api/bootstrap.runtime.events` 只返回未压缩 turn 的事件；`useRuntime.ts` 用它重建工具调用、队友轨迹、AskCard、PlanCard 与错误状态
 - Chat turn、Scheduler run 与 Watchlist 手动检查会登记到 `agent/runtime/active.py` 的进程内 active task registry；`POST /api/runtime/stop`、WebUI 停止按钮和 `/stop` 共用它取消当前可见任务，并发出 `runtime_task_cancelled`
-- External Bridge 入站事件会记录 `external_inbound` / `external_queued`，出站基础状态会记录 `external_outbound_*`；真正进入模型时仍走主线 `user_message` + `turn_id`。
+- External Bridge 入站事件会记录 `external_inbound` / `external_queued`，出站基础状态会记录 `external_outbound_*`；真正进入模型时汇聚到默认会话。
 - localStorage 只是热缓存兜底；后端冷记录是刷新/重启恢复的事实来源
 - 压缩前的细节会进入 `memory/runtime/archive/*.jsonl.gz`，但 Chat 当前页面只展示未压缩 turn
 
@@ -297,10 +299,10 @@ emperor-agent doctor --dev
 
 ### External Bridge
 
-- External Bridge 是外部平台接入基础，不是多会话系统。所有外部入口都必须通过 `MainlineTurnService` 汇入唯一 `AgentLoop.history`。
+- External Bridge 是外部平台接入基础。所有外部入口都通过 `MainlineTurnService` 汇入默认会话。
 - 当前只允许通用 adapter 抽象、统一消息模型、入站去重、忙碌/Ask/Plan 时排队、durable store、只读状态 API 与 runtime 事件；不要在基础层直接实现飞书/Slack/Telegram 等具体平台。
 - Durable store 固定写入 `memory/external/state.json`，保存 `seen`、`pending`、`outbox` 和最近错误。损坏状态必须备份为 `state.json.corrupt-*` 并进入 diagnostics，不能静默丢弃。
-- 外部入站内容进入模型前必须带来源上下文和“不可信输入”标记；长期记忆写入仍由主 Agent 与既有记忆机制决定，不能让平台消息绕过主线。
+- 外部入站内容进入模型前必须带来源上下文和"不可信输入"标记；长期记忆写入仍由主 Agent 与既有记忆机制决定，不能让平台消息绕过会话。
 - 出站能力目前只保留 outbox 状态和 adapter `send()` 接口，不暴露模型可调用的 `send_external_message` 工具；真实外发平台后续必须接入权限/审批策略。
 
 ### 权限模式 / Ask / Plan
@@ -343,6 +345,7 @@ emperor-agent doctor --dev
 - `desktop/node_modules/`
 - `desktop/out/`
 - `desktop/dist/`
+- `desktop/.uiplan-progress.json`
 
 ### 10.2 新能力扩展路径
 
@@ -352,11 +355,12 @@ emperor-agent doctor --dev
 - 新权限策略：优先放在 `agent/permissions/`，不要把审批规则散落到工具实现或 prompt 文案里
 - 新 Chat 行为事件：优先接入 `agent/runtime/` 持久化，事件需带 `turn_id`，并同步 `agent/runtime/events.py`、`desktop/src/renderer/src/types.ts`、`desktop/src/renderer/src/runtime/*` 与 `useRuntime.ts` replay 分支
 - 新 Team 能力：优先放在 `agent/team/`，同步 `agent/web/routes/team.py` API、`desktop/src/renderer/src/types.ts` 与 `TeamPanel.vue`
-- 新外部平台接入：优先放在 `agent/external/`，通过 `ExternalAdapter` 标准化入站/出站，并复用 `ExternalBridgeService`；禁止引入 `session_id`、会话列表或 `channel:chat_id` 多会话模型。
+- 新外部平台接入：优先放在 `agent/external/`，通过 `ExternalAdapter` 标准化入站/出站，并复用 `ExternalBridgeService`；汇入默认会话。
 - 新 MCP 服务器：在 `mcp_config.json` 中配置即可，无需改代码；如需调整连接/发现行为再动 `agent/mcp/`
 - 新子代理：`templates/subagents/*.md` + `subagents/registry.py` 白名单
 - 新技能：`skills/<name>/SKILL.md`
-- 扩展桌面应用：可测纯逻辑放进 `desktop/src/main/*.ts` 独立模块并配 `*.test.ts`（vitest），`main/index.ts` 只做装配，不在其中堆业务分支；renderer 前端改动放在 `desktop/src/renderer/src/`，API 字段同步看 §10.3。
+- 扩展桌面应用：可测纯逻辑放进 `desktop/src/main/*.ts` 独立模块并配 `*.test.ts`（vitest），`main/index.ts` 只做装配；renderer 前端改动放在 `desktop/src/renderer/src/`，API 字段同步看 §10.3。
+- 新增会话能力：持久化放在 `agent/sessions/`；API 放在 `agent/web/routes/sessions.py`；前端侧栏放在 `desktop/src/renderer/src/components/layout/SessionSidebar.vue` + `composables/useSession.ts`。
 
 ### 10.3 前端改动注意
 
@@ -365,7 +369,7 @@ emperor-agent doctor --dev
   - `useBootstrap.ts` / `useRuntime.ts`
   - 相关 panel/view
 - runtime 状态机改动优先放在 `desktop/src/renderer/src/runtime/`；`useRuntime.ts` 只承担 WebSocket 生命周期和调度 glue。
-- 新图标放仓库根 `assets/`，并在 `desktop/src/renderer/src/assets.ts` 注册
+- 新图标使用 `lucide-vue-next`，在 `desktop/src/renderer/src/icons.ts` 注册映射
 
 ## 11. 常见排查清单（出问题先看）
 
@@ -381,7 +385,7 @@ emperor-agent doctor --dev
 - 小改动优先最小 patch，不做无关重构。
 - 涉及行为变化时，必须同时更新 README 或本文件对应章节。
 - 做完改动至少做一次“路径验证”：能启动、能发消息、关键 API 不 500。
-- Python 质量门禁优先使用 `.venv/bin/python -m pip install -r requirements-dev.txt` 后执行 `make check`；局部调试可拆开跑 `git diff --check`、`.venv/bin/python -m ruff check agent tests`、`.venv/bin/python -m pytest -q`、`npm --prefix webui run build`，但提交前以 `make check` 为准。
+- Python 质量门禁优先使用 `.venv/bin/python -m pip install -r requirements-dev.txt` 后执行 `make check`；局部调试可拆开跑 `git diff --check`、`.venv/bin/python -m ruff check agent tests`、`.venv/bin/python -m pytest -q`、`cd desktop && npm run build && npm test`，但提交前以 `make check` 为准。
 - 若发现代码与 README 不一致，以“当前代码行为”为准并回写文档。
 
 ## 13. 项目素材生成规范（imagegen）
@@ -394,7 +398,7 @@ emperor-agent doctor --dev
 - 内置工具默认输出目录：`$CODEX_HOME/generated_images/...`（中间产物）。
 - 本项目素材根目录（原始路径）：`/Users/anhuike/Documents/workspace/emperor-agent/assets`。
 - 生成素材必须最终落在上述 `assets/` 根目录下。
-- 若该素材明确属于现有分类（如 `assets/nav/`、`assets/actions/`、`assets/brand/`），保存到对应分类目录。
+- 若该素材明确属于现有分类（如 `assets/desktop-pet/`），保存到对应分类目录。
 - 若暂不属于既有分类，保存到 `assets/generated/`。
 
 ### 13.2 落盘规则
@@ -405,11 +409,10 @@ emperor-agent doctor --dev
 
 ### 13.3 提示词同步规则（必须执行）
 
-- 每次素材生成/编辑完成后，必须把“最终采用的提示词”同步记录到对应目录的 `PROMPTS.md`：
-  - `assets/nav/*` -> `assets/nav/PROMPTS.md`
-  - `assets/actions/*` -> `assets/actions/PROMPTS.md`
-  - 其他同理
+- 每次素材生成/编辑完成后，必须把”最终采用的提示词”同步记录到对应目录的 `PROMPTS.md`：
+  - `assets/desktop-pet/*` -> `assets/desktop-pet/PROMPTS.md`
   - `assets/generated/*` -> `assets/generated/PROMPTS.md`
+  - 其他同理
 - 记录至少包含：日期、输出文件名、工具模式（built-in / CLI fallback）、最终 prompt（含关键约束）。
 - 若目标目录不存在 `PROMPTS.md`，先创建再记录。
 
