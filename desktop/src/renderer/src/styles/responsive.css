@@ -121,6 +121,19 @@
     max-width: calc(100vw - 4.75rem);
   }
 
+  .assistant-toolbar,
+  .assistant-timeline-shell {
+    @apply pl-5;
+  }
+
+  .assistant-timeline-shell::before {
+    display: none;
+  }
+
+  .timeline-node::before {
+    @apply -left-[1.38rem];
+  }
+
   .message-row {
     @apply gap-2.5;
   }
@@ -149,6 +162,10 @@
 
   .activity-body {
     @apply px-3;
+  }
+
+  .timeline-node.text-node {
+    @apply px-4 py-3;
   }
 
   .agent-node-body {

@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
-import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SchedulerMessageMeta, SubagentState, TeamMessage, ToolSegment, ToolStatus, WsEvent } from '../types'
+import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SchedulerMessageMeta, SubagentState, TeamMessage, ThoughtSegment, ToolSegment, ToolStatus, WsEvent } from '../types'
 import {
   clearRuntimeSnapshotRaw,
   IN_FLIGHT_MAX_AGE_MS,
@@ -75,6 +75,7 @@ export function useRuntime(options: {
   let pendingClearTimer: number | undefined
   let pendingVersion = 0
   let rehydrating = false
+  const turnClock = new Map<string, number>()
 
   const currentAssistant = computed(() => messages.value.find((message) => message.id === currentAssistantId.value && message.role === 'assistant') as AssistantMessage | undefined)
 
@@ -179,7 +180,7 @@ export function useRuntime(options: {
     }
     if (attachments.length) userMsg.attachments = attachments
     messages.value.push(userMsg)
-    messages.value.push({ id: assistantId, role: 'assistant', content: '', segments: [], todos: null, streaming: true })
+    messages.value.push(createStreamingAssistant(assistantId, Date.now()))
     currentAssistantId.value = assistantId
     busy.value = true
     status.value = 'ready'
@@ -273,7 +274,7 @@ export function useRuntime(options: {
     messages.value.push({ id: userId, role: 'user', content: userLabel })
     if (expectAssistant) {
       const assistantId = nextId('assistant')
-      messages.value.push({ id: assistantId, role: 'assistant', content: '', segments: [], todos: null, streaming: true })
+      messages.value.push(createStreamingAssistant(assistantId, Date.now()))
       currentAssistantId.value = assistantId
       busy.value = true
       updatePending('正在继续执行...', userLabel)
@@ -291,6 +292,7 @@ export function useRuntime(options: {
     messages.value = []
     currentAssistantId.value = null
     busy.value = false
+    turnClock.clear()
     updatePending()
     clearRuntimeSnapshot()
     options.showToast('当前屏幕已清空')
@@ -362,6 +364,7 @@ export function useRuntime(options: {
     busy.value = false
     updatePending()
     lastSeq.value = 0
+    turnClock.clear()
     rehydrating = true
     try {
       replayRuntimeEvents(events, ({ event }) => handleSocketEvent(JSON.stringify(event)))
@@ -400,6 +403,7 @@ export function useRuntime(options: {
     if (data.event === 'message_delta') {
       const assistant = assistantForEvent(data)
       if (assistant) {
+        finishActiveThought(assistant, data)
         const delta = data.delta || ''
         assistant.content += delta
         const last = assistant.segments[assistant.segments.length - 1]
@@ -430,12 +434,16 @@ export function useRuntime(options: {
     if (data.event === 'tool_call') {
       const assistant = assistantForEvent(data)
       if (assistant) {
-        const startedAt = Date.now()
+        finishActiveThought(assistant, data)
+        const startedAt = eventTimeMs(data)
         assistant.segments.push({
           id: nextId('segment'),
           type: 'tool',
           toolId: data.id,
           name: data.name,
+          displayName: toolDisplayName(data.name),
+          inputLabel: 'IN',
+          outputLabel: 'OUT',
           arguments: data.arguments || {},
           status: 'running',
           summary: '',
@@ -451,13 +459,17 @@ export function useRuntime(options: {
       const assistant = assistantForEvent(data, false)
       const seg = findToolSegment(assistant, data.id)
       if (seg) {
-        finishTimedState(seg)
+        finishTimedState(seg, eventTimeMs(data))
         seg.summary = data.summary || '已完成'
         seg.status = 'done'
-        if (data.name === 'update_todos' && data.todos) assistant!.todos = data.todos
+        if ((data.name === 'update_todos' || seg.name === 'update_todos') && data.todos) {
+          seg.todos = data.todos
+          assistant!.todos = data.todos
+        }
       }
       const running = (assistant?.segments || []).filter((seg): seg is ToolSegment => seg.type === 'tool' && seg.status === 'running')
       if (running.length) updatePending(`正在执行: ${running[0].name}`, `剩余 ${running.length} 个工具`)
+      else if (assistant?.streaming) startThought(assistant, data, '整理工具结果')
       return
     }
 
@@ -465,10 +477,11 @@ export function useRuntime(options: {
       const assistant = assistantForEvent(data, false)
       const seg = findToolSegment(assistant, data.id)
       if (seg) {
-        finishTimedState(seg)
+        finishTimedState(seg, eventTimeMs(data))
         seg.status = 'error'
         seg.summary = data.message || '工具执行出错'
       }
+      if (assistant?.streaming) startThought(assistant, data, '处理工具错误')
       updatePending(`工具 ${data.name || ''} 执行出错`, data.message || '', 'error')
       return
     }
@@ -476,8 +489,11 @@ export function useRuntime(options: {
     if (data.event === 'assistant_done') {
       const assistant = assistantForEvent(data, false) || currentAssistant.value
       if (assistant) {
+        finishActiveThought(assistant, data)
         assistant.content = data.content || assistant.content
+        syncAssistantDoneContent(assistant, data.content || '')
         assistant.streaming = false
+        if (assistant.turn_id) turnClock.delete(assistant.turn_id)
       }
       currentAssistantId.value = null
       busy.value = false
@@ -512,7 +528,11 @@ export function useRuntime(options: {
 
     if (data.event === 'turn_paused') {
       const assistant = assistantForEvent(data, false) || currentAssistant.value
-      if (assistant) assistant.streaming = false
+      if (assistant) {
+        finishActiveThought(assistant, data)
+        assistant.streaming = false
+        if (assistant.turn_id) turnClock.delete(assistant.turn_id)
+      }
       currentAssistantId.value = null
       busy.value = false
       status.value = 'ready'
@@ -557,6 +577,7 @@ export function useRuntime(options: {
     const clientId = data.client_message_id || ''
     const content = data.content || ''
     const meta = schedulerMessageMeta(content, clientId, data.source, data.scheduler)
+    if (turnId) turnClock.set(turnId, eventTimeMs(data))
     const existing = messages.value.find((message) =>
       message.role === 'user' && (
         (clientId && message.id === clientId) ||
@@ -583,7 +604,7 @@ export function useRuntime(options: {
     messages.value.push(msg)
   }
 
-  function assistantForEvent(data?: { turn_id?: string }, create = true): AssistantMessage | undefined {
+  function assistantForEvent(data?: { turn_id?: string; ts?: number }, create = true): AssistantMessage | undefined {
     const turnId = data?.turn_id || ''
     if (turnId) {
       const existing = messages.value.find((message): message is AssistantMessage =>
@@ -599,9 +620,9 @@ export function useRuntime(options: {
         return current
       }
       if (!create) return undefined
-      return createAssistantForIncomingControl(turnId)
+      return createAssistantForIncomingControl(turnId, turnClock.get(turnId) || eventTimeMs(data))
     }
-    return create ? (currentAssistant.value || createAssistantForIncomingControl()) : currentAssistant.value
+    return create ? (currentAssistant.value || createAssistantForIncomingControl('', eventTimeMs(data))) : currentAssistant.value
   }
 
   function handleReadyEvent(data: Extract<WsEvent, { event: 'ready' }>) {
@@ -644,6 +665,7 @@ export function useRuntime(options: {
     }
     const assistant = assistantForEvent(data)
     if (!assistant) return
+    finishActiveThought(assistant, data)
     const type = data.event === 'ask_request' ? 'ask' : 'plan'
     const existing = assistant.segments.find((seg) =>
       (seg.type === 'ask' || seg.type === 'plan') && seg.interaction.id === data.interaction!.id
@@ -656,20 +678,86 @@ export function useRuntime(options: {
     updatePending(type === 'plan' ? '计划待预览' : '等待你回答', data.interaction.title || data.interaction.context || '', 'done')
   }
 
-  function createAssistantForIncomingControl(turnId = '') {
+  function createAssistantForIncomingControl(turnId = '', startedAt = Date.now()) {
     const assistantId = nextId('assistant')
-    const assistant: AssistantMessage = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      segments: [],
-      todos: null,
-      streaming: true,
-      turn_id: turnId || undefined,
-    }
+    const assistant = createStreamingAssistant(assistantId, startedAt)
+    if (turnId) assistant.turn_id = turnId
     messages.value.push(assistant)
     currentAssistantId.value = assistantId
     return assistant
+  }
+
+  function createStreamingAssistant(assistantId: string, startedAt: number): AssistantMessage {
+    return {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      segments: [createThoughtSegment(startedAt, '等待模型首字')],
+      todos: null,
+      streaming: true,
+    }
+  }
+
+  function createThoughtSegment(startedAt: number, label = 'Thought'): ThoughtSegment {
+    return {
+      id: nextId('thought'),
+      type: 'thought',
+      status: 'running',
+      label,
+      startedAt,
+    }
+  }
+
+  function startThought(assistant: AssistantMessage, data?: { ts?: number }, label = 'Thought') {
+    const last = assistant.segments[assistant.segments.length - 1]
+    if (last?.type === 'thought' && last.status === 'running') return
+    assistant.segments.push(createThoughtSegment(eventTimeMs(data), label))
+  }
+
+  function finishActiveThought(assistant: AssistantMessage, data?: { ts?: number }) {
+    const last = assistant.segments[assistant.segments.length - 1]
+    if (last?.type !== 'thought' || last.status !== 'running') return
+    finishTimedState(last, eventTimeMs(data))
+    last.status = 'done'
+  }
+
+  function syncAssistantDoneContent(assistant: AssistantMessage, content: string) {
+    const text = content.trimEnd()
+    if (!text) return
+    const textSegments = assistant.segments.filter((segment) => segment.type === 'text')
+    const current = textSegments.map((segment) => segment.content).join('')
+    if (!current) {
+      assistant.segments.push({ id: nextId('segment'), type: 'text', content: text })
+      return
+    }
+    if (text.startsWith(current)) {
+      const rest = text.slice(current.length)
+      const lastText = [...assistant.segments].reverse().find((segment) => segment.type === 'text')
+      if (rest && lastText?.type === 'text') lastText.content += rest
+    }
+  }
+
+  function eventTimeMs(data?: { ts?: number }) {
+    const raw = typeof data?.ts === 'number' ? data.ts : 0
+    if (!raw) return Date.now()
+    return raw < 1_000_000_000_000 ? Math.round(raw * 1000) : Math.round(raw)
+  }
+
+  function toolDisplayName(name: string) {
+    const names: Record<string, string> = {
+      dispatch_subagent: 'Agent',
+      edit_file: 'Edit',
+      glob: 'Glob',
+      grep: 'Search',
+      load_skill: 'Skill',
+      read_file: 'Read',
+      run_command: 'Bash',
+      scheduler: 'Scheduler',
+      update_todos: 'Update Todos',
+      web_fetch: 'Fetch',
+      write_file: 'Write',
+    }
+    return names[name] || name
   }
 
   function updateControlSegment(interaction: ControlInteraction) {
@@ -699,7 +787,7 @@ export function useRuntime(options: {
           status: 'running',
           content: '',
           tools: [],
-          startedAt: Date.now(),
+          startedAt: eventTimeMs(data),
         })
       }
       updatePending(`派遣小太监: ${data.agent_type || 'subagent'}`, data.purpose || '')
@@ -717,7 +805,7 @@ export function useRuntime(options: {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
         sub.tools ||= []
-        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: Date.now() })
+        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: eventTimeMs(data) })
       }
       updatePending(`小太监调用: ${data.name}`, '')
       return
@@ -726,7 +814,7 @@ export function useRuntime(options: {
     if (data.event === 'subagent_tool_result') {
       const tool = findSubagentTool(assistant, data.parent_id, data.subagent_id, data.id)
       if (tool) {
-        finishTimedState(tool)
+        finishTimedState(tool, eventTimeMs(data))
         tool.summary = data.summary || '已完成'
         tool.status = 'done'
       }
@@ -736,7 +824,7 @@ export function useRuntime(options: {
     if (data.event === 'subagent_tool_error') {
       const tool = findSubagentTool(assistant, data.parent_id, data.subagent_id, data.id)
       if (tool) {
-        finishTimedState(tool)
+        finishTimedState(tool, eventTimeMs(data))
         tool.summary = data.message || '工具执行出错'
         tool.status = 'error'
       }
@@ -747,7 +835,7 @@ export function useRuntime(options: {
     if (data.event === 'subagent_done') {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
-        finishTimedState(sub)
+        finishTimedState(sub, eventTimeMs(data))
         sub.status = 'done'
         sub.summary = data.summary
       }
@@ -758,7 +846,7 @@ export function useRuntime(options: {
     if (data.event === 'subagent_error') {
       const sub = findSubagent(assistant, data.parent_id, data.subagent_id)
       if (sub) {
-        finishTimedState(sub)
+        finishTimedState(sub, eventTimeMs(data))
         sub.status = 'error'
         sub.error = data.message
       }
@@ -799,7 +887,7 @@ export function useRuntime(options: {
           content: '',
           tools: [],
           messages: [],
-          startedAt: Date.now(),
+          startedAt: eventTimeMs(data),
         })
       }
       updatePending(`队友 ${data.teammate || ''} 已唤醒`, data.purpose || '')
@@ -817,7 +905,7 @@ export function useRuntime(options: {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
         sub.tools ||= []
-        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: Date.now() })
+        sub.tools.push({ id: data.id, name: data.name, arguments: data.arguments || {}, status: 'running', startedAt: eventTimeMs(data) })
       }
       updatePending(`队友调用: ${data.name}`, data.teammate || '')
       return
@@ -826,7 +914,7 @@ export function useRuntime(options: {
     if (data.event === 'team_run_tool_result') {
       const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
       if (tool) {
-        finishTimedState(tool)
+        finishTimedState(tool, eventTimeMs(data))
         tool.summary = data.summary || '已完成'
         tool.status = 'done'
       }
@@ -836,7 +924,7 @@ export function useRuntime(options: {
     if (data.event === 'team_run_tool_error') {
       const tool = findSubagentTool(assistant, data.parent_id, data.teammate, data.id)
       if (tool) {
-        finishTimedState(tool)
+        finishTimedState(tool, eventTimeMs(data))
         tool.summary = data.message || '工具执行出错'
         tool.status = 'error'
       }
@@ -847,7 +935,7 @@ export function useRuntime(options: {
     if (data.event === 'team_run_done') {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
-        finishTimedState(sub)
+        finishTimedState(sub, eventTimeMs(data))
         sub.status = 'done'
         sub.summary = data.summary
       }
@@ -858,7 +946,7 @@ export function useRuntime(options: {
     if (data.event === 'team_run_error') {
       const sub = findSubagent(assistant, data.parent_id, data.teammate)
       if (sub) {
-        finishTimedState(sub)
+        finishTimedState(sub, eventTimeMs(data))
         sub.status = 'error'
         sub.error = data.message
       }
@@ -923,6 +1011,11 @@ export function useRuntime(options: {
     if (!assistant) return
     assistant.streaming = false
     for (const seg of assistant.segments) {
+      if (seg.type === 'thought' && seg.status === 'running') {
+        finishTimedState(seg)
+        seg.status = 'error_aborted'
+        continue
+      }
       if (seg.type !== 'tool') continue
       if (seg.status === 'running') {
         finishTimedState(seg)
@@ -944,7 +1037,8 @@ export function useRuntime(options: {
   }
 
   function finishInterruptedAssistant(assistant: AssistantMessage, fallback: string) {
-    if (!assistant.content && !assistant.segments.length) {
+    const hasText = assistant.segments.some((segment) => segment.type === 'text')
+    if (!assistant.content && !hasText) {
       assistant.content = fallback
       assistant.segments.push({ id: nextId('segment'), type: 'text', content: fallback })
     }
@@ -972,8 +1066,7 @@ export function useRuntime(options: {
     }
   }
 
-  function finishTimedState(state: { startedAt?: number; endedAt?: number; durationMs?: number }) {
-    const endedAt = Date.now()
+  function finishTimedState(state: { startedAt?: number; endedAt?: number; durationMs?: number }, endedAt = Date.now()) {
     state.endedAt = endedAt
     if (state.startedAt) state.durationMs = Math.max(0, endedAt - state.startedAt)
   }
@@ -1060,7 +1153,20 @@ function finalizedSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   const messages = snapshot.messages.map((message) => {
     if (message.role !== 'assistant' || message.id !== snapshot.currentAssistantId) return message
     const fallback = '（上次回复已超时中断，请重新发送。）'
-    const segments = message.segments.length ? message.segments : [{ id: nextId('segment'), type: 'text' as const, content: fallback }]
+    const baseSegments = message.segments.map((segment) => {
+      if (segment.type !== 'thought' || segment.status !== 'running') return segment
+      const endedAt = snapshot.savedAt
+      return {
+        ...segment,
+        status: 'error_aborted' as const,
+        endedAt,
+        durationMs: segment.startedAt ? Math.max(0, endedAt - segment.startedAt) : segment.durationMs,
+      }
+    })
+    const hasText = baseSegments.some((segment) => segment.type === 'text')
+    const segments = hasText
+      ? baseSegments
+      : [...baseSegments, { id: nextId('segment'), type: 'text' as const, content: fallback }]
     const content = message.content || fallback
     return { ...message, content, segments, streaming: false } satisfies AssistantMessage
   })

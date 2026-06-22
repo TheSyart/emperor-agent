@@ -411,14 +411,28 @@ export interface TextSegment {
   content: string
 }
 
+export interface ThoughtSegment {
+  id: string
+  type: 'thought'
+  status: 'running' | 'done' | 'error' | 'error_aborted'
+  label?: string
+  startedAt?: number
+  endedAt?: number
+  durationMs?: number
+}
+
 export interface ToolSegment {
   id: string
   type: 'tool'
   toolId?: string
   name: string
+  displayName?: string
+  inputLabel?: string
+  outputLabel?: string
   arguments?: Record<string, unknown>
   status: ToolStatus
   summary?: string
+  todos?: TodoItem[]
   subagents?: SubagentState[]
   startedAt?: number
   endedAt?: number
@@ -481,7 +495,7 @@ export interface PlanSegment {
   interaction: ControlInteraction
 }
 
-export type AssistantSegment = TextSegment | ToolSegment | AskSegment | PlanSegment
+export type AssistantSegment = TextSegment | ThoughtSegment | ToolSegment | AskSegment | PlanSegment
 
 export interface SubagentToolState {
   id?: string

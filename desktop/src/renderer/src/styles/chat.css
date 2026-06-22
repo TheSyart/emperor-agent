@@ -40,7 +40,7 @@
   }
 
   .message-row.assistant {
-    padding-left: clamp(0rem, 2vw, 2.5rem);
+    padding-left: clamp(0rem, 1.2vw, 1.5rem);
   }
 
   .message-row.user {
@@ -227,11 +227,15 @@
 
   .flow-body {
     @apply flex min-w-0 flex-col items-start gap-3;
-    max-width: min(760px, calc(100% - 4.75rem));
+    max-width: min(920px, 100%);
+  }
+
+  .timeline-flow {
+    @apply w-full;
   }
 
   .assistant-toolbar {
-    @apply flex w-full items-center justify-between gap-3 px-1;
+    @apply flex w-full items-center justify-between gap-3 px-1 pl-7;
   }
 
   .assistant-toolbar.ghost {
@@ -239,7 +243,7 @@
   }
 
   .copy-message-button {
-    @apply inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line/60 bg-paper/85 px-3 py-1 text-[11px] font-semibold text-muted opacity-70 shadow-sm transition hover:border-seal/35 hover:bg-seal/10 hover:text-seal hover:opacity-100;
+    @apply inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line/55 bg-paper/75 px-2.5 py-1 text-[11px] font-semibold text-muted opacity-70 shadow-sm transition hover:border-seal/35 hover:bg-seal/10 hover:text-seal hover:opacity-100;
     backdrop-filter: blur(10px);
   }
 
@@ -253,4 +257,84 @@
   .message-row.assistant:hover .copy-message-button,
   .copy-message-button:focus-visible {
     @apply opacity-100;
+  }
+
+  .assistant-mini-avatar {
+    @apply size-full rounded-full object-cover;
+    image-rendering: pixelated;
+  }
+
+  .assistant-timeline-shell {
+    @apply relative flex w-full min-w-0 flex-col gap-3 pl-7;
+  }
+
+  .assistant-timeline-shell::before {
+    content: '';
+    @apply absolute bottom-2 left-[0.68rem] top-1 w-px bg-line/70;
+    background:
+      linear-gradient(180deg, transparent, rgb(var(--line) / 0.78) 1.5rem, rgb(var(--line) / 0.5) calc(100% - 1rem), transparent);
+  }
+
+  .timeline-node {
+    @apply relative min-w-0 max-w-full;
+  }
+
+  .timeline-node::before {
+    content: '';
+    @apply absolute -left-[1.82rem] top-4 size-2.5 rounded-full border border-paper bg-muted;
+    box-shadow: 0 0 0 3px rgb(var(--paper) / 0.82);
+  }
+
+  .timeline-node.text-node {
+    @apply rounded-[1.05rem] border border-line/60 bg-paper/[0.58] px-5 py-4 text-ink;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.42),
+      0 0.45rem 1.15rem rgb(var(--ink) / 0.035);
+  }
+
+  .timeline-node.text-node::before {
+    @apply bg-seal/70;
+  }
+
+  .timeline-node.text-node.streaming {
+    @apply border-amber/40 bg-amber/5;
+  }
+
+  .timeline-node.text-node.streaming::after {
+    content: '';
+    @apply absolute bottom-4 right-4 size-2 rounded-full bg-amber animate-pulse-seal;
+  }
+
+  .thought-node {
+    @apply flex w-fit max-w-full items-center gap-2 rounded-full px-1.5 py-0.5 font-mono text-xs font-semibold text-muted;
+  }
+
+  .thought-node::before {
+    @apply top-2 bg-muted;
+  }
+
+  .thought-node.running::before {
+    @apply bg-amber animate-pulse-seal;
+  }
+
+  .thought-node.done::before {
+    @apply bg-jade;
+  }
+
+  .thought-node.error::before,
+  .thought-node.error_aborted::before {
+    @apply bg-seal;
+  }
+
+  .thought-label {
+    @apply text-muted;
+  }
+
+  .thought-chevron {
+    @apply text-muted/70;
+  }
+
+  .control-node > .control-card,
+  .todo-fallback-node > .todo-panel {
+    @apply w-full max-w-none;
   }

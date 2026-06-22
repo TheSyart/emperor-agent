@@ -20,7 +20,7 @@ function agentTitle(sub: SubagentState) {
 }
 
 function agentKind(sub: SubagentState) {
-  return sub.kind === 'team' ? 'Agent Team' : 'Subagent'
+  return sub.kind === 'team' ? 'Team Agent' : 'Agent'
 }
 
 function durationLabel(ms?: number) {
@@ -58,7 +58,7 @@ function fullJson(value: unknown) {
         <img class="subagent-avatar" :src="avatarAssets.subagent" alt="" width="24" height="24" />
         <span class="agent-node-title">
           <span>{{ agentKind(sub) }}</span>
-          <strong>{{ agentTitle(sub) }}</strong>
+          <strong>Agent: {{ agentTitle(sub) }}</strong>
           <small v-if="sub.purpose">{{ sub.purpose }}</small>
         </span>
         <span v-if="sub.role" class="agent-role-badge">{{ sub.role }}</span>

@@ -72,7 +72,7 @@ function toggleDesktopPet() {
               </span>
             </div>
             <div class="desktop-pet-preview">
-              <img src="../../../assets/desktop-pet/clawd-tank/clawd-idle-living.svg" alt="" />
+              <img src="../../../../../assets/desktop-pet/clawd-tank/clawd-idle-living.svg" alt="" />
             </div>
             <div class="desktop-pet-meta">
               <span>

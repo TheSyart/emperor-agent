@@ -1,12 +1,12 @@
   .activity-card {
-    @apply relative w-full max-w-full overflow-hidden rounded-[1.25rem] border border-line/65 bg-paper2/55 text-sm shadow-insetPaper;
+    @apply relative w-full max-w-full overflow-visible rounded-[1.05rem] border border-line/60 bg-paper/[0.52] text-sm shadow-insetPaper;
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.42),
-      0 0.7rem 1.4rem rgb(var(--ink) / 0.055);
+      inset 0 1px 0 rgb(255 255 255 / 0.38),
+      0 0.45rem 1.1rem rgb(var(--ink) / 0.04);
   }
 
   .activity-card[open] {
-    @apply bg-paper/80;
+    @apply bg-paper/[0.72];
   }
 
   .activity-card.running {
@@ -22,6 +22,19 @@
     @apply border-seal/30 bg-seal/10;
   }
 
+  .activity-card.running::before {
+    @apply bg-amber animate-pulse-seal;
+  }
+
+  .activity-card.done::before {
+    @apply bg-jade;
+  }
+
+  .activity-card.error::before,
+  .activity-card.error_aborted::before {
+    @apply bg-seal;
+  }
+
   .activity-summary {
     @apply grid cursor-pointer items-center gap-3 px-3.5 py-2.5;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -33,13 +46,13 @@
   }
 
   .activity-rail {
-    @apply relative grid size-11 shrink-0 place-items-center rounded-[0.95rem] border border-line/55 bg-paper/80;
+    @apply relative grid size-9 shrink-0 place-items-center rounded-[0.8rem] border border-line/55 bg-paper/80;
   }
 
   .activity-icon {
-    @apply size-9;
+    @apply size-7;
     image-rendering: pixelated;
-    transform: scale(1.12);
+    transform: scale(1.08);
   }
 
   .activity-status-dot {
@@ -68,7 +81,11 @@
   }
 
   .activity-main strong {
-    @apply truncate font-mono text-sm font-black text-ink;
+    @apply min-w-0 truncate font-mono text-sm font-black text-ink;
+  }
+
+  .activity-main strong em {
+    @apply ml-1 font-mono text-[10px] font-semibold not-italic text-muted;
   }
 
   .activity-main small {
@@ -98,22 +115,86 @@
   }
 
   .activity-body {
-    @apply border-t border-line/55 px-3.5 pb-3.5 pt-3;
+    @apply space-y-3 border-t border-line/50 px-3.5 pb-3.5 pt-3;
     background:
-      linear-gradient(90deg, rgb(var(--seal) / 0.06), transparent 0.28rem),
-      linear-gradient(180deg, rgb(var(--paper) / 0.58), rgb(var(--paper-2) / 0.22));
+      linear-gradient(180deg, rgb(var(--paper) / 0.56), rgb(var(--paper-2) / 0.18));
   }
 
-  .activity-detail {
-    @apply rounded-[1rem] border border-line/55 bg-paper/60 px-3 py-2.5;
+  .tool-io-grid {
+    @apply grid min-w-0 gap-2;
   }
 
-  .activity-detail > span {
-    @apply mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted;
+  .tool-io-panel {
+    @apply min-w-0 overflow-hidden rounded-[0.82rem] border border-line/50 bg-paper2/45;
+  }
+
+  .tool-io-panel > span {
+    @apply block border-b border-line/45 bg-ink/[0.03] px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-muted;
   }
 
   .tool-summary {
-    @apply text-xs leading-6 text-muted;
+    @apply px-3 py-2 text-xs leading-6 text-muted;
+  }
+
+  .tool-code {
+    @apply font-mono;
+  }
+
+  .tool-todo-list {
+    @apply rounded-[0.9rem] border border-amber/30 bg-amber/10 px-3 py-2.5;
+  }
+
+  .tool-todo-head {
+    @apply mb-2 flex items-center justify-between gap-3;
+  }
+
+  .tool-todo-head strong {
+    @apply font-mono text-xs font-black text-ink;
+  }
+
+  .tool-todo-head span {
+    @apply rounded-full border border-amber/30 bg-paper/65 px-2 py-0.5 font-mono text-[10px] text-muted;
+  }
+
+  .tool-todo-items {
+    @apply space-y-1.5;
+  }
+
+  .tool-todo-item {
+    @apply grid min-w-0 items-center gap-2 rounded-xl border border-line/45 bg-paper/[0.68] px-2.5 py-2 text-xs text-ink;
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .tool-todo-item span {
+    @apply grid size-5 place-items-center rounded-md bg-paper2 font-mono text-[10px] font-black text-muted;
+  }
+
+  .tool-todo-item em {
+    @apply font-mono text-[10px] not-italic text-muted;
+  }
+
+  .tool-todo-item p {
+    @apply min-w-0 break-words leading-5;
+  }
+
+  .tool-todo-item.completed {
+    @apply text-muted;
+  }
+
+  .tool-todo-item.completed p {
+    @apply line-through decoration-line/80;
+  }
+
+  .tool-todo-item.completed span {
+    @apply bg-jade/10 text-jade;
+  }
+
+  .tool-todo-item.in_progress {
+    @apply border-amber/40 bg-amber/15;
+  }
+
+  .tool-todo-item.in_progress span {
+    @apply bg-amber/20 text-amber;
   }
 
   .control-card {
