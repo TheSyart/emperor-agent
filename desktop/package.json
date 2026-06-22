@@ -1,0 +1,15 @@
+{
+  "name": "emperor-agent-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Emperor Agent desktop shell (Electron) that hosts the full WebUI.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "electron": "^42.2.0"
+  }
+}
