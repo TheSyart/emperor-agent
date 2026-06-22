@@ -18,6 +18,7 @@ from .routes import (
     memory,
     model,
     scheduler,
+    sessions,
     skills,
     team,
 )
@@ -59,6 +60,7 @@ def create_app(
     app["container"] = container
     app["state"] = state
     for register in (
+        sessions.register,
         skills.register,
         assets.register,
         memory.register,
