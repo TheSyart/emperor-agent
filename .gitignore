@@ -8,11 +8,10 @@ __pycache__/
 model_config.json
 mcp_config.json
 emperor.local.json
-webui/dist/
-webui/node_modules/
 desktop-pet/node_modules/
 desktop/node_modules/
-webui/public/assets/
+desktop/out/
+desktop/dist/
 templates/USER.local.md
 templates/*.local.md
 logs/

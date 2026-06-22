@@ -27,5 +27,11 @@ echo "== ruff =="
 echo "== pytest =="
 "$PYTHON_BIN" -m pytest -q
 
-echo "== webui build =="
-npm --prefix webui run build
+echo "== vitest =="
+npm --prefix desktop run test
+
+echo "== electron-vite build =="
+npm --prefix desktop run build
+
+echo "== vue-tsc + tsc =="
+npm --prefix desktop run typecheck
