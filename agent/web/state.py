@@ -50,10 +50,11 @@ class WebUIState:
         webui_port: int | None = None,
     ):
         self.root = root.resolve()
+        # Address the local backend listens on; the desktop app loads the
+        # frontend itself, so this is no longer a browser-facing web host.
         self.webui_host = webui_host
         self.webui_port = webui_port
         configure_logging(self.root)
-        self.static_dir = self.root / "webui" / "dist"
         self._ensure_tool_config()
         self.loop = AgentLoop(root=self.root, verbose=False, startup_compaction=False)
         self.loop.init_mcp()
@@ -377,87 +378,10 @@ class WebUIState:
                 "unarchivedHistory": self.memory_service.unarchived_history(),
             })
 
-    async def static(self, request: web.Request) -> web.StreamResponse:
-        if not (self.static_dir / "index.html").exists():
-            return self._missing_dist_response()
-
-        path = request.match_info.get("tail", "") or "index.html"
-        target = (self.static_dir / path).resolve()
-        static_root = self.static_dir.resolve()
-        if not _is_relative_to(target, static_root):
-            raise web.HTTPNotFound()
-        if target.is_dir():
-            target = target / "index.html"
-        if not target.exists():
-            target = static_root / "index.html"
-        return web.FileResponse(target)
-
-    def _missing_dist_response(self) -> web.Response:
-        html = """<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Emperor Agent WebUI 未构建</title>
-    <style>
-      :root { color-scheme: light; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background:
-          radial-gradient(circle at 20% 10%, rgba(184, 122, 45, 0.18), transparent 34%),
-          linear-gradient(135deg, #f7efde, #efe1c6);
-        color: #30241d;
-        font-family: "Songti SC", "STSong", Georgia, serif;
-      }
-      main {
-        width: min(680px, calc(100vw - 32px));
-        border: 1px solid rgba(151, 44, 31, 0.22);
-        border-radius: 28px;
-        padding: 32px;
-        background: rgba(247, 239, 222, 0.78);
-        box-shadow: 0 24px 70px rgba(77, 39, 22, 0.16);
-      }
-      .seal {
-        width: 56px;
-        height: 56px;
-        display: grid;
-        place-items: center;
-        border-radius: 18px;
-        background: #972c1f;
-        color: #f7efde;
-        font-size: 28px;
-        font-weight: 900;
-      }
-      h1 { margin: 20px 0 8px; font-size: 34px; }
-      p { color: #765b46; line-height: 1.8; }
-      code {
-        display: block;
-        margin-top: 16px;
-        padding: 16px;
-        border-radius: 16px;
-        background: #30241d;
-        color: #f7efde;
-        font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
-        white-space: pre-wrap;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <div class="seal">令</div>
-      <h1>WebUI 还没有构建</h1>
-      <p>当前 Python 服务只托管 <strong>webui/dist</strong>。请先构建 Vue 前端，或开发时使用 Vite dev server 访问。</p>
-      <code>cd webui
-npm install
-npm run build</code>
-      <p>开发模式可使用：<strong>cd webui && npm run dev</strong>，它会代理 /api 和 /ws 到 http://127.0.0.1:8765。</p>
-    </main>
-  </body>
-</html>"""
-        return web.Response(text=html, content_type="text/html")
+    async def not_found(self, request: web.Request) -> web.Response:
+        # API/WS-only backend: any non-api path is a JSON 404. The desktop app
+        # serves the frontend itself, so there is no SPA HTML fallback here.
+        return web.json_response({"error": "not_found"}, status=404)
 
     def tools(self) -> list[dict[str, Any]]:
         out = []
