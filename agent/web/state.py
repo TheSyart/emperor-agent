@@ -348,6 +348,9 @@ class WebUIState:
 
         return load_local_config(self.root).webui.port
 
+    def _rel(self, p: str | Path) -> str:
+        return Path(p).resolve().relative_to(self.root).as_posix()
+
     @staticmethod
     async def _body(request: web.Request) -> dict[str, Any]:
         try:
