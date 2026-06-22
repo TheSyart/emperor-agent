@@ -22,6 +22,8 @@ from .control import (
 from .logger import configure as configure_logging
 from .mcp import MCPClient
 from .memory import MemoryStore
+from .sessions.store import SessionStore
+from .sessions.conversation import ConversationStore
 from .model_router import ModelRouter
 from .runner import AgentRunner
 from .runner_factory import build_routed_runner
@@ -142,6 +144,57 @@ class AgentLoop:
                     logger.warning(f"startup compaction failed: {exc}")
                 unarchived = []
             self.history: list = list(unarchived)
+
+        # ── Multi-session initialisation ────────────────────────────
+        self.session_store = SessionStore(self.root)
+        self._active_session_id: str | None = None
+        self._active_conversation: ConversationStore | None = None
+
+        self._migrate_if_needed_and_activate()
+        # ─────────────────────────────────────────────────────────────
+
+    def _migrate_if_needed_and_activate(self) -> None:
+        sessions = self.session_store.list()
+        old_history = self.root / "memory" / "history.jsonl"
+
+        if not sessions and old_history.exists():
+            logger.info("Migrating legacy conversation into default session...")
+            default = self.session_store.create("Default")
+            dst = self.session_store._dir(default["id"])
+
+            # Move old history into the session directory
+            shutil.move(str(old_history), str(dst / "history.jsonl"))
+
+            # Move old checkpoint if present
+            old_cp = self.root / "memory" / "_checkpoint.json"
+            if old_cp.exists():
+                shutil.move(str(old_cp), str(dst / "_checkpoint.json"))
+
+            # Move runtime events if present
+            old_runtime = self.root / "memory" / "runtime" / "events.jsonl"
+            dst_rt_dir = dst / "runtime"
+            if old_runtime.exists():
+                dst_rt_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old_runtime), str(dst_rt_dir / "events.jsonl"))
+            old_rt_archive = self.root / "memory" / "runtime" / "archive"
+            if old_rt_archive.exists():
+                shutil.move(str(old_rt_archive), str(dst_rt_dir / "archive"))
+
+            sessions = [default]
+
+        if sessions:
+            self.activate_session(sessions[0]["id"])
+
+    def activate_session(self, session_id: str) -> None:
+        conv = ConversationStore(self.session_store._dir(session_id))
+        self._active_session_id = session_id
+        self._active_conversation = conv
+        cp = conv.read_checkpoint()
+        if cp:
+            logger.info(f"Session {session_id[:8]}: restored checkpoint ({len(cp)} msgs)")
+            self.history = list(cp)
+        else:
+            self.history = conv.load_unarchived_history()
 
     def _ensure_local_user_file(self) -> Path:
         template = self.root / "templates" / "init" / "USER.md"
