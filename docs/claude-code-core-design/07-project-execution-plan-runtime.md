@@ -137,7 +137,7 @@ Emperor 对应方向：
 Emperor 对应方向：
 
 - 当前 `ControlManager.approve()` 已把 `PlanRecord` 置为 approved/executing，恢复 previous mode，并把 plan/todos 放入 `plan_approved` runtime event。
-- 下一步要补“批准权限增量”：Claude Code 支持 `allowedPrompts` 这种按语义授权一类 Bash 操作。Emperor 可以先做更保守版本：PlanStep.commands 是唯一自动可验证命令，其他写/危险命令仍走权限 pipeline。
+- 批准权限增量已落地第一版：Claude Code 支持 `allowedPrompts` 这种按语义授权一类 Bash 操作；Emperor 采用更保守版本，只有 active `PlanStep.commands` 中精确匹配的非高风险 `run_command` 会得到 `plan.approved_command`，其他写/危险命令仍走 permission pipeline。
 
 ### 6. TodoWrite：把计划变成正在推进的任务列表
 
@@ -312,6 +312,8 @@ ControlManager.set_mode("plan")
 
 目标：批准计划不等于无限授权，只对计划内动作提供更顺滑的执行路径。
 
+状态：已落地第一版。`PermissionManager` 在常规权限管线前识别当前 active PlanStep 的精确验证命令，返回 `plan.approved_command`；`git push`、删除、部署等 high-risk shell 即使写入计划也仍会触发审批，写文件和敏感路径不因出现在计划文件列表中自动放行。
+
 目标文件：
 
 - `agent/permissions/pipeline.py`
@@ -329,6 +331,7 @@ ControlManager.set_mode("plan")
 
 - 批准计划内 test 命令不重复弹无意义审批。
 - 计划外 `rm -rf`、部署、push 不被批准计划自动放行。
+- 覆盖测试：`tests/unit/test_plan_command_permissions.py`。
 
 ### PE-6：Step Evidence 强制一致性
 
@@ -459,7 +462,7 @@ ControlManager.set_mode("plan")
 
 1. `PE-7 独立验证子代理`：让非平凡项目最终答复前有复核证据。
 2. `PE-3 只读探索扇出`：把探索发现自动写入 plan draft。
-3. `PE-5 批准后权限与命令白名单`：减少计划内验证命令的重复审批。
+3. `PE-5 批准后权限与命令白名单`：已落地第一版，减少计划内非高风险验证命令的重复审批。
 4. `PE-9 WebUI Project Execution 面板`：把恢复后的计划状态做成稳定用户界面。
 
 暂缓做：

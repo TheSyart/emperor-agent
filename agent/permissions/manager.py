@@ -4,8 +4,9 @@ import json
 from typing import Any
 
 from ..control.tools import make_pause_result
-from .models import PermissionDecision
+from .models import PermissionDecision, PermissionTraceEntry
 from .policy import PermissionPolicy
+from .resolvers import is_high_risk_command
 
 
 class PermissionManager:
@@ -29,6 +30,9 @@ class PermissionManager:
                 reason="user denied this high-risk operation",
                 rule="user.denied_once",
             )
+        plan_decision = self._approved_plan_command_decision(tool_name, args)
+        if plan_decision is not None:
+            return plan_decision
         return self.policy.assess(tool_name, args, self.control_manager.mode, registry=registry)
 
     def require_approval(
@@ -106,6 +110,31 @@ class PermissionManager:
             "arguments:",
             json.dumps(decision.arguments or {}, ensure_ascii=False, indent=2)[:1600],
         ])
+
+    def _approved_plan_command_decision(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> PermissionDecision | None:
+        if tool_name != "run_command":
+            return None
+        command = str(arguments.get("command") or "")
+        if not command or is_high_risk_command(command):
+            return None
+        target_provider = getattr(self.control_manager, "plan_verification_target", None)
+        if not callable(target_provider):
+            return None
+        target = target_provider(command)
+        if not target:
+            return None
+        return PermissionDecision.allow(
+            tool_name=tool_name,
+            arguments=arguments,
+            rule="plan.approved_command",
+            trace=(
+                PermissionTraceEntry("plan.active_step_command", "allow", str(target.get("step_id") or "")),
+            ),
+        )
 
 
 def _fingerprint(tool_name: str, arguments: dict[str, Any]) -> str:
