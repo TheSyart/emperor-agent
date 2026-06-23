@@ -11,8 +11,8 @@ from .schema import (
     tool_parameters_schema,
 )
 
-_VALID_STATUS = ("pending", "in_progress", "completed")
-_STATUS_ICON = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}
+_VALID_STATUS = ("pending", "in_progress", "completed", "blocked")
+_STATUS_ICON = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]", "blocked": "[!]"}
 
 
 def _render(todos: list[dict]) -> str:
@@ -40,11 +40,18 @@ class TodoStore:
             status = t.get("status", "pending")
             if status not in _VALID_STATUS:
                 status = "pending"
-            cleaned.append({
+            item = {
                 "id": t.get("id", i),
                 "content": content,
                 "status": status,
-            })
+            }
+            plan_step_id = str(t.get("plan_step_id") or "").strip()
+            if plan_step_id:
+                item["plan_step_id"] = plan_step_id[:64]
+            blocked_reason = str(t.get("blocked_reason") or "").strip()
+            if blocked_reason:
+                item["blocked_reason"] = blocked_reason[:1000]
+            cleaned.append(item)
 
         in_progress_count = sum(1 for t in cleaned if t["status"] == "in_progress")
         if in_progress_count > 1:
@@ -77,8 +84,14 @@ class TodoStore:
                 continue
             todos.append({
                 "id": index,
+                "plan_step_id": str(step.get("id") or "").strip() or None,
                 "content": title,
                 "status": status_map.get(str(step.get("status") or "pending"), "pending"),
+                **(
+                    {"blocked_reason": str(step.get("blocked_reason") or "").strip()}
+                    if step.get("blocked_reason")
+                    else {}
+                ),
             })
         return self.update(todos)
 
@@ -107,10 +120,20 @@ class UpdateTodosTool(Tool):
                     "单条待办",
                     properties={
                         "id": IntegerSchema("序号，从 1 开始"),
+                        "plan_step_id": StringSchema(
+                            "可选 PlanStep id，用于与批准计划中的步骤精确对齐",
+                            max_length=64,
+                            nullable=True,
+                        ),
                         "content": StringSchema("这一步要做什么"),
                         "status": StringSchema(
                             "状态",
                             enum=list(_VALID_STATUS),
+                        ),
+                        "blocked_reason": StringSchema(
+                            "当 status=blocked 时必填，说明等待的输入、权限、成本或外部条件",
+                            max_length=1000,
+                            nullable=True,
                         ),
                     },
                     required=["id", "content", "status"],

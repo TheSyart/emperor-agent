@@ -63,6 +63,6 @@ def test_todo_store_syncs_from_plan_steps() -> None:
 
     assert "todos updated" in result
     assert store.todos == [
-        {"id": 1, "content": "Edit code", "status": "in_progress"},
-        {"id": 2, "content": "Run tests", "status": "pending"},
+        {"id": 1, "plan_step_id": "step_1", "content": "Edit code", "status": "in_progress"},
+        {"id": 2, "plan_step_id": "step_2", "content": "Run tests", "status": "pending"},
     ]

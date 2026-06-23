@@ -433,8 +433,10 @@ export interface ToolArtifactRef {
 
 export interface TodoItem {
   id: string | number
+  plan_step_id?: string | null
   content: string
   status: 'pending' | 'in_progress' | 'completed' | string
+  blocked_reason?: string | null
 }
 
 export interface TextSegment {

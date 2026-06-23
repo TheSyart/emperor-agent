@@ -61,7 +61,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Project Execution and Plan Runtime v3 has started: `PlanDecisionPolicy` now deterministically classifies required/recommended/proceed planning cases and Runner blocks non-read-only tools for required-plan requests before files are modified.
 - `PlanDraftState` now persists plan phase, relevant files, open/resolved questions, alternatives, recommended approach, verification strategy, and plan comment revision snapshots across `PlanRecord` reloads.
 - `PlanQualityGate` now rejects weak `propose_plan` calls before a PlanCard is created, requiring concrete scope, verification, and high-risk risk/rollback notes.
-- The next upgrade lane is continuing Plan Runtime v3: evidence gate, plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- `PlanEvidenceGate` now rejects `update_todos` completion for command-backed PlanSteps until matching verification evidence has passed, preserves explicit `plan_step_id`, and requires `blocked_reason` for blocked steps.
+- The next upgrade lane is continuing Plan Runtime v3: plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 
@@ -3057,7 +3058,7 @@ Result: `32 passed`; ruff passed.
 - Modify: `agent/runner.py`
 - Create: `tests/unit/test_plan_evidence_gate.py`
 
-- [ ] **Step 1: Add failing evidence tests**
+- [x] **Step 1: Add failing evidence tests**
 
 Cases:
 
@@ -3066,15 +3067,15 @@ Cases:
 - A passing verification result allows completion.
 - A blocked step requires `blocked_reason` or an `ask_user` interaction.
 
-- [ ] **Step 2: Add explicit step identity**
+- [x] **Step 2: Add explicit step identity**
 
 Extend todo items with optional `plan_step_id`; stop relying only on list index. Keep index compatibility for old history and tests.
 
-- [ ] **Step 3: Enforce completion**
+- [x] **Step 3: Enforce completion**
 
 `ControlManager.sync_plan_from_todos()` should reject a completion transition if required evidence is missing. The tool result should be model-readable and should not corrupt `PlanRecord`.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3083,6 +3084,15 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Actual verification:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_evidence_gate.py tests/unit/test_plan_runtime.py tests/unit/test_plan_verification.py tests/unit/test_control.py tests/unit/test_plan_quality_gate.py tests/unit/test_plan_draft_state.py -q
+.venv/bin/python -m ruff check agent/plans agent/control agent/runner.py agent/tools/todo.py tests/unit/test_plan_evidence_gate.py tests/unit/test_plan_runtime.py tests/unit/test_plan_verification.py tests/unit/test_control.py
+```
+
+Result: `41 passed`; ruff passed.
 
 ### Task 6J: Plan Runtime Recovery Attachments
 

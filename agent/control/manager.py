@@ -9,6 +9,7 @@ from ..permissions import PermissionManager
 from ..plans import (
     PlanDraftPhase,
     PlanDraftState,
+    PlanEvidenceError,
     PlanExecutionState,
     PlanQualityGate,
     PlanRecord,
@@ -450,6 +451,11 @@ class ControlManager:
         record = self._latest_executable_plan()
         if record is None or not record.steps:
             return None
+        todo_by_step_id = {
+            str(item.get("plan_step_id")): item
+            for item in todos
+            if isinstance(item, dict) and str(item.get("plan_step_id") or "").strip()
+        }
         todo_by_index = {
             int(item.get("id")) - 1: item
             for item in todos
@@ -458,18 +464,29 @@ class ControlManager:
         now = now_ts()
         steps: list[PlanStep] = []
         for index, step in enumerate(record.steps):
-            todo = todo_by_index.get(index)
+            todo = todo_by_step_id.get(step.id) or todo_by_index.get(index)
             if todo is None:
                 steps.append(step)
                 continue
             todo_status = str(todo.get("status") or "pending")
             next_status = _plan_status_from_todo(todo_status)
+            self._validate_plan_step_transition(step, todo=todo, next_status=next_status)
             step_evidence = list(step.evidence)
             if next_status == PlanStepStatus.DONE.value and step.status != PlanStepStatus.DONE.value:
                 step_evidence.append({
                     **(evidence or {}),
                     "todo_id": todo.get("id"),
+                    "plan_step_id": todo.get("plan_step_id") or step.id,
                     "todo_status": todo_status,
+                    "synced_at": now,
+                })
+            if next_status == PlanStepStatus.BLOCKED.value and step.status != PlanStepStatus.BLOCKED.value:
+                step_evidence.append({
+                    **(evidence or {}),
+                    "todo_id": todo.get("id"),
+                    "plan_step_id": todo.get("plan_step_id") or step.id,
+                    "todo_status": todo_status,
+                    "blocked_reason": str(todo.get("blocked_reason") or "").strip(),
                     "synced_at": now,
                 })
             steps.append(replace(step, status=next_status, evidence=step_evidence))
@@ -488,6 +505,49 @@ class ControlManager:
         )
         self.plan_store.save(updated)
         return updated
+
+    def _validate_plan_step_transition(
+        self,
+        step: PlanStep,
+        *,
+        todo: dict[str, Any],
+        next_status: str,
+    ) -> None:
+        if next_status == PlanStepStatus.BLOCKED.value:
+            blocked_reason = str(todo.get("blocked_reason") or "").strip()
+            if not blocked_reason and not self._has_ask_interaction():
+                raise PlanEvidenceError(
+                    "PLAN_BLOCKED_REASON_REQUIRED",
+                    step_id=step.id,
+                    reason="blocked steps must include blocked_reason or be paired with ask_user",
+                )
+        if next_status != PlanStepStatus.DONE.value or step.status == PlanStepStatus.DONE.value:
+            return
+        if not step.commands:
+            return
+        command_state = _verification_state_by_command(step)
+        failed = [command for command, passed in command_state.items() if passed is False]
+        if failed:
+            raise PlanEvidenceError(
+                "PLAN_EVIDENCE_FAILED",
+                step_id=step.id,
+                reason=f"declared verification failed: {'; '.join(failed[:3])}",
+            )
+        missing = [
+            command for command in step.commands
+            if command_state.get(_normalize_command(command)) is not True
+        ]
+        if missing:
+            raise PlanEvidenceError(
+                "PLAN_EVIDENCE_REQUIRED",
+                step_id=step.id,
+                reason=f"missing passing verification evidence for: {'; '.join(missing[:3])}",
+            )
+
+    def _has_ask_interaction(self) -> bool:
+        state = self.store.load()
+        interactions = [state.pending, state.last_interaction]
+        return any(item is not None and item.kind == InteractionKind.ASK.value for item in interactions)
 
     def plan_verification_target(self, command: str) -> dict[str, str] | None:
         record = self._latest_executable_plan()
@@ -838,7 +898,24 @@ def _plan_status_from_todo(status: str) -> str:
         return PlanStepStatus.DONE.value
     if status == "in_progress":
         return PlanStepStatus.ACTIVE.value
+    if status == "blocked":
+        return PlanStepStatus.BLOCKED.value
     return PlanStepStatus.PENDING.value
+
+
+def _verification_state_by_command(step: PlanStep) -> dict[str, bool]:
+    expected = {_normalize_command(command) for command in step.commands}
+    states: dict[str, bool] = {}
+    for item in step.evidence:
+        if not isinstance(item, dict):
+            continue
+        command = _normalize_command(item.get("command"))
+        if command not in expected:
+            continue
+        passed = item.get("passed")
+        if isinstance(passed, bool):
+            states[command] = passed
+    return states
 
 
 def _normalize_command(command: Any) -> str:

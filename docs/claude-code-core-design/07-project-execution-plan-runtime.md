@@ -334,6 +334,8 @@ ControlManager.set_mode("plan")
 
 目标：消除“todo 完成但 step 没有真实证据”的漏洞。
 
+状态：已落地第一版。当前实现包括 `agent/plans/evidence.py`、`ControlManager.sync_plan_from_todos()` 的 transition guard、`UpdateTodosTool` 的 `plan_step_id` / `blocked_reason` 字段，以及 Runner 对 `PlanEvidenceError` 的工具错误回写；测试见 `tests/unit/test_plan_evidence_gate.py`。
+
 目标文件：
 
 - `agent/tools/todo.py`
@@ -343,15 +345,17 @@ ControlManager.set_mode("plan")
 
 行为：
 
-- `update_todos` 标完成 active step 时，如果 step 要求 verification 且无 evidence，返回可修复错误。
-- Runner 可以在检测到刚运行过匹配命令后允许完成。
-- 完成 evidence 必须记录来源 tool、exit code、summary、timestamp。
+- `update_todos` 标完成 active step 时，如果 step 声明了 verification commands 且无通过 evidence，返回可修复错误。
+- Runner 检测到匹配 `run_command` 通过证据后允许完成。
+- failed verification 会阻止完成，并保持 PlanRecord 不被错误推进。
+- `blocked` step 必须有 `blocked_reason` 或配套 `ask_user` 交互。
+- todo 支持 `plan_step_id`，优先按显式 step id 对齐，旧 id 下标仍兼容。
 
 验收：
 
 - 未运行验证时不能完成 required verification step。
 - 验证失败不能完成 step。
-- 手动 evidence 必须说明原因和来源。
+- blocked step 必须说明原因。
 
 ### PE-7：独立验证子代理
 
@@ -430,10 +434,10 @@ ControlManager.set_mode("plan")
 
 优先做：
 
-1. `PE-6 Step Evidence Gate`：堵住“没验证就完成”的口子。
-2. `PE-8 Plan Runtime 恢复附件`：保证长任务压缩后不断线。
-3. `PE-3 只读探索扇出`：把探索发现自动写入 plan draft。
-4. `PE-7 独立验证子代理`：让非平凡项目最终答复前有复核证据。
+1. `PE-8 Plan Runtime 恢复附件`：保证长任务压缩后不断线。
+2. `PE-3 只读探索扇出`：把探索发现自动写入 plan draft。
+3. `PE-7 独立验证子代理`：让非平凡项目最终答复前有复核证据。
+4. `PE-5 批准后权限与命令白名单`：减少计划内验证命令的重复审批。
 
 暂缓做：
 

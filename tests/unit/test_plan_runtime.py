@@ -153,8 +153,8 @@ def test_plan_approval_activates_first_step_when_todo_store_is_attached(tmp_path
     assert saved.steps[0].status == PlanStepStatus.ACTIVE.value
     assert saved.steps[1].status == PlanStepStatus.PENDING.value
     assert todo_store.todos == [
-        {"id": 1, "content": "Add failing tests", "status": "in_progress"},
-        {"id": 2, "content": "Run focused tests", "status": "pending"},
+        {"id": 1, "plan_step_id": "step_1", "content": "Add failing tests", "status": "in_progress"},
+        {"id": 2, "plan_step_id": "step_2", "content": "Run focused tests", "status": "pending"},
     ]
     assert resume.event["plan"]["status"] == PlanStatus.EXECUTING.value
     assert resume.event["todos"][0]["status"] == "in_progress"

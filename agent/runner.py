@@ -8,6 +8,7 @@ from loguru import logger
 
 from .context_pipeline import ContextPipeline, ToolResultStore
 from .control import ClarificationAssessment, TurnPaused, parse_pause_result
+from .plans import PlanEvidenceError
 from .plans.verification import VerificationCommand, VerificationResult
 from .providers import LLMProvider, ToolCallRequest
 from .providers.base import is_truncated, run_sync
@@ -629,7 +630,14 @@ class AgentRunner:
                 if followup is not None:
                     plan_followups.append(followup)
             if not result.is_error:
-                plan_update = self._sync_plan_from_todo_tool(call, content)
+                try:
+                    plan_update = self._sync_plan_from_todo_tool(call, content)
+                except PlanEvidenceError as exc:
+                    self._restore_todos_from_plan()
+                    result = ToolResult.from_text(str(exc), is_error=True)
+                    results_by_id[call.id] = result
+                    await self._emit_tool_result(call, result, emit)
+                    return result
                 await self._emit_tool_result(call, result, emit)
                 if plan_update is not None and emit:
                     await emit(runtime_events.plan_runtime_update(plan_update.to_dict()))
@@ -808,6 +816,15 @@ class AgentRunner:
             },
         )
 
+    def _restore_todos_from_plan(self) -> None:
+        if self.todo_store is None:
+            return
+        followup = self._plan_completion_followup()
+        plan = followup.get("plan") if isinstance(followup, dict) else None
+        steps = plan.get("steps") if isinstance(plan, dict) else None
+        if isinstance(steps, list):
+            self.todo_store.sync_from_plan_steps(steps)
+
     def _plan_completion_followup(self) -> dict[str, Any] | None:
         if self.control_manager is None or not hasattr(self.control_manager, "plan_completion_followup"):
             return None
@@ -926,7 +943,13 @@ class AgentRunner:
                 payload["metadata"] = result.metadata
             if call.name == "update_todos" and self.todo_store is not None:
                 payload["todos"] = [
-                    {"id": t["id"], "content": t["content"], "status": t["status"]}
+                    {
+                        "id": t["id"],
+                        **({"plan_step_id": t["plan_step_id"]} if t.get("plan_step_id") else {}),
+                        "content": t["content"],
+                        "status": t["status"],
+                        **({"blocked_reason": t["blocked_reason"]} if t.get("blocked_reason") else {}),
+                    }
                     for t in self.todo_store.todos
                 ]
             await emit(payload)
