@@ -284,10 +284,7 @@ ControlManager.set_mode("plan")
 - 最终答复前会检查最新可执行 PlanRecord；若仍有 pending/active/failed step，会追加 `[PLAN_INCOMPLETE]` 继续执行提示，而不是直接结束 turn。
 - 后端发送 `plan_runtime_update`，前端可通过 runtime replay 恢复计划状态。
 - PlanCard 已消费 runtime plan projection，能在计划卡上展示 step 状态、相关文件/命令、最新验证 evidence、失败 stderr/stdout 摘要；刷新后由 `plan_runtime_update`、`plan_step_update`、`plan_verification_done` 重建。
-
-下一步应补齐的部分：
-
-- Prompt contract 应强化批准计划后的执行规则，确保模型主动维护 active step、验证证据和失败恢复。
+- 批准计划后的恢复消息和稳定模板已经写入 Prompt Contract：必须维护 `active todo` / `active PlanStep`，每步完成前记录 `verification evidence`，验证 `failed` 时先修复重跑，`blocked` 时调用 `ask_user`，未完成前不得最终答复。
 
 ## Emperor Runner 拆分建议
 

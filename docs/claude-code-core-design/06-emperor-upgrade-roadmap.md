@@ -304,13 +304,9 @@ Plan 模式只读探索
 - 最终答复前，Runner 会通过 Final Answer Gate 检查最新 PlanRecord；若仍有 pending/active/failed step，会追加 `[PLAN_INCOMPLETE]` 并继续执行。
 - 后端发送 `plan_runtime_update`，前端已有 reducer 可重放计划状态。
 - PlanCard 已接入 `planProjection`，会展示 step 状态、文件/命令、验证 evidence 和失败原因；刷新后由 backend runtime replay 重建。
+- 批准计划后的系统恢复消息和 `templates/TOOL.md` / `templates/SOUL.md` 已写入 Project Execution Prompt Contract：保持一个 active todo 对齐 active PlanStep，完成前记录 verification evidence，failed 先修复重跑，blocked 调用 ask_user，未完成前不最终答复。
 
-后续任务点：
-
-1. **Project Execution Prompt Contract**
-   - 目标文件：`templates/TOOL.md`、`templates/SOUL.md`、`agent/control/manager.py`。
-   - 行为：批准计划后的系统消息明确要求每步执行前保持一个 active todo，每步完成必须记录验证证据，不能跳过失败诊断。
-   - 验收：prompt contract 测试能断言批准计划后的恢复消息包含 todo、verification、blocked/failure 规则。
+后续任务点转入 Epic 6 及后续上下文预算治理：把计划执行、任务运行、工具结果和上下文压缩接成统一的长期可恢复执行面。
 
 ## Epic 6：Task Framework
 

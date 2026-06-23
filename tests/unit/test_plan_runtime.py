@@ -135,6 +135,58 @@ def test_plan_approval_activates_first_step_when_todo_store_is_attached(tmp_path
     assert resume.event["todos"][0]["status"] == "in_progress"
 
 
+def test_plan_approval_message_contains_project_execution_contract(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    todo_store = TodoStore()
+    manager.set_todo_store(todo_store)
+    manager.set_mode("plan")
+    tool = ProposePlanTool(manager)
+
+    tool.execute(
+        title="Runner upgrade",
+        summary="Extract context pipeline",
+        plan_markdown="# Plan\n\n- Add failing tests\n- Run focused tests",
+        steps=[
+            {
+                "id": "step_1",
+                "title": "Add failing tests",
+                "commands": [".venv/bin/python -m pytest tests/unit/test_context_pipeline.py -q"],
+            },
+            {"id": "step_2", "title": "Run focused tests"},
+        ],
+        assumptions=[],
+        risk_level="low",
+    )
+    pending = manager.payload()["pending"]
+
+    resume = manager.approve(pending["id"])
+
+    message = resume.message
+    assert "[CONTROL:PLAN_APPROVED]" in message
+    assert "active todo" in message
+    assert "verification evidence" in message
+    assert "failed" in message
+    assert "blocked" in message
+    assert "ask_user" in message
+    assert "step_1 [active]" in message
+    assert "commands: .venv/bin/python -m pytest tests/unit/test_context_pipeline.py -q" in message
+    assert "Do not provide a final answer while any step is pending, active, failed, or blocked." in message
+
+
+def test_prompt_templates_contain_project_execution_contract() -> None:
+    root = Path(__file__).resolve().parents[2]
+    tool_prompt = (root / "templates" / "TOOL.md").read_text(encoding="utf-8")
+    soul_prompt = (root / "templates" / "SOUL.md").read_text(encoding="utf-8")
+
+    assert "active todo" in tool_prompt
+    assert "active PlanStep" in tool_prompt
+    assert "verification evidence" in tool_prompt
+    assert "failed" in tool_prompt
+    assert "blocked" in tool_prompt
+    assert "ask_user" in tool_prompt
+    assert "批准计划后的执行契约" in soul_prompt
+
+
 def test_control_manager_syncs_todos_back_to_plan_steps(tmp_path: Path) -> None:
     manager = ControlManager(tmp_path)
     todo_store = TodoStore()

@@ -1,6 +1,6 @@
 # 工具配置
 
-Prompt-Version: emperor-tool-v3
+Prompt-Version: emperor-tool-v4
 
 记录工具使用偏好、权限边界和默认工作方式；具体可用工具以运行时注册表为准。
 
@@ -13,3 +13,12 @@ Prompt-Version: emperor-tool-v3
 - 网络访问只用于外部事实、实时信息或仓库内信息不足的场景。
 - 子代理只用于非 Plan 模式、无待处理 Ask/Plan、权限允许且差事独立/可并行/上下文较重的场景。
 - Skill 统一通过 `load_skill` 按需加载；不要绕过工具直接读取 `SKILL.md` 作为主路径。
+
+## 计划执行契约
+
+- 用户批准 PlanCard 后，计划进入执行模式；必须把批准计划维护为可执行状态，而不是只当作 Markdown 参考。
+- 执行前保持一个且仅一个 `active todo` 对齐当前 `active PlanStep`；完成当前 step 后再推进下一步。
+- 每个 step 完成前必须留下 `verification evidence`：优先运行该 step 声明的命令，或用工具结果给出明确可审计的检查证据。
+- 验证 `failed` 时不要跳过或最终答复；先诊断、修复、重跑验证，只有验证通过后才能继续推进。
+- 如果 step 因输入、权限、成本、安全或不可恢复歧义而 `blocked`，调用 `ask_user` 说明阻塞点并等待用户决策。
+- 只要仍有 pending、active、failed 或 blocked step，不要给出最终完成答复。

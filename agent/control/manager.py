@@ -216,7 +216,7 @@ class ControlManager:
         state.last_interaction = updated
         state.updated_at = now_ts()
         self.store.save(state)
-        message = self._approval_message(updated)
+        message = self._approval_message(updated, plan_record)
         return ControlResume(
             interaction=updated.to_dict(),
             message=message,
@@ -322,17 +322,40 @@ class ControlManager:
             f"评论：\n{comment.strip()}"
         )
 
-    def _approval_message(self, interaction: Interaction) -> str:
-        return (
-            "[CONTROL:PLAN_APPROVED]\n"
-            f"interaction_id: {interaction.id}\n"
-            "用户已批准以下计划。现在切换到执行模式，请按计划实施；执行中如出现新的高影响歧义，可再次 ask_user。\n\n"
-            f"# {interaction.title}\n\n{interaction.plan_markdown}"
-            "\n\n[PLAN_EXECUTION]\n"
-            "- Convert the approved plan into todos before editing.\n"
-            "- Keep exactly one plan step active while executing.\n"
-            "- Run each step's verification commands before marking the step done.\n"
-        )
+    def _approval_message(self, interaction: Interaction, plan_record: PlanRecord | None = None) -> str:
+        lines = [
+            "[CONTROL:PLAN_APPROVED]",
+            f"interaction_id: {interaction.id}",
+        ]
+        if plan_record is not None:
+            lines.append(f"plan_id: {plan_record.id}")
+            lines.append(f"plan_status: {plan_record.status}")
+        lines.extend([
+            "用户已批准以下计划。现在切换到执行模式，请按计划实施；执行中如出现新的高影响歧义，可再次 ask_user。",
+            "",
+            f"# {interaction.title}",
+            "",
+            interaction.plan_markdown,
+            "",
+            "[PLAN_EXECUTION_CONTRACT]",
+            "- Convert the approved plan into todos before editing, and keep the active todo aligned with the active PlanStep.",
+            "- Keep exactly one active todo / active PlanStep while executing; move to the next step only after the current step has evidence.",
+            "- Before marking a step done, record verification evidence by running declared commands or producing an explicit tool-backed check result.",
+            "- If verification failed, keep or mark the step failed, diagnose and repair the failure, rerun verification, then continue.",
+            "- If the step is blocked by missing input, access, cost, safety, or unrecoverable ambiguity, call ask_user and keep the step blocked until resolved.",
+            "- Do not provide a final answer while any step is pending, active, failed, or blocked.",
+        ])
+        if plan_record is not None and plan_record.steps:
+            lines.extend(["", "[PLAN_STEPS]"])
+            for step in plan_record.steps:
+                lines.append(f"- {step.id} [{step.status}] {step.title}")
+                if step.files:
+                    lines.append(f"  files: {'; '.join(step.files[:5])}")
+                if step.commands:
+                    lines.append(f"  commands: {'; '.join(step.commands[:5])}")
+                if step.acceptance:
+                    lines.append(f"  acceptance: {'; '.join(step.acceptance[:5])}")
+        return "\n".join(lines).strip()
 
     def _cancel_message(self, interaction: Interaction) -> str:
         return (
