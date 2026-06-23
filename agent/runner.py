@@ -484,11 +484,6 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ) -> str:
-        if self.control_manager is not None and not self.control_manager.is_tool_allowed(call.name, self.registry):
-            return (
-                f"Error: tool '{call.name}' is unavailable in Plan mode. "
-                "Only read-only tools plus ask_user/propose_plan are allowed until the plan is approved."
-            )
         if clarification and clarification.required and self._ask_guard_blocks_tool(call.name):
             return _ASK_GUARD_BLOCK
         if self.control_manager is not None:

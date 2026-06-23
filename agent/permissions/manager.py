@@ -20,13 +20,14 @@ class PermissionManager:
         fingerprint = _fingerprint(tool_name, args)
         if fingerprint in self._approved_once:
             self._approved_once.remove(fingerprint)
-            return PermissionDecision.allow(tool_name=tool_name, arguments=args)
+            return PermissionDecision.allow(tool_name=tool_name, arguments=args, rule="user.approved_once")
         if fingerprint in self._denied_once:
             self._denied_once.remove(fingerprint)
             return PermissionDecision.deny(
                 tool_name=tool_name,
                 arguments=args,
                 reason="user denied this high-risk operation",
+                rule="user.denied_once",
             )
         return self.policy.assess(tool_name, args, self.control_manager.mode, registry=registry)
 
@@ -56,6 +57,11 @@ class PermissionManager:
                     "tool_name": decision.tool_name,
                     "risk": decision.risk,
                     "reason": decision.reason,
+                    "rule": decision.rule,
+                    "trace": [
+                        {"rule": item.rule, "outcome": item.outcome, "detail": item.detail}
+                        for item in decision.trace
+                    ],
                     "arguments": decision.arguments or {},
                 }
             },
@@ -88,8 +94,15 @@ class PermissionManager:
         return "\n".join([
             "Permission Guard",
             f"risk: {decision.risk}",
+            f"rule: {decision.rule}",
             f"reason: {decision.reason}",
             f"tool: {decision.tool_name}",
+            "trace:",
+            json.dumps(
+                [{"rule": item.rule, "outcome": item.outcome, "detail": item.detail} for item in decision.trace],
+                ensure_ascii=False,
+                indent=2,
+            )[:1200],
             "arguments:",
             json.dumps(decision.arguments or {}, ensure_ascii=False, indent=2)[:1600],
         ])
