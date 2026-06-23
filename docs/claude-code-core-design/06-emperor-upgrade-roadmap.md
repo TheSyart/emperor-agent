@@ -260,6 +260,77 @@ class PermissionDecision:
 - 用户拒绝后同参只拒绝一次。
 - Scheduler/Team/External 在不可交互场景不会永久挂起，无法确认时明确 deny 或 paused。
 
+## Epic 5.5：Project Execution / Plan Runtime v2
+
+目标：把“计划”从一次性 Markdown 卡片升级为可恢复、可审计、可验证的项目执行状态。Claude Code 的真实项目编写能力来自 Plan Mode、TodoWrite、工具执行、验证反馈的闭环；Emperor 也应把这条链路做成后端事实，而不是只靠提示词提醒模型。
+
+目标文件：
+
+- `agent/control/manager.py`
+- `agent/control/tools.py`
+- `agent/plans/models.py`
+- `agent/plans/store.py`
+- `agent/plans/execution.py`
+- `agent/plans/verification.py`
+- `agent/tools/todo.py`
+- `agent/runner.py`
+- `agent/runtime/events.py`
+- `desktop/src/renderer/src/runtime/handlers/plans.ts`
+
+执行链路：
+
+```text
+Plan 模式只读探索
+-> propose_plan(title, summary, plan_markdown, steps)
+-> PlanStore 保存 waiting_approval 计划
+-> 用户 approve PlanCard
+-> PlanExecutionState 激活第一个 step
+-> TodoStore 同步为 in_progress/pending
+-> AgentRunner 执行工具和 update_todos
+-> ControlManager.sync_plan_from_todos 回写 PlanStep.status/evidence
+-> plan_runtime_update 写入 runtime event
+-> WebUI replay 恢复计划执行状态
+```
+
+已落地：
+
+- `propose_plan` 支持结构化 `steps`，每步包含 `files`、`commands`、`acceptance`、`risk`。
+- `PlanStore` 持久保存 `PlanRecord`，corrupt index 会备份恢复。
+- 用户批准 PlanCard 后，计划进入 `executing`，首个 step 激活并同步成 todos。
+- `update_todos` 成功后，Runner 会调用 `ControlManager.sync_plan_from_todos()`，把 todo 状态回写到 `PlanStep`。
+- 完成 step 会追加 evidence，所有 step 完成后 PlanRecord 进入 `completed`。
+- 后端发送 `plan_runtime_update`，前端已有 reducer 可重放计划状态。
+
+后续任务点：
+
+1. **Verification Command Runner**
+   - 目标文件：`agent/plans/verification.py`、`agent/tools/command.py`、`agent/runner.py`。
+   - 新增接口：`PlanVerificationRunner.run(step.commands) -> list[VerificationResult]`。
+   - 行为：当 active step 的 `commands` 被执行后，自动记录 command、cwd、exit_code、summary、stdout_tail、stderr_tail。
+   - 验收：测试覆盖成功命令、失败命令、超时命令；`plan_verification_done` 会更新对应 step evidence。
+
+2. **Step Failure / Blocked 状态**
+   - 目标文件：`agent/plans/execution.py`、`agent/control/manager.py`、`agent/runner.py`。
+   - 新增接口：`sync_plan_failure(step_id, evidence, status="failed|blocked")`。
+   - 行为：验证失败时不直接最终答复；PlanStep 标记 failed，Runner 注入诊断 follow-up，要求修复或 ask_user。
+   - 验收：失败验证后 PlanRecord.status 为 `failed` 或保持 `executing` 且 step 为 `failed`，模型下一轮收到明确恢复指令。
+
+3. **Final Answer Gate**
+   - 目标文件：`agent/runner.py`、`agent/query_state/transitions.py`。
+   - 新增接口：`CompletionPolicy.ensure_plan_complete(plan_store)`。
+   - 行为：最终回复前检查最新 executing plan；若还有 pending/active/failed step，不能结束 turn，必须继续执行或报告阻塞。
+   - 验收：有未完成 PlanStep 时，runner 发出 todo/plan follow-up；全部完成才允许 `assistant_done`。
+
+4. **Plan Replay UI**
+   - 目标文件：`desktop/src/renderer/src/runtime/handlers/plans.ts`、`desktop/src/renderer/src/components/chat/PlanCard.vue`。
+   - 行为：PlanCard 展示 step 状态、验证 evidence、失败原因；刷新后从 backend runtime replay 重建。
+   - 验收：`plan_runtime_update`、`plan_step_update`、`plan_verification_done` 三类事件在 replay 后投影一致。
+
+5. **Project Execution Prompt Contract**
+   - 目标文件：`templates/TOOL.md`、`templates/SOUL.md`、`agent/control/manager.py`。
+   - 行为：批准计划后的系统消息明确要求每步执行前保持一个 active todo，每步完成必须记录验证证据，不能跳过失败诊断。
+   - 验收：prompt contract 测试能断言批准计划后的恢复消息包含 todo、verification、blocked/failure 规则。
+
 ## Epic 6：Task Framework
 
 目标：统一长期运行单元的状态、进度、输出、停止、通知和 transcript。

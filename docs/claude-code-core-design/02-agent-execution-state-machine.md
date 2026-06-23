@@ -239,6 +239,55 @@ Emperor Agent 当前对应：
 - 每个 `continue` 点都产出结构化 runtime event，便于 WebUI 和调试。
 - 对 prompt-too-long、tool mismatch、max-output、context overflow 建立不同恢复策略，不再只有“压缩或续写”。
 
+## Project Execution / Plan 能力链路
+
+Claude Code 能稳定编写真实项目，不只靠 tool loop，而是靠一条强约束执行链：
+
+```text
+进入 Plan 模式
+-> 只读探索项目
+-> 产出可审阅计划
+-> 用户批准
+-> 退出 Plan 模式
+-> 用 TodoWrite 固定执行步骤
+-> 每步执行工具
+-> 更新 todo/step 状态
+-> 运行验证命令
+-> 把验证证据写回计划
+-> 未完成则继续，失败则诊断恢复
+```
+
+Emperor Agent 对应升级后的链路应是：
+
+```text
+ControlManager.set_mode("plan")
+-> ProposePlanTool.create_plan(...)
+-> PlanStore 保存 PlanRecord / PlanStep
+-> ControlManager.approve(...)
+-> PlanExecutionState 激活第一个 step
+-> TodoStore.sync_from_plan_steps(...)
+-> AgentRunner 执行 update_todos
+-> ControlManager.sync_plan_from_todos(...)
+-> PlanStep 写入 evidence
+-> runtime_events.plan_runtime_update(...)
+-> WebUI replay 重建计划执行状态
+```
+
+已落地的关键约束：
+
+- Plan 模式仍由 `agent/control/` 控制，写工具和高影响操作不能绕过批准。
+- `propose_plan` 不再只是 Markdown 预览，可以保存结构化 `steps`、`files`、`commands`、`acceptance`。
+- 用户批准后，结构化 plan 会同步成 todos，并保持单个 `in_progress` 步骤。
+- `update_todos` 成功后，Runner 会把 todo 状态回写到 `PlanStep.status`，完成步骤会追加 `evidence`。
+- 后端发送 `plan_runtime_update`，前端可通过 runtime replay 恢复计划状态。
+
+下一步应补齐的部分：
+
+- `run_command` 完成后自动将命令退出码、stdout/stderr tail 转为 `VerificationResult`。
+- PlanStep 的 `commands` 应能被工具层识别为“待验证命令”，不只依赖模型自然语言记忆。
+- 失败验证应把 step 标记为 `failed` 或 `blocked`，并触发诊断继续，而不是只靠普通模型回复。
+- 最终答复前应检查最新 PlanRecord：若还有 active/pending/failed step，必须继续执行或说明阻塞原因。
+
 ## Emperor Runner 拆分建议
 
 `AgentRunner.step_async()` 当前同时承担：
