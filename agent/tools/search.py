@@ -138,6 +138,7 @@ class _SearchTool(_FsTool):
 
 class GlobTool(_SearchTool):
     """Find files matching a glob pattern."""
+    max_result_chars = 12_000
 
     @property
     def name(self) -> str:
@@ -257,6 +258,7 @@ class GlobTool(_SearchTool):
 
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
+    max_result_chars = 16_000
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
 

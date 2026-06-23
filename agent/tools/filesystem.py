@@ -59,6 +59,7 @@ class _FsTool(Tool):
 class ReadFileTool(_FsTool):
     name = "read_file"
     description = "安全读取文本/PDF/附件 sidecar 内容，支持 offset/limit 分页。输出格式：行号|内容。"
+    max_result_chars = 24_000
     _DEFAULT_LIMIT = 2000
     _MAX_CHARS = 128_000
     _MAX_FILE_BYTES = 5 * 1024 * 1024

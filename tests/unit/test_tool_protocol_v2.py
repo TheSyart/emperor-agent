@@ -4,9 +4,13 @@ from pathlib import Path
 
 from agent.tools.base import Tool, tool_parameters
 from agent.tools.context import ToolExecutionContext
+from agent.tools.filesystem import ReadFileTool
 from agent.tools.protocol import ToolAdapter
 from agent.tools.registry import ToolRegistry
 from agent.tools.results import ToolResult
+from agent.tools.search import GlobTool, GrepTool
+from agent.tools.shell import RunCommand
+from agent.tools.web import WebFetch
 
 
 @tool_parameters({
@@ -74,3 +78,20 @@ def test_registry_exposes_tool_result_budgets() -> None:
     registry.register(BudgetedTool())
 
     assert registry.tool_result_limits() == {"budgeted": 1234}
+
+
+def test_builtin_high_output_tools_define_result_budgets(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(ReadFileTool(tmp_path))
+    registry.register(GrepTool(tmp_path))
+    registry.register(GlobTool(tmp_path))
+    registry.register(RunCommand(tmp_path))
+    registry.register(WebFetch())
+
+    assert registry.tool_result_limits() == {
+        "glob": 12_000,
+        "grep": 16_000,
+        "read_file": 24_000,
+        "run_command": 12_000,
+        "web_fetch": 10_000,
+    }

@@ -154,6 +154,7 @@ class WebFetch(Tool):
     name = "web_fetch"
     description = "获取指定 URL 的网页内容，支持文本提取模式"
     read_only = True
+    max_result_chars = 10_000
 
     @property
     def parameters(self) -> dict:

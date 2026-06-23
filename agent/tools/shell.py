@@ -58,6 +58,7 @@ class RunCommand(Tool):
     name = "run_command"
     description = "在终端执行一条 shell 命令并返回输出"
     exclusive = True
+    max_result_chars = 12_000
 
     def __init__(self, workspace: Path | object | None = None):
         self._workspace = workspace

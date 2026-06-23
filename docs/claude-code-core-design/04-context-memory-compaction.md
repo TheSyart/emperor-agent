@@ -31,7 +31,8 @@ Claude Code 这里有两层预算：
 - 当前已新增 `ToolResultStore` 并接入 `ContextPipeline(tool_result_store=...)`：大工具结果会落到 `memory/tool-results/`，模型请求投影只保留 preview、artifact path、原始长度和恢复提示。
 - `AgentRunner` 默认请求路径已在存在 `memory_store` 时使用 store-backed `ContextPipeline`，并通过 `context_projection` runtime event 暴露 replacement 计数和记录。
 - `Tool.max_result_chars` 已进入基类，`ToolRegistry.tool_result_limits()` 会把工具级预算传给 Runner 默认 `ContextPipeline`。
-- 结果仍未完全贯通到所有旧工具的 `ToolResult(raw, model_content, display_summary, artifacts)` 协议，后续还需要 UI summary/artifact 协议和具体工具预算标注。
+- `read_file`、`grep`、`glob`、`run_command`、`web_fetch` 已有首批模型上下文预算。
+- 结果仍未完全贯通到所有旧工具的 `ToolResult(raw, model_content, display_summary, artifacts)` 协议，后续还需要 UI summary/artifact 协议和 MCP/外部工具预算标注。
 
 升级建议：
 
