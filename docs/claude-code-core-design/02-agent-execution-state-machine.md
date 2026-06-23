@@ -281,11 +281,13 @@ ControlManager.set_mode("plan")
 - `update_todos` 成功后，Runner 会把 todo 状态回写到 `PlanStep.status`，完成步骤会追加 `evidence`。
 - active PlanStep 中声明的 `commands` 被 `run_command` 执行时，Runner 会记录 `VerificationResult`，并发出 `plan_verification_start`、`plan_verification_done`、`plan_runtime_update`。
 - 验证失败时，PlanStep 会被标记为 `failed`，Runner 会向下一轮模型注入 `[PLAN_VERIFICATION_FAILED]` 诊断指令，要求先修复或必要时 `ask_user`。
+- 最终答复前会检查最新可执行 PlanRecord；若仍有 pending/active/failed step，会追加 `[PLAN_INCOMPLETE]` 继续执行提示，而不是直接结束 turn。
 - 后端发送 `plan_runtime_update`，前端可通过 runtime replay 恢复计划状态。
 
 下一步应补齐的部分：
 
-- 最终答复前应检查最新 PlanRecord：若还有 active/pending/failed step，必须继续执行或说明阻塞原因。
+- PlanCard UI 应展示 step 状态、验证 evidence 和失败原因。
+- Prompt contract 应强化批准计划后的执行规则，确保模型主动维护 active step、验证证据和失败恢复。
 
 ## Emperor Runner 拆分建议
 

@@ -466,6 +466,39 @@ class ControlManager:
         self.plan_store.save(updated)
         return updated
 
+    def plan_completion_followup(self) -> dict[str, Any] | None:
+        record = self._latest_executable_plan()
+        if record is None or not record.steps:
+            return None
+        unfinished = [
+            step for step in record.steps
+            if step.status not in {PlanStepStatus.DONE.value, PlanStepStatus.SKIPPED.value}
+        ]
+        if not unfinished:
+            return None
+        lines = [
+            "[PLAN_INCOMPLETE]",
+            f"plan_id: {record.id}",
+            f"status: {record.status}",
+            "以下计划步骤仍未完成，不能直接最终答复。请继续执行、修复失败步骤，或在确实受阻时说明阻塞原因并调用 ask_user：",
+            "",
+        ]
+        for step in unfinished:
+            lines.append(f"- {step.id} [{step.status}] {step.title}")
+            if step.commands:
+                lines.append(f"  commands: {'; '.join(step.commands[:3])}")
+            if step.evidence:
+                latest = step.evidence[-1]
+                summary = str(latest.get("summary") or latest.get("error") or "")[:300]
+                if summary:
+                    lines.append(f"  latest_evidence: {summary}")
+        return {
+            "plan_id": record.id,
+            "unfinished_count": len(unfinished),
+            "message": "\n".join(lines),
+            "plan": record.to_dict(),
+        }
+
     def _update_plan_status(self, interaction: Interaction, status: str, *, approved: bool = False) -> None:
         plan_id = str(interaction.meta.get("plan_id") or "")
         if not plan_id:

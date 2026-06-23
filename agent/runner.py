@@ -410,6 +410,20 @@ class AgentRunner:
                 logger.info(f"\n[最终计划状态 - 全部办妥]\n{_render_todos(self.todo_store.todos)}\n")
                 self.todo_store.todos = []
 
+            plan_followup = self._plan_completion_followup()
+            if plan_followup is not None:
+                history.append({"role": "user", "content": str(plan_followup["message"])})
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.PLAN_FOLLOWUP,
+                    emit,
+                    detail={
+                        "plan_id": plan_followup.get("plan_id"),
+                        "unfinished": plan_followup.get("unfinished_count"),
+                    },
+                )
+                continue
+
             await self._emit_turn_phase(turn_state, TurnPhase.COMPACT_CHECK, emit)
             await self._maybe_compact(history)
             # turn 正常落地 → 清掉 checkpoint
@@ -735,6 +749,11 @@ class AgentRunner:
                 "summary": _summarize_tool_result(content),
             },
         )
+
+    def _plan_completion_followup(self) -> dict[str, Any] | None:
+        if self.control_manager is None or not hasattr(self.control_manager, "plan_completion_followup"):
+            return None
+        return self.control_manager.plan_completion_followup()
 
     def _plan_verification_target(self, call: ToolCallRequest) -> dict[str, str] | None:
         if call.name != "run_command" or self.control_manager is None:

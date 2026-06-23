@@ -15,6 +15,7 @@ class TurnPhase(StrEnum):
     EMPTY_RETRY = "empty_retry"
     LENGTH_RETRY = "length_retry"
     TODO_FOLLOWUP = "todo_followup"
+    PLAN_FOLLOWUP = "plan_followup"
     COMPACT_CHECK = "compact_check"
     PAUSED = "paused"
     MAX_TURNS = "max_turns"

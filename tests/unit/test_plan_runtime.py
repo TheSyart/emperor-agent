@@ -273,6 +273,7 @@ async def test_runner_run_command_records_plan_verification(tmp_path: Path) -> N
         registry=registry,
         system_prompt="system",
         control_manager=manager,
+        max_turns=2,
     )
     emitted: list[dict] = []
 
@@ -333,6 +334,7 @@ async def test_failed_run_command_records_plan_verification(tmp_path: Path) -> N
         registry=registry,
         system_prompt="system",
         control_manager=manager,
+        max_turns=2,
     )
     emitted: list[dict] = []
 
@@ -357,3 +359,51 @@ async def test_failed_run_command_records_plan_verification(tmp_path: Path) -> N
     assert followup["role"] == "user"
     assert "[PLAN_VERIFICATION_FAILED]" in followup["content"]
     assert "failed tests" in followup["content"]
+
+
+@pytest.mark.anyio
+async def test_runner_final_answer_gate_continues_incomplete_plan(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    manager.set_mode("plan")
+    tool = ProposePlanTool(manager)
+    tool.execute(
+        title="Runner upgrade",
+        summary="Verify final gate",
+        plan_markdown="# Plan\n\n- Run tests",
+        steps=[{"id": "step_1", "title": "Run tests"}],
+        assumptions=[],
+        risk_level="low",
+    )
+    pending = manager.payload()["pending"]
+    manager.approve(pending["id"])
+
+    provider = FakeProvider([
+        LLMResponse(content="premature final"),
+        LLMResponse(content="still premature"),
+    ])
+    runner = AgentRunner(
+        provider=provider,
+        model="fake",
+        registry=ToolRegistry(),
+        system_prompt="system",
+        control_manager=manager,
+        max_turns=2,
+    )
+    emitted: list[dict] = []
+
+    async def emit(event: dict) -> None:
+        emitted.append(event)
+
+    reply = await runner.step_async([{"role": "user", "content": "execute approved plan"}], emit=emit)
+
+    assert reply.startswith("（达到 max_turns=2")
+    assert len(provider.seen_messages) == 2
+    followup = provider.seen_messages[1][-1]
+    assert followup["role"] == "user"
+    assert "[PLAN_INCOMPLETE]" in followup["content"]
+    assert "step_1 [pending] Run tests" in followup["content"]
+    assert any(
+        event.get("event") == "turn_phase"
+        and event.get("phase") == "plan_followup"
+        for event in emitted
+    )
