@@ -5,6 +5,7 @@ from typing import Any
 
 from agent.runtime.active import ActiveTaskRegistry
 from agent.scheduler import SchedulerJob, SchedulerPayload, SchedulerSchedule
+from agent.tasks import TaskKind, TaskManager, TaskStatus
 from agent.web.services.scheduler_executor import SchedulerJobExecutor
 
 
@@ -52,6 +53,7 @@ class FakeLoop:
         self.runner = FakeRunner()
         self.team_manager = FakeTeamManager()
         self.team_managers: dict[str, FakeTeamManager] = {}
+        self.task_manager: TaskManager | None = None
 
     def team_manager_for_project(self, project_id: str) -> FakeTeamManager:
         self.team_managers.setdefault(project_id, FakeTeamManager())
@@ -115,6 +117,26 @@ def test_scheduler_executor_runs_agent_turn() -> None:
     assert any(event["event"] == "assistant_done" for event in state.events)
 
 
+def test_scheduler_executor_records_successful_task(tmp_path) -> None:
+    state = FakeState()
+    state.loop.task_manager = TaskManager(tmp_path)
+    executor = SchedulerJobExecutor(state)
+    job = make_job(SchedulerPayload(kind="agent_turn", message="Write a report"))
+
+    result = asyncio.run(executor.run(job))
+
+    assert result == "agent_turn completed"
+    records = state.loop.task_manager.store.list()
+    assert len(records) == 1
+    record = records[0]
+    assert record.kind == TaskKind.SCHEDULER_RUN.value
+    assert record.status == TaskStatus.COMPLETED.value
+    assert record.job_id == job.id
+    assert record.turn_id == "turn_1"
+    assert record.progress["summary"] == "agent_turn completed"
+    assert record.metadata["payload_kind"] == "agent_turn"
+
+
 def test_scheduler_executor_rejects_agent_turn_while_control_pending() -> None:
     state = FakeState()
     state._pending = {"id": "ask_1", "kind": "ask"}
@@ -127,6 +149,28 @@ def test_scheduler_executor_rejects_agent_turn_while_control_pending() -> None:
         assert "Ask / Plan" in str(exc)
     else:
         raise AssertionError("expected pending control to block scheduler agent turn")
+
+
+def test_scheduler_executor_records_failed_task(tmp_path) -> None:
+    state = FakeState()
+    state.loop.task_manager = TaskManager(tmp_path)
+    state._pending = {"id": "ask_1", "kind": "ask"}
+    executor = SchedulerJobExecutor(state)
+    job = make_job(SchedulerPayload(kind="agent_turn", message="Write a report"))
+
+    try:
+        asyncio.run(executor.run(job))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected pending control to block scheduler agent turn")
+
+    records = state.loop.task_manager.store.list()
+    assert len(records) == 1
+    record = records[0]
+    assert record.kind == TaskKind.SCHEDULER_RUN.value
+    assert record.status == TaskStatus.FAILED.value
+    assert record.progress["error"] == "cannot run scheduler agent_turn while Ask / Plan is pending"
 
 
 def test_scheduler_executor_hides_agent_turn_when_deliver_false() -> None:

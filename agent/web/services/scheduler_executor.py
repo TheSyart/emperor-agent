@@ -9,6 +9,7 @@ from loguru import logger
 from ...control import TurnPaused
 from ...runtime import events as runtime_events
 from ...scheduler import SchedulerJob, reset_scheduler_run, set_scheduler_run
+from ...tasks import TaskKind
 
 if TYPE_CHECKING:
     from ..state import WebUIState
@@ -22,27 +23,52 @@ class SchedulerJobExecutor:
 
     async def run(self, job: SchedulerJob) -> str | None:
         token = set_scheduler_run(True)
+        task_manager = getattr(self.state.loop, "task_manager", None)
+        task_record = None
+        if task_manager is not None:
+            task_record = task_manager.start_task(
+                kind=TaskKind.SCHEDULER_RUN.value,
+                title=f"Scheduler job: {job.name}",
+                source="scheduler",
+                job_id=job.id,
+                metadata={
+                    "job_name": job.name,
+                    "payload_kind": job.payload.kind,
+                    "deliver": bool(job.payload.deliver),
+                },
+            )
         try:
-            return await self.state.active_tasks.run(
+            result = await self.state.active_tasks.run(
                 task_id=f"scheduler:{job.id}",
                 kind="scheduler",
                 label=f"Scheduler job: {job.name}",
-                awaitable=self._dispatch(job),
+                awaitable=self._dispatch(job, task_id=task_record.id if task_record is not None else None),
                 job_id=job.id,
             )
+            if task_manager is not None and task_record is not None:
+                task_manager.complete_task(task_record.id, summary=str(result or ""))
+            return result
+        except asyncio.CancelledError:
+            if task_manager is not None and task_record is not None:
+                task_manager.cancel_task(task_record.id)
+            raise
+        except Exception as exc:
+            if task_manager is not None and task_record is not None:
+                task_manager.fail_task(task_record.id, error=str(exc))
+            raise
         finally:
             reset_scheduler_run(token)
 
-    async def _dispatch(self, job: SchedulerJob) -> str | None:
+    async def _dispatch(self, job: SchedulerJob, *, task_id: str | None = None) -> str | None:
         if job.payload.kind == "agent_turn":
-            return await self._run_agent_turn(job)
+            return await self._run_agent_turn(job, task_id=task_id)
         if job.payload.kind == "team_wake":
             return await self._run_team_wake(job)
         if job.payload.kind == "system_event":
             return await self._run_system_event(job)
         raise ValueError(f"unsupported scheduler payload kind: {job.payload.kind}")
 
-    async def _run_agent_turn(self, job: SchedulerJob) -> str:
+    async def _run_agent_turn(self, job: SchedulerJob, *, task_id: str | None = None) -> str:
         message = job.payload.message.strip()
         if not message:
             raise ValueError("agent_turn scheduler job requires payload.message")
@@ -51,6 +77,9 @@ class SchedulerJobExecutor:
 
         turn_id = self.state.new_turn_id()
         await self.state.active_tasks.update(f"scheduler:{job.id}", turn_id=turn_id)
+        task_manager = getattr(self.state.loop, "task_manager", None)
+        if task_manager is not None and task_id:
+            task_manager.update_task(task_id, turn_id=turn_id)
         model_content = self._agent_turn_content(job)
         display = f"定时任务触发 · {job.name}\n\n{message}"
         deliver = bool(job.payload.deliver)
