@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent.tools.base import Tool, tool_parameters
 from agent.tools.context import ToolExecutionContext
-from agent.tools.filesystem import ReadFileTool
+from agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 from agent.tools.protocol import ToolAdapter
 from agent.tools.registry import ToolRegistry
 from agent.tools.results import ToolArtifact, ToolResult
@@ -208,3 +208,54 @@ def test_run_command_execute_result_adds_command_metadata(tmp_path: Path) -> Non
         "timed_out": False,
         "truncated": False,
     }
+
+
+def test_write_file_execute_result_adds_file_artifact_and_diff_metadata(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(WriteFileTool(tmp_path))
+
+    result = registry.execute_result(
+        "write_file",
+        {"path": "generated.py", "content": "print('ok')\n"},
+    )
+
+    assert result.model_content.startswith("Successfully wrote 12 characters")
+    assert result.display_summary == "write_file generated.py (12 chars)"
+    assert result.artifacts[0].path == "generated.py"
+    assert result.artifacts[0].kind == "source_file"
+    assert result.metadata["tool"] == "write_file"
+    assert result.metadata["path"] == "generated.py"
+    assert result.metadata["content_chars"] == 12
+    assert result.metadata["content_bytes"] == 12
+    assert result.metadata["diff"].startswith("--- /dev/null\n+++ generated.py\n")
+    assert "+print('ok')" in result.metadata["diff"]
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "print('ok')\n"
+
+
+def test_edit_file_execute_result_adds_file_artifact_and_diff_metadata(tmp_path: Path) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("value = 1\nprint(value)\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(EditFileTool(tmp_path))
+
+    result = registry.execute_result(
+        "edit_file",
+        {
+            "path": "app.py",
+            "old_text": "value = 1",
+            "new_text": "value = 2",
+        },
+    )
+
+    assert result.model_content.startswith("Successfully edited")
+    assert result.display_summary == "edit_file app.py (1 replacement)"
+    assert result.artifacts[0].path == "app.py"
+    assert result.artifacts[0].kind == "source_file"
+    assert result.metadata["tool"] == "edit_file"
+    assert result.metadata["path"] == "app.py"
+    assert result.metadata["replacements"] == 1
+    assert result.metadata["replace_all"] is False
+    assert result.metadata["diff"].startswith("--- app.py (before)\n+++ app.py (after)\n")
+    assert "-value = 1" in result.metadata["diff"]
+    assert "+value = 2" in result.metadata["diff"]
+    assert target.read_text(encoding="utf-8") == "value = 2\nprint(value)\n"

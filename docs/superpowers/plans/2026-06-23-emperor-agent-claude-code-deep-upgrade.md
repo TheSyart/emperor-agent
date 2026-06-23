@@ -54,7 +54,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - First built-in result budgets are now configured: `read_file=24000`, `grep=16000`, `glob=12000`, `run_command=12000`, `web_fetch=10000`.
 - Structured `ToolResult` is now preserved across `ToolRegistry.execute_result()`, `ToolExecutionEngine`, `AgentRunner` tool messages/runtime summaries, and WebUI replay types. Legacy `execute()` remains string-compatible.
 - First native high-value tool mappings are now in place: `read_file` emits source-file artifact metadata and line ranges, `grep` emits match/search metadata, and `run_command` emits command/exit/timeout/truncation metadata while keeping legacy `execute()` string-compatible.
-- The next upgrade lane is continuing the later Epics: native mapping for `edit_file`/write tools, MCP/external-tool budget overrides, tool-card artifact display, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- Write/edit result mapping is now in place: `write_file` and `edit_file` emit file artifacts, concise summaries, unified diff previews, and change metadata while keeping legacy `execute()` string-compatible.
+- The next upgrade lane is continuing the later Epics: MCP/external-tool budget overrides, tool-card artifact display, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 

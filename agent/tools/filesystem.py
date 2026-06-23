@@ -251,16 +251,75 @@ class WriteFileTool(_FsTool):
     description = "写入文件（覆盖已有内容）。部分编辑请用 edit_file。"
 
     def execute(self, path: str, content: str, **kwargs: Any) -> str:
+        self._last_write_result = None
         try:
             fp = self._resolve(path)
+            existed = fp.is_file()
+            before = ""
+            if existed:
+                try:
+                    before = fp.read_text(encoding="utf-8").replace("\r\n", "\n")
+                except UnicodeDecodeError:
+                    before = ""
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
+            display_path = self._display_path(fp)
+            after = content.replace("\r\n", "\n")
+            self._last_write_result = {
+                "path": display_path,
+                "content_chars": len(content),
+                "content_bytes": len(content.encode("utf-8")),
+                "file_bytes": fp.stat().st_size,
+                "operation": "overwrote" if existed else "created",
+                "diff": _unified_text_diff(
+                    before,
+                    after,
+                    before_label=f"{display_path} (before)" if existed else "/dev/null",
+                    after_label=display_path,
+                ),
+            }
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             logger.warning(f"[write_file] {e}")
             return f"Error writing file: {e}"
+
+    def map_result(self, result: Any, context: ToolExecutionContext) -> ToolResult:
+        text = str(result)
+        if text.startswith("Error:"):
+            return ToolResult.from_text(text, is_error=True)
+        args = context.arguments or {}
+        path = str(args.get("path") or "")
+        record = getattr(self, "_last_write_result", None) or {}
+        display_path = str(record.get("path") or path)
+        content = str(args.get("content") or "")
+        metadata = {
+            "tool": "write_file",
+            "path": display_path,
+            "operation": record.get("operation") or "wrote",
+            "content_chars": record.get("content_chars", len(content)),
+            "content_bytes": record.get("content_bytes", len(content.encode("utf-8"))),
+            "diff": record.get("diff") or _unified_text_diff(
+                "",
+                content,
+                before_label="/dev/null",
+                after_label=display_path,
+            ),
+        }
+        return ToolResult(
+            model_content=text,
+            display_summary=f"write_file {display_path} ({metadata['content_chars']} chars)",
+            raw_content=text,
+            artifacts=[
+                ToolArtifact(
+                    path=display_path,
+                    kind="source_file",
+                    bytes=_optional_int(record.get("file_bytes")),
+                )
+            ],
+            metadata=metadata,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +401,28 @@ def _best_window(old: str, content: str) -> tuple[float, int]:
     return best_ratio, best_start
 
 
+def _unified_text_diff(
+    before: str,
+    after: str,
+    *,
+    before_label: str,
+    after_label: str,
+) -> str:
+    return "".join(difflib.unified_diff(
+        before.splitlines(keepends=True),
+        after.splitlines(keepends=True),
+        fromfile=before_label,
+        tofile=after_label,
+    ))
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 @tool_parameters({
     "type": "object",
     "properties": {
@@ -363,12 +444,27 @@ class EditFileTool(_FsTool):
         self, path: str, old_text: str, new_text: str,
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
+        self._last_edit_result = None
         try:
             fp = self._resolve(path)
             if not fp.exists():
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")
+                    display_path = self._display_path(fp)
+                    self._last_edit_result = {
+                        "path": display_path,
+                        "operation": "created",
+                        "replacements": 0,
+                        "replace_all": bool(replace_all),
+                        "file_bytes": fp.stat().st_size,
+                        "diff": _unified_text_diff(
+                            "",
+                            new_text.replace("\r\n", "\n"),
+                            before_label="/dev/null",
+                            after_label=display_path,
+                        ),
+                    }
                     return f"Successfully created {fp}"
                 return f"Error: File not found: {path}"
 
@@ -381,6 +477,20 @@ class EditFileTool(_FsTool):
                 if content.strip():
                     return f"Error: Cannot create file — {path} already exists and is not empty."
                 fp.write_text(new_text, encoding="utf-8")
+                display_path = self._display_path(fp)
+                self._last_edit_result = {
+                    "path": display_path,
+                    "operation": "edited",
+                    "replacements": 0,
+                    "replace_all": bool(replace_all),
+                    "file_bytes": fp.stat().st_size,
+                    "diff": _unified_text_diff(
+                        content,
+                        new_text.replace("\r\n", "\n"),
+                        before_label=f"{display_path} (before)",
+                        after_label=f"{display_path} (after)",
+                    ),
+                }
                 return f"Successfully edited {fp}"
 
             matches = _find_matches(content, norm_old)
@@ -417,9 +527,61 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
             fp.write_bytes(new_content.encode("utf-8"))
+            display_path = self._display_path(fp)
+            normalized_new_content = new_content.replace("\r\n", "\n")
+            self._last_edit_result = {
+                "path": display_path,
+                "operation": "edited",
+                "replacements": len(selected),
+                "replace_all": bool(replace_all),
+                "file_bytes": fp.stat().st_size,
+                "diff": _unified_text_diff(
+                    content,
+                    normalized_new_content,
+                    before_label=f"{display_path} (before)",
+                    after_label=f"{display_path} (after)",
+                ),
+            }
             return f"Successfully edited {fp}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             logger.warning(f"[edit_file] {e}")
             return f"Error editing file: {e}"
+
+    def map_result(self, result: Any, context: ToolExecutionContext) -> ToolResult:
+        text = str(result)
+        if text.startswith("Error:") or text.startswith("Warning:"):
+            return ToolResult.from_text(text, is_error=text.startswith("Error:"))
+        args = context.arguments or {}
+        path = str(args.get("path") or "")
+        record = getattr(self, "_last_edit_result", None) or {}
+        display_path = str(record.get("path") or path)
+        replacements = _optional_int(record.get("replacements")) or 0
+        label = "replacement" if replacements == 1 else "replacements"
+        summary = (
+            f"edit_file {display_path} (created)"
+            if record.get("operation") == "created"
+            else f"edit_file {display_path} ({replacements} {label})"
+        )
+        metadata = {
+            "tool": "edit_file",
+            "path": display_path,
+            "operation": record.get("operation") or "edited",
+            "replacements": replacements,
+            "replace_all": bool(args.get("replace_all", False)),
+            "diff": record.get("diff") or "",
+        }
+        return ToolResult(
+            model_content=text,
+            display_summary=summary,
+            raw_content=text,
+            artifacts=[
+                ToolArtifact(
+                    path=display_path,
+                    kind="source_file",
+                    bytes=_optional_int(record.get("file_bytes")),
+                )
+            ],
+            metadata=metadata,
+        )

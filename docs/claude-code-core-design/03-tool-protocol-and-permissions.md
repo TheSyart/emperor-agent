@@ -140,11 +140,11 @@ Emperor 当前：
 - `ToolExecutionEngine` 内部保留 `ToolResult`，tool message 使用 `model_content`，`tool_run_completed` 与 legacy `tool_result` runtime event 使用 `display_summary`，并可携带 artifacts/metadata。
 - `_cap_tool_result()`、`_shrink_old_tool_results()` 和 `ContextPipeline` 继续负责请求前预算治理，`ToolResultStore` 负责大结果 artifact-backed replacement。
 - `read_file`、`grep`、`run_command` 已有第一批原生 `map_result()`：分别输出源码 artifact/行号 metadata、搜索匹配 metadata、命令 exit/timeout/truncation metadata。
+- `write_file`、`edit_file` 已有第一批原生 `map_result()`：输出文件 artifact、短 summary、unified diff preview、变更类型和替换次数 metadata。
 
 升级方向：
 
-- 继续把写入/编辑类工具迁移为原生 `ToolResult`：`edit_file`、`write_file` 应输出稳定 summary、结构化 diff、涉及文件 artifact、mtime 或内容版本 metadata。
-- MCP/外部工具先通过 adapter 包装，后续支持 server/tool 级预算和 artifact override。
+- MCP/外部工具先通过 adapter 包装，后续支持 server/tool 级预算、artifact override 和 provider-specific metadata。
 - Runtime UI 已能保留 artifacts/metadata，下一步需要在工具卡片中展示 artifact 链接和计划验证证据。
 
 ### 7. UI 元数据
