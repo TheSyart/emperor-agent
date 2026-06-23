@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from .base import Tool
-from .protocol import PreparedToolCall
+from .context import ToolExecutionContext
+from .protocol import PreparedToolCall, ToolAdapter
 from .results import ToolResult
 
 
@@ -88,22 +90,69 @@ class ToolRegistry:
         if mcp_names:
             self._defs_cache = None
 
-    def execute(self, name: str, params: Any, emit=None, loop=None, parent_call_id=None) -> str:
+    def execute_result(
+        self,
+        name: str,
+        params: Any,
+        emit=None,
+        loop=None,
+        parent_call_id=None,
+        *,
+        root: Path | str | None = None,
+        turn_id: str | None = None,
+    ) -> ToolResult:
         prepared = self.prepare_call(name, params)
         if prepared.error:
-            return f"{prepared.error}\n{self._HINT}"
+            return ToolResult.from_text(f"{prepared.error}\n{self._HINT}", is_error=True)
         tool = prepared.tool
         cast = prepared.arguments
+        context = ToolExecutionContext(
+            root=Path(root or ".").resolve(),
+            turn_id=turn_id,
+            parent_call_id=parent_call_id,
+            emit=emit,
+            loop=loop,
+        )
         try:
             if getattr(tool, "requires_runtime_context", False):
-                result = tool.execute(**cast, emit=emit, loop=loop, parent_call_id=parent_call_id)
+                raw = tool.execute(**cast, emit=emit, loop=loop, parent_call_id=parent_call_id)
+                result = _map_tool_result(tool, raw, context)
             else:
-                result = tool.execute(**cast)
-            if isinstance(result, ToolResult):
-                return result.model_content
-            if isinstance(result, str) and result.startswith("Error"):
-                return f"{result}\n{self._HINT}"
-            return result
+                result = ToolAdapter(tool).execute_sync(cast, context)
+            return self._hint_tool_error(result)
         except Exception as e:
             logger.warning(f"Tool execution error: {name}: {e}")
-            return f"Error executing {name}: {e}\n{self._HINT}"
+            return ToolResult.from_text(f"Error executing {name}: {e}\n{self._HINT}", is_error=True)
+
+    def execute(self, name: str, params: Any, emit=None, loop=None, parent_call_id=None) -> str:
+        return self.execute_result(
+            name,
+            params,
+            emit=emit,
+            loop=loop,
+            parent_call_id=parent_call_id,
+        ).model_content
+
+    def _hint_tool_error(self, result: ToolResult) -> ToolResult:
+        if not result.is_error or self._HINT in result.model_content:
+            return result
+        return ToolResult(
+            model_content=f"{result.model_content}\n{self._HINT}",
+            display_summary=result.display_summary,
+            raw_content=result.raw_content,
+            artifacts=result.artifacts,
+            metadata=result.metadata,
+            is_error=True,
+        )
+
+
+def _map_tool_result(tool: Tool, result: Any, context: ToolExecutionContext) -> ToolResult:
+    map_result = getattr(tool, "map_result", None)
+    if callable(map_result):
+        mapped = map_result(result, context)
+        if isinstance(mapped, ToolResult):
+            return mapped
+    if isinstance(result, ToolResult):
+        return result
+    text = str(result)
+    return ToolResult.from_text(text, is_error=text.startswith("Error"))

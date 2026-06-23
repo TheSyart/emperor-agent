@@ -7,7 +7,7 @@ from agent.tools.context import ToolExecutionContext
 from agent.tools.filesystem import ReadFileTool
 from agent.tools.protocol import ToolAdapter
 from agent.tools.registry import ToolRegistry
-from agent.tools.results import ToolResult
+from agent.tools.results import ToolArtifact, ToolResult
 from agent.tools.search import GlobTool, GrepTool
 from agent.tools.shell import RunCommand
 from agent.tools.web import WebFetch
@@ -40,6 +40,33 @@ class BudgetedTool(Tool):
 
     def execute(self, value: str) -> str:
         return value
+
+
+@tool_parameters({
+    "type": "object",
+    "properties": {"value": {"type": "string"}},
+    "required": ["value"],
+})
+class StructuredResultTool(Tool):
+    name = "structured_result"
+    description = "structured result"
+    read_only = True
+
+    def execute(self, value: str) -> ToolResult:
+        return ToolResult(
+            model_content=f"model:{value}",
+            display_summary=f"summary:{value}",
+            raw_content=f"raw:{value}",
+            artifacts=[
+                ToolArtifact(
+                    path=f"memory/tool-results/{value}.txt",
+                    kind="text",
+                    bytes=42,
+                    metadata={"source": "test"},
+                )
+            ],
+            metadata={"kind": "structured"},
+        )
 
 
 def test_tool_adapter_wraps_string_result(tmp_path: Path) -> None:
@@ -78,6 +105,27 @@ def test_registry_exposes_tool_result_budgets() -> None:
     registry.register(BudgetedTool())
 
     assert registry.tool_result_limits() == {"budgeted": 1234}
+
+
+def test_registry_execute_result_preserves_structured_tool_result(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(StructuredResultTool())
+
+    result = registry.execute_result(
+        "structured_result",
+        {"value": "artifact"},
+        root=tmp_path,
+        turn_id="turn_1",
+        parent_call_id="call_1",
+    )
+
+    assert result.model_content == "model:artifact"
+    assert result.display_summary == "summary:artifact"
+    assert result.raw_content == "raw:artifact"
+    assert result.artifacts[0].path == "memory/tool-results/artifact.txt"
+    assert result.artifacts[0].metadata == {"source": "test"}
+    assert result.metadata == {"kind": "structured"}
+    assert registry.execute("structured_result", {"value": "artifact"}) == "model:artifact"
 
 
 def test_builtin_high_output_tools_define_result_budgets(tmp_path: Path) -> None:

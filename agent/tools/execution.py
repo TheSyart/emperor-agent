@@ -11,6 +11,7 @@ from ..control import TurnPaused
 from ..providers import ToolCallRequest
 from ..runtime import events as runtime_events
 from .registry import ToolRegistry
+from .results import ToolResult
 
 StreamEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 ToolRunStatus = Literal["queued", "executing", "completed", "failed", "cancelled"]
@@ -23,7 +24,7 @@ class ToolRunState:
     arguments: dict[str, Any]
     status: ToolRunStatus = "queued"
     concurrency_safe: bool = False
-    result: str | None = None
+    result: ToolResult | None = None
     error: str | None = None
 
 
@@ -42,7 +43,7 @@ class ToolExecutionEngine:
         if emit:
             for state in states:
                 await emit(runtime_events.tool_run_queued(id=state.id, name=state.name, arguments=state.arguments))
-        results_by_id: dict[str, str] = {}
+        results_by_id: dict[str, ToolResult] = {}
         index = 0
         while index < len(tool_calls):
             state = states[index]
@@ -64,10 +65,10 @@ class ToolExecutionEngine:
                     if isinstance(raw, TurnPaused):
                         raise raw
                     if isinstance(raw, Exception):
-                        content = f"Error: {raw}"
+                        result = ToolResult.from_text(f"Error: {raw}", is_error=True)
                         item.status = "failed"
                         item.error = str(raw)
-                        results_by_id[call.id] = content
+                        results_by_id[call.id] = result
                         if emit:
                             await emit(runtime_events.tool_run_failed(id=call.id, name=call.name, message=str(raw)))
                     else:
@@ -85,7 +86,7 @@ class ToolExecutionEngine:
                 "role": "tool",
                 "tool_call_id": call.id,
                 "name": call.name,
-                "content": results_by_id.get(call.id, ""),
+                "content": results_by_id.get(call.id, ToolResult.from_text("")).model_content,
             }
             for call in tool_calls
         ]
@@ -107,15 +108,15 @@ class ToolExecutionEngine:
         *,
         emit: StreamEmitter | None,
         run_one,
-    ) -> str:
+    ) -> ToolResult:
         state.status = "executing"
         if emit:
             await emit(runtime_events.tool_run_started(id=state.id, name=state.name))
         try:
             if run_one is None:
-                content = await asyncio.to_thread(self.registry.execute, call.name, call.arguments)
+                result = await asyncio.to_thread(self.registry.execute_result, call.name, call.arguments)
             else:
-                content = await run_one(call)
+                result = _coerce_tool_result(await run_one(call))
         except TurnPaused:
             state.status = "cancelled"
             if emit:
@@ -127,9 +128,22 @@ class ToolExecutionEngine:
             state.error = str(exc)
             if emit:
                 await emit(runtime_events.tool_run_failed(id=state.id, name=state.name, message=str(exc)))
-            return f"Error: {exc}"
-        state.status = "completed"
-        state.result = str(content)
-        if emit and not str(content).startswith("Error:"):
-            await emit(runtime_events.tool_run_completed(id=state.id, name=state.name, summary=str(content)))
-        return str(content)
+            return ToolResult.from_text(f"Error: {exc}", is_error=True)
+        state.status = "failed" if result.is_error else "completed"
+        state.result = result
+        if emit and not result.is_error:
+            await emit(runtime_events.tool_run_completed(
+                id=state.id,
+                name=state.name,
+                summary=result.summary,
+                artifacts=result.artifact_payloads() or None,
+                metadata=result.metadata or None,
+            ))
+        return result
+
+
+def _coerce_tool_result(value: Any) -> ToolResult:
+    if isinstance(value, ToolResult):
+        return value
+    text = str(value)
+    return ToolResult.from_text(text, is_error=text.startswith("Error:"))

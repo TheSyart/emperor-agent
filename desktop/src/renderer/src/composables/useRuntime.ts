@@ -471,6 +471,8 @@ export function useRuntime(options: {
         finishTimedState(seg, eventTimeMs(data))
         seg.summary = data.summary || '已完成'
         seg.status = 'done'
+        if (data.artifacts) seg.artifacts = data.artifacts
+        if (data.metadata) seg.metadata = data.metadata
         if ((data.name === 'update_todos' || seg.name === 'update_todos') && data.todos) {
           seg.todos = data.todos
           assistant!.todos = data.todos

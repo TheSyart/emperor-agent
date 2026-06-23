@@ -28,6 +28,7 @@ from .runner_state import TurnPhase, TurnState
 from .runtime import events as runtime_events
 from .tools.execution import ToolExecutionEngine
 from .tools.registry import ToolRegistry
+from .tools.results import ToolResult
 
 StreamEmitter = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -587,10 +588,10 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ) -> list[dict[str, Any]]:
-        results_by_id: dict[str, str] = {}
+        results_by_id: dict[str, ToolResult] = {}
         plan_followups: list[dict[str, Any]] = []
 
-        async def run_one(call: ToolCallRequest) -> str:
+        async def run_one(call: ToolCallRequest) -> ToolResult:
             await self._emit_tool_call(call, emit)
             verification_target = self._plan_verification_target(call)
             if verification_target is not None and emit:
@@ -599,8 +600,9 @@ class AgentRunner:
                     step_id=verification_target["step_id"],
                     command=verification_target["command"],
                 ))
-            content = await self._run_tool(call, emit, clarification=clarification)
-            results_by_id[call.id] = content
+            result = await self._run_tool_result(call, emit, clarification=clarification)
+            content = result.model_content
+            results_by_id[call.id] = result
             self._maybe_pause_for_control(content, tool_calls, results_by_id)
             verification_update = self._record_plan_verification(call, content, verification_target)
             if verification_update is not None and emit:
@@ -614,15 +616,44 @@ class AgentRunner:
                 followup = self._plan_verification_followup(verification_update)
                 if followup is not None:
                     plan_followups.append(followup)
-            if not content.startswith("Error:"):
+            if not result.is_error:
                 plan_update = self._sync_plan_from_todo_tool(call, content)
-                await self._emit_tool_result(call, content, emit)
+                await self._emit_tool_result(call, result, emit)
                 if plan_update is not None and emit:
                     await emit(runtime_events.plan_runtime_update(plan_update.to_dict()))
-            return content
+            return result
 
         tool_messages = await self.tool_execution_engine.run_batch(tool_calls, emit=emit, run_one=run_one)
         return [*tool_messages, *plan_followups]
+
+    async def _run_tool_result(
+        self,
+        call: ToolCallRequest,
+        emit: StreamEmitter | None = None,
+        *,
+        clarification: ClarificationAssessment | None = None,
+    ) -> ToolResult:
+        if clarification and clarification.required and self._ask_guard_blocks_tool(call.name):
+            return ToolResult.from_text(_ASK_GUARD_BLOCK, is_error=True)
+        if self.control_manager is not None:
+            decision = self.control_manager.assess_permission(call.name, call.arguments, self.registry)
+            if decision.requires_approval:
+                return ToolResult.from_text(
+                    self.control_manager.permission_approval_result(decision, parent_call_id=call.id)
+                )
+            if not decision.allowed:
+                return ToolResult.from_text(
+                    f"Error: permission denied for {call.name}: {decision.reason}",
+                    is_error=True,
+                )
+        tool = self.registry.get(call.name)
+        if emit and tool is not None and getattr(tool, "requires_runtime_context", False):
+            loop = asyncio.get_running_loop()
+            return await asyncio.to_thread(
+                self.registry.execute_result, call.name, call.arguments,
+                emit=emit, loop=loop, parent_call_id=call.id,
+            )
+        return await asyncio.to_thread(self.registry.execute_result, call.name, call.arguments)
 
     async def _run_tool(
         self,
@@ -631,22 +662,9 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ) -> str:
-        if clarification and clarification.required and self._ask_guard_blocks_tool(call.name):
-            return _ASK_GUARD_BLOCK
-        if self.control_manager is not None:
-            decision = self.control_manager.assess_permission(call.name, call.arguments, self.registry)
-            if decision.requires_approval:
-                return self.control_manager.permission_approval_result(decision, parent_call_id=call.id)
-            if not decision.allowed:
-                return f"Error: permission denied for {call.name}: {decision.reason}"
-        tool = self.registry.get(call.name)
-        if emit and tool is not None and getattr(tool, "requires_runtime_context", False):
-            loop = asyncio.get_running_loop()
-            return await asyncio.to_thread(
-                self.registry.execute, call.name, call.arguments,
-                emit=emit, loop=loop, parent_call_id=call.id,
-            )
-        return await asyncio.to_thread(self.registry.execute, call.name, call.arguments)
+        return (
+            await self._run_tool_result(call, emit=emit, clarification=clarification)
+        ).model_content
 
     def _assess_clarification(self, history: list[dict[str, Any]]) -> ClarificationAssessment:
         if self.control_manager is None:
@@ -727,7 +745,7 @@ class AgentRunner:
         self,
         content: str,
         tool_calls: list[ToolCallRequest],
-        results_by_id: dict[str, str],
+        results_by_id: dict[str, ToolResult],
     ) -> None:
         interaction = parse_pause_result(content)
         if interaction is None:
@@ -814,13 +832,14 @@ class AgentRunner:
     @staticmethod
     def _tool_messages_for_pause(
         tool_calls: list[ToolCallRequest],
-        results_by_id: dict[str, str],
+        results_by_id: dict[str, ToolResult],
         interaction: dict[str, Any],
     ) -> list[dict[str, Any]]:
         messages = []
         current_id = str(interaction.get("parent_call_id") or "")
         for call in tool_calls:
-            content = results_by_id.get(call.id)
+            result = results_by_id.get(call.id)
+            content = result.model_content if result is not None else None
             if content and parse_pause_result(content):
                 content = f"waiting for user ({interaction.get('kind')}:{interaction.get('id')})"
             elif content is None:
@@ -848,16 +867,23 @@ class AgentRunner:
     async def _emit_tool_result(
         self,
         call: ToolCallRequest,
-        content: str,
+        result: ToolResult | str,
         emit: StreamEmitter | None,
     ) -> None:
         if emit:
+            if not isinstance(result, ToolResult):
+                result = ToolResult.from_text(str(result), is_error=str(result).startswith("Error:"))
             payload: dict[str, Any] = {
                 "event": "tool_result",
                 "id": call.id,
                 "name": call.name,
-                "summary": _summarize_tool_result(content),
+                "summary": _summarize_tool_result(result.summary),
             }
+            artifacts = result.artifact_payloads()
+            if artifacts:
+                payload["artifacts"] = artifacts
+            if result.metadata:
+                payload["metadata"] = result.metadata
             if call.name == "update_todos" and self.todo_store is not None:
                 payload["todos"] = [
                     {"id": t["id"], "content": t["content"], "status": t["status"]}

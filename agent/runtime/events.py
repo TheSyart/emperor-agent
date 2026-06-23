@@ -151,8 +151,22 @@ def tool_run_started(*, id: str, name: str) -> dict[str, Any]:
     return runtime_event("tool_run_started", id=id, name=name)
 
 
-def tool_run_completed(*, id: str, name: str, summary: str) -> dict[str, Any]:
-    return runtime_event("tool_run_completed", id=id, name=name, summary=summary)
+def tool_run_completed(
+    *,
+    id: str,
+    name: str,
+    summary: str,
+    artifacts: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return runtime_event(
+        "tool_run_completed",
+        id=id,
+        name=name,
+        summary=summary,
+        artifacts=artifacts,
+        metadata=metadata,
+    )
 
 
 def tool_run_failed(*, id: str, name: str, message: str) -> dict[str, Any]:

@@ -52,7 +52,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Project Execution Prompt Contract is now explicit in approved-plan follow-up messages and stable prompt templates: active todo maintenance, verification evidence, failure repair, blocked-state escalation, and no-final-answer-before-complete are covered by tests.
 - Advanced context budget work has started: `ToolResultStore` is available, `ContextPipeline(tool_result_store=...)` can replace large tool messages with stable artifact-backed model content, `AgentRunner` uses store-backed projection when a memory store is present, and tool-level `max_result_chars` budgets flow from `ToolRegistry` into that projection.
 - First built-in result budgets are now configured: `read_file=24000`, `grep=16000`, `glob=12000`, `run_command=12000`, `web_fetch=10000`.
-- The next upgrade lane is continuing the later Epics: artifact-aware ToolResult mapping, MCP/external-tool budget overrides, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- Structured `ToolResult` is now preserved across `ToolRegistry.execute_result()`, `ToolExecutionEngine`, `AgentRunner` tool messages/runtime summaries, and WebUI replay types. Legacy `execute()` remains string-compatible.
+- The next upgrade lane is continuing the later Epics: native artifact-aware mappings for high-value built-in tools, MCP/external-tool budget overrides, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 
@@ -903,11 +904,14 @@ Update `execute()` to use `prepared = self.prepare_call(...)`. Preserve the curr
         cast = prepared.arguments
 ```
 
-If a tool returns `ToolResult`, return `result.model_content` for now:
+Add `execute_result()` for the structured path, and keep `execute()` as the legacy string adapter:
 
 ```python
-            if isinstance(result, ToolResult):
-                return result.model_content
+    def execute_result(...) -> ToolResult:
+        ...
+
+    def execute(...) -> str:
+        return self.execute_result(...).model_content
 ```
 
 - [ ] **Step 8: Run protocol tests plus existing tool tests**

@@ -136,14 +136,15 @@ Emperor 当前：
 
 Emperor 当前：
 
-- 工具结果统一为字符串。
-- `_cap_tool_result()` 和 `_shrink_old_tool_results()` 在 runner 层截断。
+- 旧工具仍可用字符串 `execute()`，但 `ToolRegistry.execute_result()` 已能把旧字符串和新 `ToolResult` 统一成结构化结果。
+- `ToolExecutionEngine` 内部保留 `ToolResult`，tool message 使用 `model_content`，`tool_run_completed` 与 legacy `tool_result` runtime event 使用 `display_summary`，并可携带 artifacts/metadata。
+- `_cap_tool_result()`、`_shrink_old_tool_results()` 和 `ContextPipeline` 继续负责请求前预算治理，`ToolResultStore` 负责大结果 artifact-backed replacement。
 
 升级方向：
 
-- 工具返回 `ToolResult`：`model_content`、`display_summary`、`raw_artifact_path`、`metadata`。
-- 大结果由工具执行层落盘，模型只收到预览和路径。
-- Runtime UI 使用 `display_summary`，不要从模型内容中再摘要。
+- 继续把高价值内置工具迁移为原生 `ToolResult`：`read_file`、`grep`、`run_command`、`edit_file` 应输出稳定 summary、raw content、artifacts、metadata。
+- MCP/外部工具先通过 adapter 包装，后续支持 server/tool 级预算和 artifact override。
+- Runtime UI 已能保留 artifacts/metadata，下一步需要在工具卡片中展示 artifact 链接和计划验证证据。
 
 ### 7. UI 元数据
 

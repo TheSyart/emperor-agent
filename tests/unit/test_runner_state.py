@@ -9,6 +9,7 @@ from agent.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from agent.runner import AgentRunner
 from agent.runner_state import TurnPhase, TurnState
 from agent.tools import Tool, ToolRegistry
+from agent.tools.results import ToolArtifact, ToolResult
 
 
 class FakeProvider(LLMProvider):
@@ -41,6 +42,32 @@ class BudgetedEchoTool(EchoTool):
     name = "budgeted_echo"
     description = "Echo with a smaller model-context result budget."
     max_result_chars = 2000
+
+
+class StructuredEchoTool(Tool):
+    name = "structured_echo"
+    description = "Structured echo."
+    parameters = {
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"],
+    }
+    read_only = True
+
+    def execute(self, **kwargs) -> ToolResult:
+        value = str(kwargs["value"])
+        return ToolResult(
+            model_content=f"model:{value}",
+            display_summary=f"summary:{value}",
+            artifacts=[
+                ToolArtifact(
+                    path=f"memory/tool-results/{value}.txt",
+                    kind="text",
+                    bytes=9,
+                )
+            ],
+            metadata={"source": "runner-test"},
+        )
 
 
 def test_turn_state_transitions_to_runtime_events() -> None:
@@ -116,6 +143,44 @@ async def test_runner_emits_tool_batch_phases() -> None:
     assert "tool_batch_start" in [event["phase"] for event in phases]
     assert "tool_batch_done" in [event["phase"] for event in phases]
     assert [event["iteration"] for event in phases if event["phase"] == "model_request"] == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_runner_uses_structured_tool_result_for_history_and_runtime_summary() -> None:
+    registry = ToolRegistry()
+    registry.register(StructuredEchoTool())
+    runner = AgentRunner(
+        provider=FakeProvider([
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="call_1", name="structured_echo", arguments={"value": "large"})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done"),
+        ]),
+        model="fake",
+        registry=registry,
+        system_prompt="system",
+    )
+    history = [{"role": "user", "content": "hi"}]
+    emitted: list[dict[str, Any]] = []
+
+    async def emit(event: dict[str, Any]) -> None:
+        emitted.append(event)
+
+    await runner.step_async(history, emit=emit)
+
+    tool_message = next(message for message in history if message.get("role") == "tool")
+    tool_result_event = next(event for event in emitted if event.get("event") == "tool_result")
+    completed_event = next(event for event in emitted if event.get("event") == "tool_run_completed")
+
+    assert tool_message["content"] == "model:large"
+    assert tool_result_event["summary"] == "summary:large"
+    assert tool_result_event["artifacts"] == [
+        {"path": "memory/tool-results/large.txt", "kind": "text", "bytes": 9}
+    ]
+    assert completed_event["summary"] == "summary:large"
+    assert completed_event["metadata"] == {"source": "runner-test"}
 
 
 @pytest.mark.anyio
