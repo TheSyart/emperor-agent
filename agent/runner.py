@@ -574,6 +574,7 @@ class AgentRunner:
         clarification: ClarificationAssessment | None = None,
     ) -> list[dict[str, Any]]:
         results_by_id: dict[str, str] = {}
+        plan_followups: list[dict[str, Any]] = []
 
         async def run_one(call: ToolCallRequest) -> str:
             await self._emit_tool_call(call, emit)
@@ -595,6 +596,10 @@ class AgentRunner:
                     result=verification_update["result"],
                 ))
                 await emit(runtime_events.plan_runtime_update(verification_update["plan"].to_dict()))
+            if verification_update is not None:
+                followup = self._plan_verification_followup(verification_update)
+                if followup is not None:
+                    plan_followups.append(followup)
             if not content.startswith("Error:"):
                 plan_update = self._sync_plan_from_todo_tool(call, content)
                 await self._emit_tool_result(call, content, emit)
@@ -602,7 +607,8 @@ class AgentRunner:
                     await emit(runtime_events.plan_runtime_update(plan_update.to_dict()))
             return content
 
-        return await self.tool_execution_engine.run_batch(tool_calls, emit=emit, run_one=run_one)
+        tool_messages = await self.tool_execution_engine.run_batch(tool_calls, emit=emit, run_one=run_one)
+        return [*tool_messages, *plan_followups]
 
     async def _run_tool(
         self,
@@ -764,6 +770,27 @@ class AgentRunner:
         if plan is None:
             return None
         return {"target": target, "result": result, "plan": plan}
+
+    @staticmethod
+    def _plan_verification_followup(update: dict[str, Any]) -> dict[str, str] | None:
+        result = update.get("result") or {}
+        if result.get("passed") is not False:
+            return None
+        target = update.get("target") or {}
+        return {
+            "role": "user",
+            "content": "\n".join([
+                "[PLAN_VERIFICATION_FAILED]",
+                f"plan_id: {target.get('plan_id')}",
+                f"step_id: {target.get('step_id')}",
+                f"command: {result.get('command')}",
+                f"exit_code: {result.get('exit_code')}",
+                f"summary: {result.get('summary')}",
+                "",
+                "该计划步骤的验证命令失败。不要直接最终答复；先诊断失败原因，修复后重新执行相关验证。"
+                "如果失败原因需要用户决策，调用 ask_user。",
+            ]),
+        }
 
     @staticmethod
     def _tool_messages_for_pause(

@@ -17,8 +17,10 @@ class FakeProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]) -> None:
         super().__init__(default_model="fake")
         self.responses = responses
+        self.seen_messages: list[list[dict]] = []
 
     async def chat(self, **kwargs) -> LLMResponse:
+        self.seen_messages.append(kwargs.get("messages") or [])
         if self.responses:
             return self.responses.pop(0)
         return LLMResponse(content="done")
@@ -317,15 +319,16 @@ async def test_failed_run_command_records_plan_verification(tmp_path: Path) -> N
 
     registry = ToolRegistry()
     registry.register(FakeCommandTool({command: "Error: command exited with code 2\nfailed tests"}))
+    provider = FakeProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="call_1", name="run_command", arguments={"command": command})],
+            finish_reason="tool_calls",
+        ),
+        LLMResponse(content="diagnosed"),
+    ])
     runner = AgentRunner(
-        provider=FakeProvider([
-            LLMResponse(
-                content="",
-                tool_calls=[ToolCallRequest(id="call_1", name="run_command", arguments={"command": command})],
-                finish_reason="tool_calls",
-            ),
-            LLMResponse(content="diagnosed"),
-        ]),
+        provider=provider,
         model="fake",
         registry=registry,
         system_prompt="system",
@@ -340,9 +343,17 @@ async def test_failed_run_command_records_plan_verification(tmp_path: Path) -> N
 
     saved = manager.plan_store.get(plan_id)
     assert saved is not None
+    assert saved.status == PlanStatus.EXECUTING.value
+    assert saved.steps[0].status == PlanStepStatus.FAILED.value
     evidence = saved.steps[0].evidence[-1]
     assert evidence["passed"] is False
     assert evidence["exit_code"] == 2
     assert evidence["summary"] == "failed tests"
     done_events = [event for event in emitted if event.get("event") == "plan_verification_done"]
     assert done_events[-1]["result"]["passed"] is False
+    plan_updates = [event for event in emitted if event.get("event") == "plan_runtime_update"]
+    assert plan_updates[-1]["plan"]["steps"][0]["status"] == PlanStepStatus.FAILED.value
+    followup = provider.seen_messages[1][-1]
+    assert followup["role"] == "user"
+    assert "[PLAN_VERIFICATION_FAILED]" in followup["content"]
+    assert "failed tests" in followup["content"]

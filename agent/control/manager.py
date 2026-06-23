@@ -451,13 +451,18 @@ class ControlManager:
         if record is None:
             return None
         now = now_ts()
+        failed = result.get("passed") is False
         steps = [
-            replace(step, evidence=[*step.evidence, result])
+            replace(
+                step,
+                status=PlanStepStatus.FAILED.value if failed else step.status,
+                evidence=[*step.evidence, result],
+            )
             if step.id == step_id
             else step
             for step in record.steps
         ]
-        updated = replace(record, updated_at=now, steps=steps)
+        updated = replace(record, status=PlanStatus.EXECUTING.value, updated_at=now, steps=steps)
         self.plan_store.save(updated)
         return updated
 

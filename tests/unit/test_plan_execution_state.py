@@ -42,6 +42,19 @@ def test_complete_active_step_moves_to_next() -> None:
     assert completed.steps[1].status == PlanStepStatus.PENDING.value
 
 
+def test_fail_step_records_failed_status_and_evidence() -> None:
+    running = PlanExecutionState(sample_plan()).start_next_step()
+
+    failed = PlanExecutionState(running).fail_step(
+        "step_1",
+        evidence={"command": "pytest", "passed": False},
+    )
+
+    assert failed.status == PlanStatus.FAILED.value
+    assert failed.steps[0].status == PlanStepStatus.FAILED.value
+    assert failed.steps[0].evidence[-1] == {"command": "pytest", "passed": False}
+
+
 def test_todo_store_syncs_from_plan_steps() -> None:
     running = PlanExecutionState(sample_plan()).start_next_step()
     store = TodoStore()

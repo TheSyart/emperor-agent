@@ -280,11 +280,11 @@ ControlManager.set_mode("plan")
 - 用户批准后，结构化 plan 会同步成 todos，并保持单个 `in_progress` 步骤。
 - `update_todos` 成功后，Runner 会把 todo 状态回写到 `PlanStep.status`，完成步骤会追加 `evidence`。
 - active PlanStep 中声明的 `commands` 被 `run_command` 执行时，Runner 会记录 `VerificationResult`，并发出 `plan_verification_start`、`plan_verification_done`、`plan_runtime_update`。
+- 验证失败时，PlanStep 会被标记为 `failed`，Runner 会向下一轮模型注入 `[PLAN_VERIFICATION_FAILED]` 诊断指令，要求先修复或必要时 `ask_user`。
 - 后端发送 `plan_runtime_update`，前端可通过 runtime replay 恢复计划状态。
 
 下一步应补齐的部分：
 
-- 失败验证应把 step 标记为 `failed` 或 `blocked`，并触发诊断继续，而不是只靠普通模型回复。
 - 最终答复前应检查最新 PlanRecord：若还有 active/pending/failed step，必须继续执行或说明阻塞原因。
 
 ## Emperor Runner 拆分建议

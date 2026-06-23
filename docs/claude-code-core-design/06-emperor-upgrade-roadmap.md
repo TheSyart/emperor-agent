@@ -300,28 +300,23 @@ Plan 模式只读探索
 - `update_todos` 成功后，Runner 会调用 `ControlManager.sync_plan_from_todos()`，把 todo 状态回写到 `PlanStep`。
 - 完成 step 会追加 evidence，所有 step 完成后 PlanRecord 进入 `completed`。
 - active step 的 `commands` 被 `run_command` 执行时，Runner 会生成 `VerificationResult`，写入 PlanStep evidence，并发送 `plan_verification_start` / `plan_verification_done` / `plan_runtime_update`。
+- 验证命令失败时，PlanStep 会进入 `failed`，Runner 会追加 `[PLAN_VERIFICATION_FAILED]` 诊断 follow-up，要求修复或必要时询问用户。
 - 后端发送 `plan_runtime_update`，前端已有 reducer 可重放计划状态。
 
 后续任务点：
 
-1. **Step Failure / Blocked 状态**
-   - 目标文件：`agent/plans/execution.py`、`agent/control/manager.py`、`agent/runner.py`。
-   - 新增接口：`sync_plan_failure(step_id, evidence, status="failed|blocked")`。
-   - 行为：验证失败时不直接最终答复；PlanStep 标记 failed，Runner 注入诊断 follow-up，要求修复或 ask_user。
-   - 验收：失败验证后 PlanRecord.status 为 `failed` 或保持 `executing` 且 step 为 `failed`，模型下一轮收到明确恢复指令。
-
-2. **Final Answer Gate**
+1. **Final Answer Gate**
    - 目标文件：`agent/runner.py`、`agent/query_state/transitions.py`。
    - 新增接口：`CompletionPolicy.ensure_plan_complete(plan_store)`。
    - 行为：最终回复前检查最新 executing plan；若还有 pending/active/failed step，不能结束 turn，必须继续执行或报告阻塞。
    - 验收：有未完成 PlanStep 时，runner 发出 todo/plan follow-up；全部完成才允许 `assistant_done`。
 
-3. **Plan Replay UI**
+2. **Plan Replay UI**
    - 目标文件：`desktop/src/renderer/src/runtime/handlers/plans.ts`、`desktop/src/renderer/src/components/chat/PlanCard.vue`。
    - 行为：PlanCard 展示 step 状态、验证 evidence、失败原因；刷新后从 backend runtime replay 重建。
    - 验收：`plan_runtime_update`、`plan_step_update`、`plan_verification_done` 三类事件在 replay 后投影一致。
 
-4. **Project Execution Prompt Contract**
+3. **Project Execution Prompt Contract**
    - 目标文件：`templates/TOOL.md`、`templates/SOUL.md`、`agent/control/manager.py`。
    - 行为：批准计划后的系统消息明确要求每步执行前保持一个 active todo，每步完成必须记录验证证据，不能跳过失败诊断。
    - 验收：prompt contract 测试能断言批准计划后的恢复消息包含 todo、verification、blocked/failure 规则。
