@@ -63,7 +63,9 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - `PlanQualityGate` now rejects weak `propose_plan` calls before a PlanCard is created, requiring concrete scope, verification, and high-risk risk/rollback notes.
 - `PlanEvidenceGate` now rejects `update_todos` completion for command-backed PlanSteps until matching verification evidence has passed, preserves explicit `plan_step_id`, and requires `blocked_reason` for blocked steps.
 - `PlanContextBuilder` now injects durable plan runtime context into model projection and memory compaction prompts, preserving active step, failed evidence, blocked reason, open questions, files, and artifacts after compaction/recovery.
-- The next upgrade lane is continuing Plan Runtime v3: independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- Independent Verification Gate is now part of Plan Runtime v3: non-trivial completed plans require reviewer PASS with command evidence or user waiver before final answer, and PlanCard projects required/passed/failed/waived/missing-evidence states.
+- Task Framework v1 is in place: `TaskStore`, `TaskManager`, `SidechainTranscript`, task lifecycle runtime events, frontend task projection, subagent task registration, Team wake task records, Scheduler task records, and task transcript API are all covered by focused tests.
+- The remaining upgrade lane is task transcript consolidation across more long-running tools plus microcompact/reactive compact refinements on top of the file-backed tool result store.
 
 ## File Structure
 
@@ -3239,13 +3241,15 @@ Result: `6 passed`; typecheck passed. Full `make check` was run after implementa
 
 ### Task 7: Durable Task Store
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Create: `agent/tasks/__init__.py`
 - Create: `agent/tasks/models.py`
 - Create: `agent/tasks/store.py`
 - Create: `tests/unit/test_tasks_store.py`
 
-- [ ] **Step 1: Write task store tests**
+- [x] **Step 1: Write task store tests**
 
 Create `tests/unit/test_tasks_store.py`:
 
@@ -3282,7 +3286,7 @@ def test_task_store_marks_corrupt_index(tmp_path) -> None:
     assert list(store.tasks_dir.glob("index.json.corrupt-*"))
 ```
 
-- [ ] **Step 2: Run tests and confirm missing package**
+- [x] **Step 2: Run tests and confirm missing package**
 
 Run:
 
@@ -3296,7 +3300,7 @@ Expected:
 ModuleNotFoundError: No module named 'agent.tasks'
 ```
 
-- [ ] **Step 3: Add task models**
+- [x] **Step 3: Add task models**
 
 Create `agent/tasks/models.py`:
 
@@ -3374,7 +3378,7 @@ from .store import TaskStore
 __all__ = ["TaskKind", "TaskRecord", "TaskStatus", "TaskStore"]
 ```
 
-- [ ] **Step 4: Add task store**
+- [x] **Step 4: Add task store**
 
 Create `agent/tasks/store.py`:
 
@@ -3428,7 +3432,7 @@ class TaskStore:
         tmp.replace(self.index_file)
 ```
 
-- [ ] **Step 5: Run task store tests**
+- [x] **Step 5: Run task store tests**
 
 Run:
 
@@ -3442,7 +3446,7 @@ Expected:
 2 passed
 ```
 
-- [ ] **Step 6: Commit task store**
+- [x] **Step 6: Commit task store**
 
 Run:
 
@@ -3455,11 +3459,13 @@ Expected: commit succeeds.
 
 ### Task 8: Sidechain Transcript Store
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Create: `agent/tasks/sidechain.py`
 - Create: `tests/unit/test_sidechain_transcript.py`
 
-- [ ] **Step 1: Write sidechain tests**
+- [x] **Step 1: Write sidechain tests**
 
 Create `tests/unit/test_sidechain_transcript.py`:
 
@@ -3489,7 +3495,7 @@ def test_sidechain_skips_bad_lines(tmp_path) -> None:
     assert page["messages"][0]["content"] == "ok"
 ```
 
-- [ ] **Step 2: Run tests and confirm missing module**
+- [x] **Step 2: Run tests and confirm missing module**
 
 Run:
 
@@ -3503,7 +3509,7 @@ Expected:
 ModuleNotFoundError: No module named 'agent.tasks.sidechain'
 ```
 
-- [ ] **Step 3: Add sidechain transcript**
+- [x] **Step 3: Add sidechain transcript**
 
 Create `agent/tasks/sidechain.py`:
 
@@ -3556,7 +3562,7 @@ class SidechainTranscript:
         return {"messages": messages, "nextOffset": min(next_offset, offset + len(messages)), "path": str(self.path)}
 ```
 
-- [ ] **Step 4: Run sidechain tests**
+- [x] **Step 4: Run sidechain tests**
 
 Run:
 
@@ -3570,7 +3576,7 @@ Expected:
 2 passed
 ```
 
-- [ ] **Step 5: Commit sidechain store**
+- [x] **Step 5: Commit sidechain store**
 
 Run:
 
@@ -3585,6 +3591,8 @@ Expected: commit succeeds.
 
 ### Task 9: Add Task Lifecycle Events
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Modify: `agent/runtime/events.py`
 - Modify: `desktop/src/renderer/src/types.ts`
@@ -3592,7 +3600,7 @@ Expected: commit succeeds.
 - Create: `desktop/src/renderer/src/runtime/taskProjection.test.ts`
 - Modify: `desktop/src/renderer/src/composables/useRuntime.ts`
 
-- [ ] **Step 1: Add frontend projection tests first**
+- [x] **Step 1: Add frontend projection tests first**
 
 Create `desktop/src/renderer/src/runtime/taskProjection.test.ts`:
 
@@ -3633,7 +3641,7 @@ describe('task projection', () => {
 })
 ```
 
-- [ ] **Step 2: Run frontend test and confirm missing handler**
+- [x] **Step 2: Run frontend test and confirm missing handler**
 
 Run:
 
@@ -3643,7 +3651,7 @@ npm --prefix desktop run test -- taskProjection
 
 Expected: failure because `./handlers/tasks` does not exist.
 
-- [ ] **Step 3: Add backend event helpers**
+- [x] **Step 3: Add backend event helpers**
 
 Modify `agent/runtime/events.py`:
 
@@ -3672,7 +3680,7 @@ def task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -> dict[s
     return runtime_event("task_cancelled", task=task, reason=reason)
 ```
 
-- [ ] **Step 4: Add frontend task types**
+- [x] **Step 4: Add frontend task types**
 
 Modify `desktop/src/renderer/src/types.ts` near runtime event types:
 
@@ -3706,7 +3714,7 @@ Add event variants to `WsEvent`:
   | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
 ```
 
-- [ ] **Step 5: Add task projection helper**
+- [x] **Step 5: Add task projection helper**
 
 Create `desktop/src/renderer/src/runtime/handlers/tasks.ts`:
 
@@ -3738,7 +3746,7 @@ export function applyTaskEvent(projection: TaskProjection, event: TaskEvent): Ta
 }
 ```
 
-- [ ] **Step 6: Wire `useRuntime.ts` to consume task events**
+- [x] **Step 6: Wire `useRuntime.ts` to consume task events**
 
 Modify imports:
 
@@ -3771,7 +3779,7 @@ Inside `applyRuntimeEvent`, before scheduler/team branches:
 
 Return `taskProjection` from `useRuntime` public API.
 
-- [ ] **Step 7: Run frontend task projection test**
+- [x] **Step 7: Run frontend task projection test**
 
 Run:
 
@@ -3781,7 +3789,7 @@ npm --prefix desktop run test -- taskProjection
 
 Expected: test passes.
 
-- [ ] **Step 8: Commit runtime event projection**
+- [x] **Step 8: Commit runtime event projection**
 
 Run:
 
@@ -3796,13 +3804,15 @@ Expected: commit succeeds.
 
 ### Task 10: Register Subagent Runs as Tasks
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Modify: `agent/tools/dispatch.py`
 - Modify: `agent/loop.py`
 - Modify: `agent/web/container.py`
 - Create: `tests/unit/test_subagent_task_sidechain.py`
 
-- [ ] **Step 1: Write tests for dispatch task registration**
+- [x] **Step 1: Write tests for dispatch task registration**
 
 Create `tests/unit/test_subagent_task_sidechain.py`:
 
@@ -3836,7 +3846,7 @@ def test_subagent_task_record_shape(tmp_path) -> None:
     assert loaded.transcript_path.endswith("transcript.jsonl")
 ```
 
-- [ ] **Step 2: Run the shape test**
+- [x] **Step 2: Run the shape test**
 
 Run:
 
@@ -3846,7 +3856,7 @@ Run:
 
 Expected: test passes after Task 7 is merged.
 
-- [ ] **Step 3: Add task manager injection to dispatch tool**
+- [x] **Step 3: Add task manager injection to dispatch tool**
 
 Modify `DispatchSubagentTool.__init__` signature:
 
@@ -3897,7 +3907,7 @@ When exception occurs:
                     self._task_manager.fail_task(task_record.id, error=str(exc))
 ```
 
-- [ ] **Step 4: Add a minimal TaskManager before wiring all call sites**
+- [x] **Step 4: Add a minimal TaskManager before wiring all call sites**
 
 Create `agent/tasks/manager.py`:
 
@@ -3980,7 +3990,7 @@ from .store import TaskStore
 __all__ = ["TaskKind", "TaskManager", "TaskRecord", "TaskStatus", "TaskStore"]
 ```
 
-- [ ] **Step 5: Wire task manager in composition root**
+- [x] **Step 5: Wire task manager in composition root**
 
 Modify `agent/loop.py` where tools are registered:
 
@@ -3996,7 +4006,7 @@ task_manager = TaskManager(root)
 
 Pass `task_manager=task_manager` to `DispatchSubagentTool`.
 
-- [ ] **Step 6: Run subagent-related tests**
+- [x] **Step 6: Run subagent-related tests**
 
 Run:
 
@@ -4006,7 +4016,7 @@ Run:
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit subagent task registration**
+- [x] **Step 7: Commit subagent task registration**
 
 Run:
 
@@ -4021,12 +4031,14 @@ Expected: commit succeeds.
 
 ### Task 11: File-Backed Tool Result Store
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Modify: `agent/context_pipeline/models.py`
 - Modify: `agent/context_pipeline/tool_results.py`
 - Create: `tests/unit/test_tool_result_store.py`
 
-- [ ] **Step 1: Write tests for stable replacement records**
+- [x] **Step 1: Write tests for stable replacement records**
 
 Create `tests/unit/test_tool_result_store.py`:
 
@@ -4044,7 +4056,7 @@ def test_tool_result_store_reuses_replacement_record(tmp_path) -> None:
     assert (tmp_path / record1.artifact_path).exists()
 ```
 
-- [ ] **Step 2: Run tests and confirm missing store**
+- [x] **Step 2: Run tests and confirm missing store**
 
 Run:
 
@@ -4054,7 +4066,7 @@ Run:
 
 Expected: import failure for `ToolResultStore`.
 
-- [ ] **Step 3: Add replacement record model**
+- [x] **Step 3: Add replacement record model**
 
 Modify `agent/context_pipeline/models.py`:
 
@@ -4069,7 +4081,7 @@ class ToolResultReplacementRecord:
     original_chars: int
 ```
 
-- [ ] **Step 4: Add file-backed store**
+- [x] **Step 4: Add file-backed store**
 
 Modify `agent/context_pipeline/tool_results.py`:
 
@@ -4115,7 +4127,7 @@ class ToolResultStore:
         return record
 ```
 
-- [ ] **Step 5: Run tool result store test**
+- [x] **Step 5: Run tool result store test**
 
 Run:
 
@@ -4129,7 +4141,7 @@ Expected:
 1 passed
 ```
 
-- [ ] **Step 6: Commit tool result store**
+- [x] **Step 6: Commit tool result store**
 
 Run:
 
@@ -4139,6 +4151,15 @@ git commit -m "feat: add file-backed tool result store"
 ```
 
 Expected: commit succeeds.
+
+Focused verification result for Tasks 7-11:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_tasks_store.py tests/unit/test_sidechain_transcript.py tests/unit/test_subagent_task_sidechain.py tests/unit/test_tool_result_store.py tests/unit/test_context_pipeline.py tests/unit/test_runner_state.py -q
+npm --prefix desktop run test -- taskProjection planProjection
+```
+
+Result: Python `20 passed`; frontend runtime projection `7 passed`.
 
 ## Final Verification
 
