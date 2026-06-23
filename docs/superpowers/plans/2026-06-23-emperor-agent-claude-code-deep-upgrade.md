@@ -3194,12 +3194,14 @@ Result: `27 passed`.
 
 ### Task 6L: Project Execution Web Projection
 
+Status: done in branch `codex/plan-runtime-v2`.
+
 **Files:**
 - Modify: `desktop/src/renderer/src/runtime/handlers/plans.ts`
 - Modify: `desktop/src/renderer/src/components/chat/PlanCard.vue`
 - Create or modify: `desktop/src/renderer/src/runtime/planProjection.test.ts`
 
-- [ ] **Step 1: Add projection tests**
+- [x] **Step 1: Add projection tests**
 
 Test that replayed events show:
 
@@ -3209,11 +3211,11 @@ Test that replayed events show:
 - open questions count.
 - independent verification status.
 
-- [ ] **Step 2: Render execution-focused state**
+- [x] **Step 2: Render execution-focused state**
 
 `PlanCard` should show the current execution state first. Long plan markdown remains secondary; users need to see what is active, what failed, and what evidence exists.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -3223,6 +3225,15 @@ npm --prefix desktop run build
 ```
 
 Expected: tests and build pass.
+
+Result:
+
+```bash
+npm --prefix desktop run test -- planProjection
+npm --prefix desktop run typecheck
+```
+
+Result: `6 passed`; typecheck passed. Full `make check` was run after implementation.
 
 ## Phase 6: Task Framework and Sidechain Transcript
 

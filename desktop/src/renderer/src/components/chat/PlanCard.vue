@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ControlInteraction, RuntimePlanRecord, RuntimePlanStep } from '../../types'
 import { useAppContext } from '../../composables/useAppContext'
+import { planExecutionSummary, type IndependentVerificationStatus } from '../../runtime/handlers/plans'
 import MarkdownBlock from './MarkdownBlock.vue'
 
 const props = defineProps<{ interaction: ControlInteraction; plan?: RuntimePlanRecord | null }>()
@@ -12,12 +13,23 @@ const waiting = computed(() => props.interaction.status === 'waiting')
 const comments = computed(() => props.interaction.comments || [])
 const runtimePlan = computed(() => props.plan || null)
 const planSteps = computed(() => runtimePlan.value?.steps || [])
+const executionSummary = computed(() => planExecutionSummary(runtimePlan.value))
 const riskLabel = computed(() => {
   if (props.interaction.risk_level === 'high') return '高风险'
   if (props.interaction.risk_level === 'low') return '低风险'
   return '中风险'
 })
 const runtimeStatusLabel = computed(() => statusLabel(runtimePlan.value?.status || props.interaction.status))
+const showExecutionSummary = computed(() => {
+  const summary = executionSummary.value
+  return Boolean(
+    summary.activeStep ||
+    summary.failedVerificationSummary ||
+    summary.blockedReason ||
+    summary.openQuestionsCount ||
+    summary.independentVerificationStatus !== 'none',
+  )
+})
 
 function approve() {
   ctx.approvePlan(props.interaction.id)
@@ -95,6 +107,25 @@ function evidenceFailureDetail(step: RuntimePlanStep) {
   return evidenceValue(evidence, 'stderr_tail') || evidenceValue(evidence, 'stdout_tail')
 }
 
+function independentVerificationLabel(status: IndependentVerificationStatus) {
+  const labels: Record<IndependentVerificationStatus, string> = {
+    none: '无',
+    required: '待独立复核',
+    passed: '复核通过',
+    failed: '复核失败',
+    waived: '用户豁免',
+    missing_command_evidence: '缺少命令证据',
+  }
+  return labels[status]
+}
+
+function independentVerificationTone(status: IndependentVerificationStatus) {
+  if (status === 'passed' || status === 'waived') return 'ok'
+  if (status === 'failed' || status === 'missing_command_evidence') return 'danger'
+  if (status === 'required') return 'warn'
+  return ''
+}
+
 function compactList(items?: string[], limit = 3) {
   const visible = (items || []).filter(Boolean).slice(0, limit)
   if (!visible.length) return ''
@@ -112,21 +143,46 @@ function compactList(items?: string[], limit = 3) {
     </header>
     <p v-if="props.interaction.summary" class="control-context">{{ props.interaction.summary }}</p>
 
-    <div class="plan-markdown">
-      <MarkdownBlock :content="props.interaction.plan_markdown || ''" />
-    </div>
-
-    <div v-if="props.interaction.assumptions?.length" class="plan-assumptions">
-      <span>Assumptions</span>
-      <ul>
-        <li v-for="item in props.interaction.assumptions" :key="item">{{ item }}</li>
-      </ul>
-    </div>
-
     <div v-if="runtimePlan" class="plan-runtime">
       <div class="plan-runtime-head">
         <span>Execution Trace</span>
         <em :class="['plan-runtime-status', runtimePlan.status]">{{ runtimeStatusLabel }}</em>
+      </div>
+      <div v-if="showExecutionSummary" class="plan-execution-summary">
+        <div v-if="executionSummary.activeStep" class="plan-summary-item active">
+          <span>Active Step</span>
+          <strong>{{ executionSummary.activeStep.title }}</strong>
+        </div>
+        <div v-if="executionSummary.openQuestionsCount" class="plan-summary-item warn">
+          <span>Open Questions</span>
+          <strong>{{ executionSummary.openQuestionsCount }}</strong>
+        </div>
+        <div v-if="executionSummary.blockedReason" class="plan-summary-item danger">
+          <span>Blocked</span>
+          <strong>{{ executionSummary.blockedReason }}</strong>
+        </div>
+        <div v-if="executionSummary.failedVerificationSummary" class="plan-summary-item danger">
+          <span>Failed Verification</span>
+          <strong>{{ executionSummary.failedVerificationSummary }}</strong>
+        </div>
+        <div
+          v-if="executionSummary.independentVerificationStatus !== 'none'"
+          class="plan-summary-item"
+          :class="independentVerificationTone(executionSummary.independentVerificationStatus)"
+        >
+          <span>Independent Review</span>
+          <strong>{{ independentVerificationLabel(executionSummary.independentVerificationStatus) }}</strong>
+          <p v-if="executionSummary.independentVerificationSummary">
+            {{ executionSummary.independentVerificationSummary }}
+          </p>
+          <code
+            v-for="command in executionSummary.independentVerificationCommands"
+            :key="command"
+          >{{ command }}</code>
+          <small v-if="executionSummary.riskSignals.length">
+            Risk: {{ compactList(executionSummary.riskSignals, 4) }}
+          </small>
+        </div>
       </div>
       <ol v-if="planSteps.length" class="plan-step-list">
         <li
@@ -160,6 +216,17 @@ function compactList(items?: string[], limit = 3) {
         </li>
       </ol>
       <p v-else class="plan-runtime-empty">批准后会在这里记录执行步骤与验证结果。</p>
+    </div>
+
+    <div class="plan-markdown">
+      <MarkdownBlock :content="props.interaction.plan_markdown || ''" />
+    </div>
+
+    <div v-if="props.interaction.assumptions?.length" class="plan-assumptions">
+      <span>Assumptions</span>
+      <ul>
+        <li v-for="item in props.interaction.assumptions" :key="item">{{ item }}</li>
+      </ul>
     </div>
 
     <div v-if="comments.length" class="plan-comments">

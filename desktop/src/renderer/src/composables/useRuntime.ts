@@ -532,7 +532,11 @@ export function useRuntime(options: {
     ) {
       if ('control' in data && data.control && options.boot.value) options.boot.value.control = data.control
       if (data.interaction) updateControlSegment(data.interaction)
-      if (data.event === 'plan_approved') updatePending('计划已批准，开始执行', '', 'done')
+      if (data.event === 'plan_approved') {
+        const next = applyPlanEvent({ plans: planProjection.plans }, data)
+        planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
+        updatePending('计划已批准，开始执行', '', 'done')
+      }
       if (data.event === 'interaction_cancelled') updatePending('已取消等待', '', 'done')
       return
     }

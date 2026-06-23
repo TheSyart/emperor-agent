@@ -426,6 +426,59 @@
     color: rgb(var(--fg-subtle));
   }
 
+  .plan-execution-summary {
+    @apply mt-3 grid gap-2;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  }
+
+  .plan-summary-item {
+    @apply min-w-0 rounded-md border px-3 py-2 text-xs leading-5;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--fg-muted));
+  }
+
+  .plan-summary-item.active {
+    border-color: rgb(var(--warn) / 0.35);
+  }
+
+  .plan-summary-item.warn {
+    border-color: rgb(var(--warn) / 0.42);
+    background: rgb(var(--warn) / 0.06);
+  }
+
+  .plan-summary-item.ok {
+    border-color: rgb(var(--ok) / 0.36);
+    background: rgb(var(--ok) / 0.06);
+  }
+
+  .plan-summary-item.danger {
+    border-color: rgb(var(--danger) / 0.36);
+    background: rgb(var(--danger) / 0.06);
+  }
+
+  .plan-summary-item span {
+    @apply block font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-summary-item strong {
+    @apply mt-1 block break-words text-xs font-semibold leading-5;
+    color: rgb(var(--fg));
+  }
+
+  .plan-summary-item p,
+  .plan-summary-item small {
+    @apply mt-1 block break-words text-[11px] leading-5;
+    color: rgb(var(--fg-muted));
+  }
+
+  .plan-summary-item code {
+    @apply mt-1 block break-all rounded px-2 py-1 font-mono text-[11px];
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
   .plan-runtime-status,
   .plan-step-status {
     @apply rounded border px-2 py-0.5 font-mono text-[10px] not-italic;

@@ -529,6 +529,21 @@ export interface RuntimePlanStep {
   acceptance?: string[]
   evidence?: Array<Record<string, unknown>>
   risk?: string
+  risk_note?: string
+  rollback?: string
+  blocked_reason?: string
+}
+
+export interface RuntimePlanDraft {
+  phase?: string
+  discoveries?: Array<Record<string, unknown>>
+  relevant_files?: string[]
+  open_questions?: Array<Record<string, unknown>>
+  resolved_questions?: Array<Record<string, unknown>>
+  alternatives_considered?: string[]
+  recommended_approach?: string
+  verification_strategy?: string[]
+  last_context_refresh_at?: number | null
 }
 
 export interface RuntimePlanRecord {
@@ -541,6 +556,8 @@ export interface RuntimePlanRecord {
   planMarkdown?: string
   assumptions?: string[]
   verification?: Array<Record<string, unknown>>
+  draft?: RuntimePlanDraft
+  metadata?: Record<string, unknown>
 }
 
 export interface RuntimeTaskRecord {

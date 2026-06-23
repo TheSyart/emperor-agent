@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyPlanEvent, latestPlanForInteraction, type PlanProjection } from './handlers/plans'
+import {
+  applyPlanEvent,
+  latestPlanForInteraction,
+  planExecutionSummary,
+  type PlanProjection,
+} from './handlers/plans'
 
 describe('plan projection', () => {
   it('updates step status and verification evidence', () => {
@@ -22,6 +27,131 @@ describe('plan projection', () => {
 
     expect(projection.plans[0]?.steps[0]?.status).toBe('active')
     expect(projection.plans[0]?.steps[0]?.evidence?.[0]?.summary).toBe('2 passed')
+  })
+
+  it('replays approved plans as runtime plan state', () => {
+    let projection: PlanProjection = { plans: [] }
+
+    projection = applyPlanEvent(projection, {
+      event: 'plan_approved',
+      plan: {
+        id: 'plan_approved',
+        title: 'Approved plan',
+        status: 'executing',
+        steps: [{ id: 'step_1', title: 'Active work', status: 'active' }],
+      },
+    })
+
+    expect(projection.plans[0]?.id).toBe('plan_approved')
+    expect(planExecutionSummary(projection.plans[0])?.activeStep?.title).toBe('Active work')
+  })
+
+  it('summarizes active step, failed verification, blocked reason and open questions', () => {
+    const summary = planExecutionSummary({
+      id: 'plan_1',
+      title: 'Runtime projection',
+      status: 'executing',
+      draft: {
+        open_questions: [
+          { id: 'scope', question: 'Confirm scope?' },
+          { id: 'risk', question: 'Accept risk?' },
+        ],
+      },
+      steps: [
+        { id: 'step_1', title: 'Implement runtime reducer', status: 'done' },
+        {
+          id: 'step_2',
+          title: 'Render active work',
+          status: 'active',
+          files: ['desktop/src/renderer/src/components/chat/PlanCard.vue'],
+        },
+        {
+          id: 'step_3',
+          title: 'Fix failed verification',
+          status: 'failed',
+          evidence: [{ passed: false, summary: 'planProjection test failed' }],
+        },
+        {
+          id: 'step_4',
+          title: 'Wait for user decision',
+          status: 'blocked',
+          evidence: [{ blocked_reason: 'Waiting for user to approve reviewer waiver.' }],
+        },
+      ],
+    })
+
+    expect(summary.activeStep?.id).toBe('step_2')
+    expect(summary.failedVerificationSummary).toBe('planProjection test failed')
+    expect(summary.blockedReason).toBe('Waiting for user to approve reviewer waiver.')
+    expect(summary.openQuestionsCount).toBe(2)
+  })
+
+  it('summarizes independent verification status and risk signals', () => {
+    const required = planExecutionSummary({
+      id: 'plan_required',
+      title: 'Required review',
+      status: 'completed',
+      steps: [],
+      metadata: {
+        independent_verification_request: {
+          risk_signals: ['changed_files>=3', 'runtime'],
+          changed_files: ['agent/runner.py', 'agent/control/manager.py', 'desktop/src/renderer/src/runtime/handlers/plans.ts'],
+        },
+      },
+    })
+    const failed = planExecutionSummary({
+      id: 'plan_failed',
+      title: 'Failed review',
+      status: 'completed',
+      steps: [],
+      verification: [{
+        source: 'independent_verification',
+        reviewer: 'verification_reviewer',
+        passed: false,
+        summary: 'Reviewer found missing PlanCard coverage.',
+        commands: ['npm --prefix desktop run test -- planProjection'],
+      }],
+    })
+    const missingCommandEvidence = planExecutionSummary({
+      id: 'plan_missing',
+      title: 'Missing command evidence',
+      status: 'completed',
+      steps: [],
+      verification: [{ source: 'independent_verification', passed: true, summary: 'Looks good.' }],
+    })
+    const passed = planExecutionSummary({
+      id: 'plan_passed',
+      title: 'Passed review',
+      status: 'completed',
+      steps: [],
+      verification: [{
+        source: 'independent_verification',
+        passed: true,
+        summary: 'Reviewed runtime replay.',
+        commands: ['npm --prefix desktop run test -- planProjection'],
+      }],
+    })
+    const waived = planExecutionSummary({
+      id: 'plan_waived',
+      title: 'Waived review',
+      status: 'completed',
+      steps: [],
+      verification: [{
+        source: 'independent_verification_waiver',
+        waived: true,
+        reason: 'User approved shipping without reviewer.',
+      }],
+    })
+
+    expect(required.independentVerificationStatus).toBe('required')
+    expect(required.riskSignals).toEqual(['changed_files>=3', 'runtime'])
+    expect(failed.independentVerificationStatus).toBe('failed')
+    expect(failed.independentVerificationSummary).toBe('Reviewer found missing PlanCard coverage.')
+    expect(failed.independentVerificationCommands).toEqual(['npm --prefix desktop run test -- planProjection'])
+    expect(missingCommandEvidence.independentVerificationStatus).toBe('missing_command_evidence')
+    expect(passed.independentVerificationStatus).toBe('passed')
+    expect(waived.independentVerificationStatus).toBe('waived')
+    expect(waived.independentVerificationSummary).toBe('User approved shipping without reviewer.')
   })
 
   it('finds the runtime plan for a plan interaction', () => {

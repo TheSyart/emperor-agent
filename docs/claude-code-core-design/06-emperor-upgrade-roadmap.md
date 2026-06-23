@@ -314,9 +314,9 @@ Plan 模式只读探索
 - `PE-4 结构化计划质量门禁`：已落地第一版，拒绝泛泛 `propose_plan`，强制 step 具备范围、文件/发现依据、验证方式和高风险风险/回滚说明。
 - `PE-5 批准后权限与命令白名单`：批准计划只降低计划内动作摩擦，不绕过危险操作审批。
 - `PE-6 Step Evidence 强制一致性`：已落地第一版，无通过验证证据不能完成声明了 commands 的 step，失败验证会阻止完成，blocked step 必须有原因。
-- `PE-7 独立验证子代理`：已落地第一版；非平凡项目改动最终答复前必须有 reviewer PASS + command evidence，或用户豁免。剩余工作是 WebUI 投影和 task transcript 收敛。
+- `PE-7 独立验证子代理`：已落地第一版；非平凡项目改动最终答复前必须有 reviewer PASS + command evidence，或用户豁免。PlanCard 投影已接入，剩余工作是 task transcript 收敛。
 - `PE-8 Plan Runtime 恢复附件`：已落地第一版，ContextPipeline 与 Compactor 会注入紧凑 plan runtime context，压缩、刷新、重启后继续 active step。
-- `PE-9 WebUI Project Execution 面板`：把计划执行状态从后端 runtime event 投影到用户可见界面。
+- `PE-9 WebUI Project Execution 面板`：已落地第一版；PlanCard 会优先显示 active step、失败验证摘要、blocked reason、open questions 和 independent verification 状态。剩余工作是独立面板页。
 
 完成这条链路后，再把计划执行、任务运行、工具结果和上下文压缩接入 Epic 6 的统一长期任务框架。
 

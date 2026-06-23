@@ -424,6 +424,8 @@ ControlManager.set_mode("plan")
 
 目标：让用户能直接看到计划执行状态，而不是只从聊天日志推断。
 
+状态：已落地第一版。当前实现包括 `desktop/src/renderer/src/runtime/handlers/plans.ts` 的 `planExecutionSummary()`、`plan_approved` / `plan_runtime_update` 重放合并，以及 `PlanCard.vue` 的执行态摘要区。计划正文 Markdown 退到执行摘要之后，用户先看到当前 active step、失败验证摘要、blocked reason、open questions 数量和 independent verification 状态。
+
 目标文件：
 
 - `desktop/src/renderer/src/runtime/handlers/plans.ts`
@@ -444,6 +446,12 @@ ControlManager.set_mode("plan")
 - 刷新后状态不丢。
 - 验证失败摘要可见，但不展示超长 stdout。
 - 用户能从 UI 判断为什么还没最终完成。
+
+第一版边界：
+
+- 已完成 Chat 内 PlanCard 投影；尚未新增独立 Project Execution 面板页。
+- 已展示 independent verification required / passed / failed / waived / missing command evidence。
+- 后续 Task Framework 落地后，需要把 reviewer task transcript、sidechain 输出和 PlanCard 状态统一收敛。
 
 ## 升级优先级
 
