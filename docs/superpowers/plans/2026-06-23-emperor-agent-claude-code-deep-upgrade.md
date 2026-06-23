@@ -67,6 +67,7 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Independent Verification Gate is now part of Plan Runtime v3: non-trivial completed plans require reviewer PASS with command evidence or user waiver before final answer, and PlanCard projects required/passed/failed/waived/missing-evidence states.
 - Task Framework v1 is in place: `TaskStore`, `TaskManager`, `SidechainTranscript`, task lifecycle runtime events, frontend task projection, subagent task registration, Team wake task records, Scheduler task records, and task transcript API are all covered by focused tests.
 - Local microcompact is now part of `ContextPipeline`: older oversized plain text user/assistant messages are shortened into stable head/tail records before model requests while recent messages, tool results, tool_calls, and multimodal content are preserved.
+- Plan Entry Runtime Contract is now in place: `PlanDecision` exposes `triggers`, suggested clarification questions, recommended read-only scopes, a runtime contract serializer, Runner emits `plan_entry_decision`, `PLAN_GUARD_REQUIRED` includes read-only scopes, and Vue runtime projection stores recent entry decisions.
 - The remaining upgrade lane is Project Execution Plan Runtime v4: discovery ledger, read-only exploration fanout, approved-plan permission tokens, plan-step task binding, verification matrix, reviewer transcripts, a Project Execution panel, and end-to-end smoke gates. After that, continue task transcript consolidation across more long-running tools plus model microcompact / reactive compact refinements on top of the file-backed tool result store.
 
 ## File Structure
@@ -3245,7 +3246,7 @@ This phase turns the existing Plan Runtime into a stronger real-project executio
 
 ### Task 6M: Plan Entry Runtime Contract
 
-Status: pending.
+Status: done in branch `codex/plan-runtime-v2`.
 
 **Files:**
 - Modify: `agent/control/plan_policy.py`
@@ -3256,7 +3257,7 @@ Status: pending.
 - Test: `tests/unit/test_plan_decision_policy.py`
 - Test: `tests/unit/test_control.py`
 
-- [ ] **Step 1: Add decision contract tests**
+- [x] **Step 1: Add decision contract tests**
 
 Add tests that assert a high-impact multi-file request returns a required plan decision with reason, triggers, and readonly scopes; a focused single-file bugfix returns proceed; and a medium feature returns recommended.
 
@@ -3268,7 +3269,7 @@ Run:
 
 Expected: new assertions fail before the contract fields exist.
 
-- [ ] **Step 2: Add `PlanEntryDecision`**
+- [x] **Step 2: Add `PlanEntryDecision`**
 
 Extend the plan policy result with:
 
@@ -3284,11 +3285,13 @@ class PlanEntryDecision:
 
 Keep the existing `PlanDecision` API compatible by mapping it to `PlanEntryDecision` in `ControlManager.assess_plan_decision()`.
 
-- [ ] **Step 3: Emit plan entry runtime event**
+Result: implemented as a compatible `PlanDecision` runtime contract: `triggers`, `suggested_questions`, `recommended_readonly_scopes`, and `to_runtime_contract()` are available without breaking existing `signals` callers.
+
+- [x] **Step 3: Emit plan entry runtime event**
 
 Add a runtime event carrying `decision`, `reason`, `triggers`, and `recommended_readonly_scopes` at the start of a turn. The event must not create a pending interaction by itself.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3298,6 +3301,17 @@ npm --prefix desktop run test -- planProjection
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_decision_policy.py tests/unit/test_control.py::test_runner_emits_plan_entry_decision_contract tests/unit/test_control.py::test_runner_plan_guard_blocks_high_impact_write_before_planning -q
+npm --prefix desktop run test -- planProjection
+.venv/bin/python -m ruff check agent/control/plan_policy.py agent/runner.py agent/runtime/events.py tests/unit/test_plan_decision_policy.py tests/unit/test_control.py
+npm --prefix desktop run typecheck
+```
+
+Result: Python focused tests `7 passed`; frontend `planProjection` tests `7 passed`; focused ruff passed; desktop typecheck passed.
 
 ### Task 6N: Plan Discovery Ledger
 

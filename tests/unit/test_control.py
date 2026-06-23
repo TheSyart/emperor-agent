@@ -318,7 +318,39 @@ async def test_runner_plan_guard_blocks_high_impact_write_before_planning(tmp_pa
 
     tool_message = next(msg for msg in history if msg.get("role") == "tool")
     assert "PLAN_GUARD_REQUIRED" in tool_message["content"]
+    assert "readonly_scopes:" in tool_message["content"]
+    assert "auth" in tool_message["content"].lower() or "authentication" in tool_message["content"].lower()
     assert not (tmp_path / "auth.py").exists()
+
+
+@pytest.mark.anyio
+async def test_runner_emits_plan_entry_decision_contract(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    registry = make_registry(manager, tmp_path)
+    provider = FakeProvider([LLMResponse(content="我会先说明需要计划。")])
+    runner = AgentRunner(
+        provider=provider,
+        model="fake",
+        registry=registry,
+        system_prompt="system",
+        control_manager=manager,
+    )
+    emitted: list[dict[str, Any]] = []
+
+    async def emit(event: dict[str, Any]) -> None:
+        emitted.append(event)
+
+    with pytest.raises(TurnPaused):
+        await runner.step_async(
+            [{"role": "user", "content": "Add a dashboard feature with UI state management and tests"}],
+            emit=emit,
+        )
+
+    decision_event = next(event for event in emitted if event.get("event") == "plan_entry_decision")
+    assert decision_event["decision"] == "recommended"
+    assert decision_event["triggers"] == ["feature", "multi_step"]
+    assert decision_event["recommended_readonly_scopes"]
+    assert decision_event["suggested_questions"]
 
 
 @pytest.mark.anyio

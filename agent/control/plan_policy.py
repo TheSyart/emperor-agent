@@ -14,6 +14,57 @@ class PlanDecision:
     reason: str
     signals: list[str]
 
+    @property
+    def triggers(self) -> list[str]:
+        return list(self.signals)
+
+    @property
+    def suggested_questions(self) -> list[str]:
+        if self.behavior == "proceed":
+            return []
+        if "unclear_acceptance" in self.signals:
+            return ["What acceptance criteria or scope boundaries should be confirmed before implementation?"]
+        if "architecture" in self.signals or "refactor" in self.signals:
+            return ["Which implementation approach or migration boundary should be preferred?"]
+        return ["What scope, success criteria, or tradeoffs should be clarified before implementation?"]
+
+    @property
+    def recommended_readonly_scopes(self) -> list[str]:
+        scopes: list[str] = []
+        signal_scopes = {
+            "security": "Read authentication, authorization, and permission-related modules before proposing edits.",
+            "architecture": "Map the affected architecture, composition roots, and existing extension points.",
+            "migration": "Inspect schema, migration, and persistence code before choosing an approach.",
+            "deployment": "Inspect deployment, release, scheduler, and environment configuration paths.",
+            "destructive": "Search all delete, overwrite, cleanup, and persistence call sites before changing data paths.",
+            "refactor": "Trace callers and public contracts before proposing a refactor.",
+            "multi_module": "Search each affected module and identify shared interfaces before implementation.",
+        }
+        for signal in self.signals:
+            scope = signal_scopes.get(signal)
+            if scope:
+                scopes.append(scope)
+        if not scopes and self.behavior != "proceed":
+            scopes.extend([
+                "Search existing implementation patterns and related tests.",
+                "Read the most relevant files before proposing edits.",
+            ])
+        elif "feature" in self.signals or "multi_step" in self.signals:
+            scopes.extend([
+                "Search existing implementation patterns and related tests.",
+                "Read the most relevant files before proposing edits.",
+            ])
+        return _dedupe(scopes)
+
+    def to_runtime_contract(self) -> dict[str, object]:
+        return {
+            "decision": self.behavior,
+            "reason": self.reason,
+            "triggers": self.triggers,
+            "suggested_questions": self.suggested_questions,
+            "recommended_readonly_scopes": self.recommended_readonly_scopes,
+        }
+
 
 class PlanDecisionPolicy:
     """Deterministic guard for deciding when project work should enter Plan mode."""

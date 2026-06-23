@@ -133,6 +133,10 @@ def context_projection(*, report: dict[str, Any], message_count: int) -> dict[st
     return runtime_event("context_projection", report=report, message_count=message_count)
 
 
+def plan_entry_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("plan_entry_decision", **decision)
+
+
 def turn_phase(
     *,
     phase: str,

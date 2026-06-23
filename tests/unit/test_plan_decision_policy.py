@@ -17,6 +17,10 @@ def test_plan_decision_requires_plan_for_high_impact_requests() -> None:
     assert "architecture" in decision.signals
     assert "migration" in decision.signals
     assert "deployment" in decision.signals
+    assert decision.triggers == decision.signals
+    assert decision.recommended_readonly_scopes
+    assert any("auth" in scope or "认证" in scope for scope in decision.recommended_readonly_scopes)
+    assert decision.suggested_questions
 
 
 def test_plan_decision_recommends_plan_for_feature_scale_work() -> None:
@@ -31,6 +35,31 @@ def test_plan_decision_recommends_plan_for_feature_scale_work() -> None:
     assert decision.behavior == "recommended"
     assert "feature" in decision.signals
     assert "multi_step" in decision.signals
+    assert decision.triggers == decision.signals
+    assert decision.recommended_readonly_scopes
+
+
+def test_plan_entry_decision_serializes_runtime_contract() -> None:
+    policy = PlanDecisionPolicy()
+
+    decision = policy.assess(
+        "Add a realtime dashboard feature with UI state management and tests",
+        mode=ControlMode.ASK_BEFORE_EDIT.value,
+        has_pending=False,
+    )
+
+    assert decision.to_runtime_contract() == {
+        "decision": "recommended",
+        "reason": "Multi-step implementation would benefit from a plan.",
+        "triggers": ["feature", "multi_step"],
+        "suggested_questions": [
+            "What scope, success criteria, or tradeoffs should be clarified before implementation?",
+        ],
+        "recommended_readonly_scopes": [
+            "Search existing implementation patterns and related tests.",
+            "Read the most relevant files before proposing edits.",
+        ],
+    }
 
 
 def test_plan_decision_proceeds_for_small_or_already_planned_work() -> None:

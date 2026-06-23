@@ -42,7 +42,7 @@ export function useRuntime(options: {
   const currentAssistantId = ref<string | null>(null)
   const sessionId = ref<string>('')
   const pending = reactive<PendingState>({ label: '', detail: '' })
-  const planProjection = reactive<PlanProjection>({ plans: [] })
+  const planProjection = reactive<PlanProjection>({ plans: [], entryDecisions: [] })
   const taskProjection = reactive<TaskProjection>({ tasks: [] })
   const reconnectAttempts = ref(0)
   const socket = ref<WebSocket | null>(null)
@@ -533,8 +533,12 @@ export function useRuntime(options: {
       if ('control' in data && data.control && options.boot.value) options.boot.value.control = data.control
       if (data.interaction) updateControlSegment(data.interaction)
       if (data.event === 'plan_approved') {
-        const next = applyPlanEvent({ plans: planProjection.plans }, data)
+        const next = applyPlanEvent(
+          { plans: planProjection.plans, entryDecisions: planProjection.entryDecisions },
+          data,
+        )
         planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
+        planProjection.entryDecisions.splice(0, planProjection.entryDecisions.length, ...next.entryDecisions)
         updatePending('计划已批准，开始执行', '', 'done')
       }
       if (data.event === 'interaction_cancelled') updatePending('已取消等待', '', 'done')
@@ -571,13 +575,18 @@ export function useRuntime(options: {
     }
 
     if (
+      data.event === 'plan_entry_decision' ||
       data.event === 'plan_runtime_update' ||
       data.event === 'plan_step_update' ||
       data.event === 'plan_verification_start' ||
       data.event === 'plan_verification_done'
     ) {
-      const next = applyPlanEvent({ plans: planProjection.plans }, data)
+      const next = applyPlanEvent(
+        { plans: planProjection.plans, entryDecisions: planProjection.entryDecisions },
+        data,
+      )
       planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
+      planProjection.entryDecisions.splice(0, planProjection.entryDecisions.length, ...next.entryDecisions)
       return
     }
 

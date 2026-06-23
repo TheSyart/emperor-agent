@@ -1,11 +1,12 @@
-import type { ControlInteraction, RuntimePlanRecord, RuntimePlanStep, WsEvent } from '../../types'
+import type { ControlInteraction, RuntimePlanEntryDecision, RuntimePlanRecord, RuntimePlanStep, WsEvent } from '../../types'
 
 export interface PlanProjection {
   plans: RuntimePlanRecord[]
+  entryDecisions: RuntimePlanEntryDecision[]
 }
 
 type PlanEvent = Extract<WsEvent, {
-  event: 'plan_approved' | 'plan_runtime_update' | 'plan_step_update' | 'plan_verification_start' | 'plan_verification_done'
+  event: 'plan_approved' | 'plan_entry_decision' | 'plan_runtime_update' | 'plan_step_update' | 'plan_verification_start' | 'plan_verification_done'
 }>
 
 export type IndependentVerificationStatus =
@@ -28,18 +29,36 @@ export interface PlanExecutionSummary {
 }
 
 export function applyPlanEvent(projection: PlanProjection, event: PlanEvent): PlanProjection {
+  const entryDecisions = projection.entryDecisions || []
+  if (event.event === 'plan_entry_decision') {
+    return {
+      ...projection,
+      entryDecisions: [
+        ...entryDecisions,
+        {
+          decision: event.decision || 'proceed',
+          reason: event.reason || '',
+          triggers: stringList(event.triggers),
+          suggestedQuestions: stringList(event.suggested_questions),
+          recommendedReadonlyScopes: stringList(event.recommended_readonly_scopes),
+        },
+      ].slice(-20),
+    }
+  }
+
   if (event.event === 'plan_runtime_update' || event.event === 'plan_approved') {
     if (!event.plan?.id) return projection
     const existing = projection.plans.findIndex((plan) => plan.id === event.plan?.id)
     const plans = [...projection.plans]
     if (existing >= 0) plans[existing] = { ...plans[existing], ...event.plan }
     else plans.push(event.plan)
-    return { plans }
+    return { ...projection, plans }
   }
 
   const planId = event.plan_id
   if (!planId) return projection
   return {
+    ...projection,
     plans: projection.plans.map((plan) => {
       if (plan.id !== planId) return plan
       if (event.event === 'plan_step_update' && event.step?.id) {

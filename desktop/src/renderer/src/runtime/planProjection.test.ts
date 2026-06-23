@@ -7,8 +7,27 @@ import {
 } from './handlers/plans'
 
 describe('plan projection', () => {
+  it('stores the latest plan entry decision contract', () => {
+    const projection = applyPlanEvent({ plans: [], entryDecisions: [] }, {
+      event: 'plan_entry_decision',
+      decision: 'recommended',
+      reason: 'Multi-step implementation would benefit from a plan.',
+      triggers: ['feature', 'multi_step'],
+      suggested_questions: ['Which tradeoff matters most?'],
+      recommended_readonly_scopes: ['Read related dashboard files.'],
+    })
+
+    expect(projection.entryDecisions[0]).toEqual({
+      decision: 'recommended',
+      reason: 'Multi-step implementation would benefit from a plan.',
+      triggers: ['feature', 'multi_step'],
+      suggestedQuestions: ['Which tradeoff matters most?'],
+      recommendedReadonlyScopes: ['Read related dashboard files.'],
+    })
+  })
+
   it('updates step status and verification evidence', () => {
-    let projection: PlanProjection = { plans: [] }
+    let projection: PlanProjection = { plans: [], entryDecisions: [] }
     projection = applyPlanEvent(projection, {
       event: 'plan_runtime_update',
       plan: {
@@ -30,7 +49,7 @@ describe('plan projection', () => {
   })
 
   it('replays approved plans as runtime plan state', () => {
-    let projection: PlanProjection = { plans: [] }
+    let projection: PlanProjection = { plans: [], entryDecisions: [] }
 
     projection = applyPlanEvent(projection, {
       event: 'plan_approved',

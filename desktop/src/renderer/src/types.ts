@@ -560,6 +560,16 @@ export interface RuntimePlanRecord {
   metadata?: Record<string, unknown>
 }
 
+export interface RuntimePlanEntryDecision {
+  decision: 'required' | 'recommended' | 'proceed' | string
+  reason: string
+  triggers: string[]
+  suggested_questions?: string[]
+  suggestedQuestions?: string[]
+  recommended_readonly_scopes?: string[]
+  recommendedReadonlyScopes?: string[]
+}
+
 export interface RuntimeTaskRecord {
   id: string
   kind: string
@@ -797,6 +807,7 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'plan_draft'; interaction?: ControlInteraction }
   | { event: 'plan_comment_added'; interaction?: ControlInteraction; comment?: string }
   | { event: 'plan_approved'; interaction?: ControlInteraction; control?: ControlPayload; plan?: RuntimePlanRecord; todos?: TodoItem[] }
+  | { event: 'plan_entry_decision'; decision?: string; reason?: string; triggers?: string[]; suggested_questions?: string[]; recommended_readonly_scopes?: string[] }
   | { event: 'plan_runtime_update'; plan?: RuntimePlanRecord }
   | { event: 'plan_step_update'; plan_id?: string; step?: RuntimePlanStep }
   | { event: 'plan_verification_start'; plan_id?: string; step_id?: string; command?: string }

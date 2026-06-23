@@ -151,6 +151,9 @@ class AgentRunner:
             emit,
             detail={"history_length": len(history)},
         )
+        entry_plan_decision = self._assess_plan_decision(history)
+        if emit and entry_plan_decision is not None:
+            await emit(runtime_events.plan_entry_decision(_plan_decision_contract(entry_plan_decision)))
         query_state = QueryState(turn_id=turn_id, max_turns=self.max_turns)
         final_parts: list[str] = []
         clarification = self._assess_clarification(history)
@@ -1045,14 +1048,37 @@ def _summarize_tool_result(content: str, limit: int = 560) -> str:
 def _plan_guard_message(call: ToolCallRequest, decision: Any) -> str:
     signals = ", ".join(getattr(decision, "signals", []) or [])
     reason = str(getattr(decision, "reason", "") or "high-impact work requires planning")
+    readonly_scopes = "; ".join(getattr(decision, "recommended_readonly_scopes", []) or [])
     return "\n".join([
         "Error: PLAN_GUARD_REQUIRED",
         f"tool: {call.name}",
         f"reason: {reason}",
         f"signals: {signals}",
+        f"readonly_scopes: {readonly_scopes}",
         "Before using write or high-impact tools for this request, enter Plan mode, perform read-only exploration, "
         "submit a concrete plan, and wait for user approval.",
     ])
+
+
+def _plan_decision_contract(decision: Any) -> dict[str, Any]:
+    to_runtime_contract = getattr(decision, "to_runtime_contract", None)
+    if callable(to_runtime_contract):
+        payload = to_runtime_contract()
+    else:
+        payload = {
+            "decision": getattr(decision, "behavior", "proceed"),
+            "reason": getattr(decision, "reason", ""),
+            "triggers": getattr(decision, "signals", []) or [],
+            "suggested_questions": [],
+            "recommended_readonly_scopes": [],
+        }
+    return {
+        "decision": str(payload.get("decision") or "proceed"),
+        "reason": str(payload.get("reason") or ""),
+        "triggers": [str(item) for item in payload.get("triggers") or []],
+        "suggested_questions": [str(item) for item in payload.get("suggested_questions") or []],
+        "recommended_readonly_scopes": [str(item) for item in payload.get("recommended_readonly_scopes") or []],
+    }
 
 
 def _latest_user_text(history: list[dict[str, Any]]) -> str:
