@@ -19,12 +19,14 @@ class ContextPipeline:
         tool_result_store: ToolResultStore | None = None,
         replacement_min_bytes: int = 8000,
         replacement_preview_chars: int = 1000,
+        tool_result_limits: dict[str, int] | None = None,
     ) -> None:
         self.per_call_limit = per_call_limit
         self.keep_recent = keep_recent
         self.tool_result_store = tool_result_store
         self.replacement_min_bytes = replacement_min_bytes
         self.replacement_preview_chars = replacement_preview_chars
+        self.tool_result_limits = dict(tool_result_limits or {})
 
     def project(self, history: list[dict]) -> ContextProjection:
         paired, filled, dropped = pair_tool_calls(history)
@@ -36,6 +38,7 @@ class ContextPipeline:
                 self.tool_result_store,
                 min_bytes=self.replacement_min_bytes,
                 preview_chars=self.replacement_preview_chars,
+                tool_result_limits=self.tool_result_limits,
             )
         capped, capped_count = cap_tool_results(prepared, per_call_limit=self.per_call_limit)
         shrunk, shrunk_count = shrink_old_tool_results(capped, keep_recent=self.keep_recent)

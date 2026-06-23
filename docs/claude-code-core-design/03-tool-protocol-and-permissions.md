@@ -271,6 +271,8 @@ class ToolV2(Protocol):
     async def execute(self, args: dict, context: ToolContext) -> ToolResult: ...
 ```
 
+当前 Emperor 已向这个协议推进了一步：`Tool.max_result_chars` 作为兼容 trait 进入基类，`ToolRegistry.tool_result_limits()` 会导出正整数预算，`AgentRunner` 默认 store-backed `ContextPipeline` 会按工具名应用预算。这意味着大结果替换不再只有全局阈值，后续可以逐步给 `grep`、`read_file`、MCP 工具配置不同的模型上下文预算。
+
 兼容策略：
 
 - 旧 `Tool` 通过 adapter 变成 `ToolV2`。

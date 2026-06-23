@@ -23,6 +23,21 @@ class EchoPathTool(Tool):
         return f"path={path}"
 
 
+@tool_parameters({
+    "type": "object",
+    "properties": {"value": {"type": "string"}},
+    "required": ["value"],
+})
+class BudgetedTool(Tool):
+    name = "budgeted"
+    description = "budgeted output"
+    read_only = True
+    max_result_chars = 1234
+
+    def execute(self, value: str) -> str:
+        return value
+
+
 def test_tool_adapter_wraps_string_result(tmp_path: Path) -> None:
     context = ToolExecutionContext(root=tmp_path, turn_id="turn_1")
     result = ToolAdapter(EchoPathTool()).execute_sync({"path": "a.txt"}, context)
@@ -51,3 +66,11 @@ def test_invalid_params_do_not_execute_tool() -> None:
 
     assert prepared.error is not None
     assert "missing required field 'path'" in prepared.error
+
+
+def test_registry_exposes_tool_result_budgets() -> None:
+    registry = ToolRegistry()
+    registry.register(EchoPathTool())
+    registry.register(BudgetedTool())
+
+    assert registry.tool_result_limits() == {"budgeted": 1234}

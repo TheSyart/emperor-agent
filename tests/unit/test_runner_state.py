@@ -37,6 +37,12 @@ class EchoTool(Tool):
         return str(kwargs["value"])
 
 
+class BudgetedEchoTool(EchoTool):
+    name = "budgeted_echo"
+    description = "Echo with a smaller model-context result budget."
+    max_result_chars = 2000
+
+
 def test_turn_state_transitions_to_runtime_events() -> None:
     state = TurnState(turn_id="turn_1")
     state.start_iteration()
@@ -200,3 +206,54 @@ async def test_runner_default_context_pipeline_replaces_large_tool_results(tmp_p
     assert "Tool result stored outside the model context" in projected_tool["content"]
     assert replacement["artifact_path"] in projected_tool["content"]
     assert (tmp_path / replacement["artifact_path"]).read_text(encoding="utf-8") == content
+
+
+@pytest.mark.anyio
+async def test_runner_uses_registered_tool_result_budget(tmp_path) -> None:
+    content = "x" * 3000
+    memory = MemoryStore(tmp_path / "memory", tmp_path / "USER.local.md")
+    provider = FakeProvider([LLMResponse(content="done")])
+    registry = ToolRegistry()
+    registry.register(BudgetedEchoTool())
+    runner = AgentRunner(
+        provider=provider,
+        model="fake",
+        registry=registry,
+        system_prompt="system",
+        memory_store=memory,
+    )
+    emitted: list[dict[str, Any]] = []
+
+    async def emit(event: dict[str, Any]) -> None:
+        emitted.append(event)
+
+    await runner.step_async(
+        [
+            {"role": "user", "content": "inspect"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "budgeted_echo", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "turn_id": "turn_1",
+                "tool_call_id": "call_1",
+                "name": "budgeted_echo",
+                "content": content,
+            },
+        ],
+        emit=emit,
+    )
+
+    context_event = next(event for event in emitted if event.get("event") == "context_projection")
+    projected_tool = provider.seen_messages[0][-1]
+
+    assert context_event["report"]["tool_result_replacements"][0]["tool_name"] == "budgeted_echo"
+    assert "original_chars: 3000" in projected_tool["content"]

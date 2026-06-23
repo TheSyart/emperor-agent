@@ -50,8 +50,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Project Execution and Plan Runtime v2 has a durable `PlanRecord`/`PlanStep` store, plan approval activation, todo synchronization, command verification evidence, verification failure follow-up, and final-answer gate.
 - Plan replay is now visible in the Chat UI: `planProjection` is exposed through app context, `PlanCard` renders step status, files, commands, verification evidence, and failed stderr/stdout summaries, and `planProjection.test.ts` covers interaction-to-plan selection.
 - Project Execution Prompt Contract is now explicit in approved-plan follow-up messages and stable prompt templates: active todo maintenance, verification evidence, failure repair, blocked-state escalation, and no-final-answer-before-complete are covered by tests.
-- Advanced context budget work has started: `ToolResultStore` is available, `ContextPipeline(tool_result_store=...)` can replace large tool messages with stable artifact-backed model content, and `AgentRunner` now uses store-backed projection when a memory store is present.
-- The next upgrade lane is continuing the later Epics: tool-level result budgets, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- Advanced context budget work has started: `ToolResultStore` is available, `ContextPipeline(tool_result_store=...)` can replace large tool messages with stable artifact-backed model content, `AgentRunner` uses store-backed projection when a memory store is present, and tool-level `max_result_chars` budgets flow from `ToolRegistry` into that projection.
+- The next upgrade lane is continuing the later Epics: concrete per-tool budget tuning, artifact-aware ToolResult mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 

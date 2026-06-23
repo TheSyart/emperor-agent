@@ -31,6 +31,14 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return sorted(self._tools.keys())
 
+    def tool_result_limits(self) -> dict[str, int]:
+        limits: dict[str, int] = {}
+        for name, tool in self._tools.items():
+            value = getattr(tool, "max_result_chars", None)
+            if isinstance(value, int) and value > 0:
+                limits[name] = value
+        return limits
+
     def get_definitions(self) -> list[dict]:
         if self._defs_cache is not None:
             return self._defs_cache

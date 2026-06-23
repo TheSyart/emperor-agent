@@ -124,6 +124,7 @@ class Tool(ABC):
     read_only: bool = False
     exclusive: bool = False
     requires_runtime_context: bool = False
+    max_result_chars: int | None = None
 
     @property
     def concurrency_safe(self) -> bool:

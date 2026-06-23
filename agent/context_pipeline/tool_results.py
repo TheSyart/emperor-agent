@@ -110,18 +110,22 @@ def replace_large_tool_results(
     *,
     min_bytes: int = DEFAULT_TOOL_RESULT_BUDGET,
     preview_chars: int = 1000,
+    tool_result_limits: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[ToolResultReplacementRecord]]:
     out: list[dict[str, Any]] = []
     replacements: list[ToolResultReplacementRecord] = []
+    limits = tool_result_limits or {}
     for message in history:
         copied = dict(message)
-        if copied.get("role") == "tool" and content_text_size(copied.get("content")) > min_bytes:
+        tool_name = str(copied.get("name") or copied.get("tool_call_id") or "tool")
+        limit = _limit_for_tool(tool_name, limits, min_bytes)
+        if copied.get("role") == "tool" and content_text_size(copied.get("content")) > limit:
             content = str(copied.get("content") or "")
             tool_call_id = str(copied.get("tool_call_id") or copied.get("id") or "unknown_tool_call")
             record = store.persist_large_result(
                 str(copied.get("turn_id") or "unknown_turn"),
                 tool_call_id,
-                str(copied.get("name") or tool_call_id or "tool"),
+                tool_name,
                 content,
                 preview_chars=preview_chars,
             )
@@ -129,6 +133,13 @@ def replace_large_tool_results(
             replacements.append(record)
         out.append(copied)
     return out, replacements
+
+
+def _limit_for_tool(tool_name: str, limits: dict[str, int], fallback: int) -> int:
+    value = limits.get(tool_name)
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
 
 
 def _replacement_message(record: ToolResultReplacementRecord) -> str:

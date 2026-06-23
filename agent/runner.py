@@ -112,7 +112,7 @@ class AgentRunner:
         self.max_context = max_context
         self.compact_threshold = compact_threshold
         self.max_turns = max_turns
-        self.context_pipeline = context_pipeline or _build_default_context_pipeline(memory_store)
+        self.context_pipeline = context_pipeline or _build_default_context_pipeline(memory_store, registry)
         self.tool_execution_engine = tool_execution_engine or ToolExecutionEngine(registry)
 
     def step(self, history: list[dict[str, Any]]) -> str:
@@ -879,12 +879,15 @@ class AgentRunner:
         return bool(self.reasoning_effort and self.reasoning_effort.lower() not in {"none", "minimal", "minimum"})
 
 
-def _build_default_context_pipeline(memory_store: Any | None) -> ContextPipeline:
+def _build_default_context_pipeline(memory_store: Any | None, registry: ToolRegistry) -> ContextPipeline:
     memory_dir = getattr(memory_store, "memory_dir", None)
     if memory_dir is None:
         return ContextPipeline()
     try:
-        return ContextPipeline(tool_result_store=ToolResultStore(memory_dir.parent))
+        return ContextPipeline(
+            tool_result_store=ToolResultStore(memory_dir.parent),
+            tool_result_limits=registry.tool_result_limits(),
+        )
     except Exception as exc:
         logger.warning("tool result store unavailable; using in-memory context pipeline: {}", exc)
         return ContextPipeline()
