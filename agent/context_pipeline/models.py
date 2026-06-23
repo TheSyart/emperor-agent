@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ContextProjection:
+    messages: list[dict[str, Any]]
+    report: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

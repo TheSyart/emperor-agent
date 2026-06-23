@@ -6,6 +6,7 @@ from typing import Any
 
 from loguru import logger
 
+from .context_pipeline import ContextPipeline
 from .control import ClarificationAssessment, TurnPaused, parse_pause_result
 from .providers import LLMProvider, ToolCallRequest
 from .providers.base import is_truncated, run_sync
@@ -57,6 +58,7 @@ class AgentRunner:
         max_context: int = 200_000,
         compact_threshold: float = 0.7,
         max_turns: int | None = None,
+        context_pipeline: ContextPipeline | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -93,6 +95,7 @@ class AgentRunner:
         self.max_context = max_context
         self.compact_threshold = compact_threshold
         self.max_turns = max_turns
+        self.context_pipeline = context_pipeline or ContextPipeline()
 
     def step(self, history: list[dict[str, Any]]) -> str:
         """Run one full turn synchronously. Mutates `history` in place."""
@@ -333,9 +336,8 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ):
-        governed = self._pair_tool_calls(history)
-        governed = self._cap_tool_result(governed)
-        governed = self._shrink_old_tool_results(governed)
+        projection = self.context_pipeline.project(history)
+        governed = projection.messages
         system_prompt = self.system_prompt
         if self.control_manager is not None:
             system_prompt = f"{system_prompt}\n\n---\n\n{self.control_manager.system_prompt()}"
