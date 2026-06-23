@@ -23,6 +23,7 @@ from .routes import (
     sessions,
     sidebar,
     skills,
+    tasks,
     team,
 )
 
@@ -73,6 +74,7 @@ def create_app(
         control.register,
         diagnostics.register,
         desktop_pet.register,
+        tasks.register,
         team.register,
         scheduler.register,
         external.register,

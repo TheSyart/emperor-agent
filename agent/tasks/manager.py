@@ -44,6 +44,9 @@ class TaskManager:
     def append_sidechain(self, task_id: str, message: dict) -> None:
         SidechainTranscript(self.root, task_id).append(message)
 
+    def read_sidechain(self, task_id: str, *, offset: int = 0, limit: int = 100) -> dict:
+        return SidechainTranscript(self.root, task_id).read(offset=offset, limit=limit)
+
     def complete_task(self, task_id: str, *, summary: str = "") -> TaskRecord | None:
         record = self.store.get(task_id)
         if record is None:

@@ -18,6 +18,10 @@ class WebContainer:
     def plan_store(self):
         return self.state.loop.control_manager.plan_store
 
+    @property
+    def task_manager(self):
+        return self.state.loop.task_manager
+
     @classmethod
     def create(
         cls,
