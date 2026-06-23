@@ -6,7 +6,16 @@ from typing import Any
 from uuid import uuid4
 
 from ..permissions import PermissionManager
-from ..plans import PlanExecutionState, PlanRecord, PlanStatus, PlanStep, PlanStepStatus, PlanStore
+from ..plans import (
+    PlanDraftPhase,
+    PlanDraftState,
+    PlanExecutionState,
+    PlanRecord,
+    PlanStatus,
+    PlanStep,
+    PlanStepStatus,
+    PlanStore,
+)
 from .clarification import ClarificationAssessment, ClarificationPolicy
 from .models import (
     ControlMode,
@@ -86,12 +95,18 @@ class ControlManager:
     ) -> Interaction:
         self.ensure_no_pending()
         parsed = [Question.from_dict(item) for item in questions]
+        interaction_meta = dict(meta or {})
+        if self.mode == ControlMode.PLAN.value:
+            draft = self._ensure_plan_draft()
+            interaction_meta["plan_id"] = draft.id
         interaction = Interaction.ask(
             questions=parsed,
             context=context,
             parent_call_id=parent_call_id,
-            meta=meta or {},
+            meta=interaction_meta,
         )
+        if interaction_meta.get("plan_id"):
+            self._record_plan_open_questions(interaction)
         self._set_pending(interaction)
         return interaction
 
@@ -108,7 +123,9 @@ class ControlManager:
         meta: dict[str, Any] | None = None,
     ) -> Interaction:
         self.ensure_no_pending()
-        plan_id = f"plan_{uuid4().hex[:12]}"
+        plan_meta = dict(meta or {})
+        existing = self._plan_record_for_meta(plan_meta) or self._latest_draft_plan()
+        plan_id = existing.id if existing is not None else f"plan_{uuid4().hex[:12]}"
         now = now_ts()
         structured_steps = _parse_plan_steps(steps or [])
         interaction = Interaction.plan(
@@ -118,7 +135,12 @@ class ControlManager:
             assumptions=assumptions,
             risk_level=risk_level,
             parent_call_id=parent_call_id,
-            meta={**(meta or {}), "plan_id": plan_id},
+            meta={**plan_meta, "plan_id": plan_id},
+        )
+        draft = _ready_for_approval_draft(
+            existing.draft if existing is not None else PlanDraftState(),
+            summary=interaction.summary,
+            steps=structured_steps,
         )
         self.plan_store.save(
             PlanRecord(
@@ -126,13 +148,17 @@ class ControlManager:
                 title=interaction.title,
                 summary=interaction.summary,
                 status=PlanStatus.WAITING_APPROVAL.value,
-                created_at=now,
+                created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
                 source_interaction_id=interaction.id,
                 plan_markdown=interaction.plan_markdown,
                 assumptions=list(interaction.assumptions),
                 steps=structured_steps,
-                metadata={"risk_level": interaction.risk_level},
+                draft=draft,
+                metadata={
+                    **(existing.metadata if existing is not None else {}),
+                    "risk_level": interaction.risk_level,
+                },
             )
         )
         self._set_pending(interaction)
@@ -189,6 +215,7 @@ class ControlManager:
         updated = interaction.touch(status=InteractionStatus.ANSWERED.value)
         updated.answers = normalized
         self.permission_manager.record_answer(updated)
+        self._record_plan_resolved_questions(updated)
         self._complete(updated)
         message = self._answer_message(updated)
         return ControlResume(
@@ -207,6 +234,7 @@ class ControlManager:
             *updated.comments,
             {"content": text[:4000], "timestamp": now_ts()},
         ]
+        self._record_plan_comment(updated, text)
         self._complete(updated)
         message = self._comment_message(updated, text)
         return ControlResume(
@@ -533,6 +561,117 @@ class ControlManager:
             "plan": record.to_dict(),
         }
 
+    def _ensure_plan_draft(self) -> PlanRecord:
+        existing = self._latest_draft_plan()
+        if existing is not None:
+            return existing
+        now = now_ts()
+        record = PlanRecord(
+            id=f"plan_{uuid4().hex[:12]}",
+            title="Plan Draft",
+            summary="Plan mode draft",
+            status=PlanStatus.DRAFT.value,
+            created_at=now,
+            updated_at=now,
+            draft=PlanDraftState(phase=PlanDraftPhase.EXPLORING.value),
+            metadata={"risk_level": "medium"},
+        )
+        self.plan_store.save(record)
+        return record
+
+    def _latest_draft_plan(self) -> PlanRecord | None:
+        plans = [plan for plan in self.plan_store.list() if plan.status == PlanStatus.DRAFT.value]
+        if not plans:
+            return None
+        return max(plans, key=lambda item: item.updated_at)
+
+    def _plan_record_for_meta(self, meta: dict[str, Any]) -> PlanRecord | None:
+        plan_id = str(meta.get("plan_id") or "")
+        return self.plan_store.get(plan_id) if plan_id else None
+
+    def _record_plan_open_questions(self, interaction: Interaction) -> None:
+        record = self._plan_record_for_meta(interaction.meta)
+        if record is None:
+            return
+        open_questions = list(record.draft.open_questions)
+        for question in interaction.questions:
+            open_questions.append({
+                "interaction_id": interaction.id,
+                "id": question.id,
+                "header": question.header,
+                "question": question.question,
+                "options": [option.label for option in question.options],
+                "context": interaction.context,
+            })
+        draft = replace(
+            record.draft,
+            phase=PlanDraftPhase.QUESTIONING.value,
+            open_questions=open_questions,
+        )
+        self.plan_store.save(replace(record, updated_at=now_ts(), draft=draft))
+
+    def _record_plan_resolved_questions(self, interaction: Interaction) -> None:
+        record = self._plan_record_for_meta(interaction.meta)
+        if record is None:
+            return
+        question_ids = {question.id for question in interaction.questions}
+        remaining_open = [
+            item for item in record.draft.open_questions
+            if item.get("interaction_id") != interaction.id or item.get("id") not in question_ids
+        ]
+        resolved = list(record.draft.resolved_questions)
+        open_by_id = {
+            str(item.get("id")): item
+            for item in record.draft.open_questions
+            if item.get("interaction_id") == interaction.id
+        }
+        for question in interaction.questions:
+            answer = interaction.answers.get(question.id) or {}
+            choice = answer.get("choice") if isinstance(answer, dict) else str(answer)
+            freeform = answer.get("freeform") if isinstance(answer, dict) else ""
+            source = open_by_id.get(question.id, {})
+            resolved.append({
+                "interaction_id": interaction.id,
+                "id": question.id,
+                "header": question.header,
+                "question": question.question,
+                "answer": str(choice or "").strip(),
+                "freeform": str(freeform or "").strip(),
+                "context": str(source.get("context") or interaction.context),
+            })
+        draft = replace(
+            record.draft,
+            phase=PlanDraftPhase.DESIGNING.value,
+            open_questions=remaining_open,
+            resolved_questions=resolved,
+        )
+        self.plan_store.save(replace(record, updated_at=now_ts(), draft=draft))
+
+    def _record_plan_comment(self, interaction: Interaction, comment: str) -> None:
+        record = self._plan_record_for_meta(interaction.meta)
+        if record is None:
+            return
+        metadata = dict(record.metadata)
+        revisions = list(metadata.get("revisions") or [])
+        revisions.append({
+            "title": record.title,
+            "summary": record.summary,
+            "plan_markdown": record.plan_markdown,
+            "comment": comment[:4000],
+            "timestamp": now_ts(),
+        })
+        metadata["revisions"] = revisions[-20:]
+        draft = replace(record.draft, phase=PlanDraftPhase.REVIEWING.value)
+        self.plan_store.save(
+            replace(
+                record,
+                status=PlanStatus.DRAFT.value,
+                updated_at=now_ts(),
+                draft=draft,
+                metadata=metadata,
+            )
+        )
+
     def _update_plan_status(self, interaction: Interaction, status: str, *, approved: bool = False) -> None:
         plan_id = str(interaction.meta.get("plan_id") or "")
         if not plan_id:
@@ -541,10 +680,14 @@ class ControlManager:
         if record is None:
             return
         now = now_ts()
+        draft = record.draft
+        if approved:
+            draft = replace(draft, phase=PlanDraftPhase.APPROVED.value)
         payload = {
             **record.to_dict(),
             "status": status,
             "updated_at": now,
+            "draft": draft.to_dict(),
         }
         if approved:
             payload["approved_at"] = now
@@ -560,6 +703,10 @@ class ControlManager:
         if self.todo_store is None or not record.steps:
             return record
         activated = PlanExecutionState(record).start_next_step()
+        activated = replace(
+            activated,
+            draft=replace(activated.draft, phase=PlanDraftPhase.EXECUTING.value),
+        )
         self.plan_store.save(activated)
         self.todo_store.sync_from_plan_steps([step.to_dict() for step in activated.steps])
         return activated
@@ -637,6 +784,38 @@ def _parse_plan_steps(items: list[dict[str, Any]]) -> list[PlanStep]:
             )
         )
     return steps
+
+
+def _ready_for_approval_draft(
+    draft: PlanDraftState,
+    *,
+    summary: str,
+    steps: list[PlanStep],
+) -> PlanDraftState:
+    files = list(draft.relevant_files)
+    commands = list(draft.verification_strategy)
+    for step in steps:
+        files.extend(step.files)
+        commands.extend(step.commands)
+    return replace(
+        draft,
+        phase=PlanDraftPhase.READY_FOR_APPROVAL.value,
+        relevant_files=_dedupe_strings(files),
+        recommended_approach=str(summary or "").strip()[:1200],
+        verification_strategy=_dedupe_strings(commands),
+    )
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _is_positive_int(value: Any) -> bool:

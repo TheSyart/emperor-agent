@@ -24,9 +24,82 @@ class PlanStepStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class PlanDraftPhase(StrEnum):
+    EXPLORING = "exploring"
+    QUESTIONING = "questioning"
+    DESIGNING = "designing"
+    REVIEWING = "reviewing"
+    READY_FOR_APPROVAL = "ready_for_approval"
+    APPROVED = "approved"
+    EXECUTING = "executing"
+
+
 def _valid_value(value: Any, allowed: set[str], fallback: str) -> str:
     text = str(value or "").strip()
     return text if text in allowed else fallback
+
+
+def _string_list(value: Any, *, limit: int = 120) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value[:limit]:
+        text = str(item or "").strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _dict_list(value: Any, *, limit: int = 120) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value[:limit] if isinstance(item, dict)]
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class PlanDraftState:
+    phase: str = PlanDraftPhase.EXPLORING.value
+    discoveries: list[dict[str, Any]] = field(default_factory=list)
+    relevant_files: list[str] = field(default_factory=list)
+    open_questions: list[dict[str, Any]] = field(default_factory=list)
+    resolved_questions: list[dict[str, Any]] = field(default_factory=list)
+    alternatives_considered: list[str] = field(default_factory=list)
+    recommended_approach: str = ""
+    verification_strategy: list[str] = field(default_factory=list)
+    last_context_refresh_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> PlanDraftState:
+        if not isinstance(raw, dict):
+            return cls()
+        refresh = raw.get("last_context_refresh_at")
+        return cls(
+            phase=_valid_value(
+                raw.get("phase"),
+                {item.value for item in PlanDraftPhase},
+                PlanDraftPhase.EXPLORING.value,
+            ),
+            discoveries=_dict_list(raw.get("discoveries")),
+            relevant_files=_string_list(raw.get("relevant_files")),
+            open_questions=_dict_list(raw.get("open_questions")),
+            resolved_questions=_dict_list(raw.get("resolved_questions")),
+            alternatives_considered=_string_list(raw.get("alternatives_considered")),
+            recommended_approach=str(raw.get("recommended_approach") or "").strip()[:1200],
+            verification_strategy=_string_list(raw.get("verification_strategy")),
+            last_context_refresh_at=_optional_float(refresh),
+        )
 
 
 @dataclass(frozen=True)
@@ -78,15 +151,18 @@ class PlanRecord:
     assumptions: list[str] = field(default_factory=list)
     steps: list[PlanStep] = field(default_factory=list)
     verification: list[dict[str, Any]] = field(default_factory=list)
+    draft: PlanDraftState = field(default_factory=PlanDraftState)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["steps"] = [step.to_dict() for step in self.steps]
+        payload["draft"] = self.draft.to_dict()
         return payload
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> PlanRecord:
+        metadata = dict(raw.get("metadata") or {})
         return cls(
             id=str(raw["id"]),
             title=str(raw["title"]),
@@ -101,5 +177,6 @@ class PlanRecord:
             assumptions=[str(item) for item in raw.get("assumptions") or []],
             steps=[PlanStep.from_dict(item) for item in raw.get("steps") or [] if isinstance(item, dict)],
             verification=[item for item in raw.get("verification") or [] if isinstance(item, dict)],
-            metadata=dict(raw.get("metadata") or {}),
+            draft=PlanDraftState.from_dict(raw.get("draft") or metadata.get("draft")),
+            metadata=metadata,
         )

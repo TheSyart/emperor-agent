@@ -110,8 +110,8 @@ Claude Code 新版 Plan Mode 有两种工作流：
 
 Emperor 对应方向：
 
-- `propose_plan` 现在能保存结构化 steps，但还缺少 `plan_phase`。
-- 应给 `PlanRecord` 增加 phase 或在 `PlanDraftState` 中维护：
+- `propose_plan` 现在能保存结构化 steps，并已在 `PlanRecord.draft` 中维护 `PlanDraftState`。
+- `PlanDraftState` 当前维护：
   - `exploring`
   - `questioning`
   - `designing`
@@ -119,7 +119,8 @@ Emperor 对应方向：
   - `ready_for_approval`
   - `approved`
   - `executing`
-- `ask_user` 在 Plan 模式下应自动把问题写入 plan draft 的 `open_questions` / `resolved_questions`。
+- `ask_user` 在 Plan 模式下会自动把问题写入 plan draft 的 `open_questions`；用户回答后会移动到 `resolved_questions` 并保留 freeform note。
+- Plan comment 会把等待批准的计划退回 `reviewing` / `draft`，并在 metadata 中保留修订快照，下一次 `propose_plan` 会复用同一个 plan id。
 
 ### 5. ExitPlanMode：批准边界和权限恢复
 
@@ -232,6 +233,8 @@ ControlManager.set_mode("plan")
 
 目标：把 Claude Code 的 plan file 工作流变为结构化 draft。
 
+状态：已落地第一版。当前实现位于 `agent/plans/models.py` 的 `PlanDraftState` / `PlanDraftPhase`，并已接入 `ControlManager.create_plan()`、Plan 模式 `ask_user`、`answer()` 和 `comment()`；测试见 `tests/unit/test_plan_draft_state.py`。
+
 目标文件：
 
 - `agent/plans/models.py`
@@ -255,7 +258,7 @@ ControlManager.set_mode("plan")
 
 - Plan comment 后保留旧 draft，并生成修订版本。
 - `ask_user` 答案可关联到 open question。
-- 压缩/重启后仍知道当前处于探索、提问还是待批准。
+- 重启后可从 `memory/plans/index.json` 恢复当前处于探索、提问、修订还是待批准。
 
 ### PE-3：只读探索扇出
 
@@ -425,10 +428,10 @@ ControlManager.set_mode("plan")
 
 优先做：
 
-1. `PE-2 PlanDraftState`：让计划过程本身可恢复。
+1. `PE-4 结构化计划质量门禁`：提高批准前计划质量。
 2. `PE-6 Step Evidence Gate`：堵住“没验证就完成”的口子。
 3. `PE-8 Plan Runtime 恢复附件`：保证长任务压缩后不断线。
-4. `PE-4 结构化计划质量门禁`：提高批准前计划质量。
+4. `PE-3 只读探索扇出`：把探索发现自动写入 plan draft。
 
 暂缓做：
 

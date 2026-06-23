@@ -59,7 +59,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Write/edit result mapping is now in place: `write_file` and `edit_file` emit file artifacts, concise summaries, unified diff previews, and change metadata while keeping legacy `execute()` string-compatible.
 - Tool-card evidence display is now in place: Chat tool cards render artifact paths, artifact kind/size, and diff previews from replayed runtime metadata.
 - Project Execution and Plan Runtime v3 has started: `PlanDecisionPolicy` now deterministically classifies required/recommended/proceed planning cases and Runner blocks non-read-only tools for required-plan requests before files are modified.
-- The next upgrade lane is continuing Plan Runtime v3: plan draft phases, evidence gate, plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- `PlanDraftState` now persists plan phase, relevant files, open/resolved questions, alternatives, recommended approach, verification strategy, and plan comment revision snapshots across `PlanRecord` reloads.
+- The next upgrade lane is continuing Plan Runtime v3: plan quality gate, evidence gate, plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 
@@ -2951,7 +2952,7 @@ Result: `26 passed`; ruff passed.
 - Modify: `agent/control/manager.py`
 - Create: `tests/unit/test_plan_draft_state.py`
 
-- [ ] **Step 1: Write draft-state tests**
+- [x] **Step 1: Write draft-state tests**
 
 Test that a draft can record:
 
@@ -2970,15 +2971,15 @@ Run:
 
 Expected before implementation: model fields missing.
 
-- [ ] **Step 2: Extend plan models compatibly**
+- [x] **Step 2: Extend plan models compatibly**
 
 Add optional fields to `PlanRecord.metadata` first, or add frozen dataclasses with backward-compatible `from_dict()`. Existing `memory/plans/index.json` files must still load.
 
-- [ ] **Step 3: Capture Ask answers into draft state**
+- [x] **Step 3: Capture Ask answers into draft state**
 
 When Plan mode uses `ask_user`, store questions in `open_questions`. When the user answers, move them into `resolved_questions` and preserve the freeform note.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -2987,6 +2988,15 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Actual verification:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_draft_state.py tests/unit/test_plan_runtime.py tests/unit/test_control.py tests/unit/test_plan_decision_policy.py tests/unit/test_runner_state.py -q
+.venv/bin/python -m ruff check agent/plans agent/control agent/runner.py tests/unit/test_plan_draft_state.py tests/unit/test_plan_runtime.py tests/unit/test_control.py tests/unit/test_plan_decision_policy.py
+```
+
+Result: `40 passed`; ruff passed.
 
 ### Task 6H: Plan Quality Gate
 
