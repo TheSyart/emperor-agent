@@ -318,7 +318,7 @@ Plan 模式只读探索
 - `PE-8 Plan Runtime 恢复附件`：已落地第一版，ContextPipeline 与 Compactor 会注入紧凑 plan runtime context，压缩、刷新、重启后继续 active step。
 - `PE-9 WebUI Project Execution 面板`：已落地第一版；PlanCard 会优先显示 active step、失败验证摘要、blocked reason、open questions 和 independent verification 状态。剩余工作是独立面板页。
 - `PE-10 Plan Entry Runtime Contract`：已落地第一版；required/recommended/proceed 计划判定已变成本轮 runtime contract，带 triggers、reason、suggested questions 和 recommended readonly scopes，并通过 `plan_entry_decision` 进入前端 runtime projection。
-- `PE-11 Plan Discovery Ledger`：把 read/search/subagent 的只读探索摘要、文件路径、artifact refs 写入 `PlanDraftState.discoveries`，质量门禁可引用。
+- `PE-11 Plan Discovery Ledger`：已落地第一版；`read_file` / `grep` 的只读探索摘要、文件路径、evidence refs 会写入 `PlanDraftState.discoveries`，`PlanStep.discovery_refs` 可被质量门禁引用。subagent 探索写入留给 PE-12。
 - `PE-12 只读探索扇出执行器`：Plan 模式允许只读探索子代理并发，结果写入 task sidechain 和 discovery ledger，写入型子代理继续拒绝。
 - `PE-13 Approved Plan Permission Token`：批准计划后生成短期一次性 token，只覆盖 active step 的非高风险计划内命令；评论、修订、失败会撤销。
 - `PE-14 Plan Step Task Binding`：每个 PlanStep 绑定 TaskRecord，工具输出、验证命令、复核结果进入 step sidechain。

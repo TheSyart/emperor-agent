@@ -81,6 +81,15 @@ class PlanContextBuilder:
             text = str(question.get("question") or "").strip()
             if qid or text:
                 lines.append(f"open_question: {qid} {text}".rstrip())
+        for discovery in record.draft.discoveries[-8:]:
+            source = str(discovery.get("source") or "tool").strip()
+            summary = _truncate_inline(str(discovery.get("summary") or "").strip(), 500)
+            if summary:
+                lines.append(f"discovery: {source} {summary}")
+            for path in _discovery_files(discovery)[:5]:
+                lines.append(f"  discovery_file: {path}")
+            for ref in _discovery_evidence_refs(discovery)[:5]:
+                lines.append(f"  evidence_ref: {ref}")
         for path in _relevant_files(record)[:20]:
             lines.append(f"file: {path}")
         return _truncate("\n".join(lines), self.max_chars)
@@ -156,12 +165,27 @@ def _relevant_files(record: PlanRecord) -> list[str]:
     files.extend(record.draft.relevant_files)
     for discovery in record.draft.discoveries:
         if isinstance(discovery, dict):
+            files.extend(_discovery_files(discovery))
             path = str(discovery.get("path") or discovery.get("file") or "").strip()
             if path:
                 files.append(path)
     for step in record.steps:
         files.extend(step.files)
     return _dedupe(files)
+
+
+def _discovery_files(discovery: dict[str, Any]) -> list[str]:
+    files = discovery.get("files")
+    if isinstance(files, list):
+        return [str(item).strip() for item in files if str(item or "").strip()]
+    return []
+
+
+def _discovery_evidence_refs(discovery: dict[str, Any]) -> list[str]:
+    refs = discovery.get("evidence_refs") or discovery.get("evidenceRefs")
+    if isinstance(refs, list):
+        return [str(item).strip() for item in refs if str(item or "").strip()]
+    return []
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -127,6 +127,11 @@ class ProposePlanTool(Tool):
                     items=StringSchema("验收条件", max_length=300),
                     max_items=12,
                 ),
+                "discovery_refs": ArraySchema(
+                    "引用的 PlanDiscovery id，用于证明该步骤基于只读探索事实",
+                    items=StringSchema("discovery id", max_length=64),
+                    max_items=12,
+                ),
                 "risk": StringSchema("风险级别", enum=["low", "medium", "high"], nullable=True),
                 "risk_note": StringSchema("高风险步骤的风险说明", max_length=1000, nullable=True),
                 "rollback": StringSchema("高风险步骤的回滚路径或降级方案", max_length=1000, nullable=True),

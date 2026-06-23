@@ -66,6 +66,32 @@ def _optional_float(value: Any) -> float | None:
 
 
 @dataclass(frozen=True)
+class PlanDiscovery:
+    id: str
+    source: str
+    summary: str
+    files: list[str] = field(default_factory=list)
+    symbols: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    created_at: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PlanDiscovery:
+        return cls(
+            id=str(raw.get("id") or ""),
+            source=str(raw.get("source") or "").strip()[:80],
+            summary=str(raw.get("summary") or "").strip()[:1200],
+            files=_string_list(raw.get("files") or _legacy_discovery_files(raw)),
+            symbols=_string_list(raw.get("symbols")),
+            evidence_refs=_string_list(raw.get("evidence_refs") or raw.get("evidenceRefs")),
+            created_at=float(raw.get("created_at") or raw.get("createdAt") or 0.0),
+        )
+
+
+@dataclass(frozen=True)
 class PlanDraftState:
     phase: str = PlanDraftPhase.EXPLORING.value
     discoveries: list[dict[str, Any]] = field(default_factory=list)
@@ -111,6 +137,7 @@ class PlanStep:
     files: list[str] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
     acceptance: list[str] = field(default_factory=list)
+    discovery_refs: list[str] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
     risk: str = "medium"
     risk_note: str = ""
@@ -133,11 +160,25 @@ class PlanStep:
             files=[str(item) for item in raw.get("files") or []],
             commands=[str(item) for item in raw.get("commands") or []],
             acceptance=[str(item) for item in raw.get("acceptance") or []],
+            discovery_refs=[
+                str(item)
+                for item in raw.get("discovery_refs") or raw.get("discoveryRefs") or []
+                if str(item or "").strip()
+            ],
             evidence=[item for item in raw.get("evidence") or [] if isinstance(item, dict)],
             risk=str(raw.get("risk") or "medium"),
             risk_note=str(raw.get("risk_note") or raw.get("riskNote") or ""),
             rollback=str(raw.get("rollback") or raw.get("rollback_path") or raw.get("rollbackPath") or ""),
         )
+
+
+def _legacy_discovery_files(raw: dict[str, Any]) -> list[str]:
+    files: list[str] = []
+    for key in ("path", "file"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            files.append(value)
+    return files
 
 
 @dataclass(frozen=True)

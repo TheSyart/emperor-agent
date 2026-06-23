@@ -635,6 +635,7 @@ class AgentRunner:
                 clarification=clarification,
                 plan_decision=plan_decision,
             )
+            self._record_plan_discovery(call, result)
             content = result.model_content
             results_by_id[call.id] = result
             self._maybe_pause_for_control(content, tool_calls, results_by_id)
@@ -721,6 +722,29 @@ class AgentRunner:
         except Exception as exc:
             logger.warning(f"plan decision assessment failed: {exc}")
             return None
+
+    def _record_plan_discovery(self, call: ToolCallRequest, result: ToolResult) -> None:
+        if result.is_error or self.control_manager is None:
+            return
+        recorder = getattr(self.control_manager, "record_plan_discovery", None)
+        if not callable(recorder):
+            return
+        source = str(result.metadata.get("tool") or call.name)
+        if source not in {"read_file", "grep"}:
+            return
+        files = _discovery_files(source, result)
+        if source == "grep" and not files:
+            return
+        evidence_refs = _discovery_evidence_refs(source, result, files)
+        try:
+            recorder(
+                source=source,
+                summary=result.display_summary or _summarize_tool_result(result.model_content, limit=240),
+                files=files,
+                evidence_refs=evidence_refs,
+            )
+        except Exception as exc:
+            logger.warning(f"plan discovery recording failed: {exc}")
 
     def _assess_clarification(self, history: list[dict[str, Any]]) -> ClarificationAssessment:
         if self.control_manager is None:
@@ -1079,6 +1103,57 @@ def _plan_decision_contract(decision: Any) -> dict[str, Any]:
         "suggested_questions": [str(item) for item in payload.get("suggested_questions") or []],
         "recommended_readonly_scopes": [str(item) for item in payload.get("recommended_readonly_scopes") or []],
     }
+
+
+def _discovery_files(source: str, result: ToolResult) -> list[str]:
+    if source == "read_file":
+        path = str(result.metadata.get("path") or "").strip()
+        return [path] if path else [artifact.path for artifact in result.artifacts if artifact.path]
+    if source == "grep":
+        mode = str(result.metadata.get("output_mode") or "")
+        lines = [
+            line.strip()
+            for line in result.model_content.splitlines()
+            if line.strip() and not line.startswith("(")
+        ]
+        if mode == "content":
+            return _dedupe_strings([
+                line.split(":", 1)[0]
+                for line in lines
+                if ":" in line and not line[:1].isspace() and not line.startswith(">")
+            ])
+        if mode == "count":
+            return _dedupe_strings([line.split(":", 1)[0] for line in lines if ": " in line])
+        if result.model_content.startswith("No matches found"):
+            return []
+        return _dedupe_strings(lines)
+    return []
+
+
+def _discovery_evidence_refs(source: str, result: ToolResult, files: list[str]) -> list[str]:
+    if source == "read_file":
+        path = str(result.metadata.get("path") or (files[0] if files else "")).strip()
+        start = result.metadata.get("line_start")
+        end = result.metadata.get("line_end")
+        if path and start and end:
+            return [f"{path}#L{start}-L{end}"]
+        return [path] if path else []
+    if source == "grep":
+        pattern = str(result.metadata.get("pattern") or "").strip()
+        return [f"grep:{pattern}"] if pattern else []
+    return []
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _latest_user_text(history: list[dict[str, Any]]) -> str:

@@ -3315,7 +3315,7 @@ Result: Python focused tests `7 passed`; frontend `planProjection` tests `7 pass
 
 ### Task 6N: Plan Discovery Ledger
 
-Status: pending.
+Status: done in branch `codex/plan-runtime-v2`.
 
 **Files:**
 - Modify: `agent/plans/models.py`
@@ -3325,7 +3325,7 @@ Status: pending.
 - Modify: `agent/tools/grep.py`
 - Test: `tests/unit/test_plan_discovery_ledger.py`
 
-- [ ] **Step 1: Add ledger tests**
+- [x] **Step 1: Add ledger tests**
 
 Create tests that save read/search discoveries with file paths and evidence refs, reload the plan store, and assert `PlanQualityGate` can reject a non-trivial step with no file, discovery, or user-decision evidence.
 
@@ -3337,15 +3337,15 @@ Run:
 
 Expected: import or assertion failure before discovery models exist.
 
-- [ ] **Step 2: Add `PlanDiscovery` model**
+- [x] **Step 2: Add `PlanDiscovery` model**
 
 Persist discovery records under `PlanDraftState.discoveries` with `id`, `source`, `summary`, `files`, `symbols`, `evidence_refs`, and `created_at`.
 
-- [ ] **Step 3: Record discoveries from read/search tools in Plan mode**
+- [x] **Step 3: Record discoveries from read/search tools in Plan mode**
 
 When `ControlManager.mode == "plan"`, allow `read_file` and `grep` to call a small manager method that records concise discovery summaries. Store artifact refs instead of large tool contents.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3354,6 +3354,23 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_discovery_ledger.py tests/unit/test_plan_quality_gate.py tests/unit/test_plan_draft_state.py tests/unit/test_plan_context_attachment.py -q
+.venv/bin/python -m ruff check agent/plans/models.py agent/plans/quality.py agent/plans/context.py agent/control/manager.py agent/control/tools.py agent/runner.py tests/unit/test_plan_discovery_ledger.py
+```
+
+Result: `16 passed`; ruff passed.
+
+Implementation notes:
+
+- `PlanDiscovery` is now a structured model while old dict-shaped discoveries remain readable.
+- `PlanStep.discovery_refs` is parsed from `propose_plan` and enforced by `PlanQualityGate`.
+- `AgentRunner` records discovery summaries from `read_file` and `grep` tool results while in Plan mode.
+- `PlanContextBuilder` injects recent discovery summaries, files, and evidence refs.
+- Subagent exploration discovery remains in Task 6O.
 
 ### Task 6O: Read-Only Exploration Fanout
 

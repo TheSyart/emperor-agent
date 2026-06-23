@@ -275,6 +275,8 @@ class PlanEntryDecision:
 
 目标：让只读探索结果进入 `PlanDraftState.discoveries`，计划质量门禁可以引用这些事实。
 
+状态：已落地第一版。当前实现新增 `PlanDiscovery` 结构、`PlanStep.discovery_refs`、`ControlManager.record_plan_discovery()`，Runner 会在 Plan 模式下从 `read_file` / `grep` 的结构化结果自动记录 discovery。`propose_plan` schema 支持 `discovery_refs`，`PlanQualityGate` 要求步骤显式引用文件、discovery 或其他具体范围；`PlanContextBuilder` 会注入最近 discovery 摘要、文件和 evidence refs。只读探索子代理的 discovery 写入进入 PE-12。
+
 目标文件：
 
 - `agent/plans/models.py`

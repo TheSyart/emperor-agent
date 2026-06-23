@@ -527,6 +527,8 @@ export interface RuntimePlanStep {
   files?: string[]
   commands?: string[]
   acceptance?: string[]
+  discovery_refs?: string[]
+  discoveryRefs?: string[]
   evidence?: Array<Record<string, unknown>>
   risk?: string
   risk_note?: string

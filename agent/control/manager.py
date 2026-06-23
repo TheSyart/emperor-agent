@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ..permissions import PermissionManager
 from ..plans import (
+    PlanDiscovery,
     PlanDraftPhase,
     PlanDraftState,
     PlanEvidenceError,
@@ -577,6 +578,42 @@ class ControlManager:
                     }
         return None
 
+    def record_plan_discovery(
+        self,
+        *,
+        source: str,
+        summary: str,
+        files: list[str] | None = None,
+        symbols: list[str] | None = None,
+        evidence_refs: list[str] | None = None,
+    ) -> PlanRecord | None:
+        if self.mode != ControlMode.PLAN.value:
+            return None
+        text = str(summary or "").strip()
+        if not text:
+            return None
+        now = now_ts()
+        record = self._ensure_plan_draft()
+        discovery = PlanDiscovery(
+            id=f"disc_{uuid4().hex[:10]}",
+            source=str(source or "tool").strip()[:80],
+            summary=text[:1200],
+            files=_dedupe_strings(files or []),
+            symbols=_dedupe_strings(symbols or []),
+            evidence_refs=_dedupe_strings(evidence_refs or []),
+            created_at=now,
+        ).to_dict()
+        discoveries = [*record.draft.discoveries, discovery][-80:]
+        draft = replace(
+            record.draft,
+            discoveries=discoveries,
+            relevant_files=_dedupe_strings([*record.draft.relevant_files, *discovery["files"]]),
+            last_context_refresh_at=now,
+        )
+        updated = replace(record, updated_at=now, draft=draft)
+        self.plan_store.save(updated)
+        return updated
+
     def record_plan_verification_result(
         self,
         *,
@@ -1068,6 +1105,11 @@ def _parse_plan_steps(items: list[dict[str, Any]]) -> list[PlanStep]:
                 files=[str(path) for path in item.get("files") or []][:30],
                 commands=[str(command) for command in item.get("commands") or []][:12],
                 acceptance=[str(rule) for rule in item.get("acceptance") or []][:12],
+                discovery_refs=[
+                    str(ref)
+                    for ref in item.get("discovery_refs") or item.get("discoveryRefs") or []
+                    if str(ref or "").strip()
+                ][:12],
                 risk=str(item.get("risk") or "medium").strip()[:24],
                 risk_note=str(item.get("risk_note") or item.get("riskNote") or "").strip()[:1000],
                 rollback=str(
