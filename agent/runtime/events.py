@@ -129,6 +129,10 @@ def runtime_task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -
     return runtime_event("runtime_task_cancelled", task=task, reason=reason)
 
 
+def context_projection(*, report: dict[str, Any], message_count: int) -> dict[str, Any]:
+    return runtime_event("context_projection", report=report, message_count=message_count)
+
+
 def turn_phase(
     *,
     phase: str,

@@ -170,6 +170,15 @@ def test_task_runtime_event_payloads() -> None:
 
 
 def test_tool_run_runtime_event_payloads() -> None:
+    assert runtime_events.context_projection(
+        report={"paired_missing_tool_results": 1},
+        message_count=3,
+    ) == {
+        "event": "context_projection",
+        "report": {"paired_missing_tool_results": 1},
+        "message_count": 3,
+    }
+
     assert runtime_events.turn_phase(
         phase="model_request",
         sequence=2,

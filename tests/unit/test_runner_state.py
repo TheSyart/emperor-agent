@@ -14,8 +14,10 @@ class FakeProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]) -> None:
         super().__init__(default_model="fake")
         self.responses = responses
+        self.seen_messages: list[list[dict[str, Any]]] = []
 
     async def chat(self, **kwargs) -> LLMResponse:
+        self.seen_messages.append(kwargs.get("messages") or [])
         if self.responses:
             return self.responses.pop(0)
         return LLMResponse(content="done")
@@ -107,3 +109,41 @@ async def test_runner_emits_tool_batch_phases() -> None:
     assert "tool_batch_start" in [event["phase"] for event in phases]
     assert "tool_batch_done" in [event["phase"] for event in phases]
     assert [event["iteration"] for event in phases if event["phase"] == "model_request"] == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_runner_emits_context_projection_report() -> None:
+    provider = FakeProvider([LLMResponse(content="done")])
+    runner = AgentRunner(
+        provider=provider,
+        model="fake",
+        registry=ToolRegistry(),
+        system_prompt="system",
+    )
+    emitted: list[dict[str, Any]] = []
+
+    async def emit(event: dict[str, Any]) -> None:
+        emitted.append(event)
+
+    await runner.step_async(
+        [
+            {"role": "user", "content": "inspect"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+        ],
+        emit=emit,
+    )
+
+    context_events = [event for event in emitted if event.get("event") == "context_projection"]
+    assert context_events[0]["report"]["paired_missing_tool_results"] == 1
+    assert context_events[0]["message_count"] == 3
+    assert provider.seen_messages[0][-1]["tool_call_id"] == "call_1"

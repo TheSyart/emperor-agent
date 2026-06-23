@@ -743,6 +743,7 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'user_message'; content?: string; attachments?: AttachmentRef[]; source?: string; scheduler?: SchedulerMessageMeta }
   | { event: 'message_delta'; delta?: string }
   | { event: 'context_usage'; used?: number; max?: number; threshold?: number; usage_type?: string; model_role?: string; model?: string; provider?: string; route_reason?: string; estimated_input_tokens?: number }
+  | { event: 'context_projection'; report?: Record<string, unknown>; message_count?: number }
   | { event: 'model_route_fallback'; from_model?: string; to_model?: string; reason?: string; usage_type?: string }
   | { event: 'session_created'; session?: SessionInfo; client_draft_id?: string }
   | { event: 'session_title_updated'; session?: SessionInfo }

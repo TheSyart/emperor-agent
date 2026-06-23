@@ -24,6 +24,7 @@ from .query_state import (
 )
 from .runner_model import ModelCaller
 from .runner_state import TurnPhase, TurnState
+from .runtime import events as runtime_events
 from .tools.execution import ToolExecutionEngine
 from .tools.registry import ToolRegistry
 
@@ -443,6 +444,11 @@ class AgentRunner:
     ):
         projection = self.context_pipeline.project(history)
         governed = projection.messages
+        if emit:
+            await emit(runtime_events.context_projection(
+                report=projection.report,
+                message_count=len(governed),
+            ))
         system_prompt = self.system_prompt
         if self.control_manager is not None:
             system_prompt = f"{system_prompt}\n\n---\n\n{self.control_manager.system_prompt()}"
