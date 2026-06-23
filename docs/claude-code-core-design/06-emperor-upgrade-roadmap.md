@@ -414,7 +414,7 @@ class TaskRecord:
 
 第四阶段：高级上下文恢复
 
-1. ToolResultStore。
+1. ToolResultStore 与 ContextPipeline replacement 已落地：大工具结果可稳定落盘，模型可见消息只保留 preview 与 artifact path；下一步把 runner 默认投影切到 store-backed pipeline。
 2. Microcompact。
 3. Reactive compact。
 4. 主会话后台化。

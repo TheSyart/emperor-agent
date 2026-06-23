@@ -26,15 +26,16 @@ Claude Code 这里有两层预算：
 
 与 Emperor 对照：
 
-- Emperor 当前 `_cap_tool_result()` 对单条 tool message 做硬截断。
-- `_shrink_old_tool_results()` 对旧工具结果做摘要替换。
-- 结果不区分“原始结果”“模型可见结果”“UI 摘要”“落盘 artifact”。
+- Emperor 早期 `_cap_tool_result()` 对单条 tool message 做硬截断，`_shrink_old_tool_results()` 对旧工具结果做摘要替换。
+- 当前已抽出 `agent/context_pipeline/ContextPipeline`，保留 pairing、cap、shrink 的兼容行为。
+- 当前已新增 `ToolResultStore` 并接入 `ContextPipeline(tool_result_store=...)`：大工具结果会落到 `memory/tool-results/`，模型请求投影只保留 preview、artifact path、原始长度和恢复提示。
+- 结果仍未完全贯通到所有旧工具的 `ToolResult(raw, model_content, display_summary, artifacts)` 协议，runner 默认路径也还需要继续注入 store-backed pipeline。
 
 升级建议：
 
-- 新增 `ToolResultStore`：按 turn/tool_use_id 保存大结果 artifact。
+- `ToolResultStore`：按 turn/tool_use_id 保存大结果 artifact，并生成稳定 replacement record。
 - 工具返回 `ToolResult(raw, model_content, display_summary, artifacts)`。
-- `ContextPipeline` 根据工具 `max_result_chars` 做替换。
+- `ContextPipeline` 根据预算阈值做文件化替换；下一步再接入工具级 `max_result_chars`。
 - `ToolResultStore` 保存 replacement record：原始 artifact path、预览文本、替换原因、预算版本、是否已冻结。
 - Runtime event 使用 `display_summary`，模型消息使用 `model_content`。
 
@@ -193,7 +194,7 @@ Claude Code 这里有两层预算：
 
 1. 先把 `_pair_tool_calls()`、`_cap_tool_result()`、`_shrink_old_tool_results()` 原样迁入 pipeline，保持行为不变。
 2. 加入 `ContextBudgetReport` runtime event。
-3. 工具结果 store 只服务新工具，旧工具仍走字符串。
+3. 已让工具结果 store 可服务 `ContextPipeline`；下一步把 runner 默认投影切到 store-backed pipeline，并让新旧工具都能产生 artifact-backed model content。
 4. 拆分 compactor 的上下文摘要与长期记忆更新。
 5. 引入 reactive recovery。
 

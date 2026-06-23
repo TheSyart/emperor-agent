@@ -102,3 +102,45 @@ class ToolResultStore:
         if not meta.exists():
             meta.write_text(json.dumps(record.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
         return record
+
+
+def replace_large_tool_results(
+    history: list[dict[str, Any]],
+    store: ToolResultStore,
+    *,
+    min_bytes: int = DEFAULT_TOOL_RESULT_BUDGET,
+    preview_chars: int = 1000,
+) -> tuple[list[dict[str, Any]], list[ToolResultReplacementRecord]]:
+    out: list[dict[str, Any]] = []
+    replacements: list[ToolResultReplacementRecord] = []
+    for message in history:
+        copied = dict(message)
+        if copied.get("role") == "tool" and content_text_size(copied.get("content")) > min_bytes:
+            content = str(copied.get("content") or "")
+            tool_call_id = str(copied.get("tool_call_id") or copied.get("id") or "unknown_tool_call")
+            record = store.persist_large_result(
+                str(copied.get("turn_id") or "unknown_turn"),
+                tool_call_id,
+                str(copied.get("name") or tool_call_id or "tool"),
+                content,
+                preview_chars=preview_chars,
+            )
+            copied["content"] = _replacement_message(record)
+            replacements.append(record)
+        out.append(copied)
+    return out, replacements
+
+
+def _replacement_message(record: ToolResultReplacementRecord) -> str:
+    return "\n".join([
+        "[tool_result_replacement]",
+        "Tool result stored outside the model context.",
+        f"tool_name: {record.tool_name}",
+        f"tool_call_id: {record.tool_call_id}",
+        f"artifact_path: {record.artifact_path}",
+        f"original_chars: {record.original_chars}",
+        "Use read_file on artifact_path if the exact full output is required.",
+        "",
+        "preview:",
+        record.preview,
+    ]).strip()
