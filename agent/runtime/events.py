@@ -129,6 +129,16 @@ def runtime_task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -
     return runtime_event("runtime_task_cancelled", task=task, reason=reason)
 
 
+def turn_phase(
+    *,
+    phase: str,
+    sequence: int,
+    iteration: int,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return runtime_event("turn_phase", phase=phase, sequence=sequence, iteration=iteration, detail=detail or {})
+
+
 def tool_run_queued(*, id: str, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     return runtime_event("tool_run_queued", id=id, name=name, arguments=arguments or {})
 

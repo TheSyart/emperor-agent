@@ -170,6 +170,19 @@ def test_task_runtime_event_payloads() -> None:
 
 
 def test_tool_run_runtime_event_payloads() -> None:
+    assert runtime_events.turn_phase(
+        phase="model_request",
+        sequence=2,
+        iteration=1,
+        detail={"history_length": 3},
+    ) == {
+        "event": "turn_phase",
+        "phase": "model_request",
+        "sequence": 2,
+        "iteration": 1,
+        "detail": {"history_length": 3},
+    }
+
     assert runtime_events.tool_run_queued(id="call_1", name="grep", arguments={"q": "x"}) == {
         "event": "tool_run_queued",
         "id": "call_1",

@@ -11,6 +11,7 @@ from .control import ClarificationAssessment, TurnPaused, parse_pause_result
 from .providers import LLMProvider, ToolCallRequest
 from .providers.base import is_truncated, run_sync
 from .runner_model import ModelCaller
+from .runner_state import TurnPhase, TurnState
 from .tools.execution import ToolExecutionEngine
 from .tools.registry import ToolRegistry
 
@@ -123,6 +124,13 @@ class AgentRunner:
         *,
         turn_id: str | None = None,
     ) -> str:
+        turn_state = TurnState(turn_id=turn_id)
+        await self._emit_turn_phase(
+            turn_state,
+            TurnPhase.STARTED,
+            emit,
+            detail={"history_length": len(history)},
+        )
         turns = 0
         final_parts: list[str] = []
         empty_retries = 0
@@ -131,6 +139,7 @@ class AgentRunner:
         # 进入 turn 时先记一次快照，防止 LLM 还没回应就被杀
         if self.memory_store is not None:
             self.memory_store.write_checkpoint(history)
+            await self._emit_turn_phase(turn_state, TurnPhase.CHECKPOINT, emit, detail={"reason": "turn_start"})
         while True:
             if self.max_turns is not None and turns >= self.max_turns:
                 reply = f"（达到 max_turns={self.max_turns} 上限，未办妥；history 中已有部分进展）"
@@ -142,10 +151,22 @@ class AgentRunner:
                     extra = {"turn_id": turn_id} if turn_id else None
                     self.memory_store.append_history("assistant", reply, extra=extra)
                     self.memory_store.clear_checkpoint()
+                await self._emit_turn_phase(turn_state, TurnPhase.MAX_TURNS, emit, detail={"max_turns": self.max_turns})
                 return reply
-            turns += 1
+            turns = turn_state.start_iteration()
 
+            await self._emit_turn_phase(turn_state, TurnPhase.MODEL_REQUEST, emit)
             response = await self._ask_model(history, emit, clarification=clarification)
+            await self._emit_turn_phase(
+                turn_state,
+                TurnPhase.MODEL_RESPONSE,
+                emit,
+                detail={
+                    "finish_reason": response.finish_reason,
+                    "tool_call_count": len(response.tool_calls),
+                    "content_chars": len(response.content or ""),
+                },
+            )
             if response.usage:
                 call_meta = self._last_model_call
                 if self.token_tracker:
@@ -226,12 +247,31 @@ class AgentRunner:
                 if response.thinking_blocks:
                     assistant_message["thinking_blocks"] = response.thinking_blocks
                 history.append(assistant_message)
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.TOOL_BATCH_START,
+                    emit,
+                    detail={
+                        "count": len(response.tool_calls),
+                        "names": [call.name for call in response.tool_calls],
+                    },
+                )
                 try:
                     tool_messages = await self._execute_tool_calls(response.tool_calls, emit, clarification=clarification)
                 except TurnPaused as pause:
                     history.extend(pause.tool_messages)
                     if self.memory_store is not None:
                         self.memory_store.write_checkpoint(history)
+                    await self._emit_turn_phase(
+                        turn_state,
+                        TurnPhase.PAUSED,
+                        emit,
+                        detail={
+                            "kind": pause.interaction.get("kind"),
+                            "interaction_id": pause.interaction.get("id"),
+                            "source": "tool",
+                        },
+                    )
                     if emit:
                         for msg in pause.tool_messages:
                             if msg.get("tool_call_id") == pause.interaction.get("parent_call_id"):
@@ -246,10 +286,17 @@ class AgentRunner:
                         await emit({"event": "turn_paused", "interaction": pause.interaction})
                     raise
                 history.extend(tool_messages)
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.TOOL_BATCH_DONE,
+                    emit,
+                    detail={"count": len(tool_messages)},
+                )
                 # 工具批次刚完成 → 此刻 history 处于"tool_calls 与 tool 消息严格配对"的一致点，
                 # 写入 checkpoint；如果 LLM 下一次调用前进程被杀，重启可从此处续命。
                 if self.memory_store is not None:
                     self.memory_store.write_checkpoint(history)
+                    await self._emit_turn_phase(turn_state, TurnPhase.CHECKPOINT, emit, detail={"reason": "tool_batch"})
                 continue
 
             reply = response.content or ""
@@ -262,6 +309,12 @@ class AgentRunner:
                         "role": "user",
                         "content": "（上一轮无任何输出，请继续推进或给出最终答复）",
                     })
+                    await self._emit_turn_phase(
+                        turn_state,
+                        TurnPhase.EMPTY_RETRY,
+                        emit,
+                        detail={"attempt": empty_retries, "max": _MAX_EMPTY_RETRIES},
+                    )
                     if emit:
                         await emit({
                             "event": "tool_error",
@@ -283,6 +336,12 @@ class AgentRunner:
                     "role": "user",
                     "content": "（上一轮被 max_tokens 截断，请从中断处续写，不要重复已输出内容）",
                 })
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.LENGTH_RETRY,
+                    emit,
+                    detail={"attempt": length_retries, "max": _MAX_LENGTH_RECOVERIES},
+                )
                 if emit:
                     await emit({
                         "event": "tool_error",
@@ -292,9 +351,21 @@ class AgentRunner:
                 continue
 
             if clarification.required and reply.strip():
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.PAUSED,
+                    emit,
+                    detail={"kind": "ask", "source": "clarification"},
+                )
                 await self._pause_for_clarification(history, clarification, emit, turn_id=turn_id)
 
             if self._must_pause_for_plan(reply):
+                await self._emit_turn_phase(
+                    turn_state,
+                    TurnPhase.PAUSED,
+                    emit,
+                    detail={"kind": "plan", "source": "plan_final"},
+                )
                 await self._pause_for_plan(history, reply, emit, turn_id=turn_id)
 
             final_parts.append(reply)
@@ -322,15 +393,40 @@ class AgentRunner:
                     )
                     logger.info(f"\n[计划尚未办妥，继续执行...]\n{_render_todos(self.todo_store.todos)}\n")
                     history.append({"role": "user", "content": nudge})
+                    await self._emit_turn_phase(
+                        turn_state,
+                        TurnPhase.TODO_FOLLOWUP,
+                        emit,
+                        detail={"unfinished": len(unfinished)},
+                    )
                     continue
                 logger.info(f"\n[最终计划状态 - 全部办妥]\n{_render_todos(self.todo_store.todos)}\n")
                 self.todo_store.todos = []
 
+            await self._emit_turn_phase(turn_state, TurnPhase.COMPACT_CHECK, emit)
             await self._maybe_compact(history)
             # turn 正常落地 → 清掉 checkpoint
             if self.memory_store is not None:
                 self.memory_store.clear_checkpoint()
+            await self._emit_turn_phase(
+                turn_state,
+                TurnPhase.COMPLETED,
+                emit,
+                detail={"content_chars": len(final_reply)},
+            )
             return final_reply
+
+    @staticmethod
+    async def _emit_turn_phase(
+        state: TurnState,
+        phase: TurnPhase,
+        emit: StreamEmitter | None,
+        *,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        event = state.transition(phase, detail=detail)
+        if emit:
+            await emit(event.to_runtime_event())
 
     async def _ask_model(
         self,

@@ -759,6 +759,7 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'tool_run_completed'; id?: string; name: string; summary?: string }
   | { event: 'tool_run_failed'; id?: string; name: string; message?: string }
   | { event: 'tool_run_cancelled'; id?: string; name: string; reason?: string }
+  | { event: 'turn_phase'; phase?: string; sequence?: number; iteration?: number; detail?: Record<string, unknown> }
   | { event: 'assistant_done'; content?: string }
   | { event: 'error'; message?: string; partial?: boolean }
   | { event: 'control_mode_update'; control?: ControlPayload }
