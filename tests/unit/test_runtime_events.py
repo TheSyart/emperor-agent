@@ -133,3 +133,37 @@ def test_session_runtime_event_payloads() -> None:
         "event": "session_title_updated",
         "session": session,
     }
+
+
+def test_task_runtime_event_payloads() -> None:
+    task = {
+        "id": "task_1",
+        "kind": "subagent",
+        "status": "running",
+        "title": "inspect",
+        "source": "dispatch_subagent",
+    }
+
+    assert runtime_events.task_started(task) == {"event": "task_started", "task": task}
+    assert runtime_events.task_progress(task, progress={"pct": 50}) == {
+        "event": "task_progress",
+        "task": task,
+        "progress": {"pct": 50},
+    }
+    assert runtime_events.task_output(task, offset=1, chunk="hello") == {
+        "event": "task_output",
+        "task": task,
+        "offset": 1,
+        "chunk": "hello",
+    }
+    assert runtime_events.task_done(task) == {"event": "task_done", "task": task}
+    assert runtime_events.task_error(task, error="boom") == {
+        "event": "task_error",
+        "task": task,
+        "error": "boom",
+    }
+    assert runtime_events.task_cancelled(task, reason="stop") == {
+        "event": "task_cancelled",
+        "task": task,
+        "reason": "stop",
+    }

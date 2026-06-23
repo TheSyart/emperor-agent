@@ -8,6 +8,7 @@ import { replayRuntimeEvents } from '../runtime/reducer'
 import { findSubagent, findSubagentTool, findToolSegment } from '../runtime/selectors'
 import { applyPlanEvent, type PlanProjection } from '../runtime/handlers/plans'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
+import { applyTaskEvent, type TaskProjection } from '../runtime/handlers/tasks'
 import { apiUrl, wsUrl } from '../api/backend'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { SCHEDULER_CLIENT_ID_PREFIX, schedulerMessageMeta } from '../runtime/schedulerMeta'
@@ -42,6 +43,7 @@ export function useRuntime(options: {
   const sessionId = ref<string>('')
   const pending = reactive<PendingState>({ label: '', detail: '' })
   const planProjection = reactive<PlanProjection>({ plans: [] })
+  const taskProjection = reactive<TaskProjection>({ tasks: [] })
   const reconnectAttempts = ref(0)
   const socket = ref<WebSocket | null>(null)
   const lastSeq = ref(0)
@@ -570,6 +572,19 @@ export function useRuntime(options: {
     ) {
       const next = applyPlanEvent({ plans: planProjection.plans }, data)
       planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
+      return
+    }
+
+    if (
+      data.event === 'task_started' ||
+      data.event === 'task_progress' ||
+      data.event === 'task_output' ||
+      data.event === 'task_done' ||
+      data.event === 'task_error' ||
+      data.event === 'task_cancelled'
+    ) {
+      const next = applyTaskEvent({ tasks: taskProjection.tasks }, data)
+      taskProjection.tasks.splice(0, taskProjection.tasks.length, ...next.tasks)
       return
     }
 
@@ -1123,6 +1138,7 @@ export function useRuntime(options: {
     sessionId,
     pending,
     planProjection,
+    taskProjection,
     runtimeText,
     switchSession(id: string) {
       sessionId.value = id

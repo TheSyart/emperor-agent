@@ -532,6 +532,23 @@ export interface RuntimePlanRecord {
   verification?: Array<Record<string, unknown>>
 }
 
+export interface RuntimeTaskRecord {
+  id: string
+  kind: string
+  status: string
+  title: string
+  source: string
+  startedAt?: number
+  endedAt?: number | null
+  turnId?: string | null
+  toolCallId?: string | null
+  jobId?: string | null
+  outputPath?: string | null
+  transcriptPath?: string | null
+  progress?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
 export interface AskSegment {
   id: string
   type: 'ask'
@@ -749,6 +766,12 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'plan_step_update'; plan_id?: string; step?: RuntimePlanStep }
   | { event: 'plan_verification_start'; plan_id?: string; step_id?: string; command?: string }
   | { event: 'plan_verification_done'; plan_id?: string; step_id?: string; result?: Record<string, unknown> }
+  | { event: 'task_started'; task?: RuntimeTaskRecord }
+  | { event: 'task_progress'; task?: RuntimeTaskRecord; progress?: Record<string, unknown> }
+  | { event: 'task_output'; task?: RuntimeTaskRecord; offset?: number; chunk?: string }
+  | { event: 'task_done'; task?: RuntimeTaskRecord }
+  | { event: 'task_error'; task?: RuntimeTaskRecord; error?: string }
+  | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
   | { event: 'interaction_cancelled'; interaction?: ControlInteraction; control?: ControlPayload }
   | { event: 'turn_paused'; interaction?: ControlInteraction }
   | { event: 'subagent_start'; parent_id?: string; subagent_id?: string; agent_type?: string; purpose?: string }

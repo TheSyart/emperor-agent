@@ -135,3 +135,27 @@ def plan_verification_start(*, plan_id: str, step_id: str, command: str) -> dict
 
 def plan_verification_done(*, plan_id: str, step_id: str, result: dict[str, Any]) -> dict[str, Any]:
     return runtime_event("plan_verification_done", plan_id=plan_id, step_id=step_id, result=result)
+
+
+def task_started(task: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_started", task=task)
+
+
+def task_progress(task: dict[str, Any], *, progress: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_progress", task=task, progress=progress)
+
+
+def task_output(task: dict[str, Any], *, offset: int, chunk: str) -> dict[str, Any]:
+    return runtime_event("task_output", task=task, offset=offset, chunk=chunk)
+
+
+def task_done(task: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_done", task=task)
+
+
+def task_error(task: dict[str, Any], *, error: str) -> dict[str, Any]:
+    return runtime_event("task_error", task=task, error=error)
+
+
+def task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -> dict[str, Any]:
+    return runtime_event("task_cancelled", task=task, reason=reason)
