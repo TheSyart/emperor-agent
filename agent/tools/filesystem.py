@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 import stat
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 from loguru import logger
 
 from .base import Tool, tool_parameters
+from .context import ToolExecutionContext
+from .results import ToolArtifact, ToolResult
 
 
 class _FsTool(Tool):
@@ -45,6 +48,15 @@ class _FsTool(Tool):
                     f"(workspace: {ws})"
                 ) from exc
         return p
+
+    def _display_path(self, path: Path) -> str:
+        workspace = self._workspace_root()
+        if workspace:
+            try:
+                return path.relative_to(workspace).as_posix()
+            except ValueError:
+                pass
+        return path.as_posix()
 
 
 @tool_parameters({
@@ -126,6 +138,67 @@ class ReadFileTool(_FsTool):
         except Exception as e:
             logger.warning(f"[read_file] {e}")
             return f"Error reading file: {e}"
+
+    def map_result(self, result: Any, context: ToolExecutionContext) -> ToolResult:
+        text = str(result)
+        if text.startswith("Error:"):
+            return ToolResult.from_text(text, is_error=True)
+        args = context.arguments or {}
+        requested_path = str(args.get("path") or "")
+        display_path = requested_path
+        byte_size: int | None = None
+        try:
+            resolved = self._resolve(requested_path)
+            display_path = self._display_path(resolved)
+            read_path = _sidecar_path(resolved) or resolved
+            byte_size = read_path.stat().st_size
+        except Exception as exc:
+            logger.debug(f"[read_file.map_result] metadata fallback for {requested_path}: {exc}")
+
+        line_start, line_end, total_lines, truncated = _read_file_line_metadata(text)
+        summary = (
+            f"read_file {display_path} lines {line_start}-{line_end} of {total_lines}"
+            if line_start and line_end and total_lines
+            else f"read_file {display_path} ({len(text)} chars)"
+        )
+        metadata: dict[str, Any] = {
+            "tool": "read_file",
+            "path": display_path,
+            "line_start": line_start,
+            "line_end": line_end,
+            "total_lines": total_lines,
+            "truncated": truncated,
+        }
+        metadata = {key: value for key, value in metadata.items() if value is not None}
+        return ToolResult(
+            model_content=text,
+            display_summary=summary,
+            raw_content=text,
+            artifacts=[ToolArtifact(path=display_path, kind="source_file", bytes=byte_size)],
+            metadata=metadata,
+        )
+
+
+def _read_file_line_metadata(text: str) -> tuple[int | None, int | None, int | None, bool]:
+    showing = re.search(r"\(Showing lines (\d+)-(\d+) of (\d+)\.", text)
+    if showing:
+        return int(showing.group(1)), int(showing.group(2)), int(showing.group(3)), True
+    end = re.search(r"\(End of file .+?(\d+) lines total\)", text)
+    if end:
+        total = int(end.group(1))
+        numbered = [
+            line for line in text.splitlines()
+            if re.match(r"^\d+\|", line)
+        ]
+        line_start = _line_number_from_numbered_line(numbered[0]) if numbered else None
+        line_end = _line_number_from_numbered_line(numbered[-1]) if numbered else None
+        return line_start, line_end, total, False
+    return None, None, None, False
+
+
+def _line_number_from_numbered_line(line: str) -> int | None:
+    match = re.match(r"^(\d+)\|", line)
+    return int(match.group(1)) if match else None
 
 
 def _sidecar_path(path: Path) -> Path | None:

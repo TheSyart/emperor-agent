@@ -53,7 +53,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - Advanced context budget work has started: `ToolResultStore` is available, `ContextPipeline(tool_result_store=...)` can replace large tool messages with stable artifact-backed model content, `AgentRunner` uses store-backed projection when a memory store is present, and tool-level `max_result_chars` budgets flow from `ToolRegistry` into that projection.
 - First built-in result budgets are now configured: `read_file=24000`, `grep=16000`, `glob=12000`, `run_command=12000`, `web_fetch=10000`.
 - Structured `ToolResult` is now preserved across `ToolRegistry.execute_result()`, `ToolExecutionEngine`, `AgentRunner` tool messages/runtime summaries, and WebUI replay types. Legacy `execute()` remains string-compatible.
-- The next upgrade lane is continuing the later Epics: native artifact-aware mappings for high-value built-in tools, MCP/external-tool budget overrides, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- First native high-value tool mappings are now in place: `read_file` emits source-file artifact metadata and line ranges, `grep` emits match/search metadata, and `run_command` emits command/exit/timeout/truncation metadata while keeping legacy `execute()` string-compatible.
+- The next upgrade lane is continuing the later Epics: native mapping for `edit_file`/write tools, MCP/external-tool budget overrides, tool-card artifact display, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 

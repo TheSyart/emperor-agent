@@ -143,3 +143,68 @@ def test_builtin_high_output_tools_define_result_budgets(tmp_path: Path) -> None
         "run_command": 12_000,
         "web_fetch": 10_000,
     }
+
+
+def test_read_file_execute_result_adds_source_artifact_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("def main():\n    return 1\nprint(main())\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(ReadFileTool(tmp_path))
+
+    result = registry.execute_result("read_file", {"path": "app.py", "offset": 1, "limit": 2})
+
+    assert result.model_content.startswith("1| def main():")
+    assert result.display_summary == "read_file app.py lines 1-2 of 3"
+    assert result.raw_content == result.model_content
+    assert result.artifacts[0].path == "app.py"
+    assert result.artifacts[0].kind == "source_file"
+    assert result.metadata == {
+        "tool": "read_file",
+        "path": "app.py",
+        "line_start": 1,
+        "line_end": 2,
+        "total_lines": 3,
+        "truncated": True,
+    }
+
+
+def test_grep_execute_result_adds_search_metadata(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("needle = 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("other = 2\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(GrepTool(tmp_path))
+
+    result = registry.execute_result(
+        "grep",
+        {"pattern": "needle", "path": ".", "type": "py", "output_mode": "files_with_matches"},
+    )
+
+    assert result.model_content == "a.py"
+    assert result.display_summary == "grep 'needle' matched 1 file in ."
+    assert result.metadata == {
+        "tool": "grep",
+        "pattern": "needle",
+        "path": ".",
+        "output_mode": "files_with_matches",
+        "matched_files": 1,
+        "result_lines": 1,
+        "truncated": False,
+    }
+
+
+def test_run_command_execute_result_adds_command_metadata(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(RunCommand(tmp_path))
+
+    result = registry.execute_result("run_command", {"command": "printf ok"})
+
+    assert result.model_content == "ok"
+    assert result.display_summary == "run_command exit 0: printf ok"
+    assert result.raw_content == "ok"
+    assert result.metadata == {
+        "tool": "run_command",
+        "command": "printf ok",
+        "exit_code": 0,
+        "timed_out": False,
+        "truncated": False,
+    }

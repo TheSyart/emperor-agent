@@ -108,6 +108,7 @@ class ToolRegistry:
         cast = prepared.arguments
         context = ToolExecutionContext(
             root=Path(root or ".").resolve(),
+            arguments=cast,
             turn_id=turn_id,
             parent_call_id=parent_call_id,
             emit=emit,

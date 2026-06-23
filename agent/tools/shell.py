@@ -4,10 +4,13 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from .base import Tool, tool_parameters
+from .context import ToolExecutionContext
+from .results import ToolResult
 from .schema import StringSchema, tool_parameters_schema
 
 # 危险命令模式（regex）——匹配即拒绝
@@ -106,3 +109,42 @@ class RunCommand(Tool):
         except OSError as exc:
             logger.warning(f"Command failed to start: {command[:80]}: {exc}")
             return f"Error: command failed to start: {exc}"
+
+    def map_result(self, result: Any, context: ToolExecutionContext) -> ToolResult:
+        text = str(result)
+        command = str((context.arguments or {}).get("command") or "")
+        timed_out = "command timed out" in text
+        exit_code = _extract_exit_code(text)
+        is_error = text.startswith("Error:")
+        if exit_code is None and not is_error:
+            exit_code = 0
+        summary = (
+            f"run_command timed out: {_short_command(command)}"
+            if timed_out
+            else f"run_command exit {exit_code if exit_code is not None else 'unknown'}: {_short_command(command)}"
+        )
+        return ToolResult(
+            model_content=text,
+            display_summary=summary,
+            raw_content=text,
+            metadata={
+                "tool": "run_command",
+                "command": command,
+                "exit_code": exit_code,
+                "timed_out": timed_out,
+                "truncated": "truncated, total" in text,
+            },
+            is_error=is_error,
+        )
+
+
+def _extract_exit_code(text: str) -> int | None:
+    match = re.search(r"command exited with code (\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def _short_command(command: str, limit: int = 120) -> str:
+    command = " ".join(command.split())
+    if len(command) <= limit:
+        return command
+    return f"{command[:limit - 3].rstrip()}..."

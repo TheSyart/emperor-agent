@@ -11,7 +11,9 @@ from typing import Any, TypeVar
 
 from loguru import logger
 
+from .context import ToolExecutionContext
 from .filesystem import _FsTool
+from .results import ToolResult
 
 _DEFAULT_HEAD_LIMIT = 250
 T = TypeVar("T")
@@ -561,3 +563,70 @@ class GrepTool(_SearchTool):
         except Exception as e:
             logger.warning(f"[grep] {e}")
             return f"Error searching files: {e}"
+
+    def map_result(self, result: Any, context: ToolExecutionContext) -> ToolResult:
+        text = str(result)
+        if text.startswith("Error:"):
+            return ToolResult.from_text(text, is_error=True)
+        args = context.arguments or {}
+        pattern = str(args.get("pattern") or "")
+        path = str(args.get("path") or ".")
+        output_mode = str(args.get("output_mode") or "files_with_matches")
+        result_lines = _non_note_line_count(text)
+        no_matches = text.startswith("No matches found")
+        truncated = "(pagination:" in text or "(output truncated" in text
+        matched_files = _grep_matched_files(text, output_mode, no_matches)
+        summary = _grep_summary(pattern, path, output_mode, matched_files, result_lines, no_matches)
+        return ToolResult(
+            model_content=text,
+            display_summary=summary,
+            raw_content=text,
+            metadata={
+                "tool": "grep",
+                "pattern": pattern,
+                "path": path,
+                "output_mode": output_mode,
+                "matched_files": matched_files,
+                "result_lines": result_lines,
+                "truncated": truncated,
+            },
+        )
+
+
+def _non_note_line_count(text: str) -> int:
+    return len([
+        line for line in text.splitlines()
+        if line.strip() and not line.startswith("(")
+    ])
+
+
+def _grep_matched_files(text: str, output_mode: str, no_matches: bool) -> int:
+    if no_matches:
+        return 0
+    lines = [
+        line for line in text.splitlines()
+        if line.strip() and not line.startswith("(")
+    ]
+    if output_mode == "content":
+        paths = {line.split(":", 1)[0] for line in lines if ":" in line and not line[:1].isspace()}
+        return len(paths)
+    if output_mode == "count":
+        return len([line for line in lines if ": " in line])
+    return len(lines)
+
+
+def _grep_summary(
+    pattern: str,
+    path: str,
+    output_mode: str,
+    matched_files: int,
+    result_lines: int,
+    no_matches: bool,
+) -> str:
+    if no_matches:
+        return f"grep {pattern!r} found no matches in {path}"
+    if output_mode == "content":
+        return f"grep {pattern!r} returned {result_lines} match block{'s' if result_lines != 1 else ''} in {matched_files} file{'s' if matched_files != 1 else ''}"
+    if output_mode == "count":
+        return f"grep {pattern!r} counted matches in {matched_files} file{'s' if matched_files != 1 else ''}"
+    return f"grep {pattern!r} matched {matched_files} file{'s' if matched_files != 1 else ''} in {path}"
