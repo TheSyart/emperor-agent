@@ -303,15 +303,11 @@ Plan 模式只读探索
 - 验证命令失败时，PlanStep 会进入 `failed`，Runner 会追加 `[PLAN_VERIFICATION_FAILED]` 诊断 follow-up，要求修复或必要时询问用户。
 - 最终答复前，Runner 会通过 Final Answer Gate 检查最新 PlanRecord；若仍有 pending/active/failed step，会追加 `[PLAN_INCOMPLETE]` 并继续执行。
 - 后端发送 `plan_runtime_update`，前端已有 reducer 可重放计划状态。
+- PlanCard 已接入 `planProjection`，会展示 step 状态、文件/命令、验证 evidence 和失败原因；刷新后由 backend runtime replay 重建。
 
 后续任务点：
 
-1. **Plan Replay UI**
-   - 目标文件：`desktop/src/renderer/src/runtime/handlers/plans.ts`、`desktop/src/renderer/src/components/chat/PlanCard.vue`。
-   - 行为：PlanCard 展示 step 状态、验证 evidence、失败原因；刷新后从 backend runtime replay 重建。
-   - 验收：`plan_runtime_update`、`plan_step_update`、`plan_verification_done` 三类事件在 replay 后投影一致。
-
-2. **Project Execution Prompt Contract**
+1. **Project Execution Prompt Contract**
    - 目标文件：`templates/TOOL.md`、`templates/SOUL.md`、`agent/control/manager.py`。
    - 行为：批准计划后的系统消息明确要求每步执行前保持一个 active todo，每步完成必须记录验证证据，不能跳过失败诊断。
    - 验收：prompt contract 测试能断言批准计划后的恢复消息包含 todo、verification、blocked/failure 规则。

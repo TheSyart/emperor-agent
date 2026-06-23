@@ -370,6 +370,140 @@
     color: rgb(var(--fg-muted));
   }
 
+  .plan-runtime {
+    @apply mt-3 rounded-md border px-3 py-3;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset) / 0.45);
+  }
+
+  .plan-runtime-head {
+    @apply flex flex-wrap items-center justify-between gap-2;
+  }
+
+  .plan-runtime-head span {
+    @apply font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-runtime-status,
+  .plan-step-status {
+    @apply rounded border px-2 py-0.5 font-mono text-[10px] not-italic;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-runtime-status.executing,
+  .plan-step-item.active .plan-step-status {
+    border-color: rgb(var(--warn) / 0.42);
+    color: rgb(var(--warn));
+  }
+
+  .plan-runtime-status.completed,
+  .plan-step-item.done .plan-step-status {
+    border-color: rgb(var(--ok) / 0.42);
+    color: rgb(var(--ok));
+  }
+
+  .plan-runtime-status.failed,
+  .plan-step-item.failed .plan-step-status,
+  .plan-step-item.blocked .plan-step-status {
+    border-color: rgb(var(--danger) / 0.42);
+    color: rgb(var(--danger));
+  }
+
+  .plan-step-list {
+    @apply mt-3 space-y-2;
+  }
+
+  .plan-step-item {
+    @apply rounded-md border px-3 py-2.5;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+  }
+
+  .plan-step-item.active {
+    border-color: rgb(var(--warn) / 0.35);
+  }
+
+  .plan-step-item.done {
+    border-color: rgb(var(--ok) / 0.35);
+  }
+
+  .plan-step-item.failed,
+  .plan-step-item.blocked {
+    border-color: rgb(var(--danger) / 0.38);
+  }
+
+  .plan-step-head {
+    @apply grid items-start gap-2;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .plan-step-index {
+    @apply flex h-5 w-5 items-center justify-center rounded-full border font-mono text-[10px];
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-step-copy {
+    @apply min-w-0;
+  }
+
+  .plan-step-copy strong {
+    @apply block break-words text-xs font-semibold leading-5;
+    color: rgb(var(--fg));
+  }
+
+  .plan-step-copy p {
+    @apply mt-1 break-words text-xs leading-5;
+    color: rgb(var(--fg-muted));
+  }
+
+  .plan-step-meta {
+    @apply mt-2 flex flex-wrap gap-2 pl-7 text-[11px] leading-5;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-step-meta span {
+    @apply min-w-0 break-all rounded border px-2 py-0.5;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-inset));
+  }
+
+  .plan-step-evidence {
+    @apply mt-2 space-y-1 rounded-md border px-3 py-2 text-xs leading-5;
+    border-color: rgb(var(--ok) / 0.28);
+    background: rgb(var(--ok) / 0.06);
+    color: rgb(var(--fg-muted));
+  }
+
+  .plan-step-evidence.failed {
+    border-color: rgb(var(--danger) / 0.32);
+    background: rgb(var(--danger) / 0.06);
+  }
+
+  .plan-step-evidence span {
+    @apply block font-mono text-[10px] uppercase tracking-wider;
+    color: rgb(var(--fg-subtle));
+  }
+
+  .plan-step-evidence code {
+    @apply block break-all rounded px-2 py-1 font-mono text-[11px];
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
+  .plan-step-evidence pre {
+    @apply max-h-32 overflow-auto whitespace-pre-wrap break-words rounded px-2 py-1 font-mono text-[11px];
+    background: rgb(var(--bg));
+    color: rgb(var(--danger));
+  }
+
+  .plan-runtime-empty {
+    @apply mt-2 text-xs leading-5;
+    color: rgb(var(--fg-subtle));
+  }
+
   .plan-toggle {
     @apply relative z-10 inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-left transition disabled:opacity-50;
     border-color: rgb(var(--border));

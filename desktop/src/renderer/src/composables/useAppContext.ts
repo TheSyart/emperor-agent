@@ -13,6 +13,7 @@ import type {
   WatchlistDecision,
 } from '../types'
 import type { SlashPaletteItem } from '../commands'
+import type { PlanProjection } from '../runtime/handlers/plans'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -26,6 +27,7 @@ export interface AppContext {
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>
   pending: PendingState
+  planProjection: PlanProjection
   runtimeText: () => string
 
   commands: ComputedRef<SlashPaletteItem[]>

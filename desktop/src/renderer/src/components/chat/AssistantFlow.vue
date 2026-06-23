@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AssistantMessage, AssistantSegment, ThoughtSegment } from '../../types'
+import type { AssistantMessage, AssistantSegment, ControlInteraction, RuntimePlanRecord, ThoughtSegment } from '../../types'
 import { actionIcons, avatarIcons } from '../../icons'
+import { latestPlanForInteraction } from '../../runtime/handlers/plans'
 import MarkdownBlock from './MarkdownBlock.vue'
 import TodoPanel from './TodoPanel.vue'
 import ToolEvent from './ToolEvent.vue'
@@ -9,7 +10,7 @@ import AskCard from './AskCard.vue'
 import PlanCard from './PlanCard.vue'
 import ThoughtEvent from './ThoughtEvent.vue'
 
-const props = defineProps<{ message: AssistantMessage }>()
+const props = defineProps<{ message: AssistantMessage; plans?: RuntimePlanRecord[] }>()
 const copied = ref(false)
 
 const messageText = computed(() => {
@@ -52,6 +53,10 @@ function segmentClass(segment: AssistantSegment) {
 
 function isStreamingText(segment: AssistantSegment, index: number) {
   return props.message.streaming && segment.type === 'text' && index === visibleSegments.value.length - 1
+}
+
+function planForInteraction(interaction: ControlInteraction) {
+  return latestPlanForInteraction(props.plans || [], interaction)
 }
 
 async function copyMessage() {
@@ -103,7 +108,7 @@ async function copyMessage() {
             <AskCard :interaction="segment.interaction" />
           </div>
           <div v-else-if="segment.type === 'plan'" class="timeline-node control-node">
-            <PlanCard :interaction="segment.interaction" />
+            <PlanCard :interaction="segment.interaction" :plan="planForInteraction(segment.interaction)" />
           </div>
         </template>
         <div

@@ -1,4 +1,4 @@
-import type { RuntimePlanRecord, RuntimePlanStep, WsEvent } from '../../types'
+import type { ControlInteraction, RuntimePlanRecord, RuntimePlanStep, WsEvent } from '../../types'
 
 export interface PlanProjection {
   plans: RuntimePlanRecord[]
@@ -39,6 +39,21 @@ export function applyPlanEvent(projection: PlanProjection, event: PlanEvent): Pl
       return plan
     }),
   }
+}
+
+export function latestPlanForInteraction(
+  plans: RuntimePlanRecord[],
+  interaction?: ControlInteraction | null,
+): RuntimePlanRecord | null {
+  if (!plans.length) return null
+  const planId = planIdFromInteraction(interaction)
+  if (planId) return plans.find((plan) => plan.id === planId) || null
+  return plans[plans.length - 1] || null
+}
+
+export function planIdFromInteraction(interaction?: ControlInteraction | null): string {
+  const value = interaction?.meta?.plan_id
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function upsertStep(steps: RuntimePlanStep[], step: RuntimePlanStep): RuntimePlanStep[] {

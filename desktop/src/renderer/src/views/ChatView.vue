@@ -63,7 +63,7 @@ function normalizeReasoningEffort(value?: string | null) {
     </header>
 
     <div class="chat-body">
-      <MessageList :messages="ctx.messages.value" />
+      <MessageList :messages="ctx.messages.value" :plans="ctx.planProjection.plans" />
 
       <div class="chat-bottom-stack">
         <PendingBar :pending="ctx.pending" />

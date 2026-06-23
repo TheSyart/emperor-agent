@@ -45,6 +45,12 @@ This upgrade spans independent subsystems. Execute in this sequence so every sta
 
 Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain transcript relies on structured tool results and execution lifecycle events.
 
+## Current Progress
+
+- Project Execution and Plan Runtime v2 has a durable `PlanRecord`/`PlanStep` store, plan approval activation, todo synchronization, command verification evidence, verification failure follow-up, and final-answer gate.
+- Plan replay is now visible in the Chat UI: `planProjection` is exposed through app context, `PlanCard` renders step status, files, commands, verification evidence, and failed stderr/stdout summaries, and `planProjection.test.ts` covers interaction-to-plan selection.
+- The next Project Execution task is the Prompt Contract stage: approved-plan follow-up messages should make active todo maintenance, verification evidence, failure repair, and blocked-state escalation explicit in tests and prompts.
+
 ## File Structure
 
 ### New backend modules

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { slashCommands } from '../../commands'
-import type { ChatMessage, UserMessage } from '../../types'
+import type { ChatMessage, RuntimePlanRecord, UserMessage } from '../../types'
 import { avatarIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
 import wordmarkUrl from '../../../../../../assets/generated/emperoragent-wordmark.png'
 
-const props = defineProps<{ messages: ChatMessage[] }>()
+const props = defineProps<{ messages: ChatMessage[]; plans?: RuntimePlanRecord[] }>()
 const scroller = ref<HTMLElement | null>(null)
 const schedulerClientIdPrefix = 'scheduler:'
 const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
@@ -121,7 +121,7 @@ function schedulerTriggerPrefix(content: string) {
             </div>
           </div>
         </article>
-        <AssistantFlow v-else :message="message" />
+        <AssistantFlow v-else :message="message" :plans="props.plans || []" />
       </template>
     </div>
   </section>
