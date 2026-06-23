@@ -58,7 +58,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - First native high-value tool mappings are now in place: `read_file` emits source-file artifact metadata and line ranges, `grep` emits match/search metadata, and `run_command` emits command/exit/timeout/truncation metadata while keeping legacy `execute()` string-compatible.
 - Write/edit result mapping is now in place: `write_file` and `edit_file` emit file artifacts, concise summaries, unified diff previews, and change metadata while keeping legacy `execute()` string-compatible.
 - Tool-card evidence display is now in place: Chat tool cards render artifact paths, artifact kind/size, and diff previews from replayed runtime metadata.
-- The next upgrade lane is Project Execution and Plan Runtime v3: plan trigger policy, plan draft phases, evidence gate, plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- Project Execution and Plan Runtime v3 has started: `PlanDecisionPolicy` now deterministically classifies required/recommended/proceed planning cases and Runner blocks non-read-only tools for required-plan requests before files are modified.
+- The next upgrade lane is continuing Plan Runtime v3: plan draft phases, evidence gate, plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 
@@ -2888,7 +2889,7 @@ Claude Code behaviors to absorb:
 - Modify: `agent/runner.py`
 - Create: `tests/unit/test_plan_decision_policy.py`
 
-- [ ] **Step 1: Write policy tests**
+- [x] **Step 1: Write policy tests**
 
 Create `tests/unit/test_plan_decision_policy.py` with these cases:
 
@@ -2905,7 +2906,7 @@ Run:
 
 Expected before implementation: import failure for `agent.control.plan_policy`.
 
-- [ ] **Step 2: Add `PlanDecisionPolicy`**
+- [x] **Step 2: Add `PlanDecisionPolicy`**
 
 Add a dataclass result:
 
@@ -2919,11 +2920,11 @@ class PlanDecision:
 
 Add `PlanDecisionPolicy.assess(user_message, *, mode, has_pending)` with deterministic rules first. Do not call an LLM in this phase.
 
-- [ ] **Step 3: Wire policy as a pre-write guard**
+- [x] **Step 3: Wire policy as a pre-write guard**
 
 In `AgentRunner`, before non-read-only tools execute under `ask_before_edit` or `auto`, ask `ControlManager` whether the latest user request requires planning. If `required`, return a control tool result that asks the model to enter Plan mode or triggers `ask_user` with a clear reason. Keep simple work unblocked.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -2932,6 +2933,15 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Actual verification:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_decision_policy.py tests/unit/test_control.py tests/unit/test_runner_state.py -q
+.venv/bin/python -m ruff check agent/control agent/runner.py tests/unit/test_plan_decision_policy.py tests/unit/test_control.py
+```
+
+Result: `26 passed`; ruff passed.
 
 ### Task 6G: Plan Draft State and Phases
 

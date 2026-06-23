@@ -274,7 +274,13 @@ class AgentRunner:
                     },
                 )
                 try:
-                    tool_messages = await self._execute_tool_calls(response.tool_calls, emit, clarification=clarification)
+                    plan_decision = self._assess_plan_decision(history)
+                    tool_messages = await self._execute_tool_calls(
+                        response.tool_calls,
+                        emit,
+                        clarification=clarification,
+                        plan_decision=plan_decision,
+                    )
                 except TurnPaused as pause:
                     history.extend(pause.tool_messages)
                     if self.memory_store is not None:
@@ -587,6 +593,7 @@ class AgentRunner:
         emit: StreamEmitter | None,
         *,
         clarification: ClarificationAssessment | None = None,
+        plan_decision: Any | None = None,
     ) -> list[dict[str, Any]]:
         results_by_id: dict[str, ToolResult] = {}
         plan_followups: list[dict[str, Any]] = []
@@ -600,7 +607,12 @@ class AgentRunner:
                     step_id=verification_target["step_id"],
                     command=verification_target["command"],
                 ))
-            result = await self._run_tool_result(call, emit, clarification=clarification)
+            result = await self._run_tool_result(
+                call,
+                emit,
+                clarification=clarification,
+                plan_decision=plan_decision,
+            )
             content = result.model_content
             results_by_id[call.id] = result
             self._maybe_pause_for_control(content, tool_calls, results_by_id)
@@ -632,9 +644,12 @@ class AgentRunner:
         emit: StreamEmitter | None = None,
         *,
         clarification: ClarificationAssessment | None = None,
+        plan_decision: Any | None = None,
     ) -> ToolResult:
         if clarification and clarification.required and self._ask_guard_blocks_tool(call.name):
             return ToolResult.from_text(_ASK_GUARD_BLOCK, is_error=True)
+        if self._plan_guard_blocks_tool(call, plan_decision):
+            return ToolResult.from_text(_plan_guard_message(call, plan_decision), is_error=True)
         if self.control_manager is not None:
             decision = self.control_manager.assess_permission(call.name, call.arguments, self.registry)
             if decision.requires_approval:
@@ -666,6 +681,18 @@ class AgentRunner:
             await self._run_tool_result(call, emit=emit, clarification=clarification)
         ).model_content
 
+    def _assess_plan_decision(self, history: list[dict[str, Any]]) -> Any | None:
+        if self.control_manager is None or not hasattr(self.control_manager, "assess_plan_decision"):
+            return None
+        latest = _latest_user_text(history)
+        if not latest:
+            return None
+        try:
+            return self.control_manager.assess_plan_decision(latest)
+        except Exception as exc:
+            logger.warning(f"plan decision assessment failed: {exc}")
+            return None
+
     def _assess_clarification(self, history: list[dict[str, Any]]) -> ClarificationAssessment:
         if self.control_manager is None:
             return ClarificationAssessment()
@@ -682,6 +709,19 @@ class AgentRunner:
         if tool is None:
             return False
         return not bool(getattr(tool, "read_only", False))
+
+    def _plan_guard_blocks_tool(self, call: ToolCallRequest, decision: Any | None) -> bool:
+        if getattr(decision, "behavior", "") != "required":
+            return False
+        if call.name in {"ask_user", "propose_plan", "update_todos"}:
+            return False
+        tool = self.registry.get(call.name)
+        if tool is None:
+            return False
+        try:
+            return not bool(tool.is_read_only(call.arguments))
+        except Exception:
+            return not bool(getattr(tool, "read_only", False))
 
     async def _pause_for_clarification(
         self,
@@ -935,6 +975,37 @@ def _summarize_tool_result(content: str, limit: int = 560) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()}..."
+
+
+def _plan_guard_message(call: ToolCallRequest, decision: Any) -> str:
+    signals = ", ".join(getattr(decision, "signals", []) or [])
+    reason = str(getattr(decision, "reason", "") or "high-impact work requires planning")
+    return "\n".join([
+        "Error: PLAN_GUARD_REQUIRED",
+        f"tool: {call.name}",
+        f"reason: {reason}",
+        f"signals: {signals}",
+        "Before using write or high-impact tools for this request, enter Plan mode, perform read-only exploration, "
+        "submit a concrete plan, and wait for user approval.",
+    ])
+
+
+def _latest_user_text(history: list[dict[str, Any]]) -> str:
+    for message in reversed(history):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = [
+                str(item.get("text") or "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            return "\n".join(parts).strip()
+        return str(content or "").strip()
+    return ""
 
 
 def _context_used_from_usage(usage: dict[str, int]) -> int:

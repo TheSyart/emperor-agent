@@ -17,6 +17,7 @@ from .models import (
     Question,
     now_ts,
 )
+from .plan_policy import PlanDecision, PlanDecisionPolicy
 from .policy import ControlPolicy
 from .store import ControlStore
 
@@ -35,6 +36,7 @@ class ControlManager:
         self.plan_store = PlanStore(root)
         self.policy = ControlPolicy(self)
         self.clarification_policy = ClarificationPolicy()
+        self.plan_decision_policy = PlanDecisionPolicy()
         self.permission_manager = PermissionManager(self)
         self.todo_store = None
 
@@ -161,6 +163,15 @@ class ControlManager:
 
     def assess_clarification(self, history: list[dict[str, Any]]) -> ClarificationAssessment:
         return self.clarification_policy.assess(history)
+
+    def assess_plan_decision(self, user_message: str) -> PlanDecision:
+        state = self.store.load()
+        has_pending = bool(state.pending and state.pending.status == InteractionStatus.WAITING.value)
+        return self.plan_decision_policy.assess(
+            user_message,
+            mode=state.mode,
+            has_pending=has_pending,
+        )
 
     def should_enforce_plan_final(self) -> bool:
         return self.mode == ControlMode.PLAN.value

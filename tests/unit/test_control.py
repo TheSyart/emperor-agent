@@ -288,6 +288,40 @@ async def test_runner_ask_guard_pauses_plain_final_for_ambiguous_task(tmp_path: 
 
 
 @pytest.mark.anyio
+async def test_runner_plan_guard_blocks_high_impact_write_before_planning(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    registry = make_registry(manager, tmp_path)
+    provider = FakeProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_write",
+                    name="write_file",
+                    arguments={"path": "auth.py", "content": "new auth"},
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        LLMResponse(content="我需要先进入计划模式。"),
+    ])
+    runner = AgentRunner(
+        provider=provider,
+        model="fake",
+        registry=registry,
+        system_prompt="system",
+        control_manager=manager,
+    )
+    history = [{"role": "user", "content": "Redesign authentication architecture across modules"}]
+
+    await runner.step_async(history)
+
+    tool_message = next(msg for msg in history if msg.get("role") == "tool")
+    assert "PLAN_GUARD_REQUIRED" in tool_message["content"]
+    assert not (tmp_path / "auth.py").exists()
+
+
+@pytest.mark.anyio
 async def test_answer_resume_injects_user_message(tmp_path: Path) -> None:
     manager = ControlManager(tmp_path)
     interaction = manager.create_ask(questions=[make_question()])

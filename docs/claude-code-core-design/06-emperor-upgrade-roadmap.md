@@ -308,7 +308,7 @@ Plan 模式只读探索
 
 后续任务点不要直接跳到通用 Task Framework。应先完成 `07-project-execution-plan-runtime.md` 中的 PE-1 至 PE-9：
 
-- `PE-1 PlanDecisionPolicy`：判断何时必须进入计划、何时建议计划、何时直接执行。
+- `PE-1 PlanDecisionPolicy`：已落地第一版，能判断何时必须进入计划、何时建议计划、何时直接执行，并在 required-plan 请求写入前返回 `PLAN_GUARD_REQUIRED`。
 - `PE-2 PlanDraftState`：把探索发现、相关文件、未决问题、候选方案、推荐方案和验证策略结构化保存。
 - `PE-3 只读探索扇出`：Plan 模式允许只读探索子代理，并把结果写入 plan draft。
 - `PE-4 结构化计划质量门禁`：拒绝泛泛计划，强制 step 可执行、可验证。

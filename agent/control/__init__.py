@@ -17,6 +17,7 @@ from .models import (
     Question,
     QuestionOption,
 )
+from .plan_policy import PlanDecision, PlanDecisionPolicy
 from .policy import CONTROL_TOOL_NAMES, ControlPolicy
 from .store import ControlStore
 from .tools import AskUserTool, ProposePlanTool, parse_pause_result
@@ -42,6 +43,8 @@ __all__ = [
     "PermissionManager",
     "PermissionMode",
     "PermissionPolicy",
+    "PlanDecision",
+    "PlanDecisionPolicy",
     "RiskLevel",
     "TurnPaused",
     "parse_pause_result",
