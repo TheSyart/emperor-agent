@@ -1,3 +1,4 @@
+from .context import PlanContextBuilder
 from .evidence import PlanEvidenceError, format_plan_evidence_error
 from .execution import PlanExecutionState
 from .models import PlanDraftPhase, PlanDraftState, PlanRecord, PlanStatus, PlanStep, PlanStepStatus
@@ -7,6 +8,7 @@ from .verification import VerificationCommand, VerificationResult
 
 __all__ = [
     "PlanExecutionState",
+    "PlanContextBuilder",
     "PlanEvidenceError",
     "PlanDraftPhase",
     "PlanDraftState",

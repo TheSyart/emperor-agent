@@ -62,7 +62,8 @@ Do not start Phase 6 before Phase 3 and Phase 4 are merged, because sidechain tr
 - `PlanDraftState` now persists plan phase, relevant files, open/resolved questions, alternatives, recommended approach, verification strategy, and plan comment revision snapshots across `PlanRecord` reloads.
 - `PlanQualityGate` now rejects weak `propose_plan` calls before a PlanCard is created, requiring concrete scope, verification, and high-risk risk/rollback notes.
 - `PlanEvidenceGate` now rejects `update_todos` completion for command-backed PlanSteps until matching verification evidence has passed, preserves explicit `plan_step_id`, and requires `blocked_reason` for blocked steps.
-- The next upgrade lane is continuing Plan Runtime v3: plan recovery attachments, independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
+- `PlanContextBuilder` now injects durable plan runtime context into model projection and memory compaction prompts, preserving active step, failed evidence, blocked reason, open questions, files, and artifacts after compaction/recovery.
+- The next upgrade lane is continuing Plan Runtime v3: independent verification, then external-tool budget overrides, MCP/external artifact mapping, microcompact/reactive compact, task framework consolidation, and sidechain/runtime replay hardening.
 
 ## File Structure
 
@@ -3102,7 +3103,7 @@ Result: `41 passed`; ruff passed.
 - Modify: `agent/compactor.py`
 - Create: `tests/unit/test_plan_context_attachment.py`
 
-- [ ] **Step 1: Add attachment tests**
+- [x] **Step 1: Add attachment tests**
 
 Projecting context with an executing plan should inject a compact meta message containing:
 
@@ -3115,15 +3116,15 @@ Projecting context with an executing plan should inject a compact meta message c
 
 Completed plans should not be injected unless the current user message explicitly asks about past plan history.
 
-- [ ] **Step 2: Implement `PlanContextBuilder`**
+- [x] **Step 2: Implement `PlanContextBuilder`**
 
 Build small model-visible text from `PlanStore.latest()` with strict size limits. Keep full evidence in runtime/artifacts; the model sees summaries and refs.
 
-- [ ] **Step 3: Wire into context projection**
+- [x] **Step 3: Wire into context projection**
 
-Add an optional `plan_context_provider` to `ContextPipeline`. `AgentRunner` supplies it when `control_manager` exists.
+Add an optional `plan_context_provider` to `ContextPipeline`. `AgentRunner` supplies it when `control_manager` exists. `Compactor` also accepts a runtime context provider so compaction prompts preserve plan state.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3132,6 +3133,15 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Actual verification:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_context_attachment.py tests/unit/test_context_pipeline.py tests/unit/test_plan_runtime.py tests/unit/test_compactor.py -q
+.venv/bin/python -m ruff check agent/plans agent/context_pipeline agent/runner.py agent/compactor.py agent/loop.py tests/unit/test_plan_context_attachment.py tests/unit/test_context_pipeline.py tests/unit/test_plan_runtime.py tests/unit/test_compactor.py
+```
+
+Result: `22 passed`; ruff passed.
 
 ### Task 6K: Independent Verification Gate
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,9 +78,20 @@ def parse_compaction_result(text: str) -> CompactionResult:
     )
 
 
-def _messages_to_text(messages: list[dict[str, Any]]) -> str:
+def _messages_to_text(
+    messages: list[dict[str, Any]],
+    runtime_context_provider: Callable[[list[dict[str, Any]]], dict[str, Any] | str | None] | None = None,
+) -> str:
     """Flatten OpenAI-style history messages into a readable transcript."""
     parts: list[str] = []
+    runtime_context = runtime_context_provider(messages) if runtime_context_provider is not None else None
+    if runtime_context:
+        if isinstance(runtime_context, dict):
+            content = runtime_context.get("content")
+        else:
+            content = runtime_context
+        if content:
+            parts.append(f"[system:runtime_context] {str(content)[:4000]}")
     for msg in messages:
         role = msg.get("role", "?")
         content = msg.get("content", "")
@@ -145,6 +157,7 @@ class Compactor:
         fallback_model_role: str = "main",
         route_reason: str = "memory_compaction",
         fallback_route_reason: str = "",
+        runtime_context_provider: Callable[[list[dict[str, Any]]], dict[str, Any] | str | None] | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -163,6 +176,7 @@ class Compactor:
         self.fallback_model_role = fallback_model_role
         self.route_reason = route_reason
         self.fallback_route_reason = fallback_route_reason or f"{route_reason}:fallback_main"
+        self.runtime_context_provider = runtime_context_provider
 
     def compact(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return run_sync(self.compact_async(history))
@@ -194,7 +208,7 @@ class Compactor:
 
     async def _compact_messages(self, messages: list[dict[str, Any]]) -> bool:
         prompt = _PROMPT_TEMPLATE.format(
-            old_conversation=_messages_to_text(messages),
+            old_conversation=_messages_to_text(messages, self.runtime_context_provider),
             current_memory=self.memory.read_memory() or "(空)",
             current_user=self.memory.read_user() or "(空)",
             today_episode=self.memory.read_today_episode() or "(空)",

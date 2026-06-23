@@ -8,7 +8,7 @@ from loguru import logger
 
 from .context_pipeline import ContextPipeline, ToolResultStore
 from .control import ClarificationAssessment, TurnPaused, parse_pause_result
-from .plans import PlanEvidenceError
+from .plans import PlanContextBuilder, PlanEvidenceError
 from .plans.verification import VerificationCommand, VerificationResult
 from .providers import LLMProvider, ToolCallRequest
 from .providers.base import is_truncated, run_sync
@@ -114,7 +114,11 @@ class AgentRunner:
         self.max_context = max_context
         self.compact_threshold = compact_threshold
         self.max_turns = max_turns
-        self.context_pipeline = context_pipeline or _build_default_context_pipeline(memory_store, registry)
+        self.context_pipeline = context_pipeline or _build_default_context_pipeline(
+            memory_store,
+            registry,
+            control_manager=control_manager,
+        )
         self.tool_execution_engine = tool_execution_engine or ToolExecutionEngine(registry)
 
     def step(self, history: list[dict[str, Any]]) -> str:
@@ -968,18 +972,33 @@ class AgentRunner:
         return bool(self.reasoning_effort and self.reasoning_effort.lower() not in {"none", "minimal", "minimum"})
 
 
-def _build_default_context_pipeline(memory_store: Any | None, registry: ToolRegistry) -> ContextPipeline:
+def _build_default_context_pipeline(
+    memory_store: Any | None,
+    registry: ToolRegistry,
+    *,
+    control_manager: Any | None = None,
+) -> ContextPipeline:
+    plan_context_provider = _build_plan_context_provider(control_manager)
     memory_dir = getattr(memory_store, "memory_dir", None)
     if memory_dir is None:
-        return ContextPipeline()
+        return ContextPipeline(plan_context_provider=plan_context_provider)
     try:
         return ContextPipeline(
             tool_result_store=ToolResultStore(memory_dir.parent),
             tool_result_limits=registry.tool_result_limits(),
+            plan_context_provider=plan_context_provider,
         )
     except Exception as exc:
         logger.warning("tool result store unavailable; using in-memory context pipeline: {}", exc)
-        return ContextPipeline()
+        return ContextPipeline(plan_context_provider=plan_context_provider)
+
+
+def _build_plan_context_provider(control_manager: Any | None):
+    plan_store = getattr(control_manager, "plan_store", None)
+    if plan_store is None:
+        return None
+    builder = PlanContextBuilder(plan_store)
+    return builder.message_for
 
 
 _TODO_ICON = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}

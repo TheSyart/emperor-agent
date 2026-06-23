@@ -384,12 +384,14 @@ ControlManager.set_mode("plan")
 
 目标：压缩、刷新、重启后不丢正在执行的计划边界。
 
+状态：已落地第一版。当前实现包括 `agent/plans/context.py` 的 `PlanContextBuilder`、`ContextPipeline(plan_context_provider=...)`、Runner 默认接入 `control_manager.plan_store`，以及 Compactor runtime context provider；测试见 `tests/unit/test_plan_context_attachment.py`。
+
 目标文件：
 
 - `agent/context_pipeline/*`
 - `agent/compactor.py`
-- `agent/memory.py`
-- `agent/runtime/events.py`
+- `agent/runner.py`
+- `agent/loop.py`
 
 附件内容：
 
@@ -402,8 +404,9 @@ ControlManager.set_mode("plan")
 验收：
 
 - 压缩后模型仍能继续 active step。
-- 重启后 WebUI 能恢复 PlanCard 和 step evidence。
+- 重启后模型投影可从 `memory/plans/index.json` 恢复 active plan context。
 - 历史摘要不会把 failed verification 写成 passed。
+- completed plan 默认不注入，除非用户明确询问计划历史。
 
 ### PE-9：WebUI Project Execution 面板
 
@@ -434,10 +437,10 @@ ControlManager.set_mode("plan")
 
 优先做：
 
-1. `PE-8 Plan Runtime 恢复附件`：保证长任务压缩后不断线。
+1. `PE-7 独立验证子代理`：让非平凡项目最终答复前有复核证据。
 2. `PE-3 只读探索扇出`：把探索发现自动写入 plan draft。
-3. `PE-7 独立验证子代理`：让非平凡项目最终答复前有复核证据。
-4. `PE-5 批准后权限与命令白名单`：减少计划内验证命令的重复审批。
+3. `PE-5 批准后权限与命令白名单`：减少计划内验证命令的重复审批。
+4. `PE-9 WebUI Project Execution 面板`：把恢复后的计划状态做成稳定用户界面。
 
 暂缓做：
 

@@ -51,7 +51,7 @@ Emperor Agent 目前已经具备多 provider、工具、MCP、Ask/Plan、Schedul
 | 权限模式 | default、plan、acceptEdits、bypassPermissions、dontAsk、auto、bubble 等，统一进入 `hasPermissionsToUseTool` | ask_before_edit、auto、plan，`PermissionPolicy` 规则较集中但较粗 | 建立 `PermissionDecisionPipeline`：tool-specific -> rules -> mode -> hooks/classifier -> interaction |
 | 上下文治理 | tool result budget、snip、microcompact、context collapse、autocompact、reactive compact 多层组合 | `_cap_tool_result`、`_shrink_old_tool_results`、`Compactor.K=10` 和 token 阈值压缩 | 引入 `ContextPipeline`，让预算和压缩成为可测试、可观测的阶段 |
 | 子代理与任务 | AgentTool 包装 `query()`；TaskState 统一 background task、sidechain transcript、输出文件和通知 | `dispatch_subagent` 同步回填结果；Team 有持久队友、inbox、thread、checkpoint | 新增 Task Framework，把 subagent/team/scheduler/background shell 统一纳入 TaskState |
-| 项目执行 / Plan Runtime | Plan Mode 切权限，只读探索，计划文件持久化，ExitPlanMode 审批，TodoWrite 推进，验证失败继续 | 已有 `PlanStore`、`PlanStep`、`PlanDraftState`、`PlanQualityGate`、Step Evidence Gate、`plan_runtime_update`、验证 evidence、Final Answer Gate、`PlanDecisionPolicy` 写工具前置 guard | 继续补 Plan Runtime 恢复附件和独立验证子代理 |
+| 项目执行 / Plan Runtime | Plan Mode 切权限，只读探索，计划文件持久化，ExitPlanMode 审批，TodoWrite 推进，验证失败继续 | 已有 `PlanStore`、`PlanStep`、`PlanDraftState`、`PlanQualityGate`、Step Evidence Gate、Plan Runtime 恢复附件、`plan_runtime_update`、验证 evidence、Final Answer Gate、`PlanDecisionPolicy` 写工具前置 guard | 继续补独立验证子代理和计划内权限白名单 |
 | UI/runtime | 自研 Ink TUI + AppState store + task panel；消息即 UI 数据 | Vue WebUI + WebSocket runtime event store + localStorage fallback | 不移植 Ink；吸收 AppState selector、event-sourced runtime、task panel 的状态建模 |
 
 ## 源码范围

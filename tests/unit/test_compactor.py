@@ -99,3 +99,22 @@ def test_compactor_preserves_memory_when_repair_still_invalid(tmp_path: Path) ->
     payload = json.loads(diagnostics.read_text(encoding="utf-8").splitlines()[-1])
     assert payload["event"] == "compact_parse_failed"
     assert "episode" in payload["missing_tags"]
+
+
+def test_compactor_prompt_includes_runtime_context_attachment(tmp_path: Path) -> None:
+    provider = QueueProvider([VALID_COMPACTION])
+    store = _memory(tmp_path)
+    compactor = Compactor(
+        provider,
+        "fake-model",
+        store,
+        runtime_context_provider=lambda messages: {
+            "role": "system",
+            "content": "[PLAN_RUNTIME_CONTEXT]\nplan_id: plan_1\nactive_step: step_1",
+        },
+    )
+
+    asyncio.run(compactor.compact_async(_history()))
+
+    assert "[PLAN_RUNTIME_CONTEXT]" in provider.prompts[0]
+    assert "plan_id: plan_1" in provider.prompts[0]

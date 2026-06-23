@@ -23,6 +23,7 @@ from .logger import configure as configure_logging
 from .mcp import MCPClient
 from .memory import MemoryStore
 from .model_router import ModelRouter
+from .plans import PlanContextBuilder
 from .projects import ProjectStore
 from .runner import AgentRunner
 from .runner_factory import build_routed_runner
@@ -308,6 +309,7 @@ class AgentLoop:
             fallback_generation=compactor_fallback.generation if compactor_fallback else None,
             fallback_model_role=compactor_fallback.model_role if compactor_fallback else "main",
             fallback_route_reason=compactor_fallback.route_reason if compactor_fallback else "",
+            runtime_context_provider=PlanContextBuilder(self.control_manager.plan_store).message_for,
         )
         system_prompt = self.context_builder.build_system_prompt()
         if self.verbose and initial:
