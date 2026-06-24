@@ -8,6 +8,10 @@ files:
   - out/**/*
   - package.json
 
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
 asar: true
 
 mac:

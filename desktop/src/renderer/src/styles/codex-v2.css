@@ -445,9 +445,9 @@ select:focus-visible {
 }
 
 .bubble.user {
-  border: 1px solid rgb(var(--border));
+  border: 1px solid rgb(var(--border) / 0.55);
   border-radius: 8px;
-  background: rgb(var(--bg-inset));
+  background: transparent;
 }
 
 .bubble.assistant,
@@ -456,6 +456,35 @@ select:focus-visible {
   border-color: transparent;
   background: transparent;
   padding-inline: 0;
+}
+
+.timeline-node.text-node.streaming {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.tool-group-card {
+  border-radius: 8px !important;
+  border-color: rgb(var(--border)) !important;
+  background: rgb(var(--bg-elevated) / 0.82) !important;
+  box-shadow: none !important;
+}
+
+.tool-group-card.running {
+  border-color: rgb(var(--warn) / 0.38) !important;
+}
+
+.tool-group-card.error,
+.tool-group-card.error_aborted {
+  border-color: rgb(var(--danger) / 0.42) !important;
+}
+
+.tool-group-summary {
+  min-height: 48px;
+}
+
+.tool-group-body {
+  background: rgb(var(--bg) / 0.38) !important;
 }
 
 .assistant-timeline-shell {
@@ -625,12 +654,24 @@ select:focus-visible {
   box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
 }
 
+.composer:focus-within {
+  border-color: rgb(var(--border-strong));
+  box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
+}
+
 .composer textarea {
   min-height: 58px;
   max-height: 150px;
   padding: 13px 16px 10px;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.composer textarea:focus,
+.composer textarea:focus-visible {
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .composer-highlight-layer {

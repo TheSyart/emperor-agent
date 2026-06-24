@@ -9,6 +9,8 @@
   Chat / Build 多会话 · 项目级记忆 · 工具执行 · Scheduler · Codex 风格桌面端
 </p>
 
+> 分支说明：原风格项目保留在 `second` 分支；当前 `main` 分支会持续全力打造一个真正好用、稳定、长期可用的 Agent。
+
 <p align="center">
   <img src="assets/generated/readme-product-hero.png" alt="Emperor Agent desktop workspace preview" width="920" />
 </p>

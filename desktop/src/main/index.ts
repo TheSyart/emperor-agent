@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { resolveConfig } from './config'
 import { buildBackendCommand } from './backend-command'
 import { probeBackend, waitForBackend } from './health'
+import { resolveAppIconPath } from './icon'
 import { planStartup, planShutdown } from './lifecycle'
 import { readBounds, pickBounds } from './window-bounds'
 import { resolveAssetPath } from './protocol'
@@ -14,6 +15,11 @@ import { resolveAssetPath } from './protocol'
 const config = resolveConfig({ argv: process.argv.slice(2), env: process.env })
 const boundsPath = path.join(config.root, 'memory', 'desktop', 'window.json')
 const rendererRoot = path.join(__dirname, '..', 'renderer')
+const appIconPath = resolveAppIconPath({
+  dirname: __dirname,
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+})
 
 let backendChild: ChildProcess | null = null
 let ownsBackend = false
@@ -112,6 +118,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     ...readBounds(boundsPath),
     title: 'Emperor Agent',
+    icon: appIconPath,
     backgroundColor: '#1a1410',
     show: false,
     webPreferences: {
@@ -155,6 +162,10 @@ function createWindow(): void {
 }
 
 async function startup(): Promise<void> {
+  app.setName('Emperor Agent')
+  if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
+  if (process.platform === 'win32') app.setAppUserModelId('com.emperor.agent.desktop')
+
   registerAppProtocol()
 
   const alreadyHealthy = await probeBackend(config.backendBaseUrl)

@@ -422,6 +422,23 @@ export interface RuntimeReplayPayload {
   events: RuntimeEventEnvelope[]
 }
 
+export interface RuntimeTaskRecord {
+  id: string
+  kind: string
+  status: string
+  title: string
+  source: string
+  startedAt?: number
+  endedAt?: number | null
+  turnId?: string | null
+  toolCallId?: string | null
+  jobId?: string | null
+  outputPath?: string | null
+  transcriptPath?: string | null
+  progress?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
 export type ToolStatus = 'running' | 'done' | 'error' | 'error_aborted'
 
 export interface ToolArtifactRef {
@@ -845,6 +862,12 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'scheduler_run_done'; job?: SchedulerJob }
   | { event: 'scheduler_run_error'; job?: SchedulerJob; error?: string }
   | { event: 'scheduler_run_cancelled'; job?: SchedulerJob; reason?: string }
+  | { event: 'task_started'; task?: RuntimeTaskRecord }
+  | { event: 'task_progress'; task?: RuntimeTaskRecord; progress?: Record<string, unknown> }
+  | { event: 'task_output'; task?: RuntimeTaskRecord; offset?: number; chunk?: string }
+  | { event: 'task_done'; task?: RuntimeTaskRecord }
+  | { event: 'task_error'; task?: RuntimeTaskRecord; error?: string }
+  | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
   | { event: 'runtime_task_cancelled'; task?: { id?: string; kind?: string; label?: string; turnId?: string; jobId?: string }; reason?: string }
 ))
 

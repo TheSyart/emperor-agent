@@ -155,7 +155,8 @@
 
   .bubble.user {
     @apply rounded-lg;
-    background: rgb(var(--accent) / 0.14);
+    border: 1px solid rgb(var(--border) / 0.55);
+    background: transparent;
     color: rgb(var(--fg));
   }
 
@@ -237,8 +238,8 @@
 
   .timeline-node.text-node {
     @apply rounded-md border px-3.5 py-2.5 text-[14px] leading-6;
-    border-color: rgb(var(--border));
-    background: rgb(var(--bg-elevated));
+    border-color: transparent;
+    background: transparent;
     color: rgb(var(--fg));
   }
 
@@ -247,7 +248,7 @@
   }
 
   .timeline-node.text-node.streaming {
-    border-color: rgb(var(--accent) / 0.4);
+    border-color: transparent;
   }
 
   .timeline-node.text-node.streaming::after {
