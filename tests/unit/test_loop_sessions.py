@@ -70,6 +70,26 @@ def test_chat_session_does_not_expose_persistent_team_tools(tmp_path: Path) -> N
     assert loop.team_manager is None
 
 
+def test_stale_build_session_project_does_not_break_activation(tmp_path: Path) -> None:
+    _write_old_history(tmp_path)
+    loop = AgentLoop(root=tmp_path, verbose=False, startup_compaction=False)
+    stale = loop.session_store.create(
+        "Stale build",
+        mode="build",
+        project={
+            "project_id": "missing_visual_project",
+            "project_path": str(tmp_path / "missing-project"),
+            "project_name": "Missing",
+        },
+    )
+
+    loop.activate_session(stale["id"])
+
+    assert loop.team_manager is None
+    assert "spawn_teammate" not in loop.registry.names()
+    assert loop.active_session_id == stale["id"]
+
+
 def test_build_project_sessions_share_project_team_but_projects_are_isolated(tmp_path: Path) -> None:
     _write_old_history(tmp_path)
     loop = AgentLoop(root=tmp_path, verbose=False, startup_compaction=False)

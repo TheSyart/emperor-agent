@@ -220,31 +220,40 @@ class AgentLoop:
         session_mode = str(entry.get("mode") or "chat")
         project_id = str(entry.get("project_id") or "")
         project_path = str(entry.get("project_path") or "")
-        self._active_project_id = project_id or None
-        self._active_project_path = project_path or None
+        project = self.project_store.get(project_id) if session_mode == "build" and project_id else None
+        valid_project_id = project_id if project is not None else ""
+        valid_project_path = project_path if project is not None else ""
+        if session_mode == "build" and project_id and project is None:
+            logger.warning(
+                "Build session %s references unknown project_id %s; falling back to chat scope",
+                session_id[:8],
+                project_id,
+            )
+        self._active_project_id = valid_project_id or None
+        self._active_project_path = valid_project_path or None
         project_agents = ""
-        if session_mode == "build" and project_id:
+        if session_mode == "build" and valid_project_id:
             self._active_session_memory = ProjectSessionMemoryStore(
                 self.memory,
                 conv,
                 self.project_store,
-                project_id,
+                valid_project_id,
             )
-            project_agents = self.project_store.read_agents(project_id)
-            if project_path and Path(project_path).expanduser().exists():
-                self.workspace_context.set(project_path)
+            project_agents = self.project_store.read_agents(valid_project_id)
+            if valid_project_path and Path(valid_project_path).expanduser().exists():
+                self.workspace_context.set(valid_project_path)
             else:
                 self.workspace_context.reset()
         else:
             self._active_session_memory = SessionMemoryStore(self.memory, conv)
             self.workspace_context.reset()
         self.context_builder.set_session_scope(
-            mode=session_mode,
+            mode=session_mode if valid_project_id or session_mode != "build" else "chat",
             project_agents=project_agents,
-            project_path=project_path,
+            project_path=valid_project_path,
             project_index_summary=self.project_store.summary_for_chat(),
         )
-        self._activate_team_scope(session_mode, project_id)
+        self._activate_team_scope(session_mode, valid_project_id)
         cp = conv.read_checkpoint()
         if cp:
             logger.info(f"Session {session_id[:8]}: restored checkpoint ({len(cp)} msgs)")
