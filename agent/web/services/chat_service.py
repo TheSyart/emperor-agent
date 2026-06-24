@@ -9,6 +9,7 @@ from loguru import logger
 
 from ...attachments import AttachmentRef, encode_for_openai_block
 from ...control import InteractionKind, TurnPaused
+from ..origin_guard import is_local_request
 from ...runtime import events as runtime_events
 from ...skill_requests import (
     SkillRequestError,
@@ -26,6 +27,10 @@ class ChatService:
         self.state = state
 
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
+        # Defense in depth: origin_guard_middleware already covers this route, but the
+        # WS endpoint drives the agent, so reject cross-origin upgrades explicitly too.
+        if not is_local_request(request, port=request.app.get("webui_port")):
+            raise web.HTTPForbidden(reason="cross-origin websocket rejected")
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         last_seq = self.state.safe_int(request.query.get("last_seq"), 0)

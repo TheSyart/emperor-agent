@@ -8,6 +8,7 @@ from aiohttp import web
 from loguru import logger
 
 from .container import WebContainer
+from .origin_guard import origin_guard_middleware
 from .routes import (
     assets,
     chat,
@@ -60,9 +61,11 @@ def create_app(
 ) -> web.Application:
     container = WebContainer.create(root, webui_host=webui_host, webui_port=webui_port)
     state = container.state
-    app = web.Application(middlewares=[error_middleware])
+    # error_middleware is outermost so guard rejections on /api/* render as JSON.
+    app = web.Application(middlewares=[error_middleware, origin_guard_middleware])
     app["container"] = container
     app["state"] = state
+    app["webui_port"] = webui_port
     for register in (
         sessions.register,
         sidebar.register,
