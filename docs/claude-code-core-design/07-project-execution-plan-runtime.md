@@ -345,6 +345,8 @@ class PlanDiscovery:
 
 ### PE-13：Approved Plan Permission Token
 
+状态：已落地第一版。批准计划激活 active step 后，会为该 step 的非高风险 `run_command` 验证命令生成 `PlanPermissionToken`，以 `PlanRecord.metadata["permission_tokens"]` 持久化。token 使用 `permission_argument_hash(arguments)` 做 exact 参数哈希，一次命中后立即消耗；参数漂移、过期、step 不再 active、mode 切换、计划评论/修订、失败验证都会撤销或忽略旧 token。高风险 shell 命令仍先走正常审批，不会生成或命中 token。
+
 目标：批准计划后生成短期、可撤销、可审计的权限 token，而不是长期放宽模式。
 
 目标文件：

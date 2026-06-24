@@ -320,7 +320,7 @@ Plan 模式只读探索
 - `PE-10 Plan Entry Runtime Contract`：已落地第一版；required/recommended/proceed 计划判定已变成本轮 runtime contract，带 triggers、reason、suggested questions 和 recommended readonly scopes，并通过 `plan_entry_decision` 进入前端 runtime projection。
 - `PE-11 Plan Discovery Ledger`：已落地第一版；`read_file` / `grep` 的只读探索摘要、文件路径、evidence refs 会写入 `PlanDraftState.discoveries`，`PlanStep.discovery_refs` 可被质量门禁引用，并已与 PE-12 的子代理探索结果衔接。
 - `PE-12 只读探索扇出执行器`：已落地第一版；Plan 模式暴露受限 `dispatch_subagent`，只允许 registry 标记的只读探索子代理携带完整探索契约并发执行，结果写入 task sidechain 和 discovery ledger，写入型子代理继续拒绝，PlanCard 展示探索证据数量和最近摘要。
-- `PE-13 Approved Plan Permission Token`：批准计划后生成短期一次性 token，只覆盖 active step 的非高风险计划内命令；评论、修订、失败会撤销。
+- `PE-13 Approved Plan Permission Token`：已落地第一版；批准计划后为 active step 的非高风险 `run_command` 生成 exact 参数哈希、短期一次性 token，命中后消耗，评论/修订/失败/mode 切换撤销，高风险 shell 不会被 token 放行。
 - `PE-14 Plan Step Task Binding`：每个 PlanStep 绑定 TaskRecord，工具输出、验证命令、复核结果进入 step sidechain。
 - `PE-15 Verification Matrix`：把单条 `commands` 扩展为 required/optional/manual/reviewer/smoke 验证矩阵。
 - `PE-16 Reviewer Task Transcript 收敛`：independent verification 创建可打开的 verification task transcript，并把 PASS/FAIL 写回 PlanRecord evidence。

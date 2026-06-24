@@ -5,8 +5,10 @@ from .models import (
     PermissionDecision,
     PermissionMode,
     PermissionTraceEntry,
+    PlanPermissionToken,
     RiskLevel,
     ToolPermissionProfile,
+    permission_argument_hash,
 )
 from .pipeline import PermissionPipeline
 from .policy import PermissionPolicy
@@ -18,6 +20,8 @@ __all__ = [
     "PermissionPipeline",
     "PermissionPolicy",
     "PermissionTraceEntry",
+    "PlanPermissionToken",
     "RiskLevel",
     "ToolPermissionProfile",
+    "permission_argument_hash",
 ]

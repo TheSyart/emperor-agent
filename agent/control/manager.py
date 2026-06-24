@@ -5,7 +5,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
-from ..permissions import PermissionManager
+from ..permissions import PermissionManager, PlanPermissionToken, permission_argument_hash
+from ..permissions.resolvers import is_high_risk_command
 from ..plans import (
     PlanDiscovery,
     PlanDraftPhase,
@@ -51,6 +52,7 @@ _INDEPENDENT_VERIFICATION_SOURCES = {
     "reviewer",
     "verification_subagent",
 }
+_PLAN_PERMISSION_TOKEN_TTL_SECONDS = 3600.0
 
 
 class ControlManager:
@@ -85,6 +87,7 @@ class ControlManager:
         if value not in {item.value for item in ControlMode}:
             raise ValueError("mode must be ask_before_edit, auto or plan")
         state = self.store.load()
+        old_mode = state.mode
         if value == ControlMode.PLAN.value and state.mode != ControlMode.PLAN.value:
             state.previous_mode = state.mode
         elif value != ControlMode.PLAN.value:
@@ -92,6 +95,8 @@ class ControlManager:
         state.mode = value
         state.updated_at = now_ts()
         self.store.save(state)
+        if value != old_mode:
+            self.revoke_plan_permission_tokens(reason="control mode changed")
         return self.payload()
 
     def ensure_no_pending(self) -> None:
@@ -172,10 +177,10 @@ class ControlManager:
                 assumptions=list(interaction.assumptions),
                 steps=structured_steps,
                 draft=draft,
-                metadata={
+                metadata=_metadata_without_plan_permission_tokens({
                     **(existing.metadata if existing is not None else {}),
                     "risk_level": interaction.risk_level,
-                },
+                }),
             )
         )
         self._set_pending(interaction)
@@ -636,7 +641,114 @@ class ControlManager:
             else step
             for step in record.steps
         ]
-        updated = replace(record, status=PlanStatus.EXECUTING.value, updated_at=now, steps=steps)
+        metadata = (
+            _metadata_without_plan_permission_tokens(record.metadata, reason="plan step failed")
+            if failed
+            else dict(record.metadata)
+        )
+        updated = replace(
+            record,
+            status=PlanStatus.EXECUTING.value,
+            updated_at=now,
+            steps=steps,
+            metadata=metadata,
+        )
+        self.plan_store.save(updated)
+        return updated
+
+    def _issue_plan_permission_tokens(self, record: PlanRecord) -> PlanRecord:
+        now = now_ts()
+        tokens: list[dict[str, Any]] = []
+        for step in record.steps:
+            if step.status != PlanStepStatus.ACTIVE.value:
+                continue
+            for command in step.commands:
+                text = str(command or "")
+                if not text.strip() or is_high_risk_command(text):
+                    continue
+                tokens.append(
+                    PlanPermissionToken(
+                        plan_id=record.id,
+                        step_id=step.id,
+                        tool_name="run_command",
+                        argument_hash=permission_argument_hash({"command": text}),
+                        expires_at=now + _PLAN_PERMISSION_TOKEN_TTL_SECONDS,
+                        uses_remaining=1,
+                        reason="approved plan active step verification command",
+                    ).to_dict()
+                )
+        metadata = dict(record.metadata)
+        metadata["permission_tokens"] = tokens
+        return replace(record, metadata=metadata)
+
+    def consume_plan_permission_token(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> PlanPermissionToken | None:
+        record = self._latest_executable_plan()
+        if record is None:
+            return None
+        active_step_ids = {
+            step.id
+            for step in record.steps
+            if step.status == PlanStepStatus.ACTIVE.value
+        }
+        if not active_step_ids:
+            return None
+        now = now_ts()
+        target_hash = permission_argument_hash(arguments or {})
+        tokens_raw = record.metadata.get("permission_tokens") or []
+        if not isinstance(tokens_raw, list):
+            return None
+        kept: list[dict[str, Any]] = []
+        consumed: PlanPermissionToken | None = None
+        changed = False
+        for item in tokens_raw:
+            if not isinstance(item, dict):
+                changed = True
+                continue
+            token = PlanPermissionToken.from_dict(item)
+            if (
+                token.plan_id != record.id
+                or token.step_id not in active_step_ids
+                or token.expires_at <= now
+                or token.uses_remaining <= 0
+            ):
+                changed = True
+                continue
+            if (
+                consumed is None
+                and token.tool_name == tool_name
+                and token.argument_hash == target_hash
+            ):
+                consumed = token
+                changed = True
+                remaining = replace(token, uses_remaining=token.uses_remaining - 1)
+                if remaining.uses_remaining > 0:
+                    kept.append(remaining.to_dict())
+                continue
+            kept.append(token.to_dict())
+        if changed:
+            metadata = dict(record.metadata)
+            metadata["permission_tokens"] = kept
+            self.plan_store.save(replace(record, updated_at=now, metadata=metadata))
+        return consumed
+
+    def revoke_plan_permission_tokens(
+        self,
+        *,
+        plan_id: str | None = None,
+        reason: str = "revoked",
+    ) -> PlanRecord | None:
+        record = self.plan_store.get(plan_id) if plan_id else self._latest_executable_plan()
+        if record is None:
+            return None
+        if not record.metadata.get("permission_tokens"):
+            return record
+        metadata = _metadata_without_plan_permission_tokens(record.metadata, reason=reason)
+        updated = replace(record, updated_at=now_ts(), metadata=metadata)
         self.plan_store.save(updated)
         return updated
 
@@ -865,6 +977,7 @@ class ControlManager:
             "timestamp": now_ts(),
         })
         metadata["revisions"] = revisions[-20:]
+        metadata = _metadata_without_plan_permission_tokens(metadata, reason="plan comment")
         draft = replace(record.draft, phase=PlanDraftPhase.REVIEWING.value)
         self.plan_store.save(
             replace(
@@ -911,6 +1024,7 @@ class ControlManager:
             activated,
             draft=replace(activated.draft, phase=PlanDraftPhase.EXECUTING.value),
         )
+        activated = self._issue_plan_permission_tokens(activated)
         self.plan_store.save(activated)
         self.todo_store.sync_from_plan_steps([step.to_dict() for step in activated.steps])
         return activated
@@ -1317,6 +1431,22 @@ def _has_command_evidence(evidence: dict[str, Any]) -> bool:
         isinstance(item, dict) and str(item.get("command") or "").strip()
         for item in command_evidence
     )
+
+
+def _metadata_without_plan_permission_tokens(
+    metadata: dict[str, Any],
+    *,
+    reason: str = "plan changed",
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    had_tokens = bool(payload.get("permission_tokens"))
+    payload["permission_tokens"] = []
+    if had_tokens:
+        payload["permission_tokens_revoked"] = {
+            "reason": str(reason or "revoked")[:240],
+            "timestamp": now_ts(),
+        }
+    return payload
 
 
 def _append_unique(items: list[str], value: str) -> None:

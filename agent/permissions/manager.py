@@ -30,7 +30,9 @@ class PermissionManager:
                 reason="user denied this high-risk operation",
                 rule="user.denied_once",
             )
-        plan_decision = self._approved_plan_command_decision(tool_name, args)
+        if tool_name == "run_command" and is_high_risk_command(str(args.get("command") or "")):
+            return self.policy.assess(tool_name, args, self.control_manager.mode, registry=registry)
+        plan_decision = self._plan_permission_token_decision(tool_name, args)
         if plan_decision is not None:
             return plan_decision
         return self.policy.assess(tool_name, args, self.control_manager.mode, registry=registry)
@@ -111,28 +113,27 @@ class PermissionManager:
             json.dumps(decision.arguments or {}, ensure_ascii=False, indent=2)[:1600],
         ])
 
-    def _approved_plan_command_decision(
+    def _plan_permission_token_decision(
         self,
         tool_name: str,
         arguments: dict[str, Any],
     ) -> PermissionDecision | None:
-        if tool_name != "run_command":
+        consumer = getattr(self.control_manager, "consume_plan_permission_token", None)
+        if not callable(consumer):
             return None
-        command = str(arguments.get("command") or "")
-        if not command or is_high_risk_command(command):
-            return None
-        target_provider = getattr(self.control_manager, "plan_verification_target", None)
-        if not callable(target_provider):
-            return None
-        target = target_provider(command)
-        if not target:
+        token = consumer(tool_name=tool_name, arguments=arguments)
+        if token is None:
             return None
         return PermissionDecision.allow(
             tool_name=tool_name,
             arguments=arguments,
-            rule="plan.approved_command",
+            rule="plan.permission_token",
             trace=(
-                PermissionTraceEntry("plan.active_step_command", "allow", str(target.get("step_id") or "")),
+                PermissionTraceEntry(
+                    "plan.permission_token",
+                    "allow",
+                    f"{token.plan_id}:{token.step_id}",
+                ),
             ),
         )
 

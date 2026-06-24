@@ -3446,16 +3446,20 @@ Implementation notes:
 
 ### Task 6P: Approved Plan Permission Tokens
 
-Status: pending.
+Status: done.
 
 **Files:**
 - Modify: `agent/permissions/models.py`
+- Modify: `agent/permissions/__init__.py`
 - Modify: `agent/permissions/manager.py`
 - Modify: `agent/control/manager.py`
-- Modify: `agent/plans/models.py`
+- Modify: `tests/unit/test_plan_command_permissions.py`
+- Modify: `docs/claude-code-core-design/06-emperor-upgrade-roadmap.md`
+- Modify: `docs/claude-code-core-design/07-project-execution-plan-runtime.md`
+- Reuse existing: `agent/plans/models.py`
 - Test: `tests/unit/test_plan_permission_tokens.py`
 
-- [ ] **Step 1: Add token tests**
+- [x] **Step 1: Add token tests**
 
 Test that approval creates a one-use token for an active step's exact non-high-risk command, consumes it once, revokes it after plan comment/revision/failure, and never allows high-risk shell commands.
 
@@ -3467,15 +3471,15 @@ Run:
 
 Expected: failure before token model exists.
 
-- [ ] **Step 2: Add token model and store**
+- [x] **Step 2: Add token model and store**
 
 Add `PlanPermissionToken` with `plan_id`, `step_id`, `tool_name`, `argument_hash`, `expires_at`, `uses_remaining`, and `reason`. Store tokens in `PlanRecord.metadata["permission_tokens"]`.
 
-- [ ] **Step 3: Integrate with permission manager**
+- [x] **Step 3: Integrate with permission manager**
 
 Check tokens before normal ask/deny decisions only for exact argument hashes and only after high-risk shell/path checks.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3484,6 +3488,28 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_permission_tokens.py tests/unit/test_plan_command_permissions.py -q
+# 7 passed
+
+.venv/bin/python -m pytest tests/unit/test_plan_permission_tokens.py tests/unit/test_plan_command_permissions.py tests/unit/test_plan_runtime.py tests/unit/test_plan_evidence_gate.py tests/unit/test_plan_execution_state.py tests/unit/test_permission_pipeline_v2.py tests/unit/test_control.py -q
+# 45 passed
+
+.venv/bin/python -m ruff check agent/permissions/models.py agent/permissions/__init__.py agent/permissions/manager.py agent/control/manager.py tests/unit/test_plan_permission_tokens.py tests/unit/test_plan_command_permissions.py
+# passed
+```
+
+Implementation notes:
+
+- `PlanPermissionToken` lives in `agent/permissions/models.py`; tokens are stored in `PlanRecord.metadata["permission_tokens"]`.
+- `permission_argument_hash()` hashes exact tool arguments, so command whitespace drift no longer receives plan-token treatment.
+- `PermissionManager` checks high-risk shell commands before token consumption, then consumes matching one-use tokens via `ControlManager.consume_plan_permission_token()`.
+- Token generation happens after approval activates the first active step; only non-high-risk `run_command` entries from that step receive tokens.
+- `record_plan_verification_result(failed)`, `set_mode()`, plan comments, and plan revisions clear stored tokens.
+- `agent/plans/models.py` did not require a structural change because `PlanRecord.metadata` already persists token payloads.
 
 ### Task 6Q: Plan Step Task Binding
 

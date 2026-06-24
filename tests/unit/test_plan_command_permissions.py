@@ -38,12 +38,12 @@ def test_approved_plan_command_gets_explicit_permission_rule(tmp_path) -> None:
 
     decision = manager.assess_permission(
         "run_command",
-        {"command": "  .venv/bin/python   -m pytest tests/unit/test_runner_state.py -q  "},
+        {"command": command},
         registry=None,
     )
 
     assert decision.allowed
-    assert decision.rule == "plan.approved_command"
+    assert decision.rule == "plan.permission_token"
 
 
 def test_approved_plan_command_does_not_bypass_high_risk_shell_approval(tmp_path) -> None:
