@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent.control import ControlManager, ProposePlanTool
-from agent.plans.models import PlanStatus, PlanStepStatus
+from agent.plans.models import PlanRecord, PlanStatus, PlanStep, PlanStepStatus
 from agent.plans.store import PlanStore
 from agent.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from agent.runner import AgentRunner
@@ -499,3 +499,28 @@ async def test_runner_final_answer_gate_continues_incomplete_plan(tmp_path: Path
         and event.get("phase") == "plan_followup"
         for event in emitted
     )
+
+
+def _completed_plan_record(plan_id: str = "plan_finished") -> PlanRecord:
+    now = 1000.0
+    return PlanRecord(
+        id=plan_id,
+        title="Finished plan",
+        summary="all work done",
+        status=PlanStatus.COMPLETED.value,
+        created_at=now,
+        updated_at=now,
+        steps=[PlanStep(id="step_1", title="Do it", status=PlanStepStatus.DONE.value)],
+    )
+
+
+def test_reviewable_plan_id_returns_finished_plan(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    record = _completed_plan_record()
+    manager.plan_store.save(record)
+    assert manager.reviewable_plan_id() == record.id
+
+
+def test_reviewable_plan_id_none_when_no_finished_plan(tmp_path: Path) -> None:
+    manager = ControlManager(tmp_path)
+    assert manager.reviewable_plan_id() is None

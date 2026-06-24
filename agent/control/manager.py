@@ -1164,6 +1164,12 @@ class ControlManager:
             return None
         return max(plans, key=lambda item: item.updated_at)
 
+    def reviewable_plan_id(self) -> str | None:
+        record = self._latest_reviewable_plan()
+        if record is None or not record.steps or not _plan_steps_finished(record):
+            return None
+        return record.id
+
     def _latest_reviewable_plan(self) -> PlanRecord | None:
         plans = [
             plan for plan in self.plan_store.list()
