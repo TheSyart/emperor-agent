@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 
 from aiohttp import web
 from loguru import logger
 
+from .auth_guard import auth_guard_middleware
 from .container import WebContainer
 from .origin_guard import origin_guard_middleware
 from .routes import (
@@ -62,10 +64,11 @@ def create_app(
     container = WebContainer.create(root, webui_host=webui_host, webui_port=webui_port)
     state = container.state
     # error_middleware is outermost so guard rejections on /api/* render as JSON.
-    app = web.Application(middlewares=[error_middleware, origin_guard_middleware])
+    app = web.Application(middlewares=[error_middleware, origin_guard_middleware, auth_guard_middleware])
     app["container"] = container
     app["state"] = state
     app["webui_port"] = webui_port
+    app["auth_token"] = (os.environ.get("EMPEROR_WEBUI_TOKEN") or "").strip()
     for register in (
         sessions.register,
         sidebar.register,
