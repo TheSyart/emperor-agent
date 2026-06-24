@@ -147,6 +147,22 @@ class Tool(ABC):
     def validate_params(self, params: dict) -> None:
         _validate_one(params, self.parameters)
 
+    def is_read_only(self, arguments: dict[str, Any]) -> bool:
+        return bool(self.read_only)
+
+    def is_concurrency_safe(self, arguments: dict[str, Any]) -> bool:
+        return bool(self.concurrency_safe)
+
+    def is_destructive(self, arguments: dict[str, Any]) -> bool:
+        return not self.is_read_only(arguments)
+
+    def validate_input(self, arguments: dict[str, Any], context: Any = None) -> str | None:
+        return None
+
+    def get_path(self, arguments: dict[str, Any]) -> str | None:
+        value = arguments.get("path") if isinstance(arguments, dict) else None
+        return str(value) if value else None
+
     @abstractmethod
     def execute(self, **kwargs) -> str:
         ...

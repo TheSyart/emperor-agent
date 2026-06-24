@@ -27,12 +27,14 @@ class DispatchSubagentTool(Tool):
     def __init__(self, *, client, model: str,
                  parent_registry: ToolRegistry,
                  subagent_registry,
-                 runner_factory):
+                 runner_factory,
+                 task_manager=None):
         self._client = client
         self._model = model
         self._parent_registry = parent_registry
         self._subagent_registry = subagent_registry
         self._runner_factory = runner_factory   # 注入: spec, sub_registry -> AgentRunner
+        self._task_manager = task_manager
         self._counter = 0
         self._counter_lock = Lock()
 
@@ -118,10 +120,19 @@ class DispatchSubagentTool(Tool):
         logger.info("  ┌── subagent context start ──")
 
         history: list = [{"role": "user", "content": subagent_task}]
+        subagent_id = f"sub_{counter}"
+        task_record = None
+        if self._task_manager is not None:
+            task_record = self._task_manager.start_task(
+                kind="subagent",
+                title=purpose or task[:80],
+                source="dispatch_subagent",
+                tool_call_id=parent_call_id,
+                metadata={"agent_type": agent_type, "subagent_id": subagent_id},
+            )
+            self._task_manager.append_sidechain(task_record.id, history[0])
 
         if emit is not None and loop is not None and parent_call_id is not None:
-            subagent_id = f"sub_{counter}"
-
             def bridge_emit(evt):
                 asyncio_mod.run_coroutine_threadsafe(emit(evt), loop)
 
@@ -156,6 +167,8 @@ class DispatchSubagentTool(Tool):
             try:
                 final = run_sync(runner.step_stream(history, sub_emit))
             except Exception as exc:
+                if task_record is not None:
+                    self._task_manager.fail_task(task_record.id, error=str(exc))
                 bridge_emit({
                     "event": "subagent_error",
                     "parent_id": parent_call_id,
@@ -168,9 +181,14 @@ class DispatchSubagentTool(Tool):
             try:
                 final = runner.step(history)
             except Exception as exc:
+                if task_record is not None:
+                    self._task_manager.fail_task(task_record.id, error=str(exc))
                 logger.warning(f"  └── subagent context end (异常: {exc}) ──")
                 return f"Error: subagent '{agent_type}' raised: {exc}"
 
+        if task_record is not None:
+            self._task_manager.append_sidechain(task_record.id, {"role": "assistant", "content": final})
+            self._task_manager.complete_task(task_record.id, summary=final[:500])
         logger.info(f"  └── subagent context end (内部 history {len(history)} 条, 回传 {len(final)} 字) ──")
         logger.info(f"[小太监回禀]: {final}")
         logger.info(f"[主上下文压缩]: 子代理仅向主 history 追加 {len(final)} 字")

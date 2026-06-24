@@ -5,6 +5,8 @@ from typing import Any
 from loguru import logger
 
 from .base import Tool
+from .protocol import PreparedToolCall
+from .results import ToolResult
 
 
 class ToolRegistry:
@@ -44,23 +46,31 @@ class ToolRegistry:
         self._defs_cache = builtin + mcp
         return self._defs_cache
 
-    def prepare_call(self, name: str, params: Any):
+    def prepare_call(self, name: str, params: Any) -> PreparedToolCall:
         if not isinstance(params, dict):
-            return None, None, (
-                f"Error: tool '{name}' received non-object params: "
-                f"{type(params).__name__}"
+            return PreparedToolCall(
+                name=name,
+                arguments={},
+                error=f"Error: tool '{name}' received non-object params: {type(params).__name__}",
             )
         tool = self._tools.get(name)
         if tool is None:
-            return None, None, (
-                f"Error: Unknown tool '{name}'. Available: {', '.join(self.names())}"
+            return PreparedToolCall(
+                name=name,
+                arguments=params,
+                error=f"Error: Unknown tool '{name}'. Available: {', '.join(self.names())}",
             )
         try:
             cast = tool.cast_params(params)
             tool.validate_params(cast)
         except (ValueError, TypeError) as e:
-            return tool, None, f"Error: invalid params for '{name}': {e}"
-        return tool, cast, None
+            return PreparedToolCall(
+                name=name,
+                arguments=params,
+                tool=tool,
+                error=f"Error: invalid params for '{name}': {e}",
+            )
+        return PreparedToolCall(name=name, arguments=cast, tool=tool, error=None)
 
     def unregister_mcp_tools(self) -> None:
         """移除所有 mcp_ 前缀的工具（用于重连时刷新）。"""
@@ -71,14 +81,18 @@ class ToolRegistry:
             self._defs_cache = None
 
     def execute(self, name: str, params: Any, emit=None, loop=None, parent_call_id=None) -> str:
-        tool, cast, err = self.prepare_call(name, params)
-        if err:
-            return f"{err}\n{self._HINT}"
+        prepared = self.prepare_call(name, params)
+        if prepared.error:
+            return f"{prepared.error}\n{self._HINT}"
+        tool = prepared.tool
+        cast = prepared.arguments
         try:
             if getattr(tool, "requires_runtime_context", False):
                 result = tool.execute(**cast, emit=emit, loop=loop, parent_call_id=parent_call_id)
             else:
                 result = tool.execute(**cast)
+            if isinstance(result, ToolResult):
+                return result.model_content
             if isinstance(result, str) and result.startswith("Error"):
                 return f"{result}\n{self._HINT}"
             return result

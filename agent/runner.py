@@ -6,10 +6,14 @@ from typing import Any
 
 from loguru import logger
 
+from .context_pipeline import ContextPipeline
 from .control import ClarificationAssessment, TurnPaused, parse_pause_result
 from .providers import LLMProvider, ToolCallRequest
 from .providers.base import is_truncated, run_sync
+from .query_state.models import QueryState
+from .query_state.transitions import empty_response_retry
 from .runner_model import ModelCaller
+from .tools.execution import ToolExecutionEngine
 from .tools.registry import ToolRegistry
 
 StreamEmitter = Callable[[dict[str, Any]], Awaitable[None]]
@@ -57,6 +61,8 @@ class AgentRunner:
         max_context: int = 200_000,
         compact_threshold: float = 0.7,
         max_turns: int | None = None,
+        context_pipeline: ContextPipeline | None = None,
+        tool_execution_engine: ToolExecutionEngine | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -93,6 +99,8 @@ class AgentRunner:
         self.max_context = max_context
         self.compact_threshold = compact_threshold
         self.max_turns = max_turns
+        self.context_pipeline = context_pipeline or ContextPipeline()
+        self.tool_execution_engine = tool_execution_engine or ToolExecutionEngine(registry)
 
     def step(self, history: list[dict[str, Any]]) -> str:
         """Run one full turn synchronously. Mutates `history` in place."""
@@ -250,18 +258,19 @@ class AgentRunner:
 
             # —— 空响应救援 ——
             if not reply.strip() and not response.tool_calls:
-                if empty_retries < _MAX_EMPTY_RETRIES:
-                    empty_retries += 1
-                    history.append({
-                        "role": "user",
-                        "content": "（上一轮无任何输出，请继续推进或给出最终答复）",
-                    })
+                state = QueryState(
+                    history=history,
+                    turn_count=turns,
+                    empty_retries=empty_retries,
+                    length_retries=length_retries,
+                )
+                transition = empty_response_retry(state, max_empty_retries=_MAX_EMPTY_RETRIES)
+                if transition is not None:
+                    empty_retries = transition.next_state.empty_retries
+                    history[:] = transition.next_state.history
                     if emit:
-                        await emit({
-                            "event": "tool_error",
-                            "name": "_empty_response",
-                            "message": f"empty response, retry {empty_retries}/{_MAX_EMPTY_RETRIES}",
-                        })
+                        for event in transition.emit:
+                            await emit(event)
                     continue
 
             # —— 截断续写 ——
@@ -333,9 +342,8 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ):
-        governed = self._pair_tool_calls(history)
-        governed = self._cap_tool_result(governed)
-        governed = self._shrink_old_tool_results(governed)
+        projection = self.context_pipeline.project(history)
+        governed = projection.messages
         system_prompt = self.system_prompt
         if self.control_manager is not None:
             system_prompt = f"{system_prompt}\n\n---\n\n{self.control_manager.system_prompt()}"
@@ -459,84 +467,35 @@ class AgentRunner:
         *,
         clarification: ClarificationAssessment | None = None,
     ) -> list[dict[str, Any]]:
-        async def _report_tool_error(call: ToolCallRequest, err_msg: str) -> None:
-            if emit:
-                await emit({
-                    "event": "tool_error",
-                    "id": call.id,
-                    "name": call.name,
-                    "message": err_msg,
-                })
+        results_by_id: dict[str, str] = {}
 
-        async def _run_and_collect(call: ToolCallRequest) -> str:
+        async def run_one(call: ToolCallRequest) -> str:
+            await self._emit_tool_call(call, emit)
             try:
-                return await self._run_tool(call, emit, clarification=clarification)
+                content = await self._run_tool(call, emit, clarification=clarification)
             except Exception as exc:
                 err_msg = str(exc)
                 logger.exception(f"Tool execution failed: {call.name}")
-                await _report_tool_error(call, err_msg)
-                return f"Error: {err_msg}"
-
-        results_by_id: dict[str, str] = {}
-        i = 0
-        while i < len(tool_calls):
-            call = tool_calls[i]
-            tool = self.registry.get(call.name)
-
-            if tool is not None and tool.concurrency_safe:
-                group: list[ToolCallRequest] = []
-                while i < len(tool_calls):
-                    candidate = tool_calls[i]
-                    candidate_tool = self.registry.get(candidate.name)
-                    if candidate_tool is None or not candidate_tool.concurrency_safe:
-                        break
-                    group.append(candidate)
-                    i += 1
-
-                if len(group) > 1:
-                    names = ", ".join(item.name for item in group)
-                    logger.info(f"[并发执行 {len(group)} 个工具]: {names}")
-                    for item in group:
-                        await self._emit_tool_call(item, emit)
-                    tasks = [self._run_tool(item, emit, clarification=clarification) for item in group]
-                    gathered = await asyncio.gather(*tasks, return_exceptions=True)
-                    for item, raw in zip(group, gathered, strict=True):
-                        if isinstance(raw, Exception):
-                            err_msg = str(raw)
-                            results_by_id[item.id] = f"Error: {err_msg}"
-                            await _report_tool_error(item, err_msg)
-                        else:
-                            results_by_id[item.id] = raw
-                            await self._emit_tool_result(item, raw, emit)
-                    for item in group:
-                        self._maybe_pause_for_control(results_by_id[item.id], tool_calls, results_by_id)
-                else:
-                    item = group[0]
-                    await self._emit_tool_call(item, emit)
-                    content = await _run_and_collect(item)
-                    results_by_id[item.id] = content
-                    self._maybe_pause_for_control(content, tool_calls, results_by_id)
-                    if not content.startswith("Error:"):
-                        await self._emit_tool_result(item, content, emit)
-                continue
-
-            await self._emit_tool_call(call, emit)
-            content = await _run_and_collect(call)
+                if emit:
+                    await emit({
+                        "event": "tool_error",
+                        "id": call.id,
+                        "name": call.name,
+                        "message": err_msg,
+                    })
+                raise
             results_by_id[call.id] = content
             self._maybe_pause_for_control(content, tool_calls, results_by_id)
             if not content.startswith("Error:"):
                 await self._emit_tool_result(call, content, emit)
-            i += 1
+            return content
 
-        return [
-            {
-                "role": "tool",
-                "tool_call_id": call.id,
-                "name": call.name,
-                "content": results_by_id.get(call.id, ""),
-            }
-            for call in tool_calls
-        ]
+        return await self.tool_execution_engine.run_batch(
+            tool_calls,
+            emit=emit,
+            run_one=run_one,
+            propagate_exceptions=(TurnPaused,),
+        )
 
     async def _run_tool(
         self,

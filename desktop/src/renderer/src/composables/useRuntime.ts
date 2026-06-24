@@ -8,6 +8,7 @@ import { replayRuntimeEvents } from '../runtime/reducer'
 import { findSubagent, findSubagentTool, findToolSegment } from '../runtime/selectors'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
 import { apiUrl, wsUrl } from '../api/backend'
+import { applyTaskEvent, type TaskProjection } from '../runtime/handlers/tasks'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { SCHEDULER_CLIENT_ID_PREFIX, schedulerMessageMeta } from '../runtime/schedulerMeta'
 import { loadRuntimeSnapshot, transcriptFromMessages, type RuntimeSnapshot } from '../runtime/snapshot'
@@ -49,6 +50,7 @@ export function useRuntime(options: {
   let rehydrating = false
   let intentionalSocketClose = false
   const turnClock = new Map<string, number>()
+  const taskProjection = reactive<TaskProjection>({ tasks: [] })
 
   const currentAssistant = computed(() => messages.value.find((message) => message.id === currentAssistantId.value && message.role === 'assistant') as AssistantMessage | undefined)
 
@@ -557,6 +559,19 @@ export function useRuntime(options: {
       currentAssistantId.value = null
       busy.value = false
       updatePending('任务已停止', data.task?.label || data.reason || '', 'done')
+      return
+    }
+
+    if (
+      data.event === 'task_started' ||
+      data.event === 'task_progress' ||
+      data.event === 'task_output' ||
+      data.event === 'task_done' ||
+      data.event === 'task_error' ||
+      data.event === 'task_cancelled'
+    ) {
+      const next = applyTaskEvent({ tasks: taskProjection.tasks }, data)
+      taskProjection.tasks.splice(0, taskProjection.tasks.length, ...next.tasks)
       return
     }
 
@@ -1109,6 +1124,7 @@ export function useRuntime(options: {
     status,
     sessionId,
     pending,
+    taskProjection,
     runtimeText,
     switchSession(id: string) {
       sessionId.value = id

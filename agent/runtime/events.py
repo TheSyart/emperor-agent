@@ -127,3 +127,47 @@ def scheduler_run_cancelled(job: dict[str, Any], *, reason: str = "cancelled") -
 
 def runtime_task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -> dict[str, Any]:
     return runtime_event("runtime_task_cancelled", task=task, reason=reason)
+
+
+def tool_run_queued(*, id: str, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    return runtime_event("tool_run_queued", id=id, name=name, arguments=arguments or {})
+
+
+def tool_run_started(*, id: str, name: str) -> dict[str, Any]:
+    return runtime_event("tool_run_started", id=id, name=name)
+
+
+def tool_run_completed(*, id: str, name: str, summary: str) -> dict[str, Any]:
+    return runtime_event("tool_run_completed", id=id, name=name, summary=summary)
+
+
+def tool_run_failed(*, id: str, name: str, message: str) -> dict[str, Any]:
+    return runtime_event("tool_run_failed", id=id, name=name, message=message)
+
+
+def tool_run_cancelled(*, id: str, name: str, reason: str) -> dict[str, Any]:
+    return runtime_event("tool_run_cancelled", id=id, name=name, reason=reason)
+
+
+def task_started(task: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_started", task=task)
+
+
+def task_progress(task: dict[str, Any], *, progress: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_progress", task=task, progress=progress)
+
+
+def task_output(task: dict[str, Any], *, offset: int, chunk: str) -> dict[str, Any]:
+    return runtime_event("task_output", task=task, offset=offset, chunk=chunk)
+
+
+def task_done(task: dict[str, Any]) -> dict[str, Any]:
+    return runtime_event("task_done", task=task)
+
+
+def task_error(task: dict[str, Any], *, error: str) -> dict[str, Any]:
+    return runtime_event("task_error", task=task, error=error)
+
+
+def task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -> dict[str, Any]:
+    return runtime_event("task_cancelled", task=task, reason=reason)

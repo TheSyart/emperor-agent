@@ -5,6 +5,7 @@ from typing import Any
 
 from ..control.tools import make_pause_result
 from .models import PermissionDecision
+from .pipeline import PermissionPipeline
 from .policy import PermissionPolicy
 
 
@@ -12,6 +13,7 @@ class PermissionManager:
     def __init__(self, control_manager):
         self.control_manager = control_manager
         self.policy = PermissionPolicy()
+        self.pipeline = PermissionPipeline(self.policy)
         self._approved_once: set[str] = set()
         self._denied_once: set[str] = set()
 
@@ -28,7 +30,7 @@ class PermissionManager:
                 arguments=args,
                 reason="user denied this high-risk operation",
             )
-        return self.policy.assess(tool_name, args, self.control_manager.mode, registry=registry)
+        return self.pipeline.assess(tool_name, args, mode=self.control_manager.mode, registry=registry)
 
     def require_approval(
         self,

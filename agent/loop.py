@@ -31,6 +31,7 @@ from .sessions.conversation import ConversationStore, ProjectSessionMemoryStore,
 from .sessions.store import SessionStore
 from .skills import SkillsLoader
 from .subagents import SubagentRegistry
+from .tasks import TaskManager
 from .team import (
     TeamBroadcastTool,
     TeamListTool,
@@ -93,6 +94,7 @@ class AgentLoop:
         self.scheduler_store = SchedulerStore(self.root)
         self.scheduler_service = SchedulerService(self.scheduler_store)
         self.project_store = ProjectStore(self.root)
+        self.task_manager = TaskManager(self.root)
 
         self.skills = SkillsLoader(self.root / "skills")
         self.context_builder = ContextBuilder(
@@ -619,6 +621,7 @@ class AgentLoop:
             parent_registry=self.registry,
             subagent_registry=self.subagent_registry,
             runner_factory=_make_subagent_runner,
+            task_manager=self.task_manager,
         ))
 
     def _team_runner_factory(self, project_id: str):

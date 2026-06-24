@@ -17,6 +17,12 @@ class RiskLevel(StrEnum):
     HIGH = "high"
 
 
+class PermissionBehavior(StrEnum):
+    ALLOW = "allow"
+    ASK = "ask"
+    DENY = "deny"
+
+
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
@@ -25,16 +31,44 @@ class PermissionDecision:
     reason: str = ""
     tool_name: str = ""
     arguments: dict[str, Any] | None = None
+    behavior: str = PermissionBehavior.ALLOW.value
+    updated_arguments: dict[str, Any] | None = None
+    content_blocks: list[dict[str, Any]] | None = None
 
     @classmethod
     def allow(cls, *, tool_name: str, arguments: dict[str, Any] | None = None) -> PermissionDecision:
-        return cls(allowed=True, tool_name=tool_name, arguments=arguments or {})
+        return cls(
+            allowed=True,
+            behavior=PermissionBehavior.ALLOW.value,
+            tool_name=tool_name,
+            arguments=arguments or {},
+        )
 
     @classmethod
     def deny(cls, *, tool_name: str, reason: str, arguments: dict[str, Any] | None = None) -> PermissionDecision:
         return cls(
             allowed=False,
+            behavior=PermissionBehavior.DENY.value,
             risk=RiskLevel.HIGH.value,
+            reason=reason,
+            tool_name=tool_name,
+            arguments=arguments or {},
+        )
+
+    @classmethod
+    def ask(
+        cls,
+        *,
+        tool_name: str,
+        reason: str,
+        arguments: dict[str, Any] | None = None,
+        risk: str = RiskLevel.HIGH.value,
+    ) -> PermissionDecision:
+        return cls(
+            allowed=False,
+            requires_approval=True,
+            behavior=PermissionBehavior.ASK.value,
+            risk=risk,
             reason=reason,
             tool_name=tool_name,
             arguments=arguments or {},
@@ -49,11 +83,4 @@ class PermissionDecision:
         arguments: dict[str, Any] | None = None,
         risk: str = RiskLevel.HIGH.value,
     ) -> PermissionDecision:
-        return cls(
-            allowed=False,
-            requires_approval=True,
-            risk=risk,
-            reason=reason,
-            tool_name=tool_name,
-            arguments=arguments or {},
-        )
+        return cls.ask(tool_name=tool_name, reason=reason, arguments=arguments, risk=risk)
