@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, net, type OpenDialogOptions } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -20,6 +21,10 @@ const appIconPath = resolveAppIconPath({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
 })
+
+// Packaged-only defense-in-depth: a per-launch token shared with the spawned backend
+// (env) and the renderer (preload arg). Empty in dev so electron-vite dev stays token-free.
+const authToken = app.isPackaged ? randomUUID() : ''
 
 let backendChild: ChildProcess | null = null
 let ownsBackend = false
@@ -75,7 +80,8 @@ function fail(title: string, message: string): void {
 
 function spawnBackend(): ChildProcess {
   const { command, args } = buildBackendCommand({ config, env: process.env })
-  const child = spawn(command, args, { cwd: config.root, stdio: 'inherit', env: process.env })
+  const env = authToken ? { ...process.env, EMPEROR_WEBUI_TOKEN: authToken } : process.env
+  const child = spawn(command, args, { cwd: config.root, stdio: 'inherit', env })
 
   child.on('error', (err: NodeJS.ErrnoException) => {
     if (err && err.code === 'ENOENT') {
@@ -130,7 +136,7 @@ function createWindow(): void {
       // and /ws, so the renderer should use same-origin relative paths.
       // In prod mode (app://) the preload injects the absolute backend URL.
       additionalArguments: app.isPackaged
-        ? [`--backend-url=${config.backendBaseUrl}`]
+        ? [`--backend-url=${config.backendBaseUrl}`, `--backend-token=${authToken}`]
         : [],
     },
   })
