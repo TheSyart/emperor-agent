@@ -47,7 +47,8 @@ def test_ask_before_edit_requires_approval_for_high_risk_command() -> None:
     )
 
     assert decision.requires_approval
-    assert "high-impact shell command" in decision.reason
+    assert decision.risk == "high"
+    assert "requires approval" in decision.reason
 
 
 def test_ask_before_edit_allows_low_risk_tools(tmp_path: Path) -> None:

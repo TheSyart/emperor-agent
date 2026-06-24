@@ -9,7 +9,12 @@ from .models import (
     RiskLevel,
     ToolPermissionProfile,
 )
-from .resolvers import is_high_risk_command, is_sensitive_path, resolve_tool_profile
+from .resolvers import (
+    is_high_risk_command,
+    is_low_risk_command,
+    is_sensitive_path,
+    resolve_tool_profile,
+)
 
 
 class PermissionPipeline:
@@ -108,13 +113,18 @@ class PermissionPipeline:
         profile: ToolPermissionProfile,
         trace: list[PermissionTraceEntry],
     ) -> PermissionDecision:
-        if profile.name == "run_command" and is_high_risk_command(profile.command):
-            trace.append(_trace("ask.high_risk_command", "approval", profile.command[:160]))
+        if profile.name == "run_command":
+            if is_low_risk_command(profile.command):
+                trace.append(_trace("ask.run_command.low_risk_allowlist", "allow", profile.command[:160]))
+                return _allow(profile, "ask.run_command.low_risk_allowlist", trace)
+            risk = RiskLevel.HIGH.value if is_high_risk_command(profile.command) else RiskLevel.MEDIUM.value
+            trace.append(_trace("ask.run_command.default_approval", "approval", profile.command[:160]))
             return _approval(
                 profile,
-                "ask.high_risk_command",
-                f"high-impact shell command: {profile.command[:160]}",
+                "ask.run_command.default_approval",
+                f"shell command requires approval: {profile.command[:160]}",
                 trace,
+                risk=risk,
             )
 
         if profile.name in {"spawn_teammate", "broadcast", "shutdown_teammate"}:

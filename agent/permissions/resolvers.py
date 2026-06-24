@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -89,6 +90,38 @@ def resolve_tool_profile(tool_name: str, arguments: dict[str, Any], *, registry=
 
 def is_high_risk_command(command: str) -> bool:
     return bool(HIGH_RISK_COMMAND.search(command or ""))
+
+
+# Low-risk commands that may run without approval in ask_before_edit mode.
+# NOTE: pytest / npm test execute project code, so this is "low risk" for the user's
+# own coding workflow, NOT strictly read-only. Arbitrary file readers (cat/head/tail/
+# grep/find) are intentionally excluded because they exfiltrate sensitive paths. This
+# is the single tunable allow-list — expand deliberately.
+_LOW_RISK_SINGLE = {"ls", "pwd", "pytest"}
+_LOW_RISK_GIT_SUB = {"status", "diff", "log", "show", "branch"}
+_SHELL_META = re.compile(r"[;&|`$><(){}\n\\]")
+
+
+def is_low_risk_command(command: str) -> bool:
+    cmd = (command or "").strip()
+    if not cmd or _SHELL_META.search(cmd):
+        return False  # any chaining / redirection / subshell -> not low-risk
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    head = parts[0].rsplit("/", 1)[-1]  # basename defeats /bin/rm style
+    if head in _LOW_RISK_SINGLE:
+        return True
+    if head == "git" and len(parts) >= 2 and parts[1] in _LOW_RISK_GIT_SUB:
+        return True
+    if head in {"python", "python3"} and len(parts) >= 3 and parts[1] == "-m" and parts[2] == "pytest":
+        return True
+    if head == "npm" and "test" in parts[1:]:
+        return True
+    return False
 
 
 def is_sensitive_path(path: str | None) -> bool:
