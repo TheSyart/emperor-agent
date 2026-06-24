@@ -38,6 +38,8 @@ exclude = ["tests*", "webui*", "memory*", "assets*", "templates*", "skills*", "l
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Vendored / peripheral trees that are not part of the core project lint surface.
+extend-exclude = ["skills", "desktop-pet", ".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S"]

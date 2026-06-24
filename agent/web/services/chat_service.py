@@ -9,7 +9,6 @@ from loguru import logger
 
 from ...attachments import AttachmentRef, encode_for_openai_block
 from ...control import InteractionKind, TurnPaused
-from ..origin_guard import is_local_request
 from ...runtime import events as runtime_events
 from ...skill_requests import (
     SkillRequestError,
@@ -17,6 +16,7 @@ from ...skill_requests import (
     inject_requested_skills,
     parse_requested_skills,
 )
+from ..origin_guard import is_local_request
 
 if TYPE_CHECKING:
     from ..state import WebUIState
