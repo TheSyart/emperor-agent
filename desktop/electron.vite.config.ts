@@ -19,6 +19,8 @@ export default defineConfig({
       alias: { '@renderer': resolve(__dirname, 'src/renderer/src') },
     },
     server: {
+      host: '127.0.0.1',
+      port: 5173,
       // Allow importing the shared repo-root assets/ directory from the renderer.
       fs: { allow: [repoRoot] },
       proxy: {
