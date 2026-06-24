@@ -64,6 +64,9 @@ class PermissionPipeline:
             return True
         if tool_name == "scheduler":
             return True
+        if tool_name == "dispatch_subagent":
+            tool = registry.get(tool_name) if registry is not None else None
+            return bool(getattr(tool, "supports_plan_readonly_exploration", False))
         profile = resolve_tool_profile(tool_name, {}, registry=registry)
         return profile.read_only
 

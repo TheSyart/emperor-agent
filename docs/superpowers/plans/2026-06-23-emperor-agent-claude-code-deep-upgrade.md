@@ -3374,17 +3374,23 @@ Implementation notes:
 
 ### Task 6O: Read-Only Exploration Fanout
 
-Status: pending.
+Status: done.
 
 **Files:**
 - Modify: `agent/subagents/registry.py`
-- Modify: `agent/tools/subagent.py`
-- Modify: `agent/tasks/manager.py`
-- Modify: `agent/tasks/sidechain.py`
-- Modify: `agent/runtime/events.py`
+- Modify: `agent/subagents/spec.py`
+- Modify: `agent/tools/dispatch.py`
+- Modify: `agent/permissions/pipeline.py`
+- Modify: `agent/loop.py`
+- Modify: `desktop/src/renderer/src/components/chat/PlanCard.vue`
+- Modify: `docs/claude-code-core-design/06-emperor-upgrade-roadmap.md`
+- Modify: `docs/claude-code-core-design/07-project-execution-plan-runtime.md`
+- Reuse existing: `agent/tasks/manager.py`
+- Reuse existing: `agent/tasks/sidechain.py`
+- Reuse existing: `agent/runtime/events.py`
 - Test: `tests/unit/test_plan_readonly_exploration.py`
 
-- [ ] **Step 1: Add fanout tests**
+- [x] **Step 1: Add fanout tests**
 
 Test that Plan mode allows `dispatch_subagent` only for read-only explorer/reviewer agent types, requires `scope_limit`, `expected_output`, and `evidence_required`, and rejects write-capable subagents.
 
@@ -3396,15 +3402,15 @@ Run:
 
 Expected: failure before the Plan-mode subagent allowlist exists.
 
-- [ ] **Step 2: Add read-only explorer policy**
+- [x] **Step 2: Add read-only explorer policy**
 
 Expose a registry capability flag such as `plan_readonly_explorer=True`. The policy must be in the registry or permission layer, not in prompt text.
 
-- [ ] **Step 3: Write exploration results to plan discovery and sidechain**
+- [x] **Step 3: Write exploration results to plan discovery and sidechain**
 
 After a read-only exploration task finishes, append the transcript to `SidechainTranscript` and summarize its evidence into `PlanDiscovery`.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3413,6 +3419,30 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_readonly_exploration.py -q
+# 4 passed
+
+.venv/bin/python -m pytest tests/unit/test_plan_readonly_exploration.py tests/unit/test_subagent_task_sidechain.py tests/unit/test_permission_pipeline_v2.py tests/unit/test_control.py -q
+# 26 passed
+
+npm --prefix desktop run typecheck
+# passed
+
+.venv/bin/python -m ruff check agent/subagents/spec.py agent/subagents/registry.py agent/tools/dispatch.py agent/loop.py agent/permissions/pipeline.py tests/unit/test_plan_readonly_exploration.py
+# passed
+```
+
+Implementation notes:
+
+- `SubagentSpec.plan_readonly_explorer` is the registry-level source of truth; templates do not control this safety boundary.
+- `PermissionPipeline.is_tool_exposed()` exposes `dispatch_subagent` in Plan mode only because `DispatchSubagentTool.supports_plan_readonly_exploration=True`; actual execution still requires argument-level `is_read_only()`.
+- Plan exploration requires `scope_limit`, `expected_output`, and `evidence_required` before dispatch.
+- Completed read-only explorations keep the existing TaskRecord and `SidechainTranscript`, then append a `PlanDiscovery` with `source=dispatch_subagent:<agent_type>`, `task:<task_id>` evidence, extracted file refs, and a compact summary.
+- PlanCard now displays the exploration evidence count, recent discovery summaries, and associated files.
 
 ### Task 6P: Approved Plan Permission Tokens
 

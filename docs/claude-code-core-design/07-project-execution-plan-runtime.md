@@ -316,15 +316,18 @@ class PlanDiscovery:
 
 ### PE-12：只读探索扇出执行器
 
+状态：已落地第一版。当前实现新增 `SubagentSpec.plan_readonly_explorer`、`DispatchSubagentTool.supports_plan_readonly_exploration` 与参数级 `is_read_only()`，Plan 模式会暴露 `dispatch_subagent`，但只有 registry 标记的只读探索子代理且同时提供 `scope_limit`、`expected_output`、`evidence_required` 才能执行。探索完成后会保留 TaskRecord / sidechain transcript，并通过 `ControlManager.record_plan_discovery()` 写入 `PlanDraftState.discoveries`；PlanCard 展示探索证据数量、最近 discovery 摘要和文件列表。子代理内部在 Plan 探索场景共享 Plan 权限上下文，`run_command` 等非只读工具仍会被 Plan 权限拒绝。
+
 目标：吸收 Claude Code Explore/Plan agent 并行探索能力，但保持 Emperor 的子代理权限白名单。
 
 目标文件：
 
 - `agent/subagents/registry.py`
-- `agent/tools/subagent.py`
+- `agent/tools/dispatch.py`
 - `agent/tasks/manager.py`
 - `agent/tasks/sidechain.py`
 - `agent/runtime/events.py`
+- `desktop/src/renderer/src/components/chat/PlanCard.vue`
 - `tests/unit/test_plan_readonly_exploration.py`
 
 行为：

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from threading import Lock
+from typing import Any
 
 from loguru import logger
 
@@ -11,6 +13,14 @@ from .base import Tool
 from .registry import ToolRegistry
 from .schema import StringSchema, tool_parameters_schema
 
+_PLAN_CONTRACT_FIELDS = ("scope_limit", "expected_output", "evidence_required")
+_EVIDENCE_FILE_RE = re.compile(
+    r"(?<![\w/.-])"
+    r"([A-Za-z0-9_./-]+\."
+    r"(?:py|pyi|ts|tsx|js|jsx|vue|md|rst|json|toml|yaml|yml|txt|css|scss|html)"
+    r"(?::\d+(?:-\d+)?)?)"
+)
+
 
 class DispatchSubagentTool(Tool):
     """派遣预设身份的子代理。子代理拥有独立 history, 跑完只回传一段
@@ -19,6 +29,7 @@ class DispatchSubagentTool(Tool):
     name = "dispatch_subagent"
     exclusive = False
     requires_runtime_context = True
+    supports_plan_readonly_exploration = True
 
     @property
     def concurrency_safe(self) -> bool:
@@ -30,13 +41,15 @@ class DispatchSubagentTool(Tool):
                  parent_registry: ToolRegistry,
                  subagent_registry,
                  runner_factory,
-                 task_manager=None):
+                 task_manager=None,
+                 control_manager=None):
         self._client = client
         self._model = model
         self._parent_registry = parent_registry
         self._subagent_registry = subagent_registry
         self._runner_factory = runner_factory   # 注入: spec, sub_registry -> AgentRunner
         self._task_manager = task_manager
+        self._control_manager = control_manager
         self._counter = 0
         self._counter_lock = Lock()
 
@@ -46,7 +59,8 @@ class DispatchSubagentTool(Tool):
             "派遣一个小太监去单独办差。小太监有自己独立的上下文, 办完只回传"
             "一段文字总结, 不污染主上下文。适用于: 抓取并阅读多个网页、"
             "批量执行命令并整理输出、需要试错的探索性搜索、跨多文件查找等。"
-            "仅在非 Plan 模式、无待处理 Ask/Plan 且权限允许时使用。"
+            "Plan 模式只允许 registry 标记的只读探索子代理, 且必须填写 "
+            "scope_limit / expected_output / evidence_required; 写入型子代理仍禁止。"
             "若多件差事互不依赖, 可在同一回复中发出多个 dispatch_subagent, "
             "运行时会并发派遣并按原 tool_use 顺序回填结果。\n\n"
             "可用 agent_type:\n"
@@ -85,6 +99,15 @@ class DispatchSubagentTool(Tool):
         schema["required"] = ["agent_type", "task"]
         return schema
 
+    def is_read_only(self, arguments: dict[str, Any]) -> bool:
+        spec = self._subagent_registry.get(str(arguments.get("agent_type") or ""))
+        if spec is None or not bool(getattr(spec, "plan_readonly_explorer", False)):
+            return False
+        return not _missing_plan_contract(arguments)
+
+    def is_destructive(self, arguments: dict[str, Any]) -> bool:
+        return not self.is_read_only(arguments)
+
     def execute(self, *, agent_type: str, task: str, purpose: str | None = None,
                 expected_output: str | None = None,
                 evidence_required: str | None = None,
@@ -102,6 +125,19 @@ class DispatchSubagentTool(Tool):
                 f"Error: unknown subagent '{agent_type}'. "
                 f"Available: {self._subagent_registry.names(include_aliases=True)}"
             )
+
+        plan_error = self._plan_exploration_error(
+            spec=spec,
+            arguments={
+                "agent_type": agent_type,
+                "task": task,
+                "expected_output": expected_output,
+                "evidence_required": evidence_required,
+                "scope_limit": scope_limit,
+            },
+        )
+        if plan_error:
+            return plan_error
 
         sub_registry = ToolRegistry()
         for tool_name in spec.tool_names:
@@ -133,7 +169,14 @@ class DispatchSubagentTool(Tool):
                 title=purpose or task[:80],
                 source="dispatch_subagent",
                 tool_call_id=parent_call_id,
-                metadata={"agent_type": agent_type, "subagent_name": spec.name},
+                metadata={
+                    "agent_type": agent_type,
+                    "subagent_name": spec.name,
+                    "plan_readonly_explorer": bool(getattr(spec, "plan_readonly_explorer", False)),
+                    "scope_limit": scope_limit or "",
+                    "expected_output": expected_output or "",
+                    "evidence_required": evidence_required or "",
+                },
             )
             self._task_manager.append_sidechain(task_record.id, history[0])
             bridge_emit(runtime_events.task_started(task_record.to_runtime_dict()))
@@ -196,13 +239,57 @@ class DispatchSubagentTool(Tool):
         if task_record is not None:
             self._task_manager.append_sidechain(task_record.id, {"role": "assistant", "content": final})
             completed = self._task_manager.complete_task(task_record.id, summary=final[:500])
+            plan_update = self._record_plan_exploration_discovery(
+                spec=spec,
+                task_record=completed or task_record,
+                final=final,
+            )
             if completed is not None:
                 bridge_emit(runtime_events.task_done(completed.to_runtime_dict()))
+            if plan_update is not None:
+                bridge_emit(runtime_events.plan_runtime_update(plan_update.to_dict()))
 
         logger.info(f"  └── subagent context end (内部 history {len(history)} 条, 回传 {len(final)} 字) ──")
         logger.info(f"[小太监回禀]: {final}")
         logger.info(f"[主上下文压缩]: 子代理仅向主 history 追加 {len(final)} 字")
         return final
+
+    def _plan_exploration_error(self, *, spec, arguments: dict[str, Any]) -> str:
+        if not self._in_plan_mode():
+            return ""
+        if not bool(getattr(spec, "plan_readonly_explorer", False)):
+            return (
+                "Error: Plan mode only allows dispatch_subagent for registry-marked "
+                "read-only explorer subagents."
+            )
+        missing = _missing_plan_contract(arguments)
+        if missing:
+            return (
+                "Error: Plan mode dispatch_subagent requires explicit "
+                f"{', '.join(_PLAN_CONTRACT_FIELDS)}. Missing: {', '.join(missing)}."
+            )
+        return ""
+
+    def _in_plan_mode(self) -> bool:
+        return str(getattr(self._control_manager, "mode", "")) == "plan"
+
+    def _record_plan_exploration_discovery(self, *, spec, task_record, final: str):
+        if not self._in_plan_mode() or not bool(getattr(spec, "plan_readonly_explorer", False)):
+            return None
+        recorder = getattr(self._control_manager, "record_plan_discovery", None)
+        if not callable(recorder):
+            return None
+        evidence_refs = [f"task:{task_record.id}", *_extract_evidence_refs(final)]
+        try:
+            return recorder(
+                source=f"dispatch_subagent:{spec.name}",
+                summary=_summarize_exploration(final),
+                files=_extract_evidence_files(evidence_refs),
+                evidence_refs=evidence_refs,
+            )
+        except Exception as exc:
+            logger.warning(f"plan exploration discovery recording failed: {exc}")
+            return None
 
 
 def _compose_subagent_task(
@@ -221,3 +308,49 @@ def _compose_subagent_task(
         contract.append(f"- 范围限制: {scope_limit}")
     contract.append("- 最终回禀必须包含: 结论、证据、风险、建议下一步。")
     return f"{task.rstrip()}\n\n## 差事契约\n" + "\n".join(contract)
+
+
+def _missing_plan_contract(arguments: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for field in _PLAN_CONTRACT_FIELDS:
+        if not str(arguments.get(field) or "").strip():
+            missing.append(field)
+    return missing
+
+
+def _extract_evidence_refs(text: str) -> list[str]:
+    refs: list[str] = []
+    for match in _EVIDENCE_FILE_RE.findall(text or ""):
+        ref = match.strip().rstrip(".,;，。；)")
+        if ref.startswith("http://") or ref.startswith("https://"):
+            continue
+        refs.append(ref)
+    return _dedupe_strings(refs)
+
+
+def _extract_evidence_files(evidence_refs: list[str]) -> list[str]:
+    files: list[str] = []
+    for ref in evidence_refs:
+        if ref.startswith("task:"):
+            continue
+        files.append(ref.split(":", 1)[0])
+    return _dedupe_strings(files)
+
+
+def _summarize_exploration(text: str, *, limit: int = 500) -> str:
+    summary = " ".join((text or "").strip().split())
+    if len(summary) <= limit:
+        return summary
+    return f"{summary[:limit - 3].rstrip()}..."
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result

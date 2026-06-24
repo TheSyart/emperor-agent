@@ -20,6 +20,11 @@ const riskLabel = computed(() => {
   return '中风险'
 })
 const runtimeStatusLabel = computed(() => statusLabel(runtimePlan.value?.status || props.interaction.status))
+const planDiscoveries = computed(() => {
+  const discoveries = runtimePlan.value?.draft?.discoveries || []
+  return discoveries.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+})
+const recentDiscoveries = computed(() => planDiscoveries.value.slice(-3).reverse())
 const showExecutionSummary = computed(() => {
   const summary = executionSummary.value
   return Boolean(
@@ -27,7 +32,8 @@ const showExecutionSummary = computed(() => {
     summary.failedVerificationSummary ||
     summary.blockedReason ||
     summary.openQuestionsCount ||
-    summary.independentVerificationStatus !== 'none',
+    summary.independentVerificationStatus !== 'none' ||
+    planDiscoveries.value.length,
   )
 })
 
@@ -132,6 +138,27 @@ function compactList(items?: string[], limit = 3) {
   const suffix = (items || []).length > limit ? ` +${(items || []).length - limit}` : ''
   return `${visible.join(', ')}${suffix}`
 }
+
+function discoveryString(item: Record<string, unknown>, key: string): string {
+  const value = item[key]
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+function discoveryList(item: Record<string, unknown>, key: string): string[] {
+  const value = item[key]
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => String(entry || '').trim()).filter(Boolean)
+}
+
+function discoverySummary(item: Record<string, unknown>): string {
+  return discoveryString(item, 'summary') || discoveryString(item, 'source') || '已记录探索证据'
+}
+
+function discoveryFiles(item: Record<string, unknown>): string {
+  return compactList(discoveryList(item, 'files'), 2)
+}
 </script>
 
 <template>
@@ -181,6 +208,20 @@ function compactList(items?: string[], limit = 3) {
           >{{ command }}</code>
           <small v-if="executionSummary.riskSignals.length">
             Risk: {{ compactList(executionSummary.riskSignals, 4) }}
+          </small>
+        </div>
+        <div v-if="planDiscoveries.length" class="plan-summary-item ok">
+          <span>Exploration Evidence</span>
+          <strong>{{ planDiscoveries.length }}</strong>
+          <p v-for="item in recentDiscoveries" :key="discoveryString(item, 'id') || discoverySummary(item)">
+            {{ discoverySummary(item) }}
+          </p>
+          <small
+            v-for="item in recentDiscoveries"
+            v-show="discoveryFiles(item)"
+            :key="`${discoveryString(item, 'id') || discoverySummary(item)}-files`"
+          >
+            Files: {{ discoveryFiles(item) }}
           </small>
         </div>
       </div>

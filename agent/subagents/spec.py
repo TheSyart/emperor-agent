@@ -15,3 +15,4 @@ class SubagentSpec:
     system_prompt: str
     tool_names: tuple[str, ...] = field(default_factory=tuple)
     max_turns: int = 15
+    plan_readonly_explorer: bool = False

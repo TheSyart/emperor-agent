@@ -608,6 +608,11 @@ class AgentLoop:
     def _install_subagent_tool(self) -> None:
         def _make_subagent_runner(*, spec, sub_registry, task: str | None = None):
             route = self.model_router.route("subagent", agent_type=spec.name, task=task)
+            plan_control_manager = (
+                self.control_manager
+                if self.control_manager.mode == "plan" and getattr(spec, "plan_readonly_explorer", False)
+                else None
+            )
             return build_routed_runner(
                 route=route,
                 registry=sub_registry,
@@ -615,6 +620,7 @@ class AgentLoop:
                 max_tokens_cap=2000,
                 usage_type=f"subagent:{spec.name}",
                 token_tracker=self.token_tracker,
+                control_manager=plan_control_manager,
                 max_turns=spec.max_turns,
             )
 
@@ -625,6 +631,7 @@ class AgentLoop:
             subagent_registry=self.subagent_registry,
             runner_factory=_make_subagent_runner,
             task_manager=self.task_manager,
+            control_manager=self.control_manager,
         ))
 
     def _team_runner_factory(self, project_id: str):

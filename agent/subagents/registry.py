@@ -26,6 +26,7 @@ _BUILTIN_SPECS: dict[str, dict] = {
             "load_skill", "read_file", "glob", "grep",
         ),
         "max_turns": 12,
+        "plan_readonly_explorer": True,
     },
     "dongchang_tanshi": {
         "description": (
@@ -47,6 +48,7 @@ _BUILTIN_SPECS: dict[str, dict] = {
             "run_command", "read_file", "glob", "grep",
         ),
         "max_turns": 12,
+        "plan_readonly_explorer": True,
     },
     "verification_reviewer": {
         "description": (
@@ -57,6 +59,7 @@ _BUILTIN_SPECS: dict[str, dict] = {
             "run_command", "read_file", "glob", "grep",
         ),
         "max_turns": 14,
+        "plan_readonly_explorer": True,
     },
     "neiguan_yingzao": {
         "description": (
@@ -124,6 +127,7 @@ class SubagentRegistry:
                 system_prompt=system_prompt,
                 tool_names=tuple(cfg["tool_names"]),
                 max_turns=cfg["max_turns"],
+                plan_readonly_explorer=bool(cfg.get("plan_readonly_explorer", False)),
             )
 
     def resolve_name(self, name: str) -> str:
