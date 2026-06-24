@@ -3598,16 +3598,22 @@ Implementation notes:
 
 ### Task 6R: Verification Matrix
 
-Status: pending.
+Status: done.
 
 **Files:**
 - Modify: `agent/plans/verification.py`
 - Modify: `agent/plans/evidence.py`
+- Modify: `agent/plans/models.py`
+- Modify: `agent/plans/__init__.py`
 - Modify: `agent/control/manager.py`
-- Modify: `agent/runner.py`
+- Modify: `agent/control/tools.py`
+- Modify: `desktop/src/renderer/src/types.ts`
+- Modify: `docs/claude-code-core-design/06-emperor-upgrade-roadmap.md`
+- Modify: `docs/claude-code-core-design/07-project-execution-plan-runtime.md`
+- Reuse existing: `agent/runner.py`
 - Test: `tests/unit/test_plan_verification_matrix.py`
 
-- [ ] **Step 1: Add matrix tests**
+- [x] **Step 1: Add matrix tests**
 
 Test that multiple required commands must all pass, optional command failure becomes a risk note, manual verification requires external evidence, and skipped requirements require a reason.
 
@@ -3619,19 +3625,19 @@ Run:
 
 Expected: failure before verification requirements exist.
 
-- [ ] **Step 2: Add requirement model**
+- [x] **Step 2: Add requirement model**
 
 Add `VerificationRequirement` with `id`, `kind`, `required`, `command`, `description`, `status`, `evidence_refs`, and `reason`.
 
-- [ ] **Step 3: Map legacy commands**
+- [x] **Step 3: Map legacy commands**
 
 Map `PlanStep.commands` into required command requirements so existing plans remain compatible.
 
-- [ ] **Step 4: Gate completion and final answer**
+- [x] **Step 4: Gate completion and final answer**
 
 Update `PlanEvidenceGate` and final-answer gate so required matrix items must pass before step completion or final answer.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -3640,6 +3646,31 @@ Run:
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_verification_matrix.py -q
+# 4 passed
+
+.venv/bin/python -m pytest tests/unit/test_plan_verification_matrix.py tests/unit/test_plan_evidence_gate.py tests/unit/test_plan_runtime.py tests/unit/test_plan_task_binding.py -q
+# 22 passed
+
+.venv/bin/python -m ruff check agent/plans/verification.py agent/plans/evidence.py agent/plans/models.py agent/plans/__init__.py agent/control/manager.py agent/control/tools.py tests/unit/test_plan_verification_matrix.py
+# passed
+
+npm --prefix desktop run typecheck
+# passed
+```
+
+Implementation notes:
+
+- `VerificationRequirement` lives in `agent/plans/verification.py`.
+- `PlanStep.verification` persists explicit matrix requirements; legacy `PlanStep.commands` are mapped into required command requirements by `requirements_for_step()`.
+- `assess_step_verification()` returns blocking errors and risk notes; required failures/missing evidence block completion, optional failures do not.
+- Manual requirements pass only with explicit evidence matching `requirement_id` / `verification_id`.
+- Skipped requirements require a reason; a reason turns the skip into a risk note rather than a silent pass.
+- `propose_plan` schema accepts a `verification` array for future model-authored matrices.
 
 ### Task 6S: Reviewer Task Transcript
 

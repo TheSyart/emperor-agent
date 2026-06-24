@@ -1,5 +1,5 @@
 from .context import PlanContextBuilder
-from .evidence import PlanEvidenceError, format_plan_evidence_error
+from .evidence import PlanEvidenceError, assess_step_verification, format_plan_evidence_error
 from .execution import PlanExecutionState
 from .models import (
     PlanDiscovery,
@@ -12,12 +12,18 @@ from .models import (
 )
 from .quality import PlanQualityError, PlanQualityGate, PlanQualityResult, format_plan_quality_error
 from .store import PlanStore
-from .verification import VerificationCommand, VerificationResult, VerificationReviewRequest
+from .verification import (
+    VerificationCommand,
+    VerificationRequirement,
+    VerificationResult,
+    VerificationReviewRequest,
+)
 
 __all__ = [
     "PlanExecutionState",
     "PlanContextBuilder",
     "PlanEvidenceError",
+    "assess_step_verification",
     "PlanDiscovery",
     "PlanDraftPhase",
     "PlanDraftState",
@@ -30,6 +36,7 @@ __all__ = [
     "PlanQualityResult",
     "PlanStore",
     "VerificationCommand",
+    "VerificationRequirement",
     "VerificationResult",
     "VerificationReviewRequest",
     "format_plan_evidence_error",

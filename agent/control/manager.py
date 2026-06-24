@@ -19,7 +19,9 @@ from ..plans import (
     PlanStep,
     PlanStepStatus,
     PlanStore,
+    VerificationRequirement,
     VerificationReviewRequest,
+    assess_step_verification,
 )
 from ..tasks import TaskKind, TaskStatus
 from .clarification import ClarificationAssessment, ClarificationPolicy
@@ -546,25 +548,18 @@ class ControlManager:
                 )
         if next_status != PlanStepStatus.DONE.value or step.status == PlanStepStatus.DONE.value:
             return
-        if not step.commands:
-            return
-        command_state = _verification_state_by_command(step)
-        failed = [command for command, passed in command_state.items() if passed is False]
-        if failed:
+        assessment = assess_step_verification(step)
+        if assessment.failed_required:
             raise PlanEvidenceError(
                 "PLAN_EVIDENCE_FAILED",
                 step_id=step.id,
-                reason=f"declared verification failed: {'; '.join(failed[:3])}",
+                reason=f"declared verification failed: {'; '.join(assessment.failed_required[:3])}",
             )
-        missing = [
-            command for command in step.commands
-            if command_state.get(_normalize_command(command)) is not True
-        ]
-        if missing:
+        if assessment.blocking_errors:
             raise PlanEvidenceError(
                 "PLAN_EVIDENCE_REQUIRED",
                 step_id=step.id,
-                reason=f"missing passing verification evidence for: {'; '.join(missing[:3])}",
+                reason=f"missing passing verification evidence for: {'; '.join(assessment.blocking_errors[:3])}",
             )
 
     def _has_ask_interaction(self) -> bool:
@@ -1355,6 +1350,11 @@ def _parse_plan_steps(items: list[dict[str, Any]]) -> list[PlanStep]:
                     for ref in item.get("discovery_refs") or item.get("discoveryRefs") or []
                     if str(ref or "").strip()
                 ][:12],
+                verification=[
+                    VerificationRequirement.from_dict(raw)
+                    for raw in item.get("verification") or item.get("verification_requirements") or []
+                    if isinstance(raw, dict)
+                ][:20],
                 risk=str(item.get("risk") or "medium").strip()[:24],
                 risk_note=str(item.get("risk_note") or item.get("riskNote") or "").strip()[:1000],
                 rollback=str(
@@ -1595,11 +1595,11 @@ def _task_status_from_plan_step(status: str) -> str:
 
 
 def _step_verification_status(step: PlanStep) -> str:
-    if any(item.get("passed") is False for item in step.evidence if isinstance(item, dict)):
+    assessment = assess_step_verification(step)
+    if assessment.failed_required:
         return "failed"
-    if step.commands:
-        command_state = _verification_state_by_command(step)
-        if step.commands and all(command_state.get(_normalize_command(command)) is True for command in step.commands):
+    if assessment.requirements:
+        if not assessment.blocking_errors:
             return "passed"
         return "pending"
     return "not_required"

@@ -415,6 +415,8 @@ class PlanPermissionToken:
 
 ### PE-15：Verification Matrix
 
+状态：已落地第一版。新增 `VerificationRequirement`，`PlanStep.verification` 可表达 `command/manual/reviewer/smoke` 验证项、required/optional、status、evidence refs 和 skip reason；legacy `PlanStep.commands` 会自动映射为 required command requirements。`assess_step_verification()` 统一计算 blocking errors 与 risk notes，step 完成门禁改为要求所有 required matrix item 通过或带 reason 跳过，optional failure 不阻断但进入风险 note。`propose_plan` schema 已支持提交 verification matrix。
+
 目标：把每个 step 的验证从单条 command 升级为 required/optional/manual 矩阵。
 
 目标文件：

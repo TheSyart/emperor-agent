@@ -529,6 +529,7 @@ export interface RuntimePlanStep {
   acceptance?: string[]
   discovery_refs?: string[]
   discoveryRefs?: string[]
+  verification?: Array<Record<string, unknown>>
   evidence?: Array<Record<string, unknown>>
   risk?: string
   risk_note?: string

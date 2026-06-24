@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .verification import VerificationRequirement
+
 
 class PlanStatus(StrEnum):
     DRAFT = "draft"
@@ -138,6 +140,7 @@ class PlanStep:
     commands: list[str] = field(default_factory=list)
     acceptance: list[str] = field(default_factory=list)
     discovery_refs: list[str] = field(default_factory=list)
+    verification: list[VerificationRequirement] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
     risk: str = "medium"
     risk_note: str = ""
@@ -164,6 +167,11 @@ class PlanStep:
                 str(item)
                 for item in raw.get("discovery_refs") or raw.get("discoveryRefs") or []
                 if str(item or "").strip()
+            ],
+            verification=[
+                item if isinstance(item, VerificationRequirement) else VerificationRequirement.from_dict(item)
+                for item in raw.get("verification") or raw.get("verification_requirements") or []
+                if isinstance(item, (VerificationRequirement, dict))
             ],
             evidence=[item for item in raw.get("evidence") or [] if isinstance(item, dict)],
             risk=str(raw.get("risk") or "medium"),

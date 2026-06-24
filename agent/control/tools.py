@@ -5,7 +5,7 @@ from typing import Any
 
 from ..plans import PlanQualityError
 from ..tools.base import Tool
-from ..tools.schema import ArraySchema, ObjectSchema, StringSchema
+from ..tools.schema import ArraySchema, BooleanSchema, ObjectSchema, StringSchema
 
 CONTROL_PAUSE_PREFIX = "__CONTROL_PAUSE__:"
 
@@ -131,6 +131,30 @@ class ProposePlanTool(Tool):
                     "引用的 PlanDiscovery id，用于证明该步骤基于只读探索事实",
                     items=StringSchema("discovery id", max_length=64),
                     max_items=12,
+                ),
+                "verification": ArraySchema(
+                    "验证矩阵；用于表达 required/optional/manual/reviewer/smoke 验证要求",
+                    items=ObjectSchema(
+                        "验证要求",
+                        properties={
+                            "id": StringSchema("稳定 requirement id", min_length=1, max_length=64),
+                            "kind": StringSchema(
+                                "验证类型",
+                                enum=["command", "manual", "reviewer", "smoke"],
+                            ),
+                            "required": BooleanSchema("是否为阻塞性必需验证"),
+                            "command": StringSchema("命令型验证的命令", max_length=300, nullable=True),
+                            "description": StringSchema("验证说明", max_length=500, nullable=True),
+                            "status": StringSchema(
+                                "当前状态",
+                                enum=["pending", "passed", "failed", "skipped"],
+                                nullable=True,
+                            ),
+                            "reason": StringSchema("跳过或失败原因", max_length=500, nullable=True),
+                        },
+                        required=["id", "kind"],
+                    ),
+                    max_items=20,
                 ),
                 "risk": StringSchema("风险级别", enum=["low", "medium", "high"], nullable=True),
                 "risk_note": StringSchema("高风险步骤的风险说明", max_length=1000, nullable=True),

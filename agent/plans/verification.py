@@ -2,9 +2,110 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 
 _TOOL_ERROR_HINT = "[Analyze the error above and try a different approach.]"
+_VALID_REQUIREMENT_STATUSES = {"pending", "passed", "failed", "skipped"}
+
+
+@dataclass(frozen=True)
+class VerificationRequirement:
+    id: str
+    kind: str
+    required: bool = True
+    command: str = ""
+    description: str = ""
+    status: str = "pending"
+    evidence_refs: list[str] = field(default_factory=list)
+    reason: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> VerificationRequirement:
+        status = str(raw.get("status") or "pending").strip()
+        if status not in _VALID_REQUIREMENT_STATUSES:
+            status = "pending"
+        return cls(
+            id=str(raw.get("id") or raw.get("requirement_id") or "").strip(),
+            kind=str(raw.get("kind") or "command").strip() or "command",
+            required=bool(raw.get("required", True)),
+            command=str(raw.get("command") or "").strip(),
+            description=str(raw.get("description") or "").strip(),
+            status=status,
+            evidence_refs=[str(item) for item in raw.get("evidence_refs") or raw.get("evidenceRefs") or []],
+            reason=str(raw.get("reason") or "").strip(),
+        )
+
+
+def requirements_for_step(step) -> list[VerificationRequirement]:
+    explicit = [
+        item if isinstance(item, VerificationRequirement) else VerificationRequirement.from_dict(item)
+        for item in getattr(step, "verification", []) or []
+        if isinstance(item, (VerificationRequirement, dict))
+    ]
+    commands = [str(item) for item in getattr(step, "commands", []) or [] if str(item or "").strip()]
+    existing_commands = {_normalize_command(item.command) for item in explicit if item.command}
+    legacy = [
+        VerificationRequirement(
+            id=f"cmd_{index}",
+            kind="command",
+            required=True,
+            command=command,
+            description=f"Run `{command}`",
+        )
+        for index, command in enumerate(commands, start=1)
+        if _normalize_command(command) not in existing_commands
+    ]
+    evidence = [item for item in getattr(step, "evidence", []) or [] if isinstance(item, dict)]
+    return [_apply_evidence(requirement, evidence) for requirement in [*explicit, *legacy]]
+
+
+def _apply_evidence(
+    requirement: VerificationRequirement,
+    evidence: list[dict],
+) -> VerificationRequirement:
+    if requirement.status in {"passed", "failed", "skipped"}:
+        return requirement
+    matched = _matching_evidence(requirement, evidence)
+    if matched is None:
+        return requirement
+    passed = matched.get("passed")
+    if passed is True:
+        return replace(requirement, status="passed", evidence_refs=_evidence_refs(matched))
+    if passed is False:
+        return replace(
+            requirement,
+            status="failed",
+            evidence_refs=_evidence_refs(matched),
+            reason=str(matched.get("summary") or matched.get("error") or requirement.reason).strip(),
+        )
+    return requirement
+
+
+def _matching_evidence(requirement: VerificationRequirement, evidence: list[dict]) -> dict | None:
+    for item in reversed(evidence):
+        req_id = str(item.get("requirement_id") or item.get("verification_id") or "").strip()
+        if req_id and req_id == requirement.id:
+            return item
+        if requirement.kind == "command" and requirement.command:
+            if _normalize_command(str(item.get("command") or "")) == _normalize_command(requirement.command):
+                return item
+    return None
+
+
+def _evidence_refs(evidence: dict) -> list[str]:
+    refs: list[str] = []
+    for key in ("tool_call_id", "task_id", "path", "command"):
+        value = str(evidence.get(key) or "").strip()
+        if value:
+            refs.append(f"{key}:{value}" if key != "command" else value)
+    return refs
+
+
+def _normalize_command(command: str) -> str:
+    return " ".join(str(command or "").split())
 
 
 @dataclass(frozen=True)
