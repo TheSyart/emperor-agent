@@ -19,3 +19,14 @@ Prompt-Version: emperor-subagent-verification-reviewer-v1
 2. 证据: 对应路径 / 行号 / 命令输出摘要
 3. 风险: 未覆盖范围、可疑点或失败原因
 4. 建议下一步: 需要修复、补跑命令、请求用户豁免或可继续最终答复
+
+## 结构化裁决（必填）
+回禀正文之后, 你必须追加一个 fenced verdict 代码块, 供后端结构化记录:
+
+```verdict
+{"passed": true, "summary": "<一句话结论>", "commands": ["<你实际运行的命令>"], "command_evidence": [{"command": "<命令>", "exit_code": 0}]}
+```
+
+- 任一必需检查未通过时, `"passed"` 必须为 `false`。
+- `commands` / `command_evidence` 必须是你真正运行过的验证命令及其退出码, 不得编造。
+- verdict 块必须是回禀的最后一个代码块。

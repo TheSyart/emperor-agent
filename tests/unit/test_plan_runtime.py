@@ -524,3 +524,66 @@ def test_reviewable_plan_id_returns_finished_plan(tmp_path: Path) -> None:
 def test_reviewable_plan_id_none_when_no_finished_plan(tmp_path: Path) -> None:
     manager = ControlManager(tmp_path)
     assert manager.reviewable_plan_id() is None
+
+
+def test_reviewer_verdict_records_independent_verification(tmp_path: Path) -> None:
+    from agent.tools.dispatch import DispatchSubagentTool
+
+    manager = ControlManager(tmp_path)
+    record = _completed_plan_record()
+    manager.plan_store.save(record)
+
+    final = (
+        "复核完成。\n```verdict\n"
+        '{"passed": true, "summary": "ok", "commands": ["pytest"], '
+        '"command_evidence": [{"command": "pytest", "exit_code": 0}]}\n```'
+    )
+
+    class _Spec:
+        name = "verification_reviewer"
+
+    class _Task:
+        id = "subagent_abc"
+        transcript_path = "memory/tasks/subagent_abc/transcript.jsonl"
+
+    tool = DispatchSubagentTool(
+        client=None,
+        model="fake",
+        parent_registry=None,
+        subagent_registry=None,
+        runner_factory=None,
+        control_manager=manager,
+    )
+    updated = tool._record_independent_verification(spec=_Spec(), task_record=_Task(), final=final)
+
+    assert updated is not None
+    latest = updated.metadata.get("independent_verification_latest")
+    assert latest["passed"] is True
+    assert latest["task_id"] == "subagent_abc"
+    assert latest["transcript_path"].endswith("transcript.jsonl")
+    assert updated.verification[-1]["source"] == "verification_reviewer"
+
+
+def test_reviewer_verdict_ignored_for_non_reviewer_subagent(tmp_path: Path) -> None:
+    from agent.tools.dispatch import DispatchSubagentTool
+
+    manager = ControlManager(tmp_path)
+    manager.plan_store.save(_completed_plan_record())
+
+    class _Spec:
+        name = "dongchang_tanshi"
+
+    class _Task:
+        id = "subagent_xyz"
+        transcript_path = "memory/tasks/subagent_xyz/transcript.jsonl"
+
+    tool = DispatchSubagentTool(
+        client=None,
+        model="fake",
+        parent_registry=None,
+        subagent_registry=None,
+        runner_factory=None,
+        control_manager=manager,
+    )
+    final = "```verdict\n{\"passed\": true, \"summary\": \"ok\"}\n```"
+    assert tool._record_independent_verification(spec=_Spec(), task_record=_Task(), final=final) is None

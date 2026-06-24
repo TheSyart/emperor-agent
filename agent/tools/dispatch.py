@@ -6,6 +6,7 @@ from typing import Any
 
 from loguru import logger
 
+from ..plans.reviewer import parse_reviewer_verdict
 from ..providers.base import run_sync
 from ..runtime import events as runtime_events
 from ..tasks import TaskKind
@@ -244,10 +245,17 @@ class DispatchSubagentTool(Tool):
                 task_record=completed or task_record,
                 final=final,
             )
+            verification_update = self._record_independent_verification(
+                spec=spec,
+                task_record=completed or task_record,
+                final=final,
+            )
             if completed is not None:
                 bridge_emit(runtime_events.task_done(completed.to_runtime_dict()))
             if plan_update is not None:
                 bridge_emit(runtime_events.plan_runtime_update(plan_update.to_dict()))
+            if verification_update is not None:
+                bridge_emit(runtime_events.plan_runtime_update(verification_update.to_dict()))
 
         logger.info(f"  └── subagent context end (内部 history {len(history)} 条, 回传 {len(final)} 字) ──")
         logger.info(f"[小太监回禀]: {final}")
@@ -289,6 +297,30 @@ class DispatchSubagentTool(Tool):
             )
         except Exception as exc:
             logger.warning(f"plan exploration discovery recording failed: {exc}")
+            return None
+
+    def _record_independent_verification(self, *, spec, task_record, final: str):
+        if getattr(spec, "name", "") != "verification_reviewer":
+            return None
+        recorder = getattr(self._control_manager, "record_independent_verification_result", None)
+        plan_lookup = getattr(self._control_manager, "reviewable_plan_id", None)
+        if not callable(recorder) or not callable(plan_lookup):
+            return None
+        verdict = parse_reviewer_verdict(final)
+        if verdict is None:
+            return None
+        plan_id = plan_lookup()
+        if plan_id is None:
+            return None
+        payload = verdict.to_payload()
+        payload["source"] = "verification_reviewer"
+        if task_record is not None:
+            payload["task_id"] = task_record.id
+            payload["transcript_path"] = task_record.transcript_path
+        try:
+            return recorder(plan_id=plan_id, result=payload)
+        except Exception as exc:
+            logger.warning(f"independent verification recording failed: {exc}")
             return None
 
 
