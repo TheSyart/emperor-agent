@@ -57,22 +57,18 @@ class DispatchSubagentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "派遣一个小太监去单独办差。小太监有自己独立的上下文, 办完只回传"
-            "一段文字总结, 不污染主上下文。适用于: 抓取并阅读多个网页、"
-            "批量执行命令并整理输出、需要试错的探索性搜索、跨多文件查找等。"
-            "Plan 模式只允许 registry 标记的只读探索子代理, 且必须填写 "
-            "scope_limit / expected_output / evidence_required; 写入型子代理仍禁止。"
-            "若多件差事互不依赖, 可在同一回复中发出多个 dispatch_subagent, "
-            "运行时会并发派遣并按原 tool_use 顺序回填结果。\n\n"
-            "可用 agent_type:\n"
-            f"{self._subagent_registry.describe()}"
+            "派遣一个子代理独立执行只读调研、批量搜索、跨文件查找或试错探索。"
+            "子代理使用独立上下文，完成后只回传总结，避免污染主上下文。"
+            "计划模式下只允许具备只读探索权限的子代理，并必须填写 "
+            "scope_limit、expected_output、evidence_required；写入型子代理仍被禁止。"
+            "多项互不依赖的任务可在同一回合并发派遣，结果会按原工具调用顺序回填。"
         )
 
     @property
     def parameters(self) -> dict:
         schema = tool_parameters_schema(
             agent_type=StringSchema(
-                "子代理类型, 必须是 description 中列出的可用类型之一",
+                "子代理类型，必须是 enum 中列出的可用类型之一",
                 enum=self._subagent_registry.names(include_aliases=True),
             ),
             task=StringSchema(
@@ -240,16 +236,26 @@ class DispatchSubagentTool(Tool):
         if task_record is not None:
             self._task_manager.append_sidechain(task_record.id, {"role": "assistant", "content": final})
             completed = self._task_manager.complete_task(task_record.id, summary=final[:500])
-            plan_update = self._record_plan_exploration_discovery(
-                spec=spec,
-                task_record=completed or task_record,
-                final=final,
-            )
-            verification_update = self._record_independent_verification(
-                spec=spec,
-                task_record=completed or task_record,
-                final=final,
-            )
+            recorded = completed or task_record
+            record_task_id = recorded.id if recorded is not None else None
+            try:
+                plan_update = self._record_plan_exploration_discovery(
+                    spec=spec, task_record=recorded, final=final,
+                )
+            except Exception as exc:
+                plan_update = None
+                logger.warning(f"plan discovery record failed: {exc}")
+                bridge_emit(runtime_events.record_degraded(
+                    kind="plan_discovery", reason=str(exc), task_id=record_task_id))
+            try:
+                verification_update = self._record_independent_verification(
+                    spec=spec, task_record=recorded, final=final,
+                )
+            except Exception as exc:
+                verification_update = None
+                logger.warning(f"independent verification record failed: {exc}")
+                bridge_emit(runtime_events.record_degraded(
+                    kind="independent_verification", reason=str(exc), task_id=record_task_id))
             if completed is not None:
                 bridge_emit(runtime_events.task_done(completed.to_runtime_dict()))
             if plan_update is not None:
@@ -288,16 +294,13 @@ class DispatchSubagentTool(Tool):
         if not callable(recorder):
             return None
         evidence_refs = [f"task:{task_record.id}", *_extract_evidence_refs(final)]
-        try:
-            return recorder(
-                source=f"dispatch_subagent:{spec.name}",
-                summary=_summarize_exploration(final),
-                files=_extract_evidence_files(evidence_refs),
-                evidence_refs=evidence_refs,
-            )
-        except Exception as exc:
-            logger.warning(f"plan exploration discovery recording failed: {exc}")
-            return None
+        # Failures propagate to the caller, which emits a record_degraded event.
+        return recorder(
+            source=f"dispatch_subagent:{spec.name}",
+            summary=_summarize_exploration(final),
+            files=_extract_evidence_files(evidence_refs),
+            evidence_refs=evidence_refs,
+        )
 
     def _record_independent_verification(self, *, spec, task_record, final: str):
         if getattr(spec, "name", "") != "verification_reviewer":
@@ -317,11 +320,8 @@ class DispatchSubagentTool(Tool):
         if task_record is not None:
             payload["task_id"] = task_record.id
             payload["transcript_path"] = task_record.transcript_path
-        try:
-            return recorder(plan_id=plan_id, result=payload)
-        except Exception as exc:
-            logger.warning(f"independent verification recording failed: {exc}")
-            return None
+        # Failures propagate to the caller, which emits a record_degraded event.
+        return recorder(plan_id=plan_id, result=payload)
 
 
 def _compose_subagent_task(

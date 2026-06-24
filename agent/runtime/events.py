@@ -219,3 +219,7 @@ def task_error(task: dict[str, Any], *, error: str) -> dict[str, Any]:
 
 def task_cancelled(task: dict[str, Any], *, reason: str = "cancelled") -> dict[str, Any]:
     return runtime_event("task_cancelled", task=task, reason=reason)
+
+
+def record_degraded(*, kind: str, reason: str, task_id: str | None = None) -> dict[str, Any]:
+    return runtime_event("record_degraded", kind=kind, reason=reason[:500], taskId=task_id)

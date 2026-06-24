@@ -392,6 +392,11 @@ export function useRuntime(options: {
       lastSeq.value = data.seq
     }
 
+    if (data.event === 'record_degraded') {
+      updatePending(`状态记录降级: ${data.kind || ''}`, data.reason || '', 'error', 6000)
+      return
+    }
+
     if (data.event === 'user_message') {
       handleUserMessageEvent(data)
       return

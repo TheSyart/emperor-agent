@@ -564,6 +564,47 @@ def test_reviewer_verdict_records_independent_verification(tmp_path: Path) -> No
     assert updated.verification[-1]["source"] == "verification_reviewer"
 
 
+def test_record_degraded_event_shape() -> None:
+    from agent.runtime import events
+
+    event = events.record_degraded(kind="plan_discovery", reason="x" * 600, task_id="t1")
+    assert event["event"] == "record_degraded"
+    assert event["kind"] == "plan_discovery"
+    assert len(event["reason"]) == 500
+    assert event["taskId"] == "t1"
+
+
+def test_record_independent_verification_propagates_recorder_error(tmp_path: Path) -> None:
+    from agent.tools.dispatch import DispatchSubagentTool
+
+    manager = ControlManager(tmp_path)
+    manager.plan_store.save(_completed_plan_record())
+
+    def _boom(**_kwargs):
+        raise RuntimeError("disk full")
+
+    manager.record_independent_verification_result = _boom  # type: ignore[assignment]
+
+    class _Spec:
+        name = "verification_reviewer"
+
+    class _Task:
+        id = "subagent_e"
+        transcript_path = "memory/tasks/subagent_e/transcript.jsonl"
+
+    tool = DispatchSubagentTool(
+        client=None,
+        model="fake",
+        parent_registry=None,
+        subagent_registry=None,
+        runner_factory=None,
+        control_manager=manager,
+    )
+    final = '```verdict\n{"passed": true, "summary": "ok"}\n```'
+    with pytest.raises(RuntimeError, match="disk full"):
+        tool._record_independent_verification(spec=_Spec(), task_record=_Task(), final=final)
+
+
 def test_reviewer_verdict_ignored_for_non_reviewer_subagent(tmp_path: Path) -> None:
     from agent.tools.dispatch import DispatchSubagentTool
 

@@ -872,6 +872,7 @@ export type WsEvent = ({ seq?: number; ts?: number; turn_id?: string; client_mes
   | { event: 'task_error'; task?: RuntimeTaskRecord; error?: string }
   | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
   | { event: 'runtime_task_cancelled'; task?: { id?: string; kind?: string; label?: string; turnId?: string; jobId?: string }; reason?: string }
+  | { event: 'record_degraded'; kind?: string; reason?: string; taskId?: string }
 ))
 
 export interface SessionInfo {
