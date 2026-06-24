@@ -19,10 +19,10 @@
 7. `07-project-execution-plan-runtime.md`
    专门分析 Claude Code 的真实项目执行链路：Plan Mode、只读探索、计划批准、TodoWrite、验证证据、失败恢复和最终答复门禁，并给出 Emperor Agent 下一阶段任务点。
 
-对应的可执行实施计划：
+当前有效路线图入口：
 
-- 深度任务级升级计划：`docs/superpowers/plans/2026-06-23-emperor-agent-claude-code-deep-upgrade.md`
-- 早期分析版计划：`docs/superpowers/plans/2026-06-23-claude-code-core-design-upgrade.md`
+- 当前升级路线：`docs/claude-code-core-design/06-emperor-upgrade-roadmap.md`
+- Plan Runtime v4 分册：`docs/claude-code-core-design/07-project-execution-plan-runtime.md`
 
 ## 核心结论
 
