@@ -121,6 +121,7 @@ class AgentLoop:
         self.registry.register(SchedulerTool(self.scheduler_service))
 
         self.control_manager = ControlManager(self.root)
+        self.control_manager.set_task_manager(self.task_manager)
         self.registry.register(AskUserTool(self.control_manager))
         self.registry.register(ProposePlanTool(self.control_manager))
 

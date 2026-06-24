@@ -3513,18 +3513,24 @@ Implementation notes:
 
 ### Task 6Q: Plan Step Task Binding
 
-Status: pending.
+Status: done.
 
 **Files:**
-- Modify: `agent/plans/execution.py`
 - Modify: `agent/tasks/models.py`
 - Modify: `agent/tasks/manager.py`
-- Modify: `agent/tools/todo.py`
-- Modify: `agent/runtime/events.py`
+- Modify: `agent/control/manager.py`
+- Modify: `agent/loop.py`
+- Modify: `agent/runner.py`
 - Modify: `desktop/src/renderer/src/runtime/handlers/tasks.ts`
+- Modify: `desktop/src/renderer/src/runtime/taskProjection.test.ts`
+- Modify: `docs/claude-code-core-design/06-emperor-upgrade-roadmap.md`
+- Modify: `docs/claude-code-core-design/07-project-execution-plan-runtime.md`
+- Reuse existing: `agent/plans/execution.py`
+- Reuse existing: `agent/tools/todo.py`
+- Reuse existing: `agent/runtime/events.py`
 - Test: `tests/unit/test_plan_task_binding.py`
 
-- [ ] **Step 1: Add binding tests**
+- [x] **Step 1: Add binding tests**
 
 Test that approving a plan creates or binds one `TaskRecord(kind="plan_step")` per step, the active step task enters running, pending steps enter queued, and restart can recover the mapping.
 
@@ -3536,15 +3542,15 @@ Run:
 
 Expected: failure before plan-step task binding exists.
 
-- [ ] **Step 2: Add plan-step task metadata**
+- [x] **Step 2: Add plan-step task metadata**
 
 Extend task metadata with `plan_id`, `plan_step_id`, `sequence`, and `verification_status`.
 
-- [ ] **Step 3: Write tool and verification output to step sidechain**
+- [x] **Step 3: Write tool and verification output to step sidechain**
 
 When a tool call is associated with the active plan step, append a concise sidechain entry with tool name, summary, artifact refs, and verification result.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -3554,6 +3560,41 @@ npm --prefix desktop run test -- taskProjection
 ```
 
 Expected: all tests pass.
+
+Result:
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_plan_task_binding.py -q
+# 3 passed
+
+.venv/bin/python -m pytest tests/unit/test_plan_task_binding.py tests/unit/test_tasks_store.py tests/unit/test_subagent_task_sidechain.py tests/unit/test_task_runtime_api.py -q
+# 10 passed
+
+.venv/bin/python -m pytest tests/unit/test_sidechain_transcript.py -q
+# 2 passed
+
+npm --prefix desktop run test -- taskProjection
+# 2 passed
+
+.venv/bin/python -m pytest tests/unit/test_plan_task_binding.py tests/unit/test_plan_runtime.py tests/unit/test_plan_evidence_gate.py tests/unit/test_plan_permission_tokens.py tests/unit/test_plan_command_permissions.py tests/unit/test_runner_state.py tests/unit/test_plan_discovery_ledger.py -q
+# 37 passed
+
+.venv/bin/python -m ruff check agent/control/manager.py agent/tasks/models.py agent/tasks/manager.py agent/loop.py agent/runner.py tests/unit/test_plan_task_binding.py
+# passed
+
+npm --prefix desktop run typecheck
+# passed
+```
+
+Implementation notes:
+
+- `TaskKind.PLAN_STEP` and `TaskStatus.QUEUED` were added to represent durable plan-step work units.
+- `ControlManager.set_task_manager()` wires task persistence into plan approval and runtime updates.
+- `PlanRecord.metadata["plan_step_tasks"]` stores the durable mapping from `PlanStep.id` to task id.
+- Active plan steps create/update running tasks; pending steps create/update queued tasks.
+- `record_plan_step_tool_output()` appends concise tool output to the active step transcript.
+- `record_plan_verification_result()` appends verification evidence to the matching step transcript and updates task progress.
+- `taskForPlanStep()` lets the frontend runtime projection locate a task from `plan_id` and `plan_step_id`.
 
 ### Task 6R: Verification Matrix
 

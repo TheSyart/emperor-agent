@@ -21,6 +21,7 @@ from ..plans import (
     PlanStore,
     VerificationReviewRequest,
 )
+from ..tasks import TaskKind, TaskStatus
 from .clarification import ClarificationAssessment, ClarificationPolicy
 from .models import (
     ControlMode,
@@ -64,9 +65,13 @@ class ControlManager:
         self.plan_decision_policy = PlanDecisionPolicy()
         self.permission_manager = PermissionManager(self)
         self.todo_store = None
+        self.task_manager = None
 
     def set_todo_store(self, todo_store) -> None:
         self.todo_store = todo_store
+
+    def set_task_manager(self, task_manager) -> None:
+        self.task_manager = task_manager
 
     @property
     def mode(self) -> str:
@@ -520,6 +525,7 @@ class ControlManager:
             updated_at=now,
             steps=steps,
         )
+        updated = self._sync_plan_step_tasks(updated)
         self.plan_store.save(updated)
         return updated
 
@@ -619,6 +625,41 @@ class ControlManager:
         self.plan_store.save(updated)
         return updated
 
+    def record_plan_step_tool_output(
+        self,
+        *,
+        tool_name: str,
+        summary: str,
+        tool_call_id: str | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        is_error: bool = False,
+    ):
+        record, step, task_id = self._active_plan_step_task()
+        if record is None or step is None or task_id is None or self.task_manager is None:
+            return None
+        message = {
+            "kind": "tool_output",
+            "role": "tool",
+            "plan_id": record.id,
+            "plan_step_id": step.id,
+            "tool_name": str(tool_name or ""),
+            "tool_call_id": tool_call_id,
+            "content": str(summary or "")[:2000],
+            "artifacts": artifacts or [],
+            "metadata": metadata or {},
+            "is_error": bool(is_error),
+        }
+        self.task_manager.append_sidechain(task_id, message)
+        task = self.task_manager.store.get(task_id)
+        progress = dict(task.progress) if task is not None else {}
+        progress.update({
+            "last_tool": str(tool_name or ""),
+            "last_summary": str(summary or "")[:500],
+            "last_tool_call_id": tool_call_id,
+        })
+        return self.task_manager.update_task(task_id, progress=progress)
+
     def record_plan_verification_result(
         self,
         *,
@@ -654,7 +695,96 @@ class ControlManager:
             metadata=metadata,
         )
         self.plan_store.save(updated)
+        self._append_plan_step_verification(updated, step_id=step_id, result=result)
         return updated
+
+    def _sync_plan_step_tasks(self, record: PlanRecord) -> PlanRecord:
+        if self.task_manager is None or not record.steps:
+            return record
+        mapping = dict(record.metadata.get("plan_step_tasks") or {})
+        for index, step in enumerate(record.steps, start=1):
+            metadata = {
+                "plan_id": record.id,
+                "plan_step_id": step.id,
+                "sequence": index,
+                "verification_status": _step_verification_status(step),
+            }
+            task_id = str(mapping.get(step.id) or "")
+            status = _task_status_from_plan_step(step.status)
+            if task_id and self.task_manager.store.get(task_id) is not None:
+                task = self.task_manager.store.get(task_id)
+                progress = dict(task.progress) if task is not None else {}
+                progress["verification_status"] = metadata["verification_status"]
+                self.task_manager.update_task(
+                    task_id,
+                    status=status,
+                    title=step.title,
+                    metadata=metadata,
+                    progress=progress,
+                )
+                continue
+            task = self.task_manager.start_task(
+                kind=TaskKind.PLAN_STEP.value,
+                title=step.title,
+                source="plan_step",
+                status=status,
+                metadata=metadata,
+            )
+            mapping[step.id] = task.id
+        metadata = dict(record.metadata)
+        metadata["plan_step_tasks"] = mapping
+        return replace(record, metadata=metadata)
+
+    def _active_plan_step_task(self) -> tuple[PlanRecord | None, PlanStep | None, str | None]:
+        record = self._latest_executable_plan()
+        if record is None:
+            return None, None, None
+        mapping = record.metadata.get("plan_step_tasks") or {}
+        if not isinstance(mapping, dict):
+            return record, None, None
+        for step in record.steps:
+            if step.status != PlanStepStatus.ACTIVE.value:
+                continue
+            task_id = str(mapping.get(step.id) or "")
+            return record, step, task_id or None
+        return record, None, None
+
+    def _append_plan_step_verification(
+        self,
+        record: PlanRecord,
+        *,
+        step_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        if self.task_manager is None:
+            return
+        mapping = record.metadata.get("plan_step_tasks") or {}
+        if not isinstance(mapping, dict):
+            return
+        task_id = str(mapping.get(step_id) or "")
+        if not task_id:
+            return
+        passed = result.get("passed")
+        verification_status = "passed" if passed is True else "failed" if passed is False else "unknown"
+        self.task_manager.append_sidechain(task_id, {
+            "kind": "verification",
+            "role": "tool",
+            "plan_id": record.id,
+            "plan_step_id": step_id,
+            "tool_name": str(result.get("source") or "run_command"),
+            "command": str(result.get("command") or ""),
+            "content": str(result.get("summary") or result.get("error") or "")[:2000],
+            "passed": passed,
+            "result": dict(result),
+        })
+        task = self.task_manager.store.get(task_id)
+        progress = dict(task.progress) if task is not None else {}
+        progress["verification_status"] = verification_status
+        progress["last_verification"] = dict(result)
+        fields: dict[str, Any] = {"progress": progress}
+        if passed is False:
+            fields["status"] = TaskStatus.FAILED.value
+        self.task_manager.update_task(task_id, **fields)
 
     def _issue_plan_permission_tokens(self, record: PlanRecord) -> PlanRecord:
         now = now_ts()
@@ -1025,6 +1155,7 @@ class ControlManager:
             draft=replace(activated.draft, phase=PlanDraftPhase.EXECUTING.value),
         )
         activated = self._issue_plan_permission_tokens(activated)
+        activated = self._sync_plan_step_tasks(activated)
         self.plan_store.save(activated)
         self.todo_store.sync_from_plan_steps([step.to_dict() for step in activated.steps])
         return activated
@@ -1447,6 +1578,31 @@ def _metadata_without_plan_permission_tokens(
             "timestamp": now_ts(),
         }
     return payload
+
+
+def _task_status_from_plan_step(status: str) -> str:
+    if status == PlanStepStatus.ACTIVE.value:
+        return TaskStatus.RUNNING.value
+    if status == PlanStepStatus.PENDING.value:
+        return TaskStatus.QUEUED.value
+    if status in {PlanStepStatus.DONE.value, PlanStepStatus.SKIPPED.value}:
+        return TaskStatus.COMPLETED.value
+    if status == PlanStepStatus.FAILED.value:
+        return TaskStatus.FAILED.value
+    if status == PlanStepStatus.BLOCKED.value:
+        return TaskStatus.PENDING.value
+    return TaskStatus.PENDING.value
+
+
+def _step_verification_status(step: PlanStep) -> str:
+    if any(item.get("passed") is False for item in step.evidence if isinstance(item, dict)):
+        return "failed"
+    if step.commands:
+        command_state = _verification_state_by_command(step)
+        if step.commands and all(command_state.get(_normalize_command(command)) is True for command in step.commands):
+            return "passed"
+        return "pending"
+    return "not_required"
 
 
 def _append_unique(items: list[str], value: str) -> None:

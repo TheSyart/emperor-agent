@@ -636,6 +636,7 @@ class AgentRunner:
                 plan_decision=plan_decision,
             )
             self._record_plan_discovery(call, result)
+            self._record_plan_step_tool_output(call, result)
             content = result.model_content
             results_by_id[call.id] = result
             self._maybe_pause_for_control(content, tool_calls, results_by_id)
@@ -745,6 +746,24 @@ class AgentRunner:
             )
         except Exception as exc:
             logger.warning(f"plan discovery recording failed: {exc}")
+
+    def _record_plan_step_tool_output(self, call: ToolCallRequest, result: ToolResult) -> None:
+        if self.control_manager is None:
+            return
+        recorder = getattr(self.control_manager, "record_plan_step_tool_output", None)
+        if not callable(recorder):
+            return
+        try:
+            recorder(
+                tool_name=call.name,
+                summary=result.display_summary or _summarize_tool_result(result.model_content, limit=240),
+                tool_call_id=call.id,
+                artifacts=result.artifact_payloads(),
+                metadata=result.metadata,
+                is_error=result.is_error,
+            )
+        except Exception as exc:
+            logger.warning(f"plan step task sidechain recording failed: {exc}")
 
     def _assess_clarification(self, history: list[dict[str, Any]]) -> ClarificationAssessment:
         if self.control_manager is None:

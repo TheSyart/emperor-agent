@@ -23,6 +23,7 @@ class TaskManager:
         turn_id: str | None = None,
         tool_call_id: str | None = None,
         job_id: str | None = None,
+        status: str = TaskStatus.RUNNING.value,
         metadata: dict | None = None,
     ) -> TaskRecord:
         task_id = f"{self._prefix(kind)}_{uuid4().hex[:12]}"
@@ -30,7 +31,7 @@ class TaskManager:
         record = TaskRecord(
             id=task_id,
             kind=kind,
-            status=TaskStatus.RUNNING.value,
+            status=status,
             title=title[:160],
             source=source,
             started_at=time.time(),
@@ -49,6 +50,9 @@ class TaskManager:
             return None
         payload = record.to_dict()
         allowed = {
+            "status",
+            "title",
+            "source",
             "turn_id",
             "tool_call_id",
             "job_id",
@@ -112,6 +116,7 @@ class TaskManager:
     @staticmethod
     def _prefix(kind: str) -> str:
         return {
+            TaskKind.PLAN_STEP.value: "planstep",
             TaskKind.SUBAGENT.value: "subagent",
             TaskKind.TEAM_WAKE.value: "team",
             TaskKind.SCHEDULER_RUN.value: "scheduler",

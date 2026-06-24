@@ -386,6 +386,8 @@ class PlanPermissionToken:
 
 ### PE-14：Plan Step Task Binding
 
+状态：已落地第一版。批准计划后会为每个 `PlanStep` 创建或复用 `TaskRecord(kind="plan_step")`，`PlanRecord.metadata["plan_step_tasks"]` 保存 step id 到 task id 的映射；active step 对应 task 为 `running`，pending step 为 `queued`。task metadata 带 `plan_id`、`plan_step_id`、`sequence`、`verification_status`，重启后可通过 `PlanStore` + `TaskStore` 恢复映射。Runner 会把 active step 期间的工具输出写入 step sidechain，验证结果也会写入对应 task transcript 并更新 task progress。前端 task projection 提供按 plan/step 查找 task 的 helper。
+
 目标：把 `PlanStep`、todo、TaskRecord、sidechain transcript 合并成一个可恢复执行单元。
 
 目标文件：

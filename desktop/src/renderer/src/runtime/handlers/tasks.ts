@@ -30,3 +30,15 @@ export function applyTaskEvent(projection: TaskProjection, event: TaskEvent): Ta
   else tasks.push(nextTask)
   return { tasks }
 }
+
+export function taskForPlanStep(
+  tasks: RuntimeTaskRecord[],
+  planId: string,
+  stepId: string,
+): RuntimeTaskRecord | null {
+  return tasks.find((task) =>
+    task.kind === 'plan_step' &&
+    task.metadata?.plan_id === planId &&
+    task.metadata?.plan_step_id === stepId
+  ) || null
+}

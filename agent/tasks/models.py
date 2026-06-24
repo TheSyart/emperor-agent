@@ -7,6 +7,7 @@ from typing import Any
 
 class TaskKind(StrEnum):
     TURN = "turn"
+    PLAN_STEP = "plan_step"
     SUBAGENT = "subagent"
     TEAM_WAKE = "team_wake"
     SCHEDULER_RUN = "scheduler_run"
@@ -15,6 +16,7 @@ class TaskKind(StrEnum):
 
 
 class TaskStatus(StrEnum):
+    QUEUED = "queued"
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
