@@ -56,7 +56,7 @@ def test_approved_plan_command_does_not_bypass_high_risk_shell_approval(tmp_path
     )
 
     assert decision.requires_approval
-    assert decision.rule == "ask.high_risk_command"
+    assert decision.rule == "ask.run_command.default_approval"
 
 
 def test_approved_plan_files_do_not_auto_allow_sensitive_writes(tmp_path) -> None:

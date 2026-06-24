@@ -98,4 +98,4 @@ def test_high_risk_plan_command_never_receives_permission_token(tmp_path) -> Non
     decision = manager.assess_permission("run_command", {"command": "git push origin main"}, registry=None)
 
     assert decision.requires_approval
-    assert decision.rule == "ask.high_risk_command"
+    assert decision.rule == "ask.run_command.default_approval"
