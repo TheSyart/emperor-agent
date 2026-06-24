@@ -5,8 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
-from ..permissions import PermissionManager, PlanPermissionToken, permission_argument_hash
-from ..permissions.resolvers import is_high_risk_command
+from ..permissions import PermissionManager, PlanPermissionToken
 from ..plans import (
     PlanDiscovery,
     PlanDraftPhase,
@@ -55,6 +54,7 @@ from .plan_helpers import (
     _step_verification_status,
     _task_status_from_plan_step,
 )
+from .plan_permissions import PlanPermissionTokenManager
 from .plan_policy import PlanDecision, PlanDecisionPolicy
 from .policy import ControlPolicy
 from .store import ControlStore
@@ -68,9 +68,6 @@ class ControlResume:
     resume: bool = True
 
 
-_PLAN_PERMISSION_TOKEN_TTL_SECONDS = 3600.0
-
-
 class ControlManager:
     def __init__(self, root):
         self.store = ControlStore(root)
@@ -79,6 +76,7 @@ class ControlManager:
         self.clarification_policy = ClarificationPolicy()
         self.plan_decision_policy = PlanDecisionPolicy()
         self.permission_manager = PermissionManager(self)
+        self.permission_tokens = PlanPermissionTokenManager(self)
         self.todo_store = None
         self.task_manager = None
 
@@ -795,29 +793,7 @@ class ControlManager:
         self.task_manager.update_task(task_id, **fields)
 
     def _issue_plan_permission_tokens(self, record: PlanRecord) -> PlanRecord:
-        now = now_ts()
-        tokens: list[dict[str, Any]] = []
-        for step in record.steps:
-            if step.status != PlanStepStatus.ACTIVE.value:
-                continue
-            for command in step.commands:
-                text = str(command or "")
-                if not text.strip() or is_high_risk_command(text):
-                    continue
-                tokens.append(
-                    PlanPermissionToken(
-                        plan_id=record.id,
-                        step_id=step.id,
-                        tool_name="run_command",
-                        argument_hash=permission_argument_hash({"command": text}),
-                        expires_at=now + _PLAN_PERMISSION_TOKEN_TTL_SECONDS,
-                        uses_remaining=1,
-                        reason="approved plan active step verification command",
-                    ).to_dict()
-                )
-        metadata = dict(record.metadata)
-        metadata["permission_tokens"] = tokens
-        return replace(record, metadata=metadata)
+        return self.permission_tokens.issue(record)
 
     def consume_plan_permission_token(
         self,
@@ -825,54 +801,7 @@ class ControlManager:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> PlanPermissionToken | None:
-        record = self._latest_executable_plan()
-        if record is None:
-            return None
-        active_step_ids = {
-            step.id
-            for step in record.steps
-            if step.status == PlanStepStatus.ACTIVE.value
-        }
-        if not active_step_ids:
-            return None
-        now = now_ts()
-        target_hash = permission_argument_hash(arguments or {})
-        tokens_raw = record.metadata.get("permission_tokens") or []
-        if not isinstance(tokens_raw, list):
-            return None
-        kept: list[dict[str, Any]] = []
-        consumed: PlanPermissionToken | None = None
-        changed = False
-        for item in tokens_raw:
-            if not isinstance(item, dict):
-                changed = True
-                continue
-            token = PlanPermissionToken.from_dict(item)
-            if (
-                token.plan_id != record.id
-                or token.step_id not in active_step_ids
-                or token.expires_at <= now
-                or token.uses_remaining <= 0
-            ):
-                changed = True
-                continue
-            if (
-                consumed is None
-                and token.tool_name == tool_name
-                and token.argument_hash == target_hash
-            ):
-                consumed = token
-                changed = True
-                remaining = replace(token, uses_remaining=token.uses_remaining - 1)
-                if remaining.uses_remaining > 0:
-                    kept.append(remaining.to_dict())
-                continue
-            kept.append(token.to_dict())
-        if changed:
-            metadata = dict(record.metadata)
-            metadata["permission_tokens"] = kept
-            self.plan_store.save(replace(record, updated_at=now, metadata=metadata))
-        return consumed
+        return self.permission_tokens.consume(tool_name=tool_name, arguments=arguments)
 
     def revoke_plan_permission_tokens(
         self,
@@ -880,15 +809,7 @@ class ControlManager:
         plan_id: str | None = None,
         reason: str = "revoked",
     ) -> PlanRecord | None:
-        record = self.plan_store.get(plan_id) if plan_id else self._latest_executable_plan()
-        if record is None:
-            return None
-        if not record.metadata.get("permission_tokens"):
-            return record
-        metadata = _metadata_without_plan_permission_tokens(record.metadata, reason=reason)
-        updated = replace(record, updated_at=now_ts(), metadata=metadata)
-        self.plan_store.save(updated)
-        return updated
+        return self.permission_tokens.revoke(plan_id=plan_id, reason=reason)
 
     def plan_completion_followup(self) -> dict[str, Any] | None:
         record = self._latest_executable_plan()
