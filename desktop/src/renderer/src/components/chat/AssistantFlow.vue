@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AssistantMessage, AssistantSegment, ThoughtSegment } from '../../types'
+import type { AssistantMessage, ThoughtSegment } from '../../types'
 import { actionIcons, avatarIcons } from '../../icons'
 import MarkdownBlock from './MarkdownBlock.vue'
 import TodoPanel from './TodoPanel.vue'
-import ToolEvent from './ToolEvent.vue'
+import ToolGroup from './ToolGroup.vue'
 import AskCard from './AskCard.vue'
 import PlanCard from './PlanCard.vue'
 import ThoughtEvent from './ThoughtEvent.vue'
+import { projectAssistantFlow } from './assistantFlowProjection'
 
 const props = defineProps<{ message: AssistantMessage }>()
 const copied = ref(false)
@@ -20,13 +21,7 @@ const messageText = computed(() => {
     .trim()
 })
 
-const visibleSegments = computed(() => {
-  return props.message.segments.filter((segment) => {
-    if (segment.type !== 'thought') return true
-    if (segment.status === 'running') return true
-    return (segment.durationMs || 0) >= 120
-  })
-})
+const flowBlocks = computed(() => projectAssistantFlow(props.message))
 
 const fallbackThought = computed<ThoughtSegment>(() => ({
   id: 'fallback-thought',
@@ -35,24 +30,6 @@ const fallbackThought = computed<ThoughtSegment>(() => ({
   startedAt: Date.now(),
   label: '等待模型首字',
 }))
-
-const fallbackTodos = computed(() => {
-  if (!props.message.todos?.length) return []
-  const hasToolTodos = props.message.segments.some((segment) =>
-    segment.type === 'tool' && Boolean(segment.todos?.length),
-  )
-  return hasToolTodos ? [] : props.message.todos
-})
-
-function segmentClass(segment: AssistantSegment) {
-  if (segment.type === 'text') return 'text-node'
-  if (segment.type === 'ask' || segment.type === 'plan') return 'control-node'
-  return ''
-}
-
-function isStreamingText(segment: AssistantSegment, index: number) {
-  return props.message.streaming && segment.type === 'text' && index === visibleSegments.value.length - 1
-}
 
 async function copyMessage() {
   const text = messageText.value
@@ -88,30 +65,27 @@ async function copyMessage() {
       </div>
 
       <div class="assistant-timeline-shell" :class="{ streaming: props.message.streaming }">
-        <ThoughtEvent v-if="!visibleSegments.length && props.message.streaming" :segment="fallbackThought" />
-        <template v-for="(segment, index) in visibleSegments" :key="segment.id">
-          <ThoughtEvent v-if="segment.type === 'thought'" :segment="segment" />
+        <ThoughtEvent v-if="!flowBlocks.length && props.message.streaming" :segment="fallbackThought" />
+        <template v-for="block in flowBlocks" :key="block.id">
+          <ThoughtEvent v-if="block.kind === 'thought'" :segment="block.segment" />
           <div
-            v-else-if="segment.type === 'text'"
-            class="timeline-node"
-            :class="[segmentClass(segment), { streaming: isStreamingText(segment, index) }]"
+            v-else-if="block.kind === 'text'"
+            class="timeline-node text-node"
+            :class="{ streaming: block.streaming }"
           >
-            <MarkdownBlock :content="segment.content" />
+            <MarkdownBlock :content="block.content" />
           </div>
-          <ToolEvent v-else-if="segment.type === 'tool'" :segment="segment" />
-          <div v-else-if="segment.type === 'ask'" class="timeline-node control-node">
-            <AskCard :interaction="segment.interaction" />
+          <ToolGroup v-else-if="block.kind === 'tool_group'" :block="block" />
+          <div v-else-if="block.kind === 'control' && block.segment.type === 'ask'" class="timeline-node control-node">
+            <AskCard :interaction="block.segment.interaction" />
           </div>
-          <div v-else-if="segment.type === 'plan'" class="timeline-node control-node">
-            <PlanCard :interaction="segment.interaction" />
+          <div v-else-if="block.kind === 'control' && block.segment.type === 'plan'" class="timeline-node control-node">
+            <PlanCard :interaction="block.segment.interaction" />
+          </div>
+          <div v-else-if="block.kind === 'todos'" class="timeline-node todo-fallback-node">
+            <TodoPanel :todos="block.todos" />
           </div>
         </template>
-        <div
-          v-if="fallbackTodos.length"
-          class="timeline-node todo-fallback-node"
-        >
-          <TodoPanel :todos="fallbackTodos" />
-        </div>
       </div>
     </div>
   </article>

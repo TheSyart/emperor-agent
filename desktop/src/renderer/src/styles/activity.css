@@ -208,6 +208,82 @@
     color: rgb(var(--warn));
   }
 
+  .tool-group-card {
+    @apply relative w-full max-w-full overflow-visible rounded-md border text-sm;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg-elevated));
+  }
+
+  .tool-group-card.running {
+    border-color: rgb(var(--warn) / 0.42);
+  }
+
+  .tool-group-card.error,
+  .tool-group-card.error_aborted {
+    border-color: rgb(var(--danger) / 0.45);
+  }
+
+  .tool-group-summary {
+    @apply grid cursor-pointer items-center gap-2.5 px-3 py-2.5;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    list-style: none;
+  }
+
+  .tool-group-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-group-icon {
+    @apply grid size-7 shrink-0 place-items-center rounded border;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-muted));
+    background: rgb(var(--bg-inset));
+  }
+
+  .tool-group-main {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .tool-group-main strong {
+    @apply min-w-0 truncate font-mono text-[13px] font-semibold;
+    color: rgb(var(--fg));
+  }
+
+  .tool-group-main small {
+    @apply truncate text-xs;
+    color: rgb(var(--fg-muted));
+  }
+
+  .tool-group-meta {
+    @apply flex shrink-0 items-center gap-1.5;
+  }
+
+  .tool-group-meta em,
+  .tool-group-meta time {
+    @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
+    border-color: rgb(var(--border));
+    color: rgb(var(--fg-subtle));
+  }
+
+  .tool-group-card.running .tool-group-meta em:last-of-type {
+    color: rgb(var(--warn));
+  }
+
+  .tool-group-card.error .tool-group-meta em:last-of-type,
+  .tool-group-card.error_aborted .tool-group-meta em:last-of-type {
+    color: rgb(var(--danger));
+  }
+
+  .tool-group-body {
+    @apply grid gap-2 border-t px-2.5 py-2.5;
+    border-color: rgb(var(--border));
+    background: rgb(var(--bg) / 0.34);
+  }
+
+  .tool-group-body .activity-card {
+    background: rgb(var(--bg-elevated) / 0.72);
+  }
+
   /* ── Control cards (Ask / Plan) ──────────────────────────────────────────── */
   .control-card {
     @apply w-full max-w-full overflow-hidden rounded-md border p-4 text-sm;
@@ -887,6 +963,8 @@
   .composer textarea:focus {
     border-color: transparent;
     background: transparent;
+    box-shadow: none;
+    outline: none;
   }
 
   .composer-textarea-wrap.has-skill-slash textarea,
