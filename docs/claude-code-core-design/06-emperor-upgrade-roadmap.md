@@ -323,11 +323,11 @@ Plan 模式只读探索
 - `PE-13 Approved Plan Permission Token`：已落地第一版；批准计划后为 active step 的非高风险 `run_command` 生成 exact 参数哈希、短期一次性 token，命中后消耗，评论/修订/失败/mode 切换撤销，高风险 shell 不会被 token 放行。
 - `PE-14 Plan Step Task Binding`：已落地第一版；每个 PlanStep 绑定 `TaskRecord(kind="plan_step")`，active/pending step 映射到 running/queued task，工具输出和验证结果进入 step sidechain，前端 task projection 可按 plan/step 定位 task。
 - `PE-15 Verification Matrix`：已落地第一版；`PlanStep.verification` 支持 command/manual/reviewer/smoke 的 required/optional 验证矩阵，legacy `commands` 自动映射为 required command，required 未通过会阻断 step 完成，optional failure 只进入风险 note。
-- `PE-16 Reviewer Task Transcript 收敛`：independent verification 创建可打开的 verification task transcript，并把 PASS/FAIL 写回 PlanRecord evidence。
-- `PE-17 Project Execution Panel`：新增独立项目执行视图，展示 active step、discovery、verification matrix、reviewer transcript 和用户审批历史。
-- `PE-18 Project Execution Smoke Gate`：新增集成验收，覆盖 required plan、探索、批准、执行、失败修复、复核、压缩/重启恢复。
+- `PE-16 Reviewer Task Transcript 收敛`：已落地第一版；`verification_reviewer` 子代理回禀的 fenced verdict 块由 `dispatch_subagent` 钩子解析，PASS/FAIL 写回 `PlanRecord` evidence 并带上 `task_id`/`transcript_path`，前端可通过 `/api/tasks/{id}/transcript` 打开复核 transcript。
+- `PE-17 Project Execution Panel`：已落地第一版；新增独立 `项目执行 / Project Execution` 路由与视图，展示 active step、计划步骤、verification 状态、reviewer transcript 抽屉、失败/阻塞原因与待答问题。
+- `PE-18 Project Execution Smoke Gate`：已落地第一版；`tests/integration/test_project_execution_smoke.py` 覆盖 required plan、批准、执行、失败修复、复核裁决记录和重启恢复的闭环。
 
-完成 PE-10 至 PE-18 后，再把计划执行、任务运行、工具结果和上下文压缩接入 Epic 6 的统一长期任务框架。
+完成 PE-10 至 PE-18 后，下一轮进入 Epic 6：把计划执行、任务运行、工具结果和上下文压缩接入统一长期任务框架（Scheduler run 任务化、`run_local_agent` 统一子代理/Team wake 派生）。
 
 ## Epic 6：Task Framework
 
