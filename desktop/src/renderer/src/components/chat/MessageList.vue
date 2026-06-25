@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { slashCommands } from '../../commands'
+import { hasComposerCapabilityTokens, renderComposerInlineTokens } from '../../capabilities/composerCapabilityTokens'
+import { isPathLikeSlashToken, slashCommands } from '../../commands'
 import type { ChatMessage, RuntimePlanRecord, UserMessage } from '../../types'
 import { avatarIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
@@ -28,12 +29,21 @@ function skillSlashParts(message: UserMessage): { token: string; rest: string } 
   if (!text.startsWith('/')) return null
   const [token] = text.split(/\s+/, 1)
   if (!token || token === '/') return null
+  if (isPathLikeSlashToken(token)) return null
   const normalized = token.toLowerCase()
   const isSystemCommand = slashCommands.some((command) =>
     command.name === normalized || command.aliases?.includes(normalized),
   )
   if (isSystemCommand) return null
   return { token, rest: text.slice(token.length).trimStart() }
+}
+
+function hasInlineTokens(message: UserMessage): boolean {
+  return hasComposerCapabilityTokens(message.content)
+}
+
+function inlineTokenParts(message: UserMessage) {
+  return renderComposerInlineTokens(message.content)
 }
 
 function isSchedulerMessage(message: ChatMessage): boolean {
@@ -113,7 +123,19 @@ function schedulerTriggerPrefix(content: string) {
               />
             </div>
             <div v-if="message.content" class="bubble user whitespace-pre-wrap">
-              <template v-if="skillSlashParts(message)">
+              <template v-if="hasInlineTokens(message)">
+                <template v-for="(segment, index) in inlineTokenParts(message)" :key="index">
+                  <span
+                    v-if="segment.kind === 'token'"
+                    class="user-inline-token"
+                    :data-kind="segment.tokenKind"
+                  >
+                    {{ segment.tokenKind === 'skill' ? 'Skill' : 'MCP' }} · {{ segment.name }}
+                  </span>
+                  <span v-else>{{ segment.text }}</span>
+                </template>
+              </template>
+              <template v-else-if="skillSlashParts(message)">
                 <span class="user-skill-slash">{{ skillSlashParts(message)?.token }}</span>
                 <span v-if="skillSlashParts(message)?.rest"> {{ skillSlashParts(message)?.rest }}</span>
               </template>

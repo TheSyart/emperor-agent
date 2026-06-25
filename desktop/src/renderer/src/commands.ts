@@ -70,6 +70,7 @@ export function parseSlashCommand(input: string) {
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
   const [name, ...args] = trimmed.split(/\s+/)
+  if (isPathLikeSlashToken(name)) return null
   const normalized = name.toLowerCase()
   const command = slashCommands.find((item) => item.name === normalized || item.aliases?.includes(normalized))
   return { raw: trimmed, name: normalized, command, args }
@@ -79,6 +80,7 @@ export function parseSkillSlashCommand(input: string, skills: SkillInfo[] = []) 
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
   const [token, ...rest] = trimmed.split(/\s+/)
+  if (isPathLikeSlashToken(token)) return null
   const normalized = token.slice(1).toLowerCase()
   const exact = skills.find((skill) => skill.name.toLowerCase() === normalized)
   const alias = !exact && normalized.endsWith('-skill')
@@ -94,4 +96,10 @@ export function parseSkillSlashCommand(input: string, skills: SkillInfo[] = []) 
     task: rest.join(' ').trim(),
     requestedSkill,
   }
+}
+
+export function isPathLikeSlashToken(token: string): boolean {
+  const text = token.trim()
+  if (!text.startsWith('/') || text === '/') return false
+  return text.slice(1).includes('/')
 }

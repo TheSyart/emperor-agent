@@ -791,6 +791,44 @@ select:focus-visible {
   line-height: 1.6;
 }
 
+.composer-drafts-inline {
+  margin: 0 12px 7px;
+}
+
+.composer-inline-token {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55em;
+  margin: 0 2px;
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.composer-inline-token[data-kind='skill'] {
+  border-color: rgb(101 210 255 / 0.38);
+  background: rgb(101 210 255 / 0.1);
+  color: rgb(101 210 255);
+}
+
+.composer-inline-token[data-kind='mcp'] {
+  border-color: rgb(var(--border-strong));
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+}
+
+.composer-textarea-wrap.has-inline-tokens textarea,
+.composer-textarea-wrap.has-inline-tokens textarea:focus {
+  background: transparent;
+  color: transparent;
+  caret-color: rgb(var(--fg));
+}
+
 .composer-action-row {
   margin-top: 0;
   border: 0;
@@ -980,6 +1018,109 @@ select:focus-visible {
 .composer-palette-item[data-action='insert_skill'] .composer-palette-item-icon,
 .composer-palette-item[data-action='insert_skill'] strong {
   color: rgb(var(--ok));
+}
+
+.composer-palette-item[data-action='insert_capability_token'] .composer-palette-item-icon,
+.composer-palette-item[data-action='insert_capability_token'] strong {
+  color: rgb(101 210 255);
+}
+
+.composer-palette-item[data-action='insert_capability_token'][data-tone='slate'] .composer-palette-item-icon,
+.composer-palette-item[data-action='insert_capability_token'][data-tone='slate'] strong {
+  color: rgb(var(--fg));
+}
+
+.composer-capability-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 2px 6px;
+  border-radius: 18px;
+  padding: 10px 12px 6px;
+  background: rgb(var(--bg-inset) / 0.58);
+}
+
+.composer-capability-row {
+  display: grid;
+  min-height: 20px;
+  grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  color: rgb(var(--fg-muted));
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.composer-capability-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: currentColor;
+}
+
+.composer-capability-main {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.composer-capability-main strong {
+  overflow: hidden;
+  max-width: 15rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-capability-main small,
+.composer-capability-meta {
+  overflow: hidden;
+  min-width: 0;
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-capability-remove {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  color: rgb(var(--fg-subtle));
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.composer-capability-remove:hover {
+  background: rgb(var(--border-strong) / 0.42);
+  color: rgb(var(--fg));
+}
+
+.composer-capability-row[data-tone='red'] {
+  color: rgb(248 113 113);
+}
+
+.composer-capability-row[data-tone='cyan'] {
+  color: rgb(101 210 255);
+}
+
+.composer-capability-row[data-tone='blue'] {
+  color: rgb(96 165 250);
+}
+
+.composer-capability-row[data-tone='gold'] {
+  color: rgb(var(--warn));
+}
+
+.composer-capability-row[data-tone='green'] {
+  color: rgb(var(--ok));
+}
+
+.composer-capability-row[data-tone='violet'] {
+  color: rgb(196 181 253);
 }
 
 .model-menu,

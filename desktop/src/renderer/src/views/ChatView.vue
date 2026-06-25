@@ -71,6 +71,8 @@ function normalizeReasoningEffort(value?: string | null) {
           <Composer
             :busy="ctx.busy.value"
             :commands="ctx.commands.value"
+            :tools="ctx.boot.value?.tools || []"
+            :mcp-content="ctx.mcpContent.value"
             :context-used="ctx.boot.value?.context_used ?? 0"
             :context-max="ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0"
             :control-mode="ctx.boot.value?.control?.mode || 'ask_before_edit'"

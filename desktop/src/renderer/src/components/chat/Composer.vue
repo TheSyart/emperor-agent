@@ -1,16 +1,27 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import type { CSSProperties } from 'vue'
+import type { CapabilityPickerItem } from '../../capabilities/capabilityPicker'
+import { buildCapabilityPickerGroups } from '../../capabilities/capabilityPickerModel'
+import {
+  hasComposerCapabilityTokens,
+  normalizeComposerCapabilityInput,
+  renderComposerInlineTokens,
+} from '../../capabilities/composerCapabilityTokens'
+import { isPathLikeSlashToken } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
-import type { AttachmentRef, CurrentModelConfig, ModelEntry } from '../../types'
+import type { AttachmentRef, ChatSendPayload, CurrentModelConfig, ModelEntry, ToolInfo } from '../../types'
 import { actionIcons, modelIcons, toolIcon } from '../../icons'
 import type { IconComponent } from '../../icons'
 import { uploadAttachment } from '../../api/attachments'
 import AttachmentChip from './AttachmentChip.vue'
+import CapabilityPicker from './CapabilityPicker.vue'
 
 const props = defineProps<{
   busy: boolean
   commands: SlashPaletteItem[]
+  tools: ToolInfo[]
+  mcpContent?: string
   contextUsed: number
   contextMax: number
   controlMode?: string
@@ -19,7 +30,7 @@ const props = defineProps<{
   supportsVision?: boolean
 }>()
 const emit = defineEmits<{
-  send: [payload: { content: string; attachments: AttachmentRef[] }]
+  send: [payload: ChatSendPayload]
   stop: []
   error: [message: string]
   'set-mode': [mode: 'ask_before_edit' | 'auto' | 'plan']
@@ -48,18 +59,6 @@ const modeMenuPlacement = ref<'top' | 'bottom'>('top')
 let modelMenuRaf = 0
 let modeMenuRaf = 0
 
-type ComposerPaletteAction = 'files' | 'insert_command' | 'insert_skill'
-type ComposerPaletteItem = {
-  id: string
-  group: string
-  action: ComposerPaletteAction
-  label: string
-  description: string
-  meta?: string
-  completion?: string
-  icon: IconComponent
-}
-
 const ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
 const MAX_DRAFTS = 5
@@ -84,59 +83,37 @@ const suggestions = computed(() => {
 })
 const commandSuggestions = computed(() => suggestions.value.filter((item) => item.kind === 'command'))
 const skillSuggestions = computed(() => suggestions.value.filter((item) => item.kind === 'skill'))
-const slashPaletteItems = computed(() => [
-  ...commandSuggestions.value.map((item) => paletteItemFromSlash(item, '命令')),
-  ...skillSuggestions.value.map((item) => paletteItemFromSlash(item, '插件')),
-])
-const addPaletteItems = computed(() => {
-  const priority = ['/plan', '/tools', '/skills', '/mode', '/status']
-  const commandItems = priority
-    .map((name) => props.commands.find((item) => item.kind === 'command' && item.name === name))
-    .filter((item): item is SlashPaletteItem => Boolean(item))
-    .map((item) => paletteItemFromSlash(item, '命令'))
-  const skillItems = props.commands
-    .filter((item) => item.kind === 'skill')
-    .slice(0, 8)
-    .map((item) => paletteItemFromSlash(item, '插件'))
-  return [
-    {
-      id: 'files',
-      group: 'Add',
-      action: 'files' as const,
-      label: 'Files and folders',
-      description: '上传图片、文档或数据文件',
-      meta: '附件',
-      icon: actionIcons.attach,
-    },
-    ...commandItems,
-    ...skillItems,
-  ]
-})
+const slashPaletteGroups = computed(() => [
+  {
+    label: '命令',
+    items: commandSuggestions.value.map((item) => paletteItemFromSlash(item, '命令')),
+  },
+  {
+    label: 'Skills',
+    items: skillSuggestions.value.map((item) => paletteItemFromSlash(item, 'Skill')),
+  },
+].filter((group) => group.items.length))
+const addPaletteGroups = computed(() => buildCapabilityPickerGroups({
+  commands: props.commands,
+  tools: props.tools,
+  mcpContent: props.mcpContent || '',
+}))
 const paletteMode = computed<'add' | 'slash' | null>(() => {
   if (addMenuOpen.value) return 'add'
-  if (slashPaletteItems.value.length) return 'slash'
+  if (slashPaletteGroups.value.length) return 'slash'
   return null
 })
-const paletteGroups = computed(() => {
-  const items = paletteMode.value === 'add' ? addPaletteItems.value : slashPaletteItems.value
-  const groups: { label: string; items: ComposerPaletteItem[] }[] = []
-  for (const item of items) {
-    let group = groups.find((candidate) => candidate.label === item.group)
-    if (!group) {
-      group = { label: item.group, items: [] }
-      groups.push(group)
-    }
-    group.items.push(item)
-  }
-  return groups
-})
-const paletteHeading = computed(() => paletteMode.value === 'add' ? 'Add' : '斜杠命令')
-const paletteHint = computed(() => paletteMode.value === 'add' ? '添加文件或插入命令' : 'Tab 补全第一项')
+const paletteGroups = computed(() => paletteMode.value === 'add' ? addPaletteGroups.value : slashPaletteGroups.value)
+const paletteHeading = computed(() => paletteMode.value === 'add' ? '添加能力' : '斜杠命令')
+const paletteHint = computed(() => paletteMode.value === 'add' ? '插入附件、Skill 或 MCP 占位符' : 'Tab 补全第一项')
+const inlineSegments = computed(() => renderComposerInlineTokens(value.value))
+const hasInlineTokens = computed(() => hasComposerCapabilityTokens(value.value))
 const composerSlashParts = computed((): { token: string; rest: string } | null => {
   const text = value.value
   if (!text.startsWith('/')) return null
   const token = text.match(/^\/\S+/)?.[0]
   if (!token || token === '/') return null
+  if (isPathLikeSlashToken(token)) return null
   const normalized = token.toLowerCase()
   const isSystemCommand = props.commands.some((item) =>
     item.kind === 'command' && (item.name === normalized || item.aliases?.includes(normalized)),
@@ -207,16 +184,17 @@ const reasoningOptions = [
   { value: 'max', label: 'Max' },
 ] as const
 
-function paletteItemFromSlash(item: SlashPaletteItem, group: string): ComposerPaletteItem {
+function paletteItemFromSlash(item: SlashPaletteItem, meta: string): CapabilityPickerItem {
+  const skillName = item.skillName || item.name.replace(/^\//, '')
   return {
     id: item.id,
-    group,
-    action: item.kind === 'skill' ? 'insert_skill' : 'insert_command',
+    action: item.kind === 'skill' ? 'insert_capability_token' : 'insert_command',
     label: item.name,
     description: item.description,
-    meta: item.kind === 'skill' ? (item.tags || 'Skill') : item.usage,
-    completion: item.completion,
+    meta: item.kind === 'skill' ? (item.tags || meta) : item.usage,
+    completion: item.kind === 'skill' ? `@skill(${skillName})` : item.completion,
     icon: item.kind === 'skill' ? toolIcon('skill') : commandIcon(item.name),
+    tone: item.kind === 'skill' ? 'cyan' : 'slate',
   }
 }
 
@@ -243,12 +221,15 @@ function syncHighlightScroll() {
 }
 
 function submit() {
-  const content = value.value.trim()
   if (props.busy) return
+  const normalized = normalizeComposerCapabilityInput(value.value.trim())
+  const content = normalized.content.trim()
   if (!content && drafts.value.length === 0) return
   emit('send', {
     content,
     attachments: [...drafts.value],
+    requestedSkills: normalized.requestedSkills,
+    displayContent: normalized.displayContent,
   })
   value.value = ''
   drafts.value = []
@@ -259,9 +240,9 @@ function submit() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Tab' && suggestions.value.length) {
+  if (event.key === 'Tab' && firstPaletteItem.value) {
     event.preventDefault()
-    applyPaletteItem(slashPaletteItems.value[0])
+    applyPaletteItem(firstPaletteItem.value)
     return
   }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
@@ -269,11 +250,20 @@ function handleKeydown(event: KeyboardEvent) {
   submit()
 }
 
-function applyPaletteItem(item: ComposerPaletteItem | undefined) {
+const firstPaletteItem = computed(() => paletteGroups.value[0]?.items[0])
+
+function applyPaletteItem(item: CapabilityPickerItem | undefined) {
   if (!item) return
   if (item.action === 'files') {
     closeAddMenu()
     pickFiles()
+    return
+  }
+  if (item.action === 'insert_capability_token') {
+    insertInlineToken(item.completion || item.label)
+    closeAddMenu()
+    closeModelMenu()
+    closeModeMenu()
     return
   }
   if (!item.completion) return
@@ -283,6 +273,35 @@ function applyPaletteItem(item: ComposerPaletteItem | undefined) {
   closeModeMenu()
   input.value?.focus()
   void nextTick(resize)
+}
+
+function insertInlineToken(token: string) {
+  const insertion = token.trim()
+  if (!insertion) return
+  const el = input.value
+  if (!el) {
+    value.value = appendInlineToken(value.value, insertion)
+    void nextTick(resize)
+    return
+  }
+  const start = el.selectionStart ?? value.value.length
+  const end = el.selectionEnd ?? start
+  const before = value.value.slice(0, start)
+  const after = value.value.slice(end)
+  const prefix = before && !/\s$/.test(before) ? ' ' : ''
+  const suffix = after && !/^\s/.test(after) ? ' ' : ''
+  value.value = `${before}${prefix}${insertion}${suffix}${after}`
+  const nextPos = before.length + prefix.length + insertion.length + suffix.length
+  void nextTick(() => {
+    input.value?.focus()
+    input.value?.setSelectionRange(nextPos, nextPos)
+    resize()
+  })
+}
+
+function appendInlineToken(text: string, token: string) {
+  const trimmed = text.trimEnd()
+  return trimmed ? `${trimmed} ${token}` : token
 }
 
 async function toggleModeMenu() {
@@ -652,50 +671,14 @@ onBeforeUnmount(() => {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <div v-if="paletteMode" class="composer-palette" :data-mode="paletteMode">
-      <div class="composer-palette-head">
-        <span>{{ paletteHeading }}</span>
-        <em>{{ paletteHint }}</em>
-      </div>
-
-      <section v-for="group in paletteGroups" :key="group.label" class="composer-palette-group">
-        <div class="composer-palette-label">{{ group.label }}</div>
-        <button
-          v-for="item in group.items"
-          :key="item.id"
-          type="button"
-          class="composer-palette-item"
-          :data-action="item.action"
-          @click="applyPaletteItem(item)"
-        >
-          <span class="composer-palette-item-icon">
-            <component :is="item.icon" :size="15" />
-          </span>
-          <strong>{{ item.label }}</strong>
-          <span>{{ item.description }}</span>
-          <b v-if="item.meta">{{ item.meta }}</b>
-        </button>
-      </section>
-    </div>
-
-    <div v-if="drafts.length || uploading.size" class="composer-drafts">
-      <AttachmentChip
-        v-for="(d, i) in drafts"
-        :key="d.id"
-        :data="d"
-        removable
-        @remove="removeDraft(i)"
-      />
-      <div v-for="name in Array.from(uploading)" :key="name" class="attach-chip uploading" :title="name">
-        <span class="attach-doc-icon">
-          <component :is="actionIcons.statusBusy" class="animate-spin" :size="14" />
-        </span>
-        <div class="attach-meta">
-          <div class="attach-name">{{ name }}</div>
-          <div class="attach-sub">上传中…</div>
-        </div>
-      </div>
-    </div>
+    <CapabilityPicker
+      v-if="paletteMode"
+      :groups="paletteGroups"
+      :heading="paletteHeading"
+      :hint="paletteHint"
+      :mode="paletteMode"
+      @select="applyPaletteItem"
+    />
 
     <form class="composer" @submit.prevent="submit" @keydown.esc="closeComposerMenus">
       <input
@@ -708,9 +691,31 @@ onBeforeUnmount(() => {
       />
 
       <div class="composer-input-row">
-        <div class="composer-textarea-wrap" :class="{ 'has-skill-slash': composerSlashParts }">
-          <div v-if="composerSlashParts" ref="highlightLayer" class="composer-highlight-layer" aria-hidden="true">
-            <span class="composer-skill-slash">{{ composerSlashParts.token }}</span><span>{{ composerSlashParts.rest }}</span>
+        <div
+          class="composer-textarea-wrap"
+          :class="{ 'has-skill-slash': composerSlashParts, 'has-inline-tokens': hasInlineTokens }"
+        >
+          <div
+            v-if="composerSlashParts || hasInlineTokens"
+            ref="highlightLayer"
+            class="composer-highlight-layer"
+            aria-hidden="true"
+          >
+            <template v-if="hasInlineTokens">
+              <template v-for="(segment, index) in inlineSegments" :key="index">
+                <span
+                  v-if="segment.kind === 'token'"
+                  class="composer-inline-token"
+                  :data-kind="segment.tokenKind"
+                >
+                  {{ segment.tokenKind === 'skill' ? 'Skill' : 'MCP' }} · {{ segment.name }}
+                </span>
+                <span v-else>{{ segment.text }}</span>
+              </template>
+            </template>
+            <template v-else-if="composerSlashParts">
+              <span class="composer-skill-slash">{{ composerSlashParts.token }}</span><span>{{ composerSlashParts.rest }}</span>
+            </template>
           </div>
           <textarea
             ref="input"
@@ -723,6 +728,25 @@ onBeforeUnmount(() => {
             @scroll="syncHighlightScroll"
             @keydown="handleKeydown"
           />
+        </div>
+      </div>
+
+      <div v-if="drafts.length || uploading.size" class="composer-drafts composer-drafts-inline">
+        <AttachmentChip
+          v-for="(d, i) in drafts"
+          :key="d.id"
+          :data="d"
+          removable
+          @remove="removeDraft(i)"
+        />
+        <div v-for="name in Array.from(uploading)" :key="name" class="attach-chip uploading" :title="name">
+          <span class="attach-doc-icon">
+            <component :is="actionIcons.statusBusy" class="animate-spin" :size="14" />
+          </span>
+          <div class="attach-meta">
+            <div class="attach-name">{{ name }}</div>
+            <div class="attach-sub">上传中…</div>
+          </div>
         </div>
       </div>
 

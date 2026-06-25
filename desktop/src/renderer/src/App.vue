@@ -127,7 +127,12 @@ async function runSafely(task: () => Promise<void>) {
 function submitFromComposer(payload: string | ChatSendPayload) {
   const obj = typeof payload === 'string'
     ? { content: payload, attachments: [] }
-    : { content: payload.content, attachments: payload.attachments || [] }
+    : {
+        content: payload.content,
+        attachments: payload.attachments || [],
+        requestedSkills: payload.requestedSkills || [],
+        displayContent: payload.displayContent,
+      }
   const parsed = parseSlashCommand(obj.content)
   if (!obj.attachments.length && parsed?.command) {
     void executeSlashCommand(parsed.raw, parsed.name, parsed.command)

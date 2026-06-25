@@ -165,6 +165,33 @@
     color: rgb(var(--accent));
   }
 
+  .user-inline-token {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5em;
+    margin: 0 2px;
+    border: 1px solid rgb(var(--border-strong));
+    border-radius: 999px;
+    padding: 0 7px;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.45;
+    vertical-align: baseline;
+    white-space: nowrap;
+  }
+
+  .user-inline-token[data-kind='skill'] {
+    border-color: rgb(101 210 255 / 0.38);
+    background: rgb(101 210 255 / 0.1);
+    color: rgb(101 210 255);
+  }
+
+  .user-inline-token[data-kind='mcp'] {
+    border-color: rgb(var(--border-strong));
+    background: rgb(var(--bg-inset));
+    color: rgb(var(--fg));
+  }
+
   .bubble.assistant {
     @apply rounded-lg border;
     border-color: rgb(var(--border));
