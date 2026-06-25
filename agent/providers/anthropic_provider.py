@@ -4,9 +4,12 @@ import secrets
 import string
 from typing import Any
 
+from loguru import logger
+
 from .base import LLMProvider, LLMResponse, ToolCallRequest
 
 _ALNUM = string.ascii_letters + string.digits
+_EPHEMERAL = {"type": "ephemeral"}
 
 
 def _tool_id() -> str:
@@ -76,10 +79,17 @@ class AnthropicProvider(LLMProvider):
             "messages": anthropic_messages,
             "temperature": temperature,
         }
+        cache = self._supports_prompt_caching()
         if system:
-            kwargs["system"] = system
+            # 缓存稳定的 system 前缀：会话内提示词不变，跨轮命中可省成本/降延迟。
+            kwargs["system"] = (
+                [{"type": "text", "text": system, "cache_control": _EPHEMERAL}] if cache else system
+            )
         anthropic_tools = self.openai_tools_to_anthropic(tools)
         if anthropic_tools:
+            if cache:
+                # 工具表整会话稳定，是最大的可缓存块；标记最后一个即覆盖整段。
+                anthropic_tools[-1] = {**anthropic_tools[-1], "cache_control": _EPHEMERAL}
             kwargs["tools"] = anthropic_tools
             kwargs["tool_choice"] = {"type": "auto"}
         if reasoning_effort and reasoning_effort != "none":
@@ -88,6 +98,12 @@ class AnthropicProvider(LLMProvider):
             kwargs["temperature"] = 1.0
             kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 1024)
         return kwargs
+
+    def _supports_prompt_caching(self) -> bool:
+        # 原生 Anthropic 端点（未设 base 或 anthropic.com）支持 cache_control；
+        # 第三方兼容代理可能不认该字段，跳过以保持向后兼容。
+        base = (self.api_base or "").lower()
+        return not base or "anthropic.com" in base
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
@@ -288,6 +304,10 @@ class AnthropicProvider(LLMProvider):
                 "cache_read": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
                 "cache_create": getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
             }
+            if usage.get("cache_read") or usage.get("cache_create"):
+                logger.debug(
+                    f"[prompt-cache] read={usage['cache_read']} create={usage['cache_create']} input={usage['input']}"
+                )
         return LLMResponse(
             content="".join(parts) or None,
             tool_calls=tools,
