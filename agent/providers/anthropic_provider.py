@@ -6,7 +6,7 @@ from typing import Any
 
 from loguru import logger
 
-from .base import LLMProvider, LLMResponse, ToolCallRequest
+from .base import DEFAULT_MAX_RETRIES, LLMProvider, LLMResponse, ToolCallRequest
 
 _ALNUM = string.ascii_letters + string.digits
 _EPHEMERAL = {"type": "ephemeral"}
@@ -21,7 +21,7 @@ class AnthropicProvider(LLMProvider):
         super().__init__(**kwargs)
         from anthropic import AsyncAnthropic
 
-        client_kwargs: dict[str, Any] = {"max_retries": 0}
+        client_kwargs: dict[str, Any] = {"max_retries": DEFAULT_MAX_RETRIES}
         if self.api_key:
             client_kwargs["api_key"] = self.api_key
         if self.api_base:

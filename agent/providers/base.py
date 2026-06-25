@@ -11,6 +11,10 @@ from loguru import logger
 
 ContentDelta = Callable[[str], Awaitable[None]]
 
+# SDK 自带指数退避 + 尊重 Retry-After，覆盖 429/5xx/连接错误。
+# LLM 调用本身无副作用（工具执行在 runner 侧分开），重试幂等安全。
+DEFAULT_MAX_RETRIES = 2
+
 
 @dataclass
 class ToolCallRequest:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from .base import LLMProvider, LLMResponse
+from .base import DEFAULT_MAX_RETRIES, LLMProvider, LLMResponse
 
 
 class BedrockProvider(LLMProvider):
@@ -18,9 +18,13 @@ class BedrockProvider(LLMProvider):
         super().__init__(**kwargs)
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:
             raise RuntimeError("Bedrock provider requires boto3.") from exc
-        self.client = boto3.client("bedrock-runtime")
+        self.client = boto3.client(
+            "bedrock-runtime",
+            config=Config(retries={"max_attempts": DEFAULT_MAX_RETRIES + 1, "mode": "standard"}),
+        )
 
     async def chat(
         self,
@@ -33,12 +37,13 @@ class BedrockProvider(LLMProvider):
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
         if tools:
-            raise RuntimeError("Bedrock tool calling is not implemented in this lightweight port.")
+            raise RuntimeError(
+                "Bedrock backend does not support tool calling, which the main agent loop "
+                "requires; use an Anthropic/OpenAI-compatible provider."
+            )
         response = await asyncio.to_thread(
             self.client.converse,
-            modelId=model or self.default_model,
-            messages=self._messages(messages),
-            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+            **self._converse_request(model or self.default_model, messages, max_tokens, temperature),
         )
         text = ""
         for block in response.get("output", {}).get("message", {}).get("content", []):
@@ -51,6 +56,29 @@ class BedrockProvider(LLMProvider):
                 "output": usage.get("outputTokens", 0),
             },
         )
+
+    @classmethod
+    def _converse_request(
+        cls,
+        model: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: float,
+    ) -> dict[str, Any]:
+        request: dict[str, Any] = {
+            "modelId": model,
+            "messages": cls._messages(messages),
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+        }
+        system = cls._system_text(messages)
+        if system:
+            request["system"] = [{"text": system}]
+        return request
+
+    @staticmethod
+    def _system_text(messages: list[dict[str, Any]]) -> str:
+        parts = [str(msg.get("content") or "") for msg in messages if msg.get("role") == "system"]
+        return "\n\n".join(p for p in parts if p)
 
     @staticmethod
     def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

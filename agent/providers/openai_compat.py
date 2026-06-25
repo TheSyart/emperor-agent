@@ -4,7 +4,7 @@ from typing import Any
 
 from loguru import logger
 
-from .base import LLMProvider, LLMResponse, ToolCallRequest
+from .base import DEFAULT_MAX_RETRIES, LLMProvider, LLMResponse, ToolCallRequest
 from .registry import ProviderSpec
 
 
@@ -24,7 +24,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=self.api_key or "no-key",
             base_url=self.api_base or (spec.default_api_base if spec else None),
             default_headers=headers,
-            max_retries=0,
+            max_retries=DEFAULT_MAX_RETRIES,
             http_client=http_client,
         )
 
