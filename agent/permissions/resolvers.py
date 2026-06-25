@@ -101,15 +101,28 @@ _LOW_RISK_SINGLE = {"ls", "pwd", "pytest"}
 _LOW_RISK_GIT_SUB = {"status", "diff", "log", "show", "branch"}
 _SHELL_META = re.compile(r"[;&|`$><(){}\n\\]")
 
+# Pure-inspection commands: no side effects and no code execution. Strictly narrower
+# than low-risk — it excludes pytest / npm test, which run project code and are NOT
+# read-only. Used to let the plan guard pass `pwd` / `git status` style probes even
+# when a plan is otherwise required.
+_READONLY_SINGLE = {"ls", "pwd"}
+_READONLY_GIT_SUB = {"status", "diff", "log", "show", "branch"}
 
-def is_low_risk_command(command: str) -> bool:
+
+def _safe_command_parts(command: str) -> list[str] | None:
+    """shlex-split a single command, or None if it chains / redirects / subshells."""
     cmd = (command or "").strip()
     if not cmd or _SHELL_META.search(cmd):
-        return False  # any chaining / redirection / subshell -> not low-risk
+        return None
     try:
         parts = shlex.split(cmd)
     except ValueError:
-        return False
+        return None
+    return parts or None
+
+
+def is_low_risk_command(command: str) -> bool:
+    parts = _safe_command_parts(command)
     if not parts:
         return False
     head = parts[0].rsplit("/", 1)[-1]  # basename defeats /bin/rm style
@@ -122,6 +135,16 @@ def is_low_risk_command(command: str) -> bool:
     if head == "npm" and "test" in parts[1:]:
         return True
     return False
+
+
+def is_readonly_command(command: str) -> bool:
+    parts = _safe_command_parts(command)
+    if not parts:
+        return False
+    head = parts[0].rsplit("/", 1)[-1]
+    if head in _READONLY_SINGLE:
+        return True
+    return head == "git" and len(parts) >= 2 and parts[1] in _READONLY_GIT_SUB
 
 
 def is_sensitive_path(path: str | None) -> bool:

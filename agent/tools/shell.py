@@ -79,6 +79,13 @@ class RunCommand(Tool):
             return Path(path).resolve()
         return Path(self._workspace).resolve()  # type: ignore[arg-type]
 
+    def is_read_only(self, arguments: dict[str, Any]) -> bool:
+        # Pure-inspection commands (pwd / ls / git status…) carry no side effects, so the
+        # plan guard should not block them. Code-executing commands stay non-read-only.
+        from ..permissions.resolvers import is_readonly_command
+
+        return is_readonly_command(str(arguments.get("command") or ""))
+
     def execute(self, command: str) -> str:
         logger.info(f"[执行命令]: {command}")
 
