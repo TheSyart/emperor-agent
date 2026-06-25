@@ -28,6 +28,31 @@ describe('buildBackendCommand', () => {
     expect(args).toEqual(['-m', 'agent.webui', ...tailArgs])
   })
 
+  it('uses the bundled backend when packaged resources provide it', () => {
+    const bundled = '/Applications/Emperor Agent.app/Contents/Resources/backend/emperor-agent'
+    const { command, args } = buildBackendCommand({
+      config,
+      env: {},
+      bundledBackendPath: bundled,
+      fileExists: (p) => p === bundled,
+    })
+
+    expect(command).toBe(bundled)
+    expect(args).toEqual(tailArgs)
+  })
+
+  it('keeps explicit backend override ahead of the bundled backend', () => {
+    const { command, args } = buildBackendCommand({
+      config,
+      env: { EMPEROR_BACKEND_CMD: 'python -m agent.webui' },
+      bundledBackendPath: '/bundle/backend/emperor-agent',
+      fileExists: () => true,
+    })
+
+    expect(command).toBe('python')
+    expect(args).toEqual(['-m', 'agent.webui', ...tailArgs])
+  })
+
   it('ignores a blank EMPEROR_BACKEND_CMD', () => {
     const { command } = buildBackendCommand({
       config,

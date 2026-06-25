@@ -10,6 +10,7 @@ export interface BuildBackendCommandOptions {
   config: Pick<ResolvedConfig, 'root' | 'host' | 'port'>
   env?: Record<string, string | undefined>
   fileExists?: (p: string) => boolean
+  bundledBackendPath?: string
 }
 
 export interface BackendCommand {
@@ -23,6 +24,7 @@ export function buildBackendCommand({
   config,
   env = {},
   fileExists = defaultFileExists,
+  bundledBackendPath = '',
 }: BuildBackendCommandOptions): BackendCommand {
   const tailArgs = ['web', '--host', config.host, '--port', String(config.port), '--no-open']
 
@@ -31,6 +33,10 @@ export function buildBackendCommand({
   if (override) {
     const [command, ...baseArgs] = override.split(/\s+/)
     return { command, args: [...baseArgs, ...tailArgs] }
+  }
+
+  if (bundledBackendPath && fileExists(bundledBackendPath)) {
+    return { command: bundledBackendPath, args: tailArgs }
   }
 
   const venvBinary = path.join(config.root, '.venv', 'bin', 'emperor-agent')

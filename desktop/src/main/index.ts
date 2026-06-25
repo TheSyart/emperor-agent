@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, net, type OpenDialogOptions, type Rectangle } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
@@ -10,11 +10,18 @@ import { buildBackendCommand } from './backend-command'
 import { probeBackend, waitForBackend } from './health'
 import { resolveAppIconPath } from './icon'
 import { planStartup, planShutdown } from './lifecycle'
+import {
+  bundledBackendPath as resolveBundledBackendPath,
+  initializePackagedRuntime,
+  packagedRuntimeRoot,
+  runtimeDefaultsRoot,
+} from './runtime-root'
 import { readBounds, pickBounds } from './window-bounds'
 import { resolveAssetPath } from './protocol'
 
-const config = resolveConfig({ argv: process.argv.slice(2), env: process.env })
-const boundsPath = path.join(config.root, 'memory', 'desktop', 'window.json')
+const mainArgv = process.argv.slice(2)
+const petWindowMode = mainArgv.includes('--pet-window')
+let config = resolveConfig({ argv: mainArgv, env: process.env })
 const rendererRoot = path.join(__dirname, '..', 'renderer')
 const appIconPath = resolveAppIconPath({
   dirname: __dirname,
@@ -24,7 +31,7 @@ const appIconPath = resolveAppIconPath({
 
 // Packaged-only defense-in-depth: a per-launch token shared with the spawned backend
 // (env) and the renderer (preload arg). Empty in dev so electron-vite dev stays token-free.
-const authToken = app.isPackaged ? randomUUID() : ''
+const authToken = app.isPackaged && !petWindowMode ? randomUUID() : ''
 
 let backendChild: ChildProcess | null = null
 let ownsBackend = false
@@ -50,6 +57,27 @@ ipcMain.handle('emperor:select-directory', async () => {
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+function argValue(argv: string[], flag: string): string | undefined {
+  const idx = argv.indexOf(flag)
+  if (idx >= 0 && idx + 1 < argv.length) return argv[idx + 1]
+  return undefined
+}
+
+function mainBoundsPath(): string {
+  return path.join(config.root, 'memory', 'desktop', 'window.json')
+}
+
+function prepareMainRuntime(): void {
+  const defaultRoot = app.isPackaged ? packagedRuntimeRoot(app.getPath('userData')) : undefined
+  config = resolveConfig({ argv: mainArgv, env: process.env, defaultRoot })
+  if (app.isPackaged) {
+    initializePackagedRuntime({
+      root: config.root,
+      defaultsRoot: runtimeDefaultsRoot(process.resourcesPath),
+    })
+  }
 }
 
 function reclaimBackend(): void {
@@ -79,8 +107,14 @@ function fail(title: string, message: string): void {
 }
 
 function spawnBackend(): ChildProcess {
-  const { command, args } = buildBackendCommand({ config, env: process.env })
-  const env = authToken ? { ...process.env, EMPEROR_WEBUI_TOKEN: authToken } : process.env
+  const { command, args } = buildBackendCommand({
+    config,
+    env: process.env,
+    bundledBackendPath: app.isPackaged ? resolveBundledBackendPath(process.resourcesPath, process.platform) : '',
+  })
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  if (authToken) env.EMPEROR_WEBUI_TOKEN = authToken
+  if (app.isPackaged) env.EMPEROR_DESKTOP_PET_CMD = JSON.stringify([process.execPath, '--pet-window'])
   const child = spawn(command, args, { cwd: config.root, stdio: 'inherit', env })
 
   child.on('error', (err: NodeJS.ErrnoException) => {
@@ -121,6 +155,7 @@ function loadRenderer(): void {
 }
 
 function createWindow(): void {
+  const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
     ...readBounds(boundsPath),
     title: 'Emperor Agent',
@@ -167,11 +202,106 @@ function createWindow(): void {
   loadRenderer()
 }
 
+function petRendererRoot(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'desktop-pet')
+  return path.resolve(__dirname, '..', '..', '..', 'desktop-pet')
+}
+
+function petStateDir(root: string): string {
+  return path.join(root, 'memory', 'desktop_pet')
+}
+
+function readPetBounds(boundsPath: string): Partial<Rectangle> & { width: number; height: number } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(boundsPath, 'utf8'))
+    const width = Math.max(Number(raw.width) || 300, 300)
+    const height = Math.max(Number(raw.height) || 340, 340)
+    const bounds: Partial<Rectangle> & { width: number; height: number } = { width, height }
+    if (Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
+      bounds.x = Math.round(raw.x)
+      bounds.y = Math.round(raw.y)
+    }
+    return bounds
+  } catch {
+    return { width: 300, height: 340 }
+  }
+}
+
+function savePetBounds(win: BrowserWindow, boundsPath: string): void {
+  if (!win || win.isDestroyed()) return
+  try {
+    fs.mkdirSync(path.dirname(boundsPath), { recursive: true })
+    fs.writeFileSync(boundsPath, `${JSON.stringify(win.getBounds(), null, 2)}\n`, 'utf8')
+  } catch {
+    // Best-effort persistence; never block pet shutdown on disk errors.
+  }
+}
+
+function createPetWindow(): void {
+  const root =
+    argValue(mainArgv, '--root') ||
+    process.env.EMPEROR_AGENT_ROOT ||
+    (app.isPackaged ? packagedRuntimeRoot(app.getPath('userData')) : path.resolve(__dirname, '..', '..', '..'))
+  const webuiUrl = argValue(mainArgv, '--webui-url') || process.env.EMPEROR_WEBUI_URL || 'http://127.0.0.1:8765'
+  const assetBaseUrl = pathToFileURL(path.join(root, 'assets', 'desktop-pet', 'clawd-tank') + path.sep).href
+  const backendToken = argValue(mainArgv, '--backend-token') || process.env.EMPEROR_WEBUI_TOKEN || ''
+  const boundsPath = path.join(petStateDir(root), 'window.json')
+  const rootDir = petRendererRoot()
+  const win = new BrowserWindow({
+    ...readPetBounds(boundsPath),
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    show: false,
+    webPreferences: {
+      preload: path.join(rootDir, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      additionalArguments: [
+        `--emperor-root=${root}`,
+        `--emperor-webui-url=${webuiUrl}`,
+        `--emperor-asset-base-url=${assetBaseUrl}`,
+        `--emperor-backend-token=${backendToken}`,
+      ],
+    },
+  })
+
+  win.setAlwaysOnTop(true, 'floating')
+  if (process.platform === 'darwin') {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
+  win.loadFile(path.join(rootDir, 'renderer.html'))
+  win.once('ready-to-show', () => win.showInactive())
+
+  let saveTimer: NodeJS.Timeout | null = null
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      savePetBounds(win, boundsPath)
+    }, 180)
+  }
+  win.on('move', scheduleSave)
+  win.on('close', () => savePetBounds(win, boundsPath))
+}
+
 async function startup(): Promise<void> {
   app.setName('Emperor Agent')
   if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
   if (process.platform === 'win32') app.setAppUserModelId('com.emperor.agent.desktop')
 
+  if (petWindowMode) {
+    if (process.platform === 'darwin') app.dock?.hide()
+    createPetWindow()
+    return
+  }
+
+  prepareMainRuntime()
   registerAppProtocol()
 
   const alreadyHealthy = await probeBackend(config.backendBaseUrl)
@@ -196,10 +326,18 @@ async function startup(): Promise<void> {
 app.whenReady().then(startup)
 
 app.on('activate', () => {
+  if (petWindowMode) {
+    if (BrowserWindow.getAllWindows().length === 0) createPetWindow()
+    return
+  }
   if (BrowserWindow.getAllWindows().length === 0 && backendReady) createWindow()
 })
 
 app.on('window-all-closed', () => {
+  if (petWindowMode) {
+    app.quit()
+    return
+  }
   reclaimBackend()
   app.quit()
 })

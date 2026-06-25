@@ -1,6 +1,7 @@
 const cfg = window.emperorPet || {};
 const mapper = window.EmperorPetMapper;
 const idleScenes = window.EmperorPetIdleScenes;
+const runtimeUrls = window.EmperorPetUrls;
 const pet = document.getElementById("pet");
 const bubble = document.getElementById("speech-bubble");
 const bubbleText = document.getElementById("speech-text");
@@ -146,13 +147,12 @@ function applyRuntimeEvent(event, options = {}) {
 }
 
 function wsUrl() {
-  const base = String(cfg.webuiUrl || "http://127.0.0.1:8765").replace(/^http/i, "ws");
-  return `${base.replace(/\/$/, "")}/ws?last_seq=${encodeURIComponent(lastSeq)}`;
+  return runtimeUrls.wsUrl(cfg.webuiUrl, lastSeq, cfg.backendToken);
 }
 
 async function loadBootstrap() {
   try {
-    const response = await fetch(`${String(cfg.webuiUrl || "").replace(/\/$/, "")}/api/bootstrap`);
+    const response = await fetch(runtimeUrls.apiUrl(cfg.webuiUrl, "/api/bootstrap", cfg.backendToken));
     const boot = await response.json();
     lastSeq = Number(boot?.runtime?.latestSeq || 0);
     const pending = boot?.control?.pending;

@@ -57,6 +57,8 @@ emperor-agent chat
 # 兼容入口：python agent.py
 ```
 
+当前终端入口是 Rich CLI fallback，不是独立 TUI 产品线；本轮发布不阻塞在 TUI 同步上。
+
 常用命令：
 
 ```bash
@@ -78,18 +80,18 @@ npm run dev              # 开发模式（HMR + 自动拉起后端）
 npm run build            # 生产构建 → out/
 npm start                # 预览生产构建
 npm test                 # vitest 单元测试
-npm run dist             # electron-builder 打包 → dist/*.dmg
+npm run dist:mac         # 打包开箱即用 macOS dmg/zip → dist/
 ```
 
-需要 Node ≥ 18。Electron 启动时自动探测后端 8765 端口：未运行则 spawn `emperor-agent web`（退出时回收），已运行则附着。生产模式下通过自定义 `app://` 协议加载构建产物，支持 Vue Router history 模式的深层路由。
+需要 Node ≥ 18。Electron 启动时自动探测后端 8765 端口：未运行则 spawn 后端（退出时回收），已运行则附着。开发模式优先使用 `.venv/bin/emperor-agent` 或 PATH 中的 `emperor-agent`；生产安装包优先使用随 App 打包的 PyInstaller 后端。生产模式下通过自定义 `app://` 协议加载构建产物，支持 Vue Router history 模式的深层路由。
 
 开发模式下 electron-vite 内置 Vite dev server（HMR），并代理 `/api`/`/ws` 到后端；可用 `EMPEROR_BACKEND_CMD` 环境变量覆盖后端启动命令。host/port 从仓库根 `emperor.local.json` 读取。
 
-**安装包**：`npm run dist` 通过 electron-builder 产出 macOS `.dmg`（`desktop/dist/`）。打包产物仅含 Electron 前端；目标机需 `emperor-agent` 可用或设置 `EMPEROR_BACKEND_CMD`。代码签名需 Apple Developer ID（本地自用可跳过）。
+**安装包**：`npm run dist:mac` 会先用 PyInstaller 构建 Python 后端，再通过 electron-builder 产出 macOS `.dmg` / `.zip`（`desktop/dist/`）。用户安装后直接打开 App，后端服务随 App 自启动，不要求目标机预装 Python、pip 或 `emperor-agent` 命令。生产首启会把默认 `templates/`、`skills/`、`assets/` 和示例配置复制到用户数据目录下的 `runtime/`，不会覆盖用户已有 `memory/` 或本地配置。当前未接入 Apple Developer ID 签名与 notarization，本地自用可跳过，公开分发时 macOS 可能出现 Gatekeeper 提示。
 
 ### 4. 可选桌宠
 
-桌宠 companion 默认关闭。首次使用需单独安装 Electron 依赖，然后在 WebUI「配置文件」页开启，或用 CLI 管理：
+桌宠 companion 默认关闭。开发模式首次使用仍需单独安装 Electron 依赖；生产安装包内置桌宠窗口，开启后不需要额外 `npm install`。可在 WebUI「配置文件」页开启，或用 CLI 管理：
 
 ```bash
 cd desktop-pet

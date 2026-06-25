@@ -12,9 +12,11 @@ desktop-pet/node_modules/
 desktop/node_modules/
 desktop/out/
 desktop/dist/
+desktop/build/backend/
 desktop/screenshots/
 desktop/test-results/
 desktop/.uiplan-progress.json
+build/
 templates/USER.local.md
 templates/*.local.md
 logs/

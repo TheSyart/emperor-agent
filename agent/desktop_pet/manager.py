@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import time
@@ -38,6 +39,8 @@ class DesktopPetManager:
 
     @property
     def install_command(self) -> str:
+        if self._packaged_command_base():
+            return "bundled with Emperor Agent.app"
         return "cd desktop-pet && npm install"
 
     def payload(self) -> dict[str, Any]:
@@ -57,17 +60,19 @@ class DesktopPetManager:
         payload = self.payload()
         electron = self._electron_binary()
         main_js = self.app_dir / "main.js"
+        packaged = self._packaged_command_base()
         pid = self._read_pid()
         stale_pid = bool(pid and not self._process_alive(pid))
         return {
             **payload,
             "optional": True,
             "appDir": self.app_dir.as_posix(),
+            "packagedCommand": packaged,
             "stateFile": self.state_file.as_posix(),
             "pidFile": self.pid_file.as_posix(),
             "electronPath": electron.as_posix(),
-            "electronInstalled": electron.exists(),
-            "mainJsExists": main_js.exists(),
+            "electronInstalled": bool(packaged) or electron.exists(),
+            "mainJsExists": bool(packaged) or main_js.exists(),
             "stalePid": stale_pid,
         }
 
@@ -107,13 +112,21 @@ class DesktopPetManager:
             return existing
         self._clear_stale_pid()
 
-        electron = self._electron_binary()
-        if not electron.exists():
-            return self._fail(
-                f"Electron dependency missing. Run `{self.install_command}` before starting the desktop pet."
-            )
-        if not (self.app_dir / "main.js").exists():
-            return self._fail("desktop-pet/main.js is missing.")
+        packaged_base = self._packaged_command_base()
+        if packaged_base:
+            executable = Path(packaged_base[0]).expanduser()
+            if executable.is_absolute() and not executable.exists():
+                return self._fail(f"Packaged desktop pet command is missing: {executable}")
+            cmd_base = packaged_base
+        else:
+            electron = self._electron_binary()
+            if not electron.exists():
+                return self._fail(
+                    f"Electron dependency missing. Run `{self.install_command}` before starting the desktop pet."
+                )
+            if not (self.app_dir / "main.js").exists():
+                return self._fail("desktop-pet/main.js is missing.")
+            cmd_base = [str(electron), str(self.app_dir)]
 
         config = load_local_config(self.root)
         web_host = host or config.webui.host
@@ -125,8 +138,7 @@ class DesktopPetManager:
             "EMPEROR_WEBUI_URL": webui_url,
         }
         cmd = [
-            str(electron),
-            str(self.app_dir),
+            *cmd_base,
             "--webui-url",
             webui_url,
             "--root",
@@ -186,6 +198,21 @@ class DesktopPetManager:
         if os.name == "nt":
             return self.app_dir / "node_modules" / ".bin" / "electron.cmd"
         return self.app_dir / "node_modules" / ".bin" / "electron"
+
+    def _packaged_command_base(self) -> list[str]:
+        raw = (os.environ.get("EMPEROR_DESKTOP_PET_CMD") or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(item, str) and item for item in parsed):
+            return parsed
+        try:
+            return shlex.split(raw)
+        except ValueError:
+            return []
 
     def _read_pid(self) -> int | None:
         try:

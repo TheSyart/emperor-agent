@@ -12,7 +12,9 @@
     "test": "vitest run",
     "screenshots": "playwright test -c playwright.config.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "dist": "electron-vite build && electron-builder"
+    "backend:bundle": "cd .. && scripts/build_backend_bundle.sh",
+    "dist:mac": "cd .. && scripts/build_desktop_release.sh",
+    "dist": "npm run dist:mac"
   },
   "dependencies": {
     "lucide-vue-next": "^0.577.0",

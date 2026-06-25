@@ -11,11 +11,37 @@ files:
 extraResources:
   - from: build/icon.png
     to: icon.png
+  - from: build/backend
+    to: backend
+  - from: ../templates
+    to: runtime-defaults/templates
+  - from: ../skills
+    to: runtime-defaults/skills
+  - from: ../assets
+    to: runtime-defaults/assets
+  - from: ../model_config.example.json
+    to: runtime-defaults/model_config.example.json
+  - from: ../mcp_config.example.json
+    to: runtime-defaults/mcp_config.example.json
+  - from: ../.env.example
+    to: runtime-defaults/.env.example
+  - from: ../desktop-pet
+    to: desktop-pet
+    filter:
+      - renderer.html
+      - renderer.css
+      - renderer.js
+      - preload.js
+      - event-mapper.js
+      - idle-scenes.js
+      - runtime-urls.js
 
 asar: true
 
 mac:
-  target: dmg
+  target:
+    - dmg
+    - zip
   category: public.app-category.productivity
   icon: build/icon.png
   artifactName: Emperor-Agent-${version}-mac-${arch}.${ext}
@@ -29,6 +55,5 @@ mac:
 #   icon: build/icon.png
 #   category: Utility
 
-# The Electron app bundles only the frontend. The Python backend is not
-# included in the installer — the target machine must have emperor-agent
-# available on PATH, or set EMPEROR_BACKEND_CMD to a custom launch command.
+# macOS release bundles the Python backend under Resources/backend and copies
+# runtime defaults into the user's app data directory on first launch.

@@ -16,6 +16,7 @@ export interface ResolveConfigOptions {
   argv?: string[]
   env?: Record<string, string | undefined>
   readFile?: (p: string) => string
+  defaultRoot?: string
 }
 
 function defaultReadFile(p: string): string {
@@ -36,10 +37,15 @@ function coercePort(value: unknown): number | undefined {
   return n
 }
 
-function resolveRoot(argv: string[], env: Record<string, string | undefined>): string {
+function resolveRoot(
+  argv: string[],
+  env: Record<string, string | undefined>,
+  defaultRoot?: string,
+): string {
   return (
     argValue(argv, '--root') ||
     env.EMPEROR_AGENT_ROOT ||
+    defaultRoot ||
     path.resolve(__dirname, '..', '..', '..')
   )
 }
@@ -48,8 +54,9 @@ export function resolveConfig({
   argv = [],
   env = {},
   readFile = defaultReadFile,
+  defaultRoot,
 }: ResolveConfigOptions = {}): ResolvedConfig {
-  const root = resolveRoot(argv, env)
+  const root = resolveRoot(argv, env, defaultRoot)
 
   let fileHost: string | undefined
   let filePort: number | undefined

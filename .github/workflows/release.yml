@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Run backend tests
+        run: python -m pytest tests/unit/test_desktop_pet.py tests/unit/test_desktop_pet_api.py -q
+      - name: Run desktop tests
+        working-directory: desktop
+        run: npm run test -- backend-command config lifecycle runtime-root
+      - name: Run desktop pet tests
+        working-directory: desktop-pet
+        run: npm test
+      - name: Build macOS release
+        working-directory: desktop
+        run: npm run dist:mac
+      - name: Publish GitHub Release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
