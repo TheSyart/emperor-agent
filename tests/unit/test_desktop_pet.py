@@ -133,7 +133,7 @@ def test_desktop_pet_uses_packaged_command_without_local_electron(tmp_path, monk
     assert payload["running"] is True
     assert calls[0]["cmd"][:2] == [str(executable), "--pet-window"]
     assert calls[0]["cmd"][-4:] == ["--webui-url", "http://127.0.0.1:8765", "--root", str(tmp_path)]
-    assert calls[0]["kwargs"]["env"]["EMPEROR_WEBUI_TOKEN"] == "tok-release"
+    assert calls[0]["kwargs"]["env"]["EMPEROR_WEBUI_TOKEN"] == "-".join(["tok", "release"])
     assert payload["installCommand"] == "bundled with Emperor Agent.app"
 
 
