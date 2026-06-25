@@ -24,6 +24,71 @@
 
 ---
 
+## 复审（2026-06-25）
+
+> 本节为一次全量复审：用三路只读探查**交叉验证当前代码**（非仅信任上版报告），覆盖 ① 既有 6 项修复是否仍成立、② 上版报告后新落地且此前未审计的代码（最近 3 个提示词/工具/缓存提交，以及 providers 重试/退避、Bedrock、`loop.py` 装配、desktop capabilities）、③ 既有「已接受残余」是否仍只是残余。
+> 基线复跑：本会话 `python -m pytest tests/ -q` = **458 passed**（含新缓存测试）。
+
+### 再验证（既有修复 + 最近提交）
+
+| 项 | 复审结论 | 当前证据 |
+|---|---|---|
+| ISSUE-001 命令默认审批 | **HOLD** | `permissions/pipeline.py:116-128` run_command 默认 `_approval`，仅 `is_low_risk_command` 白名单免批；`resolvers.py:105-124` 用 `shlex.split` + 元字符门挡链式绕过；高风险即便已批准计划仍需审批 |
+| ISSUE-002 Origin/Auth | **HOLD** | `web/app.py:67` 中间件顺序 `[error, origin_guard, auth_guard]`；origin_guard 校验 Host+Origin（挡 DNS-rebinding/CSRF），auth_guard 仅打包态启用 token 且豁免 `/api/bootstrap`；13 个 guard 测试通过 |
+| ISSUE-003 任务索引归档 | **HOLD** | `tasks/store.py` 终态任务月度归档、活跃不归档、`list()` 默认只列热索引 |
+| ISSUE-004 God-object | **HOLD** | `control/manager.py` 557、`runner.py` 984，未反弹；上轮删除的死重复静态方法未重现；子管理器经 `plan_helpers` 共享逻辑、无重复 |
+| ISSUE-005 CI/LICENSE/pre-commit | **HOLD** | `.github/workflows/ci.yml`（ruff + pytest + `git diff --check` + 前端 vitest/build）、`LICENSE`(MIT)、`.pre-commit-config.yaml` 均在位 |
+| ISSUE-006 显式降级事件 | **HOLD** | `agent/**` 内 `except BaseException` 共 8 处，**全部 cleanup 后 re-raise**，无静默丢状态；`record_degraded` 在位 |
+| web_fetch SSRF | **HOLD** | `tools/web.py` 校验 scheme/host、阻塞私网/环回/保留 IP，重定向逐跳再校验 |
+| filesystem 工作区禁闭 | **HOLD** | `tools/filesystem.py` `_resolve()` 先 `expanduser`+`resolve` 规范化再 `relative_to(workspace)`，挡 `../`/符号链接逃逸 |
+| 最近 3 提交（提示词/工具/缓存） | **CLEAN** | 四条新行为契约命中（`test_agent_prompt_contracts`）；工具描述与真实行为一致（120s 超时、`行号\|内容` 格式、最小 env，`test_tool_descriptions`）；Anthropic 缓存按端点门控正确、下游无 `system` 必为 str 假设（`test_anthropic_prompt_caching`） |
+
+**结论**：审计时点名的全部修复经**当前代码实证仍成立**；最近提交未引入回归。
+
+### ISSUE-007 · Bedrock provider 丢弃 system 提示且拒绝任何工具调用
+- **Severity: P3 Low** · **Confidence: High** · **Critical Path: No** · **状态: 新发现（此前未审计区）**
+- **FACT**
+  - `[E1] agent/providers/bedrock_provider.py:55-61` | `_messages` 对 `role == "system"` 直接 `continue`，且 `converse(...)` 调用无 `system=` 入参 → **系统提示词整段丢弃**。
+  - `[E1] agent/providers/bedrock_provider.py:35-36` | `chat` 一旦收到任意 `tools` 即 `raise RuntimeError("Bedrock tool calling is not implemented...")`。
+- **REASONING**：主 agent 回合**必带工具表**，因此 Bedrock 在触及 system 丢弃问题之前就先 `raise` → **无法承载主回合**。仅当被选作纯文本路径时，身份/工具契约会无声缺失。该 provider 自述为 "minimal port / lightweight"，属潜在 footgun 而非在用路径缺陷，故定 Low。
+- **最小修复**：选用 Bedrock 跑主回合时 fail-fast 抛清晰「主回合暂不支持 Bedrock」错误（避免无声降级）；或补 `system=[{"text": system}]` 入参 + 实现工具转换后再开放。
+- **验证**：单测断言「带 tools 调 Bedrock」抛清晰错误；若启用纯文本路径，则 system 文本进入 `converse` 请求。
+
+### ISSUE-008 · providers 无重试/退避，瞬时故障直接硬失败回合
+- **Severity: P3 Low** · **Confidence: High** · **Critical Path: No** · **状态: 新发现（此前未审计区）**
+- **FACT**
+  - `[E1] agent/providers/anthropic_provider.py:21` | `AsyncAnthropic(max_retries=0)` —— 显式关闭 SDK 自带重试。
+  - `[E1] agent/providers/openai_compat.py` | 未见 backoff/retry；`[E1] bedrock_provider.py:37-42` | `asyncio.to_thread(client.converse, ...)` 无显式超时，依赖 boto3 默认 socket 超时。
+  - 上版报告 §1.3 已记多模型路由 fallback 存在，但**单 provider 内**无退避/熔断。
+- **REASONING**：429/5xx/瞬时网络抖动会直接终止当前回合，无优雅降级或有界重试。当前为有意选择（避免重复副作用），但**未文档化**，长期个人使用下偶发中断体验差。
+- **最小修复**：文档化「不在 provider 内重试」的决定；或在 provider/runner 边界对**幂等失败**（连接错误、429）加有界指数退避重试，并对最终失败发显式降级事件。
+- **验证**：注入一次 429/连接错误，断言触发有界重试或产生显式降级事件（而非静默终止）。
+
+### ISSUE-009 · provider `system` 形状不对称，且无跨 provider 一致性测试
+- **Severity: P3 Low** · **Confidence: High** · **Critical Path: No** · **状态: 新发现**
+- **FACT**
+  - `[E1] agent/providers/anthropic_provider.py:82-86` | 原生端点下 `system` 现为 `list[dict]`（带 `cache_control`）；`[E1] bedrock_provider.py` / `openai_compat.py` | 仍为 `str`。
+  - `[E1] tests/unit/test_anthropic_prompt_caching.py` | 仅覆盖 Anthropic；无断言三 provider 接受同一 system+messages 契约的测试。
+- **REASONING**：各 provider 各自把 system 交给对应 SDK 消费，当前**无下游代码假设 `system` 必为 str**（复审已核 `_kwargs` 出口直达 SDK），故风险低；缺口在于**没有一道测试把「跨 provider 接受同一上层契约」钉死**，未来改动易悄然破坏某一支。
+- **最小修复**：补一个参数化测试，对 Anthropic/OpenAI-compat/Bedrock 传入同一 system + messages（+ Bedrock 的无工具约束），断言各自构造请求不抛、system 内容均被携带或按既定方式处理。
+- **验证**：新参数化测试绿。
+
+### 维护性重申（已知增量项，非本轮新缺陷，不在范围）
+- shell `_DENY_PATTERNS` 仍不全（`rm -rf ~`、`; bash x.sh`、`node -e`、`osascript -e` 等未拦）—— 但**审批门为主防线**，deny-list 仅纵深防御，非新缺陷。
+- `desktop/.../composables/useRuntime.ts` 1226 LoC —— 体量大但**内聚**（运行时状态/WS/重放单一职责），非 God-object，留观。
+- CI 缺**覆盖率门禁**与 **`tsc --noEmit` 类型检查**；仓库缺 `CHANGELOG`/`Dockerfile`。均为面向完整商业化的增量项。
+
+### 评分更新（诚实，不抬分）
+- 本轮**未发现 P0/P1**；新增 ISSUE-007/008/009 均为 provider 健壮性低风险债，**不改综合总评 ≈6.5/10**（本地单用户语境）。
+- 维度备注：「错误处理/可观测」与「依赖与配置卫生」追记「providers 单支无重试/退避、Bedrock 主回合路径残缺」作为已知短板；其余维度同「修复后」列。
+
+### 本轮未覆盖（诚实声明）
+- 仍未做动态渗透（DNS-rebinding/CSRF 仅静态推断）。
+- MCP 外部 server 行为、desktop e2e 仅静态/单测层面覆盖；`desktop-pet/` 未深入 —— 续记为已知未审计。
+- 「未发现」仅代表已覆盖范围内证据不足，不等于不存在。
+
+---
+
 ## 0. 基线（Baseline）
 
 | 项 | 值 |
