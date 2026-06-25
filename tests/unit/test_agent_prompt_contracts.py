@@ -81,16 +81,20 @@ def test_system_prompt_uses_code_backed_skill_and_subagent_contracts(tmp_path: P
     assert "不要向用户展示隐藏推理" in prompt
     for phrase in (
         "专用工具优先",
+        "并行工具调用",
+        "范围克制",
         "提示注入",
         "失败后诊断",
+        "被拒工具",
         "验证后完成",
         "风险操作先确认",
+        "授权范围化",
         "同一时间只许一项 `in_progress`",
     ):
         assert phrase in prompt
     assert "复杂独立任务必须写清" in prompt
     fixed_prompt_chars = sum(len(section.content) for section in sections if section.name != "long_term_memory")
-    assert fixed_prompt_chars < 5_000
+    assert fixed_prompt_chars < 7_000
     memory_section = next(section for section in sections if section.name == "long_term_memory")
     assert memory_section.budget_chars == 80
     assert "clipped by ContextBuilder" in memory_section.content
