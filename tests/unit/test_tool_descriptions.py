@@ -49,6 +49,7 @@ EXPECTED_BUILTIN_TOOL_DESCRIPTIONS = {
     ),
     "edit_file": (
         "对已有文件做局部文本替换；编辑前应先用 read_file 理解目标片段。适合小范围修改、重命名或替换唯一文本；"
+        "read_file 输出为 行号|内容，old_text 只取竖线之后的原始文本并保留精确缩进，不要带上行号或竖线前缀；"
         "若 old_text 匹配多处，需要提供更多上下文或设置 replace_all=true。不要用 run_command/sed/awk 代替此工具编辑文件；"
         "失败后根据错误调整匹配范围，不要盲目重试。"
     ),
@@ -75,8 +76,9 @@ EXPECTED_BUILTIN_TOOL_DESCRIPTIONS = {
     ),
     "read_inbox": "读取当前角色的队友收件箱。主控读取主控收件箱，队友读取自己的收件箱；只读查看消息，不应代替 send_message 发送回复。",
     "run_command": (
-        "在当前工作区终端执行一条 shell 命令并返回输出；危险命令会被安全策略拒绝。"
+        "在当前工作区终端执行一条 shell 命令并返回输出；rm -rf /、curl/wget、python -c、管道到 sh/bash 等危险模式会被安全策略直接拒绝。"
         "仅用于测试、构建、git、包管理器或必须由 shell 执行的系统操作；不要用它读写搜文件或向用户输出文本。"
+        "命令运行在受限的最小环境变量（仅 HOME/PATH/LANG 等）下，依赖额外环境变量的命令可能失败；单条命令超过 120 秒会被硬超时中断。"
         "失败后先阅读 stdout/stderr 诊断根因，不要盲目重试或绕过安全检查。"
     ),
     "scheduler": (

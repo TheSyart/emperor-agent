@@ -443,6 +443,7 @@ class EditFileTool(_FsTool):
     name = "edit_file"
     description = (
         "对已有文件做局部文本替换；编辑前应先用 read_file 理解目标片段。适合小范围修改、重命名或替换唯一文本；"
+        "read_file 输出为 行号|内容，old_text 只取竖线之后的原始文本并保留精确缩进，不要带上行号或竖线前缀；"
         "若 old_text 匹配多处，需要提供更多上下文或设置 replace_all=true。不要用 run_command/sed/awk 代替此工具编辑文件；"
         "失败后根据错误调整匹配范围，不要盲目重试。"
     )

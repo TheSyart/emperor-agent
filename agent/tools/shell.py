@@ -60,8 +60,9 @@ def _cap_output(text: str) -> str:
 class RunCommand(Tool):
     name = "run_command"
     description = (
-        "在当前工作区终端执行一条 shell 命令并返回输出；危险命令会被安全策略拒绝。"
+        "在当前工作区终端执行一条 shell 命令并返回输出；rm -rf /、curl/wget、python -c、管道到 sh/bash 等危险模式会被安全策略直接拒绝。"
         "仅用于测试、构建、git、包管理器或必须由 shell 执行的系统操作；不要用它读写搜文件或向用户输出文本。"
+        "命令运行在受限的最小环境变量（仅 HOME/PATH/LANG 等）下，依赖额外环境变量的命令可能失败；单条命令超过 120 秒会被硬超时中断。"
         "失败后先阅读 stdout/stderr 诊断根因，不要盲目重试或绕过安全检查。"
     )
     exclusive = True
