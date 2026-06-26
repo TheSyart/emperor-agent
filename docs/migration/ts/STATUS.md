@@ -58,14 +58,14 @@
 | MIG-TOOL-003 | ToolRegistry | ☑ |
 | MIG-TOOL-004 | 执行上下文+protocol/adapter | ☑ |
 | MIG-TOOL-005 | 命令判定 resolvers | ☑ |
-| MIG-TOOL-006 | ReadFileTool | ☐ |
-| MIG-TOOL-007 | Write/EditFileTool | ☐ |
-| MIG-TOOL-008 | GlobTool | ☐ |
-| MIG-TOOL-009 | GrepTool | ☐ |
-| MIG-TOOL-010 | WebFetch(SSRF) | ☐ |
-| MIG-TOOL-011 | RunCommand | ☐ |
-| MIG-TOOL-012 | LoadSkill+SkillsLoader | ☐ |
-| MIG-TOOL-013 | UpdateTodos+TodoStore | ☐ |
+| MIG-TOOL-006 | ReadFileTool | ☑ |
+| MIG-TOOL-007 | Write/EditFileTool | ☑ |
+| MIG-TOOL-008 | GlobTool | ☑ |
+| MIG-TOOL-009 | GrepTool | ☑ |
+| MIG-TOOL-010 | WebFetch(SSRF) | ☑ |
+| MIG-TOOL-011 | RunCommand | ☑ |
+| MIG-TOOL-012 | LoadSkill+SkillsLoader | ☑ |
+| MIG-TOOL-013 | UpdateTodos+TodoStore | ☑ |
 | MIG-TOOL-014 | DispatchSubagent(壳) | ☐ |
 
 ## W05 控制/计划/权限（CTRL） · 依赖 W03
