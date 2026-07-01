@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "team_name": "default",
+  "members": [
+    {
+      "name": "reviewer",
+      "role": "Review migrated TypeScript behavior",
+      "agent_type": "reviewer",
+      "status": "working",
+      "created_at": 1782362400,
+      "updated_at": 1782362401,
+      "last_error": null
+    }
+  ]
+}

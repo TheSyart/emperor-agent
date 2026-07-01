@@ -177,10 +177,10 @@
 > MIG-IPC-004 已接入 `CoreApi.bootstrap()` 和 renderer IPC 优先入口；bootstrap 返回 session/control/runtime events/memory/model/team/scheduler/projects/diagnostics，并由 `useBootstrap` 通过 Core IPC 恢复初始状态。
 > MIG-IPC-005 已提供 `MainlineTurnService`/`ChatService`，chat、External Bridge 与 Scheduler agent_turn 均汇入同一 mainline 入口。
 > MIG-IPC-008 已迁移 mutation guard 并接入 CoreApi scheduler/team/desktop-pet 写入口。
-> MIG-IPC-010 已让 `useRuntime` 在 Core bridge 可用时走 IPC 订阅/`chat.submit`/`chat.stopRuntime`，并将 Ask/Plan answer/comment/approve 映射到 CoreApi control resume；`useSession` 已切 sessions/project resolve IPC；通用 `api()` 已对 memory/model/config/mcp/watchlist/scheduler/team/tasks/sidebar/desktop-pet 等支持 CoreApi 映射；附件上传、skill zip import 和模型测试也已支持 Core IPC；HTTP fallback 仅保留给无 Core bridge 的 browser-only 测试/开发场景。
+> MIG-IPC-010 已让 `useRuntime` 走 IPC 订阅/`chat.submit`/`chat.stopRuntime`，并将 Ask/Plan answer/comment/approve 映射到 CoreApi control resume；`useSession` 已切 sessions/project resolve IPC；通用 `api()` 已对 memory/model/config/mcp/watchlist/scheduler/team/tasks/sidebar/desktop-pet 等支持 CoreApi 映射；附件上传、skill zip import 和模型测试也已支持 Core IPC；无 Core bridge 时快速失败，browser-only 测试通过注入最小 Core bridge fixture 覆盖 UI。
 > 附件图片预览已改为 `app://attachments/{id}/raw`，由 Electron protocol 安全读取 `memory/attachments`，为退役 Python `/api/attachments/{id}/raw` 链路扫清阻塞。
 > Electron main 不再 probe/spawn/wait Python backend；`CoreApi` 进程内托管后直接建窗。`--python-backend`、`EMPEROR_USE_PY_BACKEND`、`EMPEROR_BACKEND_CMD` 和 packaged preload backend URL/token 注入均已退役。
-> Renderer 通用 `api()` 在 Core bridge 存在时已切为 strict IPC：未映射 route 直接报错暴露迁移缺口；HTTP fallback 只保留给无 Core bridge 的浏览器/dev 场景。
+> Renderer 通用 `api()` 已切为 strict IPC：未映射 route 直接报错暴露迁移缺口；无 Core bridge 的普通浏览器/dev 页面不再尝试 HTTP fallback。
 > 通用 `api()` 已补 bootstrap/runtime-stop/control/sessions/projects/plans/external/tools/skills/diagnostics/memory-versions route parity，并修正 scheduler/team/memory-version/task-transcript 动态路径解码，避免把 action 末段误当 id。
 > MIG-IPC-006/007 已补 `model.test` probe、sessions route response parity、skill delete、skill zip import、desktop-pet 偏好/进程启动状态、route strict IPC 映射全覆盖和 core service 拆分；route/service parity 已签收。
 > MIG-IPC-007 已开始拆出 core service：`CoreConfigService` 承接 `/api/config` 的 `templates/USER.local.md` 读写和 `/api/mcp-config` 读写/reload hook，修正 Core IPC 模式下 `/api/config` 误返回 `emperor.local.json` 的语义偏差。

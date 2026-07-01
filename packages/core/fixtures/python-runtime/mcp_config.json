@@ -1,0 +1,25 @@
+{
+  "servers": {
+    "legacy_reader": {
+      "transport": "stdio",
+      "enabled": true,
+      "command": "${PY_TOOL}",
+      "args": [
+        "-m",
+        "legacy_reader"
+      ],
+      "env": {
+        "MODE": "fixture"
+      },
+      "tool_overrides": {
+        "read": {
+          "read_only": true
+        }
+      }
+    }
+  },
+  "defaults": {
+    "read_only": true,
+    "exclusive": false
+  }
+}

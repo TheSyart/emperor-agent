@@ -29,6 +29,7 @@ export interface AppContext {
   pending: PendingState
   planProjection: PlanProjection
   runtimeText: () => string
+  eventTransportText: () => string
 
   commands: ComputedRef<SlashPaletteItem[]>
 

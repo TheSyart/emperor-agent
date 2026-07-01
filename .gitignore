@@ -1,37 +1,69 @@
-.env
+# Environment / local config
+/.env
+/.env.*
+!/.env.example
+/model_config.json
+/mcp_config.json
+/emperor.local.json
+/packages/*/model_config.json
+/packages/*/mcp_config.json
+/packages/*/emperor.local.json
+/templates/USER.local.md
+/templates/*.local.md
+
+# Python caches kept only for legacy tooling/skill helpers, not product runtime
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS / editor noise
 .DS_Store
-model_config.json
-mcp_config.json
-emperor.local.json
+*.swp
+*.swo
+*~
+
+# JavaScript / TypeScript dependencies and build caches
 node_modules/
-packages/*/dist/
 desktop-pet/node_modules/
 desktop/node_modules/
-desktop/out/
-desktop/dist/
-desktop/build/backend/
-desktop/screenshots/
-desktop/test-results/
-desktop/.uiplan-progress.json
-build/
-templates/USER.local.md
-templates/*.local.md
-logs/
-.superpowers/
+packages/*/dist/
+packages/*/coverage/
+coverage/
+.vite/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Build and test outputs
+/build/
+/desktop/out/
+/desktop/dist/
+/desktop/build/backend/
+/desktop/screenshots/
+/desktop/test-results/
+/desktop/.uiplan-progress.json
+
+# Logs / local automation state
+/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+/.superpowers/
 
 # 运行期产生的私人数据（长期记忆 / 会话历史 / token 用量）
-# 注意：裸 `memory/` 会匹配任意深度同名目录，意外吞掉了 packages/core/src/memory/
-# 这个源码目录（MIG-MEM-001 memory 子系统，含 store.ts/history.ts/versions.ts 等，
-# 从未被 git 追踪过）——用 !.../** 显式排除源码目录，其余运行期 memory/ 目录仍忽略。
-memory/
-!packages/core/src/memory/
-!packages/core/src/memory/**
+# 规则必须锚定在仓库根目录，避免误忽略 packages/core/src/memory 等源码目录。
+/memory/
 /sessions/
+/packages/*/memory/
+/packages/*/sessions/
 
 # Agent Team 运行期状态（队友配置 / inbox / 独立 thread）
-.team/
+/.team/
+/packages/*/.team/

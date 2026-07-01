@@ -1,0 +1,36 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "python-deepseek",
+      "provider": "auto",
+      "maxTokens": 4096,
+      "temperature": 0.2,
+      "reasoningEffort": null,
+      "contextWindowTokens": 64000
+    }
+  },
+  "models": [
+    {
+      "name": "python-deepseek",
+      "label": "Python DeepSeek",
+      "provider": "deepseek",
+      "apiKey": "",
+      "apiBase": "https://api.deepseek.com",
+      "mainModelId": "deepseek-chat",
+      "secondaryModelId": "deepseek-chat",
+      "maxTokens": 4096,
+      "temperature": 0.2,
+      "contextWindowTokens": 64000,
+      "reasoningEffort": null,
+      "id": "deepseek-chat"
+    }
+  ],
+  "providers": {
+    "deepseek": {
+      "apiKey": "",
+      "apiBase": "https://api.deepseek.com",
+      "extraHeaders": null,
+      "extraBody": null
+    }
+  }
+}

@@ -8,7 +8,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('model API Core IPC fallback (MIG-IPC-010)', () => {
+describe('model API Core IPC (MIG-IPC-010)', () => {
   it('runs model tests through Core IPC when the bridge is available', async () => {
     const calls: unknown[][] = []
     g.window = { emperor: { invokeCore: async (...args: unknown[]) => { calls.push(args); return { ok: true, sample: 'pong' } } } }
@@ -52,6 +52,16 @@ describe('model API Core IPC fallback (MIG-IPC-010)', () => {
       contextWindowTokens: 64000,
       reasoningEffort: null,
     }]])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to HTTP model tests when the Core IPC bridge is unavailable', async () => {
+    g.window = { emperor: {} }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    await expect(testModelEntry('main', 'text')).rejects.toThrow(
+      'Core IPC bridge is unavailable; use the Electron desktop window.',
+    )
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

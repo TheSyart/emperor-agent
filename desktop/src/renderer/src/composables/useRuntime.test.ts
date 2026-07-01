@@ -8,9 +8,29 @@ const g = globalThis as unknown as { window?: any; fetch?: unknown }
 afterEach(() => {
   delete g.window
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
+  it('does not attempt the retired WebSocket fallback when the Core IPC bridge is unavailable', () => {
+    const showToast = vi.fn()
+    const wsCtor = vi.fn()
+    vi.stubGlobal('WebSocket', wsCtor)
+    g.window = fakeWindow({})
+    const runtime = useRuntime({ ...testOptions(), showToast })
+
+    runtime.connectSocket()
+
+    expect(wsCtor).not.toHaveBeenCalled()
+    expect(runtime.status.value).toBe('error')
+    expect(runtime.pending).toMatchObject({
+      label: '桌面 IPC 不可用',
+      detail: '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      tone: 'error',
+    })
+    expect(showToast).toHaveBeenCalledWith('桌面 IPC 不可用，请在 Electron 桌面窗口中使用')
+  })
+
   it('subscribes to core events and submits chat through Core IPC when the bridge is available', async () => {
     const calls: unknown[][] = []
     let listener: ((event: unknown) => void) | null = null

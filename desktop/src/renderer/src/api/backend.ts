@@ -1,5 +1,7 @@
-// Electron desktop talks to CoreApi over IPC. URL helpers remain for browser-only
-// development and tests, where requests are same-origin.
+// Electron desktop talks to CoreApi over preload IPC. Browser-only tests inject
+// this same bridge surface; the product no longer supports HTTP/WS fallback.
+
+export const CORE_BRIDGE_UNAVAILABLE_MESSAGE = 'Core IPC bridge is unavailable; use the Electron desktop window.'
 
 interface EmperorBridge {
   selectDirectory?: () => Promise<string | null>
@@ -11,28 +13,6 @@ function bridge(): EmperorBridge | undefined {
   return (globalThis as unknown as { window?: { emperor?: EmperorBridge } }).window?.emperor
 }
 
-function loc(): { protocol: string; host: string } {
-  return (globalThis as unknown as { window: { location: { protocol: string; host: string } } }).window
-    .location
-}
-
-export function backendBase(): string {
-  return ''
-}
-
-export function getBackendToken(): string {
-  return ''
-}
-
-export function apiUrl(path: string): string {
-  return backendBase() + path
-}
-
-export function wsUrl(path: string): string {
-  const { protocol, host } = loc()
-  return `${protocol === 'https:' ? 'wss:' : 'ws:'}//${host}${path}`
-}
-
 export async function selectDirectory(): Promise<string | null> {
   const picker = bridge()?.selectDirectory
   return typeof picker === 'function' ? picker() : null
@@ -40,7 +20,7 @@ export async function selectDirectory(): Promise<string | null> {
 
 export async function invokeCore(operationKey: string, ...args: unknown[]): Promise<unknown> {
   const invoke = bridge()?.invokeCore
-  if (typeof invoke !== 'function') throw new Error('Core IPC bridge is unavailable')
+  if (typeof invoke !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
   const result = await invoke(operationKey, ...args)
   const safeError = safeCoreIpcError(result)
   if (safeError) {

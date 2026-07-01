@@ -12,7 +12,7 @@ Emperor Agent 现在是一个本地 Electron 应用：
 - Renderer 通过 preload 暴露的 IPC 调用 `CoreApi` operation。
 - Core 内部托管 `AgentLoop`、`AgentRunner`、模型路由、工具注册、会话、记忆、Runtime events、Scheduler、Team、External、MCP。
 - `app://attachments/{id}/raw` 和 `app://media/{id}/raw` 由 main 进程安全解析本地受管文件，不把任意本机路径暴露给 renderer。
-- HTTP/WS helper 只保留 browser-only fallback 语义；桌面主路径不启动 Python server，也不监听 aiohttp/FastAPI 后端端口。
+- Renderer 只通过 Electron IPC 与 CoreApi 通信；桌面主路径不启动 Python server，也不监听 aiohttp/FastAPI/HTTP/WS 后端端口。
 
 核心入口：
 
@@ -88,7 +88,7 @@ flowchart TD
 
 1. Renderer 由 composer 收集文本、附件和请求技能。
 2. `useRuntime.sendMessage()` 做本地 optimistic user bubble 和 assistant streaming bubble。
-3. 有 Core bridge 时走 `invokeCore('chat.submit', payload)`；browser-only fallback 才会尝试 WebSocket。
+3. 通过 `invokeCore('chat.submit', payload)` 进入 CoreApi；无 Core bridge 时快速失败，普通浏览器不再尝试 WebSocket。
 4. `CoreApi` 调用 `ChatService.submit()`。
 5. `ChatService` 调用 `MainlineTurnService.submit()`，并设置 `source='chat'`。
 6. `MainlineTurnService` 必要时 `loop.activateSession(sessionId)`，然后调用 `loop.runUserTurn()`。
@@ -167,6 +167,6 @@ flowchart TD
 - 不要新增 Python runtime、CLI fallback、HTTP server fallback 或打包后端。
 - 新增数据文件必须落在受管 `memory/`、配置文件或明确的 asset 目录，并遵守 `.gitignore`。
 - 新增 `app://` 资源时必须在 main 进程做路径解析和目录约束。
-- 新增 renderer API 时优先走 Core IPC；browser-only fallback 只能作为开发兼容层。
+- 新增 renderer API 时必须走 Core IPC；browser-only 测试通过注入最小 Core bridge fixture 覆盖 UI，不新增 HTTP/WS fallback。
 - 新增工具结果字段时同步 core 类型、runtime event、renderer projection 和工具详情 UI。
 - 新增会话/记忆/Scheduler/Team/External/MCP 能力时优先放在 `packages/core/src/<domain>/`，再通过 CoreApi 暴露。

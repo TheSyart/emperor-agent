@@ -36,7 +36,7 @@ export interface RouteOperation {
 }
 
 export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
-  op('chat.submit', 'WS', '/ws'),
+  op('chat.submit', 'IPC', 'chat.submit'),
   op('bootstrap', 'GET', '/api/bootstrap'),
   op('chat.stopRuntime', 'POST', '/api/runtime/stop'),
   op('config.get', 'GET', '/api/config'),

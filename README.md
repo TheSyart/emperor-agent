@@ -81,7 +81,7 @@ make check
 npm --prefix desktop run screenshots
 ```
 
-视觉测试在 browser-only 环境中注入最小 Core bridge fixture，不依赖本地 HTTP/WS server。
+视觉测试在 browser-only 环境中注入最小 Core bridge fixture；普通浏览器不再直连运行，也不依赖本地 HTTP/WS server。
 
 ## 项目结构
 
@@ -125,7 +125,7 @@ memory/                         本地运行数据，gitignored
 ## 运行时机制
 
 - Electron main 调用 `createCoreHost()` 初始化 `CoreApi`，并为全部 operation 注册 IPC channel。
-- Renderer 中 `api/http.ts` 优先把旧 HTTP 语义映射到 Core operation；无 Core bridge 时才走 same-origin browser fallback。
+- Renderer 中 `api/http.ts` 把旧 HTTP 语义映射到 Core operation；无 Core bridge 时快速失败，提示必须在 Electron 桌面窗口中使用。
 - 附件原图通过 `app://attachments/{id}/raw` 读取，由 main process 安全解析 `memory/attachments` 下的真实文件。
 - 每个 session 独立保存 `memory/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`。
 - Runtime events 通过 Core event bridge 推送到 renderer，刷新后由 bootstrap replay 恢复未压缩 turn 的工具、Ask/Plan、Scheduler、Team 和标题更新细节。

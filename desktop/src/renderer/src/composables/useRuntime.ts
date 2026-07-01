@@ -9,7 +9,7 @@ import { findSubagent, findSubagentTool, findToolSegment } from '../runtime/sele
 import { applyPlanEvent, type PlanProjection } from '../runtime/handlers/plans'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
 import { applyTaskEvent, type TaskProjection } from '../runtime/handlers/tasks'
-import { hasCoreBridge, invokeCore, onCoreEvent, wsUrl } from '../api/backend'
+import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { schedulerMessageMeta } from '../runtime/schedulerMeta'
 import { loadRuntimeSnapshot, transcriptFromMessages, type RuntimeSnapshot } from '../runtime/snapshot'
@@ -41,16 +41,13 @@ export function useRuntime(options: {
   const pending = reactive<PendingState>({ label: '', detail: '' })
   const planProjection = reactive<PlanProjection>({ plans: [], entryDecisions: [] })
   const taskProjection = reactive<TaskProjection>({ tasks: [] })
-  const reconnectAttempts = ref(0)
-  const socket = ref<WebSocket | null>(null)
   const lastSeq = ref(0)
-  let reconnectTimer: number | undefined
   let pendingClearTimer: number | undefined
   let persistTimer: number | undefined
   let coreUnsubscribe: (() => void) | undefined
   let pendingVersion = 0
   let rehydrating = false
-  let intentionalSocketClose = false
+  let bridgeUnavailableToastShown = false
   const turnClock = new Map<string, number>()
 
   const currentAssistant = computed(() => messages.value.find((message) => message.id === currentAssistantId.value && message.role === 'assistant') as AssistantMessage | undefined)
@@ -97,9 +94,15 @@ export function useRuntime(options: {
 
   function runtimeText() {
     if (busy.value) return '正在办差'
-    if (status.value === 'ready') return '流式在线'
+    if (!hasCoreBridge()) return '桌面 IPC 不可用'
+    if (status.value === 'ready') return '桌面 IPC 在线'
     if (status.value === 'error') return '连接异常'
     return '连接中'
+  }
+
+  function eventTransportText() {
+    if (!hasCoreBridge()) return '桌面 IPC 不可用'
+    return `桌面 IPC：${status.value}`
   }
 
   function updatePending(label = '', detail = '', tone: PendingState['tone'] = 'running', autoClearMs = 0) {
@@ -124,39 +127,8 @@ export function useRuntime(options: {
       connectCoreEvents()
       return
     }
-    const active = socket.value
-    if (active && (active.readyState === WebSocket.OPEN || active.readyState === WebSocket.CONNECTING)) return
-    status.value = 'connecting'
-    const params = new URLSearchParams({ last_seq: String(lastSeq.value) })
-    if (sessionId.value) params.set('session', sessionId.value)
-    const ws = new WebSocket(wsUrl(`/ws?${params.toString()}`))
-    socket.value = ws
-
-    ws.addEventListener('open', () => {
-      status.value = 'ready'
-      reconnectAttempts.value = 0
-      if (reconnectTimer) window.clearTimeout(reconnectTimer)
-    })
-    ws.addEventListener('message', (event) => handleSocketEvent(event.data))
-    ws.addEventListener('close', () => {
-      if (intentionalSocketClose) {
-        intentionalSocketClose = false
-        return
-      }
-      status.value = 'error'
-      if (currentAssistant.value?.streaming) {
-        busy.value = true
-        updatePending('WebSocket 断开，正在续接回复...', `已收到事件 #${lastSeq.value}`)
-      } else {
-        busy.value = false
-        updatePending()
-        currentAssistantId.value = null
-      }
-      scheduleReconnect()
-    })
-    ws.addEventListener('error', () => {
-      status.value = 'error'
-    })
+    markCoreBridgeUnavailable(true)
+    return
   }
 
   function connectCoreEvents() {
@@ -170,19 +142,21 @@ export function useRuntime(options: {
       handleSocketEvent(JSON.stringify(event))
     })
     status.value = 'ready'
-    reconnectAttempts.value = 0
-    if (reconnectTimer) window.clearTimeout(reconnectTimer)
   }
 
-  function scheduleReconnect() {
-    const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts.value), 30000)
-    reconnectAttempts.value += 1
-    options.showToast(`WebSocket 已断开，${Math.round(delay / 1000)} 秒后重连`)
-    if (reconnectTimer) window.clearTimeout(reconnectTimer)
-    reconnectTimer = window.setTimeout(() => {
-      status.value = 'connecting'
-      connectSocket()
-    }, delay)
+  function markCoreBridgeUnavailable(showToast = false) {
+    status.value = 'error'
+    busy.value = false
+    currentAssistantId.value = null
+    updatePending(
+      '桌面 IPC 不可用',
+      '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      'error',
+    )
+    if (showToast && !bridgeUnavailableToastShown) {
+      bridgeUnavailableToastShown = true
+      options.showToast('桌面 IPC 不可用，请在 Electron 桌面窗口中使用')
+    }
   }
 
   function sendMessage(payload: string | ChatSendPayload) {
@@ -203,44 +177,8 @@ export function useRuntime(options: {
       connectCoreEvents()
       return sendMessageViaCore({ text, displayText, attachments, requestedSkills: normalized.requestedSkills })
     }
-    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
-      connectSocket()
-      options.showToast('WebSocket 还没连上，请稍后再发')
-      return false
-    }
-
-    const userMsg = enqueueLocalTurn(displayText || text, attachments)
-    status.value = 'ready'
-
-    try {
-      const activeSessionId = sessionId.value
-      const draft = activeSessionId && isDraftSessionId(activeSessionId)
-        ? options.resolveDraftSession?.(activeSessionId)
-        : undefined
-      socket.value.send(JSON.stringify({
-        type: 'message',
-        content: text,
-        attachments: attachments.map((a) => a.id),
-        requested_skills: normalized.requestedSkills,
-        display_content: displayText !== text ? displayText : undefined,
-        client_message_id: userMsg.id,
-        session_id: activeSessionId && !isDraftSessionId(activeSessionId) ? activeSessionId : undefined,
-        draft_session: draft
-          ? {
-              client_draft_id: activeSessionId,
-              title: draft.title || '新会话',
-              mode: draft.mode || 'chat',
-              project_id: draft.project_id || undefined,
-              project_path: draft.project_path || undefined,
-              project_name: draft.project_name || undefined,
-            }
-          : undefined,
-      }))
-      return true
-    } catch (err) {
-      handleChatError(err instanceof Error ? err.message : String(err))
-      return false
-    }
+    markCoreBridgeUnavailable(true)
+    return false
   }
 
   function enqueueLocalTurn(content: string, attachments: AttachmentRef[]) {
@@ -347,27 +285,8 @@ export function useRuntime(options: {
       connectCoreEvents()
       return sendControlPayloadViaCore(payload, userLabel, expectAssistant)
     }
-    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
-      connectSocket()
-      options.showToast('WebSocket 还没连上，请稍后再试')
-      return false
-    }
-    const userId = nextId('user')
-    messages.value.push({ id: userId, role: 'user', content: userLabel })
-    if (expectAssistant) {
-      const assistantId = nextId('assistant')
-      messages.value.push(createStreamingAssistant(assistantId, Date.now()))
-      currentAssistantId.value = assistantId
-      busy.value = true
-      updatePending('正在继续执行...', userLabel)
-    }
-    try {
-      socket.value.send(JSON.stringify({ ...payload, client_message_id: userId }))
-      return true
-    } catch (err) {
-      handleChatError(err instanceof Error ? err.message : String(err))
-      return false
-    }
+    markCoreBridgeUnavailable(true)
+    return false
   }
 
   function sendControlPayloadViaCore(payload: Record<string, unknown>, userLabel: string, expectAssistant: boolean) {
@@ -494,7 +413,7 @@ export function useRuntime(options: {
     try {
       data = JSON.parse(raw) as WsEvent
     } catch {
-      handleChatError('WebSocket 返回了无法解析的数据')
+      handleChatError('事件通道返回了无法解析的数据')
       return
     }
 
@@ -861,7 +780,7 @@ export function useRuntime(options: {
       if (data.control) options.boot.value.control = data.control
     }
     if (!serverRestarted && currentAssistant.value?.streaming && hasReplay) {
-      updatePending('WebSocket 已重连，正在补齐回复...', `回放 ${data.replay_count} 个事件`)
+      updatePending('事件通道已重连，正在补齐回复...', `回放 ${data.replay_count} 个事件`)
     }
   }
 
@@ -1339,6 +1258,7 @@ export function useRuntime(options: {
     planProjection,
     taskProjection,
     runtimeText,
+    eventTransportText,
     switchSession(id: string) {
       sessionId.value = id
       messages.value = []
@@ -1348,11 +1268,6 @@ export function useRuntime(options: {
       turnClock.clear()
       updatePending()
       clearRuntimeSnapshot()
-      if (socket.value) {
-        intentionalSocketClose = true
-        socket.value.close()
-        socket.value = null
-      }
       if (coreUnsubscribe) {
         coreUnsubscribe()
         coreUnsubscribe = undefined

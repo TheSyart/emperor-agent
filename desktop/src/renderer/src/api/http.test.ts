@@ -8,7 +8,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('api Core IPC fallback (MIG-IPC-010)', () => {
+describe('api Core IPC routes (MIG-IPC-010)', () => {
   it('maps supported GET routes to CoreApi operations when the bridge is available', async () => {
     const calls: unknown[][] = []
     g.window = { emperor: { invokeCore: async (...args: unknown[]) => { calls.push(args); return { totals: {} } } } }
@@ -193,16 +193,14 @@ describe('api Core IPC fallback (MIG-IPC-010)', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('keeps HTTP fallback only when the Core bridge is unavailable', async () => {
+  it('fails fast instead of using retired HTTP fallback when the Core bridge is unavailable', async () => {
     g.window = { emperor: {} }
-    const response = new Response(JSON.stringify({ imported: 'skill' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
-    await expect(api('/api/skills/import', { method: 'POST', body: new FormData() })).resolves.toEqual({ imported: 'skill' })
+    await expect(api('/api/skills/import', { method: 'POST', body: new FormData() })).rejects.toThrow(
+      'Core IPC bridge is unavailable; use the Electron desktop window.',
+    )
 
-    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

@@ -1,24 +1,10 @@
-import { apiUrl, getBackendToken, hasCoreBridge, invokeCore } from './backend'
+import { CORE_BRIDGE_UNAVAILABLE_MESSAGE, hasCoreBridge, invokeCore } from './backend'
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (hasCoreBridge()) {
     return callCore<T>(path, options)
   }
-  const token = getBackendToken()
-  const response = await fetch(apiUrl(path), {
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { 'X-Emperor-Auth-Token': token } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
-  })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const message = typeof data?.error === 'string' ? data.error : response.statusText
-    throw new Error(message)
-  }
-  return data as T
+  throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
 }
 
 export async function callCore<T>(path: string, options: RequestInit = {}): Promise<T> {

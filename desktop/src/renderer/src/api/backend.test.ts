@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { backendBase, apiUrl, wsUrl, getBackendToken, invokeCore, onCoreEvent } from './backend'
+import { hasCoreBridge, invokeCore, onCoreEvent } from './backend'
 
 const g = globalThis as unknown as { window?: unknown }
 
@@ -7,24 +7,15 @@ afterEach(() => {
   delete g.window
 })
 
-describe('same-origin fallback urls', () => {
-  it('keeps api paths relative and derives ws from location', () => {
-    g.window = { location: { protocol: 'http:', host: 'localhost:5173' } }
-    expect(backendBase()).toBe('')
-    expect(apiUrl('/api/bootstrap')).toBe('/api/bootstrap')
-    expect(wsUrl('/ws?x=1')).toBe('ws://localhost:5173/ws?x=1')
-  })
-})
-
-describe('backend token', () => {
-  it('is empty because desktop no longer injects backend auth', () => {
-    g.window = { location: { protocol: 'http:', host: 'localhost:5173' } }
-    expect(getBackendToken()).toBe('')
-    expect(wsUrl('/ws?x=1')).toBe('ws://localhost:5173/ws?x=1')
-  })
-})
-
 describe('with an injected Core IPC bridge', () => {
+  it('reports bridge availability from the preload surface', () => {
+    g.window = { emperor: {} }
+    expect(hasCoreBridge()).toBe(false)
+
+    g.window = { emperor: { invokeCore: async () => ({ ok: true }) } }
+    expect(hasCoreBridge()).toBe(true)
+  })
+
   it('delegates invokeCore to the preload bridge', async () => {
     const calls: unknown[][] = []
     g.window = {
