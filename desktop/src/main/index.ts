@@ -14,13 +14,15 @@ import { readBounds, pickBounds } from './window-bounds'
 import { resolveAssetPath, resolveAttachmentRawPath, resolveMediaRawPath } from './protocol'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge } from './event-bridge'
+import { moduleDirFromUrl } from './esm-path'
 
+const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
 const petWindowMode = mainArgv.includes('--pet-window')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
-const rendererRoot = path.join(__dirname, '..', 'renderer')
+const rendererRoot = path.join(mainDir, '..', 'renderer')
 const appIconPath = resolveAppIconPath({
-  dirname: __dirname,
+  dirname: mainDir,
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
 })
@@ -121,7 +123,7 @@ function createWindow(): void {
     backgroundColor: '#1a1410',
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      preload: path.join(mainDir, '..', 'preload', 'index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -162,7 +164,7 @@ function createWindow(): void {
 
 function petRendererRoot(): string {
   if (app.isPackaged) return path.join(process.resourcesPath, 'desktop-pet')
-  return path.resolve(__dirname, '..', '..', '..', 'desktop-pet')
+  return path.resolve(mainDir, '..', '..', '..', 'desktop-pet')
 }
 
 function petStateDir(root: string): string {
@@ -199,7 +201,7 @@ function createPetWindow(): void {
   const root =
     argValue(mainArgv, '--root') ||
     process.env.EMPEROR_AGENT_ROOT ||
-    (app.isPackaged ? packagedRuntimeRoot(app.getPath('userData')) : path.resolve(__dirname, '..', '..', '..'))
+    (app.isPackaged ? packagedRuntimeRoot(app.getPath('userData')) : path.resolve(mainDir, '..', '..', '..'))
   const assetBaseUrl = pathToFileURL(path.join(root, 'assets', 'desktop-pet', 'clawd-tank') + path.sep).href
   const boundsPath = path.join(petStateDir(root), 'window.json')
   const rootDir = petRendererRoot()
