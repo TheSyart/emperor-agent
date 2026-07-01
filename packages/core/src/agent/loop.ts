@@ -11,6 +11,7 @@ import { AgentRunner, type ControlManagerRunnerHost } from './runner'
 import { buildRoutedRunner } from './runner-factory'
 import { loadModelConfig } from '../config/model-config'
 import { ControlManager } from '../control/manager'
+import type { Interaction } from '../control/models'
 import { AskUserTool, ProposePlanTool } from '../control/tools'
 import { MCPClient } from '../mcp/client'
 import { MemoryStore } from '../memory/store'
@@ -25,7 +26,7 @@ import { SchedulerStore } from '../scheduler/store'
 import { SchedulerTool } from '../scheduler/tool'
 import { ConversationStore, ProjectSessionMemoryStore, SessionMemoryStore } from '../sessions/conversation'
 import { migrateLegacyMainlineToDefaultSession } from '../sessions/migrate'
-import { SessionStore, type SessionEntry } from '../sessions/store'
+import { SessionStore, type SessionControlPending, type SessionEntry } from '../sessions/store'
 import { buildDispatchRunnerFactory } from '../subagents/dispatch-runner'
 import { SubagentRegistry } from '../subagents/registry'
 import { TaskManager } from '../tasks/manager'
@@ -79,6 +80,7 @@ export interface RunUserTurnOptions {
   clientMessageId?: string | null
   source?: string | null
   scheduler?: Record<string, unknown> | null
+  uiHidden?: boolean | null
   taskId?: string | null
   useActiveTask?: boolean
   memoryExtra?: Record<string, unknown> | null
@@ -116,6 +118,7 @@ export class AgentLoop {
   private readonly ownsModelRouter: boolean
   private readonly modelOverride: string | null
   private schedulerAgentTurnSubmitter: ((payload: SchedulerAgentTurnPayload) => Promise<string>) | null = null
+  private controlPendingSessionId: string | null = null
 
   private constructor(opts: AgentLoopCreateOptions, modelRouter: LoopModelRouter, sharedMemory: MemoryStore) {
     this.root = resolve(opts.root)
@@ -171,6 +174,10 @@ export class AgentLoop {
 
     this.controlManager.setTodoStore(this.todoStore)
     this.controlManager.setTaskManager(this.taskManager)
+    this.controlManager.setPendingObserver({
+      setPending: (interaction) => this.setActiveSessionControlPending(interaction),
+      clearPending: (interaction) => this.clearSessionControlPending(interaction),
+    })
     this.registerBuiltinTools()
     this.schedulerService.onJob = async (job) => this.schedulerExecutor().run(job)
   }
@@ -209,6 +216,21 @@ export class AgentLoop {
     this.contextBuilder.setSessionScope(this.sessionScope(session))
     this.runner = this.buildMainRunner()
     return session
+  }
+
+  reconcileSessionControlPending(): void {
+    const pending = this.controlManager.store.load().pending
+    const summary = pending ? this.sessionControlPending(pending) : null
+    this.sessionStore.reconcileControlPending(summary, this.activeSessionId)
+    if (summary) {
+      this.controlPendingSessionId = this.findControlPendingSessionId(summary.interaction_id)
+    } else {
+      this.controlPendingSessionId = null
+    }
+  }
+
+  controlPendingOwnerSessionId(interactionId: string): string | null {
+    return this.findControlPendingSessionId(interactionId)
   }
 
   async runUserTurn(content: string, opts: RunUserTurnOptions = {}): Promise<string> {
@@ -274,6 +296,7 @@ export class AgentLoop {
         clientMessageId: opts.clientMessageId ?? turnId,
         source: opts.source ?? null,
         scheduler: opts.scheduler ?? null,
+        uiHidden: opts.uiHidden ?? false,
       }),
       { turnId, emit: opts.emit ?? null },
     )
@@ -343,6 +366,52 @@ export class AgentLoop {
     if (current) return current
     const existing = this.sessionStore.list({ includeArchived: false })[0]
     return existing ?? this.sessionStore.create('Default')
+  }
+
+  private setActiveSessionControlPending(interaction: Interaction): void {
+    const sessionId = this.activeSessionId
+    if (!sessionId) return
+    const pending = this.sessionControlPending(interaction)
+    if (!pending) return
+    const updated = this.sessionStore.setControlPending(sessionId, pending)
+    if (updated) this.controlPendingSessionId = sessionId
+  }
+
+  private clearSessionControlPending(interaction: Interaction): void {
+    const sessionId = this.controlPendingSessionId || this.findControlPendingSessionId(interaction.id)
+    if (!sessionId) return
+    this.sessionStore.clearControlPending(sessionId)
+    if (this.controlPendingSessionId === sessionId) this.controlPendingSessionId = null
+  }
+
+  private findControlPendingSessionId(interactionId: string): string | null {
+    return this.sessionStore
+      .list({ includeArchived: true })
+      .find((session) => session.control_pending?.interaction_id === interactionId)
+      ?.id ?? null
+  }
+
+  private sessionControlPending(interaction: Interaction): SessionControlPending | null {
+    if (interaction.status !== 'waiting') return null
+    if (interaction.kind === 'ask') {
+      return {
+        kind: 'ask',
+        label: '需要用户输入',
+        tone: 'blue',
+        interaction_id: interaction.id,
+        updated_at: interaction.updatedAt,
+      }
+    }
+    if (interaction.kind === 'plan') {
+      return {
+        kind: 'plan',
+        label: '计划需要用户确认',
+        tone: 'green',
+        interaction_id: interaction.id,
+        updated_at: interaction.updatedAt,
+      }
+    }
+    return null
   }
 
   private memoryStoreForSession(session: SessionEntry, conversation: ConversationStore): SessionMemoryStore {

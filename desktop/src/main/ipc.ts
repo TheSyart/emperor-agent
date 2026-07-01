@@ -13,7 +13,7 @@ export function registerCoreIpc(ipcMain: IpcMainLike, coreApi: CoreApiLike, oper
       try {
         return await invokeOperation(coreApi, key, args)
       } catch (error) {
-        return safeIpcError(error)
+        return safeIpcError(error, key)
       }
     })
   }
@@ -35,12 +35,16 @@ function resolveOperation(coreApi: CoreApiLike, operationKey: string): { fn: unk
   return { fn: current, receiver }
 }
 
-function safeIpcError(_error: unknown): Record<string, unknown> {
+function safeIpcError(error: unknown, operationKey: string): Record<string, unknown> {
+  const errorId = `ipc_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+  if (process.env.NODE_ENV !== 'production') {
+    console.error(`[core-ipc] ${operationKey} failed (${errorId})`, error)
+  }
   return {
     ok: false,
     error: {
       message: 'Internal error',
-      errorId: `ipc_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      errorId,
     },
   }
 }

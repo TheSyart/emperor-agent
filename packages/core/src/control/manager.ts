@@ -40,6 +40,11 @@ export interface ControlResume {
   resume: boolean
 }
 
+export interface ControlPendingObserver {
+  setPending(interaction: Interaction): void
+  clearPending(interaction: Interaction): void
+}
+
 export class ControlManager implements ControlManagerHost, ToolManagerHost {
   readonly store: ControlStore
   readonly planStore: PlanStore
@@ -53,6 +58,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   readonly execution: PlanExecutionManager
   todoStore: TodoStoreLike | null = null
   taskManager: TaskManagerLike | null = null
+  private pendingObserver: ControlPendingObserver | null = null
 
   constructor(root: string) {
     this.store = new ControlStore(root)
@@ -73,6 +79,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   setTaskManager(taskManager: TaskManagerLike | null): void {
     this.taskManager = taskManager
+  }
+
+  setPendingObserver(observer: ControlPendingObserver | null): void {
+    this.pendingObserver = observer
   }
 
   get mode(): string {
@@ -176,6 +186,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.lastInteraction = interaction
     state.updatedAt = nowTs()
     this.store.save(state)
+    this.notifyPendingSet(interaction)
   }
 
   answer(interactionId: string, answers: Record<string, unknown>): ControlResume {
@@ -224,6 +235,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.lastInteraction = updated
     state.updatedAt = nowTs()
     this.store.save(state)
+    this.notifyPendingCleared(updated)
     const message = this.approvalMessage(updated, planRecord)
     const event: Record<string, unknown> = {
       event: 'plan_approved',
@@ -247,6 +259,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       state.lastInteraction = updated
       state.updatedAt = nowTs()
       this.store.save(state)
+      this.notifyPendingCleared(updated)
     } else {
       this.complete(updated)
     }
@@ -264,6 +277,15 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.lastInteraction = interaction
     state.updatedAt = nowTs()
     this.store.save(state)
+    this.notifyPendingCleared(interaction)
+  }
+
+  private notifyPendingSet(interaction: Interaction): void {
+    this.pendingObserver?.setPending(interaction)
+  }
+
+  private notifyPendingCleared(interaction: Interaction): void {
+    this.pendingObserver?.clearPending(interaction)
   }
 
   private requirePending(interactionId: string, kind?: InteractionKind): Interaction {

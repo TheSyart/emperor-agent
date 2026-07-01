@@ -102,16 +102,32 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const events: Array<Record<string, unknown>> = []
 
     const boot = await api.bootstrap()
-    const reply = await api.chat.submit({ content: 'ping', turnId: 'turn_api_1', emit: async (event) => { events.push(event) } })
+    const session = api.sessions.create({ title: 'API Chat' })
+    const reply = await api.chat.submit({ content: 'ping', turnId: 'turn_api_1', sessionId: String(session.id), emit: async (event) => { events.push(event) } })
     const tools = boot.tools as Array<Record<string, unknown>>
     const activeSessionId = String(api.loop.activeSessionId ?? '')
 
     expect(boot.app).toBe('Emperor Agent')
+    expect(boot).toMatchObject({ sessionIndexSource: expect.any(String), repairedSessions: expect.any(Number) })
     expect(tools.some((tool) => tool.name === 'read_file')).toBe(true)
     expect(reply.content).toBe('pong')
     expect(events.map((event) => event.event)).toContain('assistant_done')
     expect(activeSessionId).toBeTruthy()
     expect(existsSync(join(root, 'sessions', activeSessionId, 'history.jsonl'))).toBe(true)
+
+    await api.close()
+  })
+
+  it('rejects draft session ids at bootstrap before activating or replaying', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-bootstrap-session-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const activeSessionId = api.loop.activeSessionId
+
+    await expect(api.bootstrap({ sessionId: 'draft:new-chat' })).rejects.toThrow(/draft/i)
+    expect(api.loop.activeSessionId).toBe(activeSessionId)
 
     await api.close()
   })
@@ -137,6 +153,58 @@ describe('CoreApi (MIG-IPC-001)', () => {
     expect(String(archived.archived_at || '')).toBeTruthy()
     expect(all.some((item) => item.id === created.id)).toBe(true)
     expect(activated).toMatchObject({ active: api.loop.activeSessionId, complete: true })
+
+    await api.close()
+  })
+
+  it('reconciles stale session pending tags before bootstrap and session list responses', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-control-tags-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const active = api.loop.sessionStore.get(String(api.loop.activeSessionId))!
+    const stale = api.loop.sessionStore.create('Stale Session')
+    api.loop.sessionStore.setControlPending(active.id, {
+      kind: 'plan',
+      label: '计划需要用户确认',
+      tone: 'green',
+      interaction_id: 'plan_current',
+      updated_at: 1,
+    })
+    api.loop.sessionStore.setControlPending(stale.id, {
+      kind: 'ask',
+      label: '需要用户输入',
+      tone: 'blue',
+      interaction_id: 'ask_stale',
+      updated_at: 2,
+    })
+
+    await api.bootstrap()
+
+    expect(api.loop.sessionStore.get(active.id)?.control_pending).toBeNull()
+    expect(api.loop.sessionStore.get(stale.id)?.control_pending).toBeNull()
+
+    const pending = api.loop.controlManager.createPlan({
+      title: 'Pending Plan',
+      summary: 'Need approval',
+      planMarkdown: '# Plan',
+      riskLevel: 'low',
+    })
+    api.loop.sessionStore.setControlPending(stale.id, {
+      kind: 'ask',
+      label: '需要用户输入',
+      tone: 'blue',
+      interaction_id: 'ask_stale',
+      updated_at: 3,
+    })
+
+    const sessions = api.sessions.list() as Array<Record<string, unknown>>
+
+    expect(api.loop.sessionStore.get(active.id)?.control_pending).toMatchObject({ interaction_id: pending.id })
+    expect(api.loop.sessionStore.get(stale.id)?.control_pending).toBeNull()
+    expect(sessions.find((item) => item.id === active.id)?.control_pending).toMatchObject({ interaction_id: pending.id })
+    expect(sessions.find((item) => item.id === stale.id)?.control_pending).toBeNull()
 
     await api.close()
   })
@@ -286,13 +354,57 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const result = await api.control.answerInteraction(
       interaction.id,
       { scope: { choice: '完整', freeform: '' } },
-      { clientMessageId: 'control-msg-1', emit: async (event) => { events.push(event) } },
+      { clientMessageId: 'control-msg-1', uiHidden: true, emit: async (event: Record<string, unknown>) => { events.push(event) } },
     )
 
     expect(result).toMatchObject({ resume: true, result: { content: 'pong' } })
     expect(events.map((event) => event.event)).toContain('ask_answered')
     expect(events.map((event) => event.event)).toContain('assistant_done')
+    expect(events.find((event) => event.event === 'user_message')).toMatchObject({
+      source: 'control',
+      ui_hidden: true,
+      client_message_id: 'control-msg-1',
+    })
     expect(JSON.stringify(api.loop.activeMemoryStore.loadUnarchivedHistory())).toContain('[CONTROL:ASK_ANSWERED]')
+
+    await api.close()
+  })
+
+  it('resumes answered control interactions in their owning session after the user switches away', async () => {
+    const root = tmp('emperor-core-api-control-owner-')
+    const api = await CoreApi.create({
+      root,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const ownerSessionId = String(api.loop.activeSessionId)
+    const other = api.sessions.create({ title: 'Other Session' })
+    const interaction = api.loop.controlManager.createAsk({
+      questions: [{
+        id: 'scope',
+        header: '范围',
+        question: '范围怎么定',
+        options: [
+          { label: '完整', description: 'full' },
+          { label: '最小', description: 'small' },
+        ],
+      }],
+      context: 'need scope',
+    })
+    api.sessions.activate(String(other.id))
+
+    await api.control.answerInteraction(
+      interaction.id,
+      { scope: { choice: '完整', freeform: '' } },
+      { clientMessageId: 'control-owner-msg', uiHidden: true },
+    )
+
+    expect(api.loop.activeSessionId).toBe(ownerSessionId)
+    expect(api.loop.sessionStore.get(ownerSessionId)?.control_pending).toBeNull()
+    expect(api.loop.sessionStore.get(String(other.id))?.control_pending).toBeNull()
+    expect(readFileSync(join(root, 'sessions', ownerSessionId, 'history.jsonl'), 'utf8')).toContain('[CONTROL:ASK_ANSWERED]')
+    const otherHistoryPath = join(root, 'sessions', String(other.id), 'history.jsonl')
+    expect(existsSync(otherHistoryPath) ? readFileSync(otherHistoryPath, 'utf8') : '').not.toContain('[CONTROL:ASK_ANSWERED]')
 
     await api.close()
   })

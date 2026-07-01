@@ -2,14 +2,20 @@
 import { computed } from 'vue'
 import { cloneJson } from '../api/http'
 import { useAppContext } from '../composables/useAppContext'
+import { useSession } from '../composables/useSession'
+import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
+import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
+import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import PendingBar from '../components/chat/PendingBar.vue'
 import type { ModelConfigRaw } from '../types'
 
 const ctx = useAppContext()
+const sessionStore = useSession()
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.config?.models || [])
 const currentModel = computed(() => ctx.boot.value?.modelConfig?.current || null)
+const activeBottomControl = computed(() => activeBottomControlPanel(ctx.boot.value?.control || null, sessionStore.active.value || null))
 
 function switchModel(entryName: string) {
   const payload = ctx.boot.value?.modelConfig
@@ -66,8 +72,10 @@ function normalizeReasoningEffort(value?: string | null) {
       <MessageList :messages="ctx.messages.value" :plans="ctx.planProjection.plans" />
 
       <div class="chat-bottom-stack">
-        <PendingBar :pending="ctx.pending" />
-        <div class="composer-wrap">
+        <ActiveAskPanel v-if="activeBottomControl?.kind === 'ask'" :interaction="activeBottomControl.interaction" />
+        <ActivePlanDecisionPanel v-else-if="activeBottomControl?.kind === 'plan'" :interaction="activeBottomControl.interaction" />
+        <PendingBar v-if="!activeBottomControl" :pending="ctx.pending" />
+        <div v-if="!activeBottomControl" class="composer-wrap">
           <Composer
             :busy="ctx.busy.value"
             :commands="ctx.commands.value"

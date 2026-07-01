@@ -15,6 +15,7 @@ import { resolveAssetPath, resolveAttachmentRawPath, resolveMediaRawPath } from 
 import { createCoreHost } from './core-host'
 import { CoreEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
+import { resolveMainPreloadPath } from './preload-path'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
@@ -123,7 +124,7 @@ function createWindow(): void {
     backgroundColor: '#1a1410',
     show: false,
     webPreferences: {
-      preload: path.join(mainDir, '..', 'preload', 'index.js'),
+      preload: resolveMainPreloadPath(mainDir),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

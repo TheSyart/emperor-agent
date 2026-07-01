@@ -32,6 +32,8 @@ export function useRuntime(options: {
   resolveDraftSession?: (id: string) => SessionInfo | undefined
   onSessionCreated?: (event: Extract<WsEvent, { event: 'session_created' }>) => void
   onSessionTitleUpdated?: (event: Extract<WsEvent, { event: 'session_title_updated' }>) => void
+  onSessionControlPendingChanged?: (sessionId: string, interaction?: ControlInteraction | null) => void
+  refreshSessions?: () => Promise<void>
 }) {
   const messages = ref<ChatMessage[]>([])
   const busy = ref(false)
@@ -197,6 +199,11 @@ export function useRuntime(options: {
   }
 
   function sendMessageViaCore(opts: { text: string; displayText: string; attachments: AttachmentRef[]; requestedSkills: RequestedSkill[] }) {
+    if (!sessionId.value || isDraftSessionId(sessionId.value)) {
+      updatePending('正在创建会话', '请稍后再试', 'running', 3000)
+      options.showToast('正在创建会话，请稍后再试')
+      return false
+    }
     const userMsg = enqueueLocalTurn(opts.displayText || opts.text, opts.attachments)
     status.value = 'ready'
     void invokeCore('chat.submit', {
@@ -205,7 +212,7 @@ export function useRuntime(options: {
       attachments: opts.attachments.map((item) => item.id),
       requestedSkills: opts.requestedSkills,
       clientMessageId: userMsg.id,
-      sessionId: sessionId.value && !isDraftSessionId(sessionId.value) ? sessionId.value : undefined,
+      sessionId: sessionId.value,
     }).catch((err) => {
       handleChatError(err instanceof Error ? err.message : String(err))
     })
@@ -290,20 +297,21 @@ export function useRuntime(options: {
   }
 
   function sendControlPayloadViaCore(payload: Record<string, unknown>, userLabel: string, expectAssistant: boolean) {
-    const userId = nextId('user')
-    messages.value.push({ id: userId, role: 'user', content: userLabel })
+    const controlMessageId = nextId('control')
+    let optimisticAssistantId: string | null = null
     if (expectAssistant) {
       const assistantId = nextId('assistant')
+      optimisticAssistantId = assistantId
       messages.value.push(createStreamingAssistant(assistantId, Date.now()))
       currentAssistantId.value = assistantId
       busy.value = true
       updatePending('正在继续执行...', userLabel)
     }
     const interactionId = String(payload.interaction_id || '')
-    const resumeOpts = { clientMessageId: userId, displayContent: userLabel }
+    const resumeOpts = toPlainRecord({ clientMessageId: controlMessageId, displayContent: '', uiHidden: true })
     let call: Promise<unknown>
     if (payload.type === 'interaction_answer') {
-      call = invokeCore('control.answerInteraction', interactionId, payload.answers || {}, resumeOpts)
+      call = invokeCore('control.answerInteraction', interactionId, toPlainRecord(payload.answers || {}), resumeOpts)
     } else if (payload.type === 'plan_comment') {
       call = invokeCore('control.commentPlan', interactionId, String(payload.comment || ''), resumeOpts)
     } else if (payload.type === 'plan_approve') {
@@ -315,9 +323,60 @@ export function useRuntime(options: {
       return false
     }
     void call.catch((err) => {
-      handleChatError(err instanceof Error ? err.message : String(err))
+      void handleControlPayloadError(err, optimisticAssistantId)
     })
     return true
+  }
+
+  async function handleControlPayloadError(error: unknown, optimisticAssistantId: string | null) {
+    if (optimisticAssistantId) {
+      const index = messages.value.findIndex((message) => message.id === optimisticAssistantId)
+      if (index >= 0) messages.value.splice(index, 1)
+      if (currentAssistantId.value === optimisticAssistantId) currentAssistantId.value = null
+    }
+    busy.value = false
+    status.value = hasCoreBridge() ? 'ready' : 'error'
+    updatePending()
+    options.showToast(displayError(error))
+    await refreshControlAndSessions()
+  }
+
+  async function refreshControlAndSessions() {
+    try {
+      const control = await invokeCore('control.get') as BootstrapPayload['control']
+      if (options.boot.value) options.boot.value.control = control
+    } catch {
+      // Keep the original control error as the visible failure; refresh is best-effort.
+    }
+    await options.refreshSessions?.().catch(() => undefined)
+  }
+
+  function displayError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    const errorId = error && typeof error === 'object' && 'errorId' in error
+      ? String((error as { errorId?: unknown }).errorId || '')
+      : ''
+    return errorId ? `${message} · ${errorId}` : message
+  }
+
+  function toPlainRecord(value: unknown): Record<string, unknown> {
+    const plain = toPlainIpcValue(value)
+    return plain && typeof plain === 'object' && !Array.isArray(plain) ? plain as Record<string, unknown> : {}
+  }
+
+  function toPlainIpcValue(value: unknown): unknown {
+    if (value == null) return value
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+    if (Array.isArray(value)) return value.map((item) => toPlainIpcValue(item))
+    if (typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        const plain = toPlainIpcValue(item)
+        if (plain !== undefined) out[key] = plain
+      }
+      return out
+    }
+    return undefined
   }
 
   function clearChat() {
@@ -594,6 +653,11 @@ export function useRuntime(options: {
       return
     }
 
+    if (data.event === 'plan_draft_delta') {
+      handlePlanDraftDelta(data)
+      return
+    }
+
     if (
       data.event === 'ask_answered' ||
       data.event === 'plan_comment_added' ||
@@ -601,6 +665,7 @@ export function useRuntime(options: {
       data.event === 'interaction_cancelled'
     ) {
       if ('control' in data && data.control && options.boot.value) options.boot.value.control = data.control
+      if (sessionId.value) options.onSessionControlPendingChanged?.(sessionId.value, null)
       if (data.interaction) updateControlSegment(data.interaction)
       if (data.event === 'plan_approved') {
         const next = applyPlanEvent(
@@ -697,8 +762,9 @@ export function useRuntime(options: {
     const turnId = data.turn_id || ''
     const clientId = data.client_message_id || ''
     const content = data.content || ''
-    const meta = schedulerMessageMeta(content, clientId, data.source, data.scheduler)
     if (turnId) turnClock.set(turnId, eventTimeMs(data))
+    if (data.ui_hidden || data.source === 'control') return
+    const meta = schedulerMessageMeta(content, clientId, data.source, data.scheduler)
     const existing = messages.value.find((message) =>
       message.role === 'user' && (
         (clientId && message.id === clientId) ||
@@ -790,19 +856,40 @@ export function useRuntime(options: {
       options.boot.value.control ||= { mode: 'ask_before_edit', pending: null }
       options.boot.value.control.pending = data.interaction
     }
+    if (sessionId.value) options.onSessionControlPendingChanged?.(sessionId.value, data.interaction)
     const assistant = assistantForEvent(data)
     if (!assistant) return
     finishActiveThought(assistant, data)
     const type = data.event === 'ask_request' ? 'ask' : 'plan'
-    const existing = assistant.segments.find((seg) =>
-      (seg.type === 'ask' || seg.type === 'plan') && seg.interaction.id === data.interaction!.id
-    )
+    const existing = findControlSegment(assistant, type, data.interaction)
     if (existing && (existing.type === 'ask' || existing.type === 'plan')) {
-      existing.interaction = data.interaction
+      existing.interaction = mergeControlInteraction(existing.interaction, data.interaction)
     } else {
       assistant.segments.push({ id: nextId(type), type, interaction: data.interaction })
     }
     updatePending(type === 'plan' ? '计划待预览' : '等待你回答', data.interaction.title || data.interaction.context || '', 'done')
+  }
+
+  function handlePlanDraftDelta(data: Extract<WsEvent, { event: 'plan_draft_delta' }>) {
+    if (!data.interaction) return
+    const assistant = assistantForEvent(data)
+    if (!assistant) return
+    finishActiveThought(assistant, data)
+    const interaction = {
+      ...data.interaction,
+      meta: {
+        ...(data.interaction.meta || {}),
+        plan_stream_id: controlInteractionStreamId(data.interaction, data.tool_call_id),
+        provisional: true,
+      },
+    }
+    const existing = findControlSegment(assistant, 'plan', interaction)
+    if (existing && existing.type === 'plan') {
+      existing.interaction = mergeControlInteraction(existing.interaction, interaction)
+    } else {
+      assistant.segments.push({ id: nextId('plan'), type: 'plan', interaction })
+    }
+    updatePending('正在生成计划...', interaction.title || interaction.summary || '', 'running')
   }
 
   function handleAgentThoughtEvent(data: Extract<WsEvent, { event: 'agent_thought' }>) {
@@ -911,14 +998,44 @@ export function useRuntime(options: {
   }
 
   function updateControlSegment(interaction: ControlInteraction) {
+    const streamId = controlInteractionStreamId(interaction)
     for (const message of messages.value) {
       if (message.role !== 'assistant') continue
       for (const segment of message.segments) {
-        if ((segment.type === 'ask' || segment.type === 'plan') && segment.interaction.id === interaction.id) {
-          segment.interaction = interaction
+        if ((segment.type === 'ask' || segment.type === 'plan') && (
+          segment.interaction.id === interaction.id ||
+          (segment.type === 'plan' && streamId && controlInteractionStreamId(segment.interaction) === streamId)
+        )) {
+          segment.interaction = mergeControlInteraction(segment.interaction, interaction)
         }
       }
     }
+  }
+
+  function findControlSegment(assistant: AssistantMessage, type: 'ask' | 'plan', interaction: ControlInteraction) {
+    const streamId = type === 'plan' ? controlInteractionStreamId(interaction) : ''
+    return assistant.segments.find((segment) => {
+      if (type === 'ask') return segment.type === 'ask' && segment.interaction.id === interaction.id
+      return segment.type === 'plan' && (
+        segment.interaction.id === interaction.id ||
+        (streamId && controlInteractionStreamId(segment.interaction) === streamId)
+      )
+    })
+  }
+
+  function controlInteractionStreamId(interaction: ControlInteraction, fallback?: string): string {
+    const metaId = interaction.meta?.plan_stream_id
+    if (typeof metaId === 'string' && metaId.trim()) return metaId.trim()
+    if (interaction.parent_call_id) return interaction.parent_call_id
+    return String(fallback || '').trim()
+  }
+
+  function mergeControlInteraction(previous: ControlInteraction, next: ControlInteraction): ControlInteraction {
+    const streamId = controlInteractionStreamId(next) || controlInteractionStreamId(previous)
+    const meta = { ...(previous.meta || {}), ...(next.meta || {}) }
+    if (streamId) meta.plan_stream_id = streamId
+    if (!next.meta?.provisional) delete meta.provisional
+    return { ...previous, ...next, meta }
   }
 
   function handleSubagentEvent(data: WsEvent) {

@@ -568,56 +568,6 @@
     color: rgb(var(--fg-muted));
   }
 
-  .ask-question-list {
-    @apply mt-3 space-y-3;
-  }
-
-  .ask-question {
-    @apply rounded-md border p-3;
-    border-color: rgb(var(--border));
-    background: rgb(var(--bg-inset));
-  }
-
-  .ask-question-title span {
-    @apply block font-mono text-[10px] uppercase tracking-wider;
-    color: rgb(var(--accent));
-  }
-
-  .ask-question-title strong {
-    @apply mt-1 block text-sm font-semibold leading-6;
-    color: rgb(var(--fg));
-  }
-
-  .ask-options {
-    @apply mt-2 grid gap-2 md:grid-cols-2;
-  }
-
-  .ask-options button {
-    @apply rounded-md border px-3 py-2 text-left transition disabled:opacity-60;
-    border-color: rgb(var(--border));
-    background: rgb(var(--bg-elevated));
-    color: rgb(var(--fg));
-  }
-
-  .ask-options button:hover {
-    background: rgb(var(--bg-inset));
-  }
-
-  .ask-options button[data-active='true'] {
-    border-color: rgb(var(--ok) / 0.5);
-    color: rgb(var(--ok));
-  }
-
-  .ask-options strong {
-    @apply block text-xs font-semibold;
-  }
-
-  .ask-options small {
-    @apply mt-1 block text-[11px] leading-5;
-    color: rgb(var(--fg-subtle));
-  }
-
-  .ask-question textarea,
   .plan-action-zone textarea {
     @apply mt-2 text-sm;
   }

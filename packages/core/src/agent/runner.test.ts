@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentRunner, type MemoryStoreLike } from './runner'
 import { TurnPhase, TurnState } from './turn-state'
-import { LLMProvider, type ChatArgs, type LLMResponse, type ToolCallRequest } from '../providers/base'
+import { LLMProvider, type ChatArgs, type ChatStreamArgs, type LLMResponse, type ToolCallRequest } from '../providers/base'
 import { Tool } from '../tools/base'
 import { okResult, type ToolResult } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
@@ -48,6 +48,49 @@ class FakeProvider extends LLMProvider {
     this.seenMessages.push(args.messages)
     this.seenTools.push(((args.tools as Array<Record<string, unknown>>) ?? []).map((t) => String(t.name)))
     return this.responses.length ? this.responses.shift()! : makeResponse({ content: 'done' })
+  }
+}
+
+class StreamingToolDeltaProvider extends LLMProvider {
+  constructor() {
+    super({ defaultModel: 'fake' })
+  }
+
+  async chat(): Promise<LLMResponse> {
+    return makeResponse({ content: 'unused' })
+  }
+
+  override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
+    const partial = '{"title":"迁移计划","summary":"迁移 TS"}'
+    const full = JSON.stringify(streamingPlanArgs())
+    await args.onToolCallDelta?.({ index: 0, id: 'call_plan', name: 'propose_plan', argumentsText: partial })
+    await args.onToolCallDelta?.({ index: 0, id: 'call_plan', name: 'propose_plan', argumentsText: full })
+    return makeResponse({
+      content: '',
+      toolCalls: [toolCall('call_plan', 'propose_plan', streamingPlanArgs())],
+      finishReason: 'tool_calls',
+    })
+  }
+}
+
+function streamingPlanArgs(): Record<string, unknown> {
+  return {
+    title: '迁移计划',
+    summary: '迁移 TS',
+    plan_markdown: '# 计划\n\n## Steps\n- 改 UI\n- 跑测试',
+    risk_level: 'medium',
+    assumptions: ['保持现有 Electron-only 架构'],
+    steps: [
+      {
+        id: 'step_1',
+        title: '更新 Ask Plan UI',
+        description: '调整 renderer 时间线与底部控制面板，保持 plan 卡片单一来源。',
+        files: ['desktop/src/renderer/src/views/ChatView.vue'],
+        commands: ['npm --prefix desktop run test'],
+        acceptance: ['底部只显示决策面板，时间线保留单张计划卡'],
+        risk: 'medium',
+      },
+    ],
   }
 }
 
@@ -462,6 +505,35 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     expect((manager.payload().pending as Record<string, unknown>).kind).toBe('plan')
     expect(emitted.some((e) => e.event === 'plan_draft')).toBe(true)
     expect(emitted.some((e) => e.event === 'assistant_done')).toBe(false)
+  })
+
+  it('streams partial propose_plan arguments as plan_draft_delta events', async () => {
+    const manager = new ControlManager(tmp('emperor-runner-plan-stream-'))
+    manager.setMode('plan')
+    const registry = controlRegistry(manager)
+    const provider = new StreamingToolDeltaProvider()
+    const runner = new AgentRunner({ provider, model: 'fake', registry, systemPrompt: 'system', controlManager: manager })
+    const emitted: Msg[] = []
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: '做一个计划' }], { emit: (e) => { emitted.push(e) }, turnId: 'turn-plan-stream' }),
+    ).rejects.toThrow()
+
+    const deltas = emitted.filter((event) => event.event === 'plan_draft_delta')
+    expect(deltas.length).toBeGreaterThan(0)
+    expect(deltas.at(-1)).toMatchObject({
+      event: 'plan_draft_delta',
+      tool_call_id: 'call_plan',
+      interaction: expect.objectContaining({
+        id: 'provisional-plan-call_plan',
+        kind: 'plan',
+        status: 'waiting',
+        title: '迁移计划',
+        summary: '迁移 TS',
+        plan_markdown: '# 计划\n\n## Steps\n- 改 UI\n- 跑测试',
+      }),
+    })
+    expect(emitted.some((event) => event.event === 'plan_draft')).toBe(true)
   })
 
   it('ask guard pauses plain final for ambiguous task', async () => {

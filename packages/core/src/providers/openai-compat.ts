@@ -95,6 +95,12 @@ export class OpenAICompatProvider extends LLMProvider {
         if (tc.id) buf.id += tc.id
         if (tc.function?.name) buf.name += tc.function.name
         if (tc.function?.arguments) buf.arguments += tc.function.arguments
+        await args.onToolCallDelta?.({
+          index: idx,
+          id: buf.id || `call_${idx}`,
+          name: buf.name,
+          argumentsText: buf.arguments,
+        })
       }
     }
     const toolCalls: ToolCallRequest[] = [...toolChunks.entries()]

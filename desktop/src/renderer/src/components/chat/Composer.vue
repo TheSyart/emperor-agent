@@ -15,6 +15,7 @@ import type { IconComponent } from '../../icons'
 import { uploadAttachment } from '../../api/attachments'
 import AttachmentChip from './AttachmentChip.vue'
 import CapabilityPicker from './CapabilityPicker.vue'
+import { composerSendDisabled } from './composerControls'
 import { useFloatingMenu } from './floatingMenu'
 
 const props = defineProps<{
@@ -521,7 +522,11 @@ function reasoningLabel(value?: string | null) {
   return normalized
 }
 
-const sendDisabled = computed(() => !props.busy && !value.value.trim() && drafts.value.length === 0)
+const sendDisabled = computed(() => composerSendDisabled({
+  busy: props.busy,
+  content: value.value,
+  attachmentCount: drafts.value.length,
+}))
 
 onBeforeUnmount(() => {
   closeAddMenu()

@@ -35,6 +35,15 @@ export interface LLMResponse {
 
 export type ContentDelta = (text: string) => void | Promise<void>
 
+export interface ToolCallDelta {
+  index: number
+  id: string
+  name: string
+  argumentsText: string
+}
+
+export type ToolCallDeltaHandler = (delta: ToolCallDelta) => void | Promise<void>
+
 export interface GenerationSettings {
   maxTokens: number
   temperature: number
@@ -74,6 +83,7 @@ export interface ChatArgs {
 
 export interface ChatStreamArgs extends ChatArgs {
   onContentDelta?: ContentDelta
+  onToolCallDelta?: ToolCallDeltaHandler
 }
 
 export interface LLMProviderConfig {

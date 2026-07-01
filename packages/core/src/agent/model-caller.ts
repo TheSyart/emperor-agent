@@ -2,7 +2,7 @@
  * ModelCaller (MIG-CORE-001)。对齐 Python `agent/runner_model.py`。
  * 统一模型调用 + 次模型失败一次性升主；记 _lastModelCall（route_reason/估算输入/fallback）。
  */
-import type { ChatArgs, ChatStreamArgs, GenerationSettings, LLMProvider, LLMResponse } from '../providers/base'
+import { parseJsonArgs, type ChatArgs, type ChatStreamArgs, type GenerationSettings, type LLMProvider, type LLMResponse, type ToolCallDelta } from '../providers/base'
 import * as runtimeEvents from './runtime-events'
 
 export type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
@@ -52,6 +52,11 @@ export class ModelCaller {
     const onDelta = async (delta: string): Promise<void> => {
       if (opts.emit) await opts.emit({ event: 'message_delta', delta })
     }
+    const onToolCallDelta = async (delta: ToolCallDelta): Promise<void> => {
+      if (!opts.emit) return
+      const event = planDraftDeltaFromToolDelta(delta)
+      if (event) await opts.emit(event)
+    }
     try {
       runner.lastModelCall = {
         model: runner.model,
@@ -73,6 +78,7 @@ export class ModelCaller {
         tools: opts.tools,
         emit: opts.emit,
         onDelta,
+        onToolCallDelta,
       })
     } catch (exc) {
       if (!(runner.fallbackProvider && runner.fallbackModel)) throw exc
@@ -107,6 +113,7 @@ export class ModelCaller {
         tools: opts.tools,
         emit: opts.emit,
         onDelta,
+        onToolCallDelta,
       })
     }
   }
@@ -121,6 +128,7 @@ export class ModelCaller {
     tools: Array<Record<string, unknown>> | null
     emit: StreamEmitter | null
     onDelta: (delta: string) => Promise<void>
+    onToolCallDelta: (delta: ToolCallDelta) => Promise<void>
   }): Promise<LLMResponse> {
     if (opts.emit) {
       const args: ChatStreamArgs = {
@@ -131,6 +139,7 @@ export class ModelCaller {
         temperature: opts.temperature,
         reasoningEffort: opts.reasoningEffort,
         onContentDelta: opts.onDelta,
+        onToolCallDelta: opts.onToolCallDelta,
       }
       return opts.provider.chatStream(args)
     }
@@ -144,4 +153,38 @@ export class ModelCaller {
     }
     return opts.provider.chat(args)
   }
+}
+
+function planDraftDeltaFromToolDelta(delta: ToolCallDelta): Record<string, unknown> | null {
+  if (delta.name !== 'propose_plan') return null
+  const args = parseJsonArgs(delta.argumentsText)
+  const title = textField(args, 'title')
+  const summary = textField(args, 'summary')
+  const planMarkdown = textField(args, 'plan_markdown') || textField(args, 'planMarkdown')
+  if (!title && !summary && !planMarkdown) return null
+  const streamId = delta.id || `call_${delta.index}`
+  const interaction: Record<string, unknown> = {
+    id: `provisional-plan-${streamId}`,
+    kind: 'plan',
+    status: 'waiting',
+    parent_call_id: streamId,
+    title,
+    summary,
+    plan_markdown: planMarkdown,
+    assumptions: stringArrayField(args, 'assumptions'),
+    risk_level: textField(args, 'risk_level') || textField(args, 'riskLevel') || 'medium',
+    meta: { plan_stream_id: streamId, provisional: true },
+  }
+  return runtimeEvents.planDraftDelta({ toolCallId: streamId, interaction })
+}
+
+function textField(value: Record<string, unknown>, key: string): string {
+  const raw = value[key]
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
+function stringArrayField(value: Record<string, unknown>, key: string): string[] {
+  const raw = value[key]
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => String(item || '').trim()).filter(Boolean)
 }

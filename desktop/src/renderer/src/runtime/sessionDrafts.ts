@@ -1,4 +1,4 @@
-import type { SessionInfo, WsEvent } from '../types'
+import type { SessionControlPending, SessionInfo, WsEvent } from '../types'
 
 export const DRAFT_SESSION_PREFIX = 'draft:'
 
@@ -40,6 +40,7 @@ export function createDraftSession(options: DraftSessionOptions = {}): SessionIn
     project_name: options.projectName || null,
     message_count: 0,
     title_status: 'draft',
+    control_pending: null,
     version: 1,
     draft: true,
   }
@@ -88,7 +89,23 @@ function normalizeBackendSession(value: unknown): SessionInfo | null {
     project_name: raw.project_name ? String(raw.project_name) : null,
     message_count: Number(raw.message_count || 0),
     title_status: String(raw.title_status || 'manual'),
+    control_pending: normalizeControlPending(raw.control_pending),
     version: Number(raw.version || 1),
+  }
+}
+
+function normalizeControlPending(value: unknown): SessionControlPending | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Partial<SessionControlPending> & { interactionId?: unknown; updatedAt?: unknown }
+  const kind = raw.kind === 'plan' ? 'plan' : raw.kind === 'ask' ? 'ask' : ''
+  const interactionId = String(raw.interaction_id ?? raw.interactionId ?? '').trim()
+  if (!kind || !interactionId) return null
+  return {
+    kind,
+    label: String(raw.label || (kind === 'plan' ? '计划需要用户确认' : '需要用户输入')).slice(0, 40),
+    tone: kind === 'plan' ? 'green' : 'blue',
+    interaction_id: interactionId,
+    updated_at: Number(raw.updated_at ?? raw.updatedAt ?? Date.now()) || Date.now(),
   }
 }
 

@@ -10,7 +10,7 @@ import type { ControlResume } from '../control/manager'
 import { ExternalBridgeService } from '../external/service'
 import { AgentLoop, type AgentLoopCreateOptions, type LoopModelRouter } from '../agent/loop'
 import { assertCoreMutationAllowed } from './mutation-guard'
-import { ChatService, MainlineTurnService } from './chat-service'
+import { ChatService, InvalidSessionError, MainlineTurnService } from './chat-service'
 import { CoreConfigService, type UserConfigPayload } from './services/config-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
@@ -193,11 +193,15 @@ export class CoreApi {
 
   async bootstrap(opts: { sessionId?: string | null } = {}): Promise<Dict> {
     const sessionId = String(opts.sessionId ?? '').trim()
-    if (sessionId && !sessionId.startsWith('draft:')) this.loop.activateSession(sessionId)
+    if (sessionId) this.activateBootstrapSession(sessionId)
+    this.loop.reconcileSessionControlPending()
+    const sessionDiagnostics = this.loop.sessionStore.diagnostics()
     const route = this.loop.modelRouter.route('main_agent')
     const activeTurnIds = this.loop.activeMemoryStore.loadUnarchivedTurnIds()
     return {
       app: 'Emperor Agent',
+      sessionIndexSource: sessionDiagnostics.sessionIndexSource,
+      repairedSessions: sessionDiagnostics.repairedSessions,
       model: route.snapshot.model,
       provider: route.snapshot.providerName,
       providerLabel: route.snapshot.providerLabel,
@@ -229,6 +233,7 @@ export class CoreApi {
       displayContent?: string | null
       clientMessageId?: string | null
       sessionId?: string | null
+      uiHidden?: boolean | null
     }): Promise<Dict> => {
       const result = await this.chatService.submit({
         content: String(opts.content ?? ''),
@@ -237,6 +242,7 @@ export class CoreApi {
         displayContent: opts.displayContent ?? null,
         clientMessageId: opts.clientMessageId ?? null,
         sessionId: opts.sessionId ?? null,
+        uiHidden: opts.uiHidden ?? false,
       })
       return result as unknown as Dict
     },
@@ -288,9 +294,18 @@ export class CoreApi {
   readonly control = {
     get: (): Dict => this.loop.controlManager.payload(),
     setMode: (mode: string): Dict => this.loop.controlManager.setMode(mode),
-    answerInteraction: (id: string, answers: Dict, opts: ControlResumeOptions = {}): Promise<Dict> => this.resumeControl(this.loop.controlManager.answer(id, answers), opts),
-    commentPlan: (id: string, comment: string, opts: ControlResumeOptions = {}): Promise<Dict> => this.resumeControl(this.loop.controlManager.comment(id, comment), opts),
-    approvePlan: (id: string, opts: ControlResumeOptions = {}): Promise<Dict> => this.resumeControl(this.loop.controlManager.approve(id), opts),
+    answerInteraction: (id: string, answers: Dict, opts: ControlResumeOptions = {}): Promise<Dict> => {
+      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
+      return this.resumeControl(this.loop.controlManager.answer(id, answers), opts, ownerSessionId)
+    },
+    commentPlan: (id: string, comment: string, opts: ControlResumeOptions = {}): Promise<Dict> => {
+      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
+      return this.resumeControl(this.loop.controlManager.comment(id, comment), opts, ownerSessionId)
+    },
+    approvePlan: (id: string, opts: ControlResumeOptions = {}): Promise<Dict> => {
+      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
+      return this.resumeControl(this.loop.controlManager.approve(id), opts, ownerSessionId)
+    },
     cancelInteraction: (id: string): Dict => this.loop.controlManager.cancel(id),
   }
 
@@ -317,7 +332,10 @@ export class CoreApi {
   }
 
   readonly sessions = {
-    list: (opts: { includeArchived?: boolean } = {}): Dict[] => this.loop.sessionStore.list({ includeArchived: opts.includeArchived ?? false }) as unknown as Dict[],
+    list: (opts: { includeArchived?: boolean } = {}): Dict[] => {
+      this.loop.reconcileSessionControlPending()
+      return this.loop.sessionStore.list({ includeArchived: opts.includeArchived ?? false }) as unknown as Dict[]
+    },
     create: (opts: { title?: string; mode?: string; project?: Dict | null; project_path?: string | null } = {}): Dict => {
       let project = opts.project ?? null
       const mode = opts.mode === 'build' ? 'build' : 'chat'
@@ -426,17 +444,20 @@ export class CoreApi {
     return { ok: !result.isError, result: result.modelContent, summary: result.summary }
   }
 
-  private async resumeControl(resume: ControlResume, opts: ControlResumeOptions): Promise<Dict> {
+  private async resumeControl(resume: ControlResume, opts: ControlResumeOptions, ownerSessionId: string | null): Promise<Dict> {
     const event = isRecord(resume.event) ? { ...resume.event, control: this.loop.controlManager.payload() } : null
     if (event) await this.emitRuntime(event, { emit: opts.emit ?? null })
     let result: Dict | null = null
     if (resume.resume === true) {
+      const uiHidden = opts.uiHidden ?? false
       result = await this.mainline.submit({
         content: String(resume.message ?? ''),
-        displayContent: opts.displayContent ?? String(resume.message ?? ''),
+        displayContent: uiHidden ? '' : opts.displayContent ?? String(resume.message ?? ''),
         clientMessageId: opts.clientMessageId ?? null,
         turnId: opts.turnId ?? null,
         source: 'control',
+        sessionId: ownerSessionId,
+        uiHidden,
         emit: opts.emit ?? null,
       }) as unknown as Dict
     }
@@ -450,12 +471,24 @@ export class CoreApi {
     return payload
   }
 
+  private activateBootstrapSession(sessionId: string): void {
+    if (sessionId.startsWith('draft:')) {
+      throw new InvalidSessionError(`bootstrap cannot activate draft session ${sessionId}`, sessionId)
+    }
+    const session = this.loop.sessionStore.get(sessionId)
+    if (!session || session.archived_at) {
+      throw new InvalidSessionError(`bootstrap received unknown session ${sessionId}`, sessionId)
+    }
+    this.loop.activateSession(session.id)
+  }
+
 }
 
 interface ControlResumeOptions {
   clientMessageId?: string | null
   turnId?: string | null
   displayContent?: string | null
+  uiHidden?: boolean | null
   emit?: StreamEmitter | null
 }
 

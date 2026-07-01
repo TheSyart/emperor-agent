@@ -22,6 +22,11 @@ export interface SidebarSearchResult {
   projectName?: string | null
 }
 
+export interface SessionControlPendingTag {
+  label: string
+  tone: 'blue' | 'green'
+}
+
 export const defaultSidebarState: SidebarState = {
   section_order: ['projects', 'chats'],
   project_sort: 'updated_at',
@@ -102,6 +107,18 @@ export function searchSidebarSessions(sessions: SessionInfo[], query: string): S
       mode: session.mode === 'build' ? 'build' : 'chat',
       projectName: session.project_name,
     }))
+}
+
+export function sessionControlPendingTag(session: SessionInfo): SessionControlPendingTag | null {
+  const pending = session.control_pending
+  if (!pending?.interaction_id) return null
+  if (pending.kind === 'plan') {
+    return { label: pending.label || '计划需要用户确认', tone: 'green' }
+  }
+  if (pending.kind === 'ask') {
+    return { label: pending.label || '需要用户输入', tone: 'blue' }
+  }
+  return null
 }
 
 function sortSessions(items: SessionInfo[], mode: SidebarSortMode, manualOrder: string[]): SessionInfo[] {

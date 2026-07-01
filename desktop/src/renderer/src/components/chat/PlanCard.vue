@@ -1,25 +1,24 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { ControlInteraction, RuntimePlanRecord, RuntimePlanStep } from '../../types'
-import { useAppContext } from '../../composables/useAppContext'
 import { planExecutionSummary, type IndependentVerificationStatus } from '../../runtime/handlers/plans'
 import MarkdownBlock from './MarkdownBlock.vue'
+import {
+  planDisplayMarkdown,
+  planProgressSummary,
+  planStatusPresentation,
+  statusLabel,
+} from './planDisplay'
 
 const props = defineProps<{ interaction: ControlInteraction; plan?: RuntimePlanRecord | null }>()
-const ctx = useAppContext()
-const comment = ref('')
 
-const waiting = computed(() => props.interaction.status === 'waiting')
 const comments = computed(() => props.interaction.comments || [])
 const runtimePlan = computed(() => props.plan || null)
 const planSteps = computed(() => runtimePlan.value?.steps || [])
 const executionSummary = computed(() => planExecutionSummary(runtimePlan.value))
-const riskLabel = computed(() => {
-  if (props.interaction.risk_level === 'high') return '高风险'
-  if (props.interaction.risk_level === 'low') return '低风险'
-  return '中风险'
-})
-const runtimeStatusLabel = computed(() => statusLabel(runtimePlan.value?.status || props.interaction.status))
+const presentation = computed(() => planStatusPresentation(props.interaction, runtimePlan.value))
+const markdownContent = computed(() => planDisplayMarkdown(props.interaction, runtimePlan.value))
+const progressSummary = computed(() => planProgressSummary(runtimePlan.value))
 const planDiscoveries = computed(() => {
   const discoveries = runtimePlan.value?.draft?.discoveries || []
   return discoveries.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
@@ -36,39 +35,6 @@ const showExecutionSummary = computed(() => {
     planDiscoveries.value.length,
   )
 })
-
-function approve() {
-  ctx.approvePlan(props.interaction.id)
-}
-
-function sendComment() {
-  const text = comment.value.trim()
-  if (!text) return
-  if (ctx.sendPlanComment(props.interaction.id, text)) comment.value = ''
-}
-
-function cancel() {
-  ctx.cancelInteraction(props.interaction.id)
-}
-
-function statusLabel(status?: string) {
-  const labels: Record<string, string> = {
-    waiting: '待处理',
-    waiting_approval: '待批准',
-    approved: '已批准',
-    executing: '执行中',
-    completed: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
-    pending: '待执行',
-    active: '执行中',
-    done: '已完成',
-    blocked: '受阻',
-    skipped: '已跳过',
-  }
-  const key = String(status || '').trim()
-  return labels[key] || key || '未知'
-}
 
 function latestEvidence(step: RuntimePlanStep): Record<string, unknown> | null {
   const items = step.evidence || []
@@ -162,18 +128,34 @@ function discoveryFiles(item: Record<string, unknown>): string {
 </script>
 
 <template>
-  <section class="control-card plan-card" :class="props.interaction.status">
-    <header class="control-card-head">
-      <span>Plan Preview</span>
-      <strong>{{ props.interaction.title || '待批准计划' }}</strong>
-      <em>{{ riskLabel }}</em>
+  <section class="control-card plan-card plan-large-card" :class="props.interaction.status" :data-tone="presentation.tone">
+    <header class="plan-card-hero">
+      <div class="plan-card-kicker">计划</div>
+      <div class="plan-card-title-row">
+        <strong>{{ props.interaction.title || runtimePlan?.title || '待批准计划' }}</strong>
+        <div class="plan-card-chips">
+          <em>{{ presentation.label }}</em>
+          <em>{{ presentation.risk }}</em>
+        </div>
+      </div>
     </header>
     <p v-if="props.interaction.summary" class="control-context">{{ props.interaction.summary }}</p>
 
+    <div v-if="runtimePlan" class="plan-progress-strip">
+      <span>{{ progressSummary.label }}</span>
+      <div v-if="progressSummary.total" class="plan-progress-track">
+        <i :style="{ width: `${Math.max(4, Math.round((progressSummary.done / progressSummary.total) * 100))}%` }" />
+      </div>
+    </div>
+
+    <div class="plan-markdown plan-markdown-primary">
+      <MarkdownBlock :content="markdownContent" />
+    </div>
+
     <div v-if="runtimePlan" class="plan-runtime">
       <div class="plan-runtime-head">
-        <span>Execution Trace</span>
-        <em :class="['plan-runtime-status', runtimePlan.status]">{{ runtimeStatusLabel }}</em>
+        <span>执行轨迹</span>
+        <em :class="['plan-runtime-status', runtimePlan.status]">{{ statusLabel(runtimePlan.status) }}</em>
       </div>
       <div v-if="showExecutionSummary" class="plan-execution-summary">
         <div v-if="executionSummary.activeStep" class="plan-summary-item active">
@@ -259,10 +241,6 @@ function discoveryFiles(item: Record<string, unknown>): string {
       <p v-else class="plan-runtime-empty">批准后会在这里记录执行步骤与验证结果。</p>
     </div>
 
-    <div class="plan-markdown">
-      <MarkdownBlock :content="props.interaction.plan_markdown || ''" />
-    </div>
-
     <div v-if="props.interaction.assumptions?.length" class="plan-assumptions">
       <span>Assumptions</span>
       <ul>
@@ -275,14 +253,6 @@ function discoveryFiles(item: Record<string, unknown>): string {
       <p v-for="item in comments" :key="`${item.timestamp}-${item.content}`">{{ item.content }}</p>
     </div>
 
-    <footer v-if="waiting" class="plan-action-zone">
-      <textarea v-model="comment" rows="3" placeholder="写下修改意见，Agent 会据此重出计划" />
-      <div class="control-actions">
-        <button class="control-secondary" type="button" @click="cancel">取消</button>
-        <button class="control-secondary" type="button" :disabled="!comment.trim()" @click="sendComment">提交评论</button>
-        <button class="control-primary" type="button" @click="approve">批准执行</button>
-      </div>
-    </footer>
-    <footer v-else class="control-footnote">状态：{{ props.interaction.status }}</footer>
+    <footer class="control-footnote">状态：{{ props.interaction.status }}</footer>
   </section>
 </template>

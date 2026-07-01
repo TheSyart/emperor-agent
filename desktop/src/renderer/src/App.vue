@@ -76,6 +76,8 @@ const runtime = useRuntime({
   resolveDraftSession: sessionStore.getSession,
   onSessionCreated: sessionStore.applySessionCreatedEvent,
   onSessionTitleUpdated: sessionStore.applySessionTitleUpdatedEvent,
+  onSessionControlPendingChanged: sessionStore.applySessionControlPending,
+  refreshSessions: sessionStore.load,
 })
 const {
   messages,

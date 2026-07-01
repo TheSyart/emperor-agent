@@ -1,0 +1,33 @@
+{
+  "plan_id": "PLAN-SES-001",
+  "plan_file": "docs/superpowers/plans/2026-07-01-session-system-claude-rules.md",
+  "total_tasks": 6,
+  "completed": 6,
+  "rounds": 0,
+  "tasks": {
+    "SES-001": {
+      "status": "done",
+      "title": "Build authoritative session metadata log and index rebuild"
+    },
+    "SES-002": {
+      "status": "done",
+      "title": "Harden Core creation, activation, and submit boundaries"
+    },
+    "SES-003": {
+      "status": "done",
+      "title": "Retire renderer local session authority"
+    },
+    "SES-004": {
+      "status": "done",
+      "title": "Bind Ask/Plan ownership to authoritative sessions"
+    },
+    "SES-005": {
+      "status": "done",
+      "title": "Add migration, repair, and diagnostics"
+    },
+    "SES-006": {
+      "status": "done",
+      "title": "Verify, document, and prevent regressions"
+    }
+  }
+}

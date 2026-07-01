@@ -1,16 +1,16 @@
 import { ref, computed } from 'vue'
 import { api } from '../api/http'
-import type { ProjectInfo, SessionInfo, SessionMode, WsEvent } from '../types'
+import type { ControlInteraction, ProjectInfo, SessionControlPending, SessionInfo, SessionMode, WsEvent } from '../types'
 import {
   applySessionCreated,
   applySessionTitleUpdated,
-  createDraftSession,
   isDraftSessionId,
 } from '../runtime/sessionDrafts'
 
 const sessions = ref<SessionInfo[]>([])
 const activeId = ref<string>('')
 const loading = ref(false)
+const creating = ref(false)
 
 export interface CreateSessionDraftOptions {
   title?: string
@@ -26,9 +26,7 @@ export function useSession() {
     try {
       sessions.value = await api<SessionInfo[]>('/api/sessions')
       if (!sessions.value.length) {
-        const draft = createDraftSession()
-        sessions.value = [draft]
-        activeId.value = draft.id
+        await create({ mode: 'chat', title: '新会话' })
       } else if (!activeId.value || !sessions.value.some((session) => session.id === activeId.value)) {
         activeId.value = sessions.value[0].id
       }
@@ -41,28 +39,34 @@ export function useSession() {
     return api<SessionInfo[]>('/api/sessions?archived=1')
   }
 
-  function create(options: string | CreateSessionDraftOptions = '新会话'): SessionInfo {
+  async function create(options: string | CreateSessionDraftOptions = '新会话'): Promise<SessionInfo> {
     const opts = typeof options === 'string' ? { title: options } : options
     const mode: SessionMode = opts.mode === 'build' ? 'build' : 'chat'
-    const existingDraft = sessions.value.find((session) =>
-      session.draft
-      && session.mode === mode
-      && (mode === 'chat' || session.project_id === opts.project?.project_id),
-    )
-    if (existingDraft) {
-      activeId.value = existingDraft.id
-      return existingDraft
+    const previousActiveId = activeId.value
+    creating.value = true
+    try {
+      const created = normalizeSessionInfo(await api<SessionInfo>('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: (opts.title || '').trim() || '新会话',
+          mode,
+          project: mode === 'build' ? opts.project ?? null : null,
+        }),
+      }))
+      sessions.value = [
+        created,
+        ...sessions.value.filter((session) => session.id !== created.id && !session.draft),
+      ]
+      activeId.value = created.id
+      await activate(created.id)
+      return created
+    } catch (err) {
+      activeId.value = previousActiveId
+      sessions.value = sessions.value.filter((session) => !session.draft)
+      throw err
+    } finally {
+      creating.value = false
     }
-    const draft = createDraftSession({
-      title: (opts.title || '').trim() || '新会话',
-      mode,
-      projectId: opts.project?.project_id,
-      projectPath: opts.project?.project_path,
-      projectName: opts.project?.project_name,
-    })
-    sessions.value.unshift(draft)
-    activeId.value = draft.id
-    return draft
   }
 
   async function resolveProject(path: string): Promise<ProjectInfo> {
@@ -76,14 +80,14 @@ export function useSession() {
     if (isDraftSessionId(id)) {
       sessions.value = sessions.value.filter((s) => s.id !== id)
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
-      if (!sessions.value.length) create()
+      if (!sessions.value.length) await create()
       return true
     }
     try {
       await api<{ deleted: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
       sessions.value = sessions.value.filter((s) => s.id !== id)
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
-      if (!sessions.value.length) create()
+      if (!sessions.value.length) await create()
       return true
     } catch {
       return false
@@ -125,7 +129,7 @@ export function useSession() {
       if (archived) {
         sessions.value = sessions.value.filter((s) => s.id !== id)
         if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
-        if (!sessions.value.length) create()
+        if (!sessions.value.length) await create()
       } else {
         const index = sessions.value.findIndex((s) => s.id === id)
         if (index >= 0) sessions.value[index] = updated
@@ -158,6 +162,17 @@ export function useSession() {
     sessions.value = applySessionTitleUpdated(sessions.value, event)
   }
 
+  function applySessionControlPending(sessionId: string, interaction?: ControlInteraction | null) {
+    const index = sessions.value.findIndex((session) => session.id === sessionId)
+    if (index < 0) return
+    const next = sessions.value.slice()
+    next[index] = {
+      ...next[index],
+      control_pending: sessionControlPendingFromInteraction(interaction),
+    }
+    sessions.value = next
+  }
+
   function backendSessionId() {
     return isDraftSessionId(activeId.value) ? '' : activeId.value
   }
@@ -171,6 +186,7 @@ export function useSession() {
     activeId,
     active,
     loading,
+    creating,
     load,
     loadArchived,
     create,
@@ -181,8 +197,46 @@ export function useSession() {
     activate,
     applySessionCreatedEvent,
     applySessionTitleUpdatedEvent,
+    applySessionControlPending,
     backendSessionId,
     getSession,
     isDraftSessionId,
+  }
+}
+
+function sessionControlPendingFromInteraction(interaction?: ControlInteraction | null): SessionControlPending | null {
+  if (!interaction || interaction.status !== 'waiting') return null
+  if (interaction.kind === 'plan') {
+    return {
+      kind: 'plan',
+      label: '计划需要用户确认',
+      tone: 'green',
+      interaction_id: interaction.id,
+      updated_at: Date.now(),
+    }
+  }
+  if (interaction.kind === 'ask') {
+    return {
+      kind: 'ask',
+      label: '需要用户输入',
+      tone: 'blue',
+      interaction_id: interaction.id,
+      updated_at: Date.now(),
+    }
+  }
+  return null
+}
+
+function normalizeSessionInfo(value: SessionInfo): SessionInfo {
+  return {
+    ...value,
+    id: String(value.id),
+    title: String(value.title || '新会话'),
+    mode: value.mode === 'build' ? 'build' : 'chat',
+    project_id: value.project_id ?? null,
+    project_path: value.project_path ?? null,
+    project_name: value.project_name ?? null,
+    control_pending: value.control_pending ?? null,
+    draft: undefined,
   }
 }

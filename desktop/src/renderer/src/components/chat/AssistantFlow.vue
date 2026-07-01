@@ -6,7 +6,7 @@ import { latestPlanForInteraction } from '../../runtime/handlers/plans'
 import MarkdownBlock from './MarkdownBlock.vue'
 import TodoPanel from './TodoPanel.vue'
 import ToolGroup from './ToolGroup.vue'
-import AskCard from './AskCard.vue'
+import AskHistoryCard from './AskHistoryCard.vue'
 import PlanCard from './PlanCard.vue'
 import ThoughtEvent from './ThoughtEvent.vue'
 import MediaBlock from './MediaBlock.vue'
@@ -114,7 +114,7 @@ onBeforeUnmount(stopFlowClock)
           <ToolGroup v-else-if="block.kind === 'tool_group'" :block="block" />
           <MediaBlock v-else-if="block.kind === 'media'" :items="block.items" />
           <div v-else-if="block.kind === 'control' && block.segment.type === 'ask'" class="timeline-node control-node">
-            <AskCard :interaction="block.segment.interaction" />
+            <AskHistoryCard :interaction="block.segment.interaction" />
           </div>
           <div v-else-if="block.kind === 'control' && block.segment.type === 'plan'" class="timeline-node control-node">
             <PlanCard :interaction="block.segment.interaction" :plan="planForInteraction(block.segment.interaction)" />

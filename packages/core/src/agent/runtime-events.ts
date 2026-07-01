@@ -44,6 +44,17 @@ export function agentThought(opts: {
   return event
 }
 
+export function planDraftDelta(opts: {
+  toolCallId: string
+  interaction: Record<string, unknown>
+}): Record<string, unknown> {
+  return {
+    event: 'plan_draft_delta',
+    tool_call_id: opts.toolCallId,
+    interaction: opts.interaction,
+  }
+}
+
 export function planVerificationStart(opts: { planId: string; stepId: string; command: string }): Record<string, unknown> {
   return { event: 'plan_verification_start', plan_id: opts.planId, step_id: opts.stepId, command: opts.command }
 }

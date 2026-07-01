@@ -16,6 +16,7 @@ export interface MainlineSubmitInput {
   sessionId?: string | null
   source?: string | null
   scheduler?: Record<string, unknown> | null
+  uiHidden?: boolean | null
   taskId?: string | null
   useActiveTask?: boolean
   emit?: MainlineEventSink | null
@@ -25,6 +26,17 @@ export interface MainlineSubmitResult {
   turnId: string
   content: string
   activeSessionId: string | null
+}
+
+export class InvalidSessionError extends Error {
+  readonly code = 'invalid_session'
+  readonly sessionId: string | null
+
+  constructor(message: string, sessionId: string | null) {
+    super(message)
+    this.name = 'InvalidSessionError'
+    this.sessionId = sessionId
+  }
 }
 
 export class MainlineTurnService {
@@ -37,7 +49,12 @@ export class MainlineTurnService {
   async submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
     const turnId = input.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
     const sessionId = String(input.sessionId ?? '').trim()
-    if (sessionId && !sessionId.startsWith('draft:')) this.loop.activateSession(sessionId)
+    const source = String(input.source ?? 'chat').trim() || 'chat'
+    if (source === 'chat') {
+      this.activateRequiredSession(sessionId, 'chat.submit')
+    } else if (sessionId) {
+      this.activateOptionalSession(sessionId, `${source}.submit`)
+    }
 
     const content = String(input.content ?? '')
     const displayContent = input.displayContent ?? content
@@ -46,8 +63,9 @@ export class MainlineTurnService {
       emit: input.emit ?? null,
       displayContent,
       clientMessageId: input.clientMessageId ?? turnId,
-      source: input.source ?? null,
+      source,
       scheduler: input.scheduler ?? null,
+      uiHidden: input.uiHidden ?? false,
       memoryExtra: input.memoryExtra ?? null,
       taskId: input.taskId ?? null,
       useActiveTask: input.useActiveTask,
@@ -68,6 +86,24 @@ export class MainlineTurnService {
       emit: payload.deliver ? this.loop.eventSink : async () => undefined,
     })
     return result.content
+  }
+
+  private activateRequiredSession(sessionId: string, operation: string): void {
+    if (!sessionId) {
+      throw new InvalidSessionError(`${operation} requires a real sessionId`, null)
+    }
+    this.activateOptionalSession(sessionId, operation)
+  }
+
+  private activateOptionalSession(sessionId: string, operation: string): void {
+    if (sessionId.startsWith('draft:')) {
+      throw new InvalidSessionError(`${operation} cannot submit draft session ${sessionId}`, sessionId)
+    }
+    const session = this.loop.sessionStore.get(sessionId)
+    if (!session || session.archived_at) {
+      throw new InvalidSessionError(`${operation} received unknown session ${sessionId}`, sessionId)
+    }
+    this.loop.activateSession(session.id)
   }
 }
 

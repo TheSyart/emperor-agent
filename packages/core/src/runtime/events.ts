@@ -34,6 +34,7 @@ export function userMessage(opts: {
   clientMessageId?: string
   source?: string | null
   scheduler?: EventPayload | null
+  uiHidden?: boolean | null
 }): EventPayload {
   return runtimeEvent('user_message', {
     content: opts.content,
@@ -41,6 +42,7 @@ export function userMessage(opts: {
     client_message_id: opts.clientMessageId ?? '',
     source: opts.source ?? null,
     scheduler: opts.scheduler ?? null,
+    ui_hidden: opts.uiHidden ? true : null,
   })
 }
 
@@ -134,6 +136,16 @@ export function agentThought(opts: {
     status: opts.status,
     tool_call_ids: opts.toolCallIds?.length ? opts.toolCallIds : null,
     tool_names: opts.toolNames?.length ? opts.toolNames : null,
+  })
+}
+
+export function planDraftDelta(opts: {
+  toolCallId: string
+  interaction: EventPayload
+}): EventPayload {
+  return runtimeEvent('plan_draft_delta', {
+    tool_call_id: opts.toolCallId,
+    interaction: opts.interaction,
   })
 }
 

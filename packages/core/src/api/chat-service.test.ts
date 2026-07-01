@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -15,6 +15,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     const root = tmp('emperor-mainline-')
     const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const events: Array<Record<string, unknown>> = []
+    const session = api.sessions.create({ title: 'Mainline' })
 
     const result = await api.mainline.submit({
       content: 'ping',
@@ -22,6 +23,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
       clientMessageId: 'client-1',
       turnId: 'turn_main_1',
       source: 'chat',
+      sessionId: String(session.id),
       emit: async (event) => { events.push(event) },
     })
 
@@ -37,9 +39,49 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
 
   it('backs CoreApi chat.submit with the same mainline service', async () => {
     const api = await CoreApi.create({ root: tmp('emperor-mainline-'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const session = api.sessions.create({ title: 'Chat' })
 
     expect(api.mainline).toBeInstanceOf(MainlineTurnService)
-    await expect(api.chat.submit({ content: 'hello', turnId: 'turn_chat_1' })).resolves.toMatchObject({ turnId: 'turn_chat_1', content: 'pong' })
+    await expect(api.chat.submit({ content: 'hello', turnId: 'turn_chat_1', sessionId: String(session.id) })).resolves.toMatchObject({ turnId: 'turn_chat_1', content: 'pong' })
+
+    await api.close()
+  })
+
+  it('rejects chat submits without a real known session id before writing history', async () => {
+    const root = tmp('emperor-mainline-session-boundary-')
+    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const activeSessionId = String(api.loop.activeSessionId)
+
+    await expect(api.chat.submit({ content: 'missing session' })).rejects.toThrow(/session/i)
+    await expect(api.chat.submit({ content: 'draft session', sessionId: 'draft:new-chat' })).rejects.toThrow(/draft/i)
+    await expect(api.chat.submit({ content: 'unknown session', sessionId: 'not-real' })).rejects.toThrow(/unknown|session/i)
+
+    const historyPath = join(root, 'sessions', activeSessionId, 'history.jsonl')
+    expect(existsSync(historyPath) ? readFileSync(historyPath, 'utf8').trim() : '').toBe('')
+
+    await api.close()
+  })
+
+  it('writes the first build-session chat turn to the build session history only', async () => {
+    const root = tmp('emperor-mainline-build-session-')
+    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const defaultSessionId = String(api.loop.activeSessionId)
+    const projectPath = join(root, 'project')
+    mkdirSync(projectPath, { recursive: true })
+    const build = api.sessions.create({ title: 'Build Project', mode: 'build', project_path: projectPath })
+    api.control.setMode('auto')
+
+    await api.chat.submit({ content: 'ping', turnId: 'turn_build_1', sessionId: String(build.id) })
+
+    const buildHistory = readFileSync(join(root, 'sessions', String(build.id), 'history.jsonl'), 'utf8')
+    expect(buildHistory).toContain('ping')
+    const defaultHistory = join(root, 'sessions', defaultSessionId, 'history.jsonl')
+    expect(existsSync(defaultHistory) ? readFileSync(defaultHistory, 'utf8').trim() : '').toBe('')
+    expect(api.loop.sessionStore.get(String(build.id))).toMatchObject({
+      mode: 'build',
+      project_path: projectPath,
+      project_name: 'project',
+    })
 
     await api.close()
   })

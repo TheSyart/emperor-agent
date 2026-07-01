@@ -73,4 +73,28 @@ describe('sidebar model', () => {
       session({ id: 'chat-1', title: '普通对话', preview: 'emperor only in preview' }),
     ], 'emperor')).toEqual([])
   })
+
+  it('projects ask and plan pending tags for session rows', async () => {
+    const { sessionControlPendingTag } = await import('./sidebarModel')
+
+    expect(sessionControlPendingTag(session({
+      control_pending: {
+        kind: 'ask',
+        label: '需要用户输入',
+        tone: 'blue',
+        interaction_id: 'ask_1',
+        updated_at: 1,
+      },
+    }))).toEqual({ label: '需要用户输入', tone: 'blue' })
+    expect(sessionControlPendingTag(session({
+      control_pending: {
+        kind: 'plan',
+        label: '计划需要用户确认',
+        tone: 'green',
+        interaction_id: 'plan_1',
+        updated_at: 1,
+      },
+    }))).toEqual({ label: '计划需要用户确认', tone: 'green' })
+    expect(sessionControlPendingTag(session({ control_pending: null }))).toBeNull()
+  })
 })

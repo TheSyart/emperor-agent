@@ -61,6 +61,56 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     expect(existsSync(join(root, 'sessions', loop.activeSessionId!, 'history.jsonl'))).toBe(true)
   })
 
+  it('mirrors waiting ask and plan controls into the active session index', async () => {
+    const root = tmp('emperor-agent-loop-control-session-tag-')
+    const loop = await AgentLoop.create({
+      root,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      startupCompaction: false,
+    })
+    const sessionId = loop.activeSessionId!
+
+    const ask = loop.controlManager.createAsk({
+      questions: [{
+        id: 'scope',
+        header: '范围',
+        question: '范围怎么定？',
+        options: [
+          { label: '最小', description: '只做核心' },
+          { label: '完整', description: '包含测试' },
+        ],
+      }],
+    })
+    expect(loop.sessionStore.get(sessionId)?.control_pending).toMatchObject({
+      kind: 'ask',
+      label: '需要用户输入',
+      tone: 'blue',
+      interaction_id: ask.id,
+    })
+
+    loop.controlManager.answer(ask.id, { scope: { choice: '完整' } })
+    expect(loop.sessionStore.get(sessionId)?.control_pending).toBeNull()
+
+    loop.controlManager.setMode('plan')
+    const plan = loop.controlManager.createPlan({
+      title: '实现计划',
+      summary: '等待确认',
+      planMarkdown: '# Plan\n\n- Do it',
+      assumptions: [],
+      riskLevel: 'low',
+    })
+    expect(loop.sessionStore.get(sessionId)?.control_pending).toMatchObject({
+      kind: 'plan',
+      label: '计划需要用户确认',
+      tone: 'green',
+      interaction_id: plan.id,
+    })
+
+    loop.controlManager.cancel(plan.id)
+    expect(loop.sessionStore.get(sessionId)?.control_pending).toBeNull()
+  })
+
   it('gates dispatch_subagent tool calls through the real permission pipeline (audit P0-1)', async () => {
     const root = tmp('emperor-agent-loop-dispatch-guard-')
     const marker = join(root, 'marker.txt')

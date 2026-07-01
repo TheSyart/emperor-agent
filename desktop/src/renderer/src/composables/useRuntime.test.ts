@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import type { BootstrapPayload } from '../types'
 import { useRuntime } from './useRuntime'
 
@@ -55,10 +55,11 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     runtime.connectSocket()
     expect(runtime.status.value).toBe('ready')
+    runtime.switchSession('s1')
     expect(runtime.sendMessage('hello')).toBe(true)
     await Promise.resolve()
 
-    expect(calls[0]).toEqual(['chat.submit', expect.objectContaining({ content: 'hello', displayContent: 'hello' })])
+    expect(calls[0]).toEqual(['chat.submit', expect.objectContaining({ content: 'hello', displayContent: 'hello', sessionId: 's1' })])
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(runtime.messages.value.at(-1)).toMatchObject({ role: 'assistant', content: 'pong', streaming: false })
     expect(runtime.busy.value).toBe(false)
@@ -96,6 +97,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
+    runtime.switchSession('s1')
     expect(runtime.sendMessage('show image')).toBe(true)
     await Promise.resolve()
 
@@ -192,9 +194,170 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     await Promise.resolve()
 
     expect(calls).toEqual([
-      ['control.answerInteraction', 'ask_1', { scope: { choice: '完整' } }, expect.objectContaining({ clientMessageId: expect.any(String) })],
+      ['control.answerInteraction', 'ask_1', { scope: { choice: '完整' } }, expect.objectContaining({ clientMessageId: expect.any(String), displayContent: '', uiHidden: true })],
     ])
-    expect(runtime.messages.value[0]).toMatchObject({ role: 'user', content: '已回答澄清问题' })
+    expect(runtime.messages.value.some((message) => message.role === 'user' && message.content === '已回答澄清问题')).toBe(false)
+    expect(runtime.messages.value[0]).toMatchObject({ role: 'assistant', streaming: true })
+  })
+
+  it('rolls back optimistic control resume UI and refreshes state when Core IPC rejects', async () => {
+    const calls: unknown[][] = []
+    const refreshSessions = vi.fn(async () => {})
+    const showToast = vi.fn()
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'control.answerInteraction') {
+          return { ok: false, error: { message: 'Internal error', errorId: 'ipc_deadbeef' } }
+        }
+        if (args[0] === 'control.get') {
+          return { mode: 'auto', pending: null }
+        }
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const boot = ref({
+      app: 'Emperor Agent',
+      runtime: { events: [], latestSeq: 0 },
+      control: {
+        mode: 'plan',
+        pending: { id: 'ask_1', kind: 'ask', status: 'waiting' },
+      },
+    } as unknown as BootstrapPayload)
+    const runtime = useRuntime({ ...testOptions(), boot, showToast, refreshSessions })
+
+    expect(runtime.sendInteractionAnswer('ask_1', { scope: { choice: '完整' } })).toBe(true)
+    for (let i = 0; i < 5; i += 1) await Promise.resolve()
+
+    expect(calls.map((call) => call[0])).toEqual(['control.answerInteraction', 'control.get'])
+    expect(refreshSessions).toHaveBeenCalledTimes(1)
+    expect(boot.value.control?.pending).toBeNull()
+    expect(runtime.busy.value).toBe(false)
+    expect(runtime.messages.value).toEqual([])
+    expect(showToast).toHaveBeenCalledWith('Internal error · ipc_deadbeef')
+  })
+
+  it('sanitizes reactive interaction answers before crossing the Core IPC boundary', async () => {
+    const calls: unknown[][] = []
+    let cloneError: unknown = null
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        try {
+          structuredClone(args)
+        } catch (err) {
+          cloneError = err
+          throw err
+        }
+        calls.push(args)
+        return { resume: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    const answers = reactive({ scope: { choice: '完整', freeform: '' } })
+
+    expect(runtime.sendInteractionAnswer('ask_1', answers)).toBe(true)
+    await Promise.resolve()
+
+    expect(cloneError).toBeNull()
+    expect(calls).toEqual([
+      ['control.answerInteraction', 'ask_1', { scope: { choice: '完整', freeform: '' } }, expect.objectContaining({ clientMessageId: expect.any(String), displayContent: '', uiHidden: true })],
+    ])
+    expect(runtime.messages.value.some((message) => message.role === 'user')).toBe(false)
+  })
+
+  it('ignores hidden control resume user_message events so ask and plan stay continuous', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.connectSocket()
+    listener?.({
+      event: 'user_message',
+      seq: 1,
+      turn_id: 'turn-control',
+      client_message_id: 'control-msg-1',
+      source: 'control',
+      ui_hidden: true,
+      content: '',
+    })
+
+    expect(runtime.messages.value).toEqual([])
+  })
+
+  it('merges streaming plan_draft_delta events into the final plan card', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.connectSocket()
+    listener?.({ event: 'user_message', seq: 1, turn_id: 'turn-plan', content: '制定计划' })
+    listener?.({
+      event: 'plan_draft_delta',
+      seq: 2,
+      turn_id: 'turn-plan',
+      tool_call_id: 'call_plan',
+      interaction: {
+        id: 'provisional-plan-call_plan',
+        kind: 'plan',
+        status: 'waiting',
+        title: '迁移计划',
+        plan_markdown: '# 计划',
+        meta: { plan_stream_id: 'call_plan', provisional: true },
+      },
+    })
+    listener?.({
+      event: 'plan_draft_delta',
+      seq: 3,
+      turn_id: 'turn-plan',
+      tool_call_id: 'call_plan',
+      interaction: {
+        id: 'provisional-plan-call_plan',
+        kind: 'plan',
+        status: 'waiting',
+        title: '迁移计划',
+        plan_markdown: '# 计划\n- 改 UI',
+        meta: { plan_stream_id: 'call_plan', provisional: true },
+      },
+    })
+    listener?.({
+      event: 'plan_draft',
+      seq: 4,
+      turn_id: 'turn-plan',
+      interaction: {
+        id: 'plan-real',
+        kind: 'plan',
+        status: 'waiting',
+        parent_call_id: 'call_plan',
+        title: '迁移计划',
+        plan_markdown: '# 计划\n- 改 UI',
+      },
+    })
+
+    const assistant = runtime.messages.value.find((message) => message.role === 'assistant')
+    const planSegments = assistant?.segments.filter((segment) => segment.type === 'plan') || []
+    expect(planSegments).toHaveLength(1)
+    expect(planSegments[0]).toMatchObject({
+      type: 'plan',
+      interaction: {
+        id: 'plan-real',
+        parent_call_id: 'call_plan',
+        plan_markdown: '# 计划\n- 改 UI',
+      },
+    })
   })
 
   it('debounces runtime snapshot persistence instead of writing to localStorage on every mutation (audit P1-3)', async () => {
@@ -218,6 +381,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       const runtime = useRuntime(testOptions())
 
       runtime.connectSocket()
+      runtime.switchSession('s1')
       runtime.sendMessage('hi')
       await nextTick()
 
@@ -243,6 +407,29 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('blocks chat submit before local enqueue when the active session id is missing or draft', async () => {
+    const calls: unknown[][] = []
+    const showToast = vi.fn()
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast })
+
+    runtime.connectSocket()
+    expect(runtime.sendMessage('hello without session')).toBe(false)
+    runtime.switchSession('draft:local')
+    expect(runtime.sendMessage('hello draft')).toBe(false)
+
+    expect(calls).toEqual([])
+    expect(runtime.messages.value).toEqual([])
+    expect(runtime.busy.value).toBe(false)
+    expect(showToast).toHaveBeenCalledWith('正在创建会话，请稍后再试')
   })
 })
 

@@ -29,6 +29,7 @@ import {
   defaultSidebarState,
   normalizeSidebarState,
   searchSidebarSessions,
+  sessionControlPendingTag,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { SessionInfo, SidebarSortMode, SidebarState } from '../../types'
@@ -68,6 +69,10 @@ const grouped = computed(() => buildSidebarGroups(sessions.value, sidebarState.v
 const searchResults = computed(() => searchSidebarSessions(sessions.value, searchQuery.value))
 const schedulerCount = computed(() => ctx.boot.value?.scheduler?.jobs?.length || 0)
 
+function controlPendingTag(session: SessionInfo) {
+  return sessionControlPendingTag(session)
+}
+
 async function loadSidebarState() {
   try {
     sidebarState.value = normalizeSidebarState(await api<Partial<SidebarState>>('/api/sidebar-state'))
@@ -97,14 +102,14 @@ async function activateAndEmit(id: string) {
 
 async function doCreateChat() {
   closeMenus()
-  const s = create({ mode: 'chat', title: '新会话' })
+  const s = await create({ mode: 'chat', title: '新会话' })
   await activateAndEmit(s.id)
 }
 
 async function createBuildFromPath(path: string) {
   if (!path.trim()) return
   const project = await resolveProject(path.trim())
-  const s = create({
+  const s = await create({
     mode: 'build',
     title: `构建 ${project.project_name}`,
     project,
@@ -415,6 +420,11 @@ onMounted(async () => {
                   <span v-else class="session-title" @dblclick.stop="beginRename(s)">{{ s.title }}</span>
                   <small>{{ s.preview || relativeDate(s.updated_at) }}</small>
                 </div>
+                <span
+                  v-if="controlPendingTag(s)"
+                  class="session-control-tag"
+                  :data-tone="controlPendingTag(s)?.tone"
+                >{{ controlPendingTag(s)?.label }}</span>
                 <span v-if="sidebarState.project_sort === 'manual'" class="row-move-actions">
                   <button title="上移" @click.stop="moveProjectSession(project, s.id, -1)"><ArrowUp :size="12" /></button>
                   <button title="下移" @click.stop="moveProjectSession(project, s.id, 1)"><ArrowDown :size="12" /></button>
@@ -486,6 +496,11 @@ onMounted(async () => {
               <span v-else class="session-title" @dblclick.stop="beginRename(s)">{{ s.title }}</span>
               <small>{{ s.preview || relativeDate(s.updated_at) }}</small>
             </div>
+            <span
+              v-if="controlPendingTag(s)"
+              class="session-control-tag"
+              :data-tone="controlPendingTag(s)?.tone"
+            >{{ controlPendingTag(s)?.label }}</span>
             <span v-if="sidebarState.chat_sort === 'manual'" class="row-move-actions">
               <button title="上移" @click.stop="moveChat(s.id, -1)"><ArrowUp :size="12" /></button>
               <button title="下移" @click.stop="moveChat(s.id, 1)"><ArrowDown :size="12" /></button>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { registerCoreIpc } from './ipc'
 
@@ -41,6 +41,7 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
 
   it('maps thrown implementation errors to safe renderer payloads', async () => {
     const ipc = new FakeIpcMain()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     registerCoreIpc(ipc, { model: { test: () => { throw new Error('secret stack details') } } }, ['model.test'])
 
     const payload = await ipc.invoke('emperor:core:model:test', {})
@@ -48,6 +49,11 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     expect(payload).toMatchObject({ ok: false, error: { message: 'Internal error' } })
     expect(String(payload.error.errorId)).toMatch(/^ipc_/)
     expect(JSON.stringify(payload)).not.toContain('secret stack details')
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[core-ipc\] model\.test failed \(ipc_[a-z0-9]+\)$/),
+      expect.any(Error),
+    )
+    errorSpy.mockRestore()
   })
 })
 

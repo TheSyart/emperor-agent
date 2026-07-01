@@ -867,7 +867,7 @@ export interface SchedulerPayload {
 
 export type WsEvent = CoreRuntimeEvent & ({ seq?: number; ts?: number; turn_id?: string; client_message_id?: string } & (
   | { event: 'ready'; model?: string; provider?: string; latest_seq?: number; replay_count?: number; resume_from?: number; busy?: boolean; control?: ControlPayload }
-  | { event: 'user_message'; content?: string; attachments?: AttachmentRef[]; source?: string; scheduler?: SchedulerMessageMeta }
+  | { event: 'user_message'; content?: string; attachments?: AttachmentRef[]; source?: string; scheduler?: SchedulerMessageMeta; ui_hidden?: boolean }
   | { event: 'message_delta'; delta?: string }
   | { event: 'agent_thought'; stage?: string; label?: string; summary?: string; source?: string; status?: 'done' | 'running' | string; tool_call_ids?: string[]; tool_names?: string[] }
   | { event: 'context_usage'; used?: number; max?: number; threshold?: number; usage_type?: string; model_role?: string; model?: string; provider?: string; route_reason?: string; estimated_input_tokens?: number }
@@ -895,6 +895,7 @@ export type WsEvent = CoreRuntimeEvent & ({ seq?: number; ts?: number; turn_id?:
   | { event: 'ask_request'; interaction?: ControlInteraction }
   | { event: 'ask_answered'; interaction?: ControlInteraction }
   | { event: 'plan_draft'; interaction?: ControlInteraction }
+  | { event: 'plan_draft_delta'; tool_call_id?: string; interaction?: ControlInteraction }
   | { event: 'plan_comment_added'; interaction?: ControlInteraction; comment?: string }
   | { event: 'plan_approved'; interaction?: ControlInteraction; control?: ControlPayload; plan?: RuntimePlanRecord; todos?: TodoItem[] }
   | { event: 'plan_entry_decision'; decision?: string; reason?: string; triggers?: string[]; suggested_questions?: string[]; recommended_readonly_scopes?: string[] }
@@ -954,8 +955,17 @@ export interface SessionInfo {
   message_count?: number
   title_status?: string
   archived_at?: string | null
+  control_pending?: SessionControlPending | null
   version: number
   draft?: boolean
+}
+
+export interface SessionControlPending {
+  kind: 'ask' | 'plan' | string
+  label: string
+  tone: 'blue' | 'green' | string
+  interaction_id: string
+  updated_at: number
 }
 
 export type SidebarSortMode = 'manual' | 'created_at' | 'updated_at'

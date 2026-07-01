@@ -9,7 +9,7 @@ export interface RuntimeEventEnvelope {
 
 export type RuntimeEvent = RuntimeEventEnvelope & (
   | { event: 'ready'; model?: string; provider?: string; latest_seq?: number; replay_count?: number; resume_from?: number; busy?: boolean; control?: RuntimeEventPayload }
-  | { event: 'user_message'; content?: string; attachments?: RuntimeEventPayload[]; source?: string; scheduler?: RuntimeEventPayload }
+  | { event: 'user_message'; content?: string; attachments?: RuntimeEventPayload[]; source?: string; scheduler?: RuntimeEventPayload; ui_hidden?: boolean }
   | { event: 'message_delta'; delta?: string }
   | { event: 'agent_thought'; stage?: string; label?: string; summary?: string; source?: string; status?: 'done' | 'running' | string; tool_call_ids?: string[]; tool_names?: string[] }
   | { event: 'context_usage'; used?: number; max?: number; threshold?: number; usage_type?: string; model_role?: string; model?: string; provider?: string; route_reason?: string; estimated_input_tokens?: number }
@@ -37,6 +37,7 @@ export type RuntimeEvent = RuntimeEventEnvelope & (
   | { event: 'ask_request'; interaction?: RuntimeEventPayload }
   | { event: 'ask_answered'; interaction?: RuntimeEventPayload }
   | { event: 'plan_draft'; interaction?: RuntimeEventPayload }
+  | { event: 'plan_draft_delta'; tool_call_id?: string; interaction?: RuntimeEventPayload }
   | { event: 'plan_comment_added'; interaction?: RuntimeEventPayload; comment?: string }
   | { event: 'plan_approved'; interaction?: RuntimeEventPayload; control?: RuntimeEventPayload; plan?: RuntimeEventPayload; todos?: RuntimeEventPayload[] }
   | { event: 'plan_entry_decision'; decision?: string; reason?: string; triggers?: string[]; suggested_questions?: string[]; recommended_readonly_scopes?: string[] }
