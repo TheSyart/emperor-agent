@@ -61,6 +61,7 @@ export class SchedulerJobExecutor {
       title: `Scheduler job: ${job.name}`,
       source: 'scheduler',
       jobId: job.id,
+      sessionId: schedulerPayloadSessionId(job.payload),
       metadata: { job_name: job.name, payload_kind: job.payload.kind, deliver: Boolean(job.payload.deliver) },
     }) ?? null
     try {

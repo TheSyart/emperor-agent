@@ -20,6 +20,7 @@ export class TaskManager {
     turnId?: string | null
     toolCallId?: string | null
     jobId?: string | null
+    sessionId?: string | null
     status?: string
     metadata?: Record<string, unknown> | null
   }): TaskRecord {
@@ -35,6 +36,7 @@ export class TaskManager {
       turn_id: opts.turnId ?? null,
       tool_call_id: opts.toolCallId ?? null,
       job_id: opts.jobId ?? null,
+      session_id: opts.sessionId ?? null,
       transcript_path: relative(this.root, transcript.path),
       metadata: opts.metadata ?? {},
     })

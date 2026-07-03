@@ -6,7 +6,7 @@ import { ActiveTaskRegistry } from '../runtime/active'
 import { TaskManager } from '../tasks/manager'
 import { TaskStatus } from '../tasks/models'
 import { WatchlistDecision } from '../watchlist/models'
-import { SchedulerJob, SchedulerPayload, SchedulerSchedule } from './models'
+import { SCHEDULER_TARGET_SESSION_METADATA_KEY, SchedulerJob, SchedulerPayload, SchedulerSchedule } from './models'
 import { SchedulerJobExecutor, type SchedulerAgentTurnPayload } from './executor'
 import { inSchedulerRun } from './tool'
 
@@ -48,7 +48,7 @@ describe('SchedulerJobExecutor', () => {
       },
     })
 
-    const result = await executor.run(makeJob('agent_turn', { deliver: false }))
+    const result = await executor.run(makeJob('agent_turn', { deliver: false, meta: { [SCHEDULER_TARGET_SESSION_METADATA_KEY]: 'sess_sched' } }))
     expect(result).toBe('agent_turn completed')
     expect(submitted[0]!.content).toContain('[SCHEDULER_TRIGGER]')
     expect(submitted[0]!.displayContent).toContain('定时任务触发')
@@ -56,6 +56,7 @@ describe('SchedulerJobExecutor', () => {
     const record = taskManager.store.list()[0]!
     expect(record.status).toBe(TaskStatus.COMPLETED)
     expect(record.job_id).toBe('agent_turn-job')
+    expect(record.session_id).toBe('sess_sched')
   })
 
   it('rejects agent_turn while control interaction is pending', async () => {

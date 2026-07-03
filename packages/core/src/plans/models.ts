@@ -255,6 +255,7 @@ export interface PlanRecord {
   status: string
   createdAt: number
   updatedAt: number
+  sessionId: string | null
   sourceInteractionId: string | null
   approvedAt: number | null
   completedAt: number | null
@@ -274,6 +275,7 @@ export function makePlanRecord(p: Partial<PlanRecord> & { id: string; title: str
     status: p.status,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
+    sessionId: p.sessionId ?? null,
     sourceInteractionId: p.sourceInteractionId ?? null,
     approvedAt: p.approvedAt ?? null,
     completedAt: p.completedAt ?? null,
@@ -294,6 +296,7 @@ export function planToDict(r: PlanRecord): Record<string, unknown> {
     status: r.status,
     created_at: r.createdAt,
     updated_at: r.updatedAt,
+    session_id: r.sessionId,
     source_interaction_id: r.sourceInteractionId,
     approved_at: r.approvedAt,
     completed_at: r.completedAt,
@@ -315,6 +318,7 @@ export function planFromDict(raw: Record<string, unknown>): PlanRecord {
     status: validValue(raw.status, PLAN_STATUSES, PlanStatus.DRAFT),
     createdAt: Number(raw.created_at),
     updatedAt: Number(raw.updated_at),
+    sessionId: (raw.session_id ?? null) as string | null,
     sourceInteractionId: (raw.source_interaction_id ?? null) as string | null,
     approvedAt: (raw.approved_at ?? null) as number | null,
     completedAt: (raw.completed_at ?? null) as number | null,

@@ -720,6 +720,7 @@ export class AgentRunner implements RunnerModelHost {
       ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
       ...(emit && tool && tool.requiresRuntimeContext ? { emit } : {}),
       parentCallId: call.id,
+      sessionId: this.sessionId,
       signal,
     }
     return this.registry.executeResult(call.name, call.arguments, ctx)

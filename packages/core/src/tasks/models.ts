@@ -27,6 +27,7 @@ export interface TaskRecordPayload {
   turn_id?: string | null
   tool_call_id?: string | null
   job_id?: string | null
+  session_id?: string | null
   ended_at?: number | null
   output_path?: string | null
   transcript_path?: string | null
@@ -44,6 +45,7 @@ export class TaskRecord {
   turn_id: string | null
   tool_call_id: string | null
   job_id: string | null
+  session_id: string | null
   ended_at: number | null
   output_path: string | null
   transcript_path: string | null
@@ -60,6 +62,7 @@ export class TaskRecord {
     this.turn_id = nullable(payload.turn_id)
     this.tool_call_id = nullable(payload.tool_call_id)
     this.job_id = nullable(payload.job_id)
+    this.session_id = nullable(payload.session_id)
     this.ended_at = payload.ended_at === null || payload.ended_at === undefined ? null : Number(payload.ended_at)
     this.output_path = nullable(payload.output_path)
     this.transcript_path = nullable(payload.transcript_path)
@@ -78,6 +81,7 @@ export class TaskRecord {
       turn_id: this.turn_id,
       tool_call_id: this.tool_call_id,
       job_id: this.job_id,
+      session_id: this.session_id,
       ended_at: this.ended_at,
       output_path: this.output_path,
       transcript_path: this.transcript_path,
@@ -97,6 +101,7 @@ export class TaskRecord {
       turnId: this.turn_id,
       toolCallId: this.tool_call_id,
       jobId: this.job_id,
+      sessionId: this.session_id,
       endedAt: this.ended_at,
       outputPath: this.output_path,
       transcriptPath: this.transcript_path,
@@ -116,6 +121,7 @@ export class TaskRecord {
       turn_id: payload.turn_id ?? null,
       tool_call_id: payload.tool_call_id ?? null,
       job_id: payload.job_id ?? null,
+      session_id: payload.session_id ?? null,
       ended_at: payload.ended_at ?? null,
       output_path: payload.output_path ?? null,
       transcript_path: payload.transcript_path ?? null,

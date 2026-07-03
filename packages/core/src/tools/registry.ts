@@ -74,6 +74,7 @@ export class ToolRegistry {
       arguments: casted,
       turnId: ctx?.turnId ?? null,
       parentCallId: ctx?.parentCallId ?? null,
+      sessionId: ctx?.sessionId ?? null,
       emit: ctx?.emit ?? null,
       loop: ctx?.loop ?? null,
       signal: ctx?.signal ?? null,

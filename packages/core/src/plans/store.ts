@@ -52,6 +52,22 @@ export class PlanStore {
     this.write(data)
   }
 
+  /** 级联删除：仅删除带 session_id stamp 的计划；legacy 无主计划不动。 */
+  deleteBySession(sessionId: string): number {
+    const target = String(sessionId || '').trim()
+    if (!target) return 0
+    const data = this.read()
+    let removed = 0
+    for (const [planId, item] of Object.entries(data)) {
+      if (!item || typeof item !== 'object') continue
+      if (String((item as Record<string, unknown>).session_id ?? '') !== target) continue
+      delete data[planId]
+      removed += 1
+    }
+    if (removed > 0) this.write(data)
+    return removed
+  }
+
   /**
    * 审计 P1-4：index.json 此前无归档，永久累积所有计划——对齐 tasks/store.ts 已有的
    * "终态超阈值按月归档，进行中的计划永不归档" 模式，避免热索引无界增长。

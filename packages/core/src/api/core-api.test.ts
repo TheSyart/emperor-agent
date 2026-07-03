@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { ExternalInbound } from '../external/models'
+import { makePlanRecord } from '../plans/models'
 import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
 import { CoreApi, CORE_API_ROUTE_OPERATIONS } from './core-api'
 import { CoreMutationGuardError } from './mutation-guard'
@@ -695,6 +696,41 @@ describe('CoreApi (MIG-IPC-001)', () => {
       sample: 'pong',
     })
     expect(provider.calls.at(-1)?.messages.at(-1)?.content).toBe('Reply with exactly one word: pong')
+
+    await api.close()
+  })
+
+  it('cascades session deletion to owned tasks and plans, sparing legacy and other sessions', async () => {
+    const root = tmp('emperor-core-api-cascade-')
+    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    await api.bootstrap()
+    const keep = api.sessions.create({ title: 'Keep' })
+    const doomed = api.sessions.create({ title: 'Doomed' })
+    const keepId = String(keep.id)
+    const doomedId = String(doomed.id)
+
+    const ownedTask = api.loop.taskManager.startTask({ kind: 'subagent', title: 'owned', source: 'test', sessionId: doomedId })
+    const keepTask = api.loop.taskManager.startTask({ kind: 'subagent', title: 'kept', source: 'test', sessionId: keepId })
+    const legacyTask = api.loop.taskManager.startTask({ kind: 'subagent', title: 'legacy', source: 'test' })
+    const planStore = api.loop.controlManager.planStore
+    planStore.save(makePlanRecord({ id: 'plan_doomed', title: 'd', summary: 's', status: 'draft', createdAt: 1, updatedAt: 1, sessionId: doomedId }))
+    planStore.save(makePlanRecord({ id: 'plan_keep', title: 'k', summary: 's', status: 'draft', createdAt: 1, updatedAt: 1, sessionId: keepId }))
+    api.loop.taskManager.appendSidechain(ownedTask.id, { role: 'user', content: 'owned work' })
+    const ownedSidechainDir = join(root, '.emperor', 'memory', 'tasks', ownedTask.id)
+    expect(existsSync(ownedSidechainDir)).toBe(true)
+
+    expect(api.tasks.list({ sessionId: keepId }).map((t) => t.id)).toEqual([keepTask.id])
+    expect(api.tasks.list().length).toBe(3)
+
+    const result = api.sessions.delete(doomedId)
+
+    expect(result).toMatchObject({ deleted: true, removedTasks: 1, removedPlans: 1 })
+    expect(api.loop.taskManager.store.get(ownedTask.id)).toBeNull()
+    expect(api.loop.taskManager.store.get(keepTask.id)).not.toBeNull()
+    expect(api.loop.taskManager.store.get(legacyTask.id)).not.toBeNull()
+    expect(planStore.get('plan_doomed')).toBeNull()
+    expect(planStore.get('plan_keep')).not.toBeNull()
+    expect(existsSync(ownedSidechainDir)).toBe(false)
 
     await api.close()
   })

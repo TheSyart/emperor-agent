@@ -250,9 +250,10 @@ export class SchedulerService {
     })
   }
 
+  /** 兜底链 payload → 实时 targetSessionId → 伪 session 'scheduler'：绝不发无主事件。 */
   private withEventSession(event: Record<string, unknown>, job: SchedulerJob): Record<string, unknown> {
-    const sessionId = schedulerPayloadSessionId(job.payload)
-    return sessionId ? { ...event, session_id: sessionId } : event
+    const sessionId = schedulerPayloadSessionId(job.payload) || cleanString(this.targetSessionId()) || 'scheduler'
+    return { ...event, session_id: sessionId }
   }
 }
 

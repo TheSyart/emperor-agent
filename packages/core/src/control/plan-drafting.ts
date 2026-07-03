@@ -73,6 +73,7 @@ export class PlanDraftingManager {
         status: PlanStatus.WAITING_APPROVAL,
         createdAt: existing !== null ? existing.createdAt : now,
         updatedAt: now,
+        sessionId: (scope?.session_id as string | undefined) ?? null,
         sourceInteractionId: interaction.id,
         planMarkdown: interaction.planMarkdown,
         assumptions: [...interaction.assumptions],
@@ -159,6 +160,7 @@ export class PlanDraftingManager {
       status: PlanStatus.DRAFT,
       createdAt: now,
       updatedAt: now,
+      sessionId: (scope?.session_id as string | undefined) ?? null,
       draft: { ...emptyDraft(), phase: PlanDraftPhase.EXPLORING },
       metadata: { risk_level: 'medium', ...(scope ? { scope } : {}) },
     })

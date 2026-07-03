@@ -110,7 +110,7 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
       expected_output: '结论/证据',
       evidence_required: '文件路径',
       scope_limit: '只读',
-    }, { root: root, arguments: {}, parentCallId: 'call_1' })
+    }, { root: root, arguments: {}, parentCallId: 'call_1', sessionId: 'sess_d' })
 
     expect(result).toContain('结论: done')
     expect(captured.task).toContain('期望产物: 结论/证据')
@@ -119,6 +119,7 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
     expect(record!.kind).toBe(TaskKind.SUBAGENT)
     expect(record!.status).toBe(TaskStatus.COMPLETED)
     expect(record!.tool_call_id).toBe('call_1')
+    expect(record!.session_id).toBe('sess_d')
     const page = new SidechainTranscript(root, record!.id).read()
     expect(page.messages.map((m) => m.role)).toEqual(['user', 'assistant'])
     expect(page.messages[0]!.content).toBe(captured.task)

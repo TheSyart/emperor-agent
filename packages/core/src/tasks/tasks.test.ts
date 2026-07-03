@@ -47,6 +47,30 @@ describe('TaskStore (test_tasks_store.py)', () => {
     expect(readdirSync(join(root, 'memory', 'tasks')).some((name) => name.startsWith('index.json.corrupt-'))).toBe(true)
   })
 
+  it('round-trips session ownership and tolerates legacy records without it', () => {
+    const root = tmp('emperor-task-session-')
+    const store = new TaskStore(root)
+    const owned = new TaskRecord({
+      id: 'task_owned',
+      kind: TaskKind.SUBAGENT,
+      status: TaskStatus.RUNNING,
+      title: 'owned task',
+      source: 'dispatch_subagent',
+      started_at: 123,
+      session_id: 'sess_a',
+    })
+    store.upsert(owned)
+    expect(store.get('task_owned')?.session_id).toBe('sess_a')
+    expect(store.get('task_owned')?.toDict().session_id).toBe('sess_a')
+
+    // legacy 记录（磁盘上无 session_id 字段）宽容加载为 null
+    const legacy = TaskRecord.fromDict({
+      id: 'task_legacy', kind: 'subagent', status: 'completed',
+      title: 'legacy', source: 'dispatch_subagent', started_at: 1,
+    })
+    expect(legacy.session_id).toBeNull()
+  })
+
   it('archives only terminal tasks over cap and preserves archived lookup', () => {
     const root = tmp('emperor-task-archive-')
     const store = new TaskStore(root, { maxTerminal: 5 })
@@ -87,6 +111,17 @@ describe('TaskManager and SidechainTranscript (test_task_runtime_api.py)', () =>
     expect(manager.completeTask(task.id, { summary: 'done' })?.status).toBe(TaskStatus.COMPLETED)
     expect(manager.failTask(task.id, { error: 'boom' })?.progress.error).toBe('boom')
     expect(manager.cancelTask(task.id, { reason: 'stop' })?.progress.reason).toBe('stop')
+  })
+
+  it('stamps session ownership onto started tasks', () => {
+    const manager = new TaskManager(tmp('emperor-task-manager-session-'))
+    const record = manager.startTask({
+      kind: TaskKind.SUBAGENT,
+      title: 'owned',
+      source: 'dispatch_subagent',
+      sessionId: 'sess_m',
+    })
+    expect(manager.store.get(record.id)?.session_id).toBe('sess_m')
   })
 
   it('sidechain transcript skips bad lines and returns absolute path', () => {

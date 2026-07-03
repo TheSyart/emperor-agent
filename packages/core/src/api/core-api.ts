@@ -401,7 +401,9 @@ export class CoreApi {
     },
     delete: (sessionId: string): Dict => {
       if (!this.loop.sessionStore.delete(sessionId)) throw new Error('cannot delete session')
-      return { deleted: true }
+      const removedTasks = this.loop.taskManager.store.deleteBySession(sessionId)
+      const removedPlans = this.loop.controlManager.planStore.deleteBySession(sessionId)
+      return { deleted: true, removedTasks, removedPlans }
     },
     activate: (sessionId: string): Dict => {
       this.loop.activateSession(sessionId)
@@ -423,7 +425,12 @@ export class CoreApi {
   }
 
   readonly tasks = {
-    list: (): Dict[] => this.loop.taskManager.store.list().map((task) => task.toDict() as unknown as Dict),
+    list: (opts: { sessionId?: string | null } = {}): Dict[] => {
+      const sessionId = String(opts.sessionId ?? '').trim()
+      const records = this.loop.taskManager.store.list()
+      const filtered = sessionId ? records.filter((task) => task.session_id === sessionId) : records
+      return filtered.map((task) => task.toDict() as unknown as Dict)
+    },
     get: (taskId: string): Dict | null => this.loop.taskManager.store.get(taskId)?.toDict() as unknown as Dict ?? null,
     transcript: (taskId: string, opts: { offset?: number; limit?: number } = {}): Dict => new SidechainTranscript(this.paths.stateRoot, taskId).read(opts),
   }

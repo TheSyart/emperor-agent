@@ -136,6 +136,39 @@ describe('scheduler service/tool', () => {
     expect(service.removeJob('memory-maintenance')).toBe('protected')
   })
 
+  it('never emits ownerless run events: falls back to live target session, then the scheduler pseudo-session', async () => {
+    const root = tmp('emperor-scheduler-session-fallback-')
+    const clock = new FakeClock()
+    const events: Array<Record<string, unknown>> = []
+    let liveSession: string | null = 'sess_live'
+    const service = new SchedulerService(new SchedulerStore(root), {
+      timeFunc: clock.now,
+      eventSink: async (event) => { events.push(event) },
+      onJob: async () => undefined,
+      targetSessionId: () => liveSession,
+    })
+    // 创建时 targetSessionId 可用 → payload stamp
+    const stamped = service.addJob({
+      name: 'stamped',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({ message: 'hello' }),
+    })
+    liveSession = null
+    await service.runJob(stamped.id, { force: true })
+    expect(events.every((event) => event.session_id === 'sess_live')).toBe(true)
+
+    // 创建与运行时 targetSessionId 均不可用 → 伪 session 'scheduler'，绝不无主
+    events.length = 0
+    const orphan = service.addJob({
+      name: 'orphan',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({ message: 'hello' }),
+    })
+    await service.runJob(orphan.id, { force: true })
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.every((event) => event.session_id === 'scheduler')).toBe(true)
+  })
+
   it('does not lose a concurrent add/remove while another job is executing (audit P0-3)', async () => {
     const root = tmp('emperor-scheduler-race-')
     const clock = new FakeClock()

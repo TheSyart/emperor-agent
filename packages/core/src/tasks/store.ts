@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { TaskRecord } from './models'
 
@@ -39,6 +39,22 @@ export class TaskStore {
     data[record.id] = record.toDict()
     this.archiveIfNeeded(data)
     this.write(this.indexFile, data)
+  }
+
+  /** 级联删除：仅删除带 session_id stamp 的记录及其 sidechain 目录；legacy 无主记录不动。 */
+  deleteBySession(sessionId: string): number {
+    const target = String(sessionId || '').trim()
+    if (!target) return 0
+    const data = this.read(this.indexFile)
+    let removed = 0
+    for (const [taskId, item] of Object.entries(data)) {
+      if (!isObject(item) || String(item.session_id ?? '') !== target) continue
+      delete data[taskId]
+      rmSync(join(this.tasksDir, taskId), { recursive: true, force: true })
+      removed += 1
+    }
+    if (removed > 0) this.write(this.indexFile, data)
+    return removed
   }
 
   private archiveIfNeeded(data: Record<string, any>): void {

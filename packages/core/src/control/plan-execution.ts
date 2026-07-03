@@ -181,6 +181,7 @@ export class PlanExecutionManager {
         title: step.title,
         source: 'plan_step',
         status,
+        sessionId: record.sessionId ?? ((this.cm.planScopeMetadata()?.session_id as string | undefined) ?? null),
         metadata,
       })
       mapping[step.id] = task.id

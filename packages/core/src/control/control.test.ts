@@ -157,6 +157,27 @@ describe('ControlManager (test_control.py)', () => {
     expect(manager.planCompletionFollowup()).toBeNull()
   })
 
+  it('stamps first-class session ownership onto created plans', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-plan-session-'))
+    manager.setRuntimeScope({ sessionId: 'sess_p', projectId: '', workspaceRoot: '' })
+    const interaction = manager.createPlan({
+      title: 'Owned plan',
+      summary: 'Session-scoped plan.',
+      planMarkdown: '# Plan\n\n- work',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [{
+        id: 'step_1',
+        title: 'work',
+        description: 'do work',
+        commands: ['echo hi'],
+        acceptance: ['done'],
+      }],
+    })
+    const planId = String(interaction.meta.plan_id)
+    expect(manager.planStore.get(planId)?.sessionId).toBe('sess_p')
+  })
+
   it('tags plan step tasks with the current runtime scope', () => {
     const root = tmp('emperor-ctrl-plan-task-scope-')
     const manager = new ControlManager(root)

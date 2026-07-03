@@ -24,6 +24,7 @@ import {
   emptyDraft,
   makePlanRecord,
   makeStep,
+  planFromDict,
   type PlanRecord,
 } from './models'
 
@@ -70,6 +71,28 @@ describe('PlanStore (test_plan_store.py)', () => {
     store.save(record)
     expect(store.get('plan_1')).toEqual(record)
     expect(store.latest()).toEqual(record)
+  })
+
+  it('round-trips session ownership and tolerates legacy plans without it', () => {
+    const store = new PlanStore(tmp('emperor-plan-session-'))
+    const record = makePlanRecord({
+      id: 'plan_owned',
+      title: 'Owned plan',
+      summary: 's',
+      status: PlanStatus.DRAFT,
+      createdAt: 1,
+      updatedAt: 1,
+      sessionId: 'sess_a',
+    })
+    store.save(record)
+    expect(store.get('plan_owned')?.sessionId).toBe('sess_a')
+
+    // legacy dict（无 session_id）宽容加载为 null
+    const legacy = planFromDict({
+      id: 'plan_legacy', title: 'l', summary: 's', status: PlanStatus.DRAFT,
+      created_at: 1, updated_at: 1,
+    })
+    expect(legacy.sessionId).toBeNull()
   })
 
   it('backs up corrupt index', () => {

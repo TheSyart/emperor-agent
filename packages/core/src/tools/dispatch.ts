@@ -114,6 +114,7 @@ export class DispatchSubagentTool extends Tool {
         title: asOptional(args.purpose) || task.slice(0, 80),
         source: 'dispatch_subagent',
         toolCallId: ctx?.parentCallId ?? null,
+        sessionId: ctx?.sessionId ?? null,
         metadata: {
           agent_type: agentType,
           subagent_name: spec.name,
