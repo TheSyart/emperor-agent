@@ -11,6 +11,11 @@
     @apply mx-auto flex w-full max-w-[860px] min-w-0 flex-col gap-5 pb-6;
   }
 
+  /* 虚拟滚动（Wave6）：DynamicScroller 行间距——flex gap 对绝对定位的虚拟行不生效 */
+  .message-stack-virtual-row {
+    padding-bottom: 1.25rem;
+  }
+
   /* 滚动锁定（Wave4.1）：解锁跟随时的回底浮钮 */
   .scroll-to-bottom-btn {
     @apply sticky bottom-4 z-10 mx-auto block rounded-full border border-black/10 bg-white/90 px-4 py-1.5 text-xs shadow-md backdrop-blur transition hover:bg-white dark:border-white/10 dark:bg-neutral-800/90 dark:hover:bg-neutral-800;

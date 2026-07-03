@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { messageScrollSignature, shouldFollowBottom } from './messageListModel'
+import { createExpansionStore, messageScrollSignature, shouldFollowBottom, shouldVirtualize } from './messageListModel'
 import type { ChatMessage } from '../../types'
 
 describe('messageScrollSignature', () => {
@@ -35,5 +35,30 @@ describe('shouldFollowBottom (Wave4.1)', () => {
 
   it('unlocks when the user scrolls up past the threshold', () => {
     expect(shouldFollowBottom({ scrollTop: 300, scrollHeight: 1500, clientHeight: 500 })).toBe(false)
+  })
+})
+
+describe('shouldVirtualize (Wave6)', () => {
+  it('keeps plain rendering under the threshold and virtualizes above it', () => {
+    expect(shouldVirtualize(0)).toBe(false)
+    expect(shouldVirtualize(119)).toBe(false)
+    expect(shouldVirtualize(120)).toBe(true)
+    expect(shouldVirtualize(1000)).toBe(true)
+  })
+})
+
+describe('createExpansionStore (Wave6)', () => {
+  it('remembers open state across virtual unmount/remount and bumps a version for re-measure', () => {
+    const store = createExpansionStore()
+    expect(store.isOpen('block-1', true)).toBe(true)
+    expect(store.isOpen('block-2', false)).toBe(false)
+
+    const v0 = store.version.value
+    store.setOpen('block-2', true)
+    expect(store.isOpen('block-2', false)).toBe(true)
+    expect(store.version.value).toBeGreaterThan(v0)
+
+    store.setOpen('block-1', false)
+    expect(store.isOpen('block-1', true)).toBe(false)
   })
 })

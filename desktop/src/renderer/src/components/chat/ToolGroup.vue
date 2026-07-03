@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import type { ToolSegment, ToolStatus } from '../../types'
 import { toolIcon } from '../../icons'
 import type { AssistantFlowBlock } from './assistantFlowProjection'
 import ToolDetailBody from './ToolDetailBody.vue'
+import { CHAT_EXPANSION_STORE_KEY } from './expansionStoreKey'
 import { toolPurpose, toolStatusText, toolTitle } from './toolDisplay'
 import { toolGroupDetailText } from './toolGroupModel'
 
@@ -15,6 +16,14 @@ const defaultOpen = computed(() =>
   props.block.status !== 'done' ||
   props.block.tools.some((tool) => Boolean(tool.subagents?.length)),
 )
+
+// Wave6：展开态存到 MessageList 提供的 store，虚拟滚动卸载重挂不丢
+const expansion = inject(CHAT_EXPANSION_STORE_KEY, null)
+const isOpen = computed(() => expansion ? expansion.isOpen(`tool_group:${props.block.id}`, defaultOpen.value) : defaultOpen.value)
+
+function onToggle(event: Event) {
+  expansion?.setOpen(`tool_group:${props.block.id}`, (event.target as HTMLDetailsElement).open)
+}
 
 const primaryTool = computed(() => props.block.tools[0])
 const agentCount = computed(() =>
@@ -49,7 +58,7 @@ function isTodoTool(tool: ToolSegment) {
 </script>
 
 <template>
-  <details class="timeline-node tool-group-card" :class="props.block.status" :open="defaultOpen">
+  <details class="timeline-node tool-group-card" :class="props.block.status" :open="isOpen" @toggle="onToggle">
     <summary class="tool-group-summary">
       <span class="tool-group-icon" aria-hidden="true">
         <component :is="toolIcon(primaryTool?.name || 'tool')" :size="15" />
