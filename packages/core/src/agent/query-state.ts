@@ -10,6 +10,7 @@ export enum TransitionReason {
   EMPTY_RESPONSE_RETRY = 'empty_response_retry',
   LENGTH_RECOVERY = 'length_recovery',
   TODO_CONTINUATION = 'todo_continuation',
+  NEAR_MAX_TURNS = 'near_max_turns',
   PLAN_PAUSE = 'plan_pause',
   ASK_PAUSE = 'ask_pause',
   MAX_TURNS = 'max_turns',
@@ -25,6 +26,7 @@ export interface QueryState {
   maxTurns: number | null
   paused: boolean
   completed: boolean
+  finalWarningIssued: boolean
 }
 
 export function makeQueryState(p: Partial<QueryState> = {}): QueryState {
@@ -37,6 +39,7 @@ export function makeQueryState(p: Partial<QueryState> = {}): QueryState {
     maxTurns: p.maxTurns ?? null,
     paused: p.paused ?? false,
     completed: p.completed ?? false,
+    finalWarningIssued: p.finalWarningIssued ?? false,
   }
 }
 
@@ -68,6 +71,21 @@ export function maxTurnsReached(state: QueryState): QueryTransition | null {
   const reply = `（达到 max_turns=${state.maxTurns} 上限，未办妥；history 中已有部分进展）`
   const nextState = { ...state, transition: TransitionReason.MAX_TURNS, completed: true }
   return transition({ reason: TransitionReason.MAX_TURNS, nextState, terminalReply: reply })
+}
+
+const NEAR_MAX_TURNS_MIN_LIMIT = 5
+
+export function nearMaxTurns(state: QueryState): QueryTransition | null {
+  if (state.maxTurns === null || state.maxTurns < NEAR_MAX_TURNS_MIN_LIMIT) return null
+  if (state.finalWarningIssued || state.turnCount !== state.maxTurns - 2) return null
+  const content =
+    '（接近回合上限，剩余轮次有限。请停止扩展新任务，收束当前工作，并在下一条回复输出最终交付报告：已完成事项、未完成事项、验证命令与结果、恢复入口。）'
+  const nextState = { ...state, transition: TransitionReason.NEAR_MAX_TURNS, finalWarningIssued: true }
+  return transition({
+    reason: TransitionReason.NEAR_MAX_TURNS,
+    nextState,
+    messages: [{ role: 'user', content }],
+  })
 }
 
 export function toolFollowup(state: QueryState): QueryTransition {

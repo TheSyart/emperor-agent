@@ -18,6 +18,7 @@ import { toolParamsSchema, S } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
 import { ControlManager } from '../control/manager'
 import { AskUserTool, ProposePlanTool } from '../control/tools'
+import { TodoStore, UpdateTodos } from '../tools/builtin'
 
 type Msg = Record<string, unknown>
 
@@ -844,6 +845,96 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(planContext).toContain('status: approved')
   })
 
+  it('update_todos updates the session checklist without mutating approved plan steps', async () => {
+    const manager = new ControlManager(tmp('emperor-runner-todo-decoupled-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Decoupled todo plan',
+      summary: 'Plan is approval context, todo is execution checklist.',
+      planMarkdown: '# Plan\n\n- Run matrix',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [{
+        id: 'step_1',
+        title: 'Run matrix',
+        description: 'Execute the task.',
+        commands: ['npm test'],
+        acceptance: ['todo update succeeds without plan evidence'],
+      }],
+    })
+    manager.approve(interaction.id)
+    const planId = String(interaction.meta.plan_id)
+    expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
+
+    const registry = new ToolRegistry()
+    registry.register(new UpdateTodos(todoStore))
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('todo_1', 'update_todos', {
+          todos: [{ id: 1, plan_step_id: 'step_1', content: 'Run matrix', status: 'completed' }],
+        })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'done' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry, systemPrompt: 'system', controlManager: manager, todoStore, maxTurns: 4 })
+    const emitted: Msg[] = []
+
+    const reply = await runner.stepAsync([{ role: 'user', content: 'continue' }], { emit: (event) => { emitted.push(event) } })
+
+    expect(reply).toBe('done')
+    const todoResult = emitted.find((event) => event.event === 'tool_result' && event.name === 'update_todos')
+    expect(todoResult).toMatchObject({
+      event: 'tool_result',
+      name: 'update_todos',
+      todos: [{ id: 1, plan_step_id: 'step_1', content: 'Run matrix', status: 'completed' }],
+    })
+    expect(JSON.stringify(todoResult)).not.toContain('PLAN_EVIDENCE_REQUIRED')
+    expect(emitted.filter((event) => event.event === 'plan_runtime_update')).toHaveLength(0)
+    expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
+  })
+
+  it('max_turns terminal reply is a structured delivery summary instead of the flat failure line', async () => {
+    const todoStore = new TodoStore()
+    todoStore.todos = [
+      { id: 1, content: '实现功能', status: 'completed' },
+      { id: 2, content: '补文档', status: 'pending' },
+    ]
+    const provider = new FakeProvider([makeResponse({ content: '第一轮进展：功能已实现。' })])
+    const runner = new AgentRunner({ provider, model: 'fake', registry: new ToolRegistry(), systemPrompt: 'system', todoStore, maxTurns: 1 })
+
+    const reply = await runner.stepAsync([{ role: 'user', content: '把事情办完' }])
+
+    expect(reply).toContain('max_turns=1')
+    expect(reply).toContain('已完成 1/2')
+    expect(reply).toContain('补文档')
+    expect(reply).toContain('恢复')
+    expect(reply).not.toContain('未办妥')
+  })
+
+  it('injects a single wrap-up reminder when the turn budget is nearly exhausted', async () => {
+    const todoStore = new TodoStore()
+    todoStore.todos = [{ id: 1, content: '永远做不完', status: 'pending' }]
+    const provider = new FakeProvider([
+      makeResponse({ content: '继续 1' }),
+      makeResponse({ content: '继续 2' }),
+      makeResponse({ content: '继续 3' }),
+      makeResponse({ content: '继续 4' }),
+      makeResponse({ content: '继续 5' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry: new ToolRegistry(), systemPrompt: 'system', todoStore, maxTurns: 5 })
+    const history: Msg[] = [{ role: 'user', content: '一直干' }]
+
+    await runner.stepAsync(history)
+
+    const reminders = history.filter((message) => message.role === 'user' && String(message.content ?? '').includes('回合上限'))
+    expect(reminders).toHaveLength(1)
+    const lastCall = provider.seenMessages[provider.seenMessages.length - 1]!
+    expect(lastCall.some((message) => String(message.content ?? '').includes('回合上限'))).toBe(true)
+  })
+
   it('does not project runtime plan context from another project scope', async () => {
     const manager = new ControlManager(tmp('emperor-runner-cross-project-plan-context-'))
     manager.setRuntimeScope({ sessionId: 'session_old', projectId: 'project_old', workspaceRoot: '/tmp/old-project' })
@@ -882,7 +973,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(contents.some((content) => content.includes('[PLAN_RUNTIME_CONTEXT]'))).toBe(false)
   })
 
-  it('stops repeated plan incomplete followups without reaching max turns or duplicating assistant history', async () => {
+  it('does not inject plan incomplete followups for active approved plan steps', async () => {
     const manager = new ControlManager(tmp('emperor-runner-plan-loop-'))
     const interaction = manager.createPlan({
       title: 'Stuck Plan',
@@ -918,12 +1009,13 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
     const reply = await runner.stepAsync([{ role: 'user', content: 'continue' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_plan_loop' })
 
-    expect(reply).toContain('stale plan')
-    expect(provider.seenMessages.length).toBe(2)
+    expect(reply).toBe('step already done')
+    expect(provider.seenMessages.length).toBe(1)
     expect(emitted).toEqual(expect.arrayContaining([
-      expect.objectContaining({ event: 'record_degraded', kind: 'plan_followup_loop', taskId: 'turn_plan_loop' }),
       expect.objectContaining({ event: 'turn_phase', phase: 'completed' }),
     ]))
+    expect(emitted.some((event) => event.event === 'record_degraded' && event.kind === 'plan_followup_loop')).toBe(false)
+    expect(emitted.some((event) => event.event === 'turn_phase' && event.phase === 'plan_followup')).toBe(false)
     expect(emitted.some((event) => event.event === 'turn_phase' && event.phase === 'max_turns')).toBe(false)
     expect(memory.history.filter((item) => item.role === 'assistant')).toHaveLength(1)
     expect(memory.history.find((item) => item.role === 'assistant')!.content).toBe(reply)

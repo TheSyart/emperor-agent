@@ -9,6 +9,7 @@ import {
   lengthRecovery,
   makeQueryState,
   maxTurnsReached,
+  nearMaxTurns,
   todoFollowup,
   toolFollowup,
 } from './query-state'
@@ -23,6 +24,25 @@ describe('query_state (test_query_state.py)', () => {
     expect(blocked).not.toBeNull()
     expect(blocked!.reason).toBe(TransitionReason.MAX_TURNS)
     expect(blocked!.terminalReply).toBe('（达到 max_turns=1 上限，未办妥；history 中已有部分进展）')
+  })
+
+  it('nearMaxTurns injects a one-shot wrap-up reminder two turns before the limit', () => {
+    const state = makeQueryState({ maxTurns: 5, turnCount: 3 })
+    const warning = nearMaxTurns(state)
+    expect(warning).not.toBeNull()
+    expect(warning!.messages).toHaveLength(1)
+    expect(warning!.messages[0]!.role).toBe('user')
+    expect(String(warning!.messages[0]!.content)).toContain('回合上限')
+    expect(String(warning!.messages[0]!.content)).toContain('交付报告')
+    expect(warning!.nextState.finalWarningIssued).toBe(true)
+    expect(nearMaxTurns(warning!.nextState)).toBeNull()
+  })
+
+  it('nearMaxTurns stays silent for small limits, other turns, or unlimited turns', () => {
+    expect(nearMaxTurns(makeQueryState({ maxTurns: 2, turnCount: 0 }))).toBeNull()
+    expect(nearMaxTurns(makeQueryState({ maxTurns: 4, turnCount: 2 }))).toBeNull()
+    expect(nearMaxTurns(makeQueryState({ maxTurns: 5, turnCount: 2 }))).toBeNull()
+    expect(nearMaxTurns(makeQueryState({ maxTurns: null, turnCount: 3 }))).toBeNull()
   })
 
   it('empty response retry has message and event', () => {

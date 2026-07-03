@@ -24,7 +24,6 @@ import { parsePauseResult } from '../control/tools'
 import { interactionToDict, type Interaction } from '../control/models'
 import { PlanContextBuilder } from '../plans/context'
 import { resultFromToolOutput, type VerificationCommand } from '../plans/verification'
-import { PlanEvidenceError } from '../plans/evidence'
 import { planToDict, type PlanRecord } from '../plans/models'
 import type { PlanStore } from '../plans/store'
 import { writePromptSnapshot, type PromptSectionInput } from '../prompts/manifest'
@@ -37,6 +36,7 @@ import {
   markCompleted,
   markPaused,
   maxTurnsReached,
+  nearMaxTurns,
   todoFollowup,
   toolFollowup,
   type QueryState,
@@ -48,6 +48,7 @@ import { ContextOverflowError } from '../errors'
 import { isContextOverflowProviderError } from '../providers/errors'
 import * as runtimeEvents from './runtime-events'
 import {
+  buildMaxTurnsSummary,
   contextUsedFromUsage,
   controlInteractionEvent,
   discoveryEvidenceRefs,
@@ -281,7 +282,12 @@ export class AgentRunner implements RunnerModelHost {
       const maxTurnsTransition = maxTurnsReached(queryState)
       if (maxTurnsTransition !== null) {
         queryState = maxTurnsTransition.nextState
-        const reply = maxTurnsTransition.terminalReply ?? ''
+        const reply = buildMaxTurnsSummary({
+          maxTurns: this.maxTurns,
+          todos: this.todoStore?.todos ?? [],
+          plan: this.activePlanForSummary(),
+          lastAssistantText: finalParts.length ? finalParts[finalParts.length - 1] : '',
+        })
         const message: Msg = { role: 'assistant', content: reply }
         if (turnId) message.turn_id = turnId
         history.push(message)
@@ -291,6 +297,11 @@ export class AgentRunner implements RunnerModelHost {
         }
         await this.emitTurnPhase(turnState, TurnPhase.MAX_TURNS, emit, { max_turns: this.maxTurns })
         return reply
+      }
+      const wrapUpWarning = nearMaxTurns(queryState)
+      if (wrapUpWarning !== null) {
+        queryState = wrapUpWarning.nextState
+        for (const message of wrapUpWarning.messages) history.push({ ...message } as Msg)
       }
       queryState = beginIteration(queryState).nextState
       turnState.startIteration()
@@ -669,7 +680,7 @@ export class AgentRunner implements RunnerModelHost {
       if (verificationTarget !== null && emit) {
         await emit(runtimeEvents.planVerificationStart({ planId: verificationTarget.plan_id!, stepId: verificationTarget.step_id!, command: verificationTarget.command! }))
       }
-      let result = await this.runToolResult(call, emit, clarification, ctx.planDecisionRef.current, signal)
+      const result = await this.runToolResult(call, emit, clarification, ctx.planDecisionRef.current, signal)
       throwIfAborted(signal)
       this.recordPlanDiscovery(call, result)
       this.recordPlanStepToolOutput(call, result)
@@ -685,21 +696,7 @@ export class AgentRunner implements RunnerModelHost {
         const followup = AgentRunner.planVerificationFollowup(verificationUpdate)
         if (followup !== null) planFollowups.push(followup)
       }
-      let planUpdate: PlanRecord | null = null
-      if (!result.isError) {
-        try {
-          planUpdate = this.syncPlanFromTodoTool(call, content)
-        } catch (exc) {
-          if (!(exc instanceof PlanEvidenceError)) throw exc
-          this.restoreTodosFromPlan()
-          result = ToolResultObj.fromText(exc.message, { isError: true })
-          resultsById.set(call.id, result)
-        }
-      }
       await this.emitToolResult(call, result, emit)
-      if (planUpdate !== null && emit) {
-        await emit(runtimeEvents.planRuntimeUpdate(planToDict(planUpdate)))
-      }
       return result
     }
 
@@ -797,6 +794,21 @@ export class AgentRunner implements RunnerModelHost {
     if (!latest) return null
     try {
       return this.controlManager.assessPlanDecision(latest)
+    } catch {
+      return null
+    }
+  }
+
+  private activePlanForSummary(): PlanRecord | null {
+    const store = this.controlManager?.planStore
+    if (!store) return null
+    try {
+      const record = store.latest()
+      if (record === null) return null
+      if (typeof this.controlManager?.planMatchesCurrentScope === 'function' && !this.controlManager.planMatchesCurrentScope(record)) {
+        return null
+      }
+      return record.status === 'approved' || record.status === 'executing' ? record : null
     } catch {
       return null
     }
@@ -907,23 +919,6 @@ export class AgentRunner implements RunnerModelHost {
     throw new TurnPaused(interaction, toolMessages)
   }
 
-  private syncPlanFromTodoTool(call: ToolCallRequest, content: string): PlanRecord | null {
-    if (call.name !== 'update_todos' || this.controlManager === null) return null
-    const todos = call.arguments.todos
-    if (!Array.isArray(todos) || typeof this.controlManager.syncPlanFromTodos !== 'function') return null
-    return this.controlManager.syncPlanFromTodos(todos, {
-      evidence: { source: 'update_todos', tool_call_id: call.id, summary: summarizeToolResult(content) },
-    })
-  }
-
-  private restoreTodosFromPlan(): void {
-    if (this.todoStore === null) return
-    const followup = this.planCompletionFollowup()
-    const plan = followup && typeof followup === 'object' ? (followup.plan as Record<string, unknown>) : null
-    const steps = plan && typeof plan === 'object' ? plan.steps : null
-    if (Array.isArray(steps)) this.todoStore.syncFromPlanSteps(steps as Array<Record<string, unknown>>)
-  }
-
   private planCompletionFollowup(): Record<string, unknown> | null {
     if (this.controlManager === null || typeof this.controlManager.planCompletionFollowup !== 'function') return null
     return this.controlManager.planCompletionFollowup()
@@ -959,6 +954,10 @@ export class AgentRunner implements RunnerModelHost {
       checked_at: resultObj.checkedAt,
       source: 'run_command',
       tool_call_id: call.id,
+    }
+    if (target.requirement_id) {
+      result.requirement_id = target.requirement_id
+      result.verification_id = target.requirement_id
     }
     const plan = this.controlManager.recordPlanVerificationResult({ planId: target.plan_id!, stepId: target.step_id!, result })
     if (plan === null) return null

@@ -17,6 +17,46 @@ export function renderTodos(todos: Array<Record<string, unknown>>): string {
   return lines.join('\n')
 }
 
+export interface MaxTurnsSummaryInput {
+  maxTurns: number | null
+  todos: Array<Record<string, unknown>>
+  plan?: { title?: string; status?: string; steps?: Array<{ title?: string; status?: string }> } | null
+  lastAssistantText?: string
+}
+
+const MAX_TURNS_SUMMARY_PENDING_LIMIT = 10
+const MAX_TURNS_SUMMARY_PROGRESS_CHARS = 300
+
+export function buildMaxTurnsSummary(input: MaxTurnsSummaryInput): string {
+  const lines: string[] = [`（达到 max_turns=${input.maxTurns} 上限，自动收尾）`]
+  const todos = input.todos ?? []
+  if (todos.length) {
+    const pending = todos.filter((t) => t.status !== 'completed')
+    lines.push(`已完成 ${todos.length - pending.length}/${todos.length} 项任务。`)
+    if (pending.length) {
+      lines.push('未完成：')
+      for (const todo of pending.slice(0, MAX_TURNS_SUMMARY_PENDING_LIMIT)) {
+        lines.push(`- ${String(todo.content ?? todo.id ?? '')}`)
+      }
+      if (pending.length > MAX_TURNS_SUMMARY_PENDING_LIMIT) {
+        lines.push(`- …另有 ${pending.length - MAX_TURNS_SUMMARY_PENDING_LIMIT} 项`)
+      }
+    }
+  } else {
+    lines.push('本轮未登记 todo 清单。')
+  }
+  const plan = input.plan ?? null
+  if (plan) {
+    const steps = plan.steps ?? []
+    const doneSteps = steps.filter((step) => step.status === 'completed').length
+    lines.push(`计划「${plan.title ?? ''}」状态 ${plan.status ?? ''}，步骤完成 ${doneSteps}/${steps.length}。`)
+  }
+  const progress = String(input.lastAssistantText ?? '').trim()
+  if (progress) lines.push(`最近进展：${progress.slice(0, MAX_TURNS_SUMMARY_PROGRESS_CHARS)}`)
+  lines.push('恢复方式：继续发送消息，我会从未完成项接着执行；如需详情可要求输出完整状态。')
+  return lines.join('\n')
+}
+
 export function summarizeToolResult(content: string, limit = 560): string {
   const text = String(content ?? '').split(/\s+/).filter((p) => p).join(' ')
   if (text.length <= limit) return text
