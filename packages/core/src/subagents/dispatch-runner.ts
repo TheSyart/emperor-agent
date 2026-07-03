@@ -32,7 +32,7 @@ export function buildDispatchRunner(args: DispatchRunnerFactoryArgs, opts: Route
     compactor: opts.compactor ?? null,
     todoStore: opts.todoStore ?? null,
     controlManager: opts.controlManager ?? null,
-    maxContext: opts.maxContext ?? null,
+    maxContext: opts.maxContext ?? route.snapshot.contextWindowTokens ?? null,
     maxTurns: args.spec.maxTurns,
     workspaceRoot: args.workspaceRoot ?? null,
   })

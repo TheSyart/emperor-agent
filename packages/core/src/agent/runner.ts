@@ -964,9 +964,14 @@ export class AgentRunner implements RunnerModelHost {
     await emit(payload)
   }
 
+  /** 压缩判定用的有效上下文上限：预留本回合输出 maxTokens，至少保留半个窗口。 */
+  private effectiveMaxContext(): number {
+    return Math.max(Math.trunc(this.maxContext / 2), this.maxContext - this.maxTokens)
+  }
+
   private async maybeCompact(history: Msg[], emit: StreamEmitter | null, turnId: string | null): Promise<void> {
     if (!(this.compactor && this.tokenTracker)) return
-    if (!this.tokenTracker.shouldCompact(this.maxContext, this.compactThreshold)) return
+    if (!this.tokenTracker.shouldCompact(this.effectiveMaxContext(), this.compactThreshold)) return
     try {
       if (typeof this.compactor.compactAsync === 'function') {
         const out = await this.compactor.compactAsync(history)

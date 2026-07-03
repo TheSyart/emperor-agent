@@ -413,7 +413,9 @@ export function useRuntime(options: {
   function isForeignSessionEvent(data: unknown): boolean {
     const ownerSessionId = eventOwnerSessionId(data)
     const activeSessionId = String(sessionId.value || '').trim()
-    if (!ownerSessionId || !activeSessionId || isDraftSessionId(activeSessionId)) return false
+    if (!ownerSessionId || !activeSessionId) return false
+    // draft 会话尚无后端 id，任何归属真实会话的事件都是外部事件
+    if (isDraftSessionId(activeSessionId)) return true
     return ownerSessionId !== activeSessionId
   }
 

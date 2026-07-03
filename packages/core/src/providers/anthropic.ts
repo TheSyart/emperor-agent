@@ -37,12 +37,12 @@ export class AnthropicProvider extends LLMProvider {
   }
 
   async chat(args: ChatArgs): Promise<LLMResponse> {
-    const resp = await this.client.messages.create({ ...(this.kwargsFor(args) as any), stream: false })
+    const resp = await this.client.messages.create({ ...(this.kwargsFor(args) as any), stream: false }, requestOptions(args.signal))
     return AnthropicProvider.parseResponse(resp)
   }
 
   override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
-    const stream = this.client.messages.stream(this.kwargsFor(args) as any)
+    const stream = this.client.messages.stream(this.kwargsFor(args) as any, requestOptions(args.signal))
     if (args.onContentDelta) {
       stream.on('text', (text: string) => {
         void args.onContentDelta?.(text)
@@ -166,6 +166,10 @@ export class AnthropicProvider extends LLMProvider {
 }
 
 // ── module-private helpers（对齐 Python 静态方法）──
+
+function requestOptions(signal?: AbortSignal | null): { signal: AbortSignal } | undefined {
+  return signal ? { signal } : undefined
+}
 
 function contentToAnthropic(content: unknown): unknown {
   if (typeof content === 'string') return content

@@ -38,7 +38,7 @@ export class BedrockProvider extends LLMProvider {
     const model = args.model || this.defaultModel
     const request = BedrockProvider.converseRequest(model, args.messages, args.maxTokens ?? 4096, args.temperature ?? 0.7)
     const { ConverseCommand } = require('@aws-sdk/client-bedrock-runtime')
-    const resp = await this.client.send(new ConverseCommand(request))
+    const resp = await this.client.send(new ConverseCommand(request), BedrockProvider.sendOptions(args))
     const content: Array<{ text?: string }> = resp.output?.message?.content ?? []
     const text = content.map((b) => b.text ?? '').join('')
     return {
@@ -49,6 +49,10 @@ export class BedrockProvider extends LLMProvider {
       reasoningContent: null,
       thinkingBlocks: null,
     }
+  }
+
+  static sendOptions(args: ChatArgs): { abortSignal: AbortSignal } | undefined {
+    return args.signal ? { abortSignal: args.signal } : undefined
   }
 
   static converseRequest(model: string, messages: OpenAiMessage[], maxTokens: number, temperature: number): Record<string, unknown> {

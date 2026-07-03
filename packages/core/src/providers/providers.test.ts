@@ -122,6 +122,63 @@ describe('BedrockProvider', () => {
   })
 })
 
+// ── Wave1.1 AbortSignal 透传 ──
+
+describe('AbortSignal forwarding', () => {
+  const fakeFinal = {
+    content: [{ type: 'text', text: 'ok' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }
+
+  it('AnthropicProvider.chatStream passes signal in request options', async () => {
+    const prov = new AnthropicProvider({ apiKey: 'test', defaultModel: 'claude' })
+    let receivedOptions: unknown = null
+    ;(prov.client as any).messages = {
+      stream: (_body: unknown, options: unknown) => {
+        receivedOptions = options
+        return { on: () => undefined, finalMessage: async () => fakeFinal }
+      },
+    }
+    const controller = new AbortController()
+    await prov.chatStream({ messages: [{ role: 'user', content: 'hi' }], signal: controller.signal })
+    expect((receivedOptions as { signal?: AbortSignal })?.signal).toBe(controller.signal)
+  })
+
+  it('AnthropicProvider.chat passes signal in request options', async () => {
+    const prov = new AnthropicProvider({ apiKey: 'test', defaultModel: 'claude' })
+    let receivedOptions: unknown = null
+    ;(prov.client as any).messages = {
+      create: async (_body: unknown, options: unknown) => {
+        receivedOptions = options
+        return fakeFinal
+      },
+    }
+    const controller = new AbortController()
+    await prov.chat({ messages: [{ role: 'user', content: 'hi' }], signal: controller.signal })
+    expect((receivedOptions as { signal?: AbortSignal })?.signal).toBe(controller.signal)
+  })
+
+  it('AnthropicProvider omits request options when no signal given', async () => {
+    const prov = new AnthropicProvider({ apiKey: 'test', defaultModel: 'claude' })
+    let receivedOptions: unknown = 'sentinel'
+    ;(prov.client as any).messages = {
+      stream: (_body: unknown, options: unknown) => {
+        receivedOptions = options
+        return { on: () => undefined, finalMessage: async () => fakeFinal }
+      },
+    }
+    await prov.chatStream({ messages: [{ role: 'user', content: 'hi' }] })
+    expect(receivedOptions).toBeUndefined()
+  })
+
+  it('BedrockProvider.sendOptions maps signal to abortSignal', () => {
+    const controller = new AbortController()
+    expect(BedrockProvider.sendOptions({ messages: [], signal: controller.signal })).toEqual({ abortSignal: controller.signal })
+    expect(BedrockProvider.sendOptions({ messages: [] })).toBeUndefined()
+  })
+})
+
 // ── PROV-006 Factory ──
 
 describe('createProvider', () => {

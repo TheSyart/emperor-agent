@@ -208,6 +208,38 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
     expect(requireTokenLedger(tracker.logFile)).toContain('"model_role":"secondary"')
     expect(requireTokenLedger(tracker.logFile)).toContain('"usage_type":"subagent:sili_suitang"')
   })
+
+  it('routed dispatch runner adopts the route context window for compaction checks', async () => {
+    const subagents = new SubagentRegistry(TEMPLATES)
+    const seenMaxContext: number[] = []
+    const modelRouter = {
+      route: () => ({
+        snapshot: { ...snapshot('secondary-model', 'secondary'), contextWindowTokens: 64_000 },
+        fallback: null,
+        useCase: 'subagent',
+        reason: 'test',
+        estimatedTokens: null,
+      }),
+    } as unknown as ModelRouter
+    const factory = buildDispatchRunnerFactory({
+      modelRouter,
+      tokenTracker: {
+        record: () => undefined,
+        shouldCompact: (maxContext: number) => {
+          seenMaxContext.push(maxContext)
+          return false
+        },
+      },
+      compactor: { compactAsync: async (history) => history },
+    })
+    const spec = subagents.get('sili_suitang')!
+    const runner = factory({ spec, subRegistry: new ToolRegistry(), task: '阅读 docs' })
+
+    await runner.step([{ role: 'user', content: '阅读 docs' }])
+    expect(seenMaxContext.length).toBeGreaterThan(0)
+    // 有效上限 = 路由窗口 64_000 − 预留输出 maxTokens 2_000
+    expect(seenMaxContext[0]).toBe(62_000)
+  })
 })
 
 function snapshot(model: string, role: 'main' | 'secondary'): ProviderSnapshot {

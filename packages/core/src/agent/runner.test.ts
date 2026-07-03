@@ -279,6 +279,55 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ]))
   })
 
+  it('reserves output headroom when checking compaction threshold', async () => {
+    const seenMaxContext: number[] = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      tokenTracker: {
+        record: () => undefined,
+        shouldCompact: (maxContext: number) => {
+          seenMaxContext.push(maxContext)
+          return false
+        },
+      },
+      compactor: { compactAsync: async (history) => history },
+      maxContext: 10_000,
+      maxTokens: 2_000,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'hi' }])
+
+    // 有效上限 = maxContext 10_000 − 预留输出 maxTokens 2_000
+    expect(seenMaxContext[0]).toBe(8_000)
+  })
+
+  it('keeps at least half the context window when output reserve is oversized', async () => {
+    const seenMaxContext: number[] = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      tokenTracker: {
+        record: () => undefined,
+        shouldCompact: (maxContext: number) => {
+          seenMaxContext.push(maxContext)
+          return false
+        },
+      },
+      compactor: { compactAsync: async (history) => history },
+      maxContext: 8_000,
+      maxTokens: 20_000,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'hi' }])
+
+    expect(seenMaxContext[0]).toBe(4_000)
+  })
+
   it('emits context usage with the active route context window', async () => {
     const runner = new AgentRunner({
       provider: new FakeProvider([makeResponse({ content: 'done', usage: { input: 120, output: 3 } })]),

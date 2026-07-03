@@ -156,6 +156,33 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(text).not.toContain('foreign text')
   })
 
+  it('drops foreign-session events while a draft session is active, then accepts events for the promoted id', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.switchSession('draft:pending-1')
+    listener?.({ event: 'user_message', seq: 11, session_id: 'session-other', turn_id: 'turn-other', content: 'foreign user' })
+    listener?.({ event: 'message_delta', seq: 12, session_id: 'session-other', turn_id: 'turn-other', delta: 'foreign text' })
+    listener?.({ event: 'session_created', session: { id: 'session-real' }, client_draft_id: 'draft:pending-1' })
+    listener?.({ event: 'user_message', seq: 1, session_id: 'session-real', turn_id: 'turn-real', content: 'real user' })
+    listener?.({ event: 'message_delta', seq: 2, session_id: 'session-real', turn_id: 'turn-real', delta: 'real answer' })
+    listener?.({ event: 'assistant_done', seq: 3, session_id: 'session-real', turn_id: 'turn-real', content: 'real answer' })
+
+    expect(runtime.sessionId.value).toBe('session-real')
+    const text = runtime.messages.value.map((message) => message.content).join('\n')
+    expect(text).not.toContain('foreign user')
+    expect(text).not.toContain('foreign text')
+    expect(text).toContain('real user')
+    expect(text).toContain('real answer')
+  })
+
   it('applies control pending changes to the event owner session instead of the currently open session', async () => {
     let listener: ((event: unknown) => void) | null = null
     const pendingChanges: Array<{ sessionId: string; interaction: unknown }> = []
