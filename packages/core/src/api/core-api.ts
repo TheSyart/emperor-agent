@@ -275,17 +275,20 @@ export class CoreApi {
       limit?: number | string | null
       includeArchive?: boolean | string | null
       include_archive?: boolean | string | null
+      compact?: boolean | string | null
     } = {}): Dict => {
       const sessionId = this.requireReadableSessionId(opts.sessionId ?? this.loop.activeSessionId ?? null, 'runtime.replay')
       const afterSeq = normalizedNonNegativeNumber(opts.afterSeq ?? opts.after_seq ?? 0)
       const limit = normalizedPositiveNumber(opts.limit ?? null)
       const includeArchive = normalizedBoolean(opts.includeArchive ?? opts.include_archive ?? false)
+      // P1-5：回放默认读取侧压缩（磁盘不变）；传 compact:false 取原始流
+      const compact = opts.compact === undefined ? true : normalizedBoolean(opts.compact)
       const store = new RuntimeEventStore(this.loop.sessionStore.sessionDir(sessionId), { sessionDirOverride: true })
       return {
         sessionId,
         afterSeq,
         latestSeq: store.latestSeq,
-        events: store.replayAfter(afterSeq, { sessionId, limit, includeArchive }),
+        events: store.replayAfter(afterSeq, { sessionId, limit, includeArchive, compact }),
       }
     },
   }

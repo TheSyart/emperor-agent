@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { compactReplayEvents } from '@emperor/core'
 import { projectChatEvents } from './chatProjection'
 import { projectAssistantFlow } from '../components/chat/assistantFlowProjection'
 import type { AssistantMessage } from '../types'
@@ -156,6 +157,45 @@ describe('chatProjection', () => {
     expect(askSegments[0]!.interaction.status).toBe('answered')
     const blocks = projectAssistantFlow(assistants[0] as AssistantMessage)
     expect(blocks.map((block) => block.kind)).toEqual(['text', 'control', 'text'])
+  })
+
+  // P1-5 golden：读取侧压缩后的回放流投影结果必须与原始流完全一致
+  it('projects identical messages from a compacted replay stream (golden)', () => {
+    const provisional = (title: string, seq: number) => ({
+      event: 'plan_draft_delta' as const,
+      seq,
+      session_id: 's1',
+      turn_id: 'turn_A',
+      tool_call_id: 'call_1',
+      interaction: {
+        id: 'provisional-plan-call_1', kind: 'plan', status: 'waiting', parent_call_id: 'call_1',
+        title, meta: { plan_stream_id: 'call_1', provisional: true },
+      },
+    })
+    const full = [
+      { event: 'user_message', seq: 1, session_id: 's1', turn_id: 'turn_A', content: '开工' },
+      { event: 'message_delta', seq: 2, session_id: 's1', turn_id: 'turn_A', delta: '先' },
+      { event: 'message_delta', seq: 3, session_id: 's1', turn_id: 'turn_A', delta: '规划' },
+      { event: 'message_delta', seq: 4, session_id: 's1', turn_id: 'turn_A', delta: '。' },
+      { event: 'tool_call', seq: 5, session_id: 's1', turn_id: 'turn_A', id: 'call_0', name: 'read_file', arguments: { path: 'a' } },
+      { event: 'tool_result', seq: 6, session_id: 's1', turn_id: 'turn_A', id: 'call_0', name: 'read_file', summary: 'ok' },
+      { event: 'message_delta', seq: 7, session_id: 's1', turn_id: 'turn_A', delta: '看完了' },
+      ...Array.from({ length: 30 }, (_, index) => provisional('T'.repeat(index + 1), 8 + index)),
+      {
+        event: 'plan_draft', seq: 40, session_id: 's1', turn_id: 'turn_A',
+        interaction: { id: 'plan_1', kind: 'plan', status: 'waiting', parent_call_id: 'call_1', title: 'T'.repeat(30), plan_markdown: '# P' },
+      },
+      { event: 'assistant_done', seq: 41, session_id: 's1', turn_id: 'turn_A', content: '先规划。看完了' },
+    ]
+
+    const compacted = compactReplayEvents(full as Array<Record<string, unknown>>)
+    expect(compacted.length).toBeLessThan(full.length)
+    expect(compacted.filter((event) => event.event === 'plan_draft_delta')).toHaveLength(1)
+    expect(compacted.filter((event) => event.event === 'message_delta')).toHaveLength(2)
+
+    const fromFull = projectChatEvents(full as never, { sessionId: 's1' })
+    const fromCompacted = projectChatEvents(compacted as never, { sessionId: 's1' })
+    expect(fromCompacted.messages).toEqual(fromFull.messages)
   })
 
   it('keeps a plan approval resume turn inside the paused assistant flow during replay', () => {

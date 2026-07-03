@@ -25,6 +25,38 @@ export interface RuntimeReplayOptions {
   limit?: number | null
   sessionId?: string | null
   includeArchive?: boolean | null
+  compact?: boolean | null
+}
+
+/**
+ * replay 读取侧压缩（P1-5）：磁盘 events.jsonl 不变，只收敛回放流里的高频中间态。
+ * - 连续的同流 plan_draft_delta 只保留最后一条（终态草稿覆盖前序增量）。
+ * - 连续的同 turn message_delta 合并为一条（保留首个 seq，文本拼接）。
+ * 任何其他事件都会打断 run，保证投影出的消息结构与不压缩时一致。
+ */
+export function compactReplayEvents(rows: Row[]): Row[] {
+  const out: Row[] = []
+  for (const row of rows) {
+    const prev = out[out.length - 1]
+    if (row.event === 'plan_draft_delta' && prev?.event === 'plan_draft_delta' &&
+      planDeltaStreamKey(prev) === planDeltaStreamKey(row) && String(prev.turn_id ?? '') === String(row.turn_id ?? '')) {
+      out[out.length - 1] = row
+      continue
+    }
+    if (row.event === 'message_delta' && prev?.event === 'message_delta' &&
+      String(prev.turn_id ?? '') === String(row.turn_id ?? '')) {
+      out[out.length - 1] = { ...prev, delta: String(prev.delta ?? '') + String(row.delta ?? '') }
+      continue
+    }
+    out.push(row)
+  }
+  return out
+}
+
+function planDeltaStreamKey(row: Row): string {
+  const interaction = isRecord(row.interaction) ? row.interaction : {}
+  const meta = isRecord(interaction.meta) ? interaction.meta : {}
+  return cleanString(meta.plan_stream_id) || cleanString(interaction.parent_call_id) || cleanString(row.tool_call_id) || cleanString(interaction.id)
 }
 
 export interface RuntimeStats {
@@ -88,11 +120,12 @@ export class RuntimeEventStore {
 
   replayAfter(seq: number, opts: RuntimeReplayOptions = {}): Row[] {
     const sessionId = cleanString(opts.sessionId)
-    const out = this.iterEvents({ includeArchive: opts.includeArchive }).filter((event) => {
+    let out = this.iterEvents({ includeArchive: opts.includeArchive }).filter((event) => {
       if (Number(event.seq || 0) <= seq) return false
       if (!sessionId) return true
       return cleanString(event.session_id ?? event.owner?.session_id ?? this.sessionId) === sessionId
     })
+    if (opts.compact) out = compactReplayEvents(out)
     return opts.limit && out.length > opts.limit ? out.slice(-opts.limit) : out
   }
 

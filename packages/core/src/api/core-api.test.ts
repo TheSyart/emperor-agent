@@ -7,6 +7,7 @@ import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { ExternalInbound } from '../external/models'
 import { makePlanRecord } from '../plans/models'
 import { ToolResultStore } from '../context/tool-results'
+import { RuntimeEventStore } from '../runtime/store'
 import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
 import { CoreApi, CORE_API_ROUTE_OPERATIONS } from './core-api'
 import { CoreMutationGuardError } from './mutation-guard'
@@ -194,6 +195,34 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const bootTurnIds = ((boot.runtime as any).events as any[]).map((event) => event.turn_id)
     expect(bootTurnIds).toContain('turn_first')
     expect(bootTurnIds).not.toContain('turn_second')
+
+    await api.close()
+  })
+
+  it('compacts high-frequency delta events in replay by default without touching disk', async () => {
+    const root = tmp('emperor-core-api-replay-compact-')
+    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const sessionId = String(api.loop.activeSessionId)
+    const store = new RuntimeEventStore(api.loop.sessionStore.sessionDir(sessionId), { sessionDirOverride: true })
+    store.append({ event: 'user_message', content: 'go' }, { turnId: 't1', sessionId })
+    for (let index = 0; index < 20; index += 1) {
+      store.append({
+        event: 'plan_draft_delta',
+        tool_call_id: 'c1',
+        interaction: { id: 'p', title: 'T'.repeat(index + 1), meta: { plan_stream_id: 'c1' } },
+      }, { turnId: 't1', sessionId })
+    }
+    store.append({ event: 'assistant_done', content: 'done' }, { turnId: 't1', sessionId })
+
+    const replay = api.runtime.replay({ sessionId, afterSeq: 0 }) as any
+    expect(replay.events.filter((event: any) => event.event === 'plan_draft_delta')).toHaveLength(1)
+    expect(replay.events.find((event: any) => event.event === 'plan_draft_delta').interaction.title).toBe('T'.repeat(20))
+
+    const full = api.runtime.replay({ sessionId, afterSeq: 0, compact: false }) as any
+    expect(full.events.filter((event: any) => event.event === 'plan_draft_delta')).toHaveLength(20)
+
+    const boot = await api.bootstrap({ sessionId })
+    expect(((boot.runtime as any).events as any[]).filter((event) => event.event === 'plan_draft_delta')).toHaveLength(1)
 
     await api.close()
   })

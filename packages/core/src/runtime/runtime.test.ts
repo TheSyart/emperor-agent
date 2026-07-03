@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ActiveTaskRegistry, CancelledTaskError } from './active'
 import * as runtimeEvents from './events'
-import { RuntimeEventStore } from './store'
+import { RuntimeEventStore, compactReplayEvents } from './store'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -203,5 +203,85 @@ describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
     expect(cancelled[0]!.cancelled).toBe(true)
     await expect(never).rejects.toBeInstanceOf(CancelledTaskError)
     expect(registry.list()).toEqual([])
+  })
+})
+
+describe('compactReplayEvents (P1-5 replay compaction)', () => {
+  it('collapses contiguous plan_draft_delta runs to the last event per stream', () => {
+    const rows = [
+      { event: 'user_message', seq: 1, turn_id: 't1', content: 'go' },
+      { event: 'plan_draft_delta', seq: 2, turn_id: 't1', tool_call_id: 'c1', interaction: { id: 'p', title: 'A', meta: { plan_stream_id: 'c1' } } },
+      { event: 'plan_draft_delta', seq: 3, turn_id: 't1', tool_call_id: 'c1', interaction: { id: 'p', title: 'AB', meta: { plan_stream_id: 'c1' } } },
+      { event: 'plan_draft_delta', seq: 4, turn_id: 't1', tool_call_id: 'c1', interaction: { id: 'p', title: 'ABC', meta: { plan_stream_id: 'c1' } } },
+      { event: 'plan_draft', seq: 5, turn_id: 't1', interaction: { id: 'plan_1' } },
+      { event: 'assistant_done', seq: 6, turn_id: 't1', content: 'done' },
+    ]
+
+    const out = compactReplayEvents(rows)
+
+    expect(out.map((event) => [event.event, event.seq])).toEqual([
+      ['user_message', 1],
+      ['plan_draft_delta', 4],
+      ['plan_draft', 5],
+      ['assistant_done', 6],
+    ])
+    expect(out[1]!.interaction.title).toBe('ABC')
+  })
+
+  it('merges contiguous message_delta runs keeping the first seq and joined text', () => {
+    const rows = [
+      { event: 'message_delta', seq: 1, turn_id: 't1', delta: '你' },
+      { event: 'message_delta', seq: 2, turn_id: 't1', delta: '好' },
+      { event: 'message_delta', seq: 3, turn_id: 't1', delta: '。' },
+      { event: 'tool_call', seq: 4, turn_id: 't1', id: 'call_1', name: 'grep' },
+      { event: 'message_delta', seq: 5, turn_id: 't1', delta: '继续' },
+      { event: 'message_delta', seq: 6, turn_id: 't2', delta: '另一轮' },
+    ]
+
+    const out = compactReplayEvents(rows)
+
+    expect(out.map((event) => [event.event, event.seq, event.delta ?? null])).toEqual([
+      ['message_delta', 1, '你好。'],
+      ['tool_call', 4, null],
+      ['message_delta', 5, '继续'],
+      ['message_delta', 6, '另一轮'],
+    ])
+  })
+
+  it('leaves non-delta events untouched and preserves total text', () => {
+    const rows = [
+      { event: 'user_message', seq: 1, turn_id: 't1', content: 'hi' },
+      { event: 'message_delta', seq: 2, turn_id: 't1', delta: 'a' },
+      { event: 'agent_thought', seq: 3, turn_id: 't1', stage: 's', summary: 'x' },
+      { event: 'message_delta', seq: 4, turn_id: 't1', delta: 'b' },
+      { event: 'assistant_done', seq: 5, turn_id: 't1', content: 'ab' },
+    ]
+
+    const out = compactReplayEvents(rows)
+
+    expect(out).toHaveLength(5)
+    const joined = out.filter((event) => event.event === 'message_delta').map((event) => event.delta).join('')
+    expect(joined).toBe('ab')
+    expect(out[0]).toEqual(rows[0])
+    expect(out[4]).toEqual(rows[4])
+  })
+
+  it('replayAfter applies compaction when asked without touching the disk file', () => {
+    const root = tmp('emperor-runtime-compact-')
+    const store = new RuntimeEventStore(root)
+    store.append({ event: 'user_message', content: 'go' }, { turnId: 't1' })
+    for (let index = 0; index < 5; index += 1) {
+      store.append({ event: 'plan_draft_delta', tool_call_id: 'c1', interaction: { id: 'p', title: 'T'.repeat(index + 1), meta: { plan_stream_id: 'c1' } } }, { turnId: 't1' })
+    }
+    store.append({ event: 'assistant_done', content: 'done' }, { turnId: 't1' })
+
+    const compacted = store.replayAfter(0, { compact: true })
+    const full = store.replayAfter(0)
+
+    expect(full).toHaveLength(7)
+    expect(compacted.map((event) => event.event)).toEqual(['user_message', 'plan_draft_delta', 'assistant_done'])
+    expect(compacted[1]!.interaction.title).toBe('TTTTT')
+    const eventsFile = join(root, 'memory', 'runtime', 'events.jsonl')
+    expect(readFileSync(eventsFile, 'utf8').trim().split('\n')).toHaveLength(7)
   })
 })
