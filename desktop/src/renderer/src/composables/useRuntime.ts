@@ -44,6 +44,8 @@ export function useRuntime(options: {
   const pending = reactive<PendingState>({ label: '', detail: '' })
   const planProjection = reactive<PlanProjection>({ plans: [], entryDecisions: [] })
   const taskProjection = reactive<TaskProjection>({ tasks: [] })
+  // P1-7：per-session 瞬态运行/提醒状态，不落盘
+  const sessionRuntimeStates = reactive<Record<string, { running: boolean; attention: boolean }>>({})
   const lastSeq = ref(0)
   let pendingClearTimer: number | undefined
   let persistTimer: number | undefined
@@ -422,6 +424,38 @@ export function useRuntime(options: {
     return ''
   }
 
+  // P1-7：session 行运行状态。运行事件点亮 spinner；终态事件熄灭，后台 session 完成时点提醒点。
+  const SESSION_RUNNING_EVENTS = new Set([
+    'user_message', 'message_delta', 'agent_thought', 'plan_draft_delta',
+    'tool_call', 'tool_run_queued', 'tool_run_started', 'tool_result', 'tool_run_completed', 'tool_run_failed',
+  ])
+  const SESSION_TERMINAL_EVENTS = new Set(['assistant_done', 'turn_paused', 'runtime_task_cancelled', 'error'])
+
+  function trackSessionRuntimeState(data: WsEvent): void {
+    const owner = eventOwnerSessionId(data)
+    if (!owner) return
+    if (SESSION_RUNNING_EVENTS.has(data.event)) {
+      sessionRuntimeStateFor(owner).running = true
+      return
+    }
+    if (SESSION_TERMINAL_EVENTS.has(data.event)) {
+      const state = sessionRuntimeStateFor(owner)
+      state.running = false
+      if (owner === String(sessionId.value || '').trim()) state.attention = false
+      else state.attention = true
+    }
+  }
+
+  function sessionRuntimeStateFor(id: string): { running: boolean; attention: boolean } {
+    if (!sessionRuntimeStates[id]) sessionRuntimeStates[id] = { running: false, attention: false }
+    return sessionRuntimeStates[id]!
+  }
+
+  function clearSessionAttention(id: string): void {
+    const state = sessionRuntimeStates[id]
+    if (state) state.attention = false
+  }
+
   function isForeignSessionEvent(data: unknown): boolean {
     const ownerSessionId = eventOwnerSessionId(data)
     const activeSessionId = String(sessionId.value || '').trim()
@@ -529,6 +563,10 @@ export function useRuntime(options: {
   }
 
   function restoreFromHistory(history: RuntimeHistoryItem[] = []) {
+    for (const task of options.boot.value?.runtime?.active_tasks ?? []) {
+      const owner = String(task?.session_id ?? '').trim()
+      if (owner) sessionRuntimeStateFor(owner).running = true
+    }
     const runtimeEvents = options.boot.value?.runtime?.events || []
     if (runtimeEvents.length) {
       restoreFromRuntimeEvents(runtimeEvents)
@@ -613,6 +651,9 @@ export function useRuntime(options: {
       handleReadyEvent(data)
       return
     }
+
+    // 先喂状态槽（只读 event 名与归属 id），再做外部 session 丢弃
+    trackSessionRuntimeState(data)
 
     if (isForeignSessionEvent(data)) {
       syncSessionControlPendingFromEvent(data)
@@ -1665,10 +1706,13 @@ export function useRuntime(options: {
     pending,
     planProjection,
     taskProjection,
+    sessionRuntimeStates,
+    clearSessionAttention,
     runtimeText,
     eventTransportText,
     switchSession(id: string) {
       sessionId.value = id
+      clearSessionAttention(id)
       messages.value = []
       currentAssistantId.value = null
       busy.value = false

@@ -227,6 +227,37 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('stamps active turn tasks with their session id and exposes them at bootstrap', async () => {
+    class LatchedProvider extends FakeProvider {
+      release: () => void = () => {}
+      private readonly gate = new Promise<void>((resolve) => { this.release = resolve })
+      override async chat(args: ChatArgs): Promise<LLMResponse> {
+        await this.gate
+        return super.chat(args)
+      }
+    }
+    const provider = new LatchedProvider()
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-active-session-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const sessionId = String(api.loop.activeSessionId)
+
+    const idle = await api.bootstrap()
+    expect((idle.runtime as any).active_tasks).toEqual([])
+
+    const turn = api.chat.submit({ content: 'hi', turnId: 'turn_active', sessionId, emit: async () => {} })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const active = api.loop.activeTasks.list()
+    expect(active).toHaveLength(1)
+    expect(active[0]).toMatchObject({ kind: 'turn', turn_id: 'turn_active', session_id: sessionId })
+
+    provider.release()
+    await turn
+    await api.close()
+  })
+
   it('matches session route response shapes for IPC callers', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),

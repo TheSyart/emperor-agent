@@ -507,6 +507,17 @@ export interface RuntimeReplayPayload {
   busy?: boolean
   scope?: 'unarchived' | string
   events: RuntimeEventEnvelope[]
+  active_tasks?: ActiveRuntimeTask[]
+}
+
+export interface ActiveRuntimeTask {
+  id: string
+  kind: string
+  label?: string
+  turn_id?: string | null
+  job_id?: string | null
+  session_id?: string | null
+  cancelled?: boolean
 }
 
 export interface RuntimeTaskRecord {

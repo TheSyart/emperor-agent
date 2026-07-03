@@ -27,6 +27,24 @@ export interface SessionControlPendingTag {
   tone: 'blue' | 'green'
 }
 
+export interface SessionRuntimeState {
+  running?: boolean
+  attention?: boolean
+}
+
+export type SessionRuntimeIndicator = 'running' | 'pending' | 'attention' | null
+
+/** P1-7：session 行左侧状态槽的展示优先级 running spinner > ask/plan pending tag > attention dot。 */
+export function sessionRuntimeIndicator(
+  state: SessionRuntimeState | undefined,
+  pendingTag: SessionControlPendingTag | null,
+): SessionRuntimeIndicator {
+  if (state?.running) return 'running'
+  if (pendingTag) return 'pending'
+  if (state?.attention) return 'attention'
+  return null
+}
+
 export const defaultSidebarState: SidebarState = {
   section_order: ['projects', 'chats'],
   project_sort: 'updated_at',

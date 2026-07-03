@@ -2965,3 +2965,34 @@ select:focus-visible {
     flex-direction: column;
   }
 }
+
+/* P1-7：session 行左侧状态槽（running spinner / attention dot） */
+.session-status-slot {
+  flex: 0 0 10px;
+  width: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-status-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid rgb(var(--accent) / 0.25);
+  border-top-color: rgb(var(--accent));
+  animation: session-status-spin 0.9s linear infinite;
+}
+
+.session-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(var(--accent));
+}
+
+@keyframes session-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

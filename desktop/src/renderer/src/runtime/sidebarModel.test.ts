@@ -98,3 +98,16 @@ describe('sidebar model', () => {
     expect(sessionControlPendingTag(session({ control_pending: null }))).toBeNull()
   })
 })
+
+describe('sessionRuntimeIndicator (P1-7)', () => {
+  it('prioritizes running spinner over pending tag over attention dot', async () => {
+    const { sessionRuntimeIndicator } = await import('./sidebarModel')
+    const pendingTag = { label: '需要用户输入', tone: 'blue' as const }
+    expect(sessionRuntimeIndicator({ running: true, attention: true }, pendingTag)).toBe('running')
+    expect(sessionRuntimeIndicator({ running: false, attention: true }, pendingTag)).toBe('pending')
+    expect(sessionRuntimeIndicator({ running: false, attention: true }, null)).toBe('attention')
+    expect(sessionRuntimeIndicator({ running: false, attention: false }, null)).toBeNull()
+    expect(sessionRuntimeIndicator(undefined, null)).toBeNull()
+    expect(sessionRuntimeIndicator(undefined, pendingTag)).toBe('pending')
+  })
+})

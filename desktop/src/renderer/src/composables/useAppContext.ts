@@ -28,6 +28,7 @@ export interface AppContext {
   status: Ref<RuntimeStatus>
   pending: PendingState
   planProjection: PlanProjection
+  sessionRuntimeStates: Record<string, { running: boolean; attention: boolean }>
   runtimeText: () => string
   eventTransportText: () => string
 

@@ -7,6 +7,7 @@ export interface ActiveTaskInfo {
   started_at: number
   turn_id: string | null
   job_id: string | null
+  session_id: string | null
   cancelled: boolean
 }
 
@@ -41,6 +42,7 @@ export class ActiveTaskRegistry {
     awaitable: Promise<T>
     turnId?: string | null
     jobId?: string | null
+    sessionId?: string | null
     abort?: (() => void) | null
   }): Promise<T> {
     if (this.tasks.has(opts.taskId)) throw new Error(`active task already exists: ${opts.taskId}`)
@@ -53,6 +55,7 @@ export class ActiveTaskRegistry {
       started_at: Date.now() / 1000,
       turn_id: opts.turnId ?? null,
       job_id: opts.jobId ?? null,
+      session_id: opts.sessionId ?? null,
       cancelled: false,
     }
     this.tasks.set(opts.taskId, {

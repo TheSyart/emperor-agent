@@ -273,6 +273,7 @@ export class AgentLoop {
       label: 'Agent turn',
       awaitable,
       turnId,
+      sessionId: this.activeSessionId,
       abort: () => abortController.abort(),
     })
   }

@@ -30,6 +30,7 @@ import {
   normalizeSidebarState,
   searchSidebarSessions,
   sessionControlPendingTag,
+  sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { SessionInfo, SidebarSortMode, SidebarState } from '../../types'
@@ -71,6 +72,11 @@ const schedulerCount = computed(() => ctx.boot.value?.scheduler?.jobs?.length ||
 
 function controlPendingTag(session: SessionInfo) {
   return sessionControlPendingTag(session)
+}
+
+// P1-7：running spinner > pending tag > attention dot
+function rowIndicator(session: SessionInfo) {
+  return sessionRuntimeIndicator(ctx.sessionRuntimeStates[session.id], sessionControlPendingTag(session))
 }
 
 async function loadSidebarState() {
@@ -413,6 +419,10 @@ onMounted(async () => {
                 :class="{ active: s.id === activeId }"
                 @click="activateAndEmit(s.id)"
               >
+                <span class="session-status-slot" aria-hidden="true">
+                  <span v-if="rowIndicator(s) === 'running'" class="session-status-spinner" />
+                  <span v-else-if="rowIndicator(s) === 'attention'" class="session-status-dot" />
+                </span>
                 <div class="session-row-main">
                   <span v-if="editingId === s.id" class="session-rename-wrap">
                     <input v-model="editTitle" @keyup.enter="doRename(s.id)" @keyup.escape="editingId = null" @click.stop />
@@ -421,7 +431,7 @@ onMounted(async () => {
                   <small>{{ s.preview || relativeDate(s.updated_at) }}</small>
                 </div>
                 <span
-                  v-if="controlPendingTag(s)"
+                  v-if="rowIndicator(s) === 'pending'"
                   class="session-control-tag"
                   :data-tone="controlPendingTag(s)?.tone"
                 >{{ controlPendingTag(s)?.label }}</span>
@@ -489,6 +499,10 @@ onMounted(async () => {
             :class="{ active: s.id === activeId }"
             @click="activateAndEmit(s.id)"
           >
+            <span class="session-status-slot" aria-hidden="true">
+              <span v-if="rowIndicator(s) === 'running'" class="session-status-spinner" />
+              <span v-else-if="rowIndicator(s) === 'attention'" class="session-status-dot" />
+            </span>
             <div class="session-row-main">
               <span v-if="editingId === s.id" class="session-rename-wrap">
                 <input v-model="editTitle" @keyup.enter="doRename(s.id)" @keyup.escape="editingId = null" @click.stop />
@@ -497,7 +511,7 @@ onMounted(async () => {
               <small>{{ s.preview || relativeDate(s.updated_at) }}</small>
             </div>
             <span
-              v-if="controlPendingTag(s)"
+              v-if="rowIndicator(s) === 'pending'"
               class="session-control-tag"
               :data-tone="controlPendingTag(s)?.tone"
             >{{ controlPendingTag(s)?.label }}</span>

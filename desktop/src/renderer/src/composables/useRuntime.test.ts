@@ -680,6 +680,54 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(resumeTool).toMatchObject({ status: 'done' })
   })
 
+  it('tracks per-session running state and flags background completion for attention (P1-7)', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    listener?.({ event: 'message_delta', seq: 1, session_id: 's1', turn_id: 't1', delta: 'hi' })
+    expect(runtime.sessionRuntimeStates['s1']).toMatchObject({ running: true })
+
+    const before = runtime.messages.value.length
+    listener?.({ event: 'message_delta', seq: 2, session_id: 's2', turn_id: 't2', delta: 'bg' })
+    expect(runtime.sessionRuntimeStates['s2']).toMatchObject({ running: true })
+    expect(runtime.messages.value).toHaveLength(before)
+
+    listener?.({ event: 'assistant_done', seq: 3, session_id: 's2', turn_id: 't2', content: 'done' })
+    expect(runtime.sessionRuntimeStates['s2']).toMatchObject({ running: false, attention: true })
+
+    listener?.({ event: 'assistant_done', seq: 4, session_id: 's1', turn_id: 't1', content: 'done' })
+    expect(runtime.sessionRuntimeStates['s1']).toMatchObject({ running: false, attention: false })
+
+    runtime.switchSession('s2')
+    expect(runtime.sessionRuntimeStates['s2']).toMatchObject({ attention: false })
+  })
+
+  it('marks sessions running from bootstrap active tasks (P1-7)', async () => {
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: () => () => {},
+    })
+    const options = testOptions()
+    ;(options.boot.value as any).runtime.active_tasks = [
+      { id: 'turn:t9', kind: 'turn', label: 'Agent turn', turn_id: 't9', session_id: 's9', cancelled: false },
+    ]
+    const runtime = useRuntime(options)
+    runtime.connectSocket()
+
+    runtime.restoreFromHistory([])
+
+    expect(runtime.sessionRuntimeStates['s9']).toMatchObject({ running: true })
+  })
+
   it('merges streaming plan_draft_delta events into the final plan card', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
