@@ -53,7 +53,7 @@ export function settleRunningToolSegments(
   const endedAt = options.endedAt ?? Date.now()
   let settled = 0
   for (const segment of assistant.segments) {
-    if (segment.type !== 'tool' || segment.status !== 'running') continue
+    if (segment.type !== 'tool' || (segment.status !== 'running' && segment.status !== 'queued')) continue
     finishTimedTool(segment, endedAt)
     segment.status = options.status || 'error_aborted'
     segment.summary = options.summary || segment.summary || '工具未返回结束事件'

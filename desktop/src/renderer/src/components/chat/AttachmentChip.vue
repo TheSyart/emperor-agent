@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { AttachmentRef } from '../../types'
 import { attachmentRawUrl } from '../../api/attachments'
 import { attachmentIcon } from '../../icons'
@@ -8,7 +8,8 @@ const props = defineProps<{ data: AttachmentRef; removable?: boolean }>()
 const emit = defineEmits<{ (e: 'remove'): void }>()
 
 const isImage = computed(() => props.data.kind === 'image')
-const previewUrl = computed(() => (isImage.value ? attachmentRawUrl(props.data.id) : null))
+const thumbFailed = ref(false)
+const previewUrl = computed(() => (isImage.value && !thumbFailed.value ? attachmentRawUrl(props.data.id) : null))
 const iconComp = computed(() => attachmentIcon(props.data.kind, props.data.mime, props.data.name))
 
 function formatBytes(n: number): string {
@@ -27,6 +28,7 @@ function formatBytes(n: number): string {
       :src="previewUrl"
       :alt="data.name"
       loading="lazy"
+      @error="thumbFailed = true"
     />
     <span v-else class="attach-doc-icon" aria-hidden="true">
       <component :is="iconComp" :size="22" />

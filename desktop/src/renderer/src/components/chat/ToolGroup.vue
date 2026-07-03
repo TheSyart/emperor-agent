@@ -4,7 +4,7 @@ import type { ToolSegment, ToolStatus } from '../../types'
 import { toolIcon } from '../../icons'
 import type { AssistantFlowBlock } from './assistantFlowProjection'
 import ToolDetailBody from './ToolDetailBody.vue'
-import { toolPurpose, toolTitle } from './toolDisplay'
+import { toolPurpose, toolStatusText, toolTitle } from './toolDisplay'
 import { toolGroupDetailText } from './toolGroupModel'
 
 type ToolGroupBlock = Extract<AssistantFlowBlock, { kind: 'tool_group' }>
@@ -29,10 +29,7 @@ const singleTool = computed(() => props.block.tools.length === 1)
 const detailText = computed(() => toolGroupDetailText(props.block.tools))
 
 function statusLabel(status: ToolStatus) {
-  if (status === 'done') return '完成'
-  if (status === 'running') return '执行中'
-  if (status === 'error_aborted') return '已中断'
-  return '出错'
+  return toolStatusText(status)
 }
 
 function toolStatusLabel(tool: ToolSegment) {

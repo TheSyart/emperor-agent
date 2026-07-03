@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { ToolSegment, ToolStatus } from '../../types'
 import { toolIcon } from '../../icons'
 import ToolDetailBody from './ToolDetailBody.vue'
+import { toolStatusText } from './toolDisplay'
 
 const props = defineProps<{ segment: ToolSegment }>()
 const title = computed(() => props.segment.displayName || displayName(props.segment.name))
@@ -13,10 +14,7 @@ const defaultOpen = computed(() =>
 )
 
 function statusLabel(status: ToolStatus) {
-  if (status === 'done') return '完成'
-  if (status === 'error') return '出错'
-  if (status === 'error_aborted') return '已中断'
-  return '执行中'
+  return toolStatusText(status)
 }
 
 function displayName(name: string) {

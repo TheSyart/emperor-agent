@@ -6,11 +6,12 @@ import type { ChatMessage, RuntimePlanRecord, UserMessage } from '../../types'
 import { avatarIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
-import { messageScrollSignature } from './messageListModel'
+import { messageScrollSignature, shouldFollowBottom } from './messageListModel'
 import wordmarkUrl from '../../../../../../assets/generated/emperoragent-wordmark.png'
 
 const props = defineProps<{ messages: ChatMessage[]; plans?: RuntimePlanRecord[] }>()
 const scroller = ref<HTMLElement | null>(null)
+const followBottom = ref(true)
 const schedulerClientIdPrefix = 'scheduler:'
 const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
 
@@ -19,9 +20,33 @@ function pinToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
+function onScroll() {
+  const el = scroller.value
+  if (el) followBottom.value = shouldFollowBottom(el)
+}
+
+function resumeFollow() {
+  followBottom.value = true
+  pinToBottom()
+}
+
 watch(
   () => messageScrollSignature(props.messages),
-  () => nextTick(pinToBottom),
+  () => {
+    if (followBottom.value) void nextTick(pinToBottom)
+  },
+  { flush: 'post' },
+)
+
+// 用户自己发出的新消息总是回到底部（即使此前在翻旧记录）
+watch(
+  () => {
+    const last = props.messages[props.messages.length - 1]
+    return last && last.role === 'user' ? last.id : ''
+  },
+  (id) => {
+    if (id) resumeFollow()
+  },
   { flush: 'post' },
 )
 
@@ -81,7 +106,7 @@ function schedulerTriggerPrefix(content: string) {
 </script>
 
 <template>
-  <section ref="scroller" class="messages-pane">
+  <section ref="scroller" class="messages-pane" @scroll.passive="onScroll">
     <div v-if="!props.messages.length" class="welcome-card animate-rise-in">
       <div class="welcome-brand-lockup" aria-label="emperoragent">
         <img :src="wordmarkUrl" class="welcome-wordmark" alt="emperoragent" draggable="false" />
@@ -147,5 +172,13 @@ function schedulerTriggerPrefix(content: string) {
         <AssistantFlow v-else :message="message" :plans="props.plans || []" />
       </template>
     </div>
+
+    <button
+      v-if="!followBottom && props.messages.length"
+      type="button"
+      class="scroll-to-bottom-btn"
+      aria-label="回到底部"
+      @click="resumeFollow"
+    >回到底部 ↓</button>
   </section>
 </template>

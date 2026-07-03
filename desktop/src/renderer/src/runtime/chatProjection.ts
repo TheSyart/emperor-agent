@@ -99,7 +99,7 @@ export function applyChatProjectionEvent(
     const assistant = assistantForEvent(state, event, runtime)!
     finishActiveThought(assistant, event)
     const seg = ensureToolSegment(assistant, event)
-    seg.status = 'running'
+    seg.status = event.event === 'tool_run_queued' ? 'queued' : 'running'
     if (event.event === 'tool_run_queued' && !seg.summary) seg.summary = '等待执行'
     return state
   }

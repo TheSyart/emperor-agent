@@ -525,7 +525,7 @@ export interface RuntimeTaskRecord {
   metadata?: Record<string, unknown>
 }
 
-export type ToolStatus = 'running' | 'done' | 'error' | 'error_aborted'
+export type ToolStatus = 'queued' | 'running' | 'done' | 'error' | 'error_aborted'
 
 export interface ToolArtifactRef {
   path: string

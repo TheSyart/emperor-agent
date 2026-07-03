@@ -3,7 +3,12 @@ import { toolTitle } from './toolDisplay'
 
 export function toolGroupDetailText(tools: ToolSegment[]) {
   const runningTools = tools.filter((tool) => tool.status === 'running')
-  if (runningTools.length) return `正在执行 ${toolNames(runningTools)}`
+  const queuedTools = tools.filter((tool) => tool.status === 'queued')
+  if (runningTools.length) {
+    const queuedSuffix = queuedTools.length ? `（另有 ${queuedTools.length} 个排队中）` : ''
+    return `正在执行 ${toolNames(runningTools)}${queuedSuffix}`
+  }
+  if (queuedTools.length) return `排队等待 ${toolNames(queuedTools)}`
 
   const errorTools = tools.filter((tool) => tool.status === 'error' || tool.status === 'error_aborted')
   if (errorTools.length) return `${errorTools.length} 个工具需要处理`

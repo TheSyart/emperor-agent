@@ -177,6 +177,7 @@ function toolGroupStatus(tools: ToolSegment[]): ToolStatus {
   if (tools.some((tool) => tool.status === 'error')) return 'error'
   if (tools.some((tool) => tool.status === 'error_aborted')) return 'error_aborted'
   if (tools.some((tool) => tool.status === 'running')) return 'running'
+  if (tools.some((tool) => tool.status === 'queued')) return 'queued'
   return 'done'
 }
 

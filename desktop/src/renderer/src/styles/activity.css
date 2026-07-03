@@ -353,6 +353,12 @@
     border-color: rgb(var(--warn) / 0.42);
   }
 
+  /* Wave4.2：排队中与执行中区分——排队用中性灰、无警示色 */
+  .tool-group-card.queued {
+    border-color: rgb(var(--border));
+    opacity: 0.85;
+  }
+
   .tool-group-card.error,
   .tool-group-card.error_aborted {
     border-color: rgb(var(--danger) / 0.45);

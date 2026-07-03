@@ -689,6 +689,56 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     }
   })
 
+  it('surfaces model fallback events as a transient pending notice (Wave4.3)', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+
+    listener?.({ event: 'model_route_fallback', seq: 1, from_model: 'claude-opus', to_model: 'gpt-4o', reason: 'provider timeout', usage_type: 'main_agent' })
+    expect(runtime.pending.label).toContain('备用模型')
+    expect(runtime.pending.detail).toContain('gpt-4o')
+
+    listener?.({ event: 'context_usage', seq: 2, usage_type: 'main_agent', used: 100, max: 1000, used_fallback: true, fallback_reason: 'rate_limited' })
+    expect(runtime.pending.label).toContain('备用模型')
+    expect(runtime.pending.detail).toContain('rate_limited')
+  })
+
+  it('distinguishes queued tools from running tools and settles both on turn end (Wave4.2)', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => { listener = null }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+
+    listener?.({ event: 'user_message', seq: 1, turn_id: 'turn-q', content: 'go' })
+    listener?.({ event: 'message_delta', seq: 2, turn_id: 'turn-q', delta: 'working' })
+    listener?.({ event: 'tool_run_queued', seq: 3, turn_id: 'turn-q', id: 'call_a', name: 'read_file', arguments: {} })
+    listener?.({ event: 'tool_run_queued', seq: 4, turn_id: 'turn-q', id: 'call_b', name: 'grep', arguments: {} })
+    listener?.({ event: 'tool_run_started', seq: 5, turn_id: 'turn-q', id: 'call_a', name: 'read_file' })
+
+    const assistant = runtime.messages.value.find((m) => m.role === 'assistant') as { segments: Array<{ type: string; toolId?: string; status?: string }> }
+    const toolA = assistant.segments.find((s) => s.type === 'tool' && s.toolId === 'call_a')
+    const toolB = assistant.segments.find((s) => s.type === 'tool' && s.toolId === 'call_b')
+    expect(toolA?.status).toBe('running')
+    expect(toolB?.status).toBe('queued')
+
+    // 回合结束时 queued 段也要被 settle，不能永远停在排队态
+    listener?.({ event: 'assistant_done', seq: 6, turn_id: 'turn-q', content: 'done' })
+    expect(toolB?.status).toBe('error_aborted')
+  })
+
   it('throttles persistence to a low-frequency safety flush while a turn is streaming (Wave3.4)', async () => {
     vi.useFakeTimers()
     try {

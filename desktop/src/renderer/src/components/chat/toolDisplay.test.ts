@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolSegment } from '../../types'
-import { fullOutputRef, toolTargetLabel, toolTitle } from './toolDisplay'
+import { fullOutputRef, toolStatusText, toolTargetLabel, toolTitle } from './toolDisplay'
 
 function tool(name: string, extra: Partial<ToolSegment> = {}): ToolSegment {
   return {
@@ -63,5 +63,15 @@ describe('fullOutputRef (Wave3.1)', () => {
     }))).toBe('')
 
     expect(fullOutputRef(tool('run_command', { outputTruncated: true }))).toBe('')
+  })
+})
+
+describe('toolStatusText (Wave4.2)', () => {
+  it('labels each tool status distinctly, including queued', () => {
+    expect(toolStatusText('queued')).toBe('排队中')
+    expect(toolStatusText('running')).toBe('执行中')
+    expect(toolStatusText('done')).toBe('完成')
+    expect(toolStatusText('error')).toBe('出错')
+    expect(toolStatusText('error_aborted')).toBe('已中断')
   })
 })

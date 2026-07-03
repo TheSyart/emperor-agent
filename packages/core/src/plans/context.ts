@@ -21,11 +21,17 @@ export class PlanContextBuilder {
   private readonly planStore: PlanStore
   private readonly maxChars: number
   private readonly filter: ((record: PlanRecord) => boolean) | null
+  private readonly fullEveryTurns: number
+  // Wave4.4 注入记忆：状态未变时逐轮降级为 sparse，避免长执行期每轮全量注入
+  private lastSignature = ''
+  private sparseTurns = 0
+  private seenActivePlanIds = new Set<string>()
 
-  constructor(planStore: PlanStore, opts?: { maxChars?: number; filter?: ((record: PlanRecord) => boolean) | null }) {
+  constructor(planStore: PlanStore, opts?: { maxChars?: number; filter?: ((record: PlanRecord) => boolean) | null; fullEveryTurns?: number }) {
     this.planStore = planStore
     this.maxChars = opts?.maxChars ?? 4000
     this.filter = opts?.filter ?? null
+    this.fullEveryTurns = Math.max(1, opts?.fullEveryTurns ?? 5)
   }
 
   messageFor(history: Array<Record<string, unknown>>): { role: string; content: string } | null {
@@ -34,9 +40,45 @@ export class PlanContextBuilder {
     if (!ACTIVE_STATUSES.has(record.status)) {
       if (record.status !== PlanStatus.COMPLETED || !asksAboutCompletedPlan(history)) return null
     }
-    const content = this.buildText(record)
+    const notice = this.oneShotNotice(record)
+    const signature = planSignature(record)
+    const changed = signature !== this.lastSignature
+    let content: string
+    if (changed || notice || this.sparseTurns >= this.fullEveryTurns - 1) {
+      content = this.buildText(record)
+      this.lastSignature = signature
+      this.sparseTurns = 0
+    } else {
+      content = this.buildSparseText(record)
+      this.sparseTurns += 1
+    }
     if (!content) return null
-    return { role: 'system', content }
+    return { role: 'system', content: notice ? `${notice}\n${content}` : content }
+  }
+
+  /** 首次看到某计划进入活动态时的一次性提示：刚批准 vs 重启后恢复执行中。 */
+  private oneShotNotice(record: PlanRecord): string {
+    if (!ACTIVE_STATUSES.has(record.status)) return ''
+    if (this.seenActivePlanIds.has(record.id)) return ''
+    this.seenActivePlanIds.add(record.id)
+    if (record.status === PlanStatus.APPROVED) {
+      return '[PLAN_NOTICE] 计划已批准：现在可以修改文件并开始执行，请随执行进度同步更新 todo。'
+    }
+    return '[PLAN_NOTICE] 你正在恢复一个执行中的旧计划：先阅读下方计划状态，决定继续当前步骤还是调整。'
+  }
+
+  private buildSparseText(record: PlanRecord): string {
+    const lines = [
+      '[PLAN_RUNTIME_CONTEXT:SPARSE]',
+      `plan_id: ${record.id}`,
+      `status: ${record.status}`,
+    ]
+    const active = record.steps.filter((s) => s.status === PlanStepStatus.ACTIVE)
+    for (const step of active.slice(0, 2)) lines.push(`active_step: ${step.id} ${step.title}`)
+    const pending = record.steps.filter((s) => s.status === PlanStepStatus.PENDING || s.status === PlanStepStatus.BLOCKED)
+    lines.push(`pending_steps: ${pending.length}`)
+    lines.push('(plan state unchanged since the last full snapshot)')
+    return truncate(lines.join('\n'), 600)
   }
 
   private latestScopedPlan(): PlanRecord | null {
@@ -93,6 +135,17 @@ export class PlanContextBuilder {
     for (const path of relevantFiles(record).slice(0, 20)) lines.push(`file: ${path}`)
     return truncate(lines.join('\n'), this.maxChars)
   }
+}
+
+/** 计划状态签名：id/状态/每步状态/未决问题与发现数量。变化即触发全量注入。 */
+function planSignature(record: PlanRecord): string {
+  return [
+    record.id,
+    record.status,
+    record.steps.map((s) => `${s.id}:${s.status}`).join(','),
+    record.draft.openQuestions.length,
+    record.draft.discoveries.length,
+  ].join('|')
 }
 
 function asksAboutCompletedPlan(history: Array<Record<string, unknown>>): boolean {

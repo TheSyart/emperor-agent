@@ -1,4 +1,4 @@
-import type { ToolSegment } from '../../types'
+import type { ToolSegment, ToolStatus } from '../../types'
 
 const MAX_TARGET_LENGTH = 56
 const FILE_TOOLS = new Set(['read_file', 'write_file', 'edit_file'])
@@ -120,4 +120,13 @@ function shortenTarget(value: string) {
 export function fullOutputRef(tool: Pick<ToolSegment, 'outputTruncated' | 'metadata'>): string {
   if (!tool.outputTruncated) return ''
   return String(tool.metadata?.full_output_ref ?? '')
+}
+
+/** 统一的工具状态徽标文案（Wave4.2）：排队 vs 执行中明确区分。 */
+export function toolStatusText(status: ToolStatus): string {
+  if (status === 'queued') return '排队中'
+  if (status === 'running') return '执行中'
+  if (status === 'done') return '完成'
+  if (status === 'error_aborted') return '已中断'
+  return '出错'
 }

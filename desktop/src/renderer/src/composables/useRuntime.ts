@@ -675,7 +675,21 @@ export function useRuntime(options: {
             options.boot.value.modelConfig.current.contextWindowTokens = max
           }
         }
+        // Wave4.3：备用模型降级不再静默
+        if (data.used_fallback) {
+          updatePending('本轮已切换备用模型', String(data.fallback_reason || ''), 'error', 6000)
+        }
       }
+      return
+    }
+
+    if (data.event === 'model_route_fallback') {
+      updatePending(
+        '已切换备用模型',
+        `${data.from_model || '?'} → ${data.to_model || '?'}${data.reason ? `（${data.reason}）` : ''}`,
+        'error',
+        6000,
+      )
       return
     }
 
@@ -684,10 +698,13 @@ export function useRuntime(options: {
       if (assistant) {
         finishActiveThought(assistant, data)
         const seg = ensureToolSegment(assistant, data)
-        seg.status = 'running'
+        seg.status = data.event === 'tool_run_queued' ? 'queued' : 'running'
         if (data.event === 'tool_run_queued' && !seg.summary) seg.summary = '等待执行'
       }
-      updatePending(`正在执行: ${data.name}`, data.event === 'tool_run_queued' ? compactJson(data.arguments, 180) : '')
+      updatePending(
+        data.event === 'tool_run_queued' ? `等待执行: ${data.name}` : `正在执行: ${data.name}`,
+        data.event === 'tool_run_queued' ? compactJson(data.arguments, 180) : '',
+      )
       return
     }
 
@@ -719,7 +736,7 @@ export function useRuntime(options: {
           assistant!.todos = data.todos
         }
       }
-      const running = (assistant?.segments || []).filter((seg): seg is ToolSegment => seg.type === 'tool' && seg.status === 'running')
+      const running = (assistant?.segments || []).filter((seg): seg is ToolSegment => seg.type === 'tool' && (seg.status === 'running' || seg.status === 'queued'))
       if (running.length) updatePending(`正在执行: ${running[0].name}`, `剩余 ${running.length} 个工具`)
       else if (assistant?.streaming) startThought(assistant, data, '整理工具结果')
       return
