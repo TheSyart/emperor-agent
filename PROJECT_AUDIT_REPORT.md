@@ -57,10 +57,11 @@
 - **传播链**：[修改回合逻辑] → [必须理解一台永不运转的机器] → [误判为活逻辑并围绕其设计] → [变更成本与错误理解累积]。
 - **最小修复**：整簇删除；host 接口删两个死成员。
 
-### ISSUE-A4 · 事件契约手抄平行维护，已漂移 —— P2 · Confirmed · Medium · Critical Path: Yes
-- **FACT**：`desktop/types.ts:919` `WsEvent = CoreRuntimeEvent & (76-variant 手抄 union)`；core `runtime/types.ts` 70 variant（计数复核）。每个新事件两处同改；76 vs 70 已漂移 6 个变体。另 ~8 个镜像枚举 union 带 `| string` 逃生门。
-- **传播链**：[core 改事件字段] → [desktop 手抄未同步] → [交叉类型使字段静默 never/宽化] → [typecheck 不报、运行时 UI 缺字段]（破坏 INV-005）。
-- **最小修复**：core schema 补强 payload 类型为唯一来源，desktop 删手抄 union 改 import；漂移变体逐一裁决。
+### ISSUE-A4 · 事件契约手抄平行维护，漂移无告警 —— P2 · Confirmed · Medium · Critical Path: Yes
+- **FACT**：`desktop/types.ts:919` `WsEvent = CoreRuntimeEvent & (手抄 70-variant union)`；core `runtime/types.ts` 同为 70 variant。每个新事件两处同改，且漂移完全静默（交叉类型使不匹配字段静默 never/宽化，typecheck 不报）。另 ~8 个镜像枚举 union 带 `| string` 逃生门。
+- **勘误（整改期核实）**：初扫报告的"76 vs 70 已漂移 6 个变体"不成立——76 是全文件 grep 含 6 个重复名的误计，唯一名集合两侧完全一致。真实缺陷是"漂移无告警"而非"已漂移"。
+- **传播链**：[core 改事件名/字段] → [desktop 手抄未同步] → [交叉类型静默吞掉差异] → [运行时 UI 缺字段无人知晓]（威胁 INV-005）。
+- **修复（已落地 W5）**：编译期奇偶校验绊线——`WsEventVariants['event']` 与 `CoreRuntimeEvent['event']` 双向子集断言，任一侧漂移即 typecheck 报错并点名事件；控制枚举改从 core 派生。payload 级全量类型上移评估为高churn低边际收益，记为接受的债（绊线已消除静默性）。
 
 ### ISSUE-A5 · 三层恢复机制叠放 + rehydrating 补丁旗 —— P2 · Confirmed · Medium · Critical Path: Yes
 - **FACT**：`useRuntime.ts:583-627` 早退优先级：runtime replay → localStorage snapshot（`persistence.ts` 含 `LEGACY_IN_FLIGHT_STORAGE_KEY`，双 timer 400ms/5000ms 持续全量写入）→ plain history。snapshot 层已被 replay 降级但写路径全在。`rehydrating` flag(:54) 穿透 live handler 抑制 :862/:1528 两处副作用——replay 复用 live 通道的补丁。

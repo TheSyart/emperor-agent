@@ -1,4 +1,4 @@
-import type { RuntimeEvent as CoreRuntimeEvent } from '@emperor/core'
+import type { ControlMode as CoreControlMode, InteractionKind as CoreInteractionKind, InteractionStatus as CoreInteractionStatus, RuntimeEvent as CoreRuntimeEvent } from '@emperor/core'
 
 export interface ToolInfo {
   name: string
@@ -620,9 +620,10 @@ export interface ControlQuestion {
   options: ControlQuestionOption[]
 }
 
-export type ControlMode = 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan' | string
-export type InteractionKind = 'ask' | 'plan' | string
-export type InteractionStatus = 'waiting' | 'answered' | 'commented' | 'approved' | 'cancelled' | string
+// 控制枚举以 core control/models 为单一来源；`| string` 容忍未来后端新增值
+export type ControlMode = `${CoreControlMode}` | string
+export type InteractionKind = `${CoreInteractionKind}` | string
+export type InteractionStatus = `${CoreInteractionStatus}` | string
 
 export interface ControlInteraction {
   id: string
@@ -916,7 +917,9 @@ export interface SchedulerPayload {
   diagnostics?: Record<string, unknown>
 }
 
-export type WsEvent = CoreRuntimeEvent & ({ seq?: number; ts?: number; session_id?: string; turn_id?: string; client_message_id?: string; owner?: Record<string, unknown> } & (
+export type WsEvent = CoreRuntimeEvent & ({ seq?: number; ts?: number; session_id?: string; turn_id?: string; client_message_id?: string; owner?: Record<string, unknown> } & WsEventVariants)
+
+type WsEventVariants = (
   | { event: 'ready'; model?: string; provider?: string; latest_seq?: number; replay_count?: number; resume_from?: number; busy?: boolean; control?: ControlPayload }
   | { event: 'user_message'; content?: string; attachments?: AttachmentRef[]; source?: string; scheduler?: SchedulerMessageMeta; ui_hidden?: boolean }
   | { event: 'message_delta'; delta?: string }
@@ -993,7 +996,15 @@ export type WsEvent = CoreRuntimeEvent & ({ seq?: number; ts?: number; session_i
   | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
   | { event: 'runtime_task_cancelled'; task?: { id?: string; kind?: string; label?: string; turnId?: string; jobId?: string }; reason?: string }
   | { event: 'record_degraded'; kind?: string; reason?: string; taskId?: string }
-))
+)
+
+// INV-005 绊线：desktop 手抄的事件 union 与 core RuntimeEvent 的事件名必须保持一一对应。
+// 任一侧新增/改名事件而另一侧未同步时，这两行在编译期直接报错（此前漂移是静默的）。
+type _WsEventName = WsEventVariants['event']
+type _CoreEventName = CoreRuntimeEvent['event']
+type _AssertDesktopSubset = [_WsEventName] extends [_CoreEventName] ? true : ['desktop 声明了 core 不存在的事件', Exclude<_WsEventName, _CoreEventName>]
+type _AssertCoreCovered = [_CoreEventName] extends [_WsEventName] ? true : ['core 事件未在 desktop union 声明', Exclude<_CoreEventName, _WsEventName>]
+export const WS_EVENT_NAME_PARITY: _AssertDesktopSubset extends true ? (_AssertCoreCovered extends true ? true : _AssertCoreCovered) : _AssertDesktopSubset = true
 
 export interface SessionInfo {
   id: string
