@@ -212,3 +212,21 @@ function arrayOfStrings(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map((item) => String(item)).filter(Boolean)
 }
+
+// ── 手工排序（W6：从 SessionSidebar.vue 下沉的纯数组算法） ──
+
+/** 把可见 id 并入既有手工顺序：保留已排序的可见项，追加未入序的新项。 */
+export function completeManualOrder(current: string[], visible: string[]): string[] {
+  return [...current.filter((id) => visible.includes(id)), ...visible.filter((id) => !current.includes(id))]
+}
+
+/** 在列表内把 id 向前/向后移动一位，越界钳制，未找到返回原列表。 */
+export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
+  const index = ids.indexOf(id)
+  if (index < 0) return ids
+  const target = Math.min(ids.length - 1, Math.max(0, index + delta))
+  const next = [...ids]
+  const [item] = next.splice(index, 1)
+  next.splice(target, 0, item)
+  return next
+}

@@ -26,6 +26,8 @@ import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import {
   buildSidebarGroups,
+  completeManualOrder,
+  moveId,
   defaultSidebarState,
   normalizeSidebarState,
   searchSidebarSessions,
@@ -253,19 +255,6 @@ function moveProjectSession(project: SidebarProjectGroup, sessionId: string, del
   })
 }
 
-function completeManualOrder(current: string[], visible: string[]) {
-  return [...current.filter((id) => visible.includes(id)), ...visible.filter((id) => !current.includes(id))]
-}
-
-function moveId(ids: string[], id: string, delta: -1 | 1) {
-  const index = ids.indexOf(id)
-  if (index < 0) return ids
-  const target = Math.min(ids.length - 1, Math.max(0, index + delta))
-  const next = [...ids]
-  const [item] = next.splice(index, 1)
-  next.splice(target, 0, item)
-  return next
-}
 
 function closeMenus() {
   projectMenuOpen.value = false

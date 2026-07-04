@@ -128,3 +128,14 @@ describe('sidebar hides draft sessions (P1-6)', () => {
     expect(searchSidebarSessions(items, '新会话')).toEqual([])
   })
 })
+
+describe('manual ordering helpers (W6: moved out of SessionSidebar.vue)', () => {
+  it('completes the manual order with unseen ids and moves items within bounds', async () => {
+    const { completeManualOrder, moveId } = await import('./sidebarModel')
+    expect(completeManualOrder(['b', 'ghost'], ['a', 'b', 'c'])).toEqual(['b', 'a', 'c'])
+    expect(moveId(['a', 'b', 'c'], 'b', -1)).toEqual(['b', 'a', 'c'])
+    expect(moveId(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
+    expect(moveId(['a', 'b', 'c'], 'c', 1)).toEqual(['a', 'b', 'c'])
+    expect(moveId(['a', 'b', 'c'], 'missing', 1)).toEqual(['a', 'b', 'c'])
+  })
+})

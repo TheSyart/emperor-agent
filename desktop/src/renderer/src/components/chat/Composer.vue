@@ -12,7 +12,7 @@ import type { SlashPaletteItem } from '../../commands'
 import type { AttachmentRef, ChatSendPayload, CurrentModelConfig, ModelEntry, ToolInfo } from '../../types'
 import { actionIcons, modelIcons, toolIcon } from '../../icons'
 import type { IconComponent } from '../../icons'
-import { uploadAttachment } from '../../api/attachments'
+import { useAttachments } from '../../composables/useAttachments'
 import AttachmentChip from './AttachmentChip.vue'
 import CapabilityPicker from './CapabilityPicker.vue'
 import { composerModeOptions, composerSendDisabled, currentComposerMode, type ControlModeValue } from './composerControls'
@@ -47,9 +47,18 @@ const modelButton = ref<HTMLButtonElement | null>(null)
 const modelMenu = ref<HTMLElement | null>(null)
 const modeButton = ref<HTMLButtonElement | null>(null)
 const modeMenu = ref<HTMLElement | null>(null)
-const drafts = ref<AttachmentRef[]>([])
-const uploading = ref<Set<string>>(new Set())
-const dragActive = ref(false)
+const {
+  drafts,
+  uploading,
+  dragActive,
+  onFileInput,
+  onDragEnter,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  removeDraft,
+  takeDrafts,
+} = useAttachments({ isBusy: () => props.busy, onError: (message) => emit('error', message) })
 const addMenuOpen = ref(false)
 const modelMenuOpen = ref(false)
 const modeMenuOpen = ref(false)
@@ -76,7 +85,6 @@ const modeMenuPlacement = modeFloatingMenu.placement
 
 const ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
-const MAX_DRAFTS = 5
 
 const suggestions = computed(() => {
   const text = value.value
@@ -231,12 +239,11 @@ function submit() {
   if (!content && drafts.value.length === 0) return
   emit('send', {
     content,
-    attachments: [...drafts.value],
+    attachments: takeDrafts(),
     requestedSkills: normalized.requestedSkills,
     displayContent: normalized.displayContent,
   })
   value.value = ''
-  drafts.value = []
   closeAddMenu()
   closeModelMenu()
   closeModeMenu()
@@ -404,66 +411,6 @@ function pickFiles() {
   if (props.busy) return
   closeAddMenu()
   fileInput.value?.click()
-}
-
-async function handleFiles(files: FileList | File[] | null) {
-  if (!files) return
-  const slots = MAX_DRAFTS - drafts.value.length
-  if (slots <= 0) {
-    emit('error', `最多 ${MAX_DRAFTS} 个附件，请先发送或移除已有的`)
-    return
-  }
-  const list = Array.from(files).slice(0, slots)
-  for (const f of list) {
-    uploading.value.add(f.name)
-    try {
-      const ref = await uploadAttachment(f)
-      drafts.value.push(ref)
-    } catch (err) {
-      emit('error', err instanceof Error ? err.message : String(err))
-    } finally {
-      uploading.value.delete(f.name)
-    }
-  }
-}
-
-function onFileInput(e: Event) {
-  const target = e.target as HTMLInputElement
-  void handleFiles(target.files)
-  target.value = ''
-}
-
-function onDragEnter(e: DragEvent) {
-  if (props.busy) return
-  if (!hasFiles(e.dataTransfer)) return
-  e.preventDefault()
-  dragActive.value = true
-}
-function onDragOver(e: DragEvent) {
-  if (props.busy) return
-  if (!hasFiles(e.dataTransfer)) return
-  e.preventDefault()
-  dragActive.value = true
-}
-function onDragLeave(e: DragEvent) {
-  // 只有真正离开 composer-shell 时才取消高亮
-  if (e.target === e.currentTarget) dragActive.value = false
-}
-function onDrop(e: DragEvent) {
-  if (props.busy) return
-  e.preventDefault()
-  dragActive.value = false
-  if (!e.dataTransfer?.files?.length) return
-  void handleFiles(e.dataTransfer.files)
-}
-
-function hasFiles(dt: DataTransfer | null): boolean {
-  if (!dt) return false
-  return Array.from(dt.types || []).includes('Files')
-}
-
-function removeDraft(idx: number) {
-  drafts.value.splice(idx, 1)
 }
 
 const pct = computed(() => (props.contextMax > 0 ? props.contextUsed / props.contextMax : 0))
