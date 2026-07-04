@@ -20,11 +20,9 @@ import type { ToolRegistry } from '../tools/registry'
 import { ToolResultObj, type ToolDefinition } from '../tools/base'
 import { ToolExecutionEngine } from '../tools/execution'
 import { TurnPaused } from '../control/exceptions'
-import { parsePauseResult } from '../control/tools'
-import { interactionToDict, type Interaction } from '../control/models'
+import type { Interaction } from '../control/models'
 import { PlanContextBuilder } from '../plans/context'
-import { resultFromToolOutput, type VerificationCommand } from '../plans/verification'
-import { PlanStatus, planToDict, type PlanRecord } from '../plans/models'
+import { PlanStatus, type PlanRecord } from '../plans/models'
 import type { PlanStore } from '../plans/store'
 import { writePromptSnapshot, type PromptSectionInput } from '../prompts/manifest'
 import {
@@ -48,11 +46,10 @@ import { ContextOverflowError } from '../errors'
 import { isContextOverflowProviderError } from '../providers/errors'
 import * as runtimeEvents from './runtime-events'
 import {
+  applyRepeatedRefusalNudge,
   buildMaxTurnsSummary,
   contextUsedFromUsage,
   controlInteractionEvent,
-  discoveryEvidenceRefs,
-  discoveryFiles,
   estimateMessagesTokens,
   latestUserText,
   optionalInt,
@@ -62,6 +59,15 @@ import {
   summarizeToolResult,
 } from './runner-helpers'
 import { toolIntentThought, toolResultSummaryThought } from './runner-thoughts'
+import { maybePauseForControl, pauseForClarification, pauseForPlan, toolMessagesForPause } from './runner-pause'
+import {
+  planIndependentVerificationFollowup,
+  planVerificationFollowup,
+  planVerificationTarget,
+  recordPlanDiscovery,
+  recordPlanStepToolOutput,
+  recordPlanVerification,
+} from './runner-plan-recording'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Msg = Record<string, unknown>
@@ -467,13 +473,13 @@ export class AgentRunner implements RunnerModelHost {
       if (clarification.required && reply.trim()) {
         queryState = markPaused(queryState, TransitionReason.ASK_PAUSE).nextState
         await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, { kind: 'ask', source: 'clarification' })
-        await this.pauseForClarification(history, clarification, emit, turnId)
+        await pauseForClarification(this, history, clarification, emit, turnId)
       }
 
       if (this.mustPauseForPlan()) {
         queryState = markPaused(queryState, TransitionReason.PLAN_PAUSE).nextState
         await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, { kind: 'plan', source: 'plan_final' })
-        await this.pauseForPlan(history, reply, emit, turnId)
+        await pauseForPlan(this, history, reply, emit, turnId)
       }
 
       finalParts.push(reply)
@@ -497,7 +503,7 @@ export class AgentRunner implements RunnerModelHost {
         this.todoStore.todos = []
       }
 
-      const verificationFollowup = this.planIndependentVerificationFollowup()
+      const verificationFollowup = planIndependentVerificationFollowup(this.controlManager, this.registry)
       if (verificationFollowup !== null) {
         history.push({ role: 'user', content: String(verificationFollowup.message) })
         await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, { plan_id: verificationFollowup.plan_id, verification: verificationFollowup.status })
@@ -647,25 +653,25 @@ export class AgentRunner implements RunnerModelHost {
     const runOne = async (call: ToolCallRequest): Promise<ToolResultObj> => {
       throwIfAborted(signal)
       await this.emitToolCall(call, emit)
-      const verificationTarget = this.planVerificationTarget(call)
+      const verificationTarget = planVerificationTarget(this.controlManager, call)
       if (verificationTarget !== null && emit) {
         await emit(runtimeEvents.planVerificationStart({ planId: verificationTarget.plan_id!, stepId: verificationTarget.step_id!, command: verificationTarget.command! }))
       }
       const result = await this.runToolResult(call, emit, clarification, ctx.planDecisionRef.current, signal)
       throwIfAborted(signal)
-      this.applyRepeatedRefusalNudge(result)
-      this.recordPlanDiscovery(call, result)
-      this.recordPlanStepToolOutput(call, result)
+      applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
+      recordPlanDiscovery(this.controlManager, call, result)
+      recordPlanStepToolOutput(this.controlManager, call, result)
       const content = result.modelContent
       resultsById.set(call.id, result)
-      this.maybePauseForControl(content, ctx.toolCallsRef.current, resultsById)
-      const verificationUpdate = this.recordPlanVerification(call, content, verificationTarget)
+      maybePauseForControl(content, ctx.toolCallsRef.current, resultsById)
+      const verificationUpdate = recordPlanVerification(this.controlManager, call, content, verificationTarget)
       if (verificationUpdate !== null && emit) {
         await emit(runtimeEvents.planVerificationDone({ planId: verificationUpdate.target.plan_id!, stepId: verificationUpdate.target.step_id!, result: verificationUpdate.result }))
         await emit(runtimeEvents.planRuntimeUpdate(verificationUpdate.plan))
       }
       if (verificationUpdate !== null) {
-        const followup = AgentRunner.planVerificationFollowup(verificationUpdate)
+        const followup = planVerificationFollowup(verificationUpdate)
         if (followup !== null) planFollowups.push(followup)
       }
       await this.emitToolResult(call, result, emit)
@@ -771,19 +777,6 @@ export class AgentRunner implements RunnerModelHost {
     }
   }
 
-  private static readonly SAFETY_REFUSAL_RE = /command refused by safety policy \(matches dangerous pattern: ([^)]+)\)/
-
-  /** 同一危险模式在一轮内反复被拒时，向模型追加换策略的强化提示（P1-4）。 */
-  private applyRepeatedRefusalNudge(result: ToolResultObj): void {
-    const match = AgentRunner.SAFETY_REFUSAL_RE.exec(result.modelContent)
-    if (match === null) return
-    const pattern = match[1]!
-    const count = (this.denyRefusalCounts.get(pattern) ?? 0) + 1
-    this.denyRefusalCounts.set(pattern, count)
-    if (count < 2) return
-    result.modelContent +=
-      `\n（该危险模式本轮已被拒绝 ${count} 次，必须改变策略：把代码写入临时脚本文件后执行，或运行现有测试/脚本文件；不要再重试同类命令。）`
-  }
 
   private activePlanForSummary(): PlanRecord | null {
     const store = this.controlManager?.planStore
@@ -800,40 +793,7 @@ export class AgentRunner implements RunnerModelHost {
     }
   }
 
-  private recordPlanDiscovery(call: ToolCallRequest, result: ToolResultObj): void {
-    if (result.isError || this.controlManager === null || typeof this.controlManager.recordPlanDiscovery !== 'function') return
-    const source = String(result.metadata.tool ?? call.name)
-    if (source !== 'read_file' && source !== 'grep') return
-    const files = discoveryFiles(source, result)
-    if (source === 'grep' && !files.length) return
-    const evidenceRefs = discoveryEvidenceRefs(source, result, files)
-    try {
-      this.controlManager.recordPlanDiscovery({
-        source,
-        summary: result.displaySummary || summarizeToolResult(result.modelContent, 240),
-        files,
-        evidenceRefs,
-      })
-    } catch {
-      /* tolerate */
-    }
-  }
 
-  private recordPlanStepToolOutput(call: ToolCallRequest, result: ToolResultObj): void {
-    if (this.controlManager === null || typeof this.controlManager.recordPlanStepToolOutput !== 'function') return
-    try {
-      this.controlManager.recordPlanStepToolOutput({
-        toolName: call.name,
-        summary: result.displaySummary || summarizeToolResult(result.modelContent, 240),
-        toolCallId: call.id,
-        artifacts: result.artifactPayloads(),
-        metadata: result.metadata,
-        isError: result.isError,
-      })
-    } catch {
-      /* tolerate */
-    }
-  }
 
   private assessClarification(history: Msg[]): Clarification {
     if (this.controlManager === null) return EMPTY_CLARIFICATION
@@ -864,122 +824,17 @@ export class AgentRunner implements RunnerModelHost {
     }
   }
 
-  private async pauseForClarification(history: Msg[], clarification: Clarification, emit: StreamEmitter | null, turnId: string | null): Promise<void> {
-    if (this.controlManager === null) return
-    const interaction = this.controlManager.createAsk({ questions: clarification.questions, context: `Ask Guard: ${clarification.reason}` })
-    const message: Msg = { role: 'assistant', content: '需要先确认关键取舍，已触发 Ask Guard。' }
-    if (turnId) message.turn_id = turnId
-    history.push(message)
-    if (this.memoryStore !== null) this.memoryStore.writeCheckpoint(history)
-    const payload = interactionToDict(interaction)
-    if (emit) {
-      await emit(controlInteractionEvent(payload))
-      await emit({ event: 'turn_paused', interaction: payload })
-    }
-    throw new TurnPaused(payload, [])
-  }
 
-  private async pauseForPlan(history: Msg[], reply: string, emit: StreamEmitter | null, turnId: string | null): Promise<void> {
-    if (this.controlManager === null) return
-    const interaction = this.controlManager.createPlanFromText(reply)
-    const message: Msg = { role: 'assistant', content: reply }
-    if (turnId) message.turn_id = turnId
-    history.push(message)
-    if (this.memoryStore !== null) this.memoryStore.writeCheckpoint(history)
-    const payload = interactionToDict(interaction)
-    if (emit) {
-      await emit(controlInteractionEvent(payload))
-      await emit({ event: 'turn_paused', interaction: payload })
-    }
-    throw new TurnPaused(payload, [])
-  }
 
   private mustPauseForPlan(): boolean {
     return this.controlManager !== null && this.controlManager.shouldEnforcePlanFinal()
   }
 
-  private maybePauseForControl(content: string, toolCalls: ToolCallRequest[], resultsById: Map<string, ToolResultObj>): void {
-    const interaction = parsePauseResult(content)
-    if (interaction === null) return
-    const toolMessages = AgentRunner.toolMessagesForPause(toolCalls, resultsById, interaction)
-    throw new TurnPaused(interaction, toolMessages)
-  }
 
-  private planIndependentVerificationFollowup(): Record<string, unknown> | null {
-    if (this.controlManager === null || typeof this.controlManager.planIndependentVerificationFollowup !== 'function') return null
-    return this.controlManager.planIndependentVerificationFollowup({ dispatchAvailable: this.registry.get('dispatch_subagent') !== undefined })
-  }
 
-  private planVerificationTarget(call: ToolCallRequest): Record<string, string> | null {
-    if (call.name !== 'run_command' || this.controlManager === null) return null
-    const command = call.arguments.command
-    if (typeof command !== 'string' || typeof this.controlManager.planVerificationTarget !== 'function') return null
-    return this.controlManager.planVerificationTarget(command)
-  }
 
-  private recordPlanVerification(
-    call: ToolCallRequest,
-    content: string,
-    target: Record<string, string> | null,
-  ): { target: Record<string, string>; result: Record<string, unknown>; plan: Record<string, unknown> } | null {
-    if (target === null || this.controlManager === null || typeof this.controlManager.recordPlanVerificationResult !== 'function') return null
-    const command: VerificationCommand = { command: target.command!, cwd: null, timeoutSeconds: 300 }
-    const resultObj = resultFromToolOutput(command, content)
-    const result: Record<string, unknown> = {
-      command: resultObj.command,
-      exit_code: resultObj.exitCode,
-      passed: resultObj.passed,
-      summary: resultObj.summary,
-      stdout_tail: resultObj.stdoutTail,
-      stderr_tail: resultObj.stderrTail,
-      checked_at: resultObj.checkedAt,
-      source: 'run_command',
-      tool_call_id: call.id,
-    }
-    if (target.requirement_id) {
-      result.requirement_id = target.requirement_id
-      result.verification_id = target.requirement_id
-    }
-    const plan = this.controlManager.recordPlanVerificationResult({ planId: target.plan_id!, stepId: target.step_id!, result })
-    if (plan === null) return null
-    return { target, result, plan: planToDict(plan) }
-  }
 
-  private static planVerificationFollowup(update: { result: Record<string, unknown>; target: Record<string, string> }): Msg | null {
-    const result = update.result ?? {}
-    if (result.passed !== false) return null
-    const target = update.target ?? {}
-    return {
-      role: 'user',
-      content: [
-        '[PLAN_VERIFICATION_FAILED]',
-        `plan_id: ${target.plan_id}`,
-        `step_id: ${target.step_id}`,
-        `command: ${result.command}`,
-        `exit_code: ${result.exit_code}`,
-        `summary: ${result.summary}`,
-        '',
-        '该计划步骤的验证命令失败。不要直接最终答复；先诊断失败原因，修复后重新执行相关验证。如果失败原因需要用户决策，调用 ask_user。',
-      ].join('\n'),
-    }
-  }
 
-  private static toolMessagesForPause(toolCalls: ToolCallRequest[], resultsById: Map<string, ToolResultObj>, interaction: Record<string, unknown>): Msg[] {
-    const messages: Msg[] = []
-    let currentId = String(interaction.parent_call_id ?? '')
-    for (const call of toolCalls) {
-      const result = resultsById.get(call.id)
-      let content: string | null = result !== undefined ? result.modelContent : null
-      if (content && parsePauseResult(content)) {
-        content = `waiting for user (${interaction.kind}:${interaction.id})`
-      } else if (content === null) {
-        content = 'skipped because the turn paused for user input'
-      }
-      messages.push({ role: 'tool', tool_call_id: call.id, name: call.name, content })
-      if (currentId && call.id === currentId) currentId = ''
-    }
-    return messages
-  }
 
   private async emitToolCall(call: ToolCallRequest, emit: StreamEmitter | null): Promise<void> {
     if (emit) await emit({ event: 'tool_call', id: call.id, name: call.name, arguments: call.arguments })

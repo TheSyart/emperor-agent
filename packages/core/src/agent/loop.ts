@@ -9,6 +9,7 @@ import { basename, join, resolve } from 'node:path'
 import { ContextBuilder, renderContextSections, type SkillsLoaderLike } from './context-builder'
 import { AgentRunner, type ControlManagerRunnerHost } from './runner'
 import { buildRoutedRunner } from './runner-factory'
+import { dispatchControlHost, permissionOnlyControlHost } from './control-hosts'
 import { loadLocalConfig, type PromptProfile } from '../config/local-config'
 import type { PermissionRuleInput } from '../permissions/rules'
 import { loadModelConfig } from '../config/model-config'
@@ -397,7 +398,7 @@ export class AgentLoop {
     this.registry.register(new ProposePlanTool(this.controlManager))
     this.registry.register(new RequestPlanModeTool(this.controlManager))
     this.registry.register(new UpdateTodos(this.todoStore))
-    const controlHost = this.dispatchControlHost()
+    const controlHost = dispatchControlHost(this.controlManager)
     this.registry.register(new DispatchSubagentTool({
       parentRegistry: this.registry,
       subagentRegistry: this.subagentRegistry,
@@ -407,7 +408,7 @@ export class AgentLoop {
         memoryStore: null,
         compactor: null,
         todoStore: null,
-        controlManager: this.permissionOnlyControlHost(),
+        controlManager: permissionOnlyControlHost(this.controlManager),
       }),
       taskManager: this.taskManager,
       controlManager: controlHost,
@@ -612,7 +613,7 @@ export class AgentLoop {
           memoryStore: null,
           compactor: null,
           todoStore: null,
-          controlManager: this.permissionOnlyControlHost(),
+          controlManager: permissionOnlyControlHost(this.controlManager),
           maxContext: route.snapshot.contextWindowTokens,
           maxTurns: 12,
           workspaceRoot: cleanProjectId ? this.workspaceRootForProject(cleanProjectId) : this.workspaceRootForActiveSession(),
@@ -637,34 +638,7 @@ export class AgentLoop {
     }
   }
 
-  private dispatchControlHost(): { mode?: string; [key: string]: unknown } {
-    const control = this.controlManager
-    return {
-      get mode(): string {
-        return control.mode
-      },
-    } as { mode?: string; [key: string]: unknown }
-  }
 
-  /**
-   * 子代理/Team 成员的 AgentRunner 控件宿主：只透传权限评估（工具审批闸门必须
-   * 覆盖子进程，否则 dispatch_subagent/Team 成为审批系统的旁路），不透传
-   * Ask-Guard/Plan 起草——那些是面向主对话的交互式功能，子代理"独立上下文、
-   * 只回传总结"的设计不应把用户拉进子代理内部的澄清/计划流程。
-   */
-  private permissionOnlyControlHost(): ControlManagerRunnerHost {
-    const control = this.controlManager
-    return {
-      systemPrompt: () => '',
-      toolDefinitions: (registry) => control.toolDefinitions(registry),
-      assessPermission: (name, args, registry) => control.assessPermission(name, args, registry),
-      permissionApprovalResult: (decision, opts) => control.permissionApprovalResult(decision as never, opts),
-      assessClarification: () => ({ required: false, reason: '', questions: [], categories: [] }),
-      shouldEnforcePlanFinal: () => false,
-      createAsk: (opts) => control.createAsk(opts),
-      createPlanFromText: (text) => control.createPlanFromText(text),
-    }
-  }
 
   private async emit(
     event: Record<string, unknown>,

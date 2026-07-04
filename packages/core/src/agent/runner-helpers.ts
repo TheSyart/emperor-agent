@@ -218,3 +218,17 @@ export function controlInteractionEvent(interaction: Record<string, unknown>): R
   const event = interaction.kind === 'ask' ? 'ask_request' : 'plan_draft'
   return { event, interaction }
 }
+
+const SAFETY_REFUSAL_RE = /command refused by safety policy \(matches dangerous pattern: ([^)]+)\)/
+
+/** 同一危险模式在一轮内反复被拒时，向模型追加换策略的强化提示（P1-4）。 */
+export function applyRepeatedRefusalNudge(counts: Map<string, number>, result: ToolResultObj): void {
+  const match = SAFETY_REFUSAL_RE.exec(result.modelContent)
+  if (match === null) return
+  const pattern = match[1]!
+  const count = (counts.get(pattern) ?? 0) + 1
+  counts.set(pattern, count)
+  if (count < 2) return
+  result.modelContent +=
+    `\n（该危险模式本轮已被拒绝 ${count} 次，必须改变策略：把代码写入临时脚本文件后执行，或运行现有测试/脚本文件；不要再重试同类命令。）`
+}
