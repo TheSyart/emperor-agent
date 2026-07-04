@@ -4,6 +4,7 @@
  * renderer 后续通过 IPC 调用这些方法。
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import { dirname, join, resolve } from 'node:path'
 import { AttachmentStore } from '../attachments/store'
 import type { ControlResume } from '../control/manager'
@@ -557,7 +558,7 @@ export class CoreApi {
     if (!sessionId) {
       throw new InvalidSessionError(`${operation} requires a real sessionId`, null)
     }
-    if (sessionId.startsWith('draft:')) {
+    if (sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
       throw new InvalidSessionError(`${operation} cannot read draft session ${sessionId}`, sessionId)
     }
     const session = this.loop.sessionStore.get(sessionId)

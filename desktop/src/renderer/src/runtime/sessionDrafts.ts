@@ -1,6 +1,8 @@
 import type { SessionControlPending, SessionInfo, WsEvent } from '../types'
 
-export const DRAFT_SESSION_PREFIX = 'draft:'
+import { DRAFT_SESSION_PREFIX } from '@emperor/core'
+
+export { DRAFT_SESSION_PREFIX }
 
 export interface DraftSessionOptions {
   title?: string

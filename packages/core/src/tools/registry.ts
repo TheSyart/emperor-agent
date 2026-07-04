@@ -4,7 +4,7 @@
  */
 import { ToolResultObj, type Tool, type ToolDefinition, type ToolExecutionContext, type ToolResult } from './base'
 import { ingestToolResultMedia } from '../media/ingest'
-import { ToolResultStore } from '../context/tool-results'
+import { truncationNotice, ToolResultStore } from '../context/tool-results'
 
 export class ToolRegistry {
   #tools = new Map<string, Tool>()
@@ -126,7 +126,7 @@ function attachFullOutputRef(mapped: ToolResult, execCtx: ToolExecutionContext, 
 
 function capText(text: string, limit: number): string {
   return text.length > limit
-    ? text.slice(0, limit - 200) + `\n...[truncated, total ${text.length} chars]...`
+    ? text.slice(0, limit - 200) + `\n${truncationNotice(text.length)}`
     : text
 }
 

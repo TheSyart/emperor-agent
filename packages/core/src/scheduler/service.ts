@@ -1,4 +1,5 @@
 import * as runtimeEvents from '../runtime/events'
+import { cleanString } from '../util/strings'
 import {
   computeNextRunMs,
   SchedulerJob,
@@ -259,6 +260,3 @@ export class SchedulerService {
 
 export { computeNextRunMs, validateSchedule, SchedulerJob, SchedulerPayload, SchedulerSchedule, SchedulerStatus }
 
-function cleanString(value: unknown): string {
-  return String(value ?? '').trim()
-}

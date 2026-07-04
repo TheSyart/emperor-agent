@@ -121,7 +121,6 @@ describe('ControlManager (test_control.py)', () => {
     const latest = manager.planStore.latest()
     expect(latest?.status).toBe(PlanStatus.CANCELLED)
     expect(manager.latestExecutablePlan()).toBeNull()
-    expect(manager.planCompletionFollowup()).toBeNull()
   })
 
   it('does not expose executable plans across different session or project scopes', () => {
@@ -155,7 +154,6 @@ describe('ControlManager (test_control.py)', () => {
     })
 
     expect(manager.latestExecutablePlan()).toBeNull()
-    expect(manager.planCompletionFollowup()).toBeNull()
   })
 
   it('stamps first-class session ownership onto created plans', () => {
@@ -591,16 +589,6 @@ describe('Plan verification matrix integration (test_plan_verification_matrix.py
     return { manager, planId: plan!.id }
   }
 
-  it('legacy todo projection can complete a step without passing every command first', () => {
-    const first = '.venv/bin/python -m pytest tests/unit/test_runner_state.py -q'
-    const second = '.venv/bin/python -m pytest tests/unit/test_plan_store.py -q'
-    const { manager, planId } = managerWithActiveStep([first, second])
-    manager.recordPlanVerificationResult({ planId, stepId: 'step_1', result: { command: first, passed: true, summary: 'first passed' } })
-
-    const updated = manager.syncPlanFromTodos([{ id: 1, content: 'Run matrix', status: 'completed' }], { evidence: { source: 'update_todos' } })
-    expect(updated!.steps[0]!.status).toBe('done')
-  })
-
   it('failed command evidence is recorded without forcing the active step to failed', () => {
     const command = '.venv/bin/python -m pytest tests/unit/test_runner_state.py -q'
     const { manager, planId } = managerWithActiveStep([command])
@@ -628,12 +616,6 @@ describe('Plan verification matrix integration (test_plan_verification_matrix.py
     })
   })
 
-  it('approved plans do not inject incomplete followup just because PlanStep is still active', () => {
-    const { manager } = managerWithActiveStep(['npm test'])
-
-    expect(manager.latestExecutablePlan()?.steps[0]?.status).toBe('active')
-    expect(manager.planCompletionFollowup()).toBeNull()
-  })
 })
 
 describe('Plan risk signals', () => {

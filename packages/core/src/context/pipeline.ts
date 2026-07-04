@@ -3,7 +3,7 @@
  * 对齐 Python `agent/context_pipeline/microcompact.py` + `pipeline.py`。
  */
 import { type OpenAiMsg, pairToolCalls } from './pairing'
-import { capToolResults, replaceAggregateToolResults, replaceLargeToolResults, shrinkOldToolResults, ToolResultStore } from './tool-results'
+import { DEFAULT_AGGREGATE_TOOL_RESULT_BUDGET, DEFAULT_TOOL_RESULT_BUDGET, capToolResults, replaceAggregateToolResults, replaceLargeToolResults, shrinkOldToolResults, ToolResultStore } from './tool-results'
 
 export { pairToolCalls, capToolResults, replaceAggregateToolResults, replaceLargeToolResults, shrinkOldToolResults, ToolResultStore }
 export { DEFAULT_AGGREGATE_TOOL_RESULT_BUDGET, DEFAULT_KEEP_RECENT, DEFAULT_TOOL_RESULT_BUDGET } from './tool-results'
@@ -52,12 +52,12 @@ export class ContextPipeline {
     microcompactHeadChars?: number
     microcompactTailChars?: number
   }) {
-    this.perCallLimit = opts?.perCallLimit ?? 8000
+    this.perCallLimit = opts?.perCallLimit ?? DEFAULT_TOOL_RESULT_BUDGET
     this.keepRecent = opts?.keepRecent ?? 10
     this.toolResultStore = opts?.toolResultStore ?? null
-    this.replacementMinBytes = opts?.replacementMinBytes ?? 8000
+    this.replacementMinBytes = opts?.replacementMinBytes ?? DEFAULT_TOOL_RESULT_BUDGET
     this.replacementPreviewChars = opts?.replacementPreviewChars ?? 1000
-    this.aggregateToolResultBudget = opts?.aggregateToolResultBudget ?? 24_000
+    this.aggregateToolResultBudget = opts?.aggregateToolResultBudget ?? DEFAULT_AGGREGATE_TOOL_RESULT_BUDGET
     this.toolResultLimits = { ...(opts?.toolResultLimits ?? {}) }
     this.planContextProvider = opts?.planContextProvider ?? null
     this.microcompactKeepRecent = opts?.microcompactKeepRecent ?? DEFAULT_MICROCOMPACT_KEEP_RECENT

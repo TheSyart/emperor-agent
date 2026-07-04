@@ -39,7 +39,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
     const events: Array<Record<string, unknown>> = []
 
@@ -86,7 +85,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
     const project = loop.projectStore.resolve(projectRoot)
     const buildSession = loop.sessionStore.create('Build project', { mode: 'build', project: project as unknown as Record<string, unknown> })
@@ -116,7 +114,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
     const firstSessionId = loop.activeSessionId!
     const second = loop.sessionStore.create('Second chat')
@@ -153,7 +150,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new QueueProvider([response('done')])),
-      startupCompaction: false,
     })
     const firstSessionId = loop.activeSessionId!
 
@@ -177,7 +173,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
-      startupCompaction: false,
     })
     const sessionId = loop.activeSessionId!
 
@@ -246,7 +241,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
 
     await loop.runUserTurn('帮我检查一下 marker.txt 这个文件的状态。', {
@@ -281,7 +275,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
 
     await loop.runUserTurn('写入 secret', { turnId: 'turn_rules', emit: async () => {} })
@@ -302,7 +295,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       root,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      startupCompaction: false,
     })
     const emitted: Array<Record<string, unknown>> = []
 

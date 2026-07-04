@@ -76,10 +76,6 @@ export class PlanVerificationManager {
     return updated
   }
 
-  planCompletionFollowup(): Record<string, unknown> | null {
-    return null
-  }
-
   recordIndependentVerificationResult(opts: { planId: string; result: Record<string, unknown> }): PlanRecord | null {
     const record = this.cm.planStore.get(opts.planId)
     if (record === null) return null

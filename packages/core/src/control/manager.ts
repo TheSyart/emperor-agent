@@ -502,10 +502,6 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.permissionManager.requireApproval(decision, { parentCallId: opts?.parentCallId ?? null })
   }
 
-  syncPlanFromTodos(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> | null }): PlanRecord | null {
-    return this.execution.syncPlanFromTodos(todos, opts)
-  }
-
   hasAskInteraction(): boolean {
     const state = this.store.load()
     return [state.pending, state.lastInteraction].some((item) => item !== null && item.kind === InteractionKind.ASK)
@@ -541,10 +537,6 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   revokePlanPermissionTokens(opts?: { planId?: string | null; reason?: string }): PlanRecord | null {
     return this.permissionTokens.revoke(opts)
-  }
-
-  planCompletionFollowup(): Record<string, unknown> | null {
-    return this.verification.planCompletionFollowup()
   }
 
   recordIndependentVerificationResult(opts: { planId: string; result: Record<string, unknown> }): PlanRecord | null {

@@ -1,4 +1,5 @@
 import * as runtimeEvents from '../runtime/events'
+import { cleanString } from '../util/strings'
 import type { ExternalAdapter } from './adapter'
 import { ExternalInbound, ExternalOutbound, seenKey } from './models'
 import { ExternalBridgeStore } from './store'
@@ -280,6 +281,3 @@ function targetSessionFromMessage(message: ExternalInbound): string {
   return cleanString(message.metadata[TARGET_SESSION_METADATA_KEY])
 }
 
-function cleanString(value: unknown): string {
-  return String(value ?? '').trim()
-}

@@ -88,7 +88,6 @@ export interface AgentLoopCreateOptions {
   promptProfile?: PromptProfile | string | null
   modelRouter?: LoopModelRouter | null
   modelOverride?: string | null
-  startupCompaction?: boolean
   initializeMcp?: boolean
   eventSink?: StreamEmitter | null
   permissionRules?: PermissionRuleInput[] | null
@@ -215,9 +214,6 @@ export class AgentLoop {
     }
     const session = loop.ensureActiveSession()
     loop.activateSession(session.id)
-    if (opts.startupCompaction) {
-      await loop.maybeCompactStartup()
-    }
     return loop
   }
 
@@ -689,11 +685,6 @@ export class AgentLoop {
     return this.runtimeStore
   }
 
-  private async maybeCompactStartup(): Promise<void> {
-    // Startup compaction needs a session-aware compactor. Keep the hook explicit for
-    // callers while avoiding accidental cross-session history rewrites.
-    return Promise.resolve()
-  }
 }
 
 function withTurnScope(event: Record<string, unknown>, scope: TurnScope): Record<string, unknown> {

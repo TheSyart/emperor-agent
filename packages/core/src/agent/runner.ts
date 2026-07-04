@@ -24,7 +24,7 @@ import { parsePauseResult } from '../control/tools'
 import { interactionToDict, type Interaction } from '../control/models'
 import { PlanContextBuilder } from '../plans/context'
 import { resultFromToolOutput, type VerificationCommand } from '../plans/verification'
-import { planToDict, type PlanRecord } from '../plans/models'
+import { PlanStatus, planToDict, type PlanRecord } from '../plans/models'
 import type { PlanStore } from '../plans/store'
 import { writePromptSnapshot, type PromptSectionInput } from '../prompts/manifest'
 import {
@@ -112,8 +112,6 @@ export interface ControlManagerRunnerHost {
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
   planMatchesCurrentScope?(record: PlanRecord): boolean
-  syncPlanFromTodos?(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> }): PlanRecord | null
-  planCompletionFollowup?(): Record<string, unknown> | null
   planIndependentVerificationFollowup?(opts?: { dispatchAvailable?: boolean }): Record<string, unknown> | null
   planVerificationTarget?(command: string): Record<string, string> | null
   recordPlanVerificationResult?(opts: { planId: string; stepId: string; result: Record<string, unknown> }): PlanRecord | null
@@ -273,7 +271,6 @@ export class AgentRunner implements RunnerModelHost {
     }
     let queryState: QueryState = makeQueryState({ turnId, maxTurns: this.maxTurns })
     const finalParts: string[] = []
-    const seenPlanFollowups = new Set<string>()
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
       this.memoryStore.writeCheckpoint(history)
@@ -498,34 +495,6 @@ export class AgentRunner implements RunnerModelHost {
           continue
         }
         this.todoStore.todos = []
-      }
-
-      const planFollowup = this.planCompletionFollowup()
-      if (planFollowup !== null) {
-        const key = planFollowupSignature(planFollowup)
-        if (seenPlanFollowups.has(key)) {
-          if (emit) {
-            await emit({
-              event: 'record_degraded',
-              kind: 'plan_followup_loop',
-              reason: 'repeated plan completion followup in one turn',
-              taskId: turnId ?? undefined,
-              plan_id: planFollowup.plan_id,
-              unfinished_count: planFollowup.unfinished_count,
-            })
-          }
-          if (this.memoryStore) {
-            this.memoryStore.appendHistory('assistant', finalReply, { extra: turnId ? { turn_id: turnId } : null })
-            this.memoryStore.clearCheckpoint()
-          }
-          queryState = markCompleted(queryState).nextState
-          await this.emitTurnPhase(turnState, TurnPhase.COMPLETED, emit, { content_chars: finalReply.length, degraded: 'plan_followup_loop' })
-          return finalReply
-        }
-        seenPlanFollowups.add(key)
-        history.push({ role: 'user', content: String(planFollowup.message) })
-        await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, { plan_id: planFollowup.plan_id, unfinished: planFollowup.unfinished_count })
-        continue
       }
 
       const verificationFollowup = this.planIndependentVerificationFollowup()
@@ -825,7 +794,7 @@ export class AgentRunner implements RunnerModelHost {
       if (typeof this.controlManager?.planMatchesCurrentScope === 'function' && !this.controlManager.planMatchesCurrentScope(record)) {
         return null
       }
-      return record.status === 'approved' || record.status === 'executing' ? record : null
+      return record.status === PlanStatus.APPROVED || record.status === PlanStatus.EXECUTING ? record : null
     } catch {
       return null
     }
@@ -934,11 +903,6 @@ export class AgentRunner implements RunnerModelHost {
     if (interaction === null) return
     const toolMessages = AgentRunner.toolMessagesForPause(toolCalls, resultsById, interaction)
     throw new TurnPaused(interaction, toolMessages)
-  }
-
-  private planCompletionFollowup(): Record<string, unknown> | null {
-    if (this.controlManager === null || typeof this.controlManager.planCompletionFollowup !== 'function') return null
-    return this.controlManager.planCompletionFollowup()
   }
 
   private planIndependentVerificationFollowup(): Record<string, unknown> | null {
@@ -1132,14 +1096,3 @@ function throwIfAborted(signal: AbortSignal | null | undefined): void {
   if (signal?.aborted) throw new CancelledTaskError('turn')
 }
 
-function planFollowupSignature(followup: Record<string, unknown>): string {
-  const plan = followup.plan && typeof followup.plan === 'object' ? followup.plan as Record<string, unknown> : null
-  const steps = Array.isArray(plan?.steps)
-    ? plan.steps
-      .filter((step): step is Record<string, unknown> => Boolean(step && typeof step === 'object' && !Array.isArray(step)))
-      .filter((step) => step.status !== 'done' && step.status !== 'skipped')
-      .map((step) => `${String(step.id ?? '')}:${String(step.status ?? '')}`)
-      .join('|')
-    : String(followup.message ?? '')
-  return `${String(followup.plan_id ?? '')}:${steps}`
-}

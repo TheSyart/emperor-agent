@@ -5,7 +5,7 @@ import { toolIcon } from '../../icons'
 import type { AssistantFlowBlock } from './assistantFlowProjection'
 import ToolDetailBody from './ToolDetailBody.vue'
 import { CHAT_EXPANSION_STORE_KEY } from './expansionStoreKey'
-import { toolPurpose, toolStatusText, toolTitle } from './toolDisplay'
+import { durationLabel, toolPurpose, toolStatusText, toolTitle } from './toolDisplay'
 import { toolCardDefaultOpen, toolGroupDetailText } from './toolGroupModel'
 
 type ToolGroupBlock = Extract<AssistantFlowBlock, { kind: 'tool_group' }>
@@ -42,11 +42,6 @@ function toolStatusLabel(tool: ToolSegment) {
   return statusLabel(tool.status)
 }
 
-function durationLabel(ms?: number) {
-  if (!ms && ms !== 0) return ''
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-}
 
 function isTodoTool(tool: ToolSegment) {
   return tool.name === 'update_todos' && Boolean(tool.todos?.length)

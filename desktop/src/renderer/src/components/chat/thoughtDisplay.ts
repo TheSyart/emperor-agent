@@ -24,6 +24,7 @@ function thoughtStatusLabel(segment: ThoughtSegment, executionDurationMs?: numbe
   return `${phase} · ${durationLabel(segment.durationMs)}`
 }
 
+// 注意：与 toolDisplay.durationLabel 不同——缺失时长时显示 '0ms' 而非空串（思考标签需要占位）
 function durationLabel(ms?: number) {
   if (!ms && ms !== 0) return '0ms'
   if (ms < 1000) return `${ms}ms`

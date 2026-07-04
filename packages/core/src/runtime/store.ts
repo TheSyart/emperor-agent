@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { cleanString } from '../util/strings'
 import {
   appendFileSync,
   existsSync,
@@ -330,9 +331,6 @@ function ownerReceipt(owner: unknown, scope: { sessionId?: string | null; turnId
   return out
 }
 
-function cleanString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
-}
 
 function isRecord(value: unknown): value is Row {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))

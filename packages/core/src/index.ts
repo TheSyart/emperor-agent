@@ -4,6 +4,7 @@
  */
 export * from './errors'
 export * from './util/ids'
+export * from './util/strings'
 export * from './util/time'
 export * from './util/log'
 export * from './events/bus'
@@ -70,6 +71,7 @@ export * from './memory/time-utc8'
 // sessions (W07)
 export * from './sessions/conversation'
 export * from './sessions/store'
+export * from './sessions/constants'
 export * from './sessions/migrate'
 export * from './sessions/title'
 // runtime / tasks / projects (W14)

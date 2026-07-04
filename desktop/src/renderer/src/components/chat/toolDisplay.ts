@@ -130,3 +130,9 @@ export function toolStatusText(status: ToolStatus): string {
   if (status === 'error_aborted') return '已中断'
   return '出错'
 }
+
+export function durationLabel(ms?: number): string {
+  if (!ms && ms !== 0) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+}

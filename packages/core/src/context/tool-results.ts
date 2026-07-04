@@ -13,6 +13,11 @@ export const DEFAULT_TOOL_RESULT_BUDGET = 8000
 export const DEFAULT_TOOL_RESULT_TAIL = 200
 export const DEFAULT_AGGREGATE_TOOL_RESULT_BUDGET = 24_000
 
+/** 截断标记的单一来源；tools 层与 context 层共用同一文案。 */
+export function truncationNotice(totalChars: number): string {
+  return `...[truncated, total ${totalChars} chars]...`
+}
+
 export interface ToolResultReplacementRecord {
   turn_id: string
   tool_call_id: string
@@ -54,7 +59,7 @@ export function capToolResults(
     capped++
     const head = text.slice(0, headChars)
     const tail = text.slice(-tailChars)
-    return { ...msg, content: `${head}\n...[truncated, total ${text.length} chars]...\n${tail}` }
+    return { ...msg, content: `${head}\n${truncationNotice(text.length)}\n${tail}` }
   })
   return [out, capped]
 }

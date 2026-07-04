@@ -17,8 +17,6 @@ import {
 import { PlanExecutionState } from '../plans/execution-state'
 import type { Interaction } from './models'
 import {
-  isPositiveInt,
-  planStatusFromTodo,
   stepVerificationStatus,
   taskStatusFromPlanStep,
 } from './plan-helpers'
@@ -30,69 +28,6 @@ const TASK_STATUS_FAILED = 'failed'
 export class PlanExecutionManager {
   private readonly cm: ControlManagerHost
   constructor(cm: ControlManagerHost) { this.cm = cm }
-
-  syncPlanFromTodos(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> | null }): PlanRecord | null {
-    const record = this.cm.latestExecutablePlan()
-    if (record === null || !record.steps.length) return null
-    const evidence = opts?.evidence ?? null
-    const todoByStepId = new Map<string, Record<string, unknown>>()
-    for (const item of todos) {
-      if (item && typeof item === 'object' && String(item.plan_step_id ?? '').trim()) {
-        todoByStepId.set(String(item.plan_step_id), item)
-      }
-    }
-    const todoByIndex = new Map<number, Record<string, unknown>>()
-    for (const item of todos) {
-      if (item && typeof item === 'object' && isPositiveInt(item.id)) {
-        todoByIndex.set(Number(item.id) - 1, item)
-      }
-    }
-    const now = nowTs()
-    const steps: PlanStep[] = []
-    record.steps.forEach((step, index) => {
-      const todo = todoByStepId.get(step.id) ?? todoByIndex.get(index)
-      if (todo === undefined) {
-        steps.push(step)
-        return
-      }
-      const todoStatus = String(todo.status ?? 'pending')
-      const nextStatus = planStatusFromTodo(todoStatus)
-      const stepEvidence = [...step.evidence]
-      if (nextStatus === PlanStepStatus.DONE && step.status !== PlanStepStatus.DONE) {
-        stepEvidence.push({
-          ...(evidence ?? {}),
-          todo_id: todo.id,
-          plan_step_id: todo.plan_step_id ?? step.id,
-          todo_status: todoStatus,
-          synced_at: now,
-        })
-      }
-      if (nextStatus === PlanStepStatus.BLOCKED && step.status !== PlanStepStatus.BLOCKED) {
-        stepEvidence.push({
-          ...(evidence ?? {}),
-          todo_id: todo.id,
-          plan_step_id: todo.plan_step_id ?? step.id,
-          todo_status: todoStatus,
-          blocked_reason: String(todo.blocked_reason ?? '').trim(),
-          synced_at: now,
-        })
-      }
-      steps.push({ ...step, status: nextStatus, evidence: stepEvidence })
-    })
-
-    const allDone = steps.length > 0 && steps.every((s) => s.status === PlanStepStatus.DONE || s.status === PlanStepStatus.SKIPPED)
-    const planStatus = allDone ? PlanStatus.COMPLETED : PlanStatus.EXECUTING
-    let updated: PlanRecord = {
-      ...record,
-      status: planStatus,
-      completedAt: planStatus === PlanStatus.COMPLETED ? now : record.completedAt,
-      updatedAt: now,
-      steps,
-    }
-    updated = this.syncPlanStepTasks(updated)
-    this.cm.planStore.save(updated)
-    return updated
-  }
 
   recordPlanStepToolOutput(opts: {
     toolName: string

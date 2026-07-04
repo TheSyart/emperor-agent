@@ -1042,7 +1042,6 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(emitted).toEqual(expect.arrayContaining([
       expect.objectContaining({ event: 'turn_phase', phase: 'completed' }),
     ]))
-    expect(emitted.some((event) => event.event === 'record_degraded' && event.kind === 'plan_followup_loop')).toBe(false)
     expect(emitted.some((event) => event.event === 'turn_phase' && event.phase === 'plan_followup')).toBe(false)
     expect(emitted.some((event) => event.event === 'turn_phase' && event.phase === 'max_turns')).toBe(false)
     expect(memory.history.filter((item) => item.role === 'assistant')).toHaveLength(1)

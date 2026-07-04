@@ -244,12 +244,6 @@ export class TodoStore {
     return renderTodos(this.todos)
   }
 
-  // ── backward-compat shims (W04 callers) ──
-  getAll(): TodoItem[] { return this.todos as unknown as TodoItem[] }
-  replace(items: TodoItem[]): void {
-    this.update(items as unknown as Array<Record<string, unknown>>)
-  }
-  clear(): void { this.todos = [] }
 }
 
 function todoVerificationNudge(todos: Array<Record<string, unknown>>): string {

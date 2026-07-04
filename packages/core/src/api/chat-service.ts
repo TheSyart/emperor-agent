@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { AgentLoop } from '../agent/loop'
 import { TurnBusyError } from '../runtime/active'
 import { sessionCreated, sessionTitleUpdated } from '../runtime/events'
@@ -71,7 +72,7 @@ export class MainlineTurnService {
     const content = String(input.content ?? '')
     // P1-6：draft 首条提交在这里晋升为真实 session，先广播 session_created 再进 turn
     let promoted: SessionEntry | null = null
-    if (source === 'chat' && sessionId.startsWith('draft:')) {
+    if (source === 'chat' && sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
       promoted = this.promoteDraftSession(input)
       await this.emitSessionEvent(sessionCreated(promoted as unknown as Record<string, unknown>, { clientDraftId: sessionId }), input.emit ?? null)
     } else if (source === 'chat') {
@@ -161,7 +162,7 @@ export class MainlineTurnService {
   }
 
   private activateOptionalSession(sessionId: string, operation: string): void {
-    if (sessionId.startsWith('draft:')) {
+    if (sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
       throw new InvalidSessionError(`${operation} cannot submit draft session ${sessionId}`, sessionId)
     }
     const session = this.loop.sessionStore.get(sessionId)

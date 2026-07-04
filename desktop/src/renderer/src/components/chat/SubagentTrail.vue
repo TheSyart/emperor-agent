@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SubagentState, ToolStatus } from '../../types'
+import { durationLabel } from './toolDisplay'
 import { compactJson } from '../../utils/format'
 import { avatarIcons, toolIcon } from '../../icons'
 import ExpandableText from './ExpandableText.vue'
@@ -23,11 +24,6 @@ function agentKind(sub: SubagentState) {
   return sub.kind === 'team' ? 'Team Agent' : 'Agent'
 }
 
-function durationLabel(ms?: number) {
-  if (!ms && ms !== 0) return ''
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-}
 
 function messageTitle(msg: { from: string; to: string; type: string }) {
   if (msg.to === 'lead') return `${msg.from} 回禀`
