@@ -12,7 +12,7 @@ import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { provideAppContext } from './composables/useAppContext'
 import type { ChatSendPayload, CompactResult, ControlPayload, TokenStatsRow } from './types'
-import { api } from './api/http'
+import { core } from './api/http'
 import { saveOnboardingModelConfig } from './api/model'
 import { formatNumber, usageTypeLabel } from './utils/format'
 
@@ -382,10 +382,7 @@ function renderModeStatus() {
 
 async function setControlMode(mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan'): Promise<{ ok: boolean; error?: string }> {
   try {
-    const data = await api<ControlPayload>('/api/control/mode', {
-      method: 'POST',
-      body: JSON.stringify({ mode }),
-    })
+    const data = await core<ControlPayload>('control.setMode', mode)
     if (boot.value) boot.value.control = data
     const label = mode === 'plan' ? '计划模式' : mode === 'auto' ? '自动执行' : mode === 'accept_edits' ? '接受编辑' : '编辑前询问'
     showToast(`已切换为${label}`)

@@ -20,7 +20,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-vue-next'
-import { api } from '../../api/http'
+import { core } from '../../api/http'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
@@ -81,7 +81,7 @@ function rowIndicator(session: SessionInfo) {
 
 async function loadSidebarState() {
   try {
-    sidebarState.value = normalizeSidebarState(await api<Partial<SidebarState>>('/api/sidebar-state'))
+    sidebarState.value = normalizeSidebarState(await core<Partial<SidebarState>>('sidebar.get'))
   } catch {
     sidebarState.value = { ...defaultSidebarState }
   }
@@ -91,10 +91,7 @@ async function patchSidebarState(update: Partial<SidebarState>) {
   const next = normalizeSidebarState({ ...sidebarState.value, ...update })
   sidebarState.value = next
   try {
-    sidebarState.value = normalizeSidebarState(await api<Partial<SidebarState>>('/api/sidebar-state', {
-      method: 'PATCH',
-      body: JSON.stringify(update),
-    }))
+    sidebarState.value = normalizeSidebarState(await core<Partial<SidebarState>>('sidebar.patch', update))
   } catch {
     sidebarState.value = next
   }

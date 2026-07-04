@@ -7,7 +7,7 @@ import {
   RefreshCcw,
   TriangleAlert,
 } from 'lucide-vue-next'
-import { api } from '../../api/http'
+import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
 import {
@@ -32,7 +32,7 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    diagnostics.value = await api<DiagnosticsPayload>('/api/diagnostics')
+    diagnostics.value = await core<DiagnosticsPayload>('diagnostics.get')
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {

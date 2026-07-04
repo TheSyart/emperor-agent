@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { api } from '../../api/http'
+import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type { SchedulerJob, SchedulerPayload, SchedulerRunRecord, SchedulerSchedule } from '../../types'
 import { actionIcons, navIcon, toolIcon } from '../../icons'
@@ -90,7 +90,7 @@ function backToList() {
 async function refreshScheduler() {
   loading.value = true
   try {
-    const payload = await api<SchedulerPayload>('/api/scheduler')
+    const payload = await core<SchedulerPayload>('scheduler.get')
     if (ctx.boot.value) ctx.boot.value.scheduler = payload
   } finally {
     loading.value = false
@@ -101,9 +101,7 @@ async function createJob() {
   if (!createMessage.value.trim()) return
   loading.value = true
   try {
-    const result = await api<{ job: SchedulerJob; scheduler: SchedulerPayload }>('/api/scheduler/jobs', {
-      method: 'POST',
-      body: JSON.stringify({
+    const result = await core<{ job: SchedulerJob; scheduler: SchedulerPayload }>('scheduler.createJob', {
         name: createName.value.trim() || defaultJobName(),
         schedule: buildSchedule(
           createScheduleKind.value,
@@ -119,8 +117,7 @@ async function createJob() {
           deliver: createDeliver.value,
         },
         deleteAfterRun: createDeleteAfterRun.value,
-      }),
-    })
+      })
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     selectedId.value = result.job.id
     closeCreate()
@@ -135,11 +132,10 @@ async function saveSelected() {
   if (!selected.value || !selectedCanEdit.value) return
   loading.value = true
   try {
-    const result = await api<{ job: SchedulerJob; scheduler: SchedulerPayload }>(
-      `/api/scheduler/jobs/${encodeURIComponent(selected.value.id)}`,
+    const result = await core<{ job: SchedulerJob; scheduler: SchedulerPayload }>(
+      'scheduler.updateJob',
+      selected.value.id,
       {
-        method: 'PATCH',
-        body: JSON.stringify({
           name: editName.value.trim() || selected.value.name,
           schedule: buildSchedule(
             editScheduleKind.value,
@@ -154,7 +150,6 @@ async function saveSelected() {
             deliver: editDeliver.value,
           },
           deleteAfterRun: editDeleteAfterRun.value,
-        }),
       },
     )
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
@@ -184,10 +179,7 @@ async function deleteSelected() {
   if (!window.confirm(`删除定时任务「${selected.value.name}」？`)) return
   loading.value = true
   try {
-    const result = await api<{ deleted: string; scheduler: SchedulerPayload }>(
-      `/api/scheduler/jobs/${encodeURIComponent(selected.value.id)}`,
-      { method: 'DELETE' },
-    )
+    const result = await core<{ deleted: string; scheduler: SchedulerPayload }>('scheduler.deleteJob', selected.value.id)
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     selectedId.value = ''
     ctx.showToast('定时任务已删除')
@@ -199,10 +191,8 @@ async function deleteSelected() {
 async function schedulerAction(job: SchedulerJob, action: 'run' | 'pause' | 'resume', toast: string) {
   loading.value = true
   try {
-    const result = await api<{ scheduler: SchedulerPayload }>(
-      `/api/scheduler/jobs/${encodeURIComponent(job.id)}/${action}`,
-      { method: 'POST', body: JSON.stringify({}) },
-    )
+    const opByAction = { run: 'scheduler.runJob', pause: 'scheduler.pauseJob', resume: 'scheduler.resumeJob' } as const
+    const result = await core<{ scheduler: SchedulerPayload }>(opByAction[action], job.id)
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     ctx.showToast(toast)
   } finally {

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { api } from '../api/http'
+import { core } from '../api/http'
 import type { TokensPayload } from '../types'
 
 export function useTokens(showToast: (message: string) => void) {
@@ -11,7 +11,7 @@ export function useTokens(showToast: (message: string) => void) {
     try {
       loading.value = true
       error.value = ''
-      data.value = await api<TokensPayload>('/api/tokens')
+      data.value = await core<TokensPayload>('memory.tokens')
       if (!silent) showToast('Token 统计已刷新')
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)

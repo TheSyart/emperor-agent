@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { api } from '../api/http'
+import { core } from '../api/http'
 import type { ControlInteraction, ProjectInfo, SessionControlPending, SessionInfo, SessionMode, WsEvent } from '../types'
 import {
   applySessionCreated,
@@ -25,7 +25,7 @@ export function useSession() {
   async function load() {
     loading.value = true
     try {
-      sessions.value = await api<SessionInfo[]>('/api/sessions')
+      sessions.value = await core<SessionInfo[]>('sessions.list', { includeArchived: false })
       if (!sessions.value.length) {
         await create({ mode: 'chat', title: '新会话' })
       } else if (!activeId.value || !sessions.value.some((session) => session.id === activeId.value)) {
@@ -37,7 +37,7 @@ export function useSession() {
   }
 
   async function loadArchived(): Promise<SessionInfo[]> {
-    return api<SessionInfo[]>('/api/sessions?archived=1')
+    return core<SessionInfo[]>('sessions.list', { includeArchived: true })
   }
 
   /**
@@ -60,10 +60,7 @@ export function useSession() {
   }
 
   async function resolveProject(path: string): Promise<ProjectInfo> {
-    return api<ProjectInfo>('/api/projects/resolve', {
-      method: 'POST',
-      body: JSON.stringify({ path }),
-    })
+    return core<ProjectInfo>('projects.resolve', path)
   }
 
   async function remove(id: string): Promise<boolean> {
@@ -74,7 +71,7 @@ export function useSession() {
       return true
     }
     try {
-      await api<{ deleted: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      await core<{ deleted: boolean }>('sessions.delete', id)
       sessions.value = sessions.value.filter((s) => s.id !== id)
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
       if (!sessions.value.length) await create()
@@ -91,10 +88,7 @@ export function useSession() {
       return true
     }
     try {
-      await api<SessionInfo>(`/api/sessions/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ title }),
-      })
+      await core<SessionInfo>('sessions.rename', id, { title })
       const hit = sessions.value.find((s) => s.id === id)
       if (hit) hit.title = title
       return true
@@ -112,10 +106,7 @@ export function useSession() {
       return true
     }
     try {
-      const updated = await api<SessionInfo>(`/api/sessions/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ archived }),
-      })
+      const updated = await core<SessionInfo>('sessions.rename', id, { archived })
       if (archived) {
         sessions.value = sessions.value.filter((s) => s.id !== id)
         if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
@@ -134,10 +125,7 @@ export function useSession() {
   async function activate(id: string): Promise<void> {
     activeId.value = id
     if (!isDraftSessionId(id)) {
-      await api<{ active: string; complete: boolean }>(`/api/sessions/${encodeURIComponent(id)}/activate`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      }).catch(() => undefined)
+      await core<{ active: string; complete: boolean }>('sessions.activate', id).catch(() => undefined)
     }
   }
 

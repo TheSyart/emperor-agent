@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { api } from '../../api/http'
+import { core } from '../../api/http'
 
 const props = defineProps<{ open: boolean; taskId: string }>()
 const emit = defineEmits<{ 'update:open': [boolean] }>()
@@ -18,9 +18,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api<TranscriptResponse>(
-      `/api/tasks/${encodeURIComponent(props.taskId)}/transcript?limit=200`,
-    )
+    const data = await core<TranscriptResponse>('tasks.transcript', props.taskId, { limit: 200 })
     messages.value = data?.transcript?.messages || []
   } catch (e) {
     error.value = String(e)

@@ -22,7 +22,7 @@ import { schedulerMessageMeta } from '../runtime/schedulerMeta'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
 import { applyToolResultToSegment, applyToolRunUpdateToSegment, settleRunningToolSegments } from '../runtime/toolStatus'
 import { compactJson } from '../utils/format'
-import { api } from '../api/http'
+import { core } from '../api/http'
 
 function nextId(prefix: string) {
   const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -254,10 +254,7 @@ export function useRuntime(options: {
   async function stopActive() {
     updatePending('正在停止当前任务...', '', 'running')
     try {
-      const data = await api<Record<string, unknown>>('/api/runtime/stop', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      })
+      const data = await core<Record<string, unknown>>('chat.stopRuntime', {})
       return handleStopResult(data)
     } catch (err) {
       updatePending('停止任务失败', err instanceof Error ? err.message : String(err), 'error')
