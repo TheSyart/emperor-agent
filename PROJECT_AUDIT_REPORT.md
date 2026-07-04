@@ -93,9 +93,25 @@
 | 可观测 | 7/10 | runtime 事件流完备、degraded 事件、prompt snapshot；扣：日志分级使用无规范 |
 | 文档 | 6/10 | 迁移契约/审计记录齐全；扣：docs 未标时效，多篇过时无弃用标记 |
 
-## 6. 整改路线（已获批准，全量执行）
+## 6. 整改结果（2026-07-04 当日完成，commits 7366bfb..191f20e）
 
-W1 死代码与重复规则清除 → W2 双生投影统一（最大传播面）→ W3 恢复机制收敛 → W4 假路由表清除 → W5 事件契约单一来源 → W6 组件逻辑下沉 → W7 runner/loop 安全拆分。每 Wave 以现有 663 测试原样通过为界、独立提交。详细步骤见 `.claude/plans/bug-md-merry-valiant.md`。
+| Wave | 对应 ISSUE | 结果 |
+|---|---|---|
+| W1 | A3死簇/A7/A9 | planFollowup 死簇、syncPlanFromTodos 链、ToolEvent.vue、TodoStore shims、空 hook 全删；cleanString/draft:/截断标记/8000 预算/durationLabel 单一来源化（thoughtDisplay 的 '0ms' 变体经核实为有意差异，保留并注释） |
+| W2 | A1 | chatProjection 成为唯一 reducer，live 经响应式 adapter 驱动同一 `applyChatProjectionEvent`；12 个重复函数删除；reducer 吸收 live 语义（收养无 turn 助手、schedulerMeta、逐事件 thought、plan delta meta 归一） |
+| W3 | A5 | localStorage snapshot 子系统（persistence/snapshot + LEGACY_ key + 双 timer）整体删除；恢复收敛为 replay → plain history 两层；rehydrating 仅余非 chat 事件回放一个用途 |
+| W4 | A2 | coreRoute 假 REST 路由表删除；46 个调用点直呼 op 名；`core<T>(op,...)` 薄封装 |
+| W5 | A4 | **勘误后**改为编译期奇偶校验绊线（双向子集断言，漂移即报错点名事件）+ 控制枚举从 core 派生；payload 全量上移记为接受的债 |
+| W6 | A8 | App.vue 638→261 行（slash REPL → useSlashCommands + statusRender 纯函数）；SessionSidebar 排序算法下沉 sidebarModel；Composer 附件管道 → useAttachments |
+| W7 | A3/A6 残余 | runner 1145→953（plan-recording 六函数 + pause 家族 + nudge 下沉）；loop 796→761（两个 control host 工厂下沉）；emit 家族与 loop session-context 按裁剪条款放弃（纯搬家无内聚收益） |
+
+**收尾侦察对比**：重复投影函数 12→0；假路由分支 ~90→0；useRuntime 1758→1309（预估 <900 未达成——剩余为 team/scheduler/subagent 事件处理等真实职责，非重复代码）；App.vue 638→261。全程 core 428 + desktop 225 测试与双侧 typecheck、生产构建全绿（测试数变化均来自删除死 API 用例与新增模块测试）。
+
+**遗留（接受的债）**：core-api.ts 20 命名空间门面（IPC 注册表本职）；事件 payload 级类型仍双份（绊线已消除静默漂移）；runner/loop 进一步拆分；Vue 组件层零测试覆盖。
+
+## 6.1 原整改路线
+
+W1 死代码与重复规则清除 → W2 双生投影统一 → W3 恢复机制收敛 → W4 假路由表清除 → W5 事件契约单一来源 → W6 组件逻辑下沉 → W7 runner/loop 安全拆分。详细步骤见 `.claude/plans/bug-md-merry-valiant.md`。
 
 ## TOP 5 风险排序（按传播能力）
 
