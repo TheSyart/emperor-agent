@@ -1,10 +1,6 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RequestedSkill, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SessionInfo, TeamMessage, ThoughtSegment, ToolSegment, WsEvent } from '../types'
 import {
-  clearRuntimeSnapshotRaw,
-  writeRuntimeSnapshotRaw,
-} from '../runtime/persistence'
-import {
   applyChatProjectionEvent,
   createProjectionRuntime,
   finishActiveThought,
@@ -23,7 +19,6 @@ import { applyTaskEvent, type TaskProjection } from '../runtime/handlers/tasks'
 import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { schedulerMessageMeta } from '../runtime/schedulerMeta'
-import { loadRuntimeSnapshot, transcriptFromMessages, type RuntimeSnapshot } from '../runtime/snapshot'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
 import { applyToolResultToSegment, applyToolRunUpdateToSegment, settleRunningToolSegments } from '../runtime/toolStatus'
 import { compactJson } from '../utils/format'
@@ -58,7 +53,6 @@ export function useRuntime(options: {
   const sessionRuntimeStates = reactive<Record<string, { running: boolean; attention: boolean }>>({})
   const lastSeq = ref(0)
   let pendingClearTimer: number | undefined
-  let persistTimer: number | undefined
   let coreUnsubscribe: (() => void) | undefined
   let pendingVersion = 0
   let rehydrating = false
@@ -79,57 +73,6 @@ export function useRuntime(options: {
   }
 
   const currentAssistant = computed(() => messages.value.find((message) => message.id === currentAssistantId.value && message.role === 'assistant') as AssistantMessage | undefined)
-
-  // 审计 P1-3：流式期间每个 token/segment 变化都会触发这个 deep watch；直接同步
-  // JSON.stringify + localStorage.setItem 全量快照，成本随会话历史线性增长且在
-  // 最高频路径上反复重付——debounce 掉中间态，只在安静下来后落一次盘。
-  const PERSIST_DEBOUNCE_MS = 400
-  const PERSIST_BUSY_FLUSH_MS = 5000
-  watch(
-    [messages, currentAssistantId, busy, lastSeq],
-    schedulePersist,
-    { deep: true },
-  )
-  // turn 结束（busy: true -> false，对应 assistant_done/turn_paused 等终态）立即 flush，
-  // 不必等 debounce 窗口，避免用户在这之后立刻退出丢失最终状态。
-  watch(busy, (value, previous) => {
-    if (previous && !value) flushPersist()
-  })
-
-  function schedulePersist() {
-    if (!messages.value.length) {
-      cancelScheduledPersist()
-      clearRuntimeSnapshot()
-      return
-    }
-    // Wave3.4：流式期间（busy）不逐 delta 重排 debounce，只保留一个 ~5s 的安全 flush
-    // 定时器（崩溃最多丢 5s）；turn 结束由 busy watch 立即 flush。
-    if (busy.value) {
-      if (persistTimer !== undefined) return
-      persistTimer = window.setTimeout(() => {
-        persistTimer = undefined
-        persistRuntimeSnapshot()
-      }, PERSIST_BUSY_FLUSH_MS)
-      return
-    }
-    cancelScheduledPersist()
-    persistTimer = window.setTimeout(() => {
-      persistTimer = undefined
-      persistRuntimeSnapshot()
-    }, PERSIST_DEBOUNCE_MS)
-  }
-
-  function flushPersist() {
-    cancelScheduledPersist()
-    persistRuntimeSnapshot()
-  }
-
-  function cancelScheduledPersist() {
-    if (persistTimer !== undefined) {
-      window.clearTimeout(persistTimer)
-      persistTimer = undefined
-    }
-  }
 
   function runtimeText() {
     if (busy.value) return '正在办差'
@@ -577,7 +520,6 @@ export function useRuntime(options: {
     busy.value = false
     projectionRuntime = createProjectionRuntime()
     updatePending()
-    clearRuntimeSnapshot()
     options.showToast('当前屏幕已清空')
   }
 
@@ -609,16 +551,6 @@ export function useRuntime(options: {
       restoreFromRuntimeEvents(runtimeEvents)
       return
     }
-    const snapshot = loadRuntimeSnapshot(history)
-    if (snapshot) {
-      messages.value = snapshot.messages
-      currentAssistantId.value = snapshot.currentAssistantId
-      busy.value = Boolean(snapshot.currentAssistantId)
-      lastSeq.value = snapshot.lastSeq
-      if (busy.value) updatePending('正在恢复刷新前的回复...', `已收到事件 #${lastSeq.value}`)
-      return
-    }
-
     messages.value = history
       .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map((item) => {
@@ -1339,33 +1271,6 @@ export function useRuntime(options: {
     }
   }
 
-  function persistRuntimeSnapshot() {
-    if (!messages.value.length) {
-      clearRuntimeSnapshot()
-      return
-    }
-    const snapshot: RuntimeSnapshot = {
-      messages: messages.value,
-      currentAssistantId: currentAssistantId.value,
-      lastSeq: lastSeq.value,
-      savedAt: Date.now(),
-      transcript: transcriptFromMessages(messages.value),
-    }
-    try {
-      writeRuntimeSnapshotRaw(JSON.stringify(snapshot))
-    } catch {
-      // localStorage can be full or unavailable; backend history remains the text fallback.
-    }
-  }
-
-  function clearRuntimeSnapshot() {
-    try {
-      clearRuntimeSnapshotRaw()
-    } catch {
-      // Ignore storage failures; backend history remains the source of truth after completion.
-    }
-  }
-
   return {
     messages,
     busy,
@@ -1387,7 +1292,6 @@ export function useRuntime(options: {
       lastSeq.value = 0
       projectionRuntime = createProjectionRuntime()
       updatePending()
-      clearRuntimeSnapshot()
       if (coreUnsubscribe) {
         coreUnsubscribe()
         coreUnsubscribe = undefined

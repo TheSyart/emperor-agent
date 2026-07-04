@@ -796,55 +796,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
   })
 
-  it('debounces runtime snapshot persistence instead of writing to localStorage on every mutation (audit P1-3)', async () => {
-    vi.useFakeTimers()
-    try {
-      const setItem = vi.fn()
-      let listener: ((event: unknown) => void) | null = null
-      g.window = fakeWindow({
-        invokeCore: async (...args: unknown[]) => {
-          if (args[0] === 'chat.submit') {
-            listener?.({ event: 'user_message', seq: 1, turn_id: 'turn-debounce', content: 'hi' })
-            return { turnId: 'turn-debounce', content: 'abc' }
-          }
-          return { ok: true }
-        },
-        onCoreEvent: (cb: (event: unknown) => void) => {
-          listener = cb
-          return () => { listener = null }
-        },
-      }, setItem)
-      const runtime = useRuntime(testOptions())
-
-      runtime.connectSocket()
-      runtime.switchSession('s1')
-      runtime.sendMessage('hi')
-      await nextTick()
-
-      // 流式过程中每个 delta 都是独立的一次响应式 flush（对应真实场景里一帧一帧到达的 WS/IPC 事件），
-      // 每次都同步写一遍 localStorage 是审计指出的问题——debounce 后中途不应该有任何写入。
-      listener?.({ event: 'message_delta', seq: 2, turn_id: 'turn-debounce', delta: 'a' })
-      await nextTick()
-      listener?.({ event: 'message_delta', seq: 3, turn_id: 'turn-debounce', delta: 'b' })
-      await nextTick()
-      listener?.({ event: 'message_delta', seq: 4, turn_id: 'turn-debounce', delta: 'c' })
-      await nextTick()
-      expect(setItem).not.toHaveBeenCalled()
-
-      // turn 结束（busy: true -> false，对应 assistant_done/turn_paused）应该立即 flush 一次，
-      // 不必等 debounce 窗口，避免用户在这之后立刻退出丢失最终状态。
-      listener?.({ event: 'assistant_done', seq: 5, turn_id: 'turn-debounce', content: 'abc' })
-      await nextTick()
-      expect(setItem).toHaveBeenCalledTimes(1)
-
-      // debounce 定时器不应该在 flush 之后再补一次多余的写入。
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(setItem).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('surfaces model fallback events as a transient pending notice (Wave4.3)', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -893,50 +844,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     // 回合结束时 queued 段也要被 settle，不能永远停在排队态
     listener?.({ event: 'assistant_done', seq: 6, turn_id: 'turn-q', content: 'done' })
     expect(toolB?.status).toBe('error_aborted')
-  })
-
-  it('throttles persistence to a low-frequency safety flush while a turn is streaming (Wave3.4)', async () => {
-    vi.useFakeTimers()
-    try {
-      const setItem = vi.fn()
-      let listener: ((event: unknown) => void) | null = null
-      g.window = fakeWindow({
-        invokeCore: async (...args: unknown[]) => {
-          if (args[0] === 'chat.submit') {
-            listener?.({ event: 'user_message', seq: 1, turn_id: 'turn-throttle', content: 'hi' })
-            return { turnId: 'turn-throttle', content: 'done' }
-          }
-          return { ok: true }
-        },
-        onCoreEvent: (cb: (event: unknown) => void) => {
-          listener = cb
-          return () => { listener = null }
-        },
-      }, setItem)
-      const runtime = useRuntime(testOptions())
-
-      runtime.connectSocket()
-      runtime.switchSession('s1')
-      runtime.sendMessage('hi')
-      await nextTick()
-
-      // 慢速长流：10 个 delta、每个间隔 1s（共 10s）。busy 期间不应逐 delta 落盘，
-      // 只保留 ~5s 一次的安全 flush（崩溃最多丢 5s）。
-      for (let i = 0; i < 10; i += 1) {
-        listener?.({ event: 'message_delta', seq: 2 + i, turn_id: 'turn-throttle', delta: `chunk${i}` })
-        await nextTick()
-        await vi.advanceTimersByTimeAsync(1000)
-      }
-      expect(setItem.mock.calls.length).toBeGreaterThanOrEqual(1)
-      expect(setItem.mock.calls.length).toBeLessThanOrEqual(3)
-
-      const streamingWrites = setItem.mock.calls.length
-      listener?.({ event: 'assistant_done', seq: 20, turn_id: 'turn-throttle', content: 'done' })
-      await nextTick()
-      expect(setItem.mock.calls.length).toBe(streamingWrites + 1)
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   it('blocks chat submit before local enqueue when the active session id is missing', async () => {
