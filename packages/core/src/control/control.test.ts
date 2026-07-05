@@ -655,3 +655,77 @@ describe('TodoStore.syncFromPlanSteps (test_plan_execution_state.py)', () => {
     ])
   })
 })
+
+describe('Plan completion via todo sync (2026-07-05 B1)', () => {
+  function approvedManager(): { manager: ControlManager; todoStore: TodoStore; planId: string } {
+    const manager = new ControlManager(tmp('emperor-b1-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode('plan')
+    new ProposePlanTool(manager).execute({
+      title: 'B1 completion',
+      summary: 'Two-step plan for todo-sync completion.',
+      plan_markdown: '# Plan',
+      steps: [
+        { id: 'step_1', title: 'Build it', description: 'write the file', files: ['a.html'], commands: [], acceptance: ['built'] },
+        { id: 'step_2', title: 'Verify it', description: 'check output', files: [], commands: [], acceptance: ['checked'] },
+      ],
+      assumptions: [],
+      risk_level: 'low',
+    })
+    const pending = manager.payload().pending as Record<string, unknown>
+    manager.approve(String(pending.id))
+    const plan = manager.planStore.latest()
+    expect(plan).not.toBeNull()
+    return { manager, todoStore, planId: plan!.id }
+  }
+
+  it('projects model-style camelCase todo completion into plan steps and completes the plan', () => {
+    const { manager, todoStore, planId } = approvedManager()
+    // 模型输出 camelCase planStepId；TodoStore.update 负责归一为 plan_step_id
+    todoStore.update([
+      { id: 1, content: 'Build it', status: 'completed', planStepId: 'step_1' },
+      { id: 2, content: 'Verify it', status: 'completed', planStepId: 'step_2' },
+    ])
+    const updated = manager.syncPlanFromTodos(todoStore.todos, { evidence: { source: 'update_todos', tool_call_id: 'call_1' } })
+
+    expect(updated).not.toBeNull()
+    expect(updated!.id).toBe(planId)
+    expect(updated!.status).toBe(PlanStatus.COMPLETED)
+    expect(updated!.completedAt).not.toBeNull()
+    expect(updated!.steps.map((step) => step.status)).toEqual(['done', 'done'])
+    expect(updated!.steps[0]!.evidence.at(-1)).toMatchObject({ source: 'update_todos', todo_status: 'completed' })
+  })
+
+  it('keeps the plan executing while todos are still in flight', () => {
+    const { manager, todoStore } = approvedManager()
+    todoStore.update([
+      { id: 1, content: 'Build it', status: 'completed', planStepId: 'step_1' },
+      { id: 2, content: 'Verify it', status: 'in_progress', planStepId: 'step_2' },
+    ])
+    const updated = manager.syncPlanFromTodos(todoStore.todos, { evidence: { source: 'update_todos' } })
+    expect(updated!.status).toBe(PlanStatus.EXECUTING)
+    expect(updated!.steps.map((step) => step.status)).toEqual(['done', 'active'])
+  })
+
+  it('supersedes stale executing plans when a new plan is approved', () => {
+    const { manager, planId: firstPlanId } = approvedManager()
+    manager.setMode('plan')
+    new ProposePlanTool(manager).execute({
+      title: 'B1 successor',
+      summary: 'Second plan should supersede the zombie.',
+      plan_markdown: '# Plan 2',
+      steps: [{ id: 'step_1', title: 'Redo', description: 'redo', files: [], commands: [], acceptance: ['ok'] }],
+      assumptions: [],
+      risk_level: 'low',
+    })
+    const pending = manager.payload().pending as Record<string, unknown>
+    manager.approve(String(pending.id))
+
+    const first = manager.planStore.get(firstPlanId)
+    expect(first!.status).toBe(PlanStatus.CANCELLED)
+    expect(String(first!.metadata.superseded_by || '')).not.toBe('')
+    const successor = manager.planStore.latest()
+    expect(successor!.status).not.toBe(PlanStatus.CANCELLED)
+  })
+})

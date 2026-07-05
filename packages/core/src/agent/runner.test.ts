@@ -845,7 +845,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(planContext).toContain('status: approved')
   })
 
-  it('update_todos updates the session checklist without mutating approved plan steps', async () => {
+  it('update_todos completion projects into plan steps without evidence gating (2026-07-05 B1)', async () => {
     const manager = new ControlManager(tmp('emperor-runner-todo-decoupled-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
@@ -892,8 +892,12 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       todos: [{ id: 1, plan_step_id: 'step_1', content: 'Run matrix', status: 'completed' }],
     })
     expect(JSON.stringify(todoResult)).not.toContain('PLAN_EVIDENCE_REQUIRED')
-    expect(emitted.filter((event) => event.event === 'plan_runtime_update')).toHaveLength(0)
-    expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
+    // B1：todo 完成投影进计划步骤并收口计划（投影 ≠ 证据闸门，闸门保持解耦）
+    const finished = manager.planStore.get(planId)!
+    expect(finished.steps[0]!.status).toBe('done')
+    expect(finished.status).toBe('completed')
+    expect(finished.completedAt).not.toBeNull()
+    expect(finished.steps[0]!.evidence.at(-1)).toMatchObject({ source: 'update_todos', tool_call_id: 'todo_1' })
   })
 
   it('escalates a strategy nudge when the same safety refusal repeats within a turn', async () => {

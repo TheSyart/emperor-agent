@@ -254,6 +254,9 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     const interaction = this.requirePending(interactionId, InteractionKind.PLAN)
     const updated = touchInteraction(interaction, { status: InteractionStatus.APPROVED })
     this.execution.updatePlanStatus(updated, PlanStatus.APPROVED, { approved: true })
+    // 先取代旧的 approved/executing 计划再激活新计划，保证 latest() 指向新计划（B1）
+    const approvedPlanId = String(updated.meta.plan_id ?? '')
+    if (approvedPlanId) this.execution.supersedeStaleExecutingPlans(approvedPlanId)
     const planRecord = this.execution.activateApprovedPlan(updated)
     const state = this.store.load()
     state.mode = ControlManager.restoreMode(state)
@@ -500,6 +503,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   permissionApprovalResult(decision: Parameters<PermissionManager['requireApproval']>[0], opts?: { parentCallId?: string | null }): string {
     return this.permissionManager.requireApproval(decision, { parentCallId: opts?.parentCallId ?? null })
+  }
+
+  syncPlanFromTodos(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> | null }): PlanRecord | null {
+    return this.execution.syncPlanFromTodos(todos, opts)
   }
 
   hasAskInteraction(): boolean {

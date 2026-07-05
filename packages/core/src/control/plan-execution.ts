@@ -17,6 +17,8 @@ import {
 import { PlanExecutionState } from '../plans/execution-state'
 import type { Interaction } from './models'
 import {
+  isPositiveInt,
+  planStatusFromTodo,
   stepVerificationStatus,
   taskStatusFromPlanStep,
 } from './plan-helpers'
@@ -28,6 +30,89 @@ const TASK_STATUS_FAILED = 'failed'
 export class PlanExecutionManager {
   private readonly cm: ControlManagerHost
   constructor(cm: ControlManagerHost) { this.cm = cm }
+
+  /**
+   * todo→plan step 完成投影（2026-07-05 B1）：update_todos 落地后由 runner 调用，
+   * 把 todo 状态同步进当前可执行计划的步骤；全部 done/skipped 时计划置 COMPLETED。
+   * 这是计划状态机唯一的常规完成路径。
+   */
+  syncPlanFromTodos(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> | null }): PlanRecord | null {
+    const record = this.cm.latestExecutablePlan()
+    if (record === null || !record.steps.length) return null
+    const evidence = opts?.evidence ?? null
+    const todoByStepId = new Map<string, Record<string, unknown>>()
+    for (const item of todos) {
+      if (item && typeof item === 'object' && String(item.plan_step_id ?? '').trim()) {
+        todoByStepId.set(String(item.plan_step_id), item)
+      }
+    }
+    const todoByIndex = new Map<number, Record<string, unknown>>()
+    for (const item of todos) {
+      if (item && typeof item === 'object' && isPositiveInt(item.id)) {
+        todoByIndex.set(Number(item.id) - 1, item)
+      }
+    }
+    const now = nowTs()
+    const steps: PlanStep[] = []
+    record.steps.forEach((step, index) => {
+      const todo = todoByStepId.get(step.id) ?? todoByIndex.get(index)
+      if (todo === undefined) {
+        steps.push(step)
+        return
+      }
+      const todoStatus = String(todo.status ?? 'pending')
+      const nextStatus = planStatusFromTodo(todoStatus)
+      const stepEvidence = [...step.evidence]
+      if (nextStatus === PlanStepStatus.DONE && step.status !== PlanStepStatus.DONE) {
+        stepEvidence.push({
+          ...(evidence ?? {}),
+          todo_id: todo.id,
+          plan_step_id: todo.plan_step_id ?? step.id,
+          todo_status: todoStatus,
+          synced_at: now,
+        })
+      }
+      if (nextStatus === PlanStepStatus.BLOCKED && step.status !== PlanStepStatus.BLOCKED) {
+        stepEvidence.push({
+          ...(evidence ?? {}),
+          todo_id: todo.id,
+          plan_step_id: todo.plan_step_id ?? step.id,
+          todo_status: todoStatus,
+          blocked_reason: String(todo.blocked_reason ?? '').trim(),
+          synced_at: now,
+        })
+      }
+      steps.push({ ...step, status: nextStatus, evidence: stepEvidence })
+    })
+
+    const allDone = steps.length > 0 && steps.every((s) => s.status === PlanStepStatus.DONE || s.status === PlanStepStatus.SKIPPED)
+    const planStatus = allDone ? PlanStatus.COMPLETED : PlanStatus.EXECUTING
+    let updated: PlanRecord = {
+      ...record,
+      status: planStatus,
+      completedAt: planStatus === PlanStatus.COMPLETED ? now : record.completedAt,
+      updatedAt: now,
+      steps,
+    }
+    updated = this.syncPlanStepTasks(updated)
+    this.cm.planStore.save(updated)
+    return updated
+  }
+
+  /** 批准新计划时取代同 store 内滞留的 approved/executing 旧计划，防止僵尸累积（B1）。 */
+  supersedeStaleExecutingPlans(newPlanId: string): void {
+    const now = nowTs()
+    for (const record of this.cm.planStore.list()) {
+      if (record.id === newPlanId) continue
+      if (record.status !== PlanStatus.APPROVED && record.status !== PlanStatus.EXECUTING) continue
+      // 不碰 updatedAt：取代是记账而非活动，latest() 必须继续指向新计划
+      this.cm.planStore.save({
+        ...record,
+        status: PlanStatus.CANCELLED,
+        metadata: { ...record.metadata, superseded_by: newPlanId, superseded_at: now },
+      })
+    }
+  }
 
   recordPlanStepToolOutput(opts: {
     toolName: string

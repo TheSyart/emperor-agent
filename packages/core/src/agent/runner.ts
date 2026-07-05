@@ -67,6 +67,7 @@ import {
   recordPlanDiscovery,
   recordPlanStepToolOutput,
   recordPlanVerification,
+  syncPlanTodoCompletion,
 } from './runner-plan-recording'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
@@ -117,6 +118,7 @@ export interface ControlManagerRunnerHost {
   createPlanFromText(text: string): Interaction
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
+  syncPlanFromTodos?(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> }): PlanRecord | null
   planMatchesCurrentScope?(record: PlanRecord): boolean
   planIndependentVerificationFollowup?(opts?: { dispatchAvailable?: boolean }): Record<string, unknown> | null
   planVerificationTarget?(command: string): Record<string, string> | null
@@ -662,6 +664,9 @@ export class AgentRunner implements RunnerModelHost {
       applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
       recordPlanDiscovery(this.controlManager, call, result)
       recordPlanStepToolOutput(this.controlManager, call, result)
+      if (call.name === 'update_todos' && !result.isError && this.todoStore !== null) {
+        syncPlanTodoCompletion(this.controlManager, this.todoStore.todos, call.id)
+      }
       const content = result.modelContent
       resultsById.set(call.id, result)
       maybePauseForControl(content, ctx.toolCallsRef.current, resultsById)
