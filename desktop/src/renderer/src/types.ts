@@ -941,7 +941,7 @@ type WsEventVariants = (
   | { event: 'tool_run_queued'; id?: string; name: string; arguments?: Record<string, unknown> }
   | { event: 'tool_run_started'; id?: string; name: string }
   | { event: 'tool_run_completed'; id?: string; name: string; summary?: string; output?: string; output_truncated?: boolean; artifacts?: ToolArtifactRef[]; metadata?: Record<string, unknown> }
-  | { event: 'tool_run_failed'; id?: string; name: string; message?: string }
+  | { event: 'tool_run_failed'; id?: string; name: string; message?: string; reason_kind?: 'safety_refusal' | 'error' | string }
   | { event: 'tool_run_cancelled'; id?: string; name: string; reason?: string }
   | { event: 'turn_phase'; phase?: string; sequence?: number; iteration?: number; detail?: Record<string, unknown> }
   | { event: 'turn_scope'; mode?: string; workspace_root?: string; state_root?: string; session_root?: string; project_id?: string | null; project_state_root?: string | null }

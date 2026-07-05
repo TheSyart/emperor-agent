@@ -8,6 +8,9 @@ import { Tool, type ToolResult, type ToolExecutionContext } from './base'
 import { B, S, toolParamsSchema } from './schema'
 import { isReadonlyCommand } from './resolvers'
 
+/** 安全策略拒绝文案前缀：execution 引擎据此给 tool_run_failed 打 reason_kind（B4.3）。 */
+export const SAFETY_REFUSAL_PREFIX = 'Error: command refused by safety policy'
+
 // ── GlobTool ──
 
 export class GlobTool extends Tool {
@@ -325,7 +328,7 @@ export class RunCommand extends Tool {
     for (const pat of DENY_PATTERNS) {
       if (pat.test(command)) {
         return (
-          `Error: command refused by safety policy (matches dangerous pattern: ${pat})\n`
+          `${SAFETY_REFUSAL_PREFIX} (matches dangerous pattern: ${pat})\n`
           + '替代方案：把代码写入临时脚本文件后执行，或运行现有的测试/脚本文件；不要重试同类命令或尝试绕过安全检查。'
         )
       }

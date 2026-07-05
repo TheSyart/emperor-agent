@@ -928,6 +928,78 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(String(toolMessages[1]!.content)).toContain('改变策略')
   })
 
+  it('escalates the nudge even when the model switches to a different denied pattern (2026-07-05 B4.1)', async () => {
+    class NodeDeniedTool extends Tool {
+      override name = 'deny_node'
+      override description = 'refused: node -e'
+      override parameters = toolParamsSchema({}, [])
+      async execute(): Promise<string> {
+        return 'Error: command refused by safety policy (matches dangerous pattern: /\\bnode\\s+-e\\b/)'
+      }
+    }
+    class PythonDeniedTool extends Tool {
+      override name = 'deny_python'
+      override description = 'refused: python3 -c'
+      override parameters = toolParamsSchema({}, [])
+      async execute(): Promise<string> {
+        return 'Error: command refused by safety policy (matches dangerous pattern: /\\bpython3?\\s+-c\\b/)'
+      }
+    }
+    const registry = new ToolRegistry()
+    registry.register(new NodeDeniedTool())
+    registry.register(new PythonDeniedTool())
+    const provider = new FakeProvider([
+      makeResponse({ content: '', toolCalls: [toolCall('deny_1', 'deny_node', {})], finishReason: 'tool_calls' }),
+      makeResponse({ content: '', toolCalls: [toolCall('deny_2', 'deny_python', {})], finishReason: 'tool_calls' }),
+      makeResponse({ content: 'done' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry, systemPrompt: 'system' })
+    const history: Msg[] = [{ role: 'user', content: 'run it' }]
+
+    await runner.stepAsync(history)
+
+    const toolMessages = history.filter((message) => message.role === 'tool')
+    expect(toolMessages).toHaveLength(2)
+    expect(String(toolMessages[0]!.content)).not.toContain('已被拒绝')
+    // 换解释器重试同类行为同样计数——per-pattern 计数会被换马甲绕过
+    expect(String(toolMessages[1]!.content)).toContain('已被拒绝 2 次')
+    expect(String(toolMessages[1]!.content)).toContain('改变策略')
+  })
+
+  it('marks safety refusals with reason_kind on tool_run_failed events (2026-07-05 B4.3)', async () => {
+    class DeniedTool2 extends Tool {
+      override name = 'deny_cmd'
+      override description = 'refused by safety policy'
+      override parameters = toolParamsSchema({}, [])
+      async execute(): Promise<string> {
+        return 'Error: command refused by safety policy (matches dangerous pattern: /x/)'
+      }
+    }
+    class BoomTool extends Tool {
+      override name = 'boom'
+      override description = 'plain failure'
+      override parameters = toolParamsSchema({}, [])
+      async execute(): Promise<string> { return 'Error: boom' }
+    }
+    const registry = new ToolRegistry()
+    registry.register(new DeniedTool2())
+    registry.register(new BoomTool())
+    const provider = new FakeProvider([
+      makeResponse({ content: '', toolCalls: [toolCall('c1', 'deny_cmd', {}), toolCall('c2', 'boom', {})], finishReason: 'tool_calls' }),
+      makeResponse({ content: 'done' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry, systemPrompt: 'system' })
+    const emitted: Msg[] = []
+
+    await runner.stepAsync([{ role: 'user', content: 'go' }], { emit: (event) => { emitted.push(event) } })
+
+    const failures = emitted.filter((event) => event.event === 'tool_run_failed')
+    expect(failures).toHaveLength(2)
+    const byName = Object.fromEntries(failures.map((event) => [event.name, event]))
+    expect(byName.deny_cmd).toMatchObject({ reason_kind: 'safety_refusal' })
+    expect(byName.boom).toMatchObject({ reason_kind: 'error' })
+  })
+
   it('max_turns terminal reply is a structured delivery summary instead of the flat failure line', async () => {
     const todoStore = new TodoStore()
     todoStore.todos = [

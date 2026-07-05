@@ -226,3 +226,19 @@ describe('chatProjection', () => {
     ])
   })
 })
+
+describe('safety refusal labeling (2026-07-05 B4.3)', () => {
+  it('labels safety-refusal tool failures as blocked instead of generic failure', async () => {
+    const { projectChatEvents } = await import('./chatProjection')
+    const projection = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 't1', content: 'run' },
+      { event: 'tool_call', seq: 2, turn_id: 't1', id: 'c1', name: 'run_command', arguments: { command: 'node -e "x"' } },
+      { event: 'tool_run_failed', seq: 3, turn_id: 't1', id: 'c1', name: 'run_command', message: 'Error: command refused by safety policy (matches dangerous pattern: /x/)', reason_kind: 'safety_refusal' },
+      { event: 'assistant_done', seq: 4, turn_id: 't1', content: 'done' },
+    ] as never)
+    const assistant = projection.messages.find((message) => message.role === 'assistant')!
+    const tool = assistant.segments.find((segment) => segment.type === 'tool') as { status: string; summary?: string }
+    expect(tool.status).toBe('error')
+    expect(String(tool.summary || '')).toContain('被安全策略拦截')
+  })
+})

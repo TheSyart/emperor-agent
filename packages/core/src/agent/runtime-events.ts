@@ -103,8 +103,8 @@ export function toolRunCompleted(opts: {
   return event
 }
 
-export function toolRunFailed(opts: { id: string; name: string; message: string }): Record<string, unknown> {
-  return { event: 'tool_run_failed', id: opts.id, name: opts.name, message: opts.message }
+export function toolRunFailed(opts: { id: string; name: string; message: string; reasonKind?: 'safety_refusal' | 'error' }): Record<string, unknown> {
+  return { event: 'tool_run_failed', id: opts.id, name: opts.name, message: opts.message, reason_kind: opts.reasonKind ?? 'error' }
 }
 
 export function toolRunCancelled(opts: { id: string; name: string; reason: string }): Record<string, unknown> {

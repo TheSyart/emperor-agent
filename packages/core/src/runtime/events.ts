@@ -186,8 +186,8 @@ export function toolRunCompleted(opts: {
   })
 }
 
-export function toolRunFailed(opts: { id: string; name: string; message: string }): EventPayload {
-  return runtimeEvent('tool_run_failed', { id: opts.id, name: opts.name, message: opts.message })
+export function toolRunFailed(opts: { id: string; name: string; message: string; reasonKind?: 'safety_refusal' | 'error' }): EventPayload {
+  return runtimeEvent('tool_run_failed', { id: opts.id, name: opts.name, message: opts.message, reason_kind: opts.reasonKind ?? 'error' })
 }
 
 export function toolRunCancelled(opts: { id: string; name: string; reason: string }): EventPayload {

@@ -3,6 +3,7 @@
  * concurrency_safe 连续工具成组并发，其余顺序执行；emit tool_run_* 事件；TurnPaused 冒泡。
  */
 import type { ToolCallRequest } from '../providers/base'
+import { SAFETY_REFUSAL_PREFIX } from './builtin'
 import { ToolResultObj } from './base'
 import type { ToolRegistry } from './registry'
 import { TurnPaused } from '../control/exceptions'
@@ -202,7 +203,7 @@ export class ToolExecutionEngine {
     state.result = result
     if (opts.emit) {
       if (result.isError) {
-        await opts.emit(runtimeEvents.toolRunFailed({ id: state.id, name: state.name, message: result.summary }))
+        await opts.emit(runtimeEvents.toolRunFailed({ id: state.id, name: state.name, message: result.summary, reasonKind: failureReasonKind(result.modelContent) }))
       } else {
         const output = runtimeEvents.compactRuntimeToolOutput(result.modelContent)
         await opts.emit(
@@ -254,4 +255,8 @@ function coerceToolResult(value: ToolResultObj | string): ToolResultObj {
   if (value instanceof ToolResultObj) return value
   const text = String(value)
   return ToolResultObj.fromText(text, { isError: text.startsWith('Error:') })
+}
+
+function failureReasonKind(text: string): 'safety_refusal' | 'error' {
+  return String(text ?? '').startsWith(SAFETY_REFUSAL_PREFIX) ? 'safety_refusal' : 'error'
 }

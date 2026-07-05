@@ -128,7 +128,11 @@ export function applyChatProjectionEvent(
     const seg = ensureToolSegment(assistant, event)
     applyToolRunUpdateToSegment(seg, {
       status: event.event === 'tool_run_completed' ? 'done' : event.event === 'tool_run_failed' ? 'error' : 'error_aborted',
-      summary: event.event === 'tool_run_completed' ? event.summary : event.event === 'tool_run_failed' ? event.message : event.reason,
+      summary: event.event === 'tool_run_completed'
+        ? event.summary
+        : event.event === 'tool_run_failed'
+          ? (event.reason_kind === 'safety_refusal' ? `被安全策略拦截：${event.message || ''}` : event.message)
+          : event.reason,
       output: event.event === 'tool_run_completed' ? event.output : undefined,
       outputTruncated: event.event === 'tool_run_completed' ? Boolean(event.output_truncated) : false,
       artifacts: event.event === 'tool_run_completed' ? event.artifacts : undefined,

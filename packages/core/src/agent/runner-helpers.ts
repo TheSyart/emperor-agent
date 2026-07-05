@@ -219,16 +219,18 @@ export function controlInteractionEvent(interaction: Record<string, unknown>): R
   return { event, interaction }
 }
 
-const SAFETY_REFUSAL_RE = /command refused by safety policy \(matches dangerous pattern: ([^)]+)\)/
+export const SAFETY_REFUSAL_RE = /command refused by safety policy \(matches dangerous pattern: ([^)]+)\)/
 
-/** 同一危险模式在一轮内反复被拒时，向模型追加换策略的强化提示（P1-4）。 */
+// 单桶键：所有安全拒绝共用一个计数（B4.1）——per-pattern 计数会被
+// 「node -e 被拒 → 换 python3 -c」这类换马甲重试绕过，实测于 2026-07-05 会话。
+const SAFETY_REFUSAL_BUCKET = 'safety_refusal'
+
+/** 一轮内任意第 2 次安全拒绝即向模型追加换策略的强化提示（P1-4 + B4.1）。 */
 export function applyRepeatedRefusalNudge(counts: Map<string, number>, result: ToolResultObj): void {
-  const match = SAFETY_REFUSAL_RE.exec(result.modelContent)
-  if (match === null) return
-  const pattern = match[1]!
-  const count = (counts.get(pattern) ?? 0) + 1
-  counts.set(pattern, count)
+  if (SAFETY_REFUSAL_RE.exec(result.modelContent) === null) return
+  const count = (counts.get(SAFETY_REFUSAL_BUCKET) ?? 0) + 1
+  counts.set(SAFETY_REFUSAL_BUCKET, count)
   if (count < 2) return
   result.modelContent +=
-    `\n（该危险模式本轮已被拒绝 ${count} 次，必须改变策略：把代码写入临时脚本文件后执行，或运行现有测试/脚本文件；不要再重试同类命令。）`
+    `\n（该类尝试本轮已被拒绝 ${count} 次——包括更换命令形式的重试，必须改变策略：把代码写入临时脚本文件后执行，或运行现有测试/脚本文件；不要再重试同类命令。）`
 }

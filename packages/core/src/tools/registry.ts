@@ -85,6 +85,9 @@ export class ToolRegistry {
     if (typeof raw === 'string') {
       const capped = capText(raw, tool.maxResultChars)
       mapped = tool.mapResult(capped, execCtx)
+      // 约定：字符串结果以 'Error:' 开头即失败（与 execution.coerceToolResult 一致）。
+      // 默认 mapResult 不设 isError，缺了这步 deny/非零退出会被当成 tool_run_completed（B4.3 实测）。
+      if (!mapped.isError && capped.startsWith('Error:')) mapped = { ...mapped, isError: true }
       if (capped !== raw) attachFullOutputRef(mapped, execCtx, name, raw)
     } else {
       mapped = capToolResult(raw, tool.maxResultChars)
