@@ -1077,6 +1077,26 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(reply).toBe('完成')
   })
 
+  it('final reply excludes interim tool-batch narration fragments (2026-07-05 B8)', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider([
+      makeResponse({ content: '先建任务清单，从 Step 1 起步。', toolCalls: [toolCall('c1', 'echo', { value: 'one' })], finishReason: 'tool_calls' }),
+      makeResponse({ content: 'Step 1 完成。进入 Step 2。', toolCalls: [toolCall('c2', 'echo', { value: 'two' })], finishReason: 'tool_calls' }),
+      makeResponse({ content: '## 交付报告\n\n全部完成。' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry, systemPrompt: 'system' })
+    const history: Msg[] = [{ role: 'user', content: '干活' }]
+
+    const reply = await runner.stepAsync(history)
+
+    // 过场白不进最终回复（仍留在 history 与流式展示）
+    expect(reply).toBe('## 交付报告\n\n全部完成。')
+    expect(reply).not.toContain('先建任务清单')
+    const interim = history.find((message) => message.role === 'assistant' && String(message.content).includes('先建任务清单'))
+    expect(interim).toBeTruthy()
+  })
+
   it('max_turns terminal reply is a structured delivery summary instead of the flat failure line', async () => {
     const todoStore = new TodoStore()
     todoStore.todos = [

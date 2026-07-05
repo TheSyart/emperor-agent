@@ -395,7 +395,8 @@ export class AgentRunner implements RunnerModelHost {
       if (shouldExecuteTools(response)) {
         queryState = toolFollowup(queryState).nextState
         const assistantContent = response.content ?? ''
-        if (assistantContent) finalParts.push(assistantContent)
+        // B8：伴随工具批次的过场白只进 history 与流式展示，不进最终回复
+        // （2026-07-05 会话的交付报告被 19 段「Step N 完成。」碎片淹没）
         const assistantMessage: Msg = {
           role: 'assistant',
           content: assistantContent,
