@@ -305,6 +305,30 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('defers title generation for trivially short first messages and feeds the reply as material (2026-07-05 B7)', async () => {
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-short-title-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const draftId = 'draft:short-hi'
+
+    await api.chat.submit({ content: 'hi', sessionId: draftId, clientDraftId: draftId, draftSession: { mode: 'chat' }, emit: async () => {} })
+
+    // 标题调用（命名 system prompt）必须发生在回合之后，且材料里带上助手回复
+    const titleCall = provider.calls.find((call) =>
+      call.messages.some((message) => String(message.content ?? '').includes('命名')))
+    expect(titleCall).toBeTruthy()
+    const userPrompt = String(titleCall!.messages.find((message) => message.role === 'user')?.content ?? '')
+    expect(userPrompt).toContain('pong')
+    const session = api.loop.sessionStore.get(String(api.loop.activeSessionId))!
+    expect(session.title).not.toBe('hi')
+    expect(session.title_status).toBe('generated')
+
+    await api.close()
+  })
+
   it('matches session route response shapes for IPC callers', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),

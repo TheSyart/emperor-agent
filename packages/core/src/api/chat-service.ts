@@ -3,7 +3,7 @@ import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { AgentLoop } from '../agent/loop'
 import { TurnBusyError } from '../runtime/active'
 import { sessionCreated, sessionTitleUpdated } from '../runtime/events'
-import { fallbackSessionTitle, SessionTitleService } from '../sessions/title'
+import { fallbackSessionTitle, sanitizeSessionTitle, SessionTitleService } from '../sessions/title'
 import type { SessionEntry } from '../sessions/store'
 import type { SchedulerAgentTurnPayload } from '../scheduler/executor'
 
@@ -81,7 +81,10 @@ export class MainlineTurnService {
       this.activateOptionalSession(sessionId, `${source}.submit`)
     }
 
-    const titleTask = promoted ? this.generateInitialTitle(promoted.id, content, input.emit ?? null) : null
+    // B7：超短首条消息（如 "hi"）延迟到回合结束后用回复做标题材料，避免生成无信息量标题
+    let replyResolve: (reply: string) => void = () => {}
+    const replyPromise = new Promise<string>((resolve) => { replyResolve = resolve })
+    const titleTask = promoted ? this.generateInitialTitle(promoted.id, content, input.emit ?? null, replyPromise) : null
     const displayContent = input.displayContent ?? content
     try {
       const reply = await this.loop.runUserTurn(content, {
@@ -96,8 +99,10 @@ export class MainlineTurnService {
         taskId: input.taskId ?? null,
         useActiveTask: input.useActiveTask,
       })
+      replyResolve(reply)
       return { turnId, content: reply, activeSessionId: this.loop.activeSessionId }
     } finally {
+      replyResolve('')
       if (titleTask) await titleTask
     }
   }
@@ -119,10 +124,16 @@ export class MainlineTurnService {
   }
 
   /** 首条消息后一次性生成标题；失败走 fallback，绝不让 submit 失败。 */
-  private async generateInitialTitle(sessionId: string, firstMessage: string, emit: MainlineEventSink | null): Promise<void> {
+  private async generateInitialTitle(sessionId: string, firstMessage: string, emit: MainlineEventSink | null, replyPromise?: Promise<string>): Promise<void> {
+    // 可见字符 <4 的输入（"hi"/"你好"）单独生成只会得到原话；等回合结束用回复摘要补充材料
+    let material = firstMessage
+    if (replyPromise && sanitizeSessionTitle(firstMessage).replace(/ /g, '').length < 4) {
+      const reply = String(await replyPromise.catch(() => '') ?? '')
+      if (reply.trim()) material = `${firstMessage}\n助手回复摘要：${reply.slice(0, 200)}`
+    }
     let title = ''
     try {
-      title = await new SessionTitleService(this.loop.modelRouter).generate(firstMessage)
+      title = await new SessionTitleService(this.loop.modelRouter).generate(material)
     } catch {
       title = ''
     }
