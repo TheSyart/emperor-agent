@@ -99,6 +99,28 @@ export function recordPlanVerification(
   return { target, result, plan: planToDict(plan) }
 }
 
+/** B4.2：领取未验证步骤并生成一次性诚实性 followup；宿主缺失或无未验证项返回 null。 */
+export function unverifiedPlanHonestyFollowup(cm: ControlManagerRunnerHost | null): Msg | null {
+  if (cm === null || typeof cm.claimUnverifiedPlanSteps !== 'function') return null
+  let claim: { planId: string; steps: Array<{ id: string; title: string }> } | null = null
+  try {
+    claim = cm.claimUnverifiedPlanSteps()
+  } catch {
+    return null
+  }
+  if (claim === null) return null
+  return {
+    role: 'user',
+    content: [
+      '[PLAN_VERIFICATION_UNRECORDED]',
+      `plan_id: ${claim.planId}`,
+      `以下计划步骤的验证要求未记录任何执行证据：${claim.steps.map((step) => `${step.id}（${step.title}）`).join('、')}`,
+      '',
+      '要么现在执行对应的验证命令（结果会被自动记录），要么在最终答复中逐项明确声明「未验证」。不得声称已验证。',
+    ].join('\n'),
+  }
+}
+
 export function planVerificationFollowup(update: { result: Record<string, unknown>; target: Record<string, string> }): Msg | null {
   const result = update.result ?? {}
   if (result.passed !== false) return null

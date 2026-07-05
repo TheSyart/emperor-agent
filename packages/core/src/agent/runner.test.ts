@@ -859,7 +859,6 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
         id: 'step_1',
         title: 'Run matrix',
         description: 'Execute the task.',
-        commands: ['npm test'],
         acceptance: ['todo update succeeds without plan evidence'],
       }],
     })
@@ -998,6 +997,84 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const byName = Object.fromEntries(failures.map((event) => [event.name, event]))
     expect(byName.deny_cmd).toMatchObject({ reason_kind: 'safety_refusal' })
     expect(byName.boom).toMatchObject({ reason_kind: 'error' })
+  })
+
+  it('injects a one-shot honesty followup when plan verification requirements have no evidence (2026-07-05 B4.2)', async () => {
+    const manager = new ControlManager(tmp('emperor-honesty-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode('plan')
+    new ProposePlanTool(manager).execute({
+      title: 'Honesty plan',
+      summary: 'Step carries a verification requirement.',
+      plan_markdown: '# Plan\n\n- Ship it',
+      assumptions: [],
+      risk_level: 'low',
+      steps: [{
+        id: 'step_1',
+        title: 'Ship it',
+        description: 'do the work',
+        files: ['a.html'],
+        commands: ['npm test'],
+        acceptance: ['tests pass'],
+      }],
+    })
+    const pendingHonesty = manager.payload().pending as Record<string, unknown>
+    manager.approve(String(pendingHonesty.id))
+    // 实景（2026-07-05 会话）：todos 全部完成但验证要求从未执行；F1 的投影使计划进入「宣称完工」
+    todoStore.update([{ id: 1, content: 'Ship it', status: 'completed', planStepId: 'step_1' }])
+    manager.syncPlanFromTodos(todoStore.todos, { evidence: { source: 'update_todos' } })
+    const provider = new FakeProvider([
+      makeResponse({ content: '全部完成，交付。' }),
+      makeResponse({ content: '最终答复：step_1 的验证（npm test）未执行，声明为未验证。' }),
+      makeResponse({ content: '不应该到第三轮' }),
+    ])
+    const runner = new AgentRunner({ provider, model: 'fake', registry: new ToolRegistry(), systemPrompt: 'system', controlManager: manager, todoStore, maxTurns: 6 })
+    const history: Msg[] = [{ role: 'user', content: '继续执行' }]
+
+    const reply = await runner.stepAsync(history)
+
+    // 第一次 stop 被诚实性 followup 拦截，第二次 stop 正常完成
+    expect(reply).toContain('未验证')
+    const followups = history.filter((message) => message.role === 'user' && String(message.content).includes('未记录任何执行证据'))
+    expect(followups).toHaveLength(1)
+    expect(String(followups[0]!.content)).toContain('step_1')
+    expect(provider.responses).toHaveLength(1) // 第三个响应没被消费
+
+    // 跨 turn 不重复：同一计划已提醒过，下一轮 stop 直接完成
+    const provider2 = new FakeProvider([makeResponse({ content: '下一轮直接完成' })])
+    const runner2 = new AgentRunner({ provider: provider2, model: 'fake', registry: new ToolRegistry(), systemPrompt: 'system', controlManager: manager, todoStore })
+    const history2: Msg[] = [{ role: 'user', content: '再来一轮' }]
+    const reply2 = await runner2.stepAsync(history2)
+    expect(reply2).toBe('下一轮直接完成')
+    expect(history2.filter((message) => String(message.content ?? '').includes('未记录任何执行证据'))).toHaveLength(0)
+  })
+
+  it('skips the honesty followup when verification evidence exists (B4.2)', async () => {
+    const manager = new ControlManager(tmp('emperor-honesty-ok-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode('plan')
+    new ProposePlanTool(manager).execute({
+      title: 'Verified plan',
+      summary: 'Verification already recorded.',
+      plan_markdown: '# Plan\n\n- Ship it',
+      assumptions: [],
+      risk_level: 'low',
+      steps: [{ id: 'step_1', title: 'Ship it', description: 'work', files: ['a.html'], commands: ['npm test'], acceptance: ['ok'] }],
+    })
+    const pendingVerified = manager.payload().pending as Record<string, unknown>
+    const planId = String((pendingVerified.meta as Record<string, unknown>).plan_id)
+    manager.approve(String(pendingVerified.id))
+    manager.recordPlanVerificationResult({ planId, stepId: 'step_1', result: { command: 'npm test', passed: true, summary: 'pass' } })
+    todoStore.update([{ id: 1, content: 'Ship it', status: 'completed', planStepId: 'step_1' }])
+    manager.syncPlanFromTodos(todoStore.todos, { evidence: { source: 'update_todos' } })
+    const provider = new FakeProvider([makeResponse({ content: '完成' })])
+    const runner = new AgentRunner({ provider, model: 'fake', registry: new ToolRegistry(), systemPrompt: 'system', controlManager: manager, todoStore })
+
+    const reply = await runner.stepAsync([{ role: 'user', content: '继续' }])
+
+    expect(reply).toBe('完成')
   })
 
   it('max_turns terminal reply is a structured delivery summary instead of the flat failure line', async () => {

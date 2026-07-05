@@ -68,6 +68,7 @@ import {
   recordPlanStepToolOutput,
   recordPlanVerification,
   syncPlanTodoCompletion,
+  unverifiedPlanHonestyFollowup,
 } from './runner-plan-recording'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
@@ -119,6 +120,7 @@ export interface ControlManagerRunnerHost {
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
   syncPlanFromTodos?(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> }): PlanRecord | null
+  claimUnverifiedPlanSteps?(): { planId: string; steps: Array<{ id: string; title: string }> } | null
   planMatchesCurrentScope?(record: PlanRecord): boolean
   planIndependentVerificationFollowup?(opts?: { dispatchAvailable?: boolean }): Record<string, unknown> | null
   planVerificationTarget?(command: string): Record<string, string> | null
@@ -279,6 +281,7 @@ export class AgentRunner implements RunnerModelHost {
     }
     let queryState: QueryState = makeQueryState({ turnId, maxTurns: this.maxTurns })
     const finalParts: string[] = []
+    let honestyNudged = false
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
       this.memoryStore.writeCheckpoint(history)
@@ -510,6 +513,17 @@ export class AgentRunner implements RunnerModelHost {
         history.push({ role: 'user', content: String(verificationFollowup.message) })
         await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, { plan_id: verificationFollowup.plan_id, verification: verificationFollowup.status })
         continue
+      }
+
+      // B4.2 收尾诚实性：验证要求无证据时一次性拦下 stop，要求执行验证或明确申报未验证
+      if (!honestyNudged) {
+        const honesty = unverifiedPlanHonestyFollowup(this.controlManager)
+        if (honesty !== null) {
+          honestyNudged = true
+          history.push(honesty)
+          await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, { honesty: 'verification_unrecorded' })
+          continue
+        }
       }
 
       await this.emitTurnPhase(turnState, TurnPhase.COMPACT_CHECK, emit)

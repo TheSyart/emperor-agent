@@ -25,7 +25,7 @@ import {
 } from './models'
 import { PlanDraftingManager } from './plan-drafting'
 import { PlanExecutionManager } from './plan-execution'
-import { planStepsFinished } from './plan-helpers'
+import { planStepsFinished, stepVerificationStatus } from './plan-helpers'
 import { PlanPermissionTokenManager } from './plan-permissions'
 import { PlanDecision, PlanDecisionPolicy } from './plan-policy'
 import { PlanVerificationManager } from './plan-verification'
@@ -570,6 +570,24 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     const record = this.latestReviewablePlan()
     if (record === null || !record.steps.length || !planStepsFinished(record)) return null
     return record.id
+  }
+
+  /**
+   * 收尾诚实性（2026-07-05 B4.2）：取当前 scope 内最新计划中「有验证要求但无命令证据」
+   * 的步骤，并在计划上盖章防止跨 turn 重复提醒。一次性领取语义。
+   */
+  claimUnverifiedPlanSteps(): { planId: string; steps: Array<{ id: string; title: string }> } | null {
+    const record = this.latestReviewablePlan()
+    if (record === null || record.metadata.verification_honesty_nudged) return null
+    // 只在「宣称完工」时提醒（步骤全部 done/skipped 或计划已 COMPLETED）；执行中途的 stop 不拦
+    if (record.status !== PlanStatus.COMPLETED && !planStepsFinished(record)) return null
+    // stepVerificationStatus='pending' 即「有验证要求（含从 commands 派生）但缺必需证据」
+    const unverified = record.steps.filter((step) =>
+      step.status !== PlanStepStatus.SKIPPED && stepVerificationStatus(step) === 'pending'
+    )
+    if (!unverified.length) return null
+    this.planStore.save({ ...record, metadata: { ...record.metadata, verification_honesty_nudged: nowTs() } })
+    return { planId: record.id, steps: unverified.map((step) => ({ id: step.id, title: step.title })) }
   }
 
   latestReviewablePlan(): PlanRecord | null {
