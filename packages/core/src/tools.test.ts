@@ -262,3 +262,21 @@ describe('TodoStore + UpdateTodos (test_todo_tool.py)', () => {
     expect(s.todos).toHaveLength(3)
   })
 })
+
+describe('write_file overwrite nudge (2026-07-05 B2a)', () => {
+  it('appends an edit_file hint when overwriting an existing file, not on create', async () => {
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { WriteFileTool } = await import('./tools/filesystem')
+    const root = mkdtempSync(join(tmpdir(), 'emperor-write-nudge-'))
+    const tool = new WriteFileTool(root)
+
+    const first = await tool.execute({ path: join(root, 'a.html'), content: '<html>v1</html>' })
+    expect(first).not.toContain('edit_file')
+
+    const second = await tool.execute({ path: join(root, 'a.html'), content: '<html>v2 全量重写</html>' })
+    expect(second).toContain('已整体覆盖既有文件')
+    expect(second).toContain('edit_file')
+  })
+})

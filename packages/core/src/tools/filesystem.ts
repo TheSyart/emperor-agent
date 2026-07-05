@@ -101,8 +101,9 @@ function paginate(content: string, offset: number, limit: number): string {
 export class WriteFileTool extends Tool {
   override name = 'write_file'
   override description = (
-    '创建新文件或完整覆盖文件内容；覆盖已有文件前应先用 read_file 查看现状。'
-    + '局部修改优先使用 edit_file，不要用 run_command/echo/heredoc 写文件；除非用户明确要求，不要主动创建文档或无关文件。'
+    '仅用于创建新文件或整体替换文件内容；对已存在文件做增量修改（追加功能、改片段）必须用 edit_file，'
+    + '禁止为了追加内容而全量重写整个文件——那会重复输出全部旧内容，既慢又浪费。'
+    + '覆盖已有文件前应先用 read_file 查看现状；不要用 run_command/echo/heredoc 写文件；除非用户明确要求，不要主动创建文档或无关文件。'
   )
   override parameters = toolParamsSchema({ path: S('目标路径'), content: S('文件内容') }, ['path', 'content'])
   override maxResultChars = 5000
@@ -117,9 +118,12 @@ export class WriteFileTool extends Tool {
     const decision = workspacePolicyForTool(ctx, this.workspace).resolvePath(raw, 'write')
     if (!decision.allowed) return formatWorkspacePolicyError(decision)
     const p = decision.resolvedPath
+    const overwrote = existsSync(p)
     await mkdir(dirname(p), { recursive: true })
     await fsWriteFile(p, content, 'utf8')
-    return `Wrote ${content.length} bytes to ${raw}`
+    const base = `Wrote ${content.length} bytes to ${raw}`
+    // B2a：全量覆盖既有文件时提示改用增量编辑（2026-07-05 会话实测同一文件被全量重写 6 次）
+    return overwrote ? `${base}\n注意：已整体覆盖既有文件；后续增量修改请改用 edit_file，不要再全量重写。` : base
   }
 
   override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
@@ -132,7 +136,7 @@ export class WriteFileTool extends Tool {
 export class EditFileTool extends Tool {
   override name = 'edit_file'
   override description = (
-    '对已有文件做局部文本替换；编辑前应先用 read_file 理解目标片段。适合小范围修改、重命名或替换唯一文本；'
+    '对已有文件做局部文本替换——这是修改已存在文件的默认工具（追加功能、改片段、多轮迭代同一文件都用它）；编辑前应先用 read_file 理解目标片段。'
     + 'read_file 输出为 行号|内容，old_text 只取竖线之后的原始文本并保留精确缩进，不要带上行号或竖线前缀；'
     + '若 old_text 匹配多处，需要提供更多上下文或设置 replace_all=true。不要用 run_command/sed/awk 代替此工具编辑文件；'
     + '失败后根据错误调整匹配范围，不要盲目重试。'
