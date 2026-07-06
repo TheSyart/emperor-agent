@@ -11,6 +11,9 @@
 /templates/USER.local.md
 /templates/*.local.md
 
+# Local project docs should not be published to GitHub
+/docs/
+
 # Python caches kept only for legacy tooling/skill helpers, not product runtime
 .venv/
 __pycache__/
