@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { loadMcpConfig, saveMcpConfig, type MCPConfig } from '../../mcp/config'
+import { ensureUserProfileFile } from '../../sessions/onboarding'
 
 export interface UserConfigPayload {
   path: 'templates/USER.local.md'
@@ -46,14 +47,6 @@ export class CoreConfigService {
   }
 
   private userConfigPath(): string {
-    const dir = join(this.root, 'templates')
-    const local = join(dir, 'USER.local.md')
-    if (!existsSync(local)) {
-      mkdirSync(dir, { recursive: true })
-      const init = join(this.templatesDir, 'init', 'USER.md')
-      const content = existsSync(init) ? readFileSync(init, 'utf8') : '# 用户偏好\n\n'
-      writeFileSync(local, content, 'utf8')
-    }
-    return local
+    return ensureUserProfileFile(this.root, this.templatesDir)
   }
 }

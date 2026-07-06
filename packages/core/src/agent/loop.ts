@@ -4,7 +4,7 @@
  * subagents、scheduler、Team、control 和 routed AgentRunner。
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { ContextBuilder, renderContextSections, type SkillsLoaderLike } from './context-builder'
 import { AgentRunner, type ControlManagerRunnerHost } from './runner'
@@ -32,6 +32,7 @@ import { SchedulerStore } from '../scheduler/store'
 import { SchedulerTool } from '../scheduler/tool'
 import { ConversationStore, ProjectSessionMemoryStore, SessionMemoryStore } from '../sessions/conversation'
 import { migrateLegacyMainlineToDefaultSession } from '../sessions/migrate'
+import { claimProfileOnboardingTrigger, ensureUserProfileFile, onboardingTriggerContent } from '../sessions/onboarding'
 import { SessionStore, type SessionControlPending, type SessionEntry } from '../sessions/store'
 import { buildDispatchRunnerFactory } from '../subagents/dispatch-runner'
 import { SubagentRegistry } from '../subagents/registry'
@@ -51,6 +52,7 @@ import {
   GrepTool,
   LoadSkill,
   RunCommand,
+  SaveUserProfileTool,
   TodoStore,
   UpdateTodos,
   WebFetch,
@@ -92,6 +94,12 @@ export interface AgentLoopCreateOptions {
   initializeMcp?: boolean
   eventSink?: StreamEmitter | null
   permissionRules?: PermissionRuleInput[] | null
+  /**
+   * 默认关闭：显式开启才会在首次运行（用户档案仍是种子默认 + 模型已配置）时
+   * 自动发起一次性偏好访谈 turn。默认关闭是为了不影响现有测试/嵌入场景——
+   * 真实桌面端主进程启动（desktop/src/main/core-host.ts）显式开启它。
+   */
+  enableFirstRunOnboarding?: boolean
 }
 
 export interface RunUserTurnOptions {
@@ -196,10 +204,18 @@ export class AgentLoop {
     migrateLegacyMainlineToDefaultSession(paths.stateRoot)
     const localConfig = await loadLocalConfig(root, { preserveCorrupt: false })
     const templatesDir = paths.templatesDir
-    const userFile = ensureUserFile(paths.stateRoot, templatesDir)
+    const userFile = ensureUserProfileFile(paths.stateRoot, templatesDir)
     const memoryTemplate = existingPath(join(templatesDir, 'init', 'MEMORY.md'))
     const sharedMemory = new MemoryStore(paths.memoryRoot, userFile, { memoryTemplate })
-    const modelRouter = opts.modelRouter ?? new ModelRouter(root, await loadModelConfig(root, { create: true }), opts.modelOverride ?? null)
+    // 首次运行档案访谈的门禁需要知道模型是否已配置；外部注入 modelRouter（常见于测试/嵌入场景）
+    // 本身就是"已配置"的信号，此时不必读盘、也不改变原有的 loadModelConfig 调用时机。
+    let modelRouter = opts.modelRouter ?? null
+    let hasConfiguredModel = Boolean(modelRouter)
+    if (!modelRouter) {
+      const modelConfig = await loadModelConfig(root, { create: true })
+      hasConfiguredModel = modelConfig.models.length > 0
+      modelRouter = new ModelRouter(root, modelConfig, opts.modelOverride ?? null)
+    }
     const loop = new AgentLoop({
       ...opts,
       root,
@@ -215,6 +231,24 @@ export class AgentLoop {
     }
     const session = loop.ensureActiveSession()
     loop.activateSession(session.id)
+    if (
+      opts.enableFirstRunOnboarding &&
+      claimProfileOnboardingTrigger({ stateRoot: paths.stateRoot, templatesDir, hasConfiguredModel })
+    ) {
+      // 必须 await 而非 fire-and-forget：runUserTurn 靠 activeTasks 的 'turn' 单飞互斥防止
+      // 并发回合互相践踏共享的 history/runner 状态；不 await 会让它与调用方紧接着发起的
+      // 真实首条消息产生真实的竞态（TurnBusyError 或历史交错），而不只是测试假象。
+      // 模型调用 ask_user 后 TurnPaused 会让这次 await 很快返回（无需真人同步作答），
+      // 所以这里的等待只占用启动时的一次模型往返，不会真的卡到用户填完表单。
+      try {
+        await loop.runUserTurn(onboardingTriggerContent(), {
+          source: 'onboarding',
+          displayContent: '（初次见面）向你确认一些使用偏好',
+        })
+      } catch {
+        // 首次访谈失败不影响启动；latch 已置位，不会在下次启动重试。
+      }
+    }
     return loop
   }
 
@@ -398,6 +432,7 @@ export class AgentLoop {
     this.registry.register(new ProposePlanTool(this.controlManager))
     this.registry.register(new RequestPlanModeTool(this.controlManager))
     this.registry.register(new UpdateTodos(this.todoStore))
+    this.registry.register(new SaveUserProfileTool(this.sharedMemory.userFile))
     const controlHost = dispatchControlHost(this.controlManager)
     this.registry.register(new DispatchSubagentTool({
       parentRegistry: this.registry,
@@ -734,17 +769,6 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
     }
     return names.sort()
   }
-}
-
-function ensureUserFile(root: string, templatesDir: string): string {
-  const dir = join(root, 'templates')
-  mkdirSync(dir, { recursive: true })
-  const userFile = join(dir, 'USER.local.md')
-  if (!existsSync(userFile)) {
-    const initUser = existingPath(join(templatesDir, 'init', 'USER.md'))
-    writeFileSync(userFile, initUser ? readFileSync(initUser, 'utf8') : '# 用户偏好\n\n', 'utf8')
-  }
-  return userFile
 }
 
 function existingPath(path: string): string | null {

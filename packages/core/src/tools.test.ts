@@ -280,3 +280,21 @@ describe('write_file overwrite nudge (2026-07-05 B2a)', () => {
     expect(second).toContain('edit_file')
   })
 })
+
+describe('SaveUserProfileTool (onboarding profile persistence)', () => {
+  it('overwrites the resolved user profile file with the given content', async () => {
+    const { mkdtempSync, readFileSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { SaveUserProfileTool } = await import('./tools/builtin')
+    const dir = mkdtempSync(join(tmpdir(), 'emperor-save-profile-'))
+    const userFile = join(dir, 'USER.local.md')
+    writeFileSync(userFile, '# 用户档案\n\n- **称呼**：未设置\n', 'utf8')
+    const tool = new SaveUserProfileTool(userFile)
+
+    const result = await tool.execute({ content: '# 用户档案\n\n- **称呼**：李公公\n' })
+
+    expect(readFileSync(userFile, 'utf8')).toBe('# 用户档案\n\n- **称呼**：李公公\n')
+    expect(result).toContain('已')
+  })
+})

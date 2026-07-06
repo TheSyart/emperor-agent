@@ -2,6 +2,7 @@
  * 搜索工具 (MIG-TOOL-008/009) + WebFetch (MIG-TOOL-010) + RunCommand scaffold (MIG-TOOL-011) + skills (MIG-TOOL-012)。
  */
 import { exec, execSync, type ExecOptions } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
 import { relative } from 'node:path'
 import { formatWorkspacePolicyError, workspacePolicyForTool } from '../permissions/workspace-policy'
 import { Tool, type ToolResult, type ToolExecutionContext } from './base'
@@ -254,6 +255,31 @@ function todoVerificationNudge(todos: Array<Record<string, unknown>>): string {
   if (!todos.every((t) => t.status === 'completed')) return ''
   if (todos.some((t) => TODO_VERIFICATION_PATTERN.test(String(t.content ?? '')))) return ''
   return '\n\nNOTE: You just completed 3+ tasks and none of them appears to be verification, test, or review work. Before final reporting, run the relevant checks or use an independent verification reviewer when the change is non-trivial.'
+}
+
+/**
+ * 整份改写用户偏好档案（USER.local.md）。用于首次运行访谈落盘，也供日后任意一次
+ * "记住我的偏好"请求随时更新——不是仅在 onboarding 期间可用的一次性脚手架。
+ * 路径已由调用方（AgentLoop）解析为状态根下的实际文件，工具本身不做路径推导。
+ */
+export class SaveUserProfileTool extends Tool {
+  override name = 'save_user_profile'
+  override description = (
+    '整份改写用户偏好档案（称呼/语言/沟通风格/技术水平/工作背景/兴趣/性格等）。'
+    + '传入完整 Markdown 内容，会整体覆盖现有档案；请基于系统提示词里已经看到的当前内容改写，不要凭空丢弃未涉及的字段。'
+  )
+  override parameters = toolParamsSchema({ content: S('完整的用户档案 Markdown 内容') }, ['content'])
+  override readOnly = false
+
+  private readonly userProfilePath: string
+
+  constructor(userProfilePath: string) { super(); this.userProfilePath = userProfilePath }
+
+  execute(args: Record<string, unknown>): string {
+    const content = String(args.content ?? '').trimEnd()
+    writeFileSync(this.userProfilePath, `${content}\n`, 'utf8')
+    return `已保存用户偏好档案（${content.length} 字符）。`
+  }
 }
 
 export class UpdateTodos extends Tool {

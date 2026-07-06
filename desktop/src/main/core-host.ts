@@ -20,6 +20,7 @@ export async function createCoreHost(opts: {
   const coreApi = await CoreApi.create({
     root: opts.root,
     eventSink: bridge.sink(),
+    enableFirstRunOnboarding: true,
     ...opts.coreOptions,
   })
   registerCoreHostIpc(opts.ipcMain, coreApi as unknown as CoreApiLike)
