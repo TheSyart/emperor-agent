@@ -9,6 +9,7 @@ echo "== git diff --check =="
 git diff --check
 
 echo "== migration parity map =="
+node --test scripts/check_migration_parity.test.mjs
 node scripts/check_migration_parity.mjs
 
 echo "== core vitest =="

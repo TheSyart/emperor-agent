@@ -3,11 +3,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const root = process.cwd()
-const parityPath = join(root, 'docs', 'migration', 'ts', 'PARITY.md')
-const parity = readFileSync(parityPath, 'utf8')
+const manifestPath = join(root, 'scripts', 'migration_parity_manifest.json')
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+const mappings = Array.isArray(manifest.mappings) ? manifest.mappings : []
 
-const sourceTests = [...parity.matchAll(/\|\s*`(tests\/[^`]+?test_[^`]+?\.py)`\s*\|/g)]
-  .map((match) => match[1])
+const sourceTests = mappings
+  .map((mapping) => mapping.pythonTest)
   .filter(Boolean)
   .sort()
 const duplicateSourceTests = duplicates(sourceTests)
@@ -19,8 +20,8 @@ const discoveredPythonTests = walk(join(root, 'tests'))
 
 const missingDiscoveredPython = discoveredPythonTests.filter((path) => !sourceTests.includes(path))
 
-const mappedTests = [...parity.matchAll(/`((?:packages\/core\/src|desktop\/src|desktop-pet\/test)\/[^`]+?\.(?:test\.ts|test\.js))`/g)]
-  .map((match) => match[1])
+const mappedTests = mappings
+  .flatMap((mapping) => (Array.isArray(mapping.parityTests) ? mapping.parityTests : []))
   .filter(Boolean)
 const missingMapped = [...new Set(mappedTests)]
   .filter((path) => !existsSync(join(root, path)))
@@ -28,24 +29,26 @@ const missingMapped = [...new Set(mappedTests)]
 
 if (!sourceTests.length || duplicateSourceTests.length || missingDiscoveredPython.length || missingMapped.length) {
   if (!sourceTests.length) {
-    console.error('PARITY.md does not contain a frozen Python test inventory.')
+    console.error('migration_parity_manifest.json does not contain a frozen Python test inventory.')
   }
   if (duplicateSourceTests.length) {
-    console.error('PARITY.md contains duplicate Python test mappings:')
+    console.error('migration_parity_manifest.json contains duplicate Python test mappings:')
     for (const path of duplicateSourceTests) console.error(`  - ${path}`)
   }
   if (missingDiscoveredPython.length) {
-    console.error('PARITY.md is missing discovered Python test mappings:')
+    console.error('migration_parity_manifest.json is missing discovered Python test mappings:')
     for (const path of missingDiscoveredPython) console.error(`  - ${path}`)
   }
   if (missingMapped.length) {
-    console.error('PARITY.md references missing TS/JS tests:')
+    console.error('migration_parity_manifest.json references missing TS/JS tests:')
     for (const path of missingMapped) console.error(`  - ${path}`)
   }
   process.exit(1)
 }
 
-console.log(`PARITY.md covers ${sourceTests.length} frozen Python test files and references ${new Set(mappedTests).size} TS/JS test files.`)
+console.log(
+  `Migration parity manifest covers ${sourceTests.length} frozen Python test files and references ${new Set(mappedTests).size} TS/JS test files.`,
+)
 
 function walk(dir) {
   if (!existsSync(dir)) return []

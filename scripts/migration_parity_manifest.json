@@ -1,0 +1,577 @@
+{
+  "schemaVersion": 1,
+  "source": "Frozen Python-to-TypeScript parity inventory for the retired Python runtime.",
+  "mappings": [
+    {
+      "pythonTest": "tests/integration/test_project_execution_smoke.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts",
+        "packages/core/src/tasks/tasks.test.ts",
+        "desktop/src/renderer/src/runtime/projectExecution.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_active_tasks.py",
+      "parityTests": [
+        "packages/core/src/runtime/runtime.test.ts",
+        "packages/core/src/api/core-api.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_agent_prompt_contracts.py",
+      "parityTests": [
+        "packages/core/src/agent/context-builder.test.ts",
+        "packages/core/src/tools.test.ts",
+        "packages/core/src/subagents/subagents.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_anthropic_prompt_caching.py",
+      "parityTests": [
+        "packages/core/src/providers/providers.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_auth_guard.py",
+      "parityTests": [
+        "desktop/src/main/release-config.test.ts",
+        "desktop/src/main/protocol.test.ts",
+        "desktop/src/renderer/src/api/backend.test.ts"
+      ],
+      "note": "Retired by IPC topology; covered by"
+    },
+    {
+      "pythonTest": "tests/unit/test_cli_onboarding.py",
+      "parityTests": [
+        "packages/core/src/config/model-config.test.ts",
+        "packages/core/src/api/services/model-service.test.ts",
+        "desktop/src/renderer/src/components/onboarding/onboardingModel.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_compactor.py",
+      "parityTests": [
+        "packages/core/src/memory/compactor-token.test.ts",
+        "packages/core/src/api/services/memory-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_context_pipeline.py",
+      "parityTests": [
+        "packages/core/src/tools-and-context.test.ts",
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_context_scope.py",
+      "parityTests": [
+        "packages/core/src/agent/context-builder.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_control.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/api/core-api.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_conversation_store.py",
+      "parityTests": [
+        "packages/core/src/sessions/sessions.test.ts",
+        "packages/core/src/memory/memory.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_desktop_pet.py",
+      "parityTests": [
+        "packages/core/src/api/services/desktop-pet-service.test.ts",
+        "desktop-pet/test/event-mapper.test.js",
+        "desktop-pet/test/idle-scenes.test.js"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_desktop_pet_api.py",
+      "parityTests": [
+        "packages/core/src/api/services/desktop-pet-service.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_external_bridge.py",
+      "parityTests": [
+        "packages/core/src/external/external.test.ts",
+        "packages/core/src/api/core-api.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_filesystem.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts",
+        "packages/core/src/tools-and-context.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_history_log.py",
+      "parityTests": [
+        "packages/core/src/memory/memory.test.ts",
+        "packages/core/src/store/jsonl.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_loop_sessions.py",
+      "parityTests": [
+        "packages/core/src/agent/loop.test.ts",
+        "packages/core/src/sessions/sessions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_mainline_session_routing.py",
+      "parityTests": [
+        "packages/core/src/api/chat-service.test.ts",
+        "packages/core/src/api/core-api.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_mainline_turn.py",
+      "parityTests": [
+        "packages/core/src/api/chat-service.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_mcp_config.py",
+      "parityTests": [
+        "packages/core/src/mcp/mcp.test.ts",
+        "packages/core/src/api/services/config-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_memory_service.py",
+      "parityTests": [
+        "packages/core/src/api/services/memory-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_memory_versions.py",
+      "parityTests": [
+        "packages/core/src/memory/memory.test.ts",
+        "packages/core/src/api/services/memory-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_model_router.py",
+      "parityTests": [
+        "packages/core/src/model/router.test.ts",
+        "packages/core/src/config/model-config.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_origin_guard.py",
+      "parityTests": [
+        "desktop/src/main/release-config.test.ts",
+        "desktop/src/main/protocol.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ],
+      "note": "Retired by IPC topology; covered by"
+    },
+    {
+      "pythonTest": "tests/unit/test_permission_pipeline_v2.py",
+      "parityTests": [
+        "packages/core/src/permissions/permissions.test.ts",
+        "packages/core/src/api/mutation-guard.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_permissions.py",
+      "parityTests": [
+        "packages/core/src/permissions/permissions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_command_permissions.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/permissions/permissions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_context_attachment.py",
+      "parityTests": [
+        "packages/core/src/tools-and-context.test.ts",
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_decision_policy.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_discovery_ledger.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_draft_state.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_evidence_gate.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_execution_state.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts",
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_guard_execution.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_independent_verification.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_permission_tokens.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/permissions/permissions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_quality_gate.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_readonly_exploration.py",
+      "parityTests": [
+        "packages/core/src/control/control.test.ts",
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_runtime.py",
+      "parityTests": [
+        "desktop/src/renderer/src/runtime/planProjection.test.ts",
+        "packages/core/src/runtime/runtime.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_store.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_task_binding.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts",
+        "packages/core/src/tasks/tasks.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_verification.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_plan_verification_matrix.py",
+      "parityTests": [
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_project_session_memory.py",
+      "parityTests": [
+        "packages/core/src/sessions/sessions.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_project_store.py",
+      "parityTests": [
+        "packages/core/src/tasks/tasks.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_providers.py",
+      "parityTests": [
+        "packages/core/src/providers/providers.test.ts",
+        "packages/core/src/providers/registry.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_query_state.py",
+      "parityTests": [
+        "packages/core/src/agent/query-state.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_reviewer_verdict.py",
+      "parityTests": [
+        "desktop/src/renderer/src/runtime/projectExecution.test.ts",
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_run_command_readonly.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts",
+        "packages/core/src/permissions/permissions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_runner_behavior_contract.py",
+      "parityTests": [
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_runner_state.py",
+      "parityTests": [
+        "packages/core/src/agent/runner.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_runtime_events.py",
+      "parityTests": [
+        "packages/core/src/runtime/runtime.test.ts",
+        "desktop/src/renderer/src/runtime/chatProjection.test.ts",
+        "desktop/src/renderer/src/composables/useRuntime.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_scheduler_api.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_scheduler_executor.py",
+      "parityTests": [
+        "packages/core/src/scheduler/executor.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_scheduler_service.py",
+      "parityTests": [
+        "packages/core/src/scheduler/scheduler.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_scheduler_store.py",
+      "parityTests": [
+        "packages/core/src/scheduler/scheduler.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_scheduler_tool.py",
+      "parityTests": [
+        "packages/core/src/scheduler/scheduler.test.ts",
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_session_runtime.py",
+      "parityTests": [
+        "packages/core/src/runtime/runtime.test.ts",
+        "desktop/src/renderer/src/runtime/sessionDrafts.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_session_store.py",
+      "parityTests": [
+        "packages/core/src/sessions/sessions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_session_title.py",
+      "parityTests": [
+        "packages/core/src/sessions/sessions.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_sessions_api.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "desktop/src/renderer/src/composables/useSession.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_shell.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_sidebar_state.py",
+      "parityTests": [
+        "desktop/src/renderer/src/runtime/sidebarModel.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_sidebar_state_api.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_sidechain_transcript.py",
+      "parityTests": [
+        "packages/core/src/tasks/tasks.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_skill_requests.py",
+      "parityTests": [
+        "desktop/src/renderer/src/commands.test.ts",
+        "packages/core/src/api/services/skill-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_skill_service.py",
+      "parityTests": [
+        "packages/core/src/api/services/skill-service.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_subagent_task_sidechain.py",
+      "parityTests": [
+        "packages/core/src/subagents/subagents.test.ts",
+        "packages/core/src/tasks/tasks.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_task_runtime_api.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "packages/core/src/tasks/tasks.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_tasks_store.py",
+      "parityTests": [
+        "packages/core/src/tasks/tasks.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_team.py",
+      "parityTests": [
+        "packages/core/src/team/team.test.ts",
+        "packages/core/src/api/services/team-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_todo_tool.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts",
+        "packages/core/src/plans/plans.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_token_usage.py",
+      "parityTests": [
+        "packages/core/src/memory/compactor-token.test.ts",
+        "packages/core/src/api/services/memory-service.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_tool_descriptions.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_tool_execution_engine.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_tool_protocol_v2.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts",
+        "packages/core/src/tools-and-context.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_tool_result_store.py",
+      "parityTests": [
+        "packages/core/src/tools-and-context.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_watchlist.py",
+      "parityTests": [
+        "packages/core/src/watchlist/watchlist.test.ts",
+        "packages/core/src/scheduler/executor.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_web_api_only.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "desktop/src/renderer/src/api/http.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_web_diagnostics.py",
+      "parityTests": [
+        "packages/core/src/api/services/diagnostics-service.test.ts",
+        "desktop/src/renderer/src/components/panels/diagnosticsPanelModel.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_web_fetch.py",
+      "parityTests": [
+        "packages/core/src/tools.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_web_mutation_guard.py",
+      "parityTests": [
+        "packages/core/src/api/mutation-guard.test.ts",
+        "packages/core/src/api/core-api.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_web_plans_api.py",
+      "parityTests": [
+        "packages/core/src/api/core-api.test.ts",
+        "desktop/src/renderer/src/runtime/planProjection.test.ts"
+      ]
+    },
+    {
+      "pythonTest": "tests/unit/test_workspace_context.py",
+      "parityTests": [
+        "packages/core/src/agent/context-builder.test.ts",
+        "packages/core/src/agent/loop.test.ts"
+      ]
+    }
+  ]
+}
