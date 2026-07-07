@@ -166,7 +166,7 @@ async function submit() {
       <div v-if="error" class="onboarding-error">{{ error }}</div>
 
       <footer class="onboarding-actions">
-        <span>{{ errors.length ? errors[0] : '配置会保存到本机 model_config.json' }}</span>
+        <span>{{ errors.length ? errors[0] : '配置会保存到全局私有数据目录的 model_config.json' }}</span>
         <button class="tool-button" type="button" :disabled="saving" @click="emit('close')">
           稍后配置
         </button>

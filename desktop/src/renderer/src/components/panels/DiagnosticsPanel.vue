@@ -4,10 +4,12 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleDashed,
+  FolderOpen,
   RefreshCcw,
   TriangleAlert,
 } from 'lucide-vue-next'
 import { core } from '../../api/http'
+import { openPath } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
 import {
@@ -22,6 +24,13 @@ const error = ref('')
 
 const groups = computed(() => diagnosticRows(diagnostics.value || ctx.boot.value?.diagnostics || null))
 const rootPath = computed(() => diagnostics.value?.root || ctx.boot.value?.diagnostics?.root || '')
+const dataRootPath = computed(() => diagnostics.value?.paths?.stateRoot || ctx.boot.value?.diagnostics?.paths?.stateRoot || '')
+const activeProjectPath = computed(() => {
+  const current = diagnostics.value || ctx.boot.value?.diagnostics || null
+  const workspaceRoot = current?.workspacePolicy?.workspaceRoot || ''
+  if (!workspaceRoot || workspaceRoot === current?.paths?.runtimeRoot) return ''
+  return workspaceRoot
+})
 
 onMounted(() => {
   void refresh()
@@ -32,7 +41,13 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    diagnostics.value = await core<DiagnosticsPayload>('diagnostics.get')
+    const nextDiagnostics = await core<DiagnosticsPayload>('diagnostics.get')
+    try {
+      nextDiagnostics.contextExplanation = await core('memory.explainContext')
+    } catch {
+      // Diagnostics still has value even when no active prompt snapshot exists.
+    }
+    diagnostics.value = nextDiagnostics
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -46,6 +61,16 @@ function toneIcon(tone: DiagnosticTone) {
   if (tone === 'error') return AlertCircle
   return CircleDashed
 }
+
+async function revealPath(target: string) {
+  if (!target) return
+  error.value = ''
+  try {
+    await openPath(target)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
 </script>
 
 <template>
@@ -55,10 +80,30 @@ function toneIcon(tone: DiagnosticTone) {
         <h1>诊断</h1>
         <p>{{ rootPath || '当前 CoreApi 运行环境' }}</p>
       </div>
-      <button class="tool-button asset-button refresh-action" :disabled="loading" title="刷新" @click="refresh">
-        <RefreshCcw class="action-icon" :size="16" />
-        <span>{{ loading ? '刷新中' : '刷新' }}</span>
-      </button>
+      <div class="view-head-actions">
+        <button
+          v-if="dataRootPath"
+          class="tool-button asset-button refresh-action"
+          title="打开全局数据目录"
+          @click="revealPath(dataRootPath)"
+        >
+          <FolderOpen class="action-icon" :size="16" />
+          <span>数据目录</span>
+        </button>
+        <button
+          v-if="activeProjectPath"
+          class="tool-button asset-button refresh-action"
+          title="打开当前项目目录"
+          @click="revealPath(activeProjectPath)"
+        >
+          <FolderOpen class="action-icon" :size="16" />
+          <span>项目目录</span>
+        </button>
+        <button class="tool-button asset-button refresh-action" :disabled="loading" title="刷新" @click="refresh">
+          <RefreshCcw class="action-icon" :size="16" />
+          <span>{{ loading ? '刷新中' : '刷新' }}</span>
+        </button>
+      </div>
     </header>
 
     <div class="view-body">

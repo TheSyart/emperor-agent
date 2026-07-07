@@ -27,35 +27,74 @@ describe('resolveAssetPath', () => {
 })
 
 describe('resolveAttachmentRawPath', () => {
-  it('maps app://attachments/{id}/raw to an attachment file under memory/attachments', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-'))
-    const dir = path.join(root, 'memory', 'attachments', '2026-06')
+  it('maps app://attachments/{id}/raw to an attachment file under stateRoot/memory/attachments', () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-state-'))
+    const dir = path.join(stateRoot, 'memory', 'attachments', '2026-06')
     mkdirSync(dir, { recursive: true })
     writeFileSync(path.join(dir, 'abcdef12-photo.png'), 'image')
 
-    expect(resolveAttachmentRawPath('app://attachments/att_2026-06_abcdef12/raw', root)).toBe(path.join(dir, 'abcdef12-photo.png'))
+    expect(resolveAttachmentRawPath('app://attachments/att_2026-06_abcdef12/raw', { stateRoot })).toBe(path.join(dir, 'abcdef12-photo.png'))
+  })
+
+  it('falls back to legacyRuntimeRoot when the file is not under stateRoot (read-only, no migration)', () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-state-'))
+    const legacyRuntimeRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-legacy-'))
+    const legacyDir = path.join(legacyRuntimeRoot, 'memory', 'attachments', '2026-05')
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(path.join(legacyDir, '12345678-old.png'), 'legacy image')
+
+    const resolved = resolveAttachmentRawPath('app://attachments/att_2026-05_12345678/raw', { stateRoot, legacyRuntimeRoot })
+
+    expect(resolved).toBe(path.join(legacyDir, '12345678-old.png'))
+  })
+
+  it('prefers stateRoot over legacyRuntimeRoot when both have a matching file', () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-state-'))
+    const legacyRuntimeRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-legacy-'))
+    const newDir = path.join(stateRoot, 'memory', 'attachments', '2026-06')
+    const legacyDir = path.join(legacyRuntimeRoot, 'memory', 'attachments', '2026-06')
+    mkdirSync(newDir, { recursive: true })
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(path.join(newDir, 'abcdef12-photo.png'), 'new image')
+    writeFileSync(path.join(legacyDir, 'abcdef12-photo.png'), 'legacy image')
+
+    const resolved = resolveAttachmentRawPath('app://attachments/att_2026-06_abcdef12/raw', { stateRoot, legacyRuntimeRoot })
+
+    expect(resolved).toBe(path.join(newDir, 'abcdef12-photo.png'))
   })
 
   it('rejects malformed attachment URLs', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-'))
-    expect(resolveAttachmentRawPath('app://attachments/../../secret/raw', root)).toBeNull()
-    expect(resolveAttachmentRawPath('app://bundle/index.html', root)).toBeNull()
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-attachment-protocol-'))
+    expect(resolveAttachmentRawPath('app://attachments/../../secret/raw', { stateRoot })).toBeNull()
+    expect(resolveAttachmentRawPath('app://bundle/index.html', { stateRoot })).toBeNull()
   })
 })
 
 describe('resolveMediaRawPath', () => {
-  it('maps app://media/{id}/raw to a managed media file', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-'))
-    const dir = path.join(root, 'memory', 'media', '2026-06')
+  it('maps app://media/{id}/raw to a managed media file under stateRoot/memory/media', () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-state-'))
+    const dir = path.join(stateRoot, 'memory', 'media', '2026-06')
     mkdirSync(dir, { recursive: true })
     writeFileSync(path.join(dir, 'abcdef12-screen.png'), 'image')
 
-    expect(resolveMediaRawPath('app://media/media_2026-06_abcdef12/raw', root)).toBe(path.join(dir, 'abcdef12-screen.png'))
+    expect(resolveMediaRawPath('app://media/media_2026-06_abcdef12/raw', { stateRoot })).toBe(path.join(dir, 'abcdef12-screen.png'))
+  })
+
+  it('falls back to legacyRuntimeRoot when the file is not under stateRoot (read-only, no migration)', () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-state-'))
+    const legacyRuntimeRoot = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-legacy-'))
+    const legacyDir = path.join(legacyRuntimeRoot, 'memory', 'media', '2026-05')
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(path.join(legacyDir, '12345678-old.png'), 'legacy image')
+
+    const resolved = resolveMediaRawPath('app://media/media_2026-05_12345678/raw', { stateRoot, legacyRuntimeRoot })
+
+    expect(resolved).toBe(path.join(legacyDir, '12345678-old.png'))
   })
 
   it('rejects malformed media URLs', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-'))
-    expect(resolveMediaRawPath('app://media/../../secret/raw', root)).toBeNull()
-    expect(resolveMediaRawPath('app://attachments/att_2026-06_abcdef12/raw', root)).toBeNull()
+    const stateRoot = mkdtempSync(path.join(tmpdir(), 'emperor-media-protocol-'))
+    expect(resolveMediaRawPath('app://media/../../secret/raw', { stateRoot })).toBeNull()
+    expect(resolveMediaRawPath('app://attachments/att_2026-06_abcdef12/raw', { stateRoot })).toBeNull()
   })
 })

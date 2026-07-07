@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HistoryLog } from '../memory/history'
+import { HistoryLog, type HistoryArchiveGate } from '../memory/history'
 import type { MemoryStore } from '../memory/store'
 import { nowIsoUtc8 } from '../memory/time-utc8'
+import { clearTurnCheckpoint, readRecoverableCheckpointHistory, writeTurnCheckpoint, type CheckpointWriteOptions } from './checkpoint'
 
 type Row = Record<string, unknown>
 
@@ -48,6 +49,7 @@ export class ConversationStore {
       if (row.type === 'model_call') continue
       if (hidden.has(String(row.turn_id ?? ''))) continue
       const item: Row = { role: row.role, content: row.content }
+      if (Number.isFinite(Number(row.seq)) && Number(row.seq) > 0) item.seq = Math.trunc(Number(row.seq))
       if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
       if (Array.isArray(row.attachments)) item.attachments = row.attachments
       if (typeof row.displayContent === 'string') item.displayContent = row.displayContent
@@ -68,38 +70,33 @@ export class ConversationStore {
     return ids
   }
 
-  appendCompactMarker(activeHistory?: Row[] | null): void {
+  appendCompactMarker(activeHistory?: Row[] | null, archiveGate?: HistoryArchiveGate | null): void {
     if (activeHistory === undefined || activeHistory === null) {
       this.historyLog.append({ ts: '', type: 'compact_event' })
       return
     }
-    this.historyLog.compact(activeHistory)
+    this.historyLog.compact(activeHistory, archiveGate)
   }
 
   stats(): Row {
     return this.historyLog.stats()
   }
 
-  writeCheckpoint(history: Row[]): void {
-    const payload = { ts: nowIsoUtc8(), history: jsonSafe(history) }
-    const tmp = this.checkpointFile.replace(/\.json$/, '') + '.json.tmp'
-    writeFileSync(tmp, JSON.stringify(payload), 'utf8')
-    renameSync(tmp, this.checkpointFile)
+  writeCheckpoint(history: Row[], opts: CheckpointWriteOptions = {}): void {
+    writeTurnCheckpoint(this.checkpointFile, history, {
+      ...opts,
+      baseHistorySeq: opts.baseHistorySeq ?? Number(this.historyLog.stats().latest_seq ?? 0),
+    })
   }
 
   readCheckpoint(): Row[] | null {
-    if (!existsSync(this.checkpointFile)) return null
-    try {
-      const data = JSON.parse(readFileSync(this.checkpointFile, 'utf8'))
-      const history = data && typeof data === 'object' && !Array.isArray(data) ? data.history : null
-      return Array.isArray(history) ? history : null
-    } catch {
-      return null
-    }
+    return readRecoverableCheckpointHistory(this.checkpointFile, {
+      lastHistorySeq: Number(this.historyLog.stats().latest_seq ?? 0),
+    }) as Row[] | null
   }
 
   clearCheckpoint(): void {
-    rmSync(this.checkpointFile, { force: true })
+    clearTurnCheckpoint(this.checkpointFile)
   }
 }
 
@@ -109,6 +106,7 @@ export class SessionMemoryStore {
   readonly memoryDir: string
   readonly historyFile: string
   readonly checkpointFile: string
+  readonly versions: MemoryStore['versions']
 
   constructor(sharedMemory: MemoryStore, conversation: ConversationStore) {
     this.sharedMemory = sharedMemory
@@ -116,6 +114,7 @@ export class SessionMemoryStore {
     this.memoryDir = sharedMemory.memoryDir
     this.historyFile = conversation.historyFile
     this.checkpointFile = conversation.checkpointFile
+    this.versions = sharedMemory.versions
   }
 
   appendHistory(role: string, content: unknown, opts?: { extra?: Row | null }): void {
@@ -130,16 +129,16 @@ export class SessionMemoryStore {
     return this.conversation.loadUnarchivedTurnIds()
   }
 
-  appendCompactMarker(activeHistory?: Row[] | null): void {
-    this.conversation.appendCompactMarker(activeHistory)
+  appendCompactMarker(activeHistory?: Row[] | null, archiveGate?: HistoryArchiveGate | null): void {
+    this.conversation.appendCompactMarker(activeHistory, archiveGate)
   }
 
   historyStats(): Row {
     return this.conversation.stats()
   }
 
-  writeCheckpoint(history: Row[]): void {
-    this.conversation.writeCheckpoint(history)
+  writeCheckpoint(history: Row[], opts: CheckpointWriteOptions = {}): void {
+    this.conversation.writeCheckpoint(history, opts)
   }
 
   readCheckpoint(): Row[] | null {

@@ -618,7 +618,7 @@ async function runTest(kind: 'text' | 'vision', role: 'main' | 'secondary' = 'ma
 
     <div class="empty-note">
       <component :is="brandIcon" class="note-mark" :size="20" />
-      一个条目共享同一套 provider / apiKey / apiBase，并必须配置 Main 与 Secondary 两个 Model ID。所有 apiKey 仅保存在本地 model_config.json，前端展示时已脱敏。
+      一个条目共享同一套 provider / apiKey / apiBase，并必须配置 Main 与 Secondary 两个 Model ID。所有 apiKey 仅保存在全局私有数据目录的 model_config.json，前端展示时已脱敏。
     </div>
 
     <!-- 底部 sticky 操作栏 -->

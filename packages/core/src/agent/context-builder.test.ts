@@ -15,8 +15,12 @@ const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
 class FakeMemory implements MemoryLike {
   memoryFile = 'memory/MEMORY.local.md'
+  reads = 0
   constructor(private text: string) {}
-  readMemory(): string { return this.text }
+  readMemory(): string {
+    this.reads += 1
+    return this.text
+  }
 }
 
 const EMPTY_SKILLS: SkillsLoaderLike = {
@@ -116,8 +120,73 @@ describe('ContextBuilder (test_agent_prompt_contracts.py — template-driven)', 
 
     const sections = builder.buildSections()
     const bootstrap = sections.find((section) => section.name === 'bootstrap')!
+    const userProfile = sections.find((section) => section.name === 'user_profile')!
 
-    expect(bootstrap.content).toContain('state-root-profile')
-    expect(bootstrap.source).toContain(userFile)
+    expect(bootstrap.content).not.toContain('state-root-profile')
+    expect(bootstrap.source).not.toContain(userFile)
+    expect(userProfile.content).toContain('state-root-profile')
+    expect(userProfile.source).toBe(userFile)
+    expect(userProfile.scope).toBe('user_profile')
+  })
+
+  it('builds an auditable chat context plan that omits project memory by policy', () => {
+    const builder = build()
+    builder.setSessionScope({ mode: 'chat', projectIndexSummary: '- demo: 已绑定为 Build 项目' })
+
+    const projection = builder.buildProjection()
+
+    expect(projection.sections.some((section) => section.name === 'long_term_memory')).toBe(true)
+    expect(projection.sections.some((section) => section.name === 'project_agents')).toBe(false)
+    expect(projection.contextPlan).toMatchObject({
+      version: 1,
+      mode: 'chat',
+      activeMemoryBinding: {
+        profile: { scope: { kind: 'user_profile' }, readable: true, writable: true },
+        longTerm: { scope: { kind: 'global' }, readable: true, writable: true },
+      },
+    })
+    expect(projection.contextPlan.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'project_memory',
+        reason: 'chat mode has no active bound project memory',
+      }),
+    ]))
+  })
+
+  it('builds an auditable build context plan that omits global memory by policy', () => {
+    const memory = new FakeMemory('global memory should not be injected into build')
+    const builder = new ContextBuilder(TEMPLATES_DIR, EMPTY_SKILLS, {
+      memory,
+      memoryBudgetChars: 200,
+    })
+    builder.setSubagentRegistry(FAKE_SUBAGENTS)
+    builder.setSessionScope({
+      mode: 'build',
+      projectId: 'project_1',
+      projectAgents: '# Project Memory\n\n- build facts',
+      projectAgentsSource: 'projects/project_1/AGENTS.local.md',
+      projectPath: '/tmp/project_1',
+    })
+
+    const projection = builder.buildProjection()
+
+    expect(projection.sections.some((section) => section.name === 'project_agents')).toBe(true)
+    expect(projection.sections.some((section) => section.name === 'long_term_memory')).toBe(false)
+    expect(memory.reads).toBe(0)
+    expect(projection.contextPlan).toMatchObject({
+      version: 1,
+      mode: 'build',
+      activeMemoryBinding: {
+        profile: { scope: { kind: 'user_profile' }, readable: true, writable: true },
+        longTerm: { scope: { kind: 'project', projectId: 'project_1' }, readable: true, writable: true },
+      },
+    })
+    expect(projection.contextPlan.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'global_memory',
+        source: 'memory/MEMORY.local.md',
+        reason: 'build mode intentionally does not inject global MEMORY',
+      }),
+    ]))
   })
 })

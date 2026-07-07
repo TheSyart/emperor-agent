@@ -116,6 +116,6 @@ describe('ExternalBridgeService', () => {
       'external_outbound_queued',
       'external_outbound_error',
     ])
-    expect(JSON.parse(readFileSync(join(root, 'memory', 'external', 'state.json'), 'utf8')).outbox).toHaveLength(2)
+    expect(JSON.parse(readFileSync(join(root, 'external', 'state.json'), 'utf8')).outbox).toHaveLength(2)
   })
 })

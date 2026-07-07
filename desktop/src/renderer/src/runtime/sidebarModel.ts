@@ -1,4 +1,4 @@
-import type { SessionInfo, SidebarSortMode, SidebarState } from '../types'
+import type { ProjectInfo, SessionInfo, SidebarSortMode, SidebarState } from '../types'
 
 export interface SidebarProjectGroup {
   id: string
@@ -67,7 +67,11 @@ export function normalizeSidebarState(value: Partial<SidebarState> | null | unde
   }
 }
 
-export function buildSidebarGroups(sessions: SessionInfo[], stateInput: Partial<SidebarState> | null | undefined): SidebarGroups {
+export function buildSidebarGroups(
+  sessions: SessionInfo[],
+  stateInput: Partial<SidebarState> | null | undefined,
+  projectsInput: ProjectInfo[] = [],
+): SidebarGroups {
   const state = normalizeSidebarState(stateInput)
   // P1-6：draft 会话未发首条消息前不出现在侧边栏
   const visible = sessions.filter((session) => !session.archived_at && !session.draft)
@@ -77,12 +81,19 @@ export function buildSidebarGroups(sessions: SessionInfo[], stateInput: Partial<
     state.chat_order,
   )
   const projectMap = new Map<string, SidebarProjectGroup>()
+  for (const project of projectsInput) {
+    const group = projectGroupFromProject(project)
+    if (!group) continue
+    projectMap.set(group.id, group)
+  }
   for (const session of visible) {
     if (session.mode !== 'build') continue
     const id = session.project_id || session.project_path || 'missing-project'
     const existing = projectMap.get(id)
     if (existing) {
       existing.sessions.push(session)
+      if (existing.name === '未绑定项目' && session.project_name) existing.name = session.project_name
+      if (existing.path === '项目路径不可用' && session.project_path) existing.path = session.project_path
       existing.updated_at = maxIso(existing.updated_at, session.updated_at)
       existing.created_at = minIso(existing.created_at, session.created_at)
       continue
@@ -107,6 +118,19 @@ export function buildSidebarGroups(sessions: SessionInfo[], stateInput: Partial<
   return {
     projects: sortProjects(projects, state.project_sort, state.project_order),
     chats,
+  }
+}
+
+function projectGroupFromProject(project: ProjectInfo): SidebarProjectGroup | null {
+  const id = String(project.project_id || project.project_path || '').trim()
+  if (!id) return null
+  return {
+    id,
+    name: project.project_name || project.project_path || '未绑定项目',
+    path: project.project_path || project.workspace_path || '项目路径不可用',
+    updated_at: project.updated_at || project.created_at || '',
+    created_at: project.created_at || project.updated_at || '',
+    sessions: [],
   }
 }
 
@@ -171,11 +195,15 @@ function compareDate(a = '', b = ''): number {
   return b.localeCompare(a)
 }
 
-function maxIso(a: string, b: string): string {
+function maxIso(a = '', b = ''): string {
+  if (!a) return b
+  if (!b) return a
   return a.localeCompare(b) >= 0 ? a : b
 }
 
-function minIso(a: string, b: string): string {
+function minIso(a = '', b = ''): string {
+  if (!a) return b
+  if (!b) return a
   return a.localeCompare(b) <= 0 ? a : b
 }
 

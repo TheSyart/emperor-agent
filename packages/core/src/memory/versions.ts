@@ -22,8 +22,8 @@ export interface MemoryVersion {
 }
 
 export function memoryVersionFromDict(raw: Record<string, unknown>): MemoryVersion {
-  let target = String(raw.target ?? 'memory')
-  if (target !== 'memory' && target !== 'user' && target !== 'episode' && target !== 'project') target = 'memory'
+  const target = String(raw.target ?? 'memory')
+  if (!isMemoryVersionTarget(target)) throw new Error(`unknown memory version target: ${target}`)
   return {
     id: String(raw.id ?? ''),
     target: target as MemoryVersionTarget,
@@ -34,6 +34,10 @@ export function memoryVersionFromDict(raw: Record<string, unknown>): MemoryVersi
     contentHash: String(raw.contentHash ?? raw.content_hash ?? ''),
     bytes: Number(raw.bytes ?? 0) || 0,
   }
+}
+
+function isMemoryVersionTarget(value: string): value is MemoryVersionTarget {
+  return value === 'memory' || value === 'user' || value === 'episode' || value === 'project'
 }
 
 export function memoryVersionToDict(v: MemoryVersion): Record<string, unknown> {
@@ -99,6 +103,17 @@ export class MemoryVersionStore {
     let items = this.loadIndex()
     if (opts?.target) items = items.filter((item) => item.target === opts.target)
     return items.slice(0, Math.max(1, opts?.limit ?? 80))
+  }
+
+  nextVersionForPath(path: string, opts?: { target?: MemoryVersionTarget | null }): number {
+    const real = resolve(path)
+    const resolvedTarget = opts?.target ?? this.targetForPath(real)
+    if (resolvedTarget === null) throw new Error(`memory version path is not allowed: ${real}`)
+    const relPath = this.rel(real)
+    const currentCount = this.loadIndex()
+      .filter((item) => item.relPath === relPath && item.target === resolvedTarget)
+      .length
+    return currentCount + 1
   }
 
   detail(versionId: string): Record<string, unknown> {

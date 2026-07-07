@@ -113,9 +113,26 @@ export interface MemoryPayload {
   tokensByUsageType?: Record<string, TokenStatsRow>
   tokenTotals?: TokenTotals
   runtime?: RuntimeStats
+  compaction?: SemanticCompactionPayload | null
   schedulerMaintenance?: SchedulerMaintenanceStats
   watchlist?: WatchlistPayload
   versions?: MemoryVersionsPayload
+}
+
+export interface SemanticCompactionPayload {
+  cursor?: {
+    compactedUntilSeq?: number
+    archivedUntilSeq?: number
+    status?: string
+    lastCompactionId?: string | null
+  }
+  archive?: {
+    compactedUntilSeq?: number
+    archivedUntilSeq?: number
+    archiveBlockedUntilCompacted?: boolean
+  }
+  omittedRanges?: Array<Record<string, unknown>>
+  latest?: Record<string, unknown> | null
 }
 
 export interface SchedulerMaintenanceStats {
@@ -441,10 +458,54 @@ export interface WorkspacePolicyDiagnosticsPayload {
   outsideWorkspace?: string
 }
 
+export interface DiagnosticsRuntimePaths {
+  runtimeRoot?: string
+  stateRoot?: string
+  stateRootSource?: string
+  templatesDir?: string
+  skillsDir?: string
+  assetsDir?: string
+  memoryRoot?: string
+  sessionsRoot?: string
+  projectsRoot?: string
+  attachmentsRoot?: string
+  mediaRoot?: string
+  tokensFile?: string
+  schedulerRoot?: string
+  teamRoot?: string
+  tasksRoot?: string
+  controlRoot?: string
+  externalRoot?: string
+  mcpConfigPath?: string
+}
+
+export interface LegacyStateRootInfo {
+  path: string
+  kind: string
+  existed: boolean
+}
+
+export interface LegacyStateMigrationPayload {
+  legacyStateRoots?: LegacyStateRootInfo[]
+  copied?: number
+  skipped?: number
+  logPath?: string
+}
+
+export interface ProjectLegacyPrivateDataPayload {
+  projectPath?: string
+  sessions?: boolean
+  memory?: boolean
+}
+
 export interface DiagnosticsPayload {
   root?: string
+  paths?: DiagnosticsRuntimePaths
   modelConfig?: DiagnosticsConfigSummary
   localConfig?: DiagnosticsConfigSummary
+  contextExplanation?: MemoryContextExplanationPayload
+  legacyStateMigration?: LegacyStateMigrationPayload
+  projectLegacyPrivateData?: ProjectLegacyPrivateDataPayload | null
   scheduler?: SchedulerDiagnosticsPayload
   runtime?: RuntimeStats
   workspacePolicy?: WorkspacePolicyDiagnosticsPayload
@@ -452,6 +513,20 @@ export interface DiagnosticsPayload {
   activeTasks?: RuntimeTaskRecord[]
   desktopPet?: DesktopPetPayload & Record<string, unknown>
   dependencies?: DiagnosticsDependencyPayload
+}
+
+export interface MemoryContextExplanationPayload {
+  status?: string
+  sessionId?: string | null
+  turnId?: string | null
+  mode?: string | null
+  injected?: Array<Record<string, unknown>>
+  omitted?: Array<Record<string, unknown>>
+  checkpoint?: Record<string, unknown> | null
+  compaction?: Record<string, unknown> | null
+  microcompact?: Record<string, unknown> | null
+  reason?: string
+  [key: string]: unknown
 }
 
 export interface BootstrapPayload {
@@ -480,6 +555,24 @@ export interface CompactResult {
   message: string
   memory: MemoryPayload
   unarchivedHistory: RuntimeHistoryItem[]
+  runtime?: RuntimeStats
+  compaction?: CompactResultCompaction
+  error?: string
+}
+
+export interface CompactResultCompaction {
+  compactionId?: string
+  mode?: SessionMode | string
+  projectId?: string | null
+  range?: { fromSeq?: number; toSeq?: number }
+  cursor?: SemanticCompactionPayload['cursor']
+  applied?: Array<{
+    scope?: Record<string, unknown>
+    path?: string
+    operationCount?: number
+  }>
+  discarded?: Array<Record<string, unknown>>
+  decisions?: Array<Record<string, unknown>>
 }
 
 export interface RuntimeHistoryItem {
@@ -944,7 +1037,7 @@ type WsEventVariants = (
   | { event: 'tool_run_failed'; id?: string; name: string; message?: string; reason_kind?: 'safety_refusal' | 'error' | string }
   | { event: 'tool_run_cancelled'; id?: string; name: string; reason?: string }
   | { event: 'turn_phase'; phase?: string; sequence?: number; iteration?: number; detail?: Record<string, unknown> }
-  | { event: 'turn_scope'; mode?: string; workspace_root?: string; state_root?: string; session_root?: string; project_id?: string | null; project_state_root?: string | null }
+  | { event: 'turn_scope'; mode?: string; workspace_root?: string; state_root?: string; session_root?: string; project_id?: string | null; project_state_root?: string | null; active_memory_binding?: Record<string, unknown> }
   | { event: 'assistant_done'; content?: string }
   | { event: 'error'; message?: string; partial?: boolean }
   | { event: 'control_mode_update'; control?: ControlPayload }

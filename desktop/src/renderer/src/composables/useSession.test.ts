@@ -15,6 +15,7 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
       emperor: {
         invokeCore: async (...args: unknown[]) => {
           calls.push(args)
+          if (args[0] === 'projects.list') return []
           return [{ id: 's1', title: 'Main', updated_at: '2026-01-01T00:00:00+08:00' }]
         },
       },
@@ -24,7 +25,7 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
 
     await session.load()
 
-    expect(calls).toEqual([['sessions.list', { includeArchived: false }]])
+    expect(calls).toEqual([['sessions.list', { includeArchived: false }], ['projects.list']])
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(session.sessions.value.map((item) => item.id)).toEqual(['s1'])
     expect(session.activeId.value).toBe('s1')
@@ -58,6 +59,7 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
         invokeCore: async (...args: unknown[]) => {
           calls.push(args)
           if (args[0] === 'sessions.list') return []
+          if (args[0] === 'projects.list') return []
           return { ok: true }
         },
       },
@@ -66,8 +68,32 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
 
     await session.load()
 
-    expect(calls).toEqual([['sessions.list', { includeArchived: false }]])
+    expect(calls).toEqual([['sessions.list', { includeArchived: false }], ['projects.list']])
     expect(session.activeId.value.startsWith('draft:')).toBe(true)
+  })
+
+  it('loads project registry alongside sessions for empty project sidebar rows', async () => {
+    const calls: unknown[][] = []
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          calls.push(args)
+          if (args[0] === 'sessions.list') return []
+          if (args[0] === 'projects.list') {
+            return [{ project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha', updated_at: '2026-01-01T00:00:00+08:00' }]
+          }
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+
+    await session.load()
+
+    expect(calls).toEqual([['sessions.list', { includeArchived: false }], ['projects.list']])
+    expect(session.projects.value).toEqual([
+      { project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha', updated_at: '2026-01-01T00:00:00+08:00' },
+    ])
   })
 
   it('keeps build project metadata on the draft for the first submit (P1-6)', async () => {
@@ -100,6 +126,66 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
       project_path: '/tmp/demo',
       project_name: 'demo',
     })
+  })
+
+  it('upserts resolved projects immediately without waiting for session promotion', async () => {
+    const calls: unknown[][] = []
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          calls.push(args)
+          return { project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha', updated_at: '2026-01-01T00:00:00+08:00' }
+        },
+      },
+    }
+    const session = useSession()
+
+    const project = await session.resolveProject('/tmp/alpha')
+
+    expect(calls).toEqual([['projects.resolve', '/tmp/alpha']])
+    expect(project.project_id).toBe('p1')
+    expect(session.projects.value.map((item) => item.project_id)).toEqual(['p1'])
+  })
+
+  it('upserts build session projects from session_created events without duplicating them', async () => {
+    const session = useSession()
+
+    session.applySessionCreatedEvent({
+      event: 'session_created',
+      session: {
+        id: 'build-1',
+        title: '新会话',
+        created_at: '2026-01-01T00:00:00+08:00',
+        updated_at: '2026-01-01T00:00:00+08:00',
+        preview: '',
+        mode: 'build',
+        project_id: 'p1',
+        project_path: '/tmp/alpha',
+        project_name: 'Alpha',
+        message_count: 1,
+        title_status: 'pending',
+        version: 1,
+      },
+    })
+    session.applySessionCreatedEvent({
+      event: 'session_created',
+      session: {
+        id: 'build-2',
+        title: '新会话',
+        created_at: '2026-01-02T00:00:00+08:00',
+        updated_at: '2026-01-02T00:00:00+08:00',
+        preview: '',
+        mode: 'build',
+        project_id: 'p1',
+        project_path: '/tmp/alpha',
+        project_name: 'Alpha',
+        message_count: 1,
+        title_status: 'pending',
+        version: 1,
+      },
+    })
+
+    expect(session.projects.value.map((item) => item.project_id)).toEqual(['p1'])
   })
 
   it('updates local session control pending tags from runtime control events', async () => {

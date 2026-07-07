@@ -7,6 +7,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { normalizePromptProfile, type PromptProfile } from '../config/local-config'
+import type { PromptContextPlan } from '../prompts/manifest'
+import { ContextAssembler } from '../context/assembler'
+import { ContextPlanner } from '../context/planner'
+import { ContextPolicyRegistry } from '../context/policy'
 
 const DEFAULT_MEMORY_BUDGET_CHARS = 12_000
 
@@ -17,6 +21,13 @@ export interface ContextSection {
   priority: number
   budgetChars: number | null
   version: string | null
+  scope?: string | null
+}
+
+export interface ContextProjection {
+  sections: ContextSection[]
+  contextPlan: PromptContextPlan
+  prompt: string
 }
 
 /** 完整 SkillsLoader 的最小表面（W04/技能波次提供实现）。 */
@@ -35,10 +46,11 @@ export interface SubagentRegistryLike {
 export interface MemoryLike {
   readMemory(): string
   memoryFile?: string
+  memoryDir?: string
 }
 
 export class ContextBuilder {
-  private static readonly BOOTSTRAP_FILES = ['SOUL.md', 'TOOL.md', 'USER.md']
+  private static readonly BOOTSTRAP_FILES = ['SOUL.md', 'TOOL.md']
 
   readonly docsDir: string
   readonly skills: SkillsLoaderLike
@@ -46,12 +58,15 @@ export class ContextBuilder {
   readonly memoryBudgetChars: number
   readonly userFile: string | null
   readonly promptProfile: PromptProfile
+  readonly policyRegistry = new ContextPolicyRegistry()
   subagentRegistry: SubagentRegistryLike | null = null
   sessionMode: 'chat' | 'build' = 'chat'
   projectAgents = ''
   projectAgentsSource = ''
+  projectId = ''
   projectPath = ''
   projectIndexSummary = ''
+  compactionOmittedRanges: Array<{ fromSeq: number; toSeq: number; compactionId?: string | null; targetScopes?: string[] }> = []
 
   constructor(
     docsDir: string,
@@ -70,12 +85,29 @@ export class ContextBuilder {
     this.subagentRegistry = subagentRegistry
   }
 
-  setSessionScope(opts?: { mode?: string; projectAgents?: string; projectAgentsSource?: string; projectPath?: string; projectIndexSummary?: string }): void {
+  setSessionScope(opts?: {
+    mode?: string
+    projectId?: string
+    projectAgents?: string
+    projectAgentsSource?: string
+    projectPath?: string
+    projectIndexSummary?: string
+    compactionOmittedRanges?: Array<{ fromSeq: number; toSeq: number; compactionId?: string | null; targetScopes?: string[] }>
+  }): void {
     this.sessionMode = opts?.mode === 'build' ? 'build' : 'chat'
+    this.projectId = String(opts?.projectId ?? '').trim()
     this.projectAgents = String(opts?.projectAgents ?? '').trim()
     this.projectAgentsSource = String(opts?.projectAgentsSource ?? '').trim()
     this.projectPath = String(opts?.projectPath ?? '').trim()
     this.projectIndexSummary = String(opts?.projectIndexSummary ?? '').trim()
+    this.compactionOmittedRanges = (opts?.compactionOmittedRanges ?? [])
+      .map((range) => ({
+        fromSeq: Math.max(1, Math.trunc(Number(range.fromSeq) || 0)),
+        toSeq: Math.max(1, Math.trunc(Number(range.toSeq) || 0)),
+        compactionId: range.compactionId ?? null,
+        targetScopes: range.targetScopes ?? [],
+      }))
+      .filter((range) => range.toSeq >= range.fromSeq)
   }
 
   renderTemplate(name: string, vars: Record<string, string>): string {
@@ -94,11 +126,22 @@ export class ContextBuilder {
   }
 
   buildSystemPrompt(): string {
-    return renderContextSections(this.buildSections())
+    return this.buildProjection().prompt
+  }
+
+  buildProjection(): ContextProjection {
+    const sections = this.buildSections()
+    const contextPlan = this.buildContextPlan(sections)
+    return {
+      sections,
+      contextPlan,
+      prompt: renderContextSections(sections, contextPlan),
+    }
   }
 
   buildSections(): ContextSection[] {
     const sections: ContextSection[] = []
+    const policy = this.policyRegistry.policyForMode(this.sessionMode)
 
     const bootstrapParts: string[] = []
     const versions: string[] = []
@@ -115,11 +158,28 @@ export class ContextBuilder {
       sections.push({
         name: 'bootstrap',
         content: bootstrap,
-        source: bootstrapSource(versions, this.userFile),
+        source: bootstrapSource(),
         priority: 100,
         budgetChars: null,
         version: versions.join(', ') || null,
+        scope: 'prompt',
       })
+    }
+
+    const userProfilePath = this.bootstrapPath('USER.md')
+    if (existsSync(userProfilePath)) {
+      const userProfile = readFileSync(userProfilePath, 'utf8').trim()
+      if (userProfile) {
+        sections.push({
+          name: 'user_profile',
+          content: userProfile,
+          source: userProfilePath,
+          priority: 98,
+          budgetChars: null,
+          version: promptVersion(userProfile),
+          scope: 'user_profile',
+        })
+      }
     }
 
     sections.push({
@@ -129,9 +189,10 @@ export class ContextBuilder {
       priority: 95,
       budgetChars: null,
       version: 'prompt-profile-v1',
+      scope: 'prompt',
     })
 
-    const workspace = this.sessionMode === 'build' && this.projectPath ? this.projectPath : dirname(this.docsDir)
+    const workspace = this.policyRegistry.includes(policy, 'project_path') && this.projectPath ? this.projectPath : dirname(this.docsDir)
     const identity = this.renderTemplate('identity.md', { workspace, subagents_summary: this.subagentsSummary() })
     if (identity) {
       sections.push({
@@ -141,24 +202,26 @@ export class ContextBuilder {
         priority: 90,
         budgetChars: null,
         version: promptVersion(identity),
+        scope: 'runtime',
       })
     }
 
-    if (this.sessionMode === 'build') {
-      if (this.projectAgents) {
-        sections.push({
-          name: 'project_agents',
-          content:
-            '# Project State\n\n' +
-            `Project path: ${this.projectPath || '(unknown)'}\n\n` +
-            `${clipText(this.projectAgents, this.memoryBudgetChars, 'Project State')}`,
-          source: this.projectAgentsSource || 'state/projects/AGENTS.local.md',
-          priority: 85,
-          budgetChars: this.memoryBudgetChars,
-          version: null,
-        })
-      }
-    } else if (this.memory) {
+    if (this.policyRegistry.includes(policy, 'project_memory') && this.projectAgents) {
+      sections.push({
+        name: 'project_agents',
+        content:
+          '# Project State\n\n' +
+          `Project path: ${this.projectPath || '(unknown)'}\n\n` +
+          `${clipText(this.projectAgents, this.memoryBudgetChars, 'Project State')}`,
+        source: this.projectAgentsSource || 'projects/<project-id>/AGENTS.local.md',
+        priority: 85,
+        budgetChars: this.memoryBudgetChars,
+        version: null,
+        scope: 'project',
+      })
+    }
+
+    if (this.policyRegistry.includes(policy, 'global_memory') && this.memory) {
       const memory = this.memory.readMemory().trim()
       if (memory) {
         const budgeted = clipText(memory, this.memoryBudgetChars, 'Long-term Memory')
@@ -169,18 +232,21 @@ export class ContextBuilder {
           priority: 80,
           budgetChars: this.memoryBudgetChars,
           version: null,
+          scope: 'global',
         })
       }
-      if (this.projectIndexSummary) {
-        sections.push({
-          name: 'project_index_summary',
-          content: `# Project Index Summary\n\n${this.projectIndexSummary}`,
-          source: 'state/projects/index.json',
-          priority: 75,
-          budgetChars: null,
-          version: null,
-        })
-      }
+    }
+
+    if (this.policyRegistry.includes(policy, 'project_index') && this.projectIndexSummary) {
+      sections.push({
+        name: 'project_index_summary',
+        content: `# Project Index Summary\n\n${this.projectIndexSummary}`,
+        source: 'projects/index.json',
+        priority: 75,
+        budgetChars: null,
+        version: null,
+        scope: 'project_index',
+      })
     }
 
     const alwaysSkills = this.skills.getAlwaysSkills()
@@ -194,6 +260,7 @@ export class ContextBuilder {
           priority: 70,
           budgetChars: null,
           version: null,
+          scope: 'skills',
         })
       }
     }
@@ -208,10 +275,24 @@ export class ContextBuilder {
         priority: 60,
         budgetChars: null,
         version: promptVersion(skillsSection),
+        scope: 'skills',
       })
     }
 
     return sections
+  }
+
+  private buildContextPlan(sections: ContextSection[]): PromptContextPlan {
+    return new ContextPlanner().plan({
+      mode: this.sessionMode,
+      sections,
+      projectId: this.projectId,
+      memoryFile: this.memory?.memoryFile ?? 'memory/MEMORY.local.md',
+      userFile: this.userFile,
+      projectMemoryFile: this.projectAgentsSource || (this.projectId ? `projects/${this.projectId}/AGENTS.local.md` : null),
+      policy: this.policyRegistry.policyForMode(this.sessionMode),
+      compactionOmittedRanges: this.compactionOmittedRanges,
+    })
   }
 
   private bootstrapPath(name: string): string {
@@ -229,9 +310,8 @@ export class ContextBuilder {
   }
 }
 
-function bootstrapSource(versions: string[], userFile: string | null): string {
-  const userSource = userFile ? userFile : 'templates/init/USER.md'
-  return `templates/SOUL.md+templates/TOOL.md+${userSource}${versions.length ? '' : ''}`
+function bootstrapSource(): string {
+  return 'templates/SOUL.md+templates/TOOL.md'
 }
 
 function profilePrompt(profile: PromptProfile): string {
@@ -262,8 +342,8 @@ function profilePrompt(profile: PromptProfile): string {
   ].join('\n')
 }
 
-export function renderContextSections(sections: ContextSection[]): string {
-  return sections.map((s) => s.content).join('\n\n---\n\n')
+export function renderContextSections(sections: ContextSection[], contextPlan?: PromptContextPlan | null): string {
+  return new ContextAssembler().renderSystemPrompt(sections, contextPlan)
 }
 
 function promptVersion(text: string): string | null {

@@ -1,8 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import type { AgentLoop } from '../../agent/loop'
-import { Compactor } from '../../memory/compactor'
+import { CompactionCursorStore, CompactionLedger, latestAppliedCompactionRun } from '../../memory/compaction-ledger'
+import { compactSession } from '../../memory/compaction-service'
 import { memoryVersionToDict, type MemoryVersionTarget } from '../../memory/versions'
+import { buildMemoryArtifacts } from '../../memory/artifacts'
+import { applyMemoryPatchToFile, memoryContentHash, type MemoryPatchOperation } from '../../memory/patch'
+import { readTurnCheckpoint } from '../../sessions/checkpoint'
 import type { WatchlistService } from '../../watchlist/service'
 
 type Dict = Record<string, any>
@@ -47,6 +51,7 @@ export class CoreMemoryService {
       tokenTotals: this.loop.tokenTracker.totals(),
       history: this.loop.activeMemoryStore.historyStats(),
       runtime: this.loop.runtimeStore.stats({ activeTurnIds: turnIds }),
+      compaction: this.loop.activeSessionId ? this.compactionExplanation(this.loop.activeSessionId) : null,
       schedulerMaintenance: this.schedulerMaintenance(),
       watchlist: this.watchlist.payload(),
       versions: this.loop.sharedMemory.versions.payload({ limit: 30 }),
@@ -54,7 +59,24 @@ export class CoreMemoryService {
   }
 
   saveMemory(content: string): Dict {
-    this.loop.sharedMemory.writeMemory(content)
+    const normalized = `${String(content || '').trimEnd()}\n`
+    const operations = markdownSectionReplacementOps(normalized)
+    if (!operations.length) throw new Error('save_memory requires at least one ## section')
+    const current = this.loop.sharedMemory.readMemory()
+    const result = applyMemoryPatchToFile({
+      target: { kind: 'global' },
+      baseVersion: this.loop.sharedMemory.versions.nextVersionForPath(this.loop.sharedMemory.memoryFile, { target: 'memory' }),
+      baseHash: memoryContentHash(current),
+      operations,
+      rationale: 'save_global_memory',
+    }, {
+      targetPath: this.loop.sharedMemory.memoryFile,
+      versions: this.loop.sharedMemory.versions,
+      versionTarget: 'memory',
+      ledgerPath: join(this.root, 'memory', 'patch-ledger.jsonl'),
+      explicitReplace: true,
+    })
+    if (!result.ok) throw new Error(`save_memory rejected: ${result.errors.join(', ')}`)
     this.refreshRuntimeContext?.()
     return { path: 'memory/MEMORY.local.md', content: this.loop.sharedMemory.readMemory() }
   }
@@ -131,7 +153,7 @@ export class CoreMemoryService {
     }
   }
 
-  async compact(): Promise<Dict> {
+  async compact(opts: { force?: boolean } = {}): Promise<Dict> {
     const unarchivedHistory = this.loop.activeMemoryStore.loadUnarchivedHistory()
     const count = unarchivedHistory.length
     if (count < 2) {
@@ -144,51 +166,191 @@ export class CoreMemoryService {
       }
     }
 
-    const compactor = this.buildCompactor()
-    let compacted = false
+    const route = this.loop.modelRouter.route('memory_compaction')
+    const snapshot = route.snapshot
+    const sessionId = this.loop.activeSessionId || 'default'
+    const mode = this.loop.activeSession?.mode === 'build' ? 'build' : 'chat'
+    const projectId = mode === 'build' ? String(this.loop.activeSession?.project_id || '') : null
+    let result: Awaited<ReturnType<typeof compactSession>>
     try {
-      compacted = await compactor.compactStartupAsync(unarchivedHistory)
+      result = await compactSession({
+        sessionId,
+        mode,
+        projectId,
+        historyFile: this.loop.activeMemoryStore.historyFile,
+        trigger: opts.force ? { kind: 'manual', force: true } : { kind: 'manual' },
+        memory: {
+          root: this.loop.paths.stateRoot,
+          memoryDir: this.loop.sharedMemory.memoryDir,
+          userFile: this.loop.sharedMemory.userFile,
+          versions: this.loop.sharedMemory.versions,
+          readUser: () => this.loop.sharedMemory.readUser(),
+          readGlobalMemory: () => this.loop.sharedMemory.readMemory(),
+          readEpisode: () => this.loop.sharedMemory.readTodayEpisode(),
+          readProjectMemory: (id: string) => this.loop.projectStore.readManagedMemory(id),
+        },
+        model: {
+          provider: snapshot.provider,
+          model: snapshot.model,
+          providerName: snapshot.providerName,
+          modelRole: snapshot.modelRole,
+          maxTokens: snapshot.generation.maxTokens,
+          temperature: snapshot.generation.temperature,
+          reasoningEffort: snapshot.generation.reasoningEffort,
+          routeReason: snapshot.routeReason,
+        },
+        tokenTracker: this.loop.tokenTracker,
+      })
     } catch (exc) {
       return this.compactionFailed(count, unarchivedHistory, exc)
     }
-    if (!compacted) return this.compactionFailed(count, unarchivedHistory)
+    if (result.status === 'compacted' && result.compaction) {
+      try {
+        const cursorStore = new CompactionCursorStore(this.loop.paths.stateRoot)
+        const activeHistory = activeHistoryAfterSeq(this.loop.activeMemoryStore, result.compaction.range.toSeq)
+        this.loop.activeMemoryStore.appendCompactMarker(activeHistory, cursorStore.archiveGate(sessionId))
+        result.compaction.cursor = cursorStore.readOrInit(sessionId)
+      } catch (exc) {
+        return this.compactionFailed(count, unarchivedHistory, exc)
+      }
+    }
     const runtime = this.loop.runtimeStore.compact(this.loop.activeMemoryStore.loadUnarchivedTurnIds())
-    this.loop.history = []
     this.refreshRuntimeContext?.()
+    if (result.status !== 'compacted') {
+      return {
+        status: result.status,
+        count,
+        message: result.message,
+        memory: this.getMemory(),
+        unarchivedHistory: this.loop.activeMemoryStore.loadUnarchivedHistory(),
+        runtime,
+        error: result.error,
+      }
+    }
     return {
       status: 'compacted',
       count,
-      message: `已压缩 ${count} 条未归档消息。`,
+      message: result.message,
       memory: this.getMemory(),
       unarchivedHistory: this.loop.activeMemoryStore.loadUnarchivedHistory(),
       runtime,
+      compaction: result.compaction,
     }
   }
 
-  private buildCompactor(): Compactor {
-    const route = this.loop.modelRouter.route('memory_compaction')
-    const snapshot = route.snapshot
-    const fallback = route.fallback
-    return new Compactor({
-      provider: snapshot.provider,
-      model: snapshot.model,
-      memoryStore: this.loop.activeMemoryStore,
-      docsDir: this.loop.templatesDir,
-      maxTokens: snapshot.generation.maxTokens,
-      temperature: snapshot.generation.temperature,
-      reasoningEffort: snapshot.generation.reasoningEffort,
-      providerName: snapshot.providerName,
-      tokenTracker: this.loop.tokenTracker,
-      usageType: 'memory_compaction',
-      modelRole: snapshot.modelRole,
-      routeReason: snapshot.routeReason,
-      fallbackProvider: fallback?.provider ?? null,
-      fallbackModel: fallback?.model ?? null,
-      fallbackProviderName: fallback?.providerName ?? null,
-      fallbackGeneration: fallback?.generation ?? null,
-      fallbackModelRole: fallback?.modelRole ?? 'main',
-      fallbackRouteReason: fallback?.routeReason,
-    })
+  explainContext(opts: { sessionId?: string | null; turnId?: string | null } = {}): Dict {
+    const sessionId = String(opts.sessionId ?? this.loop.activeSessionId ?? '').trim()
+    if (!sessionId) {
+      return {
+        status: 'missing_session',
+        sessionId: null,
+        turnId: opts.turnId ?? null,
+        reason: 'no active or requested session',
+      }
+    }
+    const sessionRoot = this.loop.sessionStore.sessionDir(sessionId)
+    const snapshot = this.readPromptSnapshot(sessionRoot, opts.turnId ?? null)
+    const checkpoint = this.checkpointSummary(join(sessionRoot, '_checkpoint.json'))
+    const compaction = this.compactionExplanation(sessionId)
+    const artifacts = this.memoryArtifacts(sessionId, sessionRoot)
+    if (!snapshot) {
+      return {
+        status: 'missing_snapshot',
+        sessionId,
+        turnId: opts.turnId ?? null,
+        reason: 'prompt snapshot not found',
+        checkpoint,
+        compaction,
+        artifacts,
+        microcompact: { records: [], omittedChars: 0 },
+      }
+    }
+    const contextPlan = recordValue(snapshot.contextPlan)
+    const items = Array.isArray(contextPlan.items) ? contextPlan.items.filter(isRecord) : []
+    const omitted = Array.isArray(contextPlan.omitted) ? contextPlan.omitted.filter(isRecord) : []
+    const microcompact = microcompactSummary(contextPlan, snapshot)
+    return {
+      status: 'ok',
+      sessionId,
+      turnId: String(snapshot.turnId ?? opts.turnId ?? ''),
+      mode: contextPlan.mode ?? null,
+      model: snapshot.model ?? null,
+      provider: snapshot.provider ?? null,
+      modelRole: snapshot.modelRole ?? null,
+      estimatedInputTokens: snapshot.estimatedInputTokens ?? null,
+      activeMemoryBinding: contextPlan.activeMemoryBinding ?? null,
+      injected: items.map((item) => ({
+        id: String(item.id ?? ''),
+        kind: String(item.kind ?? ''),
+        source: String(item.source ?? ''),
+        action: String(item.action ?? 'include'),
+        reason: String(item.reason ?? ''),
+        priority: numberOrNull(item.priority),
+        hash: typeof item.hash === 'string' ? item.hash : null,
+        charCount: numberOrNull(item.charCount),
+        tokenEstimate: numberOrNull(item.tokenEstimate),
+      })),
+      omitted: omitted.map((item) => ({
+        kind: String(item.kind ?? ''),
+        source: String(item.source ?? ''),
+        reason: String(item.reason ?? ''),
+      })),
+      sections: Array.isArray(snapshot.sections) ? snapshot.sections : [],
+      checkpoint,
+      compaction,
+      artifacts,
+      microcompact,
+      snapshot: {
+        createdAt: snapshot.createdAt ?? null,
+        totals: snapshot.totals ?? null,
+      },
+    }
+  }
+
+  private compactionExplanation(sessionId: string): Dict {
+    const cursor = new CompactionCursorStore(this.loop.paths.stateRoot).readOrInit(sessionId)
+    const latest = this.latestCompactionRun(sessionId, cursor.lastCompactionId ?? null)
+    return {
+      cursor,
+      archive: {
+        compactedUntilSeq: cursor.compactedUntilSeq,
+        archivedUntilSeq: cursor.archivedUntilSeq,
+        archiveBlockedUntilCompacted: cursor.archivedUntilSeq < cursor.compactedUntilSeq,
+      },
+      omittedRanges: latest && latest.status === 'applied'
+        ? [{
+          fromSeq: numberOrNull(recordValue(latest.range).fromSeq),
+          toSeq: numberOrNull(recordValue(latest.range).toSeq),
+          compactionId: String(latest.compactionId ?? ''),
+          reason: 'semantic_compaction_applied',
+        }]
+        : [],
+      latest: latest ? compactionRunExplanation(latest) : null,
+    }
+  }
+
+  private memoryArtifacts(sessionId: string, sessionRoot: string): Dict[] {
+    const session = this.loop.sessionStore.get(sessionId)
+    const projectId = String(session?.project_id ?? '').trim()
+    const project = projectId ? this.loop.projectStore.get(projectId) : null
+    return buildMemoryArtifacts({
+      stateRoot: this.loop.paths.stateRoot,
+      memoryDir: this.loop.sharedMemory.memoryDir,
+      userFile: this.loop.sharedMemory.userFile,
+      sessionId,
+      sessionRoot,
+      historyFile: join(sessionRoot, 'history.jsonl'),
+      runtimeEventsFile: join(sessionRoot, 'runtime', 'events.jsonl'),
+      projectId: project?.project_id ?? null,
+      projectMemoryPath: project?.agents_path ?? null,
+      episodeDate: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10),
+    }) as unknown as Dict[]
+  }
+
+  private latestCompactionRun(sessionId: string, preferredId: string | null): Dict | null {
+    const index = new CompactionLedger(this.loop.paths.stateRoot).readIndex()
+    const cursor = new CompactionCursorStore(this.loop.paths.stateRoot).readOrInit(sessionId)
+    return latestAppliedCompactionRun(index, sessionId, preferredId, cursor.compactedUntilSeq) as Dict | null
   }
 
   private contextPayload(): Dict {
@@ -197,7 +359,7 @@ export class CoreMemoryService {
     const mode = String(session?.mode || 'chat')
     const projectId = String(session?.project_id || '')
     const project = projectId ? this.loop.projectStore.get(projectId) : null
-    const sources = ['templates/SOUL.md', 'templates/TOOL.md', 'templates/USER.local.md']
+    const sources = ['templates/SOUL.md', 'templates/TOOL.md', 'memory/profile/USER.local.md']
     const sourceMap: Dict[] = [
       { domain: 'prompt', kind: 'bootstrap', path: 'templates/SOUL.md', scope: 'global' },
       { domain: 'prompt', kind: 'tool_contract', path: 'templates/TOOL.md', scope: 'global' },
@@ -206,7 +368,7 @@ export class CoreMemoryService {
       { domain: 'runtime', kind: 'events', path: this.loop.runtimeStore.eventsFile, sessionId },
     ]
     if (mode === 'build') {
-      sources.push('Project AGENTS.md')
+      sources.push('全局私有项目记忆 (AGENTS.local.md)', 'Workspace AGENTS.md/.emperor rules (只读协作上下文)')
       if (project) {
         sources.push(project.agents_path)
         sourceMap.push({
@@ -221,7 +383,7 @@ export class CoreMemoryService {
         })
       }
     } else {
-      sources.push('memory/MEMORY.local.md', 'memory/projects/index.json')
+      sources.push('memory/MEMORY.local.md', 'projects/index.json')
       sourceMap.push(
         { domain: 'memory', kind: 'global_memory', path: this.loop.sharedMemory.memoryFile, scope: 'global' },
         { domain: 'project', kind: 'index_summary', path: this.loop.projectStore.indexPath, scope: 'chat' },
@@ -281,6 +443,159 @@ export class CoreMemoryService {
     const r = relative(this.root, resolve(path))
     return r.startsWith('..') ? resolve(path) : r
   }
+
+  private readPromptSnapshot(sessionRoot: string, turnId: string | null): Dict | null {
+    const snapshotDir = join(sessionRoot, 'prompt-snapshots')
+    if (!existsSync(snapshotDir)) return null
+    const file = turnId ? join(snapshotDir, `${safeSnapshotName(turnId)}.json`) : latestPromptSnapshot(snapshotDir)
+    if (!file || !existsSync(file)) return null
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8') || '{}')
+      return isRecord(parsed) && Array.isArray(parsed.sections) ? parsed : null
+    } catch {
+      return null
+    }
+  }
+
+  private checkpointSummary(path: string): Dict {
+    const result = readTurnCheckpoint(path, { lastHistorySeq: latestHistorySeqForCheckpoint(path) })
+    if (!result.exists) return { exists: false, recoverable: false, historyRows: 0 }
+    if (!result.checkpoint) {
+      return {
+        exists: true,
+        recoverable: false,
+        historyRows: 0,
+        reason: result.reason,
+      }
+    }
+    return {
+      exists: true,
+      recoverable: result.recoverable,
+      historyRows: result.checkpoint.partialMessages.length,
+      updatedAt: result.checkpoint.updatedAt || null,
+      schemaVersion: result.checkpoint.schemaVersion,
+      phase: result.checkpoint.phase,
+      turnId: result.checkpoint.turnId || null,
+      legacy: result.legacy,
+      reason: result.reason,
+    }
+  }
+}
+
+function latestHistorySeqForCheckpoint(checkpointPath: string): number {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dirname(checkpointPath), 'history_index.json'), 'utf8') || '{}')
+    return Number(isRecord(parsed) ? parsed.latest_seq : 0) || 0
+  } catch {
+    return 0
+  }
+}
+
+function latestPromptSnapshot(snapshotDir: string): string | null {
+  const entries: Array<{ path: string; mtimeMs: number }> = []
+  for (const name of readdirSync(snapshotDir)) {
+    if (!name.endsWith('.json')) continue
+    const path = join(snapshotDir, name)
+    try {
+      entries.push({ path, mtimeMs: statSync(path).mtimeMs })
+    } catch {
+      // Ignore files that disappear during diagnostics.
+    }
+  }
+  entries.sort((a, b) => b.mtimeMs - a.mtimeMs || b.path.localeCompare(a.path))
+  return entries[0]?.path ?? null
+}
+
+function safeSnapshotName(value: string): string {
+  return String(value || 'turn').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 120) || 'turn'
+}
+
+function recordValue(value: unknown): Dict {
+  return isRecord(value) ? value : {}
+}
+
+function isRecord(value: unknown): value is Dict {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function numberOrNull(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function microcompactSummary(contextPlan: Dict, snapshot: Dict): Dict {
+  const raw = Array.isArray(contextPlan.microcompact)
+    ? contextPlan.microcompact
+    : Array.isArray(snapshot.microcompact)
+      ? snapshot.microcompact
+      : Array.isArray(contextPlan.microcompactRecords)
+        ? contextPlan.microcompactRecords
+        : []
+  const records = raw.filter(isRecord)
+  const omittedChars = records.reduce((sum, record) => {
+    const original = Number(record.original_chars ?? record.originalChars ?? 0) || 0
+    const head = Number(record.kept_head_chars ?? record.keptHeadChars ?? 0) || 0
+    const tail = Number(record.kept_tail_chars ?? record.keptTailChars ?? 0) || 0
+    return sum + Math.max(0, original - head - tail)
+  }, 0)
+  return { records, omittedChars }
+}
+
+function compactionRunExplanation(record: Dict): Dict {
+  const output = recordValue(record.output)
+  const range = recordValue(record.range)
+  const targetVersions = Array.isArray(output.targetVersions) ? output.targetVersions.filter(isRecord) : []
+  const discarded = Array.isArray(output.discarded) ? output.discarded.filter(isRecord) : []
+  const decisions = Array.isArray(output.decisions) ? output.decisions.filter(isRecord) : []
+  return {
+    compactionId: String(record.compactionId ?? ''),
+    status: String(record.status ?? ''),
+    mode: String(record.mode ?? ''),
+    projectId: record.projectId ?? null,
+    trigger: isRecord(record.trigger) ? record.trigger : null,
+    range: {
+      fromSeq: numberOrNull(range.fromSeq),
+      toSeq: numberOrNull(range.toSeq),
+    },
+    patchTargets: targetVersions.map((target) => ({
+      scope: isRecord(target.scope) ? target.scope : target.scope ?? null,
+      beforeVersion: numberOrNull(target.beforeVersion),
+      afterVersion: numberOrNull(target.afterVersion),
+      beforeHash: typeof target.beforeHash === 'string' ? target.beforeHash : null,
+      afterHash: typeof target.afterHash === 'string' ? target.afterHash : null,
+      operationCount: numberOrNull(target.operationCount),
+    })),
+    discardedCount: discarded.length,
+    discarded,
+    decisions,
+    error: isRecord(record.error) ? record.error : null,
+  }
+}
+
+function activeHistoryAfterSeq(store: { conversation?: { historyLog?: { loadActiveRows(): Dict[] } }; loadUnarchivedHistory(): Dict[] }, seq: number): Dict[] {
+  const cutoff = Math.trunc(Number(seq) || 0)
+  const rows = store.conversation?.historyLog?.loadActiveRows?.()
+  if (!rows) return store.loadUnarchivedHistory()
+  const hiddenTurns = new Set<string>()
+  for (const row of rows) {
+    if (typeof row.turn_id === 'string' && (row.hidden === true || row.schedulerHidden === true)) hiddenTurns.add(row.turn_id)
+  }
+  return rows
+    .filter((row) => {
+      if ((Number(row.seq) || 0) <= cutoff) return false
+      if (!('role' in row) || !('content' in row)) return false
+      if (row.type === 'model_call' || row.type === 'compact_event') return false
+      if (hiddenTurns.has(String(row.turn_id ?? ''))) return false
+      return true
+    })
+    .map((row) => {
+      const item: Dict = { role: row.role, content: row.content }
+      if (Number.isFinite(Number(row.seq)) && Number(row.seq) > 0) item.seq = Math.trunc(Number(row.seq))
+      if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
+      if (Array.isArray(row.attachments)) item.attachments = row.attachments
+      if (typeof row.displayContent === 'string') item.displayContent = row.displayContent
+      return item
+    })
 }
 
 export function validateEpisodeDate(date: string): string {
@@ -311,6 +626,25 @@ function normalizeVersionTarget(target: string | null): MemoryVersionTarget | nu
   if (!target) return null
   if (target === 'memory' || target === 'user' || target === 'episode' || target === 'project') return target
   throw new Error('Invalid version target')
+}
+
+function markdownSectionReplacementOps(markdown: string): MemoryPatchOperation[] {
+  const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+  const ops: MemoryPatchOperation[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^##\s+(.+?)\s*$/.exec(lines[index] ?? '')
+    if (!match) continue
+    const section = match[1]!.trim()
+    let end = lines.length
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (/^##\s+\S/.test(lines[cursor] ?? '')) {
+        end = cursor
+        break
+      }
+    }
+    ops.push({ op: 'replace_section', section, content: lines.slice(index + 1, end).join('\n').trimEnd() })
+  }
+  return ops
 }
 
 function localIsoSeconds(): string {

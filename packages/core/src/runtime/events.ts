@@ -174,6 +174,8 @@ export function toolRunCompleted(opts: {
   id: string
   name: string
   summary: string
+  output?: string | null
+  output_truncated?: boolean | null
   artifacts?: EventPayload[] | null
   metadata?: EventPayload | null
 }): EventPayload {
@@ -181,6 +183,8 @@ export function toolRunCompleted(opts: {
     id: opts.id,
     name: opts.name,
     summary: opts.summary,
+    output: opts.output ?? null,
+    output_truncated: opts.output_truncated ? true : null,
     artifacts: opts.artifacts ?? null,
     metadata: opts.metadata ?? null,
   })

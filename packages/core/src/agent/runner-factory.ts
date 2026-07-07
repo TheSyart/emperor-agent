@@ -4,7 +4,7 @@
  */
 import type { LLMProvider } from '../providers/base'
 import type { ModelRoute } from '../model/router'
-import type { PromptSectionInput } from '../prompts/manifest'
+import type { PromptContextPlan, PromptSectionInput } from '../prompts/manifest'
 import type { ToolRegistry } from '../tools/registry'
 import {
   AgentRunner,
@@ -30,6 +30,7 @@ export function buildRoutedRunner(opts: {
   maxTurns?: number
   workspaceRoot?: string | null
   promptSections?: PromptSectionInput[] | null
+  promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
   sessionId?: string | null
   streamingToolExecution?: boolean
@@ -67,6 +68,7 @@ export function buildRoutedRunner(opts: {
     maxTurns: opts.maxTurns ?? 12,
     workspaceRoot: opts.workspaceRoot ?? null,
     promptSections: opts.promptSections ?? null,
+    promptContextPlan: opts.promptContextPlan ?? null,
     promptSnapshotDir: opts.promptSnapshotDir ?? null,
     sessionId: opts.sessionId ?? null,
     streamingToolExecution: opts.streamingToolExecution ?? false,

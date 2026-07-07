@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { HistoryLog } from './history'
 import { MemoryStore } from './store'
-import { MemoryVersionStore } from './versions'
+import { MemoryVersionStore, memoryVersionFromDict } from './versions'
 
 type Row = Record<string, unknown>
 
@@ -85,6 +85,47 @@ describe('HistoryLog (test_history_log.py)', () => {
     expect(log.stats().active_lines).toBe(2)
   })
 
+  it('refuses to archive rows beyond the semantic compaction cursor', () => {
+    const memoryDir = join(tmp('emperor-hist-gated-'), 'memory')
+    const log = new HistoryLog(memoryDir, join(memoryDir, 'history.jsonl'))
+    log.append({ role: 'user', content: 'old', turn_id: 'turn_old' })
+    log.append({ role: 'assistant', content: 'old reply', turn_id: 'turn_old' })
+    log.append({ role: 'user', content: 'new', turn_id: 'turn_new' })
+    log.append({ role: 'assistant', content: 'new reply', turn_id: 'turn_new' })
+    const before = readFileSync(join(memoryDir, 'history.jsonl'), 'utf8')
+
+    expect(() => log.compact([
+      { role: 'user', content: 'new', turn_id: 'turn_new' },
+      { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
+    ], {
+      canArchiveUntil: () => false,
+    })).toThrow(/semantic compaction cursor/)
+
+    expect(readFileSync(join(memoryDir, 'history.jsonl'), 'utf8')).toBe(before)
+    expect(archiveRows(memoryDir)).toEqual([])
+  })
+
+  it('records archived progress only up to rows permitted by compaction cursor', () => {
+    const memoryDir = join(tmp('emperor-hist-gated-ok-'), 'memory')
+    const log = new HistoryLog(memoryDir, join(memoryDir, 'history.jsonl'))
+    log.append({ role: 'user', content: 'old', turn_id: 'turn_old' })
+    log.append({ role: 'assistant', content: 'old reply', turn_id: 'turn_old' })
+    log.append({ role: 'user', content: 'new', turn_id: 'turn_new' })
+    log.append({ role: 'assistant', content: 'new reply', turn_id: 'turn_new' })
+    const archivedUntil: number[] = []
+
+    log.compact([
+      { role: 'user', content: 'new', turn_id: 'turn_new' },
+      { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
+    ], {
+      canArchiveUntil: (seq) => seq <= 2,
+      markArchived: (seq) => { archivedUntil.push(seq) },
+    })
+
+    expect(archiveRows(memoryDir).filter((row) => row.role).map((row) => row.content)).toEqual(['old', 'old reply'])
+    expect(archivedUntil).toEqual([2])
+  })
+
   it('compact archive failure keeps hot history', () => {
     const memoryDir = join(tmp('emperor-hist-fail-'), 'memory')
     const log = new HistoryLog(memoryDir, join(memoryDir, 'history.jsonl'))
@@ -110,7 +151,7 @@ describe('MemoryStore history (test_history_log.py)', () => {
     memory.appendHistory('user', 'new', { extra: { turn_id: 'turn_new' } })
     memory.appendCompactMarker([{ role: 'user', content: 'new', turn_id: 'turn_new' }])
 
-    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'new', turn_id: 'turn_new' }])
+    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'new', seq: 3, turn_id: 'turn_new' }])
     expect(memory.historyStats().archive_files).toBe(1)
   })
 
@@ -121,16 +162,78 @@ describe('MemoryStore history (test_history_log.py)', () => {
     memory.appendHistory('user', 'hidden scheduler', { extra: { turn_id: 'turn_hidden', hidden: true, schedulerHidden: true } })
     memory.appendHistory('assistant', 'hidden reply', { extra: { turn_id: 'turn_hidden' } })
 
-    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'visible', turn_id: 'turn_visible' }])
+    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'visible', seq: 1, turn_id: 'turn_visible' }])
   })
 
   it('checkpoint round-trips and clears', () => {
     const root = tmp('emperor-mem-ckpt-')
     const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
     expect(memory.readCheckpoint()).toBeNull()
-    memory.writeCheckpoint([{ role: 'user', content: 'wip' }])
-    expect(memory.readCheckpoint()).toEqual([{ role: 'user', content: 'wip' }])
+    memory.writeCheckpoint([{ role: 'user', content: 'wip', turn_id: 'turn_1' }], {
+      sessionId: 'session_1',
+      turnId: 'turn_1',
+      phase: 'model_called',
+      baseHistorySeq: 0,
+      contextPlanId: 'context_1',
+      promptSnapshotId: 'snapshot_1',
+    })
+    const payload = JSON.parse(readFileSync(memory.checkpointFile, 'utf8'))
+    expect(payload).toMatchObject({
+      schemaVersion: 'emperor.turn-checkpoint.v1',
+      sessionId: 'session_1',
+      turnId: 'turn_1',
+      baseHistorySeq: 0,
+      phase: 'model_called',
+      contextPlanId: 'context_1',
+      promptSnapshotId: 'snapshot_1',
+      partialMessages: [{ role: 'user', content: 'wip', turn_id: 'turn_1' }],
+    })
+    expect(memory.readCheckpoint()).toEqual([{ role: 'user', content: 'wip', turn_id: 'turn_1' }])
     memory.clearCheckpoint()
+    expect(memory.readCheckpoint()).toBeNull()
+  })
+
+  it('reads legacy checkpoints but ignores committed, aborted, stale, and corrupt checkpoints', () => {
+    const root = tmp('emperor-mem-ckpt-rules-')
+    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+
+    writeFileSync(memory.checkpointFile, JSON.stringify({
+      ts: '2026-07-06T00:00:00+08:00',
+      history: [{ role: 'user', content: 'legacy draft' }],
+    }), 'utf8')
+    expect(memory.readCheckpoint()).toEqual([{ role: 'user', content: 'legacy draft' }])
+
+    writeFileSync(memory.checkpointFile, JSON.stringify({
+      schemaVersion: 'emperor.turn-checkpoint.v1',
+      sessionId: 'session_1',
+      turnId: 'turn_committed',
+      baseHistorySeq: 0,
+      phase: 'committed',
+      partialMessages: [{ role: 'user', content: 'committed draft' }],
+    }), 'utf8')
+    expect(memory.readCheckpoint()).toBeNull()
+
+    writeFileSync(memory.checkpointFile, JSON.stringify({
+      schemaVersion: 'emperor.turn-checkpoint.v1',
+      sessionId: 'session_1',
+      turnId: 'turn_aborted',
+      baseHistorySeq: 0,
+      phase: 'aborted',
+      partialMessages: [{ role: 'user', content: 'aborted draft' }],
+    }), 'utf8')
+    expect(memory.readCheckpoint()).toBeNull()
+
+    writeFileSync(memory.checkpointFile, JSON.stringify({
+      schemaVersion: 'emperor.turn-checkpoint.v1',
+      sessionId: 'session_1',
+      turnId: 'turn_stale',
+      baseHistorySeq: 99,
+      phase: 'tool_calls_pending',
+      partialMessages: [{ role: 'user', content: 'stale draft' }],
+    }), 'utf8')
+    expect(memory.readCheckpoint()).toBeNull()
+
+    writeFileSync(memory.checkpointFile, '{bad json', 'utf8')
     expect(memory.readCheckpoint()).toBeNull()
   })
 })
@@ -138,6 +241,14 @@ describe('MemoryStore history (test_history_log.py)', () => {
 // ── test_memory_versions.py ──
 
 describe('MemoryVersionStore (test_memory_versions.py)', () => {
+  it('rejects unknown serialized version targets instead of silently coercing to memory', () => {
+    expect(() => memoryVersionFromDict({
+      id: 'memv_bad',
+      target: 'global',
+      relPath: 'memory/MEMORY.local.md',
+    })).toThrow(/unknown memory version target/)
+  })
+
   it('snapshots and restores', () => {
     const root = tmp('emperor-memv-')
     const memoryDir = join(root, 'memory')

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { SCHEMA_VERSION, SchedulerJob, validateJobId } from './models'
 
@@ -32,11 +32,12 @@ export class SchedulerStore {
 
   constructor(root: string) {
     this.root = root
-    this.schedulerDir = join(root, 'memory', 'scheduler')
+    this.schedulerDir = join(root, 'scheduler')
     this.jobsFile = join(this.schedulerDir, 'jobs.json')
     this.actionFile = join(this.schedulerDir, 'action.jsonl')
     this.lockFile = join(this.schedulerDir, 'scheduler.lock')
     mkdirSync(this.schedulerDir, { recursive: true })
+    this.copyLegacyFilesIfNeeded()
     if (!existsSync(this.jobsFile)) this.atomicWriteJson(this.jobsFile, new SchedulerStoreData().toDict())
   }
 
@@ -128,6 +129,16 @@ export class SchedulerStore {
         try { renameSync(this.jobsFile, backup) } catch { /* ignore */ }
       }
       throw new SchedulerStoreCorrupt(`scheduler store at ${this.jobsFile} is corrupt; preserved at ${backup}`, { cause: error })
+    }
+  }
+
+  private copyLegacyFilesIfNeeded(): void {
+    const legacyDir = join(this.root, 'memory', 'scheduler')
+    for (const name of ['jobs.json', 'action.jsonl']) {
+      const source = join(legacyDir, name)
+      const dest = join(this.schedulerDir, name)
+      if (existsSync(dest) || !existsSync(source)) continue
+      try { copyFileSync(source, dest) } catch { /* non-destructive best effort */ }
     }
   }
 

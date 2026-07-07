@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
-import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
+import { SCHEDULER_TARGET_SESSION_METADATA_KEY, SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
 import { CoreApi } from './core-api'
 import { MainlineTurnService } from './chat-service'
 
@@ -13,7 +13,7 @@ const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 describe('MainlineTurnService (MIG-IPC-005)', () => {
   it('submits chat turns through AgentLoop and returns durable turn metadata', async () => {
     const root = tmp('emperor-mainline-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const events: Array<Record<string, unknown>> = []
     const session = api.sessions.create({ title: 'Mainline' })
 
@@ -38,7 +38,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
   })
 
   it('backs CoreApi chat.submit with the same mainline service', async () => {
-    const api = await CoreApi.create({ root: tmp('emperor-mainline-'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root: tmp('emperor-mainline-'), stateRoot: tmp('emperor-mainline-state-'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const session = api.sessions.create({ title: 'Chat' })
 
     expect(api.mainline).toBeInstanceOf(MainlineTurnService)
@@ -49,7 +49,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
 
   it('rejects chat submits without a real known session id before writing history', async () => {
     const root = tmp('emperor-mainline-session-boundary-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const activeSessionId = String(api.loop.activeSessionId)
 
     await expect(api.chat.submit({ content: 'missing session' })).rejects.toThrow(/session/i)
@@ -64,7 +64,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
 
   it('writes the first build-session chat turn to the build session history only', async () => {
     const root = tmp('emperor-mainline-build-session-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const defaultSessionId = String(api.loop.activeSessionId)
     const projectPath = join(root, 'project')
     mkdirSync(projectPath, { recursive: true })
@@ -89,7 +89,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
   it('rejects a second concurrent mainline turn before switching sessions', async () => {
     const root = tmp('emperor-mainline-concurrent-turn-')
     const provider = new BlockingProvider()
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
     const first = api.sessions.create({ title: 'First' })
     const second = api.sessions.create({ title: 'Second' })
 
@@ -110,17 +110,26 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
   })
 
   it('routes scheduler agent_turn jobs through MainlineTurnService', async () => {
-    const api = await CoreApi.create({ root: tmp('emperor-mainline-'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root: tmp('emperor-mainline-'), stateRoot: tmp('emperor-mainline-state-'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const submitSchedulerTurn = vi.spyOn(api.mainline, 'submitSchedulerTurn')
+    const originalSessionId = api.loop.activeSessionId!
+    const target = api.sessions.create({ title: 'Scheduler target' })
     const job = api.loop.schedulerService.addJob({
       name: 'daily summary',
       schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
-      payload: new SchedulerPayload({ kind: 'agent_turn', message: 'summarize today', deliver: false }),
+      payload: new SchedulerPayload({
+        kind: 'agent_turn',
+        message: 'summarize today',
+        deliver: false,
+        meta: { [SCHEDULER_TARGET_SESSION_METADATA_KEY]: String(target.id) },
+      }),
     })
 
     await expect(api.loop.schedulerService.runJob(job.id, { force: true })).resolves.toBe(true)
 
     expect(submitSchedulerTurn).toHaveBeenCalledOnce()
+    expect(api.loop.activeSessionId).toBe(originalSessionId)
+    api.loop.activateSession(String(target.id))
     const history = JSON.stringify(api.loop.activeMemoryStore.loadUnarchivedHistory())
     expect(history).toContain('[SCHEDULER_TRIGGER]')
     expect(history).toContain('定时任务触发 · daily summary')

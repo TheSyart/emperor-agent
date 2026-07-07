@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionInfo, SidebarState } from '../types'
+import type { ProjectInfo, SessionInfo, SidebarState } from '../types'
 
 function session(overrides: Partial<SessionInfo>): SessionInfo {
   return {
@@ -23,6 +23,17 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
     chat_order: [],
     project_session_order: {},
     collapsed_project_ids: [],
+    ...overrides,
+  }
+}
+
+function project(overrides: Partial<ProjectInfo>): ProjectInfo {
+  return {
+    project_id: overrides.project_id || 'p',
+    project_path: overrides.project_path || '/tmp/project',
+    project_name: overrides.project_name || 'Project',
+    created_at: overrides.created_at || '2026-01-01T00:00:00+0800',
+    updated_at: overrides.updated_at || '2026-01-01T00:00:00+0800',
     ...overrides,
   }
 }
@@ -126,6 +137,64 @@ describe('sidebar hides draft sessions (P1-6)', () => {
     expect(grouped.chats.map((item) => item.id)).toEqual(['real-1'])
     expect(grouped.projects).toEqual([])
     expect(searchSidebarSessions(items, '新会话')).toEqual([])
+  })
+})
+
+describe('sidebar project registry projection (P1-8)', () => {
+  it('shows a resolved project even before the first build session is created', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups([], state(), [
+      project({ project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha' }),
+    ])
+
+    expect(grouped.projects).toHaveLength(1)
+    expect(grouped.projects[0]).toMatchObject({
+      id: 'p1',
+      name: 'Alpha',
+      path: '/tmp/alpha',
+      sessions: [],
+    })
+  })
+
+  it('keeps draft build sessions hidden while preserving the empty project row', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups([
+      { ...session({ id: 'draft:y', title: '新会话', mode: 'build', project_id: 'p1', project_path: '/tmp/alpha', project_name: 'Alpha' }), draft: true },
+    ], state(), [
+      project({ project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha' }),
+    ])
+
+    expect(grouped.projects.map((item) => item.id)).toEqual(['p1'])
+    expect(grouped.projects[0].sessions).toEqual([])
+  })
+
+  it('attaches promoted build sessions under the already-visible project row', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups([
+      session({ id: 'build-1', title: '正式会话', mode: 'build', project_id: 'p1', project_path: '/tmp/alpha', project_name: 'Alpha' }),
+    ], state(), [
+      project({ project_id: 'p1', project_name: 'Alpha', project_path: '/tmp/alpha' }),
+    ])
+
+    expect(grouped.projects).toHaveLength(1)
+    expect(grouped.projects[0].sessions.map((item) => item.id)).toEqual(['build-1'])
+  })
+
+  it('orders empty projects with normal manual project ordering', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups([
+      session({ id: 'build-b', mode: 'build', project_id: 'project-b', project_name: 'B', updated_at: '2026-01-05T00:00:00+0800' }),
+    ], state({
+      project_sort: 'manual',
+      project_order: ['project-a'],
+    }), [
+      project({ project_id: 'project-a', project_name: 'A', updated_at: '2026-01-04T00:00:00+0800' }),
+      project({ project_id: 'project-b', project_name: 'B', updated_at: '2026-01-05T00:00:00+0800' }),
+    ])
+
+    expect(grouped.projects.map((item) => item.id)).toEqual(['project-a', 'project-b'])
+    expect(grouped.projects[0].sessions).toEqual([])
+    expect(grouped.projects[1].sessions.map((item) => item.id)).toEqual(['build-b'])
   })
 })
 

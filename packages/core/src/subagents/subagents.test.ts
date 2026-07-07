@@ -21,6 +21,18 @@ function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
+async function withEnv(name: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
+  const previous = process.env[name]
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+  try {
+    await fn()
+  } finally {
+    if (previous === undefined) delete process.env[name]
+    else process.env[name] = previous
+  }
+}
+
 class ReadTool extends Tool {
   override name = 'read_file'
   override description = 'read'
@@ -236,7 +248,9 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
     const spec = subagents.get('sili_suitang')!
     const runner = factory({ spec, subRegistry: new ToolRegistry(), task: '阅读 docs' })
 
-    await runner.step([{ role: 'user', content: '阅读 docs' }])
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      await runner.step([{ role: 'user', content: '阅读 docs' }])
+    })
     expect(seenMaxContext.length).toBeGreaterThan(0)
     // 有效上限 = 路由窗口 64_000 − 预留输出 maxTokens 2_000
     expect(seenMaxContext[0]).toBe(62_000)

@@ -9,7 +9,7 @@ export class SidechainTranscript {
   constructor(root: string, taskId: string) {
     this.root = root
     this.taskId = String(taskId)
-    this.path = join(root, 'memory', 'tasks', this.taskId, 'transcript.jsonl')
+    this.path = join(root, 'tasks', this.taskId, 'transcript.jsonl')
   }
 
   append(message: Record<string, unknown>): void {

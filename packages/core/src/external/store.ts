@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { nowTs } from '../util/time'
 import { ExternalInbound, seenKey, splitSeenKey } from './models'
@@ -21,9 +21,10 @@ export class ExternalBridgeStore {
   constructor(root: string, opts: { maxRecent?: number } = {}) {
     this.root = root
     this.maxRecent = opts.maxRecent ?? 100
-    this.externalDir = join(root, 'memory', 'external')
+    this.externalDir = join(root, 'external')
     this.stateFile = join(this.externalDir, 'state.json')
     mkdirSync(this.externalDir, { recursive: true })
+    this.copyLegacyStateIfNeeded()
   }
 
   load(): ExternalBridgeState {
@@ -101,6 +102,12 @@ export class ExternalBridgeStore {
     if (!existsSync(this.stateFile)) return
     const backup = join(this.externalDir, `state.json.corrupt-${Math.floor(nowTs())}-${randomUUID().replace(/-/g, '').slice(0, 8)}`)
     try { renameSync(this.stateFile, backup) } catch {}
+  }
+
+  private copyLegacyStateIfNeeded(): void {
+    const legacy = join(this.root, 'memory', 'external', 'state.json')
+    if (existsSync(this.stateFile) || !existsSync(legacy)) return
+    try { copyFileSync(legacy, this.stateFile) } catch { /* non-destructive best effort */ }
   }
 }
 

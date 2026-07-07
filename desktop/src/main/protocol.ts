@@ -31,7 +31,37 @@ export function resolveAssetPath(requestPath: string, rendererRoot: string): str
   return resolved
 }
 
-export function resolveAttachmentRawPath(requestUrl: string, root: string): string | null {
+export interface RawMediaRoots {
+  stateRoot: string
+  /** Read-only legacy fallback: pre-global-store installs kept attachments/media under
+   * `runtimeRoot/memory/...`. Never written to, never migrated here — Task 7's migration
+   * handles the one-time copy; this is just so existing links keep resolving until then. */
+  legacyRuntimeRoot?: string | null
+}
+
+function findRawFile(dir: string, hash8: string, opts: { excludeTxt?: boolean } = {}): string | null {
+  let names: string[]
+  try {
+    names = fs.readdirSync(dir).sort()
+  } catch {
+    return null
+  }
+  for (const name of names) {
+    if (!name.startsWith(`${hash8}-`)) continue
+    if (opts.excludeTxt && name.endsWith('.txt')) continue
+    const candidate = path.resolve(dir, name)
+    const dirWithSep = dir.endsWith(path.sep) ? dir : dir + path.sep
+    if (!candidate.startsWith(dirWithSep)) continue
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null
+}
+
+export function resolveAttachmentRawPath(requestUrl: string, roots: RawMediaRoots): string | null {
   let url: URL
   try {
     url = new URL(requestUrl)
@@ -46,28 +76,13 @@ export function resolveAttachmentRawPath(requestUrl: string, root: string): stri
   const match = /^att_(\d{4}-\d{2})_([0-9a-f]{8})$/.exec(parts[0] || '')
   if (!match) return null
   const [, month, hash8] = match
-  const dir = path.join(root, 'memory', 'attachments', month!)
-  let names: string[]
-  try {
-    names = fs.readdirSync(dir).sort()
-  } catch {
-    return null
-  }
-  for (const name of names) {
-    if (!name.startsWith(`${hash8}-`) || name.endsWith('.txt')) continue
-    const candidate = path.resolve(dir, name)
-    const dirWithSep = dir.endsWith(path.sep) ? dir : dir + path.sep
-    if (!candidate.startsWith(dirWithSep)) continue
-    try {
-      if (fs.statSync(candidate).isFile()) return candidate
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return null
+  const found = findRawFile(path.join(roots.stateRoot, 'memory', 'attachments', month!), hash8!, { excludeTxt: true })
+  if (found) return found
+  if (!roots.legacyRuntimeRoot) return null
+  return findRawFile(path.join(roots.legacyRuntimeRoot, 'memory', 'attachments', month!), hash8!, { excludeTxt: true })
 }
 
-export function resolveMediaRawPath(requestUrl: string, root: string): string | null {
+export function resolveMediaRawPath(requestUrl: string, roots: RawMediaRoots): string | null {
   let url: URL
   try {
     url = new URL(requestUrl)
@@ -82,23 +97,8 @@ export function resolveMediaRawPath(requestUrl: string, root: string): string | 
   const match = /^media_(\d{4}-\d{2})_([0-9a-f]{8})$/.exec(parts[0] || '')
   if (!match) return null
   const [, month, hash8] = match
-  const dir = path.join(root, 'memory', 'media', month!)
-  let names: string[]
-  try {
-    names = fs.readdirSync(dir).sort()
-  } catch {
-    return null
-  }
-  for (const name of names) {
-    if (!name.startsWith(`${hash8}-`)) continue
-    const candidate = path.resolve(dir, name)
-    const dirWithSep = dir.endsWith(path.sep) ? dir : dir + path.sep
-    if (!candidate.startsWith(dirWithSep)) continue
-    try {
-      if (fs.statSync(candidate).isFile()) return candidate
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return null
+  const found = findRawFile(path.join(roots.stateRoot, 'memory', 'media', month!), hash8!)
+  if (found) return found
+  if (!roots.legacyRuntimeRoot) return null
+  return findRawFile(path.join(roots.legacyRuntimeRoot, 'memory', 'media', month!), hash8!)
 }

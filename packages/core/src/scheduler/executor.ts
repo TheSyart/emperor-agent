@@ -66,9 +66,10 @@ export class SchedulerJobExecutor {
     }) ?? null
     try {
       const taskId = `scheduler:${job.id}`
-      const awaitable = this.dispatch(job, { taskId: taskRecord?.id ?? null })
+      const sessionId = schedulerPayloadSessionId(job.payload) || null
+      const awaitable = Promise.resolve().then(() => this.dispatch(job, { taskId: taskRecord?.id ?? null }))
       const result = this.activeTasks
-        ? await this.activeTasks.run({ taskId, kind: 'scheduler', label: `Scheduler job: ${job.name}`, awaitable, jobId: job.id })
+        ? await this.activeTasks.run({ taskId, kind: 'scheduler', label: `Scheduler job: ${job.name}`, awaitable, jobId: job.id, sessionId })
         : await awaitable
       if (taskRecord) this.taskManager?.completeTask(taskRecord.id, { summary: String(result || '') })
       return result

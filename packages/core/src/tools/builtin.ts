@@ -2,8 +2,9 @@
  * 搜索工具 (MIG-TOOL-008/009) + WebFetch (MIG-TOOL-010) + RunCommand scaffold (MIG-TOOL-011) + skills (MIG-TOOL-012)。
  */
 import { exec, execSync, type ExecOptions } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import { relative } from 'node:path'
+import { join, relative } from 'node:path'
+import { applyMemoryPatchToFile, memoryContentHash, type MemoryPatchOperation } from '../memory/patch'
+import type { MemoryVersionStore } from '../memory/versions'
 import { formatWorkspacePolicyError, workspacePolicyForTool } from '../permissions/workspace-policy'
 import { Tool, type ToolResult, type ToolExecutionContext } from './base'
 import { B, S, toolParamsSchema } from './schema'
@@ -183,8 +184,8 @@ function renderTodos(todos: Array<Record<string, unknown>>): string {
 }
 
 /**
- * 跨用户回合存活的待办列表。对齐 Python `agent/tools/todo.py:TodoStore`。
- * todos 为公开 dict 列表（snake_case 键），update/syncFromPlanSteps/render 与 Python 一致。
+ * 跨用户回合存活的待办列表。对齐 Claude Code TodoWrite/TaskUpdate 语义：
+ * update_todos 只维护当前会话清单，不写 PlanStep、不验证实现正确性。
  */
 export class TodoStore {
   todos: Array<Record<string, unknown>> = []
@@ -218,6 +219,7 @@ export class TodoStore {
     return summary + '\n\n当前列表：\n' + renderTodos(this.todos) + nudge
   }
 
+  /** Legacy projection helper for old tests/importers only; runner mainline must not call this. */
   syncFromPlanSteps(steps: Array<Record<string, unknown>>): string {
     const statusMap: Record<string, string> = {
       pending: 'pending',
@@ -258,28 +260,79 @@ function todoVerificationNudge(todos: Array<Record<string, unknown>>): string {
 }
 
 /**
- * 整份改写用户偏好档案（USER.local.md）。用于首次运行访谈落盘，也供日后任意一次
- * "记住我的偏好"请求随时更新——不是仅在 onboarding 期间可用的一次性脚手架。
+ * 按 Markdown 章节 patch 更新用户偏好档案（USER.local.md）。用于首次运行访谈落盘，
+ * 也供日后任意一次"记住我的偏好"请求随时更新——不是仅在 onboarding 期间可用的一次性脚手架。
  * 路径已由调用方（AgentLoop）解析为状态根下的实际文件，工具本身不做路径推导。
  */
+export interface UserProfileWriter {
+  readUser?(): string
+  writeUser(content: string): void
+  userFile?: string
+  memoryDir?: string
+  versions?: MemoryVersionStore
+}
+
 export class SaveUserProfileTool extends Tool {
   override name = 'save_user_profile'
   override description = (
-    '整份改写用户偏好档案（称呼/语言/沟通风格/技术水平/工作背景/兴趣/性格等）。'
-    + '传入完整 Markdown 内容，会整体覆盖现有档案；请基于系统提示词里已经看到的当前内容改写，不要凭空丢弃未涉及的字段。'
+    '按 Markdown 章节 patch 更新用户偏好档案（称呼/语言/沟通风格/技术水平/工作背景/兴趣/性格等）。'
+    + '只提交需要新增或修改的 ## 章节；未提交的章节会保留。不要凭空丢弃未涉及字段，删除大量内容会被拒绝。'
   )
-  override parameters = toolParamsSchema({ content: S('完整的用户档案 Markdown 内容') }, ['content'])
+  override parameters = toolParamsSchema({ content: S('包含要更新 ## 章节的用户档案 Markdown 内容') }, ['content'])
   override readOnly = false
 
-  private readonly userProfilePath: string
+  private readonly writer: UserProfileWriter
 
-  constructor(userProfilePath: string) { super(); this.userProfilePath = userProfilePath }
+  constructor(writer: UserProfileWriter) { super(); this.writer = writer }
 
   execute(args: Record<string, unknown>): string {
     const content = String(args.content ?? '').trimEnd()
-    writeFileSync(this.userProfilePath, `${content}\n`, 'utf8')
-    return `已保存用户偏好档案（${content.length} 字符）。`
+    if (!(this.writer.readUser && this.writer.userFile && this.writer.versions)) {
+      return 'Error: save_user_profile rejected: patch-capable writer is required; direct profile overwrite is disabled.'
+    }
+    const operations = userProfileSectionReplacementOps(content)
+    if (!operations.length) {
+      return 'Error: save_user_profile rejected: expected Markdown with at least one ## section heading; preserve the existing profile structure and update only relevant sections.'
+    }
+    const current = this.writer.readUser()
+    const result = applyMemoryPatchToFile({
+      target: { kind: 'user_profile' },
+      baseVersion: this.writer.versions.nextVersionForPath(this.writer.userFile, { target: 'user' }),
+      baseHash: memoryContentHash(current),
+      operations,
+      rationale: 'save_user_profile',
+    }, {
+      targetPath: this.writer.userFile,
+      versions: this.writer.versions,
+      versionTarget: 'user',
+      ledgerPath: this.writer.memoryDir ? join(this.writer.memoryDir, 'patch-ledger.jsonl') : null,
+    })
+    if (!result.ok) return `Error: save_user_profile rejected: ${result.errors.join(', ')}`
+    return `已通过 memory patch 保存用户偏好档案（${result.appliedOperations} 个章节，${content.length} 字符输入）。`
   }
+}
+
+function userProfileSectionReplacementOps(markdown: string): MemoryPatchOperation[] {
+  const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+  const ops: MemoryPatchOperation[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^##\s+(.+?)\s*$/.exec(lines[index] ?? '')
+    if (!match) continue
+    const section = match[1]!.trim()
+    let end = lines.length
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (/^##\s+\S/.test(lines[cursor] ?? '')) {
+        end = cursor
+        break
+      }
+    }
+    ops.push({
+      op: 'replace_section',
+      section,
+      content: lines.slice(index + 1, end).join('\n').trimEnd(),
+    })
+  }
+  return ops
 }
 
 export class UpdateTodos extends Tool {

@@ -69,7 +69,7 @@ describe('ControlManager (test_control.py)', () => {
     const manager = new ControlManager(root)
     manager.setMode('plan')
     expect(manager.payload().mode).toBe('plan')
-    writeFileSync(join(root, 'memory', 'control', 'state.json'), '{bad', 'utf8')
+    writeFileSync(join(root, 'control', 'state.json'), '{bad', 'utf8')
     expect(new ControlManager(root).payload().mode).toBe(ControlMode.ASK_BEFORE_EDIT)
   })
 
@@ -656,7 +656,7 @@ describe('TodoStore.syncFromPlanSteps (test_plan_execution_state.py)', () => {
   })
 })
 
-describe('Plan completion via todo sync (2026-07-05 B1)', () => {
+describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () => {
   function approvedManager(): { manager: ControlManager; todoStore: TodoStore; planId: string } {
     const manager = new ControlManager(tmp('emperor-b1-'))
     const todoStore = new TodoStore()
@@ -679,6 +679,12 @@ describe('Plan completion via todo sync (2026-07-05 B1)', () => {
     expect(plan).not.toBeNull()
     return { manager, todoStore, planId: plan!.id }
   }
+
+  it('does not populate TodoStore when a plan is approved', () => {
+    const { manager, todoStore } = approvedManager()
+    expect(manager.planStore.latest()?.status).toBe(PlanStatus.EXECUTING)
+    expect(todoStore.todos).toEqual([])
+  })
 
   it('projects model-style camelCase todo completion into plan steps and completes the plan', () => {
     const { manager, todoStore, planId } = approvedManager()

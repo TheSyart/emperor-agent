@@ -36,6 +36,7 @@ const EXPECTED_OPERATIONS = [
   'mcp.saveConfig',
   'memory.checkWatchlist',
   'memory.compact',
+  'memory.explainContext',
   'memory.get',
   'memory.getEpisode',
   'memory.getVersion',
@@ -91,6 +92,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('exposes a typed in-process method for every retired web route operation', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -105,7 +107,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('boots, submits a chat turn, and persists session runtime state without HTTP', async () => {
     const root = tmp('emperor-core-api-')
     const provider = new FakeProvider()
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
     const events: Array<Record<string, unknown>> = []
 
     const boot = await api.bootstrap()
@@ -127,7 +129,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('stores new private runtime state under .emperor and reports effective paths', async () => {
     const root = tmp('emperor-core-api-state-root-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
 
     const session = api.sessions.create({ title: 'State Root Chat' })
     await api.chat.submit({ content: 'ping', turnId: 'turn_state_1', sessionId: String(session.id), emit: async () => {} })
@@ -137,7 +139,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     expect(existsSync(join(root, '.emperor', 'sessions', String(session.id), 'history.jsonl'))).toBe(true)
     expect(existsSync(join(root, '.emperor', 'sessions', String(session.id), 'runtime', 'events.jsonl'))).toBe(true)
     expect(existsSync(join(root, '.emperor', 'sessions', String(session.id), 'prompt-snapshots', 'turn_state_1.json'))).toBe(true)
-    expect(existsSync(join(root, '.emperor', 'memory', 'control', 'state.json'))).toBe(true)
+    expect(existsSync(join(root, '.emperor', 'control', 'state.json'))).toBe(true)
     expect(existsSync(join(root, '.emperor', '.team', 'config.json'))).toBe(false)
     expect(existsSync(join(root, 'memory'))).toBe(false)
     expect(existsSync(join(root, 'sessions'))).toBe(false)
@@ -156,9 +158,26 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('saves model config through stateRoot rather than runtimeRoot', async () => {
+    const root = tmp('emperor-core-api-model-runtime-')
+    const stateRoot = tmp('emperor-core-api-model-state-')
+    const api = await CoreApi.create({ root, stateRoot, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+
+    await api.model.saveConfig({
+      config: validModelConfig('state-root-model'),
+    })
+
+    expect(existsSync(join(stateRoot, 'model_config.json'))).toBe(true)
+    expect(existsSync(join(root, 'model_config.json'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(stateRoot, 'model_config.json'), 'utf8')).models[0].name).toBe('state-root-model')
+
+    await api.close()
+  })
+
   it('rejects draft session ids at bootstrap before activating or replaying', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-bootstrap-session-'),
+      stateRoot: tmp('emperor-core-api-bootstrap-session-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -172,7 +191,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('replays runtime events for the requested session only', async () => {
     const root = tmp('emperor-core-api-runtime-replay-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const firstSessionId = String(api.loop.activeSessionId)
     const second = api.sessions.create({ title: 'Second Chat' })
 
@@ -201,7 +220,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('compacts high-frequency delta events in replay by default without touching disk', async () => {
     const root = tmp('emperor-core-api-replay-compact-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const sessionId = String(api.loop.activeSessionId)
     const store = new RuntimeEventStore(api.loop.sessionStore.sessionDir(sessionId), { sessionDirOverride: true })
     store.append({ event: 'user_message', content: 'go' }, { turnId: 't1', sessionId })
@@ -239,6 +258,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const provider = new LatchedProvider()
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-active-session-'),
+      stateRoot: tmp('emperor-core-api-active-session-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -262,6 +282,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const provider = new FakeProvider()
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-draft-submit-'),
+      stateRoot: tmp('emperor-core-api-draft-submit-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -309,6 +330,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const provider = new FakeProvider()
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-short-title-'),
+      stateRoot: tmp('emperor-core-api-short-title-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -332,6 +354,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('matches session route response shapes for IPC callers', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -357,7 +380,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('returns distinct workspace and agent state paths for resolved projects', async () => {
     const root = tmp('emperor-core-api-project-paths-')
     const projectDir = tmp('emperor-core-api-project-workspace-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
 
     const project = api.projects.resolve(projectDir) as any
 
@@ -378,7 +401,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('keeps chat and build project contexts isolated in provider prompts', async () => {
     const root = tmp('emperor-core-api-context-isolation-')
     const provider = new FakeProvider()
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(provider) })
     const chatSessionId = String(api.loop.activeSessionId)
     const projectAPath = join(root, 'project-a')
     const projectBPath = join(root, 'project-b')
@@ -386,8 +409,8 @@ describe('CoreApi (MIG-IPC-001)', () => {
     mkdirSync(projectBPath, { recursive: true })
     const projectA = api.projects.resolve(projectAPath) as any
     const projectB = api.projects.resolve(projectBPath) as any
-    api.loop.projectStore.updateMemory(String(projectA.project_id), 'PROJECT_A_PRIVATE_MEMORY')
-    api.loop.projectStore.updateMemory(String(projectB.project_id), 'PROJECT_B_PRIVATE_MEMORY')
+    api.loop.projectStore.updateMemory(String(projectA.project_id), '## Architecture Notes\n\n- PROJECT_A_PRIVATE_MEMORY')
+    api.loop.projectStore.updateMemory(String(projectB.project_id), '## Architecture Notes\n\n- PROJECT_B_PRIVATE_MEMORY')
     const buildA = api.sessions.create({ title: 'Build A', mode: 'build', project_path: projectAPath })
     const buildB = api.sessions.create({ title: 'Build B', mode: 'build', project_path: projectBPath })
     api.control.setMode('auto')
@@ -419,6 +442,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('reconciles stale session pending tags before bootstrap and session list responses', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-control-tags-'),
+      stateRoot: tmp('emperor-core-api-control-tags-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -470,21 +494,19 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('serves USER.local.md through the config route parity surface', async () => {
     const root = tmp('emperor-core-api-config-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
 
     const initial = api.config.get()
 
-    expect(initial).toMatchObject({ path: 'templates/USER.local.md' })
-    expect(readFileSync(join(root, '.emperor', 'templates', 'USER.local.md'), 'utf8')).toBe((initial as any).content)
+    expect(initial).toMatchObject({ path: 'memory/profile/USER.local.md' })
+    expect(readFileSync(join(root, '.emperor', 'memory', 'profile', 'USER.local.md'), 'utf8')).toBe((initial as any).content)
     expect(existsSync(join(root, 'emperor.local.json'))).toBe(false)
 
-    const saved = api.config.save({ content: '偏好更新\n\n' })
+    const saved = api.config.save({ content: '## Stable Preferences\n\n- 偏好更新\n' })
 
-    expect(saved).toEqual({
-      path: 'templates/USER.local.md',
-      content: '偏好更新\n',
-    })
-    expect(readFileSync(join(root, '.emperor', 'templates', 'USER.local.md'), 'utf8')).toBe('偏好更新\n')
+    expect(saved).toMatchObject({ path: 'memory/profile/USER.local.md' })
+    expect((saved as any).content).toContain('## Stable Preferences\n\n- 偏好更新')
+    expect(readFileSync(join(root, '.emperor', 'memory', 'profile', 'USER.local.md'), 'utf8')).toContain('## Stable Preferences\n\n- 偏好更新')
     expect(existsSync(join(root, 'emperor.local.json'))).toBe(false)
 
     await api.close()
@@ -493,6 +515,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('applies mutation guard at CoreApi write boundaries', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -507,6 +530,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('applies mutation guard to mcp/model config saves (audit P0-5)', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-mutation-guard-'),
+      stateRoot: tmp('emperor-core-api-mutation-guard-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -524,7 +548,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('normalizes missing and legacy sidebar state before returning it', async () => {
     const root = tmp('emperor-core-api-sidebar-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
 
     expect(api.sidebar.get()).toEqual({
       section_order: ['projects', 'chats'],
@@ -559,30 +583,33 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('returns diagnostics summaries without mutating missing or corrupt config files', async () => {
     const root = tmp('emperor-core-api-')
-    writeFileSync(join(root, 'emperor.local.json'), '{not valid json', 'utf8')
-    writeFileSync(join(root, 'emperor.local.json.corrupt-1'), '{old broken json', 'utf8')
+    const stateRoot = join(root, '.emperor')
+    mkdirSync(stateRoot, { recursive: true })
+    writeFileSync(join(stateRoot, 'emperor.local.json'), '{not valid json', 'utf8')
+    writeFileSync(join(stateRoot, 'emperor.local.json.corrupt-1'), '{old broken json', 'utf8')
     const api = await CoreApi.create({
       root,
+      stateRoot,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
     const diagnostics = await api.diagnostics.get()
 
-    expect(existsSync(join(root, 'model_config.json'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'model_config.json'))).toBe(false)
     expect(diagnostics.modelConfig).toMatchObject({
-      path: join(root, 'model_config.json'),
+      path: join(stateRoot, 'model_config.json'),
       exists: false,
       status: 'missing',
       error: '',
     })
     expect(diagnostics.localConfig).toMatchObject({
-      path: join(root, 'emperor.local.json'),
+      path: join(stateRoot, 'emperor.local.json'),
       exists: true,
       status: 'corrupt',
     })
     expect((diagnostics.localConfig as any).corruptBackups).toEqual([
-      expect.objectContaining({ path: join(root, 'emperor.local.json.corrupt-1') }),
+      expect.objectContaining({ path: join(stateRoot, 'emperor.local.json.corrupt-1') }),
     ])
     expect(diagnostics).toHaveProperty('dependencies.desktopRenderer')
     expect(diagnostics).toHaveProperty('dependencies.desktopPetNodeModules')
@@ -590,9 +617,38 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('reports legacy private data found inside a bound project source tree, without touching it (diagnostics-only)', async () => {
+    const root = tmp('emperor-core-api-project-legacy-')
+    const projectDir = tmp('emperor-core-api-project-legacy-src-')
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+
+    const clean = await api.diagnostics.get()
+    expect(clean.projectLegacyPrivateData).toBeNull()
+
+    const build = api.sessions.create({ title: 'Build', mode: 'build', project_path: projectDir })
+    api.sessions.activate(String(build.id))
+    const stillClean = await api.diagnostics.get()
+    expect(stillClean.projectLegacyPrivateData).toBeNull()
+
+    mkdirSync(join(projectDir, '.emperor', 'sessions'), { recursive: true })
+    writeFileSync(join(projectDir, '.emperor', 'sessions', 'index.json'), '[]', 'utf8')
+
+    const withLegacy = await api.diagnostics.get()
+    expect(withLegacy.projectLegacyPrivateData).toMatchObject({
+      projectPath: resolve(projectDir),
+      sessions: true,
+      memory: false,
+    })
+    // Diagnostics-only: detecting it must never delete or move it.
+    expect(existsSync(join(projectDir, '.emperor', 'sessions', 'index.json'))).toBe(true)
+
+    await api.close()
+  })
+
   it('answers pending ask interactions and resumes through mainline chat', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -633,6 +689,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const root = tmp('emperor-core-api-control-owner-')
     const api = await CoreApi.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -677,6 +734,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const root = tmp('emperor-core-api-control-cancel-owner-')
     const api = await CoreApi.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -713,6 +771,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const root = tmp('emperor-core-api-external-owner-')
     const api = await CoreApi.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -761,6 +820,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const root = tmp('emperor-core-api-scheduler-owner-')
     const api = await CoreApi.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -796,6 +856,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     mkdirSync(projectBPath, { recursive: true })
     const api = await CoreApi.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -816,6 +877,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     const provider = new FakeProvider()
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -835,7 +897,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('cascades session deletion to owned tasks and plans, sparing legacy and other sessions', async () => {
     const root = tmp('emperor-core-api-cascade-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     await api.bootstrap()
     const keep = api.sessions.create({ title: 'Keep' })
     const doomed = api.sessions.create({ title: 'Doomed' })
@@ -849,7 +911,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     planStore.save(makePlanRecord({ id: 'plan_doomed', title: 'd', summary: 's', status: 'draft', createdAt: 1, updatedAt: 1, sessionId: doomedId }))
     planStore.save(makePlanRecord({ id: 'plan_keep', title: 'k', summary: 's', status: 'draft', createdAt: 1, updatedAt: 1, sessionId: keepId }))
     api.loop.taskManager.appendSidechain(ownedTask.id, { role: 'user', content: 'owned work' })
-    const ownedSidechainDir = join(root, '.emperor', 'memory', 'tasks', ownedTask.id)
+    const ownedSidechainDir = join(root, '.emperor', 'tasks', ownedTask.id)
     expect(existsSync(ownedSidechainDir)).toBe(true)
 
     expect(api.tasks.list({ sessionId: keepId }).map((t) => t.id)).toEqual([keepTask.id])
@@ -870,7 +932,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('serves persisted full tool outputs and fences path escapes', async () => {
     const root = tmp('emperor-core-api-toolresult-')
-    const api = await CoreApi.create({ root, templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
+    const api = await CoreApi.create({ root, stateRoot: join(root, '.emperor'), templatesDir: TEMPLATES_DIR, modelRouter: fakeRouter(new FakeProvider()) })
     const store = new ToolResultStore(join(root, '.emperor'))
     const record = store.persistLargeResult('turn_x', 'call_x', 'huge_output', 'full text content')
 
@@ -884,24 +946,28 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
   it('deletes skill directories through CoreApi skills.delete', async () => {
     const root = tmp('emperor-core-api-')
-    mkdirSync(join(root, 'skills', 'demo'), { recursive: true })
-    writeFileSync(join(root, 'skills', 'demo', 'SKILL.md'), '# Demo\n', 'utf8')
+    const stateRoot = join(root, '.emperor')
+    mkdirSync(join(stateRoot, 'skills', 'demo'), { recursive: true })
+    writeFileSync(join(stateRoot, 'skills', 'demo', 'SKILL.md'), '# Demo\n', 'utf8')
     const api = await CoreApi.create({
       root,
+      stateRoot,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
     expect(api.skills.delete('demo')).toEqual({ deleted: 'demo' })
-    expect(existsSync(join(root, 'skills', 'demo'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'skills', 'demo'))).toBe(false)
 
     await api.close()
   })
 
   it('imports skill zip archives through CoreApi skills.importArchive', async () => {
     const root = tmp('emperor-core-api-')
+    const stateRoot = join(root, '.emperor')
     const api = await CoreApi.create({
       root,
+      stateRoot,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -911,7 +977,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     })
 
     expect(api.skills.importArchive({ name: 'skill.zip', raw: archive })).toEqual({ imported: 'imported-skill' })
-    expect(readFileSync(join(root, 'skills', 'imported-skill', 'SKILL.md'), 'utf8')).toContain('Imported')
+    expect(readFileSync(join(stateRoot, 'skills', 'imported-skill', 'SKILL.md'), 'utf8')).toContain('Imported')
 
     await api.close()
   })
@@ -919,6 +985,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
   it('manages desktop pet preference and reports missing dependency', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
+      stateRoot: tmp('emperor-core-api-state-'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -945,6 +1012,22 @@ function resolveMethod(api: CoreApi, key: string): unknown {
     current = current && typeof current === 'object' ? (current as Record<string, unknown>)[part] : undefined
   }
   return current
+}
+
+function validModelConfig(name: string): Record<string, unknown> {
+  return {
+    agents: { defaults: { model: name, provider: 'openai', maxTokens: 8192, temperature: 0.1, reasoningEffort: null, contextWindowTokens: 128000 } },
+    models: [{
+      name,
+      provider: 'openai',
+      mainModelId: 'gpt-4.1',
+      secondaryModelId: 'gpt-4.1-mini',
+      apiKey: 'sk-test-entry',
+    }],
+    providers: {
+      openai: { apiKey: 'sk-test-provider', apiBase: 'https://api.openai.com/v1', extraHeaders: null, extraBody: null },
+    },
+  }
 }
 
 class FakeProvider extends LLMProvider {

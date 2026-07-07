@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ActiveTaskRegistry, CancelledTaskError } from './active'
+import { ActiveTaskRegistry, CancelledTaskError, activeTaskToDict } from './active'
 import * as runtimeEvents from './events'
 import { RuntimeEventStore, compactReplayEvents } from './store'
 
@@ -183,10 +183,17 @@ describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
       label: 'Scheduler job',
       awaitable: new Promise<string>((resolve) => { resolveWork = resolve }),
       jobId: 'job_1',
+      sessionId: 'sess_scheduler',
     })
 
-    const info = registry.update('scheduler:job_1', { turnId: 'turn_scheduler' })
+    const info = registry.update('scheduler:job_1', { turnId: 'turn_scheduler', sessionId: 'sess_scheduler_updated' })
     expect(info?.turn_id).toBe('turn_scheduler')
+    expect(info?.session_id).toBe('sess_scheduler_updated')
+    expect(activeTaskToDict(info!)).toMatchObject({
+      turnId: 'turn_scheduler',
+      session_id: 'sess_scheduler_updated',
+      sessionId: 'sess_scheduler_updated',
+    })
     expect(registry.list()).toHaveLength(1)
     resolveWork('done')
     await expect(runPromise).resolves.toBe('done')

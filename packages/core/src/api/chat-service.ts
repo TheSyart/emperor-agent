@@ -86,8 +86,10 @@ export class MainlineTurnService {
     const replyPromise = new Promise<string>((resolve) => { replyResolve = resolve })
     const titleTask = promoted ? this.generateInitialTitle(promoted.id, content, input.emit ?? null, replyPromise) : null
     const displayContent = input.displayContent ?? content
+    const runSessionId = promoted?.id ?? (sessionId && !sessionId.startsWith(DRAFT_SESSION_PREFIX) ? sessionId : null)
     try {
       const reply = await this.loop.runUserTurn(content, {
+        sessionId: runSessionId,
         turnId,
         emit: input.emit ?? null,
         displayContent,
@@ -151,18 +153,30 @@ export class MainlineTurnService {
   }
 
   async submitSchedulerTurn(payload: SchedulerAgentTurnPayload): Promise<string> {
-    const result = await this.submit({
-      content: payload.content,
-      displayContent: payload.displayContent,
-      clientMessageId: payload.clientMessageId,
-      turnId: payload.clientMessageId,
-      source: payload.source,
-      sessionId: payload.sessionId ?? null,
-      scheduler: payload.scheduler,
-      taskId: payload.taskId,
-      emit: payload.deliver ? this.loop.eventSink : async () => undefined,
-    })
-    return result.content
+    const previousSessionId = this.loop.activeSessionId
+    const targetSessionId = String(payload.sessionId ?? '').trim()
+    try {
+      const result = await this.submit({
+        content: payload.content,
+        displayContent: payload.displayContent,
+        clientMessageId: payload.clientMessageId,
+        turnId: payload.clientMessageId,
+        source: payload.source,
+        sessionId: targetSessionId || null,
+        scheduler: payload.scheduler,
+        taskId: payload.taskId,
+        emit: payload.deliver ? this.loop.eventSink : async () => undefined,
+      })
+      return result.content
+    } finally {
+      if (targetSessionId && previousSessionId && previousSessionId !== targetSessionId && this.loop.activeSessionId === targetSessionId) {
+        try {
+          this.loop.activateSession(previousSessionId)
+        } catch {
+          // The previously active session may have been deleted while the scheduled turn ran.
+        }
+      }
+    }
   }
 
   private activateRequiredSession(sessionId: string, operation: string): void {

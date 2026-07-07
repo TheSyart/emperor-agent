@@ -96,6 +96,7 @@ export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
   op('memory.checkWatchlist', 'POST', '/api/watchlist/check'),
   op('memory.tokens', 'GET', '/api/tokens'),
   op('memory.compact', 'POST', '/api/compact'),
+  op('memory.explainContext', 'GET', '/api/memory/explain-context'),
   op('projects.list', 'GET', '/api/projects'),
   op('projects.resolve', 'POST', '/api/projects/resolve'),
   op('runtime.replay', 'GET', '/api/runtime/replay'),
@@ -140,9 +141,10 @@ export class CoreApi {
       reloadMcp: () => this.loop.reloadMcp(),
     }, { templatesDir: this.loop.templatesDir })
     this.desktopPetService = new CoreDesktopPetService(this.root, {
+      stateRoot: this.paths.stateRoot,
       assertMutation: (area, action) => this.assertMutation(area, action),
     })
-    this.modelService = new CoreModelService(this.root, {
+    this.modelService = new CoreModelService(this.paths.stateRoot, {
       router: () => this.loop.modelRouter,
       refreshModelConfig: () => this.loop.refreshModelConfig(),
     })
@@ -151,7 +153,7 @@ export class CoreApi {
       watchlist: this.watchlist,
       refreshRuntimeContext: () => { this.loop.refreshRuntimeContext() },
     })
-    this.skillService = new CoreSkillService(this.root, {
+    this.skillService = new CoreSkillService(this.paths.stateRoot, {
       registry: this.loop.registry,
       refreshRuntimeContext: () => { this.loop.refreshRuntimeContext() },
     })
@@ -185,6 +187,13 @@ export class CoreApi {
     })
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
+      legacyStateMigration: this.loop.legacyStateMigration,
+      activeProjectLegacyPrivateData: () => {
+        const projectPath = this.loop.activeSession?.project_path
+        if (!projectPath) return null
+        const detected = this.loop.projectStore.detectLegacyPrivateData(projectPath)
+        return { projectPath, ...detected }
+      },
       schedulerDiagnostics: () => this.loop.schedulerStore.diagnostics(),
       runtimeStats: () => this.loop.runtimeStore.stats({ activeTurnIds: this.loop.activeMemoryStore.loadUnarchivedTurnIds() }) as unknown as Dict,
       workspacePolicy: () => this.loop.workspacePolicyDiagnostics() as Dict,
@@ -466,7 +475,8 @@ export class CoreApi {
     saveWatchlist: (content: string): Dict => this.memoryService.saveWatchlist(content),
     checkWatchlist: async (): Promise<Dict> => this.memoryService.checkWatchlist(),
     tokens: (): Dict => this.memoryService.tokens(),
-    compact: (): Promise<Dict> => this.memoryService.compact(),
+    compact: (opts: { force?: boolean } = {}): Promise<Dict> => this.memoryService.compact(opts),
+    explainContext: (opts: { sessionId?: string | null; turnId?: string | null } = {}): Dict => this.memoryService.explainContext(opts),
   }
 
   readonly projects = {

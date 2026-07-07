@@ -2,14 +2,21 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import {
+  DEFAULT_PROJECT_MEMORY_BLOCK,
   ProjectStateStore,
   type ProjectStateMetadata,
 } from './state-store'
+import { appendPatchLedger, applyMemoryPatch, memoryContentHash, type MemoryPatchOperation } from '../memory/patch'
 import type { MemoryVersionStore } from '../memory/versions'
 
 export { PROJECT_MEMORY_END, PROJECT_MEMORY_START } from './state-store'
 
 const VERSION = 1
+
+export interface LegacyProjectPrivateData {
+  sessions: boolean
+  memory: boolean
+}
 
 export interface ProjectEntry extends ProjectStateMetadata {
   project_id: string
@@ -34,9 +41,9 @@ export class ProjectStore {
   readonly projectsDir: string
   readonly indexPath: string
   readonly stateStore: ProjectStateStore
-  private readonly versions: Pick<MemoryVersionStore, 'snapshotPath'> | null
+  private readonly versions: Pick<MemoryVersionStore, 'snapshotPath' | 'nextVersionForPath'> | null
 
-  constructor(root: string, opts: { versions?: Pick<MemoryVersionStore, 'snapshotPath'> | null } = {}) {
+  constructor(root: string, opts: { versions?: Pick<MemoryVersionStore, 'snapshotPath' | 'nextVersionForPath'> | null } = {}) {
     this.root = resolve(root)
     this.projectsDir = join(this.root, 'projects')
     this.indexPath = join(this.projectsDir, 'index.json')
@@ -66,6 +73,18 @@ export class ProjectStore {
     return this.load().find((item) => item.project_id === projectId) ?? null
   }
 
+  /** Detects private `.emperor/sessions` or `.emperor/memory` already sitting inside the
+   * project's own source tree (from an older layout or another tool). Diagnostics-only:
+   * this never deletes or migrates that data automatically — see global-state-store plan
+   * Task 8. */
+  detectLegacyPrivateData(projectPath: string): LegacyProjectPrivateData {
+    const dotEmperor = join(resolve(projectPath), '.emperor')
+    return {
+      sessions: existsSync(join(dotEmperor, 'sessions')),
+      memory: existsSync(join(dotEmperor, 'memory')),
+    }
+  }
+
   list(): ProjectEntry[] {
     return this.load().sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   }
@@ -73,7 +92,10 @@ export class ProjectStore {
   readAgents(projectId: string): string {
     const entry = this.get(projectId)
     if (!entry) return ''
-    return this.stateStore.readAgents(entry.project_id)
+    return [
+      this.stateStore.readAgents(entry.project_id),
+      this.stateStore.readWorkspaceCollaborationContext(entry.project_id),
+    ].filter((part) => part.trim()).join('\n\n---\n\n')
   }
 
   readManagedMemory(projectId: string): string {
@@ -84,14 +106,34 @@ export class ProjectStore {
     const entry = this.get(projectId)
     if (!entry) throw new Error(`unknown project: ${projectId}`)
     this.stateStore.ensureProject(entry)
-    if (this.versions && existsSync(entry.agents_path)) {
-      this.versions.snapshotPath(entry.agents_path, { target: 'project', reason: 'write_project_memory' })
+    const current = normalizeProjectMemoryBase(this.stateStore.readManagedMemory(projectId))
+    const operations = projectMemorySectionReplacementOps(content)
+    if (!operations.length) throw new Error('project memory update requires at least one ## section')
+    const version = this.versions
+      ? this.versions.nextVersionForPath(entry.agents_path, { target: 'project' })
+      : 1
+    const patch = {
+      target: { kind: 'project' as const, projectId },
+      baseVersion: version,
+      baseHash: memoryContentHash(current),
+      operations,
+      rationale: 'save_project_memory',
     }
-    this.stateStore.writeManagedMemory(projectId, content)
+    const result = applyMemoryPatch(patch, current, {
+      mode: 'build',
+      explicitReplace: true,
+      currentVersion: this.versions ? version : undefined,
+    })
+    if (!result.ok) throw new Error(`project memory update rejected: ${result.errors.join(', ')}`)
+    if (this.versions && existsSync(entry.agents_path)) {
+      this.versions.snapshotPath(entry.agents_path, { target: 'project', reason: 'save_project_memory' })
+    }
+    this.stateStore.writeManagedMemory(projectId, result.content)
+    appendPatchLedger(join(this.root, 'memory', 'patch-ledger.jsonl'), patch, current, result)
 
     const updated: ProjectEntry = {
       ...entry,
-      summary: summarize(content),
+      summary: summarize(result.content),
       updated_at: stamp(),
     }
     this.stateStore.writeProjectJson(updated)
@@ -163,6 +205,25 @@ function summarize(content: string): string {
     .filter(Boolean)
     .join('；')
     .slice(0, 120)
+}
+
+function normalizeProjectMemoryBase(content: string): string {
+  return String(content ?? '').trim() === DEFAULT_PROJECT_MEMORY_BLOCK.trim() ? '' : content
+}
+
+function projectMemorySectionReplacementOps(markdown: string): MemoryPatchOperation[] {
+  const text = `${String(markdown || '').trimEnd()}\n`
+  const matches = [...text.matchAll(/^##\s+(.+?)\s*$/gm)]
+  return matches.map((match, index) => {
+    const section = String(match[1] ?? '').trim()
+    const bodyStart = (match.index ?? 0) + match[0].length
+    const bodyEnd = index + 1 < matches.length ? matches[index + 1]!.index ?? text.length : text.length
+    return {
+      op: 'replace_section',
+      section,
+      content: text.slice(bodyStart, bodyEnd).trim(),
+    }
+  })
 }
 
 function normalizeProject(raw: Record<string, unknown>, projectsDir: string): ProjectEntry {

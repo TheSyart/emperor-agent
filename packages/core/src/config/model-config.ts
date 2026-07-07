@@ -399,7 +399,6 @@ export async function loadModelConfig(root: string, opts: { create?: boolean } =
   const r = resolve(root)
   if (opts.create !== false) {
     await ensureModelConfig(r)
-    await ensureExampleConfig(r)
   }
   const path = join(r, MODEL_CONFIG_FILE)
   const raw = structuredClone(defaultModelConfig())
@@ -419,7 +418,6 @@ export async function saveModelConfig(
   if (opts.validateComplete) validateCompleteModelEntries(config.raw)
   const r = resolve(root)
   await writeFile(join(r, MODEL_CONFIG_FILE), serialize(config.raw), 'utf8')
-  await ensureExampleConfig(r)
   return config
 }
 

@@ -37,12 +37,14 @@ describe('SchedulerJobExecutor', () => {
     const taskManager = new TaskManager(root)
     const activeTasks = new ActiveTaskRegistry()
     const submitted: SchedulerAgentTurnPayload[] = []
+    const activeSessionIds: Array<string | null> = []
     const executor = new SchedulerJobExecutor({
       activeTasks,
       taskManager,
       controlPending: () => false,
       submitAgentTurn: async (payload) => {
         expect(inSchedulerRun()).toBe(true)
+        activeSessionIds.push(activeTasks.list()[0]?.session_id ?? null)
         submitted.push(payload)
         return 'agent_turn completed'
       },
@@ -57,6 +59,7 @@ describe('SchedulerJobExecutor', () => {
     expect(record.status).toBe(TaskStatus.COMPLETED)
     expect(record.job_id).toBe('agent_turn-job')
     expect(record.session_id).toBe('sess_sched')
+    expect(activeSessionIds).toEqual(['sess_sched'])
   })
 
   it('rejects agent_turn while control interaction is pending', async () => {

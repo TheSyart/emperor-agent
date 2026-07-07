@@ -5,6 +5,7 @@ export const CORE_BRIDGE_UNAVAILABLE_MESSAGE = 'Core IPC bridge is unavailable; 
 
 interface EmperorBridge {
   selectDirectory?: () => Promise<string | null>
+  openPath?: (target: string) => Promise<{ ok?: boolean; error?: string } | void>
   invokeCore?: (operationKey: string, ...args: unknown[]) => Promise<unknown>
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
 }
@@ -16,6 +17,15 @@ function bridge(): EmperorBridge | undefined {
 export async function selectDirectory(): Promise<string | null> {
   const picker = bridge()?.selectDirectory
   return typeof picker === 'function' ? picker() : null
+}
+
+export async function openPath(target: string): Promise<void> {
+  const opener = bridge()?.openPath
+  if (typeof opener !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await opener(target)
+  if (result && typeof result === 'object' && result.ok === false) {
+    throw new Error(typeof result.error === 'string' && result.error ? result.error : 'Failed to open path')
+  }
 }
 
 export async function invokeCore(operationKey: string, ...args: unknown[]): Promise<unknown> {

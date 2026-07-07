@@ -6,8 +6,8 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { ContextBuilder, renderContextSections, type SkillsLoaderLike } from './context-builder'
-import { AgentRunner, type ControlManagerRunnerHost } from './runner'
+import { ContextBuilder, type SkillsLoaderLike } from './context-builder'
+import { AgentRunner, type CompactorLike } from './runner'
 import { buildRoutedRunner } from './runner-factory'
 import { dispatchControlHost, permissionOnlyControlHost } from './control-hosts'
 import { loadLocalConfig, type PromptProfile } from '../config/local-config'
@@ -18,12 +18,16 @@ import type { Interaction } from '../control/models'
 import { AskUserTool, ProposePlanTool, RequestPlanModeTool } from '../control/tools'
 import { MCPClient } from '../mcp/client'
 import { MemoryStore } from '../memory/store'
+import { compactSession } from '../memory/compaction-service'
+import { CompactionCursorStore, CompactionLedger, latestAppliedCompactionRun } from '../memory/compaction-ledger'
+import type { ActiveMemoryBinding } from '../memory/compaction-models'
 import { TokenTracker } from '../memory/token-tracker'
+import { todayUtc8 } from '../memory/time-utc8'
 import { type ModelRoute, ModelRouter } from '../model/router'
 import { WorkspacePolicy } from '../permissions/workspace-policy'
 import { ProjectStore } from '../projects/store'
 import { ActiveTaskRegistry, TurnBusyError } from '../runtime/active'
-import { migrateLegacyStateRoot } from '../runtime/migrate-state-root'
+import { migrateLegacyStateRoot, type LegacyStateMigrationResult } from '../runtime/migrate-state-root'
 import { ensureRuntimeStateDirs, resolveRuntimePaths, type RuntimePaths } from '../runtime/paths'
 import { RuntimeEventStore } from '../runtime/store'
 import { SchedulerJobExecutor, type SchedulerAgentTurnPayload } from '../scheduler/executor'
@@ -72,6 +76,7 @@ export interface TurnScope {
   turnId: string
   mode: 'chat' | 'build'
   projectId: string | null
+  activeMemoryBinding: ActiveMemoryBinding
   workspaceRoot: string
   stateRoot: string
   sessionRoot: string
@@ -103,6 +108,8 @@ export interface AgentLoopCreateOptions {
 }
 
 export interface RunUserTurnOptions {
+  sessionId?: string | null
+  restoreActiveSessionAfterTurn?: boolean | null
   turnId?: string | null
   emit?: StreamEmitter | null
   displayContent?: string | null
@@ -135,6 +142,7 @@ export class AgentLoop {
   readonly subagentRegistry: SubagentRegistry
   readonly teamManager: TeamManager
   readonly mcpClient: MCPClient
+  readonly legacyStateMigration: LegacyStateMigrationResult
   modelRouter: LoopModelRouter
   readonly eventSink: StreamEmitter | null
 
@@ -152,8 +160,14 @@ export class AgentLoop {
   private readonly todosBySession = new Map<string, Array<Record<string, unknown>>>()
   private readonly teamManagersByProject = new Map<string, TeamManager>()
 
-  private constructor(opts: AgentLoopCreateOptions, modelRouter: LoopModelRouter, sharedMemory: MemoryStore) {
+  private constructor(
+    opts: AgentLoopCreateOptions,
+    modelRouter: LoopModelRouter,
+    sharedMemory: MemoryStore,
+    legacyStateMigration: LegacyStateMigrationResult,
+  ) {
     this.paths = resolveRuntimePaths(opts.root, { stateRoot: opts.stateRoot ?? null, templatesDir: opts.templatesDir ?? null })
+    this.legacyStateMigration = legacyStateMigration
     this.root = this.paths.runtimeRoot
     this.templatesDir = this.paths.templatesDir
     this.registry.setRoot(this.paths.stateRoot)
@@ -174,7 +188,7 @@ export class AgentLoop {
       eventSink: async (event) => { await this.emit(event) },
       targetSessionId: () => this.activeSessionId,
     })
-    this.skillsLoader = new FileSkillsLoader(this.root)
+    this.skillsLoader = new FileSkillsLoader(this.root, this.paths.stateRoot)
     this.contextBuilder = new ContextBuilder(this.templatesDir, this.skillsLoader, {
       memory: this.sharedMemory,
       userFile: opts.userFile ?? this.sharedMemory.userFile,
@@ -183,7 +197,7 @@ export class AgentLoop {
     this.subagentRegistry = new SubagentRegistry(join(this.templatesDir, 'subagents'), this.skillsLoader)
     this.contextBuilder.setSubagentRegistry(this.subagentRegistry)
     this.teamManager = this.createTeamManager(null)
-    this.mcpClient = new MCPClient(this.root)
+    this.mcpClient = new MCPClient(this.paths.stateRoot)
 
     this.controlManager.setTodoStore(this.todoStore)
     this.controlManager.setTaskManager(this.taskManager)
@@ -200,9 +214,9 @@ export class AgentLoop {
     const root = paths.runtimeRoot
     mkdirSync(root, { recursive: true })
     ensureRuntimeStateDirs(paths)
-    migrateLegacyStateRoot(paths)
+    const legacyStateMigration = migrateLegacyStateRoot(paths)
     migrateLegacyMainlineToDefaultSession(paths.stateRoot)
-    const localConfig = await loadLocalConfig(root, { preserveCorrupt: false })
+    const localConfig = await loadLocalConfig(paths.stateRoot, { preserveCorrupt: false })
     const templatesDir = paths.templatesDir
     const userFile = ensureUserProfileFile(paths.stateRoot, templatesDir)
     const memoryTemplate = existingPath(join(templatesDir, 'init', 'MEMORY.md'))
@@ -212,9 +226,9 @@ export class AgentLoop {
     let modelRouter = opts.modelRouter ?? null
     let hasConfiguredModel = Boolean(modelRouter)
     if (!modelRouter) {
-      const modelConfig = await loadModelConfig(root, { create: true })
+      const modelConfig = await loadModelConfig(paths.stateRoot, { create: true })
       hasConfiguredModel = modelConfig.models.length > 0
-      modelRouter = new ModelRouter(root, modelConfig, opts.modelOverride ?? null)
+      modelRouter = new ModelRouter(paths.stateRoot, modelConfig, opts.modelOverride ?? null)
     }
     const loop = new AgentLoop({
       ...opts,
@@ -224,7 +238,7 @@ export class AgentLoop {
       userFile,
       promptProfile: opts.promptProfile ?? localConfig.prompt.profile,
       permissionRules: localConfig.permissions.rules,
-    }, modelRouter, sharedMemory)
+    }, modelRouter, sharedMemory, legacyStateMigration)
     if (opts.initializeMcp !== false) {
       await loop.mcpClient.initialize()
       loop.mcpClient.registerTools(loop.registry)
@@ -270,6 +284,9 @@ export class AgentLoop {
     this.history = this.conversationStore.readCheckpoint() ?? this.activeMemoryStore.loadUnarchivedHistory()
     this.contextBuilder.setSessionScope(this.sessionScope(session))
     this.controlManager.setRuntimeScope(this.controlRuntimeScopeForSession(session))
+    this.skillsLoader.setProjectSkillsDir(
+      session.mode === 'build' && session.project_path ? join(resolve(session.project_path), '.emperor', 'skills') : null,
+    )
     this.runner = this.buildMainRunner()
     return session
   }
@@ -293,10 +310,23 @@ export class AgentLoop {
     if (opts.useActiveTask !== false && this.activeTasks.hasActiveKind('turn')) {
       throw new TurnBusyError()
     }
+    const targetSessionId = String(opts.sessionId ?? '').trim()
+    const previousSessionId = this.activeSessionId
+    if (targetSessionId && this.activeSessionId !== targetSessionId) this.activateSession(targetSessionId)
     const turnId = opts.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
     const taskId = opts.taskId || `turn:${turnId}`
     const abortController = new AbortController()
     const awaitable = this.runUserTurnInner(content, turnId, opts, abortController.signal)
+      .finally(() => {
+        if (!opts.restoreActiveSessionAfterTurn) return
+        if (!previousSessionId || previousSessionId === this.activeSessionId) return
+        if (targetSessionId && this.activeSessionId !== targetSessionId) return
+        try {
+          this.activateSession(previousSessionId)
+        } catch {
+          // The previous session may have been deleted while a background turn was running.
+        }
+      })
     if (opts.useActiveTask === false) return awaitable
     return this.activeTasks.run({
       taskId,
@@ -320,9 +350,11 @@ export class AgentLoop {
 
   refreshRuntimeContext(): void {
     if (!this.runner) return
-    const sections = this.contextBuilder.buildSections()
-    this.runner.systemPrompt = renderContextSections(sections)
-    this.runner.promptSections = sections
+    if (this.activeSession) this.contextBuilder.setSessionScope(this.sessionScope(this.activeSession))
+    const projection = this.contextBuilder.buildProjection()
+    this.runner.systemPrompt = projection.prompt
+    this.runner.promptSections = projection.sections
+    this.runner.promptContextPlan = projection.contextPlan
     this.runner.promptSnapshotDir = this.activeSessionId ? join(this.sessionStore.sessionDir(this.activeSessionId), 'prompt-snapshots') : null
     this.runner.sessionId = this.activeSessionId
     if (this.activeSession) this.controlManager.setRuntimeScope(this.controlRuntimeScopeForSession(this.activeSession))
@@ -337,7 +369,7 @@ export class AgentLoop {
 
   async refreshModelConfig(): Promise<void> {
     if (!this.ownsModelRouter) return
-    this.modelRouter = new ModelRouter(this.root, await loadModelConfig(this.root, { create: true }), this.modelOverride)
+    this.modelRouter = new ModelRouter(this.paths.stateRoot, await loadModelConfig(this.paths.stateRoot, { create: true }), this.modelOverride)
     if (this.activeSessionId) this.runner = this.buildMainRunner()
   }
 
@@ -395,26 +427,78 @@ export class AgentLoop {
 
   private buildMainRunner(): AgentRunner {
     const route = this.modelRouter.route('main_agent')
-    const promptSections = this.contextBuilder.buildSections()
+    const session = this.activeSession ?? (this.activeSessionId ? this.sessionStore.get(this.activeSessionId) : null)
+    if (session) this.contextBuilder.setSessionScope(this.sessionScope(session))
+    const projection = this.contextBuilder.buildProjection()
+    const memoryStore = this.activeMemoryStore
     return buildRoutedRunner({
       route,
       registry: this.registry,
-      systemPrompt: renderContextSections(promptSections),
+      systemPrompt: projection.prompt,
       tokenTracker: this.tokenTracker,
       usageType: 'main_agent',
-      memoryStore: this.activeMemoryStore,
-      compactor: null,
+      memoryStore,
+      compactor: session ? this.autoMemoryCompactor(session, memoryStore) : null,
       todoStore: this.todoStore,
       controlManager: this.controlManager,
       maxContext: route.snapshot.contextWindowTokens,
       maxTurns: 20,
       workspaceRoot: this.workspaceRootForActiveSession(),
-      promptSections,
+      promptSections: projection.sections,
+      promptContextPlan: projection.contextPlan,
       promptSnapshotDir: this.activeSessionId ? join(this.sessionStore.sessionDir(this.activeSessionId), 'prompt-snapshots') : null,
       sessionId: this.activeSessionId,
       // Wave5 灰度开关：默认关闭，行为与批式逐字节一致
       streamingToolExecution: process.env.EMPEROR_STREAMING_TOOLS === '1',
     })
+  }
+
+  private autoMemoryCompactor(session: SessionEntry, memoryStore: SessionMemoryStore): CompactorLike {
+    return {
+      compactAfterTurn: async ({ currentTokens, maxContext }) => {
+        const route = this.modelRouter.route('memory_compaction')
+        const snapshot = route.snapshot
+        const mode = session.mode === 'build' ? 'build' : 'chat'
+        const projectId = mode === 'build' ? String(session.project_id || '') : null
+        const result = await compactSession({
+          sessionId: session.id,
+          mode,
+          projectId,
+          historyFile: memoryStore.historyFile,
+          trigger: { kind: 'token_threshold', currentTokens: Number(currentTokens) || 0, maxContext: Number(maxContext) || 0 },
+          memory: {
+            root: this.paths.stateRoot,
+            memoryDir: this.sharedMemory.memoryDir,
+            userFile: this.sharedMemory.userFile,
+            versions: this.sharedMemory.versions,
+            readUser: () => this.sharedMemory.readUser(),
+            readGlobalMemory: () => this.sharedMemory.readMemory(),
+            readEpisode: () => this.sharedMemory.readTodayEpisode(),
+            readProjectMemory: (id: string) => this.projectStore.readManagedMemory(id),
+          },
+          model: {
+            provider: snapshot.provider,
+            model: snapshot.model,
+            providerName: snapshot.providerName,
+            modelRole: snapshot.modelRole,
+            maxTokens: snapshot.generation.maxTokens,
+            temperature: snapshot.generation.temperature,
+            reasoningEffort: snapshot.generation.reasoningEffort,
+            routeReason: snapshot.routeReason,
+          },
+          tokenTracker: this.tokenTracker,
+        })
+        if (result.status === 'compacted' && result.compaction) {
+          const cursorStore = new CompactionCursorStore(this.paths.stateRoot)
+          const retainedHistory = activeSessionHistoryAfterSeq(memoryStore, result.compaction.range.toSeq)
+          memoryStore.appendCompactMarker(retainedHistory, cursorStore.archiveGate(session.id))
+          result.compaction.cursor = cursorStore.readOrInit(session.id)
+          this.refreshRuntimeContext()
+          return { ...result, retainedHistory }
+        }
+        return result
+      },
+    }
   }
 
   private registerBuiltinTools(): void {
@@ -432,7 +516,7 @@ export class AgentLoop {
     this.registry.register(new ProposePlanTool(this.controlManager))
     this.registry.register(new RequestPlanModeTool(this.controlManager))
     this.registry.register(new UpdateTodos(this.todoStore))
-    this.registry.register(new SaveUserProfileTool(this.sharedMemory.userFile))
+    this.registry.register(new SaveUserProfileTool(this.sharedMemory))
     const controlHost = dispatchControlHost(this.controlManager)
     this.registry.register(new DispatchSubagentTool({
       parentRegistry: this.registry,
@@ -538,19 +622,56 @@ export class AgentLoop {
     return new SessionMemoryStore(this.sharedMemory, conversation)
   }
 
-  private sessionScope(session: SessionEntry): { mode: string; projectAgents?: string; projectAgentsSource?: string; projectPath?: string; projectIndexSummary?: string } {
+  private sessionScope(session: SessionEntry): {
+    mode: string
+    projectId?: string
+    projectAgents?: string
+    projectAgentsSource?: string
+    projectPath?: string
+    projectIndexSummary?: string
+    compactionOmittedRanges?: Array<{ fromSeq: number; toSeq: number; compactionId?: string | null; targetScopes?: string[] }>
+  } {
     if (session.mode !== 'build') {
-      return { mode: 'chat', projectIndexSummary: this.projectStore.summaryForChat() }
+      return {
+        mode: 'chat',
+        projectIndexSummary: this.projectStore.summaryForChat(),
+        compactionOmittedRanges: this.compactionOmittedRangesForSession(session.id),
+      }
     }
     const projectId = session.project_id ?? ''
     const project = projectId ? this.projectStore.get(projectId) : null
     return {
       mode: 'build',
+      projectId,
       projectPath: session.project_path ?? '',
       projectAgents: projectId ? this.projectStore.readAgents(projectId) : '',
       projectAgentsSource: project?.agents_path ?? '',
       projectIndexSummary: this.projectStore.summaryForChat(),
+      compactionOmittedRanges: this.compactionOmittedRangesForSession(session.id),
     }
+  }
+
+  private compactionOmittedRangesForSession(sessionId: string): Array<{ fromSeq: number; toSeq: number; compactionId?: string | null; targetScopes?: string[] }> {
+    const cursor = new CompactionCursorStore(this.paths.stateRoot).readOrInit(sessionId)
+    if (cursor.compactedUntilSeq <= 0) return []
+    const ledger = new CompactionLedger(this.paths.stateRoot)
+    const latest = latestAppliedCompactionRun(ledger.readIndex(), sessionId, cursor.lastCompactionId ?? null, cursor.compactedUntilSeq)
+    const range = latest?.range && Number(latest.range.toSeq) > 0
+      ? {
+        fromSeq: Math.max(1, Math.trunc(Number(latest.range.fromSeq) || 1)),
+        toSeq: Math.trunc(Number(latest.range.toSeq) || cursor.compactedUntilSeq),
+      }
+      : { fromSeq: 1, toSeq: cursor.compactedUntilSeq }
+    const targetScopes = Array.isArray(latest?.output?.targetVersions)
+      ? latest.output.targetVersions
+        .map((item) => scopeLabel((item as { scope?: unknown }).scope))
+        .filter((scope): scope is string => Boolean(scope))
+      : []
+    return [{
+      ...range,
+      compactionId: latest?.compactionId ?? null,
+      targetScopes,
+    }]
   }
 
   private workspaceRootForActiveSession(): string {
@@ -584,6 +705,7 @@ export class AgentLoop {
       turnId,
       mode: session.mode,
       projectId,
+      activeMemoryBinding: this.activeMemoryBindingForSession(session),
       workspaceRoot: this.workspaceRootForSession(session),
       stateRoot: this.paths.stateRoot,
       sessionRoot: this.sessionStore.sessionDir(session.id),
@@ -598,10 +720,43 @@ export class AgentLoop {
       turn_id: scope.turnId,
       mode: scope.mode,
       project_id: scope.projectId,
+      active_memory_binding: scope.activeMemoryBinding,
       workspace_root: scope.workspaceRoot,
       state_root: scope.stateRoot,
       session_root: scope.sessionRoot,
       project_state_root: scope.projectStateRoot,
+    }
+  }
+
+  private activeMemoryBindingForSession(session: SessionEntry): ActiveMemoryBinding {
+    const projectId = String(session.project_id ?? '').trim()
+    const date = todayUtc8()
+    return {
+      profile: {
+        scope: { kind: 'user_profile' },
+        readable: true,
+        writable: true,
+        path: this.sharedMemory.userFile,
+      },
+      longTerm: session.mode === 'build'
+        ? {
+          scope: { kind: 'project', projectId: projectId || '(unknown)' },
+          readable: Boolean(projectId),
+          writable: Boolean(projectId),
+          path: projectId ? join(this.paths.projectsRoot, projectId, 'AGENTS.local.md') : null,
+        }
+        : {
+          scope: { kind: 'global' },
+          readable: true,
+          writable: true,
+          path: this.sharedMemory.memoryFile,
+        },
+      episode: {
+        scope: { kind: 'episode', date },
+        readable: false,
+        writable: true,
+        path: join(this.sharedMemory.memoryDir, `${date}.md`),
+      },
     }
   }
 
@@ -620,6 +775,8 @@ export class AgentLoop {
           source: payload.source,
           scheduler: payload.scheduler,
           taskId: payload.taskId ?? undefined,
+          sessionId: payload.sessionId ?? null,
+          restoreActiveSessionAfterTurn: Boolean(payload.sessionId),
           emit: payload.deliver ? this.eventSink : null,
         })
       },
@@ -719,11 +876,25 @@ function eventOwnerSessionId(event: Record<string, unknown>): string {
   return ''
 }
 
+/**
+ * Merges three skill sources with fixed precedence for content resolution:
+ * project (`<project>/.emperor/skills`, read-only) > user-global (`stateRoot/skills`,
+ * read-write via Skill API) > builtin (`runtimeRoot/skills`, read-only). `skillNames()`
+ * unions all three so the summary lists everything available, even lower-precedence
+ * names that aren't shadowed by a higher layer.
+ */
 class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
-  readonly skillsDir: string
+  readonly builtinDir: string
+  readonly userDir: string
+  private projectDir: string | null = null
 
-  constructor(root: string) {
-    this.skillsDir = join(root, 'skills')
+  constructor(runtimeRoot: string, stateRoot: string) {
+    this.builtinDir = join(runtimeRoot, 'skills')
+    this.userDir = join(stateRoot, 'skills')
+  }
+
+  setProjectSkillsDir(dir: string | null): void {
+    this.projectDir = dir
   }
 
   getAlwaysSkills(): string[] {
@@ -749,25 +920,33 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
   getContent(name: string): string | null {
     const safe = safeSkillName(name)
     if (!safe) return null
-    for (const path of [
-      join(this.skillsDir, safe, 'SKILL.md'),
-      join(this.skillsDir, `${safe}.md`),
-    ]) {
-      if (existsSync(path) && statSync(path).isFile()) return readFileSync(path, 'utf8')
+    for (const dir of this.dirsInPrecedenceOrder()) {
+      for (const path of [
+        join(dir, safe, 'SKILL.md'),
+        join(dir, `${safe}.md`),
+      ]) {
+        if (existsSync(path) && statSync(path).isFile()) return readFileSync(path, 'utf8')
+      }
     }
     return null
   }
 
+  private dirsInPrecedenceOrder(): string[] {
+    return [this.projectDir, this.userDir, this.builtinDir].filter((dir): dir is string => Boolean(dir))
+  }
+
   private skillNames(): string[] {
-    if (!existsSync(this.skillsDir)) return []
-    const names: string[] = []
-    for (const item of readdirSync(this.skillsDir)) {
-      if (item.startsWith('.')) continue
-      const path = join(this.skillsDir, item)
-      if (statSync(path).isDirectory() && existsSync(join(path, 'SKILL.md'))) names.push(item)
-      else if (statSync(path).isFile() && item.endsWith('.md')) names.push(basename(item, '.md'))
+    const names = new Set<string>()
+    for (const dir of this.dirsInPrecedenceOrder()) {
+      if (!existsSync(dir)) continue
+      for (const item of readdirSync(dir)) {
+        if (item.startsWith('.')) continue
+        const path = join(dir, item)
+        if (statSync(path).isDirectory() && existsSync(join(path, 'SKILL.md'))) names.add(item)
+        else if (statSync(path).isFile() && item.endsWith('.md')) names.add(basename(item, '.md'))
+      }
     }
-    return names.sort()
+    return [...names].sort()
   }
 }
 
@@ -775,8 +954,43 @@ function existingPath(path: string): string | null {
   return existsSync(path) ? path : null
 }
 
+function scopeLabel(scope: unknown): string | null {
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return null
+  const record = scope as Record<string, unknown>
+  const kind = String(record.kind || '')
+  if (!kind) return null
+  if (kind === 'project' && record.projectId) return `project:${String(record.projectId)}`
+  if (kind === 'episode' && record.date) return `episode:${String(record.date)}`
+  return kind
+}
+
 function cloneTodoItems(todos: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   return todos.map((todo) => ({ ...todo }))
+}
+
+function activeSessionHistoryAfterSeq(store: SessionMemoryStore, seq: number): Msg[] {
+  const cutoff = Math.trunc(Number(seq) || 0)
+  const activeRows = store.conversation.historyLog.loadActiveRows()
+  const hiddenTurns = new Set<string>()
+  for (const row of activeRows) {
+    if (typeof row.turn_id === 'string' && (row.hidden === true || row.schedulerHidden === true)) {
+      hiddenTurns.add(row.turn_id)
+    }
+  }
+  const out: Msg[] = []
+  for (const row of activeRows) {
+    if ((Number(row.seq) || 0) <= cutoff) continue
+    if (!('role' in row) || !('content' in row)) continue
+    if (row.type === 'model_call' || row.type === 'compact_event') continue
+    if (hiddenTurns.has(String(row.turn_id ?? ''))) continue
+    const item: Msg = { role: row.role, content: row.content }
+    if (Number.isFinite(Number(row.seq)) && Number(row.seq) > 0) item.seq = Math.trunc(Number(row.seq))
+    if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
+    if (Array.isArray(row.attachments)) item.attachments = row.attachments
+    if (typeof row.displayContent === 'string') item.displayContent = row.displayContent
+    out.push(item)
+  }
+  return out
 }
 
 function safeSkillName(name: string): string {

@@ -282,19 +282,109 @@ describe('write_file overwrite nudge (2026-07-05 B2a)', () => {
 })
 
 describe('SaveUserProfileTool (onboarding profile persistence)', () => {
-  it('overwrites the resolved user profile file with the given content', async () => {
+  it('describes section patch semantics instead of whole-file overwrite semantics', async () => {
+    const { SaveUserProfileTool } = await import('./tools/builtin')
+    const tool = new SaveUserProfileTool({ writeUser: () => undefined })
+
+    expect(tool.description).toContain('章节')
+    expect(tool.description).toContain('patch')
+    expect(tool.description).not.toContain('整份改写')
+    expect(tool.description).not.toContain('整体覆盖')
+  })
+
+  it('rejects non patch-capable writers instead of falling back to direct profile overwrite', async () => {
+    const { SaveUserProfileTool } = await import('./tools/builtin')
+    let directWriteCalled = false
+    const tool = new SaveUserProfileTool({
+      writeUser: () => { directWriteCalled = true },
+    })
+
+    const result = await tool.execute({
+      content: '## Stable Preferences\n\n- prefers Chinese\n',
+    })
+
+    expect(result).toContain('Error:')
+    expect(result).toContain('patch-capable writer')
+    expect(directWriteCalled).toBe(false)
+  })
+
+  it('applies section patches through MemoryPatch so unrelated profile sections are preserved', async () => {
     const { mkdtempSync, readFileSync, writeFileSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
+    const { MemoryStore } = await import('./memory/store')
     const { SaveUserProfileTool } = await import('./tools/builtin')
     const dir = mkdtempSync(join(tmpdir(), 'emperor-save-profile-'))
     const userFile = join(dir, 'USER.local.md')
-    writeFileSync(userFile, '# 用户档案\n\n- **称呼**：未设置\n', 'utf8')
-    const tool = new SaveUserProfileTool(userFile)
+    const memoryDir = join(dir, 'memory')
+    writeFileSync(userFile, [
+      '# 用户档案',
+      '',
+      '## 基本信息',
+      '- **称呼**：未设置',
+      '- **时区**：UTC+8',
+      '',
+      '## 工作背景',
+      '- **主要角色**：未设置',
+      '',
+    ].join('\n'), 'utf8')
+    const memory = new MemoryStore(memoryDir, userFile)
+    const tool = new SaveUserProfileTool(memory)
 
-    const result = await tool.execute({ content: '# 用户档案\n\n- **称呼**：李公公\n' })
+    const result = await tool.execute({
+      content: [
+        '# 用户档案',
+        '',
+        '## 基本信息',
+        '- **称呼**：李公公',
+        '- **时区**：Asia/Shanghai',
+        '',
+      ].join('\n'),
+    })
 
-    expect(readFileSync(userFile, 'utf8')).toBe('# 用户档案\n\n- **称呼**：李公公\n')
-    expect(result).toContain('已')
+    const next = readFileSync(userFile, 'utf8')
+    expect(next).toContain('## 基本信息\n- **称呼**：李公公\n- **时区**：Asia/Shanghai')
+    expect(next).toContain('## 工作背景\n- **主要角色**：未设置')
+    expect(memory.versions.list({ target: 'user' })).toHaveLength(1)
+    expect(result).toContain('patch')
+  })
+
+  it('rejects destructive profile section replacement and leaves the profile untouched', async () => {
+    const { mkdtempSync, readFileSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { MemoryStore } = await import('./memory/store')
+    const { SaveUserProfileTool } = await import('./tools/builtin')
+    const dir = mkdtempSync(join(tmpdir(), 'emperor-save-profile-reject-'))
+    const userFile = join(dir, 'USER.local.md')
+    const memoryDir = join(dir, 'memory')
+    const original = [
+      '# 用户档案',
+      '',
+      '## 基本信息',
+      '- **称呼**：未设置',
+      '- **时区**：UTC+8',
+      '- **语言**：中文',
+      '- **技术水平**：专家',
+      '',
+    ].join('\n')
+    writeFileSync(userFile, original, 'utf8')
+    const memory = new MemoryStore(memoryDir, userFile)
+    const tool = new SaveUserProfileTool(memory)
+
+    const result = await tool.execute({
+      content: [
+        '# 用户档案',
+        '',
+        '## 基本信息',
+        '- **称呼**：李公公',
+        '',
+      ].join('\n'),
+    })
+
+    expect(result).toContain('Error:')
+    expect(result).toContain('destructive_profile_replacement')
+    expect(readFileSync(userFile, 'utf8')).toBe(original)
+    expect(memory.versions.list({ target: 'user' })).toHaveLength(0)
   })
 })

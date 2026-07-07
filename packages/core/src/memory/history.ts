@@ -13,6 +13,11 @@ const INDEX_VERSION = 1
 
 type Row = Record<string, unknown>
 
+export interface HistoryArchiveGate {
+  canArchiveUntil(seq: number): boolean
+  markArchived?(seq: number): void
+}
+
 export class HistoryLog {
   readonly memoryDir: string
   readonly historyFile: string
@@ -48,22 +53,51 @@ export class HistoryLog {
     return payload
   }
 
-  compact(activeMessages: Row[]): void {
+  compact(activeMessages: Row[], archiveGate?: HistoryArchiveGate | null): void {
     const hotRows = this.readHotRows()
     const marker: Row = { seq: HistoryLog.nextSeq(hotRows), ts: nowIsoUtc8(), type: 'compact_event', archived: true }
     const activeRows = this.activeRowsFromMessages(activeMessages, hotRows)
-    const archivedRows = this.rowsToArchive(hotRows, activeRows)
+    const [archivedRows, gatedKeepRows] = this.rowsToArchive(hotRows, activeRows, archiveGate)
+    const maxArchivedSeq = maxSeq(archivedRows)
+    if (archiveGate && maxArchivedSeq <= 0 && gatedKeepRows.length > 0) {
+      throw new Error(`cannot archive history beyond semantic compaction cursor: seq ${maxSeq(gatedKeepRows)}`)
+    }
+    if (archiveGate && maxArchivedSeq > 0 && !archiveGate.canArchiveUntil(maxArchivedSeq)) {
+      throw new Error(`cannot archive history beyond semantic compaction cursor: seq ${maxArchivedSeq}`)
+    }
     archivedRows.push(marker)
     if (archivedRows.length) this.appendArchive(archivedRows)
-    this.rewriteHot(activeRows)
+    this.rewriteHot([...activeRows, ...gatedKeepRows].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0)))
     const index = this.loadIndex()
     index.latest_seq = Math.max(Number(index.latest_seq) || 0, Number(marker.seq))
     index.last_archive_at = marker.ts
     this.writeIndex(this.statsFromIndex(index))
+    if (archiveGate && maxArchivedSeq > 0) archiveGate.markArchived?.(maxArchivedSeq)
   }
 
   loadActiveRows(): Row[] {
     return this.readHotRows().filter((row) => row.type !== 'compact_event')
+  }
+
+  lastCompletedTurnSeq(): number {
+    const turns = this.completedTurns()
+    return turns.length ? turns[turns.length - 1]!.lastSeq : 0
+  }
+
+  seqBeforeLastNTurns(n: number): number {
+    const turns = this.completedTurns()
+    if (!turns.length) return 1
+    const keep = Math.max(0, Math.trunc(Number(n) || 0))
+    if (keep <= 0) return turns[turns.length - 1]!.lastSeq + 1
+    if (keep >= turns.length) return turns[0]!.firstSeq
+    return turns[turns.length - keep]!.firstSeq
+  }
+
+  countCompletedTurns(fromSeq: number, toSeq: number): number {
+    const from = Number(fromSeq) || 0
+    const to = Number(toSeq) || 0
+    if (to < from) return 0
+    return this.completedTurns().filter((turn) => turn.firstSeq >= from && turn.lastSeq <= to).length
   }
 
   stats(): Row {
@@ -166,13 +200,14 @@ export class HistoryLog {
     return active
   }
 
-  private rowsToArchive(hotRows: Row[], activeRows: Row[]): Row[] {
+  private rowsToArchive(hotRows: Row[], activeRows: Row[], archiveGate?: HistoryArchiveGate | null): [Row[], Row[]] {
     const activeCounts = new Map<string, number>()
     for (const row of activeRows) {
       const sig = HistoryLog.signature(row)
       activeCounts.set(sig, (activeCounts.get(sig) ?? 0) + 1)
     }
     const archived: Row[] = []
+    const gatedKeep: Row[] = []
     for (const row of hotRows) {
       const sig = HistoryLog.signature(row)
       const count = activeCounts.get(sig) ?? 0
@@ -180,9 +215,42 @@ export class HistoryLog {
         activeCounts.set(sig, count - 1)
         continue
       }
+      if (archiveGate && !archiveGate.canArchiveUntil(Number(row.seq) || 0)) {
+        gatedKeep.push({ ...row, archived: false })
+        continue
+      }
       archived.push({ ...row, archived: true })
     }
-    return archived
+    return [archived, gatedKeep]
+  }
+
+  private completedTurns(): Array<{ turnId: string; firstSeq: number; lastSeq: number }> {
+    const turns = new Map<string, { turnId: string; firstSeq: number; lastSeq: number; hasAssistant: boolean }>()
+    for (const row of this.loadActiveRows()) {
+      const turnId = typeof row.turn_id === 'string' ? row.turn_id : ''
+      if (!turnId) continue
+      const role = String(row.role ?? '')
+      if (role !== 'user' && role !== 'assistant') continue
+      const seq = Number(row.seq) || 0
+      if (seq <= 0) continue
+      const existing = turns.get(turnId)
+      if (existing) {
+        existing.firstSeq = Math.min(existing.firstSeq, seq)
+        existing.lastSeq = Math.max(existing.lastSeq, seq)
+        if (role === 'assistant') existing.hasAssistant = true
+      } else {
+        turns.set(turnId, {
+          turnId,
+          firstSeq: seq,
+          lastSeq: seq,
+          hasAssistant: role === 'assistant',
+        })
+      }
+    }
+    return [...turns.values()]
+      .filter((turn) => turn.hasAssistant)
+      .sort((a, b) => a.lastSeq - b.lastSeq)
+      .map(({ turnId, firstSeq, lastSeq }) => ({ turnId, firstSeq, lastSeq }))
   }
 
   private appendArchive(rows: Row[]): void {
@@ -292,6 +360,10 @@ function jsonSafe(obj: unknown): unknown {
     }
     return String(obj)
   }
+}
+
+function maxSeq(rows: Row[]): number {
+  return rows.reduce((max, row) => Math.max(max, Math.trunc(Number(row.seq) || 0)), 0)
 }
 
 function sortKeys(value: unknown): unknown {

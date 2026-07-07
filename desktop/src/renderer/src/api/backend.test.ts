@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { hasCoreBridge, invokeCore, onCoreEvent } from './backend'
+import { hasCoreBridge, invokeCore, onCoreEvent, openPath } from './backend'
 
 const g = globalThis as unknown as { window?: unknown }
 
@@ -61,5 +61,23 @@ describe('with an injected Core IPC bridge', () => {
 
     expect(onCoreEvent((event) => { events.push(event) })).toBe(unsubscribe)
     expect(events).toEqual([{ event: 'ready' }])
+  })
+
+  it('delegates openPath to the preload bridge and reports failures', async () => {
+    const calls: string[] = []
+    g.window = {
+      emperor: {
+        openPath: async (target: string) => {
+          calls.push(target)
+          return { ok: true }
+        },
+      },
+    }
+
+    await expect(openPath('/tmp/emperor')).resolves.toBeUndefined()
+    expect(calls).toEqual(['/tmp/emperor'])
+
+    g.window = { emperor: { openPath: async () => ({ ok: false, error: 'not found' }) } }
+    await expect(openPath('/missing')).rejects.toThrow('not found')
   })
 })

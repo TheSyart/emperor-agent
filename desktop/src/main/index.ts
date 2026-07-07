@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net, type OpenDialogOptions, type Rectangle } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, net, shell, type OpenDialogOptions, type Rectangle } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { defaultStateRoot } from '@emperor/core'
 
 import { resolveConfig } from './config'
 import { resolveAppIconPath } from './icon'
@@ -49,6 +50,13 @@ ipcMain.handle('emperor:select-directory', async () => {
   return result.filePaths[0]
 })
 
+ipcMain.handle('emperor:open-path', async (_event, target: unknown) => {
+  const pathValue = typeof target === 'string' ? target.trim() : ''
+  if (!pathValue) return { ok: false, error: 'path is required' }
+  const error = await shell.openPath(pathValue)
+  return error ? { ok: false, error } : { ok: true }
+})
+
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
@@ -61,7 +69,7 @@ function argValue(argv: string[], flag: string): string | undefined {
 }
 
 function mainBoundsPath(): string {
-  return path.join(config.root, 'memory', 'desktop', 'window.json')
+  return path.join(config.stateRoot, 'memory', 'desktop', 'window.json')
 }
 
 function prepareMainRuntime(): void {
@@ -69,7 +77,7 @@ function prepareMainRuntime(): void {
   config = resolveConfig({ argv: mainArgv, env: process.env, defaultRoot })
   if (app.isPackaged) {
     initializePackagedRuntime({
-      root: config.root,
+      root: config.runtimeRoot,
       defaultsRoot: runtimeDefaultsRoot(process.resourcesPath),
     })
   }
@@ -93,12 +101,12 @@ function registerAppProtocol(): void {
   protocol.handle('app', async (request) => {
     const url = new URL(request.url)
     if (url.host === 'attachments') {
-      const attachmentPath = resolveAttachmentRawPath(request.url, config.root)
+      const attachmentPath = resolveAttachmentRawPath(request.url, { stateRoot: config.stateRoot, legacyRuntimeRoot: config.runtimeRoot })
       if (!attachmentPath) return new Response('attachment not found', { status: 404 })
       return net.fetch(pathToFileURL(attachmentPath).toString())
     }
     if (url.host === 'media') {
-      const mediaPath = resolveMediaRawPath(request.url, config.root)
+      const mediaPath = resolveMediaRawPath(request.url, { stateRoot: config.stateRoot, legacyRuntimeRoot: config.runtimeRoot })
       if (!mediaPath) return new Response('media not found', { status: 404 })
       return net.fetch(pathToFileURL(mediaPath).toString())
     }
@@ -199,12 +207,16 @@ function savePetBounds(win: BrowserWindow, boundsPath: string): void {
 }
 
 function createPetWindow(): void {
+  // Runtime resources (assets) still resolve from --root/EMPEROR_AGENT_ROOT — the pet
+  // renderer only understands `--root` today. Private state (window bounds) resolves
+  // independently via EMPEROR_CONFIG_DIR/default, same priority as Core's stateRoot.
   const root =
     argValue(mainArgv, '--root') ||
     process.env.EMPEROR_AGENT_ROOT ||
     (app.isPackaged ? packagedRuntimeRoot(app.getPath('userData')) : path.resolve(mainDir, '..', '..', '..'))
+  const petStateRoot = process.env.EMPEROR_CONFIG_DIR || defaultStateRoot()
   const assetBaseUrl = pathToFileURL(path.join(root, 'assets', 'desktop-pet', 'clawd-tank') + path.sep).href
-  const boundsPath = path.join(petStateDir(root), 'window.json')
+  const boundsPath = path.join(petStateDir(petStateRoot), 'window.json')
   const rootDir = petRendererRoot()
   const win = new BrowserWindow({
     ...readPetBounds(boundsPath),
@@ -223,6 +235,7 @@ function createPetWindow(): void {
       nodeIntegration: false,
       additionalArguments: [
         `--emperor-root=${root}`,
+        `--emperor-config-dir=${petStateRoot}`,
         `--emperor-asset-base-url=${assetBaseUrl}`,
       ],
     },
@@ -263,9 +276,10 @@ async function startup(): Promise<void> {
 
   try {
     coreApi = await createCoreHost({
-      root: config.root,
+      root: config.runtimeRoot,
       ipcMain,
       eventBridge: coreEventBridge,
+      coreOptions: { stateRoot: config.stateRoot },
     })
   } catch (err) {
     fail('CoreApi 初始化失败', errMessage(err))

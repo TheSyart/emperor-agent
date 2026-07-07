@@ -1,4 +1,5 @@
 import { mkdtemp, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -104,6 +105,20 @@ describe('model-config IO', () => {
     expect(onDisk.endsWith('}\n')).toBe(true) // indent=2 + trailing newline
     const reloaded = await loadModelConfig(dir)
     expect(findEntry(reloaded, 'a')?.mainModelId).toBe('m')
+  })
+
+  it('does not create model_config.example.json under the private state root', async () => {
+    await loadModelConfig(dir)
+
+    expect(existsSync(join(dir, 'model_config.json'))).toBe(true)
+    expect(existsSync(join(dir, 'model_config.example.json'))).toBe(false)
+
+    await saveModelConfig(dir, {
+      agents: { defaults: { model: 'a' } },
+      models: [{ name: 'a', mainModelId: 'm', secondaryModelId: 's', provider: 'openai' }],
+    })
+
+    expect(existsSync(join(dir, 'model_config.example.json'))).toBe(false)
   })
 
   it('markEntryVision flips supportsVision and persists', async () => {

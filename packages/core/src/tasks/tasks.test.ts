@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -41,10 +41,10 @@ describe('TaskStore (test_tasks_store.py)', () => {
     expect(store.get('task_1')?.toDict()).toEqual(record.toDict())
     expect(store.list()[0]!.id).toBe('task_1')
 
-    writeFileSync(join(root, 'memory', 'tasks', 'index.json'), '{bad json', 'utf8')
+    writeFileSync(join(root, 'tasks', 'index.json'), '{bad json', 'utf8')
     expect(store.list()).toEqual([])
-    expect(existsSync(join(root, 'memory', 'tasks', 'index.json'))).toBe(true)
-    expect(readdirSync(join(root, 'memory', 'tasks')).some((name) => name.startsWith('index.json.corrupt-'))).toBe(true)
+    expect(existsSync(join(root, 'tasks', 'index.json'))).toBe(true)
+    expect(readdirSync(join(root, 'tasks')).some((name) => name.startsWith('index.json.corrupt-'))).toBe(true)
   })
 
   it('round-trips session ownership and tolerates legacy records without it', () => {
@@ -155,13 +155,41 @@ describe('ProjectStore (test_project_store.py)', () => {
     expect(readFileSync(entry.agents_path, 'utf8')).toContain(PROJECT_MEMORY_START)
     expect(readFileSync(entry.agents_path, 'utf8')).toContain(PROJECT_MEMORY_END)
 
-    const updated = store.updateMemory(entry.project_id, '## 项目情况\n\n- 使用 Vue + Python。\n- 最近在做 Build 模式。')
+    const updated = store.updateMemory(entry.project_id, '## Architecture Notes\n\n- 使用 Vue + Python。\n- 最近在做 Build 模式。')
     const text = readFileSync(entry.agents_path, 'utf8')
     expect(text).toContain('使用 Vue + Python')
     expect(updated.summary).toBe('使用 Vue + Python；最近在做 Build 模式')
     expect(store.readManagedMemory(entry.project_id)).toContain('最近在做 Build 模式')
     expect(store.summaryForChat()).toContain(entry.project_name)
     expect(existsSync(agentsPath)).toBe(false)
+  })
+
+  it('updates project memory through section patches and rejects sectionless overwrites', async () => {
+    const { ProjectStore } = await import('../projects/store')
+    const { MemoryVersionStore } = await import('../memory/versions')
+    const stateRoot = tmp('emperor-project-store-patch-state-')
+    const projectDir = tmp('emperor-project-store-patch-workspace-')
+    const memoryDir = join(stateRoot, 'memory')
+    const userFile = join(memoryDir, 'profile', 'USER.local.md')
+    mkdirSync(join(memoryDir, 'profile'), { recursive: true })
+    writeFileSync(userFile, '# User Profile\n', 'utf8')
+    const versions = new MemoryVersionStore(stateRoot, memoryDir, userFile)
+    const store = new ProjectStore(stateRoot, { versions })
+    const entry = store.resolve(projectDir)
+
+    store.updateMemory(entry.project_id, '## Architecture Notes\n\n- keep this architecture note\n')
+    const updated = store.updateMemory(entry.project_id, '## Build Commands\n\n- npm test --workspace @emperor/core\n')
+
+    const managed = store.readManagedMemory(entry.project_id)
+    expect(managed).toContain('## Architecture Notes\n- keep this architecture note')
+    expect(managed).toContain('## Build Commands')
+    expect(managed).toContain('npm test --workspace @emperor/core')
+    expect(updated.summary).toContain('keep this architecture note')
+    expect(readFileSync(join(memoryDir, 'patch-ledger.jsonl'), 'utf8')).toContain('save_project_memory')
+    expect(versions.list({ target: 'project' }).length).toBeGreaterThanOrEqual(1)
+
+    expect(() => store.updateMemory(entry.project_id, 'plain project memory')).toThrow('project memory update requires at least one ## section')
+    expect(store.readManagedMemory(entry.project_id)).toContain('npm test --workspace @emperor/core')
   })
 
   it('imports a legacy managed AGENTS.md block without mutating the project file', async () => {
@@ -189,6 +217,32 @@ describe('ProjectStore (test_project_store.py)', () => {
     expect(readFileSync(agentsPath, 'utf8')).toBe(legacyText)
     expect(readFileSync(entry.agents_path, 'utf8')).toContain('从旧托管块迁移')
     expect(store.readManagedMemory(entry.project_id)).toContain('从旧托管块迁移')
+  })
+
+  it('adds project-local collaboration files to build context without treating them as managed memory', async () => {
+    const { ProjectStore } = await import('../projects/store')
+    const stateRoot = tmp('emperor-project-store-state-')
+    const projectDir = tmp('emperor-project-store-context-workspace-')
+    writeFileSync(join(projectDir, 'AGENTS.md'), '# Repo Instructions\n\n- Keep generated files under assets/generated.\n', 'utf8')
+    mkdirSync(join(projectDir, '.emperor', 'rules'), { recursive: true })
+    writeFileSync(join(projectDir, '.emperor', 'settings.json'), JSON.stringify({ formatter: 'prettier' }), 'utf8')
+    writeFileSync(join(projectDir, '.emperor', 'rules', 'handoff.md'), '# Handoff\n\nMention residual risks.\n', 'utf8')
+    const store = new ProjectStore(stateRoot)
+
+    const entry = store.resolve(projectDir)
+    store.updateMemory(entry.project_id, '## Architecture Notes\n\n- Managed project fact.')
+
+    const agents = store.readAgents(entry.project_id)
+
+    expect(agents).toContain('Managed project fact')
+    expect(agents).toContain('# Workspace AGENTS.md')
+    expect(agents).toContain('Keep generated files under assets/generated')
+    expect(agents).toContain('# Workspace .emperor/settings.json')
+    expect(agents).toContain('"formatter": "prettier"')
+    expect(agents).toContain('# Workspace .emperor/rules/handoff.md')
+    expect(store.readManagedMemory(entry.project_id)).not.toContain('Keep generated files under assets/generated')
+    expect(existsSync(join(projectDir, '.emperor', 'sessions'))).toBe(false)
+    expect(existsSync(join(projectDir, '.emperor', 'memory'))).toBe(false)
   })
 
   it('rejects missing project directories', async () => {

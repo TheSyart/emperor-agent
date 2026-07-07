@@ -10,9 +10,9 @@ import { nowTs } from '../util/time'
 const FALLBACK_STUB = '# 用户偏好\n\n'
 const LATCH_FILE = 'onboarding.json'
 
-/** 确保 `<stateRoot>/templates/USER.local.md` 存在，缺失时从仓库种子模板拷贝；返回路径。 */
+/** 确保 `<stateRoot>/memory/profile/USER.local.md` 存在，缺失时从仓库种子模板拷贝；返回路径。 */
 export function ensureUserProfileFile(stateRoot: string, templatesDir: string): string {
-  const dir = join(stateRoot, 'templates')
+  const dir = join(stateRoot, 'memory', 'profile')
   mkdirSync(dir, { recursive: true })
   const userFile = join(dir, 'USER.local.md')
   if (!existsSync(userFile)) {

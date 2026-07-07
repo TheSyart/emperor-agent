@@ -16,7 +16,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     mkdirSync(join(root, 'desktop', 'out', 'renderer'), { recursive: true })
     writeFileSync(join(root, 'desktop', 'out', 'renderer', 'index.html'), '<html></html>', 'utf8')
     const service = new CoreDiagnosticsService(root, {
-      schedulerDiagnostics: () => ({ jobsFile: join(root, 'memory', 'scheduler', 'jobs.json') }),
+      schedulerDiagnostics: () => ({ jobsFile: join(root, 'scheduler', 'jobs.json') }),
       runtimeStats: () => ({ events: 2, archiveFiles: 1 }),
       externalPayload: () => ({ running: true, store: { exists: true } }),
       activeTasks: () => [{ id: 'turn:1', status: 'running' }],
@@ -41,7 +41,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     expect((payload.localConfig as any).corruptBackups).toEqual([
       expect.objectContaining({ path: join(root, 'emperor.local.json.corrupt-1') }),
     ])
-    expect(payload.scheduler).toMatchObject({ jobsFile: join(root, 'memory', 'scheduler', 'jobs.json') })
+    expect(payload.scheduler).toMatchObject({ jobsFile: join(root, 'scheduler', 'jobs.json') })
     expect(payload.runtime).toMatchObject({ events: 2, archiveFiles: 1 })
     expect(payload.external).toMatchObject({ running: true })
     expect(payload.activeTasks).toHaveLength(1)
@@ -61,16 +61,17 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       runtimePaths: {
         runtimeRoot: root,
         stateRoot,
+        stateRootSource: 'explicit',
         templatesDir: join(root, 'templates'),
         skillsDir: join(root, 'skills'),
         assetsDir: join(root, 'assets'),
         memoryRoot: join(stateRoot, 'memory'),
         sessionsRoot: join(stateRoot, 'sessions'),
         projectsRoot: join(stateRoot, 'projects'),
-        attachmentsRoot: join(stateRoot, 'attachments'),
-        mediaRoot: join(stateRoot, 'media'),
-        teamRoot: join(stateRoot, '.team'),
-        tokensFile: join(stateRoot, 'memory', 'token_tracker.json'),
+        attachmentsRoot: join(stateRoot, 'memory', 'attachments'),
+        mediaRoot: join(stateRoot, 'memory', 'media'),
+        teamRoot: join(stateRoot, 'team'),
+        tokensFile: join(stateRoot, 'tokens', 'tokens.jsonl'),
         schedulerRoot: join(stateRoot, 'scheduler'),
         tasksRoot: join(stateRoot, 'tasks'),
         controlRoot: join(stateRoot, 'control'),
@@ -89,12 +90,47 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     const payload = await service.payload()
 
     expect(payload.paths).toMatchObject({ runtimeRoot: root, stateRoot })
+    expect(payload.paths).toMatchObject({
+      attachmentsRoot: join(stateRoot, 'memory', 'attachments'),
+      mediaRoot: join(stateRoot, 'memory', 'media'),
+      mcpConfigPath: join(stateRoot, 'mcp_config.json'),
+    })
     expect(payload.workspacePolicy).toMatchObject({
       workspaceRoot: workspace,
       stateRoot,
       outsideWorkspace: 'deny',
       allowRoots: [{ path: workspace, label: 'workspace' }],
       denyRoots: [{ path: stateRoot, label: 'state' }],
+    })
+  })
+
+  it('exposes the legacy state migration report when supplied, and a safe empty default otherwise', async () => {
+    const root = tmp('emperor-diagnostics-legacy-migration-')
+
+    const withoutMigration = await new CoreDiagnosticsService(root, {}).payload()
+    expect(withoutMigration.legacyStateMigration).toEqual({ legacyStateRoots: [], copied: 0, skipped: 0 })
+
+    const withMigration = await new CoreDiagnosticsService(root, {
+      legacyStateMigration: {
+        copied: 3,
+        skipped: 1,
+        logPath: join(root, '.emperor', 'migration-log.jsonl'),
+        reportPath: join(root, '.emperor', 'migrations', 'state-root-migration.json'),
+        entries: [],
+        legacyStateRoots: [
+          { path: join(root, 'memory'), kind: 'ancient-bare-runtime-root', existed: false },
+          { path: join(root, '.emperor'), kind: 'previous-dotemperor-root', existed: true },
+        ],
+      },
+    }).payload()
+    expect(withMigration.legacyStateMigration).toMatchObject({
+      copied: 3,
+      skipped: 1,
+      reportPath: join(root, '.emperor', 'migrations', 'state-root-migration.json'),
+      legacyStateRoots: [
+        { path: join(root, 'memory'), kind: 'ancient-bare-runtime-root', existed: false },
+        { path: join(root, '.emperor'), kind: 'previous-dotemperor-root', existed: true },
+      ],
     })
   })
 })

@@ -19,18 +19,49 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
     })
 
     expect(service.getUserConfig()).toEqual({
-      path: 'templates/USER.local.md',
+      path: 'memory/profile/USER.local.md',
       content: '# Seed User\n\n',
     })
-    expect(readFileSync(join(root, 'templates', 'USER.local.md'), 'utf8')).toBe('# Seed User\n\n')
+    expect(readFileSync(join(root, 'memory', 'profile', 'USER.local.md'), 'utf8')).toBe('# Seed User\n\n')
     expect(existsSync(join(root, 'emperor.local.json'))).toBe(false)
 
-    expect(service.saveUserConfig('新的偏好\n\n')).toEqual({
-      path: 'templates/USER.local.md',
-      content: '新的偏好\n',
+    expect(service.saveUserConfig('## Stable Preferences\n\n- 新的偏好\n')).toEqual({
+      path: 'memory/profile/USER.local.md',
+      content: '# Seed User\n\n## Stable Preferences\n\n- 新的偏好\n',
     })
-    expect(readFileSync(join(root, 'templates', 'USER.local.md'), 'utf8')).toBe('新的偏好\n')
+    expect(readFileSync(join(root, 'memory', 'profile', 'USER.local.md'), 'utf8')).toBe('# Seed User\n\n## Stable Preferences\n\n- 新的偏好\n')
     expect(refreshes).toBe(1)
+  })
+
+  it('applies structured USER.local.md section edits through MemoryPatch and preserves unrelated sections', () => {
+    const root = tmp('emperor-config-service-patch-')
+    mkdirSync(join(root, 'memory', 'profile'), { recursive: true })
+    writeFileSync(
+      join(root, 'memory', 'profile', 'USER.local.md'),
+      '# User Profile\n\n## Stable Preferences\n\n- old preference\n\n## Working Style\n\n- keep this section\n',
+      'utf8',
+    )
+    const service = new CoreConfigService(root)
+
+    service.saveUserConfig('## Stable Preferences\n\n- new preference\n')
+
+    const saved = readFileSync(join(root, 'memory', 'profile', 'USER.local.md'), 'utf8')
+    expect(saved).toContain('- new preference')
+    expect(saved).toContain('- keep this section')
+    expect(readFileSync(join(root, 'memory', 'patch-ledger.jsonl'), 'utf8')).toContain('memory_patch_applied')
+  })
+
+  it('rejects sectionless USER.local.md saves instead of bypassing MemoryPatch auditing', () => {
+    const root = tmp('emperor-config-service-sectionless-')
+    mkdirSync(join(root, 'memory', 'profile'), { recursive: true })
+    const profilePath = join(root, 'memory', 'profile', 'USER.local.md')
+    writeFileSync(profilePath, '# User Profile\n\n## Stable Preferences\n\n- existing\n', 'utf8')
+    const service = new CoreConfigService(root)
+
+    expect(() => service.saveUserConfig('plain text preference')).toThrow('save_user_config requires at least one ## section')
+
+    expect(readFileSync(profilePath, 'utf8')).toBe('# User Profile\n\n## Stable Preferences\n\n- existing\n')
+    expect(existsSync(join(root, 'memory', 'patch-ledger.jsonl'))).toBe(false)
   })
 
   it('saves MCP config and asks the host to reload MCP tools once', async () => {

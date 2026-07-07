@@ -74,11 +74,12 @@ export class ActiveTaskRegistry {
     }
   }
 
-  update(taskId: string, fields: { turnId?: string | null; jobId?: string | null; label?: string | null }): ActiveTaskInfo | null {
+  update(taskId: string, fields: { turnId?: string | null; jobId?: string | null; sessionId?: string | null; label?: string | null }): ActiveTaskInfo | null {
     const active = this.tasks.get(taskId)
     if (!active) return null
     if (fields.turnId !== undefined) active.info.turn_id = fields.turnId
     if (fields.jobId !== undefined) active.info.job_id = fields.jobId
+    if (fields.sessionId !== undefined) active.info.session_id = fields.sessionId
     if (fields.label !== undefined && fields.label !== null) active.info.label = fields.label
     return active.info
   }
@@ -112,6 +113,8 @@ export function activeTaskToDict(info: ActiveTaskInfo): Record<string, unknown> 
     startedAt: info.started_at,
     turnId: info.turn_id,
     jobId: info.job_id,
+    sessionId: info.session_id,
+    session_id: info.session_id,
     cancelled: info.cancelled,
   }
 }

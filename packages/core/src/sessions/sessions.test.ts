@@ -34,14 +34,28 @@ describe('ConversationStore (test_conversation_store.py)', () => {
     store.appendHistory('assistant', 'hidden reply', { extra: { turn_id: 'hidden' } })
 
     expect(store.loadUnarchivedHistory()).toEqual([
-      { role: 'user', content: 'hi', turn_id: 't1' },
-      { role: 'assistant', content: 'hello', turn_id: 't1' },
+      { role: 'user', content: 'hi', seq: 1, turn_id: 't1' },
+      { role: 'assistant', content: 'hello', seq: 2, turn_id: 't1' },
     ])
     expect(store.loadUnarchivedTurnIds()).toEqual(['t1'])
 
     expect(store.readCheckpoint()).toBeNull()
-    store.writeCheckpoint([{ role: 'user', content: 'in-flight' }])
-    expect(store.readCheckpoint()).toEqual([{ role: 'user', content: 'in-flight' }])
+    store.writeCheckpoint([{ role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' }], {
+      sessionId: 'session_1',
+      turnId: 'turn_checkpoint',
+      phase: 'tool_calls_pending',
+      baseHistorySeq: 2,
+    })
+    expect(store.readCheckpoint()).toEqual([{ role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' }])
+    const checkpoint = JSON.parse(readFileSync(store.checkpointFile, 'utf8'))
+    expect(checkpoint).toMatchObject({
+      schemaVersion: 'emperor.turn-checkpoint.v1',
+      sessionId: 'session_1',
+      turnId: 'turn_checkpoint',
+      baseHistorySeq: 2,
+      phase: 'tool_calls_pending',
+      partialMessages: [{ role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' }],
+    })
     store.clearCheckpoint()
     expect(store.readCheckpoint()).toBeNull()
   })
@@ -58,7 +72,7 @@ describe('ConversationStore (test_conversation_store.py)', () => {
 
     expect(shared.readMemory()).toContain('Shared')
     expect(shared.loadUnarchivedHistory()).toEqual([])
-    expect(scoped.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'session message' }])
+    expect(scoped.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'session message', seq: 1 }])
   })
 
   it('ProjectSessionMemoryStore writes project memory without touching global memory', () => {

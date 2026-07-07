@@ -7,6 +7,7 @@ import { TurnPaused } from '../control/exceptions'
 import { interactionToDict } from '../control/models'
 import { parsePauseResult } from '../control/tools'
 import type { ToolCallRequest } from '../providers/base'
+import type { CheckpointWriteOptions } from '../sessions/checkpoint'
 import type { ToolResultObj } from '../tools/base'
 import { controlInteractionEvent } from './runner-helpers'
 import type { ControlManagerRunnerHost, MemoryStoreLike } from './runner'
@@ -31,7 +32,7 @@ export async function pauseForClarification(
   const message: Msg = { role: 'assistant', content: '需要先确认关键取舍，已触发 Ask Guard。' }
   if (turnId) message.turn_id = turnId
   history.push(message)
-  if (host.memoryStore !== null) host.memoryStore.writeCheckpoint(history)
+  if (host.memoryStore !== null) host.memoryStore.writeCheckpoint(history, pauseCheckpointOpts(turnId))
   const payload = interactionToDict(interaction)
   if (emit) {
     await emit(controlInteractionEvent(payload))
@@ -52,13 +53,17 @@ export async function pauseForPlan(
   const message: Msg = { role: 'assistant', content: reply }
   if (turnId) message.turn_id = turnId
   history.push(message)
-  if (host.memoryStore !== null) host.memoryStore.writeCheckpoint(history)
+  if (host.memoryStore !== null) host.memoryStore.writeCheckpoint(history, pauseCheckpointOpts(turnId))
   const payload = interactionToDict(interaction)
   if (emit) {
     await emit(controlInteractionEvent(payload))
     await emit({ event: 'turn_paused', interaction: payload })
   }
   throw new TurnPaused(payload, [])
+}
+
+function pauseCheckpointOpts(turnId: string | null): CheckpointWriteOptions {
+  return { turnId, phase: 'assistant_response_pending' }
 }
 
 export function maybePauseForControl(content: string, toolCalls: ToolCallRequest[], resultsById: Map<string, ToolResultObj>): void {

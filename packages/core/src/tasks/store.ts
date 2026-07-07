@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { TaskRecord } from './models'
 
@@ -14,11 +14,12 @@ export class TaskStore {
 
   constructor(root: string, opts: { maxTerminal?: number } = {}) {
     this.root = root
-    this.tasksDir = join(root, 'memory', 'tasks')
+    this.tasksDir = join(root, 'tasks')
     this.indexFile = join(this.tasksDir, 'index.json')
     this.archiveDir = join(this.tasksDir, 'archive')
     this.maxTerminal = Math.max(1, Math.trunc(opts.maxTerminal ?? 500))
     mkdirSync(this.tasksDir, { recursive: true })
+    this.copyLegacyFilesIfNeeded()
     if (!existsSync(this.indexFile)) this.write(this.indexFile, {})
   }
 
@@ -109,6 +110,26 @@ export class TaskStore {
     const tmp = join(dirname(path), `.${basename(path)}.${randomUUID().replace(/-/g, '')}.tmp`)
     writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
     renameSync(tmp, path)
+  }
+
+  private copyLegacyFilesIfNeeded(): void {
+    const legacyDir = join(this.root, 'memory', 'tasks')
+    if (!existsSync(legacyDir)) return
+    const legacyIndex = join(legacyDir, 'index.json')
+    if (!existsSync(this.indexFile) && existsSync(legacyIndex)) {
+      try { copyFileSync(legacyIndex, this.indexFile) } catch { /* non-destructive best effort */ }
+    }
+    const legacyArchive = join(legacyDir, 'archive')
+    if (!existsSync(this.archiveDir) && existsSync(legacyArchive)) {
+      try { cpSync(legacyArchive, this.archiveDir, { recursive: true, errorOnExist: false }) } catch { /* non-destructive best effort */ }
+    }
+    for (const name of readdirSync(legacyDir)) {
+      if (!name || name === 'archive' || name === 'index.json') continue
+      const source = join(legacyDir, name)
+      const dest = join(this.tasksDir, name)
+      if (existsSync(dest)) continue
+      try { cpSync(source, dest, { recursive: true, errorOnExist: false }) } catch { /* non-destructive best effort */ }
+    }
   }
 }
 

@@ -39,7 +39,7 @@ function toggleDesktopPet() {
     <header class="view-head">
       <div class="min-w-0">
         <h1>配置文件</h1>
-        <p>templates/USER.local.md — 用户偏好与档案</p>
+        <p>memory/profile/USER.local.md — 用户偏好与档案</p>
       </div>
       <button class="tool-button asset-button refresh-action" title="刷新" @click="ctx.refreshAll()">
         <component :is="actionIcons.refresh" class="action-icon" :size="16" />
@@ -50,7 +50,7 @@ function toggleDesktopPet() {
       <div class="panel-content split-panel compact-split">
         <div class="config-layout">
           <div class="editor flex-1">
-            <div class="editor-title">templates/USER.local.md</div>
+            <div class="editor-title">memory/profile/USER.local.md</div>
             <textarea v-model="draft" />
             <div class="editor-actions">
               <span class="status-pill">保存后刷新 Agent 上下文</span>

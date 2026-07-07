@@ -17,37 +17,64 @@ describe('resolveConfig', () => {
     expect(cfg.configSource).toBe('file')
   })
 
-  it('honors --root and EMPEROR_AGENT_ROOT for the config path', () => {
-    const seen: string[] = []
-    const readFile = (p: string): string => {
-      seen.push(p)
-      throw new Error('ENOENT')
-    }
-    resolveConfig({ argv: ['--root', '/tmp/custom-root'], readFile })
-    expect(seen[0]).toBe('/tmp/custom-root/emperor.local.json')
+  it('honors --root and EMPEROR_AGENT_ROOT for runtimeRoot only (emperor.local.json now lives under stateRoot)', () => {
+    const readFile = throwingRead
 
-    seen.length = 0
-    resolveConfig({ env: { EMPEROR_AGENT_ROOT: '/tmp/env-root' }, readFile })
-    expect(seen[0]).toBe('/tmp/env-root/emperor.local.json')
+    const explicit = resolveConfig({ argv: ['--root', '/tmp/custom-root'], env: { EMPEROR_CONFIG_DIR: '/tmp/custom-state' }, readFile })
+    expect(explicit.runtimeRoot).toBe('/tmp/custom-root')
+
+    const envRoot = resolveConfig({ env: { EMPEROR_AGENT_ROOT: '/tmp/env-root', EMPEROR_CONFIG_DIR: '/tmp/custom-state' }, readFile })
+    expect(envRoot.runtimeRoot).toBe('/tmp/env-root')
   })
 
   it('uses packaged default root when no explicit root is provided', () => {
+    const cfg = resolveConfig({
+      defaultRoot: '/Users/me/Library/Application Support/Emperor Agent/runtime',
+      env: { EMPEROR_CONFIG_DIR: '/tmp/emperor-config-test-state' },
+      readFile: throwingRead,
+    })
+
+    expect(cfg.runtimeRoot).toBe('/Users/me/Library/Application Support/Emperor Agent/runtime')
+    expect(cfg.runtimeRootSource).toBe('default')
+  })
+
+  it('keeps explicit runtime roots ahead of the packaged default root', () => {
+    const readFile = throwingRead
+
+    const explicit = resolveConfig({ argv: ['--root', '/manual'], defaultRoot: '/runtime', readFile })
+    expect(explicit.runtimeRoot).toBe('/manual')
+    expect(explicit.runtimeRootSource).toBe('explicit')
+
+    const envRoot = resolveConfig({ env: { EMPEROR_AGENT_ROOT: '/env' }, defaultRoot: '/runtime', readFile })
+    expect(envRoot.runtimeRoot).toBe('/env')
+    expect(envRoot.runtimeRootSource).toBe('env')
+  })
+
+  it('resolves stateRoot independently of runtimeRoot: EMPEROR_CONFIG_DIR overrides the default', () => {
+    const readFile = throwingRead
+
+    const withEnv = resolveConfig({ argv: ['--root', '/manual-runtime'], env: { EMPEROR_CONFIG_DIR: '/manual-state' }, readFile })
+    expect(withEnv.runtimeRoot).toBe('/manual-runtime')
+    expect(withEnv.stateRoot).toBe('/manual-state')
+    expect(withEnv.stateRootSource).toBe('env')
+
+    // Without EMPEROR_CONFIG_DIR, stateRoot falls back to the real ~/.emperor-agent default —
+    // only assert the source tag here, never assert/act on the literal path in a unit test.
+    const withoutEnv = resolveConfig({ argv: ['--root', '/manual-runtime'], readFile })
+    expect(withoutEnv.stateRootSource).toBe('default')
+    expect(withoutEnv.runtimeRoot).toBe('/manual-runtime')
+  })
+
+  it('reads emperor.local.json from stateRoot, not runtimeRoot', () => {
     const seen: string[] = []
     const readFile = (p: string): string => {
       seen.push(p)
-      throw new Error('ENOENT')
+      return JSON.stringify({ webui: { host: '0.0.0.0', port: 9100 } })
     }
 
-    const cfg = resolveConfig({ defaultRoot: '/Users/me/Library/Application Support/Emperor Agent/runtime', readFile })
+    const cfg = resolveConfig({ argv: ['--root', '/manual-runtime'], env: { EMPEROR_CONFIG_DIR: '/manual-state' }, readFile })
 
-    expect(cfg.root).toBe('/Users/me/Library/Application Support/Emperor Agent/runtime')
-    expect(seen[0]).toBe('/Users/me/Library/Application Support/Emperor Agent/runtime/emperor.local.json')
-  })
-
-  it('keeps explicit roots ahead of packaged default root', () => {
-    const readFile = throwingRead
-
-    expect(resolveConfig({ argv: ['--root', '/manual'], defaultRoot: '/runtime', readFile }).root).toBe('/manual')
-    expect(resolveConfig({ env: { EMPEROR_AGENT_ROOT: '/env' }, defaultRoot: '/runtime', readFile }).root).toBe('/env')
+    expect(cfg.configSource).toBe('file')
+    expect(seen).toEqual(['/manual-state/emperor.local.json'])
   })
 })

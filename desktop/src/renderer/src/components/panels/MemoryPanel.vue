@@ -90,6 +90,10 @@ const sortedEpisodes = computed(() => {
 
 const historyStats = computed(() => props.memory?.history || null)
 const runtimeStats = computed(() => props.memory?.runtime || null)
+const semanticCompaction = computed(() => props.memory?.compaction || null)
+const semanticCursor = computed(() => semanticCompaction.value?.cursor || null)
+const semanticArchive = computed(() => semanticCompaction.value?.archive || null)
+const latestSemanticCompaction = computed(() => semanticCompaction.value?.latest || null)
 const schedulerMaintenance = computed(() => props.memory?.schedulerMaintenance || null)
 const watchlistDecision = computed(() => props.memory?.watchlist?.lastDecision || null)
 const versions = computed(() => props.memory?.versions?.versions || [])
@@ -159,6 +163,24 @@ function formatNumber(value?: number) {
       </div>
     </div>
 
+    <div v-if="semanticCompaction" class="memory-stats-grid">
+      <div class="memory-stat-card">
+        <span>语义压缩游标</span>
+        <strong>{{ semanticCursor?.compactedUntilSeq ? `seq ${formatNumber(semanticCursor.compactedUntilSeq)}` : '未压缩' }}</strong>
+        <small>{{ semanticCursor?.status || 'active' }} · {{ semanticCursor?.lastCompactionId || '暂无 compaction id' }}</small>
+      </div>
+      <div class="memory-stat-card" :class="{ warning: semanticArchive?.archiveBlockedUntilCompacted }">
+        <span>语义归档边界</span>
+        <strong>archive seq {{ formatNumber(semanticArchive?.archivedUntilSeq) }}</strong>
+        <small>只允许归档到 compacted seq {{ formatNumber(semanticArchive?.compactedUntilSeq) }}</small>
+      </div>
+      <div class="memory-stat-card">
+        <span>最近语义压缩</span>
+        <strong>{{ latestSemanticCompaction?.status ? String(latestSemanticCompaction.status) : '暂无' }}</strong>
+        <small>{{ latestSemanticCompaction?.compactionId ? String(latestSemanticCompaction.compactionId) : 'Runtime 事件归档与语义压缩分离' }}</small>
+      </div>
+    </div>
+
     <div v-if="memoryContext" class="memory-context-strip">
       <div>
         <span>当前上下文</span>
@@ -224,7 +246,7 @@ function formatNumber(value?: number) {
 
     <div v-else-if="tab === 'long_term'" class="editor flex-1">
       <div class="editor-title">
-        <span>{{ isBuildContext ? 'Project AGENTS.md · 托管记忆区块' : 'MEMORY.local.md' }}</span>
+        <span>{{ isBuildContext ? '全局私有项目记忆 · AGENTS.local.md 托管区块' : '全局长期记忆 · MEMORY.local.md' }}</span>
         <button class="badge preview-toggle" :class="{ active: longTermPreview }" @click="longTermPreview = !longTermPreview">
           {{ longTermPreview ? '编辑' : '预览' }}
         </button>
@@ -234,7 +256,7 @@ function formatNumber(value?: number) {
       </div>
       <textarea v-else v-model="longTermDraft" :readonly="isBuildContext" />
       <div class="editor-actions">
-        <span class="status-pill">{{ isBuildContext ? 'Build 压缩会更新项目托管区块' : '保存后刷新 Agent 上下文' }}</span>
+        <span class="status-pill">{{ isBuildContext ? 'Build 压缩会更新全局 store 中的项目记忆，不改写项目 AGENTS.md' : '保存后刷新 Agent 上下文' }}</span>
         <button class="tool-button ink asset-button primary-action" :disabled="isBuildContext" @click="saveLongTerm">
           <component :is="actionIcons.save" class="action-icon" :size="16" />
           <span>{{ isBuildContext ? '只读' : '保存' }}</span>

@@ -8,6 +8,7 @@ type SpawnedProcess = { pid?: number; unref?: () => void }
 type SpawnFn = (command: string, args: string[], opts: SpawnOptions) => SpawnedProcess
 
 export interface CoreDesktopPetServiceDeps {
+  stateRoot?: string | null
   assertMutation?: (area: string, action: string) => void
   spawn?: SpawnFn
   processAlive?: (pid: number) => boolean
@@ -15,16 +16,18 @@ export interface CoreDesktopPetServiceDeps {
 }
 
 export class CoreDesktopPetService {
-  readonly root: string
+  readonly runtimeRoot: string
+  readonly stateRoot: string
   private readonly deps: CoreDesktopPetServiceDeps
 
   constructor(root: string, deps: CoreDesktopPetServiceDeps = {}) {
-    this.root = resolve(root)
+    this.runtimeRoot = resolve(root)
+    this.stateRoot = resolve(deps.stateRoot ?? root)
     this.deps = deps
   }
 
   async get(): Promise<Dict> {
-    const config = await loadLocalConfig(this.root)
+    const config = await loadLocalConfig(this.stateRoot)
     const pid = this.readPid()
     const running = Boolean(pid && this.processAlive(pid))
     return {
@@ -45,8 +48,8 @@ export class CoreDesktopPetService {
   }
 
   private async setEnabledInner(enabled: boolean): Promise<Dict> {
-    const config = await loadLocalConfig(this.root)
-    await saveLocalConfig(this.root, {
+    const config = await loadLocalConfig(this.stateRoot)
+    await saveLocalConfig(this.stateRoot, {
       ...config,
       desktopPet: { ...config.desktopPet, enabled: Boolean(enabled) },
     })
@@ -67,17 +70,17 @@ export class CoreDesktopPetService {
     } else {
       const electron = this.electronBinary()
       if (!existsSync(electron)) return this.fail(`Electron dependency missing. Run \`${this.installCommand()}\` before starting the desktop pet.`)
-      if (!existsSync(join(this.root, 'desktop-pet', 'main.js'))) return this.fail('desktop-pet/main.js is missing.')
-      cmdBase = [electron, join(this.root, 'desktop-pet')]
+      if (!existsSync(join(this.runtimeRoot, 'desktop-pet', 'main.js'))) return this.fail('desktop-pet/main.js is missing.')
+      cmdBase = [electron, join(this.runtimeRoot, 'desktop-pet')]
     }
 
-    const cmd = [...cmdBase, '--root', this.root]
+    const cmd = [...cmdBase, '--root', this.runtimeRoot]
     try {
       const spawned = this.spawn()(cmd[0]!, cmd.slice(1), {
-        cwd: join(this.root, 'desktop-pet'),
+        cwd: join(this.runtimeRoot, 'desktop-pet'),
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, EMPEROR_AGENT_ROOT: this.root },
+        env: { ...process.env, EMPEROR_AGENT_ROOT: this.runtimeRoot, EMPEROR_CONFIG_DIR: this.stateRoot },
       })
       spawned.unref?.()
       this.writePid(spawned.pid ?? 0, cmd)
@@ -103,15 +106,15 @@ export class CoreDesktopPetService {
   }
 
   private runtimeDir(): string {
-    return join(this.root, 'memory', 'desktop_pet')
+    return join(this.stateRoot, 'memory', 'desktop_pet')
   }
 
   private electronBinary(): string {
-    return join(this.root, 'desktop-pet', 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron')
+    return join(this.runtimeRoot, 'desktop-pet', 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron')
   }
 
   private installCommand(): string {
-    return this.packagedCommand().length ? 'bundled with Emperor Agent.app' : `cd ${join(this.root, 'desktop-pet')} && npm install`
+    return this.packagedCommand().length ? 'bundled with Emperor Agent.app' : `cd ${join(this.runtimeRoot, 'desktop-pet')} && npm install`
   }
 
   private packagedCommand(): string[] {

@@ -1,8 +1,8 @@
 /**
  * ControlStore (MIG-CTRL-001)。对齐 Python `agent/control/store.py`。
- * 磁盘格式: <root>/memory/control/state.json，indent=2；解析失败回退默认。
+ * 磁盘格式: <stateRoot>/control/state.json，indent=2；解析失败回退默认。
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
@@ -20,13 +20,14 @@ export class ControlStore {
 
   constructor(root: string) {
     this.root = resolve(root)
-    this.controlDir = join(this.root, 'memory', 'control')
+    this.controlDir = join(this.root, 'control')
     this.stateFile = join(this.controlDir, 'state.json')
     this.ensure()
   }
 
   private ensure(): void {
     mkdirSync(this.controlDir, { recursive: true })
+    this.copyLegacyStateIfNeeded()
     if (!existsSync(this.stateFile)) this.save(defaultControlState())
   }
 
@@ -52,5 +53,11 @@ export class ControlStore {
     const tmp = join(this.controlDir, `.state.json.${randomUUID().replace(/-/g, '')}.tmp`)
     writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8')
     renameSync(tmp, path)
+  }
+
+  private copyLegacyStateIfNeeded(): void {
+    const legacy = join(this.root, 'memory', 'control', 'state.json')
+    if (existsSync(this.stateFile) || !existsSync(legacy)) return
+    try { copyFileSync(legacy, this.stateFile) } catch { /* non-destructive best effort */ }
   }
 }

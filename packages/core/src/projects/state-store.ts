@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const PROJECT_MEMORY_START = '<!-- emperor-agent:project-memory:start -->'
@@ -106,6 +106,21 @@ export class ProjectStateStore {
     return existsSync(path) ? readFileSync(path, 'utf8') : ''
   }
 
+  readWorkspaceCollaborationContext(projectId: string): string {
+    const metadata = readProjectJson(this.paths(projectId).project_json_path)
+    const workspacePath = nullableString(metadata.workspace_path) ?? nullableString(metadata.project_path)
+    if (!workspacePath) return ''
+
+    const sections: string[] = []
+    pushTextSection(sections, 'Workspace AGENTS.md', join(workspacePath, 'AGENTS.md'))
+    pushJsonSection(sections, 'Workspace .emperor/settings.json', join(workspacePath, '.emperor', 'settings.json'))
+    pushJsonSection(sections, 'Workspace .emperor/settings.local.json', join(workspacePath, '.emperor', 'settings.local.json'))
+    for (const rule of listMarkdownFiles(join(workspacePath, '.emperor', 'rules'))) {
+      pushTextSection(sections, `Workspace .emperor/rules/${rule}`, join(workspacePath, '.emperor', 'rules', rule))
+    }
+    return sections.join('\n\n').trim()
+  }
+
   writePromptOverlay(projectId: string, content: string): void {
     const paths = this.paths(projectId)
     mkdirSync(paths.state_path, { recursive: true })
@@ -166,4 +181,33 @@ function stamp(): string {
   const d = new Date(Date.now() + 8 * 3600 * 1000)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}+0800`
+}
+
+function pushTextSection(sections: string[], title: string, path: string): void {
+  if (!existsSync(path)) return
+  const content = readFileSync(path, 'utf8').trim()
+  if (!content) return
+  sections.push(`# ${title}\n\n${content}`)
+}
+
+function pushJsonSection(sections: string[], title: string, path: string): void {
+  if (!existsSync(path)) return
+  const raw = readFileSync(path, 'utf8').trim()
+  if (!raw) return
+  try {
+    sections.push(`# ${title}\n\n\`\`\`json\n${JSON.stringify(JSON.parse(raw), null, 2)}\n\`\`\``)
+  } catch {
+    sections.push(`# ${title}\n\n\`\`\`json\n${raw}\n\`\`\``)
+  }
+}
+
+function listMarkdownFiles(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  try {
+    return readdirSync(dir)
+      .filter((name) => name.endsWith('.md') && !name.includes('/') && !name.includes('\\'))
+      .sort((a, b) => a.localeCompare(b))
+  } catch {
+    return []
+  }
 }

@@ -128,10 +128,10 @@ function formatJson() {
     <details class="mcp-advanced-config">
       <summary>
         <span>高级配置</span>
-        <em>编辑 mcp_config.json</em>
+        <em>编辑全局私有 mcp_config.json</em>
       </summary>
       <section class="mcp-editor">
-        <div class="editor-title">mcp_config.json</div>
+        <div class="editor-title">全局私有数据目录 / mcp_config.json</div>
         <textarea v-model="draft" :class="{ 'has-error': parseError }" spellcheck="false" />
         <div class="mcp-editor-actions">
           <button class="tool-button asset-button" title="格式化" @click="formatJson">

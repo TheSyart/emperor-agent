@@ -156,7 +156,7 @@ export function renderConfigInfo(configContent: string) {
   return [
     '## 配置文件',
     '',
-    `- 文件：${inlineCode('templates/USER.local.md')}`,
+    `- 文件：${inlineCode('memory/profile/USER.local.md')}`,
     `- 行数：${lines}`,
     `- 字符数：${formatNumber(content.length)}`,
     '',
@@ -196,14 +196,47 @@ export function renderMemoryVersions(boot: BootstrapPayload | null) {
 }
 
 export function renderCompactResult(result: CompactResult) {
-  return [
+  const applied = result.compaction?.applied || []
+  const discarded = result.compaction?.discarded || []
+  const cursor = result.compaction?.cursor
+  const statusLabel = result.status === 'compacted'
+    ? '已压缩'
+    : result.status === 'degraded'
+      ? '失败但已保留历史'
+      : '跳过'
+  const lines = [
     '## 会话压缩',
     '',
-    `- 状态：${result.status === 'compacted' ? '已压缩' : '跳过'}`,
+    `- 状态：${statusLabel}`,
     `- 处理消息数：${formatNumber(result.count)}`,
     `- 结果：${result.message}`,
     `- 剩余未归档消息：${formatNumber(result.unarchivedHistory.length)}`,
-  ].join('\n')
+  ]
+  if (result.error) lines.push(`- 错误：${result.error}`)
+  if (cursor) {
+    lines.push(`- 语义压缩游标：compacted seq ${formatNumber(cursor.compactedUntilSeq)} / archived seq ${formatNumber(cursor.archivedUntilSeq)}`)
+  }
+  if (applied.length) {
+    lines.push('- 已应用 patch：')
+    for (const item of applied) {
+      lines.push(`  - ${compactScopeLabel(item.scope)} · ${formatNumber(item.operationCount)} 个操作 · ${inlineCode(String(item.path || 'unknown'))}`)
+    }
+  } else if (result.status === 'compacted') {
+    lines.push('- 已应用 patch：无明细')
+  }
+  if (discarded.length) {
+    lines.push(`- 丢弃项：${formatNumber(discarded.length)} 条`)
+  }
+  return lines.join('\n')
+}
+
+function compactScopeLabel(scope: Record<string, unknown> | undefined) {
+  const kind = String(scope?.kind || 'unknown')
+  if (kind === 'user_profile') return '用户偏好档案'
+  if (kind === 'global') return '全局长期记忆'
+  if (kind === 'project') return `全局私有项目记忆 ${scope?.projectId ? `(${String(scope.projectId)})` : ''}`.trim()
+  if (kind === 'episode') return `情景记忆 ${scope?.date ? String(scope.date) : ''}`.trim()
+  return kind
 }
 
 export function renderStats(stats: Record<string, TokenStatsRow> | undefined, kind: 'model' | 'usage' | 'date') {

@@ -2,6 +2,7 @@
  * context_pipeline: 微压缩 + 流水线编排 (MIG-CORE-004/005)。
  * 对齐 Python `agent/context_pipeline/microcompact.py` + `pipeline.py`。
  */
+import { createHash } from 'node:crypto'
 import { type OpenAiMsg, pairToolCalls } from './pairing'
 import { DEFAULT_AGGREGATE_TOOL_RESULT_BUDGET, DEFAULT_TOOL_RESULT_BUDGET, capToolResults, replaceAggregateToolResults, replaceLargeToolResults, shrinkOldToolResults, ToolResultStore } from './tool-results'
 
@@ -66,7 +67,7 @@ export class ContextPipeline {
     this.microcompactTailChars = opts?.microcompactTailChars ?? DEFAULT_MICROCOMPACT_TAIL_CHARS
   }
 
-  project(history: OpenAiMsg[], opts?: { stableBoundary?: number }): Projection {
+  project(history: OpenAiMsg[], opts?: { stableBoundary?: number; turnId?: string | null }): Projection {
     // B3（2026-07-05）：turn 内每次调用都用同一个冻结边界，防止 shrink/微压缩/聚合裁剪
     // 随历史增长而回头改写「本 turn 内已经发给模型过」的早前消息字节，击穿前缀缓存。
     // 不传时保持旧的「相对当前长度」行为，历史调用点/测试不受影响。
@@ -94,7 +95,7 @@ export class ContextPipeline {
     }
     const [capped, cappedCount] = capToolResults(prepared, this.perCallLimit)
     const [shrunk, shrunkCount] = shrinkOldToolResults(capped, this.keepRecent, undefined, stableBoundary)
-    const [microed, microcompactRecords] = this.microcompact(shrunk, stableBoundary)
+    const [microed, microcompactRecords] = this.microcompact(shrunk, stableBoundary, opts?.turnId ?? null)
     const planContext = this.planContextProvider ? this.planContextProvider(history) : null
     const messages = planContext ? [...microed, planContext] : microed
     const report = {
@@ -122,21 +123,34 @@ export class ContextPipeline {
   }
 
   /** 超阈值时压缩更早历史。对齐 `microcompact`。 */
-  private microcompact(history: OpenAiMsg[], stableBoundary?: number): [OpenAiMsg[], Array<Record<string, unknown>>] {
+  private microcompact(history: OpenAiMsg[], stableBoundary?: number, _turnId?: string | null): [OpenAiMsg[], Array<Record<string, unknown>>] {
     const boundary = stableBoundary ?? history.length
     const cutoff = Math.max(0, boundary - this.microcompactKeepRecent)
     if (cutoff <= 0) return [history.slice(), []]
     const records: Array<Record<string, unknown>> = []
+    const turnIndexes = new Map<string, number>()
     const out = history.map((msg, index) => {
       const content = msg.content
       if (!this.shouldMicrocompact(msg, content, index, cutoff)) return msg
       const text = String(content)
       const head = text.slice(0, Math.max(1, this.microcompactHeadChars))
       const tail = this.microcompactTailChars > 0 ? text.slice(-Math.max(0, this.microcompactTailChars)) : ''
+      const sourceTurnId = sourceTurnIdFor(msg)
+      const messageId = sourceTurnId
+        ? `${sourceTurnId}:${nextTurnIndex(turnIndexes, sourceTurnId)}`
+        : `history:${index}`
+      const originalHash = sha256(text)
+      const tokenEstimate = estimateTokens(text)
+      const reason = 'older_text_over_microcompact_threshold'
       records.push({
         index,
+        message_id: messageId,
+        ...(sourceTurnId ? { source_turn_id: sourceTurnId } : {}),
         role: String(msg.role || ''),
         original_chars: text.length,
+        token_estimate: tokenEstimate,
+        original_hash: originalHash,
+        reason,
         kept_head_chars: head.length,
         kept_tail_chars: tail.length,
       })
@@ -144,7 +158,11 @@ export class ContextPipeline {
         ...msg,
         content: microcompactMessage({
           role: String(msg.role || 'message'),
+          messageId,
           originalChars: text.length,
+          tokenEstimate,
+          originalHash,
+          reason,
           head,
           tail,
         }),
@@ -161,11 +179,26 @@ export class ContextPipeline {
   }
 }
 
-function microcompactMessage(opts: { role: string; originalChars: number; head: string; tail: string }): string {
+function sourceTurnIdFor(msg: OpenAiMsg): string {
+  return String(msg.turn_id ?? msg.turnId ?? '').trim()
+}
+
+function nextTurnIndex(indexes: Map<string, number>, turnId: string): number {
+  const current = indexes.get(turnId) ?? 0
+  indexes.set(turnId, current + 1)
+  return current
+}
+
+function microcompactMessage(opts: { role: string; messageId: string; originalChars: number; tokenEstimate: number; originalHash: string; reason: string; head: string; tail: string }): string {
   const lines = [
     '[local_microcompact]',
     `role: ${opts.role}`,
+    `message_id: ${opts.messageId}`,
     `original_chars: ${opts.originalChars}`,
+    `token_estimate: ${opts.tokenEstimate}`,
+    `original_hash: ${opts.originalHash}`,
+    `reason: ${opts.reason}`,
+    'source_history_mutated: false',
     'This older text message was locally shortened before the model request.',
     '',
     'head:',
@@ -173,4 +206,12 @@ function microcompactMessage(opts: { role: string; originalChars: number; head: 
   ]
   if (opts.tail) lines.push('', 'tail:', opts.tail)
   return lines.join('\n').trim()
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4))
 }

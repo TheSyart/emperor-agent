@@ -11,25 +11,29 @@ function tmp(prefix: string): string {
 describe('CoreDesktopPetService (MIG-APP-003 / MIG-IPC-007)', () => {
   it('persists enabled preference and reports missing Electron dependency without throwing', async () => {
     const root = tmp('emperor-pet-service-missing-')
-    const service = new CoreDesktopPetService(root)
+    const stateRoot = tmp('emperor-pet-service-missing-state-')
+    const service = new CoreDesktopPetService(root, { stateRoot })
 
     const enabled = await service.setEnabled(true)
 
     expect(enabled).toMatchObject({ enabled: true, running: false, managedBy: 'CoreApi', available: false })
     expect(String(enabled.lastError)).toContain('Electron dependency missing')
-    expect(readFileSync(join(root, 'emperor.local.json'), 'utf8')).toContain('"enabled": true')
+    expect(readFileSync(join(stateRoot, 'emperor.local.json'), 'utf8')).toContain('"enabled": true')
+    expect(existsSync(join(root, 'emperor.local.json'))).toBe(false)
     expect((await service.get()).enabled).toBe(true)
 
     const disabled = await service.setEnabled(false)
 
     expect(disabled).toMatchObject({ enabled: false, running: false, lastError: null })
-    expect(existsSync(join(root, 'memory', 'desktop_pet', 'pid.json'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'memory', 'desktop_pet', 'pid.json'))).toBe(false)
   })
 
   it('starts packaged pet commands, records pid state, and reports running payloads', async () => {
     const root = tmp('emperor-pet-service-packaged-')
+    const stateRoot = tmp('emperor-pet-service-packaged-state-')
     const spawned: Array<{ cmd: string[]; cwd: string }> = []
     const service = new CoreDesktopPetService(root, {
+      stateRoot,
       env: { EMPEROR_DESKTOP_PET_CMD: JSON.stringify(['/Applications/Emperor Agent.app/Contents/MacOS/Emperor Agent', '--pet-window']) },
       processAlive: (pid) => pid === 4321,
       spawn: (command, args, opts) => {
@@ -54,7 +58,9 @@ describe('CoreDesktopPetService (MIG-APP-003 / MIG-IPC-007)', () => {
       '--root',
       root,
     ])
-    expect(JSON.parse(readFileSync(join(root, 'memory', 'desktop_pet', 'pid.json'), 'utf8')).pid).toBe(4321)
+    expect(spawned[0]?.cwd).toBe(join(root, 'desktop-pet'))
+    expect(JSON.parse(readFileSync(join(stateRoot, 'memory', 'desktop_pet', 'pid.json'), 'utf8')).pid).toBe(4321)
+    expect(existsSync(join(root, 'memory', 'desktop_pet', 'pid.json'))).toBe(false)
   })
 
   it('runs mutation checks synchronously before toggling', () => {

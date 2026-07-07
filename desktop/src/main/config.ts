@@ -1,9 +1,15 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { defaultStateRoot } from '@emperor/core'
 import { moduleDirFromUrl } from './esm-path'
 
+export type RootSource = 'explicit' | 'env' | 'default'
+
 export interface ResolvedConfig {
-  root: string
+  runtimeRoot: string
+  runtimeRootSource: RootSource
+  stateRoot: string
+  stateRootSource: RootSource
   configSource: 'file' | 'default'
 }
 
@@ -26,17 +32,24 @@ function argValue(argv: string[], flag: string): string | undefined {
   return undefined
 }
 
-function resolveRoot(
+function resolveRuntimeRoot(
   argv: string[],
   env: Record<string, string | undefined>,
   defaultRoot?: string,
-): string {
-  return (
-    argValue(argv, '--root') ||
-    env.EMPEROR_AGENT_ROOT ||
-    defaultRoot ||
-    path.resolve(mainDir, '..', '..', '..')
-  )
+): { root: string; source: RootSource } {
+  const explicit = argValue(argv, '--root')
+  if (explicit) return { root: explicit, source: 'explicit' }
+  if (env.EMPEROR_AGENT_ROOT) return { root: env.EMPEROR_AGENT_ROOT, source: 'env' }
+  if (defaultRoot) return { root: defaultRoot, source: 'default' }
+  return { root: path.resolve(mainDir, '..', '..', '..'), source: 'default' }
+}
+
+/** `EMPEROR_AGENT_ROOT`/`--root` only ever mean runtime *resources* root now; the private
+ * state root is resolved independently so packaged installs keep private data outside the
+ * app bundle even when `--root`/`EMPEROR_AGENT_ROOT` point at a bundled resources dir. */
+function resolveStateRoot(env: Record<string, string | undefined>): { root: string; source: RootSource } {
+  if (env.EMPEROR_CONFIG_DIR) return { root: env.EMPEROR_CONFIG_DIR, source: 'env' }
+  return { root: defaultStateRoot(), source: 'default' }
 }
 
 export function resolveConfig({
@@ -45,11 +58,12 @@ export function resolveConfig({
   readFile = defaultReadFile,
   defaultRoot,
 }: ResolveConfigOptions = {}): ResolvedConfig {
-  const root = resolveRoot(argv, env, defaultRoot)
+  const { root: runtimeRoot, source: runtimeRootSource } = resolveRuntimeRoot(argv, env, defaultRoot)
+  const { root: stateRoot, source: stateRootSource } = resolveStateRoot(env)
 
   let configSource: 'file' | 'default' = 'default'
   try {
-    JSON.parse(readFile(path.join(root, 'emperor.local.json')))
+    JSON.parse(readFile(path.join(stateRoot, 'emperor.local.json')))
     configSource = 'file'
   } catch {
     // Missing or malformed emperor.local.json must not crash the shell; we
@@ -58,7 +72,10 @@ export function resolveConfig({
   }
 
   return {
-    root,
+    runtimeRoot,
+    runtimeRootSource,
+    stateRoot,
+    stateRootSource,
     configSource,
   }
 }

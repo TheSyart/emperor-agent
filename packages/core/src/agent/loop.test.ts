@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -6,11 +6,24 @@ import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { AgentLoop } from './loop'
 import { CancelledTaskError } from '../runtime/active'
+import { CompactionCursorStore } from '../memory/compaction-ledger'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
+}
+
+async function withEnv(name: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
+  const previous = process.env[name]
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+  try {
+    await fn()
+  } finally {
+    if (previous === undefined) delete process.env[name]
+    else process.env[name] = previous
+  }
 }
 
 class FakeProvider extends LLMProvider {
@@ -37,6 +50,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const provider = new FakeProvider()
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -83,6 +97,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ])
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -112,6 +127,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const provider = new DelayedProvider()
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -141,13 +157,139 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       turn_id: 'turn_scope_1',
       state_root: join(root, '.emperor'),
       session_root: join(root, '.emperor', 'sessions', firstSessionId),
+      active_memory_binding: {
+        profile: {
+          scope: { kind: 'user_profile' },
+          readable: true,
+          writable: true,
+          path: join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
+        },
+        longTerm: {
+          scope: { kind: 'global' },
+          readable: true,
+          writable: true,
+          path: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
+        },
+      },
     })
+  })
+
+  it('restores the previous active session after a background turn targets another session', async () => {
+    const root = tmp('emperor-agent-loop-bg-session-')
+    const provider = new DelayedProvider()
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const firstSessionId = loop.activeSessionId!
+    const second = loop.sessionStore.create('Background target')
+
+    const running = loop.runUserTurn('后台会话执行', {
+      sessionId: second.id,
+      restoreActiveSessionAfterTurn: true,
+      turnId: 'turn_background_session',
+    })
+    await provider.started
+    expect(loop.activeSessionId).toBe(second.id)
+    provider.finish(response('后台完成。'))
+
+    await expect(running).resolves.toBe('后台完成。')
+
+    expect(loop.activeSessionId).toBe(firstSessionId)
+    const secondHistory = readFileSync(join(root, '.emperor', 'sessions', second.id, 'history.jsonl'), 'utf8')
+    expect(secondHistory).toContain('后台完成。')
+  })
+
+  it('auto-compacts stable completed turns through compactSession when explicitly enabled', async () => {
+    const root = tmp('emperor-agent-loop-auto-compact-')
+    const provider = new QueueProvider([
+      response('新回复。', { usage: { input: 90_000, output: 4 } }),
+      response(JSON.stringify({
+        schemaVersion: 'emperor.compaction-draft.v1',
+        episode: {
+          operations: [{
+            op: 'append_section_item',
+            section: 'Summary',
+            content: '- Auto compacted old completed chat turns.',
+            reason: 'token threshold summarized stable history',
+            sourceSeqs: [1, 2, 3, 4],
+            confidence: 'high',
+          }],
+        },
+        userProfile: {
+          operations: [{
+            op: 'append_section_item',
+            section: 'Stable Preferences',
+            content: '- Prefers automatic scoped compaction when context is high.',
+            reason: 'stable user preference from old turns',
+            sourceSeqs: [1],
+            confidence: 'high',
+          }],
+        },
+        globalMemory: {
+          operations: [{
+            op: 'append_section_item',
+            section: 'Cross-Project Decisions',
+            content: '- Auto compaction uses compactSession and keeps session history.',
+            reason: 'durable system behavior',
+            sourceSeqs: [2],
+            confidence: 'high',
+          }],
+        },
+        decisions: [],
+        discarded: [],
+      })),
+    ])
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    for (let i = 1; i <= 5; i++) {
+      loop.activeMemoryStore.appendHistory('user', `old user ${i}`, { extra: { turn_id: `old_${i}` } })
+      loop.activeMemoryStore.appendHistory('assistant', `old assistant ${i}`, { extra: { turn_id: `old_${i}` } })
+    }
+
+    const emitted: Array<Record<string, unknown>> = []
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const reply = await loop.runUserTurn('触发自动压缩', { turnId: 'turn_auto_compact', emit: (event) => { emitted.push(event) } })
+      expect(reply).toBe('新回复。')
+    })
+
+    expect(provider.calls).toHaveLength(2)
+    expect(emitted.filter((event) => event.event === 'record_degraded')).toEqual([])
+    expect(provider.calls[1]!.model).toBe('fake-secondary')
+    expect(loop.sharedMemory.readMemory()).toContain('Auto compaction uses compactSession')
+    expect(loop.sharedMemory.readUser()).toContain('automatic scoped compaction')
+    expect(loop.sharedMemory.readTodayEpisode()).toContain('Auto compacted old completed chat turns')
+    expect(loop.activeMemoryStore.loadUnarchivedHistory().map((row) => row.role)).toHaveLength(8)
+    expect(loop.history.map((row) => row.role)).toHaveLength(8)
+    const cursor = new CompactionCursorStore(loop.paths.stateRoot).readOrInit(loop.activeSessionId!)
+    expect(cursor.compactedUntilSeq).toBeGreaterThanOrEqual(4)
+    expect(cursor.archivedUntilSeq).toBeGreaterThanOrEqual(4)
+
+    await loop.runUserTurn('压缩后的下一轮', { turnId: 'turn_after_compact' })
+    const snapshot = JSON.parse(readFileSync(join(loop.sessionStore.sessionDir(loop.activeSessionId!), 'prompt-snapshots', 'turn_after_compact.json'), 'utf8'))
+    expect(snapshot.contextPlan.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'session_history',
+        reason: 'semantic_compaction_applied',
+        fromSeq: 1,
+        toSeq: cursor.compactedUntilSeq,
+        compactionId: cursor.lastCompactionId,
+        targetScopes: expect.arrayContaining(['global', 'user_profile']),
+      }),
+    ]))
   })
 
   it('keeps unfinished todos scoped to the session that created them', async () => {
     const root = tmp('emperor-agent-loop-todo-session-scope-')
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new QueueProvider([response('done')])),
     })
@@ -171,6 +313,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const root = tmp('emperor-agent-loop-control-session-tag-')
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
@@ -239,6 +382,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ])
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -257,7 +401,8 @@ describe('AgentLoop (MIG-CORE-011)', () => {
 
   it('loads local permission rules into the real permission pipeline', async () => {
     const root = tmp('emperor-agent-loop-permission-rules-')
-    writeFileSync(join(root, 'emperor.local.json'), JSON.stringify({
+    mkdirSync(join(root, '.emperor'), { recursive: true })
+    writeFileSync(join(root, '.emperor', 'emperor.local.json'), JSON.stringify({
       permissions: {
         rules: [
           { id: 'deny-secrets', action: 'deny', tool: 'write_file', pathGlob: 'secrets/**', reason: 'secret writes need manual handling' },
@@ -273,6 +418,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ])
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -293,6 +439,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const provider = new CancellableProvider()
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
@@ -313,6 +460,41 @@ describe('AgentLoop (MIG-CORE-011)', () => {
 
     expect(emitted.some((event) => event.event === 'assistant_done')).toBe(false)
     expect(loop.history.some((message) => message.role === 'assistant' && message.content === '这条迟到回复不应该进入会话。')).toBe(false)
+  })
+
+  it('resolves skills with project > user-global > builtin precedence, and drops project skills outside build sessions', async () => {
+    const root = tmp('emperor-agent-loop-skills-root-')
+    const stateRoot = join(root, '.emperor')
+    const projectRoot = tmp('emperor-agent-loop-skills-project-')
+    mkdirSync(join(root, 'skills', 'greet'), { recursive: true })
+    writeFileSync(join(root, 'skills', 'greet', 'SKILL.md'), 'builtin greet', 'utf8')
+    mkdirSync(join(stateRoot, 'skills', 'greet'), { recursive: true })
+    writeFileSync(join(stateRoot, 'skills', 'greet', 'SKILL.md'), 'user greet', 'utf8')
+    mkdirSync(join(stateRoot, 'skills', 'user-only'), { recursive: true })
+    writeFileSync(join(stateRoot, 'skills', 'user-only', 'SKILL.md'), 'user-only skill', 'utf8')
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe('user greet')
+    expect(await loop.registry.execute('load_skill', { name: 'user-only' })).toBe('user-only skill')
+
+    const project = loop.projectStore.resolve(projectRoot)
+    mkdirSync(join(projectRoot, '.emperor', 'skills', 'greet'), { recursive: true })
+    writeFileSync(join(projectRoot, '.emperor', 'skills', 'greet', 'SKILL.md'), 'project greet', 'utf8')
+    const buildSession = loop.sessionStore.create('Build project', { mode: 'build', project: project as unknown as Record<string, unknown> })
+    loop.activateSession(buildSession.id)
+
+    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe('project greet')
+    expect(await loop.registry.execute('load_skill', { name: 'user-only' })).toBe('user-only skill')
+
+    loop.activateSession(loop.sessionStore.list({ includeArchived: false }).find((s) => s.id !== buildSession.id)!.id)
+
+    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe('user greet')
   })
 })
 

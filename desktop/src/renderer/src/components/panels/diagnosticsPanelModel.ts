@@ -3,7 +3,11 @@ import type {
   DiagnosticsConfigSummary,
   DiagnosticsDependencyPayload,
   DiagnosticsPayload,
+  DiagnosticsRuntimePaths,
   ExternalDiagnosticsPayload,
+  LegacyStateMigrationPayload,
+  MemoryContextExplanationPayload,
+  ProjectLegacyPrivateDataPayload,
   RuntimeStats,
   SchedulerDiagnosticsPayload,
   WorkspacePolicyDiagnosticsPayload,
@@ -60,7 +64,13 @@ export function diagnosticStatusText(status: unknown): string {
 
 export function diagnosticRows(payload: DiagnosticsPayload | null | undefined): DiagnosticGroup[] {
   const diagnostics = payload || {}
+  const legacyRows = legacyDataRows(diagnostics.legacyStateMigration, diagnostics.projectLegacyPrivateData)
   return [
+    {
+      id: 'storage',
+      title: '存储路径',
+      rows: storagePathRows(diagnostics.paths, diagnostics.workspacePolicy, diagnostics.modelConfig),
+    },
     {
       id: 'config',
       title: '配置',
@@ -69,6 +79,8 @@ export function diagnosticRows(payload: DiagnosticsPayload | null | undefined): 
         configRow('local-config', '本地配置', diagnostics.localConfig),
       ],
     },
+    ...contextExplanationGroup(diagnostics.contextExplanation),
+    ...(legacyRows.length ? [{ id: 'legacy-data', title: '旧数据', rows: legacyRows }] : []),
     {
       id: 'runtime',
       title: '运行时',
@@ -93,6 +105,167 @@ export function diagnosticRows(payload: DiagnosticsPayload | null | undefined): 
       rows: dependencyRows(diagnostics.dependencies),
     },
   ]
+}
+
+function contextExplanationGroup(explanation: MemoryContextExplanationPayload | undefined): DiagnosticGroup[] {
+  if (!explanation) return []
+  const status = String(explanation.status || 'unknown')
+  const injected = arrayOfRecords(explanation.injected)
+  const omitted = arrayOfRecords(explanation.omitted)
+  const artifacts = arrayOfRecords(explanation.artifacts)
+  const microcompact = recordValue(explanation.microcompact)
+  const compaction = recordValue(explanation.compaction)
+  const cursor = recordValue(compaction.cursor)
+  return [{
+    id: 'context-explanation',
+    title: '上下文解释',
+    rows: [
+      {
+        id: 'context-mode',
+        label: 'Context Plan',
+        value: String(explanation.mode || status),
+        detail: contextModeDetail(explanation),
+        tone: status === 'ok' ? 'ok' : diagnosticStatusTone(status),
+      },
+      {
+        id: 'context-injected',
+        label: '已注入模型上下文',
+        value: `${injected.length} 项注入`,
+        detail: joinParts([
+          injected.map((item) => String(item.kind || item.id || '')).filter(Boolean).join(', '),
+          injectedTokenEstimate(injected) ? `${injectedTokenEstimate(injected)} tokens` : '',
+        ]),
+        tone: injected.length ? 'ok' : 'muted',
+      },
+      {
+        id: 'context-omitted',
+        label: '未注入项',
+        value: omitted.length ? `${omitted.length} 项未注入` : '无',
+        detail: omitted.length
+          ? omitted.map((item) => `${String(item.kind || 'unknown')}: ${String(item.reason || '')}`.trim()).join(' · ')
+          : '当前 ContextPlan 没有记录被策略排除的上下文',
+        tone: omitted.length ? 'warn' : 'ok',
+      },
+      {
+        id: 'context-microcompact',
+        label: '局部 microcompact',
+        value: `${arrayOfRecords(microcompact.records).length} 条裁剪`,
+        detail: Number(microcompact.omittedChars || 0)
+          ? `本次请求局部裁剪 ${Number(microcompact.omittedChars)} chars，不写回 history`
+          : '本次请求没有局部裁剪记录',
+        tone: arrayOfRecords(microcompact.records).length ? 'warn' : 'ok',
+      },
+      {
+        id: 'context-compaction-cursor',
+        label: '语义压缩游标',
+        value: Number(cursor.compactedUntilSeq || 0) ? `seq ${Number(cursor.compactedUntilSeq)}` : '未压缩',
+        detail: String(cursor.status || 'unknown'),
+        tone: Number(cursor.compactedUntilSeq || 0) ? 'ok' : 'muted',
+      },
+      {
+        id: 'context-artifacts',
+        label: '记忆 Artifact 边界',
+        value: artifacts.length ? `${artifacts.length} 个 artifact` : '未返回',
+        detail: artifacts.length ? artifactBoundaryDetail(artifacts) : 'memory.explainContext 未返回 artifact taxonomy',
+        tone: artifacts.length ? 'ok' : 'muted',
+      },
+      {
+        id: 'context-checkpoint',
+        label: 'Turn Checkpoint',
+        value: diagnosticStatusText(recordValue(explanation.checkpoint).status),
+        detail: String(recordValue(explanation.checkpoint).reason || recordValue(explanation.checkpoint).phase || ''),
+        tone: diagnosticStatusTone(recordValue(explanation.checkpoint).status),
+      },
+    ],
+  }]
+}
+
+function storagePathRows(
+  paths: DiagnosticsRuntimePaths | undefined,
+  workspacePolicy: WorkspacePolicyDiagnosticsPayload | undefined,
+  modelConfig: DiagnosticsConfigSummary | undefined,
+): DiagnosticRow[] {
+  const activeProjectPath = workspacePolicy?.workspaceRoot || ''
+  const hasBoundProject = Boolean(activeProjectPath) && activeProjectPath !== paths?.runtimeRoot
+  return [
+    pathRow('runtime-resources-root', 'Runtime 资源根', paths?.runtimeRoot, '内置技能/模板等只读资源所在目录'),
+    {
+      id: 'global-state-root',
+      label: '全局私有数据根',
+      value: sourceLabel(paths?.stateRootSource),
+      detail: paths?.stateRoot || '未返回',
+      tone: paths?.stateRoot ? 'ok' : 'muted',
+      path: paths?.stateRoot,
+    },
+    hasBoundProject
+      ? pathRow('active-project-path', '当前项目路径', activeProjectPath, '项目已绑定；私有会话仍保存到全局 Emperor store，不写入项目源码目录')
+      : {
+        id: 'active-project-path',
+        label: '当前项目路径',
+        value: '未绑定',
+        detail: '当前是 chat 会话，没有绑定项目目录',
+        tone: 'muted',
+      },
+    pathRow('sessions-path', 'Sessions 路径', paths?.sessionsRoot),
+    pathRow('attachments-path', '附件路径', paths?.attachmentsRoot),
+    pathRow('model-config-path', '模型配置路径', modelConfig?.path || paths?.stateRoot),
+    pathRow('mcp-config-path', 'MCP 配置路径', paths?.mcpConfigPath),
+  ]
+}
+
+function pathRow(id: string, label: string, path: string | undefined, detail?: string): DiagnosticRow {
+  return {
+    id,
+    label,
+    value: path ? '已定位' : '未返回',
+    detail: detail || path || '未返回',
+    tone: path ? 'ok' : 'muted',
+    path,
+  }
+}
+
+function sourceLabel(source: string | undefined): string {
+  if (source === 'explicit') return '显式指定'
+  if (source === 'env') return '环境变量 EMPEROR_CONFIG_DIR'
+  if (source === 'default') return '默认 ~/.emperor-agent'
+  return '未知'
+}
+
+function legacyDataRows(
+  migration: LegacyStateMigrationPayload | undefined,
+  projectLegacy: ProjectLegacyPrivateDataPayload | null | undefined,
+): DiagnosticRow[] {
+  const rows: DiagnosticRow[] = []
+  const detectedLegacyRoots = (migration?.legacyStateRoots ?? []).filter((entry) => entry.existed)
+  if (detectedLegacyRoots.length) {
+    rows.push({
+      id: 'legacy-state-migration',
+      label: '旧存储位置迁移',
+      value: `${numberOrZero(migration?.copied)} 个文件已迁移`,
+      detail: joinParts([
+        `检测到 ${detectedLegacyRoots.length} 处旧存储位置`,
+        numberOrZero(migration?.skipped) ? `${migration?.skipped} 个跳过（已存在或损坏）` : '',
+        '旧数据未删除',
+      ]),
+      tone: 'warn',
+      path: detectedLegacyRoots[0]?.path,
+    })
+  }
+  if (projectLegacy && (projectLegacy.sessions || projectLegacy.memory)) {
+    rows.push({
+      id: 'project-legacy-private-data',
+      label: '项目目录内的旧私有数据',
+      value: '未迁移/可迁移',
+      detail: joinParts([
+        projectLegacy.sessions ? '.emperor/sessions' : '',
+        projectLegacy.memory ? '.emperor/memory' : '',
+        '仅提示，不会自动删除或搬移',
+      ]),
+      tone: 'warn',
+      path: projectLegacy.projectPath,
+    })
+  }
+  return rows
 }
 
 function configRow(id: string, label: string, summary: DiagnosticsConfigSummary | undefined): DiagnosticRow {
@@ -177,6 +350,38 @@ function workspacePolicyRow(policy: WorkspacePolicyDiagnosticsPayload | undefine
     tone: !policy ? 'muted' : allowRoots.length ? 'ok' : 'warn',
     path: workspaceRoot || stateRoot || undefined,
   }
+}
+
+function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    : []
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function injectedTokenEstimate(items: Array<Record<string, unknown>>): number {
+  return items.reduce((sum, item) => sum + Number(item.tokenEstimate || 0), 0)
+}
+
+function artifactBoundaryDetail(items: Array<Record<string, unknown>>): string {
+  return items.map((item) => {
+    const kind = String(item.kind || 'unknown')
+    const visibility = String(item.visibility || 'unknown')
+    const injectedIn = Array.isArray(item.injectedIn)
+      ? item.injectedIn.map((entry) => String(entry)).filter(Boolean)
+      : []
+    return `${kind}: ${visibility} -> ${injectedIn.length ? injectedIn.join('/') : '不注入'}`
+  }).join(' · ')
+}
+
+function contextModeDetail(explanation: MemoryContextExplanationPayload): string {
+  const sessionId = String(explanation.sessionId || '')
+  const turnId = String(explanation.turnId || '')
+  const pair = sessionId && turnId ? `${sessionId} / ${turnId}` : joinParts([sessionId, turnId])
+  return joinParts([pair, String(explanation.reason || '')])
 }
 
 function externalRow(external: ExternalDiagnosticsPayload | undefined): DiagnosticRow {

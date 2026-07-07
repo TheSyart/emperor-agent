@@ -24,7 +24,8 @@ import type { Interaction } from '../control/models'
 import { PlanContextBuilder } from '../plans/context'
 import { PlanStatus, type PlanRecord } from '../plans/models'
 import type { PlanStore } from '../plans/store'
-import { writePromptSnapshot, type PromptSectionInput } from '../prompts/manifest'
+import { writePromptSnapshot, type PromptContextPlan, type PromptSectionInput } from '../prompts/manifest'
+import { readTurnCheckpoint, type CheckpointWriteOptions } from '../sessions/checkpoint'
 import {
   TransitionReason,
   beginIteration,
@@ -59,7 +60,7 @@ import {
   summarizeToolResult,
 } from './runner-helpers'
 import { toolIntentThought, toolResultSummaryThought } from './runner-thoughts'
-import { maybePauseForControl, pauseForClarification, pauseForPlan, toolMessagesForPause } from './runner-pause'
+import { maybePauseForControl, pauseForClarification, pauseForPlan } from './runner-pause'
 import {
   planIndependentVerificationFollowup,
   planVerificationFollowup,
@@ -67,7 +68,6 @@ import {
   recordPlanDiscovery,
   recordPlanStepToolOutput,
   recordPlanVerification,
-  syncPlanTodoCompletion,
   unverifiedPlanHonestyFollowup,
 } from './runner-plan-recording'
 
@@ -84,7 +84,9 @@ const ASK_GUARD_BLOCK =
 
 export interface MemoryStoreLike {
   memoryDir?: string
-  writeCheckpoint(history: Msg[]): void
+  checkpointFile?: string
+  versions?: { list(opts?: { limit?: number; target?: unknown }): unknown[] }
+  writeCheckpoint(history: Msg[], opts?: CheckpointWriteOptions): void
   clearCheckpoint(): void
   readCheckpoint(): Msg[] | null
   appendHistory(role: string, content: string, opts?: { extra?: Record<string, unknown> | null }): void
@@ -93,16 +95,17 @@ export interface MemoryStoreLike {
 export interface TokenTrackerLike {
   record(model: string, usage: Record<string, number>, opts: Record<string, unknown>): void
   shouldCompact(maxContext: number, threshold: number): boolean
+  lastInputTokensValue?(): number
 }
 
 export interface CompactorLike {
+  compactAfterTurn?(opts: { history: Msg[]; turnId: string | null; currentTokens: number; maxContext: number }): Promise<unknown> | unknown
   compactAsync?(history: Msg[]): Promise<Msg[]>
   compact?(history: Msg[]): Msg[]
 }
 
 export interface TodoStoreLike {
   todos: Array<Record<string, unknown>>
-  syncFromPlanSteps(steps: Array<Record<string, unknown>>): string
 }
 
 /** runner 需要的 ControlManager 表面（W05）。全部可选/容错调用。 */
@@ -119,7 +122,6 @@ export interface ControlManagerRunnerHost {
   createPlanFromText(text: string): Interaction
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
-  syncPlanFromTodos?(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> }): PlanRecord | null
   claimUnverifiedPlanSteps?(): { planId: string; steps: Array<{ id: string; title: string }> } | null
   planMatchesCurrentScope?(record: PlanRecord): boolean
   planIndependentVerificationFollowup?(opts?: { dispatchAvailable?: boolean }): Record<string, unknown> | null
@@ -170,6 +172,7 @@ export interface AgentRunnerOptions {
   toolExecutionEngine?: ToolExecutionEngine | null
   workspaceRoot?: string | null
   promptSections?: PromptSectionInput[] | null
+  promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
   sessionId?: string | null
   streamingToolExecution?: boolean
@@ -206,12 +209,14 @@ export class AgentRunner implements RunnerModelHost {
   private readonly denyRefusalCounts = new Map<string, number>()
   workspaceRoot: string | null
   promptSections: PromptSectionInput[]
+  promptContextPlan: PromptContextPlan | null
   promptSnapshotDir: string | null
   sessionId: string | null
   streamingToolExecution: boolean
   lastEstimatedInputTokens: number | null = null
   lastContextProjectionReport: Record<string, unknown> | null = null
   lastModelCall: ModelCallMeta
+  private compactionFailureStreak = 0
 
   constructor(opts: AgentRunnerOptions) {
     this.provider = opts.provider
@@ -243,6 +248,7 @@ export class AgentRunner implements RunnerModelHost {
     this.toolExecutionEngine = opts.toolExecutionEngine ?? new ToolExecutionEngine(opts.registry)
     this.workspaceRoot = opts.workspaceRoot ?? null
     this.promptSections = opts.promptSections ? [...opts.promptSections] : []
+    this.promptContextPlan = opts.promptContextPlan ?? null
     this.promptSnapshotDir = opts.promptSnapshotDir ?? null
     this.sessionId = opts.sessionId ?? null
     this.streamingToolExecution = opts.streamingToolExecution ?? false
@@ -286,7 +292,7 @@ export class AgentRunner implements RunnerModelHost {
     let honestyNudged = false
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
-      this.memoryStore.writeCheckpoint(history)
+      this.memoryStore.writeCheckpoint(history, { turnId, phase: 'user_received' })
       await this.emitTurnPhase(turnState, TurnPhase.CHECKPOINT, emit, { reason: 'turn_start' })
     }
     while (true) {
@@ -424,7 +430,7 @@ export class AgentRunner implements RunnerModelHost {
         } catch (pause) {
           if (!(pause instanceof TurnPaused)) throw pause
           history.push(...pause.toolMessages)
-          if (this.memoryStore !== null) this.memoryStore.writeCheckpoint(history)
+          if (this.memoryStore !== null) this.memoryStore.writeCheckpoint(history, { turnId, phase: 'tool_calls_pending' })
           await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, {
             kind: pause.interaction.kind,
             interaction_id: pause.interaction.id,
@@ -445,7 +451,7 @@ export class AgentRunner implements RunnerModelHost {
         history.push(...toolMessages)
         await this.emitTurnPhase(turnState, TurnPhase.TOOL_BATCH_DONE, emit, { count: toolMessages.length })
         if (this.memoryStore !== null) {
-          this.memoryStore.writeCheckpoint(history)
+          this.memoryStore.writeCheckpoint(history, { turnId, phase: 'tool_calls_completed' })
           await this.emitTurnPhase(turnState, TurnPhase.CHECKPOINT, emit, { reason: 'tool_batch' })
         }
         continue
@@ -529,12 +535,12 @@ export class AgentRunner implements RunnerModelHost {
         }
       }
 
-      await this.emitTurnPhase(turnState, TurnPhase.COMPACT_CHECK, emit)
-      await this.maybeCompact(history, emit, turnId)
       if (this.memoryStore !== null) {
         this.memoryStore.appendHistory('assistant', finalReply, { extra: turnId ? { turn_id: turnId } : null })
         this.memoryStore.clearCheckpoint()
       }
+      await this.emitTurnPhase(turnState, TurnPhase.COMPACT_CHECK, emit)
+      await this.maybeCompact(history, emit, turnId)
       queryState = markCompleted(queryState).nextState
       await this.emitTurnPhase(turnState, TurnPhase.COMPLETED, emit, { content_chars: finalReply.length })
       return finalReply
@@ -584,7 +590,7 @@ export class AgentRunner implements RunnerModelHost {
     onToolCallComplete?: ((call: ToolCallRequest) => void | Promise<void>) | null,
   ): Promise<LLMResponse> {
     const pipeline = emergencyShrink ? this.emergencyContextPipeline() : this.contextPipeline
-    const projection = pipeline.project(history as never, { stableBoundary })
+    const projection = pipeline.project(history as never, { stableBoundary, turnId })
     const governed = projection.messages
     const report = emergencyShrink
       ? { ...projection.report, context_overflow_retry: 1, emergency_context_shrink: 1 }
@@ -635,10 +641,17 @@ export class AgentRunner implements RunnerModelHost {
     } else {
       toolDefinitions = this.registry.getDefinitions()
     }
-    const messages: ChatArgs['messages'] = [{ role: 'system', content: systemPrompt }, ...(governed as never[])]
+    const snapshotMessages = [{ role: 'system', content: systemPrompt }, ...(governed as Array<Record<string, unknown>>)]
+    const messages: ChatArgs['messages'] = snapshotMessages.map(sanitizeProviderMessage)
     this.lastEstimatedInputTokens = estimateMessagesTokens(messages as unknown as Msg[])
     if (this.promptSnapshotDir && turnId) {
       try {
+        const microcompact = Array.isArray(report.microcompact_records)
+          ? report.microcompact_records.filter((record): record is Record<string, unknown> => Boolean(record && typeof record === 'object' && !Array.isArray(record)))
+          : []
+        const contextPlan = microcompact.length
+          ? { ...(this.promptContextPlan ?? { version: 1 as const, items: [], omitted: [] }), microcompact }
+          : this.promptContextPlan
         writePromptSnapshot({
           dir: this.promptSnapshotDir,
           sessionId: this.sessionId,
@@ -648,12 +661,37 @@ export class AgentRunner implements RunnerModelHost {
           modelRole: this.modelRole,
           estimatedInputTokens: this.lastEstimatedInputTokens,
           sections: promptSections,
+          contextPlan,
+          messages: snapshotMessages,
+          checkpoint: this.checkpointForPromptSnapshot(),
+          memoryVersions: this.memoryVersionsForPromptSnapshot(),
         })
       } catch {
         // Prompt snapshots are diagnostics only; never fail the model call because of them.
       }
     }
     return new ModelCaller(this).ask({ messages, tools: toolDefinitions as unknown as Array<Record<string, unknown>>, emit, signal, onToolCallComplete: onToolCallComplete ?? null })
+	  }
+
+  private checkpointForPromptSnapshot(): Record<string, unknown> | null {
+    const checkpointFile = this.memoryStore?.checkpointFile
+    if (!checkpointFile) return null
+    try {
+      const result = readTurnCheckpoint(checkpointFile, { sessionId: this.sessionId })
+      return result.checkpoint as unknown as Record<string, unknown> | null
+    } catch {
+      return null
+    }
+  }
+
+  private memoryVersionsForPromptSnapshot(): Array<Record<string, unknown>> {
+    const versions = this.memoryStore?.versions
+    if (!versions) return []
+    try {
+      return versions.list({ limit: 12 }).filter(isRecord)
+    } catch {
+      return []
+    }
   }
 
   /**
@@ -683,9 +721,6 @@ export class AgentRunner implements RunnerModelHost {
       applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
       recordPlanDiscovery(this.controlManager, call, result)
       recordPlanStepToolOutput(this.controlManager, call, result)
-      if (call.name === 'update_todos' && !result.isError && this.todoStore !== null) {
-        syncPlanTodoCompletion(this.controlManager, this.todoStore.todos, call.id)
-      }
       const content = result.modelContent
       resultsById.set(call.id, result)
       maybePauseForControl(content, ctx.toolCallsRef.current, resultsById)
@@ -896,16 +931,47 @@ export class AgentRunner implements RunnerModelHost {
 
   private async maybeCompact(history: Msg[], emit: StreamEmitter | null, turnId: string | null): Promise<void> {
     if (!(this.compactor && this.tokenTracker)) return
-    if (!this.tokenTracker.shouldCompact(this.effectiveMaxContext(), this.compactThreshold)) return
+    if (process.env.EMPEROR_AUTO_MEMORY_COMPACT !== '1') return
+    const maxContext = this.effectiveMaxContext()
+    if (!this.tokenTracker.shouldCompact(maxContext, this.compactThreshold)) return
+    if (this.compactionFailureStreak >= 3) {
+      if (emit) {
+        await emit({
+          event: 'record_degraded',
+          kind: 'memory_compaction',
+          reason: 'automatic memory compaction disabled after consecutive failures',
+          taskId: turnId ?? undefined,
+        })
+      }
+      return
+    }
     try {
-      if (typeof this.compactor.compactAsync === 'function') {
+      if (typeof this.compactor.compactAfterTurn === 'function') {
+        const result = await this.compactor.compactAfterTurn({
+          history: history.map((message) => ({ ...message })),
+          turnId,
+          currentTokens: this.tokenTracker.lastInputTokensValue?.() ?? 0,
+          maxContext,
+        })
+        const resultRecord = isRecord(result) ? result : null
+        const status = resultRecord ? String(resultRecord.status || '') : ''
+	        if (['degraded', 'failed', 'failure', 'error'].includes(status)) {
+	          throw new Error(String(resultRecord?.error || resultRecord?.message || status))
+	        }
+	        const retainedHistory = Array.isArray(resultRecord?.retainedHistory) ? resultRecord.retainedHistory : null
+	        if (retainedHistory !== null) history.splice(0, history.length, ...retainedHistory.map((message) => ({ ...message })))
+	        this.compactionFailureStreak = 0
+      } else if (typeof this.compactor.compactAsync === 'function') {
         const out = await this.compactor.compactAsync(history)
         history.splice(0, history.length, ...out)
+        this.compactionFailureStreak = 0
       } else if (typeof this.compactor.compact === 'function') {
         const out = this.compactor.compact(history)
         history.splice(0, history.length, ...out)
+        this.compactionFailureStreak = 0
       }
     } catch (exc) {
+      this.compactionFailureStreak++
       if (emit) {
         await emit({
           event: 'record_degraded',
@@ -971,7 +1037,20 @@ export class AgentRunner implements RunnerModelHost {
 
 }
 
+function sanitizeProviderMessage(message: Record<string, unknown>): ChatArgs['messages'][number] {
+  const out: Record<string, unknown> = {
+    role: String(message.role ?? ''),
+  }
+  for (const key of ['content', 'tool_calls', 'tool_call_id', 'name', 'reasoning_content', 'extra_content']) {
+    if (key in message) out[key] = message[key]
+  }
+  return out as ChatArgs['messages'][number]
+}
+
 function throwIfAborted(signal: AbortSignal | null | undefined): void {
   if (signal?.aborted) throw new CancelledTaskError('turn')
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}

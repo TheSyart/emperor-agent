@@ -1,6 +1,6 @@
 /**
  * PlanExecutionManager (MIG-CTRL-007)。对齐 Python `agent/control/plan_execution.py`。
- * approved→executing 激活、todo↔step 同步、step 任务同步、工具输出 sidechain。
+ * approved→executing 激活、legacy todo→step 投影、step 任务同步、工具输出 sidechain。
  * task_manager 为 null 时（W14 未迁移）所有任务绑定逻辑 no-op —— 与 Python 一致。
  */
 import { nowTs } from '../util/time'
@@ -10,7 +10,6 @@ import {
   PlanStepStatus,
   planFromDict,
   planToDict,
-  stepToDict,
   type PlanRecord,
   type PlanStep,
 } from '../plans/models'
@@ -32,9 +31,8 @@ export class PlanExecutionManager {
   constructor(cm: ControlManagerHost) { this.cm = cm }
 
   /**
-   * todo→plan step 完成投影（2026-07-05 B1）：update_todos 落地后由 runner 调用，
-   * 把 todo 状态同步进当前可执行计划的步骤；全部 done/skipped 时计划置 COMPLETED。
-   * 这是计划状态机唯一的常规完成路径。
+   * Legacy todo→plan step 投影。Claude Code-style `update_todos` 主链路不调用这里；
+   * 保留是为了旧历史、旧测试和显式兼容 API 能读取/投影旧计划状态。
    */
   syncPlanFromTodos(todos: Array<Record<string, unknown>>, opts?: { evidence?: Record<string, unknown> | null }): PlanRecord | null {
     const record = this.cm.latestExecutablePlan()
@@ -255,7 +253,6 @@ export class PlanExecutionManager {
     activated = this.cm.permissionTokens.issue(activated)
     activated = this.syncPlanStepTasks(activated)
     this.cm.planStore.save(activated)
-    this.cm.todoStore.syncFromPlanSteps(activated.steps.map(stepToDict))
     return activated
   }
 }

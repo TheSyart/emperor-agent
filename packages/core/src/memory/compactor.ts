@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ChatArgs, GenerationSettings, LLMProvider, LLMResponse } from '../providers/base'
+import type { HistoryArchiveGate } from './history'
 import type { TokenTracker } from './token-tracker'
 import { nowIsoUtc8 } from './time-utc8'
 
@@ -67,7 +68,7 @@ export interface CompactorMemoryStore {
   writeUser(content: string): void
   readTodayEpisode(): string
   appendEpisode(content: string): void
-  appendCompactMarker(activeHistory?: Array<Record<string, unknown>> | null): void
+  appendCompactMarker(activeHistory?: Array<Record<string, unknown>> | null, archiveGate?: HistoryArchiveGate | null): void
 }
 
 interface CompactionCall {

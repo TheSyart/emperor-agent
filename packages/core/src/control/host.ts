@@ -15,7 +15,6 @@ export interface ControlRuntimeScope {
 
 export interface TodoStoreLike {
   todos: Array<Record<string, unknown>>
-  syncFromPlanSteps(steps: Array<Record<string, unknown>>): string
 }
 
 export interface TaskManagerLike {

@@ -20,6 +20,7 @@ import { ToolRegistry } from '../tools/registry'
 import { ControlManager } from '../control/manager'
 import { AskUserTool, ProposePlanTool } from '../control/tools'
 import { TodoStore, UpdateTodos } from '../tools/builtin'
+import { MemoryStore } from '../memory/store'
 
 type Msg = Record<string, unknown>
 
@@ -38,13 +39,26 @@ function toolCall(id: string, name: string, args: Record<string, unknown>): Tool
   return { id, name, arguments: args }
 }
 
-function memoryDouble(): MemoryStoreLike & { cleared: boolean } {
+function memoryDouble(): MemoryStoreLike & { cleared: boolean; appended: Array<{ role: string; content: string }> } {
   return {
     cleared: false,
+    appended: [],
     writeCheckpoint: () => undefined,
     clearCheckpoint() { this.cleared = true },
     readCheckpoint: () => null,
-    appendHistory: () => undefined,
+    appendHistory(role: string, content: string) { this.appended.push({ role, content }) },
+  }
+}
+
+async function withEnv(name: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
+  const previous = process.env[name]
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+  try {
+    await fn()
+  } finally {
+    if (previous === undefined) delete process.env[name]
+    else process.env[name] = previous
   }
 }
 
@@ -280,30 +294,104 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(phases.every((e) => e.turn_id === 'turn_1')).toBe(true)
   })
 
+  it('does not run automatic memory compaction unless explicitly enabled', async () => {
+    const calls: string[] = []
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', undefined, async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([makeResponse({ content: 'done' })]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: () => {
+            calls.push('shouldCompact')
+            return true
+          },
+        },
+        compactor: {
+          compactAfterTurn: async () => {
+            calls.push('compactAfterTurn')
+            return { status: 'compacted' }
+          },
+        },
+      })
+
+      await runner.stepAsync([{ role: 'user', content: 'hi' }])
+    })
+
+    expect(calls).toEqual([])
+  })
+
+  it('runs semantic compaction after the final reply is committed and keeps projected history immutable', async () => {
+    const emitted: Msg[] = []
+    const memory = memoryDouble()
+    const history = [{ role: 'user', content: 'hi' }]
+    let sawCommittedAssistant = false
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([makeResponse({ content: 'done' })]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        memoryStore: memory,
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: () => true,
+          lastInputTokensValue: () => 9_000,
+        },
+        compactor: {
+          compactAfterTurn: async ({ history: projectedHistory }) => {
+            sawCommittedAssistant = memory.cleared && memory.appended.some((item) => item.role === 'assistant' && item.content === 'done')
+            projectedHistory.splice(0, projectedHistory.length, { role: 'system', content: 'mutated copy only' })
+            return { status: 'compacted', message: 'ok' }
+          },
+        },
+        maxContext: 100,
+      })
+
+      const reply = await runner.stepAsync(history, { emit: (event) => { emitted.push(event) }, turnId: 'turn_compact_success' })
+      expect(reply).toBe('done')
+    })
+
+    expect(sawCommittedAssistant).toBe(true)
+    expect(history).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'done', turn_id: 'turn_compact_success' },
+    ])
+    expect(emitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'turn_phase', phase: 'compact_check' }),
+      expect.objectContaining({ event: 'turn_phase', phase: 'completed' }),
+    ]))
+  })
+
   it('records compaction failure as degraded runtime state without failing a completed reply', async () => {
     const emitted: Msg[] = []
     const memory = memoryDouble()
-    const runner = new AgentRunner({
-      provider: new FakeProvider([makeResponse({ content: 'done' })]),
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      memoryStore: memory,
-      tokenTracker: {
-        record: () => undefined,
-        shouldCompact: () => true,
-      },
-      compactor: {
-        compactAsync: async () => {
-          throw new Error('compact failed')
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([makeResponse({ content: 'done' })]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        memoryStore: memory,
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: () => true,
+          lastInputTokensValue: () => 9_000,
         },
-      },
-      maxContext: 100,
+        compactor: {
+          compactAfterTurn: async () => {
+            throw new Error('compact failed')
+          },
+        },
+        maxContext: 100,
+      })
+
+      const reply = await runner.stepAsync([{ role: 'user', content: 'hi' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_compact_fail' })
+      expect(reply).toBe('done')
     })
 
-    const reply = await runner.stepAsync([{ role: 'user', content: 'hi' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_compact_fail' })
-
-    expect(reply).toBe('done')
     expect(memory.cleared).toBe(true)
     expect(emitted).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -315,26 +403,74 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ]))
   })
 
-  it('reserves output headroom when checking compaction threshold', async () => {
-    const seenMaxContext: number[] = []
-    const runner = new AgentRunner({
-      provider: new FakeProvider([makeResponse({ content: 'done' })]),
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      tokenTracker: {
-        record: () => undefined,
-        shouldCompact: (maxContext: number) => {
-          seenMaxContext.push(maxContext)
-          return false
+  it('stops retrying automatic compaction after repeated failures', async () => {
+    const emitted: Msg[] = []
+    let attempts = 0
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([
+          makeResponse({ content: 'one' }),
+          makeResponse({ content: 'two' }),
+          makeResponse({ content: 'three' }),
+          makeResponse({ content: 'four' }),
+        ]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        memoryStore: memoryDouble(),
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: () => true,
+          lastInputTokensValue: () => 9_000,
         },
-      },
-      compactor: { compactAsync: async (history) => history },
-      maxContext: 10_000,
-      maxTokens: 2_000,
+        compactor: {
+          compactAfterTurn: async () => {
+            attempts++
+            throw new Error('still broken')
+          },
+        },
+        maxContext: 100,
+      })
+
+      await runner.stepAsync([{ role: 'user', content: '1' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_1' })
+      await runner.stepAsync([{ role: 'user', content: '2' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_2' })
+      await runner.stepAsync([{ role: 'user', content: '3' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_3' })
+      await runner.stepAsync([{ role: 'user', content: '4' }], { emit: (event) => { emitted.push(event) }, turnId: 'turn_4' })
     })
 
-    await runner.stepAsync([{ role: 'user', content: 'hi' }])
+    expect(attempts).toBe(3)
+    expect(emitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'record_degraded',
+        kind: 'memory_compaction',
+        reason: 'automatic memory compaction disabled after consecutive failures',
+        taskId: 'turn_4',
+      }),
+    ]))
+  })
+
+  it('reserves output headroom when checking compaction threshold', async () => {
+    const seenMaxContext: number[] = []
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([makeResponse({ content: 'done' })]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: (maxContext: number) => {
+            seenMaxContext.push(maxContext)
+            return false
+          },
+        },
+        compactor: { compactAsync: async (history) => history },
+        maxContext: 10_000,
+        maxTokens: 2_000,
+      })
+
+      await runner.stepAsync([{ role: 'user', content: 'hi' }])
+    })
 
     // 有效上限 = maxContext 10_000 − 预留输出 maxTokens 2_000
     expect(seenMaxContext[0]).toBe(8_000)
@@ -342,24 +478,26 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
   it('keeps at least half the context window when output reserve is oversized', async () => {
     const seenMaxContext: number[] = []
-    const runner = new AgentRunner({
-      provider: new FakeProvider([makeResponse({ content: 'done' })]),
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      tokenTracker: {
-        record: () => undefined,
-        shouldCompact: (maxContext: number) => {
-          seenMaxContext.push(maxContext)
-          return false
+    await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', '1', async () => {
+      const runner = new AgentRunner({
+        provider: new FakeProvider([makeResponse({ content: 'done' })]),
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'system',
+        tokenTracker: {
+          record: () => undefined,
+          shouldCompact: (maxContext: number) => {
+            seenMaxContext.push(maxContext)
+            return false
+          },
         },
-      },
-      compactor: { compactAsync: async (history) => history },
-      maxContext: 8_000,
-      maxTokens: 20_000,
-    })
+        compactor: { compactAsync: async (history) => history },
+        maxContext: 8_000,
+        maxTokens: 20_000,
+      })
 
-    await runner.stepAsync([{ role: 'user', content: 'hi' }])
+      await runner.stepAsync([{ role: 'user', content: 'hi' }])
+    })
 
     expect(seenMaxContext[0]).toBe(4_000)
   })
@@ -478,19 +616,40 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
   it('writes a redacted prompt snapshot for each turn', async () => {
     const snapshotDir = mkdtempSync(join(tmpdir(), 'emperor-prompt-snapshot-'))
+    const memoryRoot = mkdtempSync(join(tmpdir(), 'emperor-prompt-memory-'))
+    const memoryDir = join(memoryRoot, 'memory')
+    const memory = new MemoryStore(memoryDir, join(memoryDir, 'USER.local.md'))
+    memory.writeMemory('# Updated Memory\n\n- versioned before model call')
+    const provider = new FakeProvider([makeResponse({ content: 'done' })])
     const runner = new AgentRunner({
-      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      provider,
       model: 'fake',
       registry: new ToolRegistry(),
       systemPrompt: 'secret bootstrap',
+      memoryStore: memory,
       promptSections: [
         { name: 'bootstrap', content: 'secret bootstrap', source: 'templates/SOUL.md', priority: 100, budgetChars: null, version: 'test' },
       ],
+      promptContextPlan: {
+        version: 1,
+        mode: 'build',
+        activeMemoryBinding: {
+          profile: { scope: { kind: 'user_profile' }, readable: true, writable: true, path: 'memory/profile/USER.local.md' },
+          longTerm: { scope: { kind: 'project', projectId: 'project_1' }, readable: true, writable: true, path: 'projects/project_1/AGENTS.local.md' },
+          episode: { scope: { kind: 'episode', date: '2026-07-06' }, readable: false, writable: true, path: 'memory/2026-07-06.md' },
+        },
+        items: [],
+        omitted: [{
+          kind: 'global_memory',
+          source: 'memory/MEMORY.local.md',
+          reason: 'build mode intentionally does not inject global MEMORY',
+        }],
+      },
       promptSnapshotDir: snapshotDir,
       sessionId: 'session_1',
     })
 
-    await runner.stepAsync([{ role: 'user', content: 'hi' }], { turnId: 'turn_prompt' })
+    await runner.stepAsync([{ role: 'user', content: 'private user message body', seq: 7, turn_id: 'turn_prompt' }], { turnId: 'turn_prompt' })
 
     const snapshotPath = join(snapshotDir, 'turn_prompt.json')
     expect(existsSync(snapshotPath)).toBe(true)
@@ -503,7 +662,93 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       redacted: true,
     })
     expect(snapshot.sections[0].hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(snapshot.contextPlan).toMatchObject({
+      version: 1,
+      mode: 'build',
+      items: [{
+        id: 'section:bootstrap',
+        kind: 'bootstrap',
+        source: 'templates/SOUL.md',
+        action: 'include',
+      }],
+      omitted: [{
+        kind: 'global_memory',
+        source: 'memory/MEMORY.local.md',
+        reason: 'build mode intentionally does not inject global MEMORY',
+      }],
+    })
+    expect(snapshot.contextPlan.items[0].hash).toBe(snapshot.sections[0].hash)
+    expect(snapshot.finalMessagesHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(snapshot.historyRange).toEqual({
+      messageCount: 1,
+      firstSeq: 7,
+      lastSeq: 7,
+      turnIds: ['turn_prompt'],
+    })
+    expect(provider.seenMessages[0]![1]).toEqual({
+      role: 'user',
+      content: 'private user message body',
+    })
+    expect(snapshot.checkpoint).toMatchObject({
+      status: 'captured',
+      phase: 'user_received',
+      turnId: 'turn_prompt',
+      partialMessages: 1,
+    })
+    expect(snapshot.memoryVersions).toEqual([
+      expect.objectContaining({
+        target: 'memory',
+        relPath: 'memory/MEMORY.local.md',
+      }),
+    ])
     expect(JSON.stringify(snapshot)).not.toContain('secret bootstrap')
+    expect(JSON.stringify(snapshot)).not.toContain('private user message body')
+  })
+
+  it('records local microcompact records in the prompt context plan', async () => {
+    const snapshotDir = mkdtempSync(join(tmpdir(), 'emperor-prompt-snapshot-microcompact-'))
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      contextPipeline: new ContextPipeline({
+        microcompactKeepRecent: 0,
+        microcompactMinChars: 80,
+        microcompactHeadChars: 12,
+        microcompactTailChars: 8,
+      }),
+      promptSections: [
+        { name: 'bootstrap', content: 'system', source: 'templates/SOUL.md', priority: 100, budgetChars: null, version: 'test' },
+      ],
+      promptContextPlan: {
+        version: 1,
+        mode: 'chat',
+        activeMemoryBinding: {
+          longTerm: { scope: { kind: 'global' }, readable: true, writable: true, path: 'memory/MEMORY.local.md' },
+        },
+        items: [],
+        omitted: [],
+      },
+      promptSnapshotDir: snapshotDir,
+      sessionId: 'session_1',
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'x'.repeat(120) }], { turnId: 'turn_microcompact' })
+
+    const snapshot = JSON.parse(readFileSync(join(snapshotDir, 'turn_microcompact.json'), 'utf8'))
+    expect(snapshot.contextPlan.microcompact).toEqual([
+      expect.objectContaining({
+        index: 0,
+        message_id: 'history:0',
+        role: 'user',
+        original_chars: 120,
+        token_estimate: 30,
+        reason: 'older_text_over_microcompact_threshold',
+        kept_head_chars: 12,
+        kept_tail_chars: 8,
+      }),
+    ])
   })
 
   it('streaming tool execution produces the same final reply and tool messages as batch (Wave5 golden)', async () => {
@@ -846,7 +1091,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(planContext).toContain('status: approved')
   })
 
-  it('update_todos completion projects into plan steps without evidence gating (2026-07-05 B1)', async () => {
+  it('update_todos updates only the session todo list and does not mutate plan steps', async () => {
     const manager = new ControlManager(tmp('emperor-runner-todo-decoupled-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
@@ -892,12 +1137,12 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       todos: [{ id: 1, plan_step_id: 'step_1', content: 'Run matrix', status: 'completed' }],
     })
     expect(JSON.stringify(todoResult)).not.toContain('PLAN_EVIDENCE_REQUIRED')
-    // B1：todo 完成投影进计划步骤并收口计划（投影 ≠ 证据闸门，闸门保持解耦）
+    // Claude Code TodoWrite semantics: todo completion is not a PlanStep state transition.
     const finished = manager.planStore.get(planId)!
-    expect(finished.steps[0]!.status).toBe('done')
-    expect(finished.status).toBe('completed')
-    expect(finished.completedAt).not.toBeNull()
-    expect(finished.steps[0]!.evidence.at(-1)).toMatchObject({ source: 'update_todos', tool_call_id: 'todo_1' })
+    expect(finished.steps[0]!.status).toBe('active')
+    expect(finished.status).toBe('executing')
+    expect(finished.completedAt).toBeNull()
+    expect(JSON.stringify(finished.steps[0]!.evidence)).not.toContain('update_todos')
   })
 
   it('escalates a strategy nudge when the same safety refusal repeats within a turn', async () => {

@@ -48,16 +48,6 @@ export function recordPlanStepToolOutput(cm: ControlManagerRunnerHost | null, ca
   }
 }
 
-/** update_todos 落地后把 todo 状态投影进执行中的计划（B1 完成路径）。容错：宿主缺失即跳过。 */
-export function syncPlanTodoCompletion(cm: ControlManagerRunnerHost | null, todos: Array<Record<string, unknown>>, toolCallId: string): void {
-  if (cm === null || typeof cm.syncPlanFromTodos !== 'function') return
-  try {
-    cm.syncPlanFromTodos(todos, { evidence: { source: 'update_todos', tool_call_id: toolCallId } })
-  } catch {
-    /* tolerate */
-  }
-}
-
 export function planIndependentVerificationFollowup(cm: ControlManagerRunnerHost | null, registry: ToolRegistry): Record<string, unknown> | null {
   if (cm === null || typeof cm.planIndependentVerificationFollowup !== 'function') return null
   return cm.planIndependentVerificationFollowup({ dispatchAvailable: registry.get('dispatch_subagent') !== undefined })

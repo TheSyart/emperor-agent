@@ -3,11 +3,12 @@
  * 对齐 Python `agent/memory.py`。磁盘兼容: 行 schema + checkpoint JSON 不变。
  * 实现 runner 的 MemoryStoreLike（writeCheckpoint/clearCheckpoint/readCheckpoint/appendHistory）。
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { HistoryLog } from './history'
+import { HistoryLog, type HistoryArchiveGate } from './history'
 import { MemoryVersionStore } from './versions'
 import { nowIsoUtc8, todayUtc8 } from './time-utc8'
+import { clearTurnCheckpoint, readRecoverableCheckpointHistory, writeTurnCheckpoint, type CheckpointWriteOptions } from '../sessions/checkpoint'
 
 type Row = Record<string, unknown>
 
@@ -92,12 +93,12 @@ export class MemoryStore {
   }
 
   // ── 归档标记 ──
-  appendCompactMarker(activeHistory?: Row[] | null): void {
+  appendCompactMarker(activeHistory?: Row[] | null, archiveGate?: HistoryArchiveGate | null): void {
     if (activeHistory === undefined || activeHistory === null) {
       this.historyLog.append({ ts: nowIsoUtc8(), type: 'compact_event' })
       return
     }
-    this.historyLog.compact(activeHistory)
+    this.historyLog.compact(activeHistory, archiveGate)
   }
 
   historyStats(): Row {
@@ -116,6 +117,7 @@ export class MemoryStore {
       if (r.type === 'model_call') continue
       if (hiddenTurns.has(String(r.turn_id ?? ''))) continue
       const item: Row = { role: r.role, content: r.content }
+      if (Number.isFinite(Number(r.seq)) && Number(r.seq) > 0) item.seq = Math.trunc(Number(r.seq))
       if (typeof r.turn_id === 'string') item.turn_id = r.turn_id
       if (Array.isArray(r.attachments)) item.attachments = r.attachments
       if (typeof r.displayContent === 'string') item.displayContent = r.displayContent
@@ -147,32 +149,30 @@ export class MemoryStore {
   }
 
   // ── 中断恢复 Checkpoint ──
-  writeCheckpoint(history: Row[]): void {
+  writeCheckpoint(history: Row[], opts: CheckpointWriteOptions = {}): void {
     try {
-      const payload = { ts: nowIsoUtc8(), history: jsonSafe(history) }
-      const tmp = this.checkpointFile.replace(/\.json$/, '') + '.json.tmp'
-      writeFileSync(tmp, JSON.stringify(payload), 'utf8')
-      renameSync(tmp, this.checkpointFile)
+      writeTurnCheckpoint(this.checkpointFile, history, {
+        ...opts,
+        baseHistorySeq: opts.baseHistorySeq ?? Number(this.historyLog.stats().latest_seq ?? 0),
+      })
     } catch {
       /* 失败静默：绝不能影响主流程 */
     }
   }
 
   readCheckpoint(): Row[] | null {
-    if (!existsSync(this.checkpointFile)) return null
-    let data: unknown
     try {
-      data = JSON.parse(readFileSync(this.checkpointFile, 'utf8'))
+      return readRecoverableCheckpointHistory(this.checkpointFile, {
+        lastHistorySeq: Number(this.historyLog.stats().latest_seq ?? 0),
+      }) as Row[] | null
     } catch {
       return null
     }
-    const history = data && typeof data === 'object' && !Array.isArray(data) ? (data as Row).history : null
-    return Array.isArray(history) ? (history as Row[]) : null
   }
 
   clearCheckpoint(): void {
     try {
-      if (existsSync(this.checkpointFile)) rmSync(this.checkpointFile)
+      clearTurnCheckpoint(this.checkpointFile)
     } catch {
       /* 失败静默 */
     }

@@ -42,6 +42,7 @@ const router = useRouter()
 const ctx = useAppContext()
 const {
   sessions,
+  projects,
   activeId,
   loading,
   load,
@@ -68,7 +69,7 @@ const searchIndex = ref(0)
 const searchInput = ref<HTMLInputElement | null>(null)
 const sidebarState = ref<SidebarState>({ ...defaultSidebarState })
 
-const grouped = computed(() => buildSidebarGroups(sessions.value, sidebarState.value))
+const grouped = computed(() => buildSidebarGroups(sessions.value, sidebarState.value, projects.value))
 const searchResults = computed(() => searchSidebarSessions(sessions.value, searchQuery.value))
 const schedulerCount = computed(() => ctx.boot.value?.scheduler?.jobs?.length || 0)
 

@@ -288,7 +288,7 @@ describe('context_pipeline', () => {
     const longText = 'alpha '.repeat(900)
     const recentText = 'beta '.repeat(900)
     const history = [
-      { role: 'user', content: longText },
+      { role: 'user', content: longText, turn_id: 'source_turn_1' },
       { role: 'assistant', content: 'short reply' },
       { role: 'user', content: recentText },
     ]
@@ -298,12 +298,29 @@ describe('context_pipeline', () => {
       microcompactMinChars: 1000,
       microcompactHeadChars: 80,
       microcompactTailChars: 60,
-    }).project(history)
+    }).project(history, { turnId: 'turn_micro_1' })
 
     expect(projection.report.microcompacted_messages).toBe(1)
-    expect((projection.report.microcompact_records as Array<Record<string, unknown>>)[0]).toMatchObject({ index: 0, role: 'user' })
+    const record = (projection.report.microcompact_records as Array<Record<string, unknown>>)[0]!
+    expect(record).toMatchObject({
+      index: 0,
+      message_id: 'source_turn_1:0',
+      source_turn_id: 'source_turn_1',
+      role: 'user',
+      original_chars: longText.length,
+      kept_head_chars: 80,
+      kept_tail_chars: 60,
+      reason: 'older_text_over_microcompact_threshold',
+    })
+    expect(record.original_hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(record.token_estimate).toBeGreaterThan(1000)
     expect(String(projection.messages[0]!.content)).toMatch(/^\[local_microcompact\]/)
+    expect(String(projection.messages[0]!.content)).toContain('message_id: source_turn_1:0')
     expect(String(projection.messages[0]!.content)).toContain('original_chars:')
+    expect(String(projection.messages[0]!.content)).toContain('token_estimate:')
+    expect(String(projection.messages[0]!.content)).toContain('original_hash:')
+    expect(String(projection.messages[0]!.content)).toContain('reason: older_text_over_microcompact_threshold')
+    expect(String(projection.messages[0]!.content)).toContain('source_history_mutated: false')
     expect(String(projection.messages[0]!.content)).toContain('alpha alpha')
     expect(projection.messages[2]!.content).toBe(recentText)
     expect(history[0]!.content).toBe(longText)
@@ -318,6 +335,28 @@ describe('context_pipeline', () => {
     ])
     expect(preserved.report.microcompacted_messages).toBe(0)
     expect((preserved.messages[0]!.tool_calls as Array<Record<string, unknown>>)[0]!.id).toBe('call_1')
+  })
+
+  it('microcompact message ids use the source turn index rather than the current model turn', () => {
+    const longText = 'source '.repeat(300)
+    const projection = new ContextPipeline({
+      microcompactKeepRecent: 0,
+      microcompactMinChars: 1000,
+      microcompactHeadChars: 20,
+      microcompactTailChars: 10,
+    }).project([
+      { role: 'user', content: longText, turn_id: 'source_a' },
+      { role: 'assistant', content: longText, turn_id: 'source_a' },
+      { role: 'user', content: longText, turn_id: 'source_b' },
+      { role: 'user', content: longText },
+    ], { turnId: 'current_turn' })
+
+    expect((projection.report.microcompact_records as Array<Record<string, unknown>>).map((record) => record.message_id)).toEqual([
+      'source_a:0',
+      'source_a:1',
+      'source_b:0',
+      'history:3',
+    ])
   })
 
   it('injects plan runtime context after projected history (2026-07-05 B3: tail, not head)', () => {
@@ -360,4 +399,3 @@ describe('context_pipeline', () => {
     expect(String(withoutBoundary.messages[2]!.content)).toContain('[shrunk]')
   })
 })
-

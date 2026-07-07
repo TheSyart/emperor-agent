@@ -12,7 +12,7 @@
 
 - Electron main 进程内托管 `@emperor/core`，renderer 通过 preload IPC 调用 CoreApi。
 - Vue 3 + TypeScript + Tailwind 桌面端提供 Chat / Build 多会话、项目级记忆、工具调用、Scheduler、MCP、Team、Ask / Plan、附件与桌宠 companion。
-- 运行数据落在本地 `memory/`、`model_config.json`、`mcp_config.json`、`emperor.local.json` 等 gitignored 文件中。
+- 运行数据落在本地全局私有目录（`stateRoot`，默认 `~/.emperor-agent`）里的 `memory/`、`model_config.json`、`mcp_config.json`、`emperor.local.json` 等文件中，不写入仓库或项目源码目录。
 - 旧 Python 版只作为迁移来源和 `docs/migration/ts/PARITY.md` 的冻结对账清单，不再是可运行产品线。
 
 ## 2. 先看哪里
@@ -40,7 +40,8 @@
 - `skills/`：项目内技能包。少数技能自带 Python helper 脚本属于技能资产，不是主 runtime。
 - `assets/`：品牌、桌宠、生成素材；生成素材必须记录到对应 `PROMPTS.md`。
 - `docs/migration/ts/`：Python → TypeScript 迁移计划、状态和冻结 parity 清单。
-- `memory/`：本地运行数据，永不提交。
+- `docs/architecture/`：全局私有存储根等架构文档；私有数据位置以此为准。
+- `memory/`：旧版本地运行数据残留位置，永不提交。当前默认私有数据根是 `~/.emperor-agent`（`stateRoot`，可用 `EMPEROR_CONFIG_DIR` 覆盖），不再默认写入这里或项目源码目录，详见 `docs/architecture/global-state-store.md`。
 
 ## 4. 本地运行
 
@@ -74,8 +75,8 @@ npm --prefix desktop run screenshots
 
 - Electron main 通过 `createCoreHost()` 初始化 `CoreApi`，不再 probe/spawn/wait 外部 Python server。
 - Renderer 优先使用 `window.emperor.invokeCore()`；HTTP/WS helper 只作为 browser-only fallback，不是桌面主链路。
-- 附件原图通过 `app://attachments/{id}/raw` 读取，避免恢复旧 `/api/attachments/*` server 依赖。
-- 每个 session 独立持久化 `memory/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`。
+- 附件原图通过 `app://attachments/{id}/raw` 读取，避免恢复旧 `/api/attachments/*` server 依赖；解析优先查 `stateRoot`，对旧安装保留只读 legacy fallback。
+- 每个 session 独立持久化 `stateRoot/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`（`stateRoot` 默认 `~/.emperor-agent`，与 `runtimeRoot` 是两个独立的根，见 `docs/architecture/global-state-store.md`）。
 - 新增 CoreApi operation 时必须同步 IPC contract、preload bridge、renderer API 映射和相关类型/测试。
 - 新增 runtime event 时必须同步 `packages/core/src/runtime/events.ts`、renderer `types.ts`、`runtime/*` reducer/handlers 和 `useRuntime.ts`。
 
@@ -90,14 +91,17 @@ npm --prefix desktop run screenshots
 
 ## 7. 不应提交
 
+运行态私有数据默认写入全局 `stateRoot`（`~/.emperor-agent`），不在项目目录里；以下条目主要防的是旧数据残留或显式把 `EMPEROR_CONFIG_DIR` 指回仓库的开发场景：
+
 严格不要提交：
 
 - `memory/`
+- `sessions/`
+- `.emperor/`
 - `.team/`
 - `model_config.json`
 - `mcp_config.json`
 - `emperor.local.json`
-- `templates/USER.local.md`
 - `.env`
 - `desktop/node_modules/`
 - `desktop/out/`

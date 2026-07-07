@@ -119,21 +119,31 @@ templates/                      prompt 与初始化模板
 skills/                         项目技能包
 assets/                         品牌、桌宠和生成素材
 docs/migration/ts/              迁移状态、任务波次、parity 清单
-memory/                         本地运行数据，gitignored
+docs/architecture/              全局私有存储根等架构文档
+memory/                         旧版本地运行数据残留位置（gitignored）；当前默认写入 ~/.emperor-agent，见下方"数据存储位置"
 ```
+
+## 数据存储位置
+
+Emperor Agent 区分两个根目录（详见 `docs/architecture/global-state-store.md`）：
+
+- **Runtime resources root**（`runtimeRoot`）：内置技能、模板等只读应用资源。开发模式是仓库根；打包模式是 Electron `userData/runtime`。可用 `--root` / `EMPEROR_AGENT_ROOT` 覆盖。
+- **Global state root**（`stateRoot`）：会话、记忆、配置、附件等一切私有运行数据。**默认 `~/.emperor-agent`**，开发模式和打包模式一致（不再写入仓库或项目源码目录）。可用 `EMPEROR_CONFIG_DIR` 覆盖。
+
+用户在 UI 里选择的 build 项目目录只保留 `AGENTS.md`（协作文档）和 `.emperor/{settings.json,settings.local.json,rules/,skills/}`；私有的 session/memory/attachments 一律保存到全局 `stateRoot`，不写入项目源码目录。
 
 ## 运行时机制
 
 - Electron main 调用 `createCoreHost()` 初始化 `CoreApi`，并为全部 operation 注册 IPC channel。
 - Renderer 中 `api/http.ts` 把旧 HTTP 语义映射到 Core operation；无 Core bridge 时快速失败，提示必须在 Electron 桌面窗口中使用。
-- 附件原图通过 `app://attachments/{id}/raw` 读取，由 main process 安全解析 `memory/attachments` 下的真实文件。
-- 每个 session 独立保存 `memory/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`。
+- 附件原图通过 `app://attachments/{id}/raw` 读取，由 main process 安全解析 `stateRoot/memory/attachments` 下的真实文件（并对旧安装保留只读的 legacy 路径 fallback）。
+- 每个 session 独立保存 `stateRoot/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`。
 - Runtime events 通过 Core event bridge 推送到 renderer，刷新后由 bootstrap replay 恢复未压缩 turn 的工具、Ask/Plan、Scheduler、Team 和标题更新细节。
 - Scheduler、Watchlist、Team、External Bridge 都在 `@emperor/core` 内部运行，通过 CoreApi 暴露给桌面 UI。
 
 ## 模型配置
 
-模型配置使用本地 `model_config.json`，该文件已加入 `.gitignore`。推荐用设置页的模型配置向导或模型面板编辑；手动复制 `model_config.example.json` 仍兼容。
+模型配置使用全局私有 `stateRoot/model_config.json`，该文件已加入 `.gitignore`。推荐用设置页的模型配置向导或模型面板编辑；`model_config.example.json` 是 `runtimeRoot` 下的只读模板资源，手动复制后仍兼容。
 
 一个模型 entry 共享 `provider / apiKey / apiBase / extraHeaders / extraBody`，但应同时配置：
 
@@ -144,19 +154,23 @@ memory/                         本地运行数据，gitignored
 
 ## 记忆与会话
 
+以下路径均相对 `stateRoot`（默认 `~/.emperor-agent`，见"数据存储位置"）：
+
 | 层 | 载体 |
 |---|---|
-| 会话热历史 | `memory/sessions/<id>/history.jsonl` |
-| 会话 checkpoint | `memory/sessions/<id>/_checkpoint.json` |
-| 会话 runtime events | `memory/sessions/<id>/runtime/events.jsonl` |
+| 会话热历史 | `sessions/<id>/history.jsonl` |
+| 会话 checkpoint | `sessions/<id>/_checkpoint.json` |
+| 会话 runtime events | `sessions/<id>/runtime/events.jsonl` |
 | 全局长期记忆 | `memory/MEMORY.local.md` |
-| 用户档案 | `templates/USER.local.md` |
-| 项目级记忆 | `<project>/AGENTS.md` 托管区块 |
-| 项目索引 | `memory/projects/index.json` |
+| 用户档案 | `memory/profile/USER.local.md` |
+| 项目级记忆（全局私有） | `projects/<project-id>/AGENTS.local.md` 托管区块（不在项目源码目录里，见下方命名说明） |
+| 项目索引 | `projects/index.json` |
 | 附件 | `memory/attachments/YYYY-MM/{hash8}-{name}.{ext}` |
-| token 账本 | `memory/tokens.jsonl` |
+| token 账本 | `tokens/tokens.jsonl` |
 
-Chat 压缩会更新全局长期记忆与用户档案；Build 压缩会更新项目 `AGENTS.md` 托管区块与项目索引摘要。旧根级 `memory/history.jsonl` 会在兼容路径中迁移到默认 session。
+Chat 压缩会更新全局长期记忆与用户档案；Build 压缩会更新项目私有记忆（`projects/<project-id>/AGENTS.local.md`）与项目索引摘要，**不会**改写项目源码目录里的 `AGENTS.md`（那个文件只被只读导入一次作为种子内容）。旧的单会话时代根级 `stateRoot/memory/history.jsonl`（如果存在且尚未有任何 session）会在启动时自动搬迁为一个新建的默认 session。
+
+> 命名提醒：项目源码里的 `<project>/AGENTS.md`（协作文档，可提交）和全局私有 store 下的 `AGENTS.local.md`（压缩算法维护，不在项目源码树里）只差一个 `.local` 后缀，语义完全不同，详见 `docs/architecture/global-state-store.md`。
 
 ## 权限与控制流
 
@@ -183,18 +197,19 @@ cd desktop-pet
 npm install
 ```
 
-生产安装包会内嵌桌宠窗口资源。桌宠窗口位置写入 `memory/desktop_pet/window.json`，启停通过桌面设置页和 CoreApi desktop-pet service 管理。
+生产安装包会内嵌桌宠窗口资源。桌宠窗口位置写入 `stateRoot/memory/desktop_pet/window.json`，启停通过桌面设置页和 CoreApi desktop-pet service 管理。
 
 ## 协作约定
 
-不要提交：
+不要提交（运行态默认不落在项目目录里；以下条目主要针对旧数据残留或显式把 `EMPEROR_CONFIG_DIR` 指回仓库的开发场景）：
 
 - `memory/`
+- `sessions/`
+- `.emperor/`
 - `.team/`
 - `model_config.json`
 - `mcp_config.json`
 - `emperor.local.json`
-- `templates/USER.local.md`
 - `.env`
 - `desktop/node_modules/`
 - `desktop/out/`

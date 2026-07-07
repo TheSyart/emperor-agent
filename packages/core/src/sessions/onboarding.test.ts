@@ -83,8 +83,8 @@ describe('ensureUserProfileFile (single-sourced seeding)', () => {
   it('does not overwrite an existing local profile', () => {
     const stateRoot = tmp('emperor-onboarding-seed-existing-')
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
-    mkdirSync(join(stateRoot, 'templates'), { recursive: true })
-    writeFileSync(join(stateRoot, 'templates', 'USER.local.md'), '# customized\n', 'utf8')
+    mkdirSync(join(stateRoot, 'memory', 'profile'), { recursive: true })
+    writeFileSync(join(stateRoot, 'memory', 'profile', 'USER.local.md'), '# customized\n', 'utf8')
 
     const path = ensureUserProfileFile(stateRoot, templatesDir)
 
@@ -129,8 +129,8 @@ describe('claimProfileOnboardingTrigger', () => {
   it('latches immediately without firing when the profile is already customized (upgrade path)', () => {
     const stateRoot = tmp('emperor-onboarding-claim-customized-')
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
-    mkdirSync(join(stateRoot, 'templates'), { recursive: true })
-    writeFileSync(join(stateRoot, 'templates', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
+    mkdirSync(join(stateRoot, 'memory', 'profile'), { recursive: true })
+    writeFileSync(join(stateRoot, 'memory', 'profile', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
 
     const result = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: true })
 
@@ -171,6 +171,7 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
 
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
       enableFirstRunOnboarding: true,
@@ -195,6 +196,7 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
     // 不传 modelRouter：走真实 loadModelConfig 路径，全新安装下 models 为空数组
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       enableFirstRunOnboarding: true,
       eventSink: async (event) => { events.push(event) },
@@ -208,13 +210,14 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
 
   it('does not fire for an already-customized profile (upgrade path) but does latch immediately', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-existing-user-'))
-    mkdirSync(join(root, '.emperor', 'templates'), { recursive: true })
-    writeFileSync(join(root, '.emperor', 'templates', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
+    mkdirSync(join(root, '.emperor', 'memory', 'profile'), { recursive: true })
+    writeFileSync(join(root, '.emperor', 'memory', 'profile', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
     const provider = new AskingFakeProvider()
     const events: Array<Record<string, unknown>> = []
 
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
       enableFirstRunOnboarding: true,
@@ -235,6 +238,7 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
 
     const loop = await AgentLoop.create({
       root,
+      stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
       eventSink: async (event) => { events.push(event) },
