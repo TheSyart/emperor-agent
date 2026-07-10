@@ -1,8 +1,10 @@
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs'
@@ -270,6 +272,92 @@ describe('CoreApi (MIG-IPC-001)', () => {
     ).toContain('bootstrap')
 
     await api.close()
+  })
+
+  it('migrates private state from an explicit legacy runtime without changing signed runtimeRoot', async () => {
+    const signedRuntimeRoot = tmp('emperor-core-api-signed-runtime-')
+    const legacyRuntimeRoot = tmp('emperor-core-api-legacy-runtime-')
+    const stateRoot = tmp('emperor-core-api-legacy-state-')
+    mkdirSync(join(legacyRuntimeRoot, 'memory'), { recursive: true })
+    writeFileSync(
+      join(legacyRuntimeRoot, 'memory', 'MEMORY.local.md'),
+      '# Legacy private memory\n',
+      'utf8',
+    )
+    const legacySkillRoot = join(
+      legacyRuntimeRoot,
+      '.emperor',
+      'skills',
+      'legacy-direct',
+    )
+    mkdirSync(legacySkillRoot, { recursive: true })
+    writeFileSync(
+      join(legacySkillRoot, 'SKILL.md'),
+      '# Must remain blocked by packaged migration\n',
+      'utf8',
+    )
+    const options = {
+      root: signedRuntimeRoot,
+      stateRoot,
+      legacyRuntimeRoot,
+      legacyRuntimeSkillsHandled: true,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    }
+
+    const api = await CoreApi.create(options)
+
+    expect(api.paths.runtimeRoot).toBe(resolve(signedRuntimeRoot))
+    expect(
+      readFileSync(join(stateRoot, 'memory', 'MEMORY.local.md'), 'utf8'),
+    ).toBe('# Legacy private memory\n')
+    expect(api.loop.legacyStateMigration.legacyStateRoots[0]?.path).toBe(
+      join(legacyRuntimeRoot, 'memory'),
+    )
+    expect(
+      readFileSync(
+        join(legacyRuntimeRoot, 'memory', 'MEMORY.local.md'),
+        'utf8',
+      ),
+    ).toBe('# Legacy private memory\n')
+    expect(existsSync(join(stateRoot, 'skills', 'legacy-direct'))).toBe(false)
+
+    await api.close()
+  })
+
+  it('keeps all user writes in stateRoot when runtime resources are read-only', async () => {
+    const runtimeRoot = tmp('emperor-core-api-readonly-runtime-')
+    const legacyRuntimeRoot = join(
+      tmp('emperor-core-api-readonly-legacy-'),
+      'runtime',
+    )
+    const stateRoot = tmp('emperor-core-api-readonly-state-')
+    const before = readdirSync(runtimeRoot)
+    chmodSync(runtimeRoot, 0o555)
+
+    try {
+      const api = await CoreApi.create({
+        root: runtimeRoot,
+        stateRoot,
+        legacyRuntimeRoot,
+        legacyRuntimeSkillsHandled: true,
+        templatesDir: TEMPLATES_DIR,
+        modelRouter: fakeRouter(new FakeProvider()),
+      })
+      api.skillService.save('user-skill', '# User Skill\n')
+
+      expect(
+        readFileSync(
+          join(stateRoot, 'skills', 'user-skill', 'SKILL.md'),
+          'utf8',
+        ),
+      ).toBe('# User Skill\n')
+      expect(readdirSync(runtimeRoot)).toEqual(before)
+
+      await api.close()
+    } finally {
+      chmodSync(runtimeRoot, 0o755)
+    }
   })
 
   it('manages hooks config, audit, and test runs through CoreApi', async () => {

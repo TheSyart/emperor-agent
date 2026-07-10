@@ -642,6 +642,8 @@ export interface DiagnosticsRuntimePaths {
   controlRoot?: string
   externalRoot?: string
   mcpConfigPath?: string
+  runtimeManifestPath?: string
+  legacyRuntimeSkillsReceiptPath?: string
 }
 
 export interface LegacyStateRootInfo {

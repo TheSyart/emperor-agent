@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -420,5 +421,77 @@ describe('migrateLegacyStateRoot', () => {
       kind: 'previous-dotemperor-root',
       existed: true,
     })
+  })
+
+  it('skips and records legacy state symlinks without reading outside runtimeRoot', () => {
+    const runtimeRoot = tmp('emperor-legacy-symlink-runtime-')
+    const stateRoot = tmp('emperor-legacy-symlink-state-')
+    const outside = tmp('emperor-legacy-symlink-outside-')
+    const paths = resolveRuntimePaths(runtimeRoot, { stateRoot })
+    mkdirSync(join(runtimeRoot, 'memory'), { recursive: true })
+    writeFileSync(join(outside, 'secret.txt'), 'outside secret', 'utf8')
+    symlinkSync(
+      outside,
+      join(runtimeRoot, 'memory', 'outside-link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+    if (process.platform !== 'win32') {
+      writeFileSync(join(outside, 'model.json'), '{"secret":true}\n', 'utf8')
+      symlinkSync(
+        join(outside, 'secret.txt'),
+        join(runtimeRoot, 'memory', 'secret-link.txt'),
+        'file',
+      )
+      symlinkSync(
+        join(runtimeRoot, 'memory'),
+        join(runtimeRoot, 'memory', 'cycle'),
+        'dir',
+      )
+      symlinkSync(
+        join(outside, 'model.json'),
+        join(runtimeRoot, 'model_config.json'),
+        'file',
+      )
+    }
+
+    ensureRuntimeStateDirs(paths)
+    const result = migrateLegacyStateRoot(paths)
+
+    expect(existsSync(join(stateRoot, 'memory', 'outside-link'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'memory', 'secret-link.txt'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'model_config.json'))).toBe(false)
+    expect(result.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'skipped_unsafe_path',
+          source: join(runtimeRoot, 'memory', 'outside-link'),
+        }),
+        ...(process.platform === 'win32'
+          ? []
+          : [
+              expect.objectContaining({
+                action: 'skipped_unsafe_path',
+                source: join(runtimeRoot, 'memory', 'cycle'),
+              }),
+              expect.objectContaining({
+                action: 'skipped_unsafe_path',
+                source: join(runtimeRoot, 'memory', 'secret-link.txt'),
+              }),
+              expect.objectContaining({
+                action: 'skipped_unsafe_path',
+                source: join(runtimeRoot, 'model_config.json'),
+              }),
+            ]),
+      ]),
+    )
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe(
+      'outside secret',
+    )
+    expect(JSON.parse(readFileSync(result.reportPath, 'utf8'))).toMatchObject({
+      skipped: expect.any(Number),
+    })
+    expect(
+      Number(JSON.parse(readFileSync(result.reportPath, 'utf8')).skipped),
+    ).toBeGreaterThanOrEqual(1)
   })
 })

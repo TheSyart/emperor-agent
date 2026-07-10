@@ -16,11 +16,7 @@ import { defaultStateRoot } from '@emperor/core'
 
 import { resolveConfig } from './config'
 import { resolveAppIconPath } from './icon'
-import {
-  initializePackagedRuntime,
-  packagedRuntimeRoot,
-  runtimeDefaultsRoot,
-} from './runtime-root'
+import { preparePackagedRuntime, runtimeDefaultsRoot } from './runtime-root'
 import { readBounds, pickBounds } from './window-bounds'
 import {
   resolveAssetPath,
@@ -35,6 +31,7 @@ import { resolveMainPreloadPath } from './preload-path'
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
 let config = resolveConfig({ argv: mainArgv, env: process.env })
+let legacyRuntimeRoot = config.runtimeRoot
 const rendererRoot = path.join(mainDir, '..', 'renderer')
 const appIconPath = resolveAppIconPath({
   dirname: mainDir,
@@ -101,27 +98,29 @@ function errMessage(err: unknown): string {
   return String(err)
 }
 
-function argValue(argv: string[], flag: string): string | undefined {
-  const idx = argv.indexOf(flag)
-  if (idx >= 0 && idx + 1 < argv.length) return argv[idx + 1]
-  return undefined
-}
-
 function mainBoundsPath(): string {
   return path.join(config.stateRoot, 'memory', 'desktop', 'window.json')
 }
 
 function prepareMainRuntime(): void {
-  const defaultRoot = app.isPackaged
-    ? packagedRuntimeRoot(app.getPath('userData'))
-    : undefined
-  config = resolveConfig({ argv: mainArgv, env: process.env, defaultRoot })
   if (app.isPackaged) {
-    initializePackagedRuntime({
-      root: config.runtimeRoot,
-      defaultsRoot: runtimeDefaultsRoot(process.resourcesPath),
+    const signedRoot = runtimeDefaultsRoot(process.resourcesPath)
+    config = resolveConfig({
+      argv: mainArgv,
+      env: process.env,
+      forcedRuntimeRoot: signedRoot,
     })
+    const prepared = preparePackagedRuntime({
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath('userData'),
+      stateRoot: config.stateRoot,
+      appVersion: app.getVersion(),
+    })
+    legacyRuntimeRoot = prepared.legacyRuntimeRoot
+    return
   }
+  config = resolveConfig({ argv: mainArgv, env: process.env })
+  legacyRuntimeRoot = config.runtimeRoot
 }
 
 function closeCoreHost(): void {
@@ -144,7 +143,7 @@ function registerAppProtocol(): void {
     if (url.host === 'attachments') {
       const attachmentPath = resolveAttachmentRawPath(request.url, {
         stateRoot: config.stateRoot,
-        legacyRuntimeRoot: config.runtimeRoot,
+        legacyRuntimeRoot,
       })
       if (!attachmentPath)
         return new Response('attachment not found', { status: 404 })
@@ -153,7 +152,7 @@ function registerAppProtocol(): void {
     if (url.host === 'media') {
       const mediaPath = resolveMediaRawPath(request.url, {
         stateRoot: config.stateRoot,
-        legacyRuntimeRoot: config.runtimeRoot,
+        legacyRuntimeRoot,
       })
       if (!mediaPath) return new Response('media not found', { status: 404 })
       return net.fetch(pathToFileURL(mediaPath).toString())
@@ -271,12 +270,7 @@ function savePetBounds(win: BrowserWindow, boundsPath: string): void {
 }
 
 function createPetWindow(): void {
-  const root =
-    argValue(mainArgv, '--root') ||
-    process.env.EMPEROR_AGENT_ROOT ||
-    (app.isPackaged
-      ? packagedRuntimeRoot(app.getPath('userData'))
-      : path.resolve(mainDir, '..', '..', '..'))
+  const root = config.runtimeRoot
   const petStateRoot = process.env.EMPEROR_CONFIG_DIR || defaultStateRoot()
   const assetBaseUrl = pathToFileURL(
     path.join(root, 'assets', 'desktop-pet', 'clawd-tank') + path.sep,
@@ -341,15 +335,18 @@ async function startup(): Promise<void> {
   if (process.platform === 'win32')
     app.setAppUserModelId('com.emperor.agent.desktop')
 
-  prepareMainRuntime()
-  registerAppProtocol()
-
   try {
+    prepareMainRuntime()
+    registerAppProtocol()
     coreApi = await createCoreHost({
       root: config.runtimeRoot,
       ipcMain,
       eventBridge: coreEventBridge,
-      coreOptions: { stateRoot: config.stateRoot },
+      coreOptions: {
+        stateRoot: config.stateRoot,
+        legacyRuntimeRoot: app.isPackaged ? legacyRuntimeRoot : null,
+        legacyRuntimeSkillsHandled: app.isPackaged,
+      },
     })
   } catch (err) {
     fail('CoreApi 初始化失败', errMessage(err))

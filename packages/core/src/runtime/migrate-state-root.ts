@@ -2,10 +2,10 @@ import {
   appendFileSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, extname, join, relative, sep } from 'node:path'
@@ -23,7 +23,7 @@ const LEGACY_DOTEMPEROR_STATE_PREFIXES = LEGACY_MEMORY_STATE_PREFIXES.map(
 
 export interface LegacyStateMigrationEntry {
   ts: string
-  action: 'copied' | 'skipped_corrupt_json'
+  action: 'copied' | 'skipped_corrupt_json' | 'skipped_unsafe_path'
   legacy:
     | 'memory'
     | 'sessions'
@@ -69,6 +69,7 @@ export interface LegacyStateMigrationResult {
  * Both are detected and migrated (non-destructively) into the new stateRoot. */
 export function migrateLegacyStateRoot(
   paths: RuntimePaths,
+  opts: { excludePreviousStateSkills?: boolean } = {},
 ): LegacyStateMigrationResult {
   mkdirSync(paths.stateRoot, { recursive: true })
   const logPath = join(paths.stateRoot, 'migration-log.jsonl')
@@ -176,7 +177,10 @@ export function migrateLegacyStateRoot(
     logPath,
     logged,
     result,
-    excludeTopLevelDirs: ['templates'],
+    excludeTopLevelDirs: [
+      'templates',
+      ...(opts.excludePreviousStateSkills ? ['skills'] : []),
+    ],
     excludeRelPrefixes: LEGACY_DOTEMPEROR_STATE_PREFIXES,
   })
   migrateLegacyStateSubdirsFromMemory(
@@ -279,7 +283,22 @@ function copyLegacyRootConfigFiles(
   ]) {
     const source = join(paths.runtimeRoot, name)
     const dest = join(paths.stateRoot, name)
-    if (!existsSync(source) || existsSync(dest)) continue
+    const sourceStatus = legacyFileStatus(source)
+    if (sourceStatus === 'missing' || pathEntryExists(dest)) continue
+    if (sourceStatus === 'unsafe') {
+      appendLog(
+        { legacy: 'config', logPath, logged, result },
+        {
+          action: 'skipped_unsafe_path',
+          rel_path: name,
+          source,
+          dest: null,
+          reason: 'legacy config is not a regular file',
+        },
+      )
+      result.skipped += 1
+      continue
+    }
     if (!isValidJson(source)) {
       appendLog(
         { legacy: 'config', logPath, logged, result },
@@ -322,7 +341,18 @@ function copyTree(opts: {
   if (!existsSync(opts.from)) return
   const excluded = new Set(opts.excludeTopLevelDirs ?? [])
   const excludedPrefixes = opts.excludeRelPrefixes ?? []
-  for (const path of walkFiles(opts.from)) {
+  const files = walkFiles(opts.from, (unsafePath, reason) => {
+    const relPath = slash(relative(opts.from, unsafePath)) || '(root)'
+    appendLog(opts, {
+      action: 'skipped_unsafe_path',
+      rel_path: `${opts.legacy}/${relPath}`,
+      source: unsafePath,
+      dest: null,
+      reason,
+    })
+    opts.result.skipped += 1
+  })
+  for (const path of files) {
     const relPath = slash(relative(opts.from, path))
     if (excluded.has(relPath.split('/')[0] ?? '')) continue
     if (
@@ -332,7 +362,7 @@ function copyTree(opts: {
     )
       continue
     const dest = join(opts.to, relPath)
-    if (existsSync(dest)) continue
+    if (pathEntryExists(dest)) continue
     if (shouldValidateJson(relPath) && !isValidJson(path)) {
       appendLog(opts, {
         action: 'skipped_corrupt_json',
@@ -370,7 +400,19 @@ function migrateLegacyUserProfilePath(
   const source = join(previousStateRoot, 'templates', 'USER.local.md')
   const dest = join(newStateRoot, 'memory', 'profile', 'USER.local.md')
   const opts = { legacy: 'user-profile-path' as const, logPath, logged, result }
-  if (!existsSync(source) || existsSync(dest)) return
+  const sourceStatus = legacyFileStatus(source)
+  if (sourceStatus === 'missing' || pathEntryExists(dest)) return
+  if (sourceStatus === 'unsafe') {
+    appendLog(opts, {
+      action: 'skipped_unsafe_path',
+      rel_path: 'templates/USER.local.md',
+      source,
+      dest: null,
+      reason: 'legacy user profile is not a regular file',
+    })
+    result.skipped += 1
+    return
+  }
   mkdirSync(dirname(dest), { recursive: true })
   copyFileSync(source, dest)
   appendLog(opts, {
@@ -390,7 +432,22 @@ function migrateLegacyProjectIndex(
 ): void {
   const source = join(paths.runtimeRoot, 'memory', 'projects', 'index.json')
   const dest = join(paths.projectsRoot, 'index.json')
-  if (!existsSync(source) || existsSync(dest)) return
+  const sourceStatus = legacyFileStatus(source)
+  if (sourceStatus === 'missing' || pathEntryExists(dest)) return
+  if (sourceStatus === 'unsafe') {
+    appendLog(
+      { legacy: 'projects-index', logPath, logged, result },
+      {
+        action: 'skipped_unsafe_path',
+        rel_path: 'memory/projects/index.json',
+        source,
+        dest: null,
+        reason: 'legacy project index is not a regular file',
+      },
+    )
+    result.skipped += 1
+    return
+  }
   if (!isValidJson(source)) {
     appendLog(
       { legacy: 'projects-index', logPath, logged, result },
@@ -483,9 +540,7 @@ function writeMigrationReport(
 ): void {
   const allEntries = readLogEntries(result.logPath)
   const copied = allEntries.filter((entry) => entry.action === 'copied').length
-  const skipped = allEntries.filter(
-    (entry) => entry.action === 'skipped_corrupt_json',
-  ).length
+  const skipped = allEntries.filter((entry) => entry.action !== 'copied').length
   mkdirSync(dirname(result.reportPath), { recursive: true })
   writeFileSync(
     result.reportPath,
@@ -524,16 +579,27 @@ function readLogEntries(logPath: string): LegacyStateMigrationEntry[] {
   return out
 }
 
-function walkFiles(root: string): string[] {
+function walkFiles(
+  root: string,
+  onUnsafe: (path: string, reason: string) => void,
+): string[] {
   const out: string[] = []
+  const rootStat = lstatSync(root)
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    onUnsafe(root, 'legacy root is not a regular directory')
+    return out
+  }
   const stack = [root]
   while (stack.length) {
     const dir = stack.pop()!
     for (const name of readdirSync(dir)) {
       const path = join(dir, name)
-      const stat = statSync(path)
-      if (stat.isDirectory()) stack.push(path)
+      const stat = lstatSync(path)
+      if (stat.isSymbolicLink())
+        onUnsafe(path, 'legacy path is a symbolic link')
+      else if (stat.isDirectory()) stack.push(path)
       else if (stat.isFile()) out.push(path)
+      else onUnsafe(path, 'legacy path is not a regular file or directory')
     }
   }
   return out.sort()
@@ -549,6 +615,34 @@ function isValidJson(path: string): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+function legacyFileStatus(path: string): 'missing' | 'regular' | 'unsafe' {
+  try {
+    const stat = lstatSync(path)
+    return !stat.isSymbolicLink() && stat.isFile() ? 'regular' : 'unsafe'
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+    )
+      return 'missing'
+    return 'unsafe'
+  }
+}
+
+function pathEntryExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      'code' in error &&
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+    )
   }
 }
 

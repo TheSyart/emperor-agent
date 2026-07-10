@@ -17,6 +17,7 @@ import {
 } from '../scheduler/models'
 import { CoreApi } from './core-api'
 import { MainlineTurnService } from './chat-service'
+import { LEGACY_SKILL_STATE_FILE } from '../runtime/resources'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -173,6 +174,111 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     })
     expect(provider.calls).toHaveLength(0)
 
+    await api.close()
+  })
+
+  it('does not activate a legacy Skill marked blocked pending review', async () => {
+    const root = tmp('emperor-mainline-blocked-skill-')
+    const stateRoot = join(root, '.emperor')
+    const skillRoot = join(stateRoot, 'skills', 'legacy-review')
+    mkdirSync(skillRoot, { recursive: true })
+    writeFileSync(
+      join(skillRoot, 'SKILL.md'),
+      '# Legacy Review\n\nBLOCKED_LEGACY_SKILL_MARKER',
+      'utf8',
+    )
+    writeFileSync(
+      join(skillRoot, LEGACY_SKILL_STATE_FILE),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        status: 'blocked_pending_review',
+        source: 'legacy_runtime',
+      })}\n`,
+      'utf8',
+    )
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Blocked Skill' })
+
+    await expect(
+      api.chat.submit({
+        content: 'review',
+        requestedSkills: [{ name: 'legacy-review', source: 'slash' }],
+        sessionId: String(session.id),
+      }),
+    ).rejects.toMatchObject({ code: 'requested_skill_unavailable' })
+    expect(provider.calls).toHaveLength(0)
+
+    await api.close()
+  })
+
+  it('uses stateRoot Skill content ahead of signed built-in content', async () => {
+    const root = tmp('emperor-mainline-skill-precedence-')
+    const stateRoot = join(root, '.emperor')
+    const builtinRoot = join(root, 'skills', 'reviewer')
+    const userRoot = join(stateRoot, 'skills', 'reviewer')
+    mkdirSync(builtinRoot, { recursive: true })
+    mkdirSync(userRoot, { recursive: true })
+    writeFileSync(
+      join(builtinRoot, 'SKILL.md'),
+      '# Reviewer\n\nGeneral reviewer.\n\nSIGNED_BUILTIN_MARKER',
+      'utf8',
+    )
+    writeFileSync(
+      join(userRoot, 'SKILL.md'),
+      '# Reviewer\n\nGeneral reviewer.\n\nUSER_STATE_OVERRIDE_MARKER',
+      'utf8',
+    )
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Skill Precedence' })
+
+    await api.chat.submit({
+      content: 'review',
+      requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+      sessionId: String(session.id),
+    })
+
+    const messages = JSON.stringify(provider.calls[0]?.messages)
+    expect(messages).toContain('USER_STATE_OVERRIDE_MARKER')
+    expect(messages).not.toContain('SIGNED_BUILTIN_MARKER')
+
+    await api.close()
+  })
+
+  it('keeps flat user Skills visible in the runtime Skill summary', async () => {
+    const root = tmp('emperor-mainline-flat-skill-')
+    const stateRoot = join(root, '.emperor')
+    mkdirSync(join(stateRoot, 'skills'), { recursive: true })
+    writeFileSync(
+      join(stateRoot, 'skills', 'flat-review.md'),
+      '# Flat Review\n\nGeneral flat reviewer.\n',
+      'utf8',
+    )
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Flat Skill' })
+
+    await api.chat.submit({ content: 'hello', sessionId: String(session.id) })
+
+    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
+      '- flat-review: General flat reviewer.',
+    )
     await api.close()
   })
 

@@ -108,6 +108,12 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       attachmentsRoot: join(stateRoot, 'memory', 'attachments'),
       mediaRoot: join(stateRoot, 'memory', 'media'),
       mcpConfigPath: join(stateRoot, 'mcp_config.json'),
+      runtimeManifestPath: join(root, 'runtime-manifest.json'),
+      legacyRuntimeSkillsReceiptPath: join(
+        stateRoot,
+        'migrations',
+        'legacy-runtime-skills.json',
+      ),
     })
     expect(payload.workspacePolicy).toMatchObject({
       workspaceRoot: workspace,

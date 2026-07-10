@@ -67,6 +67,7 @@ import {
   resolveRuntimePaths,
   type RuntimePaths,
 } from '../runtime/paths'
+import { isSkillBlocked } from '../runtime/resources'
 import { RuntimeEventStore } from '../runtime/store'
 import {
   SchedulerJobExecutor,
@@ -153,6 +154,8 @@ export interface LoopModelRouter {
 export interface AgentLoopCreateOptions {
   root: string
   stateRoot?: string | null
+  legacyRuntimeRoot?: string | null
+  legacyRuntimeSkillsHandled?: boolean
   templatesDir?: string
   userFile?: string | null
   promptProfile?: PromptProfile | string | null
@@ -342,7 +345,16 @@ export class AgentLoop {
     const root = paths.runtimeRoot
     mkdirSync(root, { recursive: true })
     ensureRuntimeStateDirs(paths)
-    const legacyStateMigration = migrateLegacyStateRoot(paths)
+    const migrationPaths = opts.legacyRuntimeRoot
+      ? resolveRuntimePaths(opts.legacyRuntimeRoot, {
+          stateRoot: paths.stateRoot,
+        })
+      : paths
+    const legacyStateMigration = migrateLegacyStateRoot(migrationPaths, {
+      excludePreviousStateSkills: Boolean(
+        opts.legacyRuntimeRoot && opts.legacyRuntimeSkillsHandled,
+      ),
+    })
     migrateLegacyMainlineToDefaultSession(paths.stateRoot)
     const localConfig = await loadLocalConfig(paths.stateRoot, {
       preserveCorrupt: false,
@@ -1793,6 +1805,7 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
     const safe = safeSkillName(name)
     if (!safe) return null
     for (const dir of this.dirsInPrecedenceOrder()) {
+      if (dir === this.userDir && isSkillBlocked(join(dir, safe))) continue
       for (const path of [
         join(dir, safe, 'SKILL.md'),
         join(dir, `${safe}.md`),
@@ -1817,9 +1830,11 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
       for (const item of readdirSync(dir)) {
         if (item.startsWith('.')) continue
         const path = join(dir, item)
-        if (statSync(path).isDirectory() && existsSync(join(path, 'SKILL.md')))
-          names.add(item)
-        else if (statSync(path).isFile() && item.endsWith('.md'))
+        const stat = statSync(path)
+        if (stat.isDirectory()) {
+          if (dir === this.userDir && isSkillBlocked(path)) continue
+          if (existsSync(join(path, 'SKILL.md'))) names.add(item)
+        } else if (stat.isFile() && item.endsWith('.md'))
           names.add(basename(item, '.md'))
       }
     }

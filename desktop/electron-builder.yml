@@ -4,6 +4,9 @@ productName: Emperor Agent
 directories:
   output: dist
 
+beforePack: scripts/before-pack.cjs
+afterPack: scripts/after-pack.cjs
+
 files:
   - out/**/*
   - package.json
@@ -23,6 +26,8 @@ extraResources:
     to: runtime-defaults/mcp_config.example.json
   - from: ../.env.example
     to: runtime-defaults/.env.example
+  - from: build/runtime-defaults-manifest.json
+    to: runtime-defaults/runtime-manifest.json
   - from: src/pet
     to: desktop-pet
     filter:
@@ -55,5 +60,5 @@ linux:
   category: Utility
   artifactName: Emperor-Agent-${version}-linux-${arch}.${ext}
 
-# Release builds host CoreApi in the Electron main process and copy runtime
-# defaults into the user's app data directory on first launch.
+# Release builds host CoreApi in the Electron main process and read signed
+# runtime defaults directly from the application resources directory.

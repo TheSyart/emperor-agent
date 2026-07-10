@@ -14,6 +14,7 @@ import type { LegacyStateMigrationResult } from '../../runtime/migrate-state-roo
 import type { ActiveTaskInfo, ActiveTaskKind } from '../../runtime/active'
 import type { RuntimeStats } from '../../runtime/store'
 import type { CoreDesktopPetPayload } from './desktop-pet-service'
+import { RUNTIME_MANIFEST_FILE } from '../../runtime/resources'
 
 type Dict = Record<string, unknown>
 
@@ -149,6 +150,12 @@ export class CoreDiagnosticsService {
     return {
       ...paths,
       mcpConfigPath: join(paths.stateRoot, 'mcp_config.json'),
+      runtimeManifestPath: join(paths.runtimeRoot, RUNTIME_MANIFEST_FILE),
+      legacyRuntimeSkillsReceiptPath: join(
+        paths.stateRoot,
+        'migrations',
+        'legacy-runtime-skills.json',
+      ),
     }
   }
 

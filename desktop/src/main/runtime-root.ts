@@ -1,7 +1,13 @@
-import * as fs from 'node:fs'
 import * as path from 'node:path'
+import * as fs from 'node:fs'
+import {
+  migrateLegacyRuntimeSkills,
+  validateRuntimeManifest,
+  type LegacySkillMigrationResult,
+  type RuntimeManifest,
+} from '@emperor/core'
 
-export function packagedRuntimeRoot(userDataPath: string): string {
+export function legacyPackagedRuntimeRoot(userDataPath: string): string {
   return path.join(userDataPath, 'runtime')
 }
 
@@ -9,40 +15,69 @@ export function runtimeDefaultsRoot(resourcesPath: string): string {
   return path.join(resourcesPath, 'runtime-defaults')
 }
 
-export interface InitializeRuntimeOptions {
-  root: string
-  defaultsRoot: string
+export interface PreparePackagedRuntimeOptions {
+  resourcesPath: string
+  userDataPath: string
+  stateRoot: string
+  appVersion: string
+  now?: () => string
 }
 
-const DEFAULT_DIRS = ['templates', 'skills', 'assets']
-const DEFAULT_FILES = [
-  'model_config.example.json',
-  'mcp_config.example.json',
-  '.env.example',
-]
+export interface PreparedPackagedRuntime {
+  runtimeRoot: string
+  legacyRuntimeRoot: string
+  manifest: RuntimeManifest
+  migration: LegacySkillMigrationResult
+}
 
-export function initializePackagedRuntime({
-  root,
-  defaultsRoot,
-}: InitializeRuntimeOptions): string[] {
-  fs.mkdirSync(root, { recursive: true })
-  const copied: string[] = []
+export function preparePackagedRuntime(
+  opts: PreparePackagedRuntimeOptions,
+): PreparedPackagedRuntime {
+  const runtimeRoot = runtimeDefaultsRoot(opts.resourcesPath)
+  const legacyRuntimeRoot = legacyPackagedRuntimeRoot(opts.userDataPath)
+  assertSeparateRoots(runtimeRoot, opts.stateRoot)
+  const manifest = validateRuntimeManifest(runtimeRoot, {
+    expectedAppVersion: opts.appVersion,
+  })
+  const migration = migrateLegacyRuntimeSkills({
+    legacyRuntimeRoot,
+    stateRoot: opts.stateRoot,
+    builtInSkills: manifest.builtInSkills,
+    runtimeRevision: manifest.runtimeRevision,
+    now: opts.now,
+  })
+  return { runtimeRoot, legacyRuntimeRoot, manifest, migration }
+}
 
-  for (const dir of DEFAULT_DIRS) {
-    const src = path.join(defaultsRoot, dir)
-    const dest = path.join(root, dir)
-    if (!fs.existsSync(src) || fs.existsSync(dest)) continue
-    fs.cpSync(src, dest, { recursive: true })
-    copied.push(dir)
+function assertSeparateRoots(runtimeRoot: string, stateRoot: string): void {
+  const runtime = canonicalExistingPath(runtimeRoot)
+  const state = canonicalExistingPath(stateRoot)
+  if (containsPath(runtime, state) || containsPath(state, runtime))
+    throw new Error(
+      'signed runtimeRoot and writable stateRoot must be separate',
+    )
+}
+
+function canonicalExistingPath(value: string): string {
+  const resolved = path.resolve(value)
+  if (fs.existsSync(resolved)) return fs.realpathSync(resolved)
+  const suffix: string[] = []
+  let current = resolved
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current)
+    if (parent === current) return resolved
+    suffix.unshift(path.basename(current))
+    current = parent
   }
+  return path.resolve(fs.realpathSync(current), ...suffix)
+}
 
-  for (const file of DEFAULT_FILES) {
-    const src = path.join(defaultsRoot, file)
-    const dest = path.join(root, file)
-    if (!fs.existsSync(src) || fs.existsSync(dest)) continue
-    fs.copyFileSync(src, dest)
-    copied.push(file)
-  }
-
-  return copied
+function containsPath(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate)
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  )
 }

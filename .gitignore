@@ -44,6 +44,7 @@ coverage/
 /desktop/out/
 /desktop/dist/
 /desktop/build/backend/
+/desktop/build/runtime-defaults-manifest.json*
 /desktop/screenshots/
 /desktop/test-results/
 /desktop/.uiplan-progress.json

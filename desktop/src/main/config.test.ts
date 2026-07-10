@@ -94,6 +94,21 @@ describe('resolveConfig', () => {
     expect(withoutEnv.runtimeRoot).toBe('/manual-runtime')
   })
 
+  it('forces packaged runtime resources ahead of argv and environment overrides', () => {
+    const cfg = resolveConfig({
+      argv: ['--root', '/untrusted-argv'],
+      env: {
+        EMPEROR_AGENT_ROOT: '/untrusted-env',
+        EMPEROR_CONFIG_DIR: '/private-state',
+      },
+      forcedRuntimeRoot: '/signed/resources/runtime-defaults',
+    })
+
+    expect(cfg.runtimeRoot).toBe('/signed/resources/runtime-defaults')
+    expect(cfg.runtimeRootSource).toBe('packaged')
+    expect(cfg.stateRoot).toBe('/private-state')
+  })
+
   it('reads emperor.local.json from stateRoot, not runtimeRoot', () => {
     const seen: string[] = []
     const readFile = (p: string): string => {

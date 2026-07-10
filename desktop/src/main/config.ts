@@ -3,7 +3,7 @@ import * as path from 'node:path'
 import { defaultStateRoot } from '@emperor/core'
 import { moduleDirFromUrl } from './esm-path'
 
-export type RootSource = 'explicit' | 'env' | 'default'
+export type RootSource = 'explicit' | 'env' | 'default' | 'packaged'
 
 export interface ResolvedConfig {
   runtimeRoot: string
@@ -18,6 +18,7 @@ export interface ResolveConfigOptions {
   env?: Record<string, string | undefined>
   readFile?: (p: string) => string
   defaultRoot?: string
+  forcedRuntimeRoot?: string
 }
 
 const mainDir = moduleDirFromUrl(import.meta.url)
@@ -36,7 +37,9 @@ function resolveRuntimeRoot(
   argv: string[],
   env: Record<string, string | undefined>,
   defaultRoot?: string,
+  forcedRuntimeRoot?: string,
 ): { root: string; source: RootSource } {
+  if (forcedRuntimeRoot) return { root: forcedRuntimeRoot, source: 'packaged' }
   const explicit = argValue(argv, '--root')
   if (explicit) return { root: explicit, source: 'explicit' }
   if (env.EMPEROR_AGENT_ROOT)
@@ -62,11 +65,13 @@ export function resolveConfig({
   env = {},
   readFile = defaultReadFile,
   defaultRoot,
+  forcedRuntimeRoot,
 }: ResolveConfigOptions = {}): ResolvedConfig {
   const { root: runtimeRoot, source: runtimeRootSource } = resolveRuntimeRoot(
     argv,
     env,
     defaultRoot,
+    forcedRuntimeRoot,
   )
   const { root: stateRoot, source: stateRootSource } = resolveStateRoot(env)
 
