@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createExpansionStore, messageScrollSignature, shouldFollowBottom, shouldVirtualize } from './messageListModel'
-import type { ChatMessage } from '../../types'
+import type { AssistantMessage, ChatMessage } from '../../types'
 
 describe('messageScrollSignature', () => {
   it('tracks only the last visible message changes needed for bottom pinning', () => {
@@ -18,7 +18,7 @@ describe('messageScrollSignature', () => {
   })
 
   it('tracks assistant segment count without deep-watching every segment field', () => {
-    const messages: ChatMessage[] = [
+    const messages: AssistantMessage[] = [
       { id: 'a1', role: 'assistant', content: '', streaming: true, segments: [] },
     ]
     const before = messageScrollSignature(messages)

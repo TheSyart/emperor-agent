@@ -3,6 +3,30 @@ import type { Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+type VisualSessionMode = 'build' | 'chat'
+
+type VisualProjectInfo = {
+  project_id: string
+  project_path: string
+  project_name: string
+}
+
+type VisualCoreListener = (event: unknown) => void
+
+type VisualBridge = {
+  version: string
+  platform: string
+  selectDirectory: () => Promise<string>
+  onCoreEvent: (listener: VisualCoreListener) => () => void
+  invokeCore: (operationKey: string, ...args: unknown[]) => Promise<unknown>
+}
+
+declare global {
+  interface Window {
+    emperor?: VisualBridge
+  }
+}
+
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'codex-v2')
 const visualProjectDir = resolve(process.cwd(), 'screenshots', 'fixtures', 'visual-build-project')
 
@@ -483,7 +507,7 @@ async function installVisualCoreBridge(page: Page) {
       context_used: 12000,
     }
 
-    function session(id, title, mode, projectInfo) {
+    function session(id: string, title: string, mode: VisualSessionMode, projectInfo?: VisualProjectInfo) {
       return {
         id,
         title,
@@ -505,11 +529,11 @@ async function installVisualCoreBridge(page: Page) {
       version: '0.1.0-visual',
       platform: 'visual',
       selectDirectory: async () => projectDir,
-      onCoreEvent: (listener) => {
+      onCoreEvent: (listener: VisualCoreListener) => {
         queueMicrotask(() => listener({ event: 'ready', seq: 1, latest_seq: 1, model: 'visual-main', provider: 'visual', control: boot.control }))
         return () => {}
       },
-      invokeCore: async (operationKey, ...args) => {
+      invokeCore: async (operationKey: string, ...args: unknown[]) => {
         switch (operationKey) {
           case 'bootstrap':
             return boot
@@ -518,7 +542,11 @@ async function installVisualCoreBridge(page: Page) {
           case 'sessions.activate':
             return { active: args[0], complete: true }
           case 'sessions.create': {
-            const body = args[0] || {}
+            const body = (args[0] ?? {}) as {
+              title?: string
+              mode?: VisualSessionMode
+              project?: VisualProjectInfo
+            }
             const created = session(`created-${sessions.length}`, body.title || '新会话', body.mode || 'chat', body.project)
             sessions.unshift(created)
             return created
@@ -597,16 +625,23 @@ async function installVisualCoreBridge(page: Page) {
           case 'hooks.testMatch':
             return { revision: hooksPayload.revision, eventName: 'PreToolUse', items: [], diagnostics: [] }
           case 'hooks.validateConfig':
-            return { valid: true, config: args[0]?.config, diagnostics: [] }
-          case 'hooks.setProjectTrust':
-            hooksPayload.projectTrust.status = args[0]?.trusted ? 'trusted' : 'untrusted'
-            hooksPayload.sources[1].active = Boolean(args[0]?.trusted)
-            hooksPayload.sources[1].blockedReason = args[0]?.trusted ? null : 'project_untrusted'
-            hooksPayload.effectiveGroups[1].source.active = Boolean(args[0]?.trusted)
-            hooksPayload.effectiveGroups[1].source.blockedReason = args[0]?.trusted ? null : 'project_untrusted'
+            return { valid: true, config: (args[0] as { config?: unknown } | undefined)?.config, diagnostics: [] }
+          case 'hooks.setProjectTrust': {
+            const body = (args[0] as { trusted?: boolean } | undefined) ?? {}
+            hooksPayload.projectTrust.status = body.trusted ? 'trusted' : 'untrusted'
+            hooksPayload.sources[1].active = Boolean(body.trusted)
+            hooksPayload.sources[1].blockedReason = body.trusted ? undefined : 'project_untrusted'
+            hooksPayload.effectiveGroups[1].source.active = Boolean(body.trusted)
+            hooksPayload.effectiveGroups[1].source.blockedReason = body.trusted ? undefined : 'project_untrusted'
             return hooksPayload.projectTrust
+          }
           case 'hooks.saveConfig':
-            return { ok: false, error: { message: `stale hooks revision: expected ${args[0]?.revision}, current visual-new-revision` } }
+            return {
+              ok: false,
+              error: {
+                message: `stale hooks revision: expected ${(args[0] as { revision?: string } | undefined)?.revision}, current visual-new-revision`,
+              },
+            }
           case 'chat.stopRuntime':
             return { cancelled: false }
           default:

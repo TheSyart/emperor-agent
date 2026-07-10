@@ -461,8 +461,8 @@ function execCommand(command: string, options: ExecOptions & { encoding: BufferE
   return new Promise((resolve, reject) => {
     exec(command, options, (error, stdout, stderr) => {
       if (error) {
-        ;(error as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stdout = stdout
-        ;(error as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stderr = stderr
+        ;((error as unknown) as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stdout = stdout
+        ;((error as unknown) as NodeJS.ErrnoException & { stdout?: string; stderr?: string }).stderr = stderr
         reject(error)
         return
       }

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.web.json",
+  "compilerOptions": {
+    "strict": false,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@renderer/*": ["src/renderer/src/*"],
+      "vitest": ["src/renderer/src/test-vitest-shim.ts"]
+    }
+  },
+  "include": [
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.d.ts"
+  ],
+  "exclude": []
+}

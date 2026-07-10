@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "lint": "eslint src"
+    "lint": "eslint src --max-warnings=0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

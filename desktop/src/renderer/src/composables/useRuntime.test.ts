@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { BootstrapPayload } from '../types'
 import { useRuntime } from './useRuntime'
 

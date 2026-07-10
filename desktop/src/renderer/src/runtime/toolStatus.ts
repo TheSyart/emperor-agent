@@ -1,4 +1,4 @@
-import type { AssistantMessage, ToolArtifactRef, ToolSegment, ToolStatus } from '../types'
+import type { AssistantMessage, TodoItem, ToolArtifactRef, ToolSegment, ToolStatus } from '../types'
 
 export interface ToolResultUpdate {
   summary?: string
@@ -122,14 +122,25 @@ function artifactList(value: unknown): ToolArtifactRef[] | undefined {
 
 function todoList(value: unknown): ToolSegment['todos'] | undefined {
   if (!Array.isArray(value)) return undefined
-  const out = value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-    .map((item) => ({
-      id: typeof item.id === 'number' || typeof item.id === 'string' ? item.id : '',
-      content: typeof item.content === 'string' ? item.content : '',
-      status: typeof item.status === 'string' ? item.status : 'pending',
-      plan_step_id: typeof item.plan_step_id === 'string' || item.plan_step_id === null ? item.plan_step_id : undefined,
-      blocked_reason: typeof item.blocked_reason === 'string' || item.blocked_reason === null ? item.blocked_reason : undefined,
-    }))
+  const out: TodoItem[] = value
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    .map((item): TodoItem => {
+      const planStepId = item.plan_step_id
+      const blockedReason = item.blocked_reason
+      return {
+        id: typeof item.id === 'number' || typeof item.id === 'string' ? item.id : '',
+        content: typeof item.content === 'string' ? item.content : '',
+        status: typeof item.status === 'string' ? item.status : 'pending',
+        plan_step_id: (typeof planStepId === 'string' || planStepId === null ? planStepId : undefined) as
+          | string
+          | null
+          | undefined,
+        blocked_reason: (typeof blockedReason === 'string' || blockedReason === null ? blockedReason : undefined) as
+          | string
+          | null
+          | undefined,
+      }
+    })
     .filter((item) => item.id !== '' || item.content)
   return out.length ? out : undefined
 }

@@ -35,7 +35,7 @@ describe('tool group model', () => {
     expect(toolCardDefaultOpen([tool('run_command', 'running')])).toBe(false)
     expect(toolCardDefaultOpen([tool('update_todos', 'error')])).toBe(false)
     expect(toolCardDefaultOpen([tool('dispatch_subagent', 'done', {
-      subagents: [{ id: 'agent-1', kind: 'subagent', name: 'worker', status: 'done', tools: [], messages: [] }],
+      subagents: [{ id: 'agent-1', kind: 'subagent', role: 'worker', status: 'done', tools: [], messages: [] }],
     })])).toBe(false)
   })
 })

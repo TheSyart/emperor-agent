@@ -3,7 +3,7 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-10T16:04:10+08:00",
+  "updated_at": "2026-07-10T17:12:00+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
   "completed": 1,
@@ -17,11 +17,11 @@
       "notes": "Baseline accepted on main. make check passed (Core 671, Desktop 272), Playwright passed 28/28 after aligning the four-mode contract, and macOS arm64 package:dir passed unsigned as expected."
     },
     "GOV-002": {
-      "status": "pending",
+      "status": "in_progress",
       "title": "建立全仓格式化与零告警门禁",
       "depends_on": ["BASE-001"],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 1 started on codex/cross-platform-release-v2. RED captured: `npm run format:check` failed with missing script, and Desktop typecheck file lists excluded `src/**/*.test.ts` plus `tests/visual/**/*.spec.ts` (`npm --prefix desktop exec tsc -- -p tsconfig.node.json --noEmit --listFilesOnly | rg 'desktop/(src/.+\\\\.(test|spec)\\\\.ts|tests/visual/.+\\\\.spec\\\\.ts)'` and `npm --prefix desktop exec vue-tsc -- --noEmit -p tsconfig.web.json --listFilesOnly | rg 'desktop/src/renderer/src/.+\\\\.(test|spec)\\\\.ts'` both exited 1). Baseline lint warnings observed: Core 1 warning, Desktop 14 warnings. GREEN on round 1: `npm --prefix desktop run typecheck:test`, `npm run lint --workspace @emperor/core`, `npm --prefix desktop run lint`, `npm run typecheck --workspace @emperor/core`, `npm --prefix desktop run typecheck`, `git diff --check`, plus Desktop test file-list evidence from `tsc --listFilesOnly` for renderer/main/preload/pet/tests/visual."
     },
     "PORT-003": {
       "status": "pending",

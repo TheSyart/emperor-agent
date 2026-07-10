@@ -26,6 +26,7 @@ function session(extra: Partial<SessionInfo> = {}): SessionInfo {
     project_name: null,
     archived_at: null,
     control_pending: null,
+    version: 1,
     ...extra,
   }
 }

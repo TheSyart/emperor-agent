@@ -9,7 +9,7 @@ import {
 } from '../../capabilities/composerCapabilityTokens'
 import { isPathLikeSlashToken } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
-import type { AttachmentRef, ChatSendPayload, CurrentModelConfig, ModelEntry, ToolInfo } from '../../types'
+import type { ChatSendPayload, CurrentModelConfig, ModelEntry, ToolInfo } from '../../types'
 import { actionIcons, modelIcons, toolIcon } from '../../icons'
 import type { IconComponent } from '../../icons'
 import { useAttachments } from '../../composables/useAttachments'

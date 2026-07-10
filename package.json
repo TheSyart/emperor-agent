@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "check": "scripts/check.sh",
+    "format": "node scripts/run-prettier.mjs --write",
+    "format:check": "node scripts/run-prettier.mjs --check",
     "test": "npm test --workspace @emperor/core && npm --prefix desktop run test",
+    "typecheck:test": "npm --prefix desktop run typecheck:test",
     "typecheck": "npm run typecheck --workspace @emperor/core && npm --prefix desktop run typecheck",
     "build": "npm --prefix desktop run build"
   },
@@ -13,5 +16,8 @@
   ],
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
   }
 }

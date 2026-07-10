@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
+const NOW = '2026-01-01T00:00:00+0800'
+
+function session(extra: Record<string, unknown> = {}) {
+  return {
+    id: 'session',
+    title: '会话',
+    created_at: NOW,
+    updated_at: NOW,
+    preview: '',
+    version: 1,
+    ...extra,
+  }
+}
+
 describe('session draft helpers', () => {
   it('creates a local draft session without backend fields changing shape', async () => {
     const { createDraftSession, isDraftSessionId } = await import('./sessionDrafts')
@@ -31,12 +45,12 @@ describe('session draft helpers', () => {
   it('replaces a draft with the committed backend session', async () => {
     const { applySessionCreated, createDraftSession } = await import('./sessionDrafts')
     const draft = createDraftSession()
-    const sessions = [draft, { id: 'old', title: '旧会话', preview: '' }]
+    const sessions = [draft, session({ id: 'old', title: '旧会话' })]
 
     const next = applySessionCreated(sessions, {
       event: 'session_created',
       client_draft_id: draft.id,
-      session: { id: 'real', title: '新会话', preview: 'hello', title_status: 'pending' },
+      session: session({ id: 'real', title: '新会话', preview: 'hello', title_status: 'pending' }),
     })
 
     expect(next.map((session) => session.id)).toEqual(['real', 'old'])
@@ -56,7 +70,7 @@ describe('session draft helpers', () => {
     const next = applySessionCreated([draft], {
       event: 'session_created',
       client_draft_id: draft.id,
-      session: {
+      session: session({
         id: 'real',
         title: '构建 demo',
         preview: 'start',
@@ -65,7 +79,7 @@ describe('session draft helpers', () => {
         project_path: '/tmp/demo',
         project_name: 'demo',
         title_status: 'pending',
-      },
+      }),
     })
 
     expect(next[0].id).toBe('real')
@@ -77,11 +91,11 @@ describe('session draft helpers', () => {
 
   it('applies generated title updates in place', async () => {
     const { applySessionTitleUpdated } = await import('./sessionDrafts')
-    const sessions = [{ id: 'real', title: '新会话', preview: '', title_status: 'pending' }]
+    const sessions = [session({ id: 'real', title: '新会话', title_status: 'pending' })]
 
     const next = applySessionTitleUpdated(sessions, {
       event: 'session_title_updated',
-      session: { id: 'real', title: '界面重塑', title_status: 'generated' },
+      session: session({ id: 'real', title: '界面重塑', title_status: 'generated' }),
     })
 
     expect(next[0].title).toBe('界面重塑')

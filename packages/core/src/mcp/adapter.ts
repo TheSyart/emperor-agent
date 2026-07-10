@@ -8,8 +8,6 @@ export class MCPToolAdapter extends Tool {
   override readonly name: string
   override readonly description: string
   override readonly parameters: ToolParamsSchema
-  override readonly readOnly: boolean
-  override readonly exclusive: boolean
   private readonly serverName: string
   private readonly toolName: string
   private readonly connection: MCPConnection

@@ -64,7 +64,7 @@ describe('diagnostics panel model', () => {
         inbox: { pending: 3 },
         store: { exists: true, corruptBackups: [] },
       },
-      activeTasks: [{ id: 'task_1' }],
+      activeTasks: [{ id: 'task_1', kind: 'chat', status: 'running', title: 'Visual task', source: 'runtime' }],
       desktopPet: {
         enabled: false,
         autoStartWithWebui: false,

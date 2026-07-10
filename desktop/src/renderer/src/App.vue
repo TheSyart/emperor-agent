@@ -13,10 +13,7 @@ import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
 import { provideAppContext } from './composables/useAppContext'
-import type { ChatSendPayload, CompactResult, ControlPayload, TokenStatsRow } from './types'
-import { core } from './api/http'
 import { saveOnboardingModelConfig } from './api/model'
-import { formatNumber, usageTypeLabel } from './utils/format'
 
 const router = useRouter()
 const toast = ref('')

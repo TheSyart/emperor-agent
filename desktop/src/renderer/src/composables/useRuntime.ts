@@ -1,4 +1,4 @@
-import { computed, reactive, ref, watch, type Ref } from 'vue'
+import { computed, reactive, ref, type Ref } from 'vue'
 import type { AssistantMessage, AttachmentRef, BootstrapPayload, ChatMessage, ChatSendPayload, ControlInteraction, PendingState, RequestedSkill, RuntimeEventEnvelope, RuntimeHistoryItem, RuntimeStatus, SessionInfo, TeamMessage, ThoughtSegment, ToolSegment, WsEvent } from '../types'
 import {
   applyChatProjectionEvent,
@@ -6,11 +6,9 @@ import {
   finishActiveThought,
   finishTimedState as finishTimedStateAt,
   isChatProjectionEvent,
-  syncAssistantDoneContent,
   type ChatProjectionState,
 } from '../runtime/chatProjection'
 import { sortRuntimeEvents } from '../runtime/events'
-import { toolDisplayName } from '../components/chat/toolDisplay'
 import { replayRuntimeEvents } from '../runtime/reducer'
 import { findSubagent, findSubagentTool, findToolSegment } from '../runtime/selectors'
 import { applyPlanEvent, type PlanProjection } from '../runtime/handlers/plans'
@@ -20,9 +18,9 @@ import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { schedulerMessageMeta } from '../runtime/schedulerMeta'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
-import { applyToolResultToSegment, applyToolRunUpdateToSegment, settleRunningToolSegments } from '../runtime/toolStatus'
-import { compactJson } from '../utils/format'
+import { settleRunningToolSegments } from '../runtime/toolStatus'
 import { core } from '../api/http'
+import { compactJson } from '../utils/format'
 
 function nextId(prefix: string) {
   const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`

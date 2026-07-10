@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "types": ["node", "@playwright/test"]
+  },
+  "include": [
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/pet/**/*.js",
+    "src/pet/**/*.ts",
+    "tests/visual/**/*.ts",
+    "electron.vite.config.ts",
+    "playwright.config.ts"
+  ],
+  "exclude": []
+}
