@@ -1,0 +1,167 @@
+{
+  "plan_id": "PLAN-EA-XPLAT-002",
+  "plan_version": "2.0",
+  "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
+  "created_at": "2026-07-10",
+  "updated_at": "2026-07-10T16:02:16+08:00",
+  "started_at": "2026-07-10T16:02:16+08:00",
+  "total_tasks": 22,
+  "completed": 0,
+  "rounds": 0,
+  "tasks": {
+    "BASE-001": {
+      "status": "in_progress",
+      "title": "固定当前 Hooks/UI/桌宠基线",
+      "depends_on": [],
+      "attempts": 1,
+      "notes": "Baseline validation started on main. RED confirmed: Playwright mode-menu assertion expected 3 options while the product exposes 4."
+    },
+    "GOV-002": {
+      "status": "pending",
+      "title": "建立全仓格式化与零告警门禁",
+      "depends_on": ["BASE-001"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "PORT-003": {
+      "status": "pending",
+      "title": "用 Node 原生实现 Glob/Grep",
+      "depends_on": ["GOV-002"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "IPC-004": {
+      "status": "pending",
+      "title": "建立全量类型化 Core operation registry",
+      "depends_on": ["PORT-003"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "RSC-005": {
+      "status": "pending",
+      "title": "直接读取签名 runtime defaults",
+      "depends_on": ["IPC-004"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "SKILL-006": {
+      "status": "pending",
+      "title": "最小内置 Skill 与 Core 原生 Creator",
+      "depends_on": ["RSC-005"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-FND-007": {
+      "status": "pending",
+      "title": "建立 Environment schemas、catalog 与 store",
+      "depends_on": ["SKILL-006"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-PROBE-008": {
+      "status": "pending",
+      "title": "实现无 shell 探测和项目识别",
+      "depends_on": ["ENV-FND-007"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-SNAP-009": {
+      "status": "pending",
+      "title": "统一执行环境 snapshot",
+      "depends_on": ["ENV-PROBE-008"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-JOB-010": {
+      "status": "pending",
+      "title": "安装计划、job 和中断恢复",
+      "depends_on": ["ENV-SNAP-009"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-MAC-011": {
+      "status": "pending",
+      "title": "macOS 安装 adapter",
+      "depends_on": ["ENV-JOB-010"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-WIN-012": {
+      "status": "pending",
+      "title": "Windows 安装 adapter",
+      "depends_on": ["ENV-JOB-010"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-LNX-013": {
+      "status": "pending",
+      "title": "Ubuntu 安装 adapter",
+      "depends_on": ["ENV-JOB-010"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "SKILL-INSTALL-014": {
+      "status": "pending",
+      "title": "安全预览并安装外部 Skill",
+      "depends_on": ["ENV-PROBE-008"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-API-015": {
+      "status": "pending",
+      "title": "接入 CoreApi、IPC、事件和 diagnostics",
+      "depends_on": ["ENV-MAC-011", "ENV-WIN-012", "ENV-LNX-013", "SKILL-INSTALL-014"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "ENV-UI-016": {
+      "status": "pending",
+      "title": "诊断环境与 Skill 状态 UI",
+      "depends_on": ["ENV-API-015"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "PKG-017": {
+      "status": "pending",
+      "title": "最小资源打包与 packaged smoke",
+      "depends_on": ["ENV-UI-016"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "REL-MAC-018": {
+      "status": "pending",
+      "title": "macOS 双架构签名、公证与安装验收",
+      "depends_on": ["PKG-017"],
+      "attempts": 0,
+      "notes": "External completion dependency: Developer ID Application and App Store Connect API credentials."
+    },
+    "REL-WIN-019": {
+      "status": "pending",
+      "title": "Windows Artifact Signing 与安装验收",
+      "depends_on": ["PKG-017"],
+      "attempts": 0,
+      "notes": "External completion dependency: Azure Artifact Signing or trusted OV PFX credentials."
+    },
+    "REL-LNX-020": {
+      "status": "pending",
+      "title": "Ubuntu DEB/AppImage 与双版本 smoke",
+      "depends_on": ["PKG-017"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "REL-AGG-021": {
+      "status": "pending",
+      "title": "供应链证明与原子 Release 发布",
+      "depends_on": ["REL-MAC-018", "REL-WIN-019", "REL-LNX-020"],
+      "attempts": 0,
+      "notes": ""
+    },
+    "QA-022": {
+      "status": "pending",
+      "title": "最终安全回归、receipt 与文档签收",
+      "depends_on": ["REL-AGG-021"],
+      "attempts": 0,
+      "notes": ""
+    }
+  }
+}
