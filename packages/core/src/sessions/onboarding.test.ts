@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentLoop } from '../agent/loop'
@@ -16,43 +22,78 @@ const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
 class AskingFakeProvider extends LLMProvider {
   calls: ChatArgs[] = []
-  constructor() { super({ defaultModel: 'fake-main' }) }
+  constructor() {
+    super({ defaultModel: 'fake-main' })
+  }
   async chat(args: ChatArgs): Promise<LLMResponse> {
     this.calls.push(args)
     if (this.calls.length === 1) {
       return {
         content: '',
-        toolCalls: [{
-          id: 'call_ask',
-          name: 'ask_user',
-          arguments: {
-            questions: [{
-              id: 'name',
-              header: '称呼',
-              question: '怎么称呼你？',
-              options: [{ id: 'a', label: '直接告诉你' }, { id: 'b', label: '暂不透露' }],
-            }],
+        toolCalls: [
+          {
+            id: 'call_ask',
+            name: 'ask_user',
+            arguments: {
+              questions: [
+                {
+                  id: 'name',
+                  header: '称呼',
+                  question: '怎么称呼你？',
+                  options: [
+                    { id: 'a', label: '直接告诉你' },
+                    { id: 'b', label: '暂不透露' },
+                  ],
+                },
+              ],
+            },
           },
-        }],
+        ],
         finishReason: 'tool_calls',
         usage: { input: 1, output: 1 },
         reasoningContent: null,
         thinkingBlocks: null,
       }
     }
-    return { content: '好的。', toolCalls: [], finishReason: 'stop', usage: { input: 1, output: 1 }, reasoningContent: null, thinkingBlocks: null }
+    return {
+      content: '好的。',
+      toolCalls: [],
+      finishReason: 'stop',
+      usage: { input: 1, output: 1 },
+      reasoningContent: null,
+      thinkingBlocks: null,
+    }
   }
 }
 
 function fakeRouter(provider: LLMProvider) {
   const snap: ProviderSnapshot = {
-    provider, providerName: 'fake', providerLabel: 'Fake', model: 'fake-main', apiBase: null,
-    generation: { maxTokens: 2000, temperature: 0.1, reasoningEffort: null }, contextWindowTokens: 100_000,
-    config: {}, supportsVision: false, entryName: 'fake', entryLabel: 'Fake', modelRole: 'main', routeReason: 'fake',
+    provider,
+    providerName: 'fake',
+    providerLabel: 'Fake',
+    model: 'fake-main',
+    apiBase: null,
+    generation: { maxTokens: 2000, temperature: 0.1, reasoningEffort: null },
+    contextWindowTokens: 100_000,
+    config: {},
+    supportsVision: false,
+    entryName: 'fake',
+    entryLabel: 'Fake',
+    modelRole: 'main',
+    routeReason: 'fake',
   }
   return {
-    route: (useCase: string): ModelRoute => ({ snapshot: snap, fallback: null, useCase, reason: `${useCase}:fake`, estimatedTokens: null }),
-    payload: () => ({ mainModel: 'fake-main', secondaryModel: 'fake-secondary' }),
+    route: (useCase: string): ModelRoute => ({
+      snapshot: snap,
+      fallback: null,
+      useCase,
+      reason: `${useCase}:fake`,
+      estimatedTokens: null,
+    }),
+    payload: () => ({
+      mainModel: 'fake-main',
+      secondaryModel: 'fake-secondary',
+    }),
   }
 }
 
@@ -84,7 +125,11 @@ describe('ensureUserProfileFile (single-sourced seeding)', () => {
     const stateRoot = tmp('emperor-onboarding-seed-existing-')
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
     mkdirSync(join(stateRoot, 'memory', 'profile'), { recursive: true })
-    writeFileSync(join(stateRoot, 'memory', 'profile', 'USER.local.md'), '# customized\n', 'utf8')
+    writeFileSync(
+      join(stateRoot, 'memory', 'profile', 'USER.local.md'),
+      '# customized\n',
+      'utf8',
+    )
 
     const path = ensureUserProfileFile(stateRoot, templatesDir)
 
@@ -108,7 +153,9 @@ describe('isUserProfileStillDefault', () => {
   })
 
   it('does not match once the user has customized any content', () => {
-    expect(isUserProfileStillDefault('# 用户档案\n\n- **称呼**：李公公\n', SEED)).toBe(false)
+    expect(
+      isUserProfileStillDefault('# 用户档案\n\n- **称呼**：李公公\n', SEED),
+    ).toBe(false)
   })
 })
 
@@ -118,8 +165,16 @@ describe('claimProfileOnboardingTrigger', () => {
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
     ensureUserProfileFile(stateRoot, templatesDir)
 
-    const first = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: true })
-    const second = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: true })
+    const first = claimProfileOnboardingTrigger({
+      stateRoot,
+      templatesDir,
+      hasConfiguredModel: true,
+    })
+    const second = claimProfileOnboardingTrigger({
+      stateRoot,
+      templatesDir,
+      hasConfiguredModel: true,
+    })
 
     expect(first).toBe(true)
     expect(second).toBe(false)
@@ -130,9 +185,17 @@ describe('claimProfileOnboardingTrigger', () => {
     const stateRoot = tmp('emperor-onboarding-claim-customized-')
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
     mkdirSync(join(stateRoot, 'memory', 'profile'), { recursive: true })
-    writeFileSync(join(stateRoot, 'memory', 'profile', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
+    writeFileSync(
+      join(stateRoot, 'memory', 'profile', 'USER.local.md'),
+      '# 用户档案\n\n- **称呼**：皇上\n',
+      'utf8',
+    )
 
-    const result = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: true })
+    const result = claimProfileOnboardingTrigger({
+      stateRoot,
+      templatesDir,
+      hasConfiguredModel: true,
+    })
 
     expect(result).toBe(false)
     expect(existsSync(join(stateRoot, 'onboarding.json'))).toBe(true)
@@ -143,12 +206,20 @@ describe('claimProfileOnboardingTrigger', () => {
     const templatesDir = seedTemplatesDir(stateRoot, SEED)
     ensureUserProfileFile(stateRoot, templatesDir)
 
-    const result = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: false })
+    const result = claimProfileOnboardingTrigger({
+      stateRoot,
+      templatesDir,
+      hasConfiguredModel: false,
+    })
 
     expect(result).toBe(false)
     expect(existsSync(join(stateRoot, 'onboarding.json'))).toBe(false)
 
-    const retry = claimProfileOnboardingTrigger({ stateRoot, templatesDir, hasConfiguredModel: true })
+    const retry = claimProfileOnboardingTrigger({
+      stateRoot,
+      templatesDir,
+      hasConfiguredModel: true,
+    })
     expect(retry).toBe(true)
   })
 })
@@ -175,12 +246,19 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
       enableFirstRunOnboarding: true,
-      eventSink: async (event) => { events.push(event) },
+      eventSink: async (event) => {
+        events.push(event)
+      },
     })
 
     expect(provider.calls.length).toBeGreaterThan(0)
-    const userMessageEvent = events.find((event) => event.event === 'user_message')
-    expect(userMessageEvent).toMatchObject({ source: 'onboarding', content: expect.stringContaining('初次见面') })
+    const userMessageEvent = events.find(
+      (event) => event.event === 'user_message',
+    )
+    expect(userMessageEvent).toMatchObject({
+      source: 'onboarding',
+      content: expect.stringContaining('初次见面'),
+    })
     const askEvent = events.find((event) => event.event === 'ask_request')
     expect(askEvent).toBeTruthy()
     expect(loop.registry.get('save_user_profile')).toBeTruthy()
@@ -199,19 +277,32 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
       stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       enableFirstRunOnboarding: true,
-      eventSink: async (event) => { events.push(event) },
+      eventSink: async (event) => {
+        events.push(event)
+      },
     })
 
-    expect(events.find((event) => event.event === 'user_message' && event.source === 'onboarding')).toBeUndefined()
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' && event.source === 'onboarding',
+      ),
+    ).toBeUndefined()
     expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(false)
 
     await loop.close()
   })
 
   it('does not fire for an already-customized profile (upgrade path) but does latch immediately', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-existing-user-'))
+    const root = mkdtempSync(
+      join(tmpdir(), 'emperor-onboarding-e2e-existing-user-'),
+    )
     mkdirSync(join(root, '.emperor', 'memory', 'profile'), { recursive: true })
-    writeFileSync(join(root, '.emperor', 'memory', 'profile', 'USER.local.md'), '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
+    writeFileSync(
+      join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
+      '# 用户档案\n\n- **称呼**：皇上\n',
+      'utf8',
+    )
     const provider = new AskingFakeProvider()
     const events: Array<Record<string, unknown>> = []
 
@@ -221,11 +312,18 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
       enableFirstRunOnboarding: true,
-      eventSink: async (event) => { events.push(event) },
+      eventSink: async (event) => {
+        events.push(event)
+      },
     })
 
     expect(provider.calls.length).toBe(0)
-    expect(events.find((event) => event.event === 'user_message' && event.source === 'onboarding')).toBeUndefined()
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' && event.source === 'onboarding',
+      ),
+    ).toBeUndefined()
     expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(true)
 
     await loop.close()
@@ -241,11 +339,18 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
       stateRoot: join(root, '.emperor'),
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
-      eventSink: async (event) => { events.push(event) },
+      eventSink: async (event) => {
+        events.push(event)
+      },
     })
 
     expect(provider.calls.length).toBe(0)
-    expect(events.find((event) => event.event === 'user_message' && event.source === 'onboarding')).toBeUndefined()
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' && event.source === 'onboarding',
+      ),
+    ).toBeUndefined()
     expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(false)
 
     await loop.close()

@@ -1,23 +1,23 @@
-node_modules/
-desktop/node_modules/
+/node_modules/
+/desktop/node_modules/
 
-dist/
-build/
-out/
-coverage/
-desktop/dist/
-desktop/build/
-desktop/out/
-desktop/test-results/
-desktop/screenshots/
+/dist/
+/build/
+/out/
+/coverage/
+/desktop/dist/
+/desktop/build/
+/desktop/out/
+/desktop/test-results/
+/desktop/screenshots/
 
-memory/
-sessions/
-.emperor/
-.team/
-model_config.json
-mcp_config.json
-emperor.local.json
+/memory/
+/sessions/
+/.emperor/
+/.team/
+/model_config.json
+/mcp_config.json
+/emperor.local.json
 
 *.png
 *.jpg

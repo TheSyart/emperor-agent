@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { routeBuildDecision, routeChatDecision, type CompactionMemoryDecision } from './compaction-routing'
+import {
+  routeBuildDecision,
+  routeChatDecision,
+  type CompactionMemoryDecision,
+} from './compaction-routing'
 import { memoryContentHash } from './patch'
 
 describe('compaction memory routing', () => {
@@ -24,12 +28,19 @@ describe('compaction memory routing', () => {
     expect(routed.patches[0]).toMatchObject({
       target: { kind: 'project', projectId: 'project_1' },
       baseHash: memoryContentHash(projectMemory),
-      operations: [{ op: 'append_section_item', section: 'Build Commands', item: '- npm test --workspace @emperor/core' }],
+      operations: [
+        {
+          op: 'append_section_item',
+          section: 'Build Commands',
+          item: '- npm test --workspace @emperor/core',
+        },
+      ],
     })
   })
 
   it('requires medium/high cross-project learning before build writes global memory', () => {
-    const globalMemory = '# Global Long-Term Memory\n\n## Cross-Project Decisions\n'
+    const globalMemory =
+      '# Global Long-Term Memory\n\n## Cross-Project Decisions\n'
     const localDecision: CompactionMemoryDecision = {
       kind: 'global_fact',
       section: 'Cross-Project Decisions',
@@ -50,12 +61,28 @@ describe('compaction memory routing', () => {
       content: '- durable cross-project decision',
     }
 
-    const local = routeBuildDecision(localDecision, { projectId: 'project_1', projectMemory: '# Project Memory\n', globalMemory })
-    const weak = routeBuildDecision(weakCrossProject, { projectId: 'project_1', projectMemory: '# Project Memory\n', globalMemory })
-    const durable = routeBuildDecision(durableCrossProject, { projectId: 'project_1', projectMemory: '# Project Memory\n', globalMemory })
+    const local = routeBuildDecision(localDecision, {
+      projectId: 'project_1',
+      projectMemory: '# Project Memory\n',
+      globalMemory,
+    })
+    const weak = routeBuildDecision(weakCrossProject, {
+      projectId: 'project_1',
+      projectMemory: '# Project Memory\n',
+      globalMemory,
+    })
+    const durable = routeBuildDecision(durableCrossProject, {
+      projectId: 'project_1',
+      projectMemory: '# Project Memory\n',
+      globalMemory,
+    })
 
-    expect(local.discarded[0]?.reason).toBe('build_global_write_requires_cross_project_learning')
-    expect(weak.discarded[0]?.reason).toBe('build_global_write_requires_medium_confidence')
+    expect(local.discarded[0]?.reason).toBe(
+      'build_global_write_requires_cross_project_learning',
+    )
+    expect(weak.discarded[0]?.reason).toBe(
+      'build_global_write_requires_medium_confidence',
+    )
     expect(durable.patches[0]).toMatchObject({ target: { kind: 'global' } })
   })
 
@@ -79,8 +106,12 @@ describe('compaction memory routing', () => {
       userProfile: '# User Profile\n\n## Stable Preferences\n',
     })
 
-    expect(withoutProject.discarded[0]?.reason).toBe('chat_project_write_requires_binding')
-    expect(withProject.patches[0]).toMatchObject({ target: { kind: 'project', projectId: 'project_1' } })
+    expect(withoutProject.discarded[0]?.reason).toBe(
+      'chat_project_write_requires_binding',
+    )
+    expect(withProject.patches[0]).toMatchObject({
+      target: { kind: 'project', projectId: 'project_1' },
+    })
   })
 
   it('routes stable user preferences from chat to user profile', () => {

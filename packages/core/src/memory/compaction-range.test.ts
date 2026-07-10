@@ -10,7 +10,9 @@ function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
-function cursor(overrides: Partial<SessionMemoryCursor> = {}): SessionMemoryCursor {
+function cursor(
+  overrides: Partial<SessionMemoryCursor> = {},
+): SessionMemoryCursor {
   return {
     sessionId: 'session_1',
     lastHistorySeq: 0,
@@ -26,7 +28,11 @@ function makeHistory(turns: number): HistoryLog {
   const log = new HistoryLog(dir, join(dir, 'history.jsonl'))
   for (let i = 1; i <= turns; i += 1) {
     log.append({ role: 'user', content: `request ${i}`, turn_id: `turn_${i}` })
-    log.append({ role: 'assistant', content: `answer ${i}`, turn_id: `turn_${i}` })
+    log.append({
+      role: 'assistant',
+      content: `answer ${i}`,
+      turn_id: `turn_${i}`,
+    })
   }
   return log
 }

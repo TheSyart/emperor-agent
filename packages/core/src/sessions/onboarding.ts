@@ -11,20 +11,28 @@ const FALLBACK_STUB = '# 用户偏好\n\n'
 const LATCH_FILE = 'onboarding.json'
 
 /** 确保 `<stateRoot>/memory/profile/USER.local.md` 存在，缺失时从仓库种子模板拷贝；返回路径。 */
-export function ensureUserProfileFile(stateRoot: string, templatesDir: string): string {
+export function ensureUserProfileFile(
+  stateRoot: string,
+  templatesDir: string,
+): string {
   const dir = join(stateRoot, 'memory', 'profile')
   mkdirSync(dir, { recursive: true })
   const userFile = join(dir, 'USER.local.md')
   if (!existsSync(userFile)) {
     const seedPath = join(templatesDir, 'init', 'USER.md')
-    const content = existsSync(seedPath) ? readFileSync(seedPath, 'utf8') : FALLBACK_STUB
+    const content = existsSync(seedPath)
+      ? readFileSync(seedPath, 'utf8')
+      : FALLBACK_STUB
     writeFileSync(userFile, content, 'utf8')
   }
   return userFile
 }
 
 /** 内容是否与种子模板逐字相同（trim 后比较），即"从未被定制过"。 */
-export function isUserProfileStillDefault(content: string, seedContent: string): boolean {
+export function isUserProfileStillDefault(
+  content: string,
+  seedContent: string,
+): boolean {
   return content.trim() === seedContent.trim()
 }
 
@@ -41,14 +49,24 @@ function readLatch(stateRoot: string): OnboardingLatch | null {
   if (!existsSync(path)) return null
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    return parsed && typeof parsed === 'object' ? (parsed as OnboardingLatch) : null
+    return parsed && typeof parsed === 'object'
+      ? (parsed as OnboardingLatch)
+      : null
   } catch {
     return null
   }
 }
 
 function writeLatch(stateRoot: string): void {
-  writeFileSync(latchPath(stateRoot), JSON.stringify({ profileInterviewTriggeredAt: nowTs() } satisfies OnboardingLatch, null, 2), 'utf8')
+  writeFileSync(
+    latchPath(stateRoot),
+    JSON.stringify(
+      { profileInterviewTriggeredAt: nowTs() } satisfies OnboardingLatch,
+      null,
+      2,
+    ),
+    'utf8',
+  )
 }
 
 /**
@@ -67,7 +85,9 @@ export function claimProfileOnboardingTrigger(opts: {
 
   const userFile = ensureUserProfileFile(opts.stateRoot, opts.templatesDir)
   const seedPath = join(opts.templatesDir, 'init', 'USER.md')
-  const seedContent = existsSync(seedPath) ? readFileSync(seedPath, 'utf8') : FALLBACK_STUB
+  const seedContent = existsSync(seedPath)
+    ? readFileSync(seedPath, 'utf8')
+    : FALLBACK_STUB
   const currentContent = readFileSync(userFile, 'utf8')
 
   if (!isUserProfileStillDefault(currentContent, seedContent)) {

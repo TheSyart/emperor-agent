@@ -15,7 +15,10 @@ vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   return {
     ...actual,
-    renameSync: (src: Parameters<typeof actual.renameSync>[0], dest: Parameters<typeof actual.renameSync>[1]) => {
+    renameSync: (
+      src: Parameters<typeof actual.renameSync>[0],
+      dest: Parameters<typeof actual.renameSync>[1],
+    ) => {
       renameCalls.push([String(src), String(dest)])
       return actual.renameSync(src, dest)
     },
@@ -35,11 +38,16 @@ beforeEach(() => {
 describe('MemoryStore atomic writes (audit P0-4)', () => {
   it('writeMemory goes through tmp+rename, not a direct truncating write', () => {
     const root = tmp('emperor-mem-atomic-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
 
     memory.writeMemory('long-term fact')
 
-    const memoryRename = renameCalls.find(([, dest]) => dest === memory.memoryFile)
+    const memoryRename = renameCalls.find(
+      ([, dest]) => dest === memory.memoryFile,
+    )
     expect(memoryRename).toBeTruthy()
     expect(memoryRename![0]).toContain('.tmp')
     expect(memory.readMemory()).toBe('long-term fact\n')
@@ -47,7 +55,10 @@ describe('MemoryStore atomic writes (audit P0-4)', () => {
 
   it('writeUser goes through tmp+rename, not a direct truncating write', () => {
     const root = tmp('emperor-mem-atomic-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
 
     memory.writeUser('user preference')
 

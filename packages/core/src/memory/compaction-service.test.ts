@@ -1,11 +1,23 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
-import { PROJECT_MEMORY_END, PROJECT_MEMORY_START } from '../projects/state-store'
+import {
+  PROJECT_MEMORY_END,
+  PROJECT_MEMORY_START,
+} from '../projects/state-store'
 import { CompactionLedger } from './compaction-ledger'
-import { compactSession, type ScopedCompactionMemory } from './compaction-service'
+import {
+  compactSession,
+  type ScopedCompactionMemory,
+} from './compaction-service'
 import { HistoryLog } from './history'
 import { MemoryVersionStore } from './versions'
 
@@ -58,107 +70,29 @@ describe('compactSession routing integration', () => {
     mkdirSync(projectDir, { recursive: true })
     mkdirSync(memoryDir, { recursive: true })
     const historyFile = join(root, 'sessions', 'sess_1', 'history.jsonl')
-    const history = new HistoryLog(join(root, 'sessions', 'sess_1'), historyFile)
-    history.append({ role: 'user', content: '本项目使用 pnpm test。', turn_id: 'turn_1' })
-    history.append({ role: 'assistant', content: '已记录项目命令。', turn_id: 'turn_1' })
+    const history = new HistoryLog(
+      join(root, 'sessions', 'sess_1'),
+      historyFile,
+    )
+    history.append({
+      role: 'user',
+      content: '本项目使用 pnpm test。',
+      turn_id: 'turn_1',
+    })
+    history.append({
+      role: 'assistant',
+      content: '已记录项目命令。',
+      turn_id: 'turn_1',
+    })
 
     const userFile = join(memoryDir, 'profile', 'USER.local.md')
     mkdirSync(join(memoryDir, 'profile'), { recursive: true })
     writeFileSync(userFile, '# User Profile\n\n## Stable Preferences\n', 'utf8')
-    writeFileSync(join(memoryDir, 'MEMORY.local.md'), '# Global Long-Term Memory\n\n## Cross-Project Decisions\n', 'utf8')
     writeFileSync(
-      join(projectDir, 'AGENTS.local.md'),
-      [
-        '# Project Memory',
-        '',
-        PROJECT_MEMORY_START,
-        '## Build Commands',
-        PROJECT_MEMORY_END,
-        '',
-      ].join('\n'),
+      join(memoryDir, 'MEMORY.local.md'),
+      '# Global Long-Term Memory\n\n## Cross-Project Decisions\n',
       'utf8',
     )
-
-    const draft = JSON.stringify({
-      schemaVersion: 'emperor.compaction-draft.v1',
-      globalMemory: {
-        operations: [{
-          op: 'append_section_item',
-          section: 'Cross-Project Decisions',
-          content: '- This specific project uses pnpm test.',
-          reason: 'model incorrectly classified a project-local command as global',
-          sourceSeqs: [1],
-          confidence: 'high',
-        }],
-      },
-      decisions: [{
-        sourceSeqs: [1],
-        content: 'This specific project uses pnpm test.',
-        destination: 'global_memory',
-        classification: 'project_command',
-        reason: 'project-local command, not cross-project learning',
-        confidence: 'high',
-      }],
-      discarded: [],
-    })
-    const versions = new MemoryVersionStore(root, memoryDir, userFile)
-    versions.snapshotPath(join(projectDir, 'AGENTS.local.md'), { target: 'project', reason: 'preexisting_project_version' })
-    const memory: ScopedCompactionMemory = {
-      root,
-      memoryDir,
-      userFile,
-      versions,
-      readUser: () => readFileSync(userFile, 'utf8'),
-      readGlobalMemory: () => readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
-      readEpisode: () => '',
-      readProjectMemory: () => '## Build Commands',
-    }
-
-    const result = await compactSession({
-      sessionId: 'sess_1',
-      mode: 'build',
-      projectId,
-      historyFile,
-      trigger: { kind: 'manual', force: true },
-      memory,
-      model: { provider: new StaticProvider(draft), model: 'fake-compactor' },
-    })
-
-    expect(result.status).toBe('compacted')
-    expect(readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8')).not.toContain('pnpm test')
-    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain('This specific project uses pnpm test')
-    const record = Object.values(new CompactionLedger(root).readIndex()).at(-1)!
-    expect(record.output?.targetVersions).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        scope: { kind: 'project', projectId },
-        beforeVersion: 2,
-      }),
-    ]))
-    expect(record.output?.discarded).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        reason: 'already_captured',
-        summary: expect.stringContaining('global_memory'),
-      }),
-    ]))
-    expect(existsSync(join(root, 'memory', 'compaction', 'runs.jsonl'))).toBe(true)
-  })
-
-  it('keeps project-local global draft operations out of global memory when mixed with cross-project learning', async () => {
-    const root = tmp('emperor-compact-routing-mixed-')
-    const memoryDir = join(root, 'memory')
-    const projectId = 'project_mixed'
-    const projectDir = join(root, 'projects', projectId)
-    mkdirSync(projectDir, { recursive: true })
-    mkdirSync(memoryDir, { recursive: true })
-    const historyFile = join(root, 'sessions', 'sess_mixed', 'history.jsonl')
-    const history = new HistoryLog(join(root, 'sessions', 'sess_mixed'), historyFile)
-    history.append({ role: 'user', content: '这个项目用 pnpm test；跨项目都要先跑 make check。', turn_id: 'turn_1' })
-    history.append({ role: 'assistant', content: '已完成。', turn_id: 'turn_1' })
-
-    const userFile = join(memoryDir, 'profile', 'USER.local.md')
-    mkdirSync(join(memoryDir, 'profile'), { recursive: true })
-    writeFileSync(userFile, '# User Profile\n\n## Stable Preferences\n', 'utf8')
-    writeFileSync(join(memoryDir, 'MEMORY.local.md'), '# Global Long-Term Memory\n\n## Cross-Project Decisions\n', 'utf8')
     writeFileSync(
       join(projectDir, 'AGENTS.local.md'),
       [
@@ -179,7 +113,135 @@ describe('compactSession routing integration', () => {
           {
             op: 'append_section_item',
             section: 'Cross-Project Decisions',
-            content: '- Across Emperor projects, run make check before handoff.',
+            content: '- This specific project uses pnpm test.',
+            reason:
+              'model incorrectly classified a project-local command as global',
+            sourceSeqs: [1],
+            confidence: 'high',
+          },
+        ],
+      },
+      decisions: [
+        {
+          sourceSeqs: [1],
+          content: 'This specific project uses pnpm test.',
+          destination: 'global_memory',
+          classification: 'project_command',
+          reason: 'project-local command, not cross-project learning',
+          confidence: 'high',
+        },
+      ],
+      discarded: [],
+    })
+    const versions = new MemoryVersionStore(root, memoryDir, userFile)
+    versions.snapshotPath(join(projectDir, 'AGENTS.local.md'), {
+      target: 'project',
+      reason: 'preexisting_project_version',
+    })
+    const memory: ScopedCompactionMemory = {
+      root,
+      memoryDir,
+      userFile,
+      versions,
+      readUser: () => readFileSync(userFile, 'utf8'),
+      readGlobalMemory: () =>
+        readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
+      readEpisode: () => '',
+      readProjectMemory: () => '## Build Commands',
+    }
+
+    const result = await compactSession({
+      sessionId: 'sess_1',
+      mode: 'build',
+      projectId,
+      historyFile,
+      trigger: { kind: 'manual', force: true },
+      memory,
+      model: { provider: new StaticProvider(draft), model: 'fake-compactor' },
+    })
+
+    expect(result.status).toBe('compacted')
+    expect(
+      readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
+    ).not.toContain('pnpm test')
+    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain(
+      'This specific project uses pnpm test',
+    )
+    const record = Object.values(new CompactionLedger(root).readIndex()).at(-1)!
+    expect(record.output?.targetVersions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: { kind: 'project', projectId },
+          beforeVersion: 2,
+        }),
+      ]),
+    )
+    expect(record.output?.discarded).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: 'already_captured',
+          summary: expect.stringContaining('global_memory'),
+        }),
+      ]),
+    )
+    expect(existsSync(join(root, 'memory', 'compaction', 'runs.jsonl'))).toBe(
+      true,
+    )
+  })
+
+  it('keeps project-local global draft operations out of global memory when mixed with cross-project learning', async () => {
+    const root = tmp('emperor-compact-routing-mixed-')
+    const memoryDir = join(root, 'memory')
+    const projectId = 'project_mixed'
+    const projectDir = join(root, 'projects', projectId)
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(memoryDir, { recursive: true })
+    const historyFile = join(root, 'sessions', 'sess_mixed', 'history.jsonl')
+    const history = new HistoryLog(
+      join(root, 'sessions', 'sess_mixed'),
+      historyFile,
+    )
+    history.append({
+      role: 'user',
+      content: '这个项目用 pnpm test；跨项目都要先跑 make check。',
+      turn_id: 'turn_1',
+    })
+    history.append({
+      role: 'assistant',
+      content: '已完成。',
+      turn_id: 'turn_1',
+    })
+
+    const userFile = join(memoryDir, 'profile', 'USER.local.md')
+    mkdirSync(join(memoryDir, 'profile'), { recursive: true })
+    writeFileSync(userFile, '# User Profile\n\n## Stable Preferences\n', 'utf8')
+    writeFileSync(
+      join(memoryDir, 'MEMORY.local.md'),
+      '# Global Long-Term Memory\n\n## Cross-Project Decisions\n',
+      'utf8',
+    )
+    writeFileSync(
+      join(projectDir, 'AGENTS.local.md'),
+      [
+        '# Project Memory',
+        '',
+        PROJECT_MEMORY_START,
+        '## Build Commands',
+        PROJECT_MEMORY_END,
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const draft = JSON.stringify({
+      schemaVersion: 'emperor.compaction-draft.v1',
+      globalMemory: {
+        operations: [
+          {
+            op: 'append_section_item',
+            section: 'Cross-Project Decisions',
+            content:
+              '- Across Emperor projects, run make check before handoff.',
             reason: 'cross-project verification practice',
             sourceSeqs: [1],
             confidence: 'high',
@@ -188,7 +250,8 @@ describe('compactSession routing integration', () => {
             op: 'append_section_item',
             section: 'Cross-Project Decisions',
             content: '- This specific project uses pnpm test.',
-            reason: 'model incorrectly bundled a project command into global operations',
+            reason:
+              'model incorrectly bundled a project command into global operations',
             sourceSeqs: [1],
             confidence: 'high',
           },
@@ -221,7 +284,8 @@ describe('compactSession routing integration', () => {
       userFile,
       versions,
       readUser: () => readFileSync(userFile, 'utf8'),
-      readGlobalMemory: () => readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
+      readGlobalMemory: () =>
+        readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
       readEpisode: () => '',
       readProjectMemory: () => '## Build Commands',
     }
@@ -237,11 +301,18 @@ describe('compactSession routing integration', () => {
     })
 
     expect(result.status).toBe('compacted')
-    const globalMemory = readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8')
+    const globalMemory = readFileSync(
+      join(memoryDir, 'MEMORY.local.md'),
+      'utf8',
+    )
     expect(globalMemory).toContain('run make check before handoff')
     expect(globalMemory).not.toContain('pnpm test')
-    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain('This specific project uses pnpm test')
-    expect(JSON.stringify(result.compaction?.discarded ?? [])).not.toContain('run make check before handoff')
+    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain(
+      'This specific project uses pnpm test',
+    )
+    expect(JSON.stringify(result.compaction?.discarded ?? [])).not.toContain(
+      'run make check before handoff',
+    )
   })
 
   it('uses the scope repair prompt before falling back to deterministic routing for build global misroutes', async () => {
@@ -252,58 +323,86 @@ describe('compactSession routing integration', () => {
     mkdirSync(projectDir, { recursive: true })
     mkdirSync(memoryDir, { recursive: true })
     const historyFile = join(root, 'sessions', 'sess_repair', 'history.jsonl')
-    const history = new HistoryLog(join(root, 'sessions', 'sess_repair'), historyFile)
-    history.append({ role: 'user', content: '本项目使用 pnpm test。', turn_id: 'turn_1' })
-    history.append({ role: 'assistant', content: '已记录项目命令。', turn_id: 'turn_1' })
+    const history = new HistoryLog(
+      join(root, 'sessions', 'sess_repair'),
+      historyFile,
+    )
+    history.append({
+      role: 'user',
+      content: '本项目使用 pnpm test。',
+      turn_id: 'turn_1',
+    })
+    history.append({
+      role: 'assistant',
+      content: '已记录项目命令。',
+      turn_id: 'turn_1',
+    })
 
     const userFile = join(memoryDir, 'profile', 'USER.local.md')
     mkdirSync(join(memoryDir, 'profile'), { recursive: true })
     writeFileSync(userFile, '# User Profile\n\n## Stable Preferences\n', 'utf8')
-    writeFileSync(join(memoryDir, 'MEMORY.local.md'), '# Global Long-Term Memory\n\n## Cross-Project Decisions\n', 'utf8')
-    writeFileSync(join(projectDir, 'AGENTS.local.md'), '# Project Memory\n\n## Build Commands\n', 'utf8')
+    writeFileSync(
+      join(memoryDir, 'MEMORY.local.md'),
+      '# Global Long-Term Memory\n\n## Cross-Project Decisions\n',
+      'utf8',
+    )
+    writeFileSync(
+      join(projectDir, 'AGENTS.local.md'),
+      '# Project Memory\n\n## Build Commands\n',
+      'utf8',
+    )
 
     const misroutedDraft = JSON.stringify({
       schemaVersion: 'emperor.compaction-draft.v1',
       globalMemory: {
-        operations: [{
-          op: 'append_section_item',
-          section: 'Cross-Project Decisions',
-          content: '- This specific project uses pnpm test.',
-          reason: 'model incorrectly classified project-local command as global',
-          sourceSeqs: [1],
-          confidence: 'high',
-        }],
+        operations: [
+          {
+            op: 'append_section_item',
+            section: 'Cross-Project Decisions',
+            content: '- This specific project uses pnpm test.',
+            reason:
+              'model incorrectly classified project-local command as global',
+            sourceSeqs: [1],
+            confidence: 'high',
+          },
+        ],
       },
-      decisions: [{
-        sourceSeqs: [1],
-        content: 'This specific project uses pnpm test.',
-        destination: 'global_memory',
-        classification: 'project_command',
-        reason: 'project-local command',
-        confidence: 'high',
-      }],
+      decisions: [
+        {
+          sourceSeqs: [1],
+          content: 'This specific project uses pnpm test.',
+          destination: 'global_memory',
+          classification: 'project_command',
+          reason: 'project-local command',
+          confidence: 'high',
+        },
+      ],
       discarded: [],
     })
     const repairedDraft = JSON.stringify({
       schemaVersion: 'emperor.compaction-draft.v1',
       projectMemory: {
-        operations: [{
-          op: 'append_section_item',
-          section: 'Build Commands',
-          content: '- This specific project uses pnpm test.',
-          reason: 'scope repair moved project command to project memory',
-          sourceSeqs: [1],
-          confidence: 'high',
-        }],
+        operations: [
+          {
+            op: 'append_section_item',
+            section: 'Build Commands',
+            content: '- This specific project uses pnpm test.',
+            reason: 'scope repair moved project command to project memory',
+            sourceSeqs: [1],
+            confidence: 'high',
+          },
+        ],
       },
-      decisions: [{
-        sourceSeqs: [1],
-        content: 'This specific project uses pnpm test.',
-        destination: 'project_memory',
-        classification: 'project_command',
-        reason: 'project-local command',
-        confidence: 'high',
-      }],
+      decisions: [
+        {
+          sourceSeqs: [1],
+          content: 'This specific project uses pnpm test.',
+          destination: 'project_memory',
+          classification: 'project_command',
+          reason: 'project-local command',
+          confidence: 'high',
+        },
+      ],
       discarded: [],
     })
     const provider = new QueueProvider([misroutedDraft, repairedDraft])
@@ -314,9 +413,11 @@ describe('compactSession routing integration', () => {
       userFile,
       versions,
       readUser: () => readFileSync(userFile, 'utf8'),
-      readGlobalMemory: () => readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
+      readGlobalMemory: () =>
+        readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
       readEpisode: () => '',
-      readProjectMemory: () => readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8'),
+      readProjectMemory: () =>
+        readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8'),
     }
 
     const result = await compactSession({
@@ -331,8 +432,14 @@ describe('compactSession routing integration', () => {
 
     expect(result.status).toBe('compacted')
     expect(provider.calls).toHaveLength(2)
-    expect(String(provider.calls[1]!.messages[0]!.content)).toContain('project-specific facts to globalMemory')
-    expect(readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8')).not.toContain('pnpm test')
-    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain('This specific project uses pnpm test')
+    expect(String(provider.calls[1]!.messages[0]!.content)).toContain(
+      'project-specific facts to globalMemory',
+    )
+    expect(
+      readFileSync(join(memoryDir, 'MEMORY.local.md'), 'utf8'),
+    ).not.toContain('pnpm test')
+    expect(readFileSync(join(projectDir, 'AGENTS.local.md'), 'utf8')).toContain(
+      'This specific project uses pnpm test',
+    )
   })
 })

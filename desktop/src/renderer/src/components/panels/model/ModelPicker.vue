@@ -126,11 +126,6 @@ function onInput(event: Event) {
   void openPicker(false)
 }
 
-function onToggleClick() {
-  void openPicker(true)
-  input.value?.focus()
-}
-
 function selectOption(index: number) {
   const option = visibleOptions.value[index]
   if (!option) return
@@ -214,7 +209,7 @@ onBeforeUnmount(removePositionListeners)
         :aria-label="`展开${label}列表`"
         :aria-expanded="open"
         @pointerdown.prevent
-        @click="onToggleClick"
+        @click="(void openPicker(true), input?.focus())"
       >
         <component :is="actionIcons.caretDown" :size="15" />
       </button>

@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { HistoryLog, type HistoryArchiveGate } from '../memory/history'
 import type { MemoryStore } from '../memory/store'
 import { nowIsoUtc8 } from '../memory/time-utc8'
-import { clearTurnCheckpoint, readRecoverableCheckpointHistory, writeTurnCheckpoint, type CheckpointWriteOptions } from './checkpoint'
+import {
+  clearTurnCheckpoint,
+  readRecoverableCheckpointHistory,
+  writeTurnCheckpoint,
+  type CheckpointWriteOptions,
+} from './checkpoint'
 
 type Row = Record<string, unknown>
 
@@ -21,11 +26,18 @@ export class ConversationStore {
     this.historyLog = new HistoryLog(this.sessionDir, this.historyFile)
   }
 
-  appendHistory(role: string, content: unknown, opts?: { extra?: Row | null }): void {
+  appendHistory(
+    role: string,
+    content: unknown,
+    opts?: { extra?: Row | null },
+  ): void {
     const row: Row = {
       ts: nowIsoUtc8(),
       role,
-      content: typeof content === 'string' ? content : JSON.stringify(jsonSafe(content)),
+      content:
+        typeof content === 'string'
+          ? content
+          : JSON.stringify(jsonSafe(content)),
     }
     if (opts?.extra) {
       for (const [key, value] of Object.entries(jsonSafe(opts.extra) as Row)) {
@@ -40,7 +52,10 @@ export class ConversationStore {
     const active = this.historyLog.loadActiveRows()
     const hidden = new Set<string>()
     for (const row of active) {
-      if (typeof row.turn_id === 'string' && (row.hidden === true || row.schedulerHidden === true)) {
+      if (
+        typeof row.turn_id === 'string' &&
+        (row.hidden === true || row.schedulerHidden === true)
+      ) {
         hidden.add(row.turn_id)
       }
     }
@@ -49,10 +64,12 @@ export class ConversationStore {
       if (row.type === 'model_call') continue
       if (hidden.has(String(row.turn_id ?? ''))) continue
       const item: Row = { role: row.role, content: row.content }
-      if (Number.isFinite(Number(row.seq)) && Number(row.seq) > 0) item.seq = Math.trunc(Number(row.seq))
+      if (Number.isFinite(Number(row.seq)) && Number(row.seq) > 0)
+        item.seq = Math.trunc(Number(row.seq))
       if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
       if (Array.isArray(row.attachments)) item.attachments = row.attachments
-      if (typeof row.displayContent === 'string') item.displayContent = row.displayContent
+      if (typeof row.displayContent === 'string')
+        item.displayContent = row.displayContent
       out.push(item)
     }
     return out
@@ -70,7 +87,10 @@ export class ConversationStore {
     return ids
   }
 
-  appendCompactMarker(activeHistory?: Row[] | null, archiveGate?: HistoryArchiveGate | null): void {
+  appendCompactMarker(
+    activeHistory?: Row[] | null,
+    archiveGate?: HistoryArchiveGate | null,
+  ): void {
     if (activeHistory === undefined || activeHistory === null) {
       this.historyLog.append({ ts: '', type: 'compact_event' })
       return
@@ -85,7 +105,8 @@ export class ConversationStore {
   writeCheckpoint(history: Row[], opts: CheckpointWriteOptions = {}): void {
     writeTurnCheckpoint(this.checkpointFile, history, {
       ...opts,
-      baseHistorySeq: opts.baseHistorySeq ?? Number(this.historyLog.stats().latest_seq ?? 0),
+      baseHistorySeq:
+        opts.baseHistorySeq ?? Number(this.historyLog.stats().latest_seq ?? 0),
     })
   }
 
@@ -117,7 +138,11 @@ export class SessionMemoryStore {
     this.versions = sharedMemory.versions
   }
 
-  appendHistory(role: string, content: unknown, opts?: { extra?: Row | null }): void {
+  appendHistory(
+    role: string,
+    content: unknown,
+    opts?: { extra?: Row | null },
+  ): void {
     this.conversation.appendHistory(role, content, opts)
   }
 
@@ -129,7 +154,10 @@ export class SessionMemoryStore {
     return this.conversation.loadUnarchivedTurnIds()
   }
 
-  appendCompactMarker(activeHistory?: Row[] | null, archiveGate?: HistoryArchiveGate | null): void {
+  appendCompactMarker(
+    activeHistory?: Row[] | null,
+    archiveGate?: HistoryArchiveGate | null,
+  ): void {
     this.conversation.appendCompactMarker(activeHistory, archiveGate)
   }
 
@@ -149,12 +177,24 @@ export class SessionMemoryStore {
     this.conversation.clearCheckpoint()
   }
 
-  readMemory(): string { return this.sharedMemory.readMemory() }
-  writeMemory(content: string): void { this.sharedMemory.writeMemory(content) }
-  readTodayEpisode(): string { return this.sharedMemory.readTodayEpisode() }
-  appendEpisode(content: string): void { this.sharedMemory.appendEpisode(content) }
-  readUser(): string { return this.sharedMemory.readUser() }
-  writeUser(content: string): void { this.sharedMemory.writeUser(content) }
+  readMemory(): string {
+    return this.sharedMemory.readMemory()
+  }
+  writeMemory(content: string): void {
+    this.sharedMemory.writeMemory(content)
+  }
+  readTodayEpisode(): string {
+    return this.sharedMemory.readTodayEpisode()
+  }
+  appendEpisode(content: string): void {
+    this.sharedMemory.appendEpisode(content)
+  }
+  readUser(): string {
+    return this.sharedMemory.readUser()
+  }
+  writeUser(content: string): void {
+    this.sharedMemory.writeUser(content)
+  }
 }
 
 export interface ProjectMemoryStoreLike {
@@ -206,7 +246,8 @@ function jsonSafe(obj: unknown): unknown {
     if (Array.isArray(obj)) return obj.map(jsonSafe)
     if (obj && typeof obj === 'object') {
       const out: Row = {}
-      for (const [key, value] of Object.entries(obj as Row)) out[key] = jsonSafe(value)
+      for (const [key, value] of Object.entries(obj as Row))
+        out[key] = jsonSafe(value)
       return out
     }
     return String(obj)

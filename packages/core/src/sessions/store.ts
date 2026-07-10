@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 const VERSION = 1
@@ -85,7 +93,9 @@ export class SessionStore {
   list(opts: { includeArchived?: boolean } = {}): SessionEntry[] {
     let items = this.load()
     if (!opts.includeArchived) items = items.filter((item) => !item.archived_at)
-    items.sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))
+    items.sort((a, b) =>
+      String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')),
+    )
     return items.map(cloneSession)
   }
 
@@ -167,12 +177,17 @@ export class SessionStore {
     return null
   }
 
-  touch(sessionId: string, preview: string, opts: { incrementMessages?: boolean } = {}): SessionEntry | null {
+  touch(
+    sessionId: string,
+    preview: string,
+    opts: { incrementMessages?: boolean } = {},
+  ): SessionEntry | null {
     const items = this.load()
     for (const item of items) {
       if (item.id !== sessionId) continue
       item.preview = preview.slice(0, 280)
-      if (opts.incrementMessages) item.message_count = Number(item.message_count || 0) + 1
+      if (opts.incrementMessages)
+        item.message_count = Number(item.message_count || 0) + 1
       item.updated_at = stamp()
       this.appendSnapshot(item)
       this.load()
@@ -181,7 +196,10 @@ export class SessionStore {
     return null
   }
 
-  setControlPending(sessionId: string, pending: SessionControlPending): SessionEntry | null {
+  setControlPending(
+    sessionId: string,
+    pending: SessionControlPending,
+  ): SessionEntry | null {
     const normalized = normalizeControlPending(pending)
     if (!normalized) return null
     const items = this.load()
@@ -209,7 +227,10 @@ export class SessionStore {
     return null
   }
 
-  reconcileControlPending(pending: SessionControlPending | null, fallbackSessionId: string | null = null): void {
+  reconcileControlPending(
+    pending: SessionControlPending | null,
+    fallbackSessionId: string | null = null,
+  ): void {
     const normalized = normalizeControlPending(pending)
     const items = this.load()
     let changed = false
@@ -227,7 +248,9 @@ export class SessionStore {
 
       if (item.control_pending?.interaction_id === normalized.interaction_id) {
         matched = true
-        if (JSON.stringify(item.control_pending) !== JSON.stringify(normalized)) {
+        if (
+          JSON.stringify(item.control_pending) !== JSON.stringify(normalized)
+        ) {
           item.control_pending = normalized
           item.updated_at = stamp()
           changed = true
@@ -268,7 +291,9 @@ export class SessionStore {
     }
 
     const indexItems = this.loadIndex(diagnostics)
-    const needsLegacyBackup = indexItems.some((item) => item.id && !existsSync(this.metaPath(item.id)))
+    const needsLegacyBackup = indexItems.some(
+      (item) => item.id && !existsSync(this.metaPath(item.id)),
+    )
     if (needsLegacyBackup) this.backupLegacyIndex(diagnostics)
     for (const item of indexItems) {
       if (!item.id) continue
@@ -284,7 +309,9 @@ export class SessionStore {
       byId.set(item.id, item)
     }
 
-    const items = [...byId.values()].sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))
+    const items = [...byId.values()].sort((a, b) =>
+      String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')),
+    )
     this.save(items)
     this.lastDiagnostics = diagnostics
     return items
@@ -328,7 +355,11 @@ export class SessionStore {
   private save(items: SessionEntry[]): void {
     mkdirSync(this.sessionsDir, { recursive: true })
     const tmp = this.indexPath.replace(/\.json$/, '.json.tmp')
-    const normalized = items.map((item) => normalizeSession(item as unknown as Record<string, unknown>)).filter((item) => item.id)
+    const normalized = items
+      .map((item) =>
+        normalizeSession(item as unknown as Record<string, unknown>),
+      )
+      .filter((item) => item.id)
     writeFileSync(tmp, JSON.stringify(normalized, null, 2) + '\n', 'utf8')
     renameSync(tmp, this.indexPath)
   }
@@ -336,8 +367,15 @@ export class SessionStore {
   private quarantineIndex(): void {
     mkdirSync(this.sessionsDir, { recursive: true })
     if (!existsSync(this.indexPath)) return
-    const target = join(this.sessionsDir, `index.corrupt-${stampForFilename()}.json`)
-    try { renameSync(this.indexPath, target) } catch { /* ignore */ }
+    const target = join(
+      this.sessionsDir,
+      `index.corrupt-${stampForFilename()}.json`,
+    )
+    try {
+      renameSync(this.indexPath, target)
+    } catch {
+      /* ignore */
+    }
   }
 
   private legacyBackupPath(): string {
@@ -361,11 +399,16 @@ export class SessionStore {
       diagnostics.legacyBackupPath = backupPath
       diagnostics.rebuildReasons.push('legacy_index_backed_up')
     } catch (err) {
-      diagnostics.rebuildReasons.push(`legacy_index_backup_failed:${err instanceof Error ? err.message : String(err)}`)
+      diagnostics.rebuildReasons.push(
+        `legacy_index_backup_failed:${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
-  private setArchived(sessionId: string, archived: boolean): SessionEntry | null {
+  private setArchived(
+    sessionId: string,
+    archived: boolean,
+  ): SessionEntry | null {
     const items = this.load()
     for (const item of items) {
       if (item.id !== sessionId) continue
@@ -379,17 +422,30 @@ export class SessionStore {
   }
 
   private appendSnapshot(session: SessionEntry): void {
-    const clean = normalizeSession(session as unknown as Record<string, unknown>)
+    const clean = normalizeSession(
+      session as unknown as Record<string, unknown>,
+    )
     if (!clean.id) return
     mkdirSync(this.sessionDir(clean.id), { recursive: true })
-    const event: SessionMetaEvent = { type: 'session_snapshot', ts: stamp(), session: clean }
-    writeFileSync(this.metaPath(clean.id), JSON.stringify(event) + '\n', { encoding: 'utf8', flag: 'a' })
+    const event: SessionMetaEvent = {
+      type: 'session_snapshot',
+      ts: stamp(),
+      session: clean,
+    }
+    writeFileSync(this.metaPath(clean.id), JSON.stringify(event) + '\n', {
+      encoding: 'utf8',
+      flag: 'a',
+    })
   }
 
-  private scanSessionDirectories(diagnostics: SessionStoreDiagnostics): SessionEntry[] {
+  private scanSessionDirectories(
+    diagnostics: SessionStoreDiagnostics,
+  ): SessionEntry[] {
     if (!existsSync(this.sessionsDir)) return []
     const out: SessionEntry[] = []
-    for (const dirent of readdirSync(this.sessionsDir, { withFileTypes: true })) {
+    for (const dirent of readdirSync(this.sessionsDir, {
+      withFileTypes: true,
+    })) {
       if (!dirent.isDirectory()) continue
       const id = dirent.name
       const sessionDir = this.sessionDir(id)
@@ -398,13 +454,20 @@ export class SessionStore {
         out.push(fromMeta)
         continue
       }
-      const recovered = this.recoverFromSessionFiles(id, sessionDir, diagnostics)
+      const recovered = this.recoverFromSessionFiles(
+        id,
+        sessionDir,
+        diagnostics,
+      )
       if (recovered) out.push(recovered)
     }
     return out
   }
 
-  private readLatestMeta(sessionId: string, diagnostics: SessionStoreDiagnostics): SessionEntry | null {
+  private readLatestMeta(
+    sessionId: string,
+    diagnostics: SessionStoreDiagnostics,
+  ): SessionEntry | null {
     const path = this.metaPath(sessionId)
     if (!existsSync(path)) return null
     let latest: SessionEntry | null = null
@@ -414,13 +477,19 @@ export class SessionStore {
       const trimmed = line.trim()
       if (!trimmed) continue
       try {
-        const event = JSON.parse(trimmed) as Partial<SessionMetaEvent> & Record<string, unknown>
+        const event = JSON.parse(trimmed) as Partial<SessionMetaEvent> &
+          Record<string, unknown>
         if (event.type === 'session_deleted') {
           deleted = true
           latest = null
           continue
         }
-        if (event.type !== 'session_snapshot' || !event.session || typeof event.session !== 'object' || Array.isArray(event.session)) {
+        if (
+          event.type !== 'session_snapshot' ||
+          !event.session ||
+          typeof event.session !== 'object' ||
+          Array.isArray(event.session)
+        ) {
           diagnostics.rebuildReasons.push(`meta_event_ignored:${sessionId}`)
           continue
         }
@@ -436,7 +505,11 @@ export class SessionStore {
     return latest
   }
 
-  private recoverFromSessionFiles(sessionId: string, sessionDir: string, diagnostics: SessionStoreDiagnostics): SessionEntry | null {
+  private recoverFromSessionFiles(
+    sessionId: string,
+    sessionDir: string,
+    diagnostics: SessionStoreDiagnostics,
+  ): SessionEntry | null {
     const historyPath = join(sessionDir, 'history.jsonl')
     const runtimePath = join(sessionDir, 'runtime', 'events.jsonl')
     if (!existsSync(historyPath) && !existsSync(runtimePath)) {
@@ -494,8 +567,19 @@ export class SessionStore {
 }
 
 function normalizeSession(raw: Record<string, unknown>): SessionEntry {
-  const mode = String(raw.mode ?? 'chat').trim().toLowerCase() === 'build' ? 'build' : 'chat'
-  const updated = String(raw.updated_at ?? raw.updatedAt ?? raw.created_at ?? raw.createdAt ?? stamp())
+  const mode =
+    String(raw.mode ?? 'chat')
+      .trim()
+      .toLowerCase() === 'build'
+      ? 'build'
+      : 'chat'
+  const updated = String(
+    raw.updated_at ??
+      raw.updatedAt ??
+      raw.created_at ??
+      raw.createdAt ??
+      stamp(),
+  )
   const created = String(raw.created_at ?? raw.createdAt ?? updated)
   return {
     id: String(raw.id ?? ''),
@@ -510,7 +594,9 @@ function normalizeSession(raw: Record<string, unknown>): SessionEntry {
     project_path: nullableText(raw.project_path ?? raw.projectPath),
     project_name: nullableText(raw.project_name ?? raw.projectName),
     archived_at: nullableText(raw.archived_at ?? raw.archivedAt),
-    control_pending: normalizeControlPending(raw.control_pending ?? raw.controlPending),
+    control_pending: normalizeControlPending(
+      raw.control_pending ?? raw.controlPending,
+    ),
     version: toInt(raw.version, VERSION),
   }
 }
@@ -527,16 +613,22 @@ function normalizeControlPending(value: unknown): SessionControlPending | null {
   const raw = value as Record<string, unknown>
   const kind = String(raw.kind || '').trim()
   if (kind !== 'ask' && kind !== 'plan') return null
-  const interactionId = String(raw.interaction_id ?? raw.interactionId ?? '').trim()
+  const interactionId = String(
+    raw.interaction_id ?? raw.interactionId ?? '',
+  ).trim()
   if (!interactionId) return null
   const defaultLabel = kind === 'plan' ? '计划需要用户确认' : '需要用户输入'
   const tone = kind === 'plan' ? 'green' : 'blue'
   return {
     kind,
-    label: String(raw.label || defaultLabel).trim().slice(0, 40) || defaultLabel,
+    label:
+      String(raw.label || defaultLabel)
+        .trim()
+        .slice(0, 40) || defaultLabel,
     tone,
     interaction_id: interactionId,
-    updated_at: Number(raw.updated_at ?? raw.updatedAt ?? Date.now()) || Date.now(),
+    updated_at:
+      Number(raw.updated_at ?? raw.updatedAt ?? Date.now()) || Date.now(),
   }
 }
 
@@ -546,12 +638,17 @@ function nullableText(value: unknown): string | null {
 }
 
 function toInt(value: unknown, fallback: number): number {
-  const n = typeof value === 'number' ? Math.trunc(value) : Number.parseInt(String(value), 10)
+  const n =
+    typeof value === 'number'
+      ? Math.trunc(value)
+      : Number.parseInt(String(value), 10)
   return Number.isFinite(n) ? n : fallback
 }
 
 function truncateText(value: unknown, max: number): string {
-  return String(value ?? '').trim().slice(0, max)
+  return String(value ?? '')
+    .trim()
+    .slice(0, max)
 }
 
 function stamp(): string {

@@ -9,7 +9,7 @@ import { projectAssistantFlow } from './assistantFlowProjection'
 function message(
   segments: AssistantSegment[],
   streaming = false,
-  todos = null,
+  todos: AssistantMessage['todos'] = null,
   extra: Partial<AssistantMessage> = {},
 ): AssistantMessage {
   return {

@@ -34,12 +34,7 @@ export type MemoryMutability =
   | 'derived'
 
 export type MemoryWriter =
-  | 'onboarding'
-  | 'agent_loop'
-  | 'user_tool'
-  | 'compactor'
-  | 'runtime'
-  | 'system'
+  'onboarding' | 'agent_loop' | 'user_tool' | 'compactor' | 'runtime' | 'system'
 
 export interface MemoryArtifactMeta {
   artifactId: string
@@ -69,7 +64,9 @@ export interface BuildMemoryArtifactsOptions {
   episodeDate?: string | null
 }
 
-export function buildMemoryArtifacts(opts: BuildMemoryArtifactsOptions): MemoryArtifactMeta[] {
+export function buildMemoryArtifacts(
+  opts: BuildMemoryArtifactsOptions,
+): MemoryArtifactMeta[] {
   const sessionId = clean(opts.sessionId)
   const sessionRoot = clean(opts.sessionRoot)
   const episodeDate = clean(opts.episodeDate)
@@ -94,95 +91,119 @@ export function buildMemoryArtifacts(opts: BuildMemoryArtifactsOptions): MemoryA
     }),
   ]
   if (opts.projectId && opts.projectMemoryPath) {
-    items.push(artifact({
-      kind: 'project_memory',
-      scope: { kind: 'project', projectId: opts.projectId },
-      visibility: 'build_only',
-      mutability: 'managed_patch',
-      writers: ['user_tool', 'compactor'],
-      injectedIn: ['build'],
-      path: opts.projectMemoryPath,
-    }))
+    items.push(
+      artifact({
+        kind: 'project_memory',
+        scope: { kind: 'project', projectId: opts.projectId },
+        visibility: 'build_only',
+        mutability: 'managed_patch',
+        writers: ['user_tool', 'compactor'],
+        injectedIn: ['build'],
+        path: opts.projectMemoryPath,
+      }),
+    )
   }
   if (episodeDate) {
-    items.push(artifact({
-      kind: 'daily_episode',
-      scope: { kind: 'episode', date: episodeDate },
-      visibility: 'retrieval_only',
-      mutability: 'append_only',
-      writers: ['compactor'],
-      injectedIn: [],
-      path: join(opts.memoryDir, `${episodeDate}.md`),
-    }))
+    items.push(
+      artifact({
+        kind: 'daily_episode',
+        scope: { kind: 'episode', date: episodeDate },
+        visibility: 'retrieval_only',
+        mutability: 'append_only',
+        writers: ['compactor'],
+        injectedIn: [],
+        path: join(opts.memoryDir, `${episodeDate}.md`),
+      }),
+    )
   }
   if (sessionId && opts.historyFile) {
-    items.push(artifact({
-      kind: 'conversation_history',
-      scope: { kind: 'session', sessionId },
-      visibility: 'session_context',
-      mutability: 'append_only',
-      writers: ['agent_loop'],
-      injectedIn: ['chat', 'build'],
-      path: opts.historyFile,
-    }))
-    items.push(artifact({
-      kind: 'model_call_audit',
-      scope: { kind: 'session', sessionId },
-      visibility: 'debug_only',
-      mutability: 'append_only',
-      writers: ['agent_loop'],
-      injectedIn: [],
-      path: opts.historyFile,
-    }))
+    items.push(
+      artifact({
+        kind: 'conversation_history',
+        scope: { kind: 'session', sessionId },
+        visibility: 'session_context',
+        mutability: 'append_only',
+        writers: ['agent_loop'],
+        injectedIn: ['chat', 'build'],
+        path: opts.historyFile,
+      }),
+    )
+    items.push(
+      artifact({
+        kind: 'model_call_audit',
+        scope: { kind: 'session', sessionId },
+        visibility: 'debug_only',
+        mutability: 'append_only',
+        writers: ['agent_loop'],
+        injectedIn: [],
+        path: opts.historyFile,
+      }),
+    )
   }
   if (sessionId && opts.runtimeEventsFile) {
-    items.push(artifact({
-      kind: 'runtime_event_log',
-      scope: { kind: 'session', sessionId },
-      visibility: 'runtime_only',
-      mutability: 'append_only',
-      writers: ['runtime'],
-      injectedIn: [],
-      path: opts.runtimeEventsFile,
-    }))
+    items.push(
+      artifact({
+        kind: 'runtime_event_log',
+        scope: { kind: 'session', sessionId },
+        visibility: 'runtime_only',
+        mutability: 'append_only',
+        writers: ['runtime'],
+        injectedIn: [],
+        path: opts.runtimeEventsFile,
+      }),
+    )
   }
   if (sessionId && sessionRoot) {
-    items.push(artifact({
-      kind: 'checkpoint',
-      scope: { kind: 'session', sessionId },
-      visibility: 'recovery_only',
-      mutability: 'replaceable_checkpoint',
-      writers: ['agent_loop'],
-      injectedIn: [],
-      path: join(sessionRoot, '_checkpoint.json'),
-    }))
-    items.push(artifact({
-      kind: 'prompt_snapshot',
-      scope: { kind: 'session', sessionId },
-      visibility: 'debug_only',
-      mutability: 'derived',
-      writers: ['agent_loop'],
-      injectedIn: [],
-      path: join(sessionRoot, 'prompt-snapshots'),
-    }))
-    items.push(artifact({
-      kind: 'history_archive',
-      scope: { kind: 'session', sessionId },
-      visibility: 'never_model_visible',
-      mutability: 'append_only',
-      writers: ['system'],
-      injectedIn: [],
-      path: join(sessionRoot, 'history_archive'),
-    }))
+    items.push(
+      artifact({
+        kind: 'checkpoint',
+        scope: { kind: 'session', sessionId },
+        visibility: 'recovery_only',
+        mutability: 'replaceable_checkpoint',
+        writers: ['agent_loop'],
+        injectedIn: [],
+        path: join(sessionRoot, '_checkpoint.json'),
+      }),
+    )
+    items.push(
+      artifact({
+        kind: 'prompt_snapshot',
+        scope: { kind: 'session', sessionId },
+        visibility: 'debug_only',
+        mutability: 'derived',
+        writers: ['agent_loop'],
+        injectedIn: [],
+        path: join(sessionRoot, 'prompt-snapshots'),
+      }),
+    )
+    items.push(
+      artifact({
+        kind: 'history_archive',
+        scope: { kind: 'session', sessionId },
+        visibility: 'never_model_visible',
+        mutability: 'append_only',
+        writers: ['system'],
+        injectedIn: [],
+        path: join(sessionRoot, 'history_archive'),
+      }),
+    )
   }
   return items
 }
 
-function artifact(input: Omit<MemoryArtifactMeta, 'artifactId' | 'createdAt' | 'updatedAt' | 'version' | 'contentHash'>): MemoryArtifactMeta {
+function artifact(
+  input: Omit<
+    MemoryArtifactMeta,
+    'artifactId' | 'createdAt' | 'updatedAt' | 'version' | 'contentHash'
+  >,
+): MemoryArtifactMeta {
   const digest = fileHash(input.path)
   const times = fileTimes(input.path)
   return {
-    artifactId: `${input.kind}:${createHash('sha256').update(`${input.path}:${JSON.stringify(input.scope)}`, 'utf8').digest('hex').slice(0, 12)}`,
+    artifactId: `${input.kind}:${createHash('sha256')
+      .update(`${input.path}:${JSON.stringify(input.scope)}`, 'utf8')
+      .digest('hex')
+      .slice(0, 12)}`,
     version: 1,
     contentHash: digest,
     createdAt: times.createdAt,
@@ -195,7 +216,10 @@ function fileHash(path: string): string {
   if (!existsSync(path)) return ''
   try {
     const stat = statSync(path)
-    if (!stat.isFile()) return createHash('sha256').update(`${path}:${stat.mtimeMs}:${stat.size}`, 'utf8').digest('hex')
+    if (!stat.isFile())
+      return createHash('sha256')
+        .update(`${path}:${stat.mtimeMs}:${stat.size}`, 'utf8')
+        .digest('hex')
     return createHash('sha256').update(readFileSync(path)).digest('hex')
   } catch {
     return ''

@@ -41,14 +41,14 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         calls.push(args)
         if (args[0] === 'chat.submit') {
           const payload = args[1] as Record<string, unknown>
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'user_message',
             seq: 1,
             turn_id: 'turn-ipc-1',
             client_message_id: payload.clientMessageId,
             content: payload.displayContent || payload.content,
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'assistant_done',
             seq: 2,
             turn_id: 'turn-ipc-1',
@@ -96,7 +96,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'turn_paused',
             seq: 1,
             turn_id: 'turn-paused',
@@ -189,7 +189,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
           const payload = args[1] as Record<string, unknown>
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'user_message',
             seq: 1,
             session_id: 's1',
@@ -238,7 +238,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
           const payload = args[1] as Record<string, unknown>
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'user_message',
             seq: 1,
             session_id: 's1',
@@ -246,7 +246,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             client_message_id: payload.clientMessageId,
             content: payload.displayContent || payload.content,
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'error',
             seq: 2,
             session_id: 's1',
@@ -305,28 +305,28 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.switchSession('session-current')
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 99,
       session_id: 'session-other',
       turn_id: 'turn-other',
       delta: 'foreign text',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       session_id: 'session-current',
       turn_id: 'turn-current',
       content: 'local user',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       session_id: 'session-current',
       turn_id: 'turn-current',
       delta: 'local answer',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 3,
       session_id: 'session-current',
@@ -356,40 +356,40 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.switchSession('draft:pending-1')
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 11,
       session_id: 'session-other',
       turn_id: 'turn-other',
       content: 'foreign user',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 12,
       session_id: 'session-other',
       turn_id: 'turn-other',
       delta: 'foreign text',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'session_created',
       session: { id: 'session-real' },
       client_draft_id: 'draft:pending-1',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       session_id: 'session-real',
       turn_id: 'turn-real',
       content: 'real user',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       session_id: 'session-real',
       turn_id: 'turn-real',
       delta: 'real answer',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 3,
       session_id: 'session-real',
@@ -434,7 +434,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
 
     runtime.switchSession('session-other')
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'ask_request',
       seq: 1,
       session_id: 'session-owner',
@@ -445,7 +445,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       expect.objectContaining({ id: 'ask_owner' }),
     )
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'ask_answered',
       seq: 2,
       session_id: 'session-owner',
@@ -467,13 +467,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'user_message',
             seq: 1,
             turn_id: 'turn-thought',
             content: 'show image',
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'agent_thought',
             seq: 2,
             turn_id: 'turn-thought',
@@ -485,7 +485,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             tool_call_ids: ['call_1'],
             tool_names: ['read_file'],
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_call',
             seq: 3,
             turn_id: 'turn-thought',
@@ -493,7 +493,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             name: 'read_file',
             arguments: { path: 'screen.png' },
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'assistant_done',
             seq: 4,
             turn_id: 'turn-thought',
@@ -540,13 +540,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'user_message',
             seq: 1,
             turn_id: 'turn-tools',
             content: 'run tools',
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_run_queued',
             seq: 2,
             turn_id: 'turn-tools',
@@ -554,7 +554,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             name: 'unknown_new_tool',
             arguments: { value: 1 },
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_run_completed',
             seq: 3,
             turn_id: 'turn-tools',
@@ -564,7 +564,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             artifacts: { bad: true },
             metadata: 'bad',
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_run_failed',
             seq: 4,
             turn_id: 'turn-tools',
@@ -572,7 +572,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             name: 'grep',
             message: 'grep failed',
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_run_cancelled',
             seq: 5,
             turn_id: 'turn-tools',
@@ -580,7 +580,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             name: 'run_command',
             reason: 'cancelled',
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'tool_result',
             seq: 6,
             turn_id: 'turn-tools',
@@ -589,7 +589,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
             summary: 'late call result',
             artifacts: [null, { path: 'ok.png', kind: 'image' }],
           })
-          listener?.({
+          emitCoreEvent(listener, {
             event: 'assistant_done',
             seq: 7,
             turn_id: 'turn-tools',
@@ -821,7 +821,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.sendMessage('hello')).toBe(true)
     await Promise.resolve()
     await expect(runtime.stopActive()).resolves.toBe(true)
-    rejectSubmit?.(new Error('active task cancelled: turn:1'))
+    invokeCallback(rejectSubmit, new Error('active task cancelled: turn:1'))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(runtime.status.value).toBe('ready')
@@ -974,7 +974,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       turn_id: 'turn-control',
@@ -1001,19 +1001,19 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       turn_id: 'turn-ask',
       content: 'clarify first',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       turn_id: 'turn-ask',
       delta: 'before ',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'ask_request',
       seq: 3,
       turn_id: 'turn-ask',
@@ -1024,18 +1024,18 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         context: 'scope?',
       },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'turn_paused',
       seq: 4,
       turn_id: 'turn-ask',
       interaction: { id: 'ask_1', kind: 'ask', status: 'waiting' },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'ask_answered',
       seq: 5,
       interaction: { id: 'ask_1', kind: 'ask', status: 'answered' },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 6,
       turn_id: 'turn-ask-resume',
@@ -1043,13 +1043,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       ui_hidden: true,
       content: '',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 7,
       turn_id: 'turn-ask-resume',
       delta: 'after',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 8,
       turn_id: 'turn-ask-resume',
@@ -1093,26 +1093,26 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       turn_id: 'turn-plan',
       content: '随便做点东西',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       turn_id: 'turn-plan',
       delta: '先出个计划。',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_run_started',
       seq: 3,
       turn_id: 'turn-plan',
       id: 'call_pp',
       name: 'propose_plan',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_call',
       seq: 4,
       turn_id: 'turn-plan',
@@ -1120,7 +1120,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'propose_plan',
       arguments: {},
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_draft_delta',
       seq: 5,
       turn_id: 'turn-plan',
@@ -1133,7 +1133,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         meta: { plan_stream_id: 'call_pp', provisional: true },
       },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_run_cancelled',
       seq: 6,
       turn_id: 'turn-plan',
@@ -1141,7 +1141,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'propose_plan',
       reason: 'turn_paused',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_result',
       seq: 7,
       turn_id: 'turn-plan',
@@ -1149,7 +1149,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'propose_plan',
       summary: 'waiting for user (plan:plan_live)',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_draft',
       seq: 8,
       turn_id: 'turn-plan',
@@ -1162,18 +1162,18 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         plan_markdown: '# Plan',
       },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'turn_paused',
       seq: 9,
       turn_id: 'turn-plan',
       interaction: { id: 'plan_live', kind: 'plan', status: 'waiting' },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_approved',
       seq: 10,
       interaction: { id: 'plan_live', kind: 'plan', status: 'approved' },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 11,
       turn_id: 'turn-plan-resume',
@@ -1181,13 +1181,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       ui_hidden: true,
       content: '',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 12,
       turn_id: 'turn-plan-resume',
       delta: '计划批准，开始执行。',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_call',
       seq: 13,
       turn_id: 'turn-plan-resume',
@@ -1195,7 +1195,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'write_file',
       arguments: { path: 'main.py' },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_result',
       seq: 14,
       turn_id: 'turn-plan-resume',
@@ -1203,7 +1203,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'write_file',
       summary: 'written',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 15,
       turn_id: 'turn-plan-resume',
@@ -1257,7 +1257,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.connectSocket()
     runtime.switchSession('s1')
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 1,
       session_id: 's1',
@@ -1267,7 +1267,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.sessionRuntimeStates['s1']).toMatchObject({ running: true })
 
     const before = runtime.messages.value.length
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       session_id: 's2',
@@ -1277,7 +1277,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.sessionRuntimeStates['s2']).toMatchObject({ running: true })
     expect(runtime.messages.value).toHaveLength(before)
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 3,
       session_id: 's2',
@@ -1289,7 +1289,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       attention: true,
     })
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 4,
       session_id: 's1',
@@ -1345,13 +1345,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       turn_id: 'turn-plan',
       content: '制定计划',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_draft_delta',
       seq: 2,
       turn_id: 'turn-plan',
@@ -1365,7 +1365,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         meta: { plan_stream_id: 'call_plan', provisional: true },
       },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_draft_delta',
       seq: 3,
       turn_id: 'turn-plan',
@@ -1379,7 +1379,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         meta: { plan_stream_id: 'call_plan', provisional: true },
       },
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'plan_draft',
       seq: 4,
       turn_id: 'turn-plan',
@@ -1423,7 +1423,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
     runtime.switchSession('s1')
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'model_route_fallback',
       seq: 1,
       from_model: 'claude-opus',
@@ -1434,7 +1434,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.pending.label).toContain('备用模型')
     expect(runtime.pending.detail).toContain('gpt-4o')
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'context_usage',
       seq: 2,
       usage_type: 'main_agent',
@@ -1461,19 +1461,19 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
     runtime.switchSession('s1')
 
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
       turn_id: 'turn-q',
       content: 'go',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
       turn_id: 'turn-q',
       delta: 'working',
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_run_queued',
       seq: 3,
       turn_id: 'turn-q',
@@ -1481,7 +1481,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'read_file',
       arguments: {},
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_run_queued',
       seq: 4,
       turn_id: 'turn-q',
@@ -1489,7 +1489,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       name: 'grep',
       arguments: {},
     })
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'tool_run_started',
       seq: 5,
       turn_id: 'turn-q',
@@ -1510,7 +1510,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(toolB?.status).toBe('queued')
 
     // 回合结束时 queued 段也要被 settle，不能永远停在排队态
-    listener?.({
+    emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 6,
       turn_id: 'turn-q',
@@ -1626,4 +1626,20 @@ function fakeWindow(
     setTimeout: setTimeout.bind(globalThis),
     clearTimeout: clearTimeout.bind(globalThis),
   }
+}
+
+function emitCoreEvent(
+  listener: ((event: unknown) => void) | null,
+  event: unknown,
+) {
+  if (!listener) throw new Error('listener not registered')
+  listener(event)
+}
+
+function invokeCallback<T extends unknown[]>(
+  callback: ((...args: T) => void) | null,
+  ...args: T
+) {
+  if (!callback) throw new Error('callback not registered')
+  callback(...args)
 }

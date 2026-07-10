@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -6,16 +12,35 @@ import { CompactionPatchCommitter } from './compaction-commit'
 import { CompactionCursorStore, CompactionLedger } from './compaction-ledger'
 import { memoryContentHash, type MemoryPatch } from './patch'
 import { MemoryVersionStore } from './versions'
-import type { ActiveMemoryBinding, CompactionPatchBundle, CompactionRunRecord } from './compaction-models'
+import type {
+  ActiveMemoryBinding,
+  CompactionPatchBundle,
+  CompactionRunRecord,
+} from './compaction-models'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
 const binding: ActiveMemoryBinding = {
-  profile: { scope: { kind: 'user_profile' }, readable: true, writable: true, path: '/state/memory/profile/USER.local.md' },
-  longTerm: { scope: { kind: 'project', projectId: 'project_1' }, readable: true, writable: true, path: '/state/projects/project_1/AGENTS.local.md' },
-  episode: { scope: { kind: 'episode', date: '2026-07-06' }, readable: false, writable: true, path: '/state/memory/2026-07-06.md' },
+  profile: {
+    scope: { kind: 'user_profile' },
+    readable: true,
+    writable: true,
+    path: '/state/memory/profile/USER.local.md',
+  },
+  longTerm: {
+    scope: { kind: 'project', projectId: 'project_1' },
+    readable: true,
+    writable: true,
+    path: '/state/projects/project_1/AGENTS.local.md',
+  },
+  episode: {
+    scope: { kind: 'episode', date: '2026-07-06' },
+    readable: false,
+    writable: true,
+    path: '/state/memory/2026-07-06.md',
+  },
 }
 
 const input: CompactionRunRecord['input'] = {
@@ -26,7 +51,13 @@ const input: CompactionRunRecord['input'] = {
   episodeHash: 'episode-hash',
 }
 
-function paths(root: string): { memoryDir: string; userFile: string; globalFile: string; projectFile: string; episodeFile: string } {
+function paths(root: string): {
+  memoryDir: string
+  userFile: string
+  globalFile: string
+  projectFile: string
+  episodeFile: string
+} {
   return {
     memoryDir: join(root, 'memory'),
     userFile: join(root, 'memory', 'profile', 'USER.local.md'),
@@ -41,13 +72,26 @@ function seed(root: string): ReturnType<typeof paths> {
   mkdirSync(join(root, 'memory', 'profile'), { recursive: true })
   mkdirSync(join(root, 'projects', 'project_1'), { recursive: true })
   writeFileSync(p.userFile, '# User Profile\n\n## Stable Preferences\n', 'utf8')
-  writeFileSync(p.globalFile, '# Global Long-Term Memory\n\n## Open Questions\n', 'utf8')
-  writeFileSync(p.projectFile, '# Project Memory\n\n## Build Commands\n', 'utf8')
+  writeFileSync(
+    p.globalFile,
+    '# Global Long-Term Memory\n\n## Open Questions\n',
+    'utf8',
+  )
+  writeFileSync(
+    p.projectFile,
+    '# Project Memory\n\n## Build Commands\n',
+    'utf8',
+  )
   writeFileSync(p.episodeFile, '# Episode: 2026-07-06\n\n## Summary\n', 'utf8')
   return p
 }
 
-function patch(target: MemoryPatch['target'], current: string, section: string, item: string): MemoryPatch {
+function patch(
+  target: MemoryPatch['target'],
+  current: string,
+  section: string,
+  item: string,
+): MemoryPatch {
   return {
     target,
     baseVersion: 1,
@@ -65,9 +109,24 @@ function bundle(root: string, p = paths(root)): CompactionPatchBundle {
     projectId: 'project_1',
     range: { fromSeq: 1, toSeq: 8 },
     patches: {
-      userProfilePatch: patch({ kind: 'user_profile' }, readFileSync(p.userFile, 'utf8'), 'Stable Preferences', '- Prefers direct answers'),
-      projectMemoryPatch: patch({ kind: 'project', projectId: 'project_1' }, readFileSync(p.projectFile, 'utf8'), 'Build Commands', '- make check'),
-      episodePatch: patch({ kind: 'episode', date: '2026-07-06' }, readFileSync(p.episodeFile, 'utf8'), 'Summary', '- Compaction patch committed'),
+      userProfilePatch: patch(
+        { kind: 'user_profile' },
+        readFileSync(p.userFile, 'utf8'),
+        'Stable Preferences',
+        '- Prefers direct answers',
+      ),
+      projectMemoryPatch: patch(
+        { kind: 'project', projectId: 'project_1' },
+        readFileSync(p.projectFile, 'utf8'),
+        'Build Commands',
+        '- make check',
+      ),
+      episodePatch: patch(
+        { kind: 'episode', date: '2026-07-06' },
+        readFileSync(p.episodeFile, 'utf8'),
+        'Summary',
+        '- Compaction patch committed',
+      ),
     },
     decisions: [],
     discarded: [],
@@ -97,9 +156,13 @@ describe('CompactionPatchCommitter', () => {
     })
 
     expect(result.ok).toBe(true)
-    expect(readFileSync(p.userFile, 'utf8')).toContain('- Prefers direct answers')
+    expect(readFileSync(p.userFile, 'utf8')).toContain(
+      '- Prefers direct answers',
+    )
     expect(readFileSync(p.projectFile, 'utf8')).toContain('- make check')
-    expect(readFileSync(p.episodeFile, 'utf8')).toContain('- Compaction patch committed')
+    expect(readFileSync(p.episodeFile, 'utf8')).toContain(
+      '- Compaction patch committed',
+    )
     expect(cursorStore.readOrInit('session_1')).toMatchObject({
       status: 'active',
       compactedUntilSeq: 8,
@@ -114,7 +177,11 @@ describe('CompactionPatchCommitter', () => {
       status: 'applied',
       range: { fromSeq: 1, toSeq: 8 },
     })
-    expect(index.compact_1?.output?.targetVersions.map((target) => target.scope.kind)).toEqual(['episode', 'user_profile', 'project'])
+    expect(
+      index.compact_1?.output?.targetVersions.map(
+        (target) => target.scope.kind,
+      ),
+    ).toEqual(['episode', 'user_profile', 'project'])
   })
 
   it('records failed validation without mutating memory or advancing the cursor', () => {
@@ -152,7 +219,9 @@ describe('CompactionPatchCommitter', () => {
       compactedUntilSeq: 0,
     })
     expect(versions.list({ target: 'user' })).toHaveLength(0)
-    expect(existsSync(join(root, 'memory', 'compaction', 'patches.jsonl'))).toBe(false)
+    expect(
+      existsSync(join(root, 'memory', 'compaction', 'patches.jsonl')),
+    ).toBe(false)
     expect(ledger.readIndex().compact_1).toMatchObject({
       status: 'failed',
       error: { validationErrors: ['base_hash_mismatch'] },
@@ -213,7 +282,8 @@ describe('CompactionPatchCommitter', () => {
       cursorStore,
       ledger,
       writeText: (path, content) => {
-        if (path === p.projectFile) throw new Error('simulated project write failure')
+        if (path === p.projectFile)
+          throw new Error('simulated project write failure')
         writeFileSync(path, content, 'utf8')
       },
     })
@@ -225,7 +295,9 @@ describe('CompactionPatchCommitter', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.errors.join('\n')).toContain('simulated project write failure')
+    expect(result.errors.join('\n')).toContain(
+      'simulated project write failure',
+    )
     expect(readFileSync(p.userFile, 'utf8')).toBe(originalUser)
     expect(readFileSync(p.projectFile, 'utf8')).toBe(originalProject)
     expect(readFileSync(p.episodeFile, 'utf8')).toBe(originalEpisode)
@@ -242,7 +314,9 @@ describe('CompactionPatchCommitter', () => {
   it('rolls back prepared file writes when recording the applied ledger entry fails', () => {
     class FailingAppliedLedger extends CompactionLedger {
       override recordApplied(record: CompactionRunRecord): CompactionRunRecord {
-        throw new Error(`simulated applied ledger failure for ${record.compactionId}`)
+        throw new Error(
+          `simulated applied ledger failure for ${record.compactionId}`,
+        )
       }
     }
     const root = tmp('emperor-compaction-commit-ledger-fail-')
@@ -266,7 +340,9 @@ describe('CompactionPatchCommitter', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.errors.join('\n')).toContain('simulated applied ledger failure')
+    expect(result.errors.join('\n')).toContain(
+      'simulated applied ledger failure',
+    )
     expect(readFileSync(p.userFile, 'utf8')).toBe(originalUser)
     expect(readFileSync(p.projectFile, 'utf8')).toBe(originalProject)
     expect(readFileSync(p.episodeFile, 'utf8')).toBe(originalEpisode)
@@ -311,7 +387,9 @@ describe('CompactionPatchCommitter', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.errors.join('\n')).toContain('simulated cursor advance failure')
+    expect(result.errors.join('\n')).toContain(
+      'simulated cursor advance failure',
+    )
     expect(readFileSync(p.userFile, 'utf8')).toBe(originalUser)
     expect(readFileSync(p.projectFile, 'utf8')).toBe(originalProject)
     expect(readFileSync(p.episodeFile, 'utf8')).toBe(originalEpisode)

@@ -4,7 +4,15 @@
  * 实现 runner 的 TokenTrackerLike。
  */
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { basename, dirname, join } from 'node:path'
 
@@ -42,22 +50,34 @@ export class TokenTracker {
   }
 
   /** 兼容 runner 的 `record(model, usage, opts)`（snake/camel 选项均接受）。 */
-  record(model: string, usage: Record<string, number> | null, opts: RecordOptions | Record<string, unknown> = {}): void {
+  record(
+    model: string,
+    usage: Record<string, number> | null,
+    opts: RecordOptions | Record<string, unknown> = {},
+  ): void {
     const o = opts as Record<string, unknown>
     const usageType = String(o.usageType ?? o.usage_type ?? 'main_agent')
     const provider = (o.provider ?? null) as string | null
     const modelRole = (o.modelRole ?? o.model_role ?? null) as string | null
-    const routeReason = (o.routeReason ?? o.route_reason ?? null) as string | null
+    const routeReason = (o.routeReason ?? o.route_reason ?? null) as
+      string | null
     const usedFallback = Boolean(o.usedFallback ?? o.used_fallback ?? false)
-    const fallbackReason = (o.fallbackReason ?? o.fallback_reason ?? null) as string | null
-    const estimatedInputTokens = (o.estimatedInputTokens ?? o.estimated_input_tokens ?? null) as number | null
-    const routeEstimatedTokens = (o.routeEstimatedTokens ?? o.route_estimated_tokens ?? null) as number | null
+    const fallbackReason = (o.fallbackReason ?? o.fallback_reason ?? null) as
+      string | null
+    const estimatedInputTokens = (o.estimatedInputTokens ??
+      o.estimated_input_tokens ??
+      null) as number | null
+    const routeEstimatedTokens = (o.routeEstimatedTokens ??
+      o.route_estimated_tokens ??
+      null) as number | null
 
     const u = usage ?? {}
     const inputTokens = Number(u.input ?? u.prompt_tokens ?? 0) || 0
     const outputTokens = Number(u.output ?? u.completion_tokens ?? 0) || 0
-    const cacheRead = Number(u.cache_read ?? u.cache_read_input_tokens ?? 0) || 0
-    const cacheCreate = Number(u.cache_create ?? u.cache_creation_input_tokens ?? 0) || 0
+    const cacheRead =
+      Number(u.cache_read ?? u.cache_read_input_tokens ?? 0) || 0
+    const cacheCreate =
+      Number(u.cache_create ?? u.cache_creation_input_tokens ?? 0) || 0
 
     const row: Row = {
       ts: localIsoSeconds(),
@@ -73,10 +93,15 @@ export class TokenTracker {
     if (routeReason) row.route_reason = routeReason
     if (usedFallback) row.used_fallback = true
     if (fallbackReason) row.fallback_reason = fallbackReason
-    if (estimatedInputTokens !== null && estimatedInputTokens !== undefined) row.estimated_input_tokens = estimatedInputTokens
-    if (routeEstimatedTokens !== null && routeEstimatedTokens !== undefined) row.route_estimated_tokens = routeEstimatedTokens
+    if (estimatedInputTokens !== null && estimatedInputTokens !== undefined)
+      row.estimated_input_tokens = estimatedInputTokens
+    if (routeEstimatedTokens !== null && routeEstimatedTokens !== undefined)
+      row.route_estimated_tokens = routeEstimatedTokens
 
-    this.lastInputTokens = (row.input as number) + (row.cache_read as number) + (row.cache_create as number)
+    this.lastInputTokens =
+      (row.input as number) +
+      (row.cache_read as number) +
+      (row.cache_create as number)
     appendFileSync(this.logFile, JSON.stringify(row) + '\n', 'utf8')
     if (this.cachedRows) this.cachedRows.push(row)
     this.rotateHotIfNeeded()
@@ -121,7 +146,11 @@ export class TokenTracker {
     if (limit <= 0) return []
     const rows = [...this.iterRows()]
       .map(normalizeRow)
-      .filter((row) => (Number(row.cache_read) || 0) > 0 || (Number(row.cache_create) || 0) > 0)
+      .filter(
+        (row) =>
+          (Number(row.cache_read) || 0) > 0 ||
+          (Number(row.cache_create) || 0) > 0,
+      )
     return rows.slice(-limit).reverse()
   }
 
@@ -191,7 +220,8 @@ export class TokenTracker {
 
   statsByHour(): Record<string, Row> {
     const out: Record<string, Row> = {}
-    for (let hour = 0; hour < 24; hour += 1) out[String(hour).padStart(2, '0')] = emptyStats()
+    for (let hour = 0; hour < 24; hour += 1)
+      out[String(hour).padStart(2, '0')] = emptyStats()
     for (const r of this.iterRows()) {
       const hour = String(r.ts ?? '').slice(11, 13)
       const bucket = out[hour]
@@ -201,9 +231,20 @@ export class TokenTracker {
     return out
   }
 
-  streakMetrics(): { active_days: number; current_streak: number; longest_streak: number } {
-    const dates = [...new Set([...this.iterRows()].map((r) => String(r.ts ?? '').slice(0, 10)).filter(Boolean))].sort()
-    if (!dates.length) return { active_days: 0, current_streak: 0, longest_streak: 0 }
+  streakMetrics(): {
+    active_days: number
+    current_streak: number
+    longest_streak: number
+  } {
+    const dates = [
+      ...new Set(
+        [...this.iterRows()]
+          .map((r) => String(r.ts ?? '').slice(0, 10))
+          .filter(Boolean),
+      ),
+    ].sort()
+    if (!dates.length)
+      return { active_days: 0, current_streak: 0, longest_streak: 0 }
 
     let longest = 1
     let current = 1
@@ -226,7 +267,11 @@ export class TokenTracker {
         currentStreak += 1
       }
     }
-    return { active_days: dates.length, current_streak: currentStreak, longest_streak: longest }
+    return {
+      active_days: dates.length,
+      current_streak: currentStreak,
+      longest_streak: longest,
+    }
   }
 
   sessionCount(gapMinutes = 30): number {
@@ -244,7 +289,9 @@ export class TokenTracker {
   }
 
   private rotateHotIfNeeded(): void {
-    const hotRows = existsSync(this.logFile) ? readRowsFromText(readFileSync(this.logFile, 'utf8')) : []
+    const hotRows = existsSync(this.logFile)
+      ? readRowsFromText(readFileSync(this.logFile, 'utf8'))
+      : []
     if (hotRows.length <= this.maxHotRows) return
     const archiveRows = hotRows.slice(0, hotRows.length - this.maxHotRows)
     const keptRows = hotRows.slice(hotRows.length - this.maxHotRows)
@@ -273,17 +320,32 @@ export class TokenTracker {
 
   private writeHotRows(rows: Row[]): void {
     mkdirSync(dirname(this.logFile), { recursive: true })
-    const tmp = join(dirname(this.logFile), `.${basename(this.logFile)}.${randomUUID().replace(/-/g, '')}.tmp`)
-    writeFileSync(tmp, rows.map((row) => JSON.stringify(row) + '\n').join(''), 'utf8')
+    const tmp = join(
+      dirname(this.logFile),
+      `.${basename(this.logFile)}.${randomUUID().replace(/-/g, '')}.tmp`,
+    )
+    writeFileSync(
+      tmp,
+      rows.map((row) => JSON.stringify(row) + '\n').join(''),
+      'utf8',
+    )
     renameSync(tmp, this.logFile)
   }
 
   private readArchiveRows(): Row[] {
     if (!existsSync(this.archiveDir)) return []
     const rows: Row[] = []
-    for (const name of readdirSync(this.archiveDir).filter((item) => item.endsWith('.jsonl.gz')).sort()) {
+    for (const name of readdirSync(this.archiveDir)
+      .filter((item) => item.endsWith('.jsonl.gz'))
+      .sort()) {
       try {
-        rows.push(...readRowsFromText(gunzipSync(readFileSync(join(this.archiveDir, name))).toString('utf8')))
+        rows.push(
+          ...readRowsFromText(
+            gunzipSync(readFileSync(join(this.archiveDir, name))).toString(
+              'utf8',
+            ),
+          ),
+        )
       } catch {
         continue
       }
@@ -299,7 +361,8 @@ function readRowsFromText(text: string): Row[] {
     if (!line) continue
     try {
       const parsed = JSON.parse(line)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) rows.push(parsed as Row)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+        rows.push(parsed as Row)
     } catch {
       continue
     }
@@ -308,7 +371,14 @@ function readRowsFromText(text: string): Row[] {
 }
 
 function emptyStats(): Row {
-  return { calls: 0, input: 0, output: 0, cache_read: 0, cache_create: 0, total: 0 }
+  return {
+    calls: 0,
+    input: 0,
+    output: 0,
+    cache_read: 0,
+    cache_create: 0,
+    total: 0,
+  }
 }
 
 function addRow(bucket: Row, row: Row): void {
@@ -343,7 +413,8 @@ function normalizeRow(row: Row): Row {
     if (row[key]) normalized[key] = String(row[key])
   }
   for (const key of ['estimated_input_tokens', 'route_estimated_tokens']) {
-    if (row[key] !== null && row[key] !== undefined) normalized[key] = rowInt(row, key)
+    if (row[key] !== null && row[key] !== undefined)
+      normalized[key] = rowInt(row, key)
   }
   if (row.used_fallback) normalized.used_fallback = true
   return normalized
@@ -360,7 +431,11 @@ function rowInt(row: Row, ...keys: string[]): number {
 }
 
 function inputTotal(row: Row): number {
-  return rowInt(row, 'input', 'prompt_tokens') + rowInt(row, 'cache_read', 'cache_read_input_tokens') + rowInt(row, 'cache_create', 'cache_creation_input_tokens')
+  return (
+    rowInt(row, 'input', 'prompt_tokens') +
+    rowInt(row, 'cache_read', 'cache_read_input_tokens') +
+    rowInt(row, 'cache_create', 'cache_creation_input_tokens')
+  )
 }
 
 function archiveMonth(row: Row): string {

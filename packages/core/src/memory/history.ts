@@ -3,7 +3,16 @@
  * 热段保持小；compact 时把不再活跃的行归档到 history_archive/<month>.jsonl.gz。
  * 磁盘兼容: history.jsonl 行 schema + history_index.json 不变。
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { gzipSync } from 'node:zlib'
 import { basename, dirname, join, relative } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -36,43 +45,79 @@ export class HistoryLog {
 
   append(row: Row): Row {
     let index = this.loadIndex()
-    if (index.active_lines === undefined || index.active_bytes === undefined) index = this.statsFromIndex(index)
+    if (index.active_lines === undefined || index.active_bytes === undefined)
+      index = this.statsFromIndex(index)
     const payload: Row = { ...row }
-    if (payload.seq === undefined) payload.seq = (Number(index.latest_seq) || 0) + 1
+    if (payload.seq === undefined)
+      payload.seq = (Number(index.latest_seq) || 0) + 1
     if (payload.archived === undefined) payload.archived = false
     if (payload.ts === undefined) payload.ts = nowIsoUtc8()
     const line = JSON.stringify(jsonSafe(payload)) + '\n'
     appendFileSync(this.historyFile, line, 'utf8')
-    index.latest_seq = Math.max(Number(index.latest_seq) || 0, Number(payload.seq) || 0)
+    index.latest_seq = Math.max(
+      Number(index.latest_seq) || 0,
+      Number(payload.seq) || 0,
+    )
     index.active_lines = (Number(index.active_lines) || 0) + 1
-    index.active_bytes = (Number(index.active_bytes) || 0) + Buffer.byteLength(line, 'utf8')
+    index.active_bytes =
+      (Number(index.active_bytes) || 0) + Buffer.byteLength(line, 'utf8')
     index.hot_limit_lines = 2000
     index.hot_limit_bytes = 5 * 1024 * 1024
-    index.needs_rotation = Number(index.active_bytes) > 5 * 1024 * 1024 || Number(index.active_lines) > 2000
+    index.needs_rotation =
+      Number(index.active_bytes) > 5 * 1024 * 1024 ||
+      Number(index.active_lines) > 2000
     this.writeIndex(index)
     return payload
   }
 
-  compact(activeMessages: Row[], archiveGate?: HistoryArchiveGate | null): void {
+  compact(
+    activeMessages: Row[],
+    archiveGate?: HistoryArchiveGate | null,
+  ): void {
     const hotRows = this.readHotRows()
-    const marker: Row = { seq: HistoryLog.nextSeq(hotRows), ts: nowIsoUtc8(), type: 'compact_event', archived: true }
+    const marker: Row = {
+      seq: HistoryLog.nextSeq(hotRows),
+      ts: nowIsoUtc8(),
+      type: 'compact_event',
+      archived: true,
+    }
     const activeRows = this.activeRowsFromMessages(activeMessages, hotRows)
-    const [archivedRows, gatedKeepRows] = this.rowsToArchive(hotRows, activeRows, archiveGate)
+    const [archivedRows, gatedKeepRows] = this.rowsToArchive(
+      hotRows,
+      activeRows,
+      archiveGate,
+    )
     const maxArchivedSeq = maxSeq(archivedRows)
     if (archiveGate && maxArchivedSeq <= 0 && gatedKeepRows.length > 0) {
-      throw new Error(`cannot archive history beyond semantic compaction cursor: seq ${maxSeq(gatedKeepRows)}`)
+      throw new Error(
+        `cannot archive history beyond semantic compaction cursor: seq ${maxSeq(gatedKeepRows)}`,
+      )
     }
-    if (archiveGate && maxArchivedSeq > 0 && !archiveGate.canArchiveUntil(maxArchivedSeq)) {
-      throw new Error(`cannot archive history beyond semantic compaction cursor: seq ${maxArchivedSeq}`)
+    if (
+      archiveGate &&
+      maxArchivedSeq > 0 &&
+      !archiveGate.canArchiveUntil(maxArchivedSeq)
+    ) {
+      throw new Error(
+        `cannot archive history beyond semantic compaction cursor: seq ${maxArchivedSeq}`,
+      )
     }
     archivedRows.push(marker)
     if (archivedRows.length) this.appendArchive(archivedRows)
-    this.rewriteHot([...activeRows, ...gatedKeepRows].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0)))
+    this.rewriteHot(
+      [...activeRows, ...gatedKeepRows].sort(
+        (a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0),
+      ),
+    )
     const index = this.loadIndex()
-    index.latest_seq = Math.max(Number(index.latest_seq) || 0, Number(marker.seq))
+    index.latest_seq = Math.max(
+      Number(index.latest_seq) || 0,
+      Number(marker.seq),
+    )
     index.last_archive_at = marker.ts
     this.writeIndex(this.statsFromIndex(index))
-    if (archiveGate && maxArchivedSeq > 0) archiveGate.markArchived?.(maxArchivedSeq)
+    if (archiveGate && maxArchivedSeq > 0)
+      archiveGate.markArchived?.(maxArchivedSeq)
   }
 
   loadActiveRows(): Row[] {
@@ -97,7 +142,9 @@ export class HistoryLog {
     const from = Number(fromSeq) || 0
     const to = Number(toSeq) || 0
     if (to < from) return 0
-    return this.completedTurns().filter((turn) => turn.firstSeq >= from && turn.lastSeq <= to).length
+    return this.completedTurns().filter(
+      (turn) => turn.firstSeq >= from && turn.lastSeq <= to,
+    ).length
   }
 
   stats(): Row {
@@ -107,7 +154,8 @@ export class HistoryLog {
   private ensure(): void {
     mkdirSync(this.memoryDir, { recursive: true })
     mkdirSync(this.archiveDir, { recursive: true })
-    if (!existsSync(this.historyFile)) writeFileSync(this.historyFile, '', 'utf8')
+    if (!existsSync(this.historyFile))
+      writeFileSync(this.historyFile, '', 'utf8')
     if (!existsSync(this.indexFile)) this.migrateLegacyHistory()
     else this.writeIndex(this.statsFromIndex(this.loadIndex()))
   }
@@ -118,20 +166,27 @@ export class HistoryLog {
       writeFileSync(this.legacyBackup, readFileSync(this.historyFile), 'utf8')
     }
     let lastMarker = -1
-    rows.forEach((row, i) => { if (row.type === 'compact_event') lastMarker = i })
+    rows.forEach((row, i) => {
+      if (row.type === 'compact_event') lastMarker = i
+    })
     const archived = lastMarker >= 0 ? rows.slice(0, lastMarker + 1) : []
     const active = lastMarker >= 0 ? rows.slice(lastMarker + 1) : rows
     for (const row of archived) row.archived = true
     for (const row of active) row.archived = false
     if (archived.length) this.appendArchive(archived)
     this.rewriteHot(active)
-    const latest = rows.reduce((max, row) => Math.max(max, Number(row.seq) || 0), 0)
+    const latest = rows.reduce(
+      (max, row) => Math.max(max, Number(row.seq) || 0),
+      0,
+    )
     this.writeIndex(
       this.statsFromIndex({
         version: INDEX_VERSION,
         latest_seq: latest,
         migrated_at: nowIsoUtc8(),
-        last_archive_at: archived.length ? archived[archived.length - 1]!.ts : null,
+        last_archive_at: archived.length
+          ? archived[archived.length - 1]!.ts
+          : null,
       }),
     )
   }
@@ -193,14 +248,23 @@ export class HistoryLog {
         row.archived = false
       } else {
         nextSeq += 1
-        row = { seq: nextSeq, ts: nowIsoUtc8(), archived: false, ...jsonSafe(base) as Row }
+        row = {
+          seq: nextSeq,
+          ts: nowIsoUtc8(),
+          archived: false,
+          ...(jsonSafe(base) as Row),
+        }
       }
       active.push(row)
     }
     return active
   }
 
-  private rowsToArchive(hotRows: Row[], activeRows: Row[], archiveGate?: HistoryArchiveGate | null): [Row[], Row[]] {
+  private rowsToArchive(
+    hotRows: Row[],
+    activeRows: Row[],
+    archiveGate?: HistoryArchiveGate | null,
+  ): [Row[], Row[]] {
     const activeCounts = new Map<string, number>()
     for (const row of activeRows) {
       const sig = HistoryLog.signature(row)
@@ -224,8 +288,20 @@ export class HistoryLog {
     return [archived, gatedKeep]
   }
 
-  private completedTurns(): Array<{ turnId: string; firstSeq: number; lastSeq: number }> {
-    const turns = new Map<string, { turnId: string; firstSeq: number; lastSeq: number; hasAssistant: boolean }>()
+  private completedTurns(): Array<{
+    turnId: string
+    firstSeq: number
+    lastSeq: number
+  }> {
+    const turns = new Map<
+      string,
+      {
+        turnId: string
+        firstSeq: number
+        lastSeq: number
+        hasAssistant: boolean
+      }
+    >()
     for (const row of this.loadActiveRows()) {
       const turnId = typeof row.turn_id === 'string' ? row.turn_id : ''
       if (!turnId) continue
@@ -263,7 +339,9 @@ export class HistoryLog {
     for (const [month, items] of grouped) {
       const path = join(this.archiveDir, `${month}.jsonl.gz`)
       // gzip 成员可拼接：现有 gz + 新 gz 段。对齐 Python gzip.open(at) 行为。
-      const body = items.map((row) => JSON.stringify(jsonSafe(row)) + '\n').join('')
+      const body = items
+        .map((row) => JSON.stringify(jsonSafe(row)) + '\n')
+        .join('')
       const chunk = gzipSync(Buffer.from(body, 'utf8'))
       if (existsSync(path)) appendFileSync(path, chunk)
       else writeFileSync(path, chunk)
@@ -272,15 +350,24 @@ export class HistoryLog {
 
   private rewriteHot(rows: Row[]): void {
     for (const row of rows) row.archived = false
-    const tmp = join(this.memoryDir, `.${basename(this.historyFile)}.${randomUUID().replace(/-/g, '')}.tmp`)
-    writeFileSync(tmp, rows.map((row) => JSON.stringify(jsonSafe(row)) + '\n').join(''), 'utf8')
+    const tmp = join(
+      this.memoryDir,
+      `.${basename(this.historyFile)}.${randomUUID().replace(/-/g, '')}.tmp`,
+    )
+    writeFileSync(
+      tmp,
+      rows.map((row) => JSON.stringify(jsonSafe(row)) + '\n').join(''),
+      'utf8',
+    )
     renameSync(tmp, this.historyFile)
   }
 
   private statsFromIndex(index: Row): Row {
     const hotRows = this.readHotRows()
     const archiveFiles = existsSync(this.archiveDir)
-      ? readdirSync(this.archiveDir).filter((f) => f.endsWith('.jsonl.gz')).sort()
+      ? readdirSync(this.archiveDir)
+          .filter((f) => f.endsWith('.jsonl.gz'))
+          .sort()
       : []
     const root = dirname(this.memoryDir)
     const archives = archiveFiles.map((f) => {
@@ -292,7 +379,9 @@ export class HistoryLog {
         updated_at: nowIsoUtc8(st.mtimeMs),
       }
     })
-    const hotBytes = existsSync(this.historyFile) ? statSync(this.historyFile).size : 0
+    const hotBytes = existsSync(this.historyFile)
+      ? statSync(this.historyFile).size
+      : 0
     const archiveBytes = archives.reduce((sum, item) => sum + item.bytes, 0)
     return {
       version: INDEX_VERSION,
@@ -315,14 +404,22 @@ export class HistoryLog {
     try {
       raw = JSON.parse(readFileSync(this.indexFile, 'utf8') || '{}')
     } catch {
-      return { version: INDEX_VERSION, latest_seq: HistoryLog.nextSeq(this.readHotRows()) - 1 }
+      return {
+        version: INDEX_VERSION,
+        latest_seq: HistoryLog.nextSeq(this.readHotRows()) - 1,
+      }
     }
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Row) : { version: INDEX_VERSION }
+    return raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Row)
+      : { version: INDEX_VERSION }
   }
 
   private writeIndex(index: Row): void {
     const payload = { ...index, version: INDEX_VERSION }
-    const tmp = join(this.memoryDir, `.${basename(this.indexFile)}.${randomUUID().replace(/-/g, '')}.tmp`)
+    const tmp = join(
+      this.memoryDir,
+      `.${basename(this.indexFile)}.${randomUUID().replace(/-/g, '')}.tmp`,
+    )
     writeFileSync(tmp, JSON.stringify(jsonSafe(payload), null, 2), 'utf8')
     renameSync(tmp, this.indexFile)
   }
@@ -340,7 +437,11 @@ export class HistoryLog {
 
   static archiveMonth(row: Row): string {
     const ts = String(row.ts ?? '')
-    if (ts.length >= 7 && ts[4] === '-' && (ts[7] === undefined || ts[7] === 'T' || ts[7] === '-')) {
+    if (
+      ts.length >= 7 &&
+      ts[4] === '-' &&
+      (ts[7] === undefined || ts[7] === 'T' || ts[7] === '-')
+    ) {
       return ts.slice(0, 7)
     }
     return nowIsoUtc8().slice(0, 7)
@@ -355,7 +456,8 @@ function jsonSafe(obj: unknown): unknown {
     if (Array.isArray(obj)) return obj.map(jsonSafe)
     if (obj && typeof obj === 'object') {
       const out: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) out[k] = jsonSafe(v)
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>))
+        out[k] = jsonSafe(v)
       return out
     }
     return String(obj)
@@ -363,14 +465,18 @@ function jsonSafe(obj: unknown): unknown {
 }
 
 function maxSeq(rows: Row[]): number {
-  return rows.reduce((max, row) => Math.max(max, Math.trunc(Number(row.seq) || 0)), 0)
+  return rows.reduce(
+    (max, row) => Math.max(max, Math.trunc(Number(row.seq) || 0)),
+    0,
+  )
 }
 
 function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeys)
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) out[key] = sortKeys((value as Record<string, unknown>)[key])
+    for (const key of Object.keys(value as Record<string, unknown>).sort())
+      out[key] = sortKeys((value as Record<string, unknown>)[key])
     return out
   }
   return value

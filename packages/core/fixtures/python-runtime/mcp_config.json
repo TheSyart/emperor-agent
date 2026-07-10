@@ -4,10 +4,7 @@
       "transport": "stdio",
       "enabled": true,
       "command": "${PY_TOOL}",
-      "args": [
-        "-m",
-        "legacy_reader"
-      ],
+      "args": ["-m", "legacy_reader"],
       "env": {
         "MODE": "fixture"
       },

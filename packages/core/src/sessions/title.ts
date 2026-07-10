@@ -1,7 +1,18 @@
 import type { ModelRouter, ProviderSnapshot } from '../model/router'
 
-const FORBIDDEN_PREFIXES = ['关于', '帮我', '如何', '请', '实现', '优化', '处理', '完成', '给我']
-const PUNCT_RE = /[`~!@#$%^&*()_=+[\]{}\\|;:'",.<>/?，。！？、；：“”‘’（）【】《》「」『』…—-]+/g
+const FORBIDDEN_PREFIXES = [
+  '关于',
+  '帮我',
+  '如何',
+  '请',
+  '实现',
+  '优化',
+  '处理',
+  '完成',
+  '给我',
+]
+const PUNCT_RE =
+  /[`~!@#$%^&*()_=+[\]{}\\|;:'",.<>/?，。！？、；：“”‘’（）【】《》「」『』…—-]+/g
 const SPACE_RE = /\s+/g
 
 export class SessionTitleService {
@@ -15,7 +26,9 @@ export class SessionTitleService {
     const fallback = fallbackSessionTitle(firstMessage)
     const prompt = titlePrompt(firstMessage)
     const route = this.modelRouter.route('session_title', null, firstMessage)
-    const snapshots = [route.snapshot, route.fallback].filter(Boolean) as ProviderSnapshot[]
+    const snapshots = [route.snapshot, route.fallback].filter(
+      Boolean,
+    ) as ProviderSnapshot[]
     for (const snapshot of snapshots) {
       try {
         const generation = snapshot.generation
@@ -23,7 +36,8 @@ export class SessionTitleService {
           messages: [
             {
               role: 'system',
-              content: '你只负责给聊天会话命名。必须只输出标题本身，不要解释，不要标点，不要换行。',
+              content:
+                '你只负责给聊天会话命名。必须只输出标题本身，不要解释，不要标点，不要换行。',
             },
             { role: 'user', content: prompt },
           ],
@@ -45,7 +59,10 @@ export class SessionTitleService {
 
 export function sanitizeSessionTitle(value: string): string {
   let text = String(value || '').trim()
-  text = text.replace(/^```[a-zA-Z0-9_-]*/, '').replace(/```$/, '').trim()
+  text = text
+    .replace(/^```[a-zA-Z0-9_-]*/, '')
+    .replace(/```$/, '')
+    .trim()
   text = text.replace(/\n/g, ' ')
   text = text.split(/[,，。.!！？?；;:：]/, 1)[0] ?? ''
   text = text.replace(PUNCT_RE, ' ')

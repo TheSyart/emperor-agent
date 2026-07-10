@@ -1,4 +1,8 @@
-import type { CompactionRange, CompactionTrigger, SessionMemoryCursor } from './compaction-models'
+import type {
+  CompactionRange,
+  CompactionTrigger,
+  SessionMemoryCursor,
+} from './compaction-models'
 
 export interface HistoryCompactionIndex {
   lastCompletedTurnSeq(): number
@@ -14,15 +18,25 @@ export interface SelectCompactionRangeInput {
   keepTailTurns: number
 }
 
-export function selectCompactionRange(input: SelectCompactionRangeInput): CompactionRange | null {
-  const fromSeq = Math.max(1, Math.trunc(Number(input.cursor.compactedUntilSeq) || 0) + 1)
-  const stableBoundarySeq = Math.trunc(Number(input.history.lastCompletedTurnSeq()) || 0)
+export function selectCompactionRange(
+  input: SelectCompactionRangeInput,
+): CompactionRange | null {
+  const fromSeq = Math.max(
+    1,
+    Math.trunc(Number(input.cursor.compactedUntilSeq) || 0) + 1,
+  )
+  const stableBoundarySeq = Math.trunc(
+    Number(input.history.lastCompletedTurnSeq()) || 0,
+  )
   if (stableBoundarySeq < fromSeq) return null
 
   const force = input.trigger.kind === 'manual' && input.trigger.force === true
   const keepTailFromSeq = force
     ? stableBoundarySeq + 1
-    : Math.trunc(Number(input.history.seqBeforeLastNTurns(input.keepTailTurns)) || stableBoundarySeq + 1)
+    : Math.trunc(
+        Number(input.history.seqBeforeLastNTurns(input.keepTailTurns)) ||
+          stableBoundarySeq + 1,
+      )
   const toSeq = force
     ? stableBoundarySeq
     : Math.min(stableBoundarySeq, keepTailFromSeq - 1)

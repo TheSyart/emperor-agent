@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 
@@ -17,7 +18,10 @@ const trackedOutput = execFileSync('git', ['ls-files', '-z'], {
   cwd: repoRoot,
   encoding: 'utf8',
 })
-const trackedFiles = trackedOutput.split('\0').filter(Boolean)
+const trackedFiles = trackedOutput
+  .split('\0')
+  .filter(Boolean)
+  .filter((file) => existsSync(resolve(repoRoot, file)))
 
 if (trackedFiles.length === 0) process.exit(0)
 

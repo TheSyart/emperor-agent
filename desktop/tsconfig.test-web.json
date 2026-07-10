@@ -1,11 +1,10 @@
 {
   "extends": "./tsconfig.web.json",
   "compilerOptions": {
-    "strict": false,
-    "types": ["vite/client", "node"],
+    "skipLibCheck": true,
+    "types": ["vite/client", "node", "vitest/globals"],
     "paths": {
-      "@renderer/*": ["src/renderer/src/*"],
-      "vitest": ["src/renderer/src/test-vitest-shim.ts"]
+      "@renderer/*": ["src/renderer/src/*"]
     }
   },
   "include": ["src/renderer/src/**/*.ts", "src/renderer/src/**/*.d.ts"],

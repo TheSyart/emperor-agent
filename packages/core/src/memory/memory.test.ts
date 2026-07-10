@@ -5,7 +5,14 @@
  *  - tests/unit/test_memory_versions.py (MemoryVersionStore snapshot/restore/dedupe + MemoryStore writes 建版本)
  */
 import { describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -23,7 +30,9 @@ function archiveRows(memoryDir: string): Row[] {
   const dir = join(memoryDir, 'history_archive')
   if (!existsSync(dir)) return []
   const rows: Row[] = []
-  for (const f of readdirSync(dir).filter((x) => x.endsWith('.jsonl.gz')).sort()) {
+  for (const f of readdirSync(dir)
+    .filter((x) => x.endsWith('.jsonl.gz'))
+    .sort()) {
     const text = gunzipSync(readFileSync(join(dir, f))).toString('utf8')
     for (const line of text.split('\n')) {
       if (line.trim()) rows.push(JSON.parse(line))
@@ -36,7 +45,11 @@ function archiveRows(memoryDir: string): Row[] {
 
 describe('HistoryLog (test_history_log.py)', () => {
   it('uses text-safe separators for row signatures', () => {
-    const signature = HistoryLog.signature({ role: 'user', turn_id: 't1', content: 'hello' })
+    const signature = HistoryLog.signature({
+      role: 'user',
+      turn_id: 't1',
+      content: 'hello',
+    })
     expect(signature).not.toContain('\0')
     expect(signature).toContain('\\0')
   })
@@ -51,13 +64,19 @@ describe('HistoryLog (test_history_log.py)', () => {
       { ts: '2026-05-02T10:00:00+08:00', role: 'user', content: 'active' },
       { ts: '2026-05-02T10:01:00+08:00', role: 'assistant', content: 'reply' },
     ]
-    writeFileSync(historyFile, legacy.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8')
+    writeFileSync(
+      historyFile,
+      legacy.map((r) => JSON.stringify(r)).join('\n') + '\n',
+      'utf8',
+    )
 
     const log = new HistoryLog(memoryDir, historyFile)
     const active = log.loadActiveRows()
     const archived = archiveRows(memoryDir)
 
-    expect(existsSync(join(memoryDir, 'history.legacy-backup.jsonl'))).toBe(true)
+    expect(existsSync(join(memoryDir, 'history.legacy-backup.jsonl'))).toBe(
+      true,
+    )
     expect(active.map((r) => r.content)).toEqual(['active', 'reply'])
     expect(archived.length).toBe(2)
     expect(active.length + archived.length).toBe(legacy.length)
@@ -80,7 +99,10 @@ describe('HistoryLog (test_history_log.py)', () => {
     const active = log.loadActiveRows()
     const archived = archiveRows(memoryDir)
     expect(active.map((r) => r.content)).toEqual(['new', 'new reply'])
-    expect(archived.filter((r) => r.role).map((r) => r.content)).toEqual(['old', 'old reply'])
+    expect(archived.filter((r) => r.role).map((r) => r.content)).toEqual([
+      'old',
+      'old reply',
+    ])
     expect(archived.some((r) => r.type === 'compact_event')).toBe(true)
     expect(log.stats().active_lines).toBe(2)
   })
@@ -94,12 +116,17 @@ describe('HistoryLog (test_history_log.py)', () => {
     log.append({ role: 'assistant', content: 'new reply', turn_id: 'turn_new' })
     const before = readFileSync(join(memoryDir, 'history.jsonl'), 'utf8')
 
-    expect(() => log.compact([
-      { role: 'user', content: 'new', turn_id: 'turn_new' },
-      { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
-    ], {
-      canArchiveUntil: () => false,
-    })).toThrow(/semantic compaction cursor/)
+    expect(() =>
+      log.compact(
+        [
+          { role: 'user', content: 'new', turn_id: 'turn_new' },
+          { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
+        ],
+        {
+          canArchiveUntil: () => false,
+        },
+      ),
+    ).toThrow(/semantic compaction cursor/)
 
     expect(readFileSync(join(memoryDir, 'history.jsonl'), 'utf8')).toBe(before)
     expect(archiveRows(memoryDir)).toEqual([])
@@ -114,15 +141,24 @@ describe('HistoryLog (test_history_log.py)', () => {
     log.append({ role: 'assistant', content: 'new reply', turn_id: 'turn_new' })
     const archivedUntil: number[] = []
 
-    log.compact([
-      { role: 'user', content: 'new', turn_id: 'turn_new' },
-      { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
-    ], {
-      canArchiveUntil: (seq) => seq <= 2,
-      markArchived: (seq) => { archivedUntil.push(seq) },
-    })
+    log.compact(
+      [
+        { role: 'user', content: 'new', turn_id: 'turn_new' },
+        { role: 'assistant', content: 'new reply', turn_id: 'turn_new' },
+      ],
+      {
+        canArchiveUntil: (seq) => seq <= 2,
+        markArchived: (seq) => {
+          archivedUntil.push(seq)
+        },
+      },
+    )
 
-    expect(archiveRows(memoryDir).filter((row) => row.role).map((row) => row.content)).toEqual(['old', 'old reply'])
+    expect(
+      archiveRows(memoryDir)
+        .filter((row) => row.role)
+        .map((row) => row.content),
+    ).toEqual(['old', 'old reply'])
     expect(archivedUntil).toEqual([2])
   })
 
@@ -132,7 +168,10 @@ describe('HistoryLog (test_history_log.py)', () => {
     log.append({ role: 'user', content: 'keep' })
     const before = readFileSync(join(memoryDir, 'history.jsonl'), 'utf8')
 
-    vi.spyOn(log as unknown as { appendArchive: () => void }, 'appendArchive').mockImplementation(() => {
+    vi.spyOn(
+      log as unknown as { appendArchive: () => void },
+      'appendArchive',
+    ).mockImplementation(() => {
       throw new Error('archive failed')
     })
     expect(() => log.compact([])).toThrow(/archive failed/)
@@ -145,38 +184,64 @@ describe('HistoryLog (test_history_log.py)', () => {
 describe('MemoryStore history (test_history_log.py)', () => {
   it('load unarchived reads only hot log', () => {
     const root = tmp('emperor-mem-unarch-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
     memory.appendHistory('user', 'old', { extra: { turn_id: 'turn_old' } })
-    memory.appendHistory('assistant', 'old reply', { extra: { turn_id: 'turn_old' } })
+    memory.appendHistory('assistant', 'old reply', {
+      extra: { turn_id: 'turn_old' },
+    })
     memory.appendHistory('user', 'new', { extra: { turn_id: 'turn_new' } })
-    memory.appendCompactMarker([{ role: 'user', content: 'new', turn_id: 'turn_new' }])
+    memory.appendCompactMarker([
+      { role: 'user', content: 'new', turn_id: 'turn_new' },
+    ])
 
-    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'new', seq: 3, turn_id: 'turn_new' }])
+    expect(memory.loadUnarchivedHistory()).toEqual([
+      { role: 'user', content: 'new', seq: 3, turn_id: 'turn_new' },
+    ])
     expect(memory.historyStats().archive_files).toBe(1)
   })
 
   it('hides scheduler background turns', () => {
     const root = tmp('emperor-mem-hidden-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
-    memory.appendHistory('user', 'visible', { extra: { turn_id: 'turn_visible' } })
-    memory.appendHistory('user', 'hidden scheduler', { extra: { turn_id: 'turn_hidden', hidden: true, schedulerHidden: true } })
-    memory.appendHistory('assistant', 'hidden reply', { extra: { turn_id: 'turn_hidden' } })
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
+    memory.appendHistory('user', 'visible', {
+      extra: { turn_id: 'turn_visible' },
+    })
+    memory.appendHistory('user', 'hidden scheduler', {
+      extra: { turn_id: 'turn_hidden', hidden: true, schedulerHidden: true },
+    })
+    memory.appendHistory('assistant', 'hidden reply', {
+      extra: { turn_id: 'turn_hidden' },
+    })
 
-    expect(memory.loadUnarchivedHistory()).toEqual([{ role: 'user', content: 'visible', seq: 1, turn_id: 'turn_visible' }])
+    expect(memory.loadUnarchivedHistory()).toEqual([
+      { role: 'user', content: 'visible', seq: 1, turn_id: 'turn_visible' },
+    ])
   })
 
   it('checkpoint round-trips and clears', () => {
     const root = tmp('emperor-mem-ckpt-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
     expect(memory.readCheckpoint()).toBeNull()
-    memory.writeCheckpoint([{ role: 'user', content: 'wip', turn_id: 'turn_1' }], {
-      sessionId: 'session_1',
-      turnId: 'turn_1',
-      phase: 'model_called',
-      baseHistorySeq: 0,
-      contextPlanId: 'context_1',
-      promptSnapshotId: 'snapshot_1',
-    })
+    memory.writeCheckpoint(
+      [{ role: 'user', content: 'wip', turn_id: 'turn_1' }],
+      {
+        sessionId: 'session_1',
+        turnId: 'turn_1',
+        phase: 'model_called',
+        baseHistorySeq: 0,
+        contextPlanId: 'context_1',
+        promptSnapshotId: 'snapshot_1',
+      },
+    )
     const payload = JSON.parse(readFileSync(memory.checkpointFile, 'utf8'))
     expect(payload).toMatchObject({
       schemaVersion: 'emperor.turn-checkpoint.v1',
@@ -188,49 +253,72 @@ describe('MemoryStore history (test_history_log.py)', () => {
       promptSnapshotId: 'snapshot_1',
       partialMessages: [{ role: 'user', content: 'wip', turn_id: 'turn_1' }],
     })
-    expect(memory.readCheckpoint()).toEqual([{ role: 'user', content: 'wip', turn_id: 'turn_1' }])
+    expect(memory.readCheckpoint()).toEqual([
+      { role: 'user', content: 'wip', turn_id: 'turn_1' },
+    ])
     memory.clearCheckpoint()
     expect(memory.readCheckpoint()).toBeNull()
   })
 
   it('reads legacy checkpoints but ignores committed, aborted, stale, and corrupt checkpoints', () => {
     const root = tmp('emperor-mem-ckpt-rules-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
 
-    writeFileSync(memory.checkpointFile, JSON.stringify({
-      ts: '2026-07-06T00:00:00+08:00',
-      history: [{ role: 'user', content: 'legacy draft' }],
-    }), 'utf8')
-    expect(memory.readCheckpoint()).toEqual([{ role: 'user', content: 'legacy draft' }])
+    writeFileSync(
+      memory.checkpointFile,
+      JSON.stringify({
+        ts: '2026-07-06T00:00:00+08:00',
+        history: [{ role: 'user', content: 'legacy draft' }],
+      }),
+      'utf8',
+    )
+    expect(memory.readCheckpoint()).toEqual([
+      { role: 'user', content: 'legacy draft' },
+    ])
 
-    writeFileSync(memory.checkpointFile, JSON.stringify({
-      schemaVersion: 'emperor.turn-checkpoint.v1',
-      sessionId: 'session_1',
-      turnId: 'turn_committed',
-      baseHistorySeq: 0,
-      phase: 'committed',
-      partialMessages: [{ role: 'user', content: 'committed draft' }],
-    }), 'utf8')
+    writeFileSync(
+      memory.checkpointFile,
+      JSON.stringify({
+        schemaVersion: 'emperor.turn-checkpoint.v1',
+        sessionId: 'session_1',
+        turnId: 'turn_committed',
+        baseHistorySeq: 0,
+        phase: 'committed',
+        partialMessages: [{ role: 'user', content: 'committed draft' }],
+      }),
+      'utf8',
+    )
     expect(memory.readCheckpoint()).toBeNull()
 
-    writeFileSync(memory.checkpointFile, JSON.stringify({
-      schemaVersion: 'emperor.turn-checkpoint.v1',
-      sessionId: 'session_1',
-      turnId: 'turn_aborted',
-      baseHistorySeq: 0,
-      phase: 'aborted',
-      partialMessages: [{ role: 'user', content: 'aborted draft' }],
-    }), 'utf8')
+    writeFileSync(
+      memory.checkpointFile,
+      JSON.stringify({
+        schemaVersion: 'emperor.turn-checkpoint.v1',
+        sessionId: 'session_1',
+        turnId: 'turn_aborted',
+        baseHistorySeq: 0,
+        phase: 'aborted',
+        partialMessages: [{ role: 'user', content: 'aborted draft' }],
+      }),
+      'utf8',
+    )
     expect(memory.readCheckpoint()).toBeNull()
 
-    writeFileSync(memory.checkpointFile, JSON.stringify({
-      schemaVersion: 'emperor.turn-checkpoint.v1',
-      sessionId: 'session_1',
-      turnId: 'turn_stale',
-      baseHistorySeq: 99,
-      phase: 'tool_calls_pending',
-      partialMessages: [{ role: 'user', content: 'stale draft' }],
-    }), 'utf8')
+    writeFileSync(
+      memory.checkpointFile,
+      JSON.stringify({
+        schemaVersion: 'emperor.turn-checkpoint.v1',
+        sessionId: 'session_1',
+        turnId: 'turn_stale',
+        baseHistorySeq: 99,
+        phase: 'tool_calls_pending',
+        partialMessages: [{ role: 'user', content: 'stale draft' }],
+      }),
+      'utf8',
+    )
     expect(memory.readCheckpoint()).toBeNull()
 
     writeFileSync(memory.checkpointFile, '{bad json', 'utf8')
@@ -242,11 +330,13 @@ describe('MemoryStore history (test_history_log.py)', () => {
 
 describe('MemoryVersionStore (test_memory_versions.py)', () => {
   it('rejects unknown serialized version targets instead of silently coercing to memory', () => {
-    expect(() => memoryVersionFromDict({
-      id: 'memv_bad',
-      target: 'global',
-      relPath: 'memory/MEMORY.local.md',
-    })).toThrow(/unknown memory version target/)
+    expect(() =>
+      memoryVersionFromDict({
+        id: 'memv_bad',
+        target: 'global',
+        relPath: 'memory/MEMORY.local.md',
+      }),
+    ).toThrow(/unknown memory version target/)
   })
 
   it('snapshots and restores', () => {
@@ -276,7 +366,11 @@ describe('MemoryVersionStore (test_memory_versions.py)', () => {
     mkdirSync(memoryDir, { recursive: true })
     const memoryFile = join(memoryDir, 'MEMORY.local.md')
     writeFileSync(memoryFile, 'same\n', 'utf8')
-    const store = new MemoryVersionStore(root, memoryDir, join(root, 'USER.local.md'))
+    const store = new MemoryVersionStore(
+      root,
+      memoryDir,
+      join(root, 'USER.local.md'),
+    )
     const v1 = store.snapshotPath(memoryFile)
     const v2 = store.snapshotPath(memoryFile)
     expect(v1!.id).toBe(v2!.id)
@@ -285,7 +379,10 @@ describe('MemoryVersionStore (test_memory_versions.py)', () => {
 
   it('MemoryStore writes create versions', () => {
     const root = tmp('emperor-memv-store-')
-    const memory = new MemoryStore(join(root, 'memory'), join(root, 'USER.local.md'))
+    const memory = new MemoryStore(
+      join(root, 'memory'),
+      join(root, 'USER.local.md'),
+    )
     memory.writeMemory('first memory')
     memory.writeMemory('second memory')
     const versions = memory.versions.list({ target: 'memory' })

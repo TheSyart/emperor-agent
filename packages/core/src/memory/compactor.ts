@@ -5,7 +5,12 @@
  */
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ChatArgs, GenerationSettings, LLMProvider, LLMResponse } from '../providers/base'
+import type {
+  ChatArgs,
+  GenerationSettings,
+  LLMProvider,
+  LLMResponse,
+} from '../providers/base'
 import type { HistoryArchiveGate } from './history'
 import type { TokenTracker } from './token-tracker'
 import { nowIsoUtc8 } from './time-utc8'
@@ -58,7 +63,9 @@ export function parseCompactionResult(text: string): CompactionResult {
   }
 }
 
-export type RuntimeContextProvider = (messages: Array<Record<string, unknown>>) => Record<string, unknown> | string | null
+export type RuntimeContextProvider = (
+  messages: Array<Record<string, unknown>>,
+) => Record<string, unknown> | string | null
 
 export interface CompactorMemoryStore {
   readonly memoryDir: string
@@ -68,7 +75,10 @@ export interface CompactorMemoryStore {
   writeUser(content: string): void
   readTodayEpisode(): string
   appendEpisode(content: string): void
-  appendCompactMarker(activeHistory?: Array<Record<string, unknown>> | null, archiveGate?: HistoryArchiveGate | null): void
+  appendCompactMarker(
+    activeHistory?: Array<Record<string, unknown>> | null,
+    archiveGate?: HistoryArchiveGate | null,
+  ): void
 }
 
 interface CompactionCall {
@@ -133,7 +143,10 @@ export class Compactor {
     this.provider = opts.provider
     this.model = opts.model
     this.memory = opts.memoryStore
-    this.promptTemplate = readFileSync(join(opts.docsDir, 'agent', 'compact_prompt.md'), 'utf8')
+    this.promptTemplate = readFileSync(
+      join(opts.docsDir, 'agent', 'compact_prompt.md'),
+      'utf8',
+    )
     this.maxTokens = opts.maxTokens ?? 4000
     this.temperature = opts.temperature ?? 0.1
     this.reasoningEffort = opts.reasoningEffort ?? null
@@ -147,11 +160,14 @@ export class Compactor {
     this.fallbackGeneration = opts.fallbackGeneration ?? null
     this.fallbackModelRole = opts.fallbackModelRole ?? 'main'
     this.routeReason = opts.routeReason ?? 'memory_compaction'
-    this.fallbackRouteReason = opts.fallbackRouteReason || `${this.routeReason}:fallback_main`
+    this.fallbackRouteReason =
+      opts.fallbackRouteReason || `${this.routeReason}:fallback_main`
     this.runtimeContextProvider = opts.runtimeContextProvider ?? null
   }
 
-  async compactAsync(history: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  async compactAsync(
+    history: Array<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>>> {
     if (history.length <= Compactor.K) return history
     const old = history.slice(0, -Compactor.K)
     const recent = history.slice(-Compactor.K)
@@ -160,14 +176,18 @@ export class Compactor {
     return recent
   }
 
-  async compactStartupAsync(history: Array<Record<string, unknown>>): Promise<boolean> {
+  async compactStartupAsync(
+    history: Array<Record<string, unknown>>,
+  ): Promise<boolean> {
     if (history.length < 2) return false
     if (!(await this.compactMessages(history))) return false
     this.memory.appendCompactMarker([])
     return true
   }
 
-  private async compactMessages(messages: Array<Record<string, unknown>>): Promise<boolean> {
+  private async compactMessages(
+    messages: Array<Record<string, unknown>>,
+  ): Promise<boolean> {
     const prompt = formatTemplate(this.promptTemplate, {
       old_conversation: messagesToText(messages, this.runtimeContextProvider),
       current_memory: this.memory.readMemory() || '(空)',
@@ -182,7 +202,9 @@ export class Compactor {
       parsed = parseCompactionResult(text)
     } catch (exc) {
       if (!(exc instanceof CompactionParseError)) throw exc
-      const repairPrompt = formatTemplate(REPAIR_PROMPT, { invalid_response: text.slice(0, 12_000) })
+      const repairPrompt = formatTemplate(REPAIR_PROMPT, {
+        invalid_response: text.slice(0, 12_000),
+      })
       const repairResp = await this.chat(call, repairPrompt)
       this.recordUsage(call, repairResp.usage, repairPrompt)
       try {
@@ -199,7 +221,9 @@ export class Compactor {
     return true
   }
 
-  private async callWithFallback(prompt: string): Promise<[CompactionCall, LLMResponse]> {
+  private async callWithFallback(
+    prompt: string,
+  ): Promise<[CompactionCall, LLMResponse]> {
     const call: CompactionCall = {
       provider: this.provider,
       model: this.model,
@@ -224,7 +248,10 @@ export class Compactor {
         model: this.fallbackModel,
         providerName: this.fallbackProviderName,
         modelRole: this.fallbackModelRole,
-        maxTokens: Math.min(this.maxTokens, Number(generation?.maxTokens ?? this.maxTokens) || this.maxTokens),
+        maxTokens: Math.min(
+          this.maxTokens,
+          Number(generation?.maxTokens ?? this.maxTokens) || this.maxTokens,
+        ),
         temperature: generation?.temperature ?? this.temperature,
         reasoningEffort: generation?.reasoningEffort ?? this.reasoningEffort,
         routeReason: this.fallbackRouteReason,
@@ -237,7 +264,10 @@ export class Compactor {
     }
   }
 
-  private async chat(call: CompactionCall, prompt: string): Promise<LLMResponse> {
+  private async chat(
+    call: CompactionCall,
+    prompt: string,
+  ): Promise<LLMResponse> {
     const args: ChatArgs = {
       model: call.model,
       maxTokens: call.maxTokens,
@@ -249,7 +279,11 @@ export class Compactor {
     return call.provider.chat(args)
   }
 
-  private recordUsage(call: CompactionCall, usage: Record<string, number> | undefined, prompt: string): void {
+  private recordUsage(
+    call: CompactionCall,
+    usage: Record<string, number> | undefined,
+    prompt: string,
+  ): void {
     if (!(this.tokenTracker && usage && Object.keys(usage).length)) return
     this.tokenTracker.record(call.model, usage, {
       provider: call.providerName,
@@ -282,7 +316,10 @@ export class Compactor {
 // ── helpers ──
 
 /** Python str.format()：仅替换已知键，未知 {x} 原样保留。 */
-function formatTemplate(template: string, vars: Record<string, string>): string {
+function formatTemplate(
+  template: string,
+  vars: Record<string, string>,
+): string {
   let out = template
   for (const [key, value] of Object.entries(vars)) {
     out = out.split(`{${key}}`).join(value)
@@ -294,12 +331,21 @@ function nowHhmm(): string {
   return nowIsoUtc8().slice(11, 16)
 }
 
-export function messagesToText(messages: Array<Record<string, unknown>>, runtimeContextProvider: RuntimeContextProvider | null): string {
+export function messagesToText(
+  messages: Array<Record<string, unknown>>,
+  runtimeContextProvider: RuntimeContextProvider | null,
+): string {
   const parts: string[] = []
-  const runtimeContext = runtimeContextProvider ? runtimeContextProvider(messages) : null
+  const runtimeContext = runtimeContextProvider
+    ? runtimeContextProvider(messages)
+    : null
   if (runtimeContext) {
-    const content = typeof runtimeContext === 'object' ? (runtimeContext as Record<string, unknown>).content : runtimeContext
-    if (content) parts.push(`[system:runtime_context] ${String(content).slice(0, 4000)}`)
+    const content =
+      typeof runtimeContext === 'object'
+        ? (runtimeContext as Record<string, unknown>).content
+        : runtimeContext
+    if (content)
+      parts.push(`[system:runtime_context] ${String(content).slice(0, 4000)}`)
   }
   for (const msg of messages) {
     const role = String(msg.role ?? '?')
@@ -315,7 +361,8 @@ export function messagesToText(messages: Array<Record<string, unknown>>, runtime
     } else if (Array.isArray(content)) {
       parts.push(...contentBlocksToText(role, content))
     }
-    for (const toolCall of (msg.tool_calls as Array<Record<string, unknown>>) ?? []) {
+    for (const toolCall of (msg.tool_calls as Array<Record<string, unknown>>) ??
+      []) {
       const fn = (toolCall.function as Record<string, unknown>) ?? {}
       const name = fn.name ?? ''
       const args = fn.arguments ?? '{}'
@@ -338,7 +385,13 @@ function contentBlocksToText(role: string, blocks: unknown[]): string[] {
     } else if (btype === 'tool_result') {
       let c = b.content ?? ''
       if (Array.isArray(c)) {
-        c = c.map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>).text ?? '' : String(x))).join(' ')
+        c = c
+          .map((x) =>
+            x && typeof x === 'object'
+              ? ((x as Record<string, unknown>).text ?? '')
+              : String(x),
+          )
+          .join(' ')
       }
       parts.push(`[${role}:tool_result] ${String(c).slice(0, 500)}`)
     }

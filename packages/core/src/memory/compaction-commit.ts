@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { extractProjectMemoryBlock, replaceProjectMemoryBlock } from '../projects/state-store'
+import {
+  extractProjectMemoryBlock,
+  replaceProjectMemoryBlock,
+} from '../projects/state-store'
 import { CompactionCursorStore, CompactionLedger } from './compaction-ledger'
 import {
   applyMemoryPatch,
@@ -10,7 +13,11 @@ import {
   type MemoryPatchApplyResult,
 } from './patch'
 import { MemoryVersionStore, type MemoryVersionTarget } from './versions'
-import type { ActiveMemoryBinding, CompactionPatchBundle, CompactionRunRecord } from './compaction-models'
+import type {
+  ActiveMemoryBinding,
+  CompactionPatchBundle,
+  CompactionRunRecord,
+} from './compaction-models'
 
 export interface CompactionPatchCommitterOptions {
   root: string
@@ -30,7 +37,11 @@ export interface CommitPatchBundleOptions extends MemoryPatchApplyOptions {
 
 export interface CommitPatchBundleResult {
   ok: boolean
-  applied: Array<{ scope: MemoryPatch['target']; path: string; operationCount: number }>
+  applied: Array<{
+    scope: MemoryPatch['target']
+    path: string
+    operationCount: number
+  }>
   errors: string[]
 }
 
@@ -60,13 +71,18 @@ export class CompactionPatchCommitter {
     this.root = resolve(opts.root)
     this.memoryDir = resolve(opts.memoryDir)
     this.userFile = resolve(opts.userFile)
-    this.versions = opts.versions ?? new MemoryVersionStore(this.root, this.memoryDir, this.userFile)
+    this.versions =
+      opts.versions ??
+      new MemoryVersionStore(this.root, this.memoryDir, this.userFile)
     this.cursorStore = opts.cursorStore ?? new CompactionCursorStore(this.root)
     this.ledger = opts.ledger ?? new CompactionLedger(this.root)
     this.writeText = opts.writeText ?? MemoryVersionStore.atomicWriteText
   }
 
-  commitBundle(bundle: CompactionPatchBundle, opts: CommitPatchBundleOptions): CommitPatchBundleResult {
+  commitBundle(
+    bundle: CompactionPatchBundle,
+    opts: CommitPatchBundleOptions,
+  ): CommitPatchBundleResult {
     const previousCursor = this.cursorStore.readOrInit(bundle.sessionId)
     const started = this.ledger.recordStarted(runRecord(bundle, opts))
     this.cursorStore.markCompacting(bundle.sessionId, {
@@ -86,9 +102,17 @@ export class CompactionPatchCommitter {
     }
 
     try {
-      const applied: Array<{ scope: MemoryPatch['target']; path: string; operationCount: number }> = []
-      const targetVersions: NonNullable<CompactionRunRecord['output']>['targetVersions'] = []
-      const prepared = targets.map((target) => this.prepareTargetPatch(target, bundle, opts))
+      const applied: Array<{
+        scope: MemoryPatch['target']
+        path: string
+        operationCount: number
+      }> = []
+      const targetVersions: NonNullable<
+        CompactionRunRecord['output']
+      >['targetVersions'] = []
+      const prepared = targets.map((target) =>
+        this.prepareTargetPatch(target, bundle, opts),
+      )
       for (const target of prepared) {
         this.versions.snapshotPath(target.path, {
           target: target.versionTarget,
@@ -97,7 +121,11 @@ export class CompactionPatchCommitter {
       }
       this.writePreparedTargets(prepared)
       for (const target of prepared) {
-        applied.push({ scope: target.patch.target, path: target.path, operationCount: target.result.appliedOperations })
+        applied.push({
+          scope: target.patch.target,
+          path: target.path,
+          operationCount: target.result.appliedOperations,
+        })
         targetVersions.push({
           scope: target.patch.target,
           beforeVersion: target.patch.baseVersion,
@@ -146,7 +174,11 @@ export class CompactionPatchCommitter {
     }
   }
 
-  private validateTargets(targets: PatchTarget[], bundle: CompactionPatchBundle, opts: MemoryPatchApplyOptions): string[] {
+  private validateTargets(
+    targets: PatchTarget[],
+    bundle: CompactionPatchBundle,
+    opts: MemoryPatchApplyOptions,
+  ): string[] {
     const errors: string[] = []
     for (const target of targets) {
       const result = applyMemoryPatch(target.patch, target.current, {
@@ -163,25 +195,34 @@ export class CompactionPatchCommitter {
   private targetsFor(bundle: CompactionPatchBundle): PatchTarget[] {
     return flattenPatches(bundle).map((patch) => {
       const resolved = this.resolveTarget(patch.target)
-      const fullCurrent = existsSync(resolved.path) ? readFileSync(resolved.path, 'utf8') : ''
-      const current = patch.target.kind === 'project'
-        ? extractProjectMemoryBlock(fullCurrent) ?? fullCurrent
-        : fullCurrent
+      const fullCurrent = existsSync(resolved.path)
+        ? readFileSync(resolved.path, 'utf8')
+        : ''
+      const current =
+        patch.target.kind === 'project'
+          ? (extractProjectMemoryBlock(fullCurrent) ?? fullCurrent)
+          : fullCurrent
       return { patch, ...resolved, current, fullCurrent }
     })
   }
 
-  private prepareTargetPatch(target: PatchTarget, bundle: CompactionPatchBundle, opts: MemoryPatchApplyOptions): PreparedPatchTarget {
+  private prepareTargetPatch(
+    target: PatchTarget,
+    bundle: CompactionPatchBundle,
+    opts: MemoryPatchApplyOptions,
+  ): PreparedPatchTarget {
     const result = applyMemoryPatch(target.patch, target.current, {
       mode: bundle.mode,
       allowBuildGlobalWrite: opts.allowBuildGlobalWrite,
       explicitReplace: opts.explicitReplace,
       currentVersion: this.currentVersionForTarget(target),
     })
-    if (!result.ok) throw new Error(result.errors.join(', ') || 'patch apply failed')
-    const nextContent = target.patch.target.kind === 'project'
-      ? replaceProjectMemoryBlock(target.fullCurrent, result.content)
-      : result.content
+    if (!result.ok)
+      throw new Error(result.errors.join(', ') || 'patch apply failed')
+    const nextContent =
+      target.patch.target.kind === 'project'
+        ? replaceProjectMemoryBlock(target.fullCurrent, result.content)
+        : result.content
     return { ...target, result, nextContent: nextContent.trimEnd() + '\n' }
   }
 
@@ -198,12 +239,16 @@ export class CompactionPatchCommitter {
         try {
           this.writeText(target.path, target.fullCurrent)
         } catch (rollbackError) {
-          rollbackErrors.push(`${target.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+          rollbackErrors.push(
+            `${target.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          )
         }
       }
       const message = error instanceof Error ? error.message : String(error)
       if (rollbackErrors.length) {
-        throw new Error(`${message}; rollback failed: ${rollbackErrors.join('; ')}`)
+        throw new Error(
+          `${message}; rollback failed: ${rollbackErrors.join('; ')}`,
+        )
       }
       throw error
     }
@@ -215,13 +260,19 @@ export class CompactionPatchCommitter {
       try {
         this.writeText(target.path, target.fullCurrent)
       } catch (error) {
-        rollbackErrors.push(`${target.path}: ${error instanceof Error ? error.message : String(error)}`)
+        rollbackErrors.push(
+          `${target.path}: ${error instanceof Error ? error.message : String(error)}`,
+        )
       }
     }
     if (rollbackErrors.length) throw new Error(rollbackErrors.join('; '))
   }
 
-  private recordFailure(started: CompactionRunRecord, previousCursor: ReturnType<CompactionCursorStore['readOrInit']>, error: NonNullable<CompactionRunRecord['error']>): void {
+  private recordFailure(
+    started: CompactionRunRecord,
+    previousCursor: ReturnType<CompactionCursorStore['readOrInit']>,
+    error: NonNullable<CompactionRunRecord['error']>,
+  ): void {
     try {
       this.ledger.recordFailed(started, error)
     } finally {
@@ -229,16 +280,34 @@ export class CompactionPatchCommitter {
     }
   }
 
-  private resolveTarget(scope: MemoryPatch['target']): { path: string; versionTarget: MemoryVersionTarget } {
-    if (scope.kind === 'user_profile') return { path: this.userFile, versionTarget: 'user' }
-    if (scope.kind === 'global') return { path: join(this.memoryDir, 'MEMORY.local.md'), versionTarget: 'memory' }
-    if (scope.kind === 'episode') return { path: join(this.memoryDir, `${scope.date}.md`), versionTarget: 'episode' }
-    if (scope.kind === 'project') return { path: join(this.root, 'projects', scope.projectId, 'AGENTS.local.md'), versionTarget: 'project' }
+  private resolveTarget(scope: MemoryPatch['target']): {
+    path: string
+    versionTarget: MemoryVersionTarget
+  } {
+    if (scope.kind === 'user_profile')
+      return { path: this.userFile, versionTarget: 'user' }
+    if (scope.kind === 'global')
+      return {
+        path: join(this.memoryDir, 'MEMORY.local.md'),
+        versionTarget: 'memory',
+      }
+    if (scope.kind === 'episode')
+      return {
+        path: join(this.memoryDir, `${scope.date}.md`),
+        versionTarget: 'episode',
+      }
+    if (scope.kind === 'project')
+      return {
+        path: join(this.root, 'projects', scope.projectId, 'AGENTS.local.md'),
+        versionTarget: 'project',
+      }
     throw new Error(`unsupported compaction patch scope: ${scope.kind}`)
   }
 
   private currentVersionForTarget(target: PatchTarget): number {
-    return this.versions.nextVersionForPath(target.path, { target: target.versionTarget })
+    return this.versions.nextVersionForPath(target.path, {
+      target: target.versionTarget,
+    })
   }
 }
 
@@ -251,7 +320,10 @@ function flattenPatches(bundle: CompactionPatchBundle): MemoryPatch[] {
   ].filter((patch): patch is MemoryPatch => Boolean(patch))
 }
 
-function runRecord(bundle: CompactionPatchBundle, opts: CommitPatchBundleOptions): CompactionRunRecord {
+function runRecord(
+  bundle: CompactionPatchBundle,
+  opts: CommitPatchBundleOptions,
+): CompactionRunRecord {
   return {
     compactionId: bundle.compactionId,
     sessionId: bundle.sessionId,

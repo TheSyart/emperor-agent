@@ -15,7 +15,10 @@ vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   return {
     ...actual,
-    readFileSync: (path: Parameters<typeof actual.readFileSync>[0], ...rest: unknown[]) => {
+    readFileSync: (
+      path: Parameters<typeof actual.readFileSync>[0],
+      ...rest: unknown[]
+    ) => {
       readCalls.push(String(path))
       // @ts-expect-error -- forwarding varargs to the real implementation
       return actual.readFileSync(path, ...rest)

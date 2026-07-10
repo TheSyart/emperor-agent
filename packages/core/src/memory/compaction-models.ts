@@ -47,8 +47,11 @@ export interface ProjectedCompactionMessage {
   truncated: boolean
   toolName?: string
   toolCallId?: string
-  durableHint: 'candidate' | 'likely_transient' | 'sensitive_candidate' | 'audit_only'
-  scopeHints: Array<'user_profile' | 'global' | 'project' | 'episode' | 'discard'>
+  durableHint:
+    'candidate' | 'likely_transient' | 'sensitive_candidate' | 'audit_only'
+  scopeHints: Array<
+    'user_profile' | 'global' | 'project' | 'episode' | 'discard'
+  >
 }
 
 export interface CompactionDraft {
@@ -66,7 +69,11 @@ export interface DraftTarget {
 }
 
 export interface DraftOperation {
-  op: 'append_section_item' | 'update_item' | 'mark_deprecated' | 'replace_section'
+  op:
+    | 'append_section_item'
+    | 'update_item'
+    | 'mark_deprecated'
+    | 'replace_section'
   section: string
   itemId?: string
   content?: string
@@ -78,7 +85,12 @@ export interface DraftOperation {
 export interface CompactionDecision {
   sourceSeqs: number[]
   content: string
-  destination: 'user_profile' | 'global_memory' | 'project_memory' | 'episode' | 'discarded'
+  destination:
+    | 'user_profile'
+    | 'global_memory'
+    | 'project_memory'
+    | 'episode'
+    | 'discarded'
   classification:
     | 'stable_user_preference'
     | 'working_style'

@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { appendSectionItem, canonicalSections, replaceSection, sectionBody, type MemoryMarkdownKind } from './markdown-schema'
+import {
+  appendSectionItem,
+  canonicalSections,
+  replaceSection,
+  sectionBody,
+  type MemoryMarkdownKind,
+} from './markdown-schema'
 import { MemoryVersionStore, type MemoryVersionTarget } from './versions'
 
 export type MemoryScope =
@@ -59,7 +65,9 @@ const PROMPT_INJECTION_PATTERNS = [
 ]
 
 export function memoryContentHash(content: string): string {
-  return createHash('sha256').update(String(content ?? ''), 'utf8').digest('hex')
+  return createHash('sha256')
+    .update(String(content ?? ''), 'utf8')
+    .digest('hex')
 }
 
 export function applyMemoryPatch(
@@ -69,7 +77,8 @@ export function applyMemoryPatch(
 ): MemoryPatchApplyResult {
   const current = String(currentContent ?? '')
   const errors = validateMemoryPatch(patch, current, opts)
-  if (errors.length) return { ok: false, content: current, errors, appliedOperations: 0 }
+  if (errors.length)
+    return { ok: false, content: current, errors, appliedOperations: 0 }
 
   let next = current
   let appliedOperations = 0
@@ -82,7 +91,11 @@ export function applyMemoryPatch(
       next = replaceSection(next, op.section, op.content)
       appliedOperations += 1
     } else if (op.op === 'mark_deprecated') {
-      next = appendSectionItem(next, 'Deprecated', `- id: ${op.itemId}\n  reason: ${op.reason}`)
+      next = appendSectionItem(
+        next,
+        'Deprecated',
+        `- id: ${op.itemId}\n  reason: ${op.reason}`,
+      )
       appliedOperations += 1
     } else if (op.op === 'update_item') {
       next = updateItemText(next, op.itemId, op.content)
@@ -92,9 +105,16 @@ export function applyMemoryPatch(
   return { ok: true, content: next, errors: [], appliedOperations }
 }
 
-export function applyMemoryPatchToFile(patch: MemoryPatch, opts: MemoryPatchFileApplyOptions): MemoryPatchApplyResult {
-  const current = existsSync(opts.targetPath) ? readFileSync(opts.targetPath, 'utf8') : ''
-  const currentVersion = opts.versions.nextVersionForPath(opts.targetPath, { target: opts.versionTarget ?? undefined })
+export function applyMemoryPatchToFile(
+  patch: MemoryPatch,
+  opts: MemoryPatchFileApplyOptions,
+): MemoryPatchApplyResult {
+  const current = existsSync(opts.targetPath)
+    ? readFileSync(opts.targetPath, 'utf8')
+    : ''
+  const currentVersion = opts.versions.nextVersionForPath(opts.targetPath, {
+    target: opts.versionTarget ?? undefined,
+  })
   const result = applyMemoryPatch(patch, current, { ...opts, currentVersion })
   if (!result.ok) return result
 
@@ -103,7 +123,8 @@ export function applyMemoryPatchToFile(patch: MemoryPatch, opts: MemoryPatchFile
     reason: `memory_patch:${patch.rationale || 'patch'}`,
   })
   MemoryVersionStore.atomicWriteText(opts.targetPath, result.content)
-  if (opts.ledgerPath) appendPatchLedger(opts.ledgerPath, patch, current, result)
+  if (opts.ledgerPath)
+    appendPatchLedger(opts.ledgerPath, patch, current, result)
   return result
 }
 
@@ -113,11 +134,19 @@ export function validateMemoryPatch(
   opts: MemoryPatchApplyOptions = {},
 ): string[] {
   const errors: string[] = []
-  if (patch.baseHash !== memoryContentHash(currentContent)) errors.push('base_hash_mismatch')
-  if (typeof opts.currentVersion === 'number' && patch.baseVersion !== opts.currentVersion) {
+  if (patch.baseHash !== memoryContentHash(currentContent))
+    errors.push('base_hash_mismatch')
+  if (
+    typeof opts.currentVersion === 'number' &&
+    patch.baseVersion !== opts.currentVersion
+  ) {
     errors.push('base_version_mismatch')
   }
-  if (opts.mode === 'build' && patch.target.kind === 'global' && !opts.allowBuildGlobalWrite) {
+  if (
+    opts.mode === 'build' &&
+    patch.target.kind === 'global' &&
+    !opts.allowBuildGlobalWrite
+  ) {
     errors.push('build_global_write_not_allowed')
   }
 
@@ -126,14 +155,21 @@ export function validateMemoryPatch(
     const text = operationText(op)
     if (containsSecret(text)) errors.push('suspected_secret')
     if (containsPromptInjection(text)) errors.push('prompt_injection_text')
-    if ('section' in op && schemaKind && !canonicalSections(schemaKind).includes(op.section)) {
+    if (
+      'section' in op &&
+      schemaKind &&
+      !canonicalSections(schemaKind).includes(op.section)
+    ) {
       errors.push(`forbidden_section:${op.section}`)
     }
     if (
-      patch.target.kind === 'user_profile'
-      && op.op === 'replace_section'
-      && !opts.explicitReplace
-      && deletesMoreThanFortyPercent(sectionBody(currentContent, op.section), op.content)
+      patch.target.kind === 'user_profile' &&
+      op.op === 'replace_section' &&
+      !opts.explicitReplace &&
+      deletesMoreThanFortyPercent(
+        sectionBody(currentContent, op.section),
+        op.content,
+      )
     ) {
       errors.push('destructive_profile_replacement')
     }
@@ -157,10 +193,16 @@ function operationText(op: MemoryPatchOperation): string {
   return `${op.itemId}\n${op.content}`
 }
 
-function sectionContainsItem(markdown: string, section: string, item: string): boolean {
+function sectionContainsItem(
+  markdown: string,
+  section: string,
+  item: string,
+): boolean {
   const needle = normalizeMemoryItem(item)
   if (!needle) return false
-  return sectionBody(markdown, section).split('\n').some((line) => normalizeMemoryItem(line) === needle)
+  return sectionBody(markdown, section)
+    .split('\n')
+    .some((line) => normalizeMemoryItem(line) === needle)
 }
 
 function normalizeMemoryItem(value: string): string {
@@ -187,28 +229,50 @@ function deletesMoreThanFortyPercent(before: string, after: string): boolean {
 }
 
 function nonEmptyLineCount(text: string): number {
-  return String(text ?? '').split('\n').filter((line) => line.trim()).length
+  return String(text ?? '')
+    .split('\n')
+    .filter((line) => line.trim()).length
 }
 
-function updateItemText(markdown: string, itemId: string, content: string): string {
-  const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+function updateItemText(
+  markdown: string,
+  itemId: string,
+  content: string,
+): string {
+  const lines = String(markdown ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
   const index = lines.findIndex((line) => line.includes(itemId))
-  if (index < 0) return appendSectionItem(markdown, 'Deprecated', String(content ?? '').trimEnd())
+  if (index < 0)
+    return appendSectionItem(
+      markdown,
+      'Deprecated',
+      String(content ?? '').trimEnd(),
+    )
   lines[index] = String(content ?? '').trimEnd()
   return `${lines.join('\n').replace(/\s+$/, '')}\n`
 }
 
-export function appendPatchLedger(path: string, patch: MemoryPatch, before: string, result: MemoryPatchApplyResult): void {
+export function appendPatchLedger(
+  path: string,
+  patch: MemoryPatch,
+  before: string,
+  result: MemoryPatchApplyResult,
+): void {
   mkdirSync(dirname(path), { recursive: true })
-  appendFileSync(path, JSON.stringify({
-    ts: new Date().toISOString(),
-    event: 'memory_patch_applied',
-    target: patch.target,
-    operationCount: result.appliedOperations,
-    rationale: patch.rationale,
-    baseHash: memoryContentHash(before),
-    newHash: memoryContentHash(result.content),
-  }) + '\n', 'utf8')
+  appendFileSync(
+    path,
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      event: 'memory_patch_applied',
+      target: patch.target,
+      operationCount: result.appliedOperations,
+      rationale: patch.rationale,
+      baseHash: memoryContentHash(before),
+      newHash: memoryContentHash(result.content),
+    }) + '\n',
+    'utf8',
+  )
 }
 
 function unique(values: string[]): string[] {

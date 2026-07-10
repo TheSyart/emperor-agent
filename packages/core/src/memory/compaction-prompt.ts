@@ -17,9 +17,13 @@ export interface BuildCompactionPromptOptions {
   projectedConversation: string
 }
 
-export function buildCompactionPrompt(opts: BuildCompactionPromptOptions): string {
+export function buildCompactionPrompt(
+  opts: BuildCompactionPromptOptions,
+): string {
   const projectId = opts.projectId ?? '(none)'
-  const projectedConversation = wrapProjectedConversation(opts.projectedConversation)
+  const projectedConversation = wrapProjectedConversation(
+    opts.projectedConversation,
+  )
   return [
     "You are Emperor's scoped memory compactor.",
     '',
