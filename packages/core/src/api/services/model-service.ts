@@ -25,6 +25,7 @@ import type { OpenAiMessage } from '../../providers/base'
 import {
   findByName,
   providerOptions,
+  type ProviderOption,
   type ProviderSpec,
 } from '../../providers/registry'
 
@@ -71,7 +72,7 @@ export interface ModelConfigPayload {
   availability: ModelAvailability
   routing: Record<string, unknown>
   config: Dict
-  providerOptions: Array<Record<string, unknown>>
+  providerOptions: ProviderOption[]
 }
 
 export interface DiscoveredModel {

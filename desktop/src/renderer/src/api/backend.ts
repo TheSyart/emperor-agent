@@ -1,6 +1,13 @@
 // Electron desktop talks to CoreApi over preload IPC. Browser-only tests inject
 // this same bridge surface; the product no longer supports HTTP/WS fallback.
 
+import type {
+  CoreIpcErrorEnvelope,
+  CoreOperationArgs,
+  CoreOperationKey,
+  CoreOperationResult,
+} from '@emperor/core'
+
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
   'Core IPC bridge is unavailable; use the Electron desktop window.'
 
@@ -9,7 +16,10 @@ interface EmperorBridge {
   openPath?: (
     target: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
-  invokeCore?: (operationKey: string, ...args: unknown[]) => Promise<unknown>
+  invokeCore?: <Key extends CoreOperationKey>(
+    operationKey: Key,
+    ...args: CoreOperationArgs<Key>
+  ) => Promise<CoreOperationResult<Key> | CoreIpcErrorEnvelope>
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
 }
 
@@ -37,16 +47,16 @@ export async function openPath(target: string): Promise<void> {
   }
 }
 
-export async function invokeCore(
-  operationKey: string,
-  ...args: unknown[]
-): Promise<unknown> {
+export async function invokeCore<Key extends CoreOperationKey>(
+  operationKey: Key,
+  ...args: CoreOperationArgs<Key>
+): Promise<CoreOperationResult<Key>> {
   const invoke = bridge()?.invokeCore
   if (typeof invoke !== 'function')
     throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
   const result = await invoke(operationKey, ...args)
-  const safeError = safeCoreIpcError(result)
-  if (safeError) {
+  if (isCoreIpcErrorEnvelope(result)) {
+    const safeError = safeCoreIpcError(result)
     const error = new Error(safeError.message) as Error & {
       errorId?: string
       code?: string
@@ -70,19 +80,26 @@ export function onCoreEvent(listener: (event: unknown) => void): () => void {
   return subscribe(listener)
 }
 
-function safeCoreIpcError(value: unknown): {
+function isCoreIpcErrorEnvelope(value: unknown): value is CoreIpcErrorEnvelope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = value as Record<string, unknown>
+  return (
+    payload.ok === false &&
+    Boolean(
+      payload.error &&
+      typeof payload.error === 'object' &&
+      !Array.isArray(payload.error),
+    )
+  )
+}
+
+function safeCoreIpcError(value: CoreIpcErrorEnvelope): {
   message: string
   errorId?: string
   code?: string
   action?: string
-} | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const payload = value as Record<string, unknown>
-  if (payload.ok !== false) return null
-  const rawError = payload.error
-  if (!rawError || typeof rawError !== 'object' || Array.isArray(rawError))
-    return null
-  const error = rawError as Record<string, unknown>
+} {
+  const error = value.error
   const message =
     typeof error.message === 'string' && error.message
       ? error.message

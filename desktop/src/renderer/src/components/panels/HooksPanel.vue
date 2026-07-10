@@ -152,9 +152,9 @@ async function loadAll() {
   error.value = ''
   try {
     const [nextPayload, nextMetadata, nextAudit] = await Promise.all([
-      core<HooksPayload>('hooks.getConfig'),
-      core<HooksMetadataPayload>('hooks.getMetadata'),
-      core<HookAuditPayload>('hooks.getAudit', { limit: 50 }),
+      core('hooks.getConfig'),
+      core('hooks.getMetadata'),
+      core('hooks.getAudit', { limit: 50 }),
     ])
     payload.value = nextPayload
     metadata.value = nextMetadata
@@ -203,7 +203,7 @@ async function testMatch() {
   error.value = ''
   testResult.value = null
   try {
-    matchResult.value = await core<HookMatchPayload>('hooks.testMatch', {
+    matchResult.value = await core('hooks.testMatch', {
       revision: payload.value?.revision,
       eventName: selectedEventName.value,
       input: parseObject(testInputDraft.value),
@@ -221,7 +221,7 @@ async function executeMatch(item: HookMatchItem) {
   testing.value = true
   error.value = ''
   try {
-    testResult.value = await core<Dict>('hooks.testRun', {
+    testResult.value = await core('hooks.testRun', {
       revision: payload.value?.revision,
       eventName: selectedEventName.value,
       groupId: item.groupId,
@@ -242,7 +242,7 @@ async function cancelTestRun(runId: string) {
   testing.value = true
   error.value = ''
   try {
-    const result = await core<{ cancelled?: boolean }>('hooks.cancelRun', {
+    const result = await core('hooks.cancelRun', {
       runId,
     })
     if (!result.cancelled) throw new Error(`Hook run 不存在或已结束：${runId}`)
@@ -258,13 +258,10 @@ async function cancelTestRun(runId: string) {
 async function validateAdvanced(): Promise<HookValidationPayload | null> {
   error.value = ''
   try {
-    validation.value = await core<HookValidationPayload>(
-      'hooks.validateConfig',
-      {
-        sourceKind: 'global',
-        config: parseObject(advancedDraft.value),
-      },
-    )
+    validation.value = await core('hooks.validateConfig', {
+      sourceKind: 'global',
+      config: parseObject(advancedDraft.value),
+    })
     return validation.value
   } catch (cause) {
     validation.value = null
@@ -280,9 +277,7 @@ async function saveAdvanced() {
   try {
     const checked = await validateAdvanced()
     if (!checked?.valid || !checked.config) return
-    const saved = await core<
-      HooksPayload & { saved?: boolean; decision?: { reason?: string } }
-    >('hooks.saveConfig', {
+    const saved = await core('hooks.saveConfig', {
       revision: payload.value?.revision,
       config: checked.config,
     })
@@ -309,7 +304,7 @@ async function loadAudit(cursor: string | null = null, remember = false) {
   error.value = ''
   try {
     if (remember) auditHistory.value.push(auditCursor.value)
-    const next = await core<HookAuditPayload>(
+    const next = await core(
       'hooks.getAudit',
       auditQuery({
         eventName: auditEvent.value,

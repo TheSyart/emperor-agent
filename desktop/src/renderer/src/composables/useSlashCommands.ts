@@ -13,7 +13,6 @@ import type {
   BootstrapPayload,
   ChatSendPayload,
   CompactResult,
-  ControlPayload,
   PendingState,
 } from '../types'
 import {
@@ -254,7 +253,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const data = await core<ControlPayload>('control.setMode', mode)
+      const data = await core('control.setMode', mode)
       if (boot.value) boot.value.control = data
       const label =
         mode === 'plan'

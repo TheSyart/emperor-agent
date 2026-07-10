@@ -8,8 +8,11 @@ import {
   TeamStatus,
   newTeamId,
   validateMemberName,
+  type TeamMemberPayload,
+  type TeamMessagePayload,
 } from './models'
 import { TeamStore } from './store'
+import type { TeamConfigPayload } from './store'
 import { TeamReadInboxTool, TeamSendMessageTool } from './tools'
 import type { HookAggregateDecision } from '../hooks/models'
 
@@ -66,6 +69,20 @@ export interface TeamHookHost {
   end(agentId: string): void
 }
 
+export interface TeamMemberSummaryPayload extends TeamMemberPayload {
+  unread: number
+  recent_messages: TeamMessagePayload[]
+  thread_count: number
+  tools: string[]
+}
+
+export interface TeamManagerPayload {
+  config: TeamConfigPayload
+  members: TeamMemberSummaryPayload[]
+  leadUnread: number
+  leadInbox: TeamMessagePayload[]
+}
+
 export class TeamManager {
   readonly projectId: string | null
   readonly store: TeamStore
@@ -97,7 +114,7 @@ export class TeamManager {
     this.hooks = opts.hooks ?? null
   }
 
-  payload(): Record<string, unknown> {
+  payload(): TeamManagerPayload {
     const members = this.store.listMembers().map((member) => ({
       ...member.toDict(),
       unread: this.bus.unreadCount(member.name),

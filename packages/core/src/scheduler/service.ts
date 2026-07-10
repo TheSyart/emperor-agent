@@ -26,6 +26,14 @@ export type SchedulerSetTimer = (
 export type SchedulerClearTimer = (handle: unknown) => void
 export type SchedulerTargetSession = () => string | null | undefined
 
+export interface SchedulerStatusPayload {
+  running: boolean
+  jobs: number
+  enabled: number
+  nextRunAtMs: number | null
+  lastError: string | null
+}
+
 export class SchedulerService {
   readonly store: SchedulerStore
   onJob: ((job: SchedulerJob) => Promise<string | void | null>) | null
@@ -96,7 +104,7 @@ export class SchedulerService {
   getJob(jobId: string): SchedulerJob | null {
     return this.store.getJob(jobId)
   }
-  status(): Record<string, unknown> {
+  status(): SchedulerStatusPayload {
     const jobs = this.store.listJobs({ includeDisabled: true })
     const enabled = jobs.filter((job) => job.enabled)
     const errors = jobs.filter(

@@ -15,7 +15,15 @@ import {
   TEAM_SCHEMA_VERSION,
   validateActorName,
   validateMemberName,
+  type TeamMemberPayload,
 } from './models'
+
+export interface TeamConfigPayload {
+  version?: number
+  team_name: string
+  members: TeamMemberPayload[]
+  [key: string]: unknown
+}
 
 export class TeamStore {
   readonly root: string
@@ -38,7 +46,7 @@ export class TeamStore {
     this.markStaleWorkingOffline()
   }
 
-  loadConfig(): Record<string, unknown> {
+  loadConfig(): TeamConfigPayload {
     let raw: Record<string, unknown> = {}
     try {
       const parsed = JSON.parse(readFileSync(this.configFile, 'utf8') || '{}')
@@ -59,7 +67,7 @@ export class TeamStore {
         }
       }
     }
-    const members: Array<Record<string, unknown>> = []
+    const members: TeamMemberPayload[] = []
     for (const item of Array.isArray(raw.members) ? raw.members : []) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       try {
@@ -96,10 +104,9 @@ export class TeamStore {
 
   upsertMember(member: TeamMember): TeamMember {
     const config = this.loadConfig()
-    const members: Array<Record<string, unknown>> = []
+    const members: TeamMemberPayload[] = []
     let replaced = false
-    for (const item of (config.members as Array<Record<string, unknown>>) ??
-      []) {
+    for (const item of config.members) {
       const current = TeamMember.fromDict(item)
       if (current.name === member.name) {
         members.push(member.toDict())

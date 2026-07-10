@@ -38,6 +38,8 @@ import { planToDict } from '../plans/models'
 import { SidechainTranscript } from '../tasks/sidechain'
 import { ToolResultStore } from '../context/tool-results'
 import { WatchlistService } from '../watchlist/service'
+import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
+import type { CoreOperationKey } from './operations'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Dict = Record<string, unknown>
@@ -47,12 +49,25 @@ export interface CoreApiCreateOptions extends AgentLoopCreateOptions {
 }
 
 export interface RouteOperation {
-  key: string
+  key: CoreOperationKey
   method: string
   route: string
 }
 
-export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
+export interface CoreRuntimeEventPayload {
+  event: string
+  [key: string]: unknown
+}
+
+export interface CoreRuntimeReplayPayload {
+  sessionId: string
+  afterSeq: number
+  latestSeq: number
+  events: CoreRuntimeEventPayload[]
+  [key: string]: unknown
+}
+
+const CORE_API_ROUTE_OPERATION_LIST = [
   op('chat.submit', 'IPC', 'chat.submit'),
   op('bootstrap', 'GET', '/api/bootstrap'),
   op('chat.stopRuntime', 'POST', '/api/runtime/stop'),
@@ -138,6 +153,18 @@ export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
   op('diagnostics.get', 'GET', '/api/diagnostics'),
   op('desktopPet.get', 'GET', '/api/desktop-pet'),
   op('desktopPet.setEnabled', 'POST', '/api/desktop-pet'),
+] as const
+
+type MissingRouteOperation = Exclude<
+  CoreOperationKey,
+  (typeof CORE_API_ROUTE_OPERATION_LIST)[number]['key']
+>
+const _coreApiRouteCoverage: [MissingRouteOperation] extends [never]
+  ? true
+  : never = true
+
+export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
+  ...CORE_API_ROUTE_OPERATION_LIST,
 ].sort((a, b) => a.key.localeCompare(b.key))
 
 export class CoreApi {
@@ -270,7 +297,7 @@ export class CoreApi {
       runtimeStats: () =>
         this.loop.runtimeStore.stats({
           activeTurnIds: this.loop.activeMemoryStore.loadUnarchivedTurnIds(),
-        }) as unknown as Dict,
+        }),
       workspacePolicy: () => this.loop.workspacePolicyDiagnostics() as Dict,
       externalPayload: () => this.externalBridge.payload(),
       activeTasks: () => this.loop.activeTasks.list(),
@@ -289,7 +316,7 @@ export class CoreApi {
     await this.loop.close()
   }
 
-  async bootstrap(opts: { sessionId?: string | null } = {}): Promise<Dict> {
+  async bootstrap(opts: { sessionId?: string | null } = {}) {
     const sessionId = String(opts.sessionId ?? '').trim()
     if (sessionId) this.activateBootstrapSession(sessionId)
     this.loop.reconcileSessionControlPending()
@@ -318,7 +345,7 @@ export class CoreApi {
       hooks: await this.hooks.getConfig(),
       desktopPet: await this.desktopPet.get(),
       context_used: this.loop.tokenTracker.lastInputTokensValue(),
-      unarchivedHistory: this.loop.activeMemoryStore.loadUnarchivedHistory(),
+      unarchivedHistory: this.memoryService.historyPayload(),
       runtime: {
         events: runtimeReplay.events,
         latestSeq: runtimeReplay.latestSeq,
@@ -342,7 +369,9 @@ export class CoreApi {
       uiHidden?: boolean | null
       clientDraftId?: string | null
       draftSession?: DraftSessionInput | null
-    }): Promise<Dict> => {
+      attachments?: string[] | null
+      requestedSkills?: Array<{ name: string; source?: string }> | null
+    }) => {
       const result = await this.chatService.submit({
         content: String(opts.content ?? ''),
         turnId: opts.turnId ?? null,
@@ -353,15 +382,17 @@ export class CoreApi {
         uiHidden: opts.uiHidden ?? false,
         clientDraftId: opts.clientDraftId ?? null,
         draftSession: opts.draftSession ?? null,
+        attachmentIds: opts.attachments ?? null,
+        requestedSkills: opts.requestedSkills ?? null,
       })
-      return result as unknown as Dict
+      return result
     },
     stopRuntime: (
       opts: {
         taskId?: string | null
         kind?: 'turn' | 'scheduler' | 'team' | 'watchlist' | null
       } = {},
-    ): Dict => {
+    ) => {
       const cancelled = this.loop.activeTasks.cancel({
         taskId: opts.taskId ?? null,
         kind: opts.kind ?? null,
@@ -381,7 +412,7 @@ export class CoreApi {
         include_archive?: boolean | string | null
         compact?: boolean | string | null
       } = {},
-    ): Dict => {
+    ): CoreRuntimeReplayPayload => {
       const sessionId = this.requireReadableSessionId(
         opts.sessionId ?? this.loop.activeSessionId ?? null,
         'runtime.replay',
@@ -404,12 +435,17 @@ export class CoreApi {
         sessionId,
         afterSeq,
         latestSeq: store.latestSeq,
-        events: store.replayAfter(afterSeq, {
-          sessionId,
-          limit,
-          includeArchive,
-          compact,
-        }),
+        events: store
+          .replayAfter(afterSeq, {
+            sessionId,
+            limit,
+            includeArchive,
+            compact,
+          })
+          .map((event) => ({
+            ...event,
+            event: String(event.event ?? ''),
+          })),
       }
     },
   }
@@ -432,12 +468,9 @@ export class CoreApi {
   }
 
   readonly attachments = {
-    save: (opts: {
-      raw: Buffer | Uint8Array
-      name: string
-      mime: string
-    }): Dict => this.attachmentStore.save(opts) as unknown as Dict,
-    rawPath: (attachmentId: string): Dict | null => {
+    save: (opts: { raw: Buffer | Uint8Array; name: string; mime: string }) =>
+      this.attachmentStore.save(opts),
+    rawPath: (attachmentId: string) => {
       const ref = this.attachmentStore.get(attachmentId)
       return ref
         ? { path: join(this.attachmentStore.root, ref.rel_path), ref }
@@ -446,24 +479,19 @@ export class CoreApi {
   }
 
   readonly mcp = {
-    getConfig: (): Dict => this.configService.getMcpConfig() as unknown as Dict,
-    saveConfig: async (raw: Dict): Promise<Dict> => {
+    getConfig: () => this.configService.getMcpConfig(),
+    saveConfig: async (raw: Dict) => {
       // mcp.saveConfig 落盘后会经 MCPClient 以 servers.*.command 起子进程（stdio transport）；
       // 未经审批就能被 renderer 一条 IPC 写任意 command/args 是一条进程执行 pivot（审计 P0-5）。
       this.assertMutation('mcp', 'saveConfig')
       await this.hooksService.authorizeConfigChange('mcp.saveConfig', raw)
-      const result = (await this.configService.saveMcpConfig(
-        raw,
-      )) as unknown as Dict
-      return result
+      return this.configService.saveMcpConfig(raw)
     },
   }
 
   readonly hooks = {
-    getConfig: async (opts: Dict = {}): Promise<Dict> =>
-      this.hooksService.getConfig(opts),
-    saveConfig: async (raw: unknown): Promise<Dict> =>
-      this.hooksService.saveConfig(raw),
+    getConfig: async (opts: Dict = {}) => this.hooksService.getConfig(opts),
+    saveConfig: async (raw: unknown) => this.hooksService.saveConfig(raw),
     getAudit: async (
       opts: {
         cursor?: string | number | null
@@ -473,50 +501,40 @@ export class CoreApi {
         sourceId?: string | null
         runId?: string | null
       } = {},
-    ): Promise<Dict> => this.hooksService.getAudit(opts),
-    getMetadata: (): Dict => this.hooksService.getMetadata(),
-    validateConfig: (input: Dict): Dict =>
-      this.hooksService.validateConfig(input),
-    setProjectTrust: async (input: Dict): Promise<Dict> =>
+    ) => this.hooksService.getAudit(opts),
+    getMetadata: () => this.hooksService.getMetadata(),
+    validateConfig: (input: Dict) => this.hooksService.validateConfig(input),
+    setProjectTrust: async (input: Dict) =>
       this.hooksService.setProjectTrust(input),
-    testMatch: async (input: Dict): Promise<Dict> =>
-      this.hooksService.testMatch(input),
+    testMatch: async (input: Dict) => this.hooksService.testMatch(input),
     testRun: async (input: Dict): Promise<Dict> =>
       this.hooksService.testRun(input),
-    cancelRun: async (input: Dict): Promise<Dict> =>
-      this.hooksService.cancelRun(input),
+    cancelRun: async (input: Dict) => this.hooksService.cancelRun(input),
   }
 
   readonly model = {
-    getConfig: async (): Promise<Dict> =>
-      this.modelService.getConfig() as unknown as Dict,
-    saveConfig: async (raw: Dict): Promise<Dict> => {
+    getConfig: async () => this.modelService.getConfig(),
+    saveConfig: async (raw: Dict) => {
       this.assertMutation('model', 'saveConfig')
       await this.hooksService.authorizeConfigChange('model.saveConfig', raw)
-      const result = (await this.modelService.saveConfig(
-        raw,
-      )) as unknown as Dict
-      return result
+      return this.modelService.saveConfig(raw)
     },
-    saveOnboardingConfig: async (settings: Dict): Promise<Dict> => {
+    saveOnboardingConfig: async (settings: Dict) => {
       this.assertMutation('model', 'saveOnboardingConfig')
       await this.hooksService.authorizeConfigChange(
         'model.saveOnboardingConfig',
         settings,
       )
-      const result = (await this.modelService.saveOnboardingConfig(
-        settings,
-      )) as unknown as Dict
-      return result
+      return this.modelService.saveOnboardingConfig(settings)
     },
-    discoverModels: async (body: Dict): Promise<Dict> =>
-      this.modelService.discoverModels(body) as unknown as Dict,
+    discoverModels: async (body: Dict) =>
+      this.modelService.discoverModels(body),
     test: async (body: Dict): Promise<Dict> => this.modelService.test(body),
   }
 
   readonly control = {
-    get: (): Dict => this.loop.controlManager.payload(),
-    setMode: (mode: string): Dict => this.loop.controlManager.setMode(mode),
+    get: () => this.loop.controlManager.payload(),
+    setMode: (mode: string) => this.loop.controlManager.setMode(mode),
     answerInteraction: (
       id: string,
       answers: Dict,
@@ -571,45 +589,99 @@ export class CoreApi {
   }
 
   readonly scheduler = {
-    get: (): Dict => ({
+    get: () => ({
       status: this.loop.schedulerService.status(),
       jobs: this.loop.schedulerService
         .listJobs({ includeDisabled: true })
         .map((job) => job.toDict()),
       diagnostics: this.loop.schedulerStore.diagnostics(),
     }),
-    createJob: (args: Dict): Promise<Dict> => {
+    createJob: (args: Dict) => {
       this.assertMutation('scheduler', 'create')
-      return this.schedulerTool({ ...args, action: 'add' })
+      const schedule = SchedulerSchedule.fromDict(
+        requiredRecord(args.schedule, 'schedule'),
+      )
+      const payload = schedulerPayloadFromApi(
+        requiredRecord(args.payload, 'payload'),
+      )
+      const job = this.loop.schedulerService.addJob({
+        name: String(args.name ?? '').trim() || 'Scheduled job',
+        schedule,
+        payload,
+        deleteAfterRun: Boolean(
+          args.deleteAfterRun ?? args.delete_after_run ?? false,
+        ),
+      })
+      return { job: job.toDict(), scheduler: this.scheduler.get() }
     },
-    updateJob: (jobId: string, args: Dict): Promise<Dict> => {
+    updateJob: (jobId: string, args: Dict) => {
       this.assertMutation('scheduler', 'update')
-      return this.schedulerTool({ ...args, action: 'update', job_id: jobId })
+      const current = this.loop.schedulerService.getJob(jobId)
+      if (!current) throw new Error(`scheduler job not found: ${jobId}`)
+      if (current.protected)
+        throw new Error(`scheduler job is protected: ${jobId}`)
+      const result = this.loop.schedulerService.updateJob(jobId, {
+        name:
+          args.name === undefined || args.name === null
+            ? undefined
+            : String(args.name),
+        schedule: isRecord(args.schedule)
+          ? SchedulerSchedule.fromDict(args.schedule)
+          : undefined,
+        payload: isRecord(args.payload)
+          ? schedulerPayloadFromApi(args.payload, current.payload)
+          : undefined,
+        deleteAfterRun:
+          args.deleteAfterRun === undefined &&
+          args.delete_after_run === undefined
+            ? undefined
+            : Boolean(args.deleteAfterRun ?? args.delete_after_run),
+      })
+      if (result === 'not_found')
+        throw new Error(`scheduler job not found: ${jobId}`)
+      if (result === 'protected')
+        throw new Error(`scheduler job is protected: ${jobId}`)
+      return { job: result.toDict(), scheduler: this.scheduler.get() }
     },
-    runJob: (jobId: string): Promise<Dict> => {
+    runJob: async (jobId: string) => {
       this.assertMutation('scheduler', 'run')
-      return this.schedulerTool({ action: 'run', job_id: jobId })
+      const ran = await this.loop.schedulerService.runJob(jobId, {
+        force: true,
+      })
+      if (!ran) throw new Error(`scheduler job not found: ${jobId}`)
+      return { scheduler: this.scheduler.get() }
     },
-    pauseJob: (jobId: string): Promise<Dict> => {
+    pauseJob: (jobId: string) => {
       this.assertMutation('scheduler', 'pause')
-      return this.schedulerTool({ action: 'pause', job_id: jobId })
+      const job = this.loop.schedulerService.enableJob(jobId, false)
+      if (job === 'not_found')
+        throw new Error(`scheduler job not found: ${jobId}`)
+      return { job: job.toDict(), scheduler: this.scheduler.get() }
     },
-    resumeJob: (jobId: string): Promise<Dict> => {
+    resumeJob: (jobId: string) => {
       this.assertMutation('scheduler', 'resume')
-      return this.schedulerTool({ action: 'resume', job_id: jobId })
+      const job = this.loop.schedulerService.enableJob(jobId, true)
+      if (job === 'not_found')
+        throw new Error(`scheduler job not found: ${jobId}`)
+      return { job: job.toDict(), scheduler: this.scheduler.get() }
     },
-    deleteJob: (jobId: string): Promise<Dict> => {
+    deleteJob: (jobId: string) => {
       this.assertMutation('scheduler', 'delete')
-      return this.schedulerTool({ action: 'remove', job_id: jobId })
+      const result = this.loop.schedulerService.removeJob(jobId)
+      if (result === 'not_found')
+        throw new Error(`scheduler job not found: ${jobId}`)
+      if (result === 'protected')
+        throw new Error(`scheduler job is protected: ${jobId}`)
+      return { deleted: jobId, scheduler: this.scheduler.get() }
     },
   }
 
   readonly sessions = {
-    list: (opts: { includeArchived?: boolean } = {}): Dict[] => {
+    list: (opts: { includeArchived?: boolean } = {}) => {
       this.loop.reconcileSessionControlPending()
       return this.loop.sessionStore.list({
         includeArchived: opts.includeArchived ?? false,
-      }) as unknown as Dict[]
+      })
     },
     create: (
       opts: {
@@ -618,7 +690,7 @@ export class CoreApi {
         project?: Dict | null
         project_path?: string | null
       } = {},
-    ): Dict => {
+    ) => {
       let project = opts.project ?? null
       const mode = opts.mode === 'build' ? 'build' : 'chat'
       if (mode === 'build' && !project) {
@@ -629,18 +701,18 @@ export class CoreApi {
       return this.loop.sessionStore.create(opts.title ?? 'Untitled', {
         mode,
         project,
-      }) as unknown as Dict
+      })
     },
     rename: (
       sessionId: string,
       patch: string | { title?: string | null; archived?: boolean | null },
-    ): Dict => {
+    ) => {
       if (typeof patch === 'object' && patch !== null && 'archived' in patch) {
         const entry = patch.archived
           ? this.loop.sessionStore.archive(sessionId)
           : this.loop.sessionStore.restore(sessionId)
         if (!entry) throw new Error('session not found')
-        return entry as unknown as Dict
+        return entry
       }
       const title =
         typeof patch === 'string' ? patch : String(patch?.title ?? '').trim()
@@ -648,7 +720,8 @@ export class CoreApi {
       if (!this.loop.sessionStore.rename(sessionId, title))
         throw new Error('session not found')
       const entry = this.loop.sessionStore.get(sessionId)
-      return (entry ?? {}) as unknown as Dict
+      if (!entry) throw new Error('session not found')
+      return entry
     },
     delete: async (sessionId: string): Promise<Dict> => {
       await this.loop.endSession(sessionId, 'deleted')
@@ -660,32 +733,26 @@ export class CoreApi {
         this.loop.controlManager.planStore.deleteBySession(sessionId)
       return { deleted: true, removedTasks, removedPlans }
     },
-    activate: (sessionId: string): Dict => {
+    activate: (sessionId: string) => {
       this.loop.activateSession(sessionId)
       return { active: sessionId, complete: true }
     },
   }
 
   readonly team = {
-    get: (): Dict => this.teamService.get(),
-    getMember: (name: string): Dict => this.teamService.getMember(name),
+    get: () => this.teamService.get(),
+    getMember: (name: string) => this.teamService.getMember(name),
     spawnMember: (opts: {
       name: string
       role: string
       task?: string | null
       agent_type?: string | null
-    }): Promise<Dict> => this.teamService.spawnMember(opts),
-    sendMessage: (opts: {
-      to: string
-      content: string
-      wake?: boolean
-    }): Promise<Dict> => this.teamService.sendMessage(opts),
-    wakeMember: (
-      name: string,
-      opts: { purpose?: string } = {},
-    ): Promise<Dict> => this.teamService.wakeMember(name, opts),
-    shutdownMember: (name: string): Promise<Dict> =>
-      this.teamService.shutdownMember(name),
+    }) => this.teamService.spawnMember(opts),
+    sendMessage: (opts: { to: string; content: string; wake?: boolean }) =>
+      this.teamService.sendMessage(opts),
+    wakeMember: (name: string, opts: { purpose?: string } = {}) =>
+      this.teamService.wakeMember(name, opts),
+    shutdownMember: (name: string) => this.teamService.shutdownMember(name),
   }
 
   readonly external = {
@@ -707,11 +774,11 @@ export class CoreApi {
     transcript: (
       taskId: string,
       opts: { offset?: number; limit?: number } = {},
-    ): Dict => new SidechainTranscript(this.paths.stateRoot, taskId).read(opts),
+    ) => new SidechainTranscript(this.paths.stateRoot, taskId).read(opts),
   }
 
   readonly tools = {
-    readResult: (opts: { ref: string }): Dict => {
+    readResult: (opts: { ref: string }) => {
       const content = new ToolResultStore(this.paths.stateRoot).readArtifact(
         String(opts?.ref ?? ''),
       )
@@ -720,46 +787,42 @@ export class CoreApi {
   }
 
   readonly memory = {
-    get: (): Dict => this.memoryService.getMemory(),
-    save: (content: string): Dict => this.memoryService.saveMemory(content),
-    getEpisode: (date?: string | null): Dict =>
+    get: () => this.memoryService.getMemory(),
+    save: (content: string) => this.memoryService.saveMemory(content),
+    getEpisode: (date?: string | null) =>
       this.memoryService.getEpisode(String(date ?? '')),
-    saveEpisode: (content: string, date?: string | null): Dict =>
+    saveEpisode: (content: string, date?: string | null) =>
       this.memoryService.saveEpisode(content, String(date ?? '')),
-    listVersions: (
-      opts: { limit?: number; target?: string | null } = {},
-    ): Dict => this.memoryService.listVersions(opts),
-    getVersion: (versionId: string): Dict =>
-      this.memoryService.getVersion(versionId),
-    restoreVersion: (versionId: string): Dict =>
+    listVersions: (opts: { limit?: number; target?: string | null } = {}) =>
+      this.memoryService.listVersions(opts),
+    getVersion: (versionId: string) => this.memoryService.getVersion(versionId),
+    restoreVersion: (versionId: string) =>
       this.memoryService.restoreVersion(versionId),
-    getWatchlist: (): Dict => this.memoryService.getWatchlist(),
-    saveWatchlist: (content: string): Dict =>
+    getWatchlist: () => this.memoryService.getWatchlist(),
+    saveWatchlist: (content: string) =>
       this.memoryService.saveWatchlist(content),
-    checkWatchlist: async (): Promise<Dict> =>
-      this.memoryService.checkWatchlist(),
-    tokens: (): Dict => this.memoryService.tokens(),
-    compact: (opts: { force?: boolean } = {}): Promise<Dict> =>
+    checkWatchlist: async () => this.memoryService.checkWatchlist(),
+    tokens: () => this.memoryService.tokens(),
+    compact: (opts: { force?: boolean } = {}) =>
       this.memoryService.compact(opts),
     explainContext: (
       opts: { sessionId?: string | null; turnId?: string | null } = {},
-    ): Dict => this.memoryService.explainContext(opts),
+    ) => this.memoryService.explainContext(opts),
   }
 
   readonly projects = {
-    list: (): Dict[] => this.loop.projectStore.list() as unknown as Dict[],
-    resolve: (path: string): Dict =>
-      this.loop.projectStore.resolve(path) as unknown as Dict,
+    list: () => this.loop.projectStore.list(),
+    resolve: (path: string) => this.loop.projectStore.resolve(path),
   }
 
   readonly skills = {
-    tools: (): Dict[] => this.skillService.tools(),
-    list: (): Dict[] => this.skillService.list() as unknown as Dict[],
-    get: (name: string): Dict => this.skillService.get(name) as unknown as Dict,
-    save: (name: string, content: string): Dict =>
-      this.skillService.save(name, content) as unknown as Dict,
-    delete: (name: string): Dict => this.skillService.delete(name),
-    importArchive: (archive: unknown): Dict =>
+    tools: () => this.skillService.tools(),
+    list: () => this.skillService.list(),
+    get: (name: string) => this.skillService.get(name),
+    save: (name: string, content: string) =>
+      this.skillService.save(name, content),
+    delete: (name: string) => this.skillService.delete(name),
+    importArchive: (archive: unknown) =>
       this.skillService.importArchive(archive),
   }
 
@@ -780,13 +843,12 @@ export class CoreApi {
   }
 
   readonly diagnostics = {
-    get: async (): Promise<Dict> =>
-      this.diagnosticsService.payload() as unknown as Dict,
+    get: async () => this.diagnosticsService.payload(),
   }
 
   readonly desktopPet = {
-    get: async (): Promise<Dict> => this.desktopPetService.get(),
-    setEnabled: (enabled: boolean): Promise<Dict> =>
+    get: async () => this.desktopPetService.get(),
+    setEnabled: (enabled: boolean) =>
       this.desktopPetService.setEnabled(enabled),
   }
 
@@ -795,15 +857,6 @@ export class CoreApi {
       area,
       action,
     })
-  }
-
-  private async schedulerTool(args: Dict): Promise<Dict> {
-    const result = await this.loop.registry.executeResult('scheduler', args)
-    return {
-      ok: !result.isError,
-      result: result.modelContent,
-      summary: result.summary,
-    }
   }
 
   private async resumeControl(
@@ -910,7 +963,11 @@ interface ControlResumeOptions {
   emit?: StreamEmitter | null
 }
 
-function op(key: string, method: string, route: string): RouteOperation {
+function op<const Key extends CoreOperationKey>(
+  key: Key,
+  method: string,
+  route: string,
+): RouteOperation & { key: Key } {
   return { key, method, route }
 }
 
@@ -1011,6 +1068,31 @@ function runtimeEventSessionId(event: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function requiredRecord(value: unknown, label: string): Dict {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`)
+  return value
+}
+
+function schedulerPayloadFromApi(
+  raw: Dict,
+  current?: SchedulerPayload,
+): SchedulerPayload {
+  const merged = current ? { ...current.toDict(), ...raw } : raw
+  const kind = String(merged.kind ?? 'agent_turn')
+  if (kind === 'system_event')
+    throw new Error('system_event jobs are internal and cannot be configured')
+  if (kind !== 'agent_turn' && kind !== 'team_wake')
+    throw new Error('scheduler payload kind must be agent_turn or team_wake')
+  const payload = SchedulerPayload.fromDict({ ...merged, kind })
+  if (!payload.message.trim())
+    throw new Error('message is required for scheduler jobs')
+  if (kind === 'team_wake' && !payload.target)
+    throw new Error('target is required for team_wake scheduler jobs')
+  if (kind === 'team_wake' && !payload.project_id)
+    throw new Error('projectId is required for team_wake scheduler jobs')
+  return payload
 }
 
 export type { LoopModelRouter }

@@ -1,7 +1,11 @@
 import type {
   ControlMode as CoreControlMode,
+  CompactionDecision as CoreCompactionDecision,
+  DiscardedItem as CoreDiscardedItem,
   InteractionKind as CoreInteractionKind,
   InteractionStatus as CoreInteractionStatus,
+  HooksConfigV2 as CoreHooksConfigV2,
+  MemoryScope as CoreMemoryScope,
   RuntimeEvent as CoreRuntimeEvent,
 } from '@emperor/core'
 
@@ -24,15 +28,26 @@ export interface McpServerConfig {
   url?: string | null
   headers?: Record<string, string>
   enabled?: boolean
-  tool_overrides?: Record<string, { read_only?: boolean; exclusive?: boolean }>
+  tool_overrides?: Record<string, McpToolOverride>
+  [key: string]: unknown
+}
+
+export interface McpToolOverride {
+  read_only?: boolean
+  exclusive?: boolean
+  [key: string]: unknown
+}
+
+export interface McpDefaultsConfig {
+  read_only?: boolean
+  exclusive?: boolean
+  [key: string]: unknown
 }
 
 export interface McpConfigPayload {
   servers: Record<string, McpServerConfig>
-  defaults?: {
-    read_only?: boolean
-    exclusive?: boolean
-  }
+  defaults?: McpDefaultsConfig
+  [key: string]: unknown
 }
 
 export interface HookSourcePayload {
@@ -81,13 +96,7 @@ export interface HookGroupPayload {
   handlers?: HookHandlerPayload[]
 }
 
-export interface HooksConfigPayload {
-  version?: number
-  enabled?: boolean
-  projectHooks?: { enabled?: boolean }
-  policy?: Record<string, unknown>
-  hooks?: Record<string, HookGroupPayload[]>
-}
+export type HooksConfigPayload = CoreHooksConfigV2
 
 export interface EffectiveHookGroupPayload {
   eventName?: string
@@ -666,7 +675,7 @@ export interface DiagnosticsPayload {
   runtime?: RuntimeStats
   workspacePolicy?: WorkspacePolicyDiagnosticsPayload
   external?: ExternalDiagnosticsPayload
-  activeTasks?: RuntimeTaskRecord[]
+  activeTasks?: ActiveRuntimeTask[]
   desktopPet?: DesktopPetPayload & Record<string, unknown>
   dependencies?: DiagnosticsDependencyPayload
 }
@@ -723,12 +732,12 @@ export interface CompactResultCompaction {
   range?: { fromSeq?: number; toSeq?: number }
   cursor?: SemanticCompactionPayload['cursor']
   applied?: Array<{
-    scope?: Record<string, unknown>
+    scope?: CoreMemoryScope
     path?: string
     operationCount?: number
   }>
-  discarded?: Array<Record<string, unknown>>
-  decisions?: Array<Record<string, unknown>>
+  discarded?: CoreDiscardedItem[]
+  decisions?: CoreCompactionDecision[]
 }
 
 export interface RuntimeHistoryItem {

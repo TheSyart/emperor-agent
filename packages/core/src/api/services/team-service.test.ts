@@ -53,7 +53,7 @@ describe('CoreTeamService (MIG-IPC-007)', () => {
       to: 'alice',
       content: 'read docs',
     })
-    expect(detail.thread[0].content).toHaveLength(2000)
+    expect(detail.thread[0]!.content).toHaveLength(2000)
   })
 
   it('returns chat fallback when no team manager exists', () => {

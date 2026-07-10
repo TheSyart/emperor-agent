@@ -14,6 +14,57 @@ export enum SchedulerStatus {
   CANCELLED = 'cancelled',
 }
 
+export interface SchedulerSchedulePayload {
+  kind: 'at' | 'every' | 'cron'
+  atMs: number | null
+  everyMs: number | null
+  expr: string | null
+  tz: string | null
+  [key: string]: unknown
+}
+
+export interface SchedulerJobPayload {
+  kind: 'agent_turn' | 'team_wake' | 'system_event'
+  message: string
+  target: string | null
+  projectId: string | null
+  deliver: boolean
+  meta: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface SchedulerRunRecordPayload {
+  runAtMs: number
+  status: string
+  durationMs: number
+  error: string | null
+  [key: string]: unknown
+}
+
+export interface SchedulerJobStatePayload {
+  nextRunAtMs: number | null
+  lastRunAtMs: number | null
+  lastStatus: string | null
+  lastError: string | null
+  runHistory: SchedulerRunRecordPayload[]
+  [key: string]: unknown
+}
+
+export interface SchedulerJobViewPayload {
+  id: string
+  name: string
+  enabled: boolean
+  schedule: SchedulerSchedulePayload
+  payload: SchedulerJobPayload
+  state: SchedulerJobStatePayload
+  createdAtMs: number
+  updatedAtMs: number
+  deleteAfterRun: boolean
+  protected: boolean
+  purpose: string | null
+  [key: string]: unknown
+}
+
 export function nowMs(): number {
   return Date.now()
 }
@@ -58,7 +109,7 @@ export class SchedulerSchedule {
       tz: raw.tz,
     })
   }
-  toDict(): Record<string, unknown> {
+  toDict(): SchedulerSchedulePayload {
     return {
       kind: this.kind,
       atMs: this.at_ms,
@@ -107,7 +158,7 @@ export class SchedulerPayload {
       meta: isObject(raw.meta) ? raw.meta : {},
     })
   }
-  toDict(): Record<string, unknown> {
+  toDict(): SchedulerJobPayload {
     return {
       kind: this.kind,
       message: this.message,
@@ -151,7 +202,7 @@ export class SchedulerRunRecord {
       error: raw.error,
     })
   }
-  toDict(): Record<string, unknown> {
+  toDict(): SchedulerRunRecordPayload {
     return {
       runAtMs: this.run_at_ms,
       status: this.status,
@@ -192,7 +243,7 @@ export class SchedulerJobState {
       run_history: history,
     })
   }
-  toDict(): Record<string, unknown> {
+  toDict(): SchedulerJobStatePayload {
     return {
       nextRunAtMs: this.next_run_at_ms,
       lastRunAtMs: this.last_run_at_ms,
@@ -306,7 +357,7 @@ export class SchedulerJob {
       purpose: raw.purpose,
     })
   }
-  toDict(): Record<string, unknown> {
+  toDict(): SchedulerJobViewPayload {
     return {
       id: this.id,
       name: this.name,

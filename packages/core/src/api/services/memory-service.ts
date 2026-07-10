@@ -13,7 +13,10 @@ import {
   CompactionLedger,
   latestAppliedCompactionRun,
 } from '../../memory/compaction-ledger'
-import { compactSession } from '../../memory/compaction-service'
+import {
+  compactSession,
+  type ScopedCompactionResult,
+} from '../../memory/compaction-service'
 import {
   memoryVersionToDict,
   type MemoryVersionTarget,
@@ -26,6 +29,7 @@ import {
 } from '../../memory/patch'
 import { readTurnCheckpoint } from '../../sessions/checkpoint'
 import type { WatchlistService } from '../../watchlist/service'
+import type { RuntimeStats } from '../../runtime/store'
 
 type Dict = Record<string, any>
 
@@ -33,6 +37,40 @@ export interface CoreMemoryServiceDeps {
   loop: AgentLoop
   watchlist: WatchlistService
   refreshRuntimeContext?: () => void
+}
+
+export type CoreMemoryPayload = ReturnType<CoreMemoryService['getMemory']>
+
+export interface CoreHistoryAttachment {
+  id: string
+  name: string
+  mime: string
+  size: number
+  kind: 'image' | 'document' | 'text'
+  hasText: boolean
+  hasImage: boolean
+  path: string
+  textPath?: string | null
+}
+
+export interface CoreHistoryItem {
+  role: 'user' | 'assistant'
+  content: string
+  attachments?: CoreHistoryAttachment[]
+  turn_id?: string
+  source?: string
+  requestedSkills?: Array<{ name: string; source?: string }>
+}
+
+export interface CoreCompactPayload {
+  status: 'compacted' | 'skipped' | 'degraded'
+  count: number
+  message: string
+  memory: CoreMemoryPayload
+  unarchivedHistory: CoreHistoryItem[]
+  runtime?: RuntimeStats
+  compaction?: ScopedCompactionResult['compaction']
+  error?: string
 }
 
 export class CoreMemoryService {
@@ -48,7 +86,7 @@ export class CoreMemoryService {
     this.refreshRuntimeContext = deps.refreshRuntimeContext
   }
 
-  getMemory(): Dict {
+  getMemory() {
     const memoryDir = join(this.root, 'memory')
     const episodes = existsSync(memoryDir)
       ? readdirSync(memoryDir)
@@ -78,7 +116,14 @@ export class CoreMemoryService {
     }
   }
 
-  saveMemory(content: string): Dict {
+  historyPayload(): CoreHistoryItem[] {
+    return this.loop.activeMemoryStore
+      .loadUnarchivedHistory()
+      .map(historyItemFromRow)
+      .filter((item): item is CoreHistoryItem => item !== null)
+  }
+
+  saveMemory(content: string) {
     const normalized = `${String(content || '').trimEnd()}\n`
     const operations = markdownSectionReplacementOps(normalized)
     if (!operations.length)
@@ -112,14 +157,14 @@ export class CoreMemoryService {
     }
   }
 
-  getEpisode(date: string): Dict {
+  getEpisode(date: string) {
     const safe = validateEpisodeDate(date)
     const path = join(this.root, 'memory', `${safe}.md`)
     if (!existsSync(path)) throw new Error(`Episode not found: ${safe}`)
     return { date: safe, content: readFileSync(path, 'utf8') }
   }
 
-  saveEpisode(content: string, date: string): Dict {
+  saveEpisode(content: string, date: string) {
     const safe = validateEpisodeDate(date)
     const path = join(this.root, 'memory', `${safe}.md`)
     mkdirSync(join(this.root, 'memory'), { recursive: true })
@@ -132,7 +177,7 @@ export class CoreMemoryService {
     return this.getEpisode(safe)
   }
 
-  listVersions(opts: { limit?: number; target?: string | null } = {}): Dict {
+  listVersions(opts: { limit?: number; target?: string | null } = {}) {
     const target = normalizeVersionTarget(opts.target ?? null)
     const versions = this.loop.sharedMemory.versions.list({
       limit: opts.limit ?? 80,
@@ -144,11 +189,11 @@ export class CoreMemoryService {
     }
   }
 
-  getVersion(versionId: string): Dict {
+  getVersion(versionId: string) {
     return this.loop.sharedMemory.versions.detail(versionId)
   }
 
-  restoreVersion(versionId: string): Dict {
+  restoreVersion(versionId: string) {
     const restored = this.loop.sharedMemory.versions.restore(versionId)
     this.refreshRuntimeContext?.()
     return { restored, memory: this.getMemory() }
@@ -162,7 +207,7 @@ export class CoreMemoryService {
     return this.watchlist.write(content)
   }
 
-  async checkWatchlist(): Promise<Dict> {
+  async checkWatchlist() {
     ;(this.watchlist as unknown as { modelRouter: unknown }).modelRouter =
       this.loop.modelRouter
     const decision = await this.loop.activeTasks.run({
@@ -174,7 +219,7 @@ export class CoreMemoryService {
     return { decision: decision.toDict(), watchlist: this.watchlist.payload() }
   }
 
-  tokens(): Dict {
+  tokens() {
     const tracker = this.loop.tokenTracker
     return {
       totals: tracker.totals(),
@@ -192,10 +237,13 @@ export class CoreMemoryService {
     }
   }
 
-  async compact(opts: { force?: boolean } = {}): Promise<Dict> {
-    const unarchivedHistory =
+  async compact(opts: { force?: boolean } = {}): Promise<CoreCompactPayload> {
+    const rawUnarchivedHistory =
       this.loop.activeMemoryStore.loadUnarchivedHistory()
-    const count = unarchivedHistory.length
+    const unarchivedHistory = rawUnarchivedHistory
+      .map(historyItemFromRow)
+      .filter((item): item is CoreHistoryItem => item !== null)
+    const count = rawUnarchivedHistory.length
     if (count < 2) {
       return {
         status: 'skipped',
@@ -302,7 +350,7 @@ export class CoreMemoryService {
         count,
         message: result.message,
         memory: this.getMemory(),
-        unarchivedHistory: this.loop.activeMemoryStore.loadUnarchivedHistory(),
+        unarchivedHistory: this.historyPayload(),
         runtime,
         error: result.error,
       }
@@ -312,7 +360,7 @@ export class CoreMemoryService {
       count,
       message: result.message,
       memory: this.getMemory(),
-      unarchivedHistory: this.loop.activeMemoryStore.loadUnarchivedHistory(),
+      unarchivedHistory: this.historyPayload(),
       runtime,
       compaction: result.compaction,
     }
@@ -320,7 +368,7 @@ export class CoreMemoryService {
 
   explainContext(
     opts: { sessionId?: string | null; turnId?: string | null } = {},
-  ): Dict {
+  ) {
     const sessionId = String(
       opts.sessionId ?? this.loop.activeSessionId ?? '',
     ).trim()
@@ -575,9 +623,9 @@ export class CoreMemoryService {
 
   private compactionFailed(
     count: number,
-    unarchivedHistory: Array<Record<string, unknown>>,
+    unarchivedHistory: CoreHistoryItem[],
     exc?: unknown,
-  ): Dict {
+  ): CoreCompactPayload {
     return {
       status: 'degraded',
       count,
@@ -800,10 +848,75 @@ function activeHistoryAfterSeq(
         item.seq = Math.trunc(Number(row.seq))
       if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
       if (Array.isArray(row.attachments)) item.attachments = row.attachments
+      if (Array.isArray(row.requestedSkills))
+        item.requestedSkills = row.requestedSkills
       if (typeof row.displayContent === 'string')
         item.displayContent = row.displayContent
       return item
     })
+}
+
+function historyItemFromRow(row: Dict): CoreHistoryItem | null {
+  const role = row.role === 'user' || row.role === 'assistant' ? row.role : null
+  if (!role || typeof row.content !== 'string') return null
+  const item: CoreHistoryItem = { role, content: row.content }
+  if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
+  if (typeof row.source === 'string') item.source = row.source
+  if (Array.isArray(row.attachments)) {
+    const attachments = row.attachments
+      .map(historyAttachmentFromValue)
+      .filter((value): value is CoreHistoryAttachment => value !== null)
+    if (attachments.length) item.attachments = attachments
+  }
+  if (Array.isArray(row.requestedSkills)) {
+    const requestedSkills = row.requestedSkills
+      .map(requestedSkillFromValue)
+      .filter(
+        (value): value is { name: string; source?: string } => value !== null,
+      )
+    if (requestedSkills.length) item.requestedSkills = requestedSkills
+  }
+  return item
+}
+
+function requestedSkillFromValue(
+  value: unknown,
+): { name: string; source?: string } | null {
+  if (!isRecord(value)) return null
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  if (!name) return null
+  return {
+    name,
+    ...(typeof value.source === 'string' && value.source
+      ? { source: value.source }
+      : {}),
+  }
+}
+
+function historyAttachmentFromValue(
+  value: unknown,
+): CoreHistoryAttachment | null {
+  if (!isRecord(value)) return null
+  const kind = String(value.kind ?? '')
+  if (kind !== 'image' && kind !== 'document' && kind !== 'text') return null
+  const id = String(value.id ?? '')
+  const name = String(value.name ?? '')
+  const mime = String(value.mime ?? '')
+  const path = String(value.path ?? value.rel_path ?? '')
+  const size = Number(value.size)
+  if (!id || !name || !mime || !path || !Number.isFinite(size)) return null
+  const textPath = value.textPath ?? value.text_rel_path
+  return {
+    id,
+    name,
+    mime,
+    size,
+    kind,
+    hasText: Boolean(value.hasText ?? value.has_text),
+    hasImage: Boolean(value.hasImage ?? value.has_image),
+    path,
+    ...(textPath === null || typeof textPath === 'string' ? { textPath } : {}),
+  }
 }
 
 export function validateEpisodeDate(date: string): string {

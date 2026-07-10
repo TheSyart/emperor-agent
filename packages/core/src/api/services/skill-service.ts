@@ -31,6 +31,25 @@ export interface SkillDetailPayload extends SkillInfoPayload {
   content: string
 }
 
+export interface ToolInfoPayload {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  read_only: boolean
+  exclusive: boolean
+  concurrency_safe: boolean
+  source: 'builtin' | 'mcp'
+  server: string
+}
+
+export interface SkillDeletePayload {
+  deleted: string
+}
+
+export interface SkillImportPayload {
+  imported: string
+}
+
 export class CoreSkillService {
   readonly root: string
   readonly skillsDir: string
@@ -42,14 +61,14 @@ export class CoreSkillService {
     this.deps = deps
   }
 
-  tools(): Dict[] {
+  tools(): ToolInfoPayload[] {
     return (this.deps.registry?.getDefinitions() ?? []).map((definition) => {
       const tool = this.deps.registry?.get(definition.name)
       const isMcp = definition.name.startsWith('mcp_')
       return {
         name: definition.name,
         description: definition.description,
-        parameters: definition.input_schema,
+        parameters: { ...definition.input_schema },
         read_only: Boolean(tool?.readOnly),
         exclusive: Boolean(tool?.exclusive),
         concurrency_safe: Boolean(tool?.concurrencySafe),
@@ -81,7 +100,7 @@ export class CoreSkillService {
     return this.get(safe)
   }
 
-  delete(name: string): Dict {
+  delete(name: string): SkillDeletePayload {
     const safe = safeSkillName(name)
     if (!safe) throw new Error('Invalid skill name')
     const dir = join(this.skillsDir, safe)
@@ -91,7 +110,7 @@ export class CoreSkillService {
     return { deleted: safe }
   }
 
-  importArchive(input: unknown): Dict {
+  importArchive(input: unknown): SkillImportPayload {
     const result = installSkillArchive(this.root, input)
     this.deps.refreshRuntimeContext?.()
     return result
@@ -160,7 +179,7 @@ interface ZipEntry {
   localOffset: number
 }
 
-function installSkillArchive(root: string, input: unknown): Dict {
+function installSkillArchive(root: string, input: unknown): SkillImportPayload {
   const archive = archiveBufferFromInput(input)
   const entries = readZipEntries(archive)
   if (!entries.length) throw new Error('Empty zip file')

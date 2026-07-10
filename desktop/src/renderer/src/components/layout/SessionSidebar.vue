@@ -98,9 +98,7 @@ function rowIndicator(session: SessionInfo) {
 
 async function loadSidebarState() {
   try {
-    sidebarState.value = normalizeSidebarState(
-      await core<Partial<SidebarState>>('sidebar.get'),
-    )
+    sidebarState.value = normalizeSidebarState(await core('sidebar.get'))
   } catch {
     sidebarState.value = { ...defaultSidebarState }
   }
@@ -111,7 +109,7 @@ async function patchSidebarState(update: Partial<SidebarState>) {
   sidebarState.value = next
   try {
     sidebarState.value = normalizeSidebarState(
-      await core<Partial<SidebarState>>('sidebar.patch', update),
+      await core('sidebar.patch', update),
     )
   } catch {
     sidebarState.value = next

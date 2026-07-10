@@ -2,16 +2,8 @@ import { ref } from 'vue'
 import { cloneJson, core } from '../api/http'
 import type {
   BootstrapPayload,
-  CompactResult,
-  DesktopPetPayload,
-  MemoryPayload,
-  MemoryVersionDetail,
-  ModelConfigPayload,
   ModelConfigRaw,
   McpConfigPayload,
-  SkillInfo,
-  WatchlistDecision,
-  WatchlistPayload,
 } from '../types'
 
 export function useBootstrap(showToast: (message: string) => void) {
@@ -28,11 +20,12 @@ export function useBootstrap(showToast: (message: string) => void) {
     try {
       if (showLoading) loading.value = true
       error.value = ''
-      boot.value = await core<BootstrapPayload>('bootstrap', {
+      const payload = await core('bootstrap', {
         sessionId: sessionId || null,
       })
+      boot.value = payload
       modelDraftProvider.value =
-        boot.value.modelConfig?.config?.agents?.defaults?.provider || null
+        payload.modelConfig?.config?.agents?.defaults?.provider || null
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -42,13 +35,13 @@ export function useBootstrap(showToast: (message: string) => void) {
 
   async function refreshMemory(shouldToast = true) {
     if (!boot.value) return
-    boot.value.memory = await core<MemoryPayload>('memory.get')
+    boot.value.memory = await core('memory.get')
     if (shouldToast) showToast('记忆与 Token 统计已刷新')
   }
 
   async function refreshModelConfig() {
     if (!boot.value) return
-    boot.value.modelConfig = await core<ModelConfigPayload>('model.getConfig')
+    boot.value.modelConfig = await core('model.getConfig')
     boot.value.model = boot.value.modelConfig.current?.model || boot.value.model
     boot.value.provider =
       boot.value.modelConfig.current?.provider || boot.value.provider
@@ -57,7 +50,7 @@ export function useBootstrap(showToast: (message: string) => void) {
   }
 
   async function saveModelConfig(config: ModelConfigRaw) {
-    const data = await core<ModelConfigPayload>('model.saveConfig', { config })
+    const data = await core('model.saveConfig', { config })
     if (boot.value) {
       boot.value.modelConfig = data
       boot.value.model = data.current?.model || boot.value.model
@@ -78,7 +71,7 @@ export function useBootstrap(showToast: (message: string) => void) {
   }
 
   async function compactMemory() {
-    const data = await core<CompactResult>('memory.compact')
+    const data = await core('memory.compact')
     if (boot.value) {
       boot.value.memory = data.memory
       boot.value.unarchivedHistory = data.unarchivedHistory
@@ -87,10 +80,7 @@ export function useBootstrap(showToast: (message: string) => void) {
   }
 
   async function loadSkill(name: string) {
-    const data = await core<{ name: string; content: string }>(
-      'skills.get',
-      name,
-    )
+    const data = await core('skills.get', name)
     activeSkill.value = data.name
     skillContent.value = data.content
   }
@@ -102,14 +92,14 @@ export function useBootstrap(showToast: (message: string) => void) {
 
   async function saveSkill(content: string) {
     if (!activeSkill.value) return
-    await core<SkillInfo>('skills.save', activeSkill.value, content)
+    await core('skills.save', activeSkill.value, content)
     await loadBootstrap(false)
     await loadSkill(activeSkill.value)
     showToast('Skill 已保存，并刷新了 Agent 上下文')
   }
 
   async function deleteSkill(name: string) {
-    await core<{ deleted: string }>('skills.delete', name)
+    await core('skills.delete', name)
     if (activeSkill.value === name) {
       activeSkill.value = null
       skillContent.value = ''
@@ -122,7 +112,7 @@ export function useBootstrap(showToast: (message: string) => void) {
     const file = formData.get('file')
     if (!(file instanceof File))
       throw new Error("Expected multipart field 'file'")
-    const data = await core<{ imported: string }>('skills.importArchive', {
+    const data = await core('skills.importArchive', {
       name: file.name,
       mime: file.type || 'application/zip',
       raw: new Uint8Array(await file.arrayBuffer()),
@@ -133,19 +123,19 @@ export function useBootstrap(showToast: (message: string) => void) {
   }
 
   async function loadConfig() {
-    const data = await core<{ path: string; content: string }>('config.get')
+    const data = await core('config.get')
     configContent.value = data.content
   }
 
   async function saveConfig(content: string) {
-    await core<{ path: string; content: string }>('config.save', { content })
+    await core('config.save', { content })
     await loadBootstrap(false)
     await loadConfig()
     showToast('配置已保存，并刷新了 Agent 上下文')
   }
 
   async function loadMcpConfig() {
-    const data = await core<McpConfigPayload>('mcp.getConfig')
+    const data = await core('mcp.getConfig')
     mcpContent.value = JSON.stringify(data, null, 2)
   }
 
@@ -158,60 +148,47 @@ export function useBootstrap(showToast: (message: string) => void) {
         'JSON 格式错误：' + (e instanceof Error ? e.message : String(e)),
       )
     }
-    await core<{ saved: boolean }>('mcp.saveConfig', parsed)
+    await core('mcp.saveConfig', parsed)
     await loadBootstrap(false)
     await loadMcpConfig()
     showToast('MCP 配置已保存，工具已重新加载')
   }
 
   async function saveMemory(content: string) {
-    await core<{ path: string; content: string }>('memory.save', content)
+    await core('memory.save', content)
     await loadBootstrap(false)
     showToast('长期记忆已保存')
   }
 
   async function loadEpisode(date: string) {
-    return core<{ date: string; content: string }>('memory.getEpisode', date)
+    return core('memory.getEpisode', date)
   }
 
   async function saveEpisode(date: string, content: string) {
-    await core<{ date: string; content: string }>(
-      'memory.saveEpisode',
-      content,
-      date,
-    )
+    await core('memory.saveEpisode', content, date)
     await refreshMemory(false)
     showToast(`情景记忆 ${date} 已保存`)
   }
 
   async function loadMemoryVersion(id: string) {
-    return core<MemoryVersionDetail>('memory.getVersion', id)
+    return core('memory.getVersion', id)
   }
 
   async function restoreMemoryVersion(id: string) {
-    const payload = await core<{
-      restored: { path: string; content: string }
-      memory: MemoryPayload
-    }>('memory.restoreVersion', id)
+    const payload = await core('memory.restoreVersion', id)
     if (boot.value) boot.value.memory = payload.memory
     showToast(`已恢复 ${payload.restored.path}`)
     return payload
   }
 
   async function saveWatchlist(content: string) {
-    const payload = await core<WatchlistPayload>(
-      'memory.saveWatchlist',
-      content,
-    )
+    const payload = await core('memory.saveWatchlist', content)
     if (boot.value?.memory) boot.value.memory.watchlist = payload
     showToast('Watchlist 已保存')
   }
 
   async function checkWatchlist() {
-    const payload = await core<{
-      decision: WatchlistDecision
-      watchlist: WatchlistPayload
-    }>('memory.checkWatchlist')
+    const payload = await core('memory.checkWatchlist')
     if (boot.value?.memory) boot.value.memory.watchlist = payload.watchlist
     const action = payload.decision.action === 'run' ? '建议主动执行' : '跳过'
     showToast(`Watchlist 检查完成：${action}`)
@@ -219,10 +196,7 @@ export function useBootstrap(showToast: (message: string) => void) {
   }
 
   async function setDesktopPetEnabled(enabled: boolean) {
-    const payload = await core<DesktopPetPayload>(
-      'desktopPet.setEnabled',
-      enabled,
-    )
+    const payload = await core('desktopPet.setEnabled', enabled)
     if (boot.value) boot.value.desktopPet = payload
 
     // Open or close the companion pet window via main-process IPC.

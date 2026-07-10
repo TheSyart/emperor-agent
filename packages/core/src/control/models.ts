@@ -56,6 +56,11 @@ export interface QuestionOption {
   description: string
 }
 
+export interface QuestionOptionPayload {
+  label: string
+  description: string
+}
+
 export function questionOptionFromDict(
   raw: Record<string, unknown>,
 ): QuestionOption {
@@ -69,9 +74,7 @@ export function questionOptionFromDict(
   }
 }
 
-export function questionOptionToDict(
-  o: QuestionOption,
-): Record<string, unknown> {
+export function questionOptionToDict(o: QuestionOption): QuestionOptionPayload {
   return { label: o.label, description: o.description }
 }
 
@@ -82,6 +85,13 @@ export interface Question {
   header: string
   question: string
   options: QuestionOption[]
+}
+
+export interface QuestionPayload {
+  id: string
+  header: string
+  question: string
+  options: QuestionOptionPayload[]
 }
 
 export function questionFromDict(raw: Record<string, unknown>): Question {
@@ -106,7 +116,7 @@ export function questionFromDict(raw: Record<string, unknown>): Question {
   }
 }
 
-export function questionToDict(q: Question): Record<string, unknown> {
+export function questionToDict(q: Question): QuestionPayload {
   return {
     id: q.id,
     header: q.header,
@@ -134,6 +144,32 @@ export interface Interaction {
   riskLevel: string
   comments: Array<Record<string, unknown>>
   meta: Record<string, unknown>
+}
+
+export interface InteractionCommentPayload {
+  content?: string
+  timestamp?: number
+  [key: string]: unknown
+}
+
+export interface InteractionPayload {
+  id: string
+  kind: string
+  status: string
+  created_at: number
+  updated_at: number
+  parent_call_id: string | null
+  context: string
+  questions: QuestionPayload[]
+  answers: Record<string, unknown>
+  title: string
+  summary: string
+  plan_markdown: string
+  assumptions: string[]
+  risk_level: string
+  comments: InteractionCommentPayload[]
+  meta: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export function makeAsk(opts: {
@@ -246,7 +282,7 @@ export function interactionFromDict(raw: Record<string, unknown>): Interaction {
   }
 }
 
-export function interactionToDict(i: Interaction): Record<string, unknown> {
+export function interactionToDict(i: Interaction): InteractionPayload {
   return {
     id: i.id,
     kind: i.kind,
@@ -262,7 +298,7 @@ export function interactionToDict(i: Interaction): Record<string, unknown> {
     plan_markdown: i.planMarkdown,
     assumptions: [...i.assumptions],
     risk_level: i.riskLevel,
-    comments: [...i.comments],
+    comments: i.comments.map(interactionCommentPayload),
     meta: { ...i.meta },
   }
 }
@@ -286,6 +322,20 @@ export interface ControlState {
   pending: Interaction | null
   lastInteraction: Interaction | null
   updatedAt: number
+}
+
+export interface ControlStatePayload {
+  version: number
+  mode: string
+  previous_mode:
+    | ControlMode.ASK_BEFORE_EDIT
+    | ControlMode.ACCEPT_EDITS
+    | ControlMode.AUTO
+    | null
+  pending: InteractionPayload | null
+  last_interaction: InteractionPayload | null
+  updated_at: number
+  [key: string]: unknown
 }
 
 export function defaultControlState(): ControlState {
@@ -335,15 +385,36 @@ export function controlStateFromDict(
   }
 }
 
-export function controlStateToDict(s: ControlState): Record<string, unknown> {
+export function controlStateToDict(s: ControlState): ControlStatePayload {
   return {
     version: s.version,
     mode: s.mode,
-    previous_mode: s.previousMode,
+    previous_mode: previousModePayload(s.previousMode),
     pending: s.pending ? interactionToDict(s.pending) : null,
     last_interaction: s.lastInteraction
       ? interactionToDict(s.lastInteraction)
       : null,
     updated_at: s.updatedAt,
   }
+}
+
+function interactionCommentPayload(
+  value: Record<string, unknown>,
+): InteractionCommentPayload {
+  const { content, timestamp, ...rest } = value
+  return {
+    ...rest,
+    ...(typeof content === 'string' ? { content } : {}),
+    ...(typeof timestamp === 'number' ? { timestamp } : {}),
+  }
+}
+
+function previousModePayload(
+  value: string | null,
+): ControlStatePayload['previous_mode'] {
+  return value === ControlMode.ASK_BEFORE_EDIT ||
+    value === ControlMode.ACCEPT_EDITS ||
+    value === ControlMode.AUTO
+    ? value
+    : null
 }

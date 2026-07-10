@@ -8,7 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { ExternalInbound } from '../external/models'
@@ -144,7 +144,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
         events.push(event)
       },
     })
-    const tools = boot.tools as Array<Record<string, unknown>>
+    const tools = boot.tools
     const activeSessionId = String(api.loop.activeSessionId ?? '')
 
     expect(boot.app).toBe('Emperor Agent')
@@ -162,6 +162,36 @@ describe('CoreApi (MIG-IPC-001)', () => {
       ),
     ).toBe(true)
 
+    await api.close()
+  })
+
+  it('forwards renderer attachment and requested skill fields to ChatService', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-chat-fields-'),
+      stateRoot: tmp('emperor-core-api-chat-fields-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const submit = vi.spyOn(api.chatService, 'submit').mockResolvedValue({
+      turnId: 'turn_fields',
+      content: 'ok',
+      activeSessionId: 'session_fields',
+    })
+
+    await (
+      api.chat.submit as (input: Record<string, unknown>) => Promise<unknown>
+    )({
+      content: 'inspect attachment',
+      attachments: ['att_1'],
+      requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+    })
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentIds: ['att_1'],
+        requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+      }),
+    )
     await api.close()
   })
 
@@ -1272,7 +1302,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
       updated_at: 3,
     })
 
-    const sessions = api.sessions.list() as Array<Record<string, unknown>>
+    const sessions = api.sessions.list()
 
     expect(api.loop.sessionStore.get(active.id)?.control_pending).toMatchObject(
       { interaction_id: pending.id },
@@ -1338,6 +1368,73 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
     expect(() => api.scheduler.createJob({})).toThrow(CoreMutationGuardError)
     expect(() => api.team.wakeMember('alice')).toThrow(CoreMutationGuardError)
+
+    await api.close()
+  })
+
+  it('returns structured scheduler payloads for desktop mutations', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-scheduler-'),
+      stateRoot: tmp('emperor-core-api-scheduler-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    const created = await api.scheduler.createJob({
+      name: 'Typed scheduler job',
+      schedule: { kind: 'every', everyMs: 60_000 },
+      payload: {
+        kind: 'agent_turn',
+        message: 'run a typed task',
+        deliver: true,
+      },
+      deleteAfterRun: false,
+    })
+
+    expect(created).toMatchObject({
+      job: { name: 'Typed scheduler job' },
+      scheduler: { jobs: expect.any(Array), status: expect.any(Object) },
+    })
+
+    const jobId = String((created.job as Record<string, unknown>).id)
+    const paused = await api.scheduler.pauseJob(jobId)
+    expect(paused).toMatchObject({
+      job: { id: jobId, enabled: false },
+      scheduler: { jobs: expect.any(Array) },
+    })
+
+    const removed = await api.scheduler.deleteJob(jobId)
+    expect(removed).toMatchObject({
+      deleted: jobId,
+      scheduler: { jobs: expect.any(Array) },
+    })
+
+    await api.close()
+  })
+
+  it('preserves scheduler payload restrictions at the CoreApi boundary', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-scheduler-policy-'),
+      stateRoot: tmp('emperor-core-api-scheduler-policy-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const schedule = { kind: 'every', everyMs: 60_000 }
+
+    expect(() =>
+      api.scheduler.createJob({
+        name: 'Reserved event',
+        schedule,
+        payload: { kind: 'system_event', message: 'internal only' },
+      }),
+    ).toThrow(/system_event.*internal/i)
+    expect(() =>
+      api.scheduler.createJob({
+        name: 'Incomplete team wake',
+        schedule,
+        payload: { kind: 'team_wake', message: 'wake up' },
+      }),
+    ).toThrow(/target.*team_wake/i)
 
     await api.close()
   })

@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-10T19:49:00+08:00",
+  "updated_at": "2026-07-10T23:06:40+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
-  "completed": 3,
-  "rounds": 3,
+  "completed": 4,
+  "rounds": 4,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -31,11 +31,11 @@
       "notes": "Round 3 completed with strict TDD. RED before production edits: `npm test --workspace @emperor/core -- src/tools/search.test.ts` exited 1 with 18 failed / 3 passed; failures proved recursive/filter/path/cancellation/symlink/limit gaps, and `$()` plus backtick injection canaries were created by the shell-backed implementation. GREEN: Node-native async opendir/lstat/realpath traversal, workspace-policy canonical symlink validation, Node RegExp streaming grep, binary/>2 MiB filtering, three output modes/context, POSIX paths, diagnostic errors, and 200-result caps; AgentLoop and Hook agent handler share `tools/search.ts`, while builtin keeps only a compatibility re-export and RunCommand's async exec. Initial focused verification passed 22/22 and Core passed 693 tests. Local security review then added a RED invariant test for canonical I/O and streaming byte enforcement, changed directory/file opens to validated real paths, and enforced the 2 MiB limit per chunk so concurrent growth cannot bypass it. Review-fix GREEN passed focused 23/23, Core 85 files / 694 tests, Core typecheck/lint, repository format check, and `git diff --check`. Packaged Electron 42.4.1 embeds Node 24.16 where `path.matchesGlob` is stable; the development host's Node 22.16 emits one experimental warning, retained as a non-release residual risk."
     },
     "IPC-004": {
-      "status": "pending",
+      "status": "done",
       "title": "建立全量类型化 Core operation registry",
       "depends_on": ["PORT-003"],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 4 completed with strict TDD and three review passes. RED evidence covered a missing registry, unsafe Zod error exposure, malformed IPC arguments, renderer generic assertions, scheduler contract/policy drift, MCP extension-field stripping, transcript limit zero, hostile throwable traps, unknown operation channels, task transcript traversal/symlink escape, dropped attachments/requestedSkills, and untyped tools.readResult. GREEN delivers one 81-operation CoreOperationMap registry with exact Zod tuples and fixed adapters, compile-time route coverage, typed main/preload/renderer invocation, safe non-throwing IPC envelopes, restored scheduler policy, forward-compatible MCP schemas, real attachment model delivery, explicit Skill context injection, and no-follow/realpath transcript boundaries. Final independent review found Critical 0 / Important 0 / Minor 0 and Ready to merge Yes. Final make check passed Core 86 files / 711 tests and Desktop 62 files / 276 tests, plus Core/Desktop typecheck, Desktop test typecheck, zero-warning ESLint, Prettier, git diff check, and production build."
     },
     "RSC-005": {
       "status": "pending",

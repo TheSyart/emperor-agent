@@ -36,8 +36,8 @@ export function useSession() {
     loading.value = true
     try {
       const [sessionItems, projectItems] = await Promise.all([
-        core<SessionInfo[]>('sessions.list', { includeArchived: false }),
-        core<ProjectInfo[]>('projects.list'),
+        core('sessions.list', { includeArchived: false }),
+        core('projects.list'),
       ])
       sessions.value = sessionItems
       projects.value = normalizeProjects(projectItems)
@@ -55,7 +55,7 @@ export function useSession() {
   }
 
   async function loadArchived(): Promise<SessionInfo[]> {
-    return core<SessionInfo[]>('sessions.list', { includeArchived: true })
+    return core('sessions.list', { includeArchived: true })
   }
 
   /**
@@ -83,7 +83,7 @@ export function useSession() {
   }
 
   async function resolveProject(path: string): Promise<ProjectInfo> {
-    const project = await core<ProjectInfo>('projects.resolve', path)
+    const project = await core('projects.resolve', path)
     upsertProject(project)
     return project
   }
@@ -96,7 +96,7 @@ export function useSession() {
       return true
     }
     try {
-      await core<{ deleted: boolean }>('sessions.delete', id)
+      await core('sessions.delete', id)
       sessions.value = sessions.value.filter((s) => s.id !== id)
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
       if (!sessions.value.length) await create()
@@ -113,7 +113,7 @@ export function useSession() {
       return true
     }
     try {
-      await core<SessionInfo>('sessions.rename', id, { title })
+      await core('sessions.rename', id, { title })
       const hit = sessions.value.find((s) => s.id === id)
       if (hit) hit.title = title
       return true
@@ -131,7 +131,7 @@ export function useSession() {
       return true
     }
     try {
-      const updated = await core<SessionInfo>('sessions.rename', id, {
+      const updated = await core('sessions.rename', id, {
         archived,
       })
       if (archived) {
@@ -152,10 +152,7 @@ export function useSession() {
   async function activate(id: string): Promise<void> {
     activeId.value = id
     if (!isDraftSessionId(id)) {
-      await core<{ active: string; complete: boolean }>(
-        'sessions.activate',
-        id,
-      ).catch(() => undefined)
+      await core('sessions.activate', id).catch(() => undefined)
     }
   }
 

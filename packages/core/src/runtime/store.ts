@@ -86,11 +86,17 @@ export interface RuntimeStats {
   activeTurns: number
   archiveFiles: number
   archiveBytes: number
-  archives: Array<Record<string, unknown>>
+  archives: RuntimeArchiveStats[]
   lastArchiveAt: number | null
   hotLimitEvents: number
   hotLimitBytes: number
   needsRotation: boolean
+}
+
+export interface RuntimeArchiveStats {
+  path: string
+  bytes: number
+  updatedAt: number
 }
 
 const INDEX_WRITE_INTERVAL_MS = 500

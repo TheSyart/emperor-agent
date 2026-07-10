@@ -20,6 +20,7 @@ export interface MainlineSubmitInput {
   displayContent?: string | null
   attachments?: Array<Record<string, unknown>> | null
   attachmentIds?: string[] | null
+  requestedSkills?: Array<{ name: string; source?: string }> | null
   clientMessageId?: string | null
   memoryExtra?: Record<string, unknown> | null
   turnId?: string | null
@@ -125,6 +126,8 @@ export class MainlineTurnService {
         scheduler: input.scheduler ?? null,
         uiHidden: input.uiHidden ?? false,
         memoryExtra: input.memoryExtra ?? null,
+        attachmentIds: input.attachmentIds ?? null,
+        requestedSkills: input.requestedSkills ?? null,
         taskId: input.taskId ?? null,
         useActiveTask: input.useActiveTask,
       })

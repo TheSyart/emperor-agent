@@ -125,7 +125,7 @@ function backToList() {
 async function refreshScheduler() {
   loading.value = true
   try {
-    const payload = await core<SchedulerPayload>('scheduler.get')
+    const payload = await core('scheduler.get')
     if (ctx.boot.value) ctx.boot.value.scheduler = payload
   } finally {
     loading.value = false
@@ -136,10 +136,7 @@ async function createJob() {
   if (!createMessage.value.trim()) return
   loading.value = true
   try {
-    const result = await core<{
-      job: SchedulerJob
-      scheduler: SchedulerPayload
-    }>('scheduler.createJob', {
+    const result = await core('scheduler.createJob', {
       name: createName.value.trim() || defaultJobName(),
       schedule: buildSchedule(
         createScheduleKind.value,
@@ -170,10 +167,7 @@ async function saveSelected() {
   if (!selected.value || !selectedCanEdit.value) return
   loading.value = true
   try {
-    const result = await core<{
-      job: SchedulerJob
-      scheduler: SchedulerPayload
-    }>('scheduler.updateJob', selected.value.id, {
+    const result = await core('scheduler.updateJob', selected.value.id, {
       name: editName.value.trim() || selected.value.name,
       schedule: buildSchedule(
         editScheduleKind.value,
@@ -216,10 +210,7 @@ async function deleteSelected() {
   if (!window.confirm(`删除定时任务「${selected.value.name}」？`)) return
   loading.value = true
   try {
-    const result = await core<{ deleted: string; scheduler: SchedulerPayload }>(
-      'scheduler.deleteJob',
-      selected.value.id,
-    )
+    const result = await core('scheduler.deleteJob', selected.value.id)
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     selectedId.value = ''
     ctx.showToast('定时任务已删除')
@@ -240,10 +231,7 @@ async function schedulerAction(
       pause: 'scheduler.pauseJob',
       resume: 'scheduler.resumeJob',
     } as const
-    const result = await core<{ scheduler: SchedulerPayload }>(
-      opByAction[action],
-      job.id,
-    )
+    const result = await core(opByAction[action], job.id)
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     ctx.showToast(toast)
   } finally {

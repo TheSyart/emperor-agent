@@ -16,6 +16,9 @@ export type ProviderBackend =
 export type ProviderModelDiscovery =
   'openai_compat' | 'anthropic' | 'unsupported'
 
+export type ProviderRegion =
+  'foreign' | 'aggregator' | 'cloud' | 'cn' | 'local' | 'other'
+
 export interface ProviderSpec {
   name: string
   displayName: string
@@ -28,7 +31,7 @@ export interface ProviderSpec {
   defaultApiBase: string | null
   envKey: string
   envExtras: ReadonlyArray<readonly [string, string]>
-  region: string
+  region: ProviderRegion
   isGateway: boolean
   isLocal: boolean
   isOauth: boolean
@@ -41,6 +44,22 @@ export interface ProviderSpec {
   thinkingStyle: string
   reasoningAsContent: boolean
   modelOverrides: ReadonlyArray<readonly [string, Record<string, unknown>]>
+}
+
+export interface ProviderOption {
+  name: string
+  displayName: string
+  backend: ProviderBackend
+  websiteUrl: string
+  apiKeyUrl: string
+  modelDiscovery: ProviderModelDiscovery
+  defaultApiBase: string
+  region: ProviderRegion
+  isGateway: boolean
+  isLocal: boolean
+  isOauth: boolean
+  isDirect: boolean
+  thinkingStyle: string | null
 }
 
 type SpecInput = Pick<ProviderSpec, 'name' | 'displayName' | 'backend'> &
@@ -492,7 +511,7 @@ export function findByName(
 }
 
 /** WebUI ProviderOption 下拉元数据。对齐 `provider_options`。 */
-export function providerOptions(): Array<Record<string, unknown>> {
+export function providerOptions(): ProviderOption[] {
   return PROVIDERS.filter((s) => s.selectable !== false).map((s) => ({
     name: s.name,
     displayName: s.displayName,

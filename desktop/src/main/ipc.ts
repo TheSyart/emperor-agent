@@ -1,4 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import {
+  coreOperationKeys,
+  invokeCoreOperation,
+  type CoreApi,
+  type CoreIpcErrorEnvelope,
+  type CoreOperationKey,
+  type CoreOperationResult,
+} from '@emperor/core'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 
 export interface IpcMainLike {
@@ -8,12 +16,12 @@ export interface IpcMainLike {
   ): void
 }
 
-export type CoreApiLike = Record<string, unknown>
+export type CoreApiLike = CoreApi
 
 export function registerCoreIpc(
   ipcMain: IpcMainLike,
   coreApi: CoreApiLike,
-  operationKeys: string[],
+  operationKeys: readonly CoreOperationKey[] = coreOperationKeys(),
 ): void {
   for (const key of [...operationKeys].sort()) {
     ipcMain.handle(channelForCoreOperation(key), async (_event, ...args) => {
@@ -28,44 +36,33 @@ export function registerCoreIpc(
 
 export async function invokeOperation(
   coreApi: CoreApiLike,
-  operationKey: string,
+  operationKey: CoreOperationKey,
   args: unknown[],
-): Promise<unknown> {
-  const { fn, receiver } = resolveOperation(coreApi, operationKey)
-  if (typeof fn !== 'function')
-    throw new Error(`CoreApi operation not found: ${operationKey}`)
-  return await Reflect.apply(fn, receiver, args)
-}
-
-function resolveOperation(
-  coreApi: CoreApiLike,
-  operationKey: string,
-): { fn: unknown; receiver: unknown } {
-  let current: unknown = coreApi
-  let receiver: unknown = coreApi
-  for (const part of operationKey.split('.')) {
-    receiver = current
-    current =
-      current && typeof current === 'object'
-        ? (current as Record<string, unknown>)[part]
-        : undefined
-  }
-  return { fn: current, receiver }
+): Promise<CoreOperationResult<typeof operationKey>> {
+  return invokeCoreOperation(coreApi, operationKey, args)
 }
 
 function safeIpcError(
   error: unknown,
   operationKey: string,
-): Record<string, unknown> {
-  const interruption = benignTurnInterruption(error)
-  if (interruption) return { ok: false, error: interruption }
+): CoreIpcErrorEnvelope {
+  try {
+    const interruption = benignTurnInterruption(error)
+    if (interruption) return { ok: false, error: interruption }
 
-  const domain = safeDomainError(error)
-  if (domain) return { ok: false, error: domain }
+    const domain = safeDomainError(error)
+    if (domain) return { ok: false, error: domain }
+  } catch {
+    // Error normalization is a trust boundary and must never reject the IPC call.
+  }
 
   const errorId = `ipc_${randomUUID().replace(/-/g, '').slice(0, 12)}`
   if (process.env.NODE_ENV !== 'production') {
-    console.error(`[core-ipc] ${operationKey} failed (${errorId})`, error)
+    try {
+      console.error(`[core-ipc] ${operationKey} failed (${errorId})`, error)
+    } catch {
+      // Hostile Proxy/getter values can also fail during console inspection.
+    }
   }
   return {
     ok: false,
@@ -79,33 +76,43 @@ function safeIpcError(
 function safeDomainError(
   error: unknown,
 ): { message: string; code: string; action?: string } | null {
-  if (!error || typeof error !== 'object') return null
-  const toSafe = (error as { toSafe?: unknown }).toSafe
-  if (typeof toSafe !== 'function') return null
-  const payload = toSafe.call(error)
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+  try {
+    if (!error || typeof error !== 'object') return null
+    const toSafe = (error as { toSafe?: unknown }).toSafe
+    if (typeof toSafe !== 'function') return null
+    const payload = toSafe.call(error)
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+      return null
+    const record = payload as Record<string, unknown>
+    const message =
+      typeof record.message === 'string' && record.message ? record.message : ''
+    const code =
+      typeof record.code === 'string' && record.code ? record.code : ''
+    if (!message || !code) return null
+    return {
+      message,
+      code,
+      ...(typeof record.action === 'string' && record.action
+        ? { action: record.action }
+        : {}),
+    }
+  } catch {
     return null
-  const record = payload as Record<string, unknown>
-  const message =
-    typeof record.message === 'string' && record.message ? record.message : ''
-  const code = typeof record.code === 'string' && record.code ? record.code : ''
-  if (!message || !code) return null
-  return {
-    message,
-    code,
-    ...(typeof record.action === 'string' && record.action
-      ? { action: record.action }
-      : {}),
   }
 }
 
 function benignTurnInterruption(
   error: unknown,
 ): { message: string; code: string } | null {
-  const name =
-    error && typeof error === 'object' && 'name' in error
-      ? String((error as { name?: unknown }).name || '')
-      : ''
+  let name = ''
+  try {
+    name =
+      error && typeof error === 'object' && 'name' in error
+        ? String((error as { name?: unknown }).name || '')
+        : ''
+  } catch {
+    return null
+  }
   if (name === 'TurnPaused')
     return { message: 'Turn paused', code: 'turn_paused' }
   if (name === 'CancelledTaskError')

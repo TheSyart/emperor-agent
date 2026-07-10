@@ -352,7 +352,7 @@ export function useRuntime(options: {
   async function stopActive() {
     updatePending('正在停止当前任务...', '', 'running')
     try {
-      const data = await core<Record<string, unknown>>('chat.stopRuntime', {})
+      const data = await core('chat.stopRuntime', {})
       return handleStopResult(data)
     } catch (err) {
       updatePending(
@@ -486,9 +486,7 @@ export function useRuntime(options: {
 
   async function refreshControlAndSessions() {
     try {
-      const control = (await invokeCore(
-        'control.get',
-      )) as BootstrapPayload['control']
+      const control = await invokeCore('control.get')
       if (options.boot.value) options.boot.value.control = control
     } catch {
       // Keep the original control error as the visible failure; refresh is best-effort.

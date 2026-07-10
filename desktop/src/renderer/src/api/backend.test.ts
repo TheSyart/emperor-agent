@@ -43,7 +43,9 @@ describe('with an injected Core IPC bridge', () => {
       },
     }
 
-    await expect(invokeCore('model.test')).rejects.toMatchObject({
+    await expect(
+      invokeCore('model.test', { entryName: 'main' }),
+    ).rejects.toMatchObject({
       message: 'Internal error',
       errorId: 'ipc_abc123',
     })
@@ -63,7 +65,9 @@ describe('with an injected Core IPC bridge', () => {
       },
     }
 
-    await expect(invokeCore('chat.submit')).rejects.toMatchObject({
+    await expect(
+      invokeCore('chat.submit', { content: 'hello' }),
+    ).rejects.toMatchObject({
       message: '还没有可用模型，请先配置模型。',
       code: 'model_configuration_required',
       action: 'open_model_settings',
@@ -112,3 +116,16 @@ describe('with an injected Core IPC bridge', () => {
     await expect(openPath('/missing')).rejects.toThrow('not found')
   })
 })
+
+function _assertRendererBridgeTypes(): void {
+  void invokeCore('sessions.rename', 's1', { title: 'Typed' })
+
+  // @ts-expect-error renderer operation keys are closed
+  void invokeCore('missing.operation')
+
+  // @ts-expect-error sessions.rename requires a patch
+  void invokeCore('sessions.rename', 's1')
+
+  // @ts-expect-error desktopPet.setEnabled requires a boolean
+  void invokeCore('desktopPet.setEnabled', 'true')
+}

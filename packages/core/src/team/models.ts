@@ -21,6 +21,30 @@ export enum TeamStatus {
   ERROR = 'error',
 }
 
+export interface TeamMemberPayload {
+  name: string
+  role: string
+  agent_type: string
+  status: TeamStatus
+  created_at: number
+  updated_at: number
+  last_error: string | null
+  [key: string]: unknown
+}
+
+export interface TeamMessagePayload {
+  id: string
+  type: string
+  from: string
+  to: string
+  content: string
+  timestamp: number
+  task_id: string | null
+  in_reply_to: string | null
+  meta: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export function newTeamId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 12)}`
 }
@@ -81,7 +105,7 @@ export class TeamMember {
     })
   }
 
-  toDict(): Record<string, unknown> {
+  toDict(): TeamMemberPayload {
     return {
       name: this.name,
       role: this.role,
@@ -182,7 +206,7 @@ export class TeamMessage {
     })
   }
 
-  toDict(): Record<string, unknown> {
+  toDict(): TeamMessagePayload {
     return {
       id: this.id,
       type: this.type,

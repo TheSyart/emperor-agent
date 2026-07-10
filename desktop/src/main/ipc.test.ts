@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { channelForCoreOperation } from '../shared/ipc-contract'
-import { registerCoreIpc } from './ipc'
+import { registerCoreIpc, type CoreApiLike } from './ipc'
 
 describe('core IPC bridge (MIG-IPC-002)', () => {
   it('derives stable namespaced channels from CoreApi operation keys', () => {
@@ -22,7 +22,7 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
       bootstrap: () => ({ app: 'Emperor Agent' }),
     }
 
-    registerCoreIpc(ipc, api, ['sessions.create', 'bootstrap'])
+    registerCoreIpc(ipc, asCoreApi(api), ['sessions.create', 'bootstrap'])
 
     expect(ipc.channels()).toEqual([
       'emperor:core:bootstrap',
@@ -36,6 +36,25 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     })
   })
 
+  it('rejects malformed arguments before the CoreApi adapter runs', async () => {
+    const ipc = new FakeIpcMain()
+    const create = vi.fn(() => ({ id: 's1' }))
+    registerCoreIpc(ipc, asCoreApi({ sessions: { create } }), [
+      'sessions.create',
+    ])
+
+    await expect(
+      ipc.invoke('emperor:core:sessions:create', { title: 42 }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_core_arguments',
+        message: 'Invalid arguments for sessions.create',
+      },
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('invokes prototype operations with their owning receiver', async () => {
     const ipc = new FakeIpcMain()
     class Api {
@@ -45,9 +64,7 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
         return { app: this.app }
       }
     }
-    registerCoreIpc(ipc, new Api() as unknown as Record<string, unknown>, [
-      'bootstrap',
-    ])
+    registerCoreIpc(ipc, asCoreApi(new Api()), ['bootstrap'])
 
     await expect(ipc.invoke('emperor:core:bootstrap')).resolves.toEqual({
       app: 'Emperor Agent',
@@ -61,17 +78,19 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
       .mockImplementation(() => undefined)
     registerCoreIpc(
       ipc,
-      {
+      asCoreApi({
         model: {
           test: () => {
             throw new Error('secret stack details')
           },
         },
-      },
+      }),
       ['model.test'],
     )
 
-    const payload = await ipc.invoke('emperor:core:model:test', {})
+    const payload = await ipc.invoke('emperor:core:model:test', {
+      entryName: 'main',
+    })
 
     expect(payload).toMatchObject({
       ok: false,
@@ -88,6 +107,90 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     errorSpy.mockRestore()
   })
 
+  it('contains failures thrown by a domain error serializer', async () => {
+    const ipc = new FakeIpcMain()
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    const unsafeError = Object.assign(new Error('secret domain detail'), {
+      toSafe: () => {
+        throw new Error('serializer secret')
+      },
+    })
+    registerCoreIpc(
+      ipc,
+      asCoreApi({
+        model: {
+          test: () => {
+            throw unsafeError
+          },
+        },
+      }),
+      ['model.test'],
+    )
+
+    const payload = await ipc.invoke('emperor:core:model:test', {
+      entryName: 'main',
+    })
+
+    expect(payload).toMatchObject({
+      ok: false,
+      error: { message: 'Internal error' },
+    })
+    expect(String(payload.error.errorId)).toMatch(/^ipc_/)
+    expect(JSON.stringify(payload)).not.toContain('secret')
+    errorSpy.mockRestore()
+  })
+
+  it('contains hostile throwable property traps in the safe error envelope', async () => {
+    const ipc = new FakeIpcMain()
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    const hostileError = Object.defineProperty(
+      new Error('secret throwable'),
+      'name',
+      {
+        get() {
+          throw new Error('secret name getter')
+        },
+      },
+    )
+    Object.defineProperty(hostileError, 'toSafe', {
+      get() {
+        throw new Error('secret serializer getter')
+      },
+    })
+    registerCoreIpc(
+      ipc,
+      asCoreApi({
+        model: {
+          test: () => {
+            throw hostileError
+          },
+        },
+      }),
+      ['model.test'],
+    )
+
+    const payload = await ipc.invoke('emperor:core:model:test', {
+      entryName: 'main',
+    })
+
+    expect(payload).toMatchObject({
+      ok: false,
+      error: { message: 'Internal error' },
+    })
+    expect(JSON.stringify(payload)).not.toContain('secret')
+    errorSpy.mockRestore()
+  })
+
+  it('rejects unknown operation keys before creating an IPC channel', () => {
+    expect(() => channelForCoreOperation('missing.operation' as never)).toThrow(
+      'invalid core IPC operation',
+    )
+  })
+
   it('passes safe domain errors through the IPC boundary', async () => {
     const ipc = new FakeIpcMain()
     const error = Object.assign(new Error('还没有可用模型，请先配置模型。'), {
@@ -101,18 +204,18 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     })
     registerCoreIpc(
       ipc,
-      {
+      asCoreApi({
         chat: {
           submit: () => {
             throw error
           },
         },
-      },
+      }),
       ['chat.submit'],
     )
 
     await expect(
-      ipc.invoke('emperor:core:chat:submit', {}),
+      ipc.invoke('emperor:core:chat:submit', { content: 'hello' }),
     ).resolves.toMatchObject({
       ok: false,
       error: {
@@ -133,36 +236,34 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     busy.name = 'TurnBusyError'
     registerCoreIpc(
       ipc,
-      {
+      asCoreApi({
         chat: {
           submit: () => {
             throw turnPaused
           },
-          stopRuntime: () => {
-            throw cancelled
-          },
-          busy: () => {
+          stopRuntime: (opts: { kind?: string }) => {
+            if (opts.kind === 'turn') throw cancelled
             throw busy
           },
         },
-      },
-      ['chat.submit', 'chat.stopRuntime', 'chat.busy'],
+      }),
+      ['chat.submit', 'chat.stopRuntime'],
     )
 
     await expect(
-      ipc.invoke('emperor:core:chat:submit', {}),
+      ipc.invoke('emperor:core:chat:submit', { content: 'hello' }),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: 'turn_paused', message: 'Turn paused' },
     })
     await expect(
-      ipc.invoke('emperor:core:chat:stopRuntime', {}),
+      ipc.invoke('emperor:core:chat:stopRuntime', { kind: 'turn' }),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: 'cancelled', message: 'Task cancelled' },
     })
     await expect(
-      ipc.invoke('emperor:core:chat:busy', {}),
+      ipc.invoke('emperor:core:chat:stopRuntime', {}),
     ).resolves.toMatchObject({
       ok: false,
       error: {
@@ -172,6 +273,10 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     })
   })
 })
+
+function asCoreApi(value: unknown): CoreApiLike {
+  return value as CoreApiLike
+}
 
 type Handler = (_event: unknown, ...args: unknown[]) => unknown
 

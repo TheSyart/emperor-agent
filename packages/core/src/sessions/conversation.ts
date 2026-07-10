@@ -68,6 +68,8 @@ export class ConversationStore {
         item.seq = Math.trunc(Number(row.seq))
       if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
       if (Array.isArray(row.attachments)) item.attachments = row.attachments
+      if (Array.isArray(row.requestedSkills))
+        item.requestedSkills = row.requestedSkills
       if (typeof row.displayContent === 'string')
         item.displayContent = row.displayContent
       out.push(item)

@@ -14,7 +14,16 @@ import {
   type HookEventName,
   type HookRuntimeRunOptions,
   type HookSnapshot,
+  type HookAggregateDecision,
+  type HookDiagnostic,
+  type HookEventMode,
+  type HookHandlerType,
+  type HookSourceV2,
+  type HooksConfigV2,
+  type ProjectHookTrustStatus,
+  type ResolvedHookGroup,
 } from '../../hooks'
+import type { HookAuditRunRecordV2 } from '../../hooks/orchestrator'
 
 type Dict = Record<string, unknown>
 
@@ -24,6 +33,73 @@ export interface CoreHooksServiceDeps {
   activeWorkspaceRoot?: () => string
   activeProjectRoot?: () => string | null
   assertMutation?: (area: string, action: string) => void
+}
+
+export interface CoreHooksSummaryPayload {
+  total: number
+  groups: number
+  events: Array<{ eventName: HookEventName; groups: number; count: number }>
+}
+
+export interface CoreHooksConfigPayload {
+  revision: string
+  config: HooksConfigV2
+  globalConfig: HooksConfigV2
+  effectiveGroups: ResolvedHookGroup[]
+  sources: HookSourceV2[]
+  projectTrust: ProjectHookTrustStatus | null
+  diagnostics: HookDiagnostic[]
+  summary: CoreHooksSummaryPayload
+}
+
+export interface CoreHooksSavePayload extends CoreHooksConfigPayload {
+  saved: boolean
+  decision: HookAggregateDecision
+}
+
+export interface CoreHooksAuditPayload {
+  records: HookAuditRunRecordV2[]
+  badLines: Array<{ path: string; line: number; raw: string }>
+  cursor: string
+  nextCursor: string | null
+  total: number
+}
+
+export interface CoreHookEventMetadataPayload {
+  eventName: HookEventName
+  matcherField: string | null
+  mode: HookEventMode
+  allowedHandlers: HookHandlerType[]
+}
+
+export interface CoreHooksMetadataPayload {
+  version: 2
+  events: CoreHookEventMetadataPayload[]
+  handlers: Record<string, Record<string, unknown>>
+  limits: Record<string, unknown>
+}
+
+export interface CoreHooksValidationPayload {
+  valid: boolean
+  config: Record<string, unknown>
+  diagnostics: HookDiagnostic[]
+}
+
+export interface CoreHookMatchItemPayload {
+  index: number
+  eventName: HookEventName
+  groupId: string
+  handlerId: string
+  handlerType: HookHandlerType
+  source: HookSourceV2
+  failureMode: string
+}
+
+export interface CoreHooksMatchPayload {
+  revision: string
+  eventName: HookEventName
+  items: CoreHookMatchItemPayload[]
+  diagnostics: HookDiagnostic[]
 }
 
 export class CoreHooksService {
@@ -39,7 +115,7 @@ export class CoreHooksService {
     this.deps = deps
   }
 
-  async getConfig(_opts: Dict = {}): Promise<Dict> {
+  async getConfig(_opts: Dict = {}): Promise<CoreHooksConfigPayload> {
     const scope = this.scope()
     const snapshot = await this.service.snapshot(scope)
     const global = await this.service.resolver.resolve({
@@ -49,7 +125,7 @@ export class CoreHooksService {
     return configPayload(snapshot, global.config)
   }
 
-  async saveConfig(raw: unknown): Promise<Dict> {
+  async saveConfig(raw: unknown): Promise<CoreHooksSavePayload> {
     this.deps.assertMutation?.('hooks', 'saveConfig')
     const envelope = isRecord(raw) && 'config' in raw ? raw : null
     const config = envelope?.config ?? raw
@@ -81,7 +157,7 @@ export class CoreHooksService {
   async authorizeConfigChange(
     source: string,
     candidate: unknown,
-  ): Promise<Dict> {
+  ): Promise<{ revision: string; decision: HookAggregateDecision }> {
     const scope = this.scope()
     const revision = stableRevision(candidate)
     const decision = await this.service.authorizeConfigChange({
@@ -106,7 +182,7 @@ export class CoreHooksService {
       sourceId?: string | null
       runId?: string | null
     } = {},
-  ): Promise<Dict> {
+  ): Promise<CoreHooksAuditPayload> {
     const replay = await this.audit.replayRuns({ limit: 100_000 })
     const filtered = replay.records
       .filter((record) => {
@@ -130,13 +206,15 @@ export class CoreHooksService {
     }
   }
 
-  getMetadata(): Dict {
+  getMetadata(): CoreHooksMetadataPayload {
     const defaults = defaultHooksConfigV2()
     return {
       version: 2,
       events: HOOK_EVENT_NAMES.map((eventName) => ({
         eventName,
-        ...HOOK_EVENT_SPECS[eventName],
+        matcherField: HOOK_EVENT_SPECS[eventName].matcherField,
+        mode: HOOK_EVENT_SPECS[eventName].mode,
+        allowedHandlers: [...HOOK_EVENT_SPECS[eventName].allowedHandlers],
       })),
       handlers: {
         command: {
@@ -160,11 +238,11 @@ export class CoreHooksService {
           },
         },
       },
-      limits: defaults.policy,
+      limits: { ...defaults.policy },
     }
   }
 
-  validateConfig(input: Dict): Dict {
+  validateConfig(input: Dict): CoreHooksValidationPayload {
     const sourceKind = String(input.sourceKind ?? input.source_kind ?? 'global')
     const parsed = parseHooksConfigV2(input.config, { sourceKind })
     return {
@@ -174,7 +252,7 @@ export class CoreHooksService {
     }
   }
 
-  async setProjectTrust(input: Dict): Promise<Dict> {
+  async setProjectTrust(input: Dict): Promise<ProjectHookTrustStatus> {
     this.deps.assertMutation?.('hooks', 'setProjectTrust')
     const activeRoot = this.deps.activeProjectRoot?.() ?? null
     const requestedRoot = String(
@@ -194,14 +272,14 @@ export class CoreHooksService {
       input.expectedDigest ?? input.expected_digest ?? '',
     )
     if (!expectedDigest) throw new Error('expectedDigest is required')
-    return (await this.service.resolver.trustStore.set({
+    return await this.service.resolver.trustStore.set({
       projectRoot: requestedCanonical,
       expectedDigest,
       trusted: Boolean(input.trusted),
-    })) as unknown as Dict
+    })
   }
 
-  async testMatch(input: Dict): Promise<Dict> {
+  async testMatch(input: Dict): Promise<CoreHooksMatchPayload> {
     const eventName = requiredEvent(input)
     const snapshot = await this.currentRevision(input.revision)
     const runOptions = this.runOptions(input)
@@ -260,7 +338,7 @@ export class CoreHooksService {
     })) as unknown as Dict
   }
 
-  async cancelRun(input: Dict): Promise<Dict> {
+  async cancelRun(input: Dict): Promise<{ runId: string; cancelled: boolean }> {
     const runId = String(input.runId ?? input.run_id ?? '')
     if (!runId) throw new Error('runId is required')
     return { runId, cancelled: await this.service.background.cancel(runId) }
@@ -313,7 +391,10 @@ export class CoreHooksService {
   }
 }
 
-function configPayload(snapshot: HookSnapshot, globalConfig: unknown): Dict {
+function configPayload(
+  snapshot: HookSnapshot,
+  globalConfig: HooksConfigV2,
+): CoreHooksConfigPayload {
   const effectiveGroups = snapshot.groups.map((resolved) => ({
     eventName: resolved.eventName,
     group: resolved.group,
@@ -331,7 +412,7 @@ function configPayload(snapshot: HookSnapshot, globalConfig: unknown): Dict {
   }
 }
 
-function hooksSummary(snapshot: HookSnapshot): Dict {
+function hooksSummary(snapshot: HookSnapshot): CoreHooksSummaryPayload {
   const events = HOOK_EVENT_NAMES.map((eventName) => {
     const groups = snapshot.groups.filter(
       (group) => group.eventName === eventName,
@@ -361,7 +442,7 @@ function requiredEvent(input: Dict): HookEventName {
 
 function planItemPayload(
   item: ReturnType<typeof compileHookPlan>['items'][number],
-): Dict {
+): CoreHookMatchItemPayload {
   return {
     index: item.index,
     eventName: item.eventName,

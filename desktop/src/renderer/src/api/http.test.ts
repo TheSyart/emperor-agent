@@ -41,3 +41,13 @@ describe('core IPC wrapper (W4: fake REST route table removed)', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+
+function _assertCoreWrapperTypes(): void {
+  void core('sessions.rename', 's1', { title: 'Typed' })
+
+  // @ts-expect-error core() does not accept arbitrary operation strings
+  void core('missing.operation')
+
+  // @ts-expect-error sessions.rename requires both arguments
+  void core('sessions.rename', 's1')
+}

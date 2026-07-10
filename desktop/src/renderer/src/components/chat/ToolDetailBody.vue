@@ -38,10 +38,8 @@ async function loadFullOutput() {
   fullOutputLoading.value = true
   fullOutputError.value = ''
   try {
-    const result = (await invokeCore('tools.readResult', { ref: refPath })) as {
-      content?: string
-    }
-    fullOutput.value = String(result?.content ?? '')
+    const result = await invokeCore('tools.readResult', { ref: refPath })
+    fullOutput.value = result.content
   } catch {
     fullOutputError.value = '完整输出加载失败'
   } finally {

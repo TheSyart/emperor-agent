@@ -19,6 +19,37 @@ import { basename, dirname, join } from 'node:path'
 const TOKEN_KEYS = ['input', 'output', 'cache_read', 'cache_create'] as const
 type Row = Record<string, unknown>
 
+export interface TokenStatsRow {
+  input?: number
+  output?: number
+  cache_read?: number
+  cache_create?: number
+  total?: number
+  calls?: number
+  provider?: string
+  model?: string
+  [key: string]: number | string | undefined
+}
+
+export interface TokenUsageRow {
+  ts: string
+  provider: string
+  model: string
+  model_role: string
+  usage_type: string
+  input: number
+  output: number
+  cache_read: number
+  cache_create: number
+  total: number
+  route_reason?: string
+  used_fallback?: boolean
+  fallback_reason?: string
+  estimated_input_tokens?: number
+  route_estimated_tokens?: number
+  [key: string]: string | number | boolean | undefined
+}
+
 export interface RecordOptions {
   provider?: string | null
   usageType?: string
@@ -136,13 +167,13 @@ export class TokenTracker {
     return inputTotal(last ?? {})
   }
 
-  recentCalls(limit = 20): Row[] {
+  recentCalls(limit = 20): TokenUsageRow[] {
     if (limit <= 0) return []
     const rows = [...this.iterRows()].map(normalizeRow)
     return rows.slice(-limit).reverse()
   }
 
-  recentCacheCalls(limit = 20): Row[] {
+  recentCacheCalls(limit = 20): TokenUsageRow[] {
     if (limit <= 0) return []
     const rows = [...this.iterRows()]
       .map(normalizeRow)
@@ -154,8 +185,8 @@ export class TokenTracker {
     return rows.slice(-limit).reverse()
   }
 
-  statsByDate(): Record<string, Row> {
-    const out: Record<string, Row> = {}
+  statsByDate(): Record<string, TokenStatsRow> {
+    const out: Record<string, TokenStatsRow> = {}
     for (const r of this.iterRows()) {
       const date = String(r.ts ?? '').slice(0, 10)
       addRow((out[date] ??= emptyStats()), r)
@@ -163,8 +194,8 @@ export class TokenTracker {
     return out
   }
 
-  statsByModel(): Record<string, Row> {
-    const out: Record<string, Row> = {}
+  statsByModel(): Record<string, TokenStatsRow> {
+    const out: Record<string, TokenStatsRow> = {}
     for (const r of this.iterRows()) {
       const m = String(r.model ?? 'unknown')
       addRow((out[m] ??= emptyStats()), r)
@@ -172,8 +203,8 @@ export class TokenTracker {
     return out
   }
 
-  statsByProviderModel(): Record<string, Row> {
-    const out: Record<string, Row> = {}
+  statsByProviderModel(): Record<string, TokenStatsRow> {
+    const out: Record<string, TokenStatsRow> = {}
     for (const r of this.iterRows()) {
       const provider = String(r.provider || 'unknown')
       const model = String(r.model || 'unknown')
@@ -186,8 +217,8 @@ export class TokenTracker {
     return out
   }
 
-  statsByUsageType(): Record<string, Row> {
-    const out: Record<string, Row> = {}
+  statsByUsageType(): Record<string, TokenStatsRow> {
+    const out: Record<string, TokenStatsRow> = {}
     for (const r of this.iterRows()) {
       const usageType = String(r.usage_type ?? 'main_agent')
       addRow((out[usageType] ??= emptyStats()), r)
@@ -195,14 +226,14 @@ export class TokenTracker {
     return out
   }
 
-  totals(): Row {
+  totals(): TokenStatsRow {
     const out = emptyStats()
     for (const r of this.iterRows()) addRow(out, r)
     return out
   }
 
-  statsByDateModel(): Record<string, Record<string, Row>> {
-    const out: Record<string, Record<string, Row>> = {}
+  statsByDateModel(): Record<string, Record<string, TokenStatsRow>> {
+    const out: Record<string, Record<string, TokenStatsRow>> = {}
     for (const r of this.iterRows()) {
       const date = String(r.ts ?? '').slice(0, 10)
       if (!date) continue
@@ -218,8 +249,8 @@ export class TokenTracker {
     return out
   }
 
-  statsByHour(): Record<string, Row> {
-    const out: Record<string, Row> = {}
+  statsByHour(): Record<string, TokenStatsRow> {
+    const out: Record<string, TokenStatsRow> = {}
     for (let hour = 0; hour < 24; hour += 1)
       out[String(hour).padStart(2, '0')] = emptyStats()
     for (const r of this.iterRows()) {
@@ -370,7 +401,7 @@ function readRowsFromText(text: string): Row[] {
   return rows
 }
 
-function emptyStats(): Row {
+function emptyStats(): TokenStatsRow {
   return {
     calls: 0,
     input: 0,
@@ -381,7 +412,7 @@ function emptyStats(): Row {
   }
 }
 
-function addRow(bucket: Row, row: Row): void {
+function addRow(bucket: TokenStatsRow, row: Row): void {
   bucket.calls = (Number(bucket.calls) || 0) + 1
   let total = 0
   for (const key of TOKEN_KEYS) {
@@ -392,12 +423,12 @@ function addRow(bucket: Row, row: Row): void {
   bucket.total = (Number(bucket.total) || 0) + total
 }
 
-function normalizeRow(row: Row): Row {
+function normalizeRow(row: Row): TokenUsageRow {
   const inputTokens = rowInt(row, 'input', 'prompt_tokens')
   const outputTokens = rowInt(row, 'output', 'completion_tokens')
   const cacheRead = rowInt(row, 'cache_read', 'cache_read_input_tokens')
   const cacheCreate = rowInt(row, 'cache_create', 'cache_creation_input_tokens')
-  const normalized: Row = {
+  const normalized: TokenUsageRow = {
     ts: String(row.ts ?? ''),
     provider: String(row.provider ?? 'unknown'),
     model: String(row.model ?? 'unknown'),

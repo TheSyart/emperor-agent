@@ -11,6 +11,9 @@ import {
 import { listRecentPromptSnapshots } from '../../prompts/manifest'
 import type { RuntimePaths } from '../../runtime/paths'
 import type { LegacyStateMigrationResult } from '../../runtime/migrate-state-root'
+import type { ActiveTaskInfo, ActiveTaskKind } from '../../runtime/active'
+import type { RuntimeStats } from '../../runtime/store'
+import type { CoreDesktopPetPayload } from './desktop-pet-service'
 
 type Dict = Record<string, unknown>
 
@@ -25,11 +28,12 @@ export interface CoreDiagnosticsServiceDeps {
     memory: boolean
   } | null
   schedulerDiagnostics?: () => Dict
-  runtimeStats?: () => Dict
+  runtimeStats?: () => Partial<RuntimeStats>
   workspacePolicy?: () => Dict
   externalPayload?: () => Dict
   activeTasks?: () => unknown[]
-  desktopPetPayload?: () => Dict | Promise<Dict>
+  desktopPetPayload?: () =>
+    Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
 }
 
 export interface CoreDiagnosticsPayload {
@@ -40,12 +44,12 @@ export interface CoreDiagnosticsPayload {
   legacyStateMigration: Dict
   projectLegacyPrivateData: Dict | null
   scheduler: Dict
-  runtime: Dict
+  runtime: RuntimeStats
   workspacePolicy: Dict
   promptSnapshots: Dict
   external: Dict
-  activeTasks: unknown[]
-  desktopPet: Dict
+  activeTasks: ActiveTaskInfo[]
+  desktopPet: CoreDesktopPetPayload
   dependencies: Dict
 }
 
@@ -67,12 +71,12 @@ export class CoreDiagnosticsService {
       legacyStateMigration: this.legacyStateMigrationPayload(),
       projectLegacyPrivateData: this.projectLegacyPrivateDataPayload(),
       scheduler: this.deps.schedulerDiagnostics?.() ?? {},
-      runtime: this.deps.runtimeStats?.() ?? {},
+      runtime: runtimeStatsPayload(this.deps.runtimeStats?.()),
       workspacePolicy: this.deps.workspacePolicy?.() ?? {},
       promptSnapshots: this.promptSnapshotsPayload(),
       external: this.deps.externalPayload?.() ?? {},
-      activeTasks: this.deps.activeTasks?.() ?? [],
-      desktopPet: (await this.deps.desktopPetPayload?.()) ?? {},
+      activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
+      desktopPet: desktopPetPayload(await this.deps.desktopPetPayload?.()),
       dependencies: this.dependencies(),
     }
   }
@@ -153,4 +157,72 @@ export class CoreDiagnosticsService {
     if (!paths) return { count: 0, recent: [] }
     return listRecentPromptSnapshots(paths.sessionsRoot, 5)
   }
+}
+
+function runtimeStatsPayload(
+  value: Partial<RuntimeStats> | undefined,
+): RuntimeStats {
+  return {
+    version: Number(value?.version ?? 1),
+    path: String(value?.path ?? ''),
+    bytes: Number(value?.bytes ?? 0),
+    events: Number(value?.events ?? 0),
+    latestSeq: Number(value?.latestSeq ?? 0),
+    latestTs: value?.latestTs ?? null,
+    activeTurnEvents: Number(value?.activeTurnEvents ?? 0),
+    activeTurns: Number(value?.activeTurns ?? 0),
+    archiveFiles: Number(value?.archiveFiles ?? 0),
+    archiveBytes: Number(value?.archiveBytes ?? 0),
+    archives: value?.archives ?? [],
+    lastArchiveAt: value?.lastArchiveAt ?? null,
+    hotLimitEvents: Number(value?.hotLimitEvents ?? 0),
+    hotLimitBytes: Number(value?.hotLimitBytes ?? 0),
+    needsRotation: Boolean(value?.needsRotation),
+  }
+}
+
+function activeTasksPayload(value: unknown[] | undefined): ActiveTaskInfo[] {
+  return (value ?? [])
+    .filter(isRecord)
+    .map((task) => ({
+      id: String(task.id ?? ''),
+      kind: activeTaskKind(task.kind),
+      label: String(task.label ?? task.title ?? task.id ?? ''),
+      started_at: Number(task.started_at ?? task.startedAt ?? 0),
+      turn_id: nullableText(task.turn_id ?? task.turnId),
+      job_id: nullableText(task.job_id ?? task.jobId),
+      session_id: nullableText(task.session_id ?? task.sessionId),
+      cancelled: Boolean(task.cancelled),
+    }))
+    .filter((task) => task.id)
+}
+
+function desktopPetPayload(
+  value: Partial<CoreDesktopPetPayload> | undefined,
+): CoreDesktopPetPayload {
+  return {
+    enabled: Boolean(value?.enabled),
+    autoStartWithWebui: Boolean(value?.autoStartWithWebui),
+    running: Boolean(value?.running),
+    pid: typeof value?.pid === 'number' ? value.pid : null,
+    lastError: typeof value?.lastError === 'string' ? value.lastError : null,
+    installCommand: String(value?.installCommand ?? ''),
+    managedBy: String(value?.managedBy ?? ''),
+    available: Boolean(value?.available),
+  }
+}
+
+function activeTaskKind(value: unknown): ActiveTaskKind {
+  return value === 'scheduler' || value === 'team' || value === 'watchlist'
+    ? value
+    : 'turn'
+}
+
+function nullableText(value: unknown): string | null {
+  const text = String(value ?? '')
+  return text || null
+}
+
+function isRecord(value: unknown): value is Dict {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }

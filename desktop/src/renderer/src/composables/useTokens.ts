@@ -11,7 +11,7 @@ export function useTokens(showToast: (message: string) => void) {
     try {
       loading.value = true
       error.value = ''
-      data.value = await core<TokensPayload>('memory.tokens')
+      data.value = await core('memory.tokens')
       if (!silent) showToast('Token 统计已刷新')
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)

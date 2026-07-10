@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -83,6 +89,89 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
         sessionId: String(session.id),
       }),
     ).resolves.toMatchObject({ turnId: 'turn_chat_1', content: 'pong' })
+
+    await api.close()
+  })
+
+  it('delivers attachment content and requested skill metadata through the turn', async () => {
+    const root = tmp('emperor-mainline-attachments-')
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Attachments' })
+    const skillDir = join(root, '.emperor', 'skills', 'reviewer')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '# Reviewer Skill\n\nGeneral review helper.\n\nREQUESTED_SKILL_CONTEXT_MARKER',
+      'utf8',
+    )
+    const attachment = api.attachments.save({
+      raw: Buffer.from('attachment evidence', 'utf8'),
+      name: 'evidence.txt',
+      mime: 'text/plain',
+    })
+    const events: Array<Record<string, unknown>> = []
+
+    await api.chat.submit({
+      content: 'inspect',
+      displayContent: 'inspect @skill(reviewer)',
+      attachments: [attachment.id],
+      requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+      turnId: 'turn_attachment_1',
+      sessionId: String(session.id),
+      emit: async (event) => {
+        events.push(event)
+      },
+    })
+
+    const userMessage = provider.calls[0]?.messages.find(
+      (message) => message.role === 'user',
+    )
+    expect(String(userMessage?.content)).toContain('attachment evidence')
+    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
+      'REQUESTED_SKILL_CONTEXT_MARKER',
+    )
+    const history = api.loop.activeMemoryStore.loadUnarchivedHistory()
+    expect(history.find((row) => row.role === 'user')).toMatchObject({
+      attachments: [expect.objectContaining({ id: attachment.id })],
+      requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+    })
+    expect(
+      events.find((event) => event.event === 'user_message'),
+    ).toMatchObject({
+      attachments: [expect.objectContaining({ id: attachment.id })],
+      requested_skills: [{ name: 'reviewer', source: 'slash' }],
+    })
+
+    await api.close()
+  })
+
+  it('rejects an unavailable explicitly requested skill before model execution', async () => {
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root: tmp('emperor-mainline-missing-skill-'),
+      stateRoot: tmp('emperor-mainline-missing-skill-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Missing Skill' })
+
+    await expect(
+      api.chat.submit({
+        content: 'review',
+        requestedSkills: [{ name: 'missing-skill', source: 'slash' }],
+        sessionId: String(session.id),
+      }),
+    ).rejects.toMatchObject({
+      code: 'requested_skill_unavailable',
+      skillName: 'missing-skill',
+    })
+    expect(provider.calls).toHaveLength(0)
 
     await api.close()
   })

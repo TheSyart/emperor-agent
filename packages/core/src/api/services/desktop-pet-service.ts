@@ -9,6 +9,18 @@ export interface CoreDesktopPetServiceDeps {
   assertMutation?: (area: string, action: string) => void
 }
 
+export interface CoreDesktopPetPayload {
+  enabled: boolean
+  autoStartWithWebui: boolean
+  running: boolean
+  pid: number | null
+  lastError: string | null
+  installCommand: string
+  managedBy: string
+  available: boolean
+  [key: string]: unknown
+}
+
 export class CoreDesktopPetService {
   readonly runtimeRoot: string
   readonly stateRoot: string
@@ -20,7 +32,7 @@ export class CoreDesktopPetService {
     this.deps = deps
   }
 
-  async get(): Promise<Dict> {
+  async get(): Promise<CoreDesktopPetPayload> {
     const config = await loadLocalConfig(this.stateRoot)
     const state = this.readState()
     return {
@@ -28,19 +40,21 @@ export class CoreDesktopPetService {
       autoStartWithWebui: config.desktopPet.autoStartWithWebui,
       running: Boolean(state.running),
       pid: null,
-      lastError: state.lastError ?? null,
+      lastError: typeof state.lastError === 'string' ? state.lastError : null,
       installCommand: '',
       managedBy: 'Electron main process',
       available: true,
     }
   }
 
-  setEnabled(enabled: boolean): Promise<Dict> {
+  setEnabled(enabled: boolean): Promise<CoreDesktopPetPayload> {
     this.deps.assertMutation?.('desktop pet', 'toggle')
     return this.setEnabledInner(enabled)
   }
 
-  private async setEnabledInner(enabled: boolean): Promise<Dict> {
+  private async setEnabledInner(
+    enabled: boolean,
+  ): Promise<CoreDesktopPetPayload> {
     const config = await loadLocalConfig(this.stateRoot)
     await saveLocalConfig(this.stateRoot, {
       ...config,

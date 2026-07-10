@@ -49,13 +49,17 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    const nextDiagnostics = await core<DiagnosticsPayload>('diagnostics.get')
+    const nextDiagnostics = await core('diagnostics.get')
+    let contextExplanation
     try {
-      nextDiagnostics.contextExplanation = await core('memory.explainContext')
+      contextExplanation = await core('memory.explainContext')
     } catch {
       // Diagnostics still has value even when no active prompt snapshot exists.
     }
-    diagnostics.value = nextDiagnostics
+    diagnostics.value = {
+      ...nextDiagnostics,
+      ...(contextExplanation ? { contextExplanation } : {}),
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {

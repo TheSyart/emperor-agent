@@ -29,7 +29,9 @@ import {
   questionFromDict,
   touchInteraction,
   type ControlState,
+  type ControlStatePayload,
   type Interaction,
+  type InteractionPayload,
 } from './models'
 import { PlanDraftingManager } from './plan-drafting'
 import { PlanExecutionManager } from './plan-execution'
@@ -52,7 +54,7 @@ import {
 } from './tools'
 
 export interface ControlResume {
-  interaction: Record<string, unknown>
+  interaction: InteractionPayload
   message: string
   event: Record<string, unknown>
   resume: boolean
@@ -118,11 +120,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.store.load().mode
   }
 
-  payload(): Record<string, unknown> {
+  payload(): ControlStatePayload {
     return controlStateToDict(this.store.load())
   }
 
-  setMode(mode: string): Record<string, unknown> {
+  setMode(mode: string): ControlStatePayload {
     let value = String(mode ?? '')
       .trim()
       .toLowerCase()

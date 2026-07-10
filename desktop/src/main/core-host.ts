@@ -1,13 +1,13 @@
 import {
-  CORE_API_ROUTE_OPERATIONS,
   CoreApi,
+  coreOperationKeys as registryCoreOperationKeys,
   type CoreApiCreateOptions,
 } from '@emperor/core'
 import { CoreEventBridge } from './event-bridge'
 import { registerCoreIpc, type CoreApiLike, type IpcMainLike } from './ipc'
 
-export function coreOperationKeys(): string[] {
-  return CORE_API_ROUTE_OPERATIONS.map((op) => op.key)
+export function coreOperationKeys() {
+  return registryCoreOperationKeys()
 }
 
 export function registerCoreHostIpc(
@@ -30,6 +30,6 @@ export async function createCoreHost(opts: {
     enableFirstRunOnboarding: true,
     ...opts.coreOptions,
   })
-  registerCoreHostIpc(opts.ipcMain, coreApi as unknown as CoreApiLike)
+  registerCoreHostIpc(opts.ipcMain, coreApi)
   return coreApi
 }

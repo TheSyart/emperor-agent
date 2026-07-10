@@ -1,4 +1,5 @@
-import type { TeamManager } from '../../team/manager'
+import type { TeamManager, TeamManagerPayload } from '../../team/manager'
+import type { TeamMemberPayload, TeamMessagePayload } from '../../team/models'
 
 type Dict = Record<string, any>
 type TeamManagerProvider = TeamManager | (() => TeamManager | null) | null
@@ -12,6 +13,24 @@ export interface CoreTeamServiceDeps {
   assertMutation?: (area: string, action: string) => void
 }
 
+export interface CoreTeamPayload extends TeamManagerPayload {
+  managed: boolean
+  scope: string
+  project_id: string | null
+}
+
+export interface CoreTeamMemberPayload {
+  member: TeamMemberPayload & { unread: number; tools: string[] }
+  inbox: TeamMessagePayload[]
+  leadInbox: TeamMessagePayload[]
+  thread: Array<{ role?: string; content: string }>
+}
+
+export interface CoreTeamMutationPayload {
+  result: string
+  team: CoreTeamPayload
+}
+
 export class CoreTeamService {
   private readonly deps: CoreTeamServiceDeps
 
@@ -19,17 +38,18 @@ export class CoreTeamService {
     this.deps = deps
   }
 
-  get(): Dict {
+  get(): CoreTeamPayload {
     const manager = this.managerOrNull()
     if (!manager) return fallbackPayload()
-    const payload = manager.payload() as Dict
-    payload.managed = true
-    payload.scope = this.scope()
-    payload.project_id = this.projectId()
-    return payload
+    return {
+      ...manager.payload(),
+      managed: true,
+      scope: this.scope(),
+      project_id: this.projectId(),
+    }
   }
 
-  getMember(name: string): Dict {
+  getMember(name: string): CoreTeamMemberPayload {
     const manager = this.requireManager()
     const member = manager.store.getMember(name)
     if (!member) throw new Error(`unknown teammate: ${name}`)
@@ -54,7 +74,7 @@ export class CoreTeamService {
     role: string
     task?: string | null
     agent_type?: string | null
-  }): Promise<Dict> {
+  }): Promise<CoreTeamMutationPayload> {
     this.assertMutation('team', 'spawn teammate')
     return this.requireManager()
       .spawnTeammate(opts)
@@ -65,21 +85,24 @@ export class CoreTeamService {
     to: string
     content: string
     wake?: boolean
-  }): Promise<Dict> {
+  }): Promise<CoreTeamMutationPayload> {
     this.assertMutation('team', 'send message')
     return this.requireManager()
       .sendMessage(opts)
       .then((result) => ({ result, team: this.get() }))
   }
 
-  wakeMember(name: string, opts: { purpose?: string } = {}): Promise<Dict> {
+  wakeMember(
+    name: string,
+    opts: { purpose?: string } = {},
+  ): Promise<CoreTeamMutationPayload> {
     this.assertMutation('team', 'wake teammate')
     return this.requireManager()
       .wakeTeammate(name, opts)
       .then((result) => ({ result, team: this.get() }))
   }
 
-  shutdownMember(name: string): Promise<Dict> {
+  shutdownMember(name: string): Promise<CoreTeamMutationPayload> {
     this.assertMutation('team', 'shutdown teammate')
     return this.requireManager()
       .shutdownTeammate({ name })
@@ -123,18 +146,18 @@ export class CoreTeamService {
 
   private threadSummary(
     name: string,
-  ): Array<{ role?: unknown; content: string }> {
+  ): Array<{ role?: string; content: string }> {
     return this.requireManager()
       .store.readThread(name)
       .slice(-20)
       .map((item) => ({
-        role: item.role,
+        ...(typeof item.role === 'string' ? { role: item.role } : {}),
         content: extractTextContent(item.content).slice(0, 2000),
       }))
   }
 }
 
-function fallbackPayload(): Dict {
+function fallbackPayload(): CoreTeamPayload {
   return {
     managed: true,
     scope: 'chat',

@@ -19,7 +19,7 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
       emperor: {
         invokeCore: async (...args: unknown[]) => {
           calls.push(args)
-          return { ok: true, sample: 'pong' }
+          return { ok: true, kind: 'text', sample: 'pong' }
         },
       },
     }
@@ -27,6 +27,7 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
 
     await expect(testModelEntry('main', 'text', 'secondary')).resolves.toEqual({
       ok: true,
+      kind: 'text',
       sample: 'pong',
     })
 

@@ -34,6 +34,7 @@ export function readyEvent(opts: {
 export function userMessage(opts: {
   content: string
   attachments: EventPayload[]
+  requestedSkills?: Array<{ name: string; source?: string }>
   clientMessageId?: string
   source?: string | null
   scheduler?: EventPayload | null
@@ -42,6 +43,9 @@ export function userMessage(opts: {
   return runtimeEvent('user_message', {
     content: opts.content,
     attachments: opts.attachments,
+    requested_skills: opts.requestedSkills?.length
+      ? opts.requestedSkills
+      : null,
     client_message_id: opts.clientMessageId ?? '',
     source: opts.source ?? null,
     scheduler: opts.scheduler ?? null,

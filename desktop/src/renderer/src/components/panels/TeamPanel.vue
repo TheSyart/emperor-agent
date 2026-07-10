@@ -62,7 +62,7 @@ watch(selectedName, async (name) => {
 async function refreshTeam() {
   loading.value = true
   try {
-    const payload = await core<TeamPayload>('team.get')
+    const payload = await core('team.get')
     if (ctx.boot.value) ctx.boot.value.team = payload
     if (!selectedName.value && payload.members?.length)
       selectedName.value = payload.members[0].name
@@ -73,7 +73,7 @@ async function refreshTeam() {
 }
 
 async function loadMember(name: string) {
-  detail.value = await core<TeamMemberPayload>('team.getMember', name)
+  detail.value = await core('team.getMember', name)
 }
 
 async function createMember() {
@@ -82,10 +82,11 @@ async function createMember() {
   if (!name || !role) return
   loading.value = true
   try {
-    const payload = await core<{ result: string; team: TeamPayload }>(
-      'team.spawnMember',
-      { name, role, task: createTask.value.trim() || null },
-    )
+    const payload = await core('team.spawnMember', {
+      name,
+      role,
+      task: createTask.value.trim() || null,
+    })
     if (ctx.boot.value) ctx.boot.value.team = payload.team
     selectedName.value = name
     createName.value = ''
@@ -101,14 +102,11 @@ async function sendMessage() {
   if (!selected.value || !messageDraft.value.trim()) return
   loading.value = true
   try {
-    const payload = await core<{ result: string; team: TeamPayload }>(
-      'team.sendMessage',
-      {
-        to: selected.value.name,
-        content: messageDraft.value.trim(),
-        wake: true,
-      },
-    )
+    const payload = await core('team.sendMessage', {
+      to: selected.value.name,
+      content: messageDraft.value.trim(),
+      wake: true,
+    })
     if (ctx.boot.value) ctx.boot.value.team = payload.team
     messageDraft.value = ''
     await loadMember(selected.value.name)
@@ -121,11 +119,7 @@ async function wakeMember() {
   if (!selected.value) return
   loading.value = true
   try {
-    const payload = await core<{ result: string; team: TeamPayload }>(
-      'team.wakeMember',
-      selected.value.name,
-      {},
-    )
+    const payload = await core('team.wakeMember', selected.value.name, {})
     if (ctx.boot.value) ctx.boot.value.team = payload.team
     await loadMember(selected.value.name)
   } finally {
@@ -137,10 +131,7 @@ async function shutdownMember() {
   if (!selected.value) return
   loading.value = true
   try {
-    const payload = await core<{ result: string; team: TeamPayload }>(
-      'team.shutdownMember',
-      selected.value.name,
-    )
+    const payload = await core('team.shutdownMember', selected.value.name)
     if (ctx.boot.value) ctx.boot.value.team = payload.team
     await loadMember(selected.value.name)
   } finally {

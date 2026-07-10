@@ -71,10 +71,12 @@ describe('diagnostics panel model', () => {
       activeTasks: [
         {
           id: 'task_1',
-          kind: 'chat',
-          status: 'running',
-          title: 'Visual task',
-          source: 'runtime',
+          kind: 'turn',
+          label: 'Visual task',
+          turn_id: 'turn_1',
+          session_id: 'session_1',
+          job_id: null,
+          cancelled: false,
         },
       ],
       desktopPet: {

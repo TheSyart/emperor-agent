@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -166,6 +167,58 @@ describe('TaskManager and SidechainTranscript (test_task_runtime_api.py)', () =>
     expect(payload.messages.map((m) => m.content)).toEqual(['a', 'b'])
     expect(payload.path).toBe(transcript.path)
   })
+
+  it('keeps sidechain transcript paths inside the task directory', () => {
+    const root = tmp('emperor-sidechain-boundary-')
+
+    for (const taskId of [
+      '../escape',
+      '..',
+      '.',
+      'nested/task',
+      'nested\\task',
+    ]) {
+      expect(() => new SidechainTranscript(root, taskId)).toThrow(
+        /invalid task id|outside task directory/i,
+      )
+    }
+  })
+
+  it('rejects a sidechain task directory symlink that escapes tasks', () => {
+    const root = tmp('emperor-sidechain-symlink-')
+    const outside = tmp('emperor-sidechain-outside-')
+    mkdirSync(join(root, 'tasks'), { recursive: true })
+    writeFileSync(join(outside, 'transcript.jsonl'), '{"secret":true}\n')
+    symlinkSync(
+      outside,
+      join(root, 'tasks', 'task_link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    const transcript = new SidechainTranscript(root, 'task_link')
+    expect(() => transcript.read()).toThrow(/symlink|outside task directory/i)
+    expect(() =>
+      transcript.append({ role: 'user', content: 'escape' }),
+    ).toThrow(/symlink|outside task directory/i)
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a sidechain transcript file symlink that escapes tasks',
+    () => {
+      const root = tmp('emperor-sidechain-file-symlink-')
+      const outside = join(tmp('emperor-sidechain-file-outside-'), 'secret')
+      const taskRoot = join(root, 'tasks', 'task_link')
+      mkdirSync(taskRoot, { recursive: true })
+      writeFileSync(outside, '{"secret":true}\n')
+      symlinkSync(outside, join(taskRoot, 'transcript.jsonl'), 'file')
+
+      const transcript = new SidechainTranscript(root, 'task_link')
+      expect(() => transcript.read()).toThrow(/symlink|outside task directory/i)
+      expect(() =>
+        transcript.append({ role: 'user', content: 'escape' }),
+      ).toThrow(/symlink|outside task directory/i)
+    },
+  )
 })
 
 describe('ProjectStore (test_project_store.py)', () => {

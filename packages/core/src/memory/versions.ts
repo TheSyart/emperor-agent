@@ -35,6 +35,25 @@ export interface MemoryVersion {
   bytes: number
 }
 
+export interface MemoryVersionDetail {
+  version: MemoryVersion
+  content: string
+  currentContent: string
+  diff: string
+}
+
+export interface MemoryVersionRestore {
+  version: MemoryVersion
+  path: string
+  content: string
+}
+
+export interface MemoryVersionsPayload {
+  versions: MemoryVersion[]
+  count: number
+  path: string
+}
+
 export function memoryVersionFromDict(
   raw: Record<string, unknown>,
 ): MemoryVersion {
@@ -62,7 +81,7 @@ function isMemoryVersionTarget(value: string): value is MemoryVersionTarget {
   )
 }
 
-export function memoryVersionToDict(v: MemoryVersion): Record<string, unknown> {
+export function memoryVersionToDict(v: MemoryVersion): MemoryVersion {
   return {
     id: v.id,
     target: v.target,
@@ -155,7 +174,7 @@ export class MemoryVersionStore {
     return currentCount + 1
   }
 
-  detail(versionId: string): Record<string, unknown> {
+  detail(versionId: string): MemoryVersionDetail {
     const [version, content] = this.readSnapshot(versionId)
     const current = this.currentContent(version.relPath)
     const diff = unifiedDiff(
@@ -172,7 +191,7 @@ export class MemoryVersionStore {
     }
   }
 
-  restore(versionId: string): Record<string, unknown> {
+  restore(versionId: string): MemoryVersionRestore {
     const [version, content] = this.readSnapshot(versionId)
     const target = this.resolveRel(version.relPath)
     const resolvedTarget = this.targetForPath(target)
@@ -193,7 +212,7 @@ export class MemoryVersionStore {
     }
   }
 
-  payload(opts?: { limit?: number }): Record<string, unknown> {
+  payload(opts?: { limit?: number }): MemoryVersionsPayload {
     const allItems = this.loadIndex()
     return {
       versions: allItems

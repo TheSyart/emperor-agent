@@ -176,6 +176,8 @@ export class MemoryStore {
         item.seq = Math.trunc(Number(r.seq))
       if (typeof r.turn_id === 'string') item.turn_id = r.turn_id
       if (Array.isArray(r.attachments)) item.attachments = r.attachments
+      if (Array.isArray(r.requestedSkills))
+        item.requestedSkills = r.requestedSkills
       if (typeof r.displayContent === 'string')
         item.displayContent = r.displayContent
       out.push(item)

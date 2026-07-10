@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { coreOperationKeys, registerCoreHostIpc } from './core-host'
+import type { CoreApiLike } from './ipc'
 
 describe('desktop CoreApi host (MIG-IPC-002)', () => {
   it('registers every CoreApi operation on the Electron IPC boundary', () => {
     const ipc = new FakeIpcMain()
-    registerCoreHostIpc(ipc, { bootstrap: () => ({ app: 'Emperor Agent' }) })
+    registerCoreHostIpc(ipc, {
+      bootstrap: async () => ({ app: 'Emperor Agent' }),
+    } as unknown as CoreApiLike)
 
     expect(coreOperationKeys()).toContain('bootstrap')
     expect(coreOperationKeys()).toContain('control.answerInteraction')

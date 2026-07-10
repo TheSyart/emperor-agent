@@ -4,6 +4,8 @@
  * subagents、scheduler、Team、control 和 routed AgentRunner。
  */
 import { randomUUID } from 'node:crypto'
+import { buildUserContent, refToJson } from '../attachments/encode'
+import { AttachmentStore } from '../attachments/store'
 import {
   existsSync,
   mkdirSync,
@@ -180,6 +182,8 @@ export interface RunUserTurnOptions {
   taskId?: string | null
   useActiveTask?: boolean
   memoryExtra?: Record<string, unknown> | null
+  attachmentIds?: string[] | null
+  requestedSkills?: Array<{ name: string; source?: string }> | null
 }
 
 export interface CompactionHookScope {
@@ -754,6 +758,32 @@ export class AgentLoop {
       typeof promptDecision.updatedInput.content === 'string'
         ? promptDecision.updatedInput.content
         : content
+    const attachmentIds = [...new Set(opts.attachmentIds ?? [])]
+      .map((id) => String(id).trim())
+      .filter(Boolean)
+    const attachmentStore = new AttachmentStore(this.paths.stateRoot)
+    const attachmentPayloads = attachmentIds
+      .map((id) => attachmentStore.get(id))
+      .filter((ref) => ref !== null)
+      .map((ref) => refToJson(ref))
+    const modelContent = buildUserContent(
+      updatedPrompt,
+      attachmentIds,
+      attachmentStore,
+      {
+        supportsVision:
+          this.modelRouter.route('main_agent').snapshot.supportsVision,
+      },
+    )
+    const persistedContent = buildUserContent(
+      updatedPrompt,
+      attachmentIds,
+      attachmentStore,
+      { supportsVision: false },
+    )
+    const requestedSkillContext = this.requestedSkillContext(
+      opts.requestedSkills ?? [],
+    )
     this.appendLifecycleHookContext(
       history,
       memoryStore,
@@ -761,17 +791,45 @@ export class AgentLoop {
       'UserPromptSubmit',
       turnId,
     )
+    if (requestedSkillContext) {
+      const content = `[Requested Skill Context]\n${requestedSkillContext.content}`
+      history.push({
+        role: 'system',
+        content,
+        turn_id: turnId,
+        ui_hidden: true,
+      })
+      memoryStore.appendHistory('system', content, {
+        extra: {
+          turn_id: turnId,
+          ui_hidden: true,
+          requestedSkills: requestedSkillContext.names.map((name) => ({
+            name,
+            source: 'explicit',
+          })),
+        },
+      })
+    }
     const displayContent = opts.displayContent ?? content
-    const userMessage: Msg = { role: 'user', content: updatedPrompt }
+    const userMessage: Msg = { role: 'user', content: modelContent }
     if (turnId) userMessage.turn_id = turnId
-    if (displayContent !== updatedPrompt)
+    if (attachmentPayloads.length) userMessage.attachments = attachmentPayloads
+    if (displayContent !== updatedPrompt || attachmentPayloads.length)
       userMessage.displayContent = displayContent
     history.push(userMessage)
-    memoryStore.appendHistory('user', updatedPrompt, {
+    memoryStore.appendHistory('user', persistedContent, {
       extra: {
         ...(opts.memoryExtra ?? {}),
         turn_id: turnId,
-        ...(displayContent !== updatedPrompt ? { displayContent } : {}),
+        ...(attachmentPayloads.length
+          ? { attachments: attachmentPayloads }
+          : {}),
+        ...(opts.requestedSkills?.length
+          ? { requestedSkills: opts.requestedSkills }
+          : {}),
+        ...(displayContent !== updatedPrompt || attachmentPayloads.length
+          ? { displayContent }
+          : {}),
         ...(opts.source ? { source: opts.source } : {}),
       },
     })
@@ -787,7 +845,8 @@ export class AgentLoop {
     await this.emit(
       runtimeEvents.userMessage({
         content: displayContent,
-        attachments: [],
+        attachments: attachmentPayloads,
+        requestedSkills: opts.requestedSkills ?? [],
         clientMessageId: opts.clientMessageId ?? turnId,
         source: opts.source ?? null,
         scheduler: opts.scheduler ?? null,
@@ -1297,6 +1356,30 @@ export class AgentLoop {
     memoryStore.appendHistory('system', content, {
       extra: { turn_id: turnId, ui_hidden: true, hook_event_name: eventName },
     })
+  }
+
+  private requestedSkillContext(
+    requestedSkills: Array<{ name: string; source?: string }>,
+  ): { names: string[]; content: string } | null {
+    const names = [
+      ...new Set(
+        requestedSkills.map((skill) => {
+          const raw = String(skill.name ?? '').trim()
+          const safe = safeSkillName(raw)
+          if (!safe || safe !== raw)
+            throw new RequestedSkillUnavailableError(raw || '(empty)')
+          return safe
+        }),
+      ),
+    ]
+    if (!names.length) return null
+    for (const name of names) {
+      if (!this.skillsLoader.getContent(name))
+        throw new RequestedSkillUnavailableError(name)
+    }
+    const content = this.skillsLoader.loadSkillsForContext(names).trim()
+    if (!content) throw new RequestedSkillUnavailableError(names.join(', '))
+    return { names, content }
   }
 
   private workspaceRootForSession(
@@ -1841,6 +1924,8 @@ function activeSessionHistoryAfterSeq(
       item.seq = Math.trunc(Number(row.seq))
     if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
     if (Array.isArray(row.attachments)) item.attachments = row.attachments
+    if (Array.isArray(row.requestedSkills))
+      item.requestedSkills = row.requestedSkills
     if (typeof row.displayContent === 'string')
       item.displayContent = row.displayContent
     out.push(item)
@@ -1851,4 +1936,21 @@ function activeSessionHistoryAfterSeq(
 function safeSkillName(name: string): string {
   const safe = String(name || '').trim()
   return /^[A-Za-z0-9_.-]+$/.test(safe) ? safe : ''
+}
+
+class RequestedSkillUnavailableError extends Error {
+  readonly code = 'requested_skill_unavailable'
+
+  constructor(readonly skillName: string) {
+    super(`Requested skill is unavailable: ${skillName}`)
+    this.name = 'RequestedSkillUnavailableError'
+  }
+
+  toSafe(): { code: string; message: string; action: string } {
+    return {
+      code: this.code,
+      message: `请求的 Skill 不可用：${this.skillName}`,
+      action: 'refresh_skills',
+    }
+  }
 }

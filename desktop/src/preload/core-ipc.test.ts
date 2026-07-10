@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createCoreBridge } from './core-ipc'
+import { createCoreBridge, type CoreBridge } from './core-ipc'
 
 describe('preload core IPC bridge (MIG-IPC-002)', () => {
   it('invokes namespaced CoreApi channels by operation key', async () => {
@@ -19,3 +19,18 @@ describe('preload core IPC bridge (MIG-IPC-002)', () => {
     ])
   })
 })
+
+declare const typedBridge: CoreBridge
+
+function _assertCoreBridgeTypes(): void {
+  void typedBridge.invokeCore('sessions.rename', 's1', { title: 'Typed' })
+
+  // @ts-expect-error operation keys are closed
+  void typedBridge.invokeCore('missing.operation')
+
+  // @ts-expect-error sessions.rename requires its patch argument
+  void typedBridge.invokeCore('sessions.rename', 's1')
+
+  // @ts-expect-error desktopPet.setEnabled requires a boolean
+  void typedBridge.invokeCore('desktopPet.setEnabled', 'true')
+}

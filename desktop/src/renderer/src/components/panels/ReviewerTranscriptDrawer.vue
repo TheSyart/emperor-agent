@@ -5,10 +5,6 @@ import { core } from '../../api/http'
 const props = defineProps<{ open: boolean; taskId: string }>()
 const emit = defineEmits<{ 'update:open': [boolean] }>()
 
-interface TranscriptResponse {
-  transcript?: { messages?: Array<Record<string, unknown>> }
-}
-
 const messages = ref<Array<Record<string, unknown>>>([])
 const loading = ref(false)
 const error = ref('')
@@ -18,12 +14,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await core<TranscriptResponse>(
-      'tasks.transcript',
-      props.taskId,
-      { limit: 200 },
-    )
-    messages.value = data?.transcript?.messages || []
+    const data = await core('tasks.transcript', props.taskId, { limit: 200 })
+    messages.value = data.messages
   } catch (e) {
     error.value = String(e)
   } finally {
