@@ -28,6 +28,7 @@ describe('Environment domain schemas', () => {
         declarationSource: null,
         status: 'ready',
         detectedVersion: '2.50.1',
+        versionSummary: 'git version 2.50.1',
         requiredVersion: '>=2.40.0',
         executablePath: '/usr/bin/git',
         installStrategy: null,

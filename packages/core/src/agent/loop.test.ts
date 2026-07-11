@@ -16,6 +16,7 @@ import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { AgentLoop } from './loop'
 import { CancelledTaskError } from '../runtime/active'
 import { CompactionCursorStore } from '../memory/compaction-ledger'
+import { EnvironmentProbe } from '../environment/probe'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -100,6 +101,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       'emperor-environment-tools',
     )
     expect(Object.isFrozen(loop.environmentCatalog.catalog)).toBe(true)
+    expect(loop.environmentProbe).toBeInstanceOf(EnvironmentProbe)
     expect(loop.activeSessionId).toBeTruthy()
     expect(provider.calls).toHaveLength(2)
     expect(JSON.stringify(provider.calls[1]!.messages)).toContain(

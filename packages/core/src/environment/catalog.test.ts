@@ -26,9 +26,7 @@ function fixture(): Record<string, unknown> {
         version: { pinned: '2.50.1', requirement: '>=2.40.0' },
         licenseId: 'git-license',
         dependencies: [],
-        targets: [
-          { platform: 'darwin', arch: 'arm64' },
-        ],
+        targets: [{ platform: 'darwin', arch: 'arm64' }],
         probe: {
           executables: ['git'],
           args: ['--version'],
@@ -125,13 +123,14 @@ describe('signed ToolCatalog', () => {
 
     const launcher = fixture()
     const launcherStrategy = (
-      (launcher.tools as Array<Record<string, unknown>>)[0]!.strategies as Array<
-        Record<string, unknown>
-      >
+      (launcher.tools as Array<Record<string, unknown>>)[0]!
+        .strategies as Array<Record<string, unknown>>
     )[0]!
     launcherStrategy.executable = '/usr/bin/env'
     launcherStrategy.args = ['sh', '-c', 'touch /tmp/catalog-bypass']
-    expect(() => parseToolCatalog(launcher)).toThrow(/command|executable|shell/i)
+    expect(() => parseToolCatalog(launcher)).toThrow(
+      /command|executable|shell/i,
+    )
   })
 
   it('requires exact pinned versions, parseable ranges, and nonblank publishers', () => {
@@ -190,7 +189,9 @@ describe('signed ToolCatalog', () => {
 
   it('rejects ambiguous relations and uncovered targets', () => {
     const duplicateDependency = fixture()
-    const git = (duplicateDependency.tools as Array<Record<string, unknown>>)[0]!
+    const git = (
+      duplicateDependency.tools as Array<Record<string, unknown>>
+    )[0]!
     const ripgrep = structuredClone(git)
     ripgrep.id = 'ripgrep'
     ripgrep.displayName = 'ripgrep'
@@ -209,9 +210,9 @@ describe('signed ToolCatalog', () => {
     expect(() => parseToolCatalog(uncovered)).toThrow(/target_uncovered/i)
 
     const incompatibleDependency = fixture()
-    ;(incompatibleDependency.tools as Array<Record<string, unknown>>)[0]!.targets = [
-      { platform: 'darwin', arch: 'arm64' },
-    ]
+    ;(
+      incompatibleDependency.tools as Array<Record<string, unknown>>
+    )[0]!.targets = [{ platform: 'darwin', arch: 'arm64' }]
     const dependent = structuredClone(
       (incompatibleDependency.tools as Array<Record<string, unknown>>)[0]!,
     )

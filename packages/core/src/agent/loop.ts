@@ -71,6 +71,7 @@ import {
   loadBundledToolCatalog,
   type LoadedToolCatalog,
 } from '../environment/catalog'
+import { EnvironmentProbe } from '../environment/probe'
 import {
   migrateLegacyStateRoot,
   type LegacyStateMigrationResult,
@@ -226,6 +227,7 @@ export class AgentLoop {
   readonly tokenTracker: TokenTracker
   readonly hookService: HookService
   readonly environmentCatalog: LoadedToolCatalog
+  readonly environmentProbe: EnvironmentProbe
   readonly taskManager: TaskManager
   readonly projectStore: ProjectStore
   readonly controlManager: ControlManager
@@ -285,6 +287,10 @@ export class AgentLoop {
     this.sessionStore = new SessionStore(this.paths.stateRoot)
     this.tokenTracker = new TokenTracker(this.paths.tokensFile)
     this.environmentCatalog = loadBundledToolCatalog()
+    this.environmentProbe = new EnvironmentProbe({
+      catalog: () => this.environmentCatalog,
+      env: () => process.env,
+    })
     this.hookService = new HookService({
       stateRoot: this.paths.stateRoot,
       modelRouter: {

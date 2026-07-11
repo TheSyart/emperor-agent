@@ -9,6 +9,7 @@ import {
   sha256Schema,
   stableEnvironmentHash,
 } from './models'
+import { versionSatisfies } from './version'
 
 const safeExecutableSchema = z
   .string()
@@ -462,13 +463,7 @@ const ALLOWED_PROBE_COMMANDS = new Set([
 ])
 
 const ALLOWED_STRATEGY_COMMANDS = new Set([
-  commandKey('rustup', [
-    'component',
-    'add',
-    'cargo',
-    '--toolchain',
-    '1.97.0',
-  ]),
+  commandKey('rustup', ['component', 'add', 'cargo', '--toolchain', '1.97.0']),
   commandKey('brew', ['install', 'git']),
   commandKey('winget.exe', ['install', '--exact', '--id', 'Git.Git']),
   commandKey('pkexec', ['apt-get', 'install', '-y', 'git']),
@@ -518,44 +513,6 @@ function isValidVersionRequirement(value: string): boolean {
     tokens.length > 0 &&
     tokens.every((token) => /^(?:<=|>=|<|>|=)?\d+(?:\.\d+){2,3}$/.test(token))
   )
-}
-
-function versionSatisfies(version: string, requirement: string): boolean {
-  const actual = parseNumericVersion(version)
-  if (!actual || !isValidVersionRequirement(requirement)) return false
-  return requirement.split(/\s+/).every((token) => {
-    const match = /^(<=|>=|<|>|=)?(\d+(?:\.\d+){2,3})$/.exec(token)
-    if (!match) return false
-    const expected = parseNumericVersion(match[2]!)
-    if (!expected) return false
-    const comparison = compareNumericVersions(actual, expected)
-    switch (match[1] ?? '=') {
-      case '<':
-        return comparison < 0
-      case '<=':
-        return comparison <= 0
-      case '>':
-        return comparison > 0
-      case '>=':
-        return comparison >= 0
-      default:
-        return comparison === 0
-    }
-  })
-}
-
-function parseNumericVersion(value: string): number[] | null {
-  if (!/^\d+(?:\.\d+){2,3}$/.test(value)) return null
-  return value.split('.').map(Number)
-}
-
-function compareNumericVersions(left: number[], right: number[]): number {
-  const length = Math.max(left.length, right.length)
-  for (let index = 0; index < length; index += 1) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0)
-    if (difference !== 0) return Math.sign(difference)
-  }
-  return 0
 }
 
 function compilesRegex(value: string): boolean {

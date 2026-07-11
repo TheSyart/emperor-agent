@@ -84,6 +84,7 @@ export const environmentToolStateSchema = z
     declarationSource: z.string().max(1_000).nullable(),
     status: environmentToolStatusSchema,
     detectedVersion: z.string().max(128).nullable(),
+    versionSummary: z.string().max(512).nullable(),
     requiredVersion: z.string().max(128).nullable(),
     executablePath: z.string().max(4_096).nullable(),
     installStrategy: environmentIdSchema.nullable(),

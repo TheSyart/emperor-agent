@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T09:31:13+08:00",
+  "updated_at": "2026-07-11T10:44:50+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
-  "completed": 7,
-  "rounds": 7,
+  "completed": 8,
+  "rounds": 8,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -59,11 +59,11 @@
       "notes": "Round 7 completed from clean commit caa85302 with strict TDD and four review passes. Core now exposes strict Zod environment tool/state/plan/job/receipt/log schemas, 20 stable Chinese error descriptors with bound recovery actions, fixed internal-error redaction, and a packaged immutable 12-tool ToolCatalog that validates before AgentLoop state writes. Catalog validation fails closed on schema drift, unsupported targets, duplicate/cyclic/platform-incompatible dependencies, uncovered targets, unsafe/public-network inputs, missing digest/publisher, nonconcrete or unsatisfied versions, and any probe/install command outside exact static allowlists. Official metadata locked Git 2.55.0, ripgrep 15.1.0, Volta 2.0.2, Node 24.18.0, npm 12.0.1, uv 0.11.28, Python 3.12.13, Go 1.26.5, Rust/Cargo 1.97.0, rustup 1.29.0 and MSVC 17.14.37411.7; golden revision is dc95b1f423e1b8ccde50c66c06fa172f9226b95be7f15e10799ac2a4fefc7ffe. EnvironmentStore provides strict atomic JSON, Windows backup recovery, same-path read/write serialization, corruption isolation, symlinked-directory rejection, paged JSONL and conservative HOME/user/header/cookie/token/CLI credential redaction. Final independent review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 92 files / 765 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks and migration parity; final Electron production build passed. Probe execution remains intentionally deferred to ENV-PROBE-008."
     },
     "ENV-PROBE-008": {
-      "status": "pending",
+      "status": "done",
       "title": "实现无 shell 探测和项目识别",
       "depends_on": ["ENV-FND-007"],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 8 completed from clean commit e11ee9dc with strict TDD and two review passes. Core now provides a long-lived EnvironmentProbe, a shell-free bounded process runner, deterministic macOS/Linux/Windows PATH construction with Volta precedence and fixed Windows registry queries, canonical executable resolution, strict numeric version/range parsing, root-only Node/Python/Go/Rust declaration detection via structured JSON/TOML parsing, stable project fingerprints, Skill bin/runtime/env evaluation, dependency closure, bounded-concurrency probing and immutable validated status snapshots. Cache keys cover project/catalog/platform/PATH/Skill/env-presence changes; refresh, project switch, cancellation and explicit invalidation fail closed without caching partial results. Diagnostics and version summaries are bounded and do not expose project JSON fragments, environment secrets or full subprocess output. Initial review found two Important issues: Go/Cargo minimum declarations were treated as exact, and inherited PATH could outrank Volta; both were fixed with >= semantics, toolchain exact preservation and three-platform Volta-first PATH tests. Final review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 97 files / 792 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks, migration parity and production build. The first sandboxed make check attempt failed only because loopback listeners were denied with EPERM; the required unsandboxed rerun passed. Execution-environment snapshot wiring remains intentionally deferred to ENV-SNAP-009."
     },
     "ENV-SNAP-009": {
       "status": "pending",

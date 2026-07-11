@@ -14,9 +14,9 @@ describe('Environment safe errors', () => {
       const descriptor = environmentErrorDescriptor(code)
       expect(descriptor.message).toMatch(/[\u4e00-\u9fff]/)
       expect(descriptor.action).toMatch(/^[a-z][a-z0-9_]+$/)
-      expect(
-        environmentSafeErrorSchema.parse({ code, ...descriptor }),
-      ).toEqual({ code, ...descriptor })
+      expect(environmentSafeErrorSchema.parse({ code, ...descriptor })).toEqual(
+        { code, ...descriptor },
+      )
     }
   })
 
