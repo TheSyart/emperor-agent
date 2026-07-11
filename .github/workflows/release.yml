@@ -6,64 +6,71 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  package:
-    name: package (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+  macos-candidate:
+    name: macOS candidate (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            target: mac
-            artifact_glob: |
-              desktop/dist/*.dmg
-              desktop/dist/*.zip
-          - os: ubuntu-latest
-            target: linux
-            artifact_glob: 'desktop/dist/*.AppImage'
-          - os: windows-latest
-            target: win
-            artifact_glob: 'desktop/dist/*.exe'
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      EMPEROR_RELEASE_TARGET: mac
+      ELECTRON_ARCH: ${{ matrix.arch }}
+      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-            desktop-pet/package-lock.json
-      - name: Install core dependencies
-        run: npm ci
-      - name: Install desktop dependencies
-        working-directory: desktop
-        run: npm ci
-      - name: Install desktop pet dependencies
-        working-directory: desktop-pet
-        run: npm ci
-      - name: Core tests
-        run: npm test --workspace @emperor/core
-      - name: Core typecheck
-        run: npm run typecheck --workspace @emperor/core
-      - name: Desktop tests
-        working-directory: desktop
-        run: npm run test
-      - name: Desktop typecheck
-        working-directory: desktop
-        run: npm run typecheck
-      - name: Desktop pet tests
-        working-directory: desktop-pet
-        run: npm test
-      - name: Build package
-        working-directory: desktop
-        run: npm run dist:${{ matrix.target }}
-      - name: Publish GitHub Release artifacts
-        uses: softprops/action-gh-release@v2
+      - name: Require Apple signing and notarization credentials
+        shell: bash
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required macOS release credential: $name" >&2
+              exit 1
+            fi
+          done
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode >"$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >>"$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Quality gate
+        run: make check
+      - name: Build signed and notarized candidate
+        run: scripts/build_desktop_release.sh
+      - name: Verify signature, notarization, DMG and smoke
+        run: scripts/verify-macos-release.sh "${{ matrix.arch }}"
+      - name: Upload macOS candidate
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ matrix.artifact_glob }}
+          name: macos-${{ matrix.arch }}-candidate
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/SHA256SUMS-macos-${{ matrix.arch }}.txt
+            desktop/dist/packaged-smoke/darwin-${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 7

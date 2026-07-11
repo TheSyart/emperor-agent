@@ -22,5 +22,9 @@ rm -rf "$ROOT/desktop/dist"
 
 (
   cd "$ROOT/desktop"
-  npx electron-builder --mac dmg zip "--$ELECTRON_ARCH" --publish never
+  EMPEROR_RELEASE_TARGET=mac npx electron-builder \
+    --config electron-builder.release.cjs \
+    --mac dmg zip \
+    "--$ELECTRON_ARCH" \
+    --publish never
 )

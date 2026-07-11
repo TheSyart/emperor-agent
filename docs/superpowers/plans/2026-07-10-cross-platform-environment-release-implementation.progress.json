@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T20:45:51+08:00",
+  "updated_at": "2026-07-11T20:55:07+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
   "completed": 17,
-  "rounds": 17,
+  "rounds": 18,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -134,11 +134,11 @@
       "notes": "Round 17 completed from clean commit 3b04bf20 with strict TDD and real unpacked-app verification. RED first proved the packaged-smoke module, package scripts, ASAR/resource validator and node_modules exclusion were absent; the first real package:verify then correctly failed because electron-builder still auto-included production dependencies despite the files exclusion. GREEN moves fully bundled Desktop/Core libraries to build-time dependencies, leaves the ASAR with only out/ and a minimal package.json, and validates required main/preload/renderer entries, forbidden node_modules/source/tests/fixtures/Python/catalog paths, development-machine absolute paths and the exact six-file embedded desktop-pet allowlist during afterPack. Runtime defaults now package only templates, skill-creator, config examples and desktop-pet assets; generated README artwork is no longer duplicated. A fixed --emperor-packaged-smoke main-process mode creates no BrowserWindow or dialog, initializes the signed CoreApi, requires exactly skill-creator, runs bootstrap/diagnostics/environment plus Node-native Glob/Grep in a temporary workspace, verifies install job count remains zero, closes Core cleanly and atomically writes a bounded receipt without HOME, username or PATH. The cross-platform runner uses an absolute packaged executable, shell:false, a minimal environment and empty PATH; Linux adds explicit Chromium/Ozone headless flags, and CI now runs package:verify on macOS/Windows/Ubuntu. The actual unsigned macOS arm64 unpacked app passed repeatedly with app.asar reduced from about 99 MiB to 8.4 MiB and runtime-defaults from about 13 MiB to 208 KiB; its receipt records runtime revision 649627454f7efd78edda25da76e8a6539b3b092ed35e0e09fab5ec998474353b, manifest hash fb4fa52b83927f083a72df20ba07acfc866eec4e42d4484085f76328897792ba, all five operations green, zero install jobs and exit code 0. Final make check passed Core 107 files / 900 tests and Desktop 64 files / 290 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. macOS signing remains intentionally deferred to REL-MAC-018 because no valid Developer ID identity is available."
     },
     "REL-MAC-018": {
-      "status": "pending",
+      "status": "blocked",
       "title": "macOS 双架构签名、公证与安装验收",
       "depends_on": ["PKG-017"],
-      "attempts": 0,
-      "notes": "External completion dependency: Developer ID Application and App Store Connect API credentials."
+      "attempts": 1,
+      "notes": "Round 18 implemented the complete macOS trusted-candidate path but cannot truthfully sign it off without external Apple credentials. A dedicated electron-builder.release.cjs extends the unsigned base config and hard-enables forceCodeSigning, Hardened Runtime, macOS 14.0 minimum, notarization and explicit main/helper entitlements. The entitlements contain only Electron JIT/unsigned-executable-memory allowances and no App Sandbox, DYLD or library-validation bypass. release.yml now uses macos-15 arm64 and macos-15-intel x64, requires Developer ID P12 plus App Store Connect API-key credentials, decodes the .p8 to a restricted temporary file, runs make check, builds candidates without publishing and uploads only seven-day candidate artifacts. verify-macos-release.sh checks exact Developer ID authority and TeamIdentifier, codesign deep/strict, Gatekeeper, stapled notarization, Mach-O architecture, read-only DMG mount, the mounted app's signature/ticket, minimal-PATH packaged smoke and SHA-256 for DMG/ZIP. Static RED/GREEN tests and plist/bash syntax checks passed; final make check passed Core 107 files / 900 tests and Desktop 65 files / 294 tests. A real local release-config build with CSC discovery disabled failed at the signing phase exactly as required, proving unsigned formal output is rejected. Final codesign/spctl/stapler/DMG receipts remain externally blocked until Developer ID Application, MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER and APPLE_TEAM_ID are provisioned; the task must not be marked done before both GitHub macOS runners pass."
     },
     "REL-WIN-019": {
       "status": "pending",
