@@ -5,12 +5,12 @@
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-11T21:33:00+08:00",
+  "updated_at": "2026-07-11T22:09:01+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
   "total_tasks": 22,
   "completed": 17,
-  "rounds": 20,
+  "rounds": 23,
   "planning_receipt": {
     "status": "executing",
     "implementation_started": true,
@@ -238,31 +238,31 @@
       "attempts": 1,
       "started_at": "2026-07-11T21:22:00+08:00",
       "completed_at": null,
-      "commit": null,
+      "commit": "6b692d54",
       "receipt": null,
       "notes": "Trusted Linux config, Ubuntu 22.04 build job, Ubuntu 22.04/24.04 smoke matrix and fail-closed DEB/AppImage verifier are implemented. A real macOS cross-build produced valid x86-64 ELF AppImage and Debian package after RED exposed missing homepage metadata and inconsistent architecture names. Focused 15/15 tests, bash syntax and make check passed. Final completion remains blocked until both Ubuntu runners upload AppImage and DEB install/smoke/remove receipts."
     },
     "REL-AGG-021": {
-      "status": "pending",
+      "status": "blocked",
       "title": "供应链证明与原子 Release 发布",
       "depends_on": ["REL-MAC-018", "REL-WIN-019", "REL-LNX-020"],
-      "attempts": 0,
-      "started_at": null,
+      "attempts": 1,
+      "started_at": "2026-07-11T21:41:00+08:00",
       "completed_at": null,
-      "commit": null,
+      "commit": "33c3db6e",
       "receipt": null,
-      "notes": ""
+      "notes": "Structured platform receipts, fail-closed bundle assembly, complete Core+Desktop CycloneDX SBOM merging, GitHub provenance/SBOM attestations, draft-first atomic publication and the isolated unsigned internal workflow are implemented in 33c3db6e. Focused 19/19 tests, real dual-lockfile SBOM generation/merge, YAML/script syntax and make check (Core 900, Desktop 309) passed. Final completion remains blocked until signed macOS/Windows candidates and Ubuntu 22.04/24.04 lifecycle receipts allow the aggregate and publish jobs to run."
     },
     "QA-022": {
-      "status": "pending",
+      "status": "blocked",
       "title": "最终安全回归、receipt 与文档签收",
       "depends_on": ["REL-AGG-021"],
-      "attempts": 0,
-      "started_at": null,
+      "attempts": 1,
+      "started_at": "2026-07-11T22:03:10+08:00",
       "completed_at": null,
-      "commit": null,
+      "commit": "932fe41a",
       "receipt": null,
-      "notes": ""
+      "notes": "README, AGENTS, migration status, trusted Release runbook and ToolCatalog review checklist are synchronized in 932fe41a. Fresh make check passed Core 900/Desktop 309 with format, parity, test typecheck, zero-warning lint and production build; Playwright screenshots passed 33/33 including diagnostics environment, Skill install, model picker, scroll and Hooks flows. QA remains blocked because signed macOS/Windows receipts, Ubuntu 22.04/24.04 lifecycle receipts, aggregate attestations and a published Release receipt do not yet exist; checker correctly remains 17/22 rather than falsely reporting completion."
     }
   }
 }
