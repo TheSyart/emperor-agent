@@ -1,14 +1,18 @@
 # PLAN-EA-XPLAT-002 · 跨平台环境配置与可信 Release 实施计划
 
 > **Version**: v2.0
-> **Date**: 2026-07-10
-> **Status**: planning
+> **Date**: 2026-07-11
+> **Status**: approved, not started
 > **Owner**: Emperor Agent maintainers
+> **Depends On**: `PLAN-EA-XPLAT-002` v2.0 design approval
+> **Depended By**: first trusted cross-platform Emperor Agent release
 > **Design**: `docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md`
 > **Progress**: `docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.progress.json`
 > **Checker**: `docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.check_progress.py`
 
 > **Execution rule**: 使用 `superpowers:executing-plans` 或 `superpowers:subagent-driven-development`。一次只执行一个未阻塞任务；行为改动必须先写测试并确认 RED，再实现并确认 GREEN。任务未通过专属验收和相关全局门禁时不得标记 `done`。
+
+> **Planning-only receipt**: 本文件及配套 progress/checker 的创建不执行任何任务。初始状态固定为 22/22 `pending`；既有文件或历史 commit 只有通过相应任务的测试、验收和 receipt 后才能签收。
 
 ## 1. Overview
 
@@ -126,6 +130,22 @@ For every task:
 9. Commit code, tests and progress update together. Platform adapter tasks may use separate branches but must merge only after independent verification.
 
 Configuration-only tasks use a failing check instead of code-level RED. Formal Release tasks can remain `blocked` only for documented external credentials; code and unsigned internal verification must still be completed first.
+
+### 4.1 Task Specification Contract
+
+下列 22 项任务均按同一 12 字段契约执行：标题、Purpose/Scope/Excluded、Source Mapping、Target Specification、Detailed Design、Dependencies、Risk/Complexity、Test Plan、Acceptance Criteria、Effort、Status、Notes。为减少重复，任务段中的 `Purpose`、`Target`、`TDD Cases`、`Acceptance`、`Risk/Effort` 分别承载上述字段；未单列的通用约束由本节补足：
+
+- **Scope/Excluded**：任务只允许修改其 `Target` 和为满足测试必须同步的契约文件；后继任务负责的 UI、Release 或文档不得提前混入。
+- **Source Mapping**：执行前必须把 `Source` 展开到具体文件与 symbol，并写入 progress notes；如果仓库已出现候选实现，先将其作为审计输入，不自动视为 GREEN。
+- **Detailed Design**：以 v2.0 design 对应章节为唯一协议来源；数据结构、状态机、下载限制、签名规则和错误码不得在实现时弱化。
+- **Dependencies**：内部依赖以拓扑图和每项 `Depends On` 为准；npm、Node/Electron、系统签名服务和 GitHub runner 属于外部依赖，不改变内部拓扑。
+- **Test Plan**：每组 `TDD Cases` 至少包含 3 个正常场景、3 个边界场景和 2 个错误场景。先记录窄范围 RED 命令和失败原因，再实现并记录 GREEN；配置任务使用结构断言或缺失凭据失败作为 RED。
+- **Status**：以 progress JSON 为唯一可写状态源，本文不直接记录完成度。初始均为 `pending`。
+- **Notes**：限制、外部凭据、receipt 路径、commit/PR 和偏差理由写入 progress；不得用自由文本覆盖未通过的验收项。
+
+### 4.2 Execution Baseline Rule
+
+`1.4 Current Baseline` 是 2026-07-10 规划审计快照，不是后续分支的实时状态。真正执行 `BASE-001` 时必须重新采集 `git status`、HEAD、测试数量、package smoke 和签名凭据状态；若仓库已有本计划的候选实现，执行者必须逐项复验，不得跳过 RED/GREEN 或直接批量把 progress 改为 `done`。
 
 ## 5. Task Specifications
 

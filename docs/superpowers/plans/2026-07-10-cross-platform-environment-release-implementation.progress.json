@@ -1,111 +1,175 @@
 {
+  "schema_version": 1,
   "plan_id": "PLAN-EA-XPLAT-002",
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
-  "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T20:55:07+08:00",
+  "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
+  "created_at": "2026-07-11T21:03:55+08:00",
+  "updated_at": "2026-07-11T21:07:00+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
+  "completed_at": null,
   "total_tasks": 22,
   "completed": 17,
-  "rounds": 18,
+  "rounds": 19,
+  "planning_receipt": {
+    "status": "executing",
+    "implementation_started": true,
+    "statement": "Candidate commits were re-audited with make check and packaged smoke before task status restoration."
+  },
   "tasks": {
     "BASE-001": {
       "status": "done",
       "title": "固定当前 Hooks/UI/桌宠基线",
       "depends_on": [],
       "attempts": 1,
-      "notes": "Baseline accepted on main. make check passed (Core 671, Desktop 272), Playwright passed 28/28 after aligning the four-mode contract, and macOS arm64 package:dir passed unsigned as expected."
+      "started_at": "2026-07-10T16:02:16+08:00",
+      "completed_at": "2026-07-10T16:04:35+08:00",
+      "commit": "e62b5c90",
+      "receipt": "Fresh make check on 2026-07-11: Core 900, Desktop 294, all typecheck/lint/build gates passed.",
+      "notes": "Baseline is isolated on codex/cross-platform-release-v2; no runtime-private files are tracked."
     },
     "GOV-002": {
       "status": "done",
       "title": "建立全仓格式化与零告警门禁",
       "depends_on": ["BASE-001"],
       "attempts": 2,
-      "notes": "Round 1 started on codex/cross-platform-release-v2. RED captured: `npm run format:check` failed with missing script, and Desktop typecheck file lists excluded `src/**/*.test.ts` plus `tests/visual/**/*.spec.ts` (`npm --prefix desktop exec tsc -- -p tsconfig.node.json --noEmit --listFilesOnly | rg 'desktop/(src/.+\\\\.(test|spec)\\\\.ts|tests/visual/.+\\\\.spec\\\\.ts)'` and `npm --prefix desktop exec vue-tsc -- --noEmit -p tsconfig.web.json --listFilesOnly | rg 'desktop/src/renderer/src/.+\\\\.(test|spec)\\\\.ts'` both exited 1). Baseline lint warnings observed: Core 1 warning, Desktop 14 warnings. GREEN on round 1: `npm --prefix desktop run typecheck:test`, `npm run lint --workspace @emperor/core`, `npm --prefix desktop run lint`, `npm run typecheck --workspace @emperor/core`, `npm --prefix desktop run typecheck`, `git diff --check`, plus Desktop test file-list evidence from `tsc --listFilesOnly` for renderer/main/preload/pet/tests/visual. Round 2: `npm run format` applied the repository-wide mechanical Prettier pass. Final GOV-002 verification after formatting: `npm run format:check`, `npm --prefix desktop run typecheck:test`, `npm run lint --workspace @emperor/core`, `npm --prefix desktop run lint`, `make check`, and `git diff --check`. Review-fix follow-up on the shared worktree kept completed/rounds unchanged: anchored root-only runtime ignores in `.prettierignore`, filtered deleted tracked paths in `scripts/run-prettier.mjs`, restored strict renderer test typecheck with real Vitest types plus `skipLibCheck` for the external `vitest`/`vite` lib conflict, removed the temporary Vitest any-shim, tightened `test-vue-shim` to `unknown`, repaired the 57 strict renderer diagnostics, restored `ModelPicker.vue` to an inline template event expression, and re-verified with `npm run format:check`, `npm --prefix desktop run typecheck:test`, `npm run lint --workspace @emperor/core`, `npm --prefix desktop run lint`, `make check`, and `git diff --check`. `make check` needed one rerun after an unrelated flaky `src/hooks/executor-v2.test.ts` timeout assertion; the immediate focused rerun and the subsequent full rerun both passed."
+      "started_at": null,
+      "completed_at": "2026-07-10T16:46:02+08:00",
+      "commit": "f5924e31,353c54ca,74ed1f19",
+      "receipt": "Fresh make check passed format, test typecheck and zero-warning lint gates.",
+      "notes": "Configuration and mechanical formatting remain separate commits."
     },
     "PORT-003": {
       "status": "done",
       "title": "用 Node 原生实现 Glob/Grep",
       "depends_on": ["GOV-002"],
       "attempts": 1,
-      "notes": "Round 3 completed with strict TDD. RED before production edits: `npm test --workspace @emperor/core -- src/tools/search.test.ts` exited 1 with 18 failed / 3 passed; failures proved recursive/filter/path/cancellation/symlink/limit gaps, and `$()` plus backtick injection canaries were created by the shell-backed implementation. GREEN: Node-native async opendir/lstat/realpath traversal, workspace-policy canonical symlink validation, Node RegExp streaming grep, binary/>2 MiB filtering, three output modes/context, POSIX paths, diagnostic errors, and 200-result caps; AgentLoop and Hook agent handler share `tools/search.ts`, while builtin keeps only a compatibility re-export and RunCommand's async exec. Initial focused verification passed 22/22 and Core passed 693 tests. Local security review then added a RED invariant test for canonical I/O and streaming byte enforcement, changed directory/file opens to validated real paths, and enforced the 2 MiB limit per chunk so concurrent growth cannot bypass it. Review-fix GREEN passed focused 23/23, Core 85 files / 694 tests, Core typecheck/lint, repository format check, and `git diff --check`. Packaged Electron 42.4.1 embeds Node 24.16 where `path.matchesGlob` is stable; the development host's Node 22.16 emits one experimental warning, retained as a non-release residual risk."
+      "started_at": null,
+      "completed_at": "2026-07-10T19:48:53+08:00",
+      "commit": "1be5692e,7b4ed449",
+      "receipt": "Core search coverage is included in the fresh 900-test make check run.",
+      "notes": "Node-native Glob/Grep retains workspace and symlink boundary tests."
     },
     "IPC-004": {
       "status": "done",
       "title": "建立全量类型化 Core operation registry",
       "depends_on": ["PORT-003"],
       "attempts": 1,
-      "notes": "Round 4 completed with strict TDD and three review passes. RED evidence covered a missing registry, unsafe Zod error exposure, malformed IPC arguments, renderer generic assertions, scheduler contract/policy drift, MCP extension-field stripping, transcript limit zero, hostile throwable traps, unknown operation channels, task transcript traversal/symlink escape, dropped attachments/requestedSkills, and untyped tools.readResult. GREEN delivers one 81-operation CoreOperationMap registry with exact Zod tuples and fixed adapters, compile-time route coverage, typed main/preload/renderer invocation, safe non-throwing IPC envelopes, restored scheduler policy, forward-compatible MCP schemas, real attachment model delivery, explicit Skill context injection, and no-follow/realpath transcript boundaries. Final independent review found Critical 0 / Important 0 / Minor 0 and Ready to merge Yes. Final make check passed Core 86 files / 711 tests and Desktop 62 files / 276 tests, plus Core/Desktop typecheck, Desktop test typecheck, zero-warning ESLint, Prettier, git diff check, and production build."
+      "started_at": null,
+      "completed_at": "2026-07-10T23:07:39+08:00",
+      "commit": "5cf5f0dc",
+      "receipt": "Core/Desktop operation, IPC, preload and renderer tests/typechecks passed in make check.",
+      "notes": "Typed operation registry remains the shared contract source."
     },
     "RSC-005": {
       "status": "done",
       "title": "直接读取签名 runtime defaults",
       "depends_on": ["IPC-004"],
       "attempts": 1,
-      "notes": "Round 5 completed from clean commit 5cf5f0dc with strict TDD. Packaged runtimeRoot is now forced to resourcesPath/runtime-defaults ahead of argv/env overrides; runtime/state overlap is rejected before writes; userData/runtime remains a separate read-only legacy source for attachment fallback and non-destructive memory/session/config migration. A deterministic schema-v1 manifest records app version, exact sorted file paths, sizes, SHA-256 digests, built-in Skills and runtime revision. electron-builder beforePack generates it and afterPack validates the final appOutDir resource tree before signing. Unknown Skills from legacy runtime/skills and runtime/.emperor/skills migrate atomically with blocked_pending_review markers and a strict, idempotent receipt; built-ins, collisions, malformed content, symlinks and corrupt receipts are skipped/quarantined without deleting source data. FileSkillsLoader fails closed on blocked markers while preserving flat .md Skills and user-over-builtin precedence. Security review found three Important and two Minor issues; follow-up tests closed legacy directory/file/cycle/config symlink traversal, flat Skill hiding, missing final-package validation, weak receipt validation and duplicate/unsorted builtInSkills. Final make check passed Core 87 files / 723 tests and Desktop 62 files / 279 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, git diff check and production build. macOS arm64 package:dir passed; afterPack and Core both validated the actual 70-file runtime tree with 10 current built-ins and revision 48514047dd1e86bed6677f20bdf229e480ff705168f63fce540a86aba2fd6300. Code signing was skipped only because the planned Developer ID credential is not yet available."
+      "started_at": null,
+      "completed_at": "2026-07-11T01:55:00+08:00",
+      "commit": "4f12b911",
+      "receipt": "Runtime manifest/resource tests passed in make check and package:verify.",
+      "notes": "Signed runtime resources remain read-only; legacy migration is non-destructive."
     },
     "SKILL-006": {
       "status": "done",
       "title": "最小内置 Skill 与 Core 原生 Creator",
       "depends_on": ["RSC-005"],
       "attempts": 1,
-      "notes": "Round 6 completed from clean commit 4f12b911 with strict TDD and three independent review passes. Only skill-creator remains active; nine prior built-ins moved to non-scanned/non-packaged skills-catalog, all catalog developer-machine paths now use {{skill_dir}}, and Creator's three Python helpers were removed. Core now provides YAML-backed source/status/requirements metadata, create/validate/reproducible package operations, manage_skill, canonical runtime placeholder expansion, user-over-builtin precedence, invalid/blocked fail-closed loading, and explicit flat .md compatibility. Packaging enforces canonical state containment, no-follow descriptor reads, identity-stable snapshots, symlink rejection, bounded depth/entries/files/bytes, deterministic ZIP metadata, recoverable Windows replacement, and CoreApi mutation guards. Initial review found two Critical, four Important and one Minor issue; all seven were fixed. Final review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 88 files / 742 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks and production build. Final macOS arm64 package:dir passed; the 47-file runtime manifest contains only skill-creator (revision f464dfbe4148746cf93f4b79e5b3a9f584d845f3ec8b313155c8a83103073564), with no Python or skills-catalog resources. Signing remains intentionally deferred to REL-MAC-018 because no valid Developer ID credential is available."
+      "started_at": null,
+      "completed_at": "2026-07-11T08:30:22+08:00",
+      "commit": "caa85302",
+      "receipt": "Skill manager/creator tests passed and package:verify contains only skill-creator.",
+      "notes": "skills-catalog remains inactive and excluded from packaged runtime."
     },
     "ENV-FND-007": {
       "status": "done",
       "title": "建立 Environment schemas、catalog 与 store",
       "depends_on": ["SKILL-006"],
       "attempts": 1,
-      "notes": "Round 7 completed from clean commit caa85302 with strict TDD and four review passes. Core now exposes strict Zod environment tool/state/plan/job/receipt/log schemas, 20 stable Chinese error descriptors with bound recovery actions, fixed internal-error redaction, and a packaged immutable 12-tool ToolCatalog that validates before AgentLoop state writes. Catalog validation fails closed on schema drift, unsupported targets, duplicate/cyclic/platform-incompatible dependencies, uncovered targets, unsafe/public-network inputs, missing digest/publisher, nonconcrete or unsatisfied versions, and any probe/install command outside exact static allowlists. Official metadata locked Git 2.55.0, ripgrep 15.1.0, Volta 2.0.2, Node 24.18.0, npm 12.0.1, uv 0.11.28, Python 3.12.13, Go 1.26.5, Rust/Cargo 1.97.0, rustup 1.29.0 and MSVC 17.14.37411.7; golden revision is dc95b1f423e1b8ccde50c66c06fa172f9226b95be7f15e10799ac2a4fefc7ffe. EnvironmentStore provides strict atomic JSON, Windows backup recovery, same-path read/write serialization, corruption isolation, symlinked-directory rejection, paged JSONL and conservative HOME/user/header/cookie/token/CLI credential redaction. Final independent review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 92 files / 765 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks and migration parity; final Electron production build passed. Probe execution remains intentionally deferred to ENV-PROBE-008."
+      "started_at": null,
+      "completed_at": "2026-07-11T09:49:38+08:00",
+      "commit": "e11ee9dc",
+      "receipt": "Environment schema/catalog/store tests passed in the fresh Core 900-test run.",
+      "notes": "Catalog remains immutable, validated and revision-bound."
     },
     "ENV-PROBE-008": {
       "status": "done",
       "title": "实现无 shell 探测和项目识别",
       "depends_on": ["ENV-FND-007"],
       "attempts": 1,
-      "notes": "Round 8 completed from clean commit e11ee9dc with strict TDD and two review passes. Core now provides a long-lived EnvironmentProbe, a shell-free bounded process runner, deterministic macOS/Linux/Windows PATH construction with Volta precedence and fixed Windows registry queries, canonical executable resolution, strict numeric version/range parsing, root-only Node/Python/Go/Rust declaration detection via structured JSON/TOML parsing, stable project fingerprints, Skill bin/runtime/env evaluation, dependency closure, bounded-concurrency probing and immutable validated status snapshots. Cache keys cover project/catalog/platform/PATH/Skill/env-presence changes; refresh, project switch, cancellation and explicit invalidation fail closed without caching partial results. Diagnostics and version summaries are bounded and do not expose project JSON fragments, environment secrets or full subprocess output. Initial review found two Important issues: Go/Cargo minimum declarations were treated as exact, and inherited PATH could outrank Volta; both were fixed with >= semantics, toolchain exact preservation and three-platform Volta-first PATH tests. Final review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 97 files / 792 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks, migration parity and production build. The first sandboxed make check attempt failed only because loopback listeners were denied with EPERM; the required unsandboxed rerun passed. Execution-environment snapshot wiring remains intentionally deferred to ENV-SNAP-009."
+      "started_at": null,
+      "completed_at": "2026-07-11T11:26:32+08:00",
+      "commit": "bc94dd00,fe278dc4",
+      "receipt": "Probe, PATH, project detector and version tests passed in make check.",
+      "notes": "All probe execution remains shell:false with bounded output and time."
     },
     "ENV-SNAP-009": {
       "status": "done",
       "title": "统一执行环境 snapshot",
       "depends_on": ["ENV-PROBE-008"],
       "attempts": 1,
-      "notes": "Round 9 completed from clean commit bc94dd00 with TDD and two self-review passes. Core now creates one immutable revisioned ExecutionEnvironment per turn from a single atomic probe/env capture; public snapshots contain only effective PATH, platform basics and ready tool paths, while explicitly selected private values remain non-serializable and bounded. AgentRunner propagates the same snapshot through batch and streaming tools; RunCommand, command/http Hooks, hook agents, Subagents and Team runners inherit it; Scheduler turns create fresh snapshots. stdio MCP starts with the snapshot, re-resolves config templates on revision changes and waits for active calls before reconnecting lazily on the next call. Review fixes covered atomic env capture, draft sessions with nonexistent project paths, MCP template re-resolution and active-call-safe switching. Focused verification passed 9 files / 142 tests; final make check passed Core 98 files / 806 tests and Desktop 62 files / 280 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, git diff check, migration parity and production build. Legacy standalone tool/hook fallbacks remain for compatibility, while all product Agent execution paths use the snapshot. Environment install jobs remain deferred to ENV-JOB-010."
+      "started_at": null,
+      "completed_at": "2026-07-11T11:41:32+08:00",
+      "commit": "dccdcf67",
+      "receipt": "Snapshot and integration tests passed in the fresh Core test run.",
+      "notes": "Turn snapshots remain immutable and stdio MCP refreshes on the next call."
     },
     "ENV-JOB-010": {
       "status": "done",
       "title": "安装计划、job 和中断恢复",
       "depends_on": ["ENV-SNAP-009"],
       "attempts": 1,
-      "notes": "Round 10 completed from clean commit dccdcf67 with strict TDD and repeated security review. Core now provides a strict plan registry and EnvironmentInstallOrchestrator: dependency-first plans bind catalog revision, canonical project root/fingerprint, platform/arch and the complete tool-state hash; expire at ten minutes; expose only plan/tool/strategy/license/confirmation IDs; and force-refresh the original project before execution, after execution and during recovery. Jobs persist atomically, hold a tokenized heartbeat cross-process lock, reject concurrent install/recovery, reclaim identity-checked abandoned locks, continue only unrelated dependency branches, support awaiting_user/cancel/partial/failed/completed/interrupted states, and generate receipts from fresh probe results. Review RED/GREEN fixes added exact-deadline expiry, live-job recovery exclusion, post-probe failure convergence, actual step/receipt outcomes, malformed stale-lock recovery, symlinked root/job isolation, 5 MiB bounded redacted JSONL, and POSIX/Windows process-tree termination without shell. Final focused environment verification passed 7 files / 54 tests; full make check passed Core 99 files / 821 tests and Desktop 62 files / 280 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. Platform command/download/signature adapters remain intentionally deferred to ENV-MAC/WIN/LNX-011/012/013."
+      "started_at": null,
+      "completed_at": "2026-07-11T12:05:09+08:00",
+      "commit": "d95e3cd4",
+      "receipt": "Job, lock, cancellation, recovery and process-tree tests passed in make check.",
+      "notes": "Interrupted jobs re-probe and never auto-resume."
     },
     "ENV-MAC-011": {
       "status": "done",
       "title": "macOS 安装 adapter",
       "depends_on": ["ENV-JOB-010"],
       "attempts": 1,
-      "notes": "Round 11 completed from clean commit d95e3cd4 with strict TDD and security review. MacEnvironmentAdapter now supports fixed arm64 `/opt/homebrew/bin/brew` and x64 `/usr/local/bin/brew` paths, exact catalog formula/version-manager/bundled args, fixed `xcode-select --install` Git fallback, user-only official-guided flows, cancellation/elevation error mapping, minimal PATH/env and 30-minute bounded install processes. Homebrew is never installed automatically and no command uses a shell. macOS pkg requires both fixed SHA-256 and exact Developer ID Installer publisher before `/usr/bin/open`; direct archives require a fixed digest and remain user-reviewed instead of auto-extracted. Shared NodeHttpsAssetDownloader adds HTTPS-only URLs, public-DNS validation on every redirect, DNS pinning against rebinding, three-redirect limit, byte caps, AbortSignal handling, atomic temp files and response cleanup on local I/O failure. A manual-only macos-15/macos-15-intel internal workflow runs adapter/download/process tests and uploads a JSON receipt whose locally verified catalog revision is dc95b1f423e1b8ccde50c66c06fa172f9226b95be7f15e10799ac2a4fefc7ffe. Final make check passed Core 101 files / 837 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. No real tool installation or unsigned release publication was performed."
+      "started_at": null,
+      "completed_at": "2026-07-11T12:20:30+08:00",
+      "commit": "fdb08f6e",
+      "receipt": "macOS adapter/download/process tests passed in the fresh Core test run.",
+      "notes": "No real system installer was executed during local verification."
     },
     "ENV-WIN-012": {
       "status": "done",
       "title": "Windows 安装 adapter",
       "depends_on": ["ENV-JOB-010"],
       "attempts": 1,
-      "notes": "Round 12 completed from clean commit fdb08f6e with strict TDD and security review. WindowsEnvironmentAdapter is x64-only and executes the immutable catalog through fixed Windows App Installer, Volta/rustup/bundled commands, Authenticode-verified MSI/EXE, or digest-verified bounded ZIP extraction; all processes use argv arrays, minimal environments, output/time limits and no shell. winget is accepted only at the fixed per-user App Installer alias and now receives exact package/source/agreement/noninteractive arguments. MSVC Build Tools is rejected from mixed plans and requires an independent elevated confirmation; UAC decline and cancellation preserve distinct error outcomes. Official installers require SHA-256 plus exact Valid publisher before execution. ZIP handling rejects traversal, links, devices, duplicate paths and archive/file/total limits; managed download/tool symlinks are rejected, candidate installs replace atomically, failed PATH updates restore the prior version, and temporary downloads are removed. User PATH changes use fixed SystemRoot reg.exe, preserve existing REG_EXPAND_SZ content and fail closed on unreadable or malformed output. The manual windows-2022 internal workflow runs adapter/ZIP/download/process tests and uploads a platform-specific receipt; local receipt validation produced catalog revision 4a8fbd5ce9de1636727ad3a353ce07f272f849e5587b9a158ae698564b4ddd09. Final make check passed Core 103 files / 860 tests and Desktop 62 files / 280 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. No real installer, elevation prompt or unsigned release publication was executed locally."
+      "started_at": null,
+      "completed_at": "2026-07-11T12:40:55+08:00",
+      "commit": "b5f0a77f",
+      "receipt": "Windows adapter, Authenticode and ZIP tests passed in make check.",
+      "notes": "No real installer or UAC prompt was executed during local verification."
     },
     "ENV-LNX-013": {
       "status": "done",
       "title": "Ubuntu 安装 adapter",
       "depends_on": ["ENV-JOB-010"],
       "attempts": 1,
-      "notes": "Round 13 completed from clean commit b5f0a77f with strict TDD, official-source verification and security review. LinuxEnvironmentAdapter accepts only Ubuntu 22.04/24.04 x64 from a bounded os-release file, permits the canonical /etc/os-release to /usr/lib/os-release link, and rejects every other distro/arch before process execution. Git/ripgrep use fixed /usr/bin/pkexec with exact apt-get argv, plan elevation proof, minimal env, no sudo/password handling and distinct decline/cancel outcomes. Catalog revision 3e12b926a9e9e32d3de284dbb6ec2f101ea9912a4f744deda856c0a78048d2d5 pins official x64 assets for Volta 2.0.2, uv 0.11.28, rustup 1.29.0 and Go 1.26.5 with SHA-256; no remote installer script is downloaded or piped to a shell. A pure Node bounded tar.gz extractor rejects traversal, duplicate paths, links/devices, unsafe types, checksum errors and entry/file/total limits while preserving owner executable bits. Managed archive installs use candidate/backup atomic replacement, no-follow roots, home-contained activation links, conflict preflight and rollback; Go never replaces an existing PATH installation. rustup-init executes directly with fixed noninteractive argv and temporary download cleanup. Real official Volta, uv and Go archives were independently downloaded, digest-checked and passed isolated-HOME end-to-end extraction/activation; the Go archive's 16,693 entries remained below the 50,000 hard limit. AppImage FUSE diagnostics remain non-installing. A manual ubuntu-22.04/24.04 matrix workflow runs adapter/TAR/download/process tests and emits Linux receipts; local receipt validation passed. Final make check passed Core 105 files / 878 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. No package manager, rustup binary or elevation prompt was executed locally."
+      "started_at": null,
+      "completed_at": "2026-07-11T18:29:38+08:00",
+      "commit": "8b84f954",
+      "receipt": "Ubuntu adapter, TAR, download and process tests passed in make check.",
+      "notes": "No package manager or elevation prompt was executed locally."
     },
     "SKILL-INSTALL-014": {
       "status": "done",
       "title": "安全预览并安装外部 Skill",
       "depends_on": ["ENV-PROBE-008"],
       "attempts": 1,
-      "notes": "Round 14 completed from clean commit 8b84f954 with strict TDD and security review. SkillInstallService accepts canonical local paths, direct HTTPS .skill/.zip files and public GitHub repo/tree URLs; GitHub tree resolution supports slash-containing refs without credentials. Downloads reuse the DNS-pinned SSRF-safe HTTPS client, allow at most three redirects and stage under stateRoot with limits of 20 MiB download, 100 MiB unpacked, 1000 files, 20 MiB per file and bounded path depth/length. ZIP validation rejects traversal, links/devices, Unicode/case collisions, Windows reserved names, trailing dots/spaces, colons and control characters. Preview exposes source, digest, files, scripts, declared commands/environment and missing requirements; confirmation expires after ten minutes, requires explicit permission, is once-at-a-time, and revalidates the active preview fingerprint, staged archive, local source and candidate snapshot before atomic stage/backup/target replacement with rollback. Missing dependencies write a blocked marker, stay out of Skill summaries/load_skill and can be reactivated only after fresh dependency reconciliation. Focused tests cover source normalization, GitHub slash refs, mutation/expiry, rollback and blocked activation. Final make check passed Core 106 files / 891 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. Replacing the legacy skills.importArchive API path with preview/confirm operations is intentionally reserved for the immediately dependent ENV-API-015 task."
+      "started_at": null,
+      "completed_at": "2026-07-11T18:56:36+08:00",
+      "commit": "223b4936",
+      "receipt": "Skill source, archive, preview/confirm and blocked-state tests passed in make check.",
+      "notes": "Network installs remain staged, digest-bound and permission-gated."
     },
     "ENV-API-015": {
       "status": "done",
@@ -117,41 +181,65 @@
         "SKILL-INSTALL-014"
       ],
       "attempts": 1,
-      "notes": "Round 15 completed from clean commit 223b4936 with strict TDD, contract testing and security review. CoreEnvironmentService now provides environment.getStatus/createInstallPlan/install/cancelInstall/getInstallLog over the existing immutable probe, persistent orchestrator/store and platform-specific executor selected without renderer command input. Status includes the signed catalog, at most 20 recent jobs and one active job; diagnostics adds a bounded environment summary and contains probe failures with safe errors; log pages enforce cursor/limit and cap malformed-line diagnostics. Environment install/cancel and Skill confirm use the existing Plan/Ask mutation guard. EnvironmentInstallOrchestrator publishes cloned job updates while isolating observer failures, requires a matching job ID for cancellation and safely skips startup recovery/reconciliation while another process owns the install lock. Five runtime events expose only bounded IDs, counts, statuses, error codes and digests, force-flush terminal events, and never include commands, environments or URL queries. CoreSkillService removed the legacy skills.importArchive bypass and exposes previewInstall/confirmInstall with strict Zod schemas, stable safe errors and native Electron webUtils path resolution; blocked Skill rechecks now share EnvironmentProbe state and fail closed on transitive installer dependencies. CoreOperationMap remains the single 90-operation source used by main, preload and renderer; packaged Desktop passes the signed runtime revision and app version into receipts. Final make check passed Core 107 files / 900 tests and Desktop 62 files / 282 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build."
+      "started_at": null,
+      "completed_at": "2026-07-11T19:27:36+08:00",
+      "commit": "4ab0f198",
+      "receipt": "CoreApi, IPC, diagnostics and event tests/typechecks passed in make check.",
+      "notes": "Renderer cannot submit installer commands, URLs or argv."
     },
     "ENV-UI-016": {
       "status": "done",
       "title": "诊断环境与 Skill 状态 UI",
       "depends_on": ["ENV-API-015"],
       "attempts": 1,
-      "notes": "Round 16 completed from clean commit 4ab0f198 with typed UI modeling, focused unit tests and Playwright acceptance. Diagnostics now provides a compact development-environment section grouped by platform/base/project/Skill/large prerequisites, one-click or per-tool planning, immutable catalog source/version/license/size/elevation review, explicit license and separate-step confirmation, live bounded progress, cancellation, partial/interrupted recovery, recent receipts and paged redacted logs. Runtime events refresh status without overwriting terminal progress decisions. SkillsPanel replaced the legacy archive-import path with local webUtils and public HTTPS/GitHub preview/confirm flows that expose digest, files, scripts, external commands, missing requirements and blocked installation state before explicit confirmation; blocked Skills are also visible in capability projection. Core status exposes only safe signed catalog presentation metadata and no command argv or environment data. Desktop and 390x844 layouts passed real scroll, horizontal-overflow and modal-boundary assertions; desktop/mobile environment and Skill confirmation screenshots were visually inspected. Playwright passed 33/33 including install, cancel, partial, interrupted, Skill confirmation, four Hooks views and all settings scroll contracts. Final make check passed Core 107 files / 900 tests and Desktop 63 files / 285 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build."
+      "started_at": null,
+      "completed_at": "2026-07-11T20:20:04+08:00",
+      "commit": "3b04bf20",
+      "receipt": "Desktop environment model tests passed in make check; prior Playwright acceptance covered desktop/mobile flows.",
+      "notes": "Diagnostics UI exposes plan confirmation, progress, cancellation and recovery."
     },
     "PKG-017": {
       "status": "done",
       "title": "最小资源打包与 packaged smoke",
       "depends_on": ["ENV-UI-016"],
       "attempts": 1,
-      "notes": "Round 17 completed from clean commit 3b04bf20 with strict TDD and real unpacked-app verification. RED first proved the packaged-smoke module, package scripts, ASAR/resource validator and node_modules exclusion were absent; the first real package:verify then correctly failed because electron-builder still auto-included production dependencies despite the files exclusion. GREEN moves fully bundled Desktop/Core libraries to build-time dependencies, leaves the ASAR with only out/ and a minimal package.json, and validates required main/preload/renderer entries, forbidden node_modules/source/tests/fixtures/Python/catalog paths, development-machine absolute paths and the exact six-file embedded desktop-pet allowlist during afterPack. Runtime defaults now package only templates, skill-creator, config examples and desktop-pet assets; generated README artwork is no longer duplicated. A fixed --emperor-packaged-smoke main-process mode creates no BrowserWindow or dialog, initializes the signed CoreApi, requires exactly skill-creator, runs bootstrap/diagnostics/environment plus Node-native Glob/Grep in a temporary workspace, verifies install job count remains zero, closes Core cleanly and atomically writes a bounded receipt without HOME, username or PATH. The cross-platform runner uses an absolute packaged executable, shell:false, a minimal environment and empty PATH; Linux adds explicit Chromium/Ozone headless flags, and CI now runs package:verify on macOS/Windows/Ubuntu. The actual unsigned macOS arm64 unpacked app passed repeatedly with app.asar reduced from about 99 MiB to 8.4 MiB and runtime-defaults from about 13 MiB to 208 KiB; its receipt records runtime revision 649627454f7efd78edda25da76e8a6539b3b092ed35e0e09fab5ec998474353b, manifest hash fb4fa52b83927f083a72df20ba07acfc866eec4e42d4484085f76328897792ba, all five operations green, zero install jobs and exit code 0. Final make check passed Core 107 files / 900 tests and Desktop 64 files / 290 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. macOS signing remains intentionally deferred to REL-MAC-018 because no valid Developer ID identity is available."
+      "started_at": null,
+      "completed_at": "2026-07-11T20:46:40+08:00",
+      "commit": "40e0312f",
+      "receipt": "Fresh npm --prefix desktop run package:verify passed on macOS arm64 with minimal-PATH packaged smoke.",
+      "notes": "Unsigned local package is accepted only as a packaged-runtime test artifact."
     },
     "REL-MAC-018": {
       "status": "blocked",
       "title": "macOS 双架构签名、公证与安装验收",
       "depends_on": ["PKG-017"],
       "attempts": 1,
-      "notes": "Round 18 implemented the complete macOS trusted-candidate path but cannot truthfully sign it off without external Apple credentials. A dedicated electron-builder.release.cjs extends the unsigned base config and hard-enables forceCodeSigning, Hardened Runtime, macOS 14.0 minimum, notarization and explicit main/helper entitlements. The entitlements contain only Electron JIT/unsigned-executable-memory allowances and no App Sandbox, DYLD or library-validation bypass. release.yml now uses macos-15 arm64 and macos-15-intel x64, requires Developer ID P12 plus App Store Connect API-key credentials, decodes the .p8 to a restricted temporary file, runs make check, builds candidates without publishing and uploads only seven-day candidate artifacts. verify-macos-release.sh checks exact Developer ID authority and TeamIdentifier, codesign deep/strict, Gatekeeper, stapled notarization, Mach-O architecture, read-only DMG mount, the mounted app's signature/ticket, minimal-PATH packaged smoke and SHA-256 for DMG/ZIP. Static RED/GREEN tests and plist/bash syntax checks passed; final make check passed Core 107 files / 900 tests and Desktop 65 files / 294 tests. A real local release-config build with CSC discovery disabled failed at the signing phase exactly as required, proving unsigned formal output is rejected. Final codesign/spctl/stapler/DMG receipts remain externally blocked until Developer ID Application, MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER and APPLE_TEAM_ID are provisioned; the task must not be marked done before both GitHub macOS runners pass."
+      "started_at": "2026-07-11T20:46:41+08:00",
+      "completed_at": null,
+      "commit": "fe745bb4",
+      "receipt": null,
+      "notes": "Candidate configuration and static verifier are implemented, but Developer ID and App Store Connect credentials are absent; no signed/notarized arm64/x64 receipts exist."
     },
     "REL-WIN-019": {
-      "status": "pending",
+      "status": "in_progress",
       "title": "Windows Artifact Signing 与安装验收",
       "depends_on": ["PKG-017"],
-      "attempts": 0,
-      "notes": "External completion dependency: Azure Artifact Signing or trusted OV PFX credentials."
+      "attempts": 1,
+      "started_at": "2026-07-11T21:07:00+08:00",
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
+      "notes": "External completion dependency: Azure Artifact Signing or trusted OV signing credentials."
     },
     "REL-LNX-020": {
       "status": "pending",
       "title": "Ubuntu DEB/AppImage 与双版本 smoke",
       "depends_on": ["PKG-017"],
       "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
       "notes": ""
     },
     "REL-AGG-021": {
@@ -159,6 +247,10 @@
       "title": "供应链证明与原子 Release 发布",
       "depends_on": ["REL-MAC-018", "REL-WIN-019", "REL-LNX-020"],
       "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
       "notes": ""
     },
     "QA-022": {
@@ -166,6 +258,10 @@
       "title": "最终安全回归、receipt 与文档签收",
       "depends_on": ["REL-AGG-021"],
       "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
       "notes": ""
     }
   }

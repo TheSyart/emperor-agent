@@ -9,6 +9,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PROGRESS = ROOT / "2026-07-10-cross-platform-environment-release-implementation.progress.json"
 ALLOWED_STATUSES = {"pending", "in_progress", "done", "blocked", "failed"}
+REQUIRED_TASK_FIELDS = {
+    "status",
+    "title",
+    "depends_on",
+    "attempts",
+    "started_at",
+    "completed_at",
+    "commit",
+    "receipt",
+    "notes",
+}
 
 
 def fail(message: str, code: int = 2) -> int:
@@ -35,6 +46,13 @@ def main() -> int:
             f"total_tasks mismatch: declared {declared_total!r}, actual {len(tasks)}"
         )
 
+    if data.get("schema_version") != 1:
+        return fail("unsupported progress schema_version")
+    if data.get("plan_id") != "PLAN-EA-XPLAT-002":
+        return fail("unexpected plan_id")
+    if data.get("plan_version") != "2.0":
+        return fail("unexpected plan_version")
+
     invalid_statuses: list[str] = []
     unknown_dependencies: list[str] = []
     premature_done: list[str] = []
@@ -44,6 +62,10 @@ def main() -> int:
     for task_id, task in sorted(tasks.items()):
         if not isinstance(task, dict):
             return fail(f"task {task_id} must be an object")
+
+        missing_fields = sorted(REQUIRED_TASK_FIELDS - task.keys())
+        if missing_fields:
+            return fail(f"task {task_id} missing fields: {', '.join(missing_fields)}")
 
         status = task.get("status")
         if status not in ALLOWED_STATUSES:
@@ -56,6 +78,18 @@ def main() -> int:
 
         missing = [dep for dep in dependencies if dep not in tasks]
         unknown_dependencies.extend(f"{task_id}->{dep}" for dep in missing)
+
+        attempts = task.get("attempts")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+            return fail(f"task {task_id} attempts must be a non-negative integer")
+
+        if status == "pending" and (
+            task.get("started_at") is not None
+            or task.get("completed_at") is not None
+            or task.get("commit") is not None
+            or task.get("receipt") is not None
+        ):
+            return fail(f"pending task {task_id} contains execution receipt fields")
 
         if status == "done":
             incomplete = [
@@ -73,6 +107,27 @@ def main() -> int:
         return fail("invalid statuses: " + ", ".join(invalid_statuses))
     if unknown_dependencies:
         return fail("unknown dependencies: " + ", ".join(unknown_dependencies))
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            raise ValueError(task_id)
+        if task_id in visited:
+            return
+        visiting.add(task_id)
+        for dependency in tasks[task_id].get("depends_on", []):
+            visit(dependency)
+        visiting.remove(task_id)
+        visited.add(task_id)
+
+    try:
+        for task_id in tasks:
+            visit(task_id)
+    except ValueError as exc:
+        return fail(f"dependency cycle detected at {exc}")
+
     if premature_done:
         return fail("dependency violations: " + "; ".join(premature_done))
 

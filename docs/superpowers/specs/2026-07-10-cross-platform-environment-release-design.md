@@ -3,9 +3,11 @@
 > **Plan ID**: `PLAN-EA-XPLAT-002`
 > **Version**: v2.0
 > **Date**: 2026-07-10
-> **Status**: confirmed
+> **Status**: approved for implementation planning
 > **Targets**: macOS 14+ arm64/x64、Windows 10 22H2+ x64、Ubuntu 22.04/24.04 x64
 > **Implementation Plan**: `docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md`
+
+> **Document boundary**: 本文件只冻结目标架构、协议、安全边界和 Release 门禁，不代表任何实现任务已经完成。实际执行状态仅以配套 progress 文件及可验证 receipt 为准。
 
 ## 1. 背景与基线
 
@@ -507,3 +509,15 @@ Skills 页面展示 built-in/user/legacy 来源、digest、依赖状态和 block
 - [Volta Getting Started](https://docs.volta.sh/guide/getting-started)
 - [uv Installation](https://docs.astral.sh/uv/getting-started/installation/)
 - [rustup Installation](https://rust-lang.github.io/rustup/installation/)
+
+## 19. 实施交接边界
+
+本设计由配套 implementation plan 拆解为 22 个任务。创建或更新本设计、implementation plan、progress JSON 与 progress checker 仅属于规划交付，不得据此修改任务状态，也不得视为代码、CI、安装器或正式 Release 已实现。
+
+正式开始实施前必须满足以下条件：
+
+1. 由执行者重新记录目标分支、HEAD、工作树状态和 Core/Desktop 测试数量，作为不可覆盖的 execution baseline。
+2. progress 中 22 个任务初始均为 `pending`；只有在对应任务的 RED、GREEN、验收清单和 receipt 同时成立后才能改为 `done`。
+3. Apple Developer 与 Windows 代码签名凭据可以使相应 Release 任务进入 `blocked`，但不能使其提前完成，也不能降级正式产物的签名要求。
+4. 任何已经存在但缺少本计划 receipt 的代码只能作为待审计候选实现，不能仅凭文件存在或历史 commit 自动签收。
+5. 本轮文档交付不修改 README、AGENTS、产品代码、测试、workflow、打包配置或 Git 发布状态；这些改动只允许在后续执行阶段按任务发生。
