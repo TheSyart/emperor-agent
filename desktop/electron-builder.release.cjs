@@ -7,6 +7,12 @@ function releaseTarget() {
   return target
 }
 
+function requiredWindowsSigningValue(name) {
+  const value = String(process.env[name] || '').trim()
+  if (!value) throw new Error(`${name} is required for Windows trusted release`)
+  return value
+}
+
 module.exports = function trustedReleaseConfig() {
   const target = releaseTarget()
   if (target === 'mac') {
@@ -23,5 +29,30 @@ module.exports = function trustedReleaseConfig() {
     }
   }
 
-  throw new Error('Windows trusted release configuration is not implemented')
+  const endpoint = requiredWindowsSigningValue('WINDOWS_SIGNING_ENDPOINT')
+  const certificateProfileName = requiredWindowsSigningValue(
+    'WINDOWS_SIGNING_PROFILE',
+  )
+  const codeSigningAccountName = requiredWindowsSigningValue(
+    'WINDOWS_SIGNING_ACCOUNT',
+  )
+  const publisherName = requiredWindowsSigningValue('WINDOWS_SIGNING_PUBLISHER')
+
+  return {
+    extends: './electron-builder.yml',
+    win: {
+      forceCodeSigning: true,
+      publisherName: [publisherName],
+      azureSignOptions: {
+        endpoint,
+        certificateProfileName,
+        codeSigningAccountName,
+      },
+    },
+    nsis: {
+      oneClick: false,
+      perMachine: false,
+      allowToChangeInstallationDirectory: true,
+    },
+  }
 }

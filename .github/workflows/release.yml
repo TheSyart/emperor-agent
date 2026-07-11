@@ -74,3 +74,72 @@ jobs:
             desktop/dist/packaged-smoke/darwin-${{ matrix.arch }}.json
           if-no-files-found: error
           retention-days: 7
+
+  windows-candidate:
+    name: Windows candidate (x64)
+    runs-on: windows-2022
+    env:
+      EMPEROR_RELEASE_TARGET: win
+      WINDOWS_SIGNING_ENDPOINT: ${{ secrets.WINDOWS_SIGNING_ENDPOINT }}
+      WINDOWS_SIGNING_PROFILE: ${{ secrets.WINDOWS_SIGNING_PROFILE }}
+      WINDOWS_SIGNING_ACCOUNT: ${{ secrets.WINDOWS_SIGNING_ACCOUNT }}
+      WINDOWS_SIGNING_PUBLISHER: ${{ secrets.WINDOWS_SIGNING_PUBLISHER }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Require Azure Artifact Signing credentials
+        shell: pwsh
+        run: |
+          $required = @(
+            'WINDOWS_SIGNING_ENDPOINT',
+            'WINDOWS_SIGNING_PROFILE',
+            'WINDOWS_SIGNING_ACCOUNT',
+            'WINDOWS_SIGNING_PUBLISHER',
+            'AZURE_TENANT_ID',
+            'AZURE_CLIENT_ID',
+            'AZURE_CLIENT_SECRET'
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing required Windows release credential: $name"
+            }
+          }
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Quality gate
+        shell: bash
+        run: ./scripts/check.sh
+      - name: Build signed NSIS candidate
+        shell: pwsh
+        run: |
+          npm --prefix desktop run build
+          Push-Location desktop
+          npx electron-builder --config electron-builder.release.cjs --win nsis --x64 --publish never
+          Pop-Location
+      - name: Verify Authenticode, install, smoke and uninstall
+        shell: pwsh
+        run: ./scripts/verify-windows-release.ps1
+      - name: Upload Windows candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-candidate
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/SHA256SUMS-windows-x64.txt
+            desktop/dist/packaged-smoke/win32-x64.json
+          if-no-files-found: error
+          retention-days: 7

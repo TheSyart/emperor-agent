@@ -5,7 +5,7 @@
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-11T21:07:00+08:00",
+  "updated_at": "2026-07-11T21:15:00+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
   "total_tasks": 22,
@@ -221,7 +221,7 @@
       "notes": "Candidate configuration and static verifier are implemented, but Developer ID and App Store Connect credentials are absent; no signed/notarized arm64/x64 receipts exist."
     },
     "REL-WIN-019": {
-      "status": "in_progress",
+      "status": "blocked",
       "title": "Windows Artifact Signing 与安装验收",
       "depends_on": ["PKG-017"],
       "attempts": 1,
@@ -229,7 +229,7 @@
       "completed_at": null,
       "commit": null,
       "receipt": null,
-      "notes": "External completion dependency: Azure Artifact Signing or trusted OV signing credentials."
+      "notes": "Windows release config, isolated smoke environment, windows-2022 candidate workflow and Authenticode install/smoke/uninstall verifier are implemented. Focused 12/12 tests, schema inspection, packaged smoke and make check passed. Final receipt remains blocked on Azure Artifact Signing credentials and a Windows runner; the task cannot be marked done until installer and installed binaries have the exact expected publisher."
     },
     "REL-LNX-020": {
       "status": "pending",

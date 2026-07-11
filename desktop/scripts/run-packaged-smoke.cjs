@@ -21,10 +21,14 @@ const tempRoot = mkdtempSync(join(tmpdir(), 'emperor-packaged-smoke-'))
 const stateRoot = join(tempRoot, 'state')
 const homeRoot = join(tempRoot, 'home')
 const emptyBin = join(tempRoot, 'empty-bin')
+const appDataRoot = join(homeRoot, 'AppData', 'Roaming')
+const localAppDataRoot = join(homeRoot, 'AppData', 'Local')
 const receiptPath = join(tempRoot, 'receipt.json')
 mkdirSync(stateRoot, { recursive: true })
 mkdirSync(homeRoot, { recursive: true })
 mkdirSync(emptyBin, { recursive: true })
+mkdirSync(appDataRoot, { recursive: true })
+mkdirSync(localAppDataRoot, { recursive: true })
 
 const args = [
   '--emperor-packaged-smoke',
@@ -115,21 +119,16 @@ function smokeEnvironment() {
     EMPEROR_CONFIG_DIR: stateRoot,
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    APPDATA: join(homeRoot, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(homeRoot, 'AppData', 'Local'),
+    TEMP: tempRoot,
+    TMP: tempRoot,
+    TMPDIR: tempRoot,
     PATH: emptyBin,
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
   }
-  for (const name of [
-    'APPDATA',
-    'COMSPEC',
-    'LOCALAPPDATA',
-    'PROGRAMDATA',
-    'SYSTEMROOT',
-    'TEMP',
-    'TMP',
-    'TMPDIR',
-    'WINDIR',
-  ]) {
+  for (const name of ['COMSPEC', 'PROGRAMDATA', 'SYSTEMROOT', 'WINDIR']) {
     if (process.env[name]) env[name] = process.env[name]
   }
   return env

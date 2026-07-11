@@ -91,6 +91,10 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(runner).toContain('shell: false')
     expect(runner).not.toMatch(/env:\s*\{\s*\.\.\.process\.env/)
     expect(runner).toContain('PATH: emptyBin')
+    expect(runner).toContain("APPDATA: join(homeRoot, 'AppData', 'Roaming')")
+    expect(runner).toContain("LOCALAPPDATA: join(homeRoot, 'AppData', 'Local')")
+    expect(runner).toContain('TEMP: tempRoot')
+    expect(runner).toContain('TMP: tempRoot')
   })
 
   it('build_desktop_release does not require the Python backend bundle', () => {
