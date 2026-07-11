@@ -40,6 +40,25 @@ prepare() {
     sha256sum "$(basename "$APPIMAGE")" "$(basename "$DEB")" \
       >"$(basename "$CHECKSUMS")"
   )
+  local receipt_dir="$DIST/release-receipts"
+  local commit="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+  mkdir -p "$receipt_dir"
+  RECEIPT_PATH="$receipt_dir/linux-x64-build.json" COMMIT="$commit" \
+  APPIMAGE_NAME="$(basename "$APPIMAGE")" DEB_NAME="$(basename "$DEB")" \
+  PACKAGE_NAME="$package" node <<'NODE'
+const fs = require('node:fs')
+const receipt = {
+  schemaVersion: 1,
+  commit: process.env.COMMIT,
+  platform: 'linux',
+  arch: 'x64',
+  package: process.env.PACKAGE_NAME,
+  debArchitecture: 'amd64',
+  metadataVerified: true,
+  artifacts: [process.env.APPIMAGE_NAME, process.env.DEB_NAME],
+}
+fs.writeFileSync(process.env.RECEIPT_PATH, `${JSON.stringify(receipt, null, 2)}\n`)
+NODE
 }
 
 classify_smoke_failure() {
@@ -134,6 +153,23 @@ smoke() {
     echo "DEB package remained installed after removal" >&2
     exit 1
   fi
+  local commit="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+  RECEIPT_PATH="$RECEIPT_DIR/${UBUNTU_VERSION}-lifecycle.json" \
+  COMMIT="$commit" UBUNTU_VERSION="$UBUNTU_VERSION" node <<'NODE'
+const fs = require('node:fs')
+const receipt = {
+  schemaVersion: 1,
+  commit: process.env.COMMIT,
+  platform: 'linux',
+  arch: 'x64',
+  ubuntuVersion: process.env.UBUNTU_VERSION,
+  appImageSmoke: true,
+  debInstall: true,
+  debSmoke: true,
+  debRemove: true,
+}
+fs.writeFileSync(process.env.RECEIPT_PATH, `${JSON.stringify(receipt, null, 2)}\n`)
+NODE
 }
 
 case "$MODE" in

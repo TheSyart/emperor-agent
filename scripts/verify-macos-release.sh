@@ -65,3 +65,27 @@ trap - EXIT
   shasum -a 256 "$(basename "$DMG")" "$(basename "$ZIP")" \
     >"SHA256SUMS-macos-$ARCH.txt"
 )
+
+RECEIPT_DIR="$DIST/release-receipts"
+RECEIPT_PATH="$RECEIPT_DIR/macos-$ARCH.json"
+COMMIT="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+mkdir -p "$RECEIPT_DIR"
+RECEIPT_PATH="$RECEIPT_PATH" COMMIT="$COMMIT" ARCH="$ARCH" \
+EXPECTED_TEAM_ID="$EXPECTED_TEAM_ID" DMG_NAME="$(basename "$DMG")" \
+ZIP_NAME="$(basename "$ZIP")" node <<'NODE'
+const fs = require('node:fs')
+const receipt = {
+  schemaVersion: 1,
+  commit: process.env.COMMIT,
+  platform: 'macos',
+  arch: process.env.ARCH,
+  teamId: process.env.EXPECTED_TEAM_ID,
+  signed: true,
+  gatekeeper: true,
+  notarized: true,
+  dmgMounted: true,
+  packagedSmoke: `darwin-${process.env.ARCH}.json`,
+  artifacts: [process.env.DMG_NAME, process.env.ZIP_NAME],
+}
+fs.writeFileSync(process.env.RECEIPT_PATH, `${JSON.stringify(receipt, null, 2)}\n`)
+NODE

@@ -231,4 +231,65 @@ describe('trusted release configuration', () => {
     expect(verifier).toContain('Chromium sandbox failure')
     expect(runner).toContain("APPIMAGE_EXTRACT_AND_RUN: '1'")
   })
+
+  it('attests a complete candidate bundle before the publish job can run', () => {
+    const workflow = fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+      'utf8',
+    )
+
+    expect(workflow).toContain('release-aggregate:')
+    expect(workflow).toContain('publish-release:')
+    expect(workflow).toContain('needs: release-aggregate')
+    expect(workflow).toContain('id-token: write')
+    expect(workflow).toContain('attestations: write')
+    expect(workflow).toContain('artifact-metadata: write')
+    expect(workflow).toContain('@cyclonedx/cyclonedx-npm@6.0.0')
+    expect(workflow).toContain('scripts/merge-cyclonedx-sboms.mjs')
+    expect(workflow.match(/actions\/attest@v4/g)?.length).toBe(2)
+    expect(workflow).toContain('subject-checksums:')
+    expect(workflow).toContain('sbom-path:')
+    expect(workflow).toContain('gh attestation verify')
+    expect(workflow).toContain('scripts/assemble-release-bundle.mjs')
+    expect(workflow).toContain('scripts/publish-release.sh')
+    expect(workflow).not.toContain('softprops/action-gh-release')
+  })
+
+  it('keeps unsigned internal packages manual, short-lived and unpublishable', () => {
+    const workflow = fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'release-internal.yml'),
+      'utf8',
+    )
+
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).not.toContain('push:')
+    expect(workflow).toContain('UNSIGNED-INTERNAL')
+    expect(workflow).toContain('retention-days: 7')
+    expect(workflow).not.toContain('contents: write')
+    expect(workflow).not.toContain('gh release')
+  })
+
+  it('fails closed on incomplete, unsigned or receipt-less release bundles', () => {
+    const assembler = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'assemble-release-bundle.mjs'),
+      'utf8',
+    )
+    const publisher = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'publish-release.sh'),
+      'utf8',
+    )
+
+    expect(assembler).toContain('UNSIGNED-INTERNAL')
+    expect(assembler).toContain('macos-arm64.json')
+    expect(assembler).toContain('windows-x64.json')
+    expect(assembler).toContain('24.04-lifecycle.json')
+    expect(assembler).toContain('ARTIFACT-SHA256SUMS.txt')
+    expect(assembler).toContain('release-manifest.json')
+    expect(publisher).toContain('gh release create')
+    expect(publisher).toContain('--draft')
+    expect(publisher).toContain('gh release upload')
+    expect(publisher).toContain('gh release edit')
+    expect(publisher).toContain('--draft=false')
+    expect(publisher).toContain('gh release delete')
+  })
 })

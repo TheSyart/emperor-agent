@@ -72,6 +72,7 @@ jobs:
             desktop/dist/*.zip
             desktop/dist/SHA256SUMS-macos-${{ matrix.arch }}.txt
             desktop/dist/packaged-smoke/darwin-${{ matrix.arch }}.json
+            desktop/dist/release-receipts/macos-${{ matrix.arch }}.json
           if-no-files-found: error
           retention-days: 7
 
@@ -141,6 +142,7 @@ jobs:
             desktop/dist/*.exe
             desktop/dist/SHA256SUMS-windows-x64.txt
             desktop/dist/packaged-smoke/win32-x64.json
+            desktop/dist/release-receipts/windows-x64.json
           if-no-files-found: error
           retention-days: 7
 
@@ -181,8 +183,170 @@ jobs:
             desktop/dist/*.AppImage
             desktop/dist/*.deb
             desktop/dist/SHA256SUMS-linux-x64.txt
+            desktop/dist/release-receipts/linux-x64-build.json
           if-no-files-found: error
           retention-days: 7
+
+  release-aggregate:
+    name: Verify and attest trusted release bundle
+    needs: [macos-candidate, windows-candidate, linux-build, linux-smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install SBOM inputs
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Download platform candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-candidate'
+          path: release-inputs
+          merge-multiple: true
+      - name: Download Linux lifecycle receipts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'linux-*-receipts'
+          path: release-inputs
+          merge-multiple: true
+      - name: Assemble fail-closed release bundle
+        run: >-
+          node scripts/assemble-release-bundle.mjs
+          release-inputs release-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Generate reproducible CycloneDX SBOM
+        run: |
+          mkdir -p release-sbom
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.0 \
+            --package-lock-only \
+            --output-reproducible \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --validate \
+            --output-file release-sbom/core.cdx.json
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.0 \
+            --package-lock-only \
+            --ignore-npm-errors \
+            --output-reproducible \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --validate \
+            --output-file release-sbom/desktop.cdx.json \
+            desktop/package.json
+          node scripts/merge-cyclonedx-sboms.mjs \
+            release-sbom/core.cdx.json \
+            release-sbom/desktop.cdx.json \
+            "release-bundle/emperor-agent-${GITHUB_REF_NAME}.cdx.json"
+          (
+            cd release-bundle
+            find . -maxdepth 1 -type f \
+              ! -name 'SHA256SUMS.txt' \
+              -printf '%f\n' | LC_ALL=C sort | while IFS= read -r file; do
+                sha256sum "$file"
+              done >SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
+          )
+      - name: Attest release provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: release-bundle/SHA256SUMS.txt
+      - name: Attest artifact SBOM
+        uses: actions/attest@v4
+        with:
+          subject-checksums: release-bundle/ARTIFACT-SHA256SUMS.txt
+          sbom-path: release-bundle/emperor-agent-${{ github.ref_name }}.cdx.json
+      - name: Verify uploaded attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while read -r _ file; do
+            file="${file#\*}"
+            for attempt in 1 2 3 4 5; do
+              if gh attestation verify "release-bundle/$file" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF"; then
+                break
+              fi
+              if [[ "$attempt" == 5 ]]; then exit 1; fi
+              sleep $((attempt * 3))
+            done
+          done <release-bundle/SHA256SUMS.txt
+          while read -r _ file; do
+            file="${file#\*}"
+            for attempt in 1 2 3 4 5; do
+              if gh attestation verify "release-bundle/$file" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF" \
+                --predicate-type 'https://cyclonedx.org/bom'; then
+                break
+              fi
+              if [[ "$attempt" == 5 ]]; then exit 1; fi
+              sleep $((attempt * 3))
+            done
+          done <release-bundle/ARTIFACT-SHA256SUMS.txt
+      - name: Upload attested release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: trusted-release-bundle
+          path: release-bundle
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish atomic GitHub Release
+    needs: release-aggregate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Download attested release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: trusted-release-bundle
+          path: release-bundle
+      - name: Reverify checksums and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd release-bundle && sha256sum --check SHA256SUMS.txt)
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "release-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "$GITHUB_REF"
+          done <release-bundle/SHA256SUMS.txt
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "release-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "$GITHUB_REF" \
+              --predicate-type 'https://cyclonedx.org/bom'
+          done <release-bundle/ARTIFACT-SHA256SUMS.txt
+      - name: Create draft, verify assets and publish atomically
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/publish-release.sh release-bundle
 
   linux-smoke:
     name: Linux smoke (${{ matrix.version }})

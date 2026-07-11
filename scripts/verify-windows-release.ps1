@@ -67,6 +67,29 @@ try {
   $hash = (Get-FileHash -Path $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
   $checksumPath = Join-Path $distRoot 'SHA256SUMS-windows-x64.txt'
   Set-Content -Path $checksumPath -Value "$hash *$($installer.Name)" -Encoding utf8NoBOM
+  $receiptRoot = Join-Path $distRoot 'release-receipts'
+  New-Item -Path $receiptRoot -ItemType Directory -Force | Out-Null
+  $commit = [Environment]::GetEnvironmentVariable('GITHUB_SHA')
+  if ([string]::IsNullOrWhiteSpace($commit)) {
+    $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
+  }
+  $receipt = [ordered]@{
+    schemaVersion = 1
+    commit = $commit
+    platform = 'windows'
+    arch = 'x64'
+    publisher = $expectedPublisher
+    authenticode = $true
+    installedExecutableSigned = $true
+    uninstallerSigned = $true
+    installExitCode = 0
+    smokeExitCode = 0
+    uninstallExitCode = 0
+    packagedSmoke = 'win32-x64.json'
+    artifacts = @($installer.Name)
+  }
+  $receiptPath = Join-Path $receiptRoot 'windows-x64.json'
+  $receipt | ConvertTo-Json -Depth 4 | Set-Content -Path $receiptPath -Encoding utf8NoBOM
   Write-Host "Windows trusted release verification passed: $($installer.Name)"
 }
 finally {
