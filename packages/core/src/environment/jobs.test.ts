@@ -126,6 +126,9 @@ function orchestrator(
     now?: () => Date
     idFactory?: (kind: 'plan' | 'job') => string
     lockStaleMs?: number
+    onJobUpdate?: (
+      job: import('./models').EnvironmentJobRecord,
+    ) => void | Promise<void>
   } = {},
 ): EnvironmentInstallOrchestrator {
   return new EnvironmentInstallOrchestrator({
@@ -138,6 +141,7 @@ function orchestrator(
     now: opts.now,
     idFactory: opts.idFactory,
     lockStaleMs: opts.lockStaleMs,
+    onJobUpdate: opts.onJobUpdate,
   })
 }
 
@@ -278,6 +282,27 @@ describe('EnvironmentInstallOrchestrator plans', () => {
 })
 
 describe('EnvironmentInstallOrchestrator jobs', () => {
+  it('publishes job changes without letting observer failures break installation', async () => {
+    const updates: string[] = []
+    const service = orchestrator({
+      status: async () => probeStatus({ ready: { git: '2.55.0' } }),
+      onJobUpdate: async (job) => {
+        updates.push(`${job.status}:${job.currentStepId ?? ''}`)
+        if (updates.length === 1) throw new Error('observer unavailable')
+      },
+    })
+    const plan = await service.createPlan({ toolIds: ['git'] })
+
+    const job = await service.install({
+      planId: plan.planId,
+      ...accepted(plan),
+    })
+
+    expect(job.status).toBe('completed')
+    expect(updates[0]).toBe('running:')
+    expect(updates.at(-1)).toBe('completed:')
+  })
+
   it('continues unrelated steps and blocks only failed dependency branches', async () => {
     let current = probeStatus()
     let statusCalls = 0

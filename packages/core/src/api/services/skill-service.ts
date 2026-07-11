@@ -1,15 +1,14 @@
-import { inflateRawSync } from 'node:zlib'
 import {
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import type { ToolRegistry } from '../../tools/registry'
+import { EmperorError } from '../../errors'
 import {
   SkillManager,
   parseSkillMetadata,
@@ -23,14 +22,24 @@ import {
   type SkillValidateInput,
   type SkillValidationResult,
 } from '../../skills/manager'
-
-type Dict = Record<string, unknown>
+import {
+  SkillInstallService,
+  type SkillConfirmInstallInput,
+  type SkillInstallPreview,
+  type SkillInstallResult,
+  type SkillInstallSourceInput,
+  type SkillMissingRequirements,
+} from '../../skills/install'
 
 export interface CoreSkillServiceDeps {
   runtimeRoot?: string
   manager?: SkillManager
   registry?: ToolRegistry
   refreshRuntimeContext?: () => void
+  installService?: SkillInstallService
+  resolveMissing?: (
+    requirements: SkillRequirements,
+  ) => Promise<SkillMissingRequirements>
 }
 
 export interface SkillInfoPayload {
@@ -64,14 +73,11 @@ export interface SkillDeletePayload {
   deleted: string
 }
 
-export interface SkillImportPayload {
-  imported: string
-}
-
 export class CoreSkillService {
   readonly root: string
   readonly skillsDir: string
   readonly manager: SkillManager
+  readonly installService: SkillInstallService
   private readonly deps: CoreSkillServiceDeps
 
   constructor(root: string, deps: CoreSkillServiceDeps = {}) {
@@ -83,6 +89,13 @@ export class CoreSkillService {
       new SkillManager({
         stateRoot: this.root,
         runtimeRoot: deps.runtimeRoot ?? this.root,
+      })
+    this.installService =
+      deps.installService ??
+      new SkillInstallService({
+        manager: this.manager,
+        stateRoot: this.root,
+        ...(deps.resolveMissing ? { resolveMissing: deps.resolveMissing } : {}),
       })
   }
 
@@ -141,10 +154,35 @@ export class CoreSkillService {
     return { deleted: safe }
   }
 
-  importArchive(input: unknown): SkillImportPayload {
-    const result = installSkillArchive(this.root, input)
-    this.deps.refreshRuntimeContext?.()
-    return result
+  async previewInstall(input: {
+    source: SkillInstallSourceInput
+  }): Promise<SkillInstallPreview> {
+    try {
+      return await this.installService.previewInstall(input)
+    } catch (error) {
+      throw safeSkillInstallError('preview', error)
+    }
+  }
+
+  async confirmInstall(
+    input: SkillConfirmInstallInput,
+  ): Promise<SkillInstallResult> {
+    try {
+      const result = await this.installService.confirmInstall(input)
+      this.deps.refreshRuntimeContext?.()
+      return result
+    } catch (error) {
+      throw safeSkillInstallError('confirm', error)
+    }
+  }
+
+  async reconcileBlocked(): Promise<{
+    activated: string[]
+    blocked: string[]
+  }> {
+    const results = await this.installService.reconcileBlocked()
+    if (results.activated.length) this.deps.refreshRuntimeContext?.()
+    return results
   }
 
   create(input: SkillCreateInput): SkillCreateResult {
@@ -193,6 +231,23 @@ export class CoreSkillService {
   }
 }
 
+function safeSkillInstallError(
+  phase: 'preview' | 'confirm',
+  cause: unknown,
+): EmperorError {
+  if (cause instanceof EmperorError) return cause
+  return new EmperorError(
+    phase === 'preview'
+      ? 'Skill 安装预览失败，请检查来源和压缩包后重试。'
+      : 'Skill 安装确认失败，预览可能已过期或内容发生变化。',
+    phase === 'preview' ? 'skill_preview_failed' : 'skill_install_failed',
+    {
+      ...(cause instanceof Error ? { cause } : {}),
+      action: 'review_skill_install',
+    },
+  )
+}
+
 function boolMeta(value: unknown): boolean {
   return (
     String(value ?? '')
@@ -215,126 +270,4 @@ function assertWritableSkillPath(skillsDir: string, name: string): void {
   const skillFile = join(dir, 'SKILL.md')
   if (existsSync(skillFile) && lstatSync(skillFile).isSymbolicLink())
     throw new Error(`SKILL.md must not be a symbolic link: ${name}`)
-}
-
-interface ZipEntry {
-  name: string
-  method: number
-  compressedSize: number
-  localOffset: number
-}
-
-function installSkillArchive(root: string, input: unknown): SkillImportPayload {
-  const archive = archiveBufferFromInput(input)
-  const entries = readZipEntries(archive)
-  if (!entries.length) throw new Error('Empty zip file')
-  const roots = new Set(entries.map((entry) => entry.name.split('/')[0] || ''))
-  if (roots.size !== 1)
-    throw new Error('Skill archive must contain a single root directory')
-  const rootName = [...roots][0]!
-  if (!safeSkillName(rootName))
-    throw new Error(`Invalid skill root directory: ${rootName}`)
-  if (!entries.some((entry) => entry.name === `${rootName}/SKILL.md`)) {
-    throw new Error(`Missing SKILL.md in zip root (${rootName})`)
-  }
-
-  const skillsDir = join(root, 'skills')
-  const stage = join(
-    skillsDir,
-    `.skill-import-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  )
-  mkdirSync(stage, { recursive: true })
-  try {
-    for (const entry of entries) {
-      const data = extractZipEntry(archive, entry)
-      const target = join(stage, entry.name)
-      mkdirSync(dirname(target), { recursive: true })
-      writeFileSync(target, data)
-    }
-    const target = join(skillsDir, rootName)
-    const backup = existsSync(target)
-      ? join(
-          skillsDir,
-          `.${rootName}.bak-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        )
-      : ''
-    if (backup) renameSync(target, backup)
-    try {
-      renameSync(join(stage, rootName), target)
-      if (backup) rmSync(backup, { recursive: true, force: true })
-    } catch (error) {
-      if (backup && !existsSync(target) && existsSync(backup))
-        renameSync(backup, target)
-      throw error
-    }
-  } finally {
-    rmSync(stage, { recursive: true, force: true })
-  }
-  return { imported: rootName }
-}
-
-function archiveBufferFromInput(input: unknown): Buffer {
-  if (typeof input === 'string') return readFileSync(input)
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    const raw = (input as Dict).raw
-    if (raw instanceof Uint8Array) return Buffer.from(raw)
-    if (raw instanceof ArrayBuffer) return Buffer.from(raw)
-    if (Array.isArray(raw)) return Buffer.from(raw as number[])
-  }
-  throw new Error('Expected skill archive bytes')
-}
-
-function readZipEntries(buf: Buffer): ZipEntry[] {
-  const eocd = findEndOfCentralDirectory(buf)
-  const entryCount = buf.readUInt16LE(eocd + 10)
-  let offset = buf.readUInt32LE(eocd + 16)
-  const entries: ZipEntry[] = []
-  for (let i = 0; i < entryCount; i += 1) {
-    if (buf.readUInt32LE(offset) !== 0x02014b50)
-      throw new Error('Invalid zip central directory')
-    const method = buf.readUInt16LE(offset + 10)
-    const compressedSize = buf.readUInt32LE(offset + 20)
-    const nameLen = buf.readUInt16LE(offset + 28)
-    const extraLen = buf.readUInt16LE(offset + 30)
-    const commentLen = buf.readUInt16LE(offset + 32)
-    const localOffset = buf.readUInt32LE(offset + 42)
-    const rawName = buf
-      .subarray(offset + 46, offset + 46 + nameLen)
-      .toString('utf8')
-    const name = normalizeZipMember(rawName)
-    if (name && !rawName.endsWith('/'))
-      entries.push({ name, method, compressedSize, localOffset })
-    offset += 46 + nameLen + extraLen + commentLen
-  }
-  return entries
-}
-
-function findEndOfCentralDirectory(buf: Buffer): number {
-  const min = Math.max(0, buf.length - 65_557)
-  for (let i = buf.length - 22; i >= min; i -= 1) {
-    if (buf.readUInt32LE(i) === 0x06054b50) return i
-  }
-  throw new Error('Invalid zip file')
-}
-
-function normalizeZipMember(raw: string): string {
-  const clean = raw.replace(/\\/g, '/').trim().replace(/\/+$/, '')
-  if (!clean) return ''
-  const parts = clean.split('/')
-  if (parts.some((part) => !part || part === '.' || part === '..'))
-    throw new Error(`unsafe path in skill zip: ${raw}`)
-  return parts.join('/')
-}
-
-function extractZipEntry(buf: Buffer, entry: ZipEntry): Buffer {
-  const offset = entry.localOffset
-  if (buf.readUInt32LE(offset) !== 0x04034b50)
-    throw new Error('Invalid zip local header')
-  const nameLen = buf.readUInt16LE(offset + 26)
-  const extraLen = buf.readUInt16LE(offset + 28)
-  const start = offset + 30 + nameLen + extraLen
-  const compressed = buf.subarray(start, start + entry.compressedSize)
-  if (entry.method === 0) return Buffer.from(compressed)
-  if (entry.method === 8) return inflateRawSync(compressed)
-  throw new Error(`Unsupported zip compression method: ${entry.method}`)
 }

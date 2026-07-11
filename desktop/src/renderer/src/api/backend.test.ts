@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { hasCoreBridge, invokeCore, onCoreEvent, openPath } from './backend'
+import {
+  getPathForFile,
+  hasCoreBridge,
+  invokeCore,
+  onCoreEvent,
+  openPath,
+} from './backend'
 
 const g = globalThis as unknown as { window?: unknown }
 
@@ -31,6 +37,15 @@ describe('with an injected Core IPC bridge', () => {
       { ok: true },
     )
     expect(calls).toEqual([['bootstrap', { sessionId: 's1' }]])
+  })
+
+  it('resolves native file paths only through the preload bridge', () => {
+    const file = new File(['zip'], 'demo.zip')
+    g.window = {
+      emperor: { getPathForFile: () => '/tmp/demo.zip' },
+    }
+
+    expect(getPathForFile(file)).toBe('/tmp/demo.zip')
   })
 
   it('throws safe Core IPC errors instead of returning them as successful payloads', async () => {

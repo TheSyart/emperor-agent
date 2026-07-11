@@ -31,6 +31,12 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       externalPayload: () => ({ running: true, store: { exists: true } }),
       activeTasks: () => [{ id: 'turn:1', status: 'running' }],
       desktopPetPayload: async () => ({ enabled: false, running: false }),
+      environmentSummary: async () => ({
+        platform: 'darwin',
+        required: 4,
+        ready: 3,
+        activeJob: null,
+      }),
     })
 
     const payload = await service.payload()
@@ -60,6 +66,13 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     expect(payload.external).toMatchObject({ running: true })
     expect(payload.activeTasks).toHaveLength(1)
     expect(payload.desktopPet).toMatchObject({ enabled: false, running: false })
+    expect(payload.environment).toEqual({
+      platform: 'darwin',
+      required: 4,
+      ready: 3,
+      activeJob: null,
+    })
+    expect(payload.environment).not.toHaveProperty('logs')
     expect(payload.dependencies).toMatchObject({
       nodeRuntime: true,
       desktopRenderer: true,
@@ -122,6 +135,23 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       allowRoots: [{ path: workspace, label: 'workspace' }],
       denyRoots: [{ path: stateRoot, label: 'state' }],
     })
+  })
+
+  it('contains Environment probe failures without leaking diagnostics internals', async () => {
+    const payload = await new CoreDiagnosticsService(tmp('emperor-diag-env-'), {
+      environmentSummary: async () => {
+        throw new Error('secret executable path')
+      },
+    }).payload()
+
+    expect(payload.environment).toEqual({
+      status: 'unavailable',
+      error: {
+        code: 'internal_error',
+        message: '发生内部错误，请查看日志。',
+      },
+    })
+    expect(JSON.stringify(payload.environment)).not.toContain('secret')
   })
 
   it('exposes the legacy state migration report when supplied, and a safe empty default otherwise', async () => {

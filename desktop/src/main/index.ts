@@ -32,6 +32,7 @@ const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
 let config = resolveConfig({ argv: mainArgv, env: process.env })
 let legacyRuntimeRoot = config.runtimeRoot
+let packagedRuntimeRevision = ''
 const rendererRoot = path.join(mainDir, '..', 'renderer')
 const appIconPath = resolveAppIconPath({
   dirname: mainDir,
@@ -117,6 +118,7 @@ function prepareMainRuntime(): void {
       appVersion: app.getVersion(),
     })
     legacyRuntimeRoot = prepared.legacyRuntimeRoot
+    packagedRuntimeRevision = prepared.manifest.runtimeRevision
     return
   }
   config = resolveConfig({ argv: mainArgv, env: process.env })
@@ -343,6 +345,10 @@ async function startup(): Promise<void> {
       ipcMain,
       eventBridge: coreEventBridge,
       coreOptions: {
+        appVersion: app.getVersion(),
+        ...(packagedRuntimeRevision
+          ? { runtimeRevision: packagedRuntimeRevision }
+          : {}),
         stateRoot: config.stateRoot,
         legacyRuntimeRoot: app.isPackaged ? legacyRuntimeRoot : null,
         legacyRuntimeSkillsHandled: app.isPackaged,

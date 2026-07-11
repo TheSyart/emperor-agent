@@ -29,6 +29,7 @@ import {
 } from './services/config-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
+import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { CoreModelService } from './services/model-service'
@@ -40,12 +41,16 @@ import { ToolResultStore } from '../context/tool-results'
 import { WatchlistService } from '../watchlist/service'
 import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
 import type { CoreOperationKey } from './operations'
+import { missingSkillRequirementsFromStatus } from '../environment/probe'
+import type { SkillRequirements } from '../skills/manager'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Dict = Record<string, unknown>
 
 export interface CoreApiCreateOptions extends AgentLoopCreateOptions {
   loop?: AgentLoop | null
+  appVersion?: string
+  runtimeRevision?: string
 }
 
 export interface RouteOperation {
@@ -150,12 +155,18 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('skills.package', 'POST', '/api/skills/package'),
   op('skills.save', 'POST', '/api/skill'),
   op('skills.delete', 'DELETE', '/api/skill'),
-  op('skills.importArchive', 'POST', '/api/skills/import'),
+  op('skills.previewInstall', 'POST', '/api/skills/install/preview'),
+  op('skills.confirmInstall', 'POST', '/api/skills/install/confirm'),
   op('sidebar.get', 'GET', '/api/sidebar-state'),
   op('sidebar.patch', 'PATCH', '/api/sidebar-state'),
   op('diagnostics.get', 'GET', '/api/diagnostics'),
   op('desktopPet.get', 'GET', '/api/desktop-pet'),
   op('desktopPet.setEnabled', 'POST', '/api/desktop-pet'),
+  op('environment.getStatus', 'GET', '/api/environment'),
+  op('environment.createInstallPlan', 'POST', '/api/environment/plans'),
+  op('environment.install', 'POST', '/api/environment/install'),
+  op('environment.cancelInstall', 'POST', '/api/environment/cancel'),
+  op('environment.getInstallLog', 'GET', '/api/environment/install-log'),
 ] as const
 
 type MissingRouteOperation = Exclude<
@@ -182,13 +193,18 @@ export class CoreApi {
   readonly configService: CoreConfigService
   readonly desktopPetService: CoreDesktopPetService
   readonly diagnosticsService: CoreDiagnosticsService
+  readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
   readonly memoryService: CoreMemoryService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly teamService: CoreTeamService
 
-  private constructor(root: string, loop: AgentLoop) {
+  private constructor(
+    root: string,
+    loop: AgentLoop,
+    opts: Pick<CoreApiCreateOptions, 'appVersion' | 'runtimeRevision'> = {},
+  ) {
     this.root = resolve(root)
     this.loop = loop
     this.paths = loop.paths
@@ -240,6 +256,45 @@ export class CoreApi {
       refreshRuntimeContext: () => {
         this.loop.refreshRuntimeContext()
       },
+      resolveMissing: async (requirements: SkillRequirements) => {
+        const skillName = 'install-candidate'
+        const projectRoot =
+          this.loop.activeSession?.mode === 'build'
+            ? (this.loop.activeSession.project_path ?? this.root)
+            : this.root
+        const status = await this.loop.environmentProbe.getStatus({
+          projectRoot,
+          forceRefresh: true,
+          skillRequirements: [
+            { skillName, skillStatus: 'active', requirements },
+          ],
+        })
+        return missingSkillRequirementsFromStatus(
+          status,
+          skillName,
+          requirements,
+        )
+      },
+    })
+    this.environmentService = new CoreEnvironmentService({
+      stateRoot: this.paths.stateRoot,
+      catalog: this.loop.environmentCatalog,
+      probe: this.loop.environmentProbe,
+      skillManager: this.loop.skillManager,
+      projectRoot: () =>
+        this.loop.activeSession?.mode === 'build'
+          ? (this.loop.activeSession.project_path ?? this.root)
+          : this.root,
+      appVersion: opts.appVersion ?? '0.0.0-dev',
+      runtimeRevision:
+        opts.runtimeRevision ?? this.loop.environmentCatalog.revision,
+      emitRuntime: async (event) => {
+        await this.emitRuntime(event, {
+          sessionId: this.loop.activeSessionId,
+        })
+      },
+      reconcileBlockedSkills: async () =>
+        await this.skillService.reconcileBlocked(),
     })
     this.teamService = new CoreTeamService({
       teamManager: () => this.loop.teamManagerForActiveSession(),
@@ -307,13 +362,16 @@ export class CoreApi {
       externalPayload: () => this.externalBridge.payload(),
       activeTasks: () => this.loop.activeTasks.list(),
       desktopPetPayload: () => this.desktopPet.get(),
+      environmentSummary: () => this.environmentService.diagnosticsSummary(),
     })
   }
 
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
     const loop = opts.loop ?? (await AgentLoop.create(opts))
-    return new CoreApi(root, loop)
+    const api = new CoreApi(root, loop, opts)
+    await api.environmentService.initialize()
+    return api
   }
 
   async close(): Promise<void> {
@@ -842,10 +900,37 @@ export class CoreApi {
       this.assertMutation('skills', 'delete')
       return this.skillService.delete(name)
     },
-    importArchive: (archive: unknown) => {
-      this.assertMutation('skills', 'import')
-      return this.skillService.importArchive(archive)
+    previewInstall: (
+      input: Parameters<CoreSkillService['previewInstall']>[0],
+    ) => this.skillService.previewInstall(input),
+    confirmInstall: (
+      input: Parameters<CoreSkillService['confirmInstall']>[0],
+    ) => {
+      this.assertMutation('skills', 'confirm install')
+      return this.skillService.confirmInstall(input)
     },
+  }
+
+  readonly environment = {
+    getStatus: (
+      input: Parameters<CoreEnvironmentService['getStatus']>[0] = {},
+    ) => this.environmentService.getStatus(input),
+    createInstallPlan: (
+      input: Parameters<CoreEnvironmentService['createInstallPlan']>[0],
+    ) => this.environmentService.createInstallPlan(input),
+    install: (input: Parameters<CoreEnvironmentService['install']>[0]) => {
+      this.assertMutation('environment', 'install')
+      return this.environmentService.install(input)
+    },
+    cancelInstall: (
+      input: Parameters<CoreEnvironmentService['cancelInstall']>[0],
+    ) => {
+      this.assertMutation('environment', 'cancel install')
+      return this.environmentService.cancelInstall(input)
+    },
+    getInstallLog: (
+      input: Parameters<CoreEnvironmentService['getInstallLog']>[0],
+    ) => this.environmentService.getInstallLog(input),
   }
 
   readonly sidebar = {

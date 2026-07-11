@@ -82,6 +82,7 @@ export interface EnvironmentInstallOrchestratorOptions {
   now?: () => Date
   idFactory?: (kind: 'plan' | 'job') => string
   lockStaleMs?: number
+  onJobUpdate?: (job: EnvironmentJobRecord) => void | Promise<void>
 }
 
 interface RegisteredPlan {
@@ -108,6 +109,8 @@ export class EnvironmentInstallOrchestrator {
   private readonly now: () => Date
   private readonly idFactory: (kind: 'plan' | 'job') => string
   private readonly lockStaleMs: number
+  private readonly onJobUpdate:
+    ((job: EnvironmentJobRecord) => void | Promise<void>) | null
   private readonly plans = new Map<string, RegisteredPlan>()
   private activeInstall: ActiveInstall | null = null
 
@@ -123,6 +126,7 @@ export class EnvironmentInstallOrchestrator {
       opts.idFactory ??
       ((kind) => `${kind}_${randomUUID().replace(/-/g, '').slice(0, 16)}`)
     this.lockStaleMs = opts.lockStaleMs ?? LOCK_STALE_MS
+    this.onJobUpdate = opts.onJobUpdate ?? null
     this.store = new EnvironmentStore(opts.stateRoot, {
       now: () => this.now().toISOString(),
     })
@@ -186,9 +190,12 @@ export class EnvironmentInstallOrchestrator {
     }
   }
 
-  async cancelActiveInstall(): Promise<EnvironmentJobRecord | null> {
+  async cancelActiveInstall(
+    expectedJobId?: string,
+  ): Promise<EnvironmentJobRecord | null> {
     const active = this.activeInstall
     if (active) {
+      if (expectedJobId && active.jobId !== expectedJobId) return null
       const job = await this.store.getJob(active.jobId)
       if (!job) return null
       const cancelling = environmentJobRecordSchema.parse({
@@ -197,11 +204,14 @@ export class EnvironmentInstallOrchestrator {
         updatedAt: this.now().toISOString(),
       })
       await this.store.saveJob(cancelling)
+      await this.notifyJobUpdate(cancelling)
       active.controller.abort()
       return cancelling
     }
     const awaiting = (await this.store.listJobs()).find(
-      (job) => job.status === 'awaiting_user',
+      (job) =>
+        job.status === 'awaiting_user' &&
+        (!expectedJobId || job.jobId === expectedJobId),
     )
     if (!awaiting) return null
     const cancelled = environmentJobRecordSchema.parse({
@@ -216,6 +226,7 @@ export class EnvironmentInstallOrchestrator {
       error: safeError('cancelled'),
     })
     await this.store.saveJob(cancelled)
+    await this.notifyJobUpdate(cancelled)
     await this.writeReceipt(
       cancelled,
       await this.getStatus({
@@ -265,6 +276,7 @@ export class EnvironmentInstallOrchestrator {
         error: safeError('interrupted'),
       })
       await this.store.saveJob(interrupted)
+      await this.notifyJobUpdate(interrupted)
       await this.writeReceipt(
         interrupted,
         await this.getStatus({
@@ -306,6 +318,7 @@ export class EnvironmentInstallOrchestrator {
     this.activeInstall = { jobId: job.jobId, controller }
     try {
       await this.store.saveJob(job)
+      await this.notifyJobUpdate(job)
       await this.store.appendLog(job.jobId, {
         level: 'info',
         kind: 'job_started',
@@ -469,7 +482,17 @@ export class EnvironmentInstallOrchestrator {
       updatedAt: this.now().toISOString(),
     })
     await this.store.saveJob(updated)
+    await this.notifyJobUpdate(updated)
     return updated
+  }
+
+  private async notifyJobUpdate(job: EnvironmentJobRecord): Promise<void> {
+    if (!this.onJobUpdate) return
+    try {
+      await this.onJobUpdate(structuredClone(job))
+    } catch {
+      // Observability is isolated from the installation state machine.
+    }
   }
 
   private async writeReceipt(

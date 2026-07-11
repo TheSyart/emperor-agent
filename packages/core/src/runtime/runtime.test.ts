@@ -132,6 +132,30 @@ describe('runtime events (test_runtime_events.py)', () => {
       taskId: 'task_1',
     })
   })
+
+  it('bounds Environment events to identifiers, counts, and digests', () => {
+    const event = runtimeEvents.environmentInstallProgress({
+      jobId: 'job_1?token=secret',
+      toolId: 'git; curl evil',
+      stepId: 'step_1',
+      status: 'running',
+      completedSteps: -3,
+      totalSteps: 99_999,
+      errorCode: 'download_failed',
+    })
+
+    expect(event).toEqual({
+      event: 'environment_install_progress',
+      job_id: 'job_1tokensecret',
+      tool_id: 'gitcurlevil',
+      step_id: 'step_1',
+      status: 'running',
+      completed_steps: 0,
+      total_steps: 10_000,
+      error_code: 'download_failed',
+    })
+    expect(JSON.stringify(event)).not.toContain('token=secret')
+  })
 })
 
 describe('RuntimeEventStore (test_runtime_events.py)', () => {

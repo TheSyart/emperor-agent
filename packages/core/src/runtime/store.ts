@@ -109,6 +109,9 @@ const INDEX_FORCE_WRITE_EVENTS = new Set([
   'plan_approved',
   'interaction_cancelled',
   'session_created',
+  'environment_install_completed',
+  'environment_install_failed',
+  'environment_changed',
 ])
 
 export class RuntimeEventStore {

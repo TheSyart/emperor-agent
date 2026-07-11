@@ -50,6 +50,19 @@ class FakeTool extends Tool {
 }
 
 describe('CoreSkillService (MIG-IPC-007)', () => {
+  it('maps installer internals to stable safe API errors', async () => {
+    const service = new CoreSkillService(tmp('emperor-skill-safe-error-'))
+
+    await expect(
+      service.previewInstall({
+        source: { kind: 'local', path: '/missing/private/skill.zip' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'skill_preview_failed',
+      action: 'review_skill_install',
+    })
+  })
+
   it('projects tool definitions into WebUI capability payloads', () => {
     const registry = new ToolRegistry()
     registry.register(
@@ -228,7 +241,7 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     expect(readFileSync(join(outside, 'SKILL.md'), 'utf8')).toBe('outside\n')
   })
 
-  it('round-trips a deterministic Core package through the legacy archive importer', () => {
+  it('round-trips a deterministic Core package through preview and confirm', async () => {
     const sourceRoot = tmp('emperor-skill-service-package-source-')
     const destinationRoot = tmp('emperor-skill-service-package-destination-')
     const source = new CoreSkillService(sourceRoot)
@@ -241,9 +254,17 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     })
     const packaged = source.package({ name: 'release-audit' })
 
-    expect(
-      destination.importArchive({ raw: readFileSync(packaged.path) }),
-    ).toEqual({ imported: 'release-audit' })
+    const preview = await destination.previewInstall({
+      source: { kind: 'local', path: packaged.path },
+    })
+    await expect(
+      destination.confirmInstall({
+        previewId: preview.previewId,
+        digest: preview.digest,
+        candidateId: preview.candidates[0]!.candidateId,
+        permissionConfirmed: true,
+      }),
+    ).resolves.toMatchObject({ name: 'release-audit', status: 'active' })
     expect(destination.get('release-audit')).toMatchObject({
       name: 'release-audit',
       source: 'user',

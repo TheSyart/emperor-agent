@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { EnvironmentError } from '@emperor/core'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { registerCoreIpc, type CoreApiLike } from './ipc'
 
@@ -105,6 +106,39 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
       expect.any(Error),
     )
     errorSpy.mockRestore()
+  })
+
+  it('preserves stable Environment error codes without leaking internals', async () => {
+    const ipc = new FakeIpcMain()
+    registerCoreIpc(
+      ipc,
+      asCoreApi({
+        environment: {
+          install: () => {
+            throw new EnvironmentError('integrity_failed', {
+              detail: 'https://private.example/tool?token=secret',
+            })
+          },
+        },
+      }),
+      ['environment.install'],
+    )
+
+    const payload = await ipc.invoke('emperor:core:environment:install', {
+      planId: 'plan_1',
+      acceptedLicenseIds: [],
+      confirmedStepIds: [],
+    })
+
+    expect(payload).toEqual({
+      ok: false,
+      error: {
+        code: 'integrity_failed',
+        message: '安装资源完整性校验失败，文件不会被执行。',
+        action: 'retry_download',
+      },
+    })
+    expect(JSON.stringify(payload)).not.toContain('token=secret')
   })
 
   it('contains failures thrown by a domain error serializer', async () => {

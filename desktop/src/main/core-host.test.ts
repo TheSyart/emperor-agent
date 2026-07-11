@@ -28,6 +28,13 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'hooks.setProjectTrust',
         'hooks.testMatch',
         'hooks.cancelRun',
+        'environment.getStatus',
+        'environment.createInstallPlan',
+        'environment.install',
+        'environment.cancelInstall',
+        'environment.getInstallLog',
+        'skills.previewInstall',
+        'skills.confirmInstall',
       ]),
     )
   })

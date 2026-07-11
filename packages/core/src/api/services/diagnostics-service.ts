@@ -15,6 +15,7 @@ import type { ActiveTaskInfo, ActiveTaskKind } from '../../runtime/active'
 import type { RuntimeStats } from '../../runtime/store'
 import type { CoreDesktopPetPayload } from './desktop-pet-service'
 import { RUNTIME_MANIFEST_FILE } from '../../runtime/resources'
+import { toSafeError } from '../../errors'
 
 type Dict = Record<string, unknown>
 
@@ -35,6 +36,7 @@ export interface CoreDiagnosticsServiceDeps {
   activeTasks?: () => unknown[]
   desktopPetPayload?: () =>
     Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
+  environmentSummary?: () => Dict | Promise<Dict>
 }
 
 export interface CoreDiagnosticsPayload {
@@ -51,6 +53,7 @@ export interface CoreDiagnosticsPayload {
   external: Dict
   activeTasks: ActiveTaskInfo[]
   desktopPet: CoreDesktopPetPayload
+  environment: Dict
   dependencies: Dict
 }
 
@@ -78,6 +81,7 @@ export class CoreDiagnosticsService {
       external: this.deps.externalPayload?.() ?? {},
       activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
       desktopPet: desktopPetPayload(await this.deps.desktopPetPayload?.()),
+      environment: await this.environmentSummaryPayload(),
       dependencies: this.dependencies(),
     }
   }
@@ -163,6 +167,15 @@ export class CoreDiagnosticsService {
     const paths = this.deps.runtimePaths
     if (!paths) return { count: 0, recent: [] }
     return listRecentPromptSnapshots(paths.sessionsRoot, 5)
+  }
+
+  private async environmentSummaryPayload(): Promise<Dict> {
+    if (!this.deps.environmentSummary) return {}
+    try {
+      return await this.deps.environmentSummary()
+    } catch (error) {
+      return { status: 'unavailable', error: toSafeError(error) }
+    }
   }
 }
 

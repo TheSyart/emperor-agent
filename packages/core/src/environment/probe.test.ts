@@ -12,10 +12,12 @@ import { describe, expect, it } from 'vitest'
 import { loadBundledToolCatalog, type ToolCatalogEntry } from './catalog'
 import {
   EnvironmentProbe,
+  missingSkillRequirementsFromStatus,
   readWindowsNpmVersion,
   resolveCatalogExecutable,
   type EnvironmentExecutableResolver,
   type SkillEnvironmentRequirement,
+  type EnvironmentProbeStatus,
 } from './probe'
 import type {
   EnvironmentProcessRequest,
@@ -435,6 +437,52 @@ describe('EnvironmentProbe', () => {
     expect(readWindowsNpmVersion(shim)).toBe('12.0.1')
     writeFileSync(join(npmDir, 'package.json'), '{broken', 'utf8')
     expect(readWindowsNpmVersion(shim)).toBeNull()
+  })
+
+  it('maps probe Skill state back to the original requirement vocabulary', () => {
+    const status = {
+      skills: [
+        {
+          skillName: 'candidate',
+          status: 'blocked',
+          requiredTools: ['ripgrep', 'node'],
+          missing: ['ripgrep', 'node', 'env:API_TOKEN'],
+          unsupported: ['bin:custom-tool'],
+        },
+      ],
+    } as unknown as EnvironmentProbeStatus
+
+    expect(
+      missingSkillRequirementsFromStatus(status, 'candidate', {
+        bins: ['rg', 'custom-tool', 'git'],
+        runtimes: ['node'],
+        env: ['API_TOKEN', 'READY_TOKEN'],
+      }),
+    ).toEqual({
+      bins: ['rg', 'custom-tool'],
+      runtimes: ['node'],
+      env: ['API_TOKEN'],
+    })
+
+    const dependencyOnly = {
+      ...status,
+      skills: [
+        {
+          skillName: 'candidate',
+          status: 'blocked',
+          requiredTools: ['volta', 'node'],
+          missing: ['volta'],
+          unsupported: [],
+        },
+      ],
+    } as EnvironmentProbeStatus
+    expect(
+      missingSkillRequirementsFromStatus(dependencyOnly, 'candidate', {
+        bins: [],
+        runtimes: ['node'],
+        env: [],
+      }),
+    ).toEqual({ bins: [], runtimes: ['node'], env: [] })
   })
 
   it.skipIf(process.platform === 'win32')(

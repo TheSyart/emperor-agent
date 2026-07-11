@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
+import {
+  environmentIdSchema,
+  environmentToolIdSchema,
+  sha256Schema,
+} from '../environment/models'
 
 const dictSchema = z.record(z.string(), z.unknown())
 const idSchema = z.string().trim().min(1)
@@ -35,6 +40,54 @@ const skillValidateSchema = z
   })
   .strict()
 const skillPackageSchema = z.object({ name: creatorSkillNameSchema }).strict()
+const environmentStatusSchema = z
+  .object({ forceRefresh: z.boolean().optional() })
+  .strict()
+const environmentPlanSchema = z
+  .object({ toolIds: z.array(environmentToolIdSchema).min(1).max(64) })
+  .strict()
+const environmentInstallSchema = z
+  .object({
+    planId: environmentIdSchema,
+    acceptedLicenseIds: z.array(environmentIdSchema).max(64),
+    confirmedStepIds: z.array(environmentIdSchema).max(128),
+  })
+  .strict()
+const environmentCancelSchema = z
+  .object({ jobId: environmentIdSchema })
+  .strict()
+const environmentLogSchema = z
+  .object({
+    jobId: environmentIdSchema,
+    cursor: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict()
+const skillInstallSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('local'), path: z.string().min(1).max(4_096) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('url'),
+      url: z.string().url().startsWith('https://').max(2_048),
+    })
+    .strict(),
+])
+const skillPreviewInstallSchema = z
+  .object({ source: skillInstallSourceSchema })
+  .strict()
+const skillConfirmInstallSchema = z
+  .object({
+    previewId: z.string().regex(/^preview_[a-f0-9]{24}$/),
+    digest: sha256Schema,
+    candidateId: z
+      .string()
+      .regex(/^candidate_[a-f0-9]{20}$/)
+      .optional(),
+    permissionConfirmed: z.literal(true),
+  })
+  .strict()
 const nullableStringSchema = z.string().nullable().optional()
 const numberLikeSchema = z.union([z.number(), z.string()]).nullable().optional()
 const booleanLikeSchema = z
@@ -257,6 +310,26 @@ export const CORE_OPERATION_REGISTRY = {
     api.desktopPet.setEnabled(enabled),
   ),
   'diagnostics.get': operation(z.tuple([]), (api) => api.diagnostics.get()),
+  'environment.cancelInstall': operation(
+    z.tuple([environmentCancelSchema]),
+    (api, [input]) => api.environment.cancelInstall(input),
+  ),
+  'environment.createInstallPlan': operation(
+    z.tuple([environmentPlanSchema]),
+    (api, [input]) => api.environment.createInstallPlan(input),
+  ),
+  'environment.getInstallLog': operation(
+    z.tuple([environmentLogSchema]),
+    (api, [input]) => api.environment.getInstallLog(input),
+  ),
+  'environment.getStatus': operation(
+    z.tuple([environmentStatusSchema.optional()]),
+    (api, [input]) => api.environment.getStatus(input),
+  ),
+  'environment.install': operation(
+    z.tuple([environmentInstallSchema]),
+    (api, [input]) => api.environment.install(input),
+  ),
   'external.get': operation(z.tuple([]), (api) => api.external.get()),
   'hooks.cancelRun': operation(z.tuple([dictSchema]), (api, [input]) =>
     api.hooks.cancelRun(input),
@@ -441,12 +514,17 @@ export const CORE_OPERATION_REGISTRY = {
   'skills.get': operation(z.tuple([idSchema]), (api, [name]) =>
     api.skills.get(name),
   ),
-  'skills.importArchive': operation(z.tuple([dictSchema]), (api, [input]) =>
-    api.skills.importArchive(input),
+  'skills.confirmInstall': operation(
+    z.tuple([skillConfirmInstallSchema]),
+    (api, [input]) => api.skills.confirmInstall(input),
   ),
   'skills.list': operation(z.tuple([]), (api) => api.skills.list()),
   'skills.package': operation(z.tuple([skillPackageSchema]), (api, [input]) =>
     api.skills.package(input),
+  ),
+  'skills.previewInstall': operation(
+    z.tuple([skillPreviewInstallSchema]),
+    (api, [input]) => api.skills.previewInstall(input),
   ),
   'skills.save': operation(
     z.tuple([idSchema, z.string()]),

@@ -33,4 +33,17 @@ function _assertCoreBridgeTypes(): void {
 
   // @ts-expect-error desktopPet.setEnabled requires a boolean
   void typedBridge.invokeCore('desktopPet.setEnabled', 'true')
+
+  void typedBridge.invokeCore('environment.getStatus', { forceRefresh: true })
+  void typedBridge.invokeCore('environment.createInstallPlan', {
+    toolIds: ['git', 'node'],
+  })
+
+  void typedBridge.invokeCore('environment.install', {
+    planId: 'plan_1',
+    acceptedLicenseIds: [],
+    confirmedStepIds: [],
+    // @ts-expect-error renderer cannot submit executable commands
+    command: 'curl evil',
+  })
 }

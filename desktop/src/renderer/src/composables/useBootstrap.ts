@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { cloneJson, core } from '../api/http'
+import { getPathForFile } from '../api/backend'
 import type {
   BootstrapPayload,
   ModelConfigRaw,
@@ -112,14 +113,29 @@ export function useBootstrap(showToast: (message: string) => void) {
     const file = formData.get('file')
     if (!(file instanceof File))
       throw new Error("Expected multipart field 'file'")
-    const data = await core('skills.importArchive', {
-      name: file.name,
-      mime: file.type || 'application/zip',
-      raw: new Uint8Array(await file.arrayBuffer()),
+    const preview = await core('skills.previewInstall', {
+      source: { kind: 'local', path: getPathForFile(file) },
+    })
+    if (preview.candidates.length !== 1)
+      throw new Error('此压缩包包含多个 Skill，请使用安装预览界面选择')
+    const candidate = preview.candidates[0]!
+    if (!candidate.valid)
+      throw new Error(candidate.errors.join('；') || 'Skill 校验失败')
+    const riskCount =
+      candidate.scripts.length + candidate.externalCommands.length
+    const confirmed = window.confirm(
+      `安装 Skill「${candidate.name}」？${riskCount ? `\n检测到 ${riskCount} 项脚本或外部命令。` : ''}`,
+    )
+    if (!confirmed) throw new Error('已取消 Skill 安装')
+    const data = await core('skills.confirmInstall', {
+      previewId: preview.previewId,
+      digest: preview.digest,
+      candidateId: candidate.candidateId,
+      permissionConfirmed: true,
     })
     await loadBootstrap(false)
-    showToast(`Skill「${data.imported}」已导入`)
-    return data.imported
+    showToast(`Skill「${data.name}」已安装`)
+    return data.name
   }
 
   async function loadConfig() {

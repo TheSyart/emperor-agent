@@ -20,6 +20,7 @@ import { RuntimeEventStore } from '../runtime/store'
 import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
 import { CoreApi, CORE_API_ROUTE_OPERATIONS } from './core-api'
 import { CoreMutationGuardError } from './mutation-guard'
+import { CoreSkillService } from './services/skill-service'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -40,6 +41,11 @@ const EXPECTED_OPERATIONS = [
   'desktopPet.get',
   'desktopPet.setEnabled',
   'diagnostics.get',
+  'environment.cancelInstall',
+  'environment.createInstallPlan',
+  'environment.getInstallLog',
+  'environment.getStatus',
+  'environment.install',
   'external.get',
   'hooks.cancelRun',
   'hooks.getAudit',
@@ -89,12 +95,13 @@ const EXPECTED_OPERATIONS = [
   'sessions.rename',
   'sidebar.get',
   'sidebar.patch',
+  'skills.confirmInstall',
   'skills.create',
   'skills.delete',
   'skills.get',
-  'skills.importArchive',
   'skills.list',
   'skills.package',
+  'skills.previewInstall',
   'skills.save',
   'skills.tools',
   'skills.validate',
@@ -1474,9 +1481,20 @@ describe('CoreApi (MIG-IPC-001)', () => {
     expect(() => api.skills.delete('blocked-delete')).toThrow(
       CoreMutationGuardError,
     )
-    expect(() => api.skills.importArchive({ raw: [] })).toThrow(
-      CoreMutationGuardError,
-    )
+    expect(() =>
+      api.skills.confirmInstall({
+        previewId: `preview_${'a'.repeat(24)}`,
+        digest: 'b'.repeat(64),
+        permissionConfirmed: true,
+      }),
+    ).toThrow(CoreMutationGuardError)
+    expect(() =>
+      api.environment.install({
+        planId: 'plan_1',
+        acceptedLicenseIds: [],
+        confirmedStepIds: [],
+      }),
+    ).toThrow(CoreMutationGuardError)
 
     await api.close()
   })
@@ -2260,7 +2278,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
-  it('imports skill zip archives through CoreApi skills.importArchive', async () => {
+  it('previews and confirms local Skill archives through CoreApi', async () => {
     const root = tmp('emperor-core-api-')
     const stateRoot = join(root, '.emperor')
     const api = await CoreApi.create({
@@ -2269,20 +2287,31 @@ describe('CoreApi (MIG-IPC-001)', () => {
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
-    const archive = makeStoredZip({
-      'imported-skill/SKILL.md': '# Imported\n\nUse when testing import.\n',
-      'imported-skill/notes/readme.txt': 'extra file\n',
+    const source = new CoreSkillService(join(root, 'source-state'))
+    source.create({
+      name: 'imported-skill',
+      description: 'Use when testing a secure local install.',
+      resources: ['references'],
+    })
+    const archivePath = source.package({ name: 'imported-skill' }).path
+
+    const preview = await api.skills.previewInstall({
+      source: { kind: 'local', path: archivePath },
+    })
+    const installed = await api.skills.confirmInstall({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      candidateId: preview.candidates[0]!.candidateId,
+      permissionConfirmed: true,
     })
 
-    expect(
-      api.skills.importArchive({ name: 'skill.zip', raw: archive }),
-    ).toEqual({ imported: 'imported-skill' })
+    expect(installed).toMatchObject({ name: 'imported-skill' })
     expect(
       readFileSync(
         join(stateRoot, 'skills', 'imported-skill', 'SKILL.md'),
         'utf8',
       ),
-    ).toContain('Imported')
+    ).toContain('Use when testing a secure local install.')
 
     await api.close()
   })
@@ -2433,45 +2462,4 @@ function response(content: string): LLMResponse {
     reasoningContent: null,
     thinkingBlocks: null,
   }
-}
-
-function makeStoredZip(files: Record<string, string>): Uint8Array {
-  const localParts: Buffer[] = []
-  const centralParts: Buffer[] = []
-  let offset = 0
-  for (const [name, content] of Object.entries(files)) {
-    const nameBuf = Buffer.from(name)
-    const data = Buffer.from(content)
-    const local = Buffer.alloc(30)
-    local.writeUInt32LE(0x04034b50, 0)
-    local.writeUInt16LE(20, 4)
-    local.writeUInt16LE(0, 8)
-    local.writeUInt32LE(0, 14)
-    local.writeUInt32LE(data.length, 18)
-    local.writeUInt32LE(data.length, 22)
-    local.writeUInt16LE(nameBuf.length, 26)
-    localParts.push(local, nameBuf, data)
-
-    const central = Buffer.alloc(46)
-    central.writeUInt32LE(0x02014b50, 0)
-    central.writeUInt16LE(20, 6)
-    central.writeUInt16LE(0, 10)
-    central.writeUInt32LE(0, 16)
-    central.writeUInt32LE(data.length, 20)
-    central.writeUInt32LE(data.length, 24)
-    central.writeUInt16LE(nameBuf.length, 28)
-    central.writeUInt32LE(offset, 42)
-    centralParts.push(central, nameBuf)
-
-    offset += local.length + nameBuf.length + data.length
-  }
-  const centralStart = offset
-  const central = Buffer.concat(centralParts)
-  const eocd = Buffer.alloc(22)
-  eocd.writeUInt32LE(0x06054b50, 0)
-  eocd.writeUInt16LE(Object.keys(files).length, 8)
-  eocd.writeUInt16LE(Object.keys(files).length, 10)
-  eocd.writeUInt32LE(central.length, 12)
-  eocd.writeUInt32LE(centralStart, 16)
-  return new Uint8Array(Buffer.concat([...localParts, central, eocd]))
 }

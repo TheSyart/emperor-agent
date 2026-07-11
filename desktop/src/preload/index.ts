@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { createCoreBridge } from './core-ipc'
 import { createCoreEventBridge } from './core-events'
 
@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('emperor', {
   version: '0.1.0',
   platform: process.platform,
   selectDirectory: () => ipcRenderer.invoke('emperor:select-directory'),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   openPath: (target: string) => ipcRenderer.invoke('emperor:open-path', target),
   openPet: () => ipcRenderer.invoke('emperor:pet:open'),
   closePet: () => ipcRenderer.invoke('emperor:pet:close'),

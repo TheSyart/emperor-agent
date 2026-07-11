@@ -38,11 +38,27 @@ describe('useBootstrap IPC bootstrap (MIG-IPC-004)', () => {
   it('imports skill archives through Core IPC when the preload bridge is available', async () => {
     const calls: unknown[][] = []
     g.window = {
+      confirm: () => true,
       emperor: {
+        getPathForFile: () => '/tmp/demo.zip',
         invokeCore: async (...args: unknown[]) => {
           calls.push(args)
-          if (args[0] === 'skills.importArchive')
-            return { imported: 'demo-skill' }
+          if (args[0] === 'skills.previewInstall')
+            return {
+              previewId: `preview_${'a'.repeat(24)}`,
+              digest: 'b'.repeat(64),
+              candidates: [
+                {
+                  candidateId: `candidate_${'c'.repeat(20)}`,
+                  name: 'demo-skill',
+                  valid: true,
+                  errors: [],
+                  scripts: [],
+                  externalCommands: [],
+                },
+              ],
+            }
+          if (args[0] === 'skills.confirmInstall') return { name: 'demo-skill' }
           return { app: 'Emperor Agent' }
         },
       },
@@ -57,9 +73,12 @@ describe('useBootstrap IPC bootstrap (MIG-IPC-004)', () => {
 
     await expect(boot.importSkill(data)).resolves.toBe('demo-skill')
 
-    expect(calls[0]?.[0]).toBe('skills.importArchive')
-    expect(calls[0]?.[1]).toMatchObject({ name: 'demo.zip' })
-    expect(calls[0]?.[1]).toHaveProperty('raw')
+    expect(calls[0]).toEqual([
+      'skills.previewInstall',
+      { source: { kind: 'local', path: '/tmp/demo.zip' } },
+    ])
+    expect(calls[1]?.[0]).toBe('skills.confirmInstall')
+    expect(calls[1]?.[1]).toMatchObject({ permissionConfirmed: true })
     expect(calls.at(-1)).toEqual(['bootstrap', { sessionId: null }])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

@@ -673,6 +673,24 @@ export interface ProjectLegacyPrivateDataPayload {
   memory?: boolean
 }
 
+export interface DiagnosticsEnvironmentSummary {
+  catalogRevision?: string
+  platform?: 'darwin' | 'win32' | 'linux'
+  arch?: 'arm64' | 'x64'
+  projectRoot?: string
+  required?: number
+  ready?: number
+  missing?: number
+  versionMismatch?: number
+  blockedSkills?: number
+  diagnostics?: string[]
+  activeJob?: {
+    jobId?: string
+    status?: string
+    updatedAt?: string
+  } | null
+}
+
 export interface DiagnosticsPayload {
   root?: string
   paths?: DiagnosticsRuntimePaths
@@ -687,6 +705,7 @@ export interface DiagnosticsPayload {
   external?: ExternalDiagnosticsPayload
   activeTasks?: ActiveRuntimeTask[]
   desktopPet?: DesktopPetPayload & Record<string, unknown>
+  environment?: DiagnosticsEnvironmentSummary
   dependencies?: DiagnosticsDependencyPayload
 }
 
@@ -1214,6 +1233,18 @@ interface HookRuntimeEventFields {
   duration_ms?: number
 }
 
+interface EnvironmentRuntimeEventFields {
+  job_id?: string
+  tool_id?: string | null
+  step_id?: string | null
+  status?: string
+  completed_steps?: number
+  total_steps?: number
+  error_code?: string | null
+  catalog_revision?: string
+  project_fingerprint?: string
+}
+
 type WsEventVariants =
   | {
       event: 'ready'
@@ -1364,6 +1395,19 @@ type WsEventVariants =
       hook_ids?: string[]
       hook_run_ids?: string[]
     })
+  | (EnvironmentRuntimeEventFields & {
+      event: 'environment_install_started'
+    })
+  | (EnvironmentRuntimeEventFields & {
+      event: 'environment_install_progress'
+    })
+  | (EnvironmentRuntimeEventFields & {
+      event: 'environment_install_completed'
+    })
+  | (EnvironmentRuntimeEventFields & {
+      event: 'environment_install_failed'
+    })
+  | (EnvironmentRuntimeEventFields & { event: 'environment_changed' })
   | {
       event: 'turn_phase'
       phase?: string

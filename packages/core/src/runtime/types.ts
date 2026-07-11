@@ -30,6 +30,18 @@ export interface HookRuntimeEventFields {
   duration_ms?: number
 }
 
+export interface EnvironmentRuntimeEventFields {
+  job_id?: string
+  tool_id?: string | null
+  step_id?: string | null
+  status?: string
+  completed_steps?: number
+  total_steps?: number
+  error_code?: string | null
+  catalog_revision?: string
+  project_fingerprint?: string
+}
+
 export type RuntimeEvent = RuntimeEventEnvelope &
   (
     | {
@@ -186,6 +198,19 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         hook_ids?: string[]
         hook_run_ids?: string[]
       })
+    | (EnvironmentRuntimeEventFields & {
+        event: 'environment_install_started'
+      })
+    | (EnvironmentRuntimeEventFields & {
+        event: 'environment_install_progress'
+      })
+    | (EnvironmentRuntimeEventFields & {
+        event: 'environment_install_completed'
+      })
+    | (EnvironmentRuntimeEventFields & {
+        event: 'environment_install_failed'
+      })
+    | (EnvironmentRuntimeEventFields & { event: 'environment_changed' })
     | {
         event: 'turn_phase'
         phase?: string

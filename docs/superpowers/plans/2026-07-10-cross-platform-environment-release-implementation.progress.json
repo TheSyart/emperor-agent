@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T18:56:10+08:00",
+  "updated_at": "2026-07-11T19:26:49+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
-  "completed": 14,
-  "rounds": 14,
+  "completed": 15,
+  "rounds": 15,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -108,7 +108,7 @@
       "notes": "Round 14 completed from clean commit 8b84f954 with strict TDD and security review. SkillInstallService accepts canonical local paths, direct HTTPS .skill/.zip files and public GitHub repo/tree URLs; GitHub tree resolution supports slash-containing refs without credentials. Downloads reuse the DNS-pinned SSRF-safe HTTPS client, allow at most three redirects and stage under stateRoot with limits of 20 MiB download, 100 MiB unpacked, 1000 files, 20 MiB per file and bounded path depth/length. ZIP validation rejects traversal, links/devices, Unicode/case collisions, Windows reserved names, trailing dots/spaces, colons and control characters. Preview exposes source, digest, files, scripts, declared commands/environment and missing requirements; confirmation expires after ten minutes, requires explicit permission, is once-at-a-time, and revalidates the active preview fingerprint, staged archive, local source and candidate snapshot before atomic stage/backup/target replacement with rollback. Missing dependencies write a blocked marker, stay out of Skill summaries/load_skill and can be reactivated only after fresh dependency reconciliation. Focused tests cover source normalization, GitHub slash refs, mutation/expiry, rollback and blocked activation. Final make check passed Core 106 files / 891 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. Replacing the legacy skills.importArchive API path with preview/confirm operations is intentionally reserved for the immediately dependent ENV-API-015 task."
     },
     "ENV-API-015": {
-      "status": "pending",
+      "status": "done",
       "title": "接入 CoreApi、IPC、事件和 diagnostics",
       "depends_on": [
         "ENV-MAC-011",
@@ -116,8 +116,8 @@
         "ENV-LNX-013",
         "SKILL-INSTALL-014"
       ],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 15 completed from clean commit 223b4936 with strict TDD, contract testing and security review. CoreEnvironmentService now provides environment.getStatus/createInstallPlan/install/cancelInstall/getInstallLog over the existing immutable probe, persistent orchestrator/store and platform-specific executor selected without renderer command input. Status includes the signed catalog, at most 20 recent jobs and one active job; diagnostics adds a bounded environment summary and contains probe failures with safe errors; log pages enforce cursor/limit and cap malformed-line diagnostics. Environment install/cancel and Skill confirm use the existing Plan/Ask mutation guard. EnvironmentInstallOrchestrator publishes cloned job updates while isolating observer failures, requires a matching job ID for cancellation and safely skips startup recovery/reconciliation while another process owns the install lock. Five runtime events expose only bounded IDs, counts, statuses, error codes and digests, force-flush terminal events, and never include commands, environments or URL queries. CoreSkillService removed the legacy skills.importArchive bypass and exposes previewInstall/confirmInstall with strict Zod schemas, stable safe errors and native Electron webUtils path resolution; blocked Skill rechecks now share EnvironmentProbe state and fail closed on transitive installer dependencies. CoreOperationMap remains the single 90-operation source used by main, preload and renderer; packaged Desktop passes the signed runtime revision and app version into receipts. Final make check passed Core 107 files / 900 tests and Desktop 62 files / 282 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build."
     },
     "ENV-UI-016": {
       "status": "pending",

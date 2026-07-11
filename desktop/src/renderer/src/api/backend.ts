@@ -13,6 +13,7 @@ export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
 
 interface EmperorBridge {
   selectDirectory?: () => Promise<string | null>
+  getPathForFile?: (file: File) => string
   openPath?: (
     target: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
@@ -31,6 +32,15 @@ function bridge(): EmperorBridge | undefined {
 export async function selectDirectory(): Promise<string | null> {
   const picker = bridge()?.selectDirectory
   return typeof picker === 'function' ? picker() : null
+}
+
+export function getPathForFile(file: File): string {
+  const resolvePath = bridge()?.getPathForFile
+  if (typeof resolvePath !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const path = resolvePath(file).trim()
+  if (!path) throw new Error('无法读取所选文件路径')
+  return path
 }
 
 export async function openPath(target: string): Promise<void> {

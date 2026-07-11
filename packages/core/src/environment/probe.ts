@@ -508,6 +508,49 @@ export function collectSkillEnvironmentRequirements(
   })
 }
 
+export function missingSkillRequirementsFromStatus(
+  status: EnvironmentProbeStatus,
+  skillName: string,
+  requirements: SkillRequirements,
+): SkillRequirements {
+  const state = status.skills.find((skill) => skill.skillName === skillName)
+  if (!state) return normalizeRequirements(requirements)
+  const missing = new Set([...state.missing, ...state.unsupported])
+  const toolMissing = (name: string): boolean => {
+    const id = REQUIREMENT_ALIASES[name.toLowerCase()]
+    return id ? missing.has(id) : missing.has(`bin:${name}`)
+  }
+  const result = {
+    bins: requirements.bins.filter(toolMissing),
+    runtimes: requirements.runtimes.filter((name) => {
+      const id = REQUIREMENT_ALIASES[name.toLowerCase()]
+      return id ? missing.has(id) : missing.has(`runtime:${name}`)
+    }),
+    env: requirements.env.filter((name) => missing.has(`env:${name}`)),
+  }
+  return state.status !== 'ready' && !hasRequirements(result)
+    ? normalizeRequirements(requirements)
+    : result
+}
+
+function normalizeRequirements(
+  requirements: SkillRequirements,
+): SkillRequirements {
+  return {
+    bins: [...new Set(requirements.bins)].sort(),
+    runtimes: [...new Set(requirements.runtimes)].sort(),
+    env: [...new Set(requirements.env)].sort(),
+  }
+}
+
+function hasRequirements(requirements: SkillRequirements): boolean {
+  return Boolean(
+    requirements.bins.length ||
+    requirements.runtimes.length ||
+    requirements.env.length,
+  )
+}
+
 function requiredTools(
   project: ProjectEnvironmentDetection,
   skills: SkillEnvironmentRequirement[],
