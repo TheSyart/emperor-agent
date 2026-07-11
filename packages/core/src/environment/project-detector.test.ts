@@ -1,9 +1,4 @@
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -65,10 +60,18 @@ describe('ProjectEnvironmentDetector', () => {
 
   it('honors Go and Rust structured declaration priority', () => {
     const root = project()
-    write(root, 'go.mod', 'module example.com/app\n\ngo 1.24.0\ntoolchain go1.26.5\n')
+    write(
+      root,
+      'go.mod',
+      'module example.com/app\n\ngo 1.24.0\ntoolchain go1.26.5\n',
+    )
     write(root, 'rust-toolchain.toml', '[toolchain]\nchannel = "stable"\n')
     write(root, 'rust-toolchain', '1.90.0\n')
-    write(root, 'Cargo.toml', '[package]\nname = "app"\nrust-version = "1.80"\n')
+    write(
+      root,
+      'Cargo.toml',
+      '[package]\nname = "app"\nrust-version = "1.80"\n',
+    )
 
     const result = new ProjectEnvironmentDetector({ fallbacks }).detect(root)
     expect(result.declarations.go).toMatchObject({

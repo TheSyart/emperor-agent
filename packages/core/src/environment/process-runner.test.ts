@@ -41,9 +41,9 @@ describe('NodeEnvironmentProcessRunner', () => {
       maxOutputBytes: 1_024,
     })
     expect(bounded.status).toBe('output_limit')
-    expect(Buffer.byteLength(bounded.stdout) + Buffer.byteLength(bounded.stderr)).toBeLessThanOrEqual(
-      1_024,
-    )
+    expect(
+      Buffer.byteLength(bounded.stdout) + Buffer.byteLength(bounded.stderr),
+    ).toBeLessThanOrEqual(1_024)
   })
 
   it('distinguishes cancellation and spawn failures', async () => {

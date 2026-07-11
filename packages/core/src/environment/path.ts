@@ -56,9 +56,7 @@ export function buildEffectivePath(opts: EffectivePathOptions): EffectivePath {
         : posix.join(opts.homeDir, '.volta', 'bin')
     const system = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
     const platform =
-      opts.platform === 'darwin'
-        ? ['/opt/homebrew/bin']
-        : ['/usr/local/go/bin']
+      opts.platform === 'darwin' ? ['/opt/homebrew/bin'] : ['/usr/local/go/bin']
     entries = [
       voltaBin,
       ...inherited,
@@ -79,7 +77,9 @@ export function dedupePathEntries(
   const output: string[] = []
   const seen = new Set<string>()
   for (const raw of entries) {
-    const entry = String(raw ?? '').trim().replace(/^"|"$/g, '')
+    const entry = String(raw ?? '')
+      .trim()
+      .replace(/^"|"$/g, '')
     if (
       !entry ||
       [...entry].some((character) => {
@@ -118,8 +118,7 @@ export async function queryWindowsRegistryPaths(
     SystemRoot: systemRoot,
     SYSTEMROOT: systemRoot,
     PATH: windowsEnvValue(env, 'PATH') ?? '',
-    TEMP:
-      windowsEnvValue(env, 'TEMP') ?? windowsEnvValue(env, 'TMP') ?? '',
+    TEMP: windowsEnvValue(env, 'TEMP') ?? windowsEnvValue(env, 'TMP') ?? '',
   }
   const queries = [
     {
@@ -157,7 +156,10 @@ export function windowsEnvValue(
   return Object.entries(env).find(([key]) => key.toLowerCase() === target)?.[1]
 }
 
-function splitPath(value: string | null | undefined, separator: string): string[] {
+function splitPath(
+  value: string | null | undefined,
+  separator: string,
+): string[] {
   return String(value ?? '')
     .split(separator)
     .map((entry) => entry.trim())

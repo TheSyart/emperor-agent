@@ -9,11 +9,12 @@ import {
 import { homedir } from 'node:os'
 import { dirname, extname, join, posix, win32 } from 'node:path'
 import { z } from 'zod'
-import type { SkillManager, SkillRequirements, SkillStatus } from '../skills/manager'
-import {
-  type LoadedToolCatalog,
-  type ToolCatalogEntry,
-} from './catalog'
+import type {
+  SkillManager,
+  SkillRequirements,
+  SkillStatus,
+} from '../skills/manager'
+import { type LoadedToolCatalog, type ToolCatalogEntry } from './catalog'
 import { EnvironmentError } from './errors'
 import {
   ENVIRONMENT_TOOL_IDS,
@@ -112,13 +113,7 @@ const projectDeclarationSchema = z
   .object({
     ecosystem: z.enum(['node', 'python', 'go', 'rust']),
     detected: z.boolean(),
-    status: z.enum([
-      'absent',
-      'default',
-      'declared',
-      'unsupported',
-      'invalid',
-    ]),
+    status: z.enum(['absent', 'default', 'declared', 'unsupported', 'invalid']),
     source: z.string().max(256).nullable(),
     rawRequirement: z.string().max(512).nullable(),
     normalizedRequirement: z.string().max(512).nullable(),
@@ -168,7 +163,9 @@ export const environmentProbeStatusSchema = z
   })
   .strict()
 
-export type EnvironmentProbeStatus = z.infer<typeof environmentProbeStatusSchema>
+export type EnvironmentProbeStatus = z.infer<
+  typeof environmentProbeStatusSchema
+>
 
 export interface EnvironmentProbeRequest {
   projectRoot: string
@@ -228,7 +225,9 @@ export class EnvironmentProbe {
     this.cache = null
   }
 
-  async getStatus(request: EnvironmentProbeRequest): Promise<EnvironmentProbeStatus> {
+  async getStatus(
+    request: EnvironmentProbeRequest,
+  ): Promise<EnvironmentProbeStatus> {
     if (request.signal?.aborted) throw new EnvironmentError('cancelled')
     const loaded = this.catalogProvider()
     const env = this.envProvider()
@@ -276,10 +275,12 @@ export class EnvironmentProbe {
         ),
       ),
       envPresence: Object.fromEntries(
-        [...new Set(requiredEnvNames)].sort().map((name) => [
-          name,
-          Boolean(environmentValue(env, name, this.platform)?.trim()),
-        ]),
+        [...new Set(requiredEnvNames)]
+          .sort()
+          .map((name) => [
+            name,
+            Boolean(environmentValue(env, name, this.platform)?.trim()),
+          ]),
       ),
     })
     if (!request.forceRefresh && this.cache?.key === cacheKey)
@@ -292,10 +293,7 @@ export class EnvironmentProbe {
       homeDir,
       this.platform,
     )
-    const diagnostics = [
-      ...project.diagnostics,
-      ...windowsPaths.diagnostics,
-    ]
+    const diagnostics = [...project.diagnostics, ...windowsPaths.diagnostics]
     const tools = await mapWithConcurrency(
       loaded.catalog.tools,
       4,
@@ -395,11 +393,7 @@ export class EnvironmentProbe {
       })
     let executable: string | null
     try {
-      executable = this.resolveExecutable(
-        tool,
-        opts.pathEntries,
-        this.platform,
-      )
+      executable = this.resolveExecutable(tool, opts.pathEntries, this.platform)
     } catch {
       return parseToolState({
         ...base,
@@ -540,7 +534,10 @@ function requiredTools(
       add(id, 'project', `${ecosystem} 项目环境`)
   }
   for (const skill of skills) {
-    for (const name of [...skill.requirements.bins, ...skill.requirements.runtimes]) {
+    for (const name of [
+      ...skill.requirements.bins,
+      ...skill.requirements.runtimes,
+    ]) {
       const id = REQUIREMENT_ALIASES[name.toLowerCase()]
       if (id) add(id, 'skill', `Skill ${skill.skillName}`)
     }
@@ -572,7 +569,9 @@ function normalizeSkillRequirements(
 ): SkillEnvironmentRequirement[] {
   return values
     .map((value) => ({
-      skillName: String(value.skillName ?? '').trim().slice(0, 128),
+      skillName: String(value.skillName ?? '')
+        .trim()
+        .slice(0, 128),
       skillStatus: normalizeSkillStatus(value.skillStatus),
       requirements: {
         bins: normalizedList(value.requirements?.bins),
@@ -596,12 +595,16 @@ function evaluateSkills(
   return skills.map((skill) => {
     const requiredTools = new Set<EnvironmentToolId>()
     const unsupported: string[] = []
-    for (const name of [...skill.requirements.bins, ...skill.requirements.runtimes]) {
+    for (const name of [
+      ...skill.requirements.bins,
+      ...skill.requirements.runtimes,
+    ]) {
       const id = REQUIREMENT_ALIASES[name.toLowerCase()]
       if (id) requiredTools.add(id)
-      else unsupported.push(
-        `${skill.requirements.bins.includes(name) ? 'bin' : 'runtime'}:${name}`,
-      )
+      else
+        unsupported.push(
+          `${skill.requirements.bins.includes(name) ? 'bin' : 'runtime'}:${name}`,
+        )
     }
     const addDependencies = (
       id: EnvironmentToolId,
@@ -758,7 +761,8 @@ export function readWindowsNpmVersion(shimPath: string): string | null {
       if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 1024 * 1024)
         continue
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        continue
       const version = normalizeDetectedVersion(
         String((parsed as Record<string, unknown>).version ?? ''),
       )
@@ -807,9 +811,7 @@ function normalizedList(values: unknown): string[] {
   const list = Array.isArray(values) ? values : []
   return [
     ...new Set(
-      list
-        .map((value) => String(value).trim().slice(0, 256))
-        .filter(Boolean),
+      list.map((value) => String(value).trim().slice(0, 256)).filter(Boolean),
     ),
   ]
     .sort()

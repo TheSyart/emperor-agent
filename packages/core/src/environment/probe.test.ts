@@ -46,7 +46,9 @@ class FakeRunner implements EnvironmentProcessRunner {
   readonly requests: EnvironmentProcessRequest[] = []
   readonly versions = { ...outputs }
 
-  async run(request: EnvironmentProcessRequest): Promise<EnvironmentProcessResult> {
+  async run(
+    request: EnvironmentProcessRequest,
+  ): Promise<EnvironmentProcessResult> {
     this.requests.push(request)
     const id = request.executable.split('/').at(-1) ?? ''
     const stdout = this.versions[id] ?? ''
@@ -67,12 +69,14 @@ function resolver(missing: string[] = []): EnvironmentExecutableResolver {
     absent.has(tool.id) ? null : `/fake/${tool.id}`
 }
 
-function createProbe(opts: {
-  runner?: FakeRunner
-  missing?: string[]
-  env?: Record<string, string | undefined>
-  catalogProvider?: () => ReturnType<typeof loadBundledToolCatalog>
-} = {}): { probe: EnvironmentProbe; runner: FakeRunner } {
+function createProbe(
+  opts: {
+    runner?: FakeRunner
+    missing?: string[]
+    env?: Record<string, string | undefined>
+    catalogProvider?: () => ReturnType<typeof loadBundledToolCatalog>
+  } = {},
+): { probe: EnvironmentProbe; runner: FakeRunner } {
   const runner = opts.runner ?? new FakeRunner()
   return {
     runner,
@@ -123,20 +127,27 @@ describe('EnvironmentProbe', () => {
     expect(
       runner.requests.every(
         (request) =>
-          Object.keys(request.env).every((key) =>
-            ['PATH', 'HOME', 'LANG', 'LC_ALL', 'USER', 'SystemRoot', 'TEMP'].includes(
-              key,
-            ) ||
-            [
-              'USERNAME',
-              'TMP',
-              'USERPROFILE',
-              'LOCALAPPDATA',
-              'VOLTA_HOME',
-              'CARGO_HOME',
-              'RUSTUP_HOME',
-              'UV_PYTHON_INSTALL_DIR',
-            ].includes(key),
+          Object.keys(request.env).every(
+            (key) =>
+              [
+                'PATH',
+                'HOME',
+                'LANG',
+                'LC_ALL',
+                'USER',
+                'SystemRoot',
+                'TEMP',
+              ].includes(key) ||
+              [
+                'USERNAME',
+                'TMP',
+                'USERPROFILE',
+                'LOCALAPPDATA',
+                'VOLTA_HOME',
+                'CARGO_HOME',
+                'RUSTUP_HOME',
+                'UV_PYTHON_INSTALL_DIR',
+              ].includes(key),
           ) &&
           request.timeoutMs === 5_000 &&
           request.maxOutputBytes === 64 * 1024,
@@ -393,7 +404,9 @@ describe('EnvironmentProbe', () => {
       },
     })
     const status = await probe.getStatus({ projectRoot: root })
-    expect(status.tools.find((tool) => tool.id === 'git')?.status).toBe('failed')
+    expect(status.tools.find((tool) => tool.id === 'git')?.status).toBe(
+      'failed',
+    )
     expect(status.tools.find((tool) => tool.id === 'go')?.status).toBe('failed')
     expect(JSON.stringify(status)).not.toContain('secret internal')
   })
@@ -427,25 +440,25 @@ describe('EnvironmentProbe', () => {
   it.skipIf(process.platform === 'win32')(
     'records the canonical executable target and rejects non-executable files',
     () => {
-    const root = project()
-    const target = join(root, 'git-real')
-    const alias = join(root, 'git')
-    writeFileSync(target, '#!/bin/sh\nexit 0\n', 'utf8')
-    chmodSync(target, 0o755)
-    symlinkSync(target, alias)
-    const git = loadBundledToolCatalog().catalog.tools.find(
-      (tool) => tool.id === 'git',
-    )!
-    const gitOnly = {
-      ...git,
-      probe: { ...git.probe, executables: ['git'] },
-    }
-    expect(resolveCatalogExecutable(gitOnly, [root], 'darwin')).toBe(
-      realpathSync(target),
-    )
+      const root = project()
+      const target = join(root, 'git-real')
+      const alias = join(root, 'git')
+      writeFileSync(target, '#!/bin/sh\nexit 0\n', 'utf8')
+      chmodSync(target, 0o755)
+      symlinkSync(target, alias)
+      const git = loadBundledToolCatalog().catalog.tools.find(
+        (tool) => tool.id === 'git',
+      )!
+      const gitOnly = {
+        ...git,
+        probe: { ...git.probe, executables: ['git'] },
+      }
+      expect(resolveCatalogExecutable(gitOnly, [root], 'darwin')).toBe(
+        realpathSync(target),
+      )
 
-    chmodSync(target, 0o644)
-    expect(resolveCatalogExecutable(gitOnly, [root], 'darwin')).toBeNull()
+      chmodSync(target, 0o644)
+      expect(resolveCatalogExecutable(gitOnly, [root], 'darwin')).toBeNull()
     },
   )
 })

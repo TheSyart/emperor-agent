@@ -32,8 +32,7 @@ export function parseVersionRequirement(
   opts: VersionRequirementOptions = {},
 ): VersionRequirementResult {
   const raw = String(value ?? '').trim()
-  if (!raw)
-    return { status: 'invalid', raw, normalized: null, reason: 'empty' }
+  if (!raw) return { status: 'invalid', raw, normalized: null, reason: 'empty' }
   if (raw.length > 512)
     return {
       status: 'invalid',
@@ -72,10 +71,7 @@ export function parseVersionRequirement(
       reason: 'unsupported_range_syntax',
     }
 
-  const tokens = raw
-    .replaceAll(',', ' ')
-    .split(/\s+/)
-    .filter(Boolean)
+  const tokens = raw.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
   const predicates: Predicate[] = []
   for (const token of tokens) {
     const parsed = parseRequirementToken(token)
@@ -131,9 +127,7 @@ export function versionSatisfies(
 }
 
 function parseRequirementToken(token: string): Predicate[] | null {
-  const match = /^(<=|>=|<|>|=|\^|~)?(?:v|go)?(\d+(?:\.\d+){0,3})$/i.exec(
-    token,
-  )
+  const match = /^(<=|>=|<|>|=|\^|~)?(?:v|go)?(\d+(?:\.\d+){0,3})$/i.exec(token)
   if (!match) return null
   const parsed = parseNumericVersion(match[2]!)
   if (!parsed) return null
@@ -249,7 +243,9 @@ function hasSatisfyingVersion(predicates: Predicate[]): boolean {
   }
   if (!lower || !upper) return true
   const comparison = compareVersions(lower.version, upper.version)
-  return comparison < 0 || (comparison === 0 && lower.inclusive && upper.inclusive)
+  return (
+    comparison < 0 || (comparison === 0 && lower.inclusive && upper.inclusive)
+  )
 }
 
 function predicateMatches(version: number[], predicate: Predicate): boolean {

@@ -32,11 +32,7 @@ const DECLARATION_FILES = [
 
 export type ProjectEcosystem = 'node' | 'python' | 'go' | 'rust'
 export type ProjectDeclarationStatus =
-  | 'absent'
-  | 'default'
-  | 'declared'
-  | 'unsupported'
-  | 'invalid'
+  'absent' | 'default' | 'declared' | 'unsupported' | 'invalid'
 
 export interface ProjectEnvironmentDeclaration {
   ecosystem: ProjectEcosystem
@@ -97,9 +93,7 @@ export class ProjectEnvironmentDetector {
         name: file.name,
         exists: file.exists,
         error: file.error,
-        contentHash: file.exists
-          ? stableEnvironmentHash(file.content)
-          : null,
+        contentHash: file.exists ? stableEnvironmentHash(file.content) : null,
       })),
     })
     return {
@@ -124,7 +118,12 @@ function detectNode(
   const detected = packageFile.exists || nodeVersion.exists || nvmrc.exists
   let packageJson: Record<string, unknown> = {}
   if (packageFile.error)
-    return invalidDeclaration('node', detected, 'package.json', packageFile.error)
+    return invalidDeclaration(
+      'node',
+      detected,
+      'package.json',
+      packageFile.error,
+    )
   if (packageFile.exists) {
     try {
       const parsed: unknown = JSON.parse(packageFile.content)
@@ -139,10 +138,7 @@ function detectNode(
       )
     }
   }
-  if (
-    Object.hasOwn(packageJson, 'volta') &&
-    !isRecord(packageJson.volta)
-  )
+  if (Object.hasOwn(packageJson, 'volta') && !isRecord(packageJson.volta))
     return invalidDeclaration(
       'node',
       true,
@@ -150,7 +146,10 @@ function detectNode(
       'volta must be an object',
     )
   const voltaRecord = isRecord(packageJson.volta) ? packageJson.volta : {}
-  if (Object.hasOwn(voltaRecord, 'node') && typeof voltaRecord.node !== 'string')
+  if (
+    Object.hasOwn(voltaRecord, 'node') &&
+    typeof voltaRecord.node !== 'string'
+  )
     return invalidDeclaration(
       'node',
       true,
@@ -163,10 +162,7 @@ function detectNode(
   if (nodeVersion.exists)
     return fileDeclaration('node', nodeVersion, '.node-version')
   if (nvmrc.exists) return fileDeclaration('node', nvmrc, '.nvmrc')
-  if (
-    Object.hasOwn(packageJson, 'engines') &&
-    !isRecord(packageJson.engines)
-  )
+  if (Object.hasOwn(packageJson, 'engines') && !isRecord(packageJson.engines))
     return invalidDeclaration(
       'node',
       true,
@@ -300,9 +296,7 @@ function detectRust(
         'rust-toolchain.toml',
         parsed.error,
       )
-    const section = isRecord(parsed.data.toolchain)
-      ? parsed.data.toolchain
-      : {}
+    const section = isRecord(parsed.data.toolchain) ? parsed.data.toolchain : {}
     if (
       Object.hasOwn(section, 'channel') &&
       typeof section.channel !== 'string'
@@ -333,8 +327,12 @@ function detectRust(
     const packageSection = isRecord(parsed.data.package)
       ? parsed.data.package
       : {}
-    const workspace = isRecord(parsed.data.workspace) ? parsed.data.workspace : {}
-    const workspacePackage = isRecord(workspace.package) ? workspace.package : {}
+    const workspace = isRecord(parsed.data.workspace)
+      ? parsed.data.workspace
+      : {}
+    const workspacePackage = isRecord(workspace.package)
+      ? workspace.package
+      : {}
     const rustVersion =
       packageSection['rust-version'] ?? workspacePackage['rust-version']
     const rustVersionSource = Object.hasOwn(packageSection, 'rust-version')
@@ -348,11 +346,7 @@ function detectRust(
         'Rust version must be a string',
       )
     if (typeof rustVersion === 'string')
-      return declared(
-        'rust',
-        rustVersionSource,
-        `>=${rustVersion}`,
-      )
+      return declared('rust', rustVersionSource, `>=${rustVersion}`)
   }
   return fallbackDeclaration('rust', detected, fallback)
 }
@@ -381,8 +375,7 @@ function fileDeclaration(
   source: string,
   opts: { allowStable?: boolean; fallbackVersion?: string } = {},
 ): ProjectEnvironmentDeclaration {
-  if (file.error)
-    return invalidDeclaration(ecosystem, true, source, file.error)
+  if (file.error) return invalidDeclaration(ecosystem, true, source, file.error)
   const values = meaningfulLines(file.content)
   if (!values.length)
     return invalidDeclaration(ecosystem, true, source, 'empty declaration')
@@ -463,14 +456,20 @@ function invalidDeclaration(
 
 function readRootFile(root: string, name: string): RootFileSnapshot {
   const path = resolve(root, name)
-  if (!existsSync(path)) return { name, exists: false, content: '', error: null }
+  if (!existsSync(path))
+    return { name, exists: false, content: '', error: null }
   try {
     const stat = lstatSync(path)
     if (stat.isSymbolicLink() || !stat.isFile())
       return { name, exists: true, content: '', error: 'unsafe file type' }
     if (stat.size > MAX_DECLARATION_BYTES)
       return { name, exists: true, content: '', error: 'file exceeds 1 MiB' }
-    return { name, exists: true, content: readFileSync(path, 'utf8'), error: null }
+    return {
+      name,
+      exists: true,
+      content: readFileSync(path, 'utf8'),
+      error: null,
+    }
   } catch (error) {
     return {
       name,

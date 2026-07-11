@@ -4,11 +4,7 @@ const DEFAULT_TIMEOUT_MS = 5_000
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
 
 export type EnvironmentProcessStatus =
-  | 'completed'
-  | 'timeout'
-  | 'output_limit'
-  | 'cancelled'
-  | 'spawn_error'
+  'completed' | 'timeout' | 'output_limit' | 'cancelled' | 'spawn_error'
 
 export interface EnvironmentProcessRequest {
   executable: string
@@ -100,8 +96,12 @@ export class NodeEnvironmentProcessRunner implements EnvironmentProcessRunner {
         outputBytes += Math.min(buffer.byteLength, remaining)
         if (buffer.byteLength > remaining) terminate('output_limit')
       }
-      child.stdout?.on('data', (chunk: Buffer | string) => append(stdout, chunk))
-      child.stderr?.on('data', (chunk: Buffer | string) => append(stderr, chunk))
+      child.stdout?.on('data', (chunk: Buffer | string) =>
+        append(stdout, chunk),
+      )
+      child.stderr?.on('data', (chunk: Buffer | string) =>
+        append(stderr, chunk),
+      )
 
       const timer = setTimeout(() => terminate('timeout'), timeoutMs)
       timer.unref?.()

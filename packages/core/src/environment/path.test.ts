@@ -34,7 +34,9 @@ describe('environment PATH providers', () => {
       envPath: '/usr/bin:/usr/bin:/bin',
       homeDir: '/home/tester',
     })
-    expect(linux.entries.filter((entry) => entry === '/usr/bin')).toHaveLength(1)
+    expect(linux.entries.filter((entry) => entry === '/usr/bin')).toHaveLength(
+      1,
+    )
     expect(linux.entries[0]).toBe('/home/tester/.volta/bin')
     expect(linux.entries).toContain('/usr/local/go/bin')
     expect(linux.entries).toContain('/home/tester/.cargo/bin')
