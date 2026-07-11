@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T12:04:20+08:00",
+  "updated_at": "2026-07-11T12:19:43+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
-  "completed": 10,
-  "rounds": 10,
+  "completed": 11,
+  "rounds": 11,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -80,11 +80,11 @@
       "notes": "Round 10 completed from clean commit dccdcf67 with strict TDD and repeated security review. Core now provides a strict plan registry and EnvironmentInstallOrchestrator: dependency-first plans bind catalog revision, canonical project root/fingerprint, platform/arch and the complete tool-state hash; expire at ten minutes; expose only plan/tool/strategy/license/confirmation IDs; and force-refresh the original project before execution, after execution and during recovery. Jobs persist atomically, hold a tokenized heartbeat cross-process lock, reject concurrent install/recovery, reclaim identity-checked abandoned locks, continue only unrelated dependency branches, support awaiting_user/cancel/partial/failed/completed/interrupted states, and generate receipts from fresh probe results. Review RED/GREEN fixes added exact-deadline expiry, live-job recovery exclusion, post-probe failure convergence, actual step/receipt outcomes, malformed stale-lock recovery, symlinked root/job isolation, 5 MiB bounded redacted JSONL, and POSIX/Windows process-tree termination without shell. Final focused environment verification passed 7 files / 54 tests; full make check passed Core 99 files / 821 tests and Desktop 62 files / 280 tests, plus Core/Desktop typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. Platform command/download/signature adapters remain intentionally deferred to ENV-MAC/WIN/LNX-011/012/013."
     },
     "ENV-MAC-011": {
-      "status": "pending",
+      "status": "done",
       "title": "macOS 安装 adapter",
       "depends_on": ["ENV-JOB-010"],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 11 completed from clean commit d95e3cd4 with strict TDD and security review. MacEnvironmentAdapter now supports fixed arm64 `/opt/homebrew/bin/brew` and x64 `/usr/local/bin/brew` paths, exact catalog formula/version-manager/bundled args, fixed `xcode-select --install` Git fallback, user-only official-guided flows, cancellation/elevation error mapping, minimal PATH/env and 30-minute bounded install processes. Homebrew is never installed automatically and no command uses a shell. macOS pkg requires both fixed SHA-256 and exact Developer ID Installer publisher before `/usr/bin/open`; direct archives require a fixed digest and remain user-reviewed instead of auto-extracted. Shared NodeHttpsAssetDownloader adds HTTPS-only URLs, public-DNS validation on every redirect, DNS pinning against rebinding, three-redirect limit, byte caps, AbortSignal handling, atomic temp files and response cleanup on local I/O failure. A manual-only macos-15/macos-15-intel internal workflow runs adapter/download/process tests and uploads a JSON receipt whose locally verified catalog revision is dc95b1f423e1b8ccde50c66c06fa172f9226b95be7f15e10799ac2a4fefc7ffe. Final make check passed Core 101 files / 837 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, migration parity, git diff check and production build. No real tool installation or unsigned release publication was performed."
     },
     "ENV-WIN-012": {
       "status": "pending",

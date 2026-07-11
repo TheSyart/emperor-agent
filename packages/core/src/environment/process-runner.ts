@@ -1,6 +1,7 @@
 import { spawn, type SpawnOptions } from 'node:child_process'
 
 const DEFAULT_TIMEOUT_MS = 5_000
+const MAX_TIMEOUT_MS = 30 * 60 * 1_000
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
 
 export type EnvironmentProcessStatus =
@@ -46,7 +47,7 @@ export class NodeEnvironmentProcessRunner implements EnvironmentProcessRunner {
       request.timeoutMs,
       DEFAULT_TIMEOUT_MS,
       10,
-      30_000,
+      MAX_TIMEOUT_MS,
     )
     const maxOutputBytes = boundedInteger(
       request.maxOutputBytes,
@@ -73,7 +74,7 @@ export class NodeEnvironmentProcessRunner implements EnvironmentProcessRunner {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       }
-      this.onSpawn?.({ ...options })
+      this.onSpawn?.({ ...options, timeoutMs, maxOutputBytes })
       const child = spawn(request.executable, [...request.args], options)
       const stdout: Buffer[] = []
       const stderr: Buffer[] = []

@@ -23,8 +23,28 @@ describe('NodeEnvironmentProcessRunner', () => {
       stdout: 'version 1.2.3',
     })
     expect(observed).toEqual([
-      expect.objectContaining({ shell: false, windowsHide: true }),
+      expect.objectContaining({
+        shell: false,
+        windowsHide: true,
+        timeoutMs: 5_000,
+      }),
     ])
+  })
+
+  it('preserves the bounded thirty-minute installer timeout', async () => {
+    const observed: Array<Record<string, unknown>> = []
+    const runner = new NodeEnvironmentProcessRunner({
+      onSpawn: (options) => observed.push(options),
+    })
+
+    await runner.run({
+      executable: process.execPath,
+      args: ['-e', ''],
+      env: {},
+      timeoutMs: 30 * 60 * 1_000,
+    })
+
+    expect(observed[0]).toMatchObject({ timeoutMs: 30 * 60 * 1_000 })
   })
 
   it('enforces timeout and byte-level combined output limits', async () => {
