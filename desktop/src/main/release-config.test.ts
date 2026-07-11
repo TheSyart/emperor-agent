@@ -92,8 +92,21 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     })
 
     expect(validated).toEqual(generated)
-    expect(generated.files.length).toBeGreaterThan(50)
-    expect(generated.builtInSkills).toContain('skill-creator')
+    expect(generated.files.length).toBeGreaterThan(40)
+    expect(generated.builtInSkills).toEqual(['skill-creator'])
+    expect(
+      generated.files
+        .filter((file) => file.path.startsWith('skills/'))
+        .map((file) => file.path),
+    ).toEqual(['skills/skill-creator/SKILL.md'])
+    expect(generated.files.some((file) => file.path.endsWith('.py'))).toBe(
+      false,
+    )
+    expect(
+      hook.SOURCE_MAPPINGS.some((mapping) =>
+        mapping.source.includes('skills-catalog'),
+      ),
+    ).toBe(false)
     expect(generated.files.every((file) => !path.isAbsolute(file.path))).toBe(
       true,
     )

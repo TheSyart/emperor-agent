@@ -8,12 +8,21 @@ import { buildUserContent, refToJson } from '../attachments/encode'
 import { AttachmentStore } from '../attachments/store'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
   readdirSync,
-  statSync,
 } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import { ContextBuilder, type SkillsLoaderLike } from './context-builder'
 import {
   AgentRunner,
@@ -68,6 +77,7 @@ import {
   type RuntimePaths,
 } from '../runtime/paths'
 import { isSkillBlocked } from '../runtime/resources'
+import { SkillManager } from '../skills/manager'
 import { RuntimeEventStore } from '../runtime/store'
 import {
   SchedulerJobExecutor,
@@ -115,6 +125,7 @@ import {
   type SkillsLoader as ToolSkillsLoader,
 } from '../tools/builtin'
 import { GlobTool, GrepTool } from '../tools/search'
+import { ManageSkillTool } from '../tools/manage-skill'
 import { DispatchSubagentTool } from '../tools/dispatch'
 import { EditFileTool, ReadFileTool, WriteFileTool } from '../tools/filesystem'
 import { ToolRegistry } from '../tools/registry'
@@ -218,6 +229,7 @@ export class AgentLoop {
   readonly schedulerService: SchedulerService
   readonly activeTasks = new ActiveTaskRegistry()
   readonly skillsLoader: FileSkillsLoader
+  readonly skillManager: SkillManager
   readonly contextBuilder: ContextBuilder
   readonly subagentRegistry: SubagentRegistry
   readonly teamManager: TeamManager
@@ -306,7 +318,15 @@ export class AgentLoop {
       },
       targetSessionId: () => this.activeSessionId,
     })
-    this.skillsLoader = new FileSkillsLoader(this.root, this.paths.stateRoot)
+    this.skillManager = new SkillManager({
+      runtimeRoot: this.root,
+      stateRoot: this.paths.stateRoot,
+    })
+    this.skillsLoader = new FileSkillsLoader(
+      this.root,
+      this.paths.stateRoot,
+      this.skillManager,
+    )
     this.contextBuilder = new ContextBuilder(
       this.templatesDir,
       this.skillsLoader,
@@ -460,10 +480,13 @@ export class AgentLoop {
     this.controlManager.setRuntimeScope(
       this.controlRuntimeScopeForSession(session),
     )
-    this.skillsLoader.setProjectSkillsDir(
+    const projectSkillsRoot =
       session.mode === 'build' && session.project_path
-        ? join(resolve(session.project_path), '.emperor', 'skills')
-        : null,
+        ? resolve(session.project_path)
+        : null
+    this.skillsLoader.setProjectSkillsDir(
+      projectSkillsRoot ? join(projectSkillsRoot, '.emperor', 'skills') : null,
+      projectSkillsRoot,
     )
     this.runner = this.buildMainRunner()
     return session
@@ -1079,6 +1102,11 @@ export class AgentLoop {
     this.registry.register(new WebSearchTool())
     this.registry.register(new WebFetch())
     this.registry.register(new LoadSkill(this.skillsLoader))
+    this.registry.register(
+      new ManageSkillTool(this.skillManager, () =>
+        this.refreshRuntimeContext(),
+      ),
+    )
     this.registry.register(new ReadFileTool(this.root))
     this.registry.register(new WriteFileTool(this.root))
     this.registry.register(new EditFileTool(this.root))
@@ -1759,17 +1787,25 @@ function eventOwnerSessionId(event: Record<string, unknown>): string {
  * names that aren't shadowed by a higher layer.
  */
 class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
+  readonly runtimeRoot: string
+  readonly stateRoot: string
   readonly builtinDir: string
   readonly userDir: string
+  private readonly manager: SkillManager
   private projectDir: string | null = null
+  private projectRoot: string | null = null
 
-  constructor(runtimeRoot: string, stateRoot: string) {
-    this.builtinDir = join(runtimeRoot, 'skills')
-    this.userDir = join(stateRoot, 'skills')
+  constructor(runtimeRoot: string, stateRoot: string, manager: SkillManager) {
+    this.runtimeRoot = resolve(runtimeRoot)
+    this.stateRoot = resolve(stateRoot)
+    this.builtinDir = join(this.runtimeRoot, 'skills')
+    this.userDir = join(this.stateRoot, 'skills')
+    this.manager = manager
   }
 
-  setProjectSkillsDir(dir: string | null): void {
+  setProjectSkillsDir(dir: string | null, projectRoot: string | null): void {
     this.projectDir = dir
+    this.projectRoot = projectRoot
   }
 
   getAlwaysSkills(): string[] {
@@ -1804,42 +1840,155 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
   getContent(name: string): string | null {
     const safe = safeSkillName(name)
     if (!safe) return null
-    for (const dir of this.dirsInPrecedenceOrder()) {
-      if (dir === this.userDir && isSkillBlocked(join(dir, safe))) continue
-      for (const path of [
-        join(dir, safe, 'SKILL.md'),
+    for (const source of this.dirsInPrecedenceOrder()) {
+      if (!canonicalRegularPath(source.dir, source.boundary, 'directory'))
+        continue
+      const dir = source.dir
+      const nestedPath = join(dir, safe)
+      const nestedRoot = canonicalRegularPath(
+        nestedPath,
+        source.boundary,
+        'directory',
+      )
+      if (source.kind === 'user' && nestedRoot && isSkillBlocked(nestedRoot))
+        continue
+      const candidates = [
+        ...(nestedRoot ? [join(nestedPath, 'SKILL.md')] : []),
         join(dir, `${safe}.md`),
-      ]) {
-        if (existsSync(path) && statSync(path).isFile())
-          return readFileSync(path, 'utf8')
+      ]
+      for (const path of candidates) {
+        const file = canonicalRegularPath(path, source.boundary, 'file')
+        if (!file) continue
+        if (
+          nestedRoot &&
+          path === join(nestedPath, 'SKILL.md') &&
+          !this.manager.validateRecord({
+            name: safe,
+            root: nestedRoot,
+            skillFile: file,
+            source: source.kind,
+            status: 'active',
+            readOnly: source.kind !== 'user',
+          }).valid
+        )
+          continue
+        return readFileSync(file, 'utf8').replaceAll(
+          '{{skill_dir}}',
+          dirname(file),
+        )
       }
     }
     return null
   }
 
-  private dirsInPrecedenceOrder(): string[] {
-    return [this.projectDir, this.userDir, this.builtinDir].filter(
-      (dir): dir is string => Boolean(dir),
-    )
+  private dirsInPrecedenceOrder(): Array<{
+    kind: 'project' | 'user' | 'builtin'
+    dir: string
+    boundary: string
+  }> {
+    return [
+      ...(this.projectDir && this.projectRoot
+        ? [
+            {
+              kind: 'project' as const,
+              dir: this.projectDir,
+              boundary: this.projectRoot,
+            },
+          ]
+        : []),
+      {
+        kind: 'user' as const,
+        dir: this.userDir,
+        boundary: this.stateRoot,
+      },
+      {
+        kind: 'builtin' as const,
+        dir: this.builtinDir,
+        boundary: this.runtimeRoot,
+      },
+    ]
   }
 
   private skillNames(): string[] {
     const names = new Set<string>()
-    for (const dir of this.dirsInPrecedenceOrder()) {
-      if (!existsSync(dir)) continue
+    for (const source of this.dirsInPrecedenceOrder()) {
+      if (!canonicalRegularPath(source.dir, source.boundary, 'directory'))
+        continue
+      const dir = source.dir
       for (const item of readdirSync(dir)) {
         if (item.startsWith('.')) continue
         const path = join(dir, item)
-        const stat = statSync(path)
-        if (stat.isDirectory()) {
-          if (dir === this.userDir && isSkillBlocked(path)) continue
-          if (existsSync(join(path, 'SKILL.md'))) names.add(item)
-        } else if (stat.isFile() && item.endsWith('.md'))
+        const directory = canonicalRegularPath(
+          path,
+          source.boundary,
+          'directory',
+        )
+        if (directory) {
+          if (source.kind === 'user' && isSkillBlocked(directory)) continue
+          if (
+            (() => {
+              const skillFile = canonicalRegularPath(
+                join(path, 'SKILL.md'),
+                source.boundary,
+                'file',
+              )
+              return (
+                skillFile &&
+                this.manager.validateRecord({
+                  name: item,
+                  root: directory,
+                  skillFile,
+                  source: source.kind,
+                  status: 'active',
+                  readOnly: source.kind !== 'user',
+                }).valid
+              )
+            })()
+          )
+            names.add(item)
+        } else if (
+          item.endsWith('.md') &&
+          canonicalRegularPath(path, source.boundary, 'file')
+        )
           names.add(basename(item, '.md'))
       }
     }
     return [...names].sort()
   }
+}
+
+function canonicalRegularPath(
+  path: string,
+  boundary: string,
+  kind: 'file' | 'directory',
+): string | null {
+  const lexicalBoundary = resolve(boundary)
+  const lexicalPath = resolve(path)
+  if (!pathInside(lexicalBoundary, lexicalPath)) return null
+  if (!existsSync(lexicalBoundary)) return null
+  const rel = relative(lexicalBoundary, lexicalPath)
+  let cursor = lexicalBoundary
+  for (const part of rel ? rel.split(sep) : []) {
+    cursor = join(cursor, part)
+    if (!existsSync(cursor)) return null
+    const stat = lstatSync(cursor)
+    if (stat.isSymbolicLink()) return null
+  }
+  const canonicalBoundary = realpathSync(lexicalBoundary)
+  const canonicalPath = realpathSync(lexicalPath)
+  if (!pathInside(canonicalBoundary, canonicalPath)) return null
+  const stat = lstatSync(lexicalPath)
+  if (stat.isSymbolicLink()) return null
+  if (kind === 'file' ? !stat.isFile() : !stat.isDirectory()) return null
+  return canonicalPath
+}
+
+function pathInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate)
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+  )
 }
 
 function existingPath(path: string): string | null {

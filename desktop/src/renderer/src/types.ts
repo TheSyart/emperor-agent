@@ -170,6 +170,14 @@ export interface SkillInfo {
   path: string
   tags?: string
   always?: boolean
+  source?: 'builtin' | 'user' | 'project'
+  status?: 'active' | 'blocked_pending_review' | 'invalid'
+  readOnly?: boolean
+  requirements?: {
+    bins: string[]
+    runtimes: string[]
+    env: string[]
+  }
 }
 
 export interface RequestedSkill {

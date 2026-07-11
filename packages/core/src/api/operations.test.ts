@@ -15,7 +15,7 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(81)
+    expect(coreOperationKeys()).toHaveLength(84)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
   })
@@ -67,6 +67,16 @@ describe('Core operation registry', () => {
           content: 'review',
           requestedSkills: [{ name: '../outside', source: 'slash' }],
         },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['skills.create'].args.parse([
+        { name: '../outside', description: 'Unsafe' },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['skills.package'].args.parse([
+        { name: 'valid', output: '/tmp/untrusted' },
       ]),
     ).toThrow()
   })

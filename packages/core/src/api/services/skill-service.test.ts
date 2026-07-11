@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -89,8 +90,12 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
 
   it('lists, reads, writes, and deletes skills with frontmatter metadata', () => {
     const root = tmp('emperor-skill-service-skills-')
-    const skillDir = join(root, 'skills', 'code-audit')
+    const stateRoot = join(root, 'state')
+    const runtimeRoot = join(root, 'runtime')
+    const skillDir = join(stateRoot, 'skills', 'code-audit')
+    const builtinDir = join(runtimeRoot, 'skills', 'skill-creator')
     mkdirSync(skillDir, { recursive: true })
+    mkdirSync(builtinDir, { recursive: true })
     writeFileSync(
       join(skillDir, 'SKILL.md'),
       [
@@ -106,8 +111,14 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       ].join('\n'),
       'utf8',
     )
+    writeFileSync(
+      join(builtinDir, 'SKILL.md'),
+      '---\nname: skill-creator\ndescription: Create skills.\n---\n',
+      'utf8',
+    )
     let refreshes = 0
-    const service = new CoreSkillService(root, {
+    const service = new CoreSkillService(stateRoot, {
+      runtimeRoot,
       refreshRuntimeContext: () => {
         refreshes += 1
       },
@@ -115,11 +126,26 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
 
     expect(service.list()).toEqual([
       {
-        name: 'code-audit',
-        description: 'Audit code changes',
-        path: 'skills/code-audit/SKILL.md',
-        tags: 'review backend',
         always: true,
+        description: 'Audit code changes',
+        name: 'code-audit',
+        path: 'skills/code-audit/SKILL.md',
+        readOnly: false,
+        requirements: { bins: [], runtimes: [], env: [] },
+        source: 'user',
+        status: 'active',
+        tags: 'review backend',
+      },
+      {
+        always: false,
+        description: 'Create skills.',
+        name: 'skill-creator',
+        path: 'skills/skill-creator/SKILL.md',
+        readOnly: true,
+        requirements: { bins: [], runtimes: [], env: [] },
+        source: 'builtin',
+        status: 'active',
+        tags: '',
       },
     ])
     expect(service.get('code-audit')).toMatchObject({
@@ -139,15 +165,126 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       content: expect.stringContaining('# Writer'),
     })
     expect(
-      readFileSync(join(root, 'skills', 'writer', 'SKILL.md'), 'utf8'),
+      readFileSync(join(stateRoot, 'skills', 'writer', 'SKILL.md'), 'utf8'),
     ).toContain('# Writer')
     expect(refreshes).toBe(1)
 
     expect(service.delete('writer')).toEqual({ deleted: 'writer' })
-    expect(existsSync(join(root, 'skills', 'writer'))).toBe(false)
+    expect(existsSync(join(stateRoot, 'skills', 'writer'))).toBe(false)
     expect(refreshes).toBe(2)
     expect(() => service.save('../bad', '# Bad')).toThrow(
       'Skill name must be a safe directory name',
     )
+    expect(() => service.delete('skill-creator')).toThrow(/read-only/i)
+  })
+
+  it('uses user precedence and never scans a sibling skills-catalog', () => {
+    const root = tmp('emperor-skill-service-precedence-')
+    const stateRoot = join(root, 'state')
+    const runtimeRoot = join(root, 'runtime')
+    for (const [base, body] of [
+      [runtimeRoot, 'builtin'],
+      [stateRoot, 'user'],
+    ] as const) {
+      const dir = join(base, 'skills', 'same-name')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, 'SKILL.md'),
+        `---\nname: same-name\ndescription: ${body}\n---\n\n${body}\n`,
+      )
+    }
+    const catalogDir = join(root, 'skills-catalog', 'catalog-only')
+    mkdirSync(catalogDir, { recursive: true })
+    writeFileSync(
+      join(catalogDir, 'SKILL.md'),
+      '---\nname: catalog-only\ndescription: Catalog only\n---\n',
+    )
+
+    const service = new CoreSkillService(stateRoot, { runtimeRoot })
+    expect(service.get('same-name')).toMatchObject({
+      source: 'user',
+      description: 'user',
+      content: expect.stringContaining('\nuser\n'),
+    })
+    expect(service.list().map((skill) => skill.name)).toEqual(['same-name'])
+    expect(() => service.get('catalog-only')).toThrow(/not found/i)
+  })
+
+  it('refuses to save through a symbolic-link Skill directory', () => {
+    const root = tmp('emperor-skill-service-symlink-')
+    const stateRoot = join(root, 'state')
+    const outside = join(root, 'outside')
+    mkdirSync(join(stateRoot, 'skills'), { recursive: true })
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'SKILL.md'), 'outside\n')
+    symlinkSync(
+      outside,
+      join(stateRoot, 'skills', 'linked'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    const service = new CoreSkillService(stateRoot)
+    expect(() => service.save('linked', '# Replaced')).toThrow(/symbolic link/i)
+    expect(readFileSync(join(outside, 'SKILL.md'), 'utf8')).toBe('outside\n')
+  })
+
+  it('round-trips a deterministic Core package through the legacy archive importer', () => {
+    const sourceRoot = tmp('emperor-skill-service-package-source-')
+    const destinationRoot = tmp('emperor-skill-service-package-destination-')
+    const source = new CoreSkillService(sourceRoot)
+    const destination = new CoreSkillService(destinationRoot)
+
+    source.create({
+      name: 'release-audit',
+      description: 'Audit release artifacts and integrity evidence.',
+      resources: ['references'],
+    })
+    const packaged = source.package({ name: 'release-audit' })
+
+    expect(
+      destination.importArchive({ raw: readFileSync(packaged.path) }),
+    ).toEqual({ imported: 'release-audit' })
+    expect(destination.get('release-audit')).toMatchObject({
+      name: 'release-audit',
+      source: 'user',
+      content: expect.stringContaining(
+        'Audit release artifacts and integrity evidence.',
+      ),
+    })
+  })
+
+  it('preserves blocked_pending_review even when blocked content is invalid', () => {
+    const stateRoot = tmp('emperor-skill-service-blocked-')
+    const skillDir = join(stateRoot, 'skills', 'legacy-script')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), '# Missing frontmatter\n')
+    writeFileSync(
+      join(skillDir, '.emperor-skill-state.json'),
+      JSON.stringify({ status: 'blocked_pending_review' }),
+    )
+
+    expect(new CoreSkillService(stateRoot).list()).toEqual([
+      expect.objectContaining({
+        name: 'legacy-script',
+        status: 'blocked_pending_review',
+      }),
+    ])
+  })
+
+  it('marks structurally invalid Skills as invalid even when YAML parses', () => {
+    const stateRoot = tmp('emperor-skill-service-invalid-')
+    const skillDir = join(stateRoot, 'skills', 'invalid-skill')
+    mkdirSync(join(skillDir, 'unsupported'), { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: invalid-skill\n---\n\n# Missing description\n',
+    )
+
+    expect(new CoreSkillService(stateRoot).list()).toEqual([
+      expect.objectContaining({
+        name: 'invalid-skill',
+        status: 'invalid',
+      }),
+    ])
   })
 })

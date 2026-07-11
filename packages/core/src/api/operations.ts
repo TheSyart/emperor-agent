@@ -12,6 +12,29 @@ const skillNameSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9_.-]+$/, 'invalid skill name')
+const creatorSkillNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'invalid creator skill name')
+const skillCreateSchema = z
+  .object({
+    name: creatorSkillNameSchema,
+    description: z.string().trim().min(1).max(1_024),
+    resources: z
+      .array(z.enum(['scripts', 'references', 'assets']))
+      .max(3)
+      .optional(),
+  })
+  .strict()
+const skillValidateSchema = z
+  .object({
+    name: creatorSkillNameSchema,
+    content: z.string().optional(),
+  })
+  .strict()
+const skillPackageSchema = z.object({ name: creatorSkillNameSchema }).strict()
 const nullableStringSchema = z.string().nullable().optional()
 const numberLikeSchema = z.union([z.number(), z.string()]).nullable().optional()
 const booleanLikeSchema = z
@@ -412,6 +435,9 @@ export const CORE_OPERATION_REGISTRY = {
   'skills.delete': operation(z.tuple([idSchema]), (api, [name]) =>
     api.skills.delete(name),
   ),
+  'skills.create': operation(z.tuple([skillCreateSchema]), (api, [input]) =>
+    api.skills.create(input),
+  ),
   'skills.get': operation(z.tuple([idSchema]), (api, [name]) =>
     api.skills.get(name),
   ),
@@ -419,11 +445,17 @@ export const CORE_OPERATION_REGISTRY = {
     api.skills.importArchive(input),
   ),
   'skills.list': operation(z.tuple([]), (api) => api.skills.list()),
+  'skills.package': operation(z.tuple([skillPackageSchema]), (api, [input]) =>
+    api.skills.package(input),
+  ),
   'skills.save': operation(
     z.tuple([idSchema, z.string()]),
     (api, [name, content]) => api.skills.save(name, content),
   ),
   'skills.tools': operation(z.tuple([]), (api) => api.skills.tools()),
+  'skills.validate': operation(z.tuple([skillValidateSchema]), (api, [input]) =>
+    api.skills.validate(input),
+  ),
   'tasks.get': operation(z.tuple([idSchema]), (api, [id]) => api.tasks.get(id)),
   'tasks.list': operation(
     z.tuple([

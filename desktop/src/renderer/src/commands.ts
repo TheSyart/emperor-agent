@@ -106,7 +106,8 @@ export function buildSlashPaletteItems(
     description: command.description,
     aliases: command.aliases,
   }))
-  const skillItems = [...skills]
+  const skillItems = skills
+    .filter(isCallableSkill)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((skill) => ({
       id: `skill:${skill.name}`,
@@ -144,10 +145,13 @@ export function parseSkillSlashCommand(
   const [token, ...rest] = trimmed.split(/\s+/)
   if (isPathLikeSlashToken(token)) return null
   const normalized = token.slice(1).toLowerCase()
-  const exact = skills.find((skill) => skill.name.toLowerCase() === normalized)
+  const callableSkills = skills.filter(isCallableSkill)
+  const exact = callableSkills.find(
+    (skill) => skill.name.toLowerCase() === normalized,
+  )
   const alias =
     !exact && normalized.endsWith('-skill')
-      ? skills.find(
+      ? callableSkills.find(
           (skill) =>
             skill.name.toLowerCase() === normalized.slice(0, -'-skill'.length),
         )
@@ -162,6 +166,10 @@ export function parseSkillSlashCommand(
     task: rest.join(' ').trim(),
     requestedSkill,
   }
+}
+
+function isCallableSkill(skill: SkillInfo): boolean {
+  return !skill.status || skill.status === 'active'
 }
 
 export function isPathLikeSlashToken(token: string): boolean {

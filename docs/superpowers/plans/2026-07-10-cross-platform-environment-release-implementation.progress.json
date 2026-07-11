@@ -3,11 +3,11 @@
   "plan_version": "2.0",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "created_at": "2026-07-10",
-  "updated_at": "2026-07-11T01:53:59+08:00",
+  "updated_at": "2026-07-11T08:28:21+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "total_tasks": 22,
-  "completed": 5,
-  "rounds": 5,
+  "completed": 6,
+  "rounds": 6,
   "tasks": {
     "BASE-001": {
       "status": "done",
@@ -45,11 +45,11 @@
       "notes": "Round 5 completed from clean commit 5cf5f0dc with strict TDD. Packaged runtimeRoot is now forced to resourcesPath/runtime-defaults ahead of argv/env overrides; runtime/state overlap is rejected before writes; userData/runtime remains a separate read-only legacy source for attachment fallback and non-destructive memory/session/config migration. A deterministic schema-v1 manifest records app version, exact sorted file paths, sizes, SHA-256 digests, built-in Skills and runtime revision. electron-builder beforePack generates it and afterPack validates the final appOutDir resource tree before signing. Unknown Skills from legacy runtime/skills and runtime/.emperor/skills migrate atomically with blocked_pending_review markers and a strict, idempotent receipt; built-ins, collisions, malformed content, symlinks and corrupt receipts are skipped/quarantined without deleting source data. FileSkillsLoader fails closed on blocked markers while preserving flat .md Skills and user-over-builtin precedence. Security review found three Important and two Minor issues; follow-up tests closed legacy directory/file/cycle/config symlink traversal, flat Skill hiding, missing final-package validation, weak receipt validation and duplicate/unsorted builtInSkills. Final make check passed Core 87 files / 723 tests and Desktop 62 files / 279 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, git diff check and production build. macOS arm64 package:dir passed; afterPack and Core both validated the actual 70-file runtime tree with 10 current built-ins and revision 48514047dd1e86bed6677f20bdf229e480ff705168f63fce540a86aba2fd6300. Code signing was skipped only because the planned Developer ID credential is not yet available."
     },
     "SKILL-006": {
-      "status": "pending",
+      "status": "done",
       "title": "最小内置 Skill 与 Core 原生 Creator",
       "depends_on": ["RSC-005"],
-      "attempts": 0,
-      "notes": ""
+      "attempts": 1,
+      "notes": "Round 6 completed from clean commit 4f12b911 with strict TDD and three independent review passes. Only skill-creator remains active; nine prior built-ins moved to non-scanned/non-packaged skills-catalog, all catalog developer-machine paths now use {{skill_dir}}, and Creator's three Python helpers were removed. Core now provides YAML-backed source/status/requirements metadata, create/validate/reproducible package operations, manage_skill, canonical runtime placeholder expansion, user-over-builtin precedence, invalid/blocked fail-closed loading, and explicit flat .md compatibility. Packaging enforces canonical state containment, no-follow descriptor reads, identity-stable snapshots, symlink rejection, bounded depth/entries/files/bytes, deterministic ZIP metadata, recoverable Windows replacement, and CoreApi mutation guards. Initial review found two Critical, four Important and one Minor issue; all seven were fixed. Final review found Critical 0 / Important 0 and Ready Yes. Final make check passed Core 88 files / 742 tests and Desktop 62 files / 280 tests, plus both typechecks, Desktop test typecheck, zero-warning ESLint, Prettier, diff checks and production build. Final macOS arm64 package:dir passed; the 47-file runtime manifest contains only skill-creator (revision f464dfbe4148746cf93f4b79e5b3a9f584d845f3ec8b313155c8a83103073564), with no Python or skills-catalog resources. Signing remains intentionally deferred to REL-MAC-018 because no valid Developer ID credential is available."
     },
     "ENV-FND-007": {
       "status": "pending",

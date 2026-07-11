@@ -145,6 +145,9 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('skills.tools', 'GET', '/api/tools'),
   op('skills.list', 'GET', '/api/skills'),
   op('skills.get', 'GET', '/api/skill'),
+  op('skills.create', 'POST', '/api/skills/create'),
+  op('skills.validate', 'POST', '/api/skills/validate'),
+  op('skills.package', 'POST', '/api/skills/package'),
   op('skills.save', 'POST', '/api/skill'),
   op('skills.delete', 'DELETE', '/api/skill'),
   op('skills.importArchive', 'POST', '/api/skills/import'),
@@ -231,6 +234,8 @@ export class CoreApi {
       },
     })
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
+      runtimeRoot: this.paths.runtimeRoot,
+      manager: this.loop.skillManager,
       registry: this.loop.registry,
       refreshRuntimeContext: () => {
         this.loop.refreshRuntimeContext()
@@ -819,11 +824,28 @@ export class CoreApi {
     tools: () => this.skillService.tools(),
     list: () => this.skillService.list(),
     get: (name: string) => this.skillService.get(name),
-    save: (name: string, content: string) =>
-      this.skillService.save(name, content),
-    delete: (name: string) => this.skillService.delete(name),
-    importArchive: (archive: unknown) =>
-      this.skillService.importArchive(archive),
+    create: (input: Parameters<CoreSkillService['create']>[0]) => {
+      this.assertMutation('skills', 'create')
+      return this.skillService.create(input)
+    },
+    validate: (input: Parameters<CoreSkillService['validate']>[0]) =>
+      this.skillService.validate(input),
+    package: (input: Parameters<CoreSkillService['package']>[0]) => {
+      this.assertMutation('skills', 'package')
+      return this.skillService.package(input)
+    },
+    save: (name: string, content: string) => {
+      this.assertMutation('skills', 'save')
+      return this.skillService.save(name, content)
+    },
+    delete: (name: string) => {
+      this.assertMutation('skills', 'delete')
+      return this.skillService.delete(name)
+    },
+    importArchive: (archive: unknown) => {
+      this.assertMutation('skills', 'import')
+      return this.skillService.importArchive(archive)
+    },
   }
 
   readonly sidebar = {

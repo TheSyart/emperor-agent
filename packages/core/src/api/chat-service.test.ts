@@ -21,6 +21,14 @@ import { LEGACY_SKILL_STATE_FILE } from '../runtime/resources'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
+function skillDocument(
+  name: string,
+  description: string,
+  body: string,
+): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
+}
+
 describe('MainlineTurnService (MIG-IPC-005)', () => {
   it('submits chat turns through AgentLoop and returns durable turn metadata', async () => {
     const root = tmp('emperor-mainline-')
@@ -108,7 +116,11 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     mkdirSync(skillDir, { recursive: true })
     writeFileSync(
       join(skillDir, 'SKILL.md'),
-      '# Reviewer Skill\n\nGeneral review helper.\n\nREQUESTED_SKILL_CONTEXT_MARKER',
+      skillDocument(
+        'reviewer',
+        'Review supplied evidence.',
+        '# Reviewer Skill\n\nGeneral review helper.\n\nREQUESTED_SKILL_CONTEXT_MARKER',
+      ),
       'utf8',
     )
     const attachment = api.attachments.save({
@@ -226,12 +238,20 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     mkdirSync(userRoot, { recursive: true })
     writeFileSync(
       join(builtinRoot, 'SKILL.md'),
-      '# Reviewer\n\nGeneral reviewer.\n\nSIGNED_BUILTIN_MARKER',
+      skillDocument(
+        'reviewer',
+        'Review code from the signed runtime.',
+        '# Reviewer\n\nGeneral reviewer.\n\nSIGNED_BUILTIN_MARKER',
+      ),
       'utf8',
     )
     writeFileSync(
       join(userRoot, 'SKILL.md'),
-      '# Reviewer\n\nGeneral reviewer.\n\nUSER_STATE_OVERRIDE_MARKER',
+      skillDocument(
+        'reviewer',
+        'Review code from user state.',
+        '# Reviewer\n\nGeneral reviewer.\n\nUSER_STATE_OVERRIDE_MARKER',
+      ),
       'utf8',
     )
     const provider = new FakeProvider()

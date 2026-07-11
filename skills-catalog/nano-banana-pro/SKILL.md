@@ -14,13 +14,13 @@ Run the script using absolute path (do NOT cd to skill directory first):
 **Generate new image:**
 
 ```bash
-uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "your image description" --filename "output-name.png" [--resolution 1K|2K|4K] [--api-key KEY]
+uv run {{skill_dir}}/scripts/generate_image.py --prompt "your image description" --filename "output-name.png" [--resolution 1K|2K|4K] [--api-key KEY]
 ```
 
 **Edit existing image:**
 
 ```bash
-uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "editing instructions" --filename "output-name.png" --input-image "path/to/input.png" [--resolution 1K|2K|4K] [--api-key KEY]
+uv run {{skill_dir}}/scripts/generate_image.py --prompt "editing instructions" --filename "output-name.png" --input-image "path/to/input.png" [--resolution 1K|2K|4K] [--api-key KEY]
 ```
 
 **Important:** Always run from the user's current working directory so images are saved where the user is working, not in the skill directory.
@@ -30,11 +30,11 @@ uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/s
 Goal: fast iteration without burning time on 4K until the prompt is correct.
 
 - Draft (1K): quick feedback loop
-  - `uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "<draft prompt>" --filename "yyyy-mm-dd-hh-mm-ss-draft.png" --resolution 1K`
+  - `uv run {{skill_dir}}/scripts/generate_image.py --prompt "<draft prompt>" --filename "yyyy-mm-dd-hh-mm-ss-draft.png" --resolution 1K`
 - Iterate: adjust prompt in small diffs; keep filename new per run
   - If editing: keep the same `--input-image` for every iteration until you’re happy.
 - Final (4K): only when prompt is locked
-  - `uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "<final prompt>" --filename "yyyy-mm-dd-hh-mm-ss-final.png" --resolution 4K`
+  - `uv run {{skill_dir}}/scripts/generate_image.py --prompt "<final prompt>" --filename "yyyy-mm-dd-hh-mm-ss-final.png" --resolution 4K`
 
 ## Resolution Options
 
@@ -129,11 +129,11 @@ Use templates when the user is vague or when edits must be precise.
 **Generate new image:**
 
 ```bash
-uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "A serene Japanese garden with cherry blossoms" --filename "2025-11-23-14-23-05-japanese-garden.png" --resolution 4K
+uv run {{skill_dir}}/scripts/generate_image.py --prompt "A serene Japanese garden with cherry blossoms" --filename "2025-11-23-14-23-05-japanese-garden.png" --resolution 4K
 ```
 
 **Edit existing image:**
 
 ```bash
-uv run /Users/anhuike/Documents/workspace/emperor-agent/skills/nano-banana-pro/scripts/generate_image.py --prompt "make the sky more dramatic with storm clouds" --filename "2025-11-23-14-25-30-dramatic-sky.png" --input-image "original-photo.jpg" --resolution 2K
+uv run {{skill_dir}}/scripts/generate_image.py --prompt "make the sky more dramatic with storm clouds" --filename "2025-11-23-14-25-30-dramatic-sky.png" --input-image "original-photo.jpg" --resolution 2K
 ```

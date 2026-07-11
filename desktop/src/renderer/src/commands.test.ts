@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildSlashPaletteItems,
   isPathLikeSlashToken,
   parseSkillSlashCommand,
   parseSlashCommand,
@@ -32,5 +33,22 @@ describe('slash command parsing', () => {
       parseSkillSlashCommand('/code-audit 检查项目', skills)?.requestedSkill
         .name,
     ).toBe('code-audit')
+  })
+
+  it('keeps blocked Skills out of callable shortcuts', () => {
+    const blocked: SkillInfo = {
+      name: 'legacy-script',
+      path: 'skills/legacy-script/SKILL.md',
+      status: 'blocked_pending_review',
+    }
+
+    expect(
+      buildSlashPaletteItems([...skills, blocked]).some(
+        (item) => item.id === 'skill:legacy-script',
+      ),
+    ).toBe(false)
+    expect(
+      parseSkillSlashCommand('/legacy-script run', [...skills, blocked]),
+    ).toBeNull()
   })
 })

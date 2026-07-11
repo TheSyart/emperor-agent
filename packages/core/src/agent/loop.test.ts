@@ -3,12 +3,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { AgentLoop } from './loop'
@@ -19,6 +21,18 @@ const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
+}
+
+function symlinkDirectory(target: string, path: string): void {
+  symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+}
+
+function skillDocument(
+  name: string,
+  description: string,
+  body: string,
+): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
 }
 
 async function withEnv(
@@ -737,22 +751,42 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const root = tmp('emperor-agent-loop-skills-root-')
     const stateRoot = join(root, '.emperor')
     const projectRoot = tmp('emperor-agent-loop-skills-project-')
+    const builtinGreet = skillDocument(
+      'greet',
+      'Greet from built-in.',
+      'builtin greet',
+    )
+    const userGreet = skillDocument(
+      'greet',
+      'Greet from user state.',
+      'user greet',
+    )
+    const userOnly = skillDocument(
+      'user-only',
+      'Available only from user state.',
+      'user-only skill',
+    )
+    const projectGreet = skillDocument(
+      'greet',
+      'Greet from the active project.',
+      'project greet',
+    )
     mkdirSync(join(root, 'skills', 'greet'), { recursive: true })
     writeFileSync(
       join(root, 'skills', 'greet', 'SKILL.md'),
-      'builtin greet',
+      builtinGreet,
       'utf8',
     )
     mkdirSync(join(stateRoot, 'skills', 'greet'), { recursive: true })
     writeFileSync(
       join(stateRoot, 'skills', 'greet', 'SKILL.md'),
-      'user greet',
+      userGreet,
       'utf8',
     )
     mkdirSync(join(stateRoot, 'skills', 'user-only'), { recursive: true })
     writeFileSync(
       join(stateRoot, 'skills', 'user-only', 'SKILL.md'),
-      'user-only skill',
+      userOnly,
       'utf8',
     )
 
@@ -764,11 +798,11 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
 
     expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
-      'user greet',
+      userGreet,
     )
     expect(
       await loop.registry.execute('load_skill', { name: 'user-only' }),
-    ).toBe('user-only skill')
+    ).toBe(userOnly)
 
     const project = loop.projectStore.resolve(projectRoot)
     mkdirSync(join(projectRoot, '.emperor', 'skills', 'greet'), {
@@ -776,7 +810,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
     writeFileSync(
       join(projectRoot, '.emperor', 'skills', 'greet', 'SKILL.md'),
-      'project greet',
+      projectGreet,
       'utf8',
     )
     const buildSession = loop.sessionStore.create('Build project', {
@@ -786,11 +820,11 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     loop.activateSession(buildSession.id)
 
     expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
-      'project greet',
+      projectGreet,
     )
     expect(
       await loop.registry.execute('load_skill', { name: 'user-only' }),
-    ).toBe('user-only skill')
+    ).toBe(userOnly)
 
     loop.activateSession(
       loop.sessionStore
@@ -799,8 +833,159 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     )
 
     expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
-      'user greet',
+      userGreet,
     )
+  })
+
+  it('expands {{skill_dir}} to the selected canonical directory without rewriting SKILL.md', async () => {
+    const root = tmp('emperor-agent-loop-skill-placeholder-root-')
+    const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'path-aware')
+    const skillFile = join(skillDir, 'SKILL.md')
+    const source = skillDocument(
+      'path-aware',
+      'Resolve bundled file paths.',
+      'Run {{skill_dir}}/scripts/check.mjs',
+    )
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(skillFile, source, 'utf8')
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(
+      await loop.registry.execute('load_skill', { name: 'path-aware' }),
+    ).toBe(source.replaceAll('{{skill_dir}}', realpathSync(skillDir)))
+    expect(readFileSync(skillFile, 'utf8')).toBe(source)
+  })
+
+  it('exposes Core-native create, validate, and package actions through manage_skill', async () => {
+    const root = tmp('emperor-agent-loop-manage-skill-root-')
+    const stateRoot = join(root, '.emperor')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const refreshRuntimeContext = vi.spyOn(loop, 'refreshRuntimeContext')
+
+    const created = JSON.parse(
+      await loop.registry.execute('manage_skill', {
+        action: 'create',
+        name: 'release-audit',
+        description: 'Audit release artifacts and integrity evidence.',
+        resources: ['references'],
+      }),
+    ) as Record<string, unknown>
+    expect(created).toMatchObject({ name: 'release-audit', valid: true })
+    expect(refreshRuntimeContext).toHaveBeenCalledOnce()
+
+    const validated = JSON.parse(
+      await loop.registry.execute('manage_skill', {
+        action: 'validate',
+        name: 'release-audit',
+      }),
+    ) as Record<string, unknown>
+    expect(validated).toMatchObject({ name: 'release-audit', valid: true })
+
+    const packaged = JSON.parse(
+      await loop.registry.execute('manage_skill', {
+        action: 'package',
+        name: 'release-audit',
+      }),
+    ) as Record<string, unknown>
+    expect(packaged).toMatchObject({
+      name: 'release-audit',
+      path: join(
+        realpathSync(stateRoot),
+        'skill-packages',
+        'release-audit.skill',
+      ),
+    })
+  })
+
+  it('does not load a Skill through a symbolic-link root', async () => {
+    const root = tmp('emperor-agent-loop-skill-link-root-')
+    const stateRoot = join(root, '.emperor')
+    const outside = tmp('emperor-agent-loop-skill-link-outside-')
+    mkdirSync(join(stateRoot, 'skills'), { recursive: true })
+    writeFileSync(join(outside, 'SKILL.md'), 'outside skill\n')
+    symlinkDirectory(outside, join(stateRoot, 'skills', 'linked'))
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(await loop.registry.execute('load_skill', { name: 'linked' })).toBe(
+      '[ERR] skill "linked" not found',
+    )
+  })
+
+  it('does not load project Skills through a symlinked .emperor ancestor', async () => {
+    const root = tmp('emperor-agent-loop-project-skill-link-root-')
+    const stateRoot = join(root, '.state')
+    const projectRoot = tmp('emperor-agent-loop-project-skill-project-')
+    const outside = tmp('emperor-agent-loop-project-skill-outside-')
+    const outsideSkill = join(outside, 'skills', 'escaped')
+    mkdirSync(outsideSkill, { recursive: true })
+    writeFileSync(join(outsideSkill, 'SKILL.md'), 'escaped project skill\n')
+    symlinkDirectory(outside, join(projectRoot, '.emperor'))
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const project = loop.projectStore.resolve(projectRoot)
+    const session = loop.sessionStore.create('Linked project', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    loop.activateSession(session.id)
+
+    expect(await loop.registry.execute('load_skill', { name: 'escaped' })).toBe(
+      '[ERR] skill "escaped" not found',
+    )
+  })
+
+  it('skips invalid directory Skills and falls back to the next valid source', async () => {
+    const root = tmp('emperor-agent-loop-invalid-skill-root-')
+    const stateRoot = join(root, '.state')
+    const builtin = join(root, 'skills', 'reviewer')
+    const user = join(stateRoot, 'skills', 'reviewer')
+    mkdirSync(builtin, { recursive: true })
+    mkdirSync(user, { recursive: true })
+    writeFileSync(
+      join(builtin, 'SKILL.md'),
+      '---\nname: reviewer\ndescription: Review code safely.\n---\n\nVALID_BUILTIN\n',
+    )
+    writeFileSync(
+      join(user, 'SKILL.md'),
+      '---\nname: reviewer\n---\n\nINVALID_USER\n',
+    )
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(
+      await loop.registry.execute('load_skill', { name: 'reviewer' }),
+    ).toBe(
+      '---\nname: reviewer\ndescription: Review code safely.\n---\n\nVALID_BUILTIN\n',
+    )
+    expect(loop.skillsLoader.summary()).not.toContain('INVALID_USER')
   })
 })
 

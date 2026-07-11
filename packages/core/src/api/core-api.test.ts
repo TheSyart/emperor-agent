@@ -89,12 +89,15 @@ const EXPECTED_OPERATIONS = [
   'sessions.rename',
   'sidebar.get',
   'sidebar.patch',
+  'skills.create',
   'skills.delete',
   'skills.get',
   'skills.importArchive',
   'skills.list',
+  'skills.package',
   'skills.save',
   'skills.tools',
+  'skills.validate',
   'tasks.get',
   'tasks.list',
   'tasks.transcript',
@@ -1456,6 +1459,24 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
     expect(() => api.scheduler.createJob({})).toThrow(CoreMutationGuardError)
     expect(() => api.team.wakeMember('alice')).toThrow(CoreMutationGuardError)
+    expect(() =>
+      api.skills.create({
+        name: 'blocked-create',
+        description: 'Must not write while Plan mode is active.',
+      }),
+    ).toThrow(CoreMutationGuardError)
+    expect(() => api.skills.package({ name: 'missing' })).toThrow(
+      CoreMutationGuardError,
+    )
+    expect(() => api.skills.save('blocked-save', '# Blocked')).toThrow(
+      CoreMutationGuardError,
+    )
+    expect(() => api.skills.delete('blocked-delete')).toThrow(
+      CoreMutationGuardError,
+    )
+    expect(() => api.skills.importArchive({ raw: [] })).toThrow(
+      CoreMutationGuardError,
+    )
 
     await api.close()
   })

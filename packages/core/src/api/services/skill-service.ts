@@ -1,20 +1,34 @@
 import { inflateRawSync } from 'node:zlib'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import type { ToolRegistry } from '../../tools/registry'
+import {
+  SkillManager,
+  parseSkillMetadata,
+  type SkillCreateInput,
+  type SkillCreateResult,
+  type SkillPackageInput,
+  type SkillPackageResult,
+  type SkillRequirements,
+  type SkillSource,
+  type SkillStatus,
+  type SkillValidateInput,
+  type SkillValidationResult,
+} from '../../skills/manager'
 
 type Dict = Record<string, unknown>
 
 export interface CoreSkillServiceDeps {
+  runtimeRoot?: string
+  manager?: SkillManager
   registry?: ToolRegistry
   refreshRuntimeContext?: () => void
 }
@@ -25,6 +39,10 @@ export interface SkillInfoPayload {
   path: string
   tags: string
   always: boolean
+  source: SkillSource
+  status: SkillStatus
+  readOnly: boolean
+  requirements: SkillRequirements
 }
 
 export interface SkillDetailPayload extends SkillInfoPayload {
@@ -53,12 +71,19 @@ export interface SkillImportPayload {
 export class CoreSkillService {
   readonly root: string
   readonly skillsDir: string
+  readonly manager: SkillManager
   private readonly deps: CoreSkillServiceDeps
 
   constructor(root: string, deps: CoreSkillServiceDeps = {}) {
     this.root = resolve(root)
     this.skillsDir = join(this.root, 'skills')
     this.deps = deps
+    this.manager =
+      deps.manager ??
+      new SkillManager({
+        stateRoot: this.root,
+        runtimeRoot: deps.runtimeRoot ?? this.root,
+      })
   }
 
   tools(): ToolInfoPayload[] {
@@ -79,7 +104,7 @@ export class CoreSkillService {
   }
 
   list(): SkillInfoPayload[] {
-    return this.skillNames().map((name) => this.info(name))
+    return this.manager.listRecords().map((record) => this.info(record.name))
   }
 
   get(name: string): SkillDetailPayload {
@@ -93,6 +118,7 @@ export class CoreSkillService {
   save(name: string, content: string): SkillDetailPayload {
     const safe = safeSkillName(name)
     if (!safe) throw new Error('Skill name must be a safe directory name')
+    assertWritableSkillPath(this.skillsDir, safe)
     const path = join(this.skillsDir, safe, 'SKILL.md')
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, `${String(content || '').trimEnd()}\n`, 'utf8')
@@ -104,7 +130,12 @@ export class CoreSkillService {
     const safe = safeSkillName(name)
     if (!safe) throw new Error('Invalid skill name')
     const dir = join(this.skillsDir, safe)
-    if (!existsSync(dir)) throw new Error(`Skill not found: ${safe}`)
+    if (!existsSync(dir)) {
+      const record = this.manager.resolve(safe)
+      if (record?.readOnly)
+        throw new Error(`Built-in Skill is read-only: ${safe}`)
+      throw new Error(`Skill not found: ${safe}`)
+    }
     rmSync(dir, { recursive: true, force: true })
     this.deps.refreshRuntimeContext?.()
     return { deleted: safe }
@@ -116,47 +147,50 @@ export class CoreSkillService {
     return result
   }
 
+  create(input: SkillCreateInput): SkillCreateResult {
+    const result = this.manager.create(input)
+    this.deps.refreshRuntimeContext?.()
+    return result
+  }
+
+  validate(input: SkillValidateInput): SkillValidationResult {
+    return this.manager.validate(input)
+  }
+
+  package(input: SkillPackageInput): SkillPackageResult {
+    return this.manager.package(input)
+  }
+
   private info(name: string): SkillInfoPayload {
-    const path = this.skillPath(name)
-    if (!path) throw new Error(`Skill not found: ${name}`)
-    const meta = parseFrontmatter(readFileSync(path, 'utf8'))
+    const record = this.manager.resolve(name)
+    if (!record) throw new Error(`Skill not found: ${name}`)
+    const content = readFileSync(record.skillFile, 'utf8')
+    const meta = parseSkillMetadata(content)
+    const validation = this.manager.validate({ name })
     return {
       name,
-      description: String(meta.description ?? ''),
-      path: relative(this.root, path).replace(/\\/g, '/'),
-      tags: String(meta.tags ?? ''),
-      always: boolMeta(meta.always),
+      description: String(meta.data.description ?? ''),
+      path: relative(
+        record.source === 'user' ? this.root : this.manager.runtimeRoot,
+        record.skillFile,
+      ).replace(/\\/g, '/'),
+      tags: String(meta.data.tags ?? ''),
+      always: boolMeta(meta.data.always),
+      source: record.source,
+      status:
+        record.status !== 'active'
+          ? record.status
+          : !validation.valid
+            ? 'invalid'
+            : 'active',
+      readOnly: record.readOnly,
+      requirements: validation.requirements,
     }
   }
 
-  private skillNames(): string[] {
-    if (!existsSync(this.skillsDir)) return []
-    return readdirSync(this.skillsDir)
-      .filter(
-        (name) =>
-          !name.startsWith('.') && safeSkillName(name) && this.skillPath(name),
-      )
-      .sort()
-  }
-
   private skillPath(name: string): string | null {
-    const path = join(this.skillsDir, name, 'SKILL.md')
-    return existsSync(path) && statSync(path).isFile() ? path : null
+    return this.manager.resolve(name)?.skillFile ?? null
   }
-}
-
-function parseFrontmatter(content: string): Dict {
-  if (!content.startsWith('---\n')) return {}
-  const end = content.indexOf('\n---', 4)
-  if (end < 0) return {}
-  const raw = content.slice(4, end)
-  const meta: Dict = {}
-  for (const line of raw.split('\n')) {
-    const match = /^([A-Za-z0-9_.-]+):\s*(.*)$/.exec(line.trim())
-    if (!match) continue
-    meta[match[1]!] = match[2]!.trim()
-  }
-  return meta
 }
 
 function boolMeta(value: unknown): boolean {
@@ -170,6 +204,17 @@ function boolMeta(value: unknown): boolean {
 function safeSkillName(name: string): string {
   const safe = String(name || '').trim()
   return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test(safe) ? safe : ''
+}
+
+function assertWritableSkillPath(skillsDir: string, name: string): void {
+  if (existsSync(skillsDir) && lstatSync(skillsDir).isSymbolicLink())
+    throw new Error('User Skills directory must not be a symbolic link')
+  const dir = join(skillsDir, name)
+  if (existsSync(dir) && lstatSync(dir).isSymbolicLink())
+    throw new Error(`Skill directory must not be a symbolic link: ${name}`)
+  const skillFile = join(dir, 'SKILL.md')
+  if (existsSync(skillFile) && lstatSync(skillFile).isSymbolicLink())
+    throw new Error(`SKILL.md must not be a symbolic link: ${name}`)
 }
 
 interface ZipEntry {
