@@ -6,6 +6,12 @@ const repoRoot = resolve(__dirname, '..', '..', '..')
 const workflowsRoot = resolve(repoRoot, '.github', 'workflows')
 
 describe('GitHub Actions governance', () => {
+  it('checks out tracked text with LF on every runner', () => {
+    const attributes = readFileSync(resolve(repoRoot, '.gitattributes'), 'utf8')
+
+    expect(attributes).toMatch(/^\* text=auto eol=lf$/m)
+  })
+
   it('uses the release-pinned Node 24 toolchain in every workflow', () => {
     const workflows = readdirSync(workflowsRoot)
       .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
