@@ -22,7 +22,11 @@ const runIdPattern = /^[1-9]\d*$/
 const previewMarker = 'UNSIGNED-PREVIEW'
 
 const platformSpecs = {
-  macos: { arches: ['arm64', 'x64'], extensions: ['dmg', 'zip'], smoke: 'darwin' },
+  macos: {
+    arches: ['arm64', 'x64'],
+    extensions: ['dmg', 'zip'],
+    smoke: 'darwin',
+  },
   windows: { arches: ['x64'], extensions: ['exe'], smoke: 'win32' },
   linux: { arches: ['x64'], extensions: ['AppImage', 'deb'], smoke: 'linux' },
 }
@@ -98,7 +102,10 @@ export function createPreviewCandidate({
   }
   const receiptRoot = join(dist, 'preview-receipts')
   mkdirSync(receiptRoot, { recursive: true })
-  writeJsonAtomic(join(receiptRoot, `${platform}-${arch}.json`), receipt)
+  writeJsonAtomic(
+    join(receiptRoot, `candidate-${platform}-${arch}.json`),
+    receipt,
+  )
   writeJsonAtomic(
     join(receiptRoot, `${previewMarker}-${platform}-${arch}.marker.json`),
     common,
@@ -180,7 +187,8 @@ function validateIdentity({ commit, runId, platform, arch }) {
 }
 
 function rejectForeignMarkers(dist) {
-  if (!existsSync(dist)) throw new Error(`distribution directory missing: ${dist}`)
+  if (!existsSync(dist))
+    throw new Error(`distribution directory missing: ${dist}`)
   const names = readdirSync(dist)
   if (names.some((name) => name.includes('UNSIGNED-INTERNAL')))
     throw new Error('UNSIGNED-INTERNAL input cannot enter Preview')
@@ -290,7 +298,10 @@ function main(argv) {
   throw new Error(usage())
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   try {
     main(process.argv.slice(2))
   } catch (error) {

@@ -63,7 +63,6 @@ describe('unsigned preview release channel', () => {
     expect(workflow).toContain('arch: x64')
     expect(workflow).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(workflow).toContain('contents: read')
-    expect(workflow).not.toContain('contents: write')
     expect(workflow).not.toContain('forceCodeSigning')
     expect(workflow).not.toContain('notarize')
     expect(workflow).not.toContain('azureSignOptions')
@@ -111,6 +110,54 @@ describe('unsigned preview release channel', () => {
     expect(internal).toContain('UNSIGNED-INTERNAL')
     expect(internal).not.toContain('push:')
     expect(preview).not.toContain('UNSIGNED-INTERNAL')
+  })
+
+  it('attests only after all candidates pass and publishes from a separate job', () => {
+    const workflow = readWorkflow('release-preview.yml')
+
+    expect(workflow).toContain('preview-aggregate:')
+    expect(workflow).toContain('preview-publish:')
+    expect(workflow).toMatch(
+      /needs:\s*\[macos-preview, windows-preview, linux-preview-build, linux-preview-smoke\]/,
+    )
+    expect(workflow).toContain('needs: preview-aggregate')
+    expect(workflow).toContain('id-token: write')
+    expect(workflow).toContain('attestations: write')
+    expect(workflow).toContain('artifact-metadata: write')
+    expect(workflow.match(/actions\/attest@v4/g)?.length).toBe(2)
+    expect(workflow).toContain('@cyclonedx/cyclonedx-npm@6.0.0')
+    expect(workflow).toContain('assemble-preview-release-bundle.mjs')
+    expect(workflow).toContain('publish-preview-release.sh')
+    expect(workflow).toContain('gh attestation verify')
+  })
+
+  it('limits write permission to the Preview publish job', () => {
+    const workflow = readWorkflow('release-preview.yml')
+    const writeMatches = workflow.match(/contents: write/g) ?? []
+
+    expect(writeMatches).toHaveLength(1)
+    expect(workflow).toContain('UNSIGNED-PREVIEW-release-bundle')
+    expect(workflow).not.toContain('softprops/action-gh-release')
+  })
+
+  it('uses draft-first atomic Pre-release publication with rollback', () => {
+    const publisher = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'publish-preview-release.sh'),
+      'utf8',
+    )
+
+    expect(publisher).toContain('preview-publication-contract.mjs')
+    expect(publisher).toContain('merge-base --is-ancestor')
+    expect(publisher).toContain('gh release view')
+    expect(publisher).toContain('gh release create')
+    expect(publisher).toContain('--draft')
+    expect(publisher).toContain('--prerelease')
+    expect(publisher).toContain('--notes-file')
+    expect(publisher).toContain('gh release upload')
+    expect(publisher).toContain('gh release edit')
+    expect(publisher).toContain('--draft=false')
+    expect(publisher).toContain('gh release delete')
+    expect(publisher).toContain('UNSIGNED-PREVIEW')
   })
 
   it('strictly classifies Stable, Preview and unsupported tags', () => {
@@ -165,7 +212,7 @@ describe('unsigned preview release channel', () => {
 
     const receipt = JSON.parse(
       fs.readFileSync(
-        path.join(dist, 'preview-receipts', 'linux-x64.json'),
+        path.join(dist, 'preview-receipts', 'candidate-linux-x64.json'),
         'utf8',
       ),
     ) as Record<string, unknown>

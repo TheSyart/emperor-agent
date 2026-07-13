@@ -62,7 +62,7 @@ jobs:
             desktop/dist/*-UNSIGNED-PREVIEW-macos-${{ matrix.arch }}.zip
             desktop/dist/SHA256SUMS-macos-${{ matrix.arch }}.txt
             desktop/dist/packaged-smoke/darwin-${{ matrix.arch }}.json
-            desktop/dist/preview-receipts/macos-${{ matrix.arch }}.json
+            desktop/dist/preview-receipts/candidate-macos-${{ matrix.arch }}.json
             desktop/dist/preview-receipts/UNSIGNED-PREVIEW-macos-${{ matrix.arch }}.marker.json
           if-no-files-found: error
           retention-days: 7
@@ -114,7 +114,7 @@ jobs:
             desktop/dist/*-UNSIGNED-PREVIEW-windows-x64.exe
             desktop/dist/SHA256SUMS-windows-x64.txt
             desktop/dist/packaged-smoke/win32-x64.json
-            desktop/dist/preview-receipts/windows-x64.json
+            desktop/dist/preview-receipts/candidate-windows-x64.json
             desktop/dist/preview-receipts/UNSIGNED-PREVIEW-windows-x64.marker.json
           if-no-files-found: error
           retention-days: 7
@@ -161,7 +161,7 @@ jobs:
             desktop/dist/*-UNSIGNED-PREVIEW-linux-x64.deb
             desktop/dist/SHA256SUMS-linux-x64.txt
             desktop/dist/packaged-smoke/linux-x64.json
-            desktop/dist/preview-receipts/linux-x64.json
+            desktop/dist/preview-receipts/candidate-linux-x64.json
             desktop/dist/preview-receipts/UNSIGNED-PREVIEW-linux-x64.marker.json
           if-no-files-found: error
           retention-days: 7
@@ -204,3 +204,164 @@ jobs:
           path: desktop/dist/preview-linux-receipts/UNSIGNED-PREVIEW-ubuntu-${{ matrix.version }}.json
           if-no-files-found: error
           retention-days: 7
+
+  preview-aggregate:
+    name: Verify and attest UNSIGNED-PREVIEW bundle
+    needs:
+      [macos-preview, windows-preview, linux-preview-build, linux-preview-smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install SBOM inputs
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Download Preview candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: UNSIGNED-PREVIEW-*-candidate
+          path: preview-inputs
+          merge-multiple: true
+      - name: Download Preview lifecycle receipts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: UNSIGNED-PREVIEW-linux-*-receipts
+          path: preview-inputs
+          merge-multiple: true
+      - name: Assemble fail-closed Preview bundle
+        run: >-
+          node scripts/assemble-preview-release-bundle.mjs
+          preview-inputs preview-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          "$GITHUB_RUN_ID"
+      - name: Generate reproducible CycloneDX SBOM and full checksums
+        run: |
+          mkdir -p preview-sbom
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.0 \
+            --package-lock-only \
+            --output-reproducible \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --validate \
+            --output-file preview-sbom/core.cdx.json
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.0 \
+            --package-lock-only \
+            --ignore-npm-errors \
+            --output-reproducible \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --validate \
+            --output-file preview-sbom/desktop.cdx.json \
+            desktop/package.json
+          node scripts/merge-cyclonedx-sboms.mjs \
+            preview-sbom/core.cdx.json \
+            preview-sbom/desktop.cdx.json \
+            "preview-bundle/emperor-agent-${GITHUB_REF_NAME}.cdx.json"
+          (
+            cd preview-bundle
+            find . -maxdepth 1 -type f \
+              ! -name 'SHA256SUMS.txt' \
+              -printf '%f\n' | LC_ALL=C sort | while IFS= read -r file; do
+                sha256sum "$file"
+              done >SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
+          )
+          node scripts/preview-publication-contract.mjs \
+            preview-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+      - name: Attest Preview build provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: preview-bundle/SHA256SUMS.txt
+      - name: Attest Preview artifact SBOM
+        uses: actions/attest@v4
+        with:
+          subject-checksums: preview-bundle/ARTIFACT-SHA256SUMS.txt
+          sbom-path: preview-bundle/emperor-agent-${{ github.ref_name }}.cdx.json
+      - name: Verify Preview attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "preview-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-preview.yml" \
+              --source-ref "$GITHUB_REF"
+          done <preview-bundle/SHA256SUMS.txt
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "preview-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-preview.yml" \
+              --source-ref "$GITHUB_REF" \
+              --predicate-type 'https://cyclonedx.org/bom'
+          done <preview-bundle/ARTIFACT-SHA256SUMS.txt
+      - name: Upload attested Preview bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-PREVIEW-release-bundle
+          path: preview-bundle
+          if-no-files-found: error
+          retention-days: 7
+
+  preview-publish:
+    name: Publish atomic UNSIGNED-PREVIEW GitHub Pre-release
+    needs: preview-aggregate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch default branch
+        run: git fetch origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download attested Preview bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: UNSIGNED-PREVIEW-release-bundle
+          path: preview-bundle
+      - name: Reverify Preview checksums and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/preview-publication-contract.mjs \
+            preview-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "preview-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-preview.yml" \
+              --source-ref "$GITHUB_REF"
+          done <preview-bundle/SHA256SUMS.txt
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "preview-bundle/$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-preview.yml" \
+              --source-ref "$GITHUB_REF" \
+              --predicate-type 'https://cyclonedx.org/bom'
+          done <preview-bundle/ARTIFACT-SHA256SUMS.txt
+      - name: Create draft, verify inventory and publish Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/publish-preview-release.sh preview-bundle

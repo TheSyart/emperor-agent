@@ -5,16 +5,16 @@
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-13T12:25:17+08:00",
+  "updated_at": "2026-07-13T12:42:51+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
   "total_tasks": 25,
-  "completed": 18,
-  "rounds": 28,
+  "completed": 19,
+  "rounds": 30,
   "planning_receipt": {
     "status": "executing",
     "implementation_started": true,
-    "statement": "The independent Unsigned Preview channel now has an isolated candidate workflow and receipt contract. Aggregation, public Pre-release publication and real platform receipts remain pending; five Signed Stable tasks remain blocked without weakening their gates."
+    "statement": "The Unsigned Preview candidate, aggregation, SBOM/attestation and atomic GitHub Pre-release publication paths are implemented and locally verified. The first real public release and platform receipts remain pending; five Signed Stable tasks remain blocked without weakening their gates."
   },
   "milestones": {
     "unsigned_preview": {
@@ -239,20 +239,20 @@
       "attempts": 1,
       "started_at": "2026-07-13T12:10:42+08:00",
       "completed_at": "2026-07-13T12:25:17+08:00",
-      "commit": null,
+      "commit": "25a076e8",
       "receipt": "Preview contract tests 7/7 and release bundle tests 4/4 passed; full make check passed Core 903 and Desktop 318 tests, typechecks, zero-warning lint, format and production build. A real macOS arm64 preview-config directory package skipped signing because identity is explicitly null and passed minimal-PATH packaged smoke.",
       "notes": "release-preview.yml is tag-only and contents-read; it builds macOS arm64/x64, Windows x64 and Linux x64 candidates without signing secrets, labels artifacts/markers/receipts UNSIGNED-PREVIEW, runs Ubuntu 22.04/24.04 lifecycle smoke, and cannot publish. Stable tags exclude all prereleases and the trusted assembler explicitly rejects Preview input."
     },
     "PREVIEW-PUB-024": {
-      "status": "pending",
+      "status": "done",
       "title": "聚合并原子发布 GitHub Pre-release",
       "depends_on": ["PREVIEW-WF-023"],
-      "attempts": 0,
-      "started_at": null,
-      "completed_at": null,
+      "attempts": 1,
+      "started_at": "2026-07-13T12:26:30+08:00",
+      "completed_at": "2026-07-13T12:42:51+08:00",
       "commit": null,
-      "receipt": null,
-      "notes": "Must publish only an explicitly unsigned GitHub Pre-release with checksums, SBOM, attestations and risk disclosure."
+      "receipt": "Preview release and bundle suites passed 21/21 focused tests; full make check passed Core 903 and Desktop 332 tests, all typechecks, zero-warning lint, format, Shell syntax and production build.",
+      "notes": "The fail-closed assembler accepts exactly seven UNSIGNED-PREVIEW products plus same-run candidate/smoke/lifecycle receipts, validates SHA-256 and emits deterministic unsigned manifest/notice. Aggregate generates CycloneDX 1.6 and two GitHub attestations; only the final job has contents:write. Publication preflight preserves signingStatus:unsigned and bilingual risk disclosure, requires default-branch reachability, refuses existing Releases, creates a prerelease draft, verifies exact remote asset inventory and deletes its draft on failure. Attestations are documented as provenance/integrity only, not publisher trust."
     },
     "PREVIEW-QA-025": {
       "status": "pending",
