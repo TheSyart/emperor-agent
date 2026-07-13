@@ -17,9 +17,9 @@
 
 GitHub Actions repository/environment secrets 必须配置：
 
-| 平台 | Secrets |
-| --- | --- |
-| macOS | `MACOS_CERTIFICATE`、`MACOS_CERTIFICATE_PASSWORD`、`APPLE_API_KEY_BASE64`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER`、`APPLE_TEAM_ID` |
+| 平台    | Secrets                                                                                                                                                                    |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS   | `MACOS_CERTIFICATE`、`MACOS_CERTIFICATE_PASSWORD`、`APPLE_API_KEY_BASE64`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER`、`APPLE_TEAM_ID`                                         |
 | Windows | `WINDOWS_SIGNING_ENDPOINT`、`WINDOWS_SIGNING_PROFILE`、`WINDOWS_SIGNING_ACCOUNT`、`WINDOWS_SIGNING_PUBLISHER`、`AZURE_TENANT_ID`、`AZURE_CLIENT_ID`、`AZURE_CLIENT_SECRET` |
 
 规则：
@@ -81,13 +81,13 @@ macOS 额外检查 `codesign --verify --deep --strict`、`spctl --assess` 和 `x
 
 ## 7. 失败恢复
 
-| 故障 | 处理 |
-| --- | --- |
-| 缺少或过期凭据 | 停止发布，轮换 secret 后重新运行完整 tag workflow；不得只重跑 publish job |
-| 平台签名或 smoke 失败 | 查看对应 job 的脱敏日志，修复后创建新 commit/tag；旧 candidate 不可与新 commit 混用 |
-| receipt、checksum 或 SBOM 不一致 | 视为构建完整性失败，废弃整批候选，不手工编辑 receipt |
-| attestation API 暂时不可用 | workflow 会有限重试；持续失败时保留候选并重新运行完整 workflow |
-| draft 上传失败 | 发布脚本自动删除 draft；确认不存在同名 Release 后重跑完整聚合/发布链 |
-| 已公开版本发现安全问题 | 撤销相关凭据，停止后续 tag，发布安全公告与修复版本；保留原 attestation 审计记录 |
+| 故障                             | 处理                                                                                |
+| -------------------------------- | ----------------------------------------------------------------------------------- |
+| 缺少或过期凭据                   | 停止发布，轮换 secret 后重新运行完整 tag workflow；不得只重跑 publish job           |
+| 平台签名或 smoke 失败            | 查看对应 job 的脱敏日志，修复后创建新 commit/tag；旧 candidate 不可与新 commit 混用 |
+| receipt、checksum 或 SBOM 不一致 | 视为构建完整性失败，废弃整批候选，不手工编辑 receipt                                |
+| attestation API 暂时不可用       | workflow 会有限重试；持续失败时保留候选并重新运行完整 workflow                      |
+| draft 上传失败                   | 发布脚本自动删除 draft；确认不存在同名 Release 后重跑完整聚合/发布链                |
+| 已公开版本发现安全问题           | 撤销相关凭据，停止后续 tag，发布安全公告与修复版本；保留原 attestation 审计记录     |
 
 当前首个正式版本仍被 Apple/Azure 凭据和三平台真实 receipt 阻塞。在这些证据完成前，Release 任务不得标记为 done。
