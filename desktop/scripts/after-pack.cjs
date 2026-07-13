@@ -15,9 +15,8 @@ const PET_RESOURCE_FILES = [
 function validatePackagedAppResources(resourcesRoot) {
   const asarPath = join(resourcesRoot, 'app.asar')
   assertRegularFile(asarPath, 'app.asar')
-  const entries = listPackage(asarPath).map((entry) =>
-    entry.replace(/\\/g, '/'),
-  )
+  const archiveEntries = listPackage(asarPath)
+  const entries = archiveEntries.map(normalizeArchiveEntry)
   const required = [
     '/out/main/index.js',
     '/out/preload/index.mjs',
@@ -51,7 +50,7 @@ function validatePackagedAppResources(resourcesRoot) {
   )
   if (packageJson?.main !== 'out/main/index.js')
     throw new Error('packaged app main entry is invalid')
-  assertNoDevelopmentPaths(asarPath, entries)
+  assertNoDevelopmentPaths(asarPath, archiveEntries)
 
   const petRoot = join(resourcesRoot, 'desktop-pet')
   if (!existsSync(petRoot) || !lstatSync(petRoot).isDirectory())
@@ -73,19 +72,20 @@ function validatePackagedAppResources(resourcesRoot) {
   }
 }
 
-function assertNoDevelopmentPaths(asarPath, entries) {
+function assertNoDevelopmentPaths(asarPath, archiveEntries) {
   const patterns = [
     /\/Users\/[A-Za-z0-9._-]+\//,
     /\/home\/[A-Za-z0-9._-]+\//,
     /[A-Za-z]:\\Users\\[^\\]+\\/,
   ]
-  for (const entry of entries) {
+  for (const archiveEntry of archiveEntries) {
+    const entry = normalizeArchiveEntry(archiveEntry)
     if (
       !entry.startsWith('/out/') ||
       !/\.(?:css|html|js|json|mjs)$/.test(entry)
     )
       continue
-    const content = extractFile(asarPath, entry.slice(1))
+    const content = extractFile(asarPath, archiveEntry.replace(/^[/\\]/, ''))
     if (content.byteLength > 8 * 1024 * 1024)
       throw new Error(
         `packaged ASAR text entry exceeds inspection limit: ${entry}`,
@@ -96,6 +96,10 @@ function assertNoDevelopmentPaths(asarPath, entries) {
         `packaged ASAR contains a development-machine path: ${entry}`,
       )
   }
+}
+
+function normalizeArchiveEntry(entry) {
+  return entry.replace(/\\/g, '/')
 }
 
 function assertRegularFile(path, label) {
