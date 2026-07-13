@@ -216,7 +216,7 @@ export class CoreMemoryService {
       taskId: 'watchlist:manual-check',
       kind: 'watchlist',
       label: 'Watchlist manual check',
-      awaitable: this.watchlist.check(),
+      execute: () => this.watchlist.check(),
     })
     return { decision: decision.toDict(), watchlist: this.watchlist.payload() }
   }

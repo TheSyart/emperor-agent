@@ -45,6 +45,7 @@ export class SchedulerService {
   private readonly clearTimer: SchedulerClearTimer
   private running = false
   private timer: unknown = null
+  private readonly inFlightJobIds = new Set<string>()
 
   constructor(
     store: SchedulerStore,
@@ -202,9 +203,9 @@ export class SchedulerService {
     const job = this.store.getJob(jobId)
     if (!job) return false
     if (!opts.force && !job.enabled) return false
-    await this.executeJob(job, { manual: true })
+    const executed = await this.executeJob(job, { manual: true })
     this.armTimer()
-    return true
+    return executed
   }
 
   async onTimer(): Promise<void> {
@@ -283,6 +284,20 @@ export class SchedulerService {
    * 不会覆盖其他 job 的并发变更。
    */
   private async executeJob(
+    job: SchedulerJob,
+    opts: { manual: boolean },
+  ): Promise<boolean> {
+    if (this.inFlightJobIds.has(job.id)) return false
+    this.inFlightJobIds.add(job.id)
+    try {
+      await this.executeJobLocked(job, opts)
+      return true
+    } finally {
+      this.inFlightJobIds.delete(job.id)
+    }
+  }
+
+  private async executeJobLocked(
     job: SchedulerJob,
     opts: { manual: boolean },
   ): Promise<void> {

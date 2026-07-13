@@ -70,6 +70,26 @@ export class SchedulerJobExecutor {
 
   async run(job: SchedulerJob): Promise<string> {
     const token = setSchedulerRun(true)
+    try {
+      const taskId = `scheduler:${job.id}`
+      const sessionId = schedulerPayloadSessionId(job.payload) || null
+      const execute = () => this.runTracked(job)
+      return this.activeTasks
+        ? await this.activeTasks.run({
+            taskId,
+            kind: 'scheduler',
+            label: `Scheduler job: ${job.name}`,
+            execute,
+            jobId: job.id,
+            sessionId,
+          })
+        : await execute()
+    } finally {
+      resetSchedulerRun(token)
+    }
+  }
+
+  private async runTracked(job: SchedulerJob): Promise<string> {
     const taskRecord =
       this.taskManager?.startTask({
         kind: TaskKind.SCHEDULER_RUN,
@@ -84,21 +104,9 @@ export class SchedulerJobExecutor {
         },
       }) ?? null
     try {
-      const taskId = `scheduler:${job.id}`
-      const sessionId = schedulerPayloadSessionId(job.payload) || null
-      const awaitable = Promise.resolve().then(() =>
-        this.dispatch(job, { taskId: taskRecord?.id ?? null }),
-      )
-      const result = this.activeTasks
-        ? await this.activeTasks.run({
-            taskId,
-            kind: 'scheduler',
-            label: `Scheduler job: ${job.name}`,
-            awaitable,
-            jobId: job.id,
-            sessionId,
-          })
-        : await awaitable
+      const result = await this.dispatch(job, {
+        taskId: taskRecord?.id ?? null,
+      })
       if (taskRecord)
         this.taskManager?.completeTask(taskRecord.id, {
           summary: String(result || ''),
@@ -114,8 +122,6 @@ export class SchedulerJobExecutor {
           })
       }
       throw error
-    } finally {
-      resetSchedulerRun(token)
     }
   }
 

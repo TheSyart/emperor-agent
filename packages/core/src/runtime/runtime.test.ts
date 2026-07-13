@@ -312,6 +312,42 @@ describe('RuntimeEventStore (test_runtime_events.py)', () => {
 })
 
 describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
+  it('registers before starting work and never starts a duplicate factory', async () => {
+    const registry = new ActiveTaskRegistry()
+    let release: () => void = () => {}
+    let firstCalls = 0
+    let duplicateCalls = 0
+    const first = registry.run({
+      taskId: 'scheduler:job_1',
+      kind: 'scheduler',
+      label: 'Scheduler job',
+      execute: async () => {
+        firstCalls += 1
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return 'done'
+      },
+    })
+    await Promise.resolve()
+
+    const duplicate = registry.run({
+      taskId: 'scheduler:job_1',
+      kind: 'scheduler',
+      label: 'Duplicate scheduler job',
+      execute: async () => {
+        duplicateCalls += 1
+        return 'duplicate'
+      },
+    })
+
+    await expect(duplicate).rejects.toThrow('active task already exists')
+    expect(firstCalls).toBe(1)
+    expect(duplicateCalls).toBe(0)
+    release()
+    await expect(first).resolves.toBe('done')
+  })
+
   it('cancels matching tasks and updates metadata', async () => {
     const registry = new ActiveTaskRegistry()
     let resolveWork: (value: string) => void = () => {}
@@ -319,9 +355,10 @@ describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
       taskId: 'scheduler:job_1',
       kind: 'scheduler',
       label: 'Scheduler job',
-      awaitable: new Promise<string>((resolve) => {
-        resolveWork = resolve
-      }),
+      execute: () =>
+        new Promise<string>((resolve) => {
+          resolveWork = resolve
+        }),
       jobId: 'job_1',
       sessionId: 'sess_scheduler',
     })
@@ -346,7 +383,7 @@ describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
       taskId: 'watchlist:manual-check',
       kind: 'watchlist',
       label: 'Watchlist manual check',
-      awaitable: new Promise(() => {}),
+      execute: () => new Promise(() => {}),
     })
     const cancelled = registry.cancel({ kind: 'watchlist' })
     expect(cancelled).toHaveLength(1)

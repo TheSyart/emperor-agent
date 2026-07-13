@@ -39,7 +39,7 @@ export class ActiveTaskRegistry {
     taskId: string
     kind: ActiveTaskKind
     label: string
-    awaitable: Promise<T>
+    execute: () => Promise<T>
     turnId?: string | null
     jobId?: string | null
     sessionId?: string | null
@@ -70,7 +70,8 @@ export class ActiveTaskRegistry {
       },
     })
     try {
-      return await Promise.race([opts.awaitable, cancelPromise])
+      const awaitable = opts.execute()
+      return await Promise.race([awaitable, cancelPromise])
     } finally {
       const current = this.tasks.get(opts.taskId)
       if (current?.info === info) this.tasks.delete(opts.taskId)

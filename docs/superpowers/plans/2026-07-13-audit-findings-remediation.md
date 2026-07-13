@@ -307,7 +307,7 @@ Inline execution order is SEC-001 → SEC-002 → SEC-003 → SEC-004 → SEC-00
   - [ ] Errors and cancellation release both registry state and Scheduler lease.
   - [ ] Unrelated jobs retain existing sequential timer behavior.
 - **Estimate:** 8 hours / 5 points.
-- **Status:** ☐ todo
+- **Status:** ☑ done
 - **Notes:** Process-local at-most-once matches the current single Electron main-process architecture.
 
 ### SEC-004 · Introduce a pinned public HTTP client for WebFetch and assets
@@ -534,7 +534,7 @@ Inline execution order is SEC-001 → SEC-002 → SEC-003 → SEC-004 → SEC-00
 | ------- | ------------------------------- | ------ | ------ | ------------------------------------- |
 | SEC-001 | Electron trust boundary         | ☑      | —      | 22 focused and 353 desktop tests pass |
 | SEC-002 | AUTO command policy             | ☑      | —      | 47 focused and 914 core tests pass    |
-| SEC-003 | Scheduler at-most-once          | ☐      | —      |                                       |
+| SEC-003 | Scheduler at-most-once          | ☑      | —      | 29 focused and 917 core tests pass    |
 | SEC-004 | Public HTTP boundary            | ☐      | —      |                                       |
 | SEC-005 | Config recovery                 | ☐      | —      |                                       |
 | SEC-006 | Full receipts and audit closure | ☐      | —      |                                       |

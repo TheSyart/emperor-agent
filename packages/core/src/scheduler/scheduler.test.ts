@@ -116,6 +116,48 @@ describe('scheduler models/store', () => {
 })
 
 describe('scheduler service/tool', () => {
+  it('runs a job at most once when manual calls overlap', async () => {
+    const root = tmp('emperor-scheduler-single-flight-')
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: () => void = () => {}
+    const firstEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    let dispatches = 0
+    const events: Array<Record<string, unknown>> = []
+    const service = new SchedulerService(new SchedulerStore(root), {
+      eventSink: async (event) => {
+        events.push(event)
+      },
+      onJob: async () => {
+        dispatches += 1
+        entered()
+        await gate
+      },
+    })
+    const job = service.addJob({
+      name: 'single-flight',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({ message: 'ping' }),
+    })
+    const first = service.runJob(job.id, { force: true })
+    await firstEntered
+    const duplicate = service.runJob(job.id, { force: true })
+    await Promise.resolve()
+    release()
+
+    await expect(first).resolves.toBe(true)
+    await expect(duplicate).resolves.toBe(false)
+    expect(dispatches).toBe(1)
+    expect(
+      events.filter((event) => event.event === 'scheduler_run_start'),
+    ).toHaveLength(1)
+    expect(service.getJob(job.id)?.state.run_history).toHaveLength(1)
+  })
+
   it('computes and validates schedules', () => {
     expect(
       computeNextRunMs(

@@ -722,29 +722,30 @@ export class AgentLoop {
     const turnId = opts.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
     const taskId = opts.taskId || `turn:${turnId}`
     const abortController = new AbortController()
-    const awaitable = this.runUserTurnInner(
-      content,
-      turnId,
-      opts,
-      abortController.signal,
-    ).finally(() => {
-      this.hookService.endTurn(turnId)
-      if (!opts.restoreActiveSessionAfterTurn) return
-      if (!previousSessionId || previousSessionId === this.activeSessionId)
-        return
-      if (targetSessionId && this.activeSessionId !== targetSessionId) return
-      try {
-        this.activateSession(previousSessionId)
-      } catch {
-        // The previous session may have been deleted while a background turn was running.
-      }
-    })
-    if (opts.useActiveTask === false) return awaitable
+    const execute = () =>
+      this.runUserTurnInner(
+        content,
+        turnId,
+        opts,
+        abortController.signal,
+      ).finally(() => {
+        this.hookService.endTurn(turnId)
+        if (!opts.restoreActiveSessionAfterTurn) return
+        if (!previousSessionId || previousSessionId === this.activeSessionId)
+          return
+        if (targetSessionId && this.activeSessionId !== targetSessionId) return
+        try {
+          this.activateSession(previousSessionId)
+        } catch {
+          // The previous session may have been deleted while a background turn was running.
+        }
+      })
+    if (opts.useActiveTask === false) return execute()
     return this.activeTasks.run({
       taskId,
       kind: 'turn',
       label: 'Agent turn',
-      awaitable,
+      execute,
       turnId,
       sessionId: this.activeSessionId,
       abort: () => abortController.abort(),

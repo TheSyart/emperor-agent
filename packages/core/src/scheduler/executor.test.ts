@@ -49,6 +49,43 @@ function makeJob(
 }
 
 describe('SchedulerJobExecutor', () => {
+  it('does not dispatch or create a task record for a duplicate active job', async () => {
+    const root = tmp('emperor-scheduler-executor-duplicate-')
+    const taskManager = new TaskManager(root)
+    const activeTasks = new ActiveTaskRegistry()
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered: () => void = () => {}
+    const firstEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    let dispatches = 0
+    const executor = new SchedulerJobExecutor({
+      activeTasks,
+      taskManager,
+      submitAgentTurn: async () => {
+        dispatches += 1
+        entered()
+        await gate
+        return 'done'
+      },
+    })
+    const job = makeJob('agent_turn')
+    const first = executor.run(job)
+    await firstEntered
+
+    const duplicate = executor.run(job)
+    await Promise.resolve()
+    release()
+
+    await expect(first).resolves.toBe('done')
+    await expect(duplicate).rejects.toThrow('active task already exists')
+    expect(dispatches).toBe(1)
+    expect(taskManager.store.list()).toHaveLength(1)
+  })
+
   it('runs agent_turn jobs through active task and task manager with scheduler context', async () => {
     const root = tmp('emperor-scheduler-executor-agent-')
     const taskManager = new TaskManager(root)
