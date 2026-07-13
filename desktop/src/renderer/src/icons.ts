@@ -148,6 +148,9 @@ export const modelIcons = {
   vision: Eye,
   testOk: CircleCheck,
   testFail: CircleX,
+  primary: Cpu,
+  secondary: Brain,
+  guidance: CircleCheck,
 } satisfies Record<string, IconComponent>
 
 // ── Empty states ────────────────────────────────────────────────────────────

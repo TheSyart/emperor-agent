@@ -6,10 +6,16 @@ import {
   onBeforeUnmount,
   reactive,
   ref,
+  type CSSProperties,
+  watch,
 } from 'vue'
 import type { DiscoveredModel } from '../../../types'
 import { actionIcons } from '../../../icons'
-import { filterModelOptions, normalizeModelOptions } from './modelPickerModel'
+import {
+  computeModelPickerPlacement,
+  filterModelOptions,
+  normalizeModelOptions,
+} from './modelPickerModel'
 
 const props = withDefaults(
   defineProps<{
@@ -36,12 +42,16 @@ const listbox = ref<HTMLElement | null>(null)
 const open = ref(false)
 const query = ref('')
 const activeIndex = ref(-1)
-const popoverStyle = reactive({
+const placement = ref<'top' | 'bottom'>('bottom')
+const popoverStyle = reactive<CSSProperties>({
   left: '0px',
   top: '0px',
   width: '240px',
   maxHeight: '260px',
+  visibility: 'hidden',
 })
+let positionFrame: number | undefined
+let resizeObserver: ResizeObserver | null = null
 
 const normalizedOptions = computed(() =>
   normalizeModelOptions(props.options, props.modelValue),
@@ -57,36 +67,76 @@ const activeDescendant = computed(() =>
 
 function updatePopoverPosition() {
   const target = input.value
-  if (!target) return
+  const popover = listbox.value
+  if (!target || !popover || !open.value) return
   const rect = target.getBoundingClientRect()
-  const viewportHeight = window.innerHeight
-  const gap = 6
-  const desiredHeight = 260
-  const spaceBelow = viewportHeight - rect.bottom - gap
-  const spaceAbove = rect.top - gap
-  const openAbove = spaceBelow < 180 && spaceAbove > spaceBelow
-  const available = Math.max(
-    120,
-    Math.min(desiredHeight, openAbove ? spaceAbove : spaceBelow),
-  )
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+  if (
+    rect.bottom <= 0 ||
+    rect.top >= viewportHeight ||
+    rect.right <= 0 ||
+    rect.left >= viewportWidth
+  ) {
+    closePicker()
+    return
+  }
 
-  popoverStyle.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8))}px`
-  popoverStyle.width = `${Math.max(220, Math.min(rect.width, window.innerWidth - 16))}px`
-  popoverStyle.maxHeight = `${available}px`
-  popoverStyle.top = openAbove
-    ? `${Math.max(8, rect.top - available - gap)}px`
-    : `${rect.bottom + gap}px`
+  const next = computeModelPickerPlacement({
+    anchor: rect,
+    contentHeight: Math.max(
+      popover.scrollHeight,
+      popover.getBoundingClientRect().height,
+    ),
+    viewportWidth,
+    viewportHeight,
+  })
+  placement.value = next.placement
+  popoverStyle.left = `${next.left}px`
+  popoverStyle.top = `${next.top}px`
+  popoverStyle.width = `${next.width}px`
+  popoverStyle.maxHeight = `${next.maxHeight}px`
+  popoverStyle.visibility = 'visible'
+}
+
+function schedulePopoverPosition() {
+  if (!open.value || positionFrame !== undefined) return
+  positionFrame = window.requestAnimationFrame(() => {
+    positionFrame = undefined
+    updatePopoverPosition()
+  })
+}
+
+function startResizeObserver() {
+  if (typeof ResizeObserver === 'undefined') return
+  resizeObserver?.disconnect()
+  resizeObserver = new ResizeObserver(schedulePopoverPosition)
+  if (input.value) resizeObserver.observe(input.value)
+  if (listbox.value) resizeObserver.observe(listbox.value)
+}
+
+function stopPositioning() {
+  if (positionFrame !== undefined) {
+    window.cancelAnimationFrame(positionFrame)
+    positionFrame = undefined
+  }
+  resizeObserver?.disconnect()
+  resizeObserver = null
 }
 
 function addPositionListeners() {
-  window.addEventListener('resize', updatePopoverPosition)
-  window.addEventListener('scroll', updatePopoverPosition, true)
+  window.addEventListener('resize', schedulePopoverPosition)
+  window.addEventListener('scroll', schedulePopoverPosition, true)
+  window.visualViewport?.addEventListener('resize', schedulePopoverPosition)
+  window.visualViewport?.addEventListener('scroll', schedulePopoverPosition)
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
 }
 
 function removePositionListeners() {
-  window.removeEventListener('resize', updatePopoverPosition)
-  window.removeEventListener('scroll', updatePopoverPosition, true)
+  window.removeEventListener('resize', schedulePopoverPosition)
+  window.removeEventListener('scroll', schedulePopoverPosition, true)
+  window.visualViewport?.removeEventListener('resize', schedulePopoverPosition)
+  window.visualViewport?.removeEventListener('scroll', schedulePopoverPosition)
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 }
 
@@ -94,10 +144,12 @@ async function openPicker(showAll = true) {
   if (showAll) query.value = ''
   activeIndex.value = -1
   if (!open.value) {
+    popoverStyle.visibility = 'hidden'
     open.value = true
     addPositionListeners()
   }
   await nextTick()
+  startResizeObserver()
   updatePopoverPosition()
 }
 
@@ -106,6 +158,8 @@ function closePicker() {
   open.value = false
   activeIndex.value = -1
   removePositionListeners()
+  stopPositioning()
+  popoverStyle.visibility = 'hidden'
 }
 
 function onDocumentPointerDown(event: PointerEvent) {
@@ -179,7 +233,15 @@ function onKeydown(event: KeyboardEvent) {
   })
 }
 
-onBeforeUnmount(removePositionListeners)
+watch([() => props.loading, () => visibleOptions.value.length, query], () => {
+  if (!open.value) return
+  void nextTick(schedulePopoverPosition)
+})
+
+onBeforeUnmount(() => {
+  removePositionListeners()
+  stopPositioning()
+})
 </script>
 
 <template>
@@ -224,6 +286,7 @@ onBeforeUnmount(removePositionListeners)
       class="model-picker-popover"
       role="listbox"
       :aria-label="`${label}候选模型`"
+      :data-placement="placement"
       :style="popoverStyle"
     >
       <div v-if="loading" class="model-picker-state">正在获取模型...</div>

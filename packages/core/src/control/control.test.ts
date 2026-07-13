@@ -101,6 +101,18 @@ describe('ControlManager (test_control.py)', () => {
     expect(manager.payload().pending).toBeNull()
   })
 
+  it('keeps each Ask interaction limited to three questions', () => {
+    const questions = Array.from({ length: 9 }, (_, index) => ({
+      ...makeQuestion(),
+      id: `profile_${index + 1}`,
+    }))
+    const manager = new ControlManager(tmp('emperor-ctrl-ask-limit-'))
+
+    expect(() => manager.createAsk({ questions })).toThrow(
+      'ask_user requires 1-3 questions',
+    )
+  })
+
   it('cancels an executable plan when the user answers to ignore or abandon the stuck plan', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-abandon-plan-'))
     const planInteraction = manager.createPlan({

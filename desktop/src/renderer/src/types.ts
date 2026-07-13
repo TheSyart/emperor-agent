@@ -540,6 +540,24 @@ export interface ModelAvailability {
   entryName?: string | null
 }
 
+export type ProfileOnboardingStatus =
+  'pending' | 'in_progress' | 'completed' | 'skipped'
+
+export interface ProfileOnboardingPayload {
+  status: ProfileOnboardingStatus
+  sessionId: string | null
+  interactionId: string | null
+  attemptCount: number
+  lastError: string | null
+  canStart: boolean
+  canSkip: boolean
+}
+
+export interface ProfileOnboardingActionResult {
+  started: boolean
+  state: ProfileOnboardingPayload
+}
+
 export interface ModelConfigPayload {
   current?: CurrentModelConfig
   secondary?: CurrentModelConfig | null
@@ -732,6 +750,7 @@ export interface BootstrapPayload {
   skills: SkillInfo[]
   memory: MemoryPayload
   modelConfig: ModelConfigPayload
+  profileOnboarding: ProfileOnboardingPayload
   team?: TeamPayload
   scheduler?: SchedulerPayload
   control?: ControlPayload
@@ -775,6 +794,7 @@ export interface RuntimeHistoryItem {
   attachments?: AttachmentRef[]
   turn_id?: string
   source?: string
+  ui_hidden?: boolean
   scheduler?: SchedulerMessageMeta
 }
 
@@ -1434,8 +1454,17 @@ type WsEventVariants =
       partial?: boolean
     }
   | { event: 'control_mode_update'; control?: ControlPayload }
+  | {
+      event: 'profile_onboarding_status_changed'
+      profile_onboarding?: ProfileOnboardingPayload
+      reason?: string
+    }
   | { event: 'ask_request'; interaction?: ControlInteraction }
-  | { event: 'ask_answered'; interaction?: ControlInteraction }
+  | {
+      event: 'ask_answered'
+      interaction?: ControlInteraction
+      resume_model?: boolean
+    }
   | { event: 'plan_draft'; interaction?: ControlInteraction }
   | {
       event: 'plan_draft_delta'

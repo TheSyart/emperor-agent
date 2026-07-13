@@ -43,6 +43,8 @@ export interface AppContext {
   refreshAll: () => Promise<void>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
   saveModelConfig: (config: ModelConfigRaw) => Promise<void>
+  startProfileInterview: () => Promise<void>
+  skipProfileInterview: () => Promise<void>
   compactMemory: () => Promise<CompactResult>
   loadSkill: (name: string) => Promise<void>
   startNewSkill: (name: string) => void
@@ -82,7 +84,6 @@ export interface AppContext {
 
   showToast: (message: string) => void
   runSafely: (task: () => Promise<void>) => Promise<void>
-  openOnboarding: () => void
 
   tokens: Ref<TokensPayload | null>
   tokensLoading: Ref<boolean>

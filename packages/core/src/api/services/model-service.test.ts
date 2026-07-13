@@ -238,10 +238,27 @@ describe('CoreModelService (MIG-IPC-007)', () => {
       },
     })
     let refreshes = 0
+    const lifecycle: string[] = []
     const service = new CoreModelService(root, {
       router: new ModelRouter(root, await loadModelConfig(root)),
       refreshModelConfig: () => {
         refreshes += 1
+        lifecycle.push('refresh')
+      },
+      afterConfigSaved: async () => {
+        lifecycle.push('onboarding')
+        return {
+          started: true,
+          state: {
+            status: 'in_progress' as const,
+            sessionId: 'default-session',
+            interactionId: 'ask_profile',
+            attemptCount: 1,
+            lastError: null,
+            canStart: false,
+            canSkip: true,
+          },
+        }
       },
     })
 
@@ -283,7 +300,16 @@ describe('CoreModelService (MIG-IPC-007)', () => {
     expect(onDisk.models[0].apiKey).toBe('sk-entry-old-1234')
     expect(onDisk.providers.openai.apiKey).toBe('sk-provider-old-9876')
     expect(saved.config.models?.[0]?.apiKey).toBe('***1234')
+    expect(saved.profileOnboarding).toMatchObject({
+      started: true,
+      state: {
+        status: 'in_progress',
+        sessionId: 'default-session',
+        interactionId: 'ask_profile',
+      },
+    })
     expect(refreshes).toBe(1)
+    expect(lifecycle).toEqual(['refresh', 'onboarding'])
 
     await expect(
       service.saveConfig({
@@ -291,6 +317,7 @@ describe('CoreModelService (MIG-IPC-007)', () => {
       }),
     ).rejects.toThrow('Secondary Model ID')
     expect(refreshes).toBe(1)
+    expect(lifecycle).toEqual(['refresh', 'onboarding'])
   })
 
   it('saves onboarding wizard settings through the migrated builder', async () => {

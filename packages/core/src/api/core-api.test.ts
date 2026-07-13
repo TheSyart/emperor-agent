@@ -76,6 +76,9 @@ const EXPECTED_OPERATIONS = [
   'model.saveConfig',
   'model.saveOnboardingConfig',
   'model.test',
+  'onboarding.getProfileStatus',
+  'onboarding.skipProfileInterview',
+  'onboarding.startProfileInterview',
   'plans.get',
   'plans.list',
   'projects.list',
@@ -1451,6 +1454,185 @@ describe('CoreApi (MIG-IPC-001)', () => {
       ),
     ).toContain('## Stable Preferences\n\n- 偏好更新')
     expect(existsSync(join(root, 'emperor.local.json'))).toBe(false)
+    expect(api.onboarding.getProfileStatus()).toMatchObject({
+      status: 'completed',
+      canStart: false,
+    })
+
+    await api.close()
+  })
+
+  it('exposes resumable profile onboarding status, cancellation, and permanent skip', async () => {
+    class ProfileAskProvider extends FakeProvider {
+      override async chat(args: ChatArgs): Promise<LLMResponse> {
+        this.calls.push(args)
+        return {
+          content: '',
+          toolCalls: [
+            {
+              id: 'call_profile_ask',
+              name: 'ask_user',
+              arguments: {
+                questions: [
+                  {
+                    id: 'identity',
+                    header: '基本信息',
+                    question: '希望我如何称呼你？',
+                    options: [
+                      { label: '使用昵称', description: '填写常用昵称' },
+                      { label: '暂不设置', description: '以后再补充' },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+          finishReason: 'tool_calls',
+          usage: { input: 1, output: 1 },
+          reasoningContent: null,
+          thinkingBlocks: null,
+        }
+      }
+    }
+    const root = tmp('emperor-core-api-profile-onboarding-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new ProfileAskProvider()),
+    })
+
+    expect((await api.bootstrap()).profileOnboarding).toMatchObject({
+      status: 'pending',
+      canStart: true,
+    })
+    const started = await api.onboarding.startProfileInterview()
+    expect(started).toMatchObject({
+      started: true,
+      state: { status: 'in_progress', interactionId: expect.any(String) },
+    })
+
+    await api.control.cancelInteraction(started.state.interactionId!)
+    expect(api.onboarding.getProfileStatus()).toMatchObject({
+      status: 'pending',
+      interactionId: null,
+    })
+
+    const skipped = await api.onboarding.skipProfileInterview()
+    expect(skipped.state).toMatchObject({
+      status: 'skipped',
+      canStart: true,
+      canSkip: false,
+    })
+
+    await api.close()
+  })
+
+  it('lets the Agent conduct multiple template-driven Ask rounds before saving the profile', async () => {
+    const root = tmp('emperor-core-api-profile-dynamic-')
+    const provider = new DynamicOnboardingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    api.control.setMode('auto')
+
+    const started = await api.onboarding.startProfileInterview()
+    const sessionId = started.state.sessionId!
+    const firstInteractionId = started.state.interactionId!
+
+    expect(provider.calls).toHaveLength(1)
+    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
+      '[PROFILE_ONBOARDING]',
+    )
+    expect(api.control.get().pending).toMatchObject({
+      id: firstInteractionId,
+      questions: [expect.objectContaining({ id: 'preferred_address' })],
+      meta: { profileOnboardingVersion: 2 },
+    })
+
+    await expect(
+      api.control.answerInteraction(firstInteractionId, {
+        preferred_address: { choice: '自定义称呼', freeform: '皇上' },
+      }),
+    ).rejects.toThrow('turn paused for ask')
+
+    const second = api.onboarding.getProfileStatus()
+    expect(second).toMatchObject({
+      status: 'in_progress',
+      interactionId: expect.any(String),
+    })
+    expect(second.interactionId).not.toBe(firstInteractionId)
+    expect(provider.calls).toHaveLength(2)
+    expect(api.control.get().pending).toMatchObject({
+      id: second.interactionId,
+      questions: [expect.objectContaining({ id: 'working_style' })],
+      meta: { profileOnboardingVersion: 2 },
+    })
+
+    const result = await api.control.answerInteraction(second.interactionId!, {
+      working_style: { choice: '主动推进', freeform: '高风险操作先确认' },
+    })
+
+    expect(result).toMatchObject({
+      resume: true,
+      result: { content: expect.stringContaining('个人档案已经完善') },
+    })
+    expect(provider.calls).toHaveLength(4)
+    expect(api.onboarding.getProfileStatus()).toMatchObject({
+      status: 'completed',
+      interactionId: null,
+      canStart: false,
+    })
+    const profile = readFileSync(
+      join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
+      'utf8',
+    )
+    expect(profile).toContain('- **称呼**：皇上')
+    expect(profile).toContain('## 偏好设置\n\n- **沟通风格**：简洁直接')
+    expect(profile).toContain('## 角色互动偏好\n\n- 主动推进；高风险操作先确认')
+
+    const events = (
+      api.runtime.replay({
+        sessionId,
+        afterSeq: 0,
+        compact: false,
+      }) as any
+    ).events
+    expect(
+      events.find(
+        (event: any) =>
+          event.event === 'user_message' &&
+          event.source === 'onboarding' &&
+          event.ui_hidden !== true,
+      ),
+    ).toBeUndefined()
+    expect(
+      events.filter((event: any) => event.event === 'ask_request'),
+    ).toHaveLength(2)
+    expect(
+      events.find(
+        (event: any) =>
+          event.event === 'tool_result' &&
+          event.name === 'save_user_profile' &&
+          String(event.summary).startsWith('Error:'),
+      ),
+    ).toBeUndefined()
+    expect(
+      events.filter(
+        (event: any) =>
+          event.event === 'assistant_done' &&
+          String(event.content).includes('个人档案已经完善'),
+      ),
+    ).toHaveLength(1)
+    const onboardingState = readFileSync(
+      join(root, '.emperor', 'onboarding.json'),
+      'utf8',
+    )
+    expect(onboardingState).not.toContain('皇上')
+    expect(onboardingState).not.toContain('高风险操作')
 
     await api.close()
   })
@@ -2402,6 +2584,63 @@ class FakeProvider extends LLMProvider {
   }
 }
 
+class DynamicOnboardingProvider extends FakeProvider {
+  override async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.calls.push(args)
+    if (this.calls.length === 1) {
+      return toolResponse(
+        '初次见面。我会参考个人偏好模板逐步了解你，先从称呼开始。',
+        'call_profile_ask_1',
+        'ask_user',
+        {
+          questions: [
+            {
+              id: 'preferred_address',
+              header: '称呼',
+              question: '你希望我平时怎么称呼你？',
+              options: [
+                { label: '直接称呼“你”', description: '不记录额外称呼' },
+                { label: '自定义称呼', description: '填写常用称呼' },
+              ],
+            },
+          ],
+          context: '先建立自然的称呼方式。',
+        },
+      )
+    }
+    if (this.calls.length === 2) {
+      return toolResponse(
+        '称呼记下了。我还想根据你的协作习惯补充一个问题。',
+        'call_profile_ask_2',
+        'ask_user',
+        {
+          questions: [
+            {
+              id: 'working_style',
+              header: '协作方式',
+              question: '你希望我默认怎样推进任务？',
+              options: [
+                { label: '主动推进', description: '边界清晰时直接完成' },
+                { label: '关键步骤确认', description: '重要步骤先确认' },
+              ],
+            },
+          ],
+          context: '根据前一轮回答继续完善协作偏好。',
+        },
+      )
+    }
+    if (this.calls.length === 3) {
+      return toolResponse(
+        '信息已经足够，我现在整理并保存个人档案。',
+        'call_profile_save',
+        'save_user_profile',
+        { content: dynamicProfileMarkdown() },
+      )
+    }
+    return response('个人档案已经完善。之后我会按这些偏好与你协作。')
+  }
+}
+
 function fakeRouter(provider: FakeProvider): {
   route: (
     useCase: string,
@@ -2462,4 +2701,53 @@ function response(content: string): LLMResponse {
     reasoningContent: null,
     thinkingBlocks: null,
   }
+}
+
+function toolResponse(
+  content: string,
+  id: string,
+  name: string,
+  args: Record<string, unknown>,
+): LLMResponse {
+  return {
+    content,
+    toolCalls: [{ id, name, arguments: args }],
+    finishReason: 'tool_calls',
+    usage: { input: 1, output: 1 },
+    reasoningContent: null,
+    thinkingBlocks: null,
+  }
+}
+
+function dynamicProfileMarkdown(): string {
+  return [
+    '## 基本信息',
+    '',
+    '- **称呼**：皇上',
+    '- **时区**：UTC+8',
+    '- **语言**：中文',
+    '',
+    '## 偏好设置',
+    '',
+    '- **沟通风格**：简洁直接',
+    '- **技术深度**：自动适配',
+    '',
+    '## 工作背景',
+    '',
+    '- **主要角色**：未设置',
+    '- **常用工具**：未设置',
+    '',
+    '## 兴趣领域',
+    '',
+    '- 未设置',
+    '',
+    '## 性格与工作风格',
+    '',
+    '- 主动推进',
+    '',
+    '## 角色互动偏好',
+    '',
+    '- 主动推进；高风险操作先确认',
+    '',
+  ].join('\n')
 }

@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  discoverProviderModels,
-  saveOnboardingModelConfig,
-  testModelEntry,
-} from './model'
+import { discoverProviderModels, testModelEntry } from './model'
 
 const g = globalThis as unknown as { window?: any; fetch?: unknown }
 
@@ -33,55 +29,6 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
 
     expect(calls).toEqual([
       ['model.test', { entryName: 'main', kind: 'text', role: 'secondary' }],
-    ])
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('saves onboarding wizard settings through Core IPC', async () => {
-    const calls: unknown[][] = []
-    g.window = {
-      emperor: {
-        invokeCore: async (...args: unknown[]) => {
-          calls.push(args)
-          return { current: { model: 'deepseek-chat' } }
-        },
-      },
-    }
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-
-    await expect(
-      saveOnboardingModelConfig({
-        provider: 'deepseek',
-        name: 'deepseek-work',
-        label: '',
-        apiKey: 'sk',
-        apiBase: 'https://api.deepseek.com',
-        mainModelId: 'deepseek-chat',
-        secondaryModelId: 'deepseek-chat',
-        maxTokens: 4096,
-        temperature: 0.2,
-        contextWindowTokens: 64000,
-        reasoningEffort: null,
-      }),
-    ).resolves.toEqual({ current: { model: 'deepseek-chat' } })
-
-    expect(calls).toEqual([
-      [
-        'model.saveOnboardingConfig',
-        {
-          provider: 'deepseek',
-          name: 'deepseek-work',
-          label: '',
-          apiKey: 'sk',
-          apiBase: 'https://api.deepseek.com',
-          mainModelId: 'deepseek-chat',
-          secondaryModelId: 'deepseek-chat',
-          maxTokens: 4096,
-          temperature: 0.2,
-          contextWindowTokens: 64000,
-          reasoningEffort: null,
-        },
-      ],
     ])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

@@ -22,6 +22,7 @@ import {
   type ModelAvailability,
 } from '../../model/availability'
 import type { OpenAiMessage } from '../../providers/base'
+import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
 import {
   findByName,
   providerOptions,
@@ -47,6 +48,8 @@ export interface CoreModelRouterLike {
 export interface CoreModelServiceDeps {
   router: CoreModelRouterLike | (() => CoreModelRouterLike)
   refreshModelConfig?: () => void | Promise<void>
+  afterConfigSaved?: () =>
+    ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
 }
 
 export interface CurrentModelPayload {
@@ -73,6 +76,10 @@ export interface ModelConfigPayload {
   routing: Record<string, unknown>
   config: Dict
   providerOptions: ProviderOption[]
+}
+
+export interface ModelConfigSavePayload extends ModelConfigPayload {
+  profileOnboarding?: ProfileOnboardingActionResult
 }
 
 export interface DiscoveredModel {
@@ -123,7 +130,7 @@ export class CoreModelService {
     }
   }
 
-  async saveConfig(input: unknown): Promise<ModelConfigPayload> {
+  async saveConfig(input: unknown): Promise<ModelConfigSavePayload> {
     const body =
       isRecord(input) && isRecord(input.config) ? input.config : input
     if (!isRecord(body)) throw new Error('model config must be an object')
@@ -132,16 +139,16 @@ export class CoreModelService {
     restoreMaskedKeys(next, existing)
     await saveModelConfig(this.root, next, { validateComplete: true })
     await this.deps.refreshModelConfig?.()
-    return this.getConfig()
+    return this.savedPayload()
   }
 
-  async saveOnboardingConfig(input: unknown): Promise<ModelConfigPayload> {
+  async saveOnboardingConfig(input: unknown): Promise<ModelConfigSavePayload> {
     const settings = wizardSettings(input)
     const existing = (await loadModelConfig(this.root)).raw
     const next = buildWizardModelConfig(existing, settings)
     await saveModelConfig(this.root, next, { validateComplete: true })
     await this.deps.refreshModelConfig?.()
-    return this.getConfig()
+    return this.savedPayload()
   }
 
   async discoverModels(input: Dict): Promise<ModelDiscoveryPayload> {
@@ -277,6 +284,14 @@ export class CoreModelService {
         provider: snapshot.providerName,
         modelRole: snapshot.modelRole,
       }
+    }
+  }
+
+  private async savedPayload(): Promise<ModelConfigSavePayload> {
+    const profileOnboarding = await this.deps.afterConfigSaved?.()
+    return {
+      ...(await this.getConfig()),
+      ...(profileOnboarding ? { profileOnboarding } : {}),
     }
   }
 

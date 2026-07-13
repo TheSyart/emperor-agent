@@ -237,7 +237,10 @@ export function applyChatProjectionEvent(
   ) {
     if (!event.interaction) return state
     const assistantId = updateControlSegment(state, event.interaction)
-    if (event.event === 'interaction_cancelled')
+    if (
+      event.event === 'interaction_cancelled' ||
+      (event.event === 'ask_answered' && event.resume_model === false)
+    )
       runtime.pendingControlResumeAssistantId = null
     else if (assistantId) runtime.pendingControlResumeAssistantId = assistantId
     return state

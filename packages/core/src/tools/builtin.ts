@@ -2,12 +2,7 @@
  * WebFetch (MIG-TOOL-010) + RunCommand scaffold (MIG-TOOL-011) + skills (MIG-TOOL-012)。
  */
 import { exec, type ExecOptions } from 'node:child_process'
-import { join } from 'node:path'
-import {
-  applyMemoryPatchToFile,
-  memoryContentHash,
-  type MemoryPatchOperation,
-} from '../memory/patch'
+import { applyUserProfileMarkdownPatch } from '../memory/user-profile'
 import type { MemoryVersionStore } from '../memory/versions'
 import {
   formatWorkspacePolicyError,
@@ -230,7 +225,7 @@ export class SaveUserProfileTool extends Tool {
   override name = 'save_user_profile'
   override description =
     '按 Markdown 章节 patch 更新用户偏好档案（称呼/语言/沟通风格/技术水平/工作背景/兴趣/性格等）。' +
-    '只提交需要新增或修改的 ## 章节；未提交的章节会保留。不要凭空丢弃未涉及字段，删除大量内容会被拒绝。'
+    '只提交需要新增或修改的 ## 章节；未提交的章节会保留，但每个已提交章节必须包含该章节需要保留的完整字段。不要凭空丢弃未涉及字段，删除大量内容会被拒绝。'
   override parameters = toolParamsSchema(
     { content: S('包含要更新 ## 章节的用户档案 Markdown 内容') },
     ['content'],
@@ -238,10 +233,19 @@ export class SaveUserProfileTool extends Tool {
   override readOnly = false
 
   private readonly writer: UserProfileWriter
+  private readonly onSaved: (() => void) | null
+  private readonly allowExplicitReplace:
+    ((currentContent: string) => boolean) | null
 
-  constructor(writer: UserProfileWriter) {
+  constructor(
+    writer: UserProfileWriter,
+    onSaved?: (() => void) | null,
+    allowExplicitReplace?: ((currentContent: string) => boolean) | null,
+  ) {
     super()
     this.writer = writer
+    this.onSaved = onSaved ?? null
+    this.allowExplicitReplace = allowExplicitReplace ?? null
   }
 
   execute(args: Record<string, unknown>): string {
@@ -253,65 +257,28 @@ export class SaveUserProfileTool extends Tool {
     )) {
       return 'Error: save_user_profile rejected: patch-capable writer is required; direct profile overwrite is disabled.'
     }
-    const operations = userProfileSectionReplacementOps(content)
-    if (!operations.length) {
-      return 'Error: save_user_profile rejected: expected Markdown with at least one ## section heading; preserve the existing profile structure and update only relevant sections.'
-    }
     const current = this.writer.readUser()
-    const result = applyMemoryPatchToFile(
-      {
-        target: { kind: 'user_profile' },
-        baseVersion: this.writer.versions.nextVersionForPath(
-          this.writer.userFile,
-          { target: 'user' },
-        ),
-        baseHash: memoryContentHash(current),
-        operations,
-        rationale: 'save_user_profile',
-      },
+    const result = applyUserProfileMarkdownPatch(
+      content,
       {
         targetPath: this.writer.userFile,
+        currentContent: current,
         versions: this.writer.versions,
-        versionTarget: 'user',
-        ledgerPath: this.writer.memoryDir
-          ? join(this.writer.memoryDir, 'patch-ledger.jsonl')
-          : null,
+        memoryDir: this.writer.memoryDir ?? null,
+      },
+      {
+        rationale: 'save_user_profile',
+        explicitReplace: this.allowExplicitReplace?.(current) ?? false,
       },
     )
+    if (result.errors.includes('missing_profile_sections')) {
+      return 'Error: save_user_profile rejected: expected Markdown with at least one ## section heading; preserve the existing profile structure and update only relevant sections.'
+    }
     if (!result.ok)
       return `Error: save_user_profile rejected: ${result.errors.join(', ')}`
+    this.onSaved?.()
     return `已通过 memory patch 保存用户偏好档案（${result.appliedOperations} 个章节，${content.length} 字符输入）。`
   }
-}
-
-function userProfileSectionReplacementOps(
-  markdown: string,
-): MemoryPatchOperation[] {
-  const lines = String(markdown ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-  const ops: MemoryPatchOperation[] = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = /^##\s+(.+?)\s*$/.exec(lines[index] ?? '')
-    if (!match) continue
-    const section = match[1]!.trim()
-    let end = lines.length
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      if (/^##\s+\S/.test(lines[cursor] ?? '')) {
-        end = cursor
-        break
-      }
-    }
-    ops.push({
-      op: 'replace_section',
-      section,
-      content: lines
-        .slice(index + 1, end)
-        .join('\n')
-        .trimEnd(),
-    })
-  }
-  return ops
 }
 
 export class UpdateTodos extends Tool {

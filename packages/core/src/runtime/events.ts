@@ -57,6 +57,16 @@ export function controlModeUpdate(control: EventPayload): EventPayload {
   return runtimeEvent('control_mode_update', { control })
 }
 
+export function profileOnboardingStatusChanged(
+  state: EventPayload,
+  opts: { reason: string },
+): EventPayload {
+  return runtimeEvent('profile_onboarding_status_changed', {
+    profile_onboarding: state,
+    reason: opts.reason,
+  })
+}
+
 export function error(
   message: string,
   opts: {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildModelSetupDialogContent } from './modelSetupDialogModel'
+import {
+  buildModelSetupDialogContent,
+  shouldShowModelSetupPrompt,
+} from './modelSetupDialogModel'
 
 describe('model setup dialog content', () => {
   it('presents unavailable model setup as an onboarding modal instead of an error prompt', () => {
@@ -15,4 +18,43 @@ describe('model setup dialog content', () => {
     expect('badges' in content).toBe(false)
     expect('features' in content).toBe(false)
   })
+
+  it('shows the first-run prompt only while the effective model is unavailable', () => {
+    expect(
+      shouldShowModelSetupPrompt({
+        app: 'Emperor Agent',
+        tools: [],
+        skills: [],
+        memory: {},
+        profileOnboarding: pendingProfileOnboarding(),
+        modelConfig: {
+          availability: { usable: false, message: '请配置模型' },
+        },
+      }),
+    ).toBe(true)
+    expect(
+      shouldShowModelSetupPrompt({
+        app: 'Emperor Agent',
+        tools: [],
+        skills: [],
+        memory: {},
+        profileOnboarding: pendingProfileOnboarding(),
+        modelConfig: {
+          availability: { usable: true, message: '模型可用' },
+        },
+      }),
+    ).toBe(false)
+  })
 })
+
+function pendingProfileOnboarding() {
+  return {
+    status: 'pending' as const,
+    sessionId: null,
+    interactionId: null,
+    attemptCount: 0,
+    lastError: null,
+    canStart: true,
+    canSkip: true,
+  }
+}

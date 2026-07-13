@@ -87,6 +87,13 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('model.saveConfig', 'POST', '/api/model-config'),
   op('model.saveOnboardingConfig', 'IPC', 'model.saveOnboardingConfig'),
   op('model.test', 'POST', '/api/model-test'),
+  op('onboarding.getProfileStatus', 'GET', '/api/onboarding/profile'),
+  op(
+    'onboarding.startProfileInterview',
+    'POST',
+    '/api/onboarding/profile/start',
+  ),
+  op('onboarding.skipProfileInterview', 'POST', '/api/onboarding/profile/skip'),
   op('control.get', 'GET', '/api/control'),
   op('control.setMode', 'POST', '/api/control/mode'),
   op('control.answerInteraction', 'IPC', 'control.answerInteraction'),
@@ -218,6 +225,9 @@ export class CoreApi {
         refreshRuntimeContext: () => {
           this.loop.refreshRuntimeContext()
         },
+        reconcileProfileOnboarding: () => {
+          this.loop.reconcileProfileOnboarding()
+        },
         reloadMcp: () => this.loop.reloadMcp(),
       },
       { templatesDir: this.loop.templatesDir },
@@ -229,6 +239,8 @@ export class CoreApi {
     this.modelService = new CoreModelService(this.paths.stateRoot, {
       router: () => this.loop.modelRouter,
       refreshModelConfig: () => this.loop.refreshModelConfig(),
+      afterConfigSaved: () =>
+        this.loop.startProfileInterview({ manual: false }),
     })
     this.hooksService = new CoreHooksService(this.paths.stateRoot, {
       service: this.loop.hookService,
@@ -402,6 +414,7 @@ export class CoreApi {
       skills: this.skills.list(),
       memory: this.memory.get(),
       modelConfig: await this.model.getConfig(),
+      profileOnboarding: this.onboarding.getProfileStatus(),
       team: this.team.get(),
       scheduler: this.scheduler.get(),
       control: this.control.get(),
@@ -595,20 +608,40 @@ export class CoreApi {
     test: async (body: Dict): Promise<Dict> => this.modelService.test(body),
   }
 
+  readonly onboarding = {
+    getProfileStatus: () => this.loop.profileOnboardingPayload(),
+    startProfileInterview: () =>
+      this.loop.startProfileInterview({ manual: true }),
+    skipProfileInterview: async () => {
+      const state = this.loop.profileOnboardingPayload()
+      if (state.interactionId) {
+        const pending = this.loop.controlManager.payload().pending
+        if (pending?.id === state.interactionId)
+          await this.control.cancelInteraction(state.interactionId)
+      }
+      return this.loop.skipProfileInterview()
+    },
+  }
+
   readonly control = {
     get: () => this.loop.controlManager.payload(),
     setMode: (mode: string) => this.loop.controlManager.setMode(mode),
-    answerInteraction: (
+    answerInteraction: async (
       id: string,
       answers: Dict,
       opts: ControlResumeOptions = {},
     ): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      return this.resumeControl(
-        this.loop.controlManager.answer(id, answers),
-        opts,
-        ownerSessionId,
-      )
+      const isProfileOnboarding = this.loop.isProfileOnboardingInteraction(id)
+      const resume = this.loop.controlManager.answer(id, answers)
+      const result = await this.resumeControl(resume, opts, ownerSessionId)
+      if (isProfileOnboarding) {
+        return {
+          ...result,
+          profileOnboarding: this.loop.profileOnboardingPayload(),
+        }
+      }
+      return result
     },
     commentPlan: (
       id: string,
@@ -638,6 +671,7 @@ export class CoreApi {
       const result = this.loop.controlManager.cancel(id)
       const event = { ...result, control: this.loop.controlManager.payload() }
       await this.emitRuntime(event, { sessionId: ownerSessionId })
+      await this.loop.deferProfileInterview(id)
       return event
     },
   }
@@ -982,18 +1016,22 @@ export class CoreApi {
     let result: Dict | null = null
     if (resume.resume === true) {
       const uiHidden = opts.uiHidden ?? false
-      result = (await this.mainline.submit({
-        content: String(resume.message ?? ''),
-        displayContent: uiHidden
-          ? ''
-          : (opts.displayContent ?? String(resume.message ?? '')),
-        clientMessageId: opts.clientMessageId ?? null,
-        turnId: opts.turnId ?? null,
-        source: 'control',
-        sessionId: ownerSessionId,
-        uiHidden,
-        emit: opts.emit ?? null,
-      })) as unknown as Dict
+      try {
+        result = (await this.mainline.submit({
+          content: String(resume.message ?? ''),
+          displayContent: uiHidden
+            ? ''
+            : (opts.displayContent ?? String(resume.message ?? '')),
+          clientMessageId: opts.clientMessageId ?? null,
+          turnId: opts.turnId ?? null,
+          source: 'control',
+          sessionId: ownerSessionId,
+          uiHidden,
+          emit: opts.emit ?? null,
+        })) as unknown as Dict
+      } finally {
+        await this.loop.settleProfileInterviewResume(resume.interaction.id)
+      }
     }
     return {
       ...(resume as unknown as Dict),

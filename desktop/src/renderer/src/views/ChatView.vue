@@ -31,6 +31,11 @@ const activeBottomControl = computed(() =>
     sessionStore.active.value || null,
   ),
 )
+const showProfileOnboardingPrompt = computed(
+  () =>
+    ctx.boot.value?.profileOnboarding?.status === 'pending' &&
+    !activeBottomControl.value,
+)
 
 function switchModel(entryName: string) {
   const payload = ctx.boot.value?.modelConfig
@@ -105,6 +110,28 @@ function normalizeReasoningEffort(value?: string | null) {
       />
 
       <div class="chat-bottom-stack">
+        <div
+          v-if="showProfileOnboardingPrompt"
+          class="profile-onboarding-banner"
+          role="status"
+        >
+          <div>
+            <strong>补充个人偏好</strong>
+            <span>用一个简短访谈设置称呼、沟通方式和工作偏好。</span>
+          </div>
+          <div class="profile-onboarding-actions">
+            <button type="button" @click="ctx.skipProfileInterview">
+              不再提醒
+            </button>
+            <button
+              type="button"
+              class="primary"
+              @click="ctx.startProfileInterview"
+            >
+              开始访谈
+            </button>
+          </div>
+        </div>
         <ActiveAskPanel
           v-if="activeBottomControl?.kind === 'ask'"
           :interaction="activeBottomControl.interaction"

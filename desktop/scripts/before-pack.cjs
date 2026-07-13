@@ -18,8 +18,27 @@ const {
   sep,
 } = require('node:path')
 
+const TEMPLATE_RUNTIME_FILES = [
+  'SOUL.md',
+  'TOOL.md',
+  'agent/compact_prompt.md',
+  'agent/identity.md',
+  'agent/skills_section.md',
+  'init/MEMORY.md',
+  'init/USER.md',
+  'subagents/dongchang_tanshi.md',
+  'subagents/neiguan_yingzao.md',
+  'subagents/shangbao_dianbu.md',
+  'subagents/sili_suitang.md',
+  'subagents/verification_reviewer.md',
+  'subagents/xiaohuangmen.md',
+]
+
 const SOURCE_MAPPINGS = [
-  { source: 'templates', target: 'templates' },
+  ...TEMPLATE_RUNTIME_FILES.map((path) => ({
+    source: `templates/${path}`,
+    target: `templates/${path}`,
+  })),
   { source: 'skills', target: 'skills' },
   { source: 'assets/desktop-pet', target: 'assets/desktop-pet' },
   {
@@ -263,3 +282,4 @@ module.exports = beforePack
 module.exports.createRuntimeManifest = createRuntimeManifest
 module.exports.validateRuntimeManifest = validateRuntimeManifest
 module.exports.SOURCE_MAPPINGS = SOURCE_MAPPINGS
+module.exports.TEMPLATE_RUNTIME_FILES = TEMPLATE_RUNTIME_FILES

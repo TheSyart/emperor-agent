@@ -11,7 +11,7 @@ import type {
   ProviderOption,
   ProviderRegion,
 } from '../../types'
-import { actionIcons } from '../../icons'
+import { actionIcons, modelIcons } from '../../icons'
 import BrandMark from '../brand/BrandMark.vue'
 import ModelEntryList from './model/ModelEntryList.vue'
 import ModelPicker from './model/ModelPicker.vue'
@@ -657,7 +657,7 @@ async function runTest(
         <div class="model-form-v2">
           <section class="model-form-section">
             <div class="model-form-section-head">
-              <h4>身份</h4>
+              <h4>基本信息</h4>
               <span>用于侧边栏与快捷切换显示</span>
             </div>
             <div class="model-form-grid">
@@ -685,52 +685,8 @@ async function runTest(
 
           <section class="model-form-section">
             <div class="model-form-section-head">
-              <h4>连接</h4>
+              <h4>连接与服务商</h4>
               <span>凭证只保存在本地</span>
-            </div>
-            <div class="model-form-grid">
-              <label v-if="!editingHidesApiKey" class="form-row span-2">
-                <span class="form-label">API Key</span>
-                <input
-                  v-model="editing.apiKey"
-                  class="form-input"
-                  type="password"
-                  :placeholder="
-                    editingProviderSpec?.isLocal
-                      ? '(本地服务通常不需要)'
-                      : '保存为明文，仅本地，不回传明文'
-                  "
-                />
-              </label>
-              <div v-else class="empty-note compact span-2">
-                <span v-if="editingProviderSpec?.isOauth"
-                  >该 provider 走 OAuth 授权流程，无需 API Key。</span
-                >
-                <span v-else-if="editingProviderSpec?.isLocal"
-                  >本地服务通常不需要 API Key（除非你单独开了认证）。</span
-                >
-              </div>
-              <label class="form-row span-2">
-                <span class="form-label">API Base</span>
-                <input
-                  :value="editing.apiBase ?? ''"
-                  class="form-input"
-                  :placeholder="
-                    editingProviderSpec?.defaultApiBase || '由 SDK 决定'
-                  "
-                  @input="
-                    editing.apiBase =
-                      ($event.target as HTMLInputElement).value || null
-                  "
-                />
-              </label>
-            </div>
-          </section>
-
-          <section class="model-form-section">
-            <div class="model-form-section-head">
-              <h4>模型</h4>
-              <span>Main / Secondary</span>
             </div>
             <div class="model-form-grid">
               <div class="form-row span-2">
@@ -793,6 +749,50 @@ async function runTest(
                   >
                 </div>
               </div>
+              <label v-if="!editingHidesApiKey" class="form-row span-2">
+                <span class="form-label">API Key</span>
+                <input
+                  v-model="editing.apiKey"
+                  class="form-input"
+                  type="password"
+                  :placeholder="
+                    editingProviderSpec?.isLocal
+                      ? '(本地服务通常不需要)'
+                      : '保存为明文，仅本地，不回传明文'
+                  "
+                />
+              </label>
+              <div v-else class="empty-note compact span-2">
+                <span v-if="editingProviderSpec?.isOauth"
+                  >该 provider 走 OAuth 授权流程，无需 API Key。</span
+                >
+                <span v-else-if="editingProviderSpec?.isLocal"
+                  >本地服务通常不需要 API Key（除非你单独开了认证）。</span
+                >
+              </div>
+              <label class="form-row span-2">
+                <span class="form-label">API Base</span>
+                <input
+                  :value="editing.apiBase ?? ''"
+                  class="form-input"
+                  :placeholder="
+                    editingProviderSpec?.defaultApiBase || '由 SDK 决定'
+                  "
+                  @input="
+                    editing.apiBase =
+                      ($event.target as HTMLInputElement).value || null
+                  "
+                />
+              </label>
+            </div>
+          </section>
+
+          <section class="model-form-section">
+            <div class="model-form-section-head">
+              <h4>模型角色</h4>
+              <span>Main / Secondary</span>
+            </div>
+            <div class="model-form-grid">
               <ModelPicker
                 :model-value="editing.mainModelId || editing.id || ''"
                 :options="modelCandidates"
@@ -910,6 +910,44 @@ async function runTest(
               @run-test="runTest"
             />
           </details>
+
+          <section
+            class="model-role-guide"
+            aria-labelledby="model-role-guide-title"
+          >
+            <div class="model-role-guide-head">
+              <h4 id="model-role-guide-title">主次模型怎么选</h4>
+              <span>两者都需要配置</span>
+            </div>
+            <div class="model-role-guide-grid">
+              <div class="model-role-guide-item">
+                <component :is="modelIcons.primary" :size="17" />
+                <div>
+                  <strong>主模型</strong>
+                  <p>
+                    用于主 Agent、复杂决策及写入型子代理；优先能力与上下文。
+                  </p>
+                </div>
+              </div>
+              <div class="model-role-guide-item">
+                <component :is="modelIcons.secondary" :size="17" />
+                <div>
+                  <strong>次模型</strong>
+                  <p>用于记忆压缩、轻量只读与核验；优先速度与成本。</p>
+                </div>
+              </div>
+              <div class="model-role-guide-item">
+                <component :is="modelIcons.guidance" :size="17" />
+                <div>
+                  <strong>选择建议</strong>
+                  <p>
+                    可选择同一个 Model
+                    ID；次模型不可用或容量不足时会回退主模型。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
     </div>

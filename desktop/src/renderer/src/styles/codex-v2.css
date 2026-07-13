@@ -893,6 +893,68 @@ select:focus-visible {
     );
 }
 
+.profile-onboarding-banner {
+  display: flex;
+  width: min(760px, 100%);
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: rgb(var(--bg-elevated) / 0.97);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+}
+
+.profile-onboarding-banner > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.profile-onboarding-banner strong {
+  color: rgb(var(--fg));
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.profile-onboarding-banner span {
+  color: rgb(var(--fg-muted));
+  font-size: 12px;
+}
+
+.profile-onboarding-actions,
+.config-profile-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-onboarding-actions button {
+  min-height: 28px;
+  border-radius: 7px;
+  padding: 0 9px;
+  color: rgb(var(--fg-muted));
+  font-size: 12px;
+}
+
+.profile-onboarding-actions button:hover {
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+}
+
+.profile-onboarding-actions button.primary {
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg));
+}
+
+.config-profile-status {
+  margin-bottom: 10px;
+}
+
 .active-ask-panel {
   width: min(760px, 100%);
   max-height: min(28rem, calc(100dvh - 150px));
@@ -2152,6 +2214,16 @@ select:focus-visible {
     border-radius: 14px;
   }
 
+  .profile-onboarding-banner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .profile-onboarding-actions {
+    justify-content: flex-end;
+  }
+
   .active-plan-decision-panel {
     width: 100%;
     margin: 0 0 8px;
@@ -2759,14 +2831,16 @@ select:focus-visible {
 }
 
 .model-settings-view .model-panel-shell {
-  gap: 12px;
-  padding: 0;
+  container-name: model-settings;
+  container-type: inline-size;
+  gap: 0;
+  padding: 0 0 8px;
 }
 
 .model-settings-view .entry-layout {
-  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   align-items: start;
-  gap: 14px;
+  gap: 18px;
   overflow: visible;
 }
 
@@ -2777,53 +2851,223 @@ select:focus-visible {
   align-self: start;
   gap: 8px;
   overflow: hidden;
-  border-radius: 8px;
-  padding: 10px;
+  border: 0;
+  border-right: 1px solid rgb(var(--border));
+  border-radius: 0;
+  padding: 3px 14px 3px 0;
+  background: transparent;
   box-shadow: none;
 }
 
+.model-settings-view .entry-list-head {
+  min-height: 34px;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.model-settings-view .entry-list-head .tool-button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+}
+
 .model-settings-view .entry-list {
+  border: 0 !important;
   gap: 6px;
+  background: transparent !important;
 }
 
 .model-settings-view .entry-item {
   gap: 8px;
+  border-color: transparent;
   border-radius: 7px;
-  padding: 9px;
+  padding: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.model-settings-view .entry-item:hover {
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg-hover));
+}
+
+.model-settings-view .entry-item.active,
+.model-settings-view .entry-item.default,
+.model-settings-view .entry-item.active.default {
+  border-color: rgb(var(--border-strong));
+  background: rgb(var(--bg-inset));
+  box-shadow: none;
 }
 
 .model-settings-view .entry-editor {
-  gap: 10px;
+  gap: 0;
   overflow: visible;
-  border-radius: 8px;
-  padding: 12px;
+  border: 0 !important;
+  border-radius: 0;
+  padding: 0;
+  background: transparent !important;
   box-shadow: none;
 }
 
 .model-settings-view .entry-editor-head {
-  padding-bottom: 10px;
+  min-height: 42px;
+  padding: 0 0 10px;
   background: transparent !important;
 }
 
 .model-settings-view .model-form-v2 {
-  gap: 9px;
+  gap: 0;
   overflow: visible;
   padding-right: 0;
 }
 
-.model-settings-view .model-form-section,
+.model-settings-view .model-form-section {
+  gap: 10px;
+  border: 0 !important;
+  border-top: 1px solid rgb(var(--border)) !important;
+  border-radius: 0 !important;
+  padding: 14px 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.model-settings-view .model-form-section:first-child {
+  padding-top: 12px !important;
+}
+
+.model-settings-view .model-form-section-head {
+  min-height: 20px;
+}
+
+.model-settings-view .model-form-section-head h4 {
+  letter-spacing: 0;
+}
+
+.model-settings-view .model-form-grid {
+  gap: 11px 12px !important;
+}
+
+.model-settings-view .model-form-v2 .form-label {
+  letter-spacing: 0 !important;
+  text-transform: none;
+}
+
+.model-settings-view .model-form-v2 .form-input,
+.model-settings-view .model-form-v2 .form-select {
+  min-height: 38px;
+}
+
+.model-settings-view .empty-note.compact {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+}
+
 .model-settings-view .advanced-panel {
-  border-radius: 8px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-top: 1px solid rgb(var(--border)) !important;
+  border-radius: 0 !important;
+  padding: 13px 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.model-settings-view .advanced-panel[open] {
+  background: transparent !important;
+}
+
+.model-settings-view .advanced-toggle {
+  min-height: 24px;
+  align-items: center;
+  padding: 0;
+}
+
+.model-settings-view .model-role-guide {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: rgb(var(--bg-inset) / 0.3);
+}
+
+.model-settings-view .model-role-guide-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-settings-view .model-role-guide-head h4 {
+  color: rgb(var(--fg));
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.model-settings-view .model-role-guide-head span {
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+}
+
+.model-settings-view .model-role-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.model-settings-view .model-role-guide-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 2px 12px;
+  color: rgb(var(--fg-muted));
+}
+
+.model-settings-view .model-role-guide-item:first-child {
+  padding-left: 0;
+}
+
+.model-settings-view .model-role-guide-item + .model-role-guide-item {
+  border-left: 1px solid rgb(var(--border));
+}
+
+.model-settings-view .model-role-guide-item > svg {
+  margin-top: 1px;
+  color: rgb(var(--fg-subtle));
+}
+
+.model-settings-view .model-role-guide-item strong {
+  display: block;
+  color: rgb(var(--fg));
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.model-settings-view .model-role-guide-item p {
+  margin-top: 3px;
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .model-settings-view .model-action-bar {
-  bottom: 10px;
-  margin-top: 0;
-  min-height: 48px;
+  bottom: 0;
+  margin-top: 12px;
+  min-height: 44px;
   border-radius: 8px;
-  padding: 7px 9px;
-  background: rgb(var(--bg-elevated) / 0.94);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+  padding: 5px 7px;
+  background: rgb(var(--bg-elevated) / 0.96);
+  box-shadow: 0 -5px 18px rgb(0 0 0 / 0.08);
 }
 
 .model-settings-view .model-action-bar.dirty {
@@ -2839,23 +3083,60 @@ select:focus-visible {
   font-size: 11px;
 }
 
-@media (max-width: 980px) {
+@container model-settings (max-width: 860px) {
   .model-settings-view .entry-layout {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 
   .model-settings-view .entry-list-pane {
     position: static;
     width: 100%;
-    max-height: 220px;
+    max-height: 208px;
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--border));
+    padding: 0 0 12px;
   }
 
   .model-settings-view .entry-list {
-    max-height: 156px;
+    display: grid;
+    max-height: 154px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
-  .model-settings-view .model-action-bar {
-    position: static;
+  .model-settings-view .model-role-guide-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-settings-view .model-role-guide-item {
+    padding: 9px 0;
+  }
+
+  .model-settings-view .model-role-guide-item + .model-role-guide-item {
+    border-top: 1px solid rgb(var(--border));
+    border-left: 0;
+  }
+}
+
+@container model-settings (max-width: 560px) {
+  .model-settings-view .model-form-grid,
+  .model-settings-view .advanced-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-settings-view .model-form-v2 .form-row.span-2,
+  .model-settings-view .advanced-grid .form-row.span-2 {
+    grid-column: 1;
+  }
+
+  .model-settings-view .entry-editor-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .model-settings-view .provider-control-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

@@ -441,6 +441,15 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.model.test(input),
   ),
+  'onboarding.getProfileStatus': operation(z.tuple([]), (api) =>
+    api.onboarding.getProfileStatus(),
+  ),
+  'onboarding.startProfileInterview': operation(z.tuple([]), (api) =>
+    api.onboarding.startProfileInterview(),
+  ),
+  'onboarding.skipProfileInterview': operation(z.tuple([]), (api) =>
+    api.onboarding.skipProfileInterview(),
+  ),
   'plans.get': operation(z.tuple([idSchema]), (api, [id]) => api.plans.get(id)),
   'plans.list': operation(z.tuple([]), (api) => api.plans.list()),
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),

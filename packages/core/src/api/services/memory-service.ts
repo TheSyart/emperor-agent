@@ -60,6 +60,7 @@ export interface CoreHistoryItem {
   attachments?: CoreHistoryAttachment[]
   turn_id?: string
   source?: string
+  ui_hidden?: boolean
   requestedSkills?: Array<{ name: string; source?: string }>
 }
 
@@ -862,6 +863,7 @@ function historyItemFromRow(row: Dict): CoreHistoryItem | null {
   const item: CoreHistoryItem = { role, content: row.content }
   if (typeof row.turn_id === 'string') item.turn_id = row.turn_id
   if (typeof row.source === 'string') item.source = row.source
+  if (row.ui_hidden === true) item.ui_hidden = true
   if (Array.isArray(row.attachments)) {
     const attachments = row.attachments
       .map(historyAttachmentFromValue)

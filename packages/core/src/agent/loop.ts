@@ -36,6 +36,7 @@ import type { PermissionRuleInput } from '../permissions/rules'
 import { loadModelConfig } from '../config/model-config'
 import { ControlManager } from '../control/manager'
 import type { Interaction } from '../control/models'
+import { TurnPaused } from '../control/exceptions'
 import {
   AskUserTool,
   ProposePlanTool,
@@ -105,9 +106,12 @@ import {
 } from '../sessions/conversation'
 import { migrateLegacyMainlineToDefaultSession } from '../sessions/migrate'
 import {
-  claimProfileOnboardingTrigger,
   ensureUserProfileFile,
-  onboardingTriggerContent,
+  PROFILE_ONBOARDING_VERSION,
+  ProfileOnboardingCoordinator,
+  profileOnboardingAgentPrompt,
+  type ProfileOnboardingActionResult,
+  type ProfileOnboardingPayload,
 } from '../sessions/onboarding'
 import {
   SessionStore,
@@ -231,6 +235,7 @@ export class AgentLoop {
   readonly registry = new ToolRegistry()
   readonly sessionStore: SessionStore
   readonly sharedMemory: MemoryStore
+  readonly profileOnboarding: ProfileOnboardingCoordinator
   readonly tokenTracker: TokenTracker
   readonly hookService: HookService
   readonly environmentCatalog: LoadedToolCatalog
@@ -262,6 +267,7 @@ export class AgentLoop {
   history: Msg[] = []
   private readonly ownsModelRouter: boolean
   private readonly modelOverride: string | null
+  private readonly enableFirstRunOnboarding: boolean
   private schedulerAgentTurnSubmitter:
     ((payload: SchedulerAgentTurnPayload) => Promise<string>) | null = null
   private controlPendingSessionId: string | null = null
@@ -289,7 +295,13 @@ export class AgentLoop {
     this.modelRouter = modelRouter
     this.ownsModelRouter = !opts.modelRouter
     this.modelOverride = opts.modelOverride ?? null
+    this.enableFirstRunOnboarding = Boolean(opts.enableFirstRunOnboarding)
     this.sharedMemory = sharedMemory
+    this.profileOnboarding = new ProfileOnboardingCoordinator({
+      stateRoot: this.paths.stateRoot,
+      templatesDir: this.templatesDir,
+      userFile: opts.userFile ?? this.sharedMemory.userFile,
+    })
     this.eventSink = opts.eventSink ?? null
 
     this.sessionStore = new SessionStore(this.paths.stateRoot)
@@ -372,6 +384,18 @@ export class AgentLoop {
 
     this.controlManager.setTodoStore(this.todoStore)
     this.controlManager.setTaskManager(this.taskManager)
+    this.controlManager.setAskMetaProvider(() => {
+      const state = this.profileOnboarding.payload()
+      if (
+        state.status !== 'in_progress' ||
+        state.sessionId !== this.activeSessionId
+      )
+        return null
+      return {
+        profileOnboardingVersion: PROFILE_ONBOARDING_VERSION,
+        profileOnboardingMode: 'agent',
+      }
+    })
     this.controlManager.setPendingObserver({
       setPending: (interaction) =>
         this.setActiveSessionControlPending(interaction),
@@ -413,15 +437,11 @@ export class AgentLoop {
     const sharedMemory = new MemoryStore(paths.memoryRoot, userFile, {
       memoryTemplate,
     })
-    // 首次运行档案访谈的门禁需要知道模型是否已配置；外部注入 modelRouter（常见于测试/嵌入场景）
-    // 本身就是"已配置"的信号，此时不必读盘、也不改变原有的 loadModelConfig 调用时机。
     let modelRouter = opts.modelRouter ?? null
-    let hasConfiguredModel = Boolean(modelRouter)
     if (!modelRouter) {
       const modelConfig = await loadModelConfig(paths.stateRoot, {
         create: true,
       })
-      hasConfiguredModel = modelConfig.models.length > 0
       modelRouter = new ModelRouter(
         paths.stateRoot,
         modelConfig,
@@ -451,29 +471,173 @@ export class AgentLoop {
       loop.mcpClient.registerTools(loop.registry)
     }
     loop.activateSession(session.id)
-    if (
-      opts.enableFirstRunOnboarding &&
-      claimProfileOnboardingTrigger({
-        stateRoot: paths.stateRoot,
-        templatesDir,
-        hasConfiguredModel,
-      })
-    ) {
-      // 必须 await 而非 fire-and-forget：runUserTurn 靠 activeTasks 的 'turn' 单飞互斥防止
-      // 并发回合互相践踏共享的 history/runner 状态；不 await 会让它与调用方紧接着发起的
-      // 真实首条消息产生真实的竞态（TurnBusyError 或历史交错），而不只是测试假象。
-      // 模型调用 ask_user 后 TurnPaused 会让这次 await 很快返回（无需真人同步作答），
-      // 所以这里的等待只占用启动时的一次模型往返，不会真的卡到用户填完表单。
-      try {
-        await loop.runUserTurn(onboardingTriggerContent(), {
-          source: 'onboarding',
-          displayContent: '（初次见面）向你确认一些使用偏好',
-        })
-      } catch {
-        // 首次访谈失败不影响启动；latch 已置位，不会在下次启动重试。
-      }
-    }
+    await loop.reconcileProfileOnboardingPendingAtStartup()
+    if (opts.enableFirstRunOnboarding)
+      await loop.startProfileInterview({ manual: false })
     return loop
+  }
+
+  profileOnboardingPayload(): ProfileOnboardingPayload {
+    return this.profileOnboarding.reconcileProfile()
+  }
+
+  private async reconcileProfileOnboardingPendingAtStartup(): Promise<void> {
+    const state = this.profileOnboarding.payload()
+    const pending = this.controlManager.store.load().pending
+    const matching =
+      state.status === 'in_progress' &&
+      state.interactionId &&
+      pending?.kind === 'ask' &&
+      pending.id === state.interactionId
+        ? pending
+        : null
+    if (
+      matching &&
+      matching.meta?.profileOnboardingVersion !== PROFILE_ONBOARDING_VERSION
+    ) {
+      const ownerSessionId = state.sessionId
+      const cancelled = this.controlManager.cancel(matching.id)
+      await this.emitProfileOnboardingRuntimeEvent(
+        {
+          ...cancelled,
+          source: 'onboarding',
+          session_id: ownerSessionId,
+          reason: 'onboarding_schema_upgraded',
+        },
+        `onboarding_upgrade_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      )
+      await this.deferProfileInterview(matching.id)
+      return
+    }
+    this.profileOnboarding.reconcilePendingInteraction(matching?.id ?? null)
+  }
+
+  async startProfileInterview(
+    opts: { manual?: boolean } = {},
+  ): Promise<ProfileOnboardingActionResult> {
+    const manual = Boolean(opts.manual)
+    const reconciled = this.profileOnboarding.reconcileProfile()
+    if (reconciled.status === 'completed')
+      return { started: false, state: reconciled }
+    if (!manual && !this.enableFirstRunOnboarding)
+      return { started: false, state: reconciled }
+    if (!this.modelAvailableForOnboarding())
+      return { started: false, state: reconciled }
+    if (
+      this.activeTasks.hasActive() ||
+      Boolean(this.controlManager.payload().pending)
+    )
+      return { started: false, state: reconciled }
+
+    const session = this.profileOnboardingSession()
+    const attempt = this.profileOnboarding.beginAttempt(session.id, { manual })
+    if (!attempt.started) return attempt
+    await this.emitProfileOnboardingStatus('started')
+
+    const turnId = `onboarding_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+    try {
+      if (this.activeSessionId !== session.id) this.activateSession(session.id)
+      await this.runUserTurn(
+        profileOnboardingAgentPrompt(
+          this.profileOnboarding.seedContent,
+          this.sharedMemory.readUser(),
+        ),
+        {
+          sessionId: session.id,
+          turnId,
+          source: 'onboarding',
+          displayContent: '',
+          uiHidden: true,
+          memoryExtra: { ui_hidden: true, onboarding: true },
+        },
+      )
+      const state = this.profileOnboarding.reconcileProfile()
+      if (state.status === 'completed') {
+        await this.emitProfileOnboardingStatus('completed')
+        return { started: true, state }
+      }
+      const failed = this.profileOnboarding.fail(
+        'profile interview ended before asking the user or saving the profile',
+      )
+      await this.emitProfileOnboardingStatus('failed')
+      return { started: false, state: failed }
+    } catch (error) {
+      if (error instanceof TurnPaused) {
+        const interactionId = String(error.interaction.id ?? '').trim()
+        const interaction = this.tagProfileOnboardingInteraction(interactionId)
+        const state = this.profileOnboarding.attachInteraction(interaction.id)
+        await this.emitProfileOnboardingStatus('awaiting_answers')
+        return { started: true, state }
+      }
+      const state = this.profileOnboarding.fail(error)
+      await this.emitProfileOnboardingStatus('failed')
+      return { started: false, state }
+    }
+  }
+
+  async skipProfileInterview(): Promise<ProfileOnboardingActionResult> {
+    const state = this.profileOnboarding.skip()
+    await this.emitProfileOnboardingStatus('skipped')
+    return { started: false, state }
+  }
+
+  async deferProfileInterview(
+    interactionId: string,
+  ): Promise<ProfileOnboardingPayload> {
+    const before = this.profileOnboarding.payload()
+    const state = this.profileOnboarding.defer(interactionId)
+    if (
+      before.status !== state.status ||
+      before.interactionId !== state.interactionId
+    )
+      await this.emitProfileOnboardingStatus('deferred')
+    return state
+  }
+
+  isProfileOnboardingInteraction(interactionId: string): boolean {
+    const state = this.profileOnboarding.payload()
+    if (
+      state.status !== 'in_progress' ||
+      state.interactionId !== String(interactionId ?? '').trim()
+    )
+      return false
+    const pending = this.controlManager.store.load().pending
+    return Boolean(
+      pending?.kind === 'ask' &&
+      pending.id === state.interactionId &&
+      pending.meta?.profileOnboardingVersion === PROFILE_ONBOARDING_VERSION,
+    )
+  }
+
+  reconcileProfileOnboarding(): ProfileOnboardingPayload {
+    const before = this.profileOnboarding.payload()
+    const state = this.profileOnboarding.reconcileProfile()
+    if (before.status !== state.status)
+      void this.emitProfileOnboardingStatus('profile_saved').catch(() => {})
+    return state
+  }
+
+  async settleProfileInterviewResume(
+    interactionId: string,
+  ): Promise<ProfileOnboardingPayload> {
+    const before = this.profileOnboarding.payload()
+    if (before.interactionId !== interactionId) return before
+    const reconciled = this.profileOnboarding.reconcileProfile()
+    if (reconciled.status === 'completed') return reconciled
+    const pending = this.controlManager.payload().pending
+    if (pending?.kind === 'ask' && pending.id) {
+      const interaction = this.tagProfileOnboardingInteraction(
+        String(pending.id),
+      )
+      const state = this.profileOnboarding.attachInteraction(interaction.id)
+      await this.emitProfileOnboardingStatus('awaiting_answers')
+      return state
+    }
+    const state = this.profileOnboarding.fail(
+      'profile interview ended before the profile was saved',
+    )
+    await this.emitProfileOnboardingStatus('failed')
+    return state
   }
 
   activateSession(sessionId: string): SessionEntry {
@@ -887,6 +1051,7 @@ export class AgentLoop {
     const displayContent = opts.displayContent ?? content
     const userMessage: Msg = { role: 'user', content: modelContent }
     if (turnId) userMessage.turn_id = turnId
+    if (opts.uiHidden) userMessage.ui_hidden = true
     if (attachmentPayloads.length) userMessage.attachments = attachmentPayloads
     if (displayContent !== updatedPrompt || attachmentPayloads.length)
       userMessage.displayContent = displayContent
@@ -905,6 +1070,7 @@ export class AgentLoop {
           ? { displayContent }
           : {}),
         ...(opts.source ? { source: opts.source } : {}),
+        ...(opts.uiHidden ? { ui_hidden: true } : {}),
       },
     })
     this.sessionStore.touch(sessionId, displayContent, {
@@ -934,7 +1100,11 @@ export class AgentLoop {
       reply = await runner.stepStream(
         history,
         async (event) => {
-          await this.emit(event, {
+          const emittedEvent =
+            opts.source === 'onboarding' && !('source' in event)
+              ? { ...event, source: 'onboarding' }
+              : event
+          await this.emit(emittedEvent, {
             turnId,
             emit: opts.emit ?? null,
             runtimeStore,
@@ -1177,7 +1347,19 @@ export class AgentLoop {
     this.registry.register(new ProposePlanTool(this.controlManager))
     this.registry.register(new RequestPlanModeTool(this.controlManager))
     this.registry.register(new UpdateTodos(this.todoStore))
-    this.registry.register(new SaveUserProfileTool(this.sharedMemory))
+    this.registry.register(
+      new SaveUserProfileTool(
+        this.sharedMemory,
+        () => {
+          this.reconcileProfileOnboarding()
+        },
+        (currentContent) =>
+          this.profileOnboarding.allowsSeedReplacement(
+            this.activeSessionId,
+            currentContent,
+          ),
+      ),
+    )
     const controlHost = dispatchControlHost(this.controlManager)
     this.registry.register(
       new DispatchSubagentTool({
@@ -1263,6 +1445,50 @@ export class AgentLoop {
     if (current) return current
     const existing = this.sessionStore.list({ includeArchived: false })[0]
     return existing ?? this.sessionStore.create('Default')
+  }
+
+  private profileOnboardingSession(): SessionEntry {
+    const sessions = this.sessionStore.list({ includeArchived: false })
+    return (
+      sessions.find(
+        (session) => session.mode === 'chat' && session.title === 'Default',
+      ) ??
+      sessions.find((session) => session.mode === 'chat') ??
+      this.sessionStore.create('Default', { mode: 'chat' })
+    )
+  }
+
+  private modelAvailableForOnboarding(): boolean {
+    return this.modelRouter.availability?.usable ?? true
+  }
+
+  private tagProfileOnboardingInteraction(interactionId: string) {
+    return this.controlManager.updatePendingMeta(interactionId, {
+      profileOnboardingVersion: PROFILE_ONBOARDING_VERSION,
+      profileOnboardingMode: 'agent',
+    })
+  }
+
+  private async emitProfileOnboardingRuntimeEvent(
+    event: Record<string, unknown>,
+    turnId: string,
+  ): Promise<void> {
+    try {
+      await this.emit(event, { turnId })
+    } catch {
+      // A renderer/event sink failure must not invalidate the persisted Ask.
+    }
+  }
+
+  private async emitProfileOnboardingStatus(reason: string): Promise<void> {
+    const state = this.profileOnboarding.payload()
+    try {
+      await this.emit(
+        runtimeEvents.profileOnboardingStatusChanged({ ...state }, { reason }),
+      )
+    } catch {
+      // Observability must not alter onboarding state or model-save success.
+    }
   }
 
   private setActiveSessionControlPending(interaction: Interaction): void {

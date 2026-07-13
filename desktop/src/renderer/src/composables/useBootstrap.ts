@@ -4,6 +4,7 @@ import type {
   BootstrapPayload,
   ModelConfigRaw,
   McpConfigPayload,
+  ProfileOnboardingActionResult,
 } from '../types'
 
 export function useBootstrap(showToast: (message: string) => void) {
@@ -57,6 +58,8 @@ export function useBootstrap(showToast: (message: string) => void) {
       boot.value.provider = data.current?.provider || boot.value.provider
       boot.value.providerLabel =
         data.current?.providerLabel || boot.value.providerLabel
+      if (data.profileOnboarding)
+        boot.value.profileOnboarding = data.profileOnboarding.state
     }
     modelDraftProvider.value = data.config?.agents?.defaults?.provider || null
     const label = data.current?.entryLabel || data.current?.entryName
@@ -68,6 +71,21 @@ export function useBootstrap(showToast: (message: string) => void) {
     } else {
       showToast(`已切换到 ${provider} / ${model}`)
     }
+    return (data.profileOnboarding ??
+      null) as ProfileOnboardingActionResult | null
+  }
+
+  async function startProfileInterview() {
+    const result = await core('onboarding.startProfileInterview')
+    if (boot.value) boot.value.profileOnboarding = result.state
+    return result
+  }
+
+  async function skipProfileInterview() {
+    const result = await core('onboarding.skipProfileInterview')
+    if (boot.value) boot.value.profileOnboarding = result.state
+    showToast('已关闭个人档案访谈提醒')
+    return result
   }
 
   async function compactMemory() {
@@ -213,6 +231,8 @@ export function useBootstrap(showToast: (message: string) => void) {
     refreshMemory,
     refreshModelConfig,
     saveModelConfig,
+    startProfileInterview,
+    skipProfileInterview,
     compactMemory,
     loadSkill,
     startNewSkill,

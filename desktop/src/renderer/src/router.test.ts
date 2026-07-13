@@ -34,6 +34,14 @@ describe('renderer routes', () => {
     expect(team?.component).toBeUndefined()
   })
 
+  it('redirects the legacy model route into the settings model page', async () => {
+    const { routeRecords } = await import('./router')
+    const model = routeRecords.find((route) => route.path === '/model')
+
+    expect(model?.redirect).toBe('/settings/model')
+    expect(model?.component).toBeUndefined()
+  })
+
   it('marks settings as a standalone shell without the app sidebar', async () => {
     const { routeRecords } = await import('./router')
     const settings = routeRecords.find(

@@ -122,6 +122,13 @@ const scenarios = [
     selector: '.model-panel-shell',
   },
   {
+    name: 'settings-model-wide',
+    path: '/settings/model',
+    width: 1280,
+    height: 820,
+    selector: '.model-panel-shell',
+  },
+  {
     name: 'settings-model-mobile',
     path: '/settings/model',
     width: 390,
@@ -180,6 +187,7 @@ for (const scenario of scenarios) {
     }
     if (scenario.path === '/settings/model') {
       await expect(page.locator('.advanced-panel')).toBeVisible()
+      await expect(page.getByText('主次模型怎么选')).toBeVisible()
       await expect(page.getByText('Context Window').first()).toBeAttached()
       await expect(page.getByText('Max Tokens').first()).toBeAttached()
     }
@@ -232,6 +240,123 @@ test('model pickers select, reopen all candidates, and retain custom ids', async
     page.getByRole('option', { name: /private-model-v2.*自定义/ }),
   ).toBeVisible()
   await expect(page.getByRole('option', { name: /visual-main/ })).toBeVisible()
+})
+
+test('model picker remains anchored when the settings viewport shrinks', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  await page.goto('/settings/model')
+  await page.getByRole('button', { name: '获取模型' }).click()
+
+  const main = page.getByRole('combobox', { name: 'Main Model ID' })
+  const listbox = page.getByRole('listbox', {
+    name: 'Main Model ID候选模型',
+  })
+  await main.click()
+  await expect(listbox).toBeVisible()
+  await expectModelPickerAnchored(main, listbox)
+
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await expect(listbox).toBeVisible()
+  await expectModelPickerAnchored(main, listbox)
+  await expect(listbox).toHaveAttribute('data-placement', 'top')
+  await page.screenshot({
+    path: resolve(screenshotDir, 'settings-model-picker-resized.png'),
+    fullPage: false,
+  })
+})
+
+test('first-run model prompt routes to settings without opening a second wizard', async ({
+  page,
+}) => {
+  await page.goto('/chat?visualModel=unavailable')
+  const prompt = page.getByRole('dialog', {
+    name: '把任务交给本地 Agent。',
+  })
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '去配置模型' }).click()
+
+  await expect(page).toHaveURL(/\/settings\/model$/)
+  await expect(page.locator('.model-panel-shell')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.locator('.onboarding-shell')).toHaveCount(0)
+})
+
+test('first saved model returns to chat and completes the profile interview', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  await page.goto('/chat?visualModel=unavailable&visualProfile=pending')
+
+  const prompt = page.getByRole('dialog', {
+    name: '把任务交给本地 Agent。',
+  })
+  await prompt.getByRole('button', { name: '去配置模型' }).click()
+  await page.getByLabel('显示标签（可选）').fill('Visual First Run')
+  await page.getByRole('button', { name: '保存配置' }).click()
+
+  await expect(page).toHaveURL(/\/chat$/)
+  await expect(page.getByText(/初次见面。我会根据你的回答/)).toBeVisible()
+  await expect(page.getByText('1 of 1')).toBeVisible()
+  await expect(page.locator('.message-row.user')).toHaveCount(0)
+  await completeVisualProfileInterview(page)
+  await expect(page.getByText('我平时怎么称呼你？')).toBeHidden()
+  await expect(page.getByText(/个人档案已经完善/)).toBeVisible()
+
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '配置', exact: true }).click()
+  await expect(page.getByText('已完成')).toBeVisible()
+})
+
+test('profile onboarding can start, defer, skip, and restart from settings', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  await page.goto('/chat?visualProfile=pending')
+
+  const banner = page.locator('.profile-onboarding-banner')
+  await expect(banner).toBeVisible()
+  await banner.getByRole('button', { name: '开始访谈' }).click()
+  await expect(page.getByText('我平时怎么称呼你？')).toBeVisible()
+  await expect(page.getByText('1 of 1')).toBeVisible()
+  await expect(page.getByText(/初次见面。我会根据你的回答/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /稍后再说/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: '不再提醒' })).toBeVisible()
+  await page.screenshot({
+    path: resolve(screenshotDir, 'profile-onboarding-ask.png'),
+    fullPage: false,
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectDialogWithinViewport(page, page.locator('.active-ask-panel'))
+  await page.screenshot({
+    path: resolve(screenshotDir, 'profile-onboarding-ask-mobile.png'),
+    fullPage: false,
+  })
+  await page.setViewportSize({ width: 1280, height: 820 })
+
+  await page.getByRole('button', { name: /稍后再说/ }).click()
+  await expect(banner).toBeVisible()
+  await banner.getByRole('button', { name: '不再提醒' }).click()
+  await expect(banner).toBeHidden()
+
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page).toHaveURL(/\/settings\/general$/)
+  await page.getByRole('button', { name: '配置', exact: true }).click()
+  await expect(page).toHaveURL(/\/settings\/configs$/)
+  await expect(
+    page.getByText('活动文件：memory/profile/USER.local.md'),
+  ).toBeVisible()
+  await expect(page.getByText('已跳过')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重新开始' })).toBeVisible()
+})
+
+test('legacy model route redirects to the settings model page', async ({
+  page,
+}) => {
+  await page.goto('/model')
+  await expect(page).toHaveURL(/\/settings\/model$/)
+  await expect(page.locator('.model-panel-shell')).toBeVisible()
 })
 
 test('settings pages keep their scroll contract without horizontal overflow', async ({
@@ -627,6 +752,34 @@ async function expectDialogWithinViewport(page: Page, dialog: Locator) {
     .toBe(true)
 }
 
+async function expectModelPickerAnchored(input: Locator, listbox: Locator) {
+  await expect
+    .poll(async () => {
+      const inputBox = await input.boundingBox()
+      const listboxBox = await listbox.boundingBox()
+      const placement = await listbox.getAttribute('data-placement')
+      if (!inputBox || !listboxBox || !placement)
+        return Number.POSITIVE_INFINITY
+      return placement === 'top'
+        ? Math.abs(listboxBox.y + listboxBox.height - (inputBox.y - 6))
+        : Math.abs(listboxBox.y - (inputBox.y + inputBox.height + 6))
+    })
+    .toBeLessThanOrEqual(1)
+}
+
+async function completeVisualProfileInterview(page: Page) {
+  const panel = page.locator('.active-ask-panel')
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText('1 of 1')).toBeVisible()
+  await panel.locator('.active-ask-option').first().click()
+  await panel.getByRole('button', { name: /^提交/ }).click()
+
+  await expect(page.getByText('你希望我怎样推进日常协作？')).toBeVisible()
+  await expect(panel.getByText('1 of 1')).toBeVisible()
+  await panel.locator('.active-ask-option').first().click()
+  await panel.getByRole('button', { name: /^提交/ }).click()
+}
+
 async function installVisualCoreBridge(page: Page) {
   await page.addInitScript(
     ({ projectDir }) => {
@@ -647,7 +800,62 @@ async function installVisualCoreBridge(page: Page) {
         }),
         session('chat-main', '普通对话', 'chat'),
       ]
+      const modelUnavailable =
+        new URLSearchParams(window.location.search).get('visualModel') ===
+        'unavailable'
+      const profileOnboarding = {
+        status:
+          new URLSearchParams(window.location.search).get('visualProfile') ===
+          'pending'
+            ? 'pending'
+            : 'completed',
+        sessionId: null as string | null,
+        interactionId: null as string | null,
+        attemptCount: 0,
+        lastError: null as string | null,
+        canStart: true,
+        canSkip: true,
+      }
+      const profileOnboardingQuestions = [
+        {
+          id: 'preferred_address',
+          header: '称呼',
+          question: '我平时怎么称呼你？',
+          options: [
+            { label: '直接称呼“你”', description: '不记录额外称呼' },
+            { label: '自定义称呼', description: '填写昵称或称呼' },
+            { label: '暂不设置', description: '以后再补充' },
+          ],
+        },
+      ]
+      const profileOnboardingFollowupQuestions = [
+        {
+          id: 'working_style',
+          header: '协作方式',
+          question: '你希望我怎样推进日常协作？',
+          options: [
+            { label: '主动推进', description: '边界清晰时直接完成' },
+            { label: '关键步骤确认', description: '重要决策先征求意见' },
+            { label: '按任务判断', description: '根据风险动态选择' },
+          ],
+        },
+      ]
       const modelConfig = {
+        availability: modelUnavailable
+          ? {
+              usable: false,
+              code: 'model_configuration_required',
+              message: '还没有可用模型，请先配置模型。',
+              action: 'open_model_settings',
+              provider: null,
+              entryName: null,
+            }
+          : {
+              usable: true,
+              message: '模型已配置',
+              provider: 'visual',
+              entryName: 'visual',
+            },
         current: {
           provider: 'visual',
           providerLabel: 'Visual Provider',
@@ -1179,9 +1387,13 @@ async function installVisualCoreBridge(page: Page) {
         }>,
         memory,
         modelConfig,
+        profileOnboarding,
         scheduler,
         team,
-        control: { mode: 'ask_before_edit', pending: null },
+        control: {
+          mode: 'ask_before_edit',
+          pending: null as Record<string, unknown> | null,
+        },
         desktopPet: {
           enabled: false,
           autoStartWithWebui: false,
@@ -1216,9 +1428,21 @@ async function installVisualCoreBridge(page: Page) {
           },
         },
         projects: [project],
-        runtime: { latestSeq: 1, scope: 'unarchived', events: [] },
+        runtime: {
+          latestSeq: 1,
+          scope: 'unarchived',
+          events: [] as Array<Record<string, unknown>>,
+        },
         unarchivedHistory: [],
         context_used: 12000,
+      }
+      let visualRuntimeSeq = 1
+
+      function emitVisualRuntime(event: Record<string, unknown>) {
+        const payload = { ...event, seq: ++visualRuntimeSeq }
+        boot.runtime.events.push(payload)
+        boot.runtime.latestSeq = visualRuntimeSeq
+        for (const listener of environmentListeners) listener(payload)
       }
 
       function session(
@@ -1242,6 +1466,7 @@ async function installVisualCoreBridge(page: Page) {
           title_status: 'ready',
           archived_at: null,
           version: 1,
+          control_pending: null as Record<string, unknown> | null,
         }
       }
 
@@ -1321,6 +1546,253 @@ async function installVisualCoreBridge(page: Page) {
               }
             case 'model.getConfig':
               return modelConfig
+            case 'model.saveConfig': {
+              Object.assign(modelConfig.availability, {
+                usable: true,
+                message: '模型已配置',
+                provider: 'visual',
+                entryName: 'visual',
+              })
+              const action = await window.emperor?.invokeCore(
+                'onboarding.startProfileInterview',
+              )
+              return { ...modelConfig, profileOnboarding: action }
+            }
+            case 'onboarding.getProfileStatus':
+              return profileOnboarding
+            case 'onboarding.startProfileInterview': {
+              const onboardingTurnId = 'onboarding_visual_profile'
+              const interaction = {
+                id: 'ask_visual_profile_1',
+                kind: 'ask',
+                status: 'waiting',
+                created_at: Date.now() / 1000,
+                updated_at: Date.now() / 1000,
+                parent_call_id: 'call_visual_profile',
+                context: '先从称呼开始，后续问题会根据你的回答调整。',
+                questions: profileOnboardingQuestions,
+                answers: {},
+                title: '',
+                summary: '',
+                plan_markdown: '',
+                assumptions: [],
+                risk_level: 'medium',
+                comments: [],
+                meta: {
+                  profileOnboardingVersion: 2,
+                  profileOnboardingMode: 'agent',
+                },
+              }
+              profileOnboarding.status = 'in_progress'
+              profileOnboarding.sessionId = 'chat-main'
+              profileOnboarding.interactionId = interaction.id
+              profileOnboarding.attemptCount += 1
+              profileOnboarding.canStart = false
+              boot.control.pending = interaction
+              const chatSession = sessions.find(
+                (entry) => entry.id === 'chat-main',
+              )
+              if (chatSession) {
+                chatSession.control_pending = {
+                  kind: 'ask',
+                  label: '需要用户输入',
+                  tone: 'blue',
+                  interaction_id: interaction.id,
+                  updated_at: Date.now() / 1000,
+                }
+              }
+              emitVisualRuntime({
+                event: 'message_delta',
+                session_id: 'chat-main',
+                turn_id: onboardingTurnId,
+                source: 'onboarding',
+                delta:
+                  '初次见面。我会根据你的回答逐步了解偏好，不需要一次说完；先从称呼开始。',
+              })
+              emitVisualRuntime({
+                event: 'ask_request',
+                session_id: 'chat-main',
+                turn_id: onboardingTurnId,
+                source: 'onboarding',
+                interaction,
+              })
+              emitVisualRuntime({
+                event: 'turn_paused',
+                session_id: 'chat-main',
+                turn_id: onboardingTurnId,
+                source: 'onboarding',
+                interaction,
+              })
+              emitVisualRuntime({
+                event: 'profile_onboarding_status_changed',
+                session_id: 'chat-main',
+                profile_onboarding: { ...profileOnboarding },
+              })
+              return { started: true, state: { ...profileOnboarding } }
+            }
+            case 'onboarding.skipProfileInterview':
+              profileOnboarding.status = 'skipped'
+              profileOnboarding.sessionId = null
+              profileOnboarding.interactionId = null
+              profileOnboarding.canStart = true
+              profileOnboarding.canSkip = false
+              boot.control.pending = null
+              const skippedSession = sessions.find(
+                (entry) => entry.id === 'chat-main',
+              )
+              if (skippedSession) skippedSession.control_pending = null
+              for (const listener of environmentListeners)
+                listener({
+                  event: 'profile_onboarding_status_changed',
+                  session_id: 'chat-main',
+                  profile_onboarding: { ...profileOnboarding },
+                })
+              return { started: false, state: { ...profileOnboarding } }
+            case 'control.cancelInteraction':
+              profileOnboarding.status = 'pending'
+              profileOnboarding.sessionId = null
+              profileOnboarding.interactionId = null
+              profileOnboarding.canStart = true
+              profileOnboarding.canSkip = true
+              boot.control.pending = null
+              const deferredSession = sessions.find(
+                (entry) => entry.id === 'chat-main',
+              )
+              if (deferredSession) deferredSession.control_pending = null
+              for (const listener of environmentListeners) {
+                listener({
+                  event: 'interaction_cancelled',
+                  session_id: 'chat-main',
+                  control: boot.control,
+                })
+                listener({
+                  event: 'profile_onboarding_status_changed',
+                  session_id: 'chat-main',
+                  profile_onboarding: { ...profileOnboarding },
+                })
+              }
+              return { control: boot.control }
+            case 'control.answerInteraction': {
+              const answered = boot.control.pending
+              boot.control.pending = null
+              const answeredSession = sessions.find(
+                (entry) => entry.id === 'chat-main',
+              )
+              if (answeredSession) answeredSession.control_pending = null
+              emitVisualRuntime({
+                event: 'ask_answered',
+                session_id: 'chat-main',
+                turn_id: 'onboarding_visual_profile',
+                source: 'control',
+                resume_model: true,
+                interaction: answered
+                  ? {
+                      ...answered,
+                      status: 'answered',
+                      answers: args[1],
+                    }
+                  : undefined,
+                control: boot.control,
+              })
+              if (answered?.id === 'ask_visual_profile_1') {
+                const followup = {
+                  id: 'ask_visual_profile_2',
+                  kind: 'ask',
+                  status: 'waiting',
+                  created_at: Date.now() / 1000,
+                  updated_at: Date.now() / 1000,
+                  parent_call_id: 'call_visual_profile_followup',
+                  context: '根据上一轮回答继续了解协作方式。',
+                  questions: profileOnboardingFollowupQuestions,
+                  answers: {},
+                  title: '',
+                  summary: '',
+                  plan_markdown: '',
+                  assumptions: [],
+                  risk_level: 'medium',
+                  comments: [],
+                  meta: {
+                    profileOnboardingVersion: 2,
+                    profileOnboardingMode: 'agent',
+                  },
+                }
+                boot.control.pending = followup
+                profileOnboarding.status = 'in_progress'
+                profileOnboarding.interactionId = followup.id
+                if (answeredSession) {
+                  answeredSession.control_pending = {
+                    kind: 'ask',
+                    label: '需要用户输入',
+                    tone: 'blue',
+                    interaction_id: followup.id,
+                    updated_at: Date.now() / 1000,
+                  }
+                }
+                emitVisualRuntime({
+                  event: 'message_delta',
+                  session_id: 'chat-main',
+                  turn_id: 'onboarding_visual_profile_followup',
+                  source: 'control',
+                  delta: '明白了。我再确认一下日常协作方式。',
+                })
+                emitVisualRuntime({
+                  event: 'ask_request',
+                  session_id: 'chat-main',
+                  turn_id: 'onboarding_visual_profile_followup',
+                  source: 'control',
+                  interaction: followup,
+                })
+                emitVisualRuntime({
+                  event: 'turn_paused',
+                  session_id: 'chat-main',
+                  turn_id: 'onboarding_visual_profile_followup',
+                  source: 'control',
+                  interaction: followup,
+                })
+                emitVisualRuntime({
+                  event: 'profile_onboarding_status_changed',
+                  session_id: 'chat-main',
+                  profile_onboarding: { ...profileOnboarding },
+                })
+                return {
+                  control: boot.control,
+                  resume: true,
+                  profileOnboarding: { ...profileOnboarding },
+                }
+              }
+              profileOnboarding.status = 'completed'
+              profileOnboarding.sessionId = null
+              profileOnboarding.interactionId = null
+              profileOnboarding.canStart = false
+              profileOnboarding.canSkip = false
+              emitVisualRuntime({
+                event: 'profile_onboarding_status_changed',
+                session_id: 'chat-main',
+                profile_onboarding: { ...profileOnboarding },
+              })
+              emitVisualRuntime({
+                event: 'message_delta',
+                session_id: 'chat-main',
+                turn_id: 'onboarding_done_visual_profile',
+                source: 'control',
+                delta:
+                  '个人档案已经完善。之后我会按这些偏好协作，也可以在后续对话中继续补充。',
+              })
+              emitVisualRuntime({
+                event: 'assistant_done',
+                session_id: 'chat-main',
+                turn_id: 'onboarding_done_visual_profile',
+                source: 'control',
+                id: 'assistant_visual_profile_done',
+                content:
+                  '个人档案已经完善。之后我会按这些偏好协作，也可以在后续对话中继续补充。',
+              })
+              return {
+                control: boot.control,
+                resume: true,
+                profileOnboarding: { ...profileOnboarding },
+              }
+            }
             case 'model.discoverModels':
               return {
                 ok: true,
@@ -1334,7 +1806,7 @@ async function installVisualCoreBridge(page: Page) {
               }
             case 'config.get':
               return {
-                path: 'emperor.local.json',
+                path: 'memory/profile/USER.local.md',
                 content: '{\\n  "webui": {}\\n}\\n',
               }
             case 'mcp.getConfig':

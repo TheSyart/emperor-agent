@@ -65,6 +65,8 @@ export interface ControlPendingObserver {
   clearPending(interaction: Interaction): void
 }
 
+export type AskMetaProvider = () => Record<string, unknown> | null
+
 export class ControlManager implements ControlManagerHost, ToolManagerHost {
   readonly store: ControlStore
   readonly planStore: PlanStore
@@ -79,6 +81,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   todoStore: TodoStoreLike | null = null
   taskManager: TaskManagerLike | null = null
   private pendingObserver: ControlPendingObserver | null = null
+  private askMetaProvider: AskMetaProvider | null = null
   private runtimeScope: Required<ControlRuntimeScope> | null = null
 
   constructor(
@@ -114,6 +117,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   setPendingObserver(observer: ControlPendingObserver | null): void {
     this.pendingObserver = observer
+  }
+
+  setAskMetaProvider(provider: AskMetaProvider | null): void {
+    this.askMetaProvider = provider
   }
 
   get mode(): string {
@@ -186,7 +193,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }): Interaction {
     this.ensureNoPending()
     const parsed = opts.questions.map((item) => questionFromDict(item))
-    const interactionMeta = { ...(opts.meta ?? {}) }
+    const interactionMeta = {
+      ...(this.askMetaProvider?.() ?? {}),
+      ...(opts.meta ?? {}),
+    }
     if (this.mode === ControlMode.PLAN) {
       const draft = this.drafting.ensurePlanDraft()
       interactionMeta.plan_id = draft.id
@@ -245,6 +255,17 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.notifyPendingSet(interaction)
   }
 
+  updatePendingMeta(
+    interactionId: string,
+    meta: Record<string, unknown>,
+  ): Interaction {
+    const pending = this.requirePending(interactionId)
+    const updated = touchInteraction(pending)
+    updated.meta = { ...updated.meta, ...meta }
+    this.setPending(updated)
+    return updated
+  }
+
   answer(
     interactionId: string,
     answers: Record<string, unknown>,
@@ -269,7 +290,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return {
       interaction: interactionToDict(updated),
       message,
-      event: { event: 'ask_answered', interaction: interactionToDict(updated) },
+      event: {
+        event: 'ask_answered',
+        interaction: interactionToDict(updated),
+        resume_model: true,
+      },
       resume: true,
     }
   }

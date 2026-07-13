@@ -1,3 +1,5 @@
+import type { BootstrapPayload } from '../../types'
+
 export interface ModelSetupDialogContent {
   brandAlt: string
   title: string
@@ -10,6 +12,12 @@ export interface ModelSetupDialogContent {
 }
 
 const DEFAULT_STATUS = '还没有可用模型，请先配置模型。'
+
+export function shouldShowModelSetupPrompt(
+  payload: BootstrapPayload | null | undefined,
+): boolean {
+  return payload?.modelConfig?.availability?.usable === false
+}
 
 export function buildModelSetupDialogContent(
   message?: string | null,

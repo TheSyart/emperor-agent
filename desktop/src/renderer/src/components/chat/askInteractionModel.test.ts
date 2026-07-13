@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { ControlInteraction, ControlQuestion } from '../../types'
-import {
+import * as askModel from './askInteractionModel'
+
+const {
   activeAskInteraction,
+  askFreeformPresentation,
   askHistoryPresentation,
   askQuestionCanContinue,
   askSubmitLabel,
+  isProfileOnboardingAsk,
   toPlainAskAnswers,
-} from './askInteractionModel'
+} = askModel
 
 const questions: ControlQuestion[] = [
   {
@@ -83,6 +87,19 @@ describe('ask interaction model', () => {
     )
     expect(askSubmitLabel(0, 2)).toBe('继续')
     expect(askSubmitLabel(1, 2)).toBe('提交')
+  })
+
+  it('keeps dynamic onboarding questions generic and does not infer validation from labels', () => {
+    const profile = ask({ meta: { profileOnboardingVersion: 2 } })
+
+    expect(isProfileOnboardingAsk(profile)).toBe(true)
+    expect(askQuestionCanContinue({ choice: '自定义称呼', freeform: '' })).toBe(
+      true,
+    )
+    expect(askFreeformPresentation(true)).toEqual({
+      label: '补充你的实际情况或其他说明（可选）',
+      placeholder: '可补充选项没有覆盖的偏好',
+    })
   })
 
   it('renders timeline ask interactions as compact history summaries', () => {

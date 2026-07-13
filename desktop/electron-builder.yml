@@ -17,6 +17,20 @@ extraResources:
     to: icon.png
   - from: ../templates
     to: runtime-defaults/templates
+    filter:
+      - SOUL.md
+      - TOOL.md
+      - agent/compact_prompt.md
+      - agent/identity.md
+      - agent/skills_section.md
+      - init/MEMORY.md
+      - init/USER.md
+      - subagents/dongchang_tanshi.md
+      - subagents/neiguan_yingzao.md
+      - subagents/shangbao_dianbu.md
+      - subagents/sili_suitang.md
+      - subagents/verification_reviewer.md
+      - subagents/xiaohuangmen.md
   - from: ../skills
     to: runtime-defaults/skills
   - from: ../assets/desktop-pet

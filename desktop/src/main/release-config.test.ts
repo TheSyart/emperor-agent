@@ -23,6 +23,7 @@ interface RuntimeManifestHook {
     files: Array<{ path: string; sha256: string; size: number }>
   }
   SOURCE_MAPPINGS: Array<{ source: string; target: string }>
+  TEMPLATE_RUNTIME_FILES: string[]
 }
 
 type AfterPackHook = (context: {
@@ -153,6 +154,22 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(generated.files.some((file) => file.path.endsWith('.py'))).toBe(
       false,
     )
+    expect(
+      generated.files.some(
+        (file) =>
+          file.path.endsWith('.local.md') ||
+          file.path === 'templates/USER.local.md',
+      ),
+    ).toBe(false)
+    expect(
+      generated.files
+        .filter((file) => file.path.startsWith('templates/'))
+        .map((file) => file.path.slice('templates/'.length)),
+    ).toEqual([...hook.TEMPLATE_RUNTIME_FILES].sort())
+    for (const template of hook.TEMPLATE_RUNTIME_FILES)
+      expect(
+        fs.readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8'),
+      ).toContain(`- ${template}`)
     expect(
       hook.SOURCE_MAPPINGS.some((mapping) =>
         mapping.source.includes('skills-catalog'),

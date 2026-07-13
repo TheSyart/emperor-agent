@@ -3,11 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SessionSidebar from './components/layout/SessionSidebar.vue'
 import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
-import OnboardingWizard from './components/onboarding/OnboardingWizard.vue'
-import {
-  shouldShowOnboarding,
-  type WizardModelSettings,
-} from './components/onboarding/onboardingModel'
+import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
 import { useBootstrap } from './composables/useBootstrap'
@@ -16,7 +12,6 @@ import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
 import { provideAppContext } from './composables/useAppContext'
-import { saveOnboardingModelConfig } from './api/model'
 
 const router = useRouter()
 const toast = ref('')
@@ -24,7 +19,6 @@ let toastTimer: number | undefined
 const hideAppSidebar = computed(
   () => router.currentRoute.value.meta?.hideAppSidebar === true,
 )
-const onboardingOpen = ref(false)
 const modelSetupPromptOpen = ref(false)
 const modelSetupDismissed = ref(false)
 
@@ -34,16 +28,6 @@ function showToast(message: string) {
   toastTimer = window.setTimeout(() => {
     toast.value = ''
   }, 2600)
-}
-
-function openOnboarding() {
-  modelSetupDismissed.value = true
-  modelSetupPromptOpen.value = false
-  onboardingOpen.value = true
-}
-
-function closeOnboarding() {
-  onboardingOpen.value = false
 }
 
 function closeModelSetupPrompt() {
@@ -63,7 +47,9 @@ const {
   mcpContent,
   loadBootstrap,
   refreshMemory,
-  saveModelConfig,
+  saveModelConfig: saveModelConfigBase,
+  startProfileInterview: startProfileInterviewBase,
+  skipProfileInterview: skipProfileInterviewBase,
   compactMemory,
   loadSkill,
   startNewSkill,
@@ -123,6 +109,35 @@ async function onSessionActivate(id: string) {
   restoreFromHistory(boot.value?.unarchivedHistory || [])
 }
 
+async function openProfileInterviewSession(sessionId: string | null) {
+  if (!sessionId) return
+  await sessionStore.load()
+  await onSessionActivate(sessionId)
+  await router.push('/').catch(() => undefined)
+}
+
+async function saveModelConfig(
+  config: Parameters<typeof saveModelConfigBase>[0],
+) {
+  const onboarding = await saveModelConfigBase(config)
+  if (onboarding?.started)
+    await openProfileInterviewSession(onboarding.state.sessionId)
+}
+
+async function startProfileInterview() {
+  const result = await startProfileInterviewBase()
+  if (result.started) {
+    await openProfileInterviewSession(result.state.sessionId)
+    return
+  }
+  if (result.state.status === 'completed') showToast('个人档案已完成')
+  else if (result.state.lastError) showToast(result.state.lastError)
+}
+
+async function skipProfileInterview() {
+  await skipProfileInterviewBase()
+}
+
 const tokensClient = useTokens(showToast)
 const {
   data: tokensData,
@@ -156,48 +171,23 @@ async function refreshAll() {
   }
 }
 
-async function completeOnboarding(settings: WizardModelSettings) {
-  const data = await saveOnboardingModelConfig(
-    settings as unknown as Record<string, unknown>,
-  )
-  if (boot.value) {
-    boot.value.modelConfig = data
-    boot.value.model = data.current?.model || boot.value.model
-    boot.value.provider = data.current?.provider || boot.value.provider
-    boot.value.providerLabel =
-      data.current?.providerLabel || boot.value.providerLabel
-  }
-  await loadBootstrap(false, sessionStore.backendSessionId())
-  if (!error.value) {
-    onboardingOpen.value = false
-    connectSocket()
-    showToast('模型配置已保存')
-  }
-}
-
 async function configureModelFromPrompt() {
   modelSetupDismissed.value = true
   modelSetupPromptOpen.value = false
-  await router.push('/model').catch(() => undefined)
-  openOnboarding()
+  await router.push('/settings/model').catch(() => undefined)
 }
 
 watch(
-  () =>
-    [
-      boot.value?.modelConfig?.availability?.usable,
-      onboardingOpen.value,
-    ] as const,
+  () => boot.value?.modelConfig?.availability?.usable,
   () => {
     if (!boot.value) return
-    const shouldPrompt = shouldShowOnboarding(boot.value)
+    const shouldPrompt = shouldShowModelSetupPrompt(boot.value)
     if (!shouldPrompt) {
       modelSetupPromptOpen.value = false
       modelSetupDismissed.value = false
       return
     }
-    if (!modelSetupDismissed.value && !onboardingOpen.value)
-      modelSetupPromptOpen.value = true
+    if (!modelSetupDismissed.value) modelSetupPromptOpen.value = true
   },
   { immediate: true },
 )
@@ -248,6 +238,8 @@ provideAppContext({
   refreshAll,
   refreshMemory,
   saveModelConfig,
+  startProfileInterview,
+  skipProfileInterview,
   compactMemory,
   loadSkill,
   startNewSkill,
@@ -276,7 +268,6 @@ provideAppContext({
   submitFromComposer,
   showToast,
   runSafely,
-  openOnboarding,
   tokens: tokensData,
   tokensLoading,
   loadTokens,
@@ -309,16 +300,10 @@ provideAppContext({
       </router-view>
     </div>
     <ModelSetupRequiredDialog
-      :open="modelSetupPromptOpen && !onboardingOpen"
+      :open="modelSetupPromptOpen"
       :message="modelSetupMessage"
       @close="closeModelSetupPrompt"
       @configure="configureModelFromPrompt"
-    />
-    <OnboardingWizard
-      :payload="boot"
-      :open="onboardingOpen"
-      :save="completeOnboarding"
-      @close="closeOnboarding"
     />
   </template>
 

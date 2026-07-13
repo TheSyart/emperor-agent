@@ -12,6 +12,41 @@ afterEach(() => {
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
+  it('applies live profile onboarding state changes to bootstrap', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+    runtime.connectSocket()
+
+    emitCoreEvent(listener, {
+      event: 'profile_onboarding_status_changed',
+      profile_onboarding: {
+        status: 'skipped',
+        sessionId: null,
+        interactionId: null,
+        attemptCount: 1,
+        lastError: null,
+        canStart: true,
+        canSkip: false,
+      },
+    })
+
+    expect(options.boot.value?.profileOnboarding).toMatchObject({
+      status: 'skipped',
+      canStart: true,
+      canSkip: false,
+    })
+  })
+
   it('does not attempt the retired WebSocket fallback when the Core IPC bridge is unavailable', () => {
     const showToast = vi.fn()
     const wsCtor = vi.fn()
@@ -1329,6 +1364,33 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.restoreFromHistory([])
 
     expect(runtime.sessionRuntimeStates['s9']).toMatchObject({ running: true })
+  })
+
+  it('does not restore hidden onboarding trigger messages from history fallback', () => {
+    const options = testOptions()
+    ;(options.boot.value as any).runtime.events = []
+    const runtime = useRuntime(options)
+
+    runtime.restoreFromHistory([
+      {
+        role: 'user',
+        content: '[PROFILE_ONBOARDING]',
+        source: 'onboarding',
+        ui_hidden: true,
+      },
+      {
+        role: 'assistant',
+        content: '初次见面，我先了解一下你的偏好。',
+        source: 'onboarding',
+      },
+    ])
+
+    expect(runtime.messages.value).toMatchObject([
+      {
+        role: 'assistant',
+        content: '初次见面，我先了解一下你的偏好。',
+      },
+    ])
   })
 
   it('merges streaming plan_draft_delta events into the final plan card', async () => {

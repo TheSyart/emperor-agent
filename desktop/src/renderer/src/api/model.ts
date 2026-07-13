@@ -1,15 +1,5 @@
-import type {
-  ModelConfigPayload,
-  ModelDiscoveryResult,
-  ModelTestResult,
-} from '../types'
+import type { ModelDiscoveryResult, ModelTestResult } from '../types'
 import { invokeCore } from './backend'
-
-export async function saveOnboardingModelConfig(
-  settings: Record<string, unknown>,
-): Promise<ModelConfigPayload> {
-  return invokeCore('model.saveOnboardingConfig', settings)
-}
 
 export async function testModelEntry(
   entryName: string,

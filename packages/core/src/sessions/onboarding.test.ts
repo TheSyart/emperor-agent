@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs'
@@ -12,10 +13,10 @@ import { AgentLoop } from '../agent/loop'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import {
+  ProfileOnboardingCoordinator,
   claimProfileOnboardingTrigger,
   ensureUserProfileFile,
   isUserProfileStillDefault,
-  onboardingTriggerContent,
 } from './onboarding'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
@@ -29,7 +30,8 @@ class AskingFakeProvider extends LLMProvider {
     this.calls.push(args)
     if (this.calls.length === 1) {
       return {
-        content: '',
+        content:
+          '初次见面。我会根据个人偏好模板逐步了解你，并按你的回答决定是否继续追问。',
         toolCalls: [
           {
             id: 'call_ask',
@@ -37,12 +39,12 @@ class AskingFakeProvider extends LLMProvider {
             arguments: {
               questions: [
                 {
-                  id: 'name',
-                  header: '称呼',
-                  question: '怎么称呼你？',
+                  id: 'dynamic_priority',
+                  header: '优先了解',
+                  question: '你希望我先了解哪一类偏好？',
                   options: [
-                    { id: 'a', label: '直接告诉你' },
-                    { id: 'b', label: '暂不透露' },
+                    { label: '沟通方式', description: '先确定回复习惯' },
+                    { label: '工作背景', description: '先了解工作上下文' },
                   ],
                 },
               ],
@@ -159,6 +161,171 @@ describe('isUserProfileStillDefault', () => {
   })
 })
 
+describe('ProfileOnboardingCoordinator', () => {
+  it('creates pending state for a fresh default profile and gates auto attempts per process', () => {
+    const stateRoot = tmp('emperor-onboarding-state-fresh-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+
+    expect(coordinator.payload()).toMatchObject({
+      status: 'pending',
+      attemptCount: 0,
+      canStart: true,
+      canSkip: true,
+    })
+    expect(coordinator.beginAttempt('chat-session', { manual: false })).toEqual(
+      expect.objectContaining({ started: true }),
+    )
+    coordinator.fail(new Error(`provider failed at ${stateRoot}/secret`))
+
+    expect(coordinator.payload()).toMatchObject({
+      status: 'pending',
+      attemptCount: 1,
+      lastError: 'provider failed at <stateRoot>/secret',
+    })
+    expect(coordinator.beginAttempt('chat-session', { manual: false })).toEqual(
+      expect.objectContaining({ started: false }),
+    )
+    expect(coordinator.beginAttempt('chat-session', { manual: true })).toEqual(
+      expect.objectContaining({ started: true }),
+    )
+  })
+
+  it('migrates the legacy latch without losing an unfinished default profile', () => {
+    const stateRoot = tmp('emperor-onboarding-state-legacy-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    writeFileSync(
+      join(stateRoot, 'onboarding.json'),
+      JSON.stringify({ profileInterviewTriggeredAt: 123 }),
+      'utf8',
+    )
+
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+
+    expect(coordinator.payload().status).toBe('pending')
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, 'onboarding.json'), 'utf8')),
+    ).toMatchObject({ version: 2, profile: { status: 'pending' } })
+  })
+
+  it('recovers stale in-progress state, defers cancellation, and persists skip', () => {
+    const stateRoot = tmp('emperor-onboarding-state-recovery-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    const first = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+    first.beginAttempt('chat-session', { manual: false })
+    first.attachInteraction('ask_profile')
+
+    const restarted = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+    restarted.reconcilePendingInteraction(null)
+    expect(restarted.payload()).toMatchObject({
+      status: 'pending',
+      sessionId: null,
+      interactionId: null,
+    })
+
+    restarted.beginAttempt('chat-session', { manual: true })
+    restarted.attachInteraction('ask_profile_2')
+    expect(restarted.defer('ask_profile_2').status).toBe('pending')
+    expect(restarted.skip().status).toBe('skipped')
+    expect(
+      new ProfileOnboardingCoordinator({
+        stateRoot,
+        templatesDir,
+        userFile,
+      }).payload().status,
+    ).toBe('skipped')
+  })
+
+  it('marks a patched or manually customized profile completed', () => {
+    const stateRoot = tmp('emperor-onboarding-state-complete-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+    coordinator.beginAttempt('chat-session', { manual: false })
+    writeFileSync(userFile, '# 用户档案\n\n- **称呼**：皇上\n', 'utf8')
+
+    expect(coordinator.reconcileProfile().status).toBe('completed')
+    expect(coordinator.payload()).toMatchObject({
+      status: 'completed',
+      sessionId: null,
+      interactionId: null,
+      canStart: false,
+      canSkip: false,
+    })
+    expect(coordinator.defer('ask_unrelated').status).toBe('completed')
+  })
+
+  it('updates an untouched profile when the seed revision changes without losing skip intent', () => {
+    const stateRoot = tmp('emperor-onboarding-state-seed-revision-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    const first = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+    first.skip()
+    const nextSeed = '# 用户档案\n\n- **称呼**：未设置\n- **语言**：中文\n'
+    writeFileSync(join(templatesDir, 'init', 'USER.md'), nextSeed, 'utf8')
+
+    const upgraded = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+
+    expect(upgraded.payload().status).toBe('skipped')
+    expect(readFileSync(userFile, 'utf8')).toBe(nextSeed)
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, 'onboarding.json'), 'utf8'))
+        .profile.seedHash,
+    ).toBe(upgraded.seedHash)
+  })
+
+  it('preserves a corrupt state file and derives status from the current profile', () => {
+    const stateRoot = tmp('emperor-onboarding-state-corrupt-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const userFile = ensureUserProfileFile(stateRoot, templatesDir)
+    writeFileSync(join(stateRoot, 'onboarding.json'), '{not-json', 'utf8')
+
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+      userFile,
+    })
+
+    expect(coordinator.payload().status).toBe('pending')
+    expect(
+      readdirSync(stateRoot).some((name) =>
+        name.startsWith('onboarding.json.corrupt-'),
+      ),
+    ).toBe(true)
+  })
+})
+
 describe('claimProfileOnboardingTrigger', () => {
   it('fires exactly once on a genuine first run with a configured model', () => {
     const stateRoot = tmp('emperor-onboarding-claim-fresh-')
@@ -224,18 +391,8 @@ describe('claimProfileOnboardingTrigger', () => {
   })
 })
 
-describe('onboardingTriggerContent', () => {
-  it('carries the ONBOARDING_TRIGGER marker and instructs ask_user + save_user_profile', () => {
-    const content = onboardingTriggerContent()
-
-    expect(content).toContain('[ONBOARDING_TRIGGER]')
-    expect(content).toContain('ask_user')
-    expect(content).toContain('save_user_profile')
-  })
-})
-
 describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-06)', () => {
-  it('fires the onboarding turn on a genuine first run and the model can reach ask_user/save_user_profile', async () => {
+  it('lets the Agent derive its first Ask from the profile template without a visible user message', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-fresh-'))
     const provider = new AskingFakeProvider()
     const events: Array<Record<string, unknown>> = []
@@ -251,23 +408,71 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
       },
     })
 
-    expect(provider.calls.length).toBeGreaterThan(0)
-    const userMessageEvent = events.find(
-      (event) => event.event === 'user_message',
+    expect(provider.calls).toHaveLength(1)
+    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
+      '[PROFILE_ONBOARDING]',
     )
-    expect(userMessageEvent).toMatchObject({
+    expect(JSON.stringify(provider.calls[0]?.messages)).toContain('## 基本信息')
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' &&
+          event.source === 'onboarding' &&
+          event.ui_hidden !== true,
+      ),
+    ).toBeUndefined()
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' && event.source === 'onboarding',
+      ),
+    ).toMatchObject({ ui_hidden: true, content: '' })
+    expect(
+      events.find((event) => event.event === 'message_delta'),
+    ).toMatchObject({
       source: 'onboarding',
-      content: expect.stringContaining('初次见面'),
+      delta: expect.stringContaining('根据个人偏好模板'),
     })
     const askEvent = events.find((event) => event.event === 'ask_request')
-    expect(askEvent).toBeTruthy()
-    expect(loop.registry.get('save_user_profile')).toBeTruthy()
+    expect(askEvent).toMatchObject({
+      source: 'onboarding',
+      interaction: {
+        questions: expect.arrayContaining([
+          expect.objectContaining({ id: 'dynamic_priority' }),
+        ]),
+        meta: { profileOnboardingVersion: 2 },
+      },
+    })
+    expect(
+      (askEvent?.interaction as { questions?: unknown[] }).questions,
+    ).toHaveLength(1)
+    expect(events.find((event) => event.event === 'turn_paused')).toMatchObject(
+      {
+        source: 'onboarding',
+      },
+    )
+    const rows = readFileSync(loop.activeMemoryStore.historyFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(loop.history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringContaining('根据个人偏好模板'),
+        }),
+      ]),
+    )
+    expect(rows.find((row) => row.role === 'user')).toMatchObject({
+      source: 'onboarding',
+      ui_hidden: true,
+    })
     expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(true)
 
     await loop.close()
   })
 
-  it('does not fire when the model is not configured yet, and does not latch (retries next boot)', async () => {
+  it('does not fire when the model is not configured yet and persists pending for a later retry', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-no-model-'))
     const events: Array<Record<string, unknown>> = []
 
@@ -288,7 +493,11 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
           event.event === 'user_message' && event.source === 'onboarding',
       ),
     ).toBeUndefined()
-    expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(false)
+    expect(
+      JSON.parse(
+        readFileSync(join(root, '.emperor', 'onboarding.json'), 'utf8'),
+      ),
+    ).toMatchObject({ version: 2, profile: { status: 'pending' } })
 
     await loop.close()
   })
@@ -351,8 +560,66 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
           event.event === 'user_message' && event.source === 'onboarding',
       ),
     ).toBeUndefined()
-    expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(false)
+    expect(
+      JSON.parse(
+        readFileSync(join(root, '.emperor', 'onboarding.json'), 'utf8'),
+      ),
+    ).toMatchObject({ version: 2, profile: { status: 'pending' } })
 
     await loop.close()
+  })
+
+  it('supersedes a matching legacy model-generated onboarding Ask on restart', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-legacy-ask-'))
+    const stateRoot = join(root, '.emperor')
+    const first = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new AskingFakeProvider()),
+      enableFirstRunOnboarding: true,
+    })
+    const oldPending = first.controlManager.payload().pending as {
+      id: string
+    }
+    await first.close()
+
+    const controlPath = join(stateRoot, 'control', 'state.json')
+    const control = JSON.parse(readFileSync(controlPath, 'utf8')) as {
+      pending: { meta: Record<string, unknown> }
+    }
+    control.pending.meta = {}
+    writeFileSync(controlPath, `${JSON.stringify(control, null, 2)}\n`, 'utf8')
+    const events: Array<Record<string, unknown>> = []
+
+    const restarted = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new AskingFakeProvider()),
+      enableFirstRunOnboarding: true,
+      eventSink: async (event) => {
+        events.push(event)
+      },
+    })
+
+    const pending = restarted.controlManager.payload().pending as {
+      id: string
+      questions: unknown[]
+      meta: Record<string, unknown>
+    }
+    expect(pending.id).not.toBe(oldPending.id)
+    expect(pending.questions).toHaveLength(1)
+    expect(pending.meta).toMatchObject({ profileOnboardingVersion: 2 })
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'interaction_cancelled' &&
+          (event.interaction as { id?: string } | undefined)?.id ===
+            oldPending.id,
+      ),
+    ).toBeTruthy()
+
+    await restarted.close()
   })
 })

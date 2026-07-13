@@ -25,6 +25,11 @@ export interface AskHistoryPresentation {
   answers: AskHistoryAnswer[]
 }
 
+export interface AskFreeformPresentation {
+  label: string
+  placeholder: string
+}
+
 export function activeAskInteraction(
   control?: ControlPayload | null,
 ): ControlInteraction | null {
@@ -43,9 +48,30 @@ export function ensureAskDraft(
 }
 
 export function askQuestionCanContinue(answer?: AskAnswerDraft): boolean {
-  return Boolean(
-    (answer?.choice || '').trim() || (answer?.freeform || '').trim(),
-  )
+  const choice = (answer?.choice || '').trim()
+  const freeform = (answer?.freeform || '').trim()
+  return Boolean(choice || freeform)
+}
+
+export function isProfileOnboardingAsk(
+  interaction: ControlInteraction,
+): boolean {
+  return Number(interaction.meta?.profileOnboardingVersion) === 2
+}
+
+export function askFreeformPresentation(
+  profileOnboarding: boolean,
+): AskFreeformPresentation {
+  if (!profileOnboarding) {
+    return {
+      label: '否，请告知 Agent 如何调整',
+      placeholder: '补充说明，或用这条内容替代上面的选项',
+    }
+  }
+  return {
+    label: '补充你的实际情况或其他说明（可选）',
+    placeholder: '可补充选项没有覆盖的偏好',
+  }
 }
 
 export function askSubmitLabel(index: number, total: number): string {

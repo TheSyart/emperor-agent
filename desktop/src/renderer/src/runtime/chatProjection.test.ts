@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { compactReplayEvents } from '@emperor/core'
-import { projectChatEvents } from './chatProjection'
+import {
+  applyChatProjectionEvent,
+  createProjectionRuntime,
+  emptyChatProjection,
+  projectChatEvents,
+} from './chatProjection'
 import { projectAssistantFlow } from '../components/chat/assistantFlowProjection'
-import type { AssistantMessage } from '../types'
+import type { AssistantMessage, WsEvent } from '../types'
 
 describe('chatProjection', () => {
   it('rebuilds text, thought, tool, and control segments from runtime replay', () => {
@@ -554,6 +559,99 @@ describe('chatProjection', () => {
       'control',
       'text',
     ])
+  })
+
+  it('keeps dynamic onboarding follow-up rounds in one Agent flow', () => {
+    const state = emptyChatProjection()
+    const runtime = createProjectionRuntime()
+    const events: WsEvent[] = [
+      {
+        event: 'message_delta',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'onboarding_start',
+        source: 'onboarding',
+        delta: '初次见面。',
+      },
+      {
+        event: 'ask_request',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'onboarding_start',
+        interaction: {
+          id: 'ask_profile',
+          kind: 'ask',
+          status: 'waiting',
+          meta: { profileOnboardingVersion: 2 },
+        },
+      },
+      {
+        event: 'turn_paused',
+        seq: 3,
+        session_id: 's1',
+        turn_id: 'onboarding_start',
+        interaction: { id: 'ask_profile', kind: 'ask', status: 'waiting' },
+      },
+      {
+        event: 'ask_answered',
+        seq: 4,
+        session_id: 's1',
+        resume_model: true,
+        interaction: { id: 'ask_profile', kind: 'ask', status: 'answered' },
+      },
+      {
+        event: 'message_delta',
+        seq: 5,
+        session_id: 's1',
+        turn_id: 'onboarding_followup',
+        source: 'control',
+        delta: '我再确认一下协作方式。',
+      },
+      {
+        event: 'ask_request',
+        seq: 6,
+        session_id: 's1',
+        turn_id: 'onboarding_followup',
+        interaction: {
+          id: 'ask_profile_followup',
+          kind: 'ask',
+          status: 'waiting',
+          meta: { profileOnboardingVersion: 2 },
+        },
+      },
+      {
+        event: 'turn_paused',
+        seq: 7,
+        session_id: 's1',
+        turn_id: 'onboarding_followup',
+        interaction: {
+          id: 'ask_profile_followup',
+          kind: 'ask',
+          status: 'waiting',
+        },
+      },
+    ]
+
+    for (const event of events)
+      applyChatProjectionEvent(state, event, runtime, { sessionId: 's1' })
+
+    const assistants = state.messages.filter(
+      (message) => message.role === 'assistant',
+    )
+    expect(assistants).toMatchObject([
+      { content: '初次见面。', streaming: false },
+      { content: '我再确认一下协作方式。', streaming: false },
+    ])
+    expect(
+      assistants.flatMap((assistant) =>
+        (assistant as AssistantMessage).segments.filter(
+          (segment) => segment.type === 'ask',
+        ),
+      ),
+    ).toHaveLength(2)
+    expect(
+      state.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(0)
   })
 
   // P1-5 golden：读取侧压缩后的回放流投影结果必须与原始流完全一致

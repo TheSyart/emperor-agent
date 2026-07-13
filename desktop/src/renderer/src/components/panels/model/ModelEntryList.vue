@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModelEntry } from '../../../types'
-import { modelIcons } from '../../../icons'
+import { actionIcons, modelIcons } from '../../../icons'
 
 defineProps<{
   entries: ModelEntry[]
@@ -22,7 +22,10 @@ const emit = defineEmits<{
         <span>模型条目</span>
         <small>{{ entries.length }} 条</small>
       </div>
-      <button class="tool-button compact" @click="emit('add')">+ 添加</button>
+      <button class="tool-button compact" @click="emit('add')">
+        <component :is="actionIcons.new" :size="14" />
+        <span>添加</span>
+      </button>
     </header>
     <div class="entry-list">
       <div

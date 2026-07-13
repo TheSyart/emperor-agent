@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiscoveredModel, ModelEntry } from '../../../types'
 import {
   applyModelSelection,
+  computeModelPickerPlacement,
   filterModelOptions,
   normalizeModelOptions,
 } from './modelPickerModel'
@@ -69,6 +70,40 @@ describe('model picker model', () => {
     ).toEqual({
       ...entry,
       secondaryModelId: 'deepseek-reasoner',
+    })
+  })
+
+  it('anchors a short popover immediately above the input using its rendered height', () => {
+    expect(
+      computeModelPickerPlacement({
+        anchor: { left: 420, top: 690, right: 720, bottom: 730, width: 300 },
+        contentHeight: 88,
+        viewportWidth: 1024,
+        viewportHeight: 768,
+      }),
+    ).toMatchObject({
+      placement: 'top',
+      top: 596,
+      left: 420,
+      width: 300,
+      maxHeight: 88,
+    })
+  })
+
+  it('keeps the popover adjacent while constraining it to narrow viewport space', () => {
+    expect(
+      computeModelPickerPlacement({
+        anchor: { left: -4, top: 300, right: 396, bottom: 340, width: 400 },
+        contentHeight: 420,
+        viewportWidth: 390,
+        viewportHeight: 500,
+      }),
+    ).toEqual({
+      placement: 'top',
+      top: 34,
+      left: 8,
+      width: 374,
+      maxHeight: 260,
     })
   })
 })

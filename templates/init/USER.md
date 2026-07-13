@@ -2,7 +2,7 @@
 
 仓库初始化版用户档案。此文件应保持通用、可提交，不写入真实个人偏好、身份信息、会话记忆或私密上下文。
 
-本地运行时会优先使用 `templates/USER.local.md`。首次启动时若本地文件不存在，会从此模板复制生成。
+首次启动时，Core 会从此模板播种全局私有 `stateRoot/memory/profile/USER.local.md`。运行时通过专用上下文和配置接口读取或更新，不应从项目 workspace 探测该文件。
 
 ## 基本信息
 
@@ -53,4 +53,4 @@
 
 ---
 
-_本文件是仓库默认模板。个人化内容请写入 `templates/USER.local.md`，不要提交到 GitHub。_
+_本文件是仓库默认模板。个人化内容只写入全局私有 `stateRoot/memory/profile/USER.local.md`，不要提交到 GitHub。_

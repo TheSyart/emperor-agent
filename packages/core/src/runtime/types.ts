@@ -237,8 +237,17 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         partial?: boolean
       }
     | { event: 'control_mode_update'; control?: RuntimeEventPayload }
+    | {
+        event: 'profile_onboarding_status_changed'
+        profile_onboarding?: RuntimeEventPayload
+        reason?: string
+      }
     | { event: 'ask_request'; interaction?: RuntimeEventPayload }
-    | { event: 'ask_answered'; interaction?: RuntimeEventPayload }
+    | {
+        event: 'ask_answered'
+        interaction?: RuntimeEventPayload
+        resume_model?: boolean
+      }
     | { event: 'plan_draft'; interaction?: RuntimeEventPayload }
     | {
         event: 'plan_draft_delta'

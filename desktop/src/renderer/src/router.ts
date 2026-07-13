@@ -15,9 +15,7 @@ export const routeRecords: RouteRecordRaw[] = [
   },
   {
     path: '/model',
-    name: 'model',
-    component: () => import('./views/ModelView.vue'),
-    meta: { label: 'Model', hint: '模型厂家' },
+    redirect: '/settings/model',
   },
   {
     path: '/tokens',

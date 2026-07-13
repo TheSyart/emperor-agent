@@ -517,31 +517,6 @@
   @apply rounded-2xl border border-line/70 bg-paper/60 px-3 py-2 font-mono text-xs leading-5 text-ink shadow-insetPaper;
 }
 
-.onboarding-advanced {
-  @apply rounded-[1rem] border border-line/70 bg-paper2/35 p-3 shadow-insetPaper;
-}
-
-.onboarding-advanced[open] {
-  @apply bg-paper2/55;
-}
-
-.onboarding-advanced summary {
-  @apply flex cursor-pointer items-baseline justify-between gap-3 font-display text-sm font-bold text-ink;
-  list-style: none;
-}
-
-.onboarding-advanced summary::-webkit-details-marker {
-  display: none;
-}
-
-.onboarding-advanced summary small {
-  @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-muted;
-}
-
-.onboarding-advanced-grid {
-  @apply mt-3;
-}
-
 /* ── ModelPanel v3: 多条目布局 ── */
 .model-panel-shell {
   @apply relative;
@@ -2247,71 +2222,6 @@
   @apply fixed inset-0 z-[70] grid place-items-center bg-black/55 p-4 backdrop-blur-sm;
 }
 
-.onboarding-shell {
-  @apply flex max-h-[min(46rem,calc(100vh-2rem))] w-[min(44rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto rounded-lg border border-line/70 bg-paper p-4 shadow-2xl;
-}
-
-.onboarding-head {
-  @apply flex items-center gap-3 border-b border-line/60 pb-3;
-}
-
-.onboarding-brand {
-  @apply grid size-10 shrink-0 place-items-center rounded-lg border border-line/70 bg-paper2 text-seal;
-}
-
-.onboarding-head h2 {
-  @apply text-base font-semibold text-ink;
-}
-
-.onboarding-head p {
-  @apply mt-0.5 font-mono text-[11px] text-muted;
-}
-
-.onboarding-grid {
-  @apply grid grid-cols-2 gap-3;
-}
-
-.onboarding-grid .form-row {
-  @apply flex min-w-0 flex-col gap-1.5;
-}
-
-.onboarding-grid .form-label {
-  @apply flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted;
-}
-
-.onboarding-grid .form-label small {
-  @apply truncate normal-case tracking-normal text-muted;
-}
-
-.onboarding-grid .form-input,
-.onboarding-grid .form-select {
-  @apply min-h-10 rounded-lg border-line/70 bg-paper2/50 px-3 py-2 text-sm text-ink shadow-none;
-}
-
-.onboarding-grid .form-select option {
-  @apply bg-paper text-ink;
-}
-
-.onboarding-note {
-  @apply rounded-lg border border-line/60 bg-paper2/45 px-3 py-2 text-sm text-muted;
-}
-
-.onboarding-error {
-  @apply rounded-lg border border-seal/35 bg-seal/10 px-3 py-2 text-sm leading-6 text-seal;
-}
-
-.onboarding-actions {
-  @apply flex items-center justify-between gap-3 border-t border-line/60 pt-3;
-}
-
-.onboarding-actions > span {
-  @apply min-w-0 text-xs text-muted;
-}
-
-.onboarding-actions .tool-button {
-  @apply shrink-0;
-}
-
 .model-setup-backdrop {
   background: rgb(0 0 0 / 0.46);
   backdrop-filter: blur(6px);
@@ -2488,29 +2398,7 @@
   object-position: 58% 50%;
 }
 
-.spin {
-  animation: onboarding-spin 0.9s linear infinite;
-}
-
-@keyframes onboarding-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (max-width: 760px) {
-  .onboarding-grid {
-    @apply grid-cols-1;
-  }
-
-  .onboarding-grid .span-2 {
-    @apply col-span-1;
-  }
-
-  .onboarding-actions {
-    @apply flex-col items-stretch;
-  }
-
   .model-setup-modal {
     grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;

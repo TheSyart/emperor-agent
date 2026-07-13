@@ -15,7 +15,7 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(90)
+    expect(coreOperationKeys()).toHaveLength(93)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
   })
@@ -31,6 +31,17 @@ describe('Core operation registry', () => {
       CORE_OPERATION_REGISTRY.bootstrap.args.parse([{ sessionId: 's1' }]),
     ).toEqual([{ sessionId: 's1' }])
     expect(() => CORE_OPERATION_REGISTRY.bootstrap.args.parse(['s1'])).toThrow()
+
+    expect(
+      CORE_OPERATION_REGISTRY['onboarding.startProfileInterview'].args.parse(
+        [],
+      ),
+    ).toEqual([])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['onboarding.startProfileInterview'].args.parse([
+        {},
+      ]),
+    ).toThrow()
 
     expect(
       CORE_OPERATION_REGISTRY['sessions.rename'].args.parse([

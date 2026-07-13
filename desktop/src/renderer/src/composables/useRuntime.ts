@@ -752,7 +752,11 @@ export function useRuntime(options: {
       return
     }
     messages.value = history
-      .filter((item) => item.role === 'user' || item.role === 'assistant')
+      .filter(
+        (item) =>
+          !item.ui_hidden &&
+          (item.role === 'user' || item.role === 'assistant'),
+      )
       .map((item) => {
         if (item.role === 'user') {
           const meta = schedulerMessageMeta(
@@ -923,6 +927,12 @@ export function useRuntime(options: {
     if (data.event === 'control_mode_update') {
       if (options.boot.value && data.control)
         options.boot.value.control = data.control
+      return
+    }
+
+    if (data.event === 'profile_onboarding_status_changed') {
+      if (options.boot.value && data.profile_onboarding)
+        options.boot.value.profileOnboarding = data.profile_onboarding
       return
     }
 

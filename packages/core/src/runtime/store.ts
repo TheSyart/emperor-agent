@@ -113,6 +113,7 @@ const INDEX_FORCE_WRITE_EVENTS = new Set([
   'environment_install_completed',
   'environment_install_failed',
   'environment_changed',
+  'profile_onboarding_status_changed',
 ])
 
 export class RuntimeEventStore {

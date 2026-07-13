@@ -4,9 +4,11 @@ import type { ControlInteraction, ControlQuestion } from '../../types'
 import { useAppContext } from '../../composables/useAppContext'
 import {
   allAskQuestionsAnswered,
+  askFreeformPresentation,
   askQuestionCanContinue,
   askSubmitLabel,
   ensureAskDraft,
+  isProfileOnboardingAsk,
   toPlainAskAnswers,
   type AskAnswerDrafts,
 } from './askInteractionModel'
@@ -26,15 +28,28 @@ const currentDraft = computed(() =>
     ? ensureAskDraft(drafts, currentQuestion.value.id)
     : { choice: '', freeform: '' },
 )
-const canContinue = computed(() => askQuestionCanContinue(currentDraft.value))
-const canSubmit = computed(() =>
-  allAskQuestionsAnswered(questions.value, drafts),
-)
 const submitLabel = computed(() =>
   askSubmitLabel(currentIndex.value, total.value),
 )
 const progressLabel = computed(
   () => `${Math.min(currentIndex.value + 1, total.value)} of ${total.value}`,
+)
+const isProfileOnboarding = computed(
+  () =>
+    isProfileOnboardingAsk(props.interaction) ||
+    ctx.boot.value?.profileOnboarding?.interactionId === props.interaction.id,
+)
+const canContinue = computed(() => askQuestionCanContinue(currentDraft.value))
+const canSubmit = computed(() =>
+  allAskQuestionsAnswered(questions.value, drafts),
+)
+const freeformPresentation = computed(() =>
+  currentQuestion.value
+    ? askFreeformPresentation(isProfileOnboarding.value)
+    : {
+        label: '补充你的实际情况或其他说明（可选）',
+        placeholder: '',
+      },
 )
 
 watch(
@@ -94,6 +109,10 @@ function submitOrNext() {
 function cancel() {
   ctx.cancelInteraction(props.interaction.id)
 }
+
+function skipPermanently() {
+  void ctx.runSafely(() => ctx.skipProfileInterview())
+}
 </script>
 
 <template>
@@ -141,18 +160,26 @@ function cancel() {
     </div>
 
     <label class="active-ask-freeform">
-      <span>否，请告知 Agent 如何调整</span>
+      <span>{{ freeformPresentation.label }}</span>
       <textarea
         v-model="currentDraft.freeform"
         rows="2"
-        placeholder="补充说明，或用这条内容替代上面的选项"
+        :placeholder="freeformPresentation.placeholder"
       />
     </label>
 
     <footer class="active-ask-actions">
       <button class="active-ask-ignore" type="button" @click="cancel">
-        <span>忽略</span>
+        <span>{{ isProfileOnboarding ? '稍后再说' : '忽略' }}</span>
         <kbd>ESC</kbd>
+      </button>
+      <button
+        v-if="isProfileOnboarding"
+        class="active-ask-ignore"
+        type="button"
+        @click="skipPermanently"
+      >
+        不再提醒
       </button>
       <button
         class="active-ask-submit"
