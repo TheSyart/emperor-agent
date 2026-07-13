@@ -1,20 +1,43 @@
 {
   "schema_version": 1,
   "plan_id": "PLAN-EA-XPLAT-002",
-  "plan_version": "2.0",
+  "plan_version": "2.1",
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-13T10:45:53+08:00",
+  "updated_at": "2026-07-13T11:34:05+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
-  "total_tasks": 22,
+  "total_tasks": 25,
   "completed": 17,
-  "rounds": 25,
+  "rounds": 26,
   "planning_receipt": {
     "status": "executing",
     "implementation_started": true,
-    "statement": "Local make check and generic macOS/Windows/Ubuntu CI are green on da954aa9; formal platform Release receipts remain blocked by signing credentials and dedicated release gates."
+    "statement": "v2.1 adds an independent Unsigned Preview milestone with three pending tasks. Existing 17 done and five Signed Stable blocked tasks are preserved; no workflow, tag or Release was created by this planning revision."
+  },
+  "milestones": {
+    "unsigned_preview": {
+      "title": "公开未签名预览版",
+      "target_release": "v0.1.0-preview.1",
+      "required_tasks": [
+        "PKG-017",
+        "PREVIEW-WF-023",
+        "PREVIEW-PUB-024",
+        "PREVIEW-QA-025"
+      ]
+    },
+    "trusted_stable": {
+      "title": "三平台可信稳定版",
+      "target_release": "v0.1.0",
+      "required_tasks": [
+        "REL-MAC-018",
+        "REL-WIN-019",
+        "REL-LNX-020",
+        "REL-AGG-021",
+        "QA-022"
+      ]
+    }
   },
   "tasks": {
     "BASE-001": {
@@ -63,7 +86,7 @@
     },
     "RSC-005": {
       "status": "done",
-      "title": "直接读取签名 runtime defaults",
+      "title": "直接读取只读 runtime defaults 并校验 manifest",
       "depends_on": ["IPC-004"],
       "attempts": 1,
       "started_at": null,
@@ -209,6 +232,39 @@
       "receipt": "Fresh npm --prefix desktop run package:verify passed on macOS arm64 with minimal-PATH packaged smoke.",
       "notes": "Unsigned local package is accepted only as a packaged-runtime test artifact."
     },
+    "PREVIEW-WF-023": {
+      "status": "pending",
+      "title": "建立未签名 Preview 构建通道",
+      "depends_on": ["PKG-017"],
+      "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
+      "notes": "Must isolate preview/stable/internal tags, workflows, artifacts and receipts; signing credentials are not a dependency."
+    },
+    "PREVIEW-PUB-024": {
+      "status": "pending",
+      "title": "聚合并原子发布 GitHub Pre-release",
+      "depends_on": ["PREVIEW-WF-023"],
+      "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
+      "notes": "Must publish only an explicitly unsigned GitHub Pre-release with checksums, SBOM, attestations and risk disclosure."
+    },
+    "PREVIEW-QA-025": {
+      "status": "pending",
+      "title": "发布并验收首个未签名预览版",
+      "depends_on": ["PREVIEW-PUB-024"],
+      "attempts": 0,
+      "started_at": null,
+      "completed_at": null,
+      "commit": null,
+      "receipt": null,
+      "notes": "Requires a real public v0.1.0-preview.1 release and platform receipts; planning or local packages cannot satisfy it."
+    },
     "REL-MAC-018": {
       "status": "blocked",
       "title": "macOS 双架构签名、公证与安装验收",
@@ -218,7 +274,7 @@
       "completed_at": null,
       "commit": "fe745bb4",
       "receipt": null,
-      "notes": "Candidate configuration and static verifier are implemented. Generic macOS CI run 29220027666 passed tests, typecheck, lint, build and package dry run on da954aa9. Developer ID and App Store Connect credentials remain absent, so no signed/notarized arm64/x64 receipts exist and the formal gate cannot run."
+      "notes": "Candidate configuration and static verifier are implemented. Generic macOS CI run 29220027666 passed tests, typecheck, lint, build and package dry run on da954aa9. Developer ID and App Store Connect credentials remain absent, so no signed/notarized arm64/x64 receipts exist and the Stable gate cannot run; this does not block Unsigned Preview."
     },
     "REL-WIN-019": {
       "status": "blocked",
@@ -229,7 +285,7 @@
       "completed_at": null,
       "commit": "e70faa95",
       "receipt": null,
-      "notes": "Windows release config, isolated smoke environment, windows-2022 candidate workflow and Authenticode install/smoke/uninstall verifier are implemented. Generic Windows CI run 29220027666 passed all tests, typecheck, lint, build and package dry run after native path and ASAR validation fixes through da954aa9. Azure signing credentials remain absent; the final receipt stays blocked until the installer and installed binaries have the expected publisher on windows-2022."
+      "notes": "Windows release config, isolated smoke environment, windows-2022 candidate workflow and Authenticode install/smoke/uninstall verifier are implemented. Generic Windows CI run 29220027666 passed all tests, typecheck, lint, build and package dry run after native path and ASAR validation fixes through da954aa9. Azure signing credentials remain absent; the Stable receipt stays blocked until the installer and installed binaries have the expected publisher on windows-2022, without blocking Unsigned Preview."
     },
     "REL-LNX-020": {
       "status": "blocked",
@@ -262,7 +318,7 @@
       "completed_at": null,
       "commit": "932fe41a",
       "receipt": null,
-      "notes": "README, AGENTS, migration status, trusted Release runbook and ToolCatalog review checklist are synchronized in 932fe41a. Fresh local make check passed Core 903/Desktop 310 with format, parity, test typecheck, zero-warning lint and production build; prior Playwright screenshots passed 33/33. GitHub CI run 29220027666 passed macOS, Windows and Ubuntu tests/build/package dry runs. QA remains blocked at 17/22 until signed platform receipts and aggregate publication verification exist."
+      "notes": "README, AGENTS, migration status, trusted Release runbook and ToolCatalog review checklist are synchronized in 932fe41a. Fresh local make check passed Core 903/Desktop 310 with format, parity, test typecheck, zero-warning lint and production build; prior Playwright screenshots passed 33/33. GitHub CI run 29220027666 passed macOS, Windows and Ubuntu tests/build/package dry runs. Stable QA remains blocked at 17/25 until signed platform receipts and aggregate publication verification exist; Preview has its own QA task."
     }
   }
 }

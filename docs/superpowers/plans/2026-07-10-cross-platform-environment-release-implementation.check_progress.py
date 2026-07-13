@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ REQUIRED_TASK_FIELDS = {
     "receipt",
     "notes",
 }
+REQUIRED_MILESTONE_FIELDS = {"title", "target_release", "required_tasks"}
 
 
 def fail(message: str, code: int = 2) -> int:
@@ -27,7 +29,17 @@ def fail(message: str, code: int = 2) -> int:
     return code
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Validate PLAN-EA-XPLAT-002 progress")
+    parser.add_argument(
+        "--milestone",
+        help="validate one milestone instead of requiring every plan task to be done",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
     if not PROGRESS.exists():
         return fail(f"missing progress file: {PROGRESS}")
 
@@ -50,8 +62,29 @@ def main() -> int:
         return fail("unsupported progress schema_version")
     if data.get("plan_id") != "PLAN-EA-XPLAT-002":
         return fail("unexpected plan_id")
-    if data.get("plan_version") != "2.0":
+    if data.get("plan_version") != "2.1":
         return fail("unexpected plan_version")
+
+    milestones = data.get("milestones")
+    if not isinstance(milestones, dict) or not milestones:
+        return fail("progress milestones must be a non-empty object")
+
+    for milestone_id, milestone in sorted(milestones.items()):
+        if not isinstance(milestone, dict):
+            return fail(f"milestone {milestone_id} must be an object")
+        missing_fields = sorted(REQUIRED_MILESTONE_FIELDS - milestone.keys())
+        if missing_fields:
+            return fail(
+                f"milestone {milestone_id} missing fields: {', '.join(missing_fields)}"
+            )
+        required_tasks = milestone.get("required_tasks")
+        if not isinstance(required_tasks, list) or not required_tasks:
+            return fail(f"milestone {milestone_id} required_tasks must be an array")
+        unknown = [task_id for task_id in required_tasks if task_id not in tasks]
+        if unknown:
+            return fail(
+                f"milestone {milestone_id} has unknown tasks: {', '.join(unknown)}"
+            )
 
     invalid_statuses: list[str] = []
     unknown_dependencies: list[str] = []
@@ -139,6 +172,25 @@ def main() -> int:
 
     plan_id = data.get("plan_id", "unknown plan")
     print(f"{len(done)}/{len(tasks)} tasks complete for {plan_id}")
+
+    if args.milestone:
+        milestone = milestones.get(args.milestone)
+        if milestone is None:
+            return fail(f"unknown milestone: {args.milestone}")
+        required_tasks = milestone["required_tasks"]
+        incomplete = [
+            task_id
+            for task_id in required_tasks
+            if tasks[task_id].get("status") != "done"
+        ]
+        print(
+            f"milestone {args.milestone}: "
+            f"{len(required_tasks) - len(incomplete)}/{len(required_tasks)} complete"
+        )
+        if incomplete:
+            print("milestone pending: " + ", ".join(incomplete))
+            return 1
+        return 0
 
     if pending:
         print("pending: " + ", ".join(pending))
