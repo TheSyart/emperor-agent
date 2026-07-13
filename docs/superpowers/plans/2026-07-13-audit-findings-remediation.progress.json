@@ -1,0 +1,39 @@
+{
+  "started_at": "2026-07-13T00:00:00+08:00",
+  "updated_at": "2026-07-13T00:00:00+08:00",
+  "total_tasks": 6,
+  "completed": 0,
+  "rounds": 0,
+  "tasks": {
+    "SEC-001": {
+      "title": "Electron trust boundary",
+      "module": "desktop",
+      "status": "pending"
+    },
+    "SEC-002": {
+      "title": "AUTO command policy",
+      "module": "core-permissions",
+      "status": "pending"
+    },
+    "SEC-003": {
+      "title": "Scheduler at-most-once",
+      "module": "core-scheduler",
+      "status": "pending"
+    },
+    "SEC-004": {
+      "title": "Public HTTP boundary",
+      "module": "core-network",
+      "status": "pending"
+    },
+    "SEC-005": {
+      "title": "Config recovery",
+      "module": "core-config",
+      "status": "pending"
+    },
+    "SEC-006": {
+      "title": "Full receipts and audit closure",
+      "module": "repository",
+      "status": "pending"
+    }
+  }
+}
