@@ -13,8 +13,7 @@ module.exports = {
   },
   linux: {
     target: ['AppImage', 'deb'],
-    artifactName:
-      'Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-${arch}.${ext}',
+    artifactName: 'Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.${ext}',
     maintainer: 'Emperor Agent maintainers',
     vendor: 'Emperor Agent',
   },

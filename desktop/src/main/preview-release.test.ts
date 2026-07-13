@@ -92,7 +92,7 @@ describe('unsigned preview release channel', () => {
       linux: {
         target: ['AppImage', 'deb'],
         artifactName:
-          'Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-${arch}.${ext}',
+          'Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.${ext}',
       },
     })
 
