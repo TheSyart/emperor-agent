@@ -58,19 +58,19 @@ npm run dist:linux       # Linux AppImage
 npm run dist:win         # Windows NSIS exe
 ```
 
-安装包内含 Electron/Node runtime，不要求目标机预装 Node、npm、Python、pip、Git、ripgrep 或 `emperor-agent` 命令。签名只读的 `runtime-defaults` 直接从应用资源目录加载；模型配置、记忆、会话和用户安装的 Skill 只写入全局私有 `stateRoot`，升级应用不会覆盖用户内容。诊断页可探测项目或 Skill 缺失的开发工具，安装前必须展示固定 catalog 来源、许可、提权和依赖计划并由用户确认。
+安装包内含 Electron/Node runtime，不要求目标机预装 Node、npm、Python、pip、Git、ripgrep 或 `emperor-agent` 命令。只读 `runtime-defaults` 直接从应用资源目录加载，并通过 manifest、SHA-256 和发布 attestation 验证；模型配置、记忆、会话和用户安装的 Skill 只写入全局私有 `stateRoot`，升级应用不会覆盖用户内容。诊断页可探测项目或 Skill 缺失的开发工具，安装前必须展示固定 catalog 来源、许可、提权和依赖计划并由用户确认。
 
-## 安装包与可信 Release
+## 安装包与未签名 Preview Release
 
-正式 Release 同批支持 macOS arm64/x64、Windows x64、Ubuntu x64。`.github/workflows/release.yml` 只接受 tag，平台 job 仅上传候选；全部签名、公证、安装 smoke、SHA-256、CycloneDX SBOM 和 GitHub attestation 验证通过后，最终 job 才会发布 GitHub Release。任一平台失败都不会降级为 unsigned 正式包。
+当前唯一公开发布通道是 `Unsigned Preview`，同批支持 macOS arm64/x64、Windows x64 和 Ubuntu x64。`.github/workflows/release-preview.yml` 只接受默认分支可达的 `v*-preview.*` annotated tag；各平台完成安装 smoke、资源检查、SHA-256、CycloneDX SBOM 和 GitHub attestation 后，最终 job 才会原子发布 GitHub Pre-release。任一平台失败都不会留下公开的半成品 Release。
 
-### 未签名公开预览版
+### 下载与安全提示
 
-在可信签名凭据就绪前，`.github/workflows/release-preview.yml` 可从默认分支上的 `v*-preview.*` annotated tag 发布明确标记的 GitHub Pre-release。首个目标版本是 [`v0.1.0-preview.1`](https://github.com/TheSyart/emperor-agent/releases/tag/v0.1.0-preview.1)。文件名、Release 标题、manifest 和说明均包含 `UNSIGNED-PREVIEW`；它是未签名测试版本，不是 Stable：macOS 未使用 Developer ID 且未经 Apple 公证，Windows 会显示 `Unknown publisher` 并可能触发 SmartScreen。
+当前公开版本是 [`v0.1.0-preview.1`](https://github.com/TheSyart/emperor-agent/releases/tag/v0.1.0-preview.1)。文件名、Release 标题、manifest 和说明均包含 `UNSIGNED-PREVIEW`；它是未签名测试版本，不是 Stable：macOS 未使用 Developer ID 且未经 Apple 公证，Windows 会显示 `Unknown publisher` 并可能触发 SmartScreen。
 
 下载后先在 Release 目录执行 `sha256sum --check SHA256SUMS.txt`，再用 `gh attestation verify <file> --repo TheSyart/emperor-agent` 验证 GitHub 构建来源。Attestation 证明来源与完整性，不代表 Apple/Microsoft 发布者签名。确认摘要后，macOS 仅使用 **System Settings → Privacy & Security → Open Anyway** 的单应用入口，详见 [Apple 官方说明](https://support.apple.com/en-us/102445)；Windows 仅在设备策略允许时使用 **More info → Run anyway**，详见 [Microsoft 官方说明](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/publish-first-app)。不要更改整机 Gatekeeper、Defender 或 SmartScreen 安全策略。
 
-`.github/workflows/release-internal.yml` 只允许手动生成保留 7 天的 `UNSIGNED-INTERNAL` 调试包，没有 Release 写权限，不能作为正式分发物。当前可信发布流程已经实现，但首个正式版本仍需 Apple Developer、Azure Artifact Signing 凭据和三平台 CI receipt 完成签收。发布和凭据轮换步骤见 [`docs/release/trusted-release-runbook.md`](docs/release/trusted-release-runbook.md)，环境工具 catalog 变更见 [`docs/release/tool-catalog-review.md`](docs/release/tool-catalog-review.md)。
+`.github/workflows/release-internal.yml` 只允许手动生成保留 7 天的 `UNSIGNED-INTERNAL` 调试包，没有 Release 写权限，不能作为公开分发物。正式签名、Apple notarization 和 Windows publisher signing 已从当前计划取消；保留的 legacy `release.yml` 不是当前发布入口，维护者不创建无 prerelease suffix 的正式发布 tag。未来恢复签名发布时必须建立新的 Plan ID。当前策略见 [v2.2 Release 设计](docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md)，环境工具 catalog 变更见 [`docs/release/tool-catalog-review.md`](docs/release/tool-catalog-review.md)。
 
 ## 质量检查
 
