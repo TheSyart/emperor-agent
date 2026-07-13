@@ -5,16 +5,16 @@
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-13T12:44:15+08:00",
+  "updated_at": "2026-07-13T14:30:45+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
   "total_tasks": 25,
-  "completed": 19,
-  "rounds": 31,
+  "completed": 20,
+  "rounds": 32,
   "planning_receipt": {
     "status": "executing",
     "implementation_started": true,
-    "statement": "The Unsigned Preview candidate, aggregation, SBOM/attestation and atomic GitHub Pre-release publication paths are implemented and locally verified. The first real public release and platform receipts remain pending; five Signed Stable tasks remain blocked without weakening their gates."
+    "statement": "The first public Unsigned Preview is published and verified end to end across macOS arm64/x64, Windows x64 and Ubuntu x64. Its checksums, CycloneDX SBOM, provenance and SBOM attestations are public; five Signed Stable tasks remain blocked without weakening their gates."
   },
   "milestones": {
     "unsigned_preview": {
@@ -255,15 +255,15 @@
       "notes": "The fail-closed assembler accepts exactly seven UNSIGNED-PREVIEW products plus same-run candidate/smoke/lifecycle receipts, validates SHA-256 and emits deterministic unsigned manifest/notice. Aggregate generates CycloneDX 1.6 and two GitHub attestations; only the final job has contents:write. Publication preflight preserves signingStatus:unsigned and bilingual risk disclosure, requires default-branch reachability, refuses existing Releases, creates a prerelease draft, verifies exact remote asset inventory and deletes its draft on failure. Attestations are documented as provenance/integrity only, not publisher trust."
     },
     "PREVIEW-QA-025": {
-      "status": "in_progress",
+      "status": "done",
       "title": "发布并验收首个未签名预览版",
       "depends_on": ["PREVIEW-PUB-024"],
-      "attempts": 1,
+      "attempts": 5,
       "started_at": "2026-07-13T12:44:15+08:00",
-      "completed_at": null,
-      "commit": null,
-      "receipt": null,
-      "notes": "Requires a real public v0.1.0-preview.1 release and platform receipts; planning or local packages cannot satisfy it."
+      "completed_at": "2026-07-13T14:30:45+08:00",
+      "commit": "87717979903ada861b5ef6e7e0111e7b6e894eb7",
+      "receipt": "GitHub Actions run 29227858676 completed every macOS arm64/x64, Windows x64, Linux x64, Ubuntu 22.04/24.04 lifecycle, aggregate/attest and atomic publish job. Public prerelease v0.1.0-preview.1 contains exactly 13 assets and seven installable products; all 12 SHA256SUMS entries passed and every product passed both repository-bound provenance and CycloneDX SBOM attestation verification.",
+      "notes": "Published at https://github.com/TheSyart/emperor-agent/releases/tag/v0.1.0-preview.1 from annotated tag v0.1.0-preview.1 at 87717979903ada861b5ef6e7e0111e7b6e894eb7. Manifest and marker preserve signingStatus=unsigned, notarized=false and UNSIGNED-PREVIEW risk disclosure. Four prior fail-closed runs exposed and fixed Windows CRLF checkout, Linux architecture naming, DEB dependency installation and CycloneDX serial-number defects. The Stable release workflow was not triggered."
     },
     "REL-MAC-018": {
       "status": "blocked",
