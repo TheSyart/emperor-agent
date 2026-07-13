@@ -15,10 +15,74 @@ import { Tool } from './tools/base'
 import { toolParamsSchema } from './tools/schema'
 import { ToolRegistry } from './tools/registry'
 import { ExecutionEnvironment } from './environment/snapshot'
+import { PublicHttpError, type PublicHttpRequest } from './network/public-http'
+import { WebFetch, type WebFetchClient } from './tools/web-fetch'
 
 let dir: string
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'emperor-tools-'))
+})
+
+describe('WebFetch', () => {
+  it('keeps raw and text modes while bounding the public HTTP request', async () => {
+    const requests: PublicHttpRequest[] = []
+    const client: WebFetchClient = {
+      async get(request) {
+        requests.push(request)
+        return {
+          url: request.url,
+          status: 200,
+          headers: {},
+          body: Buffer.from('<main>Hello <strong>public</strong></main>'),
+        }
+      },
+    }
+    const tool = new WebFetch(client)
+
+    await expect(tool.execute({ url: 'https://example.com', raw: true })).resolves.toBe(
+      '<main>Hello <strong>public</strong></main>',
+    )
+    await expect(tool.execute({ url: 'https://example.com' })).resolves.toBe(
+      'Hello public',
+    )
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).toMatchObject({
+      url: 'https://example.com',
+      protocols: ['http:', 'https:'],
+      maxBytes: 1024 * 1024,
+    })
+  })
+
+  it.each([
+    ['blocked_url', '[ERR] blocked non-public host'],
+    ['blocked_address', '[ERR] blocked non-public host'],
+    ['redirect_limit', '[ERR] web_fetch redirect limit exceeded'],
+    ['response_too_large', '[ERR] web_fetch response too large'],
+    ['timeout', '[ERR] web_fetch timed out'],
+    ['cancelled', '[ERR] web_fetch cancelled'],
+  ] as const)('maps %s failures without exposing exception details', async (code, message) => {
+    const client: WebFetchClient = {
+      async get() {
+        throw new PublicHttpError(code, new Error('private implementation detail'))
+      },
+    }
+
+    await expect(new WebFetch(client).execute({ url: 'https://example.com' })).resolves.toBe(
+      message,
+    )
+  })
+
+  it('maps unexpected transport failures to a stable generic message', async () => {
+    const client: WebFetchClient = {
+      async get() {
+        throw new Error('secret transport details')
+      },
+    }
+
+    await expect(new WebFetch(client).execute({ url: 'https://example.com' })).resolves.toBe(
+      '[ERR] web_fetch failed',
+    )
+  })
 })
 
 describe('ReadFileTool', () => {

@@ -532,9 +532,9 @@ Inline execution order is SEC-001 → SEC-002 → SEC-003 → SEC-004 → SEC-00
 
 | ID      | Title                           | Status | Commit | Notes                                 |
 | ------- | ------------------------------- | ------ | ------ | ------------------------------------- |
-| SEC-001 | Electron trust boundary         | ☑      | —      | 22 focused and 353 desktop tests pass |
-| SEC-002 | AUTO command policy             | ☑      | —      | 47 focused and 914 core tests pass    |
-| SEC-003 | Scheduler at-most-once          | ☑      | —      | 29 focused and 917 core tests pass    |
-| SEC-004 | Public HTTP boundary            | ☐      | —      |                                       |
+| SEC-001 | Electron trust boundary         | ☑      | 152892c0 | 22 focused and 353 desktop tests pass |
+| SEC-002 | AUTO command policy             | ☑      | 6c4624d9 | 47 focused and 914 core tests pass    |
+| SEC-003 | Scheduler at-most-once          | ☑      | b721f7ba | 29 focused and 917 core tests pass    |
+| SEC-004 | Public HTTP boundary            | ☑      | pending  | 55 focused and 942 core tests pass    |
 | SEC-005 | Config recovery                 | ☐      | —      |                                       |
 | SEC-006 | Full receipts and audit closure | ☐      | —      |                                       |

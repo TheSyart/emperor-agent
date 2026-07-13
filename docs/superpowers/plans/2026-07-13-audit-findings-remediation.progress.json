@@ -1,9 +1,9 @@
 {
   "started_at": "2026-07-13T00:00:00+08:00",
-  "updated_at": "2026-07-13T23:35:00+08:00",
+  "updated_at": "2026-07-13T23:44:00+08:00",
   "total_tasks": 6,
-  "completed": 3,
-  "rounds": 3,
+  "completed": 4,
+  "rounds": 4,
   "tasks": {
     "SEC-001": {
       "title": "Electron trust boundary",
@@ -23,7 +23,7 @@
     "SEC-004": {
       "title": "Public HTTP boundary",
       "module": "core-network",
-      "status": "pending"
+      "status": "done"
     },
     "SEC-005": {
       "title": "Config recovery",
