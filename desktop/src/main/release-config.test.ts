@@ -61,7 +61,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('!node_modules{,/**/*}')
     expect(config).toContain('from: ../assets/desktop-pet')
     expect(config).toMatch(
-      /linux:\n(?:[ \t].*\n)*[ \t]+executableName: emperor-agent/m,
+      /linux:\r?\n(?:[ \t].*\r?\n)*[ \t]+executableName: emperor-agent/m,
     )
     expect(config).not.toMatch(/from:\s+\.\.\/assets\s*$/m)
     expect(

@@ -8,7 +8,7 @@ import {
   resolveMediaRawPath,
 } from './protocol'
 
-const ROOT = '/app/out/renderer'
+const ROOT = path.join(path.parse(process.cwd()).root, 'app', 'out', 'renderer')
 
 describe('resolveAssetPath', () => {
   it('maps the root path to index.html', () => {

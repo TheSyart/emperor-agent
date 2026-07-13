@@ -15,7 +15,9 @@ const PET_RESOURCE_FILES = [
 function validatePackagedAppResources(resourcesRoot) {
   const asarPath = join(resourcesRoot, 'app.asar')
   assertRegularFile(asarPath, 'app.asar')
-  const entries = listPackage(asarPath)
+  const entries = listPackage(asarPath).map((entry) =>
+    entry.replace(/\\/g, '/'),
+  )
   const required = [
     '/out/main/index.js',
     '/out/preload/index.mjs',

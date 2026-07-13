@@ -58,13 +58,26 @@ function writeRuntimeDefaults(resourcesPath: string): string {
 
 describe('packaged runtime paths', () => {
   it('keeps signed defaults and the legacy writable runtime as separate roots', () => {
-    expect(
-      legacyPackagedRuntimeRoot(
-        '/Users/me/Library/Application Support/Emperor Agent',
-      ),
-    ).toBe('/Users/me/Library/Application Support/Emperor Agent/runtime')
-    expect(runtimeDefaultsRoot('/App/Contents/Resources')).toBe(
-      '/App/Contents/Resources/runtime-defaults',
+    const userDataPath = path.join(
+      path.parse(process.cwd()).root,
+      'Users',
+      'me',
+      'Library',
+      'Application Support',
+      'Emperor Agent',
+    )
+    const resourcesPath = path.join(
+      path.parse(process.cwd()).root,
+      'App',
+      'Contents',
+      'Resources',
+    )
+
+    expect(legacyPackagedRuntimeRoot(userDataPath)).toBe(
+      path.join(userDataPath, 'runtime'),
+    )
+    expect(runtimeDefaultsRoot(resourcesPath)).toBe(
+      path.join(resourcesPath, 'runtime-defaults'),
     )
   })
 })

@@ -49,6 +49,8 @@ function smokeFixture() {
 
 describe('packaged smoke contract', () => {
   it('only enables the fixed packaged smoke mode with an absolute receipt path', () => {
+    const receiptPath = path.join(os.tmpdir(), 'emperor-smoke.json')
+
     expect(parsePackagedSmokeArgs(['Emperor Agent'])).toBeNull()
     expect(() =>
       parsePackagedSmokeArgs([
@@ -63,9 +65,9 @@ describe('packaged smoke contract', () => {
         'Emperor Agent',
         '--emperor-packaged-smoke',
         '--emperor-smoke-receipt',
-        '/tmp/emperor-smoke.json',
+        receiptPath,
       ]),
-    ).toEqual({ receiptPath: '/tmp/emperor-smoke.json' })
+    ).toEqual({ receiptPath })
   })
 
   it('runs bootstrap, diagnostics, environment and native search without installing', async () => {

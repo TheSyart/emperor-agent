@@ -272,14 +272,14 @@ describe('hooks v2 command executor', () => {
       const run = await registry()
       const root = mkdtempSync(join(tmpdir(), 'hooks-process-tree-'))
       const sentinel = join(root, 'descendant-finished')
-      const childScript = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(sentinel)},'done'),150)`
+      const childScript = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(sentinel)},'done'),1000)`
       const parentScript = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childScript)}]);setTimeout(()=>{},5000)`
       const result = await run.execute(
-        command({ timeoutMs: 30, args: ['-e', parentScript] }),
+        command({ timeoutMs: 50, args: ['-e', parentScript] }),
         input(),
         context(),
       )
-      await delay(250)
+      await delay(1250)
 
       expect(result.outcome).toBe('timeout')
       expect(existsSync(sentinel)).toBe(false)

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import * as path from 'node:path'
 import { resolveConfig } from './config'
 
 const throwingRead = (): string => {
@@ -123,6 +124,6 @@ describe('resolveConfig', () => {
     })
 
     expect(cfg.configSource).toBe('file')
-    expect(seen).toEqual(['/manual-state/emperor.local.json'])
+    expect(seen).toEqual([path.join('/manual-state', 'emperor.local.json')])
   })
 })
