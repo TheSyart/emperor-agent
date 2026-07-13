@@ -29,6 +29,7 @@ import { CoreEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
 import { resolveMainPreloadPath } from './preload-path'
 import { parsePackagedSmokeArgs, runPackagedSmoke } from './packaged-smoke'
+import { createTrustedRendererPolicy } from './trusted-renderer'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
@@ -49,6 +50,15 @@ let runtimeReady = false
 let mainWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
 let didLoadRetry = false
+const trustedRendererPolicy = createTrustedRendererPolicy({
+  productionUrl: 'app://bundle/index.html',
+  developmentUrl: process.env.ELECTRON_RENDERER_URL ?? null,
+  mainWebContents: () => mainWindow?.webContents ?? null,
+  openExternal: (url) => shell.openExternal(url),
+  onExternalOpenError: (error, url) => {
+    console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
+  },
+})
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -57,7 +67,8 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-ipcMain.handle('emperor:select-directory', async () => {
+ipcMain.handle('emperor:select-directory', async (event) => {
+  trustedRendererPolicy.authorizeIpc(event)
   const options: OpenDialogOptions = {
     properties: ['openDirectory'],
   }
@@ -68,14 +79,16 @@ ipcMain.handle('emperor:select-directory', async () => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('emperor:open-path', async (_event, target: unknown) => {
+ipcMain.handle('emperor:open-path', async (event, target: unknown) => {
+  trustedRendererPolicy.authorizeIpc(event)
   const pathValue = typeof target === 'string' ? target.trim() : ''
   if (!pathValue) return { ok: false, error: 'path is required' }
   const error = await shell.openPath(pathValue)
   return error ? { ok: false, error } : { ok: true }
 })
 
-ipcMain.handle('emperor:pet:open', async () => {
+ipcMain.handle('emperor:pet:open', async (event) => {
+  trustedRendererPolicy.authorizeIpc(event)
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.showInactive()
     return { open: true }
@@ -85,14 +98,16 @@ ipcMain.handle('emperor:pet:open', async () => {
   return { open: true }
 })
 
-ipcMain.handle('emperor:pet:close', async () => {
+ipcMain.handle('emperor:pet:close', async (event) => {
+  trustedRendererPolicy.authorizeIpc(event)
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.close()
   }
   return { open: false }
 })
 
-ipcMain.handle('emperor:pet:status', async () => {
+ipcMain.handle('emperor:pet:status', async (event) => {
+  trustedRendererPolicy.authorizeIpc(event)
   const open = petWindow !== null && !petWindow.isDestroyed()
   return { open }
 })
@@ -192,6 +207,15 @@ function createWindow(): void {
     },
   })
   coreEventBridge.attach(mainWindow.webContents)
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) =>
+    trustedRendererPolicy.handleNavigation(event, targetUrl),
+  )
+  mainWindow.webContents.on('will-redirect', (event, targetUrl) =>
+    trustedRendererPolicy.handleNavigation(event, targetUrl),
+  )
+  mainWindow.webContents.setWindowOpenHandler((details) =>
+    trustedRendererPolicy.handleWindowOpen(details),
+  )
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
@@ -348,6 +372,7 @@ async function startup(): Promise<void> {
       root: config.runtimeRoot,
       ipcMain,
       eventBridge: coreEventBridge,
+      authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
         appVersion: app.getVersion(),
         ...(packagedRuntimeRevision

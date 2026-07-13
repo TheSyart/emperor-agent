@@ -200,7 +200,7 @@ Inline execution order is SEC-001 → SEC-002 → SEC-003 → SEC-004 → SEC-00
   - [ ] No untrusted call reaches CoreApi or desktop privileged handlers.
   - [ ] Production and development renderer startup remain supported.
 - **Estimate:** 8 hours / 5 points; policy and tests 4h, wiring 2h, Electron compatibility verification 2h.
-- **Status:** ☐ todo
+- **Status:** ☑ done
 - **Notes:** Opening an external browser is best-effort; failure is logged and never changes deny behavior.
 
 ### SEC-002 · Replace AUTO shell blacklist authorization with positive readonly classification
@@ -530,11 +530,11 @@ Inline execution order is SEC-001 → SEC-002 → SEC-003 → SEC-004 → SEC-00
 
 > 6 tasks total / 2 phases. Status: ☐ todo · ◐ wip · ☑ done · ⛔ blocked
 
-| ID      | Title                           | Status | Commit | Notes |
-| ------- | ------------------------------- | ------ | ------ | ----- |
-| SEC-001 | Electron trust boundary         | ☐      | —      |       |
-| SEC-002 | AUTO command policy             | ☐      | —      |       |
-| SEC-003 | Scheduler at-most-once          | ☐      | —      |       |
-| SEC-004 | Public HTTP boundary            | ☐      | —      |       |
-| SEC-005 | Config recovery                 | ☐      | —      |       |
-| SEC-006 | Full receipts and audit closure | ☐      | —      |       |
+| ID      | Title                           | Status | Commit | Notes                                 |
+| ------- | ------------------------------- | ------ | ------ | ------------------------------------- |
+| SEC-001 | Electron trust boundary         | ☑      | —      | 22 focused and 353 desktop tests pass |
+| SEC-002 | AUTO command policy             | ☐      | —      |                                       |
+| SEC-003 | Scheduler at-most-once          | ☐      | —      |                                       |
+| SEC-004 | Public HTTP boundary            | ☐      | —      |                                       |
+| SEC-005 | Config recovery                 | ☐      | —      |                                       |
+| SEC-006 | Full receipts and audit closure | ☐      | —      |                                       |

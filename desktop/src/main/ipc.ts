@@ -18,14 +18,18 @@ export interface IpcMainLike {
 
 export type CoreApiLike = CoreApi
 
+export type IpcAuthorizer = (event: unknown) => void
+
 export function registerCoreIpc(
   ipcMain: IpcMainLike,
   coreApi: CoreApiLike,
   operationKeys: readonly CoreOperationKey[] = coreOperationKeys(),
+  opts: { authorize?: IpcAuthorizer } = {},
 ): void {
   for (const key of [...operationKeys].sort()) {
-    ipcMain.handle(channelForCoreOperation(key), async (_event, ...args) => {
+    ipcMain.handle(channelForCoreOperation(key), async (event, ...args) => {
       try {
+        opts.authorize?.(event)
         return await invokeOperation(coreApi, key, args)
       } catch (error) {
         return safeIpcError(error, key)

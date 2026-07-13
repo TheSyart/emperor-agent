@@ -56,6 +56,37 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it('authorizes the IPC caller before invoking the CoreApi adapter', async () => {
+    const ipc = new FakeIpcMain()
+    const create = vi.fn(() => ({ id: 's1' }))
+    const authorize = vi.fn(() => {
+      throw Object.assign(new Error('untrusted renderer'), {
+        toSafe: () => ({
+          code: 'forbidden_ipc_caller',
+          message: 'IPC caller is not trusted',
+        }),
+      })
+    })
+    registerCoreIpc(
+      ipc,
+      asCoreApi({ sessions: { create } }),
+      ['sessions.create'],
+      { authorize },
+    )
+
+    await expect(
+      ipc.invoke('emperor:core:sessions:create', { title: '新会话' }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'forbidden_ipc_caller',
+        message: 'IPC caller is not trusted',
+      },
+    })
+    expect(authorize).toHaveBeenCalledOnce()
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('invokes prototype operations with their owning receiver', async () => {
     const ipc = new FakeIpcMain()
     class Api {
