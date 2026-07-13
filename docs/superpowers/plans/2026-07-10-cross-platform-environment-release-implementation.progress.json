@@ -5,16 +5,16 @@
   "plan_file": "docs/superpowers/plans/2026-07-10-cross-platform-environment-release-implementation.md",
   "design_file": "docs/superpowers/specs/2026-07-10-cross-platform-environment-release-design.md",
   "created_at": "2026-07-11T21:03:55+08:00",
-  "updated_at": "2026-07-12T00:30:56+08:00",
+  "updated_at": "2026-07-13T10:45:53+08:00",
   "started_at": "2026-07-10T16:02:16+08:00",
   "completed_at": null,
   "total_tasks": 22,
   "completed": 17,
-  "rounds": 24,
+  "rounds": 25,
   "planning_receipt": {
     "status": "executing",
     "implementation_started": true,
-    "statement": "Candidate commits were re-audited with make check and packaged smoke before task status restoration."
+    "statement": "Local make check and generic macOS/Windows/Ubuntu CI are green on da954aa9; formal platform Release receipts remain blocked by signing credentials and dedicated release gates."
   },
   "tasks": {
     "BASE-001": {
@@ -218,7 +218,7 @@
       "completed_at": null,
       "commit": "fe745bb4",
       "receipt": null,
-      "notes": "Candidate configuration and static verifier are implemented, but Developer ID and App Store Connect credentials are absent; no signed/notarized arm64/x64 receipts exist. A 2026-07-12 GitHub audit found no repository secrets or environments, so the credential gate cannot currently run."
+      "notes": "Candidate configuration and static verifier are implemented. Generic macOS CI run 29220027666 passed tests, typecheck, lint, build and package dry run on da954aa9. Developer ID and App Store Connect credentials remain absent, so no signed/notarized arm64/x64 receipts exist and the formal gate cannot run."
     },
     "REL-WIN-019": {
       "status": "blocked",
@@ -229,7 +229,7 @@
       "completed_at": null,
       "commit": "e70faa95",
       "receipt": null,
-      "notes": "Windows release config, isolated smoke environment, windows-2022 candidate workflow and Authenticode install/smoke/uninstall verifier are implemented. Focused 12/12 tests, schema inspection, packaged smoke and make check passed. A 2026-07-12 GitHub audit found no Azure signing secrets, environments or self-hosted runners. Final receipt remains blocked until the installer and installed binaries have the exact expected publisher on windows-2022."
+      "notes": "Windows release config, isolated smoke environment, windows-2022 candidate workflow and Authenticode install/smoke/uninstall verifier are implemented. Generic Windows CI run 29220027666 passed all tests, typecheck, lint, build and package dry run after native path and ASAR validation fixes through da954aa9. Azure signing credentials remain absent; the final receipt stays blocked until the installer and installed binaries have the expected publisher on windows-2022."
     },
     "REL-LNX-020": {
       "status": "blocked",
@@ -240,7 +240,7 @@
       "completed_at": null,
       "commit": "6b692d54",
       "receipt": null,
-      "notes": "Trusted Linux config, Ubuntu 22.04 build job, Ubuntu 22.04/24.04 smoke matrix and fail-closed DEB/AppImage verifier are implemented. A real macOS cross-build produced valid x86-64 ELF AppImage and Debian package after RED exposed missing homepage metadata and inconsistent architecture names. Focused 15/15 tests, bash syntax and make check passed. Docker Desktop failed to provide a daemon within 120 seconds on two separate audits, so local Ubuntu containers cannot substitute for the required 22.04/24.04 runner receipts."
+      "notes": "Trusted Linux config, Ubuntu 22.04 build job, Ubuntu 22.04/24.04 smoke matrix and fail-closed DEB/AppImage verifier are implemented. Generic Ubuntu CI run 29220027666 passed all tests, typecheck, lint, build and package dry run on da954aa9. Docker is not a release dependency; completion still requires the formal DEB/AppImage receipts from both Ubuntu 22.04 and 24.04 release runners."
     },
     "REL-AGG-021": {
       "status": "blocked",
@@ -251,7 +251,7 @@
       "completed_at": null,
       "commit": "33c3db6e",
       "receipt": null,
-      "notes": "Structured platform receipts, fail-closed bundle assembly, complete Core+Desktop CycloneDX SBOM merging, GitHub provenance/SBOM attestations, draft-first atomic publication and the isolated unsigned internal workflow are implemented in 33c3db6e. Focused 19/19 tests, real dual-lockfile SBOM generation/merge, actionlint v1.7.12, YAML/script syntax and make check (Core 900, Desktop 309) passed. The implementation branch is not present on GitHub and remote workflows remain the pre-implementation versions; aggregate/publish cannot run before an intentional push and complete platform receipts."
+      "notes": "Structured platform receipts, fail-closed bundle assembly, complete Core+Desktop CycloneDX SBOM merging, GitHub provenance/SBOM attestations, draft-first atomic publication and the isolated unsigned internal workflow are implemented in 33c3db6e. The implementation branch is pushed and generic CI run 29220027666 is green on all three platforms. Aggregate/publish remains blocked because its hard dependencies are formal signed platform receipts, not generic package dry-run results."
     },
     "QA-022": {
       "status": "blocked",
@@ -262,7 +262,7 @@
       "completed_at": null,
       "commit": "932fe41a",
       "receipt": null,
-      "notes": "README, AGENTS, migration status, trusted Release runbook and ToolCatalog review checklist are synchronized in 932fe41a. Fresh make check passed Core 900/Desktop 309 with format, parity, test typecheck, zero-warning lint and production build; Playwright screenshots passed 33/33 including diagnostics environment, Skill install, model picker, scroll and Hooks flows. GitHub external-state and actionlint audits are also green except for missing signing/runner receipts. QA remains blocked at 17/22 rather than falsely reporting completion."
+      "notes": "README, AGENTS, migration status, trusted Release runbook and ToolCatalog review checklist are synchronized in 932fe41a. Fresh local make check passed Core 903/Desktop 310 with format, parity, test typecheck, zero-warning lint and production build; prior Playwright screenshots passed 33/33. GitHub CI run 29220027666 passed macOS, Windows and Ubuntu tests/build/package dry runs. QA remains blocked at 17/22 until signed platform receipts and aggregate publication verification exist."
     }
   }
 }
