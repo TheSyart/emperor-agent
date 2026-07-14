@@ -42,9 +42,7 @@ export async function testModelEntry(
   return {
     ok: Boolean(result.ok),
     kind,
-    ...(typeof result.entryId === 'string'
-      ? { entryId: result.entryId }
-      : {}),
+    ...(typeof result.entryId === 'string' ? { entryId: result.entryId } : {}),
     ...(typeof result.latencyMs === 'number'
       ? { latencyMs: result.latencyMs }
       : {}),

@@ -34,7 +34,9 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
       sample: 'pong',
     })
 
-    expect(calls).toEqual([['model.test', { entryId: 'entry-1', kind: 'text' }]])
+    expect(calls).toEqual([
+      ['model.test', { entryId: 'entry-1', kind: 'text' }],
+    ])
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

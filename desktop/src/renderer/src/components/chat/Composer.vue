@@ -230,9 +230,7 @@ const currentModelLabel = computed(() => {
   const entry = currentModelEntry.value
   if (entry) return entry.displayName || entry.modelId || '模型'
   return (
-    props.currentModel?.displayName ||
-    props.currentModel?.modelId ||
-    '模型'
+    props.currentModel?.displayName || props.currentModel?.modelId || '模型'
   )
 })
 const currentReasoningLabel = computed(() =>
@@ -861,7 +859,9 @@ onBeforeUnmount(() => {
             <small>{{ entry.modelId || '未配置' }}</small>
             <span class="model-option-meta">
               <em>{{ entry.provider || 'provider' }}</em>
-              <em>{{ entry.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI' }}</em>
+              <em>{{
+                entry.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'
+              }}</em>
             </span>
           </span>
           <span class="model-option-badges">

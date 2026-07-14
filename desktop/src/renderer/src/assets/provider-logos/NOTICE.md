@@ -46,4 +46,3 @@ All paths below are relative to the pinned cc-switch commit:
 - `src/icons/extracted/longcat-color.svg`
 - `src/icons/extracted/baidu.svg`
 - `src/icons/extracted/ollama.svg`
-
