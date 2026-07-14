@@ -27,9 +27,7 @@ describe('model setup dialog content', () => {
         skills: [],
         memory: {},
         profileOnboarding: pendingProfileOnboarding(),
-        modelConfig: {
-          availability: { usable: false, message: '请配置模型' },
-        },
+        modelConfig: modelConfig(false, '请配置模型'),
       }),
     ).toBe(true)
     expect(
@@ -39,9 +37,7 @@ describe('model setup dialog content', () => {
         skills: [],
         memory: {},
         profileOnboarding: pendingProfileOnboarding(),
-        modelConfig: {
-          availability: { usable: true, message: '模型可用' },
-        },
+        modelConfig: modelConfig(true, '模型可用'),
       }),
     ).toBe(false)
   })
@@ -56,5 +52,16 @@ function pendingProfileOnboarding() {
     lastError: null,
     canStart: true,
     canSkip: true,
+  }
+}
+
+function modelConfig(usable: boolean, message: string) {
+  return {
+    schemaVersion: 2 as const,
+    activeModelId: null,
+    models: [],
+    current: null,
+    availability: { usable, message },
+    providerOptions: [],
   }
 }

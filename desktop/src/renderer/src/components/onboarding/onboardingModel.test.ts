@@ -25,10 +25,15 @@ function boot(usable: boolean): BootstrapPayload {
       canSkip: true,
     },
     modelConfig: {
+      schemaVersion: 2,
+      activeModelId: null,
+      models: [],
+      current: null,
       availability: {
         usable,
         message: usable ? '模型已配置' : '还没有可用模型，请先配置模型。',
       },
+      providerOptions: [],
     },
   }
 }
