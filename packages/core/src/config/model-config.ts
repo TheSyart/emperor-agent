@@ -70,7 +70,19 @@ export interface ProviderConfig {
 }
 
 /** @deprecated aliases 不会出现在 config.raw 或磁盘。 */
-export interface ModelEntry extends ModelEntryV2 {
+export interface ModelEntry {
+  entryId?: string
+  provider: string
+  protocol?: ModelProtocol
+  modelId?: string
+  displayName?: string
+  apiBase: string | null
+  apiKey: string | null
+  capabilityOverrides?: ModelCapabilityOverrides
+  contextWindowTokens: number | null
+  maxTokens: number | null
+  reasoningEffort: string | null
+  legacy?: ModelEntryLegacyData
   name: string
   id: string
   mainModelId: string
@@ -86,7 +98,7 @@ export interface ModelConfig {
   schemaVersion: 2
   activeModelId: string | null
   models: ModelEntry[]
-  raw: ModelConfigV2
+  raw: ModelConfigV2 & Record<string, unknown>
   /** @deprecated compatibility view; never serialized. */
   defaults: AgentDefaults
   /** @deprecated compatibility view; never serialized. */
@@ -139,11 +151,14 @@ function optionalString(value: unknown): string | null {
 }
 
 function positiveInteger(value: unknown, field: string): number {
+  const text = typeof value === 'string' ? value.trim() : null
   const parsed =
     typeof value === 'number'
-      ? Math.trunc(value)
-      : Number.parseInt(String(value), 10)
-  if (!Number.isFinite(parsed) || parsed <= 0)
+      ? value
+      : text && /^\d+$/.test(text)
+        ? Number(text)
+        : Number.NaN
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
     throw new ValidationError(`${field} 必须是正整数`)
   return parsed
 }
@@ -167,12 +182,18 @@ export function maskSecret(value: string | null | undefined): string {
   return `***${text.slice(-4)}`
 }
 
-function providerSpec(name: string): RawRecord | undefined {
-  return findByName(name) as unknown as RawRecord | undefined
+function canonicalProviderName(value: unknown): string | null {
+  const name = optionalString(value)
+  if (!name) return null
+  if (name.replace(/-/g, '_').toLowerCase() === 'custom') return 'custom'
+  return findByName(name)?.name ?? null
 }
 
-function knownProvider(name: string): boolean {
-  return name === 'custom' || Boolean(providerSpec(name))
+function providerSpec(name: string): RawRecord | undefined {
+  const canonical = canonicalProviderName(name)
+  return canonical
+    ? (findByName(canonical) as unknown as RawRecord | undefined)
+    : undefined
 }
 
 function defaultApiBase(provider: string, protocol: ModelProtocol): string {
@@ -240,9 +261,10 @@ function normalizeEntry(
   const entryId = optionalString(input.entryId)
   if (!entryId && !options.allowMissingEntryId)
     throw new ValidationError('entryId 不能为空')
-  const provider = optionalString(input.provider)
-  if (!provider || REMOVED_PROVIDERS.has(provider) || !knownProvider(provider))
-    throw new ValidationError(`provider 无效: ${provider ?? ''}`)
+  const submittedProvider = optionalString(input.provider)
+  const provider = canonicalProviderName(submittedProvider)
+  if (!provider || REMOVED_PROVIDERS.has(provider))
+    throw new ValidationError(`provider 无效: ${submittedProvider ?? ''}`)
   const protocol = optionalString(input.protocol)
   if (protocol !== 'openai' && protocol !== 'anthropic')
     throw new ValidationError(`protocol 无效: ${protocol ?? ''}`)
@@ -352,7 +374,7 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
     schemaVersion: 2,
     activeModelId: clean.activeModelId,
     models,
-    raw: clean,
+    raw: clean as ModelConfigV2 & Record<string, unknown>,
     defaults: {
       model: active?.entryId ?? '',
       provider: active?.provider ?? 'auto',
@@ -365,13 +387,54 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
   }
 }
 
-function legacyValue(
+function legacyCandidates(
   entry: RawRecord,
   provider: RawRecord,
   defaults: RawRecord,
   key: string,
-): unknown {
-  return entry[key] ?? provider[key] ?? defaults[key]
+): unknown[] {
+  return [entry[key], provider[key], defaults[key]]
+}
+
+function firstLegacyString(values: unknown[]): string | null {
+  for (const value of values) {
+    const text = optionalString(value)
+    if (text) return text
+  }
+  return null
+}
+
+function firstLegacyPositiveInteger(
+  values: unknown[],
+  fallback: number,
+): number {
+  for (const value of values) {
+    const text = typeof value === 'string' ? value.trim() : null
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : text && /^\d+$/.test(text)
+          ? Number(text)
+          : Number.NaN
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
+  }
+  return fallback
+}
+
+function firstLegacyNumber(values: unknown[]): number | null {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function firstLegacyRecord(values: unknown[]): RawRecord | null {
+  for (const value of values) {
+    if (isRecord(value)) return value
+  }
+  return null
 }
 
 function realLegacySecret(...values: unknown[]): string | null {
@@ -393,16 +456,17 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
   let activeModelId: string | null = null
 
   for (const legacyEntry of legacyModels) {
-    let provider =
+    let submittedProvider =
       optionalString(legacyEntry.provider) ??
       optionalString(defaults.provider) ??
       'custom'
     const mainModelId = optionalString(
       legacyEntry.mainModelId ?? legacyEntry.id ?? legacyEntry.modelId,
     )
-    if ((!provider || provider === 'auto') && mainModelId)
-      provider = resolveProviderName('auto', mainModelId, {})
-    if (REMOVED_PROVIDERS.has(provider) || !knownProvider(provider)) continue
+    if (submittedProvider.toLowerCase() === 'auto' && mainModelId)
+      submittedProvider = resolveProviderName('auto', mainModelId, {})
+    const provider = canonicalProviderName(submittedProvider)
+    if (!provider || REMOVED_PROVIDERS.has(provider)) continue
     if (!mainModelId) continue
     const protocol: ModelProtocol =
       provider === 'anthropic' ? 'anthropic' : 'openai'
@@ -413,44 +477,33 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
       defaults.apiKey,
     )
     const apiBase =
-      optionalString(
-        legacyValue(legacyEntry, providerBlock, defaults, 'apiBase'),
+      firstLegacyString(
+        legacyCandidates(legacyEntry, providerBlock, defaults, 'apiBase'),
       ) ?? defaultApiBase(provider, protocol)
-    const maxTokens = Math.max(
-      1,
-      Number.parseInt(
-        String(
-          legacyValue(legacyEntry, providerBlock, defaults, 'maxTokens') ??
-            8192,
-        ),
-        10,
-      ) || 8192,
+    const maxTokens = firstLegacyPositiveInteger(
+      legacyCandidates(legacyEntry, providerBlock, defaults, 'maxTokens'),
+      8192,
     )
-    const contextWindowTokens = Math.max(
-      1,
-      Number.parseInt(
-        String(
-          legacyValue(
-            legacyEntry,
-            providerBlock,
-            defaults,
-            'contextWindowTokens',
-          ) ?? 128000,
-        ),
-        10,
-      ) || 128000,
+    const contextWindowTokens = firstLegacyPositiveInteger(
+      legacyCandidates(
+        legacyEntry,
+        providerBlock,
+        defaults,
+        'contextWindowTokens',
+      ),
+      128000,
     )
-    const reasoningEffort = optionalString(
-      legacyValue(legacyEntry, providerBlock, defaults, 'reasoningEffort'),
+    const reasoningEffort = firstLegacyString(
+      legacyCandidates(legacyEntry, providerBlock, defaults, 'reasoningEffort'),
     )
-    const temperature = optionalNumber(
-      legacyValue(legacyEntry, providerBlock, defaults, 'temperature'),
+    const temperature = firstLegacyNumber(
+      legacyCandidates(legacyEntry, providerBlock, defaults, 'temperature'),
     )
-    const extraHeaders = optionalRecord(
-      legacyValue(legacyEntry, providerBlock, defaults, 'extraHeaders'),
+    const extraHeaders = firstLegacyRecord(
+      legacyCandidates(legacyEntry, providerBlock, defaults, 'extraHeaders'),
     )
-    const extraBody = optionalRecord(
-      legacyValue(legacyEntry, providerBlock, defaults, 'extraBody'),
+    const extraBody = firstLegacyRecord(
+      legacyCandidates(legacyEntry, providerBlock, defaults, 'extraBody'),
     )
     const legacy: ModelEntryLegacyData = {
       temperature: temperature ?? null,
@@ -538,13 +591,14 @@ export function resolveProviderName(
   providers: Record<string, ProviderConfig>,
 ): string {
   if (provider && !['auto', 'default'].includes(provider.toLowerCase())) {
-    if (!knownProvider(provider) || REMOVED_PROVIDERS.has(provider)) {
+    const canonical = canonicalProviderName(provider)
+    if (!canonical || REMOVED_PROVIDERS.has(canonical)) {
       logger.warn("Unknown provider in defaults; falling back to 'custom'", {
         provider,
       })
       return 'custom'
     }
-    return provider
+    return canonical
   }
   const normalizedModel = model.toLowerCase().replace(/_/g, '-')
   for (const spec of PROVIDERS as readonly unknown[]) {
@@ -561,8 +615,9 @@ export function resolveProviderName(
       return name
   }
   for (const [name, config] of Object.entries(providers)) {
-    if (config.apiKey && knownProvider(name) && !REMOVED_PROVIDERS.has(name))
-      return name
+    const canonical = canonicalProviderName(name)
+    if (config.apiKey && canonical && !REMOVED_PROVIDERS.has(canonical))
+      return canonical
   }
   return 'deepseek'
 }
@@ -614,8 +669,18 @@ function validateDiskConfig(value: unknown): RawRecord {
   }
   if ('agents' in value && !isRecord(value.agents))
     throw new Error("model_config: 'agents' must be an object")
-  if ('providers' in value && !isRecord(value.providers))
-    throw new Error("model_config: 'providers' must be an object")
+  if (
+    isRecord(value.agents) &&
+    'defaults' in value.agents &&
+    !isRecord(value.agents.defaults)
+  )
+    throw new Error("model_config: 'agents.defaults' must be an object")
+  if ('providers' in value) {
+    if (!isRecord(value.providers))
+      throw new Error("model_config: 'providers' must be an object")
+    if (Object.values(value.providers).some((entry) => !isRecord(entry)))
+      throw new Error('model_config: every provider must be an object')
+  }
   return value
 }
 
@@ -672,10 +737,49 @@ export async function saveModelConfig(
   data: ModelConfigV2 | RawRecord,
   opts: { validateComplete?: boolean } = {},
 ): Promise<ModelConfig> {
-  const config = parseModelConfig(data)
+  const path = configPath(rootOrFile)
+  const merged = await preserveStoredApiKeys(path, data)
+  const config = parseModelConfig(merged)
   if (opts.validateComplete) validateCompleteModelEntries(config.raw)
-  await writeJsonAtomic(configPath(rootOrFile), config.raw, { mode: 0o600 })
+  await writeJsonAtomic(path, config.raw, { mode: 0o600 })
   return config
+}
+
+async function preserveStoredApiKeys(
+  path: string,
+  data: ModelConfigV2 | RawRecord,
+): Promise<ModelConfigV2 | RawRecord> {
+  if (!isRecord(data) || data.schemaVersion !== 2 || !existsSync(path))
+    return data
+  let stored: unknown
+  try {
+    stored = JSON.parse(await readFile(path, 'utf8'))
+  } catch {
+    return data
+  }
+  if (!isRecord(stored) || stored.schemaVersion !== 2) return data
+  const previous = new Map<string, RawRecord>()
+  for (const item of Array.isArray(stored.models) ? stored.models : []) {
+    if (!isRecord(item)) continue
+    const entryId = optionalString(item.entryId)
+    if (entryId) previous.set(entryId, item)
+  }
+  const next = structuredClone(data) as RawRecord
+  for (const item of Array.isArray(next.models) ? next.models : []) {
+    if (!isRecord(item)) continue
+    const old = previous.get(optionalString(item.entryId) ?? '')
+    if (!old) continue
+    const submitted = Object.prototype.hasOwnProperty.call(item, 'apiKey')
+      ? item.apiKey
+      : undefined
+    if (
+      submitted === undefined ||
+      (typeof submitted === 'string' &&
+        (!submitted.trim() || isMaskedSecret(submitted)))
+    )
+      item.apiKey = old.apiKey ?? null
+  }
+  return next
 }
 
 function mergeDefined(target: RawRecord, patch: RawRecord): RawRecord {

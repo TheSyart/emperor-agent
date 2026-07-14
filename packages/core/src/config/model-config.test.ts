@@ -74,7 +74,11 @@ describe('model_config v2 schema', () => {
     [{ ...entry(), modelId: '' }, /modelId/i],
     [{ ...entry(), contextWindowTokens: 0 }, /contextWindowTokens/i],
     [{ ...entry(), maxTokens: -1 }, /maxTokens/i],
+    [{ ...entry(), maxTokens: 1.5 }, /maxTokens/i],
+    [{ ...entry(), contextWindowTokens: '128000junk' }, /contextWindowTokens/i],
     [{ ...entry(), provider: 'bedrock' }, /provider/i],
+    [{ ...entry(), provider: 'Azure-OpenAI' }, /provider/i],
+    [{ ...entry(), provider: 'OPENAI-CODEX' }, /provider/i],
   ])('rejects invalid v2 entries %#', (invalid, message) => {
     expect(() =>
       parseModelConfig({
@@ -132,6 +136,19 @@ describe('typed entry mutation', () => {
       activeModelId: 'entry-openai',
       models: [entry({ legacy: { temperature: 0.2, extraBody: { seed: 7 } } })],
     })
+
+    await saveModelConfig(dir, {
+      schemaVersion: 2,
+      activeModelId: 'entry-openai',
+      models: [
+        entry({
+          apiKey: '***cret',
+          displayName: 'Masked round trip',
+          legacy: { temperature: 0.2, extraBody: { seed: 7 } },
+        }),
+      ],
+    })
+    expect((await loadModelConfig(dir)).models[0]?.apiKey).toBe('sk-secret')
 
     await saveModelEntry(dir, {
       ...entry({ apiKey: undefined as never, displayName: 'Renamed' }),
@@ -281,8 +298,8 @@ describe('v1 migration', () => {
       JSON.stringify({
         agents: { defaults: { model: 'old' } },
         models: [
-          { name: 'old', provider: 'bedrock', mainModelId: 'claude-old' },
-          { name: 'oauth', provider: 'openai_codex', mainModelId: 'codex-old' },
+          { name: 'old', provider: 'BEDROCK', mainModelId: 'claude-old' },
+          { name: 'oauth', provider: 'openai-codex', mainModelId: 'codex-old' },
         ],
       }),
       'utf8',
@@ -291,6 +308,41 @@ describe('v1 migration', () => {
     await expect(loadModelConfig(dir)).resolves.toMatchObject({
       activeModelId: null,
       models: [],
+    })
+  })
+
+  it('falls through empty or invalid entry values to provider and defaults', async () => {
+    const value = legacy()
+    value.models[0] = {
+      ...value.models[0],
+      apiBase: '',
+      maxTokens: '',
+      contextWindowTokens: 'invalid',
+      reasoningEffort: '',
+      temperature: '',
+      extraHeaders: null,
+    }
+    value.providers.openai.maxTokens = 12_000
+    value.providers.openai.contextWindowTokens = 96_000
+    value.providers.openai.reasoningEffort = 'high'
+    value.providers.openai.temperature = 0.25
+    await writeFile(
+      join(dir, 'model_config.json'),
+      JSON.stringify(value),
+      'utf8',
+    )
+
+    const migrated = await loadModelConfig(dir)
+
+    expect(migrated.models[0]).toMatchObject({
+      apiBase: 'https://api.openai.com/v1',
+      maxTokens: 12_000,
+      contextWindowTokens: 96_000,
+      reasoningEffort: 'high',
+      legacy: {
+        temperature: 0.25,
+        extraHeaders: { 'X-Tenant': 'local' },
+      },
     })
   })
 })
@@ -323,6 +375,18 @@ describe('model-config IO recovery', () => {
     await writeFile(
       path,
       JSON.stringify({ schemaVersion: 2, activeModelId: null, models: {} }),
+      'utf8',
+    )
+    expect((await loadModelConfig(dir)).raw).toEqual(defaultModelConfig())
+    expect(existsSync(path)).toBe(false)
+
+    await writeFile(
+      path,
+      JSON.stringify({
+        agents: { defaults: [] },
+        models: [],
+        providers: { openai: 'invalid' },
+      }),
       'utf8',
     )
     expect((await loadModelConfig(dir)).raw).toEqual(defaultModelConfig())
