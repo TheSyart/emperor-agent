@@ -236,7 +236,7 @@ export function buildProviderSnapshot(
     apiBase: apiBase || spec.defaultApiBase,
     generation,
     contextWindowTokens,
-    config: config.raw,
+    config: config.raw as unknown as Record<string, unknown>,
     supportsVision: selectedRole === 'main' ? entry.supportsVision : false,
     entryName: entry.name,
     entryLabel: entry.label || entry.name,
@@ -266,18 +266,21 @@ function synthEntryFromLegacy(
 ): ModelEntry {
   if (!modelId) {
     return {
+      entryId: 'legacy-default',
       name: 'default',
       id: 'deepseek-chat',
       mainModelId: 'deepseek-chat',
+      modelId: 'deepseek-chat',
       provider: 'deepseek',
+      protocol: 'openai',
       secondaryModelId: '',
       apiKey: null,
-      apiBase: null,
+      apiBase: 'https://api.deepseek.com',
       extraHeaders: null,
       extraBody: null,
-      maxTokens: null,
+      maxTokens: 8192,
       temperature: null,
-      contextWindowTokens: null,
+      contextWindowTokens: 128000,
       reasoningEffort: null,
       label: '',
       supportsVision: false,
@@ -290,18 +293,25 @@ function synthEntryFromLegacy(
   )
   const p = config.providers[providerName] ?? null
   return {
+    entryId: `legacy-${modelId}`,
     name: modelId,
     id: modelId,
     mainModelId: modelId,
+    modelId,
     provider: providerName,
+    protocol: providerName === 'anthropic' ? 'anthropic' : 'openai',
     secondaryModelId: '',
     apiKey: p?.apiKey ?? null,
-    apiBase: p?.apiBase ?? null,
+    apiBase:
+      p?.apiBase ??
+      (providerName === 'anthropic'
+        ? 'https://api.anthropic.com'
+        : 'https://api.openai.com/v1'),
     extraHeaders: p?.extraHeaders ?? null,
     extraBody: p?.extraBody ?? null,
-    maxTokens: null,
+    maxTokens: config.defaults.maxTokens,
     temperature: null,
-    contextWindowTokens: null,
+    contextWindowTokens: config.defaults.contextWindowTokens,
     reasoningEffort: null,
     label: '',
     supportsVision: false,
