@@ -3,8 +3,12 @@
  * 对齐 Python `agent/providers/openai_compat.py`。
  */
 import OpenAI from 'openai'
+import {
+  reasoningPayload,
+  type ReasoningEffort,
+} from '../model/profile'
 import { logger } from '../util/log'
-import type { ProviderSpec } from './registry'
+import { normalizeApiBase, type ProviderSpec } from './registry'
 import {
   DEFAULT_MAX_RETRIES,
   LLMProvider,
@@ -14,8 +18,54 @@ import {
   type ChatStreamArgs,
   type OpenAiMessage,
   type ToolCallCompleteHandler,
+  messagesForProfile,
   parseJsonArgs,
 } from './base'
+
+const UI_AND_CORE_BODY_FIELDS = new Set([
+  'activeModelId',
+  'apiBase',
+  'apiBases',
+  'apiKey',
+  'capabilityOverrides',
+  'contextWindowTokens',
+  'defaultModel',
+  'defaultProtocol',
+  'displayName',
+  'entryId',
+  'extraBody',
+  'extraHeaders',
+  'iconId',
+  'legacy',
+  'maxTokens',
+  'messages',
+  'model',
+  'modelId',
+  'profile',
+  'protocols',
+  'provider',
+  'protocol',
+  'reasoning',
+  'reasoningAdapter',
+  'reasoningEffort',
+  'reasoningEfforts',
+  'reasoning_effort',
+  'reasoning_split',
+  'schemaVersion',
+  'sources',
+  'stream',
+  'temperature',
+  'thinking',
+  'toolCall',
+  'vision',
+  'enable_thinking',
+  'tool_choice',
+  'tools',
+  'max_tokens',
+  'max_completion_tokens',
+])
+const NO_TEMPERATURE_MODEL_RE =
+  /(?:^|[/._-])(?:gpt-5|o[134])(?:$|[/._-])/
 
 export class OpenAICompatProvider extends LLMProvider {
   readonly spec: ProviderSpec | undefined
@@ -26,9 +76,12 @@ export class OpenAICompatProvider extends LLMProvider {
   ) {
     super(cfg)
     this.spec = cfg.spec
+    const configuredBase = this.apiBase || cfg.spec?.apiBases.openai
     this.client = new OpenAI({
       apiKey: this.apiKey || 'no-key',
-      baseURL: this.apiBase || (cfg.spec?.defaultApiBase ?? undefined),
+      baseURL: configuredBase
+        ? normalizeApiBase('openai', configuredBase)
+        : undefined,
       defaultHeaders: this.extraHeaders,
       maxRetries: DEFAULT_MAX_RETRIES,
       timeout: 600_000,
@@ -162,64 +215,61 @@ export class OpenAICompatProvider extends LLMProvider {
 
   kwargsFor(args: ChatArgs, stream: boolean): Record<string, unknown> {
     const modelName = this.modelName(args.model)
-    const reasoningEffort = args.reasoningEffort ?? null
+    const reasoningEffort = this.reasoningEffort(args)
+    const reasoning = reasoningEffort
+      ? reasoningPayload(this.profile, reasoningEffort)
+      : {}
     const kwargs: Record<string, unknown> = {
       model: modelName,
       messages: this.sanitizeMessages(
-        args.messages,
-        modelName,
+        messagesForProfile(args.messages, this.profile),
         reasoningEffort,
       ),
       stream,
     }
     if (!this.temperatureForbidden(modelName, reasoningEffort)) {
-      kwargs.temperature = args.temperature ?? 0.7
+      kwargs.temperature = args.temperature ?? this.generation.temperature
     }
+    const maxTokens = Math.min(
+      this.profile.maxTokens,
+      Math.max(1, args.maxTokens ?? this.generation.maxTokens),
+    )
     if (this.spec?.supportsMaxCompletionTokens) {
-      kwargs.max_completion_tokens = Math.max(1, args.maxTokens ?? 4096)
+      kwargs.max_completion_tokens = maxTokens
     } else {
-      kwargs.max_tokens = Math.max(1, args.maxTokens ?? 4096)
+      kwargs.max_tokens = maxTokens
     }
-    if (reasoningEffort && reasoningEffort !== 'none')
-      kwargs.reasoning_effort = reasoningEffort
-    if (args.tools?.length) {
+    if (args.tools?.length && this.profile.toolCall) {
       kwargs.tools = LLMProvider.anthropicToolsToOpenai(args.tools)
       kwargs.tool_choice = 'auto'
     }
-    const extraBody = this.extraBodyForReasoning(reasoningEffort)
-    if (Object.keys(this.extraBody).length)
-      Object.assign(extraBody, this.extraBody)
-    if (Object.keys(extraBody).length) kwargs.extra_body = extraBody
+    for (const [key, value] of Object.entries(this.extraBody)) {
+      if (!UI_AND_CORE_BODY_FIELDS.has(key)) kwargs[key] = value
+    }
+    Object.assign(kwargs, reasoning)
     return kwargs
   }
 
   temperatureForbidden(model: string, reasoningEffort: string | null): boolean {
     const name = model.toLowerCase()
-    return (
-      Boolean(reasoningEffort && reasoningEffort !== 'none') ||
-      ['gpt-5', 'o1', 'o3', 'o4'].some((t) => name.includes(t))
-    )
+    const effort = asReasoningEffort(reasoningEffort)
+    const reasoningEnabled =
+      effort !== null &&
+      effort !== 'none' &&
+      Object.keys(reasoningPayload(this.profile, effort)).length > 0
+    return reasoningEnabled || NO_TEMPERATURE_MODEL_RE.test(name)
   }
 
-  extraBodyForReasoning(
-    reasoningEffort: string | null,
-  ): Record<string, unknown> {
-    if (!this.spec?.thinkingStyle || reasoningEffort === null) return {}
-    const enabled = !['none', 'minimal', 'minimum'].includes(reasoningEffort)
-    switch (this.spec.thinkingStyle) {
-      case 'thinking_type':
-        return { thinking: { type: enabled ? 'enabled' : 'disabled' } }
-      case 'enable_thinking':
-        return { enable_thinking: enabled }
-      case 'reasoning_split':
-        return { reasoning_split: enabled }
-    }
-    return {}
+  private reasoningEffort(args: ChatArgs): ReasoningEffort | null {
+    return asReasoningEffort(
+      args.reasoningEffort === undefined
+        ? this.generation.reasoningEffort
+        : args.reasoningEffort,
+    )
   }
 
   sanitizeMessages(
     messages: OpenAiMessage[],
-    modelName: string,
     reasoningEffort: string | null,
   ): OpenAiMessage[] {
     const allowed = new Set([
@@ -240,7 +290,7 @@ export class OpenAICompatProvider extends LLMProvider {
         out.content = out.content ?? null
       return out
     })
-    if (this.requiresReasoningBackfill(modelName, reasoningEffort)) {
+    if (this.requiresReasoningBackfill(reasoningEffort)) {
       for (const msg of clean) {
         if (msg.role === 'assistant' && msg.reasoning_content === undefined)
           msg.reasoning_content = ''
@@ -249,27 +299,19 @@ export class OpenAICompatProvider extends LLMProvider {
     return clean
   }
 
-  requiresReasoningBackfill(
-    modelName: string,
-    reasoningEffort: string | null,
-  ): boolean {
-    const effort =
-      typeof reasoningEffort === 'string' ? reasoningEffort.toLowerCase() : null
-    const explicit = !!(
-      reasoningEffort !== null &&
-      effort &&
-      !['none', 'minimal', 'minimum'].includes(effort) &&
-      this.spec?.thinkingStyle
+  requiresReasoningBackfill(reasoningEffort: string | null): boolean {
+    const resolvedEffort = asReasoningEffort(reasoningEffort?.toLowerCase())
+    const vendorRequiresBackfill = [
+      'thinking_toggle',
+      'enable_thinking_toggle',
+      'reasoning_split_toggle',
+    ].includes(this.profile.reasoningAdapter)
+    return Boolean(
+      vendorRequiresBackfill &&
+      resolvedEffort &&
+      resolvedEffort !== 'none' &&
+      Object.keys(reasoningPayload(this.profile, resolvedEffort)).length,
     )
-    const deepseekArg = !!(
-      this.spec?.name === 'deepseek' &&
-      effort &&
-      !['none', 'minimal', 'minimum'].includes(effort) &&
-      ['deepseek-v4', 'deepseek-reasoner'].some((t) =>
-        modelName.toLowerCase().includes(t),
-      )
-    )
-    return explicit || deepseekArg
   }
 
   /** 单个已流完的 tool 分片解析为 ToolCallRequest 并回调一次（幂等：拼好名字才发）。 */
@@ -354,12 +396,16 @@ function streamUsageUnsupported(text: string): boolean {
   return lower.includes('stream_options') || lower.includes('include_usage')
 }
 
-export class AzureOpenAIProvider extends OpenAICompatProvider {
-  constructor(cfg: ConstructorParameters<typeof OpenAICompatProvider>[0]) {
-    const base = cfg.apiBase?.replace(/\/$/, '')
-    super({ ...cfg, apiBase: base ? `${base}/openai/v1/` : undefined })
-  }
+function asReasoningEffort(value: string | null | undefined): ReasoningEffort | null {
+  return [
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+  ].includes(value ?? '')
+    ? (value as ReasoningEffort)
+    : null
 }
-
-export class OpenAICodexProvider extends OpenAICompatProvider {}
-export class GitHubCopilotProvider extends OpenAICompatProvider {}

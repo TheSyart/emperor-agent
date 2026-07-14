@@ -1,4 +1,8 @@
 import { jsonrepair } from 'jsonrepair'
+import {
+  resolveModelProfile,
+  type ResolvedModelProfile,
+} from '../model/profile'
 
 /**
  * Provider 基类 + 类型 + 工具/消息转换 (MIG-PROV-001)。
@@ -110,6 +114,7 @@ export interface LLMProviderConfig {
   defaultModel: string
   extraHeaders?: Record<string, string> | null
   extraBody?: Record<string, unknown> | null
+  profile?: ResolvedModelProfile
 }
 
 export abstract class LLMProvider {
@@ -118,7 +123,8 @@ export abstract class LLMProvider {
   readonly defaultModel: string
   readonly extraHeaders: Record<string, string>
   readonly extraBody: Record<string, unknown>
-  generation: GenerationSettings = defaultGenerationSettings()
+  readonly profile: ResolvedModelProfile
+  generation: GenerationSettings
 
   constructor(cfg: LLMProviderConfig) {
     this.apiKey = cfg.apiKey ?? null
@@ -126,6 +132,17 @@ export abstract class LLMProvider {
     this.defaultModel = cfg.defaultModel
     this.extraHeaders = cfg.extraHeaders ?? {}
     this.extraBody = cfg.extraBody ?? {}
+    this.profile =
+      cfg.profile ??
+      resolveModelProfile({
+        provider: 'custom',
+        protocol: 'openai',
+        modelId: 'unknown-model',
+      })
+    this.generation = {
+      ...defaultGenerationSettings(),
+      maxTokens: this.profile.maxTokens,
+    }
   }
 
   abstract chat(args: ChatArgs): Promise<LLMResponse>
@@ -170,6 +187,32 @@ export abstract class LLMProvider {
       }
     })
   }
+}
+
+/**
+ * 在 provider 边界执行视觉能力门控。文本块（包括附件解析文本）始终保留。
+ */
+export function messagesForProfile(
+  messages: OpenAiMessage[],
+  profile: ResolvedModelProfile,
+): OpenAiMessage[] {
+  if (profile.vision) return messages
+  return messages.map((message) => {
+    if (!Array.isArray(message.content)) return message
+    return {
+      ...message,
+      content: message.content.filter(
+        (block) =>
+          !(
+            block &&
+            typeof block === 'object' &&
+            ['image_url', 'image'].includes(
+              String((block as Record<string, unknown>).type ?? ''),
+            )
+          ),
+      ),
+    }
+  })
 }
 
 /** 解析工具调用的 JSON 参数；坏 JSON 走 jsonrepair，最终失败返回 {}。对齐 `parse_json_args`。 */

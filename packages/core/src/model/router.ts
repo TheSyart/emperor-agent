@@ -13,9 +13,17 @@ import {
   resolveProviderName,
 } from '../config/model-config'
 import { createProvider } from '../providers/factory'
-import { findByName, type ProviderSpec } from '../providers/registry'
+import {
+  findByName,
+  type ProviderProtocol,
+  type ProviderSpec,
+} from '../providers/registry'
 import { type GenerationSettings, type LLMProvider } from '../providers/base'
 import { modelAvailability, type ModelAvailability } from './availability'
+import {
+  resolveModelProfile,
+  type ResolvedModelProfile,
+} from './profile'
 
 export type ModelRole = 'main' | 'secondary'
 
@@ -26,6 +34,8 @@ export interface ProviderSnapshot {
   model: string
   apiBase: string | null
   generation: GenerationSettings
+  /** Compatibility-optional for synthetic test snapshots; real snapshots always set it. */
+  profile?: ResolvedModelProfile
   contextWindowTokens: number
   config: Record<string, unknown>
   supportsVision: boolean
@@ -209,40 +219,80 @@ export function buildProviderSnapshot(
   )
 
   const defaults = config.defaults
-  const generation: GenerationSettings = {
+  const protocol = snapshotProtocol(entry, spec)
+  const resolvedApiBase = snapshotApiBase(apiBase, spec, protocol)
+  const profile = resolveModelProfile({
+    provider: entry.provider,
+    protocol,
+    modelId,
+    capabilityOverrides: entry.capabilityOverrides,
+    contextWindowTokens:
+      entry.contextWindowTokens ?? defaults.contextWindowTokens,
     maxTokens: entry.maxTokens ?? defaults.maxTokens,
+  })
+  const generation: GenerationSettings = {
+    maxTokens: profile.maxTokens,
     temperature: entry.temperature ?? defaults.temperature,
     reasoningEffort: entry.reasoningEffort ?? defaults.reasoningEffort,
   }
 
   const provider = createProvider({
+    protocol,
+    profile,
     spec,
     apiKey,
-    apiBase: apiBase || spec.defaultApiBase,
+    apiBase: resolvedApiBase,
     defaultModel: modelId,
     extraHeaders,
     extraBody,
   })
   provider.generation = generation
 
-  const contextWindowTokens =
-    entry.contextWindowTokens ?? defaults.contextWindowTokens
+  const contextWindowTokens = profile.contextWindowTokens
 
   return {
     provider,
     providerName: spec.name,
     providerLabel: spec.displayName,
     model: modelId,
-    apiBase: apiBase || spec.defaultApiBase,
+    apiBase: resolvedApiBase,
     generation,
+    profile,
     contextWindowTokens,
     config: config.raw,
-    supportsVision: selectedRole === 'main' ? entry.supportsVision : false,
+    supportsVision: selectedRole === 'main' ? profile.vision : false,
     entryName: entry.name,
     entryLabel: entry.label || entry.name,
     modelRole: selectedRole,
     routeReason,
   }
+}
+
+function snapshotProtocol(
+  entry: ModelEntry,
+  spec: ProviderSpec,
+): ProviderProtocol {
+  const protocol = entry.protocol ?? spec.defaultProtocol
+  if (!protocol)
+    throw new Error(`Provider ${spec.name} requires an explicit protocol`)
+  if (!spec.protocols.includes(protocol))
+    throw new Error(
+      `Provider ${spec.name} does not support ${protocol} protocol`,
+    )
+  return protocol
+}
+
+function snapshotApiBase(
+  explicit: string | null,
+  spec: ProviderSpec,
+  protocol: ProviderProtocol,
+): string {
+  const apiBase = explicit || spec.apiBases[protocol]
+  if (!apiBase)
+    throw new Error(
+      `Provider ${spec.name} requires an API base for ${protocol} protocol`,
+    )
+  return apiBase
 }
 
 function resolveActiveEntry(

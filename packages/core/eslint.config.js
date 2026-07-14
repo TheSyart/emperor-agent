@@ -17,10 +17,4 @@ export default tseslint.config(
       'no-empty': ['warn', { allowEmptyCatch: true }],
     },
   },
-  {
-    // Bedrock 是可选依赖（不在 package.json dependencies 里），用 require() 做运行时探测，
-    // 缺包时给出清晰报错而不是让整个应用因为静态 import 解析失败而炸掉。
-    files: ['src/providers/bedrock.ts'],
-    rules: { '@typescript-eslint/no-require-imports': 'off' },
-  },
 )

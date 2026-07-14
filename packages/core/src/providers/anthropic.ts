@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
+import {
+  reasoningPayload,
+  type ReasoningEffort,
+} from '../model/profile'
 import { logger } from '../util/log'
+import { normalizeApiBase } from './registry'
 import {
   type ChatArgs,
   type ChatStreamArgs,
@@ -8,6 +13,7 @@ import {
   type LLMResponse,
   type OpenAiMessage,
   type ToolCallRequest,
+  messagesForProfile,
   parseJsonArgs,
 } from './base'
 
@@ -26,7 +32,9 @@ export class AnthropicProvider extends LLMProvider {
     this.client = new Anthropic({
       maxRetries: DEFAULT_MAX_RETRIES,
       ...(this.apiKey ? { apiKey: this.apiKey } : {}),
-      ...(this.apiBase ? { baseURL: this.apiBase } : {}),
+      ...(this.apiBase
+        ? { baseURL: normalizeApiBase('anthropic', this.apiBase) }
+        : {}),
       ...(Object.keys(this.extraHeaders).length
         ? { defaultHeaders: this.extraHeaders }
         : {}),
@@ -73,25 +81,45 @@ export class AnthropicProvider extends LLMProvider {
 
   /** 对齐 `_kwargs`：组装 Anthropic messages.create 请求体（含缓存门控）。 */
   kwargsFor(args: ChatArgs): Record<string, unknown> {
-    const reasoningEffort = args.reasoningEffort ?? null
-    const [system, messages] = this.convertMessages(args.messages)
-    if (this.needsReasoningBackfill(reasoningEffort))
+    const reasoningEffort = this.reasoningEffort(args)
+    const reasoning = reasoningEffort
+      ? reasoningPayload(this.profile, reasoningEffort)
+      : {}
+    const reasoningEnabled =
+      reasoningEffort !== null &&
+      reasoningEffort !== 'none' &&
+      Object.keys(reasoning).length > 0
+    const [system, messages] = this.convertMessages(
+      messagesForProfile(args.messages, this.profile),
+    )
+    if (reasoningEnabled && this.needsReasoningBackfill(reasoningEffort))
       backfillReasoning(messages)
 
-    const maxTokens = Math.max(1, args.maxTokens ?? 4096)
+    const requestedMaxTokens = Math.min(
+      this.profile.maxTokens,
+      Math.max(1, args.maxTokens ?? this.generation.maxTokens),
+    )
+    const budget = thinkingBudget(reasoning)
+    const maxTokens = Math.min(
+      this.profile.maxTokens,
+      Math.max(requestedMaxTokens, budget === null ? 1 : budget + 1),
+    )
     const kwargs: Record<string, unknown> = {
       model: AnthropicProvider.stripPrefix(args.model || this.defaultModel),
       max_tokens: maxTokens,
       messages,
-      temperature: args.temperature ?? 0.7,
     }
+    if (!reasoningEnabled)
+      kwargs.temperature = args.temperature ?? this.generation.temperature
     const cache = this.supportsPromptCaching()
     if (system) {
       kwargs.system = cache
         ? [{ type: 'text', text: system, cache_control: EPHEMERAL }]
         : system
     }
-    const tools = LLMProvider.openaiToolsToAnthropic(args.tools)
+    const tools = this.profile.toolCall
+      ? LLMProvider.openaiToolsToAnthropic(args.tools)
+      : null
     if (tools && tools.length) {
       if (cache)
         tools[tools.length - 1] = {
@@ -101,14 +129,16 @@ export class AnthropicProvider extends LLMProvider {
       kwargs.tools = tools
       kwargs.tool_choice = { type: 'auto' }
     }
-    if (reasoningEffort && reasoningEffort !== 'none') {
-      const budget =
-        { low: 1024, medium: 4096, high: 8192 }[reasoningEffort] ?? 4096
-      kwargs.thinking = { type: 'enabled', budget_tokens: budget }
-      kwargs.temperature = 1.0
-      kwargs.max_tokens = Math.max(maxTokens, budget + 1024)
-    }
+    Object.assign(kwargs, reasoning)
     return kwargs
+  }
+
+  private reasoningEffort(args: ChatArgs): ReasoningEffort | null {
+    return asReasoningEffort(
+      args.reasoningEffort === undefined
+        ? this.generation.reasoningEffort
+        : args.reasoningEffort,
+    )
   }
 
   static stripPrefix(model: string): string {
@@ -246,6 +276,8 @@ function contentToAnthropic(content: unknown): unknown {
           source: { type: 'base64', media_type: mediaType, data },
         })
       }
+    } else if (block.type === 'image' && block.source) {
+      out.push({ type: 'image', source: { ...block.source } })
     }
   }
   return out
@@ -328,6 +360,31 @@ function backfillReasoning(messages: Array<Record<string, any>>): void {
     if (msg.role === 'assistant' && !('reasoning_content' in msg))
       msg.reasoning_content = ''
   }
+}
+
+function thinkingBudget(reasoning: Record<string, unknown>): number | null {
+  const thinking = reasoning.thinking
+  if (!thinking || typeof thinking !== 'object') return null
+  const budget = Number(
+    (thinking as Record<string, unknown>).budget_tokens ?? Number.NaN,
+  )
+  return Number.isSafeInteger(budget) && budget > 0 ? budget : null
+}
+
+function asReasoningEffort(
+  value: string | null | undefined,
+): ReasoningEffort | null {
+  return [
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+  ].includes(value ?? '')
+    ? (value as ReasoningEffort)
+    : null
 }
 
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'

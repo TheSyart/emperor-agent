@@ -7,9 +7,6 @@
 
 export type ProviderProtocol = 'openai' | 'anthropic'
 
-/** @deprecated factory 完成双协议迁移后删除。 */
-export type ProviderBackend = 'openai_compat' | 'anthropic'
-
 export type ProviderModelDiscovery =
   'openai_compat' | 'anthropic' | 'unsupported'
 
@@ -47,8 +44,6 @@ export interface ProviderSpec {
   /** @deprecated Task 2 将 discovery 调用方切到显式 protocol 后删除。 */
   legacyModelDiscovery: ProviderModelDiscovery
   reasoningAdapter: ProviderReasoningAdapters
-  /** @deprecated use protocols/defaultProtocol. */
-  backend: ProviderBackend
   /** @deprecated use apiBases[protocol]. */
   defaultApiBase: string | null
   websiteUrl: string | null
@@ -93,10 +88,7 @@ export interface ProviderOption {
 
 type RegistryProviderSpec = ProviderSpec
 
-type SpecInput = Pick<
-  RegistryProviderSpec,
-  'name' | 'displayName' | 'backend'
-> &
+type SpecInput = Pick<RegistryProviderSpec, 'name' | 'displayName'> &
   Partial<
     Omit<
       RegistryProviderSpec,
@@ -215,7 +207,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'openai',
     displayName: 'OpenAI',
-    backend: 'openai_compat',
     keywords: ['openai', 'gpt', 'o1', 'o3', 'o4'],
     defaultApiBase: 'https://api.openai.com/v1',
     envKey: 'OPENAI_API_KEY',
@@ -227,7 +218,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'anthropic',
     displayName: 'Anthropic',
-    backend: 'anthropic',
     keywords: ['anthropic', 'claude'],
     envKey: 'ANTHROPIC_API_KEY',
     region: 'foreign',
@@ -238,7 +228,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'gemini',
     displayName: 'Google Gemini',
-    backend: 'openai_compat',
     keywords: ['gemini', 'gemma', 'google'],
     defaultApiBase: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     envKey: 'GEMINI_API_KEY',
@@ -249,7 +238,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'xai',
     displayName: 'xAI Grok',
-    backend: 'openai_compat',
     keywords: ['xai', 'grok'],
     defaultApiBase: 'https://api.x.ai/v1',
     envKey: 'XAI_API_KEY',
@@ -260,7 +248,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'mistral',
     displayName: 'Mistral AI',
-    backend: 'openai_compat',
     keywords: ['mistral', 'codestral'],
     defaultApiBase: 'https://api.mistral.ai/v1',
     envKey: 'MISTRAL_API_KEY',
@@ -271,7 +258,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'groq',
     displayName: 'Groq',
-    backend: 'openai_compat',
     keywords: ['groq'],
     defaultApiBase: 'https://api.groq.com/openai/v1',
     envKey: 'GROQ_API_KEY',
@@ -283,7 +269,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'openrouter',
     displayName: 'OpenRouter',
-    backend: 'openai_compat',
     keywords: ['openrouter'],
     defaultApiBase: 'https://openrouter.ai/api/v1',
     envKey: 'OPENROUTER_API_KEY',
@@ -298,7 +283,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'huggingface',
     displayName: 'Hugging Face',
-    backend: 'openai_compat',
     keywords: ['huggingface', 'hugging-face'],
     defaultApiBase: 'https://router.huggingface.co/v1',
     envKey: 'HF_TOKEN',
@@ -312,7 +296,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'aihubmix',
     displayName: 'AiHubMix',
-    backend: 'openai_compat',
     keywords: ['aihubmix'],
     defaultApiBase: 'https://aihubmix.com/v1',
     envKey: 'AIHUBMIX_API_KEY',
@@ -326,7 +309,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'siliconflow',
     displayName: 'SiliconFlow (硅基流动)',
-    backend: 'openai_compat',
     keywords: ['siliconflow'],
     defaultApiBase: 'https://api.siliconflow.cn/v1',
     envKey: 'SILICONFLOW_API_KEY',
@@ -340,7 +322,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'deepseek',
     displayName: 'DeepSeek',
-    backend: 'openai_compat',
     keywords: ['deepseek'],
     defaultApiBase: 'https://api.deepseek.com',
     envKey: 'DEEPSEEK_API_KEY',
@@ -352,7 +333,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'dashscope',
     displayName: 'Alibaba DashScope (Qwen)',
-    backend: 'openai_compat',
     keywords: ['dashscope', 'qwen'],
     defaultApiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     envKey: 'DASHSCOPE_API_KEY',
@@ -364,7 +344,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'moonshot',
     displayName: 'Moonshot Kimi',
-    backend: 'openai_compat',
     keywords: ['moonshot', 'kimi'],
     defaultApiBase: 'https://api.moonshot.cn/v1',
     envKey: 'MOONSHOT_API_KEY',
@@ -380,7 +359,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'zhipu',
     displayName: 'Zhipu GLM (智谱)',
-    backend: 'openai_compat',
     keywords: ['zhipu', 'glm', 'zai'],
     defaultApiBase: 'https://open.bigmodel.cn/api/paas/v4/',
     envKey: 'ZAI_API_KEY',
@@ -392,7 +370,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'volcengine',
     displayName: 'VolcEngine 火山方舟 (含豆包)',
-    backend: 'openai_compat',
     keywords: ['volcengine', 'volces', 'ark', 'doubao'],
     defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3',
     envKey: 'ARK_API_KEY',
@@ -406,7 +383,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'volcengine_coding_plan',
     displayName: 'VolcEngine Coding Plan',
-    backend: 'openai_compat',
     keywords: ['volcengine-plan'],
     defaultApiBase: 'https://ark.cn-beijing.volces.com/api/coding/v3',
     envKey: 'ARK_API_KEY',
@@ -420,7 +396,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'byteplus',
     displayName: 'BytePlus (海外火山)',
-    backend: 'openai_compat',
     keywords: ['byteplus'],
     defaultApiBase: 'https://ark.ap-southeast.bytepluses.com/api/v3',
     envKey: 'BYTEPLUS_API_KEY',
@@ -435,7 +410,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'minimax',
     displayName: 'MiniMax',
-    backend: 'openai_compat',
     keywords: ['minimax'],
     defaultApiBase: 'https://api.minimax.io/v1',
     envKey: 'MINIMAX_API_KEY',
@@ -448,7 +422,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'stepfun',
     displayName: 'Step Fun (阶跃星辰)',
-    backend: 'openai_compat',
     keywords: ['stepfun', 'step'],
     defaultApiBase: 'https://api.stepfun.com/v1',
     envKey: 'STEPFUN_API_KEY',
@@ -460,7 +433,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'xiaomi_mimo',
     displayName: 'Xiaomi MIMO (小米)',
-    backend: 'openai_compat',
     keywords: ['xiaomi', 'mimo'],
     defaultApiBase: 'https://api.xiaomimimo.com/v1',
     envKey: 'XIAOMIMIMO_API_KEY',
@@ -471,7 +443,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'longcat',
     displayName: 'LongCat (美团)',
-    backend: 'openai_compat',
     keywords: ['longcat'],
     defaultApiBase: 'https://api.longcat.chat/openai/v1',
     envKey: 'LONGCAT_API_KEY',
@@ -482,7 +453,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'qianfan',
     displayName: 'Qianfan 千帆 (文心 ERNIE)',
-    backend: 'openai_compat',
     keywords: ['qianfan', 'ernie', 'wenxin'],
     defaultApiBase: 'https://qianfan.baidubce.com/v2',
     envKey: 'QIANFAN_API_KEY',
@@ -495,7 +465,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'ollama',
     displayName: 'Ollama',
-    backend: 'openai_compat',
     keywords: ['ollama', 'llama', 'nemotron'],
     defaultApiBase: 'http://localhost:11434/v1',
     envKey: 'OLLAMA_API_KEY',
@@ -507,7 +476,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'lm_studio',
     displayName: 'LM Studio',
-    backend: 'openai_compat',
     keywords: ['lm-studio', 'lmstudio', 'lm_studio'],
     defaultApiBase: 'http://localhost:1234/v1',
     envKey: 'LM_STUDIO_API_KEY',
@@ -519,7 +487,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'vllm',
     displayName: 'vLLM',
-    backend: 'openai_compat',
     keywords: ['vllm'],
     envKey: 'HOSTED_VLLM_API_KEY',
     region: 'local',
@@ -529,7 +496,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'ovms',
     displayName: 'OpenVINO Model Server',
-    backend: 'openai_compat',
     keywords: ['openvino', 'ovms'],
     defaultApiBase: 'http://localhost:8000/v3',
     region: 'local',
@@ -541,7 +507,6 @@ export const PROVIDERS: readonly RegistryProviderSpec[] = [
   spec({
     name: 'custom',
     displayName: 'Custom',
-    backend: 'openai_compat',
     keywords: [],
     region: 'other',
     isDirect: true,

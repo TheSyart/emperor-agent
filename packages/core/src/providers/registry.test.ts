@@ -36,15 +36,14 @@ describe('provider registry', () => {
       protocols: ['anthropic'],
       defaultProtocol: 'anthropic',
       apiBases: { anthropic: 'https://api.anthropic.com' },
-      backend: 'anthropic',
       defaultApiBase: 'https://api.anthropic.com',
     })
     expect(findByName('openai')).toMatchObject({
       protocols: ['openai'],
       defaultProtocol: 'openai',
       apiBases: { openai: 'https://api.openai.com/v1' },
-      backend: 'openai_compat',
     })
+    expect(PROVIDERS.every((provider) => !('backend' in provider))).toBe(true)
   })
 
   it.each(Object.entries(dualProtocolBases))(
