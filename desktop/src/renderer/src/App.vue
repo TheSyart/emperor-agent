@@ -47,7 +47,6 @@ const {
   mcpContent,
   loadBootstrap,
   refreshMemory,
-  saveModelConfig: saveModelConfigBase,
   startProfileInterview: startProfileInterviewBase,
   skipProfileInterview: skipProfileInterviewBase,
   compactMemory,
@@ -114,14 +113,6 @@ async function openProfileInterviewSession(sessionId: string | null) {
   await sessionStore.load()
   await onSessionActivate(sessionId)
   await router.push('/').catch(() => undefined)
-}
-
-async function saveModelConfig(
-  config: Parameters<typeof saveModelConfigBase>[0],
-) {
-  const onboarding = await saveModelConfigBase(config)
-  if (onboarding?.started)
-    await openProfileInterviewSession(onboarding.state.sessionId)
 }
 
 async function startProfileInterview() {
@@ -237,7 +228,7 @@ provideAppContext({
   commands: slashPaletteItems,
   refreshAll,
   refreshMemory,
-  saveModelConfig,
+  openProfileInterviewSession,
   startProfileInterview,
   skipProfileInterview,
   compactMemory,

@@ -46,7 +46,7 @@ const emit = defineEmits<{
   stop: []
   error: [message: string]
   'set-mode': [mode: ControlModeValue]
-  'switch-model': [entryName: string]
+  'switch-model': [entryId: string]
   'set-reasoning-effort': [level: string | null]
 }>()
 const value = ref('')
@@ -212,15 +212,15 @@ const modeTitle = computed(() =>
   props.busy ? '等待当前任务结束后再切换' : '切换执行方式',
 )
 const availableModelEntries = computed(() =>
-  props.modelEntries.filter((entry) => entry.name),
+  props.modelEntries.filter((entry) => entry.entryId),
 )
-const activeModelName = computed(
-  () => props.currentModel?.entryName || props.modelEntries[0]?.name || '',
+const activeModelId = computed(
+  () => props.currentModel?.entryId || props.modelEntries[0]?.entryId || '',
 )
 const currentModelEntry = computed(
   () =>
     availableModelEntries.value.find(
-      (entry) => entry.name === activeModelName.value,
+      (entry) => entry.entryId === activeModelId.value,
     ) ||
     availableModelEntries.value[0] ||
     null,
@@ -228,11 +228,10 @@ const currentModelEntry = computed(
 const showModelSwitcher = computed(() => availableModelEntries.value.length > 0)
 const currentModelLabel = computed(() => {
   const entry = currentModelEntry.value
-  if (entry) return entry.label || entry.name
+  if (entry) return entry.displayName || entry.modelId || '模型'
   return (
-    props.currentModel?.entryLabel ||
-    props.currentModel?.entryName ||
-    props.currentModel?.model ||
+    props.currentModel?.displayName ||
+    props.currentModel?.modelId ||
     '模型'
   )
 })
@@ -254,13 +253,13 @@ const modelTitle = computed(() => {
   if (props.busy) return '等待当前任务结束后再切换模型'
   return `${currentModelLabel.value} · 思考 ${currentReasoningLabel.value}`
 })
-const reasoningOptions = [
+const reasoningOptions = computed(() => [
   { value: null, label: 'Default' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'max', label: 'Max' },
-] as const
+  ...(props.currentModel?.reasoningEfforts || []).map((value) => ({
+    value,
+    label: reasoningLabel(value),
+  })),
+])
 
 function paletteItemFromSlash(
   item: SlashPaletteItem,
@@ -426,10 +425,10 @@ async function toggleModelMenu() {
   modelFloatingMenu.position()
 }
 
-function selectModel(entryName: string) {
+function selectModel(entryId: string) {
   if (props.busy) return
   closeModelMenu()
-  if (entryName !== activeModelName.value) emit('switch-model', entryName)
+  if (entryId !== activeModelId.value) emit('switch-model', entryId)
   input.value?.focus()
 }
 
@@ -511,15 +510,7 @@ function fmt(n: number) {
 }
 
 function modelEntryLabel(entry: ModelEntry) {
-  return entry.label || entry.name
-}
-
-function entryMainModelId(entry: ModelEntry) {
-  return entry.mainModelId || entry.id || '未配置'
-}
-
-function entrySecondaryModelId(entry: ModelEntry) {
-  return entry.secondaryModelId || '未配置'
+  return entry.displayName || entry.modelId || '模型'
 }
 
 function normalizeReasoningValue(value?: string | null) {
@@ -527,8 +518,12 @@ function normalizeReasoningValue(value?: string | null) {
     .trim()
     .toLowerCase()
   if (!normalized) return ''
-  if (normalized === 'xhigh' || normalized === 'max') return 'max'
-  if (['high', 'medium', 'low', 'none'].includes(normalized)) return normalized
+  if (
+    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
+      normalized,
+    )
+  )
+    return normalized
   return normalized
 }
 
@@ -536,9 +531,11 @@ function reasoningLabel(value?: string | null) {
   const normalized = normalizeReasoningValue(value)
   if (!normalized) return 'Default'
   if (normalized === 'max') return 'Max'
+  if (normalized === 'xhigh') return 'XHigh'
   if (normalized === 'high') return 'High'
   if (normalized === 'medium') return 'Medium'
   if (normalized === 'low') return 'Low'
+  if (normalized === 'minimal') return 'Minimal'
   if (normalized === 'none') return 'None'
   return normalized
 }
@@ -828,9 +825,9 @@ onBeforeUnmount(() => {
           <span>模型与思考</span>
           <em>下一轮生效</em>
         </div>
-        <div class="reasoning-row">
-          <span>推理强度</span>
-          <div class="reasoning-control" role="group" aria-label="推理强度">
+        <div v-if="reasoningOptions.length > 1" class="reasoning-row">
+          <span>思考强度</span>
+          <div class="reasoning-control" role="group" aria-label="思考强度">
             <button
               v-for="option in reasoningOptions"
               :key="option.label"
@@ -848,11 +845,11 @@ onBeforeUnmount(() => {
         <div class="model-menu-label">模型条目</div>
         <button
           v-for="entry in availableModelEntries"
-          :key="entry.name"
+          :key="entry.entryId"
           type="button"
           class="model-option"
-          :data-active="entry.name === activeModelName"
-          @click="selectModel(entry.name)"
+          :data-active="entry.entryId === activeModelId"
+          @click="entry.entryId && selectModel(entry.entryId)"
         >
           <component
             :is="modelIcons.text"
@@ -861,14 +858,14 @@ onBeforeUnmount(() => {
           />
           <span class="model-option-copy">
             <strong>{{ modelEntryLabel(entry) }}</strong>
-            <small>{{ entryMainModelId(entry) }}</small>
+            <small>{{ entry.modelId || '未配置' }}</small>
             <span class="model-option-meta">
               <em>{{ entry.provider || 'provider' }}</em>
-              <em>次 {{ entrySecondaryModelId(entry) }}</em>
+              <em>{{ entry.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI' }}</em>
             </span>
           </span>
           <span class="model-option-badges">
-            <b>{{ entry.name === activeModelName ? '当前' : '切换' }}</b>
+            <b>{{ entry.entryId === activeModelId ? '当前' : '切换' }}</b>
           </span>
         </button>
       </div>

@@ -30,7 +30,13 @@ function bootStub(): BootstrapPayload {
     memory: { tokenTotals: { total: 1234, calls: 5 } },
     unarchivedHistory: [{ role: 'user', content: 'x' }],
     modelConfig: {
-      current: { name: 'e', provider: 'prov', mainModelId: 'main-model' },
+      current: {
+        entryId: 'e',
+        provider: 'prov',
+        protocol: 'openai',
+        modelId: 'main-model',
+        capabilities: { toolCall: true, vision: false, reasoning: true },
+      },
     },
   } as unknown as BootstrapPayload
 }

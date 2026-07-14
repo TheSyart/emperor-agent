@@ -176,11 +176,11 @@ async function deleteArchived(id: string) {
             <div class="settings-row">
               <Cpu :size="18" />
               <div>
-                <strong>主模型</strong>
-                <span>对话与构建任务的默认模型</span>
+                <strong>当前模型</strong>
+                <span>所有 Agent 工作负载共用的激活模型</span>
               </div>
               <code>{{
-                ctx.boot.value?.modelConfig?.current?.mainModelId ||
+                ctx.boot.value?.modelConfig?.current?.modelId ||
                 ctx.boot.value?.model ||
                 '未配置'
               }}</code>

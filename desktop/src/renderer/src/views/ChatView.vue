@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { cloneJson } from '../api/http'
+import {
+  activateModelEntry,
+  setModelReasoningEffort,
+} from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { useSession } from '../composables/useSession'
 import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
@@ -9,12 +12,12 @@ import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.
 import Composer from '../components/chat/Composer.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import PendingBar from '../components/chat/PendingBar.vue'
-import type { ModelConfigRaw } from '../types'
+import type { ModelConfigPayload } from '../types'
 
 const ctx = useAppContext()
 const sessionStore = useSession()
 const modelEntries = computed(
-  () => ctx.boot.value?.modelConfig?.config?.models || [],
+  () => ctx.boot.value?.modelConfig?.models || [],
 )
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -37,44 +40,38 @@ const showProfileOnboardingPrompt = computed(
     !activeBottomControl.value,
 )
 
-function switchModel(entryName: string) {
+function applyModelConfig(payload: ModelConfigPayload): void {
+  if (!ctx.boot.value) return
+  ctx.boot.value.modelConfig = payload
+  ctx.boot.value.model = payload.current?.modelId || ''
+  ctx.boot.value.provider = payload.current?.provider || undefined
+  ctx.boot.value.providerLabel = payload.current?.providerLabel || undefined
+}
+
+function switchModel(entryId: string) {
   const payload = ctx.boot.value?.modelConfig
-  if (!payload?.config || payload.current?.entryName === entryName) return
-  const sourceConfig = payload.config
+  if (!payload || payload.current?.entryId === entryId) return
   void ctx.runSafely(async () => {
-    const config = cloneJson<ModelConfigRaw>(sourceConfig)
-    config.agents = {
-      ...(config.agents || {}),
-      defaults: {
-        ...(config.agents?.defaults || {}),
-        model: entryName,
-      },
-    }
-    await ctx.saveModelConfig(config)
+    applyModelConfig(await activateModelEntry(entryId))
   })
 }
 
 function setReasoningEffort(level: string | null) {
   const payload = ctx.boot.value?.modelConfig
-  const activeName = payload?.current?.entryName
-  if (!payload?.config || !activeName) return
-  const currentEntry = payload.config.models?.find(
-    (entry) => entry.name === activeName,
+  const activeId = payload?.current?.entryId
+  if (!payload || !activeId) return
+  const currentEntry = payload.models?.find(
+    (entry) => entry.entryId === activeId,
   )
   const currentValue = normalizeReasoningEffort(
     payload.current?.reasoningEffort ?? currentEntry?.reasoningEffort,
   )
   const nextValue = normalizeReasoningEffort(level)
   if (currentValue === nextValue) return
-  const sourceConfig = payload.config
   void ctx.runSafely(async () => {
-    const config = cloneJson<ModelConfigRaw>(sourceConfig)
-    const entry = config.models?.find(
-      (candidate) => candidate.name === activeName,
+    applyModelConfig(
+      await setModelReasoningEffort(activeId, nextValue || null),
     )
-    if (!entry) return
-    entry.reasoningEffort = nextValue || null
-    await ctx.saveModelConfig(config)
   })
 }
 
@@ -82,7 +79,6 @@ function normalizeReasoningEffort(value?: string | null) {
   const normalized = String(value || '')
     .trim()
     .toLowerCase()
-  if (normalized === 'xhigh') return 'max'
   return normalized
 }
 </script>
@@ -95,7 +91,7 @@ function normalizeReasoningEffort(value?: string | null) {
         <p class="truncate">
           {{ ctx.runtimeText() }} ·
           {{
-            ctx.boot.value?.modelConfig?.current?.entryLabel ||
+            ctx.boot.value?.modelConfig?.current?.displayName ||
             ctx.boot.value?.model ||
             'model'
           }}
@@ -155,7 +151,7 @@ function normalizeReasoningEffort(value?: string | null) {
             :current-model="currentModel"
             :model-entries="modelEntries"
             :supports-vision="
-              ctx.boot.value?.modelConfig?.current?.supportsVision ?? false
+              ctx.boot.value?.modelConfig?.current?.capabilities?.vision ?? false
             "
             :send-blocked-reason="sendBlockedReason"
             @set-mode="ctx.setControlMode"

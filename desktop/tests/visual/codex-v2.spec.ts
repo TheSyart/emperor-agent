@@ -186,10 +186,9 @@ for (const scenario of scenarios) {
       await expect(page.getByRole('button', { name: /Team/i })).toHaveCount(0)
     }
     if (scenario.path === '/settings/model') {
-      await expect(page.locator('.advanced-panel')).toBeVisible()
-      await expect(page.getByText('主次模型怎么选')).toBeVisible()
-      await expect(page.getByText('Context Window').first()).toBeAttached()
-      await expect(page.getByText('Max Tokens').first()).toBeAttached()
+      await expect(page.locator('.model-entry-list')).toBeVisible()
+      await expect(page.getByText('Visual Local')).toBeVisible()
+      await expect(page.getByText('单模型运行')).toBeVisible()
     }
     await expect(page.locator('body')).not.toContainText('Web UI 启动失败')
     await page.waitForTimeout(650)
@@ -200,69 +199,49 @@ for (const scenario of scenarios) {
   })
 }
 
-test('model pickers select, reopen all candidates, and retain custom ids', async ({
+test('model editor discovers candidates and retains a custom model id', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 820 })
   await page.goto('/settings/model')
+  await page.getByRole('button', { name: '编辑 Visual Local' }).click()
   await page.getByRole('button', { name: '获取模型' }).click()
   await expect(page.getByText('已获取 3 个模型')).toBeVisible()
 
-  const main = page.getByRole('combobox', { name: 'Main Model ID' })
-  await main.click()
-  await expect(
-    page.getByRole('listbox', { name: 'Main Model ID候选模型' }),
-  ).toBeVisible()
-  await expect(page.getByRole('option', { name: /visual-pro/ })).toBeVisible()
-  await page.getByRole('option', { name: /visual-pro/ }).click()
-  await expect(main).toHaveValue('visual-pro')
-
-  await main.click()
-  await expect(page.getByRole('option', { name: /visual-main/ })).toBeVisible()
-  await expect(
-    page.getByRole('option', { name: /visual-secondary/ }),
-  ).toBeVisible()
-  await expect(page.getByRole('option', { name: /visual-pro/ })).toBeVisible()
-  await main.press('Escape')
-
-  const secondary = page.getByRole('combobox', { name: 'Secondary Model ID' })
-  await secondary.click()
-  await secondary.press('ArrowDown')
-  await secondary.press('Enter')
-  await expect(secondary).toHaveValue('visual-main')
-  await expect(main).toHaveValue('visual-pro')
-
-  await secondary.fill('private-model-v2')
-  await secondary.press('Escape')
-  await expect(secondary).toHaveValue('private-model-v2')
-  await secondary.click()
-  await expect(
-    page.getByRole('option', { name: /private-model-v2.*自定义/ }),
-  ).toBeVisible()
-  await expect(page.getByRole('option', { name: /visual-main/ })).toBeVisible()
+  const modelId = page.getByLabel('模型 ID')
+  await modelId.fill('visual-pro')
+  await expect(modelId).toHaveValue('visual-pro')
+  await modelId.fill('private-model-v2')
+  await expect(modelId).toHaveValue('private-model-v2')
+  await expect(page.getByRole('button', { name: '保存模型' })).toBeEnabled()
 })
 
-test('model picker remains anchored when the settings viewport shrinks', async ({
+test('model editor remains inside the settings viewport when it shrinks', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 820 })
   await page.goto('/settings/model')
-  await page.getByRole('button', { name: '获取模型' }).click()
-
-  const main = page.getByRole('combobox', { name: 'Main Model ID' })
-  const listbox = page.getByRole('listbox', {
-    name: 'Main Model ID候选模型',
+  await page.getByRole('button', { name: '编辑 Visual Local' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑模型' })
+  await expect(dialog).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectDialogWithinViewport(page, dialog)
+  const dialogScroll = await page.locator('.dialog-body').evaluate((element) => {
+    const host = element as HTMLElement
+    host.scrollTop = Math.min(80, host.scrollHeight - host.clientHeight)
+    return {
+      overflowY: window.getComputedStyle(host).overflowY,
+      scrollable: host.scrollHeight > host.clientHeight + 1,
+      scrolled: host.scrollTop > 0,
+    }
   })
-  await main.click()
-  await expect(listbox).toBeVisible()
-  await expectModelPickerAnchored(main, listbox)
-
-  await page.setViewportSize({ width: 1024, height: 768 })
-  await expect(listbox).toBeVisible()
-  await expectModelPickerAnchored(main, listbox)
-  await expect(listbox).toHaveAttribute('data-placement', 'top')
+  expect(dialogScroll).toEqual({
+    overflowY: 'auto',
+    scrollable: true,
+    scrolled: true,
+  })
   await page.screenshot({
-    path: resolve(screenshotDir, 'settings-model-picker-resized.png'),
+    path: resolve(screenshotDir, 'settings-model-editor-mobile.png'),
     fullPage: false,
   })
 })
@@ -293,8 +272,10 @@ test('first saved model returns to chat and completes the profile interview', as
     name: '把任务交给本地 Agent。',
   })
   await prompt.getByRole('button', { name: '去配置模型' }).click()
-  await page.getByLabel('显示标签（可选）').fill('Visual First Run')
-  await page.getByRole('button', { name: '保存配置' }).click()
+  await page.getByRole('button', { name: '添加模型', exact: true }).click()
+  await page.getByLabel('模型 ID').fill('visual-main')
+  await page.getByLabel('显示名称（可选）').fill('Visual First Run')
+  await page.getByRole('button', { name: '保存模型' }).click()
 
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByText(/初次见面。我会根据你的回答/)).toBeVisible()
@@ -410,11 +391,7 @@ test('settings pages keep their scroll contract without horizontal overflow', as
         return { found: true, scrolled: scrollHost.scrollTop > 0 }
       })
 
-      if (
-        route === 'diagnostics' ||
-        (route === 'model' && viewport.width < 980)
-      )
-        expect(scrollResult.found).toBe(true)
+      if (route === 'diagnostics') expect(scrollResult.found).toBe(true)
       if (scrollResult.found) expect(scrollResult.scrolled).toBe(true)
     }
   }
@@ -752,21 +729,6 @@ async function expectDialogWithinViewport(page: Page, dialog: Locator) {
     .toBe(true)
 }
 
-async function expectModelPickerAnchored(input: Locator, listbox: Locator) {
-  await expect
-    .poll(async () => {
-      const inputBox = await input.boundingBox()
-      const listboxBox = await listbox.boundingBox()
-      const placement = await listbox.getAttribute('data-placement')
-      if (!inputBox || !listboxBox || !placement)
-        return Number.POSITIVE_INFINITY
-      return placement === 'top'
-        ? Math.abs(listboxBox.y + listboxBox.height - (inputBox.y - 6))
-        : Math.abs(listboxBox.y - (inputBox.y + inputBox.height + 6))
-    })
-    .toBeLessThanOrEqual(1)
-}
-
 async function completeVisualProfileInterview(page: Page) {
   const panel = page.locator('.active-ask-panel')
   await expect(panel).toBeVisible()
@@ -840,7 +802,72 @@ async function installVisualCoreBridge(page: Page) {
           ],
         },
       ]
-      const modelConfig = {
+      const visualModelEntry = {
+        entryId: 'visual-entry',
+        provider: 'visual',
+        protocol: 'openai',
+        modelId: 'visual-main',
+        displayName: 'Visual Local',
+        apiBase: 'https://visual.example/v1',
+        apiKey: '',
+        capabilityOverrides: { vision: true },
+        contextWindowTokens: 128000,
+        maxTokens: 4096,
+        reasoningEffort: 'high',
+        resolvedProfile: {
+          toolCall: true,
+          vision: true,
+          reasoning: true,
+          sources: {
+            toolCall: 'inferred',
+            vision: 'override',
+            reasoning: 'inferred',
+          },
+          contextWindowTokens: 128000,
+          maxTokens: 4096,
+          reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          reasoningAdapter: 'openai',
+        },
+      }
+      const visualCurrent = {
+        entryId: 'visual-entry',
+        provider: 'visual',
+        providerLabel: 'Visual Provider',
+        protocol: 'openai',
+        modelId: 'visual-main',
+        displayName: 'Visual Local',
+        apiBase: 'https://visual.example/v1',
+        reasoningEffort: 'high',
+        contextWindowTokens: 128000,
+        maxTokens: 4096,
+        capabilities: { toolCall: true, vision: true, reasoning: true },
+        capabilitySources: visualModelEntry.resolvedProfile.sources,
+        reasoningEfforts: visualModelEntry.resolvedProfile.reasoningEfforts,
+        reasoningAdapter: 'openai',
+      }
+      const currentForEntry = (entry: any) => ({
+        ...visualCurrent,
+        entryId: entry.entryId,
+        provider: entry.provider,
+        protocol: entry.protocol,
+        modelId: entry.modelId,
+        displayName: entry.displayName || null,
+        apiBase: entry.apiBase,
+        reasoningEffort: entry.reasoningEffort ?? null,
+        contextWindowTokens: entry.contextWindowTokens,
+        maxTokens: entry.maxTokens,
+        capabilities: {
+          toolCall: entry.resolvedProfile.toolCall,
+          vision: entry.resolvedProfile.vision,
+          reasoning: entry.resolvedProfile.reasoning,
+        },
+        capabilitySources: entry.resolvedProfile.sources,
+        reasoningEfforts: entry.resolvedProfile.reasoningEfforts,
+      })
+      const modelConfig: any = {
+        schemaVersion: 2,
+        activeModelId: modelUnavailable ? null : 'visual-entry',
+        models: modelUnavailable ? [] : [visualModelEntry],
         availability: modelUnavailable
           ? {
               usable: false,
@@ -848,64 +875,24 @@ async function installVisualCoreBridge(page: Page) {
               message: '还没有可用模型，请先配置模型。',
               action: 'open_model_settings',
               provider: null,
-              entryName: null,
             }
           : {
               usable: true,
               message: '模型已配置',
               provider: 'visual',
-              entryName: 'visual',
             },
-        current: {
-          provider: 'visual',
-          providerLabel: 'Visual Provider',
-          model: 'visual-main',
-          mainModelId: 'visual-main',
-          secondaryModelId: 'visual-secondary',
-          entryName: 'visual',
-          entryLabel: 'Visual Local',
-          supportsVision: true,
-          contextWindowTokens: 128000,
-          maxTokens: 4096,
-        },
-        secondary: {
-          provider: 'visual',
-          providerLabel: 'Visual Provider',
-          model: 'visual-secondary',
-          entryName: 'visual',
-          entryLabel: 'Visual Local',
-        },
-        routing: {
-          secondaryEnabled: true,
-          fallbackToMain: true,
-          mainEntry: 'visual',
-          mainModel: 'visual-main',
-          secondaryModel: 'visual-secondary',
-        },
-        config: {
-          agents: { defaults: { provider: 'visual', model: 'visual' } },
-          models: [
-            {
-              name: 'visual',
-              label: 'Visual Local',
-              provider: 'visual',
-              mainModelId: 'visual-main',
-              secondaryModelId: 'visual-secondary',
-              contextWindowTokens: 128000,
-              maxTokens: 4096,
-              supportsVision: true,
-            },
-          ],
-          providers: { visual: { apiKey: '' } },
-        },
+        current: modelUnavailable ? null : visualCurrent,
         providerOptions: [
           {
             name: 'visual',
             displayName: 'Visual Provider',
-            backend: 'openai-compatible',
+            protocols: ['openai'],
+            defaultProtocol: 'openai',
+            apiBases: { openai: 'https://visual.example/v1' },
+            iconId: 'openai',
             region: 'local',
             isLocal: true,
-            modelDiscovery: 'supported',
+            modelDiscovery: { openai: 'openai_compat' },
           },
         ],
       }
@@ -1546,17 +1533,90 @@ async function installVisualCoreBridge(page: Page) {
               }
             case 'model.getConfig':
               return modelConfig
-            case 'model.saveConfig': {
+            case 'model.saveEntry': {
+              const input = (args[0] || {}) as any
+              const wasUsable = Boolean(modelConfig.availability.usable)
+              const entryId = input.entryId || 'visual-entry'
+              const existing = modelConfig.models.find(
+                (entry: any) => entry.entryId === entryId,
+              )
+              const overrides = input.capabilityOverrides || {}
+              const saved = {
+                ...(existing || visualModelEntry),
+                ...input,
+                entryId,
+                apiKey: '',
+                resolvedProfile: {
+                  ...visualModelEntry.resolvedProfile,
+                  toolCall: overrides.toolCall ?? true,
+                  vision: overrides.vision ?? true,
+                  reasoning: overrides.reasoning ?? true,
+                  contextWindowTokens:
+                    input.contextWindowTokens || 128000,
+                  maxTokens: input.maxTokens || 4096,
+                },
+              }
+              const index = modelConfig.models.findIndex(
+                (entry: any) => entry.entryId === entryId,
+              )
+              if (index >= 0) modelConfig.models[index] = saved
+              else modelConfig.models.push(saved)
+              if (!modelConfig.activeModelId) modelConfig.activeModelId = entryId
+              const active = modelConfig.models.find(
+                (entry: any) => entry.entryId === modelConfig.activeModelId,
+              )
+              modelConfig.current = active ? currentForEntry(active) : null
               Object.assign(modelConfig.availability, {
                 usable: true,
                 message: '模型已配置',
                 provider: 'visual',
-                entryName: 'visual',
               })
-              const action = await window.emperor?.invokeCore(
-                'onboarding.startProfileInterview',
+              if (!wasUsable) {
+                const action = await window.emperor?.invokeCore(
+                  'onboarding.startProfileInterview',
+                )
+                return { ...modelConfig, profileOnboarding: action }
+              }
+              return modelConfig
+            }
+            case 'model.activate': {
+              const entryId = String((args[0] as any)?.entryId || '')
+              const active = modelConfig.models.find(
+                (entry: any) => entry.entryId === entryId,
               )
-              return { ...modelConfig, profileOnboarding: action }
+              if (active) {
+                modelConfig.activeModelId = entryId
+                modelConfig.current = currentForEntry(active)
+              }
+              return modelConfig
+            }
+            case 'model.deleteEntry': {
+              const entryId = String((args[0] as any)?.entryId || '')
+              modelConfig.models = modelConfig.models.filter(
+                (entry: any) => entry.entryId !== entryId,
+              )
+              if (modelConfig.activeModelId === entryId) {
+                modelConfig.activeModelId =
+                  modelConfig.models[0]?.entryId || null
+              }
+              const active = modelConfig.models.find(
+                (entry: any) =>
+                  entry.entryId === modelConfig.activeModelId,
+              )
+              modelConfig.current = active ? currentForEntry(active) : null
+              modelConfig.availability.usable = Boolean(active)
+              return modelConfig
+            }
+            case 'model.setReasoningEffort': {
+              const body = (args[0] || {}) as any
+              const entry = modelConfig.models.find(
+                (candidate: any) => candidate.entryId === body.entryId,
+              )
+              if (entry) entry.reasoningEffort = body.reasoningEffort
+              if (entry?.entryId === modelConfig.activeModelId) {
+                modelConfig.current = currentForEntry(entry)
+              }
+              return modelConfig
             }
             case 'onboarding.getProfileStatus':
               return profileOnboarding
@@ -1797,6 +1857,7 @@ async function installVisualCoreBridge(page: Page) {
               return {
                 ok: true,
                 provider: 'visual',
+                protocol: 'openai',
                 source: 'visual-fixture',
                 models: [
                   { id: 'visual-main', ownedBy: 'Visual Labs' },
@@ -1804,6 +1865,18 @@ async function installVisualCoreBridge(page: Page) {
                   { id: 'visual-pro', ownedBy: 'Visual Research' },
                 ],
               }
+            case 'model.test': {
+              const body = (args[0] || {}) as any
+              return {
+                ok: true,
+                entryId: body.entryId,
+                kind: body.kind,
+                latencyMs: 42,
+                model: modelConfig.current?.modelId || 'visual-main',
+                provider: 'visual',
+                sample: body.kind === 'vision' ? 'red' : 'pong',
+              }
+            }
             case 'config.get':
               return {
                 path: 'memory/profile/USER.local.md',
@@ -2266,7 +2339,9 @@ async function assertFloatingModelMenu(page: Page) {
   await expect(menu).not.toContainText('输出上限')
   await expect(menu).not.toContainText(/\b\d+k\b|1M/)
   await expect(menu.locator('.reasoning-control')).toBeVisible()
-  await expect(menu.locator('.reasoning-choice')).toHaveCount(5)
+  await expect(menu.locator('.reasoning-choice')).toHaveCount(7)
+  await expect(menu.locator('.reasoning-control')).toContainText('XHigh')
+  await expect(menu.locator('.reasoning-control')).toContainText('Max')
   await expect(menu.locator('.model-option').first()).toBeVisible()
   await expect(
     menu.locator('.model-option').first().locator('.model-option-meta'),

@@ -1,79 +1,361 @@
 <script setup lang="ts">
-import type { ModelEntry } from '../../../types'
-import { actionIcons, modelIcons } from '../../../icons'
+import { Check, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import type { ModelEntry, ProviderOption } from '../../../types'
+import { providerIconAsset, providerIconFallback } from './providerIcons'
 
-defineProps<{
+const props = defineProps<{
   entries: ModelEntry[]
-  defaultName: string
-  editingIndex: number
+  providerOptions: ProviderOption[]
+  activeModelId: string | null
+  activatingId?: string | null
+  deletingId?: string | null
 }>()
 
 const emit = defineEmits<{
   add: []
-  pick: [index: number]
-  setActive: [index: number]
+  edit: [entry: ModelEntry]
+  activate: [entryId: string]
+  delete: [entryId: string]
 }>()
+
+function providerOption(entry: ModelEntry): ProviderOption | undefined {
+  return props.providerOptions.find((option) => option.name === entry.provider)
+}
+
+function providerLabel(entry: ModelEntry): string {
+  const provider = providerOption(entry)
+  return provider?.displayName || provider?.name || entry.provider
+}
+
+function providerIcon(entry: ModelEntry): string | null {
+  return providerIconAsset(providerOption(entry)?.iconId || entry.provider)
+}
 </script>
 
 <template>
-  <aside class="entry-list-pane">
-    <header class="entry-list-head">
-      <div class="entry-list-title">
-        <span>模型条目</span>
-        <small>{{ entries.length }} 条</small>
+  <section class="model-entry-list" aria-labelledby="saved-models-title">
+    <header class="model-list-head">
+      <div>
+        <h2 id="saved-models-title">已保存模型</h2>
+        <p>可以保存多条配置，但全局只激活一个模型。</p>
       </div>
-      <button class="tool-button compact" @click="emit('add')">
-        <component :is="actionIcons.new" :size="14" />
-        <span>添加</span>
+      <button type="button" class="model-add-button" @click="emit('add')">
+        <Plus :size="16" aria-hidden="true" />
+        添加模型
       </button>
     </header>
-    <div class="entry-list">
-      <div
-        v-for="(entry, idx) in entries"
-        :key="idx"
-        class="entry-item"
-        :class="{
-          active: idx === editingIndex,
-          default: entry.name === defaultName,
-        }"
-        @click="emit('pick', idx)"
+
+    <div v-if="entries.length" class="model-card-grid">
+      <article
+        v-for="entry in entries"
+        :key="entry.entryId"
+        class="model-card"
+        :class="{ active: entry.entryId === activeModelId }"
       >
-        <div class="entry-meta">
-          <div class="entry-title">
-            <span>{{ entry.label || entry.name }}</span>
-            <span
-              v-if="entry.supportsVision"
-              class="entry-vision-eye"
-              title="此条目已通过视觉测试，可接收图片附件"
-              aria-label="视觉已激活"
-            >
-              <component :is="modelIcons.vision" :size="14" />
-            </span>
+        <div class="model-card-main">
+          <div class="provider-avatar" aria-hidden="true">
+            <img
+              v-if="providerIcon(entry)"
+              :src="providerIcon(entry) || undefined"
+              :alt="`${providerLabel(entry)} logo`"
+            />
+            <span v-else>{{ providerIconFallback(providerLabel(entry)) }}</span>
           </div>
-          <div class="entry-sub">
-            <code>{{ entry.provider }}</code> ·
-            <code>{{ entry.mainModelId || entry.id || '(no main)' }}</code>
-            /
-            <code :class="{ 'text-seal': !entry.secondaryModelId }">{{
-              entry.secondaryModelId || '需补次模型'
-            }}</code>
+          <div class="model-card-copy">
+            <div class="model-card-title-row">
+              <strong>{{ entry.displayName || entry.modelId }}</strong>
+              <span
+                v-if="entry.entryId === activeModelId"
+                class="active-badge"
+              >
+                <Check :size="12" aria-hidden="true" />
+                激活
+              </span>
+            </div>
+            <code>{{ entry.modelId }}</code>
+            <div class="model-card-meta">
+              <span>{{ providerLabel(entry) }}</span>
+              <span aria-hidden="true">·</span>
+              <span>{{ entry.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI' }}</span>
+            </div>
           </div>
         </div>
-        <span
-          v-if="entry.name === defaultName"
-          class="entry-active-badge"
-          title="此条目当前为激活状态"
-          >激活</span
-        >
-        <button
-          v-else
-          class="entry-activate-btn"
-          title="切换为激活条目（保存后生效）"
-          @click.stop="emit('setActive', idx)"
-        >
-          设为激活
-        </button>
-      </div>
+
+        <div class="model-card-actions">
+          <button
+            v-if="entry.entryId !== activeModelId"
+            type="button"
+            class="card-action activate"
+            :disabled="activatingId === entry.entryId"
+            @click="entry.entryId && emit('activate', entry.entryId)"
+          >
+            {{ activatingId === entry.entryId ? '切换中…' : '设为激活' }}
+          </button>
+          <button
+            type="button"
+            class="card-action icon"
+            :aria-label="`编辑 ${entry.displayName || entry.modelId}`"
+            title="编辑"
+            @click="emit('edit', entry)"
+          >
+            <Pencil :size="15" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="card-action icon danger"
+            :disabled="deletingId === entry.entryId"
+            :aria-label="`删除 ${entry.displayName || entry.modelId}`"
+            title="删除"
+            @click="entry.entryId && emit('delete', entry.entryId)"
+          >
+            <Trash2 :size="15" aria-hidden="true" />
+          </button>
+        </div>
+      </article>
     </div>
-  </aside>
+
+    <button v-else type="button" class="model-empty" @click="emit('add')">
+      <span class="empty-plus"><Plus :size="20" aria-hidden="true" /></span>
+      <strong>添加第一个模型</strong>
+      <span>配置 API 地址、凭证和模型能力后即可开始使用。</span>
+    </button>
+  </section>
 </template>
+
+<style scoped>
+.model-entry-list {
+  display: grid;
+  gap: 18px;
+}
+
+.model-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-list-head h2 {
+  margin: 0;
+  color: rgb(var(--fg));
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.model-list-head p {
+  margin: 5px 0 0;
+  color: rgb(var(--fg-subtle));
+  font-size: 12px;
+}
+
+.model-add-button,
+.card-action {
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--bg-elevated));
+  color: rgb(var(--fg));
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    color 150ms ease;
+}
+
+.model-add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.model-add-button:hover,
+.card-action:hover:not(:disabled) {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--bg-inset));
+}
+
+.model-card-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.model-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 78px;
+  padding: 14px 16px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--bg-elevated));
+}
+
+.model-card.active {
+  border-color: rgb(var(--accent) / 0.52);
+  box-shadow: inset 3px 0 0 rgb(var(--accent));
+}
+
+.model-card-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 13px;
+}
+
+.provider-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border));
+  border-radius: 9px;
+  background: rgb(var(--bg));
+  color: rgb(var(--fg-muted));
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.provider-avatar img {
+  width: 23px;
+  height: 23px;
+  object-fit: contain;
+}
+
+.model-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.model-card-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.model-card-title-row strong,
+.model-card-copy code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-title-row strong {
+  color: rgb(var(--fg));
+  font-size: 13px;
+}
+
+.model-card-copy code {
+  color: rgb(var(--fg-muted));
+  font-size: 12px;
+}
+
+.model-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+}
+
+.active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgb(var(--accent) / 0.15);
+  color: rgb(var(--accent));
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.model-card-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.card-action {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.card-action.icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+}
+
+.card-action.danger:hover:not(:disabled) {
+  border-color: rgb(var(--danger));
+  color: rgb(var(--danger));
+}
+
+.card-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.model-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  min-height: 190px;
+  padding: 28px;
+  border: 1px dashed rgb(var(--border));
+  border-radius: 10px;
+  background: transparent;
+  color: rgb(var(--fg-subtle));
+  cursor: pointer;
+}
+
+.model-empty strong {
+  color: rgb(var(--fg));
+  font-size: 13px;
+}
+
+.model-empty span:last-child {
+  font-size: 12px;
+}
+
+.empty-plus {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgb(var(--bg-elevated));
+  color: rgb(var(--accent));
+}
+
+@media (max-width: 720px) {
+  .model-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .model-card-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-add-button,
+  .card-action {
+    transition: none;
+  }
+}
+</style>

@@ -57,8 +57,7 @@ export function renderStatus({
     `- 事件通道：${inlineCode(eventTransportText)}`,
     `- 忙碌状态：${busy ? '正在执行' : '空闲'}`,
     `- Provider：${inlineCode(current?.provider || boot?.provider || 'unknown')}`,
-    `- Main Model：${inlineCode(current?.mainModelId || current?.model || boot?.model || 'unknown')}`,
-    `- Secondary Model：${current?.secondaryModelId ? inlineCode(current.secondaryModelId) : '未配置'}`,
+    `- Model：${inlineCode(current?.modelId || boot?.model || 'unknown')}`,
     `- Token 总量：${Number(totals.total || 0).toLocaleString('zh-CN')}`,
     `- 模型调用：${Number(totals.calls || 0).toLocaleString('zh-CN')} 次`,
     `- Skills：${boot?.skills?.length || 0}`,
@@ -94,20 +93,21 @@ export function renderModelInfo(boot: BootstrapPayload | null) {
   const payload = boot?.modelConfig
   const current = payload?.current
   const provider = current?.provider || boot?.provider || 'unknown'
-  const rawProvider = payload?.config?.providers?.[provider] || {}
   return [
     '## 模型信息',
     '',
     `- Provider：${inlineCode(provider)}`,
     `- Provider Label：${current?.providerLabel || boot?.providerLabel || 'unknown'}`,
-    `- Main Model：${inlineCode(current?.mainModelId || current?.model || boot?.model || 'unknown')}`,
-    `- Secondary Model：${current?.secondaryModelId ? inlineCode(current.secondaryModelId) : '未配置'}`,
-    `- Secondary Enabled：${payload?.routing?.secondaryEnabled ? 'yes' : 'no'}`,
-    `- API Base：${inlineCode(String(rawProvider.apiBase || current?.apiBase || '未配置'))}`,
+    `- Model：${inlineCode(current?.modelId || boot?.model || 'unknown')}`,
+    `- Entry ID：${inlineCode(current?.entryId || 'unknown')}`,
+    `- Protocol：${inlineCode(current?.protocol || 'unknown')}`,
+    `- API Base：${inlineCode(String(current?.apiBase || '未配置'))}`,
     `- Max Tokens：${formatNumber(current?.maxTokens || 0)}`,
-    `- Temperature：${current?.temperature ?? '未配置'}`,
     `- Reasoning Effort：${current?.reasoningEffort || 'null'}`,
     `- Context Window：${formatNumber(current?.contextWindowTokens || 0)}`,
+    `- Tool Call：${current?.capabilities?.toolCall ? 'yes' : 'no'}`,
+    `- Vision：${current?.capabilities?.vision ? 'yes' : 'no'}`,
+    `- Reasoning：${current?.capabilities?.reasoning ? 'yes' : 'no'}`,
     `- 可选 Provider 数：${payload?.providerOptions?.length || 0}`,
     '',
     'API Key 不在命令输出中展示。',

@@ -12,7 +12,6 @@ import type {
   CompactResult,
   MemoryVersionDetail,
   DesktopPetPayload,
-  ModelConfigRaw,
   PendingState,
   RuntimeStatus,
   TokensPayload,
@@ -42,7 +41,7 @@ export interface AppContext {
 
   refreshAll: () => Promise<void>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
-  saveModelConfig: (config: ModelConfigRaw) => Promise<void>
+  openProfileInterviewSession: (sessionId: string | null) => Promise<void>
   startProfileInterview: () => Promise<void>
   skipProfileInterview: () => Promise<void>
   compactMemory: () => Promise<CompactResult>
