@@ -3,7 +3,7 @@ import { open, readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { ValidationError } from '../errors'
-import { PROVIDERS, findByName } from '../providers/registry'
+import { PROVIDERS, findByName, normalizeApiBase } from '../providers/registry'
 import { logger } from '../util/log'
 import {
   readJson,
@@ -268,10 +268,17 @@ function normalizeEntry(
   const protocol = optionalString(input.protocol)
   if (protocol !== 'openai' && protocol !== 'anthropic')
     throw new ValidationError(`protocol 无效: ${protocol ?? ''}`)
+  const protocols = findByName(provider)?.protocols ?? []
+  if (!protocols.includes(protocol))
+    throw new ValidationError(
+      `provider ${provider} 不支持 protocol: ${protocol}`,
+    )
   const modelId = optionalString(input.modelId)
   if (!modelId) throw new ValidationError('modelId 不能为空')
-  const apiBase = optionalString(input.apiBase)
-  if (!apiBase) throw new ValidationError('apiBase 不能为空')
+  const submittedApiBase = optionalString(input.apiBase)
+  if (!submittedApiBase) throw new ValidationError('apiBase 不能为空')
+  const apiBase = normalizeApiBase(protocol, submittedApiBase)
+  if (!apiBase) throw new ValidationError('apiBase 规范化后不能为空')
   const apiKey =
     input.apiKey === null ||
     input.apiKey === undefined ||
@@ -365,7 +372,7 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
       apiKey: model?.apiKey ?? null,
       apiBase:
         model?.apiBase ??
-        defaultApiBase(name, name === 'anthropic' ? 'anthropic' : 'openai'),
+        defaultApiBase(name, findByName(name)?.defaultProtocol ?? 'openai'),
       extraHeaders: model?.legacy?.extraHeaders ?? null,
       extraBody: model?.legacy?.extraBody ?? null,
     }
@@ -469,17 +476,19 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
     if (!provider || REMOVED_PROVIDERS.has(provider)) continue
     if (!mainModelId) continue
     const protocol: ModelProtocol =
-      provider === 'anthropic' ? 'anthropic' : 'openai'
+      findByName(provider)?.defaultProtocol ?? 'openai'
     const providerBlock = optionalRecord(providerBlocks[provider]) ?? {}
     const apiKey = realLegacySecret(
       legacyEntry.apiKey,
       providerBlock.apiKey,
       defaults.apiKey,
     )
-    const apiBase =
+    const apiBase = normalizeApiBase(
+      protocol,
       firstLegacyString(
         legacyCandidates(legacyEntry, providerBlock, defaults, 'apiBase'),
-      ) ?? defaultApiBase(provider, protocol)
+      ) ?? defaultApiBase(provider, protocol),
+    )
     const maxTokens = firstLegacyPositiveInteger(
       legacyCandidates(legacyEntry, providerBlock, defaults, 'maxTokens'),
       8192,

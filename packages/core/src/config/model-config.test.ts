@@ -108,6 +108,81 @@ describe('model_config v2 schema', () => {
       }),
     ).not.toThrow()
   })
+
+  it('enforces provider protocol support from the registry', () => {
+    expect(() =>
+      parseModelConfig({
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [entry({ provider: 'openai', protocol: 'anthropic' })],
+      }),
+    ).toThrow(/protocol/i)
+    expect(() =>
+      parseModelConfig({
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [entry({ provider: 'anthropic', protocol: 'openai' })],
+      }),
+    ).toThrow(/protocol/i)
+
+    expect(() =>
+      parseModelConfig({
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [entry({ provider: 'deepseek', protocol: 'anthropic' })],
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseModelConfig({
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [entry({ provider: 'custom', protocol: 'anthropic' })],
+      }),
+    ).not.toThrow()
+  })
+
+  it('normalizes complete request URLs into reusable API bases', () => {
+    const config = parseModelConfig({
+      schemaVersion: 2,
+      activeModelId: 'openai-entry',
+      models: [
+        entry({
+          entryId: 'openai-entry',
+          apiBase: 'https://proxy.test/v1/chat/completions/',
+        }),
+        entry({
+          entryId: 'anthropic-entry',
+          provider: 'anthropic',
+          protocol: 'anthropic',
+          apiBase: 'https://proxy.test/v1/messages/',
+        }),
+      ],
+    })
+
+    expect(config.models.map((model) => model.apiBase)).toEqual([
+      'https://proxy.test/v1',
+      'https://proxy.test',
+    ])
+  })
+
+  it.each(['/', '/chat/completions', '/v1/messages'])(
+    'rejects API base %s when normalization leaves no reusable base',
+    (apiBase) => {
+      expect(() =>
+        parseModelConfig({
+          schemaVersion: 2,
+          activeModelId: 'entry-openai',
+          models: [
+            entry({
+              protocol: apiBase.includes('messages') ? 'anthropic' : 'openai',
+              provider: apiBase.includes('messages') ? 'anthropic' : 'openai',
+              apiBase,
+            }),
+          ],
+        }),
+      ).toThrow(/apiBase/i)
+    },
+  )
 })
 
 describe('typed entry mutation', () => {

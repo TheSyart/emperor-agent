@@ -1,34 +1,74 @@
 /**
  * Provider Registry (MIG-PROV-002)。
  *
- * 对齐 Python `agent/providers/registry.py`：ProviderSpec 只描述「访问方式」，不内嵌 model 列表。
- * 字段、默认值与 PROVIDERS 表逐条保真（32 条）。`findByName` 容忍 - / _ 互换。
+ * ProviderSpec 只描述访问方式，不内嵌 model 列表。
+ * 对外协议固定为 OpenAI Chat Completions 与 Anthropic Messages。
  */
 
-export type ProviderBackend =
-  | 'openai_compat'
-  | 'anthropic'
+export type ProviderProtocol = 'openai' | 'anthropic'
+
+/** @deprecated factory 完成双协议迁移后删除。 */
+export type ProviderBackend = 'openai_compat' | 'anthropic'
+
+/** @deprecated 仅让尚未迁移的 factory switch 编译；registry 不接受这些值。 */
+type LegacyFactoryBackend =
+  | ProviderBackend
   | 'azure_openai'
   | 'bedrock'
   | 'openai_codex'
   | 'github_copilot'
 
+export type RegistryProviderBackend = ProviderBackend
+
 export type ProviderModelDiscovery =
   'openai_compat' | 'anthropic' | 'unsupported'
+
+export type ProviderDiscoveryByProtocol = Readonly<
+  Partial<Record<ProviderProtocol, ProviderModelDiscovery>>
+>
+
+/** @deprecated Task 2 删除与标量 discovery 的交叉兼容。 */
+type TransitionalProviderDiscovery = ProviderDiscoveryByProtocol &
+  ProviderModelDiscovery
+
+export type ProviderReasoningAdapter =
+  | 'openai_effort'
+  | 'anthropic'
+  | 'thinking_toggle'
+  | 'enable_thinking_toggle'
+  | 'reasoning_split_toggle'
+  | 'none'
+
+export type ProviderReasoningAdapters = Readonly<
+  Partial<Record<ProviderProtocol, ProviderReasoningAdapter>>
+>
 
 export type ProviderRegion =
   'foreign' | 'aggregator' | 'cloud' | 'cn' | 'local' | 'other'
 
-export interface ProviderSpec {
+export interface ProviderSpec<
+  Backend extends LegacyFactoryBackend = LegacyFactoryBackend,
+> {
   name: string
   displayName: string
-  backend: ProviderBackend
+  protocols: readonly ProviderProtocol[]
+  defaultProtocol: ProviderProtocol | null
+  apiBases: Readonly<Partial<Record<ProviderProtocol, string>>>
+  iconId: string | null
+  /**
+   * Protocol-aware discovery metadata. The scalar union remains type-visible
+   * only while the legacy CoreApi discovery caller is migrated in Task 2.
+   */
+  modelDiscovery: TransitionalProviderDiscovery
+  reasoningAdapter: ProviderReasoningAdapters
+  /** @deprecated use protocols/defaultProtocol. */
+  backend: Backend
+  /** @deprecated use apiBases[protocol]. */
+  defaultApiBase: string | null
   websiteUrl: string | null
   apiKeyUrl: string | null
-  modelDiscovery: ProviderModelDiscovery
   selectable: boolean
   keywords: readonly string[]
-  defaultApiBase: string | null
   envKey: string
   envExtras: ReadonlyArray<readonly [string, string]>
   region: ProviderRegion
@@ -49,11 +89,14 @@ export interface ProviderSpec {
 export interface ProviderOption {
   name: string
   displayName: string
-  backend: ProviderBackend
+  protocols: readonly ProviderProtocol[]
+  defaultProtocol: ProviderProtocol | null
+  apiBases: Readonly<Partial<Record<ProviderProtocol, string>>>
+  iconId: string | null
+  modelDiscovery: ProviderDiscoveryByProtocol
+  reasoningAdapter: ProviderReasoningAdapters
   websiteUrl: string
   apiKeyUrl: string
-  modelDiscovery: ProviderModelDiscovery
-  defaultApiBase: string
   region: ProviderRegion
   isGateway: boolean
   isLocal: boolean
@@ -62,17 +105,94 @@ export interface ProviderOption {
   thinkingStyle: string | null
 }
 
-type SpecInput = Pick<ProviderSpec, 'name' | 'displayName' | 'backend'> &
-  Partial<ProviderSpec>
+type RegistryProviderSpec = ProviderSpec<RegistryProviderBackend>
 
-function spec(input: SpecInput): ProviderSpec {
-  const out: ProviderSpec = {
+type SpecInput = Pick<
+  RegistryProviderSpec,
+  'name' | 'displayName' | 'backend'
+> &
+  Partial<
+    Omit<
+      RegistryProviderSpec,
+      | 'protocols'
+      | 'defaultProtocol'
+      | 'apiBases'
+      | 'iconId'
+      | 'modelDiscovery'
+      | 'reasoningAdapter'
+    >
+  > & {
+    modelDiscovery?: ProviderModelDiscovery
+    iconId?: string | null
+  }
+
+const ANTHROPIC_API_BASES: Readonly<Record<string, string>> = {
+  deepseek: 'https://api.deepseek.com/anthropic',
+  dashscope: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  moonshot: 'https://api.moonshot.cn/anthropic',
+  zhipu: 'https://open.bigmodel.cn/api/anthropic',
+  volcengine: 'https://ark.cn-beijing.volces.com/api/compatible',
+  volcengine_coding_plan: 'https://ark.cn-beijing.volces.com/api/coding',
+  byteplus: 'https://ark.ap-southeast.bytepluses.com/api/coding',
+  minimax: 'https://api.minimax.io/anthropic',
+  stepfun: 'https://api.stepfun.com/step_plan',
+  xiaomi_mimo: 'https://api.xiaomimimo.com/anthropic',
+  longcat: 'https://api.longcat.chat/anthropic',
+  qianfan: 'https://qianfan.baidubce.com/anthropic/coding',
+  siliconflow: 'https://api.siliconflow.cn',
+}
+
+const OPENAI_REASONING_ADAPTERS: Readonly<
+  Record<string, ProviderReasoningAdapter>
+> = {
+  deepseek: 'thinking_toggle',
+  dashscope: 'enable_thinking_toggle',
+  volcengine: 'thinking_toggle',
+  volcengine_coding_plan: 'thinking_toggle',
+  byteplus: 'thinking_toggle',
+  minimax: 'reasoning_split_toggle',
+}
+
+function spec(input: SpecInput): RegistryProviderSpec {
+  const protocols: readonly ProviderProtocol[] =
+    input.name === 'anthropic'
+      ? ['anthropic']
+      : input.name === 'custom' || ANTHROPIC_API_BASES[input.name]
+        ? ['openai', 'anthropic']
+        : ['openai']
+  const defaultProtocol: ProviderProtocol | null =
+    input.name === 'custom'
+      ? null
+      : input.name === 'anthropic'
+        ? 'anthropic'
+        : 'openai'
+  const apiBases: Partial<Record<ProviderProtocol, string>> = {}
+  if (input.defaultApiBase) apiBases.openai = input.defaultApiBase
+  if (input.name === 'anthropic')
+    apiBases.anthropic = 'https://api.anthropic.com'
+  else if (ANTHROPIC_API_BASES[input.name])
+    apiBases.anthropic = ANTHROPIC_API_BASES[input.name]
+  const discovery: Partial<Record<ProviderProtocol, ProviderModelDiscovery>> =
+    {}
+  for (const protocol of protocols)
+    discovery[protocol] =
+      protocol === 'anthropic'
+        ? 'anthropic'
+        : (input.modelDiscovery ?? 'openai_compat')
+  const reasoningAdapter: Partial<
+    Record<ProviderProtocol, ProviderReasoningAdapter>
+  > = {}
+  for (const protocol of protocols)
+    reasoningAdapter[protocol] =
+      protocol === 'anthropic'
+        ? 'anthropic'
+        : (OPENAI_REASONING_ADAPTERS[input.name] ?? 'openai_effort')
+
+  return {
     websiteUrl: null,
     apiKeyUrl: null,
-    modelDiscovery: 'unsupported',
     selectable: true,
     keywords: [],
-    defaultApiBase: null,
     envKey: '',
     envExtras: [],
     region: 'other',
@@ -89,21 +209,19 @@ function spec(input: SpecInput): ProviderSpec {
     reasoningAsContent: false,
     modelOverrides: [],
     ...input,
+    protocols,
+    defaultProtocol,
+    apiBases,
+    defaultApiBase: defaultProtocol
+      ? (apiBases[defaultProtocol] ?? null)
+      : null,
+    iconId: input.iconId === undefined ? input.name : input.iconId,
+    modelDiscovery: discovery as unknown as TransitionalProviderDiscovery,
+    reasoningAdapter,
   }
-  out.modelDiscovery =
-    input.modelDiscovery ?? defaultModelDiscovery(out.backend)
-  return out
 }
 
-function defaultModelDiscovery(
-  backend: ProviderBackend,
-): ProviderModelDiscovery {
-  if (backend === 'openai_compat') return 'openai_compat'
-  if (backend === 'anthropic') return 'anthropic'
-  return 'unsupported'
-}
-
-export const PROVIDERS: readonly ProviderSpec[] = [
+export const PROVIDERS: readonly RegistryProviderSpec[] = [
   // ─── 海外大厂 ───
   spec({
     name: 'openai',
@@ -228,37 +346,6 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     detectByBaseKeyword: 'siliconflow',
     websiteUrl: 'https://siliconflow.cn',
     apiKeyUrl: 'https://cloud.siliconflow.cn/account/ak',
-  }),
-  // ─── 云厂 ───
-  spec({
-    name: 'azure_openai',
-    displayName: 'Azure OpenAI',
-    backend: 'azure_openai',
-    keywords: ['azure', 'azure-openai'],
-    region: 'cloud',
-    isDirect: true,
-    websiteUrl: 'https://learn.microsoft.com/azure/ai-services/openai/',
-    modelDiscovery: 'unsupported',
-  }),
-  spec({
-    name: 'bedrock',
-    displayName: 'AWS Bedrock',
-    backend: 'bedrock',
-    keywords: [
-      'bedrock',
-      'anthropic.claude',
-      'amazon.nova',
-      'meta.',
-      'mistral.',
-      'cohere.',
-      'deepseek.',
-      'moonshot.',
-    ],
-    envKey: 'AWS_BEARER_TOKEN_BEDROCK',
-    region: 'cloud',
-    isDirect: true,
-    websiteUrl: 'https://aws.amazon.com/bedrock/',
-    modelDiscovery: 'unsupported',
   }),
   // ─── 国内 ───
   spec({
@@ -461,35 +548,6 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     isDirect: true,
     websiteUrl: 'https://docs.openvino.ai',
   }),
-  // ─── OAuth-based ───
-  spec({
-    name: 'openai_codex',
-    displayName: 'OpenAI Codex',
-    backend: 'openai_codex',
-    keywords: ['openai-codex', 'codex'],
-    defaultApiBase: 'https://chatgpt.com/backend-api',
-    region: 'other',
-    isOauth: true,
-    detectByBaseKeyword: 'codex',
-    stripModelPrefix: true,
-    selectable: false,
-    modelDiscovery: 'unsupported',
-    websiteUrl: 'https://openai.com/chatgpt/pricing',
-  }),
-  spec({
-    name: 'github_copilot',
-    displayName: 'GitHub Copilot',
-    backend: 'github_copilot',
-    keywords: ['github_copilot', 'copilot'],
-    defaultApiBase: 'https://api.githubcopilot.com',
-    region: 'other',
-    isOauth: true,
-    stripModelPrefix: true,
-    supportsMaxCompletionTokens: true,
-    selectable: false,
-    modelDiscovery: 'unsupported',
-    websiteUrl: 'https://github.com/features/copilot',
-  }),
   // ─── 兜底 ───
   spec({
     name: 'custom',
@@ -504,22 +562,40 @@ export const PROVIDERS: readonly ProviderSpec[] = [
 /** 按 registry name 精确查找；容忍 - / _ 互换。对齐 `find_by_name`。 */
 export function findByName(
   name: string | null | undefined,
-): ProviderSpec | undefined {
+): RegistryProviderSpec | undefined {
   if (!name) return undefined
   const normalized = name.replace(/-/g, '_').toLowerCase()
   return PROVIDERS.find((s) => s.name === normalized)
 }
 
-/** WebUI ProviderOption 下拉元数据。对齐 `provider_options`。 */
+/**
+ * 将完整请求 URL 规范化为可复用的 API base。
+ * 普通 base 只移除尾斜杠，保留 `/v1` 等有语义的路径段。
+ */
+export function normalizeApiBase(
+  protocol: ProviderProtocol,
+  url: string,
+): string {
+  const trimmed = url.trim().replace(/\/+$/, '')
+  const resource = protocol === 'openai' ? '/chat/completions' : '/v1/messages'
+  return trimmed.toLowerCase().endsWith(resource)
+    ? trimmed.slice(0, -resource.length).replace(/\/+$/, '')
+    : trimmed
+}
+
+/** WebUI ProviderOption 下拉元数据。 */
 export function providerOptions(): ProviderOption[] {
   return PROVIDERS.filter((s) => s.selectable !== false).map((s) => ({
     name: s.name,
     displayName: s.displayName,
-    backend: s.backend,
+    protocols: s.protocols,
+    defaultProtocol: s.defaultProtocol,
+    apiBases: s.apiBases,
+    iconId: s.iconId,
+    modelDiscovery: s.modelDiscovery as ProviderDiscoveryByProtocol,
+    reasoningAdapter: s.reasoningAdapter,
     websiteUrl: s.websiteUrl ?? '',
     apiKeyUrl: s.apiKeyUrl ?? '',
-    modelDiscovery: s.modelDiscovery,
-    defaultApiBase: s.defaultApiBase ?? '',
     region: s.region,
     isGateway: s.isGateway,
     isLocal: s.isLocal,
