@@ -286,7 +286,9 @@ describe('typed entry mutation', () => {
       capabilityOverrides: { reasoning: false },
     })
 
-    expect((await loadModelConfig(dir)).raw.models[0]?.capabilityOverrides).toEqual({
+    expect(
+      (await loadModelConfig(dir)).raw.models[0]?.capabilityOverrides,
+    ).toEqual({
       reasoning: false,
     })
 

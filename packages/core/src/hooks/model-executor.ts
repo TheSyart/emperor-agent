@@ -89,9 +89,10 @@ export class RoutedHookModelGateway implements HookModelGateway {
     }
     const response: LLMResponse = await snapshot.provider.chat({
       messages,
-      tools: (snapshot.profile?.toolCall ?? true)
-        ? (request.tools as unknown as Array<Record<string, unknown>> | null)
-        : null,
+      tools:
+        (snapshot.profile?.toolCall ?? true)
+          ? (request.tools as unknown as Array<Record<string, unknown>> | null)
+          : null,
       model: snapshot.model,
       maxTokens: snapshot.generation.maxTokens,
       temperature: snapshot.generation.temperature,

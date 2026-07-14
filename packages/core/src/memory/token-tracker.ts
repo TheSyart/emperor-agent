@@ -90,8 +90,7 @@ export class TokenTracker {
     const usageType = String(o.usageType ?? o.usage_type ?? 'main_agent')
     const provider = (o.provider ?? null) as string | null
     const modelEntryId = (o.modelEntryId ?? o.model_entry_id ?? null) as
-      | string
-      | null
+      string | null
     const routeReason = (o.routeReason ?? o.route_reason ?? null) as
       string | null
     const estimatedInputTokens = (o.estimatedInputTokens ??

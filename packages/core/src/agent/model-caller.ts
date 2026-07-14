@@ -102,9 +102,7 @@ export class ModelCaller {
       emit: opts.emit,
       onDelta,
       onToolCallDelta: runner.supportsToolCall ? onToolCallDelta : null,
-      onToolCallComplete: runner.supportsToolCall
-        ? onToolCallComplete
-        : null,
+      onToolCallComplete: runner.supportsToolCall ? onToolCallComplete : null,
       signal: opts.signal ?? null,
       onRetry: (count, kind) => {
         retryCount = count

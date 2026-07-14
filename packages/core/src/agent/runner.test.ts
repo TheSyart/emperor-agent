@@ -951,9 +951,9 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(fallback.seenMessages).toHaveLength(0)
     expect(runner.model).toBe('main-model')
     expect(runner.provider).toBe(primary)
-    expect(emitted.some((event) => event.event === 'model_route_fallback')).toBe(
-      false,
-    )
+    expect(
+      emitted.some((event) => event.event === 'model_route_fallback'),
+    ).toBe(false)
   })
 
   it('disables tool payloads and streaming callbacks when tool calling is unsupported', async () => {

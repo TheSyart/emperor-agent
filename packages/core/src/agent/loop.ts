@@ -737,7 +737,8 @@ export class AgentLoop {
         (this.activeSessionId
           ? this.sessionStore.get(this.activeSessionId)
           : null)
-      const activeProfile = this.modelRouter.route('main_agent').snapshot.profile
+      const activeProfile =
+        this.modelRouter.route('main_agent').snapshot.profile
       const requiresTools =
         activeSession?.mode === 'build' || opts.source === 'scheduler'
       if (requiresTools && activeProfile?.toolCall === false) {

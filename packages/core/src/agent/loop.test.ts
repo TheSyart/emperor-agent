@@ -1247,7 +1247,10 @@ class DelayedProvider extends LLMProvider {
   }
 }
 
-function fakeRouter(provider: LLMProvider, toolCall = true): {
+function fakeRouter(
+  provider: LLMProvider,
+  toolCall = true,
+): {
   route: (
     useCase: string,
     agentType?: string | null,
@@ -1272,10 +1275,7 @@ function fakeRouter(provider: LLMProvider, toolCall = true): {
   }
 }
 
-function snapshot(
-  provider: LLMProvider,
-  toolCall = true,
-): ProviderSnapshot {
+function snapshot(provider: LLMProvider, toolCall = true): ProviderSnapshot {
   return {
     provider,
     providerName: 'fake',

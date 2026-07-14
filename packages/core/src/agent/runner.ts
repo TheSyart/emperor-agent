@@ -479,9 +479,7 @@ export class AgentRunner implements RunnerModelHost {
                 callMeta.provider || this.providerName || 'unknown',
               ),
               usageType: this.usageType,
-              modelEntryId: String(
-                callMeta.modelEntryId || this.modelEntryId,
-              ),
+              modelEntryId: String(callMeta.modelEntryId || this.modelEntryId),
               routeReason: String(
                 callMeta.routeReason || this.routeReason || '',
               ),
