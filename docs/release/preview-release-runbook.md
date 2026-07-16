@@ -11,7 +11,7 @@
 
 - 目标 commit 已进入仓库默认分支，或 Preview tag 的 commit 可从默认分支到达。
 - 根目录和 desktop lockfile 已提交，`make check` 在干净环境通过。
-- `CHANGELOG.md` 的 `Unreleased` 已记录用户可感知变化。
+- [Changelog](CHANGELOG.md) 的 `Unreleased` 已记录用户可感知变化。
 - [未签名 Preview 安全说明](unsigned-preview-notice.md)仍与当前包签名状态一致。
 - 版本名不与已有 Release、tag 或包资产冲突。
 

@@ -56,6 +56,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.log
+/.claude/
 /.superpowers/
 
 # Personal development documents (local-only; never publish)

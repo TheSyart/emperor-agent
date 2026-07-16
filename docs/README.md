@@ -52,8 +52,8 @@
 - [Preview 发布手册](release/preview-release-runbook.md)
 - [Stable 发布手册](release/stable-release-runbook.md)
 - [ToolCatalog 发布审核](release/tool-catalog-review.md)
-- [Security Policy](../SECURITY.md)
-- [Changelog](../CHANGELOG.md)
+- [Security Policy](../.github/SECURITY.md)
+- [Changelog](release/CHANGELOG.md)
 
 ## 文档状态
 

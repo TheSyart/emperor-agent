@@ -1,5 +1,7 @@
 # AGENTS.md · Emperor Agent 协作指南
 
+> 本文件固定保存在仓库根目录，供 Codex 和其他受控 Agent 在开发 Emperor Agent 时读取。普通用户说明以 `README.md` 和 `docs/user/` 为准；面向人工开发者的操作指南以 `docs/development/` 为准。
+
 ## 0. 沟通与原则
 
 - 默认使用中文沟通；命令、路径、配置 key 保留英文原文。

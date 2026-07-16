@@ -14,7 +14,7 @@ Emperor Agent 区分两个互不重叠的根目录概念：
 | `runtimeRoot` | 应用内置资源根：模板、内置技能、静态资源                   | 开发模式为仓库根；打包模式为 Electron `userData/runtime` | `--root` / `EMPEROR_AGENT_ROOT` |
 | `stateRoot`   | 全局私有数据根：会话、记忆、配置、附件等一切运行期私有状态 | `~/.emperor-agent`（开发与打包模式一致）                 | `EMPEROR_CONFIG_DIR`            |
 
-`runtimeRoot` 里的内容是只读或半只读的"应用资源"，例如 `templates/`、`skills/`、`model_config.example.json`、`mcp_config.example.json`；`stateRoot` 里的内容是持续被读写的"用户私有状态"。两者刻意分离，且默认值**不再有包含关系**（旧模型里 `stateRoot` 是 `runtimeRoot/.emperor`，新模型里两者是完全独立的目录树）。
+`runtimeRoot` 里的内容是只读或半只读的“应用资源”，例如 `templates/`、`skills/`、`model_config.example.json`、`mcp_config.example.json`；仓库中的两个配置示例源文件位于 `config/examples/`，打包后仍使用前述 runtime 文件名。`stateRoot` 里的内容是持续被读写的“用户私有状态”。两者刻意分离，且默认值**不再有包含关系**（旧模型里 `stateRoot` 是 `runtimeRoot/.emperor`，新模型里两者是完全独立的目录树）。
 
 解析优先级（`packages/core/src/runtime/paths.ts` 的 `resolveRuntimePaths()`）：
 

@@ -61,6 +61,12 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('runtime-defaults-manifest.json')
     expect(config).toContain('!node_modules{,/**/*}')
     expect(config).toContain('from: ../assets/desktop-pet')
+    expect(config).toContain(
+      'from: ../config/examples/model_config.example.json',
+    )
+    expect(config).toContain('from: ../config/examples/mcp_config.example.json')
+    expect(config).not.toMatch(/from:\s+\.\.\/model_config\.example\.json/)
+    expect(config).not.toMatch(/from:\s+\.\.\/mcp_config\.example\.json/)
     expect(config).toMatch(
       /linux:\r?\n(?:[ \t].*\r?\n)*[ \t]+executableName: emperor-agent/m,
     )
@@ -175,6 +181,18 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         mapping.source.includes('skills-catalog'),
       ),
     ).toBe(false)
+    expect(hook.SOURCE_MAPPINGS).toEqual(
+      expect.arrayContaining([
+        {
+          source: 'config/examples/model_config.example.json',
+          target: 'model_config.example.json',
+        },
+        {
+          source: 'config/examples/mcp_config.example.json',
+          target: 'mcp_config.example.json',
+        },
+      ]),
+    )
     expect(generated.files.every((file) => !path.isAbsolute(file.path))).toBe(
       true,
     )

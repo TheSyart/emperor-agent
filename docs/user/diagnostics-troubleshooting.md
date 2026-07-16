@@ -99,4 +99,4 @@ npm --prefix desktop run package:verify
 
 普通问题应包含：应用来源、平台与架构、复现步骤、期望结果、实际结果和脱敏日志。不要上传 API Key、环境变量、用户文档或完整 `stateRoot`。
 
-安全漏洞不要公开披露复现细节，按 [Security Policy](../../SECURITY.md) 使用私密报告入口。
+安全漏洞不要公开披露复现细节，按 [Security Policy](../../.github/SECURITY.md) 使用私密报告入口。

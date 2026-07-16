@@ -4,6 +4,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve, sep } from 'node:path'
 
 const root = process.cwd()
+const allowedRootDocuments = new Set([
+  'README.md',
+  'AGENTS.md',
+  'package.json',
+  'package-lock.json',
+])
 const allowedFiles = new Set(['docs/README.md', 'docs/DOCUMENTATION.md'])
 const allowedPrefixes = [
   'docs/user/',
@@ -20,12 +26,27 @@ const trackedDocs = execFileSync('git', ['ls-files', '-z', '--', 'docs'], {
   .filter(Boolean)
   .sort()
 
+const unexpectedRootDocuments = execFileSync('git', ['ls-files', '-z'], {
+  cwd: root,
+  encoding: 'utf8',
+})
+  .split('\0')
+  .filter((path) => path && existsSync(resolve(root, path)))
+  .filter(
+    (path) =>
+      !path.includes('/') &&
+      !path.startsWith('.') &&
+      /\.(?:json|md)$/i.test(path) &&
+      !allowedRootDocuments.has(path),
+  )
+  .sort()
+
 const unexpected = trackedDocs.filter((path) => !isPublicDocPath(path))
 const publicMarkdown = [
   'README.md',
   'AGENTS.md',
-  'SECURITY.md',
-  'CHANGELOG.md',
+  '.github/SECURITY.md',
+  'docs/release/CHANGELOG.md',
   ...trackedDocs.filter(
     (path) => isPublicDocPath(path) && path.endsWith('.md'),
   ),
@@ -69,7 +90,16 @@ for (const path of publicMarkdown) {
   }
 }
 
-if (unexpected.length || brokenLinks.length || privateLinks.length) {
+if (
+  unexpectedRootDocuments.length ||
+  unexpected.length ||
+  brokenLinks.length ||
+  privateLinks.length
+) {
+  if (unexpectedRootDocuments.length) {
+    console.error('Tracked Markdown/JSON files outside the root allowlist:')
+    for (const path of unexpectedRootDocuments) console.error(`  - ${path}`)
+  }
   if (unexpected.length) {
     console.error('Tracked docs outside the public documentation allowlist:')
     for (const path of unexpected) console.error(`  - ${path}`)

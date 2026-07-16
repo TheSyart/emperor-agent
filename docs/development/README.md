@@ -78,4 +78,4 @@ npm --prefix desktop run package:verify
 - 新 operation、event、schema 或 Store 均已完成跨层同步。
 - 磁盘格式变化有兼容与恢复策略。
 - 相关测试与 `make check` 通过。
-- 用户可感知变化已进入 `CHANGELOG.md` 的 `Unreleased`。
+- 用户可感知变化已进入 [`docs/release/CHANGELOG.md`](../release/CHANGELOG.md) 的 `Unreleased`。

@@ -35,9 +35,9 @@ extraResources:
     to: runtime-defaults/skills
   - from: ../assets/desktop-pet
     to: runtime-defaults/assets/desktop-pet
-  - from: ../model_config.example.json
+  - from: ../config/examples/model_config.example.json
     to: runtime-defaults/model_config.example.json
-  - from: ../mcp_config.example.json
+  - from: ../config/examples/mcp_config.example.json
     to: runtime-defaults/mcp_config.example.json
   - from: ../.env.example
     to: runtime-defaults/.env.example

@@ -59,7 +59,7 @@ Plan（规划模式）用于先探索、再提交方案。Goal（目标模式）
 4. 第一次启动后进入设置页，添加模型 Provider、API Key 和模型 ID。
 5. 创建 Chat 开始普通对话，或者选择本地目录创建 Build 会话。
 
-启动过程不会强制要求你立刻配置模型。没有可用模型时，对话和模型测试会给出配置入口；已经熟悉配置文件的用户也可以参考 `model_config.example.json`。
+启动过程不会强制要求你立刻配置模型。没有可用模型时，对话和模型测试会给出配置入口；已经熟悉配置文件的用户也可以参考 [`config/examples/model_config.example.json`](config/examples/model_config.example.json)。
 
 ### 模型配置
 
@@ -299,8 +299,8 @@ npm --prefix desktop run package:verify
 | 当前 Preview 构建与发布      | [Preview 发布手册](docs/release/preview-release-runbook.md)   |
 | 未来 Stable 发布边界         | [Stable 发布手册](docs/release/stable-release-runbook.md)     |
 | 环境工具 catalog 变更        | [工具 catalog 审查流程](docs/release/tool-catalog-review.md)  |
-| 安全边界与私密报告           | [Security Policy](SECURITY.md)                                |
-| 版本变化                     | [Changelog](CHANGELOG.md)                                     |
+| 安全边界与私密报告           | [Security Policy](.github/SECURITY.md)                        |
+| 版本变化                     | [Changelog](docs/release/CHANGELOG.md)                        |
 | 文档维护机制                 | [文档维护规范](docs/DOCUMENTATION.md)                         |
 | 开发协作规范                 | [AGENTS.md](AGENTS.md)                                        |
 

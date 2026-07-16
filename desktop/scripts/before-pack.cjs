@@ -42,11 +42,11 @@ const SOURCE_MAPPINGS = [
   { source: 'skills', target: 'skills' },
   { source: 'assets/desktop-pet', target: 'assets/desktop-pet' },
   {
-    source: 'model_config.example.json',
+    source: 'config/examples/model_config.example.json',
     target: 'model_config.example.json',
   },
   {
-    source: 'mcp_config.example.json',
+    source: 'config/examples/mcp_config.example.json',
     target: 'mcp_config.example.json',
   },
   { source: '.env.example', target: '.env.example' },
