@@ -115,6 +115,7 @@ function normalizeSummary(
     id: identity.goalId,
     sessionId: identity.sessionId,
     lastEventSeq: identity.lastEventSeq,
+    createdAt: goal.createdAt || goal.updatedAt || identity.updatedAt,
     updatedAt: identity.updatedAt || goal.updatedAt,
   }
 }

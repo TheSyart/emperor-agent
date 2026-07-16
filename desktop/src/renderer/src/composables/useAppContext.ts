@@ -71,8 +71,8 @@ export interface AppContext {
   checkWatchlist: () => Promise<WatchlistDecision>
   setDesktopPetEnabled: (enabled: boolean) => Promise<DesktopPetPayload>
 
-  setControlMode: (
-    mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
+  setPermissionMode: (
+    mode: 'ask_before_edit' | 'accept_edits' | 'auto',
   ) => Promise<{ ok: boolean; error?: string }>
   sendMessage: (payload: string | ChatSendPayload) => boolean
   sendInteractionAnswer: (
@@ -87,6 +87,8 @@ export interface AppContext {
     goalId: string,
     action: GoalCardAction,
   ) => Promise<GoalOperationResult>
+  replaceGoal: (goalId: string, outcome: string) => Promise<GoalOperationResult>
+  startGoal: (outcome: string) => Promise<GoalOperationResult>
   clearChat: () => void
   submitFromComposer: (payload: string | ChatSendPayload) => void
 

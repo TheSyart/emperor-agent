@@ -7,6 +7,9 @@ import type {
   RuntimeGoalSummary,
 } from '../types'
 import { useSlashCommands, type SlashCommandDeps } from './useSlashCommands'
+import { core } from '../api/http'
+
+vi.mock('../api/http', () => ({ core: vi.fn() }))
 
 function summary(): RuntimeGoalSummary {
   return {
@@ -18,6 +21,7 @@ function summary(): RuntimeGoalSummary {
     currentPlanId: null,
     cyclesUsed: 1,
     acceptance: { passed: 0, failed: 0, missing: 1, total: 1 },
+    createdAt: '2026-07-16T09:58:00.000Z',
     updatedAt: '2026-07-16T10:00:00.000Z',
     lastEventSeq: 1,
   }
@@ -64,6 +68,10 @@ function command(name: '/goal' | '/goals') {
   return slashCommands.find((item) => item.name === name)!
 }
 
+function controlCommand(name: '/mode' | '/plan') {
+  return slashCommands.find((item) => item.name === name)!
+}
+
 describe('Goal slash command orchestration', () => {
   it('starts a Goal through the typed operation instead of chat.submit', async () => {
     const ctx = setup()
@@ -104,5 +112,53 @@ describe('Goal slash command orchestration', () => {
     )
     expect(duplicate.startGoal).not.toHaveBeenCalled()
     expect(duplicate.local.mock.calls.at(-1)?.[1]).toContain('已有 active Goal')
+  })
+})
+
+describe('Plan and permission slash command orchestration', () => {
+  it('uses the permission-only operation for /mode and does not expose /mode plan', async () => {
+    const ctx = setup()
+    ctx.deps.boot.value = {
+      control: { mode: 'ask_before_edit', previous_mode: null },
+    } as BootstrapPayload
+    vi.mocked(core).mockResolvedValue({
+      mode: 'accept_edits',
+      previous_mode: null,
+    } as never)
+
+    await ctx.executeSlashCommand(
+      '/mode edits',
+      '/mode',
+      controlCommand('/mode'),
+    )
+    expect(core).toHaveBeenCalledWith(
+      'control.setPermissionMode',
+      'accept_edits',
+    )
+
+    vi.mocked(core).mockClear()
+    await ctx.executeSlashCommand(
+      '/mode plan',
+      '/mode',
+      controlCommand('/mode'),
+    )
+    expect(core).not.toHaveBeenCalled()
+    expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('权限模式')
+  })
+
+  it('restores the saved permission when /plan off exits Plan', async () => {
+    const ctx = setup()
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+    vi.mocked(core).mockResolvedValue({
+      mode: 'auto',
+      previous_mode: null,
+    } as never)
+
+    await ctx.executeSlashCommand('/plan off', '/plan', controlCommand('/plan'))
+
+    expect(core).toHaveBeenCalledWith('control.setMode', 'auto')
+    expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('自动执行')
   })
 })

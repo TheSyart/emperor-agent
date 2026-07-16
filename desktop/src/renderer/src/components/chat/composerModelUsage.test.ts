@@ -13,6 +13,25 @@ describe('Composer single-model controls', () => {
     expect(source).not.toContain('secondaryModelId')
   })
 
+  it('uses shared Provider logos and separates the current model from alternatives', () => {
+    expect(source).toContain("from '../../model/providerIcons'")
+    expect(source).toContain('providerIconAsset')
+    expect(source).toContain('providerIconFallback')
+    expect(source).toContain('当前模型')
+    expect(source).toContain('otherModelEntries')
+    expect(source).not.toContain(':is="modelIcons.text"')
+  })
+
+  it('shows Goal then Plan as independent lifecycle indicators', () => {
+    expect(source).toContain('composer-lifecycle-indicator goal')
+    expect(source).toContain('composer-lifecycle-indicator plan')
+    expect(source.indexOf('composer-lifecycle-indicator goal')).toBeLessThan(
+      source.indexOf('composer-lifecycle-indicator plan'),
+    )
+    expect(source).toContain("'set-permission': [mode: ControlModeValue]")
+    expect(source).not.toContain("'set-mode': [mode: ControlModeValue]")
+  })
+
   it('uses resolved reasoning choices without collapsing xhigh into max', () => {
     expect(source).toContain('currentModel?.reasoningEfforts')
     expect(source).toContain("if (normalized === 'xhigh') return 'XHigh'")

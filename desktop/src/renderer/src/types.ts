@@ -1082,6 +1082,7 @@ export interface RuntimeGoalSummary {
       evidenceSummary: string | null
     }>
   }
+  createdAt: string
   updatedAt: string
   lastEventSeq: number
 }

@@ -145,6 +145,7 @@ export interface GoalSummary {
     readonly total: number
     readonly criteria?: readonly GoalAcceptanceSummary[]
   }
+  readonly createdAt: string
   readonly updatedAt: string
   readonly lastEventSeq: number
 }
@@ -220,6 +221,7 @@ export function goalSummary(
       total: record.contract.acceptanceCriteria.length,
       criteria,
     },
+    createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     lastEventSeq: record.lastEventSeq,
   }

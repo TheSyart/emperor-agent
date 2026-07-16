@@ -7,16 +7,15 @@
 
 Control 系统把“模型想做什么”和“Core 允许做什么”分开。界面、模型、Goal、Scheduler、Team 和 Hook 都不能自行扩大权限；最终决定由 Core 的 permission pipeline、pending interaction、workspace policy 和 mutation guard 共同完成。
 
-## 四种内部模式
+## 三种执行权限与 Plan 状态
 
-| 内部值            | Slash command              | 语义                                                                               |
-| ----------------- | -------------------------- | ---------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/mode ask`                | 低风险读取、普通文件写入和低风险命令可直接执行；敏感路径、批量替换和高风险操作询问 |
-| `accept_edits`    | `/mode edits`              | 普通文件编辑可直接执行；shell、高风险和非文件 mutation 仍按规则询问                |
-| `auto`            | `/mode auto`               | 在既有安全策略内尽量继续；不能证明为只读的 shell 命令仍需批准                      |
-| `plan`            | `/mode plan` 或 `/plan on` | 只读探索、询问用户和提交方案；不执行方案中的写操作                                 |
+| 内部值            | Slash command | 语义                                                                               |
+| ----------------- | ------------- | ---------------------------------------------------------------------------------- |
+| `ask_before_edit` | `/mode ask`   | 低风险读取、普通文件写入和低风险命令可直接执行；敏感路径、批量替换和高风险操作询问 |
+| `accept_edits`    | `/mode edits` | 普通文件编辑可直接执行；shell、高风险和非文件 mutation 仍按规则询问                |
+| `auto`            | `/mode auto`  | 在既有安全策略内尽量继续；不能证明为只读的 shell 命令仍需批准                      |
 
-`/mode status` 查看当前权限模式；`/plan status` 查看 Plan 控制状态。命令名字相近，但 Plan 是受约束的规划阶段，不是 Goal 的别名。
+Plan 仍以内部 `mode === plan` 表示只读运行状态，但不再作为第四种用户权限。`/mode ask|edits|auto|status` 只管理执行权限；`/plan on|off|status` 管理 Plan 生命周期。
 
 ## 决策顺序
 
@@ -50,7 +49,7 @@ Ask 是持久的用户交互，不是普通 assistant 文本：
 
 ## Plan 生命周期
 
-进入 Plan 时，Core 保存此前的权限模式。Plan 阶段允许只读探索、`ask_user` 和 `propose_plan`；用户批准后恢复进入 Plan 前的模式，再执行批准范围内的步骤。
+进入 Plan 时，Core 把当前执行权限保存在 `previous_mode`。Plan 阶段允许只读探索、`ask_user` 和 `propose_plan`；用户仍可调用 `control.setPermissionMode` 修改 `previous_mode`，而不退出 Plan。批准方案或执行 `/plan off` 后，Core 使用最新保存的权限继续。
 
 Plan 保存步骤、依赖和验证要求。Plan permission token 只授权与已批准方案匹配的执行，不覆盖高风险限制、workspace policy 或新的 Ask。方案被修改、替换或失效后，旧 token 不能继续使用。
 

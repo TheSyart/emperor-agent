@@ -114,6 +114,7 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   ),
   op('onboarding.skipProfileInterview', 'POST', '/api/onboarding/profile/skip'),
   op('control.get', 'GET', '/api/control'),
+  op('control.setPermissionMode', 'IPC', 'control.setPermissionMode'),
   op('control.setMode', 'POST', '/api/control/mode'),
   op('control.answerInteraction', 'IPC', 'control.answerInteraction'),
   op('control.commentPlan', 'IPC', 'control.commentPlan'),
@@ -128,6 +129,7 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('goals.get', 'IPC', 'goals.get'),
   op('goals.pause', 'IPC', 'goals.pause'),
   op('goals.resume', 'IPC', 'goals.resume'),
+  op('goals.replace', 'IPC', 'goals.replace'),
   op('goals.cancel', 'IPC', 'goals.cancel'),
   op('plans.list', 'GET', '/api/plans'),
   op('plans.get', 'GET', '/api/plans/{plan_id}'),
@@ -358,6 +360,13 @@ export class CoreApi {
         this.loop.goalScopeForSession(session as never),
       activeSessionId: () => this.loop.activeSessionId,
       summarize: async (goal) => await this.goalSummary(goal),
+      clearPendingInteraction: (goal) => {
+        if (goal.runtime.pendingInteractionId)
+          this.loop.controlManager.clearPendingInteractionForGoal(
+            goal.runtime.pendingInteractionId,
+          )
+        this.loop.controlManager.clearPendingInteractionForGoal(goal.id)
+      },
     })
     this.loop.setSchedulerAgentTurnSubmitter((payload) =>
       this.mainline.submitSchedulerTurn(payload),
@@ -709,6 +718,8 @@ export class CoreApi {
 
   readonly control = {
     get: () => this.loop.controlManager.payload(),
+    setPermissionMode: (mode: string) =>
+      this.loop.controlManager.setPermissionMode(mode),
     setMode: (mode: string) => this.loop.controlManager.setMode(mode),
     answerInteraction: async (
       id: string,
@@ -888,6 +899,8 @@ export class CoreApi {
     get: (goalId: string) => this.goalService.get(goalId),
     pause: (goalId: string) => this.goalService.pause(goalId),
     resume: (goalId: string) => this.goalService.resume(goalId),
+    replace: (input: Parameters<GoalService['replace']>[0]) =>
+      this.goalService.replace(input),
     cancel: (goalId: string, reason?: string | null) =>
       this.goalService.cancel(goalId, reason),
   }

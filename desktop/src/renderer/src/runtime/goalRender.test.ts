@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeGoalSummary, RuntimePlanRecord } from '../types'
-import { renderGoalStatus, toGoalCardViewModel } from './goalRender'
+import {
+  goalElapsedLabel,
+  renderGoalStatus,
+  toGoalCardViewModel,
+  toGoalStatusBarViewModel,
+} from './goalRender'
 
 function goal(
   phase: RuntimeGoalSummary['phase'] = 'executing',
@@ -46,6 +51,7 @@ function goal(
         },
       ],
     },
+    createdAt: '2026-07-16T09:58:30.000Z',
     updatedAt: '2026-07-16T10:00:00.000Z',
     lastEventSeq: 9,
   }
@@ -97,6 +103,28 @@ describe('Goal render model', () => {
     expect(
       toGoalCardViewModel({ goal: goal('terminal', 'completed') }).actions,
     ).toEqual([])
+  })
+
+  it('builds compact Goal status and falls back to updatedAt for old payloads', () => {
+    expect(
+      toGoalStatusBarViewModel(
+        goal('planning'),
+        Date.parse('2026-07-16T10:00:00.000Z'),
+      ),
+    ).toMatchObject({
+      phaseLabel: '规划中',
+      elapsedLabel: '1分30秒',
+      actions: ['pause', 'cancel'],
+      terminal: false,
+    })
+    const legacy = {
+      ...goal('paused'),
+      createdAt: undefined,
+    } as unknown as RuntimeGoalSummary
+    expect(
+      toGoalStatusBarViewModel(legacy, Date.parse('2026-07-16T10:01:05.000Z')),
+    ).toMatchObject({ phaseLabel: '已暂停', elapsedLabel: '1分5秒' })
+    expect(goalElapsedLabel('invalid', 'invalid', 0)).toBe('刚刚')
   })
 
   it('renders status and recent lists without leaking internal fields', () => {

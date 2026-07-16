@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Eye, EyeOff, LoaderCircle, RotateCw, Search, X } from 'lucide-vue-next'
 import {
-  activateModelEntry,
   deleteModelEntry,
   discoverProviderModels,
   resolveModelProfilePreview,
@@ -35,15 +34,12 @@ const emit = defineEmits<{
 
 const entries = computed(() => props.payload?.models ?? [])
 const providerOptions = computed(() => props.payload?.providerOptions ?? [])
-const activeModelId = computed(() => props.payload?.activeModelId ?? null)
-
 const dialogOpen = ref(false)
 const editing = ref<ModelEntryDraft | null>(null)
 const providerSearch = ref('')
 const providerResultsOpen = ref(false)
 const showApiKey = ref(false)
 const saving = ref(false)
-const activatingId = ref<string | null>(null)
 const deletingId = ref<string | null>(null)
 const discovering = ref(false)
 const discoveredModels = ref<DiscoveredModel[]>([])
@@ -298,26 +294,10 @@ async function save(): Promise<void> {
   }
 }
 
-async function activate(entryId: string): Promise<void> {
-  if (activatingId.value) return
-  activatingId.value = entryId
-  try {
-    emit('updated', await activateModelEntry(entryId))
-  } catch (error) {
-    emit('error', error instanceof Error ? error.message : String(error))
-  } finally {
-    activatingId.value = null
-  }
-}
-
 async function remove(entryId: string): Promise<void> {
   const entry = entries.value.find((candidate) => candidate.entryId === entryId)
   const label = entry?.displayName || entry?.modelId || '此模型'
-  const activeHint =
-    entryId === activeModelId.value
-      ? ' 删除后会自动激活剩余列表中的第一条模型。'
-      : ''
-  if (!window.confirm(`确定删除「${label}」吗？${activeHint}`)) return
+  if (!window.confirm(`确定删除「${label}」吗？`)) return
   deletingId.value = entryId
   try {
     emit('updated', await deleteModelEntry(entryId))
@@ -384,22 +364,19 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
     </div>
 
     <template v-else>
-      <div class="model-route-note">
+      <div class="model-config-note">
         <BrandMark :size="30" />
         <div>
-          <strong>单模型运行</strong>
-          <span>对话、构建、自动任务与子代理统一使用当前激活模型。</span>
+          <strong>模型配置</strong>
+          <span>在此管理连接与能力；当前会话使用的模型在聊天输入框选择。</span>
         </div>
       </div>
       <ModelEntryList
         :entries="entries"
         :provider-options="providerOptions"
-        :active-model-id="activeModelId"
-        :activating-id="activatingId"
         :deleting-id="deletingId"
         @add="openAdd"
         @edit="openEdit"
-        @activate="activate"
         @delete="remove"
       />
 
@@ -426,7 +403,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
               >
                 {{ editing.entryId ? '编辑模型' : '添加模型' }}
               </h2>
-              <p>每条配置只对应一个模型，保存后可在列表中切换。</p>
+              <p>每条配置对应一个模型和一组连接参数。</p>
             </div>
             <button
               type="button"
@@ -771,7 +748,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   font-size: 12px;
 }
 
-.model-route-note {
+.model-config-note {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -781,17 +758,17 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   background: rgb(var(--bg-elevated) / 0.44);
 }
 
-.model-route-note > div {
+.model-config-note > div {
   display: grid;
   gap: 2px;
 }
 
-.model-route-note strong {
+.model-config-note strong {
   color: rgb(var(--fg));
   font-size: 11px;
 }
 
-.model-route-note span {
+.model-config-note span {
   color: rgb(var(--fg-subtle));
   font-size: 10px;
 }

@@ -3,6 +3,7 @@ import {
   composerModeOptions,
   composerSendDisabled,
   composerStopPresentation,
+  currentComposerPermission,
   currentComposerMode,
 } from './composerControls'
 
@@ -57,13 +58,24 @@ describe('composer control model', () => {
       'ask_before_edit',
       'accept_edits',
       'auto',
-      'plan',
     ])
     expect(currentComposerMode('accept_edits')).toMatchObject({
       value: 'accept_edits',
       short: '编辑',
     })
     expect(currentComposerMode('normal').value).toBe('ask_before_edit')
+  })
+
+  it('shows the saved execution permission while Plan remains active', () => {
+    expect(
+      currentComposerPermission({ mode: 'plan', previous_mode: 'auto' }),
+    ).toMatchObject({ value: 'auto', short: '自动' })
+    expect(
+      currentComposerPermission({
+        mode: 'plan',
+        previous_mode: 'accept_edits',
+      }),
+    ).toMatchObject({ value: 'accept_edits', short: '编辑' })
   })
 
   it('uses pause semantics while the owner session Goal is running', () => {

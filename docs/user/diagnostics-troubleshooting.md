@@ -13,7 +13,7 @@
 | ---------------------------- | ----------------------------------------------------------------------------- |
 | 页面白屏或窗口打开后无内容   | `npm --prefix desktop run build`，再检查 `desktop/out/renderer/index.html`    |
 | 显示“必须在 Electron 中使用” | 当前页面没有 preload Core bridge；完整产品不能在普通浏览器独立运行            |
-| 模型未配置或认证失败         | 设置 → 模型中的激活项、协议、API Base、模型 ID 和 API Key                     |
+| 模型未配置或认证失败         | 设置 → 模型中的协议、API Base、模型 ID 和 API Key；输入框中的当前模型         |
 | 模型能回复但工具失败         | 当前权限模式、Ask/Plan 卡片、workspace 和工具输入                             |
 | Build 读到错误项目           | 当前 session 的 project path、诊断页 workspace fence、是否切错会话            |
 | 会话刷新后卡片缺失           | session runtime event 日志、bootstrap replay 和 reducer 投影                  |

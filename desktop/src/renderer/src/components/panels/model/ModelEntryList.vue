@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { Check, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import type { ModelEntry, ProviderOption } from '../../../types'
-import { providerIconAsset, providerIconFallback } from './providerIcons'
+import {
+  providerIconAsset,
+  providerIconFallback,
+} from '../../../model/providerIcons'
 
 const props = defineProps<{
   entries: ModelEntry[]
   providerOptions: ProviderOption[]
-  activeModelId: string | null
-  activatingId?: string | null
   deletingId?: string | null
 }>()
 
 const emit = defineEmits<{
   add: []
   edit: [entry: ModelEntry]
-  activate: [entryId: string]
   delete: [entryId: string]
 }>()
 
@@ -37,7 +37,7 @@ function providerIcon(entry: ModelEntry): string | null {
     <header class="model-list-head">
       <div>
         <h2 id="saved-models-title">已保存模型</h2>
-        <p>可以保存多条配置，但全局只激活一个模型。</p>
+        <p>管理 Provider、协议、凭证与模型能力。</p>
       </div>
       <button type="button" class="model-add-button" @click="emit('add')">
         <Plus :size="16" aria-hidden="true" />
@@ -46,12 +46,7 @@ function providerIcon(entry: ModelEntry): string | null {
     </header>
 
     <div v-if="entries.length" class="model-card-grid">
-      <article
-        v-for="entry in entries"
-        :key="entry.entryId"
-        class="model-card"
-        :class="{ active: entry.entryId === activeModelId }"
-      >
+      <article v-for="entry in entries" :key="entry.entryId" class="model-card">
         <div class="model-card-main">
           <div class="provider-avatar" aria-hidden="true">
             <img
@@ -64,10 +59,6 @@ function providerIcon(entry: ModelEntry): string | null {
           <div class="model-card-copy">
             <div class="model-card-title-row">
               <strong>{{ entry.displayName || entry.modelId }}</strong>
-              <span v-if="entry.entryId === activeModelId" class="active-badge">
-                <Check :size="12" aria-hidden="true" />
-                激活
-              </span>
             </div>
             <code>{{ entry.modelId }}</code>
             <div class="model-card-meta">
@@ -81,15 +72,6 @@ function providerIcon(entry: ModelEntry): string | null {
         </div>
 
         <div class="model-card-actions">
-          <button
-            v-if="entry.entryId !== activeModelId"
-            type="button"
-            class="card-action activate"
-            :disabled="activatingId === entry.entryId"
-            @click="entry.entryId && emit('activate', entry.entryId)"
-          >
-            {{ activatingId === entry.entryId ? '切换中…' : '设为激活' }}
-          </button>
           <button
             type="button"
             class="card-action icon"
@@ -194,11 +176,6 @@ function providerIcon(entry: ModelEntry): string | null {
   background: rgb(var(--bg-elevated));
 }
 
-.model-card.active {
-  border-color: rgb(var(--accent) / 0.52);
-  box-shadow: inset 3px 0 0 rgb(var(--accent));
-}
-
 .model-card-main {
   display: flex;
   align-items: center;
@@ -219,6 +196,10 @@ function providerIcon(entry: ModelEntry): string | null {
   color: rgb(var(--fg-muted));
   font-size: 15px;
   font-weight: 700;
+}
+
+.provider-avatar:has(img) {
+  background: rgb(248 250 252);
 }
 
 .provider-avatar img {
@@ -263,18 +244,6 @@ function providerIcon(entry: ModelEntry): string | null {
   gap: 5px;
   color: rgb(var(--fg-subtle));
   font-size: 11px;
-}
-
-.active-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgb(var(--accent) / 0.15);
-  color: rgb(var(--accent));
-  font-size: 10px;
-  font-weight: 650;
 }
 
 .model-card-actions {

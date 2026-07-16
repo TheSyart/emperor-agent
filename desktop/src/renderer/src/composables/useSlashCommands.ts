@@ -284,11 +284,12 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       return
     }
     if (normalized === 'off' || normalized === 'normal') {
-      const result = await setControlMode('ask_before_edit')
+      const restored = savedExecutionPermission(boot.value?.control)
+      const result = await setControlMode(restored)
       deps.addLocalCommand(
         raw,
         result.ok
-          ? 'Plan 模式已关闭，已回到编辑前询问模式。'
+          ? `Plan 模式已关闭，执行权限恢复为：${permissionLabel(restored)}。`
           : `Plan 模式关闭失败：${result.error}`,
       )
       return
@@ -300,7 +301,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     const [, arg = 'status'] = raw.trim().split(/\s+/, 2)
     const normalized = arg.toLowerCase()
     if (['ask', 'ask_before_edit', 'edit_before_ask'].includes(normalized)) {
-      const result = await setControlMode('ask_before_edit')
+      const result = await setPermissionMode('ask_before_edit')
       deps.addLocalCommand(
         raw,
         result.ok
@@ -310,7 +311,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       return
     }
     if (['accept_edits', 'accept-edits', 'edits'].includes(normalized)) {
-      const result = await setControlMode('accept_edits')
+      const result = await setPermissionMode('accept_edits')
       deps.addLocalCommand(
         raw,
         result.ok
@@ -320,7 +321,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       return
     }
     if (normalized === 'auto') {
-      const result = await setControlMode('auto')
+      const result = await setPermissionMode('auto')
       deps.addLocalCommand(
         raw,
         result.ok
@@ -329,17 +330,22 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       )
       return
     }
-    if (normalized === 'plan') {
-      const result = await setControlMode('plan')
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? '权限模式已切换为：计划模式。'
-          : `权限模式切换失败：${result.error}`,
-      )
-      return
-    }
     deps.addLocalCommand(raw, renderModeStatus(boot.value?.control))
+  }
+
+  async function setPermissionMode(
+    mode: 'ask_before_edit' | 'accept_edits' | 'auto',
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const data = await core('control.setPermissionMode', mode)
+      if (boot.value) boot.value.control = data
+      deps.showToast(`执行权限已切换为${permissionLabel(mode)}`)
+      return { ok: true }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      deps.showToast(error)
+      return { ok: false, error }
+    }
   }
 
   async function setControlMode(
@@ -348,14 +354,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     try {
       const data = await core('control.setMode', mode)
       if (boot.value) boot.value.control = data
-      const label =
-        mode === 'plan'
-          ? '计划模式'
-          : mode === 'auto'
-            ? '自动执行'
-            : mode === 'accept_edits'
-              ? '接受编辑'
-              : '编辑前询问'
+      const label = mode === 'plan' ? '计划模式' : permissionLabel(mode)
       deps.showToast(`已切换为${label}`)
       return { ok: true }
     } catch (err) {
@@ -385,7 +384,30 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
   }
 
-  return { submitFromComposer, executeSlashCommand, setControlMode }
+  return {
+    submitFromComposer,
+    executeSlashCommand,
+    setControlMode,
+    setPermissionMode,
+  }
+}
+
+function savedExecutionPermission(
+  control: BootstrapPayload['control'] | undefined,
+): 'ask_before_edit' | 'accept_edits' | 'auto' {
+  if (control?.mode === 'plan' && control.previous_mode)
+    return control.previous_mode
+  if (control?.mode === 'accept_edits' || control?.mode === 'auto')
+    return control.mode
+  return 'ask_before_edit'
+}
+
+function permissionLabel(
+  mode: 'ask_before_edit' | 'accept_edits' | 'auto',
+): string {
+  if (mode === 'auto') return '自动执行'
+  if (mode === 'accept_edits') return '接受编辑'
+  return '编辑前询问'
 }
 
 function goalActionVerb(action: GoalCardAction) {

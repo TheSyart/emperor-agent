@@ -30,7 +30,7 @@ async function onUpdated(payload: ModelConfigPayload): Promise<void> {
     <header class="view-head">
       <div class="min-w-0">
         <h1>模型</h1>
-        <p>保存多个标准接口模型，全局只激活一个。</p>
+        <p>配置 Provider、协议、凭证和模型能力。</p>
       </div>
     </header>
     <div class="view-body">

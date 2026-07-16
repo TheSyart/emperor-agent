@@ -20,6 +20,12 @@ export interface GoalStartInput {
   guardPolicy?: Partial<GoalGuardPolicy> | null
 }
 
+export interface GoalReplaceInput {
+  goalId: string
+  outcome: string
+  sessionId: string
+}
+
 export interface GoalOperationResult {
   accepted: boolean
   goal: GoalSummary
@@ -64,6 +70,7 @@ interface GoalServiceOptions {
   }
   readonly activeSessionId?: () => string | null
   readonly summarize?: (goal: GoalRecord) => Promise<GoalSummary>
+  readonly clearPendingInteraction?: (goal: GoalRecord) => void | Promise<void>
 }
 
 export class GoalService {
@@ -75,6 +82,64 @@ export class GoalService {
     return await this.serializeStart(
       async () => await this.startUnlocked(input),
     )
+  }
+
+  async replace(input: GoalReplaceInput): Promise<GoalOperationResult> {
+    return await this.serializeStart(async () => {
+      const previous = await this.requireOwnedGoal(
+        input.goalId,
+        input.sessionId,
+        'goals.replace',
+      )
+      if (isGoalTerminal(previous.status))
+        throw new GoalServiceError(
+          'goal_terminal',
+          'A terminal Goal cannot be replaced.',
+        )
+
+      const session = this.options.requireReadableSession(
+        input.sessionId,
+        'goals.replace',
+      )
+      const replacement = newGoalRecord({
+        outcome: input.outcome,
+        scope: this.options.scopeForSession(session),
+        guardPolicy: previous.guardPolicy,
+        supersedesGoalId: previous.id,
+      })
+      const unrelatedTask = this.options.activeTasks
+        .list()
+        .find((task) => task.id !== `goal:${previous.id}`)
+      if (unrelatedTask)
+        throw new GoalServiceError(
+          'goal_mutation_busy',
+          'Another mutation runtime is already active.',
+        )
+
+      const previousHandle = this.options.coordinator.active(previous.id)
+      await this.options.coordinator.cancel(previous.id, 'goal_replaced')
+      if (previousHandle) await previousHandle.promise
+      await this.options.clearPendingInteraction?.(previous)
+      if (this.options.activeTasks.hasActive())
+        throw new GoalServiceError(
+          'goal_mutation_busy',
+          'The previous Goal runtime has not released mutation ownership.',
+        )
+
+      const created = await this.options.goalStore.create(replacement)
+      try {
+        const running = await this.options.coordinator.start(
+          created,
+          created.contract.outcome,
+        )
+        return await this.result(running, true)
+      } catch (error) {
+        await this.options.coordinator
+          .cancel(created.id, 'replacement_start_failed')
+          .catch(() => undefined)
+        throw error
+      }
+    })
   }
 
   private async startUnlocked(
@@ -174,11 +239,16 @@ export class GoalService {
     reason?: string | null,
     ownerSessionId?: string | null,
   ): Promise<GoalOperationResult> {
-    await this.requireOwnedGoal(goalId, ownerSessionId, 'goals.cancel')
+    const previous = await this.requireOwnedGoal(
+      goalId,
+      ownerSessionId,
+      'goals.cancel',
+    )
     const goal = await this.options.coordinator.cancel(
       goalId,
       boundedReason(reason || 'user_cancelled'),
     )
+    await this.options.clearPendingInteraction?.(previous)
     return await this.result(goal, true)
   }
 
@@ -207,6 +277,7 @@ export class GoalService {
       boundedReason(reason),
     )
     if (handle) await handle.promise
+    await this.options.clearPendingInteraction?.(goal)
     return cancelled
   }
 

@@ -167,6 +167,7 @@ describe('runtime events (test_runtime_events.py)', () => {
       currentPlanId: 'plan_1',
       cyclesUsed: 2,
       acceptance: { passed: 1, failed: 0, missing: 1, total: 2 },
+      createdAt: '2026-07-16T01:00:00.000Z',
       updatedAt: '2026-07-16T01:02:03.000Z',
       lastEventSeq: 3,
       workspaceRoot: '/private/workspace',

@@ -15,9 +15,33 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(102)
+    expect(coreOperationKeys()).toHaveLength(104)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
+  })
+
+  it('keeps Plan outside the public permission selector and validates Goal replacement input', () => {
+    expect(
+      CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse([
+        'accept_edits',
+      ]),
+    ).toEqual(['accept_edits'])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse(['plan']),
+    ).toThrow()
+
+    expect(
+      CORE_OPERATION_REGISTRY['goals.replace'].args.parse([
+        { goalId: 'goal_1', outcome: '新的结果', sessionId: 'session_1' },
+      ]),
+    ).toEqual([
+      { goalId: 'goal_1', outcome: '新的结果', sessionId: 'session_1' },
+    ])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['goals.replace'].args.parse([
+        { goalId: 'goal_1', outcome: '   ', sessionId: 'session_1' },
+      ]),
+    ).toThrow()
   })
 
   it('uses exact Zod tuples for no-arg, optional, single, and multi-arg operations', () => {

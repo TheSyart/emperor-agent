@@ -177,7 +177,7 @@ async function deleteArchived(id: string) {
               <Cpu :size="18" />
               <div>
                 <strong>当前模型</strong>
-                <span>所有 Agent 工作负载共用的激活模型</span>
+                <span>在聊天输入框中选择，新的请求会使用该模型</span>
               </div>
               <code>{{
                 ctx.boot.value?.modelConfig?.current?.modelId ||

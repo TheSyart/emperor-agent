@@ -201,6 +201,20 @@ async function runGoalAction(
   return result
 }
 
+async function replaceGoal(
+  goalId: string,
+  outcome: string,
+): Promise<GoalOperationResult> {
+  const result = await core('goals.replace', {
+    goalId,
+    outcome,
+    sessionId: sessionId.value,
+  })
+  applyGoalSummary(result.goal)
+  showToast('已创建替代 Goal')
+  return result
+}
+
 async function onSessionActivate(id: string) {
   await sessionStore.activate(id)
   switchSession(id)
@@ -292,7 +306,7 @@ async function runSafely(task: () => Promise<void>) {
   }
 }
 
-const { submitFromComposer, setControlMode } = useSlashCommands({
+const { submitFromComposer, setPermissionMode } = useSlashCommands({
   boot,
   configContent,
   busy,
@@ -356,7 +370,7 @@ provideAppContext({
   saveWatchlist,
   checkWatchlist,
   setDesktopPetEnabled,
-  setControlMode,
+  setPermissionMode,
   sendMessage,
   sendInteractionAnswer,
   sendPlanComment,
@@ -364,6 +378,8 @@ provideAppContext({
   cancelInteraction,
   stopActive,
   runGoalAction,
+  replaceGoal,
+  startGoal,
   clearChat,
   submitFromComposer,
   showToast,

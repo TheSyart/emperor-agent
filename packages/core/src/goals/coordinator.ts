@@ -187,8 +187,7 @@ export class GoalCoordinator {
     handle?.abortController.abort(reason)
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = await this.requireGoal(goalId)
-      if (isGoalTerminal(current.status) || current.runtime.phase === 'paused')
-        return current
+      if (isGoalTerminal(current.status)) return current
       try {
         return await this.persistPause(current, reason)
       } catch (error) {
@@ -518,7 +517,8 @@ export class GoalCoordinator {
     goal: GoalRecord,
     reason: string,
   ): Promise<GoalRecord> {
-    if (goal.runtime.phase === 'paused') return goal
+    if (goal.runtime.phase === 'paused' && goal.runtime.pauseReason === reason)
+      return goal
     return await this.update(
       goal,
       {

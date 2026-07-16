@@ -62,6 +62,9 @@ describe('statusRender pure formatters (W6)', () => {
     expect(renderTokenInfo(boot)).toContain('Token 消耗')
     expect(renderMemoryInfo(boot)).toContain('记忆状态')
     expect(renderModeStatus(boot.control)).toContain('`auto`')
+    expect(
+      renderModeStatus({ mode: 'plan', previous_mode: 'accept_edits' }),
+    ).toContain('当前权限：`accept_edits`')
     expect(renderCommandHelp()).toContain('斜杠命令')
     expect(
       renderCompactResult({

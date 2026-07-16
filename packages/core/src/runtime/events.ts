@@ -520,6 +520,7 @@ function runtimeGoalSummary(
             : null,
         })),
     },
+    createdAt: String(goal.createdAt ?? goal.updatedAt ?? '').slice(0, 64),
     updatedAt: String(goal.updatedAt ?? '').slice(0, 64),
     lastEventSeq: Math.max(0, Math.trunc(lastEventSeq || 0)),
   }

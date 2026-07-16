@@ -11,12 +11,19 @@ import { isPathLikeSlashToken } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
 import type {
   ChatSendPayload,
+  ControlPayload,
   CurrentModelConfig,
   ModelEntry,
+  ProviderOption,
+  RuntimeGoalSummary,
   ToolInfo,
 } from '../../types'
-import { actionIcons, modelIcons, toolIcon } from '../../icons'
+import { actionIcons, goalIcons, toolIcon } from '../../icons'
 import type { IconComponent } from '../../icons'
+import {
+  providerIconAsset,
+  providerIconFallback,
+} from '../../model/providerIcons'
 import { useAttachments } from '../../composables/useAttachments'
 import AttachmentChip from './AttachmentChip.vue'
 import CapabilityPicker from './CapabilityPicker.vue'
@@ -24,7 +31,7 @@ import {
   composerModeOptions,
   composerSendDisabled,
   composerStopPresentation,
-  currentComposerMode,
+  currentComposerPermission,
   type ControlModeValue,
 } from './composerControls'
 import { useFloatingMenu } from './floatingMenu'
@@ -36,18 +43,19 @@ const props = defineProps<{
   mcpContent?: string
   contextUsed: number
   contextMax: number
-  controlMode?: string
+  control?: ControlPayload | null
   currentModel?: CurrentModelConfig | null
   modelEntries: ModelEntry[]
+  providerOptions: ProviderOption[]
   supportsVision?: boolean
   sendBlockedReason?: string | null
-  goalActive?: boolean
+  goal?: RuntimeGoalSummary | null
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
   stop: []
   error: [message: string]
-  'set-mode': [mode: ControlModeValue]
+  'set-permission': [mode: ControlModeValue]
   'switch-model': [entryId: string]
   'set-reasoning-effort': [level: string | null]
 }>()
@@ -83,7 +91,7 @@ const modelFloatingMenu = useFloatingMenu({
   button: modelButton,
   menu: modelMenu,
   fallbackWidth: 390,
-  fallbackHeight: 260,
+  fallbackHeight: 420,
   onClose: closeModelMenu,
 })
 const modeFloatingMenu = useFloatingMenu({
@@ -199,20 +207,20 @@ const modeOptions = composerModeOptions.map((option) => ({
       ? actionIcons.modeAskBeforeEdit
       : option.value === 'accept_edits'
         ? actionIcons.modeAcceptEdits
-        : option.value === 'auto'
-          ? actionIcons.modeAuto
-          : actionIcons.modePlan,
+        : actionIcons.modeAuto,
 }))
 
 const currentMode = computed(() => {
-  const option = currentComposerMode(props.controlMode)
+  const option = currentComposerPermission(props.control)
   return (
     modeOptions.find((item) => item.value === option.value) || modeOptions[0]
   )
 })
 const modeTitle = computed(() =>
-  props.busy ? '等待当前任务结束后再切换' : '切换执行方式',
+  props.busy ? '等待当前任务结束后再切换' : '切换执行权限',
 )
+const planActive = computed(() => props.control?.mode === 'plan')
+const goalActive = computed(() => Boolean(props.goal))
 const availableModelEntries = computed(() =>
   props.modelEntries.filter((entry) => entry.entryId),
 )
@@ -227,6 +235,11 @@ const currentModelEntry = computed(
     availableModelEntries.value[0] ||
     null,
 )
+const otherModelEntries = computed(() =>
+  availableModelEntries.value.filter(
+    (entry) => entry.entryId !== activeModelId.value,
+  ),
+)
 const showModelSwitcher = computed(() => availableModelEntries.value.length > 0)
 const currentModelLabel = computed(() => {
   const entry = currentModelEntry.value
@@ -235,6 +248,31 @@ const currentModelLabel = computed(() => {
     props.currentModel?.displayName || props.currentModel?.modelId || '模型'
   )
 })
+const currentProviderName = computed(
+  () => currentModelEntry.value?.provider || props.currentModel?.provider || '',
+)
+const currentProviderLabel = computed(() =>
+  providerLabel(currentProviderName.value),
+)
+const currentProviderIcon = computed(() =>
+  providerIconAsset(
+    providerOption(currentProviderName.value)?.iconId ||
+      currentProviderName.value,
+  ),
+)
+const currentProviderFallback = computed(() =>
+  providerIconFallback(currentProviderLabel.value),
+)
+const currentModelId = computed(
+  () => currentModelEntry.value?.modelId || props.currentModel?.modelId || '',
+)
+const currentProtocolLabel = computed(() =>
+  protocolLabel(
+    currentModelEntry.value?.protocol ||
+      props.currentModel?.protocol ||
+      'openai',
+  ),
+)
 const currentReasoningLabel = computed(() =>
   reasoningLabel(
     props.currentModel?.reasoningEffort ??
@@ -407,7 +445,7 @@ async function toggleModeMenu() {
 function selectMode(mode: ControlModeValue) {
   if (props.busy) return
   closeModeMenu()
-  if (mode !== props.controlMode) emit('set-mode', mode)
+  if (mode !== currentMode.value?.value) emit('set-permission', mode)
   input.value?.focus()
 }
 
@@ -555,6 +593,29 @@ function modelEntryLabel(entry: ModelEntry) {
   return entry.displayName || entry.modelId || '模型'
 }
 
+function providerOption(name: string): ProviderOption | undefined {
+  return props.providerOptions.find((option) => option.name === name)
+}
+
+function providerLabel(name: string): string {
+  const option = providerOption(name)
+  return option?.displayName || option?.name || name || 'Provider'
+}
+
+function providerIcon(entry: ModelEntry): string | null {
+  return providerIconAsset(
+    providerOption(entry.provider)?.iconId || entry.provider,
+  )
+}
+
+function providerFallback(entry: ModelEntry): string {
+  return providerIconFallback(providerLabel(entry.provider))
+}
+
+function protocolLabel(protocol: 'openai' | 'anthropic'): string {
+  return protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'
+}
+
 function normalizeReasoningValue(value?: string | null) {
   const normalized = String(value || '')
     .trim()
@@ -591,7 +652,7 @@ const sendDisabled = computed(() =>
   }),
 )
 const stopPresentation = computed(() =>
-  composerStopPresentation(Boolean(props.goalActive)),
+  composerStopPresentation(goalActive.value),
 )
 
 onBeforeUnmount(() => {
@@ -730,6 +791,44 @@ onBeforeUnmount(() => {
           >
             <component :is="actionIcons.new" class="action-icon" :size="16" />
           </button>
+
+          <div class="mode-picker">
+            <button
+              ref="modeButton"
+              type="button"
+              class="mode-button"
+              :aria-expanded="modeMenuOpen"
+              :title="modeTitle"
+              :disabled="props.busy"
+              @click="toggleModeMenu"
+            >
+              <component :is="currentMode.icon" class="mode-icon" :size="16" />
+              <span>{{ currentMode.short }}</span>
+              <component
+                :is="actionIcons.caretDown"
+                class="mode-caret"
+                :size="12"
+              />
+            </button>
+          </div>
+
+          <span class="composer-action-divider" aria-hidden="true" />
+          <span
+            v-if="goalActive"
+            class="composer-lifecycle-indicator goal"
+            title="Goal 正在运行。使用 /goal status 查看状态"
+          >
+            <component :is="goalIcons.goal" :size="14" aria-hidden="true" />
+            Goal
+          </span>
+          <span
+            v-if="planActive"
+            class="composer-lifecycle-indicator plan"
+            title="Plan 已开启。使用 /plan status 查看状态"
+          >
+            <component :is="goalIcons.plan" :size="14" aria-hidden="true" />
+            Plan
+          </span>
         </div>
 
         <div class="composer-right-actions">
@@ -773,34 +872,20 @@ onBeforeUnmount(() => {
               :disabled="props.busy"
               @click="toggleModelMenu"
             >
-              <component :is="modelIcons.text" class="model-icon" :size="15" />
+              <span class="model-provider-avatar compact" aria-hidden="true">
+                <img
+                  v-if="currentProviderIcon"
+                  :src="currentProviderIcon"
+                  alt=""
+                />
+                <span v-else>{{ currentProviderFallback }}</span>
+              </span>
               <span class="model-button-label">{{ currentModelLabel }}</span>
               <span class="model-button-separator" aria-hidden="true">·</span>
               <span class="model-button-meta">{{ currentReasoningLabel }}</span>
               <component
                 :is="actionIcons.caretDown"
                 class="model-caret"
-                :size="12"
-              />
-            </button>
-          </div>
-
-          <div class="mode-picker">
-            <button
-              ref="modeButton"
-              type="button"
-              class="mode-button"
-              :data-active="currentMode.value === 'plan'"
-              :aria-expanded="modeMenuOpen"
-              :title="modeTitle"
-              :disabled="props.busy"
-              @click="toggleModeMenu"
-            >
-              <component :is="currentMode.icon" class="mode-icon" :size="16" />
-              <span>{{ currentMode.short }}</span>
-              <component
-                :is="actionIcons.caretDown"
-                class="mode-caret"
                 :size="12"
               />
             </button>
@@ -842,8 +927,8 @@ onBeforeUnmount(() => {
         @keydown.esc="closeModeMenu"
       >
         <div class="mode-menu-head">
-          <span>执行方式</span>
-          <em>立即应用到下一轮</em>
+          <span>执行权限</span>
+          <em>{{ planActive ? 'Plan 结束后使用' : '立即应用到下一轮' }}</em>
         </div>
         <button
           v-for="option in modeOptions"
@@ -876,8 +961,23 @@ onBeforeUnmount(() => {
         @keydown="onModelMenuKeydown"
       >
         <div class="model-menu-head">
-          <span>模型与思考</span>
+          <span>模型</span>
           <em>下一轮生效</em>
+        </div>
+        <div class="model-current-card">
+          <span class="model-provider-avatar" aria-hidden="true">
+            <img v-if="currentProviderIcon" :src="currentProviderIcon" alt="" />
+            <span v-else>{{ currentProviderFallback }}</span>
+          </span>
+          <span class="model-current-copy">
+            <small>当前模型</small>
+            <strong>{{ currentModelLabel }}</strong>
+            <code>{{ currentModelId || '未配置模型 ID' }}</code>
+            <span>
+              {{ currentProviderLabel }} · {{ currentProtocolLabel }} · 思考
+              {{ currentReasoningLabel }}
+            </span>
+          </span>
         </div>
         <div v-if="reasoningOptions.length > 1" class="reasoning-row">
           <span>思考强度</span>
@@ -896,34 +996,37 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="model-menu-label">模型条目</div>
+        <div class="model-menu-label">其他模型</div>
         <button
-          v-for="entry in availableModelEntries"
+          v-for="entry in otherModelEntries"
           :key="entry.entryId"
           type="button"
           class="model-option"
-          :data-active="entry.entryId === activeModelId"
           @click="entry.entryId && selectModel(entry.entryId)"
         >
-          <component
-            :is="modelIcons.text"
-            class="model-option-icon"
-            :size="15"
-          />
+          <span class="model-provider-avatar compact" aria-hidden="true">
+            <img
+              v-if="providerIcon(entry)"
+              :src="providerIcon(entry) || ''"
+              alt=""
+            />
+            <span v-else>{{ providerFallback(entry) }}</span>
+          </span>
           <span class="model-option-copy">
             <strong>{{ modelEntryLabel(entry) }}</strong>
             <small>{{ entry.modelId || '未配置' }}</small>
             <span class="model-option-meta">
-              <em>{{ entry.provider || 'provider' }}</em>
-              <em>{{
-                entry.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'
-              }}</em>
+              <em>{{ providerLabel(entry.provider) }}</em>
+              <em>{{ protocolLabel(entry.protocol) }}</em>
             </span>
           </span>
           <span class="model-option-badges">
-            <b>{{ entry.entryId === activeModelId ? '当前' : '切换' }}</b>
+            <b>切换</b>
           </span>
         </button>
+        <p v-if="!otherModelEntries.length" class="model-menu-empty">
+          没有其他已保存模型。
+        </p>
       </div>
     </Teleport>
   </div>

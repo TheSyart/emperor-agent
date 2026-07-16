@@ -21,8 +21,12 @@ export function composerStopPresentation(goalActive: boolean) {
       }
 }
 
-export type ControlModeValue =
-  'ask_before_edit' | 'accept_edits' | 'auto' | 'plan'
+export type ControlModeValue = 'ask_before_edit' | 'accept_edits' | 'auto'
+
+export interface ComposerControlProjection {
+  mode?: string | null
+  previous_mode?: ControlModeValue | null
+}
 
 export interface ComposerModeOption {
   value: ControlModeValue
@@ -50,12 +54,6 @@ export const composerModeOptions: ComposerModeOption[] = [
     short: '自动',
     description: '在当前权限下直接推进任务',
   },
-  {
-    value: 'plan',
-    label: '计划预览',
-    short: '计划',
-    description: '先只读探索，再提交计划审批',
-  },
 ]
 
 export function normalizeComposerControlMode(
@@ -64,7 +62,6 @@ export function normalizeComposerControlMode(
   if (mode === 'normal' || !mode) return 'ask_before_edit'
   if (mode === 'accept_edits') return 'accept_edits'
   if (mode === 'auto') return 'auto'
-  if (mode === 'plan') return 'plan'
   return 'ask_before_edit'
 }
 
@@ -76,4 +73,12 @@ export function currentComposerMode(
     composerModeOptions.find((item) => item.value === normalized) ??
     composerModeOptions[0]!
   )
+}
+
+export function currentComposerPermission(
+  control: ComposerControlProjection | null | undefined,
+): ComposerModeOption {
+  const permission =
+    control?.mode === 'plan' ? control.previous_mode : control?.mode
+  return currentComposerMode(permission)
 }

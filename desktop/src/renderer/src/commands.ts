@@ -89,7 +89,7 @@ export const slashCommands: SlashCommand[] = [
   },
   {
     name: '/mode',
-    usage: '/mode ask|auto|plan|status',
+    usage: '/mode ask|edits|auto|status',
     description: '查看或切换权限模式',
   },
   {

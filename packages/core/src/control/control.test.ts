@@ -601,6 +601,36 @@ describe('ControlManager (test_control.py)', () => {
     expect(manager.payload().previous_mode).toBeNull()
   })
 
+  it('changes the saved execution permission during Plan without leaving Plan', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-plan-permission-'))
+    manager.setMode(ControlMode.AUTO)
+    manager.setMode(ControlMode.PLAN)
+
+    const updated = manager.setPermissionMode(ControlMode.ACCEPT_EDITS)
+    expect(updated.mode).toBe(ControlMode.PLAN)
+    expect(updated.previous_mode).toBe(ControlMode.ACCEPT_EDITS)
+
+    const interaction = manager.createPlan({
+      title: '使用最新权限执行',
+      summary: 'Plan 与执行权限独立保存',
+      planMarkdown: '# Plan\n\n- Apply approved edits',
+      assumptions: [],
+      riskLevel: 'low',
+    })
+    manager.approve(interaction.id)
+
+    expect(manager.payload().mode).toBe(ControlMode.ACCEPT_EDITS)
+    expect(manager.payload().previous_mode).toBeNull()
+  })
+
+  it('rejects Plan as a permission selection', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-permission-only-'))
+
+    expect(() => manager.setPermissionMode(ControlMode.PLAN)).toThrow(
+      'permission mode must be ask_before_edit, accept_edits or auto',
+    )
+  })
+
   it('cancel returns history message and clears pending', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-cancel-'))
     const interaction = manager.createAsk({ questions: [makeQuestion()] })

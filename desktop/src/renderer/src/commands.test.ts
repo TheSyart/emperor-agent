@@ -59,6 +59,19 @@ describe('slash command parsing', () => {
     ).toBe('code-audit')
   })
 
+  it('advertises Plan separately from the three permission modes', () => {
+    const mode = buildSlashPaletteItems().find(
+      (item) => item.id === 'command:/mode',
+    )
+    const plan = buildSlashPaletteItems().find(
+      (item) => item.id === 'command:/plan',
+    )
+
+    expect(mode?.usage).toBe('/mode ask|edits|auto|status')
+    expect(mode?.usage).not.toContain('plan')
+    expect(plan?.usage).toBe('/plan on|off|status')
+  })
+
   it('keeps blocked Skills out of callable shortcuts', () => {
     const blocked: SkillInfo = {
       name: 'legacy-script',

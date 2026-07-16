@@ -209,6 +209,18 @@ describe('GoalCoordinator', () => {
     await expect(f.coordinator.resume(f.goal.id)).rejects.toThrow()
   })
 
+  it('records a newer pause cause when an already paused Goal changes lifecycle context', async () => {
+    const f = await fixture()
+
+    await f.coordinator.pause(f.goal.id, 'no_new_evidence')
+    const archived = await f.coordinator.pause(f.goal.id, 'session_archived')
+
+    expect(archived).toMatchObject({
+      status: 'active',
+      runtime: { phase: 'paused', pauseReason: 'session_archived' },
+    })
+  })
+
   it('makes explicit maxCycles terminal and never guesses unavailable cost', async () => {
     const f = await fixture({ guardPolicy: { maxCycles: 1 } })
     await f.coordinator.start(f.goal.id)

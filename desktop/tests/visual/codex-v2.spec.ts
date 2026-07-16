@@ -188,7 +188,8 @@ for (const scenario of scenarios) {
     if (scenario.path === '/settings/model') {
       await expect(page.locator('.model-entry-list')).toBeVisible()
       await expect(page.getByText('Visual Local')).toBeVisible()
-      await expect(page.getByText('单模型运行')).toBeVisible()
+      await expect(page.getByText('已保存模型')).toBeVisible()
+      await expect(page.getByText('单模型运行')).toHaveCount(0)
     }
     await expect(page.locator('body')).not.toContainText('Web UI 启动失败')
     await page.waitForTimeout(650)
@@ -706,7 +707,7 @@ test('captures composer model menu on desktop', async ({ page }) => {
   await assertFloatingModelMenu(page)
   await expect(page.locator('.model-menu button').first()).toBeFocused()
   await page.keyboard.press('Tab')
-  await expect(page.locator('.model-menu')).toContainText('模型条目')
+  await expect(page.locator('.model-menu')).toContainText('其他模型')
   await expect(page.locator('.model-menu button:focus')).toHaveCount(1)
   await page.keyboard.press('ArrowDown')
   await expect(page.locator('.model-menu button:focus')).toHaveCount(1)
@@ -727,6 +728,105 @@ test('captures composer model menu on mobile', async ({ page }) => {
     fullPage: false,
   })
 })
+
+const composerLifecycleScenarios = [
+  {
+    name: 'composer-plan-dark',
+    path: '/chat?visualPlan=on',
+    width: 1440,
+    height: 900,
+    phase: null,
+    plan: true,
+    theme: 'dark',
+  },
+  {
+    name: 'composer-goal-light',
+    path: '/chat?visualGoal=executing&visualTheme=light',
+    width: 1440,
+    height: 900,
+    phase: 'executing',
+    plan: false,
+    theme: 'light',
+  },
+  {
+    name: 'composer-goal-plan-760',
+    path: '/chat?visualGoal=planning&visualPlan=on',
+    width: 760,
+    height: 900,
+    phase: 'planning',
+    plan: true,
+    theme: 'dark',
+  },
+  {
+    name: 'composer-goal-paused',
+    path: '/chat?visualGoal=paused',
+    width: 1440,
+    height: 900,
+    phase: 'paused',
+    plan: false,
+    theme: 'dark',
+  },
+  {
+    name: 'composer-goal-awaiting-mobile',
+    path: '/chat?visualGoal=awaiting_user',
+    width: 390,
+    height: 844,
+    phase: 'awaiting_user',
+    plan: false,
+    theme: 'dark',
+  },
+] as const
+
+for (const scenario of composerLifecycleScenarios) {
+  test(`captures ${scenario.name}`, async ({ page }) => {
+    await page.setViewportSize({
+      width: scenario.width,
+      height: scenario.height,
+    })
+    await page.goto(scenario.path)
+    await expect(page.locator('.composer')).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-theme',
+      scenario.theme,
+    )
+    await expect(
+      page.locator('.composer-lifecycle-indicator.plan'),
+    ).toHaveCount(scenario.plan ? 1 : 0)
+
+    const goalBar = page.locator('.goal-status-shell')
+    if (scenario.phase) {
+      await expect(goalBar).toBeVisible()
+      await expect(goalBar).toHaveAttribute('data-phase', scenario.phase)
+      await expect(
+        page.locator('.composer-lifecycle-indicator.goal'),
+      ).toBeVisible()
+      const goalBox = await goalBar.boundingBox()
+      const composerBox = await page.locator('.composer').boundingBox()
+      expect(goalBox).not.toBeNull()
+      expect(composerBox).not.toBeNull()
+      if (goalBox && composerBox) expect(goalBox.y).toBeLessThan(composerBox.y)
+    } else {
+      await expect(goalBar).toHaveCount(0)
+      await expect(
+        page.locator('.composer-lifecycle-indicator.goal'),
+      ).toHaveCount(0)
+    }
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth + 1,
+        ),
+      )
+      .toBe(true)
+    await page.screenshot({
+      path: resolve(screenshotDir, `${scenario.name}.png`),
+      fullPage: false,
+    })
+  })
+}
 
 async function expectDialogWithinViewport(page: Page, dialog: Locator) {
   const bounds = await dialog.boundingBox()
@@ -763,6 +863,12 @@ async function installVisualCoreBridge(page: Page) {
   await page.addInitScript(
     ({ projectDir }) => {
       const now = '2026-06-26T12:00:00.000Z'
+      const visualParams = new URLSearchParams(window.location.search)
+      const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
+      const visualGoalPhase = visualParams.get('visualGoal')
+      const visualTheme = visualParams.get('visualTheme')
+      if (visualTheme === 'light' || visualTheme === 'dark')
+        localStorage.setItem('emperor.theme', visualTheme)
       const project = {
         project_id: 'visual_project',
         project_path: projectDir,
@@ -779,13 +885,10 @@ async function installVisualCoreBridge(page: Page) {
         }),
         session('chat-main', '普通对话', 'chat'),
       ]
-      const modelUnavailable =
-        new URLSearchParams(window.location.search).get('visualModel') ===
-        'unavailable'
+      const modelUnavailable = visualParams.get('visualModel') === 'unavailable'
       const profileOnboarding = {
         status:
-          new URLSearchParams(window.location.search).get('visualProfile') ===
-          'pending'
+          visualParams.get('visualProfile') === 'pending'
             ? 'pending'
             : 'completed',
         sessionId: null as string | null,
@@ -846,6 +949,16 @@ async function installVisualCoreBridge(page: Page) {
           reasoningAdapter: 'openai',
         },
       }
+      const visualSecondaryEntry = {
+        ...visualModelEntry,
+        entryId: 'anthropic-entry',
+        provider: 'anthropic',
+        protocol: 'anthropic',
+        modelId: 'claude-visual-sonnet',
+        displayName: 'Claude Visual',
+        apiBase: 'https://api.anthropic.com',
+        reasoningEffort: 'medium',
+      }
       const visualCurrent = {
         entryId: 'visual-entry',
         provider: 'visual',
@@ -866,6 +979,8 @@ async function installVisualCoreBridge(page: Page) {
         ...visualCurrent,
         entryId: entry.entryId,
         provider: entry.provider,
+        providerLabel:
+          entry.provider === 'anthropic' ? 'Anthropic' : 'Visual Provider',
         protocol: entry.protocol,
         modelId: entry.modelId,
         displayName: entry.displayName || null,
@@ -884,7 +999,9 @@ async function installVisualCoreBridge(page: Page) {
       const modelConfig: any = {
         schemaVersion: 2,
         activeModelId: modelUnavailable ? null : 'visual-entry',
-        models: modelUnavailable ? [] : [visualModelEntry],
+        models: modelUnavailable
+          ? []
+          : [visualModelEntry, visualSecondaryEntry],
         availability: modelUnavailable
           ? {
               usable: false,
@@ -910,6 +1027,17 @@ async function installVisualCoreBridge(page: Page) {
             region: 'local',
             isLocal: true,
             modelDiscovery: { openai: 'openai_compat' },
+          },
+          {
+            name: 'anthropic',
+            displayName: 'Anthropic',
+            protocols: ['anthropic'],
+            defaultProtocol: 'anthropic',
+            apiBases: { anthropic: 'https://api.anthropic.com' },
+            iconId: 'anthropic',
+            region: 'global',
+            isLocal: false,
+            modelDiscovery: { anthropic: 'anthropic' },
           },
         ],
       }
@@ -1336,6 +1464,40 @@ async function installVisualCoreBridge(page: Page) {
           details: {},
         },
       ]
+      const supportedGoalPhases = new Set([
+        'contract',
+        'planning',
+        'executing',
+        'verifying',
+        'awaiting_user',
+        'paused',
+      ])
+      const normalizedGoalPhase = supportedGoalPhases.has(
+        String(visualGoalPhase),
+      )
+        ? String(visualGoalPhase)
+        : null
+      const visualGoal = normalizedGoalPhase
+        ? {
+            id: 'goal_visual_lifecycle',
+            status: 'active',
+            phase: normalizedGoalPhase,
+            outcome: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
+            sessionId: 'build-ui',
+            currentPlanId: visualPlanEnabled ? 'plan_visual' : null,
+            cyclesUsed: 2,
+            acceptance: {
+              passed: normalizedGoalPhase === 'verifying' ? 1 : 0,
+              failed: 0,
+              missing: normalizedGoalPhase === 'verifying' ? 1 : 2,
+              total: 2,
+              criteria: [],
+            },
+            createdAt: new Date(Date.now() - 23_000).toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastEventSeq: 1,
+          }
+        : null
       const boot = {
         app: 'Emperor Agent',
         model: 'visual-main',
@@ -1395,8 +1557,13 @@ async function installVisualCoreBridge(page: Page) {
         scheduler,
         team,
         control: {
-          mode: 'ask_before_edit',
+          mode: visualPlanEnabled ? 'plan' : 'ask_before_edit',
+          previous_mode: visualPlanEnabled ? 'auto' : null,
           pending: null as Record<string, unknown> | null,
+        },
+        goals: {
+          active: visualGoal,
+          recent: visualGoal ? [visualGoal] : [],
         },
         desktopPet: {
           enabled: false,
@@ -1406,7 +1573,11 @@ async function installVisualCoreBridge(page: Page) {
         },
         diagnostics: {
           root: projectDir,
-          modelConfig: { status: 'ok', exists: true, models: 1 },
+          modelConfig: {
+            status: 'ok',
+            exists: true,
+            models: modelConfig.models.length,
+          },
           localConfig: { status: 'ok', exists: true },
           scheduler: { jobsFile: 'memory/scheduler/jobs.json' },
           runtime: { events: 0, latestSeq: 1 },
@@ -2233,12 +2404,30 @@ async function installVisualCoreBridge(page: Page) {
               return boot.tools
             case 'control.get':
               return boot.control
-            case 'control.setMode':
-              boot.control = {
-                mode: String(args[0] || 'ask_before_edit'),
-                pending: null,
+            case 'control.setPermissionMode': {
+              const permissionMode = String(args[0] || 'ask_before_edit')
+              if (boot.control.mode === 'plan')
+                boot.control.previous_mode = permissionMode
+              else {
+                boot.control.mode = permissionMode
+                boot.control.previous_mode = null
               }
               return boot.control
+            }
+            case 'control.setMode': {
+              const nextMode = String(args[0] || 'ask_before_edit')
+              if (nextMode === 'plan') {
+                boot.control.previous_mode =
+                  boot.control.mode === 'plan'
+                    ? boot.control.previous_mode
+                    : boot.control.mode
+                boot.control.mode = 'plan'
+              } else {
+                boot.control.mode = nextMode
+                boot.control.previous_mode = null
+              }
+              return boot.control
+            }
             case 'hooks.getConfig':
               return hooksPayload
             case 'hooks.getMetadata':
@@ -2344,10 +2533,11 @@ async function assertComposerShellTrimmed(page: Page) {
 async function assertFloatingModeMenu(page: Page) {
   const menu = page.locator('.mode-menu')
   await expect(menu).toBeVisible()
-  await expect(page.locator('.mode-option')).toHaveCount(4)
-  for (const label of ['询问确认', '接受编辑', '自动执行', '计划预览']) {
+  await expect(page.locator('.mode-option')).toHaveCount(3)
+  for (const label of ['询问确认', '接受编辑', '自动执行']) {
     await expect(menu.getByText(label, { exact: true })).toBeVisible()
   }
+  await expect(menu.getByText('计划预览', { exact: true })).toHaveCount(0)
 
   const position = await menu.evaluate(
     (el) => window.getComputedStyle(el).position,
@@ -2379,7 +2569,15 @@ async function assertFloatingModeMenu(page: Page) {
 async function assertFloatingModelMenu(page: Page) {
   const menu = page.locator('.model-menu')
   await expect(menu).toBeVisible()
-  await expect(menu.locator('.model-menu-head')).toContainText('模型与思考')
+  await expect(menu.locator('.model-menu-head')).toContainText('模型')
+  await expect(menu.locator('.model-menu-head')).toContainText('下一轮生效')
+  await expect(menu.locator('.model-current-card')).toContainText('当前模型')
+  await expect(menu.locator('.model-current-card')).toContainText(
+    'Visual Local',
+  )
+  await expect(
+    menu.locator('.model-current-card .model-provider-avatar img'),
+  ).toBeVisible()
   await expect(menu).not.toContainText('上下文窗口')
   await expect(menu).not.toContainText('输出上限')
   await expect(menu).not.toContainText(/\b\d+k\b|1M/)
@@ -2387,7 +2585,10 @@ async function assertFloatingModelMenu(page: Page) {
   await expect(menu.locator('.reasoning-choice')).toHaveCount(7)
   await expect(menu.locator('.reasoning-control')).toContainText('XHigh')
   await expect(menu.locator('.reasoning-control')).toContainText('Max')
-  await expect(menu.locator('.model-option').first()).toBeVisible()
+  await expect(menu.locator('.model-option')).toHaveCount(1)
+  await expect(menu.locator('.model-option').first()).toContainText(
+    'Claude Visual',
+  )
   await expect(
     menu.locator('.model-option').first().locator('.model-option-meta'),
   ).toBeVisible()

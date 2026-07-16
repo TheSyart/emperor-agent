@@ -223,6 +223,38 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.payload()
   }
 
+  setPermissionMode(mode: string): ControlStatePayload {
+    const value = String(mode ?? '')
+      .trim()
+      .toLowerCase()
+    if (
+      value !== ControlMode.ASK_BEFORE_EDIT &&
+      value !== ControlMode.ACCEPT_EDITS &&
+      value !== ControlMode.AUTO
+    ) {
+      throw new Error(
+        'permission mode must be ask_before_edit, accept_edits or auto',
+      )
+    }
+
+    const state = this.store.load()
+    const previousPermission =
+      state.mode === ControlMode.PLAN
+        ? ControlManager.restoreMode(state)
+        : state.mode
+    if (state.mode === ControlMode.PLAN) state.previousMode = value
+    else {
+      state.mode = value
+      state.previousMode = null
+    }
+    state.updatedAt = nowTs()
+    this.store.save(state)
+    if (value !== previousPermission) {
+      this.revokePlanPermissionTokens({ reason: 'control permission changed' })
+    }
+    return this.payload()
+  }
+
   ensureNoPending(): void {
     const pending = this.store.load().pending
     if (pending && pending.status === InteractionStatus.WAITING) {

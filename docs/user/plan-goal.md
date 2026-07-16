@@ -14,7 +14,6 @@ Plan（规划模式）和 Goal（目标模式）不是同一层能力。Plan 控
 | `/mode ask`    | `ask_before_edit` | 默认模式；低风险读取、普通文件写入和低风险命令可继续，敏感路径、批量替换和高风险操作询问 |
 | `/mode edits`  | `accept_edits`    | 普通文件编辑可以直接执行，shell、Team、Scheduler 等 mutation 仍需确认                    |
 | `/mode auto`   | `auto`            | 在现有权限范围内自动推进；复杂或未证明只读的 shell 仍可能询问                            |
-| `/mode plan`   | `plan`            | 只允许只读探索、`ask_user` 和 `propose_plan`                                             |
 | `/mode status` | —                 | 查看当前模式和 pending interaction                                                       |
 
 模式不会关闭路径安全、schema 校验、workspace policy 或 Core deny。
@@ -29,11 +28,11 @@ Plan（规划模式）和 Goal（目标模式）不是同一层能力。Plan 控
 /plan status
 ```
 
-进入 Plan 后，Agent 可以读取信息、澄清问题并提交结构化方案，但不能执行普通写操作。用户批准后，系统恢复进入 Plan 前的权限模式，Plan token 只授权与批准方案相符的执行。
+进入 Plan 后，Agent 可以读取信息、澄清问题并提交结构化方案，但不能执行普通写操作。权限选择器仍显示并允许修改询问、编辑或自动；这只更新 Plan 结束后的执行权限，不会退出 Plan。用户批准后，系统按最新选择继续，Plan token 只授权与批准方案相符的执行。
 
 Plan 记录步骤、依赖、验证要求和 reviewer 信息。步骤完成并不自动等于 Goal 完成；没有 Goal 时，Plan 只负责本次执行路径。
 
-`/plan off` 会回到 `ask_before_edit`，不是恢复任意旧模式。由批准流程退出 Plan 时，Core 才会恢复进入 Plan 前保存的模式。
+`/plan off` 和计划批准都会恢复 `previous_mode` 中保存的最新执行权限，不会固定回到 `ask_before_edit`。
 
 ## Goal：持续完成一个结果
 
@@ -57,6 +56,8 @@ Goal 常用命令：
 | `/goal cancel` 或 `/goal-cancel`             | 确认后永久取消                       |
 
 每个 session 最多有一个非终态 Goal。Stop 在 Goal 中会转成可恢复的 Pause；Cancel 是不可恢复终态。应用重启不会自动恢复写操作，用户必须显式 Resume。
+
+Composer 上方的 Goal 状态条会显示阶段、Outcome 和持续时间，并提供编辑、暂停/恢复与取消。编辑 Outcome 不会原地改写已锁定 Contract：Core 会取消旧 Goal，再创建带 supersession 关系的替代 Goal；旧事件和证据继续保留。替换失败时界面保留输入并显示错误，不会把失败伪装成成功。
 
 ## Goal 怎样判断完成
 

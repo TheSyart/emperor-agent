@@ -36,6 +36,15 @@ export interface GoalCardViewModelInput {
   gate?: GoalGateProjection | null
 }
 
+export interface GoalStatusBarViewModel {
+  id: string
+  outcome: string
+  phaseLabel: string
+  elapsedLabel: string
+  actions: GoalCardAction[]
+  terminal: boolean
+}
+
 const STATUS_LABELS: Record<RuntimeGoalStatus, string> = {
   draft: '待定义',
   active: '进行中',
@@ -82,6 +91,39 @@ export function toGoalCardViewModel({
     actions: actionsForGoal(goal),
     terminal,
   }
+}
+
+export function toGoalStatusBarViewModel(
+  goal: RuntimeGoalSummary,
+  now = Date.now(),
+): GoalStatusBarViewModel {
+  return {
+    id: goal.id,
+    outcome: bounded(goal.outcome, 600),
+    phaseLabel: PHASE_LABELS[goal.phase] || goal.phase,
+    elapsedLabel: goalElapsedLabel(goal.createdAt, goal.updatedAt, now),
+    actions: actionsForGoal(goal),
+    terminal: isTerminalGoal(goal),
+  }
+}
+
+export function goalElapsedLabel(
+  createdAt: string | undefined,
+  updatedAt: string,
+  now = Date.now(),
+): string {
+  const started = Date.parse(createdAt || updatedAt)
+  if (!Number.isFinite(started) || !Number.isFinite(now) || now <= started)
+    return '刚刚'
+  const seconds = Math.max(0, Math.floor((now - started) / 1_000))
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  if (minutes < 60)
+    return remainder ? `${minutes}分${remainder}秒` : `${minutes}分钟`
+  const hours = Math.floor(minutes / 60)
+  const minuteRemainder = minutes % 60
+  return minuteRemainder ? `${hours}小时${minuteRemainder}分` : `${hours}小时`
 }
 
 export function renderGoalStatus(

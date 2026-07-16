@@ -70,11 +70,15 @@ export function renderStatus({
 }
 
 export function renderModeStatus(control: ControlPayload | undefined | null) {
+  const permission =
+    control?.mode === 'plan'
+      ? control.previous_mode || 'ask_before_edit'
+      : control?.mode || 'ask_before_edit'
   return [
     '## 权限模式',
     '',
-    `- 当前模式：${inlineCode(control?.mode || 'ask_before_edit')}`,
-    `- 进入 Plan 前模式：${control?.previous_mode ? inlineCode(control.previous_mode) : '无'}`,
+    `- 当前权限：${inlineCode(permission)}`,
+    `- Plan：${control?.mode === 'plan' ? '已开启' : '未开启'}`,
     `- 等待交互：${control?.pending ? inlineCode(`${control.pending.kind}:${control.pending.id}`) : '无'}`,
   ].join('\n')
 }
@@ -84,8 +88,12 @@ export function renderPlanStatus(control: ControlPayload | undefined | null) {
   return [
     '## Plan 模式',
     '',
-    `- 当前模式：${inlineCode(control?.mode || 'ask_before_edit')}`,
-    `- 进入 Plan 前模式：${control?.previous_mode ? inlineCode(control.previous_mode) : '无'}`,
+    `- 状态：${control?.mode === 'plan' ? '已开启' : '未开启'}`,
+    `- 执行权限：${inlineCode(
+      control?.mode === 'plan'
+        ? control.previous_mode || 'ask_before_edit'
+        : control?.mode || 'ask_before_edit',
+    )}`,
     `- 等待交互：${pending ? inlineCode(`${pending.kind}:${pending.id}`) : '无'}`,
   ].join('\n')
 }

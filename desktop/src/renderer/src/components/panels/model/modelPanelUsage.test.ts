@@ -15,9 +15,11 @@ describe('single-model settings information architecture', () => {
     expect(panelSource).toContain('aria-modal="true"')
     expect(listSource).toContain('model-entry-list')
     expect(listSource).toContain('providerIconAsset')
-    expect(listSource).toContain('激活')
     expect(listSource).toContain('编辑')
     expect(listSource).toContain('删除')
+    expect(listSource).not.toContain('设为激活')
+    expect(listSource).not.toContain('active-badge')
+    expect(listSource).not.toContain('activatingId')
   })
 
   it('exposes only the two standard protocols and the required model controls', () => {
@@ -47,7 +49,9 @@ describe('single-model settings information architecture', () => {
       expect(listSource).not.toContain(retired)
     }
     expect(panelSource).toContain('saveModelEntry')
-    expect(panelSource).toContain('activateModelEntry')
+    expect(panelSource).not.toContain('activateModelEntry')
+    expect(panelSource).not.toContain('单模型运行')
+    expect(panelSource).not.toContain('当前激活模型')
     expect(panelSource).not.toContain('ModelConfigRaw')
   })
 })

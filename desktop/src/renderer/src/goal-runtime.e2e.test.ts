@@ -208,6 +208,7 @@ function summary(
     currentPlanId: 'plan-goal',
     cyclesUsed: 2,
     acceptance: { passed: 0, failed: 0, missing: 1, total: 1 },
+    createdAt: '2026-07-16T09:58:00.000Z',
     updatedAt: '2026-07-16T10:00:00.000Z',
     lastEventSeq: 1,
     ...overrides,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { useSession } from '../composables/useSession'
@@ -7,17 +7,21 @@ import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
 import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
 import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
+import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import PendingBar from '../components/chat/PendingBar.vue'
 import type { ModelConfigPayload } from '../types'
 import { activeGoalForSession } from '../runtime/selectors'
-import { isTerminalGoal } from '../runtime/goalRender'
+import { isTerminalGoal, type GoalCardAction } from '../runtime/goalRender'
 
 const ctx = useAppContext()
 const sessionStore = useSession()
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
+)
+const providerOptions = computed(
+  () => ctx.boot.value?.modelConfig?.providerOptions || [],
 )
 const sendBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
@@ -58,6 +62,71 @@ const goalMutationLocked = computed(() => {
   )
 })
 const composerBusy = computed(() => ctx.busy.value || goalMutationLocked.value)
+const goalActionPending = ref<GoalCardAction | null>(null)
+const goalReplacing = ref(false)
+const goalReplaceError = ref('')
+const goalReplacementDraft = ref('')
+
+watch(
+  () => activeGoal.value?.id,
+  (goalId) => {
+    if (!goalId) return
+    goalReplaceError.value = ''
+    goalReplacementDraft.value = ''
+  },
+)
+
+async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
+  const goal = activeGoal.value
+  if (!goal || goalActionPending.value || goalReplacing.value) return
+  goalActionPending.value = action
+  try {
+    await ctx.runGoalAction(goal.id, action)
+  } catch (error) {
+    ctx.showToast(error instanceof Error ? error.message : String(error))
+  } finally {
+    goalActionPending.value = null
+  }
+}
+
+async function replaceGoal(outcome: string): Promise<void> {
+  const goal = activeGoal.value
+  if (!goal || goalReplacing.value || goalActionPending.value) return
+  goalReplacing.value = true
+  goalReplaceError.value = ''
+  goalReplacementDraft.value = outcome
+  try {
+    await ctx.replaceGoal(goal.id, outcome)
+    goalReplacementDraft.value = ''
+  } catch (error) {
+    goalReplaceError.value =
+      error instanceof Error ? error.message : String(error)
+  } finally {
+    goalReplacing.value = false
+  }
+}
+
+async function retryGoalReplacement(): Promise<void> {
+  const outcome = goalReplacementDraft.value.trim()
+  if (!outcome || goalReplacing.value) return
+  goalReplacing.value = true
+  try {
+    await ctx.startGoal(outcome)
+    goalReplaceError.value = ''
+    goalReplacementDraft.value = ''
+  } catch (error) {
+    goalReplaceError.value =
+      error instanceof Error ? error.message : String(error)
+  } finally {
+    goalReplacing.value = false
+  }
+}
+
+function dismissGoalReplacementError(): void {
+  if (goalReplacing.value) return
+  goalReplaceError.value = ''
+  goalReplacementDraft.value = ''
+}
 
 async function applyModelConfig(payload: ModelConfigPayload): Promise<void> {
   if (!ctx.boot.value) return
@@ -155,6 +224,41 @@ function normalizeReasoningEffort(value?: string | null) {
             </button>
           </div>
         </div>
+        <GoalStatusBar
+          v-if="activeGoal && !isTerminalGoal(activeGoal)"
+          :goal="activeGoal"
+          :action-pending="goalActionPending"
+          :replacing="goalReplacing"
+          :replace-error="goalReplaceError"
+          @action="runGoalStatusAction"
+          @edit="replaceGoal"
+        />
+        <form
+          v-else-if="goalReplaceError && goalReplacementDraft"
+          class="goal-replacement-recovery"
+          @submit.prevent="retryGoalReplacement"
+        >
+          <div>
+            <strong>Goal 替换未完成</strong>
+            <span>{{ goalReplaceError }}</span>
+          </div>
+          <input
+            v-model="goalReplacementDraft"
+            aria-label="待重试的 Goal Outcome"
+            maxlength="4000"
+            :disabled="goalReplacing"
+          />
+          <button type="submit" :disabled="goalReplacing">
+            {{ goalReplacing ? '创建中…' : '重新创建 Goal' }}
+          </button>
+          <button
+            type="button"
+            :disabled="goalReplacing"
+            @click="dismissGoalReplacementError"
+          >
+            关闭
+          </button>
+        </form>
         <ActiveAskPanel
           v-if="activeBottomControl?.kind === 'ask'"
           :interaction="activeBottomControl.interaction"
@@ -167,7 +271,7 @@ function normalizeReasoningEffort(value?: string | null) {
         <div v-if="!activeBottomControl" class="composer-wrap">
           <Composer
             :busy="composerBusy"
-            :goal-active="goalMutationLocked"
+            :goal="activeGoal"
             :commands="ctx.commands.value"
             :tools="ctx.boot.value?.tools || []"
             :mcp-content="ctx.mcpContent.value"
@@ -175,15 +279,16 @@ function normalizeReasoningEffort(value?: string | null) {
             :context-max="
               ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0
             "
-            :control-mode="ctx.boot.value?.control?.mode || 'ask_before_edit'"
+            :control="ctx.boot.value?.control || null"
             :current-model="currentModel"
             :model-entries="modelEntries"
+            :provider-options="providerOptions"
             :supports-vision="
               ctx.boot.value?.modelConfig?.current?.capabilities?.vision ??
               false
             "
             :send-blocked-reason="sendBlockedReason"
-            @set-mode="ctx.setControlMode"
+            @set-permission="ctx.setPermissionMode"
             @switch-model="switchModel"
             @set-reasoning-effort="setReasoningEffort"
             @send="ctx.submitFromComposer($event)"

@@ -189,6 +189,14 @@ const goalStartSchema = z
   })
   .strict()
 
+const goalReplaceSchema = z
+  .object({
+    goalId: idSchema,
+    outcome: z.string().trim().min(1).max(4_000),
+    sessionId: idSchema,
+  })
+  .strict()
+
 const chatSubmitSchema = z
   .object({
     content: z.string(),
@@ -372,6 +380,10 @@ export const CORE_OPERATION_REGISTRY = {
       api.control.commentPlan(id, comment, options),
   ),
   'control.get': operation(z.tuple([]), (api) => api.control.get()),
+  'control.setPermissionMode': operation(
+    z.tuple([z.enum(['ask_before_edit', 'accept_edits', 'auto'])]),
+    (api, [mode]) => api.control.setPermissionMode(mode),
+  ),
   'control.setMode': operation(z.tuple([z.string()]), (api, [mode]) =>
     api.control.setMode(mode),
   ),
@@ -416,6 +428,9 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'goals.resume': operation(z.tuple([idSchema]), (api, [id]) =>
     api.goals.resume(id),
+  ),
+  'goals.replace': operation(z.tuple([goalReplaceSchema]), (api, [input]) =>
+    api.goals.replace(input),
   ),
   'goals.start': operation(z.tuple([goalStartSchema]), (api, [input]) =>
     api.goals.start(input),

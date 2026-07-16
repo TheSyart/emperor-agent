@@ -466,6 +466,7 @@ describe('Goal models', () => {
       sessionId: 'session-summary',
       currentPlanId: 'plan-current',
       cyclesUsed: 7,
+      createdAt: CREATED_AT,
       lastEventSeq: 0,
       acceptance: {
         passed: 1,
