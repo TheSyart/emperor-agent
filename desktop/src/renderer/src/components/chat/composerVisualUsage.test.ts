@@ -2,10 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(
-  join(__dirname, '../../styles/codex-v2.css'),
-  'utf8',
-)
+const css = readFileSync(join(__dirname, '../../styles/codex-v2.css'), 'utf8')
 
 describe('Composer visual contract', () => {
   it('renders the collapsed model trigger without a card border', () => {
