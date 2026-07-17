@@ -23,6 +23,7 @@ import type { SlashPaletteItem } from '../commands'
 import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
+import type { LifecycleTransitionResult } from './composerLifecycle'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -76,10 +77,10 @@ export interface AppContext {
   setPermissionMode: (
     mode: 'ask_before_edit' | 'accept_edits' | 'auto',
   ) => Promise<{ ok: boolean; error?: string }>
-  setPlanEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
-  armGoalCapture: () => { ok: boolean; error?: string }
-  cancelGoalCapture: () => void
-  startCapturedGoal: (outcome: string) => Promise<GoalOperationResult>
+  activatePlan: () => Promise<LifecycleTransitionResult>
+  activateGoalCapture: () => Promise<LifecycleTransitionResult>
+  startGoalWithLifecycle: (outcome: string) => Promise<GoalOperationResult>
+  dismissLifecycle: () => Promise<LifecycleTransitionResult>
   sendMessage: (payload: string | ChatSendPayload) => boolean
   sendInteractionAnswer: (
     interactionId: string,
@@ -92,6 +93,7 @@ export interface AppContext {
   runGoalAction: (
     goalId: string,
     action: GoalCardAction,
+    reason?: string,
   ) => Promise<GoalOperationResult>
   replaceGoal: (goalId: string, outcome: string) => Promise<GoalOperationResult>
   startGoal: (outcome: string) => Promise<GoalOperationResult>

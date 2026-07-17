@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { useSession } from '../composables/useSession'
+import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
 import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
 import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
 import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
@@ -67,6 +68,13 @@ const goalCaptureStatus = computed(() =>
     ? ctx.goalCaptureState.value.status
     : 'idle',
 )
+const composerLifecycleMode = computed(() =>
+  resolveComposerLifecycleMode(
+    ctx.boot.value?.control,
+    activeGoal.value,
+    goalCaptureStatus.value,
+  ),
+)
 const goalActionPending = ref<GoalCardAction | null>(null)
 const goalReplacing = ref(false)
 const goalReplaceError = ref('')
@@ -94,26 +102,27 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
   }
 }
 
-function activateGoalCapture(): void {
-  const result = ctx.armGoalCapture()
-  if (!result.ok) ctx.showToast(result.error || 'Goal 待输入状态开启失败。')
+async function activatePlan(): Promise<void> {
+  const result = await ctx.activatePlan()
+  if (!result.ok && result.error) ctx.showToast(result.error)
 }
 
-async function startCapturedGoal(outcome: string): Promise<void> {
+async function activateGoalCapture(): Promise<void> {
+  const result = await ctx.activateGoalCapture()
+  if (!result.ok && result.error) ctx.showToast(result.error)
+}
+
+async function startGoalWithLifecycle(outcome: string): Promise<void> {
   try {
-    await ctx.startCapturedGoal(outcome)
+    await ctx.startGoalWithLifecycle(outcome)
   } catch (error) {
     ctx.showToast(error instanceof Error ? error.message : String(error))
   }
 }
 
-async function cancelGoalMode(): Promise<void> {
-  if (composerBusy.value) return
-  if (goalCaptureStatus.value !== 'idle') {
-    ctx.cancelGoalCapture()
-    return
-  }
-  if (activeGoal.value) await runGoalStatusAction('cancel')
+async function dismissLifecycle(): Promise<void> {
+  const result = await ctx.dismissLifecycle()
+  if (!result.ok && result.error) ctx.showToast(result.error)
 }
 
 async function replaceGoal(outcome: string): Promise<void> {
@@ -300,6 +309,7 @@ function normalizeReasoningEffort(value?: string | null) {
             :busy="composerBusy"
             :goal="activeGoal"
             :goal-capture-status="goalCaptureStatus"
+            :lifecycle-mode="composerLifecycleMode"
             :commands="ctx.commands.value"
             :tools="ctx.boot.value?.tools || []"
             :mcp-content="ctx.mcpContent.value"
@@ -317,11 +327,10 @@ function normalizeReasoningEffort(value?: string | null) {
             "
             :send-blocked-reason="sendBlockedReason"
             @set-permission="ctx.setPermissionMode"
-            @activate-plan="ctx.setPlanEnabled(true)"
+            @activate-plan="activatePlan"
             @activate-goal="activateGoalCapture"
-            @exit-plan="ctx.setPlanEnabled(false)"
-            @cancel-goal="cancelGoalMode"
-            @start-goal="startCapturedGoal"
+            @dismiss-lifecycle="dismissLifecycle"
+            @start-goal="startGoalWithLifecycle"
             @switch-model="switchModel"
             @set-reasoning-effort="setReasoningEffort"
             @send="ctx.submitFromComposer($event)"

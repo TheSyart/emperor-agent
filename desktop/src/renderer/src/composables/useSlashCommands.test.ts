@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { slashCommands } from '../commands'
 import type {
   BootstrapPayload,
@@ -8,14 +8,17 @@ import type {
 } from '../types'
 import { useSlashCommands, type SlashCommandDeps } from './useSlashCommands'
 import { core } from '../api/http'
+import type { GoalCaptureStatus } from './goalCapture'
 
 vi.mock('../api/http', () => ({ core: vi.fn() }))
 
-function summary(): RuntimeGoalSummary {
+function summary(
+  phase: RuntimeGoalSummary['phase'] = 'executing',
+): RuntimeGoalSummary {
   return {
     id: 'goal_1',
     status: 'active',
-    phase: 'executing',
+    phase,
     outcome: '完成升级',
     sessionId: 'session_1',
     currentPlanId: null,
@@ -27,20 +30,43 @@ function summary(): RuntimeGoalSummary {
   }
 }
 
-function setup(active: RuntimeGoalSummary | null = null) {
+function setup(initialGoal: RuntimeGoalSummary | null = null) {
+  let active = initialGoal
+  let captureStatus: GoalCaptureStatus = 'idle'
   const local = vi.fn()
   const startGoal = vi.fn(async (): Promise<GoalOperationResult> => ({
     accepted: true,
     goal: summary(),
     activeTask: null,
   }))
-  const runGoalAction = vi.fn(async (): Promise<GoalOperationResult> => ({
-    accepted: true,
-    goal: summary(),
-    activeTask: null,
-  }))
-  const armGoalCapture = vi.fn(() => ({ ok: true }))
-  const clearGoalCapture = vi.fn()
+  const runGoalAction = vi.fn(
+    async (
+      _goalId: string,
+      action: 'pause' | 'resume' | 'cancel',
+      _reason?: string,
+    ): Promise<GoalOperationResult> => {
+      const goal =
+        action === 'cancel'
+          ? { ...summary('terminal'), status: 'cancelled' as const }
+          : summary()
+      if (action === 'cancel') active = null
+      return { accepted: true, goal, activeTask: null }
+    },
+  )
+  const armGoalCapture = vi.fn(() => {
+    captureStatus = 'armed'
+    return { ok: true }
+  })
+  const clearGoalCapture = vi.fn(() => {
+    captureStatus = 'idle'
+  })
+  const startCapturedGoal = vi.fn(
+    async (outcome: string): Promise<GoalOperationResult> => {
+      const result = await startGoal(outcome)
+      captureStatus = 'idle'
+      return result
+    },
+  )
   const deps: SlashCommandDeps = {
     boot: ref(null as BootstrapPayload | null),
     configContent: ref(''),
@@ -62,8 +88,10 @@ function setup(active: RuntimeGoalSummary | null = null) {
     listGoals: vi.fn(async () => (active ? [active] : [])),
     getGoal: vi.fn(async () => active || summary()),
     runGoalAction,
+    currentGoalCaptureStatus: () => captureStatus,
     armGoalCapture,
     clearGoalCapture,
+    startCapturedGoal,
   } as unknown as SlashCommandDeps
   return {
     ...useSlashCommands(deps),
@@ -73,6 +101,9 @@ function setup(active: RuntimeGoalSummary | null = null) {
     runGoalAction,
     armGoalCapture,
     clearGoalCapture,
+    setActiveGoal: (goal: RuntimeGoalSummary | null) => {
+      active = goal
+    },
   }
 }
 
@@ -84,12 +115,15 @@ function controlCommand(name: '/mode' | '/plan') {
   return slashCommands.find((item) => item.name === name)!
 }
 
+beforeEach(() => {
+  vi.mocked(core).mockReset()
+})
+
 describe('Goal slash command orchestration', () => {
   it('starts a Goal through the typed operation instead of chat.submit', async () => {
     const ctx = setup()
     await ctx.executeSlashCommand('/goal 完成升级', '/goal', command('/goal'))
     expect(ctx.startGoal).toHaveBeenCalledWith('完成升级')
-    expect(ctx.clearGoalCapture).toHaveBeenCalledOnce()
     expect(ctx.deps.sendMessage).not.toHaveBeenCalled()
     expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('完成升级')
   })
@@ -116,6 +150,25 @@ describe('Goal slash command orchestration', () => {
     await missing.executeSlashCommand('/goal', '/goal', command('/goal'))
     expect(missing.startGoal).not.toHaveBeenCalled()
     expect(missing.armGoalCapture).toHaveBeenCalledOnce()
+  })
+
+  it('exits an independent Plan before arming Goal capture', async () => {
+    const ctx = setup()
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+    vi.mocked(core).mockResolvedValue({
+      mode: 'auto',
+      previous_mode: null,
+    } as never)
+
+    await ctx.executeSlashCommand('/goal', '/goal', command('/goal'))
+
+    expect(core).toHaveBeenCalledWith('control.setMode', 'auto')
+    expect(ctx.armGoalCapture).toHaveBeenCalledOnce()
+    expect(vi.mocked(core).mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.armGoalCapture.mock.invocationCallOrder[0],
+    )
   })
 
   it('keeps duplicate starts local and actionable', async () => {
@@ -191,5 +244,67 @@ describe('Plan and permission slash command orchestration', () => {
 
     expect(core).toHaveBeenCalledWith('control.setMode', 'auto')
     expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('自动执行')
+  })
+
+  it('cancels a paused Goal before enabling independent Plan', async () => {
+    const ctx = setup(summary('paused'))
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+    vi.mocked(core).mockResolvedValue({
+      mode: 'plan',
+      previous_mode: 'auto',
+    } as never)
+
+    const result = await ctx.setPlanEnabled(true)
+
+    expect(result.ok).toBe(true)
+    expect(ctx.runGoalAction).toHaveBeenCalledWith(
+      'goal_1',
+      'cancel',
+      'user_switch_to_plan',
+    )
+    expect(core).toHaveBeenCalledWith('control.setMode', 'plan')
+    expect(ctx.runGoalAction.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(core).mock.invocationCallOrder[0],
+    )
+  })
+
+  it('refuses to enable Plan while Goal is running', async () => {
+    const ctx = setup(summary('executing'))
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+
+    const result = await ctx.setPlanEnabled(true)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('请先停止或暂停')
+    expect(ctx.runGoalAction).not.toHaveBeenCalled()
+    expect(core).not.toHaveBeenCalled()
+  })
+
+  it('does not let /plan off alter Goal-owned internal planning', async () => {
+    const ctx = setup(summary('paused'))
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+
+    await ctx.executeSlashCommand('/plan off', '/plan', controlCommand('/plan'))
+
+    expect(core).not.toHaveBeenCalled()
+    expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('当前顶层模式是 Goal')
+  })
+
+  it('keeps repeated Plan activation idempotent', async () => {
+    const ctx = setup()
+    ctx.deps.boot.value = {
+      control: { mode: 'plan', previous_mode: 'auto' },
+    } as BootstrapPayload
+
+    const result = await ctx.setPlanEnabled(true)
+
+    expect(result.ok).toBe(true)
+    expect(core).not.toHaveBeenCalled()
   })
 })

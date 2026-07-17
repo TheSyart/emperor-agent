@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { GoalCaptureStatus } from '../../composables/goalCapture'
+import type { ComposerLifecycleMode } from '../../composables/composerLifecycle'
 import type { CapabilityPickerItem } from '../../capabilities/capabilityPicker'
 import { buildCapabilityPickerGroups } from '../../capabilities/capabilityPickerModel'
 import {
@@ -55,6 +56,7 @@ const props = defineProps<{
   sendBlockedReason?: string | null
   goal?: RuntimeGoalSummary | null
   goalCaptureStatus?: GoalCaptureStatus
+  lifecycleMode?: ComposerLifecycleMode
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
@@ -65,8 +67,7 @@ const emit = defineEmits<{
   'set-reasoning-effort': [level: string | null]
   'activate-plan': []
   'activate-goal': []
-  'exit-plan': []
-  'cancel-goal': []
+  'dismiss-lifecycle': []
   'start-goal': [outcome: string]
 }>()
 const value = ref('')
@@ -229,7 +230,9 @@ const currentMode = computed(() => {
 const modeTitle = computed(() =>
   props.busy ? '等待当前任务结束后再切换' : '切换执行权限',
 )
-const planActive = computed(() => props.control?.mode === 'plan')
+const permissionAppliesAfterPlan = computed(
+  () => props.control?.mode === 'plan',
+)
 const goalCaptureActive = computed(
   () =>
     props.goalCaptureStatus === 'armed' ||
@@ -237,9 +240,6 @@ const goalCaptureActive = computed(
 )
 const goalCaptureStarting = computed(
   () => props.goalCaptureStatus === 'starting',
-)
-const goalActive = computed(
-  () => Boolean(props.goal) || goalCaptureActive.value,
 )
 const availableModelEntries = computed(() =>
   props.modelEntries.filter((entry) => entry.entryId),
@@ -895,21 +895,15 @@ onBeforeUnmount(() => {
           </div>
 
           <span
-            v-if="goalActive || planActive"
+            v-if="props.lifecycleMode"
             class="composer-action-divider"
             aria-hidden="true"
           />
           <ComposerLifecycleIndicator
-            v-if="goalActive"
-            kind="goal"
+            v-if="props.lifecycleMode"
+            :kind="props.lifecycleMode"
             :busy="props.busy || goalCaptureStarting"
-            @dismiss="emit('cancel-goal')"
-          />
-          <ComposerLifecycleIndicator
-            v-if="planActive"
-            kind="plan"
-            :busy="props.busy || goalCaptureStarting"
-            @dismiss="emit('exit-plan')"
+            @dismiss="emit('dismiss-lifecycle')"
           />
         </div>
 
@@ -1032,7 +1026,9 @@ onBeforeUnmount(() => {
       >
         <div class="mode-menu-head">
           <span>执行权限</span>
-          <em>{{ planActive ? 'Plan 结束后使用' : '立即应用到下一轮' }}</em>
+          <em>{{
+            permissionAppliesAfterPlan ? '规划结束后使用' : '立即应用到下一轮'
+          }}</em>
         </div>
         <button
           v-for="option in modeOptions"

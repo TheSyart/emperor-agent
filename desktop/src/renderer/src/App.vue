@@ -194,13 +194,14 @@ async function getGoal(goalId: string): Promise<RuntimeGoalSummary> {
 async function runGoalAction(
   goalId: string,
   action: GoalCardAction,
+  reason = 'user_confirmed_cancel',
 ): Promise<GoalOperationResult> {
   const result =
     action === 'pause'
       ? await core('goals.pause', goalId)
       : action === 'resume'
         ? await core('goals.resume', goalId)
-        : await core('goals.cancel', goalId, 'user_confirmed_cancel')
+        : await core('goals.cancel', goalId, reason)
   applyGoalSummary(result.goal)
   showToast(
     action === 'pause'
@@ -317,31 +318,53 @@ async function runSafely(task: () => Promise<void>) {
   }
 }
 
-const { submitFromComposer, setPermissionMode, setPlanEnabled } =
-  useSlashCommands({
-    boot,
-    configContent,
-    busy,
-    pending,
-    routeName: () => router.currentRoute.value.name?.toString() || 'chat',
-    runtimeText,
-    eventTransportText,
-    sendMessage,
-    addLocalCommand,
-    clearChat,
-    stopActive,
-    compactMemory,
-    restoreMemoryVersion,
-    refreshAll,
-    showToast,
-    currentGoal: () => currentGoal.value,
-    startGoal,
-    listGoals,
-    getGoal,
-    runGoalAction,
-    armGoalCapture: goalCapture.arm,
-    clearGoalCapture: goalCapture.reset,
-  })
+const {
+  submitFromComposer,
+  setPermissionMode,
+  activatePlan,
+  activateGoalCapture,
+  startGoalWithLifecycle,
+  dismissLifecycle,
+  reconcileTerminalGoal,
+} = useSlashCommands({
+  boot,
+  configContent,
+  busy,
+  pending,
+  routeName: () => router.currentRoute.value.name?.toString() || 'chat',
+  runtimeText,
+  eventTransportText,
+  sendMessage,
+  addLocalCommand,
+  clearChat,
+  stopActive,
+  compactMemory,
+  restoreMemoryVersion,
+  refreshAll,
+  showToast,
+  currentGoal: () => currentGoal.value,
+  startGoal,
+  listGoals,
+  getGoal,
+  runGoalAction,
+  currentGoalCaptureStatus: () => goalCapture.state.value.status,
+  armGoalCapture: goalCapture.arm,
+  clearGoalCapture: goalCapture.reset,
+  startCapturedGoal: goalCapture.start,
+})
+
+watch(
+  () => ({ sessionId: sessionId.value, goalId: currentGoal.value?.id || null }),
+  (current, previous) => {
+    if (!previous || current.sessionId !== previous.sessionId) return
+    if (!previous.goalId || current.goalId) return
+    const goal = goalProjection.byId[previous.goalId]
+    if (!goal || !isTerminalGoal(goal)) return
+    void reconcileTerminalGoal(previous.goalId).then((result) => {
+      if (!result.ok && result.error) showToast(result.error)
+    })
+  },
+)
 
 provideAppContext({
   boot,
@@ -386,10 +409,10 @@ provideAppContext({
   checkWatchlist,
   setDesktopPetEnabled,
   setPermissionMode,
-  setPlanEnabled,
-  armGoalCapture: goalCapture.arm,
-  cancelGoalCapture: goalCapture.reset,
-  startCapturedGoal: goalCapture.start,
+  activatePlan,
+  activateGoalCapture,
+  startGoalWithLifecycle,
+  dismissLifecycle,
   sendMessage,
   sendInteractionAnswer,
   sendPlanComment,

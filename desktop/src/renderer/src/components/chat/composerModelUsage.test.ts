@@ -22,16 +22,13 @@ describe('Composer single-model controls', () => {
     expect(source).not.toContain(':is="modelIcons.text"')
   })
 
-  it('shows Goal then Plan as independent lifecycle indicators', () => {
+  it('renders exactly one mutually exclusive lifecycle indicator', () => {
     expect(source).toContain('ComposerLifecycleIndicator')
-    expect(source).toContain('kind="goal"')
-    expect(source).toContain('kind="plan"')
-    expect(source.indexOf('kind="goal"')).toBeLessThan(
-      source.indexOf('kind="plan"'),
-    )
-    expect(source).toContain('@dismiss="emit(\'cancel-goal\')"')
-    expect(source).toContain('@dismiss="emit(\'exit-plan\')"')
-    expect(source).toContain('v-if="goalActive || planActive"')
+    expect(source.match(/<ComposerLifecycleIndicator/g)).toHaveLength(1)
+    expect(source).toContain(':kind="props.lifecycleMode"')
+    expect(source).toContain('@dismiss="emit(\'dismiss-lifecycle\')"')
+    expect(source).not.toContain('kind="goal"')
+    expect(source).not.toContain('kind="plan"')
     expect(source).toContain("'set-permission': [mode: ControlModeValue]")
     expect(source).not.toContain("'set-mode': [mode: ControlModeValue]")
   })

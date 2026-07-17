@@ -763,6 +763,63 @@ test('slash menu activates Goal and Plan without inserting usage text', async ({
   await expect(planIndicator).toHaveCount(0)
 })
 
+test('Composer switches Goal capture and Plan without showing both', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat')
+  const textarea = page.locator('.composer textarea')
+
+  await textarea.fill('/go')
+  await page
+    .locator('.composer-palette-item[data-action="activate_goal"]')
+    .click()
+  await textarea.fill('保留这段尚未提交的目标描述')
+  await page.locator('.attach-button').click()
+  await page
+    .locator('.composer-palette-item[data-action="activate_plan"]')
+    .click()
+
+  await expect(textarea).toHaveValue('保留这段尚未提交的目标描述')
+  await expect(page.locator('.composer-lifecycle-indicator.goal')).toHaveCount(
+    0,
+  )
+  await expect(page.locator('.composer-lifecycle-indicator.plan')).toHaveCount(
+    1,
+  )
+
+  await textarea.fill('/go')
+  await page
+    .locator('.composer-palette-item[data-action="activate_goal"]')
+    .click()
+  await expect(page.locator('.composer-lifecycle-indicator.plan')).toHaveCount(
+    0,
+  )
+  await expect(page.locator('.composer-lifecycle-indicator.goal')).toHaveCount(
+    1,
+  )
+})
+
+test('paused Goal switches permanently to independent Plan', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat?visualGoal=paused')
+
+  await page.locator('.attach-button').click()
+  await page
+    .locator('.composer-palette-item[data-action="activate_plan"]')
+    .click()
+
+  await expect(page.locator('.composer-lifecycle-indicator.goal')).toHaveCount(
+    0,
+  )
+  await expect(page.locator('.goal-status-shell')).toHaveCount(0)
+  await expect(page.locator('.composer-lifecycle-indicator.plan')).toHaveCount(
+    1,
+  )
+})
+
 const composerLifecycleScenarios = [
   {
     name: 'composer-plan-dark',
@@ -783,12 +840,12 @@ const composerLifecycleScenarios = [
     theme: 'light',
   },
   {
-    name: 'composer-goal-plan-760',
+    name: 'composer-goal-planning-760',
     path: '/chat?visualGoal=planning&visualPlan=on',
     width: 760,
     height: 900,
     phase: 'planning',
-    plan: true,
+    plan: false,
     theme: 'dark',
   },
   {
@@ -2488,6 +2545,23 @@ async function installVisualCoreBridge(page: Page) {
                 boot.control.previous_mode = null
               }
               return { ...boot.control }
+            }
+            case 'goals.cancel': {
+              const activeGoal = boot.goals.active
+              if (!activeGoal) throw new Error('Goal is not active')
+              const cancelledGoal = {
+                ...activeGoal,
+                status: 'cancelled',
+                phase: 'terminal',
+                updatedAt: new Date().toISOString(),
+              }
+              boot.goals.active = null
+              boot.goals.recent = [cancelledGoal]
+              return {
+                accepted: true,
+                goal: cancelledGoal,
+                activeTask: null,
+              }
             }
             case 'hooks.getConfig':
               return hooksPayload

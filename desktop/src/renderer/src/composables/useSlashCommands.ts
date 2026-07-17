@@ -35,6 +35,8 @@ import {
   renderGoalStatus,
 } from '../runtime/statusRender'
 import type { GoalCardAction } from '../runtime/goalRender'
+import type { GoalCaptureStatus } from './goalCapture'
+import { createComposerLifecycleController } from './composerLifecycle'
 
 export interface SlashCommandDeps {
   boot: Ref<BootstrapPayload | null>
@@ -59,13 +61,36 @@ export interface SlashCommandDeps {
   runGoalAction: (
     goalId: string,
     action: GoalCardAction,
+    reason?: string,
   ) => Promise<GoalOperationResult>
+  currentGoalCaptureStatus: () => GoalCaptureStatus
   armGoalCapture: () => { ok: boolean; error?: string }
   clearGoalCapture: () => void
+  startCapturedGoal: (outcome: string) => Promise<GoalOperationResult>
 }
 
 export function useSlashCommands(deps: SlashCommandDeps) {
   const { boot, busy, pending } = deps
+  let commandDispatching = false
+  let busyBeforeCommand = false
+
+  const lifecycle = createComposerLifecycleController({
+    currentControl: () => boot.value?.control,
+    currentGoal: deps.currentGoal,
+    currentGoalCaptureStatus: deps.currentGoalCaptureStatus,
+    agentBusy: () => (commandDispatching ? busyBeforeCommand : busy.value),
+    setPlanEnabled: async (enabled) => {
+      await writeControlMode(
+        enabled ? 'plan' : savedExecutionPermission(boot.value?.control),
+      )
+    },
+    cancelGoal: (goalId, reason) =>
+      deps.runGoalAction(goalId, 'cancel', reason),
+    armGoalCapture: deps.armGoalCapture,
+    clearGoalCapture: deps.clearGoalCapture,
+    startGoal: deps.startGoal,
+    startCapturedGoal: deps.startCapturedGoal,
+  })
 
   function submitFromComposer(payload: string | ChatSendPayload) {
     const obj =
@@ -115,6 +140,8 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     name: string,
     command: SlashCommand | undefined,
   ) {
+    busyBeforeCommand = busy.value
+    commandDispatching = true
     busy.value = true
     try {
       if (!command) {
@@ -193,7 +220,8 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         return deps.addLocalCommand(raw, '工作台状态已刷新。')
       }
     } finally {
-      busy.value = false
+      busy.value = busyBeforeCommand
+      commandDispatching = false
       pending.label = ''
       pending.detail = ''
     }
@@ -203,7 +231,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     const action = parseGoalSlashCommand(raw)
     if (!action) return
     if (action.kind === 'missing') {
-      const result = deps.armGoalCapture()
+      const result = await lifecycle.activateGoalCapture()
       if (!result.ok)
         deps.addLocalCommand(raw, result.error || 'Goal 待输入状态开启失败。')
       return
@@ -239,8 +267,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         return
       }
       try {
-        const result = await deps.startGoal(action.outcome)
-        deps.clearGoalCapture()
+        const result = await lifecycle.startGoalWithLifecycle(action.outcome)
         deps.addLocalCommand(
           raw,
           renderGoalStatus([result.goal], result.goal.id),
@@ -276,7 +303,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     const [, arg = 'on'] = raw.trim().split(/\s+/, 2)
     const normalized = arg.toLowerCase()
     if (normalized === 'on' || normalized === 'plan') {
-      const result = await setPlanEnabled(true)
+      const result = await lifecycle.activatePlan()
       deps.addLocalCommand(
         raw,
         result.ok
@@ -287,12 +314,19 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
     if (normalized === 'off' || normalized === 'normal') {
       const restored = savedExecutionPermission(boot.value?.control)
-      const result = await setPlanEnabled(false)
+      const result = await lifecycle.deactivatePlan()
       deps.addLocalCommand(
         raw,
         result.ok
           ? `Plan 模式已关闭，执行权限恢复为：${permissionLabel(restored)}。`
           : `Plan 模式关闭失败：${result.error}`,
+      )
+      return
+    }
+    if (deps.currentGoal()) {
+      deps.addLocalCommand(
+        raw,
+        '当前顶层模式是 Goal；Goal 内部可能处于规划阶段，但不会作为独立 Plan 显示。',
       )
       return
     }
@@ -350,14 +384,21 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
   }
 
+  async function writeControlMode(
+    mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
+  ) {
+    const data = await core('control.setMode', mode)
+    if (boot.value) boot.value.control = data
+    const label = mode === 'plan' ? '计划模式' : permissionLabel(mode)
+    deps.showToast(`已切换为${label}`)
+    return data
+  }
+
   async function setControlMode(
     mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const data = await core('control.setMode', mode)
-      if (boot.value) boot.value.control = data
-      const label = mode === 'plan' ? '计划模式' : permissionLabel(mode)
-      deps.showToast(`已切换为${label}`)
+      await writeControlMode(mode)
       return { ok: true }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
@@ -369,9 +410,10 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   async function setPlanEnabled(
     enabled: boolean,
   ): Promise<{ ok: boolean; error?: string }> {
-    return await setControlMode(
-      enabled ? 'plan' : savedExecutionPermission(boot.value?.control),
-    )
+    const result = enabled
+      ? await lifecycle.activatePlan()
+      : await lifecycle.deactivatePlan()
+    return result.ok ? { ok: true } : { ok: false, error: result.error }
   }
 
   async function handleMemoryRestoreCommand(raw: string) {
@@ -400,6 +442,12 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     setControlMode,
     setPlanEnabled,
     setPermissionMode,
+    activatePlan: lifecycle.activatePlan,
+    activateGoalCapture: lifecycle.activateGoalCapture,
+    startGoalWithLifecycle: lifecycle.startGoalWithLifecycle,
+    dismissLifecycle: lifecycle.dismissLifecycle,
+    reconcileTerminalGoal: lifecycle.reconcileTerminalGoal,
+    lifecycleMode: lifecycle.mode,
   }
 }
 

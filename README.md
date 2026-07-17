@@ -46,6 +46,8 @@ Emperor Agent 里有几组名称看起来相似，实际处在不同层级：
 
 Plan（规划模式）用于先探索、再提交方案。Goal（目标模式）则负责持续完成一个结果：它会锁定范围和验收条件，执行过程中可以重新规划，但只有证据和 Completion Gate 都通过后才能标记为完成。
 
+Plan 和 Goal 是互斥的顶层模式，Composer 同一时间只显示一个标识。Goal 内部可以使用 Plan 引擎规划和审批，但这只是 Goal 的“规划中”阶段，不会再显示一个独立 Plan。
+
 “本地优先”不等于完全离线。模型请求会发送给你配置的 Provider；调用网页、远程 MCP 或其他联网工具时，对应内容也会离开本机。Emperor Agent 负责把本地运行数据和项目数据边界分开，但无法替代外部服务自身的隐私政策。
 
 <a id="download"></a>
@@ -116,7 +118,7 @@ Goal 用于需要跨多个回合推进、修复和验收的任务。可以直接
 /goal 完成项目的 Goal 模式升级并通过全部验收
 ```
 
-也可以从 `/` 菜单选择 Goal，或单独输入 `/goal`。此时权限选择器右侧会先出现 Goal 标识，下一条纯文字会作为 Outcome 创建并启动 Goal。这个待输入状态只属于当前会话，不会写入 Goal 账本；切换会话或重启应用后会清除。Goal Outcome 暂不接受附件、Skill 或 MCP 引用，界面会阻止提交，不会静默丢弃这些内容。
+也可以从 `/` 菜单选择 Goal，或单独输入 `/goal`。此时权限选择器右侧会先出现 Goal 标识，下一条纯文字会作为 Outcome 创建并启动 Goal。若独立 Plan 已开启，系统会先退出 Plan，再进入 Goal。这个待输入状态只属于当前会话，不会写入 Goal 账本；切换会话或重启应用后会清除。Goal Outcome 暂不接受附件、Skill 或 MCP 引用，界面会阻止提交，不会静默丢弃这些内容。
 
 Goal 创建后会锁定 Outcome、范围、约束和 Acceptance Criteria。它通常会进入 Plan 阶段提出方案，等待批准后再由普通 Agent turns 和工具完成步骤。
 
@@ -136,7 +138,9 @@ Goal 常用命令：
 
 Stop 在 Goal 中表示可恢复的 Pause，不表示已经完成。Cancel 才是不可恢复的终态。应用重启也不会自动恢复写操作，必须由用户显式 Resume。
 
-Composer 中的 Goal 和 Plan 标识可以同时显示。鼠标悬浮或键盘聚焦后，标识右上角会出现关闭按钮。尚未创建 Goal 时，关闭只退出待输入状态并保留输入框文字；正式 Goal 处于空闲、暂停或等待用户状态时，关闭会直接取消 Goal。Agent 正在运行时，快捷关闭按钮不可用，应先停止或暂停。Goal 状态条和显式命令仍保留原有操作能力。
+Composer 同一时间只显示 Goal 或 Plan 其中一个标识。Goal 进入内部规划阶段时仍显示 Goal，状态条会标注“规划中”。鼠标悬浮或键盘聚焦后，标识右上角会出现关闭按钮。尚未创建 Goal 时，关闭只退出待输入状态并保留输入框文字；正式 Goal 处于暂停或等待用户状态时，切换到 Plan 会永久取消旧 Goal，再开启独立 Plan，旧记录仍保留用于审计。Goal 正在 Contract、规划、执行或核验时不能切换，应先停止或暂停。
+
+反向切换同样自动处理：Goal 待输入状态切换到 Plan 时会保留输入框文字；独立 Plan 切换到 Goal 时，必须先成功退出 Plan。`/plan off` 不会关闭 Goal 内部规划，`/plan status` 在 Goal 存续期间只报告当前顶层模式为 Goal。
 
 Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal、Plan、Observation、Evidence 或交互进展时，Coordinator 会安全暂停。默认不设置总 cycle、总时长或总成本上限；需要这些限制时，应显式配置 guard。
 
@@ -234,7 +238,7 @@ Build 项目目录不会承载私有 session、memory、attachments 或 Goal 数
 | `accept_edits`    | `/mode edits` | 普通文件编辑可以直接执行，shell、Team、Scheduler 和其他 mutation 仍需确认      |
 | `auto`            | `/mode auto`  | 在当前权限下自动推进；未证明只读的 shell 命令仍需确认                          |
 
-Plan 通过 `/plan` 或 `/plan on|off|status` 独立管理，不属于权限菜单。上述三种权限都不会关闭路径安全、schema 校验或 Core deny。存在未处理的 Ask 或 Plan 时，执行型 Scheduler、Team 和桌宠 mutation 会被 CoreApi guard 拒绝；Agent Hooks 也不能覆盖 workspace policy 或 Core deny。Goal 同样复用这套规则，不会因为运行时间更长而获得额外权限。
+Plan 通过 `/plan` 或 `/plan on|off|status` 独立管理，不属于权限菜单，并与顶层 Goal 互斥。Goal 内部仍可复用 Plan 引擎，但不会产生第二个用户模式。上述三种权限都不会关闭路径安全、schema 校验或 Core deny。存在未处理的 Ask 或 Plan 时，执行型 Scheduler、Team 和桌宠 mutation 会被 CoreApi guard 拒绝；Agent Hooks 也不能覆盖 workspace policy 或 Core deny。Goal 同样复用这套规则，不会因为运行时间更长而获得额外权限。
 
 MCP 工具结果、网页内容和外部消息都按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
 
