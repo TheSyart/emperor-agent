@@ -57,7 +57,7 @@ export function buildCapabilityPickerGroups(
 function prioritizedCommands(
   commands: SlashPaletteItem[],
 ): CapabilityPickerItem[] {
-  const priority = ['/plan', '/tools', '/skills', '/mode', '/status']
+  const priority = ['/plan', '/goal', '/tools', '/skills', '/mode', '/status']
   return priority
     .map((name) =>
       commands.find((item) => item.kind === 'command' && item.name === name),
@@ -65,7 +65,12 @@ function prioritizedCommands(
     .filter((item): item is SlashPaletteItem => Boolean(item))
     .map((item) => ({
       id: item.id,
-      action: 'insert_command' as const,
+      action:
+        item.name === '/plan'
+          ? ('activate_plan' as const)
+          : item.name === '/goal'
+            ? ('activate_goal' as const)
+            : ('insert_command' as const),
       label: item.name,
       description: item.description,
       meta: item.usage,

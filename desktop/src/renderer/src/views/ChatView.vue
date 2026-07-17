@@ -62,6 +62,11 @@ const goalMutationLocked = computed(() => {
   )
 })
 const composerBusy = computed(() => ctx.busy.value || goalMutationLocked.value)
+const goalCaptureStatus = computed(() =>
+  ctx.goalCaptureState.value.sessionId === ctx.sessionId.value
+    ? ctx.goalCaptureState.value.status
+    : 'idle',
+)
 const goalActionPending = ref<GoalCardAction | null>(null)
 const goalReplacing = ref(false)
 const goalReplaceError = ref('')
@@ -87,6 +92,28 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
   } finally {
     goalActionPending.value = null
   }
+}
+
+function activateGoalCapture(): void {
+  const result = ctx.armGoalCapture()
+  if (!result.ok) ctx.showToast(result.error || 'Goal 待输入状态开启失败。')
+}
+
+async function startCapturedGoal(outcome: string): Promise<void> {
+  try {
+    await ctx.startCapturedGoal(outcome)
+  } catch (error) {
+    ctx.showToast(error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function cancelGoalMode(): Promise<void> {
+  if (composerBusy.value) return
+  if (goalCaptureStatus.value !== 'idle') {
+    ctx.cancelGoalCapture()
+    return
+  }
+  if (activeGoal.value) await runGoalStatusAction('cancel')
 }
 
 async function replaceGoal(outcome: string): Promise<void> {
@@ -272,6 +299,7 @@ function normalizeReasoningEffort(value?: string | null) {
           <Composer
             :busy="composerBusy"
             :goal="activeGoal"
+            :goal-capture-status="goalCaptureStatus"
             :commands="ctx.commands.value"
             :tools="ctx.boot.value?.tools || []"
             :mcp-content="ctx.mcpContent.value"
@@ -289,6 +317,11 @@ function normalizeReasoningEffort(value?: string | null) {
             "
             :send-blocked-reason="sendBlockedReason"
             @set-permission="ctx.setPermissionMode"
+            @activate-plan="ctx.setPlanEnabled(true)"
+            @activate-goal="activateGoalCapture"
+            @exit-plan="ctx.setPlanEnabled(false)"
+            @cancel-goal="cancelGoalMode"
+            @start-goal="startCapturedGoal"
             @switch-model="switchModel"
             @set-reasoning-effort="setReasoningEffort"
             @send="ctx.submitFromComposer($event)"

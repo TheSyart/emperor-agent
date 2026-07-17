@@ -6,6 +6,22 @@ import { buildCapabilityPickerGroups } from './capabilityPickerModel'
 
 const commands: SlashPaletteItem[] = [
   {
+    id: 'command:/plan',
+    kind: 'command',
+    name: '/plan',
+    usage: '/plan on|off|status',
+    completion: '/plan ',
+    description: '开启 Plan',
+  },
+  {
+    id: 'command:/goal',
+    kind: 'command',
+    name: '/goal',
+    usage: '/goal <outcome>|status|pause|resume|cancel',
+    completion: '/goal ',
+    description: '开启 Goal',
+  },
+  {
     id: 'command:/skills',
     kind: 'command',
     name: '/skills',
@@ -77,5 +93,20 @@ describe('capability picker model', () => {
     expect(skill?.completion).toBe('@skill(clawhub)')
     expect(github?.completion).toBe('@mcp(github)')
     expect(gitlab?.completion).toBe('@mcp(gitlab)')
+  })
+
+  it('turns Plan and Goal selections into lifecycle activations', () => {
+    const items = buildCapabilityPickerGroups({
+      commands,
+      tools,
+      mcpContent: '',
+    }).flatMap((group) => group.items)
+
+    expect(items.find((item) => item.id === 'command:/plan')?.action).toBe(
+      'activate_plan',
+    )
+    expect(items.find((item) => item.id === 'command:/goal')?.action).toBe(
+      'activate_goal',
+    )
   })
 })

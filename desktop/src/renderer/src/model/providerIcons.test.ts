@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { providerIconAsset, providerIconFallback } from './providerIcons'
+import {
+  providerIconAsset,
+  providerIconFallback,
+  providerIconIsMonochrome,
+  providerIconMaskCssUrl,
+} from './providerIcons'
 
 describe('providerIcons', () => {
   it.each([
@@ -25,5 +30,21 @@ describe('providerIcons', () => {
     expect(providerIconFallback('LM Studio')).toBe('L')
     expect(providerIconFallback('  智谱 GLM  ')).toBe('智')
     expect(providerIconFallback('')).toBe('?')
+  })
+
+  it('identifies monochrome assets that can follow the active theme', () => {
+    expect(providerIconIsMonochrome('openai')).toBe(true)
+    expect(providerIconIsMonochrome('anthropic')).toBe(true)
+    expect(providerIconIsMonochrome('longcat')).toBe(true)
+    expect(providerIconIsMonochrome('gemini')).toBe(false)
+    expect(providerIconIsMonochrome('custom')).toBe(false)
+  })
+
+  it('quotes inline SVG data URIs before using them as CSS masks', () => {
+    expect(
+      providerIconMaskCssUrl(
+        "data:image/svg+xml,%3csvg%20fill='currentColor'%3e",
+      ),
+    ).toBe(`url("data:image/svg+xml,%3csvg%20fill='currentColor'%3e")`)
   })
 })

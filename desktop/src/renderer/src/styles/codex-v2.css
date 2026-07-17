@@ -1856,29 +1856,6 @@ select:focus-visible {
   background: rgb(var(--border));
 }
 
-.composer-lifecycle-indicator {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  flex: 0 0 auto;
-  gap: 5px;
-  border-radius: 7px;
-  padding: 0 7px;
-  color: rgb(var(--fg-muted));
-  font-size: 11px;
-  font-weight: 620;
-}
-
-.composer-lifecycle-indicator.goal {
-  background: rgb(var(--accent) / 0.11);
-  color: rgb(var(--accent));
-}
-
-.composer-lifecycle-indicator.plan {
-  background: rgb(var(--bg-inset));
-  color: rgb(var(--fg));
-}
-
 .attach-button,
 .send-button,
 .model-button,
@@ -1908,6 +1885,13 @@ select:focus-visible {
 .model-button {
   max-width: 210px;
   gap: 5px;
+  border: 0;
+  background: transparent;
+  padding-inline: 6px;
+}
+
+.model-button:hover:not(:disabled) {
+  background: rgb(var(--bg-inset));
 }
 
 .model-provider-avatar {
@@ -1927,6 +1911,34 @@ select:focus-visible {
 
 .model-provider-avatar:has(img) {
   background: rgb(248 250 252);
+}
+
+.model-provider-avatar.bare {
+  width: 19px;
+  height: 19px;
+  flex-basis: 19px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 10px;
+}
+
+.model-provider-avatar.bare:has(img) {
+  background: transparent;
+}
+
+.model-provider-avatar.bare img {
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+}
+
+.model-provider-mask {
+  width: 17px;
+  height: 17px;
+  background: currentColor;
+  -webkit-mask: var(--provider-icon) center / contain no-repeat;
+  mask: var(--provider-icon) center / contain no-repeat;
 }
 
 .model-provider-avatar.compact {

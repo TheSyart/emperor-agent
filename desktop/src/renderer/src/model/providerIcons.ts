@@ -51,14 +51,39 @@ const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
   ollama: new URL('../assets/provider-logos/ollama.svg', import.meta.url).href,
 }
 
-export function providerIconAsset(
-  iconId: string | null | undefined,
-): string | null {
-  const normalized = String(iconId ?? '')
+const MONOCHROME_PROVIDER_ICONS = new Set([
+  'anthropic',
+  'longcat',
+  'moonshot',
+  'ollama',
+  'openai',
+  'openrouter',
+  'xai',
+  'xiaomi_mimo',
+])
+
+function normalizeProviderIconId(iconId: string | null | undefined): string {
+  return String(iconId ?? '')
     .trim()
     .toLowerCase()
     .replace(/-/g, '_')
+}
+
+export function providerIconAsset(
+  iconId: string | null | undefined,
+): string | null {
+  const normalized = normalizeProviderIconId(iconId)
   return PROVIDER_ICON_ASSETS[normalized] ?? null
+}
+
+export function providerIconIsMonochrome(
+  iconId: string | null | undefined,
+): boolean {
+  return MONOCHROME_PROVIDER_ICONS.has(normalizeProviderIconId(iconId))
+}
+
+export function providerIconMaskCssUrl(asset: string): string {
+  return `url(${JSON.stringify(asset)})`
 }
 
 export function providerIconFallback(displayName: string): string {

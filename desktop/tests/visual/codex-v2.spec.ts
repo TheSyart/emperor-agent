@@ -729,6 +729,40 @@ test('captures composer model menu on mobile', async ({ page }) => {
   })
 })
 
+test('slash menu activates Goal and Plan without inserting usage text', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat')
+  const textarea = page.locator('.composer textarea')
+
+  await textarea.fill('/go')
+  await page
+    .locator('.composer-palette-item[data-action="activate_goal"]')
+    .click()
+  await expect(textarea).toHaveValue('')
+  await expect(textarea).toHaveAttribute('placeholder', '描述要持续完成的目标')
+  const goalIndicator = page.locator('.composer-lifecycle-indicator.goal')
+  await expect(goalIndicator).toBeVisible()
+  const goalDismiss = goalIndicator.locator('.composer-lifecycle-dismiss')
+  await expect(goalDismiss).toHaveCSS('opacity', '0')
+  await goalIndicator.hover()
+  await expect(goalDismiss).toHaveCSS('opacity', '1')
+  await goalDismiss.click()
+  await expect(goalIndicator).toHaveCount(0)
+
+  await textarea.fill('/pl')
+  await page
+    .locator('.composer-palette-item[data-action="activate_plan"]')
+    .click()
+  await expect(textarea).toHaveValue('')
+  const planIndicator = page.locator('.composer-lifecycle-indicator.plan')
+  await expect(planIndicator).toBeVisible()
+  await planIndicator.hover()
+  await planIndicator.locator('.composer-lifecycle-dismiss').click()
+  await expect(planIndicator).toHaveCount(0)
+})
+
 const composerLifecycleScenarios = [
   {
     name: 'composer-plan-dark',
@@ -789,9 +823,23 @@ for (const scenario of composerLifecycleScenarios) {
       'data-theme',
       scenario.theme,
     )
-    await expect(
-      page.locator('.composer-lifecycle-indicator.plan'),
-    ).toHaveCount(scenario.plan ? 1 : 0)
+    const planIndicator = page.locator('.composer-lifecycle-indicator.plan')
+    await expect(planIndicator).toHaveCount(scenario.plan ? 1 : 0)
+    if (scenario.plan) {
+      const planDismiss = planIndicator.locator('.composer-lifecycle-dismiss')
+      await expect(planDismiss).toHaveCSS('opacity', '0')
+      await expect(planDismiss).toHaveAttribute(
+        'aria-disabled',
+        scenario.phase ? 'true' : 'false',
+      )
+      await planIndicator.hover()
+      await expect(planDismiss).toHaveCSS(
+        'opacity',
+        scenario.phase ? '0.58' : '1',
+      )
+      await page.mouse.move(0, 0)
+      await expect(planDismiss).toHaveCSS('opacity', '0')
+    }
 
     const goalBar = page.locator('.goal-status-shell')
     if (scenario.phase) {
@@ -800,6 +848,19 @@ for (const scenario of composerLifecycleScenarios) {
       await expect(
         page.locator('.composer-lifecycle-indicator.goal'),
       ).toBeVisible()
+      const goalIndicator = page.locator('.composer-lifecycle-indicator.goal')
+      const goalDismiss = goalIndicator.locator('.composer-lifecycle-dismiss')
+      const goalBusy =
+        scenario.phase !== 'paused' && scenario.phase !== 'awaiting_user'
+      await expect(goalDismiss).toHaveCSS('opacity', '0')
+      await expect(goalDismiss).toHaveAttribute(
+        'aria-disabled',
+        goalBusy ? 'true' : 'false',
+      )
+      await goalIndicator.hover()
+      await expect(goalDismiss).toHaveCSS('opacity', goalBusy ? '0.58' : '1')
+      await page.mouse.move(0, 0)
+      await expect(goalDismiss).toHaveCSS('opacity', '0')
       const goalBox = await goalBar.boundingBox()
       const composerBox = await page.locator('.composer').boundingBox()
       expect(goalBox).not.toBeNull()
@@ -2403,7 +2464,7 @@ async function installVisualCoreBridge(page: Page) {
             case 'skills.tools':
               return boot.tools
             case 'control.get':
-              return boot.control
+              return { ...boot.control }
             case 'control.setPermissionMode': {
               const permissionMode = String(args[0] || 'ask_before_edit')
               if (boot.control.mode === 'plan')
@@ -2412,7 +2473,7 @@ async function installVisualCoreBridge(page: Page) {
                 boot.control.mode = permissionMode
                 boot.control.previous_mode = null
               }
-              return boot.control
+              return { ...boot.control }
             }
             case 'control.setMode': {
               const nextMode = String(args[0] || 'ask_before_edit')
@@ -2426,7 +2487,7 @@ async function installVisualCoreBridge(page: Page) {
                 boot.control.mode = nextMode
                 boot.control.previous_mode = null
               }
-              return boot.control
+              return { ...boot.control }
             }
             case 'hooks.getConfig':
               return hooksPayload
@@ -2509,15 +2570,20 @@ async function assertComposerShellTrimmed(page: Page) {
   const modelButton = page.locator('.model-button')
   if (await modelButton.count()) {
     await expect(modelButton.locator('.model-button-label')).toBeVisible()
-    await expect(modelButton.locator('.model-button-meta')).toHaveCount(1)
-    const viewport = page.viewportSize()
-    if ((viewport?.width || 0) > 820) {
-      await expect(
-        modelButton.locator('.model-button-meta').first(),
-      ).toBeVisible()
-      await expect(modelButton).toContainText('·')
-      await expect(modelButton).not.toContainText(/\b\d+k\b|1M|输出上限/)
-    }
+    await expect(modelButton.locator('.model-provider-avatar')).toBeVisible()
+    await expect(modelButton.locator('.model-button-meta')).toHaveCount(0)
+    await expect(modelButton.locator('.model-button-separator')).toHaveCount(0)
+    const borderWidths = await modelButton.evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return [
+        style.borderTopWidth,
+        style.borderRightWidth,
+        style.borderBottomWidth,
+        style.borderLeftWidth,
+      ]
+    })
+    expect(borderWidths).toEqual(['0px', '0px', '0px', '0px'])
+    await expect(modelButton).not.toContainText(/\b\d+k\b|1M|输出上限/)
     if (await contextRing.count()) {
       const contextBox = await contextRing.first().boundingBox()
       const modelBox = await modelButton.first().boundingBox()

@@ -21,6 +21,15 @@ describe('ChatView Composer lifecycle integration', () => {
     expect(source).toContain('@set-permission="ctx.setPermissionMode"')
   })
 
+  it('wires lifecycle activation and Goal capture through App context', () => {
+    expect(source).toContain(':goal-capture-status="goalCaptureStatus"')
+    expect(source).toContain('@activate-plan="ctx.setPlanEnabled(true)"')
+    expect(source).toContain('@activate-goal="activateGoalCapture"')
+    expect(source).toContain('@exit-plan="ctx.setPlanEnabled(false)"')
+    expect(source).toContain('@cancel-goal="cancelGoalMode"')
+    expect(source).toContain('@start-goal="startCapturedGoal"')
+  })
+
   it('preserves a failed replacement Outcome after the old Goal becomes terminal', () => {
     expect(source).toContain('goalReplacementDraft.value = outcome')
     expect(source).toContain('goal-replacement-recovery')

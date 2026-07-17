@@ -39,6 +39,8 @@ function setup(active: RuntimeGoalSummary | null = null) {
     goal: summary(),
     activeTask: null,
   }))
+  const armGoalCapture = vi.fn(() => ({ ok: true }))
+  const clearGoalCapture = vi.fn()
   const deps: SlashCommandDeps = {
     boot: ref(null as BootstrapPayload | null),
     configContent: ref(''),
@@ -60,8 +62,18 @@ function setup(active: RuntimeGoalSummary | null = null) {
     listGoals: vi.fn(async () => (active ? [active] : [])),
     getGoal: vi.fn(async () => active || summary()),
     runGoalAction,
+    armGoalCapture,
+    clearGoalCapture,
   } as unknown as SlashCommandDeps
-  return { ...useSlashCommands(deps), deps, local, startGoal, runGoalAction }
+  return {
+    ...useSlashCommands(deps),
+    deps,
+    local,
+    startGoal,
+    runGoalAction,
+    armGoalCapture,
+    clearGoalCapture,
+  }
 }
 
 function command(name: '/goal' | '/goals') {
@@ -77,6 +89,7 @@ describe('Goal slash command orchestration', () => {
     const ctx = setup()
     await ctx.executeSlashCommand('/goal 完成升级', '/goal', command('/goal'))
     expect(ctx.startGoal).toHaveBeenCalledWith('完成升级')
+    expect(ctx.clearGoalCapture).toHaveBeenCalledOnce()
     expect(ctx.deps.sendMessage).not.toHaveBeenCalled()
     expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('完成升级')
   })
@@ -98,13 +111,16 @@ describe('Goal slash command orchestration', () => {
     ])
   })
 
-  it('keeps missing and duplicate starts local and actionable', async () => {
+  it('arms Goal capture when the bare command is submitted', async () => {
     const missing = setup()
     await missing.executeSlashCommand('/goal', '/goal', command('/goal'))
     expect(missing.startGoal).not.toHaveBeenCalled()
-    expect(missing.local.mock.calls.at(-1)?.[1]).toContain('请提供 Outcome')
+    expect(missing.armGoalCapture).toHaveBeenCalledOnce()
+  })
 
+  it('keeps duplicate starts local and actionable', async () => {
     const duplicate = setup(summary())
+
     await duplicate.executeSlashCommand(
       '/goal 新目标',
       '/goal',
@@ -116,6 +132,21 @@ describe('Goal slash command orchestration', () => {
 })
 
 describe('Plan and permission slash command orchestration', () => {
+  it('opens Plan when the bare command is submitted', async () => {
+    const ctx = setup()
+    ctx.deps.boot.value = {
+      control: { mode: 'ask_before_edit', previous_mode: null },
+    } as BootstrapPayload
+    vi.mocked(core).mockResolvedValue({
+      mode: 'plan',
+      previous_mode: 'ask_before_edit',
+    } as never)
+
+    await ctx.executeSlashCommand('/plan', '/plan', controlCommand('/plan'))
+
+    expect(core).toHaveBeenCalledWith('control.setMode', 'plan')
+  })
+
   it('uses the permission-only operation for /mode and does not expose /mode plan', async () => {
     const ctx = setup()
     ctx.deps.boot.value = {

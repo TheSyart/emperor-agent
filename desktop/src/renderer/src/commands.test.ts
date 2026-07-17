@@ -72,6 +72,16 @@ describe('slash command parsing', () => {
     expect(plan?.usage).toBe('/plan on|off|status')
   })
 
+  it('keeps command usage as help text instead of composer completion', () => {
+    const items = buildSlashPaletteItems()
+    const goal = items.find((item) => item.id === 'command:/goal')
+    const mode = items.find((item) => item.id === 'command:/mode')
+
+    expect(goal?.usage).toBe('/goal <outcome>|status|pause|resume|cancel')
+    expect(goal?.completion).not.toBe(goal?.usage)
+    expect(mode?.completion).toBe('/mode ')
+  })
+
   it('keeps blocked Skills out of callable shortcuts', () => {
     const blocked: SkillInfo = {
       name: 'legacy-script',

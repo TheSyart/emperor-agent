@@ -22,6 +22,7 @@ import type {
 import type { SlashPaletteItem } from '../commands'
 import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
+import type { GoalCaptureProjection } from './goalCapture'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -37,6 +38,7 @@ export interface AppContext {
   pending: PendingState
   planProjection: PlanProjection
   goalProjection: GoalProjectionState
+  goalCaptureState: Ref<GoalCaptureProjection>
   sessionId: Ref<string>
   sessionRuntimeStates: Record<string, { running: boolean; attention: boolean }>
   runtimeText: () => string
@@ -74,6 +76,10 @@ export interface AppContext {
   setPermissionMode: (
     mode: 'ask_before_edit' | 'accept_edits' | 'auto',
   ) => Promise<{ ok: boolean; error?: string }>
+  setPlanEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+  armGoalCapture: () => { ok: boolean; error?: string }
+  cancelGoalCapture: () => void
+  startCapturedGoal: (outcome: string) => Promise<GoalOperationResult>
   sendMessage: (payload: string | ChatSendPayload) => boolean
   sendInteractionAnswer: (
     interactionId: string,

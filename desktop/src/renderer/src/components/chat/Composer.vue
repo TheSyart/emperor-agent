@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import type { GoalCaptureStatus } from '../../composables/goalCapture'
 import type { CapabilityPickerItem } from '../../capabilities/capabilityPicker'
 import { buildCapabilityPickerGroups } from '../../capabilities/capabilityPickerModel'
 import {
@@ -18,15 +19,18 @@ import type {
   RuntimeGoalSummary,
   ToolInfo,
 } from '../../types'
-import { actionIcons, goalIcons, toolIcon } from '../../icons'
+import { actionIcons, toolIcon } from '../../icons'
 import type { IconComponent } from '../../icons'
 import {
   providerIconAsset,
   providerIconFallback,
+  providerIconIsMonochrome,
+  providerIconMaskCssUrl,
 } from '../../model/providerIcons'
 import { useAttachments } from '../../composables/useAttachments'
 import AttachmentChip from './AttachmentChip.vue'
 import CapabilityPicker from './CapabilityPicker.vue'
+import ComposerLifecycleIndicator from './ComposerLifecycleIndicator.vue'
 import {
   composerModeOptions,
   composerSendDisabled,
@@ -50,6 +54,7 @@ const props = defineProps<{
   supportsVision?: boolean
   sendBlockedReason?: string | null
   goal?: RuntimeGoalSummary | null
+  goalCaptureStatus?: GoalCaptureStatus
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
@@ -58,6 +63,11 @@ const emit = defineEmits<{
   'set-permission': [mode: ControlModeValue]
   'switch-model': [entryId: string]
   'set-reasoning-effort': [level: string | null]
+  'activate-plan': []
+  'activate-goal': []
+  'exit-plan': []
+  'cancel-goal': []
+  'start-goal': [outcome: string]
 }>()
 const value = ref('')
 const shell = ref<HTMLElement | null>(null)
@@ -220,7 +230,17 @@ const modeTitle = computed(() =>
   props.busy ? '等待当前任务结束后再切换' : '切换执行权限',
 )
 const planActive = computed(() => props.control?.mode === 'plan')
-const goalActive = computed(() => Boolean(props.goal))
+const goalCaptureActive = computed(
+  () =>
+    props.goalCaptureStatus === 'armed' ||
+    props.goalCaptureStatus === 'starting',
+)
+const goalCaptureStarting = computed(
+  () => props.goalCaptureStatus === 'starting',
+)
+const goalActive = computed(
+  () => Boolean(props.goal) || goalCaptureActive.value,
+)
 const availableModelEntries = computed(() =>
   props.modelEntries.filter((entry) => entry.entryId),
 )
@@ -254,12 +274,23 @@ const currentProviderName = computed(
 const currentProviderLabel = computed(() =>
   providerLabel(currentProviderName.value),
 )
-const currentProviderIcon = computed(() =>
-  providerIconAsset(
+const currentProviderIconId = computed(
+  () =>
     providerOption(currentProviderName.value)?.iconId ||
-      currentProviderName.value,
-  ),
+    currentProviderName.value,
 )
+const currentProviderIcon = computed(() =>
+  providerIconAsset(currentProviderIconId.value),
+)
+const currentProviderIconMonochrome = computed(() =>
+  providerIconIsMonochrome(currentProviderIconId.value),
+)
+const currentProviderMaskStyle = computed((): Record<string, string> => {
+  if (!currentProviderIcon.value) return {}
+  return {
+    '--provider-icon': providerIconMaskCssUrl(currentProviderIcon.value),
+  }
+})
 const currentProviderFallback = computed(() =>
   providerIconFallback(currentProviderLabel.value),
 )
@@ -307,7 +338,13 @@ function paletteItemFromSlash(
   return {
     id: item.id,
     action:
-      item.kind === 'skill' ? 'insert_capability_token' : 'insert_command',
+      item.kind === 'skill'
+        ? 'insert_capability_token'
+        : item.name === '/plan'
+          ? 'activate_plan'
+          : item.name === '/goal'
+            ? 'activate_goal'
+            : 'insert_command',
     label: item.name,
     description: item.description,
     meta: item.kind === 'skill' ? item.tags || meta : item.usage,
@@ -341,13 +378,31 @@ function syncHighlightScroll() {
 }
 
 function submit() {
-  if (props.busy) return
+  if (props.busy || goalCaptureStarting.value) return
   if (props.sendBlockedReason) {
     emit('error', props.sendBlockedReason)
     return
   }
   const normalized = normalizeComposerCapabilityInput(value.value.trim())
   const content = normalized.content.trim()
+  if (goalCaptureActive.value) {
+    if (
+      drafts.value.length > 0 ||
+      uploading.value.size > 0 ||
+      normalized.requestedSkills.length > 0 ||
+      hasInlineTokens.value
+    ) {
+      emit(
+        'error',
+        'Goal Outcome 暂仅支持纯文字；请先移除附件、Skill 或 MCP 引用。',
+      )
+      return
+    }
+    if (!content) return
+    emit('start-goal', content)
+    closeComposerMenus()
+    return
+  }
   if (!content && drafts.value.length === 0) return
   emit('send', {
     content,
@@ -387,6 +442,18 @@ function applyPaletteItem(item: CapabilityPickerItem | undefined) {
     closeAddMenu()
     closeModelMenu()
     closeModeMenu()
+    return
+  }
+  if (item.action === 'activate_plan' || item.action === 'activate_goal') {
+    const fromSlashPalette = paletteMode.value === 'slash'
+    if (fromSlashPalette) value.value = ''
+    closeAddMenu()
+    closeModelMenu()
+    closeModeMenu()
+    if (item.action === 'activate_plan') emit('activate-plan')
+    else emit('activate-goal')
+    input.value?.focus()
+    void nextTick(resize)
     return
   }
   if (!item.completion) return
@@ -643,16 +710,27 @@ function reasoningLabel(value?: string | null) {
   return normalized
 }
 
-const sendDisabled = computed(() =>
-  composerSendDisabled({
-    busy: props.busy,
-    content: value.value,
-    attachmentCount: drafts.value.length,
-    sendBlockedReason: props.sendBlockedReason || null,
-  }),
+const sendDisabled = computed(
+  () =>
+    goalCaptureStarting.value ||
+    composerSendDisabled({
+      busy: props.busy,
+      content: value.value,
+      attachmentCount: drafts.value.length,
+      sendBlockedReason: props.sendBlockedReason || null,
+    }),
 )
 const stopPresentation = computed(() =>
-  composerStopPresentation(goalActive.value),
+  composerStopPresentation(Boolean(props.goal)),
+)
+
+watch(
+  () => props.goalCaptureStatus,
+  (status, previous) => {
+    if (previous !== 'starting' || status !== 'idle') return
+    value.value = ''
+    void nextTick(resize)
+  },
 )
 
 onBeforeUnmount(() => {
@@ -733,12 +811,16 @@ onBeforeUnmount(() => {
             ref="input"
             v-model="value"
             rows="2"
-            :disabled="props.busy"
+            :disabled="props.busy || goalCaptureStarting"
             :placeholder="
               props.busy
                 ? '正在生成回复...'
-                : props.sendBlockedReason ||
-                  '描述要推进的任务。可用 / 调用命令，拖入图片或文档'
+                : goalCaptureStarting
+                  ? '正在启动 Goal...'
+                  : goalCaptureActive
+                    ? '描述要持续完成的目标'
+                    : props.sendBlockedReason ||
+                      '描述要推进的任务。可用 / 调用命令，拖入图片或文档'
             "
             @focus="closeComposerMenus"
             @input="resize"
@@ -786,7 +868,7 @@ onBeforeUnmount(() => {
             class="attach-button"
             :title="attachTitle"
             :aria-label="attachTitle"
-            :disabled="props.busy"
+            :disabled="props.busy || goalCaptureStarting"
             @click="toggleAddMenu"
           >
             <component :is="actionIcons.new" class="action-icon" :size="16" />
@@ -812,23 +894,23 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <span class="composer-action-divider" aria-hidden="true" />
           <span
+            v-if="goalActive || planActive"
+            class="composer-action-divider"
+            aria-hidden="true"
+          />
+          <ComposerLifecycleIndicator
             v-if="goalActive"
-            class="composer-lifecycle-indicator goal"
-            title="Goal 正在运行。使用 /goal status 查看状态"
-          >
-            <component :is="goalIcons.goal" :size="14" aria-hidden="true" />
-            Goal
-          </span>
-          <span
+            kind="goal"
+            :busy="props.busy || goalCaptureStarting"
+            @dismiss="emit('cancel-goal')"
+          />
+          <ComposerLifecycleIndicator
             v-if="planActive"
-            class="composer-lifecycle-indicator plan"
-            title="Plan 已开启。使用 /plan status 查看状态"
-          >
-            <component :is="goalIcons.plan" :size="14" aria-hidden="true" />
-            Plan
-          </span>
+            kind="plan"
+            :busy="props.busy || goalCaptureStarting"
+            @dismiss="emit('exit-plan')"
+          />
         </div>
 
         <div class="composer-right-actions">
@@ -872,17 +954,23 @@ onBeforeUnmount(() => {
               :disabled="props.busy"
               @click="toggleModelMenu"
             >
-              <span class="model-provider-avatar compact" aria-hidden="true">
+              <span
+                class="model-provider-avatar bare compact"
+                aria-hidden="true"
+              >
+                <span
+                  v-if="currentProviderIcon && currentProviderIconMonochrome"
+                  class="model-provider-mask"
+                  :style="currentProviderMaskStyle"
+                />
                 <img
-                  v-if="currentProviderIcon"
+                  v-else-if="currentProviderIcon"
                   :src="currentProviderIcon"
                   alt=""
                 />
                 <span v-else>{{ currentProviderFallback }}</span>
               </span>
               <span class="model-button-label">{{ currentModelLabel }}</span>
-              <span class="model-button-separator" aria-hidden="true">·</span>
-              <span class="model-button-meta">{{ currentReasoningLabel }}</span>
               <component
                 :is="actionIcons.caretDown"
                 class="model-caret"
@@ -897,20 +985,36 @@ onBeforeUnmount(() => {
             :title="
               props.busy
                 ? stopPresentation.title
-                : props.sendBlockedReason || '发送'
+                : goalCaptureStarting
+                  ? '正在启动 Goal'
+                  : props.sendBlockedReason || '发送'
             "
-            :aria-label="props.busy ? stopPresentation.label : '发送'"
+            :aria-label="
+              props.busy
+                ? stopPresentation.label
+                : goalCaptureStarting
+                  ? '正在启动 Goal'
+                  : '发送'
+            "
             :type="props.busy ? 'button' : 'submit'"
             @click="props.busy ? emit('stop') : undefined"
           >
             <component
-              :is="props.busy ? actionIcons.statusBusy : actionIcons.send"
+              :is="
+                props.busy || goalCaptureStarting
+                  ? actionIcons.statusBusy
+                  : actionIcons.send
+              "
               class="action-icon send-icon"
-              :class="{ 'animate-spin': props.busy }"
+              :class="{ 'animate-spin': props.busy || goalCaptureStarting }"
               :size="18"
             />
             <span class="sr-only">{{
-              props.busy ? stopPresentation.label : '发送'
+              props.busy
+                ? stopPresentation.label
+                : goalCaptureStarting
+                  ? '正在启动 Goal'
+                  : '发送'
             }}</span>
           </button>
         </div>

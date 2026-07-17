@@ -5,7 +5,11 @@ import type {
 } from './capabilityProjection'
 
 export type CapabilityPickerAction =
-  'files' | 'insert_command' | 'insert_capability_token'
+  | 'files'
+  | 'insert_command'
+  | 'insert_capability_token'
+  | 'activate_plan'
+  | 'activate_goal'
 
 export interface CapabilityPickerItem {
   id: string

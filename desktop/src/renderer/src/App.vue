@@ -12,6 +12,7 @@ import { useRuntime } from './composables/useRuntime'
 import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
+import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
 import { activeGoalForSession } from './runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
@@ -167,6 +168,16 @@ async function startGoal(outcome: string): Promise<GoalOperationResult> {
   return result
 }
 
+const goalCapture = createGoalCaptureController({
+  currentSessionId: () => sessionId.value,
+  hasActiveGoal: () => Boolean(currentGoal.value),
+  startGoal,
+})
+
+watch(sessionId, () => {
+  goalCapture.reset()
+})
+
 async function listGoals(): Promise<RuntimeGoalSummary[]> {
   if (sessionStore.isDraftSessionId(sessionId.value)) return []
   const goals = await core('goals.list', { sessionId: sessionId.value })
@@ -306,28 +317,31 @@ async function runSafely(task: () => Promise<void>) {
   }
 }
 
-const { submitFromComposer, setPermissionMode } = useSlashCommands({
-  boot,
-  configContent,
-  busy,
-  pending,
-  routeName: () => router.currentRoute.value.name?.toString() || 'chat',
-  runtimeText,
-  eventTransportText,
-  sendMessage,
-  addLocalCommand,
-  clearChat,
-  stopActive,
-  compactMemory,
-  restoreMemoryVersion,
-  refreshAll,
-  showToast,
-  currentGoal: () => currentGoal.value,
-  startGoal,
-  listGoals,
-  getGoal,
-  runGoalAction,
-})
+const { submitFromComposer, setPermissionMode, setPlanEnabled } =
+  useSlashCommands({
+    boot,
+    configContent,
+    busy,
+    pending,
+    routeName: () => router.currentRoute.value.name?.toString() || 'chat',
+    runtimeText,
+    eventTransportText,
+    sendMessage,
+    addLocalCommand,
+    clearChat,
+    stopActive,
+    compactMemory,
+    restoreMemoryVersion,
+    refreshAll,
+    showToast,
+    currentGoal: () => currentGoal.value,
+    startGoal,
+    listGoals,
+    getGoal,
+    runGoalAction,
+    armGoalCapture: goalCapture.arm,
+    clearGoalCapture: goalCapture.reset,
+  })
 
 provideAppContext({
   boot,
@@ -343,6 +357,7 @@ provideAppContext({
   pending,
   planProjection,
   goalProjection,
+  goalCaptureState: goalCapture.state,
   sessionId,
   sessionRuntimeStates,
   runtimeText,
@@ -371,6 +386,10 @@ provideAppContext({
   checkWatchlist,
   setDesktopPetEnabled,
   setPermissionMode,
+  setPlanEnabled,
+  armGoalCapture: goalCapture.arm,
+  cancelGoalCapture: goalCapture.reset,
+  startCapturedGoal: goalCapture.start,
   sendMessage,
   sendInteractionAnswer,
   sendPlanComment,

@@ -2,17 +2,18 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Goal 与 Agent runtime 开发者<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-07-17<br>
 > 事实源：`packages/core/src/goals/`、`packages/core/src/agent/goal-*`、Goal CoreApi 与 renderer runtime projection
 
 Goal 模式是 Emperor Agent 的 TypeScript-only 长任务执行能力。它把“持续推进一个结果”建模为独立于单次模型回合的持久状态机，并复用现有 Session、Plan、Ask、权限、工具与 runtime event 链路。它不是 Python 教学实现的运行时移植，也不会启动 Python、HTTP 或 WebSocket fallback。
 
 ## 用户入口与边界
 
-- 在 Chat 或 Build 会话输入 `/goal <outcome>` 创建 Goal；草稿会话会先经 CoreApi 原子 materialize，再创建 Goal。
+- 在 Chat 或 Build 会话输入 `/goal <outcome>` 可以直接创建 Goal；草稿会话会先经 CoreApi 原子 materialize，再创建 Goal。
+- 从 Composer 的 `/` 菜单选择 Goal，或输入裸 `/goal`，会先建立 renderer 内存中的会话级 Goal capture 投影。下一条纯文字才会作为 Outcome 调用 `goals.start`。该投影不属于 Goal Store，切换会话或重启应用时清除；启动失败则回到待输入状态。
 - `/goal status` 查看当前 Goal，`/goals` 查看当前会话最近 Goal；`/goal pause` / `/goal-pause`、`/goal resume` / `/goal-resume`、`/goal cancel` / `/goal-cancel` 分别暂停、恢复和取消当前 Goal。
 - 桌面端 Project Execution 面板展示 Outcome、状态/阶段、cycle、当前 Plan、验收汇总、最近 evidence/Gate 结果及合法操作。
-- Composer 上方展示非终态 Goal 的紧凑状态条。Outcome 编辑调用 `goals.replace`：校验 owner session 和新 Outcome 后终止旧 Goal，再创建带 `supersedesGoalId` 的替代 Goal；旧 ledger 不会被改写。
+- Composer 上方展示非终态 Goal 的紧凑状态条。权限选择器右侧另有 Goal / Plan 标识；标识的快捷关闭在 Agent 运行期间不可用，Goal 空闲时会调用现有 `goals.cancel`。Outcome 编辑调用 `goals.replace`：校验 owner session 和新 Outcome 后终止旧 Goal，再创建带 `supersedesGoalId` 的替代 Goal；旧 ledger 不会被改写。
 - 每个 session 最多有一个非终态 Goal。Goal 只能读取或修改所属 session；跨 session 的 `get`、`resume` 等操作由 Core 拒绝。
 - Stop 的含义是可恢复的 `paused`，Cancel 才是不可恢复的 `cancelled` 终态。应用重启不会自动恢复写操作。
 

@@ -122,7 +122,8 @@ export function buildSlashPaletteItems(
     kind: 'command' as const,
     name: command.name,
     usage: command.usage,
-    completion: command.usage,
+    completion:
+      command.usage === command.name ? command.name : `${command.name} `,
     description: command.description,
     aliases: command.aliases,
   }))

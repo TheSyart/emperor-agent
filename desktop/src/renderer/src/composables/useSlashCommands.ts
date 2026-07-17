@@ -60,6 +60,8 @@ export interface SlashCommandDeps {
     goalId: string,
     action: GoalCardAction,
   ) => Promise<GoalOperationResult>
+  armGoalCapture: () => { ok: boolean; error?: string }
+  clearGoalCapture: () => void
 }
 
 export function useSlashCommands(deps: SlashCommandDeps) {
@@ -201,10 +203,9 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     const action = parseGoalSlashCommand(raw)
     if (!action) return
     if (action.kind === 'missing') {
-      deps.addLocalCommand(
-        raw,
-        `请提供 Outcome，例如：${inlineCode('/goal 完成迁移并通过核验')}`,
-      )
+      const result = deps.armGoalCapture()
+      if (!result.ok)
+        deps.addLocalCommand(raw, result.error || 'Goal 待输入状态开启失败。')
       return
     }
     if (action.kind === 'list') {
@@ -239,6 +240,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       }
       try {
         const result = await deps.startGoal(action.outcome)
+        deps.clearGoalCapture()
         deps.addLocalCommand(
           raw,
           renderGoalStatus([result.goal], result.goal.id),
@@ -271,10 +273,10 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   }
 
   async function handlePlanCommand(raw: string) {
-    const [, arg = 'status'] = raw.trim().split(/\s+/, 2)
+    const [, arg = 'on'] = raw.trim().split(/\s+/, 2)
     const normalized = arg.toLowerCase()
     if (normalized === 'on' || normalized === 'plan') {
-      const result = await setControlMode('plan')
+      const result = await setPlanEnabled(true)
       deps.addLocalCommand(
         raw,
         result.ok
@@ -285,7 +287,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
     if (normalized === 'off' || normalized === 'normal') {
       const restored = savedExecutionPermission(boot.value?.control)
-      const result = await setControlMode(restored)
+      const result = await setPlanEnabled(false)
       deps.addLocalCommand(
         raw,
         result.ok
@@ -364,6 +366,14 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
   }
 
+  async function setPlanEnabled(
+    enabled: boolean,
+  ): Promise<{ ok: boolean; error?: string }> {
+    return await setControlMode(
+      enabled ? 'plan' : savedExecutionPermission(boot.value?.control),
+    )
+  }
+
   async function handleMemoryRestoreCommand(raw: string) {
     const [, id = ''] = raw.trim().split(/\s+/, 2)
     if (!id) {
@@ -388,6 +398,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     submitFromComposer,
     executeSlashCommand,
     setControlMode,
+    setPlanEnabled,
     setPermissionMode,
   }
 }
