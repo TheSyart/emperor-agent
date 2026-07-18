@@ -20,6 +20,7 @@ const projects = ref<ProjectInfo[]>([])
 const activeId = ref<string>('')
 const loading = ref(false)
 const creating = ref(false)
+const sessionActionError = ref('')
 
 export interface CreateSessionDraftOptions {
   title?: string
@@ -30,6 +31,9 @@ export interface CreateSessionDraftOptions {
 export function useSession() {
   const active = computed(() =>
     sessions.value.find((s) => s.id === activeId.value),
+  )
+  const canDeletePersistedSession = computed(
+    () => sessions.value.filter((session) => !session.draft).length > 1,
   )
 
   async function load() {
@@ -89,6 +93,7 @@ export function useSession() {
   }
 
   async function remove(id: string): Promise<boolean> {
+    sessionActionError.value = ''
     if (isDraftSessionId(id)) {
       sessions.value = sessions.value.filter((s) => s.id !== id)
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
@@ -101,7 +106,9 @@ export function useSession() {
       if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
       if (!sessions.value.length) await create()
       return true
-    } catch {
+    } catch (error) {
+      sessionActionError.value =
+        error instanceof Error ? error.message : String(error)
       return false
     }
   }
@@ -205,6 +212,8 @@ export function useSession() {
     projects,
     activeId,
     active,
+    canDeletePersistedSession,
+    sessionActionError,
     loading,
     creating,
     load,

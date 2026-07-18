@@ -2570,6 +2570,7 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
       systemPrompt: 'system',
       memoryStore: memory,
       controlManager: manager,
+      sessionId: 'session_ask_owner',
     })
     const history: Msg[] = [{ role: 'user', content: 'do work' }]
     const emitted: Msg[] = []
@@ -2583,6 +2584,14 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     expect((manager.payload().pending as Record<string, unknown>).kind).toBe(
       'ask',
     )
+    expect(
+      (
+        (manager.payload().pending as Record<string, unknown>).meta as Record<
+          string,
+          unknown
+        >
+      ).control_session_id,
+    ).toBe('session_ask_owner')
     expect(memory.readCheckpoint()).not.toBeNull()
     expect(emitted.some((e) => e.event === 'ask_request')).toBe(true)
     expect(emitted.some((e) => e.event === 'turn_paused')).toBe(true)
@@ -2605,6 +2614,7 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
       registry,
       systemPrompt: 'system',
       controlManager: manager,
+      sessionId: 'session_plain_plan_owner',
     })
     const emitted: Msg[] = []
     await expect(
@@ -2617,6 +2627,14 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     expect((manager.payload().pending as Record<string, unknown>).kind).toBe(
       'plan',
     )
+    expect(
+      (
+        (manager.payload().pending as Record<string, unknown>).meta as Record<
+          string,
+          unknown
+        >
+      ).control_session_id,
+    ).toBe('session_plain_plan_owner')
     expect(emitted.some((e) => e.event === 'plan_draft')).toBe(true)
     expect(emitted.some((e) => e.event === 'assistant_done')).toBe(false)
   })
@@ -2673,6 +2691,7 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
       registry,
       systemPrompt: 'system',
       controlManager: manager,
+      sessionId: 'session_ask_guard_owner',
     })
     const emitted: Msg[] = []
     await expect(
@@ -2693,6 +2712,14 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     expect((manager.payload().pending as Record<string, unknown>).kind).toBe(
       'ask',
     )
+    expect(
+      (
+        (manager.payload().pending as Record<string, unknown>).meta as Record<
+          string,
+          unknown
+        >
+      ).control_session_id,
+    ).toBe('session_ask_guard_owner')
     expect(emitted.some((e) => e.event === 'ask_request')).toBe(true)
   })
 

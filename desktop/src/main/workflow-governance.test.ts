@@ -29,4 +29,18 @@ describe('GitHub Actions governance', () => {
       expect(new Set(versions), workflow.name).toEqual(new Set(['24']))
     }
   })
+
+  it('typechecks Desktop tests in CI before the Desktop build', () => {
+    const workflow = readFileSync(resolve(workflowsRoot, 'ci.yml'), 'utf8')
+    const desktopTests = workflow.indexOf('- name: Desktop tests')
+    const testTypecheck = workflow.indexOf('- name: Desktop test typecheck')
+    const desktopBuild = workflow.indexOf('- name: Desktop build')
+
+    expect(desktopTests).toBeGreaterThan(-1)
+    expect(testTypecheck).toBeGreaterThan(desktopTests)
+    expect(desktopBuild).toBeGreaterThan(testTypecheck)
+    expect(workflow.slice(testTypecheck, desktopBuild)).toContain(
+      'run: npm run typecheck:test',
+    )
+  })
 })

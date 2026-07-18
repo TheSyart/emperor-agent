@@ -5,7 +5,7 @@
  */
 import { TurnPaused } from '../control/exceptions'
 import { interactionToDict } from '../control/models'
-import { parsePauseResult } from '../control/tools'
+import { controlSessionMeta, parsePauseResult } from '../control/tools'
 import type { ToolCallRequest } from '../providers/base'
 import type { CheckpointWriteOptions } from '../sessions/checkpoint'
 import type { ToolResultObj } from '../tools/base'
@@ -18,6 +18,7 @@ type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 export interface PauseHost {
   controlManager: ControlManagerRunnerHost | null
   memoryStore: MemoryStoreLike | null
+  sessionId?: string | null
 }
 
 export async function pauseForClarification(
@@ -31,6 +32,7 @@ export async function pauseForClarification(
   const interaction = host.controlManager.createAsk({
     questions: clarification.questions,
     context: `Ask Guard: ${clarification.reason}`,
+    meta: controlSessionMeta(host.sessionId),
   })
   const message: Msg = {
     role: 'assistant',
@@ -56,7 +58,10 @@ export async function pauseForPlan(
   turnId: string | null,
 ): Promise<void> {
   if (host.controlManager === null) return
-  const interaction = host.controlManager.createPlanFromText(reply)
+  const interaction = host.controlManager.createPlanFromText(
+    reply,
+    controlSessionMeta(host.sessionId),
+  )
   const message: Msg = { role: 'assistant', content: reply }
   if (turnId) message.turn_id = turnId
   history.push(message)

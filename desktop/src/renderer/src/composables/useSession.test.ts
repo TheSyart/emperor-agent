@@ -264,4 +264,34 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
     })
     expect(session.sessions.value[0]?.control_pending).toBeNull()
   })
+
+  it('exposes persisted-session deletion failures and protects the last visible session', async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [
+              {
+                id: 's1',
+                title: 'Only session',
+                updated_at: '2026-01-01T00:00:00+08:00',
+              },
+            ]
+          if (args[0] === 'projects.list') return []
+          if (args[0] === 'sessions.delete')
+            throw new Error('Cannot delete the last persisted session.')
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+
+    expect(session.canDeletePersistedSession.value).toBe(false)
+    await expect(session.remove('s1')).resolves.toBe(false)
+    expect(session.sessionActionError.value).toBe(
+      'Cannot delete the last persisted session.',
+    )
+    expect(session.sessions.value.map((item) => item.id)).toEqual(['s1'])
+  })
 })

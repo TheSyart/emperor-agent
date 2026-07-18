@@ -305,8 +305,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.drafting.createPlan(opts)
   }
 
-  createPlanFromText(text: string): Interaction {
-    return this.drafting.createPlanFromText(text)
+  createPlanFromText(
+    text: string,
+    meta?: Record<string, unknown> | null,
+  ): Interaction {
+    return this.drafting.createPlanFromText(text, meta)
   }
 
   assessClarification(
@@ -748,10 +751,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   permissionApprovalResult(
     decision: Parameters<PermissionManager['requireApproval']>[0],
-    opts?: { parentCallId?: string | null },
+    opts?: { parentCallId?: string | null; sessionId?: string | null },
   ): string {
     return this.permissionManager.requireApproval(decision, {
       parentCallId: opts?.parentCallId ?? null,
+      sessionId: opts?.sessionId ?? null,
     })
   }
 

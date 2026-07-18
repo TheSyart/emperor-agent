@@ -50,6 +50,8 @@ const {
   projects,
   activeId,
   loading,
+  canDeletePersistedSession,
+  sessionActionError,
   load,
   create,
   resolveProject,
@@ -57,6 +59,7 @@ const {
   rename,
   archive,
   activate,
+  isDraftSessionId,
 } = useSession()
 
 const editingId = ref<string | null>(null)
@@ -174,8 +177,16 @@ async function pickBuildProject(kind: 'empty' | 'existing') {
 }
 
 async function doDelete(id: string) {
+  if (!isDraftSessionId(id) && !canDeletePersistedSession.value) {
+    ctx.showToast('至少保留一个持久化会话')
+    return
+  }
   const wasActive = activeId.value === id
-  await remove(id)
+  const removed = await remove(id)
+  if (!removed) {
+    ctx.showToast(sessionActionError.value || '删除会话失败')
+    return
+  }
   if (wasActive) {
     const next = sessions.value[0]
     if (next) await activateAndEmit(next.id)
@@ -556,7 +567,12 @@ onMounted(async () => {
                 </button>
                 <button
                   class="session-del-btn"
-                  title="删除"
+                  :title="
+                    !s.draft && !canDeletePersistedSession
+                      ? '至少保留一个持久化会话'
+                      : '删除'
+                  "
+                  :disabled="!s.draft && !canDeletePersistedSession"
                   @click.stop="doDelete(s.id)"
                 >
                   <Trash2 :size="13" />
@@ -690,7 +706,12 @@ onMounted(async () => {
             </button>
             <button
               class="session-del-btn"
-              title="删除"
+              :title="
+                !s.draft && !canDeletePersistedSession
+                  ? '至少保留一个持久化会话'
+                  : '删除'
+              "
+              :disabled="!s.draft && !canDeletePersistedSession"
               @click.stop="doDelete(s.id)"
             >
               <Trash2 :size="13" />

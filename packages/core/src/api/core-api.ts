@@ -26,7 +26,10 @@ import {
 } from '../agent/loop'
 import type { RuntimePaths } from '../runtime/paths'
 import { RuntimeEventStore } from '../runtime/store'
-import { assertCoreMutationAllowed } from './mutation-guard'
+import {
+  assertCoreMutationAllowed,
+  CoreMutationGuardError,
+} from './mutation-guard'
 import {
   ChatService,
   InvalidSessionError,
@@ -1045,14 +1048,27 @@ export class CoreApi {
     delete: async (sessionId: string): Promise<Dict> => {
       if (!this.loop.sessionStore.get(sessionId))
         throw new Error('cannot delete session')
+      if (this.loop.sessionStore.list({ includeArchived: true }).length <= 1)
+        throw new CoreMutationGuardError(
+          409,
+          'Cannot delete the last persisted session.',
+        )
+      const pausedGoal = await this.goalService.pauseBySession(
+        sessionId,
+        'session_delete_pending',
+      )
+      const activeGoal = pausedGoal
+        ? this.loop.goalCoordinator.active(pausedGoal.id)
+        : null
+      if (activeGoal) await activeGoal.promise
+      await this.loop.endSession(sessionId, 'deleted')
+      if (!this.loop.sessionStore.delete(sessionId))
+        throw new Error('cannot delete session')
       await this.goalService.cancelAndSettleBySession(
         sessionId,
         'session_deleted',
       )
       const removedGoals = await this.loop.goalStore.deleteBySession(sessionId)
-      await this.loop.endSession(sessionId, 'deleted')
-      if (!this.loop.sessionStore.delete(sessionId))
-        throw new Error('cannot delete session')
       const removedTasks =
         this.loop.taskManager.store.deleteBySession(sessionId)
       const removedPlans =

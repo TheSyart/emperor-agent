@@ -45,6 +45,9 @@ jobs:
       - name: Desktop tests
         working-directory: desktop
         run: npm run test
+      - name: Desktop test typecheck
+        working-directory: desktop
+        run: npm run typecheck:test
       - name: Desktop typecheck
         working-directory: desktop
         run: npm run typecheck

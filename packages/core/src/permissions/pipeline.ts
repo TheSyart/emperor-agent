@@ -13,6 +13,7 @@ import {
   type ToolPermissionProfile,
 } from './models'
 import {
+  executesProjectCodeCommand,
   isHighRiskCommand,
   isLowRiskCommand,
   isReadonlyCommand,
@@ -254,6 +255,22 @@ export class PermissionPipeline {
     trace: PermissionTraceEntry[],
   ): PermissionDecision {
     if (profile.name === 'run_command') {
+      if (executesProjectCodeCommand(profile.command)) {
+        trace.push(
+          traceEntry(
+            'ask.run_command.project_code',
+            'approval',
+            profile.command.slice(0, 160),
+          ),
+        )
+        return approval(
+          profile,
+          'ask.run_command.project_code',
+          `command executes project-controlled code and requires approval: ${profile.command.slice(0, 160)}`,
+          trace,
+          RiskLevel.HIGH,
+        )
+      }
       if (isLowRiskCommand(profile.command)) {
         trace.push(
           traceEntry(

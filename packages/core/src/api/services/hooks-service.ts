@@ -297,6 +297,7 @@ export class CoreHooksService {
   }
 
   async testRun(input: Dict): Promise<Dict> {
+    this.deps.assertMutation?.('hooks', 'testRun')
     if (input.confirmExecution !== true && input.confirm_execution !== true)
       throw new Error('confirmExecution=true is required')
     const eventName = requiredEvent(input)

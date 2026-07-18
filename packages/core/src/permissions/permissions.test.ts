@@ -223,19 +223,30 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
   })
 
   it('low-risk allowlisted commands allowed', () => {
-    for (const cmd of [
-      'git status',
-      'git diff --stat',
-      'pytest -q tests/unit',
-      'python -m pytest',
-      'python3 -m pytest tests',
-      'ls -la',
-      'npm --prefix desktop test',
-    ]) {
+    for (const cmd of ['git status', 'git diff --stat', 'ls -la', 'pwd']) {
       const decision = run(cmd)
       expect(decision.allowed, cmd).toBe(true)
       expect(decision.requiresApproval, cmd).toBe(false)
       expect(decision.rule, cmd).toBe('ask.run_command.low_risk_allowlist')
+    }
+  })
+
+  it('project-code test runners require high-risk approval', () => {
+    for (const cmd of [
+      'pytest -q tests/unit',
+      '/usr/local/bin/pytest tests/unit',
+      'python -m pytest',
+      '/usr/bin/python3 -m pytest tests',
+      'npm test',
+      'npm --prefix desktop test',
+      'npm test --prefix desktop',
+      'npm run test',
+    ]) {
+      const decision = run(cmd)
+      expect(decision.allowed, cmd).toBe(false)
+      expect(decision.requiresApproval, cmd).toBe(true)
+      expect(decision.risk, cmd).toBe('high')
+      expect(decision.rule, cmd).toBe('ask.run_command.project_code')
     }
   })
 

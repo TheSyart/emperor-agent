@@ -15,6 +15,13 @@ import { interactionToDict, type Interaction } from './models'
 
 export const CONTROL_PAUSE_PREFIX = '__CONTROL_PAUSE__:'
 
+export function controlSessionMeta(
+  sessionId?: string | null,
+): Record<string, unknown> {
+  const normalized = String(sessionId ?? '').trim()
+  return normalized ? { control_session_id: normalized } : {}
+}
+
 export function makePauseResult(interaction: Record<string, unknown>): string {
   return CONTROL_PAUSE_PREFIX + JSON.stringify({ interaction })
 }
@@ -55,6 +62,7 @@ export interface ToolManagerHost {
     riskLevel?: string
     steps?: Array<Record<string, unknown>> | null
     parentCallId?: string | null
+    meta?: Record<string, unknown> | null
     enforceQuality?: boolean
   }): Interaction
 }
@@ -123,6 +131,7 @@ export class AskUserTool extends Tool {
       questions: (args.questions as Array<Record<string, unknown>>) ?? [],
       context: String(args.context ?? ''),
       parentCallId: ctx?.parentCallId ?? null,
+      meta: controlSessionMeta(ctx?.sessionId),
     })
     return makePauseResult(interactionToDict(interaction))
   }
@@ -175,7 +184,10 @@ export class RequestPlanModeTool extends Tool {
       ],
       context: reason,
       parentCallId: ctx?.parentCallId ?? null,
-      meta: { plan_mode_request: true },
+      meta: {
+        plan_mode_request: true,
+        ...controlSessionMeta(ctx?.sessionId),
+      },
     })
     return makePauseResult(interactionToDict(interaction))
   }
@@ -256,6 +268,7 @@ export class ProposePlanTool extends Tool {
         riskLevel: String(args.risk_level ?? 'medium'),
         steps: (args.steps as Array<Record<string, unknown>>) ?? [],
         parentCallId: ctx?.parentCallId ?? null,
+        meta: controlSessionMeta(ctx?.sessionId),
         enforceQuality: true,
       })
     } catch (exc) {

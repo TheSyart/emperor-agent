@@ -689,6 +689,60 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('rejects deleting the only persisted session before mutating its Goal', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-last-session-delete-'),
+      stateRoot: tmp('emperor-core-api-last-session-delete-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const sessionId = String(api.loop.activeSessionId)
+    const started = await api.goals.start({
+      outcome: 'Keep the only session Goal intact when deletion is rejected',
+      sessionId,
+    })
+    await api.goals.pause(started.goal.id)
+    const before = await api.loop.goalStore.get(started.goal.id)
+
+    await expect(api.sessions.delete(sessionId)).rejects.toMatchObject({
+      status: 409,
+    })
+
+    expect(api.loop.sessionStore.get(sessionId)).not.toBeNull()
+    expect(await api.loop.goalStore.get(started.goal.id)).toEqual(before)
+    await api.close()
+  })
+
+  it('keeps a Goal recoverable when the session store rejects deletion', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-session-delete-rejected-'),
+      stateRoot: tmp('emperor-core-api-session-delete-rejected-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = api.sessions.create({ title: 'Deletion target' })
+    api.sessions.activate(String(session.id))
+    const started = await api.goals.start({
+      outcome: 'Remain recoverable when session deletion fails',
+      sessionId: String(session.id),
+    })
+    await api.goals.pause(started.goal.id)
+    const before = await api.loop.goalStore.get(started.goal.id)
+    const deleteGoals = vi.spyOn(api.loop.goalStore, 'deleteBySession')
+    vi.spyOn(api.loop.sessionStore, 'delete').mockReturnValue(false)
+
+    await expect(api.sessions.delete(String(session.id))).rejects.toThrow(
+      /cannot delete session/i,
+    )
+
+    expect(deleteGoals).not.toHaveBeenCalled()
+    expect(await api.loop.goalStore.get(started.goal.id)).toMatchObject({
+      status: before?.status,
+      runtime: { phase: 'paused' },
+    })
+    await api.close()
+  })
+
   it('forwards renderer attachment and requested skill fields to ChatService', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-chat-fields-'),
@@ -1109,6 +1163,134 @@ describe('CoreApi (MIG-IPC-001)', () => {
       }),
     ).rejects.toThrow(/does not match/)
 
+    await api.close()
+  })
+
+  it('blocks hook test execution in Plan mode before command or audit side effects', async () => {
+    const root = tmp('emperor-core-api-hook-plan-guard-')
+    const marker = join(root, 'plan-hook-marker.txt')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const initial = await api.hooks.getConfig()
+    const saved = await api.hooks.saveConfig({
+      revision: initial.revision,
+      config: {
+        version: 2,
+        hooks: {
+          Stop: [
+            {
+              id: 'plan-guard',
+              handlers: [
+                {
+                  id: 'plan-guard-command',
+                  type: 'command',
+                  command: process.execPath,
+                  args: [
+                    '-e',
+                    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed')`,
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+    const auditBefore = await api.hooks.getAudit()
+    api.control.setMode('plan')
+
+    const rejection = await api.hooks
+      .testRun({
+        revision: saved.revision,
+        eventName: 'Stop',
+        groupId: 'plan-guard',
+        handlerId: 'plan-guard-command',
+        confirmExecution: true,
+        input: { reason: 'done' },
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+
+    expect(rejection).toBeInstanceOf(CoreMutationGuardError)
+    expect(rejection).toMatchObject({ status: 403 })
+    expect(existsSync(marker)).toBe(false)
+    expect(await api.hooks.getAudit()).toEqual(auditBefore)
+    await api.close()
+  })
+
+  it('blocks hook test execution while an Ask is pending before command or audit side effects', async () => {
+    const root = tmp('emperor-core-api-hook-pending-guard-')
+    const marker = join(root, 'pending-hook-marker.txt')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const initial = await api.hooks.getConfig()
+    const saved = await api.hooks.saveConfig({
+      revision: initial.revision,
+      config: {
+        version: 2,
+        hooks: {
+          Stop: [
+            {
+              id: 'pending-guard',
+              handlers: [
+                {
+                  id: 'pending-guard-command',
+                  type: 'command',
+                  command: process.execPath,
+                  args: [
+                    '-e',
+                    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed')`,
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    })
+    const auditBefore = await api.hooks.getAudit()
+    api.loop.controlManager.createAsk({
+      questions: [
+        {
+          id: 'hook_scope',
+          header: 'Hook',
+          question: '是否继续？',
+          options: [
+            { label: '继续', description: '继续执行' },
+            { label: '停止', description: '保持等待' },
+          ],
+        },
+      ],
+    })
+
+    const rejection = await api.hooks
+      .testRun({
+        revision: saved.revision,
+        eventName: 'Stop',
+        groupId: 'pending-guard',
+        handlerId: 'pending-guard-command',
+        confirmExecution: true,
+        input: { reason: 'done' },
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+
+    expect(rejection).toBeInstanceOf(CoreMutationGuardError)
+    expect(rejection).toMatchObject({ status: 409 })
+    expect(existsSync(marker)).toBe(false)
+    expect(await api.hooks.getAudit()).toEqual(auditBefore)
     await api.close()
   })
 

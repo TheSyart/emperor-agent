@@ -675,10 +675,18 @@ describe('ControlManager (test_control.py)', () => {
 
     const raw = await tool.execute(
       { reason: '需要重构鉴权架构' },
-      { root: '/tmp', arguments: {}, parentCallId: 'call_rpm' },
+      {
+        root: '/tmp',
+        arguments: {},
+        parentCallId: 'call_rpm',
+        sessionId: 'session_request_plan_owner',
+      },
     )
     const interaction = parsePauseResult(String(raw))
     expect(interaction).not.toBeNull()
+    expect(
+      (interaction!.meta as Record<string, unknown>).control_session_id,
+    ).toBe('session_request_plan_owner')
 
     const resume = manager.answer(String(interaction!.id), {
       enter_plan_mode: '同意进入计划模式',
@@ -874,6 +882,25 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
     expect(low.allowed).toBe(true)
     expect(low.rule).toBe('plan.permission_token')
   })
+
+  it('tags permission approval Ask with the originating session', () => {
+    const manager = new ControlManager(tmp('emperor-permission-owner-'))
+    const decision = manager.assessPermission(
+      'run_command',
+      { command: 'git push origin main' },
+      null,
+    )
+
+    manager.permissionApprovalResult(decision, {
+      parentCallId: 'call_permission',
+      sessionId: 'session_permission_owner',
+    })
+
+    const pending = manager.payload().pending as Record<string, unknown>
+    expect((pending.meta as Record<string, unknown>).control_session_id).toBe(
+      'session_permission_owner',
+    )
+  })
 })
 
 // ── test_plan_quality_gate.py (ProposePlanTool integration) ──
@@ -947,45 +974,57 @@ describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
   it('accepts a concrete verifiable plan and creates a waiting card', () => {
     const manager = new ControlManager(tmp('emperor-qg-ok-'))
     manager.setMode('plan')
-    const result = new ProposePlanTool(manager).execute({
-      title: 'Plan quality gate',
-      summary: 'Reject weak plans before approval',
-      plan_markdown:
-        '# Plan\n\n- Add gate tests\n- Implement gate\n\n## 验证\n- Run focused pytest',
-      steps: [
-        {
-          id: 'step_1',
-          title: 'Add plan quality gate tests',
-          description: 'Cover weak plans and accepted concrete plans.',
-          files: ['tests/unit/test_plan_quality_gate.py'],
-          commands: [
-            '.venv/bin/python -m pytest tests/unit/test_plan_quality_gate.py -q',
-          ],
-          acceptance: ['weak plans return a repairable tool error'],
-          risk: 'low',
-        },
-        {
-          id: 'step_2',
-          title: 'Enforce plan quality before PlanCard creation',
-          description:
-            'Wire the gate through ProposePlanTool without changing approved execution state.',
-          files: ['agent/control/tools.py', 'agent/plans/quality.py'],
-          commands: [
-            '.venv/bin/python -m pytest tests/unit/test_plan_runtime.py -q',
-          ],
-          acceptance: ['accepted plans still create a pending PlanCard'],
-          risk: 'high',
-          risk_note:
-            'The gate can over-block model-generated plans if rules are too strict.',
-          rollback:
-            'Disable enforce_quality on ProposePlanTool while keeping low-level create_plan available.',
-        },
-      ],
-      assumptions: ['internal create_plan helper remains available for tests'],
-      risk_level: 'high',
-    }) as string
+    const result = new ProposePlanTool(manager).execute(
+      {
+        title: 'Plan quality gate',
+        summary: 'Reject weak plans before approval',
+        plan_markdown:
+          '# Plan\n\n- Add gate tests\n- Implement gate\n\n## 验证\n- Run focused pytest',
+        steps: [
+          {
+            id: 'step_1',
+            title: 'Add plan quality gate tests',
+            description: 'Cover weak plans and accepted concrete plans.',
+            files: ['tests/unit/test_plan_quality_gate.py'],
+            commands: [
+              '.venv/bin/python -m pytest tests/unit/test_plan_quality_gate.py -q',
+            ],
+            acceptance: ['weak plans return a repairable tool error'],
+            risk: 'low',
+          },
+          {
+            id: 'step_2',
+            title: 'Enforce plan quality before PlanCard creation',
+            description:
+              'Wire the gate through ProposePlanTool without changing approved execution state.',
+            files: ['agent/control/tools.py', 'agent/plans/quality.py'],
+            commands: [
+              '.venv/bin/python -m pytest tests/unit/test_plan_runtime.py -q',
+            ],
+            acceptance: ['accepted plans still create a pending PlanCard'],
+            risk: 'high',
+            risk_note:
+              'The gate can over-block model-generated plans if rules are too strict.',
+            rollback:
+              'Disable enforce_quality on ProposePlanTool while keeping low-level create_plan available.',
+          },
+        ],
+        assumptions: [
+          'internal create_plan helper remains available for tests',
+        ],
+        risk_level: 'high',
+      },
+      {
+        root: '/tmp',
+        arguments: {},
+        sessionId: 'session_proposed_plan_owner',
+      },
+    ) as string
     const interaction = parsePauseResult(result)
     expect(interaction).not.toBeNull()
+    expect(
+      (interaction!.meta as Record<string, unknown>).control_session_id,
+    ).toBe('session_proposed_plan_owner')
     expect((manager.payload().pending as Record<string, unknown>).id).toBe(
       interaction!.id,
     )

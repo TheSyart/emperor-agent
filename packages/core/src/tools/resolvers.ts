@@ -6,11 +6,6 @@
 const HIGH_RISK_FALLBACK =
   /(\bgit\s+push\b|\bgh\s+(pr\s+merge|release|workflow|run)\b|\brm\s+(-[^\s]*r|-[^\s]*f|--recursive|--force)\b|\bsudo\b|\bchmod\b|\bchown\b|\bdeploy\b|\bpublish\b|\brelease\b|\bnpm\s+(install|publish)\b|\bpip\s+install\b|\bbrew\s+install\b|\bdocker\s+(push|compose\s+up|run)\b|\bkubectl\b|\bterraform\s+(apply|destroy)\b)/i
 
-// Low-risk: may execute project code (pytest, npm test) in user's own coding workflow.
-// NOT strictly read-only. Intentionally excludes cat/head/tail/grep/find (exfil sensitive paths).
-const LOW_RISK_SINGLE = new Set(['ls', 'pwd', 'pytest'])
-const LOW_RISK_GIT_SUB = new Set(['status', 'diff', 'log', 'show', 'branch'])
-
 // Strictly inspection-only, no code execution. Used by plan guard to pass probes.
 const READONLY_SINGLE = new Set(['ls', 'pwd'])
 const READONLY_GIT_SUB = new Set(['status', 'diff', 'log', 'show', 'branch'])
@@ -48,20 +43,23 @@ export function isHighRiskCommand(command: string): boolean {
 }
 
 export function isLowRiskCommand(command: string): boolean {
+  return isReadonlyCommand(command)
+}
+
+/** Commands whose runner loads code controlled by the current project. */
+export function executesProjectCodeCommand(command: string): boolean {
   const parts = safeCommandParts(command)
   if (!parts) return false
-  const head = (parts[0] ?? '').split('/').pop()!
-  if (LOW_RISK_SINGLE.has(head)) return true
-  if (head === 'git' && parts.length >= 2 && LOW_RISK_GIT_SUB.has(parts[1]!))
-    return true
-  if (
-    (head === 'python' || head === 'python3') &&
-    parts.length >= 3 &&
-    parts[1] === '-m' &&
-    parts[2] === 'pytest'
-  )
-    return true
-  if (head === 'npm' && parts.slice(1).some((p) => p === 'test')) return true
+  const head = basename(parts[0] ?? '')
+  if (head === 'pytest') return true
+  if (head === 'python' || head === 'python3') {
+    const moduleIndex = parts.indexOf('-m', 1)
+    if (moduleIndex >= 1 && parts[moduleIndex + 1] === 'pytest') return true
+  }
+  if (head === 'npm') {
+    const args = parts.slice(1)
+    return args.includes('test') || args.includes('run')
+  }
   return false
 }
 

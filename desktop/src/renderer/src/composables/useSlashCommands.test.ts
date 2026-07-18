@@ -34,11 +34,13 @@ function setup(initialGoal: RuntimeGoalSummary | null = null) {
   let active = initialGoal
   let captureStatus: GoalCaptureStatus = 'idle'
   const local = vi.fn()
-  const startGoal = vi.fn(async (): Promise<GoalOperationResult> => ({
-    accepted: true,
-    goal: summary(),
-    activeTask: null,
-  }))
+  const startGoal = vi.fn<SlashCommandDeps['startGoal']>(
+    async (_outcome: string): Promise<GoalOperationResult> => ({
+      accepted: true,
+      goal: summary(),
+      activeTask: null,
+    }),
+  )
   const runGoalAction = vi.fn(
     async (
       _goalId: string,

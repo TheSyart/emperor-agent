@@ -2312,6 +2312,7 @@ export class AgentLoop {
       (goalId
         ? (this.goalCoordinator.active(goalId)?.sessionId ?? null)
         : null) ||
+      String(interaction.meta.control_session_id ?? '').trim() ||
       this.activeSessionId
     if (!sessionId) return
     const pending = this.sessionControlPending(interaction)

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进长任务的用户<br>
-> 最后核验：2026-07-17<br>
+> 最后核验：2026-07-18<br>
 > 事实源：slash command parser、ControlManager、PermissionPipeline、GoalCoordinator 与 Completion Gate
 
 Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Composer 中是互斥的顶层模式。Plan 控制“先提出什么方案、何时允许执行”；Goal 管理“跨多少回合持续推进、满足什么条件才算完成”。Goal 可以在内部使用 Plan 引擎，界面仍只显示 Goal。
@@ -11,12 +11,14 @@ Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Comp
 
 | 界面命令       | 内部模式          | 行为                                                                                     |
 | -------------- | ----------------- | ---------------------------------------------------------------------------------------- |
-| `/mode ask`    | `ask_before_edit` | 默认模式；低风险读取、普通文件写入和低风险命令可继续，敏感路径、批量替换和高风险操作询问 |
+| `/mode ask`    | `ask_before_edit` | 默认模式；低风险读取、普通文件写入和只读诊断命令可继续，敏感路径、批量替换和代码执行询问 |
 | `/mode edits`  | `accept_edits`    | 普通文件编辑可以直接执行，shell、Team、Scheduler 等 mutation 仍需确认                    |
 | `/mode auto`   | `auto`            | 在现有权限范围内自动推进；复杂或未证明只读的 shell 仍可能询问                            |
 | `/mode status` | —                 | 查看当前模式和 pending interaction                                                       |
 
 模式不会关闭路径安全、schema 校验、workspace policy 或 Core deny。
+
+命令是否常用于开发不代表它安全。`pytest`、`python -m pytest`、`npm test` 和 `npm run ...` 会加载项目控制的代码，因此在默认询问模式下必须先批准；`git status`、`git diff`、`ls`、`pwd` 等严格只读诊断命令仍可直接执行。显式用户规则或已批准 Plan 的精确 permission token 可以受控放行匹配的命令。
 
 ## Plan：先规划再执行
 

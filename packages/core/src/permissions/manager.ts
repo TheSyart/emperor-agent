@@ -3,7 +3,7 @@
  * approve/deny-once 指纹 + plan token；高风险 run_command 在 token 前先评估 (PE-13)。
  */
 import type { ToolRegistry } from '../tools/registry'
-import { makePauseResult } from '../control/tools'
+import { controlSessionMeta, makePauseResult } from '../control/tools'
 import {
   PermissionDecision,
   stableJson,
@@ -94,7 +94,7 @@ export class PermissionManager {
 
   requireApproval(
     decision: PermissionDecision,
-    opts?: { parentCallId?: string | null },
+    opts?: { parentCallId?: string | null; sessionId?: string | null },
   ): string {
     const interaction = this.controlManager.createAsk({
       questions: [
@@ -114,6 +114,7 @@ export class PermissionManager {
       context: this.context(decision),
       parentCallId: opts?.parentCallId ?? null,
       meta: {
+        ...controlSessionMeta(opts?.sessionId),
         permission: {
           fingerprint: fingerprintOf(
             decision.toolName,

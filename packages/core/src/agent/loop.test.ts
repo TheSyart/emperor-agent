@@ -1712,6 +1712,65 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     )
   })
 
+  it('keeps a late Ask bound to the session that started the turn', async () => {
+    const root = tmp('emperor-agent-loop-late-ask-scope-')
+    const provider = new DelayedProvider()
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const firstSessionId = loop.activeSessionId!
+    const second = loop.sessionStore.create('Second chat')
+
+    const running = loop.runUserTurn('确认本次修改范围', {
+      turnId: 'turn_late_ask_scope',
+      emit: async () => {},
+    })
+    const settled = running.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    await provider.started
+    loop.activateSession(second.id)
+    provider.finish(
+      response(null, {
+        toolCalls: [
+          {
+            id: 'call_late_ask',
+            name: 'ask_user',
+            arguments: {
+              questions: [
+                {
+                  id: 'scope',
+                  header: '范围',
+                  question: '本次范围怎么定？',
+                  options: [
+                    { label: '最小', description: '只处理核心路径' },
+                    { label: '完整', description: '包含测试和文档' },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        finishReason: 'tool_calls',
+      }),
+    )
+
+    expect(await settled).not.toBeNull()
+    const pending = loop.controlManager.store.load().pending
+    expect(pending?.meta.control_session_id).toBe(firstSessionId)
+    expect(
+      loop.sessionStore.get(firstSessionId)?.control_pending,
+    ).toMatchObject({
+      kind: 'ask',
+      interaction_id: pending?.id,
+    })
+    expect(loop.sessionStore.get(second.id)?.control_pending).toBeNull()
+  })
+
   it('restores the previous active session after a background turn targets another session', async () => {
     const root = tmp('emperor-agent-loop-bg-session-')
     const provider = new DelayedProvider()
@@ -1950,6 +2009,73 @@ describe('AgentLoop (MIG-CORE-011)', () => {
 
     loop.controlManager.cancel(plan.id)
     expect(loop.sessionStore.get(sessionId)?.control_pending).toBeNull()
+  })
+
+  it('does not execute a project test script before permission approval', async () => {
+    const root = tmp('emperor-agent-loop-project-test-approval-')
+    const projectRoot = tmp('emperor-agent-loop-project-test-workspace-')
+    const marker = join(projectRoot, 'test-marker.txt')
+    writeFileSync(
+      join(projectRoot, 'package.json'),
+      JSON.stringify({
+        name: 'permission-fixture',
+        private: true,
+        scripts: { test: 'node write-test-marker.cjs' },
+      }),
+      'utf8',
+    )
+    writeFileSync(
+      join(projectRoot, 'write-test-marker.cjs'),
+      "require('node:fs').writeFileSync('test-marker.txt', 'executed')\n",
+      'utf8',
+    )
+    const provider = new QueueProvider([
+      response(null, {
+        toolCalls: [
+          {
+            id: 'call_project_test',
+            name: 'run_command',
+            arguments: { command: 'npm test' },
+          },
+        ],
+        finishReason: 'tool_calls',
+      }),
+      response('测试已执行。'),
+    ])
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const project = loop.projectStore.resolve(projectRoot)
+    const buildSession = loop.sessionStore.create('Build project', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    loop.activateSession(buildSession.id)
+
+    const result = await loop
+      .runUserTurn('运行项目测试', {
+        turnId: 'turn_project_test_approval',
+        emit: async () => {},
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+
+    expect(result).not.toBeNull()
+    expect(existsSync(marker)).toBe(false)
+    expect(loop.controlManager.store.load().pending).toMatchObject({
+      kind: 'ask',
+      meta: {
+        permission: {
+          rule: 'ask.run_command.project_code',
+          risk: 'high',
+        },
+      },
+    })
   })
 
   it('gates dispatch_subagent tool calls through the real permission pipeline (audit P0-1)', async () => {

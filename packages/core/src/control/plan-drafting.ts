@@ -121,7 +121,10 @@ export class PlanDraftingManager {
     return interaction
   }
 
-  createPlanFromText(text: string): Interaction {
+  createPlanFromText(
+    text: string,
+    meta?: Record<string, unknown> | null,
+  ): Interaction {
     let body = String(text ?? '').trim()
     if (!body) body = 'Plan 模式要求先提交可预览计划。'
     const title = firstHeading(body) || '计划预览'
@@ -142,6 +145,7 @@ export class PlanDraftingManager {
       planMarkdown: body,
       assumptions: [],
       riskLevel: 'medium',
+      meta,
     })
   }
 

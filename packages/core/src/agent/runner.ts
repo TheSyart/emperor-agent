@@ -178,7 +178,7 @@ export interface ControlManagerRunnerHost {
   }
   permissionApprovalResult(
     decision: unknown,
-    opts?: { parentCallId?: string | null },
+    opts?: { parentCallId?: string | null; sessionId?: string | null },
   ): string
   assessClarification(history: Msg[]): {
     required: boolean
@@ -191,8 +191,12 @@ export interface ControlManagerRunnerHost {
   createAsk(opts: {
     questions: Array<Record<string, unknown>>
     context?: string
+    meta?: Record<string, unknown> | null
   }): Interaction
-  createPlanFromText(text: string): Interaction
+  createPlanFromText(
+    text: string,
+    meta?: Record<string, unknown> | null,
+  ): Interaction
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
   claimUnverifiedPlanSteps?(): {
@@ -1572,6 +1576,7 @@ export class AgentRunner implements RunnerModelHost {
             result: ToolResultObj.fromText(
               this.controlManager.permissionApprovalResult(permission, {
                 parentCallId: call.id,
+                sessionId: this.sessionId,
               }),
             ),
             executed: false,

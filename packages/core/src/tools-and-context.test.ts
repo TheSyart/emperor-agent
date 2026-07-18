@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  executesProjectCodeCommand,
   isHighRiskCommand,
   isLowRiskCommand,
   isReadonlyCommand,
@@ -47,14 +48,31 @@ describe('command resolvers', () => {
     expect(isHighRiskCommand('printf "git push origin main"')).toBe(false)
   })
 
-  it('low risk allowlist covers ls/pwd/pytest/git status|diff|log + npm test + python3 -m pytest', () => {
+  it('low risk allowlist is limited to inspection commands', () => {
     expect(isLowRiskCommand('ls')).toBe(true)
     expect(isLowRiskCommand('pwd')).toBe(true)
-    expect(isLowRiskCommand('pytest')).toBe(true)
     expect(isLowRiskCommand('git status')).toBe(true)
     expect(isLowRiskCommand('git log --oneline')).toBe(true)
-    expect(isLowRiskCommand('npm test')).toBe(true)
-    expect(isLowRiskCommand('python3 -m pytest tests/')).toBe(true)
+    expect(isLowRiskCommand('pytest')).toBe(false)
+    expect(isLowRiskCommand('npm test')).toBe(false)
+    expect(isLowRiskCommand('python3 -m pytest tests/')).toBe(false)
+  })
+
+  it('recognizes project-controlled test runners across common argument forms', () => {
+    for (const command of [
+      'pytest',
+      '/opt/tools/pytest -q',
+      'python -m pytest',
+      '/usr/bin/python3 -m pytest tests/',
+      'npm test',
+      'npm --prefix desktop test',
+      'npm test --prefix desktop',
+      'npm run test',
+    ]) {
+      expect(executesProjectCodeCommand(command), command).toBe(true)
+    }
+    expect(executesProjectCodeCommand('git status')).toBe(false)
+    expect(executesProjectCodeCommand('pwd')).toBe(false)
   })
 
   it('low risk blocks chained/redirected commands', () => {
