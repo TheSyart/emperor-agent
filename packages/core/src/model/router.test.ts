@@ -144,6 +144,73 @@ describe('hook model routing', () => {
     expect(secondary.snapshot.model).toBe(main.snapshot.model)
     expect('fallback' in secondary).toBe(false)
   })
+
+  it('materializes only an explicitly enabled fallback and cost policy', () => {
+    const router = new ModelRouter(
+      '/tmp/emperor-router-policy-test',
+      parseModelConfig({
+        schemaVersion: 2,
+        activeModelId: 'primary',
+        models: [
+          {
+            entryId: 'primary',
+            provider: 'openai',
+            protocol: 'openai',
+            modelId: 'primary-model',
+            apiBase: 'https://api.openai.com/v1',
+            apiKey: null,
+            contextWindowTokens: 128_000,
+            maxTokens: 8_000,
+            reasoningEffort: null,
+            pricing: {
+              inputUsdPerMillionTokens: 1,
+              outputUsdPerMillionTokens: 2,
+              cacheReadUsdPerMillionTokens: 0.1,
+              cacheWriteUsdPerMillionTokens: 1.2,
+            },
+          },
+          {
+            entryId: 'fallback',
+            provider: 'anthropic',
+            protocol: 'anthropic',
+            modelId: 'fallback-model',
+            apiBase: 'https://api.anthropic.com',
+            apiKey: null,
+            contextWindowTokens: 128_000,
+            maxTokens: 4_000,
+            reasoningEffort: 'low',
+            pricing: {
+              inputUsdPerMillionTokens: 3,
+              outputUsdPerMillionTokens: 15,
+              cacheReadUsdPerMillionTokens: 0.3,
+              cacheWriteUsdPerMillionTokens: 3.75,
+            },
+          },
+        ],
+        policy: {
+          fallback: {
+            enabled: true,
+            entryId: 'fallback',
+            triggerOn: ['rate_limit'],
+          },
+          cost: { maxUsdPerAgentTurn: 0.5 },
+        },
+      }),
+    )
+
+    const route = router.route('main_agent')
+    expect(route.executionPolicy).toMatchObject({
+      triggerOn: ['rate_limit'],
+      maxUsdPerAgentTurn: 0.5,
+      fallback: {
+        model: 'fallback-model',
+        modelEntryId: 'fallback',
+        providerName: 'anthropic',
+      },
+    })
+    expect(route.snapshot.pricing?.outputUsdPerMillionTokens).toBe(2)
+    expect('fallback' in route).toBe(false)
+  })
 })
 
 function configuredRouter(): ModelRouter {

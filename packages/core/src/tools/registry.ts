@@ -102,10 +102,12 @@ export class ToolRegistry {
       turnId: ctx?.turnId ?? null,
       parentCallId: ctx?.parentCallId ?? null,
       sessionId: ctx?.sessionId ?? null,
+      taskId: ctx?.taskId ?? null,
       emit: ctx?.emit ?? null,
       loop: ctx?.loop ?? null,
       signal: ctx?.signal ?? null,
       executionEnvironment: ctx?.executionEnvironment ?? null,
+      subagentDepth: ctx?.subagentDepth ?? 0,
     }
     const raw = await tool.execute(casted, execCtx)
     let mapped: ToolResult

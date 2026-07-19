@@ -39,13 +39,14 @@ function runContract(...args: string[]) {
 }
 
 describe('unsigned preview release channel', () => {
-  it('routes Preview tags away from the trusted Stable workflow', () => {
+  it('routes Preview tags automatically while keeping Frozen Stable manual', () => {
     const stable = readWorkflow('release.yml')
     const preview = readWorkflow('release-preview.yml')
 
-    expect(stable).toContain("- 'v*'")
-    expect(stable).toContain("- '!v*-*'")
-    expect(stable).toContain("- '!v*-preview.*'")
+    expect(stable).toContain('workflow_dispatch:')
+    expect(stable).toContain('stable_tag:')
+    expect(stable).toContain('publish:')
+    expect(stable).not.toMatch(/^\s*push:\s*$/m)
     expect(preview).toContain("- 'v*-preview.*'")
     expect(preview).not.toContain("- 'v*'")
     expect(preview).not.toContain('workflow_dispatch:')

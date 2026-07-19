@@ -9,18 +9,19 @@
 
 ## 我想做什么
 
-| 目的                               | 从这里开始                                             |
-| ---------------------------------- | ------------------------------------------------------ |
-| 安装并完成第一次对话               | [首次使用](user/getting-started.md)                    |
-| 理解 Chat 与 Build                 | [会话与项目工作](user/chat-build.md)                   |
-| 先规划再执行，或持续推进长任务     | [Plan 与 Goal](user/plan-goal.md)                      |
-| 配置模型、记忆和附件               | [模型、记忆与附件](user/models-memory-attachments.md)  |
-| 使用 Tools、Skills 或 MCP          | [工具与扩展能力](user/tools-skills-mcp.md)             |
-| 使用 Scheduler、Team、Hooks 或桌宠 | [自动化与协作](user/automation-collaboration.md)       |
-| 排查启动、模型、数据或打包问题     | [诊断与排障](user/diagnostics-troubleshooting.md)      |
-| 了解系统为什么这样设计             | [架构总览](architecture/overview.md)                   |
-| 修改或扩展项目                     | [开发指南](development/README.md)                      |
-| 构建公开 Preview                   | [Preview 发布手册](release/preview-release-runbook.md) |
+| 目的                               | 从这里开始                                                   |
+| ---------------------------------- | ------------------------------------------------------------ |
+| 安装并完成第一次对话               | [首次使用](user/getting-started.md)                          |
+| 理解 Chat 与 Build                 | [会话与项目工作](user/chat-build.md)                         |
+| 先规划再执行，或持续推进长任务     | [Plan 与 Goal](user/plan-goal.md)                            |
+| 配置模型、记忆和附件               | [模型、记忆与附件](user/models-memory-attachments.md)        |
+| 使用 Tools、Skills 或 MCP          | [工具与扩展能力](user/tools-skills-mcp.md)                   |
+| 使用 Scheduler、Team、Hooks 或桌宠 | [自动化与协作](user/automation-collaboration.md)             |
+| 排查启动、模型、数据或打包问题     | [诊断与排障](user/diagnostics-troubleshooting.md)            |
+| 了解系统为什么这样设计             | [架构总览](architecture/overview.md)                         |
+| 修改或扩展项目                     | [开发指南](development/README.md)                            |
+| 通过 ACP stdio 运行 Headless Core  | [Headless ACP operator preview](development/headless-acp.md) |
+| 构建公开 Preview                   | [Preview 发布手册](release/preview-release-runbook.md)       |
 
 ## 当前维护的文档
 
@@ -45,6 +46,7 @@
 - [全局私有存储根](architecture/global-state-store.md)
 - [开发指南](development/README.md)
 - [扩展 Emperor Agent](development/extending-emperor.md)
+- [Headless ACP operator preview](development/headless-acp.md)
 
 ### 发布与安全
 

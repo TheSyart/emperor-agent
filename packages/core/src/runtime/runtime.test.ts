@@ -8,6 +8,11 @@ import {
   activeTaskToDict,
 } from './active'
 import * as runtimeEvents from './events'
+import {
+  modelVisibleEnvelopePayloads,
+  newRuntimeCorrelationId,
+  runtimeEventVisibility,
+} from './envelope'
 import { RuntimeEventStore, compactReplayEvents } from './store'
 
 function tmp(prefix: string): string {
@@ -43,6 +48,27 @@ describe('runtime events (test_runtime_events.py)', () => {
     expect(runtimeEvents.schedulerRunCancelled(job).event).toBe(
       'scheduler_run_cancelled',
     )
+    expect(
+      runtimeEvents.schedulerRunSkipped(job, {
+        run: { runId: 'run-1', taskId: 'task-1' },
+        reason: 'capacity',
+      }),
+    ).toMatchObject({
+      event: 'scheduler_run_skipped',
+      run_id: 'run-1',
+      task_id: 'task-1',
+      reason: 'capacity',
+    })
+    expect(
+      runtimeEvents.schedulerRunInterrupted(job, {
+        run: { runId: 'run-2', taskId: 'task-2' },
+        reason: 'shutdown',
+      }),
+    ).toMatchObject({
+      event: 'scheduler_run_interrupted',
+      run_id: 'run-2',
+      task_id: 'task-2',
+    })
     expect(runtimeEvents.schedulerRunError(job, { error: 'boom' }).error).toBe(
       'boom',
     )
@@ -53,6 +79,31 @@ describe('runtime events (test_runtime_events.py)', () => {
       task: { id: 'turn:1' },
       reason: 'stop',
     })
+    const mcpState = runtimeEvents.mcpConnectionStateChanged({
+      serverName: 'docs',
+      transport: 'stdio',
+      generation: 2,
+      clientId: 'mcp_client_2',
+      state: 'ready',
+      health: 'healthy',
+      auth: 'ok',
+      toolCount: 3,
+      tools: ['search', 'read', 'list'],
+      restartAttempts: 0,
+      nextRetryAt: null,
+      activeRequestCount: 0,
+      activeRequestIds: [],
+      lastError: null,
+    })
+    expect(mcpState).toMatchObject({
+      event: 'mcp_connection_state',
+      server_name: 'docs',
+      generation: 2,
+      client_id: 'mcp_client_2',
+      state: 'ready',
+      tool_count: 3,
+    })
+    expect(runtimeEventVisibility(String(mcpState.event))).toBe('diagnostic')
 
     const message = { platform: 'fake', external_message_id: 'm1' }
     expect(runtimeEvents.externalInbound(message)).toEqual({
@@ -254,6 +305,277 @@ describe('runtime events (test_runtime_events.py)', () => {
 })
 
 describe('RuntimeEventStore (test_runtime_events.py)', () => {
+  it('writes V2 behind a flag, projects V1 wire events, and dedupes idempotency keys across restart', () => {
+    const sessionRoot = join(
+      tmp('emperor-runtime-envelope-v2-'),
+      'sessions',
+      'session_v2',
+    )
+    const store = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    const first = store.append(
+      { event: 'tool_run_started', id: 'call_1', name: 'grep' },
+      {
+        turnId: 'turn_1',
+        requestId: 'req_1',
+        attemptId: 'attempt_1',
+        taskId: 'task_1',
+        toolCallId: 'call_1',
+        ownerId: 'task_1',
+        idempotencyKey: 'tool:call_1:started',
+        visibility: 'user',
+      },
+    )
+    const duplicate = store.append(
+      { event: 'tool_run_started', id: 'call_1', name: 'must-not-append' },
+      { idempotencyKey: 'tool:call_1:started' },
+    )
+
+    expect(duplicate).toEqual(first)
+    expect(first).toMatchObject({
+      event: 'tool_run_started',
+      seq: 1,
+      session_id: 'session_v2',
+      turn_id: 'turn_1',
+      request_id: 'req_1',
+      attempt_id: 'attempt_1',
+      task_id: 'task_1',
+      tool_call_id: 'call_1',
+      schema_version: 2,
+      visibility: 'user',
+    })
+    expect(String(first.event_id)).toMatch(/^evt_/)
+    const rawLines = readFileSync(store.eventsFile, 'utf8').trim().split('\n')
+    expect(rawLines).toHaveLength(1)
+    expect(JSON.parse(rawLines[0]!)).toMatchObject({
+      schemaVersion: 2,
+      eventId: first.event_id,
+      idempotencyKey: 'tool:call_1:started',
+      sessionId: 'session_v2',
+      sequence: 1,
+      visibility: 'user',
+      type: 'tool_run_started',
+      payload: { id: 'call_1', name: 'grep' },
+    })
+
+    const reopened = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    expect(
+      reopened.append(
+        { event: 'tool_run_started', id: 'call_1', name: 'still-duplicate' },
+        { idempotencyKey: 'tool:call_1:started' },
+      ),
+    ).toEqual(first)
+    expect(reopened.latestSeq).toBe(1)
+    expect(reopened.replayEnvelopesAfter(0)[0]).toMatchObject({
+      schemaVersion: 2,
+      eventId: first.event_id,
+      requestId: 'req_1',
+      attemptId: 'attempt_1',
+      taskId: 'task_1',
+      toolCallId: 'call_1',
+    })
+  })
+
+  it('opens mixed V1/V2 logs and assigns stable envelope ids to legacy events', () => {
+    const sessionRoot = join(
+      tmp('emperor-runtime-envelope-mixed-'),
+      'sessions',
+      'legacy_session',
+    )
+    const legacyStore = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+    })
+    legacyStore.append(
+      { event: 'user_message', content: 'legacy' },
+      { turnId: 'legacy_turn' },
+    )
+    const v2Store = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    v2Store.append(
+      { event: 'assistant_done', content: 'new' },
+      { turnId: 'legacy_turn', idempotencyKey: 'assistant:new' },
+    )
+
+    expect(v2Store.replayAfter(0).map((event) => event.event)).toEqual([
+      'user_message',
+      'assistant_done',
+    ])
+    const firstRead = v2Store.replayEnvelopesAfter(0)
+    const secondRead = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+    }).replayEnvelopesAfter(0)
+    expect(firstRead.map((event) => event.eventId)).toEqual(
+      secondRead.map((event) => event.eventId),
+    )
+    expect(firstRead[0]).toMatchObject({
+      schemaVersion: 2,
+      sessionId: 'legacy_session',
+      turnId: 'legacy_turn',
+      sequence: 1,
+      type: 'user_message',
+      payload: { content: 'legacy' },
+    })
+    expect(firstRead[0]!.eventId).toMatch(/^evt_legacy_/)
+  })
+
+  it('preserves V2 envelopes and archived idempotency receipts through compaction', () => {
+    const sessionRoot = join(
+      tmp('emperor-runtime-envelope-compact-'),
+      'sessions',
+      'compact_session',
+    )
+    const store = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    const archived = store.append(
+      { event: 'assistant_done', content: 'archive me' },
+      { turnId: 'turn_old', idempotencyKey: 'turn_old:done' },
+    )
+    store.append(
+      { event: 'user_message', content: 'keep me' },
+      { turnId: 'turn_active', idempotencyKey: 'turn_active:user' },
+    )
+
+    store.compact(['turn_active'])
+    expect(
+      JSON.parse(readFileSync(store.eventsFile, 'utf8').trim()),
+    ).toMatchObject({ schemaVersion: 2, turnId: 'turn_active' })
+    expect(
+      store
+        .replayEnvelopesAfter(0, { includeArchive: true })
+        .map((event) => event.turnId),
+    ).toEqual(['turn_old', 'turn_active'])
+
+    const reopened = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    expect(
+      reopened.append(
+        { event: 'assistant_done', content: 'must stay archived' },
+        { idempotencyKey: 'turn_old:done' },
+      ),
+    ).toEqual(archived)
+    expect(reopened.latestSeq).toBe(2)
+  })
+
+  it('keeps diagnostic envelope payloads out of the model-visible projection', () => {
+    const root = tmp('emperor-runtime-envelope-visibility-')
+    const store = new RuntimeEventStore(root, { writeEnvelopeV2: true })
+    store.append(
+      { event: 'partial_stream_capture', content: 'DIAGNOSTIC_SECRET' },
+      { visibility: 'diagnostic', ownerId: 'request_1' },
+    )
+    store.append(
+      { event: 'model_checkpoint', content: 'safe model context' },
+      { visibility: 'model', ownerId: 'turn_1' },
+    )
+
+    const envelopes = store.replayEnvelopesAfter(0)
+    expect(envelopes.map((event) => event.visibility)).toEqual([
+      'diagnostic',
+      'model',
+    ])
+    const modelPayloads = modelVisibleEnvelopePayloads(envelopes)
+    expect(modelPayloads).toEqual([
+      {
+        event: 'model_checkpoint',
+        content: 'safe model context',
+        source: 'core',
+      },
+    ])
+    expect(JSON.stringify(modelPayloads)).not.toContain('DIAGNOSTIC_SECRET')
+  })
+
+  it('reconstructs retry, parallel tool, and child-task correlation from V2 envelopes', () => {
+    const sessionRoot = join(
+      tmp('emperor-runtime-envelope-timeline-'),
+      'sessions',
+      'timeline_session',
+    )
+    const store = new RuntimeEventStore(sessionRoot, {
+      sessionDirOverride: true,
+      writeEnvelopeV2: true,
+    })
+    const requestId = newRuntimeCorrelationId('request')
+    const attempt1 = newRuntimeCorrelationId('attempt')
+    const attempt2 = newRuntimeCorrelationId('attempt')
+    const parentTaskId = newRuntimeCorrelationId('task')
+    const childTaskId = newRuntimeCorrelationId('task')
+    const toolA = newRuntimeCorrelationId('tool')
+    const toolB = newRuntimeCorrelationId('tool')
+    store.append(
+      { event: 'model_attempt_started', attempt: 1 },
+      { turnId: 'turn_timeline', requestId, attemptId: attempt1 },
+    )
+    store.append(
+      { event: 'model_attempt_failed', attempt: 1 },
+      { turnId: 'turn_timeline', requestId, attemptId: attempt1 },
+    )
+    store.append(
+      { event: 'model_attempt_started', attempt: 2 },
+      { turnId: 'turn_timeline', requestId, attemptId: attempt2 },
+    )
+    store.append(
+      { event: 'tool_run_started', id: toolA, name: 'read_file' },
+      {
+        turnId: 'turn_timeline',
+        requestId,
+        attemptId: attempt2,
+        taskId: parentTaskId,
+        toolCallId: toolA,
+      },
+    )
+    store.append(
+      { event: 'tool_run_started', id: toolB, name: 'grep' },
+      {
+        turnId: 'turn_timeline',
+        requestId,
+        attemptId: attempt2,
+        taskId: parentTaskId,
+        toolCallId: toolB,
+      },
+    )
+    store.append(
+      { event: 'task_started', task: { id: childTaskId, kind: 'subagent' } },
+      {
+        turnId: 'turn_timeline',
+        requestId,
+        attemptId: attempt2,
+        taskId: childTaskId,
+        parentTaskId,
+      },
+    )
+
+    const timeline = store.replayEnvelopesAfter(0)
+    expect(timeline.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(
+      new Set(timeline.map((event) => event.requestId).filter(Boolean)),
+    ).toEqual(new Set([requestId]))
+    expect(
+      timeline
+        .filter((event) => event.type.startsWith('model_attempt_'))
+        .map((event) => event.attemptId),
+    ).toEqual([attempt1, attempt1, attempt2])
+    expect(
+      timeline
+        .filter((event) => event.type === 'tool_run_started')
+        .map((event) => event.toolCallId),
+    ).toEqual([toolA, toolB])
+    expect(timeline.at(-1)).toMatchObject({
+      taskId: childTaskId,
+      parentTaskId,
+    })
+  })
+
   it('appends, recovers latest seq, replays, and filters bad lines', () => {
     const root = tmp('emperor-runtime-store-')
     const store = new RuntimeEventStore(root)
@@ -470,6 +792,11 @@ describe('ActiveTaskRegistry (test_active_tasks.py)', () => {
       sessionId: 'sess_scheduler_updated',
     })
     expect(registry.list()).toHaveLength(1)
+    expect(registry.hasActiveForSession('sess_scheduler_updated')).toBe(true)
+    expect(
+      registry.hasActiveForSession('sess_scheduler_updated', 'scheduler'),
+    ).toBe(true)
+    expect(registry.hasActiveForSession('other_session')).toBe(false)
     resolveWork('done')
     await expect(runPromise).resolves.toBe('done')
     expect(registry.list()).toEqual([])

@@ -897,9 +897,19 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
     })
 
     const pending = manager.payload().pending as Record<string, unknown>
-    expect((pending.meta as Record<string, unknown>).control_session_id).toBe(
-      'session_permission_owner',
-    )
+    const meta = pending.meta as Record<string, unknown>
+    expect(meta.control_session_id).toBe('session_permission_owner')
+    const permission = meta.permission as Record<string, unknown>
+    expect(permission.explanation).toMatchObject({
+      version: 1,
+      selected: {
+        source: { kind: 'core_policy', trust: 'system' },
+      },
+      shell: {
+        parser: 'emperor-shell-ast-v1',
+        readonly: false,
+      },
+    })
   })
 })
 

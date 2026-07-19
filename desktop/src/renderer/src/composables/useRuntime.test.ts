@@ -126,6 +126,94 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.busy.value).toBe(false)
   })
 
+  it('disposes the session subscription and all domain effect runners', () => {
+    const unsubscribe = vi.fn()
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          unsubscribe()
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    expect(listener).not.toBeNull()
+
+    runtime.dispose()
+
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    expect(listener).toBeNull()
+  })
+
+  it('submits a busy prompt as an interjection without creating a second optimistic assistant', async () => {
+    const calls: unknown[][] = []
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.submit') {
+          const payload = args[1] as Record<string, unknown>
+          if (payload.delivery === 'interject')
+            return Promise.resolve({
+              turnId: 'prompt-turn',
+              delivery: 'interjected',
+              targetTurnId: 'owner-turn',
+            })
+          return new Promise(() => undefined)
+        }
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.switchSession('s1')
+    expect(runtime.sendMessage('original')).toBe(true)
+    expect(
+      runtime.sendMessage({ content: 'interrupt now', delivery: 'interject' }),
+    ).toBe(true)
+    await flushPromises()
+
+    const submits = calls.filter((call) => call[0] === 'chat.submit')
+    expect(submits).toHaveLength(2)
+    expect(submits[1]?.[1]).toMatchObject({
+      content: 'interrupt now',
+      delivery: 'interject',
+      sessionId: 's1',
+    })
+    const users = runtime.messages.value.filter(
+      (message) => message.role === 'user',
+    )
+    expect(users.at(-1)).toMatchObject({
+      content: 'interrupt now',
+      deliveryState: 'queued',
+    })
+    expect(
+      runtime.messages.value.filter((message) => message.role === 'assistant'),
+    ).toHaveLength(1)
+    expect(runtime.busy.value).toBe(true)
+
+    emitCoreEvent(listener, {
+      event: 'prompt_interjected',
+      seq: 1,
+      session_id: 's1',
+      turn_id: 'prompt-turn',
+      prompt_id: users.at(-1)?.id,
+      client_message_id: users.at(-1)?.id,
+      target_turn_id: 'owner-turn',
+    })
+    expect(users.at(-1)).toMatchObject({ deliveryState: 'interjected' })
+  })
+
   it('does not append an error message when a chat turn pauses for user input', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -407,26 +495,28 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
     emitCoreEvent(listener, {
       event: 'session_created',
+      seq: 1,
+      session_id: 'session-real',
       session: { id: 'session-real' },
       client_draft_id: 'draft:pending-1',
     })
     emitCoreEvent(listener, {
       event: 'user_message',
-      seq: 1,
+      seq: 2,
       session_id: 'session-real',
       turn_id: 'turn-real',
       content: 'real user',
     })
     emitCoreEvent(listener, {
       event: 'message_delta',
-      seq: 2,
+      seq: 3,
       session_id: 'session-real',
       turn_id: 'turn-real',
       delta: 'real answer',
     })
     emitCoreEvent(listener, {
       event: 'assistant_done',
-      seq: 3,
+      seq: 4,
       session_id: 'session-real',
       turn_id: 'turn-real',
       content: 'real answer',
@@ -1342,6 +1432,176 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
   })
 
+  it('does not resurrect a terminal session spinner from duplicate or out-of-order events', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 2,
+      session_id: 's1',
+      turn_id: 't1',
+      content: 'done',
+    })
+    emitCoreEvent(listener, {
+      event: 'message_delta',
+      seq: 1,
+      session_id: 's1',
+      turn_id: 't1',
+      delta: 'stale',
+    })
+
+    expect(runtime.sessionRuntimeStates.s1).toMatchObject({
+      running: false,
+      attention: false,
+    })
+    expect(runtime.messages.value).toEqual([])
+  })
+
+  it('rehydrates runtime state without scheduling live timers or refresh effects', () => {
+    const setTimeoutSpy = vi.fn(setTimeout.bind(globalThis))
+    const options = testOptions()
+    ;(options.boot.value as any).runtime = {
+      latestSeq: 4,
+      busy: false,
+      events: [
+        {
+          event: 'user_message',
+          seq: 1,
+          session_id: 's1',
+          turn_id: 't1',
+          content: 'hello',
+        },
+        {
+          event: 'message_delta',
+          seq: 2,
+          session_id: 's1',
+          turn_id: 't1',
+          delta: 'done',
+        },
+        {
+          event: 'assistant_done',
+          seq: 3,
+          session_id: 's1',
+          turn_id: 't1',
+          content: 'done',
+        },
+        {
+          event: 'scheduler_run_done',
+          seq: 4,
+          session_id: 's1',
+          job: { id: 'job-1', name: 'nightly' },
+        },
+      ],
+    }
+    g.window = fakeWindow(
+      {
+        invokeCore: async () => ({ ok: true }),
+        onCoreEvent: () => () => {},
+      },
+      () => undefined,
+      setTimeoutSpy,
+    )
+    const runtime = useRuntime(options)
+    runtime.switchSession('s1')
+
+    runtime.restoreFromHistory([])
+
+    expect(setTimeoutSpy).not.toHaveBeenCalled()
+    expect(options.refreshMemory).not.toHaveBeenCalled()
+    expect(runtime.messages.value.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'done',
+      streaming: false,
+    })
+  })
+
+  it('uses the task reducer for sorted replay and fences stale live progress', () => {
+    let listener: ((event: unknown) => void) | null = null
+    const options = testOptions()
+    ;(options.boot.value as any).runtime = {
+      latestSeq: 3,
+      events: [
+        {
+          event: 'task_done',
+          seq: 3,
+          session_id: 's1',
+          task: {
+            id: 'task-1',
+            kind: 'subagent',
+            status: 'completed',
+            title: 'inspect',
+            source: 'dispatch_subagent',
+            endedAt: 3,
+          },
+        },
+        {
+          event: 'task_started',
+          seq: 1,
+          session_id: 's1',
+          task: {
+            id: 'task-1',
+            kind: 'subagent',
+            status: 'running',
+            title: 'inspect',
+            source: 'dispatch_subagent',
+            startedAt: 1,
+          },
+        },
+      ],
+    }
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(options)
+    runtime.switchSession('s1')
+    runtime.restoreFromHistory([])
+
+    expect(runtime.taskProjection.tasks).toEqual([
+      expect.objectContaining({
+        id: 'task-1',
+        status: 'completed',
+        startedAt: 1,
+        endedAt: 3,
+      }),
+    ])
+
+    emitCoreEvent(listener, {
+      event: 'task_progress',
+      seq: 2,
+      session_id: 's1',
+      task: {
+        id: 'task-1',
+        kind: 'subagent',
+        status: 'running',
+        title: 'inspect',
+        source: 'dispatch_subagent',
+      },
+      progress: { label: 'stale' },
+    })
+    expect(runtime.taskProjection.tasks[0]).toMatchObject({
+      status: 'completed',
+      endedAt: 3,
+    })
+  })
+
   it('marks sessions running from bootstrap active tasks (P1-7)', async () => {
     g.window = fakeWindow({
       invokeCore: async () => ({ ok: true }),
@@ -1676,6 +1936,7 @@ function testOptions() {
 function fakeWindow(
   bridge: Record<string, unknown>,
   setItem: (...args: unknown[]) => void = () => undefined,
+  setTimeoutImpl: (...args: any[]) => any = setTimeout.bind(globalThis),
 ) {
   return {
     emperor: bridge,
@@ -1685,7 +1946,7 @@ function fakeWindow(
       removeItem: () => undefined,
     },
     location: { protocol: 'http:', host: 'localhost:5173' },
-    setTimeout: setTimeout.bind(globalThis),
+    setTimeout: setTimeoutImpl,
     clearTimeout: clearTimeout.bind(globalThis),
   }
 }

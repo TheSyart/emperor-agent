@@ -18,7 +18,7 @@ Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Comp
 
 模式不会关闭路径安全、schema 校验、workspace policy 或 Core deny。
 
-命令是否常用于开发不代表它安全。`pytest`、`python -m pytest`、`npm test` 和 `npm run ...` 会加载项目控制的代码，因此在默认询问模式下必须先批准；`git status`、`git diff`、`ls`、`pwd` 等严格只读诊断命令仍可直接执行。显式用户规则或已批准 Plan 的精确 permission token 可以受控放行匹配的命令。
+命令是否常用于开发不代表它安全。`pytest`、`python -m pytest`、`npm test` 和 `npm run ...` 会加载项目控制的代码，因此在默认询问模式下必须先批准；`git status`、`git diff`、`ls`、`pwd` 等严格只读诊断命令仍可直接执行。显式用户规则或已批准 Plan 的精确 permission token 可以受控放行匹配的命令，但授权不覆盖 OS containment：未证明只读的命令在 sandbox backend 不可用时仍会在 spawn 前拒绝。
 
 ## Plan：先规划再执行
 

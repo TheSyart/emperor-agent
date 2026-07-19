@@ -2,6 +2,7 @@ import type {
   ModelConfigPayload,
   ModelDiscoveryResult,
   ModelEntrySaveInput,
+  ModelExecutionPolicy,
   ModelProfilePreviewInput,
   ModelTestResult,
   ResolvedModelProfile,
@@ -12,6 +13,12 @@ export async function saveModelEntry(
   entry: ModelEntrySaveInput,
 ): Promise<ModelConfigPayload> {
   return invokeCore('model.saveEntry', entry)
+}
+
+export async function saveModelPolicy(
+  policy: ModelExecutionPolicy,
+): Promise<ModelConfigPayload> {
+  return invokeCore('model.savePolicy', policy)
 }
 
 export async function deleteModelEntry(

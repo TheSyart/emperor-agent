@@ -12,7 +12,6 @@ import {
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { defaultStateRoot } from '@emperor/core'
 import type { CoreApi } from '@emperor/core'
 
 import { resolveConfig } from './config'
@@ -20,16 +19,25 @@ import { resolveAppIconPath } from './icon'
 import { preparePackagedRuntime, runtimeDefaultsRoot } from './runtime-root'
 import { readBounds, pickBounds } from './window-bounds'
 import {
+  appAssetRequestAccess,
   resolveAssetPath,
   resolveAttachmentRawPath,
   resolveMediaRawPath,
+  resolveStaticAssetPath,
 } from './protocol'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
-import { resolveMainPreloadPath } from './preload-path'
 import { parsePackagedSmokeArgs, runPackagedSmoke } from './packaged-smoke'
-import { createTrustedRendererPolicy } from './trusted-renderer'
+import {
+  createPackagedSmokeAttachment,
+  verifyPackagedRenderer,
+} from './packaged-renderer-smoke'
+import {
+  createTrustedRendererPolicy,
+  type TrustedRendererPolicy,
+} from './trusted-renderer'
+import { mainWindowWebPreferences } from './window-security'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
@@ -59,11 +67,24 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
 })
+const trustedPetPolicy = createTrustedRendererPolicy({
+  productionUrl: 'app://pet/renderer.html',
+  mainWebContents: () => petWindow?.webContents ?? null,
+  openExternal: (url) => shell.openExternal(url),
+  onExternalOpenError: (error, url) => {
+    console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
+  },
+})
 
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',
-    privileges: { standard: true, secure: true, supportFetchAPI: true },
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
   },
 ])
 
@@ -110,6 +131,19 @@ ipcMain.handle('emperor:pet:status', async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   const open = petWindow !== null && !petWindow.isDestroyed()
   return { open }
+})
+
+ipcMain.handle('emperor:pet:renderer-bootstrap', async (event) => {
+  trustedPetPolicy.authorizeIpc(event)
+  if (!coreApi) throw new Error('core not ready')
+  const boot = await coreApi.bootstrap()
+  return { runtime: boot.runtime, control: boot.control }
+})
+
+ipcMain.handle('emperor:pet:renderer-close', async (event) => {
+  trustedPetPolicy.authorizeIpc(event)
+  if (petWindow && !petWindow.isDestroyed()) petWindow.close()
+  return { open: false }
 })
 
 function errMessage(err: unknown): string {
@@ -160,6 +194,12 @@ function fail(title: string, message: string): void {
 function registerAppProtocol(): void {
   protocol.handle('app', async (request) => {
     const url = new URL(request.url)
+    const access = appAssetRequestAccess(
+      url.host,
+      request.headers.get('Origin'),
+    )
+    if (!access.allowed)
+      return new Response('asset origin forbidden', { status: 403 })
     if (url.host === 'attachments') {
       const attachmentPath = resolveAttachmentRawPath(request.url, {
         stateRoot: config.stateRoot,
@@ -177,8 +217,17 @@ function registerAppProtocol(): void {
       if (!mediaPath) return new Response('media not found', { status: 404 })
       return net.fetch(pathToFileURL(mediaPath).toString())
     }
-    const { pathname } = url
-    const filePath = resolveAssetPath(pathname, rendererRoot)
+    let filePath: string | null = null
+    if (url.host === 'bundle')
+      filePath = resolveAssetPath(url.pathname, rendererRoot)
+    else if (url.host === 'pet')
+      filePath = resolveStaticAssetPath(url.pathname, petRendererRoot())
+    else if (url.host === 'pet-assets')
+      filePath = resolveStaticAssetPath(
+        url.pathname,
+        path.join(config.runtimeRoot, 'assets', 'desktop-pet', 'clawd-tank'),
+      )
+    if (!filePath) return new Response('asset not found', { status: 404 })
     return net.fetch(pathToFileURL(filePath).toString())
   })
 }
@@ -190,6 +239,21 @@ function loadRenderer(): void {
   else mainWindow.loadURL('app://bundle/index.html')
 }
 
+function secureWindowNavigation(
+  win: BrowserWindow,
+  policy: TrustedRendererPolicy,
+): void {
+  win.webContents.on('will-navigate', (event, targetUrl) =>
+    policy.handleNavigation(event, targetUrl),
+  )
+  win.webContents.on('will-redirect', (event, targetUrl) =>
+    policy.handleNavigation(event, targetUrl),
+  )
+  win.webContents.setWindowOpenHandler((details) =>
+    policy.handleWindowOpen(details),
+  )
+}
+
 function createWindow(): void {
   const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
@@ -198,24 +262,10 @@ function createWindow(): void {
     icon: appIconPath,
     backgroundColor: '#1a1410',
     show: false,
-    webPreferences: {
-      preload: resolveMainPreloadPath(mainDir),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      additionalArguments: [],
-    },
+    webPreferences: mainWindowWebPreferences(mainDir),
   })
   coreEventBridge.attach(mainWindow.webContents)
-  mainWindow.webContents.on('will-navigate', (event, targetUrl) =>
-    trustedRendererPolicy.handleNavigation(event, targetUrl),
-  )
-  mainWindow.webContents.on('will-redirect', (event, targetUrl) =>
-    trustedRendererPolicy.handleNavigation(event, targetUrl),
-  )
-  mainWindow.webContents.setWindowOpenHandler((details) =>
-    trustedRendererPolicy.handleWindowOpen(details),
-  )
+  secureWindowNavigation(mainWindow, trustedRendererPolicy)
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
@@ -299,11 +349,8 @@ function savePetBounds(win: BrowserWindow, boundsPath: string): void {
 }
 
 function createPetWindow(): void {
-  const root = config.runtimeRoot
-  const petStateRoot = process.env.EMPEROR_CONFIG_DIR || defaultStateRoot()
-  const assetBaseUrl = pathToFileURL(
-    path.join(root, 'assets', 'desktop-pet', 'clawd-tank') + path.sep,
-  ).href
+  const petStateRoot = config.stateRoot
+  const assetBaseUrl = 'app://pet-assets/'
   const boundsPath = path.join(petStateDir(petStateRoot), 'window.json')
   const rootDir = petRendererRoot()
   const win = new BrowserWindow({
@@ -321,11 +368,8 @@ function createPetWindow(): void {
       preload: path.join(rootDir, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [
-        `--emperor-root=${root}`,
-        `--emperor-config-dir=${petStateRoot}`,
-        `--emperor-asset-base-url=${assetBaseUrl}`,
-      ],
+      sandbox: true,
+      additionalArguments: [`--emperor-asset-base-url=${assetBaseUrl}`],
     },
   })
 
@@ -333,7 +377,9 @@ function createPetWindow(): void {
   if (process.platform === 'darwin') {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
-  win.loadFile(path.join(rootDir, 'renderer.html'))
+  petWindow = win
+  secureWindowNavigation(win, trustedPetPolicy)
+  win.loadURL('app://pet/renderer.html')
   win.once('ready-to-show', () => win.showInactive())
 
   // Wire pet into core event bridge so it receives live runtime events.
@@ -354,8 +400,6 @@ function createPetWindow(): void {
   }
   win.on('move', scheduleSave)
   win.on('close', () => savePetBounds(win, boundsPath))
-
-  petWindow = win
 }
 
 async function startup(): Promise<void> {
@@ -383,7 +427,9 @@ async function startup(): Promise<void> {
         legacyRuntimeSkillsHandled: app.isPackaged,
       },
     })
+    registerAppProtocol()
     if (packagedSmoke) {
+      const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,
         runtimeRoot: config.runtimeRoot,
@@ -394,13 +440,35 @@ async function startup(): Promise<void> {
         commit: process.env.EMPEROR_BUILD_COMMIT || 'local',
         platform: process.platform,
         arch: process.arch,
+        verifyRenderer: () => {
+          const webPreferences = mainWindowWebPreferences(mainDir)
+          return verifyPackagedRenderer({
+            createWindow: () => {
+              const win = new BrowserWindow({
+                show: false,
+                backgroundColor: '#1a1410',
+                webPreferences,
+              })
+              mainWindow = win
+              secureWindowNavigation(win, trustedRendererPolicy)
+              return win
+            },
+            attachmentUrl: attachment.url,
+            attachmentContent: attachment.content,
+            chromiumSandboxDisabledForTest:
+              process.argv.includes('--no-sandbox'),
+            webPreferences,
+            releaseWindow: () => {
+              mainWindow = null
+            },
+          })
+        },
       })
       await coreApi.close()
       coreApi = null
       app.exit(0)
       return
     }
-    registerAppProtocol()
   } catch (err) {
     if (packagedSmoke) {
       console.error(`packaged smoke failed: ${errMessage(err)}`)
@@ -424,6 +492,7 @@ app.on('activate', () => {
 })
 
 app.on('window-all-closed', () => {
+  if (packagedSmoke) return
   closeCoreHost()
   app.quit()
 })

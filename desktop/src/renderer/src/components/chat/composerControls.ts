@@ -4,7 +4,7 @@ export function composerSendDisabled(opts: {
   attachmentCount: number
   sendBlockedReason?: string | null
 }): boolean {
-  if (opts.busy) return false
+  if (opts.busy) return !opts.content.trim() || opts.attachmentCount > 0
   if (opts.sendBlockedReason) return true
   return !opts.content.trim() && opts.attachmentCount === 0
 }

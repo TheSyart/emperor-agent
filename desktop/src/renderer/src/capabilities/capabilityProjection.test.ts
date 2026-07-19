@@ -110,6 +110,39 @@ describe('capability projection', () => {
     expect(item.kind).toBe('mcp')
     expect(item.title).toBe('GitHub')
     expect(item.description).toBe('stdio · github-mcp-server')
-    expect(item.badges.map((badge) => badge.label)).toEqual(['启用', '4 工具'])
+    expect(item.badges.map((badge) => badge.label)).toEqual([
+      '未连接',
+      '4 工具',
+    ])
+  })
+
+  it('shows MCP auth and generation diagnostics instead of inferring health from an empty tool list', () => {
+    const item = mcpServerCapability(
+      'private-api',
+      { transport: 'sse', enabled: true, url: 'https://mcp.example.test' },
+      0,
+      {
+        serverName: 'private-api',
+        transport: 'sse',
+        generation: 3,
+        clientId: 'client_3',
+        state: 'auth_failed',
+        health: 'unhealthy',
+        auth: 'failed',
+        toolCount: 0,
+        lastError: {
+          code: 'mcp_auth_failed',
+          message: 'MCP server authentication failed',
+        },
+      },
+    )
+
+    expect(item.meta).toContain('认证失败')
+    expect(item.description).toContain('authentication failed')
+    expect(item.badges).toEqual([
+      { label: '认证失败', tone: 'red' },
+      { label: '0 工具', tone: 'blue' },
+      { label: 'G3', tone: 'slate' },
+    ])
   })
 })

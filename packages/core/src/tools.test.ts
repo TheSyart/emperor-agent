@@ -4,24 +4,68 @@ import {
   writeFileSync,
   symlinkSync,
   readFileSync,
+  realpathSync,
 } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { ReadFileTool, WriteFileTool, EditFileTool } from './tools/filesystem'
+import {
+  ApplyPatchTool,
+  DeleteFileTool,
+  EditFileTool,
+  ReadFileTool,
+  RenameFileTool,
+  WriteFileTool,
+} from './tools/filesystem'
 import { RunCommand, TodoStore, UpdateTodos } from './tools/builtin'
 import { Tool } from './tools/base'
 import { toolParamsSchema } from './tools/schema'
 import { ToolRegistry } from './tools/registry'
 import { ExecutionEnvironment } from './environment/snapshot'
+import type {
+  OwnedProcessRequest,
+  OwnedProcessRunner,
+} from './environment/process-runner'
+import { NodeOwnedProcessRunner } from './environment/process-runner'
+import type { ProcessContainmentController } from './environment/sandbox'
 import { PublicHttpError, type PublicHttpRequest } from './network/public-http'
 import { WebFetch, type WebFetchClient } from './tools/web-fetch'
+import type { CodeGraphFileEvent } from './code-intelligence/models'
 
 let dir: string
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'emperor-tools-'))
 })
+
+function testOwnedProcessRunner(): OwnedProcessRunner {
+  const sandbox: ProcessContainmentController = {
+    capability: () => ({
+      platform: process.platform,
+      backend: 'macos-seatbelt',
+      status: 'available',
+      filesystem: 'workspace-write',
+      network: 'policy-controlled',
+      processTree: true,
+      reason: 'test-only pass-through containment fixture',
+    }),
+    prepare: (executable, args) => ({
+      executable,
+      args,
+      receipt: {
+        decision: 'sandboxed',
+        backend: 'macos-seatbelt',
+        capabilityStatus: 'available',
+        filesystem: 'workspace-write',
+        network: 'denied',
+        processTree: true,
+        policyHash: 'c'.repeat(64),
+        reason: 'test-only pass-through containment fixture',
+      },
+    }),
+  }
+  return new NodeOwnedProcessRunner({ sandbox })
+}
 
 describe('WebFetch', () => {
   it('keeps raw and text modes while bounding the public HTTP request', async () => {
@@ -210,6 +254,108 @@ describe('WriteFileTool + EditFileTool', () => {
   })
 })
 
+describe('managed destructive file tools', () => {
+  it('publishes graph file events only after successful managed mutations', async () => {
+    const observed: CodeGraphFileEvent[][] = []
+    const observer = async (events: readonly CodeGraphFileEvent[]) => {
+      observed.push([...events])
+    }
+    const path = join(dir, 'observed.ts')
+    await new WriteFileTool(dir, observer).execute({
+      path,
+      content: 'export const before = 1\n',
+    })
+    await new EditFileTool(dir, observer).execute({
+      path,
+      old_text: 'before',
+      new_text: 'after',
+    })
+    await new EditFileTool(dir, observer).execute({
+      path,
+      old_text: 'missing',
+      new_text: 'ignored',
+    })
+    await new RenameFileTool(dir, observer).execute({
+      source: path,
+      destination: 'renamed.ts',
+    })
+    await new DeleteFileTool(dir, observer).execute({ path: 'renamed.ts' })
+
+    expect(observed).toEqual([
+      [{ kind: 'created', path }],
+      [{ kind: 'modified', path }],
+      [
+        {
+          kind: 'renamed',
+          path,
+          nextPath: join(dir, 'renamed.ts'),
+        },
+      ],
+      [{ kind: 'removed', path: join(dir, 'renamed.ts') }],
+    ])
+  })
+
+  it('deletes and renames regular workspace files', async () => {
+    writeFileSync(join(dir, 'delete.txt'), 'delete me')
+    writeFileSync(join(dir, 'old.txt'), 'rename me')
+
+    const deleted = await new DeleteFileTool(dir).execute({
+      path: 'delete.txt',
+    })
+    const renamed = await new RenameFileTool(dir).execute({
+      source: 'old.txt',
+      destination: 'nested/new.txt',
+    })
+
+    expect(deleted).toContain('Deleted')
+    expect(existsSync(join(dir, 'delete.txt'))).toBe(false)
+    expect(renamed).toContain('Renamed')
+    expect(existsSync(join(dir, 'old.txt'))).toBe(false)
+    expect(readFileSync(join(dir, 'nested/new.txt'), 'utf8')).toBe('rename me')
+  })
+
+  it('applies an exact single-file patch and refuses ambiguous matches', async () => {
+    writeFileSync(join(dir, 'patch.txt'), 'first\nvalue\nvalue\n')
+    const tool = new ApplyPatchTool(dir)
+
+    expect(
+      await tool.execute({
+        path: 'patch.txt',
+        old_text: 'first',
+        new_text: 'changed',
+      }),
+    ).toContain('Patched')
+    expect(
+      await tool.execute({
+        path: 'patch.txt',
+        old_text: 'value',
+        new_text: 'next',
+      }),
+    ).toContain('[ERR]')
+    expect(readFileSync(join(dir, 'patch.txt'), 'utf8')).toBe(
+      'changed\nvalue\nvalue\n',
+    )
+  })
+
+  it('blocks delete and rename through escaping symlinks', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'emperor-managed-outside-'))
+    const secret = join(outside, 'secret.txt')
+    writeFileSync(secret, 'secret')
+    symlinkSync(secret, join(dir, 'linked.txt'))
+
+    expect(
+      await new DeleteFileTool(dir).execute({ path: 'linked.txt' }),
+    ).toContain('[ERR]')
+    expect(
+      await new RenameFileTool(dir).execute({
+        source: 'linked.txt',
+        destination: 'moved.txt',
+      }),
+    ).toContain('[ERR]')
+    expect(readFileSync(secret, 'utf8')).toBe('secret')
+  })
+})
+
 describe('RunCommand is_read_only delegates to resolvers', () => {
   it('pwd is readonly, curl is not', () => {
     const r = new RunCommand(dir)
@@ -296,7 +442,7 @@ describe('RunCommand structured results', () => {
   it('does not infer mapResult failure from user-visible stdout text', () => {
     const result = new RunCommand(dir).mapResult('Error: command cancelled', {
       root: dir,
-      workspaceRoot: dir,
+      workspaceRoot: realpathSync(dir),
       arguments: { command: "printf 'Error: command cancelled'" },
     })
 
@@ -308,9 +454,123 @@ describe('RunCommand structured results', () => {
   })
 })
 
+describe('RunCommand OS containment contract', () => {
+  it('fails a mutating command closed when the OS sandbox backend is unavailable', async () => {
+    const requests: OwnedProcessRequest[] = []
+    const runner: OwnedProcessRunner = {
+      capability: () => ({
+        platform: 'linux',
+        backend: 'linux-bwrap',
+        status: 'unavailable',
+        filesystem: 'unavailable',
+        network: 'unavailable',
+        processTree: false,
+        reason: 'bubblewrap missing',
+      }),
+      run: async (request) => {
+        requests.push(request)
+        return {
+          status: 'containment_unavailable',
+          exitCode: null,
+          stdout: '',
+          stderr: '',
+          durationMs: 0,
+          error: 'bubblewrap missing',
+          containment: {
+            decision: 'denied',
+            backend: 'linux-bwrap',
+            capabilityStatus: 'unavailable',
+            filesystem: 'unavailable',
+            network: 'unavailable',
+            processTree: false,
+            policyHash: 'a'.repeat(64),
+            reason: 'bubblewrap missing',
+          },
+        }
+      },
+    }
+    const target = join(dir, 'mutation.txt')
+    const command = `printf mutation > "${target}"`
+    const result = await new RunCommand(dir, { ownedRunner: runner }).execute({
+      command,
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.containment).toMatchObject({
+      mode: 'required',
+      workspaceRoot: realpathSync(dir),
+      network: 'deny',
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      modelContent: expect.stringContaining('OS sandbox unavailable'),
+      metadata: {
+        containment: {
+          decision: 'denied',
+          backend: 'linux-bwrap',
+          capabilityStatus: 'unavailable',
+        },
+      },
+    })
+    expect(existsSync(target)).toBe(false)
+  })
+
+  it('allows a proven read-only command to degrade truthfully with an unsandboxed receipt', async () => {
+    const requests: OwnedProcessRequest[] = []
+    const runner: OwnedProcessRunner = {
+      capability: () => ({
+        platform: 'win32',
+        backend: 'windows-unsupported',
+        status: 'unsupported',
+        filesystem: 'unavailable',
+        network: 'unavailable',
+        processTree: false,
+        reason: 'not implemented',
+      }),
+      run: async (request) => {
+        requests.push(request)
+        return {
+          status: 'completed',
+          exitCode: 0,
+          stdout: `${dir}\n`,
+          stderr: '',
+          durationMs: 2,
+          error: null,
+          containment: {
+            decision: 'unsandboxed',
+            backend: 'none',
+            capabilityStatus: 'unsupported',
+            filesystem: 'unrestricted',
+            network: 'unrestricted',
+            processTree: false,
+            policyHash: 'b'.repeat(64),
+            reason: 'not implemented',
+          },
+        }
+      },
+    }
+    const result = await new RunCommand(dir, { ownedRunner: runner }).execute({
+      command: 'pwd',
+    })
+
+    expect(requests[0]!.containment.mode).toBe('preferred')
+    expect(result).toMatchObject({
+      modelContent: dir,
+      isError: false,
+      metadata: {
+        containment: {
+          decision: 'unsandboxed',
+          backend: 'none',
+          capabilityStatus: 'unsupported',
+        },
+      },
+    })
+  })
+})
+
 describe('RunCommand cancellation', () => {
   it('stops a running shell command when the turn abort signal fires', async () => {
-    const r = new RunCommand(dir)
+    const r = new RunCommand(dir, { ownedRunner: testOwnedProcessRunner() })
     const controller = new AbortController()
     const command = `"${process.execPath}" -e "setTimeout(() => console.log('should-not-finish'), 300)"`
     const pending = r.execute({ command }, {
@@ -352,7 +612,9 @@ describe('RunCommand execution environment snapshot', () => {
     )
     try {
       const command = `"${process.execPath}" -e "process.stdout.write([process.env.PATH, process.env.HOME, process.env.PROCESS_ONLY_SECRET].map((value) => value || '').join('|'))"`
-      const output = await new RunCommand(dir).execute(
+      const output = await new RunCommand(dir, {
+        ownedRunner: testOwnedProcessRunner(),
+      }).execute(
         { command },
         {
           root: dir,

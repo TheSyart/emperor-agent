@@ -12,10 +12,30 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { nowTs } from '../util/time'
-import { ExternalInbound, seenKey, splitSeenKey } from './models'
+import { ExternalInbound, seenKey } from './models'
+
+export const EXTERNAL_BRIDGE_STATE_VERSION = 2
+export type ExternalIngestStatus =
+  'received' | 'accepted' | 'dispatched' | 'failed' | 'dead-letter'
+
+export interface ExternalDedupeRecord {
+  key: string
+  platform: string
+  external_message_id: string
+  status: ExternalIngestStatus
+  revision: number
+  received_at: number
+  updated_at: number
+  expires_at: number | null
+  lease_expires_at: number | null
+  attempts: number
+  turn_id: string | null
+  last_error: string | null
+}
 
 export interface ExternalBridgeState {
-  seen: Set<string>
+  dedupeRevision: number
+  dedupe: Map<string, ExternalDedupeRecord>
   inbox: Array<Record<string, unknown>>
   pending: ExternalInbound[]
   outbox: Map<string, Record<string, unknown>>
@@ -49,10 +69,40 @@ export class ExternalBridgeStore {
       return emptyState()
     }
     const obj = raw as Record<string, unknown>
-    const seen = new Set<string>()
+    const dedupe = new Map<string, ExternalDedupeRecord>()
+    let dedupeRevision = nonNegativeInteger(obj.dedupeRevision)
+    for (const item of Array.isArray(obj.dedupe) ? obj.dedupe : []) {
+      if (!isRecord(item)) continue
+      const record = parseDedupeRecord(item)
+      if (!record) continue
+      dedupe.set(record.key, record)
+      dedupeRevision = Math.max(dedupeRevision, record.revision)
+    }
+    const legacyUpdatedAt = finiteNumber(obj.updatedAt, nowTs())
     for (const item of Array.isArray(obj.seen) ? obj.seen : []) {
-      if (Array.isArray(item) && item.length === 2 && item[0] && item[1])
-        seen.add(seenKey(String(item[0]), String(item[1])))
+      if (!Array.isArray(item) || item.length !== 2 || !item[0] || !item[1])
+        continue
+      const platform = String(item[0])
+      const externalMessageId = String(item[1])
+      const key = seenKey(platform, externalMessageId)
+      if (dedupe.has(key)) continue
+      dedupeRevision += 1
+      dedupe.set(key, {
+        key,
+        platform,
+        external_message_id: externalMessageId,
+        status: 'dispatched',
+        revision: dedupeRevision,
+        received_at: legacyUpdatedAt,
+        updated_at: legacyUpdatedAt,
+        // Legacy `seen` had no timestamp/receipt semantics. Give it a finite
+        // migration lifetime; the service applies its configured TTL on load.
+        expires_at: null,
+        lease_expires_at: null,
+        attempts: 1,
+        turn_id: null,
+        last_error: null,
+      })
     }
     const inbox = trimRecent(
       (Array.isArray(obj.inbox) ? obj.inbox : []).filter(isRecord),
@@ -77,23 +127,31 @@ export class ExternalBridgeStore {
       ),
       this.maxRecent,
     )
-    return { seen, inbox, pending, outbox, recentErrors }
+    return {
+      dedupeRevision,
+      dedupe,
+      inbox,
+      pending,
+      outbox,
+      recentErrors,
+    }
   }
 
   save(state: {
-    seen: Set<string>
+    dedupeRevision: number
+    dedupe: Map<string, ExternalDedupeRecord>
     inbox: Array<Record<string, unknown>>
     pending: ExternalInbound[]
     outbox: Map<string, Record<string, unknown>>
     recentErrors: Array<Record<string, unknown>>
   }): void {
     const payload = {
-      version: 1,
+      version: EXTERNAL_BRIDGE_STATE_VERSION,
       updatedAt: nowTs(),
-      seen: [...state.seen]
-        .map(splitSeenKey)
-        .filter((item) => item[0] && item[1])
-        .sort(),
+      dedupeRevision: Math.max(0, Math.floor(state.dedupeRevision)),
+      dedupe: [...state.dedupe.values()].sort((a, b) =>
+        a.key.localeCompare(b.key),
+      ),
       inbox: trimRecent(state.inbox, this.maxRecent),
       pending: trimRecent(state.pending, this.maxRecent).map((message) =>
         message.toDict(),
@@ -161,7 +219,8 @@ export class ExternalBridgeStore {
 
 function emptyState(): ExternalBridgeState {
   return {
-    seen: new Set(),
+    dedupeRevision: 0,
+    dedupe: new Map(),
     inbox: [],
     pending: [],
     outbox: new Map(),
@@ -175,4 +234,61 @@ function trimRecent<T>(items: T[], max: number): T[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function parseDedupeRecord(
+  raw: Record<string, unknown>,
+): ExternalDedupeRecord | null {
+  const platform = String(raw.platform ?? '').trim()
+  const externalMessageId = String(raw.external_message_id ?? '').trim()
+  const status = String(raw.status ?? '')
+  if (!platform || !externalMessageId || !isExternalIngestStatus(status))
+    return null
+  const key = seenKey(platform, externalMessageId)
+  return {
+    key,
+    platform,
+    external_message_id: externalMessageId,
+    status,
+    revision: nonNegativeInteger(raw.revision),
+    received_at: finiteNumber(raw.received_at, 0),
+    updated_at: finiteNumber(raw.updated_at, 0),
+    expires_at: nullableFiniteNumber(raw.expires_at),
+    lease_expires_at: nullableFiniteNumber(raw.lease_expires_at),
+    attempts: nonNegativeInteger(raw.attempts),
+    turn_id:
+      raw.turn_id === undefined || raw.turn_id === null
+        ? null
+        : String(raw.turn_id),
+    last_error:
+      raw.last_error === undefined || raw.last_error === null
+        ? null
+        : String(raw.last_error),
+  }
+}
+
+function isExternalIngestStatus(value: string): value is ExternalIngestStatus {
+  return (
+    value === 'received' ||
+    value === 'accepted' ||
+    value === 'dispatched' ||
+    value === 'failed' ||
+    value === 'dead-letter'
+  )
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function nullableFiniteNumber(value: unknown): number | null {
+  if (value === undefined || value === null) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }

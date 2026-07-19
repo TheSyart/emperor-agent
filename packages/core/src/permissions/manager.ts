@@ -8,12 +8,15 @@ import {
   PermissionDecision,
   stableJson,
   traceEntry,
+  type PermissionDecisionExplanation,
   type PermissionTraceEntry,
   type PlanPermissionToken,
 } from './models'
 import { PermissionPolicy } from './policy'
 import { isHighRiskCommand } from '../tools/resolvers'
 import type { PermissionRuleInput } from './rules'
+import type { PermissionRuleAction, PermissionRuleTrust } from './rules'
+import { analyzeShellCommandFailClosed, shellAstSummary } from './shell-ast'
 
 /** PermissionManager 依赖的 ControlManager 表面。 */
 export interface PermissionControlHost {
@@ -66,6 +69,15 @@ export class PermissionManager {
         toolName,
         arguments: argv,
         rule: 'user.approved_once',
+        explanation: directDecisionExplanation({
+          rule: 'user.approved_once',
+          action: 'allow',
+          sourceKind: 'user_interaction',
+          sourceId: 'permission-answer',
+          trust: 'user',
+          toolName,
+          args: argv,
+        }),
       })
     }
     if (this.deniedOnce.has(fingerprint)) {
@@ -75,6 +87,15 @@ export class PermissionManager {
         arguments: argv,
         reason: 'user denied this high-risk operation',
         rule: 'user.denied_once',
+        explanation: directDecisionExplanation({
+          rule: 'user.denied_once',
+          action: 'deny',
+          sourceKind: 'user_interaction',
+          sourceId: 'permission-answer',
+          trust: 'user',
+          toolName,
+          args: argv,
+        }),
       })
     }
     if (
@@ -129,6 +150,7 @@ export class PermissionManager {
             outcome: item.outcome,
             detail: item.detail,
           })),
+          explanation: decision.explanation ?? null,
           arguments: decision.arguments ?? {},
         },
       },
@@ -193,6 +215,8 @@ export class PermissionManager {
         null,
         2,
       ).slice(0, 1200),
+      'explanation:',
+      JSON.stringify(decision.explanation ?? {}, null, 2).slice(0, 1600),
       'arguments:',
       JSON.stringify(decision.arguments ?? {}, null, 2).slice(0, 1600),
     ].join('\n')
@@ -221,7 +245,53 @@ export class PermissionManager {
       arguments: args,
       rule: 'plan.permission_token',
       trace,
+      explanation: directDecisionExplanation({
+        rule: 'plan.permission_token',
+        action: 'allow',
+        sourceKind: 'plan_token',
+        sourceId: `${token.planId}:${token.stepId}`,
+        trust: 'system',
+        toolName,
+        args,
+      }),
     })
+  }
+}
+
+function directDecisionExplanation(opts: {
+  rule: string
+  action: PermissionRuleAction
+  sourceKind: string
+  sourceId: string
+  trust: PermissionRuleTrust
+  toolName: string
+  args: Record<string, unknown>
+}): PermissionDecisionExplanation {
+  const source = {
+    kind: opts.sourceKind,
+    id: opts.sourceId,
+    trust: opts.trust,
+  }
+  const candidate = {
+    id: opts.rule,
+    action: opts.action,
+    matched: true,
+    source,
+    precedence: `${opts.action}:${opts.trust}:direct`,
+  }
+  const command = String(opts.args.command ?? '')
+  return {
+    version: 1,
+    candidates: [candidate],
+    selected: {
+      id: candidate.id,
+      action: candidate.action,
+      source: { ...candidate.source },
+      precedence: candidate.precedence,
+    },
+    ...(opts.toolName === 'run_command'
+      ? { shell: shellAstSummary(analyzeShellCommandFailClosed(command)) }
+      : {}),
   }
 }
 

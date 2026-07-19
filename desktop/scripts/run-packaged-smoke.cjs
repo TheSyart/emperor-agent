@@ -169,7 +169,7 @@ function run(executable, args, env) {
 
 function validateReceipt(receipt) {
   if (
-    receipt?.schemaVersion !== 1 ||
+    receipt?.schemaVersion !== 2 ||
     receipt.exitCode !== 0 ||
     receipt.stateRoot !== '$TEMP/stateRoot' ||
     !/^[a-f0-9]{64}$/.test(receipt.runtimeManifestHash || '') ||
@@ -184,10 +184,29 @@ function validateReceipt(receipt) {
     'environment',
     'glob',
     'grep',
+    'renderer',
   ]) {
     if (receipt.operations?.[name]?.ok !== true)
       throw new Error(`packaged smoke operation failed: ${name}`)
   }
+  const renderer = receipt.operations.renderer
+  if (
+    renderer.nodeGlobalsAbsent !== true ||
+    renderer.coreBridge !== true ||
+    renderer.coreBootstrap !== true ||
+    renderer.attachment?.ok !== true ||
+    !Number.isSafeInteger(renderer.attachment?.bytes) ||
+    renderer.attachment.bytes <= 0 ||
+    renderer.webPreferences?.sandbox !== true ||
+    renderer.webPreferences?.contextIsolation !== true ||
+    renderer.webPreferences?.nodeIntegration !== false ||
+    !['enabled', 'disabled-for-linux-test'].includes(
+      renderer.chromiumSandbox,
+    ) ||
+    (renderer.chromiumSandbox === 'disabled-for-linux-test' &&
+      receipt.platform !== 'linux')
+  )
+    throw new Error('packaged renderer sandbox receipt is invalid')
   const body = JSON.stringify(receipt)
   if (
     body.includes(tempRoot) ||

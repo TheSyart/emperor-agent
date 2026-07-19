@@ -2,10 +2,12 @@
 
 > 文档状态：Active<br>
 > 面向读者：修改 ToolCatalog 的开发者与发布审核者<br>
-> 最后核验：2026-07-16<br>
-> 事实源：`packages/core/src/environment/tool-catalog.json`、catalog schema、环境安装 adapters
+> 最后核验：2026-07-19<br>
+> 事实源：`packages/core/src/environment/tool-catalog.json`、catalog schema、环境安装 adapters、`packages/core/src/environment/sandbox.ts`
 
 `packages/core/src/environment/tool-catalog.json` 是随应用签名发布的静态执行策略，不是普通展示数据。catalog 决定可探测、下载和执行的程序；任何变更都按供应链与命令执行安全变更审核。
+
+当前命令 sandbox helper 不由 ToolCatalog 下载：macOS `sandbox-exec` 与 Linux `bwrap` 被视为 host-OS capability，Windows 明确 unsupported。它们仍受固定路径、固定 probe argv 与 packaged smoke receipt 审核；不得因为“不在 catalog”就接受 PATH 首项、renderer/model 指定 helper 或静默 unsandboxed fallback。未来若把 bwrap/Landlock/Windows helper 随应用分发，必须先加入 catalog/签名资源清单，固定版本、SHA-256、publisher 与 license，再修改 backend selection。
 
 ## 变更信息
 
@@ -43,6 +45,7 @@
 - [ ] 执行 `npm test --workspace @emperor/core`、Core typecheck/lint 和 `make check`。
 - [ ] 在对应平台 internal workflow 生成 adapter receipt；receipt 不含 HOME、用户名、token 或完整 PATH。
 - [ ] packaged smoke 证明最小 PATH 下应用可启动，且不会自动安装工具。
+- [ ] packaged smoke 的 Diagnostics receipt 包含 `sandbox.backend/status/provenance=host-os`；macOS 必须是可用 Seatbelt，Linux 必须明确 bwrap available/unavailable/error，Windows 必须明确 unsupported。receipt 不包含 helper 绝对路径、profile、HOME 或 PATH。
 - [ ] PR/commit 记录 catalog revision、来源、摘要核验方式、许可结论和平台 receipt。
 
 任一项不能确认时，不合并 catalog 变更，也不通过修改 Zod schema、allowlist 或 failure mode 绕过审核。

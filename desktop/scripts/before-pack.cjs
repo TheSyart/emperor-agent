@@ -26,6 +26,7 @@ const TEMPLATE_RUNTIME_FILES = [
   'agent/skills_section.md',
   'init/MEMORY.md',
   'init/USER.md',
+  'subagents/agents.json',
   'subagents/dongchang_tanshi.md',
   'subagents/neiguan_yingzao.md',
   'subagents/shangbao_dianbu.md',

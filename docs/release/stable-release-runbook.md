@@ -2,8 +2,8 @@
 
 > 文档状态：Frozen<br>
 > 面向读者：未来的发布维护者<br>
-> 冻结说明：workflow 和验证链已保留，但当前公开渠道不是 Stable；凭证、签名与一次完整候选演练通过前不得启用<br>
-> 最后核验：2026-07-16<br>
+> 冻结说明：workflow 和验证链已保留，但当前公开渠道不是 Stable；Stable tag 不会自动触发，仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 在解冻前必须保持未设置<br>
+> 最后核验：2026-07-19<br>
 > 事实源：`.github/workflows/release.yml`、`scripts/build_desktop_release.sh`、`scripts/verify-*-release.*`、`scripts/publish-release.sh`
 
 本手册描述仓库中已存在但尚未作为当前公开渠道启用的受信发布链。不能因为 workflow 文件存在，就对外宣称已经提供 Stable 包。
@@ -19,9 +19,22 @@
 
 任一条件未满足时，继续使用[未签名 Preview 渠道](preview-release-runbook.md)。不得把 unsigned candidate 放进 Stable workflow，也不得删除签名校验以求通过。
 
-## Tag 与触发
+## 手动触发与机器门禁
 
-`.github/workflows/release.yml` 接受没有 prerelease 后缀的 `v*` tag，并排除 `v*-*` 与 Preview tag。正式启用后应使用符合仓库版本策略的 annotated tag；tag commit 必须是已验收的默认分支 commit。
+`.github/workflows/release.yml` 只接受 `workflow_dispatch`，推送任何 Stable tag 都不会自动运行。维护者必须显式输入现有 `stable_tag`；`release-policy` 会在任何候选 job 前验证：
+
+- tag 只能是无 prerelease 后缀的 `v<major>.<minor>.<patch>`；
+- tag 必须已经存在且是 annotated tag；
+- tag 必须与其 commit 中 `desktop/package.json` 的版本一致；
+- tag commit 必须位于默认分支历史中。
+
+`publish=false` 只执行签名候选、smoke、receipt、SBOM 与 attestation 演练，不创建 GitHub Release。公开发布同时要求：
+
+1. 手动输入 `publish=true`；
+2. 仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 明确设置为 `true`；
+3. `stable-release` GitHub Environment 配置 required reviewers 并通过审批。
+
+当前 Frozen 期间必须保持 `EMPEROR_STABLE_RELEASE_ENABLED` 未设置，即使误触手动 workflow 也不能进入 `publish-release`。解除冻结必须先按本手册完成候选演练，再通过单独 code review 同时变更仓库变量和 Environment 保护设置。
 
 ## 凭证
 
@@ -50,19 +63,22 @@ Windows job fail closed 地要求：
 
 ```mermaid
 flowchart LR
-  Tag["Stable tag"] --> Mac["Signed + notarized macOS"]
-  Tag --> Win["Authenticode Windows"]
-  Tag --> Linux["Linux build + lifecycle smoke"]
+  Manual["Manual stable_tag input"] --> Policy["Annotated tag + default branch policy"]
+  Policy --> Mac["Signed + notarized macOS"]
+  Policy --> Win["Authenticode Windows"]
+  Policy --> Linux["Linux build + lifecycle smoke"]
   Mac --> Aggregate["Fail-closed aggregate"]
   Win --> Aggregate
   Linux --> Aggregate
   Aggregate --> Attest["Checksums + SBOM + attestations"]
-  Attest --> Publish["Atomic GitHub Release"]
+  Attest --> Gate["publish=true + repository variable + protected environment"]
+  Gate --> Publish["Atomic GitHub Release"]
 ```
 
-- macOS：构建签名候选，验证签名、notarization、DMG 和 packaged smoke。
-- Windows：构建签名 NSIS，验证 Authenticode，并完成安装、smoke、卸载。
-- Linux：构建 AppImage / DEB，在 Ubuntu 22.04 / 24.04 验证完整生命周期。
+- macOS：构建签名候选，验证签名、notarization、DMG 和 packaged smoke；smoke 必须报告可用 `macos-seatbelt`。
+- Windows：构建签名 NSIS，验证 Authenticode，并完成安装、smoke、卸载；在 Job Object + ACL backend 实现前必须报告 `windows-unsupported`，不能伪装 sandboxed。
+- Linux：构建 AppImage / DEB，在 Ubuntu 22.04 / 24.04 验证完整生命周期，并记录 `linux-bwrap` 的真实 available/unavailable/error capability。
+- 所有平台的 packaged smoke schema 2 必须显示 Lifecycle Supervisor 为 `ready`，全部 required service 为 ready，并由真实 ASAR renderer 证明 Node globals absent、Core bridge/bootstrap、attachment 字节、sandbox/context-isolation/node-integration 全部通过；缺项、failed、stop timeout 或非 Linux 平台关闭 Chromium sandbox 都不得进入聚合发布。
 - Aggregate：只接受完整平台矩阵和 receipt，生成合并 SBOM 与 checksum，并上传 GitHub attestations。
 - Publish：重新核验所有材料，先 draft、核对 inventory，再原子公开。
 

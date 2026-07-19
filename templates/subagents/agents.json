@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "agents": [
+    {
+      "schemaVersion": 1,
+      "name": "xiaohuangmen",
+      "aliases": [],
+      "description": "通传小黄门。轻量只读, 适合短命令、快速确认、跑腿探路。若发现差事变复杂, 应回禀总管改派专职内官。",
+      "prompt": "xiaohuangmen.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": ["run_command", "read_file", "glob", "grep"]
+      },
+      "skills": { "allow": [] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 8,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "workspace-write",
+        "network": "deny",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": false }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "sili_suitang",
+      "aliases": [],
+      "description": "司礼监随堂小太监。只读文书, 适合阅读代码、查阅文档、整理提纲、归纳结论。",
+      "prompt": "sili_suitang.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": ["load_skill", "read_file", "glob", "grep"]
+      },
+      "skills": { "allow": ["*"] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 12,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "read-only",
+        "network": "deny",
+        "process": "deny"
+      },
+      "delegation": { "planReadonlyExplorer": true }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "dongchang_tanshi",
+      "aliases": ["researcher"],
+      "description": "东厂探事小太监。只读查访, 适合抓网页、查资料、探索性搜索、比对外部线索。",
+      "prompt": "dongchang_tanshi.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": [
+          "run_command",
+          "web_fetch",
+          "load_skill",
+          "read_file",
+          "glob",
+          "grep"
+        ]
+      },
+      "skills": { "allow": ["*"] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 15,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "workspace-write",
+        "network": "policy",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": false }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "shangbao_dianbu",
+      "aliases": [],
+      "description": "尚宝监典簿小太监。只读核验, 适合盘点文件、校对清单、检查遗漏、整理表册。",
+      "prompt": "shangbao_dianbu.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": ["run_command", "read_file", "glob", "grep"]
+      },
+      "skills": { "allow": [] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 12,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "read-only",
+        "network": "deny",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": true }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "verification_reviewer",
+      "aliases": ["reviewer"],
+      "description": "独立复核小太监。只读审查项目变更, 适合对非平凡计划做对抗式复核、验证命令核验、风险遗漏检查。",
+      "prompt": "verification_reviewer.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": ["run_command", "read_file", "glob", "grep"]
+      },
+      "skills": { "allow": [] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 14,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "read-only",
+        "network": "deny",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": true }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "neiguan_yingzao",
+      "aliases": ["general"],
+      "description": "内官监营造小太监。可读写可执行命令, 适合修改文件、搭建工程、跑命令验收。",
+      "prompt": "neiguan_yingzao.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": [
+          "run_command",
+          "web_fetch",
+          "load_skill",
+          "read_file",
+          "write_file",
+          "edit_file",
+          "apply_patch",
+          "delete_file",
+          "rename_file",
+          "glob",
+          "grep"
+        ]
+      },
+      "skills": { "allow": ["*"] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 20,
+        "requiredSections": ["结论", "证据", "风险", "建议下一步"]
+      },
+      "sandbox": {
+        "filesystem": "workspace-write",
+        "network": "policy",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": false }
+    }
+  ]
+}

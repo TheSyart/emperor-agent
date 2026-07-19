@@ -15,6 +15,18 @@ export enum TaskStatus {
   COMPLETED = 'completed',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
+  INTERRUPTED = 'interrupted',
+}
+
+const TERMINAL_TASK_STATUSES = new Set<string>([
+  TaskStatus.COMPLETED,
+  TaskStatus.FAILED,
+  TaskStatus.CANCELLED,
+  TaskStatus.INTERRUPTED,
+])
+
+export function isTerminalTaskStatus(status: unknown): boolean {
+  return TERMINAL_TASK_STATUSES.has(String(status))
 }
 
 export interface TaskRecordPayload {

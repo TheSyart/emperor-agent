@@ -53,6 +53,10 @@ import {
   Play,
   Ban,
   ArrowDownToLine,
+  FileClock,
+  RotateCcw,
+  TriangleAlert,
+  Square,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -87,6 +91,7 @@ export const actionIcons = {
   refresh: RotateCw,
   save: Save,
   send: ArrowUp,
+  stop: Square,
   close: X,
   caretDown: ChevronDown,
   modeAskBeforeEdit: ShieldQuestion,
@@ -109,6 +114,16 @@ export const goalIcons = {
   fail: CircleX,
   missing: CircleAlert,
   notice: CircleAlert,
+} satisfies Record<string, IconComponent>
+
+export const checkpointIcons = {
+  alert: CircleAlert,
+  ok: CircleCheck,
+  file: FileClock,
+  loading: LoaderCircle,
+  refresh: RotateCw,
+  rewind: RotateCcw,
+  warning: TriangleAlert,
 } satisfies Record<string, IconComponent>
 
 export function modeIcon(mode: string): IconComponent {

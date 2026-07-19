@@ -1,15 +1,24 @@
 import type {
+  AgentDefinitionDiagnosticsPayload,
+  CodeIntelligenceDiagnosticsPayload,
   DesktopPetPayload,
   DiagnosticsConfigSummary,
   DiagnosticsDependencyPayload,
   DiagnosticsPayload,
+  EffectiveConfigSnapshotPayload,
+  HybridMemoryDiagnosticsPayload,
+  LifecycleDiagnosticsPayload,
   DiagnosticsRuntimePaths,
   ExternalDiagnosticsPayload,
   LegacyStateMigrationPayload,
   MemoryContextExplanationPayload,
   ProjectLegacyPrivateDataPayload,
+  PromptSnapshotsDiagnosticsPayload,
+  ProcessRuntimeDiagnosticsPayload,
   RuntimeStats,
   SchedulerDiagnosticsPayload,
+  SandboxCapabilityDiagnosticsPayload,
+  SubagentSupervisorDiagnosticsPayload,
   WorkspacePolicyDiagnosticsPayload,
 } from '../../types'
 
@@ -32,7 +41,8 @@ export interface DiagnosticGroup {
 
 export function diagnosticStatusTone(status: unknown): DiagnosticTone {
   const normalized = String(status || 'unknown').toLowerCase()
-  if (['ok', 'ready', 'running', 'healthy'].includes(normalized)) return 'ok'
+  if (['ok', 'ready', 'running', 'healthy', 'available'].includes(normalized))
+    return 'ok'
   if (['corrupt', 'invalid', 'error', 'failed', 'failure'].includes(normalized))
     return 'error'
   if (
@@ -44,6 +54,8 @@ export function diagnosticStatusTone(status: unknown): DiagnosticTone {
       'not-installed',
       'warning',
       'warn',
+      'unavailable',
+      'unsupported',
     ].includes(normalized)
   )
     return 'warn'
@@ -57,6 +69,7 @@ export function diagnosticStatusText(status: unknown): string {
     ready: '就绪',
     running: '运行中',
     healthy: '正常',
+    available: '可用',
     missing: '缺失',
     corrupt: '损坏',
     invalid: '无效',
@@ -70,6 +83,8 @@ export function diagnosticStatusText(status: unknown): string {
     warn: '警告',
     not_installed: '未安装',
     'not-installed': '未安装',
+    unavailable: '不可用',
+    unsupported: '不支持',
   }
   return labels[normalized] || String(status || '未知')
 }
@@ -98,6 +113,7 @@ export function diagnosticRows(
       rows: [
         configRow('model-config', '模型配置', diagnostics.modelConfig),
         configRow('local-config', '本地配置', diagnostics.localConfig),
+        ...effectiveConfigRows(diagnostics.effectiveConfig),
       ],
     },
     ...contextExplanationGroup(diagnostics.contextExplanation),
@@ -111,6 +127,14 @@ export function diagnosticRows(
         schedulerRow(diagnostics.scheduler),
         runtimeRow(diagnostics.runtime),
         workspacePolicyRow(diagnostics.workspacePolicy),
+        sandboxCapabilityRow(diagnostics.sandbox),
+        processRuntimeRow(diagnostics.processRuntime),
+        lifecycleRow(diagnostics.lifecycle),
+        subagentSupervisorRow(diagnostics.subagents),
+        agentDefinitionsRow(diagnostics.agentDefinitions),
+        promptCacheBreakRow(diagnostics.promptSnapshots),
+        hybridMemoryRow(diagnostics.hybridMemory),
+        codeIntelligenceRow(diagnostics.codeIntelligence),
         activeTasksRow(diagnostics.activeTasks),
       ],
     },
@@ -128,6 +152,58 @@ export function diagnosticRows(
       rows: dependencyRows(diagnostics.dependencies),
     },
   ]
+}
+
+function effectiveConfigRows(
+  snapshot: EffectiveConfigSnapshotPayload | undefined,
+): DiagnosticRow[] {
+  const entries = snapshot?.entries ?? []
+  if (!entries.length) return []
+  return entries.map((entry, index) => {
+    const source = entry.source ?? {}
+    const trace = entry.trace ?? []
+    const rejected = trace.filter((item) => item.status === 'rejected').length
+    const secrets = entry.secretSources?.length ?? 0
+    const kind = String(source.kind || 'unknown')
+    const id = String(source.id || 'unknown')
+    const trust = String(source.trust || entry.trust || 'unknown')
+    const traceSummary = trace
+      .map((item) => {
+        const traceSource = item.source ?? {}
+        return `${String(traceSource.kind || 'unknown')}:${String(traceSource.id || 'unknown')} ${String(item.status || 'unknown')}`
+      })
+      .join(' > ')
+    return {
+      id: `effective-config-${String(entry.key || index).replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      label: String(entry.key || `effective.${index}`),
+      value: `${kind}:${id}`,
+      detail: [
+        `trust ${trust}`,
+        `trace ${trace.length}${traceSummary ? ` [${traceSummary}]` : ''}`,
+        rejected ? `${rejected} rejected` : '',
+        secrets
+          ? `${secrets} secret source${secrets === 1 ? '' : 's'} redacted`
+          : '',
+        `effective ${compactEffectiveValue(entry.value)}`,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      tone: trust === 'untrusted' || rejected ? 'warn' : 'ok',
+    }
+  })
+}
+
+function compactEffectiveValue(value: unknown): string {
+  if (value === null || value === undefined) return String(value)
+  if (typeof value === 'string') return value.slice(0, 120)
+  try {
+    const serialized = JSON.stringify(value)
+    return serialized.length > 160
+      ? `${serialized.slice(0, 157)}...`
+      : serialized
+  } catch {
+    return '[unavailable]'
+  }
 }
 
 function contextExplanationGroup(
@@ -411,6 +487,90 @@ function activeTasksRow(activeTasks: unknown[] | undefined): DiagnosticRow {
   }
 }
 
+function hybridMemoryRow(
+  memory: HybridMemoryDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const capability = memory?.capability
+  const requested = String(capability?.requestedMode || 'unknown')
+  const effective = String(capability?.effectiveMode || 'unknown')
+  const strategy = String(memory?.lastStrategy || 'idle')
+  return {
+    id: 'hybrid-memory',
+    label: 'Hybrid Memory',
+    value: memory ? `${effective} · ${strategy}` : '未返回',
+    detail: memory
+      ? joinParts([
+          `requested ${requested} / prompt ${capability?.promptMutationAllowed ? 'on' : 'off'}`,
+          capability?.reason ? `reason ${capability.reason}` : '',
+          `search ${numberOrZero(memory.searches)} / mutations ${numberOrZero(memory.promptMutations)} / fallbacks ${numberOrZero(memory.embeddingFallbacks)}`,
+          `results ${numberOrZero(memory.lastResultCount)} / index ${numberOrZero(memory.derivedDiskBytes)} bytes`,
+        ])
+      : '未返回详细信息',
+    tone: !memory
+      ? 'muted'
+      : effective === 'on'
+        ? 'ok'
+        : effective === 'eval'
+          ? 'warn'
+          : effective === 'off'
+            ? 'muted'
+            : 'error',
+    path: memory?.indexPath,
+  }
+}
+
+function codeIntelligenceRow(
+  intelligence: CodeIntelligenceDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const capability = intelligence?.capability
+  const graph = intelligence?.graph
+  const lsp = intelligence?.lsp ?? []
+  const requested = String(capability?.requestedMode || 'unknown')
+  const effective = String(capability?.effectiveMode || 'unknown')
+  const strategy = String(intelligence?.lastStrategy || 'idle')
+  const skipped =
+    numberOrZero(graph?.skippedOversized) +
+    numberOrZero(graph?.skippedSymlinks) +
+    numberOrZero(graph?.skippedBinary) +
+    numberOrZero(graph?.skippedUnsupported) +
+    numberOrZero(graph?.skippedCapacity)
+  const readyLsp = lsp.filter((server) => server.state === 'ready').length
+  const restarts = lsp.reduce(
+    (total, server) => total + numberOrZero(server.restarts),
+    0,
+  )
+  const protocolErrors = lsp.reduce(
+    (total, server) => total + numberOrZero(server.protocolErrors),
+    0,
+  )
+  return {
+    id: 'code-intelligence',
+    label: 'Code Intelligence',
+    value: intelligence ? `${effective} · ${strategy}` : '未返回',
+    detail: intelligence
+      ? joinParts([
+          `requested ${requested} / tool ${capability?.toolAllowed ? 'on' : 'off'}`,
+          capability?.reason ? `reason ${capability.reason}` : '',
+          `graph ${String(graph?.state || 'idle')} / ${numberOrZero(intelligence.graphManagers)} managers / ${numberOrZero(graph?.indexedFiles)} files / ${numberOrZero(graph?.cacheBytes)} cache bytes`,
+          `skipped ${skipped} / parse errors ${numberOrZero(graph?.parseErrors)}`,
+          `lsp ${lsp.length} / ready ${readyLsp} / restarts ${restarts} / protocol ${protocolErrors}`,
+          `queries ${numberOrZero(intelligence.queries)} / lsp ${numberOrZero(intelligence.lspQueries)} / fallbacks ${numberOrZero(intelligence.graphFallbacks)} / events ${numberOrZero(intelligence.notifications)} / ${numberOrZero(intelligence.lastLatencyMs)}ms`,
+        ])
+      : '未返回详细信息',
+    tone: !intelligence
+      ? 'muted'
+      : protocolErrors > 0
+        ? 'error'
+        : effective === 'on'
+          ? 'ok'
+          : effective === 'eval'
+            ? 'warn'
+            : effective === 'off'
+              ? 'muted'
+              : 'error',
+  }
+}
+
 function workspacePolicyRow(
   policy: WorkspacePolicyDiagnosticsPayload | undefined,
 ): DiagnosticRow {
@@ -433,6 +593,197 @@ function workspacePolicyRow(
       : '未返回详细信息',
     tone: !policy ? 'muted' : allowRoots.length ? 'ok' : 'warn',
     path: workspaceRoot || stateRoot || undefined,
+  }
+}
+
+function sandboxCapabilityRow(
+  capability: SandboxCapabilityDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const status = String(capability?.status || 'unknown')
+  return {
+    id: 'process-sandbox',
+    label: 'Command OS Sandbox',
+    value: capability
+      ? `${String(capability.backend || 'unknown')} · ${diagnosticStatusText(status)}`
+      : '未返回',
+    detail: capability
+      ? joinParts([
+          `filesystem ${String(capability.filesystem || 'unknown')}`,
+          `network ${String(capability.network || 'unknown')}`,
+          capability.processTree
+            ? 'process tree controlled'
+            : 'process tree unavailable',
+          String(capability.reason || ''),
+        ])
+      : '未返回详细信息',
+    tone:
+      status === 'available'
+        ? 'ok'
+        : status === 'error'
+          ? 'error'
+          : capability
+            ? 'warn'
+            : 'muted',
+  }
+}
+
+function processRuntimeRow(
+  runtime: ProcessRuntimeDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const ready = Boolean(
+    runtime?.ownership &&
+    runtime.leases &&
+    runtime.reparent &&
+    runtime.orphanReconcile,
+  )
+  const terminal = runtime?.terminal
+  const quota = runtime?.outputQuota
+  return {
+    id: 'owned-process-runtime',
+    label: 'Owned Process Runtime',
+    value: runtime
+      ? `${ready ? 'owned' : 'degraded'} · ${String(runtime.processTree || 'unknown')}`
+      : '未返回',
+    detail: runtime
+      ? joinParts([
+          `lease ${runtime.leases ? 'on' : 'off'} / reparent ${runtime.reparent ? 'on' : 'off'} / orphan ${runtime.orphanReconcile ? 'on' : 'off'}`,
+          terminal?.interactiveStdio
+            ? terminal.pty
+              ? 'interactive PTY'
+              : 'interactive stdio; PTY/resize unavailable'
+            : 'interactive stdio unavailable',
+          `quota ${Number(quota?.defaultBytes ?? 0)}/${Number(quota?.maximumBytes ?? 0)} ${String(quota?.defaultStrategy || 'unknown')}`,
+        ])
+      : '未返回详细信息',
+    tone: !runtime ? 'muted' : ready ? 'ok' : 'error',
+  }
+}
+
+function lifecycleRow(
+  lifecycle: LifecycleDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const state = String(lifecycle?.state || 'unknown')
+  const services = lifecycle?.services ?? []
+  const unavailable = services.filter((service) => service.state !== 'ready')
+  return {
+    id: 'lifecycle-supervisor',
+    label: 'Lifecycle Supervisor',
+    value: lifecycle
+      ? `${state} · ${services.length - unavailable.length}/${services.length} ready`
+      : '未返回',
+    detail: lifecycle
+      ? unavailable.length || lifecycle.failedServiceId
+        ? joinParts([
+            ...unavailable.map(
+              (service) =>
+                `${String(service.id || 'unknown')} ${String(service.state || 'unknown')}`,
+            ),
+            lifecycle.failedServiceId
+              ? `failed ${lifecycle.failedServiceId}:${String(lifecycle.failedPhase || 'unknown')}`
+              : '',
+          ])
+        : '所有 required service 已就绪'
+      : '未返回详细信息',
+    tone:
+      state === 'ready'
+        ? 'ok'
+        : state === 'failed'
+          ? 'error'
+          : lifecycle
+            ? 'warn'
+            : 'muted',
+  }
+}
+
+function subagentSupervisorRow(
+  supervisor: SubagentSupervisorDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const active = Math.max(0, Number(supervisor?.active ?? 0))
+  const maxGlobal = Math.max(0, Number(supervisor?.maxGlobal ?? 0))
+  const maxPerSession = Math.max(0, Number(supervisor?.maxPerSession ?? 0))
+  const sessions = Object.entries(supervisor?.bySession ?? {}).sort(
+    ([a], [b]) => a.localeCompare(b),
+  )
+  const saturated =
+    Boolean(maxGlobal && active >= maxGlobal) ||
+    sessions.some(([, count]) => maxPerSession > 0 && count >= maxPerSession)
+  return {
+    id: 'subagent-supervisor',
+    label: 'Subagent Supervisor',
+    value: supervisor
+      ? `${active} active · ${active}/${maxGlobal} capacity`
+      : '未返回',
+    detail: supervisor
+      ? joinParts([
+          `per-session limit ${maxPerSession}`,
+          sessions
+            .map(([sessionId, count]) => `${sessionId}: ${count}`)
+            .join(', '),
+        ])
+      : '未返回详细信息',
+    tone: supervisor ? (saturated ? 'warn' : 'ok') : 'muted',
+  }
+}
+
+function agentDefinitionsRow(
+  snapshot: AgentDefinitionDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const sources = snapshot?.sources ?? []
+  const activeSources = sources.filter((source) => source.active)
+  const diagnostics = snapshot?.diagnostics ?? []
+  const errors = diagnostics.filter(
+    (diagnostic) => String(diagnostic.severity || 'error') === 'error',
+  )
+  return {
+    id: 'agent-definitions',
+    label: 'Agent Definitions',
+    value: snapshot
+      ? `${snapshot.agents?.length ?? 0} agents · ${activeSources.length}/${sources.length} sources`
+      : '未返回',
+    detail: snapshot
+      ? joinParts([
+          activeSources
+            .map(
+              (source) =>
+                `${String(source.kind || source.id || 'unknown')}:${String(source.trust || 'unknown')}`,
+            )
+            .join(', '),
+          errors.length ? `${errors.length} 个 resolver 冲突/错误` : '',
+        ])
+      : '未返回定义来源、信任和冲突信息',
+    tone: snapshot ? (errors.length ? 'error' : 'ok') : 'muted',
+  }
+}
+
+function promptCacheBreakRow(
+  snapshots: PromptSnapshotsDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const latest = snapshots?.recent?.[0]
+  const projection = latest?.projection
+  const cacheBreak = projection?.cacheBreak
+  const classification = String(cacheBreak?.classification || 'unknown')
+  const reasonCode = String(cacheBreak?.reasonCode || 'no_projection')
+  const changed = cacheBreak?.firstChanged
+  const stableHash = String(projection?.stablePrefix?.hash || '')
+  return {
+    id: 'prompt-cache-break',
+    label: 'Prompt Cache Break',
+    value: projection ? `${classification} · ${reasonCode}` : '暂无快照',
+    detail: projection
+      ? joinParts([
+          latest?.turnId ? `turn ${latest.turnId}` : '',
+          changed
+            ? `first ${String(changed.kind || 'unknown')}:${String(changed.id || 'unknown')}[${Number(changed.index ?? 0)}]`
+            : '',
+          stableHash ? `stable ${stableHash.slice(0, 12)}` : '',
+        ])
+      : `${Number(snapshots?.count ?? 0)} 个 prompt snapshot`,
+    tone:
+      classification === 'unexpected'
+        ? 'error'
+        : ['expected', 'none'].includes(classification)
+          ? 'ok'
+          : 'muted',
   }
 }
 
@@ -485,26 +836,65 @@ function externalRow(
   const pending = numberOrZero(external?.inbox?.pending)
   const errors = count(external?.recentErrors)
   const backups = count(external?.store?.corruptBackups)
+  const adapters = external?.adapters ?? []
+  const ready = adapters.filter((adapter) => adapter.state === 'ready').length
+  const unhealthy = adapters.filter(
+    (adapter) =>
+      ['auth_failed', 'degraded'].includes(String(adapter.state)) ||
+      adapter.configuration?.status === 'invalid',
+  )
+  const auditFailures = adapters.reduce(
+    (sum, adapter) => sum + numberOrZero(adapter.audit?.writeFailures),
+    0,
+  )
+  const auditBadLines = adapters.reduce(
+    (sum, adapter) => sum + numberOrZero(adapter.audit?.badLines),
+    0,
+  )
   const tone: DiagnosticTone =
-    errors || backups
+    errors || backups || unhealthy.length || auditFailures || auditBadLines
       ? 'error'
-      : external?.running
+      : ready
         ? 'ok'
-        : external
+        : external?.running
           ? 'warn'
           : 'muted'
+  const adapterDetail = adapters
+    .map((adapter) => {
+      const name = adapter.display_name || adapter.name || 'adapter'
+      const state = adapter.state || 'unknown'
+      const mode = adapter.effectiveMode || adapter.requestedMode || 'off'
+      const accepted = numberOrZero(adapter.accepted)
+      const rejected = numberOrZero(adapter.rejected)
+      const sent = numberOrZero(adapter.outboundSent)
+      const dead = numberOrZero(adapter.outboundDeadLetter)
+      const reason = adapter.lastReason ? ` · reason ${adapter.lastReason}` : ''
+      return `${name}: ${state}/${mode} · in ${accepted}/${rejected} · out ${sent}/${dead}${reason}`
+    })
+    .join(' · ')
+  const auditPath = adapters.find((adapter) => adapter.audit?.path)?.audit?.path
   return {
     id: 'external-bridge',
     label: 'External Bridge',
-    value: external ? (external.running ? '运行中' : '已停止') : '未返回',
+    value: external
+      ? ready
+        ? `${ready}/${adapters.length} adapter 已就绪`
+        : external.running
+          ? '桥接已启动，adapter 未启用'
+          : '已停止'
+      : '未返回',
     detail: joinParts([
+      adapterDetail,
       `${pending} 条待处理`,
       errors ? `${errors} 个近期错误` : '',
       backups ? `${backups} 个腐化备份` : '',
-      external?.store?.path || '',
+      unhealthy.length ? `${unhealthy.length} 个 adapter 异常` : '',
+      auditFailures ? `${auditFailures} 个审计写入失败` : '',
+      auditBadLines ? `${auditBadLines} 个审计坏行` : '',
+      external?.store?.path || auditPath || '',
     ]),
     tone,
-    path: external?.store?.path || undefined,
+    path: external?.store?.path || auditPath || undefined,
   }
 }
 

@@ -1,9 +1,17 @@
 /**
  * RunCommand scaffold (MIG-TOOL-011) + skills (MIG-TOOL-012)。
  */
-import { exec, type ExecOptions } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, dirname, join } from 'node:path'
 import { applyUserProfileMarkdownPatch } from '../memory/user-profile'
 import type { MemoryVersionStore } from '../memory/versions'
+import {
+  NodeOwnedProcessRunner,
+  type OwnedProcessResult,
+  type OwnedProcessRunner,
+} from '../environment/process-runner'
+import type { ProcessContainmentReceipt } from '../environment/sandbox'
 import {
   formatWorkspacePolicyError,
   workspacePolicyForTool,
@@ -11,6 +19,7 @@ import {
 import { Tool, type ToolResult, type ToolExecutionContext } from './base'
 import { S, toolParamsSchema } from './schema'
 import { isReadonlyCommand } from './resolvers'
+import { pathsEqual } from '../util/paths'
 
 export { GlobTool, GrepTool } from './search'
 export { WebFetch } from './web-fetch'
@@ -25,6 +34,9 @@ export interface SkillsLoader {
   summary(): string
 }
 
+type SkillsLoaderProvider =
+  SkillsLoader | ((sessionId?: string | null) => SkillsLoader | null)
+
 export class LoadSkill extends Tool {
   override name = 'load_skill'
   override description =
@@ -34,17 +46,24 @@ export class LoadSkill extends Tool {
   override readOnly = true
   override evidencePolicy = 'forbidden' as const
 
-  private readonly loader: SkillsLoader | null
+  private readonly loaderProvider: SkillsLoaderProvider | null
 
-  constructor(loader?: SkillsLoader) {
+  constructor(loader?: SkillsLoaderProvider) {
     super()
-    this.loader = loader ?? null
+    this.loaderProvider = loader ?? null
   }
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
     const name = String(args.name ?? '')
-    if (!this.loader) return '[ERR] no skills loader configured'
-    const c = this.loader.getContent(name)
+    const loader =
+      typeof this.loaderProvider === 'function'
+        ? this.loaderProvider(ctx?.sessionId)
+        : this.loaderProvider
+    if (!loader) return '[ERR] no skills loader configured'
+    const c = loader.getContent(name)
     return c ?? `[ERR] skill "${name}" not found`
   }
 }
@@ -88,6 +107,14 @@ function renderTodos(todos: Array<Record<string, unknown>>): string {
  */
 export class TodoStore {
   todos: Array<Record<string, unknown>> = []
+  private readonly onChange:
+    ((todos: Array<Record<string, unknown>>) => void) | null
+
+  constructor(
+    onChange: ((todos: Array<Record<string, unknown>>) => void) | null = null,
+  ) {
+    this.onChange = onChange
+  }
 
   update(items: Array<Record<string, unknown>>): string {
     const cleaned: Array<Record<string, unknown>> = []
@@ -123,6 +150,7 @@ export class TodoStore {
       return 'Error: 同一时间只能有一个 in_progress 任务，请重新规划。'
 
     this.todos = cleaned
+    this.onChange?.(this.todos.map((todo) => ({ ...todo })))
     const completed = this.todos.filter((t) => t.status === 'completed').length
     const pending = this.todos.filter((t) => t.status === 'pending').length
     const summary = `todos updated: total=${this.todos.length}, completed=${completed}, in_progress=${inProgressCount}, pending=${pending}`
@@ -286,16 +314,27 @@ export class UpdateTodos extends Tool {
   override evidencePolicy = 'forbidden' as const
   override exclusive = true
 
-  private readonly store: TodoStore
+  private readonly storeProvider:
+    TodoStore | ((sessionId?: string | null) => TodoStore | null)
 
-  constructor(store: TodoStore) {
+  constructor(
+    store: TodoStore | ((sessionId?: string | null) => TodoStore | null),
+  ) {
     super()
-    this.store = store
+    this.storeProvider = store
   }
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
     const todos = (args.todos as Array<Record<string, unknown>>) ?? []
-    return this.store.update(todos)
+    const store =
+      typeof this.storeProvider === 'function'
+        ? this.storeProvider(ctx?.sessionId)
+        : this.storeProvider
+    if (!store) return 'Error: session todo store is unavailable'
+    return store.update(todos)
   }
 }
 
@@ -336,36 +375,35 @@ interface RunCommandExecutionOutcome {
     | null
 }
 
-type RunCommandExecutor = (
-  command: string,
-  options: ExecOptions & { encoding: BufferEncoding },
-) => Promise<RunCommandExecutionOutcome>
-
 export class RunCommand extends Tool {
   override name = 'run_command'
   override description =
     '在当前工作区终端执行一条 shell 命令并返回输出；rm -rf /、curl/wget、python -c、管道到 sh/bash 等危险模式会被安全策略直接拒绝。' +
     '仅用于测试、构建、git、包管理器或必须由 shell 执行的系统操作；不要用它读写搜文件或向用户输出文本。' +
-    '命令运行在受限的最小环境变量（仅 HOME/PATH/LANG 等）下，依赖额外环境变量的命令可能失败；单条命令超过 120 秒会被硬超时中断。' +
+    '命令运行在受限的最小环境变量（仅 HOME/PATH/LANG 等）下；OS sandbox 默认只允许 workspace 与隔离临时目录写入并阻断网络。' +
+    '未证明只读的命令在 sandbox backend 不可用时会 fail closed；单条命令超过 120 秒会被硬超时中断。' +
     '失败后先阅读 stdout/stderr 诊断根因，不要盲目重试或绕过安全检查。'
   override parameters = toolParamsSchema(
     { command: S('要执行的 shell 命令') },
     ['command'],
   )
   override exclusive = true
+  override requiresRuntimeContext = true
   override evidencePolicy = 'eligible' as const
   override maxResultChars = 12_000
 
   private readonly workspace: string
-  private readonly executor: RunCommandExecutor
+  private readonly ownedRunner: OwnedProcessRunner
 
   constructor(
     root: string,
-    options: { readonly executor?: RunCommandExecutor } = {},
+    options: {
+      readonly ownedRunner?: OwnedProcessRunner
+    } = {},
   ) {
     super()
     this.workspace = root
-    this.executor = options.executor ?? execCommand
+    this.ownedRunner = options.ownedRunner ?? new NodeOwnedProcessRunner()
   }
 
   async execute(
@@ -392,27 +430,73 @@ export class RunCommand extends Tool {
       }
     }
     let outcome: RunCommandExecutionOutcome
+    let containment: ProcessContainmentReceipt | null = null
     try {
       const snapshotEnv = ctx?.executionEnvironment?.env
-      outcome = await this.executor(command, {
-        encoding: 'utf8',
-        timeout: 120_000,
-        cwd: workspace || process.cwd(),
-        env: snapshotEnv
-          ? {
-              ...snapshotEnv,
-              LANG: snapshotEnv.LANG ?? 'C.UTF-8',
-              TERM: snapshotEnv.TERM ?? 'dumb',
-            }
-          : {
-              HOME: process.env.HOME ?? '',
-              PATH: process.env.PATH ?? '/usr/bin:/bin',
-              LANG: 'C.UTF-8',
-              TERM: 'dumb',
-              USER: process.env.USER ?? '',
-            },
-        signal: ctx?.signal ?? undefined,
-      })
+      const env: Record<string, string> = snapshotEnv
+        ? {
+            ...snapshotEnv,
+            LANG: snapshotEnv.LANG ?? 'C.UTF-8',
+            TERM: snapshotEnv.TERM ?? 'dumb',
+          }
+        : {
+            HOME: process.env.HOME ?? '',
+            PATH: process.env.PATH ?? '/usr/bin:/bin',
+            LANG: 'C.UTF-8',
+            TERM: 'dumb',
+            USER: process.env.USER ?? '',
+          }
+      const tempRoot = mkdtempSync(join(tmpdir(), 'emperor-command-'))
+      try {
+        const owned = await this.ownedRunner.run({
+          executable:
+            process.platform === 'win32'
+              ? process.env.ComSpec || 'cmd.exe'
+              : '/bin/sh',
+          args:
+            process.platform === 'win32'
+              ? ['/d', '/s', '/c', command]
+              : ['-c', command],
+          cwd: cwdDecision.realPath,
+          env: {
+            ...env,
+            TMPDIR: tempRoot,
+            TMP: tempRoot,
+            TEMP: tempRoot,
+          },
+          timeoutMs: 120_000,
+          maxOutputBytes: MAX_OUTPUT_CHARS * 4,
+          owner: {
+            kind: ctx?.taskId ? 'task' : 'session',
+            id: String(
+              ctx?.taskId || ctx?.sessionId || ctx?.turnId || 'unbound-session',
+            ),
+            sessionId: ctx?.sessionId ?? null,
+          },
+          ...(ctx?.signal ? { signal: ctx.signal } : {}),
+          onContainment: async (receipt) =>
+            await emitContainmentReceipt(ctx, receipt),
+          containment: {
+            mode: isReadonlyCommand(command) ? 'preferred' : 'required',
+            workspaceRoot: cwdDecision.realPath,
+            stateRoot:
+              ctx?.root && !pathsEqual(ctx.root, cwdDecision.realPath)
+                ? ctx.root
+                : null,
+            tempRoot,
+            readOnlyRoots: commandRuntimeReadRoots(env.PATH),
+            network: 'deny',
+          },
+        })
+        containment = owned.containment
+        if (owned.status === 'containment_unavailable') {
+          const content = `Error: OS sandbox unavailable; command was not started (${containment.backend}: ${containment.reason || containment.capabilityStatus})`
+          return this.policyFailureResult(command, content, containment)
+        }
+        outcome = ownedProcessOutcome(owned)
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true })
+      }
     } catch (error) {
       outcome = {
         stdout: '',
@@ -427,8 +511,9 @@ export class RunCommand extends Tool {
       return this.successResult(
         command,
         outcome.stdout.trim() || '(command completed with no output)',
+        containment,
       )
-    return this.failedProcessResult(command, outcome, ctx)
+    return this.failedProcessResult(command, outcome, ctx, containment)
   }
 
   override isReadOnly(args: Record<string, unknown>): boolean {
@@ -439,7 +524,11 @@ export class RunCommand extends Tool {
     return this.successResult(String(ctx.arguments?.command ?? ''), raw)
   }
 
-  private successResult(command: string, content: string): ToolResult {
+  private successResult(
+    command: string,
+    content: string,
+    containment: ProcessContainmentReceipt | null = null,
+  ): ToolResult {
     return {
       modelContent: content,
       displaySummary: `run_command exit 0: ${command.slice(0, 120)}`,
@@ -451,12 +540,17 @@ export class RunCommand extends Tool {
         exitCode: 0,
         signal: null,
         timedOut: false,
+        ...(containment ? { containment } : {}),
       },
       isError: false,
     }
   }
 
-  private policyFailureResult(command: string, content: string): ToolResult {
+  private policyFailureResult(
+    command: string,
+    content: string,
+    containment: ProcessContainmentReceipt | null = null,
+  ): ToolResult {
     return {
       modelContent: content,
       displaySummary: `run_command exit non-zero: ${command.slice(0, 120)}`,
@@ -468,6 +562,7 @@ export class RunCommand extends Tool {
         exitCode: null,
         signal: null,
         timedOut: false,
+        ...(containment ? { containment } : {}),
       },
       isError: true,
     }
@@ -477,6 +572,7 @@ export class RunCommand extends Tool {
     command: string,
     outcome: RunCommandExecutionOutcome,
     ctx?: ToolExecutionContext,
+    containment: ProcessContainmentReceipt | null = null,
   ): ToolResult {
     const error = outcome.error!
     const cancelled = error.name === 'AbortError' || ctx?.signal?.aborted
@@ -509,19 +605,67 @@ export class RunCommand extends Tool {
         exitCode,
         signal,
         timedOut,
+        ...(containment ? { containment } : {}),
       },
       isError: true,
     }
   }
 }
 
-function execCommand(
-  command: string,
-  options: ExecOptions & { encoding: BufferEncoding },
-): Promise<RunCommandExecutionOutcome> {
-  return new Promise((resolve) => {
-    exec(command, options, (error, stdout, stderr) => {
-      resolve({ stdout, stderr, error })
-    })
+function ownedProcessOutcome(
+  result: OwnedProcessResult,
+): RunCommandExecutionOutcome {
+  if (result.status === 'completed' && result.exitCode === 0)
+    return { stdout: result.stdout, stderr: result.stderr, error: null }
+  const error = new Error(
+    result.error ||
+      (result.status === 'timeout'
+        ? 'command timed out'
+        : result.status === 'cancelled'
+          ? 'command cancelled'
+          : result.status === 'output_limit'
+            ? 'command output limit exceeded'
+            : result.exitCode !== null
+              ? `command exited with code ${result.exitCode}`
+              : 'command spawn failed'),
+  ) as Error & {
+    code?: string | number | null
+    signal?: string | null
+    killed?: boolean
+  }
+  if (result.status === 'cancelled') error.name = 'AbortError'
+  if (result.status === 'timeout') {
+    error.code = 'ETIMEDOUT'
+    error.killed = true
+  } else if (result.exitCode !== null) error.code = result.exitCode
+  if (result.signal) error.signal = result.signal
+  return { stdout: result.stdout, stderr: result.stderr, error }
+}
+
+function commandRuntimeReadRoots(pathValue: string | undefined): string[] {
+  const roots = [dirname(process.execPath)]
+  for (const entry of String(pathValue ?? '').split(delimiter)) {
+    const value = entry.trim()
+    if (value) roots.push(value)
+  }
+  return [...new Set(roots)]
+}
+
+async function emitContainmentReceipt(
+  ctx: ToolExecutionContext | undefined,
+  receipt: ProcessContainmentReceipt,
+): Promise<void> {
+  if (!ctx?.emit) return
+  await ctx.emit({
+    event: 'process_containment',
+    id: ctx.parentCallId ?? undefined,
+    backend: receipt.backend,
+    decision: receipt.decision,
+    capability_status: receipt.capabilityStatus,
+    filesystem: receipt.filesystem,
+    network: receipt.network,
+    process_tree: receipt.processTree,
+    policy_hash: receipt.policyHash,
+    reason: receipt.reason || undefined,
   })
 }

@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-07-16<br>
-> 事实源：根目录与 `desktop/package.json`、`Makefile`、`AGENTS.md`
+> 最后核验：2026-07-19<br>
+> 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`、`AGENTS.md`
 
 这里提供源码开发的最短入口。工程约束、关键目录和禁止提交项以根目录 [AGENTS.md](../../AGENTS.md) 为准；系统边界先读[架构总览](../architecture/overview.md)。
 
@@ -26,6 +26,8 @@ npm run dev
 
 `npm run dev` 启动 Electron 开发窗口和 renderer dev server。桌面主路径必须通过 preload IPC 访问 main 内的 CoreApi。
 
+本机 ACP client 可以使用源码级的 [Headless ACP operator preview](headless-acp.md)。它通过 stdio 直接托管同一个 TypeScript Core，不是桌面 IPC fallback，也不恢复旧 HTTP / WebSocket backend。
+
 ## 质量门禁
 
 在仓库根目录运行：
@@ -42,7 +44,7 @@ npm --prefix desktop run package:verify
 ```
 
 - 修改 renderer 视觉或交互时运行 `screenshots`，检查生成结果，不把临时产物混入提交。
-- 修改打包、资源路径、Electron main 或 release contract 时运行 `package:verify`。
+- 修改打包、资源路径、Electron main、preload、`app://` protocol 或 release contract 时运行 `package:verify`。该命令不只检查 Core：schema 2 smoke 会加载真实 sandboxed renderer，验证 CJS preload、Core bridge 和 attachment fetch；只跑 `package:dir` 不构成通过证据。
 - 文档改动至少运行 `npm run format:check`、`git diff --check` 和相关 contract test。
 
 ## 修改从哪里开始
@@ -58,6 +60,7 @@ npm --prefix desktop run package:verify
 | Goal                   | `packages/core/src/goals/`、`packages/core/src/agent/goal-*`               |
 | Scheduler / Team / MCP | `packages/core/src/<domain>/` 与对应 API service                           |
 | Electron host / IPC    | `desktop/src/main/`、`desktop/src/preload/`                                |
+| Headless / ACP stdio   | `packages/core/src/acp/`、`scripts/build-acp.mjs`                          |
 | Vue UI                 | `desktop/src/renderer/src/`                                                |
 
 跨层改动请使用[扩展 Emperor Agent](extending-emperor.md)的同步清单，不要只修改最先报错的一层。

@@ -7,6 +7,7 @@ import {
   writeJsonAtomic,
   type CoreApi,
 } from '@emperor/core'
+import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 
 export interface PackagedSmokeCore {
   bootstrap(): Promise<unknown>
@@ -30,10 +31,11 @@ export interface PackagedSmokeOptions {
   platform: NodeJS.Platform | string
   arch: string
   now?: () => string
+  verifyRenderer(): Promise<PackagedRendererSmokeReceipt>
 }
 
 export interface PackagedSmokeReceipt {
-  schemaVersion: 1
+  schemaVersion: 2
   appVersion: string
   commit: string
   platform: string
@@ -45,10 +47,15 @@ export interface PackagedSmokeReceipt {
   finishedAt: string
   operations: {
     bootstrap: { ok: boolean; builtInSkills: string[] }
-    diagnostics: { ok: boolean }
+    diagnostics: {
+      ok: boolean
+      sandbox: { backend: string; status: string; provenance: 'host-os' }
+      lifecycle: { state: string; readyServices: string[] }
+    }
     environment: { ok: boolean; tools: number; blockedSkills: number }
     glob: { ok: boolean; matches: number }
     grep: { ok: boolean; matches: number }
+    renderer: PackagedRendererSmokeReceipt
   }
   installJobs: { before: number; after: number }
   exitCode: 0 | 1
@@ -93,7 +100,9 @@ export async function runPackagedSmoke(
     if (builtInSkills.length !== 1 || builtInSkills[0] !== 'skill-creator')
       throw new Error('packaged smoke requires only built-in skill-creator')
 
-    await opts.core.diagnostics.get()
+    const diagnostics = asRecord(await opts.core.diagnostics.get())
+    const sandbox = packagedSandboxReceipt(diagnostics.sandbox, opts.platform)
+    const lifecycle = packagedLifecycleReceipt(diagnostics.lifecycle)
     const environmentBefore = asSmokeStatus(
       await opts.core.environment.getStatus({
         forceRefresh: true,
@@ -139,13 +148,17 @@ export async function runPackagedSmoke(
     const jobsAfter = installJobCount(environmentAfter)
     if (jobsAfter !== jobsBefore)
       throw new Error('packaged smoke must not create environment install jobs')
+    const renderer = assertRendererReceipt(
+      await opts.verifyRenderer(),
+      opts.platform,
+    )
 
     const receipt: PackagedSmokeReceipt = {
       ...base,
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
         bootstrap: { ok: true, builtInSkills },
-        diagnostics: { ok: true },
+        diagnostics: { ok: true, sandbox, lifecycle },
         environment: {
           ok: true,
           tools: environmentBefore.status?.tools?.length ?? 0,
@@ -156,6 +169,7 @@ export async function runPackagedSmoke(
         },
         glob: { ok: true, matches: lineCount(globOutput) },
         grep: { ok: true, matches: lineCount(grepOutput) },
+        renderer,
       },
       installJobs: { before: jobsBefore, after: jobsAfter },
       exitCode: 0,
@@ -168,10 +182,19 @@ export async function runPackagedSmoke(
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
         bootstrap: { ok: false, builtInSkills: [] },
-        diagnostics: { ok: false },
+        diagnostics: {
+          ok: false,
+          sandbox: {
+            backend: 'unknown',
+            status: 'unknown',
+            provenance: 'host-os',
+          },
+          lifecycle: { state: 'unknown', readyServices: [] },
+        },
         environment: { ok: false, tools: 0, blockedSkills: 0 },
         glob: { ok: false, matches: 0 },
         grep: { ok: false, matches: 0 },
+        renderer: failedRendererReceipt(),
       },
       installJobs: { before: 0, after: 0 },
       exitCode: 1,
@@ -203,7 +226,7 @@ async function receiptBase(
     join(opts.runtimeRoot, 'runtime-manifest.json'),
   )
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     appVersion: bounded(opts.appVersion, 64, 'app version'),
     commit: normalizeCommit(opts.commit),
     platform: bounded(opts.platform, 24, 'platform'),
@@ -256,6 +279,126 @@ function skillNames(value: unknown): string[] {
     .map((item) => asRecord(item).name)
     .filter((name): name is string => typeof name === 'string')
     .sort()
+}
+
+function packagedSandboxReceipt(
+  value: unknown,
+  platform: NodeJS.Platform | string,
+): { backend: string; status: string; provenance: 'host-os' } {
+  const sandbox = asRecord(value)
+  const backend = bounded(sandbox.backend, 48, 'sandbox backend')
+  const status = bounded(sandbox.status, 24, 'sandbox capability status')
+  if (!['available', 'unavailable', 'unsupported', 'error'].includes(status))
+    throw new Error(
+      'packaged smoke received an invalid sandbox capability status',
+    )
+  if (
+    platform === 'darwin' &&
+    (backend !== 'macos-seatbelt' || status !== 'available')
+  )
+    throw new Error('packaged macOS smoke requires the Seatbelt host backend')
+  if (platform === 'linux' && backend !== 'linux-bwrap')
+    throw new Error(
+      'packaged Linux smoke requires an explicit bwrap capability',
+    )
+  if (
+    platform === 'win32' &&
+    (backend !== 'windows-unsupported' || status !== 'unsupported')
+  )
+    throw new Error('packaged Windows smoke must report sandbox unsupported')
+  return { backend, status, provenance: 'host-os' }
+}
+
+function packagedLifecycleReceipt(value: unknown): {
+  state: string
+  readyServices: string[]
+} {
+  const lifecycle = asRecord(value)
+  const state = bounded(lifecycle.state, 24, 'lifecycle state')
+  if (state !== 'ready')
+    throw new Error('packaged smoke requires lifecycle state ready')
+  if (!Array.isArray(lifecycle.services))
+    throw new Error('packaged smoke requires lifecycle service receipts')
+  const services = lifecycle.services.map(asRecord)
+  const expected = [
+    'process-runtime',
+    'code-intelligence',
+    'task-runtime',
+    'subagent-supervisor',
+    'session-runtime',
+    'mcp',
+    'scheduler',
+  ]
+  for (const id of expected) {
+    const service = services.find((candidate) => candidate.id === id)
+    if (!service || service.required !== true || service.state !== 'ready')
+      throw new Error(`packaged smoke requires lifecycle service ready: ${id}`)
+  }
+  if (
+    services.some(
+      (service) => service.required === true && service.state !== 'ready',
+    )
+  )
+    throw new Error(
+      'packaged smoke found an unready required lifecycle service',
+    )
+  return { state, readyServices: [...expected].sort() }
+}
+
+function assertRendererReceipt(
+  value: PackagedRendererSmokeReceipt,
+  platform: NodeJS.Platform | string,
+): PackagedRendererSmokeReceipt {
+  const valid =
+    value?.ok === true &&
+    value.nodeGlobalsAbsent === true &&
+    value.coreBridge === true &&
+    value.coreBootstrap === true &&
+    value.attachment?.ok === true &&
+    Number.isSafeInteger(value.attachment.bytes) &&
+    value.attachment.bytes > 0 &&
+    value.attachment.bytes <= 1_048_576 &&
+    value.webPreferences?.sandbox === true &&
+    value.webPreferences.contextIsolation === true &&
+    value.webPreferences.nodeIntegration === false &&
+    ['enabled', 'disabled-for-linux-test'].includes(value.chromiumSandbox)
+  if (!valid) throw new Error('packaged renderer sandbox receipt is invalid')
+  if (
+    value.chromiumSandbox === 'disabled-for-linux-test' &&
+    platform !== 'linux'
+  )
+    throw new Error(
+      'Chromium sandbox may only be disabled by the Linux smoke harness',
+    )
+  return {
+    ok: true,
+    nodeGlobalsAbsent: true,
+    coreBridge: true,
+    coreBootstrap: true,
+    attachment: { ok: true, bytes: value.attachment.bytes },
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    chromiumSandbox: value.chromiumSandbox,
+  }
+}
+
+function failedRendererReceipt(): PackagedRendererSmokeReceipt {
+  return {
+    ok: false,
+    nodeGlobalsAbsent: false,
+    coreBridge: false,
+    coreBootstrap: false,
+    attachment: { ok: false, bytes: 0 },
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: false,
+      nodeIntegration: false,
+    },
+    chromiumSandbox: 'unknown',
+  }
 }
 
 function asSmokeStatus(value: unknown): SmokeStatus {

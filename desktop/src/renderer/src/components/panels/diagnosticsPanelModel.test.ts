@@ -63,8 +63,210 @@ describe('diagnostics panel model', () => {
         denyRoots: [{ path: '/repo/.emperor', label: 'state' }],
         outsideWorkspace: 'deny',
       },
+      sandbox: {
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'probe passed',
+      },
+      processRuntime: {
+        platform: 'darwin',
+        ownership: true,
+        leases: true,
+        reparent: true,
+        orphanReconcile: true,
+        stableProcessIdentity: true,
+        processTree: 'process_group',
+        terminal: { interactiveStdio: true, pty: false, resize: false },
+        outputQuota: {
+          defaultBytes: 65_536,
+          maximumBytes: 8_388_608,
+          defaultStrategy: 'terminate',
+        },
+      },
+      hybridMemory: {
+        capability: {
+          requestedMode: 'on',
+          effectiveMode: 'eval',
+          promptMutationAllowed: false,
+          reason: 'embedding_unavailable',
+          evaluationDatasetSha256: null,
+          embeddingProviderId: null,
+        },
+        indexPath: '/Users/me/.emperor-agent/memory/hybrid-index/index.v1.json',
+        searches: 3,
+        promptMutations: 0,
+        embeddingFallbacks: 1,
+        lastStrategy: 'fts_fallback',
+        lastResultCount: 4,
+        lastSourceDigest: 'abcdef0123456789',
+        derivedDiskBytes: 4096,
+      },
+      codeIntelligence: {
+        capability: {
+          requestedMode: 'on',
+          effectiveMode: 'eval',
+          toolAllowed: false,
+          reason: 'gate_missing',
+          evaluationDatasetSha256: null,
+          parserRevision: 'typescript-5.9-code-graph-v1',
+        },
+        graphManagers: 1,
+        queries: 12,
+        lspQueries: 2,
+        graphFallbacks: 3,
+        notifications: 4,
+        lastStrategy: 'graph_fallback',
+        lastLatencyMs: 8.5,
+        graph: {
+          state: 'ready',
+          indexedFiles: 120,
+          sourceBytes: 8192,
+          parserLoads: 1,
+          parseErrors: 0,
+          skippedOversized: 1,
+          skippedSymlinks: 2,
+          skippedBinary: 0,
+          skippedUnsupported: 5,
+          oversizedFileGateVerified: true,
+          cacheStatus: 'loaded',
+          cacheBytes: 4096,
+        },
+        lsp: [
+          {
+            descriptorId: 'typescript-language-server',
+            sourceKind: 'managed',
+            state: 'ready',
+            starts: 1,
+            restarts: 0,
+            crashes: 0,
+            pendingRequests: 0,
+            openDocuments: 1,
+            ignoredNotifications: 0,
+            protocolErrors: 0,
+          },
+        ],
+      },
+      lifecycle: {
+        state: 'ready',
+        failedServiceId: null,
+        failedPhase: null,
+        services: [
+          { id: 'process-runtime', required: true, state: 'ready' },
+          { id: 'code-intelligence', required: true, state: 'ready' },
+          { id: 'task-runtime', required: true, state: 'ready' },
+          { id: 'subagent-supervisor', required: true, state: 'ready' },
+          { id: 'session-runtime', required: true, state: 'ready' },
+          { id: 'mcp', required: true, state: 'ready' },
+          { id: 'scheduler', required: true, state: 'ready' },
+        ],
+      },
+      subagents: {
+        active: 2,
+        maxGlobal: 6,
+        maxPerSession: 3,
+        bySession: { session_1: 2 },
+        taskIds: ['subagent_1', 'subagent_2'],
+      },
+      agentDefinitions: {
+        revision: 'agents-r1',
+        sources: [
+          {
+            id: 'emperor-builtin-agents',
+            kind: 'builtin',
+            trust: 'system',
+            active: true,
+          },
+        ],
+        agents: [
+          { definition: { name: 'sili_suitang' } },
+          { definition: { name: 'neiguan_yingzao' } },
+        ],
+        diagnostics: [],
+      },
+      effectiveConfig: {
+        schemaVersion: 1,
+        revision: 'config-r1',
+        entries: [
+          {
+            key: 'mcp.config',
+            value: {
+              servers: {
+                docs: { headers: '[REDACTED]', enabled: true },
+              },
+            },
+            source: {
+              kind: 'user',
+              id: 'mcp_config.json',
+              trust: 'trusted',
+            },
+            trust: 'trusted',
+            trace: [
+              {
+                source: { kind: 'builtin', id: 'mcp.config:builtin' },
+                status: 'applied',
+                reason: 'builtin_default',
+              },
+              {
+                source: { kind: 'user', id: 'mcp_config.json' },
+                status: 'applied',
+                reason: 'layer_merged',
+              },
+            ],
+            secretSources: [
+              {
+                path: 'servers.*.headers',
+                source: { kind: 'user', id: 'mcp_config.json' },
+              },
+            ],
+          },
+        ],
+      },
+      promptSnapshots: {
+        count: 2,
+        recent: [
+          {
+            turnId: 'turn_2',
+            projection: {
+              stablePrefix: { hash: 'abcdef0123456789' },
+              cacheBreak: {
+                classification: 'unexpected',
+                reasonCode: 'stable_section_changed_without_version',
+                firstChanged: {
+                  kind: 'section',
+                  id: 'section:bootstrap',
+                  index: 0,
+                },
+              },
+            },
+          },
+        ],
+      },
       external: {
         running: true,
+        adapters: [
+          {
+            name: 'signed-webhook',
+            display_name: 'Signed Webhook',
+            state: 'ready',
+            requestedMode: 'on',
+            effectiveMode: 'on',
+            accepted: 4,
+            rejected: 2,
+            outboundSent: 3,
+            outboundDeadLetter: 1,
+            audit: {
+              path: '/Users/me/.emperor-agent/external/audit.jsonl',
+              records: 12,
+              badLines: 0,
+              archives: 0,
+              writeFailures: 0,
+            },
+          },
+        ],
         inbox: { pending: 3 },
         store: { exists: true, corruptBackups: [] },
       },
@@ -140,6 +342,24 @@ describe('diagnostics panel model', () => {
       tone: 'error',
       detail: 'Unexpected token · 1 个腐化备份',
     })
+    expect(
+      rows.find((row) => row.id === 'effective-config-mcp-config'),
+    ).toMatchObject({
+      label: 'mcp.config',
+      value: 'user:mcp_config.json',
+      tone: 'ok',
+    })
+    expect(
+      rows.find((row) => row.id === 'effective-config-mcp-config')?.detail,
+    ).toContain('1 secret source redacted')
+    expect(
+      rows.find((row) => row.id === 'effective-config-mcp-config')?.detail,
+    ).toContain(
+      'trace 2 [builtin:mcp.config:builtin applied > user:mcp_config.json applied]',
+    )
+    expect(
+      rows.find((row) => row.id === 'effective-config-mcp-config')?.detail,
+    ).toContain('[REDACTED]')
     expect(rows.find((row) => row.id === 'scheduler-store')).toMatchObject({
       label: 'Scheduler Store',
       value: '异常',
@@ -151,6 +371,72 @@ describe('diagnostics panel model', () => {
       value: '1 个允许根 / 1 个禁止根',
       tone: 'ok',
       detail: 'workspace /repo/project · state /repo/.emperor · outside deny',
+    })
+    expect(rows.find((row) => row.id === 'process-sandbox')).toMatchObject({
+      label: 'Command OS Sandbox',
+      value: 'macos-seatbelt · 可用',
+      tone: 'ok',
+      detail:
+        'filesystem workspace-write · network policy-controlled · process tree controlled · probe passed',
+    })
+    expect(
+      rows.find((row) => row.id === 'owned-process-runtime'),
+    ).toMatchObject({
+      label: 'Owned Process Runtime',
+      value: 'owned · process_group',
+      tone: 'ok',
+      detail:
+        'lease on / reparent on / orphan on · interactive stdio; PTY/resize unavailable · quota 65536/8388608 terminate',
+    })
+    expect(rows.find((row) => row.id === 'hybrid-memory')).toMatchObject({
+      label: 'Hybrid Memory',
+      value: 'eval · fts_fallback',
+      tone: 'warn',
+      path: '/Users/me/.emperor-agent/memory/hybrid-index/index.v1.json',
+      detail:
+        'requested on / prompt off · reason embedding_unavailable · search 3 / mutations 0 / fallbacks 1 · results 4 / index 4096 bytes',
+    })
+    expect(rows.find((row) => row.id === 'code-intelligence')).toMatchObject({
+      label: 'Code Intelligence',
+      value: 'eval · graph_fallback',
+      tone: 'warn',
+      detail:
+        'requested on / tool off · reason gate_missing · graph ready / 1 managers / 120 files / 4096 cache bytes · skipped 8 / parse errors 0 · lsp 1 / ready 1 / restarts 0 / protocol 0 · queries 12 / lsp 2 / fallbacks 3 / events 4 / 8.5ms',
+    })
+    expect(rows.find((row) => row.id === 'lifecycle-supervisor')).toMatchObject(
+      {
+        label: 'Lifecycle Supervisor',
+        value: 'ready · 7/7 ready',
+        detail: '所有 required service 已就绪',
+        tone: 'ok',
+      },
+    )
+    expect(rows.find((row) => row.id === 'subagent-supervisor')).toMatchObject({
+      label: 'Subagent Supervisor',
+      value: '2 active · 2/6 capacity',
+      detail: 'per-session limit 3 · session_1: 2',
+      tone: 'ok',
+    })
+    expect(rows.find((row) => row.id === 'agent-definitions')).toMatchObject({
+      label: 'Agent Definitions',
+      value: '2 agents · 1/1 sources',
+      detail: 'builtin:system',
+      tone: 'ok',
+    })
+    expect(rows.find((row) => row.id === 'prompt-cache-break')).toMatchObject({
+      label: 'Prompt Cache Break',
+      value: 'unexpected · stable_section_changed_without_version',
+      detail:
+        'turn turn_2 · first section:section:bootstrap[0] · stable abcdef012345',
+      tone: 'error',
+    })
+    expect(rows.find((row) => row.id === 'external-bridge')).toMatchObject({
+      label: 'External Bridge',
+      value: '1/1 adapter 已就绪',
+      tone: 'ok',
+      detail:
+        'Signed Webhook: ready/on · in 4/2 · out 3/1 · 3 条待处理 · /Users/me/.emperor-agent/external/audit.jsonl',
+      path: '/Users/me/.emperor-agent/external/audit.jsonl',
     })
     expect(rows.find((row) => row.id === 'desktop-renderer')).toMatchObject({
       label: '桌面 Renderer',
@@ -185,6 +471,38 @@ describe('diagnostics panel model', () => {
     expect(rows.find((row) => row.id === 'active-project-path')).toMatchObject({
       value: '未绑定',
       tone: 'muted',
+    })
+  })
+
+  it('does not describe a running bridge with an off adapter as externally ready', () => {
+    const rows = diagnosticRows({
+      root: '/repo',
+      external: {
+        running: true,
+        adapters: [
+          {
+            name: 'signed-webhook',
+            display_name: 'Signed Webhook',
+            state: 'stopped',
+            requestedMode: 'off',
+            effectiveMode: 'off',
+            lastReason: 'mode_off',
+            audit: { path: '/state/external/audit.jsonl' },
+            configuration: {
+              path: '/state/external_config.json',
+              status: 'missing',
+            },
+          },
+        ],
+        inbox: { pending: 0 },
+      },
+    }).flatMap((group) => group.rows)
+
+    expect(rows.find((row) => row.id === 'external-bridge')).toMatchObject({
+      value: '桥接已启动，adapter 未启用',
+      tone: 'warn',
+      detail:
+        'Signed Webhook: stopped/off · in 0/0 · out 0/0 · reason mode_off · 0 条待处理 · /state/external/audit.jsonl',
     })
   })
 

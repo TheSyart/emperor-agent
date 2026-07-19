@@ -96,6 +96,7 @@ describe('RuntimePaths', () => {
     expect(existsSync(paths.schedulerRoot)).toBe(true)
     expect(existsSync(paths.teamRoot)).toBe(true)
     expect(existsSync(paths.tasksRoot)).toBe(true)
+    expect(existsSync(paths.processesRoot)).toBe(true)
     expect(existsSync(paths.controlRoot)).toBe(true)
     expect(existsSync(paths.externalRoot)).toBe(true)
     expect(existsSync(paths.templatesDir)).toBe(false)

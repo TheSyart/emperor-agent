@@ -25,7 +25,7 @@ type Registry = {
 
 async function executorApi(): Promise<{
   registry(): Registry
-  command(): unknown
+  command(shellAnalyzer?: unknown): unknown
 }> {
   const module = (await import('./executor')) as unknown as Record<
     string,
@@ -37,7 +37,8 @@ async function executorApi(): Promise<{
   const CommandHookExecutor = module.CommandHookExecutor!
   return {
     registry: () => new HookExecutorRegistry() as Registry,
-    command: () => new CommandHookExecutor(),
+    command: (shellAnalyzer?: unknown) =>
+      new CommandHookExecutor(shellAnalyzer),
   }
 }
 
@@ -117,6 +118,28 @@ describe('hooks v2 command executor', () => {
 
     expect(result).toMatchObject({ outcome: 'failed', output: null })
     expect(result.reason).toMatch(/shell.*disabled/i)
+  })
+
+  it('fails closed before spawning when the bash classifier capability crashes', async () => {
+    const api = await executorApi()
+    const run = api.registry()
+    run.register(
+      api.command(() => {
+        throw new Error('private parser service detail')
+      }),
+    )
+    const policy = defaultHooksConfigV2().policy
+    policy.command.allowShell = true
+
+    const result = await run.execute(
+      command({ command: 'printf safe', shell: 'bash' }),
+      input(),
+      context({ policy }),
+    )
+
+    expect(result).toMatchObject({ outcome: 'failed', output: null })
+    expect(result.reason).toContain('parser_failure')
+    expect(result.reason).not.toContain('private parser service detail')
   })
 
   it('exposes only the intersection of handler and policy environment allowlists', async () => {

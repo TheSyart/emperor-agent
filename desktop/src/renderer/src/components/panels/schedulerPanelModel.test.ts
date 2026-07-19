@@ -3,6 +3,9 @@ import type { SchedulerJob } from '../../types'
 import {
   canEditSchedulerJob,
   readonlySchedulerTimeFields,
+  schedulerMisfirePolicyLabel,
+  schedulerMisfirePolicyOptions,
+  schedulerRunStatusLabel,
 } from './schedulerPanelModel'
 
 function job(overrides: Partial<SchedulerJob> = {}): SchedulerJob {
@@ -39,5 +42,17 @@ describe('scheduler panel model', () => {
       'nextRunAtMs',
       'lastRunAtMs',
     ])
+  })
+
+  it('projects closed policy and terminal status labels', () => {
+    expect(schedulerMisfirePolicyOptions()).toEqual([
+      { value: 'skip', label: '跳过（默认）' },
+      { value: 'latest', label: '只运行最近一次' },
+      { value: 'catch-up-one', label: '补跑最早一次' },
+    ])
+    expect(schedulerMisfirePolicyLabel('latest')).toBe('只运行最近一次')
+    expect(schedulerMisfirePolicyLabel('invalid')).toBe('跳过（默认）')
+    expect(schedulerRunStatusLabel('interrupted')).toBe('已中断')
+    expect(schedulerRunStatusLabel('cancelled')).toBe('已取消')
   })
 })

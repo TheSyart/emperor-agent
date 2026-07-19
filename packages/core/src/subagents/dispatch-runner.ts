@@ -3,6 +3,7 @@ import type {
   AgentRunnerHookHost,
   CompactorLike,
   ControlManagerRunnerHost,
+  FileCheckpointCaptureHost,
   MemoryStoreLike,
   TodoStoreLike,
   TokenTrackerLike,
@@ -26,10 +27,12 @@ export interface RoutedDispatchRunnerFactoryOptions {
   todoStore?: TodoStoreLike | null
   controlManager?: ControlManagerRunnerHost | null
   maxTokensCap?: number | null
+  tokenBudget?: number | null
   maxContext?: number | null
   hooks?:
     ((args: DispatchRunnerFactoryArgs) => AgentRunnerHookHost | null) | null
   goalObservationRecorder?: RunnerGoalRecordingHost | null
+  fileCheckpoints?: FileCheckpointCaptureHost | null
 }
 
 export function buildDispatchRunnerFactory(
@@ -45,6 +48,7 @@ export function buildDispatchRunner(
   const goalObservationRecorder =
     args.goalObservationRecorder ?? opts.goalObservationRecorder ?? null
   const route = opts.modelRouter.route('subagent', args.spec.name, args.task)
+  assertAgentModelPolicy(args, route.snapshot)
   const runner = buildRoutedRunner({
     route,
     registry: args.subRegistry as ToolRegistry,
@@ -52,6 +56,7 @@ export function buildDispatchRunner(
     tokenTracker: opts.tokenTracker ?? null,
     usageType: `subagent:${args.spec.name}`,
     maxTokensCap: opts.maxTokensCap ?? null,
+    tokenBudget: opts.tokenBudget ?? null,
     memoryStore: opts.memoryStore ?? null,
     compactor: opts.compactor ?? null,
     todoStore: opts.todoStore ?? null,
@@ -60,6 +65,8 @@ export function buildDispatchRunner(
     maxTurns: args.spec.maxTurns,
     workspaceRoot: args.workspaceRoot ?? null,
     sessionId: args.sessionId,
+    taskId: args.taskId ?? null,
+    subagentDepth: 1,
     hooks: opts.hooks?.(args) ?? null,
     goalObservationRecorder:
       goalObservationRecorder && args.taskId && args.agentId && args.turnId
@@ -70,12 +77,31 @@ export function buildDispatchRunner(
             turnId: args.turnId,
           })
         : null,
+    fileCheckpoints: opts.fileCheckpoints ?? null,
   })
   return {
-    step: (history) =>
+    step: (history, stepOpts) =>
       runner.stepAsync(history, {
         turnId: args.turnId ?? null,
+        signal: stepOpts?.signal ?? null,
         executionEnvironment: args.executionEnvironment ?? null,
       }),
   }
+}
+
+function assertAgentModelPolicy(
+  args: DispatchRunnerFactoryArgs,
+  snapshot: { modelEntryId?: string; entryName: string },
+): void {
+  const allowed = args.spec.definition.model.allowedProfiles
+  if (allowed.length === 0) return
+  const active = new Set(
+    [snapshot.modelEntryId, snapshot.entryName]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean),
+  )
+  if (allowed.some((profile) => active.has(profile))) return
+  throw new Error(
+    'AgentDefinition model policy denied active profile; select an allowed model profile or tighten the definition source.',
+  )
 }

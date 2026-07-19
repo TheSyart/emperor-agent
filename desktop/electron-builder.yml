@@ -11,6 +11,8 @@ files:
   - out/**/*
   - package.json
   - '!node_modules{,/**/*}'
+  - node_modules/typescript/package.json
+  - node_modules/typescript/lib/typescript.js
 
 extraResources:
   - from: build/icon.png
@@ -25,6 +27,7 @@ extraResources:
       - agent/skills_section.md
       - init/MEMORY.md
       - init/USER.md
+      - subagents/agents.json
       - subagents/dongchang_tanshi.md
       - subagents/neiguan_yingzao.md
       - subagents/shangbao_dianbu.md

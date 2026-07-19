@@ -377,14 +377,37 @@ function syncHighlightScroll() {
   highlightLayer.value.scrollTop = input.value.scrollTop
 }
 
-function submit() {
-  if (props.busy || goalCaptureStarting.value) return
+function submit(delivery?: 'queue' | 'interject') {
+  if (goalCaptureStarting.value) return
   if (props.sendBlockedReason) {
     emit('error', props.sendBlockedReason)
     return
   }
   const normalized = normalizeComposerCapabilityInput(value.value.trim())
   const content = normalized.content.trim()
+  if (props.busy) {
+    if (!content) return
+    if (
+      drafts.value.length > 0 ||
+      uploading.value.size > 0 ||
+      normalized.requestedSkills.length > 0 ||
+      hasInlineTokens.value
+    ) {
+      emit('error', '运行中的排队和插话仅支持纯文字。')
+      return
+    }
+    emit('send', {
+      content,
+      attachments: [],
+      requestedSkills: [],
+      displayContent: normalized.displayContent,
+      delivery: delivery || 'interject',
+    })
+    value.value = ''
+    closeComposerMenus()
+    void nextTick(resize)
+    return
+  }
   if (goalCaptureActive.value) {
     if (
       drafts.value.length > 0 ||
@@ -761,7 +784,7 @@ onBeforeUnmount(() => {
 
     <form
       class="composer"
-      @submit.prevent="submit"
+      @submit.prevent="submit()"
       @keydown.esc="closeComposerMenus"
     >
       <input
@@ -811,10 +834,10 @@ onBeforeUnmount(() => {
             ref="input"
             v-model="value"
             rows="2"
-            :disabled="props.busy || goalCaptureStarting"
+            :disabled="goalCaptureStarting"
             :placeholder="
               props.busy
-                ? '正在生成回复...'
+                ? '输入纯文字，可选择排队或在安全边界插话'
                 : goalCaptureStarting
                   ? '正在启动 Goal...'
                   : goalCaptureActive
@@ -973,42 +996,61 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
+          <template v-if="props.busy">
+            <button
+              type="button"
+              class="busy-delivery-button"
+              :disabled="sendDisabled"
+              title="当前回复完成后处理"
+              @click="submit('queue')"
+            >
+              排队
+            </button>
+            <button
+              type="button"
+              class="busy-delivery-button primary"
+              :disabled="sendDisabled"
+              title="在下一个模型或工具安全边界替换当前指令"
+              @click="submit('interject')"
+            >
+              插话
+            </button>
+            <button
+              type="button"
+              class="send-button stop-button"
+              :title="stopPresentation.title"
+              :aria-label="stopPresentation.label"
+              @click="emit('stop')"
+            >
+              <component
+                :is="actionIcons.stop"
+                class="action-icon send-icon"
+                :size="16"
+              />
+            </button>
+          </template>
           <button
+            v-else
             class="send-button"
             :disabled="sendDisabled"
             :title="
-              props.busy
-                ? stopPresentation.title
-                : goalCaptureStarting
-                  ? '正在启动 Goal'
-                  : props.sendBlockedReason || '发送'
+              goalCaptureStarting
+                ? '正在启动 Goal'
+                : props.sendBlockedReason || '发送'
             "
-            :aria-label="
-              props.busy
-                ? stopPresentation.label
-                : goalCaptureStarting
-                  ? '正在启动 Goal'
-                  : '发送'
-            "
-            :type="props.busy ? 'button' : 'submit'"
-            @click="props.busy ? emit('stop') : undefined"
+            :aria-label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
+            type="submit"
           >
             <component
               :is="
-                props.busy || goalCaptureStarting
-                  ? actionIcons.statusBusy
-                  : actionIcons.send
+                goalCaptureStarting ? actionIcons.statusBusy : actionIcons.send
               "
               class="action-icon send-icon"
-              :class="{ 'animate-spin': props.busy || goalCaptureStarting }"
+              :class="{ 'animate-spin': goalCaptureStarting }"
               :size="18"
             />
             <span class="sr-only">{{
-              props.busy
-                ? stopPresentation.label
-                : goalCaptureStarting
-                  ? '正在启动 Goal'
-                  : '发送'
+              goalCaptureStarting ? '正在启动 Goal' : '发送'
             }}</span>
           </button>
         </div>

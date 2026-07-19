@@ -80,6 +80,14 @@ function schedulerTriggerPrefix(content: string) {
     schedulerTriggerPrefixes.find((prefix) => text.startsWith(prefix)) || ''
   )
 }
+
+function deliveryLabel(message: UserMessage): string {
+  if (message.deliveryState === 'queued') return '已排队'
+  if (message.deliveryState === 'running') return '处理中'
+  if (message.deliveryState === 'interjected') return '已插话'
+  if (message.deliveryState === 'cancelled') return '已取消'
+  return ''
+}
 </script>
 
 <template>
@@ -110,7 +118,17 @@ function schedulerTriggerPrefix(content: string) {
       <component :is="avatarIcons.emperor" :size="16" />
     </div>
     <div class="message-cluster user">
-      <div class="message-meta user"><span>你</span><small>request</small></div>
+      <div class="message-meta user">
+        <span>你</span><small>request</small>
+        <small
+          v-if="props.message.deliveryState"
+          class="prompt-delivery-state"
+          :data-state="props.message.deliveryState"
+          :title="props.message.deliveryReason || deliveryLabel(props.message)"
+        >
+          {{ deliveryLabel(props.message) }}
+        </small>
+      </div>
       <div v-if="props.message.attachments?.length" class="user-attach-row">
         <AttachmentChip
           v-for="attachment in props.message.attachments"

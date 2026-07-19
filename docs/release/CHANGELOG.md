@@ -6,6 +6,8 @@
 
 ### Added
 
+- 增加源码级 Headless ACP V1 stdio operator preview，复用 TypeScript CoreApi、持久 Build 会话、runtime event 投影、请求去重与端到端取消。
+- 增加默认关闭、由用户显式配置的模型 fallback 与每 Agent 轮成本上限；支持用户单价、成本完整性和跨模型 reasoning/signature 清理。
 - 增加 Goal 长任务生命周期：Contract、Plan bridge、Evidence ledger、Completion Gate、Pause / Resume / Cancel、重启恢复与诊断。
 - 增加 MCP 工具结果的不可信标记和协议 `isError` 传递。
 - 增加 token 使用热日志的按月归档，同时保持聚合统计覆盖热数据与归档数据。
@@ -27,5 +29,6 @@
 
 ### Security
 
+- Electron 主界面与桌宠现在显式运行在 renderer sandbox 中；preload 改为受构建/打包审计的最小 CommonJS，桌宠不再直接读取文件系统，packaged smoke 会真实验证 Core bridge 与受管附件协议。
 - 明确 MCP、Web 与外部消息是不可信输入，Goal 完成态只能由 Core Completion Gate 提交。
 - 发布文档区分当前未签名 Preview 与尚未启用的受信 Stable 流程。

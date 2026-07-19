@@ -18,6 +18,105 @@ export function runtimeEvent(
   return data
 }
 
+export function modelAttemptStarted(opts: {
+  requestId: string
+  attemptId: string
+  attempt: number
+  maxAttempts: number
+  idempotencyKey?: string | null
+}): EventPayload {
+  return runtimeEvent('model_attempt_started', modelAttemptPayload(opts))
+}
+
+export function modelAttemptSucceeded(
+  opts: Parameters<typeof modelAttemptStarted>[0] & { durationMs: number },
+): EventPayload {
+  return runtimeEvent('model_attempt_succeeded', {
+    ...modelAttemptPayload(opts),
+    duration_ms: opts.durationMs,
+  })
+}
+
+export function modelAttemptFailed(
+  opts: Parameters<typeof modelAttemptStarted>[0] & {
+    durationMs: number
+    errorKind: string
+    willRetry: boolean
+    retryDelayMs?: number | null
+  },
+): EventPayload {
+  return runtimeEvent('model_attempt_failed', {
+    ...modelAttemptPayload(opts),
+    duration_ms: opts.durationMs,
+    error_kind: opts.errorKind,
+    will_retry: opts.willRetry,
+    retry_delay_ms: opts.retryDelayMs ?? null,
+  })
+}
+
+export function modelAttemptCancelled(
+  opts: Parameters<typeof modelAttemptStarted>[0] & {
+    durationMs: number
+    reason: string
+  },
+): EventPayload {
+  return runtimeEvent('model_attempt_cancelled', {
+    ...modelAttemptPayload(opts),
+    duration_ms: opts.durationMs,
+    reason: opts.reason,
+  })
+}
+
+export function mcpConnectionStateChanged(snapshot: {
+  serverName: string
+  transport: string
+  generation: number
+  clientId: string | null
+  state: string
+  health: string
+  auth: string
+  toolCount: number
+  tools: string[]
+  restartAttempts: number
+  nextRetryAt: number | null
+  activeRequestCount: number
+  activeRequestIds?: string[]
+  lastError: { code: string; message: string } | null
+}): EventPayload {
+  return runtimeEvent('mcp_connection_state', {
+    server_name: snapshot.serverName,
+    transport: snapshot.transport,
+    generation: snapshot.generation,
+    client_id: snapshot.clientId,
+    state: snapshot.state,
+    health: snapshot.health,
+    auth: snapshot.auth,
+    tool_count: snapshot.toolCount,
+    tools: snapshot.tools,
+    restart_attempts: snapshot.restartAttempts,
+    next_retry_at: snapshot.nextRetryAt,
+    active_request_count: snapshot.activeRequestCount,
+    active_request_ids: snapshot.activeRequestIds ?? [],
+    request_id:
+      snapshot.activeRequestIds?.length === 1
+        ? snapshot.activeRequestIds[0]
+        : null,
+    last_error: snapshot.lastError,
+  })
+}
+
+function modelAttemptPayload(
+  opts: Parameters<typeof modelAttemptStarted>[0],
+): EventPayload {
+  return {
+    request_id: opts.requestId,
+    attempt_id: opts.attemptId,
+    attempt: opts.attempt,
+    max_attempts: opts.maxAttempts,
+    ...(opts.idempotencyKey ? { idempotency_key: opts.idempotencyKey } : {}),
+  }
+}
+
 export function readyEvent(opts: {
   model: string
   provider: string
@@ -57,6 +156,56 @@ export function userMessage(opts: {
     source: opts.source ?? null,
     scheduler: opts.scheduler ?? null,
     ui_hidden: opts.uiHidden ? true : null,
+  })
+}
+
+export function promptQueued(opts: {
+  promptId: string
+  clientMessageId: string
+  delivery: 'queue' | 'interject'
+  targetTurnId?: string | null
+  content?: string | null
+}): EventPayload {
+  return runtimeEvent('prompt_queued', {
+    prompt_id: opts.promptId,
+    client_message_id: opts.clientMessageId,
+    delivery: opts.delivery,
+    target_turn_id: opts.targetTurnId ?? null,
+    content: opts.content ?? null,
+  })
+}
+
+export function promptDequeued(opts: {
+  promptId: string
+  clientMessageId: string
+}): EventPayload {
+  return runtimeEvent('prompt_dequeued', {
+    prompt_id: opts.promptId,
+    client_message_id: opts.clientMessageId,
+  })
+}
+
+export function promptInterjected(opts: {
+  promptId: string
+  clientMessageId: string
+  targetTurnId: string
+}): EventPayload {
+  return runtimeEvent('prompt_interjected', {
+    prompt_id: opts.promptId,
+    client_message_id: opts.clientMessageId,
+    target_turn_id: opts.targetTurnId,
+  })
+}
+
+export function promptCancelled(opts: {
+  promptId: string
+  clientMessageId: string
+  reason: string
+}): EventPayload {
+  return runtimeEvent('prompt_cancelled', {
+    prompt_id: opts.promptId,
+    client_message_id: opts.clientMessageId,
+    reason: opts.reason,
   })
 }
 
@@ -143,29 +292,79 @@ export function schedulerJobUpdate(
   return runtimeEvent('scheduler_job_update', { job, action: opts.action })
 }
 
-export function schedulerRunStart(job: EventPayload): EventPayload {
-  return runtimeEvent('scheduler_run_start', { job })
+export function schedulerRunStart(
+  job: EventPayload,
+  opts: { run?: EventPayload } = {},
+): EventPayload {
+  return runtimeEvent('scheduler_run_start', {
+    job,
+    ...schedulerRunCorrelation(opts.run),
+  })
 }
 
-export function schedulerRunDone(job: EventPayload): EventPayload {
-  return runtimeEvent('scheduler_run_done', { job })
+export function schedulerRunDone(
+  job: EventPayload,
+  opts: { run?: EventPayload } = {},
+): EventPayload {
+  return runtimeEvent('scheduler_run_done', {
+    job,
+    ...schedulerRunCorrelation(opts.run),
+  })
 }
 
 export function schedulerRunError(
   job: EventPayload,
-  opts: { error: string },
+  opts: { error: string; run?: EventPayload },
 ): EventPayload {
-  return runtimeEvent('scheduler_run_error', { job, error: opts.error })
+  return runtimeEvent('scheduler_run_error', {
+    job,
+    error: opts.error,
+    ...schedulerRunCorrelation(opts.run),
+  })
 }
 
 export function schedulerRunCancelled(
   job: EventPayload,
-  opts: { reason?: string } = {},
+  opts: { reason?: string; run?: EventPayload } = {},
 ): EventPayload {
   return runtimeEvent('scheduler_run_cancelled', {
     job,
     reason: opts.reason ?? 'cancelled',
+    ...schedulerRunCorrelation(opts.run),
   })
+}
+
+export function schedulerRunSkipped(
+  job: EventPayload,
+  opts: { run: EventPayload; reason?: string },
+): EventPayload {
+  return runtimeEvent('scheduler_run_skipped', {
+    job,
+    reason: opts.reason ?? 'skipped',
+    ...schedulerRunCorrelation(opts.run),
+  })
+}
+
+export function schedulerRunInterrupted(
+  job: EventPayload,
+  opts: { run: EventPayload; reason?: string },
+): EventPayload {
+  return runtimeEvent('scheduler_run_interrupted', {
+    job,
+    reason: opts.reason ?? 'interrupted',
+    ...schedulerRunCorrelation(opts.run),
+  })
+}
+
+function schedulerRunCorrelation(run?: EventPayload): EventPayload {
+  if (!run) return {}
+  const runId = String(run.runId ?? run.run_id ?? '')
+  const taskId = String(run.taskId ?? run.task_id ?? '')
+  return {
+    run,
+    ...(runId ? { run_id: runId } : {}),
+    ...(taskId ? { task_id: taskId } : {}),
+  }
 }
 
 export function runtimeTaskCancelled(
@@ -280,12 +479,14 @@ export function toolRunFailed(opts: {
   name: string
   message: string
   reasonKind?: 'safety_refusal' | 'error'
+  metadata?: EventPayload | null
 }): EventPayload {
   return runtimeEvent('tool_run_failed', {
     id: opts.id,
     name: opts.name,
     message: opts.message,
     reason_kind: opts.reasonKind ?? 'error',
+    metadata: opts.metadata ?? null,
   })
 }
 

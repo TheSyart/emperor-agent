@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { CoreUnavailableError } from '@emperor/core'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { coreOperationKeys, registerCoreHostIpc } from './core-host'
 import type { CoreApiLike } from './ipc'
@@ -43,6 +44,10 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'environment.install',
         'environment.cancelInstall',
         'environment.getInstallLog',
+        'fileCheckpoints.list',
+        'fileCheckpoints.preview',
+        'fileCheckpoints.rewind',
+        'fileCheckpoints.rewindGit',
         'skills.previewInstall',
         'skills.confirmInstall',
       ]),
@@ -70,6 +75,33 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
       ok: false,
       error: { code: 'goal_not_found', message: 'Goal does not exist.' },
     })
+  })
+
+  it('returns typed unavailable before lifecycle ready without invoking CoreApi', async () => {
+    const ipc = new FakeIpcMain()
+    const bootstrap = vi.fn()
+    registerCoreHostIpc(ipc, {
+      loop: {
+        lifecycleSupervisor: {
+          assertReady: () => {
+            throw new CoreUnavailableError('starting')
+          },
+        },
+      },
+      bootstrap,
+    } as unknown as CoreApiLike)
+
+    await expect(
+      ipc.invoke(channelForCoreOperation('bootstrap')),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'core_unavailable',
+        message: 'Core runtime is not ready (starting).',
+        action: 'retry',
+      },
+    })
+    expect(bootstrap).not.toHaveBeenCalled()
   })
 })
 

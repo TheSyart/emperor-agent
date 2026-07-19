@@ -1,14 +1,20 @@
-import { ActiveTaskRegistry } from '../runtime/active'
 import { ModelConfigurationError } from '../errors'
+import { ActiveTaskRegistry, CancelledTaskError } from '../runtime/active'
 import { TaskManager } from '../tasks/manager'
-import { TaskKind } from '../tasks/models'
+import { TaskKind, TaskStatus } from '../tasks/models'
+import {
+  TaskRuntimeHandle,
+  TaskRuntimeRegistry,
+  type TaskRuntimeExecution,
+} from '../tasks/runtime'
 import type { WatchlistDecision } from '../watchlist/models'
 import {
   SchedulerJob,
   SchedulerPayload,
   schedulerPayloadSessionId,
 } from './models'
-import { resetSchedulerRun, setSchedulerRun } from './tool'
+import type { SchedulerRunContext } from './service'
+import { runInSchedulerRun } from './tool'
 
 export interface SchedulerAgentTurnPayload {
   job: SchedulerJob
@@ -17,8 +23,17 @@ export interface SchedulerAgentTurnPayload {
   deliver: boolean
   clientMessageId: string
   source: 'scheduler'
-  scheduler: { jobId: string; jobName: string }
-  taskId: string | null
+  scheduler: {
+    jobId: string
+    jobName: string
+    runId: string
+    taskId: string
+    scheduledForMs: number
+    trigger: string
+  }
+  taskId: string
+  signal: AbortSignal
+  useActiveTask: false
   sessionId?: string | null
 }
 
@@ -28,20 +43,23 @@ export interface TeamWakeManager {
     content: string
     wake: boolean
     type: string
+    signal?: AbortSignal
   }): string | Promise<string>
 }
 
 export interface WatchlistServiceLike {
-  check(): Promise<WatchlistDecision>
+  check(signal?: AbortSignal): Promise<WatchlistDecision>
 }
 
 export type SchedulerSystemHandler = (
   job: SchedulerJob,
+  context: SchedulerRunContext,
 ) => string | Promise<string>
 
 export class SchedulerJobExecutor {
   private readonly activeTasks: ActiveTaskRegistry | null
-  private readonly taskManager: TaskManager | null
+  private readonly taskManager: TaskManager
+  private readonly taskRuntime: TaskRuntimeRegistry
   private readonly submitAgentTurn: (
     payload: SchedulerAgentTurnPayload,
   ) => Promise<string>
@@ -54,7 +72,8 @@ export class SchedulerJobExecutor {
 
   constructor(opts: {
     activeTasks?: ActiveTaskRegistry | null
-    taskManager?: TaskManager | null
+    taskManager: TaskManager
+    taskRuntime: TaskRuntimeRegistry
     submitAgentTurn: (payload: SchedulerAgentTurnPayload) => Promise<string>
     teamManagerForProject?: ((projectId: string) => TeamWakeManager) | null
     controlPending?: (() => boolean) | null
@@ -63,7 +82,8 @@ export class SchedulerJobExecutor {
     watchlistService?: WatchlistServiceLike | null
   }) {
     this.activeTasks = opts.activeTasks ?? null
-    this.taskManager = opts.taskManager ?? null
+    this.taskManager = opts.taskManager
+    this.taskRuntime = opts.taskRuntime
     this.submitAgentTurn = opts.submitAgentTurn
     this.teamManagerForProject = opts.teamManagerForProject ?? null
     this.controlPending = opts.controlPending ?? (() => false)
@@ -72,77 +92,128 @@ export class SchedulerJobExecutor {
     this.watchlistService = opts.watchlistService ?? null
   }
 
-  async run(job: SchedulerJob): Promise<string> {
-    const token = setSchedulerRun(true)
-    try {
-      const taskId = `scheduler:${job.id}`
-      const sessionId = schedulerPayloadSessionId(job.payload) || null
-      const execute = () => this.runTracked(job)
-      return this.activeTasks
-        ? await this.activeTasks.run({
-            taskId,
-            kind: 'scheduler',
-            label: `Scheduler job: ${job.name}`,
-            execute,
-            jobId: job.id,
-            sessionId,
-          })
-        : await execute()
-    } finally {
-      resetSchedulerRun(token)
-    }
+  async run(job: SchedulerJob, context: SchedulerRunContext): Promise<string> {
+    return await runInSchedulerRun(
+      async () => await this.runTracked(job, context),
+    )
   }
 
-  private async runTracked(job: SchedulerJob): Promise<string> {
-    const taskRecord =
-      this.taskManager?.startTask({
-        kind: TaskKind.SCHEDULER_RUN,
-        title: `Scheduler job: ${job.name}`,
-        source: 'scheduler',
-        jobId: job.id,
-        sessionId: schedulerPayloadSessionId(job.payload),
-        metadata: {
-          job_name: job.name,
-          payload_kind: job.payload.kind,
-          deliver: Boolean(job.payload.deliver),
-        },
-      }) ?? null
-    try {
-      const result = await this.dispatch(job, {
-        taskId: taskRecord?.id ?? null,
-      })
-      if (taskRecord)
-        this.taskManager?.completeTask(taskRecord.id, {
-          summary: String(result || ''),
-        })
-      return result
-    } catch (error) {
-      if (taskRecord) {
-        if (error instanceof Error && error.name === 'CancelledTaskError')
-          this.taskManager?.cancelTask(taskRecord.id)
-        else
-          this.taskManager?.failTask(taskRecord.id, {
-            error: error instanceof Error ? error.message : String(error),
-          })
-      }
+  private async runTracked(
+    job: SchedulerJob,
+    context: SchedulerRunContext,
+  ): Promise<string> {
+    const sessionId = schedulerPayloadSessionId(job.payload) || null
+    const task = this.taskManager.startTask({
+      taskId: context.taskId,
+      kind: TaskKind.SCHEDULER_RUN,
+      title: `Scheduler job: ${job.name}`,
+      source: 'scheduler',
+      jobId: job.id,
+      sessionId,
+      metadata: {
+        job_name: job.name,
+        payload_kind: job.payload.kind,
+        deliver: Boolean(job.payload.deliver),
+        scheduler_run_id: context.runId,
+        scheduler_trigger: context.trigger,
+        scheduled_for_ms: context.scheduledForMs,
+        misfire_policy: context.misfirePolicy,
+        missed_count: context.missedCount,
+        count_capped: context.countCapped,
+      },
+    })
+    const handleRef: { value: TaskRuntimeHandle<string> | null } = {
+      value: null,
+    }
+    let executionError: unknown = null
+    const handle = this.taskRuntime.launch({
+      task,
+      parentSignal: context.signal,
+      execute: async (runtime) => {
+        try {
+          return await this.runWithActiveProjection(
+            job,
+            context,
+            runtime,
+            () => {
+              if (!handleRef.value)
+                throw new Error('scheduler TaskRuntime handle is unavailable')
+              return handleRef.value
+            },
+          )
+        } catch (error) {
+          executionError = error
+          throw error
+        }
+      },
+      fail: (error, expectedRevision) =>
+        error instanceof Error && error.name === 'CancelledTaskError'
+          ? this.taskManager.cancelTask(task.id, {
+              reason: error.message,
+              expectedRevision,
+            })
+          : this.taskManager.failTask(task.id, {
+              error: error instanceof Error ? error.message : String(error),
+              expectedRevision,
+            }),
+    })
+    handleRef.value = handle
+    const terminal = await handle.wait()
+    if (!terminal) throw new Error(`scheduler Task did not settle: ${task.id}`)
+    if (terminal.status === TaskStatus.COMPLETED)
+      return String(terminal.value ?? terminal.record.progress.summary ?? '')
+    if (terminal.status === TaskStatus.CANCELLED)
+      throw new CancelledTaskError(context.runId)
+    if (terminal.status === TaskStatus.INTERRUPTED) {
+      const error = new Error(
+        terminal.error || `scheduler Task interrupted: ${task.id}`,
+      )
+      error.name = 'InterruptedTaskError'
       throw error
     }
+    if (executionError instanceof Error) throw executionError
+    throw new Error(
+      terminal.error || `scheduler Task failed with status ${terminal.status}`,
+    )
+  }
+
+  private async runWithActiveProjection(
+    job: SchedulerJob,
+    context: SchedulerRunContext,
+    runtime: TaskRuntimeExecution,
+    handle: () => TaskRuntimeHandle<string>,
+  ): Promise<string> {
+    const execute = async () =>
+      await this.dispatch(job, { ...context, signal: runtime.signal })
+    if (!this.activeTasks) return await execute()
+    return await this.activeTasks.run({
+      taskId: context.runId,
+      kind: 'scheduler',
+      label: `Scheduler job: ${job.name}`,
+      execute,
+      jobId: job.id,
+      sessionId: schedulerPayloadSessionId(job.payload) || null,
+      abort: () => {
+        void handle().cancel('active Scheduler run cancelled')
+      },
+    })
   }
 
   private async dispatch(
     job: SchedulerJob,
-    opts: { taskId: string | null },
+    context: SchedulerRunContext,
   ): Promise<string> {
-    if (job.payload.kind === 'agent_turn') return this.runAgentTurn(job, opts)
-    if (job.payload.kind === 'team_wake') return this.runTeamWake(job)
+    if (job.payload.kind === 'agent_turn')
+      return this.runAgentTurn(job, context)
+    if (job.payload.kind === 'team_wake') return this.runTeamWake(job, context)
     if (job.payload.kind === 'system_event')
-      return this.runSystemEvent(job, opts)
+      return this.runSystemEvent(job, context)
     throw new Error(`unsupported scheduler payload kind: ${job.payload.kind}`)
   }
 
   private async runAgentTurn(
     job: SchedulerJob,
-    opts: { taskId: string | null },
+    context: SchedulerRunContext,
   ): Promise<string> {
     const message = job.payload.message.trim()
     if (!message)
@@ -156,15 +227,27 @@ export class SchedulerJobExecutor {
       content: SchedulerJobExecutor.agentTurnContent(job),
       displayContent: `定时任务触发 · ${job.name}\n\n${message}`,
       deliver: Boolean(job.payload.deliver),
-      clientMessageId: `scheduler:${job.id}`,
+      clientMessageId: `scheduler:${context.runId}`,
       source: 'scheduler',
-      scheduler: { jobId: job.id, jobName: job.name },
-      taskId: opts.taskId,
+      scheduler: {
+        jobId: job.id,
+        jobName: job.name,
+        runId: context.runId,
+        taskId: context.taskId,
+        scheduledForMs: context.scheduledForMs,
+        trigger: context.trigger,
+      },
+      taskId: context.taskId,
+      signal: context.signal,
+      useActiveTask: false,
       sessionId: schedulerPayloadSessionId(job.payload) || null,
     })
   }
 
-  private async runTeamWake(job: SchedulerJob): Promise<string> {
+  private async runTeamWake(
+    job: SchedulerJob,
+    context: SchedulerRunContext,
+  ): Promise<string> {
     const target = String(job.payload.target || '').trim()
     const message = job.payload.message.trim()
     const projectId = String(job.payload.project_id || '').trim()
@@ -188,13 +271,14 @@ export class SchedulerJobExecutor {
         content: message,
         wake: true,
         type: 'task',
+        signal: context.signal,
       }),
     )
   }
 
   private async runSystemEvent(
     job: SchedulerJob,
-    opts: { taskId: string | null },
+    context: SchedulerRunContext,
   ): Promise<string> {
     const eventName = String(
       job.payload.meta.system_event || job.payload.message || job.id,
@@ -202,7 +286,7 @@ export class SchedulerJobExecutor {
     if (eventName === 'watchlist-check') {
       if (!this.watchlistService)
         return 'watchlist-check skipped: watchlist service unavailable'
-      const decision = await this.watchlistService.check()
+      const decision = await this.watchlistService.check(context.signal)
       if (decision.action !== 'run')
         return `watchlist-check skipped: ${decision.reason}`
       const proactive = cloneJobWithPayload(
@@ -214,10 +298,10 @@ export class SchedulerJobExecutor {
           meta: job.payload.meta,
         }),
       )
-      return this.runAgentTurn(proactive, opts)
+      return this.runAgentTurn(proactive, context)
     }
     const handler = this.systemHandlers[eventName]
-    if (handler) return String(await handler(job))
+    if (handler) return String(await handler(job, context))
     return `system_event acknowledged: ${eventName}`
   }
 

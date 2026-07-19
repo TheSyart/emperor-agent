@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import type { PromptProjectionSnapshot } from './projection'
 
 export interface PromptSectionInput {
   name: string
@@ -17,6 +18,7 @@ export interface PromptSectionInput {
   budgetChars: number | null
   version: string | null
   scope?: string | null
+  stability?: 'stable' | 'dynamic'
 }
 
 export interface PromptManifestSection {
@@ -26,6 +28,7 @@ export interface PromptManifestSection {
   budgetChars: number | null
   version: string | null
   scope: string | null
+  stability: 'stable' | 'dynamic'
   hash: string
   charCount: number
   tokenEstimate: number
@@ -104,6 +107,7 @@ export interface PromptSnapshot {
   memoryVersions: PromptMemoryVersionSummary[]
   sections: PromptManifestSection[]
   contextPlan: PromptContextPlan
+  projection?: PromptProjectionSnapshot
   totals: {
     charCount: number
     tokenEstimate: number
@@ -122,6 +126,7 @@ export function toPromptManifestSection(
     budgetChars,
     version: section.version ?? null,
     scope: section.scope ?? null,
+    stability: section.stability === 'dynamic' ? 'dynamic' : 'stable',
     hash: createHash('sha256').update(content, 'utf8').digest('hex'),
     charCount: content.length,
     tokenEstimate: estimateTokens(content),
@@ -146,6 +151,7 @@ export function writePromptSnapshot(opts: {
   messages?: Array<Record<string, unknown>> | null
   checkpoint?: Record<string, unknown> | null
   memoryVersions?: Array<Record<string, unknown>> | null
+  projection?: PromptProjectionSnapshot | null
 }): PromptSnapshot {
   mkdirSync(opts.dir, { recursive: true })
   const sections = opts.sections.map(toPromptManifestSection)
@@ -165,6 +171,9 @@ export function writePromptSnapshot(opts: {
     memoryVersions: summarizeMemoryVersions(opts.memoryVersions ?? null),
     sections,
     contextPlan: buildContextPlan(sections, opts.contextPlan ?? null),
+    ...(opts.projection
+      ? { projection: cloneProjection(opts.projection) }
+      : {}),
     totals: {
       charCount: sections.reduce((sum, section) => sum + section.charCount, 0),
       tokenEstimate: sections.reduce(
@@ -179,6 +188,12 @@ export function writePromptSnapshot(opts: {
     'utf8',
   )
   return snapshot
+}
+
+function cloneProjection(
+  projection: PromptProjectionSnapshot,
+): PromptProjectionSnapshot {
+  return JSON.parse(JSON.stringify(projection)) as PromptProjectionSnapshot
 }
 
 function buildContextPlan(
@@ -255,12 +270,58 @@ export function listRecentPromptSnapshots(
   return { count: snapshots.length, recent: snapshots.slice(0, limit) }
 }
 
+export function latestPromptProjection(
+  snapshotDir: string,
+): PromptProjectionSnapshot | null {
+  if (!existsSync(snapshotDir) || !statSync(snapshotDir).isDirectory())
+    return null
+  let latest: {
+    createdAt: string
+    projection: PromptProjectionSnapshot
+  } | null = null
+  for (const name of readdirSync(snapshotDir)) {
+    if (!name.endsWith('.json')) continue
+    try {
+      const parsed = JSON.parse(
+        readFileSync(join(snapshotDir, name), 'utf8') || '{}',
+      ) as unknown
+      if (!isPromptSnapshot(parsed) || !isPromptProjection(parsed.projection))
+        continue
+      if (!latest || parsed.createdAt.localeCompare(latest.createdAt) > 0) {
+        latest = {
+          createdAt: parsed.createdAt,
+          projection: parsed.projection,
+        }
+      }
+    } catch {
+      // A corrupt diagnostic snapshot must not affect model execution.
+    }
+  }
+  return latest ? cloneProjection(latest.projection) : null
+}
+
 function isPromptSnapshot(value: unknown): value is PromptSnapshot {
   return Boolean(
     value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
     Array.isArray((value as PromptSnapshot).sections),
+  )
+}
+
+function isPromptProjection(value: unknown): value is PromptProjectionSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const projection = value as PromptProjectionSnapshot
+  return Boolean(
+    projection.version === 1 &&
+    projection.stablePrefix &&
+    /^[a-f0-9]{64}$/.test(String(projection.stablePrefix.hash || '')) &&
+    Array.isArray(projection.stablePrefix.leaves) &&
+    projection.dynamicSuffix &&
+    /^[a-f0-9]{64}$/.test(String(projection.dynamicSuffix.hash || '')) &&
+    Array.isArray(projection.dynamicSuffix.leaves) &&
+    projection.cacheBreak &&
+    typeof projection.cacheBreak.reasonCode === 'string',
   )
 }
 

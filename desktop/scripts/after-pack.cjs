@@ -2,6 +2,10 @@ const { existsSync, lstatSync, readdirSync, readFileSync } = require('node:fs')
 const { join } = require('node:path')
 const { extractFile, listPackage } = require('@electron/asar')
 const { validateRuntimeManifest } = require('./before-pack.cjs')
+const {
+  validatePetPreloadSource,
+  validatePreloadSource,
+} = require('./audit-preload.cjs')
 
 const PET_RESOURCE_FILES = [
   'event-mapper.js',
@@ -12,6 +16,14 @@ const PET_RESOURCE_FILES = [
   'renderer.js',
 ]
 
+const TYPESCRIPT_ASAR_ENTRIES = new Set([
+  '/node_modules',
+  '/node_modules/typescript',
+  '/node_modules/typescript/lib',
+  '/node_modules/typescript/lib/typescript.js',
+  '/node_modules/typescript/package.json',
+])
+
 function validatePackagedAppResources(resourcesRoot) {
   const asarPath = join(resourcesRoot, 'app.asar')
   assertRegularFile(asarPath, 'app.asar')
@@ -19,9 +31,11 @@ function validatePackagedAppResources(resourcesRoot) {
   const entries = archiveEntries.map(normalizeArchiveEntry)
   const required = [
     '/out/main/index.js',
-    '/out/preload/index.mjs',
+    '/out/preload/index.cjs',
     '/out/renderer/index.html',
     '/package.json',
+    '/node_modules/typescript/package.json',
+    '/node_modules/typescript/lib/typescript.js',
   ]
   for (const entry of required) {
     if (!entries.includes(entry))
@@ -29,8 +43,8 @@ function validatePackagedAppResources(resourcesRoot) {
   }
   for (const entry of entries) {
     if (
-      entry === '/node_modules' ||
-      entry.startsWith('/node_modules/') ||
+      ((entry === '/node_modules' || entry.startsWith('/node_modules/')) &&
+        !TYPESCRIPT_ASAR_ENTRIES.has(entry)) ||
       /(?:^|\/)(?:fixtures|tests|skills-catalog|desktop-pet)(?:\/|$)/i.test(
         entry,
       ) ||
@@ -40,7 +54,8 @@ function validatePackagedAppResources(resourcesRoot) {
     if (
       entry !== '/package.json' &&
       entry !== '/out' &&
-      !entry.startsWith('/out/')
+      !entry.startsWith('/out/') &&
+      !TYPESCRIPT_ASAR_ENTRIES.has(entry)
     )
       throw new Error(`packaged app contains unexpected ASAR entry: ${entry}`)
   }
@@ -50,6 +65,23 @@ function validatePackagedAppResources(resourcesRoot) {
   )
   if (packageJson?.main !== 'out/main/index.js')
     throw new Error('packaged app main entry is invalid')
+  validatePreloadSource(extractFile(asarPath, 'out/preload/index.cjs'))
+  const typescriptPackage = JSON.parse(
+    extractFile(asarPath, 'node_modules/typescript/package.json').toString(
+      'utf8',
+    ),
+  )
+  if (
+    packageJson?.dependencies?.typescript !== typescriptPackage?.version ||
+    typescriptPackage?.main !== './lib/typescript.js'
+  )
+    throw new Error('packaged TypeScript parser version is invalid')
+  const parserBytes = extractFile(
+    asarPath,
+    'node_modules/typescript/lib/typescript.js',
+  ).byteLength
+  if (parserBytes < 1_000_000 || parserBytes > 15 * 1024 * 1024)
+    throw new Error('packaged TypeScript parser size is invalid')
   assertNoDevelopmentPaths(asarPath, archiveEntries)
 
   const petRoot = join(resourcesRoot, 'desktop-pet')
@@ -65,6 +97,7 @@ function validatePackagedAppResources(resourcesRoot) {
     throw new Error('packaged desktop-pet resources do not match allowlist')
   for (const name of actualPetFiles)
     assertRegularFile(join(petRoot, name), `desktop-pet/${name}`)
+  validatePetPreloadSource(readFileSync(join(petRoot, 'preload.js')))
 
   for (const forbidden of ['backend', 'node_modules', 'skills-catalog']) {
     if (existsSync(join(resourcesRoot, forbidden)))
@@ -82,7 +115,7 @@ function assertNoDevelopmentPaths(asarPath, archiveEntries) {
     const entry = normalizeArchiveEntry(archiveEntry)
     if (
       !entry.startsWith('/out/') ||
-      !/\.(?:css|html|js|json|mjs)$/.test(entry)
+      !/\.(?:cjs|css|html|js|json|mjs)$/.test(entry)
     )
       continue
     const content = extractFile(asarPath, archiveEntry.replace(/^[/\\]/, ''))

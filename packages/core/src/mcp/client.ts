@@ -3,30 +3,75 @@ import { MCPToolAdapter } from './adapter'
 import { loadMcpConfig, type MCPConfig, type ServerConfig } from './config'
 import { MCPConnection, SSEConnection, StdioConnection } from './connection'
 import type { ExecutionEnvironment } from '../environment/snapshot'
+import {
+  MCPConnectionSupervisor,
+  type MCPConnectionSnapshot,
+  type MCPConnectionSupervisorOptions,
+} from './supervisor'
+import type { OwnedProcessRuntime } from '../processes/runtime'
 
 export type MCPConnectionFactory = (
   cfg: ServerConfig,
   executionEnvironment?: ExecutionEnvironment | null,
 ) => MCPConnection
 
+export interface MCPClientSnapshot {
+  readonly initialized: boolean
+  readonly servers: MCPConnectionSnapshot[]
+  readonly ready: number
+  readonly configured: number
+  readonly tools: number
+}
+
+export interface MCPClientOptions {
+  readonly processRuntime?: OwnedProcessRuntime | null
+  readonly workspaceRoot?: (() => string) | null
+  readonly ownerSessionId?: (() => string | null) | null
+  readonly connectionFactory?: MCPConnectionFactory
+  readonly onStateChange?: (
+    snapshot: MCPConnectionSnapshot,
+  ) => void | Promise<void>
+  readonly supervisor?: Partial<
+    Pick<
+      MCPConnectionSupervisorOptions,
+      | 'callTimeoutMs'
+      | 'clientIdFactory'
+      | 'connectTimeoutMs'
+      | 'maxRestartAttempts'
+      | 'now'
+      | 'requestIdFactory'
+      | 'sleep'
+    >
+  >
+}
+
 export class MCPClient {
   readonly root: string
   config: MCPConfig | null = null
   private readonly connectionFactory: MCPConnectionFactory
-  private readonly connections = new Map<string, MCPConnection>()
+  private readonly connections = new Map<string, MCPConnectionSupervisor>()
+  private readonly effectiveConfigs = new Map<string, ServerConfig>()
   private readonly tools: MCPToolAdapter[] = []
+  private readonly opts: MCPClientOptions
+  private executionEnvironment: ExecutionEnvironment | null = null
   private initialized = false
 
-  constructor(
-    root: string,
-    opts: { connectionFactory?: MCPConnectionFactory } = {},
-  ) {
+  constructor(root: string, opts: MCPClientOptions = {}) {
     this.root = root
+    this.opts = opts
     this.connectionFactory =
       opts.connectionFactory ??
       ((config, executionEnvironment) =>
-        createConnection(config, executionEnvironment, (snapshot) =>
-          this.configForSnapshot(config.name, snapshot),
+        createConnection(
+          config,
+          executionEnvironment,
+          (snapshot) => this.configForSnapshot(config.name, snapshot),
+          {
+            processRuntime: opts.processRuntime ?? null,
+            workspaceRoot: opts.workspaceRoot?.() ?? null,
+            stateRoot: this.root,
+            ownerSessionId: opts.ownerSessionId?.() ?? null,
+          },
         ))
   }
 
@@ -34,20 +79,65 @@ export class MCPClient {
     executionEnvironment: ExecutionEnvironment | null = null,
   ): Promise<void> {
     if (this.initialized) return
-    this.config = executionEnvironment
+    await this.reload(executionEnvironment)
+  }
+
+  async reload(
+    executionEnvironment: ExecutionEnvironment | null = this
+      .executionEnvironment,
+  ): Promise<void> {
+    const config = executionEnvironment
       ? await loadMcpConfigForEnvironment(this.root, executionEnvironment)
       : await loadMcpConfig(this.root)
-    const defaults = this.config.defaults
+    this.executionEnvironment = executionEnvironment
+    const desired = new Set<string>()
 
-    for (const server of Object.values(this.config.servers)) {
+    for (const server of Object.values(config.servers)) {
       if (!server.enabled) continue
-      const conn = this.connectionFactory(server, executionEnvironment)
-      this.connections.set(server.name, conn)
-      const ok = await conn.connect()
-      if (!ok) continue
+      desired.add(server.name)
+      const existing = this.connections.get(server.name)
+      if (existing) {
+        if (await existing.reconfigure(server))
+          this.effectiveConfigs.set(server.name, server)
+        continue
+      }
+      const supervisor = new MCPConnectionSupervisor({
+        serverName: server.name,
+        config: server,
+        connectionFactory: (candidate) =>
+          this.connectionFactory(candidate, this.executionEnvironment),
+        ...(this.opts.supervisor ?? {}),
+        onStateChange: this.opts.onStateChange,
+      })
+      this.connections.set(server.name, supervisor)
+      if (await supervisor.connect())
+        this.effectiveConfigs.set(server.name, server)
+    }
+
+    for (const [name, connection] of [...this.connections]) {
+      if (desired.has(name)) continue
+      this.connections.delete(name)
+      this.effectiveConfigs.delete(name)
+      await connection.disconnect().catch(() => {})
+    }
+
+    this.config = config
+    await this.rebuildTools()
+    this.initialized = true
+  }
+
+  private async rebuildTools(): Promise<void> {
+    this.tools.length = 0
+    const defaults = this.config?.defaults ?? {}
+    for (const server of Object.values(this.config?.servers ?? {})) {
+      if (!server.enabled) continue
+      const conn = this.connections.get(server.name)
+      if (!conn) continue
+      const effectiveConfig = this.effectiveConfigs.get(server.name)
+      if (!effectiveConfig) continue
       const discovered = await conn.listTools()
       for (const tool of discovered) {
-        const overrides = server.tool_overrides[tool.name] ?? {}
+        const overrides = effectiveConfig.tool_overrides[tool.name] ?? {}
         this.tools.push(
           new MCPToolAdapter({
             serverName: server.name,
@@ -72,12 +162,13 @@ export class MCPClient {
             maxResultChars: positiveInt(
               overrides.max_result_chars ?? defaults.max_result_chars,
             ),
+            callTimeoutMs: positiveInt(
+              overrides.call_timeout_ms ?? defaults.call_timeout_ms,
+            ),
           }),
         )
       }
     }
-
-    this.initialized = true
   }
 
   getTools(): MCPToolAdapter[] {
@@ -92,12 +183,30 @@ export class MCPClient {
     return this.connections.get(serverName)
   }
 
+  snapshot(): MCPClientSnapshot {
+    const configured = Object.values(this.config?.servers ?? {}).filter(
+      (server) => server.enabled,
+    ).length
+    const servers = [...this.connections.values()]
+      .map((connection) => connection.snapshot())
+      .sort((left, right) => left.serverName.localeCompare(right.serverName))
+    return {
+      initialized: this.initialized,
+      servers,
+      ready: servers.filter((server) => server.state === 'ready').length,
+      configured,
+      tools: this.tools.length,
+    }
+  }
+
   async close(): Promise<void> {
     for (const conn of this.connections.values())
       await conn.disconnect().catch(() => {})
     this.connections.clear()
+    this.effectiveConfigs.clear()
     this.tools.length = 0
     this.initialized = false
+    this.executionEnvironment = null
   }
 
   private async configForSnapshot(
@@ -118,12 +227,27 @@ function createConnection(
         snapshot: ExecutionEnvironment,
       ) => ServerConfig | null | Promise<ServerConfig | null>)
     | null = null,
+  owned: {
+    processRuntime: OwnedProcessRuntime | null
+    workspaceRoot: string | null
+    stateRoot: string
+    ownerSessionId: string | null
+  } = {
+    processRuntime: null,
+    workspaceRoot: null,
+    stateRoot: process.cwd(),
+    ownerSessionId: null,
+  },
 ): MCPConnection {
   return cfg.transport === 'sse'
     ? new SSEConnection(cfg.name, cfg)
     : new StdioConnection(cfg.name, cfg, {
         executionEnvironment,
         configResolver,
+        processRuntime: owned.processRuntime,
+        workspaceRoot: owned.workspaceRoot,
+        stateRoot: owned.stateRoot,
+        ownerSessionId: owned.ownerSessionId,
       })
 }
 

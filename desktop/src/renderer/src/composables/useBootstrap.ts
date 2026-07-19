@@ -100,6 +100,12 @@ export function useBootstrap(showToast: (message: string) => void) {
     mcpContent.value = JSON.stringify(data, null, 2)
   }
 
+  async function loadMcpStatus() {
+    const status = await core('mcp.status')
+    if (boot.value) boot.value.mcp = status
+    return status
+  }
+
   async function saveMcpConfig(content: string) {
     let parsed: McpConfigPayload
     try {
@@ -195,6 +201,7 @@ export function useBootstrap(showToast: (message: string) => void) {
     loadConfig,
     saveConfig,
     loadMcpConfig,
+    loadMcpStatus,
     saveMcpConfig,
     saveMemory,
     loadEpisode,

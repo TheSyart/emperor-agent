@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { createRequire } from 'node:module'
-import { createPackage } from '@electron/asar'
+import { createPackage, getRawHeader } from '@electron/asar'
 import { validateRuntimeManifest } from '@emperor/core'
 
 const desktopRoot = path.resolve(__dirname, '..', '..')
@@ -37,6 +37,11 @@ interface PackagedResourceHook {
   validatePackagedAppResources(resourcesRoot: string): void
 }
 
+interface PreloadAudit {
+  validatePetPreloadSource(value: string | Buffer): void
+  validatePreloadSource(value: string | Buffer): void
+}
+
 const petResourceFiles = [
   'event-mapper.js',
   'idle-scenes.js',
@@ -45,6 +50,39 @@ const petResourceFiles = [
   'renderer.html',
   'renderer.js',
 ]
+
+function regularFileBytes(root: string): number {
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .reduce((total, entry) => {
+      const target = path.join(root, entry.name)
+      if (entry.isDirectory()) return total + regularFileBytes(target)
+      if (entry.isFile()) return total + fs.statSync(target).size
+      throw new Error(`unexpected ASAR fixture entry: ${target}`)
+    }, 0)
+}
+
+async function waitForCompleteAsar(
+  archivePath: string,
+  payloadBytes: number,
+): Promise<void> {
+  const deadline = Date.now() + 2_000
+  let expectedBytes = Number.POSITIVE_INFINITY
+  do {
+    try {
+      const { headerSize } = getRawHeader(archivePath)
+      expectedBytes = 8 + headerSize + payloadBytes
+      if (fs.statSync(archivePath).size >= expectedBytes) return
+    } catch {
+      // @electron/asar 3.4.1 can resolve createPackage before its write stream
+      // has flushed the header. Keep yielding until the deterministic size is met.
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  } while (Date.now() < deadline)
+  throw new Error(
+    `ASAR fixture did not finish writing: expected ${expectedBytes} bytes`,
+  )
+}
 
 describe('desktop release packaging (MIG-REL-001)', () => {
   it('does not bundle the legacy Python backend by default', () => {
@@ -60,6 +98,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('afterPack: scripts/after-pack.cjs')
     expect(config).toContain('runtime-defaults-manifest.json')
     expect(config).toContain('!node_modules{,/**/*}')
+    expect(config).toContain('node_modules/typescript/package.json')
+    expect(config).toContain('node_modules/typescript/lib/typescript.js')
     expect(config).toContain('from: ../assets/desktop-pet')
     expect(config).toContain(
       'from: ../config/examples/model_config.example.json',
@@ -82,13 +122,62 @@ describe('desktop release packaging (MIG-REL-001)', () => {
   it('defines a packaged smoke command instead of treating package:dir as proof', () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'),
-    ) as { scripts?: Record<string, string> }
+    ) as {
+      scripts?: Record<string, string>
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const viteConfig = fs.readFileSync(
+      path.join(desktopRoot, 'electron.vite.config.ts'),
+      'utf8',
+    )
 
     expect(pkg.scripts?.['package:smoke']).toBe(
       'node scripts/run-packaged-smoke.cjs',
     )
     expect(pkg.scripts?.['package:verify']).toContain('package:dir')
     expect(pkg.scripts?.['package:verify']).toContain('package:smoke')
+    expect(pkg.dependencies?.typescript).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(pkg.devDependencies?.typescript).toBeUndefined()
+    expect(viteConfig).toContain('externalizeDepsPlugin')
+    expect(viteConfig).toContain("include: ['typescript']")
+    expect(pkg.scripts?.build).toContain('node scripts/audit-preload.cjs')
+  })
+
+  it('rejects ESM, Node builtins and oversized sandbox preload bundles', () => {
+    const audit = require(
+      path.join(desktopRoot, 'scripts', 'audit-preload.cjs'),
+    ) as PreloadAudit
+    expect(() =>
+      audit.validatePreloadSource(
+        'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {})',
+      ),
+    ).not.toThrow()
+    expect(() =>
+      audit.validatePreloadSource(
+        'import { contextBridge } from "electron"; contextBridge.exposeInMainWorld("emperor", {})',
+      ),
+    ).toThrow(/CommonJS/i)
+    expect(() =>
+      audit.validatePreloadSource(
+        'const fs=require("node:fs"); const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {})',
+      ),
+    ).toThrow(/forbidden module/i)
+    expect(() =>
+      audit.validatePreloadSource(
+        `const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {});${'x'.repeat(70 * 1024)}`,
+      ),
+    ).toThrow(/size/i)
+    expect(() =>
+      audit.validatePetPreloadSource(
+        'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorPet", {})',
+      ),
+    ).not.toThrow()
+    expect(() =>
+      audit.validatePetPreloadSource(
+        'const fs=require("fs"); const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorPet", {})',
+      ),
+    ).toThrow(/forbidden module/i)
   })
 
   it('runs the packaged binary headlessly with a minimal non-shell environment', () => {
@@ -203,8 +292,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     fs.mkdirSync(path.join(appStage, 'out', 'renderer'), { recursive: true })
     fs.writeFileSync(path.join(appStage, 'out', 'main', 'index.js'), 'void 0\n')
     fs.writeFileSync(
-      path.join(appStage, 'out', 'preload', 'index.mjs'),
-      'void 0\n',
+      path.join(appStage, 'out', 'preload', 'index.cjs'),
+      'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {})\n',
     )
     fs.writeFileSync(
       path.join(appStage, 'out', 'renderer', 'index.html'),
@@ -215,13 +304,38 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       JSON.stringify({
         name: 'emperor-agent-desktop',
         main: 'out/main/index.js',
+        dependencies: { typescript: '5.9.3' },
       }),
     )
-    await createPackage(appStage, path.join(appOutDir, 'resources', 'app.asar'))
+    const parserStage = path.join(appStage, 'node_modules', 'typescript', 'lib')
+    fs.mkdirSync(parserStage, { recursive: true })
+    fs.copyFileSync(
+      path.join(desktopRoot, 'node_modules', 'typescript', 'package.json'),
+      path.join(appStage, 'node_modules', 'typescript', 'package.json'),
+    )
+    fs.copyFileSync(
+      path.join(
+        desktopRoot,
+        'node_modules',
+        'typescript',
+        'lib',
+        'typescript.js',
+      ),
+      path.join(parserStage, 'typescript.js'),
+    )
+    const asarPath = path.join(appOutDir, 'resources', 'app.asar')
+    const payloadBytes = regularFileBytes(appStage)
+    await createPackage(appStage, asarPath)
+    await waitForCompleteAsar(asarPath, payloadBytes)
     const petRoot = path.join(appOutDir, 'resources', 'desktop-pet')
     fs.mkdirSync(petRoot, { recursive: true })
     for (const file of petResourceFiles)
-      fs.writeFileSync(path.join(petRoot, file), 'fixture\n')
+      fs.writeFileSync(
+        path.join(petRoot, file),
+        file === 'preload.js'
+          ? 'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorPet", {})\n'
+          : 'fixture\n',
+      )
 
     const afterPack = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),

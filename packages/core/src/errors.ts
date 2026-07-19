@@ -96,6 +96,15 @@ export class ModelProviderError extends EmperorError {
   }
 }
 
+/** 当前 Agent step 的显式模型成本上限不允许再发起一次请求。 */
+export class ModelCostCapExceededError extends EmperorError {
+  constructor(message = '本轮模型成本上限已用尽，请提高上限或开始新一轮。') {
+    super(message, 'model_cost_cap_exceeded', {
+      action: 'open_model_settings',
+    })
+  }
+}
+
 /** 模型输入超过上下文窗口。 */
 export class ContextOverflowError extends EmperorError {
   constructor(message: string, options?: ErrorOptions) {

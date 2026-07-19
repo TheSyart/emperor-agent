@@ -14,6 +14,7 @@ import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
 import { diagnosticRows, type DiagnosticTone } from './diagnosticsPanelModel'
 import EnvironmentDiagnosticsSection from './EnvironmentDiagnosticsSection.vue'
+import FileCheckpointsSection from './FileCheckpointsSection.vue'
 
 const ctx = useAppContext()
 const diagnostics = ref<DiagnosticsPayload | null>(
@@ -23,6 +24,9 @@ const loading = ref(false)
 const error = ref('')
 const environmentSection = ref<InstanceType<
   typeof EnvironmentDiagnosticsSection
+> | null>(null)
+const fileCheckpointsSection = ref<InstanceType<
+  typeof FileCheckpointsSection
 > | null>(null)
 
 const groups = computed(() =>
@@ -65,6 +69,7 @@ async function refresh() {
       ...(contextExplanation ? { contextExplanation } : {}),
     }
     await environmentSection.value?.refresh(true)
+    await fileCheckpointsSection.value?.refresh()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -142,6 +147,11 @@ async function revealPath(target: string) {
         </div>
 
         <EnvironmentDiagnosticsSection ref="environmentSection" />
+
+        <FileCheckpointsSection
+          ref="fileCheckpointsSection"
+          :session-id="ctx.sessionId.value"
+        />
 
         <section
           v-for="group in groups"

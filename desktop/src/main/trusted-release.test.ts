@@ -26,6 +26,27 @@ afterEach(() => {
 })
 
 describe('trusted release configuration', () => {
+  it('keeps Frozen Stable manual, tag-verified and environment-protected', () => {
+    const workflow = fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+      'utf8',
+    )
+
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).not.toMatch(/^\s*push:\s*$/m)
+    expect(workflow).toContain('release-policy:')
+    expect(workflow).toContain('git cat-file -t "refs/tags/$STABLE_TAG"')
+    expect(workflow).toContain('git merge-base --is-ancestor')
+    expect(workflow.indexOf('commit="$(git rev-parse')).toBeLessThan(
+      workflow.indexOf('version="$(git show'),
+    )
+    expect(workflow).toContain('needs: release-policy')
+    expect(workflow).toContain(
+      "if: inputs.publish == true && vars.EMPEROR_STABLE_RELEASE_ENABLED == 'true'",
+    )
+    expect(workflow).toContain('environment: stable-release')
+  })
+
   it('hard-gates signed and notarized macOS candidates', () => {
     process.env.EMPEROR_RELEASE_TARGET = 'mac'
     const configFactory = require(
@@ -243,7 +264,7 @@ describe('trusted release configuration', () => {
 
     expect(workflow).toContain('release-aggregate:')
     expect(workflow).toContain('publish-release:')
-    expect(workflow).toContain('needs: release-aggregate')
+    expect(workflow).toContain('needs: [release-policy, release-aggregate]')
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain('attestations: write')
     expect(workflow).toContain('artifact-metadata: write')

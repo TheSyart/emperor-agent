@@ -28,7 +28,11 @@ export interface TokenStatsRow {
   calls?: number
   provider?: string
   model?: string
-  [key: string]: number | string | undefined
+  cost_usd_nanos?: number
+  cost_complete_calls?: number
+  cost_incomplete_calls?: number
+  cost_is_partial?: boolean
+  [key: string]: number | string | boolean | undefined
 }
 
 export interface TokenUsageRow {
@@ -47,6 +51,9 @@ export interface TokenUsageRow {
   route_reason?: string
   used_fallback?: boolean
   fallback_reason?: string
+  cost_usd_nanos?: number
+  cost_cap_usd_nanos?: number
+  cost_complete?: boolean
   estimated_input_tokens?: number
   route_estimated_tokens?: number
   [key: string]: string | number | boolean | undefined
@@ -59,6 +66,11 @@ export interface RecordOptions {
   routeReason?: string | null
   estimatedInputTokens?: number | null
   routeEstimatedTokens?: number | null
+  costUsdNanos?: number | null
+  costCapUsdNanos?: number | null
+  costComplete?: boolean | null
+  usedFallback?: boolean
+  fallbackReason?: string | null
 }
 
 export class TokenTracker {
@@ -99,6 +111,17 @@ export class TokenTracker {
     const routeEstimatedTokens = (o.routeEstimatedTokens ??
       o.route_estimated_tokens ??
       null) as number | null
+    const costUsdNanos = optionalNonNegativeInt(
+      o.costUsdNanos ?? o.cost_usd_nanos,
+    )
+    const costCapUsdNanos = optionalNonNegativeInt(
+      o.costCapUsdNanos ?? o.cost_cap_usd_nanos,
+    )
+    const costComplete = o.costComplete ?? o.cost_complete
+    const usedFallback = Boolean(o.usedFallback ?? o.used_fallback ?? false)
+    const fallbackReason = String(
+      o.fallbackReason ?? o.fallback_reason ?? '',
+    ).trim()
 
     const u = usage ?? {}
     const inputTokens = Number(u.input ?? u.prompt_tokens ?? 0) || 0
@@ -124,6 +147,11 @@ export class TokenTracker {
       row.estimated_input_tokens = estimatedInputTokens
     if (routeEstimatedTokens !== null && routeEstimatedTokens !== undefined)
       row.route_estimated_tokens = routeEstimatedTokens
+    if (costUsdNanos !== null) row.cost_usd_nanos = costUsdNanos
+    if (costCapUsdNanos !== null) row.cost_cap_usd_nanos = costCapUsdNanos
+    if (typeof costComplete === 'boolean') row.cost_complete = costComplete
+    if (usedFallback) row.used_fallback = true
+    if (fallbackReason) row.fallback_reason = fallbackReason
 
     this.lastInputTokens =
       (row.input as number) +
@@ -405,6 +433,10 @@ function emptyStats(): TokenStatsRow {
     cache_read: 0,
     cache_create: 0,
     total: 0,
+    cost_usd_nanos: 0,
+    cost_complete_calls: 0,
+    cost_incomplete_calls: 0,
+    cost_is_partial: false,
   }
 }
 
@@ -417,6 +449,15 @@ function addRow(bucket: TokenStatsRow, row: Row): void {
     total += value
   }
   bucket.total = (Number(bucket.total) || 0) + total
+  if ('cost_usd_nanos' in row)
+    bucket.cost_usd_nanos =
+      (Number(bucket.cost_usd_nanos) || 0) + rowInt(row, 'cost_usd_nanos')
+  if (row.cost_complete === true)
+    bucket.cost_complete_calls = (Number(bucket.cost_complete_calls) || 0) + 1
+  else if (row.cost_complete === false)
+    bucket.cost_incomplete_calls =
+      (Number(bucket.cost_incomplete_calls) || 0) + 1
+  bucket.cost_is_partial = (Number(bucket.cost_incomplete_calls) || 0) > 0
 }
 
 function normalizeRow(row: Row): TokenUsageRow {
@@ -445,7 +486,20 @@ function normalizeRow(row: Row): TokenUsageRow {
       normalized[key] = rowInt(row, key)
   }
   if (row.used_fallback) normalized.used_fallback = true
+  for (const key of ['cost_usd_nanos', 'cost_cap_usd_nanos'] as const) {
+    if (row[key] !== null && row[key] !== undefined)
+      normalized[key] = rowInt(row, key)
+  }
+  if (typeof row.cost_complete === 'boolean')
+    normalized.cost_complete = row.cost_complete
   return normalized
+}
+
+function optionalNonNegativeInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return null
+  return parsed
 }
 
 function rowInt(row: Row, ...keys: string[]): number {

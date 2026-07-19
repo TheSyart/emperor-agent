@@ -26,7 +26,6 @@ import {
   type ChatProjectionState,
 } from '../runtime/chatProjection'
 import { isGoalRuntimeEvent, sortRuntimeEvents } from '../runtime/events'
-import { replayRuntimeEvents } from '../runtime/reducer'
 import {
   findSubagent,
   findSubagentTool,
@@ -39,7 +38,7 @@ import {
   type GoalProjectionState,
 } from '../runtime/handlers/goals'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
-import { applyTaskEvent, type TaskProjection } from '../runtime/handlers/tasks'
+import type { TaskProjection } from '../runtime/handlers/tasks'
 import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 import { applyTeamEventToBootstrap } from '../runtime/handlers/team'
 import { schedulerMessageMeta } from '../runtime/schedulerMeta'
@@ -47,6 +46,45 @@ import { isDraftSessionId } from '../runtime/sessionDrafts'
 import { settleRunningToolSegments } from '../runtime/toolStatus'
 import { core } from '../api/http'
 import { compactJson } from '../utils/format'
+import { ActionEffectStore } from '../runtime/actionEffect'
+import {
+  createPendingProjectionState,
+  executePendingEffect,
+  reducePendingProjection,
+  type PendingEffect,
+  type PendingEffectOutput,
+  type PendingProjectionAction,
+  type PendingProjectionState,
+} from '../runtime/pendingProjection'
+import {
+  createRuntimeEffectState,
+  reduceRuntimeEffects,
+  type RuntimeEffect,
+  type RuntimeEffectAction,
+  type RuntimeEffectOutput,
+  type RuntimeEffectState,
+} from '../runtime/runtimeEffects'
+import { SessionEffectExecutor } from '../runtime/sessionEffects'
+import {
+  createSessionProjectionState,
+  eventOwnerSessionId,
+  reduceSessionProjection,
+  type SessionEffect,
+  type SessionEffectOutput,
+  type SessionProjectionAction,
+  type SessionProjectionMeta,
+  type SessionProjectionState,
+} from '../runtime/sessionProjection'
+import {
+  createTaskProjectionState,
+  isTaskRuntimeEvent,
+  reduceTaskProjection,
+  type TaskProjectionState,
+} from '../runtime/taskProjection'
+import {
+  createRendererProjectionState,
+  replayRendererProjection,
+} from '../runtime/rendererProjection'
 
 function nextId(prefix: string) {
   const random =
@@ -94,13 +132,71 @@ export function useRuntime(options: {
     Record<string, { running: boolean; attention: boolean }>
   >({})
   const lastSeq = ref(0)
-  let pendingClearTimer: number | undefined
-  let coreUnsubscribe: (() => void) | undefined
-  let pendingVersion = 0
   let rehydrating = false
   let bridgeUnavailableToastShown = false
   // W2：live 与 replay 共用 chatProjection reducer；此 adapter 把 reducer 的 state 桥到响应式 refs
   let projectionRuntime = createProjectionRuntime()
+  let taskActionState = createTaskProjectionState()
+
+  const pendingStore = new ActionEffectStore<
+    PendingProjectionState,
+    PendingProjectionAction,
+    PendingEffect,
+    PendingEffectOutput
+  >({
+    initialState: createPendingProjectionState(),
+    reducer: reducePendingProjection,
+    execute: executePendingEffect,
+    taskResultAction: (result) => ({
+      type: 'pending_effect_result',
+      result,
+    }),
+    onStateChange: (state) => Object.assign(pending, state.pending),
+  })
+
+  const runtimeEffectStore = new ActionEffectStore<
+    RuntimeEffectState,
+    RuntimeEffectAction,
+    RuntimeEffect,
+    RuntimeEffectOutput
+  >({
+    initialState: createRuntimeEffectState(),
+    reducer: reduceRuntimeEffects,
+    execute: async (_effect, signal) => {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      await options.refreshMemory(false)
+      return { refreshed: true }
+    },
+    taskResultAction: (result) => ({
+      type: 'runtime_effect_result',
+      result,
+    }),
+  })
+
+  const sessionEffectExecutor = new SessionEffectExecutor({
+    isAvailable: hasCoreBridge,
+    subscribe: onCoreEvent,
+    onEvent: (event) => {
+      if (event && typeof event === 'object')
+        handleSocketEvent(JSON.stringify(event))
+    },
+  })
+  const sessionStore = new ActionEffectStore<
+    SessionProjectionState,
+    SessionProjectionAction,
+    SessionEffect,
+    SessionEffectOutput,
+    SessionProjectionMeta
+  >({
+    initialState: createSessionProjectionState(),
+    reducer: reduceSessionProjection,
+    execute: (effect, signal) => sessionEffectExecutor.execute(effect, signal),
+    taskResultAction: (result) => ({
+      type: 'session_effect_result',
+      result,
+    }),
+    onStateChange: syncSessionProjection,
+  })
   const liveProjection: ChatProjectionState = {
     get messages() {
       return messages.value
@@ -157,42 +253,23 @@ export function useRuntime(options: {
     tone: PendingState['tone'] = 'running',
     autoClearMs = 0,
   ) {
-    pendingVersion += 1
-    const version = pendingVersion
-    if (pendingClearTimer) {
-      window.clearTimeout(pendingClearTimer)
-      pendingClearTimer = undefined
-    }
-    pending.label = label
-    pending.detail = detail
-    pending.tone = label ? tone : undefined
-    if (label && autoClearMs > 0) {
-      pendingClearTimer = window.setTimeout(() => {
-        if (pendingVersion === version) updatePending()
-      }, autoClearMs)
-    }
+    if (rehydrating) return
+    pendingStore.dispatch({
+      type: 'pending_set',
+      label,
+      detail,
+      tone,
+      autoClearMs,
+    })
   }
 
   function connectSocket() {
     if (hasCoreBridge()) {
-      connectCoreEvents()
+      sessionStore.dispatch({ type: 'session_connect_requested' })
       return
     }
     markCoreBridgeUnavailable(true)
     return
-  }
-
-  function connectCoreEvents() {
-    if (coreUnsubscribe) {
-      status.value = 'ready'
-      return
-    }
-    status.value = 'connecting'
-    coreUnsubscribe = onCoreEvent((event) => {
-      if (!event || typeof event !== 'object') return
-      handleSocketEvent(JSON.stringify(event))
-    })
-    status.value = 'ready'
   }
 
   function markCoreBridgeUnavailable(showToast = false) {
@@ -224,12 +301,22 @@ export function useRuntime(options: {
             attachments: payload.attachments || [],
             requestedSkills: payload.requestedSkills || [],
             displayContent: payload.displayContent || payload.content,
+            delivery: payload.delivery,
           }
     const text = normalized.content.trim()
     const displayText = normalized.displayContent.trim()
     const attachments = normalized.attachments
-    if (busy.value) return false
     if (!text && attachments.length === 0) return false
+    const delivery = busy.value ? normalized.delivery || 'queue' : undefined
+    if (
+      delivery === 'interject' &&
+      (attachments.length > 0 || normalized.requestedSkills.length > 0)
+    ) {
+      const message = '插话仅支持纯文字；附件和 Skill 请改用排队。'
+      updatePending('无法插话', message, 'error', 4000)
+      options.showToast(message)
+      return false
+    }
     const blockedReason = modelSendBlockedReason()
     if (blockedReason) {
       updatePending('需要配置模型', blockedReason, 'error', 6000)
@@ -237,12 +324,13 @@ export function useRuntime(options: {
       return false
     }
     if (hasCoreBridge()) {
-      connectCoreEvents()
+      connectSocket()
       return sendMessageViaCore({
         text,
         displayText,
         attachments,
         requestedSkills: normalized.requestedSkills,
+        delivery,
       })
     }
     markCoreBridgeUnavailable(true)
@@ -271,11 +359,27 @@ export function useRuntime(options: {
     return userMsg
   }
 
+  function enqueueLocalPrompt(
+    content: string,
+    attachments: AttachmentRef[],
+  ): ChatMessage {
+    const userMsg: ChatMessage = {
+      id: nextId('user'),
+      role: 'user',
+      content,
+      deliveryState: 'queued',
+    }
+    if (attachments.length) userMsg.attachments = attachments
+    messages.value.push(userMsg)
+    return userMsg
+  }
+
   function sendMessageViaCore(opts: {
     text: string
     displayText: string
     attachments: AttachmentRef[]
     requestedSkills: RequestedSkill[]
+    delivery?: 'queue' | 'interject'
   }) {
     const activeSessionId = sessionId.value
     if (!activeSessionId) {
@@ -286,10 +390,9 @@ export function useRuntime(options: {
     const draftPayload = isDraftSessionId(activeSessionId)
       ? draftSubmitPayload(activeSessionId)
       : null
-    const userMsg = enqueueLocalTurn(
-      opts.displayText || opts.text,
-      opts.attachments,
-    )
+    const userMsg = opts.delivery
+      ? enqueueLocalPrompt(opts.displayText || opts.text, opts.attachments)
+      : enqueueLocalTurn(opts.displayText || opts.text, opts.attachments)
     status.value = 'ready'
     void invokeCore('chat.submit', {
       content: opts.text,
@@ -298,8 +401,17 @@ export function useRuntime(options: {
       requestedSkills: opts.requestedSkills,
       clientMessageId: userMsg.id,
       sessionId: activeSessionId,
+      ...(opts.delivery ? { delivery: opts.delivery } : {}),
       ...(draftPayload ?? {}),
     }).catch((err) => {
+      if (opts.delivery) {
+        if (userMsg.role === 'user') {
+          userMsg.deliveryState = 'cancelled'
+          userMsg.deliveryReason = displayError(err)
+        }
+        options.showToast(displayError(err))
+        return
+      }
       handleChatSubmitError(err)
     })
     return true
@@ -407,7 +519,7 @@ export function useRuntime(options: {
   ) {
     if (busy.value) return false
     if (hasCoreBridge()) {
-      connectCoreEvents()
+      connectSocket()
       return sendControlPayloadViaCore(payload, userLabel, expectAssistant)
     }
     markCoreBridgeUnavailable(true)
@@ -558,51 +670,19 @@ export function useRuntime(options: {
     return ''
   }
 
-  // P1-7：session 行运行状态。运行事件点亮 spinner；终态事件熄灭，后台 session 完成时点提醒点。
-  const SESSION_RUNNING_EVENTS = new Set([
-    'user_message',
-    'message_delta',
-    'agent_thought',
-    'plan_draft_delta',
-    'tool_call',
-    'tool_run_queued',
-    'tool_run_started',
-    'tool_result',
-    'tool_run_completed',
-    'tool_run_failed',
-    'hook_run_started',
-    'hook_run_progress',
-  ])
-  const SESSION_TERMINAL_EVENTS = new Set([
-    'assistant_done',
-    'turn_paused',
-    'runtime_task_cancelled',
-    'error',
-  ])
-
-  function trackSessionRuntimeState(data: WsEvent): void {
-    const owner = eventOwnerSessionId(data)
-    if (!owner) return
-    if (SESSION_RUNNING_EVENTS.has(data.event)) {
-      sessionRuntimeStateFor(owner).running = true
-      return
+  function syncSessionProjection(state: SessionProjectionState): void {
+    sessionId.value = state.activeSessionId
+    lastSeq.value = state.activeLastSeq
+    status.value = state.transport
+    for (const id of Object.keys(sessionRuntimeStates)) {
+      if (!state.sessions[id]) delete sessionRuntimeStates[id]
     }
-    if (SESSION_TERMINAL_EVENTS.has(data.event)) {
-      const state = sessionRuntimeStateFor(owner)
-      state.running = false
-      if (owner === String(sessionId.value || '').trim())
-        state.attention = false
-      else state.attention = true
+    for (const [id, value] of Object.entries(state.sessions)) {
+      sessionRuntimeStates[id] = {
+        running: value.running,
+        attention: value.attention,
+      }
     }
-  }
-
-  function sessionRuntimeStateFor(id: string): {
-    running: boolean
-    attention: boolean
-  } {
-    if (!sessionRuntimeStates[id])
-      sessionRuntimeStates[id] = { running: false, attention: false }
-    return sessionRuntimeStates[id]!
   }
 
   function settleSessionRuntime(
@@ -611,46 +691,22 @@ export function useRuntime(options: {
   ): void {
     const owner = String(id || '').trim()
     if (!owner) return
-    const state = sessionRuntimeStateFor(owner)
-    state.running = false
-    state.attention =
-      owner === String(sessionId.value || '').trim() ? false : attention
+    sessionStore.dispatch({
+      type: 'session_settled',
+      sessionId: owner,
+      attention,
+    })
   }
 
   function clearAllSessionRunning(): void {
-    for (const state of Object.values(sessionRuntimeStates)) {
-      state.running = false
-    }
+    sessionStore.dispatch({ type: 'session_running_cleared' })
   }
 
   function clearSessionAttention(id: string): void {
-    const state = sessionRuntimeStates[id]
-    if (state) state.attention = false
-  }
-
-  function isForeignSessionEvent(data: unknown): boolean {
-    const ownerSessionId = eventOwnerSessionId(data)
-    const activeSessionId = String(sessionId.value || '').trim()
-    if (!ownerSessionId || !activeSessionId) return false
-    // draft 会话尚无后端 id，任何归属真实会话的事件都是外部事件
-    if (isDraftSessionId(activeSessionId)) return true
-    return ownerSessionId !== activeSessionId
-  }
-
-  function eventOwnerSessionId(data: unknown): string {
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return ''
-    const payload = data as Record<string, unknown>
-    const direct = String(payload.session_id ?? payload.sessionId ?? '').trim()
-    if (direct) return direct
-    const owner = payload.owner
-    if (owner && typeof owner === 'object' && !Array.isArray(owner)) {
-      return String(
-        (owner as Record<string, unknown>).session_id ??
-          (owner as Record<string, unknown>).sessionId ??
-          '',
-      ).trim()
-    }
-    return ''
+    sessionStore.dispatch({
+      type: 'session_attention_cleared',
+      sessionId: id,
+    })
   }
 
   function syncSessionControlPendingFromEvent(data: WsEvent): void {
@@ -750,10 +806,12 @@ export function useRuntime(options: {
   }
 
   function restoreFromHistory(history: RuntimeHistoryItem[] = []) {
-    for (const task of options.boot.value?.runtime?.active_tasks ?? []) {
-      const owner = String(task?.session_id ?? '').trim()
-      if (owner) sessionRuntimeStateFor(owner).running = true
-    }
+    sessionStore.dispatch({
+      type: 'session_bootstrap_tasks',
+      sessionIds: (options.boot.value?.runtime?.active_tasks ?? []).map(
+        (task) => String(task?.session_id ?? '').trim(),
+      ),
+    })
     const runtimeEvents = options.boot.value?.runtime?.events || []
     if (runtimeEvents.length) {
       restoreFromRuntimeEvents(runtimeEvents)
@@ -801,12 +859,15 @@ export function useRuntime(options: {
     currentAssistantId.value = null
     busy.value = false
     updatePending()
-    lastSeq.value = 0
     projectionRuntime = createProjectionRuntime()
     rehydrating = true
     try {
       const scope =
         sessionId.value || options.boot.value?.runtime?.sessionId || null
+      const replay = replayRendererProjection(
+        createRendererProjectionState(String(scope || '')),
+        events,
+      )
       for (const event of sortRuntimeEvents(events)) {
         if (isChatProjectionEvent(event)) {
           applyChatProjectionEvent(
@@ -817,17 +878,22 @@ export function useRuntime(options: {
           )
         }
       }
-      replayRuntimeEvents(
-        events.filter((event) => !isChatProjectionEvent(event)),
-        ({ event }) => handleSocketEvent(JSON.stringify(event)),
-      )
+      sessionStore.dispatch({
+        type: 'session_replay_completed',
+        state: replay.state.session,
+      })
+      syncTaskProjection(replay.state.tasks)
+      for (const event of replay.acceptedEvents) {
+        if (!isChatProjectionEvent(event as RuntimeEventEnvelope))
+          applyNonChatProjection(event, 'replay')
+      }
+      sessionStore.dispatch({
+        type: 'session_cursor_advanced',
+        seq: Number(options.boot.value?.runtime?.latestSeq || 0),
+      })
     } finally {
       rehydrating = false
     }
-    lastSeq.value = Math.max(
-      lastSeq.value,
-      Number(options.boot.value?.runtime?.latestSeq || 0),
-    )
     const assistant = currentAssistant.value
     busy.value = Boolean(assistant?.streaming)
     if (assistant?.streaming && options.boot.value?.runtime?.busy === false) {
@@ -847,23 +913,30 @@ export function useRuntime(options: {
       return
     }
 
+    const sessionTransition = sessionStore.dispatch({
+      type: 'runtime_event_received',
+      origin: 'live',
+      event: data,
+    })
+    const decision = sessionTransition.meta
+
     if (data.event === 'ready') {
-      handleReadyEvent(data)
+      handleReadyEvent(data, Boolean(decision?.serverRestarted))
       return
     }
 
-    // 先喂状态槽（只读 event 名与归属 id），再做外部 session 丢弃
-    trackSessionRuntimeState(data)
-
-    if (isForeignSessionEvent(data)) {
+    if (decision?.foreign) {
       syncSessionControlPendingFromEvent(data)
       return
     }
+    if (decision?.accepted === false) return
 
-    if (typeof data.seq === 'number' && data.seq > 0) {
-      if (data.seq <= lastSeq.value) return
-      lastSeq.value = data.seq
-    }
+    runtimeEffectStore.dispatch({
+      type: 'runtime_event_committed',
+      origin: 'live',
+      sessionId: eventOwnerSessionId(data) || sessionId.value,
+      event: data,
+    })
 
     if (data.event === 'record_degraded') {
       updatePending(
@@ -882,20 +955,36 @@ export function useRuntime(options: {
       return
     }
 
+    applyNonChatProjection(data, 'live')
+  }
+
+  function syncTaskProjection(state: TaskProjectionState): void {
+    taskActionState = state
+    taskProjection.tasks.splice(0, taskProjection.tasks.length, ...state.tasks)
+  }
+
+  function applyNonChatProjection(
+    data: WsEvent,
+    origin: 'live' | 'replay',
+  ): void {
     if (data.event === 'session_created') {
       if (
         data.client_draft_id &&
         data.client_draft_id === sessionId.value &&
         data.session?.id
       ) {
-        sessionId.value = data.session.id
+        sessionStore.dispatch({
+          type: 'session_draft_materialized',
+          draftId: data.client_draft_id,
+          sessionId: data.session.id,
+        })
       }
-      options.onSessionCreated?.(data)
+      if (origin === 'live') options.onSessionCreated?.(data)
       return
     }
 
     if (data.event === 'session_title_updated') {
-      options.onSessionTitleUpdated?.(data)
+      if (origin === 'live') options.onSessionTitleUpdated?.(data)
       return
     }
 
@@ -910,7 +999,7 @@ export function useRuntime(options: {
           }
         }
         // Wave4.3：备用模型降级不再静默
-        if (data.used_fallback) {
+        if (origin === 'live' && data.used_fallback) {
           updatePending(
             '本轮已切换备用模型',
             String(data.fallback_reason || ''),
@@ -923,12 +1012,13 @@ export function useRuntime(options: {
     }
 
     if (data.event === 'model_route_fallback') {
-      updatePending(
-        '已切换备用模型',
-        `${data.from_model || '?'} → ${data.to_model || '?'}${data.reason ? `（${data.reason}）` : ''}`,
-        'error',
-        6000,
-      )
+      if (origin === 'live')
+        updatePending(
+          '已切换备用模型',
+          `${data.from_model || '?'} → ${data.to_model || '?'}${data.reason ? `（${data.reason}）` : ''}`,
+          'error',
+          6000,
+        )
       return
     }
 
@@ -982,16 +1072,14 @@ export function useRuntime(options: {
       return
     }
 
-    if (
-      data.event === 'task_started' ||
-      data.event === 'task_progress' ||
-      data.event === 'task_output' ||
-      data.event === 'task_done' ||
-      data.event === 'task_error' ||
-      data.event === 'task_cancelled'
-    ) {
-      const next = applyTaskEvent({ tasks: taskProjection.tasks }, data)
-      taskProjection.tasks.splice(0, taskProjection.tasks.length, ...next.tasks)
+    if (isTaskRuntimeEvent(data)) {
+      if (origin === 'live')
+        syncTaskProjection(
+          reduceTaskProjection(taskActionState, {
+            type: 'task_event_received',
+            event: data,
+          }).state,
+        )
       return
     }
 
@@ -1023,6 +1111,20 @@ export function useRuntime(options: {
         currentAssistant.value?.streaming
       )
         busy.value = true
+      return
+    }
+    if (data.event === 'prompt_dequeued') {
+      busy.value = true
+      updatePending('开始处理排队消息', '')
+      return
+    }
+    if (data.event === 'prompt_interjected') {
+      busy.value = true
+      updatePending('已在安全边界插话', '')
+      return
+    }
+    if (data.event === 'prompt_cancelled') {
+      updatePending('消息已取消', data.reason || '', 'done', 2500)
       return
     }
     if (data.event === 'message_delta') {
@@ -1097,7 +1199,6 @@ export function useRuntime(options: {
       busy.value = false
       status.value = 'ready'
       updatePending()
-      if (!rehydrating) void options.refreshMemory(false)
       return
     }
     if (data.event === 'turn_paused') {
@@ -1200,14 +1301,14 @@ export function useRuntime(options: {
     return currentAssistant.value
   }
 
-  function handleReadyEvent(data: Extract<WsEvent, { event: 'ready' }>) {
+  function handleReadyEvent(
+    data: Extract<WsEvent, { event: 'ready' }>,
+    serverRestarted: boolean,
+  ) {
     status.value = 'ready'
-    const latestSeq = Number(data.latest_seq || 0)
-    const serverRestarted = lastSeq.value > 0 && latestSeq < lastSeq.value
     const hasReplay = Number(data.replay_count || 0) > 0
 
     if (serverRestarted) {
-      lastSeq.value = latestSeq
       if (currentAssistant.value?.streaming) {
         finishInterruptedAssistant(
           currentAssistant.value,
@@ -1578,6 +1679,24 @@ export function useRuntime(options: {
       )
       return
     }
+    if (data.event === 'scheduler_run_skipped') {
+      updatePending(
+        'Scheduler 任务已跳过',
+        data.job?.name || data.job?.id || data.reason || '',
+        'done',
+        SCHEDULER_DONE_PENDING_MS,
+      )
+      return
+    }
+    if (data.event === 'scheduler_run_interrupted') {
+      updatePending(
+        'Scheduler 任务已中断',
+        data.job?.name || data.job?.id || data.reason || '',
+        'done',
+        SCHEDULER_DONE_PENDING_MS,
+      )
+      return
+    }
     if (data.event === 'scheduler_job_update') {
       updatePending(
         'Scheduler 任务已更新',
@@ -1816,23 +1935,28 @@ export function useRuntime(options: {
     goalProjection,
     sessionRuntimeStates,
     clearSessionAttention,
+    dispose() {
+      pendingStore.dispose()
+      runtimeEffectStore.dispose()
+      sessionStore.dispose()
+      sessionEffectExecutor.close()
+    },
     runtimeText,
     eventTransportText,
     switchSession(id: string) {
-      sessionId.value = id
-      clearSessionAttention(id)
       messages.value = []
       currentAssistantId.value = null
       busy.value = false
-      lastSeq.value = 0
       projectionRuntime = createProjectionRuntime()
+      syncTaskProjection(createTaskProjectionState())
       Object.assign(goalProjection, createGoalProjectionState())
       updatePending()
-      if (coreUnsubscribe) {
-        coreUnsubscribe()
-        coreUnsubscribe = undefined
+      if (hasCoreBridge())
+        sessionStore.dispatch({ type: 'session_switched', sessionId: id })
+      else {
+        sessionStore.dispatch({ type: 'session_switched', sessionId: id })
+        markCoreBridgeUnavailable(true)
       }
-      connectSocket()
     },
     connectSocket,
     sendMessage,

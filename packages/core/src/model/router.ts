@@ -5,6 +5,8 @@ import {
   findEntry,
   type ModelConfig,
   type ModelEntry,
+  type ModelFallbackTrigger,
+  type ModelPricing,
   resolveProviderName,
 } from '../config/model-config'
 import { createProvider } from '../providers/factory'
@@ -32,6 +34,7 @@ export interface ProviderSnapshot {
   contextWindowTokens: number
   config: Record<string, unknown>
   supportsVision: boolean
+  pricing?: ModelPricing
   /** Compatibility-optional for synthetic test snapshots; real snapshots always set it. */
   modelEntryId?: string
   /** @deprecated CoreApi 迁移期间的只读别名。 */
@@ -46,6 +49,11 @@ export interface ModelRoute {
   snapshot: ProviderSnapshot
   /** @deprecated Historical synthetic fixtures only; real routes omit it. */
   fallback?: ProviderSnapshot | null
+  executionPolicy?: {
+    fallback: ProviderSnapshot | null
+    triggerOn: ModelFallbackTrigger[]
+    maxUsdPerAgentTurn: number | null
+  }
   useCase: string
   reason: string
   estimatedTokens: number | null
@@ -56,6 +64,7 @@ export class ModelRouter {
   readonly modelOverride: string | null
   readonly availability: ModelAvailability
   readonly active: ProviderSnapshot
+  readonly executionPolicy: ModelRoute['executionPolicy']
   private readonly routeCounts = new Map<string, number>()
 
   constructor(
@@ -68,6 +77,7 @@ export class ModelRouter {
     this.modelOverride = modelOverride ?? null
     this.availability = modelAvailability(config)
     this.active = buildProviderSnapshot(config)
+    this.executionPolicy = buildExecutionPolicy(config)
   }
 
   route(
@@ -92,6 +102,20 @@ export class ModelRouter {
   private activeRoute(useCase: string, task?: string | null): ModelRoute {
     return {
       snapshot: { ...this.active, routeReason: useCase },
+      ...(this.executionPolicy
+        ? {
+            executionPolicy: {
+              ...this.executionPolicy,
+              fallback: this.executionPolicy.fallback
+                ? {
+                    ...this.executionPolicy.fallback,
+                    routeReason: `${useCase}:explicit_fallback`,
+                  }
+                : null,
+              triggerOn: [...this.executionPolicy.triggerOn],
+            },
+          }
+        : {}),
       useCase,
       reason: useCase,
       estimatedTokens: task ? roughTokenEstimate(task) : null,
@@ -177,10 +201,31 @@ export function buildProviderSnapshot(
     contextWindowTokens,
     config: config.raw,
     supportsVision: profile.vision,
+    ...(entry.pricing ? { pricing: structuredClone(entry.pricing) } : {}),
     modelEntryId: entry.entryId || entry.name,
     entryName: entry.entryId || entry.name,
     entryLabel: entry.displayName || entry.label || entry.name,
     routeReason: 'active_model',
+  }
+}
+
+function buildExecutionPolicy(
+  config: ModelConfig,
+): ModelRoute['executionPolicy'] {
+  const policy = config.policy
+  const hasFallback =
+    policy.fallback.enabled && Boolean(policy.fallback.entryId)
+  const hasCostCap = policy.cost.maxUsdPerAgentTurn !== null
+  if (!hasFallback && !hasCostCap) return undefined
+  return {
+    fallback:
+      hasFallback && policy.fallback.entryId
+        ? buildProviderSnapshot(config, {
+            modelOverride: policy.fallback.entryId,
+          })
+        : null,
+    triggerOn: [...policy.fallback.triggerOn],
+    maxUsdPerAgentTurn: policy.cost.maxUsdPerAgentTurn,
   }
 }
 

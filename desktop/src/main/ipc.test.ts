@@ -250,10 +250,27 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     errorSpy.mockRestore()
   })
 
-  it('rejects unknown operation keys before creating an IPC channel', () => {
-    expect(() => channelForCoreOperation('missing.operation' as never)).toThrow(
-      'invalid core IPC operation',
+  it('contains unknown well-formed keys inside the fixed Core namespace', () => {
+    expect(channelForCoreOperation('missing.operation' as never)).toBe(
+      'emperor:core:missing:operation',
     )
+  })
+
+  it('rejects malformed keys before they can escape the Core namespace', () => {
+    for (const key of [
+      '',
+      '.bootstrap',
+      'bootstrap.',
+      'chat..submit',
+      'chat:submit',
+      '../bootstrap',
+      'chat/submit',
+      'chat submit',
+    ]) {
+      expect(() => channelForCoreOperation(key as never)).toThrow(
+        'invalid core IPC operation',
+      )
+    }
   })
 
   it('passes safe domain errors through the IPC boundary', async () => {

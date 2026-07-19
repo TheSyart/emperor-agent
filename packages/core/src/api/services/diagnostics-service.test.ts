@@ -29,7 +29,127 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       }),
       runtimeStats: () => ({ events: 2, archiveFiles: 1 }),
       externalPayload: () => ({ running: true, store: { exists: true } }),
+      lifecycle: () => ({
+        state: 'ready',
+        failedServiceId: null,
+        failedPhase: null,
+        services: [
+          {
+            id: 'scheduler',
+            required: true,
+            dependsOn: ['session-runtime'],
+            state: 'ready',
+            error: null,
+          },
+        ],
+      }),
+      subagents: () => ({
+        active: 2,
+        maxGlobal: 6,
+        maxPerSession: 3,
+        bySession: { session_1: 2 },
+        taskIds: ['subagent_1', 'subagent_2'],
+      }),
+      agentDefinitions: () =>
+        ({
+          schemaVersion: 1,
+          revision: 'agents-r1',
+          sources: [
+            {
+              id: 'emperor-builtin-agents',
+              kind: 'builtin',
+              trust: 'system',
+              active: true,
+            },
+          ],
+          agents: [{ definition: { name: 'sili_suitang' } }],
+          aliases: { researcher: 'dongchang_tanshi' },
+          diagnostics: [],
+        }) as never,
+      effectiveConfig: async () => ({
+        schemaVersion: 1,
+        revision: 'a'.repeat(64),
+        entries: [
+          {
+            key: 'sandbox.runtime',
+            value: { command: 'required' },
+            source: {
+              kind: 'builtin',
+              id: 'sandbox.runtime:builtin',
+              trust: 'trusted',
+            },
+            trust: 'trusted',
+            trace: [],
+            secretSources: [],
+          },
+        ],
+      }),
+      hybridMemory: () => ({
+        capability: {
+          requestedMode: 'on',
+          effectiveMode: 'eval',
+          promptMutationAllowed: false,
+          reason: 'embedding_unavailable',
+          evaluationDatasetSha256: null,
+          embeddingProviderId: null,
+        },
+        indexPath: join(root, 'memory', 'hybrid-index', 'index.v1.json'),
+        searches: 3,
+        promptMutations: 0,
+        embeddingFallbacks: 1,
+        lastStrategy: 'fts_fallback',
+        lastResultCount: 4,
+        lastSourceDigest: 'a'.repeat(64),
+        derivedDiskBytes: 4096,
+      }),
+      codeIntelligence: () => ({
+        capability: {
+          requestedMode: 'on',
+          effectiveMode: 'eval',
+          toolAllowed: false,
+          reason: 'gate_missing',
+          evaluationDatasetSha256: null,
+          parserRevision: 'typescript-5.9-code-graph-v1',
+        },
+        graphManagers: 0,
+        queries: 0,
+        lspQueries: 0,
+        graphFallbacks: 0,
+        notifications: 0,
+        lastStrategy: null,
+        lastLatencyMs: null,
+        graph: {
+          state: 'idle',
+          version: 0,
+          indexedFiles: 0,
+          sourceBytes: 0,
+          parserLoads: 0,
+          parseErrors: 0,
+          skippedOversized: 0,
+          skippedSymlinks: 0,
+          skippedBinary: 0,
+          skippedUnsupported: 0,
+          skippedCapacity: 0,
+          oversizedFileGateVerified: false,
+          cacheStatus: 'not_checked',
+          cacheBytes: 0,
+        },
+        lsp: [],
+      }),
       activeTasks: () => [{ id: 'turn:1', status: 'running' }],
+      sessionRuntimes: () => [
+        {
+          sessionId: 'session_1',
+          running: true,
+          queued: 1,
+          closed: false,
+          commandReceipts: 2,
+          pendingInterjections: 0,
+          interjectionReceipts: 0,
+          illegalTransitions: 0,
+          lastUsed: 4,
+        },
+      ],
       desktopPetPayload: async () => ({ enabled: false, running: false }),
       environmentSummary: async () => ({
         platform: 'darwin',
@@ -69,7 +189,53 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     })
     expect(payload.runtime).toMatchObject({ events: 2, archiveFiles: 1 })
     expect(payload.external).toMatchObject({ running: true })
+    expect(payload.lifecycle).toMatchObject({
+      state: 'ready',
+      services: [{ id: 'scheduler', state: 'ready' }],
+    })
+    expect(payload.subagents).toEqual({
+      active: 2,
+      maxGlobal: 6,
+      maxPerSession: 3,
+      bySession: { session_1: 2 },
+      taskIds: ['subagent_1', 'subagent_2'],
+    })
+    expect(payload.agentDefinitions).toMatchObject({
+      schemaVersion: 1,
+      revision: 'agents-r1',
+      sources: [{ kind: 'builtin', trust: 'system', active: true }],
+      agents: [{ definition: { name: 'sili_suitang' } }],
+      diagnostics: [],
+    })
+    expect(payload.effectiveConfig).toMatchObject({
+      revision: 'a'.repeat(64),
+      entries: [{ key: 'sandbox.runtime' }],
+    })
+    expect(payload.hybridMemory).toMatchObject({
+      capability: {
+        requestedMode: 'on',
+        effectiveMode: 'eval',
+        reason: 'embedding_unavailable',
+      },
+      searches: 3,
+      promptMutations: 0,
+      embeddingFallbacks: 1,
+    })
+    expect(payload.codeIntelligence).toMatchObject({
+      capability: {
+        requestedMode: 'on',
+        effectiveMode: 'eval',
+        toolAllowed: false,
+        reason: 'gate_missing',
+      },
+      graphManagers: 0,
+      graph: { state: 'idle', indexedFiles: 0 },
+      lsp: [],
+    })
     expect(payload.activeTasks).toHaveLength(1)
+    expect(payload.sessionRuntimes).toEqual([
+      expect.objectContaining({ sessionId: 'session_1', running: true }),
+    ])
     expect(payload.desktopPet).toMatchObject({ enabled: false, running: false })
     expect(payload.environment).toEqual({
       platform: 'darwin',
@@ -111,6 +277,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         tokensFile: join(stateRoot, 'tokens', 'tokens.jsonl'),
         schedulerRoot: join(stateRoot, 'scheduler'),
         tasksRoot: join(stateRoot, 'tasks'),
+        processesRoot: join(stateRoot, 'processes'),
         controlRoot: join(stateRoot, 'control'),
         externalRoot: join(stateRoot, 'external'),
       },
@@ -121,6 +288,15 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         denyRoots: [{ path: stateRoot, label: 'state' }],
         readOnlyRoots: [],
         outsideWorkspace: 'deny',
+      }),
+      sandboxCapability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'probe passed',
       }),
     })
 
@@ -144,6 +320,15 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       outsideWorkspace: 'deny',
       allowRoots: [{ path: workspace, label: 'workspace' }],
       denyRoots: [{ path: stateRoot, label: 'state' }],
+    })
+    expect(payload.sandbox).toEqual({
+      platform: 'darwin',
+      backend: 'macos-seatbelt',
+      status: 'available',
+      filesystem: 'workspace-write',
+      network: 'policy-controlled',
+      processTree: true,
+      reason: 'probe passed',
     })
   })
 

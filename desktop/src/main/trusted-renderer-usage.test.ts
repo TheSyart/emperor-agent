@@ -24,5 +24,16 @@ describe('trusted renderer policy wiring', () => {
         ),
       )
     }
+
+    for (const channel of [
+      'emperor:pet:renderer-bootstrap',
+      'emperor:pet:renderer-close',
+    ]) {
+      expect(source).toMatch(
+        new RegExp(
+          `ipcMain\\.handle\\('${channel}'[\\s\\S]{0,220}trustedPetPolicy\\.authorizeIpc\\(event\\)`,
+        ),
+      )
+    }
   })
 })

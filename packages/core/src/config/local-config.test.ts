@@ -23,6 +23,12 @@ describe('local config', () => {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
+      memory: { hybridMemory: 'eval' },
+      codeIntelligence: { mode: 'eval' },
+      workspace: {
+        fileCheckpoints: { enabled: true },
+        gitRewind: { mode: 'eval' },
+      },
       permissions: {
         rules: [
           {
@@ -42,6 +48,12 @@ describe('local config', () => {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
+      memory: { hybridMemory: 'eval' },
+      codeIntelligence: { mode: 'eval' },
+      workspace: {
+        fileCheckpoints: { enabled: true },
+        gitRewind: { mode: 'eval' },
+      },
       permissions: {
         rules: [
           {
@@ -71,6 +83,10 @@ describe('local config', () => {
       autoStartWithWebui: false,
     })
     expect(loaded.prompt).toEqual({ profile: 'classic' })
+    expect(loaded.memory).toEqual({ hybridMemory: 'eval' })
+    expect(loaded.codeIntelligence).toEqual({ mode: 'eval' })
+    expect(loaded.workspace.fileCheckpoints).toEqual({ enabled: true })
+    expect(loaded.workspace.gitRewind).toEqual({ mode: 'eval' })
     expect(loaded.permissions.rules).toEqual([
       {
         id: 'ask-publish',
@@ -109,7 +125,41 @@ describe('local config', () => {
       autoStartWithWebui: false,
     })
     expect(parsed.prompt).toEqual({ profile: 'technical' })
+    expect(parsed.memory).toEqual({ hybridMemory: 'off' })
+    expect(parsed.codeIntelligence).toEqual({ mode: 'off' })
+    expect(parsed.workspace.fileCheckpoints).toEqual({ enabled: false })
+    expect(parsed.workspace.gitRewind).toEqual({ mode: 'off' })
     expect(parsed.permissions.rules).toHaveLength(2)
+  })
+
+  it('accepts only typed hybrid memory modes and defaults invalid values off', () => {
+    expect(
+      parseLocalConfig({ memory: { hybrid_memory: 'on' } }).memory,
+    ).toEqual({ hybridMemory: 'on' })
+    expect(
+      parseLocalConfig({ memory: { hybridMemory: 'surprise' } }).memory,
+    ).toEqual({ hybridMemory: 'off' })
+  })
+
+  it('accepts canonical and snake-case code intelligence modes and defaults invalid values off', () => {
+    expect(
+      parseLocalConfig({ code_intelligence: { mode: 'on' } }).codeIntelligence,
+    ).toEqual({ mode: 'on' })
+    expect(
+      parseLocalConfig({ codeIntelligence: { mode: 'surprise' } })
+        .codeIntelligence,
+    ).toEqual({ mode: 'off' })
+  })
+
+  it('accepts canonical and snake-case soft Git rewind modes and defaults invalid values off', () => {
+    expect(
+      parseLocalConfig({ workspace: { git_rewind: { mode: 'on' } } }).workspace
+        .gitRewind,
+    ).toEqual({ mode: 'on' })
+    expect(
+      parseLocalConfig({ workspace: { gitRewind: { mode: 'surprise' } } })
+        .workspace.gitRewind,
+    ).toEqual({ mode: 'off' })
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {

@@ -23,6 +23,7 @@ import {
   validateMemberName,
 } from './models'
 import { TeamStore } from './store'
+import { teamThreadRevision } from './store'
 import {
   TeamBroadcastTool,
   TeamListTool,
@@ -189,6 +190,343 @@ describe('TeamStore and MessageBus', () => {
 })
 
 describe('TeamManager and tools', () => {
+  it('resumes a prepared checkpoint without duplicating the pending inbox turn', async () => {
+    const root = tmp('emperor-team-checkpoint-prepared-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    const pending = bus.send({
+      from_actor: LEAD_ACTOR,
+      to: 'alice',
+      content: 'original inbox task',
+      type: 'task',
+    })
+    const preparedHistory = [
+      { role: 'system', content: 'durable prepared marker' },
+      { role: 'user', content: 'prepared inbox rendering' },
+    ]
+    store.writeCheckpoint('alice', preparedHistory, {
+      checkpoint_version: 2,
+      turn_id: 'turn_prepared',
+      phase: 'prepared',
+      base_thread_revision: teamThreadRevision([]),
+      pending_cursor_start: 0,
+      pending_cursor_end: 1,
+      pending_message_ids: [pending.id],
+    })
+
+    const histories: Array<Array<Record<string, unknown>>> = []
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: (history) => {
+          histories.push(structuredClone(history))
+          return 'prepared resumed'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toBe('prepared resumed')
+    expect(histories).toEqual([preparedHistory])
+    expect(manager.store.readCursor('alice')).toBe(1)
+    expect(manager.store.readCheckpointPayload('alice')).toBeNull()
+  })
+
+  it('fails closed when a checkpoint file exists but cannot be decoded', async () => {
+    const root = tmp('emperor-team-checkpoint-corrupt-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    bus.send({ from_actor: LEAD_ACTOR, to: 'alice', content: 'do not replay' })
+    writeFileSync(store.checkpointPath('alice'), '{broken checkpoint', 'utf8')
+    let calls = 0
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return 'unsafe replay'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toMatch(
+      /checkpoint.*corrupt|cannot be decoded/i,
+    )
+    expect(calls).toBe(0)
+    expect(manager.store.readCursor('alice')).toBe(0)
+    expect(existsSync(manager.store.checkpointPath('alice'))).toBe(true)
+  })
+
+  it('rejects a prepared checkpoint when its durable thread revision diverges', async () => {
+    const root = tmp('emperor-team-checkpoint-revision-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    const pending = bus.send({
+      from_actor: LEAD_ACTOR,
+      to: 'alice',
+      content: 'revision guarded task',
+    })
+    store.writeCheckpoint('alice', [{ role: 'user', content: 'prepared' }], {
+      checkpoint_version: 2,
+      turn_id: 'turn_revision',
+      phase: 'prepared',
+      base_thread_revision: teamThreadRevision([]),
+      pending_cursor_start: 0,
+      pending_cursor_end: 1,
+      pending_message_ids: [pending.id],
+    })
+    store.writeThread('alice', [{ role: 'assistant', content: 'diverged' }])
+    let calls = 0
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return 'must not run'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toMatch(/revision diverged/i)
+    expect(calls).toBe(0)
+    expect(manager.store.readCursor('alice')).toBe(0)
+  })
+
+  it('fails closed for an ambiguous running checkpoint until retry is explicit', async () => {
+    const root = tmp('emperor-team-checkpoint-running-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    const pending = bus.send({
+      from_actor: LEAD_ACTOR,
+      to: 'alice',
+      content: 'may have caused an external effect',
+    })
+    const runningHistory = [{ role: 'user', content: 'running turn' }]
+    store.writeCheckpoint('alice', runningHistory, {
+      checkpoint_version: 2,
+      turn_id: 'turn_running',
+      phase: 'running',
+      base_thread_revision: teamThreadRevision([]),
+      pending_cursor_start: 0,
+      pending_cursor_end: 1,
+      pending_message_ids: [pending.id],
+    })
+
+    let calls = 0
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return 'explicit retry completed'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toMatch(
+      /ambiguous.*recovery.*retry/i,
+    )
+    expect(calls).toBe(0)
+    expect(manager.store.readCursor('alice')).toBe(0)
+    expect(manager.store.readCheckpointPayload('alice')?.phase).toBe('running')
+
+    expect(await manager.wakeTeammate('alice', { recovery: 'retry' })).toBe(
+      'explicit retry completed',
+    )
+    expect(calls).toBe(1)
+    expect(manager.store.readCursor('alice')).toBe(1)
+  })
+
+  it('finalizes a completed checkpoint without rerunning or duplicating its lead receipt', async () => {
+    const root = tmp('emperor-team-checkpoint-terminal-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    const pending = bus.send({
+      from_actor: LEAD_ACTOR,
+      to: 'alice',
+      content: 'finish this once',
+    })
+    const finalHistory = [{ role: 'user', content: 'completed turn' }]
+    store.writeCheckpoint('alice', finalHistory, {
+      checkpoint_version: 2,
+      turn_id: 'turn_terminal',
+      phase: 'terminal_pending',
+      base_thread_revision: teamThreadRevision([]),
+      final_thread_revision: teamThreadRevision(finalHistory),
+      pending_cursor_start: 0,
+      pending_cursor_end: 1,
+      pending_message_ids: [pending.id],
+      last_effect_receipt: {
+        kind: 'runner_result',
+        result: 'durable completed result',
+        reply_required: true,
+        reply_message_id: null,
+      },
+    })
+    bus.send({
+      from_actor: 'alice',
+      to: LEAD_ACTOR,
+      content: 'durable completed result',
+      type: 'result',
+      in_reply_to: pending.id,
+      meta: { team_turn_id: 'turn_terminal' },
+    })
+
+    let calls = 0
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return 'must not run'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toBe('durable completed result')
+    expect(calls).toBe(0)
+    expect(manager.store.readCursor('alice')).toBe(1)
+    expect(manager.store.readThread('alice')).toEqual(finalHistory)
+    expect(
+      manager.bus
+        .allMessages(LEAD_ACTOR)
+        .filter((message) => message.meta.team_turn_id === 'turn_terminal'),
+    ).toHaveLength(1)
+    expect(manager.store.readCheckpointPayload('alice')).toBeNull()
+  })
+
+  it('rejects a terminal checkpoint with a malformed effect receipt', async () => {
+    const root = tmp('emperor-team-checkpoint-receipt-')
+    const store = new TeamStore(root)
+    store.upsertMember(
+      new TeamMember({
+        name: 'alice',
+        role: 'reader',
+        agent_type: 'sili_suitang',
+      }),
+    )
+    const bus = new MessageBus(store)
+    const pending = bus.send({
+      from_actor: LEAD_ACTOR,
+      to: 'alice',
+      content: 'receipt guarded task',
+    })
+    const finalHistory = [{ role: 'user', content: 'completed' }]
+    writeFileSync(
+      store.checkpointPath('alice'),
+      JSON.stringify({
+        version: 1,
+        member: 'alice',
+        messages: finalHistory,
+        checkpoint_version: 2,
+        turn_id: 'turn_bad_receipt',
+        phase: 'terminal_pending',
+        base_thread_revision: teamThreadRevision([]),
+        final_thread_revision: teamThreadRevision(finalHistory),
+        pending_cursor_start: 0,
+        pending_cursor_end: 1,
+        pending_message_ids: [pending.id],
+        last_effect_receipt: {
+          kind: 'runner_result',
+          result: 'must not be accepted',
+          reply_required: 'yes',
+          reply_message_id: null,
+        },
+      }),
+      'utf8',
+    )
+    let calls = 0
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return 'must not run'
+        },
+      }),
+    })
+
+    expect(await manager.wakeTeammate('alice')).toMatch(
+      /missing.*effect receipt|invalid.*effect receipt/i,
+    )
+    expect(calls).toBe(0)
+    expect(manager.store.readCursor('alice')).toBe(0)
+  })
+
+  it('never lets a late runner result overwrite a shutdown member state', async () => {
+    const root = tmp('emperor-team-late-terminal-')
+    let releaseRunner!: (result: string) => void
+    let signalStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve
+    })
+    const runnerResult = new Promise<string>((resolve) => {
+      releaseRunner = resolve
+    })
+    const manager = new TeamManager({
+      root,
+      subagentRegistry: fakeSubagents(),
+      runnerFactory: () => ({
+        step: async () => {
+          signalStarted()
+          return runnerResult
+        },
+      }),
+    })
+    await manager.spawnTeammate({ name: 'alice', role: 'reader' })
+    const wake = manager.sendMessage({
+      to: 'alice',
+      content: 'long running task',
+      wake: true,
+    })
+    await started
+    await manager.shutdownTeammate({ name: 'alice' })
+    releaseRunner('late completed result')
+    await wake
+
+    expect(manager.store.getMember('alice')?.status).toBe(TeamStatus.SHUTDOWN)
+  })
+
   it('spawns teammates, wakes on messages, writes lead replies, and exposes payloads', async () => {
     const root = tmp('emperor-team-manager-')
     const parentRegistry = new ToolRegistry()

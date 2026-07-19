@@ -24,6 +24,7 @@ export function resolveToolProfile(
   let concurrencySafe = tool ? Boolean(tool.concurrencySafe) : false
   let destructive = !readOnly
   let path = argumentPath(args)
+  let paths = path ? [path] : []
 
   if (tool) {
     try {
@@ -52,6 +53,16 @@ export function resolveToolProfile(
         /* keep argument path */
       }
     }
+    if (typeof tool.getPaths === 'function') {
+      try {
+        paths = uniquePaths(tool.getPaths(args))
+        path = paths[0] ?? path
+      } catch {
+        /* keep argument paths */
+      }
+    } else if (path) {
+      paths = [path]
+    }
   }
 
   return makeProfile({
@@ -61,7 +72,16 @@ export function resolveToolProfile(
     concurrencySafe,
     destructive,
     path,
+    paths,
     command: String((args && args.command) || ''),
     schedulerAction: schedulerAction(args),
   })
+}
+
+function uniquePaths(values: unknown[]): string[] {
+  return [
+    ...new Set(
+      values.map((value) => String(value ?? '').trim()).filter(Boolean),
+    ),
+  ]
 }

@@ -348,6 +348,7 @@ export class HookOrchestrator {
             await this.executor.execute(item.handler, input, {
               ...context,
               signal,
+              processOwnerId: hookRunId,
             }),
           onCompleted: async (completion) => {
             const execution = completion.value
@@ -415,11 +416,10 @@ export class HookOrchestrator {
 
     let result: HookOrchestratorRunResult
     try {
-      const execution = await this.executor.execute(
-        item.handler,
-        input,
-        context,
-      )
+      const execution = await this.executor.execute(item.handler, input, {
+        ...context,
+        processOwnerId: hookRunId,
+      })
       result = normalizedExecutionResult(item, hookRunId, execution, started)
     } catch (error) {
       result = runResult(

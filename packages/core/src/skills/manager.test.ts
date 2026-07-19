@@ -32,6 +32,36 @@ function fixture(): {
 }
 
 describe('SkillManager', () => {
+  it('resolves a user override with an explicit builtin-to-user trace', () => {
+    const { manager, runtimeRoot, stateRoot } = fixture()
+    for (const [root, description] of [
+      [join(runtimeRoot, 'skills'), 'builtin'],
+      [join(stateRoot, 'skills'), 'user'],
+    ] as const) {
+      const skill = join(root, 'same-skill')
+      mkdirSync(skill, { recursive: true })
+      writeFileSync(
+        join(skill, 'SKILL.md'),
+        `---\nname: same-skill\ndescription: ${description}\n---\n`,
+      )
+    }
+
+    const resolved = manager.resolveWithProvenance('same-skill')
+
+    expect(resolved.value).toMatchObject({
+      name: 'same-skill',
+      source: 'user',
+    })
+    expect(resolved.source).toMatchObject({ kind: 'user', trust: 'trusted' })
+    expect(resolved.overridden).toEqual([
+      expect.objectContaining({
+        source: expect.objectContaining({ kind: 'builtin' }),
+        value: expect.objectContaining({ source: 'builtin' }),
+      }),
+    ])
+    expect(manager.resolve('same-skill')).toEqual(resolved.value)
+  })
+
   it('creates stable snapshots for arbitrary staging directories', () => {
     const { manager, stateRoot } = fixture()
     const staged = join(stateRoot, 'staged-source')

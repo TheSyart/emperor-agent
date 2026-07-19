@@ -8,21 +8,35 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { describe, expect, it, vi } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { ExternalInbound } from '../external/models'
+import { signWebhookBody } from '../external/signed-webhook'
 import { makePlanRecord, PlanStatus } from '../plans/models'
 import { ToolResultStore } from '../context/tool-results'
 import { RuntimeEventStore } from '../runtime/store'
-import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
+import {
+  SchedulerActiveRun,
+  SchedulerMisfirePolicy,
+  SchedulerPayload,
+  SchedulerRunTrigger,
+  SchedulerSchedule,
+} from '../scheduler/models'
 import { CoreApi, CORE_API_ROUTE_OPERATIONS } from './core-api'
 import { CoreMutationGuardError } from './mutation-guard'
 import { CoreSkillService } from './services/skill-service'
+import { CoreEnvironmentService } from './services/environment-service'
+import { AgentLoop } from '../agent/loop'
 import { GoalContractValidator, newGoalRecord } from '../goals/validation'
 import { ControlManager } from '../control/manager'
+import type { SubagentLaunchResult } from '../subagents/supervisor'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -32,6 +46,7 @@ const EXPECTED_OPERATIONS = [
   'bootstrap',
   'chat.stopRuntime',
   'chat.submit',
+  'config.effective',
   'config.get',
   'config.save',
   'control.answerInteraction',
@@ -50,6 +65,10 @@ const EXPECTED_OPERATIONS = [
   'environment.getStatus',
   'environment.install',
   'external.get',
+  'fileCheckpoints.list',
+  'fileCheckpoints.preview',
+  'fileCheckpoints.rewind',
+  'fileCheckpoints.rewindGit',
   'goals.cancel',
   'goals.get',
   'goals.list',
@@ -68,6 +87,7 @@ const EXPECTED_OPERATIONS = [
   'hooks.validateConfig',
   'mcp.getConfig',
   'mcp.saveConfig',
+  'mcp.status',
   'memory.checkWatchlist',
   'memory.compact',
   'memory.explainContext',
@@ -87,6 +107,7 @@ const EXPECTED_OPERATIONS = [
   'model.getConfig',
   'model.resolveProfile',
   'model.saveEntry',
+  'model.savePolicy',
   'model.setReasoningEffort',
   'model.test',
   'onboarding.getProfileStatus',
@@ -94,6 +115,9 @@ const EXPECTED_OPERATIONS = [
   'onboarding.startProfileInterview',
   'plans.get',
   'plans.list',
+  'processes.cancel',
+  'processes.list',
+  'processes.reparent',
   'projects.list',
   'projects.resolve',
   'runtime.replay',
@@ -121,9 +145,13 @@ const EXPECTED_OPERATIONS = [
   'skills.save',
   'skills.tools',
   'skills.validate',
+  'tasks.cancel',
   'tasks.get',
   'tasks.list',
+  'tasks.readOutput',
+  'tasks.resume',
   'tasks.transcript',
+  'tasks.wait',
   'team.get',
   'team.getMember',
   'team.sendMessage',
@@ -134,6 +162,33 @@ const EXPECTED_OPERATIONS = [
 ]
 
 describe('CoreApi (MIG-IPC-001)', () => {
+  it('stops an already-ready lifecycle when CoreApi initialization fails', async () => {
+    const root = tmp('emperor-core-api-lifecycle-init-failure-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    const stop = vi.spyOn(loop.lifecycleSupervisor, 'stop')
+    const initialize = vi
+      .spyOn(CoreEnvironmentService.prototype, 'initialize')
+      .mockRejectedValueOnce(new Error('injected environment init failure'))
+
+    try {
+      await expect(CoreApi.create({ root, loop })).rejects.toThrow(
+        'injected environment init failure',
+      )
+      expect(stop).toHaveBeenCalledWith('shutdown')
+      expect(loop.lifecycleSupervisor.snapshot().state).toBe('stopped')
+      expect(loop.schedulerService.status().running).toBe(false)
+    } finally {
+      initialize.mockRestore()
+      await loop.close()
+    }
+  })
+
   it('binds an approved Goal Plan before resuming the control turn', async () => {
     const root = tmp('emperor-core-api-goal-plan-')
     const api = await CoreApi.create({
@@ -531,6 +586,83 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('exposes explicit MCP connection status in the operation, bootstrap, and diagnostics', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-mcp-status-'),
+      stateRoot: tmp('emperor-core-api-mcp-status-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(api.mcp.status()).toEqual({
+      initialized: true,
+      servers: [],
+      ready: 0,
+      configured: 0,
+      tools: 0,
+    })
+    await expect(api.bootstrap()).resolves.toMatchObject({
+      mcp: { initialized: true, ready: 0, configured: 0, tools: 0 },
+      diagnostics: {
+        mcp: { initialized: true, ready: 0, configured: 0, tools: 0 },
+      },
+    })
+    await api.close()
+  })
+
+  it('records failed MCP lifecycle state as a diagnostic V2 event instead of an empty-tool ambiguity', async () => {
+    const root = tmp('emperor-core-api-mcp-lifecycle-')
+    const stateRoot = tmp('emperor-core-api-mcp-lifecycle-state-')
+    writeFileSync(
+      join(stateRoot, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          broken: { enabled: true, transport: 'sse', url: null },
+        },
+      }),
+      'utf8',
+    )
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    expect(api.mcp.status()).toMatchObject({
+      configured: 1,
+      ready: 0,
+      tools: 0,
+      servers: [
+        {
+          serverName: 'broken',
+          generation: 1,
+          state: 'failed',
+          health: 'unhealthy',
+          lastError: { code: 'mcp_connection_failed' },
+        },
+      ],
+    })
+    const replay = api.runtime.replay({
+      sessionId: api.loop.activeSessionId,
+      afterSeq: 0,
+      format: 'envelope_v2',
+    })
+    expect(replay.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'mcp_connection_state',
+          visibility: 'diagnostic',
+          payload: expect.objectContaining({
+            server_name: 'broken',
+            state: 'failed',
+          }),
+        }),
+      ]),
+    )
+    await api.close()
+  })
+
   it('exposes a typed in-process method for every retired web route operation', async () => {
     const api = await CoreApi.create({
       root: tmp('emperor-core-api-'),
@@ -545,6 +677,183 @@ describe('CoreApi (MIG-IPC-001)', () => {
     for (const key of EXPECTED_OPERATIONS) {
       expect(resolveMethod(api, key), key).toBeTypeOf('function')
     }
+    await api.close()
+  })
+
+  it('lists, previews, and explicitly rewinds file checkpoints without accepting a renderer path', async () => {
+    const root = tmp('emperor-core-api-file-checkpoints-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      fileCheckpointsEnabled: true,
+    })
+    const sessionId = api.loop.activeSessionId!
+    const target = join(root, 'checkpoint-api.txt')
+    writeFileSync(target, 'before-api')
+    const captured = await api.loop.fileCheckpoints.capture(
+      {
+        sessionId,
+        turnId: 'turn-api-checkpoint',
+        toolCallId: 'call-api-checkpoint',
+        toolName: 'write_file',
+        workspaceRoot: root,
+        paths: ['checkpoint-api.txt'],
+      },
+      async () => writeFileSync(target, 'after-api'),
+    )
+
+    const listed = await api.fileCheckpoints.list({ sessionId })
+    expect(listed).toMatchObject({
+      enabled: true,
+      sessionId,
+      checkpoints: [{ id: captured.checkpoint!.id }],
+    })
+    expect(listed.checkpoints[0]).not.toHaveProperty('workspaceRoot')
+    expect(listed.checkpoints[0]).not.toHaveProperty('prepared')
+    expect(JSON.stringify(listed)).not.toContain('before-api')
+    expect(JSON.stringify(listed)).not.toContain(root)
+    const preview = await api.fileCheckpoints.preview({
+      sessionId,
+      checkpointId: captured.checkpoint!.id,
+    })
+    expect(preview).toMatchObject({ canRewind: true, conflicts: [] })
+    expect(preview.checkpoint).not.toHaveProperty('workspaceRoot')
+    expect(JSON.stringify(preview)).not.toContain('before-api')
+    await expect(
+      api.fileCheckpoints.rewind({
+        sessionId,
+        checkpointId: captured.checkpoint!.id,
+        confirmed: false as never,
+      }),
+    ).rejects.toThrow(/confirmation/i)
+    await expect(
+      api.fileCheckpoints.rewind({
+        sessionId,
+        checkpointId: captured.checkpoint!.id,
+        confirmed: true,
+      }),
+    ).resolves.toMatchObject({ status: 'rewound' })
+    expect(readFileSync(target, 'utf8')).toBe('before-api')
+    await api.close()
+  })
+
+  it('previews and explicitly soft-rewinds Git through the same conflict-checked file checkpoint', async () => {
+    const root = tmp('emperor-core-api-soft-git-')
+    const stateRoot = tmp('emperor-core-api-soft-git-state-')
+    const gitRun = (...args: string[]) =>
+      execFileSync('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      }).trim()
+    gitRun('init', '--quiet')
+    const target = join(root, 'checkpoint-git.txt')
+    writeFileSync(target, 'before-git\n')
+    gitRun('add', '--', 'checkpoint-git.txt')
+    gitRun(
+      '-c',
+      'user.name=Emperor Test',
+      '-c',
+      'user.email=test@example.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'base',
+    )
+    const baseHead = gitRun('rev-parse', 'HEAD')
+    const gitVersion = execFileSync('git', ['--version'], {
+      encoding: 'utf8',
+    })
+      .trim()
+      .replace('git version ', '')
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      fileCheckpointsEnabled: true,
+      softGitRewindMode: 'on',
+      softGitRewindEvaluationGate: {
+        passed: true,
+        datasetSha256: 'a'.repeat(64),
+        platform: process.platform,
+        gitVersion,
+        stashVerified: true,
+        rollbackVerified: true,
+        conflictVetoVerified: true,
+        forbiddenCommandScanVerified: true,
+      },
+    })
+    const sessionId = api.loop.activeSessionId!
+    const captured = await api.loop.fileCheckpoints.capture(
+      {
+        sessionId,
+        turnId: 'turn-api-soft-git',
+        toolCallId: 'call-api-soft-git',
+        toolName: 'write_file',
+        workspaceRoot: root,
+        paths: ['checkpoint-git.txt'],
+      },
+      async () => writeFileSync(target, 'after-git\n'),
+    )
+    gitRun('add', '--', 'checkpoint-git.txt')
+    gitRun(
+      '-c',
+      'user.name=Emperor Test',
+      '-c',
+      'user.email=test@example.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'agent change',
+    )
+
+    const preview = await api.fileCheckpoints.preview({
+      sessionId,
+      checkpointId: captured.checkpoint!.id,
+    })
+    expect(preview.git).toMatchObject({
+      canRewind: true,
+      reason: 'ready',
+      targetHead: baseHead,
+      commitsToRewind: 1,
+    })
+    expect(JSON.stringify(preview)).not.toContain(join(root, '.git'))
+    writeFileSync(target, 'external-after-preview\n')
+    await expect(
+      api.fileCheckpoints.rewindGit({
+        sessionId,
+        checkpointId: captured.checkpoint!.id,
+        confirmed: true,
+        confirmedGitRisk: true,
+        previewRevision: preview.git!.revision,
+        dirtyStrategy: 'abort',
+      }),
+    ).rejects.toMatchObject({ code: 'rewind_conflict' })
+    expect(gitRun('for-each-ref', 'refs/emperor-agent/rewind')).toBe('')
+    writeFileSync(target, 'after-git\n')
+    const freshPreview = await api.fileCheckpoints.preview({
+      sessionId,
+      checkpointId: captured.checkpoint!.id,
+    })
+    const result = await api.fileCheckpoints.rewindGit({
+      sessionId,
+      checkpointId: captured.checkpoint!.id,
+      confirmed: true,
+      confirmedGitRisk: true,
+      previewRevision: freshPreview.git!.revision,
+      dirtyStrategy: 'abort',
+    })
+
+    expect(result).toMatchObject({
+      checkpoint: { status: 'rewound' },
+      git: { status: 'completed', targetHead: baseHead },
+    })
+    expect(gitRun('rev-parse', 'HEAD')).toBe(baseHead)
+    expect(readFileSync(target, 'utf8')).toBe('before-git\n')
+    expect(gitRun('status', '--porcelain')).toBe('')
     await api.close()
   })
 
@@ -1656,6 +1965,22 @@ describe('CoreApi (MIG-IPC-001)', () => {
     expect(
       replay.events.every((event: any) => event.session_id === firstSessionId),
     ).toBe(true)
+    const envelopes = api.runtime.replay({
+      sessionId: firstSessionId,
+      afterSeq: 0,
+      format: 'envelope_v2',
+    }) as any
+    expect(envelopes.format).toBe('envelope_v2')
+    expect(envelopes.events.length).toBeGreaterThan(0)
+    expect(
+      envelopes.events.every(
+        (event: any) =>
+          event.schemaVersion === 2 && event.sessionId === firstSessionId,
+      ),
+    ).toBe(true)
+    expect(envelopes.events.map((event: any) => event.turnId)).toContain(
+      'turn_first',
+    )
 
     const boot = await api.bootstrap({ sessionId: firstSessionId })
     const bootTurnIds = ((boot.runtime as any).events as any[]).map(
@@ -2153,6 +2478,47 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('exposes a deterministic effective-config snapshot without MCP secrets', async () => {
+    const root = tmp('emperor-core-api-effective-config-')
+    const stateRoot = join(root, '.emperor')
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    const secret = 'core-api-effective-config-secret'
+    writeFileSync(
+      join(stateRoot, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          docs: {
+            transport: 'sse',
+            url: `https://mcp.invalid/?token=${secret}`,
+            headers: { Authorization: `Bearer ${secret}` },
+          },
+        },
+      }),
+    )
+
+    const first = await api.config.effective()
+    const second = await api.config.effective()
+
+    expect(first).toEqual(second)
+    expect(first).toMatchObject({
+      schemaVersion: 1,
+      revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      entries: expect.arrayContaining([
+        expect.objectContaining({ key: 'permissions.rules' }),
+        expect.objectContaining({ key: 'sandbox.runtime' }),
+        expect.objectContaining({ key: 'mcp.config' }),
+      ]),
+    })
+    expect(JSON.stringify(first)).not.toContain(secret)
+    await api.close()
+  })
+
   it('exposes resumable profile onboarding status, cancellation, and permanent skip', async () => {
     class ProfileAskProvider extends FakeProvider {
       override async chat(args: ChatArgs): Promise<LLMResponse> {
@@ -2389,14 +2755,34 @@ describe('CoreApi (MIG-IPC-001)', () => {
         deliver: true,
       },
       deleteAfterRun: false,
+      misfirePolicy: 'latest',
     })
 
     expect(created).toMatchObject({
-      job: { name: 'Typed scheduler job' },
-      scheduler: { jobs: expect.any(Array), status: expect.any(Object) },
+      job: { name: 'Typed scheduler job', misfirePolicy: 'latest' },
+      scheduler: {
+        jobs: expect.any(Array),
+        status: {
+          maxConcurrentRuns: 2,
+          maxPerOwner: 1,
+          maxQueuedRuns: 100,
+          shutdownPolicy: 'cancel-and-interrupt',
+        },
+      },
     })
 
     const jobId = String((created.job as Record<string, unknown>).id)
+    const updated = await api.scheduler.updateJob(jobId, {
+      misfirePolicy: 'catch-up-one',
+    })
+    expect(updated.job).toMatchObject({ misfirePolicy: 'catch-up-one' })
+    const renamed = await api.scheduler.updateJob(jobId, {
+      name: 'Renamed scheduler job',
+    })
+    expect(renamed.job).toMatchObject({
+      name: 'Renamed scheduler job',
+      misfirePolicy: 'catch-up-one',
+    })
     const paused = await api.scheduler.pauseJob(jobId)
     expect(paused).toMatchObject({
       job: { id: jobId, enabled: false },
@@ -2409,6 +2795,49 @@ describe('CoreApi (MIG-IPC-001)', () => {
       scheduler: { jobs: expect.any(Array) },
     })
 
+    await api.close()
+  })
+
+  it('redacts internal Scheduler owner and resume fields from public payloads', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-scheduler-redaction-'),
+      stateRoot: tmp('emperor-core-api-scheduler-redaction-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const job = api.loop.schedulerService.addJob({
+      name: 'Redacted run',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({ message: 'run' }),
+      misfirePolicy: SchedulerMisfirePolicy.LATEST,
+    })
+    job.state.next_run_at_ms = null
+    job.state.active_run = new SchedulerActiveRun({
+      run_id: `schrun_${'a'.repeat(32)}`,
+      task_id: `scheduler_run_${'b'.repeat(32)}`,
+      phase: 'queued',
+      trigger: SchedulerRunTrigger.MISFIRE,
+      scheduled_for_ms: 1_700_000_000_000,
+      enqueued_at_ms: 1_700_000_000_100,
+      started_at_ms: null,
+      owner_key_digest: 'c'.repeat(64),
+      misfire_policy: SchedulerMisfirePolicy.LATEST,
+      missed_count: 3,
+      count_capped: false,
+      resume_next_run_at_ms: 1_700_000_060_000,
+    })
+    api.loop.schedulerStore.upsertJob(job)
+
+    const publicJob = api.scheduler
+      .get()
+      .jobs.find((candidate) => candidate.id === job.id)!
+    expect(publicJob.state.activeRun).toMatchObject({
+      runId: job.state.active_run.run_id,
+      taskId: job.state.active_run.task_id,
+      phase: 'queued',
+    })
+    expect(JSON.stringify(publicJob)).not.toContain('ownerKeyDigest')
+    expect(JSON.stringify(publicJob)).not.toContain('resumeNextRunAtMs')
     await api.close()
   })
 
@@ -2435,6 +2864,14 @@ describe('CoreApi (MIG-IPC-001)', () => {
         payload: { kind: 'team_wake', message: 'wake up' },
       }),
     ).toThrow(/target.*team_wake/i)
+    expect(() =>
+      api.scheduler.createJob({
+        name: 'Invalid misfire policy',
+        schedule,
+        payload: { kind: 'agent_turn', message: 'run' },
+        misfirePolicy: 'replay-all',
+      }),
+    ).toThrow(/misfirePolicy.*skip.*latest.*catch-up-one/i)
 
     await api.close()
   })
@@ -2881,6 +3318,183 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('keeps the default signed-webhook adapter registered but network inert', async () => {
+    const root = tmp('emperor-core-api-external-default-off-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+
+    const external = api.external.get() as {
+      running: boolean
+      lifecycle: Record<string, unknown>
+      adapters: Array<Record<string, unknown>>
+    }
+    expect(external).toMatchObject({
+      running: true,
+      lifecycle: { state: 'ready' },
+    })
+    expect(external.adapters).toHaveLength(1)
+    expect(external.adapters[0]).toMatchObject({
+      name: 'signed-webhook',
+      requestedMode: 'off',
+      effectiveMode: 'off',
+      state: 'stopped',
+      endpoint: null,
+      lastReason: 'mode_off',
+      configuration: { status: 'missing' },
+    })
+    expect(existsSync(join(root, '.emperor', 'external_config.json'))).toBe(
+      false,
+    )
+
+    await api.close()
+  })
+
+  it('starts one configured signed-webhook ingress, dedupes real HTTP, replies, audits and closes it', async () => {
+    const root = tmp('emperor-core-api-external-network-')
+    const stateRoot = join(root, '.emperor')
+    const secret = 'core-e2e-secret-'.repeat(3)
+    const secretName = 'EMPEROR_TEST_EXTERNAL_WEBHOOK_SECRET'
+    const previousSecret = process.env[secretName]
+    const nativeFetch = fetch
+    const outbound: Array<{ url: string; init?: RequestInit }> = []
+    const port = await availablePort()
+    const provider = new FakeProvider()
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+      initializeMcp: false,
+    })
+    writeFileSync(
+      join(stateRoot, 'external_config.json'),
+      JSON.stringify({
+        version: 1,
+        signedWebhook: {
+          mode: 'on',
+          bindHost: '127.0.0.1',
+          port,
+          path: '/v1/external/events',
+          sessionId: loop.activeSessionId,
+          keyId: 'core-e2e-key',
+          secretEnv: secretName,
+          outboundUrl: 'https://connector.example/emperor/replies',
+        },
+      }),
+    )
+    process.env[secretName] = secret
+    vi.stubGlobal(
+      'fetch',
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.startsWith('https://connector.example/')) {
+          outbound.push({ url, init })
+          return new Response(null, { status: 204 })
+        }
+        return await nativeFetch(input, init)
+      },
+    )
+    let api: CoreApi | null = null
+    try {
+      api = await CoreApi.create({ root, loop })
+      const external = api.external.get() as {
+        running: boolean
+        adapters: Array<Record<string, unknown>>
+        lifecycle: Record<string, unknown>
+      }
+      expect(external.running).toBe(true)
+      expect(external.lifecycle).toMatchObject({
+        state: 'ready',
+        services: [
+          expect.objectContaining({ id: 'external-bridge', state: 'ready' }),
+        ],
+      })
+      expect(external.adapters).toHaveLength(1)
+      expect(external.adapters[0]).toMatchObject({
+        name: 'signed-webhook',
+        state: 'ready',
+        effectiveMode: 'on',
+      })
+      const endpoint = String(external.adapters[0]!.endpoint)
+      const body = Buffer.from(
+        JSON.stringify({
+          version: 1,
+          message: {
+            id: 'provider-stable-1',
+            senderId: 'remote-user',
+            targetId: 'remote-thread',
+            content: 'hello core ingress',
+          },
+        }),
+      )
+      const send = async (nonce: string): Promise<Response> => {
+        const timestamp = Math.floor(Date.now() / 1000)
+        return await nativeFetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-emperor-key-id': 'core-e2e-key',
+            'x-emperor-timestamp': String(timestamp),
+            'x-emperor-nonce': nonce,
+            'x-emperor-signature': signWebhookBody(
+              secret,
+              timestamp,
+              nonce,
+              body,
+            ),
+          },
+          body,
+        })
+      }
+
+      expect((await send('core_e2e_nonce_1')).status).toBe(202)
+      await waitFor(() => outbound.length === 1)
+      expect((await send('core_e2e_nonce_2')).status).toBe(202)
+      await delay(20)
+      expect(provider.calls).toHaveLength(1)
+      expect(outbound).toHaveLength(1)
+      expect(outbound[0]!.url).toBe('https://connector.example/emperor/replies')
+      expect(
+        new Headers(outbound[0]!.init?.headers).get('idempotency-key'),
+      ).toMatch(/^ext_out_/)
+      expect(String(outbound[0]!.init?.body)).toContain('pong')
+      const audit = readFileSync(
+        join(stateRoot, 'external', 'audit.jsonl'),
+        'utf8',
+      )
+      expect(audit).toContain('"outcome":"sent"')
+      expect(audit).not.toContain(secret)
+      expect(audit).not.toContain('hello core ingress')
+
+      await api.close()
+      expect(api.external.get()).toMatchObject({
+        running: false,
+        lifecycle: {
+          state: 'stopped',
+          services: [
+            expect.objectContaining({
+              id: 'external-bridge',
+              state: 'stopped',
+            }),
+          ],
+        },
+      })
+      await expect(nativeFetch(endpoint)).rejects.toThrow()
+      api = null
+    } finally {
+      if (api) await api.close()
+      else await loop.close()
+      vi.unstubAllGlobals()
+      if (previousSecret === undefined) delete process.env[secretName]
+      else process.env[secretName] = previousSecret
+    }
+  })
+
   it('runs scheduler agent_turn jobs in the session that created them after the user switches away', async () => {
     const root = tmp('emperor-core-api-scheduler-owner-')
     const api = await CoreApi.create({
@@ -3020,6 +3634,137 @@ describe('CoreApi (MIG-IPC-001)', () => {
     })
     expect(probe).toHaveBeenCalledWith({ entryId: 'entry-1', kind: 'text' })
 
+    await api.close()
+  })
+
+  it('controls supervised subagents through wait/read/cancel/resume and fences session ownership', async () => {
+    const root = tmp('emperor-core-api-subagent-controls-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    await api.bootstrap()
+    const ownerSessionId = String(api.loop.activeSessionId)
+    const launch = async (
+      resumedFromTaskId: string | null = null,
+    ): Promise<SubagentLaunchResult<string>> =>
+      await api.loop.subagentSupervisor.launch({
+        title: 'controlled subagent',
+        sessionId: ownerSessionId,
+        agentType: 'sili_suitang',
+        agentId: resumedFromTaskId ? 'agent_resumed' : 'agent_initial',
+        turnId: resumedFromTaskId ? 'turn_resumed' : 'turn_initial',
+        parentDepth: 0,
+        mode: 'background',
+        workspace: { mode: 'shared', root },
+        metadata: {},
+        ...(resumedFromTaskId ? { resumedFromTaskId } : {}),
+        execute: resumedFromTaskId
+          ? async (runtime) => {
+              runtime.appendOutput('resumed output')
+              return 'resumed result'
+            }
+          : async () => await new Promise<string>(() => {}),
+        resume: async (source) => await launch(source.id),
+      })
+    const initial = await launch()
+
+    await expect(
+      api.tasks.wait(initial.task.id, { timeoutMs: 5 }),
+    ).resolves.toBeNull()
+    await expect(api.tasks.readOutput(initial.task.id)).resolves.toMatchObject({
+      content: '',
+      eof: true,
+    })
+    await expect(
+      api.tasks.cancel(initial.task.id, { reason: 'operator stop' }),
+    ).resolves.toMatchObject({ status: 'cancelled' })
+    await expect(api.tasks.wait(initial.task.id)).resolves.toMatchObject({
+      status: 'cancelled',
+      reason: 'operator stop',
+      task: { id: initial.task.id, session_id: ownerSessionId },
+    })
+
+    const resumed = await api.tasks.resume(initial.task.id)
+    const resumedTask = resumed.task as Record<string, unknown>
+    await expect(api.tasks.wait(String(resumedTask.id))).resolves.toMatchObject(
+      { status: 'completed' },
+    )
+    await expect(
+      api.tasks.readOutput(String(resumedTask.id)),
+    ).resolves.toMatchObject({
+      content: 'resumed outputresumed result',
+      eof: true,
+    })
+
+    const other = api.sessions.create({ title: 'Other' })
+    await api.sessions.activate(String(other.id))
+    await expect(api.tasks.cancel(initial.task.id)).rejects.toMatchObject({
+      code: 'subagent_session_mismatch',
+    })
+
+    await api.close()
+  })
+
+  it('lists, lease-fences, reparents and cancels only active-session processes', async () => {
+    const root = tmp('emperor-core-api-process-controls-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    const sessionId = String(api.loop.activeSessionId)
+    const running = api.loop.processRuntime.run({
+      executable: process.execPath,
+      args: ['-e', 'setTimeout(()=>{},5000)'],
+      cwd: root,
+      env: {},
+      owner: { kind: 'session', id: sessionId, sessionId },
+      timeoutMs: 5_000,
+      containment: {
+        mode: 'preferred',
+        workspaceRoot: root,
+        stateRoot: join(root, '.emperor'),
+        tempRoot: root,
+        readOnlyRoots: [],
+        network: 'deny',
+      },
+    })
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (api.processes.list({ activeOnly: true }).length) break
+      await delay(10)
+    }
+    const before = api.processes.list({ activeOnly: true })[0]!
+    const beforeLease = String((before.lease as Record<string, unknown>).id)
+    const after = api.processes.reparent(String(before.id), {
+      leaseId: beforeLease,
+      ownerKind: 'terminal',
+      ownerId: 'terminal-main',
+    })
+
+    expect(() =>
+      api.processes.cancel(String(before.id), { leaseId: beforeLease }),
+    ).toThrow(/lease is stale/i)
+    api.processes.cancel(String(before.id), {
+      leaseId: String((after.lease as Record<string, unknown>).id),
+      reason: 'operator stop',
+    })
+    await expect(running).resolves.toMatchObject({ status: 'cancelled' })
+
+    const other = api.sessions.create({ title: 'Other' })
+    await api.sessions.activate(String(other.id))
+    expect(api.processes.list()).toEqual([])
+    expect(() =>
+      api.processes.reparent(String(before.id), {
+        leaseId: String((after.lease as Record<string, unknown>).id),
+        ownerKind: 'terminal',
+        ownerId: 'cross-session',
+      }),
+    ).toThrow(/not owned by the active session/i)
     await api.close()
   })
 
@@ -3224,6 +3969,28 @@ describe('CoreApi (MIG-IPC-001)', () => {
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
+}
+
+async function availablePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((done, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', done)
+  })
+  const port = (server.address() as AddressInfo).port
+  await new Promise<void>((done) => server.close(() => done()))
+  return port
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('condition timed out')
+    await delay(10)
+  }
 }
 
 function resolveMethod(api: CoreApi, key: string): unknown {

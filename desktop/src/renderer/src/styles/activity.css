@@ -1467,6 +1467,29 @@
   @apply size-4;
 }
 
+.busy-delivery-button {
+  @apply h-8 shrink-0 rounded-md border px-2.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40;
+  border-color: rgb(var(--border));
+  color: rgb(var(--fg-muted));
+  background: rgb(var(--bg));
+}
+
+.busy-delivery-button:hover:not(:disabled) {
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-elevated));
+}
+
+.busy-delivery-button.primary {
+  border-color: rgb(var(--accent) / 0.45);
+  color: rgb(var(--accent));
+}
+
+.stop-button {
+  background: rgb(var(--danger) / 0.12);
+  color: rgb(var(--danger));
+  border-color: rgb(var(--danger) / 0.35);
+}
+
 .attach-button {
   background: transparent;
   border-color: rgb(var(--border));

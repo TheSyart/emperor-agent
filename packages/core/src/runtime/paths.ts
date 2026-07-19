@@ -20,6 +20,7 @@ export interface RuntimePaths {
   schedulerRoot: string
   teamRoot: string
   tasksRoot: string
+  processesRoot: string
   controlRoot: string
   externalRoot: string
 }
@@ -70,6 +71,7 @@ export function resolveRuntimePaths(
     schedulerRoot: join(stateRoot, 'scheduler'),
     teamRoot: join(stateRoot, 'team'),
     tasksRoot: join(stateRoot, 'tasks'),
+    processesRoot: join(stateRoot, 'processes'),
     controlRoot: join(stateRoot, 'control'),
     externalRoot: join(stateRoot, 'external'),
   }
@@ -86,6 +88,7 @@ export function ensureRuntimeStateDirs(paths: RuntimePaths): void {
     paths.schedulerRoot,
     paths.teamRoot,
     paths.tasksRoot,
+    paths.processesRoot,
     paths.controlRoot,
     paths.externalRoot,
   ]) {

@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { existsSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
@@ -20,14 +19,27 @@ import type {
 } from './models'
 import { parseHookOutput } from './schema'
 import type { ExecutionEnvironment } from '../environment/snapshot'
+import {
+  NodeOwnedProcessRunner,
+  type OwnedProcessRunner,
+} from '../environment/process-runner'
+import {
+  analyzeShellCommand,
+  analyzeShellCommandFailClosed,
+  type ShellCommandAnalyzer,
+} from '../permissions/shell-ast'
 
 const MAX_OUTPUT_CHARS = 64_000
+const legacyHookProcessRunner = new NodeOwnedProcessRunner()
 
 export type HookExecutorOutcome =
   'completed' | 'failed' | 'timeout' | 'cancelled'
 
 export interface HookExecutorContext {
   eventName: HookEventName
+  sessionId?: string | null
+  turnId?: string | null
+  processOwnerId?: string | null
   cwd: string
   policy: HookPolicy
   signal?: AbortSignal | null
@@ -83,6 +95,11 @@ export class HookExecutorRegistry {
 export class CommandHookExecutor implements HookHandlerExecutor<HookCommandHandlerV2> {
   readonly type = 'command' as const
 
+  constructor(
+    private readonly shellAnalyzer: ShellCommandAnalyzer = analyzeShellCommand,
+    private readonly ownedRunner: OwnedProcessRunner = new NodeOwnedProcessRunner(),
+  ) {}
+
   async execute(
     handler: HookCommandHandlerV2,
     input: Record<string, unknown>,
@@ -108,6 +125,18 @@ export class CommandHookExecutor implements HookHandlerExecutor<HookCommandHandl
         started,
       )
     }
+    if (handler.shell === 'bash') {
+      const analysis = analyzeShellCommandFailClosed(
+        handler.command,
+        this.shellAnalyzer,
+      )
+      if (analysis.status !== 'parsed')
+        return emptyExecutorResult(
+          'failed',
+          `Hook bash command classification failed: ${analysis.reasonCodes.join(',') || analysis.status}`,
+          started,
+        )
+    }
     const invocation = commandInvocation(handler)
     const maxOutputBytes = Math.max(
       1,
@@ -120,107 +149,84 @@ export class CommandHookExecutor implements HookHandlerExecutor<HookCommandHandl
       context.policy.command.maxTimeoutMs,
     )
 
-    return await new Promise<HookExecutorResultV2>((resolveResult) => {
-      let settled = false
-      let timedOut = false
-      let cancelled = false
-      const child = spawn(invocation.command, invocation.args, {
-        cwd: context.cwd,
-        env: commandEnvironment(
-          handler,
-          context.policy,
-          context.executionEnvironment ?? null,
+    const result = await this.ownedRunner.run({
+      executable: invocation.command,
+      args: invocation.args,
+      cwd: context.cwd,
+      env: commandEnvironment(
+        handler,
+        context.policy,
+        context.executionEnvironment ?? null,
+      ) as Record<string, string>,
+      stdin: `${JSON.stringify(input)}\n`,
+      timeoutMs,
+      maxOutputBytes,
+      outputPolicy: 'truncate_tail',
+      outputQuotaScope: 'per_stream',
+      ...(context.signal ? { signal: context.signal } : {}),
+      owner: {
+        kind: 'hook',
+        id: String(
+          context.processOwnerId ||
+            `${context.eventName}:${context.turnId || context.sessionId || 'unbound'}`,
         ),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: process.platform !== 'win32',
-        windowsHide: true,
-      })
-      const settle = (result: HookExecutorResultV2): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        context.signal?.removeEventListener('abort', cancelFromCaller)
-        resolveResult(result)
-      }
-      const stop = (): void =>
-        killProcessTree(child.pid, child.kill.bind(child))
-      const cancelFromCaller = (): void => {
-        cancelled = true
-        stop()
-      }
-      const timer = setTimeout(
-        () => {
-          timedOut = true
-          stop()
-        },
-        Math.max(1, timeoutMs),
-      )
-
-      context.signal?.addEventListener('abort', cancelFromCaller, {
-        once: true,
-      })
-      child.stdout?.on('data', (chunk: Buffer | string) => stdout.append(chunk))
-      child.stderr?.on('data', (chunk: Buffer | string) => stderr.append(chunk))
-      child.on('error', (error) =>
-        settle(
-          commandResult({
-            outcome: 'failed',
-            reason: error.message,
-            started,
-            stdout,
-            stderr,
-          }),
-        ),
-      )
-      child.stdin?.on('error', (error: NodeJS.ErrnoException) => {
-        if (error.code !== 'EPIPE')
-          settle(
-            commandResult({
-              outcome: 'failed',
-              reason: error.message,
-              started,
-              stdout,
-              stderr,
-            }),
-          )
-      })
-      child.on('close', (code) => {
-        if (cancelled) {
-          settle(
-            commandResult({
-              outcome: 'cancelled',
-              reason: 'Hook execution cancelled',
-              started,
-              stdout,
-              stderr,
-            }),
-          )
-          return
-        }
-        if (timedOut) {
-          settle(
-            commandResult({
-              outcome: 'timeout',
-              reason: `Hook timed out after ${timeoutMs}ms`,
-              started,
-              stdout,
-              stderr,
-            }),
-          )
-          return
-        }
-        settle(
-          resultFromCommandExit(
-            context.eventName,
-            code ?? 0,
-            started,
-            stdout,
-            stderr,
-          ),
-        )
-      })
-      child.stdin?.end(`${JSON.stringify(input)}\n`)
+        sessionId: context.sessionId ?? null,
+      },
+      containment: {
+        mode: 'preferred',
+        workspaceRoot: context.cwd,
+        stateRoot: String(input.state_root ?? '').trim() || null,
+        tempRoot: context.cwd,
+        readOnlyRoots: [],
+        network: 'allow',
+      },
     })
+    stdout.append(result.stdout)
+    stderr.append(result.stderr)
+    let mapped: HookExecutorResultV2
+    if (result.status === 'cancelled')
+      mapped = commandResult({
+        outcome: 'cancelled',
+        reason: 'Hook execution cancelled',
+        started,
+        stdout,
+        stderr,
+      })
+    else if (result.status === 'timeout')
+      mapped = commandResult({
+        outcome: 'timeout',
+        reason: `Hook timed out after ${timeoutMs}ms`,
+        started,
+        stdout,
+        stderr,
+      })
+    else if (
+      result.status === 'spawn_error' ||
+      result.status === 'containment_unavailable' ||
+      result.status === 'output_limit'
+    )
+      mapped = commandResult({
+        outcome: 'failed',
+        reason: result.error || `Hook process failed: ${result.status}`,
+        started,
+        stdout,
+        stderr,
+      })
+    else
+      mapped = resultFromCommandExit(
+        context.eventName,
+        result.exitCode ?? 0,
+        started,
+        stdout,
+        stderr,
+      )
+    return {
+      ...mapped,
+      stdoutBytes: result.stdoutBytes ?? mapped.stdoutBytes,
+      stderrBytes: result.stderrBytes ?? mapped.stderrBytes,
+      stdoutTruncated: result.stdoutTruncated ?? mapped.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated ?? mapped.stderrTruncated,
+    }
   }
 }
 
@@ -814,31 +820,6 @@ function emptyExecutorResult(
   }
 }
 
-function killProcessTree(
-  pid: number | undefined,
-  fallback: () => boolean,
-): void {
-  if (!pid) {
-    fallback()
-    return
-  }
-  if (process.platform === 'win32') {
-    const killer = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
-    killer.on('error', () => {
-      fallback()
-    })
-    return
-  }
-  try {
-    process.kill(-pid, 'SIGKILL')
-  } catch {
-    fallback()
-  }
-}
-
 export async function executeHook(
   hook: HookDefinition,
   input: HookInput,
@@ -874,80 +855,56 @@ async function executeCommandHook(
   input: HookInput,
   started: number,
 ): Promise<HookExecutionResult> {
-  return new Promise<HookExecutionResult>((resolve) => {
-    const child = spawn(handler.command, handler.args, {
-      cwd: typeof input.cwd === 'string' ? input.cwd : process.cwd(),
-      env: allowedEnv(handler.allowedEnv),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      child.kill('SIGKILL')
-      resolve({
-        hookId,
-        status: 'timeout',
-        decision: 'passthrough',
-        reason: `Hook timed out after ${handler.timeoutMs}ms`,
-        durationMs: Date.now() - started,
-        stdout,
-        stderr,
-      })
-    }, handler.timeoutMs)
-
-    child.stdout?.on('data', (chunk) => {
-      stdout = capOutput(stdout + String(chunk))
-    })
-    child.stderr?.on('data', (chunk) => {
-      stderr = capOutput(stderr + String(chunk))
-    })
-    child.on('error', (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve({
-        hookId,
-        status: 'failed',
-        decision: 'passthrough',
-        reason: error.message,
-        durationMs: Date.now() - started,
-        stdout,
-        stderr,
-      })
-    })
-    child.stdin?.on('error', (error: NodeJS.ErrnoException) => {
-      if (settled || error.code === 'EPIPE') return
-      settled = true
-      clearTimeout(timer)
-      resolve({
-        hookId,
-        status: 'failed',
-        decision: 'passthrough',
-        reason: error.message,
-        durationMs: Date.now() - started,
-        stdout,
-        stderr,
-      })
-    })
-    child.on('close', (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(
-        resultFromProcessExit(
-          hookId,
-          code ?? 0,
-          stdout,
-          stderr,
-          Date.now() - started,
-        ),
-      )
-    })
-    child.stdin?.end(`${JSON.stringify(input)}\n`)
+  const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd()
+  const result = await legacyHookProcessRunner.run({
+    executable: handler.command,
+    args: handler.args,
+    cwd,
+    env: allowedEnv(handler.allowedEnv) as Record<string, string>,
+    stdin: `${JSON.stringify(input)}\n`,
+    timeoutMs: handler.timeoutMs,
+    maxOutputBytes: MAX_OUTPUT_CHARS,
+    outputPolicy: 'truncate_tail',
+    outputQuotaScope: 'per_stream',
+    owner: { kind: 'hook', id: hookId, sessionId: null },
+    containment: {
+      mode: 'preferred',
+      workspaceRoot: cwd,
+      stateRoot: null,
+      tempRoot: cwd,
+      readOnlyRoots: [],
+      network: 'allow',
+    },
   })
+  const stdout = capOutput(result.stdout)
+  const stderr = capOutput(result.stderr)
+  if (result.status === 'timeout')
+    return {
+      hookId,
+      status: 'timeout',
+      decision: 'passthrough',
+      reason: `Hook timed out after ${handler.timeoutMs}ms`,
+      durationMs: Date.now() - started,
+      stdout,
+      stderr,
+    }
+  if (result.status !== 'completed')
+    return {
+      hookId,
+      status: 'failed',
+      decision: 'passthrough',
+      reason: result.error || `Hook process failed: ${result.status}`,
+      durationMs: Date.now() - started,
+      stdout,
+      stderr,
+    }
+  return resultFromProcessExit(
+    hookId,
+    result.exitCode ?? 0,
+    stdout,
+    stderr,
+    Date.now() - started,
+  )
 }
 
 async function executeHttpHook(

@@ -123,6 +123,19 @@ export class ActiveTaskRegistry {
   hasActiveKind(kind: ActiveTaskKind): boolean {
     return [...this.tasks.values()].some((active) => active.info.kind === kind)
   }
+
+  hasActiveForSession(
+    sessionId: string | null | undefined,
+    kind?: ActiveTaskKind | null,
+  ): boolean {
+    const owner = String(sessionId ?? '').trim()
+    if (!owner) return false
+    return [...this.tasks.values()].some(
+      (active) =>
+        active.info.session_id === owner &&
+        (!kind || active.info.kind === kind),
+    )
+  }
 }
 
 export function activeTaskToDict(

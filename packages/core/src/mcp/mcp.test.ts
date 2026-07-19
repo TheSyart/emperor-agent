@@ -11,7 +11,12 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ToolRegistry } from '../tools/registry'
 import { MCPToolAdapter } from './adapter'
-import { loadMcpConfig, saveMcpConfig } from './config'
+import {
+  loadMcpConfig,
+  loadMcpConfigUnresolved,
+  resolveMcpConfig,
+  saveMcpConfig,
+} from './config'
 import {
   buildStdioEnv,
   MCPConnection,
@@ -30,6 +35,8 @@ class FakeConnection extends MCPConnection {
   readonly tools: MCPToolDefinition[]
   readonly output: MCPCallToolResult
   connectOk: boolean
+  connectCount = 0
+  disconnectCount = 0
   called: Array<{ tool: string; args: Record<string, unknown> }> = []
 
   constructor(
@@ -47,11 +54,13 @@ class FakeConnection extends MCPConnection {
   }
 
   override async connect(): Promise<boolean> {
+    this.connectCount += 1
     this.connected = this.connectOk
     return this.connected
   }
 
   override async disconnect(): Promise<void> {
+    this.disconnectCount += 1
     this.connected = false
   }
 
@@ -174,6 +183,70 @@ describe('MCP config', () => {
       servers: {},
       defaults: { read_only: true, exclusive: false },
     })
+  })
+
+  it('keeps credential placeholders unresolved in the renderer editing payload', async () => {
+    const root = tmp('emperor-mcp-unresolved-editor-')
+    writeFileSync(
+      join(root, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          remote: {
+            transport: 'sse',
+            url: 'https://mcp.example.test',
+            headers: { Authorization: 'Bearer ${MCP_SECRET_TOKEN}' },
+          },
+        },
+      }),
+      'utf8',
+    )
+
+    const runtime = await loadMcpConfig(root, {
+      MCP_SECRET_TOKEN: 'runtime-secret-value',
+    })
+    const editor = await loadMcpConfigUnresolved(root)
+
+    expect(runtime.servers.remote?.headers.Authorization).toBe(
+      'Bearer runtime-secret-value',
+    )
+    expect(editor.servers.remote?.headers.Authorization).toBe(
+      'Bearer ${MCP_SECRET_TOKEN}',
+    )
+    expect(JSON.stringify(editor)).not.toContain('runtime-secret-value')
+  })
+
+  it('keeps the legacy loader result while exposing its user-layer provenance', async () => {
+    const root = tmp('emperor-mcp-config-resolution-')
+    writeFileSync(
+      join(root, 'mcp_config.json'),
+      JSON.stringify({
+        defaults: { read_only: true },
+        servers: {
+          remote: {
+            transport: 'sse',
+            url: 'https://mcp.example.test',
+            headers: { Authorization: 'Bearer ${MCP_TOKEN}' },
+          },
+        },
+      }),
+      'utf8',
+    )
+
+    const legacy = await loadMcpConfigUnresolved(root)
+    const resolved = await resolveMcpConfig(root, {})
+
+    expect(resolved.config).toEqual(legacy)
+    expect(resolved.resolution.source).toMatchObject({
+      kind: 'user',
+      id: 'mcp_config.json',
+      trust: 'trusted',
+    })
+    expect(resolved.resolution.key.secretPaths).toEqual([
+      'servers.*.args',
+      'servers.*.env',
+      'servers.*.headers',
+      'servers.*.url',
+    ])
   })
 
   it('validates and writes raw config compatibly', async () => {
@@ -363,6 +436,39 @@ describe('MCP adapter/client', () => {
     expect(conn.called).toEqual([{ tool: 'search', args: { q: 'hello' } }])
   })
 
+  it('passes the task abort signal through the MCP adapter', async () => {
+    const controller = new AbortController()
+    let observedSignal: AbortSignal | undefined
+    const conn = new (class extends FakeConnection {
+      override async callTool(
+        toolName: string,
+        args: Record<string, unknown>,
+        signal?: AbortSignal,
+      ): Promise<MCPCallToolResult> {
+        observedSignal = signal
+        return await super.callTool(toolName, args)
+      }
+    })('alpha', [])
+    await conn.connect()
+    const adapter = new MCPToolAdapter({
+      serverName: 'alpha',
+      toolName: 'search',
+      description: 'Search docs',
+      parametersSchema: { type: 'object', properties: {}, required: [] },
+      connection: conn,
+    })
+
+    await adapter.execute(
+      { q: 'abortable' },
+      {
+        root: tmp('emperor-mcp-signal-'),
+        arguments: {},
+        signal: controller.signal,
+      },
+    )
+    expect(observedSignal).toBe(controller.signal)
+  })
+
   it('marks MCP protocol errors as failed untrusted tool results', async () => {
     const conn = new FakeConnection('alpha', [], {
       output: { content: 'remote failed', isError: true },
@@ -482,5 +588,148 @@ describe('MCP adapter/client', () => {
 
     await client.close()
     expect(client.getTools()).toEqual([])
+  })
+
+  it('preserves a healthy generation for an unchanged config and replaces only the changed server', async () => {
+    const root = tmp('emperor-mcp-reload-')
+    const configPath = join(root, 'mcp_config.json')
+    const writeConfig = (command: string) =>
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          servers: {
+            alpha: { enabled: true, transport: 'stdio', command },
+          },
+        }),
+        'utf8',
+      )
+    writeConfig('/bin/one')
+    const created: FakeConnection[] = []
+    const client = new MCPClient(root, {
+      connectionFactory: (cfg) => {
+        const connection = new FakeConnection(
+          cfg.name,
+          [
+            {
+              name: 'search',
+              description: 'Search',
+              inputSchema: { type: 'object', properties: {}, required: [] },
+            },
+          ],
+          { output: String(cfg.command) },
+        )
+        created.push(connection)
+        return connection
+      },
+      supervisor: {
+        clientIdFactory: (generation) => `reload_client_${generation}`,
+      },
+    })
+
+    await client.initialize()
+    expect(client.snapshot()).toMatchObject({
+      configured: 1,
+      ready: 1,
+      tools: 1,
+      servers: [
+        {
+          serverName: 'alpha',
+          generation: 1,
+          clientId: 'reload_client_1',
+          state: 'ready',
+        },
+      ],
+    })
+
+    await client.reload()
+    expect(created).toHaveLength(1)
+    expect(created[0]!.disconnectCount).toBe(0)
+
+    writeConfig('/bin/two')
+    await client.reload()
+    expect(created).toHaveLength(2)
+    expect(created[0]!.connected).toBe(false)
+    expect(created[1]!.connected).toBe(true)
+    expect(client.snapshot().servers[0]).toMatchObject({
+      generation: 2,
+      clientId: 'reload_client_2',
+      state: 'ready',
+    })
+    expect(await client.getTools()[0]!.execute({ q: 'new' })).toMatchObject({
+      rawContent: expect.stringContaining('/bin/two:search'),
+    })
+  })
+
+  it('creates a replacement with the latest execution environment rather than a captured startup snapshot', async () => {
+    const root = tmp('emperor-mcp-environment-reload-')
+    writeFileSync(
+      join(root, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          alpha: {
+            enabled: true,
+            transport: 'stdio',
+            command: '${MCP_BIN}',
+          },
+        },
+      }),
+      'utf8',
+    )
+    const initial = executionEnvironment('8', { MCP_BIN: '/bin/old-mcp' })
+    const next = executionEnvironment('9', { MCP_BIN: '/bin/new-mcp' })
+    const observed: Array<{ command: string | null; revision: string | null }> =
+      []
+    const client = new MCPClient(root, {
+      connectionFactory: (cfg, environment) => {
+        observed.push({
+          command: cfg.command,
+          revision: environment?.revision ?? null,
+        })
+        return new FakeConnection(cfg.name, [])
+      },
+    })
+
+    await client.initialize(initial)
+    await client.reload(next)
+    await client.reload(next)
+
+    expect(observed).toEqual([
+      { command: '/bin/old-mcp', revision: initial.revision },
+      { command: '/bin/new-mcp', revision: next.revision },
+    ])
+    expect(client.snapshot().servers[0]?.generation).toBe(2)
+  })
+
+  it('stores the exact large MCP result as an artifact while bounding model content', async () => {
+    const root = tmp('emperor-mcp-large-result-')
+    const full = 'large-result-'.repeat(2_000)
+    const connection = new FakeConnection('alpha', [], { output: full })
+    await connection.connect()
+    const adapter = new MCPToolAdapter({
+      serverName: 'alpha',
+      toolName: 'dump',
+      description: 'Dump a large result',
+      parametersSchema: { type: 'object', properties: {}, required: [] },
+      connection,
+      maxResultChars: 1_000,
+    })
+    const registry = new ToolRegistry(root)
+    registry.register(adapter)
+
+    const result = await registry.executeResult(
+      adapter.name,
+      {},
+      {
+        root,
+        turnId: 'turn_large_mcp',
+        parentCallId: 'call_large_mcp',
+      },
+    )
+
+    expect(result.modelContent.length).toBeLessThanOrEqual(1_000)
+    expect(result.modelContent).toContain('[truncated')
+    const ref = String(result.metadata.full_output_ref ?? '')
+    expect(ref).toMatch(/^memory\/tool-results\/[a-f0-9]+\.txt$/)
+    expect(readFileSync(join(root, ref), 'utf8')).toBe(`${full}:dump:{}`)
   })
 })

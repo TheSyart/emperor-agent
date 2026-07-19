@@ -13,7 +13,7 @@ describe('resolveMainPreloadPath', () => {
         'desktop',
         'out',
         'preload',
-        'index.mjs',
+        'index.cjs',
       ),
     )
   })

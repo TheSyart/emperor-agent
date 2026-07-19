@@ -1,14 +1,33 @@
 import { randomUUID } from 'node:crypto'
-import { Tool, type ToolExecutionContext } from './base'
-import { S, toolParamsSchema, type ParamSchema } from './schema'
+import {
+  Tool,
+  type ToolExecutionContext,
+  type ToolExecutionResult,
+  type ToolResult,
+} from './base'
+import {
+  S,
+  toolParamsSchema,
+  type ParamSchema,
+  type ToolParamsSchema,
+} from './schema'
 import { ToolRegistry } from './registry'
 import { TaskKind, TaskStatus, type TaskRecord } from '../tasks/models'
 import type { TaskManager } from '../tasks/manager'
+import { TaskRuntimeRegistry, type TaskTerminalResult } from '../tasks/runtime'
+import { TaskStoreConflictError } from '../tasks/store'
+import * as runtimeEvents from '../runtime/events'
 import type { SubagentRegistry } from '../subagents/registry'
 import type { SubagentSpec } from '../subagents/spec'
 import type { HookAggregateDecision } from '../hooks/models'
 import type { ExecutionEnvironment } from '../environment/snapshot'
 import type { RunnerGoalRecordingHost } from '../agent/runner-goal-recording'
+import {
+  SubagentSupervisor,
+  type SubagentExecutionMode,
+  type SubagentLaunchResult,
+  type SubagentResumeOptions,
+} from '../subagents/supervisor'
 
 const PLAN_CONTRACT_FIELDS = [
   'scope_limit',
@@ -19,7 +38,10 @@ const EVIDENCE_FILE_RE =
   /(?<![\w/.-])([A-Za-z0-9_./-]+\.(?:py|pyi|ts|tsx|js|jsx|vue|md|rst|json|toml|yaml|yml|txt|css|scss|html)(?::\d+(?:-\d+)?)?)/g
 
 export interface DispatchRunner {
-  step(history: Array<Record<string, unknown>>): string | Promise<string>
+  step(
+    history: Array<Record<string, unknown>>,
+    opts?: { signal?: AbortSignal | null },
+  ): string | Promise<string>
 }
 
 export interface DispatchRunnerFactoryArgs {
@@ -51,6 +73,8 @@ export interface DispatchSubagentToolOptions {
   subagentRegistry: SubagentRegistry
   runnerFactory: (args: DispatchRunnerFactoryArgs) => DispatchRunner
   taskManager?: TaskManager | null
+  taskRuntime?: TaskRuntimeRegistry | null
+  supervisor?: SubagentSupervisor | null
   controlManager?: { mode?: string; [key: string]: unknown } | null
   hooks?: DispatchSubagentHookHost | null
 }
@@ -68,6 +92,8 @@ export class DispatchSubagentTool extends Tool {
     args: DispatchRunnerFactoryArgs,
   ) => DispatchRunner
   private readonly taskManager: TaskManager | null
+  private readonly taskRuntime: TaskRuntimeRegistry | null
+  private readonly supervisor: SubagentSupervisor | null
   private readonly controlManager: {
     mode?: string
     [key: string]: unknown
@@ -80,6 +106,14 @@ export class DispatchSubagentTool extends Tool {
     this.subagentRegistry = opts.subagentRegistry
     this.runnerFactory = opts.runnerFactory
     this.taskManager = opts.taskManager ?? null
+    this.taskRuntime =
+      opts.taskRuntime ??
+      (this.taskManager ? new TaskRuntimeRegistry(this.taskManager) : null)
+    this.supervisor =
+      opts.supervisor ??
+      (this.taskManager && this.taskRuntime
+        ? new SubagentSupervisor(this.taskManager, this.taskRuntime)
+        : null)
     this.controlManager = opts.controlManager ?? null
     this.hooks = opts.hooks ?? null
   }
@@ -119,6 +153,24 @@ export class DispatchSubagentTool extends Tool {
           ...S('可选: 明确禁止越界的范围, 如只读/不改文件/只看某目录'),
           nullable: true,
         } as ParamSchema,
+        mode: {
+          ...S(
+            '执行方式：foreground 随父回合等待；background 立即返回 Task ID',
+          ),
+          enum: ['foreground', 'background'],
+          nullable: true,
+        } as ParamSchema,
+        ttl_ms: {
+          type: ['integer', 'null'],
+          description: '可选运行时限；超时后 Supervisor 取消 Task',
+          minimum: 1,
+          maximum: 1800000,
+        } as ParamSchema,
+        workspace_mode: {
+          ...S('workspace 隔离方式；worktree 仅在 capability 可用时允许'),
+          enum: ['shared', 'worktree'],
+          nullable: true,
+        } as ParamSchema,
       },
       ['agent_type', 'task'],
     )
@@ -146,12 +198,19 @@ export class DispatchSubagentTool extends Tool {
     }
     const planError = this.planExplorationError(spec, args)
     if (planError) return planError
-
-    const subRegistry = new ToolRegistry()
-    for (const toolName of spec.toolNames) {
-      const tool = this.parentRegistry.get(toolName)
-      if (tool) subRegistry.register(tool)
+    if (this.supervisor && this.taskManager) {
+      try {
+        const launched = await this.launchSupervised(spec, args, ctx)
+        if (launched.mode === 'background')
+          return `Subagent background task started: ${launched.task.id}. Use manage_subagent with wait/read_output/cancel/resume to control it.`
+        const terminal = await this.supervisor.wait<string>(launched.task.id)
+        return dispatchTerminalResult(terminal, agentType)
+      } catch (error) {
+        return `Error: subagent '${agentType}' raised: ${error}`
+      }
     }
+
+    const subRegistry = this.registryForSpec(spec)
     const subagentTask = composeSubagentTask(task, {
       expectedOutput: asOptional(args.expected_output),
       evidenceRequired: asOptional(args.evidence_required),
@@ -167,7 +226,7 @@ export class DispatchSubagentTool extends Tool {
     let hookScopeStarted = false
 
     try {
-      if (this.hooks) {
+      if (this.hooks && spec.definition.hooks.allow.includes('SubagentStart')) {
         const start = await this.hooks.begin({
           agentId,
           agentType: spec.name,
@@ -192,6 +251,7 @@ export class DispatchSubagentTool extends Tool {
           toolCallId: ctx?.parentCallId ?? null,
           sessionId: ctx?.sessionId ?? null,
           metadata: {
+            ...agentDefinitionMetadata(spec),
             agent_type: agentType,
             agent_id: agentId,
             turn_id: turnId,
@@ -219,7 +279,45 @@ export class DispatchSubagentTool extends Tool {
         executionEnvironment: ctx?.executionEnvironment ?? null,
       })
 
-      const final = await runner.step(history)
+      if (this.taskRuntime && this.taskManager && taskRecord) {
+        const taskId = taskRecord.id
+        const handle = this.taskRuntime.launch({
+          task: taskRecord,
+          parentSignal: ctx?.signal ?? null,
+          execute: ({ signal }) => runner.step(history, { signal }),
+          complete: async (final, expectedRevision) => {
+            const current = this.taskManager!.store.get(taskId)
+            if (!current || current.revision !== expectedRevision)
+              throw new TaskStoreConflictError()
+            this.taskManager!.appendSidechain(taskId, {
+              role: 'assistant',
+              content: final,
+            })
+            return await this.taskManager!.completeTaskWithHooks(taskId, {
+              summary: final.slice(0, 500),
+              expectedRevision,
+            })
+          },
+          fail: (error, expectedRevision) =>
+            this.taskManager!.failTask(taskId, {
+              error: String(error),
+              expectedRevision,
+            }),
+        })
+        await ctx?.emit?.(
+          runtimeEvents.taskStarted(
+            this.taskManager.store.get(taskId)?.toRuntimeDict() ??
+              taskRecord.toRuntimeDict(),
+          ),
+        )
+        const terminal = await handle.wait()
+        await emitTaskTerminal(ctx, terminal)
+        return dispatchTerminalResult(terminal, agentType)
+      }
+
+      const final = await runner.step(history, {
+        signal: ctx?.signal ?? null,
+      })
       if (this.taskManager && taskRecord) {
         const terminal = terminalTaskResult(
           this.taskManager.store.get(taskRecord.id),
@@ -268,6 +366,297 @@ export class DispatchSubagentTool extends Tool {
     }
     return ''
   }
+
+  private async launchSupervised(
+    spec: SubagentSpec,
+    args: Record<string, unknown>,
+    ctx: ToolExecutionContext | undefined,
+    resumeOpts: {
+      sourceTaskId?: string | null
+      mode?: SubagentExecutionMode
+      ttlMs?: number
+    } = {},
+  ): Promise<SubagentLaunchResult<string>> {
+    if (!this.supervisor || !this.taskManager)
+      throw new Error('subagent supervisor is unavailable')
+    const planError = this.planExplorationError(spec, args)
+    if (planError) throw new Error(planError)
+    const subRegistry = this.registryForSpec(spec)
+    const subagentTask = composeSubagentTask(String(args.task ?? ''), {
+      expectedOutput: asOptional(args.expected_output),
+      evidenceRequired: asOptional(args.evidence_required),
+      scopeLimit: asOptional(args.scope_limit),
+    })
+    const sourceWorkspace = ctx?.workspaceRoot ?? ctx?.root ?? process.cwd()
+    const sessionId = String(ctx?.sessionId ?? '').trim() || 'session:unbound'
+    const agentId = `subagent_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+    const turnId = `subagent_turn_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+    const history: Array<Record<string, unknown>> = [
+      { role: 'user', content: subagentTask },
+    ]
+    let hookScopeStarted = false
+    if (this.hooks && spec.definition.hooks.allow.includes('SubagentStart')) {
+      const start = await this.hooks.begin({
+        agentId,
+        agentType: spec.name,
+        sessionId,
+        cwd: sourceWorkspace,
+      })
+      hookScopeStarted = true
+      if (start.additionalContext.trim())
+        history.unshift({
+          role: 'system',
+          content: `[SubagentStart hook context]\n${start.additionalContext}`,
+          ui_hidden: true,
+        })
+    }
+    const requestedMode = String(args.mode ?? '')
+    const mode =
+      resumeOpts.mode ??
+      (requestedMode === 'background' ? 'background' : 'foreground')
+    const requestedTtl = Number(args.ttl_ms)
+    const ttlMs =
+      resumeOpts.ttlMs ??
+      (Number.isFinite(requestedTtl) && requestedTtl > 0
+        ? Math.trunc(requestedTtl)
+        : undefined)
+    const workspaceMode =
+      String(args.workspace_mode ?? '') === 'worktree' ? 'worktree' : 'shared'
+    const savedArgs = { ...args }
+    let managedTaskId: string | null = null
+    try {
+      const launched = await this.supervisor.launch<string>({
+        title: asOptional(args.purpose) || String(args.task ?? '').slice(0, 80),
+        sessionId,
+        agentType: spec.name,
+        agentId,
+        turnId,
+        toolCallId: ctx?.parentCallId ?? null,
+        parentTaskId: String(ctx?.turnId ?? '').trim() || null,
+        parentDepth: Math.max(0, Math.trunc(Number(ctx?.subagentDepth ?? 0))),
+        mode,
+        ...(ttlMs !== undefined ? { ttlMs } : {}),
+        workspace: { mode: workspaceMode, root: sourceWorkspace },
+        parentSignal: ctx?.signal ?? null,
+        resumedFromTaskId: resumeOpts.sourceTaskId ?? null,
+        metadata: {
+          ...agentDefinitionMetadata(spec),
+          subagent_name: spec.name,
+          plan_readonly_explorer: spec.planReadonlyExplorer,
+          max_turns: spec.maxTurns,
+          scope_limit: asOptional(args.scope_limit),
+          expected_output: asOptional(args.expected_output),
+          evidence_required: asOptional(args.evidence_required),
+        },
+        execute: async ({ signal, taskId, workspaceRoot }) => {
+          managedTaskId = taskId
+          this.taskManager!.appendSidechain(taskId, history.at(-1)!)
+          const runner = this.runnerFactory({
+            spec,
+            subRegistry,
+            task: subagentTask,
+            workspaceRoot,
+            agentId,
+            taskId,
+            turnId,
+            sessionId,
+            executionEnvironment: ctx?.executionEnvironment ?? null,
+          })
+          return await runner.step(history, { signal })
+        },
+        complete: async (final, expectedRevision) => {
+          const taskId = managedTaskId
+          if (!taskId) throw new TaskStoreConflictError()
+          const current = this.taskManager!.store.get(taskId)
+          if (!current || current.revision !== expectedRevision)
+            throw new TaskStoreConflictError()
+          this.taskManager!.appendSidechain(taskId, {
+            role: 'assistant',
+            content: final,
+          })
+          return await this.taskManager!.completeTaskWithHooks(taskId, {
+            summary: final.slice(0, 500),
+            expectedRevision,
+          })
+        },
+        fail: (error, expectedRevision) => {
+          const taskId = managedTaskId
+          if (!taskId) throw new TaskStoreConflictError()
+          return this.taskManager!.failTask(taskId, {
+            error: String(error),
+            expectedRevision,
+          })
+        },
+        notify: ctx?.emit ?? undefined,
+        onSettled: () => {
+          if (hookScopeStarted) this.hooks?.end(agentId)
+          hookScopeStarted = false
+        },
+        resume: async (source, options: SubagentResumeOptions) =>
+          await this.launchSupervised(
+            spec,
+            savedArgs,
+            ctx
+              ? {
+                  ...ctx,
+                  signal: null,
+                  parentCallId: source.tool_call_id,
+                  subagentDepth: 0,
+                }
+              : {
+                  root: sourceWorkspace,
+                  workspaceRoot: sourceWorkspace,
+                  arguments: savedArgs,
+                  signal: null,
+                  parentCallId: source.tool_call_id,
+                  sessionId,
+                  subagentDepth: 0,
+                },
+            {
+              sourceTaskId: source.id,
+              mode:
+                options.mode ??
+                (source.metadata.subagent_mode === 'background'
+                  ? 'background'
+                  : 'foreground'),
+              ...(options.ttlMs !== undefined ? { ttlMs: options.ttlMs } : {}),
+            },
+          ),
+      })
+      await ctx?.emit?.(
+        runtimeEvents.taskStarted(launched.task.toRuntimeDict()),
+      )
+      return launched
+    } catch (error) {
+      if (hookScopeStarted) this.hooks?.end(agentId)
+      throw error
+    }
+  }
+
+  private registryForSpec(spec: SubagentSpec): ToolRegistry {
+    const names = new Set(spec.toolNames)
+    for (const definition of this.parentRegistry.getDefinitions()) {
+      const tool = this.parentRegistry.get(definition.name)
+      if (tool && allowedMcpTool(spec, definition.name, tool))
+        names.add(definition.name)
+    }
+    const registry = new ToolRegistry()
+    for (const name of names) {
+      const tool = this.parentRegistry.get(name)
+      if (tool) registry.register(new AgentPolicyTool(tool, spec))
+    }
+    return registry
+  }
+}
+
+class AgentPolicyTool extends Tool {
+  override readonly name: string
+  override readonly description: string
+  override readonly parameters: ToolParamsSchema
+  private readonly delegate: Tool
+  private readonly spec: SubagentSpec
+
+  constructor(delegate: Tool, spec: SubagentSpec) {
+    super()
+    this.delegate = delegate
+    this.spec = spec
+    this.name = delegate.name
+    this.description = delegate.description
+    this.parameters = delegate.parameters
+    this.readOnly = delegate.readOnly
+    this.exclusive = delegate.exclusive
+    this.requiresRuntimeContext = delegate.requiresRuntimeContext
+    this.maxResultChars = delegate.maxResultChars
+    this.concurrencySafe = delegate.concurrencySafe
+    this.evidencePolicy = delegate.evidencePolicy
+    this.classifiesStringErrors = delegate.classifiesStringErrors
+  }
+
+  override isReadOnly(args: Record<string, unknown>): boolean {
+    return this.delegate.isReadOnly(args)
+  }
+
+  override isDestructive(args?: Record<string, unknown>): boolean {
+    return this.delegate.isDestructive(args)
+  }
+
+  override isConcurrencySafe(args?: Record<string, unknown>): boolean {
+    return this.delegate.isConcurrencySafe(args)
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return this.delegate.getPath?.(args) ?? null
+  }
+
+  override getPaths(args: Record<string, unknown>): string[] {
+    if (this.delegate.getPaths) return this.delegate.getPaths(args)
+    const path = this.delegate.getPath?.(args)
+    return path ? [path] : []
+  }
+
+  override execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> | ToolExecutionResult {
+    const denial = agentPolicyDenial(this.delegate, this.spec, args)
+    return denial ?? this.delegate.execute(args, ctx)
+  }
+
+  override mapResult(raw: string, ctx: ToolExecutionContext): ToolResult {
+    return this.delegate.mapResult(raw, ctx)
+  }
+}
+
+function agentPolicyDenial(
+  tool: Tool,
+  spec: SubagentSpec,
+  args: Record<string, unknown>,
+): string | null {
+  const definition = spec.definition
+  if (tool.name === 'load_skill') {
+    const name = String(args.name ?? '').trim()
+    const allowed = definition.skills.allow
+    if (!allowed.includes('*') && !allowed.includes(name))
+      return `[ERR] AgentDefinition denied Skill: ${safePolicyLabel(name)}`
+  }
+  if (isMcpTool(tool.name) && !allowedMcpTool(spec, tool.name, tool))
+    return `[ERR] AgentDefinition denied MCP tool: ${safePolicyLabel(tool.name)}`
+  if (definition.sandbox.process === 'deny' && tool.name === 'run_command')
+    return '[ERR] AgentDefinition sandbox denied process execution'
+  if (
+    definition.sandbox.network === 'deny' &&
+    (tool.name === 'web_fetch' || isMcpTool(tool.name))
+  )
+    return `[ERR] AgentDefinition sandbox denied network tool: ${safePolicyLabel(tool.name)}`
+  if (definition.sandbox.filesystem === 'read-only' && tool.isDestructive(args))
+    return `[ERR] AgentDefinition read-only sandbox denied destructive tool: ${safePolicyLabel(tool.name)}`
+  return null
+}
+
+function allowedMcpTool(
+  spec: SubagentSpec,
+  toolName: string,
+  tool?: Tool,
+): boolean {
+  if (!isMcpTool(toolName)) return false
+  const exactServer = String(
+    (tool as { mcpServerName?: unknown } | undefined)?.mcpServerName ?? '',
+  ).trim()
+  if (exactServer) return spec.definition.mcp.servers.includes(exactServer)
+  return spec.definition.mcp.servers.some((server) =>
+    toolName.startsWith(`mcp_${server}_`),
+  )
+}
+
+function isMcpTool(toolName: string): boolean {
+  return toolName.startsWith('mcp_')
+}
+
+function safePolicyLabel(value: string): string {
+  const cleaned = String(value ?? '')
+    .replace(/[^A-Za-z0-9_.:-]/g, '_')
+    .slice(0, 128)
+  return cleaned || 'unknown'
 }
 
 export function composeSubagentTask(
@@ -328,6 +717,15 @@ function asOptional(value: unknown): string {
   return String(value ?? '').trim()
 }
 
+function agentDefinitionMetadata(spec: SubagentSpec): Record<string, unknown> {
+  return {
+    agent_definition_revision: spec.revision,
+    agent_source_id: spec.source.id,
+    agent_source_kind: spec.source.kind,
+    agent_source_trust: spec.source.trust,
+  }
+}
+
 function terminalTaskResult(
   record: TaskRecord | null | undefined,
   agentType: string,
@@ -344,6 +742,54 @@ function terminalTaskResult(
     return `Error: subagent '${agentType}' task already ${record.status}; result ignored.`
   }
   return ''
+}
+
+function dispatchTerminalResult(
+  terminal: TaskTerminalResult<string> | undefined,
+  agentType: string,
+): string {
+  if (!terminal)
+    return `Error: subagent '${agentType}' task ended without a terminal result.`
+  if (terminal.status === TaskStatus.COMPLETED)
+    return String(terminal.value ?? terminal.record.progress.summary ?? '')
+  if (terminal.status === TaskStatus.CANCELLED) {
+    const reason = terminal.reason ?? terminal.record.progress.reason
+    return `Error: subagent '${agentType}' task cancelled: ${String(reason ?? 'cancelled')}`
+  }
+  if (terminal.status === TaskStatus.INTERRUPTED)
+    return `Error: subagent '${agentType}' task interrupted: ${String(terminal.error ?? terminal.record.progress.reason ?? 'runtime interrupted')}`
+  return `Error: subagent '${agentType}' raised: ${String(terminal.error ?? terminal.record.progress.error ?? terminal.status)}`
+}
+
+async function emitTaskTerminal(
+  ctx: ToolExecutionContext | undefined,
+  terminal: TaskTerminalResult<string> | undefined,
+): Promise<void> {
+  if (!ctx?.emit || !terminal) return
+  const task = terminal.record.toRuntimeDict()
+  if (terminal.status === TaskStatus.COMPLETED) {
+    await ctx.emit(runtimeEvents.taskDone(task))
+    return
+  }
+  if (terminal.status === TaskStatus.CANCELLED) {
+    await ctx.emit(
+      runtimeEvents.taskCancelled(task, {
+        reason:
+          terminal.reason ?? String(terminal.record.progress.reason ?? ''),
+      }),
+    )
+    return
+  }
+  await ctx.emit(
+    runtimeEvents.taskError(task, {
+      error: String(
+        terminal.error ??
+          terminal.record.progress.error ??
+          terminal.record.progress.reason ??
+          terminal.status,
+      ),
+    }),
+  )
 }
 
 function dedupe(items: string[]): string[] {

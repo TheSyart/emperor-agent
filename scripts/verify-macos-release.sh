@@ -68,7 +68,7 @@ trap - EXIT
 
 RECEIPT_DIR="$DIST/release-receipts"
 RECEIPT_PATH="$RECEIPT_DIR/macos-$ARCH.json"
-COMMIT="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+COMMIT="${EMPEROR_RELEASE_COMMIT:-${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}}"
 mkdir -p "$RECEIPT_DIR"
 RECEIPT_PATH="$RECEIPT_PATH" COMMIT="$COMMIT" ARCH="$ARCH" \
 EXPECTED_TEAM_ID="$EXPECTED_TEAM_ID" DMG_NAME="$(basename "$DMG")" \

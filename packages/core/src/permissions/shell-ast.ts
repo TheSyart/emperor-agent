@@ -1,0 +1,875 @@
+import { createHash } from 'node:crypto'
+
+export type ShellAstStatus = 'parsed' | 'invalid' | 'too_complex'
+
+export type ShellAstFeature =
+  | 'pipeline'
+  | 'and'
+  | 'or'
+  | 'sequence'
+  | 'background'
+  | 'redirection'
+  | 'heredoc'
+  | 'here_string'
+  | 'command_substitution'
+  | 'process_substitution'
+  | 'parameter_expansion'
+  | 'arithmetic_expansion'
+  | 'subshell'
+  | 'brace_group'
+  | 'control_flow'
+
+export interface ShellAstRedirect {
+  operator: string
+  target: string
+  fd: number | null
+}
+
+export interface ShellAstCommand {
+  type: 'command'
+  argv: string[]
+  env: Array<{ name: string; value: string }>
+  redirects: ShellAstRedirect[]
+  nested: boolean
+}
+
+export interface ShellAstRoot {
+  type: 'script'
+  children: Array<
+    | ShellAstCommand
+    | { type: 'operator'; operator: string }
+    | { type: 'dynamic'; feature: ShellAstFeature }
+  >
+}
+
+export interface ShellAstAnalysis {
+  version: 1
+  parser: 'emperor-shell-ast-v1'
+  status: ShellAstStatus
+  root: ShellAstRoot
+  commands: ShellAstCommand[]
+  features: ShellAstFeature[]
+  reasonCodes: string[]
+  nodeCount: number
+  fingerprint: string
+}
+
+export interface ShellAstSummary {
+  parser: 'emperor-shell-ast-v1'
+  status: ShellAstStatus
+  features: ShellAstFeature[]
+  reasonCodes: string[]
+  commandCount: number
+  redirectCount: number
+  nodeCount: number
+  readonly: boolean
+  fingerprint: string
+}
+
+export type ShellCommandAnalyzer = (command: string) => ShellAstAnalysis
+
+type WordToken = {
+  kind: 'word'
+  value: string
+  start: number
+  end: number
+}
+type OperatorToken = {
+  kind: 'operator'
+  value: string
+  start: number
+  end: number
+}
+type RedirectToken = {
+  kind: 'redirect'
+  value: string
+  fd: number | null
+  start: number
+  end: number
+}
+type ShellToken = WordToken | OperatorToken | RedirectToken
+
+interface ScanResult {
+  tokens: ShellToken[]
+  features: Set<ShellAstFeature>
+  reasons: Set<string>
+  nested: ShellAstCommand[]
+  status: ShellAstStatus
+}
+
+const MAX_COMMAND_CHARS = 10_000
+const MAX_AST_NODES = 512
+const DYNAMIC_PLACEHOLDER = '__SHELL_DYNAMIC__'
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
+const CONTROL_FLOW_WORDS = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'for',
+  'while',
+  'until',
+  'case',
+  'esac',
+  'do',
+  'done',
+  'function',
+  'select',
+  'coproc',
+])
+const FEATURE_ORDER: ShellAstFeature[] = [
+  'pipeline',
+  'and',
+  'or',
+  'sequence',
+  'background',
+  'redirection',
+  'heredoc',
+  'here_string',
+  'command_substitution',
+  'process_substitution',
+  'parameter_expansion',
+  'arithmetic_expansion',
+  'subshell',
+  'brace_group',
+  'control_flow',
+]
+
+export function analyzeShellCommand(command: string): ShellAstAnalysis {
+  const input = String(command ?? '')
+  const preflightReasons = new Set<string>()
+  let status: ShellAstStatus = 'parsed'
+  if (!input.trim()) {
+    preflightReasons.add('empty_command')
+    status = 'invalid'
+  }
+  if (input.length > MAX_COMMAND_CHARS) {
+    preflightReasons.add('command_too_long')
+    status = 'too_complex'
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/\0|[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(input)) {
+    preflightReasons.add('control_character')
+    status = 'invalid'
+  }
+  if (
+    /[\u00a0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]/u.test(
+      input,
+    )
+  ) {
+    preflightReasons.add('unicode_whitespace')
+    status = 'invalid'
+  }
+
+  const scanned =
+    status === 'parsed' ? scan(input, 0) : emptyScan(status, preflightReasons)
+  for (const reason of preflightReasons) scanned.reasons.add(reason)
+  if (status !== 'parsed') scanned.status = status
+  const parsed = parseTokens(scanned.tokens, scanned)
+  const commands = [...parsed.commands, ...scanned.nested]
+  for (const commandNode of commands) {
+    if (commandNode.argv.some((part) => part === DYNAMIC_PLACEHOLDER))
+      scanned.reasons.add('dynamic_expansion')
+    for (const argument of commandNode.argv.slice(1)) {
+      if (isOutsidePathArgument(argument))
+        scanned.reasons.add('outside_path_argument')
+    }
+    if (CONTROL_FLOW_WORDS.has(baseName(commandNode.argv[0] ?? ''))) {
+      scanned.features.add('control_flow')
+      scanned.reasons.add('compound_command')
+    }
+  }
+  let nodeCount =
+    parsed.root.children.length +
+    commands.reduce(
+      (sum, item) => sum + 1 + item.argv.length + item.redirects.length,
+      0,
+    )
+  if (nodeCount > MAX_AST_NODES) {
+    scanned.status = 'too_complex'
+    scanned.reasons.add('ast_node_limit')
+    nodeCount = MAX_AST_NODES
+  }
+  const features = FEATURE_ORDER.filter((feature) =>
+    scanned.features.has(feature),
+  )
+  const reasonCodes = [...scanned.reasons].sort()
+  const structural = {
+    status: scanned.status,
+    commands: commands.map((item) => ({
+      argv: item.argv,
+      env: item.env,
+      redirects: item.redirects,
+      nested: item.nested,
+    })),
+    features,
+    reasonCodes,
+  }
+  return {
+    version: 1,
+    parser: 'emperor-shell-ast-v1',
+    status: scanned.status,
+    root: parsed.root,
+    commands,
+    features,
+    reasonCodes,
+    nodeCount,
+    fingerprint: sha256(stableStringify(structural)),
+  }
+}
+
+/**
+ * Capability boundary used by permission actors/services. A parser adapter is
+ * advisory evidence, so crashes and malformed adapter results must only remove
+ * permissions; they can never promote a command to read-only.
+ */
+export function analyzeShellCommandFailClosed(
+  command: string,
+  analyzer: ShellCommandAnalyzer = analyzeShellCommand,
+): ShellAstAnalysis {
+  try {
+    const analysis = analyzer(command)
+    if (!isShellAstAnalysis(analysis))
+      return failedAnalysis(command, 'parser_invalid_result')
+    return analysis
+  } catch {
+    return failedAnalysis(command, 'parser_failure')
+  }
+}
+
+export function isShellAstReadonly(analysis: ShellAstAnalysis): boolean {
+  if (analysis.status !== 'parsed') return false
+  if (analysis.features.length || analysis.reasonCodes.length) return false
+  if (analysis.commands.length !== 1) return false
+  const command = analysis.commands[0]!
+  if (command.env.length || command.redirects.length || command.nested)
+    return false
+  return isReadonlyArgv(command.argv)
+}
+
+export function shellAstSummary(analysis: ShellAstAnalysis): ShellAstSummary {
+  return {
+    parser: analysis.parser,
+    status: analysis.status,
+    features: [...analysis.features],
+    reasonCodes: [...analysis.reasonCodes],
+    commandCount: analysis.commands.length,
+    redirectCount: analysis.commands.reduce(
+      (sum, command) => sum + command.redirects.length,
+      0,
+    ),
+    nodeCount: analysis.nodeCount,
+    readonly: isShellAstReadonly(analysis),
+    fingerprint: analysis.fingerprint,
+  }
+}
+
+function scan(input: string, depth: number): ScanResult {
+  const result: ScanResult = emptyScan('parsed')
+  if (depth > 8) {
+    result.status = 'too_complex'
+    result.reasons.add('substitution_depth_limit')
+    return result
+  }
+  let word = ''
+  let wordStart = -1
+  const flushWord = (end: number): void => {
+    if (wordStart < 0) return
+    result.tokens.push({
+      kind: 'word',
+      value: word,
+      start: wordStart,
+      end,
+    })
+    word = ''
+    wordStart = -1
+  }
+  const append = (value: string, index: number): void => {
+    if (wordStart < 0) wordStart = index
+    word += value
+  }
+
+  for (let index = 0; index < input.length; index++) {
+    const ch = input[index]!
+    if (ch === ' ' || ch === '\t' || ch === '\r') {
+      flushWord(index)
+      continue
+    }
+    if (ch === '\n') {
+      flushWord(index)
+      pushOperator(result, '\n', index, index + 1)
+      continue
+    }
+    if (ch === "'") {
+      if (wordStart < 0) wordStart = index
+      const closed = consumeSingleQuoted(input, index + 1)
+      if (!closed) {
+        result.status = 'invalid'
+        result.reasons.add('unclosed_quote')
+        break
+      }
+      word += closed.value
+      index = closed.end
+      continue
+    }
+    if (ch === '"') {
+      if (wordStart < 0) wordStart = index
+      const quoted = consumeDoubleQuoted(input, index + 1, depth, result)
+      if (!quoted.closed) {
+        result.status = 'invalid'
+        result.reasons.add('unclosed_quote')
+        break
+      }
+      word += quoted.value
+      index = quoted.end
+      continue
+    }
+    if (ch === '\\') {
+      if (index + 1 >= input.length) {
+        result.status = 'invalid'
+        result.reasons.add('trailing_escape')
+        break
+      }
+      if (input[index + 1] === '\n') {
+        index += 1
+        continue
+      }
+      append(input[index + 1]!, index)
+      index += 1
+      continue
+    }
+    if (ch === '`') {
+      const substitution = consumeBackticks(input, index + 1)
+      result.features.add('command_substitution')
+      result.reasons.add('dynamic_expansion')
+      append(DYNAMIC_PLACEHOLDER, index)
+      if (!substitution.closed) {
+        result.status = 'invalid'
+        result.reasons.add('unclosed_substitution')
+        break
+      }
+      mergeNested(result, substitution.value, depth)
+      index = substitution.end
+      continue
+    }
+    if (ch === '$') {
+      const dynamic = consumeDollar(input, index, depth, result)
+      if (dynamic) {
+        append(DYNAMIC_PLACEHOLDER, index)
+        index = dynamic.end
+        continue
+      }
+    }
+    if ((ch === '<' || ch === '>') && input[index + 1] === '(') {
+      const substitution = consumeBalanced(input, index + 2)
+      result.features.add('process_substitution')
+      result.reasons.add('process_substitution')
+      append(DYNAMIC_PLACEHOLDER, index)
+      if (!substitution.closed) {
+        result.status = 'invalid'
+        result.reasons.add('unclosed_substitution')
+        break
+      }
+      mergeNested(result, substitution.value, depth)
+      index = substitution.end
+      continue
+    }
+    const redirect = redirectAt(input, index)
+    if (redirect) {
+      flushWord(index)
+      let fd: number | null = null
+      const previous = result.tokens.at(-1)
+      if (
+        previous?.kind === 'word' &&
+        previous.end === index &&
+        /^\d+$/.test(previous.value)
+      ) {
+        fd = Number(previous.value)
+        result.tokens.pop()
+      }
+      result.tokens.push({
+        kind: 'redirect',
+        value: redirect,
+        fd,
+        start: index,
+        end: index + redirect.length,
+      })
+      result.features.add('redirection')
+      if (redirect.startsWith('<<')) result.features.add('heredoc')
+      if (redirect === '<<<') result.features.add('here_string')
+      index += redirect.length - 1
+      continue
+    }
+    const operator = operatorAt(input, index)
+    if (operator) {
+      flushWord(index)
+      pushOperator(result, operator, index, index + operator.length)
+      index += operator.length - 1
+      continue
+    }
+    if (ch === '(' || ch === ')') {
+      flushWord(index)
+      result.features.add('subshell')
+      result.reasons.add('compound_command')
+      result.tokens.push({
+        kind: 'operator',
+        value: ch,
+        start: index,
+        end: index + 1,
+      })
+      continue
+    }
+    if (ch === '{' || ch === '}') {
+      flushWord(index)
+      result.features.add('brace_group')
+      result.reasons.add('compound_command')
+      result.tokens.push({
+        kind: 'operator',
+        value: ch,
+        start: index,
+        end: index + 1,
+      })
+      continue
+    }
+    append(ch, index)
+  }
+  flushWord(input.length)
+  return result
+}
+
+function parseTokens(
+  tokens: ShellToken[],
+  scanned: ScanResult,
+): { root: ShellAstRoot; commands: ShellAstCommand[] } {
+  const root: ShellAstRoot = { type: 'script', children: [] }
+  const commands: ShellAstCommand[] = []
+  let words: string[] = []
+  let redirects: ShellAstRedirect[] = []
+  let pendingRedirect: RedirectToken | null = null
+  const flush = (): void => {
+    if (!words.length && !redirects.length) return
+    const env: Array<{ name: string; value: string }> = []
+    while (words.length) {
+      const assignment = ENV_ASSIGNMENT.exec(words[0]!)
+      if (!assignment) break
+      env.push({ name: assignment[1]!, value: assignment[2] ?? '' })
+      words.shift()
+    }
+    if (words.length) {
+      const command: ShellAstCommand = {
+        type: 'command',
+        argv: words,
+        env,
+        redirects,
+        nested: false,
+      }
+      commands.push(command)
+      root.children.push(command)
+    } else {
+      scanned.reasons.add('missing_command')
+    }
+    words = []
+    redirects = []
+  }
+
+  for (const token of tokens) {
+    if (token.kind === 'word') {
+      if (pendingRedirect) {
+        redirects.push({
+          operator: pendingRedirect.value,
+          target: token.value,
+          fd: pendingRedirect.fd,
+        })
+        pendingRedirect = null
+      } else {
+        words.push(token.value)
+      }
+      continue
+    }
+    if (token.kind === 'redirect') {
+      if (pendingRedirect) scanned.reasons.add('missing_redirect_target')
+      pendingRedirect = token
+      continue
+    }
+    if (pendingRedirect) {
+      scanned.reasons.add('missing_redirect_target')
+      pendingRedirect = null
+    }
+    flush()
+    root.children.push({ type: 'operator', operator: token.value })
+  }
+  if (pendingRedirect) scanned.reasons.add('missing_redirect_target')
+  flush()
+  return { root, commands }
+}
+
+function consumeDollar(
+  input: string,
+  index: number,
+  depth: number,
+  result: ScanResult,
+): { end: number } | null {
+  const next = input[index + 1]
+  if (next === '(') {
+    if (input[index + 2] === '(') {
+      const arithmetic = consumeArithmetic(input, index + 3)
+      result.features.add('arithmetic_expansion')
+      result.reasons.add('dynamic_expansion')
+      if (!arithmetic.closed) {
+        result.status = 'invalid'
+        result.reasons.add('unclosed_substitution')
+      }
+      return { end: arithmetic.end }
+    }
+    const substitution = consumeBalanced(input, index + 2)
+    result.features.add('command_substitution')
+    result.reasons.add('dynamic_expansion')
+    if (!substitution.closed) {
+      result.status = 'invalid'
+      result.reasons.add('unclosed_substitution')
+    } else {
+      mergeNested(result, substitution.value, depth)
+    }
+    return { end: substitution.end }
+  }
+  if (next === '{') {
+    const end = input.indexOf('}', index + 2)
+    result.features.add('parameter_expansion')
+    result.reasons.add('dynamic_expansion')
+    if (end < 0) {
+      result.status = 'invalid'
+      result.reasons.add('unclosed_substitution')
+      return { end: input.length - 1 }
+    }
+    return { end }
+  }
+  if (next && /[A-Za-z0-9_?$!#*@-]/.test(next)) {
+    let end = index + 1
+    while (end + 1 < input.length && /[A-Za-z0-9_]/.test(input[end + 1]!))
+      end += 1
+    result.features.add('parameter_expansion')
+    result.reasons.add('dynamic_expansion')
+    return { end }
+  }
+  return null
+}
+
+function consumeDoubleQuoted(
+  input: string,
+  start: number,
+  depth: number,
+  result: ScanResult,
+): { value: string; end: number; closed: boolean } {
+  let value = ''
+  for (let index = start; index < input.length; index++) {
+    const ch = input[index]!
+    if (ch === '"') return { value, end: index, closed: true }
+    if (ch === '\\') {
+      const next = input[index + 1]
+      if (next === undefined) break
+      if (next === '\n') {
+        index += 1
+        continue
+      }
+      if (next === '$' || next === '`' || next === '"' || next === '\\') {
+        value += next
+        index += 1
+        continue
+      }
+      value += `\\${next}`
+      index += 1
+      continue
+    }
+    if (ch === '`') {
+      const substitution = consumeBackticks(input, index + 1)
+      result.features.add('command_substitution')
+      result.reasons.add('dynamic_expansion')
+      value += DYNAMIC_PLACEHOLDER
+      if (!substitution.closed)
+        return { value, end: input.length - 1, closed: false }
+      mergeNested(result, substitution.value, depth)
+      index = substitution.end
+      continue
+    }
+    if (ch === '$') {
+      const dynamic = consumeDollar(input, index, depth, result)
+      if (dynamic) {
+        value += DYNAMIC_PLACEHOLDER
+        index = dynamic.end
+        continue
+      }
+    }
+    value += ch
+  }
+  return { value, end: input.length - 1, closed: false }
+}
+
+function consumeSingleQuoted(
+  input: string,
+  start: number,
+): { value: string; end: number } | null {
+  const end = input.indexOf("'", start)
+  return end < 0 ? null : { value: input.slice(start, end), end }
+}
+
+function consumeBackticks(
+  input: string,
+  start: number,
+): { value: string; end: number; closed: boolean } {
+  let escaped = false
+  for (let index = start; index < input.length; index++) {
+    const ch = input[index]!
+    if (!escaped && ch === '`')
+      return { value: input.slice(start, index), end: index, closed: true }
+    escaped = !escaped && ch === '\\'
+    if (ch !== '\\') escaped = false
+  }
+  return { value: '', end: input.length - 1, closed: false }
+}
+
+function consumeBalanced(
+  input: string,
+  start: number,
+): { value: string; end: number; closed: boolean } {
+  let depth = 1
+  let quote: "'" | '"' | null = null
+  let escaped = false
+  for (let index = start; index < input.length; index++) {
+    const ch = input[index]!
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      continue
+    }
+    if (ch === '(') depth += 1
+    if (ch === ')') {
+      depth -= 1
+      if (depth === 0)
+        return {
+          value: input.slice(start, index),
+          end: index,
+          closed: true,
+        }
+    }
+  }
+  return { value: '', end: input.length - 1, closed: false }
+}
+
+function consumeArithmetic(
+  input: string,
+  start: number,
+): { end: number; closed: boolean } {
+  for (let index = start; index < input.length - 1; index++) {
+    if (input[index] === ')' && input[index + 1] === ')')
+      return { end: index + 1, closed: true }
+  }
+  return { end: input.length - 1, closed: false }
+}
+
+function mergeNested(result: ScanResult, input: string, depth: number): void {
+  const nested = scan(input, depth + 1)
+  const parsed = parseTokens(nested.tokens, nested)
+  result.nested.push(
+    ...parsed.commands.map((command) => ({ ...command, nested: true })),
+    ...nested.nested,
+  )
+  nested.features.forEach((feature) => result.features.add(feature))
+  nested.reasons.forEach((reason) => result.reasons.add(reason))
+  if (nested.status !== 'parsed') result.status = nested.status
+}
+
+function pushOperator(
+  result: ScanResult,
+  value: string,
+  start: number,
+  end: number,
+): void {
+  result.tokens.push({ kind: 'operator', value, start, end })
+  if (value === '|' || value === '|&') result.features.add('pipeline')
+  else if (value === '&&') result.features.add('and')
+  else if (value === '||') result.features.add('or')
+  else if (value === '&') result.features.add('background')
+  else result.features.add('sequence')
+  result.reasons.add('compound_command')
+}
+
+function redirectAt(input: string, index: number): string | null {
+  for (const operator of [
+    '&>>',
+    '<<<',
+    '&>',
+    '>>',
+    '<<',
+    '>&',
+    '<&',
+    '>|',
+    '>',
+    '<',
+  ]) {
+    if (input.startsWith(operator, index)) return operator
+  }
+  return null
+}
+
+function operatorAt(input: string, index: number): string | null {
+  for (const operator of ['&&', '||', '|&', ';', '|', '&']) {
+    if (input.startsWith(operator, index)) return operator
+  }
+  return null
+}
+
+function isReadonlyArgv(argv: string[]): boolean {
+  if (!argv.length) return false
+  const head = baseName(argv[0]!)
+  if (head === 'pwd')
+    return argv
+      .slice(1)
+      .every((argument) => argument === '-L' || argument === '-P')
+  if (head === 'ls')
+    return argv
+      .slice(1)
+      .every((argument) => argument === '.' || /^-[A-Za-z]+$/.test(argument))
+  if (head !== 'git') return false
+
+  let index = 1
+  while (argv[index] === '--no-pager' || argv[index] === '--literal-pathspecs')
+    index += 1
+  const subcommand = argv[index]
+  if (!subcommand) return false
+  const args = argv.slice(index + 1)
+  if (subcommand === 'status')
+    return !args.some(
+      (argument) =>
+        argument === '--help' ||
+        argument === '-h' ||
+        argument === '--config' ||
+        argument.startsWith('--config='),
+    )
+  if (subcommand === 'diff' || subcommand === 'log' || subcommand === 'show') {
+    return !args.some(
+      (argument) =>
+        argument === '--ext-diff' ||
+        argument === '--help' ||
+        argument === '-h' ||
+        argument === '--textconv' ||
+        argument === '--no-textconv' ||
+        argument === '--output' ||
+        argument.startsWith('--output='),
+    )
+  }
+  if (subcommand === 'branch') {
+    if (!args.length) return true
+    const mutating = new Set([
+      '-d',
+      '-D',
+      '-m',
+      '-M',
+      '-c',
+      '-C',
+      '--delete',
+      '--move',
+      '--copy',
+      '--edit-description',
+      '--set-upstream-to',
+      '--unset-upstream',
+    ])
+    if (args.some((argument) => mutating.has(argument))) return false
+    const permitsPatterns = args.some(
+      (argument) => argument === '--list' || argument.startsWith('--list='),
+    )
+    return args.every((argument) => argument.startsWith('-')) || permitsPatterns
+  }
+  return false
+}
+
+function isOutsidePathArgument(argument: string): boolean {
+  const value = argument.replace(/\\/g, '/')
+  return Boolean(
+    value.startsWith('/') ||
+    value.startsWith('~/') ||
+    value.startsWith('//') ||
+    value === '..' ||
+    value.startsWith('../') ||
+    value.includes('/../'),
+  )
+}
+
+function emptyScan(
+  status: ShellAstStatus,
+  reasons: Set<string> = new Set(),
+): ScanResult {
+  return {
+    tokens: [],
+    features: new Set(),
+    reasons,
+    nested: [],
+    status,
+  }
+}
+
+function baseName(value: string): string {
+  return value.replace(/\\/g, '/').split('/').pop() || value
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+function failedAnalysis(command: string, reason: string): ShellAstAnalysis {
+  const structural = {
+    status: 'invalid',
+    reasonCodes: [reason],
+    inputFingerprint: sha256(String(command ?? '')),
+  }
+  return {
+    version: 1,
+    parser: 'emperor-shell-ast-v1',
+    status: 'invalid',
+    root: { type: 'script', children: [] },
+    commands: [],
+    features: [],
+    reasonCodes: [reason],
+    nodeCount: 0,
+    fingerprint: sha256(stableStringify(structural)),
+  }
+}
+
+function isShellAstAnalysis(value: unknown): value is ShellAstAnalysis {
+  if (!value || typeof value !== 'object') return false
+  const analysis = value as Partial<ShellAstAnalysis>
+  return (
+    analysis.version === 1 &&
+    analysis.parser === 'emperor-shell-ast-v1' &&
+    (analysis.status === 'parsed' ||
+      analysis.status === 'invalid' ||
+      analysis.status === 'too_complex') &&
+    Boolean(analysis.root && analysis.root.type === 'script') &&
+    Array.isArray(analysis.commands) &&
+    Array.isArray(analysis.features) &&
+    Array.isArray(analysis.reasonCodes) &&
+    Number.isFinite(analysis.nodeCount) &&
+    typeof analysis.fingerprint === 'string'
+  )
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`
+}

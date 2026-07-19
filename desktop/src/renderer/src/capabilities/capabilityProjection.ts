@@ -1,5 +1,6 @@
 import type {
   AttachmentRef,
+  McpConnectionStatusPayload,
   McpServerConfig,
   SkillInfo,
   ToolInfo,
@@ -93,24 +94,50 @@ export function mcpServerCapability(
   name: string,
   config: McpServerConfig,
   toolCount = 0,
+  status?: McpConnectionStatusPayload | null,
 ): CapabilityDisplayItem {
   const enabled = config.enabled !== false
   const transport = config.transport || (config.url ? 'sse' : 'stdio')
   const target = config.command || config.url || '未配置启动方式'
+  const state = enabled ? status?.state || 'stopped' : 'stopped'
+  const stateDisplay = enabled ? mcpStateDisplay(state) : '已停用'
+  const effectiveToolCount = status?.toolCount ?? toolCount
   return {
     id: `mcp-server:${name}`,
     kind: 'mcp',
     title: titleizeCapabilityName(name),
     name,
-    description: `${transport} · ${target}`,
+    description: `${transport} · ${target}${status?.lastError?.message ? ` · ${status.lastError.message}` : ''}`,
     tone: 'slate',
-    meta: 'MCP server',
+    meta: `MCP server · ${stateDisplay}`,
     badges: [
-      { label: enabled ? '启用' : '停用', tone: enabled ? 'green' : 'gold' },
-      { label: `${toolCount} 工具`, tone: 'blue' },
+      { label: stateDisplay, tone: mcpStateTone(state, enabled) },
+      { label: `${effectiveToolCount} 工具`, tone: 'blue' },
+      ...(status?.generation
+        ? [{ label: `G${status.generation}`, tone: 'slate' as const }]
+        : []),
     ],
     sourceName: 'MCP',
   }
+}
+
+function mcpStateDisplay(state: string): string {
+  if (state === 'ready') return '已连接'
+  if (state === 'connecting') return '连接中'
+  if (state === 'backoff') return '等待重试'
+  if (state === 'auth_failed') return '认证失败'
+  if (state === 'degraded') return '连接异常'
+  if (state === 'failed') return '连接失败'
+  return '未连接'
+}
+
+function mcpStateTone(state: string, enabled: boolean): CapabilityTone {
+  if (!enabled) return 'gold'
+  if (state === 'ready') return 'green'
+  if (state === 'connecting' || state === 'backoff') return 'gold'
+  if (state === 'auth_failed' || state === 'degraded' || state === 'failed')
+    return 'red'
+  return 'slate'
 }
 
 export function titleizeCapabilityName(name: string): string {

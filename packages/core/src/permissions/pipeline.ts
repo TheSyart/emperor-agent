@@ -16,26 +16,54 @@ import {
   executesProjectCodeCommand,
   isHighRiskCommand,
   isLowRiskCommand,
-  isReadonlyCommand,
   isSensitivePath,
 } from '../tools/resolvers'
 import { resolveToolProfile } from './resolve-profile'
 import {
-  matchPermissionRule,
-  parsePermissionRules,
+  parsePermissionRuleLayers,
+  resolvePermissionRules,
   type PermissionRule,
+  type PermissionRuleAction,
   type PermissionRuleDiagnostics,
   type PermissionRuleInput,
+  type PermissionRuleLayerInput,
+  type PermissionRuleResolution,
 } from './rules'
+import {
+  analyzeShellCommand,
+  analyzeShellCommandFailClosed,
+  isShellAstReadonly,
+  shellAstSummary,
+  type ShellAstAnalysis,
+  type ShellCommandAnalyzer,
+} from './shell-ast'
 
 export class PermissionPipeline {
   private readonly userRules: PermissionRule[]
   private readonly ruleDiagnostics: PermissionRuleDiagnostics
+  private readonly shellAnalyzer: ShellCommandAnalyzer
 
-  constructor(opts: { rules?: PermissionRuleInput[] | null } = {}) {
-    const parsed = parsePermissionRules(opts.rules ?? [])
+  constructor(
+    opts: {
+      rules?: PermissionRuleInput[] | null
+      layers?: PermissionRuleLayerInput[] | null
+      shellAnalyzer?: ShellCommandAnalyzer
+    } = {},
+  ) {
+    const parsed = parsePermissionRuleLayers([
+      {
+        source: {
+          kind: 'local_config',
+          id: 'emperor.local.json',
+          trust: 'user',
+        },
+        rules: opts.rules ?? [],
+      },
+      ...(opts.layers ?? []),
+    ])
     this.userRules = parsed.rules
     this.ruleDiagnostics = parsed.diagnostics
+    this.shellAnalyzer = opts.shellAnalyzer ?? analyzeShellCommand
   }
 
   diagnostics(): PermissionRuleDiagnostics {
@@ -62,18 +90,44 @@ export class PermissionPipeline {
     const trace: PermissionTraceEntry[] = [
       traceEntry('mode.resolve', 'matched', normalizedMode),
     ]
-
-    const userRuleDecision = this.assessUserRule(profile, trace)
-    if (userRuleDecision !== null) return userRuleDecision
-
-    if (toolName === 'ask_user') {
+    const resolution = resolvePermissionRules(this.userRules, profile)
+    const shellAnalysis =
+      profile.name === 'run_command'
+        ? analyzeShellCommandFailClosed(profile.command, this.shellAnalyzer)
+        : null
+    for (const candidate of resolution.candidates) {
+      if (!candidate.matched) continue
       trace.push(
-        traceEntry('control.ask_user', 'allow', 'ask_user is always available'),
+        traceEntry(
+          `candidate.${candidate.id}`,
+          candidate.action,
+          `${candidate.source.kind}:${candidate.source.id}:${candidate.source.trust}`,
+        ),
       )
-      return allow(profile, 'control.ask_user', trace)
     }
+    const decision = this.assessProfile(
+      profile,
+      normalizedMode,
+      trace,
+      resolution,
+      mode,
+      shellAnalysis,
+    )
+    return explainDecision(decision, resolution, profile, shellAnalysis)
+  }
 
-    if (toolName === 'propose_plan' && normalizedMode !== PermissionMode.PLAN) {
+  private assessProfile(
+    profile: ToolPermissionProfile,
+    normalizedMode: string,
+    trace: PermissionTraceEntry[],
+    resolution: PermissionRuleResolution,
+    rawMode: string,
+    shellAnalysis: ShellAstAnalysis | null,
+  ): PermissionDecision {
+    if (
+      profile.name === 'propose_plan' &&
+      normalizedMode !== PermissionMode.PLAN
+    ) {
       trace.push(
         traceEntry(
           'control.propose_plan',
@@ -89,11 +143,32 @@ export class PermissionPipeline {
       )
     }
 
+    if (profile.name === 'ask_user') {
+      const userRuleDecision = this.assessUserRule(profile, trace, resolution)
+      if (userRuleDecision) return userRuleDecision
+      trace.push(
+        traceEntry('control.ask_user', 'allow', 'ask_user is always available'),
+      )
+      return allow(profile, 'control.ask_user', trace)
+    }
+
+    if (normalizedMode === PermissionMode.PLAN) {
+      const constrained = this.assessPlan(profile, trace)
+      if (!constrained.allowed) return constrained
+      return this.assessUserRule(profile, trace, resolution) ?? constrained
+    }
+
     if (normalizedMode === PermissionMode.AUTO) {
       // AUTO 只能自动执行经正向证明为只读的诊断命令。脚本、解释器、构建、测试和
       // 未知 executable 都可能承载任意副作用，不能再依赖有限黑名单判断安全性。
       if (profile.name === 'run_command') {
-        if (isReadonlyCommand(profile.command)) {
+        if (shellAnalysis && isShellAstReadonly(shellAnalysis)) {
+          const userRuleDecision = this.assessUserRule(
+            profile,
+            trace,
+            resolution,
+          )
+          if (userRuleDecision) return userRuleDecision
           trace.push(
             traceEntry(
               'mode.auto.read_only_command',
@@ -103,6 +178,8 @@ export class PermissionPipeline {
           )
           return allow(profile, 'mode.auto.read_only_command', trace)
         }
+        const tightening = this.assessTighteningRule(profile, trace, resolution)
+        if (tightening) return tightening
         trace.push(
           traceEntry(
             'mode.auto.command_approval',
@@ -118,6 +195,8 @@ export class PermissionPipeline {
           RiskLevel.HIGH,
         )
       }
+      const userRuleDecision = this.assessUserRule(profile, trace, resolution)
+      if (userRuleDecision) return userRuleDecision
       trace.push(
         traceEntry(
           'mode.auto',
@@ -128,23 +207,61 @@ export class PermissionPipeline {
       return allow(profile, 'mode.auto', trace)
     }
 
-    if (normalizedMode === PermissionMode.PLAN) {
-      return this.assessPlan(profile, trace)
-    }
-
     if (normalizedMode === PermissionMode.ASK_BEFORE_EDIT) {
+      if (
+        profile.name === 'run_command' &&
+        shellAnalysis?.status !== 'parsed'
+      ) {
+        const tightening = this.assessTighteningRule(profile, trace, resolution)
+        if (tightening) return tightening
+        trace.push(
+          traceEntry(
+            'ask.run_command.parser_untrusted',
+            'approval',
+            shellAnalysis?.status ?? 'missing',
+          ),
+        )
+        return approval(
+          profile,
+          'ask.run_command.parser_untrusted',
+          'shell command could not be classified reliably and requires approval.',
+          trace,
+          RiskLevel.HIGH,
+        )
+      }
+      if (
+        profile.name === 'run_command' &&
+        (executesProjectCodeCommand(profile.command) ||
+          isHighRiskCommand(profile.command))
+      ) {
+        const tightening = this.assessTighteningRule(profile, trace, resolution)
+        if (tightening) return tightening
+        return this.assessAskBeforeEdit(profile, trace)
+      }
+      const userRuleDecision = this.assessUserRule(profile, trace, resolution)
+      if (userRuleDecision) return userRuleDecision
       return this.assessAskBeforeEdit(profile, trace)
     }
 
     if (normalizedMode === PermissionMode.ACCEPT_EDITS) {
+      if (profile.name === 'run_command') {
+        const tightening = this.assessTighteningRule(profile, trace, resolution)
+        if (tightening) return tightening
+        return this.assessAcceptEdits(profile, trace)
+      }
+      const userRuleDecision = this.assessUserRule(profile, trace, resolution)
+      if (userRuleDecision) return userRuleDecision
       return this.assessAcceptEdits(profile, trace)
     }
+
+    const userRuleDecision = this.assessUserRule(profile, trace, resolution)
+    if (userRuleDecision) return userRuleDecision
 
     trace.push(traceEntry('mode.unknown', 'deny', normalizedMode))
     return deny(
       profile,
       'mode.unknown',
-      `unknown permission mode: ${mode}`,
+      `unknown permission mode: ${rawMode}`,
       trace,
     )
   }
@@ -238,8 +355,9 @@ export class PermissionPipeline {
   private assessUserRule(
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
+    resolution: PermissionRuleResolution,
   ): PermissionDecision | null {
-    const rule = matchPermissionRule(this.userRules, profile)
+    const rule = resolution.winner
     if (!rule) return null
     const ruleName = `user_rule.${rule.id}`
     trace.push(traceEntry(ruleName, rule.action, rule.reason))
@@ -248,6 +366,16 @@ export class PermissionPipeline {
     if (rule.action === 'ask')
       return approval(profile, ruleName, rule.reason, trace, RiskLevel.MEDIUM)
     return allow(profile, ruleName, trace)
+  }
+
+  private assessTighteningRule(
+    profile: ToolPermissionProfile,
+    trace: PermissionTraceEntry[],
+    resolution: PermissionRuleResolution,
+  ): PermissionDecision | null {
+    const winner = resolution.winner
+    if (!winner || winner.action === 'allow') return null
+    return this.assessUserRule(profile, trace, resolution)
   }
 
   private assessAskBeforeEdit(
@@ -331,23 +459,19 @@ export class PermissionPipeline {
       return this.assessSchedulerInAskMode(profile, trace)
     }
 
-    if (
-      (profile.name === 'write_file' || profile.name === 'edit_file') &&
-      isSensitivePath(profile.path)
-    ) {
-      trace.push(
-        traceEntry('ask.sensitive_path', 'approval', profile.path || ''),
-      )
+    const sensitivePath = sensitiveProfilePath(profile)
+    if (isManagedFileMutation(profile.name) && sensitivePath) {
+      trace.push(traceEntry('ask.sensitive_path', 'approval', sensitivePath))
       return approval(
         profile,
         'ask.sensitive_path',
-        `sensitive or runtime path: ${profile.path}`,
+        `sensitive or runtime path: ${sensitivePath}`,
         trace,
       )
     }
 
     if (
-      profile.name === 'edit_file' &&
+      (profile.name === 'edit_file' || profile.name === 'apply_patch') &&
       Boolean((profile.arguments as Record<string, unknown>).replace_all)
     ) {
       trace.push(
@@ -359,6 +483,17 @@ export class PermissionPipeline {
         `bulk replace requested in ${profile.path}`,
         trace,
         RiskLevel.MEDIUM,
+      )
+    }
+
+    if (profile.name === 'delete_file' || profile.name === 'rename_file') {
+      trace.push(traceEntry('ask.destructive_file', 'approval', profile.name))
+      return approval(
+        profile,
+        'ask.destructive_file',
+        'deleting or renaming a file requires explicit approval.',
+        trace,
+        RiskLevel.HIGH,
       )
     }
 
@@ -436,27 +571,21 @@ export class PermissionPipeline {
       return this.assessSchedulerInAcceptEditsMode(profile, trace)
     }
 
-    if (
-      (profile.name === 'write_file' || profile.name === 'edit_file') &&
-      isSensitivePath(profile.path)
-    ) {
+    const sensitivePath = sensitiveProfilePath(profile)
+    if (isManagedFileMutation(profile.name) && sensitivePath) {
       trace.push(
-        traceEntry(
-          'accept_edits.sensitive_path',
-          'approval',
-          profile.path || '',
-        ),
+        traceEntry('accept_edits.sensitive_path', 'approval', sensitivePath),
       )
       return approval(
         profile,
         'accept_edits.sensitive_path',
-        `sensitive or runtime path: ${profile.path}`,
+        `sensitive or runtime path: ${sensitivePath}`,
         trace,
       )
     }
 
     if (
-      profile.name === 'edit_file' &&
+      (profile.name === 'edit_file' || profile.name === 'apply_patch') &&
       Boolean((profile.arguments as Record<string, unknown>).replace_all)
     ) {
       trace.push(
@@ -475,7 +604,20 @@ export class PermissionPipeline {
       )
     }
 
-    if (profile.name === 'write_file' || profile.name === 'edit_file') {
+    if (profile.name === 'delete_file' || profile.name === 'rename_file') {
+      trace.push(
+        traceEntry('accept_edits.destructive_file', 'approval', profile.name),
+      )
+      return approval(
+        profile,
+        'accept_edits.destructive_file',
+        'deleting or renaming a file requires explicit approval.',
+        trace,
+        RiskLevel.HIGH,
+      )
+    }
+
+    if (isNonDestructiveFileEdit(profile.name)) {
       trace.push(
         traceEntry(
           'accept_edits.file_edit',
@@ -581,6 +723,26 @@ export class PermissionPipeline {
   }
 }
 
+function isNonDestructiveFileEdit(name: string): boolean {
+  return name === 'write_file' || name === 'edit_file' || name === 'apply_patch'
+}
+
+function isManagedFileMutation(name: string): boolean {
+  return (
+    isNonDestructiveFileEdit(name) ||
+    name === 'delete_file' ||
+    name === 'rename_file'
+  )
+}
+
+function sensitiveProfilePath(profile: ToolPermissionProfile): string | null {
+  return (
+    (profile.paths.length ? profile.paths : [profile.path ?? '']).find((path) =>
+      isSensitivePath(path),
+    ) ?? null
+  )
+}
+
 function normalizeMode(mode: string): string {
   if (
     mode === '' ||
@@ -638,4 +800,68 @@ function approval(
     rule,
     trace: [...trace],
   })
+}
+
+function explainDecision(
+  decision: PermissionDecision,
+  resolution: PermissionRuleResolution,
+  profile: ToolPermissionProfile,
+  shellAnalysis: ShellAstAnalysis | null,
+): PermissionDecision {
+  const action: PermissionRuleAction = decision.allowed
+    ? 'allow'
+    : decision.requiresApproval
+      ? 'ask'
+      : 'deny'
+  const selectedRule = decision.rule.startsWith('user_rule.')
+    ? resolution.winner
+    : null
+  const selectedCandidate = selectedRule
+    ? resolution.candidates.find(
+        (candidate) => candidate.id === selectedRule.id && candidate.matched,
+      )
+    : null
+  const coreCandidate = {
+    id: decision.rule || 'core_policy.unknown',
+    action,
+    matched: true,
+    source: {
+      kind: 'core_policy',
+      id: 'permission-pipeline-v1',
+      trust: 'system' as const,
+    },
+    precedence: `${action}:system:core`,
+  }
+  const candidates = selectedRule
+    ? resolution.candidates
+    : [...resolution.candidates, coreCandidate]
+  return {
+    ...decision,
+    explanation: {
+      version: 1,
+      candidates,
+      selected: selectedRule
+        ? {
+            id: selectedRule.id,
+            action: selectedRule.action,
+            source: { ...selectedRule.source },
+            precedence:
+              selectedCandidate?.precedence ??
+              `${selectedRule.action}:${selectedRule.source.trust}:unknown`,
+          }
+        : {
+            id: coreCandidate.id,
+            action: coreCandidate.action,
+            source: { ...coreCandidate.source },
+            precedence: coreCandidate.precedence,
+          },
+      ...(profile.name === 'run_command'
+        ? {
+            shell: shellAstSummary(
+              shellAnalysis ?? analyzeShellCommandFailClosed(profile.command),
+            ),
+          }
+        : {}),
+    },
+  }
 }

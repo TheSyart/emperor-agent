@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { loadMcpConfig, saveMcpConfig, type MCPConfig } from '../../mcp/config'
+import {
+  loadMcpConfigUnresolved,
+  saveMcpConfig,
+  type MCPConfig,
+} from '../../mcp/config'
 import { ensureUserProfileFile } from '../../sessions/onboarding'
 import { applyUserProfileMarkdownPatch } from '../../memory/user-profile'
 import { MemoryVersionStore } from '../../memory/versions'
@@ -67,7 +71,7 @@ export class CoreConfigService {
   }
 
   async getMcpConfig(): Promise<MCPConfig> {
-    return await loadMcpConfig(this.root)
+    return await loadMcpConfigUnresolved(this.root)
   }
 
   async saveMcpConfig(raw: Record<string, unknown>): Promise<MCPConfig> {

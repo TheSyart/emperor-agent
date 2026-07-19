@@ -1,15 +1,25 @@
 import { resolve } from 'node:path'
-import { defineConfig } from 'electron-vite'
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
 
 const repoRoot = resolve(__dirname, '..')
 
 export default defineConfig({
   main: {
+    plugins: [externalizeDepsPlugin({ include: ['typescript'] })],
     build: { outDir: 'out/main' },
   },
   preload: {
-    build: { outDir: 'out/preload' },
+    build: {
+      outDir: 'out/preload',
+      rollupOptions: {
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs',
+          chunkFileNames: '[name]-[hash].cjs',
+        },
+      },
+    },
   },
   renderer: {
     root: 'src/renderer',

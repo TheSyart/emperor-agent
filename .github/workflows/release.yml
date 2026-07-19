@@ -1,18 +1,73 @@
 name: release
 
 on:
-  push:
-    tags:
-      - 'v*'
-      - '!v*-*'
-      - '!v*-preview.*'
+  workflow_dispatch:
+    inputs:
+      stable_tag:
+        description: Existing annotated Stable tag to rehearse or publish
+        required: true
+        type: string
+      publish:
+        description: Publish after all candidates, receipts and attestations pass
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: stable-release-${{ inputs.stable_tag }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  release-policy:
+    name: Validate explicit Stable release request
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.policy.outputs.tag }}
+      commit: ${{ steps.policy.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - id: policy
+        name: Require an annotated Stable tag on the default branch
+        shell: bash
+        env:
+          STABLE_TAG: ${{ inputs.stable_tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ ! "$STABLE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable tag must be a release tag without a prerelease suffix" >&2
+            exit 1
+          fi
+          git rev-parse --verify "refs/tags/$STABLE_TAG" >/dev/null
+          if [[ "$(git cat-file -t "refs/tags/$STABLE_TAG")" != tag ]]; then
+            echo "Stable tag must be annotated: $STABLE_TAG" >&2
+            exit 1
+          fi
+          commit="$(git rev-parse "refs/tags/$STABLE_TAG^{commit}")"
+          version="$(git show "$commit:desktop/package.json" 2>/dev/null | node -e "let value=''; process.stdin.on('data', chunk => value += chunk).on('end', () => process.stdout.write(JSON.parse(value).version))")"
+          if [[ "$STABLE_TAG" != "v$version" ]]; then
+            echo "Stable tag $STABLE_TAG does not match desktop version $version" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$commit" "origin/$DEFAULT_BRANCH"
+          echo "tag=$STABLE_TAG" >>"$GITHUB_OUTPUT"
+          echo "commit=$commit" >>"$GITHUB_OUTPUT"
+
   macos-candidate:
     name: macOS candidate (${{ matrix.arch }})
+    needs: release-policy
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -24,6 +79,8 @@ jobs:
             arch: x64
     env:
       EMPEROR_RELEASE_TARGET: mac
+      EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
+      EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
       ELECTRON_ARCH: ${{ matrix.arch }}
       CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
       CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -34,6 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -80,9 +138,12 @@ jobs:
 
   windows-candidate:
     name: Windows candidate (x64)
+    needs: release-policy
     runs-on: windows-2022
     env:
       EMPEROR_RELEASE_TARGET: win
+      EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
+      EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
       WINDOWS_SIGNING_ENDPOINT: ${{ secrets.WINDOWS_SIGNING_ENDPOINT }}
       WINDOWS_SIGNING_PROFILE: ${{ secrets.WINDOWS_SIGNING_PROFILE }}
       WINDOWS_SIGNING_ACCOUNT: ${{ secrets.WINDOWS_SIGNING_ACCOUNT }}
@@ -93,6 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -150,12 +212,16 @@ jobs:
 
   linux-build:
     name: Linux candidate build (x64)
+    needs: release-policy
     runs-on: ubuntu-22.04
     env:
       EMPEROR_RELEASE_TARGET: linux
+      EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
+      EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -191,7 +257,14 @@ jobs:
 
   release-aggregate:
     name: Verify and attest trusted release bundle
-    needs: [macos-candidate, windows-candidate, linux-build, linux-smoke]
+    needs:
+      [
+        release-policy,
+        macos-candidate,
+        windows-candidate,
+        linux-build,
+        linux-smoke,
+      ]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -201,6 +274,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -228,7 +302,9 @@ jobs:
       - name: Assemble fail-closed release bundle
         run: >-
           node scripts/assemble-release-bundle.mjs
-          release-inputs release-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          release-inputs release-bundle
+          "${{ needs.release-policy.outputs.tag }}"
+          "${{ needs.release-policy.outputs.commit }}"
       - name: Generate reproducible CycloneDX SBOM
         run: |
           mkdir -p release-sbom
@@ -251,7 +327,7 @@ jobs:
           node scripts/merge-cyclonedx-sboms.mjs \
             release-sbom/core.cdx.json \
             release-sbom/desktop.cdx.json \
-            "release-bundle/emperor-agent-${GITHUB_REF_NAME}.cdx.json"
+            "release-bundle/emperor-agent-${{ needs.release-policy.outputs.tag }}.cdx.json"
           (
             cd release-bundle
             find . -maxdepth 1 -type f \
@@ -269,7 +345,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-checksums: release-bundle/ARTIFACT-SHA256SUMS.txt
-          sbom-path: release-bundle/emperor-agent-${{ github.ref_name }}.cdx.json
+          sbom-path: release-bundle/emperor-agent-${{ needs.release-policy.outputs.tag }}.cdx.json
       - name: Verify uploaded attestations
         env:
           GH_TOKEN: ${{ github.token }}
@@ -311,7 +387,9 @@ jobs:
 
   publish-release:
     name: Publish atomic GitHub Release
-    needs: release-aggregate
+    needs: [release-policy, release-aggregate]
+    if: inputs.publish == true && vars.EMPEROR_STABLE_RELEASE_ENABLED == 'true'
+    environment: stable-release
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -319,6 +397,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - name: Download attested release bundle
         uses: actions/download-artifact@v4
@@ -348,11 +427,13 @@ jobs:
       - name: Create draft, verify assets and publish atomically
         env:
           GH_TOKEN: ${{ github.token }}
+          EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
+          EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
         run: scripts/publish-release.sh release-bundle
 
   linux-smoke:
     name: Linux smoke (${{ matrix.version }})
-    needs: linux-build
+    needs: [release-policy, linux-build]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -365,6 +446,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
@@ -375,6 +457,9 @@ jobs:
           name: linux-x64-candidate
           path: desktop/dist
       - name: Install, smoke and remove AppImage and DEB
+        env:
+          EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
+          EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
         run: scripts/verify-linux-release.sh smoke
       - name: Upload Linux smoke receipts
         uses: actions/upload-artifact@v4

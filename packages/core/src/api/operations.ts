@@ -13,6 +13,27 @@ const taskIdSchema = idSchema.refine(
     /^[A-Za-z0-9_-][A-Za-z0-9_.:-]*$/.test(value) && !value.includes('..'),
   'invalid task id',
 )
+const fileCheckpointIdSchema = z
+  .string()
+  .regex(/^fcp_[a-f0-9]{24}$/, 'invalid file checkpoint id')
+const fileCheckpointSessionSchema = z
+  .object({ sessionId: idSchema.nullable().optional() })
+  .strict()
+const fileCheckpointLookupSchema = z
+  .object({
+    sessionId: idSchema,
+    checkpointId: fileCheckpointIdSchema,
+  })
+  .strict()
+const fileCheckpointRewindSchema = fileCheckpointLookupSchema.extend({
+  confirmed: z.literal(true),
+})
+const fileCheckpointGitRewindSchema = fileCheckpointLookupSchema.extend({
+  confirmed: z.literal(true),
+  confirmedGitRisk: z.literal(true),
+  previewRevision: sha256Schema,
+  dirtyStrategy: z.enum(['abort', 'stash']),
+})
 const skillNameSchema = z
   .string()
   .trim()
@@ -103,6 +124,33 @@ const modelCapabilityOverridesSchema = z
     reasoning: z.boolean().optional(),
   })
   .strict()
+const modelPricingSchema = z
+  .object({
+    inputUsdPerMillionTokens: z.number().finite().nonnegative(),
+    outputUsdPerMillionTokens: z.number().finite().nonnegative(),
+    cacheReadUsdPerMillionTokens: z.number().finite().nonnegative(),
+    cacheWriteUsdPerMillionTokens: z.number().finite().nonnegative(),
+  })
+  .strict()
+const modelExecutionPolicySchema = z
+  .object({
+    fallback: z
+      .object({
+        enabled: z.boolean(),
+        entryId: idSchema.nullable(),
+        triggerOn: z
+          .array(z.enum(['rate_limit', 'transient']))
+          .min(1)
+          .max(2),
+      })
+      .strict(),
+    cost: z
+      .object({
+        maxUsdPerAgentTurn: z.number().finite().positive().nullable(),
+      })
+      .strict(),
+  })
+  .strict()
 const modelEntrySaveSchema = z
   .object({
     entryId: idSchema.optional(),
@@ -113,6 +161,7 @@ const modelEntrySaveSchema = z
     apiBase: z.string().trim().min(1).optional(),
     apiKey: z.string().nullable().optional(),
     capabilityOverrides: modelCapabilityOverridesSchema.optional(),
+    pricing: modelPricingSchema.nullable().optional(),
     contextWindowTokens: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
@@ -152,6 +201,7 @@ const controlResumeSchema = z
     turnId: nullableStringSchema,
     displayContent: nullableStringSchema,
     uiHidden: z.boolean().nullable().optional(),
+    delivery: z.enum(['queue', 'interject']).nullable().optional(),
   })
   .strict()
 
@@ -194,6 +244,65 @@ const goalReplaceSchema = z
     goalId: idSchema,
     outcome: z.string().trim().min(1).max(4_000),
     sessionId: idSchema,
+  })
+  .strict()
+
+const schedulerMisfirePolicySchema = z.enum(['skip', 'latest', 'catch-up-one'])
+const schedulerScheduleSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('at'), atMs: z.number().int().positive() })
+    .strict(),
+  z
+    .object({ kind: z.literal('every'), everyMs: z.number().int().positive() })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('cron'),
+      expr: z.string().trim().min(1).max(512),
+      tz: z.string().trim().min(1).max(128).nullable().optional(),
+    })
+    .strict(),
+])
+const schedulerAgentPayloadSchema = z
+  .object({
+    kind: z.literal('agent_turn'),
+    message: z.string().trim().min(1).max(16_384),
+    target: z.null().optional(),
+    projectId: z.string().trim().min(1).max(256).nullable().optional(),
+    deliver: z.boolean().optional(),
+    meta: dictSchema.optional(),
+  })
+  .strict()
+const schedulerTeamPayloadSchema = z
+  .object({
+    kind: z.literal('team_wake'),
+    message: z.string().trim().min(1).max(16_384),
+    target: z.string().trim().min(1).max(256),
+    projectId: z.string().trim().min(1).max(256),
+    deliver: z.boolean().optional(),
+    meta: dictSchema.optional(),
+  })
+  .strict()
+const schedulerPayloadSchema = z.discriminatedUnion('kind', [
+  schedulerAgentPayloadSchema,
+  schedulerTeamPayloadSchema,
+])
+const schedulerCreateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(256).optional(),
+    schedule: schedulerScheduleSchema,
+    payload: schedulerPayloadSchema,
+    deleteAfterRun: z.boolean().optional(),
+    misfirePolicy: schedulerMisfirePolicySchema.optional(),
+  })
+  .strict()
+const schedulerUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(256).optional(),
+    schedule: schedulerScheduleSchema.optional(),
+    payload: schedulerPayloadSchema.optional(),
+    deleteAfterRun: z.boolean().optional(),
+    misfirePolicy: schedulerMisfirePolicySchema.optional(),
   })
   .strict()
 
@@ -242,6 +351,7 @@ const runtimeReplayOptionsSchema = z
     includeArchive: booleanLikeSchema,
     include_archive: booleanLikeSchema,
     compact: booleanLikeSchema,
+    format: z.enum(['projection', 'envelope_v2']).optional(),
   })
   .strict()
 
@@ -350,6 +460,7 @@ export const CORE_OPERATION_REGISTRY = {
   'chat.submit': operation(z.tuple([chatSubmitSchema]), (api, [input]) =>
     api.chat.submit(input),
   ),
+  'config.effective': operation(z.tuple([]), (api) => api.config.effective()),
   'config.get': operation(z.tuple([]), (api) => api.config.get()),
   'config.save': operation(
     z.tuple([
@@ -436,6 +547,22 @@ export const CORE_OPERATION_REGISTRY = {
     api.goals.start(input),
   ),
   'external.get': operation(z.tuple([]), (api) => api.external.get()),
+  'fileCheckpoints.list': operation(
+    z.tuple([fileCheckpointSessionSchema.optional()]),
+    (api, [input]) => api.fileCheckpoints.list(input),
+  ),
+  'fileCheckpoints.preview': operation(
+    z.tuple([fileCheckpointLookupSchema]),
+    (api, [input]) => api.fileCheckpoints.preview(input),
+  ),
+  'fileCheckpoints.rewind': operation(
+    z.tuple([fileCheckpointRewindSchema]),
+    (api, [input]) => api.fileCheckpoints.rewind(input),
+  ),
+  'fileCheckpoints.rewindGit': operation(
+    z.tuple([fileCheckpointGitRewindSchema]),
+    (api, [input]) => api.fileCheckpoints.rewindGit(input),
+  ),
   'hooks.cancelRun': operation(z.tuple([dictSchema]), (api, [input]) =>
     api.hooks.cancelRun(input),
   ),
@@ -464,6 +591,7 @@ export const CORE_OPERATION_REGISTRY = {
     api.hooks.validateConfig(input),
   ),
   'mcp.getConfig': operation(z.tuple([]), (api) => api.mcp.getConfig()),
+  'mcp.status': operation(z.tuple([]), (api) => api.mcp.status()),
   'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input]) =>
     api.mcp.saveConfig({ ...input }),
   ),
@@ -543,6 +671,10 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([modelEntrySaveSchema]),
     (api, [input]) => api.model.saveEntry(input),
   ),
+  'model.savePolicy': operation(
+    z.tuple([modelExecutionPolicySchema]),
+    (api, [input]) => api.model.savePolicy(input),
+  ),
   'model.setReasoningEffort': operation(
     z.tuple([modelReasoningEffortSchema]),
     (api, [input]) => api.model.setReasoningEffort(input),
@@ -577,8 +709,9 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([runtimeReplayOptionsSchema.optional()]),
     (api, [options]) => api.runtime.replay(options),
   ),
-  'scheduler.createJob': operation(z.tuple([dictSchema]), (api, [input]) =>
-    api.scheduler.createJob(input),
+  'scheduler.createJob': operation(
+    z.tuple([schedulerCreateSchema]),
+    (api, [input]) => api.scheduler.createJob(input),
   ),
   'scheduler.deleteJob': operation(z.tuple([idSchema]), (api, [id]) =>
     api.scheduler.deleteJob(id),
@@ -594,7 +727,7 @@ export const CORE_OPERATION_REGISTRY = {
     api.scheduler.runJob(id),
   ),
   'scheduler.updateJob': operation(
-    z.tuple([idSchema, dictSchema]),
+    z.tuple([idSchema, schedulerUpdateSchema]),
     (api, [id, input]) => api.scheduler.updateJob(id, input),
   ),
   'sessions.activate': operation(z.tuple([idSchema]), (api, [id]) =>
@@ -661,6 +794,16 @@ export const CORE_OPERATION_REGISTRY = {
     api.skills.validate(input),
   ),
   'tasks.get': operation(z.tuple([idSchema]), (api, [id]) => api.tasks.get(id)),
+  'tasks.cancel': operation(
+    z.tuple([
+      taskIdSchema,
+      z
+        .object({ reason: z.string().trim().min(1).max(500).optional() })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options]) => api.tasks.cancel(id, options),
+  ),
   'tasks.list': operation(
     z.tuple([
       z.object({ sessionId: nullableStringSchema }).strict().optional(),
@@ -679,6 +822,82 @@ export const CORE_OPERATION_REGISTRY = {
         .optional(),
     ]),
     (api, [id, options]) => api.tasks.transcript(id, options),
+  ),
+  'tasks.readOutput': operation(
+    z.tuple([
+      taskIdSchema,
+      z
+        .object({ cursor: z.string().max(64).optional() })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options]) => api.tasks.readOutput(id, options),
+  ),
+  'tasks.resume': operation(
+    z.tuple([
+      taskIdSchema,
+      z
+        .object({
+          mode: z.enum(['foreground', 'background']).optional(),
+          ttlMs: z
+            .number()
+            .int()
+            .min(1)
+            .max(30 * 60_000)
+            .optional(),
+        })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options]) => api.tasks.resume(id, options),
+  ),
+  'tasks.wait': operation(
+    z.tuple([
+      taskIdSchema,
+      z
+        .object({
+          timeoutMs: z
+            .number()
+            .int()
+            .min(0)
+            .max(10 * 60_000)
+            .optional(),
+        })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options]) => api.tasks.wait(id, options),
+  ),
+  'processes.list': operation(
+    z.tuple([
+      z.object({ activeOnly: z.boolean().optional() }).strict().optional(),
+    ]),
+    (api, [options]) => api.processes.list(options),
+  ),
+  'processes.cancel': operation(
+    z.tuple([
+      idSchema,
+      z
+        .object({
+          leaseId: idSchema,
+          reason: z.string().trim().min(1).max(500).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [id, options]) => api.processes.cancel(id, options),
+  ),
+  'processes.reparent': operation(
+    z.tuple([
+      idSchema,
+      z
+        .object({
+          leaseId: idSchema,
+          ownerKind: z.enum(['session', 'task', 'terminal']),
+          ownerId: idSchema,
+        })
+        .strict(),
+    ]),
+    (api, [id, options]) => api.processes.reparent(id, options),
   ),
   'team.get': operation(z.tuple([]), (api) => api.team.get()),
   'team.getMember': operation(z.tuple([idSchema]), (api, [name]) =>
@@ -715,7 +934,13 @@ export const CORE_OPERATION_REGISTRY = {
   'team.wakeMember': operation(
     z.tuple([
       idSchema,
-      z.object({ purpose: z.string().optional() }).strict().optional(),
+      z
+        .object({
+          purpose: z.string().optional(),
+          recovery: z.enum(['auto', 'retry']).optional(),
+        })
+        .strict()
+        .optional(),
     ]),
     (api, [name, options]) => api.team.wakeMember(name, options),
   ),
@@ -774,6 +999,7 @@ export async function invokeCoreOperation<Key extends CoreOperationKey>(
   key: Key,
   input: unknown,
 ): Promise<CoreOperationResult<Key>> {
+  api.loop?.lifecycleSupervisor?.assertReady()
   const spec = CORE_OPERATION_REGISTRY[key]
   try {
     return (await spec.parseAndInvoke(api, input)) as CoreOperationResult<Key>

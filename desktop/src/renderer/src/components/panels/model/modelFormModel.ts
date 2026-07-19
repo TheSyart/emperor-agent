@@ -2,6 +2,7 @@ import type {
   ModelCapabilityOverrides,
   ModelEntry,
   ModelEntrySaveInput,
+  ModelPricing,
   ProviderOption,
 } from '../../../types'
 
@@ -24,6 +25,8 @@ export interface ModelEntryDraft {
   contextWindowTokens: number
   maxTokens: number
   reasoningEffort: string | null
+  pricingEnabled: boolean
+  pricing: ModelPricing
   resolvedProfile?: ModelEntry['resolvedProfile']
   savedIdentity?: {
     provider: string
@@ -111,6 +114,15 @@ export function createModelEntryDraft(
     contextWindowTokens: Number(entry?.contextWindowTokens || 128_000),
     maxTokens: Number(entry?.maxTokens || 8_000),
     reasoningEffort: entry?.reasoningEffort ?? null,
+    pricingEnabled: Boolean(entry?.pricing),
+    pricing: {
+      inputUsdPerMillionTokens: entry?.pricing?.inputUsdPerMillionTokens ?? 0,
+      outputUsdPerMillionTokens: entry?.pricing?.outputUsdPerMillionTokens ?? 0,
+      cacheReadUsdPerMillionTokens:
+        entry?.pricing?.cacheReadUsdPerMillionTokens ?? 0,
+      cacheWriteUsdPerMillionTokens:
+        entry?.pricing?.cacheWriteUsdPerMillionTokens ?? 0,
+    },
     ...(entry?.resolvedProfile
       ? { resolvedProfile: entry.resolvedProfile }
       : {}),
@@ -210,5 +222,21 @@ export function toModelEntrySaveInput(
     contextWindowTokens: Math.max(1, Math.trunc(draft.contextWindowTokens)),
     maxTokens: Math.max(1, Math.trunc(draft.maxTokens)),
     reasoningEffort: draft.reasoningEffort,
+    pricing: draft.pricingEnabled
+      ? {
+          inputUsdPerMillionTokens: Number(
+            draft.pricing.inputUsdPerMillionTokens,
+          ),
+          outputUsdPerMillionTokens: Number(
+            draft.pricing.outputUsdPerMillionTokens,
+          ),
+          cacheReadUsdPerMillionTokens: Number(
+            draft.pricing.cacheReadUsdPerMillionTokens,
+          ),
+          cacheWriteUsdPerMillionTokens: Number(
+            draft.pricing.cacheWriteUsdPerMillionTokens,
+          ),
+        }
+      : null,
   }
 }

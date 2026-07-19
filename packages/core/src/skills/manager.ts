@@ -18,6 +18,11 @@ import {
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseDocument } from 'yaml'
 import { LEGACY_SKILL_STATE_FILE, skillBlockStatus } from '../runtime/resources'
+import {
+  ConfigResolver,
+  defineConfigKey,
+  type Resolved,
+} from '../config/resolver'
 
 const RESOURCE_DIRS = ['scripts', 'references', 'assets'] as const
 const MAX_SKILL_FILES = 1_000
@@ -151,12 +156,30 @@ export class SkillManager {
   }
 
   resolve(name: string): SkillRecord | null {
+    return this.resolveWithProvenance(name).value
+  }
+
+  resolveWithProvenance(name: string): Resolved<SkillRecord | null> {
     const safe = safeRuntimeSkillName(name)
-    if (!safe) return null
-    return (
-      this.recordAt(this.userSkillsDir, safe) ??
-      this.recordAt(this.builtinSkillsDir, safe)
-    )
+    const key = defineConfigKey<SkillRecord | null>({
+      id: `skills.${safe || 'invalid'}`,
+      builtin: safe ? this.recordAt(this.builtinSkillsDir, safe) : null,
+    })
+    const user = safe ? this.recordAt(this.userSkillsDir, safe) : null
+    return new ConfigResolver().resolve(key, {
+      candidates: user
+        ? [
+            {
+              source: {
+                kind: 'user',
+                id: `skill:${safe}`,
+                trust: 'trusted',
+              },
+              value: user,
+            },
+          ]
+        : [],
+    })
   }
 
   create(input: SkillCreateInput): SkillCreateResult {

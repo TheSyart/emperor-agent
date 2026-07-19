@@ -3,6 +3,12 @@
  * PermissionDecision 字段集合: allowed/requiresApproval/risk/reason/toolName/arguments/rule/trace —— 无 `behavior`。
  */
 import { createHash } from 'node:crypto'
+import type { ShellAstSummary } from './shell-ast'
+import type {
+  PermissionRuleAction,
+  PermissionRuleCandidate,
+  PermissionRuleSource,
+} from './rules'
 
 export enum PermissionMode {
   ASK_BEFORE_EDIT = 'ask_before_edit',
@@ -38,6 +44,7 @@ export interface ToolPermissionProfile {
   concurrencySafe: boolean
   destructive: boolean
   path: string | null
+  paths: string[]
   command: string
   schedulerAction: string
 }
@@ -52,6 +59,7 @@ export function makeProfile(
     concurrencySafe: p.concurrencySafe ?? false,
     destructive: p.destructive ?? true,
     path: p.path ?? null,
+    paths: p.paths ?? (p.path ? [p.path] : []),
     command: p.command ?? '',
     schedulerAction: p.schedulerAction ?? '',
   }
@@ -95,6 +103,19 @@ export interface PermissionDecision {
   arguments: Record<string, unknown> | null
   rule: string
   trace: PermissionTraceEntry[]
+  explanation?: PermissionDecisionExplanation
+}
+
+export interface PermissionDecisionExplanation {
+  version: 1
+  candidates: PermissionRuleCandidate[]
+  selected: {
+    id: string
+    action: PermissionRuleAction
+    source: PermissionRuleSource
+    precedence: string
+  }
+  shell?: ShellAstSummary
 }
 
 export const PermissionDecision = {
@@ -103,6 +124,7 @@ export const PermissionDecision = {
     arguments?: Record<string, unknown> | null
     rule?: string
     trace?: PermissionTraceEntry[]
+    explanation?: PermissionDecisionExplanation
   }): PermissionDecision {
     return {
       allowed: true,
@@ -113,6 +135,7 @@ export const PermissionDecision = {
       arguments: opts.arguments ?? {},
       rule: opts.rule ?? '',
       trace: opts.trace ?? [],
+      ...(opts.explanation ? { explanation: opts.explanation } : {}),
     }
   },
   deny(opts: {
@@ -121,6 +144,7 @@ export const PermissionDecision = {
     arguments?: Record<string, unknown> | null
     rule?: string
     trace?: PermissionTraceEntry[]
+    explanation?: PermissionDecisionExplanation
   }): PermissionDecision {
     return {
       allowed: false,
@@ -131,6 +155,7 @@ export const PermissionDecision = {
       arguments: opts.arguments ?? {},
       rule: opts.rule ?? '',
       trace: opts.trace ?? [],
+      ...(opts.explanation ? { explanation: opts.explanation } : {}),
     }
   },
   approval(opts: {
@@ -140,6 +165,7 @@ export const PermissionDecision = {
     risk?: string
     rule?: string
     trace?: PermissionTraceEntry[]
+    explanation?: PermissionDecisionExplanation
   }): PermissionDecision {
     return {
       allowed: false,
@@ -150,6 +176,7 @@ export const PermissionDecision = {
       arguments: opts.arguments ?? {},
       rule: opts.rule ?? '',
       trace: opts.trace ?? [],
+      ...(opts.explanation ? { explanation: opts.explanation } : {}),
     }
   },
 }

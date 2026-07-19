@@ -37,6 +37,15 @@ const flowBlocks = computed(() =>
   projectAssistantFlow(props.message, { now: flowClock.value }),
 )
 
+const terminalLabel = computed(() => {
+  if (!props.message.tombstoned) return ''
+  if (props.message.terminalReason === 'interjected') return '已被插话替代'
+  if (props.message.terminalReason === 'cancelled') return '已取消，内容未提交'
+  if (props.message.terminalReason === 'model_failed')
+    return '模型失败，内容未提交'
+  return '内容已作废'
+})
+
 const fallbackThought = computed<ThoughtSegment>(() => ({
   id: 'fallback-thought',
   type: 'thought',
@@ -118,7 +127,10 @@ onBeforeUnmount(stopFlowClock)
 
       <div
         class="assistant-timeline-shell"
-        :class="{ streaming: props.message.streaming }"
+        :class="{
+          streaming: props.message.streaming,
+          tombstoned: props.message.tombstoned,
+        }"
       >
         <ThoughtEvent
           v-if="!flowBlocks.length && props.message.streaming"
@@ -163,6 +175,9 @@ onBeforeUnmount(stopFlowClock)
             <TodoPanel :todos="block.todos" />
           </div>
         </template>
+      </div>
+      <div v-if="terminalLabel" class="assistant-terminal-state" role="status">
+        {{ terminalLabel }}
       </div>
     </div>
   </article>

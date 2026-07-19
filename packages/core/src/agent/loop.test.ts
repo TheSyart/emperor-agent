@@ -16,13 +16,12 @@ import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { AgentLoop } from './loop'
 import { CancelledTaskError } from '../runtime/active'
 import { CompactionCursorStore } from '../memory/compaction-ledger'
+import type { MemoryEmbeddingProvider } from '../memory/hybrid-retrieval'
 import { EnvironmentProbe } from '../environment/probe'
 import { ExecutionEnvironmentService } from '../environment/snapshot'
-import {
-  SchedulerJob,
-  SchedulerPayload,
-  SchedulerSchedule,
-} from '../scheduler/models'
+import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
+import type { SchedulerAgentTurnPayload } from '../scheduler/executor'
+import { SchedulerService } from '../scheduler/service'
 import type { GoalObservation } from '../goals/evidence'
 import {
   GoalContractValidator,
@@ -46,6 +45,7 @@ import {
   GOAL_MANUAL_EVIDENCE_PASS_LABEL,
   GOAL_MANUAL_EVIDENCE_QUESTION_ID,
 } from '../control/goal-manual-evidence'
+import { CODE_GRAPH_PARSER_REVISION } from '../code-intelligence/models'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -214,6 +214,94 @@ async function createInterruptedSkip(
 }
 
 describe('AgentLoop (MIG-CORE-011)', () => {
+  it('keeps code intelligence absent by default and exposes it only for a gated Build scope', async () => {
+    const defaultRoot = tmp('emperor-agent-loop-code-default-')
+    const defaultLoop = await AgentLoop.create({
+      root: defaultRoot,
+      stateRoot: join(defaultRoot, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    expect(defaultLoop.registry.has('code_intelligence')).toBe(false)
+    expect(defaultLoop.codeIntelligence.diagnostics()).toMatchObject({
+      capability: { effectiveMode: 'off', toolAllowed: false },
+      graphManagers: 0,
+    })
+    await defaultLoop.close()
+
+    const root = tmp('emperor-agent-loop-code-enabled-')
+    const stateRoot = join(root, '.emperor')
+    const projectRoot = join(root, 'project')
+    mkdirSync(join(projectRoot, 'src'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, 'src', 'a.ts'),
+      'export const alpha = 1\n',
+      'utf8',
+    )
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+      codeIntelligenceMode: 'on',
+      codeIntelligenceEvaluationGate: {
+        passed: true,
+        datasetSha256: 'a'.repeat(64),
+        parserRevision: CODE_GRAPH_PARSER_REVISION,
+      },
+    })
+    expect(loop.registry.has('code_intelligence')).toBe(true)
+
+    const chatResult = await loop.registry.executeResult(
+      'code_intelligence',
+      { operation: 'find_definitions', symbol: 'alpha' },
+      { sessionId: loop.activeSessionId, workspaceRoot: root },
+    )
+    expect(chatResult.isError).toBe(true)
+    expect(chatResult.modelContent).toMatch(/Build session/i)
+
+    const project = loop.projectStore.resolve(projectRoot)
+    const build = loop.sessionStore.create('Code project', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    const first = await loop.registry.executeResult(
+      'code_intelligence',
+      { operation: 'find_definitions', symbol: 'alpha' },
+      {
+        sessionId: build.id,
+        workspaceRoot: join(root, 'attacker-controlled-context'),
+      },
+    )
+    expect(first.isError).toBe(false)
+    expect(JSON.parse(first.modelContent)).toMatchObject({
+      strategy: 'graph',
+      locations: [{ path: 'src/a.ts', line: 1 }],
+    })
+
+    await loop.registry.executeResult(
+      'write_file',
+      { path: 'src/a.ts', content: 'export const beta = 2\n' },
+      { sessionId: build.id, workspaceRoot: projectRoot },
+    )
+    const second = await loop.registry.executeResult(
+      'code_intelligence',
+      { operation: 'find_definitions', symbol: 'beta' },
+      { sessionId: build.id, workspaceRoot: projectRoot },
+    )
+    expect(JSON.parse(second.modelContent)).toMatchObject({
+      locations: [{ path: 'src/a.ts', line: 1 }],
+    })
+    expect(loop.codeIntelligence.diagnostics()).toMatchObject({
+      graphManagers: 1,
+      notifications: 1,
+    })
+    await loop.endSession(build.id, 'test complete')
+    await loop.close()
+  })
+
   it('assembles core subsystems and runs a user turn through a real tool loop', async () => {
     const root = tmp('emperor-agent-loop-')
     writeFileSync(join(root, 'hello.txt'), 'hello from workspace\n', 'utf8')
@@ -1368,6 +1456,243 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     }
   })
 
+  it('prefetches goal, memory/skills projection, execution environment, and MCP concurrently', async () => {
+    const root = tmp('emperor-agent-loop-prefetch-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new QueueProvider([response('done')])),
+      initializeMcp: false,
+    })
+    const started: string[] = []
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const originalEnvironmentCreate =
+      loop.executionEnvironmentService.create.bind(
+        loop.executionEnvironmentService,
+      )
+    vi.spyOn(loop.executionEnvironmentService, 'create').mockImplementation(
+      async (request) => {
+        started.push('execution_environment')
+        await gate
+        return await originalEnvironmentCreate(request)
+      },
+    )
+    const originalFindGoal = loop.goalStore.findActiveBySession.bind(
+      loop.goalStore,
+    )
+    vi.spyOn(loop.goalStore, 'findActiveBySession').mockImplementation(
+      async (sessionId) => {
+        started.push('active_goal')
+        await gate
+        return await originalFindGoal(sessionId)
+      },
+    )
+    const bindings = loop.sessionRuntimes.get(loop.activeSessionId!)!.bindings
+    const originalProjection = bindings.contextBuilder.buildProjection.bind(
+      bindings.contextBuilder,
+    )
+    vi.spyOn(bindings.contextBuilder, 'buildProjection').mockImplementation(
+      () => {
+        started.push('memory_skills_projection')
+        return originalProjection()
+      },
+    )
+    vi.spyOn(loop.mcpClient, 'getTools').mockImplementation(() => {
+      started.push('mcp_catalog')
+      return []
+    })
+    const emitted: Array<Record<string, unknown>> = []
+
+    try {
+      const running = loop.runUserTurn('prefetch', {
+        turnId: 'turn_prefetch',
+        emit: (event) => {
+          emitted.push(event)
+        },
+      })
+      await vi.waitFor(() => {
+        expect(started).toEqual(
+          expect.arrayContaining([
+            'active_goal',
+            'execution_environment',
+            'memory_skills_projection',
+            'mcp_catalog',
+          ]),
+        )
+      })
+      release()
+      await expect(running).resolves.toBe('done')
+
+      expect(
+        emitted.find((event) => event.event === 'context_projection'),
+      ).toMatchObject({
+        report: {
+          prefetch: {
+            version: 1,
+            tasks: expect.arrayContaining([
+              expect.objectContaining({
+                name: 'active_goal',
+                status: 'ready',
+              }),
+              expect.objectContaining({
+                name: 'execution_environment',
+                status: 'ready',
+              }),
+              expect.objectContaining({
+                name: 'memory_skills_projection',
+                status: 'ready',
+              }),
+              expect.objectContaining({
+                name: 'mcp_catalog',
+                status: 'ready',
+              }),
+            ]),
+          },
+        },
+      })
+    } finally {
+      release()
+      await loop.close()
+    }
+  })
+
+  it('runs hybrid memory in eval shadow mode without changing the model prompt', async () => {
+    const root = tmp('emperor-agent-loop-hybrid-eval-')
+    const provider = new QueueProvider([response('done')])
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+      initializeMcp: false,
+      hybridMemoryMode: 'eval',
+    })
+    loop.sharedMemory.writeMemory(
+      '## Database\n\nDatabase endpoint is db.eval.internal:6543.',
+    )
+
+    await loop.runUserTurn('database endpoint', { turnId: 'turn_hybrid_eval' })
+
+    expect(loop.hybridMemory.diagnostics()).toMatchObject({
+      capability: {
+        effectiveMode: 'eval',
+        promptMutationAllowed: false,
+      },
+      searches: 1,
+      promptMutations: 0,
+      lastStrategy: 'fts',
+    })
+    expect(existsSync(loop.hybridMemory.index.indexPath)).toBe(true)
+    expect(JSON.stringify(provider.calls[0]!.messages)).not.toContain(
+      'Retrieved Long-term Memory',
+    )
+  })
+
+  it('changes only the dynamic memory projection after provider-bound eval gate passes', async () => {
+    const root = tmp('emperor-agent-loop-hybrid-on-')
+    const provider = new QueueProvider([response('done')])
+    const embeddingProvider: MemoryEmbeddingProvider = {
+      id: 'evaluated-loop-fixture',
+      dimensions: 2,
+      async embed(texts) {
+        return texts.map(() => [1, 0])
+      },
+    }
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+      initializeMcp: false,
+      hybridMemoryMode: 'on',
+      memoryEmbeddingProvider: embeddingProvider,
+      hybridMemoryEvaluationGate: {
+        passed: true,
+        datasetSha256: 'a'.repeat(64),
+        embeddingProviderId: embeddingProvider.id,
+      },
+    })
+    loop.sharedMemory.writeMemory(
+      '## Database\n\nPostgreSQL endpoint is db.on.internal:6543.',
+    )
+
+    await loop.runUserTurn('where is the primary database', {
+      turnId: 'turn_hybrid_on',
+    })
+
+    const sent = JSON.stringify(provider.calls[0]!.messages)
+    expect(sent).toContain('Retrieved Long-term Memory')
+    expect(sent).toContain('db.on.internal:6543')
+    expect(sent).toContain('source=global')
+    expect(loop.hybridMemory.diagnostics()).toMatchObject({
+      capability: { effectiveMode: 'on', promptMutationAllowed: true },
+      searches: 1,
+      promptMutations: 1,
+      lastStrategy: 'hybrid',
+    })
+    expect(
+      loop.runner.promptSections.find(
+        (section) => section.name === 'long_term_memory',
+      ),
+    ).toMatchObject({ stability: 'dynamic' })
+  })
+
+  it('starts the production scheduler exactly once and stops it with the loop', async () => {
+    const root = tmp('emperor-agent-loop-scheduler-lifecycle-')
+    const start = vi.spyOn(SchedulerService.prototype, 'start')
+    let loop: AgentLoop | null = null
+    try {
+      loop = await AgentLoop.create({
+        root,
+        stateRoot: join(root, '.emperor'),
+        templatesDir: TEMPLATES_DIR,
+        modelRouter: fakeRouter(new QueueProvider([response('unused')])),
+        initializeMcp: false,
+      })
+
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(loop.schedulerService.status().running).toBe(true)
+      expect(loop.lifecycleSupervisor.snapshot()).toMatchObject({
+        state: 'ready',
+        services: [
+          { id: 'process-runtime', state: 'ready' },
+          { id: 'code-intelligence', state: 'ready' },
+          { id: 'task-runtime', state: 'ready' },
+          { id: 'subagent-supervisor', state: 'ready' },
+          { id: 'session-runtime', state: 'ready' },
+          { id: 'mcp', state: 'ready' },
+          { id: 'scheduler', state: 'ready' },
+        ],
+      })
+
+      await loop.schedulerService.start()
+      expect(start).toHaveBeenCalledTimes(2)
+      expect(loop.schedulerService.status().running).toBe(true)
+
+      await loop.close()
+      expect(loop.schedulerService.status().running).toBe(false)
+      expect(loop.lifecycleSupervisor.snapshot()).toMatchObject({
+        state: 'stopped',
+        services: [
+          { id: 'process-runtime', state: 'stopped' },
+          { id: 'code-intelligence', state: 'stopped' },
+          { id: 'task-runtime', state: 'stopped' },
+          { id: 'subagent-supervisor', state: 'stopped' },
+          { id: 'session-runtime', state: 'stopped' },
+          { id: 'mcp', state: 'stopped' },
+          { id: 'scheduler', state: 'stopped' },
+        ],
+      })
+    } finally {
+      if (loop?.schedulerService.status().running) await loop.close()
+      start.mockRestore()
+    }
+  })
+
   it('creates a fresh snapshot for a scheduler-triggered agent run', async () => {
     const root = tmp('emperor-agent-loop-scheduler-environment-')
     const provider = new QueueProvider([response('scheduled')])
@@ -1379,8 +1704,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       initializeMcp: false,
     })
     const create = vi.spyOn(loop.executionEnvironmentService, 'create')
-    const job = SchedulerJob.create({
-      jobId: 'snapshot-scheduler-job',
+    const job = loop.schedulerService.addJob({
       name: 'snapshot scheduler job',
       schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
       payload: new SchedulerPayload({
@@ -1388,10 +1712,9 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         message: 'inspect environment',
         deliver: false,
       }),
-      now: 1_700_000_000_000,
     })
 
-    await loop.schedulerService.onJob!(job)
+    await loop.schedulerService.runJob(job.id, { force: true })
 
     expect(create).toHaveBeenCalledTimes(1)
     const snapshot = await create.mock.results[0]!.value
@@ -1400,6 +1723,68 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       '[SCHEDULER_TRIGGER]',
     )
     await loop.close()
+  })
+
+  it('runs Scheduler turns through TaskRuntime and propagates lifecycle cancellation', async () => {
+    const root = tmp('emperor-agent-loop-scheduler-task-runtime-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new QueueProvider([])),
+      initializeMcp: false,
+    })
+    let entered = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const submitted: { value: SchedulerAgentTurnPayload | null } = {
+      value: null,
+    }
+    loop.setSchedulerAgentTurnSubmitter(async (payload) => {
+      submitted.value = payload
+      entered()
+      return await new Promise<string>((_resolve, reject) => {
+        payload.signal.addEventListener(
+          'abort',
+          () => reject(payload.signal.reason),
+          { once: true },
+        )
+      })
+    })
+    const job = loop.schedulerService.addJob({
+      name: 'runtime-owned scheduler turn',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({
+        kind: 'agent_turn',
+        message: 'wait for shutdown',
+        deliver: false,
+      }),
+    })
+
+    const running = loop.schedulerService.runJob(job.id, { force: true })
+    await started
+    const taskId = submitted.value!.taskId
+    expect(loop.taskManager.store.get(taskId)).toMatchObject({
+      status: 'running',
+      metadata: { runtime_managed: true },
+    })
+    expect(loop.activeTasks.list()).toEqual([
+      expect.objectContaining({
+        id: submitted.value!.scheduler.runId,
+        kind: 'scheduler',
+      }),
+    ])
+
+    const closing = loop.close()
+    await expect(running).resolves.toBe(true)
+    await closing
+    expect(submitted.value!.signal.aborted).toBe(true)
+    expect(loop.taskManager.store.get(taskId)?.status).toBe('cancelled')
+    expect(loop.schedulerService.getJob(job.id)?.state.last_status).toBe(
+      'interrupted',
+    )
+    expect(loop.activeTasks.list()).toEqual([])
   })
 
   it('applies configured PreToolUse hooks through the real loop runtime', async () => {
@@ -1642,6 +2027,91 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     expect(toolOutputs).not.toContain('core-only.txt')
     expect(provider.calls[0]!.messages[0]!.content).toContain(
       `Workspace root: \`${projectRoot}\``,
+    )
+    const processEnvelope = readFileSync(
+      loop.sessionRuntimes.get(buildSession.id)!.bindings.runtimeStore
+        .eventsFile,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((event) => event.type === 'process_containment')
+    expect(processEnvelope).toMatchObject({
+      schemaVersion: 2,
+      type: 'process_containment',
+      toolCallId: 'call_pwd',
+      visibility: 'user',
+      idempotencyKey: 'call_pwd:process_containment',
+      payload: {
+        decision: expect.stringMatching(/^(sandboxed|unsandboxed)$/),
+        backend: expect.any(String),
+        capability_status: expect.any(String),
+        policy_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    })
+  })
+
+  it('captures enabled managed file writes at the real tool boundary and can rewind them', async () => {
+    const root = tmp('emperor-agent-loop-file-checkpoint-')
+    const projectRoot = tmp('emperor-agent-loop-file-checkpoint-project-')
+    writeFileSync(join(projectRoot, 'managed.txt'), 'before checkpoint\n')
+    const provider = new QueueProvider([
+      response(null, {
+        toolCalls: [
+          {
+            id: 'call_checkpoint_edit',
+            name: 'edit_file',
+            arguments: {
+              path: 'managed.txt',
+              old_text: 'before checkpoint',
+              new_text: 'after checkpoint',
+            },
+          },
+        ],
+        finishReason: 'tool_calls',
+      }),
+      response('修改完成。'),
+    ])
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+      fileCheckpointsEnabled: true,
+      softGitRewindMode: 'eval',
+    })
+    const project = loop.projectStore.resolve(projectRoot)
+    const buildSession = loop.sessionStore.create('Checkpoint build', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    loop.activateSession(buildSession.id)
+
+    await loop.runUserTurn('修改 managed.txt', {
+      turnId: 'turn_checkpoint_edit',
+      emit: async () => {},
+    })
+
+    expect(readFileSync(join(projectRoot, 'managed.txt'), 'utf8')).toBe(
+      'after checkpoint\n',
+    )
+    const checkpoints = await loop.fileCheckpoints.list(buildSession.id)
+    expect(checkpoints).toHaveLength(1)
+    expect(checkpoints[0]).toMatchObject({
+      turnId: 'turn_checkpoint_edit',
+      toolCallId: 'call_checkpoint_edit',
+      toolName: 'edit_file',
+      changes: [{ path: 'managed.txt', kind: 'modify' }],
+      gitCheckpoint: { status: 'unavailable', reason: 'not_repository' },
+    })
+    await loop.fileCheckpoints.rewind({
+      sessionId: buildSession.id,
+      checkpointId: checkpoints[0]!.id,
+      workspaceRoot: projectRoot,
+    })
+    expect(readFileSync(join(projectRoot, 'managed.txt'), 'utf8')).toBe(
+      'before checkpoint\n',
     )
   })
 
@@ -2120,10 +2590,13 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
+    const emitted: Array<Record<string, unknown>> = []
 
     await loop.runUserTurn('帮我检查一下 marker.txt 这个文件的状态。', {
       turnId: 'turn_1',
-      emit: async () => {},
+      emit: async (event) => {
+        emitted.push(event)
+      },
     })
 
     // 高危命令必须没有真的执行 —— 文件权限位应保持未变。
@@ -2131,6 +2604,63 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     expect(mode).not.toBe(0)
     // 审批流程应该真实触发（而不是被子代理静默绕过）。
     expect(loop.controlManager.payload().pending).toBeTruthy()
+    expect(emitted.map((event) => event.event)).toEqual(
+      expect.arrayContaining(['task_started', 'task_error']),
+    )
+    const taskEnvelopes = readFileSync(loop.runtimeStore.eventsFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => String(event.type ?? '').startsWith('task_'))
+    expect(taskEnvelopes).toHaveLength(2)
+    expect(taskEnvelopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          schemaVersion: 2,
+          type: 'task_started',
+          taskId: expect.stringMatching(/^subagent_/),
+          visibility: 'user',
+          idempotencyKey: expect.stringContaining(':task_started'),
+        }),
+        expect.objectContaining({
+          schemaVersion: 2,
+          type: 'task_error',
+          taskId: expect.stringMatching(/^subagent_/),
+          visibility: 'user',
+          idempotencyKey: expect.stringContaining(':task_error'),
+        }),
+      ]),
+    )
+    const storedEvents = readFileSync(loop.runtimeStore.eventsFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    const toolEnvelopes = storedEvents.filter((event) =>
+      String(event.type ?? '').startsWith('tool_'),
+    )
+    expect(toolEnvelopes.length).toBeGreaterThan(0)
+    expect(
+      toolEnvelopes.every(
+        (event) => event.schemaVersion === 2 && Boolean(event.toolCallId),
+      ),
+    ).toBe(true)
+    const queuedToolIds = toolEnvelopes
+      .filter((event) => event.type === 'tool_run_queued')
+      .map((event) => String(event.toolCallId))
+    for (const toolCallId of queuedToolIds) {
+      expect(
+        toolEnvelopes.filter(
+          (event) =>
+            event.toolCallId === toolCallId &&
+            [
+              'tool_run_completed',
+              'tool_run_failed',
+              'tool_run_cancelled',
+            ].includes(String(event.type)),
+        ),
+        toolCallId,
+      ).toHaveLength(1)
+    }
   })
 
   it('loads local permission rules into the real permission pipeline', async () => {
@@ -2302,6 +2832,14 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       projectGreet,
     )
     expect(
+      loop
+        .effectiveSkillConfigResolutions()
+        .find((resolution) => resolution.key.id === 'skills.greet'),
+    ).toMatchObject({
+      source: { kind: 'project', trust: 'trusted' },
+      value: { name: 'greet', source: 'project', readOnly: true },
+    })
+    expect(
       await loop.registry.execute('load_skill', { name: 'user-only' }),
     ).toBe(userOnly)
 
@@ -2314,6 +2852,14 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
       userGreet,
     )
+    expect(
+      loop
+        .effectiveSkillConfigResolutions()
+        .find((resolution) => resolution.key.id === 'skills.greet'),
+    ).toMatchObject({
+      source: { kind: 'user', trust: 'trusted' },
+      value: { name: 'greet', source: 'user', readOnly: false },
+    })
   })
 
   it('expands {{skill_dir}} to the selected canonical directory without rewriting SKILL.md', async () => {

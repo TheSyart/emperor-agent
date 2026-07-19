@@ -30,6 +30,29 @@ export interface ModelEntryLegacyData {
   extraBody?: Record<string, unknown> | null
 }
 
+export interface ModelPricing {
+  inputUsdPerMillionTokens: number
+  outputUsdPerMillionTokens: number
+  cacheReadUsdPerMillionTokens: number
+  cacheWriteUsdPerMillionTokens: number
+}
+
+export type ModelFallbackTrigger = 'rate_limit' | 'transient'
+
+export interface ModelExecutionPolicy {
+  fallback: {
+    enabled: boolean
+    entryId: string | null
+    triggerOn: ModelFallbackTrigger[]
+  }
+  cost: { maxUsdPerAgentTurn: number | null }
+}
+
+export interface ModelUsageCost {
+  costUsdNanos: number | null
+  complete: boolean
+}
+
 export interface ModelEntryV2 {
   entryId: string
   provider: string
@@ -42,6 +65,7 @@ export interface ModelEntryV2 {
   contextWindowTokens: number
   maxTokens: number
   reasoningEffort: string | null
+  pricing?: ModelPricing
   legacy?: ModelEntryLegacyData
 }
 
@@ -49,6 +73,7 @@ export interface ModelConfigV2 {
   schemaVersion: 2
   activeModelId: string | null
   models: ModelEntryV2[]
+  policy?: ModelExecutionPolicy
 }
 
 /** @deprecated Task 2 删除；只为旧 router/CoreApi 在迁移期间提供内存视图。 */
@@ -79,6 +104,7 @@ export interface ModelEntry {
   apiBase: string | null
   apiKey: string | null
   capabilityOverrides?: ModelCapabilityOverrides
+  pricing?: ModelPricing
   contextWindowTokens: number | null
   maxTokens: number | null
   reasoningEffort: string | null
@@ -98,6 +124,7 @@ export interface ModelConfig {
   schemaVersion: 2
   activeModelId: string | null
   models: ModelEntry[]
+  policy: ModelExecutionPolicy
   raw: ModelConfigV2 & Record<string, unknown>
   /** @deprecated compatibility view; never serialized. */
   defaults: AgentDefaults
@@ -119,8 +146,9 @@ export interface WizardModelSettings {
   reasoningEffort?: string | null
 }
 
-export type ModelEntryUpdate = Partial<ModelEntryV2> & {
+export type ModelEntryUpdate = Omit<Partial<ModelEntryV2>, 'pricing'> & {
   apiKey?: string | null
+  pricing?: ModelPricing | null
 }
 
 type RawRecord = Record<string, any>
@@ -134,6 +162,17 @@ const REMOVED_PROVIDERS = new Set([
 
 export function defaultModelConfig(): ModelConfigV2 {
   return { schemaVersion: 2, activeModelId: null, models: [] }
+}
+
+export function defaultModelExecutionPolicy(): ModelExecutionPolicy {
+  return {
+    fallback: {
+      enabled: false,
+      entryId: null,
+      triggerOn: ['rate_limit'],
+    },
+    cost: { maxUsdPerAgentTurn: null },
+  }
 }
 
 function isRecord(value: unknown): value is RawRecord {
@@ -250,6 +289,24 @@ function normalizeLegacy(value: unknown): ModelEntryLegacyData | undefined {
   return Object.keys(result).length ? result : undefined
 }
 
+function normalizePricing(value: unknown): ModelPricing | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!isRecord(value)) throw new ValidationError('pricing 必须是对象')
+  const result = {} as ModelPricing
+  for (const key of [
+    'inputUsdPerMillionTokens',
+    'outputUsdPerMillionTokens',
+    'cacheReadUsdPerMillionTokens',
+    'cacheWriteUsdPerMillionTokens',
+  ] as const) {
+    const parsed = Number(value[key])
+    if (!Number.isFinite(parsed) || parsed < 0)
+      throw new ValidationError(`pricing.${key} 必须是非负有限数值`)
+    result[key] = parsed
+  }
+  return result
+}
+
 function newEntryId(): string {
   return `model-${randomUUID()}`
 }
@@ -290,6 +347,7 @@ function normalizeEntry(
     input.capabilityOverrides,
   )
   const legacy = normalizeLegacy(input.legacy)
+  const pricing = normalizePricing(input.pricing)
   const result: ModelEntryV2 = {
     entryId: entryId ?? newEntryId(),
     provider,
@@ -306,8 +364,81 @@ function normalizeEntry(
   }
   if (displayName) result.displayName = displayName
   if (capabilityOverrides) result.capabilityOverrides = capabilityOverrides
+  if (pricing) result.pricing = pricing
   if (legacy) result.legacy = legacy
   return result
+}
+
+function normalizeExecutionPolicy(
+  value: unknown,
+  models: readonly ModelEntryV2[],
+  activeModelId: string | null,
+): ModelExecutionPolicy {
+  const defaults = defaultModelExecutionPolicy()
+  if (value === undefined) return defaults
+  if (!isRecord(value)) throw new ValidationError('policy 必须是对象')
+  const fallback = value.fallback
+  const cost = value.cost
+  if (fallback !== undefined && !isRecord(fallback))
+    throw new ValidationError('policy.fallback 必须是对象')
+  if (cost !== undefined && !isRecord(cost))
+    throw new ValidationError('policy.cost 必须是对象')
+  const fallbackRecord = fallback ?? {}
+  const costRecord = cost ?? {}
+  const enabled = fallbackRecord.enabled ?? defaults.fallback.enabled
+  if (typeof enabled !== 'boolean')
+    throw new ValidationError('policy.fallback.enabled 必须是布尔值')
+  const entryId = optionalString(fallbackRecord.entryId)
+  const rawTriggers = fallbackRecord.triggerOn ?? defaults.fallback.triggerOn
+  if (!Array.isArray(rawTriggers) || !rawTriggers.length)
+    throw new ValidationError('policy.fallback.triggerOn 必须是非空数组')
+  const triggerSet = new Set<ModelFallbackTrigger>()
+  for (const trigger of rawTriggers) {
+    if (trigger !== 'rate_limit' && trigger !== 'transient')
+      throw new ValidationError(
+        'policy.fallback.triggerOn 只允许 rate_limit 或 transient',
+      )
+    triggerSet.add(trigger)
+  }
+  const triggerOn = (['rate_limit', 'transient'] as const).filter((trigger) =>
+    triggerSet.has(trigger),
+  )
+  let maxUsdPerAgentTurn: number | null = null
+  if (
+    costRecord.maxUsdPerAgentTurn !== undefined &&
+    costRecord.maxUsdPerAgentTurn !== null &&
+    costRecord.maxUsdPerAgentTurn !== ''
+  ) {
+    const parsed = Number(costRecord.maxUsdPerAgentTurn)
+    const nanos = Math.round(parsed * 1_000_000_000)
+    if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isSafeInteger(nanos))
+      throw new ValidationError(
+        'policy.cost.maxUsdPerAgentTurn 必须是可表示的正数',
+      )
+    maxUsdPerAgentTurn = parsed
+  }
+  const byId = new Map(models.map((entry) => [entry.entryId, entry]))
+  if (enabled) {
+    if (!entryId || !byId.has(entryId))
+      throw new ValidationError('policy fallback entryId 必须指向现有模型条目')
+    if (entryId === activeModelId)
+      throw new ValidationError('policy fallback 不能指向 active 模型')
+  }
+  if (maxUsdPerAgentTurn !== null) {
+    const active = activeModelId ? byId.get(activeModelId) : null
+    if (!active?.pricing)
+      throw new ValidationError(
+        '启用 cost cap 前必须为 active 模型配置完整 pricing',
+      )
+    if (enabled && entryId && !byId.get(entryId)?.pricing)
+      throw new ValidationError(
+        '启用 cost cap 前必须为 fallback 模型配置完整 pricing',
+      )
+  }
+  return {
+    fallback: { enabled, entryId, triggerOn: [...triggerOn] },
+    cost: { maxUsdPerAgentTurn },
+  }
 }
 
 function normalizeV2(raw: RawRecord): ModelConfigV2 {
@@ -327,11 +458,18 @@ function normalizeV2(raw: RawRecord): ModelConfigV2 {
     ids.add(item.entryId)
   }
   const activeModelId = optionalString(raw.activeModelId)
-  return {
+  const result: ModelConfigV2 = {
     schemaVersion: 2,
     activeModelId: models.length ? activeModelId : null,
     models,
   }
+  const policy = normalizeExecutionPolicy(
+    raw.policy,
+    models,
+    result.activeModelId,
+  )
+  if (raw.policy !== undefined) result.policy = policy
+  return result
 }
 
 function providerNames(): string[] {
@@ -381,6 +519,11 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
     schemaVersion: 2,
     activeModelId: clean.activeModelId,
     models,
+    policy: normalizeExecutionPolicy(
+      clean.policy,
+      clean.models,
+      clean.activeModelId,
+    ),
     raw: clean as ModelConfigV2 & Record<string, unknown>,
     defaults: {
       model: active?.entryId ?? '',
@@ -839,11 +982,12 @@ export function upsertModelEntryConfig(
   const models = raw.models.slice()
   if (index >= 0) models[index] = normalized
   else models.push(normalized)
-  return {
+  return normalizeV2({
     schemaVersion: 2,
     activeModelId: raw.activeModelId ?? normalized.entryId,
     models,
-  }
+    ...(raw.policy ? { policy: raw.policy } : {}),
+  })
 }
 
 export function deleteModelEntryConfig(
@@ -855,15 +999,20 @@ export function deleteModelEntryConfig(
     throw new ValidationError(
       `entry '${entryId}' not found in model_config.json`,
     )
+  if (raw.policy?.fallback.enabled && raw.policy.fallback.entryId === entryId)
+    throw new ValidationError(
+      '该模型仍被 policy fallback 引用，请先关闭或修改 fallback',
+    )
   const models = raw.models.filter((entry) => entry.entryId !== entryId)
-  return {
+  return normalizeV2({
     schemaVersion: 2,
     activeModelId:
       raw.activeModelId === entryId
         ? (models[0]?.entryId ?? null)
         : raw.activeModelId,
     models,
-  }
+    ...(raw.policy ? { policy: raw.policy } : {}),
+  })
 }
 
 export function activateModelEntryConfig(
@@ -875,7 +1024,26 @@ export function activateModelEntryConfig(
     throw new ValidationError(
       `entry '${entryId}' not found in model_config.json`,
     )
-  return { ...raw, activeModelId: entryId }
+  return normalizeV2({ ...raw, activeModelId: entryId })
+}
+
+export function updateModelPolicyConfig(
+  config: ModelConfigV2,
+  policy: ModelExecutionPolicy,
+): ModelConfigV2 {
+  const raw = normalizeV2(config as unknown as RawRecord)
+  return normalizeV2({ ...raw, policy })
+}
+
+export async function saveModelPolicy(
+  rootOrFile: string,
+  policy: ModelExecutionPolicy,
+): Promise<ModelConfig> {
+  const current = await loadModelConfig(rootOrFile)
+  return saveModelConfig(
+    rootOrFile,
+    updateModelPolicyConfig(current.raw, policy),
+  )
 }
 
 export async function saveModelEntry(

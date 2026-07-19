@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { TaskKind, TaskRecord, TaskStatus } from './models'
+import {
+  isTerminalTaskStatus,
+  TaskKind,
+  TaskRecord,
+  TaskStatus,
+} from './models'
 import { SidechainTranscript } from './sidechain'
-import { TaskStore } from './store'
+import { TaskStore, TaskStoreConflictError } from './store'
 import type { HookAggregateDecision, HookEventName } from '../hooks/models'
 import { relativePortable } from '../util/paths'
 
@@ -40,6 +45,8 @@ export class TaskManager {
   readonly store: TaskStore
 
   private readonly hooks: TaskHookHost | null
+  private runtimeCancelHandler:
+    ((record: TaskRecord, reason: string) => void) | null = null
   readonly #reviewerCapability = Object.freeze({
     kind: 'core_goal_reviewer_task_writer',
   })
@@ -170,21 +177,27 @@ export class TaskManager {
 
   completeTask(
     taskId: string,
-    opts: { summary?: string } = {},
+    opts: { summary?: string; expectedRevision?: number } = {},
   ): TaskRecord | null {
     const record = this.store.get(taskId)
     if (!record) return null
-    return this.finish(record, TaskStatus.COMPLETED, {
-      summary: opts.summary ?? '',
-    })
+    return this.finish(
+      record,
+      TaskStatus.COMPLETED,
+      { summary: opts.summary ?? '' },
+      opts.expectedRevision,
+    )
   }
 
   async completeTaskWithHooks(
     taskId: string,
-    opts: { summary?: string } = {},
+    opts: { summary?: string; expectedRevision?: number } = {},
   ): Promise<TaskTransitionResult | null> {
     const record = this.store.get(taskId)
     if (!record) return null
+    this.assertExpectedRevision(record, opts.expectedRevision)
+    if (isTerminalTaskStatus(record.status))
+      return { committed: false, record, reason: 'task_already_terminal' }
     const candidate = this.finishedCandidate(record, TaskStatus.COMPLETED, {
       summary: opts.summary ?? '',
     })
@@ -204,10 +217,18 @@ export class TaskManager {
     return { committed: true, record: saved, reason: '' }
   }
 
-  failTask(taskId: string, opts: { error: string }): TaskRecord | null {
+  failTask(
+    taskId: string,
+    opts: { error: string; expectedRevision?: number },
+  ): TaskRecord | null {
     const record = this.store.get(taskId)
     if (!record) return null
-    return this.finish(record, TaskStatus.FAILED, { error: opts.error })
+    return this.finish(
+      record,
+      TaskStatus.FAILED,
+      { error: opts.error },
+      opts.expectedRevision,
+    )
   }
 
   completeGoalReviewerTask(
@@ -257,24 +278,81 @@ export class TaskManager {
 
   cancelTask(
     taskId: string,
-    opts: { reason?: string } = {},
+    opts: { reason?: string; expectedRevision?: number } = {},
   ): TaskRecord | null {
     const record = this.store.get(taskId)
     if (!record) return null
-    return this.finish(record, TaskStatus.CANCELLED, {
-      reason: opts.reason ?? 'cancelled',
-    })
+    const cancelled = this.finish(
+      record,
+      TaskStatus.CANCELLED,
+      { reason: opts.reason ?? 'cancelled' },
+      opts.expectedRevision,
+    )
+    if (cancelled.status === TaskStatus.CANCELLED)
+      this.runtimeCancelHandler?.(
+        cancelled,
+        String(cancelled.progress.reason ?? 'cancelled'),
+      )
+    return cancelled
+  }
+
+  bindRuntimeCancelHandler(
+    handler: (record: TaskRecord, reason: string) => void,
+  ): () => void {
+    this.runtimeCancelHandler = handler
+    return () => {
+      if (this.runtimeCancelHandler === handler)
+        this.runtimeCancelHandler = null
+    }
+  }
+
+  interruptTask(
+    taskId: string,
+    opts: { reason?: string; expectedRevision?: number } = {},
+  ): TaskRecord | null {
+    const record = this.store.get(taskId)
+    if (!record) return null
+    const progress = {
+      code: 'task_interrupted_by_restart',
+      reason: opts.reason ?? 'runtime restarted before task completion',
+    }
+    if (record.source === 'goal_reviewer_dispatch') {
+      this.assertExpectedRevision(record, opts.expectedRevision)
+      if (isTerminalTaskStatus(record.status)) return record
+      return this.finishGoalReviewer(record, TaskStatus.INTERRUPTED, progress)
+    }
+    return this.finish(
+      record,
+      TaskStatus.INTERRUPTED,
+      progress,
+      opts.expectedRevision,
+    )
   }
 
   private finish(
     record: TaskRecord,
     status: string,
     progress: Record<string, unknown>,
+    expectedRevision?: number,
   ): TaskRecord {
+    this.assertExpectedRevision(record, expectedRevision)
+    if (isTerminalTaskStatus(record.status)) return record
     const updated = this.finishedCandidate(record, status, progress)
     return this.store.upsert(updated, {
       expectedRevision: record.revision,
     })
+  }
+
+  private assertExpectedRevision(
+    record: TaskRecord,
+    expectedRevision: number | undefined,
+  ): void {
+    if (
+      expectedRevision !== undefined &&
+      expectedRevision !== record.revision
+    ) {
+      throw new TaskStoreConflictError()
+    }
   }
 
   private finishGoalReviewer(

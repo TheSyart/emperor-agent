@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BUNDLE="${1:?usage: publish-release.sh <release-bundle>}"
-TAG="${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
+TAG="${EMPEROR_RELEASE_TAG:-${GITHUB_REF_NAME:-}}"
+[[ -n "$TAG" ]] || { echo 'EMPEROR_RELEASE_TAG or GITHUB_REF_NAME is required' >&2; exit 1; }
 
 [[ -d "$BUNDLE" ]] || { echo "Release bundle not found: $BUNDLE" >&2; exit 1; }
 [[ ! -e "$BUNDLE/UNSIGNED-INTERNAL.txt" ]] || { echo 'Unsigned internal bundle cannot be published' >&2; exit 1; }

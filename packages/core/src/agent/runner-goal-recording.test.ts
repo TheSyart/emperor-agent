@@ -32,6 +32,11 @@ import { WebSearchTool } from '../tools/web-search'
 import { Tool, ToolResultObj } from '../tools/base'
 import { ToolRegistry } from '../tools/registry'
 import { S, toolParamsSchema } from '../tools/schema'
+import type {
+  OwnedProcessRequest,
+  OwnedProcessResult,
+  OwnedProcessRunner,
+} from '../environment/process-runner'
 import {
   GoalEvidenceLedger,
   GoalObservationRecorder,
@@ -57,6 +62,36 @@ type Msg = Record<string, unknown>
 const T0 = '2026-07-15T10:00:00.000Z'
 const T1 = '2026-07-15T10:01:00.000Z'
 const T2 = '2026-07-15T10:02:00.000Z'
+
+function ownedProcessRunnerWith(
+  result: Omit<OwnedProcessResult, 'containment'>,
+): OwnedProcessRunner {
+  return {
+    capability: () => ({
+      platform: 'darwin',
+      backend: 'macos-seatbelt',
+      status: 'available',
+      filesystem: 'workspace-write',
+      network: 'policy-controlled',
+      processTree: true,
+      reason: 'test fixture',
+    }),
+    async run(request: OwnedProcessRequest) {
+      const containment = {
+        decision: 'sandboxed' as const,
+        backend: 'macos-seatbelt' as const,
+        capabilityStatus: 'available' as const,
+        filesystem: 'workspace-write' as const,
+        network: 'denied' as const,
+        processTree: true,
+        policyHash: 'a'.repeat(64),
+        reason: 'test fixture',
+      }
+      await request.onContainment?.(containment)
+      return { ...result, containment }
+    },
+  }
+}
 
 describe('AgentRunner Goal final-result recording', () => {
   let stateRoot: string
@@ -865,12 +900,13 @@ describe('Tool Goal evidence policy allowlist', () => {
     })
 
     const missingShell = new RunCommand(root, {
-      executor: async () => ({
+      ownedRunner: ownedProcessRunnerWith({
+        status: 'spawn_error',
+        exitCode: null,
         stdout: '',
         stderr: '',
-        error: Object.assign(new Error('spawn unavailable'), {
-          code: 'ENOENT',
-        }),
+        durationMs: 0,
+        error: 'spawn unavailable',
       }),
     })
     const operationalRegistry = new ToolRegistry(root)
@@ -883,13 +919,14 @@ describe('Tool Goal evidence policy allowlist', () => {
     })
 
     const signalled = new RunCommand(root, {
-      executor: async () => ({
+      ownedRunner: ownedProcessRunnerWith({
+        status: 'completed',
+        exitCode: null,
         stdout: '',
         stderr: '',
-        error: Object.assign(new Error('terminated by signal'), {
-          code: null,
-          signal: 'SIGTERM',
-        }),
+        durationMs: 1,
+        error: 'terminated by signal',
+        signal: 'SIGTERM',
       }),
     })
     const signalRegistry = new ToolRegistry(root)

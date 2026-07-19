@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -23,6 +23,40 @@ export interface TeamConfigPayload {
   team_name: string
   members: TeamMemberPayload[]
   [key: string]: unknown
+}
+
+export const TEAM_CHECKPOINT_VERSION = 2
+export type TeamCheckpointPhase = 'prepared' | 'running' | 'terminal_pending'
+
+export interface TeamEffectReceipt {
+  kind: 'runner_result'
+  result: string
+  reply_required: boolean
+  reply_message_id: string | null
+  [key: string]: unknown
+}
+
+export interface TeamCheckpointPayload {
+  version: number
+  member: string
+  messages: Array<Record<string, unknown>>
+  checkpoint_version?: number
+  turn_id?: string
+  phase?: TeamCheckpointPhase
+  base_thread_revision?: string
+  final_thread_revision?: string
+  pending_cursor_start?: number
+  pending_cursor_end?: number
+  pending_message_ids?: string[]
+  lead_message_ids_before?: string[]
+  last_effect_receipt?: TeamEffectReceipt
+}
+
+/** Stable digest used to reject recovery against a different durable thread. */
+export function teamThreadRevision(
+  messages: Array<Record<string, unknown>>,
+): string {
+  return createHash('sha256').update(JSON.stringify(messages)).digest('hex')
 }
 
 export class TeamStore {
@@ -159,6 +193,9 @@ export class TeamStore {
   checkpointPath(name: string): string {
     return join(this.checkpointsDir, `${validateMemberName(name)}.json`)
   }
+  hasCheckpoint(name: string): boolean {
+    return existsSync(this.checkpointPath(name))
+  }
   cursorPath(actor: string): string {
     return join(this.cursorsDir, `${validateActorName(actor)}.json`)
   }
@@ -184,7 +221,7 @@ export class TeamStore {
     })
   }
 
-  readCheckpointPayload(name: string): Record<string, unknown> | null {
+  readCheckpointPayload(name: string): TeamCheckpointPayload | null {
     const path = this.checkpointPath(name)
     if (!existsSync(path)) return null
     let raw: unknown
@@ -199,10 +236,45 @@ export class TeamStore {
         ? (raw as Record<string, unknown>)
         : null
     if (!payload || !Array.isArray(payload.messages)) return null
+    const phase =
+      payload.phase === 'prepared' ||
+      payload.phase === 'running' ||
+      payload.phase === 'terminal_pending'
+        ? payload.phase
+        : undefined
+    const receipt =
+      payload.last_effect_receipt &&
+      typeof payload.last_effect_receipt === 'object' &&
+      !Array.isArray(payload.last_effect_receipt)
+        ? (payload.last_effect_receipt as Record<string, unknown>)
+        : null
+    const validReceipt = Boolean(
+      receipt?.kind === 'runner_result' &&
+      typeof receipt.result === 'string' &&
+      typeof receipt.reply_required === 'boolean' &&
+      (receipt.reply_message_id === undefined ||
+        receipt.reply_message_id === null ||
+        typeof receipt.reply_message_id === 'string'),
+    )
     return {
       version: Number(payload.version ?? TEAM_SCHEMA_VERSION),
       member: validateMemberName(name),
-      messages: payload.messages,
+      messages: payload.messages as Array<Record<string, unknown>>,
+      checkpoint_version:
+        payload.checkpoint_version === undefined
+          ? undefined
+          : Number(payload.checkpoint_version),
+      turn_id:
+        payload.turn_id === undefined ? undefined : String(payload.turn_id),
+      phase,
+      base_thread_revision:
+        payload.base_thread_revision === undefined
+          ? undefined
+          : String(payload.base_thread_revision),
+      final_thread_revision:
+        payload.final_thread_revision === undefined
+          ? undefined
+          : String(payload.final_thread_revision),
       pending_cursor_start:
         payload.pending_cursor_start === undefined
           ? undefined
@@ -214,6 +286,23 @@ export class TeamStore {
       pending_message_ids: Array.isArray(payload.pending_message_ids)
         ? payload.pending_message_ids.map(String)
         : undefined,
+      lead_message_ids_before: Array.isArray(payload.lead_message_ids_before)
+        ? payload.lead_message_ids_before.map(String)
+        : undefined,
+      last_effect_receipt:
+        validReceipt && receipt
+          ? {
+              ...receipt,
+              kind: 'runner_result',
+              result: String(receipt.result ?? ''),
+              reply_required: receipt.reply_required === true,
+              reply_message_id:
+                receipt.reply_message_id === undefined ||
+                receipt.reply_message_id === null
+                  ? null
+                  : String(receipt.reply_message_id),
+            }
+          : undefined,
     }
   }
 
@@ -228,9 +317,16 @@ export class TeamStore {
     name: string,
     messages: Array<Record<string, unknown>>,
     opts: {
+      checkpoint_version?: number | null
+      turn_id?: string | null
+      phase?: TeamCheckpointPhase | null
+      base_thread_revision?: string | null
+      final_thread_revision?: string | null
       pending_cursor_start?: number | null
       pending_cursor_end?: number | null
       pending_message_ids?: string[] | null
+      lead_message_ids_before?: string[] | null
+      last_effect_receipt?: TeamEffectReceipt | null
     } = {},
   ): void {
     const payload: Record<string, unknown> = {
@@ -238,6 +334,20 @@ export class TeamStore {
       member: validateMemberName(name),
       messages,
     }
+    if (
+      opts.checkpoint_version !== undefined &&
+      opts.checkpoint_version !== null
+    )
+      payload.checkpoint_version = Math.max(
+        0,
+        Math.floor(opts.checkpoint_version),
+      )
+    if (opts.turn_id) payload.turn_id = String(opts.turn_id)
+    if (opts.phase) payload.phase = opts.phase
+    if (opts.base_thread_revision)
+      payload.base_thread_revision = String(opts.base_thread_revision)
+    if (opts.final_thread_revision)
+      payload.final_thread_revision = String(opts.final_thread_revision)
     if (
       opts.pending_cursor_start !== undefined &&
       opts.pending_cursor_start !== null
@@ -250,6 +360,10 @@ export class TeamStore {
       payload.pending_cursor_end = Math.max(0, opts.pending_cursor_end)
     if (opts.pending_message_ids)
       payload.pending_message_ids = opts.pending_message_ids.map(String)
+    if (opts.lead_message_ids_before)
+      payload.lead_message_ids_before = opts.lead_message_ids_before.map(String)
+    if (opts.last_effect_receipt)
+      payload.last_effect_receipt = { ...opts.last_effect_receipt }
     atomicWriteJson(this.checkpointPath(name), payload)
   }
 

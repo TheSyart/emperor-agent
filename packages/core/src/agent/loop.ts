@@ -23,18 +23,38 @@ import {
   resolve,
   sep,
 } from 'node:path'
-import { ContextBuilder, type SkillsLoaderLike } from './context-builder'
+import {
+  ContextBuilder,
+  type ContextProjection,
+  type SkillsLoaderLike,
+} from './context-builder'
 import {
   AgentRunner,
   type AgentRunnerHookHost,
   type CompactorLike,
 } from './runner'
 import { buildRoutedRunner } from './runner-factory'
+import {
+  PromptPrefetchCoordinator,
+  type PromptPrefetchTask,
+} from '../prompts/prefetch'
+import { FileCheckpointService } from '../checkpoints/file-checkpoints'
+import {
+  SoftGitRewindService,
+  type SoftGitRewindEvaluationGateReceipt,
+  type SoftGitRewindMode,
+} from '../checkpoints/soft-git-rewind'
 import { RunnerGoalRecordingService } from './runner-goal-recording'
 import { dispatchControlHost, permissionOnlyControlHost } from './control-hosts'
 import { loadLocalConfig, type PromptProfile } from '../config/local-config'
 import type { PermissionRuleInput } from '../permissions/rules'
 import { loadModelConfig } from '../config/model-config'
+import {
+  ConfigResolver,
+  defineConfigKey,
+  type ConfigCandidate,
+  type Resolved,
+} from '../config/resolver'
 import { ModelConfigurationError } from '../errors'
 import { ControlManager } from '../control/manager'
 import type { Interaction } from '../control/models'
@@ -46,6 +66,31 @@ import {
 } from '../control/tools'
 import { MCPClient } from '../mcp/client'
 import { MemoryStore } from '../memory/store'
+import {
+  applyHybridMemoryPromptProjection,
+  HybridMemoryService,
+  type HybridMemoryRetrieveResult,
+} from '../memory/hybrid-service'
+import {
+  resolveHybridMemoryMode,
+  type HybridMemoryEvaluationGateReceipt,
+  type HybridMemoryMode,
+} from '../memory/hybrid-capability'
+import type { HybridMemoryDocument } from '../memory/hybrid-index'
+import type { MemoryEmbeddingProvider } from '../memory/hybrid-retrieval'
+import {
+  effectiveCodeIntelligenceCapability,
+  resolveCodeIntelligenceMode,
+  type CodeIntelligenceEvaluationGateReceipt,
+  type CodeIntelligenceMode,
+} from '../code-intelligence/capability'
+import { CodeIntelligenceService } from '../code-intelligence/service'
+import { CodeIntelligenceTool } from '../code-intelligence/tool'
+import type { TrustedLspServerDescriptor } from '../code-intelligence/lsp-supervisor'
+import {
+  CODE_GRAPH_PARSER_REVISION,
+  type CodeGraphFileEvent,
+} from '../code-intelligence/models'
 import { compactSession } from '../memory/compaction-service'
 import {
   CompactionCursorStore,
@@ -93,6 +138,8 @@ import {
   ExecutionEnvironmentService,
   type ExecutionEnvironment,
 } from '../environment/snapshot'
+import { OsSandboxController } from '../environment/sandbox'
+import { OwnedProcessRuntime } from '../processes/runtime'
 import {
   migrateLegacyStateRoot,
   type LegacyStateMigrationResult,
@@ -105,6 +152,14 @@ import {
 import { isSkillBlocked } from '../runtime/resources'
 import { SkillManager } from '../skills/manager'
 import { RuntimeEventStore } from '../runtime/store'
+import {
+  SessionRuntimeManager,
+  type SessionInterjection,
+} from '../runtime/session-runtime'
+import {
+  LifecycleSupervisor,
+  type LifecycleService,
+} from '../runtime/lifecycle'
 import {
   SchedulerJobExecutor,
   type SchedulerAgentTurnPayload,
@@ -133,7 +188,13 @@ import {
 } from '../sessions/store'
 import { buildDispatchRunnerFactory } from '../subagents/dispatch-runner'
 import { SubagentRegistry } from '../subagents/registry'
+import {
+  GitWorktreeSubagentWorkspaceProvider,
+  SubagentSupervisor,
+} from '../subagents/supervisor'
 import { TaskManager } from '../tasks/manager'
+import { isTerminalTaskStatus, TaskStatus } from '../tasks/models'
+import { TaskRuntimeRegistry } from '../tasks/runtime'
 import {
   TeamBroadcastTool,
   TeamListTool,
@@ -155,9 +216,18 @@ import {
 } from '../tools/builtin'
 import { GlobTool, GrepTool } from '../tools/search'
 import { ManageSkillTool } from '../tools/manage-skill'
+import { SubagentTaskControlTool } from '../tools/subagent-tasks'
 import { DispatchSubagentTool } from '../tools/dispatch'
-import { EditFileTool, ReadFileTool, WriteFileTool } from '../tools/filesystem'
+import {
+  ApplyPatchTool,
+  DeleteFileTool,
+  EditFileTool,
+  ReadFileTool,
+  RenameFileTool,
+  WriteFileTool,
+} from '../tools/filesystem'
 import { ToolRegistry } from '../tools/registry'
+import type { ToolExecutionContext } from '../tools/base'
 import { WebSearchTool } from '../tools/web-search'
 import * as runtimeEvents from '../runtime/events'
 import {
@@ -241,6 +311,24 @@ export interface AgentLoopCreateOptions {
   initializeMcp?: boolean
   eventSink?: StreamEmitter | null
   permissionRules?: PermissionRuleInput[] | null
+  /** Beta，默认关闭；开启后仅捕获受管文件工具的 before/after。 */
+  fileCheckpointsEnabled?: boolean
+  /** Experimental soft Git rewind remains off unless a verified gate enables mutation. */
+  softGitRewindMode?: SoftGitRewindMode
+  /** Runtime/platform-bound safety evaluation receipt supplied only by a trusted host. */
+  softGitRewindEvaluationGate?: SoftGitRewindEvaluationGateReceipt | null
+  /** Experimental retrieval remains off unless explicitly selected. */
+  hybridMemoryMode?: HybridMemoryMode
+  /** Provider capability is injected by a trusted host; project data cannot supply it. */
+  memoryEmbeddingProvider?: MemoryEmbeddingProvider | null
+  /** Provider-bound offline evaluation receipt required before prompt mutation. */
+  hybridMemoryEvaluationGate?: HybridMemoryEvaluationGateReceipt | null
+  /** Experimental code intelligence remains inert unless a verified gate enables it. */
+  codeIntelligenceMode?: CodeIntelligenceMode
+  /** Parser-bound benchmark receipt injected only by a trusted host. */
+  codeIntelligenceEvaluationGate?: CodeIntelligenceEvaluationGateReceipt | null
+  /** Executable descriptors are host-owned; project/model inputs never populate this list. */
+  trustedLspDescriptors?: readonly TrustedLspServerDescriptor[]
   /**
    * 默认关闭：显式开启才会在首次运行（用户档案仍是种子默认 + 模型已配置）时
    * 自动发起一次性偏好访谈 turn。默认关闭是为了不影响现有测试/嵌入场景——
@@ -265,6 +353,39 @@ export interface RunUserTurnOptions {
   attachmentIds?: string[] | null
   requestedSkills?: Array<{ name: string; source?: string }> | null
   signal?: AbortSignal | null
+  delivery?: 'queue' | 'interject' | null
+}
+
+export interface InterjectedUserPrompt {
+  sessionId: string
+  promptId: string
+  turnId: string
+  clientMessageId: string
+  content: string
+  displayContent: string
+  source: string | null
+  uiHidden: boolean
+}
+
+export interface InterjectUserTurnResult {
+  accepted: boolean
+  targetTurnId: string | null
+  reason: string | null
+}
+
+export interface AgentSessionBindingState {
+  session: SessionEntry
+  conversationStore: ConversationStore
+  memoryStore: SessionMemoryStore
+  runtimeStore: RuntimeEventStore
+  history: Msg[]
+  todoStore: TodoStore
+  skillsLoader: FileSkillsLoader
+  contextBuilder: ContextBuilder
+}
+
+export interface AgentSessionBindings extends AgentSessionBindingState {
+  runner: AgentRunner
 }
 
 export interface CompactionHookScope {
@@ -292,19 +413,30 @@ export class AgentLoop {
   readonly environmentCatalog: LoadedToolCatalog
   readonly environmentProbe: EnvironmentProbe
   readonly executionEnvironmentService: ExecutionEnvironmentService
+  readonly processSandbox: OsSandboxController
+  readonly processRuntime: OwnedProcessRuntime
   readonly taskManager: TaskManager
+  readonly taskRuntime: TaskRuntimeRegistry
+  readonly subagentSupervisor: SubagentSupervisor
   readonly projectStore: ProjectStore
+  readonly hybridMemory: HybridMemoryService
+  readonly codeIntelligence: CodeIntelligenceService
   readonly controlManager: ControlManager
   readonly todoStore: TodoStore
   readonly schedulerStore: SchedulerStore
   readonly schedulerService: SchedulerService
   readonly activeTasks = new ActiveTaskRegistry()
+  readonly sessionRuntimes: SessionRuntimeManager<AgentSessionBindings>
+  readonly lifecycleSupervisor: LifecycleSupervisor
   readonly skillsLoader: FileSkillsLoader
   readonly skillManager: SkillManager
   readonly contextBuilder: ContextBuilder
   readonly subagentRegistry: SubagentRegistry
   readonly teamManager: TeamManager
   readonly mcpClient: MCPClient
+  readonly promptPrefetch = new PromptPrefetchCoordinator()
+  readonly fileCheckpoints: FileCheckpointService
+  readonly softGitRewind: SoftGitRewindService
   readonly goalStore: GoalStore
   readonly goalPlanBridge: GoalPlanBridge
   readonly goalObservationRecorder: GoalObservationRecorder
@@ -331,7 +463,7 @@ export class AgentLoop {
   conversationStore!: ConversationStore
   activeMemoryStore!: SessionMemoryStore
   runtimeStore!: RuntimeEventStore
-  runner!: AgentRunner
+  private activeRunner!: AgentRunner
   history: Msg[] = []
   private readonly ownsModelRouter: boolean
   private readonly modelOverride: string | null
@@ -350,6 +482,21 @@ export class AgentLoop {
     Omit<GoalCoreFactRefreshInput, 'currentScope'>
   >()
   private readonly goalGateMutations: GoalGateMutationLedger
+
+  get runner(): AgentRunner {
+    const bindings = this.activeSessionId
+      ? this.sessionRuntimes?.get(this.activeSessionId)?.bindings
+      : null
+    return bindings?.runner ?? this.activeRunner
+  }
+
+  set runner(value: AgentRunner) {
+    this.activeRunner = value
+    const bindings = this.activeSessionId
+      ? this.sessionRuntimes?.get(this.activeSessionId)?.bindings
+      : null
+    if (bindings) bindings.runner = value
+  }
 
   private constructor(
     opts: AgentLoopCreateOptions,
@@ -376,7 +523,6 @@ export class AgentLoop {
       userFile: opts.userFile ?? this.sharedMemory.userFile,
     })
     this.eventSink = opts.eventSink ?? null
-
     this.sessionStore = new SessionStore(this.paths.stateRoot)
     this.goalStore = new GoalStore(this.paths.stateRoot, {
       hooks: {
@@ -465,6 +611,24 @@ export class AgentLoop {
       probe: this.environmentProbe,
       env: () => process.env,
     })
+    this.processSandbox = new OsSandboxController()
+    this.processRuntime = new OwnedProcessRuntime(this.paths.stateRoot, {
+      sandbox: this.processSandbox,
+    })
+    this.softGitRewind = new SoftGitRewindService({
+      stateRoot: this.paths.stateRoot,
+      requestedMode: opts.softGitRewindMode ?? 'off',
+      evaluationGate: opts.softGitRewindEvaluationGate ?? null,
+      runtime: this.processRuntime,
+      resolveRuntime: async (workspaceRoot) =>
+        await this.resolveSoftGitRuntime(workspaceRoot),
+    })
+    this.fileCheckpoints = new FileCheckpointService({
+      stateRoot: this.paths.stateRoot,
+      enabled: opts.fileCheckpointsEnabled === true,
+      gitCapture:
+        this.softGitRewind.requestedMode === 'off' ? null : this.softGitRewind,
+    })
     this.hookService = new HookService({
       stateRoot: this.paths.stateRoot,
       modelRouter: {
@@ -472,6 +636,7 @@ export class AgentLoop {
           this.routeHookModel(useCase, role, task),
       },
       tokenTracker: this.tokenTracker,
+      ownedProcessRunner: this.processRuntime,
       executionEnvironment: async ({ projectRoot, cwd }) =>
         await this.createExecutionEnvironment(projectRoot ?? cwd),
     })
@@ -492,8 +657,84 @@ export class AgentLoop {
         },
       },
     })
+    this.taskRuntime = new TaskRuntimeRegistry(this.taskManager, {
+      reconcileOnStart: false,
+    })
+    this.subagentSupervisor = new SubagentSupervisor(
+      this.taskManager,
+      this.taskRuntime,
+      {
+        workspaceProvider: new GitWorktreeSubagentWorkspaceProvider({
+          worktreeRoot: join(this.paths.stateRoot, 'subagent-worktrees'),
+          resolveRuntime: async (sourceRoot) => {
+            const executionEnvironment =
+              await this.createExecutionEnvironment(sourceRoot)
+            const executable = executionEnvironment.toolPaths.git
+            if (!executable) return null
+            return {
+              executable,
+              env: {
+                ...executionEnvironment.selectEnv([
+                  'PATH',
+                  'HOME',
+                  'USERPROFILE',
+                  'SystemRoot',
+                  'TEMP',
+                  'TMP',
+                  'TMPDIR',
+                  'LANG',
+                  'LC_ALL',
+                ]),
+              },
+            }
+          },
+        }),
+      },
+    )
     this.projectStore = new ProjectStore(this.paths.stateRoot, {
       versions: this.sharedMemory.versions,
+    })
+    this.hybridMemory = new HybridMemoryService({
+      stateRoot: this.paths.stateRoot,
+      requested: resolveHybridMemoryMode(
+        opts.hybridMemoryMode
+          ? [
+              {
+                source: {
+                  kind: 'user',
+                  id: 'emperor.local.json',
+                  trust: 'trusted',
+                },
+                value: { mode: opts.hybridMemoryMode },
+              },
+            ]
+          : [],
+      ),
+      embeddingProvider: opts.memoryEmbeddingProvider ?? null,
+      evaluationGate: opts.hybridMemoryEvaluationGate ?? null,
+    })
+    this.codeIntelligence = new CodeIntelligenceService({
+      stateRoot: this.paths.stateRoot,
+      capability: effectiveCodeIntelligenceCapability({
+        requested: resolveCodeIntelligenceMode(
+          opts.codeIntelligenceMode
+            ? [
+                {
+                  source: {
+                    kind: 'user',
+                    id: 'emperor.local.json',
+                    trust: 'trusted',
+                  },
+                  value: { mode: opts.codeIntelligenceMode },
+                },
+              ]
+            : [],
+        ),
+        evaluationGate: opts.codeIntelligenceEvaluationGate ?? null,
+        parserRevision: CODE_GRAPH_PARSER_REVISION,
+      }),
+      processRuntime: this.processRuntime,
+      lspDescriptors: opts.trustedLspDescriptors ?? [],
     })
     this.controlManager = new ControlManager(this.paths.stateRoot, {
       permissionRules: opts.permissionRules ?? [],
@@ -563,6 +804,22 @@ export class AgentLoop {
         await this.emit(event)
       },
       targetSessionId: () => this.activeSessionId,
+      taskTerminal: (taskId) => {
+        const task = this.taskManager.store.get(taskId)
+        if (!task || !isTerminalTaskStatus(task.status)) return null
+        const status =
+          task.status === TaskStatus.COMPLETED
+            ? 'completed'
+            : task.status === TaskStatus.CANCELLED
+              ? 'cancelled'
+              : task.status === TaskStatus.INTERRUPTED
+                ? 'interrupted'
+                : 'failed'
+        return {
+          status,
+          error: String(task.progress.error ?? task.progress.reason ?? ''),
+        }
+      },
     })
     this.skillManager = new SkillManager({
       runtimeRoot: this.root,
@@ -585,6 +842,7 @@ export class AgentLoop {
     this.subagentRegistry = new SubagentRegistry(
       join(this.templatesDir, 'subagents'),
       this.skillsLoader,
+      { userSourceRoot: join(this.paths.stateRoot, 'agents') },
     )
     this.contextBuilder.setSubagentRegistry(this.subagentRegistry)
     this.goalReviewerExecutor = new GoalReviewerExecutor({
@@ -603,10 +861,12 @@ export class AgentLoop {
         todoStore: null,
         controlManager: permissionOnlyControlHost(this.controlManager),
         hooks: (args) =>
-          args.agentId
+          args.agentId &&
+          args.spec.definition.hooks.allow.includes('SubagentStop')
             ? this.scopedAgentRunnerHooks(args.agentId, 'SubagentStop')
             : null,
         goalObservationRecorder: this.goalRecordingService,
+        fileCheckpoints: this.fileCheckpoints,
       }),
     })
     this.goalCompletionGate = createAuthorizedGoalCompletionGate({
@@ -717,7 +977,19 @@ export class AgentLoop {
       },
     })
     this.teamManager = this.createTeamManager(null)
-    this.mcpClient = new MCPClient(this.paths.stateRoot)
+    this.mcpClient = new MCPClient(this.paths.stateRoot, {
+      processRuntime: this.processRuntime,
+      workspaceRoot: () =>
+        this.workspaceRootForSession(
+          this.activeSession ?? this.ensureActiveSession(),
+        ),
+      ownerSessionId: () => this.activeSessionId,
+      onStateChange: async (snapshot) => {
+        await this.emit(runtimeEvents.mcpConnectionStateChanged(snapshot), {
+          runtimeStore: this.runtimeStore,
+        })
+      },
+    })
 
     this.controlManager.setTodoStore(this.todoStore)
     this.controlManager.setTaskManager(this.taskManager)
@@ -748,9 +1020,17 @@ export class AgentLoop {
       clearPending: (interaction) =>
         this.clearSessionControlPending(interaction),
     })
+    this.sessionRuntimes = new SessionRuntimeManager<AgentSessionBindings>({
+      maxActiveActors: 2,
+      commandReceiptLimit: 1_024,
+      createBindings: (sessionId) => this.createSessionBindings(sessionId),
+    })
+    this.lifecycleSupervisor = new LifecycleSupervisor(
+      this.lifecycleServices(opts.initializeMcp !== false),
+    )
     this.registerBuiltinTools()
-    this.schedulerService.onJob = async (job) =>
-      this.schedulerExecutor().run(job)
+    this.schedulerService.onJob = async (job, context) =>
+      this.schedulerExecutor().run(job, context)
   }
 
   static async create(opts: AgentLoopCreateOptions): Promise<AgentLoop> {
@@ -803,6 +1083,15 @@ export class AgentLoop {
         userFile,
         promptProfile: opts.promptProfile ?? localConfig.prompt.profile,
         permissionRules: localConfig.permissions.rules,
+        fileCheckpointsEnabled:
+          opts.fileCheckpointsEnabled ??
+          localConfig.workspace.fileCheckpoints.enabled,
+        softGitRewindMode:
+          opts.softGitRewindMode ?? localConfig.workspace.gitRewind.mode,
+        hybridMemoryMode:
+          opts.hybridMemoryMode ?? localConfig.memory.hybridMemory,
+        codeIntelligenceMode:
+          opts.codeIntelligenceMode ?? localConfig.codeIntelligence.mode,
       },
       modelRouter,
       sharedMemory,
@@ -835,18 +1124,104 @@ export class AgentLoop {
       )
     }
     const session = loop.ensureActiveSession()
-    if (opts.initializeMcp !== false) {
-      const executionEnvironment = await loop.createExecutionEnvironment(
-        loop.workspaceRootForSession(session),
-      )
-      await loop.mcpClient.initialize(executionEnvironment)
-      loop.mcpClient.registerTools(loop.registry)
-    }
     loop.activateSession(session.id)
-    await loop.reconcileProfileOnboardingPendingAtStartup()
-    if (opts.enableFirstRunOnboarding)
-      await loop.startProfileInterview({ manual: false })
+    await loop.lifecycleSupervisor.start()
+    try {
+      await loop.reconcileProfileOnboardingPendingAtStartup()
+      if (opts.enableFirstRunOnboarding)
+        await loop.startProfileInterview({ manual: false })
+    } catch (error) {
+      await loop.lifecycleSupervisor.stop('startup failure')
+      throw error
+    }
     return loop
+  }
+
+  private lifecycleServices(initializeMcp: boolean): LifecycleService[] {
+    return [
+      {
+        id: 'process-runtime',
+        required: true,
+        dependsOn: [],
+        reconcile: async () => await this.processRuntime.reconcileOrphans(),
+        start: () => undefined,
+        ready: () => undefined,
+        stop: async (reason) => await this.processRuntime.shutdown(reason),
+      },
+      {
+        id: 'code-intelligence',
+        required: true,
+        dependsOn: ['process-runtime'],
+        reconcile: () => undefined,
+        start: () => undefined,
+        ready: () => undefined,
+        stop: async () => await this.codeIntelligence.close(),
+      },
+      {
+        id: 'task-runtime',
+        required: true,
+        dependsOn: ['process-runtime'],
+        reconcile: () => {
+          this.taskRuntime.reconcileInterrupted()
+        },
+        start: () => undefined,
+        ready: () => undefined,
+        stop: async (reason) => await this.taskRuntime.shutdown(reason),
+      },
+      {
+        id: 'subagent-supervisor',
+        required: true,
+        dependsOn: ['task-runtime'],
+        reconcile: async () => await this.subagentSupervisor.reconcile(),
+        start: () => undefined,
+        ready: () => undefined,
+        stop: async (reason) => await this.subagentSupervisor.shutdown(reason),
+      },
+      {
+        id: 'session-runtime',
+        required: true,
+        dependsOn: ['subagent-supervisor'],
+        reconcile: () => undefined,
+        start: () => undefined,
+        ready: () => undefined,
+        stop: async () => await this.sessionRuntimes.close(),
+      },
+      {
+        id: 'mcp',
+        required: true,
+        dependsOn: ['session-runtime'],
+        reconcile: async () => await this.mcpClient.close(),
+        start: async (signal) => {
+          if (!initializeMcp) return
+          if (signal.aborted) throw new Error('MCP startup cancelled')
+          const session = this.activeSession ?? this.ensureActiveSession()
+          const executionEnvironment = await this.createExecutionEnvironment(
+            this.workspaceRootForSession(session),
+          )
+          if (signal.aborted) throw new Error('MCP startup cancelled')
+          await this.mcpClient.initialize(executionEnvironment)
+          if (signal.aborted) throw new Error('MCP startup cancelled')
+          this.mcpClient.registerTools(this.registry)
+        },
+        ready: () => undefined,
+        stop: async () => {
+          this.registry.unregisterWhere((name) => name.startsWith('mcp_'))
+          await this.mcpClient.close()
+        },
+      },
+      {
+        id: 'scheduler',
+        required: true,
+        dependsOn: ['session-runtime'],
+        reconcile: () => undefined,
+        start: async () => await this.schedulerService.start(),
+        ready: () => {
+          if (!this.schedulerService.status().running)
+            throw new Error('Scheduler did not reach running state')
+        },
+        stop: () => this.schedulerService.stop(),
+      },
+    ]
   }
 
   async refreshGoalGateFacts(
@@ -1339,37 +1714,79 @@ export class AgentLoop {
     return state
   }
 
+  private createSessionBindings(sessionId: string): AgentSessionBindings {
+    const session = this.sessionStore.get(sessionId)
+    if (!session) throw new Error(`unknown session: ${sessionId}`)
+    const conversationStore = new ConversationStore(
+      this.sessionStore.sessionDir(session.id),
+    )
+    const memoryStore = this.memoryStoreForSession(session, conversationStore)
+    const runtimeStore = new RuntimeEventStore(conversationStore.sessionDir, {
+      sessionDirOverride: true,
+    })
+    const history =
+      conversationStore.readCheckpoint() ?? memoryStore.loadUnarchivedHistory()
+    const todoStore = new TodoStore((todos) => {
+      this.todosBySession.set(session.id, cloneTodoItems(todos))
+      if (this.activeSessionId === session.id)
+        this.todoStore.todos = cloneTodoItems(todos)
+    })
+    todoStore.todos = cloneTodoItems(this.todosBySession.get(session.id) ?? [])
+    const skillsLoader = new FileSkillsLoader(
+      this.root,
+      this.paths.stateRoot,
+      this.skillManager,
+    )
+    const projectSkillsRoot =
+      session.mode === 'build' && session.project_path
+        ? resolve(session.project_path)
+        : null
+    skillsLoader.setProjectSkillsDir(
+      projectSkillsRoot ? join(projectSkillsRoot, '.emperor', 'skills') : null,
+      projectSkillsRoot,
+    )
+    const contextBuilder = new ContextBuilder(this.templatesDir, skillsLoader, {
+      memory: this.sharedMemory,
+      userFile: this.sharedMemory.userFile,
+      promptProfile: this.contextBuilder.promptProfile,
+    })
+    contextBuilder.setSubagentRegistry(this.subagentRegistry)
+    contextBuilder.setSessionScope(this.sessionScope(session))
+    const state: AgentSessionBindingState = {
+      session,
+      conversationStore,
+      memoryStore,
+      runtimeStore,
+      history,
+      todoStore,
+      skillsLoader,
+      contextBuilder,
+    }
+    return { ...state, runner: this.buildMainRunner(state) }
+  }
+
   activateSession(sessionId: string): SessionEntry {
     const session = this.sessionStore.get(sessionId)
     if (!session) throw new Error(`unknown session: ${sessionId}`)
     const previousSessionId = this.activeSessionId
     if (previousSessionId && previousSessionId !== session.id) {
+      const previousBindings =
+        this.sessionRuntimes.get(previousSessionId)?.bindings
+      if (previousBindings)
+        previousBindings.todoStore.todos = cloneTodoItems(this.todoStore.todos)
       this.todosBySession.set(
         previousSessionId,
         cloneTodoItems(this.todoStore.todos),
       )
     }
+    const bindings = this.sessionRuntimes.actor(session.id).bindings
     this.activeSession = session
     this.activeSessionId = session.id
-    if (previousSessionId !== session.id) {
-      this.todoStore.todos = cloneTodoItems(
-        this.todosBySession.get(session.id) ?? [],
-      )
-    }
-    this.conversationStore = new ConversationStore(
-      this.sessionStore.sessionDir(session.id),
-    )
-    this.activeMemoryStore = this.memoryStoreForSession(
-      session,
-      this.conversationStore,
-    )
-    this.runtimeStore = new RuntimeEventStore(
-      this.conversationStore.sessionDir,
-      { sessionDirOverride: true },
-    )
-    this.history =
-      this.conversationStore.readCheckpoint() ??
-      this.activeMemoryStore.loadUnarchivedHistory()
+    this.conversationStore = bindings.conversationStore
+    this.activeMemoryStore = bindings.memoryStore
+    this.runtimeStore = bindings.runtimeStore
+    this.history = bindings.history
+    this.todoStore.todos = cloneTodoItems(bindings.todoStore.todos)
     this.contextBuilder.setSessionScope(this.sessionScope(session))
     this.controlManager.setRuntimeScope(
       this.controlRuntimeScopeForSession(session),
@@ -1382,7 +1799,7 @@ export class AgentLoop {
       projectSkillsRoot ? join(projectSkillsRoot, '.emperor', 'skills') : null,
       projectSkillsRoot,
     )
-    this.runner = this.buildMainRunner()
+    this.runner = bindings.runner
     return session
   }
 
@@ -1422,11 +1839,7 @@ export class AgentLoop {
     content: string,
     opts: RunUserTurnOptions = {},
   ): Promise<string> {
-    if (
-      opts.source !== 'goal' &&
-      (this.activeTasks.hasActiveKind('turn') ||
-        this.activeTasks.hasActiveKind('goal'))
-    ) {
+    if (opts.source !== 'goal' && this.activeTasks.hasActiveKind('goal')) {
       throw new TurnBusyError()
     }
     const targetSessionId = String(opts.sessionId ?? '').trim()
@@ -1453,13 +1866,17 @@ export class AgentLoop {
         // The previous session may have been deleted while a background turn was running.
       }
     }
+    let bindings: AgentSessionBindings
     try {
       assertModelAvailable(this.modelRouter.availability)
-      const activeSession =
-        this.activeSession ??
-        (this.activeSessionId
-          ? this.sessionStore.get(this.activeSessionId)
-          : null)
+      const activeSession = targetSessionId
+        ? this.sessionStore.get(targetSessionId)
+        : (this.activeSession ??
+          (this.activeSessionId
+            ? this.sessionStore.get(this.activeSessionId)
+            : null))
+      if (!activeSession) throw new Error('active session is not initialized')
+      bindings = this.sessionRuntimes.actor(activeSession.id).bindings
       const activeProfile =
         this.modelRouter.route('main_agent').snapshot.profile
       const requiresTools =
@@ -1474,24 +1891,364 @@ export class AgentLoop {
       throw error
     }
     const turnId = opts.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
-    const taskId = opts.taskId || `turn:${turnId}`
-    const abortController = opts.signal ? null : new AbortController()
-    const signal = opts.signal ?? abortController?.signal ?? null
-    const execute = () =>
-      this.runUserTurnInner(content, turnId, opts, signal).finally(() => {
-        this.hookService.endTurn(turnId)
-        restorePreviousSession()
+    const commandId = `turn:${turnId}`
+    const taskId = opts.taskId || commandId
+    const actor = this.sessionRuntimes.actor(bindings.session.id)
+    const queued = Boolean(actor.activeCommandId) || actor.snapshot().queued > 0
+    const queuedPromptId = String(opts.clientMessageId ?? turnId)
+    const sessionId = bindings.session.id
+    const queuedScope = this.turnScope(bindings.session, turnId)
+    if (queued) {
+      bindings.conversationStore.messageGraph.recordPrompt({
+        id: queuedPromptId,
+        turnId,
+        clientMessageId: queuedPromptId,
+        delivery: 'queue',
       })
-    if (opts.useActiveTask === false) return execute()
-    return this.activeTasks.run({
-      taskId,
-      kind: 'turn',
-      label: 'Agent turn',
-      execute,
+      await this.emit(
+        runtimeEvents.promptQueued({
+          promptId: queuedPromptId,
+          clientMessageId: queuedPromptId,
+          delivery: 'queue',
+          content: opts.displayContent ?? content,
+        }),
+        {
+          turnId,
+          emit: opts.emit ?? null,
+          runtimeStore: bindings.runtimeStore,
+          scope: queuedScope,
+        },
+      )
+    }
+    const runInActor = (signal: AbortSignal | null) =>
+      this.sessionRuntimes.run(
+        sessionId,
+        commandId,
+        async (owned, actorSignal) => {
+          if (queued) {
+            owned.conversationStore.messageGraph.transitionPrompt(
+              queuedPromptId,
+              'running',
+            )
+            await this.emit(
+              runtimeEvents.promptDequeued({
+                promptId: queuedPromptId,
+                clientMessageId: queuedPromptId,
+              }),
+              {
+                turnId,
+                emit: opts.emit ?? null,
+                runtimeStore: owned.runtimeStore,
+                scope: queuedScope,
+              },
+            )
+          }
+          return await this.runUserTurnInner(
+            content,
+            turnId,
+            opts,
+            actorSignal,
+            owned,
+          ).finally(() => {
+            this.hookService.endTurn(turnId)
+            restorePreviousSession()
+          })
+        },
+        { signal },
+      )
+    if (opts.useActiveTask === false) {
+      const result = runInActor(opts.signal ?? null)
+      return await this.settleQueuedPrompt(result, {
+        queued,
+        promptId: queuedPromptId,
+        turnId,
+        emit: opts.emit ?? null,
+        bindings,
+        scope: queuedScope,
+      })
+    }
+    const abortController = new AbortController()
+    const abortFromParent = () => abortController.abort(opts.signal?.reason)
+    if (opts.signal?.aborted) abortFromParent()
+    else opts.signal?.addEventListener('abort', abortFromParent, { once: true })
+    const result = this.activeTasks
+      .run({
+        taskId,
+        kind: 'turn',
+        label: 'Agent turn',
+        execute: () => runInActor(abortController.signal),
+        turnId,
+        sessionId,
+        abort: () => abortController.abort(),
+      })
+      .finally(() => {
+        opts.signal?.removeEventListener('abort', abortFromParent)
+      })
+    return await this.settleQueuedPrompt(result, {
+      queued,
+      promptId: queuedPromptId,
       turnId,
-      sessionId: this.activeSessionId,
-      abort: () => abortController?.abort(),
+      emit: opts.emit ?? null,
+      bindings,
+      scope: queuedScope,
     })
+  }
+
+  async interjectUserTurn(
+    prompt: InterjectedUserPrompt,
+    opts: { emit?: StreamEmitter | null } = {},
+  ): Promise<InterjectUserTurnResult> {
+    const targetSessionId = String(prompt.sessionId ?? '').trim()
+    if (!targetSessionId)
+      return { accepted: false, targetTurnId: null, reason: 'session_required' }
+    const actor = this.sessionRuntimes.get(targetSessionId)
+    const targetCommandId = actor?.activeCommandId ?? null
+    if (!actor || !targetCommandId)
+      return {
+        accepted: false,
+        targetTurnId: null,
+        reason: 'no_running_turn',
+      }
+    const bindings = actor.bindings
+    const targetTurnId = commandTurnId(targetCommandId)
+    bindings.conversationStore.messageGraph.recordPrompt({
+      id: prompt.promptId,
+      turnId: prompt.turnId,
+      clientMessageId: prompt.clientMessageId,
+      delivery: 'interject',
+      targetCommandId,
+    })
+    const result = this.sessionRuntimes.interject(targetSessionId, {
+      id: prompt.promptId,
+      payload: prompt,
+      onState: async (item) => {
+        if (item.state !== 'cancelled') return
+        await this.cancelInterjectedPrompt(bindings, item, opts.emit ?? null)
+      },
+    })
+    if (!result.accepted) {
+      bindings.conversationStore.messageGraph.transitionPrompt(
+        prompt.promptId,
+        'cancelled',
+        result.reason ?? 'interjection_rejected',
+      )
+      return {
+        accepted: false,
+        targetTurnId: null,
+        reason: result.reason ?? 'interjection_rejected',
+      }
+    }
+    const scope = this.turnScope(bindings.session, prompt.turnId)
+    await this.emit(
+      runtimeEvents.promptQueued({
+        promptId: prompt.promptId,
+        clientMessageId: prompt.clientMessageId,
+        delivery: 'interject',
+        targetTurnId,
+        content: prompt.displayContent,
+      }),
+      {
+        turnId: prompt.turnId,
+        emit: opts.emit ?? null,
+        runtimeStore: bindings.runtimeStore,
+        scope,
+      },
+    )
+    return { accepted: true, targetTurnId, reason: null }
+  }
+
+  private async settleQueuedPrompt(
+    result: Promise<string>,
+    opts: {
+      queued: boolean
+      promptId: string
+      turnId: string
+      emit: StreamEmitter | null
+      bindings: AgentSessionBindings
+      scope: TurnScope
+    },
+  ): Promise<string> {
+    if (!opts.queued) return await result
+    try {
+      const reply = await result
+      opts.bindings.conversationStore.messageGraph.transitionPrompt(
+        opts.promptId,
+        'completed',
+      )
+      return reply
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : String(error ?? 'cancelled')
+      opts.bindings.conversationStore.messageGraph.transitionPrompt(
+        opts.promptId,
+        'cancelled',
+        reason,
+      )
+      await this.emit(
+        runtimeEvents.promptCancelled({
+          promptId: opts.promptId,
+          clientMessageId: opts.promptId,
+          reason,
+        }),
+        {
+          turnId: opts.turnId,
+          emit: opts.emit,
+          runtimeStore: opts.bindings.runtimeStore,
+          scope: opts.scope,
+        },
+      )
+      throw error
+    }
+  }
+
+  private async cancelInterjectedPrompt(
+    bindings: AgentSessionBindings,
+    item: SessionInterjection<InterjectedUserPrompt>,
+    emit: StreamEmitter | null,
+  ): Promise<void> {
+    const reason = item.reason ?? 'target_command_cancelled'
+    bindings.conversationStore.messageGraph.transitionPrompt(
+      item.id,
+      'cancelled',
+      reason,
+    )
+    await this.emit(
+      runtimeEvents.promptCancelled({
+        promptId: item.id,
+        clientMessageId: item.payload.clientMessageId,
+        reason,
+      }),
+      {
+        turnId: item.payload.turnId,
+        emit,
+        runtimeStore: bindings.runtimeStore,
+        scope: this.turnScope(bindings.session, item.payload.turnId),
+      },
+    )
+  }
+
+  private async materializeInterjections(
+    bindings: AgentSessionBindings,
+    items: Array<SessionInterjection<InterjectedUserPrompt>>,
+    opts: {
+      ownerTurnId: string
+      ownerScope: TurnScope
+      emit: StreamEmitter | null
+    },
+  ): Promise<Msg[]> {
+    const out: Msg[] = []
+    for (const item of items) {
+      const prompt = item.payload
+      const promptScope = this.turnScope(bindings.session, prompt.turnId)
+      const decision = await this.runLoopHook(
+        'UserPromptSubmit',
+        {
+          sessionId: bindings.session.id,
+          cwd: opts.ownerScope.workspaceRoot,
+          source: 'interjection',
+          prompt: prompt.content,
+        },
+        {
+          turnId: opts.ownerTurnId,
+          emit: opts.emit,
+          runtimeStore: bindings.runtimeStore,
+          scope: opts.ownerScope,
+        },
+      )
+      if (decision.decision === 'deny') {
+        const reason =
+          decision.reason || 'UserPromptSubmit hook denied interjection'
+        bindings.conversationStore.messageGraph.transitionPrompt(
+          item.id,
+          'cancelled',
+          reason,
+        )
+        await this.emit(
+          runtimeEvents.promptCancelled({
+            promptId: item.id,
+            clientMessageId: prompt.clientMessageId,
+            reason,
+          }),
+          {
+            turnId: prompt.turnId,
+            emit: opts.emit,
+            runtimeStore: bindings.runtimeStore,
+            scope: promptScope,
+          },
+        )
+        continue
+      }
+      const content =
+        decision.updatedInput &&
+        typeof decision.updatedInput.content === 'string'
+          ? decision.updatedInput.content
+          : prompt.content
+      bindings.conversationStore.messageGraph.transitionPrompt(
+        item.id,
+        'interjected',
+      )
+      this.appendLifecycleHookContext(
+        out,
+        bindings.memoryStore,
+        decision.additionalContext,
+        'UserPromptSubmit',
+        prompt.turnId,
+      )
+      const message: Msg = {
+        role: 'user',
+        content,
+        turn_id: prompt.turnId,
+        interjected: true,
+      }
+      if (prompt.uiHidden) message.ui_hidden = true
+      if (prompt.displayContent !== content)
+        message.displayContent = prompt.displayContent
+      out.push(message)
+      bindings.memoryStore.appendHistory('user', content, {
+        extra: {
+          turn_id: prompt.turnId,
+          client_message_id: prompt.clientMessageId,
+          source: 'interjection',
+          interjected: true,
+          ...(prompt.displayContent !== content
+            ? { displayContent: prompt.displayContent }
+            : {}),
+          ...(prompt.uiHidden ? { ui_hidden: true } : {}),
+        },
+      })
+      this.sessionStore.touch(bindings.session.id, prompt.displayContent, {
+        incrementMessages: true,
+      })
+      await this.emit(
+        runtimeEvents.promptInterjected({
+          promptId: item.id,
+          clientMessageId: prompt.clientMessageId,
+          targetTurnId: commandTurnId(item.targetCommandId),
+        }),
+        {
+          turnId: prompt.turnId,
+          emit: opts.emit,
+          runtimeStore: bindings.runtimeStore,
+          scope: promptScope,
+        },
+      )
+      await this.emit(
+        runtimeEvents.userMessage({
+          content: prompt.displayContent,
+          attachments: [],
+          clientMessageId: prompt.clientMessageId,
+          source: 'interjection',
+          uiHidden: prompt.uiHidden,
+        }),
+        {
+          turnId: prompt.turnId,
+          emit: opts.emit,
+          runtimeStore: bindings.runtimeStore,
+          scope: promptScope,
+        },
+      )
+    }
+    return out
   }
 
   setSchedulerAgentTurnSubmitter(
@@ -1502,7 +2259,7 @@ export class AgentLoop {
 
   async close(): Promise<void> {
     await this.goalCoordinator.shutdown()
-    this.schedulerService.stop()
+    await this.lifecycleSupervisor.stop('shutdown')
     const session =
       this.activeSession ??
       (this.activeSessionId
@@ -1520,7 +2277,6 @@ export class AgentLoop {
         .catch(() => {})
     }
     await this.hookService.shutdown()
-    await this.mcpClient.close()
   }
 
   async endSession(sessionId: string, reason: string): Promise<void> {
@@ -1535,25 +2291,34 @@ export class AgentLoop {
         reason,
       })
       .catch(() => {})
+    await this.subagentSupervisor.closeSession(sessionId, reason)
+    await this.codeIntelligence.closeSession(sessionId)
+    await this.processRuntime.cancelSession(sessionId, reason)
+    await this.sessionRuntimes.closeSession(sessionId)
     this.sessionStartHooksRun.delete(sessionId)
     this.hookService.clearSession(sessionId)
   }
 
   refreshRuntimeContext(): void {
-    if (!this.runner) return
-    if (this.activeSession)
-      this.contextBuilder.setSessionScope(this.sessionScope(this.activeSession))
-    const projection = this.contextBuilder.buildProjection()
-    this.runner.systemPrompt = projection.prompt
-    this.runner.promptSections = projection.sections
-    this.runner.promptContextPlan = projection.contextPlan
-    this.runner.promptSnapshotDir = this.activeSessionId
-      ? join(
-          this.sessionStore.sessionDir(this.activeSessionId),
-          'prompt-snapshots',
-        )
+    for (const actor of this.sessionRuntimes.listActors()) {
+      const bindings = actor.bindings
+      bindings.contextBuilder.setSessionScope(
+        this.sessionScope(bindings.session),
+      )
+      const projection = bindings.contextBuilder.buildProjection()
+      bindings.runner.systemPrompt = projection.prompt
+      bindings.runner.promptSections = projection.sections
+      bindings.runner.promptContextPlan = projection.contextPlan
+      bindings.runner.promptSnapshotDir = join(
+        this.sessionStore.sessionDir(bindings.session.id),
+        'prompt-snapshots',
+      )
+      bindings.runner.sessionId = bindings.session.id
+    }
+    const activeBindings = this.activeSessionId
+      ? this.sessionRuntimes.get(this.activeSessionId)?.bindings
       : null
-    this.runner.sessionId = this.activeSessionId
+    if (activeBindings) this.runner = activeBindings.runner
     if (this.activeSession)
       this.controlManager.setRuntimeScope(
         this.controlRuntimeScopeForSession(this.activeSession),
@@ -1567,6 +2332,10 @@ export class AgentLoop {
     }).describe()
   }
 
+  effectiveSkillConfigResolutions(): Array<Resolved<any>> {
+    return this.skillsLoader.configResolutions()
+  }
+
   async refreshModelConfig(): Promise<void> {
     if (!this.ownsModelRouter) return
     this.modelRouter = new ModelRouter(
@@ -1574,16 +2343,21 @@ export class AgentLoop {
       await loadModelConfig(this.paths.stateRoot, { create: true }),
       this.modelOverride,
     )
-    if (this.activeSessionId) this.runner = this.buildMainRunner()
+    for (const actor of this.sessionRuntimes.listActors()) {
+      actor.bindings.runner = this.buildMainRunner(actor.bindings)
+    }
+    const activeBindings = this.activeSessionId
+      ? this.sessionRuntimes.get(this.activeSessionId)?.bindings
+      : null
+    if (activeBindings) this.runner = activeBindings.runner
   }
 
   async reloadMcp(): Promise<void> {
-    await this.mcpClient.close()
-    this.registry.unregisterWhere((name) => name.startsWith('mcp_'))
     const executionEnvironment = await this.createExecutionEnvironment(
       this.workspaceRootForActiveSession(),
     )
-    await this.mcpClient.initialize(executionEnvironment)
+    await this.mcpClient.reload(executionEnvironment)
+    this.registry.unregisterWhere((name) => name.startsWith('mcp_'))
     this.mcpClient.registerTools(this.registry)
   }
 
@@ -1675,29 +2449,105 @@ export class AgentLoop {
     turnId: string,
     opts: RunUserTurnOptions,
     signal: AbortSignal | null,
+    bindings: AgentSessionBindings,
   ): Promise<string> {
-    if (!this.activeSessionId)
-      this.activateSession(this.ensureActiveSession().id)
-    const session =
-      this.activeSession ?? this.sessionStore.get(this.activeSessionId!)
-    const sessionId = session?.id ?? this.activeSessionId!
-    const history = this.history
-    const memoryStore = this.activeMemoryStore
-    const runner = this.runner
-    const runtimeStore = this.runtimeStore
-    if (!session || !runner || !runtimeStore)
-      throw new Error('active session is not initialized')
+    const session = bindings.session
+    const sessionId = session.id
+    const history = bindings.history
+    const memoryStore = bindings.memoryStore
+    const runner = bindings.runner
+    const runtimeStore = bindings.runtimeStore
     this.controlManager.setRuntimeScope(
       this.controlRuntimeScopeForSession(session),
     )
-    this.controlManager.setActiveGoalPlanContext(
-      await this.goalStore.findActiveBySession(session.id),
-    )
     const scope = this.turnScope(session, turnId)
-    const executionEnvironment = await this.createExecutionEnvironment(
-      scope.workspaceRoot,
+    bindings.contextBuilder.setSessionScope(this.sessionScope(session))
+    const requestedSkills = opts.requestedSkills ?? []
+    const prefetchTasks: PromptPrefetchTask[] = [
+      {
+        name: 'active_goal',
+        required: true,
+        timeoutMs: 5_000,
+        run: async () => await this.goalStore.findActiveBySession(session.id),
+      },
+      {
+        name: 'execution_environment',
+        required: true,
+        timeoutMs: 30_000,
+        run: async (taskSignal) =>
+          await this.createExecutionEnvironment(
+            scope.workspaceRoot,
+            taskSignal,
+          ),
+      },
+      {
+        name: 'memory_skills_projection',
+        required: true,
+        timeoutMs: 2_000,
+        run: () => bindings.contextBuilder.buildProjection(),
+      },
+      {
+        name: 'mcp_catalog',
+        timeoutMs: 500,
+        run: () => this.mcpClient.getTools().map((tool) => tool.name),
+      },
+    ]
+    if (this.hybridMemory.capability.effectiveMode !== 'off') {
+      prefetchTasks.push({
+        name: 'hybrid_memory_projection',
+        timeoutMs: 2_000,
+        run: async (taskSignal) =>
+          await this.hybridMemory.retrieve({
+            query: content,
+            documents: this.hybridMemoryDocuments(),
+            scope: {
+              mode: session.mode === 'build' ? 'build' : 'chat',
+              projectId: session.project_id,
+              sessionId: session.id,
+            },
+            signal: taskSignal,
+            promptBudgetBytes: bindings.contextBuilder.memoryBudgetChars,
+          }),
+      })
+    }
+    if (requestedSkills.length) {
+      prefetchTasks.push({
+        name: 'requested_skills',
+        required: true,
+        timeoutMs: 2_000,
+        run: () =>
+          this.requestedSkillContext(requestedSkills, bindings.skillsLoader),
+      })
+    }
+    const prefetched = await this.promptPrefetch.run(prefetchTasks, {
       signal,
+      deadlineMs: 30_000,
+    })
+    this.controlManager.setActiveGoalPlanContext(
+      prefetched.values.active_goal as Awaited<
+        ReturnType<GoalStore['findActiveBySession']>
+      >,
     )
+    let contextProjection = prefetched.values
+      .memory_skills_projection as ContextProjection
+    const hybridProjection = prefetched.values.hybrid_memory_projection as
+      HybridMemoryRetrieveResult | undefined
+    if (hybridProjection)
+      contextProjection = applyHybridMemoryPromptProjection(
+        contextProjection,
+        hybridProjection,
+      )
+    runner.systemPrompt = contextProjection.prompt
+    runner.promptSections = contextProjection.sections
+    runner.promptContextPlan = contextProjection.contextPlan
+    runner.promptPrefetchReport = prefetched.report
+    const executionEnvironment = prefetched.values
+      .execution_environment as ExecutionEnvironment
+    const requestedSkillContext = requestedSkills.length
+      ? (prefetched.values.requested_skills as ReturnType<
+          AgentLoop['requestedSkillContext']
+        >)
+      : null
     await this.hookService.beginTurn({
       turnId,
       sessionId,
@@ -1765,9 +2615,6 @@ export class AgentLoop {
       attachmentIds,
       attachmentStore,
       { supportsVision: false },
-    )
-    const requestedSkillContext = this.requestedSkillContext(
-      opts.requestedSkills ?? [],
     )
     this.appendLifecycleHookContext(
       history,
@@ -1842,6 +2689,40 @@ export class AgentLoop {
       { turnId, emit: opts.emit ?? null, runtimeStore, scope },
     )
 
+    const commandId = `turn:${turnId}`
+    let supersededParentLeafId: string | null = null
+    const interjections = {
+      consume: async (): Promise<Msg[]> => {
+        const items =
+          this.sessionRuntimes.consumeInterjections<InterjectedUserPrompt>(
+            sessionId,
+            commandId,
+          )
+        if (!items.length) return []
+        supersededParentLeafId =
+          bindings.conversationStore.messageGraph.snapshot().leafId
+        return await this.materializeInterjections(bindings, items, {
+          ownerTurnId: turnId,
+          ownerScope: scope,
+          emit: opts.emit ?? null,
+        })
+      },
+      tombstonePartial: (record: {
+        turnId: string | null
+        content: string
+        reason: 'interjected' | 'cancelled' | 'model_failed'
+      }): void => {
+        const graph = bindings.conversationStore.messageGraph
+        const partial = graph.beginMessage({
+          parentId: supersededParentLeafId ?? graph.snapshot().leafId,
+          role: 'assistant',
+          content: record.content,
+          turnId: record.turnId,
+        })
+        graph.tombstoneMessage(partial.id, record.reason)
+        supersededParentLeafId = null
+      },
+    }
     let reply: string
     try {
       reply = await runner.stepStream(
@@ -1858,7 +2739,7 @@ export class AgentLoop {
             scope,
           })
         },
-        { turnId, signal, executionEnvironment },
+        { turnId, signal, executionEnvironment, interjections },
       )
     } catch (error) {
       if (!isBenignTurnInterruption(error)) {
@@ -1887,16 +2768,48 @@ export class AgentLoop {
     return reply
   }
 
-  private buildMainRunner(): AgentRunner {
+  private controlManagerForSession(session: SessionEntry): ControlManager {
+    const control = this.controlManager
+    const scope = this.controlRuntimeScopeForSession(session)
+    return new Proxy(control, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target)
+        if (typeof value !== 'function') return value
+        return (...args: unknown[]) => {
+          target.setRuntimeScope(scope)
+          return value.apply(target, args)
+        }
+      },
+    })
+  }
+
+  private controlManagerForSessionId(
+    sessionId?: string | null,
+  ): ControlManager {
+    const session = sessionId ? this.sessionStore.get(sessionId) : null
+    return session
+      ? this.controlManagerForSession(session)
+      : this.controlManager
+  }
+
+  private buildMainRunner(
+    bindings: AgentSessionBindingState | null = null,
+  ): AgentRunner {
     const route = this.modelRouter.route('main_agent')
     const session =
+      bindings?.session ??
       this.activeSession ??
       (this.activeSessionId
         ? this.sessionStore.get(this.activeSessionId)
         : null)
-    if (session) this.contextBuilder.setSessionScope(this.sessionScope(session))
-    const projection = this.contextBuilder.buildProjection()
-    const memoryStore = this.activeMemoryStore
+    const contextBuilder = bindings?.contextBuilder ?? this.contextBuilder
+    if (session) contextBuilder.setSessionScope(this.sessionScope(session))
+    const projection = contextBuilder.buildProjection()
+    const memoryStore = bindings?.memoryStore ?? this.activeMemoryStore
+    const todoStore = bindings?.todoStore ?? this.todoStore
+    const controlManager = session
+      ? this.controlManagerForSession(session)
+      : this.controlManager
     const goalContext = session
       ? new GoalContextBuilder({
           goalStore: this.goalStore,
@@ -1939,21 +2852,19 @@ export class AgentLoop {
       compactor: session
         ? this.autoMemoryCompactor(session, memoryStore)
         : null,
-      todoStore: this.todoStore,
-      controlManager: this.controlManager,
+      todoStore,
+      controlManager,
       maxContext: route.snapshot.contextWindowTokens,
       maxTurns: 20,
-      workspaceRoot: this.workspaceRootForActiveSession(),
+      workspaceRoot: this.workspaceRootForSession(session),
       promptSections: projection.sections,
       promptContextPlan: projection.contextPlan,
-      promptSnapshotDir: this.activeSessionId
-        ? join(
-            this.sessionStore.sessionDir(this.activeSessionId),
-            'prompt-snapshots',
-          )
+      promptSnapshotDir: session
+        ? join(this.sessionStore.sessionDir(session.id), 'prompt-snapshots')
         : null,
-      sessionId: this.activeSessionId,
+      sessionId: session?.id ?? null,
       goalObservationRecorder: this.goalRecordingService,
+      fileCheckpoints: this.fileCheckpoints,
       goalToolHost: this.goalToolHost,
       goalContextProvider: goalContext
         ? async (history) => {
@@ -2019,6 +2930,42 @@ export class AgentLoop {
       skillRequirements: collectSkillEnvironmentRequirements(this.skillManager),
       ...(signal ? { signal } : {}),
     })
+  }
+
+  private async resolveSoftGitRuntime(projectRoot: string): Promise<{
+    executable: string
+    gitVersion: string
+    env: Record<string, string>
+  } | null> {
+    const executionEnvironment =
+      await this.createExecutionEnvironment(projectRoot)
+    const executable = executionEnvironment.toolPaths.git
+    if (!executable) return null
+    const status = await this.environmentProbe.getStatus({
+      projectRoot: this.environmentProbeRoot(projectRoot),
+      skillRequirements: collectSkillEnvironmentRequirements(this.skillManager),
+    })
+    const git = status.tools.find(
+      (tool) => tool.id === 'git' && tool.status === 'ready',
+    )
+    if (!git?.detectedVersion || git.executablePath !== executable) return null
+    return {
+      executable,
+      gitVersion: git.detectedVersion,
+      env: {
+        ...executionEnvironment.selectEnv([
+          'PATH',
+          'HOME',
+          'USERPROFILE',
+          'SystemRoot',
+          'TEMP',
+          'TMP',
+          'TMPDIR',
+          'LANG',
+          'LC_ALL',
+        ]),
+      },
+    }
   }
 
   private isTrustedTaskTranscriptRef(ref: string): boolean {
@@ -2136,30 +3083,81 @@ export class AgentLoop {
   }
 
   private registerBuiltinTools(): void {
-    this.registry.register(new RunCommand(this.root))
+    const observeFileMutation = async (
+      events: readonly CodeGraphFileEvent[],
+      context?: ToolExecutionContext,
+    ): Promise<void> => {
+      if (!context) return
+      const scope = this.codeIntelligenceScope(context)
+      if (!scope) return
+      await this.codeIntelligence.notify(events, {
+        ...scope,
+        signal: context.signal ?? null,
+      })
+    }
+    this.registry.register(
+      new RunCommand(this.root, {
+        ownedRunner: this.processRuntime,
+      }),
+    )
     this.registry.register(new WebSearchTool())
     this.registry.register(new WebFetch())
-    this.registry.register(new LoadSkill(this.skillsLoader))
+    this.registry.register(
+      new LoadSkill(
+        (sessionId) =>
+          (sessionId
+            ? this.sessionRuntimes.get(sessionId)?.bindings.skillsLoader
+            : null) ?? this.skillsLoader,
+      ),
+    )
     this.registry.register(
       new ManageSkillTool(this.skillManager, () =>
         this.refreshRuntimeContext(),
       ),
     )
     this.registry.register(new ReadFileTool(this.root))
-    this.registry.register(new WriteFileTool(this.root))
-    this.registry.register(new EditFileTool(this.root))
+    this.registry.register(new WriteFileTool(this.root, observeFileMutation))
+    this.registry.register(new EditFileTool(this.root, observeFileMutation))
+    this.registry.register(new ApplyPatchTool(this.root, observeFileMutation))
+    this.registry.register(new DeleteFileTool(this.root, observeFileMutation))
+    this.registry.register(new RenameFileTool(this.root, observeFileMutation))
     this.registry.register(new GlobTool(this.root))
     this.registry.register(new GrepTool(this.root))
+    if (this.codeIntelligence.capability.toolAllowed)
+      this.registry.register(
+        new CodeIntelligenceTool(this.codeIntelligence, (context) =>
+          this.codeIntelligenceScope(context),
+        ),
+      )
     this.registry.register(new SchedulerTool(this.schedulerService))
-    this.registry.register(new AskUserTool(this.controlManager))
-    this.registry.register(new ProposePlanTool(this.controlManager))
-    this.registry.register(new RequestPlanModeTool(this.controlManager))
+    this.registry.register(
+      new AskUserTool((sessionId) =>
+        this.controlManagerForSessionId(sessionId),
+      ),
+    )
+    this.registry.register(
+      new ProposePlanTool((sessionId) =>
+        this.controlManagerForSessionId(sessionId),
+      ),
+    )
+    this.registry.register(
+      new RequestPlanModeTool((sessionId) =>
+        this.controlManagerForSessionId(sessionId),
+      ),
+    )
     this.registry.register(new GetGoalTool(this.goalToolHost))
     this.registry.register(new DefineGoalContractTool(this.goalToolHost))
     this.registry.register(new RecordGoalEvidenceTool(this.goalToolHost))
     this.registry.register(new CompleteGoalTool(this.goalToolHost))
     this.registry.register(new BlockGoalTool(this.goalToolHost))
-    this.registry.register(new UpdateTodos(this.todoStore))
+    this.registry.register(
+      new UpdateTodos(
+        (sessionId) =>
+          (sessionId
+            ? this.sessionRuntimes.get(sessionId)?.bindings.todoStore
+            : null) ?? this.todoStore,
+      ),
+    )
     this.registry.register(
       new SaveUserProfileTool(
         this.sharedMemory,
@@ -2186,12 +3184,18 @@ export class AgentLoop {
           todoStore: null,
           controlManager: permissionOnlyControlHost(this.controlManager),
           hooks: (args) =>
-            args.agentId
+            args.agentId &&
+            args.spec.definition.hooks.allow.includes('SubagentStop')
               ? this.scopedAgentRunnerHooks(args.agentId, 'SubagentStop')
               : null,
           goalObservationRecorder: this.goalRecordingService,
+          fileCheckpoints: this.fileCheckpoints,
+          maxTokensCap: this.subagentSupervisor.tokenBudget,
+          tokenBudget: this.subagentSupervisor.tokenBudget,
         }),
         taskManager: this.taskManager,
+        taskRuntime: this.taskRuntime,
+        supervisor: this.subagentSupervisor,
         controlManager: controlHost,
         hooks: {
           begin: async ({ agentId, agentType, sessionId, cwd }) => {
@@ -2215,6 +3219,7 @@ export class AgentLoop {
         },
       }),
     )
+    this.registry.register(new SubagentTaskControlTool(this.subagentSupervisor))
     const activeTeamManager = () => this.teamManagerForActiveSession()
     this.registry.register(new TeamSpawnTool(activeTeamManager))
     this.registry.register(new TeamListTool(activeTeamManager))
@@ -2222,6 +3227,23 @@ export class AgentLoop {
     this.registry.register(new TeamReadInboxTool(activeTeamManager))
     this.registry.register(new TeamBroadcastTool(activeTeamManager))
     this.registry.register(new TeamShutdownTool(activeTeamManager))
+  }
+
+  private codeIntelligenceScope(
+    context: ToolExecutionContext,
+  ): { workspaceRoot: string; sessionId: string } | null {
+    const sessionId = String(context.sessionId ?? '').trim()
+    const session = sessionId ? this.sessionStore.get(sessionId) : null
+    if (
+      session?.mode !== 'build' ||
+      !session.project_id ||
+      !session.project_path
+    )
+      return null
+    return {
+      workspaceRoot: resolve(session.project_path),
+      sessionId: session.id,
+    }
   }
 
   teamManagerForActiveSession(): TeamManager | null {
@@ -2382,6 +3404,37 @@ export class AgentLoop {
     return new SessionMemoryStore(this.sharedMemory, conversation)
   }
 
+  private hybridMemoryDocuments(): HybridMemoryDocument[] {
+    const documents: HybridMemoryDocument[] = []
+    const globalContent = this.sharedMemory.readMemory().trim()
+    if (globalContent) {
+      documents.push({
+        id: 'global:MEMORY.local.md',
+        content: globalContent,
+        source: 'global',
+        path: this.sharedMemory.memoryFile,
+        createdAt: fileModifiedAt(this.sharedMemory.memoryFile),
+      })
+    }
+    for (const project of this.projectStore.list()) {
+      const content = this.projectStore
+        .readManagedMemory(project.project_id)
+        .trim()
+      if (!content) continue
+      documents.push({
+        id: `project:${project.project_id}`,
+        content,
+        source: 'project',
+        projectId: project.project_id,
+        path: project.memory_path,
+        createdAt:
+          fileModifiedAt(project.memory_path) ||
+          Math.max(0, Date.parse(project.updated_at) || 0),
+      })
+    }
+    return documents
+  }
+
   private sessionScope(session: SessionEntry): {
     mode: string
     projectId?: string
@@ -2498,6 +3551,7 @@ export class AgentLoop {
 
   private requestedSkillContext(
     requestedSkills: Array<{ name: string; source?: string }>,
+    skillsLoader: FileSkillsLoader = this.skillsLoader,
   ): { names: string[]; content: string } | null {
     const names = [
       ...new Set(
@@ -2512,10 +3566,10 @@ export class AgentLoop {
     ]
     if (!names.length) return null
     for (const name of names) {
-      if (!this.skillsLoader.getContent(name))
+      if (!skillsLoader.getContent(name))
         throw new RequestedSkillUnavailableError(name)
     }
-    const content = this.skillsLoader.loadSkillsForContext(names).trim()
+    const content = skillsLoader.loadSkillsForContext(names).trim()
     if (!content) throw new RequestedSkillUnavailableError(names.join(', '))
     return { names, content }
   }
@@ -2683,6 +3737,7 @@ export class AgentLoop {
     return new SchedulerJobExecutor({
       activeTasks: this.activeTasks,
       taskManager: this.taskManager,
+      taskRuntime: this.taskRuntime,
       controlPending: () => Boolean(this.controlManager.payload().pending),
       toolCallingAvailable: () =>
         this.modelRouter.route('team').snapshot.profile?.toolCall !== false,
@@ -2697,7 +3752,9 @@ export class AgentLoop {
           clientMessageId: payload.clientMessageId,
           source: payload.source,
           scheduler: payload.scheduler,
-          taskId: payload.taskId ?? undefined,
+          taskId: payload.taskId,
+          signal: payload.signal,
+          useActiveTask: payload.useActiveTask,
           sessionId: payload.sessionId ?? null,
           restoreActiveSessionAfterTurn: Boolean(payload.sessionId),
           emit: payload.deliver ? this.eventSink : null,
@@ -2764,6 +3821,7 @@ export class AgentLoop {
             ? this.workspaceRootForProject(cleanProjectId)
             : this.workspaceRootForActiveSession(),
           sessionId: this.activeSessionId,
+          fileCheckpoints: this.fileCheckpoints,
           hooks: this.scopedAgentRunnerHooks(
             agentId,
             'TeammateIdle',
@@ -2840,8 +3898,66 @@ export class AgentLoop {
   ): Promise<void> {
     const scoped = opts.scope ? withTurnScope(event, opts.scope) : event
     const store = opts.runtimeStore ?? this.runtimeStoreForEvent(scoped)
+    const eventType = String(scoped.event ?? scoped.type ?? '')
+    const samplingAttempt = eventType.startsWith('model_attempt_')
+    const taskEvent = eventType.startsWith('task_')
+    const toolEvent = eventType.startsWith('tool_')
+    const processEvent = eventType === 'process_containment'
+    const mcpEvent = eventType === 'mcp_connection_state'
+    const attemptId = samplingAttempt
+      ? String(scoped.attempt_id ?? '').trim()
+      : ''
+    const eventTask = isRecord(scoped.task) ? scoped.task : null
+    const taskId = taskEvent
+      ? String(scoped.task_id ?? eventTask?.id ?? '').trim()
+      : ''
+    const taskRevision = taskEvent
+      ? Math.max(0, Math.trunc(Number(eventTask?.revision ?? 0)))
+      : 0
+    const toolCallId =
+      toolEvent || processEvent
+        ? String(scoped.tool_call_id ?? scoped.id ?? '').trim()
+        : ''
+    const taskEventKey =
+      taskId && taskEvent
+        ? `${taskId}:${taskRevision}:${eventType}${eventType === 'task_output' ? `:${Math.max(0, Math.trunc(Number(scoped.offset ?? 0)))}` : ''}`
+        : null
     const payload = store
-      ? store.append(scoped, { turnId: opts.turnId ?? null })
+      ? store.append(scoped, {
+          turnId: opts.turnId ?? null,
+          ...(samplingAttempt ||
+          taskEvent ||
+          toolEvent ||
+          processEvent ||
+          mcpEvent
+            ? {
+                envelopeV2: true,
+                requestId:
+                  samplingAttempt || mcpEvent
+                    ? String(scoped.request_id ?? '').trim() || null
+                    : null,
+                attemptId: samplingAttempt ? attemptId || null : null,
+                taskId: taskEvent ? taskId || null : null,
+                toolCallId:
+                  toolEvent || processEvent ? toolCallId || null : null,
+                visibility:
+                  samplingAttempt || mcpEvent
+                    ? ('diagnostic' as const)
+                    : ('user' as const),
+                idempotencyKey:
+                  String(scoped.idempotency_key ?? '').trim() ||
+                  (samplingAttempt && attemptId
+                    ? `${attemptId}:${eventType}`
+                    : taskEventKey
+                      ? taskEventKey
+                      : mcpEvent
+                        ? mcpStateIdempotencyKey(scoped)
+                        : toolCallId
+                          ? `${toolCallId}:${eventType}`
+                          : null),
+              }
+            : {}),
+        })
       : scoped
     const sink = opts.emit ?? this.eventSink
     if (sink) await sink(payload)
@@ -2856,6 +3972,9 @@ export class AgentLoop {
       ownerSessionId !== this.activeSessionId &&
       this.sessionStore.get(ownerSessionId)
     ) {
+      const ownedStore =
+        this.sessionRuntimes.get(ownerSessionId)?.bindings.runtimeStore
+      if (ownedStore) return ownedStore
       return new RuntimeEventStore(
         this.sessionStore.sessionDir(ownerSessionId),
         { sessionDirOverride: true },
@@ -2978,42 +4097,100 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
   getContent(name: string): string | null {
     const safe = safeSkillName(name)
     if (!safe) return null
+    return this.resolveSkill(safe).value?.content ?? null
+  }
+
+  configResolutions(): Array<Resolved<EffectiveSkillConfigValue | null>> {
+    return this.skillNames().map((name) => {
+      const candidates = this.skillCandidates(name)
+      const key = defineConfigKey<EffectiveSkillConfigValue | null>({
+        id: `skills.${name}`,
+        builtin: null,
+      })
+      return new ConfigResolver().resolve(key, {
+        candidates: candidates.map((candidate) => ({
+          source: candidate.source,
+          value: {
+            name: candidate.value.name,
+            source: candidate.value.source,
+            path: candidate.value.path,
+            readOnly: candidate.value.readOnly,
+          },
+        })),
+      })
+    })
+  }
+
+  private resolveSkill(name: string): Resolved<FileSkillValue | null> {
+    const key = defineConfigKey<FileSkillValue | null>({
+      id: `skills.${name}`,
+      builtin: null,
+    })
+    return new ConfigResolver().resolve(key, {
+      candidates: this.skillCandidates(name),
+    })
+  }
+
+  private skillCandidates(name: string): ConfigCandidate<FileSkillValue>[] {
+    const out: ConfigCandidate<FileSkillValue>[] = []
     for (const source of this.dirsInPrecedenceOrder()) {
-      if (!canonicalRegularPath(source.dir, source.boundary, 'directory'))
-        continue
-      const dir = source.dir
-      const nestedPath = join(dir, safe)
-      const nestedRoot = canonicalRegularPath(
-        nestedPath,
-        source.boundary,
-        'directory',
+      const value = this.skillAtSource(name, source)
+      if (!value) continue
+      out.push({
+        source: {
+          kind: source.kind,
+          id: `skill:${source.kind}:${name}`,
+          trust: 'trusted',
+        },
+        value,
+      })
+    }
+    return out
+  }
+
+  private skillAtSource(
+    name: string,
+    source: ReturnType<FileSkillsLoader['dirsInPrecedenceOrder']>[number],
+  ): FileSkillValue | null {
+    if (!canonicalRegularPath(source.dir, source.boundary, 'directory'))
+      return null
+    const nestedPath = join(source.dir, name)
+    const nestedRoot = canonicalRegularPath(
+      nestedPath,
+      source.boundary,
+      'directory',
+    )
+    if (source.kind === 'user' && nestedRoot && isSkillBlocked(nestedRoot))
+      return null
+    const candidates = [
+      ...(nestedRoot ? [join(nestedPath, 'SKILL.md')] : []),
+      join(source.dir, `${name}.md`),
+    ]
+    for (const path of candidates) {
+      const file = canonicalRegularPath(path, source.boundary, 'file')
+      if (!file) continue
+      if (
+        nestedRoot &&
+        path === join(nestedPath, 'SKILL.md') &&
+        !this.manager.validateRecord({
+          name,
+          root: nestedRoot,
+          skillFile: file,
+          source: source.kind,
+          status: 'active',
+          readOnly: source.kind !== 'user',
+        }).valid
       )
-      if (source.kind === 'user' && nestedRoot && isSkillBlocked(nestedRoot))
         continue
-      const candidates = [
-        ...(nestedRoot ? [join(nestedPath, 'SKILL.md')] : []),
-        join(dir, `${safe}.md`),
-      ]
-      for (const path of candidates) {
-        const file = canonicalRegularPath(path, source.boundary, 'file')
-        if (!file) continue
-        if (
-          nestedRoot &&
-          path === join(nestedPath, 'SKILL.md') &&
-          !this.manager.validateRecord({
-            name: safe,
-            root: nestedRoot,
-            skillFile: file,
-            source: source.kind,
-            status: 'active',
-            readOnly: source.kind !== 'user',
-          }).valid
-        )
-          continue
-        return readFileSync(file, 'utf8').replaceAll(
+      return {
+        name,
+        source: source.kind,
+        path: file,
+        readOnly: source.kind !== 'user',
+        content: readFileSync(file, 'utf8').replaceAll(
           '{{skill_dir}}',
           dirname(file),
-        )
+        ),
       }
     }
     return null
@@ -3095,6 +4272,17 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
   }
 }
 
+interface FileSkillValue extends EffectiveSkillConfigValue {
+  content: string
+}
+
+interface EffectiveSkillConfigValue {
+  name: string
+  source: 'project' | 'user' | 'builtin'
+  path: string
+  readOnly: boolean
+}
+
 function canonicalRegularPath(
   path: string,
   boundary: string,
@@ -3133,6 +4321,14 @@ function existingPath(path: string): string | null {
   return existsSync(path) ? path : null
 }
 
+function fileModifiedAt(path: string): number {
+  try {
+    return Math.max(0, lstatSync(path).mtimeMs)
+  } catch {
+    return 0
+  }
+}
+
 function isBenignTurnInterruption(error: unknown): boolean {
   const name =
     error && typeof error === 'object' && 'name' in error
@@ -3145,9 +4341,27 @@ function isBenignTurnInterruption(error: unknown): boolean {
   )
 }
 
+function commandTurnId(commandId: string): string {
+  const value = String(commandId ?? '')
+  return value.startsWith('turn:') ? value.slice('turn:'.length) : value
+}
+
 function hookErrorKind(error: unknown): string {
   if (error instanceof Error && error.name) return error.name
   return 'unknown_error'
+}
+
+function mcpStateIdempotencyKey(event: Record<string, unknown>): string {
+  const error = isRecord(event.last_error) ? event.last_error : null
+  return [
+    'mcp-state',
+    String(event.server_name ?? 'unknown'),
+    String(event.client_id ?? `generation-${event.generation ?? 0}`),
+    String(event.state ?? 'unknown'),
+    String(event.restart_attempts ?? 0),
+    String(event.active_request_count ?? 0),
+    String(error?.code ?? 'ok'),
+  ].join(':')
 }
 
 function safeRuntimeError(error: unknown): {

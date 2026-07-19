@@ -51,6 +51,16 @@ const enabledCount = computed(() => {
 const mcpTools = computed(
   () => ctx.boot.value?.tools?.filter((t) => t.source === 'mcp') || [],
 )
+const mcpStatus = computed(() => ctx.boot.value?.mcp)
+const statusByServer = computed(
+  () =>
+    new Map(
+      (mcpStatus.value?.servers || []).map((status) => [
+        status.serverName,
+        status,
+      ]),
+    ),
+)
 const serverItems = computed(() => {
   const servers = parsed.value?.servers as Record<string, unknown> | undefined
   if (!servers) return []
@@ -58,12 +68,27 @@ const serverItems = computed(() => {
     const toolCount = mcpTools.value.filter(
       (tool) => tool.server === name,
     ).length
-    return mcpServerCapability(name, config as any, toolCount)
+    return mcpServerCapability(
+      name,
+      config as any,
+      toolCount,
+      statusByServer.value.get(name),
+    )
   })
 })
 const mcpToolItems = computed(() =>
   mcpTools.value.map((tool) => toolCapability(tool)),
 )
+
+const noToolsMessage = computed(() => {
+  if (!serverCount.value) return '暂无 MCP 工具。请先配置并启用 MCP server。'
+  const failed = mcpStatus.value?.servers.filter(
+    (server) => server.state !== 'ready',
+  )
+  if (failed?.length)
+    return `尚未加载工具：${failed.map((server) => `${server.serverName}=${server.state}`).join('，')}`
+  return '连接已建立，但 server 没有公布可用工具。'
+})
 
 function validate() {
   parseError.value = ''
@@ -91,6 +116,11 @@ function formatJson() {
     parseError.value = e instanceof Error ? e.message : 'JSON 格式错误'
   }
 }
+
+async function refresh() {
+  await ctx.loadMcpConfig()
+  await ctx.loadMcpStatus()
+}
 </script>
 
 <template>
@@ -99,6 +129,9 @@ function formatJson() {
       <div class="filter-wrap">
         <span class="filter-badge">
           服务器 {{ serverCount }} 个 · 启用 {{ enabledCount }} 个
+          <template v-if="mcpStatus">
+            · 已连接 {{ mcpStatus.ready }}/{{ mcpStatus.configured }}</template
+          >
           <template v-if="mcpTools.length">
             · MCP 工具 {{ mcpTools.length }} 个</template
           >
@@ -108,7 +141,7 @@ function formatJson() {
       <button
         class="tool-button asset-button"
         title="刷新"
-        @click="ctx.runSafely(() => ctx.loadMcpConfig())"
+        @click="ctx.runSafely(refresh)"
       >
         <component :is="actionIcons.refresh" class="action-icon" :size="16" />
         <span>刷新</span>
@@ -134,7 +167,7 @@ function formatJson() {
         <div class="editor-title">已加载的 MCP 工具</div>
         <div class="mcp-tool-list capability-card-grid">
           <div v-if="!mcpTools.length" class="empty-note">
-            暂无 MCP 工具。配置并保存 MCP 服务器后即可看到工具列表。
+            {{ noToolsMessage }}
           </div>
           <CapabilityCard
             v-for="item in mcpToolItems"

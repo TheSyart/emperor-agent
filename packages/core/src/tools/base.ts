@@ -131,11 +131,14 @@ export interface ToolExecutionContext {
   turnId?: string | null
   parentCallId?: string | null
   sessionId?: string | null
+  taskId?: string | null
   executionEnvironment?: ExecutionEnvironment | null
   /** 运行时事件发射器（流式事件 dict）。对齐 runner/control 的 StreamEmitter。 */
   emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
   loop?: unknown | null
   signal?: AbortSignal | null
+  /** Subagent supervisor depth; main turns are 0 and children cannot exceed 1. */
+  subagentDepth?: number
 }
 
 // ── tool base ──
@@ -175,6 +178,8 @@ export abstract class Tool {
 
   /** 可选：返回该调用影响的路径（供权限画像/敏感路径判定）。对齐 `get_path(arguments)`。 */
   getPath?(args: Record<string, unknown>): string | null
+  /** 多路径 mutation 必须返回全部路径，权限规则不能只检查第一个参数。 */
+  getPaths?(args: Record<string, unknown>): string[]
 
   abstract execute(
     args: Record<string, unknown>,

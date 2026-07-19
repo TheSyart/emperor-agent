@@ -250,6 +250,36 @@ class LatchEchoTool extends Tool {
   }
 }
 
+class AbortAwareStreamingTool extends Tool {
+  override name = 'abort_aware_streaming'
+  override description = 'Wait until the per-tool signal is aborted.'
+  override parameters = toolParamsSchema({}, [])
+  override readOnly = true
+  override concurrencySafe = true
+  aborted = false
+  private markStarted: (() => void) | null = null
+  readonly started = new Promise<void>((resolve) => {
+    this.markStarted = resolve
+  })
+
+  execute(
+    _args: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ): Promise<string> {
+    this.markStarted?.()
+    return new Promise((resolve) => {
+      context?.signal?.addEventListener(
+        'abort',
+        () => {
+          this.aborted = true
+          resolve('cancelled')
+        },
+        { once: true },
+      )
+    })
+  }
+}
+
 class EarlyToolProvider extends LLMProvider {
   private streamCalls = 0
   constructor(
@@ -387,6 +417,17 @@ class ErrorResultTool extends Tool {
   }
 }
 
+class InterjectionProbeTool extends Tool {
+  override name = 'interjection_probe'
+  override description = 'Must not run after an interjection supersedes it.'
+  override parameters = toolParamsSchema({}, [])
+  calls = 0
+  execute(): string {
+    this.calls += 1
+    return 'obsolete tool result'
+  }
+}
+
 // ── test_runner_state.py (TurnState) ──
 
 describe('TurnState (test_runner_state.py)', () => {
@@ -437,6 +478,126 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(phases.every((e) => e.turn_id === 'turn_1')).toBe(true)
   })
 
+  it('consumes ordered interjections at the model/tool boundary and tombstones the superseded response', async () => {
+    const provider = new FakeProvider([
+      makeResponse({
+        content: 'obsolete tool plan',
+        finishReason: 'tool_calls',
+        toolCalls: [toolCall('call_obsolete', 'interjection_probe', {})],
+      }),
+      makeResponse({ content: 'final after interjection' }),
+    ])
+    const registry = new ToolRegistry()
+    const tool = new InterjectionProbeTool()
+    registry.register(tool)
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+    })
+    const emitted: Msg[] = []
+    const tombstones: Msg[] = []
+    let consumes = 0
+    const history: Msg[] = [{ role: 'user', content: 'original prompt' }]
+
+    const reply = await runner.stepAsync(history, {
+      turnId: 'turn_interjection',
+      emit: (event) => {
+        emitted.push(event)
+      },
+      interjections: {
+        consume: () => {
+          consumes += 1
+          return consumes === 2
+            ? [
+                {
+                  role: 'user',
+                  content: 'first interjection',
+                  turn_id: 'prompt_1',
+                },
+                {
+                  role: 'user',
+                  content: 'second interjection',
+                  turn_id: 'prompt_2',
+                },
+              ]
+            : []
+        },
+        tombstonePartial: (record) => {
+          tombstones.push(record)
+        },
+      },
+    })
+
+    expect(reply).toBe('final after interjection')
+    expect(tool.calls).toBe(0)
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      'first interjection',
+    )
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      'second interjection',
+    )
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        content: 'obsolete tool plan',
+        reason: 'interjected',
+        turnId: 'turn_interjection',
+      }),
+    ])
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        event: 'message_tombstoned',
+        reason: 'interjected',
+      }),
+    )
+  })
+
+  it('tombstones a streamed partial on model failure even without a UI emitter', async () => {
+    const provider = new (class extends LLMProvider {
+      constructor() {
+        super({ defaultModel: 'fake' })
+      }
+      async chat(): Promise<LLMResponse> {
+        return makeResponse({ content: 'unused' })
+      }
+      override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
+        await args.onContentDelta?.('orphan partial')
+        throw Object.assign(new Error('invalid api key'), {
+          status: 401,
+          code: 'invalid_api_key',
+        })
+      }
+    })()
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+    })
+    const tombstones: Msg[] = []
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'hi' }], {
+        turnId: 'turn_failed_partial',
+        interjections: {
+          consume: () => [],
+          tombstonePartial: (record) => {
+            tombstones.push(record)
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'model_provider_auth' })
+
+    expect(tombstones).toEqual([
+      expect.objectContaining({
+        turnId: 'turn_failed_partial',
+        content: 'orphan partial',
+        reason: 'model_failed',
+      }),
+    ])
+  })
+
   it('propagates one immutable execution snapshot through a turn tool batch', async () => {
     const provider = new FakeProvider([
       makeResponse({
@@ -481,7 +642,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     )
   })
 
-  it('does not run automatic memory compaction unless explicitly enabled', async () => {
+  it('runs automatic semantic compaction without an environment switch', async () => {
     const calls: string[] = []
     await withEnv('EMPEROR_AUTO_MEMORY_COMPACT', undefined, async () => {
       const runner = new AgentRunner({
@@ -506,6 +667,34 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
       await runner.stepAsync([{ role: 'user', content: 'hi' }])
     })
+
+    expect(calls).toEqual(['shouldCompact', 'compactAfterTurn'])
+  })
+
+  it('allows automatic semantic compaction to be disabled explicitly', async () => {
+    const calls: string[] = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      autoCompact: false,
+      tokenTracker: {
+        record: () => undefined,
+        shouldCompact: () => {
+          calls.push('shouldCompact')
+          return true
+        },
+      },
+      compactor: {
+        compactAfterTurn: async () => {
+          calls.push('compactAfterTurn')
+          return { status: 'compacted' }
+        },
+      },
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'hi' }])
 
     expect(calls).toEqual([])
   })
@@ -857,6 +1046,21 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(
       emitted.filter((event) => event.event === 'model_provider_retry'),
     ).toHaveLength(2)
+    const attempts = emitted.filter((event) =>
+      String(event.event).startsWith('model_attempt_'),
+    )
+    expect(
+      attempts.filter((event) => event.event === 'model_attempt_started'),
+    ).toHaveLength(3)
+    expect(
+      attempts.filter((event) =>
+        ['model_attempt_failed', 'model_attempt_succeeded'].includes(
+          String(event.event),
+        ),
+      ),
+    ).toHaveLength(3)
+    expect(new Set(attempts.map((event) => event.request_id)).size).toBe(1)
+    expect(new Set(attempts.map((event) => event.attempt_id)).size).toBe(3)
     expect(
       emitted.find((event) => event.event === 'context_usage'),
     ).toMatchObject({ provider_retry_count: 2 })
@@ -953,6 +1157,73 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(runner.provider).toBe(primary)
     expect(
       emitted.some((event) => event.event === 'model_route_fallback'),
+    ).toBe(false)
+  })
+
+  it('keeps an explicit fallback for the current step only and starts the next step on primary', async () => {
+    const primary = new FlakyProvider(3, () =>
+      Object.assign(new Error('temporarily unavailable'), { status: 503 }),
+    )
+    const fallback = new FakeProvider([
+      makeResponse({
+        content: 'partial',
+        finishReason: 'length',
+        usage: { input: 70, output: 5 },
+      }),
+      makeResponse({
+        content: 'fallback done',
+        usage: { input: 80, output: 6 },
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider: primary,
+      model: 'main-model',
+      modelEntryId: 'active-entry',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      modelPolicy: {
+        fallback: {
+          provider: fallback,
+          model: 'fallback-model',
+          providerName: 'fallback-provider',
+          modelEntryId: 'fallback-entry',
+          supportsToolCall: true,
+          maxTokens: 8_000,
+          temperature: 0,
+          reasoningEffort: null,
+          pricing: null,
+        },
+        triggerOn: ['transient'],
+        maxUsdPerAgentTurn: null,
+      },
+    })
+    const firstEvents: Msg[] = []
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'first' }], {
+        emit: (event) => {
+          firstEvents.push(event)
+        },
+      }),
+    ).resolves.toContain('fallback done')
+    expect(primary.calls).toBe(3)
+    expect(fallback.seenMessages).toHaveLength(2)
+    expect(
+      firstEvents.filter((event) => event.event === 'model_route_fallback'),
+    ).toHaveLength(1)
+
+    const secondEvents: Msg[] = []
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'second' }], {
+        emit: (event) => {
+          secondEvents.push(event)
+        },
+      }),
+    ).resolves.toBe('done')
+    expect(primary.calls).toBe(4)
+    expect(fallback.seenMessages).toHaveLength(2)
+    expect(
+      secondEvents.some((event) => event.event === 'model_route_fallback'),
     ).toBe(false)
   })
 
@@ -1084,6 +1355,23 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     })
     expect(snapshot.contextPlan.items[0].hash).toBe(snapshot.sections[0].hash)
     expect(snapshot.finalMessagesHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(snapshot.projection).toMatchObject({
+      version: 1,
+      cacheBreak: {
+        classification: 'initial',
+        reasonCode: 'initial_projection',
+      },
+      stablePrefix: {
+        hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        leaves: [
+          expect.objectContaining({
+            id: 'section:bootstrap',
+            stability: 'stable',
+          }),
+          expect.objectContaining({ id: 'request:tools', kind: 'tools' }),
+        ],
+      },
+    })
     expect(snapshot.historyRange).toEqual({
       messageCount: 1,
       firstSeq: 7,
@@ -1108,6 +1396,123 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ])
     expect(JSON.stringify(snapshot)).not.toContain('secret bootstrap')
     expect(JSON.stringify(snapshot)).not.toContain('private user message body')
+  })
+
+  it('keeps the prompt stable-prefix hash across turns and emits cache-break plus provider cache diagnostics', async () => {
+    const snapshotDir = mkdtempSync(
+      join(tmpdir(), 'emperor-prompt-projection-'),
+    )
+    const provider = new FakeProvider([
+      makeResponse({ content: 'one', usage: { input: 10, output: 2 } }),
+      makeResponse({
+        content: 'two',
+        usage: { input: 12, output: 2, cache_read: 8 },
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'stable system',
+      promptSections: [
+        {
+          name: 'bootstrap',
+          content: 'stable system',
+          source: 'templates/SOUL.md',
+          priority: 100,
+          budgetChars: null,
+          version: 'v1',
+          stability: 'stable',
+        },
+      ],
+      promptSnapshotDir: snapshotDir,
+      sessionId: 'session_cache',
+    })
+    const history: Msg[] = [{ role: 'user', content: 'first' }]
+    await runner.stepAsync(history, { turnId: 'turn_cache_1' })
+    history.push({ role: 'user', content: 'second' })
+    const emitted: Msg[] = []
+    await runner.stepAsync(history, {
+      turnId: 'turn_cache_2',
+      emit: (event) => {
+        emitted.push(event)
+      },
+    })
+
+    const first = JSON.parse(
+      readFileSync(join(snapshotDir, 'turn_cache_1.json'), 'utf8'),
+    )
+    const second = JSON.parse(
+      readFileSync(join(snapshotDir, 'turn_cache_2.json'), 'utf8'),
+    )
+    expect(second.projection.stablePrefix.hash).toBe(
+      first.projection.stablePrefix.hash,
+    )
+    expect(second.projection.cacheBreak).toMatchObject({
+      classification: 'expected',
+      reasonCode: 'history_appended',
+    })
+    expect(
+      emitted.find((event) => event.event === 'context_projection'),
+    ).toMatchObject({
+      report: {
+        stable_prefix_hash: second.projection.stablePrefix.hash,
+        cache_break_classification: 'expected',
+        cache_break_reason: 'history_appended',
+      },
+    })
+    expect(
+      emitted.find((event) => event.event === 'context_usage'),
+    ).toMatchObject({
+      cache_read_tokens: 8,
+      cache_create_tokens: 0,
+      prompt_cache_hit: true,
+      stable_prefix_hash: second.projection.stablePrefix.hash,
+    })
+  })
+
+  it('restores the previous redacted projection after runner restart for adjacent-turn diagnostics', async () => {
+    const snapshotDir = mkdtempSync(
+      join(tmpdir(), 'emperor-prompt-projection-restart-'),
+    )
+    const createRunner = (provider: FakeProvider) =>
+      new AgentRunner({
+        provider,
+        model: 'fake',
+        registry: new ToolRegistry(),
+        systemPrompt: 'stable system',
+        promptSections: [
+          {
+            name: 'bootstrap',
+            content: 'stable system',
+            source: 'templates/SOUL.md',
+            priority: 100,
+            budgetChars: null,
+            version: 'v1',
+            stability: 'stable',
+          },
+        ],
+        promptSnapshotDir: snapshotDir,
+        sessionId: 'session_cache_restart',
+      })
+    const history: Msg[] = [{ role: 'user', content: 'first' }]
+    await createRunner(
+      new FakeProvider([makeResponse({ content: 'one' })]),
+    ).stepAsync(history, { turnId: 'turn_restart_1' })
+    history.push({ role: 'user', content: 'second' })
+
+    await createRunner(
+      new FakeProvider([makeResponse({ content: 'two' })]),
+    ).stepAsync(history, { turnId: 'turn_restart_2' })
+
+    const second = JSON.parse(
+      readFileSync(join(snapshotDir, 'turn_restart_2.json'), 'utf8'),
+    )
+    expect(second.projection.cacheBreak).toMatchObject({
+      classification: 'expected',
+      reasonCode: 'history_appended',
+      previousStablePrefixHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
   })
 
   it('records local microcompact records in the prompt context plan', async () => {
@@ -1239,6 +1644,60 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(started).toBe(true)
     resolveModel!()
     await turn
+  })
+
+  it('tombstones and aborts an early tool omitted from the final model response', async () => {
+    const registry = new ToolRegistry()
+    const tool = new AbortAwareStreamingTool()
+    registry.register(tool)
+    const partial = toolCall('partial_call', tool.name, {})
+    const provider = new (class extends LLMProvider {
+      constructor() {
+        super({ defaultModel: 'fake' })
+      }
+      async chat(): Promise<LLMResponse> {
+        return makeResponse({ content: 'done' })
+      }
+      override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
+        await args.onToolCallComplete?.(partial)
+        await tool.started
+        return makeResponse({ content: 'done', toolCalls: [] })
+      }
+    })()
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      streamingToolExecution: true,
+    })
+    const emitted: Array<Record<string, unknown>> = []
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'hi' }], {
+        emit: (event) => {
+          emitted.push(event)
+        },
+      }),
+    ).resolves.toBe('done')
+
+    expect(tool.aborted).toBe(true)
+    expect(
+      emitted.filter(
+        (event) =>
+          event.id === partial.id &&
+          [
+            'tool_run_completed',
+            'tool_run_failed',
+            'tool_run_cancelled',
+          ].includes(String(event.event)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        event: 'tool_run_cancelled',
+        reason: 'not_in_final_response',
+      }),
+    ])
   })
 
   it('propagates the turn snapshot through streaming tool execution', async () => {

@@ -4,7 +4,6 @@
  */
 import OpenAI from 'openai'
 import { reasoningPayload, type ReasoningEffort } from '../model/profile'
-import { logger } from '../util/log'
 import { normalizeApiBase, type ProviderSpec } from './registry'
 import {
   DEFAULT_MAX_RETRIES,
@@ -66,6 +65,7 @@ const NO_TEMPERATURE_MODEL_RE = /(?:^|[/._-])(?:gpt-5|o[134])(?:$|[/._-])/
 export class OpenAICompatProvider extends LLMProvider {
   readonly spec: ProviderSpec | undefined
   readonly client: OpenAI
+  private streamUsageSupported: boolean | null = null
 
   constructor(
     cfg: ConstructorParameters<typeof LLMProvider>[0] & { spec?: ProviderSpec },
@@ -118,24 +118,14 @@ export class OpenAICompatProvider extends LLMProvider {
 
   override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
     const streamKwargs = this.kwargsFor(args, true)
-    ;(streamKwargs as any).stream_options = { include_usage: true }
-    let stream: any
-    try {
-      stream = await this.client.chat.completions.create(
-        { ...(streamKwargs as any), stream: true },
-        OpenAICompatProvider.requestOptions(args),
-      )
-    } catch (exc: unknown) {
-      if (!streamUsageUnsupported(String(exc))) throw exc
-      logger.debug(
-        `Provider does not support stream usage, retrying without it: ${String(exc)}`,
-      )
-      delete (streamKwargs as any).stream_options
-      stream = await this.client.chat.completions.create(
-        { ...(streamKwargs as any), stream: true },
-        OpenAICompatProvider.requestOptions(args),
-      )
+    if (this.streamUsageSupported !== false) {
+      ;(streamKwargs as any).stream_options = { include_usage: true }
     }
+    const stream: any = await this.client.chat.completions.create(
+      { ...(streamKwargs as any), stream: true },
+      OpenAICompatProvider.requestOptions(args),
+    )
+    if ((streamKwargs as any).stream_options) this.streamUsageSupported = true
     const contentParts: string[] = []
     const reasoningParts: string[] = []
     const toolChunks = new Map<
@@ -201,6 +191,16 @@ export class OpenAICompatProvider extends LLMProvider {
       reasoningContent: reasoningParts.join('') || null,
       thinkingBlocks: null,
     }
+  }
+
+  override recoverSamplingRequest(error: unknown): boolean {
+    if (
+      this.streamUsageSupported === false ||
+      !streamUsageUnsupported(String(error))
+    )
+      return false
+    this.streamUsageSupported = false
+    return true
   }
 
   private static requestOptions(

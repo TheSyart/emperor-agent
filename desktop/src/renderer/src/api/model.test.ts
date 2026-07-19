@@ -5,6 +5,7 @@ import {
   discoverProviderModels,
   resolveModelProfilePreview,
   saveModelEntry,
+  saveModelPolicy,
   setModelReasoningEffort,
   testModelEntry,
 } from './model'
@@ -99,6 +100,14 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
       maxTokens: 16_000,
       reasoningEffort: 'high',
     })
+    await saveModelPolicy({
+      fallback: {
+        enabled: false,
+        entryId: null,
+        triggerOn: ['rate_limit'],
+      },
+      cost: { maxUsdPerAgentTurn: null },
+    })
     await activateModelEntry('entry-1')
     await setModelReasoningEffort('entry-1', 'xhigh')
     await resolveModelProfilePreview({
@@ -112,6 +121,17 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
 
     expect(calls).toEqual([
       ['model.saveEntry', expect.objectContaining({ entryId: 'entry-1' })],
+      [
+        'model.savePolicy',
+        {
+          fallback: {
+            enabled: false,
+            entryId: null,
+            triggerOn: ['rate_limit'],
+          },
+          cost: { maxUsdPerAgentTurn: null },
+        },
+      ],
       ['model.activate', { entryId: 'entry-1' }],
       [
         'model.setReasoningEffort',

@@ -6,12 +6,14 @@ import {
   discoverProviderModels,
   resolveModelProfilePreview,
   saveModelEntry,
+  saveModelPolicy,
   testModelEntry,
 } from '../../api/model'
 import type {
   DiscoveredModel,
   ModelConfigPayload,
   ModelEntry,
+  ModelFallbackTrigger,
   ModelTestResult,
   ProviderOption,
 } from '../../types'
@@ -34,6 +36,11 @@ const emit = defineEmits<{
 
 const entries = computed(() => props.payload?.models ?? [])
 const providerOptions = computed(() => props.payload?.providerOptions ?? [])
+const fallbackTargets = computed(() =>
+  entries.value.filter(
+    (entry) => entry.entryId !== props.payload?.activeModelId,
+  ),
+)
 const dialogOpen = ref(false)
 const editing = ref<ModelEntryDraft | null>(null)
 const providerSearch = ref('')
@@ -41,6 +48,12 @@ const providerResultsOpen = ref(false)
 const showApiKey = ref(false)
 const saving = ref(false)
 const deletingId = ref<string | null>(null)
+const policySaving = ref(false)
+const fallbackEnabled = ref(false)
+const fallbackEntryId = ref('')
+const fallbackOnRateLimit = ref(true)
+const fallbackOnTransient = ref(false)
+const costCapUsd = ref<number | string>('')
 const discovering = ref(false)
 const discoveredModels = ref<DiscoveredModel[]>([])
 const discoveryMessage = ref('')
@@ -117,6 +130,20 @@ const capabilityOptions: Array<{ value: CapabilityControl; label: string }> = [
 
 const inputTokenPresets = [32_000, 64_000, 128_000, 256_000]
 const outputTokenPresets = [8_000, 16_000, 32_000, 64_000]
+
+watch(
+  () => props.payload?.policy,
+  (policy) => {
+    fallbackEnabled.value = policy?.fallback.enabled ?? false
+    fallbackEntryId.value = policy?.fallback.entryId ?? ''
+    fallbackOnRateLimit.value =
+      policy?.fallback.triggerOn.includes('rate_limit') ?? true
+    fallbackOnTransient.value =
+      policy?.fallback.triggerOn.includes('transient') ?? false
+    costCapUsd.value = policy?.cost.maxUsdPerAgentTurn ?? ''
+  },
+  { immediate: true, deep: true },
+)
 
 watch(
   () => {
@@ -276,6 +303,45 @@ function validateDraft(draft: ModelEntryDraft): void {
   if (!draft.modelId.trim()) throw new Error('请填写模型 ID')
   if (draft.contextWindowTokens < 1) throw new Error('输入上限必须大于 0')
   if (draft.maxTokens < 1) throw new Error('输出上限必须大于 0')
+  if (draft.pricingEnabled) {
+    for (const [key, value] of Object.entries(draft.pricing)) {
+      if (!Number.isFinite(Number(value)) || Number(value) < 0)
+        throw new Error(`成本单价 ${key} 必须是非负数`)
+    }
+  }
+}
+
+async function saveExecutionPolicy(): Promise<void> {
+  if (policySaving.value) return
+  policySaving.value = true
+  try {
+    const triggerOn: ModelFallbackTrigger[] = []
+    if (fallbackOnRateLimit.value) triggerOn.push('rate_limit')
+    if (fallbackOnTransient.value) triggerOn.push('transient')
+    if (!triggerOn.length) throw new Error('请至少选择一种备用模型触发条件')
+    if (fallbackEnabled.value && !fallbackEntryId.value)
+      throw new Error('请选择备用模型')
+    const capText = String(costCapUsd.value ?? '').trim()
+    const maxUsdPerAgentTurn = capText ? Number(capText) : null
+    if (
+      maxUsdPerAgentTurn !== null &&
+      (!Number.isFinite(maxUsdPerAgentTurn) || maxUsdPerAgentTurn <= 0)
+    )
+      throw new Error('每 Agent 轮成本上限必须是正数')
+    const payload = await saveModelPolicy({
+      fallback: {
+        enabled: fallbackEnabled.value,
+        entryId: fallbackEntryId.value || null,
+        triggerOn,
+      },
+      cost: { maxUsdPerAgentTurn },
+    })
+    emit('updated', payload)
+  } catch (error) {
+    emit('error', error instanceof Error ? error.message : String(error))
+  } finally {
+    policySaving.value = false
+  }
 }
 
 async function save(): Promise<void> {
@@ -379,6 +445,90 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
         @edit="openEdit"
         @delete="remove"
       />
+
+      <section class="execution-policy-card" aria-labelledby="policy-title">
+        <header class="policy-head">
+          <div>
+            <h2 id="policy-title">执行与成本策略</h2>
+            <p>默认不会自动切换模型；以下能力只有保存显式配置后才生效。</p>
+          </div>
+          <button
+            type="button"
+            class="primary-button"
+            :disabled="policySaving"
+            @click="saveExecutionPolicy"
+          >
+            {{ policySaving ? '保存中…' : '保存策略' }}
+          </button>
+        </header>
+
+        <div class="policy-grid">
+          <div class="policy-field span-2">
+            <label class="policy-toggle">
+              <input v-model="fallbackEnabled" type="checkbox" />
+              <span>备用模型（显式启用）</span>
+            </label>
+            <small>
+              主模型完成自身重试后，才会按所选错误类型切换一次；下一 Agent
+              轮仍从主模型开始。
+            </small>
+          </div>
+
+          <label class="policy-field">
+            <span>备用模型</span>
+            <select
+              v-model="fallbackEntryId"
+              :disabled="!fallbackEnabled"
+              aria-label="备用模型"
+            >
+              <option value="">请选择</option>
+              <option
+                v-for="entry in fallbackTargets"
+                :key="entry.entryId"
+                :value="entry.entryId"
+              >
+                {{ entry.displayName || entry.modelId }}
+              </option>
+            </select>
+          </label>
+
+          <fieldset class="policy-field trigger-field">
+            <legend>触发条件</legend>
+            <label>
+              <input
+                v-model="fallbackOnRateLimit"
+                type="checkbox"
+                :disabled="!fallbackEnabled"
+              />
+              限流耗尽
+            </label>
+            <label>
+              <input
+                v-model="fallbackOnTransient"
+                type="checkbox"
+                :disabled="!fallbackEnabled"
+              />
+              服务/网络暂时失败
+            </label>
+          </fieldset>
+
+          <label class="policy-field span-2">
+            <span>每 Agent 轮成本上限（USD，可选）</span>
+            <input
+              v-model="costCapUsd"
+              type="number"
+              min="0.000001"
+              step="0.001"
+              inputmode="decimal"
+              placeholder="留空表示不限制"
+            />
+            <small>
+              启用前必须为主模型和备用模型填写完整单价。失败或重试请求可能不返回
+              usage，因此未知成本不会按 0 计算，账本会标记为不完整。
+            </small>
+          </label>
+        </div>
+      </section>
 
       <div
         v-if="dialogOpen && editing"
@@ -671,6 +821,66 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
               </label>
             </section>
 
+            <section class="form-section">
+              <div class="form-section-title">
+                <span>成本单价</span>
+                <small>USD / 每百万 tokens；不内置厂商价格</small>
+              </div>
+              <label class="clear-key-control span-2 pricing-toggle">
+                <input v-model="editing.pricingEnabled" type="checkbox" />
+                为此模型配置成本单价
+              </label>
+              <div class="pricing-grid span-2">
+                <label class="field">
+                  <span>普通输入</span>
+                  <input
+                    v-model.number="editing.pricing.inputUsdPerMillionTokens"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    :disabled="!editing.pricingEnabled"
+                  />
+                </label>
+                <label class="field">
+                  <span>模型输出</span>
+                  <input
+                    v-model.number="editing.pricing.outputUsdPerMillionTokens"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    :disabled="!editing.pricingEnabled"
+                  />
+                </label>
+                <label class="field">
+                  <span>缓存读取</span>
+                  <input
+                    v-model.number="
+                      editing.pricing.cacheReadUsdPerMillionTokens
+                    "
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    :disabled="!editing.pricingEnabled"
+                  />
+                </label>
+                <label class="field">
+                  <span>缓存写入</span>
+                  <input
+                    v-model.number="
+                      editing.pricing.cacheWriteUsdPerMillionTokens
+                    "
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    :disabled="!editing.pricingEnabled"
+                  />
+                </label>
+              </div>
+              <small class="span-2 pricing-note">
+                价格缺失代表未知，不代表免费。若 Provider 改价，请手动更新这里。
+              </small>
+            </section>
+
             <section
               v-if="editing.entryId"
               class="form-section connection-test"
@@ -771,6 +981,118 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .model-config-note span {
   color: rgb(var(--fg-subtle));
   font-size: 10px;
+}
+
+.execution-policy-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--bg-elevated) / 0.52);
+}
+
+.policy-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.policy-head h2 {
+  margin: 0;
+  color: rgb(var(--fg));
+  font-size: 14px;
+}
+
+.policy-head p {
+  margin: 5px 0 0;
+  color: rgb(var(--fg-subtle));
+  font-size: 11px;
+}
+
+.policy-grid,
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.policy-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.policy-field > span,
+.trigger-field legend {
+  color: rgb(var(--fg-muted));
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.policy-field select,
+.policy-field > input {
+  width: 100%;
+  min-height: 35px;
+  padding: 0 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 7px;
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+  font: inherit;
+  font-size: 12px;
+}
+
+.policy-field small,
+.pricing-note {
+  color: rgb(var(--fg-subtle));
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.policy-toggle,
+.trigger-field label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: fit-content;
+  gap: 7px;
+  color: rgb(var(--fg));
+  font-size: 11px;
+}
+
+.policy-toggle input,
+.trigger-field input {
+  flex: 0 0 14px;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  min-height: 0;
+  accent-color: rgb(var(--accent));
+}
+
+.trigger-field input:disabled {
+  opacity: 0.5;
+}
+
+.policy-toggle span {
+  font-weight: 650;
+}
+
+.trigger-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.trigger-field legend {
+  margin-bottom: 7px;
+}
+
+.trigger-field label + label {
+  margin-top: 7px;
 }
 
 .model-dialog-backdrop {
@@ -1105,6 +1427,15 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   gap: 9px;
 }
 
+.pricing-grid {
+  gap: 9px;
+}
+
+.pricing-toggle {
+  color: rgb(var(--fg-muted));
+  font-size: 11px;
+}
+
 .capability-grid label {
   display: grid;
   gap: 6px;
@@ -1197,6 +1528,16 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
   .capability-grid {
     grid-template-columns: 1fr;
+  }
+
+  .policy-grid,
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

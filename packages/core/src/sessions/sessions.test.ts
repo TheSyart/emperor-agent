@@ -88,6 +88,65 @@ describe('ConversationStore (test_conversation_store.py)', () => {
     expect(store.readCheckpoint()).toBeNull()
   })
 
+  it('writes new history through the V2 message graph sidecar without changing V1 replay', () => {
+    const store = new ConversationStore(
+      join(tmp('emperor-session-message-graph-'), 's1'),
+    )
+
+    store.appendHistory('user', 'hello graph', {
+      extra: { turn_id: 'turn_graph' },
+    })
+    store.appendHistory('assistant', 'hello branch', {
+      extra: { turn_id: 'turn_graph' },
+    })
+    store.appendCompactMarker()
+
+    const rawRows = readFileSync(store.historyFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(rawRows.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        role: 'user',
+        content: 'hello graph',
+        message_id: expect.any(String),
+      }),
+      expect.objectContaining({
+        seq: 2,
+        role: 'assistant',
+        content: 'hello branch',
+        message_id: expect.any(String),
+      }),
+    ])
+    expect(store.loadUnarchivedHistory()).toEqual([
+      { role: 'user', content: 'hello graph', seq: 1, turn_id: 'turn_graph' },
+      {
+        role: 'assistant',
+        content: 'hello branch',
+        seq: 2,
+        turn_id: 'turn_graph',
+      },
+    ])
+    expect(store.messageGraph.snapshot()).toMatchObject({
+      leafId: rawRows[1]!.message_id,
+      nodes: [
+        { id: rawRows[0]!.message_id, parentId: null, status: 'committed' },
+        {
+          id: rawRows[1]!.message_id,
+          parentId: rawRows[0]!.message_id,
+          status: 'committed',
+        },
+      ],
+      compactBoundaries: [
+        {
+          parentLeafId: rawRows[1]!.message_id,
+          compactedUntilHistorySeq: 3,
+        },
+      ],
+    })
+  })
+
   it('SessionMemoryStore delegates history to conversation and memory to shared store', () => {
     const root = tmp('emperor-session-memory-')
     const userFile = join(root, 'templates', 'USER.local.md')

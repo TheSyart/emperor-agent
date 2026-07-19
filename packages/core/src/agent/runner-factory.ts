@@ -11,10 +11,13 @@ import {
   type CompactorLike,
   type ControlManagerRunnerHost,
   type AgentRunnerHookHost,
+  type FileCheckpointCaptureHost,
   type MemoryStoreLike,
   type TodoStoreLike,
   type TokenTrackerLike,
 } from './runner'
+import type { ModelCallPolicy, ModelCallTarget } from './model-caller'
+import type { ProviderSnapshot } from '../model/router'
 import type { RunnerGoalRecordingHost } from './runner-goal-recording'
 import type { GoalContextProvider } from '../context/pipeline'
 import type { GoalToolHost } from '../goals/tools'
@@ -37,6 +40,9 @@ export function buildRoutedRunner(opts: {
   promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
   sessionId?: string | null
+  taskId?: string | null
+  subagentDepth?: number
+  tokenBudget?: number | null
   streamingToolExecution?: boolean
   hooks?: AgentRunnerHookHost | null
   goalObservationRecorder?: RunnerGoalRecordingHost | null
@@ -49,6 +55,7 @@ export function buildRoutedRunner(opts: {
       } | null>)
     | null
   onGoalCompacted?: (() => void) | null
+  fileCheckpoints?: FileCheckpointCaptureHost | null
 }): AgentRunner {
   const snapshot = opts.route.snapshot
   let maxTokens = snapshot.generation.maxTokens
@@ -63,12 +70,14 @@ export function buildRoutedRunner(opts: {
     maxTokens,
     temperature: snapshot.generation.temperature,
     reasoningEffort: snapshot.generation.reasoningEffort,
+    pricing: snapshot.pricing ?? null,
     providerName: snapshot.providerName,
     modelEntryId: snapshot.modelEntryId ?? snapshot.entryName,
     supportsToolCall: snapshot.profile?.toolCall ?? true,
     routeReason: opts.route.reason,
     routeEstimatedTokens: opts.route.estimatedTokens,
     usageType: opts.usageType,
+    modelPolicy: routeModelPolicy(opts.route, opts.maxTokensCap),
     memoryStore: opts.memoryStore ?? null,
     tokenTracker: opts.tokenTracker,
     compactor: opts.compactor ?? null,
@@ -84,6 +93,9 @@ export function buildRoutedRunner(opts: {
     promptContextPlan: opts.promptContextPlan ?? null,
     promptSnapshotDir: opts.promptSnapshotDir ?? null,
     sessionId: opts.sessionId ?? null,
+    taskId: opts.taskId ?? null,
+    subagentDepth: opts.subagentDepth ?? 0,
+    tokenBudget: opts.tokenBudget ?? null,
     streamingToolExecution: opts.streamingToolExecution ?? false,
     hooks: opts.hooks ?? null,
     goalObservationRecorder: opts.goalObservationRecorder ?? null,
@@ -91,5 +103,42 @@ export function buildRoutedRunner(opts: {
     goalContextProvider: opts.goalContextProvider ?? null,
     goalContextHint: opts.goalContextHint ?? null,
     onGoalCompacted: opts.onGoalCompacted ?? null,
+    fileCheckpoints: opts.fileCheckpoints ?? null,
   })
+}
+
+function routeModelPolicy(
+  route: ModelRoute,
+  maxTokensCap: number | null | undefined,
+): ModelCallPolicy | null {
+  const policy = route.executionPolicy
+  if (!policy) return null
+  return {
+    fallback: policy.fallback
+      ? snapshotTarget(policy.fallback, maxTokensCap)
+      : null,
+    triggerOn: [...policy.triggerOn],
+    maxUsdPerAgentTurn: policy.maxUsdPerAgentTurn,
+  }
+}
+
+function snapshotTarget(
+  snapshot: ProviderSnapshot,
+  maxTokensCap: number | null | undefined,
+): ModelCallTarget {
+  const maxTokens =
+    maxTokensCap === null || maxTokensCap === undefined
+      ? snapshot.generation.maxTokens
+      : Math.min(maxTokensCap, snapshot.generation.maxTokens)
+  return {
+    provider: snapshot.provider as unknown as LLMProvider,
+    model: snapshot.model,
+    providerName: snapshot.providerName,
+    modelEntryId: snapshot.modelEntryId ?? snapshot.entryName,
+    supportsToolCall: snapshot.profile?.toolCall ?? true,
+    maxTokens,
+    temperature: snapshot.generation.temperature,
+    reasoningEffort: snapshot.generation.reasoningEffort,
+    pricing: snapshot.pricing ?? null,
+  }
 }

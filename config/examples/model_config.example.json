@@ -1,5 +1,15 @@
 {
   "schemaVersion": 2,
   "activeModelId": null,
-  "models": []
+  "models": [],
+  "policy": {
+    "fallback": {
+      "enabled": false,
+      "entryId": null,
+      "triggerOn": ["rate_limit"]
+    },
+    "cost": {
+      "maxUsdPerAgentTurn": null
+    }
+  }
 }

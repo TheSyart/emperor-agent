@@ -173,7 +173,7 @@ async function loadBootstrap() {
     }
   } catch {
     setAnimation('disconnected')
-    showBubble('读取本地事件失败，等待重试。', 4000)
+    showBubble('连接 Agent 事件失败，等待重试。', 4000)
   }
 }
 
@@ -199,13 +199,13 @@ function startPolling() {
       const ipcEvents = await cfg.readIpcEvents?.()
       for (const event of ipcEvents || []) applyRuntimeEvent(event)
     } catch {
-      // IPC events are best-effort; filesystem is the fallback.
+      // IPC events are best-effort; the next bootstrap restores recent state.
     }
   }, 200)
 }
 
 setAnimation('disconnected')
-showBubble('正在读取本地事件。', 2500)
+showBubble('正在连接 Agent 事件。', 2500)
 loadBootstrap().finally(() => {
   if (currentAnimation === 'disconnected') setAnimation('idle')
   startPolling()

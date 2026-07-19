@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   readJson,
@@ -6,6 +7,12 @@ import {
   type ConfigRecoveryInfo,
 } from '../store/atomic-json'
 import { logger } from '../util/log'
+import {
+  ConfigResolver,
+  defineConfigKey,
+  type ConfigCandidate,
+  type Resolved,
+} from '../config/resolver'
 
 export interface ServerConfig {
   name: string
@@ -34,6 +41,21 @@ export const DEFAULT_MCP_CONFIG = {
 
 export const MCP_CONFIG_FILE = 'mcp_config.json'
 
+const MCP_CONFIG_KEY = defineConfigKey<Record<string, unknown>>({
+  id: 'mcp.config',
+  builtin: DEFAULT_MCP_CONFIG,
+  secretPaths: [
+    'servers.*.args',
+    'servers.*.env',
+    'servers.*.headers',
+    'servers.*.url',
+  ],
+  merge: (current, next) =>
+    deepMerge(structuredClone(current), structuredClone(next.value)),
+  restrictUntrustedProject: (current, next) =>
+    restrictUntrustedMcpConfig(current, next.value),
+})
+
 const ENV_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 export type EnvironmentValueSource =
   Record<string, string | undefined> | ((name: string) => string | undefined)
@@ -42,20 +64,66 @@ export async function loadMcpConfig(
   root: string,
   env: EnvironmentValueSource = process.env,
 ): Promise<MCPConfig> {
+  return (await resolveMcpConfig(root, env)).config
+}
+
+export interface ResolvedMcpConfig {
+  config: MCPConfig
+  resolution: Resolved<Record<string, unknown>>
+}
+
+/** Legacy `mcp_config.json` remains the writable fact source; this adapter adds
+ * deterministic layer provenance without changing the persisted schema. */
+export async function resolveMcpConfig(
+  root: string,
+  env: EnvironmentValueSource = process.env,
+  opts: { preserveCorrupt?: boolean } = {},
+): Promise<ResolvedMcpConfig> {
   const path = join(root, MCP_CONFIG_FILE)
-  const raw = structuredClone(DEFAULT_MCP_CONFIG) as Record<string, unknown>
+  const candidates: ConfigCandidate<Record<string, unknown>>[] = []
   if (existsSync(path)) {
-    const loaded = await readJson<Record<string, unknown>>(
-      path,
-      structuredClone(DEFAULT_MCP_CONFIG),
-      {
-        validate: validateRawConfig,
-        onCorrupt: reportMcpConfigRecovery,
-      },
-    )
-    deepMerge(raw, expandEnv(loaded, env) as Record<string, unknown>)
+    const loaded =
+      opts.preserveCorrupt === false
+        ? await readMcpConfigWithoutRecovery(path)
+        : await readJson<Record<string, unknown>>(
+            path,
+            structuredClone(DEFAULT_MCP_CONFIG),
+            {
+              validate: validateRawConfig,
+              onCorrupt: reportMcpConfigRecovery,
+            },
+          )
+    if (loaded && (opts.preserveCorrupt === false || existsSync(path)))
+      candidates.push({
+        source: {
+          kind: 'user',
+          id: MCP_CONFIG_FILE,
+          trust: 'trusted',
+        },
+        value: expandEnv(loaded, env) as Record<string, unknown>,
+      })
   }
-  return parseConfig(raw)
+  const resolution = new ConfigResolver().resolve(MCP_CONFIG_KEY, {
+    candidates,
+  })
+  return { config: parseConfig(resolution.value), resolution }
+}
+
+async function readMcpConfigWithoutRecovery(
+  path: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return validateRawConfig(JSON.parse(await readFile(path, 'utf8')))
+  } catch {
+    return null
+  }
+}
+
+/** Renderer/editor view: validates and normalizes config but never resolves env placeholders. */
+export async function loadMcpConfigUnresolved(
+  root: string,
+): Promise<MCPConfig> {
+  return await loadMcpConfig(root, {})
 }
 
 export async function saveMcpConfig(
@@ -128,6 +196,35 @@ export function deepMerge(
     }
   }
   return target
+}
+
+function restrictUntrustedMcpConfig(
+  current: Readonly<Record<string, unknown>>,
+  candidate: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const next = structuredClone(current) as Record<string, unknown>
+  const currentDefaults = objectValue(next.defaults)
+  const candidateDefaults = objectValue(candidate.defaults)
+  if (candidateDefaults.read_only === true) currentDefaults.read_only = true
+  if (candidateDefaults.exclusive === true) currentDefaults.exclusive = true
+  next.defaults = currentDefaults
+
+  const currentServers = objectValue(next.servers)
+  const candidateServers = objectValue(candidate.servers)
+  for (const [name, raw] of Object.entries(candidateServers)) {
+    const existing = objectValue(currentServers[name])
+    const requested = objectValue(raw)
+    if (!Object.keys(existing).length || requested.enabled !== false) continue
+    currentServers[name] = { ...existing, enabled: false }
+  }
+  next.servers = currentServers
+  return next
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 }
 
 function parseConfig(raw: Record<string, unknown>): MCPConfig {

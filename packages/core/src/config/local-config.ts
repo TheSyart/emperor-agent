@@ -14,6 +14,7 @@ import {
   type PermissionRuleDiagnostics,
   type PermissionRuleInput,
 } from '../permissions/rules'
+import type { SoftGitRewindMode } from '../checkpoints/soft-git-rewind'
 
 export const LOCAL_CONFIG_FILE = 'emperor.local.json'
 
@@ -38,11 +39,39 @@ export interface PermissionPreferences {
   rules: PermissionRuleInput[]
 }
 
+export interface WorkspacePreferences {
+  fileCheckpoints: { enabled: boolean }
+  gitRewind: { mode: SoftGitRewindMode }
+}
+
+export type HybridMemoryMode = 'off' | 'eval' | 'on'
+
+export interface MemoryPreferences {
+  hybridMemory: HybridMemoryMode
+}
+
+export type CodeIntelligenceMode = 'off' | 'eval' | 'on'
+
+export interface CodeIntelligencePreferences {
+  mode: CodeIntelligenceMode
+}
+
 export interface LocalConfig {
   webui: WebUIPreferences
   desktopPet: DesktopPetPreferences
   prompt: PromptPreferences
+  memory: MemoryPreferences
+  codeIntelligence: CodeIntelligencePreferences
+  workspace: WorkspacePreferences
   permissions: PermissionPreferences
+}
+
+export type LocalConfigInput = Omit<
+  LocalConfig,
+  'memory' | 'codeIntelligence'
+> & {
+  memory?: MemoryPreferences
+  codeIntelligence?: CodeIntelligencePreferences
 }
 
 export interface LocalConfigBackup {
@@ -65,6 +94,12 @@ function defaultLocalConfig(): LocalConfig {
     webui: { host: '127.0.0.1', port: 8765, openBrowser: false },
     desktopPet: { enabled: false, autoStartWithWebui: true },
     prompt: { profile: 'technical' },
+    memory: { hybridMemory: 'off' },
+    codeIntelligence: { mode: 'off' },
+    workspace: {
+      fileCheckpoints: { enabled: false },
+      gitRewind: { mode: 'off' },
+    },
     permissions: { rules: [] },
   }
 }
@@ -92,6 +127,15 @@ export function parseLocalConfig(
   if (Object.keys(desktopPet).length === 0)
     desktopPet = objectOrEmpty(data.desktop_pet)
   const prompt = objectOrEmpty(data.prompt)
+  const memory = objectOrEmpty(data.memory)
+  const codeIntelligence = objectOrEmpty(
+    data.codeIntelligence ?? data.code_intelligence,
+  )
+  const workspace = objectOrEmpty(data.workspace)
+  const fileCheckpoints = objectOrEmpty(
+    workspace.fileCheckpoints ?? workspace.file_checkpoints,
+  )
+  const gitRewind = objectOrEmpty(workspace.gitRewind ?? workspace.git_rewind)
   const permissions = objectOrEmpty(data.permissions)
   return {
     webui: {
@@ -109,6 +153,20 @@ export function parseLocalConfig(
     },
     prompt: {
       profile: normalizePromptProfile(prompt.profile),
+    },
+    memory: {
+      hybridMemory: normalizeHybridMemoryMode(
+        memory.hybridMemory ?? memory.hybrid_memory,
+      ),
+    },
+    codeIntelligence: {
+      mode: normalizeCodeIntelligenceMode(codeIntelligence.mode),
+    },
+    workspace: {
+      fileCheckpoints: {
+        enabled: Boolean(fileCheckpoints.enabled ?? false),
+      },
+      gitRewind: { mode: normalizeSoftGitRewindMode(gitRewind.mode) },
     },
     permissions: {
       rules: Array.isArray(permissions.rules)
@@ -140,7 +198,7 @@ export async function loadLocalConfig(
 
 export async function saveLocalConfig(
   root: string,
-  config: LocalConfig,
+  config: LocalConfigInput,
 ): Promise<string> {
   const path = localConfigPath(root)
   const payload = {
@@ -155,6 +213,20 @@ export async function saveLocalConfig(
     },
     prompt: {
       profile: normalizePromptProfile(config.prompt?.profile),
+    },
+    memory: {
+      hybridMemory: normalizeHybridMemoryMode(config.memory?.hybridMemory),
+    },
+    codeIntelligence: {
+      mode: normalizeCodeIntelligenceMode(config.codeIntelligence?.mode),
+    },
+    workspace: {
+      fileCheckpoints: {
+        enabled: Boolean(config.workspace?.fileCheckpoints?.enabled ?? false),
+      },
+      gitRewind: {
+        mode: normalizeSoftGitRewindMode(config.workspace?.gitRewind?.mode),
+      },
     },
     permissions: {
       rules: Array.isArray(config.permissions?.rules)
@@ -176,6 +248,20 @@ export function normalizePromptProfile(value: unknown): PromptProfile {
   return value === 'classic' || value === 'neutral' || value === 'technical'
     ? value
     : 'technical'
+}
+
+export function normalizeSoftGitRewindMode(value: unknown): SoftGitRewindMode {
+  return value === 'eval' || value === 'on' ? value : 'off'
+}
+
+export function normalizeHybridMemoryMode(value: unknown): HybridMemoryMode {
+  return value === 'eval' || value === 'on' ? value : 'off'
+}
+
+export function normalizeCodeIntelligenceMode(
+  value: unknown,
+): CodeIntelligenceMode {
+  return value === 'eval' || value === 'on' ? value : 'off'
 }
 
 export function mergeWebuiOverrides(

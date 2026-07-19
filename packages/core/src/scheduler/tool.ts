@@ -9,6 +9,9 @@ const schedulerRun = new AsyncLocalStorage<boolean>()
 export function inSchedulerRun(): boolean {
   return schedulerRun.getStore() === true
 }
+export function runInSchedulerRun<T>(execute: () => T): T {
+  return schedulerRun.run(true, execute)
+}
 export function setSchedulerRun(value: boolean): boolean {
   schedulerRun.enterWith(Boolean(value))
   return Boolean(value)
@@ -145,6 +148,8 @@ export class SchedulerTool extends Tool {
       return `Error: scheduler job not found: ${jobId}`
     if (result === 'protected')
       return `Error: scheduler job is protected and cannot be removed: ${jobId}`
+    if (result === 'active')
+      return `Error: scheduler job is active and cannot be removed: ${jobId}`
     return `Scheduler job removed: ${result.name} (${result.id}).`
   }
 

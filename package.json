@@ -6,6 +6,7 @@
     "check": "scripts/check.sh",
     "format": "node scripts/run-prettier.mjs --write",
     "format:check": "node scripts/run-prettier.mjs --check",
+    "headless:acp": "npm run headless:acp --workspace @emperor/core --",
     "test": "npm test --workspace @emperor/core && npm --prefix desktop run test",
     "typecheck:test": "npm --prefix desktop run typecheck:test",
     "typecheck": "npm run typecheck --workspace @emperor/core && npm --prefix desktop run typecheck",

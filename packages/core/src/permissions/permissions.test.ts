@@ -7,7 +7,13 @@ import { describe, expect, it } from 'vitest'
 import { PermissionMode } from './models'
 import { PermissionPipeline } from './pipeline'
 import { PermissionPolicy } from './policy'
-import { ReadFileTool, WriteFileTool } from '../tools/filesystem'
+import {
+  ApplyPatchTool,
+  DeleteFileTool,
+  ReadFileTool,
+  RenameFileTool,
+  WriteFileTool,
+} from '../tools/filesystem'
 import { Tool } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
@@ -40,6 +46,9 @@ function makeRegistry(root: string): ToolRegistry {
   const registry = new ToolRegistry()
   registry.register(new ReadFileTool(root))
   registry.register(new WriteFileTool(root))
+  registry.register(new ApplyPatchTool(root))
+  registry.register(new DeleteFileTool(root))
+  registry.register(new RenameFileTool(root))
   registry.register(new SchedulerStub())
   return registry
 }
@@ -120,6 +129,59 @@ describe('PermissionPolicy (test_permissions.py)', () => {
         PermissionMode.ASK_BEFORE_EDIT,
       ).allowed,
     ).toBe(true)
+  })
+
+  it('allows exact patches but requires approval for delete and rename mutations', () => {
+    const registry = makeRegistry(root)
+    const policy = new PermissionPolicy()
+    expect(
+      policy.assess(
+        'apply_patch',
+        { path: 'src/a.ts', old_text: 'a', new_text: 'b' },
+        PermissionMode.ACCEPT_EDITS,
+        { registry },
+      ),
+    ).toMatchObject({ allowed: true, requiresApproval: false })
+    expect(
+      policy.assess(
+        'delete_file',
+        { path: 'src/a.ts' },
+        PermissionMode.ASK_BEFORE_EDIT,
+        { registry },
+      ),
+    ).toMatchObject({ allowed: false, requiresApproval: true })
+    expect(
+      policy.assess(
+        'rename_file',
+        { source: 'src/a.ts', destination: 'src/b.ts' },
+        PermissionMode.ACCEPT_EDITS,
+        { registry },
+      ),
+    ).toMatchObject({ allowed: false, requiresApproval: true })
+  })
+
+  it('matches rename permission rules against both source and destination', () => {
+    const registry = makeRegistry(root)
+    const decision = new PermissionPipeline({
+      rules: [
+        {
+          id: 'deny-dotenv-rename',
+          action: 'deny',
+          tool: 'rename_file',
+          pathGlob: '.env',
+        },
+      ],
+    }).assess(
+      'rename_file',
+      { source: 'safe.txt', destination: '.env' },
+      PermissionMode.AUTO,
+      { registry },
+    )
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      rule: 'user_rule.deny-dotenv-rename',
+    })
   })
 
   it('ask_before_edit requires approval for scheduler changes', () => {
@@ -414,6 +476,331 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     expect(pipeline.diagnostics()).toMatchObject({
       loaded: 1,
       invalid: 1,
+    })
+  })
+
+  it('resolves every matching rule with deny > ask > allow independent of input order', () => {
+    const pipeline = new PermissionPipeline({
+      rules: [
+        {
+          id: 'allow-git',
+          action: 'allow',
+          tool: 'run_command',
+          commandPrefix: 'git',
+        },
+        {
+          id: 'deny-push',
+          action: 'deny',
+          tool: 'run_command',
+          commandPrefix: 'git push',
+          reason: 'push is managed manually',
+        },
+        {
+          id: 'ask-push',
+          action: 'ask',
+          tool: 'run_command',
+          commandPrefix: 'git push',
+        },
+      ],
+    })
+
+    const decision = pipeline.assess(
+      'run_command',
+      { command: 'git push origin main' },
+      PermissionMode.ASK_BEFORE_EDIT,
+    )
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'user_rule.deny-push',
+      explanation: {
+        version: 1,
+        selected: {
+          id: 'deny-push',
+          action: 'deny',
+          source: { kind: 'local_config', trust: 'user' },
+        },
+        candidates: [
+          expect.objectContaining({ id: 'deny-push', matched: true }),
+          expect.objectContaining({ id: 'ask-push', matched: true }),
+          expect.objectContaining({ id: 'allow-git', matched: true }),
+        ],
+      },
+    })
+  })
+
+  it('does not let a lower-trust allow relax a higher-trust ask candidate', () => {
+    const pipeline = new PermissionPipeline({
+      layers: [
+        {
+          source: {
+            kind: 'managed_policy',
+            id: 'enterprise',
+            trust: 'managed',
+          },
+          rules: [
+            {
+              id: 'managed-ask-publish',
+              action: 'ask',
+              tool: 'run_command',
+              commandPrefix: 'npm publish',
+            },
+          ],
+        },
+        {
+          source: {
+            kind: 'project',
+            id: 'repo',
+            trust: 'project',
+          },
+          rules: [
+            {
+              id: 'project-allow-publish',
+              action: 'allow',
+              tool: 'run_command',
+              commandPrefix: 'npm publish',
+            },
+          ],
+        },
+      ],
+    })
+
+    const decision = pipeline.assess(
+      'run_command',
+      { command: 'npm publish' },
+      PermissionMode.ASK_BEFORE_EDIT,
+    )
+
+    expect(decision.requiresApproval).toBe(true)
+    expect(decision.rule).toBe('user_rule.managed-ask-publish')
+    expect(decision.explanation?.candidates).toEqual([
+      expect.objectContaining({
+        id: 'managed-ask-publish',
+        precedence: 'ask:managed:2:0',
+      }),
+      expect.objectContaining({
+        id: 'project-allow-publish',
+        precedence: 'allow:project:2:1',
+      }),
+    ])
+  })
+
+  it('accepts only tightening rules from an untrusted project layer', () => {
+    const pipeline = new PermissionPipeline({
+      layers: [
+        {
+          source: {
+            kind: 'project',
+            id: 'untrusted-repo',
+            trust: 'untrusted',
+          },
+          rules: [
+            {
+              id: 'project-allow-write',
+              action: 'allow',
+              tool: 'write_file',
+              pathGlob: 'src/**',
+            },
+            {
+              id: 'project-deny-secrets',
+              action: 'deny',
+              tool: 'write_file',
+              pathGlob: 'src/secrets/**',
+            },
+          ],
+        },
+      ],
+    })
+
+    const ordinary = pipeline.assess(
+      'write_file',
+      { path: 'src/index.ts', content: 'ok' },
+      PermissionMode.ASK_BEFORE_EDIT,
+    )
+    const secret = pipeline.assess(
+      'write_file',
+      { path: 'src/secrets/key.ts', content: 'no' },
+      PermissionMode.ACCEPT_EDITS,
+    )
+
+    expect(ordinary.rule).not.toBe('user_rule.project-allow-write')
+    expect(secret).toMatchObject({
+      allowed: false,
+      rule: 'user_rule.project-deny-secrets',
+      explanation: {
+        selected: {
+          source: { kind: 'project', trust: 'untrusted' },
+        },
+      },
+    })
+  })
+
+  it('keeps Plan denial and automatic shell approval as system constraints', () => {
+    const pipeline = new PermissionPipeline({
+      rules: [
+        {
+          id: 'allow-every-command',
+          action: 'allow',
+          tool: 'run_command',
+          commandPrefix: '',
+          access: 'execute',
+        },
+        {
+          id: 'allow-write',
+          action: 'allow',
+          tool: 'write_file',
+          pathGlob: '**',
+        },
+      ],
+    })
+
+    const auto = pipeline.assess(
+      'run_command',
+      { command: 'node script.js' },
+      PermissionMode.AUTO,
+    )
+    const plan = pipeline.assess(
+      'write_file',
+      { path: 'src/x.ts', content: 'x' },
+      PermissionMode.PLAN,
+    )
+
+    expect(auto).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'mode.auto.command_approval',
+      explanation: {
+        selected: {
+          source: { kind: 'core_policy', trust: 'system' },
+        },
+      },
+    })
+    expect(plan).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'plan.write_block',
+      explanation: {
+        selected: {
+          source: { kind: 'core_policy', trust: 'system' },
+        },
+      },
+    })
+  })
+
+  it('attaches a stable redacted shell AST explanation to run_command decisions', () => {
+    const first = run('git status | tee private-status.txt')
+    const second = run('git status | tee private-status.txt')
+
+    expect(second.explanation).toEqual(first.explanation)
+    expect(second.explanation?.shell).toMatchObject({
+      parser: 'emperor-shell-ast-v1',
+      status: 'parsed',
+      features: ['pipeline'],
+      commandCount: 2,
+      readonly: false,
+    })
+    expect(JSON.stringify(second.explanation)).not.toContain(
+      'private-status.txt',
+    )
+  })
+
+  it('fails closed when the shell classifier capability crashes', () => {
+    const pipeline = new PermissionPipeline({
+      shellAnalyzer: () => {
+        throw new Error('parser service unavailable')
+      },
+    })
+
+    const decision = pipeline.assess(
+      'run_command',
+      { command: 'git status' },
+      PermissionMode.AUTO,
+    )
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'mode.auto.command_approval',
+      explanation: {
+        shell: {
+          status: 'invalid',
+          reasonCodes: ['parser_failure'],
+          readonly: false,
+        },
+      },
+    })
+    expect(JSON.stringify(decision.explanation)).not.toContain(
+      'parser service unavailable',
+    )
+  })
+
+  it('keeps permission rule source trust out of rule-controlled config data', () => {
+    const spoofedRule = {
+      id: 'spoof-system',
+      action: 'deny' as const,
+      tool: 'write_file',
+      access: 'write',
+      source: { kind: 'managed_policy', id: 'spoof', trust: 'system' },
+      trust: 'system',
+    }
+    const pipeline = new PermissionPipeline({ rules: [spoofedRule] })
+
+    const decision = pipeline.assess(
+      'write_file',
+      { path: 'README.md', content: 'x' },
+      PermissionMode.ACCEPT_EDITS,
+    )
+
+    expect(decision.explanation?.selected).toMatchObject({
+      id: 'spoof-system',
+      source: {
+        kind: 'local_config',
+        id: 'emperor.local.json',
+        trust: 'user',
+      },
+    })
+  })
+
+  it('matches command rules on AST word boundaries and normalized quoted argv', () => {
+    const allowPipeline = new PermissionPipeline({
+      rules: [
+        {
+          id: 'allow-status',
+          action: 'allow',
+          tool: 'run_command',
+          commandPrefix: 'git status',
+        },
+      ],
+    })
+    const denyPipeline = new PermissionPipeline({
+      rules: [
+        {
+          id: 'deny-push',
+          action: 'deny',
+          tool: 'run_command',
+          commandPrefix: 'git push',
+        },
+      ],
+    })
+
+    const falsePrefix = allowPipeline.assess(
+      'run_command',
+      { command: 'git status-evil' },
+      PermissionMode.ASK_BEFORE_EDIT,
+    )
+    const quotedDeny = denyPipeline.assess(
+      'run_command',
+      { command: `g'i't pu'sh' origin main` },
+      PermissionMode.ASK_BEFORE_EDIT,
+    )
+
+    expect(falsePrefix.allowed).toBe(false)
+    expect(falsePrefix.rule).not.toBe('user_rule.allow-status')
+    expect(quotedDeny).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'user_rule.deny-push',
     })
   })
 

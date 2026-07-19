@@ -2,13 +2,13 @@
  * 命令安全判定纯函数 (MIG-TOOL-005)。
  * 对齐 Python `agent/permissions/resolvers.py`。Shell/权限管线共用。
  */
+import {
+  analyzeShellCommand,
+  isShellAstReadonly,
+} from '../permissions/shell-ast'
 
 const HIGH_RISK_FALLBACK =
   /(\bgit\s+push\b|\bgh\s+(pr\s+merge|release|workflow|run)\b|\brm\s+(-[^\s]*r|-[^\s]*f|--recursive|--force)\b|\bsudo\b|\bchmod\b|\bchown\b|\bdeploy\b|\bpublish\b|\brelease\b|\bnpm\s+(install|publish)\b|\bpip\s+install\b|\bbrew\s+install\b|\bdocker\s+(push|compose\s+up|run)\b|\bkubectl\b|\bterraform\s+(apply|destroy)\b)/i
-
-// Strictly inspection-only, no code execution. Used by plan guard to pass probes.
-const READONLY_SINGLE = new Set(['ls', 'pwd'])
-const READONLY_GIT_SUB = new Set(['status', 'diff', 'log', 'show', 'branch'])
 
 const SENSITIVE_PATH_PARTS = new Set([
   '.emperor',
@@ -28,18 +28,31 @@ interface ParsedCommand {
 }
 
 function safeCommandParts(command: string): string[] | null {
-  const parsed = parseShellCommand(command)
-  if (parsed.unsupported || parsed.hasControlOperator || parsed.hasRedirection)
+  const analysis = analyzeShellCommand(command)
+  if (
+    analysis.status !== 'parsed' ||
+    analysis.features.length ||
+    analysis.reasonCodes.length ||
+    analysis.commands.length !== 1 ||
+    analysis.commands[0]!.env.length ||
+    analysis.commands[0]!.redirects.length
+  )
     return null
-  if (parsed.segments.length !== 1) return null
-  const parts = parsed.segments[0] ?? []
-  return parts.length ? parts : null
+  const parts = analysis.commands[0]!.argv
+  return parts.length ? [...parts] : null
 }
 
 export function isHighRiskCommand(command: string): boolean {
-  const parsed = parseShellCommand(command)
-  if (parsed.unsupported) return HIGH_RISK_FALLBACK.test(command || '')
-  return parsed.segments.some((segment) => isHighRiskSegment(segment))
+  const analysis = analyzeShellCommand(command)
+  if (analysis.commands.some((segment) => isHighRiskSegment(segment.argv)))
+    return true
+  // The old conservative recognizer remains the fallback for syntax that the
+  // bounded AST cannot finish. It may tighten a decision; it never grants one.
+  const fallback = parseShellCommand(command)
+  return (
+    fallback.segments.some((segment) => isHighRiskSegment(segment)) ||
+    (analysis.status !== 'parsed' && HIGH_RISK_FALLBACK.test(command || ''))
+  )
 }
 
 export function isLowRiskCommand(command: string): boolean {
@@ -64,11 +77,7 @@ export function executesProjectCodeCommand(command: string): boolean {
 }
 
 export function isReadonlyCommand(command: string): boolean {
-  const parts = safeCommandParts(command)
-  if (!parts) return false
-  const head = (parts[0] ?? '').split('/').pop()!
-  if (READONLY_SINGLE.has(head)) return true
-  return head === 'git' && parts.length >= 2 && READONLY_GIT_SUB.has(parts[1]!)
+  return isShellAstReadonly(analyzeShellCommand(command))
 }
 
 export function isSensitivePath(path: string | null | undefined): boolean {

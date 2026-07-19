@@ -101,7 +101,12 @@ export function useSlashCommands(deps: SlashCommandDeps) {
             attachments: payload.attachments || [],
             requestedSkills: payload.requestedSkills || [],
             displayContent: payload.displayContent,
+            delivery: payload.delivery,
           }
+    if (obj.delivery) {
+      deps.sendMessage(obj)
+      return
+    }
     const parsed = parseSlashCommand(obj.content)
     if (!obj.attachments.length && parsed?.command) {
       void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
@@ -124,6 +129,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         attachments: obj.attachments,
         requestedSkills: [skillRequest.requestedSkill],
         displayContent: skillRequest.raw,
+        delivery: obj.delivery,
       }
       deps.sendMessage(outgoing)
       return

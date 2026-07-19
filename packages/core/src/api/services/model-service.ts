@@ -8,11 +8,13 @@ import {
   maskSecret,
   parseModelConfig,
   saveModelEntry,
+  saveModelPolicy,
   upsertModelEntryConfig,
   type ModelConfig,
   type ModelEntry,
   type ModelEntryUpdate,
   type ModelEntryV2,
+  type ModelExecutionPolicy,
   type ModelProtocol,
 } from '../../config/model-config'
 import {
@@ -100,6 +102,7 @@ export interface ModelConfigPayload {
   schemaVersion: 2
   activeModelId: string | null
   models: ModelEntryPayload[]
+  policy: ModelExecutionPolicy
   current: CurrentModelPayload | null
   availability: ModelAvailability
   providerOptions: ProviderOption[]
@@ -144,6 +147,7 @@ export class CoreModelService {
       schemaVersion: 2,
       activeModelId: config.activeModelId,
       models,
+      policy: structuredClone(config.policy),
       current: entry ? currentModelPayload(entry) : null,
       availability: modelAvailability(config),
       providerOptions: providerOptions(),
@@ -222,6 +226,12 @@ export class CoreModelService {
       entryId: entry.entryId,
       reasoningEffort,
     })
+    await this.deps.refreshModelConfig?.()
+    return this.getConfig()
+  }
+
+  async savePolicy(policy: ModelExecutionPolicy): Promise<ModelConfigPayload> {
+    await saveModelPolicy(this.root, policy)
     await this.deps.refreshModelConfig?.()
     return this.getConfig()
   }

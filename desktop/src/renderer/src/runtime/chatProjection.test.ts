@@ -10,6 +10,211 @@ import { projectAssistantFlow } from '../components/chat/assistantFlowProjection
 import type { AssistantMessage, WsEvent } from '../types'
 
 describe('chatProjection', () => {
+  it('projects queued, interjected, and cancelled prompt states idempotently', () => {
+    const state = projectChatEvents([
+      {
+        event: 'prompt_queued',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'prompt_1',
+        prompt_id: 'client_1',
+        client_message_id: 'client_1',
+        delivery: 'interject',
+        content: 'interrupt now',
+      },
+      {
+        event: 'prompt_interjected',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'prompt_1',
+        prompt_id: 'client_1',
+        client_message_id: 'client_1',
+        target_turn_id: 'owner_1',
+      },
+      {
+        event: 'user_message',
+        seq: 3,
+        session_id: 's1',
+        turn_id: 'prompt_1',
+        client_message_id: 'client_1',
+        content: 'interrupt now',
+        source: 'interjection',
+      },
+      {
+        event: 'prompt_queued',
+        seq: 4,
+        session_id: 's1',
+        turn_id: 'prompt_2',
+        prompt_id: 'client_2',
+        client_message_id: 'client_2',
+        delivery: 'queue',
+        content: 'queued then cancelled',
+      },
+      {
+        event: 'prompt_cancelled',
+        seq: 5,
+        session_id: 's1',
+        turn_id: 'prompt_2',
+        prompt_id: 'client_2',
+        client_message_id: 'client_2',
+        reason: 'owner cancelled',
+      },
+    ])
+
+    expect(state.messages).toEqual([
+      expect.objectContaining({
+        id: 'client_1',
+        role: 'user',
+        content: 'interrupt now',
+        deliveryState: 'interjected',
+      }),
+      expect.objectContaining({
+        id: 'client_2',
+        role: 'user',
+        content: 'queued then cancelled',
+        deliveryState: 'cancelled',
+        deliveryReason: 'owner cancelled',
+      }),
+    ])
+  })
+
+  it('clears a queued prompt processing badge when its assistant turn completes', () => {
+    const state = projectChatEvents([
+      {
+        event: 'prompt_queued',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'queued_turn',
+        prompt_id: 'queued_client',
+        client_message_id: 'queued_client',
+        delivery: 'queue',
+        content: 'next request',
+      },
+      {
+        event: 'prompt_dequeued',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'queued_turn',
+        prompt_id: 'queued_client',
+        client_message_id: 'queued_client',
+      },
+      {
+        event: 'assistant_done',
+        seq: 3,
+        session_id: 's1',
+        turn_id: 'queued_turn',
+        content: 'done',
+      },
+    ])
+
+    expect(state.messages[0]).toMatchObject({
+      id: 'queued_client',
+      role: 'user',
+    })
+    expect(state.messages[0]).not.toHaveProperty('deliveryState')
+  })
+
+  it('separates a tombstoned assistant partial from the replacement response in the same turn', () => {
+    const state = projectChatEvents([
+      {
+        event: 'user_message',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'owner',
+        content: 'original',
+      },
+      {
+        event: 'message_delta',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'owner',
+        delta: 'obsolete partial',
+      },
+      {
+        event: 'message_tombstoned',
+        seq: 3,
+        session_id: 's1',
+        turn_id: 'owner',
+        reason: 'interjected',
+      },
+      {
+        event: 'message_delta',
+        seq: 4,
+        session_id: 's1',
+        turn_id: 'owner',
+        delta: 'replacement',
+      },
+      {
+        event: 'assistant_done',
+        seq: 5,
+        session_id: 's1',
+        turn_id: 'owner',
+        content: 'replacement final',
+      },
+    ])
+    const assistants = state.messages.filter(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )
+
+    expect(assistants).toHaveLength(2)
+    expect(assistants[0]).toMatchObject({
+      content: 'obsolete partial',
+      streaming: false,
+      tombstoned: true,
+      terminalReason: 'interjected',
+    })
+    expect(assistants[1]).toMatchObject({
+      content: 'replacement final',
+      streaming: false,
+    })
+  })
+
+  it('advances replay cursors for sampling diagnostics without creating model-visible messages', () => {
+    const state = projectChatEvents(
+      [
+        {
+          event: 'model_attempt_started',
+          seq: 1,
+          session_id: 's1',
+          turn_id: 'turn_sampling',
+          request_id: 'req_1',
+          attempt_id: 'req_1:attempt:1',
+          attempt: 1,
+          max_attempts: 3,
+        },
+        {
+          event: 'model_attempt_failed',
+          seq: 2,
+          session_id: 's1',
+          turn_id: 'turn_sampling',
+          request_id: 'req_1',
+          attempt_id: 'req_1:attempt:1',
+          attempt: 1,
+          max_attempts: 3,
+          duration_ms: 12,
+          error_kind: 'server',
+          will_retry: true,
+          retry_delay_ms: 250,
+        },
+        {
+          event: 'mcp_connection_state',
+          seq: 3,
+          session_id: 's1',
+          server_name: 'docs',
+          generation: 2,
+          client_id: 'mcp_client_2',
+          state: 'ready',
+          health: 'healthy',
+          tool_count: 3,
+        },
+      ],
+      { sessionId: 's1' },
+    )
+
+    expect(state.lastSeq).toBe(3)
+    expect(state.messages).toEqual([])
+  })
+
   it('rebuilds text, thought, tool, and control segments from runtime replay', () => {
     const state = projectChatEvents(
       [
@@ -180,6 +385,54 @@ describe('chatProjection', () => {
         }),
       ]),
     )
+  })
+
+  it('keeps renderer state identical when the same replay batch is consumed twice', () => {
+    const events: WsEvent[] = [
+      {
+        event: 'user_message',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'turn_1',
+        content: 'run',
+      },
+      {
+        event: 'tool_call',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'turn_1',
+        id: 'call_1',
+        name: 'read_file',
+        arguments: { path: 'README.md' },
+      },
+      {
+        event: 'tool_result',
+        seq: 3,
+        session_id: 's1',
+        turn_id: 'turn_1',
+        id: 'call_1',
+        name: 'read_file',
+        summary: 'ok',
+      },
+      {
+        event: 'assistant_done',
+        seq: 4,
+        session_id: 's1',
+        turn_id: 'turn_1',
+        content: 'done',
+      },
+    ]
+    const state = emptyChatProjection()
+    const runtime = createProjectionRuntime()
+    for (const event of events)
+      applyChatProjectionEvent(state, event, runtime, { sessionId: 's1' })
+    const once = JSON.parse(JSON.stringify(state))
+
+    for (const event of events)
+      applyChatProjectionEvent(state, event, runtime, { sessionId: 's1' })
+
+    expect(state).toEqual(once)
+    expect(state.lastSeq).toBe(4)
   })
 
   it('replays new tool output and safely degrades legacy summary-only tool events', () => {

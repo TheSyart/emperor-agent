@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ModelConfigPayload } from '../../types'
 import {
   buildModelSetupDialogContent,
   shouldShowModelSetupPrompt,
@@ -55,12 +56,20 @@ function pendingProfileOnboarding() {
   }
 }
 
-function modelConfig(usable: boolean, message: string) {
+function modelConfig(usable: boolean, message: string): ModelConfigPayload {
   return {
     schemaVersion: 2 as const,
     activeModelId: null,
     models: [],
     current: null,
+    policy: {
+      fallback: {
+        enabled: false,
+        entryId: null,
+        triggerOn: ['rate_limit'],
+      },
+      cost: { maxUsdPerAgentTurn: null },
+    },
     availability: { usable, message },
     providerOptions: [],
   }

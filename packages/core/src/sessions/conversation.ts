@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { HistoryLog, type HistoryArchiveGate } from '../memory/history'
 import type { MemoryStore } from '../memory/store'
 import { nowIsoUtc8 } from '../memory/time-utc8'
+import { MessageGraphStore } from './message-graph'
 import {
   clearTurnCheckpoint,
   readRecoverableCheckpointHistory,
@@ -17,6 +18,7 @@ export class ConversationStore {
   readonly historyFile: string
   readonly checkpointFile: string
   readonly historyLog: HistoryLog
+  readonly messageGraph: MessageGraphStore
 
   constructor(sessionDir: string) {
     this.sessionDir = sessionDir
@@ -24,6 +26,9 @@ export class ConversationStore {
     this.historyFile = join(this.sessionDir, 'history.jsonl')
     this.checkpointFile = join(this.sessionDir, '_checkpoint.json')
     this.historyLog = new HistoryLog(this.sessionDir, this.historyFile)
+    this.messageGraph = new MessageGraphStore(this.sessionDir, {
+      legacyRows: this.historyLog.loadActiveRows(),
+    })
   }
 
   appendHistory(
@@ -31,20 +36,40 @@ export class ConversationStore {
     content: unknown,
     opts?: { extra?: Row | null },
   ): void {
+    const normalizedContent =
+      typeof content === 'string' ? content : JSON.stringify(jsonSafe(content))
     const row: Row = {
       ts: nowIsoUtc8(),
       role,
-      content:
-        typeof content === 'string'
-          ? content
-          : JSON.stringify(jsonSafe(content)),
+      content: normalizedContent,
     }
     if (opts?.extra) {
       for (const [key, value] of Object.entries(jsonSafe(opts.extra) as Row)) {
         if (!(key in row)) row[key] = value
       }
     }
-    this.historyLog.append(row)
+    const tracksMessage = role !== 'model_call' && row.type !== 'model_call'
+    const partial = tracksMessage
+      ? this.messageGraph.beginMessage({
+          role,
+          content: normalizedContent,
+          turnId: typeof row.turn_id === 'string' ? row.turn_id : null,
+          legacy: row,
+        })
+      : null
+    if (partial) row.message_id = partial.id
+    try {
+      const written = this.historyLog.append(row)
+      if (partial)
+        this.messageGraph.commitMessage(partial.id, {
+          historySeq: Number(written.seq),
+          legacy: written,
+        })
+    } catch (error) {
+      if (partial)
+        this.messageGraph.tombstoneMessage(partial.id, 'history_append_failed')
+      throw error
+    }
   }
 
   loadUnarchivedHistory(): Row[] {
@@ -95,9 +120,17 @@ export class ConversationStore {
   ): void {
     if (activeHistory === undefined || activeHistory === null) {
       this.historyLog.append({ ts: '', type: 'compact_event' })
+      this.messageGraph.recordCompactBoundary({
+        compactedUntilHistorySeq: Number(
+          this.historyLog.stats().latest_seq ?? 0,
+        ),
+      })
       return
     }
     this.historyLog.compact(activeHistory, archiveGate)
+    this.messageGraph.recordCompactBoundary({
+      compactedUntilHistorySeq: Number(this.historyLog.stats().latest_seq ?? 0),
+    })
   }
 
   stats(): Row {

@@ -11,7 +11,13 @@ import {
   type TeamMemberPayload,
   type TeamMessagePayload,
 } from './models'
-import { TeamStore } from './store'
+import {
+  TEAM_CHECKPOINT_VERSION,
+  TeamStore,
+  teamThreadRevision,
+  type TeamCheckpointPayload,
+  type TeamEffectReceipt,
+} from './store'
 import type { TeamConfigPayload } from './store'
 import { TeamReadInboxTool, TeamSendMessageTool } from './tools'
 import type { HookAggregateDecision } from '../hooks/models'
@@ -60,6 +66,7 @@ export type TeamRunnerFactory = (opts: {
 export type TeamEventSink = (
   event: Record<string, unknown>,
 ) => Promise<void> | void
+export type TeamCheckpointRecovery = 'auto' | 'retry'
 export interface TeamHookHost {
   begin(opts: {
     agentId: string
@@ -81,6 +88,17 @@ export interface TeamManagerPayload {
   members: TeamMemberSummaryPayload[]
   leadUnread: number
   leadInbox: TeamMessagePayload[]
+}
+
+interface ValidatedTeamCheckpoint {
+  payload: TeamCheckpointPayload
+  history: Array<Record<string, unknown>>
+  turnId: string
+  cursorStart: number
+  cursorEnd: number
+  pendingIds: string[]
+  baseThreadRevision: string
+  leadBefore: Set<string>
 }
 
 export class TeamManager {
@@ -290,6 +308,7 @@ export class TeamManager {
       parent_call_id?: string | null
       purpose?: string
       eventSink?: TeamEventSink | null
+      recovery?: TeamCheckpointRecovery
     } = {},
   ): Promise<string> {
     const member = this.requireMember(name)
@@ -311,6 +330,7 @@ export class TeamManager {
       parent_call_id?: string | null
       purpose?: string
       eventSink?: TeamEventSink | null
+      recovery?: TeamCheckpointRecovery
     },
   ): Promise<string> {
     const working = this.store.updateMember(member.name, {
@@ -328,50 +348,120 @@ export class TeamManager {
     )
 
     const inbox = this.bus.allMessages(working.name)
-    const cursorStart = Math.min(
-      this.store.readCursor(working.name),
-      inbox.length,
-    )
-    const unread = inbox.slice(cursorStart, cursorStart + 50)
-    const cursorEnd = cursorStart + unread.length
-    const pendingIds = unread.map((msg) => msg.id)
-    const history = this.store.readThread(working.name)
-    if (!unread.length) {
-      const idle = this.store.updateMember(working.name, {
-        status: TeamStatus.IDLE,
-        last_error: null,
-      })
-      await this.emit(events.memberUpdate(idle), opts.eventSink)
-      await this.emit(
-        events.runDone({
-          parent_id: opts.parent_call_id ?? null,
-          member: idle,
-          summary: '没有未读消息。',
-        }),
-        opts.eventSink,
+    const storedCheckpoint = this.store.readCheckpointPayload(working.name)
+    if (!storedCheckpoint && this.store.hasCheckpoint(working.name))
+      return this.failCheckpointRecovery(
+        working,
+        'checkpoint is corrupt or cannot be decoded; refusing an unsafe automatic replay',
+        opts,
       )
-      return '没有未读消息。'
+    let run: ValidatedTeamCheckpoint
+    if (storedCheckpoint) {
+      const recovered = this.validateCheckpoint(
+        working,
+        storedCheckpoint,
+        inbox,
+      )
+      if (typeof recovered === 'string')
+        return this.failCheckpointRecovery(working, recovered, opts)
+      run = recovered
+      if (storedCheckpoint.phase === 'terminal_pending')
+        return this.finalizeCheckpoint(
+          working,
+          run,
+          storedCheckpoint.last_effect_receipt as TeamEffectReceipt,
+          opts,
+        )
+      if (
+        storedCheckpoint.phase === 'running' &&
+        (opts.recovery ?? 'auto') !== 'retry'
+      ) {
+        return this.failCheckpointRecovery(
+          working,
+          `ambiguous running checkpoint '${run.turnId}'; automatic replay is disabled to avoid duplicate side effects. Retry explicitly with recovery='retry'`,
+          opts,
+        )
+      }
+    } else {
+      const cursorStart = Math.min(
+        this.store.readCursor(working.name),
+        inbox.length,
+      )
+      const unread = inbox.slice(cursorStart, cursorStart + 50)
+      if (!unread.length) {
+        const current = this.requireMember(working.name)
+        const idle =
+          current.status === TeamStatus.SHUTDOWN
+            ? current
+            : this.store.updateMember(working.name, {
+                status: TeamStatus.IDLE,
+                last_error: null,
+              })
+        if (idle.status !== TeamStatus.SHUTDOWN)
+          await this.emit(events.memberUpdate(idle), opts.eventSink)
+        await this.emit(
+          events.runDone({
+            parent_id: opts.parent_call_id ?? null,
+            member: idle,
+            summary: '没有未读消息。',
+          }),
+          opts.eventSink,
+        )
+        return '没有未读消息。'
+      }
+
+      const history = this.store.readThread(working.name)
+      const baseThreadRevision = teamThreadRevision(history)
+      history.push({
+        role: 'user',
+        content: TeamManager.renderInboxForRunner(working, unread),
+      })
+      const pendingIds = unread.map((msg) => msg.id)
+      const turnId = newTeamId('turn')
+      const leadBefore = new Set(
+        this.bus.allMessages(LEAD_ACTOR).map((msg) => msg.id),
+      )
+      run = {
+        payload: {
+          version: 1,
+          member: working.name,
+          messages: history,
+          checkpoint_version: TEAM_CHECKPOINT_VERSION,
+          turn_id: turnId,
+          phase: 'prepared',
+          base_thread_revision: baseThreadRevision,
+          pending_cursor_start: cursorStart,
+          pending_cursor_end: cursorStart + unread.length,
+          pending_message_ids: pendingIds,
+          lead_message_ids_before: [...leadBefore],
+        },
+        history,
+        turnId,
+        cursorStart,
+        cursorEnd: cursorStart + unread.length,
+        pendingIds,
+        baseThreadRevision,
+        leadBefore,
+      }
+      this.writeRunCheckpoint(working.name, run, 'prepared')
     }
 
-    history.push({
-      role: 'user',
-      content: TeamManager.renderInboxForRunner(working, unread),
-    })
-    this.store.writeCheckpoint(working.name, history, {
-      pending_cursor_start: cursorStart,
-      pending_cursor_end: cursorEnd,
-      pending_message_ids: pendingIds,
-    })
     if (!this.runnerFactory)
-      throw new Error('team runner factory is unavailable')
-    const spec = this.requireSpec(working.agent_type)
-    const leadBefore = new Set(
-      this.bus.allMessages(LEAD_ACTOR).map((msg) => msg.id),
-    )
+      return this.failCheckpointRecovery(
+        working,
+        'team runner factory is unavailable',
+        opts,
+      )
     const agentId = newTeamId('agent')
     let hookScopeStarted = false
+    let executionStarted = false
 
     try {
+      // An explicit retry acknowledges that a previous `running` attempt may
+      // already have produced effects. Re-enter `prepared` before any await so
+      // a second crash before model execution remains safely resumable.
+      this.writeRunCheckpoint(working.name, run, 'prepared')
+      const spec = this.requireSpec(working.agent_type)
       if (this.hooks) {
         const start = await this.hooks.begin({
           agentId,
@@ -379,13 +469,22 @@ export class TeamManager {
           teammateName: working.name,
         })
         hookScopeStarted = true
-        if (start.additionalContext.trim()) {
-          history.splice(Math.max(0, history.length - 1), 0, {
+        const hookContext = start.additionalContext.trim()
+        if (
+          hookContext &&
+          !run.history.some(
+            (message) =>
+              message.content ===
+              `[SubagentStart hook context]\n${hookContext}`,
+          )
+        ) {
+          run.history.splice(Math.max(0, run.history.length - 1), 0, {
             role: 'system',
-            content: `[SubagentStart hook context]\n${start.additionalContext}`,
+            content: `[SubagentStart hook context]\n${hookContext}`,
             ui_hidden: true,
           })
         }
+        this.writeRunCheckpoint(working.name, run, 'prepared')
       }
       const runner = this.runnerFactory({
         member: working,
@@ -393,72 +492,237 @@ export class TeamManager {
         subRegistry: this.registryForMember(working, spec),
         agentId,
       })
+      this.writeRunCheckpoint(working.name, run, 'running')
+      executionStarted = true
       const final = runner.stepStream
-        ? await runner.stepStream(history, async (evt) => {
+        ? await runner.stepStream(run.history, async (evt) => {
             await this.emit(
               this.mapRunnerEvent(evt, working, opts.parent_call_id ?? null) ??
                 evt,
               opts.eventSink,
             )
           })
-        : await runner.step(history)
-      this.store.writeThread(working.name, history)
-      this.store.clearCheckpoint(working.name)
-      this.store.writeCursor(working.name, cursorEnd)
-      const idle = this.store.updateMember(working.name, {
-        status: TeamStatus.IDLE,
-        last_error: null,
-      })
-      await this.emit(events.memberUpdate(idle), opts.eventSink)
+        : await runner.step(run.history)
       const explicitReply = this.bus
         .allMessages(LEAD_ACTOR)
         .some(
-          (msg) => !leadBefore.has(msg.id) && msg.from_actor === working.name,
+          (msg) =>
+            !run.leadBefore.has(msg.id) && msg.from_actor === working.name,
         )
-      if (!explicitReply) {
-        const reply = this.bus.send({
-          from_actor: working.name,
-          to: LEAD_ACTOR,
-          content: final,
-          type: 'result',
-          in_reply_to: pendingIds.at(-1) ?? null,
-          meta: { role: working.role, agent_type: working.agent_type },
-        })
-        await this.emit(events.messageEvent(reply), opts.eventSink)
+      const receipt: TeamEffectReceipt = {
+        kind: 'runner_result',
+        result: final,
+        reply_required: !explicitReply,
+        reply_message_id: null,
       }
-      await this.emit(
-        events.runDone({
-          parent_id: opts.parent_call_id ?? null,
-          member: idle,
-          summary: final,
-        }),
-        opts.eventSink,
-      )
-      return final
+      this.writeRunCheckpoint(working.name, run, 'terminal_pending', receipt)
+      return this.finalizeCheckpoint(working, run, receipt, opts)
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
-      this.store.writeCheckpoint(working.name, history, {
-        pending_cursor_start: cursorStart,
-        pending_cursor_end: cursorEnd,
-        pending_message_ids: pendingIds,
-      })
-      const errored = this.store.updateMember(working.name, {
-        status: TeamStatus.ERROR,
-        last_error: text,
-      })
-      await this.emit(events.memberUpdate(errored), opts.eventSink)
-      await this.emit(
-        events.runError({
-          parent_id: opts.parent_call_id ?? null,
-          member: errored,
-          message: text,
-        }),
-        opts.eventSink,
+      this.writeRunCheckpoint(
+        working.name,
+        run,
+        executionStarted ? 'running' : 'prepared',
       )
-      return `Error: teammate '${working.name}' raised: ${text}`
+      return this.failCheckpointRecovery(working, text, opts, true)
     } finally {
       if (hookScopeStarted) this.hooks?.end(agentId)
     }
+  }
+
+  private validateCheckpoint(
+    member: TeamMember,
+    checkpoint: TeamCheckpointPayload,
+    inbox: TeamMessage[],
+  ): ValidatedTeamCheckpoint | string {
+    if (checkpoint.checkpoint_version !== TEAM_CHECKPOINT_VERSION)
+      return 'legacy or unsupported checkpoint version; refusing an unsafe automatic replay'
+    if (!checkpoint.turn_id?.trim()) return 'checkpoint turn_id is missing'
+    if (!checkpoint.phase) return 'checkpoint phase is missing or invalid'
+    if (!checkpoint.base_thread_revision)
+      return 'checkpoint base thread revision is missing'
+    const cursorStart = checkpoint.pending_cursor_start
+    const cursorEnd = checkpoint.pending_cursor_end
+    if (
+      !Number.isInteger(cursorStart) ||
+      !Number.isInteger(cursorEnd) ||
+      (cursorStart as number) < 0 ||
+      (cursorEnd as number) < (cursorStart as number) ||
+      (cursorEnd as number) > inbox.length
+    )
+      return 'checkpoint message cursor is invalid for the current inbox'
+
+    const start = cursorStart as number
+    const end = cursorEnd as number
+    const pendingIds = checkpoint.pending_message_ids ?? []
+    const actualIds = inbox.slice(start, end).map((message) => message.id)
+    if (
+      pendingIds.length !== end - start ||
+      pendingIds.some((id, index) => actualIds[index] !== id)
+    )
+      return 'checkpoint message ids no longer match the inbox cursor range'
+
+    const durableThreadRevision = teamThreadRevision(
+      this.store.readThread(member.name),
+    )
+    if (checkpoint.phase === 'terminal_pending') {
+      if (!checkpoint.last_effect_receipt)
+        return 'terminal checkpoint is missing its last effect receipt'
+      if (
+        !checkpoint.final_thread_revision ||
+        checkpoint.final_thread_revision !==
+          teamThreadRevision(checkpoint.messages)
+      )
+        return 'terminal checkpoint final thread revision is invalid'
+      if (
+        durableThreadRevision !== checkpoint.base_thread_revision &&
+        durableThreadRevision !== checkpoint.final_thread_revision
+      )
+        return 'durable thread revision diverged from the terminal checkpoint'
+    } else if (durableThreadRevision !== checkpoint.base_thread_revision) {
+      return 'durable thread revision diverged from the resumable checkpoint'
+    }
+
+    const currentCursor = this.store.readCursor(member.name)
+    if (currentCursor < start)
+      return 'durable inbox cursor is behind the checkpoint start'
+    if (checkpoint.phase === 'prepared' && currentCursor !== start)
+      return 'prepared checkpoint cursor already advanced; refusing an unsafe replay'
+
+    return {
+      payload: checkpoint,
+      history: checkpoint.messages,
+      turnId: checkpoint.turn_id,
+      cursorStart: start,
+      cursorEnd: end,
+      pendingIds,
+      baseThreadRevision: checkpoint.base_thread_revision,
+      leadBefore: new Set(
+        checkpoint.lead_message_ids_before ??
+          this.bus.allMessages(LEAD_ACTOR).map((message) => message.id),
+      ),
+    }
+  }
+
+  private writeRunCheckpoint(
+    memberName: string,
+    run: ValidatedTeamCheckpoint,
+    phase: 'prepared' | 'running' | 'terminal_pending',
+    receipt: TeamEffectReceipt | null = null,
+  ): void {
+    const finalRevision =
+      phase === 'terminal_pending' ? teamThreadRevision(run.history) : undefined
+    run.payload.phase = phase
+    run.payload.final_thread_revision = finalRevision
+    run.payload.last_effect_receipt = receipt ?? undefined
+    this.store.writeCheckpoint(memberName, run.history, {
+      checkpoint_version: TEAM_CHECKPOINT_VERSION,
+      turn_id: run.turnId,
+      phase,
+      base_thread_revision: run.baseThreadRevision,
+      final_thread_revision: finalRevision,
+      pending_cursor_start: run.cursorStart,
+      pending_cursor_end: run.cursorEnd,
+      pending_message_ids: run.pendingIds,
+      lead_message_ids_before: [...run.leadBefore],
+      last_effect_receipt: receipt,
+    })
+  }
+
+  private async finalizeCheckpoint(
+    member: TeamMember,
+    run: ValidatedTeamCheckpoint,
+    receipt: TeamEffectReceipt,
+    opts: {
+      parent_call_id?: string | null
+      eventSink?: TeamEventSink | null
+    },
+  ): Promise<string> {
+    const finalRevision = teamThreadRevision(run.history)
+    if (
+      teamThreadRevision(this.store.readThread(member.name)) !== finalRevision
+    )
+      this.store.writeThread(member.name, run.history)
+
+    if (receipt.reply_required) {
+      let reply = this.bus
+        .allMessages(LEAD_ACTOR)
+        .find((message) => message.meta.team_turn_id === run.turnId)
+      if (!reply) {
+        reply = this.bus.send({
+          from_actor: member.name,
+          to: LEAD_ACTOR,
+          content: receipt.result,
+          type: 'result',
+          in_reply_to: run.pendingIds.at(-1) ?? null,
+          meta: {
+            role: member.role,
+            agent_type: member.agent_type,
+            team_turn_id: run.turnId,
+          },
+        })
+        await this.emit(events.messageEvent(reply), opts.eventSink)
+      }
+      if (receipt.reply_message_id !== reply.id) {
+        receipt = { ...receipt, reply_message_id: reply.id }
+        this.writeRunCheckpoint(member.name, run, 'terminal_pending', receipt)
+      }
+    }
+
+    const cursor = this.store.readCursor(member.name)
+    if (cursor < run.cursorEnd)
+      this.store.writeCursor(member.name, run.cursorEnd)
+    const current = this.requireMember(member.name)
+    const terminal =
+      current.status === TeamStatus.SHUTDOWN
+        ? current
+        : this.store.updateMember(member.name, {
+            status: TeamStatus.IDLE,
+            last_error: null,
+          })
+    if (terminal.status !== TeamStatus.SHUTDOWN)
+      await this.emit(events.memberUpdate(terminal), opts.eventSink)
+    this.store.clearCheckpoint(member.name)
+    await this.emit(
+      events.runDone({
+        parent_id: opts.parent_call_id ?? null,
+        member: terminal,
+        summary: receipt.result,
+      }),
+      opts.eventSink,
+    )
+    return receipt.result
+  }
+
+  private async failCheckpointRecovery(
+    member: TeamMember,
+    message: string,
+    opts: {
+      parent_call_id?: string | null
+      eventSink?: TeamEventSink | null
+    },
+    runnerRaised = false,
+  ): Promise<string> {
+    const current = this.requireMember(member.name)
+    const terminal =
+      current.status === TeamStatus.SHUTDOWN
+        ? current
+        : this.store.updateMember(member.name, {
+            status: TeamStatus.ERROR,
+            last_error: message,
+          })
+    if (terminal.status !== TeamStatus.SHUTDOWN)
+      await this.emit(events.memberUpdate(terminal), opts.eventSink)
+    await this.emit(
+      events.runError({
+        parent_id: opts.parent_call_id ?? null,
+        member: terminal,
+        message,
+      }),
+      opts.eventSink,
+    )
+    const reason = runnerRaised ? 'raised' : 'checkpoint recovery failed'
+    return `Error: teammate '${member.name}' ${reason}: ${message}`
   }
 
   private registryForMember(

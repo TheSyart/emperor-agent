@@ -37,6 +37,17 @@ export function contextProjection(opts: {
   }
 }
 
+export function messageTombstoned(opts: {
+  reason: 'interjected' | 'cancelled' | 'model_failed'
+  contentChars: number
+}): Record<string, unknown> {
+  return {
+    event: 'message_tombstoned',
+    reason: opts.reason,
+    content_chars: Math.max(0, Math.trunc(opts.contentChars)),
+  }
+}
+
 export function agentThought(opts: {
   stage: string
   label: string
@@ -149,14 +160,17 @@ export function toolRunFailed(opts: {
   name: string
   message: string
   reasonKind?: 'safety_refusal' | 'error'
+  metadata?: Record<string, unknown> | null
 }): Record<string, unknown> {
-  return {
+  const event: Record<string, unknown> = {
     event: 'tool_run_failed',
     id: opts.id,
     name: opts.name,
     message: opts.message,
     reason_kind: opts.reasonKind ?? 'error',
   }
+  if (opts.metadata) event.metadata = opts.metadata
+  return event
 }
 
 export function toolRunCancelled(opts: {

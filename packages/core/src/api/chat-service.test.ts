@@ -18,6 +18,7 @@ import {
 import { CoreApi } from './core-api'
 import { MainlineTurnService } from './chat-service'
 import { LEGACY_SKILL_STATE_FILE } from '../runtime/resources'
+import { CancelledTaskError } from '../runtime/active'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -384,9 +385,9 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     await api.close()
   })
 
-  it('rejects a second concurrent mainline turn before switching sessions', async () => {
+  it('runs different session actors concurrently without crossing history or runtime ownership', async () => {
     const root = tmp('emperor-mainline-concurrent-turn-')
-    const provider = new BlockingProvider()
+    const provider = new ConcurrentBlockingProvider()
     const api = await CoreApi.create({
       root,
       stateRoot: join(root, '.emperor'),
@@ -401,20 +402,45 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
       turnId: 'turn_busy_1',
       sessionId: String(first.id),
     })
-    await provider.started
+    await provider.waitForCalls(1)
+    const runningSecond = api.chat.submit({
+      content: 'second',
+      turnId: 'turn_busy_2',
+      sessionId: String(second.id),
+    })
+    await provider.waitForCalls(2)
+    expect(
+      api.loop.activeTasks
+        .list()
+        .map((task) => task.session_id)
+        .sort(),
+    ).toEqual([String(first.id), String(second.id)].sort())
 
-    await expect(
-      api.chat.submit({
-        content: 'second',
-        turnId: 'turn_busy_2',
-        sessionId: String(second.id),
-      }),
-    ).rejects.toMatchObject({ name: 'TurnBusyError' })
-    expect(api.loop.activeSessionId).toBe(String(first.id))
+    provider.finish(1, response('second done'))
+    await expect(runningSecond).resolves.toMatchObject({
+      content: 'second done',
+      activeSessionId: String(second.id),
+    })
+    const secondBootstrap = await api.bootstrap({
+      sessionId: String(second.id),
+    })
+    expect(secondBootstrap.runtime).toMatchObject({
+      busy: false,
+      active_tasks: [expect.objectContaining({ session_id: String(first.id) })],
+    })
+    provider.finish(0, response('first done'))
+    await expect(running).resolves.toMatchObject({
+      content: 'first done',
+      activeSessionId: String(first.id),
+    })
 
-    provider.finish(response('first done'))
-    await expect(running).resolves.toMatchObject({ content: 'first done' })
-
+    const firstHistoryPath = join(
+      root,
+      '.emperor',
+      'sessions',
+      String(first.id),
+      'history.jsonl',
+    )
     const secondHistoryPath = join(
       root,
       '.emperor',
@@ -422,12 +448,385 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
       String(second.id),
       'history.jsonl',
     )
-    expect(
-      existsSync(secondHistoryPath)
-        ? readFileSync(secondHistoryPath, 'utf8')
-        : '',
-    ).not.toContain('second')
+    const firstHistory = readFileSync(firstHistoryPath, 'utf8')
+    const secondHistory = readFileSync(secondHistoryPath, 'utf8')
+    expect(firstHistory).toContain('first done')
+    expect(firstHistory).not.toContain('second done')
+    expect(secondHistory).toContain('second done')
+    expect(secondHistory).not.toContain('first done')
 
+    const firstReplay = api.runtime.replay({ sessionId: String(first.id) })
+    const secondReplay = api.runtime.replay({ sessionId: String(second.id) })
+    expect(firstReplay.events.map((event) => event.turn_id)).not.toContain(
+      'turn_busy_2',
+    )
+    expect(secondReplay.events.map((event) => event.turn_id)).not.toContain(
+      'turn_busy_1',
+    )
+
+    await api.close()
+  })
+
+  it('serializes two submits to the same session mailbox by command id', async () => {
+    const root = tmp('emperor-mainline-session-mailbox-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Mailbox' })
+
+    const first = api.chat.submit({
+      content: 'first queued',
+      turnId: 'turn_queue_1',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    const second = api.chat.submit({
+      content: 'second queued',
+      turnId: 'turn_queue_2',
+      clientMessageId: 'client_queue_2',
+      sessionId: String(session.id),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(provider.calls).toHaveLength(1)
+    expect(
+      api.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.find((event) => event.event === 'prompt_queued'),
+    ).toMatchObject({
+      turn_id: 'turn_queue_2',
+      prompt_id: 'client_queue_2',
+      delivery: 'queue',
+    })
+
+    provider.finish(0, response('first complete'))
+    await expect(first).resolves.toMatchObject({ content: 'first complete' })
+    await provider.waitForCalls(2)
+    provider.finish(1, response('second complete'))
+    await expect(second).resolves.toMatchObject({ content: 'second complete' })
+    expect(
+      provider.calls[1]!.messages.filter(
+        (message) => message.role === 'assistant',
+      ).map((message) => message.content),
+    ).toContain('first complete')
+    expect(
+      api.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.map((event) => event.event),
+    ).toContain('prompt_dequeued')
+    expect(
+      api.loop.sessionRuntimes
+        .get(String(session.id))!
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: 'client_queue_2',
+        state: 'completed',
+        delivery: 'queue',
+      }),
+    )
+
+    await api.close()
+  })
+
+  it('preserves a queued prompt when cancellation races the running turn', async () => {
+    const root = tmp('emperor-mainline-cancel-queue-race-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Cancel queue race' })
+    const first = api.chat.submit({
+      content: 'cancel this turn',
+      turnId: 'turn_cancel_owner',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    const second = api.chat.submit({
+      content: 'keep queued prompt',
+      turnId: 'turn_keep_queued',
+      clientMessageId: 'client_keep_queued',
+      sessionId: String(session.id),
+    })
+
+    expect(
+      api.loop.activeTasks.cancel({ taskId: 'turn:turn_cancel_owner' }),
+    ).toHaveLength(1)
+    await expect(first).rejects.toBeInstanceOf(CancelledTaskError)
+    await provider.waitForCalls(2)
+    provider.finish(1, response('queued prompt survived'))
+    await expect(second).resolves.toMatchObject({
+      content: 'queued prompt survived',
+    })
+    provider.finish(0, response('late cancelled response'))
+    expect(
+      api.loop.sessionRuntimes
+        .get(String(session.id))!
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: 'client_keep_queued',
+        state: 'completed',
+      }),
+    )
+
+    await api.close()
+  })
+
+  it('interjects a busy turn at the next model boundary and tombstones the superseded partial', async () => {
+    const root = tmp('emperor-mainline-session-interject-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Interjection' })
+
+    const running = api.chat.submit({
+      content: 'original prompt',
+      turnId: 'turn_interject_owner',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    const interjected = await api.chat.submit({
+      content: 'new instruction',
+      displayContent: 'New instruction',
+      clientMessageId: 'client_interjection',
+      turnId: 'turn_interjection_prompt',
+      sessionId: String(session.id),
+      delivery: 'interject',
+    })
+
+    expect(interjected).toMatchObject({
+      turnId: 'turn_interjection_prompt',
+      content: '',
+      delivery: 'interjected',
+      targetTurnId: 'turn_interject_owner',
+    })
+    provider.finish(0, response('obsolete partial answer'))
+    await provider.waitForCalls(2)
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'new instruction',
+    )
+    provider.finish(1, response('final answer'))
+    await expect(running).resolves.toMatchObject({ content: 'final answer' })
+
+    const history = readFileSync(
+      join(root, '.emperor', 'sessions', String(session.id), 'history.jsonl'),
+      'utf8',
+    )
+    expect(history).toContain('original prompt')
+    expect(history).toContain('new instruction')
+    expect(history).toContain('final answer')
+    expect(history).not.toContain('obsolete partial answer')
+    const graph = api.loop.sessionRuntimes
+      .get(String(session.id))!
+      .bindings.conversationStore.messageGraph.snapshot()
+    expect(graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'obsolete partial answer',
+          status: 'tombstoned',
+          tombstoneReason: 'interjected',
+        }),
+      ]),
+    )
+    const replay = api.runtime.replay({ sessionId: String(session.id) })
+    expect(replay.events.map((event) => event.event)).toEqual(
+      expect.arrayContaining([
+        'prompt_queued',
+        'prompt_interjected',
+        'message_tombstoned',
+      ]),
+    )
+
+    await api.close()
+  })
+
+  it('cancels session A without cancelling a concurrent turn in session B', async () => {
+    const root = tmp('emperor-mainline-session-cancel-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const sessionA = api.sessions.create({ title: 'A' })
+    const sessionB = api.sessions.create({ title: 'B' })
+    const turnA = api.chat.submit({
+      content: 'cancel A',
+      turnId: 'turn_cancel_a',
+      sessionId: String(sessionA.id),
+    })
+    await provider.waitForCalls(1)
+    const turnB = api.chat.submit({
+      content: 'keep B',
+      turnId: 'turn_keep_b',
+      sessionId: String(sessionB.id),
+    })
+    await provider.waitForCalls(2)
+
+    expect(
+      api.loop.activeTasks.cancel({ taskId: 'turn:turn_cancel_a' }),
+    ).toHaveLength(1)
+    await expect(turnA).rejects.toBeInstanceOf(CancelledTaskError)
+    expect(api.loop.activeTasks.list()).toEqual([
+      expect.objectContaining({ id: 'turn:turn_keep_b', cancelled: false }),
+    ])
+    provider.finish(1, response('B survived'))
+    await expect(turnB).resolves.toMatchObject({ content: 'B survived' })
+    provider.finish(0, response('A late result'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(
+      readFileSync(
+        join(
+          root,
+          '.emperor',
+          'sessions',
+          String(sessionA.id),
+          'history.jsonl',
+        ),
+        'utf8',
+      ),
+    ).not.toContain('A late result')
+
+    await api.close()
+  })
+
+  it('reopens a session actor from existing stores after process restart', async () => {
+    const root = tmp('emperor-mainline-session-restart-')
+    const stateRoot = join(root, '.emperor')
+    const firstProvider = new FakeProvider()
+    const firstApi = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(firstProvider),
+    })
+    const session = firstApi.sessions.create({ title: 'Durable actor' })
+    await firstApi.chat.submit({
+      content: 'before restart',
+      turnId: 'turn_before_restart',
+      sessionId: String(session.id),
+    })
+    await firstApi.close()
+
+    const secondProvider = new FakeProvider()
+    const secondApi = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(secondProvider),
+    })
+    await secondApi.chat.submit({
+      content: 'after restart',
+      turnId: 'turn_after_restart',
+      sessionId: String(session.id),
+    })
+    expect(JSON.stringify(secondProvider.calls[0]?.messages)).toContain(
+      'before restart',
+    )
+    expect(
+      secondApi.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.map((event) => event.turn_id),
+    ).toEqual(
+      expect.arrayContaining(['turn_before_restart', 'turn_after_restart']),
+    )
+    await secondApi.close()
+  })
+
+  it('executes distinct turn commands that share one long-lived task owner', async () => {
+    const provider = new FakeProvider()
+    const api = await CoreApi.create({
+      root: tmp('emperor-mainline-long-lived-task-'),
+      stateRoot: tmp('emperor-mainline-long-lived-task-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const sessionId = api.loop.activeSessionId!
+    const runActorCommand = vi.spyOn(api.loop.sessionRuntimes, 'run')
+
+    await api.mainline.submit({
+      content: 'cycle one',
+      turnId: 'turn_goal_cycle_1',
+      taskId: 'goal:stable-owner',
+      useActiveTask: false,
+      source: 'goal',
+      sessionId,
+    })
+    expect(provider.calls).toHaveLength(1)
+    const actor = api.loop.sessionRuntimes.get(sessionId)
+    expect(actor?.snapshot().commandReceipts).toBe(1)
+    await api.mainline.submit({
+      content: 'cycle two',
+      turnId: 'turn_goal_cycle_2',
+      taskId: 'goal:stable-owner',
+      useActiveTask: false,
+      source: 'goal',
+      sessionId,
+    })
+
+    expect(api.loop.sessionRuntimes.get(sessionId)).toBe(actor)
+    expect(runActorCommand.mock.calls.map((call) => call[1])).toEqual([
+      'turn:turn_goal_cycle_1',
+      'turn:turn_goal_cycle_2',
+    ])
+    expect(provider.calls).toHaveLength(2)
+    expect(JSON.stringify(provider.calls[1]?.messages)).toContain('cycle one')
+    expect(JSON.stringify(provider.calls[1]?.messages)).toContain('cycle two')
+    await api.close()
+  })
+
+  it('persists every sampling attempt as a correlated diagnostic V2 envelope', async () => {
+    const root = tmp('emperor-mainline-sampling-envelope-')
+    const stateRoot = join(root, '.emperor')
+    const provider = new RetryOnceProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const sessionId = api.loop.activeSessionId!
+
+    await api.mainline.submit({
+      content: 'retry once',
+      turnId: 'turn_sampling_envelope',
+      sessionId,
+    })
+
+    const rows = readFileSync(
+      join(stateRoot, 'sessions', sessionId, 'runtime', 'events.jsonl'),
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    const attempts = rows.filter((row) =>
+      String(row.type ?? '').startsWith('model_attempt_'),
+    )
+    expect(attempts.map((row) => row.type)).toEqual([
+      'model_attempt_started',
+      'model_attempt_failed',
+      'model_attempt_started',
+      'model_attempt_succeeded',
+    ])
+    expect(attempts.every((row) => row.schemaVersion === 2)).toBe(true)
+    expect(attempts.every((row) => row.visibility === 'diagnostic')).toBe(true)
+    expect(new Set(attempts.map((row) => row.requestId)).size).toBe(1)
+    expect(new Set(attempts.map((row) => row.attemptId)).size).toBe(2)
+    expect(new Set(attempts.map((row) => row.idempotencyKey)).size).toBe(4)
     await api.close()
   })
 
@@ -517,13 +916,9 @@ class FakeProvider extends LLMProvider {
   }
 }
 
-class BlockingProvider extends LLMProvider {
+class ConcurrentBlockingProvider extends LLMProvider {
   calls: ChatArgs[] = []
-  private startedResolve: () => void = () => {}
-  private finishResolve: (response: LLMResponse) => void = () => {}
-  readonly started = new Promise<void>((resolve) => {
-    this.startedResolve = resolve
-  })
+  private readonly finishes: Array<(response: LLMResponse) => void> = []
 
   constructor() {
     super({ defaultModel: 'fake-main' })
@@ -531,15 +926,39 @@ class BlockingProvider extends LLMProvider {
 
   async chat(args: ChatArgs): Promise<LLMResponse> {
     this.calls.push(args)
-    if (this.calls.length > 1) return response('unexpected second turn')
-    this.startedResolve()
-    return new Promise<LLMResponse>((resolve) => {
-      this.finishResolve = resolve
+    return await new Promise<LLMResponse>((resolve) => {
+      this.finishes.push(resolve)
     })
   }
 
-  finish(response: LLMResponse): void {
-    this.finishResolve(response)
+  finish(index: number, result: LLMResponse): void {
+    const resolve = this.finishes[index]
+    if (!resolve) throw new Error(`provider call ${index} is not waiting`)
+    resolve(result)
+  }
+
+  async waitForCalls(count: number): Promise<void> {
+    const deadline = Date.now() + 2_000
+    while (this.calls.length < count) {
+      if (Date.now() > deadline)
+        throw new Error(`provider did not receive ${count} calls`)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+  }
+}
+
+class RetryOnceProvider extends LLMProvider {
+  private calls = 0
+
+  constructor() {
+    super({ defaultModel: 'fake-main' })
+  }
+
+  async chat(): Promise<LLMResponse> {
+    this.calls += 1
+    if (this.calls === 1)
+      throw Object.assign(new Error('upstream unavailable'), { status: 503 })
+    return response('recovered')
   }
 }
 

@@ -21,7 +21,7 @@ import {
   type PlanContextProvider,
 } from '../context/pipeline'
 import type { ToolRegistry } from '../tools/registry'
-import { ToolResultObj, type ToolDefinition } from '../tools/base'
+import { ToolResultObj, type Tool, type ToolDefinition } from '../tools/base'
 import { ToolExecutionEngine } from '../tools/execution'
 import { TurnPaused } from '../control/exceptions'
 import { parsePauseResult } from '../control/tools'
@@ -30,10 +30,16 @@ import { PlanContextBuilder } from '../plans/context'
 import { PlanStatus, type PlanRecord } from '../plans/models'
 import type { PlanStore } from '../plans/store'
 import {
+  latestPromptProjection,
   writePromptSnapshot,
   type PromptContextPlan,
   type PromptSectionInput,
 } from '../prompts/manifest'
+import {
+  PromptProjectionTracker,
+  type PromptProjectionSnapshot,
+} from '../prompts/projection'
+import type { PromptPrefetchReport } from '../prompts/prefetch'
 import {
   readTurnCheckpoint,
   type CheckpointWriteOptions,
@@ -54,12 +60,21 @@ import {
 } from './query-state'
 import { TurnPhase, TurnState } from './turn-state'
 import {
+  createModelPolicyTurnState,
   ModelCaller,
+  type ModelCallPolicy,
   type ModelCallMeta,
+  type ModelPolicyTurnState,
   type RunnerModelHost,
 } from './model-caller'
+import type { ModelPricing } from '../config/model-config'
 import { CancelledTaskError } from '../runtime/active'
-import { ContextOverflowError } from '../errors'
+import { SamplingCoordinator } from '../sampling/coordinator'
+import type {
+  FileCheckpointCaptureInput,
+  FileCheckpointRecord,
+} from '../checkpoints/file-checkpoints'
+import { ContextOverflowError, EmperorError } from '../errors'
 import { isContextOverflowProviderError } from '../providers/errors'
 import type {
   HookAggregateDecision,
@@ -126,6 +141,16 @@ export interface MemoryStoreLike {
     content: string,
     opts?: { extra?: Record<string, unknown> | null },
   ): void
+}
+
+export interface AgentRunnerInterjectionHost {
+  consume():
+    Array<Record<string, unknown>> | Promise<Array<Record<string, unknown>>>
+  tombstonePartial(record: {
+    turnId: string | null
+    content: string
+    reason: 'interjected' | 'cancelled' | 'model_failed'
+  }): void | Promise<void>
 }
 
 export interface TokenTrackerLike {
@@ -233,6 +258,30 @@ function clarificationPrompt(c: Clarification): string {
   ].join('\n')
 }
 
+const FILE_CHECKPOINT_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'apply_patch',
+  'delete_file',
+  'rename_file',
+])
+
+function managedCheckpointPaths(
+  call: ToolCallRequest,
+  tool: Tool | undefined,
+): string[] {
+  if (!FILE_CHECKPOINT_TOOLS.has(call.name) || !tool) return []
+  const paths =
+    typeof tool.getPaths === 'function'
+      ? tool.getPaths(call.arguments)
+      : typeof tool.getPath === 'function'
+        ? [tool.getPath(call.arguments)]
+        : [call.arguments.path]
+  return [
+    ...new Set(paths.map((path) => String(path ?? '').trim()).filter(Boolean)),
+  ]
+}
+
 export interface AgentRunnerOptions {
   provider: LLMProvider
   model: string
@@ -241,12 +290,14 @@ export interface AgentRunnerOptions {
   maxTokens?: number
   temperature?: number
   reasoningEffort?: string | null
+  pricing?: ModelPricing | null
   providerName?: string | null
   modelEntryId?: string
   supportsToolCall?: boolean
   routeReason?: string
   routeEstimatedTokens?: number | null
   usageType?: string
+  modelPolicy?: ModelCallPolicy | null
   memoryStore?: MemoryStoreLike | null
   tokenTracker?: TokenTrackerLike | null
   compactor?: CompactorLike | null
@@ -254,6 +305,7 @@ export interface AgentRunnerOptions {
   controlManager?: ControlManagerRunnerHost | null
   maxContext?: number
   compactThreshold?: number
+  autoCompact?: boolean
   maxTurns?: number | null
   contextPipeline?: ContextPipeline | null
   toolExecutionEngine?: ToolExecutionEngine | null
@@ -262,6 +314,9 @@ export interface AgentRunnerOptions {
   promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
   sessionId?: string | null
+  taskId?: string | null
+  subagentDepth?: number
+  tokenBudget?: number | null
   streamingToolExecution?: boolean
   hooks?: AgentRunnerHookHost | null
   goalObservationRecorder?: RunnerGoalRecordingHost | null
@@ -274,6 +329,23 @@ export interface AgentRunnerOptions {
       } | null>)
     | null
   onGoalCompacted?: (() => void) | null
+  fileCheckpoints?: FileCheckpointCaptureHost | null
+}
+
+export interface FileCheckpointCaptureHost {
+  capture<T>(
+    input: FileCheckpointCaptureInput,
+    effect: () => Promise<T> | T,
+  ): Promise<{ value: T; checkpoint: FileCheckpointRecord | null }>
+}
+
+export class AgentTokenBudgetExceededError extends EmperorError {
+  constructor(budget: number, used: number) {
+    super(
+      `Agent token budget exceeded (${used}/${budget}).`,
+      'agent_token_budget_exceeded',
+    )
+  }
 }
 
 export interface AgentRunnerHookHost {
@@ -286,6 +358,7 @@ export interface AgentRunnerHookHost {
 }
 
 export class AgentRunner implements RunnerModelHost {
+  private readonly samplingCoordinator = new SamplingCoordinator()
   provider: LLMProvider
   model: string
   registry: ToolRegistry
@@ -293,12 +366,15 @@ export class AgentRunner implements RunnerModelHost {
   maxTokens: number
   temperature: number
   reasoningEffort: string | null
+  pricing: ModelPricing | null
   providerName: string | null
   modelEntryId: string
   supportsToolCall: boolean
   routeReason: string
   routeEstimatedTokens: number | null
   usageType: string
+  modelPolicy: ModelCallPolicy | null
+  modelPolicyTurn: ModelPolicyTurnState
   memoryStore: MemoryStoreLike | null
   tokenTracker: TokenTrackerLike | null
   compactor: CompactorLike | null
@@ -306,6 +382,7 @@ export class AgentRunner implements RunnerModelHost {
   controlManager: ControlManagerRunnerHost | null
   maxContext: number
   compactThreshold: number
+  autoCompact: boolean
   maxTurns: number | null
   contextPipeline: ContextPipeline
   toolExecutionEngine: ToolExecutionEngine
@@ -315,6 +392,9 @@ export class AgentRunner implements RunnerModelHost {
   promptContextPlan: PromptContextPlan | null
   promptSnapshotDir: string | null
   sessionId: string | null
+  taskId: string | null
+  subagentDepth: number
+  tokenBudget: number | null
   streamingToolExecution: boolean
   hooks: AgentRunnerHookHost | null
   goalObservationRecorder: RunnerGoalRecordingHost | null
@@ -327,9 +407,13 @@ export class AgentRunner implements RunnerModelHost {
       } | null>)
     | null
   onGoalCompacted: (() => void) | null
+  fileCheckpoints: FileCheckpointCaptureHost | null
   lastEstimatedInputTokens: number | null = null
   lastContextProjectionReport: Record<string, unknown> | null = null
+  lastPromptProjection: PromptProjectionSnapshot | null = null
+  promptPrefetchReport: PromptPrefetchReport | null = null
   lastModelCall: ModelCallMeta
+  private readonly promptProjectionTracker: PromptProjectionTracker
   private compactionFailureStreak = 0
 
   constructor(opts: AgentRunnerOptions) {
@@ -340,12 +424,15 @@ export class AgentRunner implements RunnerModelHost {
     this.maxTokens = opts.maxTokens ?? 20000
     this.temperature = opts.temperature ?? 0.1
     this.reasoningEffort = opts.reasoningEffort ?? null
+    this.pricing = opts.pricing ?? null
     this.providerName = opts.providerName ?? null
     this.modelEntryId = opts.modelEntryId ?? 'unknown'
     this.supportsToolCall = opts.supportsToolCall ?? true
     this.routeReason = opts.routeReason ?? ''
     this.routeEstimatedTokens = opts.routeEstimatedTokens ?? null
     this.usageType = opts.usageType ?? 'main_agent'
+    this.modelPolicy = opts.modelPolicy ?? null
+    this.modelPolicyTurn = createModelPolicyTurnState()
     this.memoryStore = opts.memoryStore ?? null
     this.tokenTracker = opts.tokenTracker ?? null
     this.compactor = opts.compactor ?? null
@@ -353,6 +440,7 @@ export class AgentRunner implements RunnerModelHost {
     this.controlManager = opts.controlManager ?? null
     this.maxContext = opts.maxContext ?? 200_000
     this.compactThreshold = opts.compactThreshold ?? 0.7
+    this.autoCompact = opts.autoCompact ?? true
     this.maxTurns = opts.maxTurns ?? null
     this.contextPipeline = opts.contextPipeline ?? this.defaultContextPipeline()
     this.toolExecutionEngine =
@@ -361,7 +449,18 @@ export class AgentRunner implements RunnerModelHost {
     this.promptSections = opts.promptSections ? [...opts.promptSections] : []
     this.promptContextPlan = opts.promptContextPlan ?? null
     this.promptSnapshotDir = opts.promptSnapshotDir ?? null
+    this.promptProjectionTracker = new PromptProjectionTracker(
+      this.promptSnapshotDir
+        ? latestPromptProjection(this.promptSnapshotDir)
+        : null,
+    )
     this.sessionId = opts.sessionId ?? null
+    this.taskId = opts.taskId ?? null
+    this.subagentDepth = Math.max(
+      0,
+      Math.trunc(Number(opts.subagentDepth ?? 0)),
+    )
+    this.tokenBudget = positiveOptionalInt(opts.tokenBudget)
     this.streamingToolExecution = opts.streamingToolExecution ?? false
     this.hooks = opts.hooks ?? null
     this.goalObservationRecorder = opts.goalObservationRecorder ?? null
@@ -369,6 +468,7 @@ export class AgentRunner implements RunnerModelHost {
     this.goalContextProvider = opts.goalContextProvider ?? null
     this.goalContextHint = opts.goalContextHint ?? null
     this.onGoalCompacted = opts.onGoalCompacted ?? null
+    this.fileCheckpoints = opts.fileCheckpoints ?? null
     this.lastModelCall = {
       model: this.model,
       provider: this.providerName,
@@ -378,6 +478,12 @@ export class AgentRunner implements RunnerModelHost {
       estimatedInputTokens: null,
       providerRetryCount: 0,
       providerErrorKind: '',
+      usedFallback: false,
+      fallbackReason: '',
+      costUsdNanos: null,
+      turnCostUsdNanos: 0,
+      costCapUsdNanos: null,
+      costComplete: true,
     }
   }
 
@@ -388,6 +494,7 @@ export class AgentRunner implements RunnerModelHost {
       turnId?: string | null
       signal?: AbortSignal | null
       executionEnvironment?: ExecutionEnvironment | null
+      interjections?: AgentRunnerInterjectionHost | null
     },
   ): Promise<string> {
     const reply = await this.stepAsync(history, {
@@ -395,6 +502,7 @@ export class AgentRunner implements RunnerModelHost {
       turnId: opts?.turnId ?? null,
       signal: opts?.signal ?? null,
       executionEnvironment: opts?.executionEnvironment ?? null,
+      interjections: opts?.interjections ?? null,
     })
     throwIfAborted(opts?.signal ?? null)
     await emit({ event: 'assistant_done', content: reply })
@@ -408,12 +516,32 @@ export class AgentRunner implements RunnerModelHost {
       turnId?: string | null
       signal?: AbortSignal | null
       executionEnvironment?: ExecutionEnvironment | null
+      interjections?: AgentRunnerInterjectionHost | null
+    },
+  ): Promise<string> {
+    this.modelPolicyTurn = createModelPolicyTurnState()
+    try {
+      return await this.stepAsyncInner(history, opts)
+    } finally {
+      this.modelPolicyTurn = createModelPolicyTurnState()
+    }
+  }
+
+  private async stepAsyncInner(
+    history: Msg[],
+    opts?: {
+      emit?: StreamEmitter | null
+      turnId?: string | null
+      signal?: AbortSignal | null
+      executionEnvironment?: ExecutionEnvironment | null
+      interjections?: AgentRunnerInterjectionHost | null
     },
   ): Promise<string> {
     const emit = opts?.emit ?? null
     const turnId = opts?.turnId ?? null
     const signal = opts?.signal ?? null
     const executionEnvironment = opts?.executionEnvironment ?? null
+    const interjections = opts?.interjections ?? null
     throwIfAborted(signal)
     this.denyRefusalCounts.clear()
     // B3（2026-07-05）：turn 内每次投影都冻结在此边界，防止压缩/裁剪回头改写本 turn 已发给模型过的字节
@@ -437,6 +565,7 @@ export class AgentRunner implements RunnerModelHost {
     const finalParts: string[] = []
     let honestyNudged = false
     let stopHookNudged = false
+    let tokenBudgetUsed = 0
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
       this.memoryStore.writeCheckpoint(history, {
@@ -449,6 +578,8 @@ export class AgentRunner implements RunnerModelHost {
     }
     while (true) {
       throwIfAborted(signal)
+      const beforeModel = await consumeRunnerInterjections(interjections)
+      if (beforeModel.length) history.push(...beforeModel)
       const maxTurnsTransition = maxTurnsReached(queryState)
       if (maxTurnsTransition !== null) {
         queryState = maxTurnsTransition.nextState
@@ -484,31 +615,86 @@ export class AgentRunner implements RunnerModelHost {
       turnState.startIteration()
 
       await this.emitTurnPhase(turnState, TurnPhase.MODEL_REQUEST, emit)
-      const streamingTools = this.streamingToolExecution
-        ? this.beginStreamingTools(
-            emit,
-            clarification,
-            signal,
-            entryPlanDecision,
-            executionEnvironment,
+      const streamingTools =
+        this.streamingToolExecution && !interjections
+          ? this.beginStreamingTools(
+              emit,
+              clarification,
+              signal,
+              entryPlanDecision,
+              executionEnvironment,
+              turnId,
+            )
+          : null
+      let response: LLMResponse
+      let streamedPartial = ''
+      const modelEmit =
+        emit || interjections
+          ? async (event: Record<string, unknown>) => {
+              if (event.event === 'message_delta')
+                streamedPartial += String(event.delta ?? '')
+              if (emit) await emit(event)
+            }
+          : null
+      try {
+        response = await this.askModel(
+          history,
+          modelEmit,
+          clarification,
+          signal,
+          turnId,
+          turnStartLength,
+          streamingTools?.onToolCallComplete ?? null,
+        )
+        throwIfAborted(signal)
+      } catch (error) {
+        await streamingTools?.cancel('model_request_failed')
+        if (streamedPartial && interjections) {
+          const reason = signal?.aborted ? 'cancelled' : 'model_failed'
+          await interjections.tombstonePartial({
             turnId,
-          )
-        : null
-      const response = await this.askModel(
-        history,
-        emit,
-        clarification,
-        signal,
-        turnId,
-        turnStartLength,
-        streamingTools?.onToolCallComplete ?? null,
-      )
-      throwIfAborted(signal)
+            content: streamedPartial,
+            reason,
+          })
+          if (emit)
+            await emit(
+              runtimeEvents.messageTombstoned({
+                reason,
+                contentChars: streamedPartial.length,
+              }),
+            )
+        }
+        throw error
+      }
+      if (streamingTools && !shouldExecuteTools(response))
+        await streamingTools.cancel('not_in_final_response')
       await this.emitTurnPhase(turnState, TurnPhase.MODEL_RESPONSE, emit, {
         finish_reason: response.finishReason,
         tool_call_count: response.toolCalls.length,
         content_chars: (response.content ?? '').length,
       })
+      const superseding = await consumeRunnerInterjections(interjections)
+      if (superseding.length) {
+        await streamingTools?.cancel('interjected')
+        const partial = String(response.content ?? streamedPartial)
+        if (partial) {
+          await interjections!.tombstonePartial({
+            turnId,
+            content: partial,
+            reason: 'interjected',
+          })
+          if (emit)
+            await emit(
+              runtimeEvents.messageTombstoned({
+                reason: 'interjected',
+                contentChars: partial.length,
+              }),
+            )
+        }
+        history.push(...superseding)
+        finalParts.length = 0
+        continue
+      }
       if (response.usage && Object.keys(response.usage).length) {
         const callMeta = this.lastModelCall
         const projectionReport = this.lastContextProjectionReport ?? {}
@@ -527,10 +713,35 @@ export class AgentRunner implements RunnerModelHost {
               ),
               estimatedInputTokens: optionalInt(callMeta.estimatedInputTokens),
               routeEstimatedTokens: optionalInt(callMeta.routeEstimatedTokens),
+              costUsdNanos: callMeta.costUsdNanos,
+              costCapUsdNanos: callMeta.costCapUsdNanos,
+              costComplete: callMeta.costComplete,
+              usedFallback: callMeta.usedFallback,
+              fallbackReason: callMeta.fallbackReason || null,
             },
           )
         }
         if (emit) {
+          const cacheReadTokens = Math.max(
+            0,
+            Math.trunc(
+              Number(
+                response.usage.cache_read ??
+                  response.usage.cache_read_input_tokens ??
+                  0,
+              ) || 0,
+            ),
+          )
+          const cacheCreateTokens = Math.max(
+            0,
+            Math.trunc(
+              Number(
+                response.usage.cache_create ??
+                  response.usage.cache_creation_input_tokens ??
+                  0,
+              ) || 0,
+            ),
+          )
           await emit({
             event: 'context_usage',
             used: contextUsedFromUsage(response.usage),
@@ -545,6 +756,12 @@ export class AgentRunner implements RunnerModelHost {
             provider_retry_count:
               optionalInt(callMeta.providerRetryCount) ?? undefined,
             provider_error_kind: callMeta.providerErrorKind || undefined,
+            used_fallback: callMeta.usedFallback || undefined,
+            fallback_reason: callMeta.fallbackReason || undefined,
+            cost_usd_nanos: callMeta.costUsdNanos ?? undefined,
+            turn_cost_usd_nanos: callMeta.turnCostUsdNanos,
+            cost_cap_usd_nanos: callMeta.costCapUsdNanos ?? undefined,
+            cost_complete: callMeta.costComplete,
             replaced_tool_results:
               optionalInt(projectionReport.replaced_tool_results) ?? undefined,
             aggregate_replaced_tool_results:
@@ -553,8 +770,25 @@ export class AgentRunner implements RunnerModelHost {
             aggregate_tool_result_budget:
               optionalInt(projectionReport.aggregate_tool_result_budget) ??
               undefined,
+            cache_read_tokens: cacheReadTokens,
+            cache_create_tokens: cacheCreateTokens,
+            prompt_cache_hit: cacheReadTokens > 0,
+            stable_prefix_hash:
+              this.lastPromptProjection?.stablePrefix.hash ?? undefined,
+            cache_break_classification:
+              this.lastPromptProjection?.cacheBreak.classification ?? undefined,
+            cache_break_reason:
+              this.lastPromptProjection?.cacheBreak.reasonCode ?? undefined,
           })
         }
+      }
+      tokenBudgetUsed += modelUsageTokens(response.usage)
+      if (this.tokenBudget !== null && tokenBudgetUsed > this.tokenBudget) {
+        await streamingTools?.cancel('token_budget_exceeded')
+        throw new AgentTokenBudgetExceededError(
+          this.tokenBudget,
+          tokenBudgetUsed,
+        )
       }
       if (this.memoryStore) {
         const lastUser = [...history].reverse().find((m) => m.role === 'user')
@@ -573,7 +807,7 @@ export class AgentRunner implements RunnerModelHost {
           : 0
         this.memoryStore.appendHistory(
           'model_call',
-          `${this.model} call: input=${inputTokens} output=${outputTokens}`,
+          `${this.lastModelCall.model || this.model} call: input=${inputTokens} output=${outputTokens}`,
           {
             extra: {
               type: 'model_call',
@@ -590,6 +824,12 @@ export class AgentRunner implements RunnerModelHost {
               command_event: cmdEvent,
               input_tokens: inputTokens,
               output_tokens: outputTokens,
+              used_fallback: this.lastModelCall.usedFallback,
+              fallback_reason: this.lastModelCall.fallbackReason || null,
+              cost_usd_nanos: this.lastModelCall.costUsdNanos,
+              turn_cost_usd_nanos: this.lastModelCall.turnCostUsdNanos,
+              cost_cap_usd_nanos: this.lastModelCall.costCapUsdNanos,
+              cost_complete: this.lastModelCall.costComplete,
               ...(turnId ? { turn_id: turnId } : {}),
             },
           },
@@ -999,15 +1239,7 @@ export class AgentRunner implements RunnerModelHost {
           emergency_context_shrink: 1,
         }
       : projection.report
-    this.lastContextProjectionReport = report
-    if (emit) {
-      await emit(
-        runtimeEvents.contextProjection({
-          report,
-          messageCount: governed.length,
-        }),
-      )
-    }
+    if (this.promptPrefetchReport) report.prefetch = this.promptPrefetchReport
     let systemPrompt = this.systemPrompt
     const promptSections: PromptSectionInput[] = this.promptSections.length
       ? [...this.promptSections]
@@ -1019,6 +1251,7 @@ export class AgentRunner implements RunnerModelHost {
             priority: 100,
             budgetChars: null,
             version: null,
+            stability: 'stable',
           },
         ]
     const durableContext: Array<Record<string, unknown>> = []
@@ -1042,6 +1275,7 @@ export class AgentRunner implements RunnerModelHost {
         priority: content.startsWith('[GOAL_') ? 70 : 60,
         budgetChars: null,
         version: null,
+        stability: 'dynamic',
       })
     }
     let toolDefinitions: ToolDefinition[]
@@ -1055,6 +1289,7 @@ export class AgentRunner implements RunnerModelHost {
         priority: 50,
         budgetChars: null,
         version: null,
+        stability: 'dynamic',
       })
       if (clarification && clarification.required) {
         const askGuardPrompt = clarificationPrompt(clarification)
@@ -1066,6 +1301,7 @@ export class AgentRunner implements RunnerModelHost {
           priority: 45,
           budgetChars: null,
           version: null,
+          stability: 'dynamic',
         })
       }
       toolDefinitions = this.controlManager.toolDefinitions(this.registry)
@@ -1083,6 +1319,36 @@ export class AgentRunner implements RunnerModelHost {
       { role: 'system', content: systemPrompt },
       ...(governed as Array<Record<string, unknown>>),
     ]
+    const promptProjection = this.promptProjectionTracker.observe({
+      sessionId: this.sessionId,
+      turnId: turnId ?? 'unscoped',
+      sections: promptSections,
+      canonicalHistory: history as Array<Record<string, unknown>>,
+      projectedMessages: snapshotMessages,
+      toolDefinitions: toolDefinitions as unknown as Array<
+        Record<string, unknown>
+      >,
+      report,
+    })
+    this.lastPromptProjection = promptProjection
+    Object.assign(report, {
+      stable_prefix_hash: promptProjection.stablePrefix.hash,
+      dynamic_suffix_hash: promptProjection.dynamicSuffix.hash,
+      canonical_history_hash: promptProjection.canonicalHistoryHash,
+      projected_messages_hash: promptProjection.projectedMessagesHash,
+      cache_break_classification: promptProjection.cacheBreak.classification,
+      cache_break_reason: promptProjection.cacheBreak.reasonCode,
+      cache_break_first_changed: promptProjection.cacheBreak.firstChanged,
+    })
+    this.lastContextProjectionReport = report
+    if (emit) {
+      await emit(
+        runtimeEvents.contextProjection({
+          report,
+          messageCount: governed.length,
+        }),
+      )
+    }
     const messages: ChatArgs['messages'] = snapshotMessages.map(
       sanitizeProviderMessage,
     )
@@ -1124,12 +1390,13 @@ export class AgentRunner implements RunnerModelHost {
           messages: snapshotMessages,
           checkpoint: this.checkpointForPromptSnapshot(),
           memoryVersions: this.memoryVersionsForPromptSnapshot(),
+          projection: promptProjection,
         })
       } catch {
         // Prompt snapshots are diagnostics only; never fail the model call because of them.
       }
     }
-    return new ModelCaller(this).ask({
+    return new ModelCaller(this, this.samplingCoordinator).ask({
       messages,
       tools: toolDefinitions as unknown as Array<Record<string, unknown>>,
       emit,
@@ -1174,29 +1441,36 @@ export class AgentRunner implements RunnerModelHost {
     executionEnvironment: ExecutionEnvironment | null
     turnId: string | null
   }): {
-    runOne: (call: ToolCallRequest) => Promise<ToolResultObj>
+    runOne: (
+      call: ToolCallRequest,
+      childSignal: AbortSignal,
+    ) => Promise<ToolResultObj>
     resultsById: Map<string, ToolResultObj>
     planFollowups: Msg[]
   } {
-    const { emit, clarification, signal, executionEnvironment } = ctx
+    const { emit, clarification, executionEnvironment } = ctx
     const resultsById = new Map<string, ToolResultObj>()
     const planFollowups: Msg[] = []
 
-    const runOne = async (call: ToolCallRequest): Promise<ToolResultObj> => {
-      throwIfAborted(signal)
+    const runOne = async (
+      call: ToolCallRequest,
+      childSignal: AbortSignal,
+    ): Promise<ToolResultObj> => {
+      throwIfAborted(childSignal)
       await this.emitToolCall(call, emit)
       const outcome = await this.executeToolWithHooks(
         call,
         emit,
         clarification,
         ctx.planDecisionRef.current,
-        signal,
+        childSignal,
         executionEnvironment,
+        ctx.turnId,
       )
       const result = outcome.result
       const executedCall = outcome.executedCall ?? call
       const verificationTarget = outcome.verificationTarget ?? null
-      throwIfAborted(signal)
+      throwIfAborted(childSignal)
       applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
       recordPlanDiscovery(this.controlManager, call, result)
       recordPlanStepToolOutput(this.controlManager, call, result)
@@ -1321,6 +1595,7 @@ export class AgentRunner implements RunnerModelHost {
       toolCalls: ToolCallRequest[],
       planDecision: unknown,
     ) => Promise<Msg[]>
+    cancel: (reason?: string) => Promise<void>
   } {
     const toolCallsRef: { current: ToolCallRequest[] } = { current: [] }
     const planDecisionRef: { current: unknown } = { current: entryPlanDecision }
@@ -1350,6 +1625,9 @@ export class AgentRunner implements RunnerModelHost {
         const resultThought = toolResultSummaryThought(toolCalls, resultsById)
         if (resultThought) await this.emitAgentThought(resultThought, emit)
         return [...toolMessages, ...planFollowups]
+      },
+      cancel: async (reason): Promise<void> => {
+        await run.cancel(reason)
       },
     }
   }
@@ -1392,6 +1670,7 @@ export class AgentRunner implements RunnerModelHost {
     planDecision: unknown,
     signal: AbortSignal | null,
     executionEnvironment: ExecutionEnvironment | null,
+    turnId: string | null,
   ): Promise<{
     result: ToolResultObj
     executed: boolean
@@ -1590,6 +1869,8 @@ export class AgentRunner implements RunnerModelHost {
       ...(emit && tool && tool.requiresRuntimeContext ? { emit } : {}),
       parentCallId: effectiveCall.id,
       sessionId: this.sessionId,
+      taskId: this.taskId,
+      subagentDepth: this.subagentDepth,
       signal,
       executionEnvironment,
     }
@@ -1620,11 +1901,35 @@ export class AgentRunner implements RunnerModelHost {
     throwIfAborted(signal)
     let result: ToolResultObj
     try {
-      result = await this.registry.executeResult(
-        effectiveCall.name,
-        effectiveCall.arguments,
-        ctx,
-      )
+      const execute = async () =>
+        await this.registry.executeResult(
+          effectiveCall.name,
+          effectiveCall.arguments,
+          ctx,
+        )
+      const paths = managedCheckpointPaths(effectiveCall, tool)
+      if (
+        this.fileCheckpoints &&
+        this.sessionId &&
+        this.workspaceRoot &&
+        paths.length
+      ) {
+        result = (
+          await this.fileCheckpoints.capture(
+            {
+              sessionId: this.sessionId,
+              turnId: turnId ?? `tool-${effectiveCall.id}`,
+              toolCallId: effectiveCall.id,
+              toolName: effectiveCall.name,
+              workspaceRoot: this.workspaceRoot,
+              paths,
+            },
+            execute,
+          )
+        ).value
+      } else {
+        result = await execute()
+      }
     } catch (error) {
       throwIfAborted(signal)
       if (error instanceof TurnPaused || error instanceof CancelledTaskError)
@@ -1890,7 +2195,7 @@ export class AgentRunner implements RunnerModelHost {
     turnId: string | null,
   ): Promise<void> {
     if (!(this.compactor && this.tokenTracker)) return
-    if (process.env.EMPEROR_AUTO_MEMORY_COMPACT !== '1') return
+    if (!this.autoCompact) return
     const maxContext = this.effectiveMaxContext()
     if (!this.tokenTracker.shouldCompact(maxContext, this.compactThreshold))
       return
@@ -2058,8 +2363,42 @@ function throwIfAborted(signal: AbortSignal | null | undefined): void {
   if (signal?.aborted) throw new CancelledTaskError('turn')
 }
 
+async function consumeRunnerInterjections(
+  host: AgentRunnerInterjectionHost | null,
+): Promise<Msg[]> {
+  if (!host) return []
+  const messages = await host.consume()
+  if (!Array.isArray(messages))
+    throw new Error('interjection host returned an invalid message batch')
+  return messages.map((message) => {
+    if (!isRecord(message) || message.role !== 'user')
+      throw new Error('interjection messages must have the user role')
+    const content = String(message.content ?? '')
+    if (!content.trim()) throw new Error('interjection message is empty')
+    return { ...message, role: 'user', content }
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function positiveOptionalInt(value: unknown): number | null {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.trunc(parsed)
+}
+
+function modelUsageTokens(usage: Record<string, number>): number {
+  const total = Number(usage.total ?? usage.total_tokens)
+  if (Number.isFinite(total) && total > 0) return Math.trunc(total)
+  const input = Number(usage.input ?? usage.input_tokens)
+  const output = Number(usage.output ?? usage.output_tokens)
+  return Math.max(
+    0,
+    Math.trunc(Number.isFinite(input) ? input : 0) +
+      Math.trunc(Number.isFinite(output) ? output : 0),
+  )
 }
 
 function emptyHookDecision(): HookAggregateDecision {

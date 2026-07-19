@@ -35,7 +35,12 @@ export function emptyChatProjection(): ChatProjectionState {
 
 const CHAT_PROJECTION_EVENTS = new Set([
   'user_message',
+  'prompt_queued',
+  'prompt_dequeued',
+  'prompt_interjected',
+  'prompt_cancelled',
   'message_delta',
+  'message_tombstoned',
   'agent_thought',
   'tool_call',
   'tool_result',
@@ -90,6 +95,36 @@ export function applyChatProjectionEvent(
 
   if (event.event === 'user_message') {
     applyUserMessage(state, event, runtime)
+    return state
+  }
+
+  if (
+    event.event === 'prompt_queued' ||
+    event.event === 'prompt_dequeued' ||
+    event.event === 'prompt_interjected' ||
+    event.event === 'prompt_cancelled'
+  ) {
+    applyPromptState(state, event)
+    return state
+  }
+
+  if (event.event === 'message_tombstoned') {
+    const assistant =
+      assistantForEvent(state, event, runtime, false) || currentAssistant(state)
+    if (assistant) {
+      const endedAt = eventTimeMs(event)
+      finishActiveThought(assistant, event)
+      finishTimedState(assistant, endedAt)
+      settleRunningToolSegments(assistant, {
+        endedAt,
+        status: 'error_aborted',
+        summary: '回答已被新的用户指令替代',
+      })
+      assistant.streaming = false
+      assistant.tombstoned = true
+      assistant.terminalReason = event.reason || 'tombstoned'
+    }
+    state.currentAssistantId = null
     return state
   }
 
@@ -181,7 +216,10 @@ export function applyChatProjectionEvent(
       artifacts:
         event.event === 'tool_run_completed' ? event.artifacts : undefined,
       metadata:
-        event.event === 'tool_run_completed' ? event.metadata : undefined,
+        event.event === 'tool_run_completed' ||
+        event.event === 'tool_run_failed'
+          ? event.metadata
+          : undefined,
       endedAt: eventTimeMs(event),
     })
     return state
@@ -260,6 +298,16 @@ export function applyChatProjectionEvent(
       assistant.content = event.content || assistant.content
       syncAssistantDoneContent(assistant, event.content || '')
       assistant.streaming = false
+    }
+    for (const message of state.messages) {
+      if (
+        message.role === 'user' &&
+        message.turn_id === event.turn_id &&
+        message.deliveryState === 'running'
+      ) {
+        delete message.deliveryState
+        delete message.deliveryReason
+      }
     }
     if (event.turn_id) {
       runtime.resumeTurnTargets.delete(event.turn_id)
@@ -368,6 +416,53 @@ function applyUserMessage(
   })
 }
 
+function applyPromptState(
+  state: ChatProjectionState,
+  event: Extract<
+    WsEvent,
+    {
+      event:
+        | 'prompt_queued'
+        | 'prompt_dequeued'
+        | 'prompt_interjected'
+        | 'prompt_cancelled'
+    }
+  >,
+): void {
+  const turnId = event.turn_id || ''
+  const promptId = event.client_message_id || event.prompt_id
+  const existing = state.messages.find(
+    (message) =>
+      message.role === 'user' &&
+      ((promptId && message.id === promptId) ||
+        (turnId && message.turn_id === turnId)),
+  )
+  const user =
+    existing?.role === 'user'
+      ? existing
+      : {
+          id:
+            promptId ||
+            `prompt-${turnId || event.seq || state.messages.length + 1}`,
+          role: 'user' as const,
+          content: event.content || '',
+          turn_id: turnId || undefined,
+        }
+  if (!existing) state.messages.push(user)
+  if (event.content) user.content = event.content
+  if (turnId) user.turn_id = turnId
+  user.deliveryState =
+    event.event === 'prompt_queued'
+      ? 'queued'
+      : event.event === 'prompt_dequeued'
+        ? 'running'
+        : event.event === 'prompt_interjected'
+          ? 'interjected'
+          : 'cancelled'
+  user.deliveryReason =
+    event.event === 'prompt_cancelled' ? event.reason : undefined
+}
+
 function assistantForEvent(
   state: ChatProjectionState,
   event: { turn_id?: string; ts?: number; seq?: number },
@@ -390,7 +485,9 @@ function assistantForEvent(
     }
     const existing = state.messages.find(
       (message): message is AssistantMessage =>
-        message.role === 'assistant' && message.turn_id === turnId,
+        message.role === 'assistant' &&
+        message.turn_id === turnId &&
+        !message.tombstoned,
     )
     if (existing) {
       state.currentAssistantId = existing.id
@@ -398,7 +495,7 @@ function assistantForEvent(
     }
     // live 路径：本地发送时预建的无 turn_id 助手在第一个带 turn 的事件到达时被收养
     const current = currentAssistant(state)
-    if (current && !current.turn_id) {
+    if (current && !current.turn_id && !current.tombstoned) {
       current.turn_id = turnId
       const startedAt = runtime.turnClock.get(turnId)
       if (startedAt && (!current.startedAt || current.startedAt > startedAt)) {
@@ -414,8 +511,12 @@ function assistantForEvent(
   const startedAt = turnId
     ? runtime.turnClock.get(turnId) || eventTimeMs(event)
     : eventTimeMs(event)
+  const baseId = `assistant-${turnId || event.seq || state.messages.length + 1}`
+  const duplicateCount = state.messages.filter(
+    (message) => message.role === 'assistant' && message.id.startsWith(baseId),
+  ).length
   const assistant: AssistantMessage = {
-    id: `assistant-${turnId || event.seq || state.messages.length + 1}`,
+    id: duplicateCount ? `${baseId}-${duplicateCount + 1}` : baseId,
     role: 'assistant',
     content: '',
     segments: [],

@@ -1,4 +1,8 @@
-import type { TeamManager, TeamManagerPayload } from '../../team/manager'
+import type {
+  TeamCheckpointRecovery,
+  TeamManager,
+  TeamManagerPayload,
+} from '../../team/manager'
 import type { TeamMemberPayload, TeamMessagePayload } from '../../team/models'
 
 type Dict = Record<string, any>
@@ -94,7 +98,7 @@ export class CoreTeamService {
 
   wakeMember(
     name: string,
-    opts: { purpose?: string } = {},
+    opts: { purpose?: string; recovery?: TeamCheckpointRecovery } = {},
   ): Promise<CoreTeamMutationPayload> {
     this.assertMutation('team', 'wake teammate')
     return this.requireManager()

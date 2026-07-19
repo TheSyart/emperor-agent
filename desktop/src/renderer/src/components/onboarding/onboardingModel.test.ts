@@ -29,6 +29,14 @@ function boot(usable: boolean): BootstrapPayload {
       activeModelId: null,
       models: [],
       current: null,
+      policy: {
+        fallback: {
+          enabled: false,
+          entryId: null,
+          triggerOn: ['rate_limit'],
+        },
+        cost: { maxUsdPerAgentTurn: null },
+      },
       availability: {
         usable,
         message: usable ? '模型已配置' : '还没有可用模型，请先配置模型。',

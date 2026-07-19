@@ -4,12 +4,18 @@ import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type {
   SchedulerJob,
+  SchedulerMisfirePolicy,
   SchedulerPayload,
   SchedulerRunRecord,
   SchedulerSchedule,
 } from '../../types'
 import { actionIcons, navIcon, toolIcon } from '../../icons'
-import { canEditSchedulerJob } from './schedulerPanelModel'
+import {
+  canEditSchedulerJob,
+  schedulerMisfirePolicyLabel,
+  schedulerMisfirePolicyOptions,
+  schedulerRunStatusLabel,
+} from './schedulerPanelModel'
 
 const ctx = useAppContext()
 const selectedId = ref('')
@@ -20,6 +26,7 @@ const createName = ref('')
 const createMessage = ref('')
 const createDeliver = ref(true)
 const createDeleteAfterRun = ref(false)
+const createMisfirePolicy = ref<SchedulerMisfirePolicy>('skip')
 const createScheduleKind = ref<'at' | 'every' | 'cron'>('every')
 const createAtLocal = ref('')
 const createEveryMinutes = ref(60)
@@ -32,6 +39,7 @@ const editName = ref('')
 const editMessage = ref('')
 const editDeliver = ref(true)
 const editDeleteAfterRun = ref(false)
+const editMisfirePolicy = ref<SchedulerMisfirePolicy>('skip')
 const editScheduleKind = ref<'at' | 'every' | 'cron'>('every')
 const editAtLocal = ref('')
 const editEveryMinutes = ref(60)
@@ -65,6 +73,7 @@ const enabledCount = computed(() => scheduler.value.status?.enabled || 0)
 const nextRunLabel = computed(() =>
   formatMs(scheduler.value.status?.nextRunAtMs),
 )
+const misfireOptions = schedulerMisfirePolicyOptions()
 
 watch(
   jobs,
@@ -87,6 +96,7 @@ watch(
     editMessage.value = job.payload?.message || ''
     editDeliver.value = job.payload?.deliver !== false
     editDeleteAfterRun.value = Boolean(job.deleteAfterRun)
+    editMisfirePolicy.value = job.misfirePolicy || 'skip'
     setScheduleDraft(job.schedule, 'edit')
   },
   { immediate: true },
@@ -107,6 +117,7 @@ function resetCreateForm() {
   createMessage.value = ''
   createDeliver.value = true
   createDeleteAfterRun.value = false
+  createMisfirePolicy.value = 'skip'
   createScheduleKind.value = 'every'
   createAtLocal.value = ''
   createEveryMinutes.value = 60
@@ -152,6 +163,7 @@ async function createJob() {
         deliver: createDeliver.value,
       },
       deleteAfterRun: createDeleteAfterRun.value,
+      misfirePolicy: createMisfirePolicy.value,
     })
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     selectedId.value = result.job.id
@@ -176,12 +188,9 @@ async function saveSelected() {
         editCronExpr.value,
         editCronTz.value,
       ),
-      payload: {
-        ...selected.value.payload,
-        message: editMessage.value.trim(),
-        deliver: editDeliver.value,
-      },
+      payload: editablePayload(selected.value),
       deleteAfterRun: editDeleteAfterRun.value,
+      misfirePolicy: editMisfirePolicy.value,
     })
     if (ctx.boot.value) ctx.boot.value.scheduler = result.scheduler
     ctx.showToast('定时任务已保存')
@@ -245,7 +254,10 @@ function buildSchedule(
   everyMinutes: number,
   cronExpr: string,
   cronTz: string,
-): SchedulerSchedule {
+):
+  | { kind: 'at'; atMs: number }
+  | { kind: 'every'; everyMs: number }
+  | { kind: 'cron'; expr: string; tz: string } {
   if (kind === 'at') {
     return {
       kind: 'at',
@@ -262,6 +274,27 @@ function buildSchedule(
   return {
     kind: 'every',
     everyMs: Math.max(1, Number(everyMinutes || 1)) * 60 * 1000,
+  }
+}
+
+function editablePayload(job: SchedulerJob) {
+  if (job.payload.kind === 'team_wake') {
+    return {
+      kind: 'team_wake' as const,
+      message: editMessage.value.trim(),
+      target: String(job.payload.target || ''),
+      projectId: String(job.payload.projectId || ''),
+      deliver: editDeliver.value,
+      meta: job.payload.meta,
+    }
+  }
+  return {
+    kind: 'agent_turn' as const,
+    message: editMessage.value.trim(),
+    target: null,
+    projectId: job.payload.projectId,
+    deliver: editDeliver.value,
+    meta: job.payload.meta,
   }
 }
 
@@ -305,6 +338,8 @@ function payloadLabel(job: SchedulerJob) {
 }
 
 function statusLabel(job: SchedulerJob) {
+  if (job.state?.activeRun?.phase === 'running') return '运行中'
+  if (job.state?.activeRun?.phase === 'queued') return '排队中'
   if (!job.enabled) return '已暂停'
   if (job.state?.lastStatus === 'error') return '异常'
   if (job.protected) return '受保护'
@@ -323,16 +358,18 @@ function statusClass(job: SchedulerJob) {
 }
 
 function runStatusLabel(status?: string | null) {
-  if (status === 'ok') return '成功'
-  if (status === 'error') return '失败'
-  if (status === 'skipped') return '已跳过'
-  if (status === 'cancelled') return '已取消'
-  if (status === 'running') return '运行中'
-  return status || '-'
+  return schedulerRunStatusLabel(status)
 }
 
 function runKey(run: SchedulerRunRecord) {
-  return `${run.runAtMs}-${run.status}-${run.durationMs || 0}-${run.error || ''}`
+  return (
+    run.runId ||
+    `${run.runAtMs}-${run.status}-${run.durationMs || 0}-${run.error || ''}`
+  )
+}
+
+function policyLabel(policy?: SchedulerMisfirePolicy) {
+  return schedulerMisfirePolicyLabel(policy)
 }
 
 function formatDuration(ms?: number) {
@@ -373,6 +410,17 @@ function toLocalInputValue(ms: number) {
         ><b>{{ nextRunLabel }}</b
         >下次运行</span
       >
+      <span
+        ><b
+          >{{ scheduler.status.active || 0 }}/{{
+            scheduler.status.queued || 0
+          }}/{{ scheduler.status.maxConcurrentRuns || 2 }}</b
+        >运行 / 排队 / 上限</span
+      >
+      <span
+        ><b>{{ scheduler.status.maxPerOwner || 1 }}</b
+        >同一会话上限</span
+      >
       <button
         class="tool-button asset-button compact"
         :disabled="loading"
@@ -382,6 +430,9 @@ function toLocalInputValue(ms: number) {
         <span>刷新列表</span>
       </button>
     </div>
+    <p class="empty-note scheduler-runtime-note">
+      关闭应用时取消并中断运行；重启只恢复已持久排队的任务，不自动重放未确认完成的运行。启动期间无论错过多少次，最多补跑一次。
+    </p>
 
     <div v-if="!selected" class="scheduler-workspace">
       <section class="scheduler-list-shell">
@@ -473,6 +524,7 @@ function toLocalInputValue(ms: number) {
           >
           <span><b>创建</b>{{ formatMs(selected.createdAtMs) }}</span>
           <span><b>更新</b>{{ formatMs(selected.updatedAtMs) }}</span>
+          <span><b>错过策略</b>{{ policyLabel(selected.misfirePolicy) }}</span>
         </div>
 
         <label class="scheduler-field">
@@ -536,6 +588,22 @@ function toLocalInputValue(ms: number) {
             :disabled="!selectedCanEdit"
           />
         </label>
+
+        <label class="scheduler-field">
+          <span>应用关闭期间错过计划时</span>
+          <select v-model="editMisfirePolicy" :disabled="!selectedCanEdit">
+            <option
+              v-for="option in misfireOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <p class="empty-note">
+          此策略只影响启动恢复；无论错过多少次，单个任务最多进入队列一次。
+        </p>
 
         <label class="scheduler-check">
           <input
@@ -623,9 +691,18 @@ function toLocalInputValue(ms: number) {
           >
             <div class="team-message-top">
               <strong>{{ runStatusLabel(run.status) }}</strong>
-              <span>{{ formatMs(run.runAtMs) }}</span>
+              <span>实际 {{ formatMs(run.runAtMs) }}</span>
             </div>
-            <p>{{ formatDuration(run.durationMs) }}</p>
+            <p>
+              计划 {{ formatMs(run.scheduledForMs || run.runAtMs) }} ·
+              {{ formatDuration(run.durationMs) }} ·
+              {{ run.missedCount || 1 }} 次计划{{
+                run.countCapped ? '（计数已封顶）' : ''
+              }}
+            </p>
+            <small v-if="run.runId"
+              >run {{ run.runId }} · task {{ run.taskId || '-' }}</small
+            >
             <small v-if="run.error">{{ run.error }}</small>
           </article>
           <div v-if="!selectedRunHistory.length" class="empty-note">
@@ -699,6 +776,22 @@ function toLocalInputValue(ms: number) {
           <span>时区</span>
           <input v-model="createCronTz" placeholder="Asia/Shanghai" />
         </label>
+
+        <label class="scheduler-field">
+          <span>应用关闭期间错过计划时</span>
+          <select v-model="createMisfirePolicy">
+            <option
+              v-for="option in misfireOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <p class="empty-note">
+          最多补跑一次；“只运行最近一次”保留最新计划时间，“补跑最早一次”保留首次错过时间。
+        </p>
 
         <label class="scheduler-check"
           ><input v-model="createDeliver" type="checkbox" />

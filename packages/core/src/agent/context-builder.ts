@@ -25,6 +25,7 @@ export interface ContextSection {
   budgetChars: number | null
   version: string | null
   scope?: string | null
+  stability?: 'stable' | 'dynamic'
 }
 
 export interface ContextProjection {
@@ -322,7 +323,10 @@ export class ContextBuilder {
       })
     }
 
-    return sections
+    return sections.map((section) => ({
+      ...section,
+      stability: section.stability ?? 'stable',
+    }))
   }
 
   private buildContextPlan(sections: ContextSection[]): PromptContextPlan {

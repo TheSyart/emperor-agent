@@ -54,4 +54,13 @@ describe('single-model settings information architecture', () => {
     expect(panelSource).not.toContain('当前激活模型')
     expect(panelSource).not.toContain('ModelConfigRaw')
   })
+
+  it('exposes explicit default-off fallback and per-Agent-turn cost controls', () => {
+    expect(panelSource).toContain('saveModelPolicy')
+    expect(panelSource).toContain('备用模型（显式启用）')
+    expect(panelSource).toContain('每 Agent 轮成本上限')
+    expect(panelSource).toContain('每百万 tokens')
+    expect(panelSource).toContain('未知成本不会按 0 计算')
+    expect(panelSource).toContain('默认不会自动切换模型')
+  })
 })

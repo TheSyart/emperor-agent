@@ -173,12 +173,28 @@ describe('TaskManager and SidechainTranscript (test_task_runtime_api.py)', () =>
     expect(manager.completeTask(task.id, { summary: 'done' })?.status).toBe(
       TaskStatus.COMPLETED,
     )
-    expect(manager.failTask(task.id, { error: 'boom' })?.progress.error).toBe(
-      'boom',
+    expect(manager.failTask(task.id, { error: 'boom' })?.status).toBe(
+      TaskStatus.COMPLETED,
     )
+    const failedTask = manager.startTask({
+      kind: TaskKind.SUBAGENT,
+      title: 'Fail separately',
+      source: 'dispatch_subagent',
+    })
     expect(
-      manager.cancelTask(task.id, { reason: 'stop' })?.progress.reason,
+      manager.failTask(failedTask.id, { error: 'boom' })?.progress.error,
+    ).toBe('boom')
+    const cancelledTask = manager.startTask({
+      kind: TaskKind.SUBAGENT,
+      title: 'Cancel separately',
+      source: 'dispatch_subagent',
+    })
+    expect(
+      manager.cancelTask(cancelledTask.id, { reason: 'stop' })?.progress.reason,
     ).toBe('stop')
+    expect(
+      manager.completeTask(cancelledTask.id, { summary: 'late' })?.status,
+    ).toBe(TaskStatus.CANCELLED)
   })
 
   it('stamps session ownership onto started tasks', () => {

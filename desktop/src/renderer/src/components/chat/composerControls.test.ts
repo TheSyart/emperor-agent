@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   composerModeOptions,
   composerSendDisabled,
@@ -8,10 +10,31 @@ import {
 } from './composerControls'
 
 describe('composer control model', () => {
-  it('keeps the stop button clickable while a turn is busy', () => {
+  it('renders separate queue, interject, and stop actions while busy', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('./Composer.vue', import.meta.url)),
+      'utf8',
+    )
+    expect(source).toContain("submit('queue')")
+    expect(source).toContain("submit('interject')")
+    expect(source).toContain("emit('stop')")
+    const textarea = source.match(/<textarea[\s\S]*?\/>/)?.[0] || ''
+    expect(textarea).toContain(':disabled="goalCaptureStarting"')
+    expect(textarea).not.toContain(
+      ':disabled="props.busy || goalCaptureStarting"',
+    )
+  })
+
+  it('enables busy prompt delivery only for non-empty plain text', () => {
     expect(
       composerSendDisabled({ busy: true, content: '', attachmentCount: 0 }),
+    ).toBe(true)
+    expect(
+      composerSendDisabled({ busy: true, content: '插话', attachmentCount: 0 }),
     ).toBe(false)
+    expect(
+      composerSendDisabled({ busy: true, content: '', attachmentCount: 1 }),
+    ).toBe(true)
   })
 
   it('disables send only when idle with no content or attachments', () => {
@@ -26,7 +49,7 @@ describe('composer control model', () => {
     ).toBe(false)
   })
 
-  it('blocks idle sending when the model is unavailable without disabling the busy stop button', () => {
+  it('blocks idle sending when the model is unavailable without blocking a text interjection', () => {
     expect(
       composerSendDisabled({
         busy: false,

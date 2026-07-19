@@ -8,6 +8,22 @@ import {
   type PackagedSmokeCore,
 } from './packaged-smoke'
 
+function rendererReceipt() {
+  return {
+    ok: true as const,
+    nodeGlobalsAbsent: true,
+    coreBridge: true,
+    coreBootstrap: true,
+    attachment: { ok: true, bytes: 34 },
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    chromiumSandbox: 'enabled' as const,
+  }
+}
+
 function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
   const getStatus = vi.fn(async () => ({
     status: {
@@ -26,7 +42,27 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
       skills: [{ name: 'skill-creator', source: 'builtin' }],
     })),
     diagnostics: {
-      get: vi.fn(async () => ({ root: '/signed/runtime-defaults' })),
+      get: vi.fn(async () => ({
+        root: '/signed/runtime-defaults',
+        sandbox: {
+          backend: 'macos-seatbelt',
+          status: 'available',
+        },
+        lifecycle: {
+          state: 'ready',
+          failedServiceId: null,
+          failedPhase: null,
+          services: [
+            { id: 'process-runtime', required: true, state: 'ready' },
+            { id: 'code-intelligence', required: true, state: 'ready' },
+            { id: 'task-runtime', required: true, state: 'ready' },
+            { id: 'subagent-supervisor', required: true, state: 'ready' },
+            { id: 'session-runtime', required: true, state: 'ready' },
+            { id: 'mcp', required: true, state: 'ready' },
+            { id: 'scheduler', required: true, state: 'ready' },
+          ],
+        },
+      })),
     },
     environment: { getStatus },
     ...overrides,
@@ -84,6 +120,7 @@ describe('packaged smoke contract', () => {
       commit: 'b'.repeat(40),
       platform: 'darwin',
       arch: 'arm64',
+      verifyRenderer: async () => rendererReceipt(),
     })
 
     expect(core.bootstrap).toHaveBeenCalledOnce()
@@ -94,10 +131,30 @@ describe('packaged smoke contract', () => {
     })
     expect(receipt.operations).toMatchObject({
       bootstrap: { ok: true, builtInSkills: ['skill-creator'] },
-      diagnostics: { ok: true },
+      diagnostics: {
+        ok: true,
+        sandbox: {
+          backend: 'macos-seatbelt',
+          status: 'available',
+          provenance: 'host-os',
+        },
+        lifecycle: {
+          state: 'ready',
+          readyServices: [
+            'code-intelligence',
+            'mcp',
+            'process-runtime',
+            'scheduler',
+            'session-runtime',
+            'subagent-supervisor',
+            'task-runtime',
+          ],
+        },
+      },
       environment: { ok: true },
       glob: { ok: true },
       grep: { ok: true },
+      renderer: rendererReceipt(),
     })
     expect(receipt.installJobs).toEqual({ before: 0, after: 0 })
     expect(receipt.exitCode).toBe(0)
@@ -136,10 +193,75 @@ describe('packaged smoke contract', () => {
         commit: 'local',
         platform: 'linux',
         arch: 'x64',
+        verifyRenderer: async () => rendererReceipt(),
       }),
     ).rejects.toThrow(/skill-creator/i)
     expect(
       JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')),
     ).toMatchObject({ exitCode: 1, error: { code: 'smoke_failed' } })
+  })
+
+  it('fails closed when packaged diagnostics omit the sandbox capability receipt', async () => {
+    const fixture = smokeFixture()
+    const { core } = makeCore({
+      diagnostics: { get: vi.fn(async () => ({ root: '/runtime' })) },
+    })
+
+    await expect(
+      runPackagedSmoke({
+        core,
+        runtimeRoot: fixture.runtimeRoot,
+        stateRoot: fixture.stateRoot,
+        receiptPath: fixture.receiptPath,
+        appVersion: '0.1.0',
+        runtimeRevision: 'a'.repeat(64),
+        commit: 'b'.repeat(40),
+        platform: 'darwin',
+        arch: 'arm64',
+        verifyRenderer: async () => rendererReceipt(),
+      }),
+    ).rejects.toThrow(/sandbox/i)
+  })
+
+  it('fails closed when a required lifecycle service is not ready', async () => {
+    const fixture = smokeFixture()
+    const { core } = makeCore({
+      diagnostics: {
+        get: vi.fn(async () => ({
+          sandbox: { backend: 'macos-seatbelt', status: 'available' },
+          lifecycle: {
+            state: 'starting',
+            services: [
+              { id: 'process-runtime', required: true, state: 'ready' },
+              { id: 'code-intelligence', required: true, state: 'ready' },
+              { id: 'task-runtime', required: true, state: 'ready' },
+              {
+                id: 'subagent-supervisor',
+                required: true,
+                state: 'ready',
+              },
+              { id: 'session-runtime', required: true, state: 'starting' },
+              { id: 'mcp', required: true, state: 'pending' },
+              { id: 'scheduler', required: true, state: 'pending' },
+            ],
+          },
+        })),
+      },
+    })
+
+    await expect(
+      runPackagedSmoke({
+        core,
+        runtimeRoot: fixture.runtimeRoot,
+        stateRoot: fixture.stateRoot,
+        receiptPath: fixture.receiptPath,
+        appVersion: '0.1.0',
+        runtimeRevision: 'a'.repeat(64),
+        commit: 'b'.repeat(40),
+        platform: 'darwin',
+        arch: 'arm64',
+        verifyRenderer: async () => rendererReceipt(),
+      }),
+    ).rejects.toThrow(/lifecycle/i)
   })
 })

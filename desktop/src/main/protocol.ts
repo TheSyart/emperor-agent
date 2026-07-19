@@ -1,6 +1,26 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+const TRUSTED_CROSS_ORIGIN: Readonly<Record<string, string>> = {
+  attachments: 'app://bundle',
+  media: 'app://bundle',
+  bundle: 'app://bundle',
+  pet: 'app://pet',
+  'pet-assets': 'app://pet',
+}
+
+export function appAssetRequestAccess(
+  host: string,
+  origin: string | null,
+): { allowed: boolean; allowOrigin: string | null } {
+  if (!origin) return { allowed: true, allowOrigin: null }
+  const normalized = origin.trim().replace(/\/+$/, '')
+  const expected = TRUSTED_CROSS_ORIGIN[host] ?? null
+  if (!expected || normalized !== expected)
+    return { allowed: false, allowOrigin: null }
+  return { allowed: true, allowOrigin: expected }
+}
+
 // Map an app:// request pathname to a file inside the bundled renderer.
 //
 // Rules:
@@ -33,6 +53,25 @@ export function resolveAssetPath(
   }
 
   if (!path.extname(resolved)) return indexHtml
+  return resolved
+}
+
+export function resolveStaticAssetPath(
+  requestPath: string,
+  resourceRoot: string,
+): string | null {
+  let rel: string
+  try {
+    rel = decodeURIComponent(requestPath).replace(/^\/+/, '')
+  } catch {
+    return null
+  }
+  if (!rel) return null
+  const resolved = path.resolve(resourceRoot, rel)
+  const rootWithSep = resourceRoot.endsWith(path.sep)
+    ? resourceRoot
+    : resourceRoot + path.sep
+  if (!resolved.startsWith(rootWithSep) || !path.extname(resolved)) return null
   return resolved
 }
 

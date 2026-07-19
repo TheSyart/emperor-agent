@@ -5,30 +5,40 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "emperor-agent-acp": "./dist/bin/emperor-agent-acp.mjs"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./sessions/constants": "./src/sessions/constants.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:acp",
+    "build:acp": "node ../../scripts/build-acp.mjs",
+    "headless:acp": "npm run build:acp && node dist/bin/emperor-agent-acp.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "eval:hybrid-memory": "vitest run src/memory/hybrid-offline-eval.test.ts --reporter=verbose",
+    "eval:code-intelligence": "node --expose-gc ../../node_modules/vitest/vitest.mjs run src/code-intelligence/offline-eval.test.ts --reporter=verbose",
+    "eval:soft-git-rewind": "vitest run src/checkpoints/soft-git-rewind.test.ts src/checkpoints/soft-git-rewind-eval.test.ts --reporter=verbose",
     "lint": "eslint src --max-warnings=0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "0.21.5",
     "eslint": "^9.39.4",
-    "typescript": "^5.7.0",
     "typescript-eslint": "^8.62.1",
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.2.1",
     "@anthropic-ai/sdk": "^0.106.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "croner": "^10.0.1",
     "jsonrepair": "^3.14.1",
     "openai": "^6.45.0",
     "smol-toml": "^1.7.0",
+    "typescript": "5.9.3",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }

@@ -61,6 +61,7 @@ export interface AppContext {
   saveConfig: (content: string) => Promise<void>
   mcpContent: Ref<string>
   loadMcpConfig: () => Promise<void>
+  loadMcpStatus: () => Promise<BootstrapPayload['mcp']>
   saveMcpConfig: (content: string) => Promise<void>
   saveMemory: (content: string) => Promise<void>
   loadEpisode: (date: string) => Promise<{ date: string; content: string }>

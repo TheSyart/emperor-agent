@@ -19,12 +19,20 @@ import {
   GOAL_PERMISSION_BLOCKER_QUESTION_ID,
 } from '../control/goal-blocker'
 import { ExternalBridgeService } from '../external/service'
+import { ExternalAuditStore } from '../external/audit'
+import {
+  loadExternalConfig,
+  type LoadedExternalConfig,
+} from '../external/config'
+import { SignedWebhookAdapter } from '../external/signed-webhook'
 import {
   AgentLoop,
   type AgentLoopCreateOptions,
   type LoopModelRouter,
 } from '../agent/loop'
 import type { RuntimePaths } from '../runtime/paths'
+import type { EventEnvelopeV2 } from '../runtime/envelope'
+import { LifecycleSupervisor } from '../runtime/lifecycle'
 import { RuntimeEventStore } from '../runtime/store'
 import {
   assertCoreMutationAllowed,
@@ -41,8 +49,10 @@ import {
   type UserConfigPayload,
 } from './services/config-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
+import { CoreEffectiveConfigService } from './services/effective-config-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
+import { CoreFileCheckpointService } from './services/file-checkpoint-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { CoreModelService } from './services/model-service'
@@ -54,7 +64,12 @@ import { planToDict } from '../plans/models'
 import { SidechainTranscript } from '../tasks/sidechain'
 import { ToolResultStore } from '../context/tool-results'
 import { WatchlistService } from '../watchlist/service'
-import { SchedulerPayload, SchedulerSchedule } from '../scheduler/models'
+import {
+  SchedulerMisfirePolicy,
+  SchedulerPayload,
+  SchedulerSchedule,
+  schedulerJobPublicPayload,
+} from '../scheduler/models'
 import type { CoreOperationKey } from './operations'
 import { missingSkillRequirementsFromStatus } from '../environment/probe'
 import type { SkillRequirements } from '../skills/manager'
@@ -79,11 +94,18 @@ export interface CoreRuntimeEventPayload {
   [key: string]: unknown
 }
 
-export interface CoreRuntimeReplayPayload {
+export type CoreRuntimeReplayFormat = 'projection' | 'envelope_v2'
+
+export interface CoreRuntimeReplayPayload<
+  TFormat extends CoreRuntimeReplayFormat = 'projection',
+> {
   sessionId: string
   afterSeq: number
   latestSeq: number
-  events: CoreRuntimeEventPayload[]
+  format: TFormat
+  events: Array<
+    TFormat extends 'envelope_v2' ? EventEnvelopeV2 : CoreRuntimeEventPayload
+  >
   [key: string]: unknown
 }
 
@@ -91,16 +113,19 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('chat.submit', 'IPC', 'chat.submit'),
   op('bootstrap', 'GET', '/api/bootstrap'),
   op('chat.stopRuntime', 'POST', '/api/runtime/stop'),
+  op('config.effective', 'GET', '/api/config/effective'),
   op('config.get', 'GET', '/api/config'),
   op('config.save', 'POST', '/api/config'),
   op('attachments.save', 'POST', '/api/attachments'),
   op('attachments.rawPath', 'GET', '/api/attachments/{id}/raw'),
   op('mcp.getConfig', 'GET', '/api/mcp-config'),
+  op('mcp.status', 'GET', '/api/mcp-status'),
   op('mcp.saveConfig', 'POST', '/api/mcp-config'),
   op('model.discoverModels', 'IPC', 'model.discoverModels'),
   op('model.getConfig', 'GET', '/api/model-config'),
   op('model.resolveProfile', 'IPC', 'model.resolveProfile'),
   op('model.saveEntry', 'POST', '/api/models'),
+  op('model.savePolicy', 'PATCH', '/api/model-policy'),
   op('model.deleteEntry', 'DELETE', '/api/models/{entryId}'),
   op('model.activate', 'POST', '/api/models/{entryId}/activate'),
   op(
@@ -155,6 +180,10 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('team.wakeMember', 'POST', '/api/team/members/{name}/wake'),
   op('team.shutdownMember', 'POST', '/api/team/members/{name}/shutdown'),
   op('external.get', 'GET', '/api/external'),
+  op('fileCheckpoints.list', 'IPC', 'fileCheckpoints.list'),
+  op('fileCheckpoints.preview', 'IPC', 'fileCheckpoints.preview'),
+  op('fileCheckpoints.rewind', 'IPC', 'fileCheckpoints.rewind'),
+  op('fileCheckpoints.rewindGit', 'IPC', 'fileCheckpoints.rewindGit'),
   op('hooks.getConfig', 'GET', '/api/hooks'),
   op('hooks.saveConfig', 'POST', '/api/hooks'),
   op('hooks.getAudit', 'GET', '/api/hooks/audit'),
@@ -167,6 +196,13 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('tasks.list', 'GET', '/api/tasks'),
   op('tasks.get', 'GET', '/api/tasks/{task_id}'),
   op('tasks.transcript', 'GET', '/api/tasks/{task_id}/transcript'),
+  op('tasks.wait', 'IPC', 'tasks.wait'),
+  op('tasks.readOutput', 'GET', '/api/tasks/{task_id}/output'),
+  op('tasks.cancel', 'POST', '/api/tasks/{task_id}/cancel'),
+  op('tasks.resume', 'POST', '/api/tasks/{task_id}/resume'),
+  op('processes.list', 'GET', '/api/processes'),
+  op('processes.cancel', 'POST', '/api/processes/{process_id}/cancel'),
+  op('processes.reparent', 'POST', '/api/processes/{process_id}/reparent'),
   op('tools.readResult', 'GET', '/api/tools/results/{ref}'),
   op('memory.get', 'GET', '/api/memory'),
   op('memory.save', 'POST', '/api/memory'),
@@ -225,12 +261,15 @@ export class CoreApi {
   readonly attachmentStore: AttachmentStore
   readonly watchlist: WatchlistService
   readonly externalBridge: ExternalBridgeService
+  readonly externalLifecycle: LifecycleSupervisor
   readonly mainline: MainlineTurnService
   readonly chatService: ChatService
   readonly configService: CoreConfigService
+  readonly effectiveConfigService: CoreEffectiveConfigService
   readonly desktopPetService: CoreDesktopPetService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
+  readonly fileCheckpointService: CoreFileCheckpointService
   readonly hooksService: CoreHooksService
   readonly memoryService: CoreMemoryService
   readonly modelService: CoreModelService
@@ -241,6 +280,7 @@ export class CoreApi {
   private constructor(
     root: string,
     loop: AgentLoop,
+    externalConfig: LoadedExternalConfig,
     opts: Pick<CoreApiCreateOptions, 'appVersion' | 'runtimeRevision'> = {},
   ) {
     this.root = resolve(root)
@@ -262,6 +302,14 @@ export class CoreApi {
         reloadMcp: () => this.loop.reloadMcp(),
       },
       { templatesDir: this.loop.templatesDir },
+    )
+    this.effectiveConfigService = new CoreEffectiveConfigService(
+      this.paths.stateRoot,
+      {
+        skillManager: this.loop.skillManager,
+        skillResolutions: () => this.loop.effectiveSkillConfigResolutions(),
+        agentDefinitions: () => this.loop.subagentRegistry.snapshot(),
+      },
     )
     this.desktopPetService = new CoreDesktopPetService(this.root, {
       stateRoot: this.paths.stateRoot,
@@ -344,6 +392,15 @@ export class CoreApi {
       activeSession: () => this.loop.activeSession,
       assertMutation: (area, action) => this.assertMutation(area, action),
     })
+    this.fileCheckpointService = new CoreFileCheckpointService({
+      checkpoints: this.loop.fileCheckpoints,
+      softGitRewind: this.loop.softGitRewind,
+      applicationRoot: this.root,
+      activeSessionId: () => this.loop.activeSessionId,
+      requireReadableSession: (sessionId, operation) =>
+        this.requireReadableSession(sessionId, operation) as never,
+      assertMutation: (area, action) => this.assertMutation(area, action),
+    })
     this.mainline = new MainlineTurnService(this.loop)
     this.chatService = new ChatService(this.mainline)
     this.goalService = new GoalService({
@@ -377,7 +434,8 @@ export class CoreApi {
     this.externalBridge = new ExternalBridgeService({
       root: this.paths.stateRoot,
       canAcceptTurn: () =>
-        !this.loop.activeTasks.hasActive() &&
+        !this.loop.activeTasks.hasActiveKind('goal') &&
+        !this.loop.activeTasks.hasActiveForSession(this.loop.activeSessionId) &&
         !this.loop.controlManager.payload().pending,
       targetSessionId: () => this.loop.activeSessionId,
       eventSink: async (event) => {
@@ -385,7 +443,7 @@ export class CoreApi {
           sessionId: runtimeEventSessionId(event) || this.loop.activeSessionId,
         })
       },
-      submitTurn: async (payload) => {
+      submitTurn: async (payload, context) => {
         const turnId = String(
           payload.client_message_id ?? payload.clientMessageId ?? '',
         )
@@ -407,10 +465,49 @@ export class CoreApi {
             : isRecord(payload.memoryExtra)
               ? payload.memoryExtra
               : null,
+          signal: context?.signal ?? null,
         })
-        return result.turnId
+        return { turnId: result.turnId, content: result.content }
       },
     })
+    const signedWebhookConfig = externalConfig.config.signedWebhook
+    const externalAudit = new ExternalAuditStore(this.paths.stateRoot)
+    this.externalBridge.registerAdapter(
+      new SignedWebhookAdapter({
+        config: signedWebhookConfig,
+        secret: signedWebhookConfig.secretEnv
+          ? (process.env[signedWebhookConfig.secretEnv] ?? '')
+          : '',
+        auditStore: externalAudit,
+        configDiagnostics: {
+          path: externalConfig.diagnostics.path,
+          status: externalConfig.diagnostics.status,
+        },
+        preflight: () => {
+          if (signedWebhookConfig.mode === 'off') return null
+          const session = this.loop.sessionStore.get(
+            signedWebhookConfig.sessionId,
+          )
+          return session && !session.archived_at ? null : 'session_unavailable'
+        },
+        ingest: async (message, context) =>
+          await this.externalBridge.ingest(message, context),
+      }),
+    )
+    this.externalLifecycle = new LifecycleSupervisor(
+      [
+        {
+          id: 'external-bridge',
+          required: false,
+          dependsOn: [],
+          reconcile: () => undefined,
+          start: async () => await this.externalBridge.start(),
+          ready: () => undefined,
+          stop: async () => await this.externalBridge.stop(),
+        },
+      ],
+      { startTimeoutMs: 30_000, stopTimeoutMs: 5_000 },
+    )
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
       legacyStateMigration: this.loop.legacyStateMigration,
@@ -427,8 +524,18 @@ export class CoreApi {
           activeTurnIds: this.loop.activeMemoryStore.loadUnarchivedTurnIds(),
         }),
       workspacePolicy: () => this.loop.workspacePolicyDiagnostics() as Dict,
-      externalPayload: () => this.externalBridge.payload(),
+      sandboxCapability: () => ({ ...this.loop.processSandbox.capability() }),
+      processRuntime: () => this.loop.processRuntime.capabilityReport(),
+      lifecycle: () => this.loop.lifecycleSupervisor.snapshot(),
+      subagents: () => this.loop.subagentSupervisor.snapshot(),
+      agentDefinitions: () => this.loop.subagentRegistry.snapshot(),
+      effectiveConfig: () => this.effectiveConfigService.payload(),
+      hybridMemory: () => this.loop.hybridMemory.diagnostics(),
+      codeIntelligence: () => this.loop.codeIntelligence.diagnostics(),
+      mcp: () => this.loop.mcpClient.snapshot(),
+      externalPayload: () => this.externalPayload(),
       activeTasks: () => this.loop.activeTasks.list(),
+      sessionRuntimes: () => this.loop.sessionRuntimes.snapshot(),
       desktopPetPayload: () => this.desktopPet.get(),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
     })
@@ -437,13 +544,22 @@ export class CoreApi {
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
     const loop = opts.loop ?? (await AgentLoop.create(opts))
-    const api = new CoreApi(root, loop, opts)
-    await api.environmentService.initialize()
-    return api
+    let api: CoreApi | null = null
+    try {
+      const externalConfig = await loadExternalConfig(loop.paths.stateRoot)
+      api = new CoreApi(root, loop, externalConfig, opts)
+      await api.environmentService.initialize()
+      await api.externalLifecycle.start()
+      return api
+    } catch (error) {
+      if (api) await api.close().catch(() => {})
+      else await loop.close().catch(() => {})
+      throw error
+    }
   }
 
   async close(): Promise<void> {
-    await this.externalBridge.stop()
+    await this.externalLifecycle.stop('shutdown')
     await this.loop.close()
   }
 
@@ -483,10 +599,13 @@ export class CoreApi {
       runtime: {
         events: runtimeReplay.events,
         latestSeq: runtimeReplay.latestSeq,
-        busy: this.loop.activeTasks.hasActive(),
+        busy: this.loop.activeTasks.hasActiveForSession(
+          this.loop.activeSessionId,
+        ),
         active_tasks: this.loop.activeTasks.list(),
         stats: this.loop.runtimeStore.stats({ activeTurnIds }),
       },
+      mcp: this.mcp.status(),
       projects: this.projects.list(),
       diagnostics: await this.diagnostics.get(),
     }
@@ -501,10 +620,15 @@ export class CoreApi {
       clientMessageId?: string | null
       sessionId?: string | null
       uiHidden?: boolean | null
+      delivery?: 'queue' | 'interject' | null
       clientDraftId?: string | null
       draftSession?: DraftSessionInput | null
       attachments?: string[] | null
       requestedSkills?: Array<{ name: string; source?: string }> | null
+      /** In-process adapters only; IPC validation never accepts AbortSignal objects. */
+      signal?: AbortSignal | null
+      /** Trusted in-process adapter provenance. Browser IPC remains `chat`. */
+      source?: string | null
     }) => {
       const result = await this.chatService.submit({
         content: String(opts.content ?? ''),
@@ -514,10 +638,13 @@ export class CoreApi {
         clientMessageId: opts.clientMessageId ?? null,
         sessionId: opts.sessionId ?? null,
         uiHidden: opts.uiHidden ?? false,
+        delivery: opts.delivery ?? 'queue',
         clientDraftId: opts.clientDraftId ?? null,
         draftSession: opts.draftSession ?? null,
         attachmentIds: opts.attachments ?? null,
         requestedSkills: opts.requestedSkills ?? null,
+        signal: opts.signal ?? null,
+        source: opts.source ?? 'chat',
       })
       return result
     },
@@ -551,7 +678,7 @@ export class CoreApi {
   }
 
   readonly runtime = {
-    replay: (
+    replay: <TFormat extends CoreRuntimeReplayFormat = 'projection'>(
       opts: {
         sessionId?: string | null
         afterSeq?: number | string | null
@@ -560,8 +687,9 @@ export class CoreApi {
         includeArchive?: boolean | string | null
         include_archive?: boolean | string | null
         compact?: boolean | string | null
+        format?: TFormat | null
       } = {},
-    ): CoreRuntimeReplayPayload => {
+    ): CoreRuntimeReplayPayload<TFormat> => {
       const sessionId = this.requireReadableSessionId(
         opts.sessionId ?? this.loop.activeSessionId ?? null,
         'runtime.replay',
@@ -576,6 +704,7 @@ export class CoreApi {
       // P1-5：回放默认读取侧压缩（磁盘不变）；传 compact:false 取原始流
       const compact =
         opts.compact === undefined ? true : normalizedBoolean(opts.compact)
+      const format = opts.format ?? 'projection'
       const store = new RuntimeEventStore(
         this.loop.sessionStore.sessionDir(sessionId),
         { sessionDirOverride: true },
@@ -584,22 +713,51 @@ export class CoreApi {
         sessionId,
         afterSeq,
         latestSeq: store.latestSeq,
-        events: store
-          .replayAfter(afterSeq, {
-            sessionId,
-            limit,
-            includeArchive,
-            compact,
-          })
-          .map((event) => ({
-            ...event,
-            event: String(event.event ?? ''),
-          })),
-      }
+        format,
+        events:
+          format === 'envelope_v2'
+            ? store.replayEnvelopesAfter(afterSeq, {
+                sessionId,
+                limit,
+                includeArchive,
+              })
+            : store
+                .replayAfter(afterSeq, {
+                  sessionId,
+                  limit,
+                  includeArchive,
+                  compact,
+                })
+                .map((event) => ({
+                  ...event,
+                  event: String(event.event ?? ''),
+                })),
+      } as CoreRuntimeReplayPayload<TFormat>
     },
   }
 
+  readonly fileCheckpoints = {
+    list: (input: { sessionId?: string | null } = {}) =>
+      this.fileCheckpointService.list(input),
+    preview: (input: { sessionId: string; checkpointId: string }) =>
+      this.fileCheckpointService.preview(input),
+    rewind: (input: {
+      sessionId: string
+      checkpointId: string
+      confirmed: boolean
+    }) => this.fileCheckpointService.rewind(input),
+    rewindGit: (input: {
+      sessionId: string
+      checkpointId: string
+      confirmed: boolean
+      confirmedGitRisk: boolean
+      previewRevision: string
+      dirtyStrategy: 'abort' | 'stash'
+    }) => this.fileCheckpointService.rewindGit(input),
+  }
+
   readonly config = {
+    effective: () => this.effectiveConfigService.payload(),
     get: (): UserConfigPayload => this.configService.getUserConfig(),
     save: (
       body: { content?: unknown } | string = {},
@@ -629,6 +787,7 @@ export class CoreApi {
 
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
+    status: () => this.loop.mcpClient.snapshot(),
     saveConfig: async (raw: Dict) => {
       // mcp.saveConfig 落盘后会经 MCPClient 以 servers.*.command 起子进程（stdio transport）；
       // 未经审批就能被 renderer 一条 IPC 写任意 command/args 是一条进程执行 pivot（审计 P0-5）。
@@ -670,6 +829,13 @@ export class CoreApi {
       this.assertMutation('model', 'saveEntry')
       await this.hooksService.authorizeConfigChange('model.saveEntry', entry)
       return this.modelService.saveEntry(entry)
+    },
+    savePolicy: async (
+      policy: Parameters<CoreModelService['savePolicy']>[0],
+    ) => {
+      this.assertMutation('model', 'savePolicy')
+      await this.hooksService.authorizeConfigChange('model.savePolicy', policy)
+      return this.modelService.savePolicy(policy)
     },
     deleteEntry: async ({ entryId }: { entryId: string }) => {
       this.assertMutation('model', 'deleteEntry')
@@ -913,7 +1079,7 @@ export class CoreApi {
       status: this.loop.schedulerService.status(),
       jobs: this.loop.schedulerService
         .listJobs({ includeDisabled: true })
-        .map((job) => job.toDict()),
+        .map(schedulerJobPublicPayload),
       diagnostics: this.loop.schedulerStore.diagnostics(),
     }),
     createJob: (args: Dict) => {
@@ -931,8 +1097,12 @@ export class CoreApi {
         deleteAfterRun: Boolean(
           args.deleteAfterRun ?? args.delete_after_run ?? false,
         ),
+        misfirePolicy: schedulerMisfirePolicyFromApi(args.misfirePolicy),
       })
-      return { job: job.toDict(), scheduler: this.scheduler.get() }
+      return {
+        job: schedulerJobPublicPayload(job),
+        scheduler: this.scheduler.get(),
+      }
     },
     updateJob: (jobId: string, args: Dict) => {
       this.assertMutation('scheduler', 'update')
@@ -956,12 +1126,19 @@ export class CoreApi {
           args.delete_after_run === undefined
             ? undefined
             : Boolean(args.deleteAfterRun ?? args.delete_after_run),
+        misfirePolicy:
+          args.misfirePolicy === undefined
+            ? undefined
+            : schedulerMisfirePolicyFromApi(args.misfirePolicy),
       })
       if (result === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
       if (result === 'protected')
         throw new Error(`scheduler job is protected: ${jobId}`)
-      return { job: result.toDict(), scheduler: this.scheduler.get() }
+      return {
+        job: schedulerJobPublicPayload(result),
+        scheduler: this.scheduler.get(),
+      }
     },
     runJob: async (jobId: string) => {
       this.assertMutation('scheduler', 'run')
@@ -976,14 +1153,20 @@ export class CoreApi {
       const job = this.loop.schedulerService.enableJob(jobId, false)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
-      return { job: job.toDict(), scheduler: this.scheduler.get() }
+      return {
+        job: schedulerJobPublicPayload(job),
+        scheduler: this.scheduler.get(),
+      }
     },
     resumeJob: (jobId: string) => {
       this.assertMutation('scheduler', 'resume')
       const job = this.loop.schedulerService.enableJob(jobId, true)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
-      return { job: job.toDict(), scheduler: this.scheduler.get() }
+      return {
+        job: schedulerJobPublicPayload(job),
+        scheduler: this.scheduler.get(),
+      }
     },
     deleteJob: (jobId: string) => {
       this.assertMutation('scheduler', 'delete')
@@ -992,6 +1175,8 @@ export class CoreApi {
         throw new Error(`scheduler job not found: ${jobId}`)
       if (result === 'protected')
         throw new Error(`scheduler job is protected: ${jobId}`)
+      if (result === 'active')
+        throw new Error(`scheduler job is active: ${jobId}`)
       return { deleted: jobId, scheduler: this.scheduler.get() }
     },
   }
@@ -1081,6 +1266,13 @@ export class CoreApi {
     },
   }
 
+  private externalPayload(): Dict {
+    return {
+      ...this.externalBridge.payload(),
+      lifecycle: this.externalLifecycle.snapshot(),
+    }
+  }
+
   readonly team = {
     get: () => this.teamService.get(),
     getMember: (name: string) => this.teamService.getMember(name),
@@ -1092,13 +1284,53 @@ export class CoreApi {
     }) => this.teamService.spawnMember(opts),
     sendMessage: (opts: { to: string; content: string; wake?: boolean }) =>
       this.teamService.sendMessage(opts),
-    wakeMember: (name: string, opts: { purpose?: string } = {}) =>
-      this.teamService.wakeMember(name, opts),
+    wakeMember: (
+      name: string,
+      opts: { purpose?: string; recovery?: 'auto' | 'retry' } = {},
+    ) => this.teamService.wakeMember(name, opts),
     shutdownMember: (name: string) => this.teamService.shutdownMember(name),
   }
 
   readonly external = {
-    get: (): Dict => this.externalBridge.payload(),
+    get: (): Dict => this.externalPayload(),
+  }
+
+  readonly processes = {
+    list: (opts: { activeOnly?: boolean } = {}): Dict[] =>
+      this.loop.processRuntime
+        .list({
+          activeOnly: opts.activeOnly,
+          sessionId: this.loop.activeSessionId,
+        })
+        .map((receipt) => receipt as unknown as Dict),
+    cancel: (
+      processId: string,
+      opts: { leaseId: string; reason?: string },
+    ): Dict => {
+      this.assertMutation('processes', 'cancel')
+      this.assertProcessOwner(processId)
+      return this.loop.processRuntime.cancel(
+        processId,
+        opts.leaseId,
+        opts.reason,
+      ) as unknown as Dict
+    },
+    reparent: (
+      processId: string,
+      opts: {
+        leaseId: string
+        ownerKind: 'session' | 'task' | 'terminal'
+        ownerId: string
+      },
+    ): Dict => {
+      this.assertMutation('processes', 'reparent')
+      this.assertProcessOwner(processId)
+      return this.loop.processRuntime.reparent(processId, opts.leaseId, {
+        kind: opts.ownerKind,
+        id: opts.ownerId,
+        sessionId: this.loop.activeSessionId,
+      }) as unknown as Dict
+    },
   }
 
   readonly tasks = {
@@ -1117,6 +1349,73 @@ export class CoreApi {
       taskId: string,
       opts: { offset?: number; limit?: number } = {},
     ) => new SidechainTranscript(this.paths.stateRoot, taskId).read(opts),
+    wait: async (
+      taskId: string,
+      opts: { timeoutMs?: number } = {},
+    ): Promise<Dict | null> => {
+      this.loop.subagentSupervisor.assertOwner(
+        taskId,
+        this.loop.activeSessionId,
+      )
+      const terminal = await this.loop.subagentSupervisor.wait(taskId, opts)
+      if (!terminal) return null
+      return {
+        status: terminal.status,
+        task: terminal.record.toDict(),
+        ...(terminal.reason ? { reason: terminal.reason } : {}),
+        ...(terminal.error ? { error: terminal.error } : {}),
+      }
+    },
+    readOutput: async (taskId: string, opts: { cursor?: string } = {}) => {
+      this.loop.subagentSupervisor.assertOwner(
+        taskId,
+        this.loop.activeSessionId,
+      )
+      const output = await this.loop.subagentSupervisor.readOutput(
+        taskId,
+        opts.cursor,
+      )
+      return {
+        content: output.content,
+        nextCursor: output.nextCursor,
+        eof: output.eof,
+        truncated: output.truncated,
+        truncation: output.truncation,
+      }
+    },
+    cancel: async (
+      taskId: string,
+      opts: { reason?: string } = {},
+    ): Promise<Dict> => {
+      this.assertMutation('tasks', 'cancel')
+      this.loop.subagentSupervisor.assertOwner(
+        taskId,
+        this.loop.activeSessionId,
+      )
+      const task = await this.loop.subagentSupervisor.cancel(
+        taskId,
+        opts.reason,
+      )
+      return task.toDict() as unknown as Dict
+    },
+    resume: async (
+      taskId: string,
+      opts: {
+        mode?: 'foreground' | 'background'
+        ttlMs?: number
+      } = {},
+    ): Promise<Dict> => {
+      this.assertMutation('tasks', 'resume')
+      this.loop.subagentSupervisor.assertOwner(
+        taskId,
+        this.loop.activeSessionId,
+      )
+      const launched = await this.loop.subagentSupervisor.resume(taskId, opts)
+      return {
+        task: launched.task.toDict(),
+        mode: launched.mode,
+      }
+    },
   }
 
   readonly tools = {
@@ -1256,6 +1555,15 @@ export class CoreApi {
       area,
       action,
     })
+  }
+
+  private assertProcessOwner(processId: string): void {
+    const receipt = this.loop.processRuntime.get(processId)
+    if (!receipt || receipt.owner.sessionId !== this.loop.activeSessionId)
+      throw new CoreMutationGuardError(
+        403,
+        `Process is not owned by the active session: ${processId}`,
+      )
   }
 
   private async resumeControl(
@@ -1528,6 +1836,18 @@ function schedulerPayloadFromApi(
   if (kind === 'team_wake' && !payload.project_id)
     throw new Error('projectId is required for team_wake scheduler jobs')
   return payload
+}
+
+function schedulerMisfirePolicyFromApi(value: unknown): SchedulerMisfirePolicy {
+  if (value === undefined || value === null) return SchedulerMisfirePolicy.SKIP
+  if (value === SchedulerMisfirePolicy.SKIP) return SchedulerMisfirePolicy.SKIP
+  if (value === SchedulerMisfirePolicy.LATEST)
+    return SchedulerMisfirePolicy.LATEST
+  if (value === SchedulerMisfirePolicy.CATCH_UP_ONE)
+    return SchedulerMisfirePolicy.CATCH_UP_ONE
+  throw new Error(
+    'scheduler misfirePolicy must be skip, latest, or catch-up-one',
+  )
 }
 
 export type { LoopModelRouter }

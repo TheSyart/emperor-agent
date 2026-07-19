@@ -32,6 +32,23 @@ export function systemBootMarker(): string | null {
       return bootId ? sha256(`linux:${bootId}`) : null
     }
     if (process.platform === 'darwin') {
+      try {
+        const bootSessionUuid = execFileSync(
+          'sysctl',
+          ['-n', 'kern.bootsessionuuid'],
+          { encoding: 'utf8', timeout: 1_000 },
+        )
+          .trim()
+          .toLowerCase()
+        if (
+          /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(
+            bootSessionUuid,
+          )
+        )
+          return sha256(`darwin:${bootSessionUuid}`)
+      } catch {
+        // Older Darwin variants may not expose kern.bootsessionuuid.
+      }
       const value = execFileSync('sysctl', ['-n', 'kern.boottime'], {
         encoding: 'utf8',
         timeout: 1_000,

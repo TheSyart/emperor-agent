@@ -8,7 +8,9 @@ describe('SessionSidebar deletion safeguards', () => {
   it('disables deletion of the last persisted session and reports Core failures', () => {
     expect(source).toContain('canDeletePersistedSession')
     expect(source).toContain('sessionActionError')
-    expect(source).toContain(':disabled="!s.draft && !canDeletePersistedSession"')
+    expect(source).toContain(
+      ':disabled="!s.draft && !canDeletePersistedSession"',
+    )
     expect(source).toContain('ctx.showToast')
   })
 })

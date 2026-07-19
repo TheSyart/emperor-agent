@@ -2,18 +2,18 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者<br>
-> 最后核验：2026-07-18<br>
-> 事实源：`packages/core/src/control/`、`packages/core/src/permissions/`、`packages/core/src/plans/`、slash command parser
+> 最后核验：2026-07-19<br>
+> 事实源：`packages/core/src/control/`、`packages/core/src/permissions/`、`packages/core/src/plans/`、`packages/core/src/environment/sandbox.ts`、slash command parser
 
 Control 系统把“模型想做什么”和“Core 允许做什么”分开。界面、模型、Goal、Scheduler、Team 和 Hook 都不能自行扩大权限；最终决定由 Core 的 permission pipeline、pending interaction、workspace policy 和 mutation guard 共同完成。
 
 ## 三种执行权限与 Plan 状态
 
-| 内部值            | Slash command | 语义                                                                               |
-| ----------------- | ------------- | ---------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/mode ask`   | 低风险读取、普通文件写入和只读诊断命令可直接执行；敏感路径、批量替换和代码执行询问 |
-| `accept_edits`    | `/mode edits` | 普通文件编辑可直接执行；shell、高风险和非文件 mutation 仍按规则询问                |
-| `auto`            | `/mode auto`  | 在既有安全策略内尽量继续；不能证明为只读的 shell 命令仍需批准                      |
+| 内部值            | Slash command | 语义                                                                                            |
+| ----------------- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `ask_before_edit` | `/mode ask`   | 低风险读取、普通文件写入和只读诊断命令可直接执行；敏感路径、批量替换、删除/重命名和代码执行询问 |
+| `accept_edits`    | `/mode edits` | 普通文件编辑和精确 patch 可直接执行；删除/重命名、shell、高风险和非文件 mutation 仍按规则询问   |
+| `auto`            | `/mode auto`  | 在既有安全策略内尽量继续；不能证明为只读的 shell 命令仍需批准                                   |
 
 Plan 仍以内部 `mode === plan` 表示只读运行状态，但不再作为第四种用户权限。`/mode ask|edits|auto|status` 只管理执行权限；`/plan` 默认开启 Plan，`/plan on|off|status` 保留完整控制语义。Composer 的 `/` 菜单、裸命令和显式命令都经过同一个 renderer 生命周期控制器，不把命令帮助文字插入输入框。
 
@@ -29,13 +29,39 @@ flowchart TD
   Mode --> Workspace["Workspace path policy"]
   Workspace --> Decision{"允许执行?"}
   Decision -->|"需要确认"| Ask["持久化 Ask interaction"]
-  Decision -->|"允许"| Execute["执行并记录结果"]
+  Decision -->|"允许"| Containment["OS containment capability"]
+  Containment -->|"可用"| Execute["执行并记录 receipt"]
+  Containment -->|"必需但不可用"| Deny
   Decision -->|"拒绝"| Deny["返回稳定拒绝结果"]
 ```
 
 用户规则和确定性高风险限制优先于模式。`auto` 不是关闭安全检查，`accept_edits` 也不是 shell 的通行证。路径操作在执行前必须 canonicalize，并受 workspace allow / deny 规则限制。
 
+多路径文件操作不能只画像第一个参数。`rename_file` 通过 Tool contract 同时暴露 source 与 destination；permission rule 的 `pathGlob` 对任一路径匹配即生效，敏感路径检测同样扫描完整集合。`delete_file` 与 `rename_file` 在 `ask_before_edit` 和 `accept_edits` 下固定产生高风险批准，`apply_patch` 按普通精确文件编辑处理，但 `replace_all=true` 仍需批准。
+
 默认免审命令只包含经正向证明为只读的诊断入口。`pytest`、`python -m pytest`、`npm test`、`npm run ...` 等会加载项目控制的代码，必须创建高风险权限 Ask；命令名、测试框架或日常使用频率不能替代这个边界。显式用户规则和精确 Plan permission token 仍可按既有顺序受控授权。
+
+## Shell AST 与策略来源
+
+`run_command` 先经过有界的 `emperor-shell-ast-v1` 分类器。它把引号拼接还原为 argv，识别 pipeline、`&&` / `||`、序列、后台、redirect/heredoc、命令或进程替换、参数/算术展开、subshell、brace group 和 control flow；嵌套命令替换中的命令也进入风险检查。解析失败、Unicode 隐蔽空白、控制字符、节点/深度/长度超限和无法证明的复杂结构一律不能晋升为只读。
+
+只读不是“命令名白名单”。当前正向证明范围刻意很窄：受限 flags 的 `pwd`、只查看当前目录的 `ls`，以及拒绝输出文件、external diff/textconv、帮助执行路径和 branch mutation flags 的少量 Git 查询。管道、重定向、环境赋值、动态展开、workspace 外/UNC/parent-traversal 参数都会失去免审资格。旧 resolver 只作为收紧高风险结果的 fallback，不能授予 allow。
+
+每个 `PermissionDecision.explanation` 都包含所有规则候选的 action、source、trust、是否匹配与稳定 precedence，以及最终选中项。来源 trust 由加载层注入，不接受规则 JSON 自报。匹配候选按 `deny > ask > allow` 排序，同 action 再按 `system > managed > user > project > runtime > unknown`、specificity 和稳定输入顺序排序；低信任 allow 不能放宽高信任 ask/deny，Core 的 Plan、Auto 未证明只读、项目代码执行和高风险 shell 约束也不能被本地 allow 绕过。命令解释只保存结构、reason code、计数和 SHA-256 fingerprint，不保存 argv 或命令正文。
+
+规则层先通过共享 `ConfigResolver` 归一化，再进入 Permission precedence。builtin/user/project/session/managed 的次序与输入数组无关；managed 规则最后进入约束面。标记为 untrusted 的 project layer 只能贡献 `ask` / `deny`，其中的 `allow` 在解析阶段就被拒绝，不会依靠后续碰巧出现的 deny 兜底。这个层只适配旧规则输入，不把规则搬到新文件，也不接受 manifest 或远程 campaign 自报 trust。
+
+子代理 `AgentDefinition` 是 Permission 前的额外能力上限，不是新的 allow 来源。Extension source 的 trust 由 resolver loader 注入；session definition policy 只能求交集或选择更严格的 memory/sandbox/turn 上限。即使高优先级 manifest 声明某工具、网络或进程可用，Permission、workspace fence 或 OS containment 的 ask/deny/required 仍可继续收紧；manifest 和低层 session 数据不能覆盖这些 Core 约束。
+
+分类器是可替换 capability，但调用边界必须使用 fail-closed wrapper。分类器抛异常或返回无效结果时，`run_command` 转为 Ask；获准使用 Bash 的 command hook 也会在 spawn 前拒绝。新的 terminal/进程入口必须复用同一能力，而不是另写字符串 allowlist。
+
+## Permission 与 OS containment 是两份事实
+
+Permission decision 只回答“Core 是否授权尝试这个 effect”，不等于操作系统已经把进程隔离。`run_command` 在获准后还要经过 `OsSandboxController`：macOS 使用系统 Seatbelt (`sandbox-exec`)，Linux 使用已通过 user-namespace probe 的 `bwrap`，Windows 当前明确报告 `windows-unsupported`。每次执行都产生独立 containment receipt，包含实际 backend、capability status、filesystem/network/process-tree 能力和 policy hash；receipt 不含 profile 原文、HOME 或完整 PATH。`OwnedProcessRunner` 在 spawn 前提交 receipt；提交失败时不启动进程，避免先产生副作用再丢失 containment 事实。
+
+未证明只读的命令把 OS containment 设为 required。backend 缺失、probe 失败或平台不支持时，Core 在 spawn 前 fail closed，并返回 `containment_unavailable`，不会把权限批准伪装成 sandbox。严格只读诊断使用 preferred：backend 不可用时可以运行，但 receipt 必须明确标为 `unsandboxed`。当前 sandbox 只允许 workspace 和每次执行的私有临时目录写入，隐藏/拒绝 `stateRoot`，阻断 workspace 外读写、symlink/子进程逃逸和网络；读取系统运行库与受控 PATH root 只读放行。
+
+Linux 的生产 backend 当前只有 bwrap：probe 不只检查文件存在，还实际启动最小 namespace。直接 Landlock 需要经过审核的 native helper，当前未随包提供，因此 capability matrix 把它视为“尚无实现”，不能用 kernel 版本推测 available。Windows 同理保留 Job Object + ACL 研究项，但在实现、攻击测试和 package receipt 完成前保持 unsupported。
 
 ## Ask 生命周期
 

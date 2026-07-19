@@ -24,7 +24,7 @@
 3. `packages/core/src/api/core-api.ts` + `packages/core/src/api/services/*`
 4. `packages/core/src/agent/loop.ts` + `packages/core/src/agent/runner.ts`
 5. `packages/core/src/config/*` + `packages/core/src/model/*` + `packages/core/src/providers/*`
-6. `packages/core/src/tools/*` + `packages/core/src/subagents/*`
+6. `packages/core/src/tools/*` + `packages/core/src/subagents/*` + `packages/core/src/extensions/*`
 7. `packages/core/src/control/*` + `packages/core/src/permissions/*` + `packages/core/src/plans/*`
 8. `packages/core/src/memory/*` + `packages/core/src/sessions/*` + `packages/core/src/runtime/*`
 9. `packages/core/src/scheduler/*` + `packages/core/src/watchlist/*`
@@ -91,6 +91,7 @@ npm --prefix desktop run screenshots
 
 - 新 provider：`packages/core/src/providers/registry.ts`、`factory.ts` 和对应 provider 实现。
 - 新工具：`packages/core/src/tools/` 新建工具类，并在 `packages/core/src/agent/loop.ts` 注册。
+- 新 AgentDefinition/source：更新 `templates/subagents/agents.json` 与 `packages/core/src/extensions/resolver.ts`；source trust 只能由 host 注入，session policy 只能收紧，并同步打包资源 allowlist、Diagnostics 和兼容测试。
 - 新 CoreApi 能力：`packages/core/src/api/services/*` + `core-api.ts`，同步 `desktop/src/main/core-host.test.ts` 和 renderer API。
 - 新 Control/Plan/Permission 能力：优先放在 `packages/core/src/control/*`、`plans/*`、`permissions/*`，不要把策略散落到 UI 或 prompt 文案。
 - 新会话/记忆/Scheduler/Team/External/MCP 能力：优先在 `packages/core/src/<domain>/` 内保持 store/service/model 分层，再接 CoreApi。

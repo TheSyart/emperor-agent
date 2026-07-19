@@ -13,6 +13,14 @@ import {
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { basename, dirname, join } from 'node:path'
 import { relativePortable } from '../util/paths'
+import {
+  adaptRuntimeEventToEnvelope,
+  createEventEnvelopeV2,
+  isEventEnvelopeV2,
+  projectEventEnvelopeV2,
+  type EventEnvelopeV2,
+  type EventVisibility,
+} from './envelope'
 
 type Row = Record<string, any>
 
@@ -21,6 +29,16 @@ export interface RuntimeAppendOptions {
   sessionId?: string | null
   source?: string | null
   owner?: Row | null
+  envelopeV2?: boolean | null
+  eventId?: string | null
+  idempotencyKey?: string | null
+  requestId?: string | null
+  attemptId?: string | null
+  taskId?: string | null
+  parentTaskId?: string | null
+  toolCallId?: string | null
+  ownerId?: string | null
+  visibility?: EventVisibility | null
 }
 
 export interface RuntimeReplayOptions {
@@ -28,6 +46,7 @@ export interface RuntimeReplayOptions {
   sessionId?: string | null
   includeArchive?: boolean | null
   compact?: boolean | null
+  visibility?: EventVisibility | EventVisibility[] | null
 }
 
 /**
@@ -138,12 +157,22 @@ export class RuntimeEventStore {
   readonly archiveDir: string
   readonly indexFile: string
   private readonly sessionId: string | null
+  private readonly writeEnvelopeV2: boolean
+  private readonly idempotencyIndex = new Map<string, Row>()
   private _latestSeq = 0
   private lastIndexWriteMs = 0
 
-  constructor(root: string, opts: { sessionDirOverride?: boolean } = {}) {
+  constructor(
+    root: string,
+    opts: {
+      sessionDirOverride?: boolean
+      writeEnvelopeV2?: boolean | null
+    } = {},
+  ) {
     this.root = root
     this.sessionId = opts.sessionDirOverride ? basename(root) || null : null
+    this.writeEnvelopeV2 =
+      opts.writeEnvelopeV2 ?? process.env.EMPEROR_EVENT_ENVELOPE_V2 === '1'
     this.runtimeDir = opts.sessionDirOverride
       ? join(root, 'runtime')
       : join(root, 'memory', 'runtime')
@@ -152,6 +181,7 @@ export class RuntimeEventStore {
     this.indexFile = join(this.runtimeDir, 'index.json')
     this.ensure()
     this._latestSeq = this.scanLatestSeq()
+    this.rebuildIdempotencyIndex()
   }
 
   get latestSeq(): number {
@@ -159,6 +189,13 @@ export class RuntimeEventStore {
   }
 
   append(event: Row, opts: RuntimeAppendOptions = {}): Row {
+    const idempotencyKey = cleanString(
+      opts.idempotencyKey ?? event.idempotency_key ?? event.idempotencyKey,
+    )
+    if (idempotencyKey) {
+      const existing = this.idempotencyIndex.get(idempotencyKey)
+      if (existing) return this.normalizeEvent(existing)!
+    }
     this._latestSeq += 1
     const payload = jsonSafe({ ...event }) as Row
     payload.seq = this._latestSeq
@@ -175,18 +212,49 @@ export class RuntimeEventStore {
       turnId,
     })
     if (receipt) payload.owner = receipt
-    appendFileSync(this.eventsFile, JSON.stringify(payload) + '\n', 'utf8')
+    if (idempotencyKey) payload.idempotency_key = idempotencyKey
+    if (opts.eventId) payload.event_id = cleanString(opts.eventId)
+    if (opts.requestId) payload.request_id = cleanString(opts.requestId)
+    if (opts.attemptId) payload.attempt_id = cleanString(opts.attemptId)
+    if (opts.taskId) payload.task_id = cleanString(opts.taskId)
+    if (opts.parentTaskId)
+      payload.parent_task_id = cleanString(opts.parentTaskId)
+    if (opts.toolCallId) payload.tool_call_id = cleanString(opts.toolCallId)
+    if (opts.ownerId) payload.owner_id = cleanString(opts.ownerId)
+    if (opts.visibility) payload.visibility = opts.visibility
+
+    const stored: Row =
+      opts.envelopeV2 || (opts.envelopeV2 !== false && this.writeEnvelopeV2)
+        ? (createEventEnvelopeV2(payload, {
+            eventId: opts.eventId,
+            idempotencyKey,
+            sessionId,
+            turnId,
+            requestId: opts.requestId,
+            attemptId: opts.attemptId,
+            taskId: opts.taskId,
+            parentTaskId: opts.parentTaskId,
+            toolCallId: opts.toolCallId,
+            ownerId: opts.ownerId,
+            sequence: this._latestSeq,
+            timestamp: payload.ts,
+            visibility: opts.visibility,
+          }) as unknown as Row)
+        : payload
+    const projected = this.normalizeEvent(stored)!
+    appendFileSync(this.eventsFile, JSON.stringify(stored) + '\n', 'utf8')
+    if (idempotencyKey) this.idempotencyIndex.set(idempotencyKey, stored)
     // B6：index 重建是 O(全部事件) 的全量扫描，高频 delta 期间按时间窗节流；
     // 终态事件强制落盘，保证崩溃后 index 至多落后一个窗口。
     const now = Date.now()
     if (
-      INDEX_FORCE_WRITE_EVENTS.has(String(payload.event)) ||
+      INDEX_FORCE_WRITE_EVENTS.has(String(projected.event)) ||
       now - this.lastIndexWriteMs >= INDEX_WRITE_INTERVAL_MS
     ) {
       this.lastIndexWriteMs = now
       this.writeIndex(this.statsFromIndex(this.loadIndex()))
     }
-    return payload
+    return projected
   }
 
   replayAfter(seq: number, opts: RuntimeReplayOptions = {}): Row[] {
@@ -204,6 +272,35 @@ export class RuntimeEventStore {
     )
     if (opts.compact) out = compactReplayEvents(out)
     return opts.limit && out.length > opts.limit ? out.slice(-opts.limit) : out
+  }
+
+  replayEnvelopesAfter(
+    seq: number,
+    opts: RuntimeReplayOptions = {},
+  ): EventEnvelopeV2[] {
+    const sessionId = cleanString(opts.sessionId)
+    const visibility = new Set(
+      Array.isArray(opts.visibility)
+        ? opts.visibility
+        : opts.visibility
+          ? [opts.visibility]
+          : [],
+    )
+    let out = this.iterStoredEvents({
+      includeArchive: opts.includeArchive,
+    })
+      .map((event) =>
+        adaptRuntimeEventToEnvelope(event, {
+          sessionId: this.sessionId,
+        }),
+      )
+      .filter((event) => {
+        if (event.sequence <= seq) return false
+        if (sessionId && event.sessionId !== sessionId) return false
+        return !visibility.size || visibility.has(event.visibility)
+      })
+    if (opts.limit && out.length > opts.limit) out = out.slice(-opts.limit)
+    return out
   }
 
   recent(limit: number): Row[] {
@@ -230,8 +327,8 @@ export class RuntimeEventStore {
     const active = new Set(activeTurnIds.filter(Boolean).map(String))
     const keep: Row[] = []
     const archive: Row[] = []
-    for (const event of this.iterEvents()) {
-      const turnId = String(event.turn_id || '')
+    for (const event of this.iterStoredEvents()) {
+      const turnId = storedTurnId(event)
       if (turnId && active.has(turnId)) keep.push(event)
       else archive.push(event)
     }
@@ -256,25 +353,41 @@ export class RuntimeEventStore {
   private scanLatestSeq(): number {
     const index = this.loadIndex()
     let latest = Number(index.latestSeq ?? index.latest_seq ?? 0) || 0
-    for (const event of this.iterEvents())
-      latest = Math.max(latest, Number(event.seq || 0) || 0)
+    for (const event of this.iterStoredEvents({ includeArchive: true }))
+      latest = Math.max(latest, storedSequence(event))
     return latest
   }
 
+  private rebuildIdempotencyIndex(): void {
+    this.idempotencyIndex.clear()
+    for (const event of this.iterStoredEvents({ includeArchive: true })) {
+      const key = storedIdempotencyKey(event)
+      if (key) this.idempotencyIndex.set(key, event)
+    }
+  }
+
   private iterEvents(opts: { includeArchive?: boolean | null } = {}): Row[] {
+    return this.iterStoredEvents(opts)
+      .map((event) => this.normalizeEvent(event))
+      .filter((event): event is Row => event !== null)
+  }
+
+  private iterStoredEvents(
+    opts: { includeArchive?: boolean | null } = {},
+  ): Row[] {
     const rows = opts.includeArchive
-      ? [...this.iterArchiveEvents(), ...this.iterHotEvents()]
-      : this.iterHotEvents()
-    rows.sort((a, b) => (Number(a.seq || 0) || 0) - (Number(b.seq || 0) || 0))
+      ? [...this.iterStoredArchiveEvents(), ...this.iterStoredHotEvents()]
+      : this.iterStoredHotEvents()
+    rows.sort((a, b) => storedSequence(a) - storedSequence(b))
     return rows
   }
 
-  private iterHotEvents(): Row[] {
+  private iterStoredHotEvents(): Row[] {
     if (!existsSync(this.eventsFile)) return []
-    return this.parseJsonl(readFileSync(this.eventsFile, 'utf8'))
+    return this.parseStoredJsonl(readFileSync(this.eventsFile, 'utf8'))
   }
 
-  private iterArchiveEvents(): Row[] {
+  private iterStoredArchiveEvents(): Row[] {
     if (!existsSync(this.archiveDir)) return []
     const rows: Row[] = []
     const names = readdirSync(this.archiveDir)
@@ -284,7 +397,9 @@ export class RuntimeEventStore {
       const path = join(this.archiveDir, name)
       try {
         rows.push(
-          ...this.parseJsonl(gunzipSync(readFileSync(path)).toString('utf8')),
+          ...this.parseStoredJsonl(
+            gunzipSync(readFileSync(path)).toString('utf8'),
+          ),
         )
       } catch {
         continue
@@ -293,15 +408,21 @@ export class RuntimeEventStore {
     return rows
   }
 
-  private parseJsonl(content: string): Row[] {
+  private parseStoredJsonl(content: string): Row[] {
     const rows: Row[] = []
     for (let line of content.split('\n')) {
       line = line.trim()
       if (!line) continue
       try {
         const raw = JSON.parse(line)
-        const event = this.normalizeEvent(raw)
-        if (event) rows.push(event)
+        if (isEventEnvelopeV2(raw)) rows.push(raw as unknown as Row)
+        else if (
+          raw &&
+          typeof raw === 'object' &&
+          !Array.isArray(raw) &&
+          typeof (raw as Row).event === 'string'
+        )
+          rows.push(jsonSafe({ ...(raw as Row) }) as Row)
       } catch {
         continue
       }
@@ -310,6 +431,7 @@ export class RuntimeEventStore {
   }
 
   private normalizeEvent(raw: unknown): Row | null {
+    if (isEventEnvelopeV2(raw)) return projectEventEnvelopeV2(raw)
     if (
       !raw ||
       typeof raw !== 'object' ||
@@ -450,6 +572,22 @@ function eventTsSeconds(event: Row): number {
   return 0
 }
 
+function storedSequence(event: Row): number {
+  return isEventEnvelopeV2(event) ? event.sequence : Number(event.seq || 0) || 0
+}
+
+function storedTurnId(event: Row): string {
+  return isEventEnvelopeV2(event)
+    ? cleanString(event.turnId)
+    : cleanString(event.turn_id ?? event.owner?.turn_id)
+}
+
+function storedIdempotencyKey(event: Row): string {
+  return isEventEnvelopeV2(event)
+    ? cleanString(event.idempotencyKey)
+    : cleanString(event.idempotency_key ?? event.idempotencyKey)
+}
+
 function ownerReceipt(
   owner: unknown,
   scope: { sessionId?: string | null; turnId?: string | null },
@@ -468,6 +606,7 @@ function isRecord(value: unknown): value is Row {
 }
 
 function archiveMonth(event: Row): string {
+  if (isEventEnvelopeV2(event)) return event.timestamp.slice(0, 7)
   const ts = event.ts
   if (typeof ts === 'number')
     return new Date(ts * 1000).toISOString().slice(0, 7)

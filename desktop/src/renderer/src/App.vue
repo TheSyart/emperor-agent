@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SessionSidebar from './components/layout/SessionSidebar.vue'
 import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
@@ -62,6 +62,7 @@ const {
   loadConfig,
   saveConfig,
   loadMcpConfig,
+  loadMcpStatus,
   saveMcpConfig,
   saveMemory,
   loadEpisode,
@@ -95,6 +96,7 @@ const {
   sessionRuntimeStates,
   runtimeText,
   eventTransportText,
+  dispose: disposeRuntime,
   connectSocket,
   sendMessage,
   sendInteractionAnswer,
@@ -281,6 +283,8 @@ onMounted(async () => {
   })
 })
 
+onBeforeUnmount(() => disposeRuntime())
+
 async function refreshAll() {
   await loadBootstrap(false, sessionStore.backendSessionId())
   if (!error.value) {
@@ -399,6 +403,7 @@ provideAppContext({
   loadConfig,
   saveConfig,
   loadMcpConfig,
+  loadMcpStatus,
   saveMcpConfig,
   saveMemory,
   loadEpisode,

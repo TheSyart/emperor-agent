@@ -198,6 +198,48 @@ describe('CoreModelService schema v2', () => {
     expect(lifecycle.filter((item) => item === 'onboarding')).toHaveLength(1)
   })
 
+  it('returns and saves explicit model execution policy without exposing credentials', async () => {
+    const root = tmp('emperor-model-service-policy-')
+    const priced = {
+      inputUsdPerMillionTokens: 2,
+      outputUsdPerMillionTokens: 10,
+      cacheReadUsdPerMillionTokens: 0.5,
+      cacheWriteUsdPerMillionTokens: 3,
+    }
+    writeConfig(
+      root,
+      [
+        entry({ entryId: 'primary', pricing: priced }),
+        entry({ entryId: 'fallback', modelId: 'backup', pricing: priced }),
+      ],
+      'primary',
+    )
+    const refresh = vi.fn()
+    const modelService = await service(root, { refreshModelConfig: refresh })
+
+    const payload = await modelService.savePolicy({
+      fallback: {
+        enabled: true,
+        entryId: 'fallback',
+        triggerOn: ['rate_limit'],
+      },
+      cost: { maxUsdPerAgentTurn: 0.2 },
+    })
+
+    expect(payload.policy).toEqual({
+      fallback: {
+        enabled: true,
+        entryId: 'fallback',
+        triggerOn: ['rate_limit'],
+      },
+      cost: { maxUsdPerAgentTurn: 0.2 },
+    })
+    expect(payload.models[0]?.pricing).toEqual(priced)
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(JSON.stringify(payload)).not.toContain('sk-secret-1234')
+    expect((await loadModelConfig(root)).raw.policy).toEqual(payload.policy)
+  })
+
   it('validates and persists only supported reasoning efforts', async () => {
     const root = tmp('emperor-model-service-reasoning-')
     writeConfig(root, [entry()])

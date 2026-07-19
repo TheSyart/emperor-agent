@@ -101,6 +101,13 @@ const scenarios = [
     selector: '.scheduler-panel',
   },
   {
+    name: 'scheduler-panel-mobile',
+    path: '/scheduler',
+    width: 390,
+    height: 844,
+    selector: '.scheduler-panel',
+  },
+  {
     name: 'plugins-panel',
     path: '/plugins/skills',
     width: 1024,
@@ -190,6 +197,30 @@ for (const scenario of scenarios) {
       await expect(page.getByText('Visual Local')).toBeVisible()
       await expect(page.getByText('已保存模型')).toBeVisible()
       await expect(page.getByText('单模型运行')).toHaveCount(0)
+      for (const selector of [
+        '.policy-toggle',
+        '.trigger-field label:first-of-type',
+        '.trigger-field label:last-of-type',
+      ]) {
+        const inlineGap = await page.locator(selector).evaluate((label) => {
+          const control = label.querySelector('input')?.getBoundingClientRect()
+          const textElement = label.querySelector('span')
+          const text = Array.from(label.childNodes).find(
+            (node) =>
+              node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+          )
+          const range = !textElement && text ? document.createRange() : null
+          if (!control || (!textElement && (!text || !range)))
+            return Number.POSITIVE_INFINITY
+          if (text && range) range.selectNodeContents(text)
+          const textRect =
+            textElement?.getBoundingClientRect() ??
+            range!.getBoundingClientRect()
+          return textRect.left - control.right
+        })
+        expect(inlineGap).toBeGreaterThanOrEqual(0)
+        expect(inlineGap).toBeLessThanOrEqual(12)
+      }
     }
     await expect(page.locator('body')).not.toContainText('Web UI 启动失败')
     await page.waitForTimeout(650)

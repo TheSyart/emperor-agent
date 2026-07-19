@@ -1,3 +1,8 @@
+import type {
+  AgentDefinition,
+  ExtensionSourceSnapshot,
+} from '../extensions/resolver'
+
 export interface SubagentSpec {
   name: string
   description: string
@@ -5,4 +10,7 @@ export interface SubagentSpec {
   toolNames: string[]
   maxTurns: number
   planReadonlyExplorer: boolean
+  definition: AgentDefinition
+  source: ExtensionSourceSnapshot
+  revision: string
 }

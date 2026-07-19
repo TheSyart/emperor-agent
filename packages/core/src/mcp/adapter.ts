@@ -11,7 +11,10 @@ export class MCPToolAdapter extends Tool {
   override readonly parameters: ToolParamsSchema
   private readonly serverName: string
   private readonly toolName: string
+  readonly mcpServerName: string
+  readonly mcpToolName: string
   private readonly connection: MCPConnection
+  private readonly callTimeoutMs: number | null
   override evidencePolicy = 'eligible' as const
 
   constructor(opts: {
@@ -23,14 +26,18 @@ export class MCPToolAdapter extends Tool {
     readOnly?: boolean
     exclusive?: boolean
     maxResultChars?: number | null
+    callTimeoutMs?: number | null
   }) {
     super()
     this.serverName = opts.serverName
+    this.mcpServerName = opts.serverName
     this.name = `mcp_${opts.serverName}_${opts.toolName}`
     this.description = `[MCP:${opts.serverName}] ${opts.description}`
     this.parameters = opts.parametersSchema as unknown as ToolParamsSchema
     this.connection = opts.connection
     this.toolName = opts.toolName
+    this.mcpToolName = opts.toolName
+    this.callTimeoutMs = opts.callTimeoutMs ?? null
     this.readOnly = opts.readOnly ?? false
     this.exclusive = opts.exclusive ?? false
     if (opts.maxResultChars && opts.maxResultChars > 0)
@@ -41,13 +48,12 @@ export class MCPToolAdapter extends Tool {
     args: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<ToolResult> {
-    const result = context?.executionEnvironment
-      ? await this.connection.callToolWithEnvironment(
-          this.toolName,
-          args,
-          context.executionEnvironment,
-        )
-      : await this.connection.callTool(this.toolName, args)
+    const result = await this.connection.callToolRequest(this.toolName, args, {
+      requestId: mcpRequestId(context?.parentCallId),
+      signal: context?.signal ?? null,
+      timeoutMs: this.callTimeoutMs,
+      executionEnvironment: context?.executionEnvironment ?? null,
+    })
     const modelContent = `${MCP_UNTRUSTED_NOTICE}\n\n${result.content}`
     return {
       modelContent,
@@ -60,8 +66,19 @@ export class MCPToolAdapter extends Tool {
         untrusted: true,
         server: this.serverName,
         mcp_tool: this.toolName,
+        ...(result.requestId ? { mcp_request_id: result.requestId } : {}),
+        ...(result.generation ? { mcp_generation: result.generation } : {}),
+        ...(result.clientId ? { mcp_client_id: result.clientId } : {}),
       },
       isError: result.isError,
     }
   }
+}
+
+function mcpRequestId(toolCallId: string | null | undefined): string | null {
+  const cleaned = String(toolCallId ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9_.:-]/g, '_')
+    .slice(0, 140)
+  return cleaned ? `mcp_${cleaned}` : null
 }

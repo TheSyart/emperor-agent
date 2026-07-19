@@ -117,6 +117,34 @@
   color: rgb(var(--fg-subtle));
 }
 
+.prompt-delivery-state {
+  @apply rounded-full border px-1.5 py-0.5 text-[10px] font-medium;
+  border-color: rgb(var(--border));
+  color: rgb(var(--fg-muted));
+  background: rgb(var(--bg-elevated));
+}
+
+.prompt-delivery-state[data-state='interjected'] {
+  border-color: rgb(var(--accent) / 0.45);
+  color: rgb(var(--accent));
+}
+
+.prompt-delivery-state[data-state='cancelled'] {
+  border-color: rgb(var(--danger) / 0.4);
+  color: rgb(var(--danger));
+}
+
+.assistant-timeline-shell.tombstoned {
+  opacity: 0.58;
+}
+
+.assistant-terminal-state {
+  @apply mt-1 inline-flex w-fit rounded-full border px-2 py-0.5 text-[10px] font-medium;
+  border-color: rgb(var(--border));
+  color: rgb(var(--fg-subtle));
+  background: rgb(var(--bg-elevated));
+}
+
 .message-meta.assistant {
   color: rgb(var(--fg-subtle));
 }

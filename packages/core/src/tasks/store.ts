@@ -15,7 +15,7 @@ import { TaskRecord } from './models'
 import { GoalGateMutationLedger } from '../goals/mutation-ledger'
 import type { GoalMutationLease } from '../goals/mutation-guard'
 
-const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 const GOAL_REVIEWER_SOURCE = 'goal_reviewer_dispatch'
 
 export class TaskStoreConflictError extends Error {

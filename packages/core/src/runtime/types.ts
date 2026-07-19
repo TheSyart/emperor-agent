@@ -25,6 +25,8 @@ export interface RuntimeEventEnvelope {
   ts?: number
   session_id?: string
   turn_id?: string
+  request_id?: string
+  attempt_id?: string
   client_message_id?: string
   source?: string
   owner?: RuntimeEventPayload
@@ -82,6 +84,24 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         scheduler?: RuntimeEventPayload
         ui_hidden?: boolean
       }
+    | {
+        event:
+          | 'prompt_queued'
+          | 'prompt_dequeued'
+          | 'prompt_interjected'
+          | 'prompt_cancelled'
+        prompt_id: string
+        client_message_id?: string
+        delivery?: 'queue' | 'interject'
+        target_turn_id?: string | null
+        reason?: string
+        content?: string
+      }
+    | {
+        event: 'message_tombstoned'
+        reason?: string
+        content_chars?: number
+      }
     | { event: 'message_delta'; delta?: string }
     | {
         event: 'agent_thought'
@@ -110,6 +130,10 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         used_fallback?: boolean
         /** Historical replay compatibility only. */
         fallback_reason?: string
+        cost_usd_nanos?: number
+        turn_cost_usd_nanos?: number
+        cost_cap_usd_nanos?: number
+        cost_complete?: boolean
         provider_retry_count?: number
         provider_error_kind?: string
         replaced_tool_results?: number
@@ -122,6 +146,23 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         message_count?: number
       }
     | {
+        event: 'mcp_connection_state'
+        server_name: string
+        transport?: string
+        generation: number
+        client_id?: string | null
+        state: string
+        health?: string
+        auth?: string
+        tool_count?: number
+        tools?: string[]
+        restart_attempts?: number
+        next_retry_at?: number | null
+        active_request_count?: number
+        active_request_ids?: string[]
+        last_error?: RuntimeEventPayload | null
+      }
+    | {
         event: 'model_provider_retry'
         model?: string
         provider?: string | null
@@ -129,13 +170,56 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         attempt?: number
         max_retries?: number
         error_kind?: string
+        retry_delay_ms?: number
+        reason?: string
+      }
+    | {
+        event: 'model_attempt_started'
+        request_id: string
+        attempt_id: string
+        attempt: number
+        max_attempts: number
+        idempotency_key?: string
+      }
+    | {
+        event: 'model_attempt_succeeded'
+        request_id: string
+        attempt_id: string
+        attempt: number
+        max_attempts: number
+        idempotency_key?: string
+        duration_ms: number
+      }
+    | {
+        event: 'model_attempt_failed'
+        request_id: string
+        attempt_id: string
+        attempt: number
+        max_attempts: number
+        idempotency_key?: string
+        duration_ms: number
+        error_kind?: string
+        will_retry?: boolean
+        retry_delay_ms?: number
+      }
+    | {
+        event: 'model_attempt_cancelled'
+        request_id: string
+        attempt_id: string
+        attempt: number
+        max_attempts: number
+        idempotency_key?: string
+        duration_ms: number
         reason?: string
       }
     | {
         event: 'model_route_fallback'
         from_model?: string
+        from_model_entry_id?: string
         to_model?: string
+        to_model_entry_id?: string
         reason?: string
+        error_kind?: string
         usage_type?: string
       }
     | {
@@ -203,11 +287,24 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         name: string
         message?: string
         reason_kind?: 'safety_refusal' | 'error' | string
+        metadata?: RuntimeEventPayload
       }
     | {
         event: 'tool_run_cancelled'
         id?: string
         name: string
+        reason?: string
+      }
+    | {
+        event: 'process_containment'
+        id?: string
+        backend?: string
+        decision?: 'sandboxed' | 'unsandboxed' | 'denied' | string
+        capability_status?: string
+        filesystem?: string
+        network?: string
+        process_tree?: boolean
+        policy_hash?: string
         reason?: string
       }
     | (HookRuntimeEventFields & { event: 'hook_run_started' })
@@ -498,17 +595,36 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         job?: RuntimeEventPayload
         action?: string
       }
-    | { event: 'scheduler_run_start'; job?: RuntimeEventPayload }
-    | { event: 'scheduler_run_done'; job?: RuntimeEventPayload }
+    | {
+        event: 'scheduler_run_start' | 'scheduler_run_done'
+        job?: RuntimeEventPayload
+        run?: RuntimeEventPayload
+        run_id?: string
+        task_id?: string
+      }
     | {
         event: 'scheduler_run_error'
         job?: RuntimeEventPayload
         error?: string
+        run?: RuntimeEventPayload
+        run_id?: string
+        task_id?: string
       }
     | {
         event: 'scheduler_run_cancelled'
         job?: RuntimeEventPayload
         reason?: string
+        run?: RuntimeEventPayload
+        run_id?: string
+        task_id?: string
+      }
+    | {
+        event: 'scheduler_run_skipped' | 'scheduler_run_interrupted'
+        job?: RuntimeEventPayload
+        reason?: string
+        run?: RuntimeEventPayload
+        run_id?: string
+        task_id?: string
       }
     | {
         event: 'runtime_task_cancelled'

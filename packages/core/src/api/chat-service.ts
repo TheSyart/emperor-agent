@@ -36,6 +36,7 @@ export interface MainlineSubmitInput {
   emit?: MainlineEventSink | null
   clientDraftId?: string | null
   draftSession?: DraftSessionInput | null
+  delivery?: 'queue' | 'interject' | null
 }
 
 export interface DraftSessionInput {
@@ -51,6 +52,8 @@ export interface MainlineSubmitResult {
   turnId: string
   content: string
   activeSessionId: string | null
+  delivery?: 'completed' | 'interjected'
+  targetTurnId?: string | null
 }
 
 export interface MaterializedSession {
@@ -97,11 +100,7 @@ export class MainlineTurnService {
 
   async submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
     const source = String(input.source ?? 'chat').trim() || 'chat'
-    if (
-      source !== 'goal' &&
-      (this.loop.activeTasks.hasActiveKind('turn') ||
-        this.loop.activeTasks.hasActiveKind('goal'))
-    ) {
+    if (source !== 'goal' && this.loop.activeTasks.hasActiveKind('goal')) {
       throw new TurnBusyError()
     }
     const turnId = input.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
@@ -141,6 +140,37 @@ export class MainlineTurnService {
         ? sessionId
         : null)
     try {
+      if (
+        input.delivery === 'interject' &&
+        source === 'chat' &&
+        runSessionId &&
+        !(input.attachmentIds?.length || input.attachments?.length) &&
+        !input.requestedSkills?.length
+      ) {
+        const interjected = await this.loop.interjectUserTurn(
+          {
+            sessionId: runSessionId,
+            promptId: input.clientMessageId ?? turnId,
+            turnId,
+            clientMessageId: input.clientMessageId ?? turnId,
+            content,
+            displayContent,
+            source,
+            uiHidden: input.uiHidden ?? false,
+          },
+          { emit: input.emit ?? null },
+        )
+        if (interjected.accepted) {
+          replyResolve('')
+          return {
+            turnId,
+            content: '',
+            activeSessionId: runSessionId,
+            delivery: 'interjected',
+            targetTurnId: interjected.targetTurnId,
+          }
+        }
+      }
       const reply = await this.loop.runUserTurn(content, {
         sessionId: runSessionId,
         restoreActiveSessionAfterTurn: source === 'goal',
@@ -157,12 +187,15 @@ export class MainlineTurnService {
         taskId: input.taskId ?? null,
         useActiveTask: input.useActiveTask,
         signal: input.signal ?? null,
+        delivery: input.delivery ?? 'queue',
       })
       replyResolve(reply)
       return {
         turnId,
         content: reply,
-        activeSessionId: this.loop.activeSessionId,
+        activeSessionId: runSessionId ?? this.loop.activeSessionId,
+        delivery: 'completed',
+        targetTurnId: null,
       }
     } finally {
       replyResolve('')

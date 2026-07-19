@@ -45,6 +45,7 @@ Active 文档使用下面的四行状态头：
 | Chat / Build 会话语义       | Session、Project、ContextBuilder                          | README、Chat/Build 手册、存储架构        |
 | 模型 schema 或 Provider     | model config schema、Provider registry、模型面板          | 首次使用、模型手册、示例配置             |
 | CoreApi operation           | CoreApi、IPC contract、renderer API                       | 架构总览、IPC 文档、开发扩展指南         |
+| ACP method / capability     | `packages/core/src/acp/`、官方 ACP schema、wire test      | README、架构总览、Headless ACP 指南      |
 | Runtime event               | Core event 类型、renderer reducer/handler                 | Agent runtime、IPC 文档、相关用户手册    |
 | `stateRoot` 路径或迁移      | runtime paths、store、migration service                   | README、数据手册、存储架构、AGENTS       |
 | Goal 状态或 Gate            | Goal models、coordinator、Gate、renderer projection       | README、Plan/Goal 手册、Goal 架构        |

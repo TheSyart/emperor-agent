@@ -69,7 +69,10 @@ try {
   Set-Content -Path $checksumPath -Value "$hash *$($installer.Name)" -Encoding utf8NoBOM
   $receiptRoot = Join-Path $distRoot 'release-receipts'
   New-Item -Path $receiptRoot -ItemType Directory -Force | Out-Null
-  $commit = [Environment]::GetEnvironmentVariable('GITHUB_SHA')
+  $commit = [Environment]::GetEnvironmentVariable('EMPEROR_RELEASE_COMMIT')
+  if ([string]::IsNullOrWhiteSpace($commit)) {
+    $commit = [Environment]::GetEnvironmentVariable('GITHUB_SHA')
+  }
   if ([string]::IsNullOrWhiteSpace($commit)) {
     $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
   }

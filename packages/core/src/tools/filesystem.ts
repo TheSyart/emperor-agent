@@ -5,13 +5,17 @@
  */
 import { existsSync } from 'node:fs'
 import {
+  lstat,
   mkdir,
   open,
   readFile as fsReadFile,
+  rename as fsRename,
   stat,
+  unlink,
   writeFile as fsWriteFile,
 } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { CodeGraphFileEvent } from '../code-intelligence/models'
 import {
   formatWorkspacePolicyError,
   workspacePolicyForTool,
@@ -26,6 +30,11 @@ import {
 import { S, toolParamsSchema } from './schema'
 
 const PDF_MAGIC = Buffer.from('%PDF')
+
+export type ManagedFileMutationObserver = (
+  events: readonly CodeGraphFileEvent[],
+  context?: ToolExecutionContext,
+) => void | Promise<void>
 
 async function isPdf(path: string): Promise<boolean> {
   try {
@@ -81,6 +90,10 @@ export class ReadFileTool extends Tool {
   constructor(root: string) {
     super()
     this.workspace = root
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.path ?? '').trim() || null
   }
 
   async execute(
@@ -150,9 +163,16 @@ export class WriteFileTool extends Tool {
 
   private readonly workspace: string | null
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly mutationObserver?: ManagedFileMutationObserver,
+  ) {
     super()
     this.workspace = root
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.path ?? '').trim() || null
   }
 
   async execute(
@@ -170,6 +190,11 @@ export class WriteFileTool extends Tool {
     const overwrote = existsSync(p)
     await mkdir(dirname(p), { recursive: true })
     await fsWriteFile(p, content, 'utf8')
+    await notifyManagedMutation(
+      this.mutationObserver,
+      [{ kind: overwrote ? 'modified' : 'created', path: p }],
+      ctx,
+    )
     const base = `Wrote ${content.length} bytes to ${raw}`
     // B2a：全量覆盖既有文件时提示改用增量编辑（2026-07-05 会话实测同一文件被全量重写 6 次）
     return overwrote
@@ -209,9 +234,16 @@ export class EditFileTool extends Tool {
 
   private readonly workspace: string | null
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly mutationObserver?: ManagedFileMutationObserver,
+  ) {
     super()
     this.workspace = root
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.path ?? '').trim() || null
   }
 
   async execute(
@@ -242,7 +274,17 @@ export class EditFileTool extends Tool {
         if (!replaceAll && countOccurrences(content, trimmed) > 1) {
           return '[ERR] trimmed match found but is not unique — provide more context'
         }
-        return replaceFile(p, content.replace(trimmed, newText), raw)
+        const result = await replaceFile(
+          p,
+          content.replace(trimmed, newText),
+          raw,
+        )
+        await notifyManagedMutation(
+          this.mutationObserver,
+          [{ kind: 'modified', path: p }],
+          ctx,
+        )
+        return result
       }
       // normalized: collapse whitespace
       const normOld = oldText.replace(/\s+/g, ' ')
@@ -254,15 +296,41 @@ export class EditFileTool extends Tool {
       }
       // Replace the first match in the original content using the normalized alignment
       // Simple approach: replace the first exact match of the trimmed version
-      return replaceFile(p, content.replace(trimmed, newText), raw)
+      const result = await replaceFile(
+        p,
+        content.replace(trimmed, newText),
+        raw,
+      )
+      await notifyManagedMutation(
+        this.mutationObserver,
+        [{ kind: 'modified', path: p }],
+        ctx,
+      )
+      return result
     }
     if (!replaceAll && countOccurrences(content, oldText) > 1) {
       return '[ERR] old_text matches multiple locations — provide more context or set replace_all=true'
     }
     if (replaceAll) {
-      return replaceFile(p, content.replaceAll(oldText, newText), raw)
+      const result = await replaceFile(
+        p,
+        content.replaceAll(oldText, newText),
+        raw,
+      )
+      await notifyManagedMutation(
+        this.mutationObserver,
+        [{ kind: 'modified', path: p }],
+        ctx,
+      )
+      return result
     }
-    return replaceFile(p, content.replace(oldText, newText), raw)
+    const result = await replaceFile(p, content.replace(oldText, newText), raw)
+    await notifyManagedMutation(
+      this.mutationObserver,
+      [{ kind: 'modified', path: p }],
+      ctx,
+    )
+    return result
   }
 
   override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
@@ -282,6 +350,214 @@ function countOccurrences(haystack: string, needle: string): number {
   return c
 }
 
+// ── ApplyPatchTool ──
+
+export class ApplyPatchTool extends Tool {
+  override name = 'apply_patch'
+  override description =
+    '对单个工作区文本文件执行精确 patch。old_text 必须逐字存在且默认只能匹配一次；' +
+    '需要替换全部精确匹配时显式设置 replace_all=true。不会执行模糊或空白归一化匹配。'
+  override parameters = toolParamsSchema(
+    {
+      path: S('目标路径'),
+      old_text: S('必须精确匹配的原文本'),
+      new_text: S('替换后的文本'),
+      replace_all: {
+        type: 'boolean',
+        description: '替换全部精确匹配（默认 false）',
+      },
+    },
+    ['path', 'old_text', 'new_text'],
+  )
+  override evidencePolicy = 'eligible' as const
+
+  constructor(
+    private readonly workspace: string | null,
+    private readonly mutationObserver?: ManagedFileMutationObserver,
+  ) {
+    super()
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.path ?? '').trim() || null
+  }
+
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
+    const raw = String(args.path ?? '')
+    const oldText = String(args.old_text ?? '')
+    const newText = String(args.new_text ?? '')
+    const replaceAll = args.replace_all === true
+    if (!oldText) return '[ERR] old_text must not be empty'
+    const decision = workspacePolicyForTool(ctx, this.workspace).resolvePath(
+      raw,
+      'write',
+    )
+    if (!decision.allowed) return formatWorkspacePolicyError(decision)
+    const path = decision.resolvedPath
+    const info = await regularFileInfo(path)
+    if (typeof info === 'string') return info
+    const content = await fsReadFile(path, 'utf8').catch(() => null)
+    if (content === null) return '[ERR] unable to read file'
+    const matches = countOccurrences(content, oldText)
+    if (!matches) return '[ERR] old_text not found in file'
+    if (!replaceAll && matches !== 1)
+      return '[ERR] old_text matches multiple locations — provide more context or set replace_all=true'
+    const next = replaceAll
+      ? content.replaceAll(oldText, newText)
+      : content.replace(oldText, newText)
+    await fsWriteFile(path, next, 'utf8')
+    await notifyManagedMutation(
+      this.mutationObserver,
+      [{ kind: 'modified', path }],
+      ctx,
+    )
+    return `Patched ${raw}`
+  }
+
+  override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
+    return raw.startsWith('[ERR]')
+      ? errResult(raw, { meta: { tool: this.name } })
+      : okResult(raw, { meta: { tool: this.name } })
+  }
+}
+
+// ── DeleteFileTool ──
+
+export class DeleteFileTool extends Tool {
+  override name = 'delete_file'
+  override description =
+    '删除一个工作区内的普通文件。拒绝目录和符号链接；这是破坏性操作，执行前应确认目标。'
+  override parameters = toolParamsSchema({ path: S('待删除文件路径') }, [
+    'path',
+  ])
+  override evidencePolicy = 'eligible' as const
+
+  constructor(
+    private readonly workspace: string | null,
+    private readonly mutationObserver?: ManagedFileMutationObserver,
+  ) {
+    super()
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.path ?? '').trim() || null
+  }
+
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
+    const raw = String(args.path ?? '')
+    const decision = workspacePolicyForTool(ctx, this.workspace).resolvePath(
+      raw,
+      'write',
+    )
+    if (!decision.allowed) return formatWorkspacePolicyError(decision)
+    const info = await regularFileInfo(decision.resolvedPath)
+    if (typeof info === 'string') return info
+    await unlink(decision.resolvedPath)
+    await notifyManagedMutation(
+      this.mutationObserver,
+      [{ kind: 'removed', path: decision.resolvedPath }],
+      ctx,
+    )
+    return `Deleted ${raw}`
+  }
+
+  override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
+    return raw.startsWith('[ERR]')
+      ? errResult(raw, { meta: { tool: this.name } })
+      : okResult(raw, { meta: { tool: this.name } })
+  }
+}
+
+// ── RenameFileTool ──
+
+export class RenameFileTool extends Tool {
+  override name = 'rename_file'
+  override description =
+    '把一个工作区内的普通文件移动到另一个工作区路径。拒绝符号链接、目录和覆盖已有目标。'
+  override parameters = toolParamsSchema(
+    {
+      source: S('原文件路径'),
+      destination: S('目标文件路径'),
+    },
+    ['source', 'destination'],
+  )
+  override evidencePolicy = 'eligible' as const
+
+  constructor(
+    private readonly workspace: string | null,
+    private readonly mutationObserver?: ManagedFileMutationObserver,
+  ) {
+    super()
+  }
+
+  override getPath(args: Record<string, unknown>): string | null {
+    return String(args.source ?? '').trim() || null
+  }
+
+  override getPaths(args: Record<string, unknown>): string[] {
+    return [
+      String(args.source ?? '').trim(),
+      String(args.destination ?? '').trim(),
+    ].filter(Boolean)
+  }
+
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
+    const sourceRaw = String(args.source ?? '')
+    const destinationRaw = String(args.destination ?? '')
+    const policy = workspacePolicyForTool(ctx, this.workspace)
+    const source = policy.resolvePath(sourceRaw, 'write')
+    if (!source.allowed) return formatWorkspacePolicyError(source)
+    const destination = policy.resolvePath(destinationRaw, 'write')
+    if (!destination.allowed) return formatWorkspacePolicyError(destination)
+    const sourceInfo = await regularFileInfo(source.resolvedPath)
+    if (typeof sourceInfo === 'string') return sourceInfo
+    if (existsSync(destination.resolvedPath))
+      return '[ERR] rename destination already exists'
+    await mkdir(dirname(destination.resolvedPath), { recursive: true })
+    await fsRename(source.resolvedPath, destination.resolvedPath)
+    await notifyManagedMutation(
+      this.mutationObserver,
+      [
+        {
+          kind: 'renamed',
+          path: source.resolvedPath,
+          nextPath: destination.resolvedPath,
+        },
+      ],
+      ctx,
+    )
+    return `Renamed ${sourceRaw} to ${destinationRaw}`
+  }
+
+  override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
+    return raw.startsWith('[ERR]')
+      ? errResult(raw, { meta: { tool: this.name } })
+      : okResult(raw, { meta: { tool: this.name } })
+  }
+}
+
+async function regularFileInfo(
+  path: string,
+): Promise<Awaited<ReturnType<typeof lstat>> | string> {
+  const info = await lstat(path).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  })
+  if (!info) return '[ERR] file not found'
+  if (info.isSymbolicLink()) return '[ERR] symbolic links are not supported'
+  if (!info.isFile()) return '[ERR] path is not a regular file'
+  return info
+}
+
 async function replaceFile(
   p: string,
   newContent: string,
@@ -289,4 +565,13 @@ async function replaceFile(
 ): Promise<string> {
   await fsWriteFile(p, newContent, 'utf8')
   return `Edited ${label}`
+}
+
+async function notifyManagedMutation(
+  observer: ManagedFileMutationObserver | undefined,
+  events: readonly CodeGraphFileEvent[],
+  context?: ToolExecutionContext,
+): Promise<void> {
+  if (!observer) return
+  await Promise.resolve(observer(events, context)).catch(() => undefined)
 }

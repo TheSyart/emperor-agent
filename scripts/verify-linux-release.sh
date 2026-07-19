@@ -42,7 +42,7 @@ prepare() {
       >"$(basename "$CHECKSUMS")"
   )
   local receipt_dir="$DIST/release-receipts"
-  local commit="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+  local commit="${EMPEROR_RELEASE_COMMIT:-${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}}"
   mkdir -p "$receipt_dir"
   RECEIPT_PATH="$receipt_dir/linux-x64-build.json" COMMIT="$commit" \
   APPIMAGE_NAME="$(basename "$APPIMAGE")" DEB_NAME="$(basename "$DEB")" \
@@ -153,7 +153,7 @@ smoke() {
     echo "DEB package remained installed after removal" >&2
     exit 1
   fi
-  local commit="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}"
+  local commit="${EMPEROR_RELEASE_COMMIT:-${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}}"
   RECEIPT_PATH="$RECEIPT_DIR/${UBUNTU_VERSION}-lifecycle.json" \
   COMMIT="$commit" UBUNTU_VERSION="$UBUNTU_VERSION" node <<'NODE'
 const fs = require('node:fs')

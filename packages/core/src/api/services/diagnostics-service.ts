@@ -13,9 +13,17 @@ import type { RuntimePaths } from '../../runtime/paths'
 import type { LegacyStateMigrationResult } from '../../runtime/migrate-state-root'
 import type { ActiveTaskInfo, ActiveTaskKind } from '../../runtime/active'
 import type { RuntimeStats } from '../../runtime/store'
+import type { SessionRuntimeActorSnapshot } from '../../runtime/session-runtime'
+import type { LifecycleSupervisorSnapshot } from '../../runtime/lifecycle'
+import type { SubagentSupervisorSnapshot } from '../../subagents/supervisor'
 import type { CoreDesktopPetPayload } from './desktop-pet-service'
 import { RUNTIME_MANIFEST_FILE } from '../../runtime/resources'
 import { toSafeError } from '../../errors'
+import type { MCPClientSnapshot } from '../../mcp/client'
+import type { ExtensionSnapshot } from '../../extensions/resolver'
+import type { EffectiveConfigSnapshot } from '../../config/resolver'
+import type { HybridMemoryServiceDiagnostics } from '../../memory/hybrid-service'
+import type { CodeIntelligenceServiceDiagnostics } from '../../code-intelligence/service'
 
 type Dict = Record<string, unknown>
 
@@ -32,8 +40,18 @@ export interface CoreDiagnosticsServiceDeps {
   schedulerDiagnostics?: () => Dict
   runtimeStats?: () => Partial<RuntimeStats>
   workspacePolicy?: () => Dict
+  sandboxCapability?: () => Dict
+  processRuntime?: () => Dict
+  lifecycle?: () => LifecycleSupervisorSnapshot
+  subagents?: () => SubagentSupervisorSnapshot
+  agentDefinitions?: () => ExtensionSnapshot
+  effectiveConfig?: () => Promise<EffectiveConfigSnapshot>
+  hybridMemory?: () => HybridMemoryServiceDiagnostics
+  codeIntelligence?: () => CodeIntelligenceServiceDiagnostics
+  mcp?: () => MCPClientSnapshot
   externalPayload?: () => Dict
   activeTasks?: () => unknown[]
+  sessionRuntimes?: () => SessionRuntimeActorSnapshot[]
   desktopPetPayload?: () =>
     Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
   environmentSummary?: () => Dict | Promise<Dict>
@@ -50,9 +68,19 @@ export interface CoreDiagnosticsPayload {
   scheduler: Dict
   runtime: RuntimeStats
   workspacePolicy: Dict
+  sandbox: Dict
+  processRuntime: Dict
+  lifecycle: LifecycleSupervisorSnapshot | Dict
+  subagents: SubagentSupervisorSnapshot | Dict
+  agentDefinitions: ExtensionSnapshot | Dict
+  effectiveConfig: EffectiveConfigSnapshot | Dict
+  hybridMemory: HybridMemoryServiceDiagnostics | Dict
+  codeIntelligence: CodeIntelligenceServiceDiagnostics | Dict
+  mcp: MCPClientSnapshot
   promptSnapshots: Dict
   external: Dict
   activeTasks: ActiveTaskInfo[]
+  sessionRuntimes: SessionRuntimeActorSnapshot[]
   desktopPet: CoreDesktopPetPayload
   environment: Dict
   goals: Dict
@@ -79,9 +107,25 @@ export class CoreDiagnosticsService {
       scheduler: this.deps.schedulerDiagnostics?.() ?? {},
       runtime: runtimeStatsPayload(this.deps.runtimeStats?.()),
       workspacePolicy: this.deps.workspacePolicy?.() ?? {},
+      sandbox: this.deps.sandboxCapability?.() ?? {},
+      processRuntime: this.deps.processRuntime?.() ?? {},
+      lifecycle: this.deps.lifecycle?.() ?? {},
+      subagents: this.deps.subagents?.() ?? {},
+      agentDefinitions: this.deps.agentDefinitions?.() ?? {},
+      effectiveConfig: await this.effectiveConfigPayload(),
+      hybridMemory: this.deps.hybridMemory?.() ?? {},
+      codeIntelligence: this.deps.codeIntelligence?.() ?? {},
+      mcp: this.deps.mcp?.() ?? {
+        initialized: false,
+        servers: [],
+        ready: 0,
+        configured: 0,
+        tools: 0,
+      },
       promptSnapshots: this.promptSnapshotsPayload(),
       external: this.deps.externalPayload?.() ?? {},
       activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
+      sessionRuntimes: this.deps.sessionRuntimes?.() ?? [],
       desktopPet: desktopPetPayload(await this.deps.desktopPetPayload?.()),
       environment: await this.environmentSummaryPayload(),
       goals: await this.goalDiagnosticsPayload(),
@@ -187,6 +231,17 @@ export class CoreDiagnosticsService {
       return await this.deps.goalDiagnostics()
     } catch (error) {
       return { status: 'unavailable', error: toSafeError(error) }
+    }
+  }
+
+  private async effectiveConfigPayload(): Promise<
+    EffectiveConfigSnapshot | Dict
+  > {
+    if (!this.deps.effectiveConfig) return {}
+    try {
+      return await this.deps.effectiveConfig()
+    } catch (error) {
+      return { status: 'unavailable', error: toSafeError(error), entries: [] }
     }
   }
 }

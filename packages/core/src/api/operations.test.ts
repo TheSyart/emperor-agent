@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { SessionEntry } from '../sessions/store'
+import { CoreUnavailableError } from '../runtime/lifecycle'
 import { CORE_API_ROUTE_OPERATIONS, type CoreApi } from './core-api'
 import {
   CORE_OPERATION_REGISTRY,
@@ -15,7 +16,7 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(104)
+    expect(coreOperationKeys()).toHaveLength(118)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
   })
@@ -80,6 +81,116 @@ describe('Core operation registry', () => {
       CORE_OPERATION_REGISTRY['sessions.rename'].args.parse([
         's1',
         { archived: 'yes' },
+      ]),
+    ).toThrow()
+
+    expect(
+      CORE_OPERATION_REGISTRY['team.wakeMember'].args.parse([
+        'alice',
+        { purpose: 'recover', recovery: 'retry' },
+      ]),
+    ).toEqual(['alice', { purpose: 'recover', recovery: 'retry' }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['team.wakeMember'].args.parse([
+        'alice',
+        { recovery: 'force' },
+      ]),
+    ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([
+        { sessionId: 's1', afterSeq: 0, format: 'envelope_v2' },
+      ]),
+    ).toEqual([{ sessionId: 's1', afterSeq: 0, format: 'envelope_v2' }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([{ format: 'raw' }]),
+    ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['tasks.wait'].args.parse([
+        'subagent_1',
+        { timeoutMs: 250 },
+      ]),
+    ).toEqual(['subagent_1', { timeoutMs: 250 }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['tasks.wait'].args.parse([
+        'subagent_1',
+        { timeoutMs: -1 },
+      ]),
+    ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['tasks.resume'].args.parse([
+        'subagent_1',
+        { mode: 'background', ttlMs: 1_000 },
+      ]),
+    ).toEqual(['subagent_1', { mode: 'background', ttlMs: 1_000 }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['tasks.resume'].args.parse([
+        'subagent_1',
+        { mode: 'recursive' },
+      ]),
+    ).toThrow()
+    const schedulerCreate = {
+      name: 'Daily review',
+      schedule: {
+        kind: 'cron' as const,
+        expr: '0 9 * * *',
+        tz: 'Asia/Shanghai',
+      },
+      payload: {
+        kind: 'agent_turn' as const,
+        message: 'Review current work',
+        deliver: true,
+      },
+      deleteAfterRun: false,
+      misfirePolicy: 'latest' as const,
+    }
+    expect(
+      CORE_OPERATION_REGISTRY['scheduler.createJob'].args.parse([
+        schedulerCreate,
+      ]),
+    ).toEqual([schedulerCreate])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['scheduler.createJob'].args.parse([
+        { ...schedulerCreate, misfirePolicy: 'replay-all' },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['scheduler.createJob'].args.parse([
+        { ...schedulerCreate, maxConcurrentRuns: 99 },
+      ]),
+    ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['scheduler.updateJob'].args.parse([
+        'job-1',
+        { misfirePolicy: 'catch-up-one' },
+      ]),
+    ).toEqual(['job-1', { misfirePolicy: 'catch-up-one' }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['scheduler.updateJob'].args.parse([
+        'job-1',
+        { misfirePolicy: 'all' },
+      ]),
+    ).toThrow()
+    const gitRewind = {
+      sessionId: 'session-one',
+      checkpointId: 'fcp_0123456789abcdef01234567',
+      confirmed: true as const,
+      confirmedGitRisk: true as const,
+      previewRevision: 'a'.repeat(64),
+      dirtyStrategy: 'abort' as const,
+    }
+    expect(
+      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
+        gitRewind,
+      ]),
+    ).toEqual([gitRewind])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
+        { ...gitRewind, confirmedGitRisk: false },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
+        { ...gitRewind, previewRevision: 'project-controlled-ref' },
       ]),
     ).toThrow()
   })
@@ -186,6 +297,33 @@ describe('Core operation registry', () => {
         { source: { kind: 'url', url: 'http://insecure.example/a.zip' } },
       ]),
     ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['fileCheckpoints.rewind'].args.parse([
+        {
+          sessionId: 'session-one',
+          checkpointId: 'fcp_0123456789abcdef01234567',
+          confirmed: true,
+        },
+      ]),
+    ).toHaveLength(1)
+    expect(() =>
+      CORE_OPERATION_REGISTRY['fileCheckpoints.rewind'].args.parse([
+        {
+          sessionId: 'session-one',
+          checkpointId: 'fcp_0123456789abcdef01234567',
+          confirmed: false,
+        },
+      ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['fileCheckpoints.preview'].args.parse([
+        {
+          sessionId: 'session-one',
+          checkpointId: 'fcp_0123456789abcdef01234567',
+          workspaceRoot: '/renderer-controlled',
+        },
+      ]),
+    ).toThrow()
   })
 
   it('defines exact Environment and Skill installation tuples', () => {
@@ -290,6 +428,28 @@ describe('Core operation registry', () => {
       invokeCoreOperation(api, 'sessions.rename', ['s1', { title: 'Renamed' }]),
     ).resolves.toEqual({ id: 's1', title: 'Renamed' })
     expect(rename).toHaveBeenCalledWith('s1', { title: 'Renamed' })
+  })
+
+  it('rejects every operation before lifecycle readiness without invoking the domain API', async () => {
+    const rename = vi.fn()
+    const api = {
+      loop: {
+        lifecycleSupervisor: {
+          assertReady: () => {
+            throw new CoreUnavailableError('starting')
+          },
+        },
+      },
+      sessions: { rename },
+    } as unknown as CoreApi
+
+    await expect(
+      invokeCoreOperation(api, 'sessions.rename', ['s1', { title: 'Blocked' }]),
+    ).rejects.toMatchObject({
+      code: 'core_unavailable',
+      message: 'Core runtime is not ready (starting).',
+    })
+    expect(rename).not.toHaveBeenCalled()
   })
 
   it('maps schema failures to a safe operation argument error', async () => {

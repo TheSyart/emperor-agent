@@ -50,6 +50,39 @@ export interface McpConfigPayload {
   [key: string]: unknown
 }
 
+export interface McpConnectionStatusPayload {
+  serverName: string
+  transport?: string
+  generation: number
+  clientId?: string | null
+  state:
+    | 'connecting'
+    | 'ready'
+    | 'degraded'
+    | 'backoff'
+    | 'auth_failed'
+    | 'failed'
+    | 'stopped'
+    | string
+  health?: 'unknown' | 'healthy' | 'unhealthy' | string
+  auth?: 'unknown' | 'ok' | 'failed' | string
+  toolCount?: number
+  tools?: string[]
+  restartAttempts?: number
+  nextRetryAt?: number | null
+  activeRequestCount?: number
+  activeRequestIds?: string[]
+  lastError?: { code?: string; message?: string } | null
+}
+
+export interface McpStatusPayload {
+  initialized: boolean
+  servers: McpConnectionStatusPayload[]
+  ready: number
+  configured: number
+  tools: number
+}
+
 export interface HookSourcePayload {
   id?: string
   kind?: 'global' | 'project' | 'project-local' | 'session' | 'test' | string
@@ -194,7 +227,11 @@ export interface TokenStatsRow {
   calls?: number
   provider?: string
   model?: string
-  [key: string]: number | string | undefined
+  cost_usd_nanos?: number
+  cost_complete_calls?: number
+  cost_incomplete_calls?: number
+  cost_is_partial?: boolean
+  [key: string]: number | string | boolean | undefined
 }
 
 export interface TokenTotals extends TokenStatsRow {
@@ -444,7 +481,26 @@ export interface ModelEntry {
   contextWindowTokens: number
   maxTokens: number
   reasoningEffort: string | null
+  pricing?: ModelPricing
   resolvedProfile: ResolvedModelProfile
+}
+
+export interface ModelPricing {
+  inputUsdPerMillionTokens: number
+  outputUsdPerMillionTokens: number
+  cacheReadUsdPerMillionTokens: number
+  cacheWriteUsdPerMillionTokens: number
+}
+
+export type ModelFallbackTrigger = 'rate_limit' | 'transient'
+
+export interface ModelExecutionPolicy {
+  fallback: {
+    enabled: boolean
+    entryId: string | null
+    triggerOn: ModelFallbackTrigger[]
+  }
+  cost: { maxUsdPerAgentTurn: number | null }
 }
 
 export interface ModelCapabilityOverrides {
@@ -482,6 +538,7 @@ export interface ModelEntrySaveInput {
   contextWindowTokens?: number
   maxTokens?: number
   reasoningEffort?: string | null
+  pricing?: ModelPricing | null
 }
 
 export interface ModelProfilePreviewInput {
@@ -510,6 +567,7 @@ export interface ChatSendPayload {
   attachments?: AttachmentRef[]
   requestedSkills?: RequestedSkill[]
   displayContent?: string
+  delivery?: 'queue' | 'interject'
 }
 
 export interface ModelTestResult {
@@ -593,6 +651,7 @@ export interface ModelConfigPayload {
   schemaVersion: 2
   activeModelId: string | null
   models: ModelEntry[]
+  policy: ModelExecutionPolicy
   current: CurrentModelConfig | null
   availability: ModelAvailability
   providerOptions: ProviderOption[]
@@ -635,7 +694,41 @@ export interface SchedulerDiagnosticsPayload {
 
 export interface ExternalDiagnosticsPayload {
   running?: boolean
-  adapters?: unknown[]
+  lifecycle?: LifecycleDiagnosticsPayload
+  adapters?: Array<{
+    name?: string
+    display_name?: string
+    state?:
+      | 'idle'
+      | 'eval'
+      | 'starting'
+      | 'ready'
+      | 'auth_failed'
+      | 'degraded'
+      | 'stopping'
+      | 'stopped'
+      | string
+    requestedMode?: 'off' | 'eval' | 'on' | string
+    effectiveMode?: 'off' | 'eval' | 'on' | string
+    endpoint?: string | null
+    accepted?: number
+    rejected?: number
+    outboundSent?: number
+    outboundDeadLetter?: number
+    active?: number
+    lastReason?: string | null
+    audit?: {
+      path?: string
+      records?: number
+      badLines?: number
+      archives?: number
+      writeFailures?: number
+    }
+    configuration?: {
+      path?: string
+      status?: DiagnosticsStatus
+    }
+  }>
   inbox?: {
     pending?: number
     seen?: number
@@ -675,6 +768,51 @@ export interface WorkspacePolicyDiagnosticsPayload {
   outsideWorkspace?: string
 }
 
+export interface SandboxCapabilityDiagnosticsPayload {
+  platform?: string
+  backend?: string
+  status?: 'available' | 'unavailable' | 'unsupported' | 'error' | string
+  filesystem?: string
+  network?: string
+  processTree?: boolean
+  reason?: string
+}
+
+export interface ProcessRuntimeDiagnosticsPayload {
+  platform?: string
+  ownership?: boolean
+  leases?: boolean
+  reparent?: boolean
+  orphanReconcile?: boolean
+  stableProcessIdentity?: boolean
+  processTree?: string
+  terminal?: {
+    interactiveStdio?: boolean
+    pty?: boolean
+    resize?: boolean
+  }
+  outputQuota?: {
+    defaultBytes?: number
+    maximumBytes?: number
+    defaultStrategy?: string
+  }
+}
+
+export interface LifecycleServiceDiagnosticsPayload {
+  id?: string
+  required?: boolean
+  dependsOn?: string[]
+  state?: string
+  error?: string | null
+}
+
+export interface LifecycleDiagnosticsPayload {
+  state?: string
+  failedServiceId?: string | null
+  failedPhase?: string | null
+  services?: LifecycleServiceDiagnosticsPayload[]
+}
+
 export interface DiagnosticsRuntimePaths {
   runtimeRoot?: string
   stateRoot?: string
@@ -691,6 +829,7 @@ export interface DiagnosticsRuntimePaths {
   schedulerRoot?: string
   teamRoot?: string
   tasksRoot?: string
+  processesRoot?: string
   controlRoot?: string
   externalRoot?: string
   mcpConfigPath?: string
@@ -735,6 +874,156 @@ export interface DiagnosticsEnvironmentSummary {
   } | null
 }
 
+export interface SubagentSupervisorDiagnosticsPayload {
+  active?: number
+  maxGlobal?: number
+  maxPerSession?: number
+  bySession?: Record<string, number>
+  taskIds?: string[]
+}
+
+export interface AgentDefinitionDiagnosticsPayload {
+  revision?: string
+  sources?: Array<{
+    id?: string
+    kind?: string
+    trust?: string
+    rank?: number
+    active?: boolean
+    blockedReason?: string | null
+  }>
+  agents?: Array<{
+    definition?: { name?: string }
+    source?: { id?: string; kind?: string; trust?: string }
+  }>
+  aliases?: Record<string, string>
+  diagnostics?: Array<{
+    code?: string
+    severity?: string
+    sourceId?: string
+    agentName?: string | null
+    message?: string
+  }>
+}
+
+export interface EffectiveConfigSourcePayload {
+  kind?: 'builtin' | 'user' | 'project' | 'session' | 'managed' | string
+  id?: string
+  trust?: 'trusted' | 'untrusted' | 'managed' | string
+}
+
+export interface EffectiveConfigEntryPayload {
+  key?: string
+  value?: unknown
+  source?: EffectiveConfigSourcePayload
+  trust?: string
+  trace?: Array<{
+    source?: EffectiveConfigSourcePayload
+    status?: 'applied' | 'rejected' | string
+    reason?: string
+    fingerprint?: string
+  }>
+  secretSources?: Array<{
+    path?: string
+    source?: EffectiveConfigSourcePayload
+  }>
+}
+
+export interface EffectiveConfigSnapshotPayload {
+  schemaVersion?: number
+  revision?: string
+  status?: string
+  error?: string
+  entries?: EffectiveConfigEntryPayload[]
+}
+
+export interface PromptSnapshotsDiagnosticsPayload {
+  count?: number
+  recent?: Array<{
+    turnId?: string
+    projection?: {
+      stablePrefix?: { hash?: string }
+      cacheBreak?: {
+        classification?: 'initial' | 'none' | 'expected' | 'unexpected' | string
+        reasonCode?: string
+        firstChanged?: {
+          kind?: string
+          id?: string
+          index?: number
+        } | null
+      }
+    }
+  }>
+}
+
+export interface HybridMemoryDiagnosticsPayload {
+  capability?: {
+    requestedMode?: 'off' | 'eval' | 'on' | string
+    effectiveMode?: 'off' | 'eval' | 'on' | string
+    promptMutationAllowed?: boolean
+    reason?: string
+    evaluationDatasetSha256?: string | null
+    embeddingProviderId?: string | null
+  }
+  indexPath?: string
+  searches?: number
+  promptMutations?: number
+  embeddingFallbacks?: number
+  lastStrategy?: 'hybrid' | 'fts_fallback' | string | null
+  lastResultCount?: number
+  lastSourceDigest?: string | null
+  derivedDiskBytes?: number
+}
+
+export interface CodeIntelligenceDiagnosticsPayload {
+  capability?: {
+    requestedMode?: 'off' | 'eval' | 'on' | string
+    effectiveMode?: 'off' | 'eval' | 'on' | string
+    toolAllowed?: boolean
+    reason?: string
+    evaluationDatasetSha256?: string | null
+    parserRevision?: string
+  }
+  graphManagers?: number
+  queries?: number
+  lspQueries?: number
+  graphFallbacks?: number
+  notifications?: number
+  lastStrategy?: 'graph' | 'lsp' | 'graph_fallback' | string | null
+  lastLatencyMs?: number | null
+  graph?: {
+    state?: 'idle' | 'building' | 'ready' | 'closed' | string
+    version?: number
+    indexedFiles?: number
+    sourceBytes?: number
+    parserLoads?: number
+    parseErrors?: number
+    skippedOversized?: number
+    skippedSymlinks?: number
+    skippedBinary?: number
+    skippedUnsupported?: number
+    skippedCapacity?: number
+    oversizedFileGateVerified?: boolean
+    cacheStatus?: string
+    cacheBytes?: number
+  }
+  lsp?: Array<{
+    keyDigest?: string
+    descriptorId?: string
+    sourceKind?: string
+    state?: string
+    starts?: number
+    restarts?: number
+    crashes?: number
+    generation?: number
+    pendingRequests?: number
+    openDocuments?: number
+    ignoredNotifications?: number
+    protocolErrors?: number
+    lastError?: string | null
+  }>
+}
+
 export interface DiagnosticsPayload {
   root?: string
   paths?: DiagnosticsRuntimePaths
@@ -746,6 +1035,16 @@ export interface DiagnosticsPayload {
   scheduler?: SchedulerDiagnosticsPayload
   runtime?: RuntimeStats
   workspacePolicy?: WorkspacePolicyDiagnosticsPayload
+  sandbox?: SandboxCapabilityDiagnosticsPayload
+  processRuntime?: ProcessRuntimeDiagnosticsPayload
+  lifecycle?: LifecycleDiagnosticsPayload
+  subagents?: SubagentSupervisorDiagnosticsPayload
+  agentDefinitions?: AgentDefinitionDiagnosticsPayload
+  effectiveConfig?: EffectiveConfigSnapshotPayload
+  mcp?: McpStatusPayload
+  promptSnapshots?: PromptSnapshotsDiagnosticsPayload
+  hybridMemory?: HybridMemoryDiagnosticsPayload
+  codeIntelligence?: CodeIntelligenceDiagnosticsPayload
   external?: ExternalDiagnosticsPayload
   activeTasks?: ActiveRuntimeTask[]
   desktopPet?: DesktopPetPayload & Record<string, unknown>
@@ -783,6 +1082,7 @@ export interface BootstrapPayload {
   goals?: BootstrapGoalsPayload
   desktopPet?: DesktopPetPayload
   runtime?: RuntimeReplayPayload
+  mcp?: McpStatusPayload
   diagnostics?: DiagnosticsPayload
   projects?: ProjectInfo[]
   context_used?: number
@@ -830,6 +1130,8 @@ export interface RuntimeEventEnvelope {
   seq?: number
   ts?: number
   turn_id?: string
+  request_id?: string
+  attempt_id?: string
   client_message_id?: string
   [key: string]: unknown
 }
@@ -838,6 +1140,7 @@ export interface RuntimeReplayPayload {
   sessionId?: string
   afterSeq?: number
   latestSeq: number
+  format?: 'projection' | 'envelope_v2'
   busy?: boolean
   scope?: 'unarchived' | string
   events: RuntimeEventEnvelope[]
@@ -1195,6 +1498,8 @@ export interface UserMessage {
   source?: string
   scheduler?: SchedulerMessageMeta
   local?: boolean
+  deliveryState?: 'queued' | 'running' | 'interjected' | 'cancelled'
+  deliveryReason?: string
 }
 
 export interface AssistantMessage {
@@ -1209,6 +1514,8 @@ export interface AssistantMessage {
   startedAt?: number
   endedAt?: number
   durationMs?: number
+  tombstoned?: boolean
+  terminalReason?: string
 }
 
 export type ChatMessage = UserMessage | AssistantMessage
@@ -1268,10 +1575,12 @@ export interface TeamMemberPayload {
   thread: Array<{ role?: string; content?: string }>
 }
 
-export type SchedulerScheduleKind = 'at' | 'every' | 'cron' | string
-export type SchedulerPayloadKind =
-  'agent_turn' | 'team_wake' | 'system_event' | string
-export type SchedulerRunStatus = 'ok' | 'error' | 'skipped' | string
+export type SchedulerScheduleKind = 'at' | 'every' | 'cron'
+export type SchedulerPayloadKind = 'agent_turn' | 'team_wake' | 'system_event'
+export type SchedulerMisfirePolicy = 'skip' | 'latest' | 'catch-up-one'
+export type SchedulerRunTrigger = 'timer' | 'manual' | 'misfire'
+export type SchedulerRunStatus =
+  'running' | 'ok' | 'error' | 'skipped' | 'cancelled' | 'interrupted' | string
 
 export interface SchedulerSchedule {
   kind: SchedulerScheduleKind
@@ -1291,10 +1600,38 @@ export interface SchedulerJobPayload {
 }
 
 export interface SchedulerRunRecord {
+  runId?: string | null
+  taskId?: string | null
   runAtMs: number
+  scheduledForMs?: number
+  trigger?: SchedulerRunTrigger
+  misfirePolicy?: SchedulerMisfirePolicy
+  missedCount?: number
+  countCapped?: boolean
   status: SchedulerRunStatus
   durationMs?: number
   error?: string | null
+}
+
+export interface SchedulerPendingMisfire {
+  policy: SchedulerMisfirePolicy
+  scheduledForMs: number
+  detectedAtMs: number
+  missedCount: number
+  countCapped: boolean
+}
+
+export interface SchedulerActiveRun {
+  runId: string
+  taskId: string
+  phase: 'queued' | 'running'
+  trigger: SchedulerRunTrigger
+  scheduledForMs: number
+  enqueuedAtMs: number
+  startedAtMs: number | null
+  misfirePolicy: SchedulerMisfirePolicy
+  missedCount: number
+  countCapped: boolean
 }
 
 export interface SchedulerJobState {
@@ -1303,6 +1640,8 @@ export interface SchedulerJobState {
   lastStatus?: SchedulerRunStatus | null
   lastError?: string | null
   runHistory?: SchedulerRunRecord[]
+  pendingMisfire?: SchedulerPendingMisfire | null
+  activeRun?: SchedulerActiveRun | null
 }
 
 export interface SchedulerJob {
@@ -1315,6 +1654,7 @@ export interface SchedulerJob {
   createdAtMs?: number
   updatedAtMs?: number
   deleteAfterRun?: boolean
+  misfirePolicy?: SchedulerMisfirePolicy
   protected?: boolean
   purpose?: string | null
 }
@@ -1322,6 +1662,10 @@ export interface SchedulerJob {
 export interface SchedulerMessageMeta {
   jobId?: string
   jobName?: string
+  runId?: string
+  taskId?: string
+  scheduledForMs?: number
+  trigger?: SchedulerRunTrigger | string
 }
 
 export interface SchedulerStatusPayload {
@@ -1330,6 +1674,12 @@ export interface SchedulerStatusPayload {
   enabled: number
   nextRunAtMs?: number | null
   lastError?: string | null
+  active?: number
+  queued?: number
+  maxConcurrentRuns?: number
+  maxPerOwner?: number
+  maxQueuedRuns?: number
+  shutdownPolicy?: 'cancel-and-interrupt'
 }
 
 export interface SchedulerPayload {
@@ -1401,6 +1751,24 @@ type WsEventVariants =
       scheduler?: SchedulerMessageMeta
       ui_hidden?: boolean
     }
+  | {
+      event:
+        | 'prompt_queued'
+        | 'prompt_dequeued'
+        | 'prompt_interjected'
+        | 'prompt_cancelled'
+      prompt_id: string
+      client_message_id?: string
+      delivery?: 'queue' | 'interject'
+      target_turn_id?: string | null
+      reason?: string
+      content?: string
+    }
+  | {
+      event: 'message_tombstoned'
+      reason?: string
+      content_chars?: number
+    }
   | { event: 'message_delta'; delta?: string }
   | {
       event: 'agent_thought'
@@ -1429,6 +1797,10 @@ type WsEventVariants =
       used_fallback?: boolean
       /** Historical replay compatibility only. */
       fallback_reason?: string
+      cost_usd_nanos?: number
+      turn_cost_usd_nanos?: number
+      cost_cap_usd_nanos?: number
+      cost_complete?: boolean
       provider_retry_count?: number
       provider_error_kind?: string
       replaced_tool_results?: number
@@ -1441,6 +1813,23 @@ type WsEventVariants =
       message_count?: number
     }
   | {
+      event: 'mcp_connection_state'
+      server_name: string
+      transport?: string
+      generation: number
+      client_id?: string | null
+      state: string
+      health?: string
+      auth?: string
+      tool_count?: number
+      tools?: string[]
+      restart_attempts?: number
+      next_retry_at?: number | null
+      active_request_count?: number
+      active_request_ids?: string[]
+      last_error?: Record<string, unknown> | null
+    }
+  | {
       event: 'model_provider_retry'
       model?: string
       provider?: string | null
@@ -1448,13 +1837,56 @@ type WsEventVariants =
       attempt?: number
       max_retries?: number
       error_kind?: string
+      retry_delay_ms?: number
+      reason?: string
+    }
+  | {
+      event: 'model_attempt_started'
+      request_id: string
+      attempt_id: string
+      attempt: number
+      max_attempts: number
+      idempotency_key?: string
+    }
+  | {
+      event: 'model_attempt_succeeded'
+      request_id: string
+      attempt_id: string
+      attempt: number
+      max_attempts: number
+      idempotency_key?: string
+      duration_ms: number
+    }
+  | {
+      event: 'model_attempt_failed'
+      request_id: string
+      attempt_id: string
+      attempt: number
+      max_attempts: number
+      idempotency_key?: string
+      duration_ms: number
+      error_kind?: string
+      will_retry?: boolean
+      retry_delay_ms?: number
+    }
+  | {
+      event: 'model_attempt_cancelled'
+      request_id: string
+      attempt_id: string
+      attempt: number
+      max_attempts: number
+      idempotency_key?: string
+      duration_ms: number
       reason?: string
     }
   | {
       event: 'model_route_fallback'
       from_model?: string
+      from_model_entry_id?: string
       to_model?: string
+      to_model_entry_id?: string
       reason?: string
+      error_kind?: string
       usage_type?: string
     }
   | {
@@ -1522,8 +1954,21 @@ type WsEventVariants =
       name: string
       message?: string
       reason_kind?: 'safety_refusal' | 'error' | string
+      metadata?: Record<string, unknown>
     }
   | { event: 'tool_run_cancelled'; id?: string; name: string; reason?: string }
+  | {
+      event: 'process_containment'
+      id?: string
+      backend?: string
+      decision?: 'sandboxed' | 'unsandboxed' | 'denied' | string
+      capability_status?: string
+      filesystem?: string
+      network?: string
+      process_tree?: boolean
+      policy_hash?: string
+      reason?: string
+    }
   | (HookRuntimeEventFields & { event: 'hook_run_started' })
   | (HookRuntimeEventFields & {
       event: 'hook_run_progress'
@@ -1809,10 +2254,32 @@ type WsEventVariants =
       message?: string
     }
   | { event: 'scheduler_job_update'; job?: SchedulerJob; action?: string }
-  | { event: 'scheduler_run_start'; job?: SchedulerJob }
-  | { event: 'scheduler_run_done'; job?: SchedulerJob }
-  | { event: 'scheduler_run_error'; job?: SchedulerJob; error?: string }
-  | { event: 'scheduler_run_cancelled'; job?: SchedulerJob; reason?: string }
+  | {
+      event: 'scheduler_run_start' | 'scheduler_run_done'
+      job?: SchedulerJob
+      run?: SchedulerActiveRun
+      run_id?: string
+      task_id?: string
+    }
+  | {
+      event: 'scheduler_run_error'
+      job?: SchedulerJob
+      error?: string
+      run?: SchedulerActiveRun
+      run_id?: string
+      task_id?: string
+    }
+  | {
+      event:
+        | 'scheduler_run_cancelled'
+        | 'scheduler_run_skipped'
+        | 'scheduler_run_interrupted'
+      job?: SchedulerJob
+      reason?: string
+      run?: SchedulerActiveRun
+      run_id?: string
+      task_id?: string
+    }
   | { event: 'task_started'; task?: RuntimeTaskRecord }
   | {
       event: 'task_progress'

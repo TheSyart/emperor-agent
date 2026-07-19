@@ -28,6 +28,10 @@ npm run typecheck --workspace @emperor/core
 echo "== core eslint =="
 npm run lint --workspace @emperor/core
 
+echo "== ACP stdio bundle =="
+npm run build:acp --workspace @emperor/core
+node scripts/test-acp-bundle.mjs
+
 echo "== desktop vitest =="
 npm --prefix desktop run test
 

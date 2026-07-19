@@ -9,8 +9,8 @@ import {
  * 对齐 Python `agent/providers/base.py`。chat/chatStream 在 TS 下原生 async（无需 run_sync）。
  */
 
-/** SDK 自带指数退避 + 尊重 Retry-After。LLM 调用无副作用，重试幂等安全。 */
-export const DEFAULT_MAX_RETRIES = 2
+/** SDK 层禁止隐式重试；SamplingCoordinator 是唯一 attempt budget owner。 */
+export const DEFAULT_MAX_RETRIES = 0
 
 export interface ToolCallRequest {
   id: string
@@ -146,6 +146,14 @@ export abstract class LLMProvider {
   }
 
   abstract chat(args: ChatArgs): Promise<LLMResponse>
+
+  /**
+   * 只更新 provider 的请求能力状态；真正的再次提交由 SamplingCoordinator
+   * 计入统一 attempt budget。默认没有可恢复的请求形状。
+   */
+  recoverSamplingRequest(_error: unknown): boolean | Promise<boolean> {
+    return false
+  }
 
   async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
     const resp = await this.chat(args)

@@ -26,6 +26,8 @@
   },
   "defaults": {
     "read_only": false,
-    "exclusive": false
+    "exclusive": false,
+    "call_timeout_ms": 60000,
+    "max_result_chars": 12000
   }
 }

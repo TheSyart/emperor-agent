@@ -1,5 +1,9 @@
 import type { ExternalDeliveryResult, ExternalOutbound } from './models'
 
+export interface ExternalSendContext {
+  signal?: AbortSignal | null
+}
+
 export abstract class ExternalAdapter {
   name = 'external'
   display_name = 'External'
@@ -19,5 +23,8 @@ export abstract class ExternalAdapter {
     }
   }
 
-  abstract send(message: ExternalOutbound): Promise<ExternalDeliveryResult>
+  abstract send(
+    message: ExternalOutbound,
+    context?: ExternalSendContext,
+  ): Promise<ExternalDeliveryResult>
 }

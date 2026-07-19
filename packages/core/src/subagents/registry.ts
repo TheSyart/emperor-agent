@@ -1,106 +1,64 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  ExtensionResolver,
+  applyAgentSessionPolicy,
+  type AgentSessionPolicy,
+  type ExtensionSnapshot,
+  type ExtensionSourceInput,
+  type ResolvedAgentDefinition,
+} from '../extensions/resolver'
 import type { SubagentSpec } from './spec'
 
-const BUILTIN_SPECS: Record<
-  string,
-  Omit<SubagentSpec, 'name' | 'systemPrompt'>
-> = {
-  xiaohuangmen: {
-    description:
-      '通传小黄门。轻量只读, 适合短命令、快速确认、跑腿探路。若发现差事变复杂, 应回禀总管改派专职内官。',
-    toolNames: ['run_command', 'read_file', 'glob', 'grep'],
-    maxTurns: 8,
-    planReadonlyExplorer: false,
-  },
-  sili_suitang: {
-    description:
-      '司礼监随堂小太监。只读文书, 适合阅读代码、查阅文档、整理提纲、归纳结论。',
-    toolNames: ['load_skill', 'read_file', 'glob', 'grep'],
-    maxTurns: 12,
-    planReadonlyExplorer: true,
-  },
-  dongchang_tanshi: {
-    description:
-      '东厂探事小太监。只读查访, 适合抓网页、查资料、探索性搜索、比对外部线索。',
-    toolNames: [
-      'run_command',
-      'web_fetch',
-      'load_skill',
-      'read_file',
-      'glob',
-      'grep',
-    ],
-    maxTurns: 15,
-    planReadonlyExplorer: false,
-  },
-  shangbao_dianbu: {
-    description:
-      '尚宝监典簿小太监。只读核验, 适合盘点文件、校对清单、检查遗漏、整理表册。',
-    toolNames: ['run_command', 'read_file', 'glob', 'grep'],
-    maxTurns: 12,
-    planReadonlyExplorer: true,
-  },
-  verification_reviewer: {
-    description:
-      '独立复核小太监。只读审查项目变更, 适合对非平凡计划做对抗式复核、验证命令核验、风险遗漏检查。',
-    toolNames: ['run_command', 'read_file', 'glob', 'grep'],
-    maxTurns: 14,
-    planReadonlyExplorer: true,
-  },
-  neiguan_yingzao: {
-    description:
-      '内官监营造小太监。可读写可执行命令, 适合修改文件、搭建工程、跑命令验收。',
-    toolNames: [
-      'run_command',
-      'web_fetch',
-      'load_skill',
-      'read_file',
-      'write_file',
-      'edit_file',
-      'glob',
-      'grep',
-    ],
-    maxTurns: 20,
-    planReadonlyExplorer: false,
-  },
-}
-
-const ALIASES: Record<string, string> = {
-  general: 'neiguan_yingzao',
-  researcher: 'dongchang_tanshi',
-  reviewer: 'verification_reviewer',
-}
-
-const DEFAULT_PROMPT =
-  '你是奉总管之命专办一件差事的小太监。\n' +
-  "- 不必使用'奉天承运皇帝诏曰'前缀, 那是总管对皇上的礼数。\n" +
-  '- 用工具尽快把差事办妥, 最后用一段简短中文向总管回禀。\n' +
-  '- 最终回禀必须包含: 结论、证据、风险、建议下一步。\n' +
-  '- 只回禀结论与关键信息, 不要复述每一步细节。\n' +
-  '- 你不能再派遣其他小太监, 所有差事自己跑工具完成。'
+const SOURCE_MODULE_DIRECTORY = fileURLToPath(new URL('.', import.meta.url))
 
 export interface SkillsSummaryProvider {
   buildSkillsSummary?: () => string
   summary?: () => string
 }
 
+export interface SubagentRegistryOptions {
+  userSourceRoot?: string | null
+  additionalSources?: ExtensionSourceInput[]
+  sessionPolicy?: AgentSessionPolicy | null
+}
+
 export class SubagentRegistry {
   readonly templatesDir: string
   private readonly skillsLoader: SkillsSummaryProvider | null
   private readonly specs = new Map<string, SubagentSpec>()
+  private readonly extensionSnapshot: ExtensionSnapshot
 
   constructor(
     templatesDir: string,
     skillsLoader?: SkillsSummaryProvider | null,
+    opts: SubagentRegistryOptions = {},
   ) {
-    this.templatesDir = templatesDir
+    this.templatesDir = resolveBuiltinAgentRoot(templatesDir)
     this.skillsLoader = skillsLoader ?? null
-    this.loadAll()
+    const userSource = opts.userSourceRoot
+      ? userAgentSource(opts.userSourceRoot)
+      : null
+    this.extensionSnapshot = new ExtensionResolver({
+      sources: [
+        {
+          id: 'emperor-builtin-agents',
+          kind: 'builtin',
+          root: this.templatesDir,
+          manifests: ['agents.json'],
+          trusted: true,
+          readOnly: true,
+        },
+        ...(userSource ? [userSource] : []),
+        ...(opts.additionalSources ?? []),
+      ],
+    }).resolve()
+    this.loadAll(opts.sessionPolicy ?? null)
   }
 
   resolveName(name: string): string {
-    return ALIASES[name] ?? name
+    return this.extensionSnapshot.aliases[name] ?? name
   }
 
   get(name: string): SubagentSpec | null {
@@ -110,20 +68,25 @@ export class SubagentRegistry {
   names(opts: { includeAliases?: boolean } = {}): string[] {
     const names = new Set(this.specs.keys())
     if (opts.includeAliases) {
-      for (const alias of Object.keys(ALIASES)) names.add(alias)
+      for (const alias of Object.keys(this.extensionSnapshot.aliases))
+        names.add(alias)
     }
     return [...names].sort()
   }
 
   aliases(): Record<string, string> {
-    return { ...ALIASES }
+    return { ...this.extensionSnapshot.aliases }
+  }
+
+  snapshot(): ExtensionSnapshot {
+    return this.extensionSnapshot
   }
 
   describe(): string {
     const lines = [...this.specs.values()].map(
       (spec) => `  - ${spec.name}: ${spec.description}`,
     )
-    const aliasText = Object.entries(ALIASES)
+    const aliasText = Object.entries(this.extensionSnapshot.aliases)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => `${k} -> ${v}`)
       .join(', ')
@@ -131,25 +94,82 @@ export class SubagentRegistry {
     return lines.join('\n')
   }
 
-  private loadAll(): void {
-    for (const [name, cfg] of Object.entries(BUILTIN_SPECS)) {
-      const promptFile = join(this.templatesDir, `${name}.md`)
-      let systemPrompt = existsSync(promptFile)
-        ? readFileSync(promptFile, 'utf8').trim()
-        : DEFAULT_PROMPT
-      if (this.skillsLoader && cfg.toolNames.includes('load_skill')) {
-        const summary =
-          this.skillsLoader.buildSkillsSummary?.() ||
-          this.skillsLoader.summary?.() ||
-          ''
-        if (summary) {
-          systemPrompt +=
-            '\n\n## 可加载的技能 (load_skill)\n\n' +
-            `${summary}\n\n` +
-            '遇到对应专题时, 先调 load_skill 把技能内容拉进上下文。'
-        }
-      }
-      this.specs.set(name, { name, systemPrompt, ...cfg })
+  private loadAll(sessionPolicy: AgentSessionPolicy | null): void {
+    for (const resolved of this.extensionSnapshot.agents) {
+      const definition = sessionPolicy
+        ? applyAgentSessionPolicy(resolved.definition, sessionPolicy)
+        : resolved.definition
+      const systemPrompt = this.withSkillsSummary(
+        resolved,
+        definition.tools.allow,
+      )
+      this.specs.set(definition.name, {
+        name: definition.name,
+        description: definition.description,
+        systemPrompt,
+        toolNames: [...definition.tools.allow],
+        maxTurns: definition.completion.maxTurns,
+        planReadonlyExplorer: definition.delegation.planReadonlyExplorer,
+        definition,
+        source: resolved.source,
+        revision: resolved.revision,
+      })
     }
   }
+
+  private withSkillsSummary(
+    resolved: ResolvedAgentDefinition,
+    toolNames: readonly string[],
+  ): string {
+    let systemPrompt = resolved.systemPrompt
+    if (!this.skillsLoader || !toolNames.includes('load_skill'))
+      return systemPrompt
+    const summary =
+      this.skillsLoader.buildSkillsSummary?.() ||
+      this.skillsLoader.summary?.() ||
+      ''
+    if (!summary) return systemPrompt
+    systemPrompt +=
+      '\n\n## 可加载的技能 (load_skill)\n\n' +
+      `${summary}\n\n` +
+      '遇到对应专题时, 先调 load_skill 把技能内容拉进上下文。'
+    return systemPrompt
+  }
+}
+
+function userAgentSource(root: string): ExtensionSourceInput | null {
+  if (!existsSync(join(root, 'agents.json'))) return null
+  return {
+    id: 'emperor-user-agents',
+    kind: 'user',
+    root,
+    manifests: ['agents.json'],
+    trusted: true,
+    readOnly: false,
+  }
+}
+
+export function builtinAgentManifestPath(templatesDir: string): string {
+  return join(resolveBuiltinAgentRoot(templatesDir), 'agents.json')
+}
+
+function resolveBuiltinAgentRoot(preferred: string): string {
+  const candidates = [
+    preferred,
+    join(preferred, 'subagents'),
+    join(
+      SOURCE_MODULE_DIRECTORY,
+      '..',
+      '..',
+      '..',
+      '..',
+      'templates',
+      'subagents',
+    ),
+  ]
+  return (
+    candidates.find((candidate) =>
+      existsSync(join(candidate, 'agents.json')),
+    ) ?? preferred
+  )
 }

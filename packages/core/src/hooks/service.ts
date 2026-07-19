@@ -33,6 +33,7 @@ import type { TokenTrackerLike } from '../agent/runner'
 import { writeJsonAtomic } from '../store/atomic-json'
 import { parseHooksConfigV2, serializeHooksConfigV2 } from './schema'
 import type { ExecutionEnvironment } from '../environment/snapshot'
+import type { OwnedProcessRunner } from '../environment/process-runner'
 
 interface ActiveTurnSnapshot {
   turnId: string
@@ -77,6 +78,7 @@ export class HookService {
     modelRouter?: HookModelRouter | null
     tokenTracker?: Pick<TokenTrackerLike, 'record'> | null
     executionEnvironment?: HookExecutionEnvironmentProvider | null
+    ownedProcessRunner?: OwnedProcessRunner | null
   }) {
     this.stateRoot = opts.stateRoot
     this.resolver = new HookSourceResolver({ stateRoot: opts.stateRoot })
@@ -88,7 +90,11 @@ export class HookService {
     this.audit = new HookAuditStore(opts.stateRoot)
     this.executors =
       opts.executors ??
-      defaultExecutors(opts.modelRouter ?? null, opts.tokenTracker ?? null)
+      defaultExecutors(
+        opts.modelRouter ?? null,
+        opts.tokenTracker ?? null,
+        opts.ownedProcessRunner ?? null,
+      )
     this.executionEnvironmentProvider = opts.executionEnvironment ?? null
   }
 
@@ -374,6 +380,8 @@ export class HookService {
     })
     const result = await orchestrator.run(plan, input, {
       eventName,
+      sessionId: opts.sessionId,
+      turnId: typeof opts.turnId === 'string' ? opts.turnId : null,
       cwd: opts.cwd || process.cwd(),
       policy: snapshot.config.policy,
       signal: opts.signal ?? null,
@@ -468,9 +476,12 @@ export class HookService {
 function defaultExecutors(
   modelRouter: HookModelRouter | null,
   tokenTracker: Pick<TokenTrackerLike, 'record'> | null,
+  ownedProcessRunner: OwnedProcessRunner | null,
 ): HookExecutorRegistry {
   const registry = new HookExecutorRegistry()
-  registry.register(new CommandHookExecutor())
+  registry.register(
+    new CommandHookExecutor(undefined, ownedProcessRunner ?? undefined),
+  )
   registry.register(new HttpHookExecutor())
   if (modelRouter) {
     const gateway = new RoutedHookModelGateway(modelRouter, tokenTracker)

@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import {
   compareStableProcessStartIdentity,
   currentStableProcessIdentity,
+  systemBootMarker,
 } from './stable-process-identity'
 
 describe('currentStableProcessIdentity', () => {
@@ -14,6 +17,26 @@ describe('currentStableProcessIdentity', () => {
     if (first.bootMarker === null) expect(first.processStartIdentity).toBeNull()
     else expect(first.processStartIdentity).not.toBeNull()
   })
+})
+
+describe('systemBootMarker', () => {
+  it.skipIf(process.platform !== 'darwin')(
+    'binds Darwin identity to the stable boot session UUID',
+    () => {
+      const bootSessionUuid = execFileSync(
+        'sysctl',
+        ['-n', 'kern.bootsessionuuid'],
+        { encoding: 'utf8' },
+      )
+        .trim()
+        .toLowerCase()
+      const expected = createHash('sha256')
+        .update(`darwin:${bootSessionUuid}`, 'utf8')
+        .digest('hex')
+
+      expect(systemBootMarker()).toBe(expected)
+    },
+  )
 })
 
 describe('compareStableProcessStartIdentity', () => {

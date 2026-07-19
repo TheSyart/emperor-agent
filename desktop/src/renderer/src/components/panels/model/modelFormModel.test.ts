@@ -129,6 +129,22 @@ describe('model entry form model', () => {
     expect(toModelEntrySaveInput(draft)).toHaveProperty('displayName', '')
   })
 
+  it('round-trips explicit per-million-token prices and can clear them', () => {
+    const draft = createModelEntryDraft(dualProvider)
+    draft.modelId = 'deepseek-chat'
+    draft.pricingEnabled = true
+    draft.pricing = {
+      inputUsdPerMillionTokens: 2,
+      outputUsdPerMillionTokens: 8,
+      cacheReadUsdPerMillionTokens: 0.2,
+      cacheWriteUsdPerMillionTokens: 2.5,
+    }
+
+    expect(toModelEntrySaveInput(draft).pricing).toEqual(draft.pricing)
+    draft.pricingEnabled = false
+    expect(toModelEntrySaveInput(draft).pricing).toBeNull()
+  })
+
   it('preserves a saved credential for canonical-equivalent OpenAI and Anthropic addresses', () => {
     const openai = createModelEntryDraft(dualProvider, {
       entryId: 'openai-entry',

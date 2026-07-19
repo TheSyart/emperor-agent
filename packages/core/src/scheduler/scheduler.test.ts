@@ -240,7 +240,7 @@ describe('scheduler service/tool', () => {
     await service.start()
     service.stop()
     expect(service.getJob(stale.id)?.state.last_status).toBe(
-      SchedulerStatus.ERROR,
+      SchedulerStatus.INTERRUPTED,
     )
 
     await service.start()
@@ -365,6 +365,7 @@ describe('scheduler service/tool', () => {
     })
 
     await service.start()
+    expect(service.status().misfirePolicy).toBe('skip')
     const initialHandle = timers.at(-1)!.handle
     const job = service.addJob({
       name: 'soon',
@@ -382,6 +383,56 @@ describe('scheduler service/tool', () => {
     const latest = timers.at(-1)!.handle
     service.stop()
     expect(cleared).toContain(latest)
+  })
+
+  it.each([
+    {
+      kind: 'at',
+      schedule: (now: number) =>
+        new SchedulerSchedule({ kind: 'at', at_ms: now + 10_000 }),
+    },
+    {
+      kind: 'every',
+      schedule: () =>
+        new SchedulerSchedule({ kind: 'every', every_ms: 20_000 }),
+    },
+    {
+      kind: 'cron',
+      schedule: () =>
+        new SchedulerSchedule({ kind: 'cron', expr: '* * * * *', tz: 'UTC' }),
+    },
+  ])('automatically dispatches a due $kind schedule', async ({ schedule }) => {
+    const root = tmp('emperor-scheduler-auto-schedule-')
+    const clock = new FakeClock()
+    clock.value = Date.UTC(2026, 0, 1, 0, 0, 0)
+    const callbacks: Array<() => void | Promise<void>> = []
+    const called: string[] = []
+    const service = new SchedulerService(new SchedulerStore(root), {
+      timeFunc: clock.now,
+      setTimer: (callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      },
+      clearTimer: () => undefined,
+      onJob: async (job) => {
+        called.push(job.id)
+      },
+    })
+    const job = service.addJob({
+      name: 'automatic schedule',
+      schedule: schedule(clock.value),
+      payload: new SchedulerPayload({ message: 'run automatically' }),
+    })
+
+    await service.start()
+    const dueAt = service.getJob(job.id)?.state.next_run_at_ms
+    expect(dueAt).not.toBeNull()
+    clock.value = dueAt!
+    await callbacks.at(-1)!()
+
+    expect(called).toEqual([job.id])
+    expect(service.getJob(job.id)?.state.last_status).toBe(SchedulerStatus.OK)
+    service.stop()
   })
 
   it('SchedulerTool adds, lists, pauses, resumes, runs, removes, and rejects recursive creation', async () => {

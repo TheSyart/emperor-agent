@@ -51,7 +51,7 @@ flowchart LR
 聚合 job 生成或验证：
 
 - 平台安装包及 `UNSIGNED-PREVIEW` 命名；
-- candidate、packaged smoke 和 Linux lifecycle receipts；
+- candidate、packaged smoke 和 Linux lifecycle receipts；packaged smoke schema 2 必须同时带不含路径的 host-OS sandbox backend/status/provenance、全部 required/ready 的 lifecycle receipt，以及真实 ASAR renderer 的 Node globals absent、Core bridge/bootstrap、attachment 字节、sandbox/context-isolation/node-integration 结果；Linux 测试若使用 `--no-sandbox` 只能标记 `disabled-for-linux-test`，其他平台必须标记 Chromium sandbox enabled；
 - `ARTIFACT-SHA256SUMS.txt` 与全 bundle `SHA256SUMS.txt`；
 - 合并后的 CycloneDX SBOM；
 - GitHub build provenance 与 SBOM attestations；

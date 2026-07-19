@@ -3,9 +3,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import {
+  appAssetRequestAccess,
   resolveAssetPath,
   resolveAttachmentRawPath,
   resolveMediaRawPath,
+  resolveStaticAssetPath,
 } from './protocol'
 
 const ROOT = path.join(path.parse(process.cwd()).root, 'app', 'out', 'renderer')
@@ -35,6 +37,60 @@ describe('resolveAssetPath', () => {
     expect(resolveAssetPath('/../../secret.js', ROOT)).toBe(
       path.join(ROOT, 'index.html'),
     )
+  })
+})
+
+describe('resolveStaticAssetPath', () => {
+  it('serves only explicit files contained by a static resource root', () => {
+    expect(resolveStaticAssetPath('/renderer.html', ROOT)).toBe(
+      path.join(ROOT, 'renderer.html'),
+    )
+    expect(resolveStaticAssetPath('/assets/pet.svg', ROOT)).toBe(
+      path.join(ROOT, 'assets', 'pet.svg'),
+    )
+    expect(resolveStaticAssetPath('/', ROOT)).toBeNull()
+    expect(resolveStaticAssetPath('/chat', ROOT)).toBeNull()
+  })
+
+  it('rejects malformed encoding and traversal instead of falling back', () => {
+    expect(resolveStaticAssetPath('/../secret.js', ROOT)).toBeNull()
+    expect(resolveStaticAssetPath('/%2e%2e/secret.js', ROOT)).toBeNull()
+    expect(resolveStaticAssetPath('/%not-valid', ROOT)).toBeNull()
+  })
+})
+
+describe('app protocol cross-origin access', () => {
+  it('allows only the product bundle to fetch attachments and media', () => {
+    expect(appAssetRequestAccess('attachments', 'app://bundle')).toEqual({
+      allowed: true,
+      allowOrigin: 'app://bundle',
+    })
+    expect(appAssetRequestAccess('media', 'app://bundle')).toEqual({
+      allowed: true,
+      allowOrigin: 'app://bundle',
+    })
+    expect(appAssetRequestAccess('attachments', 'https://example.com')).toEqual(
+      { allowed: false, allowOrigin: null },
+    )
+    expect(appAssetRequestAccess('attachments', 'app://pet')).toEqual({
+      allowed: false,
+      allowOrigin: null,
+    })
+  })
+
+  it('allows the pet renderer to load only pet assets and keeps no-origin subresources compatible', () => {
+    expect(appAssetRequestAccess('pet-assets', 'app://pet')).toEqual({
+      allowed: true,
+      allowOrigin: 'app://pet',
+    })
+    expect(appAssetRequestAccess('pet-assets', 'app://bundle')).toEqual({
+      allowed: false,
+      allowOrigin: null,
+    })
+    expect(appAssetRequestAccess('attachments', null)).toEqual({
+      allowed: true,
+      allowOrigin: null,
+    })
   })
 })
 

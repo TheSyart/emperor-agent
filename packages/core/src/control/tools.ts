@@ -67,6 +67,16 @@ export interface ToolManagerHost {
   }): Interaction
 }
 
+type ToolManagerHostProvider =
+  ToolManagerHost | ((sessionId?: string | null) => ToolManagerHost)
+
+function resolveToolManager(
+  provider: ToolManagerHostProvider,
+  ctx?: ToolExecutionContext,
+): ToolManagerHost {
+  return typeof provider === 'function' ? provider(ctx?.sessionId) : provider
+}
+
 function obj(
   description: string,
   properties: Record<string, ParamSchema>,
@@ -120,19 +130,21 @@ export class AskUserTool extends Tool {
     ['questions'],
   )
 
-  private readonly manager: ToolManagerHost
-  constructor(manager: ToolManagerHost) {
+  private readonly managerProvider: ToolManagerHostProvider
+  constructor(manager: ToolManagerHostProvider) {
     super()
-    this.manager = manager
+    this.managerProvider = manager
   }
 
   execute(args: Record<string, unknown>, ctx?: ToolExecutionContext): string {
-    const interaction = this.manager.createAsk({
-      questions: (args.questions as Array<Record<string, unknown>>) ?? [],
-      context: String(args.context ?? ''),
-      parentCallId: ctx?.parentCallId ?? null,
-      meta: controlSessionMeta(ctx?.sessionId),
-    })
+    const interaction = resolveToolManager(this.managerProvider, ctx).createAsk(
+      {
+        questions: (args.questions as Array<Record<string, unknown>>) ?? [],
+        context: String(args.context ?? ''),
+        parentCallId: ctx?.parentCallId ?? null,
+        meta: controlSessionMeta(ctx?.sessionId),
+      },
+    )
     return makePauseResult(interactionToDict(interaction))
   }
 }
@@ -156,39 +168,41 @@ export class RequestPlanModeTool extends Tool {
     ['reason'],
   )
 
-  private readonly manager: ToolManagerHost
-  constructor(manager: ToolManagerHost) {
+  private readonly managerProvider: ToolManagerHostProvider
+  constructor(manager: ToolManagerHostProvider) {
     super()
-    this.manager = manager
+    this.managerProvider = manager
   }
 
   execute(args: Record<string, unknown>, ctx?: ToolExecutionContext): string {
     const reason = String(args.reason ?? '').trim() || '高影响改动需要先规划'
-    const interaction = this.manager.createAsk({
-      questions: [
-        {
-          id: PLAN_MODE_REQUEST_QUESTION_ID,
-          header: '计划模式',
-          question: `模型请求切换到计划模式：${reason}`,
-          options: [
-            {
-              label: PLAN_MODE_REQUEST_APPROVE_LABEL,
-              description: '切换后模型先只读探索并提交计划，批准后才动手改动',
-            },
-            {
-              label: PLAN_MODE_REQUEST_DECLINE_LABEL,
-              description: '保持当前模式，模型将改用澄清提问或缩小改动范围',
-            },
-          ],
+    const interaction = resolveToolManager(this.managerProvider, ctx).createAsk(
+      {
+        questions: [
+          {
+            id: PLAN_MODE_REQUEST_QUESTION_ID,
+            header: '计划模式',
+            question: `模型请求切换到计划模式：${reason}`,
+            options: [
+              {
+                label: PLAN_MODE_REQUEST_APPROVE_LABEL,
+                description: '切换后模型先只读探索并提交计划，批准后才动手改动',
+              },
+              {
+                label: PLAN_MODE_REQUEST_DECLINE_LABEL,
+                description: '保持当前模式，模型将改用澄清提问或缩小改动范围',
+              },
+            ],
+          },
+        ],
+        context: reason,
+        parentCallId: ctx?.parentCallId ?? null,
+        meta: {
+          plan_mode_request: true,
+          ...controlSessionMeta(ctx?.sessionId),
         },
-      ],
-      context: reason,
-      parentCallId: ctx?.parentCallId ?? null,
-      meta: {
-        plan_mode_request: true,
-        ...controlSessionMeta(ctx?.sessionId),
       },
-    })
+    )
     return makePauseResult(interactionToDict(interaction))
   }
 }
@@ -251,16 +265,16 @@ export class ProposePlanTool extends Tool {
     ['title', 'summary', 'plan_markdown'],
   )
 
-  private readonly manager: ToolManagerHost
-  constructor(manager: ToolManagerHost) {
+  private readonly managerProvider: ToolManagerHostProvider
+  constructor(manager: ToolManagerHostProvider) {
     super()
-    this.manager = manager
+    this.managerProvider = manager
   }
 
   execute(args: Record<string, unknown>, ctx?: ToolExecutionContext): string {
     let interaction: Interaction
     try {
-      interaction = this.manager.createPlan({
+      interaction = resolveToolManager(this.managerProvider, ctx).createPlan({
         title: String(args.title ?? ''),
         summary: String(args.summary ?? ''),
         planMarkdown: String(args.plan_markdown ?? ''),

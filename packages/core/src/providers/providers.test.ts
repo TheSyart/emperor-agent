@@ -133,12 +133,13 @@ describe('AnthropicProvider', () => {
     ).toBe(false)
   })
 
-  it('enables retries from the shared constant', () => {
+  it('disables SDK retries so SamplingCoordinator owns the budget', () => {
     const prov = new AnthropicProvider({
       apiKey: 'test',
       defaultModel: 'claude',
     })
-    expect(prov.client.maxRetries).toBe(DEFAULT_MAX_RETRIES)
+    expect(DEFAULT_MAX_RETRIES).toBe(0)
+    expect(prov.client.maxRetries).toBe(0)
   })
 
   it('normalizes a full Messages resource URL before the SDK appends its path', () => {
@@ -297,13 +298,32 @@ describe('OpenAICompatProvider', () => {
     })
   })
 
-  it('enables retries from the shared constant', () => {
+  it('disables SDK retries so SamplingCoordinator owns the budget', () => {
     const prov = new OpenAICompatProvider({
       apiKey: 'test',
       spec: undefined,
       defaultModel: 'gpt-x',
     })
-    expect(prov.client.maxRetries).toBe(DEFAULT_MAX_RETRIES)
+    expect(DEFAULT_MAX_RETRIES).toBe(0)
+    expect(prov.client.maxRetries).toBe(0)
+  })
+
+  it('negotiates unsupported stream usage once without resubmitting inside the provider', () => {
+    const prov = new OpenAICompatProvider({
+      apiKey: 'test',
+      spec: undefined,
+      defaultModel: 'gpt-x',
+    })
+
+    expect(
+      prov.recoverSamplingRequest(
+        Object.assign(new Error('stream_options unsupported'), { status: 400 }),
+      ),
+    ).toBe(true)
+    expect(
+      prov.recoverSamplingRequest(new Error('stream_options unsupported')),
+    ).toBe(false)
+    expect(prov.recoverSamplingRequest(new Error('network failed'))).toBe(false)
   })
 
   it('normalizes a full Chat Completions resource URL before SDK path handling', () => {
