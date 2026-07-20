@@ -527,9 +527,7 @@ class SharedOnlySubagentWorkspaceProvider implements SubagentWorkspaceProvider {
   }
 }
 
-export class GitWorktreeSubagentWorkspaceProvider
-  implements SubagentWorkspaceProvider
-{
+export class GitWorktreeSubagentWorkspaceProvider implements SubagentWorkspaceProvider {
   readonly worktreeRoot: string
   readonly manifestPath: string
   private readonly resolveRuntime: (
@@ -556,7 +554,9 @@ export class GitWorktreeSubagentWorkspaceProvider
       }
     if (!/^[A-Za-z0-9_-]+$/.test(input.taskId))
       throw new SubagentWorkspaceUnavailableError('invalid task identity')
-    const runtime = await this.resolveRuntime(input.sourceRoot).catch(() => null)
+    const runtime = await this.resolveRuntime(input.sourceRoot).catch(
+      () => null,
+    )
     if (!runtime?.executable)
       throw new SubagentWorkspaceUnavailableError('Git is not ready')
     mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 })
@@ -840,7 +840,9 @@ function gitFailure(
   prefix: string,
   result: { status: string; exitCode: number | null; stderr: string },
 ): string {
-  const detail = String(result.stderr ?? '').trim().slice(0, 300)
+  const detail = String(result.stderr ?? '')
+    .trim()
+    .slice(0, 300)
   return `${prefix} (${result.status}/${String(result.exitCode)})${detail ? `: ${detail}` : ''}`
 }
 

@@ -14,6 +14,7 @@ import { MCPToolAdapter } from './adapter'
 import {
   loadMcpConfig,
   loadMcpConfigUnresolved,
+  MCP_EDITOR_SECRET_MARKER,
   resolveMcpConfig,
   saveMcpConfig,
 } from './config'
@@ -185,7 +186,7 @@ describe('MCP config', () => {
     })
   })
 
-  it('keeps credential placeholders unresolved in the renderer editing payload', async () => {
+  it('keeps placeholders unresolved and masks literal secrets in the renderer editing payload', async () => {
     const root = tmp('emperor-mcp-unresolved-editor-')
     writeFileSync(
       join(root, 'mcp_config.json'),
@@ -194,7 +195,16 @@ describe('MCP config', () => {
           remote: {
             transport: 'sse',
             url: 'https://mcp.example.test',
-            headers: { Authorization: 'Bearer ${MCP_SECRET_TOKEN}' },
+            command: 'visible-command',
+            args: ['--token=${MCP_SECRET_TOKEN}', 'literal-argument'],
+            env: {
+              API_TOKEN: '${MCP_SECRET_TOKEN}',
+              STATIC_TOKEN: 'literal-env-secret',
+            },
+            headers: {
+              Authorization: 'Bearer ${MCP_SECRET_TOKEN}',
+              'X-Static': 'literal-header-secret',
+            },
           },
         },
       }),
@@ -212,7 +222,24 @@ describe('MCP config', () => {
     expect(editor.servers.remote?.headers.Authorization).toBe(
       'Bearer ${MCP_SECRET_TOKEN}',
     )
+    expect(editor.servers.remote).toMatchObject({
+      command: 'visible-command',
+      args: ['--token=${MCP_SECRET_TOKEN}', '[REDACTED]'],
+      env: {
+        API_TOKEN: '${MCP_SECRET_TOKEN}',
+        STATIC_TOKEN: '[REDACTED]',
+      },
+      url: '[REDACTED]',
+      headers: {
+        Authorization: 'Bearer ${MCP_SECRET_TOKEN}',
+        'X-Static': '[REDACTED]',
+      },
+    })
     expect(JSON.stringify(editor)).not.toContain('runtime-secret-value')
+    expect(JSON.stringify(editor)).not.toContain('literal-argument')
+    expect(JSON.stringify(editor)).not.toContain('literal-env-secret')
+    expect(JSON.stringify(editor)).not.toContain('literal-header-secret')
+    expect(JSON.stringify(editor)).not.toContain('https://mcp.example.test')
   })
 
   it('keeps the legacy loader result while exposing its user-layer provenance', async () => {
@@ -232,10 +259,12 @@ describe('MCP config', () => {
       'utf8',
     )
 
-    const legacy = await loadMcpConfigUnresolved(root)
+    const editor = await loadMcpConfigUnresolved(root)
+    const runtime = await loadMcpConfig(root, {})
     const resolved = await resolveMcpConfig(root, {})
 
-    expect(resolved.config).toEqual(legacy)
+    expect(resolved.config).toEqual(runtime)
+    expect(editor.servers.remote?.url).toBe('[REDACTED]')
     expect(resolved.resolution.source).toMatchObject({
       kind: 'user',
       id: 'mcp_config.json',
@@ -263,6 +292,99 @@ describe('MCP config', () => {
         .read_only,
     ).toBe(true)
     expect(statSync(join(root, 'mcp_config.json')).mode & 0o777).toBe(0o600)
+  })
+
+  it('restores masked editor leaves from the same stored server paths', async () => {
+    const root = tmp('emperor-mcp-mask-roundtrip-')
+    const path = join(root, 'mcp_config.json')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        servers: {
+          docs: {
+            transport: 'stdio',
+            command: 'docs-mcp',
+            enabled: true,
+            args: ['--token=${MCP_TOKEN}', 'literal-argument'],
+            env: { STATIC_TOKEN: 'literal-env-secret' },
+            url: 'https://literal.example.test',
+            headers: { Authorization: 'literal-header-secret' },
+          },
+        },
+      }),
+      'utf8',
+    )
+    const editor = await loadMcpConfigUnresolved(root)
+    editor.servers.docs!.enabled = false
+
+    await saveMcpConfig(root, editor as unknown as Record<string, unknown>)
+
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.servers.docs).toMatchObject({
+      enabled: false,
+      args: ['--token=${MCP_TOKEN}', 'literal-argument'],
+      env: { STATIC_TOKEN: 'literal-env-secret' },
+      url: 'https://literal.example.test',
+      headers: { Authorization: 'literal-header-secret' },
+    })
+    expect(JSON.stringify(persisted)).not.toContain(MCP_EDITOR_SECRET_MARKER)
+  })
+
+  it('persists explicit replacements, clears secret fields, and deletes servers', async () => {
+    const root = tmp('emperor-mcp-mask-update-')
+    const path = join(root, 'mcp_config.json')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        servers: {
+          alpha: {
+            args: ['old-argument'],
+            env: { TOKEN: 'old-token' },
+            url: 'https://old.example.test',
+            headers: { Authorization: 'old-header' },
+          },
+          removed: { env: { TOKEN: 'remove-me' } },
+        },
+      }),
+      'utf8',
+    )
+    const editor = await loadMcpConfigUnresolved(root)
+    editor.servers.alpha!.args = ['new-argument']
+    editor.servers.alpha!.env = {}
+    editor.servers.alpha!.url = null
+    editor.servers.alpha!.headers = {
+      Authorization: 'Bearer ${NEW_TOKEN}',
+    }
+    delete editor.servers.removed
+
+    await saveMcpConfig(root, editor as unknown as Record<string, unknown>)
+
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.servers.alpha).toMatchObject({
+      args: ['new-argument'],
+      env: {},
+      url: null,
+      headers: { Authorization: 'Bearer ${NEW_TOKEN}' },
+    })
+    expect(persisted.servers.removed).toBeUndefined()
+  })
+
+  it('rejects an editor marker with no stored value before changing the file', async () => {
+    const root = tmp('emperor-mcp-mask-orphan-')
+    const path = join(root, 'mcp_config.json')
+    const original = JSON.stringify({ servers: {} })
+    writeFileSync(path, original, 'utf8')
+
+    await expect(
+      saveMcpConfig(root, {
+        servers: {
+          injected: {
+            env: { TOKEN: MCP_EDITOR_SECRET_MARKER },
+          },
+        },
+      }),
+    ).rejects.toThrow('servers.injected.env.TOKEN')
+    expect(readFileSync(path, 'utf8')).toBe(original)
   })
 
   it('isolates truncated JSON and starts with no enabled servers', async () => {

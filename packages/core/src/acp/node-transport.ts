@@ -23,7 +23,8 @@ export function createBoundedNodeAcpStream(
     },
     cancel(reason) {
       cancelled = true
-      if (!input.destroyed) input.destroy(asError(reason, 'ACP input cancelled'))
+      if (!input.destroyed)
+        input.destroy(asError(reason, 'ACP input cancelled'))
     },
   })
   const writable = new WritableStream<AnyMessage>({

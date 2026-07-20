@@ -10,8 +10,9 @@ import {
 function candidate<T>(
   kind: ConfigLayerKind,
   value: T,
-  trust: 'trusted' | 'untrusted' | 'managed' =
-    kind === 'managed' ? 'managed' : 'trusted',
+  trust: 'trusted' | 'untrusted' | 'managed' = kind === 'managed'
+    ? 'managed'
+    : 'trusted',
 ): ConfigCandidate<T> {
   return {
     source: { kind, id: `${kind}-fixture`, trust },
@@ -274,12 +275,7 @@ function precedenceCases(): Array<{
   layers: ConfigLayerKind[]
   expected: ConfigLayerKind
 }> {
-  const optional: ConfigLayerKind[] = [
-    'user',
-    'project',
-    'session',
-    'managed',
-  ]
+  const optional: ConfigLayerKind[] = ['user', 'project', 'session', 'managed']
   return Array.from({ length: 2 ** optional.length }, (_, mask) => {
     const layers = optional.filter((_, index) => (mask & (1 << index)) !== 0)
     return {

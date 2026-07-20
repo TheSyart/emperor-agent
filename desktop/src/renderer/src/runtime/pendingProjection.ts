@@ -96,13 +96,10 @@ export function executePendingEffect(
       reject(abortError())
       return
     }
-    const timer = setTimeout(
-      () => {
-        cleanup()
-        resolve({ version: effect.version })
-      },
-      effect.delayMs,
-    )
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve({ version: effect.version })
+    }, effect.delayMs)
     const onAbort = () => {
       cleanup()
       reject(abortError())

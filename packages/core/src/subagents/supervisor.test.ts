@@ -64,7 +64,8 @@ function launchInput(
 describe('SubagentSupervisor', () => {
   it('creates detached Git worktrees with fixed argv and removes the exact lease', async () => {
     const worktreeRoot = tmp('emperor-subagent-worktrees-')
-    const calls: Array<{ executable: string; args: string[]; cwd?: string }> = []
+    const calls: Array<{ executable: string; args: string[]; cwd?: string }> =
+      []
     const runner: EnvironmentProcessRunner = {
       async run(request) {
         calls.push({
@@ -182,9 +183,10 @@ describe('SubagentSupervisor', () => {
       ],
       ['-C', '/repo', 'worktree', 'prune'],
     ])
-    expect(
-      JSON.parse(readFileSync(restarted.manifestPath, 'utf8')),
-    ).toEqual({ version: 1, leases: {} })
+    expect(JSON.parse(readFileSync(restarted.manifestPath, 'utf8'))).toEqual({
+      version: 1,
+      leases: {},
+    })
   })
 
   it('cascades parent cancellation only to foreground and closes background by owner session', async () => {

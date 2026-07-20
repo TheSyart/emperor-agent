@@ -103,9 +103,9 @@ owned process 控制使用 `processes.list`、`processes.cancel` 和 `processes.
 
 文件检查点使用 `fileCheckpoints.list`、`fileCheckpoints.preview`、`fileCheckpoints.rewind` 和 `fileCheckpoints.rewindGit`。输入只接受 session/checkpoint ID；workspace 由 Core 从受信 SessionEntry 推导。纯文件 `rewind` 的 schema 必须包含字面量 `confirmed: true`；Git 路径还必须包含 `confirmedGitRisk: true`、前一次预览的 SHA-256 revision，以及 `abort|stash` dirty strategy。输出仅含 ID、工具/turn 元数据、相对路径、change kind、大小、状态与哈希；Git capture 只投影 OID、branch、计数和 identity digest，不返回快照正文、artifact/private store、`.git` 或 workspace 绝对路径。两条回退都经过 mutation guard 和领域冲突检查；renderer 隐藏按钮不构成授权。
 
-MCP 使用 `mcp.getConfig` / `mcp.saveConfig` 管理配置，`mcp.status` 只读返回每 server 的 generation、client ID、state、auth/health、工具名快照、退避和活动 request 计数。它不返回 header/env 值、原始 transport 错误或工具结果。Bootstrap 与 Diagnostics 返回同一状态结构，插件页不通过“工具数组是否为空”猜测连接健康。
+MCP 使用 `mcp.getConfig` / `mcp.saveConfig` 管理配置。Get 保留 `${ENV_NAME}`，但将 args、env、headers、URL 中其余字面字符串逐叶投影为 `[REDACTED]`；Save 仅从同一路径的磁盘旧值回填掩码，孤立掩码 fail closed，避免 renderer 读取密钥或用掩码覆盖密钥。`mcp.status` 只读返回每 server 的 generation、client ID、state、auth/health、工具名快照、退避和活动 request 计数。它不返回 header/env 值、原始 transport 错误或工具结果。Bootstrap 与 Diagnostics 返回同一状态结构，插件页不通过“工具数组是否为空”猜测连接健康。
 
-`config.effective` 是只读解释面，不是新的写入入口。它返回按 key 排序的可复现 snapshot、revision、effective value、最终 source/trust、逐层 applied/rejected trace 与 secret source。MCP 的 args/env/headers/url 在这个 payload 中整段显示为 `[REDACTED]`，trace fingerprint 也基于脱敏值；密钥不会写入 runtime event。`config.get/save`、`mcp.getConfig/saveConfig` 等旧 operation 和原文件 schema 保持不变。
+`config.effective` 是只读解释面，不是新的写入入口。它返回按 key 排序的可复现 snapshot、revision、effective value、最终 source/trust、逐层 applied/rejected trace 与 secret source。MCP 的 args/env/headers/url 在这个 payload 中整段显示为 `[REDACTED]`，trace fingerprint 也基于脱敏值；密钥不会写入 runtime event。MCP 原文件 schema 保持不变；`mcp.getConfig/saveConfig` 的 IPC 形状也保持不变，但 secret leaf 使用上述掩码往返协议。
 
 ## 新增 runtime event
 

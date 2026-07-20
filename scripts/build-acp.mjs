@@ -3,10 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { build } from 'esbuild'
 
 const root = resolve(import.meta.dirname, '..')
-const outfile = resolve(
-  root,
-  'packages/core/dist/bin/emperor-agent-acp.mjs',
-)
+const outfile = resolve(root, 'packages/core/dist/bin/emperor-agent-acp.mjs')
 
 await mkdir(dirname(outfile), { recursive: true })
 await build({

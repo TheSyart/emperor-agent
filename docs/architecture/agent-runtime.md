@@ -115,7 +115,7 @@ Electron main 通过 `createCoreHost()` 创建 `CoreApi`，注册 IPC operation 
 
 MCP lifecycle 内部再由每 server 的 `MCPConnectionSupervisor` 管理。每个实例拥有单调 generation、随机 client ID、auth/health/state、活动 request 和冻结的 tool snapshot；replacement 先连接并发现工具，再成为 current，旧 client 随后关闭。所有 liveness callback 都带 generation/client ID，旧连接的迟到 close/error 不能把 replacement 标成断开。配置 reload 按完整 server 配置 diff，未变化且健康的连接不会重启；变更连接失败时保留旧 generation 的工具和旧的有效 tool policy，不把失败配置半应用到正在服务的 adapter。
 
-Runtime 连接从受信执行环境解析 `${ENV_NAME}`；`mcp.getConfig` 的编辑视图则始终保留未解析占位符，避免用户打开并再次保存配置时把 credential 回填为明文。状态、事件和错误摘要使用固定安全文案，不复制原始 transport error。
+Runtime 连接从受信执行环境解析 `${ENV_NAME}`；`mcp.getConfig` 的编辑视图保留这些未解析占位符，并把 args、env、headers、URL 中其余字面字符串逐叶替换为 `[REDACTED]`，因此 renderer 不会收到磁盘中的字面 credential。保存编辑视图时，Core 只允许掩码从同一 server、字段、对象 key 或数组索引的旧配置回填；没有对应旧值的掩码在写盘前拒绝。显式新值、空数组、空对象、`null` 和删除 server 仍按用户提交生效，运行时不会看到掩码。状态、事件和错误摘要使用固定安全文案，不复制原始 transport error。
 
 Core operation registry 在参数解析或领域调用前检查 lifecycle ready。未 ready、启动失败、正在关闭或已经关闭时抛出安全的 `core_unavailable`（action=`retry`）；renderer 不会把这类请求误认为已经提交。`CoreApi` 后续初始化失败也会关闭已经 ready 的 lifecycle，避免留下 Scheduler timer、MCP client、session actor 或 task handle。
 
