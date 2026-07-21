@@ -135,6 +135,10 @@ export class SessionRuntimeActor<TBindings> {
     return this.receipts.get(String(commandId))?.state ?? null
   }
 
+  interjectionState(interjectionId: string): SessionInterjectionState | null {
+    return this.interjections.get(String(interjectionId))?.state ?? null
+  }
+
   touch(value: number): void {
     this._lastUsed = Math.max(this._lastUsed, value)
   }

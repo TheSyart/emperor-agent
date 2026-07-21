@@ -532,6 +532,284 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     await api.close()
   })
 
+  it('admits only one queued chat prompt per session and rejects the second without durable side effects', async () => {
+    const root = tmp('emperor-mainline-single-queue-slot-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Single queue slot' })
+    const sessionId = String(session.id)
+    const running = api.chat.submit({
+      content: 'owner turn',
+      turnId: 'turn_single_slot_owner',
+      sessionId,
+    })
+    await provider.waitForCalls(1)
+
+    const firstQueued = api.chat.submit({
+      content: 'first queued prompt',
+      turnId: 'turn_single_slot_first',
+      clientMessageId: 'prompt_single_slot_first',
+      sessionId,
+    })
+    const rejectedEvents: Array<Record<string, unknown>> = []
+    const secondOutcome = api.chat
+      .submit({
+        content: 'second queued prompt',
+        turnId: 'turn_single_slot_second',
+        clientMessageId: 'prompt_single_slot_second',
+        sessionId,
+        emit: async (event) => {
+          rejectedEvents.push(event)
+        },
+      })
+      .then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+
+    provider.finish(0, response('owner complete'))
+    await running
+    await provider.waitForCalls(2)
+    provider.finish(1, response('first queue complete'))
+    await firstQueued
+
+    const earlyOutcome = await Promise.race([
+      secondOutcome,
+      new Promise<'pending'>((resolve) =>
+        setTimeout(() => resolve('pending'), 30),
+      ),
+    ])
+    if (earlyOutcome === 'pending') {
+      await provider.waitForCalls(3)
+      provider.finish(2, response('unexpected second queue result'))
+    }
+    const outcome = await secondOutcome
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: 'prompt_queue_full',
+        capacity: 1,
+        sessionId,
+      },
+    })
+    expect(
+      rejectedEvents.filter((event) => event.event === 'prompt_queued'),
+    ).toEqual([])
+    expect(
+      api.runtime
+        .replay({ sessionId })
+        .events.filter(
+          (event) => event.prompt_id === 'prompt_single_slot_second',
+        ),
+    ).toEqual([])
+    expect(
+      api.loop.sessionRuntimes
+        .actor(sessionId)
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).not.toContainEqual(
+      expect.objectContaining({ id: 'prompt_single_slot_second' }),
+    )
+
+    await api.close()
+  })
+
+  it('keeps one independent visible queue slot for each session', async () => {
+    const root = tmp('emperor-mainline-single-queue-per-session-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const firstSession = api.sessions.create({ title: 'First session' })
+    const secondSession = api.sessions.create({ title: 'Second session' })
+    const firstId = String(firstSession.id)
+    const secondId = String(secondSession.id)
+
+    const firstOwner = api.chat.submit({
+      content: 'first owner',
+      turnId: 'turn_first_owner',
+      sessionId: firstId,
+    })
+    const secondOwner = api.chat.submit({
+      content: 'second owner',
+      turnId: 'turn_second_owner',
+      sessionId: secondId,
+    })
+    await provider.waitForCalls(2)
+    const firstQueued = api.chat.submit({
+      content: 'first session queued',
+      turnId: 'turn_first_session_queued',
+      clientMessageId: 'prompt_first_session_queued',
+      sessionId: firstId,
+    })
+    const secondQueued = api.chat.submit({
+      content: 'second session queued',
+      turnId: 'turn_second_session_queued',
+      clientMessageId: 'prompt_second_session_queued',
+      sessionId: secondId,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(api.chat.listQueuedPrompts({ sessionId: firstId })).toHaveLength(1)
+    expect(api.chat.listQueuedPrompts({ sessionId: secondId })).toHaveLength(1)
+
+    provider.finish(0, response('first owner complete'))
+    provider.finish(1, response('second owner complete'))
+    await Promise.all([firstOwner, secondOwner])
+    await provider.waitForCalls(4)
+    provider.finish(2, response('first queue complete'))
+    provider.finish(3, response('second queue complete'))
+    await Promise.all([firstQueued, secondQueued])
+    await api.close()
+  })
+
+  it('preserves and drains multiple legacy queued prompts in FIFO order', async () => {
+    const root = tmp('emperor-mainline-legacy-multi-queue-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Legacy multi queue' })
+    const sessionId = String(session.id)
+    const graph =
+      api.loop.sessionRuntimes.actor(sessionId).bindings.conversationStore
+        .messageGraph
+    for (const [id, content] of [
+      ['prompt_legacy_first', 'legacy first'],
+      ['prompt_legacy_second', 'legacy second'],
+    ] as const) {
+      graph.recordPrompt({
+        id,
+        turnId: `turn_${id}`,
+        clientMessageId: id,
+        delivery: 'queue',
+        content,
+        displayContent: content,
+        supportsInterjection: true,
+      })
+    }
+
+    expect(
+      api.chat.listQueuedPrompts({ sessionId }).map((prompt) => prompt.id),
+    ).toEqual(['prompt_legacy_first', 'prompt_legacy_second'])
+    await provider.waitForCalls(1)
+    expect(JSON.stringify(provider.calls[0]!.messages)).toContain(
+      'legacy first',
+    )
+    provider.finish(0, response('legacy first complete'))
+    await provider.waitForCalls(2)
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'legacy second',
+    )
+    provider.finish(1, response('legacy second complete'))
+    await vi.waitFor(() => {
+      expect(graph.snapshot().prompts.map((prompt) => prompt.state)).toEqual([
+        'completed',
+        'completed',
+      ])
+    })
+    await api.close()
+  })
+
+  it('does not reconcile a live running queued prompt as a crash orphan during list refresh', async () => {
+    const root = tmp('emperor-mainline-live-queue-refresh-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Live queue refresh' })
+    const sessionId = String(session.id)
+    const owner = api.chat.submit({
+      content: 'owner request',
+      turnId: 'turn_live_refresh_owner',
+      sessionId,
+    })
+    await provider.waitForCalls(1)
+    const queued = api.chat.submit({
+      content: 'live queued request',
+      turnId: 'turn_live_refresh_queued',
+      clientMessageId: 'prompt_live_refresh_queued',
+      sessionId,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(api.chat.listQueuedPrompts({ sessionId })).toHaveLength(1)
+
+    provider.finish(0, response('owner complete'))
+    await owner
+    await provider.waitForCalls(2)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    provider.finish(1, response('queued complete'))
+
+    await expect(queued).resolves.toMatchObject({ content: 'queued complete' })
+    expect(
+      api.loop.sessionRuntimes
+        .actor(sessionId)
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: 'prompt_live_refresh_queued',
+        state: 'completed',
+      }),
+    )
+    await api.close()
+  })
+
+  it('does not enqueue a second command for a live pending interjection during list refresh', async () => {
+    const root = tmp('emperor-mainline-live-interjection-refresh-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Live interjection refresh' })
+    const sessionId = String(session.id)
+    const owner = api.chat.submit({
+      content: 'owner request',
+      turnId: 'turn_live_interjection_owner',
+      sessionId,
+    })
+    await provider.waitForCalls(1)
+    await expect(
+      api.chat.submit({
+        content: 'live interjection',
+        turnId: 'turn_live_interjection',
+        clientMessageId: 'prompt_live_interjection',
+        sessionId,
+        delivery: 'interject',
+      }),
+    ).resolves.toMatchObject({ delivery: 'interjected' })
+    expect(api.chat.listQueuedPrompts({ sessionId })).toHaveLength(1)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(
+      api.loop.sessionRuntimes
+        .actor(sessionId)
+        .commandState('turn:turn_live_interjection'),
+    ).toBeNull()
+
+    provider.finish(0, response('obsolete owner response'))
+    await provider.waitForCalls(2)
+    provider.finish(1, response('interjection complete'))
+    await owner
+    await api.close()
+  })
+
   it('lists and cancels a queued prompt exactly once', async () => {
     const root = tmp('emperor-mainline-manage-queue-')
     const provider = new ConcurrentBlockingProvider()
@@ -587,10 +865,32 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
         ),
     ).toHaveLength(1)
 
+    const replacement = api.chat.submit({
+      content: 'replacement queued after cancel',
+      displayContent: 'Replacement queued after cancel',
+      turnId: 'turn_manage_replacement',
+      clientMessageId: 'prompt_manage_replacement',
+      sessionId: String(session.id),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(
+      api.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'prompt_manage_replacement',
+        state: 'queued',
+      }),
+    ])
+
     provider.finish(0, response('owner complete'))
     await running
     await expect(queued).rejects.toMatchObject({
       code: 'session_runtime_command_cancelled',
+    })
+    await provider.waitForCalls(2)
+    provider.finish(1, response('replacement complete'))
+    await expect(replacement).resolves.toMatchObject({
+      content: 'replacement complete',
     })
     await api.close()
   })

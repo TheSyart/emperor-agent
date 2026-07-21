@@ -23,7 +23,7 @@ import {
 import type { ToolRegistry } from '../tools/registry'
 import { ToolResultObj, type Tool, type ToolDefinition } from '../tools/base'
 import { ToolExecutionEngine } from '../tools/execution'
-import { TurnPaused } from '../control/exceptions'
+import { PlanGenerationFailedError, TurnPaused } from '../control/exceptions'
 import { parsePauseResult } from '../control/tools'
 import type { Interaction } from '../control/models'
 import { PlanContextBuilder } from '../plans/context'
@@ -54,6 +54,7 @@ import {
   markPaused,
   maxTurnsReached,
   nearMaxTurns,
+  todoContinuationIntent,
   todoFollowup,
   toolFollowup,
   type QueryState,
@@ -69,7 +70,10 @@ import {
 } from './model-caller'
 import type { ModelPricing } from '../config/model-config'
 import { CancelledTaskError } from '../runtime/active'
-import { SamplingCoordinator } from '../sampling/coordinator'
+import {
+  SamplingCancelledError,
+  SamplingCoordinator,
+} from '../sampling/coordinator'
 import type {
   FileCheckpointCaptureInput,
   FileCheckpointRecord,
@@ -85,6 +89,7 @@ import * as runtimeEvents from './runtime-events'
 import {
   applyRepeatedRefusalNudge,
   buildMaxTurnsSummary,
+  buildTodoContinuationPausedSummary,
   contextUsedFromUsage,
   controlInteractionEvent,
   estimateMessagesTokens,
@@ -96,11 +101,7 @@ import {
   summarizeToolResult,
 } from './runner-helpers'
 import { toolIntentThought, toolResultSummaryThought } from './runner-thoughts'
-import {
-  maybePauseForControl,
-  pauseForClarification,
-  pauseForPlan,
-} from './runner-pause'
+import { maybePauseForControl, pauseForClarification } from './runner-pause'
 import {
   planIndependentVerificationFollowup,
   planVerificationFollowup,
@@ -180,6 +181,7 @@ export interface CompactorLike {
 
 export interface TodoStoreLike {
   todos: Array<Record<string, unknown>>
+  revision?: number
 }
 
 /** runner 需要的 ControlManager 表面（W05）。全部可选/容错调用。 */
@@ -284,12 +286,13 @@ export interface ControlManagerRunnerHost {
     context?: string
     meta?: Record<string, unknown> | null
   }): Interaction
-  createPlanFromText(
-    text: string,
-    meta?: Record<string, unknown> | null,
-  ): Interaction
   recordPlanDiscovery?(opts: Record<string, unknown>): unknown
   recordPlanStepToolOutput?(opts: Record<string, unknown>): unknown
+  syncPlanFromTodos?(
+    todos: Array<Record<string, unknown>>,
+    opts?: { evidence?: Record<string, unknown> | null },
+  ): PlanRecord | null
+  restoreCurrentPlanTodoProjection?(): void
   claimUnverifiedPlanSteps?(): {
     planId: string
     steps: Array<{ id: string; title: string }>
@@ -640,6 +643,8 @@ export class AgentRunner implements RunnerModelHost {
     const executionEnvironment = opts?.executionEnvironment ?? null
     const interjections = opts?.interjections ?? null
     throwIfAborted(signal)
+    const todoRevisionAtStart = this.todoStore?.revision ?? 0
+    const todoContinuation = todoContinuationIntent(history)
     this.denyRefusalCounts.clear()
     // B3（2026-07-05）：turn 内每次投影都冻结在此边界，防止压缩/裁剪回头改写本 turn 已发给模型过的字节
     const turnStartLength = history.length
@@ -662,6 +667,7 @@ export class AgentRunner implements RunnerModelHost {
     const finalParts: string[] = []
     let honestyNudged = false
     let stopHookNudged = false
+    let planFinalCorrections = 0
     let tokenBudgetUsed = 0
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
@@ -750,9 +756,14 @@ export class AgentRunner implements RunnerModelHost {
         )
         throwIfAborted(signal)
       } catch (error) {
+        // Capture cancellation synchronously at the provider failure boundary.
+        // Cleanup below may await tool shutdown; a later user cancellation must
+        // not relabel an already-observed network/timeout AbortError.
+        const cancelled = cancellationForAbortedTurn(error, signal)
+        const cancelledAtFailure = cancelled !== null
         await streamingTools?.cancel('model_request_failed')
         if (streamedPartial && interjections) {
-          const reason = signal?.aborted ? 'cancelled' : 'model_failed'
+          const reason = cancelledAtFailure ? 'cancelled' : 'model_failed'
           await interjections.tombstonePartial({
             turnId,
             content: streamedPartial,
@@ -766,6 +777,7 @@ export class AgentRunner implements RunnerModelHost {
               }),
             )
         }
+        if (cancelled) throw cancelled
         throw error
       }
       if (streamingTools && !shouldExecuteTools(response))
@@ -1074,15 +1086,21 @@ export class AgentRunner implements RunnerModelHost {
       }
 
       if (this.mustPauseForPlan()) {
-        queryState = markPaused(
-          queryState,
-          TransitionReason.PLAN_PAUSE,
-        ).nextState
-        await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, {
-          kind: 'plan',
-          source: 'plan_final',
+        if (planFinalCorrections >= 1) throw new PlanGenerationFailedError()
+        planFinalCorrections += 1
+        const attemptedMessage: Msg = { role: 'assistant', content: reply }
+        if (turnId) attemptedMessage.turn_id = turnId
+        history.push(attemptedMessage, {
+          role: 'user',
+          content:
+            '[CONTROL:PLAN_SUBMISSION_REQUIRED]\n' +
+            '普通最终回复不能替代计划卡。请立即调用 propose_plan，提交包含结构化步骤、依赖、验收、验证、风险和回滚的有效计划；不要执行写操作。',
         })
-        await pauseForPlan(this, history, reply, emit, turnId)
+        await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, {
+          reason: 'propose_plan_required',
+          attempt: planFinalCorrections,
+        })
+        continue
       }
 
       finalParts.push(reply)
@@ -1096,7 +1114,10 @@ export class AgentRunner implements RunnerModelHost {
         assistantMessage.thinking_blocks = response.thinkingBlocks
       history.push(assistantMessage)
 
-      if (this.todoStore && this.todoStore.todos.length) {
+      const todoLeaseActive =
+        todoContinuation !== 'none' ||
+        (this.todoStore?.revision ?? 0) > todoRevisionAtStart
+      if (todoLeaseActive && this.todoStore && this.todoStore.todos.length) {
         const unfinished = this.todoStore.todos.filter(
           (t) => t.status !== 'completed',
         )
@@ -1105,6 +1126,28 @@ export class AgentRunner implements RunnerModelHost {
             unfinishedText: renderTodos(unfinished),
             unfinishedCount: unfinished.length,
           })
+          if (t === null) {
+            const pausedReply = buildTodoContinuationPausedSummary(
+              this.todoStore.todos,
+            )
+            const pausedMessage: Msg = {
+              role: 'assistant',
+              content: pausedReply,
+            }
+            if (turnId) pausedMessage.turn_id = turnId
+            history.push(pausedMessage)
+            if (this.memoryStore) {
+              this.memoryStore.appendHistory('assistant', pausedReply, {
+                extra: turnId ? { turn_id: turnId } : null,
+              })
+              this.memoryStore.clearCheckpoint()
+            }
+            await this.emitTurnPhase(turnState, TurnPhase.TODO_FOLLOWUP, emit, {
+              unfinished: unfinished.length,
+              exhausted: true,
+            })
+            return pausedReply
+          }
           queryState = t.nextState
           history.push(...t.messages)
           await this.emitTurnPhase(turnState, TurnPhase.TODO_FOLLOWUP, emit, {
@@ -1112,7 +1155,9 @@ export class AgentRunner implements RunnerModelHost {
           })
           continue
         }
-        this.todoStore.todos = []
+        // Completed Plan-bound Todos remain as the authoritative Plan
+        // projection. A later unrelated prompt will not inherit them because
+        // continuation is prompt-scoped.
       }
 
       const verificationFollowup = planIndependentVerificationFollowup(
@@ -1580,10 +1625,38 @@ export class AgentRunner implements RunnerModelHost {
             ctx.taskIntent,
             ctx.preparedCalls?.get(call.id),
           )
-      const result = outcome.result
+      let result = outcome.result
       const executedCall = outcome.executedCall ?? call
       const verificationTarget = outcome.verificationTarget ?? null
       throwIfAborted(childSignal)
+      if (
+        call.name === 'update_todos' &&
+        !result.isError &&
+        this.todoStore !== null &&
+        typeof this.controlManager?.syncPlanFromTodos === 'function'
+      ) {
+        try {
+          this.controlManager.syncPlanFromTodos(this.todoStore.todos, {
+            evidence: {
+              source: 'update_todos',
+              tool_call_id: call.id,
+              turn_id: ctx.turnId,
+            },
+          })
+        } catch (cause) {
+          try {
+            this.controlManager.restoreCurrentPlanTodoProjection?.()
+          } catch {
+            // The Plan remains authoritative even if its Todo projection is degraded.
+          }
+          const message =
+            cause instanceof Error ? cause.message : 'invalid Plan Todo update'
+          result = ToolResultObj.fromText(
+            `Error: PLAN_TODO_BINDING_REJECTED: ${message}`,
+            { isError: true },
+          )
+        }
+      }
       applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
       recordPlanDiscovery(this.controlManager, call, result)
       recordPlanStepToolOutput(this.controlManager, call, result)
@@ -2790,6 +2863,19 @@ function sanitizeProviderMessage(
 
 function throwIfAborted(signal: AbortSignal | null | undefined): void {
   if (signal?.aborted) throw new CancelledTaskError('turn')
+}
+
+function cancellationForAbortedTurn(
+  error: unknown,
+  signal: AbortSignal | null | undefined,
+): CancelledTaskError | null {
+  if (!signal?.aborted) return null
+  if (
+    error instanceof SamplingCancelledError ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
+    return new CancelledTaskError('turn')
+  return null
 }
 
 async function consumeRunnerInterjections(

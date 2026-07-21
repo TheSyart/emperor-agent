@@ -21,13 +21,22 @@ export function planDisplayMarkdown(
 }
 
 export function planDecisionVisible(interaction: ControlInteraction): boolean {
-  return interaction.status === 'waiting'
+  return (
+    interaction.status === 'waiting' && interaction.meta?.provisional !== true
+  )
 }
 
 export function planStatusPresentation(
   interaction: ControlInteraction,
   plan?: RuntimePlanRecord | null,
 ): PlanStatusPresentation {
+  if (interaction.meta?.provisional === true) {
+    return {
+      label: '生成中',
+      tone: 'running',
+      risk: riskLabel(interaction.risk_level),
+    }
+  }
   const status = String(interaction.status || plan?.status || '')
   return {
     label: statusLabel(status),

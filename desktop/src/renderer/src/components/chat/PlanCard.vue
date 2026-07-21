@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import type { ControlInteraction, RuntimePlanRecord } from '../../types'
 import MarkdownBlock from './MarkdownBlock.vue'
-import ActivePlanDecisionPanel from './ActivePlanDecisionPanel.vue'
 import { planDisplayMarkdown, planStatusPresentation } from './planDisplay'
 
 const props = defineProps<{
@@ -61,11 +60,6 @@ const markdownContent = computed(() =>
         {{ item.content }}
       </p>
     </div>
-
-    <ActivePlanDecisionPanel
-      v-if="props.interaction.status === 'waiting'"
-      :interaction="props.interaction"
-    />
 
     <footer class="control-footnote">
       状态：{{ props.interaction.status }}

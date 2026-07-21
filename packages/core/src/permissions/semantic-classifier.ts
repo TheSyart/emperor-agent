@@ -13,14 +13,10 @@ export interface PermissionSemanticInput {
 }
 
 export interface PermissionSemanticClassifier {
-  classify(
-    input: PermissionSemanticInput,
-  ): Promise<'allow' | 'ask' | null>
+  classify(input: PermissionSemanticInput): Promise<'allow' | 'ask' | null>
 }
 
-export class ModelPermissionSemanticClassifier
-  implements PermissionSemanticClassifier
-{
+export class ModelPermissionSemanticClassifier implements PermissionSemanticClassifier {
   constructor(
     private readonly modelRouter: Pick<ModelRouter, 'route'>,
     private readonly timeoutMs = 8_000,
@@ -157,11 +153,14 @@ function summarizeShellArgument(value: string, index: number): string {
   }
   const normalized = argument.toLowerCase()
   if (SAFE_OPERATION_WORDS.has(normalized)) return normalized
-  if (/^(?:test|build|lint|typecheck|check|format|fmt):[a-z0-9_.-]+$/i.test(argument))
+  if (
+    /^(?:test|build|lint|typecheck|check|format|fmt):[a-z0-9_.-]+$/i.test(
+      argument,
+    )
+  )
     return argument
   if (/^https?:\/\//i.test(argument)) return '[URL]'
-  if (/^(?:~|\.?\.?(?:[\\/])|[A-Za-z]:[\\/]|\/)/.test(argument))
-    return '[PATH]'
+  if (/^(?:~|\.?\.?(?:[\\/])|[A-Za-z]:[\\/]|\/)/.test(argument)) return '[PATH]'
   if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument))
     return `${argument.split('=', 1)[0]}=[VALUE]`
   if (argument.includes(':')) return '[STRUCTURED_ARG]'
@@ -178,5 +177,8 @@ function argumentShape(value: unknown): unknown {
       keys: Object.keys(value as Record<string, unknown>).slice(0, 32),
     }
   if (typeof value === 'string') return { type: 'string', length: value.length }
-  return { type: typeof value, value: typeof value === 'boolean' ? value : null }
+  return {
+    type: typeof value,
+    value: typeof value === 'boolean' ? value : null,
+  }
 }

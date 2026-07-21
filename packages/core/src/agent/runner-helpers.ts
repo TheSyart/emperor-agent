@@ -79,6 +79,26 @@ export function buildMaxTurnsSummary(input: MaxTurnsSummaryInput): string {
   return lines.join('\n')
 }
 
+export function buildTodoContinuationPausedSummary(
+  todos: Array<Record<string, unknown>>,
+): string {
+  const unfinished = todos.filter((todo) => todo.status !== 'completed')
+  const lines = [
+    '本次执行已暂停：在两次纠正后仍有任务未完成，Core 不会继续无限调用模型。',
+    '未完成：',
+  ]
+  for (const todo of unfinished.slice(0, MAX_TURNS_SUMMARY_PENDING_LIMIT)) {
+    lines.push(`- ${String(todo.content ?? todo.id ?? '')}`)
+  }
+  if (unfinished.length > MAX_TURNS_SUMMARY_PENDING_LIMIT) {
+    lines.push(
+      `- …另有 ${unfinished.length - MAX_TURNS_SUMMARY_PENDING_LIMIT} 项`,
+    )
+  }
+  lines.push('恢复方式：发送 /continue 或“继续执行”以开启新的续跑回合。')
+  return lines.join('\n')
+}
+
 export function summarizeToolResult(content: string, limit = 560): string {
   const text = String(content ?? '')
     .split(/\s+/)

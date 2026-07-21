@@ -107,6 +107,7 @@ function renderTodos(todos: Array<Record<string, unknown>>): string {
  */
 export class TodoStore {
   todos: Array<Record<string, unknown>> = []
+  revision = 0
   private readonly onChange:
     ((todos: Array<Record<string, unknown>>) => void) | null
 
@@ -150,6 +151,7 @@ export class TodoStore {
       return 'Error: 同一时间只能有一个 in_progress 任务，请重新规划。'
 
     this.todos = cleaned
+    this.revision += 1
     this.onChange?.(this.todos.map((todo) => ({ ...todo })))
     const completed = this.todos.filter((t) => t.status === 'completed').length
     const pending = this.todos.filter((t) => t.status === 'pending').length

@@ -243,6 +243,58 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
+  it('publishes the rejected payload for Composer recovery when the Core queue slot is full', async () => {
+    const showToast = vi.fn()
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return Promise.reject({ code: 'prompt_queue_full', capacity: 1 })
+        if (args[0] === 'chat.listQueuedPrompts') return Promise.resolve([])
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast })
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    const attachment = {
+      id: 'att_recover',
+      name: 'recover.txt',
+      mime: 'text/plain',
+      size: 7,
+      kind: 'text' as const,
+      hasText: true,
+      hasImage: false,
+      path: '/tmp/recover.txt',
+    }
+
+    expect(
+      runtime.sendMessage({
+        content: 'recover this submission',
+        displayContent: '@skill(review) recover this submission',
+        delivery: 'queue',
+        requestedSkills: [{ name: 'review', source: 'slash' }],
+        attachments: [attachment],
+      }),
+    ).toBe(true)
+    await flushPromises(10)
+
+    expect(runtime.queueDraftRecovery.value).toEqual({
+      sessionId: 's1',
+      payload: {
+        content: 'recover this submission',
+        displayContent: '@skill(review) recover this submission',
+        delivery: 'queue',
+        requestedSkills: [{ name: 'review', source: 'slash' }],
+        attachments: [attachment],
+      },
+    })
+    expect(showToast).toHaveBeenCalledWith(
+      '已有一条消息排队，请先编辑、插入或删除后再发送。',
+    )
+  })
+
   it('queues attachments and requested Skills while a turn is busy without creating a chat bubble', async () => {
     const calls: unknown[][] = []
     g.window = fakeWindow({

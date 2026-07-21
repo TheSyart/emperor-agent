@@ -1,18 +1,29 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
+import { activeBottomControlPanelForInteraction } from '../components/chat/bottomControlPanel'
+import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
+import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
 import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import QueueTray from '../components/chat/QueueTray.vue'
-import type { ModelConfigPayload, QueuedPromptItem } from '../types'
+import type {
+  ChatSendPayload,
+  ModelConfigPayload,
+  QueuedPromptItem,
+} from '../types'
 import { activeGoalForSession } from '../runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from '../runtime/goalRender'
 
 const ctx = useAppContext()
-const composer = ref<{ setDraft: (text: string) => void } | null>(null)
+const composer = ref<{
+  setDraft: (text: string) => void
+  focusInput: () => void
+  restoreDraft: (payload: ChatSendPayload) => void
+} | null>(null)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -28,6 +39,9 @@ const sendBlockedReason = computed(() => {
 })
 const pendingInteraction = computed(
   () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
+)
+const activeBottomControl = computed(() =>
+  activeBottomControlPanelForInteraction(pendingInteraction.value),
 )
 const showProfileOnboardingPrompt = computed(
   () =>
@@ -80,6 +94,26 @@ watch(
     goalReplaceError.value = ''
     goalReplacementDraft.value = ''
   },
+)
+
+watch(
+  () => activeBottomControl.value?.interaction.id || '',
+  (interactionId, previousInteractionId) => {
+    if (!previousInteractionId || interactionId) return
+    void nextTick(() => composer.value?.focusInput())
+  },
+)
+
+watch(
+  [() => ctx.queueDraftRecovery.value, () => ctx.sessionId.value],
+  ([recovery, ownerSessionId]) => {
+    if (!recovery || recovery.sessionId !== ownerSessionId) return
+    void nextTick(() => {
+      composer.value?.restoreDraft(recovery.payload)
+      ctx.clearQueueDraftRecovery(recovery.sessionId)
+    })
+  },
+  { flush: 'post' },
 )
 
 async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
@@ -301,17 +335,21 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
             关闭
           </button>
         </form>
+        <ActiveAskPanel
+          v-if="activeBottomControl?.kind === 'ask'"
+          :interaction="activeBottomControl.interaction"
+        />
+        <ActivePlanDecisionPanel
+          v-else-if="activeBottomControl?.kind === 'plan'"
+          :interaction="activeBottomControl.interaction"
+        />
         <div class="composer-wrap">
-          <QueueTray
-            :items="ctx.queuedPrompts.value"
-            @edit="editQueuedPrompt"
-            @interject="interjectQueuedPrompt"
-            @cancel="cancelQueuedPrompt"
-          />
           <Composer
+            v-show="!activeBottomControl"
             ref="composer"
             :busy="composerBusy"
             :interaction-blocked="Boolean(pendingInteraction)"
+            :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
             :goal="activeGoal"
             :goal-capture-status="goalCaptureStatus"
             :lifecycle-mode="composerLifecycleMode"
@@ -341,7 +379,16 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
             @send="ctx.submitFromComposer($event)"
             @stop="ctx.stopActive"
             @error="ctx.showToast"
-          />
+          >
+            <template #queue>
+              <QueueTray
+                :items="ctx.queuedPrompts.value"
+                @edit="editQueuedPrompt"
+                @interject="interjectQueuedPrompt"
+                @cancel="cancelQueuedPrompt"
+              />
+            </template>
+          </Composer>
         </div>
       </div>
     </div>

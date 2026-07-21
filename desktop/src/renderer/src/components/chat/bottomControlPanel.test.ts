@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ControlInteraction, SessionInfo } from '../../types'
 import {
   activeBottomControlPanel,
+  activeBottomControlPanelForInteraction,
   composerBlockedByControl,
   pendingInteractionForSession,
 } from './bottomControlPanel'
@@ -38,6 +39,32 @@ function session(extra: Partial<SessionInfo> = {}): SessionInfo {
 }
 
 describe('bottom control panel model', () => {
+  it('projects only waiting Ask and Plan interactions into the bottom control slot', () => {
+    expect(activeBottomControlPanelForInteraction(interaction())).toMatchObject(
+      {
+        kind: 'ask',
+        interaction: { id: 'control-1' },
+      },
+    )
+    expect(
+      activeBottomControlPanelForInteraction(interaction({ kind: 'plan' })),
+    ).toMatchObject({
+      kind: 'plan',
+      interaction: { id: 'control-1' },
+    })
+    expect(
+      activeBottomControlPanelForInteraction(
+        interaction({ status: 'answered' }),
+      ),
+    ).toBeNull()
+    expect(
+      activeBottomControlPanelForInteraction(
+        interaction({ kind: 'plan', meta: { provisional: true } }),
+      ),
+    ).toBeNull()
+    expect(activeBottomControlPanelForInteraction(null)).toBeNull()
+  })
+
   it('uses waiting ask interactions as the bottom panel instead of the composer', () => {
     const active = session({
       control_pending: {

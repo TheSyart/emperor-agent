@@ -58,6 +58,7 @@ const props = defineProps<{
   goalCaptureStatus?: GoalCaptureStatus
   lifecycleMode?: ComposerLifecycleMode
   interactionBlocked?: boolean
+  queueOccupied?: boolean
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
@@ -91,6 +92,7 @@ const {
   onDrop,
   removeDraft,
   takeDrafts,
+  restoreDrafts,
 } = useAttachments({
   onError: (message) => emit('error', message),
 })
@@ -120,6 +122,7 @@ const modeMenuPlacement = modeFloatingMenu.placement
 
 const ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
+const QUEUE_FULL_MESSAGE = '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
 const suggestions = computed(() => {
   const text = value.value
@@ -387,6 +390,10 @@ function submit(delivery?: 'queue' | 'interject') {
   const content = normalized.content.trim()
   if (props.busy) {
     if (!content && drafts.value.length === 0) return
+    if (props.queueOccupied) {
+      emit('error', QUEUE_FULL_MESSAGE)
+      return
+    }
     if (uploading.value.size > 0) {
       emit('error', '附件仍在处理中，请等待完成后再排队。')
       return
@@ -454,7 +461,20 @@ function setDraft(text: string) {
   })
 }
 
-defineExpose({ setDraft })
+function focusInput() {
+  input.value?.focus()
+}
+
+function restoreDraft(payload: ChatSendPayload) {
+  value.value = String(payload.displayContent || payload.content || '')
+  restoreDrafts(payload.attachments || [])
+  void nextTick(() => {
+    resize()
+    input.value?.focus()
+  })
+}
+
+defineExpose({ setDraft, focusInput, restoreDraft })
 
 const firstPaletteItem = computed(() => paletteGroups.value[0]?.items[0])
 
@@ -744,6 +764,7 @@ const sendDisabled = computed(
       busy: props.busy,
       content: value.value,
       attachmentCount: drafts.value.length,
+      queueOccupied: props.queueOccupied,
       sendBlockedReason: props.sendBlockedReason || null,
     }),
 )
@@ -777,6 +798,8 @@ onBeforeUnmount(() => {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
+    <slot name="queue" />
+
     <CapabilityPicker
       v-if="paletteMode"
       :groups="paletteGroups"
@@ -1005,8 +1028,10 @@ onBeforeUnmount(() => {
               type="button"
               class="send-button"
               :disabled="sendDisabled"
-              title="加入队列"
-              aria-label="加入队列"
+              :title="props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列'"
+              :aria-label="
+                props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列'
+              "
               @click="submit('queue')"
             >
               <component
@@ -1014,7 +1039,9 @@ onBeforeUnmount(() => {
                 class="action-icon send-icon"
                 :size="18"
               />
-              <span class="sr-only">加入队列</span>
+              <span class="sr-only">
+                {{ props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列' }}
+              </span>
             </button>
             <button
               type="button"

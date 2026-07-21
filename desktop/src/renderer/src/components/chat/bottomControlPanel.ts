@@ -11,16 +11,24 @@ export interface BottomControlPanel {
   interaction: ControlInteraction
 }
 
+export function activeBottomControlPanelForInteraction(
+  interaction?: ControlInteraction | null,
+): BottomControlPanel | null {
+  if (!interaction || interaction.status !== 'waiting') return null
+  if (interaction.kind === 'plan' && interaction.meta?.provisional === true)
+    return null
+  if (interaction.kind === 'ask' || interaction.kind === 'plan') {
+    return { kind: interaction.kind, interaction }
+  }
+  return null
+}
+
 export function activeBottomControlPanel(
   control?: ControlPayload | null,
   activeSession?: SessionInfo | null,
 ): BottomControlPanel | null {
   const pending = pendingInteractionForSession(control, activeSession)
-  if (!pending) return null
-  if (pending.kind === 'ask' || pending.kind === 'plan') {
-    return { kind: pending.kind, interaction: pending }
-  }
-  return null
+  return activeBottomControlPanelForInteraction(pending)
 }
 
 export function pendingInteractionForSession(

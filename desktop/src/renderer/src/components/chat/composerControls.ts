@@ -2,9 +2,13 @@ export function composerSendDisabled(opts: {
   busy: boolean
   content: string
   attachmentCount: number
+  queueOccupied?: boolean
   sendBlockedReason?: string | null
 }): boolean {
-  if (opts.busy) return !opts.content.trim() && opts.attachmentCount === 0
+  if (opts.busy) {
+    if (opts.queueOccupied) return true
+    return !opts.content.trim() && opts.attachmentCount === 0
+  }
   if (opts.sendBlockedReason) return true
   return !opts.content.trim() && opts.attachmentCount === 0
 }

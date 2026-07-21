@@ -46,11 +46,24 @@ describe('plan display helpers', () => {
       'utf8',
     )
 
-    expect(source).toContain('<ActivePlanDecisionPanel')
+    expect(source).not.toContain('<ActivePlanDecisionPanel')
     expect(source).not.toContain('plan-progress-strip')
     expect(source).not.toContain('plan-step-list')
     expect(source).not.toContain('Active Step')
     expect(source).not.toContain('Failed Verification')
+  })
+
+  it('presents provisional streamed plans as generating rather than awaiting approval', () => {
+    expect(
+      planStatusPresentation(
+        interaction({ meta: { provisional: true } }),
+        null,
+      ),
+    ).toEqual({
+      label: '生成中',
+      tone: 'running',
+      risk: '中风险',
+    })
   })
 
   it('keeps the proposal markdown static after runtime execution starts', () => {
@@ -61,6 +74,9 @@ describe('plan display helpers', () => {
 
   it('keeps waiting plan decisions visible only while interaction is waiting', () => {
     expect(planDecisionVisible(interaction())).toBe(true)
+    expect(
+      planDecisionVisible(interaction({ meta: { provisional: true } })),
+    ).toBe(false)
     expect(planDecisionVisible(interaction({ status: 'approved' }))).toBe(false)
   })
 

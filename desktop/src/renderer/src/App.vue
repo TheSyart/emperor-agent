@@ -87,6 +87,8 @@ const runtime = useRuntime({
 const {
   messages,
   queuedPrompts,
+  queueDraftRecovery,
+  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,
@@ -383,6 +385,8 @@ provideAppContext({
   mcpContent,
   messages,
   queuedPrompts,
+  queueDraftRecovery,
+  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,

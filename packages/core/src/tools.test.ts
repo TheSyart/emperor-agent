@@ -855,6 +855,18 @@ describe('TodoStore + UpdateTodos (test_todo_tool.py)', () => {
     expect(s.todos).toHaveLength(1)
   })
 
+  it('advances the todo revision only after a valid model update', () => {
+    const s = new TodoStore()
+    expect(s.revision).toBe(0)
+    s.update([{ id: 1, content: 'a', status: 'pending' }])
+    expect(s.revision).toBe(1)
+    s.update([
+      { id: 1, content: 'a', status: 'in_progress' },
+      { id: 2, content: 'b', status: 'in_progress' },
+    ])
+    expect(s.revision).toBe(1)
+  })
+
   it('preserves active_form and renders it for in_progress', () => {
     const s = new TodoStore()
     const result = s.update([

@@ -898,7 +898,7 @@ export class CoreApi {
     get: () => this.loop.controlManager.payload(),
     setPermissionMode: (mode: string) =>
       this.loop.controlManager.setPermissionMode(mode),
-    setMode: (mode: string) => this.loop.controlManager.setMode(mode),
+    setMode: (mode: string) => this.loop.setControlMode(mode),
     answerInteraction: async (
       id: string,
       answers: Dict,

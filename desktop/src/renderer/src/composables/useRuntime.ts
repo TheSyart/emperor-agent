@@ -7,6 +7,7 @@ import type {
   ChatSendPayload,
   ControlInteraction,
   PendingState,
+  QueueDraftRecovery,
   QueuedPromptItem,
   RequestedSkill,
   RuntimeEventEnvelope,
@@ -97,6 +98,8 @@ function nextId(prefix: string) {
 }
 
 const SCHEDULER_DONE_PENDING_MS = 2500
+const PROMPT_QUEUE_FULL_MESSAGE =
+  '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
 export function useRuntime(options: {
   boot: Ref<BootstrapPayload | null>
@@ -117,6 +120,7 @@ export function useRuntime(options: {
 }) {
   const messages = ref<ChatMessage[]>([])
   const queuedPrompts = ref<QueuedPromptItem[]>([])
+  const queueDraftRecovery = ref<QueueDraftRecovery | null>(null)
   const pendingInteractionsBySession = reactive<
     Record<string, ControlInteraction>
   >({})
@@ -434,6 +438,21 @@ export function useRuntime(options: {
           (prompt) => prompt.id !== userMsg.id,
         )
         if (queuedPromptCancellationCode(err)) return
+        if (promptQueueFullCode(err)) {
+          queueDraftRecovery.value = {
+            sessionId: activeSessionId,
+            payload: {
+              content: opts.text,
+              displayContent: opts.displayText,
+              delivery: opts.delivery,
+              requestedSkills: [...opts.requestedSkills],
+              attachments: [...opts.attachments],
+            },
+          }
+          options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
+          void refreshQueuedPrompts(activeSessionId)
+          return
+        }
         options.showToast(displayError(err))
         return
       }
@@ -768,6 +787,20 @@ export function useRuntime(options: {
       String((error as { code?: unknown }).code || '') ===
       'session_runtime_command_cancelled'
     )
+  }
+
+  function promptQueueFullCode(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    return (
+      String((error as { code?: unknown }).code || '') === 'prompt_queue_full'
+    )
+  }
+
+  function clearQueueDraftRecovery(ownerSessionId?: string): void {
+    const recovery = queueDraftRecovery.value
+    if (!recovery) return
+    if (ownerSessionId && recovery.sessionId !== ownerSessionId) return
+    queueDraftRecovery.value = null
   }
 
   function syncSessionProjection(state: SessionProjectionState): void {
@@ -2063,6 +2096,8 @@ export function useRuntime(options: {
   return {
     messages,
     queuedPrompts,
+    queueDraftRecovery,
+    clearQueueDraftRecovery,
     pendingInteractionsBySession,
     busy,
     status,

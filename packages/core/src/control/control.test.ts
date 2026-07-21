@@ -25,7 +25,7 @@ import {
 import { ReadFileTool, WriteFileTool } from '../tools/filesystem'
 import { Tool } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
-import { TodoStore } from '../tools/builtin'
+import { TodoStore, UpdateTodos } from '../tools/builtin'
 import { ToolRegistry } from '../tools/registry'
 import {
   makePlanRecord,
@@ -643,6 +643,7 @@ describe('ControlManager (test_control.py)', () => {
   it('plan policy filters write tools', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-filter-'))
     const registry = makeRegistry(manager)
+    registry.register(new UpdateTodos(new TodoStore()))
     manager.setMode(ControlMode.PLAN)
     const names = manager.toolDefinitions(registry).map((item) => item.name)
     expect(names).toContain('read_file')
@@ -650,6 +651,7 @@ describe('ControlManager (test_control.py)', () => {
     expect(names).toContain('propose_plan')
     expect(names).toContain('scheduler')
     expect(names).not.toContain('write_file')
+    expect(names).not.toContain('update_todos')
     expect(manager.isToolAllowed('write_file', registry)).toBe(false)
   })
 
@@ -783,6 +785,65 @@ describe('ControlManager (test_control.py)', () => {
     ])
     expect(assessment.required).toBe(false)
   })
+
+  it.each(['ask_before_edit', 'smart_auto'] as const)(
+    'cancels an obsolete legacy Ask Guard on restart before %s creates a permission Ask',
+    async (mode) => {
+      const root = tmp(`emperor-ctrl-legacy-ask-guard-${mode}-`)
+      const legacy = new ControlManager(root)
+      legacy.createAsk({
+        questions: [
+          {
+            id: 'scope',
+            header: '范围',
+            question: '这次任务的实施边界优先按哪种方式推进？',
+            options: [{ label: '完整工程化' }, { label: '最小修复' }],
+          },
+          {
+            id: 'risk_boundary',
+            header: '风险',
+            question: '涉及删除时应该如何控制风险？',
+            options: [{ label: '先确认再执行' }, { label: '按安全默认' }],
+          },
+        ],
+        context: 'Ask Guard: risk',
+        meta: { control_session_id: 'deleted_legacy_session' },
+      })
+
+      const restarted = new ControlManager(root)
+      restarted.setMode(mode)
+      expect(restarted.payload().pending).toBeNull()
+
+      const workspace = join(root, 'workspace')
+      const batch = await restarted.assessPermissionBatch(
+        [
+          {
+            id: 'delete_1',
+            name: 'delete_file',
+            arguments: { path: join(workspace, 'one.html') },
+          },
+        ],
+        null,
+        {
+          sessionId: `session_${mode}`,
+          workspaceRoot: workspace,
+          cwd: workspace,
+        },
+      )
+      expect(batch.requiresApproval).toBe(true)
+      expect(() =>
+        restarted.permissionBatchApprovalResult(batch, {
+          sessionId: `session_${mode}`,
+          workspaceRoot: workspace,
+          cwd: workspace,
+        }),
+      ).not.toThrow()
+      expect(restarted.payload().pending?.meta).toMatchObject({
+        interaction_type: 'permission',
+        control_session_id: `session_${mode}`,
+      })
+    },
+  )
 })
 
 // ── test_plan_decision_policy.py ──
@@ -2163,24 +2224,573 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     return { manager, todoStore, planId: plan!.id }
   }
 
-  it('does not populate TodoStore when a plan is approved', () => {
-    const { manager, todoStore } = approvedManager()
+  it('projects approved Plan steps into exactly bound Todos', () => {
+    const { manager, todoStore, planId } = approvedManager()
     expect(manager.planStore.latest()?.status).toBe(PlanStatus.EXECUTING)
-    expect(todoStore.todos).toEqual([])
+    expect(todoStore.todos).toEqual([
+      expect.objectContaining({
+        plan_id: planId,
+        plan_step_id: 'step_1',
+        approval_generation: 1,
+        status: 'in_progress',
+      }),
+      expect.objectContaining({
+        plan_id: planId,
+        plan_step_id: 'step_2',
+        approval_generation: 1,
+        status: 'pending',
+      }),
+    ])
+  })
+
+  it('gives the active Plan step the single in-progress slot and preserves independent work as pending', () => {
+    const manager = new ControlManager(tmp('emperor-plan-todo-active-slot-'))
+    manager.setRuntimeScope({
+      sessionId: 'session-plan-todo-active-slot',
+      mode: 'build',
+      projectId: 'project-plan-todo-active-slot',
+      workspaceRoot: '/workspace/plan-todo-active-slot',
+      projectFingerprint: 'fingerprint-plan-todo-active-slot',
+    })
+    const todoStore = new TodoStore()
+    todoStore.update([
+      {
+        id: 'independent-active',
+        content: 'Temporary investigation',
+        status: 'in_progress',
+      },
+    ])
+    manager.setTodoStore(todoStore)
+    manager.setMode(ControlMode.PLAN)
+    new ProposePlanTool(manager).execute({
+      title: 'Authoritative active step',
+      summary: 'The Plan step owns the active Todo slot.',
+      plan_markdown: '# Plan',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement the change',
+          description: 'Implement it.',
+          files: [],
+          commands: [],
+          acceptance: ['done'],
+        },
+      ],
+      assumptions: [],
+      risk_level: 'low',
+    })
+    const pending = manager.payload().pending as Record<string, unknown>
+
+    manager.approve(String(pending.id))
+
+    expect(todoStore.todos).toEqual([
+      expect.objectContaining({
+        plan_step_id: 'step_1',
+        status: 'in_progress',
+      }),
+      expect.objectContaining({
+        id: 'independent-active',
+        status: 'pending',
+      }),
+    ])
+  })
+
+  it('replaces every non-terminal Plan in the current scope when entering Plan mode', () => {
+    const root = tmp('emperor-plan-mode-replacement-')
+    const manager = new ControlManager(root)
+    const taskManager = new TaskManager(root)
+    const todoStore = new TodoStore()
+    const scope = {
+      sessionId: 'session-plan-replacement',
+      mode: 'build' as const,
+      projectId: 'project-plan-replacement',
+      workspaceRoot: '/workspace/plan-replacement',
+      projectFingerprint: 'fingerprint-plan-replacement',
+    }
+    manager.setRuntimeScope(scope)
+    manager.setTaskManager(taskManager)
+    manager.setTodoStore(todoStore)
+    const oldTask = taskManager.startTask({
+      kind: 'plan_step',
+      title: 'Old work',
+      source: 'plan_step',
+      sessionId: scope.sessionId,
+    })
+    const oldPlan = manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_old_executing',
+        title: 'Old executable Plan',
+        summary: 'Must be retired immediately.',
+        status: PlanStatus.EXECUTING,
+        createdAt: 1,
+        updatedAt: 1,
+        approvedAt: 1,
+        sessionId: scope.sessionId,
+        steps: [
+          makeStep({
+            id: 'step_1',
+            title: 'Old work',
+            status: PlanStepStatus.ACTIVE,
+          }),
+        ],
+        metadata: {
+          scope: {
+            session_id: scope.sessionId,
+            mode: scope.mode,
+            project_id: scope.projectId,
+            workspace_root: scope.workspaceRoot,
+            project_fingerprint: scope.projectFingerprint,
+          },
+          permission_tokens: [{ token: 'revoke-me' }],
+          plan_step_tasks: { step_1: oldTask.id },
+        },
+      }),
+    )
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_old_draft',
+        title: 'Old draft Plan',
+        summary: 'Must also be retired.',
+        status: PlanStatus.DRAFT,
+        createdAt: 2,
+        updatedAt: 2,
+        sessionId: scope.sessionId,
+        metadata: {
+          scope: {
+            session_id: scope.sessionId,
+            mode: scope.mode,
+            project_id: scope.projectId,
+            workspace_root: scope.workspaceRoot,
+            project_fingerprint: scope.projectFingerprint,
+          },
+        },
+      }),
+    )
+    todoStore.update([
+      {
+        id: 1,
+        content: 'Old Plan todo',
+        status: 'in_progress',
+        plan_id: oldPlan.id,
+      },
+      { id: 2, content: 'Independent todo', status: 'pending' },
+    ])
+
+    manager.setMode(ControlMode.PLAN)
+
+    const replacement = manager.planStore
+      .list()
+      .find((plan) => plan.status === PlanStatus.DRAFT)!
+    expect(replacement).toMatchObject({
+      supersedesPlanId: 'plan_old_draft',
+      sessionId: scope.sessionId,
+    })
+    expect(manager.planStore.get(oldPlan.id)).toMatchObject({
+      status: PlanStatus.CANCELLED,
+      metadata: {
+        permission_tokens: [],
+        plan_step_tasks: {},
+        superseded_by: replacement.id,
+        superseded_reason: 'Plan mode entered with a replacement draft',
+      },
+    })
+    expect(taskManager.store.get(oldTask.id)?.status).toBe('cancelled')
+    expect(todoStore.todos).toEqual([
+      { id: 2, content: 'Independent todo', status: 'pending' },
+    ])
+  })
+
+  it('persists removal of superseded Plan todos through the TodoStore callback', () => {
+    const manager = new ControlManager(tmp('emperor-plan-todo-persist-'))
+    manager.setRuntimeScope({ sessionId: 'session-plan-todo-persist' })
+    const persisted: Array<Array<Record<string, unknown>>> = []
+    const todoStore = new TodoStore((todos) => persisted.push(todos))
+    manager.setTodoStore(todoStore)
+    const old = manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_todo_persist_old',
+        title: 'Old',
+        summary: 'Old work',
+        status: PlanStatus.EXECUTING,
+        createdAt: 1,
+        updatedAt: 1,
+        approvedAt: 1,
+        sessionId: 'session-plan-todo-persist',
+        metadata: { scope: { session_id: 'session-plan-todo-persist' } },
+      }),
+    )
+    todoStore.update([
+      {
+        id: 1,
+        content: 'Bound old work',
+        status: 'in_progress',
+        plan_id: old.id,
+      },
+      { id: 2, content: 'Independent work', status: 'pending' },
+    ])
+
+    manager.setMode(ControlMode.PLAN)
+
+    expect(persisted.at(-1)).toEqual([
+      { id: 2, content: 'Independent work', status: 'pending' },
+    ])
+  })
+
+  it('does not restore a superseded Plan when the replacement draft is cancelled', () => {
+    const manager = new ControlManager(tmp('emperor-plan-mode-no-restore-'))
+    const scope = {
+      sessionId: 'session-plan-no-restore',
+      mode: 'build' as const,
+      projectId: 'project-plan-no-restore',
+      workspaceRoot: '/workspace/plan-no-restore',
+      projectFingerprint: 'fingerprint-plan-no-restore',
+    }
+    manager.setRuntimeScope(scope)
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_predecessor',
+        title: 'Predecessor',
+        summary: 'Never revive this Plan.',
+        status: PlanStatus.APPROVED,
+        createdAt: 1,
+        updatedAt: 1,
+        approvedAt: 1,
+        sessionId: scope.sessionId,
+        metadata: {
+          scope: {
+            session_id: scope.sessionId,
+            mode: scope.mode,
+            project_id: scope.projectId,
+            workspace_root: scope.workspaceRoot,
+            project_fingerprint: scope.projectFingerprint,
+          },
+        },
+      }),
+    )
+    manager.setMode(ControlMode.PLAN)
+    const replacement = manager.planStore
+      .list()
+      .find((plan) => plan.status === PlanStatus.DRAFT)!
+    const interaction = manager.createPlan({
+      title: 'Replacement',
+      summary: 'This draft may be cancelled.',
+      planMarkdown: '# Replacement',
+      steps: [],
+    })
+
+    manager.cancel(interaction.id)
+
+    expect(String(interaction.meta.plan_id)).toBe(replacement.id)
+    expect(manager.planStore.get('plan_predecessor')?.status).toBe(
+      PlanStatus.CANCELLED,
+    )
+    expect(manager.planStore.get(replacement.id)?.status).toBe(
+      PlanStatus.CANCELLED,
+    )
+  })
+
+  it('cancels a stale waiting interaction after a replacement batch committed before Control state', () => {
+    const root = tmp('emperor-plan-replacement-recovery-')
+    const manager = new ControlManager(root)
+    const interaction = manager.createPlan({
+      title: 'Interrupted predecessor',
+      summary: 'Simulate a crash between Plan and Control stores.',
+      planMarkdown: '# Interrupted predecessor',
+      steps: [],
+    })
+    const planId = String(interaction.meta.plan_id)
+    const waiting = manager.planStore.get(planId)!
+    manager.planStore.save({
+      ...waiting,
+      status: PlanStatus.CANCELLED,
+      metadata: {
+        ...waiting.metadata,
+        superseded_by: 'plan_replacement_after_crash',
+      },
+    })
+
+    const restarted = new ControlManager(root)
+
+    expect(restarted.payload().pending).toBeNull()
+    expect(restarted.payload().last_interaction).toMatchObject({
+      id: interaction.id,
+      status: 'cancelled',
+    })
+  })
+
+  it('retries durable PlanStep task revocation when TaskManager attaches after restart', () => {
+    const root = tmp('emperor-plan-task-revocation-recovery-')
+    const taskManager = new TaskManager(root)
+    const task = taskManager.startTask({
+      kind: 'plan_step',
+      title: 'Interrupted old step',
+      source: 'plan_step',
+      sessionId: 'session-task-recovery',
+    })
+    const manager = new ControlManager(root)
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_cancelled_task_recovery',
+        title: 'Cancelled Plan',
+        summary: 'Its task cleanup was interrupted.',
+        status: PlanStatus.CANCELLED,
+        createdAt: 1,
+        updatedAt: 1,
+        sessionId: 'session-task-recovery',
+        metadata: {
+          plan_step_tasks_revoked: { step_1: task.id },
+          plan_step_tasks_revocation_pending: [task.id],
+        },
+      }),
+    )
+
+    manager.setTaskManager(taskManager)
+
+    expect(taskManager.store.get(task.id)?.status).toBe('cancelled')
+    expect(
+      manager.planStore.get('plan_cancelled_task_recovery')?.metadata
+        .plan_step_tasks_revocation_pending,
+    ).toBeUndefined()
+  })
+
+  it('treats an interrupted PlanStep task as terminal during revocation reconciliation', () => {
+    const root = tmp('emperor-plan-task-interrupted-recovery-')
+    const taskManager = new TaskManager(root)
+    const task = taskManager.startTask({
+      kind: 'plan_step',
+      title: 'Interrupted old step',
+      source: 'plan_step',
+      sessionId: 'session-task-interrupted-recovery',
+    })
+    taskManager.updateTask(task.id, { status: 'interrupted' })
+    const manager = new ControlManager(root)
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_cancelled_interrupted_task',
+        title: 'Cancelled Plan',
+        summary: 'Its interrupted task is already terminal.',
+        status: PlanStatus.CANCELLED,
+        createdAt: 1,
+        updatedAt: 1,
+        sessionId: 'session-task-interrupted-recovery',
+        metadata: {
+          plan_step_tasks_revoked: { step_1: task.id },
+          plan_step_tasks_revocation_pending: [task.id],
+        },
+      }),
+    )
+
+    manager.setTaskManager(taskManager)
+
+    expect(taskManager.store.get(task.id)?.status).toBe('interrupted')
+    expect(
+      manager.planStore.get('plan_cancelled_interrupted_task')?.metadata
+        .plan_step_tasks_revocation_pending,
+    ).toBeUndefined()
+  })
+
+  it('persists and retries stale Plan task revocation and removes its Todo bindings', () => {
+    const root = tmp('emperor-plan-stale-revocation-')
+    const manager = new ControlManager(root)
+    const taskManager = new TaskManager(root)
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    const scope = {
+      session_id: 'session-stale-revocation',
+      mode: 'build',
+      project_id: 'project-stale-revocation',
+      workspace_root: '/workspace/stale-revocation',
+      project_fingerprint: 'fingerprint-stale-revocation',
+    }
+    const oldTask = taskManager.startTask({
+      kind: 'plan_step',
+      title: 'Old running step',
+      source: 'plan_step',
+      sessionId: scope.session_id,
+    })
+    const successor = manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_stale_successor',
+        title: 'Successor',
+        summary: 'Approved successor.',
+        status: PlanStatus.APPROVED,
+        createdAt: 2,
+        updatedAt: 2,
+        approvedAt: 2,
+        sessionId: scope.session_id,
+        metadata: { scope, approval_generation: 1 },
+      }),
+    )
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_stale_predecessor',
+        title: 'Stale predecessor',
+        summary: 'Must be cancelled durably.',
+        status: PlanStatus.EXECUTING,
+        createdAt: 1,
+        updatedAt: 1,
+        approvedAt: 1,
+        sessionId: scope.session_id,
+        metadata: {
+          scope,
+          approval_generation: 1,
+          plan_step_tasks: { step_1: oldTask.id },
+        },
+      }),
+    )
+    todoStore.update([
+      {
+        id: 'old-bound-todo',
+        content: 'Old running step',
+        status: 'in_progress',
+        plan_id: 'plan_stale_predecessor',
+        plan_step_id: 'step_1',
+        approval_generation: 1,
+      },
+      { id: 'independent', content: 'Keep me', status: 'pending' },
+    ])
+    let firstCancel = true
+    manager.setTaskManager({
+      store: taskManager.store,
+      appendSidechain: (...args) => taskManager.appendSidechain(...args),
+      updateTask: (...args) => taskManager.updateTask(...args),
+      startTask: (...args) => taskManager.startTask(...args),
+      cancelTask: (...args) => {
+        if (firstCancel) {
+          firstCancel = false
+          throw new Error('simulated cancellation interruption')
+        }
+        return taskManager.cancelTask(...args)
+      },
+    })
+
+    expect(() =>
+      (
+        manager as unknown as {
+          execution: { supersedeStaleExecutingPlans(id: string): void }
+        }
+      ).execution.supersedeStaleExecutingPlans(successor.id),
+    ).not.toThrow()
+
+    expect(manager.planStore.get('plan_stale_predecessor')).toMatchObject({
+      status: PlanStatus.CANCELLED,
+      metadata: {
+        plan_step_tasks: {},
+        plan_step_tasks_revocation_pending: [oldTask.id],
+      },
+    })
+    expect(todoStore.todos).toEqual([
+      { id: 'independent', content: 'Keep me', status: 'pending' },
+    ])
+    expect(taskManager.store.get(oldTask.id)?.status).toBe('running')
+
+    manager.setTaskManager(taskManager)
+
+    expect(taskManager.store.get(oldTask.id)?.status).toBe('cancelled')
+    expect(
+      manager.planStore.get('plan_stale_predecessor')?.metadata
+        .plan_step_tasks_revocation_pending,
+    ).toBeUndefined()
+  })
+
+  it('keeps the replacement draft id and increments approval generation for revisions', () => {
+    const manager = new ControlManager(tmp('emperor-plan-mode-revision-id-'))
+    manager.setRuntimeScope({
+      sessionId: 'session-plan-revision-id',
+      mode: 'build',
+      projectId: 'project-plan-revision-id',
+      workspaceRoot: '/workspace/plan-revision-id',
+      projectFingerprint: 'fingerprint-plan-revision-id',
+    })
+    manager.setMode(ControlMode.PLAN)
+    const draftId = manager.planStore
+      .list()
+      .find((plan) => plan.status === PlanStatus.DRAFT)!.id
+    const first = manager.createPlan({
+      title: 'First draft',
+      summary: 'First version.',
+      planMarkdown: '# First',
+      steps: [],
+    })
+    manager.comment(first.id, 'Please revise the draft.')
+    const second = manager.createPlan({
+      title: 'Second draft',
+      summary: 'Second version.',
+      planMarkdown: '# Second',
+      steps: [],
+    })
+
+    expect(first.meta.plan_id).toBe(draftId)
+    expect(second.meta.plan_id).toBe(draftId)
+    expect(manager.planStore.get(draftId)?.metadata.approval_generation).toBe(2)
+  })
+
+  it('fails closed for Plan replacement when setMode has no runtime scope', () => {
+    const manager = new ControlManager(tmp('emperor-plan-mode-missing-scope-'))
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_foreign_session',
+        title: 'Foreign Plan',
+        summary: 'Must not be replaced without a scope.',
+        status: PlanStatus.EXECUTING,
+        createdAt: 1,
+        updatedAt: 1,
+        approvedAt: 1,
+        sessionId: 'foreign-session',
+        metadata: {
+          scope: {
+            session_id: 'foreign-session',
+            mode: 'build',
+            workspace_root: '/workspace/foreign',
+            project_fingerprint: 'fingerprint-foreign',
+          },
+        },
+      }),
+    )
+
+    manager.setMode(ControlMode.PLAN)
+
+    expect(manager.planStore.get('plan_foreign_session')?.status).toBe(
+      PlanStatus.EXECUTING,
+    )
+    expect(manager.planStore.list()).toHaveLength(1)
+  })
+
+  it('does not reuse a foreign scoped draft when an unbound manager proposes a plan', () => {
+    const manager = new ControlManager(tmp('emperor-plan-foreign-draft-'))
+    manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_foreign_draft',
+        title: 'Foreign draft',
+        summary: 'Owned by another session.',
+        status: PlanStatus.DRAFT,
+        createdAt: 1,
+        updatedAt: 1,
+        sessionId: 'foreign-session',
+        metadata: { scope: { session_id: 'foreign-session' } },
+      }),
+    )
+    manager.setMode(ControlMode.PLAN)
+
+    const interaction = manager.createPlan({
+      title: 'Local unscoped proposal',
+      summary: 'Must receive a distinct identity.',
+      planMarkdown: '# Local plan',
+      steps: [],
+    })
+
+    expect(interaction.meta.plan_id).not.toBe('plan_foreign_draft')
+    expect(manager.planStore.get('plan_foreign_draft')).toMatchObject({
+      title: 'Foreign draft',
+      status: PlanStatus.DRAFT,
+    })
   })
 
   it('projects model-style camelCase todo completion into plan steps and completes the plan', () => {
     const { manager, todoStore, planId } = approvedManager()
-    // 模型输出 camelCase planStepId；TodoStore.update 负责归一为 plan_step_id
-    todoStore.update([
-      { id: 1, content: 'Build it', status: 'completed', planStepId: 'step_1' },
-      {
-        id: 2,
-        content: 'Verify it',
-        status: 'completed',
-        planStepId: 'step_2',
-      },
-    ])
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
     const updated = manager.syncPlanFromTodos(todoStore.todos, {
       evidence: { source: 'update_todos', tool_call_id: 'call_1' },
     })
@@ -2191,22 +2801,19 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     expect(updated!.completedAt).not.toBeNull()
     expect(updated!.steps.map((step) => step.status)).toEqual(['done', 'done'])
     expect(updated!.steps[0]!.evidence.at(-1)).toMatchObject({
-      source: 'update_todos',
+      source: 'todo_implementation_claim',
       todo_status: 'completed',
     })
   })
 
   it('keeps the plan executing while todos are still in flight', () => {
     const { manager, todoStore } = approvedManager()
-    todoStore.update([
-      { id: 1, content: 'Build it', status: 'completed', planStepId: 'step_1' },
-      {
-        id: 2,
-        content: 'Verify it',
-        status: 'in_progress',
-        planStepId: 'step_2',
-      },
-    ])
+    todoStore.update(
+      todoStore.todos.map((todo) => ({
+        ...todo,
+        status: todo.plan_step_id === 'step_1' ? 'completed' : 'in_progress',
+      })),
+    )
     const updated = manager.syncPlanFromTodos(todoStore.todos, {
       evidence: { source: 'update_todos' },
     })
@@ -2217,6 +2824,85 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     ])
   })
 
+  it('records a Todo completion claim but completes only after required verification passes', () => {
+    const manager = new ControlManager(tmp('emperor-plan-verified-claim-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode(ControlMode.PLAN)
+    new ProposePlanTool(manager).execute({
+      title: 'Verified completion',
+      summary: 'Implementation and verification are separate facts.',
+      plan_markdown: '# Plan\n\n1. Implement and test',
+      assumptions: [],
+      risk_level: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement and test',
+          description: 'Change the implementation and run its test.',
+          files: ['src/example.ts'],
+          commands: ['npm test'],
+          acceptance: ['npm test passes'],
+        },
+      ],
+    })
+    const pending = manager.payload().pending as Record<string, unknown>
+    const planId = String((pending.meta as Record<string, unknown>).plan_id)
+    manager.approve(String(pending.id))
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
+
+    const claimed = manager.syncPlanFromTodos(todoStore.todos, {
+      evidence: { source: 'update_todos' },
+    })!
+
+    expect(claimed.status).toBe(PlanStatus.EXECUTING)
+    expect(claimed.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
+    expect(todoStore.todos[0]!.status).toBe('in_progress')
+    expect(claimed.metadata.implementation_claims).toMatchObject({
+      step_1: expect.objectContaining({ source: 'todo_implementation_claim' }),
+    })
+
+    const failed = manager.recordPlanVerificationResult({
+      planId,
+      stepId: 'step_1',
+      result: { command: 'npm test', passed: false, summary: 'failed' },
+    })!
+    expect(failed.status).toBe(PlanStatus.EXECUTING)
+    expect(failed.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
+
+    const passed = manager.recordPlanVerificationResult({
+      planId,
+      stepId: 'step_1',
+      result: { command: 'npm test', passed: true, summary: 'passed' },
+    })!
+    expect(passed.status).toBe(PlanStatus.COMPLETED)
+    expect(passed.steps[0]!.status).toBe(PlanStepStatus.DONE)
+    expect(todoStore.todos[0]!.status).toBe('completed')
+  })
+
+  it('rejects stale Todo bindings for a non-Goal Plan and restores the canonical projection', () => {
+    const { manager, todoStore, planId } = approvedManager()
+    const canonical = todoStore.todos.map((todo) => ({ ...todo }))
+    todoStore.update(
+      canonical.map((todo) => ({
+        ...todo,
+        approval_generation: Number(todo.approval_generation) + 1,
+      })),
+    )
+
+    expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
+      /approval_generation/,
+    )
+    manager.restoreCurrentPlanTodoProjection()
+
+    expect(manager.planStore.get(planId)!.steps[0]!.status).toBe(
+      PlanStepStatus.ACTIVE,
+    )
+    expect(todoStore.todos).toEqual(canonical)
+  })
+
   it('requires explicit plan_step_id bindings and rejects dependency bypass', () => {
     const { manager, todoStore } = approvedManager()
     todoStore.update([
@@ -2224,7 +2910,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
       { id: 2, content: 'Verify it', status: 'completed' },
     ])
     expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
-      /plan_step_id/i,
+      /Plan Todo/i,
     )
 
     const current = manager.planStore.latest()!
@@ -2239,15 +2925,20 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
         },
       ],
     })
+    const generation = Number(current.metadata.approval_generation)
     todoStore.update([
       {
         id: 1,
+        plan_id: current.id,
+        approval_generation: generation,
         content: 'Build it',
         status: 'in_progress',
         planStepId: 'step_1',
       },
       {
         id: 2,
+        plan_id: current.id,
+        approval_generation: generation,
         content: 'Verify it',
         status: 'completed',
         planStepId: 'step_2',

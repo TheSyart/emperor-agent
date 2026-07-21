@@ -14,6 +14,7 @@ import type {
   MemoryVersionDetail,
   DesktopPetPayload,
   PendingState,
+  QueueDraftRecovery,
   QueuedPromptItem,
   RuntimeStatus,
   GoalProjectionState,
@@ -37,6 +38,8 @@ export interface AppContext {
 
   messages: Ref<ChatMessage[]>
   queuedPrompts: Ref<QueuedPromptItem[]>
+  queueDraftRecovery: Ref<QueueDraftRecovery | null>
+  clearQueueDraftRecovery: (sessionId?: string) => void
   pendingInteractionsBySession: Record<string, ControlInteraction>
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>

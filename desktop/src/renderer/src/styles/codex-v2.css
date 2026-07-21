@@ -1755,6 +1755,8 @@ select:focus-visible {
 }
 
 .composer {
+  position: relative;
+  z-index: 1;
   overflow: visible;
   border-radius: 12px;
   border-color: rgb(var(--border));

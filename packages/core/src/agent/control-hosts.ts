@@ -43,6 +43,5 @@ export function permissionOnlyControlHost(
     }),
     shouldEnforcePlanFinal: () => false,
     createAsk: (opts) => control.createAsk(opts),
-    createPlanFromText: (text, meta) => control.createPlanFromText(text, meta),
   }
 }

@@ -5,16 +5,34 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(join(__dirname, 'ChatView.vue'), 'utf8')
 
 describe('ChatView Composer lifecycle integration', () => {
-  it('keeps the Goal bar visible and renders Ask or Plan inside the timeline', () => {
+  it('keeps the Goal bar visible and replaces the Composer with the active Ask or Plan panel', () => {
     expect(source).toContain('<GoalStatusBar')
-    expect(source).not.toContain('<ActiveAskPanel')
-    expect(source).not.toContain('<ActivePlanDecisionPanel')
+    expect(source).toContain('<ActiveAskPanel')
+    expect(source).toContain('<ActivePlanDecisionPanel')
+    expect(source).toContain('activeBottomControlPanelForInteraction')
+    expect(source).toContain("activeBottomControl?.kind === 'ask'")
+    expect(source).toContain("activeBottomControl?.kind === 'plan'")
+    expect(source).toContain('v-show="!activeBottomControl"')
     expect(source).not.toContain('<PendingBar')
     expect(source).toContain(
       ':interaction-blocked="Boolean(pendingInteraction)"',
     )
     expect(source).toContain('@edit="replaceGoal"')
     expect(source).toContain('ctx.replaceGoal')
+  })
+
+  it('composes the queue tray inside the Composer shell instead of beside it', () => {
+    expect(source).toContain('<template #queue>')
+    expect(source).toContain('<QueueTray')
+    expect(source).toContain(
+      ':queue-occupied="Boolean(ctx.queuedPrompts.value.length)"',
+    )
+  })
+
+  it('restores a queue submission rejected by the Core single-slot guard', () => {
+    expect(source).toContain('ctx.queueDraftRecovery.value')
+    expect(source).toContain('composer.value?.restoreDraft(recovery.payload)')
+    expect(source).toContain('ctx.clearQueueDraftRecovery(recovery.sessionId)')
   })
 
   it('passes full control and Provider metadata to Composer', () => {

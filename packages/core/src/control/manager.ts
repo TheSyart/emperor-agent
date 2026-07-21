@@ -130,13 +130,49 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.execution = new PlanExecutionManager(this)
     this.goalBlocker = new GoalBlockerControlManager(this)
     this.goalManualEvidence = new GoalManualEvidenceControlManager(this)
-    this.reconcilePendingPermission()
+    this.reconcilePendingInteraction()
   }
 
-  private reconcilePendingPermission(): void {
+  private reconcilePendingInteraction(): void {
     const state = this.store.load()
     const pending = state.pending
-    if (!pending || pending.meta?.interaction_type !== 'permission') return
+    if (!pending) return
+    if (isObsoleteLegacyGuard(pending)) {
+      const cancelled = touchInteraction(pending, {
+        status: InteractionStatus.CANCELLED,
+      })
+      state.pending = null
+      state.lastInteraction = cancelled
+      state.updatedAt = nowTs()
+      this.store.save(state)
+      return
+    }
+    if (pending.kind === InteractionKind.PLAN) {
+      const planId = String(pending.meta.plan_id ?? '').trim()
+      const generation = Number(pending.meta.approval_generation ?? 0)
+      const plan = planId ? this.planStore.get(planId) : null
+      const persistedGeneration = Number(
+        plan?.metadata.approval_generation ?? 0,
+      )
+      if (
+        plan === null ||
+        plan.status !== PlanStatus.WAITING_APPROVAL ||
+        plan.sourceInteractionId !== pending.id ||
+        !Number.isInteger(generation) ||
+        generation < 1 ||
+        generation !== persistedGeneration
+      ) {
+        const cancelled = touchInteraction(pending, {
+          status: InteractionStatus.CANCELLED,
+        })
+        state.pending = null
+        state.lastInteraction = cancelled
+        state.updatedAt = nowTs()
+        this.store.save(state)
+      }
+      return
+    }
+    if (pending.meta?.interaction_type !== 'permission') return
     if (this.permissionManager.isWaitingRequestRecoverable(pending)) return
     const cancelled = touchInteraction(pending, {
       status: InteractionStatus.CANCELLED,
@@ -153,6 +189,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   setTaskManager(taskManager: TaskManagerLike | null): void {
     this.taskManager = taskManager
+    if (taskManager !== null) this.execution.reconcileRevokedPlanTasks()
   }
 
   setRuntimeScope(scope: ControlRuntimeScope | null): void {
@@ -236,6 +273,29 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     }
     const state = this.store.load()
     const oldMode = state.mode
+    let cancelledPendingPlan: Interaction | null = null
+    if (value === ControlMode.PLAN && oldMode !== ControlMode.PLAN) {
+      // A missing session scope must never make this operation global.  The
+      // ordinary Plan draft flow remains available, but no durable Plan is
+      // replaced until the Core has bound this manager to a session.
+      if (this.planScopeMetadata()?.session_id) {
+        const draft = this.drafting.newPlanModeDraft()
+        const replacement = this.execution.beginPlanReplacement(draft)
+        if (replacement !== null) {
+          const pendingPlanId = String(state.pending?.meta.plan_id ?? '').trim()
+          if (
+            state.pending?.kind === InteractionKind.PLAN &&
+            replacement.cancelledPlanIds.includes(pendingPlanId)
+          ) {
+            cancelledPendingPlan = touchInteraction(state.pending, {
+              status: InteractionStatus.CANCELLED,
+            })
+            state.pending = null
+            state.lastInteraction = cancelledPendingPlan
+          }
+        }
+      }
+    }
     if (value === ControlMode.PLAN && state.mode !== ControlMode.PLAN) {
       state.previousMode = state.mode
     } else if (value !== ControlMode.PLAN) {
@@ -244,6 +304,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.mode = value
     state.updatedAt = nowTs()
     this.store.save(state)
+    if (cancelledPendingPlan !== null)
+      this.notifyPendingCleared(cancelledPendingPlan)
     if (value !== oldMode) {
       this.revokePlanPermissionTokens({ reason: 'control mode changed' })
     }
@@ -338,13 +400,6 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     enforceQuality?: boolean
   }): Interaction {
     return this.drafting.createPlan(opts)
-  }
-
-  createPlanFromText(
-    text: string,
-    meta?: Record<string, unknown> | null,
-  ): Interaction {
-    return this.drafting.createPlanFromText(text, meta)
   }
 
   assessClarification(
@@ -862,6 +917,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.execution.syncPlanFromTodos(todos, opts)
   }
 
+  restoreCurrentPlanTodoProjection(): void {
+    this.execution.restoreCurrentPlanTodoProjection()
+  }
+
   hasAskInteraction(): boolean {
     const state = this.store.load()
     return [state.pending, state.lastInteraction].some(
@@ -951,7 +1010,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     stepId: string
     result: Record<string, unknown>
   }): PlanRecord | null {
-    return this.verification.recordPlanVerificationResult(opts)
+    const saved = this.verification.recordPlanVerificationResult(opts)
+    return saved === null
+      ? null
+      : this.execution.reconcileAfterVerification(saved)
   }
 
   appendPlanStepVerification(
@@ -1146,6 +1208,13 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 }
 
+function isObsoleteLegacyGuard(interaction: Interaction): boolean {
+  if (interaction.kind !== InteractionKind.ASK) return false
+  return /^(?:Ask|Permission) Guard\s*:/i.test(
+    String(interaction.context ?? '').trim(),
+  )
+}
+
 function normalizeRuntimeScope(
   scope: ControlRuntimeScope | null | undefined,
 ): Required<ControlRuntimeScope> | null {
@@ -1174,15 +1243,20 @@ function planMatchesScope(
   record: PlanRecord,
   current: Required<ControlRuntimeScope> | null,
 ): boolean {
-  if (current === null) return true
+  // An unbound manager may only see legacy/unscoped Plans. Treating a missing
+  // current scope as a wildcard leaks drafts across desktop sessions.
+  if (current === null)
+    return record.sessionId === null && planRuntimeScope(record) === null
   const saved = planRuntimeScope(record)
   if (saved === null) return false
   if (record.goalId !== null) return goalScopesEqual(saved, current)
   let compared = false
   const keys: Array<keyof Required<ControlRuntimeScope>> = [
     'sessionId',
+    'mode',
     'projectId',
     'workspaceRoot',
+    'projectFingerprint',
   ]
   for (const key of keys) {
     const currentValue = current[key]

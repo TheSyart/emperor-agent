@@ -57,6 +57,7 @@ import {
   RotateCcw,
   TriangleAlert,
   Square,
+  Ellipsis,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -101,6 +102,11 @@ export const actionIcons = {
   statusBusy: LoaderCircle,
   statusError: CircleAlert,
   statusOnline: Circle,
+  queue: Inbox,
+  edit: FilePen,
+  interject: ArrowDownToLine,
+  remove: X,
+  more: Ellipsis,
 } satisfies Record<string, IconComponent>
 
 export const goalIcons = {

@@ -48,6 +48,17 @@ describe('composer control model', () => {
     ).toBe(false)
   })
 
+  it('disables a second busy submission while the single queue slot is occupied', () => {
+    expect(
+      composerSendDisabled({
+        busy: true,
+        content: 'second queued message',
+        attachmentCount: 0,
+        queueOccupied: true,
+      }),
+    ).toBe(true)
+  })
+
   it('disables send only when idle with no content or attachments', () => {
     expect(
       composerSendDisabled({ busy: false, content: '', attachmentCount: 0 }),

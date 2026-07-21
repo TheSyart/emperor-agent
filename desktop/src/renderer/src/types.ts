@@ -571,6 +571,11 @@ export interface ChatSendPayload {
   delivery?: 'queue' | 'interject'
 }
 
+export interface QueueDraftRecovery {
+  sessionId: string
+  payload: ChatSendPayload
+}
+
 export interface ModelTestResult {
   ok: boolean
   kind: 'text' | 'vision'

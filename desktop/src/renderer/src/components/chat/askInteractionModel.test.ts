@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ControlInteraction, ControlQuestion } from '../../types'
 import * as askModel from './askInteractionModel'
@@ -45,6 +47,15 @@ function ask(extra: Partial<ControlInteraction> = {}): ControlInteraction {
 }
 
 describe('ask interaction model', () => {
+  it('keeps the timeline Ask card static while the bottom slot owns interaction controls', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('./AskHistoryCard.vue', import.meta.url)),
+      'utf8',
+    )
+
+    expect(source).not.toContain('<ActiveAskPanel')
+  })
+
   it('selects only the waiting ask interaction as active', () => {
     expect(activeAskInteraction({ mode: 'plan', pending: ask() })?.id).toBe(
       'ask-1',

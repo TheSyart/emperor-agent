@@ -1,209 +1,279 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { QueuedPromptItem } from '../../types'
+import { actionIcons } from '../../icons'
 
-defineProps<{ items: QueuedPromptItem[] }>()
+const props = defineProps<{ items: QueuedPromptItem[] }>()
 
-defineEmits<{
+const emit = defineEmits<{
   edit: [item: QueuedPromptItem]
   interject: [item: QueuedPromptItem]
   cancel: [item: QueuedPromptItem]
 }>()
+
+const tray = ref<HTMLElement | null>(null)
+const menuOpen = ref(false)
+const visibleItem = computed(
+  () =>
+    [...props.items].sort(
+      (left, right) => left.createdOrder - right.createdOrder,
+    )[0] || null,
+)
+const legacyOverflow = computed(() => Math.max(0, props.items.length - 1))
+const liveMessage = computed(() => {
+  const item = visibleItem.value
+  if (!item) return '消息队列已清空'
+  const overflow = legacyOverflow.value
+    ? `，另有 ${legacyOverflow.value} 条旧队列`
+    : ''
+  return `${item.status === 'interjecting' ? '准备插入' : '已排队'}：${item.content}${overflow}`
+})
+
+function edit(item: QueuedPromptItem): void {
+  menuOpen.value = false
+  emit('edit', item)
+}
+
+function closeMenu(): void {
+  menuOpen.value = false
+}
+
+function closeFromOutside(event: PointerEvent): void {
+  if (!menuOpen.value || tray.value?.contains(event.target as Node)) return
+  closeMenu()
+}
+
+onMounted(() => document.addEventListener('pointerdown', closeFromOutside))
+onBeforeUnmount(() =>
+  document.removeEventListener('pointerdown', closeFromOutside),
+)
 </script>
 
 <template>
   <section
-    v-if="items.length"
+    v-if="visibleItem"
+    ref="tray"
     class="queue-tray"
     aria-label="待处理消息队列"
-    aria-live="polite"
+    @keydown.esc.stop="closeMenu"
   >
-    <header>
-      <span>消息队列</span>
-      <em>{{ items.length }}</em>
-    </header>
-    <ol>
-      <li v-for="item in items" :key="item.id">
-        <div class="queue-copy">
-          <span class="queue-state">
-            {{ item.status === 'interjecting' ? '准备插入' : '已排队' }}
-          </span>
-          <p>{{ item.content }}</p>
-          <small
-            v-if="item.attachmentCount || item.requestedSkillNames.length || item.hasCapabilityRefs"
+    <div class="queue-item">
+      <component
+        :is="actionIcons.queue"
+        class="queue-leading-icon"
+        :size="15"
+        aria-hidden="true"
+      />
+      <div class="queue-copy">
+        <span class="queue-state">
+          {{ visibleItem.status === 'interjecting' ? '准备插入' : '已排队' }}
+        </span>
+        <p :title="visibleItem.content">{{ visibleItem.content }}</p>
+        <small v-if="legacyOverflow">
+          另有 {{ legacyOverflow }} 条旧队列
+        </small>
+      </div>
+      <div class="queue-actions">
+        <button
+          type="button"
+          class="queue-action queue-interject"
+          :disabled="!visibleItem.supportsInterjection"
+          :title="
+            visibleItem.supportsInterjection
+              ? '插入当前执行'
+              : '包含附件或 Skill 的消息不支持插入当前执行'
+          "
+          aria-label="插入当前执行"
+          @click="emit('interject', visibleItem)"
+        >
+          <component :is="actionIcons.interject" :size="14" />
+          <span>插入当前执行</span>
+        </button>
+        <button
+          type="button"
+          class="queue-action queue-icon-action"
+          title="删除排队消息"
+          aria-label="删除排队消息"
+          @click="emit('cancel', visibleItem)"
+        >
+          <component :is="actionIcons.remove" :size="15" />
+        </button>
+        <div class="queue-menu">
+          <button
+            type="button"
+            class="queue-action queue-icon-action"
+            aria-label="更多队列操作"
+            aria-haspopup="menu"
+            :aria-expanded="menuOpen"
+            @click="menuOpen = !menuOpen"
           >
-            <span v-if="item.attachmentCount">附件 {{ item.attachmentCount }}</span>
-            <span v-if="item.requestedSkillNames.length">
-              Skill {{ item.requestedSkillNames.join('、') }}
-            </span>
-            <span
-              v-if="item.hasCapabilityRefs && !item.requestedSkillNames.length"
-            >
-              能力引用
-            </span>
-          </small>
-        </div>
-        <details class="queue-menu">
-          <summary aria-label="队列消息操作">•••</summary>
-          <div role="menu">
-            <button type="button" role="menuitem" @click="$emit('edit', item)">
+            <component :is="actionIcons.more" :size="16" />
+          </button>
+          <div v-if="menuOpen" class="queue-menu-popover" role="menu">
+            <button type="button" role="menuitem" @click="edit(visibleItem)">
+              <component :is="actionIcons.edit" :size="14" />
               编辑消息
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              :disabled="!item.supportsInterjection"
-              @click="$emit('interject', item)"
-            >
-              插入当前执行
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              class="danger"
-              @click="$emit('cancel', item)"
-            >
-              删除
-            </button>
           </div>
-        </details>
-      </li>
-    </ol>
+        </div>
+      </div>
+    </div>
+    <span class="sr-only" aria-live="polite">{{ liveMessage }}</span>
   </section>
 </template>
 
 <style scoped>
 .queue-tray {
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg);
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  margin-bottom: -10px;
+  padding: 0 8px 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 14px 14px 10px 10px;
+  background: rgb(var(--paper-2));
+  color: rgb(var(--fg));
   overflow: visible;
 }
 
-.queue-tray > header {
-  min-height: 32px;
-  padding: 0 12px;
+.queue-item {
+  min-height: 42px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg-muted);
-  font-size: 12px;
+  gap: 9px;
 }
 
-.queue-tray > header em {
-  min-width: 18px;
-  height: 18px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--paper-2);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
-
-.queue-tray ol {
-  max-height: 168px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.queue-tray li {
-  min-height: 56px;
-  padding: 8px 8px 8px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.queue-tray li:last-child {
-  border-bottom: 0;
+.queue-leading-icon {
+  flex: none;
+  color: rgb(var(--fg-subtle));
 }
 
 .queue-copy {
   min-width: 0;
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .queue-state {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--fg-subtle);
+  flex: none;
+  color: rgb(var(--fg-subtle));
   font-size: 11px;
 }
 
 .queue-copy p {
   margin: 0;
-  display: -webkit-box;
+  min-width: 0;
   overflow: hidden;
-  color: var(--fg-muted);
+  color: rgb(var(--fg-muted));
   font-size: 13px;
-  line-height: 18px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-copy small {
-  display: flex;
-  gap: 8px;
-  margin-top: 3px;
-  color: var(--fg-subtle);
+  flex: none;
+  color: rgb(var(--fg-subtle));
   font-size: 11px;
+}
+
+.queue-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.queue-action {
+  min-width: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(var(--fg-muted));
+  cursor: pointer;
+}
+
+.queue-action:hover:not(:disabled),
+.queue-action:focus-visible {
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+}
+
+.queue-action:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.65);
+  outline-offset: 1px;
+}
+
+.queue-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.queue-interject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.queue-icon-action {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
 }
 
 .queue-menu {
   position: relative;
-  flex: none;
 }
 
-.queue-menu summary {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  color: var(--fg-muted);
-  list-style: none;
-}
-
-.queue-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.queue-menu div {
+.queue-menu-popover {
   position: absolute;
   z-index: 20;
   right: 0;
-  bottom: 36px;
-  width: 164px;
+  bottom: 34px;
+  width: 142px;
   padding: 4px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: 8px;
+  background: rgb(var(--bg-elevated));
   box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
 }
 
-.queue-menu button {
+.queue-menu-popover button {
   width: 100%;
   min-height: 32px;
   padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
-  color: var(--fg);
+  color: rgb(var(--fg));
   text-align: left;
+  cursor: pointer;
 }
 
-.queue-menu button:hover:not(:disabled),
-.queue-menu button:focus-visible {
-  background: var(--paper-2);
+.queue-menu-popover button:hover,
+.queue-menu-popover button:focus-visible {
+  background: rgb(var(--paper-2));
+  outline: none;
 }
 
-.queue-menu button.danger {
-  color: var(--danger);
-}
+@media (max-width: 620px) {
+  .queue-copy small,
+  .queue-interject span {
+    display: none;
+  }
 
-.queue-menu button:disabled {
-  opacity: 0.45;
+  .queue-interject {
+    width: 30px;
+    padding: 0;
+  }
 }
 </style>

@@ -57,7 +57,7 @@ import {
 } from '../config/resolver'
 import { ModelConfigurationError } from '../errors'
 import { ControlManager } from '../control/manager'
-import type { Interaction } from '../control/models'
+import type { ControlStatePayload, Interaction } from '../control/models'
 import { TurnPaused } from '../control/exceptions'
 import {
   AskUserTool,
@@ -232,6 +232,7 @@ import { ToolRegistry } from '../tools/registry'
 import type { ToolExecutionContext } from '../tools/base'
 import { WebSearchTool } from '../tools/web-search'
 import * as runtimeEvents from '../runtime/events'
+import { planToDict } from '../plans/models'
 import {
   GoalEvidenceLedger,
   GoalObservationRecorder,
@@ -381,6 +382,24 @@ export interface ManageQueuedPromptResult {
   promptId: string
   replacementPromptId: string | null
   reason: string | null
+}
+
+export class PromptQueueFullError extends Error {
+  readonly code = 'prompt_queue_full'
+  readonly capacity = 1
+
+  constructor(readonly sessionId: string) {
+    super(`prompt queue already contains one waiting item for ${sessionId}`)
+    this.name = 'PromptQueueFullError'
+  }
+
+  toSafe(): { code: string; message: string; action: string } {
+    return {
+      code: this.code,
+      message: '已有一条消息排队，请先处理后再发送。',
+      action: 'manage_prompt_queue',
+    }
+  }
 }
 
 export interface AgentSessionBindingState {
@@ -1816,9 +1835,26 @@ export class AgentLoop {
   }
 
   reconcileSessionControlPending(): void {
-    const pending = this.controlManager.store.load().pending
+    let pending = this.controlManager.store.load().pending
+    let declaredSessionId = pending
+      ? String(
+          pending.meta.goal_session_id ?? pending.meta.control_session_id ?? '',
+        ).trim()
+      : ''
+    if (
+      pending &&
+      declaredSessionId &&
+      !this.sessionStore.get(declaredSessionId)
+    ) {
+      this.controlManager.cancel(pending.id)
+      pending = null
+      declaredSessionId = ''
+    }
     const summary = pending ? this.sessionControlPending(pending) : null
-    this.sessionStore.reconcileControlPending(summary, this.activeSessionId)
+    this.sessionStore.reconcileControlPending(
+      summary,
+      declaredSessionId || this.activeSessionId,
+    )
     if (summary) {
       this.controlPendingSessionId = this.findControlPendingSessionId(
         summary.interaction_id,
@@ -1911,7 +1947,16 @@ export class AgentLoop {
     const sessionId = bindings.session.id
     const queuedScope = this.turnScope(bindings.session, turnId)
     if (queued) {
-      bindings.conversationStore.messageGraph.recordPrompt({
+      const promptGraph = bindings.conversationStore.messageGraph
+      if (
+        promptGraph
+          .snapshot()
+          .prompts.some((prompt) => prompt.state === 'queued')
+      ) {
+        restorePreviousSession()
+        throw new PromptQueueFullError(sessionId)
+      }
+      promptGraph.recordPrompt({
         id: queuedPromptId,
         turnId,
         clientMessageId: queuedPromptId,
@@ -2338,6 +2383,12 @@ export class AgentLoop {
       )
     for (const persistedPrompt of prompts) {
       let prompt = persistedPrompt
+      const liveCommandId = `turn:${prompt.turnId}`
+      if (
+        actor.commandState(liveCommandId) !== null ||
+        actor.interjectionState(prompt.id) !== null
+      )
+        continue
       if (prompt.state === 'running' || prompt.state === 'interjected') {
         const alreadyStarted = bindings.history.some(
           (message) =>
@@ -2413,7 +2464,6 @@ export class AgentLoop {
         prompt = replacement
       }
       const commandId = `turn:${prompt.turnId}`
-      if (actor.commandState(commandId) !== null) continue
       const scope = this.turnScope(bindings.session, prompt.turnId)
       const opts: RunUserTurnOptions = {
         sessionId,
@@ -2760,6 +2810,25 @@ export class AgentLoop {
       this.controlManager.setRuntimeScope(
         this.controlRuntimeScopeForSession(this.activeSession),
       )
+  }
+
+  async setControlMode(mode: string): Promise<ControlStatePayload> {
+    const before = new Map(
+      this.controlManager.planStore
+        .list()
+        .map((plan) => [plan.id, plan.status] as const),
+    )
+    const payload = this.controlManager.setMode(mode)
+    const changed = this.controlManager.planStore
+      .list()
+      .filter((plan) => before.get(plan.id) !== plan.status)
+    for (const plan of changed) {
+      await this.emit({
+        ...runtimeEvents.planRuntimeUpdate(planToDict(plan)),
+        ...(plan.sessionId ? { session_id: plan.sessionId } : {}),
+      })
+    }
+    return payload
   }
 
   workspacePolicyDiagnostics(): Record<string, unknown> {

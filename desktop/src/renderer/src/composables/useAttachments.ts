@@ -78,6 +78,16 @@ export function useAttachments(options: {
     return taken
   }
 
+  function restoreDrafts(items: AttachmentRef[]): void {
+    const existing = new Set(drafts.value.map((item) => item.id))
+    for (const item of items) {
+      if (drafts.value.length >= MAX_ATTACHMENT_DRAFTS) break
+      if (existing.has(item.id)) continue
+      drafts.value.push(item)
+      existing.add(item.id)
+    }
+  }
+
   return {
     drafts,
     uploading,
@@ -90,6 +100,7 @@ export function useAttachments(options: {
     onDrop,
     removeDraft,
     takeDrafts,
+    restoreDrafts,
   }
 }
 
