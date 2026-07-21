@@ -3,7 +3,7 @@
  * 把 core 子系统组合成可执行的本地 Agent: session history、memory、tools、
  * subagents、scheduler、Team、control 和 routed AgentRunner。
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { buildUserContent, refToJson } from '../attachments/encode'
 import { AttachmentStore } from '../attachments/store'
 import {
@@ -57,7 +57,7 @@ import {
 } from '../config/resolver'
 import { ModelConfigurationError } from '../errors'
 import { ControlManager } from '../control/manager'
-import type { Interaction } from '../control/models'
+import type { ControlStatePayload, Interaction } from '../control/models'
 import { TurnPaused } from '../control/exceptions'
 import {
   AskUserTool,
@@ -66,6 +66,7 @@ import {
 } from '../control/tools'
 import { MCPClient } from '../mcp/client'
 import { MemoryStore } from '../memory/store'
+import type { PromptQueueRecord } from '../sessions/message-graph'
 import {
   applyHybridMemoryPromptProjection,
   HybridMemoryService,
@@ -153,6 +154,7 @@ import { isSkillBlocked } from '../runtime/resources'
 import { SkillManager } from '../skills/manager'
 import { RuntimeEventStore } from '../runtime/store'
 import {
+  SessionRuntimeCommandCancelledError,
   SessionRuntimeManager,
   type SessionInterjection,
 } from '../runtime/session-runtime'
@@ -230,6 +232,7 @@ import { ToolRegistry } from '../tools/registry'
 import type { ToolExecutionContext } from '../tools/base'
 import { WebSearchTool } from '../tools/web-search'
 import * as runtimeEvents from '../runtime/events'
+import { planToDict } from '../plans/models'
 import {
   GoalEvidenceLedger,
   GoalObservationRecorder,
@@ -373,6 +376,32 @@ export interface InterjectUserTurnResult {
   reason: string | null
 }
 
+export interface ManageQueuedPromptResult {
+  ok: boolean
+  action: 'cancel' | 'interject'
+  promptId: string
+  replacementPromptId: string | null
+  reason: string | null
+}
+
+export class PromptQueueFullError extends Error {
+  readonly code = 'prompt_queue_full'
+  readonly capacity = 1
+
+  constructor(readonly sessionId: string) {
+    super(`prompt queue already contains one waiting item for ${sessionId}`)
+    this.name = 'PromptQueueFullError'
+  }
+
+  toSafe(): { code: string; message: string; action: string } {
+    return {
+      code: this.code,
+      message: '已有一条消息排队，请先处理后再发送。',
+      action: 'manage_prompt_queue',
+    }
+  }
+}
+
 export interface AgentSessionBindingState {
   session: SessionEntry
   conversationStore: ConversationStore
@@ -477,6 +506,7 @@ export class AgentLoop {
   >()
   private readonly teamManagersByProject = new Map<string, TeamManager>()
   private readonly sessionStartHooksRun = new Set<string>()
+  private readonly queuedPromptRecoveryScheduled = new Set<string>()
   private readonly goalGateRefreshInputs = new Map<
     string,
     Omit<GoalCoreFactRefreshInput, 'currentScope'>
@@ -738,6 +768,7 @@ export class AgentLoop {
     })
     this.controlManager = new ControlManager(this.paths.stateRoot, {
       permissionRules: opts.permissionRules ?? [],
+      modelRouter: this.modelRouter,
     })
     this.goalBlockerControlAdapter = CoreGoalBlockerControlAdapter.create(
       CoreGoalBlockerCauseWriter.create(this.goalBlockerCauseLedger),
@@ -1804,9 +1835,26 @@ export class AgentLoop {
   }
 
   reconcileSessionControlPending(): void {
-    const pending = this.controlManager.store.load().pending
+    let pending = this.controlManager.store.load().pending
+    let declaredSessionId = pending
+      ? String(
+          pending.meta.goal_session_id ?? pending.meta.control_session_id ?? '',
+        ).trim()
+      : ''
+    if (
+      pending &&
+      declaredSessionId &&
+      !this.sessionStore.get(declaredSessionId)
+    ) {
+      this.controlManager.cancel(pending.id)
+      pending = null
+      declaredSessionId = ''
+    }
     const summary = pending ? this.sessionControlPending(pending) : null
-    this.sessionStore.reconcileControlPending(summary, this.activeSessionId)
+    this.sessionStore.reconcileControlPending(
+      summary,
+      declaredSessionId || this.activeSessionId,
+    )
     if (summary) {
       this.controlPendingSessionId = this.findControlPendingSessionId(
         summary.interaction_id,
@@ -1899,11 +1947,29 @@ export class AgentLoop {
     const sessionId = bindings.session.id
     const queuedScope = this.turnScope(bindings.session, turnId)
     if (queued) {
-      bindings.conversationStore.messageGraph.recordPrompt({
+      const promptGraph = bindings.conversationStore.messageGraph
+      if (
+        promptGraph
+          .snapshot()
+          .prompts.some((prompt) => prompt.state === 'queued')
+      ) {
+        restorePreviousSession()
+        throw new PromptQueueFullError(sessionId)
+      }
+      promptGraph.recordPrompt({
         id: queuedPromptId,
         turnId,
         clientMessageId: queuedPromptId,
         delivery: 'queue',
+        content,
+        displayContent: opts.displayContent ?? content,
+        source: opts.source ?? null,
+        uiHidden: opts.uiHidden === true,
+        attachmentIds: opts.attachmentIds ?? [],
+        requestedSkills: opts.requestedSkills ?? [],
+        supportsInterjection: !(
+          opts.attachmentIds?.length || opts.requestedSkills?.length
+        ),
       })
       await this.emit(
         runtimeEvents.promptQueued({
@@ -1926,6 +1992,11 @@ export class AgentLoop {
         commandId,
         async (owned, actorSignal) => {
           if (queued) {
+            const current = owned.conversationStore.messageGraph
+              .snapshot()
+              .prompts.find((item) => item.id === queuedPromptId)
+            if (current?.state !== 'queued')
+              throw new SessionRuntimeCommandCancelledError(commandId)
             owned.conversationStore.messageGraph.transitionPrompt(
               queuedPromptId,
               'running',
@@ -1961,6 +2032,7 @@ export class AgentLoop {
       return await this.settleQueuedPrompt(result, {
         queued,
         promptId: queuedPromptId,
+        clientMessageId: queuedPromptId,
         turnId,
         emit: opts.emit ?? null,
         bindings,
@@ -1987,6 +2059,7 @@ export class AgentLoop {
     return await this.settleQueuedPrompt(result, {
       queued,
       promptId: queuedPromptId,
+      clientMessageId: queuedPromptId,
       turnId,
       emit: opts.emit ?? null,
       bindings,
@@ -2001,27 +2074,63 @@ export class AgentLoop {
     const targetSessionId = String(prompt.sessionId ?? '').trim()
     if (!targetSessionId)
       return { accepted: false, targetTurnId: null, reason: 'session_required' }
-    const actor = this.sessionRuntimes.get(targetSessionId)
+    if (!this.sessionStore.get(targetSessionId))
+      return { accepted: false, targetTurnId: null, reason: 'unknown_session' }
+    const actor = this.sessionRuntimes.actor(targetSessionId)
+    const bindings = actor.bindings
+    const graph = bindings.conversationStore.messageGraph
+    const existing = graph
+      .snapshot()
+      .prompts.find((item) => item.id === prompt.promptId)
+    if (existing) {
+      if (
+        existing.content !== prompt.content ||
+        existing.displayContent !== prompt.displayContent ||
+        existing.clientMessageId !== prompt.clientMessageId
+      )
+        return {
+          accepted: false,
+          targetTurnId: null,
+          reason: 'prompt_id_conflict',
+        }
+      if (existing.state === 'cancelled')
+        return {
+          accepted: false,
+          targetTurnId: null,
+          reason: 'prompt_cancelled',
+        }
+      return {
+        accepted: true,
+        targetTurnId: existing.targetCommandId
+          ? commandTurnId(existing.targetCommandId)
+          : null,
+        reason: 'prompt_already_accepted',
+      }
+    }
     const targetCommandId = actor?.activeCommandId ?? null
-    if (!actor || !targetCommandId)
+    if (!targetCommandId)
       return {
         accepted: false,
         targetTurnId: null,
         reason: 'no_running_turn',
       }
-    const bindings = actor.bindings
     const targetTurnId = commandTurnId(targetCommandId)
-    bindings.conversationStore.messageGraph.recordPrompt({
+    graph.recordPrompt({
       id: prompt.promptId,
       turnId: prompt.turnId,
       clientMessageId: prompt.clientMessageId,
       delivery: 'interject',
       targetCommandId,
+      content: prompt.content,
+      displayContent: prompt.displayContent,
+      source: prompt.source,
+      uiHidden: prompt.uiHidden,
+      supportsInterjection: true,
     })
     const result = this.sessionRuntimes.interject(targetSessionId, {
       id: prompt.promptId,
       payload: prompt,
-      onState: async (item) => {
+      onState: async (item: SessionInterjection<InterjectedUserPrompt>) => {
         if (item.state !== 'cancelled') return
         await this.cancelInterjectedPrompt(bindings, item, opts.emit ?? null)
       },
@@ -2057,11 +2166,384 @@ export class AgentLoop {
     return { accepted: true, targetTurnId, reason: null }
   }
 
+  listQueuedPrompts(sessionId: string): PromptQueueRecord[] {
+    const id = String(sessionId ?? '').trim()
+    if (!id || !this.sessionStore.get(id))
+      throw new Error(`unknown session: ${id || '<empty>'}`)
+    const actor = this.sessionRuntimes.actor(id)
+    const graph = actor.bindings.conversationStore.messageGraph
+    const queued = graph
+      .snapshot()
+      .prompts.filter((prompt) => prompt.state === 'queued')
+      .sort(
+        (left, right) =>
+          left.createdOrder - right.createdOrder ||
+          left.createdAt.localeCompare(right.createdAt),
+      )
+    this.scheduleQueuedPromptRecovery(id)
+    return queued
+  }
+
+  async manageQueuedPrompt(input: {
+    sessionId: string
+    promptId: string
+    action: 'cancel' | 'interject'
+  }): Promise<ManageQueuedPromptResult> {
+    const sessionId = String(input.sessionId ?? '').trim()
+    const promptId = String(input.promptId ?? '').trim()
+    if (!sessionId || !this.sessionStore.get(sessionId))
+      return {
+        ok: false,
+        action: input.action,
+        promptId,
+        replacementPromptId: null,
+        reason: 'unknown_session',
+      }
+    const actor = this.sessionRuntimes.actor(sessionId)
+    const bindings = actor.bindings
+    const graph = bindings.conversationStore.messageGraph
+    const prompt = graph.snapshot().prompts.find((item) => item.id === promptId)
+    if (!prompt || prompt.state !== 'queued')
+      return {
+        ok: false,
+        action: input.action,
+        promptId,
+        replacementPromptId: null,
+        reason: 'prompt_not_queued',
+      }
+    const commandId = `turn:${prompt.turnId}`
+    const commandState = actor.commandState(commandId)
+    const scope = this.turnScope(bindings.session, prompt.turnId)
+    if (input.action === 'cancel') {
+      if (commandState !== null && commandState !== 'queued')
+        return {
+          ok: false,
+          action: input.action,
+          promptId,
+          replacementPromptId: null,
+          reason: 'prompt_already_started',
+        }
+      graph.transitionPrompt(promptId, 'cancelled', 'cancelled_by_user')
+      if (prompt.delivery === 'interject')
+        actor.cancelQueuedInterjection(promptId, 'cancelled_by_user', {
+          notify: false,
+        })
+      else if (commandState === 'queued') actor.cancelQueued(commandId)
+      await this.emit(
+        runtimeEvents.promptCancelled({
+          promptId,
+          clientMessageId: prompt.clientMessageId,
+          reason: 'cancelled_by_user',
+        }),
+        {
+          turnId: prompt.turnId,
+          emit: null,
+          runtimeStore: bindings.runtimeStore,
+          scope,
+        },
+      )
+      return {
+        ok: true,
+        action: input.action,
+        promptId,
+        replacementPromptId: null,
+        reason: null,
+      }
+    }
+    if (
+      !prompt.supportsInterjection ||
+      !prompt.displayContent ||
+      !prompt.content
+    )
+      return {
+        ok: false,
+        action: input.action,
+        promptId,
+        replacementPromptId: null,
+        reason: 'prompt_not_interjectable',
+      }
+    const replacementPromptId = `${promptId}:interject:${randomUUID()
+      .replace(/-/g, '')
+      .slice(0, 8)}`
+    const replacement: InterjectedUserPrompt = {
+      sessionId,
+      promptId: replacementPromptId,
+      turnId: prompt.turnId,
+      clientMessageId: replacementPromptId,
+      content: prompt.content,
+      displayContent: prompt.displayContent,
+      source: 'chat',
+      uiHidden: false,
+    }
+    const interjectionInput = {
+      id: replacementPromptId,
+      payload: replacement,
+      onState: async (item: SessionInterjection<InterjectedUserPrompt>) => {
+        if (item.state !== 'cancelled') return
+        await this.cancelInterjectedPrompt(bindings, item, null)
+      },
+    }
+    let durableReplacement: PromptQueueRecord | null = null
+    const commitReplacement = (targetCommandId: string) => {
+      durableReplacement = graph.replaceQueuedPrompt(prompt.id, {
+        id: replacementPromptId,
+        turnId: prompt.turnId,
+        clientMessageId: replacementPromptId,
+        delivery: 'interject',
+        targetCommandId,
+        content: prompt.content,
+        displayContent: prompt.displayContent,
+        source: prompt.source,
+        uiHidden: prompt.uiHidden,
+        supportsInterjection: true,
+      })
+    }
+    const replaced =
+      commandState === null
+        ? actor.interject(interjectionInput, { commit: commitReplacement })
+        : actor.replaceQueuedWithInterjection(commandId, interjectionInput, {
+            commit: commitReplacement,
+          })
+    if (!replaced.accepted || !replaced.targetCommandId)
+      return {
+        ok: false,
+        action: input.action,
+        promptId,
+        replacementPromptId: null,
+        reason: replaced.reason ?? 'prompt_already_started',
+      }
+    if (!durableReplacement)
+      throw new Error('interjection replacement was not durably committed')
+    await this.emit(
+      runtimeEvents.promptCancelled({
+        promptId,
+        clientMessageId: prompt.clientMessageId,
+        reason: 'replaced_by_interjection',
+      }),
+      {
+        turnId: prompt.turnId,
+        emit: null,
+        runtimeStore: bindings.runtimeStore,
+        scope,
+      },
+    )
+    await this.emit(
+      runtimeEvents.promptQueued({
+        promptId: replacementPromptId,
+        clientMessageId: replacementPromptId,
+        delivery: 'interject',
+        targetTurnId: commandTurnId(replaced.targetCommandId),
+        content: prompt.displayContent,
+      }),
+      {
+        turnId: prompt.turnId,
+        emit: null,
+        runtimeStore: bindings.runtimeStore,
+        scope,
+      },
+    )
+    return {
+      ok: true,
+      action: input.action,
+      promptId,
+      replacementPromptId,
+      reason: null,
+    }
+  }
+
+  private scheduleQueuedPromptRecovery(sessionId: string): void {
+    if (this.queuedPromptRecoveryScheduled.has(sessionId)) return
+    this.queuedPromptRecoveryScheduled.add(sessionId)
+    setTimeout(() => {
+      void this.rehydrateQueuedPrompts(sessionId).finally(() => {
+        this.queuedPromptRecoveryScheduled.delete(sessionId)
+      })
+    }, 50)
+  }
+
+  private async rehydrateQueuedPrompts(sessionId: string): Promise<void> {
+    const session = this.sessionStore.get(sessionId)
+    if (!session) return
+    const actor = this.sessionRuntimes.actor(sessionId)
+    const bindings = actor.bindings
+    const graph = bindings.conversationStore.messageGraph
+    const prompts = graph
+      .snapshot()
+      .prompts.filter(
+        (prompt) =>
+          (prompt.state === 'queued' ||
+            prompt.state === 'running' ||
+            prompt.state === 'interjected') &&
+          prompt.content !== null,
+      )
+      .sort(
+        (left, right) =>
+          left.createdOrder - right.createdOrder ||
+          left.createdAt.localeCompare(right.createdAt),
+      )
+    for (const persistedPrompt of prompts) {
+      let prompt = persistedPrompt
+      const liveCommandId = `turn:${prompt.turnId}`
+      if (
+        actor.commandState(liveCommandId) !== null ||
+        actor.interjectionState(prompt.id) !== null
+      )
+        continue
+      if (prompt.state === 'running' || prompt.state === 'interjected') {
+        const alreadyStarted = bindings.history.some(
+          (message) =>
+            message.role === 'user' &&
+            String(message.turn_id ?? '') === prompt.turnId,
+        )
+        if (prompt.state === 'interjected' && alreadyStarted) {
+          graph.transitionPrompt(prompt.id, 'completed')
+          continue
+        }
+        let replacement: PromptQueueRecord | null = null
+        if (!alreadyStarted) {
+          const replacementPromptId = `recovered:${createHash('sha256')
+            .update(prompt.id)
+            .digest('hex')
+            .slice(0, 24)}`
+          replacement = graph.recordPrompt({
+            id: replacementPromptId,
+            turnId: prompt.turnId,
+            clientMessageId: prompt.clientMessageId,
+            delivery: 'queue',
+            content: prompt.content,
+            displayContent: prompt.displayContent,
+            source: prompt.source,
+            uiHidden: prompt.uiHidden,
+            attachmentIds: prompt.attachmentIds,
+            requestedSkills: prompt.requestedSkills,
+            supportsInterjection: prompt.supportsInterjection,
+          })
+        }
+        graph.transitionPrompt(
+          prompt.id,
+          'cancelled',
+          alreadyStarted
+            ? 'interrupted_by_restart_after_start'
+            : prompt.state === 'interjected'
+              ? 'requeued_interjection_after_restart'
+              : 'requeued_after_restart',
+        )
+        const scope = this.turnScope(bindings.session, prompt.turnId)
+        await this.emit(
+          runtimeEvents.promptCancelled({
+            promptId: prompt.id,
+            clientMessageId: prompt.clientMessageId,
+            reason: alreadyStarted
+              ? 'interrupted_by_restart_after_start'
+              : prompt.state === 'interjected'
+                ? 'requeued_interjection_after_restart'
+                : 'requeued_after_restart',
+          }),
+          {
+            turnId: prompt.turnId,
+            emit: null,
+            runtimeStore: bindings.runtimeStore,
+            scope,
+          },
+        )
+        if (!replacement) continue
+        await this.emit(
+          runtimeEvents.promptQueued({
+            promptId: replacement.id,
+            clientMessageId: replacement.clientMessageId,
+            delivery: 'queue',
+            content: replacement.displayContent ?? replacement.content ?? '',
+          }),
+          {
+            turnId: replacement.turnId,
+            emit: null,
+            runtimeStore: bindings.runtimeStore,
+            scope,
+          },
+        )
+        prompt = replacement
+      }
+      const commandId = `turn:${prompt.turnId}`
+      const scope = this.turnScope(bindings.session, prompt.turnId)
+      const opts: RunUserTurnOptions = {
+        sessionId,
+        restoreActiveSessionAfterTurn: false,
+        turnId: prompt.turnId,
+        emit: null,
+        displayContent: prompt.displayContent ?? prompt.content,
+        clientMessageId: prompt.clientMessageId,
+        source: prompt.source,
+        uiHidden: prompt.uiHidden,
+        attachmentIds: prompt.attachmentIds,
+        requestedSkills: prompt.requestedSkills,
+        delivery: 'queue',
+      }
+      const abortController = new AbortController()
+      const execute = () =>
+        actor.run(
+          commandId,
+          async (owned, signal) => {
+            const current = owned.conversationStore.messageGraph
+              .snapshot()
+              .prompts.find((item) => item.id === prompt.id)
+            if (current?.state !== 'queued')
+              throw new SessionRuntimeCommandCancelledError(commandId)
+            owned.conversationStore.messageGraph.transitionPrompt(
+              prompt.id,
+              'running',
+            )
+            await this.emit(
+              runtimeEvents.promptDequeued({
+                promptId: prompt.id,
+                clientMessageId: prompt.clientMessageId,
+              }),
+              {
+                turnId: prompt.turnId,
+                emit: null,
+                runtimeStore: owned.runtimeStore,
+                scope,
+              },
+            )
+            return await this.runUserTurnInner(
+              prompt.content!,
+              prompt.turnId,
+              opts,
+              signal,
+              owned,
+            ).finally(() => this.hookService.endTurn(prompt.turnId))
+          },
+          { signal: abortController.signal },
+        )
+      const result = this.activeTasks.run({
+        taskId: commandId,
+        kind: 'turn',
+        label: 'Recovered agent turn',
+        execute,
+        turnId: prompt.turnId,
+        sessionId,
+        abort: () => {
+          abortController.abort()
+          actor.cancel(commandId)
+        },
+      })
+      void this.settleQueuedPrompt(result, {
+        queued: true,
+        promptId: prompt.id,
+        clientMessageId: prompt.clientMessageId,
+        turnId: prompt.turnId,
+        emit: null,
+        bindings,
+        scope,
+      }).catch(() => undefined)
+    }
+  }
+
   private async settleQueuedPrompt(
     result: Promise<string>,
     opts: {
       queued: boolean
       promptId: string
+      clientMessageId: string
       turnId: string
       emit: StreamEmitter | null
       bindings: AgentSessionBindings
@@ -2079,15 +2561,16 @@ export class AgentLoop {
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : String(error ?? 'cancelled')
-      opts.bindings.conversationStore.messageGraph.transitionPrompt(
-        opts.promptId,
-        'cancelled',
-        reason,
-      )
+      const graph = opts.bindings.conversationStore.messageGraph
+      const current = graph
+        .snapshot()
+        .prompts.find((prompt) => prompt.id === opts.promptId)
+      if (current?.state === 'cancelled') throw error
+      graph.transitionPrompt(opts.promptId, 'cancelled', reason)
       await this.emit(
         runtimeEvents.promptCancelled({
           promptId: opts.promptId,
-          clientMessageId: opts.promptId,
+          clientMessageId: opts.clientMessageId,
           reason,
         }),
         {
@@ -2247,6 +2730,10 @@ export class AgentLoop {
           scope: promptScope,
         },
       )
+      bindings.conversationStore.messageGraph.transitionPrompt(
+        item.id,
+        'completed',
+      )
     }
     return out
   }
@@ -2323,6 +2810,25 @@ export class AgentLoop {
       this.controlManager.setRuntimeScope(
         this.controlRuntimeScopeForSession(this.activeSession),
       )
+  }
+
+  async setControlMode(mode: string): Promise<ControlStatePayload> {
+    const before = new Map(
+      this.controlManager.planStore
+        .list()
+        .map((plan) => [plan.id, plan.status] as const),
+    )
+    const payload = this.controlManager.setMode(mode)
+    const changed = this.controlManager.planStore
+      .list()
+      .filter((plan) => before.get(plan.id) !== plan.status)
+    for (const plan of changed) {
+      await this.emit({
+        ...runtimeEvents.planRuntimeUpdate(planToDict(plan)),
+        ...(plan.sessionId ? { session_id: plan.sessionId } : {}),
+      })
+    }
+    return payload
   }
 
   workspacePolicyDiagnostics(): Record<string, unknown> {

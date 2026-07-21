@@ -57,6 +57,8 @@ const props = defineProps<{
   goal?: RuntimeGoalSummary | null
   goalCaptureStatus?: GoalCaptureStatus
   lifecycleMode?: ComposerLifecycleMode
+  interactionBlocked?: boolean
+  queueOccupied?: boolean
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
@@ -90,8 +92,8 @@ const {
   onDrop,
   removeDraft,
   takeDrafts,
+  restoreDrafts,
 } = useAttachments({
-  isBusy: () => props.busy,
   onError: (message) => emit('error', message),
 })
 const addMenuOpen = ref(false)
@@ -120,6 +122,7 @@ const modeMenuPlacement = modeFloatingMenu.placement
 
 const ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
+const QUEUE_FULL_MESSAGE = '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
 const suggestions = computed(() => {
   const text = value.value
@@ -207,16 +210,14 @@ const composerSlashParts = computed(
   },
 )
 
-const attachTitle = computed(() =>
-  props.busy ? '等待当前任务结束后再添加' : 'Add files and more',
-)
+const attachTitle = computed(() => 'Add files and more')
 
 const modeOptions = composerModeOptions.map((option) => ({
   ...option,
   icon:
     option.value === 'ask_before_edit'
       ? actionIcons.modeAskBeforeEdit
-      : option.value === 'accept_edits'
+      : option.value === 'smart_auto'
         ? actionIcons.modeAcceptEdits
         : actionIcons.modeAuto,
 }))
@@ -263,9 +264,11 @@ const otherModelEntries = computed(() =>
 const showModelSwitcher = computed(() => availableModelEntries.value.length > 0)
 const currentModelLabel = computed(() => {
   const entry = currentModelEntry.value
-  if (entry) return entry.displayName || entry.modelId || '模型'
+  if (entry) return entry.effectiveDisplayName || entry.modelId || '模型'
   return (
-    props.currentModel?.displayName || props.currentModel?.modelId || '模型'
+    props.currentModel?.effectiveDisplayName ||
+    props.currentModel?.modelId ||
+    '模型'
   )
 })
 const currentProviderName = computed(
@@ -386,22 +389,21 @@ function submit(delivery?: 'queue' | 'interject') {
   const normalized = normalizeComposerCapabilityInput(value.value.trim())
   const content = normalized.content.trim()
   if (props.busy) {
-    if (!content) return
-    if (
-      drafts.value.length > 0 ||
-      uploading.value.size > 0 ||
-      normalized.requestedSkills.length > 0 ||
-      hasInlineTokens.value
-    ) {
-      emit('error', '运行中的排队和插话仅支持纯文字。')
+    if (!content && drafts.value.length === 0) return
+    if (props.queueOccupied) {
+      emit('error', QUEUE_FULL_MESSAGE)
+      return
+    }
+    if (uploading.value.size > 0) {
+      emit('error', '附件仍在处理中，请等待完成后再排队。')
       return
     }
     emit('send', {
       content,
-      attachments: [],
-      requestedSkills: [],
+      attachments: takeDrafts(),
+      requestedSkills: normalized.requestedSkills,
       displayContent: normalized.displayContent,
-      delivery: delivery || 'interject',
+      delivery: delivery || 'queue',
     })
     value.value = ''
     closeComposerMenus()
@@ -450,6 +452,29 @@ function handleKeydown(event: KeyboardEvent) {
   event.preventDefault()
   submit()
 }
+
+function setDraft(text: string) {
+  value.value = text
+  void nextTick(() => {
+    resize()
+    input.value?.focus()
+  })
+}
+
+function focusInput() {
+  input.value?.focus()
+}
+
+function restoreDraft(payload: ChatSendPayload) {
+  value.value = String(payload.displayContent || payload.content || '')
+  restoreDrafts(payload.attachments || [])
+  void nextTick(() => {
+    resize()
+    input.value?.focus()
+  })
+}
+
+defineExpose({ setDraft, focusInput, restoreDraft })
 
 const firstPaletteItem = computed(() => paletteGroups.value[0]?.items[0])
 
@@ -610,7 +635,6 @@ function selectReasoning(value: string | null) {
 }
 
 function toggleAddMenu() {
-  if (props.busy) return
   closeModelMenu()
   closeModeMenu()
   if (addMenuOpen.value) {
@@ -653,7 +677,6 @@ function closeModelMenu() {
 }
 
 function pickFiles() {
-  if (props.busy) return
   closeAddMenu()
   fileInput.value?.click()
 }
@@ -680,7 +703,7 @@ function fmt(n: number) {
 }
 
 function modelEntryLabel(entry: ModelEntry) {
-  return entry.displayName || entry.modelId || '模型'
+  return entry.effectiveDisplayName || entry.modelId || '模型'
 }
 
 function providerOption(name: string): ProviderOption | undefined {
@@ -736,10 +759,12 @@ function reasoningLabel(value?: string | null) {
 const sendDisabled = computed(
   () =>
     goalCaptureStarting.value ||
+    props.interactionBlocked ||
     composerSendDisabled({
       busy: props.busy,
       content: value.value,
       attachmentCount: drafts.value.length,
+      queueOccupied: props.queueOccupied,
       sendBlockedReason: props.sendBlockedReason || null,
     }),
 )
@@ -773,6 +798,8 @@ onBeforeUnmount(() => {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
+    <slot name="queue" />
+
     <CapabilityPicker
       v-if="paletteMode"
       :groups="paletteGroups"
@@ -834,10 +861,10 @@ onBeforeUnmount(() => {
             ref="input"
             v-model="value"
             rows="2"
-            :disabled="goalCaptureStarting"
+            :disabled="goalCaptureStarting || props.interactionBlocked"
             :placeholder="
               props.busy
-                ? '输入纯文字，可选择排队或在安全边界插话'
+                ? '输入消息，按 Enter 加入队列'
                 : goalCaptureStarting
                   ? '正在启动 Goal...'
                   : goalCaptureActive
@@ -891,7 +918,7 @@ onBeforeUnmount(() => {
             class="attach-button"
             :title="attachTitle"
             :aria-label="attachTitle"
-            :disabled="props.busy || goalCaptureStarting"
+            :disabled="goalCaptureStarting"
             @click="toggleAddMenu"
           >
             <component :is="actionIcons.new" class="action-icon" :size="16" />
@@ -999,21 +1026,22 @@ onBeforeUnmount(() => {
           <template v-if="props.busy">
             <button
               type="button"
-              class="busy-delivery-button"
+              class="send-button"
               :disabled="sendDisabled"
-              title="当前回复完成后处理"
+              :title="props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列'"
+              :aria-label="
+                props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列'
+              "
               @click="submit('queue')"
             >
-              排队
-            </button>
-            <button
-              type="button"
-              class="busy-delivery-button primary"
-              :disabled="sendDisabled"
-              title="在下一个模型或工具安全边界替换当前指令"
-              @click="submit('interject')"
-            >
-              插话
+              <component
+                :is="actionIcons.send"
+                class="action-icon send-icon"
+                :size="18"
+              />
+              <span class="sr-only">
+                {{ props.queueOccupied ? QUEUE_FULL_MESSAGE : '加入队列' }}
+              </span>
             </button>
             <button
               type="button"

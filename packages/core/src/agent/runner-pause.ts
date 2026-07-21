@@ -50,31 +50,6 @@ export async function pauseForClarification(
   throw new TurnPaused(payload, [])
 }
 
-export async function pauseForPlan(
-  host: PauseHost,
-  history: Msg[],
-  reply: string,
-  emit: StreamEmitter | null,
-  turnId: string | null,
-): Promise<void> {
-  if (host.controlManager === null) return
-  const interaction = host.controlManager.createPlanFromText(
-    reply,
-    controlSessionMeta(host.sessionId),
-  )
-  const message: Msg = { role: 'assistant', content: reply }
-  if (turnId) message.turn_id = turnId
-  history.push(message)
-  if (host.memoryStore !== null)
-    host.memoryStore.writeCheckpoint(history, pauseCheckpointOpts(turnId))
-  const payload = interactionToDict(interaction)
-  if (emit) {
-    await emit(controlInteractionEvent(payload))
-    await emit({ event: 'turn_paused', interaction: payload })
-  }
-  throw new TurnPaused(payload, [])
-}
-
 function pauseCheckpointOpts(turnId: string | null): CheckpointWriteOptions {
   return { turnId, phase: 'assistant_response_pending' }
 }

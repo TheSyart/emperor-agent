@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-07-21<br>
 > 事实源：当前 CoreApi / IPC / runtime event / domain service 分层与 `AGENTS.md`
 
 Emperor Agent 的扩展通常横跨 Core、Electron contract、renderer 投影、持久化和文档。先确定权威状态属于哪个领域，再从 domain service 向外接入；不要把策略散落到组件或 prompt 文案。
@@ -68,7 +68,9 @@ flowchart LR
 - 文件路径必须走 workspace policy；shell 需要可靠的只读判断，无法证明时按受控操作处理。
 - 新增 shell/terminal/command-hook 入口必须复用 `analyzeShellCommandFailClosed` 与 `ShellCommandAnalyzer` capability。allow 只能来自单命令、无 redirect/env/dynamic/compound 且 flags 通过正向证明的 AST；旧 regex/token resolver 只能收紧。parser exception、invalid adapter result、复杂度上限和未知结构必须在 spawn 前转 Ask 或 deny，禁止降级为字符串首词 allowlist。
 - 新增权限来源通过 `PermissionRuleLayerInput.source` 由可信 composition root 注入，不得让 project/local rule 内容填写自己的 trust。规则解析后保留 source、candidate 和 precedence；任何新策略层都要覆盖 `deny > ask > allow`、同 action trust 顺序、引号混淆、命令边界和低信任层不可放宽测试。
-- Permission allow 与 OS containment 必须分开建模。新的命令入口复用 `OwnedProcessRunner` 与 `ProcessContainmentReceipt`；不得直接 `spawn`/`exec` 后声称 sandboxed。未证明只读的 effect 使用 required，backend unavailable/error/unsupported 时 spawn 前 fail closed；preferred 降级只能用于严格只读诊断，并必须记录 `unsandboxed`。
+- 新工具必须兼容 Runner 两阶段批量预检：schema、Guard、PreToolUse、workspace 和 Permission 在副作用前完成；批次中任一失败不得让其他调用先执行。PermissionRequest Hook 的 `allow` 不能替代用户审批，updated input 必须触发整批重新判权。
+- Permission interaction 只能公开 v2 安全摘要和稳定 option ID。fingerprint、normalize 后参数、规则 trace/explanation 与一次性凭据只能进入私有 PermissionRequestStore/Diagnostics；不得新增 renderer 或 runtime event 字段泄漏这些数据。
+- Permission allow 与 OS containment 必须分开建模。新的命令入口复用 `OwnedProcessRunner` 与 `ProcessContainmentReceipt`；不得直接 `spawn`/`exec` 后声称 sandboxed。`run_command` 一律使用 required，backend unavailable/error/unsupported 或 runner 返回 `unsandboxed` 时 fail closed；如其他只读诊断入口确需 preferred，必须独立建模、记录真实 receipt，不能借此放宽 `run_command`。
 - 扩展 sandbox backend 时同步 capability probe、固定 argv/profile 生成、stateRoot 隐藏、workspace 外读写、symlink、子进程、network 和 backend-missing 测试。profile/helper 不接受 renderer、模型或远程配置提供的命令、路径模板或 argv。
 - 联网工具把外部内容视为不可信输入，不把网页或 MCP 返回值当作系统指令。
 - 产物进入受管 attachment / media store，不把任意绝对路径直接交给 renderer。
@@ -94,7 +96,7 @@ flowchart LR
 - 同时测试 live、replay、bootstrap、重复 event 和切换 session。
 - 领域提交成功而投影失败时记录诊断，由 bootstrap 重建；不要回滚已提交终态。
 - 诊断必须暴露 lifecycle 的真实 supervisor/service state；不得把 `starting`、`stop_timeout` 或 optional failure 显示成 ready。
-- 修改 prompt queue/interjection 时同时覆盖 Core `prompt_*` / `message_tombstoned` union、loop 构造点、runtime store replay、renderer projection、乐观 user placeholder、消息终态和 Composer 选择。测试必须包含连续插话、取消+排队竞态、同 turn replacement assistant 与重复 replay。
+- 修改 prompt queue/interjection 时同时覆盖 Core `chat.listQueuedPrompts` / `chat.manageQueuedPrompt`、`prompt_*` / `message_tombstoned` union、Actor 原子替换、message graph、runtime replay、renderer 队列托盘和 Composer 默认 delivery。queued 状态不得创建乐观 user 气泡；测试必须包含取消/开始/停止竞态、事件恰好一次、消息不丢失与重复 replay。
 
 ## 新 ACP method 或投影
 

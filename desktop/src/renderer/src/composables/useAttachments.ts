@@ -9,7 +9,6 @@ import type { AttachmentRef } from '../types'
 export const MAX_ATTACHMENT_DRAFTS = 5
 
 export function useAttachments(options: {
-  isBusy: () => boolean
   onError: (message: string) => void
 }) {
   const drafts = ref<AttachmentRef[]>([])
@@ -46,14 +45,12 @@ export function useAttachments(options: {
   }
 
   function onDragEnter(e: DragEvent) {
-    if (options.isBusy()) return
     if (!hasFiles(e.dataTransfer)) return
     e.preventDefault()
     dragActive.value = true
   }
 
   function onDragOver(e: DragEvent) {
-    if (options.isBusy()) return
     if (!hasFiles(e.dataTransfer)) return
     e.preventDefault()
     dragActive.value = true
@@ -65,7 +62,6 @@ export function useAttachments(options: {
   }
 
   function onDrop(e: DragEvent) {
-    if (options.isBusy()) return
     e.preventDefault()
     dragActive.value = false
     if (!e.dataTransfer?.files?.length) return
@@ -82,6 +78,16 @@ export function useAttachments(options: {
     return taken
   }
 
+  function restoreDrafts(items: AttachmentRef[]): void {
+    const existing = new Set(drafts.value.map((item) => item.id))
+    for (const item of items) {
+      if (drafts.value.length >= MAX_ATTACHMENT_DRAFTS) break
+      if (existing.has(item.id)) continue
+      drafts.value.push(item)
+      existing.add(item.id)
+    }
+  }
+
   return {
     drafts,
     uploading,
@@ -94,6 +100,7 @@ export function useAttachments(options: {
     onDrop,
     removeDraft,
     takeDrafts,
+    restoreDrafts,
   }
 }
 

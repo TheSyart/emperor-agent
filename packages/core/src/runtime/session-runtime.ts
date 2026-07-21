@@ -131,6 +131,14 @@ export class SessionRuntimeActor<TBindings> {
     return !this.closed && !this.hasNonTerminalCommands()
   }
 
+  commandState(commandId: string): SessionRuntimeCommandState | null {
+    return this.receipts.get(String(commandId))?.state ?? null
+  }
+
+  interjectionState(interjectionId: string): SessionInterjectionState | null {
+    return this.interjections.get(String(interjectionId))?.state ?? null
+  }
+
   touch(value: number): void {
     this._lastUsed = Math.max(this._lastUsed, value)
   }
@@ -232,8 +240,62 @@ export class SessionRuntimeActor<TBindings> {
     return cancelled
   }
 
+  cancelQueued(commandId: string): boolean {
+    const receipt = this.receipts.get(normalizedId(commandId, 'commandId'))
+    if (!receipt || receipt.state !== 'queued') return false
+    receipt.controller.abort(
+      new SessionRuntimeCommandCancelledError(receipt.commandId),
+    )
+    return true
+  }
+
+  cancelQueuedInterjection(
+    interjectionId: string,
+    reason = 'cancelled_by_user',
+    opts: { notify?: boolean } = {},
+  ): boolean {
+    const receipt = this.interjections.get(
+      normalizedId(interjectionId, 'interjection id'),
+    )
+    if (!receipt || receipt.state !== 'queued') return false
+    receipt.state = 'cancelled'
+    receipt.reason = reason
+    if (opts.notify !== false) this.notifyInterjection(receipt)
+    this.trimInterjections()
+    return true
+  }
+
+  replaceQueuedWithInterjection<TPayload>(
+    commandId: string,
+    input: SessionInterjectionInput<TPayload>,
+    opts: { commit?: (targetCommandId: string) => void } = {},
+  ): SessionInterjectionResult<TPayload> {
+    const receipt = this.receipts.get(normalizedId(commandId, 'commandId'))
+    if (!receipt || receipt.state !== 'queued')
+      return {
+        accepted: false,
+        targetCommandId: null,
+        item: null,
+        reason: 'prompt_not_queued',
+      }
+    if (!this.runningCommandId)
+      return {
+        accepted: false,
+        targetCommandId: null,
+        item: null,
+        reason: 'no_running_command',
+      }
+    const result = this.interject(input, opts)
+    if (!result.accepted) return result
+    receipt.controller.abort(
+      new SessionRuntimeCommandCancelledError(receipt.commandId),
+    )
+    return result
+  }
+
   interject<TPayload>(
     input: SessionInterjectionInput<TPayload>,
+    opts: { commit?: (targetCommandId: string) => void } = {},
   ): SessionInterjectionResult<TPayload> {
     const id = normalizedId(input.id, 'interjection id')
     const existing = this.interjections.get(id) as
@@ -253,6 +315,7 @@ export class SessionRuntimeActor<TBindings> {
         item: null,
         reason: 'no_running_command',
       }
+    opts.commit?.(targetCommandId)
     const receipt: InterjectionReceipt<TPayload> = {
       id,
       targetCommandId,

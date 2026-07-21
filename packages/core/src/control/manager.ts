@@ -6,6 +6,8 @@ import { nowTs } from '../util/time'
 import { PermissionManager } from '../permissions/manager'
 import type { PlanPermissionToken } from '../permissions/models'
 import type { PermissionRuleInput } from '../permissions/rules'
+import type { PermissionSemanticClassifier } from '../permissions/semantic-classifier'
+import type { ModelRouter } from '../model/router'
 import {
   PlanStatus,
   PlanStepStatus,
@@ -101,7 +103,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   constructor(
     root: string,
-    opts: { permissionRules?: PermissionRuleInput[] | null } = {},
+    opts: {
+      permissionRules?: PermissionRuleInput[] | null
+      permissionClassifier?: PermissionSemanticClassifier | null
+      modelRouter?: Pick<ModelRouter, 'route'> | null
+    } = {},
   ) {
     this.store = new ControlStore(root)
     this.goalMutations = new GoalGateMutationLedger(root)
@@ -111,7 +117,12 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.planDecisionPolicy = new PlanDecisionPolicy()
     this.permissionManager = new PermissionManager(
       this as unknown as ConstructorParameters<typeof PermissionManager>[0],
-      { rules: opts.permissionRules ?? [] },
+      {
+        stateRoot: root,
+        rules: opts.permissionRules ?? [],
+        classifier: opts.permissionClassifier,
+        modelRouter: opts.modelRouter,
+      },
     )
     this.permissionTokens = new PlanPermissionTokenManager(this)
     this.verification = new PlanVerificationManager(this)
@@ -119,6 +130,57 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.execution = new PlanExecutionManager(this)
     this.goalBlocker = new GoalBlockerControlManager(this)
     this.goalManualEvidence = new GoalManualEvidenceControlManager(this)
+    this.reconcilePendingInteraction()
+  }
+
+  private reconcilePendingInteraction(): void {
+    const state = this.store.load()
+    const pending = state.pending
+    if (!pending) return
+    if (isObsoleteLegacyGuard(pending)) {
+      const cancelled = touchInteraction(pending, {
+        status: InteractionStatus.CANCELLED,
+      })
+      state.pending = null
+      state.lastInteraction = cancelled
+      state.updatedAt = nowTs()
+      this.store.save(state)
+      return
+    }
+    if (pending.kind === InteractionKind.PLAN) {
+      const planId = String(pending.meta.plan_id ?? '').trim()
+      const generation = Number(pending.meta.approval_generation ?? 0)
+      const plan = planId ? this.planStore.get(planId) : null
+      const persistedGeneration = Number(
+        plan?.metadata.approval_generation ?? 0,
+      )
+      if (
+        plan === null ||
+        plan.status !== PlanStatus.WAITING_APPROVAL ||
+        plan.sourceInteractionId !== pending.id ||
+        !Number.isInteger(generation) ||
+        generation < 1 ||
+        generation !== persistedGeneration
+      ) {
+        const cancelled = touchInteraction(pending, {
+          status: InteractionStatus.CANCELLED,
+        })
+        state.pending = null
+        state.lastInteraction = cancelled
+        state.updatedAt = nowTs()
+        this.store.save(state)
+      }
+      return
+    }
+    if (pending.meta?.interaction_type !== 'permission') return
+    if (this.permissionManager.isWaitingRequestRecoverable(pending)) return
+    const cancelled = touchInteraction(pending, {
+      status: InteractionStatus.CANCELLED,
+    })
+    state.pending = null
+    state.lastInteraction = cancelled
+    state.updatedAt = nowTs()
+    this.store.save(state)
   }
 
   setTodoStore(todoStore: TodoStoreLike | null): void {
@@ -127,6 +189,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   setTaskManager(taskManager: TaskManagerLike | null): void {
     this.taskManager = taskManager
+    if (taskManager !== null) this.execution.reconcileRevokedPlanTasks()
   }
 
   setRuntimeScope(scope: ControlRuntimeScope | null): void {
@@ -195,20 +258,44 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       value === 'accept edits' ||
       value === 'edits'
     )
-      value = ControlMode.ACCEPT_EDITS
-    else if (value === 'auto' || value === 'automatic') value = ControlMode.AUTO
+      value = ControlMode.SMART_AUTO
+    else if (value === 'auto' || value === 'automatic')
+      value = ControlMode.FULL_ACCESS
     if (
       value !== ControlMode.ASK_BEFORE_EDIT &&
-      value !== ControlMode.ACCEPT_EDITS &&
-      value !== ControlMode.AUTO &&
+      value !== ControlMode.SMART_AUTO &&
+      value !== ControlMode.FULL_ACCESS &&
       value !== ControlMode.PLAN
     ) {
       throw new Error(
-        'mode must be ask_before_edit, accept_edits, auto or plan',
+        'mode must be ask_before_edit, smart_auto, full_access or plan',
       )
     }
     const state = this.store.load()
     const oldMode = state.mode
+    let cancelledPendingPlan: Interaction | null = null
+    if (value === ControlMode.PLAN && oldMode !== ControlMode.PLAN) {
+      // A missing session scope must never make this operation global.  The
+      // ordinary Plan draft flow remains available, but no durable Plan is
+      // replaced until the Core has bound this manager to a session.
+      if (this.planScopeMetadata()?.session_id) {
+        const draft = this.drafting.newPlanModeDraft()
+        const replacement = this.execution.beginPlanReplacement(draft)
+        if (replacement !== null) {
+          const pendingPlanId = String(state.pending?.meta.plan_id ?? '').trim()
+          if (
+            state.pending?.kind === InteractionKind.PLAN &&
+            replacement.cancelledPlanIds.includes(pendingPlanId)
+          ) {
+            cancelledPendingPlan = touchInteraction(state.pending, {
+              status: InteractionStatus.CANCELLED,
+            })
+            state.pending = null
+            state.lastInteraction = cancelledPendingPlan
+          }
+        }
+      }
+    }
     if (value === ControlMode.PLAN && state.mode !== ControlMode.PLAN) {
       state.previousMode = state.mode
     } else if (value !== ControlMode.PLAN) {
@@ -217,6 +304,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.mode = value
     state.updatedAt = nowTs()
     this.store.save(state)
+    if (cancelledPendingPlan !== null)
+      this.notifyPendingCleared(cancelledPendingPlan)
     if (value !== oldMode) {
       this.revokePlanPermissionTokens({ reason: 'control mode changed' })
     }
@@ -224,16 +313,22 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 
   setPermissionMode(mode: string): ControlStatePayload {
-    const value = String(mode ?? '')
+    const raw = String(mode ?? '')
       .trim()
       .toLowerCase()
+    const value =
+      raw === 'accept_edits' || raw === 'accept-edits' || raw === 'edits'
+        ? ControlMode.SMART_AUTO
+        : raw === 'auto'
+          ? ControlMode.FULL_ACCESS
+          : raw
     if (
       value !== ControlMode.ASK_BEFORE_EDIT &&
-      value !== ControlMode.ACCEPT_EDITS &&
-      value !== ControlMode.AUTO
+      value !== ControlMode.SMART_AUTO &&
+      value !== ControlMode.FULL_ACCESS
     ) {
       throw new Error(
-        'permission mode must be ask_before_edit, accept_edits or auto',
+        'permission mode must be ask_before_edit, smart_auto or full_access',
       )
     }
 
@@ -263,6 +358,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 
   createAsk(opts: {
+    interactionId?: string
     questions: Array<Record<string, unknown>>
     context?: string
     parentCallId?: string | null
@@ -279,6 +375,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       interactionMeta.plan_id = draft.id
     }
     const interaction = makeAsk({
+      ...(opts.interactionId ? { id: opts.interactionId } : {}),
       questions: parsed,
       context: opts.context ?? '',
       parentCallId: opts.parentCallId ?? null,
@@ -303,13 +400,6 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     enforceQuality?: boolean
   }): Interaction {
     return this.drafting.createPlan(opts)
-  }
-
-  createPlanFromText(
-    text: string,
-    meta?: Record<string, unknown> | null,
-  ): Interaction {
-    return this.drafting.createPlanFromText(text, meta)
   }
 
   assessClarification(
@@ -356,7 +446,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       status: InteractionStatus.ANSWERED,
     })
     updated.answers = normalized
-    this.permissionManager.recordAnswer(
+    const permissionAnswer = this.permissionManager.recordAnswer(
       updated as unknown as {
         meta?: Record<string, unknown>
         answers?: Record<string, unknown>
@@ -366,7 +456,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.cancelExecutablePlanIfRequested(updated)
     this.complete(updated)
     this.maybeEnterPlanModeFromAnswer(updated)
-    const message = this.answerMessage(updated)
+    const message = this.answerMessage(updated, permissionAnswer)
     return {
       interaction: interactionToDict(updated),
       message,
@@ -473,6 +563,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   cancel(interactionId: string): Record<string, unknown> {
     const pending = this.requirePending(interactionId)
+    this.permissionManager.cancelRequest(pending)
     const updated = touchInteraction(pending, {
       status: InteractionStatus.CANCELLED,
     })
@@ -601,6 +692,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       if (!questionIds.has(qid) && qid !== '_freeform') continue
       if (value && typeof value === 'object') {
         normalized[qid] = {
+          option_id: String(
+            (value as Record<string, unknown>).option_id ??
+              (value as Record<string, unknown>).optionId ??
+              '',
+          ).trim(),
           choice: String(
             (value as Record<string, unknown>).choice ?? '',
           ).trim(),
@@ -617,7 +713,20 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return normalized
   }
 
-  private answerMessage(interaction: Interaction): string {
+  private answerMessage(
+    interaction: Interaction,
+    permissionAnswer:
+      import('../permissions/manager').PermissionAnswerResult | null,
+  ): string {
+    if (permissionAnswer) {
+      return [
+        '[CONTROL:PERMISSION_ANSWERED]',
+        `interaction_id: ${interaction.id}`,
+        `authorization_id: ${permissionAnswer.requestId}`,
+        `decision: ${permissionAnswer.outcome}`,
+        '权限层已经记录本批精确操作的决定。请直接重新发起同一批工具调用；不要再用自然语言要求用户确认。',
+      ].join('\n')
+    }
     const lines = [
       '[CONTROL:ASK_ANSWERED]',
       `interaction_id: ${interaction.id}`,
@@ -723,11 +832,12 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return (
       '# Control Tools\n\n' +
       `- 当前权限模式：${this.mode}。\n` +
-      '- `ask_before_edit` 模式下，危险、不确定或高影响操作会触发权限审批；低风险读操作和普通编辑可继续执行。\n' +
-      '- `auto` 模式下，工具层不主动审批，但仍受路径安全、schema 校验和工具自身安全策略约束。\n' +
-      '- 当用户目标存在高影响歧义且无法通过读文件/搜索等方式确定时，调用 `ask_user` 提出结构化问题。\n' +
-      '- 高影响歧义包括范围/验收不清的大改动、架构/重构/UI 取舍、提交推送、删除覆盖、发布部署、成本/权限/安全边界。\n' +
-      '- 可通过只读探索确认的事实先探索；但在写入、高影响操作或最终答复前仍有关键取舍时，必须提问。\n' +
+      '- `ask_before_edit`（询问确认）只自动执行只读操作；编辑、Shell 与外部写入会先询问。\n' +
+      '- `smart_auto`（智能自动）会自动执行工作区编辑、构建测试和确定安全的本地命令；高影响或不确定操作会先询问。\n' +
+      '- `full_access`（完全访问）不发起普通权限审批，但仍受明确拒绝、Plan 只读、schema、工具可用性和系统边界约束。\n' +
+      '- `ask_user` 只用于目标、范围、产品取舍等真实歧义，绝不能代替运行时权限审批。\n' +
+      '- 删除、覆盖、提交、推送、发布和部署是否需要确认，只由权限层按当前模式判断。目标和精确对象已经明确时，直接调用工具；不要再次用自然语言要求确认。\n' +
+      '- 可通过只读探索确认的事实先探索；只有仍存在会改变实施方案的关键取舍时才提问。\n' +
       '- 只有在进入 Plan 模式后，才使用 `propose_plan` 提交等待批准的计划。\n' +
       '- 当任务属于高影响改动且当前不在 Plan 模式时，调用 `request_plan_mode` 请求用户一键切换到计划模式，不要用 `ask_user` 现场组织措辞。'
     )
@@ -741,12 +851,41 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.policy.isToolAllowed(name, registry)
   }
 
-  assessPermission(
+  async assessPermission(
     name: string,
     args: Record<string, unknown>,
     registry: ToolRegistry | null,
+    opts?: {
+      sessionId?: string | null
+      turnId?: string | null
+      workspaceRoot?: string | null
+      cwd?: string | null
+      taskIntent?: string | null
+      authorizationId?: string | null
+    },
   ) {
-    return this.permissionManager.assess(name, args, { registry })
+    return await this.permissionManager.assess(name, args, {
+      registry,
+      ...opts,
+    })
+  }
+
+  async assessPermissionBatch(
+    calls: import('../permissions/manager').PermissionAssessmentCall[],
+    registry: ToolRegistry | null,
+    opts?: {
+      sessionId?: string | null
+      turnId?: string | null
+      workspaceRoot?: string | null
+      cwd?: string | null
+      taskIntent?: string | null
+      authorizationId?: string | null
+    },
+  ) {
+    return await this.permissionManager.assessBatch(calls, {
+      registry,
+      ...opts,
+    })
   }
 
   permissionApprovalResult(
@@ -759,11 +898,27 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     })
   }
 
+  permissionBatchApprovalResult(
+    batch: Parameters<PermissionManager['requireApprovalBatch']>[0],
+    opts?: {
+      parentCallId?: string | null
+      sessionId?: string | null
+      workspaceRoot?: string | null
+      cwd?: string | null
+    },
+  ): string {
+    return this.permissionManager.requireApprovalBatch(batch, opts)
+  }
+
   syncPlanFromTodos(
     todos: Array<Record<string, unknown>>,
     opts?: { evidence?: Record<string, unknown> | null },
   ): PlanRecord | null {
     return this.execution.syncPlanFromTodos(todos, opts)
+  }
+
+  restoreCurrentPlanTodoProjection(): void {
+    this.execution.restoreCurrentPlanTodoProjection()
   }
 
   hasAskInteraction(): boolean {
@@ -855,7 +1010,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     stepId: string
     result: Record<string, unknown>
   }): PlanRecord | null {
-    return this.verification.recordPlanVerificationResult(opts)
+    const saved = this.verification.recordPlanVerificationResult(opts)
+    return saved === null
+      ? null
+      : this.execution.reconcileAfterVerification(saved)
   }
 
   appendPlanStepVerification(
@@ -1019,8 +1177,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   static restoreMode(state: ControlState): string {
     if (
       state.previousMode === ControlMode.ASK_BEFORE_EDIT ||
-      state.previousMode === ControlMode.ACCEPT_EDITS ||
-      state.previousMode === ControlMode.AUTO
+      state.previousMode === ControlMode.SMART_AUTO ||
+      state.previousMode === ControlMode.FULL_ACCESS
     ) {
       return state.previousMode
     }
@@ -1048,6 +1206,13 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       ? (interaction as Record<string, unknown>)
       : null
   }
+}
+
+function isObsoleteLegacyGuard(interaction: Interaction): boolean {
+  if (interaction.kind !== InteractionKind.ASK) return false
+  return /^(?:Ask|Permission) Guard\s*:/i.test(
+    String(interaction.context ?? '').trim(),
+  )
 }
 
 function normalizeRuntimeScope(
@@ -1078,15 +1243,20 @@ function planMatchesScope(
   record: PlanRecord,
   current: Required<ControlRuntimeScope> | null,
 ): boolean {
-  if (current === null) return true
+  // An unbound manager may only see legacy/unscoped Plans. Treating a missing
+  // current scope as a wildcard leaks drafts across desktop sessions.
+  if (current === null)
+    return record.sessionId === null && planRuntimeScope(record) === null
   const saved = planRuntimeScope(record)
   if (saved === null) return false
   if (record.goalId !== null) return goalScopesEqual(saved, current)
   let compared = false
   const keys: Array<keyof Required<ControlRuntimeScope>> = [
     'sessionId',
+    'mode',
     'projectId',
     'workspaceRoot',
+    'projectFingerprint',
   ]
   for (const key of keys) {
     const currentValue = current[key]

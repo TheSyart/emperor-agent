@@ -31,14 +31,14 @@ EMPEROR_CONFIG_DIR=/absolute/private/state \
 
 实现使用官方 TypeScript SDK 的稳定 ACP V1 schema，并开放以下方法：
 
-| 方向           | 方法             | 当前语义                                                               |
-| -------------- | ---------------- | ---------------------------------------------------------------------- |
+| 方向           | 方法             | 当前语义                                                                |
+| -------------- | ---------------- | ----------------------------------------------------------------------- |
 | client → agent | `initialize`     | 协商 V1；只声明已实现的 `loadSession` 与纯文本 prompt 能力              |
 | client → agent | `session/new`    | 对既存绝对 `cwd` 做 canonical 校验，创建绑定该目录的 Emperor Build 会话 |
-| client → agent | `session/load`   | 校验持久 workspace，并在响应前有序发送可见历史投影                     |
+| client → agent | `session/load`   | 校验持久 workspace，并在响应前有序发送可见历史投影                      |
 | client → agent | `session/prompt` | 把纯文本交给同一 `chat.submit` / mainline turn                          |
-| client → agent | `session/cancel` | 取消该 session 当前 prompt，并向模型、工具、进程与 MCP 传播 signal     |
-| agent → client | `session/update` | 投影可见文本、思考摘要、工具状态与 context usage                       |
+| client → agent | `session/cancel` | 取消该 session 当前 prompt，并向模型、工具、进程与 MCP 传播 signal      |
+| agent → client | `session/update` | 投影可见文本、思考摘要、工具状态与 context usage                        |
 
 `session/load` 只回放持久事件，不重放 Agent 副作用。实时 `session/update` 与终态响应共用同一有序发送队列；取消或连接关闭后，迟到事件被 terminal fence 丢弃。
 
@@ -63,7 +63,7 @@ ACP 代码按职责分为：
 | `adapter.ts`        | ACP request、会话绑定、幂等 ledger、并发和取消           |
 | `projector.ts`      | Core runtime event 到 ACP update 的白名单化有界投影      |
 | `stdio.ts`          | 一个连接对应一个 `CoreApi` 的启动、settlement 和逆序关闭 |
-| `stdio-entry.ts`    | CLI 参数、signal 和 stdout / stderr 约束                  |
+| `stdio-entry.ts`    | CLI 参数、signal 和 stdout / stderr 约束                 |
 
 执行专项检查：
 

@@ -187,6 +187,34 @@ describe('ReadFileTool', () => {
     expect(out).toContain(`denied_roots: ${stateRoot}`)
     expect(out).not.toContain('PRIVATE MEMORY')
   })
+
+  it('rejects text files larger than the bounded read budget', async () => {
+    const path = join(dir, 'oversized.txt')
+    writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 + 1, 97))
+
+    const out = await new ReadFileTool(dir).execute({ path })
+
+    expect(out.startsWith('[ERR] file exceeds 8 MiB read limit')).toBe(true)
+  })
+
+  it('honors an already-aborted read signal', async () => {
+    const path = join(dir, 'cancelled.txt')
+    writeFileSync(path, 'cancel me')
+    const controller = new AbortController()
+    controller.abort(new Error('cancelled before read'))
+
+    await expect(
+      new ReadFileTool(dir).execute(
+        { path },
+        {
+          root: dir,
+          workspaceRoot: dir,
+          arguments: { path },
+          signal: controller.signal,
+        },
+      ),
+    ).rejects.toThrow('cancelled before read')
+  })
 })
 
 describe('WriteFileTool + EditFileTool', () => {
@@ -216,6 +244,105 @@ describe('WriteFileTool + EditFileTool', () => {
         new_text: 'q',
       }),
     ).toContain('[ERR]')
+  })
+
+  it.each(['', '   \n\t'])('rejects empty edit needles %j', async (oldText) => {
+    const path = join(dir, 'empty-needle.txt')
+    writeFileSync(path, 'unchanged', 'utf8')
+
+    const out = await new EditFileTool(dir).execute({
+      path,
+      old_text: oldText,
+      new_text: 'injected',
+      replace_all: true,
+    })
+
+    expect(out.startsWith('[ERR]')).toBe(true)
+    expect(readFileSync(path, 'utf8')).toBe('unchanged')
+  })
+
+  it('refuses to materialize oversized files before editing', async () => {
+    const path = join(dir, 'oversized-edit.txt')
+    const original = Buffer.alloc(8 * 1024 * 1024 + 1, 97)
+    writeFileSync(path, original)
+
+    const out = await new EditFileTool(dir).execute({
+      path,
+      old_text: 'a',
+      new_text: 'b',
+    })
+
+    expect(out.startsWith('[ERR] file exceeds 8 MiB read limit')).toBe(true)
+    expect(readFileSync(path).equals(original)).toBe(true)
+  })
+
+  it('replaces the real source span found by whitespace normalization', async () => {
+    const path = join(dir, 'normalized.txt')
+    writeFileSync(path, 'before\nalpha\n    beta\nafter\n', 'utf8')
+
+    const out = await new EditFileTool(dir).execute({
+      path,
+      old_text: 'alpha beta',
+      new_text: 'joined',
+    })
+
+    expect(out).toContain('Edited')
+    expect(readFileSync(path, 'utf8')).toBe('before\njoined\nafter\n')
+  })
+
+  it('requires replace_all for multiple normalized matches', async () => {
+    const path = join(dir, 'normalized-many.txt')
+    const original = 'alpha\n beta\n--\nalpha\tbeta\n'
+    writeFileSync(path, original, 'utf8')
+    const tool = new EditFileTool(dir)
+
+    const ambiguous = await tool.execute({
+      path,
+      old_text: 'alpha beta',
+      new_text: 'joined',
+    })
+    expect(ambiguous).toContain('[ERR]')
+    expect(readFileSync(path, 'utf8')).toBe(original)
+
+    const replaced = await tool.execute({
+      path,
+      old_text: 'alpha beta',
+      new_text: 'joined',
+      replace_all: true,
+    })
+    expect(replaced).toContain('Edited')
+    expect(readFileSync(path, 'utf8')).toBe('joined\n--\njoined\n')
+  })
+
+  it('treats replacement template tokens as literal text', async () => {
+    const path = join(dir, 'literal-replacement.txt')
+    writeFileSync(path, 'before token after', 'utf8')
+
+    await new EditFileTool(dir).execute({
+      path,
+      old_text: 'token',
+      new_text: "$&-$'",
+    })
+
+    expect(readFileSync(path, 'utf8')).toBe("before $&-$' after")
+  })
+
+  it('rejects no-op edits without writing or publishing a mutation', async () => {
+    const path = join(dir, 'no-op.txt')
+    const observed: CodeGraphFileEvent[][] = []
+    writeFileSync(path, 'same content', 'utf8')
+
+    const out = await new EditFileTool(dir, async (events) => {
+      observed.push([...events])
+    }).execute({
+      path,
+      old_text: 'same',
+      new_text: 'same',
+    })
+
+    expect(out).toBe('[ERR] edit would not change file content')
+    expect(readFileSync(path, 'utf8')).toBe('same content')
+    expect(observed).toEqual([])
   })
 
   it('blocks writes through a symlink that escapes the workspace', async () => {
@@ -335,6 +462,21 @@ describe('managed destructive file tools', () => {
     expect(readFileSync(join(dir, 'patch.txt'), 'utf8')).toBe(
       'changed\nvalue\nvalue\n',
     )
+  })
+
+  it('refuses to materialize oversized files before applying a patch', async () => {
+    const path = join(dir, 'oversized-patch.txt')
+    const original = Buffer.alloc(8 * 1024 * 1024 + 1, 97)
+    writeFileSync(path, original)
+
+    const out = await new ApplyPatchTool(dir).execute({
+      path,
+      old_text: 'a',
+      new_text: 'b',
+    })
+
+    expect(out.startsWith('[ERR] file exceeds 8 MiB read limit')).toBe(true)
+    expect(readFileSync(path).equals(original)).toBe(true)
   })
 
   it('blocks delete and rename through escaping symlinks', async () => {
@@ -515,7 +657,7 @@ describe('RunCommand OS containment contract', () => {
     expect(existsSync(target)).toBe(false)
   })
 
-  it('allows a proven read-only command to degrade truthfully with an unsandboxed receipt', async () => {
+  it('fails closed when a required command runner returns an unsandboxed receipt', async () => {
     const requests: OwnedProcessRequest[] = []
     const runner: OwnedProcessRunner = {
       capability: () => ({
@@ -553,10 +695,10 @@ describe('RunCommand OS containment contract', () => {
       command: 'pwd',
     })
 
-    expect(requests[0]!.containment.mode).toBe('preferred')
+    expect(requests[0]!.containment.mode).toBe('required')
     expect(result).toMatchObject({
-      modelContent: dir,
-      isError: false,
+      modelContent: expect.stringContaining('OS sandbox unavailable'),
+      isError: true,
       metadata: {
         containment: {
           decision: 'unsandboxed',
@@ -711,6 +853,18 @@ describe('TodoStore + UpdateTodos (test_todo_tool.py)', () => {
     })
     expect(out).toContain('todos updated: total=1')
     expect(s.todos).toHaveLength(1)
+  })
+
+  it('advances the todo revision only after a valid model update', () => {
+    const s = new TodoStore()
+    expect(s.revision).toBe(0)
+    s.update([{ id: 1, content: 'a', status: 'pending' }])
+    expect(s.revision).toBe(1)
+    s.update([
+      { id: 1, content: 'a', status: 'in_progress' },
+      { id: 2, content: 'b', status: 'in_progress' },
+    ])
+    expect(s.revision).toBe(1)
   })
 
   it('preserves active_form and renders it for in_progress', () => {

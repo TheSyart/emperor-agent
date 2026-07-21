@@ -28,6 +28,8 @@ import { AskUserTool, ProposePlanTool } from '../control/tools'
 import { TodoStore, UpdateTodos } from '../tools/builtin'
 import { MemoryStore } from '../memory/store'
 import { ExecutionEnvironment } from '../environment/snapshot'
+import { CancelledTaskError } from '../runtime/active'
+import { PlanGenerationFailedError } from '../control/exceptions'
 
 type Msg = Record<string, unknown>
 
@@ -476,6 +478,171 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ])
     expect(phases.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5])
     expect(phases.every((e) => e.turn_id === 'turn_1')).toBe(true)
+  })
+
+  it('normalizes a provider AbortError only when this turn signal is aborted', async () => {
+    let started: (() => void) | null = null
+    const provider = new (class extends LLMProvider {
+      constructor() {
+        super({ defaultModel: 'fake' })
+      }
+
+      async chat(args: ChatArgs): Promise<LLMResponse> {
+        started?.()
+        return await new Promise<LLMResponse>((_resolve, reject) => {
+          args.signal?.addEventListener(
+            'abort',
+            () =>
+              reject(
+                new DOMException('The operation was aborted', 'AbortError'),
+              ),
+            { once: true },
+          )
+        })
+      }
+    })()
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+    })
+    ;(
+      runner as unknown as {
+        samplingCoordinator: {
+          execute<T>(request: {
+            signal?: AbortSignal | null
+            invoke(context: {
+              requestId: string
+              attemptId: string
+              attempt: number
+              maxAttempts: number
+              signal: AbortSignal
+            }): Promise<T>
+          }): Promise<{
+            value: T
+            requestId: string
+            attempts: number
+            retryCount: number
+            lastErrorKind: ''
+          }>
+        }
+      }
+    ).samplingCoordinator = {
+      async execute<T>(request: {
+        signal?: AbortSignal | null
+        invoke(context: {
+          requestId: string
+          attemptId: string
+          attempt: number
+          maxAttempts: number
+          signal: AbortSignal
+        }): Promise<T>
+      }) {
+        const signal = request.signal ?? new AbortController().signal
+        const value = await request.invoke({
+          requestId: 'raw-abort-test',
+          attemptId: 'raw-abort-test:1',
+          attempt: 1,
+          maxAttempts: 1,
+          signal,
+        })
+        return {
+          value,
+          requestId: 'raw-abort-test',
+          attempts: 1,
+          retryCount: 0,
+          lastErrorKind: '',
+        }
+      },
+    }
+    const controller = new AbortController()
+    const providerStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+
+    const running = runner.stepAsync([{ role: 'user', content: 'hi' }], {
+      signal: controller.signal,
+    })
+    await providerStarted
+    controller.abort()
+
+    await expect(running).rejects.toBeInstanceOf(CancelledTaskError)
+  })
+
+  it('does not normalize a provider AbortError without turn cancellation', async () => {
+    const runner = new AgentRunner({
+      provider: new (class extends LLMProvider {
+        constructor() {
+          super({ defaultModel: 'fake' })
+        }
+
+        async chat(): Promise<LLMResponse> {
+          throw new DOMException('upstream connection aborted', 'AbortError')
+        }
+      })(),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+    })
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'hi' }]),
+    ).rejects.toMatchObject({ code: 'model_provider_unknown' })
+  })
+
+  it('keeps a missing required path side-effect free and recovers from one precise schema error', async () => {
+    let writes = 0
+    class RequiredPathWriteTool extends Tool {
+      override name = 'write_file'
+      override description = 'write a test file'
+      override parameters = toolParamsSchema(
+        { path: S('path'), content: S('content') },
+        ['path', 'content'],
+      )
+      execute(): string {
+        writes += 1
+        return 'wrote file'
+      }
+    }
+    const registry = new ToolRegistry()
+    registry.register(new RequiredPathWriteTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('write_missing_path', 'write_file', { content: 'x' }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('write_corrected', 'write_file', {
+            path: 'index.html',
+            content: 'x',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '写入完成。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 5,
+    })
+    const history: Msg[] = [{ role: 'user', content: '写入 index.html' }]
+
+    const reply = await runner.stepAsync(history)
+
+    expect(reply).toBe('写入完成。')
+    expect(writes).toBe(1)
+    const results = history.filter((message) => message.role === 'tool')
+    expect(String(results[0]!.content)).toContain('arguments.path is required')
+    expect(results[0]!.content).toContain('Tool schema validation failed')
   })
 
   it('consumes ordered interjections at the model/tool boundary and tombstones the superseded response', async () => {
@@ -2299,7 +2466,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(planContext).toContain('status: approved')
   })
 
-  it('update_todos updates only the session todo list and does not mutate plan steps', async () => {
+  it('reconciles an exactly bound update_todos completion into the authoritative Plan', async () => {
     const manager = new ControlManager(tmp('emperor-runner-todo-decoupled-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
@@ -2321,6 +2488,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     manager.approve(interaction.id)
     const planId = String(interaction.meta.plan_id)
     expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
+    const boundTodo = { ...todoStore.todos[0]!, status: 'completed' }
 
     const registry = new ToolRegistry()
     registry.register(new UpdateTodos(todoStore))
@@ -2329,14 +2497,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
         content: '',
         toolCalls: [
           toolCall('todo_1', 'update_todos', {
-            todos: [
-              {
-                id: 1,
-                plan_step_id: 'step_1',
-                content: 'Run matrix',
-                status: 'completed',
-              },
-            ],
+            todos: [boundTodo],
           }),
         ],
         finishReason: 'tool_calls',
@@ -2372,22 +2533,139 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       name: 'update_todos',
       todos: [
         {
-          id: 1,
+          id: 'plan:step_1',
+          plan_id: planId,
           plan_step_id: 'step_1',
+          approval_generation: 1,
           content: 'Run matrix',
           status: 'completed',
         },
       ],
     })
-    expect(JSON.stringify(todoResult)).not.toContain('PLAN_EVIDENCE_REQUIRED')
-    // Claude Code TodoWrite semantics: todo completion is not a PlanStep state transition.
     const finished = manager.planStore.get(planId)!
-    expect(finished.steps[0]!.status).toBe('active')
-    expect(finished.status).toBe('executing')
-    expect(finished.completedAt).toBeNull()
-    expect(JSON.stringify(finished.steps[0]!.evidence)).not.toContain(
-      'update_todos',
+    expect(finished.steps[0]!.status).toBe('done')
+    expect(finished.status).toBe('completed')
+    expect(finished.completedAt).not.toBeNull()
+    expect(JSON.stringify(finished.steps[0]!.evidence)).toContain(
+      'todo_implementation_claim',
     )
+  })
+
+  it('does not resume an old unfinished todo list for an unrelated history question', async () => {
+    const todoStore = new TodoStore()
+    todoStore.todos = [
+      { id: 1, content: '旧任务：继续实现页面', status: 'pending' },
+    ]
+    const provider = new FakeProvider([
+      makeResponse({ content: '我们刚刚讨论了页面实现。' }),
+      makeResponse({ content: '不应该消费这个响应' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      todoStore,
+      maxTurns: 6,
+    })
+    const history: Msg[] = [
+      { role: 'user', content: '先前的实现任务' },
+      { role: 'assistant', content: '已经开始执行。' },
+      { role: 'user', content: '我们刚刚说什么了1' },
+    ]
+
+    const reply = await runner.stepAsync(history)
+
+    expect(reply).toBe('我们刚刚讨论了页面实现。')
+    expect(provider.seenMessages).toHaveLength(1)
+    expect(
+      history.some((message) =>
+        String(message.content ?? '').includes('差事尚未办妥'),
+      ),
+    ).toBe(false)
+    expect(todoStore.todos).toHaveLength(1)
+  })
+
+  it('caps explicit todo continuation at two corrections and returns an honest partial report', async () => {
+    const todoStore = new TodoStore()
+    todoStore.todos = [
+      { id: 1, content: '仍需完成实现', status: 'in_progress' },
+    ]
+    const provider = new FakeProvider([
+      makeResponse({ content: '第一次误报完成。' }),
+      makeResponse({ content: '第二次仍未执行。' }),
+      makeResponse({ content: '全部完成。' }),
+      makeResponse({ content: '不应无限续跑。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      todoStore,
+      maxTurns: 8,
+    })
+    const history: Msg[] = [{ role: 'user', content: '继续执行 step_1' }]
+
+    const reply = await runner.stepAsync(history)
+
+    expect(provider.seenMessages).toHaveLength(3)
+    expect(reply).toContain('本次执行已暂停')
+    expect(reply).toContain('仍需完成实现')
+    expect(reply).toContain('/continue')
+    expect(reply).not.toContain('全部完成')
+    expect(
+      history.filter((message) =>
+        String(message.content ?? '').includes('差事尚未办妥'),
+      ),
+    ).toHaveLength(2)
+  })
+
+  it('continues a todo list created by the current prompt even without an explicit continue command', async () => {
+    const todoStore = new TodoStore()
+    const registry = new ToolRegistry()
+    registry.register(new UpdateTodos(todoStore))
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('todo_create', 'update_todos', {
+            todos: [{ id: 1, content: '完成当前请求', status: 'pending' }],
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '先到这里。' }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('todo_finish', 'update_todos', {
+            todos: [{ id: 1, content: '完成当前请求', status: 'completed' }],
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '当前请求已完成。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      todoStore,
+      maxTurns: 8,
+    })
+    const history: Msg[] = [{ role: 'user', content: '创建当前功能' }]
+
+    const reply = await runner.stepAsync(history)
+
+    expect(reply).toContain('当前请求已完成。')
+    expect(provider.seenMessages).toHaveLength(4)
+    expect(
+      history.filter((message) =>
+        String(message.content ?? '').includes('差事尚未办妥'),
+      ),
+    ).toHaveLength(1)
   })
 
   it('escalates a strategy nudge when the same safety refusal repeats within a turn', async () => {
@@ -2535,7 +2813,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(byName.boom).toMatchObject({ reason_kind: 'error' })
   })
 
-  it('injects a one-shot honesty followup when plan verification requirements have no evidence (2026-07-05 B4.2)', async () => {
+  it('keeps a claimed Plan step active and blocks a completion reply while verification is missing', async () => {
     const manager = new ControlManager(tmp('emperor-honesty-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
@@ -2559,10 +2837,9 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     })
     const pendingHonesty = manager.payload().pending as Record<string, unknown>
     manager.approve(String(pendingHonesty.id))
-    // 实景（2026-07-05 会话）：todos 全部完成但验证要求从未执行；F1 的投影使计划进入「宣称完工」
-    todoStore.update([
-      { id: 1, content: 'Ship it', status: 'completed', planStepId: 'step_1' },
-    ])
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
     manager.syncPlanFromTodos(todoStore.todos, {
       evidence: { source: 'update_todos' },
     })
@@ -2586,18 +2863,26 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
     const reply = await runner.stepAsync(history)
 
-    // 第一次 stop 被诚实性 followup 拦截，第二次 stop 正常完成
-    expect(reply).toContain('未验证')
+    expect(reply).toContain('本次执行已暂停')
+    expect(reply).toContain('Ship it')
+    expect(reply).not.toContain('全部完成')
     const followups = history.filter(
       (message) =>
         message.role === 'user' &&
-        String(message.content).includes('未记录任何执行证据'),
+        String(message.content).includes('差事尚未办妥'),
     )
-    expect(followups).toHaveLength(1)
-    expect(String(followups[0]!.content)).toContain('step_1')
-    expect(provider.responses).toHaveLength(1) // 第三个响应没被消费
+    expect(followups).toHaveLength(2)
+    expect(provider.responses).toHaveLength(0)
+    expect(
+      manager.planStore.get(
+        String((pendingHonesty.meta as Record<string, unknown>).plan_id),
+      ),
+    ).toMatchObject({
+      status: 'executing',
+      steps: [expect.objectContaining({ status: 'active' })],
+    })
 
-    // 跨 turn 不重复：同一计划已提醒过，下一轮 stop 直接完成
+    // 普通新问题不继承旧 lease，也不会擅自继续执行。
     const provider2 = new FakeProvider([
       makeResponse({ content: '下一轮直接完成' }),
     ])
@@ -2612,11 +2897,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const history2: Msg[] = [{ role: 'user', content: '再来一轮' }]
     const reply2 = await runner2.stepAsync(history2)
     expect(reply2).toBe('下一轮直接完成')
-    expect(
-      history2.filter((message) =>
-        String(message.content ?? '').includes('未记录任何执行证据'),
-      ),
-    ).toHaveLength(0)
+    expect(provider2.seenMessages).toHaveLength(1)
   })
 
   it('skips the honesty followup when verification evidence exists (B4.2)', async () => {
@@ -2651,9 +2932,9 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       stepId: 'step_1',
       result: { command: 'npm test', passed: true, summary: 'pass' },
     })
-    todoStore.update([
-      { id: 1, content: 'Ship it', status: 'completed', planStepId: 'step_1' },
-    ])
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
     manager.syncPlanFromTodos(todoStore.todos, {
       evidence: { source: 'update_todos' },
     })
@@ -2782,7 +3063,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     })
 
     const reply = await runner.stepAsync([
-      { role: 'user', content: '把事情办完' },
+      { role: 'user', content: '/continue' },
     ])
 
     expect(reply).toContain('max_turns=1')
@@ -2793,24 +3074,34 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
   })
 
   it('injects a single wrap-up reminder when the turn budget is nearly exhausted', async () => {
-    const todoStore = new TodoStore()
-    todoStore.todos = [{ id: 1, content: '永远做不完', status: 'pending' }]
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
     const provider = new FakeProvider([
-      makeResponse({ content: '继续 1' }),
-      makeResponse({ content: '继续 2' }),
-      makeResponse({ content: '继续 3' }),
-      makeResponse({ content: '继续 4' }),
-      makeResponse({ content: '继续 5' }),
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('near_1', 'echo', { value: 'one' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('near_2', 'echo', { value: 'two' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('near_3', 'echo', { value: 'three' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '收束并完成。' }),
     ])
     const runner = new AgentRunner({
       provider,
       model: 'fake',
-      registry: new ToolRegistry(),
+      registry,
       systemPrompt: 'system',
-      todoStore,
       maxTurns: 5,
     })
-    const history: Msg[] = [{ role: 'user', content: '一直干' }]
+    const history: Msg[] = [{ role: 'user', content: '执行多步检查' }]
 
     await runner.stepAsync(history)
 
@@ -3060,12 +3351,36 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     )
   })
 
-  it('plan mode wraps plain final as plan', async () => {
+  it('plan mode corrects one plain final and only a successful propose_plan creates approval', async () => {
     const manager = new ControlManager(tmp('emperor-runner-plan-'))
+    manager.setRuntimeScope({ sessionId: 'session_plain_plan_owner' })
     manager.setMode('plan')
     const registry = controlRegistry(manager)
     const provider = new FakeProvider([
       makeResponse({ content: '我会先读代码，然后实现并测试。' }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_plan', 'propose_plan', {
+            title: '实现计划',
+            summary: '完成实现并验证。',
+            plan_markdown: '# 实现计划\n\n1. 修改代码\n2. 运行测试',
+            assumptions: [],
+            risk_level: 'low',
+            steps: [
+              {
+                id: 'step_1',
+                title: '修改并验证',
+                description: '实施目标改动并运行测试。',
+                files: ['src/example.ts'],
+                commands: ['npm test'],
+                acceptance: ['测试通过'],
+              },
+            ],
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
     ])
     const runner = new AgentRunner({
       provider,
@@ -3096,6 +3411,39 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     ).toBe('session_plain_plan_owner')
     expect(emitted.some((e) => e.event === 'plan_draft')).toBe(true)
     expect(emitted.some((e) => e.event === 'assistant_done')).toBe(false)
+    expect(provider.seenMessages).toHaveLength(2)
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      '普通最终回复不能替代计划卡',
+    )
+  })
+
+  it('plan mode fails closed after two plain finals without creating a fake approval card', async () => {
+    const manager = new ControlManager(tmp('emperor-runner-plan-failed-'))
+    manager.setRuntimeScope({ sessionId: 'session_plan_failed' })
+    manager.setMode('plan')
+    const provider = new FakeProvider([
+      makeResponse({ content: '先写代码。' }),
+      makeResponse({ content: '计划已经说明完毕。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: controlRegistry(manager),
+      systemPrompt: 'system',
+      controlManager: manager,
+      sessionId: 'session_plan_failed',
+      maxTurns: 6,
+    })
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: '生成计划' }]),
+    ).rejects.toBeInstanceOf(PlanGenerationFailedError)
+    expect(manager.payload().pending).toBeNull()
+    expect(
+      manager.planStore
+        .list()
+        .filter((plan) => plan.status === 'waiting_approval'),
+    ).toHaveLength(0)
   })
 
   it('streams partial propose_plan arguments as plan_draft_delta events', async () => {

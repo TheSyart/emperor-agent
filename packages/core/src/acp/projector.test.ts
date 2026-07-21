@@ -127,9 +127,9 @@ describe('ACP runtime-event projector', () => {
     ).toThrow('ACP projection event budget exceeded')
 
     projector.terminate()
-    expect(projector.project({ event: 'message_delta', delta: 'late' })).toEqual(
-      [],
-    )
+    expect(
+      projector.project({ event: 'message_delta', delta: 'late' }),
+    ).toEqual([])
   })
 
   it('projects replayed user messages without exposing hidden or diagnostic rows', () => {

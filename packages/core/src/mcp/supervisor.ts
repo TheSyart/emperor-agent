@@ -93,8 +93,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
   private readonly callTimeoutMs: number
   private readonly connectTimeoutMs: number
   private readonly onStateChange:
-    | MCPConnectionSupervisorOptions['onStateChange']
-    | null
+    MCPConnectionSupervisorOptions['onStateChange'] | null
   private current: ManagedClient | null = null
   private generation = 0
   private state: MCPConnectionState = 'stopped'
@@ -136,7 +135,9 @@ export class MCPConnectionSupervisor extends MCPConnection {
     if (this.current && this.state === 'ready') return true
     if (this.state === 'auth_failed') return false
     this.stopped = false
-    return await this.singleflight(() => this.installCandidate(this.desiredConfig))
+    return await this.singleflight(() =>
+      this.installCandidate(this.desiredConfig),
+    )
   }
 
   override async disconnect(): Promise<void> {
@@ -317,10 +318,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
       clientId: this.clientIdFactory(this.generation + 1),
     }
     this.generation = identity.generation
-    const connection = this.connectionFactory(
-      structuredClone(config),
-      identity,
-    )
+    const connection = this.connectionFactory(structuredClone(config), identity)
     connection.setLifecycleListener((event) =>
       this.onClientLifecycle(identity, event),
     )
@@ -402,7 +400,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
       !current ||
       current.generation !== identity.generation ||
       current.clientId !== identity.clientId ||
-      event.type === 'closed' && event.intentional
+      (event.type === 'closed' && event.intentional)
     )
       return
     const error =
@@ -495,7 +493,9 @@ export class MCPConnectionSupervisor extends MCPConnection {
     )
   }
 
-  private async singleflight(operation: () => Promise<boolean>): Promise<boolean> {
+  private async singleflight(
+    operation: () => Promise<boolean>,
+  ): Promise<boolean> {
     if (this.operation) return await this.operation
     const pending = operation()
     this.operation = pending
@@ -508,7 +508,9 @@ export class MCPConnectionSupervisor extends MCPConnection {
 
   private emitState(): void {
     try {
-      void Promise.resolve(this.onStateChange?.(this.snapshot())).catch(() => {})
+      void Promise.resolve(this.onStateChange?.(this.snapshot())).catch(
+        () => {},
+      )
     } catch {
       // Diagnostics must never break connection state transitions.
     }
@@ -589,13 +591,13 @@ function normalizeTools(tools: MCPToolDefinition[]): MCPToolDefinition[] {
 }
 
 function configFingerprint(config: ServerConfig): string {
-  return createHash('sha256')
-    .update(JSON.stringify(config))
-    .digest('hex')
+  return createHash('sha256').update(JSON.stringify(config)).digest('hex')
 }
 
 function cleanRequestId(value: unknown): string {
-  return String(value ?? '').trim().slice(0, 160)
+  return String(value ?? '')
+    .trim()
+    .slice(0, 160)
 }
 
 function boundedPositiveInt(value: unknown, fallback: number): number {

@@ -475,6 +475,7 @@ export interface ModelEntry {
   protocol: 'openai' | 'anthropic'
   modelId: string
   displayName?: string
+  effectiveDisplayName: string
   apiKey: string
   apiBase: string
   capabilityOverrides?: ModelCapabilityOverrides
@@ -570,6 +571,11 @@ export interface ChatSendPayload {
   delivery?: 'queue' | 'interject'
 }
 
+export interface QueueDraftRecovery {
+  sessionId: string
+  payload: ChatSendPayload
+}
+
 export interface ModelTestResult {
   ok: boolean
   kind: 'text' | 'vision'
@@ -606,6 +612,7 @@ export interface CurrentModelConfig {
   protocol: 'openai' | 'anthropic'
   modelId: string
   displayName: string | null
+  effectiveDisplayName: string
   apiBase: string
   maxTokens: number
   reasoningEffort: string | null
@@ -1247,6 +1254,7 @@ export interface ToolSegment {
 }
 
 export interface ControlQuestionOption {
+  id?: string
   label: string
   description?: string
 }
@@ -1285,7 +1293,7 @@ export interface ControlInteraction {
 export interface ControlPayload {
   version?: number
   mode: ControlMode
-  previous_mode?: 'ask_before_edit' | 'accept_edits' | 'auto' | null
+  previous_mode?: 'ask_before_edit' | 'smart_auto' | 'full_access' | null
   pending?: ControlInteraction | null
   last_interaction?: ControlInteraction | null
   updated_at?: number
@@ -1458,8 +1466,21 @@ export interface PlanSegment {
   interaction: ControlInteraction
 }
 
+export interface PlanActivitySegment {
+  id: string
+  type: 'plan_activity'
+  label: string
+  detail?: string
+  tone: 'running' | 'success' | 'error' | 'neutral'
+}
+
 export type AssistantSegment =
-  TextSegment | ThoughtSegment | ToolSegment | AskSegment | PlanSegment
+  | TextSegment
+  | ThoughtSegment
+  | ToolSegment
+  | AskSegment
+  | PlanSegment
+  | PlanActivitySegment
 
 export interface SubagentToolState {
   id?: string
@@ -1500,6 +1521,20 @@ export interface UserMessage {
   local?: boolean
   deliveryState?: 'queued' | 'running' | 'interjected' | 'cancelled'
   deliveryReason?: string
+}
+
+export interface QueuedPromptItem {
+  id: string
+  turnId: string
+  clientMessageId: string
+  content: string
+  delivery: 'queue' | 'interject'
+  status: 'queued' | 'interjecting'
+  supportsInterjection: boolean
+  createdOrder: number
+  attachmentCount: number
+  requestedSkillNames: string[]
+  hasCapabilityRefs: boolean
 }
 
 export interface AssistantMessage {

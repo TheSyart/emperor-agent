@@ -150,10 +150,7 @@ export function reduceSessionProjection(
       ...(sessions[sessionId] ?? emptySessionRuntime()),
       running: previous.running,
       attention: false,
-      lastSeq: Math.max(
-        previous.lastSeq,
-        sessions[sessionId]?.lastSeq ?? 0,
-      ),
+      lastSeq: Math.max(previous.lastSeq, sessions[sessionId]?.lastSeq ?? 0),
     }
     return transition({
       ...state,
@@ -317,34 +314,42 @@ function reduceRuntimeEvent(
   const active = state.activeSessionId
   const draftMaterialization = Boolean(
     event.event === 'session_created' &&
-      active.startsWith('draft:') &&
-      event.client_draft_id === active &&
-      event.session?.id,
+    active.startsWith('draft:') &&
+    event.client_draft_id === active &&
+    event.session?.id,
   )
   const foreign = Boolean(
     owner &&
-      active &&
-      !draftMaterialization &&
-      (active.startsWith('draft:') || owner !== active),
+    active &&
+    !draftMaterialization &&
+    (active.startsWith('draft:') || owner !== active),
   )
   const sessionKey = owner || active
   const seq = Math.max(0, Number(event.seq || 0))
   const current = sessionKey
-    ? state.sessions[sessionKey] ?? emptySessionRuntime()
+    ? (state.sessions[sessionKey] ?? emptySessionRuntime())
     : null
   const cursor = current?.lastSeq ?? state.activeLastSeq
   if (seq > 0 && seq <= cursor)
     return {
       state,
       effects: [],
-      meta: { accepted: false, foreign, duplicate: true, serverRestarted: false },
+      meta: {
+        accepted: false,
+        foreign,
+        duplicate: true,
+        serverRestarted: false,
+      },
     }
 
   let sessions = state.sessions
   if (sessionKey) {
     const next = {
       ...(current ?? emptySessionRuntime()),
-      lastSeq: seq > 0 ? Math.max(current?.lastSeq ?? 0, seq) : current?.lastSeq ?? 0,
+      lastSeq:
+        seq > 0
+          ? Math.max(current?.lastSeq ?? 0, seq)
+          : (current?.lastSeq ?? 0),
     }
     if (RUNNING_EVENTS.has(event.event)) next.running = true
     if (TERMINAL_EVENTS.has(event.event)) {
@@ -359,7 +364,9 @@ function reduceRuntimeEvent(
       ...state,
       sessions,
       activeLastSeq:
-        !foreign && seq > 0 ? Math.max(state.activeLastSeq, seq) : state.activeLastSeq,
+        !foreign && seq > 0
+          ? Math.max(state.activeLastSeq, seq)
+          : state.activeLastSeq,
     },
     effects: [],
     meta: {

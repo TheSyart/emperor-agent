@@ -173,9 +173,6 @@ function control(
     createAsk: () => {
       throw new Error('not expected')
     },
-    createPlanFromText: () => {
-      throw new Error('not expected')
-    },
   }
 }
 
@@ -216,7 +213,7 @@ async function runTool(opts: {
 }
 
 describe('AgentRunner hooks v2 tool pipeline', () => {
-  it('lets PermissionRequest allow resolve an ask decision', async () => {
+  it('never lets PermissionRequest hook allow bypass a core approval', async () => {
     const hook = hooks((event) =>
       event === 'PermissionRequest'
         ? decision({ decision: 'allow', reason: 'approved by hook' })
@@ -231,12 +228,12 @@ describe('AgentRunner hooks v2 tool pipeline', () => {
       trace: [],
     }))
 
-    const { tool } = await runTool({
+    const { tool, provider } = await runTool({
       hookHost: hook.host,
       controlManager: manager,
     })
 
-    expect(tool.executions).toEqual([{ mode: 'read', value: 'original' }])
+    expect(tool.executions).toEqual([])
     expect(hook.events.map((entry) => entry.event)).toContain(
       'PermissionRequest',
     )
@@ -252,6 +249,9 @@ describe('AgentRunner hooks v2 tool pipeline', () => {
       rule: 'test.ask',
       trace: [],
     })
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      'permission approval required',
+    )
   })
 
   it('never lets a hook allow override a core permission deny', async () => {

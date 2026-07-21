@@ -57,6 +57,8 @@ const MCP_CONFIG_KEY = defineConfigKey<Record<string, unknown>>({
 })
 
 const ENV_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
+const ENV_PLACEHOLDER_RE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/
+export const MCP_EDITOR_SECRET_MARKER = '[REDACTED]'
 export type EnvironmentValueSource =
   Record<string, string | undefined> | ((name: string) => string | undefined)
 
@@ -123,7 +125,30 @@ async function readMcpConfigWithoutRecovery(
 export async function loadMcpConfigUnresolved(
   root: string,
 ): Promise<MCPConfig> {
-  return await loadMcpConfig(root, {})
+  return maskMcpEditorSecrets(await loadMcpConfig(root, {}))
+}
+
+function maskMcpEditorSecrets(config: MCPConfig): MCPConfig {
+  const masked = structuredClone(config)
+  for (const server of Object.values(masked.servers)) {
+    server.args = server.args.map(maskSecretLeaf)
+    server.env = maskSecretRecord(server.env)
+    server.headers = maskSecretRecord(server.headers)
+    server.url = server.url === null ? null : maskSecretLeaf(server.url)
+  }
+  return masked
+}
+
+function maskSecretRecord(
+  values: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, maskSecretLeaf(value)]),
+  )
+}
+
+function maskSecretLeaf(value: string): string {
+  return ENV_PLACEHOLDER_RE.test(value) ? value : MCP_EDITOR_SECRET_MARKER
 }
 
 export async function saveMcpConfig(
@@ -136,7 +161,8 @@ export async function saveMcpConfig(
     Array.isArray(raw.servers)
   )
     throw new Error("mcp_config: 'servers' must be an object")
-  const data = { ...raw }
+  const stored = await loadMcpConfig(root, {})
+  const data = restoreMcpEditorSecrets(raw, stored)
   if (
     !data.defaults ||
     typeof data.defaults !== 'object' ||
@@ -144,6 +170,81 @@ export async function saveMcpConfig(
   )
     data.defaults = DEFAULT_MCP_CONFIG.defaults
   await writeJsonAtomic(join(root, MCP_CONFIG_FILE), data, { mode: 0o600 })
+}
+
+function restoreMcpEditorSecrets(
+  raw: Record<string, unknown>,
+  stored: MCPConfig,
+): Record<string, unknown> {
+  const restored = structuredClone(raw)
+  const submittedServers = restored.servers as Record<string, unknown>
+  for (const [serverName, submittedValue] of Object.entries(submittedServers)) {
+    if (
+      !submittedValue ||
+      typeof submittedValue !== 'object' ||
+      Array.isArray(submittedValue)
+    )
+      continue
+    const submitted = submittedValue as Record<string, unknown>
+    const previous = stored.servers[serverName]
+    if (Array.isArray(submitted.args)) {
+      submitted.args = submitted.args.map((value, index) =>
+        restoreSecretLeaf(
+          value,
+          previous?.args[index],
+          `servers.${serverName}.args.${index}`,
+        ),
+      )
+    }
+    submitted.env = restoreSecretRecord(
+      submitted.env,
+      previous?.env,
+      `servers.${serverName}.env`,
+    )
+    submitted.headers = restoreSecretRecord(
+      submitted.headers,
+      previous?.headers,
+      `servers.${serverName}.headers`,
+    )
+    if (submitted.url === MCP_EDITOR_SECRET_MARKER) {
+      submitted.url = restoreSecretLeaf(
+        submitted.url,
+        previous?.url,
+        `servers.${serverName}.url`,
+      )
+    }
+  }
+  return restored
+}
+
+function restoreSecretRecord(
+  submittedValue: unknown,
+  previous: Record<string, string> | undefined,
+  path: string,
+): unknown {
+  if (
+    !submittedValue ||
+    typeof submittedValue !== 'object' ||
+    Array.isArray(submittedValue)
+  )
+    return submittedValue
+  const submitted = submittedValue as Record<string, unknown>
+  for (const [key, value] of Object.entries(submitted)) {
+    submitted[key] = restoreSecretLeaf(value, previous?.[key], `${path}.${key}`)
+  }
+  return submitted
+}
+
+function restoreSecretLeaf(
+  submitted: unknown,
+  previous: unknown,
+  path: string,
+): unknown {
+  if (submitted !== MCP_EDITOR_SECRET_MARKER) return submitted
+  if (typeof previous !== 'string') {
+    throw new Error(`mcp_config: secret marker has no stored value at ${path}`)
+  }
+  return previous
 }
 
 export function expandEnv(

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-07-21<br>
 > 事实源：DiagnosticsService、桌面诊断面板、当前构建与运行脚本
 
 先进入“设置 → 诊断”。诊断页会集中显示生效路径、配置文件状态、workspace fence、生命周期、迁移结果、环境能力、Scheduler、External 和桌宠信息。不要先手工删除 `stateRoot`。
@@ -54,7 +54,7 @@ Diagnostics 的 `Command OS Sandbox` 行显示实际 backend 和 capability：
 - `macos-seatbelt · 可用`：命令由系统 Seatbelt profile 包装；
 - `linux-bwrap · 可用/不可用`：同时反映 helper 与 user namespace probe，不以文件存在冒充可执行；
 - `windows-unsupported · 不支持`：当前没有 Job Object + ACL 等价实现，mutation command 会在 spawn 前拒绝；
-- 工具 metadata 中的 `decision=unsandboxed` 只应出现在已证明只读的诊断命令；`decision=denied` 表示命令根本没有启动。
+- `run_command` 要求 `decision=sandboxed`。若 runner 异常返回 `decision=unsandboxed`，工具会把结果按失败处理；`decision=denied` 或 `containment_unavailable` 表示命令没有启动。
 
 Sandboxed 命令默认不能访问 `stateRoot`、workspace 外文件或网络。依赖 HOME 配置、联网下载或写系统目录的命令因此失败是策略结果，不要通过 symlink、子 shell 或换解释器绕过；应改用受管安装/网络能力，或等待对应平台 backend/policy 明确开放。
 
@@ -68,7 +68,7 @@ MCP 的 args、env、headers 和 URL，以及 External 的 owner session、`secr
 
 有效配置不是新配置文件，也没有统一“保存”按钮。修改仍回到原入口：权限/local 字段修改 `emperor.local.json`，MCP 使用插件页，Skill 使用对应目录/Skill 管理入口，AgentDefinition 使用受信 manifest。看到 untrusted project candidate 被拒绝时，不要通过复制到 managed/user 层伪造信任；先核对项目绑定和来源。
 
-权限 Ask 会携带脱敏 explanation：最终规则、候选规则的 source/trust/precedence，以及 Shell AST 的 status、feature/reason code、计数和 fingerprint。它不会在 explanation 中保存命令正文或 argv。`pipeline`、`redirection`、`command_substitution`、`outside_path_argument`、`dynamic_expansion`、`too_complex` 或 `parser_failure` 表示 Core 无法把命令正向证明为只读；这时出现 Ask 是预期行为。批准只回答“本次是否尝试”，后续仍须通过 OS containment。
+权限 Ask 的聊天卡片只显示脱敏工具名、风险、短原因和命令摘要，不显示 trace、explanation 或参数 JSON。完整规则候选、source/trust/precedence、Shell AST 摘要与 fingerprint 只保存在本机私有 diagnostics 元数据。`pipeline`、`redirection`、`command_substitution`、`outside_path_argument`、`dynamic_expansion`、`too_complex` 或 `parser_failure` 表示 Core 无法确定性分类；在 `smart_auto` 中语义分类失败会回退 Ask。批准只回答“本次是否尝试”，后续仍须通过 OS containment。
 
 ## 文件检查点与回退（Beta）
 

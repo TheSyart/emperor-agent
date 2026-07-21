@@ -507,6 +507,53 @@ export class PlanStore {
     )
   }
 
+  /**
+   * Commit a related set of Plan mutations with one atomic index replacement.
+   * Validation is completed for the whole batch before any record is changed,
+   * so a Plan replacement never exposes cancelled predecessors without its
+   * successor draft.
+   */
+  saveBatch(records: readonly PlanRecord[]): PlanRecord[] {
+    if (!records.length) return []
+    const ids = new Set<string>()
+    for (const record of records) {
+      if (ids.has(record.id))
+        throw new Error(`duplicate Plan batch id: ${record.id}`)
+      ids.add(record.id)
+    }
+    return this.goalMutations.guard.runExclusiveSync('mutation', (lease) =>
+      this.withWriteLock(() => {
+        const data = this.read(lease)
+        const prepared = records.map((record) => {
+          const hot = data[record.id]
+          const current =
+            hot && typeof hot === 'object'
+              ? planFromDict(hot as Record<string, unknown>)
+              : this.getArchived(record.id, lease)
+          if ((current?.eventSeq ?? 0) !== Math.max(0, record.eventSeq))
+            throw new PlanStoreConflictError()
+          if (current) assertMonotonicMutation(current, record)
+          else assertInitialSkipIntent(record)
+          return {
+            ...record,
+            eventSeq: (current?.eventSeq ?? 0) + 1,
+          }
+        })
+        for (const saved of prepared) {
+          this.goalMutations.recordUnderLease(
+            lease,
+            'plan',
+            `${saved.id}:${saved.eventSeq}`,
+          )
+          data[saved.id] = planToDict(saved)
+        }
+        this.archiveIfNeeded(data, lease)
+        this.write(data)
+        return prepared
+      }),
+    )
+  }
+
   /** 级联删除：仅删除带 session_id stamp 的计划；legacy 无主计划不动。 */
   deleteBySession(sessionId: string): number {
     const target = String(sessionId || '').trim()

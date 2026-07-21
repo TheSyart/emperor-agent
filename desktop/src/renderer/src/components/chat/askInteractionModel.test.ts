@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ControlInteraction, ControlQuestion } from '../../types'
 import * as askModel from './askInteractionModel'
@@ -45,6 +47,15 @@ function ask(extra: Partial<ControlInteraction> = {}): ControlInteraction {
 }
 
 describe('ask interaction model', () => {
+  it('keeps the timeline Ask card static while the bottom slot owns interaction controls', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('./AskHistoryCard.vue', import.meta.url)),
+      'utf8',
+    )
+
+    expect(source).not.toContain('<ActiveAskPanel')
+  })
+
   it('selects only the waiting ask interaction as active', () => {
     expect(activeAskInteraction({ mode: 'plan', pending: ask() })?.id).toBe(
       'ask-1',
@@ -77,6 +88,40 @@ describe('ask interaction model', () => {
       depth: { choice: '', freeform: '自己判断' },
     })
     expect(structuredClone(plain)).toEqual(plain)
+  })
+
+  it('submits stable option ids while retaining labels for display compatibility', () => {
+    const permissionQuestions: ControlQuestion[] = [
+      {
+        id: 'permission',
+        header: '权限',
+        question: '是否允许？',
+        options: [
+          {
+            id: 'allow_once',
+            label: '允许本次',
+            description: '仅批准当前操作',
+          },
+          { id: 'deny', label: '拒绝', description: '拒绝当前操作' },
+        ],
+      },
+    ]
+
+    expect(
+      toPlainAskAnswers(permissionQuestions, {
+        permission: {
+          optionId: 'allow_once',
+          choice: '允许本次',
+          freeform: '',
+        },
+      }),
+    ).toEqual({
+      permission: {
+        option_id: 'allow_once',
+        choice: '允许本次',
+        freeform: '',
+      },
+    })
   })
 
   it('reports per-question progression labels and validity', () => {
@@ -129,5 +174,54 @@ describe('ask interaction model', () => {
       title: '澄清问题已取消',
       tone: 'cancelled',
     })
+  })
+
+  it('renders permission v2 operation summaries without private diagnostics', () => {
+    const presentation = askHistoryPresentation(
+      ask({
+        context: '内部上下文不应成为权限详情',
+        meta: {
+          interaction_type: 'permission',
+          permission: {
+            version: 2,
+            request_id: 'permission_private',
+            operation_count: 2,
+            operations: [
+              {
+                operation_id: 'operation_1',
+                tool_name: 'delete_file',
+                risk: 'high',
+                reason: '删除文件',
+                summary: 'delete_file a.txt',
+              },
+              {
+                operation_id: 'operation_2',
+                tool_name: 'delete_file',
+                risk: 'high',
+                reason: '删除文件',
+                summary: 'delete_file b.txt',
+              },
+            ],
+          },
+        },
+      }),
+    )
+
+    expect(presentation.title).toBe('2 项操作需要权限确认')
+    expect(presentation.status).toBe('等待决定')
+    expect(presentation.detail).toContain('2 项操作')
+    expect(presentation.detail).toContain('delete_file a.txt')
+    expect(presentation.detail).toContain('delete_file b.txt')
+    expect(presentation.detail).not.toContain('permission_private')
+    expect(presentation.detail).not.toContain('内部上下文')
+  })
+
+  it('does not render historical Ask Guard diagnostics verbatim', () => {
+    const presentation = askHistoryPresentation(
+      ask({ context: 'Ask Guard: risk_boundary internal diagnostics' }),
+    )
+
+    expect(presentation.detail).toBe('选择风格？')
+    expect(presentation.detail).not.toContain('risk_boundary')
   })
 })

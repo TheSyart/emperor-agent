@@ -10,11 +10,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { describe, expect, it } from 'vitest'
 import type { ModelRoute, ProviderSnapshot } from '../model/router'
-import {
-  LLMProvider,
-  type ChatArgs,
-  type LLMResponse,
-} from '../providers/base'
+import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { CoreApi } from '../api/core-api'
 import { EmperorAcpAdapter } from './adapter'
 
@@ -58,9 +54,7 @@ describe('Emperor ACP real Core E2E', () => {
       expect(provider.calls).toHaveLength(1)
       expect(
         updates
-          .filter(
-            (item) => item.update.sessionUpdate === 'agent_message_chunk',
-          )
+          .filter((item) => item.update.sessionUpdate === 'agent_message_chunk')
           .map((item) =>
             item.update.sessionUpdate === 'agent_message_chunk' &&
             item.update.content.type === 'text'
@@ -195,7 +189,10 @@ function fakeRouter(provider: FakeProvider): {
 } {
   return {
     route: (useCase: string) => ({
-      snapshot: snapshot(provider, useCase === 'main_agent' ? 'main' : 'secondary'),
+      snapshot: snapshot(
+        provider,
+        useCase === 'main_agent' ? 'main' : 'secondary',
+      ),
       fallback: null,
       useCase,
       reason: `${useCase}:fake`,

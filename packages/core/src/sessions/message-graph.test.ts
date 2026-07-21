@@ -207,4 +207,37 @@ describe('MessageGraphStore v2', () => {
       reason: 'owner_cancelled',
     })
   })
+
+  it('durably replaces a queued prompt in one replayable graph event', () => {
+    const root = tmp('emperor-prompt-atomic-replace-')
+    const store = new MessageGraphStore(root)
+    store.recordPrompt({
+      id: 'prompt_original',
+      turnId: 'turn_original',
+      delivery: 'queue',
+      content: 'urgent correction',
+    })
+
+    store.replaceQueuedPrompt('prompt_original', {
+      id: 'prompt_replacement',
+      turnId: 'turn_original',
+      delivery: 'interject',
+      targetCommandId: 'turn:owner',
+      content: 'urgent correction',
+      supportsInterjection: true,
+    })
+
+    expect(new MessageGraphStore(root).snapshot().prompts).toEqual([
+      expect.objectContaining({
+        id: 'prompt_original',
+        state: 'cancelled',
+        reason: 'replaced_by_interjection',
+      }),
+      expect.objectContaining({
+        id: 'prompt_replacement',
+        state: 'queued',
+        delivery: 'interject',
+      }),
+    ])
+  })
 })

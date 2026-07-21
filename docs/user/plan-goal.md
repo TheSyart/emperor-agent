@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进长任务的用户<br>
-> 最后核验：2026-07-18<br>
+> 最后核验：2026-07-21<br>
 > 事实源：slash command parser、ControlManager、PermissionPipeline、GoalCoordinator 与 Completion Gate
 
 Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Composer 中是互斥的顶层模式。Plan 控制“先提出什么方案、何时允许执行”；Goal 管理“跨多少回合持续推进、满足什么条件才算完成”。Goal 可以在内部使用 Plan 引擎，界面仍只显示 Goal。
@@ -11,14 +11,14 @@ Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Comp
 
 | 界面命令       | 内部模式          | 行为                                                                                     |
 | -------------- | ----------------- | ---------------------------------------------------------------------------------------- |
-| `/mode ask`    | `ask_before_edit` | 默认模式；低风险读取、普通文件写入和只读诊断命令可继续，敏感路径、批量替换和代码执行询问 |
-| `/mode edits`  | `accept_edits`    | 普通文件编辑可以直接执行，shell、Team、Scheduler 等 mutation 仍需确认                    |
-| `/mode auto`   | `auto`            | 在现有权限范围内自动推进；复杂或未证明只读的 shell 仍可能询问                            |
+| `/mode ask`    | `ask_before_edit` | 只读文件、搜索与诊断直接执行；文件修改、Shell、外部写入和持久任务变更先询问              |
+| `/mode edits`  | `smart_auto`      | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险操作先询问     |
+| `/mode auto`   | `full_access`     | 普通操作不再请求权限；显式拒绝、Plan 约束、schema、workspace 和系统 containment 继续生效 |
 | `/mode status` | —                 | 查看当前模式和 pending interaction                                                       |
 
 模式不会关闭路径安全、schema 校验、workspace policy 或 Core deny。
 
-命令是否常用于开发不代表它安全。`pytest`、`python -m pytest`、`npm test` 和 `npm run ...` 会加载项目控制的代码，因此在默认询问模式下必须先批准；`git status`、`git diff`、`ls`、`pwd` 等严格只读诊断命令仍可直接执行。显式用户规则或已批准 Plan 的精确 permission token 可以受控放行匹配的命令，但授权不覆盖 OS containment：未证明只读的命令在 sandbox backend 不可用时仍会在 spawn 前拒绝。
+`smart_auto` 会直接执行常见构建、测试、格式化、本地 Git 和逐段安全的复合诊断命令；无法确定副作用时会先做一次脱敏语义分类，失败则询问。`full_access` 不再产生 Permission Ask，但普通 `ask_user` 仍可用于需求澄清；所有模式都不能绕过 OS containment 和 Core deny。
 
 ## Plan：先规划再执行
 
@@ -33,9 +33,13 @@ Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Comp
 
 `/plan` 与 `/plan on` 等价。Agent 空闲时，Plan 标识右上角的关闭按钮会执行 `/plan off` 的语义；Agent 正在运行时，该按钮只显示原因，不会退出 Plan。
 
-进入 Plan 后，Agent 可以读取信息、澄清问题并提交结构化方案，但不能执行普通写操作。权限选择器仍显示并允许修改询问、编辑或自动；这只更新 Plan 结束后的执行权限，不会退出 Plan。用户批准后，系统按最新选择继续，Plan token 只授权与批准方案相符的执行。
+进入 Plan 后，Agent 可以读取信息、澄清问题并提交结构化方案，但不能执行普通写操作。权限选择器仍显示并允许修改询问确认、智能自动或完全访问；这只更新 Plan 结束后的执行权限，不会退出 Plan。用户批准后，系统按最新选择继续，Plan token 只授权与批准方案相符的执行。
 
-Plan 记录步骤、依赖、验证要求和 reviewer 信息。步骤完成并不自动等于 Goal 完成；没有 Goal 时，Plan 只负责本次执行路径。
+如果当前已经有 Plan，再次输入 `/plan` 会立即取消旧 Plan 并开始一份新草稿。旧 Plan 会显示为“已取消/被新计划替代”，只保留审计记录；即使后来放弃新草稿，也不会恢复旧 Plan。只有 Agent 正式提交结构化方案后才会出现审批面板，普通说明文字不会覆盖或伪造一份计划。
+
+Plan 记录步骤、依赖、验证要求和 reviewer 信息。批准后任务清单由当前 Plan 步骤自动投影；勾完清单只代表实现声明，要求验证的步骤必须取得成功证据才能完成。验证失败或缺少证据时，Plan 会保持未完成并明确列出阻塞项。步骤完成也不自动等于 Goal 完成；没有 Goal 时，Plan 只负责本次执行路径。
+
+Plan 卡片始终是静态提案历史，不会在卡片内部不断增长执行步骤。流式方案尚未完成时卡片标记“生成中”，不会提前显示审批；完整方案进入 waiting 后，底部用“实施此计划？”决策面板替代 Composer。批准或提交修改意见后恢复保留原草稿/附件的 Composer。批准、步骤进度、验证结果和最终状态会沿聊天时间线继续向下显示，工具调用与思考按真实事件顺序穿插其中。普通 Ask 和 Permission Ask 采用相同的底部替换与恢复规则。
 
 `/plan off` 和计划批准都会恢复 `previous_mode` 中保存的最新执行权限，不会固定回到 `ask_before_edit`。
 

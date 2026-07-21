@@ -124,4 +124,52 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
     expect(saved.defaults.read_only).toBe(true)
     expect(reloads).toBe(1)
   })
+
+  it('never returns literal MCP secrets and preserves them across editor saves', async () => {
+    const root = tmp('emperor-config-mcp-redaction-')
+    const path = join(root, 'mcp_config.json')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        servers: {
+          remote: {
+            transport: 'sse',
+            enabled: true,
+            url: 'https://secret-endpoint.example.test',
+            headers: { Authorization: 'literal-secret-token' },
+          },
+        },
+      }),
+      'utf8',
+    )
+    let reloads = 0
+    const service = new CoreConfigService(root, {
+      reloadMcp: () => {
+        reloads += 1
+      },
+    })
+
+    const editor = await service.getMcpConfig()
+    expect(editor.servers.remote).toMatchObject({
+      url: '[REDACTED]',
+      headers: { Authorization: '[REDACTED]' },
+    })
+    editor.servers.remote!.enabled = false
+    const saved = await service.saveMcpConfig(
+      editor as unknown as Record<string, unknown>,
+    )
+
+    expect(saved.servers.remote).toMatchObject({
+      enabled: false,
+      url: '[REDACTED]',
+      headers: { Authorization: '[REDACTED]' },
+    })
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.servers.remote).toMatchObject({
+      enabled: false,
+      url: 'https://secret-endpoint.example.test',
+      headers: { Authorization: 'literal-secret-token' },
+    })
+    expect(reloads).toBe(1)
+  })
 })

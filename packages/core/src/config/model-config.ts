@@ -189,6 +189,15 @@ function optionalString(value: unknown): string | null {
   return text || null
 }
 
+function customDisplayName(value: unknown): string | null {
+  const text = optionalString(value)
+  if (!text) return null
+  const normalized = text.toLowerCase()
+  if (normalized === 'default' || normalized === 'default · secondary')
+    return null
+  return text
+}
+
 function positiveInteger(value: unknown, field: string): number {
   const text = typeof value === 'string' ? value.trim() : null
   const parsed =
@@ -342,7 +351,7 @@ function normalizeEntry(
     isMaskedSecret(input.apiKey)
       ? null
       : optionalString(input.apiKey)
-  const displayName = optionalString(input.displayName)
+  const displayName = customDisplayName(input.displayName)
   const capabilityOverrides = normalizeCapabilityOverrides(
     input.capabilityOverrides,
   )
@@ -479,7 +488,7 @@ function providerNames(): string[] {
 }
 
 function compatibilityEntry(entry: ModelEntryV2): ModelEntry {
-  const name = entry.displayName || entry.entryId
+  const name = entry.displayName || entry.modelId
   return {
     ...structuredClone(entry),
     name,
@@ -669,10 +678,9 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
         : null,
       extraBody: extraBody ? structuredClone(extraBody) : null,
     }
-    const legacyName =
-      optionalString(legacyEntry.name) ??
-      optionalString(legacyEntry.label) ??
-      mainModelId
+    const legacyLabel = customDisplayName(legacyEntry.label)
+    const legacyName = customDisplayName(legacyEntry.name)
+    const customName = legacyLabel ?? legacyName
     const modelIds = [mainModelId]
     const secondary = optionalString(legacyEntry.secondaryModelId)
     if (secondary && secondary !== mainModelId) modelIds.push(secondary)
@@ -683,10 +691,6 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
         provider,
         protocol,
         modelId,
-        displayName:
-          position === 0
-            ? (optionalString(legacyEntry.label) ?? legacyName)
-            : `${optionalString(legacyEntry.label) ?? legacyName} · Secondary`,
         apiBase,
         apiKey,
         contextWindowTokens,
@@ -694,6 +698,9 @@ function migrateV1(raw: RawRecord): ModelConfigV2 {
         reasoningEffort,
         legacy: structuredClone(legacy),
       }
+      if (customName)
+        migrated.displayName =
+          position === 0 ? customName : `${customName} · Secondary`
       if ('supportsVision' in legacyEntry)
         migrated.capabilityOverrides = {
           vision: Boolean(legacyEntry.supportsVision),

@@ -7,10 +7,7 @@ import {
   type MCPConnectionLifecycleEvent,
   type MCPToolDefinition,
 } from './connection'
-import {
-  MCPConnectionSupervisor,
-  type MCPClientIdentity,
-} from './supervisor'
+import { MCPConnectionSupervisor, type MCPClientIdentity } from './supervisor'
 
 function config(command = '/bin/mcp'): ServerConfig {
   return {
@@ -38,8 +35,7 @@ class ControlledConnection extends MCPConnection {
   private connectGate: Promise<void> | null = null
   private releaseConnect: (() => void) | null = null
   private callImpl:
-    | ((signal?: AbortSignal) => Promise<MCPCallToolResult>)
-    | null = null
+    ((signal?: AbortSignal) => Promise<MCPCallToolResult>) | null = null
 
   constructor(
     readonly label: string,
@@ -303,11 +299,15 @@ describe('MCPConnectionSupervisor', () => {
     })
     await supervisor.connect()
     const controller = new AbortController()
-    const call = supervisor.callToolRequest('ask_user', {}, {
-      requestId: 'mcp_req_abort',
-      signal: controller.signal,
-      timeoutMs: 10_000,
-    })
+    const call = supervisor.callToolRequest(
+      'ask_user',
+      {},
+      {
+        requestId: 'mcp_req_abort',
+        signal: controller.signal,
+        timeoutMs: 10_000,
+      },
+    )
 
     controller.abort('user cancelled')
 
@@ -326,10 +326,14 @@ describe('MCPConnectionSupervisor', () => {
     await supervisor.connect()
 
     await expect(
-      supervisor.callToolRequest('mutate', {}, {
-        requestId: 'mcp_req_timeout',
-        timeoutMs: 5,
-      }),
+      supervisor.callToolRequest(
+        'mutate',
+        {},
+        {
+          requestId: 'mcp_req_timeout',
+          timeoutMs: 5,
+        },
+      ),
     ).rejects.toMatchObject({ code: 'mcp_transport_timeout' })
     expect(connection.callCount).toBe(1)
     expect(supervisor.snapshot()).toMatchObject({

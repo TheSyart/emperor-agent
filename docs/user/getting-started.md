@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-07-21<br>
 > 事实源：GitHub Releases、模型设置页、Session/Project 创建入口
 
 ## 1. 安装
@@ -24,7 +24,7 @@
 2. 选择 `openai` 或 `anthropic` 协议。界面只会展示该 Provider 支持的协议。
 3. 填写模型 ID、API Base 和 API Key。
 4. 填写上下文窗口与最大输出 Token。两项都必须是正整数，并应使用服务商公布的限制。
-5. 按需填写显示名称、reasoning effort 和能力覆盖。能力覆盖只在自动探测不准确时使用。
+5. 按需填写显示名称、reasoning effort 和能力覆盖。显示名称留空时各处自动使用并同步模型 ID；只有手工填写时才保存自定义别名。能力覆盖只在自动探测不准确时使用。
 6. 保存配置并执行模型测试。需要切换模型时，在聊天输入框右侧打开模型选择器。
 
 模型配置保存在 `stateRoot/model_config.json`，磁盘 schema 为 `schemaVersion: 2`。旧配置可以由兼容读取逻辑迁移，但当前界面和文档不再使用“主模型/次模型”双角色配置。

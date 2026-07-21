@@ -152,6 +152,16 @@ onBeforeUnmount(stopFlowClock)
           <ToolGroup v-else-if="block.kind === 'tool_group'" :block="block" />
           <MediaBlock v-else-if="block.kind === 'media'" :items="block.items" />
           <div
+            v-else-if="block.kind === 'plan_activity'"
+            class="timeline-node plan-activity-node"
+            :data-tone="block.segment.tone"
+          >
+            <span>{{ block.segment.label }}</span>
+            <strong v-if="block.segment.detail">{{
+              block.segment.detail
+            }}</strong>
+          </div>
+          <div
             v-else-if="block.kind === 'control' && block.segment.type === 'ask'"
             class="timeline-node control-node"
           >

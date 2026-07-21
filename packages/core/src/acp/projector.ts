@@ -131,9 +131,7 @@ export class AcpEventProjector {
 
   private contentUpdate(
     sessionUpdate:
-      | 'user_message_chunk'
-      | 'agent_message_chunk'
-      | 'agent_thought_chunk',
+      'user_message_chunk' | 'agent_message_chunk' | 'agent_thought_chunk',
     value: string,
     event: Row,
   ): SessionUpdate {
@@ -200,7 +198,11 @@ function toolKind(name: string): ToolKind {
   if (lower.includes('edit') || lower.includes('write')) return 'edit'
   if (lower.includes('delete')) return 'delete'
   if (lower.includes('rename') || lower.includes('move')) return 'move'
-  if (lower.includes('grep') || lower.includes('glob') || lower.includes('search'))
+  if (
+    lower.includes('grep') ||
+    lower.includes('glob') ||
+    lower.includes('search')
+  )
     return 'search'
   if (lower.includes('bash') || lower.includes('command')) return 'execute'
   if (lower.includes('fetch') || lower.includes('web')) return 'fetch'

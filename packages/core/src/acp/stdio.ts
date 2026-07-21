@@ -7,7 +7,8 @@ import {
 } from './node-transport'
 
 export interface ServeEmperorAcpStdioOptions
-  extends Pick<
+  extends
+    Pick<
       CoreApiCreateOptions,
       'root' | 'stateRoot' | 'templatesDir' | 'appVersion' | 'runtimeRevision'
     >,
@@ -55,7 +56,10 @@ export async function serveEmperorAcpStdio(
   }
 }
 
-async function boundedSettle(work: Promise<void>, timeoutMs: number): Promise<void> {
+async function boundedSettle(
+  work: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([

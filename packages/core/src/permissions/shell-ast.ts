@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { realpathSync } from 'node:fs'
+import { isAbsolute, relative, resolve } from 'node:path'
 
 export type ShellAstStatus = 'parsed' | 'invalid' | 'too_complex'
 
@@ -238,14 +240,53 @@ export function analyzeShellCommandFailClosed(
   }
 }
 
-export function isShellAstReadonly(analysis: ShellAstAnalysis): boolean {
+export interface ShellReadonlyContext {
+  readonly workspaceRoot?: string | null
+  readonly cwd?: string | null
+}
+
+export function isShellAstReadonly(
+  analysis: ShellAstAnalysis,
+  context: ShellReadonlyContext = {},
+): boolean {
   if (analysis.status !== 'parsed') return false
   if (analysis.features.length || analysis.reasonCodes.length) return false
   if (analysis.commands.length !== 1) return false
   const command = analysis.commands[0]!
   if (command.env.length || command.redirects.length || command.nested)
     return false
-  return isReadonlyArgv(command.argv)
+  return isReadonlyArgv(command.argv, context)
+}
+
+/**
+ * Smart-auto read-only proof. Unlike the strict single-command predicate used
+ * by ask mode, this accepts a bounded pipeline/sequence only when every parsed
+ * command is independently read-only and no redirection or dynamic shell
+ * feature is present.
+ */
+export function isShellAstReadonlySequence(
+  analysis: ShellAstAnalysis,
+  context: ShellReadonlyContext = {},
+): boolean {
+  if (analysis.status !== 'parsed' || !analysis.commands.length) return false
+  const safeFeatures = new Set<ShellAstFeature>([
+    'pipeline',
+    'and',
+    'or',
+    'sequence',
+  ])
+  if (analysis.features.some((feature) => !safeFeatures.has(feature)))
+    return false
+  const safeReasons = new Set(['compound_command', 'outside_path_argument'])
+  if (analysis.reasonCodes.some((reason) => !safeReasons.has(reason)))
+    return false
+  return analysis.commands.every(
+    (command) =>
+      !command.env.length &&
+      !command.redirects.length &&
+      !command.nested &&
+      isReadonlyArgv(command.argv, context),
+  )
 }
 
 export function shellAstSummary(analysis: ShellAstAnalysis): ShellAstSummary {
@@ -730,9 +771,21 @@ function operatorAt(input: string, index: number): string | null {
   return null
 }
 
-function isReadonlyArgv(argv: string[]): boolean {
+function isReadonlyArgv(
+  argv: string[],
+  context: ShellReadonlyContext,
+): boolean {
   if (!argv.length) return false
   const head = baseName(argv[0]!)
+  if (head === 'echo' || head === 'printf') return true
+  if (['cat', 'grep', 'head', 'tail', 'wc'].includes(head)) {
+    const operands = readonlyFileOperands(head, argv.slice(1))
+    return (
+      operands !== null &&
+      operands.length > 0 &&
+      operands.every((operand) => isProvenWorkspacePath(operand, context))
+    )
+  }
   if (head === 'pwd')
     return argv
       .slice(1)
@@ -792,6 +845,123 @@ function isReadonlyArgv(argv: string[]): boolean {
     return args.every((argument) => argument.startsWith('-')) || permitsPatterns
   }
   return false
+}
+
+function readonlyFileOperands(head: string, args: string[]): string[] | null {
+  if (head === 'grep') return grepFileOperands(args)
+  const operands: string[] = []
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (argument === '--') {
+      operands.push(...args.slice(index + 1))
+      break
+    }
+    if (argument === '-' || argument.startsWith('~')) return null
+    if (argument.startsWith('-')) {
+      if (head === 'cat' && /^-[AbEnsTuv]+$/.test(argument)) continue
+      if (head === 'wc' && /^-[clmwL]+$/.test(argument)) continue
+      if (
+        (head === 'head' || head === 'tail') &&
+        (/^-\d+$/.test(argument) || /^--(?:lines|bytes)=\d+$/.test(argument))
+      )
+        continue
+      if (
+        (head === 'head' || head === 'tail') &&
+        (argument === '-n' || argument === '-c')
+      ) {
+        if (!/^\+?-?\d+$/.test(args[index + 1] ?? '')) return null
+        index += 1
+        continue
+      }
+      return null
+    }
+    operands.push(argument)
+  }
+  return operands
+}
+
+function grepFileOperands(args: string[]): string[] | null {
+  const files: string[] = []
+  let patternSeen = false
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (argument === '--') {
+      const rest = args.slice(index + 1)
+      if (!patternSeen) {
+        if (!rest.length) return null
+        rest.shift()
+        patternSeen = true
+      }
+      files.push(...rest)
+      break
+    }
+    if (argument === '-' || argument.startsWith('~')) return null
+    if (argument === '-e' || argument === '--regexp') {
+      if (args[index + 1] === undefined) return null
+      patternSeen = true
+      index += 1
+      continue
+    }
+    if (argument === '-m' || argument === '--max-count') {
+      if (!/^\d+$/.test(args[index + 1] ?? '')) return null
+      index += 1
+      continue
+    }
+    if (
+      /^-[EFGHhIiLlnoqsvwxc]+$/.test(argument) ||
+      /^--(?:extended-regexp|fixed-strings|basic-regexp|ignore-case|invert-match|word-regexp|line-regexp|count|line-number|files-with-matches|files-without-match|quiet|silent|no-messages|with-filename|no-filename)$/.test(
+        argument,
+      ) ||
+      /^--max-count=\d+$/.test(argument) ||
+      argument.startsWith('--regexp=')
+    ) {
+      if (argument.startsWith('--regexp=')) patternSeen = true
+      continue
+    }
+    if (argument.startsWith('-')) return null
+    if (!patternSeen) {
+      patternSeen = true
+      continue
+    }
+    files.push(argument)
+  }
+  return patternSeen ? files : null
+}
+
+function isProvenWorkspacePath(
+  operand: string,
+  context: ShellReadonlyContext,
+): boolean {
+  if (
+    !operand ||
+    operand === '-' ||
+    operand.startsWith('~') ||
+    operand.includes('\0') ||
+    /[*?[\]{}]/.test(operand)
+  )
+    return false
+  const workspaceRoot = canonicalExistingPath(context.workspaceRoot ?? '')
+  if (!workspaceRoot) return false
+  const cwd = canonicalExistingPath(context.cwd ?? workspaceRoot)
+  if (!cwd || !pathWithin(cwd, workspaceRoot)) return false
+  const candidate = canonicalExistingPath(
+    isAbsolute(operand) ? operand : resolve(cwd, operand),
+  )
+  return Boolean(candidate && pathWithin(candidate, workspaceRoot))
+}
+
+function canonicalExistingPath(value: string): string | null {
+  if (!value) return null
+  try {
+    return realpathSync.native(resolve(value))
+  } catch {
+    return null
+  }
+}
+
+function pathWithin(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
 function isOutsidePathArgument(argument: string): boolean {

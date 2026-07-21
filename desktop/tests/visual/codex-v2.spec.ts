@@ -231,6 +231,78 @@ for (const scenario of scenarios) {
   })
 }
 
+for (const viewport of [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'mobile', width: 390, height: 844 },
+] as const) {
+  test(`captures composer-attached-single-queue-${viewport.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await page.goto('/chat?visualQueue=on')
+    const tray = page.locator('.queue-tray')
+    const composer = page.locator('.composer')
+    await expect(tray).toBeVisible()
+    await expect(composer).toBeVisible()
+    await expect(tray.locator('.queue-item')).toHaveCount(1)
+    await expect(tray).toContainText('继续补充视觉验收细节')
+    const trayBounds = await tray.boundingBox()
+    const composerBounds = await composer.boundingBox()
+    expect(trayBounds).not.toBeNull()
+    expect(composerBounds).not.toBeNull()
+    expect(Math.abs(trayBounds!.x - composerBounds!.x)).toBeLessThanOrEqual(1)
+    expect(
+      Math.abs(trayBounds!.width - composerBounds!.width),
+    ).toBeLessThanOrEqual(1)
+    await page.screenshot({
+      path: resolve(
+        screenshotDir,
+        `composer-attached-single-queue-${viewport.name}.png`,
+      ),
+      fullPage: false,
+    })
+  })
+}
+
+test('captures bottom Ask replacement while keeping timeline history static', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat?visualControl=ask')
+  await expect(page.locator('.active-ask-panel')).toBeVisible()
+  await expect(page.locator('.composer')).toBeHidden()
+  await expect(page.locator('.ask-history-card')).toBeVisible()
+  await expect(page.locator('.ask-history-card .active-ask-panel')).toHaveCount(
+    0,
+  )
+  await page.screenshot({
+    path: resolve(screenshotDir, 'bottom-ask-replaces-composer.png'),
+    fullPage: false,
+  })
+})
+
+test('shows Plan approval only after the streamed proposal is complete', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat?visualControl=plan-stream')
+  await expect(page.locator('.plan-card')).toContainText('生成中')
+  await expect(page.locator('.active-plan-decision-panel')).toHaveCount(0)
+  await expect(page.locator('.composer')).toBeVisible()
+
+  await page.goto('/chat?visualControl=plan')
+  await expect(page.locator('.plan-card')).toBeVisible()
+  await expect(page.locator('.active-plan-decision-panel')).toBeVisible()
+  await expect(page.locator('.composer')).toBeHidden()
+  await expect(
+    page.locator('.plan-card .active-plan-decision-panel'),
+  ).toHaveCount(0)
+  await page.screenshot({
+    path: resolve(screenshotDir, 'bottom-plan-replaces-composer.png'),
+    fullPage: false,
+  })
+})
+
 test('model editor discovers candidates and retains a custom model id', async ({
   page,
 }) => {
@@ -317,7 +389,7 @@ test('first saved model returns to chat and completes the profile interview', as
   await prompt.getByRole('button', { name: '去配置模型' }).click()
   await page.getByRole('button', { name: '添加模型', exact: true }).click()
   await page.getByLabel('模型 ID').fill('visual-main')
-  await page.getByLabel('显示名称（可选）').fill('Visual First Run')
+  await page.getByLabel('标识', { exact: true }).fill('Visual First Run')
   await page.getByRole('button', { name: '保存模型' }).click()
 
   await expect(page).toHaveURL(/\/chat$/)
@@ -352,7 +424,9 @@ test('profile onboarding can start, defer, skip, and restart from settings', asy
     fullPage: false,
   })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expectDialogWithinViewport(page, page.locator('.active-ask-panel'))
+  const inlineAsk = page.locator('.active-ask-panel')
+  await inlineAsk.scrollIntoViewIfNeeded()
+  await expectDialogWithinViewport(page, inlineAsk)
   await page.screenshot({
     path: resolve(screenshotDir, 'profile-onboarding-ask-mobile.png'),
     fullPage: false,
@@ -1016,6 +1090,8 @@ async function installVisualCoreBridge(page: Page) {
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
       const visualGoalPhase = visualParams.get('visualGoal')
       const visualTheme = visualParams.get('visualTheme')
+      const visualQueueEnabled = visualParams.get('visualQueue') === 'on'
+      const visualControlMode = visualParams.get('visualControl')
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
       const project = {
@@ -1077,6 +1153,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'openai',
         modelId: 'visual-main',
         displayName: 'Visual Local',
+        effectiveDisplayName: 'Visual Local',
         apiBase: 'https://visual.example/v1',
         apiKey: '',
         capabilityOverrides: { vision: true },
@@ -1105,6 +1182,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'anthropic',
         modelId: 'claude-visual-sonnet',
         displayName: 'Claude Visual',
+        effectiveDisplayName: 'Claude Visual',
         apiBase: 'https://api.anthropic.com',
         reasoningEffort: 'medium',
       }
@@ -1115,6 +1193,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'openai',
         modelId: 'visual-main',
         displayName: 'Visual Local',
+        effectiveDisplayName: 'Visual Local',
         apiBase: 'https://visual.example/v1',
         reasoningEffort: 'high',
         contextWindowTokens: 128000,
@@ -1133,6 +1212,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: entry.protocol,
         modelId: entry.modelId,
         displayName: entry.displayName || null,
+        effectiveDisplayName: entry.displayName || entry.modelId,
         apiBase: entry.apiBase,
         reasoningEffort: entry.reasoningEffort ?? null,
         contextWindowTokens: entry.contextWindowTokens,
@@ -1754,13 +1834,160 @@ async function installVisualCoreBridge(page: Page) {
         projects: [project],
         runtime: {
           latestSeq: 1,
+          sessionId: 'build-ui',
+          busy: false,
           scope: 'unarchived',
           events: [] as Array<Record<string, unknown>>,
         },
         unarchivedHistory: [],
         context_used: 12000,
       }
-      let visualRuntimeSeq = 1
+      const visualQueuedPrompts = visualQueueEnabled
+        ? [
+            {
+              id: 'prompt_visual_queue',
+              turnId: 'turn_visual_queue',
+              clientMessageId: 'prompt_visual_queue',
+              delivery: 'queue',
+              state: 'queued',
+              content: '继续补充视觉验收细节',
+              displayContent: '继续补充视觉验收细节',
+              supportsInterjection: true,
+              createdOrder: 1,
+              createdAt: now,
+              updatedAt: now,
+              attachmentIds: [],
+              requestedSkills: [],
+            },
+          ]
+        : []
+      if (visualQueueEnabled) {
+        boot.runtime.busy = true
+        boot.runtime.latestSeq = 2
+        boot.runtime.events = [
+          {
+            event: 'message_delta',
+            seq: 2,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_queue_owner',
+            id: 'assistant_visual_queue_owner',
+            delta: '我正在整理当前任务的视觉验收边界。',
+            timestamp: now,
+          },
+        ]
+      }
+
+      const visualAskInteraction = {
+        id: 'ask_visual_bottom',
+        kind: 'ask',
+        status: 'waiting',
+        created_at: Date.now() / 1000,
+        updated_at: Date.now() / 1000,
+        parent_call_id: 'call_visual_bottom_ask',
+        context: '确认最终展示密度。',
+        questions: [
+          {
+            id: 'visual_density',
+            header: '展示密度',
+            question: '底部控制面板采用哪种信息密度？',
+            options: [
+              {
+                id: 'compact',
+                label: '紧凑展示',
+                description: '保持主要操作在一屏内完成',
+              },
+              {
+                id: 'detailed',
+                label: '完整展示',
+                description: '保留更多说明和上下文',
+              },
+            ],
+          },
+        ],
+        answers: {},
+        title: '',
+        summary: '',
+        plan_markdown: '',
+        assumptions: [],
+        risk_level: 'low',
+        comments: [],
+        meta: { control_session_id: 'build-ui' },
+      }
+      const visualPlanInteraction = {
+        id:
+          visualControlMode === 'plan-stream'
+            ? 'provisional-plan-visual-bottom'
+            : 'plan_visual_bottom',
+        kind: 'plan',
+        status: 'waiting',
+        created_at: Date.now() / 1000,
+        updated_at: Date.now() / 1000,
+        parent_call_id: 'call_visual_bottom_plan',
+        context: '',
+        questions: [],
+        answers: {},
+        title: '底部交互与单槽队列实施计划',
+        summary: '将审批与消息输入互斥投影到底部控制槽。',
+        plan_markdown:
+          '# 底部交互与单槽队列实施计划\n\n1. 静态保留时间线提案。\n2. 底部审批替代 Composer。\n3. 回答后恢复草稿。',
+        assumptions: ['Composer 草稿由 renderer 会话状态持有'],
+        risk_level: 'medium',
+        comments: [],
+        meta: {
+          control_session_id: 'build-ui',
+          ...(visualControlMode === 'plan-stream'
+            ? { plan_stream_id: 'visual-bottom', provisional: true }
+            : {}),
+        },
+      }
+      if (visualControlMode === 'ask' || visualControlMode === 'plan') {
+        const interaction =
+          visualControlMode === 'ask'
+            ? visualAskInteraction
+            : visualPlanInteraction
+        boot.control.pending = interaction
+        sessions[0]!.control_pending = {
+          kind: interaction.kind,
+          label:
+            interaction.kind === 'plan' ? '计划需要用户确认' : '需要用户输入',
+          tone: interaction.kind === 'plan' ? 'green' : 'blue',
+          interaction_id: interaction.id,
+          updated_at: Date.now() / 1000,
+        }
+        boot.runtime.latestSeq = 3
+        boot.runtime.events = [
+          {
+            event: interaction.kind === 'plan' ? 'plan_draft' : 'ask_request',
+            seq: 2,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_bottom_control',
+            interaction,
+            timestamp: now,
+          },
+          {
+            event: 'turn_paused',
+            seq: 3,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_bottom_control',
+            interaction,
+            timestamp: now,
+          },
+        ]
+      } else if (visualControlMode === 'plan-stream') {
+        boot.runtime.latestSeq = 2
+        boot.runtime.events = [
+          {
+            event: 'plan_draft_delta',
+            seq: 2,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_bottom_plan_stream',
+            tool_call_id: 'visual-bottom',
+            interaction: visualPlanInteraction,
+            timestamp: now,
+          },
+        ]
+      }
+      let visualRuntimeSeq = boot.runtime.latestSeq
 
       function emitVisualRuntime(event: Record<string, unknown>) {
         const payload = { ...event, seq: ++visualRuntimeSeq }
@@ -1835,6 +2062,12 @@ async function installVisualCoreBridge(page: Page) {
               )
               sessions.unshift(created)
               return created
+            }
+            case 'chat.listQueuedPrompts': {
+              const ownerSessionId = String(
+                ((args[0] || {}) as { sessionId?: string }).sessionId || '',
+              )
+              return ownerSessionId === 'build-ui' ? visualQueuedPrompts : []
             }
             case 'projects.resolve':
               return project
@@ -1912,6 +2145,7 @@ async function installVisualCoreBridge(page: Page) {
                 ...input,
                 entryId,
                 apiKey: '',
+                effectiveDisplayName: input.displayName || input.modelId,
                 resolvedProfile: {
                   ...visualModelEntry.resolvedProfile,
                   toolCall: overrides.toolCall ?? true,
@@ -2705,7 +2939,7 @@ async function assertFloatingModeMenu(page: Page) {
   const menu = page.locator('.mode-menu')
   await expect(menu).toBeVisible()
   await expect(page.locator('.mode-option')).toHaveCount(3)
-  for (const label of ['询问确认', '接受编辑', '自动执行']) {
+  for (const label of ['询问确认', '智能自动', '完全访问']) {
     await expect(menu.getByText(label, { exact: true })).toBeVisible()
   }
   await expect(menu.getByText('计划预览', { exact: true })).toHaveCount(0)

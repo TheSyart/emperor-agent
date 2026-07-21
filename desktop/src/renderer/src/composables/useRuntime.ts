@@ -7,6 +7,8 @@ import type {
   ChatSendPayload,
   ControlInteraction,
   PendingState,
+  QueueDraftRecovery,
+  QueuedPromptItem,
   RequestedSkill,
   RuntimeEventEnvelope,
   RuntimeHistoryItem,
@@ -22,10 +24,12 @@ import {
   createProjectionRuntime,
   finishActiveThought,
   finishTimedState as finishTimedStateAt,
+  ensureControlInteractionInTimeline,
   isChatProjectionEvent,
   type ChatProjectionState,
 } from '../runtime/chatProjection'
 import { isGoalRuntimeEvent, sortRuntimeEvents } from '../runtime/events'
+import { pendingInteractionForSession } from '../components/chat/bottomControlPanel'
 import {
   findSubagent,
   findSubagentTool,
@@ -45,7 +49,6 @@ import { schedulerMessageMeta } from '../runtime/schedulerMeta'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
 import { settleRunningToolSegments } from '../runtime/toolStatus'
 import { core } from '../api/http'
-import { compactJson } from '../utils/format'
 import { ActionEffectStore } from '../runtime/actionEffect'
 import {
   createPendingProjectionState,
@@ -95,6 +98,8 @@ function nextId(prefix: string) {
 }
 
 const SCHEDULER_DONE_PENDING_MS = 2500
+const PROMPT_QUEUE_FULL_MESSAGE =
+  '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
 export function useRuntime(options: {
   boot: Ref<BootstrapPayload | null>
@@ -114,6 +119,11 @@ export function useRuntime(options: {
   refreshSessions?: () => Promise<void>
 }) {
   const messages = ref<ChatMessage[]>([])
+  const queuedPrompts = ref<QueuedPromptItem[]>([])
+  const queueDraftRecovery = ref<QueueDraftRecovery | null>(null)
+  const pendingInteractionsBySession = reactive<
+    Record<string, ControlInteraction>
+  >({})
   const busy = ref(false)
   const status = ref<RuntimeStatus>('connecting')
   const currentAssistantId = ref<string | null>(null)
@@ -361,17 +371,30 @@ export function useRuntime(options: {
 
   function enqueueLocalPrompt(
     content: string,
+    delivery: 'queue' | 'interject',
     attachments: AttachmentRef[],
-  ): ChatMessage {
-    const userMsg: ChatMessage = {
-      id: nextId('user'),
-      role: 'user',
+    requestedSkills: RequestedSkill[],
+    hasCapabilityRefs: boolean,
+  ): QueuedPromptItem {
+    const id = nextId('prompt')
+    const prompt: QueuedPromptItem = {
+      id,
+      turnId: '',
+      clientMessageId: id,
       content,
-      deliveryState: 'queued',
+      delivery,
+      status: delivery === 'interject' ? 'interjecting' : 'queued',
+      supportsInterjection:
+        delivery === 'queue' &&
+        attachments.length === 0 &&
+        requestedSkills.length === 0,
+      createdOrder: Date.now(),
+      attachmentCount: attachments.length,
+      requestedSkillNames: requestedSkills.map((skill) => skill.name),
+      hasCapabilityRefs,
     }
-    if (attachments.length) userMsg.attachments = attachments
-    messages.value.push(userMsg)
-    return userMsg
+    queuedPrompts.value.push(prompt)
+    return prompt
   }
 
   function sendMessageViaCore(opts: {
@@ -391,7 +414,13 @@ export function useRuntime(options: {
       ? draftSubmitPayload(activeSessionId)
       : null
     const userMsg = opts.delivery
-      ? enqueueLocalPrompt(opts.displayText || opts.text, opts.attachments)
+      ? enqueueLocalPrompt(
+          opts.displayText || opts.text,
+          opts.delivery,
+          opts.attachments,
+          opts.requestedSkills,
+          opts.displayText !== opts.text,
+        )
       : enqueueLocalTurn(opts.displayText || opts.text, opts.attachments)
     status.value = 'ready'
     void invokeCore('chat.submit', {
@@ -405,9 +434,24 @@ export function useRuntime(options: {
       ...(draftPayload ?? {}),
     }).catch((err) => {
       if (opts.delivery) {
-        if (userMsg.role === 'user') {
-          userMsg.deliveryState = 'cancelled'
-          userMsg.deliveryReason = displayError(err)
+        queuedPrompts.value = queuedPrompts.value.filter(
+          (prompt) => prompt.id !== userMsg.id,
+        )
+        if (queuedPromptCancellationCode(err)) return
+        if (promptQueueFullCode(err)) {
+          queueDraftRecovery.value = {
+            sessionId: activeSessionId,
+            payload: {
+              content: opts.text,
+              displayContent: opts.displayText,
+              delivery: opts.delivery,
+              requestedSkills: [...opts.requestedSkills],
+              attachments: [...opts.attachments],
+            },
+          }
+          options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
+          void refreshQueuedPrompts(activeSessionId)
+          return
         }
         options.showToast(displayError(err))
         return
@@ -429,6 +473,73 @@ export function useRuntime(options: {
           project_name: draft?.project_name ?? null,
         },
       },
+    }
+  }
+
+  async function refreshQueuedPrompts(ownerSessionId = sessionId.value) {
+    if (
+      !hasCoreBridge() ||
+      !ownerSessionId ||
+      isDraftSessionId(ownerSessionId)
+    ) {
+      queuedPrompts.value = []
+      return
+    }
+    try {
+      const records = await invokeCore('chat.listQueuedPrompts', {
+        sessionId: ownerSessionId,
+      })
+      if (ownerSessionId !== sessionId.value) return
+      queuedPrompts.value = records.map((record) => ({
+        id: record.id,
+        turnId: record.turnId,
+        clientMessageId: record.clientMessageId,
+        content: record.displayContent || '',
+        delivery: record.delivery,
+        status: record.delivery === 'interject' ? 'interjecting' : 'queued',
+        supportsInterjection: record.supportsInterjection,
+        createdOrder: record.createdOrder,
+        attachmentCount: record.attachmentIds.length,
+        requestedSkillNames: record.requestedSkills.map((skill) => skill.name),
+        hasCapabilityRefs:
+          record.requestedSkills.length > 0 ||
+          (Boolean(record.displayContent) &&
+            record.displayContent !== record.content),
+      }))
+    } catch (error) {
+      options.showToast(displayError(error))
+    }
+  }
+
+  async function manageQueuedPrompt(
+    promptId: string,
+    action: 'cancel' | 'interject',
+  ): Promise<boolean> {
+    if (!sessionId.value || isDraftSessionId(sessionId.value)) return false
+    try {
+      const result = await invokeCore('chat.manageQueuedPrompt', {
+        sessionId: sessionId.value,
+        promptId,
+        action,
+      })
+      if (!result.ok) {
+        options.showToast(
+          result.reason === 'prompt_already_started' ||
+            result.reason === 'prompt_not_queued'
+            ? '该消息已经开始处理，无法再修改队列。'
+            : '无法更新队列消息。',
+        )
+        await refreshQueuedPrompts()
+        return false
+      }
+      queuedPrompts.value = queuedPrompts.value.filter(
+        (prompt) => prompt.id !== promptId,
+      )
+      return true
+    } catch (error) {
+      options.showToast(displayError(error))
+      await refreshQueuedPrompts()
+      return false
     }
   }
 
@@ -670,6 +781,28 @@ export function useRuntime(options: {
     return ''
   }
 
+  function queuedPromptCancellationCode(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    return (
+      String((error as { code?: unknown }).code || '') ===
+      'session_runtime_command_cancelled'
+    )
+  }
+
+  function promptQueueFullCode(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    return (
+      String((error as { code?: unknown }).code || '') === 'prompt_queue_full'
+    )
+  }
+
+  function clearQueueDraftRecovery(ownerSessionId?: string): void {
+    const recovery = queueDraftRecovery.value
+    if (!recovery) return
+    if (ownerSessionId && recovery.sessionId !== ownerSessionId) return
+    queueDraftRecovery.value = null
+  }
+
   function syncSessionProjection(state: SessionProjectionState): void {
     sessionId.value = state.activeSessionId
     lastSeq.value = state.activeLastSeq
@@ -710,12 +843,13 @@ export function useRuntime(options: {
   }
 
   function syncSessionControlPendingFromEvent(data: WsEvent): void {
-    const ownerSessionId = eventOwnerSessionId(data)
+    const ownerSessionId = eventOwnerSessionId(data) || sessionId.value
     if (!ownerSessionId) return
     if (
       (data.event === 'ask_request' || data.event === 'plan_draft') &&
       data.interaction
     ) {
+      indexPendingInteraction(ownerSessionId, data.interaction)
       setBootControlPending(data.interaction)
       options.onSessionControlPendingChanged?.(ownerSessionId, data.interaction)
       return
@@ -726,9 +860,47 @@ export function useRuntime(options: {
       data.event === 'plan_approved' ||
       data.event === 'interaction_cancelled'
     ) {
-      clearBootControlPending(data)
+      const terminalInteractionId = String(data.interaction?.id || '').trim()
+      const current = pendingInteractionsBySession[ownerSessionId]
+      if (
+        terminalInteractionId &&
+        current &&
+        current.id !== terminalInteractionId
+      )
+        return
+      delete pendingInteractionsBySession[ownerSessionId]
+      const bootPending = options.boot.value?.control?.pending
+      if (
+        !terminalInteractionId ||
+        !bootPending ||
+        bootPending.id === terminalInteractionId
+      )
+        clearBootControlPending(data)
       options.onSessionControlPendingChanged?.(ownerSessionId, null)
     }
+  }
+
+  function indexPendingInteraction(
+    ownerSessionId: string,
+    interaction: ControlInteraction | null | undefined,
+  ): void {
+    const owner = String(ownerSessionId || '').trim()
+    if (!owner) return
+    if (!interaction || interaction.status !== 'waiting') {
+      delete pendingInteractionsBySession[owner]
+      return
+    }
+    pendingInteractionsBySession[owner] = interaction
+  }
+
+  function hydratePendingInteraction(ownerSessionId: string): void {
+    const owner = String(ownerSessionId || '').trim()
+    if (!owner) return
+    const interaction = pendingInteractionForSession(
+      options.boot.value?.control || null,
+      options.resolveDraftSession?.(owner) || null,
+    )
+    indexPendingInteraction(owner, interaction)
   }
 
   function setBootControlPending(interaction: ControlInteraction): void {
@@ -858,6 +1030,11 @@ export function useRuntime(options: {
     messages.value = []
     currentAssistantId.value = null
     busy.value = false
+    planProjection.plans.splice(0, planProjection.plans.length)
+    planProjection.entryDecisions.splice(
+      0,
+      planProjection.entryDecisions.length,
+    )
     updatePending()
     projectionRuntime = createProjectionRuntime()
     rehydrating = true
@@ -876,7 +1053,16 @@ export function useRuntime(options: {
             projectionRuntime,
             { sessionId: scope },
           )
+          applyPlanProjectionEvent(event as WsEvent)
         }
+      }
+      const pendingInteraction = pendingInteractionForSession(
+        options.boot.value?.control || null,
+        options.resolveDraftSession?.(String(scope || '')) || null,
+      )
+      if (pendingInteraction) {
+        indexPendingInteraction(String(scope || ''), pendingInteraction)
+        ensureControlInteractionInTimeline(liveProjection, pendingInteraction)
       }
       sessionStore.dispatch({
         type: 'session_replay_completed',
@@ -925,10 +1111,8 @@ export function useRuntime(options: {
       return
     }
 
-    if (decision?.foreign) {
-      syncSessionControlPendingFromEvent(data)
-      return
-    }
+    if (!decision?.duplicate) syncSessionControlPendingFromEvent(data)
+    if (decision?.foreign) return
     if (decision?.accepted === false) return
 
     runtimeEffectStore.dispatch({
@@ -951,6 +1135,7 @@ export function useRuntime(options: {
     if (isChatProjectionEvent(data as RuntimeEventEnvelope)) {
       const assistantBefore = currentAssistant.value
       applyChatProjectionEvent(liveProjection, data, projectionRuntime)
+      applyPlanProjectionEvent(data)
       applyLiveChatSideEffects(data, assistantBefore)
       return
     }
@@ -1049,28 +1234,7 @@ export function useRuntime(options: {
       return
     }
 
-    if (
-      data.event === 'plan_entry_decision' ||
-      data.event === 'plan_runtime_update' ||
-      data.event === 'plan_step_update' ||
-      data.event === 'plan_verification_start' ||
-      data.event === 'plan_verification_done'
-    ) {
-      const next = applyPlanEvent(
-        {
-          plans: planProjection.plans,
-          entryDecisions: planProjection.entryDecisions,
-        },
-        data,
-      )
-      planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
-      planProjection.entryDecisions.splice(
-        0,
-        planProjection.entryDecisions.length,
-        ...next.entryDecisions,
-      )
-      return
-    }
+    if (applyPlanProjectionEvent(data)) return
 
     if (isTaskRuntimeEvent(data)) {
       if (origin === 'live')
@@ -1100,12 +1264,46 @@ export function useRuntime(options: {
     handleSubagentEvent(data)
   }
 
+  function applyPlanProjectionEvent(data: WsEvent): boolean {
+    if (
+      data.event !== 'plan_approved' &&
+      data.event !== 'plan_entry_decision' &&
+      data.event !== 'plan_runtime_update' &&
+      data.event !== 'plan_step_update' &&
+      data.event !== 'plan_verification_start' &&
+      data.event !== 'plan_verification_done'
+    )
+      return false
+    const next = applyPlanEvent(
+      {
+        plans: planProjection.plans,
+        entryDecisions: planProjection.entryDecisions,
+      },
+      data,
+    )
+    planProjection.plans.splice(0, planProjection.plans.length, ...next.plans)
+    planProjection.entryDecisions.splice(
+      0,
+      planProjection.entryDecisions.length,
+      ...next.entryDecisions,
+    )
+    return true
+  }
+
   /** live 专属副作用（pending 条/busy/boot 同步/装饰性 thought）；投影本体已由 reducer 完成。 */
   function applyLiveChatSideEffects(
     data: WsEvent,
     assistantBefore?: AssistantMessage,
   ) {
     if (data.event === 'user_message') {
+      const promptId = data.client_message_id || ''
+      queuedPrompts.value = queuedPrompts.value.filter(
+        (prompt) =>
+          !(
+            (promptId && prompt.clientMessageId === promptId) ||
+            (data.turn_id && prompt.turnId === data.turn_id)
+          ),
+      )
       if (
         (data.ui_hidden || data.source === 'control') &&
         currentAssistant.value?.streaming
@@ -1113,41 +1311,58 @@ export function useRuntime(options: {
         busy.value = true
       return
     }
+    if (data.event === 'prompt_queued') {
+      const id = data.prompt_id || data.client_message_id || ''
+      if (!id) return
+      const existing = queuedPrompts.value.find((prompt) => prompt.id === id)
+      const next: QueuedPromptItem = {
+        id,
+        turnId: data.turn_id || existing?.turnId || '',
+        clientMessageId: data.client_message_id || id,
+        content: data.content || existing?.content || '',
+        delivery: data.delivery || existing?.delivery || 'queue',
+        status: data.delivery === 'interject' ? 'interjecting' : 'queued',
+        supportsInterjection:
+          data.delivery === 'queue' && (existing?.supportsInterjection ?? true),
+        createdOrder: existing?.createdOrder ?? Date.now(),
+        attachmentCount: existing?.attachmentCount ?? 0,
+        requestedSkillNames: existing?.requestedSkillNames ?? [],
+        hasCapabilityRefs: existing?.hasCapabilityRefs ?? false,
+      }
+      if (existing) Object.assign(existing, next)
+      else queuedPrompts.value.push(next)
+      return
+    }
     if (data.event === 'prompt_dequeued') {
+      queuedPrompts.value = queuedPrompts.value.filter(
+        (prompt) => prompt.id !== (data.prompt_id || data.client_message_id),
+      )
       busy.value = true
-      updatePending('开始处理排队消息', '')
       return
     }
     if (data.event === 'prompt_interjected') {
+      queuedPrompts.value = queuedPrompts.value.filter(
+        (prompt) => prompt.id !== (data.prompt_id || data.client_message_id),
+      )
       busy.value = true
-      updatePending('已在安全边界插话', '')
       return
     }
     if (data.event === 'prompt_cancelled') {
-      updatePending('消息已取消', data.reason || '', 'done', 2500)
-      return
-    }
-    if (data.event === 'message_delta') {
-      updatePending('AI 正在思量...', '')
-      return
-    }
-    if (data.event === 'agent_thought') {
-      updatePending(data.label || '思考参考', data.summary || '')
-      return
-    }
-    if (data.event === 'tool_run_queued' || data.event === 'tool_run_started') {
-      updatePending(
-        data.event === 'tool_run_queued'
-          ? `等待执行: ${data.name}`
-          : `正在执行: ${data.name}`,
-        data.event === 'tool_run_queued'
-          ? compactJson(data.arguments, 180)
-          : '',
+      queuedPrompts.value = queuedPrompts.value.filter(
+        (prompt) => prompt.id !== (data.prompt_id || data.client_message_id),
       )
       return
     }
+    if (data.event === 'message_delta') {
+      return
+    }
+    if (data.event === 'agent_thought') {
+      return
+    }
+    if (data.event === 'tool_run_queued' || data.event === 'tool_run_started') {
+      return
+    }
     if (data.event === 'tool_call') {
-      updatePending(`正在执行: ${data.name}`, compactJson(data.arguments, 180))
       return
     }
     if (
@@ -1176,23 +1391,13 @@ export function useRuntime(options: {
           seg.type === 'tool' &&
           (seg.status === 'running' || seg.status === 'queued'),
       )
-      if (running.length)
-        updatePending(
-          `正在执行: ${running[0].name}`,
-          `剩余 ${running.length} 个工具`,
-        )
-      else if (assistant?.streaming)
+      if (!running.length && assistant?.streaming)
         startThought(assistant, data, '整理工具结果')
       return
     }
     if (data.event === 'tool_error') {
       const assistant = assistantForTurn(data.turn_id)
       if (assistant?.streaming) startThought(assistant, data, '处理工具错误')
-      updatePending(
-        `工具 ${data.name || ''} 执行出错`,
-        data.message || '',
-        'error',
-      )
       return
     }
     if (data.event === 'assistant_done') {
@@ -1213,13 +1418,6 @@ export function useRuntime(options: {
     }
     if (data.event === 'ask_request' || data.event === 'plan_draft') {
       if (!data.interaction) return
-      setBootControlPending(data.interaction)
-      const ownerSessionId = eventOwnerSessionId(data) || sessionId.value
-      if (ownerSessionId)
-        options.onSessionControlPendingChanged?.(
-          ownerSessionId,
-          data.interaction,
-        )
       updatePending(
         data.event === 'plan_draft' ? '计划待预览' : '等待你回答',
         data.interaction.title || data.interaction.context || '',
@@ -1227,45 +1425,13 @@ export function useRuntime(options: {
       )
       return
     }
-    if (data.event === 'plan_draft_delta') {
-      updatePending(
-        '正在生成计划...',
-        data.interaction?.title || data.interaction?.summary || '',
-        'running',
-      )
-      return
-    }
+    if (data.event === 'plan_draft_delta') return
     if (
       data.event === 'ask_answered' ||
       data.event === 'plan_comment_added' ||
       data.event === 'plan_approved' ||
       data.event === 'interaction_cancelled'
     ) {
-      if ('control' in data && data.control && options.boot.value)
-        options.boot.value.control = data.control
-      const ownerSessionId = eventOwnerSessionId(data) || sessionId.value
-      if (ownerSessionId)
-        options.onSessionControlPendingChanged?.(ownerSessionId, null)
-      if (data.event === 'plan_approved') {
-        const next = applyPlanEvent(
-          {
-            plans: planProjection.plans,
-            entryDecisions: planProjection.entryDecisions,
-          },
-          data,
-        )
-        planProjection.plans.splice(
-          0,
-          planProjection.plans.length,
-          ...next.plans,
-        )
-        planProjection.entryDecisions.splice(
-          0,
-          planProjection.entryDecisions.length,
-          ...next.entryDecisions,
-        )
-        updatePending('计划已批准，开始执行', '', 'done')
-      }
       if (data.event === 'interaction_cancelled')
         updatePending('已取消等待', '', 'done')
       return
@@ -1329,7 +1495,10 @@ export function useRuntime(options: {
     if (options.boot.value) {
       options.boot.value.model = data.model || options.boot.value.model
       options.boot.value.provider = data.provider || options.boot.value.provider
-      if (data.control) options.boot.value.control = data.control
+      if (data.control) {
+        options.boot.value.control = data.control
+        hydratePendingInteraction(sessionId.value)
+      }
     }
     if (!serverRestarted && currentAssistant.value?.streaming && hasReplay) {
       updatePending(
@@ -1926,6 +2095,10 @@ export function useRuntime(options: {
 
   return {
     messages,
+    queuedPrompts,
+    queueDraftRecovery,
+    clearQueueDraftRecovery,
+    pendingInteractionsBySession,
     busy,
     status,
     sessionId,
@@ -1945,21 +2118,31 @@ export function useRuntime(options: {
     eventTransportText,
     switchSession(id: string) {
       messages.value = []
+      queuedPrompts.value = []
       currentAssistantId.value = null
       busy.value = false
       projectionRuntime = createProjectionRuntime()
+      planProjection.plans.splice(0, planProjection.plans.length)
+      planProjection.entryDecisions.splice(
+        0,
+        planProjection.entryDecisions.length,
+      )
       syncTaskProjection(createTaskProjectionState())
       Object.assign(goalProjection, createGoalProjectionState())
       updatePending()
+      hydratePendingInteraction(id)
       if (hasCoreBridge())
         sessionStore.dispatch({ type: 'session_switched', sessionId: id })
       else {
         sessionStore.dispatch({ type: 'session_switched', sessionId: id })
         markCoreBridgeUnavailable(true)
       }
+      void refreshQueuedPrompts(id)
     },
     connectSocket,
     sendMessage,
+    refreshQueuedPrompts,
+    manageQueuedPrompt,
     sendInteractionAnswer,
     sendPlanComment,
     approvePlan,

@@ -212,6 +212,26 @@ function isHighRiskSegment(segment: string[]): boolean {
   const sub = parts[1] ?? ''
   if (parts.some((part) => basename(part) === 'sudo')) return true
   if (head === 'git' && sub === 'push') return true
+  if (head === 'git' && (sub === 'restore' || sub === 'clean')) return true
+  if (
+    head === 'git' &&
+    sub === 'checkout' &&
+    (parts.includes('-f') ||
+      parts.includes('--force') ||
+      parts.includes('--') ||
+      parts.length > 3)
+  )
+    return true
+  if (
+    head === 'git' &&
+    sub === 'switch' &&
+    parts.some((part) =>
+      ['-f', '--force', '--discard-changes', '-C', '--force-create'].includes(
+        part,
+      ),
+    )
+  )
+    return true
   if (
     head === 'gh' &&
     (sub === 'release' ||
@@ -235,6 +255,12 @@ function isHighRiskSegment(segment: string[]): boolean {
   if (head === 'chmod' || head === 'chown' || head === 'kubectl') return true
   if (head === 'deploy' || head === 'publish' || head === 'release') return true
   if (head === 'npm' && (sub === 'install' || sub === 'publish')) return true
+  if (
+    ['npm', 'pnpm', 'yarn', 'bun'].includes(head) &&
+    sub === 'run' &&
+    /^(?:clean|deploy|publish|release)(?:[:._-]|$)/i.test(parts[2] ?? '')
+  )
+    return true
   if (head === 'pip' && sub === 'install') return true
   if (head === 'brew' && sub === 'install') return true
   if (

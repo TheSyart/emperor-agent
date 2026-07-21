@@ -89,9 +89,7 @@ export interface EffectiveConfigSnapshot {
   entries: EffectiveConfigEntry[]
 }
 
-export function defineConfigKey<T>(
-  options: ConfigKeyOptions<T>,
-): ConfigKey<T> {
+export function defineConfigKey<T>(options: ConfigKeyOptions<T>): ConfigKey<T> {
   const id = String(options.id ?? '').trim()
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(id))
     throw new Error(`Invalid config key: ${id}`)
@@ -158,9 +156,7 @@ export class ConfigResolver {
         )
         continue
       }
-      const merge = untrustedProject
-        ? key.restrictUntrustedProject!
-        : key.merge
+      const merge = untrustedProject ? key.restrictUntrustedProject! : key.merge
       const merged = cloneValue(
         merge(value, candidate, {
           key,
@@ -191,9 +187,7 @@ export class ConfigResolver {
           key,
           candidate,
           'applied',
-          untrustedProject
-            ? 'untrusted_project_restriction'
-            : 'layer_merged',
+          untrustedProject ? 'untrusted_project_restriction' : 'layer_merged',
         ),
       )
     }
@@ -227,10 +221,7 @@ export function effectiveConfigSnapshot(
 }
 
 function effectiveEntry(resolved: Resolved<any>): EffectiveConfigEntry {
-  const value = redactConfigValue(
-    resolved.value,
-    resolved.key.secretPaths,
-  )
+  const value = redactConfigValue(resolved.value, resolved.key.secretPaths)
   return {
     key: resolved.key.id,
     value,
@@ -283,7 +274,9 @@ function redactAt(
 function matchesPath(path: string[], pattern: string[]): boolean {
   return (
     path.length === pattern.length &&
-    path.every((part, index) => pattern[index] === '*' || pattern[index] === part)
+    path.every(
+      (part, index) => pattern[index] === '*' || pattern[index] === part,
+    )
   )
 }
 
@@ -325,10 +318,7 @@ function invalidSourceReason(source: ConfigSource): string | null {
     return 'managed_source_not_verified'
   if (source.kind !== 'managed' && source.trust === 'managed')
     return 'managed_trust_kind_mismatch'
-  if (
-    source.trust === 'untrusted' &&
-    source.kind !== 'project'
-  )
+  if (source.trust === 'untrusted' && source.kind !== 'project')
     return 'untrusted_source_not_allowed'
   return null
 }
@@ -343,9 +333,7 @@ function traceEntry<T>(
     source: { ...candidate.source },
     status,
     reason,
-    fingerprint: digest(
-      redactConfigValue(candidate.value, key.secretPaths),
-    ),
+    fingerprint: digest(redactConfigValue(candidate.value, key.secretPaths)),
   }
 }
 

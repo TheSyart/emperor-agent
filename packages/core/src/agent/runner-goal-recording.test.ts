@@ -1126,9 +1126,6 @@ function permissionHost(permission: {
     createAsk: () => {
       throw new Error('not expected')
     },
-    createPlanFromText: () => {
-      throw new Error('not expected')
-    },
   }
 }
 

@@ -15,7 +15,6 @@ import {
 import {
   executesProjectCodeCommand,
   isHighRiskCommand,
-  isLowRiskCommand,
   isSensitivePath,
 } from '../tools/resolvers'
 import { resolveToolProfile } from './resolve-profile'
@@ -32,11 +31,17 @@ import {
 import {
   analyzeShellCommand,
   analyzeShellCommandFailClosed,
-  isShellAstReadonly,
+  isShellAstReadonlySequence,
   shellAstSummary,
   type ShellAstAnalysis,
   type ShellCommandAnalyzer,
+  type ShellReadonlyContext,
 } from './shell-ast'
+import { WorkspacePolicy } from './workspace-policy'
+
+interface PermissionAssessmentContext extends ShellReadonlyContext {
+  readonly registry?: ToolRegistry | null
+}
 
 export class PermissionPipeline {
   private readonly userRules: PermissionRule[]
@@ -80,7 +85,7 @@ export class PermissionPipeline {
     toolName: string,
     args: Record<string, unknown> | null | undefined,
     mode: string,
-    opts?: { registry?: ToolRegistry | null },
+    opts?: PermissionAssessmentContext,
   ): PermissionDecision {
     const argv = args ?? {}
     const normalizedMode = normalizeMode(mode)
@@ -95,6 +100,13 @@ export class PermissionPipeline {
       profile.name === 'run_command'
         ? analyzeShellCommandFailClosed(profile.command, this.shellAnalyzer)
         : null
+    const containment = this.assessWorkspaceContainment(
+      profile,
+      trace,
+      opts ?? {},
+    )
+    if (containment)
+      return explainDecision(containment, resolution, profile, shellAnalysis)
     for (const candidate of resolution.candidates) {
       if (!candidate.matched) continue
       trace.push(
@@ -112,8 +124,40 @@ export class PermissionPipeline {
       resolution,
       mode,
       shellAnalysis,
+      opts ?? {},
     )
     return explainDecision(decision, resolution, profile, shellAnalysis)
+  }
+
+  private assessWorkspaceContainment(
+    profile: ToolPermissionProfile,
+    trace: PermissionTraceEntry[],
+    context: PermissionAssessmentContext,
+  ): PermissionDecision | null {
+    const workspaceRoot = String(context.workspaceRoot ?? '').trim()
+    if (!workspaceRoot || !profile.paths.length) return null
+    const policy = new WorkspacePolicy({ workspaceRoot })
+    const access = profile.readOnly ? 'read' : 'write'
+    for (const path of profile.paths) {
+      const decision = policy.resolvePath(path, access, {
+        baseRoot: context.cwd ?? workspaceRoot,
+      })
+      if (decision.allowed) continue
+      trace.push(
+        traceEntry(
+          'containment.workspace',
+          'deny',
+          `${decision.requestedPath}: ${decision.reason}`,
+        ),
+      )
+      return deny(
+        profile,
+        'containment.workspace',
+        `workspace containment denied ${profile.name}: ${decision.reason}`,
+        trace,
+      )
+    }
+    return null
   }
 
   private assessProfile(
@@ -123,6 +167,7 @@ export class PermissionPipeline {
     resolution: PermissionRuleResolution,
     rawMode: string,
     shellAnalysis: ShellAstAnalysis | null,
+    context: ShellReadonlyContext,
   ): PermissionDecision {
     if (
       profile.name === 'propose_plan' &&
@@ -153,58 +198,90 @@ export class PermissionPipeline {
     }
 
     if (normalizedMode === PermissionMode.PLAN) {
-      const constrained = this.assessPlan(profile, trace)
+      const constrained = this.assessPlan(
+        profile,
+        trace,
+        shellAnalysis,
+        context,
+      )
       if (!constrained.allowed) return constrained
       return this.assessUserRule(profile, trace, resolution) ?? constrained
     }
 
-    if (normalizedMode === PermissionMode.AUTO) {
-      // AUTO 只能自动执行经正向证明为只读的诊断命令。脚本、解释器、构建、测试和
-      // 未知 executable 都可能承载任意副作用，不能再依赖有限黑名单判断安全性。
+    if (normalizedMode === PermissionMode.FULL_ACCESS) {
+      const explicitDeny = this.assessDenyRule(profile, trace, resolution)
+      if (explicitDeny) return explicitDeny
+      trace.push(
+        traceEntry(
+          'mode.full_access',
+          'allow',
+          'permission approval is disabled in full access mode',
+        ),
+      )
+      return allow(profile, 'mode.full_access', trace)
+    }
+
+    if (normalizedMode === PermissionMode.SMART_AUTO) {
       if (profile.name === 'run_command') {
-        if (shellAnalysis && isShellAstReadonly(shellAnalysis)) {
-          const userRuleDecision = this.assessUserRule(
-            profile,
-            trace,
-            resolution,
-          )
-          if (userRuleDecision) return userRuleDecision
+        const tightening = this.assessTighteningRule(profile, trace, resolution)
+        if (tightening) return tightening
+        if (isHighRiskCommand(profile.command)) {
           trace.push(
             traceEntry(
-              'mode.auto.read_only_command',
+              'mode.smart_auto.high_risk',
+              'approval',
+              profile.command.slice(0, 160),
+            ),
+          )
+          return approval(
+            profile,
+            'mode.smart_auto.high_risk',
+            `external, destructive, or privileged command requires approval in smart_auto: ${profile.command.slice(0, 160)}`,
+            trace,
+            RiskLevel.HIGH,
+          )
+        }
+        if (
+          shellAnalysis &&
+          isShellAstReadonlySequence(shellAnalysis, context)
+        ) {
+          trace.push(
+            traceEntry(
+              'mode.smart_auto.read_only_sequence',
               'allow',
               profile.command.slice(0, 160),
             ),
           )
-          return allow(profile, 'mode.auto.read_only_command', trace)
+          return allow(profile, 'mode.smart_auto.read_only_sequence', trace)
         }
-        const tightening = this.assessTighteningRule(profile, trace, resolution)
-        if (tightening) return tightening
+        if (shellAnalysis && isLocalDevelopmentCommand(shellAnalysis)) {
+          trace.push(
+            traceEntry(
+              'mode.smart_auto.local_development',
+              'allow',
+              profile.command.slice(0, 160),
+            ),
+          )
+          return allow(profile, 'mode.smart_auto.local_development', trace)
+        }
         trace.push(
           traceEntry(
-            'mode.auto.command_approval',
+            'mode.smart_auto.semantic_review',
             'approval',
             profile.command.slice(0, 160),
           ),
         )
         return approval(
           profile,
-          'mode.auto.command_approval',
-          `shell commands not proven read-only require approval in auto mode: ${profile.command.slice(0, 160)}`,
+          'mode.smart_auto.semantic_review',
+          `command requires semantic review in smart_auto mode: ${profile.command.slice(0, 160)}`,
           trace,
-          RiskLevel.HIGH,
+          RiskLevel.MEDIUM,
         )
       }
       const userRuleDecision = this.assessUserRule(profile, trace, resolution)
       if (userRuleDecision) return userRuleDecision
-      trace.push(
-        traceEntry(
-          'mode.auto',
-          'allow',
-          'policy approval disabled for auto mode',
-        ),
-      )
-      return allow(profile, 'mode.auto', trace)
+      return this.assessSmartAuto(profile, trace)
     }
 
     if (normalizedMode === PermissionMode.ASK_BEFORE_EDIT) {
@@ -241,17 +318,6 @@ export class PermissionPipeline {
       const userRuleDecision = this.assessUserRule(profile, trace, resolution)
       if (userRuleDecision) return userRuleDecision
       return this.assessAskBeforeEdit(profile, trace)
-    }
-
-    if (normalizedMode === PermissionMode.ACCEPT_EDITS) {
-      if (profile.name === 'run_command') {
-        const tightening = this.assessTighteningRule(profile, trace, resolution)
-        if (tightening) return tightening
-        return this.assessAcceptEdits(profile, trace)
-      }
-      const userRuleDecision = this.assessUserRule(profile, trace, resolution)
-      if (userRuleDecision) return userRuleDecision
-      return this.assessAcceptEdits(profile, trace)
     }
 
     const userRuleDecision = this.assessUserRule(profile, trace, resolution)
@@ -296,6 +362,8 @@ export class PermissionPipeline {
   private assessPlan(
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
+    shellAnalysis: ShellAstAnalysis | null,
+    context: ShellReadonlyContext,
   ): PermissionDecision {
     if (profile.name === 'propose_plan') {
       trace.push(
@@ -334,7 +402,13 @@ export class PermissionPipeline {
       )
     }
 
-    if (profile.readOnly) {
+    if (
+      profile.readOnly &&
+      (profile.name !== 'run_command' ||
+        Boolean(
+          shellAnalysis && isShellAstReadonlySequence(shellAnalysis, context),
+        ))
+    ) {
       trace.push(
         traceEntry('plan.read_only', 'allow', 'tool profile is read-only'),
       )
@@ -378,10 +452,23 @@ export class PermissionPipeline {
     return this.assessUserRule(profile, trace, resolution)
   }
 
+  private assessDenyRule(
+    profile: ToolPermissionProfile,
+    trace: PermissionTraceEntry[],
+    resolution: PermissionRuleResolution,
+  ): PermissionDecision | null {
+    if (resolution.winner?.action !== 'deny') return null
+    return this.assessUserRule(profile, trace, resolution)
+  }
+
   private assessAskBeforeEdit(
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
   ): PermissionDecision {
+    if (profile.readOnly && profile.name !== 'run_command') {
+      trace.push(traceEntry('ask.read_only', 'allow', profile.name))
+      return allow(profile, 'ask.read_only', trace)
+    }
     if (profile.name === 'run_command') {
       if (executesProjectCodeCommand(profile.command)) {
         trace.push(
@@ -398,16 +485,6 @@ export class PermissionPipeline {
           trace,
           RiskLevel.HIGH,
         )
-      }
-      if (isLowRiskCommand(profile.command)) {
-        trace.push(
-          traceEntry(
-            'ask.run_command.low_risk_allowlist',
-            'allow',
-            profile.command.slice(0, 160),
-          ),
-        )
-        return allow(profile, 'ask.run_command.low_risk_allowlist', trace)
       }
       const risk = isHighRiskCommand(profile.command)
         ? RiskLevel.HIGH
@@ -459,6 +536,17 @@ export class PermissionPipeline {
       return this.assessSchedulerInAskMode(profile, trace)
     }
 
+    if (isInternalAgentStateMutation(profile.name)) {
+      trace.push(
+        traceEntry(
+          'ask.internal_agent_state',
+          'allow',
+          'bounded Core-owned state transition',
+        ),
+      )
+      return allow(profile, 'ask.internal_agent_state', trace)
+    }
+
     const sensitivePath = sensitiveProfilePath(profile)
     if (isManagedFileMutation(profile.name) && sensitivePath) {
       trace.push(traceEntry('ask.sensitive_path', 'approval', sensitivePath))
@@ -470,52 +558,50 @@ export class PermissionPipeline {
       )
     }
 
-    if (
-      (profile.name === 'edit_file' || profile.name === 'apply_patch') &&
-      Boolean((profile.arguments as Record<string, unknown>).replace_all)
-    ) {
+    if (isManagedFileMutation(profile.name)) {
+      const destructive =
+        profile.name === 'delete_file' || profile.name === 'rename_file'
       trace.push(
-        traceEntry('ask.bulk_replace', 'approval', String(profile.path || '')),
+        traceEntry(
+          destructive ? 'ask.destructive_file' : 'ask.write_approval',
+          'approval',
+          profile.name,
+        ),
       )
       return approval(
         profile,
-        'ask.bulk_replace',
-        `bulk replace requested in ${profile.path}`,
+        destructive ? 'ask.destructive_file' : 'ask.write_approval',
+        destructive
+          ? 'deleting or renaming a file requires explicit approval.'
+          : 'file changes require approval in ask_before_edit mode.',
         trace,
-        RiskLevel.MEDIUM,
+        destructive ? RiskLevel.HIGH : RiskLevel.MEDIUM,
       )
     }
 
-    if (profile.name === 'delete_file' || profile.name === 'rename_file') {
-      trace.push(traceEntry('ask.destructive_file', 'approval', profile.name))
-      return approval(
-        profile,
-        'ask.destructive_file',
-        'deleting or renaming a file requires explicit approval.',
-        trace,
-        RiskLevel.HIGH,
-      )
-    }
-
-    trace.push(
-      traceEntry('ask.default_allow', 'allow', 'no approval rule matched'),
+    trace.push(traceEntry('ask.default_approval', 'approval', profile.name))
+    return approval(
+      profile,
+      'ask.default_approval',
+      'mutating operation requires approval in ask_before_edit mode.',
+      trace,
+      RiskLevel.MEDIUM,
     )
-    return allow(profile, 'ask.default_allow', trace)
   }
 
-  private assessAcceptEdits(
+  private assessSmartAuto(
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
   ): PermissionDecision {
     if (profile.readOnly) {
       trace.push(
         traceEntry(
-          'accept_edits.read_only',
+          'smart_auto.read_only',
           'allow',
           'tool profile is read-only',
         ),
       )
-      return allow(profile, 'accept_edits.read_only', trace)
+      return allow(profile, 'smart_auto.read_only', trace)
     }
 
     if (profile.name === 'run_command') {
@@ -524,15 +610,15 @@ export class PermissionPipeline {
         : RiskLevel.MEDIUM
       trace.push(
         traceEntry(
-          'accept_edits.run_command.approval',
+          'smart_auto.run_command.approval',
           'approval',
           profile.command.slice(0, 160),
         ),
       )
       return approval(
         profile,
-        'accept_edits.run_command.approval',
-        `shell command requires approval in accept_edits mode: ${profile.command.slice(0, 160)}`,
+        'smart_auto.run_command.approval',
+        `shell command requires approval in smart_auto mode: ${profile.command.slice(0, 160)}`,
         trace,
         risk,
       )
@@ -543,12 +629,10 @@ export class PermissionPipeline {
       profile.name === 'broadcast' ||
       profile.name === 'shutdown_teammate'
     ) {
-      trace.push(
-        traceEntry('accept_edits.team_roster', 'approval', profile.name),
-      )
+      trace.push(traceEntry('smart_auto.team_roster', 'approval', profile.name))
       return approval(
         profile,
-        'accept_edits.team_roster',
+        'smart_auto.team_roster',
         'Agent Team roster or broadcast operation can affect persistent teammates.',
         trace,
       )
@@ -558,27 +642,38 @@ export class PermissionPipeline {
       profile.name === 'send_message' &&
       Boolean((profile.arguments as Record<string, unknown>).wake ?? true)
     ) {
-      trace.push(traceEntry('accept_edits.team_wake', 'approval', 'wake=true'))
+      trace.push(traceEntry('smart_auto.team_wake', 'approval', 'wake=true'))
       return approval(
         profile,
-        'accept_edits.team_wake',
+        'smart_auto.team_wake',
         'waking a teammate can run tools in a persistent teammate context.',
         trace,
       )
     }
 
     if (profile.name === 'scheduler') {
-      return this.assessSchedulerInAcceptEditsMode(profile, trace)
+      return this.assessSchedulerInSmartAutoMode(profile, trace)
+    }
+
+    if (isInternalAgentStateMutation(profile.name)) {
+      trace.push(
+        traceEntry(
+          'smart_auto.internal_agent_state',
+          'allow',
+          'bounded Core-owned state transition',
+        ),
+      )
+      return allow(profile, 'smart_auto.internal_agent_state', trace)
     }
 
     const sensitivePath = sensitiveProfilePath(profile)
     if (isManagedFileMutation(profile.name) && sensitivePath) {
       trace.push(
-        traceEntry('accept_edits.sensitive_path', 'approval', sensitivePath),
+        traceEntry('smart_auto.sensitive_path', 'approval', sensitivePath),
       )
       return approval(
         profile,
-        'accept_edits.sensitive_path',
+        'smart_auto.sensitive_path',
         `sensitive or runtime path: ${sensitivePath}`,
         trace,
       )
@@ -590,14 +685,14 @@ export class PermissionPipeline {
     ) {
       trace.push(
         traceEntry(
-          'accept_edits.bulk_replace',
+          'smart_auto.bulk_replace',
           'approval',
           String(profile.path || ''),
         ),
       )
       return approval(
         profile,
-        'accept_edits.bulk_replace',
+        'smart_auto.bulk_replace',
         `bulk replace requested in ${profile.path}`,
         trace,
         RiskLevel.MEDIUM,
@@ -606,11 +701,11 @@ export class PermissionPipeline {
 
     if (profile.name === 'delete_file' || profile.name === 'rename_file') {
       trace.push(
-        traceEntry('accept_edits.destructive_file', 'approval', profile.name),
+        traceEntry('smart_auto.destructive_file', 'approval', profile.name),
       )
       return approval(
         profile,
-        'accept_edits.destructive_file',
+        'smart_auto.destructive_file',
         'deleting or renaming a file requires explicit approval.',
         trace,
         RiskLevel.HIGH,
@@ -619,22 +714,18 @@ export class PermissionPipeline {
 
     if (isNonDestructiveFileEdit(profile.name)) {
       trace.push(
-        traceEntry(
-          'accept_edits.file_edit',
-          'allow',
-          String(profile.path || ''),
-        ),
+        traceEntry('smart_auto.file_edit', 'allow', String(profile.path || '')),
       )
-      return allow(profile, 'accept_edits.file_edit', trace)
+      return allow(profile, 'smart_auto.file_edit', trace)
     }
 
     trace.push(
-      traceEntry('accept_edits.default_approval', 'approval', profile.name),
+      traceEntry('smart_auto.default_approval', 'approval', profile.name),
     )
     return approval(
       profile,
-      'accept_edits.default_approval',
-      'non-file mutating tool requires approval in accept_edits mode.',
+      'smart_auto.default_approval',
+      'non-file mutating tool requires approval in smart_auto mode.',
       trace,
       RiskLevel.MEDIUM,
     )
@@ -689,7 +780,7 @@ export class PermissionPipeline {
     return allow(profile, 'ask.scheduler.default', trace)
   }
 
-  private assessSchedulerInAcceptEditsMode(
+  private assessSchedulerInSmartAutoMode(
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
   ): PermissionDecision {
@@ -697,23 +788,23 @@ export class PermissionPipeline {
     if (action === 'list') {
       trace.push(
         traceEntry(
-          'accept_edits.scheduler.list',
+          'smart_auto.scheduler.list',
           'allow',
           'read-only scheduler inspection',
         ),
       )
-      return allow(profile, 'accept_edits.scheduler.list', trace)
+      return allow(profile, 'smart_auto.scheduler.list', trace)
     }
     trace.push(
       traceEntry(
-        'accept_edits.scheduler.mutation',
+        'smart_auto.scheduler.mutation',
         'approval',
         action || '<missing action>',
       ),
     )
     return approval(
       profile,
-      'accept_edits.scheduler.mutation',
+      'smart_auto.scheduler.mutation',
       'scheduler jobs persist and may run later outside the current user turn.',
       trace,
       action === 'pause' || action === 'resume'
@@ -735,6 +826,21 @@ function isManagedFileMutation(name: string): boolean {
   )
 }
 
+function isInternalAgentStateMutation(name: string): boolean {
+  return INTERNAL_AGENT_STATE_MUTATIONS.has(name)
+}
+
+const INTERNAL_AGENT_STATE_MUTATIONS = new Set([
+  'block_goal',
+  'complete_goal',
+  'define_goal_contract',
+  'dispatch_subagent',
+  'manage_subagent',
+  'record_goal_evidence',
+  'request_plan_mode',
+  'update_todos',
+])
+
 function sensitiveProfilePath(profile: ToolPermissionProfile): string | null {
   return (
     (profile.paths.length ? profile.paths : [profile.path ?? '']).find((path) =>
@@ -752,9 +858,112 @@ function normalizeMode(mode: string): string {
     return PermissionMode.ASK_BEFORE_EDIT
   }
   const value = String(mode || '').trim()
-  if (value === 'accept-edits' || value === 'accept edits')
-    return PermissionMode.ACCEPT_EDITS
+  if (
+    value === 'accept_edits' ||
+    value === 'accept-edits' ||
+    value === 'accept edits'
+  )
+    return PermissionMode.SMART_AUTO
+  if (value === 'auto' || value === 'automatic')
+    return PermissionMode.FULL_ACCESS
   return value
+}
+
+function isLocalDevelopmentCommand(analysis: ShellAstAnalysis): boolean {
+  if (
+    analysis.status !== 'parsed' ||
+    analysis.commands.length !== 1 ||
+    analysis.features.length ||
+    analysis.reasonCodes.length
+  )
+    return false
+  const command = analysis.commands[0]!
+  if (command.env.length || command.redirects.length || command.nested)
+    return false
+  const argv = command.argv
+  const head = (argv[0] ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? ''
+  const sub = String(argv[1] ?? '').toLowerCase()
+  if (head === 'pytest') return true
+  if ((head === 'python' || head === 'python3') && sub === '-m')
+    return argv[2] === 'pytest'
+  if (head === 'npm') {
+    if (sub === 'test') return argv.length === 2
+    return sub === 'run' && isSafePackageScript(argv.slice(2))
+  }
+  if (head === 'pnpm' || head === 'yarn' || head === 'bun') {
+    if (['test', 'build', 'lint', 'typecheck', 'check'].includes(sub))
+      return argv.length === 2
+    return sub === 'run' && isSafePackageScript(argv.slice(2))
+  }
+  if (head === 'cargo')
+    return ['test', 'build', 'check', 'clippy', 'fmt'].includes(sub)
+  if (head === 'go') return ['test', 'build', 'vet', 'fmt'].includes(sub)
+  if (head === 'git') return isSafeLocalGit(argv.slice(1))
+  return false
+}
+
+function isSafePackageScript(args: string[]): boolean {
+  if (
+    !/^(?:test|build|lint|typecheck|check|format|fmt)(?::[a-z0-9_.-]+)*$/i.test(
+      args[0] ?? '',
+    )
+  )
+    return false
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index]!
+    if (arg === '--workspace' || arg === '-w') {
+      const workspace = args[index + 1] ?? ''
+      if (!workspace || workspace.startsWith('-')) return false
+      index += 1
+      continue
+    }
+    if (
+      arg === '--workspaces' ||
+      arg === '--if-present' ||
+      arg === '--include-workspace-root' ||
+      /^--workspace=[a-z0-9@/_.-]+$/i.test(arg)
+    )
+      continue
+    return false
+  }
+  return true
+}
+
+function isSafeLocalGit(args: string[]): boolean {
+  const subcommand = String(args[0] ?? '').toLowerCase()
+  const rest = args.slice(1)
+  if (subcommand === 'add') {
+    return (
+      rest.length > 0 && !rest.some((arg) => arg === '-f' || arg === '--force')
+    )
+  }
+  if (subcommand === 'commit') {
+    for (let index = 0; index < rest.length; index += 1) {
+      const arg = rest[index]!
+      if (arg === '-m' || arg === '--message') {
+        if (!rest[index + 1]) return false
+        index += 1
+        continue
+      }
+      if (arg.startsWith('--message=')) continue
+      if (['-a', '--all'].includes(arg)) continue
+      return false
+    }
+    return true
+  }
+  if (subcommand === 'switch') {
+    return rest.length === 1 && !rest[0]!.startsWith('-')
+  }
+  if (subcommand === 'stash') {
+    return (
+      rest.length === 0 ||
+      (rest[0] === 'push' &&
+        rest
+          .slice(1)
+          .every((arg) => ['-u', '--include-untracked'].includes(arg)))
+    )
+  }
+  return false
 }
 
 function allow(

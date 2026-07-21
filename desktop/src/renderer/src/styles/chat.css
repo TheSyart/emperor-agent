@@ -334,6 +334,38 @@
   @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-amber animate-pulse-seal;
 }
 
+.plan-activity-node {
+  min-height: 34px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.plan-activity-node strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-activity-node[data-tone='running'] {
+  border-left-color: var(--accent);
+}
+
+.plan-activity-node[data-tone='success'] {
+  border-left-color: var(--ok);
+}
+
+.plan-activity-node[data-tone='error'] {
+  border-left-color: var(--danger);
+}
+
 .thought-node {
   @apply flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[11px];
   border-color: rgb(var(--border));

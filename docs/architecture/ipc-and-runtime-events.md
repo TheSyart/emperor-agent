@@ -64,7 +64,13 @@ Renderer 的 session、task 和 runtime replay 已使用小型 domain action red
 
 工具调度事件遵守相同的终态不变量：每个 `tool_run_queued` 必须恰有一个 completed / failed / cancelled 终态。流式响应删除调用、父 turn 取消或执行 Promise 忽略 abort 时，Core 仍先写 cancelled tombstone；迟到结果被隔离，不得制造第二终态。
 
-忙碌 prompt 使用 `prompt_queued`、`prompt_dequeued`、`prompt_interjected`、`prompt_cancelled` 投影 durable queue 状态；correlation 使用 `prompt_id`、`client_message_id`、prompt `turn_id` 和可选 owner `target_turn_id`。`prompt_queued` 可以带用户已提交的有界显示文本，以便 live event 丢失后从 replay 重建占位消息。旧 assistant partial 由 `message_tombstoned` 结束，renderer 必须关闭其 streaming/tool 状态并为同一 owner turn 创建新的 assistant 投影，不能把替代回答合并进旧 partial。重复 replay 仍按 sequence 幂等。
+忙碌 prompt 使用 `prompt_queued`、`prompt_dequeued`、`prompt_interjected`、`prompt_cancelled` 投影 durable queue 状态；correlation 使用 `prompt_id`、`client_message_id`、prompt `turn_id` 和可选 owner `target_turn_id`。Renderer 还通过 `chat.listQueuedPrompts` 恢复尚未开始的项，并以 `chat.manageQueuedPrompt` 执行 `cancel` 或 `interject`。新提交按 session 使用一个用户可见队列槽；槽已占用时 `chat.submit` 在产生 graph/event 副作用前返回安全 IPC 错误 `prompt_queue_full`，Renderer 回滚失败的乐观项、刷新权威队列并恢复 Composer payload。queued→interject 的持久事实由内部 message graph 的单条 `prompt_replaced` 事件提交；它不是 renderer runtime event。启动对账会把未进入持久 `user_message` 的 running/interjected prompt 重新排队，已有用户历史的记录只收敛状态而不重放；旧版本留下的多个 queued record 继续按 FIFO 排空。`prompt_queued` 只更新 Composer 顶部的队列栏，不创建时间线用户消息；只有权威 `user_message` 才进入聊天，从而避免 live/replay 重复。旧 assistant partial 由 `message_tombstoned` 结束，renderer 必须关闭其 streaming/tool 状态并为同一 owner turn 创建新的 assistant 投影，不能把替代回答合并进旧 partial。
+
+Ask/Plan 交互以完整 `ControlInteraction` 为 renderer 事实源，`meta.control_session_id` 决定 owner session；历史缺少该字段时才回退 session summary tag。等待交互若未出现在 replay 消息流，会按 interaction ID 补入并去重。时间线中的 AskHistoryCard/PlanCard 只投影静态历史和提案；waiting interaction 在底部替代 Composer。`plan_draft_delta` 只更新 provisional“生成中”卡，正式 `plan_draft` 建立 pending 后才允许显示底部审批。`plan_approved`、`plan_step_update`、`plan_verification_start/done` 与终态 `plan_runtime_update` 转为卡片之后的 `plan_activity` 时间线节点，不回写旧卡片。
+
+重新进入 Plan 时，Core 会先原子取消同一 session/scope 的旧当前 Plan，再创建 successor DRAFT，并立即发送旧 Plan 的 `plan_runtime_update(cancelled)`；renderer 因此不能继续显示旧 Plan 为可恢复执行态。启动恢复还会核对 waiting interaction 的 Plan ID、状态和审批代次，缺失或不匹配的交互会被取消。Plan 模式连续两次没有成功调用 `propose_plan` 时，IPC 返回 `plan_generation_failed`，不会用普通回复合成审批卡。
+
+turn 取消在 IPC 使用稳定错误码 `cancelled`。Core 会先结束流式 thought/tool 状态并写入必要的 cancelled terminal/tombstone，再隔离迟到结果；renderer 只显示“已取消，内容未提交”或“任务已停止”，不得追加 `internal_error`。
 
 ## 三类数据不要混淆
 
@@ -103,9 +109,9 @@ owned process 控制使用 `processes.list`、`processes.cancel` 和 `processes.
 
 文件检查点使用 `fileCheckpoints.list`、`fileCheckpoints.preview`、`fileCheckpoints.rewind` 和 `fileCheckpoints.rewindGit`。输入只接受 session/checkpoint ID；workspace 由 Core 从受信 SessionEntry 推导。纯文件 `rewind` 的 schema 必须包含字面量 `confirmed: true`；Git 路径还必须包含 `confirmedGitRisk: true`、前一次预览的 SHA-256 revision，以及 `abort|stash` dirty strategy。输出仅含 ID、工具/turn 元数据、相对路径、change kind、大小、状态与哈希；Git capture 只投影 OID、branch、计数和 identity digest，不返回快照正文、artifact/private store、`.git` 或 workspace 绝对路径。两条回退都经过 mutation guard 和领域冲突检查；renderer 隐藏按钮不构成授权。
 
-MCP 使用 `mcp.getConfig` / `mcp.saveConfig` 管理配置，`mcp.status` 只读返回每 server 的 generation、client ID、state、auth/health、工具名快照、退避和活动 request 计数。它不返回 header/env 值、原始 transport 错误或工具结果。Bootstrap 与 Diagnostics 返回同一状态结构，插件页不通过“工具数组是否为空”猜测连接健康。
+MCP 使用 `mcp.getConfig` / `mcp.saveConfig` 管理配置。Get 保留 `${ENV_NAME}`，但将 args、env、headers、URL 中其余字面字符串逐叶投影为 `[REDACTED]`；Save 仅从同一路径的磁盘旧值回填掩码，孤立掩码 fail closed，避免 renderer 读取密钥或用掩码覆盖密钥。`mcp.status` 只读返回每 server 的 generation、client ID、state、auth/health、工具名快照、退避和活动 request 计数。它不返回 header/env 值、原始 transport 错误或工具结果。Bootstrap 与 Diagnostics 返回同一状态结构，插件页不通过“工具数组是否为空”猜测连接健康。
 
-`config.effective` 是只读解释面，不是新的写入入口。它返回按 key 排序的可复现 snapshot、revision、effective value、最终 source/trust、逐层 applied/rejected trace 与 secret source。MCP 的 args/env/headers/url 在这个 payload 中整段显示为 `[REDACTED]`，trace fingerprint 也基于脱敏值；密钥不会写入 runtime event。`config.get/save`、`mcp.getConfig/saveConfig` 等旧 operation 和原文件 schema 保持不变。
+`config.effective` 是只读解释面，不是新的写入入口。它返回按 key 排序的可复现 snapshot、revision、effective value、最终 source/trust、逐层 applied/rejected trace 与 secret source。MCP 的 args/env/headers/url 在这个 payload 中整段显示为 `[REDACTED]`，trace fingerprint 也基于脱敏值；密钥不会写入 runtime event。MCP 原文件 schema 保持不变；`mcp.getConfig/saveConfig` 的 IPC 形状也保持不变，但 secret leaf 使用上述掩码往返协议。
 
 ## 新增 runtime event
 

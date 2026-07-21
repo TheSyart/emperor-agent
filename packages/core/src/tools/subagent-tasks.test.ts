@@ -81,10 +81,7 @@ describe('SubagentTaskControlTool', () => {
       ),
     ).resolves.toContain('"status":"cancelled"')
     await expect(
-      tool.execute(
-        { action: 'wait', task_id: initial.task.id },
-        ownerContext,
-      ),
+      tool.execute({ action: 'wait', task_id: initial.task.id }, ownerContext),
     ).resolves.toContain('operator stop')
 
     const resumedText = await tool.execute(

@@ -22,17 +22,26 @@ interface FixtureState {
   results: Array<{ id: string; status: string }>
 }
 
-function fixtureStore(execute: (effect: FixtureEffect, signal: AbortSignal) => number | Promise<number>) {
-  return new ActionEffectStore<FixtureState, FixtureAction, FixtureEffect, number>({
+function fixtureStore(
+  execute: (
+    effect: FixtureEffect,
+    signal: AbortSignal,
+  ) => number | Promise<number>,
+) {
+  return new ActionEffectStore<
+    FixtureState,
+    FixtureAction,
+    FixtureEffect,
+    number
+  >({
     initialState: { value: 0, results: [] },
     reducer: (state, action) => {
-      if (action.type === 'run')
-        return { state, effects: [action.effect] }
+      if (action.type === 'run') return { state, effects: [action.effect] }
       return {
         state: {
           value:
             action.result.status === 'success'
-              ? action.result.output ?? state.value
+              ? (action.result.output ?? state.value)
               : state.value,
           results: [
             ...state.results,

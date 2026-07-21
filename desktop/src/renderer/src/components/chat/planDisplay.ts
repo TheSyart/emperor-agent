@@ -8,63 +8,41 @@ export interface PlanStatusPresentation {
   risk: string
 }
 
-export interface PlanProgressSummary {
-  total: number
-  done: number
-  active: number
-  failed: number
-  label: string
-}
-
 export function planDisplayMarkdown(
   interaction: ControlInteraction,
   plan?: RuntimePlanRecord | null,
 ): string {
   return String(
-    plan?.plan_markdown ||
+    interaction.plan_markdown ||
+      plan?.plan_markdown ||
       plan?.planMarkdown ||
-      interaction.plan_markdown ||
       '',
   ).trim()
 }
 
 export function planDecisionVisible(interaction: ControlInteraction): boolean {
-  return interaction.status === 'waiting'
+  return (
+    interaction.status === 'waiting' && interaction.meta?.provisional !== true
+  )
 }
 
 export function planStatusPresentation(
   interaction: ControlInteraction,
   plan?: RuntimePlanRecord | null,
 ): PlanStatusPresentation {
-  const status = String(plan?.status || interaction.status || '')
+  if (interaction.meta?.provisional === true) {
+    return {
+      label: '生成中',
+      tone: 'running',
+      risk: riskLabel(interaction.risk_level),
+    }
+  }
+  const status = String(interaction.status || plan?.status || '')
   return {
     label: statusLabel(status),
     tone: statusTone(status),
     risk: riskLabel(interaction.risk_level),
   }
-}
-
-export function planProgressSummary(
-  plan?: RuntimePlanRecord | null,
-): PlanProgressSummary {
-  const steps = plan?.steps || []
-  const total = steps.length
-  const done = steps.filter(
-    (step) => step.status === 'done' || step.status === 'completed',
-  ).length
-  const active = steps.filter(
-    (step) =>
-      step.status === 'active' ||
-      step.status === 'executing' ||
-      step.status === 'in_progress',
-  ).length
-  const failed = steps.filter(
-    (step) => step.status === 'failed' || step.status === 'blocked',
-  ).length
-  const parts = total ? [`${done}/${total} 完成`] : ['暂无步骤']
-  if (active) parts.push(`${active} 执行中`)
-  if (failed) parts.push(`${failed} 异常`)
-  return { total, done, active, failed, label: parts.join(' · ') }
 }
 
 export function statusLabel(status?: string): string {

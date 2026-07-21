@@ -8,7 +8,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile as fsReadFile,
   rename as fsRename,
   stat,
   unlink,
@@ -30,6 +29,12 @@ import {
 import { S, toolParamsSchema } from './schema'
 
 const PDF_MAGIC = Buffer.from('%PDF')
+const MAX_TEXT_FILE_BYTES = 8 * 1024 * 1024
+const TEXT_READ_CHUNK_BYTES = 64 * 1024
+const TEXT_FILE_TOO_LARGE_ERROR = '[ERR] file exceeds 8 MiB read limit'
+
+type TextReadResult =
+  { ok: true; content: string } | { ok: false; error: string }
 
 export type ManagedFileMutationObserver = (
   events: readonly CodeGraphFileEvent[],
@@ -48,19 +53,55 @@ async function isPdf(path: string): Promise<boolean> {
   }
 }
 
-async function readText(path: string): Promise<string> {
+function throwIfReadAborted(signal?: AbortSignal | null): void {
+  if (!signal?.aborted) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new Error('file read cancelled')
+}
+
+async function readBoundedText(
+  path: string,
+  signal?: AbortSignal | null,
+): Promise<TextReadResult> {
+  throwIfReadAborted(signal)
+  const handle = await open(path, 'r').catch(() => null)
+  if (!handle) return { ok: false, error: '[ERR] unable to read file' }
   try {
-    return await fsReadFile(path, 'utf8')
+    const chunks: Buffer[] = []
+    let total = 0
+    while (total <= MAX_TEXT_FILE_BYTES) {
+      throwIfReadAborted(signal)
+      const remaining = MAX_TEXT_FILE_BYTES + 1 - total
+      const buffer = Buffer.allocUnsafe(
+        Math.min(TEXT_READ_CHUNK_BYTES, remaining),
+      )
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null)
+      throwIfReadAborted(signal)
+      if (bytesRead === 0) break
+      chunks.push(buffer.subarray(0, bytesRead))
+      total += bytesRead
+      if (total > MAX_TEXT_FILE_BYTES) {
+        return { ok: false, error: TEXT_FILE_TOO_LARGE_ERROR }
+      }
+    }
+    return { ok: true, content: Buffer.concat(chunks, total).toString('utf8') }
   } catch {
-    return '[ERR] unable to read file'
+    throwIfReadAborted(signal)
+    return { ok: false, error: '[ERR] unable to read file' }
+  } finally {
+    await handle.close().catch(() => undefined)
   }
 }
 
-async function readSidecar(path: string): Promise<string | null> {
+async function readSidecar(
+  path: string,
+  signal?: AbortSignal | null,
+): Promise<TextReadResult | null> {
   try {
     const txt = path + '.txt'
-    if (existsSync(txt)) return await fsReadFile(txt, 'utf8')
+    if (existsSync(txt)) return await readBoundedText(txt, signal)
   } catch {
+    throwIfReadAborted(signal)
     /* ignore */
   }
   return null
@@ -119,13 +160,15 @@ export class ReadFileTool extends Tool {
 
     // PDF
     if (await isPdf(p)) {
-      const sidecar = await readSidecar(p)
-      if (sidecar) return paginate(sidecar, offset, limit)
+      throwIfReadAborted(ctx?.signal)
+      const sidecar = await readSidecar(p, ctx?.signal)
+      if (sidecar?.ok) return paginate(sidecar.content, offset, limit)
+      if (sidecar && !sidecar.ok) return sidecar.error
       return '[PDF] (no text extraction available; check sidecar or use an external tool)'
     }
 
-    const content = await readText(p)
-    return paginate(content, offset, limit)
+    const content = await readBoundedText(p, ctx?.signal)
+    return content.ok ? paginate(content.content, offset, limit) : content.error
   }
 
   override mapResult(raw: string, _ctx: ToolExecutionContext): ToolResult {
@@ -254,6 +297,7 @@ export class EditFileTool extends Tool {
     const oldText = String(args.old_text ?? '')
     const newText = String(args.new_text ?? '')
     const replaceAll = args.replace_all === true || args.replace_all === 'true'
+    if (!oldText) return '[ERR] old_text must not be empty'
     const decision = workspacePolicyForTool(ctx, this.workspace).resolvePath(
       raw,
       'write',
@@ -261,70 +305,46 @@ export class EditFileTool extends Tool {
     if (!decision.allowed) return formatWorkspacePolicyError(decision)
     const p = decision.resolvedPath
     if (!existsSync(p)) return '[ERR] file not found'
-    const content = await readText(p)
-    if (content === '[ERR] unable to read file')
-      return '[ERR] unable to read file'
+    const read = await readBoundedText(p, ctx?.signal)
+    if (!read.ok) return read.error
+    const content = read.content
 
-    // Matching order: exact → trimmed → normalized (same as Python)
-    let idx = content.indexOf(oldText)
-    if (idx < 0) {
+    // Matching order: exact → trimmed → whitespace-normalized source span.
+    let next: string
+    if (content.includes(oldText)) {
+      if (!replaceAll && countOccurrences(content, oldText) > 1) {
+        return '[ERR] old_text matches multiple locations — provide more context or set replace_all=true'
+      }
+      next = replaceLiteral(content, oldText, newText, replaceAll)
+    } else {
       const trimmed = oldText.trim()
-      idx = content.indexOf(trimmed)
-      if (idx >= 0) {
+      if (!trimmed) return '[ERR] old_text not found in file'
+      if (content.includes(trimmed)) {
         if (!replaceAll && countOccurrences(content, trimmed) > 1) {
           return '[ERR] trimmed match found but is not unique — provide more context'
         }
-        const result = await replaceFile(
-          p,
-          content.replace(trimmed, newText),
-          raw,
-        )
-        await notifyManagedMutation(
-          this.mutationObserver,
-          [{ kind: 'modified', path: p }],
-          ctx,
-        )
-        return result
+        next = replaceLiteral(content, trimmed, newText, replaceAll)
+      } else {
+        const pattern = whitespaceNormalizedPattern(trimmed)
+        const matches = [...content.matchAll(pattern)]
+        if (matches.length === 0) return '[ERR] old_text not found in file'
+        if (!replaceAll && matches.length > 1) {
+          return '[ERR] normalized match found but is not unique — provide more context or set replace_all=true'
+        }
+        if (replaceAll) {
+          next = content.replace(pattern, () => newText)
+        } else {
+          const match = matches[0]!
+          const start = match.index
+          next =
+            content.slice(0, start) +
+            newText +
+            content.slice(start + match[0].length)
+        }
       }
-      // normalized: collapse whitespace
-      const normOld = oldText.replace(/\s+/g, ' ')
-      const normContent = content.replace(/\s+/g, ' ')
-      const normIdx = normContent.indexOf(normOld)
-      if (normIdx < 0) return '[ERR] old_text not found in file'
-      if (!replaceAll && countOccurrences(normContent, normOld) > 1) {
-        return '[ERR] normalized match found but is not unique — provide more context or set replace_all=true'
-      }
-      // Replace the first match in the original content using the normalized alignment
-      // Simple approach: replace the first exact match of the trimmed version
-      const result = await replaceFile(
-        p,
-        content.replace(trimmed, newText),
-        raw,
-      )
-      await notifyManagedMutation(
-        this.mutationObserver,
-        [{ kind: 'modified', path: p }],
-        ctx,
-      )
-      return result
     }
-    if (!replaceAll && countOccurrences(content, oldText) > 1) {
-      return '[ERR] old_text matches multiple locations — provide more context or set replace_all=true'
-    }
-    if (replaceAll) {
-      const result = await replaceFile(
-        p,
-        content.replaceAll(oldText, newText),
-        raw,
-      )
-      await notifyManagedMutation(
-        this.mutationObserver,
-        [{ kind: 'modified', path: p }],
-        ctx,
-      )
-      return result
-    }
-    const result = await replaceFile(p, content.replace(oldText, newText), raw)
+    if (next === content) return '[ERR] edit would not change file content'
+    const result = await replaceFile(p, next, raw)
     await notifyManagedMutation(
       this.mutationObserver,
       [{ kind: 'modified', path: p }],
@@ -341,6 +361,7 @@ export class EditFileTool extends Tool {
 }
 
 function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) throw new Error('countOccurrences needle must not be empty')
   let c = 0
   let pos = 0
   while ((pos = haystack.indexOf(needle, pos)) >= 0) {
@@ -348,6 +369,26 @@ function countOccurrences(haystack: string, needle: string): number {
     pos += needle.length
   }
   return c
+}
+
+function replaceLiteral(
+  content: string,
+  needle: string,
+  replacement: string,
+  replaceAll: boolean,
+): string {
+  if (replaceAll) return content.split(needle).join(replacement)
+  const index = content.indexOf(needle)
+  return (
+    content.slice(0, index) + replacement + content.slice(index + needle.length)
+  )
+}
+
+function whitespaceNormalizedPattern(value: string): RegExp {
+  const escapedSegments = value
+    .split(/\s+/)
+    .map((segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(escapedSegments.join('\\s+'), 'g')
 }
 
 // ── ApplyPatchTool ──
@@ -399,8 +440,9 @@ export class ApplyPatchTool extends Tool {
     const path = decision.resolvedPath
     const info = await regularFileInfo(path)
     if (typeof info === 'string') return info
-    const content = await fsReadFile(path, 'utf8').catch(() => null)
-    if (content === null) return '[ERR] unable to read file'
+    const read = await readBoundedText(path, ctx?.signal)
+    if (!read.ok) return read.error
+    const content = read.content
     const matches = countOccurrences(content, oldText)
     if (!matches) return '[ERR] old_text not found in file'
     if (!replaceAll && matches !== 1)
@@ -429,7 +471,7 @@ export class ApplyPatchTool extends Tool {
 export class DeleteFileTool extends Tool {
   override name = 'delete_file'
   override description =
-    '删除一个工作区内的普通文件。拒绝目录和符号链接；这是破坏性操作，执行前应确认目标。'
+    '删除一个工作区内的普通文件。拒绝目录和符号链接；目标明确后直接调用，权限层会按当前模式决定是否审批，不要先用普通文字重复确认。'
   override parameters = toolParamsSchema({ path: S('待删除文件路径') }, [
     'path',
   ])
@@ -479,7 +521,7 @@ export class DeleteFileTool extends Tool {
 export class RenameFileTool extends Tool {
   override name = 'rename_file'
   override description =
-    '把一个工作区内的普通文件移动到另一个工作区路径。拒绝符号链接、目录和覆盖已有目标。'
+    '把一个工作区内的普通文件移动到另一个工作区路径。拒绝符号链接、目录和覆盖已有目标；路径明确后直接调用，权限层会按当前模式决定是否审批。'
   override parameters = toolParamsSchema(
     {
       source: S('原文件路径'),

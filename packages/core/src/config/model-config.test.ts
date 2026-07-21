@@ -50,6 +50,26 @@ describe('model_config v2 schema', () => {
     })
   })
 
+  it('removes known legacy display-name sentinels but preserves real aliases', () => {
+    const parsed = parseModelConfig({
+      schemaVersion: 2,
+      activeModelId: 'primary',
+      models: [
+        entry({ entryId: 'primary', displayName: 'default' }),
+        entry({
+          entryId: 'secondary',
+          modelId: 'gpt-5-mini',
+          displayName: 'default · Secondary',
+        }),
+        entry({ entryId: 'custom', displayName: '工作模型' }),
+      ],
+    })
+
+    expect(parsed.raw.models[0]).not.toHaveProperty('displayName')
+    expect(parsed.raw.models[1]).not.toHaveProperty('displayName')
+    expect(parsed.raw.models[2]?.displayName).toBe('工作模型')
+  })
+
   it('normalizes v2 entries and resolves the single active entry', () => {
     const config = parseModelConfig({
       schemaVersion: 2,
@@ -383,6 +403,34 @@ describe('v1 migration', () => {
     expect(
       await readFile(join(dir, 'model_config.v1-backup.json'), 'utf8'),
     ).toBe('sentinel')
+  })
+
+  it('does not promote generic default names into custom aliases', async () => {
+    const value = legacy('deepseek-v4-lite')
+    value.agents.defaults.model = 'default'
+    value.models[0] = {
+      ...value.models[0],
+      name: 'default',
+      label: '',
+      mainModelId: 'deepseek-v4-pro',
+    }
+    await writeFile(
+      join(dir, 'model_config.json'),
+      JSON.stringify(value),
+      'utf8',
+    )
+
+    const migrated = await loadModelConfig(dir)
+
+    expect(migrated.models.map((item) => item.modelId)).toEqual([
+      'deepseek-v4-pro',
+      'deepseek-v4-lite',
+    ])
+    expect(migrated.raw.models.every((item) => !item.displayName)).toBe(true)
+    expect(migrated.models.map((item) => item.name)).toEqual([
+      'deepseek-v4-pro',
+      'deepseek-v4-lite',
+    ])
   })
 
   it('deduplicates equal main/secondary and creates unique ids for duplicate legacy records', async () => {

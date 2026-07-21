@@ -17,6 +17,9 @@ import {
 import { Tool } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /** 最小 scheduler 占位工具（W09 未迁移；pipeline 仅按名字+action 判定）。 */
 class SchedulerStub extends Tool {
@@ -36,6 +39,19 @@ class DynamicTool extends Tool {
   override parameters = toolParamsSchema({ action: S('action') }, ['action'])
   override isReadOnly(args: Record<string, unknown>): boolean {
     return args.action === 'inspect'
+  }
+  execute(): string {
+    return 'ok'
+  }
+}
+
+class ThrowingDynamicTool extends Tool {
+  override name = 'throwing_dynamic_tool'
+  override description = 'A mixed tool with a broken argument classifier.'
+  override parameters = toolParamsSchema({ action: S('action') }, ['action'])
+  override readOnly = true
+  override isReadOnly(): boolean {
+    throw new Error('classifier failed')
   }
   execute(): string {
     return 'ok'
@@ -113,7 +129,7 @@ describe('PermissionPolicy (test_permissions.py)', () => {
     expect(decision.reason).toContain('requires approval')
   })
 
-  it('ask_before_edit allows low-risk read/write tools', () => {
+  it('ask_before_edit allows reads and asks before ordinary writes', () => {
     const policy = new PermissionPolicy()
     expect(
       policy.assess(
@@ -127,8 +143,35 @@ describe('PermissionPolicy (test_permissions.py)', () => {
         'write_file',
         { path: 'notes/todo.md' },
         PermissionMode.ASK_BEFORE_EDIT,
-      ).allowed,
-    ).toBe(true)
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'ask.write_approval',
+    })
+  })
+
+  it('allows bounded Core-owned state transitions without a permission prompt', () => {
+    const policy = new PermissionPolicy()
+    for (const toolName of [
+      'define_goal_contract',
+      'record_goal_evidence',
+      'complete_goal',
+      'block_goal',
+      'update_todos',
+      'dispatch_subagent',
+      'manage_subagent',
+      'request_plan_mode',
+    ]) {
+      expect(
+        policy.assess(toolName, {}, PermissionMode.ASK_BEFORE_EDIT),
+        toolName,
+      ).toMatchObject({
+        allowed: true,
+        requiresApproval: false,
+        rule: 'ask.internal_agent_state',
+      })
+    }
   })
 
   it('allows exact patches but requires approval for delete and rename mutations', () => {
@@ -138,7 +181,7 @@ describe('PermissionPolicy (test_permissions.py)', () => {
       policy.assess(
         'apply_patch',
         { path: 'src/a.ts', old_text: 'a', new_text: 'b' },
-        PermissionMode.ACCEPT_EDITS,
+        PermissionMode.SMART_AUTO,
         { registry },
       ),
     ).toMatchObject({ allowed: true, requiresApproval: false })
@@ -154,10 +197,34 @@ describe('PermissionPolicy (test_permissions.py)', () => {
       policy.assess(
         'rename_file',
         { source: 'src/a.ts', destination: 'src/b.ts' },
-        PermissionMode.ACCEPT_EDITS,
+        PermissionMode.SMART_AUTO,
         { registry },
       ),
     ).toMatchObject({ allowed: false, requiresApproval: true })
+  })
+
+  it('denies workspace-external file mutations before mode grants or approval', () => {
+    const registry = makeRegistry(root)
+    const policy = new PermissionPolicy()
+
+    for (const mode of [
+      PermissionMode.ASK_BEFORE_EDIT,
+      PermissionMode.SMART_AUTO,
+      PermissionMode.FULL_ACCESS,
+    ]) {
+      expect(
+        policy.assess('delete_file', { path: '../outside.txt' }, mode, {
+          registry,
+          workspaceRoot: root,
+          cwd: root,
+        }),
+        mode,
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: false,
+        rule: 'containment.workspace',
+      })
+    }
   })
 
   it('matches rename permission rules against both source and destination', () => {
@@ -174,7 +241,7 @@ describe('PermissionPolicy (test_permissions.py)', () => {
     }).assess(
       'rename_file',
       { source: 'safe.txt', destination: '.env' },
-      PermissionMode.AUTO,
+      PermissionMode.FULL_ACCESS,
       { registry },
     )
 
@@ -225,17 +292,17 @@ describe('PermissionPolicy (test_permissions.py)', () => {
     expect(dist.requiresApproval).toBe(true)
   })
 
-  it('auto mode allows positively read-only diagnostic commands', () => {
+  it('smart_auto allows positively read-only diagnostic commands', () => {
     const decision = new PermissionPolicy().assess(
       'run_command',
       { command: 'git status' },
-      PermissionMode.AUTO,
+      PermissionMode.SMART_AUTO,
     )
     expect(decision.allowed).toBe(true)
     expect(decision.requiresApproval).toBe(false)
   })
 
-  it('auto mode requires approval for every command not proven read-only', () => {
+  it('smart_auto sends scripts and unknown executables to semantic review', () => {
     for (const command of [
       'bash payload.sh',
       'sh payload.sh',
@@ -243,27 +310,24 @@ describe('PermissionPolicy (test_permissions.py)', () => {
       'pwsh -File payload.ps1',
       'powershell -File payload.ps1',
       './payload',
-      'npm test',
-      'npm run build',
-      'git status && pwd',
       'ls > files.txt',
     ]) {
       const decision = new PermissionPolicy().assess(
         'run_command',
         { command },
-        PermissionMode.AUTO,
+        PermissionMode.SMART_AUTO,
       )
       expect(decision.allowed, command).toBe(false)
       expect(decision.requiresApproval, command).toBe(true)
-      expect(decision.risk, command).toBe('high')
+      expect(decision.rule, command).toBe('mode.smart_auto.semantic_review')
     }
   })
 
-  it('auto mode still requires approval for high-risk commands (audit P1-1)', () => {
+  it('smart_auto still requires approval for high-risk commands', () => {
     const decision = new PermissionPolicy().assess(
       'run_command',
       { command: 'git push origin main' },
-      PermissionMode.AUTO,
+      PermissionMode.SMART_AUTO,
     )
     expect(decision.allowed).toBe(false)
     expect(decision.requiresApproval).toBe(true)
@@ -284,12 +348,12 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     ])
   })
 
-  it('low-risk allowlisted commands allowed', () => {
+  it('ask_before_edit requires approval for every shell command, including read-only diagnostics', () => {
     for (const cmd of ['git status', 'git diff --stat', 'ls -la', 'pwd']) {
       const decision = run(cmd)
-      expect(decision.allowed, cmd).toBe(true)
-      expect(decision.requiresApproval, cmd).toBe(false)
-      expect(decision.rule, cmd).toBe('ask.run_command.low_risk_allowlist')
+      expect(decision.allowed, cmd).toBe(false)
+      expect(decision.requiresApproval, cmd).toBe(true)
+      expect(decision.rule, cmd).toBe('ask.run_command.default_approval')
     }
   })
 
@@ -342,57 +406,54 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     expect(run('rm -rf ~/notes').risk).toBe('high')
   })
 
-  it('auto mode allows readonly commands without approval', () => {
-    const decision = run('git diff --stat', PermissionMode.AUTO)
+  it('smart_auto allows readonly commands without approval', () => {
+    const decision = run('git diff --stat', PermissionMode.SMART_AUTO)
     expect(decision.allowed).toBe(true)
     expect(decision.requiresApproval).toBe(false)
-    expect(decision.rule).toBe('mode.auto.read_only_command')
+    expect(decision.rule).toBe('mode.smart_auto.read_only_sequence')
   })
 
-  it('auto mode requires approval for scripts, interpreters, builds, and unknown executables', () => {
+  it('smart_auto asks for scripts, redirected commands, and unknown executables', () => {
     for (const command of [
       '/bin/bash payload.sh',
       'python script.py',
       './payload',
-      'npm test',
-      'npm run build',
-      'ls; pwd',
       'pwd > result.txt',
     ]) {
-      const decision = run(command, PermissionMode.AUTO)
+      const decision = run(command, PermissionMode.SMART_AUTO)
       expect(decision.allowed, command).toBe(false)
       expect(decision.requiresApproval, command).toBe(true)
-      expect(decision.rule, command).toBe('mode.auto.command_approval')
+      expect(decision.rule, command).toBe('mode.smart_auto.semantic_review')
     }
   })
 
-  it('auto mode still requires approval for high-risk commands (audit P1-1)', () => {
-    const decision = run('rm -rf ~/x', PermissionMode.AUTO)
+  it('smart_auto still requires approval for high-risk commands', () => {
+    const decision = run('rm -rf ~/x', PermissionMode.SMART_AUTO)
     expect(decision.allowed).toBe(false)
     expect(decision.requiresApproval).toBe(true)
     expect(decision.risk).toBe('high')
   })
 
-  it('accept_edits mode allows low-risk file edits but still asks before shell and scheduler mutations', () => {
+  it('smart_auto allows low-risk edits and read-only shell but asks before scheduler mutations', () => {
     const policy = new PermissionPolicy()
     const registry = makeRegistry('/tmp/perm-root')
 
     const edit = policy.assess(
       'write_file',
       { path: 'notes/todo.md' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
       { registry },
     )
     const shell = policy.assess(
       'run_command',
       { command: 'git status' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
       { registry },
     )
     const scheduler = policy.assess(
       'scheduler',
       { action: 'add', message: 'later' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
       { registry },
     )
     const planWrite = policy.assess(
@@ -403,27 +464,70 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     )
 
     expect(edit.allowed).toBe(true)
-    expect(edit.rule).toBe('accept_edits.file_edit')
-    expect(shell.allowed).toBe(false)
-    expect(shell.requiresApproval).toBe(true)
-    expect(shell.rule).toBe('accept_edits.run_command.approval')
+    expect(edit.rule).toBe('smart_auto.file_edit')
+    expect(shell.allowed).toBe(true)
+    expect(shell.requiresApproval).toBe(false)
+    expect(shell.rule).toBe('mode.smart_auto.read_only_sequence')
     expect(scheduler.requiresApproval).toBe(true)
     expect(planWrite.allowed).toBe(false)
   })
 
-  it('accept_edits mode does not auto-approve non-file mutating tools', () => {
+  it('smart_auto does not auto-approve unclassified mutating tools', () => {
     const registry = new ToolRegistry()
     registry.register(new DynamicTool())
     const decision = new PermissionPipeline().assess(
       'dynamic_tool',
       { action: 'mutate' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
       { registry },
     )
 
     expect(decision.allowed).toBe(false)
     expect(decision.requiresApproval).toBe(true)
-    expect(decision.rule).toBe('accept_edits.default_approval')
+    expect(decision.rule).toBe('smart_auto.default_approval')
+  })
+
+  it('fails closed when a dynamic tool read-only classifier throws', () => {
+    const registry = new ToolRegistry()
+    registry.register(new ThrowingDynamicTool())
+    const pipeline = new PermissionPipeline()
+
+    const ask = pipeline.assess(
+      'throwing_dynamic_tool',
+      { action: 'mutate' },
+      PermissionMode.ASK_BEFORE_EDIT,
+      { registry },
+    )
+    const smart = pipeline.assess(
+      'throwing_dynamic_tool',
+      { action: 'mutate' },
+      PermissionMode.SMART_AUTO,
+      { registry },
+    )
+    const plan = pipeline.assess(
+      'throwing_dynamic_tool',
+      { action: 'mutate' },
+      PermissionMode.PLAN,
+      { registry },
+    )
+
+    expect(ask.allowed).toBe(false)
+    expect(ask.requiresApproval).toBe(true)
+    expect(smart.allowed).toBe(false)
+    expect(smart.requiresApproval).toBe(true)
+    expect(plan.allowed).toBe(false)
+    expect(plan.requiresApproval).toBe(false)
+  })
+
+  it('requires approval for history-rewriting local Git commits', () => {
+    const decision = new PermissionPipeline().assess(
+      'run_command',
+      { command: 'git commit --amend --no-edit' },
+      PermissionMode.SMART_AUTO,
+    )
+
+    expect(decision.allowed).toBe(false)
+    expect(decision.requiresApproval).toBe(true)
   })
 
   it('applies user deny rules before mode allow rules', () => {
@@ -441,7 +545,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const decision = pipeline.assess(
       'write_file',
       { path: 'secrets/key.md', content: 'x' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
     )
 
     expect(decision.allowed).toBe(false)
@@ -466,7 +570,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const decision = pipeline.assess(
       'run_command',
       { command: 'npm publish --dry-run' },
-      PermissionMode.AUTO,
+      PermissionMode.SMART_AUTO,
     )
 
     expect(decision.allowed).toBe(false)
@@ -621,7 +725,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const secret = pipeline.assess(
       'write_file',
       { path: 'src/secrets/key.ts', content: 'no' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
     )
 
     expect(ordinary.rule).not.toBe('user_rule.project-allow-write')
@@ -658,7 +762,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const auto = pipeline.assess(
       'run_command',
       { command: 'node script.js' },
-      PermissionMode.AUTO,
+      PermissionMode.SMART_AUTO,
     )
     const plan = pipeline.assess(
       'write_file',
@@ -669,7 +773,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     expect(auto).toMatchObject({
       allowed: false,
       requiresApproval: true,
-      rule: 'mode.auto.command_approval',
+      rule: 'mode.smart_auto.semantic_review',
       explanation: {
         selected: {
           source: { kind: 'core_policy', trust: 'system' },
@@ -715,13 +819,13 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const decision = pipeline.assess(
       'run_command',
       { command: 'git status' },
-      PermissionMode.AUTO,
+      PermissionMode.SMART_AUTO,
     )
 
     expect(decision).toMatchObject({
       allowed: false,
       requiresApproval: true,
-      rule: 'mode.auto.command_approval',
+      rule: 'mode.smart_auto.semantic_review',
       explanation: {
         shell: {
           status: 'invalid',
@@ -749,7 +853,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     const decision = pipeline.assess(
       'write_file',
       { path: 'README.md', content: 'x' },
-      PermissionMode.ACCEPT_EDITS,
+      PermissionMode.SMART_AUTO,
     )
 
     expect(decision.explanation?.selected).toMatchObject({
@@ -836,5 +940,202 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     )
     expect(decision.allowed).toBe(false)
     expect(decision.rule).toBe('control.propose_plan')
+  })
+})
+
+describe('PermissionPipeline v2 permission modes', () => {
+  it('asks before ordinary writes in ask_before_edit mode', () => {
+    const decision = new PermissionPipeline().assess(
+      'write_file',
+      { path: 'src/example.ts', content: 'export {}' },
+      'ask_before_edit',
+    )
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'ask.write_approval',
+    })
+  })
+
+  it('allows workspace edits and local build/test commands in smart_auto', () => {
+    const pipeline = new PermissionPipeline()
+    const edit = pipeline.assess(
+      'write_file',
+      { path: 'src/example.ts', content: 'export {}' },
+      'smart_auto',
+    )
+
+    expect(edit).toMatchObject({ allowed: true, requiresApproval: false })
+    for (const command of [
+      'npm test',
+      'npm run build',
+      'npm run typecheck --workspace @emperor/core',
+      'pytest -q tests/unit',
+      'python -m pytest',
+    ]) {
+      expect(
+        pipeline.assess('run_command', { command }, 'smart_auto'),
+        command,
+      ).toMatchObject({
+        allowed: true,
+        requiresApproval: false,
+        rule: 'mode.smart_auto.local_development',
+      })
+    }
+  })
+
+  it('allows a compound sequence when every segment is read-only', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'emperor-safe-read-'))
+    const target = join(workspace, 'strikeforce.html')
+    writeFileSync(target, '<html>\n<script></script>\n</html>\n')
+    const command =
+      `grep -c '</html>' ${target} && ` +
+      `grep -c '</script>' ${target} && ` +
+      `wc -l ${target} && ` +
+      `echo ---tail--- && tail -4 ${target}`
+
+    try {
+      expect(
+        new PermissionPipeline().assess(
+          'run_command',
+          { command },
+          'smart_auto',
+          { workspaceRoot: workspace, cwd: workspace },
+        ),
+      ).toMatchObject({
+        allowed: true,
+        requiresApproval: false,
+        rule: 'mode.smart_auto.read_only_sequence',
+      })
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('never auto-allows workspace-external, tilde, stdin, or symlink-escape reads', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'emperor-read-workspace-'))
+    const outside = mkdtempSync(join(tmpdir(), 'emperor-read-outside-'))
+    const secret = join(outside, 'secret.txt')
+    writeFileSync(secret, 'secret')
+    symlinkSync(secret, join(workspace, 'linked-secret'))
+    const pipeline = new PermissionPipeline()
+
+    try {
+      for (const command of [
+        `cat ${secret}`,
+        'cat ~/.ssh/id_rsa',
+        'cat -',
+        'cat linked-secret',
+      ]) {
+        for (const mode of ['ask_before_edit', 'smart_auto']) {
+          expect(
+            pipeline.assess('run_command', { command }, mode, {
+              workspaceRoot: workspace,
+              cwd: workspace,
+            }),
+            `${mode}: ${command}`,
+          ).toMatchObject({ allowed: false, requiresApproval: true })
+        }
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    'npm run deploy',
+    'npm run clean',
+    'pnpm run publish-site',
+    'git restore .',
+    'git checkout -f',
+    'git switch --discard-changes main',
+  ])(
+    'requires approval for destructive local-looking command: %s',
+    (command) => {
+      expect(
+        new PermissionPipeline().assess(
+          'run_command',
+          { command },
+          'smart_auto',
+        ),
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: true,
+        rule: 'mode.smart_auto.high_risk',
+      })
+    },
+  )
+
+  it('asks before external, destructive, and semantically unknown commands', () => {
+    const pipeline = new PermissionPipeline()
+    expect(
+      pipeline.assess(
+        'run_command',
+        { command: 'git push origin main' },
+        'smart_auto',
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'mode.smart_auto.high_risk',
+    })
+    expect(
+      pipeline.assess(
+        'run_command',
+        { command: 'custom-linter --check src' },
+        'smart_auto',
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+      rule: 'mode.smart_auto.semantic_review',
+    })
+  })
+
+  it('full_access bypasses asks but continues to enforce explicit denies', () => {
+    const pipeline = new PermissionPipeline({
+      rules: [
+        {
+          id: 'deny-production-push',
+          action: 'deny',
+          tool: 'run_command',
+          commandPrefix: 'git push',
+        },
+        {
+          id: 'ask-publish',
+          action: 'ask',
+          tool: 'run_command',
+          commandPrefix: 'npm publish',
+        },
+      ],
+    })
+
+    expect(
+      pipeline.assess(
+        'run_command',
+        { command: 'rm -rf ./generated' },
+        'full_access',
+      ),
+    ).toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      rule: 'mode.full_access',
+    })
+    expect(
+      pipeline.assess('run_command', { command: 'npm publish' }, 'full_access'),
+    ).toMatchObject({ allowed: true, requiresApproval: false })
+    expect(
+      pipeline.assess(
+        'run_command',
+        { command: 'git push origin main' },
+        'full_access',
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'user_rule.deny-production-push',
+    })
   })
 })

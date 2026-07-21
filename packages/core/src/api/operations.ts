@@ -205,6 +205,18 @@ const controlResumeSchema = z
   })
   .strict()
 
+const queuedPromptSessionSchema = z
+  .object({ sessionId: z.string().trim().min(1) })
+  .strict()
+
+const manageQueuedPromptSchema = z
+  .object({
+    sessionId: z.string().trim().min(1),
+    promptId: z.string().trim().min(1),
+    action: z.enum(['cancel', 'interject']),
+  })
+  .strict()
+
 const draftSessionSchema = z
   .object({
     mode: nullableStringSchema,
@@ -460,6 +472,14 @@ export const CORE_OPERATION_REGISTRY = {
   'chat.submit': operation(z.tuple([chatSubmitSchema]), (api, [input]) =>
     api.chat.submit(input),
   ),
+  'chat.listQueuedPrompts': operation(
+    z.tuple([queuedPromptSessionSchema]),
+    (api, [input]) => api.chat.listQueuedPrompts(input),
+  ),
+  'chat.manageQueuedPrompt': operation(
+    z.tuple([manageQueuedPromptSchema]),
+    (api, [input]) => api.chat.manageQueuedPrompt(input),
+  ),
   'config.effective': operation(z.tuple([]), (api) => api.config.effective()),
   'config.get': operation(z.tuple([]), (api) => api.config.get()),
   'config.save': operation(
@@ -492,7 +512,15 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'control.get': operation(z.tuple([]), (api) => api.control.get()),
   'control.setPermissionMode': operation(
-    z.tuple([z.enum(['ask_before_edit', 'accept_edits', 'auto'])]),
+    z.tuple([
+      z.enum([
+        'ask_before_edit',
+        'smart_auto',
+        'full_access',
+        'accept_edits',
+        'auto',
+      ]),
+    ]),
     (api, [mode]) => api.control.setPermissionMode(mode),
   ),
   'control.setMode': operation(z.tuple([z.string()]), (api, [mode]) =>

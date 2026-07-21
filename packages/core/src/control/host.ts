@@ -18,13 +18,22 @@ export interface ControlRuntimeScope {
 
 export interface TodoStoreLike {
   todos: Array<Record<string, unknown>>
+  update?(items: Array<Record<string, unknown>>): string
 }
 
 export interface TaskManagerLike {
-  store: { get(id: string): { progress: Record<string, unknown> } | null }
+  store: {
+    get(id: string): {
+      status?: string
+      progress: Record<string, unknown>
+    } | null
+  }
   appendSidechain(taskId: string, message: Record<string, unknown>): void
   updateTask(taskId: string, fields: Record<string, unknown>): unknown
-  cancelTask(taskId: string, opts?: { reason?: string }): unknown
+  cancelTask(
+    taskId: string,
+    opts?: { reason?: string },
+  ): { status?: string } | null
   startTask(opts: {
     kind: string
     title: string

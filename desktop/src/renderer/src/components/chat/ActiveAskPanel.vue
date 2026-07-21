@@ -39,9 +39,20 @@ const isProfileOnboarding = computed(
     isProfileOnboardingAsk(props.interaction) ||
     ctx.boot.value?.profileOnboarding?.interactionId === props.interaction.id,
 )
-const canContinue = computed(() => askQuestionCanContinue(currentDraft.value))
+const isPermission = computed(
+  () => props.interaction.meta?.interaction_type === 'permission',
+)
+const canContinue = computed(() =>
+  isPermission.value
+    ? Boolean(currentDraft.value.choice?.trim())
+    : askQuestionCanContinue(currentDraft.value),
+)
 const canSubmit = computed(() =>
-  allAskQuestionsAnswered(questions.value, drafts),
+  isPermission.value
+    ? questions.value.every((question) =>
+        Boolean(ensureAskDraft(drafts, question.id).choice?.trim()),
+      )
+    : allAskQuestionsAnswered(questions.value, drafts),
 )
 const freeformPresentation = computed(() =>
   currentQuestion.value
@@ -68,6 +79,11 @@ watch(
         draft.choice = String(
           (existing as Record<string, unknown>).choice || '',
         )
+        draft.optionId = String(
+          (existing as Record<string, unknown>).option_id ||
+            (existing as Record<string, unknown>).optionId ||
+            '',
+        )
         draft.freeform = String(
           (existing as Record<string, unknown>).freeform || '',
         )
@@ -81,9 +97,18 @@ watch(total, (count) => {
   if (currentIndex.value >= count) currentIndex.value = Math.max(0, count - 1)
 })
 
-function choose(question: ControlQuestion, label: string) {
+function choose(
+  question: ControlQuestion,
+  option: ControlQuestion['options'][number],
+) {
   const draft = ensureAskDraft(drafts, question.id)
-  draft.choice = draft.choice === label ? '' : label
+  if (draft.choice === option.label) {
+    draft.choice = ''
+    draft.optionId = ''
+    return
+  }
+  draft.choice = option.label
+  draft.optionId = option.id || ''
 }
 
 function move(delta: number) {
@@ -149,7 +174,7 @@ function skipPermanently() {
         type="button"
         class="active-ask-option"
         :data-active="currentDraft.choice === option.label"
-        @click="choose(currentQuestion, option.label)"
+        @click="choose(currentQuestion, option)"
       >
         <span class="active-ask-number">{{ index + 1 }}</span>
         <span class="active-ask-option-copy">
@@ -159,7 +184,7 @@ function skipPermanently() {
       </button>
     </div>
 
-    <label class="active-ask-freeform">
+    <label v-if="!isPermission" class="active-ask-freeform">
       <span>{{ freeformPresentation.label }}</span>
       <textarea
         v-model="currentDraft.freeform"

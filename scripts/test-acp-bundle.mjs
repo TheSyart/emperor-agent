@@ -43,12 +43,18 @@ child.stdout.on('data', (chunk) => {
 const waitForResponses = () =>
   new Promise((resolvePromise, rejectPromise) => {
     const deadline = setTimeout(() => {
-      rejectPromise(new Error(`Timed out waiting for ACP responses. stderr=${stderr}`))
+      rejectPromise(
+        new Error(`Timed out waiting for ACP responses. stderr=${stderr}`),
+      )
     }, 30_000)
     deadline.unref?.()
 
     const poll = setInterval(() => {
-      const received = new Set(messages.filter((message) => 'id' in message).map((message) => message.id))
+      const received = new Set(
+        messages
+          .filter((message) => 'id' in message)
+          .map((message) => message.id),
+      )
       if ([...expectedIds].every((id) => received.has(id))) {
         clearInterval(poll)
         clearTimeout(deadline)
@@ -75,7 +81,12 @@ const waitForExit = () =>
     child.once('error', rejectPromise)
     child.once('exit', (code, signal) => {
       if (code === 0) resolvePromise()
-      else rejectPromise(new Error(`ACP process failed: code=${code} signal=${signal} stderr=${stderr}`))
+      else
+        rejectPromise(
+          new Error(
+            `ACP process failed: code=${code} signal=${signal} stderr=${stderr}`,
+          ),
+        )
     })
   })
 
@@ -106,10 +117,14 @@ try {
   const initialize = messages.find((message) => message.id === 1)
   const newSession = messages.find((message) => message.id === 2)
   if (initialize?.result?.protocolVersion !== 1) {
-    throw new Error(`Unexpected initialize response: ${JSON.stringify(initialize)}`)
+    throw new Error(
+      `Unexpected initialize response: ${JSON.stringify(initialize)}`,
+    )
   }
   if (typeof newSession?.result?.sessionId !== 'string') {
-    throw new Error(`Unexpected session/new response: ${JSON.stringify(newSession)}`)
+    throw new Error(
+      `Unexpected session/new response: ${JSON.stringify(newSession)}`,
+    )
   }
   if (stderr.trim()) {
     throw new Error(`ACP smoke test wrote to stderr: ${stderr}`)
@@ -117,6 +132,7 @@ try {
 
   process.stdout.write('ACP stdio bundle smoke test passed\n')
 } finally {
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  if (child.exitCode === null && child.signalCode === null)
+    child.kill('SIGKILL')
   await rm(stateRoot, { recursive: true, force: true })
 }

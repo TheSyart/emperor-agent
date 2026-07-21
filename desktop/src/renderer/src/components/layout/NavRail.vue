@@ -26,6 +26,7 @@ const statusIcon = computed(() => {
 })
 const modelLabel = computed(
   () =>
+    current.value?.effectiveDisplayName ||
     current.value?.displayName ||
     `${current.value?.provider || 'provider'} / ${current.value?.modelId || 'model'}`,
 )

@@ -16,6 +16,7 @@ import {
 import { PlanExecutionState } from '../plans/execution-state'
 import type { Interaction } from './models'
 import { plansShareFullGoalScope } from '../goals/scope'
+import { isTerminalTaskStatus } from '../tasks/models'
 import {
   metadataWithoutPlanPermissionTokens,
   planStatusFromTodo,
@@ -34,8 +35,9 @@ export class PlanExecutionManager {
   }
 
   /**
-   * Legacy todo→plan step 投影。Claude Code-style `update_todos` 主链路不调用这里；
-   * 保留是为了旧历史、旧测试和显式兼容 API 能读取/投影旧计划状态。
+   * Reconcile model Todo completion claims into the authoritative Plan.
+   * A Todo may claim implementation completion, but a PlanStep only becomes
+   * DONE after its required verification evidence is present.
    */
   syncPlanFromTodos(
     todos: Array<Record<string, unknown>>,
@@ -46,43 +48,62 @@ export class PlanExecutionManager {
     const evidence = opts?.evidence ?? null
     if (record.goalId !== null) {
       const activeGoal = this.cm.activeGoalPlanContext()
-      const generation = Number(record.metadata.approval_generation ?? 0)
       if (!activeGoal || activeGoal.id !== record.goalId)
         throw new Error('Goal Todo binding does not match the current Goal')
-      for (const item of todos) {
-        if (
-          String(item.plan_id ?? '').trim() !== record.id ||
-          !Number.isInteger(Number(item.approval_generation)) ||
-          Number(item.approval_generation) !== generation
-        )
-          throw new Error(
-            'Goal Todo binding must match current plan_id and approval_generation',
-          )
-      }
     }
+    const generation = Number(record.metadata.approval_generation ?? 0)
     const todoByStepId = new Map<string, Record<string, unknown>>()
+    const independentTodos: Array<Record<string, unknown>> = []
     for (const item of todos) {
       if (!item || typeof item !== 'object') continue
+      const planId = String(item.plan_id ?? '').trim()
       const stepId = String(item.plan_step_id ?? '').trim()
-      if (!stepId)
-        throw new Error('todo plan_step_id is required for Plan projection')
+      const itemGeneration = Number(item.approval_generation)
+      const carriesBinding =
+        Boolean(planId) || Boolean(stepId) || Number.isFinite(itemGeneration)
+      if (!carriesBinding) {
+        independentTodos.push(item)
+        continue
+      }
+      if (
+        planId !== record.id ||
+        !stepId ||
+        !Number.isInteger(itemGeneration) ||
+        itemGeneration !== generation
+      )
+        throw new Error(
+          'Todo binding must match current plan_id, plan_step_id and approval_generation',
+        )
       if (!record.steps.some((step) => step.id === stepId))
         throw new Error(`unknown todo plan_step_id: ${stepId}`)
       if (todoByStepId.has(stepId))
         throw new Error(`duplicate todo plan_step_id: ${stepId}`)
       todoByStepId.set(stepId, item)
     }
+    if (todoByStepId.size !== record.steps.length)
+      throw new Error(
+        'Plan Todo projection must include every current Plan step',
+      )
     const now = nowTs()
-    let updated = record
+    let updated: PlanRecord = {
+      ...record,
+      metadata: {
+        ...record.metadata,
+        implementation_claims: {
+          ...((record.metadata.implementation_claims as Record<
+            string,
+            unknown
+          >) ?? {}),
+        },
+      },
+    }
     for (const originalStep of record.steps) {
-      const todo = todoByStepId.get(originalStep.id)
-      if (todo === undefined) continue
+      const todo = todoByStepId.get(originalStep.id)!
       const todoStatus = String(todo.status ?? 'pending')
       const nextStatus = planStatusFromTodo(todoStatus)
       const currentStep = updated.steps.find(
         (step) => step.id === originalStep.id,
       )!
-      if (currentStep.status === nextStatus) continue
       const transitionEvidence = {
         ...(evidence ?? {}),
         todo_id: todo.id,
@@ -93,39 +114,197 @@ export class PlanExecutionManager {
           : {}),
         synced_at: now,
       }
-      if (
-        (nextStatus === PlanStepStatus.ACTIVE ||
-          nextStatus === PlanStepStatus.DONE) &&
-        currentStep.status === PlanStepStatus.PENDING
-      ) {
-        updated = new PlanExecutionState(updated).startNextStep()
-      }
-      const active = updated.steps.find((step) => step.id === originalStep.id)!
       if (nextStatus === PlanStepStatus.DONE) {
-        updated = new PlanExecutionState(updated).completeStep(
-          originalStep.id,
-          {
-            evidence: transitionEvidence,
+        if (currentStep.status === PlanStepStatus.PENDING)
+          throw new Error(
+            `plan step ${originalStep.id} dependencies are not satisfied`,
+          )
+        const claims = {
+          ...(updated.metadata.implementation_claims as Record<
+            string,
+            unknown
+          >),
+          [originalStep.id]: {
+            ...transitionEvidence,
+            plan_id: record.id,
+            approval_generation: generation,
+            source: 'todo_implementation_claim',
           },
-        )
+        }
+        updated = {
+          ...updated,
+          metadata: { ...updated.metadata, implementation_claims: claims },
+        }
+        const verifiable =
+          stepVerificationStatus(currentStep) === 'passed' ||
+          stepVerificationStatus(currentStep) === 'not_required'
+        if (currentStep.status === PlanStepStatus.ACTIVE && verifiable) {
+          updated = new PlanExecutionState(updated).completeStep(
+            originalStep.id,
+            { evidence: claims[originalStep.id] as Record<string, unknown> },
+          )
+          if (updated.status !== PlanStatus.COMPLETED)
+            updated = new PlanExecutionState(updated).startNextStep()
+        }
       } else if (nextStatus === PlanStepStatus.BLOCKED) {
-        updated = new PlanExecutionState(updated).blockStep(originalStep.id, {
-          evidence: transitionEvidence,
-        })
+        if (currentStep.status === PlanStepStatus.ACTIVE)
+          updated = new PlanExecutionState(updated).blockStep(originalStep.id, {
+            evidence: transitionEvidence,
+          })
       } else if (
         nextStatus === PlanStepStatus.ACTIVE &&
-        active.status !== PlanStepStatus.ACTIVE
+        currentStep.status !== PlanStepStatus.ACTIVE
       ) {
         throw new Error(
           `plan step ${originalStep.id} dependencies are not satisfied`,
         )
-      } else if (nextStatus === PlanStepStatus.PENDING) {
-        throw new Error('todo projection cannot move a Plan step backwards')
       }
     }
     updated = { ...updated, updatedAt: now }
     updated = this.syncPlanStepTasks(updated)
-    return this.cm.planStore.save(updated)
+    const saved = this.cm.planStore.save(updated)
+    this.projectTodos(saved, independentTodos)
+    return saved
+  }
+
+  restoreCurrentPlanTodoProjection(): void {
+    const record = this.cm.latestExecutablePlan()
+    if (record === null) return
+    const independent = (this.cm.todoStore?.todos ?? []).filter(
+      (todo) =>
+        !String(todo.plan_id ?? '').trim() &&
+        !String(todo.plan_step_id ?? '').trim() &&
+        !Number.isFinite(Number(todo.approval_generation)),
+    )
+    this.projectTodos(record, independent)
+  }
+
+  /**
+   * Entering Plan mode starts a new, permanent planning lineage for exactly
+   * the active runtime scope.  There is deliberately no restoration path:
+   * cancelling the successor leaves every predecessor cancelled.
+   */
+  beginPlanReplacement(successor: PlanRecord): {
+    successor: PlanRecord
+    cancelledPlanIds: string[]
+  } | null {
+    const scope = this.cm.planScopeMetadata()
+    if (!scope?.session_id) return null
+    const activeGoalId = this.cm.activeGoalPlanContext()?.id ?? null
+    const replaceable = this.cm.planStore
+      .list()
+      .filter(
+        (record) =>
+          record.goalId === activeGoalId &&
+          this.cm.planMatchesCurrentScope(record) &&
+          (record.status === PlanStatus.DRAFT ||
+            record.status === PlanStatus.WAITING_APPROVAL ||
+            record.status === PlanStatus.APPROVED ||
+            record.status === PlanStatus.EXECUTING),
+      )
+    const predecessor = replaceable.reduce<PlanRecord | null>(
+      (latest, record) =>
+        latest === null ||
+        record.updatedAt > latest.updatedAt ||
+        (record.updatedAt === latest.updatedAt && record.id > latest.id)
+          ? record
+          : latest,
+      null,
+    )
+    const now = nowTs()
+    const cancelledPlanIds: string[] = []
+    const cancelledRecords: PlanRecord[] = []
+    for (const record of replaceable) {
+      const taskMap =
+        record.metadata.plan_step_tasks &&
+        typeof record.metadata.plan_step_tasks === 'object' &&
+        !Array.isArray(record.metadata.plan_step_tasks)
+          ? {
+              ...(record.metadata.plan_step_tasks as Record<string, string>),
+            }
+          : {}
+      const metadata = metadataWithoutPlanPermissionTokens(record.metadata, {
+        reason: 'Plan mode entered with a replacement draft',
+      })
+      metadata.plan_step_tasks_revoked = taskMap
+      metadata.plan_step_tasks_revocation_pending = Object.values(taskMap)
+      metadata.plan_step_tasks = {}
+      metadata.superseded_by = successor.id
+      metadata.superseded_at = now
+      metadata.superseded_reason = 'Plan mode entered with a replacement draft'
+      metadata.supersession_audit = {
+        predecessor_plan_id: record.id,
+        successor_plan_id: successor.id,
+        goal_id: activeGoalId,
+        reason: 'Plan mode entered with a replacement draft',
+        at: now,
+      }
+      cancelledRecords.push({
+        ...record,
+        status: PlanStatus.CANCELLED,
+        updatedAt: now,
+        metadata,
+      })
+      cancelledPlanIds.push(record.id)
+    }
+    const successorWithLineage = {
+      ...successor,
+      supersedesPlanId: predecessor?.id ?? null,
+    }
+    const saved = this.cm.planStore.saveBatch([
+      ...cancelledRecords,
+      successorWithLineage,
+    ])
+    const savedSuccessor = saved.find((record) => record.id === successor.id)
+    if (!savedSuccessor)
+      throw new Error('Plan replacement did not persist its successor')
+    // Durable task revocation metadata is committed with the Plan batch;
+    // reconciliation is idempotent and reruns when TaskManager attaches.
+    this.reconcileRevokedPlanTasks(cancelledPlanIds)
+    this.removeTodoBindings(cancelledPlanIds)
+    return {
+      successor: savedSuccessor,
+      cancelledPlanIds,
+    }
+  }
+
+  reconcileRevokedPlanTasks(onlyPlanIds?: readonly string[]): void {
+    if (this.cm.taskManager === null) return
+    const only = onlyPlanIds ? new Set(onlyPlanIds) : null
+    for (const record of this.cm.planStore.list()) {
+      if (record.status !== PlanStatus.CANCELLED) continue
+      if (only && !only.has(record.id)) continue
+      const raw = record.metadata.plan_step_tasks_revocation_pending
+      if (!Array.isArray(raw)) continue
+      const taskIds = raw
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean)
+      let reconciled = true
+      for (const taskId of taskIds) {
+        try {
+          const current = this.cm.taskManager.store.get(taskId)
+          if (current === null) continue
+          const status = String(current.status ?? '')
+          if (isTerminalTaskStatus(status)) continue
+          const cancelled = this.cm.taskManager.cancelTask(taskId, {
+            reason: 'Plan mode entered with a replacement draft',
+          })
+          if (String(cancelled?.status ?? '') !== 'cancelled')
+            reconciled = false
+        } catch {
+          reconciled = false
+        }
+      }
+      if (!reconciled) continue
+      const metadata = { ...record.metadata }
+      delete metadata.plan_step_tasks_revocation_pending
+      metadata.plan_step_tasks_reconciled_at = nowTs()
+      try {
+        this.cm.planStore.save({ ...record, metadata })
+      } catch {
+        // The pending marker remains durable and will be retried later.
+      }
+    }
   }
 
   /** 批准新计划时取代同 store 内滞留的 approved/executing 旧计划，防止僵尸累积（B1）。 */
@@ -133,6 +312,8 @@ export class PlanExecutionManager {
     const successor = this.cm.planStore.get(newPlanId)
     if (successor === null) throw new Error('successor Plan does not exist')
     const now = nowTs()
+    const cancelledRecords: PlanRecord[] = []
+    const cancelledPlanIds: string[] = []
     for (const record of this.cm.planStore.list()) {
       if (record.id === newPlanId) continue
       if (
@@ -157,6 +338,7 @@ export class PlanExecutionManager {
         reason: 'Plan superseded by an approved successor',
       })
       metadata.plan_step_tasks_revoked = taskMap
+      metadata.plan_step_tasks_revocation_pending = Object.values(taskMap)
       metadata.plan_step_tasks = {}
       metadata.superseded_by = newPlanId
       metadata.superseded_at = now
@@ -166,16 +348,17 @@ export class PlanExecutionManager {
         goal_id: successor.goalId,
       }
       // 不碰 updatedAt：取代是记账而非活动，latest() 必须继续指向新计划
-      this.cm.planStore.save({
+      cancelledRecords.push({
         ...record,
         status: PlanStatus.CANCELLED,
         metadata,
       })
-      for (const taskId of Object.values(taskMap))
-        this.cm.taskManager?.cancelTask(taskId, {
-          reason: 'Plan superseded by an approved successor',
-        })
+      cancelledPlanIds.push(record.id)
     }
+    if (!cancelledRecords.length) return
+    this.cm.planStore.saveBatch(cancelledRecords)
+    this.reconcileRevokedPlanTasks(cancelledPlanIds)
+    this.removeTodoBindings(cancelledPlanIds)
   }
 
   recordPlanStepToolOutput(opts: {
@@ -213,6 +396,97 @@ export class PlanExecutionManager {
     progress.last_summary = String(opts.summary ?? '').slice(0, 500)
     progress.last_tool_call_id = opts.toolCallId ?? null
     return this.cm.taskManager.updateTask(taskId, { progress })
+  }
+
+  reconcileAfterVerification(record: PlanRecord): PlanRecord {
+    const claims =
+      record.metadata.implementation_claims &&
+      typeof record.metadata.implementation_claims === 'object' &&
+      !Array.isArray(record.metadata.implementation_claims)
+        ? (record.metadata.implementation_claims as Record<
+            string,
+            Record<string, unknown>
+          >)
+        : {}
+    const active = record.steps.find(
+      (step) => step.status === PlanStepStatus.ACTIVE,
+    )
+    let updated = record
+    if (
+      active &&
+      claims[active.id] &&
+      stepVerificationStatus(active) === 'passed'
+    ) {
+      updated = new PlanExecutionState(updated).completeStep(active.id, {
+        evidence: claims[active.id]!,
+      })
+      if (updated.status !== PlanStatus.COMPLETED)
+        updated = new PlanExecutionState(updated).startNextStep()
+      updated = this.syncPlanStepTasks(updated)
+      updated = this.cm.planStore.save(updated)
+    }
+    const independent = (this.cm.todoStore?.todos ?? []).filter(
+      (todo) => !String(todo.plan_id ?? '').trim(),
+    )
+    this.projectTodos(updated, independent)
+    return updated
+  }
+
+  private projectTodos(
+    record: PlanRecord,
+    independentTodos: Array<Record<string, unknown>>,
+  ): void {
+    if (this.cm.todoStore === null) return
+    const generation = Number(record.metadata.approval_generation ?? 0)
+    const statusMap: Record<string, string> = {
+      [PlanStepStatus.PENDING]: 'pending',
+      [PlanStepStatus.ACTIVE]: 'in_progress',
+      [PlanStepStatus.DONE]: 'completed',
+      [PlanStepStatus.FAILED]: 'pending',
+      [PlanStepStatus.BLOCKED]: 'pending',
+      [PlanStepStatus.SKIPPED]: 'completed',
+    }
+    const bound = record.steps.map((step) => ({
+      id: `plan:${step.id}`,
+      plan_id: record.id,
+      plan_step_id: step.id,
+      approval_generation: generation,
+      content: step.title,
+      status: statusMap[step.status] ?? 'pending',
+      ...(step.status === PlanStepStatus.BLOCKED
+        ? { blocked_reason: 'Plan step is blocked' }
+        : {}),
+    }))
+    const hasActivePlanStep = bound.some(
+      (todo) => todo.status === 'in_progress',
+    )
+    const independent = independentTodos.map((todo) =>
+      hasActivePlanStep && String(todo.status ?? '') === 'in_progress'
+        ? { ...todo, status: 'pending' }
+        : todo,
+    )
+    this.replaceTodos([...bound, ...independent])
+  }
+
+  private removeTodoBindings(planIds: readonly string[]): void {
+    if (!planIds.length || this.cm.todoStore === null) return
+    const cancelled = new Set(planIds)
+    this.replaceTodos(
+      this.cm.todoStore.todos.filter(
+        (todo) => !cancelled.has(String(todo.plan_id ?? '').trim()),
+      ),
+    )
+  }
+
+  private replaceTodos(items: Array<Record<string, unknown>>): void {
+    if (this.cm.todoStore === null) return
+    if (!this.cm.todoStore.update) {
+      this.cm.todoStore.todos = items
+      return
+    }
+    const result = this.cm.todoStore.update(items)
+    if (/^Error:/i.test(result.trim()))
+      throw new Error(`Plan Todo projection failed: ${result}`)
   }
 
   private syncPlanStepTasks(record: PlanRecord): PlanRecord {
@@ -360,7 +634,12 @@ export class PlanExecutionManager {
     }
     activated = this.cm.permissionTokens.issue(activated)
     activated = this.syncPlanStepTasks(activated)
-    return this.cm.planStore.save(activated)
+    const saved = this.cm.planStore.save(activated)
+    const independent = this.cm.todoStore.todos.filter(
+      (todo) => !String(todo.plan_id ?? '').trim(),
+    )
+    this.projectTodos(saved, independent)
+    return saved
   }
 }
 

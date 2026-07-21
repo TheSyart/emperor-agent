@@ -10,6 +10,7 @@ import {
   makeQueryState,
   maxTurnsReached,
   nearMaxTurns,
+  todoContinuationIntent,
   todoFollowup,
   toolFollowup,
 } from './query-state'
@@ -109,6 +110,8 @@ describe('query_state (test_query_state.py)', () => {
       unfinishedText: '  [ ] 1. Run tests',
       unfinishedCount: 1,
     })
+    expect(transition).not.toBeNull()
+    if (transition === null) throw new Error('expected todo continuation')
     expect(transition.reason).toBe(TransitionReason.TODO_CONTINUATION)
     expect(transition.nextState.transition).toBe(
       TransitionReason.TODO_CONTINUATION,
@@ -121,5 +124,50 @@ describe('query_state (test_query_state.py)', () => {
       },
     ])
     expect(transition.events).toEqual([])
+  })
+
+  it('caps todo continuation nudges at two attempts per prompt', () => {
+    const first = todoFollowup(makeQueryState(), {
+      unfinishedText: '  [ ] 1. Run tests',
+      unfinishedCount: 1,
+    })
+    expect(first).not.toBeNull()
+    const second = todoFollowup(first!.nextState, {
+      unfinishedText: '  [ ] 1. Run tests',
+      unfinishedCount: 1,
+    })
+    expect(second).not.toBeNull()
+    expect(
+      todoFollowup(second!.nextState, {
+        unfinishedText: '  [ ] 1. Run tests',
+        unfinishedCount: 1,
+      }),
+    ).toBeNull()
+  })
+
+  it('recognizes only explicit or trusted todo continuation prompts', () => {
+    expect(
+      todoContinuationIntent([{ role: 'user', content: '继续执行 step_1' }]),
+    ).toBe('explicit')
+    expect(
+      todoContinuationIntent([
+        { role: 'user', content: '[CONTROL:PLAN_APPROVED]\nplan_id: plan_1' },
+      ]),
+    ).toBe('control')
+    expect(
+      todoContinuationIntent([
+        {
+          role: 'user',
+          content: '[CONTROL:PERMISSION_ANSWERED]\nrequest_id: p1',
+        },
+      ]),
+    ).toBe('control')
+    expect(
+      todoContinuationIntent([
+        { role: 'user', content: '继续吗？' },
+        { role: 'assistant', content: '可以。' },
+        { role: 'user', content: '我们刚刚说什么了1' },
+      ]),
+    ).toBe('none')
   })
 })

@@ -23,11 +23,8 @@ import {
 import { PlanDecision } from './plan-policy'
 import {
   dedupeStrings,
-  firstHeading,
-  looksLikePlan,
   metadataWithoutPlanPermissionTokens,
   parsePlanSteps,
-  plainSummary,
   readyForApprovalDraft,
 } from './plan-helpers'
 import type { ControlManagerHost } from './host'
@@ -121,34 +118,6 @@ export class PlanDraftingManager {
     return interaction
   }
 
-  createPlanFromText(
-    text: string,
-    meta?: Record<string, unknown> | null,
-  ): Interaction {
-    let body = String(text ?? '').trim()
-    if (!body) body = 'Plan 模式要求先提交可预览计划。'
-    const title = firstHeading(body) || '计划预览'
-    const summary = plainSummary(body)
-    if (!looksLikePlan(body)) {
-      body = [
-        '# 计划预览',
-        '',
-        body,
-        '',
-        '## 验收',
-        '- 用户批准后再执行任何写入或高影响操作。',
-      ].join('\n')
-    }
-    return this.createPlan({
-      title,
-      summary,
-      planMarkdown: body,
-      assumptions: [],
-      riskLevel: 'medium',
-      meta,
-    })
-  }
-
   assessPlanDecision(userMessage: string): PlanDecision {
     const state = this.cm.store.load()
     const hasPending = Boolean(
@@ -208,10 +177,15 @@ export class PlanDraftingManager {
   ensurePlanDraft(): PlanRecord {
     const existing = this.latestDraftPlan()
     if (existing !== null) return existing
+    return this.cm.planStore.save(this.newPlanModeDraft())
+  }
+
+  /** Creates, but does not persist, the fresh draft installed by a Plan-mode entry. */
+  newPlanModeDraft(): PlanRecord {
     const activeGoal = this.cm.activeGoalPlanContext()
     const now = nowTs()
     const scope = this.cm.planScopeMetadata()
-    const record = makePlanRecord({
+    return makePlanRecord({
       id: `plan_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
       title: 'Plan Draft',
       summary: 'Plan mode draft',
@@ -223,7 +197,6 @@ export class PlanDraftingManager {
       draft: { ...emptyDraft(), phase: PlanDraftPhase.EXPLORING },
       metadata: { risk_level: 'medium', ...(scope ? { scope } : {}) },
     })
-    return this.cm.planStore.save(record)
   }
 
   private latestDraftPlan(): PlanRecord | null {

@@ -240,6 +240,7 @@ describe('Goal mode deterministic E2E', () => {
     })
     api.loop.controlManager.setActiveGoalPlanContext(locked)
     api.loop.controlManager.setRuntimeScope(locked.scope)
+    api.loop.controlManager.setMode('smart_auto')
     api.loop.controlManager.setMode('plan')
     const planInteraction = api.loop.controlManager.createPlan({
       title: 'Verification orchestration Plan',

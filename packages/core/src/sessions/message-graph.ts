@@ -67,6 +67,14 @@ export interface PromptQueueRecord {
   clientMessageId: string
   delivery: 'queue' | 'interject'
   targetCommandId: string | null
+  content: string | null
+  displayContent: string | null
+  source: string | null
+  uiHidden: boolean
+  attachmentIds: string[]
+  requestedSkills: Array<{ name: string; source?: string }>
+  createdOrder: number
+  supportsInterjection: boolean
   state: PromptQueueState
   reason: string | null
   createdAt: string
@@ -99,6 +107,7 @@ interface GraphEvent {
     | 'compact_boundary'
     | 'prompt_recorded'
     | 'prompt_transition'
+    | 'prompt_replaced'
   ts: string
   node?: MessageGraphNode
   nodeId?: string
@@ -249,12 +258,19 @@ export class MessageGraphStore {
     clientMessageId?: string | null
     delivery: 'queue' | 'interject'
     targetCommandId?: string | null
+    content?: string | null
+    displayContent?: string | null
+    source?: string | null
+    uiHidden?: boolean
+    attachmentIds?: string[] | null
+    requestedSkills?: Array<{ name: string; source?: string }> | null
+    supportsInterjection?: boolean
   }): PromptQueueRecord {
     const id = cleanId(input.id)
     const turnId = cleanId(input.turnId)
     if (!id || !turnId) throw new Error('prompt id and turn id are required')
     const existing = this.prompts.get(id)
-    if (existing) return { ...existing }
+    if (existing) return clonePrompt(existing)
     const now = nowIsoUtc8()
     const prompt: PromptQueueRecord = {
       id,
@@ -262,13 +278,22 @@ export class MessageGraphStore {
       clientMessageId: cleanId(input.clientMessageId) || id,
       delivery: input.delivery,
       targetCommandId: cleanId(input.targetCommandId),
+      content: typeof input.content === 'string' ? input.content : null,
+      displayContent:
+        typeof input.displayContent === 'string' ? input.displayContent : null,
+      source: cleanOptionalString(input.source),
+      uiHidden: input.uiHidden === true,
+      attachmentIds: normalizeStringList(input.attachmentIds),
+      requestedSkills: normalizeRequestedSkills(input.requestedSkills),
+      createdOrder: this.nextSeq,
+      supportsInterjection: input.supportsInterjection === true,
       state: 'queued',
       reason: null,
       createdAt: now,
       updatedAt: now,
     }
     this.appendEvent({ type: 'prompt_recorded', prompt })
-    return { ...prompt }
+    return clonePrompt(prompt)
   }
 
   transitionPrompt(
@@ -290,6 +315,62 @@ export class MessageGraphStore {
     return { ...this.prompts.get(prompt.id)! }
   }
 
+  replaceQueuedPrompt(
+    promptId: string,
+    input: {
+      id: string
+      turnId: string
+      clientMessageId?: string | null
+      delivery: 'queue' | 'interject'
+      targetCommandId?: string | null
+      content?: string | null
+      displayContent?: string | null
+      source?: string | null
+      uiHidden?: boolean
+      attachmentIds?: string[] | null
+      requestedSkills?: Array<{ name: string; source?: string }> | null
+      supportsInterjection?: boolean
+    },
+    reason = 'replaced_by_interjection',
+  ): PromptQueueRecord {
+    const original = this.prompts.get(String(promptId))
+    if (!original) throw new Error(`unknown prompt queue record: ${promptId}`)
+    if (original.state !== 'queued')
+      throw new Error(`prompt is not queued: ${promptId}`)
+    const id = cleanId(input.id)
+    const turnId = cleanId(input.turnId)
+    if (!id || !turnId) throw new Error('prompt id and turn id are required')
+    if (this.prompts.has(id)) throw new Error(`duplicate prompt id: ${id}`)
+    const now = nowIsoUtc8()
+    const replacement: PromptQueueRecord = {
+      id,
+      turnId,
+      clientMessageId: cleanId(input.clientMessageId) || id,
+      delivery: input.delivery,
+      targetCommandId: cleanId(input.targetCommandId),
+      content: typeof input.content === 'string' ? input.content : null,
+      displayContent:
+        typeof input.displayContent === 'string' ? input.displayContent : null,
+      source: cleanOptionalString(input.source),
+      uiHidden: input.uiHidden === true,
+      attachmentIds: normalizeStringList(input.attachmentIds),
+      requestedSkills: normalizeRequestedSkills(input.requestedSkills),
+      createdOrder: this.nextSeq,
+      supportsInterjection: input.supportsInterjection === true,
+      state: 'queued',
+      reason: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.appendEvent({
+      type: 'prompt_replaced',
+      promptId: original.id,
+      prompt: replacement,
+      reason: safeReason(reason),
+    })
+    return clonePrompt(replacement)
+  }
+
   project(leafId: string | null = this.leafId): Row[] {
     return projectMessageGraphToLegacy(this.snapshot(), { leafId })
   }
@@ -299,7 +380,7 @@ export class MessageGraphStore {
     const compactBoundaries = [...this.compactBoundaries.values()].map(
       cloneBoundary,
     )
-    const prompts = [...this.prompts.values()].map((item) => ({ ...item }))
+    const prompts = [...this.prompts.values()].map(clonePrompt)
     const diagnostics = this.diagnostics.map((item) => ({ ...item }))
     return {
       schemaVersion: 'emperor.message-graph.v2',
@@ -494,6 +575,25 @@ export class MessageGraphStore {
       prompt.updatedAt = event.ts
       return true
     }
+    if (event.type === 'prompt_replaced') {
+      const original = event.promptId ? this.prompts.get(event.promptId) : null
+      const replacement = event.prompt ? normalizePrompt(event.prompt) : null
+      if (
+        !original ||
+        original.state !== 'queued' ||
+        !replacement ||
+        replacement.state !== 'queued' ||
+        this.prompts.has(replacement.id)
+      )
+        return false
+      original.state = 'cancelled'
+      original.reason = event.reason
+        ? safeReason(event.reason)
+        : 'replaced_by_interjection'
+      original.updatedAt = event.ts
+      this.prompts.set(replacement.id, replacement)
+      return true
+    }
     const boundary = event.boundary ? normalizeBoundary(event.boundary) : null
     if (!boundary || this.compactBoundaries.has(boundary.id)) return false
     if (boundary.parentLeafId && !this.nodes.has(boundary.parentLeafId))
@@ -603,6 +703,7 @@ function normalizeEvent(value: unknown): GraphEvent | null {
       'compact_boundary',
       'prompt_recorded',
       'prompt_transition',
+      'prompt_replaced',
     ].includes(type)
   )
     return null
@@ -669,6 +770,15 @@ function normalizePrompt(value: unknown): PromptQueueRecord | null {
     clientMessageId,
     delivery,
     targetCommandId: cleanId(value.targetCommandId),
+    content: typeof value.content === 'string' ? value.content : null,
+    displayContent:
+      typeof value.displayContent === 'string' ? value.displayContent : null,
+    source: cleanOptionalString(value.source),
+    uiHidden: value.uiHidden === true,
+    attachmentIds: normalizeStringList(value.attachmentIds),
+    requestedSkills: normalizeRequestedSkills(value.requestedSkills),
+    createdOrder: nonNegativeInt(value.createdOrder),
+    supportsInterjection: value.supportsInterjection === true,
     state,
     reason: value.reason ? safeReason(value.reason) : null,
     createdAt: String(value.createdAt ?? ''),
@@ -712,6 +822,34 @@ function cleanId(value: unknown): string | null {
   return text
 }
 
+function cleanOptionalString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  return text ? text.slice(0, 512) : null
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [
+    ...new Set(value.map(cleanId).filter((item): item is string => !!item)),
+  ].slice(0, 64)
+}
+
+function normalizeRequestedSkills(
+  value: unknown,
+): Array<{ name: string; source?: string }> {
+  if (!Array.isArray(value)) return []
+  const output: Array<{ name: string; source?: string }> = []
+  for (const item of value.slice(0, 64)) {
+    if (!isRecord(item)) continue
+    const name = cleanId(item.name)
+    if (!name) continue
+    const source = cleanOptionalString(item.source)
+    output.push({ name, ...(source ? { source } : {}) })
+  }
+  return output
+}
+
 function safeReason(value: unknown): string {
   const text = String(value ?? '').trim()
   return (text || 'unspecified').slice(0, 256)
@@ -747,6 +885,10 @@ function cloneBoundary(
   boundary: MessageCompactBoundary,
 ): MessageCompactBoundary {
   return { ...boundary }
+}
+
+function clonePrompt(prompt: PromptQueueRecord): PromptQueueRecord {
+  return jsonSafe(prompt)
 }
 
 function digest(value: unknown): string {

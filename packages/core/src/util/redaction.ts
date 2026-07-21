@@ -24,6 +24,10 @@ export function redactSensitiveOutput(
     '$1: [REDACTED]',
   )
   output = output.replace(
+    /\b([A-Za-z0-9-]*(?:api[-_]?key|token|secret|authorization|credential)[A-Za-z0-9-]*)\s*:[^\r\n'";]*/gi,
+    '$1: [REDACTED]',
+  )
+  output = output.replace(
     /\b(set-cookie|cookie)\s*:[^\r\n]*/gi,
     '$1: [REDACTED]',
   )

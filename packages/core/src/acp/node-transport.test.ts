@@ -44,9 +44,14 @@ describe('bounded ACP Node transport', () => {
     for (const line of ['{bad json}\n', '[]\n']) {
       const input = new PassThrough()
       const output = new PassThrough()
-      const reader = createBoundedNodeAcpStream(input, output).readable.getReader()
+      const reader = createBoundedNodeAcpStream(
+        input,
+        output,
+      ).readable.getReader()
       input.end(line)
-      await expect(reader.read()).rejects.toThrow(/invalid ACP JSON|ACP message must be an object/)
+      await expect(reader.read()).rejects.toThrow(
+        /invalid ACP JSON|ACP message must be an object/,
+      )
     }
   })
 
@@ -58,7 +63,10 @@ describe('bounded ACP Node transport', () => {
         callback = done
       },
     })
-    const writer = createBoundedNodeAcpStream(input, output).writable.getWriter()
+    const writer = createBoundedNodeAcpStream(
+      input,
+      output,
+    ).writable.getWriter()
     let settled = false
     const pending = writer
       .write({ jsonrpc: '2.0', id: 1, result: {} })

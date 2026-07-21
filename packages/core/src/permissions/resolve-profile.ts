@@ -20,7 +20,9 @@ export function resolveToolProfile(
   const tool: Tool | undefined = opts?.registry
     ? opts.registry.get(toolName)
     : undefined
-  let readOnly = tool ? Boolean(tool.readOnly) : false
+  let readOnly = tool
+    ? Boolean(tool.readOnly)
+    : FALLBACK_READ_ONLY_TOOLS.has(toolName)
   let concurrencySafe = tool ? Boolean(tool.concurrencySafe) : false
   let destructive = !readOnly
   let path = argumentPath(args)
@@ -30,7 +32,7 @@ export function resolveToolProfile(
     try {
       readOnly = tool.isReadOnly(args)
     } catch {
-      readOnly = Boolean(tool.readOnly)
+      readOnly = false
     }
     try {
       concurrencySafe = tool.isConcurrencySafe(args)
@@ -77,6 +79,18 @@ export function resolveToolProfile(
     schedulerAction: schedulerAction(args),
   })
 }
+
+// Core callers normally supply the registry. Keeping this narrow fallback
+// makes policy-only checks reflect the immutable semantics of built-in readers
+// without treating unknown tools as safe.
+const FALLBACK_READ_ONLY_TOOLS = new Set([
+  'glob',
+  'grep',
+  'load_skill',
+  'read_file',
+  'web_fetch',
+  'web_search',
+])
 
 function uniquePaths(values: unknown[]): string[] {
   return [

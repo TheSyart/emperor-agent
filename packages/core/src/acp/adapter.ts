@@ -111,58 +111,66 @@ export class EmperorAcpAdapter {
       .onConnect((connection) => {
         void connection.closed.then(() => this.abortAll('connection_closed'))
       })
-      .onRequest(methods.agent.initialize, async (context) =>
-        await this.ledger.run(
-          'initialize',
-          context.requestId,
-          context.params,
-          async () => {
-            this.initialized = true
-            return {
-              protocolVersion: PROTOCOL_VERSION,
-              agentCapabilities: {
-                loadSession: true,
-                promptCapabilities: {
-                  image: false,
-                  audio: false,
-                  embeddedContext: false,
+      .onRequest(
+        methods.agent.initialize,
+        async (context) =>
+          await this.ledger.run(
+            'initialize',
+            context.requestId,
+            context.params,
+            async () => {
+              this.initialized = true
+              return {
+                protocolVersion: PROTOCOL_VERSION,
+                agentCapabilities: {
+                  loadSession: true,
+                  promptCapabilities: {
+                    image: false,
+                    audio: false,
+                    embeddedContext: false,
+                  },
                 },
-              },
-              agentInfo: { name: 'emperor-agent', version },
-              _meta: {
-                emperor: {
-                  transport: 'stdio',
-                  runtime: 'core-api',
-                  content: 'text-only',
+                agentInfo: { name: 'emperor-agent', version },
+                _meta: {
+                  emperor: {
+                    transport: 'stdio',
+                    runtime: 'core-api',
+                    content: 'text-only',
+                  },
                 },
-              },
-            }
-          },
-        ),
+              }
+            },
+          ),
       )
-      .onRequest(methods.agent.session.new, async (context) =>
-        await this.ledger.run(
-          'session/new',
-          context.requestId,
-          context.params,
-          async () => await this.newSession(context.params),
-        ),
+      .onRequest(
+        methods.agent.session.new,
+        async (context) =>
+          await this.ledger.run(
+            'session/new',
+            context.requestId,
+            context.params,
+            async () => await this.newSession(context.params),
+          ),
       )
-      .onRequest(methods.agent.session.load, async (context) =>
-        await this.ledger.run(
-          'session/load',
-          context.requestId,
-          context.params,
-          async () => await this.loadSession(context),
-        ),
+      .onRequest(
+        methods.agent.session.load,
+        async (context) =>
+          await this.ledger.run(
+            'session/load',
+            context.requestId,
+            context.params,
+            async () => await this.loadSession(context),
+          ),
       )
-      .onRequest(methods.agent.session.prompt, async (context) =>
-        await this.ledger.run(
-          'session/prompt',
-          context.requestId,
-          context.params,
-          async () => await this.prompt(context),
-        ),
+      .onRequest(
+        methods.agent.session.prompt,
+        async (context) =>
+          await this.ledger.run(
+            'session/prompt',
+            context.requestId,
+            context.params,
+            async () => await this.prompt(context),
+          ),
       )
       .onNotification(methods.agent.session.cancel, ({ params }) => {
         this.activePrompts
@@ -241,10 +249,7 @@ export class EmperorAcpAdapter {
         projectors.set(turnId, projector)
       }
       for (const notification of projector.project(event)) {
-        await context.client.notify(
-          methods.client.session.update,
-          notification,
-        )
+        await context.client.notify(methods.client.session.update, notification)
         replayedUpdates += 1
       }
     }
@@ -281,7 +286,8 @@ export class EmperorAcpAdapter {
       controller.abort(context.signal.reason ?? abortError('request_cancelled'))
     }
     if (context.signal.aborted) onRequestAbort()
-    else context.signal.addEventListener('abort', onRequestAbort, { once: true })
+    else
+      context.signal.addEventListener('abort', onRequestAbort, { once: true })
     const projector = new AcpEventProjector({
       sessionId: session.id,
       turnId,
@@ -431,8 +437,9 @@ class RequestLedger {
 
   private markTerminal(entry: LedgerEntry): void {
     entry.terminal = true
-    let terminal = [...this.entries.values()].filter((item) => item.terminal)
-      .length
+    let terminal = [...this.entries.values()].filter(
+      (item) => item.terminal,
+    ).length
     if (terminal <= this.maxTerminal) return
     for (const [key, candidate] of this.entries) {
       if (!candidate.terminal) continue

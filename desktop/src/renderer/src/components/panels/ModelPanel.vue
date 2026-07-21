@@ -24,6 +24,8 @@ import {
   createModelEntryDraft,
   reasoningChoices,
   toModelEntrySaveInput,
+  updateModelDraftDisplayName,
+  updateModelDraftId,
   type CapabilityControl,
   type ModelEntryDraft,
 } from './model/modelFormModel'
@@ -283,6 +285,18 @@ function onApiKeyInput(): void {
   if (editing.value?.apiKey.trim()) editing.value.clearApiKey = false
 }
 
+function onModelIdInput(event: Event): void {
+  if (!editing.value) return
+  const value = (event.target as HTMLInputElement).value
+  updateModelDraftId(editing.value, value)
+}
+
+function onDisplayNameInput(event: Event): void {
+  if (!editing.value) return
+  const value = (event.target as HTMLInputElement).value
+  updateModelDraftDisplayName(editing.value, value)
+}
+
 function capabilityStatus(key: (typeof capabilityRows)[number]['key']): string {
   const profile = editing.value?.resolvedProfile
   if (!profile) return '保存后识别'
@@ -362,7 +376,7 @@ async function save(): Promise<void> {
 
 async function remove(entryId: string): Promise<void> {
   const entry = entries.value.find((candidate) => candidate.entryId === entryId)
-  const label = entry?.displayName || entry?.modelId || '此模型'
+  const label = entry?.effectiveDisplayName || entry?.modelId || '此模型'
   if (!window.confirm(`确定删除「${label}」吗？`)) return
   deletingId.value = entryId
   try {
@@ -487,7 +501,11 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
                 :key="entry.entryId"
                 :value="entry.entryId"
               >
-                {{ entry.displayName || entry.modelId }}
+                {{
+                  entry.effectiveDisplayName ||
+                  entry.displayName ||
+                  entry.modelId
+                }}
               </option>
             </select>
           </label>
@@ -691,10 +709,11 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
                 <div class="model-id-row">
                   <input
                     id="model-id"
-                    v-model="editing.modelId"
+                    :value="editing.modelId"
                     list="discovered-models"
                     spellcheck="false"
                     placeholder="例如 gpt-5、claude-sonnet-4-5"
+                    @input="onModelIdInput"
                   />
                   <button
                     type="button"
@@ -719,13 +738,20 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
                 </datalist>
                 <small v-if="discoveryMessage">{{ discoveryMessage }}</small>
               </div>
-              <label class="field span-2">
-                <span>显示名称（可选）</span>
+              <div class="field span-2">
+                <label for="model-display-name">标识</label>
                 <input
-                  v-model="editing.displayName"
-                  placeholder="例如 工作账号 GPT-5"
+                  id="model-display-name"
+                  :value="editing.displayName"
+                  :placeholder="editing.modelId || '输入模型 ID 后自动同步'"
+                  @input="onDisplayNameInput"
                 />
-              </label>
+                <small>{{
+                  editing.displayNameCustomized
+                    ? '自定义标识；清空可恢复自动同步'
+                    : '自动标识，与模型 ID 同步且不会重复写入配置'
+                }}</small>
+              </div>
             </section>
 
             <section class="form-section">

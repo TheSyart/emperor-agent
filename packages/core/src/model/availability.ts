@@ -30,8 +30,17 @@ export function modelAvailability(config: ModelConfig): ModelAvailability {
     )
   }
   const providerName = String(entry.provider || '').trim() || null
-  const entryName = String(entry.name || '').trim() || null
   const mainModelId = String(entry.mainModelId || entry.id || '').trim()
+  const entryName =
+    String(
+      entry.displayName ||
+        entry.label ||
+        entry.modelId ||
+        entry.mainModelId ||
+        entry.id ||
+        entry.name ||
+        '',
+    ).trim() || null
   if (!mainModelId) {
     return unavailable(
       `模型条目「${entryName || '未命名'}」缺少 Main Model ID。请先补全模型配置。`,

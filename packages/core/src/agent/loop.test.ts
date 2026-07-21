@@ -2009,6 +2009,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       project: project as unknown as Record<string, unknown>,
     })
     loop.activateSession(buildSession.id)
+    loop.controlManager.setMode('smart_auto')
 
     await loop.runUserTurn('读取 package.json', {
       turnId: 'turn_1',
@@ -2081,6 +2082,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       fileCheckpointsEnabled: true,
       softGitRewindMode: 'eval',
     })
+    loop.controlManager.setPermissionMode('smart_auto')
     const project = loop.projectStore.resolve(projectRoot)
     const buildSession = loop.sessionStore.create('Checkpoint build', {
       mode: 'build',
@@ -2541,8 +2543,15 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       kind: 'ask',
       meta: {
         permission: {
-          rule: 'ask.run_command.project_code',
-          risk: 'high',
+          version: 2,
+          operation_count: 1,
+          operations: [
+            {
+              tool_name: 'run_command',
+              risk: 'high',
+              summary: 'npm test',
+            },
+          ],
         },
       },
     })
@@ -2753,6 +2762,37 @@ describe('AgentLoop (MIG-CORE-011)', () => {
           message.role === 'assistant' &&
           message.content === '这条迟到回复不应该进入会话。',
       ),
+    ).toBe(false)
+  })
+
+  it('treats an aborting provider as cancellation after an active-task race', async () => {
+    const root = tmp('emperor-agent-loop-provider-abort-')
+    const provider = new AbortRejectingProvider()
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const emitted: Array<Record<string, unknown>> = []
+    const hookRun = vi.spyOn(loop.hookService, 'run')
+
+    const running = loop.runUserTurn('读取 hello.txt 后继续总结', {
+      turnId: 'turn_provider_abort',
+      emit: async (event) => {
+        emitted.push(event)
+      },
+    })
+    await provider.secondCallStarted
+
+    loop.activeTasks.cancel({ kind: 'turn' })
+    await expect(running).rejects.toBeInstanceOf(CancelledTaskError)
+    await provider.secondCallAborted
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(emitted.some((event) => event.event === 'error')).toBe(false)
+    expect(
+      hookRun.mock.calls.some(([eventName]) => eventName === 'StopFailure'),
     ).toBe(false)
   })
 
@@ -3088,6 +3128,45 @@ class CancellableProvider extends LLMProvider {
 
   finishSecond(response: LLMResponse): void {
     this.secondResolve(response)
+  }
+}
+
+class AbortRejectingProvider extends LLMProvider {
+  calls: ChatArgs[] = []
+  private secondStartedResolve: () => void = () => {}
+  private secondAbortedResolve: () => void = () => {}
+  readonly secondCallStarted = new Promise<void>((resolve) => {
+    this.secondStartedResolve = resolve
+  })
+  readonly secondCallAborted = new Promise<void>((resolve) => {
+    this.secondAbortedResolve = resolve
+  })
+
+  constructor() {
+    super({ defaultModel: 'fake-main' })
+  }
+
+  async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.calls.push(args)
+    if (this.calls.length === 1) {
+      return response(null, {
+        toolCalls: [
+          { id: 'call_1', name: 'read_file', arguments: { path: 'hello.txt' } },
+        ],
+        finishReason: 'tool_calls',
+      })
+    }
+    this.secondStartedResolve()
+    return await new Promise<LLMResponse>((_resolve, reject) => {
+      args.signal?.addEventListener(
+        'abort',
+        () => {
+          this.secondAbortedResolve()
+          reject(new DOMException('The operation was aborted', 'AbortError'))
+        },
+        { once: true },
+      )
+    })
   }
 }
 

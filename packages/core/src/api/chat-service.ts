@@ -170,6 +170,11 @@ export class MainlineTurnService {
             targetTurnId: interjected.targetTurnId,
           }
         }
+        if (
+          interjected.reason === 'prompt_id_conflict' ||
+          interjected.reason === 'prompt_cancelled'
+        )
+          throw new Error(`interjection rejected: ${interjected.reason}`)
       }
       const reply = await this.loop.runUserTurn(content, {
         sessionId: runSessionId,
@@ -363,5 +368,17 @@ export class ChatService {
 
   submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
     return this.mainline.submit({ ...input, source: input.source ?? 'chat' })
+  }
+
+  listQueuedPrompts(input: { sessionId: string }) {
+    return this.mainline.loop.listQueuedPrompts(input.sessionId)
+  }
+
+  manageQueuedPrompt(input: {
+    sessionId: string
+    promptId: string
+    action: 'cancel' | 'interject'
+  }) {
+    return this.mainline.loop.manageQueuedPrompt(input)
   }
 }

@@ -4,6 +4,7 @@ import type {
   AssistantSegment,
   MediaArtifactRef,
   PlanSegment,
+  PlanActivitySegment,
   ThoughtSegment,
   TodoItem,
   ToolSegment,
@@ -29,6 +30,7 @@ export type AssistantFlowBlock =
     }
   | { kind: 'media'; id: string; items: MediaArtifactRef[] }
   | { kind: 'control'; id: string; segment: AskSegment | PlanSegment }
+  | { kind: 'plan_activity'; id: string; segment: PlanActivitySegment }
   | { kind: 'todos'; id: string; todos: TodoItem[] }
 
 export interface ProjectAssistantFlowOptions {
@@ -124,6 +126,12 @@ export function projectAssistantFlow(
 
     if (segment.type === 'ask' || segment.type === 'plan') {
       blocks.push({ kind: 'control', id: segment.id, segment })
+      index += 1
+      continue
+    }
+
+    if (segment.type === 'plan_activity') {
+      blocks.push({ kind: 'plan_activity', id: segment.id, segment })
       index += 1
       continue
     }

@@ -1,22 +1,29 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
-import { useSession } from '../composables/useSession'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
-import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
+import { activeBottomControlPanelForInteraction } from '../components/chat/bottomControlPanel'
 import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
 import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
 import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
-import PendingBar from '../components/chat/PendingBar.vue'
-import type { ModelConfigPayload } from '../types'
+import QueueTray from '../components/chat/QueueTray.vue'
+import type {
+  ChatSendPayload,
+  ModelConfigPayload,
+  QueuedPromptItem,
+} from '../types'
 import { activeGoalForSession } from '../runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from '../runtime/goalRender'
 
 const ctx = useAppContext()
-const sessionStore = useSession()
+const composer = ref<{
+  setDraft: (text: string) => void
+  focusInput: () => void
+  restoreDraft: (payload: ChatSendPayload) => void
+} | null>(null)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -30,16 +37,16 @@ const sendBlockedReason = computed(() => {
     ? availability.message || '还没有可用模型，请先配置模型。'
     : ''
 })
+const pendingInteraction = computed(
+  () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
+)
 const activeBottomControl = computed(() =>
-  activeBottomControlPanel(
-    ctx.boot.value?.control || null,
-    sessionStore.active.value || null,
-  ),
+  activeBottomControlPanelForInteraction(pendingInteraction.value),
 )
 const showProfileOnboardingPrompt = computed(
   () =>
     ctx.boot.value?.profileOnboarding?.status === 'pending' &&
-    !activeBottomControl.value,
+    !pendingInteraction.value,
 )
 const activeGoal = computed(() => {
   const projected = activeGoalForSession(
@@ -87,6 +94,26 @@ watch(
     goalReplaceError.value = ''
     goalReplacementDraft.value = ''
   },
+)
+
+watch(
+  () => activeBottomControl.value?.interaction.id || '',
+  (interactionId, previousInteractionId) => {
+    if (!previousInteractionId || interactionId) return
+    void nextTick(() => composer.value?.focusInput())
+  },
+)
+
+watch(
+  [() => ctx.queueDraftRecovery.value, () => ctx.sessionId.value],
+  ([recovery, ownerSessionId]) => {
+    if (!recovery || recovery.sessionId !== ownerSessionId) return
+    void nextTick(() => {
+      composer.value?.restoreDraft(recovery.payload)
+      ctx.clearQueueDraftRecovery(recovery.sessionId)
+    })
+  },
+  { flush: 'post' },
 )
 
 async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
@@ -213,6 +240,19 @@ function normalizeReasoningEffort(value?: string | null) {
     .toLowerCase()
   return normalized
 }
+
+async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  if (await ctx.manageQueuedPrompt(item.id, 'cancel'))
+    composer.value?.setDraft(item.content)
+}
+
+async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'interject')
+}
+
+async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'cancel')
+}
 </script>
 
 <template>
@@ -223,7 +263,7 @@ function normalizeReasoningEffort(value?: string | null) {
         <p class="truncate">
           {{ ctx.runtimeText() }} ·
           {{
-            ctx.boot.value?.modelConfig?.current?.displayName ||
+            ctx.boot.value?.modelConfig?.current?.effectiveDisplayName ||
             ctx.boot.value?.model ||
             'model'
           }}
@@ -303,10 +343,13 @@ function normalizeReasoningEffort(value?: string | null) {
           v-else-if="activeBottomControl?.kind === 'plan'"
           :interaction="activeBottomControl.interaction"
         />
-        <PendingBar v-if="!activeBottomControl" :pending="ctx.pending" />
-        <div v-if="!activeBottomControl" class="composer-wrap">
+        <div class="composer-wrap">
           <Composer
+            v-show="!activeBottomControl"
+            ref="composer"
             :busy="composerBusy"
+            :interaction-blocked="Boolean(pendingInteraction)"
+            :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
             :goal="activeGoal"
             :goal-capture-status="goalCaptureStatus"
             :lifecycle-mode="composerLifecycleMode"
@@ -336,7 +379,16 @@ function normalizeReasoningEffort(value?: string | null) {
             @send="ctx.submitFromComposer($event)"
             @stop="ctx.stopActive"
             @error="ctx.showToast"
-          />
+          >
+            <template #queue>
+              <QueueTray
+                :items="ctx.queuedPrompts.value"
+                @edit="editQueuedPrompt"
+                @interject="interjectQueuedPrompt"
+                @cancel="cancelQueuedPrompt"
+              />
+            </template>
+          </Composer>
         </div>
       </div>
     </div>

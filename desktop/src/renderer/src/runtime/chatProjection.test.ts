@@ -66,16 +66,9 @@ describe('chatProjection', () => {
         id: 'client_1',
         role: 'user',
         content: 'interrupt now',
-        deliveryState: 'interjected',
-      }),
-      expect.objectContaining({
-        id: 'client_2',
-        role: 'user',
-        content: 'queued then cancelled',
-        deliveryState: 'cancelled',
-        deliveryReason: 'owner cancelled',
       }),
     ])
+    expect(state.messages[0]).not.toHaveProperty('deliveryState')
   })
 
   it('clears a queued prompt processing badge when its assistant turn completes', () => {
@@ -99,8 +92,16 @@ describe('chatProjection', () => {
         client_message_id: 'queued_client',
       },
       {
-        event: 'assistant_done',
+        event: 'user_message',
         seq: 3,
+        session_id: 's1',
+        turn_id: 'queued_turn',
+        client_message_id: 'queued_client',
+        content: 'next request',
+      },
+      {
+        event: 'assistant_done',
+        seq: 4,
         session_id: 's1',
         turn_id: 'queued_turn',
         content: 'done',
@@ -1109,7 +1110,127 @@ describe('chatProjection', () => {
           status: 'approved',
         }),
       }),
+      expect.objectContaining({
+        type: 'plan_activity',
+        label: '计划已批准',
+      }),
       expect.objectContaining({ type: 'text', content: 'executing' }),
+    ])
+  })
+
+  it('keeps every Plan execution milestone in event order, including a terminal update after assistant_done', () => {
+    const state = projectChatEvents(
+      [
+        {
+          event: 'plan_draft',
+          seq: 1,
+          session_id: 's1',
+          turn_id: 'turn_plan',
+          interaction: {
+            id: 'plan_1',
+            kind: 'plan',
+            status: 'waiting',
+            title: 'Plan',
+            plan_markdown: '# Plan',
+          },
+        },
+        {
+          event: 'turn_paused',
+          seq: 2,
+          session_id: 's1',
+          turn_id: 'turn_plan',
+        },
+        {
+          event: 'plan_approved',
+          seq: 3,
+          session_id: 's1',
+          interaction: { id: 'plan_1', kind: 'plan', status: 'approved' },
+        },
+        {
+          event: 'user_message',
+          seq: 4,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          source: 'control',
+          ui_hidden: true,
+          content: '',
+        },
+        {
+          event: 'plan_step_update',
+          seq: 5,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          plan_id: 'runtime_plan',
+          step: { id: 'step_1', title: '修改代码', status: 'in_progress' },
+        },
+        {
+          event: 'message_delta',
+          seq: 6,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          delta: 'working',
+        },
+        {
+          event: 'plan_step_update',
+          seq: 7,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          plan_id: 'runtime_plan',
+          step: { id: 'step_1', title: '修改代码', status: 'completed' },
+        },
+        {
+          event: 'plan_verification_start',
+          seq: 8,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          plan_id: 'runtime_plan',
+          step_id: 'step_1',
+          command: 'npm test',
+        },
+        {
+          event: 'plan_verification_done',
+          seq: 9,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          plan_id: 'runtime_plan',
+          step_id: 'step_1',
+          result: { passed: true, summary: '全部通过' },
+        },
+        {
+          event: 'assistant_done',
+          seq: 10,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          content: 'working',
+        },
+        {
+          event: 'plan_runtime_update',
+          seq: 11,
+          session_id: 's1',
+          turn_id: 'turn_resume',
+          plan: {
+            id: 'runtime_plan',
+            title: 'Plan',
+            status: 'completed',
+            steps: [],
+          },
+        },
+      ] as never,
+      { sessionId: 's1' },
+    )
+
+    const labels = state.messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.segments)
+      .filter((segment) => segment.type === 'plan_activity')
+      .map((segment) => segment.label)
+    expect(labels).toEqual([
+      '计划已批准',
+      '开始步骤',
+      '步骤完成',
+      '开始验证',
+      '验证通过',
+      '计划完成',
     ])
   })
 })

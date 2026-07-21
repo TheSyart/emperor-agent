@@ -204,7 +204,13 @@ export function buildProviderSnapshot(
     ...(entry.pricing ? { pricing: structuredClone(entry.pricing) } : {}),
     modelEntryId: entry.entryId || entry.name,
     entryName: entry.entryId || entry.name,
-    entryLabel: entry.displayName || entry.label || entry.name,
+    entryLabel:
+      entry.displayName ||
+      entry.label ||
+      entry.modelId ||
+      entry.mainModelId ||
+      entry.id ||
+      entry.name,
     routeReason: 'active_model',
   }
 }

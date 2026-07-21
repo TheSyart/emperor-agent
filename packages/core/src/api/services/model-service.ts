@@ -78,6 +78,7 @@ export interface ModelEntryPayload extends Omit<
   'apiKey' | 'legacy'
 > {
   apiKey: string
+  effectiveDisplayName: string
   resolvedProfile: ResolvedModelProfile
 }
 
@@ -88,6 +89,7 @@ export interface CurrentModelPayload {
   protocol: ModelProtocol
   modelId: string
   displayName: string | null
+  effectiveDisplayName: string
   apiBase: string
   reasoningEffort: string | null
   contextWindowTokens: number
@@ -451,6 +453,7 @@ function modelEntryPayload(entry: ModelEntryV2): ModelEntryPayload {
   return {
     ...safe,
     apiKey: maskSecret(entry.apiKey),
+    effectiveDisplayName: entry.displayName || entry.modelId,
     resolvedProfile: resolvedProfile(entry),
   }
 }
@@ -465,6 +468,8 @@ function currentModelPayload(entry: ModelEntry): CurrentModelPayload {
     protocol: entry.protocol ?? spec?.defaultProtocol ?? 'openai',
     modelId: entry.modelId || entry.mainModelId,
     displayName: entry.displayName || entry.label || null,
+    effectiveDisplayName:
+      entry.displayName || entry.label || entry.modelId || entry.mainModelId,
     apiBase: entry.apiBase || '',
     reasoningEffort: entry.reasoningEffort,
     contextWindowTokens: profile.contextWindowTokens,

@@ -44,6 +44,8 @@ const EXPECTED_OPERATIONS = [
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
+  'chat.listQueuedPrompts',
+  'chat.manageQueuedPrompt',
   'chat.stopRuntime',
   'chat.submit',
   'config.effective',
@@ -279,6 +281,16 @@ describe('CoreApi (MIG-IPC-001)', () => {
         currentPlanId: interaction.meta.plan_id,
       },
     })
+    expect(
+      api.runtime
+        .replay({ sessionId })
+        .events.filter((event) => event.event === 'plan_step_update'),
+    ).toEqual([
+      expect.objectContaining({
+        plan_id: planId,
+        step: expect.objectContaining({ id: 'step_1', status: 'active' }),
+      }),
+    ])
     await api.close()
   })
 
@@ -2435,6 +2447,68 @@ describe('CoreApi (MIG-IPC-001)', () => {
     await api.close()
   })
 
+  it('restores a pending interaction to its declared owner session instead of the active session', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-control-owner-'),
+      stateRoot: tmp('emperor-core-api-control-owner-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const active = api.loop.sessionStore.get(String(api.loop.activeSessionId))!
+    const owner = api.loop.sessionStore.create('Pending owner')
+    const pending = api.loop.controlManager.createAsk({
+      questions: [
+        {
+          id: 'choice',
+          header: '选择',
+          question: '请选择下一步。',
+          options: [{ label: '继续' }, { label: '取消' }],
+        },
+      ],
+      meta: { control_session_id: owner.id },
+    })
+    api.loop.sessionStore.clearControlPending(owner.id)
+
+    await api.bootstrap({ sessionId: active.id })
+
+    expect(api.loop.sessionStore.get(owner.id)?.control_pending).toMatchObject({
+      interaction_id: pending.id,
+    })
+    expect(api.loop.sessionStore.get(active.id)?.control_pending).toBeNull()
+    await api.close()
+  })
+
+  it('cancels a pending interaction whose declared owner session no longer exists', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-control-orphan-'),
+      stateRoot: tmp('emperor-core-api-control-orphan-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const activeId = String(api.loop.activeSessionId)
+    const pending = api.loop.controlManager.createAsk({
+      questions: [
+        {
+          id: 'choice',
+          header: '选择',
+          question: '请选择下一步。',
+          options: [{ label: '继续' }, { label: '取消' }],
+        },
+      ],
+      meta: { control_session_id: 'deleted_owner_session' },
+    })
+
+    await api.bootstrap({ sessionId: activeId })
+
+    expect(api.loop.controlManager.payload().pending).toBeNull()
+    expect(api.loop.controlManager.payload().last_interaction).toMatchObject({
+      id: pending.id,
+      status: 'cancelled',
+    })
+    expect(api.loop.sessionStore.get(activeId)?.control_pending).toBeNull()
+    await api.close()
+  })
+
   it('serves USER.local.md through the config route parity surface', async () => {
     const root = tmp('emperor-core-api-config-')
     const api = await CoreApi.create({
@@ -2735,6 +2809,48 @@ describe('CoreApi (MIG-IPC-001)', () => {
       }),
     ).toThrow(CoreMutationGuardError)
 
+    await api.close()
+  })
+
+  it('emits cancelled Plan runtime updates immediately when /plan replaces execution', async () => {
+    const api = await CoreApi.create({
+      root: tmp('emperor-core-api-plan-replace-event-'),
+      stateRoot: tmp('emperor-core-api-plan-replace-event-state-'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const sessionId = api.loop.activeSessionId
+    const interaction = api.loop.controlManager.createPlan({
+      title: 'Old executable plan',
+      summary: 'This plan will be replaced.',
+      planMarkdown: '# Old plan',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Old work',
+          description: 'Old work',
+          acceptance: ['done'],
+        },
+      ],
+    })
+    api.loop.controlManager.approve(interaction.id)
+    const oldPlanId = String(interaction.meta.plan_id)
+
+    await api.control.setMode('plan')
+
+    const replay = api.runtime.replay({
+      sessionId,
+      compact: false,
+    }) as any
+    expect(
+      replay.events.find(
+        (event: any) =>
+          event.event === 'plan_runtime_update' && event.plan?.id === oldPlanId,
+      ),
+    ).toMatchObject({
+      session_id: sessionId,
+      plan: { id: oldPlanId, status: PlanStatus.CANCELLED },
+    })
     await api.close()
   })
 

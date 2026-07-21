@@ -61,7 +61,9 @@ describe('Emperor ACP raw wire semantics', () => {
       write(input, prompt)
       const promptResponses = await wire.waitFor(3, 2)
       expect(core.submitCalls).toBe(1)
-      expect(promptResponses.filter((message) => message.result)).toHaveLength(2)
+      expect(promptResponses.filter((message) => message.result)).toHaveLength(
+        2,
+      )
 
       write(input, {
         ...prompt,
@@ -71,7 +73,10 @@ describe('Emperor ACP raw wire semantics', () => {
       write(input, {
         ...prompt,
         id: 4,
-        params: { ...prompt.params, prompt: [{ type: 'text', text: 'conflict' }] },
+        params: {
+          ...prompt.params,
+          prompt: [{ type: 'text', text: 'conflict' }],
+        },
       })
       const conflicting = await wire.waitFor(4, 2)
       expect(core.submitCalls).toBe(2)

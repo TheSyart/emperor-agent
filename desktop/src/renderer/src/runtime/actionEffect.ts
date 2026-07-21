@@ -5,10 +5,7 @@ export interface ActionEffectDescriptor {
 }
 
 export type ActionEffectTaskStatus =
-  | 'success'
-  | 'error'
-  | 'cancelled'
-  | 'timeout'
+  'success' | 'error' | 'cancelled' | 'timeout'
 
 export interface ActionEffectTaskResult<
   Effect extends ActionEffectDescriptor,
@@ -39,9 +36,7 @@ export interface ActionEffectStoreOptions<
     action: Action,
   ) => ActionEffectTransition<State, Effect, Meta>
   execute: (effect: Effect, signal: AbortSignal) => Output | Promise<Output>
-  taskResultAction: (
-    result: ActionEffectTaskResult<Effect, Output>,
-  ) => Action
+  taskResultAction: (result: ActionEffectTaskResult<Effect, Output>) => Action
   onStateChange?: (state: State, action: Action) => void
 }
 
@@ -116,8 +111,7 @@ export class ActionEffectStore<
   }
 
   dispatch(action: Action): ActionEffectTransition<State, Effect, Meta> {
-    if (this.disposed)
-      return { state: this.state, effects: [] }
+    if (this.disposed) return { state: this.state, effects: [] }
     const transition = this.reducer(this.state, action)
     this.state = transition.state
     this.onStateChange?.(this.state, action)
@@ -204,9 +198,9 @@ export class ActionEffectStore<
 function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return Boolean(
     value &&
-      (typeof value === 'object' || typeof value === 'function') &&
-      'then' in value &&
-      typeof (value as { then?: unknown }).then === 'function',
+    (typeof value === 'object' || typeof value === 'function') &&
+    'then' in value &&
+    typeof (value as { then?: unknown }).then === 'function',
   )
 }
 

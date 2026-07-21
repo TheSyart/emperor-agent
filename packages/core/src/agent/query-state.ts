@@ -23,6 +23,7 @@ export interface QueryState {
   transition: string | null
   emptyRetries: number
   lengthRetries: number
+  todoContinuations: number
   maxTurns: number | null
   paused: boolean
   completed: boolean
@@ -36,6 +37,7 @@ export function makeQueryState(p: Partial<QueryState> = {}): QueryState {
     transition: p.transition ?? null,
     emptyRetries: p.emptyRetries ?? 0,
     lengthRetries: p.lengthRetries ?? 0,
+    todoContinuations: p.todoContinuations ?? 0,
     maxTurns: p.maxTurns ?? null,
     paused: p.paused ?? false,
     completed: p.completed ?? false,
@@ -190,17 +192,49 @@ export function lengthRecovery(
 export function todoFollowup(
   state: QueryState,
   opts: { unfinishedText: string; unfinishedCount: number },
-): QueryTransition {
+): QueryTransition | null {
+  if (state.todoContinuations >= 2) return null
   const content =
     '差事尚未办妥，以下任务仍未完成，请按计划继续执行，并按规矩更新 todolist 状态：\n' +
     opts.unfinishedText
-  const nextState = { ...state, transition: TransitionReason.TODO_CONTINUATION }
+  const nextState = {
+    ...state,
+    transition: TransitionReason.TODO_CONTINUATION,
+    todoContinuations: state.todoContinuations + 1,
+  }
   return transition({
     reason: TransitionReason.TODO_CONTINUATION,
     nextState,
     messages: [{ role: 'user', content }],
     events: [],
   })
+}
+
+export type TodoContinuationIntent = 'explicit' | 'control' | 'none'
+
+const EXPLICIT_TODO_CONTINUATION_RE =
+  /^(?:\/continue(?:\s|$)|继续(?:执行)?(?:\s|[，,:：。!！]|$)|按原计划继续(?:\s|[，,:：。!！]|$))/i
+
+/**
+ * Only the latest real user/control message may arm a previous todo list.
+ * Old conversation text is deliberately ignored so a normal question cannot
+ * inherit unfinished work from an earlier prompt.
+ */
+export function todoContinuationIntent(
+  history: Array<Record<string, unknown>>,
+): TodoContinuationIntent {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index]
+    if (message?.role !== 'user') continue
+    const content = String(message.content ?? '').trim()
+    if (
+      content.startsWith('[CONTROL:PLAN_APPROVED]') ||
+      content.startsWith('[CONTROL:PERMISSION_ANSWERED]')
+    )
+      return 'control'
+    return EXPLICIT_TODO_CONTINUATION_RE.test(content) ? 'explicit' : 'none'
+  }
+  return 'none'
 }
 
 export function markPaused(

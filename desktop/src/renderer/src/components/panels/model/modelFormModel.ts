@@ -14,6 +14,7 @@ export interface ModelEntryDraft {
   protocol: 'openai' | 'anthropic'
   modelId: string
   displayName: string
+  displayNameCustomized: boolean
   apiBase: string
   apiKey: string
   clearApiKey: boolean
@@ -102,7 +103,8 @@ export function createModelEntryDraft(
     provider: provider.name,
     protocol,
     modelId: String(entry?.modelId ?? ''),
-    displayName: String(entry?.displayName ?? ''),
+    displayName: String(entry?.displayName ?? entry?.modelId ?? ''),
+    displayNameCustomized: Boolean(entry?.displayName),
     apiBase: String(entry?.apiBase || provider.apiBases?.[protocol] || ''),
     apiKey: '',
     clearApiKey: false,
@@ -165,9 +167,31 @@ export function applyProviderSelection(
     apiKey: '',
     clearApiKey: draft.clearApiKey || identityChanged,
     modelId: '',
+    displayName: draft.displayNameCustomized ? draft.displayName : '',
     reasoningEffort: null,
     resolvedProfile: undefined,
   }
+}
+
+export function updateModelDraftId(
+  draft: ModelEntryDraft,
+  modelId: string,
+): void {
+  draft.modelId = modelId
+  if (!draft.displayNameCustomized) draft.displayName = modelId
+}
+
+export function updateModelDraftDisplayName(
+  draft: ModelEntryDraft,
+  displayName: string,
+): void {
+  if (!displayName.trim()) {
+    draft.displayNameCustomized = false
+    draft.displayName = draft.modelId
+    return
+  }
+  draft.displayNameCustomized = true
+  draft.displayName = displayName
 }
 
 export function reasoningChoices(
@@ -215,7 +239,7 @@ export function toModelEntrySaveInput(
     provider: draft.provider,
     protocol: draft.protocol,
     modelId: draft.modelId.trim(),
-    displayName: draft.displayName.trim(),
+    displayName: draft.displayNameCustomized ? draft.displayName.trim() : '',
     apiBase: draft.apiBase.trim(),
     ...(apiKey !== undefined ? { apiKey } : {}),
     capabilityOverrides,

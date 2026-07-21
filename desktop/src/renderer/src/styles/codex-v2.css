@@ -1640,6 +1640,13 @@ select:focus-visible {
   line-height: 1.5;
 }
 
+.ask-history-card[data-interaction-type='permission'] .ask-history-detail {
+  max-height: 15rem;
+  overflow: auto;
+  white-space: pre-line;
+  scrollbar-width: thin;
+}
+
 .ask-history-status {
   width: fit-content;
   border: 1px solid rgb(var(--border));
@@ -1748,6 +1755,8 @@ select:focus-visible {
 }
 
 .composer {
+  position: relative;
+  z-index: 1;
   overflow: visible;
   border-radius: 12px;
   border-color: rgb(var(--border));

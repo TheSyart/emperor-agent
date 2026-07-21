@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：配置模型或管理本地上下文的用户<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-07-21<br>
 > 事实源：ModelConfig v2、Memory/Project stores、AttachmentStore、设置页
 
 ## 模型配置
@@ -15,6 +15,8 @@ Emperor Agent 可以保存多条模型配置，但全局同时只激活一个模
 - 模型数组：`models[]`
 
 每条模型至少包含 Provider、协议、模型 ID、API Base、上下文窗口、最大输出 Token 和稳定的 `entryId`。API Key 可以为空，例如连接本地兼容服务时。
+
+“显示名称”只保存用户明确设置的自定义别名。未设置别名时，模型列表、当前模型标题、导航栏和 Composer 都使用非空的 `effectiveDisplayName=modelId`；修改模型 ID 时界面标识自动同步。手工填写别名后停止自动同步，清空别名则恢复自动状态。旧配置迁移产生的 `default` 与 `default · Secondary` 哨兵会被清理，其他真实别名保留。
 
 Provider 描述的是访问方式，不是固定模型清单。部分 Provider 支持模型发现；发现失败时仍可以手工填写模型 ID。`custom` 需要明确选择 `openai` 或 `anthropic` 协议。
 

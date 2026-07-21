@@ -93,9 +93,7 @@ describe('Emperor ACP adapter', () => {
 
   it('replays persisted Core events in order before session/load responds', async () => {
     const cwd = tempWorkspace()
-    const core = new FakeCore([
-      session('persisted', cwd),
-    ])
+    const core = new FakeCore([session('persisted', cwd)])
     core.replayEvents = [
       { event: 'user_message', seq: 1, turn_id: 'old', content: 'question' },
       { event: 'message_delta', seq: 2, turn_id: 'old', delta: 'answer' },
@@ -248,9 +246,9 @@ describe('Emperor ACP adapter', () => {
       sessionId: 'a',
     })
     await expect(promptA).resolves.toMatchObject({ stopReason: 'cancelled' })
-    expect(core.submitCalls.find((item) => item.sessionId === 'a')?.signal.aborted).toBe(
-      true,
-    )
+    expect(
+      core.submitCalls.find((item) => item.sessionId === 'a')?.signal.aborted,
+    ).toBe(true)
 
     await harness.connection.agent.notify(methods.agent.session.cancel, {
       sessionId: 'b',
@@ -323,9 +321,7 @@ class FakeCore implements EmperorAcpCore {
   }
 
   readonly sessions = {
-    list: (_opts: { includeArchived?: boolean } = {}) => [
-      ...this.sessionRows,
-    ],
+    list: (_opts: { includeArchived?: boolean } = {}) => [...this.sessionRows],
     create: (input: {
       title?: string
       mode?: string

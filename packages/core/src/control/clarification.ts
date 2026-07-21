@@ -4,15 +4,13 @@
  */
 
 export const CONTROL_RESUME_RE =
-  /^\[CONTROL:(ASK_ANSWERED|PLAN_APPROVED|PLAN_COMMENT|INTERACTION_CANCELLED)\]/
+  /^\[CONTROL:(ASK_ANSWERED|PERMISSION_ANSWERED|PLAN_APPROVED|PLAN_COMMENT|INTERACTION_CANCELLED)\]/
 const IMPLEMENT_PLAN_RE =
   /please\s+implement\s+this\s+plan|#\s*(summary|key changes|test plan)/i
 const EXPLICIT_AUTONOMY_RE =
   /(不用问|不要问|直接做|按你判断|自行决定|你决定|无需确认)/
 const BROAD_SCOPE_RE =
   /(工程化|架构|重构|重新设计|设计.*机制|解决以上问题|找到问题作出修改|通读项目|仔细阅读|审计.*修改|从头到尾|全链路|全项目|整体.*(优化|完善|改造|提升)|(项目|系统|机制|工作流|提示词|agent|Agent).*(优化|完善|改造|评估|审计)|(优化|完善|改造|评估|审计).*(项目|系统|机制|工作流|提示词|agent|Agent))/
-const HIGH_IMPACT_RE =
-  /(提交|推送|发布|部署|删除|清空|重置|覆盖|迁移|密钥|权限|付款|成本|生产)/
 const LOW_RISK_RE =
   /(改错别字|修拼写|解释|说明|查看|查询|列出|读一下|review|审查)/
 
@@ -47,7 +45,6 @@ export class ClarificationPolicy {
 
     const categories: string[] = []
     if (BROAD_SCOPE_RE.test(latest)) categories.push('scope')
-    if (HIGH_IMPACT_RE.test(latest)) categories.push('risk')
     if (
       lowered.includes('ui') ||
       latest.includes('界面') ||
@@ -57,10 +54,8 @@ export class ClarificationPolicy {
       categories.push('ui')
 
     if (!categories.length) return emptyClarification()
-    if (LOW_RISK_RE.test(latest) && !categories.includes('risk'))
-      return emptyClarification()
-    if (EXPLICIT_AUTONOMY_RE.test(latest) && !categories.includes('risk'))
-      return emptyClarification()
+    if (LOW_RISK_RE.test(latest)) return emptyClarification()
+    if (EXPLICIT_AUTONOMY_RE.test(latest)) return emptyClarification()
     if (looksDecisionComplete(latest)) return emptyClarification()
 
     const questions = questionsFor(categories)
@@ -108,8 +103,9 @@ function looksDecisionComplete(text: string): boolean {
 }
 
 function questionsFor(categories: string[]): Array<Record<string, unknown>> {
-  const questions: Array<Record<string, unknown>> = [
-    {
+  const questions: Array<Record<string, unknown>> = []
+  if (categories.includes('scope')) {
+    questions.push({
       id: 'scope',
       header: '范围',
       question: '这次任务的实施边界优先按哪种方式推进？',
@@ -121,8 +117,8 @@ function questionsFor(categories: string[]): Array<Record<string, unknown>> {
         { label: '最小修复', description: '只修当前可见问题，尽量少动结构。' },
         { label: '先出方案', description: '先产出更详细计划，确认后再实施。' },
       ],
-    },
-  ]
+    })
+  }
   if (categories.includes('ui')) {
     questions.push({
       id: 'ui_priority',
@@ -136,23 +132,6 @@ function questionsFor(categories: string[]): Array<Record<string, unknown>> {
         {
           label: '保持现状',
           description: '只接入必要状态，不做明显视觉调整。',
-        },
-      ],
-    })
-  }
-  if (categories.includes('risk')) {
-    questions.push({
-      id: 'risk_boundary',
-      header: '风险',
-      question: '涉及提交、删除、发布或其他高影响操作时，应该如何控制风险？',
-      options: [
-        {
-          label: '先确认再执行',
-          description: '列出将影响的对象，得到确认后再继续。',
-        },
-        {
-          label: '按安全默认',
-          description: '只执行可恢复或低风险部分，高风险操作跳过。',
         },
       ],
     })
