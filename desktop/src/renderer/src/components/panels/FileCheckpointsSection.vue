@@ -389,7 +389,7 @@ function message(reason: unknown): string {
 <style scoped>
 .checkpoint-section {
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -405,14 +405,14 @@ function message(reason: unknown): string {
 
 .checkpoint-head {
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .checkpoint-head > div,
 .checkpoint-card-head > div,
 .checkpoint-empty > div {
   display: grid;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -420,7 +420,7 @@ function message(reason: unknown): string {
 .checkpoint-card-head span,
 .checkpoint-empty span {
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .checkpoint-icon-button,
@@ -428,9 +428,9 @@ function message(reason: unknown): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--space-2);
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -442,8 +442,8 @@ function message(reason: unknown): string {
 }
 
 .checkpoint-button {
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: var(--space-2) 10px;
+  font-size: var(--font-size-sm);
 }
 
 .checkpoint-icon-button:disabled,
@@ -459,22 +459,22 @@ function message(reason: unknown): string {
 .checkpoint-git-preview {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid rgb(var(--border));
 }
 
 .checkpoint-git-preview > span {
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
 }
 
 .checkpoint-message,
 .checkpoint-empty,
 .checkpoint-card {
-  gap: 10px;
-  padding: 12px 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) 14px;
   border-top: 1px solid rgb(var(--border));
 }
 
@@ -491,7 +491,7 @@ function message(reason: unknown): string {
 }
 
 .checkpoint-card-head {
-  gap: 9px;
+  gap: var(--space-2);
 }
 
 .checkpoint-card-head code {
@@ -503,7 +503,7 @@ function message(reason: unknown): string {
 .checkpoint-conflicts {
   display: grid;
   gap: 4px;
-  margin: 9px 0 0 26px;
+  margin: var(--space-2) 0 0 26px;
   color: rgb(var(--fg-muted));
   font:
     12px/1.4 ui-monospace,
@@ -521,15 +521,15 @@ function message(reason: unknown): string {
 
 .checkpoint-actions {
   justify-content: flex-end;
-  margin-top: 10px;
+  margin-top: var(--space-3);
 }
 
 .checkpoint-preview {
   display: grid;
-  gap: 9px;
-  margin-top: 10px;
-  padding: 10px;
-  border-radius: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
   background: rgb(var(--ok) / 0.09);
 }
 
@@ -538,8 +538,8 @@ function message(reason: unknown): string {
 }
 
 .checkpoint-preview-title {
-  gap: 7px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
 }
 
 .checkpoint-danger {

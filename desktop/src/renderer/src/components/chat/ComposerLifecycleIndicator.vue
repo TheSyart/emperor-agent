@@ -56,11 +56,11 @@ function dismiss(): void {
   min-height: 28px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  border-radius: 7px;
+  gap: var(--space-1);
+  border-radius: var(--radius-md);
   padding: 0 8px;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 620;
 }
 
@@ -85,7 +85,7 @@ function dismiss(): void {
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
   background: rgb(var(--bg-elevated));
-  box-shadow: 0 3px 10px rgb(0 0 0 / 0.18);
+  box-shadow: 0 3px 10px rgb(var(--shadow-color) / 0.18);
   color: rgb(var(--fg-muted));
   opacity: 0;
   pointer-events: none;

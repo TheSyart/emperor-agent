@@ -64,6 +64,54 @@ describe('style audit: color convergence', () => {  it('no bare hex colors outsi
   })
 })
 
+describe('style audit: bare-value convergence (vue scoped)', () => {
+  function styleBlocks(rel: string): string {
+    return [...read(rel).matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)]
+      .map((m) => m[1])
+      .join('\n')
+  }
+
+  it('no bare px border-radius except 0/2px/999px in <style> blocks', () => {
+    const re = /border-radius:\s*(?!0\b|2px\b|999px\b)\d+px/g
+    const offenders: string[] = []
+    for (const rel of VUE_FILES) {
+      const hits = styleBlocks(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no box-shadow with hardcoded rgb(0 0 0 / *) in <style> blocks', () => {
+    const re = /box-shadow:[^;]*rgb\(0 0 0/g
+    const offenders: string[] = []
+    for (const rel of VUE_FILES) {
+      const hits = styleBlocks(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no bare px font-size in the 9-15px range in <style> blocks', () => {
+    const re = /font-size:\s*(?:9|1[0-5])px\b/g
+    const offenders: string[] = []
+    for (const rel of VUE_FILES) {
+      const hits = styleBlocks(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no text-[Npx] arbitrary font-size classes in templates', () => {
+    const re = /text-\[(?:9|1[0-5])px\]/g
+    const offenders: string[] = []
+    for (const rel of VUE_FILES) {
+      const hits = read(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+})
+
 describe('style audit: bare-value convergence (styles/)', () => {
   it('no bare px border-radius except 0/999px', () => {
     const re = /border-radius:\s*(?!0\b|999px\b)\d+px/g

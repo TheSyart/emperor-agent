@@ -144,7 +144,7 @@ function toggleDesktopPet() {
 .pet-preview {
   width: 140px;
   height: 160px;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--color-surface-variant);
   display: flex;
   align-items: center;
@@ -155,7 +155,7 @@ function toggleDesktopPet() {
 .pet-preview-img {
   width: 100px;
   height: 100px;
-  filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.25));
+  filter: drop-shadow(0 2px 8px rgb(var(--shadow-color) / 0.25));
 }
 
 .pet-info {
@@ -166,7 +166,7 @@ function toggleDesktopPet() {
 .pet-meta-row {
   display: flex;
   gap: 32px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .pet-meta-item {
@@ -176,20 +176,20 @@ function toggleDesktopPet() {
 }
 
 .pet-meta-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-fg-muted);
   text-transform: uppercase;
 }
 
 .pet-meta-value {
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
 }
 
 .pet-error {
   color: var(--color-error);
-  font-size: 13px;
-  margin-bottom: 12px;
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-3);
 }
 
 .pet-toggle {
@@ -206,7 +206,7 @@ function toggleDesktopPet() {
 }
 
 .section-desc {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--color-text-fg-muted);
   margin-bottom: 16px;
 }
@@ -214,16 +214,16 @@ function toggleDesktopPet() {
 .sprite-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .sprite-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 12px 8px;
-  border-radius: 12px;
+  gap: var(--space-2);
+  padding: var(--space-3) 8px;
+  border-radius: var(--radius-lg);
   background: var(--color-surface-variant);
   transition: background 0.15s;
 }
@@ -235,11 +235,11 @@ function toggleDesktopPet() {
 .sprite-img {
   width: 48px;
   height: 48px;
-  filter: drop-shadow(0 1px 4px rgb(0 0 0 / 0.2));
+  filter: drop-shadow(0 1px 4px rgb(var(--shadow-color) / 0.2));
 }
 
 .sprite-card figcaption {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-fg-muted);
 }
 </style>

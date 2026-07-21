@@ -953,7 +953,7 @@ function sourceStatus(source: {
   gap: 0.55rem;
   margin: 0.75rem 1.25rem 0;
   padding: 0.65rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 0.8rem;
 }
 .hooks-banner span {
@@ -1079,7 +1079,7 @@ function sourceStatus(source: {
   text-overflow: ellipsis;
   white-space: nowrap;
   border: 1px solid rgb(var(--border) / 0.7);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0.18rem 0.38rem;
   font: 700 0.65rem var(--font-mono);
   color: rgb(var(--success));
@@ -1253,7 +1253,7 @@ function sourceStatus(source: {
 .audit-toolbar select {
   min-height: 34px;
   border: 1px solid rgb(var(--border) / 0.8);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgb(var(--bg));
   padding: 0 0.55rem;
   color: rgb(var(--fg));
@@ -1276,7 +1276,7 @@ function sourceStatus(source: {
 .json-field textarea {
   min-height: 230px;
   border: 1px solid rgb(var(--border) / 0.65);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .test-form > button {
   align-self: flex-end;
@@ -1290,7 +1290,7 @@ function sourceStatus(source: {
 }
 .event-capabilities span {
   border: 1px solid rgb(var(--border) / 0.65);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0.2rem 0.38rem;
   font-size: 0.66rem;
   color: rgb(var(--fg-muted));
@@ -1520,7 +1520,7 @@ function sourceStatus(source: {
 .hooks-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .hooks-title > div {
@@ -1530,7 +1530,7 @@ function sourceStatus(source: {
 .hooks-title code {
   flex: 0 0 auto;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .hooks-body {
@@ -1544,7 +1544,7 @@ function sourceStatus(source: {
 .hooks-content {
   display: grid;
   height: auto !important;
-  gap: 14px;
+  gap: var(--space-4);
 }
 
 .hooks-topbar {
@@ -1559,7 +1559,7 @@ function sourceStatus(source: {
   gap: 2px;
   overflow-x: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px;
   background: rgb(var(--bg-elevated));
 }
@@ -1568,10 +1568,10 @@ function sourceStatus(source: {
   min-height: 28px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -1583,8 +1583,8 @@ function sourceStatus(source: {
 
 .hooks-banner {
   margin: 0;
-  border-radius: 8px;
-  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 11px;
 }
 
 .error-banner {
@@ -1599,25 +1599,25 @@ function sourceStatus(source: {
   gap: 8px 18px;
   padding: 2px 1px;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .hooks-summary-line span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .hooks-section {
   display: grid;
   min-width: 0;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .hooks-section > h2,
 .hooks-section-title h2 {
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
@@ -1625,17 +1625,17 @@ function sourceStatus(source: {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .hooks-section-title > span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .hooks-settings-list {
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .hooks-settings-row,
@@ -1650,16 +1650,16 @@ function sourceStatus(source: {
 .diagnostic-row > div span {
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .hooks-source-row small {
-  margin-left: 5px;
+  margin-left: var(--space-1);
   color: rgb(var(--fg-subtle));
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
 }
 
@@ -1671,7 +1671,7 @@ function sourceStatus(source: {
   max-width: 240px;
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1680,11 +1680,11 @@ function sourceStatus(source: {
   max-width: 14rem;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   color: rgb(var(--ok));
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1698,7 +1698,7 @@ function sourceStatus(source: {
   min-width: 0;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
 }
 
@@ -1723,7 +1723,7 @@ function sourceStatus(source: {
   min-height: 52px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   border-top: 1px solid rgb(var(--border));
   padding: 8px 10px;
   text-align: left;
@@ -1761,7 +1761,7 @@ function sourceStatus(source: {
 .audit-row strong {
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1770,7 +1770,7 @@ function sourceStatus(source: {
 .audit-row span {
   margin-top: 2px;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .row-meta,
@@ -1780,13 +1780,13 @@ function sourceStatus(source: {
 
 .row-meta code,
 .audit-row code {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .hooks-detail {
   min-width: 0;
   border: 0;
-  padding: 12px;
+  padding: var(--space-3);
 }
 
 .detail-head,
@@ -1795,7 +1795,7 @@ function sourceStatus(source: {
   min-height: 40px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-3);
   border-bottom: 1px solid rgb(var(--border));
 }
 
@@ -1806,7 +1806,7 @@ function sourceStatus(source: {
 .detail-head h3 {
   margin-top: 2px;
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 650;
   overflow-wrap: anywhere;
 }
@@ -1815,7 +1815,7 @@ function sourceStatus(source: {
 .surface-head > span,
 .surface-head > div > span {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .hooks-detail dl {
@@ -1827,7 +1827,7 @@ function sourceStatus(source: {
 .hooks-detail dl > div {
   min-width: 0;
   border-bottom: 1px solid rgb(var(--border));
-  padding: 9px 10px 9px 0;
+  padding: var(--space-2) 10px 9px 0;
 }
 
 .hooks-detail dl > div.wide {
@@ -1836,14 +1836,14 @@ function sourceStatus(source: {
 
 .hooks-detail dt {
   color: rgb(var(--fg-subtle));
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
 }
 
 .hooks-detail dd {
-  margin: 3px 0 0;
+  margin: var(--space-1) 0 0;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 
@@ -1855,9 +1855,9 @@ function sourceStatus(source: {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   border-bottom: 1px solid rgb(var(--border));
-  padding: 9px 0;
+  padding: var(--space-2) 0;
 }
 
 .handler-row strong,
@@ -1866,12 +1866,12 @@ function sourceStatus(source: {
 }
 
 .handler-row strong {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .handler-row span {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .surface-head {
@@ -1880,7 +1880,7 @@ function sourceStatus(source: {
 
 .surface-head h2 {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
@@ -1889,7 +1889,7 @@ function sourceStatus(source: {
   display: grid;
   min-height: 460px;
   grid-template-columns: minmax(300px, 0.82fr) minmax(340px, 1.18fr);
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .test-form {
@@ -1900,17 +1900,17 @@ function sourceStatus(source: {
 .test-form label {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 10px 11px 0;
+  gap: var(--space-1);
+  padding: var(--space-3) 11px 0;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .test-form select,
 .audit-toolbar select {
   min-height: 34px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg));
   padding: 0 8px;
   color: rgb(var(--fg));
@@ -1926,9 +1926,9 @@ function sourceStatus(source: {
   flex: 1;
   resize: vertical;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg));
-  padding: 10px;
+  padding: var(--space-3);
   color: rgb(var(--fg));
   font: 11px/1.55 var(--font-mono);
 }
@@ -1939,22 +1939,22 @@ function sourceStatus(source: {
 
 .test-form > button {
   align-self: flex-end;
-  margin: 10px 11px;
+  margin: var(--space-3) 11px;
 }
 
 .event-capabilities {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--space-1);
   padding: 8px 11px 0;
 }
 
 .event-capabilities span {
   border: 1px solid rgb(var(--border));
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   padding: 2px 5px;
   color: rgb(var(--fg-subtle));
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
 }
 
 .match-row {
@@ -1974,14 +1974,14 @@ function sourceStatus(source: {
 
 .match-row strong {
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 
 .match-row span {
   margin-top: 2px;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .result-json {
@@ -1989,9 +1989,9 @@ function sourceStatus(source: {
   overflow: auto;
   margin: 0;
   border-top: 1px solid rgb(var(--border));
-  padding: 10px;
+  padding: var(--space-3);
   background: rgb(var(--bg));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .async-runs > div {
@@ -2006,7 +2006,7 @@ function sourceStatus(source: {
 
 .async-runs code {
   overflow: hidden;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2015,7 +2015,7 @@ function sourceStatus(source: {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .audit-toolbar select {
@@ -2027,13 +2027,13 @@ function sourceStatus(source: {
   min-height: 42px;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
   padding: 0 8px;
 }
 
 .audit-detail {
-  padding-right: 12px;
+  padding-right: var(--space-3);
 }
 
 .advanced-editor {
@@ -2045,13 +2045,13 @@ function sourceStatus(source: {
 .advanced-editor .surface-head > div {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .advanced-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .advanced-editor textarea {
@@ -2064,8 +2064,8 @@ function sourceStatus(source: {
 .validation-ok {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 12px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   color: rgb(var(--ok));
   font-weight: 650;
 }
@@ -2075,8 +2075,8 @@ function sourceStatus(source: {
   flex-direction: column;
   gap: 4px;
   border-top: 1px solid rgb(var(--border));
-  padding: 10px 11px;
-  font-size: 10px;
+  padding: var(--space-3) 11px;
+  font-size: var(--font-size-2xs);
 }
 
 .validation-list code,
@@ -2089,13 +2089,13 @@ function sourceStatus(source: {
   min-height: 96px;
   place-items: center;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .hooks-empty.compact {
   min-height: 56px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 @media (max-width: 980px) {
@@ -2114,7 +2114,7 @@ function sourceStatus(source: {
 
   .hooks-detail {
     border: 0;
-    padding: 12px;
+    padding: var(--space-3);
   }
 }
 

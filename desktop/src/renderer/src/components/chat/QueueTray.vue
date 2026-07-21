@@ -130,7 +130,7 @@ onBeforeUnmount(() =>
   margin-bottom: -10px;
   padding: 0 8px 10px;
   border: 1px solid rgb(var(--border));
-  border-radius: 14px 14px 10px 10px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius) var(--radius);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   overflow: visible;
@@ -140,7 +140,7 @@ onBeforeUnmount(() =>
   min-height: 42px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
 }
 
 .queue-leading-icon {
@@ -159,7 +159,7 @@ onBeforeUnmount(() =>
 .queue-state {
   flex: none;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .queue-copy p {
@@ -167,7 +167,7 @@ onBeforeUnmount(() =>
   min-width: 0;
   overflow: hidden;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -176,7 +176,7 @@ onBeforeUnmount(() =>
 .queue-copy small {
   flex: none;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .queue-actions {
@@ -190,7 +190,7 @@ onBeforeUnmount(() =>
   min-width: 30px;
   min-height: 30px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: rgb(var(--fg-muted));
   cursor: pointer;
@@ -216,9 +216,9 @@ onBeforeUnmount(() =>
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-1);
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .queue-icon-action {
@@ -239,9 +239,9 @@ onBeforeUnmount(() =>
   width: 142px;
   padding: 4px;
   border: 1px solid rgb(var(--border-strong));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
-  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+  box-shadow: 0 8px 24px rgb(var(--shadow-color) / 24%);
 }
 
 .queue-menu-popover button {
@@ -250,9 +250,9 @@ onBeforeUnmount(() =>
   padding: 0 8px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: rgb(var(--fg));
   text-align: left;

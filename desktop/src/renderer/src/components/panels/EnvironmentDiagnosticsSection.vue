@@ -722,7 +722,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-head > div:first-child span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .environment-actions .icon-button {
@@ -737,10 +737,10 @@ function logDetails(details: Record<string, unknown>): string {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) 12px;
   background: rgb(var(--bg-elevated));
 }
 
@@ -762,7 +762,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-error span,
 .environment-plan-warnings span {
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .environment-progress {
@@ -774,12 +774,12 @@ function logDetails(details: Record<string, unknown>): string {
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .environment-progress-head span {
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .environment-progress-track {
@@ -799,25 +799,25 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-empty {
   grid-template-columns: 20px minmax(0, 1fr);
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .environment-tool-group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 2px;
 }
 
 .environment-tool-group-head strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .environment-tool-group-head span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .environment-tool-row {
@@ -833,7 +833,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-tool-row small {
   overflow: hidden;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -871,10 +871,10 @@ function logDetails(details: Record<string, unknown>): string {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   min-height: 42px;
   border-bottom: 1px solid rgb(var(--border));
-  padding: 7px 4px;
+  padding: var(--space-2) 4px;
 }
 
 .environment-skill-row > div {
@@ -886,14 +886,14 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-skill-row span {
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .environment-job-tabs {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   overflow-x: auto;
   padding-bottom: 2px;
 }
@@ -904,8 +904,8 @@ function logDetails(details: Record<string, unknown>): string {
   gap: 2px;
   min-width: 132px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
-  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 9px;
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg));
   text-align: left;
@@ -920,7 +920,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-job-step code,
 .environment-job-error code {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .environment-job-step {
@@ -929,7 +929,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-logs {
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
 }
 
@@ -956,9 +956,9 @@ function logDetails(details: Record<string, unknown>): string {
   grid-template-columns: 48px minmax(0, 1fr);
   gap: 8px;
   border-bottom: 1px solid rgb(var(--border));
-  padding: 7px 10px;
+  padding: var(--space-2) 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .environment-log-list > div code {
@@ -969,9 +969,9 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-log-list p {
-  padding: 10px;
+  padding: var(--space-3);
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .environment-more {
@@ -983,13 +983,13 @@ function logDetails(details: Record<string, unknown>): string {
   width: min(620px, calc(100vw - 24px));
   max-height: min(760px, calc(100dvh - 24px));
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   overflow-y: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   background: rgb(var(--bg));
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.32);
+  box-shadow: 0 18px 48px rgb(var(--shadow-color) / 0.32);
 }
 
 .environment-confirm-modal > header,
@@ -998,19 +998,19 @@ function logDetails(details: Record<string, unknown>): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .environment-confirm-modal h2 {
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
 .environment-confirm-modal header p {
   margin-top: 2px;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .environment-plan-warnings {
@@ -1033,13 +1033,13 @@ function logDetails(details: Record<string, unknown>): string {
   display: grid;
   gap: 8px;
   border-top: 1px solid rgb(var(--border));
-  padding-top: 10px;
+  padding-top: var(--space-3);
 }
 
 .environment-plan-steps dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
+  gap: var(--space-2) 12px;
 }
 
 .environment-plan-steps dl > div {
@@ -1050,13 +1050,13 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-plan-steps dt {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .environment-plan-steps dd {
   overflow: hidden;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1064,9 +1064,9 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-noncancellable {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   color: rgb(var(--warning));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .environment-license-list label {
@@ -1075,7 +1075,7 @@ function logDetails(details: Record<string, unknown>): string {
   align-items: start;
   gap: 8px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .environment-license-list a {
@@ -1084,14 +1084,14 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-second-confirm {
   border-top: 1px solid rgb(var(--border));
-  padding-top: 9px;
+  padding-top: var(--space-2);
 }
 
 .environment-confirm-modal > footer {
   position: sticky;
   bottom: -14px;
   border-top: 1px solid rgb(var(--border));
-  padding: 10px 0 14px;
+  padding: var(--space-3) 0 14px;
   background: rgb(var(--bg));
 }
 

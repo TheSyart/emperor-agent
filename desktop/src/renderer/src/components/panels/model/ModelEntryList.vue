@@ -110,7 +110,7 @@ function effectiveLabel(entry: ModelEntry): string {
 <style scoped>
 .model-entry-list {
   display: grid;
-  gap: 18px;
+  gap: var(--space-5);
 }
 
 .model-list-head {
@@ -123,20 +123,20 @@ function effectiveLabel(entry: ModelEntry): string {
 .model-list-head h2 {
   margin: 0;
   color: rgb(var(--fg));
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   font-weight: 650;
 }
 
 .model-list-head p {
-  margin: 5px 0 0;
+  margin: var(--space-1) 0 0;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .model-add-button,
 .card-action {
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg));
   font: inherit;
@@ -150,10 +150,10 @@ function effectiveLabel(entry: ModelEntry): string {
 .model-add-button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   min-height: 34px;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
@@ -165,18 +165,18 @@ function effectiveLabel(entry: ModelEntry): string {
 
 .model-card-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .model-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: var(--space-5);
   min-height: 78px;
-  padding: 14px 16px;
+  padding: var(--space-4) 16px;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated));
 }
 
@@ -195,10 +195,10 @@ function effectiveLabel(entry: ModelEntry): string {
   flex: 0 0 38px;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg));
   color: rgb(var(--fg-muted));
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
@@ -234,33 +234,33 @@ function effectiveLabel(entry: ModelEntry): string {
 
 .model-card-title-row strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .model-card-copy code {
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .model-card-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .model-card-actions {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .card-action {
   min-height: 30px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .card-action.icon {
@@ -283,11 +283,11 @@ function effectiveLabel(entry: ModelEntry): string {
 .model-empty {
   display: grid;
   justify-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   min-height: 190px;
   padding: 28px;
   border: 1px dashed rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
   color: rgb(var(--fg-subtle));
   cursor: pointer;
@@ -295,11 +295,11 @@ function effectiveLabel(entry: ModelEntry): string {
 
 .model-empty strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .model-empty span:last-child {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .empty-plus {
@@ -307,7 +307,7 @@ function effectiveLabel(entry: ModelEntry): string {
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated));
   color: rgb(var(--accent));
 }

@@ -981,7 +981,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   min-height: 220px;
   gap: 8px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .model-config-note {
@@ -990,7 +990,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   gap: 11px;
   padding: 11px 13px;
   border: 1px solid rgb(var(--border));
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated) / 0.44);
 }
 
@@ -1001,12 +1001,12 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .model-config-note strong {
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .model-config-note span {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .execution-policy-card {
@@ -1014,7 +1014,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   gap: 16px;
   padding: 16px;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated) / 0.52);
 }
 
@@ -1028,33 +1028,33 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .policy-head h2 {
   margin: 0;
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
 }
 
 .policy-head p {
-  margin: 5px 0 0;
+  margin: var(--space-1) 0 0;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .policy-grid,
 .pricing-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .policy-field {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .policy-field > span,
 .trigger-field legend {
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 550;
 }
 
@@ -1064,17 +1064,17 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   min-height: 35px;
   padding: 0 10px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .policy-field small,
 .pricing-note {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   line-height: 1.5;
 }
 
@@ -1084,9 +1084,9 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   align-items: center;
   justify-content: flex-start;
   width: fit-content;
-  gap: 7px;
+  gap: var(--space-2);
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .policy-toggle input,
@@ -1114,11 +1114,11 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .trigger-field legend {
-  margin-bottom: 7px;
+  margin-bottom: var(--space-2);
 }
 
 .trigger-field label + label {
-  margin-top: 7px;
+  margin-top: var(--space-2);
 }
 
 .model-dialog-backdrop {
@@ -1128,7 +1128,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgb(0 0 0 / 0.64);
+  background: rgb(var(--shadow-color) / 0.64);
   backdrop-filter: blur(2px);
 }
 
@@ -1139,9 +1139,9 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   max-height: min(860px, calc(100vh - 48px));
   overflow: hidden;
   border: 1px solid rgb(var(--border-strong));
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgb(var(--bg));
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.42);
+  box-shadow: 0 24px 80px rgb(var(--shadow-color) / 0.42);
 }
 
 .dialog-head,
@@ -1167,7 +1167,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .dialog-head p {
   margin: 4px 0 0;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .icon-button {
@@ -1176,7 +1176,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: rgb(var(--fg-muted));
   cursor: pointer;
@@ -1189,7 +1189,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .dialog-body {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   overflow: auto;
   padding: 16px 18px 24px;
 }
@@ -1200,7 +1200,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   gap: 13px;
   padding: 15px;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated) / 0.46);
 }
 
@@ -1209,27 +1209,27 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   margin-bottom: 2px;
 }
 
 .form-section-title span {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
 .form-section-title small,
 .field small {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .field {
   position: relative;
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .span-2 {
@@ -1240,7 +1240,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .field > span:first-child,
 .field-label {
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 550;
 }
 
@@ -1251,11 +1251,11 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   width: 100%;
   min-height: 35px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .field input,
@@ -1281,7 +1281,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .search-input-wrap {
-  padding-left: 10px;
+  padding-left: var(--space-3);
   color: rgb(var(--fg-subtle));
 }
 
@@ -1301,25 +1301,25 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: grid;
   max-height: 210px;
   overflow: auto;
-  padding: 5px;
+  padding: var(--space-1);
   border: 1px solid rgb(var(--border-strong));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg));
-  box-shadow: 0 14px 36px rgb(0 0 0 / 0.28);
+  box-shadow: 0 14px 36px rgb(var(--shadow-color) / 0.28);
 }
 
 .provider-results button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-3);
   min-height: 32px;
   padding: 0 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
@@ -1331,18 +1331,18 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .provider-results code,
 .no-results {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .no-results {
-  padding: 10px;
+  padding: var(--space-3);
   text-align: center;
 }
 
 .protocol-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .protocol-tabs.single {
@@ -1352,7 +1352,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .protocol-tabs button,
 .token-presets button {
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-muted));
   cursor: pointer;
@@ -1360,7 +1360,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .protocol-tabs button {
   min-height: 35px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .protocol-tabs button.active,
@@ -1394,9 +1394,9 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .clear-key-control {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .clear-key-control input {
@@ -1420,11 +1420,11 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   align-items: center;
   justify-content: center;
   min-height: 34px;
-  gap: 7px;
+  gap: var(--space-2);
   padding: 0 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1450,47 +1450,47 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .capability-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
+  gap: var(--space-2);
 }
 
 .pricing-grid {
-  gap: 9px;
+  gap: var(--space-2);
 }
 
 .pricing-toggle {
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .capability-grid label {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
 }
 
 .capability-grid label > span {
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 
 .capability-grid small {
   color: rgb(var(--fg-subtle));
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
 }
 
 .token-presets {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .token-presets button {
   min-height: 25px;
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
 }
 
 .test-actions {
@@ -1504,7 +1504,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   overflow: hidden;
   max-width: 360px;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

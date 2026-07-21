@@ -558,13 +558,13 @@ function missingCount() {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   border: 1px solid rgb(var(--danger) / 0.45);
-  border-radius: 8px;
-  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 11px;
   background: rgb(var(--bg-elevated));
   color: rgb(var(--danger));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .skill-install-modal {
@@ -572,24 +572,24 @@ function missingCount() {
   width: min(620px, calc(100vw - 24px));
   max-height: min(760px, calc(100dvh - 24px));
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   overflow-y: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   background: rgb(var(--bg));
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.32);
+  box-shadow: 0 18px 48px rgb(var(--shadow-color) / 0.32);
 }
 
 .skill-link-modal {
   display: grid;
   width: min(520px, calc(100vw - 24px));
-  gap: 12px;
+  gap: var(--space-3);
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   background: rgb(var(--bg));
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.32);
+  box-shadow: 0 18px 48px rgb(var(--shadow-color) / 0.32);
 }
 
 .skill-link-modal > header,
@@ -597,24 +597,24 @@ function missingCount() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .skill-link-modal h2 {
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
 .skill-link-modal header p,
 .skill-link-modal label > span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .skill-link-modal label {
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .skill-link-modal input {
@@ -631,12 +631,12 @@ function missingCount() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .skill-install-modal h2 {
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
@@ -645,7 +645,7 @@ function missingCount() {
   margin-top: 2px;
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -659,27 +659,27 @@ function missingCount() {
 .skill-install-summary > div {
   display: grid;
   min-width: 0;
-  gap: 3px;
-  padding: 9px 8px;
+  gap: var(--space-1);
+  padding: var(--space-2) 8px;
 }
 
 .skill-install-summary span {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .skill-install-summary code,
 .skill-install-summary strong {
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .skill-candidate-list {
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .skill-candidate-list label {
@@ -689,8 +689,8 @@ function missingCount() {
   gap: 8px;
   min-height: 44px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
-  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 9px;
 }
 
 .skill-candidate-list label:has(input:checked) {
@@ -707,7 +707,7 @@ function missingCount() {
 .skill-candidate-list small {
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -715,10 +715,10 @@ function missingCount() {
 .skill-risk-block {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
-  gap: 9px;
+  gap: var(--space-2);
   border: 1px solid rgb(var(--warning) / 0.4);
-  border-radius: 8px;
-  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 10px;
   color: rgb(var(--warning));
 }
 
@@ -735,47 +735,47 @@ function missingCount() {
 .skill-risk-block > div {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: var(--space-1);
 }
 
 .skill-risk-block strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .skill-risk-block span {
   overflow-wrap: anywhere;
   color: rgb(var(--fg-subtle));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .skill-file-list {
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .skill-file-list summary {
   cursor: pointer;
-  padding: 9px 10px;
+  padding: var(--space-2) 10px;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .skill-file-list code {
   display: block;
   overflow-wrap: anywhere;
   border-top: 1px solid rgb(var(--border));
-  padding: 5px 10px;
+  padding: var(--space-1) 10px;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .skill-install-modal > footer {
   position: sticky;
   bottom: -14px;
   border-top: 1px solid rgb(var(--border));
-  padding: 10px 0 14px;
+  padding: var(--space-3) 0 14px;
   background: rgb(var(--bg));
 }
 

@@ -213,9 +213,9 @@ function actionLabel(action: GoalCardAction): string {
   width: min(760px, 100%);
   margin-inline: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated) / 0.96);
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.16);
+  box-shadow: 0 10px 28px rgb(var(--shadow-color) / 0.16);
 }
 
 .goal-status-shell[data-phase='paused'] {
@@ -226,8 +226,8 @@ function actionLabel(action: GoalCardAction): string {
   display: flex;
   align-items: center;
   min-height: 38px;
-  gap: 9px;
-  padding: 5px 7px 5px 11px;
+  gap: var(--space-2);
+  padding: var(--space-1) 7px 5px 11px;
 }
 
 .goal-status-mark {
@@ -240,13 +240,13 @@ function actionLabel(action: GoalCardAction): string {
   align-items: baseline;
   min-width: 0;
   flex: 1;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .goal-status-copy span {
   flex: 0 0 auto;
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 640;
 }
 
@@ -254,7 +254,7 @@ function actionLabel(action: GoalCardAction): string {
   min-width: 0;
   overflow: hidden;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -263,7 +263,7 @@ function actionLabel(action: GoalCardAction): string {
 .goal-status-copy time {
   flex: 0 0 auto;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .goal-status-actions {
@@ -279,7 +279,7 @@ function actionLabel(action: GoalCardAction): string {
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: rgb(var(--fg-subtle));
   cursor: pointer;
@@ -304,21 +304,21 @@ function actionLabel(action: GoalCardAction): string {
 
 .goal-status-editor {
   display: grid;
-  gap: 6px;
-  padding: 9px 10px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) 10px 10px;
   border-top: 1px solid rgb(var(--border));
 }
 
 .goal-status-editor > label {
   color: rgb(var(--fg-muted));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 620;
 }
 
 .goal-status-editor-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .goal-status-editor input {
@@ -326,12 +326,12 @@ function actionLabel(action: GoalCardAction): string {
   min-height: 32px;
   flex: 1;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 9px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   font: inherit;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-status-editor input:focus {
@@ -344,7 +344,7 @@ function actionLabel(action: GoalCardAction): string {
 .goal-status-error {
   margin: 0;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .goal-status-error {
