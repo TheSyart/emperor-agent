@@ -18,7 +18,7 @@ export function thoughtPresentation(
   }
 }
 
-function thoughtStatusLabel(
+export function thoughtStatusLabel(
   segment: ThoughtSegment,
   executionDurationMs?: number,
 ) {
@@ -29,8 +29,10 @@ function thoughtStatusLabel(
     return `${phase}已中断`
   }
   if (typeof executionDurationMs === 'number')
-    return `执行 ${durationLabel(executionDurationMs)}`
+    return `思考了 ${durationLabel(executionDurationMs)}`
   if (segment.status === 'running') return phase
+  // 无自定义阶段名的终态统一为「思考了 Ns」;有阶段名保留「阶段 · Ns」。
+  if (!segment.label) return `思考了 ${durationLabel(segment.durationMs)}`
   return `${phase} · ${durationLabel(segment.durationMs)}`
 }
 

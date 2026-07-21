@@ -627,15 +627,6 @@ select:focus-visible {
   background: rgb(var(--fg-subtle));
 }
 
-.thought-node {
-  border-radius: var(--radius-md);
-  background: rgb(var(--bg-elevated));
-}
-
-.thought-node::before {
-  top: 7px;
-}
-
 .tool-event,
 .activity-card,
 .agent-node,

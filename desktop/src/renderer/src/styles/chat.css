@@ -340,7 +340,7 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  border-left: 2px solid var(--border-strong);
+  border-left: 2px solid rgb(var(--border-strong));
   color: var(--fg-muted);
   font-size: var(--font-size-sm);
 }
@@ -366,41 +366,95 @@
   border-left-color: var(--danger);
 }
 
-.thought-node {
-  @apply flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[11px];
-  border-color: rgb(var(--border));
+/* ── Thought quote block(引述块式,PLAN-20260721-THEME-THINK) ─────────────── */
+.thought-status-node {
+  @apply flex w-fit max-w-full items-center gap-1.5 px-2 py-0.5;
   color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
 }
 
-.thought-node::before {
+.thought-status-node::before,
+.thought-collapsed::before,
+.thought-quote::before {
   @apply top-2;
 }
 
-.thought-node.running::before {
-  @apply bg-warn animate-pulse-seal;
-}
-
-.thought-node.done::before {
-  background: rgb(var(--ok));
-}
-
-.thought-node.error::before,
-.thought-node.error_aborted::before {
-  background: rgb(var(--danger));
-}
-
-.thought-label {
+.thought-collapsed {
+  @apply flex w-fit max-w-full items-center gap-1.5 px-2 py-0.5 transition;
+  border-radius: var(--radius-md);
   color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
 }
 
-.thought-summary-node {
-  @apply w-full max-w-[780px] rounded-md px-3.5 py-2.5 text-[14px] leading-6;
-  color: rgb(var(--fg));
+.thought-collapsed:hover {
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg-muted));
 }
 
-.thought-summary {
-  @apply m-0 whitespace-pre-wrap break-words;
-  color: rgb(var(--fg));
+.thought-state-icon {
+  font-size: var(--font-size-2xs);
+  line-height: 1;
+}
+
+.thought-collapsed.done .thought-state-icon,
+.thought-quote.done .thought-state-icon {
+  color: rgb(var(--ok));
+}
+
+.thought-collapsed.error .thought-state-icon,
+.thought-collapsed.error_aborted .thought-state-icon,
+.thought-quote.error .thought-state-icon,
+.thought-quote.error_aborted .thought-state-icon {
+  color: rgb(var(--danger));
+}
+
+.thought-quote {
+  padding-left: var(--space-3);
+  border-left: 2px solid rgb(var(--border-strong));
+}
+
+.thought-quote.running {
+  border-left-color: rgb(var(--accent) / 0.6);
+}
+
+.thought-quote.error,
+.thought-quote.error_aborted {
+  border-left-color: rgb(var(--danger) / 0.7);
+}
+
+.thought-quote-head {
+  @apply flex items-center gap-1.5 transition;
+  border-radius: var(--radius-md);
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
+}
+
+.thought-quote-head:hover {
+  color: rgb(var(--fg-muted));
+}
+
+.thought-quote-body {
+  margin-top: var(--space-1);
+  max-height: 40vh;
+  overflow-y: auto;
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-md);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thought-spinner {
+  @apply inline-block size-2.5 shrink-0 animate-spin rounded-full;
+  border: 1.5px solid rgb(var(--accent) / 0.35);
+  border-top-color: rgb(var(--accent));
+}
+
+.thought-live-cursor {
+  @apply ml-0.5 inline-block align-[-1px] animate-pulse-seal;
+  width: 6px;
+  height: 12px;
+  background: rgb(var(--accent));
 }
 
 .thought-chevron {
