@@ -83,7 +83,9 @@ describe('ThoughtEvent quote-block presentation', () => {
     const btn = el.querySelector<HTMLButtonElement>('button.thought-collapsed')!
     btn.click()
     await Promise.resolve()
-    const head = el.querySelector('button.thought-quote-head')
+    const head = el.querySelector<HTMLButtonElement>(
+      'button.thought-quote-head',
+    )
     expect(head).toBeTruthy()
     expect(head!.getAttribute('aria-expanded')).toBe('true')
     expect(el.querySelector('.thought-quote-body')?.textContent).toContain(
