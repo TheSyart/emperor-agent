@@ -3,7 +3,7 @@
 }
 
 .panel-toolbar {
-  @apply flex shrink-0 items-center gap-3 rounded-[1.25rem] border border-border/55 bg-bg-inset/35 px-3 py-2;
+  @apply flex shrink-0 items-center gap-3 rounded-[var(--radius-xl)] border border-border/55 bg-bg-inset/35 px-3 py-2;
 }
 
 .panel-toolbar input,
@@ -50,7 +50,7 @@
 }
 
 .team-member-row {
-  @apply flex min-h-[4.65rem] w-full items-center gap-3 rounded-[1.2rem] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-accent/30 hover:bg-bg/80;
+  @apply flex min-h-[4.65rem] w-full items-center gap-3 rounded-[var(--radius-xl)] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-accent/30 hover:bg-bg/80;
 }
 
 .team-member-row.active {
@@ -109,7 +109,7 @@
 .team-create select,
 .team-create textarea,
 .team-detail textarea {
-  @apply rounded-[1rem] px-3 py-2 text-xs;
+  @apply rounded-[var(--radius-lg)] px-3 py-2 text-xs;
 }
 
 .team-timeline {
@@ -134,7 +134,7 @@
 }
 
 .team-message {
-  @apply rounded-[1.15rem] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
+  @apply rounded-[var(--radius-xl)] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
 }
 
 .team-message.to-lead {
@@ -167,7 +167,7 @@
 }
 
 .team-empty {
-  @apply grid h-full min-h-[16rem] place-items-center rounded-[1.35rem] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
+  @apply grid h-full min-h-[16rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
 }
 
 .team-empty img {
@@ -184,7 +184,7 @@
 }
 
 .team-stamp {
-  @apply flex items-center gap-3 rounded-[1.25rem] border border-border/60 bg-bg-inset/45 p-3;
+  @apply flex items-center gap-3 rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/45 p-3;
 }
 
 .team-stamp img {
@@ -201,7 +201,7 @@
 }
 
 .team-tool-cloud {
-  @apply flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-[1.2rem] border border-border/60 bg-bg-inset/35 p-3;
+  @apply flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/35 p-3;
 }
 
 .team-tool-cloud span {
@@ -218,11 +218,11 @@
 }
 
 .team-action-row .tool-button {
-  @apply min-h-11 rounded-[1rem] px-2 text-xs;
+  @apply min-h-11 rounded-[var(--radius-lg)] px-2 text-xs;
 }
 
 .team-error {
-  @apply rounded-[1rem] border border-accent/30 bg-accent/10 px-3 py-2 text-xs leading-6 text-accent;
+  @apply rounded-[var(--radius-lg)] border border-accent/30 bg-accent/10 px-3 py-2 text-xs leading-6 text-accent;
 }
 
 .scheduler-panel {
@@ -248,7 +248,7 @@
 }
 
 .scheduler-summary div {
-  @apply rounded-[1rem] border border-border/55 bg-bg/70 px-3 py-2;
+  @apply rounded-[var(--radius-lg)] border border-border/55 bg-bg/70 px-3 py-2;
 }
 
 .scheduler-summary span {
@@ -264,7 +264,7 @@
 }
 
 .scheduler-job-row {
-  @apply flex min-h-[5.2rem] w-full items-center gap-3 rounded-[1.2rem] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-ok/30 hover:bg-bg/80;
+  @apply flex min-h-[5.2rem] w-full items-center gap-3 rounded-[var(--radius-xl)] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-ok/30 hover:bg-bg/80;
 }
 
 .scheduler-job-row.active {
@@ -305,11 +305,11 @@
 .scheduler-create textarea,
 .scheduler-detail-body input,
 .scheduler-detail-body textarea {
-  @apply rounded-[1rem] px-3 py-2 text-xs;
+  @apply rounded-[var(--radius-lg)] px-3 py-2 text-xs;
 }
 
 .scheduler-check {
-  @apply inline-flex items-center gap-2 rounded-[0.85rem] border border-border/50 bg-bg/55 px-3 py-2 text-xs text-fg-muted;
+  @apply inline-flex items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/55 px-3 py-2 text-xs text-fg-muted;
 }
 
 .scheduler-check input {
@@ -334,7 +334,7 @@
 }
 
 .scheduler-run {
-  @apply rounded-[1.15rem] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
+  @apply rounded-[var(--radius-xl)] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
 }
 
 .scheduler-run.ok {
@@ -358,7 +358,7 @@
 }
 
 .scheduler-empty {
-  @apply grid min-h-[10rem] place-items-center rounded-[1.2rem] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
+  @apply grid min-h-[10rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
 }
 
 .scheduler-detail-body {
@@ -374,7 +374,7 @@
 }
 
 .scheduler-meta-grid span {
-  @apply min-w-0 rounded-[1rem] border border-border/55 bg-bg-inset/35 px-3 py-2 text-xs text-fg;
+  @apply min-w-0 rounded-[var(--radius-lg)] border border-border/55 bg-bg-inset/35 px-3 py-2 text-xs text-fg;
 }
 
 .scheduler-meta-grid b {
@@ -386,7 +386,7 @@
 }
 
 .scheduler-action-grid .tool-button {
-  @apply min-h-11 rounded-[1rem] px-2 text-xs;
+  @apply min-h-11 rounded-[var(--radius-lg)] px-2 text-xs;
 }
 
 .model-form {
@@ -557,7 +557,7 @@
 
 /* ── 底部 sticky 操作栏 ── */
 .model-action-bar {
-  @apply sticky bottom-0 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[1.3rem] border border-border/70 bg-bg/90 px-4 py-3 shadow-imperial backdrop-blur;
+  @apply sticky bottom-0 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-xl)] border border-border/70 bg-bg/90 px-4 py-3 shadow-imperial backdrop-blur;
   z-index: 10;
 }
 
@@ -582,7 +582,7 @@
 }
 
 .entry-item {
-  @apply flex cursor-pointer items-start gap-3 rounded-[1.15rem] border border-border/60 bg-bg-inset/45 p-3 transition hover:border-accent/30 hover:bg-bg/85;
+  @apply flex cursor-pointer items-start gap-3 rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/45 p-3 transition hover:border-accent/30 hover:bg-bg/85;
 }
 
 .entry-item.active {
@@ -673,11 +673,11 @@
 }
 
 .list-item {
-  @apply flex w-full items-start justify-between gap-4 rounded-[1.25rem] border border-border/60 bg-bg/60 p-4 transition hover:border-accent/30 hover:bg-bg;
+  @apply flex w-full items-start justify-between gap-4 rounded-[var(--radius-xl)] border border-border/60 bg-bg/60 p-4 transition hover:border-accent/30 hover:bg-bg;
 }
 
 .resource-icon {
-  @apply size-14 shrink-0 rounded-[1.15rem] border border-border/50 bg-bg-inset/70 p-1.5 shadow-sm;
+  @apply size-14 shrink-0 rounded-[var(--radius-xl)] border border-border/50 bg-bg-inset/70 p-1.5 shadow-sm;
   transform: scale(1.14);
 }
 
@@ -800,7 +800,7 @@
 }
 
 .empty-note {
-  @apply rounded-[1.2rem] border border-border/60 bg-bg-inset/50 p-3 text-xs leading-6 text-fg-muted;
+  @apply rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/50 p-3 text-xs leading-6 text-fg-muted;
 }
 
 .empty-note.compact {
@@ -843,7 +843,7 @@
 }
 
 .usage-card {
-  @apply rounded-[1.35rem] border border-border/70 bg-bg/70 p-3;
+  @apply rounded-[var(--radius-xl)] border border-border/70 bg-bg/70 p-3;
 }
 
 .usage-card-title {
@@ -945,7 +945,7 @@
 }
 
 .stat-card {
-  @apply relative overflow-hidden rounded-[1.35rem] border border-border/70 bg-bg/80 px-4 py-3 shadow-sm;
+  @apply relative overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg/80 px-4 py-3 shadow-sm;
 }
 
 .stat-card::after {
@@ -1000,7 +1000,7 @@
 }
 
 .legend-cell {
-  @apply inline-block size-3 rounded-[3px];
+  @apply inline-block size-3 rounded-[var(--radius-xs)];
   background: rgb(var(--accent) / 0.08);
 }
 
@@ -1056,7 +1056,7 @@
 }
 
 .heatmap-cell {
-  @apply rounded-[3px];
+  @apply rounded-[var(--radius-xs)];
   width: 14px;
   height: 14px;
   background: rgb(var(--accent) / 0.08);
@@ -1597,7 +1597,7 @@
 }
 
 .test-row {
-  @apply mt-3 flex flex-col gap-2 rounded-[1.25rem] border border-border/60 bg-bg-inset/50 p-3;
+  @apply mt-3 flex flex-col gap-2 rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/50 p-3;
 }
 .test-label {
   @apply flex flex-col gap-0.5;
@@ -1612,7 +1612,7 @@
   @apply flex flex-wrap gap-2;
 }
 .model-test-button {
-  @apply min-h-11 gap-2 rounded-[1rem] px-3.5;
+  @apply min-h-11 gap-2 rounded-[var(--radius-lg)] px-3.5;
 }
 .model-test-icon {
   @apply h-7 w-7;
@@ -1658,7 +1658,7 @@
 }
 
 .tool-card {
-  @apply flex flex-col gap-3 rounded-[1.25rem] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200;
+  @apply flex flex-col gap-3 rounded-[var(--radius-xl)] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200;
 }
 
 .tool-card:hover {
@@ -1718,7 +1718,7 @@
 }
 
 .skill-card {
-  @apply relative flex flex-col gap-2 rounded-[1.25rem] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200 cursor-pointer;
+  @apply relative flex flex-col gap-2 rounded-[var(--radius-xl)] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200 cursor-pointer;
 }
 
 .skill-card:hover {
@@ -1798,7 +1798,7 @@
 }
 
 .memory-stat-card {
-  @apply min-w-0 rounded-[1rem] border border-border/65 bg-bg/80 px-3 py-2.5 shadow-sm;
+  @apply min-w-0 rounded-[var(--radius-lg)] border border-border/65 bg-bg/80 px-3 py-2.5 shadow-sm;
 }
 
 .memory-stat-card.warning {
@@ -1876,7 +1876,7 @@
 }
 
 .capability-card-icon {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[0.8rem] border border-border/60 bg-bg-inset/60 text-fg-muted;
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-lg)] border border-border/60 bg-bg-inset/60 text-fg-muted;
 }
 
 .capability-card[data-tone='cyan'] .capability-card-icon {
@@ -1913,7 +1913,7 @@
 }
 
 .capability-detail-drawer {
-  @apply relative flex min-h-0 w-auto flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg shadow-insetPaper;
+  @apply relative flex min-h-0 w-auto flex-col overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg shadow-insetPaper;
 }
 
 .capability-tag.blue {
@@ -1998,7 +1998,7 @@
 
 .mcp-directory-section,
 .mcp-advanced-config {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-border/70 bg-bg/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .mcp-directory-section .editor-title {
@@ -2038,7 +2038,7 @@
 
 .mcp-editor,
 .mcp-tools {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-border/70 bg-bg/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .mcp-editor textarea {
@@ -2071,7 +2071,7 @@
 }
 
 .scheduler-overview span {
-  @apply inline-flex min-h-9 items-center gap-2 rounded-[0.85rem] border border-border/50 bg-bg/65 px-3 text-xs text-fg-muted;
+  @apply inline-flex min-h-9 items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/65 px-3 text-xs text-fg-muted;
 }
 
 .scheduler-overview b {
@@ -2079,7 +2079,7 @@
 }
 
 .scheduler-overview .tool-button {
-  @apply ml-auto min-h-9 rounded-[0.85rem] px-3 text-xs;
+  @apply ml-auto min-h-9 rounded-[var(--radius-lg)] px-3 text-xs;
 }
 
 .scheduler-workspace {
@@ -2089,11 +2089,11 @@
 
 .scheduler-list-shell,
 .scheduler-detail-drawer {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .scheduler-detail-page {
-  @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .scheduler-detail-page-head {
@@ -2175,7 +2175,7 @@
 .scheduler-field input,
 .scheduler-field select,
 .scheduler-field textarea {
-  @apply rounded-[0.9rem] px-3 py-2 text-xs;
+  @apply rounded-[var(--radius-lg)] px-3 py-2 text-xs;
 }
 
 .scheduler-form-grid {
@@ -2183,7 +2183,7 @@
 }
 
 .scheduler-history-block {
-  @apply mt-1 flex min-h-0 flex-col gap-2 rounded-[1rem] border border-border/60 bg-bg-inset/30 p-3;
+  @apply mt-1 flex min-h-0 flex-col gap-2 rounded-[var(--radius-lg)] border border-border/60 bg-bg-inset/30 p-3;
 }
 
 .scheduler-history-head {
@@ -2207,7 +2207,7 @@
 }
 
 .scheduler-modal {
-  @apply flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(34rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto rounded-[1.25rem] border border-border/70 bg-bg p-4 shadow-2xl;
+  @apply flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(34rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto rounded-[var(--radius-xl)] border border-border/70 bg-bg p-4 shadow-2xl;
 }
 
 .scheduler-modal .scheduler-drawer-head {
@@ -2223,7 +2223,7 @@
 }
 
 .model-setup-backdrop {
-  background: rgb(0 0 0 / 0.46);
+  background: rgb(var(--shadow-color) / 0.46);
   backdrop-filter: blur(6px);
 }
 
@@ -2235,7 +2235,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(300px, 390px);
   overflow: hidden;
   border: 1px solid rgb(var(--border-strong) / 0.74);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background:
     linear-gradient(
       135deg,
@@ -2243,7 +2243,7 @@
       rgb(var(--bg) / 0.98)
     ),
     rgb(var(--bg));
-  box-shadow: 0 24px 72px rgb(0 0 0 / 0.42);
+  box-shadow: 0 24px 72px rgb(var(--shadow-color) / 0.42);
 }
 
 .model-setup-close {
@@ -2256,7 +2256,7 @@
   height: 32px;
   place-items: center;
   border: 1px solid rgb(var(--border) / 0.72);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg) / 0.62);
   color: rgb(var(--fg-muted));
   backdrop-filter: blur(10px);
@@ -2315,7 +2315,7 @@
 .model-setup-intro p {
   max-width: 420px;
   color: rgb(var(--fg-muted));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   line-height: 1.72;
   text-wrap: pretty;
 }
@@ -2326,7 +2326,7 @@
   gap: 9px;
   max-width: 420px;
   border: 1px solid rgb(var(--border) / 0.72);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-inset) / 0.36);
   padding: 11px 12px;
 }
@@ -2343,7 +2343,7 @@
 
 .model-setup-status p {
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.55;
 }
 
@@ -2360,7 +2360,7 @@
 .model-setup-actions p {
   max-width: 250px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.55;
   text-wrap: pretty;
 }

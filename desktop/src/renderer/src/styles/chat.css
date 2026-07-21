@@ -211,7 +211,7 @@
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
   padding: 0 7px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
   vertical-align: baseline;
@@ -342,14 +342,14 @@
   gap: 8px;
   border-left: 2px solid var(--border-strong);
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .plan-activity-node strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

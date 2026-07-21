@@ -32,8 +32,7 @@ function read(rel: string): string {
   return readFileSync(join(SRC, rel), 'utf-8')
 }
 
-describe('style audit: color convergence', () => {
-  it('no bare hex colors outside theme/*.css', () => {
+describe('style audit: color convergence', () => {  it('no bare hex colors outside theme/*.css', () => {
     const offenders: string[] = []
     for (const rel of SCANNED) {
       const hits = read(rel).match(/#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g)
@@ -60,6 +59,59 @@ describe('style audit: color convergence', () => {
     for (const rel of SCANNED) {
       const hits = read(rel).match(aliasVar)
       if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+})
+
+describe('style audit: bare-value convergence (styles/)', () => {
+  it('no bare px border-radius except 0/999px', () => {
+    const re = /border-radius:\s*(?!0\b|999px\b)\d+px/g
+    const offenders: string[] = []
+    for (const rel of STYLE_FILES) {
+      const hits = read(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no box-shadow with hardcoded rgb(0 0 0 / *)', () => {
+    const re = /box-shadow:[^;]*rgb\(0 0 0/g
+    const offenders: string[] = []
+    for (const rel of STYLE_FILES) {
+      const hits = read(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no bare px font-size in the 9-15px range', () => {
+    const re = /font-size:\s*(?:9|1[0-5])px\b/g
+    const offenders: string[] = []
+    for (const rel of STYLE_FILES) {
+      const hits = read(rel).match(re)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no converged-range rounded-[Nrem]/[Npx] arbitrary radius classes', () => {
+    // Δ≤2px 的值必须归位到 var(--radius-*);偏差更大的保留值登记于此白名单。
+    const KEEP = new Set([
+      'rounded-[1.05rem]',
+      'rounded-[1.1rem]',
+      'rounded-[1.4rem]',
+      'rounded-[1.45rem]',
+      'rounded-[1.5rem]',
+      'rounded-[1.6rem]',
+      'rounded-[1.7rem]',
+    ])
+    const re = /rounded-\[(?!var\()[0-9.]+(?:rem|px)\]/g
+    const offenders: string[] = []
+    for (const rel of STYLE_FILES) {
+      const hits = (read(rel).match(re) ?? []).filter((h) => !KEEP.has(h))
+      if (hits.length)
+        offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
     }
     expect(offenders, offenders.join('\n')).toEqual([])
   })

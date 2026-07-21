@@ -106,7 +106,7 @@ select:focus-visible {
 .rail-icon-button,
 .session-new-btn,
 .session-del-btn {
-  border-radius: 7px;
+  border-radius: var(--radius-md);
 }
 
 .rail-brand {
@@ -146,7 +146,7 @@ select:focus-visible {
 }
 
 .session-sidebar-head span {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: rgb(var(--fg));
 }
@@ -164,10 +164,10 @@ select:focus-visible {
   min-width: 136px;
   gap: 2px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   background: rgb(var(--bg-elevated));
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.12);
+  box-shadow: 0 12px 32px rgb(var(--shadow-color) / 0.12);
 }
 
 .session-create-menu button {
@@ -175,10 +175,10 @@ select:focus-visible {
   align-items: center;
   gap: 8px;
   min-height: 32px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 8px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-align: left;
 }
 
@@ -199,10 +199,10 @@ select:focus-visible {
   min-height: 34px;
   align-items: center;
   gap: 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 9px;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   transition:
     background 140ms ease,
@@ -255,7 +255,7 @@ select:focus-visible {
   min-height: 28px;
   padding: 8px 8px 4px;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -269,7 +269,7 @@ select:focus-visible {
   min-height: 42px;
   align-items: center;
   gap: 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 5px 7px;
   color: rgb(var(--fg-muted));
 }
@@ -302,14 +302,14 @@ select:focus-visible {
 
 .project-meta strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
 }
 
 .project-meta small {
   margin-top: 1px;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .project-row em {
@@ -320,14 +320,14 @@ select:focus-visible {
   border-radius: 999px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: normal;
 }
 
 .session-empty-row {
   padding: 8px 10px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .session-row {
@@ -336,7 +336,7 @@ select:focus-visible {
   align-items: center;
   gap: 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 6px 6px 6px 9px;
   color: rgb(var(--fg-muted));
   cursor: pointer;
@@ -379,7 +379,7 @@ select:focus-visible {
   border: 1px solid transparent;
   border-radius: 999px;
   padding: 2px 7px;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 650;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -403,7 +403,7 @@ select:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
@@ -412,7 +412,7 @@ select:focus-visible {
   overflow: hidden;
   margin-top: 2px;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -431,9 +431,9 @@ select:focus-visible {
 
 .session-rename-wrap input {
   height: 30px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 7px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .main-view {
@@ -448,13 +448,13 @@ select:focus-visible {
 }
 
 .view-head h1 {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
 }
 
 .view-head p {
   margin-top: 1px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .view-readable .view-body {
@@ -508,7 +508,7 @@ select:focus-visible {
 .avatar {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
 }
 
@@ -519,13 +519,13 @@ select:focus-visible {
 
 .bubble.user {
   border: 1px solid rgb(var(--border) / 0.55);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
 }
 
 .bubble.assistant,
 .timeline-node.text-node {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border-color: transparent;
   background: transparent;
   padding-inline: 0;
@@ -537,7 +537,7 @@ select:focus-visible {
 }
 
 .tool-group-card {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border)) !important;
   background: rgb(var(--bg-elevated) / 0.82) !important;
   box-shadow: none !important;
@@ -561,7 +561,7 @@ select:focus-visible {
 }
 
 .tool-detail-body {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border) / 0.68) !important;
   background: rgb(var(--bg) / 0.24) !important;
 }
@@ -574,7 +574,7 @@ select:focus-visible {
 }
 
 .tool-group-tool-row {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border) / 0.72) !important;
   background: rgb(var(--bg) / 0.2) !important;
   box-shadow: none !important;
@@ -628,7 +628,7 @@ select:focus-visible {
 }
 
 .thought-node {
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
 }
 
@@ -641,7 +641,7 @@ select:focus-visible {
 .agent-node,
 .control-card,
 .todo-panel {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border)) !important;
   box-shadow: none !important;
 }
@@ -659,7 +659,7 @@ select:focus-visible {
 
 .control-card {
   padding: 14px !important;
-  border-radius: 10px !important;
+  border-radius: var(--radius) !important;
 }
 
 .control-card-head {
@@ -672,7 +672,7 @@ select:focus-visible {
 }
 
 .control-card-head em {
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   padding: 2px 7px !important;
   background: rgb(var(--bg-inset) / 0.5);
 }
@@ -680,14 +680,14 @@ select:focus-visible {
 .control-context {
   margin-top: 8px !important;
   color: rgb(var(--fg-muted)) !important;
-  font-size: 13px !important;
+  font-size: var(--font-size-md) !important;
   line-height: 1.65 !important;
 }
 
 .plan-action-zone textarea {
   min-height: 70px;
   border-color: rgb(var(--border)) !important;
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   background: rgb(var(--bg) / 0.58) !important;
   color: rgb(var(--fg)) !important;
   resize: vertical;
@@ -695,7 +695,7 @@ select:focus-visible {
 
 .plan-markdown {
   max-height: 28rem !important;
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   padding: 12px 14px !important;
   background: rgb(var(--bg) / 0.58) !important;
 }
@@ -705,7 +705,7 @@ select:focus-visible {
   max-width: 760px;
   padding: 0 !important;
   overflow: hidden;
-  border-radius: 10px !important;
+  border-radius: var(--radius) !important;
   background: rgb(var(--bg-elevated)) !important;
 }
 
@@ -718,7 +718,7 @@ select:focus-visible {
 }
 
 .plan-card-kicker {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   line-height: 1;
   color: rgb(var(--fg-subtle));
 }
@@ -753,7 +753,7 @@ select:focus-visible {
   padding: 3px 8px;
   background: rgb(var(--bg) / 0.48);
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: normal;
   line-height: 1.2;
 }
@@ -771,7 +771,7 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg));
 }
@@ -802,7 +802,7 @@ select:focus-visible {
   gap: 6px;
   color: rgb(var(--fg-subtle));
   font-family: theme('fontFamily.mono');
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.12em;
 }
@@ -831,18 +831,18 @@ select:focus-visible {
 
 .goal-status-stack strong {
   border: 1px solid rgb(var(--border));
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 3px 8px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 650;
 }
 
 .goal-status-stack span {
   color: rgb(var(--fg-subtle));
   font-family: theme('fontFamily.mono');
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   white-space: nowrap;
 }
 
@@ -853,7 +853,7 @@ select:focus-visible {
   align-items: center;
   margin: 12px 16px 0;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   background: rgb(var(--bg) / 0.48);
   color: rgb(var(--fg-muted));
@@ -884,14 +884,14 @@ select:focus-visible {
 .goal-plan-link small,
 .goal-plan-link em {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-style: normal;
 }
 
 .goal-plan-link strong {
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -913,14 +913,14 @@ select:focus-visible {
 .goal-section-head h4 {
   margin: 0;
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
 .goal-section-head span {
   color: rgb(var(--fg-subtle));
   font-family: theme('fontFamily.mono');
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .goal-acceptance-list {
@@ -928,7 +928,7 @@ select:focus-visible {
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   scrollbar-width: thin;
 }
 
@@ -973,7 +973,7 @@ select:focus-visible {
 
 .goal-acceptance-copy strong {
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -984,7 +984,7 @@ select:focus-visible {
   margin: 0;
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   line-height: 1.5;
   text-wrap: pretty;
   overflow-wrap: anywhere;
@@ -1004,7 +1004,7 @@ select:focus-visible {
 
 .goal-verdict-label {
   font-family: theme('fontFamily.mono');
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1012,7 +1012,7 @@ select:focus-visible {
 .goal-empty-copy {
   margin: 0;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-notice {
@@ -1020,11 +1020,11 @@ select:focus-visible {
   align-items: flex-start;
   gap: 8px;
   margin: 0 16px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 9px 10px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   line-height: 1.55;
 }
 
@@ -1046,7 +1046,7 @@ select:focus-visible {
 .goal-card-footer > p {
   margin: 0;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .goal-actions {
@@ -1063,11 +1063,11 @@ select:focus-visible {
   justify-content: center;
   gap: 6px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 5px 10px;
   background: rgb(var(--bg));
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 
@@ -1127,7 +1127,7 @@ select:focus-visible {
   gap: 10px;
   margin: 12px 18px 0;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .plan-progress-track {
@@ -1185,7 +1185,7 @@ select:focus-visible {
 
 .plan-assumptions,
 .plan-comments {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   background: rgb(var(--bg) / 0.36) !important;
 }
 
@@ -1197,9 +1197,9 @@ select:focus-visible {
 .control-primary,
 .control-secondary {
   min-height: 30px !important;
-  border-radius: 7px !important;
+  border-radius: var(--radius-md) !important;
   padding: 0 12px !important;
-  font-size: 12px !important;
+  font-size: var(--font-size-sm) !important;
 }
 
 .pending-bar {
@@ -1207,31 +1207,31 @@ select:focus-visible {
   max-width: min(760px, 100%);
   min-height: 42px;
   margin: 0 auto 8px max(0px, calc((100% - 760px) / 2));
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 7px 10px;
   border-color: rgb(var(--border));
   background: rgb(var(--bg-elevated) / 0.96);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.2);
+  box-shadow: 0 10px 30px rgb(var(--shadow-color) / 0.2);
 }
 
 .pending-seal {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
 }
 
 .pending-title {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.25;
 }
 
 .pending-detail {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .pending-label {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
 }
 
@@ -1247,7 +1247,7 @@ select:focus-visible {
     linear-gradient(180deg, rgb(var(--bg) / 0), rgb(var(--bg)) 36%),
     radial-gradient(
       ellipse at center bottom,
-      rgb(0 0 0 / 0.16),
+      rgb(var(--shadow-color) / 0.16),
       transparent 62%
     );
 }
@@ -1261,10 +1261,10 @@ select:focus-visible {
   gap: 16px;
   margin: 0 auto 8px;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 9px 11px;
   background: rgb(var(--bg-elevated) / 0.97);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+  box-shadow: 0 8px 24px rgb(var(--shadow-color) / 0.16);
 }
 
 .profile-onboarding-banner > div:first-child {
@@ -1275,13 +1275,13 @@ select:focus-visible {
 
 .profile-onboarding-banner strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
 }
 
 .profile-onboarding-banner span {
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .profile-onboarding-actions,
@@ -1294,10 +1294,10 @@ select:focus-visible {
 
 .profile-onboarding-actions button {
   min-height: 28px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 9px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .profile-onboarding-actions button:hover {
@@ -1320,9 +1320,9 @@ select:focus-visible {
   margin: 0 auto;
   overflow: auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   background: rgb(var(--bg-elevated) / 0.98);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+  box-shadow: 0 18px 48px rgb(var(--shadow-color) / 0.28);
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--border-strong) / 0.74) transparent;
 }
@@ -1338,7 +1338,7 @@ select:focus-visible {
 .active-ask-head strong {
   min-width: 0;
   color: rgb(var(--fg));
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   font-weight: 650;
   line-height: 1.55;
 }
@@ -1349,7 +1349,7 @@ select:focus-visible {
   align-items: center;
   gap: 8px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .active-ask-counter button {
@@ -1357,7 +1357,7 @@ select:focus-visible {
   width: 22px;
   height: 22px;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   color: rgb(var(--fg-muted));
 }
 
@@ -1382,7 +1382,7 @@ select:focus-visible {
   gap: 10px;
   align-items: start;
   min-height: 30px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 6px 10px;
   text-align: left;
   color: rgb(var(--fg-muted));
@@ -1402,7 +1402,7 @@ select:focus-visible {
   border-radius: 999px;
   background: rgb(var(--fg) / 0.11);
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   line-height: 1;
 }
@@ -1418,7 +1418,7 @@ select:focus-visible {
 
 .active-ask-option-copy strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
   line-height: 1.4;
 }
@@ -1426,7 +1426,7 @@ select:focus-visible {
 .active-ask-option-copy small {
   margin-left: 8px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.45;
 }
 
@@ -1438,14 +1438,14 @@ select:focus-visible {
 
 .active-ask-freeform span {
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .active-ask-freeform textarea {
   min-height: 44px;
   resize: vertical;
   border-color: rgb(var(--border)) !important;
-  border-radius: 10px !important;
+  border-radius: var(--radius) !important;
   background: rgb(var(--bg) / 0.58) !important;
   color: rgb(var(--fg)) !important;
 }
@@ -1467,7 +1467,7 @@ select:focus-visible {
   gap: 7px;
   border-radius: 999px;
   padding: 0 13px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .active-ask-ignore {
@@ -1480,11 +1480,11 @@ select:focus-visible {
 }
 
 .active-ask-ignore kbd {
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   padding: 1px 5px;
   background: rgb(var(--fg) / 0.12);
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .active-ask-submit {
@@ -1501,9 +1501,9 @@ select:focus-visible {
   width: min(760px, 100%);
   margin: 0 auto;
   border: 1px solid rgb(var(--border));
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   background: rgb(var(--bg-elevated) / 0.98);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+  box-shadow: 0 18px 48px rgb(var(--shadow-color) / 0.28);
 }
 
 .active-plan-decision-head {
@@ -1512,7 +1512,7 @@ select:focus-visible {
 
 .active-plan-decision-head strong {
   color: rgb(var(--fg));
-  font-size: 15px;
+  font-size: var(--font-size-lg);
   font-weight: 650;
   line-height: 1.45;
 }
@@ -1525,7 +1525,7 @@ select:focus-visible {
   width: calc(100% - 20px);
   min-height: 34px;
   margin: 0 10px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 7px 10px;
   text-align: left;
   color: rgb(var(--fg-muted));
@@ -1544,7 +1544,7 @@ select:focus-visible {
 
 .active-plan-decision-copy strong {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
 }
 
@@ -1593,7 +1593,7 @@ select:focus-visible {
   gap: 10px;
   width: 100%;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 12px;
   background: rgb(var(--bg-elevated) / 0.76);
 }
@@ -1628,7 +1628,7 @@ select:focus-visible {
 
 .ask-history-title {
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
   line-height: 1.4;
 }
@@ -1636,7 +1636,7 @@ select:focus-visible {
 .ask-history-detail {
   margin-top: 2px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -1653,7 +1653,7 @@ select:focus-visible {
   border-radius: 999px;
   padding: 2px 8px;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .ask-history-answers {
@@ -1664,19 +1664,19 @@ select:focus-visible {
 .ask-history-answer {
   display: grid;
   gap: 3px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   background: rgb(var(--bg) / 0.48);
 }
 
 .ask-history-answer span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .ask-history-answer strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   line-height: 1.5;
 }
@@ -1695,10 +1695,10 @@ select:focus-visible {
   margin-inline: auto;
   gap: 7px;
   border: 1px solid rgb(var(--danger) / 0.42);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 9px 10px;
   background: rgb(var(--bg-elevated) / 0.97);
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.16);
+  box-shadow: 0 10px 28px rgb(var(--shadow-color) / 0.16);
 }
 
 .goal-replacement-recovery > div {
@@ -1709,34 +1709,34 @@ select:focus-visible {
 
 .goal-replacement-recovery strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .goal-replacement-recovery span {
   color: rgb(var(--danger));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .goal-replacement-recovery input {
   min-width: 0;
   min-height: 32px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 9px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   font: inherit;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-replacement-recovery button {
   min-height: 32px;
   border: 1px solid rgb(var(--border));
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 10px;
   background: rgb(var(--bg));
   color: rgb(var(--fg));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-replacement-recovery button[type='submit'] {
@@ -1758,22 +1758,22 @@ select:focus-visible {
   position: relative;
   z-index: 1;
   overflow: visible;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border-color: rgb(var(--border));
   background: rgb(var(--bg-elevated));
-  box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
+  box-shadow: 0 12px 34px rgb(var(--shadow-color) / 0.24);
 }
 
 .composer:focus-within {
   border-color: rgb(var(--border-strong));
-  box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
+  box-shadow: 0 12px 34px rgb(var(--shadow-color) / 0.24);
 }
 
 .composer textarea {
   min-height: 58px;
   max-height: 150px;
   padding: 13px 16px 10px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.6;
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--border-strong) / 0.72) transparent;
@@ -1801,7 +1801,7 @@ select:focus-visible {
   min-height: 58px;
   max-height: 150px;
   padding: 13px 16px 10px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.6;
 }
 
@@ -1817,7 +1817,7 @@ select:focus-visible {
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
   padding: 0 7px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
   vertical-align: baseline;
@@ -1869,7 +1869,7 @@ select:focus-visible {
 .send-button,
 .model-button,
 .mode-button {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
 }
 
 .model-button,
@@ -1878,7 +1878,7 @@ select:focus-visible {
   border-color: rgb(var(--border));
   background: rgb(var(--bg));
   padding-inline: 9px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .attach-button,
@@ -1911,10 +1911,10 @@ select:focus-visible {
   flex: 0 0 34px;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg));
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 720;
 }
 
@@ -1927,9 +1927,9 @@ select:focus-visible {
   height: 19px;
   flex-basis: 19px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .model-provider-avatar.bare:has(img) {
@@ -1954,8 +1954,8 @@ select:focus-visible {
   width: 22px;
   height: 22px;
   flex-basis: 22px;
-  border-radius: 6px;
-  font-size: 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-2xs);
 }
 
 .model-provider-avatar img {
@@ -1998,10 +1998,10 @@ select:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgb(var(--border-strong));
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 7px;
   background: rgb(var(--bg-elevated) / 0.98);
-  box-shadow: 0 16px 46px rgb(0 0 0 / 0.28);
+  box-shadow: 0 16px 46px rgb(var(--shadow-color) / 0.28);
   backdrop-filter: blur(16px);
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--border-strong) / 0.72) transparent;
@@ -2025,7 +2025,7 @@ select:focus-visible {
   gap: 12px;
   padding: 0 6px 5px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .composer-palette-head span {
@@ -2033,7 +2033,7 @@ select:focus-visible {
 }
 
 .composer-palette-head em {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: normal;
 }
 
@@ -2046,7 +2046,7 @@ select:focus-visible {
 .composer-palette-label {
   padding: 5px 6px 3px;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .composer-palette-group:first-of-type .composer-palette-label {
@@ -2059,10 +2059,10 @@ select:focus-visible {
   grid-template-columns: 20px minmax(112px, 0.34fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px 7px;
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-align: left;
   transition:
     background 120ms ease,
@@ -2085,7 +2085,7 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 560;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -2096,7 +2096,7 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2106,11 +2106,11 @@ select:focus-visible {
   max-width: 120px;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
   color: rgb(var(--fg-subtle));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-weight: 500;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -2140,7 +2140,7 @@ select:focus-visible {
   flex-direction: column;
   gap: 3px;
   margin: 2px 2px 6px;
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   padding: 10px 12px 6px;
   background: rgb(var(--bg-inset) / 0.58);
 }
@@ -2152,7 +2152,7 @@ select:focus-visible {
   align-items: center;
   gap: 5px;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.25;
 }
 
@@ -2184,7 +2184,7 @@ select:focus-visible {
   overflow: hidden;
   min-width: 0;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2232,8 +2232,8 @@ select:focus-visible {
 
 .model-menu,
 .mode-menu {
-  border-radius: 8px;
-  box-shadow: 0 18px 42px rgb(0 0 0 / 0.32);
+  border-radius: var(--radius-md);
+  box-shadow: 0 18px 42px rgb(var(--shadow-color) / 0.32);
 }
 
 .model-menu-floating,
@@ -2277,20 +2277,20 @@ select:focus-visible {
 .model-menu-head span,
 .mode-menu-head span {
   color: rgb(var(--fg-muted)) !important;
-  font-size: 10px !important;
+  font-size: var(--font-size-2xs) !important;
   letter-spacing: 0.08em !important;
 }
 
 .model-menu-head em,
 .mode-menu-head em {
   color: rgb(var(--fg-subtle)) !important;
-  font-size: 11px !important;
+  font-size: var(--font-size-xs) !important;
 }
 
 .model-option,
 .mode-option {
   min-height: 48px;
-  border-radius: 7px !important;
+  border-radius: var(--radius-md) !important;
   padding: 8px 9px !important;
 }
 
@@ -2306,7 +2306,7 @@ select:focus-visible {
 .model-button-separator {
   flex: 0 0 auto;
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
 }
 
@@ -2321,7 +2321,7 @@ select:focus-visible {
   gap: 9px;
   margin: 1px 2px 9px;
   border: 1px solid rgb(var(--border));
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   padding: 9px;
   background: rgb(var(--bg-inset) / 0.7);
 }
@@ -2334,7 +2334,7 @@ select:focus-visible {
 
 .model-current-copy > small {
   color: rgb(var(--fg-subtle));
-  font-size: 9px;
+  font-size: var(--font-size-2xs);
   font-weight: 650;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -2351,18 +2351,18 @@ select:focus-visible {
 
 .model-current-copy > strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
 .model-current-copy > code {
   color: rgb(var(--fg-muted));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .model-current-copy > span {
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
 }
 
 .model-summary {
@@ -2370,7 +2370,7 @@ select:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
   margin: 0 2px 7px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px;
   background: rgb(var(--bg-inset) / 0.72);
 }
@@ -2389,7 +2389,7 @@ select:focus-visible {
 .model-menu-label {
   display: block;
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   line-height: 1.35;
 }
 
@@ -2399,7 +2399,7 @@ select:focus-visible {
   overflow: hidden;
   color: rgb(var(--fg));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 560;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -2417,17 +2417,17 @@ select:focus-visible {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 3px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 3px;
   background: rgb(var(--bg));
 }
 
 .reasoning-choice {
   min-width: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 3px;
   color: rgb(var(--fg-muted));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   line-height: 1.2;
   transition:
     background 120ms ease,
@@ -2474,11 +2474,11 @@ select:focus-visible {
 .model-option-meta em {
   max-width: 148px;
   overflow: hidden;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   padding: 1px 5px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-subtle));
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   font-style: normal;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -2498,17 +2498,17 @@ select:focus-visible {
 
 .model-option b,
 .mode-option b {
-  border-radius: 6px !important;
+  border-radius: var(--radius-sm) !important;
   padding: 1px 6px !important;
 }
 
 .model-menu-empty {
   margin: 0 2px 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 10px;
   background: rgb(var(--bg-inset) / 0.52);
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-align: center;
 }
 
@@ -2555,7 +2555,7 @@ select:focus-visible {
 .scheduler-meta-grid span,
 .test-row,
 .attach-chip {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border)) !important;
   background: rgb(var(--bg-elevated)) !important;
   box-shadow: none !important;
@@ -2566,12 +2566,12 @@ select:focus-visible {
 .team-stamp img,
 .team-tool-cloud img {
   image-rendering: auto !important;
-  border-radius: 7px !important;
+  border-radius: var(--radius-md) !important;
 }
 
 .model-form-section,
 .advanced-panel {
-  border-radius: 8px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border)) !important;
   background: rgb(var(--bg-inset) / 0.34) !important;
   box-shadow: none !important;
@@ -2587,13 +2587,13 @@ select:focus-visible {
 
 .model-form-section-head h4 {
   color: rgb(var(--fg)) !important;
-  font-size: 13px !important;
+  font-size: var(--font-size-md) !important;
   font-weight: 650 !important;
 }
 
 .model-form-section-head span {
   color: rgb(var(--fg-subtle)) !important;
-  font-size: 11px !important;
+  font-size: var(--font-size-xs) !important;
 }
 
 .model-form-grid {
@@ -2602,14 +2602,14 @@ select:focus-visible {
 
 .model-form-v2 .form-label {
   color: rgb(var(--fg-subtle)) !important;
-  font-size: 10px !important;
+  font-size: var(--font-size-2xs) !important;
   letter-spacing: 0.08em !important;
 }
 
 .model-form-v2 .form-input,
 .model-form-v2 .form-select,
 .advanced-grid textarea {
-  border-radius: 7px !important;
+  border-radius: var(--radius-md) !important;
   border-color: rgb(var(--border)) !important;
   background: rgb(var(--bg)) !important;
   box-shadow: none !important;
@@ -2622,7 +2622,7 @@ select:focus-visible {
 
 .advanced-toggle {
   font-family: inherit !important;
-  font-size: 13px !important;
+  font-size: var(--font-size-md) !important;
   font-weight: 650 !important;
 }
 
@@ -2639,7 +2639,7 @@ select:focus-visible {
 .scheduler-job-row strong,
 .entry-editor-head h3 {
   font-family: inherit !important;
-  font-size: 14px !important;
+  font-size: var(--font-size-lg) !important;
   font-weight: 650 !important;
   color: rgb(var(--fg)) !important;
 }
@@ -2650,21 +2650,21 @@ select:focus-visible {
 }
 
 .tool-button {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   min-height: 34px;
 }
 
 .icon-button {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .tokens-pill-group {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
 }
 
 .tokens-pill {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .tokens-pill[data-active='true'] {
@@ -2683,18 +2683,18 @@ select:focus-visible {
   width: 56px;
   height: 56px;
   border: 1px solid rgb(var(--border));
-  border-radius: 10px;
+  border-radius: var(--radius);
   color: rgb(var(--brand));
   background: rgb(var(--bg-elevated));
   font-size: 24px;
 }
 
 .toast {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border-color: rgb(var(--border));
   background: rgb(var(--fg));
   color: rgb(var(--bg));
-  box-shadow: 0 16px 42px rgb(0 0 0 / 0.28);
+  box-shadow: 0 16px 42px rgb(var(--shadow-color) / 0.28);
 }
 
 @media (max-width: 1024px) {
@@ -2797,7 +2797,7 @@ select:focus-visible {
   .active-ask-panel {
     width: 100%;
     margin: 0 0 8px;
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
   }
 
   .profile-onboarding-banner {
@@ -2813,7 +2813,7 @@ select:focus-visible {
   .active-plan-decision-panel {
     width: 100%;
     margin: 0 0 8px;
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
   }
 
   .goal-replacement-recovery {
@@ -2878,7 +2878,7 @@ select:focus-visible {
   .avatar {
     width: 26px;
     height: 26px;
-    border-radius: 7px;
+    border-radius: var(--radius-md);
   }
 
   .model-menu-floating {
@@ -2943,7 +2943,7 @@ select:focus-visible {
 
   .composer-palette {
     max-height: min(310px, 48vh);
-    border-radius: 10px;
+    border-radius: var(--radius);
     padding: 6px;
   }
 
@@ -3004,7 +3004,7 @@ select:focus-visible {
   width: 26px;
   height: 26px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: rgb(var(--fg-subtle));
   transition:
     background 140ms ease,
@@ -3033,10 +3033,10 @@ select:focus-visible {
   min-height: 32px;
   align-items: center;
   gap: 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 8px;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   text-align: left;
   transition:
@@ -3056,7 +3056,7 @@ select:focus-visible {
   border-radius: 999px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: normal;
   text-align: center;
 }
@@ -3102,7 +3102,7 @@ select:focus-visible {
   align-items: center;
   gap: 4px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
@@ -3129,10 +3129,10 @@ select:focus-visible {
   min-width: 176px;
   gap: 2px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   background: rgb(var(--bg-inset));
-  box-shadow: 0 14px 36px rgb(0 0 0 / 0.28);
+  box-shadow: 0 14px 36px rgb(var(--shadow-color) / 0.28);
 }
 
 .section-popover {
@@ -3148,10 +3148,10 @@ select:focus-visible {
   min-height: 30px;
   align-items: center;
   gap: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 8px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-align: left;
 }
 
@@ -3176,7 +3176,7 @@ select:focus-visible {
   align-items: center;
   gap: 8px;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   text-align: left;
 }
@@ -3192,7 +3192,7 @@ select:focus-visible {
   border-radius: 999px;
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-align: center;
 }
 
@@ -3212,7 +3212,7 @@ select:focus-visible {
   width: 18px;
   height: 18px;
   place-items: center;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   color: rgb(var(--fg-subtle));
 }
 
@@ -3242,16 +3242,16 @@ select:focus-visible {
   display: grid;
   place-items: start center;
   padding-top: min(28vh, 220px);
-  background: rgb(0 0 0 / 0.2);
+  background: rgb(var(--shadow-color) / 0.2);
 }
 
 .sidebar-search-panel {
   width: min(520px, calc(100vw - 32px));
   border: 1px solid rgb(var(--border-strong));
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 8px;
   background: rgb(var(--bg-inset));
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.38);
+  box-shadow: 0 24px 80px rgb(var(--shadow-color) / 0.38);
 }
 
 .sidebar-search-input-wrap {
@@ -3267,13 +3267,13 @@ select:focus-visible {
   border: 0;
   background: transparent;
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
 }
 
 .search-section-label {
   padding: 8px 8px 5px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .search-result-row {
@@ -3282,7 +3282,7 @@ select:focus-visible {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 9px;
   color: rgb(var(--fg-muted));
   text-align: left;
@@ -3298,7 +3298,7 @@ select:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
@@ -3309,7 +3309,7 @@ select:focus-visible {
   gap: 4px;
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3324,17 +3324,17 @@ select:focus-visible {
   display: inline-flex;
   gap: 2px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px;
   background: rgb(var(--bg-elevated));
 }
 
 .segmented-control button {
   min-height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   color: rgb(var(--fg-muted));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .segmented-control button.active {
@@ -3363,10 +3363,10 @@ select:focus-visible {
   width: 100%;
   min-height: 32px;
   align-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 8px;
   color: rgb(var(--fg-subtle));
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .settings-back:hover {
@@ -3378,16 +3378,16 @@ select:focus-visible {
   margin: 10px 0 14px;
   height: 30px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .settings-group-label {
   margin: 16px 8px 6px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
 }
 
@@ -3397,10 +3397,10 @@ select:focus-visible {
   min-height: 32px;
   align-items: center;
   gap: 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 0 9px;
   color: rgb(var(--fg-muted));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   text-align: left;
 }
@@ -3458,7 +3458,7 @@ select:focus-visible {
   align-items: center;
   gap: 10px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg-muted));
@@ -3474,7 +3474,7 @@ select:focus-visible {
 .settings-row strong {
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3483,7 +3483,7 @@ select:focus-visible {
 .settings-row span {
   overflow: hidden;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3492,11 +3492,11 @@ select:focus-visible {
   max-width: 280px;
   overflow: hidden;
   border: 1px solid rgb(var(--border));
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 7px;
   color: rgb(var(--fg-muted));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3526,13 +3526,13 @@ select:focus-visible {
 
 .diagnostics-group-head strong {
   color: rgb(var(--fg));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
 }
 
 .diagnostics-group-head span {
   color: rgb(var(--fg-subtle));
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .diagnostics-group-rows {
@@ -3571,7 +3571,7 @@ select:focus-visible {
   gap: 8px;
   min-height: 112px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg-muted));
@@ -3581,14 +3581,14 @@ select:focus-visible {
 .settings-info-card strong {
   overflow: hidden;
   color: rgb(var(--fg));
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .settings-info-card span {
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .settings-info-card.selectable.active {
@@ -3607,7 +3607,7 @@ select:focus-visible {
   justify-content: space-between;
   gap: 12px;
   border: 1px solid rgb(var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   background: rgb(var(--bg-elevated));
 }
@@ -3620,7 +3620,7 @@ select:focus-visible {
 .archived-session-row span {
   margin-top: 2px;
   color: rgb(var(--fg-subtle));
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .archived-session-actions {

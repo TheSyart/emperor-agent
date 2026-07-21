@@ -202,7 +202,7 @@
   }
 
   .avatar {
-    @apply size-12 rounded-[1rem];
+    @apply size-12 rounded-[var(--radius-lg)];
   }
 
   .activity-summary,

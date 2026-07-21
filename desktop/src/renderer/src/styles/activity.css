@@ -246,7 +246,7 @@
 
 .media-preview-modal {
   @apply fixed inset-0 z-50 grid place-items-center p-5;
-  background: rgb(0 0 0 / 0.72);
+  background: rgb(var(--shadow-color) / 0.72);
 }
 
 .media-preview-modal img {
@@ -1380,7 +1380,7 @@
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
   padding: 0 7px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
   vertical-align: baseline;
