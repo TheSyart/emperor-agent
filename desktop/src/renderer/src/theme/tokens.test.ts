@@ -78,12 +78,15 @@ describe('theme tokens', () => {
     '--tone-blue',
   ]
 
-  it.each(['dark.css', 'light.css'])('%s defines the full token ladder', (f) => {
-    const keys = tokenKeys(readThemeFile(f))
-    for (const required of REQUIRED_KEYS) {
-      expect(keys).toContain(required)
-    }
-  })
+  it.each(['dark.css', 'light.css'])(
+    '%s defines the full token ladder',
+    (f) => {
+      const keys = tokenKeys(readThemeFile(f))
+      for (const required of REQUIRED_KEYS) {
+        expect(keys).toContain(required)
+      }
+    },
+  )
 
   it.each(['dark.css', 'light.css'])(
     '%s stores RGB colors as space-separated triplets',
