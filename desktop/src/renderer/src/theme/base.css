@@ -1,0 +1,22 @@
+/* ── Token-agnostic global base ─────────────────────────────────────────────
+   与主题无关的全局基础样式(盒模型、body)。表单控件默认样式在 styles.css 的
+   @layer base 中;主题 token 定义见 theme/dark.css 与 theme/light.css。 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  font-family: theme('fontFamily.body');
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

@@ -2,74 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Codex-style design tokens ──────────────────────────────────────────────
-   Semantic tokens drive the new neutral UI. The legacy paper/ink/seal aliases
-   are remapped onto the neutral palette so existing component CSS keeps working
-   while it is migrated to semantic tokens. Dark is the default theme. */
-:root,
-:root[data-theme='dark'] {
-  --bg: 13 13 15;
-  --bg-elevated: 24 24 27;
-  --bg-inset: 18 18 21;
-  --fg: 237 237 240;
-  --fg-muted: 161 161 170;
-  --fg-subtle: 113 113 122;
-  --border: 39 39 45;
-  --border-strong: 63 63 70;
-  --accent: 110 168 254;
-  --accent-fg: 9 11 18;
-  --danger: 248 113 113;
-  --warn: 234 179 8;
-  --ok: 52 211 153;
-  --radius: 10px;
-  --radius-sm: 6px;
-
-  /* legacy aliases → neutral palette */
-  --paper: var(--bg);
-  --paper-2: var(--bg-inset);
-  --ink: var(--fg);
-  --muted: var(--fg-muted);
-  --line: var(--border);
-  --seal: var(--accent);
-  --jade: var(--ok);
-  --amber: var(--warn);
-}
-
-:root[data-theme='light'] {
-  --bg: 255 255 255;
-  --bg-elevated: 250 250 250;
-  --bg-inset: 244 244 245;
-  --fg: 24 24 27;
-  --fg-muted: 82 82 91;
-  --fg-subtle: 113 113 122;
-  --border: 228 228 231;
-  --border-strong: 212 212 216;
-  --accent: 37 99 235;
-  --accent-fg: 255 255 255;
-  --danger: 220 38 38;
-  --warn: 202 138 4;
-  --ok: 22 163 74;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#app {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-  overflow-x: hidden;
-  background: rgb(var(--bg));
-  color: rgb(var(--fg));
-  font-family: theme('fontFamily.body');
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
+/* 样式入口:主题 token 表见 theme/dark.css、theme/light.css;全局 base 见
+   theme/base.css;按表面拆分的组件样式见 styles/ 目录,均由 main.ts 引入。
+   @layer base 必须留在本文件——Tailwind 按文件处理,它依赖同文件的
+   @tailwind base 指令。 */
 
 @layer base {
   button,
@@ -114,5 +50,3 @@ body {
     @apply resize-none leading-6;
   }
 }
-
-/* Component styles are split by surface under webui/src/styles/. */

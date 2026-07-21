@@ -1,0 +1,31 @@
+/* ── Dark theme token table (default) ───────────────────────────────────────
+   主题 token 表:key 集合必须与 light.css 完全一致(tokens.test.ts 强制)。
+   语义 token 驱动整个中性 UI;旧别名(deprecated)仅保留兼容,新代码禁止消费。 */
+:root,
+:root[data-theme='dark'] {
+  --bg: 13 13 15;
+  --bg-elevated: 24 24 27;
+  --bg-inset: 18 18 21;
+  --fg: 237 237 240;
+  --fg-muted: 161 161 170;
+  --fg-subtle: 113 113 122;
+  --border: 39 39 45;
+  --border-strong: 63 63 70;
+  --accent: 110 168 254;
+  --accent-fg: 9 11 18;
+  --danger: 248 113 113;
+  --warn: 234 179 8;
+  --ok: 52 211 153;
+  --radius: 10px;
+  --radius-sm: 6px;
+
+  /* deprecated: 旧别名 → 中性调色板映射,仅供兼容,新代码禁止消费(审计测试强制) */
+  --paper: var(--bg);
+  --paper-2: var(--bg-inset);
+  --ink: var(--fg);
+  --muted: var(--fg-muted);
+  --line: var(--border);
+  --seal: var(--accent);
+  --jade: var(--ok);
+  --amber: var(--warn);
+}

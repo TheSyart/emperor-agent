@@ -1,0 +1,30 @@
+/* ── Light theme token table ────────────────────────────────────────────────
+   主题 token 表:key 集合必须与 dark.css 完全一致(tokens.test.ts 强制)。
+   亮色不是暗色反色:阴影透明度、边框强度、accent 对比度按本主题单独调。 */
+:root[data-theme='light'] {
+  --bg: 255 255 255;
+  --bg-elevated: 250 250 250;
+  --bg-inset: 244 244 245;
+  --fg: 24 24 27;
+  --fg-muted: 82 82 91;
+  --fg-subtle: 113 113 122;
+  --border: 228 228 231;
+  --border-strong: 212 212 216;
+  --accent: 37 99 235;
+  --accent-fg: 255 255 255;
+  --danger: 220 38 38;
+  --warn: 202 138 4;
+  --ok: 22 163 74;
+  --radius: 10px;
+  --radius-sm: 6px;
+
+  /* deprecated: 旧别名 → 中性调色板映射,仅供兼容,新代码禁止消费(审计测试强制) */
+  --paper: var(--bg);
+  --paper-2: var(--bg-inset);
+  --ink: var(--fg);
+  --muted: var(--fg-muted);
+  --line: var(--border);
+  --seal: var(--accent);
+  --jade: var(--ok);
+  --amber: var(--warn);
+}
