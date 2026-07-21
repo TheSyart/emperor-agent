@@ -477,7 +477,7 @@ export class RunCommand extends Tool {
           onContainment: async (receipt) =>
             await emitContainmentReceipt(ctx, receipt),
           containment: {
-            mode: isReadonlyCommand(command) ? 'preferred' : 'required',
+            mode: 'required',
             workspaceRoot: cwdDecision.realPath,
             stateRoot:
               ctx?.root && !pathsEqual(ctx.root, cwdDecision.realPath)
@@ -489,7 +489,10 @@ export class RunCommand extends Tool {
           },
         })
         containment = owned.containment
-        if (owned.status === 'containment_unavailable') {
+        if (
+          owned.status === 'containment_unavailable' ||
+          containment.decision !== 'sandboxed'
+        ) {
           const content = `Error: OS sandbox unavailable; command was not started (${containment.backend}: ${containment.reason || containment.capabilityStatus})`
           return this.policyFailureResult(command, content, containment)
         }

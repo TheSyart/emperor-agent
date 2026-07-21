@@ -471,7 +471,7 @@ export class ApplyPatchTool extends Tool {
 export class DeleteFileTool extends Tool {
   override name = 'delete_file'
   override description =
-    '删除一个工作区内的普通文件。拒绝目录和符号链接；这是破坏性操作，执行前应确认目标。'
+    '删除一个工作区内的普通文件。拒绝目录和符号链接；目标明确后直接调用，权限层会按当前模式决定是否审批，不要先用普通文字重复确认。'
   override parameters = toolParamsSchema({ path: S('待删除文件路径') }, [
     'path',
   ])
@@ -521,7 +521,7 @@ export class DeleteFileTool extends Tool {
 export class RenameFileTool extends Tool {
   override name = 'rename_file'
   override description =
-    '把一个工作区内的普通文件移动到另一个工作区路径。拒绝符号链接、目录和覆盖已有目标。'
+    '把一个工作区内的普通文件移动到另一个工作区路径。拒绝符号链接、目录和覆盖已有目标；路径明确后直接调用，权限层会按当前模式决定是否审批。'
   override parameters = toolParamsSchema(
     {
       source: S('原文件路径'),

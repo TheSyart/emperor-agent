@@ -1,18 +1,19 @@
 /**
  * 控制态模型 (MIG-CTRL-001)。对齐 Python `agent/control/models.py`。
  * Interaction/Question/QuestionOption/ControlState + from_dict/to_dict 校验逐字保真。
- * 磁盘兼容: control state JSON schema (version/mode/previous_mode/pending/last_interaction) 不变。
+ * Control v2 会由 ControlStore.load() 将 v1 的 accept_edits/auto 以及 Plan
+ * previous_mode 原子迁移为 smart_auto/full_access。
  */
 import { nowTs } from '../util/time'
 import { randomUUID } from 'node:crypto'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/
 
 export enum ControlMode {
   ASK_BEFORE_EDIT = 'ask_before_edit',
-  ACCEPT_EDITS = 'accept_edits',
-  AUTO = 'auto',
+  SMART_AUTO = 'smart_auto',
+  FULL_ACCESS = 'full_access',
   PLAN = 'plan',
 }
 
@@ -52,11 +53,13 @@ export function safeId(value: string, label = 'id'): string {
 // ── QuestionOption ──
 
 export interface QuestionOption {
+  id?: string
   label: string
   description: string
 }
 
 export interface QuestionOptionPayload {
+  id?: string
   label: string
   description: string
 }
@@ -66,7 +69,9 @@ export function questionOptionFromDict(
 ): QuestionOption {
   const label = String(raw.label ?? '').trim()
   if (!label) throw new Error('option label is required')
+  const idRaw = String(raw.id ?? '').trim()
   return {
+    ...(idRaw ? { id: safeId(idRaw, 'option id') } : {}),
     label: label.slice(0, 80),
     description: String(raw.description ?? '')
       .trim()
@@ -75,7 +80,11 @@ export function questionOptionFromDict(
 }
 
 export function questionOptionToDict(o: QuestionOption): QuestionOptionPayload {
-  return { label: o.label, description: o.description }
+  return {
+    ...(o.id ? { id: o.id } : {}),
+    label: o.label,
+    description: o.description,
+  }
 }
 
 // ── Question ──
@@ -173,6 +182,7 @@ export interface InteractionPayload {
 }
 
 export function makeAsk(opts: {
+  id?: string
   questions: Question[]
   context?: string
   parentCallId?: string | null
@@ -181,7 +191,9 @@ export function makeAsk(opts: {
   if (opts.questions.length < 1 || opts.questions.length > 3)
     throw new Error('ask_user requires 1-3 questions')
   return {
-    id: newInteractionId(InteractionKind.ASK),
+    id: opts.id
+      ? safeId(opts.id, 'interaction id')
+      : newInteractionId(InteractionKind.ASK),
     kind: InteractionKind.ASK,
     status: InteractionStatus.WAITING,
     createdAt: nowTs(),
@@ -329,8 +341,8 @@ export interface ControlStatePayload {
   mode: string
   previous_mode:
     | ControlMode.ASK_BEFORE_EDIT
-    | ControlMode.ACCEPT_EDITS
-    | ControlMode.AUTO
+    | ControlMode.SMART_AUTO
+    | ControlMode.FULL_ACCESS
     | null
   pending: InteractionPayload | null
   last_interaction: InteractionPayload | null
@@ -361,20 +373,22 @@ function parseInteractionSafe(value: unknown): Interaction | null {
 export function controlStateFromDict(
   raw: Record<string, unknown>,
 ): ControlState {
+  const sourceVersion = Number(raw.version ?? 1) || 1
   let mode = String(raw.mode ?? ControlMode.ASK_BEFORE_EDIT)
-  if (mode === 'normal') mode = ControlMode.ASK_BEFORE_EDIT
+  mode = migratePermissionMode(mode, sourceVersion)
   if (!CONTROL_MODES.has(mode)) mode = ControlMode.ASK_BEFORE_EDIT
   let previousMode: string | null =
     String(raw.previous_mode ?? raw.previousMode ?? '') || null
-  if (previousMode === 'normal') previousMode = ControlMode.ASK_BEFORE_EDIT
+  if (previousMode)
+    previousMode = migratePermissionMode(previousMode, sourceVersion)
   if (
     previousMode !== ControlMode.ASK_BEFORE_EDIT &&
-    previousMode !== ControlMode.ACCEPT_EDITS &&
-    previousMode !== ControlMode.AUTO
+    previousMode !== ControlMode.SMART_AUTO &&
+    previousMode !== ControlMode.FULL_ACCESS
   )
     previousMode = null
   return {
-    version: Number(raw.version ?? SCHEMA_VERSION) || SCHEMA_VERSION,
+    version: SCHEMA_VERSION,
     mode,
     previousMode,
     pending: parseInteractionSafe(raw.pending),
@@ -413,8 +427,23 @@ function previousModePayload(
   value: string | null,
 ): ControlStatePayload['previous_mode'] {
   return value === ControlMode.ASK_BEFORE_EDIT ||
-    value === ControlMode.ACCEPT_EDITS ||
-    value === ControlMode.AUTO
+    value === ControlMode.SMART_AUTO ||
+    value === ControlMode.FULL_ACCESS
     ? value
     : null
+}
+
+function migratePermissionMode(value: string, sourceVersion: number): string {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+  if (!normalized || normalized === 'normal') return ControlMode.ASK_BEFORE_EDIT
+  if (normalized === 'accept_edits') return ControlMode.SMART_AUTO
+  if (normalized === 'auto') return ControlMode.FULL_ACCESS
+  if (sourceVersion < SCHEMA_VERSION) {
+    if (normalized === 'accept-edits' || normalized === 'accept edits')
+      return ControlMode.SMART_AUTO
+    if (normalized === 'automatic') return ControlMode.FULL_ACCESS
+  }
+  return normalized
 }

@@ -225,14 +225,7 @@ function collectSignals(text: string): string[] {
 }
 
 function requiresPlan(signals: string[]): boolean {
-  const hard = new Set([
-    'architecture',
-    'deployment',
-    'destructive',
-    'security',
-    'migration',
-    'unclear_acceptance',
-  ])
+  const hard = new Set(['architecture', 'migration', 'unclear_acceptance'])
   return (
     signals.some((s) => hard.has(s)) ||
     (signals.includes('refactor') &&

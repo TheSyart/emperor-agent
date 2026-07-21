@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(join(__dirname, 'ChatView.vue'), 'utf8')
 
 describe('ChatView Composer lifecycle integration', () => {
-  it('keeps the Goal bar visible above Ask or Plan and wires replacement through App context', () => {
+  it('keeps the Goal bar visible and renders Ask or Plan inside the timeline', () => {
     expect(source).toContain('<GoalStatusBar')
-    expect(source.indexOf('<GoalStatusBar')).toBeLessThan(
-      source.indexOf('<ActiveAskPanel'),
+    expect(source).not.toContain('<ActiveAskPanel')
+    expect(source).not.toContain('<ActivePlanDecisionPanel')
+    expect(source).not.toContain('<PendingBar')
+    expect(source).toContain(
+      ':interaction-blocked="Boolean(pendingInteraction)"',
     )
     expect(source).toContain('@edit="replaceGoal"')
     expect(source).toContain('ctx.replaceGoal')

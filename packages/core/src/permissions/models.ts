@@ -12,8 +12,8 @@ import type {
 
 export enum PermissionMode {
   ASK_BEFORE_EDIT = 'ask_before_edit',
-  ACCEPT_EDITS = 'accept_edits',
-  AUTO = 'auto',
+  SMART_AUTO = 'smart_auto',
+  FULL_ACCESS = 'full_access',
   PLAN = 'plan',
 }
 

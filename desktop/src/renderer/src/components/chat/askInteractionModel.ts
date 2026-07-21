@@ -5,6 +5,7 @@ import type {
 } from '../../types'
 
 export interface AskAnswerDraft {
+  optionId?: string
   choice?: string
   freeform?: string
 }
@@ -81,14 +82,22 @@ export function askSubmitLabel(index: number, total: number): string {
 export function toPlainAskAnswers(
   questions: ControlQuestion[] = [],
   drafts: AskAnswerDrafts = {},
-): Record<string, { choice: string; freeform: string }> {
-  const out: Record<string, { choice: string; freeform: string }> = {}
+): Record<string, { option_id?: string; choice: string; freeform: string }> {
+  const out: Record<
+    string,
+    { option_id?: string; choice: string; freeform: string }
+  > = {}
   for (const question of questions) {
     const draft = drafts[question.id] || {}
     const choice = String(draft.choice || '').trim()
     const freeform = String(draft.freeform || '').trim()
     if (!choice && !freeform) continue
-    out[question.id] = { choice, freeform }
+    const optionId = String(draft.optionId || '').trim()
+    out[question.id] = {
+      ...(optionId ? { option_id: optionId } : {}),
+      choice,
+      freeform,
+    }
   }
   return out
 }
@@ -110,13 +119,39 @@ export function askHistoryPresentation(
   const count = questions.length
   const status = String(interaction.status || '')
   const answers = answerSummaries(questions, interaction.answers || {})
+  const permissionCount = permissionOperationCount(interaction)
+
+  if (permissionCount > 0) {
+    return {
+      title:
+        status === 'waiting'
+          ? `${permissionCount} 项操作需要权限确认`
+          : status === 'cancelled'
+            ? '权限确认已取消'
+            : `已处理 ${permissionCount} 项操作的权限决定`,
+      status:
+        status === 'waiting'
+          ? '等待决定'
+          : status === 'cancelled'
+            ? '已取消'
+            : '已处理',
+      tone:
+        status === 'waiting'
+          ? 'waiting'
+          : status === 'cancelled'
+            ? 'cancelled'
+            : 'answered',
+      detail: safeInteractionDetail(interaction),
+      answers: status === 'answered' ? answers : [],
+    }
+  }
 
   if (status === 'waiting') {
     return {
       title: `正在询问 ${count || 1} 个问题`,
       status: '等待回答',
       tone: 'waiting',
-      detail: interaction.context || questions[0]?.question || '',
+      detail: safeInteractionDetail(interaction, questions[0]?.question || ''),
       answers: [],
     }
   }
@@ -125,7 +160,7 @@ export function askHistoryPresentation(
       title: `已回答 ${answers.length || count || 1} 个问题`,
       status: '已回答',
       tone: 'answered',
-      detail: interaction.context || '',
+      detail: safeInteractionDetail(interaction),
       answers,
     }
   }
@@ -134,7 +169,7 @@ export function askHistoryPresentation(
       title: '澄清问题已取消',
       status: '已取消',
       tone: 'cancelled',
-      detail: interaction.context || '',
+      detail: safeInteractionDetail(interaction),
       answers: [],
     }
   }
@@ -143,9 +178,63 @@ export function askHistoryPresentation(
     title: '澄清问题',
     status: status || '未知',
     tone: 'default',
-    detail: interaction.context || '',
+    detail: safeInteractionDetail(interaction),
     answers,
   }
+}
+
+function permissionOperationCount(interaction: ControlInteraction): number {
+  if (interaction.meta?.interaction_type !== 'permission') return 0
+  const permission = interaction.meta.permission
+  if (!permission || typeof permission !== 'object') return 1
+  const count = Math.trunc(
+    Number((permission as Record<string, unknown>).operation_count) || 0,
+  )
+  return Math.max(1, Math.min(64, count))
+}
+
+function safeInteractionDetail(
+  interaction: ControlInteraction,
+  fallback = '',
+): string {
+  const context = String(interaction.context || '')
+  if (context.trimStart().startsWith('Ask Guard'))
+    return fallback || '需要确认会影响实施方案的关键信息。'
+  const permission = interaction.meta?.permission
+  const isPermission =
+    interaction.meta?.interaction_type === 'permission' ||
+    context.trimStart().startsWith('Permission Guard')
+  if (!isPermission) return context || fallback
+  if (!permission || typeof permission !== 'object')
+    return '该操作需要你的权限确认。'
+  const data = permission as Record<string, unknown>
+  if (Number(data.version) === 2 && Array.isArray(data.operations)) {
+    const operations = data.operations
+      .filter((item) => item && typeof item === 'object')
+      .slice(0, 64)
+      .map((item, index) => {
+        const operation = item as Record<string, unknown>
+        const tool = String(operation.tool_name || '工具操作')
+        const risk = String(operation.risk || 'unknown')
+        const reason = String(operation.reason || '').trim()
+        const summary = String(operation.summary || '').trim()
+        return [
+          `${index + 1}. ${tool} · 风险 ${risk}`,
+          reason,
+          summary ? `摘要：${summary}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      })
+    return [`${operations.length} 项操作需要权限确认`, ...operations].join('\n')
+  }
+  const tool = String(data.tool_name || '工具操作')
+  const risk = String(data.risk || 'unknown')
+  const reason = String(data.reason || '').trim()
+  const command = String(data.command_summary || '').trim()
+  return [`${tool} · 风险 ${risk}`, reason, command ? `摘要：${command}` : '']
+    .filter(Boolean)
+    .join('\n')
 }
 
 function answerSummaries(

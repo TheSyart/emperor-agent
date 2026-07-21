@@ -86,6 +86,8 @@ const runtime = useRuntime({
 })
 const {
   messages,
+  queuedPrompts,
+  pendingInteractionsBySession,
   busy,
   status,
   switchSession,
@@ -99,6 +101,7 @@ const {
   dispose: disposeRuntime,
   connectSocket,
   sendMessage,
+  manageQueuedPrompt,
   sendInteractionAnswer,
   sendPlanComment,
   approvePlan,
@@ -379,6 +382,8 @@ provideAppContext({
   configContent,
   mcpContent,
   messages,
+  queuedPrompts,
+  pendingInteractionsBySession,
   busy,
   status,
   pending,
@@ -419,6 +424,7 @@ provideAppContext({
   startGoalWithLifecycle,
   dismissLifecycle,
   sendMessage,
+  manageQueuedPrompt,
   sendInteractionAnswer,
   sendPlanComment,
   approvePlan,

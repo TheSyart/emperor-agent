@@ -23,7 +23,9 @@
 
 只读、可并发和是否需要确认由 Core 决定。工具卡显示的是执行投影，不能替代实际 store、command receipt 或 Goal evidence。
 
-`read_file`、`edit_file`、`apply_patch` 和 PDF 文本 sidecar 共用 8 MiB 单文件读取上限，超限会在完整载入或写回前拒绝，并响应 turn 取消。`edit_file` 拒绝空 needle；精确和 trim 匹配失败后可按空白差异定位真实源码跨度，多处命中仍要求更多上下文或 `replace_all=true`，实际内容不变时不会写盘或生成修改事件。`apply_patch` 是单文件精确文本 patch，不做模糊匹配；`delete_file` 只删除普通文件，`rename_file` 不覆盖既有目标，两者都拒绝目录和符号链接。删除与重命名即使在 `accept_edits` 下也需要显式批准；rename 的来源和目标会同时进入权限 path rule 与 workspace 检查。可选文件检查点启用后，这五种写工具会在执行边界保存 before/after。
+`read_file`、`edit_file`、`apply_patch` 和 PDF 文本 sidecar 共用 8 MiB 单文件读取上限，超限会在完整载入或写回前拒绝，并响应 turn 取消。`edit_file` 拒绝空 needle；精确和 trim 匹配失败后可按空白差异定位真实源码跨度，多处命中仍要求更多上下文或 `replace_all=true`，实际内容不变时不会写盘或生成修改事件。`apply_patch` 是单文件精确文本 patch，不做模糊匹配；`delete_file` 只删除普通文件，`rename_file` 不覆盖既有目标，两者都拒绝目录和符号链接。删除与重命名在 `ask_before_edit` 和 `smart_auto` 下需要显式批准；同一次模型回复中的多个精确目标只出现一张权限卡，卡片列出全部操作，批准只对该批次有效。`full_access` 直接执行，但明确 deny、Plan 只读和 workspace containment 仍生效。rename 的来源和目标会同时进入权限 path rule 与 workspace 检查。可选文件检查点启用后，这五种写工具会在执行边界保存 before/after。
+
+`ask_user` 只用于目标或范围不明确。例如“删除项目内文件”可以先询问具体删除哪些；用户回答“全部删除”后，Agent 应直接调用删除工具，不能再用普通对话要求确认。是否弹出权限卡由当前权限模式和 Core 权限层决定。
 
 ## Skills
 

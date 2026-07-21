@@ -113,6 +113,17 @@ export function planRuntimeUpdate(
   return { event: 'plan_runtime_update', plan }
 }
 
+export function planStepUpdate(opts: {
+  planId: string
+  step: Record<string, unknown>
+}): Record<string, unknown> {
+  return {
+    event: 'plan_step_update',
+    plan_id: opts.planId,
+    step: opts.step,
+  }
+}
+
 export function toolRunQueued(opts: {
   id: string
   name: string

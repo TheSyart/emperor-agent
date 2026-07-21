@@ -3,6 +3,7 @@ import type { ControlInteraction, SessionInfo } from '../../types'
 import {
   activeBottomControlPanel,
   composerBlockedByControl,
+  pendingInteractionForSession,
 } from './bottomControlPanel'
 
 function interaction(
@@ -100,6 +101,25 @@ describe('bottom control panel model', () => {
 
     expect(activeBottomControlPanel(otherPending, active)).toBeNull()
     expect(composerBlockedByControl(otherPending, active)).toBe(false)
+  })
+
+  it('uses explicit interaction ownership without requiring the legacy session tag', () => {
+    const pending = interaction({
+      meta: { control_session_id: 'session-1' },
+    })
+
+    expect(
+      pendingInteractionForSession(
+        { mode: 'smart_auto', pending },
+        session({ control_pending: null }),
+      ),
+    ).toBe(pending)
+    expect(
+      pendingInteractionForSession(
+        { mode: 'smart_auto', pending },
+        session({ id: 'session-2', control_pending: null }),
+      ),
+    ).toBeNull()
   })
 
   it('does not block the active composer when the session tag references a different interaction', () => {

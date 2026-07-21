@@ -26,7 +26,7 @@ function bootStub(): BootstrapPayload {
         concurrency_safe: true,
       },
     ],
-    control: { mode: 'auto', pending: null },
+    control: { mode: 'full_access', pending: null },
     memory: { tokenTotals: { total: 1234, calls: 5 } },
     unarchivedHistory: [{ role: 'user', content: 'x' }],
     modelConfig: {
@@ -52,7 +52,7 @@ describe('statusRender pure formatters (W6)', () => {
     })
     expect(text).toContain('## 当前状态')
     expect(text).toContain('桌面 IPC 在线')
-    expect(text).toContain('`auto`')
+    expect(text).toContain('`full_access`')
     expect(text).toContain('1,234')
   })
 
@@ -61,10 +61,10 @@ describe('statusRender pure formatters (W6)', () => {
     expect(renderModelInfo(boot)).toContain('`main-model`')
     expect(renderTokenInfo(boot)).toContain('Token 消耗')
     expect(renderMemoryInfo(boot)).toContain('记忆状态')
-    expect(renderModeStatus(boot.control)).toContain('`auto`')
+    expect(renderModeStatus(boot.control)).toContain('`full_access`')
     expect(
-      renderModeStatus({ mode: 'plan', previous_mode: 'accept_edits' }),
-    ).toContain('当前权限：`accept_edits`')
+      renderModeStatus({ mode: 'plan', previous_mode: 'smart_auto' }),
+    ).toContain('当前权限：`smart_auto`')
     expect(renderCommandHelp()).toContain('斜杠命令')
     expect(
       renderCompactResult({

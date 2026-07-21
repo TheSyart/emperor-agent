@@ -2009,6 +2009,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       project: project as unknown as Record<string, unknown>,
     })
     loop.activateSession(buildSession.id)
+    loop.controlManager.setMode('smart_auto')
 
     await loop.runUserTurn('读取 package.json', {
       turnId: 'turn_1',
@@ -2081,6 +2082,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       fileCheckpointsEnabled: true,
       softGitRewindMode: 'eval',
     })
+    loop.controlManager.setPermissionMode('smart_auto')
     const project = loop.projectStore.resolve(projectRoot)
     const buildSession = loop.sessionStore.create('Checkpoint build', {
       mode: 'build',
@@ -2541,8 +2543,15 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       kind: 'ask',
       meta: {
         permission: {
-          rule: 'ask.run_command.project_code',
-          risk: 'high',
+          version: 2,
+          operation_count: 1,
+          operations: [
+            {
+              tool_name: 'run_command',
+              risk: 'high',
+              summary: 'npm test',
+            },
+          ],
         },
       },
     })

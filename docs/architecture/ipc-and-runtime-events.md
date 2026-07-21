@@ -64,7 +64,9 @@ Renderer 的 session、task 和 runtime replay 已使用小型 domain action red
 
 工具调度事件遵守相同的终态不变量：每个 `tool_run_queued` 必须恰有一个 completed / failed / cancelled 终态。流式响应删除调用、父 turn 取消或执行 Promise 忽略 abort 时，Core 仍先写 cancelled tombstone；迟到结果被隔离，不得制造第二终态。
 
-忙碌 prompt 使用 `prompt_queued`、`prompt_dequeued`、`prompt_interjected`、`prompt_cancelled` 投影 durable queue 状态；correlation 使用 `prompt_id`、`client_message_id`、prompt `turn_id` 和可选 owner `target_turn_id`。`prompt_queued` 可以带用户已提交的有界显示文本，以便 live event 丢失后从 replay 重建占位消息。旧 assistant partial 由 `message_tombstoned` 结束，renderer 必须关闭其 streaming/tool 状态并为同一 owner turn 创建新的 assistant 投影，不能把替代回答合并进旧 partial。重复 replay 仍按 sequence 幂等。
+忙碌 prompt 使用 `prompt_queued`、`prompt_dequeued`、`prompt_interjected`、`prompt_cancelled` 投影 durable queue 状态；correlation 使用 `prompt_id`、`client_message_id`、prompt `turn_id` 和可选 owner `target_turn_id`。Renderer 还通过 `chat.listQueuedPrompts` 恢复尚未开始的项，并以 `chat.manageQueuedPrompt` 执行 `cancel` 或 `interject`。queued→interject 的持久事实由内部 message graph 的单条 `prompt_replaced` 事件提交；它不是 renderer runtime event。启动对账会把未进入持久 `user_message` 的 running/interjected prompt 重新排队，已有用户历史的记录只收敛状态而不重放。`prompt_queued` 只更新队列托盘，不创建时间线用户消息；只有权威 `user_message` 才进入聊天，从而避免 live/replay 重复。旧 assistant partial 由 `message_tombstoned` 结束，renderer 必须关闭其 streaming/tool 状态并为同一 owner turn 创建新的 assistant 投影，不能把替代回答合并进旧 partial。
+
+Ask/Plan 交互以完整 `ControlInteraction` 为 renderer 事实源，`meta.control_session_id` 决定 owner session；历史缺少该字段时才回退 session summary tag。等待交互若未出现在 replay 消息流，会按 interaction ID 补入并去重。PlanCard 只投影提案和审批；`plan_approved`、`plan_step_update`、`plan_verification_start/done` 与终态 `plan_runtime_update` 转为卡片之后的 `plan_activity` 时间线节点，不回写旧卡片。
 
 ## 三类数据不要混淆
 

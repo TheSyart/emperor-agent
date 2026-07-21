@@ -30,6 +30,10 @@ function providerLabel(entry: ModelEntry): string {
 function providerIcon(entry: ModelEntry): string | null {
   return providerIconAsset(providerOption(entry)?.iconId || entry.provider)
 }
+
+function effectiveLabel(entry: ModelEntry): string {
+  return entry.effectiveDisplayName || entry.displayName || entry.modelId
+}
 </script>
 
 <template>
@@ -58,7 +62,7 @@ function providerIcon(entry: ModelEntry): string | null {
           </div>
           <div class="model-card-copy">
             <div class="model-card-title-row">
-              <strong>{{ entry.displayName || entry.modelId }}</strong>
+              <strong>{{ effectiveLabel(entry) }}</strong>
             </div>
             <code>{{ entry.modelId }}</code>
             <div class="model-card-meta">
@@ -75,7 +79,7 @@ function providerIcon(entry: ModelEntry): string | null {
           <button
             type="button"
             class="card-action icon"
-            :aria-label="`编辑 ${entry.displayName || entry.modelId}`"
+            :aria-label="`编辑 ${effectiveLabel(entry)}`"
             title="编辑"
             @click="emit('edit', entry)"
           >
@@ -85,7 +89,7 @@ function providerIcon(entry: ModelEntry): string | null {
             type="button"
             class="card-action icon danger"
             :disabled="deletingId === entry.entryId"
-            :aria-label="`删除 ${entry.displayName || entry.modelId}`"
+            :aria-label="`删除 ${effectiveLabel(entry)}`"
             title="删除"
             @click="entry.entryId && emit('delete', entry.entryId)"
           >

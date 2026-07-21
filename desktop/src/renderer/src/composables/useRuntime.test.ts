@@ -109,7 +109,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.sendMessage('hello')).toBe(true)
     await Promise.resolve()
 
-    expect(calls[0]).toEqual([
+    expect(calls.find((call) => call[0] === 'chat.submit')).toEqual([
       'chat.submit',
       expect.objectContaining({
         content: 'hello',
@@ -190,12 +190,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       delivery: 'interject',
       sessionId: 's1',
     })
-    const users = runtime.messages.value.filter(
-      (message) => message.role === 'user',
-    )
-    expect(users.at(-1)).toMatchObject({
+    expect(runtime.queuedPrompts.value.at(-1)).toMatchObject({
       content: 'interrupt now',
-      deliveryState: 'queued',
+      delivery: 'interject',
     })
     expect(
       runtime.messages.value.filter((message) => message.role === 'assistant'),
@@ -207,11 +204,97 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       seq: 1,
       session_id: 's1',
       turn_id: 'prompt-turn',
-      prompt_id: users.at(-1)?.id,
-      client_message_id: users.at(-1)?.id,
+      prompt_id: runtime.queuedPrompts.value.at(-1)?.id,
+      client_message_id: runtime.queuedPrompts.value.at(-1)?.id,
       target_turn_id: 'owner-turn',
     })
-    expect(users.at(-1)).toMatchObject({ deliveryState: 'interjected' })
+    expect(runtime.queuedPrompts.value).toEqual([])
+  })
+
+  it('does not surface the expected submit rejection after cancelling a queued prompt', async () => {
+    let rejectSubmit!: (error: unknown) => void
+    const showToast = vi.fn()
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return new Promise((_resolve, reject) => {
+            rejectSubmit = reject
+          })
+        if (args[0] === 'chat.listQueuedPrompts') return Promise.resolve([])
+        if (args[0] === 'chat.manageQueuedPrompt')
+          return Promise.resolve({ ok: true })
+        return Promise.resolve({ ok: true })
+      },
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast })
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    runtime.sendMessage({ content: 'later', delivery: 'queue' })
+    const queued = runtime.queuedPrompts.value[0]!
+
+    await expect(runtime.manageQueuedPrompt(queued.id, 'cancel')).resolves.toBe(
+      true,
+    )
+    rejectSubmit({ code: 'session_runtime_command_cancelled' })
+    await flushPromises()
+
+    expect(runtime.queuedPrompts.value).toEqual([])
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('queues attachments and requested Skills while a turn is busy without creating a chat bubble', async () => {
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.listQueuedPrompts') return []
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+
+    expect(
+      runtime.sendMessage({
+        content: 'analyse this',
+        displayContent: '@skill(review) analyse this',
+        delivery: 'queue',
+        requestedSkills: [{ name: 'review', source: 'slash' }],
+        attachments: [
+          {
+            id: 'att_1',
+            name: 'report.txt',
+            mime: 'text/plain',
+            size: 12,
+            kind: 'text',
+            hasText: true,
+            hasImage: false,
+            path: '/tmp/report.txt',
+          },
+        ],
+      }),
+    ).toBe(true)
+    await flushPromises()
+
+    expect(calls.find((call) => call[0] === 'chat.submit')?.[1]).toMatchObject({
+      sessionId: 's1',
+      delivery: 'queue',
+      attachments: ['att_1'],
+      requestedSkills: [{ name: 'review', source: 'slash' }],
+    })
+    expect(runtime.queuedPrompts.value).toEqual([
+      expect.objectContaining({
+        content: '@skill(review) analyse this',
+        attachmentCount: 1,
+        requestedSkillNames: ['review'],
+        supportsInterjection: false,
+      }),
+    ])
+    expect(runtime.messages.value).toEqual([])
   })
 
   it('does not append an error message when a chat turn pauses for user input', async () => {
@@ -569,6 +652,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(boot.value.control?.pending).toEqual(
       expect.objectContaining({ id: 'ask_owner' }),
     )
+    expect(runtime.pendingInteractionsBySession).toMatchObject({
+      'session-owner': expect.objectContaining({ id: 'ask_owner' }),
+    })
+    expect(
+      runtime.pendingInteractionsBySession['session-other'],
+    ).toBeUndefined()
 
     emitCoreEvent(listener, {
       event: 'ask_answered',
@@ -585,6 +674,92 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       { sessionId: 'session-owner', interaction: null },
     ])
     expect(boot.value.control?.pending).toBeNull()
+    expect(
+      runtime.pendingInteractionsBySession['session-owner'],
+    ).toBeUndefined()
+  })
+
+  it('indexes and clears pending interactions for the currently open session', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.connectSocket()
+    runtime.switchSession('session-owner')
+    emitCoreEvent(listener, {
+      event: 'ask_request',
+      seq: 1,
+      session_id: 'session-owner',
+      interaction: { id: 'ask_owner', kind: 'ask', status: 'waiting' },
+    })
+
+    expect(runtime.pendingInteractionsBySession['session-owner']).toEqual(
+      expect.objectContaining({ id: 'ask_owner' }),
+    )
+
+    emitCoreEvent(listener, {
+      event: 'interaction_cancelled',
+      seq: 2,
+      session_id: 'session-owner',
+      interaction: { id: 'ask_owner', kind: 'ask', status: 'cancelled' },
+    })
+
+    expect(
+      runtime.pendingInteractionsBySession['session-owner'],
+    ).toBeUndefined()
+  })
+
+  it('ignores a stale terminal interaction event after a newer Ask is waiting', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.connectSocket()
+    runtime.switchSession('session-owner')
+    emitCoreEvent(listener, {
+      event: 'ask_request',
+      seq: 1,
+      session_id: 'session-owner',
+      interaction: { id: 'ask-1', kind: 'ask', status: 'waiting' },
+    })
+    emitCoreEvent(listener, {
+      event: 'ask_answered',
+      seq: 2,
+      session_id: 'session-owner',
+      interaction: { id: 'ask-1', kind: 'ask', status: 'answered' },
+    })
+    emitCoreEvent(listener, {
+      event: 'ask_request',
+      seq: 3,
+      session_id: 'session-owner',
+      interaction: { id: 'ask-2', kind: 'ask', status: 'waiting' },
+    })
+    emitCoreEvent(listener, {
+      event: 'ask_answered',
+      seq: 2,
+      session_id: 'session-owner',
+      interaction: { id: 'ask-1', kind: 'ask', status: 'answered' },
+    })
+
+    expect(runtime.pendingInteractionsBySession['session-owner']).toEqual(
+      expect.objectContaining({ id: 'ask-2' }),
+    )
   })
 
   it('projects agent_thought events into completed thought segments', async () => {
@@ -1365,6 +1540,50 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       (segment) => segment.type === 'tool' && segment.toolId === 'call_wf',
     )
     expect(resumeTool).toMatchObject({ status: 'done' })
+  })
+
+  it('updates the Plan runtime projection for chat timeline Plan events', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+
+    runtime.connectSocket()
+    emitCoreEvent(listener, {
+      event: 'plan_approved',
+      seq: 1,
+      interaction: { id: 'interaction-plan', kind: 'plan', status: 'approved' },
+      plan: {
+        id: 'plan-runtime',
+        title: 'Runtime Plan',
+        status: 'executing',
+        steps: [{ id: 'step-1', title: 'Implement', status: 'active' }],
+      },
+    })
+    emitCoreEvent(listener, {
+      event: 'plan_step_update',
+      seq: 2,
+      plan_id: 'plan-runtime',
+      step: { id: 'step-1', title: 'Implement', status: 'done' },
+    })
+
+    expect(runtime.planProjection.plans).toContainEqual(
+      expect.objectContaining({
+        id: 'plan-runtime',
+        steps: [expect.objectContaining({ id: 'step-1', status: 'done' })],
+      }),
+    )
+
+    runtime.switchSession('session-without-plan')
+    expect(runtime.planProjection.plans).toEqual([])
+    expect(runtime.planProjection.entryDecisions).toEqual([])
   })
 
   it('tracks per-session running state and flags background completion for attention (P1-7)', async () => {

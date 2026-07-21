@@ -111,6 +111,8 @@ export interface CoreRuntimeReplayPayload<
 
 const CORE_API_ROUTE_OPERATION_LIST = [
   op('chat.submit', 'IPC', 'chat.submit'),
+  op('chat.listQueuedPrompts', 'IPC', 'chat.listQueuedPrompts'),
+  op('chat.manageQueuedPrompt', 'IPC', 'chat.manageQueuedPrompt'),
   op('bootstrap', 'GET', '/api/bootstrap'),
   op('chat.stopRuntime', 'POST', '/api/runtime/stop'),
   op('config.effective', 'GET', '/api/config/effective'),
@@ -648,6 +650,13 @@ export class CoreApi {
       })
       return result
     },
+    listQueuedPrompts: (opts: { sessionId: string }) =>
+      this.chatService.listQueuedPrompts(opts),
+    manageQueuedPrompt: (opts: {
+      sessionId: string
+      promptId: string
+      action: 'cancel' | 'interject'
+    }) => this.chatService.manageQueuedPrompt(opts),
     stopRuntime: async (
       opts: {
         taskId?: string | null
@@ -1571,7 +1580,7 @@ export class CoreApi {
     opts: ControlResumeOptions,
     ownerSessionId: string | null,
   ): Promise<Dict> {
-    const event = isRecord(resume.event)
+    const event: Dict | null = isRecord(resume.event)
       ? { ...resume.event, control: this.loop.controlManager.payload() }
       : null
     if (event)
@@ -1579,6 +1588,17 @@ export class CoreApi {
         emit: opts.emit ?? null,
         sessionId: ownerSessionId,
       })
+    if (event?.event === 'plan_approved' && isRecord(event.plan)) {
+      const planId = String(event.plan.id ?? '').trim()
+      const steps = Array.isArray(event.plan.steps) ? event.plan.steps : []
+      for (const step of steps) {
+        if (!isRecord(step) || String(step.status ?? '') !== 'active') continue
+        await this.emitRuntime(
+          { event: 'plan_step_update', plan_id: planId, step: { ...step } },
+          { emit: opts.emit ?? null, sessionId: ownerSessionId },
+        )
+      }
+    }
     let result: Dict | null = null
     if (resume.resume === true) {
       const interactionId = String(resume.interaction.id ?? '')

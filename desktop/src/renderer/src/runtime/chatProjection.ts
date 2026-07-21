@@ -56,6 +56,10 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'plan_draft_delta',
   'plan_comment_added',
   'plan_approved',
+  'plan_runtime_update',
+  'plan_step_update',
+  'plan_verification_start',
+  'plan_verification_done',
   'interaction_cancelled',
   'assistant_done',
   'turn_paused',
@@ -104,7 +108,8 @@ export function applyChatProjectionEvent(
     event.event === 'prompt_interjected' ||
     event.event === 'prompt_cancelled'
   ) {
-    applyPromptState(state, event)
+    // Queue lifecycle belongs to the composer tray. The chat timeline starts
+    // only when Core emits the authoritative user_message event.
     return state
   }
 
@@ -238,6 +243,7 @@ export function applyChatProjectionEvent(
 
   if (event.event === 'ask_request' || event.event === 'plan_draft') {
     if (!event.interaction) return state
+    if (updateControlSegment(state, event.interaction)) return state
     const assistant = assistantForEvent(state, event, runtime)!
     finishActiveThought(assistant, event)
     upsertControlSegment(
@@ -275,12 +281,29 @@ export function applyChatProjectionEvent(
   ) {
     if (!event.interaction) return state
     const assistantId = updateControlSegment(state, event.interaction)
+    if (event.event === 'plan_approved')
+      appendPlanActivity(state, event, runtime, assistantId)
     if (
       event.event === 'interaction_cancelled' ||
       (event.event === 'ask_answered' && event.resume_model === false)
     )
       runtime.pendingControlResumeAssistantId = null
     else if (assistantId) runtime.pendingControlResumeAssistantId = assistantId
+    return state
+  }
+
+  if (
+    event.event === 'plan_runtime_update' ||
+    event.event === 'plan_step_update' ||
+    event.event === 'plan_verification_start' ||
+    event.event === 'plan_verification_done'
+  ) {
+    appendPlanActivity(
+      state,
+      event,
+      runtime,
+      runtime.pendingControlResumeAssistantId,
+    )
     return state
   }
 
@@ -373,6 +396,128 @@ export function createProjectionRuntime(): ProjectionRuntime {
   }
 }
 
+export function ensureControlInteractionInTimeline(
+  state: ChatProjectionState,
+  interaction: ControlInteraction,
+): void {
+  if (updateControlSegment(state, interaction)) return
+  const type = interaction.kind === 'plan' ? 'plan' : 'ask'
+  const assistant: AssistantMessage = {
+    id: `control-${interaction.id}`,
+    role: 'assistant',
+    content: '',
+    segments: [],
+    streaming: false,
+  }
+  upsertControlSegment(assistant, type, interaction)
+  state.messages.push(assistant)
+}
+
+function appendPlanActivity(
+  state: ChatProjectionState,
+  event: Extract<
+    WsEvent,
+    {
+      event:
+        | 'plan_approved'
+        | 'plan_runtime_update'
+        | 'plan_step_update'
+        | 'plan_verification_start'
+        | 'plan_verification_done'
+    }
+  >,
+  runtime: ProjectionRuntime,
+  assistantId: string | null = null,
+): void {
+  const presentation = planActivityPresentation(event)
+  if (!presentation) return
+  const assistant =
+    (assistantId
+      ? state.messages.find(
+          (message): message is AssistantMessage =>
+            message.role === 'assistant' && message.id === assistantId,
+        )
+      : undefined) ||
+    currentAssistant(state) ||
+    assistantForEvent(state, event, runtime)
+  if (!assistant) return
+  const raw = event as unknown as Record<string, unknown>
+  const step =
+    raw.step && typeof raw.step === 'object'
+      ? (raw.step as Record<string, unknown>)
+      : null
+  const id = `plan-activity-${event.seq || event.event}-${String(
+    raw.step_id || step?.id || raw.plan_id || '',
+  )}`
+  if (assistant.segments.some((segment) => segment.id === id)) return
+  assistant.segments.push({ id, type: 'plan_activity', ...presentation })
+}
+
+function planActivityPresentation(
+  event: Extract<
+    WsEvent,
+    {
+      event:
+        | 'plan_approved'
+        | 'plan_runtime_update'
+        | 'plan_step_update'
+        | 'plan_verification_start'
+        | 'plan_verification_done'
+    }
+  >,
+): {
+  label: string
+  detail?: string
+  tone: 'running' | 'success' | 'error' | 'neutral'
+} | null {
+  if (event.event === 'plan_approved')
+    return { label: '计划已批准', tone: 'success' }
+  if (event.event === 'plan_step_update') {
+    const status = String(event.step?.status || '')
+    const title = String(event.step?.title || event.plan_id || '')
+    if (
+      status === 'active' ||
+      status === 'executing' ||
+      status === 'in_progress' ||
+      status === 'running'
+    )
+      return { label: '开始步骤', detail: title, tone: 'running' }
+    if (status === 'done' || status === 'completed')
+      return { label: '步骤完成', detail: title, tone: 'success' }
+    if (status === 'failed' || status === 'blocked')
+      return {
+        label: status === 'blocked' ? '步骤阻塞' : '步骤失败',
+        detail: title,
+        tone: 'error',
+      }
+    return null
+  }
+  if (event.event === 'plan_verification_start')
+    return {
+      label: '开始验证',
+      detail: event.command || event.step_id || '',
+      tone: 'running',
+    }
+  if (event.event === 'plan_verification_done') {
+    const passed = event.result?.passed === true
+    return {
+      label: passed ? '验证通过' : '验证失败',
+      detail: String(event.result?.summary || event.step_id || ''),
+      tone: passed ? 'success' : 'error',
+    }
+  }
+  const status = String(event.plan?.status || '')
+  if (status === 'completed' || status === 'done')
+    return { label: '计划完成', tone: 'success' }
+  if (status === 'blocked' || status === 'failed')
+    return {
+      label: status === 'blocked' ? '计划阻塞' : '计划失败',
+      detail: String(event.plan?.blocked_reason || ''),
+      tone: 'error',
+    }
+  return null
+}
+
 function applyUserMessage(
   state: ChatProjectionState,
   event: Extract<WsEvent, { event: 'user_message' }>,
@@ -414,53 +559,6 @@ function applyUserMessage(
     source: meta.source || undefined,
     scheduler: meta.scheduler || undefined,
   })
-}
-
-function applyPromptState(
-  state: ChatProjectionState,
-  event: Extract<
-    WsEvent,
-    {
-      event:
-        | 'prompt_queued'
-        | 'prompt_dequeued'
-        | 'prompt_interjected'
-        | 'prompt_cancelled'
-    }
-  >,
-): void {
-  const turnId = event.turn_id || ''
-  const promptId = event.client_message_id || event.prompt_id
-  const existing = state.messages.find(
-    (message) =>
-      message.role === 'user' &&
-      ((promptId && message.id === promptId) ||
-        (turnId && message.turn_id === turnId)),
-  )
-  const user =
-    existing?.role === 'user'
-      ? existing
-      : {
-          id:
-            promptId ||
-            `prompt-${turnId || event.seq || state.messages.length + 1}`,
-          role: 'user' as const,
-          content: event.content || '',
-          turn_id: turnId || undefined,
-        }
-  if (!existing) state.messages.push(user)
-  if (event.content) user.content = event.content
-  if (turnId) user.turn_id = turnId
-  user.deliveryState =
-    event.event === 'prompt_queued'
-      ? 'queued'
-      : event.event === 'prompt_dequeued'
-        ? 'running'
-        : event.event === 'prompt_interjected'
-          ? 'interjected'
-          : 'cancelled'
-  user.deliveryReason =
-    event.event === 'prompt_cancelled' ? event.reason : undefined
 }
 
 function assistantForEvent(

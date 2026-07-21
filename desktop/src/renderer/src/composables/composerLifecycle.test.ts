@@ -103,7 +103,7 @@ describe('Composer lifecycle projection', () => {
   it('gives Goal priority over Goal-owned internal Plan', () => {
     expect(
       composerLifecycleMode(
-        { mode: 'plan', previous_mode: 'auto' },
+        { mode: 'plan', previous_mode: 'full_access' },
         goal('planning'),
         'idle',
       ),
@@ -135,7 +135,7 @@ describe('Composer lifecycle transitions', () => {
   it('cancels a paused Goal before enabling Plan', async () => {
     const ctx = setup({
       activeGoal: goal('paused'),
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     })
 
     const result = await ctx.controller.activatePlan()
@@ -169,7 +169,7 @@ describe('Composer lifecycle transitions', () => {
 
   it('restores the saved permission when an unhandled Goal terminal arrives', async () => {
     const ctx = setup({
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     })
 
     const result = await ctx.controller.reconcileTerminalGoal('goal_1')
@@ -181,7 +181,7 @@ describe('Composer lifecycle transitions', () => {
   it('does not tear down the independent Plan created by a Goal switch', async () => {
     const ctx = setup({
       activeGoal: goal('paused'),
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     })
 
     await ctx.controller.activatePlan()

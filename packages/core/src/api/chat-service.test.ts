@@ -532,6 +532,416 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     await api.close()
   })
 
+  it('lists and cancels a queued prompt exactly once', async () => {
+    const root = tmp('emperor-mainline-manage-queue-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Managed queue' })
+    const running = api.chat.submit({
+      content: 'keep running',
+      turnId: 'turn_manage_owner',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    const queued = api.chat.submit({
+      content: 'cancel queued',
+      displayContent: 'Cancel queued',
+      turnId: 'turn_manage_queued',
+      clientMessageId: 'prompt_manage_queued',
+      sessionId: String(session.id),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(
+      api.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'prompt_manage_queued',
+        displayContent: 'Cancel queued',
+        state: 'queued',
+        supportsInterjection: true,
+      }),
+    ])
+    await expect(
+      api.chat.manageQueuedPrompt({
+        sessionId: String(session.id),
+        promptId: 'prompt_manage_queued',
+        action: 'cancel',
+      }),
+    ).resolves.toMatchObject({ ok: true, replacementPromptId: null })
+    expect(
+      api.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toEqual([])
+    expect(
+      api.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.filter(
+          (event) =>
+            event.event === 'prompt_cancelled' &&
+            event.prompt_id === 'prompt_manage_queued',
+        ),
+    ).toHaveLength(1)
+
+    provider.finish(0, response('owner complete'))
+    await running
+    await expect(queued).rejects.toMatchObject({
+      code: 'session_runtime_command_cancelled',
+    })
+    await api.close()
+  })
+
+  it('restores a crash-orphaned durable queue item and keeps it cancellable', async () => {
+    const root = tmp('emperor-mainline-recover-cancel-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Recover cancel' })
+    first.loop.sessionRuntimes
+      .actor(String(session.id))
+      .bindings.conversationStore.messageGraph.recordPrompt({
+        id: 'prompt_recover_cancel',
+        turnId: 'turn_recover_cancel',
+        clientMessageId: 'prompt_recover_cancel',
+        delivery: 'queue',
+        content: 'cancel after restart',
+        displayContent: 'Cancel after restart',
+        supportsInterjection: true,
+      })
+    await first.close()
+
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    expect(
+      second.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toEqual([
+      expect.objectContaining({
+        id: 'prompt_recover_cancel',
+        content: 'cancel after restart',
+        state: 'queued',
+      }),
+    ])
+    await expect(
+      second.chat.manageQueuedPrompt({
+        sessionId: String(session.id),
+        promptId: 'prompt_recover_cancel',
+        action: 'cancel',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(
+      second.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.filter(
+          (event) =>
+            event.event === 'prompt_cancelled' &&
+            event.prompt_id === 'prompt_recover_cancel',
+        ),
+    ).toHaveLength(1)
+    await second.close()
+  })
+
+  it('rehydrates and executes a crash-orphaned durable queue item exactly once', async () => {
+    const root = tmp('emperor-mainline-recover-execute-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Recover execute' })
+    first.loop.sessionRuntimes
+      .actor(String(session.id))
+      .bindings.conversationStore.messageGraph.recordPrompt({
+        id: 'prompt_recover_execute',
+        turnId: 'turn_recover_execute',
+        clientMessageId: 'prompt_recover_execute',
+        delivery: 'queue',
+        content: 'execute after restart',
+        displayContent: 'Execute after restart',
+        supportsInterjection: true,
+      })
+    await first.close()
+
+    const provider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    expect(
+      second.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toHaveLength(1)
+    await provider.waitForCalls(1)
+    expect(JSON.stringify(provider.calls[0]!.messages)).toContain(
+      'execute after restart',
+    )
+    provider.finish(0, response('recovered result'))
+    await vi.waitFor(() => {
+      const prompt = second.loop.sessionRuntimes
+        .actor(String(session.id))
+        .bindings.conversationStore.messageGraph.snapshot()
+        .prompts.find((item) => item.id === 'prompt_recover_execute')
+      expect(prompt?.state).toBe('completed')
+    })
+    expect(provider.calls).toHaveLength(1)
+    await second.close()
+  })
+
+  it('requeues a crash-orphaned running prompt that never reached user history', async () => {
+    const root = tmp('emperor-mainline-recover-running-before-start-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Recover running prompt' })
+    const firstGraph = first.loop.sessionRuntimes.actor(String(session.id))
+      .bindings.conversationStore.messageGraph
+    firstGraph.recordPrompt({
+      id: 'prompt_running_orphan',
+      turnId: 'turn_running_orphan',
+      clientMessageId: 'prompt_running_orphan',
+      delivery: 'queue',
+      content: 'run after crash',
+      displayContent: 'Run after crash',
+      supportsInterjection: true,
+    })
+    firstGraph.transitionPrompt('prompt_running_orphan', 'running')
+    await first.close()
+
+    const provider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    expect(
+      second.chat.listQueuedPrompts({ sessionId: String(session.id) }),
+    ).toEqual([])
+    await provider.waitForCalls(1)
+    expect(JSON.stringify(provider.calls[0]!.messages)).toContain(
+      'run after crash',
+    )
+    provider.finish(0, response('running prompt recovered'))
+    await vi.waitFor(() => {
+      const prompts = second.loop.sessionRuntimes
+        .actor(String(session.id))
+        .bindings.conversationStore.messageGraph.snapshot().prompts
+      expect(prompts).toContainEqual(
+        expect.objectContaining({
+          id: 'prompt_running_orphan',
+          state: 'cancelled',
+        }),
+      )
+      expect(prompts).toContainEqual(
+        expect.objectContaining({
+          state: 'completed',
+          content: 'run after crash',
+        }),
+      )
+    })
+    expect(provider.calls).toHaveLength(1)
+    await second.close()
+  })
+
+  it('does not replay a crash-orphaned running prompt already committed to user history', async () => {
+    const root = tmp('emperor-mainline-recover-running-after-start-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Reconcile started prompt' })
+    const bindings = first.loop.sessionRuntimes.actor(
+      String(session.id),
+    ).bindings
+    bindings.conversationStore.messageGraph.recordPrompt({
+      id: 'prompt_started_orphan',
+      turnId: 'turn_started_orphan',
+      clientMessageId: 'prompt_started_orphan',
+      delivery: 'queue',
+      content: 'must not run twice',
+      displayContent: 'Must not run twice',
+      supportsInterjection: true,
+    })
+    bindings.conversationStore.messageGraph.transitionPrompt(
+      'prompt_started_orphan',
+      'running',
+    )
+    bindings.memoryStore.appendHistory('user', 'must not run twice', {
+      extra: { turn_id: 'turn_started_orphan' },
+    })
+    await first.close()
+
+    const provider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    second.chat.listQueuedPrompts({ sessionId: String(session.id) })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(provider.calls).toHaveLength(0)
+    expect(
+      second.loop.sessionRuntimes
+        .actor(String(session.id))
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: 'prompt_started_orphan',
+        state: 'cancelled',
+      }),
+    )
+    await second.close()
+  })
+
+  it('atomically replaces a queued prompt with an interjection', async () => {
+    const root = tmp('emperor-mainline-promote-queue-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Promote queue' })
+    const running = api.chat.submit({
+      content: 'original request',
+      turnId: 'turn_promote_owner',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    const queued = api.chat.submit({
+      content: 'urgent correction',
+      turnId: 'turn_promote_queued',
+      clientMessageId: 'prompt_promote_queued',
+      sessionId: String(session.id),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const promoted = await api.chat.manageQueuedPrompt({
+      sessionId: String(session.id),
+      promptId: 'prompt_promote_queued',
+      action: 'interject',
+    })
+    expect(promoted).toMatchObject({
+      ok: true,
+      promptId: 'prompt_promote_queued',
+    })
+    expect(promoted.replacementPromptId).toContain(
+      'prompt_promote_queued:interject:',
+    )
+    provider.finish(0, response('obsolete answer'))
+    await provider.waitForCalls(2)
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'urgent correction',
+    )
+    provider.finish(1, response('corrected answer'))
+    await expect(running).resolves.toMatchObject({
+      content: 'corrected answer',
+    })
+    await expect(queued).rejects.toMatchObject({
+      code: 'session_runtime_command_cancelled',
+    })
+    const events = api.runtime.replay({ sessionId: String(session.id) }).events
+    expect(
+      events.filter(
+        (event) =>
+          event.event === 'prompt_cancelled' &&
+          event.prompt_id === 'prompt_promote_queued',
+      ),
+    ).toHaveLength(1)
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'prompt_queued',
+          prompt_id: promoted.replacementPromptId,
+          delivery: 'interject',
+        }),
+        expect.objectContaining({
+          event: 'prompt_interjected',
+          prompt_id: promoted.replacementPromptId,
+        }),
+      ]),
+    )
+
+    await api.close()
+  })
+
+  it('cancels a direct queued interjection without interrupting its owner turn', async () => {
+    const root = tmp('emperor-mainline-cancel-direct-interjection-')
+    const provider = new ConcurrentBlockingProvider()
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const session = api.sessions.create({ title: 'Cancel interjection' })
+    const owner = api.chat.submit({
+      content: 'owner prompt',
+      turnId: 'turn_cancel_interjection_owner',
+      sessionId: String(session.id),
+    })
+    await provider.waitForCalls(1)
+    await expect(
+      api.chat.submit({
+        content: 'cancel this interjection',
+        turnId: 'turn_cancel_direct_interjection',
+        clientMessageId: 'prompt_cancel_direct_interjection',
+        sessionId: String(session.id),
+        delivery: 'interject',
+      }),
+    ).resolves.toMatchObject({ delivery: 'interjected' })
+
+    await expect(
+      api.chat.manageQueuedPrompt({
+        sessionId: String(session.id),
+        promptId: 'prompt_cancel_direct_interjection',
+        action: 'cancel',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+    provider.finish(0, response('owner completed'))
+    await expect(owner).resolves.toMatchObject({ content: 'owner completed' })
+
+    expect(provider.calls).toHaveLength(1)
+    expect(JSON.stringify(provider.calls[0]!.messages)).not.toContain(
+      'cancel this interjection',
+    )
+    expect(
+      api.runtime
+        .replay({ sessionId: String(session.id) })
+        .events.filter(
+          (event) =>
+            event.event === 'prompt_cancelled' &&
+            event.prompt_id === 'prompt_cancel_direct_interjection',
+        ),
+    ).toHaveLength(1)
+    await api.close()
+  })
+
   it('preserves a queued prompt when cancellation races the running turn', async () => {
     const root = tmp('emperor-mainline-cancel-queue-race-')
     const provider = new ConcurrentBlockingProvider()
@@ -630,6 +1040,12 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     const graph = api.loop.sessionRuntimes
       .get(String(session.id))!
       .bindings.conversationStore.messageGraph.snapshot()
+    expect(graph.prompts).toContainEqual(
+      expect.objectContaining({
+        id: 'client_interjection',
+        state: 'completed',
+      }),
+    )
     expect(graph.nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -650,6 +1066,201 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     )
 
     await api.close()
+  })
+
+  it('does not deliver a completed interjection twice when its client id is retried after restart', async () => {
+    const root = tmp('emperor-mainline-interjection-idempotency-')
+    const stateRoot = join(root, '.emperor')
+    const firstProvider = new ConcurrentBlockingProvider()
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(firstProvider),
+    })
+    const session = first.sessions.create({ title: 'Interjection idempotency' })
+    const firstTurn = first.chat.submit({
+      content: 'first owner',
+      turnId: 'turn_idempotent_owner_1',
+      sessionId: String(session.id),
+    })
+    await firstProvider.waitForCalls(1)
+    await expect(
+      first.chat.submit({
+        content: 'durable interjection',
+        turnId: 'turn_idempotent_interjection',
+        clientMessageId: 'client_idempotent_interjection',
+        sessionId: String(session.id),
+        delivery: 'interject',
+      }),
+    ).resolves.toMatchObject({ delivery: 'interjected' })
+    firstProvider.finish(0, response('obsolete'))
+    await firstProvider.waitForCalls(2)
+    firstProvider.finish(1, response('first final'))
+    await firstTurn
+    await first.close()
+
+    const secondProvider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(secondProvider),
+    })
+    const secondTurn = second.chat.submit({
+      content: 'second owner',
+      turnId: 'turn_idempotent_owner_2',
+      sessionId: String(session.id),
+    })
+    await secondProvider.waitForCalls(1)
+    await expect(
+      second.chat.submit({
+        content: 'durable interjection',
+        turnId: 'turn_idempotent_interjection_retry',
+        clientMessageId: 'client_idempotent_interjection',
+        sessionId: String(session.id),
+        delivery: 'interject',
+      }),
+    ).resolves.toMatchObject({ delivery: 'interjected' })
+    secondProvider.finish(0, response('second final'))
+    await secondTurn
+
+    expect(secondProvider.calls).toHaveLength(1)
+    const history = readFileSync(
+      join(root, '.emperor', 'sessions', String(session.id), 'history.jsonl'),
+      'utf8',
+    )
+    expect(
+      history
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter(
+          (row) =>
+            row.role === 'user' &&
+            String(row.content || '').includes('durable interjection'),
+        ),
+    ).toHaveLength(1)
+    await second.close()
+  })
+
+  it('requeues an interjection orphaned before durable user history on restart', async () => {
+    const root = tmp('emperor-mainline-recover-interjection-before-history-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Recover interjection' })
+    const firstGraph = first.loop.sessionRuntimes.actor(String(session.id))
+      .bindings.conversationStore.messageGraph
+    firstGraph.recordPrompt({
+      id: 'prompt_interjection_orphan',
+      turnId: 'turn_interjection_orphan',
+      clientMessageId: 'prompt_interjection_orphan',
+      delivery: 'interject',
+      targetCommandId: 'turn:missing_owner',
+      content: 'preserve orphaned interjection',
+      displayContent: 'Preserve orphaned interjection',
+      supportsInterjection: true,
+    })
+    firstGraph.transitionPrompt('prompt_interjection_orphan', 'interjected')
+    await first.close()
+
+    const provider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    second.chat.listQueuedPrompts({ sessionId: String(session.id) })
+    await provider.waitForCalls(1)
+    expect(JSON.stringify(provider.calls[0]!.messages)).toContain(
+      'preserve orphaned interjection',
+    )
+    provider.finish(0, response('interjection recovered'))
+    await vi.waitFor(() => {
+      const prompts = second.loop.sessionRuntimes
+        .actor(String(session.id))
+        .bindings.conversationStore.messageGraph.snapshot().prompts
+      expect(prompts).toContainEqual(
+        expect.objectContaining({
+          id: 'prompt_interjection_orphan',
+          state: 'cancelled',
+        }),
+      )
+      expect(prompts).toContainEqual(
+        expect.objectContaining({
+          content: 'preserve orphaned interjection',
+          state: 'completed',
+        }),
+      )
+    })
+    expect(provider.calls).toHaveLength(1)
+    await second.close()
+  })
+
+  it('completes an interjection already committed to user history without replaying it', async () => {
+    const root = tmp('emperor-mainline-reconcile-interjection-history-')
+    const stateRoot = join(root, '.emperor')
+    const first = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const session = first.sessions.create({ title: 'Committed interjection' })
+    const bindings = first.loop.sessionRuntimes.actor(
+      String(session.id),
+    ).bindings
+    bindings.conversationStore.messageGraph.recordPrompt({
+      id: 'prompt_interjection_committed',
+      turnId: 'turn_interjection_committed',
+      clientMessageId: 'client_interjection_committed',
+      delivery: 'interject',
+      targetCommandId: 'turn:former_owner',
+      content: 'already delivered interjection',
+      displayContent: 'Already delivered interjection',
+      supportsInterjection: true,
+    })
+    bindings.conversationStore.messageGraph.transitionPrompt(
+      'prompt_interjection_committed',
+      'interjected',
+    )
+    bindings.memoryStore.appendHistory(
+      'user',
+      'already delivered interjection',
+      {
+        extra: { turn_id: 'turn_interjection_committed' },
+      },
+    )
+    await first.close()
+
+    const provider = new ConcurrentBlockingProvider()
+    const second = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    second.chat.listQueuedPrompts({ sessionId: String(session.id) })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(provider.calls).toHaveLength(0)
+    expect(
+      second.loop.sessionRuntimes
+        .actor(String(session.id))
+        .bindings.conversationStore.messageGraph.snapshot().prompts,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: 'prompt_interjection_committed',
+        state: 'completed',
+      }),
+    )
+    await second.close()
   })
 
   it('cancels session A without cancelling a concurrent turn in session B', async () => {

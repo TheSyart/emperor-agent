@@ -43,6 +43,7 @@ describe('buildProviderSnapshot profile forwarding', () => {
     expect(snapshot.profile).toEqual(expected)
     expect(snapshot.provider.profile).toEqual(expected)
     expect(snapshot.supportsVision).toBe(expected.vision)
+    expect(snapshot.entryLabel).toBe('claude-opus-4-7')
   })
 
   it('rejects custom snapshots without an explicit protocol', () => {

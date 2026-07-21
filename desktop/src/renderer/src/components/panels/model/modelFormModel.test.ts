@@ -6,6 +6,8 @@ import {
   createModelEntryDraft,
   reasoningChoices,
   toModelEntrySaveInput,
+  updateModelDraftDisplayName,
+  updateModelDraftId,
 } from './modelFormModel'
 
 const dualProvider: ProviderOption = {
@@ -79,6 +81,7 @@ describe('model entry form model', () => {
       protocol: 'openai',
       modelId: 'deepseek-chat',
       displayName: 'Saved',
+      effectiveDisplayName: 'Saved',
       apiBase: 'https://api.deepseek.com/v1',
       apiKey: '***1234',
       contextWindowTokens: 128_000,
@@ -129,6 +132,22 @@ describe('model entry form model', () => {
     expect(toModelEntrySaveInput(draft)).toHaveProperty('displayName', '')
   })
 
+  it('syncs automatic labels with modelId and preserves explicit aliases', () => {
+    const draft = createModelEntryDraft(dualProvider)
+    updateModelDraftId(draft, 'deepseek-v4-pro')
+    expect(draft.displayName).toBe('deepseek-v4-pro')
+    expect(toModelEntrySaveInput(draft).displayName).toBe('')
+
+    updateModelDraftDisplayName(draft, '主力模型')
+    updateModelDraftId(draft, 'deepseek-v4-next')
+    expect(draft.displayName).toBe('主力模型')
+    expect(toModelEntrySaveInput(draft).displayName).toBe('主力模型')
+
+    updateModelDraftDisplayName(draft, '')
+    expect(draft.displayName).toBe('deepseek-v4-next')
+    expect(toModelEntrySaveInput(draft).displayName).toBe('')
+  })
+
   it('round-trips explicit per-million-token prices and can clear them', () => {
     const draft = createModelEntryDraft(dualProvider)
     draft.modelId = 'deepseek-chat'
@@ -151,6 +170,7 @@ describe('model entry form model', () => {
       provider: 'deepseek',
       protocol: 'openai',
       modelId: 'deepseek-chat',
+      effectiveDisplayName: 'deepseek-chat',
       apiBase: 'https://api.deepseek.com/v1',
       apiKey: '***1234',
       contextWindowTokens: 128_000,
@@ -166,6 +186,7 @@ describe('model entry form model', () => {
       provider: 'deepseek',
       protocol: 'anthropic',
       modelId: 'deepseek-chat',
+      effectiveDisplayName: 'deepseek-chat',
       apiBase: 'https://api.deepseek.com/anthropic',
       apiKey: '***1234',
       contextWindowTokens: 128_000,

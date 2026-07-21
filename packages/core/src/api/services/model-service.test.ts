@@ -79,6 +79,7 @@ describe('CoreModelService schema v2', () => {
       models: [
         {
           entryId: 'entry-openai',
+          effectiveDisplayName: 'Work model',
           apiKey: '***1234',
           resolvedProfile: {
             toolCall: true,
@@ -95,6 +96,7 @@ describe('CoreModelService schema v2', () => {
         protocol: 'openai',
         modelId: 'gpt-5.2',
         displayName: 'Work model',
+        effectiveDisplayName: 'Work model',
         reasoningEffort: 'high',
         capabilities: { toolCall: true, vision: false, reasoning: true },
         capabilitySources: { vision: 'override' },
@@ -112,6 +114,23 @@ describe('CoreModelService schema v2', () => {
     expect(JSON.stringify(payload)).not.toContain('secondaryModelId')
     expect(JSON.stringify(payload)).not.toContain('modelRole')
     expect(JSON.stringify(payload)).not.toContain('sk-secret-1234')
+  })
+
+  it('uses modelId as the effective name when no custom alias exists', async () => {
+    const root = tmp('emperor-model-service-effective-name-')
+    writeConfig(root, [entry({ displayName: undefined })])
+
+    const payload = await (await service(root)).getConfig()
+
+    expect(payload.models[0]).toMatchObject({
+      modelId: 'gpt-5.2',
+      effectiveDisplayName: 'gpt-5.2',
+    })
+    expect(payload.models[0]).not.toHaveProperty('displayName')
+    expect(payload.current).toMatchObject({
+      displayName: null,
+      effectiveDisplayName: 'gpt-5.2',
+    })
   })
 
   it('supports typed CRUD, preserves secrets and legacy fields, refreshes after each mutation, and onboards only the first usable model', async () => {

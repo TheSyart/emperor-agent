@@ -353,21 +353,31 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       return
     }
     if (['accept_edits', 'accept-edits', 'edits'].includes(normalized)) {
-      const result = await setPermissionMode('accept_edits')
+      const result = await setPermissionMode('smart_auto')
       deps.addLocalCommand(
         raw,
         result.ok
-          ? '权限模式已切换为：接受编辑。'
+          ? '权限模式已切换为：智能自动。'
           : `权限模式切换失败：${result.error}`,
       )
       return
     }
-    if (normalized === 'auto') {
-      const result = await setPermissionMode('auto')
+    if (['smart', 'smart_auto', 'smart-auto'].includes(normalized)) {
+      const result = await setPermissionMode('smart_auto')
       deps.addLocalCommand(
         raw,
         result.ok
-          ? '权限模式已切换为：自动执行。'
+          ? '权限模式已切换为：智能自动。'
+          : `权限模式切换失败：${result.error}`,
+      )
+      return
+    }
+    if (normalized === 'auto' || normalized === 'full_access') {
+      const result = await setPermissionMode('full_access')
+      deps.addLocalCommand(
+        raw,
+        result.ok
+          ? '权限模式已切换为：完全访问。'
           : `权限模式切换失败：${result.error}`,
       )
       return
@@ -376,7 +386,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   }
 
   async function setPermissionMode(
-    mode: 'ask_before_edit' | 'accept_edits' | 'auto',
+    mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       const data = await core('control.setPermissionMode', mode)
@@ -391,7 +401,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   }
 
   async function writeControlMode(
-    mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
+    mode: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan',
   ) {
     const data = await core('control.setMode', mode)
     if (boot.value) boot.value.control = data
@@ -401,7 +411,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   }
 
   async function setControlMode(
-    mode: 'ask_before_edit' | 'accept_edits' | 'auto' | 'plan',
+    mode: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan',
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       await writeControlMode(mode)
@@ -459,20 +469,20 @@ export function useSlashCommands(deps: SlashCommandDeps) {
 
 function savedExecutionPermission(
   control: BootstrapPayload['control'] | undefined,
-): 'ask_before_edit' | 'accept_edits' | 'auto' {
+): 'ask_before_edit' | 'smart_auto' | 'full_access' {
   if (control?.mode === 'plan' && control.previous_mode)
     return control.previous_mode
-  if (control?.mode === 'accept_edits' || control?.mode === 'auto')
+  if (control?.mode === 'smart_auto' || control?.mode === 'full_access')
     return control.mode
   return 'ask_before_edit'
 }
 
 function permissionLabel(
-  mode: 'ask_before_edit' | 'accept_edits' | 'auto',
+  mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
 ): string {
-  if (mode === 'auto') return '自动执行'
-  if (mode === 'accept_edits') return '接受编辑'
-  return '编辑前询问'
+  if (mode === 'full_access') return '完全访问'
+  if (mode === 'smart_auto') return '智能自动'
+  return '询问确认'
 }
 
 function goalActionVerb(action: GoalCardAction) {

@@ -127,8 +127,8 @@ export const checkpointIcons = {
 } satisfies Record<string, IconComponent>
 
 export function modeIcon(mode: string): IconComponent {
-  if (mode === 'accept_edits') return FilePen
-  if (mode === 'auto') return Zap
+  if (mode === 'smart_auto' || mode === 'accept_edits') return FilePen
+  if (mode === 'full_access' || mode === 'auto') return Zap
   if (mode === 'plan') return ClipboardList
   return ShieldQuestion
 }

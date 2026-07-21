@@ -9,7 +9,6 @@ import type { AttachmentRef } from '../types'
 export const MAX_ATTACHMENT_DRAFTS = 5
 
 export function useAttachments(options: {
-  isBusy: () => boolean
   onError: (message: string) => void
 }) {
   const drafts = ref<AttachmentRef[]>([])
@@ -46,14 +45,12 @@ export function useAttachments(options: {
   }
 
   function onDragEnter(e: DragEvent) {
-    if (options.isBusy()) return
     if (!hasFiles(e.dataTransfer)) return
     e.preventDefault()
     dragActive.value = true
   }
 
   function onDragOver(e: DragEvent) {
-    if (options.isBusy()) return
     if (!hasFiles(e.dataTransfer)) return
     e.preventDefault()
     dragActive.value = true
@@ -65,7 +62,6 @@ export function useAttachments(options: {
   }
 
   function onDrop(e: DragEvent) {
-    if (options.isBusy()) return
     e.preventDefault()
     dragActive.value = false
     if (!e.dataTransfer?.files?.length) return

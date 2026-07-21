@@ -2,21 +2,17 @@
 import { computed, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
-import { useSession } from '../composables/useSession'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
-import { activeBottomControlPanel } from '../components/chat/bottomControlPanel'
-import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
-import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
 import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
-import PendingBar from '../components/chat/PendingBar.vue'
-import type { ModelConfigPayload } from '../types'
+import QueueTray from '../components/chat/QueueTray.vue'
+import type { ModelConfigPayload, QueuedPromptItem } from '../types'
 import { activeGoalForSession } from '../runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from '../runtime/goalRender'
 
 const ctx = useAppContext()
-const sessionStore = useSession()
+const composer = ref<{ setDraft: (text: string) => void } | null>(null)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -30,16 +26,13 @@ const sendBlockedReason = computed(() => {
     ? availability.message || '还没有可用模型，请先配置模型。'
     : ''
 })
-const activeBottomControl = computed(() =>
-  activeBottomControlPanel(
-    ctx.boot.value?.control || null,
-    sessionStore.active.value || null,
-  ),
+const pendingInteraction = computed(
+  () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
 )
 const showProfileOnboardingPrompt = computed(
   () =>
     ctx.boot.value?.profileOnboarding?.status === 'pending' &&
-    !activeBottomControl.value,
+    !pendingInteraction.value,
 )
 const activeGoal = computed(() => {
   const projected = activeGoalForSession(
@@ -213,6 +206,19 @@ function normalizeReasoningEffort(value?: string | null) {
     .toLowerCase()
   return normalized
 }
+
+async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  if (await ctx.manageQueuedPrompt(item.id, 'cancel'))
+    composer.value?.setDraft(item.content)
+}
+
+async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'interject')
+}
+
+async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'cancel')
+}
 </script>
 
 <template>
@@ -223,7 +229,7 @@ function normalizeReasoningEffort(value?: string | null) {
         <p class="truncate">
           {{ ctx.runtimeText() }} ·
           {{
-            ctx.boot.value?.modelConfig?.current?.displayName ||
+            ctx.boot.value?.modelConfig?.current?.effectiveDisplayName ||
             ctx.boot.value?.model ||
             'model'
           }}
@@ -295,18 +301,17 @@ function normalizeReasoningEffort(value?: string | null) {
             关闭
           </button>
         </form>
-        <ActiveAskPanel
-          v-if="activeBottomControl?.kind === 'ask'"
-          :interaction="activeBottomControl.interaction"
-        />
-        <ActivePlanDecisionPanel
-          v-else-if="activeBottomControl?.kind === 'plan'"
-          :interaction="activeBottomControl.interaction"
-        />
-        <PendingBar v-if="!activeBottomControl" :pending="ctx.pending" />
-        <div v-if="!activeBottomControl" class="composer-wrap">
+        <div class="composer-wrap">
+          <QueueTray
+            :items="ctx.queuedPrompts.value"
+            @edit="editQueuedPrompt"
+            @interject="interjectQueuedPrompt"
+            @cancel="cancelQueuedPrompt"
+          />
           <Composer
+            ref="composer"
             :busy="composerBusy"
+            :interaction-blocked="Boolean(pendingInteraction)"
             :goal="activeGoal"
             :goal-capture-status="goalCaptureStatus"
             :lifecycle-mode="composerLifecycleMode"

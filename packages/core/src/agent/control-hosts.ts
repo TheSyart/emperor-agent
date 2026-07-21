@@ -27,10 +27,14 @@ export function permissionOnlyControlHost(
   return {
     systemPrompt: () => '',
     toolDefinitions: (registry) => control.toolDefinitions(registry),
-    assessPermission: (name, args, registry) =>
-      control.assessPermission(name, args, registry),
+    assessPermission: (name, args, registry, opts) =>
+      control.assessPermission(name, args, registry, opts),
+    assessPermissionBatch: (calls, registry, opts) =>
+      control.assessPermissionBatch(calls, registry, opts),
     permissionApprovalResult: (decision, opts) =>
       control.permissionApprovalResult(decision as never, opts),
+    permissionBatchApprovalResult: (batch, opts) =>
+      control.permissionBatchApprovalResult(batch as never, opts),
     assessClarification: () => ({
       required: false,
       reason: '',

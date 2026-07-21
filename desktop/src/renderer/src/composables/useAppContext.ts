@@ -9,10 +9,12 @@ import type {
   BootstrapPayload,
   ChatMessage,
   ChatSendPayload,
+  ControlInteraction,
   CompactResult,
   MemoryVersionDetail,
   DesktopPetPayload,
   PendingState,
+  QueuedPromptItem,
   RuntimeStatus,
   GoalProjectionState,
   GoalOperationResult,
@@ -34,6 +36,8 @@ export interface AppContext {
   configContent: Ref<string>
 
   messages: Ref<ChatMessage[]>
+  queuedPrompts: Ref<QueuedPromptItem[]>
+  pendingInteractionsBySession: Record<string, ControlInteraction>
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>
   pending: PendingState
@@ -76,13 +80,17 @@ export interface AppContext {
   setDesktopPetEnabled: (enabled: boolean) => Promise<DesktopPetPayload>
 
   setPermissionMode: (
-    mode: 'ask_before_edit' | 'accept_edits' | 'auto',
+    mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
   ) => Promise<{ ok: boolean; error?: string }>
   activatePlan: () => Promise<LifecycleTransitionResult>
   activateGoalCapture: () => Promise<LifecycleTransitionResult>
   startGoalWithLifecycle: (outcome: string) => Promise<GoalOperationResult>
   dismissLifecycle: () => Promise<LifecycleTransitionResult>
   sendMessage: (payload: string | ChatSendPayload) => boolean
+  manageQueuedPrompt: (
+    promptId: string,
+    action: 'cancel' | 'interject',
+  ) => Promise<boolean>
   sendInteractionAnswer: (
     interactionId: string,
     answers: Record<string, unknown>,

@@ -157,16 +157,16 @@ describe('Goal slash command orchestration', () => {
   it('exits an independent Plan before arming Goal capture', async () => {
     const ctx = setup()
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
     vi.mocked(core).mockResolvedValue({
-      mode: 'auto',
+      mode: 'full_access',
       previous_mode: null,
     } as never)
 
     await ctx.executeSlashCommand('/goal', '/goal', command('/goal'))
 
-    expect(core).toHaveBeenCalledWith('control.setMode', 'auto')
+    expect(core).toHaveBeenCalledWith('control.setMode', 'full_access')
     expect(ctx.armGoalCapture).toHaveBeenCalledOnce()
     expect(vi.mocked(core).mock.invocationCallOrder[0]).toBeLessThan(
       ctx.armGoalCapture.mock.invocationCallOrder[0],
@@ -208,7 +208,7 @@ describe('Plan and permission slash command orchestration', () => {
       control: { mode: 'ask_before_edit', previous_mode: null },
     } as BootstrapPayload
     vi.mocked(core).mockResolvedValue({
-      mode: 'accept_edits',
+      mode: 'smart_auto',
       previous_mode: null,
     } as never)
 
@@ -217,10 +217,7 @@ describe('Plan and permission slash command orchestration', () => {
       '/mode',
       controlCommand('/mode'),
     )
-    expect(core).toHaveBeenCalledWith(
-      'control.setPermissionMode',
-      'accept_edits',
-    )
+    expect(core).toHaveBeenCalledWith('control.setPermissionMode', 'smart_auto')
 
     vi.mocked(core).mockClear()
     await ctx.executeSlashCommand(
@@ -235,27 +232,27 @@ describe('Plan and permission slash command orchestration', () => {
   it('restores the saved permission when /plan off exits Plan', async () => {
     const ctx = setup()
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
     vi.mocked(core).mockResolvedValue({
-      mode: 'auto',
+      mode: 'full_access',
       previous_mode: null,
     } as never)
 
     await ctx.executeSlashCommand('/plan off', '/plan', controlCommand('/plan'))
 
-    expect(core).toHaveBeenCalledWith('control.setMode', 'auto')
-    expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('自动执行')
+    expect(core).toHaveBeenCalledWith('control.setMode', 'full_access')
+    expect(ctx.local.mock.calls.at(-1)?.[1]).toContain('完全访问')
   })
 
   it('cancels a paused Goal before enabling independent Plan', async () => {
     const ctx = setup(summary('paused'))
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
     vi.mocked(core).mockResolvedValue({
       mode: 'plan',
-      previous_mode: 'auto',
+      previous_mode: 'full_access',
     } as never)
 
     const result = await ctx.setPlanEnabled(true)
@@ -275,7 +272,7 @@ describe('Plan and permission slash command orchestration', () => {
   it('refuses to enable Plan while Goal is running', async () => {
     const ctx = setup(summary('executing'))
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
 
     const result = await ctx.setPlanEnabled(true)
@@ -289,7 +286,7 @@ describe('Plan and permission slash command orchestration', () => {
   it('does not let /plan off alter Goal-owned internal planning', async () => {
     const ctx = setup(summary('paused'))
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
 
     await ctx.executeSlashCommand('/plan off', '/plan', controlCommand('/plan'))
@@ -301,7 +298,7 @@ describe('Plan and permission slash command orchestration', () => {
   it('keeps repeated Plan activation idempotent', async () => {
     const ctx = setup()
     ctx.deps.boot.value = {
-      control: { mode: 'plan', previous_mode: 'auto' },
+      control: { mode: 'plan', previous_mode: 'full_access' },
     } as BootstrapPayload
 
     const result = await ctx.setPlanEnabled(true)

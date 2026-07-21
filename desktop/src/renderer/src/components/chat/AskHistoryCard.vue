@@ -2,13 +2,18 @@
 import { computed } from 'vue'
 import type { ControlInteraction } from '../../types'
 import { askHistoryPresentation } from './askInteractionModel'
+import ActiveAskPanel from './ActiveAskPanel.vue'
 
 const props = defineProps<{ interaction: ControlInteraction }>()
 const presentation = computed(() => askHistoryPresentation(props.interaction))
 </script>
 
 <template>
-  <section class="ask-history-card" :data-tone="presentation.tone">
+  <section
+    class="ask-history-card"
+    :data-tone="presentation.tone"
+    :data-interaction-type="props.interaction.meta?.interaction_type || 'ask'"
+  >
     <div class="ask-history-main">
       <span class="ask-history-dot" />
       <div class="min-w-0">
@@ -29,5 +34,9 @@ const presentation = computed(() => askHistoryPresentation(props.interaction))
         <strong>{{ answer.value }}</strong>
       </div>
     </div>
+    <ActiveAskPanel
+      v-if="props.interaction.status === 'waiting'"
+      :interaction="props.interaction"
+    />
   </section>
 </template>

@@ -6,6 +6,11 @@ import type { ToolRegistry } from '../tools/registry'
 import type { PermissionDecision } from './models'
 import { PermissionPipeline } from './pipeline'
 import type { PermissionRuleInput } from './rules'
+import type { ShellReadonlyContext } from './shell-ast'
+
+interface PermissionAssessmentOptions extends ShellReadonlyContext {
+  readonly registry?: ToolRegistry | null
+}
 
 export class PermissionPolicy {
   readonly pipeline: PermissionPipeline
@@ -22,7 +27,7 @@ export class PermissionPolicy {
     toolName: string,
     args: Record<string, unknown> | null | undefined,
     mode: string,
-    opts?: { registry?: ToolRegistry | null },
+    opts?: PermissionAssessmentOptions,
   ): PermissionDecision {
     return this.pipeline.assess(toolName, args, mode, opts)
   }

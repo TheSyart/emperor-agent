@@ -44,6 +44,8 @@ const EXPECTED_OPERATIONS = [
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
+  'chat.listQueuedPrompts',
+  'chat.manageQueuedPrompt',
   'chat.stopRuntime',
   'chat.submit',
   'config.effective',
@@ -279,6 +281,16 @@ describe('CoreApi (MIG-IPC-001)', () => {
         currentPlanId: interaction.meta.plan_id,
       },
     })
+    expect(
+      api.runtime
+        .replay({ sessionId })
+        .events.filter((event) => event.event === 'plan_step_update'),
+    ).toEqual([
+      expect.objectContaining({
+        plan_id: planId,
+        step: expect.objectContaining({ id: 'step_1', status: 'active' }),
+      }),
+    ])
     await api.close()
   })
 

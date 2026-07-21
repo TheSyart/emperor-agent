@@ -23,6 +23,7 @@ import { GoalGateMutationLedger } from '../goals/mutation-ledger'
 
 export interface ControlStoreInspection {
   readonly record: ControlState | null
+  readonly migrationRequired: boolean
   readonly issue: {
     readonly code: 'control_state_missing' | 'control_state_corrupt'
     readonly path: string
@@ -61,7 +62,10 @@ export class ControlStore {
   }
 
   load(): ControlState {
-    return this.inspect().record ?? defaultControlState()
+    const inspected = this.inspect()
+    const record = inspected.record ?? defaultControlState()
+    if (inspected.record && inspected.migrationRequired) this.save(record)
+    return record
   }
 
   /** Pure fail-closed read for completion-sensitive callers. */
@@ -69,6 +73,7 @@ export class ControlStore {
     if (!existsSync(this.stateFile))
       return {
         record: null,
+        migrationRequired: false,
         issue: { code: 'control_state_missing', path: this.stateFile },
       }
     try {
@@ -84,10 +89,15 @@ export class ControlStore {
           !record.lastInteraction)
       )
         throw new Error('invalid Control interaction')
-      return { record, issue: null }
+      return {
+        record,
+        migrationRequired: Number(raw.version ?? 1) < SCHEMA_VERSION,
+        issue: null,
+      }
     } catch {
       return {
         record: null,
+        migrationRequired: false,
         issue: { code: 'control_state_corrupt', path: this.stateFile },
       }
     }

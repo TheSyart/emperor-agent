@@ -317,7 +317,7 @@ test('first saved model returns to chat and completes the profile interview', as
   await prompt.getByRole('button', { name: '去配置模型' }).click()
   await page.getByRole('button', { name: '添加模型', exact: true }).click()
   await page.getByLabel('模型 ID').fill('visual-main')
-  await page.getByLabel('显示名称（可选）').fill('Visual First Run')
+  await page.getByLabel('标识', { exact: true }).fill('Visual First Run')
   await page.getByRole('button', { name: '保存模型' }).click()
 
   await expect(page).toHaveURL(/\/chat$/)
@@ -352,7 +352,9 @@ test('profile onboarding can start, defer, skip, and restart from settings', asy
     fullPage: false,
   })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expectDialogWithinViewport(page, page.locator('.active-ask-panel'))
+  const inlineAsk = page.locator('.active-ask-panel')
+  await inlineAsk.scrollIntoViewIfNeeded()
+  await expectDialogWithinViewport(page, inlineAsk)
   await page.screenshot({
     path: resolve(screenshotDir, 'profile-onboarding-ask-mobile.png'),
     fullPage: false,
@@ -1077,6 +1079,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'openai',
         modelId: 'visual-main',
         displayName: 'Visual Local',
+        effectiveDisplayName: 'Visual Local',
         apiBase: 'https://visual.example/v1',
         apiKey: '',
         capabilityOverrides: { vision: true },
@@ -1105,6 +1108,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'anthropic',
         modelId: 'claude-visual-sonnet',
         displayName: 'Claude Visual',
+        effectiveDisplayName: 'Claude Visual',
         apiBase: 'https://api.anthropic.com',
         reasoningEffort: 'medium',
       }
@@ -1115,6 +1119,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: 'openai',
         modelId: 'visual-main',
         displayName: 'Visual Local',
+        effectiveDisplayName: 'Visual Local',
         apiBase: 'https://visual.example/v1',
         reasoningEffort: 'high',
         contextWindowTokens: 128000,
@@ -1133,6 +1138,7 @@ async function installVisualCoreBridge(page: Page) {
         protocol: entry.protocol,
         modelId: entry.modelId,
         displayName: entry.displayName || null,
+        effectiveDisplayName: entry.displayName || entry.modelId,
         apiBase: entry.apiBase,
         reasoningEffort: entry.reasoningEffort ?? null,
         contextWindowTokens: entry.contextWindowTokens,
@@ -1912,6 +1918,7 @@ async function installVisualCoreBridge(page: Page) {
                 ...input,
                 entryId,
                 apiKey: '',
+                effectiveDisplayName: input.displayName || input.modelId,
                 resolvedProfile: {
                   ...visualModelEntry.resolvedProfile,
                   toolCall: overrides.toolCall ?? true,
@@ -2705,7 +2712,7 @@ async function assertFloatingModeMenu(page: Page) {
   const menu = page.locator('.mode-menu')
   await expect(menu).toBeVisible()
   await expect(page.locator('.mode-option')).toHaveCount(3)
-  for (const label of ['询问确认', '接受编辑', '自动执行']) {
+  for (const label of ['询问确认', '智能自动', '完全访问']) {
     await expect(menu.getByText(label, { exact: true })).toBeVisible()
   }
   await expect(menu.getByText('计划预览', { exact: true })).toHaveCount(0)

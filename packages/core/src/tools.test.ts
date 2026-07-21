@@ -657,7 +657,7 @@ describe('RunCommand OS containment contract', () => {
     expect(existsSync(target)).toBe(false)
   })
 
-  it('allows a proven read-only command to degrade truthfully with an unsandboxed receipt', async () => {
+  it('fails closed when a required command runner returns an unsandboxed receipt', async () => {
     const requests: OwnedProcessRequest[] = []
     const runner: OwnedProcessRunner = {
       capability: () => ({
@@ -695,10 +695,10 @@ describe('RunCommand OS containment contract', () => {
       command: 'pwd',
     })
 
-    expect(requests[0]!.containment.mode).toBe('preferred')
+    expect(requests[0]!.containment.mode).toBe('required')
     expect(result).toMatchObject({
-      modelContent: dir,
-      isError: false,
+      modelContent: expect.stringContaining('OS sandbox unavailable'),
+      isError: true,
       metadata: {
         containment: {
           decision: 'unsandboxed',

@@ -4,7 +4,7 @@ export function composerSendDisabled(opts: {
   attachmentCount: number
   sendBlockedReason?: string | null
 }): boolean {
-  if (opts.busy) return !opts.content.trim() || opts.attachmentCount > 0
+  if (opts.busy) return !opts.content.trim() && opts.attachmentCount === 0
   if (opts.sendBlockedReason) return true
   return !opts.content.trim() && opts.attachmentCount === 0
 }
@@ -21,7 +21,7 @@ export function composerStopPresentation(goalActive: boolean) {
       }
 }
 
-export type ControlModeValue = 'ask_before_edit' | 'accept_edits' | 'auto'
+export type ControlModeValue = 'ask_before_edit' | 'smart_auto' | 'full_access'
 
 export interface ComposerControlProjection {
   mode?: string | null
@@ -40,19 +40,19 @@ export const composerModeOptions: ComposerModeOption[] = [
     value: 'ask_before_edit',
     label: '询问确认',
     short: '询问',
-    description: '高风险或不确定操作前先确认',
+    description: '只读操作直接执行；编辑、Shell 与外部写入先确认',
   },
   {
-    value: 'accept_edits',
-    label: '接受编辑',
-    short: '编辑',
-    description: '文件编辑可直接执行，shell、团队和定时任务仍需确认',
+    value: 'smart_auto',
+    label: '智能自动',
+    short: '智能',
+    description: '自动执行本地安全操作，高影响和不确定操作先确认',
   },
   {
-    value: 'auto',
-    label: '自动执行',
-    short: '自动',
-    description: '在当前权限下直接推进任务',
+    value: 'full_access',
+    label: '完全访问',
+    short: '完全',
+    description: '不再请求普通权限，但仍遵守明确拒绝和系统边界',
   },
 ]
 
@@ -60,8 +60,8 @@ export function normalizeComposerControlMode(
   mode: string | null | undefined,
 ): ControlModeValue {
   if (mode === 'normal' || !mode) return 'ask_before_edit'
-  if (mode === 'accept_edits') return 'accept_edits'
-  if (mode === 'auto') return 'auto'
+  if (mode === 'smart_auto' || mode === 'accept_edits') return 'smart_auto'
+  if (mode === 'full_access' || mode === 'auto') return 'full_access'
   return 'ask_before_edit'
 }
 

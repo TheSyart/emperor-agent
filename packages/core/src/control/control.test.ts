@@ -567,9 +567,9 @@ describe('ControlManager (test_control.py)', () => {
 
   it('plan approval restores auto mode', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-auto-'))
-    manager.setMode(ControlMode.AUTO)
+    manager.setMode(ControlMode.FULL_ACCESS)
     manager.setMode(ControlMode.PLAN)
-    expect(manager.payload().previous_mode).toBe(ControlMode.AUTO)
+    expect(manager.payload().previous_mode).toBe(ControlMode.FULL_ACCESS)
 
     const interaction = manager.createPlan({
       title: '自动模式计划',
@@ -579,15 +579,15 @@ describe('ControlManager (test_control.py)', () => {
       riskLevel: 'low',
     })
     manager.approve(interaction.id)
-    expect(manager.payload().mode).toBe(ControlMode.AUTO)
+    expect(manager.payload().mode).toBe(ControlMode.FULL_ACCESS)
     expect(manager.payload().previous_mode).toBeNull()
   })
 
   it('plan approval restores accept_edits mode', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-accept-edits-'))
-    manager.setMode(ControlMode.ACCEPT_EDITS)
+    manager.setMode(ControlMode.SMART_AUTO)
     manager.setMode(ControlMode.PLAN)
-    expect(manager.payload().previous_mode).toBe(ControlMode.ACCEPT_EDITS)
+    expect(manager.payload().previous_mode).toBe(ControlMode.SMART_AUTO)
 
     const interaction = manager.createPlan({
       title: '编辑模式计划',
@@ -597,18 +597,18 @@ describe('ControlManager (test_control.py)', () => {
       riskLevel: 'low',
     })
     manager.approve(interaction.id)
-    expect(manager.payload().mode).toBe(ControlMode.ACCEPT_EDITS)
+    expect(manager.payload().mode).toBe(ControlMode.SMART_AUTO)
     expect(manager.payload().previous_mode).toBeNull()
   })
 
   it('changes the saved execution permission during Plan without leaving Plan', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-plan-permission-'))
-    manager.setMode(ControlMode.AUTO)
+    manager.setMode(ControlMode.FULL_ACCESS)
     manager.setMode(ControlMode.PLAN)
 
-    const updated = manager.setPermissionMode(ControlMode.ACCEPT_EDITS)
+    const updated = manager.setPermissionMode(ControlMode.SMART_AUTO)
     expect(updated.mode).toBe(ControlMode.PLAN)
-    expect(updated.previous_mode).toBe(ControlMode.ACCEPT_EDITS)
+    expect(updated.previous_mode).toBe(ControlMode.SMART_AUTO)
 
     const interaction = manager.createPlan({
       title: '使用最新权限执行',
@@ -619,7 +619,7 @@ describe('ControlManager (test_control.py)', () => {
     })
     manager.approve(interaction.id)
 
-    expect(manager.payload().mode).toBe(ControlMode.ACCEPT_EDITS)
+    expect(manager.payload().mode).toBe(ControlMode.SMART_AUTO)
     expect(manager.payload().previous_mode).toBeNull()
   })
 
@@ -627,7 +627,7 @@ describe('ControlManager (test_control.py)', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-permission-only-'))
 
     expect(() => manager.setPermissionMode(ControlMode.PLAN)).toThrow(
-      'permission mode must be ask_before_edit, accept_edits or auto',
+      'permission mode must be ask_before_edit, smart_auto or full_access',
     )
   })
 
@@ -742,6 +742,36 @@ describe('ControlManager (test_control.py)', () => {
     expect(assessment.required).toBe(false)
   })
 
+  it.each(['删除项目内文件', '全部删除'])(
+    'clarification: leaves destructive permission decisions to PermissionManager: %s',
+    (content) => {
+      const manager = new ControlManager(tmp('emperor-ctrl-clar-delete-'))
+      const assessment = manager.assessClarification([
+        { role: 'user', content },
+      ])
+
+      expect(assessment).toEqual({
+        required: false,
+        reason: '',
+        categories: [],
+        questions: [],
+      })
+    },
+  )
+
+  it('clarification: asks only the matched UI question without injecting scope', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-clar-ui-only-'))
+    const assessment = manager.assessClarification([
+      { role: 'user', content: '这个前端界面的视觉取舍还没确定' },
+    ])
+
+    expect(assessment.required).toBe(true)
+    expect(assessment.categories).toEqual(['ui'])
+    expect(assessment.questions.map((question) => question.id)).toEqual([
+      'ui_priority',
+    ])
+  })
+
   it('clarification: skips decision-complete plan', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-clar4-'))
     const assessment = manager.assessClarification([
@@ -796,6 +826,23 @@ describe('PlanDecisionPolicy (test_plan_decision_policy.py)', () => {
     expect(decision.triggers).toEqual(decision.signals)
     expect(decision.recommendedReadonlyScopes.length).toBeGreaterThan(0)
   })
+
+  it.each([
+    '全部删除',
+    '删除项目内文件',
+    'git push origin main',
+    '部署当前构建',
+  ])(
+    'does not turn a concrete side effect into Plan approval: %s',
+    (request) => {
+      const decision = policy.assess(request, {
+        mode: ControlMode.ASK_BEFORE_EDIT,
+        hasPending: false,
+      })
+
+      expect(decision.behavior).toBe('proceed')
+    },
+  )
 
   it('serializes runtime contract', () => {
     const decision = policy.assess(
@@ -853,7 +900,7 @@ describe('PlanDecisionPolicy (test_plan_decision_policy.py)', () => {
 // ── PE-13: test_permission_pipeline_v2.py::test_high_risk_in_approved_plan_still_requires_approval ──
 
 describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
-  it('high-risk command in approved plan still requires approval; low-risk uses token path', () => {
+  it('high-risk command in approved plan still requires approval; a plan token may approve one ordinary shell command', async () => {
     const manager = new ControlManager(tmp('emperor-pe13-'))
     // 注入一个 token 消费者：始终返回 token（模拟已批准计划）
     manager.permissionManager['controlManager'].consumePlanPermissionToken =
@@ -867,14 +914,14 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
         reason: '',
       })
 
-    const decision = manager.assessPermission(
+    const decision = await manager.assessPermission(
       'run_command',
       { command: 'git push origin main' },
       null,
     )
     expect(decision.requiresApproval).toBe(true)
 
-    const low = manager.assessPermission(
+    const low = await manager.assessPermission(
       'run_command',
       { command: 'echo hi from plan' },
       null,
@@ -883,9 +930,10 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
     expect(low.rule).toBe('plan.permission_token')
   })
 
-  it('tags permission approval Ask with the originating session', () => {
-    const manager = new ControlManager(tmp('emperor-permission-owner-'))
-    const decision = manager.assessPermission(
+  it('publishes only a safe permission batch view with stable option ids', async () => {
+    const root = tmp('emperor-permission-owner-')
+    const manager = new ControlManager(root)
+    const decision = await manager.assessPermission(
       'run_command',
       { command: 'git push origin main' },
       null,
@@ -899,16 +947,535 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
     const pending = manager.payload().pending as Record<string, unknown>
     const meta = pending.meta as Record<string, unknown>
     expect(meta.control_session_id).toBe('session_permission_owner')
+    expect(meta.interaction_type).toBe('permission')
     const permission = meta.permission as Record<string, unknown>
-    expect(permission.explanation).toMatchObject({
-      version: 1,
-      selected: {
-        source: { kind: 'core_policy', trust: 'system' },
+    expect(permission).toMatchObject({
+      version: 2,
+      operation_count: 1,
+      operations: [
+        {
+          tool_name: 'run_command',
+          risk: expect.any(String),
+          reason: expect.any(String),
+          summary: expect.any(String),
+        },
+      ],
+    })
+    expect(String(permission.request_id)).toMatch(/^permission_/)
+    expect(permission).not.toHaveProperty('fingerprint')
+    expect(permission).not.toHaveProperty('session_id')
+    expect(permission).not.toHaveProperty('diagnostics')
+    expect(String(pending.context)).not.toContain('Permission Guard')
+    expect(String(pending.context)).not.toContain('trace')
+    expect(String(pending.context)).not.toContain('arguments')
+    expect((pending.questions as unknown[])[0]).toMatchObject({
+      options: [
+        { id: 'allow_once', label: '允许本次' },
+        { id: 'deny', label: '拒绝' },
+        {
+          id: 'allow_and_full_access',
+          label: '允许并切换到完全访问',
+        },
+      ],
+    })
+  })
+
+  it('publishes distinct workspace-relative paths for an exact destructive batch', async () => {
+    const root = tmp('emperor-permission-path-summary-')
+    const manager = new ControlManager(root)
+    const calls = [
+      'strikeforce.html',
+      'A4 Paper Burn.html',
+      'terminal.html',
+    ].map((path, index) => ({
+      id: `call_${index + 1}`,
+      name: 'delete_file',
+      arguments: { path: join(root, path) },
+    }))
+    const batch = await manager.assessPermissionBatch(calls, null, {
+      sessionId: 'session_permission_path_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+
+    manager.permissionBatchApprovalResult(batch, {
+      sessionId: 'session_permission_path_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+
+    const pending = manager.payload().pending!
+    const permission = pending.meta.permission as Record<string, unknown>
+    const operations = permission.operations as Array<Record<string, unknown>>
+    expect(operations.map((operation) => operation.summary)).toEqual([
+      'delete_file strikeforce.html',
+      'delete_file A4 Paper Burn.html',
+      'delete_file terminal.html',
+    ])
+    expect(JSON.stringify(permission)).not.toContain(root)
+  })
+
+  it('keeps long, multi-path, and bidi-controlled permission targets visibly distinct', async () => {
+    const root = tmp('emperor-permission-adversarial-summary-')
+    const longPrefix = `nested/${'a'.repeat(260)}`
+    const manager = new ControlManager(root)
+    const longBatch = await manager.assessPermissionBatch(
+      ['-one.txt', '-two.txt'].map((suffix, index) => ({
+        id: `long_${index + 1}`,
+        name: 'delete_file',
+        arguments: { path: join(root, `${longPrefix}${suffix}`) },
+      })),
+      null,
+      {
+        sessionId: 'session_permission_long_summary',
+        workspaceRoot: root,
+        cwd: root,
       },
-      shell: {
-        parser: 'emperor-shell-ast-v1',
-        readonly: false,
+    )
+    manager.permissionBatchApprovalResult(longBatch, {
+      sessionId: 'session_permission_long_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    const longPermission = manager.payload().pending!.meta.permission as Record<
+      string,
+      unknown
+    >
+    const longSummaries = (
+      longPermission.operations as Array<Record<string, unknown>>
+    ).map((operation) => String(operation.summary))
+    expect(new Set(longSummaries).size).toBe(2)
+    expect(
+      longSummaries.every((summary) => /#[0-9a-f]{10}$/.test(summary)),
+    ).toBe(true)
+    manager.cancel(manager.payload().pending!.id)
+
+    const renameBatch = await manager.assessPermissionBatch(
+      [
+        {
+          id: 'rename_long_paths',
+          name: 'rename_file',
+          arguments: {
+            source: join(root, `${longPrefix}-source.txt`),
+            destination: join(root, `${longPrefix}-destination.txt`),
+          },
+        },
+      ],
+      null,
+      {
+        sessionId: 'session_permission_long_summary',
+        workspaceRoot: root,
+        cwd: root,
       },
+    )
+    manager.permissionBatchApprovalResult(renameBatch, {
+      sessionId: 'session_permission_long_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    const renamePermission = manager.payload().pending!.meta
+      .permission as Record<string, unknown>
+    const renameSummary = String(
+      (renamePermission.operations as Array<Record<string, unknown>>)[0]!
+        .summary,
+    )
+    expect(renameSummary).toContain('source=')
+    expect(renameSummary).toContain('destination=')
+    expect(renameSummary.match(/#[0-9a-f]{10}/g)).toHaveLength(2)
+    manager.cancel(manager.payload().pending!.id)
+
+    const bidiName = `safe\u202Egnp.txt`
+    const bidiBatch = await manager.assessPermissionBatch(
+      [
+        {
+          id: 'bidi_path',
+          name: 'delete_file',
+          arguments: { path: join(root, bidiName) },
+        },
+      ],
+      null,
+      {
+        sessionId: 'session_permission_long_summary',
+        workspaceRoot: root,
+        cwd: root,
+      },
+    )
+    manager.permissionBatchApprovalResult(bidiBatch, {
+      sessionId: 'session_permission_long_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    const bidiPermission = manager.payload().pending!.meta.permission as Record<
+      string,
+      unknown
+    >
+    const bidiSummary = String(
+      (bidiPermission.operations as Array<Record<string, unknown>>)[0]!.summary,
+    )
+    expect(bidiSummary).not.toContain('\u202E')
+    expect(bidiSummary).toMatch(/#[0-9a-f]{10}$/)
+    manager.cancel(manager.payload().pending!.id)
+
+    const edgeBatch = await manager.assessPermissionBatch(
+      ['edge.txt', 'edge.txt ', '\tedge.txt', 'edge.txt\u2028'].map(
+        (path, index) => ({
+          id: `edge_${index + 1}`,
+          name: 'delete_file',
+          arguments: { path: join(root, path) },
+        }),
+      ),
+      null,
+      {
+        sessionId: 'session_permission_long_summary',
+        workspaceRoot: root,
+        cwd: root,
+      },
+    )
+    manager.permissionBatchApprovalResult(edgeBatch, {
+      sessionId: 'session_permission_long_summary',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    const edgePermission = manager.payload().pending!.meta.permission as Record<
+      string,
+      unknown
+    >
+    const edgeSummaries = (
+      edgePermission.operations as Array<Record<string, unknown>>
+    ).map((operation) => String(operation.summary))
+    expect(new Set(edgeSummaries).size).toBe(4)
+    expect(
+      edgeSummaries.slice(1).every((summary) => /#[0-9a-f]{10}$/.test(summary)),
+    ).toBe(true)
+    expect(edgeSummaries.join('\n')).not.toMatch(/[\t\u2028]/u)
+    manager.cancel(manager.payload().pending!.id)
+
+    const externalBatch = await manager.assessPermissionBatch(
+      ['/private/one/shared.txt', '/private/two/shared.txt'].map(
+        (path, index) => ({
+          id: `external_${index + 1}`,
+          name: 'delete_file',
+          arguments: { path },
+        }),
+      ),
+      null,
+      { sessionId: 'session_permission_external_summary' },
+    )
+    manager.permissionBatchApprovalResult(externalBatch, {
+      sessionId: 'session_permission_external_summary',
+    })
+    const externalPermission = manager.payload().pending!.meta
+      .permission as Record<string, unknown>
+    const externalSummaries = (
+      externalPermission.operations as Array<Record<string, unknown>>
+    ).map((operation) => String(operation.summary))
+    expect(new Set(externalSummaries).size).toBe(2)
+    expect(
+      externalSummaries.every((summary) =>
+        /^delete_file \[external\]\/shared\.txt #[0-9a-f]{10}$/.test(summary),
+      ),
+    ).toBe(true)
+    expect(externalSummaries.join('\n')).not.toContain('/private/')
+  })
+
+  it('approves the current operation and switches to full access from the permission Ask', async () => {
+    const manager = new ControlManager(tmp('emperor-permission-full-access-'))
+    const args = { command: 'git push origin main' }
+    const decision = await manager.assessPermission('run_command', args, null)
+    manager.permissionApprovalResult(decision, {
+      parentCallId: 'call_permission_full_access',
+      sessionId: 'session_permission_full_access',
+    })
+    const pending = manager.payload().pending!
+
+    const resume = manager.answer(pending.id, {
+      permission: {
+        option_id: 'allow_and_full_access',
+        choice: '允许并切换到完全访问',
+      },
+    })
+
+    expect(manager.payload().mode).toBe('full_access')
+    expect(resume.message).toContain('[CONTROL:PERMISSION_ANSWERED]')
+    expect(resume.message).toContain('authorization_id: permission_')
+    await expect(
+      manager.assessPermission('run_command', args, null, {
+        sessionId: 'session_permission_full_access',
+        authorizationId: String(
+          (pending.meta.permission as Record<string, unknown>).request_id,
+        ),
+      }),
+    ).resolves.toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      rule: 'mode.full_access',
+    })
+  })
+
+  it('fails closed for forged or negated permission choices', async () => {
+    for (const choice of ['不允许', '不要完全访问', 'do not allow', 'allow']) {
+      const manager = new ControlManager(tmp('emperor-permission-forged-'))
+      const args = { command: 'git push origin main' }
+      const decision = await manager.assessPermission('run_command', args, null)
+      manager.permissionApprovalResult(decision, {
+        sessionId: 'session_forged',
+      })
+      const pending = manager.payload().pending!
+      const requestId = String(
+        (pending.meta.permission as Record<string, unknown>).request_id,
+      )
+      manager.answer(pending.id, {
+        permission: { option_id: choice, choice },
+      })
+
+      await expect(
+        manager.assessPermission('run_command', args, null, {
+          sessionId: 'session_forged',
+          authorizationId: requestId,
+        }),
+      ).resolves.toMatchObject({
+        allowed: false,
+        requiresApproval: false,
+        rule: 'user.denied_once',
+      })
+      expect(manager.payload().mode).toBe('ask_before_edit')
+    }
+  })
+
+  it('binds an allow-once grant to the originating session', async () => {
+    const manager = new ControlManager(tmp('emperor-permission-session-grant-'))
+    const args = { command: 'git push origin main' }
+    const decision = await manager.assessPermission('run_command', args, null)
+    manager.permissionApprovalResult(decision, { sessionId: 'session_a' })
+    const pending = manager.payload().pending!
+    const requestId = String(
+      (pending.meta.permission as Record<string, unknown>).request_id,
+    )
+    manager.answer(pending.id, {
+      permission: { option_id: 'allow_once', choice: '允许本次' },
+    })
+
+    await expect(
+      manager.assessPermission('run_command', args, null, {
+        sessionId: 'session_b',
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({
+      allowed: false,
+      requiresApproval: true,
+    })
+    await expect(
+      manager.assessPermission('run_command', args, null, {
+        sessionId: 'session_a',
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      rule: 'user.approved_once',
+    })
+  })
+
+  it('approves an exact permission batch once and rejects an expanded batch', async () => {
+    const root = tmp('emperor-permission-batch-')
+    const manager = new ControlManager(root)
+    const calls = ['a.txt', 'b.txt', 'c.txt'].map((path, index) => ({
+      id: `call_${index + 1}`,
+      name: 'delete_file',
+      arguments: { path },
+    }))
+    const batch = await manager.assessPermissionBatch(calls, null, {
+      sessionId: 'session_batch',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    expect(batch.requiresApproval).toBe(true)
+
+    manager.permissionBatchApprovalResult(batch, {
+      sessionId: 'session_batch',
+    })
+    const pending = manager.payload().pending!
+    const requestId = String(
+      (pending.meta.permission as Record<string, unknown>).request_id,
+    )
+    expect(
+      (pending.meta.permission as Record<string, unknown>).operation_count,
+    ).toBe(3)
+    manager.answer(pending.id, {
+      permission: { option_id: 'allow_once', choice: '允许本次' },
+    })
+
+    const restarted = new ControlManager(root)
+    await expect(
+      restarted.assessPermissionBatch(calls, null, {
+        sessionId: 'session_batch',
+        workspaceRoot: root,
+        cwd: root,
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      authorizationId: requestId,
+    })
+
+    await expect(
+      restarted.assessPermissionBatch(
+        [
+          ...calls,
+          { id: 'call_4', name: 'delete_file', arguments: { path: 'd.txt' } },
+        ],
+        null,
+        {
+          sessionId: 'session_batch',
+          workspaceRoot: root,
+          cwd: root,
+          authorizationId: requestId,
+        },
+      ),
+    ).resolves.toMatchObject({ allowed: false, requiresApproval: true })
+  })
+
+  it('rejects expanded, reordered, or changed batches before an approved grant is consumed', async () => {
+    const root = tmp('emperor-permission-unconsumed-batch-')
+    const manager = new ControlManager(root)
+    const calls = ['a.txt', 'b.txt', 'c.txt'].map((path, index) => ({
+      id: `call_${index + 1}`,
+      name: 'delete_file',
+      arguments: { path },
+    }))
+    const batch = await manager.assessPermissionBatch(calls, null, {
+      sessionId: 'session_unconsumed_batch',
+      workspaceRoot: root,
+      cwd: root,
+    })
+    manager.permissionBatchApprovalResult(batch, {
+      sessionId: 'session_unconsumed_batch',
+    })
+    const pending = manager.payload().pending!
+    const requestId = String(
+      (pending.meta.permission as Record<string, unknown>).request_id,
+    )
+    manager.answer(pending.id, {
+      permission: { option_id: 'allow_once', choice: '允许本次' },
+    })
+
+    const assess = (candidate: typeof calls) =>
+      manager.assessPermissionBatch(candidate, null, {
+        sessionId: 'session_unconsumed_batch',
+        workspaceRoot: root,
+        cwd: root,
+        authorizationId: requestId,
+      })
+    await expect(
+      assess([
+        ...calls,
+        { id: 'call_4', name: 'delete_file', arguments: { path: 'd.txt' } },
+      ]),
+    ).resolves.toMatchObject({ allowed: false, requiresApproval: true })
+    await expect(
+      assess([calls[1]!, calls[0]!, calls[2]!]),
+    ).resolves.toMatchObject({ allowed: false, requiresApproval: true })
+    await expect(
+      assess([
+        calls[0]!,
+        calls[1]!,
+        { ...calls[2]!, arguments: { path: 'changed.txt' } },
+      ]),
+    ).resolves.toMatchObject({ allowed: false, requiresApproval: true })
+    await expect(assess(calls)).resolves.toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      authorizationId: requestId,
+    })
+  })
+
+  it('never lets an approved request override a later explicit deny rule', async () => {
+    const root = tmp('emperor-permission-deny-precedence-')
+    const args = { command: 'git push origin main' }
+    const manager = new ControlManager(root)
+    const decision = await manager.assessPermission('run_command', args, null, {
+      sessionId: 'session_deny_precedence',
+    })
+    manager.permissionApprovalResult(decision, {
+      sessionId: 'session_deny_precedence',
+    })
+    const pending = manager.payload().pending!
+    const requestId = String(
+      (pending.meta.permission as Record<string, unknown>).request_id,
+    )
+    manager.answer(pending.id, {
+      permission: { option_id: 'allow_once', choice: '允许本次' },
+    })
+
+    const tightened = new ControlManager(root, {
+      permissionRules: [
+        {
+          id: 'deny-push-after-approval',
+          action: 'deny',
+          tool: 'run_command',
+          commandPrefix: 'git push',
+          reason: 'push is managed-denied',
+        },
+      ],
+    })
+    await expect(
+      tightened.assessPermission('run_command', args, null, {
+        sessionId: 'session_deny_precedence',
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'user_rule.deny-push-after-approval',
+    })
+  })
+
+  it('fails closed when a model boundary exceeds the permission batch limit', async () => {
+    const manager = new ControlManager(tmp('emperor-permission-batch-limit-'))
+    const calls = Array.from({ length: 65 }, (_, index) => ({
+      id: `call_${index + 1}`,
+      name: 'delete_file',
+      arguments: { path: `${index + 1}.txt` },
+    }))
+
+    await expect(
+      manager.assessPermissionBatch(calls, null, {
+        sessionId: 'session_batch_limit',
+      }),
+    ).resolves.toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'permission.batch_limit',
+    })
+    expect(manager.payload().pending).toBeNull()
+  })
+
+  it('cancels an unrecoverable pending permission after private store corruption', async () => {
+    const root = tmp('emperor-permission-corrupt-recovery-')
+    const manager = new ControlManager(root)
+    const decision = await manager.assessPermission(
+      'run_command',
+      { command: 'git push origin main' },
+      null,
+      { sessionId: 'session_corrupt_permission' },
+    )
+    manager.permissionApprovalResult(decision, {
+      sessionId: 'session_corrupt_permission',
+    })
+    expect(manager.payload().pending).not.toBeNull()
+    writeFileSync(
+      join(root, 'control', 'permission-requests.json'),
+      '{broken',
+      'utf8',
+    )
+
+    const restarted = new ControlManager(root)
+    expect(restarted.payload().pending).toBeNull()
+    expect(restarted.payload().last_interaction).toMatchObject({
+      kind: 'ask',
+      status: 'cancelled',
+      meta: { interaction_type: 'permission' },
     })
   })
 })
