@@ -131,7 +131,7 @@ onBeforeUnmount(() =>
   padding: 0 8px 10px;
   border: 1px solid rgb(var(--border));
   border-radius: 14px 14px 10px 10px;
-  background: rgb(var(--paper-2));
+  background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   overflow: visible;
 }
@@ -261,7 +261,7 @@ onBeforeUnmount(() =>
 
 .queue-menu-popover button:hover,
 .queue-menu-popover button:focus-visible {
-  background: rgb(var(--paper-2));
+  background: rgb(var(--bg-inset));
   outline: none;
 }
 

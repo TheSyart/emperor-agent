@@ -90,7 +90,7 @@ const legendEntries = computed(() => {
     entries.push({
       key: otherKey,
       label: '其他',
-      color: 'rgb(var(--muted) / 0.65)',
+      color: 'rgb(var(--fg-muted) / 0.65)',
     })
   }
   return entries

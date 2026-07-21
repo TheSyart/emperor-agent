@@ -113,7 +113,7 @@ function fullJson(value: unknown) {
                 }}</time>
               </div>
               <ExpandableText
-                class="text-muted"
+                class="text-fg-muted"
                 :text="
                   tool.summary || fullJson(tool.arguments) || '等待结果...'
                 "

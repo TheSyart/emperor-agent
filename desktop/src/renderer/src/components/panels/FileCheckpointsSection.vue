@@ -388,7 +388,7 @@ function message(reason: unknown): string {
 
 <style scoped>
 .checkpoint-section {
-  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.2));
+  border: 1px solid rgb(var(--border));
   border-radius: 10px;
   overflow: hidden;
 }
@@ -419,7 +419,7 @@ function message(reason: unknown): string {
 .checkpoint-head span,
 .checkpoint-card-head span,
 .checkpoint-empty span {
-  color: var(--text-muted, #888);
+  color: rgb(var(--fg-muted));
   font-size: 12px;
 }
 
@@ -429,7 +429,7 @@ function message(reason: unknown): string {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.25));
+  border: 1px solid rgb(var(--border));
   border-radius: 7px;
   background: transparent;
   color: inherit;
@@ -461,11 +461,11 @@ function message(reason: unknown): string {
   gap: 8px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.16));
+  border-top: 1px solid rgb(var(--border));
 }
 
 .checkpoint-git-preview > span {
-  color: var(--text-muted, #888);
+  color: rgb(var(--fg-muted));
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -475,19 +475,19 @@ function message(reason: unknown): string {
 .checkpoint-card {
   gap: 10px;
   padding: 12px 14px;
-  border-top: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.16));
+  border-top: 1px solid rgb(var(--border));
 }
 
 .checkpoint-error {
-  color: #dc4c64;
+  color: rgb(var(--danger));
 }
 
 .checkpoint-ok {
-  color: #2c9564;
+  color: rgb(var(--ok));
 }
 
 .checkpoint-warning {
-  color: #d68a22;
+  color: rgb(var(--warn));
 }
 
 .checkpoint-card-head {
@@ -504,7 +504,7 @@ function message(reason: unknown): string {
   display: grid;
   gap: 4px;
   margin: 9px 0 0 26px;
-  color: var(--text-muted, #888);
+  color: rgb(var(--fg-muted));
   font:
     12px/1.4 ui-monospace,
     SFMono-Regular,
@@ -530,11 +530,11 @@ function message(reason: unknown): string {
   margin-top: 10px;
   padding: 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, #2c9564 9%, transparent);
+  background: rgb(var(--ok) / 0.09);
 }
 
 .checkpoint-preview.blocked {
-  background: color-mix(in srgb, #d68a22 10%, transparent);
+  background: rgb(var(--warn) / 0.1);
 }
 
 .checkpoint-preview-title {
@@ -544,8 +544,8 @@ function message(reason: unknown): string {
 
 .checkpoint-danger {
   justify-self: end;
-  border-color: color-mix(in srgb, #dc4c64 55%, transparent);
-  color: #dc4c64;
+  border-color: rgb(var(--danger) / 0.55);
+  color: rgb(var(--danger));
 }
 
 .spin {

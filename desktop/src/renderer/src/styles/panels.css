@@ -3,7 +3,7 @@
 }
 
 .panel-toolbar {
-  @apply flex shrink-0 items-center gap-3 rounded-[1.25rem] border border-line/55 bg-paper2/35 px-3 py-2;
+  @apply flex shrink-0 items-center gap-3 rounded-[1.25rem] border border-border/55 bg-bg-inset/35 px-3 py-2;
 }
 
 .panel-toolbar input,
@@ -30,19 +30,19 @@
 .team-roster,
 .team-timeline,
 .team-detail {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.45rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.45rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .team-section-head {
-  @apply flex shrink-0 items-center justify-between gap-3 border-b border-line/60 bg-paper2/45 px-4 py-3;
+  @apply flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-bg-inset/45 px-4 py-3;
 }
 
 .team-section-head h2 {
-  @apply font-display text-lg font-black leading-tight text-ink;
+  @apply font-display text-lg font-black leading-tight text-fg;
 }
 
 .team-section-head p {
-  @apply mt-1 text-xs text-muted;
+  @apply mt-1 text-xs text-fg-muted;
 }
 
 .team-member-list {
@@ -50,19 +50,19 @@
 }
 
 .team-member-row {
-  @apply flex min-h-[4.65rem] w-full items-center gap-3 rounded-[1.2rem] border border-line/55 bg-paper2/45 px-3 py-2 text-left transition hover:border-seal/30 hover:bg-paper/80;
+  @apply flex min-h-[4.65rem] w-full items-center gap-3 rounded-[1.2rem] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-accent/30 hover:bg-bg/80;
 }
 
 .team-member-row.active {
-  @apply border-seal/35 bg-seal/10 shadow-insetPaper;
+  @apply border-accent/35 bg-accent/10 shadow-insetPaper;
 }
 
 .team-member-row.working {
-  @apply border-amber/35 bg-amber/10;
+  @apply border-warn/35 bg-warn/10;
 }
 
 .team-member-row.error {
-  @apply border-seal/35 bg-seal/10;
+  @apply border-accent/35 bg-accent/10;
 }
 
 .team-member-row.shutdown,
@@ -71,34 +71,34 @@
 }
 
 .team-member-row strong {
-  @apply block truncate font-display text-base font-black text-ink;
+  @apply block truncate font-display text-base font-black text-fg;
 }
 
 .team-member-row small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
 }
 
 .team-member-row em,
 .team-status-pill {
-  @apply shrink-0 rounded-full border border-line/60 bg-paper px-2 py-1 text-[10px] not-italic text-muted;
+  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
 }
 
 .team-status-pill.working {
-  @apply border-amber/35 bg-amber/15 text-amber;
+  @apply border-warn/35 bg-warn/15 text-warn;
 }
 
 .team-status-pill.error,
 .team-status-pill.shutdown {
-  @apply border-seal/35 bg-seal/10 text-seal;
+  @apply border-danger/35 bg-danger/10 text-danger;
 }
 
 .team-avatar {
-  @apply size-11 shrink-0 rounded-xl border border-line/60 bg-paper/80;
+  @apply size-11 shrink-0 rounded-xl border border-border/60 bg-bg/80;
   image-rendering: pixelated;
 }
 
 .team-create {
-  @apply flex shrink-0 flex-col gap-2 border-t border-line/60 bg-paper2/35 p-3;
+  @apply flex shrink-0 flex-col gap-2 border-t border-border/60 bg-bg-inset/35 p-3;
 }
 
 .team-form-row {
@@ -113,7 +113,7 @@
 }
 
 .team-timeline {
-  @apply bg-paper/60;
+  @apply bg-bg/60;
 }
 
 .team-message-scroll {
@@ -122,32 +122,32 @@
     linear-gradient(
       90deg,
       transparent,
-      rgb(var(--line) / 0.08) 49%,
-      rgb(var(--line) / 0.08) 51%,
+      rgb(var(--border) / 0.08) 49%,
+      rgb(var(--border) / 0.08) 51%,
       transparent
     ),
     radial-gradient(
       circle at 50% 0%,
-      rgb(var(--amber) / 0.08),
+      rgb(var(--warn) / 0.08),
       transparent 28rem
     );
 }
 
 .team-message {
-  @apply rounded-[1.15rem] border border-line/60 bg-paper/80 px-4 py-3 text-sm shadow-sm;
+  @apply rounded-[1.15rem] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
 }
 
 .team-message.to-lead {
-  @apply border-jade/25 bg-jade/10;
+  @apply border-ok/25 bg-ok/10;
 }
 
 .team-message.task,
 .team-message.to-member {
-  @apply border-amber/25 bg-amber/10;
+  @apply border-warn/25 bg-warn/10;
 }
 
 .team-message.error {
-  @apply border-seal/30 bg-seal/10;
+  @apply border-accent/30 bg-accent/10;
 }
 
 .team-message-top {
@@ -155,19 +155,19 @@
 }
 
 .team-message-top strong {
-  @apply min-w-0 truncate font-display text-sm font-black text-ink;
+  @apply min-w-0 truncate font-display text-sm font-black text-fg;
 }
 
 .team-message-top span {
-  @apply shrink-0 font-mono text-[10px] text-muted;
+  @apply shrink-0 font-mono text-[10px] text-fg-muted;
 }
 
 .team-message p {
-  @apply mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-ink;
+  @apply mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-fg;
 }
 
 .team-empty {
-  @apply grid h-full min-h-[16rem] place-items-center rounded-[1.35rem] border border-dashed border-line/70 bg-paper2/35 text-sm text-muted;
+  @apply grid h-full min-h-[16rem] place-items-center rounded-[1.35rem] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
 }
 
 .team-empty img {
@@ -180,32 +180,32 @@
 }
 
 .team-detail-body.muted {
-  @apply justify-center text-center text-muted;
+  @apply justify-center text-center text-fg-muted;
 }
 
 .team-stamp {
-  @apply flex items-center gap-3 rounded-[1.25rem] border border-line/60 bg-paper2/45 p-3;
+  @apply flex items-center gap-3 rounded-[1.25rem] border border-border/60 bg-bg-inset/45 p-3;
 }
 
 .team-stamp img {
-  @apply size-16 shrink-0 rounded-[1.05rem] border border-line/60 bg-paper/80;
+  @apply size-16 shrink-0 rounded-[1.05rem] border border-border/60 bg-bg/80;
   image-rendering: pixelated;
 }
 
 .team-stamp strong {
-  @apply block truncate font-display text-xl font-black text-ink;
+  @apply block truncate font-display text-xl font-black text-fg;
 }
 
 .team-stamp span {
-  @apply mt-1 block font-mono text-xs text-muted;
+  @apply mt-1 block font-mono text-xs text-fg-muted;
 }
 
 .team-tool-cloud {
-  @apply flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-[1.2rem] border border-line/60 bg-paper2/35 p-3;
+  @apply flex max-h-44 flex-wrap gap-2 overflow-y-auto rounded-[1.2rem] border border-border/60 bg-bg-inset/35 p-3;
 }
 
 .team-tool-cloud span {
-  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border border-line/55 bg-paper/70 px-2.5 py-1 font-mono text-[10px] text-muted;
+  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/55 bg-bg/70 px-2.5 py-1 font-mono text-[10px] text-fg-muted;
 }
 
 .team-tool-cloud img {
@@ -222,7 +222,7 @@
 }
 
 .team-error {
-  @apply rounded-[1rem] border border-seal/30 bg-seal/10 px-3 py-2 text-xs leading-6 text-seal;
+  @apply rounded-[1rem] border border-accent/30 bg-accent/10 px-3 py-2 text-xs leading-6 text-accent;
 }
 
 .scheduler-panel {
@@ -240,23 +240,23 @@
 .scheduler-roster,
 .scheduler-timeline,
 .scheduler-detail {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.45rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.45rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .scheduler-summary {
-  @apply grid shrink-0 grid-cols-2 gap-2 border-b border-line/60 bg-paper2/35 p-3;
+  @apply grid shrink-0 grid-cols-2 gap-2 border-b border-border/60 bg-bg-inset/35 p-3;
 }
 
 .scheduler-summary div {
-  @apply rounded-[1rem] border border-line/55 bg-paper/70 px-3 py-2;
+  @apply rounded-[1rem] border border-border/55 bg-bg/70 px-3 py-2;
 }
 
 .scheduler-summary span {
-  @apply block font-mono text-[10px] uppercase tracking-[0.14em] text-muted;
+  @apply block font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .scheduler-summary strong {
-  @apply mt-1 block truncate font-display text-sm font-black text-ink;
+  @apply mt-1 block truncate font-display text-sm font-black text-fg;
 }
 
 .scheduler-job-list {
@@ -264,11 +264,11 @@
 }
 
 .scheduler-job-row {
-  @apply flex min-h-[5.2rem] w-full items-center gap-3 rounded-[1.2rem] border border-line/55 bg-paper2/45 px-3 py-2 text-left transition hover:border-jade/30 hover:bg-paper/80;
+  @apply flex min-h-[5.2rem] w-full items-center gap-3 rounded-[1.2rem] border border-border/55 bg-bg-inset/45 px-3 py-2 text-left transition hover:border-ok/30 hover:bg-bg/80;
 }
 
 .scheduler-job-row.active {
-  @apply border-jade/40 bg-jade/10 shadow-insetPaper;
+  @apply border-ok/40 bg-ok/10 shadow-insetPaper;
 }
 
 .scheduler-job-row.paused {
@@ -276,28 +276,28 @@
 }
 
 .scheduler-job-row.error {
-  @apply border-seal/35 bg-seal/10;
+  @apply border-accent/35 bg-accent/10;
 }
 
 .scheduler-job-row strong {
-  @apply block truncate font-display text-base font-black text-ink;
+  @apply block truncate font-display text-base font-black text-fg;
 }
 
 .scheduler-job-row small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
 }
 
 .scheduler-job-row em {
-  @apply shrink-0 rounded-full border border-line/60 bg-paper px-2 py-1 text-[10px] not-italic text-muted;
+  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
 }
 
 .scheduler-job-icon {
-  @apply size-11 shrink-0 rounded-xl border border-line/60 bg-paper/80;
+  @apply size-11 shrink-0 rounded-xl border border-border/60 bg-bg/80;
   image-rendering: pixelated;
 }
 
 .scheduler-create {
-  @apply flex shrink-0 flex-col gap-2 border-t border-line/60 bg-paper2/35 p-3;
+  @apply flex shrink-0 flex-col gap-2 border-t border-border/60 bg-bg-inset/35 p-3;
 }
 
 .scheduler-create input,
@@ -309,7 +309,7 @@
 }
 
 .scheduler-check {
-  @apply inline-flex items-center gap-2 rounded-[0.85rem] border border-line/50 bg-paper/55 px-3 py-2 text-xs text-muted;
+  @apply inline-flex items-center gap-2 rounded-[0.85rem] border border-border/50 bg-bg/55 px-3 py-2 text-xs text-fg-muted;
 }
 
 .scheduler-check input {
@@ -322,43 +322,43 @@
     linear-gradient(
       90deg,
       transparent,
-      rgb(var(--line) / 0.08) 49%,
-      rgb(var(--line) / 0.08) 51%,
+      rgb(var(--border) / 0.08) 49%,
+      rgb(var(--border) / 0.08) 51%,
       transparent
     ),
     radial-gradient(
       circle at 50% 0%,
-      rgb(var(--jade) / 0.08),
+      rgb(var(--ok) / 0.08),
       transparent 28rem
     );
 }
 
 .scheduler-run {
-  @apply rounded-[1.15rem] border border-line/60 bg-paper/80 px-4 py-3 text-sm shadow-sm;
+  @apply rounded-[1.15rem] border border-border/60 bg-bg/80 px-4 py-3 text-sm shadow-sm;
 }
 
 .scheduler-run.ok {
-  @apply border-jade/25 bg-jade/10;
+  @apply border-ok/25 bg-ok/10;
 }
 
 .scheduler-run.error {
-  @apply border-seal/35 bg-seal/10;
+  @apply border-accent/35 bg-accent/10;
 }
 
 .scheduler-run.cancelled {
-  @apply border-amber/35 bg-amber/10;
+  @apply border-warn/35 bg-warn/10;
 }
 
 .scheduler-run p {
-  @apply mt-2 font-mono text-xs text-ink;
+  @apply mt-2 font-mono text-xs text-fg;
 }
 
 .scheduler-run small {
-  @apply mt-2 block whitespace-pre-wrap break-words text-xs leading-6 text-seal;
+  @apply mt-2 block whitespace-pre-wrap break-words text-xs leading-6 text-accent;
 }
 
 .scheduler-empty {
-  @apply grid min-h-[10rem] place-items-center rounded-[1.2rem] border border-dashed border-line/70 bg-paper2/35 text-sm text-muted;
+  @apply grid min-h-[10rem] place-items-center rounded-[1.2rem] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
 }
 
 .scheduler-detail-body {
@@ -366,7 +366,7 @@
 }
 
 .scheduler-detail-body.muted {
-  @apply justify-center text-center text-muted;
+  @apply justify-center text-center text-fg-muted;
 }
 
 .scheduler-meta-grid {
@@ -374,11 +374,11 @@
 }
 
 .scheduler-meta-grid span {
-  @apply min-w-0 rounded-[1rem] border border-line/55 bg-paper2/35 px-3 py-2 text-xs text-ink;
+  @apply min-w-0 rounded-[1rem] border border-border/55 bg-bg-inset/35 px-3 py-2 text-xs text-fg;
 }
 
 .scheduler-meta-grid b {
-  @apply mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-muted;
+  @apply mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .scheduler-action-grid {
@@ -394,7 +394,7 @@
 }
 
 .model-form label {
-  @apply flex flex-col gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted;
+  @apply flex flex-col gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-fg-muted;
 }
 
 .model-form .span-2,
@@ -408,7 +408,7 @@
 }
 
 .model-form-section {
-  @apply grid gap-3 rounded-[1.1rem] border border-line/70 bg-paper2/35 p-3;
+  @apply grid gap-3 rounded-[1.1rem] border border-border/70 bg-bg-inset/35 p-3;
 }
 
 .model-form-section-head {
@@ -416,11 +416,11 @@
 }
 
 .model-form-section-head h4 {
-  @apply font-display text-sm font-bold text-ink;
+  @apply font-display text-sm font-bold text-fg;
 }
 
 .model-form-section-head span {
-  @apply text-xs text-muted;
+  @apply text-xs text-fg-muted;
 }
 
 .model-form-grid {
@@ -440,16 +440,16 @@
 }
 
 .model-form-v2 .form-label {
-  @apply text-xs font-semibold uppercase tracking-[0.12em] text-muted;
+  @apply text-xs font-semibold uppercase tracking-[0.12em] text-fg-muted;
 }
 
 .model-form-v2 .form-input,
 .model-form-v2 .form-select {
-  @apply rounded-2xl border border-line/70 bg-paper2/50 px-3 py-2 text-sm text-ink shadow-insetPaper;
+  @apply rounded-2xl border border-border/70 bg-bg-inset/50 px-3 py-2 text-sm text-fg shadow-insetPaper;
 }
 
 .model-form-v2 .form-select option {
-  @apply bg-paper text-ink;
+  @apply bg-bg text-fg;
 }
 
 .provider-control-row {
@@ -465,11 +465,11 @@
 }
 
 .provider-meta-row {
-  @apply flex min-h-5 flex-wrap items-center gap-2 text-xs text-muted;
+  @apply flex min-h-5 flex-wrap items-center gap-2 text-xs text-fg-muted;
 }
 
 .provider-meta-row a {
-  @apply rounded-md border border-line/60 bg-paper2/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted transition hover:border-seal/40 hover:text-seal;
+  @apply rounded-md border border-border/60 bg-bg-inset/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted transition hover:border-accent/40 hover:text-accent;
 }
 
 .model-discovery-message {
@@ -477,23 +477,23 @@
 }
 
 .model-discovery-message.ok {
-  @apply text-jade;
+  @apply text-ok;
 }
 
 .model-discovery-message.fail {
-  @apply text-amber;
+  @apply text-warn;
 }
 
 .advanced-panel {
-  @apply mt-2 rounded-[1.4rem] border border-line/70 bg-paper2/40 p-3 shadow-insetPaper;
+  @apply mt-2 rounded-[1.4rem] border border-border/70 bg-bg-inset/40 p-3 shadow-insetPaper;
 }
 
 .advanced-panel[open] {
-  @apply bg-paper2/60;
+  @apply bg-bg-inset/60;
 }
 
 .advanced-toggle {
-  @apply flex cursor-pointer items-baseline justify-between gap-3 px-1 py-1 font-display text-sm font-bold text-ink;
+  @apply flex cursor-pointer items-baseline justify-between gap-3 px-1 py-1 font-display text-sm font-bold text-fg;
   list-style: none;
 }
 
@@ -502,7 +502,7 @@
 }
 
 .advanced-toggle small {
-  @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-muted;
+  @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-fg-muted;
 }
 
 .advanced-grid {
@@ -514,7 +514,7 @@
 }
 
 .advanced-grid textarea {
-  @apply rounded-2xl border border-line/70 bg-paper/60 px-3 py-2 font-mono text-xs leading-5 text-ink shadow-insetPaper;
+  @apply rounded-2xl border border-border/70 bg-bg/60 px-3 py-2 font-mono text-xs leading-5 text-fg shadow-insetPaper;
 }
 
 /* ── ModelPanel v3: 多条目布局 ── */
@@ -528,7 +528,7 @@
 }
 
 .entry-list-pane {
-  @apply flex min-h-0 flex-col gap-3 overflow-hidden rounded-[1.4rem] border border-line/70 bg-paper/80 p-3 shadow-insetPaper;
+  @apply flex min-h-0 flex-col gap-3 overflow-hidden rounded-[1.4rem] border border-border/70 bg-bg/80 p-3 shadow-insetPaper;
 }
 
 .entry-list-head {
@@ -540,11 +540,11 @@
 }
 
 .entry-list-title span {
-  @apply font-display text-sm font-bold text-ink;
+  @apply font-display text-sm font-bold text-fg;
 }
 
 .entry-list-title small {
-  @apply font-mono text-[10px] uppercase tracking-[0.12em] text-muted;
+  @apply font-mono text-[10px] uppercase tracking-[0.12em] text-fg-muted;
 }
 
 .tool-button.compact {
@@ -557,12 +557,12 @@
 
 /* ── 底部 sticky 操作栏 ── */
 .model-action-bar {
-  @apply sticky bottom-0 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[1.3rem] border border-line/70 bg-paper/90 px-4 py-3 shadow-imperial backdrop-blur;
+  @apply sticky bottom-0 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[1.3rem] border border-border/70 bg-bg/90 px-4 py-3 shadow-imperial backdrop-blur;
   z-index: 10;
 }
 
 .model-action-bar.dirty {
-  @apply border-amber/40 bg-amber/10;
+  @apply border-warn/40 bg-warn/10;
 }
 
 .action-bar-status {
@@ -570,11 +570,11 @@
 }
 
 .dirty-badge {
-  @apply inline-flex items-center gap-1 rounded-full border border-amber/40 bg-amber/15 px-3 py-1 font-mono text-xs font-bold text-amber;
+  @apply inline-flex items-center gap-1 rounded-full border border-warn/40 bg-warn/15 px-3 py-1 font-mono text-xs font-bold text-warn;
 }
 
 .saved-badge {
-  @apply inline-flex items-center gap-1 rounded-full border border-jade/30 bg-jade/10 px-3 py-1 font-mono text-xs font-bold text-jade;
+  @apply inline-flex items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-3 py-1 font-mono text-xs font-bold text-ok;
 }
 
 .save-action[disabled] {
@@ -582,19 +582,19 @@
 }
 
 .entry-item {
-  @apply flex cursor-pointer items-start gap-3 rounded-[1.15rem] border border-line/60 bg-paper2/45 p-3 transition hover:border-seal/30 hover:bg-paper/85;
+  @apply flex cursor-pointer items-start gap-3 rounded-[1.15rem] border border-border/60 bg-bg-inset/45 p-3 transition hover:border-accent/30 hover:bg-bg/85;
 }
 
 .entry-item.active {
-  @apply border-ink/35 bg-paper/85 shadow-insetPaper;
+  @apply border-fg/35 bg-bg/85 shadow-insetPaper;
 }
 
 .entry-item.default {
-  @apply border-seal/30 bg-seal/5;
+  @apply border-accent/30 bg-accent/5;
 }
 
 .entry-item.active.default {
-  @apply border-seal/50 bg-seal/10;
+  @apply border-accent/50 bg-accent/10;
 }
 
 .entry-meta {
@@ -602,11 +602,11 @@
 }
 
 .entry-active-badge {
-  @apply inline-flex shrink-0 items-center rounded-full border border-jade/40 bg-jade/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-jade;
+  @apply inline-flex shrink-0 items-center rounded-full border border-ok/40 bg-ok/15 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-ok;
 }
 
 .entry-activate-btn {
-  @apply shrink-0 rounded-full border border-line/70 bg-paper px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-muted opacity-0 transition hover:border-seal/40 hover:text-seal;
+  @apply shrink-0 rounded-full border border-border/70 bg-bg px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-fg-muted opacity-0 transition hover:border-accent/40 hover:text-accent;
 }
 
 /* hover 任意条目时露出激活按钮；当前编辑也露出，方便快速切 */
@@ -616,7 +616,7 @@
 }
 
 .entry-active-inline {
-  @apply inline-flex shrink-0 items-center rounded-full border border-jade/40 bg-jade/15 px-3 py-1 font-mono text-xs font-bold text-jade;
+  @apply inline-flex shrink-0 items-center rounded-full border border-ok/40 bg-ok/15 px-3 py-1 font-mono text-xs font-bold text-ok;
 }
 
 .entry-editor-title {
@@ -624,31 +624,31 @@
 }
 
 .entry-title {
-  @apply truncate font-display text-sm font-bold text-ink;
+  @apply truncate font-display text-sm font-bold text-fg;
 }
 
 .entry-sub {
-  @apply mt-1 truncate font-mono text-[11px] text-muted;
+  @apply mt-1 truncate font-mono text-[11px] text-fg-muted;
 }
 
 .entry-sub code {
-  @apply rounded bg-paper2 px-1 py-0.5;
+  @apply rounded bg-bg-inset px-1 py-0.5;
 }
 
 .entry-editor {
-  @apply flex min-h-0 flex-col gap-3 overflow-y-auto rounded-[1.4rem] border border-line/70 bg-paper/80 p-4 shadow-insetPaper;
+  @apply flex min-h-0 flex-col gap-3 overflow-y-auto rounded-[1.4rem] border border-border/70 bg-bg/80 p-4 shadow-insetPaper;
 }
 
 .entry-editor-head {
-  @apply flex items-center justify-between gap-3 border-b border-line/60 pb-3;
+  @apply flex items-center justify-between gap-3 border-b border-border/60 pb-3;
 }
 
 .entry-editor-head h3 {
-  @apply truncate font-display text-base font-bold text-ink;
+  @apply truncate font-display text-base font-bold text-fg;
 }
 
 .tool-button.danger {
-  @apply border-seal/50 bg-seal/10 text-seal hover:border-seal hover:bg-seal hover:text-paper;
+  @apply border-accent/50 bg-accent/10 text-accent hover:border-accent hover:bg-accent hover:text-bg;
 }
 
 .split-panel {
@@ -673,11 +673,11 @@
 }
 
 .list-item {
-  @apply flex w-full items-start justify-between gap-4 rounded-[1.25rem] border border-line/60 bg-paper/60 p-4 transition hover:border-seal/30 hover:bg-paper;
+  @apply flex w-full items-start justify-between gap-4 rounded-[1.25rem] border border-border/60 bg-bg/60 p-4 transition hover:border-accent/30 hover:bg-bg;
 }
 
 .resource-icon {
-  @apply size-14 shrink-0 rounded-[1.15rem] border border-line/50 bg-paper2/70 p-1.5 shadow-sm;
+  @apply size-14 shrink-0 rounded-[1.15rem] border border-border/50 bg-bg-inset/70 p-1.5 shadow-sm;
   transform: scale(1.14);
 }
 
@@ -687,15 +687,15 @@
 }
 
 .list-item.active {
-  @apply border-seal/30 bg-seal/10;
+  @apply border-accent/30 bg-accent/10;
 }
 
 .item-title {
-  @apply truncate font-mono text-xs font-bold text-ink;
+  @apply truncate font-mono text-xs font-bold text-fg;
 }
 
 .item-desc {
-  @apply mt-1 line-clamp-2 text-xs leading-5 text-muted;
+  @apply mt-1 line-clamp-2 text-xs leading-5 text-fg-muted;
 }
 
 .badge-row {
@@ -703,19 +703,19 @@
 }
 
 .badge {
-  @apply inline-flex items-center rounded-full border border-line/70 bg-paper2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted;
+  @apply inline-flex items-center rounded-full border border-border/70 bg-bg-inset px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted;
 }
 
 .badge.green {
-  @apply border-jade/25 bg-jade/10 text-jade;
+  @apply border-ok/25 bg-ok/10 text-ok;
 }
 
 .badge.red {
-  @apply border-seal/25 bg-seal/10 text-seal;
+  @apply border-accent/25 bg-accent/10 text-accent;
 }
 
 .badge.gold {
-  @apply border-amber/30 bg-amber/10 text-amber;
+  @apply border-warn/30 bg-warn/10 text-warn;
 }
 
 .filter-wrap {
@@ -727,15 +727,15 @@
 }
 
 .filter-badge {
-  @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-paper2 px-2 py-0.5 font-mono text-[10px] font-bold text-muted;
+  @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] font-bold text-fg-muted;
 }
 
 .editor {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.4rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.4rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .editor-title {
-  @apply shrink-0 border-b border-line/70 bg-paper2/55 px-4 py-3 font-mono text-xs font-bold text-muted;
+  @apply shrink-0 border-b border-border/70 bg-bg-inset/55 px-4 py-3 font-mono text-xs font-bold text-fg-muted;
 }
 
 .editor textarea {
@@ -743,7 +743,7 @@
 }
 
 .editor-actions {
-  @apply flex shrink-0 items-center justify-between gap-2 border-t border-line/70 p-3;
+  @apply flex shrink-0 items-center justify-between gap-2 border-t border-border/70 p-3;
 }
 
 .skill-editor-header {
@@ -755,11 +755,11 @@
 }
 
 .skill-editor-name {
-  @apply font-display text-sm font-black text-ink;
+  @apply font-display text-sm font-black text-fg;
 }
 
 .skill-editor-file {
-  @apply rounded-full bg-paper2 px-2 py-0.5 font-mono text-[10px] text-muted;
+  @apply rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] text-fg-muted;
 }
 
 .skill-editor-badges {
@@ -767,7 +767,7 @@
 }
 
 .empty-state {
-  @apply grid min-h-48 place-items-center rounded-[1.5rem] border border-dashed border-line/80 bg-paper/50 p-6 text-center text-sm leading-7 text-muted;
+  @apply grid min-h-48 place-items-center rounded-[1.5rem] border border-dashed border-border/80 bg-bg/50 p-6 text-center text-sm leading-7 text-fg-muted;
 }
 
 .illustrated-empty {
@@ -800,7 +800,7 @@
 }
 
 .empty-note {
-  @apply rounded-[1.2rem] border border-line/60 bg-paper2/50 p-3 text-xs leading-6 text-muted;
+  @apply rounded-[1.2rem] border border-border/60 bg-bg-inset/50 p-3 text-xs leading-6 text-fg-muted;
 }
 
 .empty-note.compact {
@@ -813,12 +813,12 @@
 }
 
 .usage-board {
-  @apply relative overflow-hidden rounded-[1.7rem] border border-seal/20 bg-seal/95 p-5 text-paper shadow-lg shadow-seal/20;
+  @apply relative overflow-hidden rounded-[1.7rem] border border-accent/20 bg-accent/95 p-5 text-bg shadow-lg shadow-accent/20;
 }
 
 .usage-board::after {
   content: '';
-  @apply pointer-events-none absolute -bottom-16 -right-10 size-44 rounded-full bg-paper/10;
+  @apply pointer-events-none absolute -bottom-16 -right-10 size-44 rounded-full bg-bg/10;
 }
 
 .usage-mark {
@@ -827,7 +827,7 @@
 }
 
 .usage-total span {
-  @apply text-xs uppercase tracking-[0.18em] text-paper/70;
+  @apply text-xs uppercase tracking-[0.18em] text-bg/70;
 }
 
 .usage-total strong {
@@ -835,7 +835,7 @@
 }
 
 .usage-total small {
-  @apply mt-3 block text-xs text-paper/70;
+  @apply mt-3 block text-xs text-bg/70;
 }
 
 .usage-grid {
@@ -843,11 +843,11 @@
 }
 
 .usage-card {
-  @apply rounded-[1.35rem] border border-line/70 bg-paper/70 p-3;
+  @apply rounded-[1.35rem] border border-border/70 bg-bg/70 p-3;
 }
 
 .usage-card-title {
-  @apply mb-2 font-display text-sm font-bold text-ink;
+  @apply mb-2 font-display text-sm font-bold text-fg;
 }
 
 .usage-table {
@@ -855,7 +855,7 @@
 }
 
 .usage-row {
-  @apply flex items-center justify-between gap-3 rounded-2xl bg-paper2/60 px-3 py-2;
+  @apply flex items-center justify-between gap-3 rounded-2xl bg-bg-inset/60 px-3 py-2;
 }
 
 .usage-row strong,
@@ -864,11 +864,11 @@
 }
 
 .usage-row span {
-  @apply text-[11px] text-muted;
+  @apply text-[11px] text-fg-muted;
 }
 
 .usage-number {
-  @apply shrink-0 font-mono text-sm font-bold text-seal;
+  @apply shrink-0 font-mono text-sm font-bold text-accent;
 }
 
 .memory-body {
@@ -876,11 +876,11 @@
 }
 
 .section-label {
-  @apply px-2 py-1 font-display text-sm font-bold text-ink;
+  @apply px-2 py-1 font-display text-sm font-bold text-fg;
 }
 
 .loading-shell {
-  @apply grid min-h-dvh place-items-center gap-5 bg-paper-grain p-8 text-center;
+  @apply grid min-h-dvh place-items-center gap-5 bg-grain p-8 text-center;
 }
 
 .loading-shell > .seal {
@@ -892,7 +892,7 @@
 }
 
 .toast {
-  @apply pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 translate-y-4 rounded-full border border-line/70 bg-ink px-5 py-3 text-sm text-paper opacity-0 shadow-imperial transition;
+  @apply pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 translate-y-4 rounded-full border border-border/70 bg-fg px-5 py-3 text-sm text-bg opacity-0 shadow-imperial transition;
 }
 
 .toast.show {
@@ -910,19 +910,19 @@
 }
 
 .tokens-pill-group {
-  @apply inline-flex items-center gap-1 rounded-full border border-line/60 bg-paper/70 p-1;
+  @apply inline-flex items-center gap-1 rounded-full border border-border/60 bg-bg/70 p-1;
 }
 
 .tokens-pill {
-  @apply rounded-full px-3 py-1 text-xs font-semibold text-muted transition;
+  @apply rounded-full px-3 py-1 text-xs font-semibold text-fg-muted transition;
 }
 
 .tokens-pill[data-active='true'] {
-  @apply bg-seal text-paper shadow;
+  @apply bg-accent text-bg shadow;
 }
 
 .tokens-pill:not([data-active='true']):hover {
-  @apply text-seal;
+  @apply text-accent;
 }
 
 .tokens-body {
@@ -945,20 +945,20 @@
 }
 
 .stat-card {
-  @apply relative overflow-hidden rounded-[1.35rem] border border-line/70 bg-paper/80 px-4 py-3 shadow-sm;
+  @apply relative overflow-hidden rounded-[1.35rem] border border-border/70 bg-bg/80 px-4 py-3 shadow-sm;
 }
 
 .stat-card::after {
   content: '';
-  @apply pointer-events-none absolute -right-6 -top-6 size-20 rounded-full bg-seal/5;
+  @apply pointer-events-none absolute -right-6 -top-6 size-20 rounded-full bg-accent/5;
 }
 
 .stat-card-label {
-  @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-muted;
+  @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-fg-muted;
 }
 
 .stat-card-value {
-  @apply mt-2 block font-display text-2xl font-black text-ink;
+  @apply mt-2 block font-display text-2xl font-black text-fg;
   word-break: break-word;
 }
 
@@ -968,31 +968,31 @@
 }
 
 .stat-card-value.compact-value[data-tone='hit'] {
-  @apply text-jade;
+  @apply text-ok;
 }
 
 .stat-card-value.compact-value[data-tone='miss'] {
-  @apply text-seal;
+  @apply text-accent;
 }
 
 .stat-card-value.compact-value[data-tone='output'] {
-  @apply text-amber;
+  @apply text-warn;
 }
 
 .stat-card-hint {
-  @apply mt-1 block text-[11px] text-muted;
+  @apply mt-1 block text-[11px] text-fg-muted;
 }
 
 .activity-heatmap-card {
-  @apply rounded-[1.6rem] border border-line/70 bg-paper/85 p-4;
+  @apply rounded-[1.6rem] border border-border/70 bg-bg/85 p-4;
 }
 
 .heatmap-head {
-  @apply mb-3 flex flex-wrap items-center justify-between gap-2 font-display text-sm font-bold text-ink;
+  @apply mb-3 flex flex-wrap items-center justify-between gap-2 font-display text-sm font-bold text-fg;
 }
 
 .heatmap-legend {
-  @apply inline-flex items-center gap-1 text-[11px] text-muted;
+  @apply inline-flex items-center gap-1 text-[11px] text-fg-muted;
 }
 
 .heatmap-legend em {
@@ -1001,20 +1001,20 @@
 
 .legend-cell {
   @apply inline-block size-3 rounded-[3px];
-  background: rgb(var(--seal) / 0.08);
+  background: rgb(var(--accent) / 0.08);
 }
 
 .legend-cell[data-level='1'] {
-  background: rgb(var(--seal) / 0.22);
+  background: rgb(var(--accent) / 0.22);
 }
 .legend-cell[data-level='2'] {
-  background: rgb(var(--seal) / 0.42);
+  background: rgb(var(--accent) / 0.42);
 }
 .legend-cell[data-level='3'] {
-  background: rgb(var(--seal) / 0.65);
+  background: rgb(var(--accent) / 0.65);
 }
 .legend-cell[data-level='4'] {
-  background: rgb(var(--seal) / 0.92);
+  background: rgb(var(--accent) / 0.92);
 }
 
 .heatmap-frame {
@@ -1022,7 +1022,7 @@
 }
 
 .heatmap-months {
-  @apply mb-1 grid pl-7 text-[10px] text-muted;
+  @apply mb-1 grid pl-7 text-[10px] text-fg-muted;
   column-gap: 0;
 }
 
@@ -1035,7 +1035,7 @@
 }
 
 .heatmap-weekdays {
-  @apply grid w-6 text-[10px] text-muted;
+  @apply grid w-6 text-[10px] text-fg-muted;
   grid-template-rows: repeat(7, 14px);
   row-gap: 2px;
 }
@@ -1059,21 +1059,21 @@
   @apply rounded-[3px];
   width: 14px;
   height: 14px;
-  background: rgb(var(--seal) / 0.08);
+  background: rgb(var(--accent) / 0.08);
   transition: transform 120ms ease;
 }
 
 .heatmap-cell[data-level='1'] {
-  background: rgb(var(--seal) / 0.22);
+  background: rgb(var(--accent) / 0.22);
 }
 .heatmap-cell[data-level='2'] {
-  background: rgb(var(--seal) / 0.42);
+  background: rgb(var(--accent) / 0.42);
 }
 .heatmap-cell[data-level='3'] {
-  background: rgb(var(--seal) / 0.65);
+  background: rgb(var(--accent) / 0.65);
 }
 .heatmap-cell[data-level='4'] {
-  background: rgb(var(--seal) / 0.92);
+  background: rgb(var(--accent) / 0.92);
 }
 .heatmap-cell[data-empty='1'] {
   background: transparent;
@@ -1081,7 +1081,7 @@
 
 .heatmap-cell:hover {
   transform: scale(1.18);
-  outline: 1px solid rgb(var(--ink) / 0.45);
+  outline: 1px solid rgb(var(--fg) / 0.45);
 }
 
 /* ----------------------- Models sub panel ----------------------- */
@@ -1091,7 +1091,7 @@
 }
 
 .model-bars-card {
-  @apply relative rounded-[1.6rem] border border-line/70 bg-paper/85 p-4;
+  @apply relative rounded-[1.6rem] border border-border/70 bg-bg/85 p-4;
 }
 
 .bars-head {
@@ -1099,11 +1099,11 @@
 }
 
 .bars-head strong {
-  @apply font-display text-sm font-bold text-ink;
+  @apply font-display text-sm font-bold text-fg;
 }
 
 .bars-head p {
-  @apply mt-1 text-[11px] text-muted;
+  @apply mt-1 text-[11px] text-fg-muted;
 }
 
 .bars-legend {
@@ -1111,7 +1111,7 @@
 }
 
 .legend-item {
-  @apply inline-flex items-center gap-1.5 text-[11px] text-ink;
+  @apply inline-flex items-center gap-1.5 text-[11px] text-fg;
 }
 
 .legend-swatch {
@@ -1128,7 +1128,7 @@
 
 .bars-grid-lines span {
   @apply block h-px w-full;
-  background: rgb(var(--line) / 0.4);
+  background: rgb(var(--border) / 0.4);
 }
 
 .model-bars {
@@ -1149,13 +1149,13 @@
 .model-bar.active .model-bar-fill,
 .model-bar:focus .model-bar-fill {
   filter: brightness(1.08);
-  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.35);
+  box-shadow: inset 0 0 0 1px rgb(var(--fg) / 0.35);
 }
 
 .model-bar-fill {
   @apply flex w-full flex-col-reverse overflow-hidden rounded-md;
   min-height: 1px;
-  background: rgb(var(--seal) / 0.08);
+  background: rgb(var(--accent) / 0.08);
 }
 
 .model-bar-segment {
@@ -1164,7 +1164,7 @@
 }
 
 .bar-tooltip {
-  @apply pointer-events-none absolute -top-3 z-10 -translate-x-1/2 -translate-y-full rounded-2xl border border-line/70 bg-ink/95 px-3 py-2 text-[11px] text-paper shadow-lg;
+  @apply pointer-events-none absolute -top-3 z-10 -translate-x-1/2 -translate-y-full rounded-2xl border border-border/70 bg-fg/95 px-3 py-2 text-[11px] text-bg shadow-lg;
   min-width: 180px;
 }
 
@@ -1185,7 +1185,7 @@
 }
 
 .bar-tooltip li em {
-  @apply not-italic font-mono text-[11px] text-paper/90;
+  @apply not-italic font-mono text-[11px] text-bg/90;
 }
 
 .tooltip-swatch {
@@ -1193,11 +1193,11 @@
 }
 
 .bar-tooltip footer {
-  @apply mt-2 border-t border-paper/15 pt-1 text-[10px] uppercase tracking-[0.16em] text-paper/70;
+  @apply mt-2 border-t border-bg/15 pt-1 text-[10px] uppercase tracking-[0.16em] text-bg/70;
 }
 
 .bars-axis {
-  @apply relative mt-2 h-4 text-[10px] text-muted;
+  @apply relative mt-2 h-4 text-[10px] text-fg-muted;
 }
 
 .bars-axis span {
@@ -1207,7 +1207,7 @@
 /* ----------------------- Model list ----------------------- */
 
 .model-list-card {
-  @apply rounded-[1.6rem] border border-line/70 bg-paper/85 p-4;
+  @apply rounded-[1.6rem] border border-border/70 bg-bg/85 p-4;
 }
 
 .list-head {
@@ -1215,11 +1215,11 @@
 }
 
 .list-head strong {
-  @apply font-display text-sm font-bold text-ink;
+  @apply font-display text-sm font-bold text-fg;
 }
 
 .list-head small {
-  @apply text-[11px] text-muted;
+  @apply text-[11px] text-fg-muted;
 }
 
 .model-list {
@@ -1228,7 +1228,7 @@
 }
 
 .model-list th {
-  @apply border-b border-line/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
+  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .model-list th.num,
@@ -1237,15 +1237,15 @@
 }
 
 .model-list th.sortable {
-  @apply cursor-pointer select-none transition hover:text-seal;
+  @apply cursor-pointer select-none transition hover:text-accent;
 }
 
 .model-list td {
-  @apply border-b border-line/30 px-3 py-2 align-middle text-ink;
+  @apply border-b border-border/30 px-3 py-2 align-middle text-fg;
 }
 
 .model-list td small {
-  @apply block text-[11px] text-muted;
+  @apply block text-[11px] text-fg-muted;
 }
 
 .row-model {
@@ -1265,24 +1265,24 @@
 }
 
 .col-share em {
-  @apply mt-1 block text-right text-[11px] not-italic font-mono text-muted;
+  @apply mt-1 block text-right text-[11px] not-italic font-mono text-fg-muted;
 }
 
 .model-list-bar {
-  @apply h-1.5 w-full overflow-hidden rounded-full bg-paper2/70;
+  @apply h-1.5 w-full overflow-hidden rounded-full bg-bg-inset/70;
 }
 
 .model-list-bar span {
   @apply block h-full;
   background: linear-gradient(
     90deg,
-    rgb(var(--seal)) 0%,
-    rgb(var(--amber)) 100%
+    rgb(var(--accent)) 0%,
+    rgb(var(--warn)) 100%
   );
 }
 
 .model-list td.num.strong {
-  @apply font-bold text-seal;
+  @apply font-bold text-accent;
 }
 
 .model-list .cache-col {
@@ -1290,15 +1290,15 @@
 }
 
 .model-list .cache-value {
-  @apply text-jade;
+  @apply text-ok;
 }
 
 .model-list .cache-value.create {
-  @apply text-amber;
+  @apply text-warn;
 }
 
 .model-list .cache-value.miss {
-  @apply text-seal;
+  @apply text-accent;
 }
 
 /* ----------------------- Token cache panel ----------------------- */
@@ -1312,7 +1312,7 @@
 }
 
 .cache-stat-card::after {
-  @apply bg-jade/10;
+  @apply bg-ok/10;
 }
 
 .token-composition-card,
@@ -1320,7 +1320,7 @@
 .cache-trend-card,
 .cache-list-card,
 .cache-recent-card {
-  @apply rounded-[1.6rem] border border-line/70 bg-paper/85 p-4;
+  @apply rounded-[1.6rem] border border-border/70 bg-bg/85 p-4;
 }
 
 .cache-section-head {
@@ -1332,19 +1332,19 @@
 }
 
 .cache-section-head strong {
-  @apply font-display text-sm font-bold text-ink;
+  @apply font-display text-sm font-bold text-fg;
 }
 
 .cache-section-head p {
-  @apply mt-1 text-[11px] text-muted;
+  @apply mt-1 text-[11px] text-fg-muted;
 }
 
 .cache-section-head span {
-  @apply rounded-full border border-line/60 bg-paper2/70 px-2.5 py-1 font-mono text-[11px] font-bold text-jade;
+  @apply rounded-full border border-border/60 bg-bg-inset/70 px-2.5 py-1 font-mono text-[11px] font-bold text-ok;
 }
 
 .cache-meter {
-  @apply flex h-7 w-full overflow-hidden rounded-xl border border-line/50 bg-paper2/80;
+  @apply flex h-7 w-full overflow-hidden rounded-xl border border-border/50 bg-bg-inset/80;
 }
 
 .cache-meter span {
@@ -1356,7 +1356,7 @@
 }
 
 .cache-legend span {
-  @apply inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-paper/70 px-2.5 py-1 text-[11px] text-muted;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-fg-muted;
 }
 
 .cache-legend i {
@@ -1368,11 +1368,11 @@
 }
 
 .cache-legend strong {
-  @apply font-mono text-ink;
+  @apply font-mono text-fg;
 }
 
 .token-composition-meter {
-  @apply flex h-7 w-full overflow-hidden rounded-xl border border-line/50 bg-paper2/80;
+  @apply flex h-7 w-full overflow-hidden rounded-xl border border-border/50 bg-bg-inset/80;
 }
 
 .token-composition-meter span {
@@ -1384,7 +1384,7 @@
 }
 
 .token-composition-legend span {
-  @apply inline-flex items-center gap-1.5 rounded-full border border-line/50 bg-paper/70 px-2.5 py-1 text-[11px] text-muted;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-fg-muted;
 }
 
 .token-composition-legend i {
@@ -1396,7 +1396,7 @@
 }
 
 .token-composition-legend strong {
-  @apply font-mono text-ink;
+  @apply font-mono text-fg;
 }
 
 .tokens-quick-grid {
@@ -1405,15 +1405,15 @@
 }
 
 .tokens-quick-grid span {
-  @apply rounded-xl border border-line/40 bg-paper2/45 px-3 py-2;
+  @apply rounded-xl border border-border/40 bg-bg-inset/45 px-3 py-2;
 }
 
 .tokens-quick-grid em {
-  @apply block truncate text-[10px] not-italic uppercase tracking-[0.14em] text-muted;
+  @apply block truncate text-[10px] not-italic uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .tokens-quick-grid strong {
-  @apply mt-1 block truncate font-mono text-sm font-bold text-ink;
+  @apply mt-1 block truncate font-mono text-sm font-bold text-fg;
 }
 
 .cache-trend-frame {
@@ -1421,11 +1421,11 @@
 }
 
 .cache-trend-bars {
-  @apply flex h-44 min-w-[36rem] items-end gap-1 rounded-xl border border-line/40 bg-paper2/40 px-3 py-3;
+  @apply flex h-44 min-w-[36rem] items-end gap-1 rounded-xl border border-border/40 bg-bg-inset/40 px-3 py-3;
 }
 
 .cache-trend-bar {
-  @apply flex h-full flex-1 items-end justify-center gap-[2px] rounded-md bg-paper/50 px-[2px];
+  @apply flex h-full flex-1 items-end justify-center gap-[2px] rounded-md bg-bg/50 px-[2px];
   min-width: 8px;
 }
 
@@ -1439,15 +1439,15 @@
 }
 
 .cache-trend-bar .read {
-  @apply bg-jade;
+  @apply bg-ok;
 }
 
 .cache-trend-bar .create {
-  @apply bg-amber;
+  @apply bg-warn;
 }
 
 .cache-trend-axis {
-  @apply mt-2 flex min-w-[36rem] justify-between px-3 font-mono text-[10px] text-muted;
+  @apply mt-2 flex min-w-[36rem] justify-between px-3 font-mono text-[10px] text-fg-muted;
 }
 
 .cache-split-grid {
@@ -1459,7 +1459,7 @@
 }
 
 .cache-rank-row {
-  @apply grid items-center gap-3 rounded-xl border border-line/30 bg-paper2/45 px-3 py-2;
+  @apply grid items-center gap-3 rounded-xl border border-border/30 bg-bg-inset/45 px-3 py-2;
   grid-template-columns: auto minmax(0, 1fr) auto minmax(5rem, 0.32fr);
 }
 
@@ -1468,23 +1468,23 @@
 }
 
 .cache-rank-row strong {
-  @apply block truncate font-display text-[13px] text-ink;
+  @apply block truncate font-display text-[13px] text-fg;
 }
 
 .cache-rank-row small {
-  @apply block truncate text-[11px] text-muted;
+  @apply block truncate text-[11px] text-fg-muted;
 }
 
 .cache-rank-row em {
-  @apply font-mono text-xs not-italic text-jade;
+  @apply font-mono text-xs not-italic text-ok;
 }
 
 .cache-rank-row > span {
-  @apply h-1.5 overflow-hidden rounded-full bg-paper/80;
+  @apply h-1.5 overflow-hidden rounded-full bg-bg/80;
 }
 
 .cache-rank-row > span b {
-  @apply block h-full rounded-full bg-jade;
+  @apply block h-full rounded-full bg-ok;
 }
 
 .cache-table-wrap {
@@ -1497,11 +1497,11 @@
 }
 
 .cache-table th {
-  @apply border-b border-line/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
+  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .cache-table td {
-  @apply border-b border-line/30 px-3 py-2 align-middle text-ink;
+  @apply border-b border-border/30 px-3 py-2 align-middle text-fg;
 }
 
 .cache-table td.mono,
@@ -1514,25 +1514,25 @@
 }
 
 .cache-table .read {
-  @apply text-jade;
+  @apply text-ok;
 }
 
 .cache-table .create {
-  @apply text-amber;
+  @apply text-warn;
 }
 
 .cache-table .miss {
-  @apply text-seal;
+  @apply text-accent;
 }
 
 .cache-table .strong {
-  @apply font-bold text-seal;
+  @apply font-bold text-accent;
 }
 
 /* ─── 附件 chip：草稿条 + 用户气泡通用 ─── */
 
 .composer-shell.composer-drag-active {
-  @apply ring-2 ring-seal/40 ring-offset-2 ring-offset-paper;
+  @apply ring-2 ring-accent/40 ring-offset-2 ring-offset-bg;
 }
 
 .composer-drafts {
@@ -1544,7 +1544,7 @@
 }
 
 .attach-chip {
-  @apply inline-flex items-center gap-2 rounded-xl border border-line/60 bg-paper/80 px-2 py-1.5 shadow-sm;
+  @apply inline-flex items-center gap-2 rounded-xl border border-border/60 bg-bg/80 px-2 py-1.5 shadow-sm;
   max-width: 16rem;
 }
 .attach-chip.is-image .attach-thumb {
@@ -1552,7 +1552,7 @@
   flex-shrink: 0;
 }
 .attach-chip .attach-doc-icon {
-  @apply grid h-12 w-12 place-items-center rounded-lg border border-line/45 bg-paper2;
+  @apply grid h-12 w-12 place-items-center rounded-lg border border-border/45 bg-bg-inset;
   flex-shrink: 0;
 }
 .attach-chip .attach-doc-icon img {
@@ -1560,22 +1560,22 @@
   transform: scale(1.08);
 }
 .attach-chip.uploading {
-  @apply border-amber/40 bg-amber/10;
+  @apply border-warn/40 bg-warn/10;
 }
 .attach-chip .attach-meta {
   @apply min-w-0 flex-1 leading-tight;
 }
 .attach-chip .attach-name {
-  @apply truncate font-mono text-xs font-bold text-ink;
+  @apply truncate font-mono text-xs font-bold text-fg;
 }
 .attach-chip .attach-sub {
-  @apply truncate font-mono text-[10px] text-muted;
+  @apply truncate font-mono text-[10px] text-fg-muted;
 }
 .attach-chip .attach-remove {
-  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-paper2 text-base text-muted transition;
+  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-fg-muted transition;
 }
 .attach-chip .attach-remove:hover {
-  @apply bg-seal/15 text-seal;
+  @apply bg-accent/15 text-accent;
 }
 
 /* 用户消息气泡上方的 attach 行 */
@@ -1588,7 +1588,7 @@
   @apply flex items-center gap-2;
 }
 .entry-vision-eye {
-  @apply inline-flex h-7 w-7 items-center justify-center rounded-full border border-jade/40 bg-jade/10 leading-none text-jade shadow-sm;
+  @apply inline-flex h-7 w-7 items-center justify-center rounded-full border border-ok/40 bg-ok/10 leading-none text-ok shadow-sm;
   cursor: help;
 }
 .entry-vision-eye img {
@@ -1597,16 +1597,16 @@
 }
 
 .test-row {
-  @apply mt-3 flex flex-col gap-2 rounded-[1.25rem] border border-line/60 bg-paper2/50 p-3;
+  @apply mt-3 flex flex-col gap-2 rounded-[1.25rem] border border-border/60 bg-bg-inset/50 p-3;
 }
 .test-label {
   @apply flex flex-col gap-0.5;
 }
 .test-label > span {
-  @apply font-mono text-xs font-bold uppercase tracking-wide text-muted;
+  @apply font-mono text-xs font-bold uppercase tracking-wide text-fg-muted;
 }
 .test-label .hint {
-  @apply text-xs text-muted;
+  @apply text-xs text-fg-muted;
 }
 .test-actions {
   @apply flex flex-wrap gap-2;
@@ -1622,10 +1622,10 @@
   @apply flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 font-mono text-xs;
 }
 .test-result.ok {
-  @apply border-jade/40 bg-jade/10;
+  @apply border-ok/40 bg-ok/10;
 }
 .test-result.fail {
-  @apply border-amber/40 bg-amber/10;
+  @apply border-warn/40 bg-warn/10;
 }
 .test-result .badge {
   @apply font-bold;
@@ -1638,19 +1638,19 @@
   transform: scale(1.18);
 }
 .test-result.ok .badge {
-  @apply text-jade;
+  @apply text-ok;
 }
 .test-result.fail .badge {
-  @apply text-amber;
+  @apply text-warn;
 }
 .test-result .meta {
-  @apply text-muted;
+  @apply text-fg-muted;
 }
 .test-result .meta.jade {
-  @apply text-jade;
+  @apply text-ok;
 }
 .test-result .sample {
-  @apply max-w-[20rem] truncate rounded bg-paper px-1.5 py-0.5 text-ink;
+  @apply max-w-[20rem] truncate rounded bg-bg px-1.5 py-0.5 text-fg;
 }
 
 .tool-card-grid {
@@ -1658,11 +1658,11 @@
 }
 
 .tool-card {
-  @apply flex flex-col gap-3 rounded-[1.25rem] border border-line/60 bg-paper/75 p-4 shadow-sm transition-all duration-200;
+  @apply flex flex-col gap-3 rounded-[1.25rem] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200;
 }
 
 .tool-card:hover {
-  @apply border-seal/30 bg-paper shadow-md;
+  @apply border-accent/30 bg-bg shadow-md;
 }
 
 .tool-card-head {
@@ -1674,11 +1674,11 @@
 }
 
 .tool-card-name {
-  @apply text-sm font-bold text-ink;
+  @apply text-sm font-bold text-fg;
 }
 
 .tool-card-desc {
-  @apply mt-0.5 text-xs leading-5 text-muted;
+  @apply mt-0.5 text-xs leading-5 text-fg-muted;
 }
 
 .tool-badge-row {
@@ -1690,7 +1690,7 @@
 }
 
 .tool-param-toggle {
-  @apply flex items-center gap-1 text-xs font-medium text-muted transition-colors hover:text-ink;
+  @apply flex items-center gap-1 text-xs font-medium text-fg-muted transition-colors hover:text-fg;
 }
 
 .tool-param-caret {
@@ -1706,7 +1706,7 @@
 }
 
 .tool-param-chip {
-  @apply inline-flex rounded-md bg-paper2/80 px-2 py-0.5 text-[11px] text-muted ring-1 ring-line/50;
+  @apply inline-flex rounded-md bg-bg-inset/80 px-2 py-0.5 text-[11px] text-fg-muted ring-1 ring-border/50;
 }
 
 .tool-empty {
@@ -1718,15 +1718,15 @@
 }
 
 .skill-card {
-  @apply relative flex flex-col gap-2 rounded-[1.25rem] border border-line/60 bg-paper/75 p-4 shadow-sm transition-all duration-200 cursor-pointer;
+  @apply relative flex flex-col gap-2 rounded-[1.25rem] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200 cursor-pointer;
 }
 
 .skill-card:hover {
-  @apply border-seal/25 bg-paper shadow-md;
+  @apply border-accent/25 bg-bg shadow-md;
 }
 
 .skill-card.active {
-  @apply border-seal/30 bg-seal/[0.06];
+  @apply border-accent/30 bg-accent/[0.06];
 }
 
 .skill-card-head {
@@ -1738,11 +1738,11 @@
 }
 
 .skill-card-name {
-  @apply text-sm font-bold text-ink;
+  @apply text-sm font-bold text-fg;
 }
 
 .skill-card-desc {
-  @apply mt-0.5 text-xs leading-5 text-muted;
+  @apply mt-0.5 text-xs leading-5 text-fg-muted;
 }
 
 .skill-badge-row {
@@ -1750,11 +1750,11 @@
 }
 
 .skill-card-path {
-  @apply truncate font-mono text-[10px] text-muted/60;
+  @apply truncate font-mono text-[10px] text-fg-muted/60;
 }
 
 .skill-delete {
-  @apply absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-sm text-muted opacity-0 transition-opacity hover:bg-red-50 hover:text-seal;
+  @apply absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-sm text-fg-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-accent;
 }
 
 .skill-card:hover .skill-delete {
@@ -1762,35 +1762,35 @@
 }
 
 .skill-preview {
-  @apply min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-paper px-4 py-3 text-sm leading-6 shadow-none;
+  @apply min-h-0 flex-1 overflow-y-auto rounded-none border-0 bg-bg px-4 py-3 text-sm leading-6 shadow-none;
 }
 
 .memory-diff-preview {
-  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-none border-0 bg-paper px-4 py-3 font-mono text-[11px] leading-6 text-ink shadow-none;
+  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-none border-0 bg-bg px-4 py-3 font-mono text-[11px] leading-6 text-fg shadow-none;
 }
 
 .preview-toggle {
-  @apply cursor-pointer transition-colors hover:bg-seal/10;
+  @apply cursor-pointer transition-colors hover:bg-accent/10;
 }
 
 .preview-toggle.active {
-  @apply bg-seal/15 text-seal;
+  @apply bg-accent/15 text-accent;
 }
 
 .memory-tabs {
-  @apply inline-flex items-center gap-1 rounded-full border border-line/60 bg-paper/80 p-1;
+  @apply inline-flex items-center gap-1 rounded-full border border-border/60 bg-bg/80 p-1;
 }
 
 .memory-tab {
-  @apply rounded-full px-3.5 py-1.5 text-xs font-semibold text-muted transition;
+  @apply rounded-full px-3.5 py-1.5 text-xs font-semibold text-fg-muted transition;
 }
 
 .memory-tab[data-active='true'] {
-  @apply bg-seal text-paper shadow-sm;
+  @apply bg-accent text-bg shadow-sm;
 }
 
 .memory-tab:not([data-active='true']):hover {
-  @apply text-seal;
+  @apply text-accent;
 }
 
 .memory-stats-grid {
@@ -1798,24 +1798,24 @@
 }
 
 .memory-stat-card {
-  @apply min-w-0 rounded-[1rem] border border-line/65 bg-paper/80 px-3 py-2.5 shadow-sm;
+  @apply min-w-0 rounded-[1rem] border border-border/65 bg-bg/80 px-3 py-2.5 shadow-sm;
 }
 
 .memory-stat-card.warning {
-  @apply border-amber/50 bg-amber/10;
+  @apply border-warn/50 bg-warn/10;
 }
 
 .memory-stat-card span,
 .memory-stat-card small {
-  @apply block truncate text-[11px] font-semibold text-muted;
+  @apply block truncate text-[11px] font-semibold text-fg-muted;
 }
 
 .memory-stat-card strong {
-  @apply block truncate font-mono text-base font-black text-ink;
+  @apply block truncate font-mono text-base font-black text-fg;
 }
 
 .memory-context-strip {
-  @apply grid shrink-0 grid-cols-3 gap-3 rounded-lg border border-line/65 bg-paper/70 p-3;
+  @apply grid shrink-0 grid-cols-3 gap-3 rounded-lg border border-border/65 bg-bg/70 p-3;
 }
 
 .memory-context-strip div {
@@ -1824,11 +1824,11 @@
 
 .memory-context-strip span,
 .memory-context-strip small {
-  @apply block truncate text-[11px] font-semibold text-muted;
+  @apply block truncate text-[11px] font-semibold text-fg-muted;
 }
 
 .memory-context-strip strong {
-  @apply block truncate text-sm font-bold text-ink;
+  @apply block truncate text-sm font-bold text-fg;
 }
 
 .episode-card {
@@ -1859,16 +1859,16 @@
 }
 
 .capability-card {
-  @apply flex min-h-[10.75rem] cursor-pointer flex-col gap-0 rounded-[1.1rem] border border-line/60 bg-paper/75 p-4 shadow-sm transition-all duration-200;
+  @apply flex min-h-[10.75rem] cursor-pointer flex-col gap-0 rounded-[1.1rem] border border-border/60 bg-bg/75 p-4 shadow-sm transition-all duration-200;
 }
 
 .capability-card:hover,
 .capability-card.active {
-  @apply border-jade/35 bg-paper shadow-md;
+  @apply border-ok/35 bg-bg shadow-md;
 }
 
 .capability-card:focus-visible {
-  @apply outline-none ring-2 ring-jade/30;
+  @apply outline-none ring-2 ring-ok/30;
 }
 
 .capability-card-head {
@@ -1876,27 +1876,27 @@
 }
 
 .capability-card-icon {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[0.8rem] border border-line/60 bg-paper2/60 text-muted;
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[0.8rem] border border-border/60 bg-bg-inset/60 text-fg-muted;
 }
 
 .capability-card[data-tone='cyan'] .capability-card-icon {
-  @apply border-cyan-500/30 bg-cyan-500/10 text-cyan-300;
+  @apply border-tone-cyan/30 bg-tone-cyan/10 text-tone-cyan;
 }
 
 .capability-card[data-tone='violet'] .capability-card-icon {
-  @apply border-violet-500/30 bg-violet-500/10 text-violet-300;
+  @apply border-tone-violet/30 bg-tone-violet/10 text-tone-violet;
 }
 
 .capability-card[data-tone='slate'] .capability-card-icon {
-  @apply border-line/70 bg-paper2 text-muted;
+  @apply border-border/70 bg-bg-inset text-fg-muted;
 }
 
 .capability-card-name {
-  @apply truncate text-sm font-bold text-ink;
+  @apply truncate text-sm font-bold text-fg;
 }
 
 .capability-card-desc {
-  @apply mt-1 overflow-hidden text-xs leading-5 text-muted;
+  @apply mt-1 overflow-hidden text-xs leading-5 text-fg-muted;
   display: -webkit-box;
   height: 5rem;
   -webkit-box-orient: vertical;
@@ -1904,79 +1904,79 @@
 }
 
 .capability-card-footer {
-  @apply mt-3 flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 overflow-visible border-t border-line/35 py-2;
+  @apply mt-3 flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 overflow-visible border-t border-border/35 py-2;
   align-content: center;
 }
 
 .capability-card-path {
-  @apply mt-2 truncate font-mono text-[10px] text-muted/70;
+  @apply mt-2 truncate font-mono text-[10px] text-fg-muted/70;
 }
 
 .capability-detail-drawer {
-  @apply relative flex min-h-0 w-auto flex-col overflow-hidden rounded-[1.25rem] border border-line/70 bg-paper shadow-insetPaper;
+  @apply relative flex min-h-0 w-auto flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg shadow-insetPaper;
 }
 
 .capability-tag.blue {
-  @apply border-blue-500/35 bg-blue-500/10 text-blue-300;
+  @apply border-tone-blue/35 bg-tone-blue/10 text-tone-blue;
 }
 
 .capability-tag.green {
-  @apply border-jade/35 bg-jade/10 text-jade;
+  @apply border-ok/35 bg-ok/10 text-ok;
 }
 
 .capability-tag.gold {
-  @apply border-amber/40 bg-amber/10 text-amber;
+  @apply border-warn/40 bg-warn/10 text-warn;
 }
 
 .capability-tag.red {
-  @apply border-seal/35 bg-seal/10 text-seal;
+  @apply border-danger/35 bg-danger/10 text-danger;
 }
 
 .capability-tag.violet {
-  @apply border-violet-500/35 bg-violet-500/10 text-violet-300;
+  @apply border-tone-violet/35 bg-tone-violet/10 text-tone-violet;
 }
 
 .capability-tag.cyan {
-  @apply border-cyan-500/35 bg-cyan-500/10 text-cyan-300;
+  @apply border-tone-cyan/35 bg-tone-cyan/10 text-tone-cyan;
 }
 
 .capability-drawer-head,
 .scheduler-drawer-head {
-  @apply flex shrink-0 items-start justify-between gap-3 border-b border-line/60 bg-paper2/50 px-4 py-3;
+  @apply flex shrink-0 items-start justify-between gap-3 border-b border-border/60 bg-bg-inset/50 px-4 py-3;
 }
 
 .capability-drawer-head h2,
 .scheduler-drawer-head h2 {
-  @apply truncate font-display text-lg font-black text-ink;
+  @apply truncate font-display text-lg font-black text-fg;
 }
 
 .capability-drawer-head p,
 .scheduler-drawer-head p {
-  @apply mt-1 truncate font-mono text-[11px] text-muted;
+  @apply mt-1 truncate font-mono text-[11px] text-fg-muted;
 }
 
 .capability-drawer-badges {
-  @apply flex shrink-0 flex-wrap gap-1.5 border-b border-line/50 px-4 py-3;
+  @apply flex shrink-0 flex-wrap gap-1.5 border-b border-border/50 px-4 py-3;
 }
 
 .capability-editor-textarea {
-  @apply min-h-0 flex-1 resize-none rounded-none border-0 bg-paper px-4 py-3 font-mono text-xs leading-6 outline-none;
+  @apply min-h-0 flex-1 resize-none rounded-none border-0 bg-bg px-4 py-3 font-mono text-xs leading-6 outline-none;
 }
 
 .capability-drawer-actions {
-  @apply flex shrink-0 justify-between gap-2 border-t border-line/60 bg-paper2/45 p-3;
+  @apply flex shrink-0 justify-between gap-2 border-t border-border/60 bg-bg-inset/45 p-3;
 }
 
 .capability-detail-copy {
-  @apply shrink-0 whitespace-pre-wrap border-b border-line/50 px-4 py-3 text-sm leading-6 text-ink;
+  @apply shrink-0 whitespace-pre-wrap border-b border-border/50 px-4 py-3 text-sm leading-6 text-fg;
 }
 
 .capability-param-section {
-  @apply shrink-0 border-b border-line/50 p-4;
+  @apply shrink-0 border-b border-border/50 p-4;
 }
 
 .capability-schema {
-  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-paper2/35 p-4 font-mono text-[11px] leading-6 text-muted;
+  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-bg-inset/35 p-4 font-mono text-[11px] leading-6 text-fg-muted;
 }
 
 .tool-param-list.expanded {
@@ -1998,7 +1998,7 @@
 
 .mcp-directory-section,
 .mcp-advanced-config {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .mcp-directory-section .editor-title {
@@ -2020,7 +2020,7 @@
 }
 
 .mcp-advanced-config summary {
-  @apply flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink;
+  @apply flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-fg;
 }
 
 .mcp-advanced-config summary::-webkit-details-marker {
@@ -2028,7 +2028,7 @@
 }
 
 .mcp-advanced-config summary em {
-  @apply not-italic text-xs font-normal text-muted;
+  @apply not-italic text-xs font-normal text-fg-muted;
 }
 
 .mcp-layout {
@@ -2038,15 +2038,15 @@
 
 .mcp-editor,
 .mcp-tools {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.2rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .mcp-editor textarea {
-  @apply min-h-56 resize-y rounded-none border-0 bg-paper px-4 py-3 font-mono text-xs leading-6 outline-none;
+  @apply min-h-56 resize-y rounded-none border-0 bg-bg px-4 py-3 font-mono text-xs leading-6 outline-none;
 }
 
 .mcp-editor textarea.has-error {
-  @apply bg-seal/10;
+  @apply bg-accent/10;
 }
 
 .mcp-tool-list {
@@ -2059,7 +2059,7 @@
 }
 
 .mcp-editor-actions {
-  @apply flex shrink-0 justify-end gap-2 border-t border-line/50 p-3;
+  @apply flex shrink-0 justify-end gap-2 border-t border-border/50 p-3;
 }
 
 .scheduler-panel-v2 {
@@ -2067,15 +2067,15 @@
 }
 
 .scheduler-overview {
-  @apply flex shrink-0 flex-wrap items-center gap-2 rounded-[1.1rem] border border-line/60 bg-paper2/35 px-3 py-2;
+  @apply flex shrink-0 flex-wrap items-center gap-2 rounded-[1.1rem] border border-border/60 bg-bg-inset/35 px-3 py-2;
 }
 
 .scheduler-overview span {
-  @apply inline-flex min-h-9 items-center gap-2 rounded-[0.85rem] border border-line/50 bg-paper/65 px-3 text-xs text-muted;
+  @apply inline-flex min-h-9 items-center gap-2 rounded-[0.85rem] border border-border/50 bg-bg/65 px-3 text-xs text-fg-muted;
 }
 
 .scheduler-overview b {
-  @apply max-w-[12rem] truncate font-mono text-sm text-ink;
+  @apply max-w-[12rem] truncate font-mono text-sm text-fg;
 }
 
 .scheduler-overview .tool-button {
@@ -2089,11 +2089,11 @@
 
 .scheduler-list-shell,
 .scheduler-detail-drawer {
-  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .scheduler-detail-page {
-  @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem] border border-line/70 bg-paper/80 shadow-insetPaper;
+  @apply flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.25rem] border border-border/70 bg-bg/80 shadow-insetPaper;
 }
 
 .scheduler-detail-page-head {
@@ -2117,7 +2117,7 @@
 }
 
 .scheduler-table-head {
-  @apply shrink-0 border-b border-line/60 bg-paper2/50 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted;
+  @apply shrink-0 border-b border-border/60 bg-bg-inset/50 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
 }
 
 .scheduler-table-scroll {
@@ -2125,11 +2125,11 @@
 }
 
 .scheduler-table-row {
-  @apply min-h-[4.4rem] w-full border-b border-line/45 bg-transparent py-2 text-left text-xs text-muted transition hover:bg-paper2/65;
+  @apply min-h-[4.4rem] w-full border-b border-border/45 bg-transparent py-2 text-left text-xs text-fg-muted transition hover:bg-bg-inset/65;
 }
 
 .scheduler-table-row.active {
-  @apply bg-jade/10 text-ink;
+  @apply bg-ok/10 text-fg;
 }
 
 .scheduler-table-row.paused {
@@ -2137,7 +2137,7 @@
 }
 
 .scheduler-table-row.error {
-  @apply bg-seal/10;
+  @apply bg-accent/10;
 }
 
 .scheduler-table-row > span {
@@ -2149,15 +2149,15 @@
 }
 
 .scheduler-cell-main strong {
-  @apply block truncate text-sm font-bold text-ink;
+  @apply block truncate text-sm font-bold text-fg;
 }
 
 .scheduler-cell-main small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
 }
 
 .scheduler-inline-icon {
-  @apply shrink-0 text-muted;
+  @apply shrink-0 text-fg-muted;
 }
 
 .scheduler-status-wrap {
@@ -2165,11 +2165,11 @@
 }
 
 .scheduler-status-wrap em {
-  @apply rounded-full border border-line/55 bg-paper px-2 py-1 text-[10px] not-italic text-muted;
+  @apply rounded-full border border-border/55 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
 }
 
 .scheduler-field {
-  @apply flex flex-col gap-1.5 text-xs font-semibold text-muted;
+  @apply flex flex-col gap-1.5 text-xs font-semibold text-fg-muted;
 }
 
 .scheduler-field input,
@@ -2183,7 +2183,7 @@
 }
 
 .scheduler-history-block {
-  @apply mt-1 flex min-h-0 flex-col gap-2 rounded-[1rem] border border-line/60 bg-paper2/30 p-3;
+  @apply mt-1 flex min-h-0 flex-col gap-2 rounded-[1rem] border border-border/60 bg-bg-inset/30 p-3;
 }
 
 .scheduler-history-head {
@@ -2191,11 +2191,11 @@
 }
 
 .scheduler-history-head strong {
-  @apply text-ink;
+  @apply text-fg;
 }
 
 .scheduler-history-head span {
-  @apply font-mono text-[10px] text-muted;
+  @apply font-mono text-[10px] text-fg-muted;
 }
 
 .compact-run {
@@ -2207,7 +2207,7 @@
 }
 
 .scheduler-modal {
-  @apply flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(34rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto rounded-[1.25rem] border border-line/70 bg-paper p-4 shadow-2xl;
+  @apply flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(34rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto rounded-[1.25rem] border border-border/70 bg-bg p-4 shadow-2xl;
 }
 
 .scheduler-modal .scheduler-drawer-head {

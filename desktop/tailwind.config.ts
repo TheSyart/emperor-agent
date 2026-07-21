@@ -23,15 +23,6 @@ export default {
         'tone-cyan': 'rgb(var(--tone-cyan) / <alpha-value>)',
         'tone-violet': 'rgb(var(--tone-violet) / <alpha-value>)',
         'tone-blue': 'rgb(var(--tone-blue) / <alpha-value>)',
-        /* legacy aliases (deprecated; removed after consumers migrate) */
-        paper: 'rgb(var(--paper) / <alpha-value>)',
-        paper2: 'rgb(var(--paper-2) / <alpha-value>)',
-        ink: 'rgb(var(--ink) / <alpha-value>)',
-        muted: 'rgb(var(--muted) / <alpha-value>)',
-        line: 'rgb(var(--line) / <alpha-value>)',
-        seal: 'rgb(var(--seal) / <alpha-value>)',
-        jade: 'rgb(var(--jade) / <alpha-value>)',
-        amber: 'rgb(var(--amber) / <alpha-value>)',
       },
       fontFamily: {
         display: [
@@ -70,7 +61,7 @@ export default {
         insetPaper: 'inset 0 0 0 1px rgb(var(--border) / 0.7)',
       },
       backgroundImage: {
-        'paper-grain':
+        grain:
           'linear-gradient(180deg, rgb(var(--bg)) 0%, rgb(var(--bg-inset)) 100%)',
       },
       animation: {

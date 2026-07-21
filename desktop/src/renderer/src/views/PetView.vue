@@ -177,7 +177,7 @@ function toggleDesktopPet() {
 
 .pet-meta-label {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-text-fg-muted);
   text-transform: uppercase;
 }
 
@@ -207,7 +207,7 @@ function toggleDesktopPet() {
 
 .section-desc {
   font-size: 13px;
-  color: var(--color-text-muted);
+  color: var(--color-text-fg-muted);
   margin-bottom: 16px;
 }
 
@@ -240,6 +240,6 @@ function toggleDesktopPet() {
 
 .sprite-card figcaption {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-text-fg-muted);
 }
 </style>

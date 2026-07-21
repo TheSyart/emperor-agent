@@ -18,7 +18,7 @@
 
 /* 滚动锁定（Wave4.1）：解锁跟随时的回底浮钮 */
 .scroll-to-bottom-btn {
-  @apply sticky bottom-4 z-10 mx-auto block rounded-full border border-black/10 bg-white/90 px-4 py-1.5 text-xs shadow-md backdrop-blur transition hover:bg-white dark:border-white/10 dark:bg-neutral-800/90 dark:hover:bg-neutral-800;
+  @apply sticky bottom-4 z-10 mx-auto block rounded-full border border-border bg-bg-elevated/90 px-4 py-1.5 text-xs shadow-md backdrop-blur transition hover:bg-bg-elevated;
 }
 
 /* ── Welcome / empty ─────────────────────────────────────────────────────── */
@@ -239,7 +239,7 @@
 
 .bubble.streaming::after {
   content: '';
-  @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-amber animate-pulse-seal;
+  @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-warn animate-pulse-seal;
 }
 
 /* ── Assistant flow / timeline ───────────────────────────────────────────── */
@@ -331,7 +331,7 @@
 
 .timeline-node.text-node.streaming::after {
   content: '';
-  @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-amber animate-pulse-seal;
+  @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-warn animate-pulse-seal;
 }
 
 .plan-activity-node {
@@ -377,7 +377,7 @@
 }
 
 .thought-node.running::before {
-  @apply bg-amber animate-pulse-seal;
+  @apply bg-warn animate-pulse-seal;
 }
 
 .thought-node.done::before {
