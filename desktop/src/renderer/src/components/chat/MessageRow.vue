@@ -13,6 +13,7 @@ const props = defineProps<{
   message: ChatMessage
   plans: RuntimePlanRecord[]
 }>()
+const emit = defineEmits<{ continueExecution: [] }>()
 const schedulerClientIdPrefix = 'scheduler:'
 const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
 
@@ -165,5 +166,10 @@ function deliveryLabel(message: UserMessage): string {
       </div>
     </div>
   </article>
-  <AssistantFlow v-else :message="props.message" :plans="props.plans" />
+  <AssistantFlow
+    v-else
+    :message="props.message"
+    :plans="props.plans"
+    @continue-execution="emit('continueExecution')"
+  />
 </template>

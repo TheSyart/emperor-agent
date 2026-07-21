@@ -48,6 +48,29 @@ export function messageTombstoned(opts: {
   }
 }
 
+export function turnContinuationEvaluated(opts: {
+  decision: 'continue' | 'finalize' | 'pause'
+  reasonCode: string
+  evaluationRound: number
+  totalIterations: number
+  grantedIterations: number
+  source: 'evaluator' | 'core_policy'
+  summary: string
+  nextActions: string[]
+}): Record<string, unknown> {
+  return {
+    event: 'turn_continuation_evaluated',
+    decision: opts.decision,
+    reasonCode: opts.reasonCode,
+    evaluationRound: Math.max(0, Math.trunc(opts.evaluationRound)),
+    totalIterations: Math.max(0, Math.trunc(opts.totalIterations)),
+    grantedIterations: Math.max(0, Math.trunc(opts.grantedIterations)),
+    source: opts.source,
+    summary: String(opts.summary ?? '').slice(0, 500),
+    nextActions: opts.nextActions.slice(0, 3).map((item) => String(item)),
+  }
+}
+
 export function agentThought(opts: {
   stage: string
   label: string

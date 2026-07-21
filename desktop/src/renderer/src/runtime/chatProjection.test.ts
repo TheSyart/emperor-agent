@@ -1235,6 +1235,113 @@ describe('chatProjection', () => {
   })
 })
 
+describe('turn continuation timeline projection', () => {
+  it('projects continue, finalize, and pause decisions and settles streaming on pause', () => {
+    const state = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 't1', content: '执行复杂任务' },
+      {
+        event: 'agent_thought',
+        seq: 2,
+        turn_id: 't1',
+        label: '执行中',
+        status: 'running',
+      },
+      {
+        event: 'turn_continuation_evaluated',
+        seq: 3,
+        turn_id: 't1',
+        decision: 'continue',
+        reasonCode: 'verification_remaining',
+        evaluationRound: 1,
+        totalIterations: 20,
+        grantedIterations: 8,
+        summary: '实现已写入，继续验证。',
+        nextActions: ['运行测试'],
+      },
+      {
+        event: 'turn_continuation_evaluated',
+        seq: 4,
+        turn_id: 't1',
+        decision: 'finalize',
+        reasonCode: 'ready_to_finalize',
+        evaluationRound: 2,
+        totalIterations: 28,
+        grantedIterations: 4,
+        summary: '验证完成。',
+        nextActions: ['整理交付'],
+      },
+      {
+        event: 'turn_continuation_evaluated',
+        seq: 5,
+        turn_id: 't1',
+        decision: 'pause',
+        reasonCode: 'no_progress',
+        evaluationRound: 3,
+        totalIterations: 32,
+        grantedIterations: 0,
+        summary: '重复读取，没有形成新进展。',
+        nextActions: ['检查阻塞原因'],
+      },
+    ] as never)
+
+    const assistant = state.messages.find(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )!
+    const activities = assistant.segments.filter(
+      (segment) => segment.type === 'plan_activity',
+    )
+    expect(activities).toEqual([
+      expect.objectContaining({
+        label: '评估后继续执行 · 追加 8 次迭代',
+        tone: 'running',
+      }),
+      expect.objectContaining({
+        label: '执行完成，正在整理交付',
+        tone: 'success',
+      }),
+      expect.objectContaining({
+        label: '执行已暂停',
+        detail: '重复读取，没有形成新进展。',
+        tone: 'error',
+        action: 'continue',
+        nextActions: ['检查阻塞原因'],
+      }),
+    ])
+    expect(assistant.streaming).toBe(false)
+    expect(state.currentAssistantId).toBeNull()
+  })
+
+  it('removes stale continue actions after the explicit resume message is accepted', () => {
+    const state = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 't1', content: '执行复杂任务' },
+      {
+        event: 'turn_continuation_evaluated',
+        seq: 2,
+        turn_id: 't1',
+        decision: 'pause',
+        reasonCode: 'no_progress',
+        evaluationRound: 1,
+        totalIterations: 20,
+        grantedIterations: 0,
+        summary: '执行暂停。',
+        nextActions: ['修复后继续'],
+      },
+      { event: 'user_message', seq: 3, turn_id: 't2', content: '继续执行' },
+    ] as never)
+
+    const activities = state.messages
+      .filter(
+        (message): message is AssistantMessage => message.role === 'assistant',
+      )
+      .flatMap((message) => message.segments)
+      .filter((segment) => segment.type === 'plan_activity')
+    expect(activities).toEqual([
+      expect.objectContaining({ label: '执行已暂停' }),
+    ])
+    expect(activities[0]).not.toHaveProperty('action')
+  })
+})
+
 describe('safety refusal labeling (2026-07-05 B4.3)', () => {
   it('labels safety-refusal tool failures as blocked instead of generic failure', async () => {
     const { projectChatEvents } = await import('./chatProjection')

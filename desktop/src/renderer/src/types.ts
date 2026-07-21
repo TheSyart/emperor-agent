@@ -1472,6 +1472,8 @@ export interface PlanActivitySegment {
   label: string
   detail?: string
   tone: 'running' | 'success' | 'error' | 'neutral'
+  action?: 'continue'
+  nextActions?: string[]
 }
 
 export type AssistantSegment =
@@ -2035,6 +2037,17 @@ type WsEventVariants =
       sequence?: number
       iteration?: number
       detail?: Record<string, unknown>
+    }
+  | {
+      event: 'turn_continuation_evaluated'
+      decision: 'continue' | 'finalize' | 'pause'
+      reasonCode: string
+      evaluationRound: number
+      totalIterations: number
+      grantedIterations: number
+      source?: 'evaluator' | 'core_policy'
+      summary: string
+      nextActions: string[]
     }
   | {
       event: 'turn_scope'

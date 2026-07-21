@@ -21,6 +21,7 @@ const props = defineProps<{
   message: AssistantMessage
   plans?: RuntimePlanRecord[]
 }>()
+const emit = defineEmits<{ continueExecution: [] }>()
 const copied = ref(false)
 const flowClock = ref(Date.now())
 let flowClockTimer: number | undefined
@@ -160,6 +161,22 @@ onBeforeUnmount(stopFlowClock)
             <strong v-if="block.segment.detail">{{
               block.segment.detail
             }}</strong>
+            <ul
+              v-if="block.segment.nextActions?.length"
+              class="plan-activity-actions"
+            >
+              <li v-for="action in block.segment.nextActions" :key="action">
+                {{ action }}
+              </li>
+            </ul>
+            <button
+              v-if="block.segment.action === 'continue'"
+              type="button"
+              class="plan-activity-continue"
+              @click="emit('continueExecution')"
+            >
+              继续执行
+            </button>
           </div>
           <div
             v-else-if="block.kind === 'control' && block.segment.type === 'ask'"

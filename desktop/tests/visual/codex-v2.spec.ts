@@ -629,7 +629,12 @@ test('environment installation can be cancelled while running', async ({
   await page.getByTestId('confirm-environment-install').click()
 
   const progress = page.getByTestId('environment-progress')
-  await progress.getByRole('button', { name: '取消' }).click()
+  const cancelButton = progress.getByRole('button', { name: '取消' })
+  await expect(cancelButton).toBeVisible()
+  // The progress poll replaces this card while installation is running.
+  // Dispatch directly so Playwright does not wait for a DOM node that is
+  // intentionally replaced on every progress tick to become stable.
+  await cancelButton.dispatchEvent('click')
   await expect(progress).toContainText('已取消')
   await expect(page.getByText('安装记录')).toBeVisible()
 })

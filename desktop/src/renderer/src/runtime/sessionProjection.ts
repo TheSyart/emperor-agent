@@ -356,6 +356,10 @@ function reduceRuntimeEvent(
       next.running = false
       next.attention = foreign
     }
+    if (event.event === 'turn_continuation_evaluated') {
+      next.running = event.decision !== 'pause'
+      if (event.decision === 'pause') next.attention = foreign
+    }
     sessions = { ...state.sessions, [sessionKey]: next }
   }
 

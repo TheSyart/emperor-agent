@@ -1420,6 +1420,310 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ])
   })
 
+  it('binds Plan pause and Todo projection to the owning session while another session is active', async () => {
+    const root = tmp('emperor-agent-loop-plan-pause-scope-')
+    const stateRoot = join(root, '.emperor')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    try {
+      const sessionA = loop.activeSessionId!
+      const bindingsA = loop.sessionRuntimes.get(sessionA)!.bindings
+      const interactionA = loop.controlManager.createPlan({
+        title: 'Session A plan',
+        summary: 'A',
+        planMarkdown: '# A',
+        steps: [
+          { id: 'step_a', title: 'A', description: 'A', acceptance: ['A'] },
+        ],
+      })
+      loop.controlManager.approve(interactionA.id)
+      bindingsA.runner.controlManager?.restoreCurrentPlanTodoProjection?.()
+      const planA = String(interactionA.meta.plan_id)
+
+      const sessionB = loop.sessionStore.create('Session B')
+      loop.activateSession(sessionB.id)
+      const bindingsB = loop.sessionRuntimes.get(sessionB.id)!.bindings
+      const interactionB = loop.controlManager.createPlan({
+        title: 'Session B plan',
+        summary: 'B',
+        planMarkdown: '# B',
+        steps: [
+          { id: 'step_b', title: 'B', description: 'B', acceptance: ['B'] },
+        ],
+      })
+      loop.controlManager.approve(interactionB.id)
+      bindingsB.runner.controlManager?.restoreCurrentPlanTodoProjection?.()
+      const planB = String(interactionB.meta.plan_id)
+
+      bindingsA.runner.controlManager?.pausePlanExecution?.({
+        reason: 'no_progress',
+        turnId: 'turn_a_pause',
+        pausedAt: Date.now() / 1000,
+        evaluationCount: 1,
+        totalIterations: 20,
+        nextActions: ['Continue A'],
+      })
+
+      expect(
+        loop.controlManager.planStore.get(planA)?.metadata.execution_pause,
+      ).toBeTruthy()
+      expect(
+        loop.controlManager.planStore.get(planB)?.metadata.execution_pause,
+      ).toBeUndefined()
+      expect(bindingsA.todoStore.todos[0]?.status).toBe('pending')
+      expect(bindingsB.todoStore.todos[0]?.status).toBe('in_progress')
+    } finally {
+      await loop.close()
+    }
+  })
+
+  it('restores a paused Plan Todo projection from durable metadata after restart', async () => {
+    const root = tmp('emperor-agent-loop-plan-pause-restart-')
+    const stateRoot = join(root, '.emperor')
+    const first = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    const interaction = first.controlManager.createPlan({
+      title: 'Restart paused plan',
+      summary: 'Persist the pause.',
+      planMarkdown: '# Restart',
+      steps: [
+        {
+          id: 'step_restart',
+          title: 'Restart step',
+          description: 'Resume explicitly.',
+          acceptance: ['resumed'],
+        },
+      ],
+    })
+    first.controlManager.approve(interaction.id)
+    first.controlManager.pausePlanExecution({
+      reason: 'budget_exhausted',
+      turnId: 'turn_restart_pause',
+      pausedAt: Date.now() / 1000,
+      evaluationCount: 3,
+      totalIterations: 56,
+      nextActions: ['Resume explicitly'],
+    })
+    await first.close()
+
+    const restarted = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    try {
+      expect(restarted.todoStore.todos).toMatchObject([
+        {
+          id: 'plan:step_restart',
+          plan_id: String(interaction.meta.plan_id),
+          status: 'pending',
+        },
+      ])
+      expect(
+        restarted.controlManager.planStore.get(String(interaction.meta.plan_id))
+          ?.metadata.execution_pause,
+      ).toMatchObject({ reason: 'budget_exhausted' })
+    } finally {
+      await restarted.close()
+    }
+  })
+
+  it('resumes a paused Goal and its bound Plan through one explicit continue message', async () => {
+    const root = tmp('emperor-agent-loop-goal-plan-resume-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(
+        new QueueProvider([
+          response(null, {
+            toolCalls: [
+              {
+                id: 'resume_todo_claim',
+                name: 'update_todos',
+                arguments: {
+                  todos: [
+                    {
+                      id: 'plan:step_resume',
+                      content: 'Resume step',
+                      status: 'completed',
+                    },
+                  ],
+                },
+              },
+            ],
+            finishReason: 'tool_calls',
+          }),
+          response(null, {
+            toolCalls: [
+              {
+                id: 'resume_verification',
+                name: 'run_command',
+                arguments: { command: 'pwd' },
+              },
+            ],
+            finishReason: 'tool_calls',
+          }),
+          response(null, {
+            toolCalls: [
+              {
+                id: 'resume_todo_complete',
+                name: 'update_todos',
+                arguments: {
+                  todos: [
+                    {
+                      id: 'plan:step_resume',
+                      content: 'Resume step',
+                      status: 'completed',
+                    },
+                  ],
+                },
+              },
+            ],
+            finishReason: 'tool_calls',
+          }),
+          response('计划已恢复并完成验证。'),
+        ]),
+      ),
+      initializeMcp: false,
+    })
+    try {
+      const sessionId = loop.activeSessionId!
+      const session = loop.sessionStore.get(sessionId)!
+      const created = await loop.goalStore.create(
+        newGoalRecord({
+          id: 'goal_loop_continuation_resume',
+          outcome: 'Resume the paused Goal and Plan together.',
+          scope: {
+            sessionId,
+            mode: session.mode,
+            projectId: session.project_id,
+            workspaceRoot: session.project_path ?? loop.root,
+          },
+          now: '2026-07-21T00:00:00.000Z',
+        }),
+      )
+      const locked = await loop.goalStore.append(created.id, {
+        type: 'goal_updated',
+        expectedLastEventSeq: created.lastEventSeq,
+        record: GoalContractValidator.lock(
+          created,
+          {
+            inScope: ['resume one paused step'],
+            outOfScope: [],
+            constraints: [],
+            acceptanceCriteria: [
+              {
+                id: 'AC-1',
+                description: 'The paused step resumes.',
+                required: true,
+                verification: { kind: 'command', requirement: 'npm test' },
+              },
+            ],
+            escalationConditions: [],
+          },
+          '2026-07-21T00:00:01.000Z',
+        ),
+      })
+      loop.controlManager.setRuntimeScope(locked.scope)
+      loop.controlManager.setActiveGoalPlanContext(locked)
+      loop.controlManager.setMode('full_access')
+      loop.controlManager.setMode('plan')
+      const interaction = loop.controlManager.createPlan({
+        title: 'Resume Goal Plan',
+        summary: 'Resume the active step.',
+        planMarkdown: '# Plan\n\n- Resume',
+        steps: [
+          {
+            id: 'step_resume',
+            title: 'Resume step',
+            commands: ['pwd'],
+            acceptance: ['step resumed'],
+          },
+        ],
+      })
+      loop.controlManager.approve(interaction.id)
+      const planId = String(interaction.meta.plan_id)
+      await loop.goalPlanBridge.bindApprovedPlan({
+        goalId: locked.id,
+        planId,
+      })
+      loop.controlManager.pausePlanExecution({
+        reason: 'no_progress',
+        turnId: 'turn_before_resume',
+        pausedAt: Date.now() / 1000,
+        evaluationCount: 1,
+        totalIterations: 20,
+        nextActions: ['Continue the active step'],
+      })
+      const resumePlanExecution = vi.spyOn(
+        loop.controlManager,
+        'resumePlanExecution',
+      )
+      await loop.goalCoordinator.pause(locked.id, 'continuation_pause')
+      let resumedTurnDone!: () => void
+      const resumedTurn = new Promise<void>((resolve) => {
+        resumedTurnDone = resolve
+      })
+      let pauseAfterGoalTurn: unknown = null
+      loop.goalCoordinator.setTurnSubmitter(async (input) => {
+        await loop.runUserTurn(input.content, {
+          displayContent: input.displayContent,
+          sessionId: input.goal.scope.sessionId,
+          restoreActiveSessionAfterTurn: true,
+          source: 'goal',
+          uiHidden: input.uiHidden,
+          useActiveTask: false,
+          taskId: input.taskId,
+          turnId: input.turnId,
+          signal: input.signal,
+        })
+        pauseAfterGoalTurn =
+          loop.controlManager.planStore.get(planId)?.metadata.execution_pause
+        resumedTurnDone()
+      })
+
+      await expect(
+        loop.runUserTurn('继续执行', {
+          sessionId,
+          turnId: 'turn_explicit_goal_resume',
+        }),
+      ).resolves.toBe('')
+      await resumedTurn
+      expect(resumePlanExecution).toHaveBeenCalled()
+      expect(
+        (
+          resumePlanExecution.mock.results[0]?.value as
+            { metadata?: Record<string, unknown> } | null | undefined
+        )?.metadata?.execution_pause,
+      ).toBeUndefined()
+      expect(pauseAfterGoalTurn).not.toMatchObject({
+        turn_id: 'turn_before_resume',
+      })
+      expect(loop.goalCoordinator.active(locked.id)).not.toBeNull()
+      await loop.goalCoordinator.pause(locked.id, 'test_cleanup')
+      const handle = loop.goalCoordinator.active(locked.id)
+      if (handle) await handle.promise
+      expect(
+        loop.controlManager.planStore.get(planId)?.metadata.execution_pause,
+      ).not.toMatchObject({ turn_id: 'turn_before_resume' })
+    } finally {
+      await loop.close()
+    }
+  })
+
   it('creates a fresh execution snapshot per turn while keeping each turn fixed', async () => {
     const root = tmp('emperor-agent-loop-environment-')
     const provider = new QueueProvider([response('first'), response('second')])

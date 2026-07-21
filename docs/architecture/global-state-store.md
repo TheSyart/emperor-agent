@@ -99,6 +99,7 @@ Emperor Agent 区分两个互不重叠的根目录概念：
   control/
     state.json
     core-action.key
+    turn-continuation-diagnostics.jsonl # 有界脱敏的续跑评估私有诊断
   hooks/
     audit.jsonl
     audit/

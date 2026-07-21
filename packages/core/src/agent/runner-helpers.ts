@@ -37,14 +37,33 @@ const MAX_TURNS_SUMMARY_PENDING_LIMIT = 10
 const MAX_TURNS_SUMMARY_PROGRESS_CHARS = 300
 
 export function buildMaxTurnsSummary(input: MaxTurnsSummaryInput): string {
-  const lines: string[] = [
-    `（达到 max_turns=${input.maxTurns} 上限，自动收尾）`,
-  ]
+  const lines: string[] = ['本轮执行额度已用尽，执行已安全暂停。']
   const todos = input.todos ?? []
-  if (todos.length) {
-    const pending = todos.filter((t) => t.status !== 'completed')
+  const plan = input.plan ?? null
+  const independentTodos = plan
+    ? todos.filter(
+        (todo) =>
+          !String(todo.plan_id ?? todo.planId ?? '').trim() &&
+          !String(todo.plan_step_id ?? todo.planStepId ?? '').trim(),
+      )
+    : todos
+  if (plan) {
+    const steps = plan.steps ?? []
+    const doneSteps = steps.filter((step) =>
+      ['done', 'completed', 'skipped'].includes(String(step.status ?? '')),
+    ).length
     lines.push(
-      `已完成 ${todos.length - pending.length}/${todos.length} 项任务。`,
+      `计划「${plan.title ?? ''}」步骤完成 ${doneSteps}/${steps.length}（状态 ${plan.status ?? ''}）。`,
+    )
+    if (String(plan.status ?? '') !== 'completed' || doneSteps !== steps.length)
+      lines.push('实现可能已写入，但计划验证未完成，不能宣称任务完成。')
+  }
+  if (independentTodos.length) {
+    const pending = independentTodos.filter(
+      (todo) => todo.status !== 'completed',
+    )
+    lines.push(
+      `${plan ? '临时待办' : '任务'}完成 ${independentTodos.length - pending.length}/${independentTodos.length}。`,
     )
     if (pending.length) {
       lines.push('未完成：')
@@ -57,16 +76,8 @@ export function buildMaxTurnsSummary(input: MaxTurnsSummaryInput): string {
         )
       }
     }
-  } else {
+  } else if (!plan) {
     lines.push('本轮未登记 todo 清单。')
-  }
-  const plan = input.plan ?? null
-  if (plan) {
-    const steps = plan.steps ?? []
-    const doneSteps = steps.filter((step) => step.status === 'completed').length
-    lines.push(
-      `计划「${plan.title ?? ''}」状态 ${plan.status ?? ''}，步骤完成 ${doneSteps}/${steps.length}。`,
-    )
   }
   const progress = String(input.lastAssistantText ?? '').trim()
   if (progress)
@@ -74,7 +85,7 @@ export function buildMaxTurnsSummary(input: MaxTurnsSummaryInput): string {
       `最近进展：${progress.slice(0, MAX_TURNS_SUMMARY_PROGRESS_CHARS)}`,
     )
   lines.push(
-    '恢复方式：继续发送消息，我会从未完成项接着执行；如需详情可要求输出完整状态。',
+    '恢复方式：发送 /continue 或“继续执行”；普通问答不会自动恢复写操作。',
   )
   return lines.join('\n')
 }

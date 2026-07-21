@@ -21,6 +21,7 @@ import type { ProviderSnapshot } from '../model/router'
 import type { RunnerGoalRecordingHost } from './runner-goal-recording'
 import type { GoalContextProvider } from '../context/pipeline'
 import type { GoalToolHost } from '../goals/tools'
+import type { TurnContinuationEvaluator } from './turn-continuation'
 
 export function buildRoutedRunner(opts: {
   route: ModelRoute
@@ -35,6 +36,7 @@ export function buildRoutedRunner(opts: {
   controlManager?: ControlManagerRunnerHost | null
   maxContext?: number | null
   maxTurns?: number
+  continuationEvaluator?: TurnContinuationEvaluator | null
   workspaceRoot?: string | null
   promptSections?: PromptSectionInput[] | null
   promptContextPlan?: PromptContextPlan | null
@@ -88,6 +90,7 @@ export function buildRoutedRunner(opts: {
       snapshot.profile?.contextWindowTokens ??
       snapshot.contextWindowTokens,
     maxTurns: opts.maxTurns ?? 12,
+    continuationEvaluator: opts.continuationEvaluator ?? null,
     workspaceRoot: opts.workspaceRoot ?? null,
     promptSections: opts.promptSections ?? null,
     promptContextPlan: opts.promptContextPlan ?? null,

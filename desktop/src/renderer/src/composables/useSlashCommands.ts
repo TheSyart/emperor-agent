@@ -108,6 +108,10 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       return
     }
     const parsed = parseSlashCommand(obj.content)
+    if (!obj.attachments.length && parsed?.name === '/continue') {
+      deps.sendMessage(obj)
+      return
+    }
     if (!obj.attachments.length && parsed?.command) {
       void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
       return

@@ -5,7 +5,7 @@
  *  - tests/unit/test_control.py::test_runner_* (pause-on-ask、plan-mode wrap、ask-guard、plan-guard、answer-resume)
  * 注: ToolResultStore 相关断言（large tool result 替换、registered budget）依赖 ContextPipeline 升级，单列。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -30,6 +30,11 @@ import { MemoryStore } from '../memory/store'
 import { ExecutionEnvironment } from '../environment/snapshot'
 import { CancelledTaskError } from '../runtime/active'
 import { PlanGenerationFailedError } from '../control/exceptions'
+import { TaskManager } from '../tasks/manager'
+import type {
+  TurnContinuationEvaluator,
+  TurnContinuationInput,
+} from './turn-continuation'
 
 type Msg = Record<string, unknown>
 
@@ -632,7 +637,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       model: 'fake',
       registry,
       systemPrompt: 'system',
-      maxTurns: 5,
+      maxTurns: 8,
     })
     const history: Msg[] = [{ role: 'user', content: '写入 index.html' }]
 
@@ -1905,7 +1910,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
   it('emits tool batch phases', async () => {
     const registry = new ToolRegistry()
-    registry.register(new EchoTool())
+    registry.register(new SafeEchoTool())
     const runner = new AgentRunner({
       provider: new FakeProvider([
         makeResponse({
@@ -2488,7 +2493,11 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     manager.approve(interaction.id)
     const planId = String(interaction.meta.plan_id)
     expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
-    const boundTodo = { ...todoStore.todos[0]!, status: 'completed' }
+    const stableTodoUpdate = {
+      id: 'plan:step_1',
+      content: 'The model must not supply authority bindings',
+      status: 'completed',
+    }
 
     const registry = new ToolRegistry()
     registry.register(new UpdateTodos(todoStore))
@@ -2497,7 +2506,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
         content: '',
         toolCalls: [
           toolCall('todo_1', 'update_todos', {
-            todos: [boundTodo],
+            todos: [stableTodoUpdate],
           }),
         ],
         finishReason: 'tool_calls',
@@ -2549,6 +2558,137 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(JSON.stringify(finished.steps[0]!.evidence)).toContain(
       'todo_implementation_claim',
     )
+  })
+
+  it('rejects an impossible Plan Todo transition before mutating TodoStore', async () => {
+    const manager = new ControlManager(tmp('emperor-runner-todo-atomic-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Atomic todo plan',
+      summary: 'Verification prevents the next step from completing early.',
+      planMarkdown: '# Plan',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement',
+          description: 'Implement the change.',
+          acceptance: ['implemented'],
+          verification: [
+            {
+              id: 'test',
+              kind: 'command',
+              command: 'npm test',
+              required: true,
+            },
+          ],
+        },
+        {
+          id: 'step_2',
+          title: 'Deliver',
+          description: 'Deliver only after verification.',
+          acceptance: ['delivered'],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const before = todoStore.todos.map((todo) => ({ ...todo }))
+    const revision = todoStore.revision
+    const registry = new ToolRegistry()
+    registry.register(new UpdateTodos(todoStore))
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall('todo_invalid', 'update_todos', {
+              todos: [
+                {
+                  id: 'plan:step_1',
+                  content: 'Implement',
+                  status: 'completed',
+                },
+                { id: 'plan:step_2', content: 'Deliver', status: 'completed' },
+              ],
+            }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: manager,
+      todoStore,
+      maxTurns: 1,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'continue' }])
+
+    expect(todoStore.revision).toBe(revision)
+    expect(todoStore.todos).toEqual(before)
+  })
+
+  it('preserves update_todos schema validation before injecting Plan bindings', async () => {
+    const manager = new ControlManager(tmp('emperor-runner-todo-schema-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Schema-first todo plan',
+      summary: 'Core bindings must not repair a malformed tool call.',
+      planMarkdown: '# Plan',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement',
+          description: 'Implement the change.',
+          acceptance: ['implemented'],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const before = todoStore.todos.map((todo) => ({ ...todo }))
+    const revision = todoStore.revision
+    const registry = new ToolRegistry()
+    registry.register(new UpdateTodos(todoStore))
+    const emitted: Msg[] = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [toolCall('todo_missing', 'update_todos', {})],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: manager,
+      todoStore,
+      maxTurns: 1,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'continue' }], {
+      emit: (event) => {
+        emitted.push(event)
+      },
+    })
+
+    expect(todoStore.revision).toBe(revision)
+    expect(todoStore.todos).toEqual(before)
+    expect(
+      emitted.find(
+        (event) =>
+          event.event === 'tool_result' && event.name === 'update_todos',
+      ),
+    ).toMatchObject({
+      is_error: true,
+      summary: expect.stringContaining('arguments.todos is required'),
+    })
   })
 
   it('does not resume an old unfinished todo list for an unrelated history question', async () => {
@@ -2610,7 +2750,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const reply = await runner.stepAsync(history)
 
     expect(provider.seenMessages).toHaveLength(3)
-    expect(reply).toContain('本次执行已暂停')
+    expect(reply).toContain('执行已暂停')
     expect(reply).toContain('仍需完成实现')
     expect(reply).toContain('/continue')
     expect(reply).not.toContain('全部完成')
@@ -2863,7 +3003,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
     const reply = await runner.stepAsync(history)
 
-    expect(reply).toContain('本次执行已暂停')
+    expect(reply).toContain('执行已暂停')
     expect(reply).toContain('Ship it')
     expect(reply).not.toContain('全部完成')
     const followups = history.filter(
@@ -3066,11 +3206,1030 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       { role: 'user', content: '/continue' },
     ])
 
-    expect(reply).toContain('max_turns=1')
-    expect(reply).toContain('已完成 1/2')
+    expect(reply).toContain('执行已安全暂停')
+    expect(reply).toContain('任务完成 1/2')
     expect(reply).toContain('补文档')
     expect(reply).toContain('恢复')
     expect(reply).not.toContain('未办妥')
+    expect(reply).not.toContain('max_turns')
+  })
+
+  it('evaluates a progressed turn at the iteration boundary and continues inside the same turn', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('progress_1', 'echo', { value: 'changed' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '验证完成并交付。' }),
+    ])
+    const evaluate = vi.fn(async (_input: TurnContinuationInput) => {
+      const decision: Awaited<
+        ReturnType<TurnContinuationEvaluator['evaluate']>
+      > = {
+        decision: 'continue',
+        reasonCode: 'verification_remaining',
+        requestedIterations: 4,
+        nextActions: ['完成验证'],
+        summary: '已有修改，仍需验证。',
+      }
+      return decision
+    })
+    const continuationEvaluator: TurnContinuationEvaluator = { evaluate }
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator,
+    })
+    const emitted: Msg[] = []
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: '完成实现并验证' }],
+      {
+        turnId: 'turn_continue',
+        emit: (event) => {
+          emitted.push(event)
+        },
+      },
+    )
+
+    expect(reply).toBe('验证完成并交付。')
+    expect(evaluate).toHaveBeenCalledTimes(1)
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskIntent: '完成实现并验证',
+        totalIterations: 1,
+        evaluationRound: 1,
+        successfulChanges: expect.arrayContaining([
+          expect.stringContaining('echo'),
+        ]),
+      }),
+      expect.objectContaining({ signal: null }),
+    )
+    expect(provider.seenMessages).toHaveLength(2)
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      '[CONTROL:CONTINUATION_GRANTED]',
+    )
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        event: 'turn_continuation_evaluated',
+        decision: 'continue',
+        grantedIterations: 4,
+        evaluationRound: 1,
+      }),
+    )
+  })
+
+  it('allows exactly one tool-free final reply after authoritative finalize approval', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('progress_finalize', 'echo', { value: 'done' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '最终交付报告。' }),
+    ])
+    const evaluate = vi.fn(async () => ({
+      decision: 'finalize',
+      reasonCode: 'ready_to_finalize',
+      requestedIterations: 4,
+      nextActions: ['整理最终交付'],
+      summary: '权威状态已经完成。',
+    }))
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+    })
+    const emitted: Msg[] = []
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: '完成并交付' }],
+      { emit: (event) => void emitted.push(event) },
+    )
+
+    expect(reply).toBe('最终交付报告。')
+    expect(provider.seenTools).toEqual([['echo'], []])
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        event: 'turn_continuation_evaluated',
+        decision: 'finalize',
+        grantedIterations: 1,
+      }),
+    )
+  })
+
+  it('never executes provider tool calls returned during the tool-free final reply', async () => {
+    const registry = new ToolRegistry()
+    const echo = new EchoTool()
+    const execute = vi.spyOn(echo, 'execute')
+    registry.register(echo)
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('progress_finalize', 'echo', { value: 'done' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('forbidden_finalize_tool', 'echo', {
+            value: 'must-not-run',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async () => ({
+          decision: 'finalize',
+          reasonCode: 'ready_to_finalize',
+          requestedIterations: 4,
+          nextActions: ['整理最终交付'],
+          summary: '权威状态已经完成。',
+        }),
+      },
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '完成并交付' },
+    ])
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(provider.seenTools).toEqual([['echo'], []])
+    expect(reply).toContain('无工具收尾阶段仍请求了工具调用')
+  })
+
+  it('rejects finalize when all tools failed and no authoritative progress exists', async () => {
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('failed_finalize', 'missing_tool', {})],
+        finishReason: 'tool_calls',
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async () => ({
+          decision: 'finalize',
+          reasonCode: 'ready_to_finalize',
+          requestedIterations: 4,
+          nextActions: ['整理最终交付'],
+          summary: '错误地宣称完成。',
+        }),
+      },
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '执行任务' },
+    ])
+
+    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
+    expect(provider.seenMessages).toHaveLength(1)
+  })
+
+  it('rejects finalize when the latest tool iteration failed after earlier progress', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('earlier_progress', 'echo', { value: 'done' })],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('latest_failure', 'missing_tool', {})],
+        finishReason: 'tool_calls',
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 2,
+      continuationEvaluator: {
+        evaluate: async () => ({
+          decision: 'finalize',
+          reasonCode: 'ready_to_finalize',
+          requestedIterations: 4,
+          nextActions: ['整理最终交付'],
+          summary: '错误地忽略了最后一次失败。',
+        }),
+      },
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '执行任务' },
+    ])
+
+    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
+    expect(provider.seenMessages).toHaveLength(2)
+  })
+
+  it('rejects finalize for an empty authority with no successful fact', () => {
+    const provider = new FakeProvider([
+      makeResponse({ content: '只做了说明。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async () => ({
+          decision: 'finalize',
+          reasonCode: 'ready_to_finalize',
+          requestedIterations: 4,
+          nextActions: ['整理最终交付'],
+          summary: '错误地宣称完成。',
+        }),
+      },
+    })
+
+    expect(
+      (
+        runner as unknown as {
+          authoritativeReadyToFinalize(progress: {
+            meaningfulProgress: number
+            successfulChanges: string[]
+            successfulEvidence: string[]
+            recentErrors: string[]
+            repeatedReadCount: number
+            noProgressIterations: number
+            lastIterationHadError: boolean
+          }): boolean
+        }
+      ).authoritativeReadyToFinalize({
+        meaningfulProgress: 0,
+        successfulChanges: [],
+        successfulEvidence: [],
+        recentErrors: [],
+        repeatedReadCount: 0,
+        noProgressIterations: 0,
+        lastIterationHadError: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('fails closed when PlanStore is unavailable during finalize adjudication', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('progress_before_store_error', 'safe_echo', {
+            value: 'done',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+    ])
+    const manager = new ControlManager(tmp('emperor-finalize-store-error-'))
+    const originalList = manager.planStore.list.bind(manager.planStore)
+    let injectStoreFailure = false
+    vi.spyOn(manager.planStore, 'list').mockImplementation(() => {
+      if (injectStoreFailure) throw new Error('injected PlanStore failure')
+      return originalList()
+    })
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      controlManager: manager,
+      continuationEvaluator: {
+        evaluate: async () => {
+          injectStoreFailure = true
+          return {
+            decision: 'finalize',
+            reasonCode: 'ready_to_finalize',
+            requestedIterations: 4,
+            nextActions: ['整理最终交付'],
+            summary: '错误地宣称完成。',
+          }
+        },
+      },
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '执行任务' },
+    ])
+
+    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
+    expect(provider.seenMessages).toHaveLength(1)
+  })
+
+  it('rejects evaluator continuation when the segment made no meaningful progress', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('failed_1', 'missing_tool', {})],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'must not run' }),
+    ])
+    const evaluate = vi.fn(async () => ({
+      decision: 'continue',
+      reasonCode: 'work_remaining',
+      requestedIterations: 12,
+      nextActions: ['Retry the same operation'],
+      summary: 'Keep trying.',
+    }))
+    const manager = new ControlManager(tmp('emperor-continuation-pause-'))
+    const pausePlanExecution = vi.spyOn(manager, 'pausePlanExecution')
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+      controlManager: manager,
+    })
+    const emitted: Msg[] = []
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: '完成任务' }],
+      {
+        emit: (event) => {
+          emitted.push(event)
+        },
+      },
+    )
+
+    expect(provider.seenMessages).toHaveLength(1)
+    expect(reply).toContain('执行已暂停')
+    expect(reply).not.toContain('max_turns')
+    expect(pausePlanExecution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'no_progress',
+        totalIterations: 1,
+        nextActions: ['Retry the same operation'],
+      }),
+    )
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        event: 'turn_continuation_evaluated',
+        decision: 'pause',
+        reasonCode: 'no_progress',
+        grantedIterations: 0,
+      }),
+    )
+  })
+
+  it('persists an evaluated pause into the authoritative Plan and PlanStep Task', async () => {
+    const root = tmp('emperor-runner-plan-pause-')
+    const manager = new ControlManager(root)
+    manager.setRuntimeScope({ sessionId: 'session_pause', mode: 'build' })
+    const todoStore = new TodoStore()
+    const taskManager = new TaskManager(root)
+    manager.setTodoStore(todoStore)
+    manager.setTaskManager(taskManager)
+    const interaction = manager.createPlan({
+      title: 'Pause persistence',
+      summary: 'Keep the active step authoritative while paused.',
+      planMarkdown: '# Plan',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement and verify',
+          description: 'Perform the remaining work.',
+          acceptance: ['verified'],
+          verification: [
+            {
+              id: 'test',
+              kind: 'command',
+              command: 'npm test',
+              required: true,
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const planId = String(interaction.meta.plan_id)
+    const taskId = String(
+      (
+        manager.planStore.get(planId)!.metadata.plan_step_tasks as Record<
+          string,
+          string
+        >
+      ).step_1,
+    )
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [toolCall('missing', 'missing_tool', {})],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async () => ({
+          decision: 'pause',
+          reasonCode: 'no_progress',
+          requestedIterations: 4,
+          nextActions: ['修复工具调用后继续'],
+          summary: '没有有效进展。',
+        }),
+      },
+      controlManager: manager,
+      todoStore,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: '继续执行' }], {
+      turnId: 'turn_pause',
+    })
+
+    const paused = manager.planStore.get(planId)!
+    expect(paused.status).toBe('executing')
+    expect(paused.steps[0]!.status).toBe('active')
+    expect(paused.metadata.execution_pause).toMatchObject({
+      reason: 'no_progress',
+      turn_id: 'turn_pause',
+      total_iterations: 1,
+    })
+    expect(taskManager.store.get(taskId)?.status).toBe('pending')
+    expect(todoStore.todos[0]!.status).toBe('pending')
+  })
+
+  it('resumes a paused Plan only for an explicit continuation prompt', async () => {
+    const manager = new ControlManager(tmp('emperor-continuation-resume-'))
+    const resumePlanExecution = vi.spyOn(manager, 'resumePlanExecution')
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: '继续完成。' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      controlManager: manager,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: '继续执行' }], {
+      turnId: 'turn_resume',
+    })
+
+    expect(resumePlanExecution).toHaveBeenCalledWith({
+      turnId: 'turn_resume',
+    })
+
+    const ordinary = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: '只回答问题。' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      controlManager: manager,
+    })
+    await ordinary.stepAsync([{ role: 'user', content: '刚刚发生了什么？' }], {
+      turnId: 'turn_question',
+    })
+
+    expect(resumePlanExecution).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not resume a paused Plan when cancellation arrives during the started emit', async () => {
+    const manager = new ControlManager(tmp('emperor-resume-cancel-barrier-'))
+    const resumePlanExecution = vi.spyOn(manager, 'resumePlanExecution')
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'must not run' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      controlManager: manager,
+    })
+    const controller = new AbortController()
+    let release!: () => void
+    let started!: () => void
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const observed = new Promise<void>((resolve) => {
+      started = resolve
+    })
+
+    const turn = runner.stepAsync([{ role: 'user', content: '继续执行' }], {
+      turnId: 'turn_cancel_before_resume',
+      signal: controller.signal,
+      emit: async (event) => {
+        if (event.event !== 'turn_phase' || event.phase !== 'started') return
+        started()
+        await barrier
+      },
+    })
+    await observed
+    controller.abort()
+    release()
+
+    await expect(turn).rejects.toBeInstanceOf(CancelledTaskError)
+    expect(resumePlanExecution).not.toHaveBeenCalled()
+  })
+
+  it('triggers continuation evaluation early after six no-progress iterations', async () => {
+    const provider = new FakeProvider([
+      ...Array.from({ length: 6 }, (_, index) =>
+        makeResponse({
+          content: '',
+          toolCalls: [toolCall(`missing_${index}`, 'missing_tool', {})],
+          finishReason: 'tool_calls',
+        }),
+      ),
+      makeResponse({ content: 'must not run' }),
+    ])
+    const evaluate = vi.fn(async () => ({
+      decision: 'pause',
+      reasonCode: 'no_progress',
+      requestedIterations: 4,
+      nextActions: ['Inspect the repeated failure'],
+      summary: 'The turn is repeating the same failed operation.',
+    }))
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      maxTurns: 20,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '完成任务' },
+    ])
+
+    expect(provider.seenMessages).toHaveLength(6)
+    expect(evaluate).toHaveBeenCalledTimes(1)
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ noProgressIterations: 6 }),
+      expect.objectContaining({ signal: null }),
+    )
+    expect(JSON.stringify(provider.seenMessages[4])).toContain(
+      '[CONTROL:NO_PROGRESS_CORRECTION]',
+    )
+    expect(reply).toContain('执行已暂停')
+  })
+
+  it('applies an early finalize grant instead of discarding the evaluator decision', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    const provider = new FakeProvider([
+      ...Array.from({ length: 7 }, (_, index) =>
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall(`repeat_early_${index}`, 'safe_echo', {
+              value: 'same-evidence',
+            }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ),
+      makeResponse({ content: '已按评估建议整理交付。' }),
+    ])
+    const evaluate = vi.fn(async () => ({
+      decision: 'finalize',
+      reasonCode: 'ready_to_finalize',
+      requestedIterations: 4,
+      nextActions: ['Summarize the completed evidence'],
+      summary: 'The authoritative state is ready for a final reply.',
+    }))
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 20,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '完成任务' },
+    ])
+
+    expect(reply).toBe('已按评估建议整理交付。')
+    expect(evaluate).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(provider.seenMessages[7])).toContain(
+      '[CONTROL:FINALIZE_GRANTED]',
+    )
+    expect(provider.seenTools[7]).toEqual([])
+  })
+
+  it('lets turn cancellation preempt an in-flight continuation evaluation', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    let releaseEvaluation: () => void = () => undefined
+    let markEvaluationStarted: () => void = () => undefined
+    const evaluationStarted = new Promise<void>((resolve) => {
+      markEvaluationStarted = resolve
+    })
+    const evaluate = vi.fn(
+      async () =>
+        await new Promise<
+          Awaited<ReturnType<TurnContinuationEvaluator['evaluate']>>
+        >((resolve) => {
+          markEvaluationStarted()
+          releaseEvaluation = () =>
+            resolve({
+              decision: 'continue',
+              reasonCode: 'work_remaining',
+              requestedIterations: 4,
+              nextActions: ['Continue writing'],
+              summary: 'Work remains.',
+            })
+        }),
+    )
+    const manager = new ControlManager(tmp('emperor-continuation-cancel-'))
+    const pausePlanExecution = vi.spyOn(manager, 'pausePlanExecution')
+    const controller = new AbortController()
+    const history: Msg[] = [{ role: 'user', content: '执行任务' }]
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall('progress_before_cancel', 'safe_echo', { value: 'x' }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+      controlManager: manager,
+    })
+
+    const pending = runner.stepAsync(history, { signal: controller.signal })
+    await evaluationStarted
+    controller.abort()
+    releaseEvaluation()
+
+    await expect(pending).rejects.toBeInstanceOf(CancelledTaskError)
+    expect(pausePlanExecution).not.toHaveBeenCalled()
+    expect(
+      history.some((message) =>
+        String(message.content ?? '').includes('执行已暂停'),
+      ),
+    ).toBe(false)
+  })
+
+  it('evaluates the latest Plan in the current session scope, not the global latest Plan', async () => {
+    const manager = new ControlManager(tmp('emperor-continuation-scope-'))
+    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
+    const planA = manager.createPlan({
+      title: 'Session A plan',
+      summary: 'Current scoped plan.',
+      planMarkdown: '# A',
+      steps: [{ id: 'a', title: 'A', description: 'A', acceptance: ['A'] }],
+    })
+    manager.approve(planA.id)
+    manager.setRuntimeScope({ sessionId: 'session_b', mode: 'build' })
+    const planB = manager.createPlan({
+      title: 'Session B plan',
+      summary: 'Newer foreign plan.',
+      planMarkdown: '# B',
+      steps: [{ id: 'b', title: 'B', description: 'B', acceptance: ['B'] }],
+    })
+    manager.approve(planB.id)
+    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
+    const evaluatorInputs: TurnContinuationInput[] = []
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [toolCall('scope_progress', 'safe_echo', { value: 'x' })],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async (input) => {
+          evaluatorInputs.push(input)
+          return {
+            decision: 'pause',
+            reasonCode: 'blocked',
+            requestedIterations: 4,
+            nextActions: ['Resolve the scoped blocker'],
+            summary: 'Paused for scope test.',
+          }
+        },
+      },
+      controlManager: manager,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: '继续 A' }])
+
+    expect(evaluatorInputs[0]?.plan?.id).toBe(String(planA.meta.plan_id))
+    expect(evaluatorInputs[0]?.plan?.id).not.toBe(String(planB.meta.plan_id))
+  })
+
+  it('does not inherit a completed Plan or its bound Todos in a new unrelated turn', async () => {
+    const manager = new ControlManager(tmp('emperor-continuation-stale-plan-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
+    const draft = manager.createPlan({
+      title: 'Earlier completed plan',
+      summary: 'Belongs to a previous user turn.',
+      planMarkdown: '# Earlier plan',
+      steps: [
+        {
+          id: 'old_step',
+          title: 'Old work',
+          description: 'Already completed.',
+          acceptance: ['done'],
+        },
+      ],
+    })
+    manager.approve(draft.id)
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
+    const completed = manager.syncPlanFromTodos(todoStore.todos, {
+      evidence: { source: 'update_todos' },
+    })
+    expect(completed?.status).toBe('completed')
+
+    const evaluatorInputs: TurnContinuationInput[] = []
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall('new_turn_progress', 'safe_echo', { value: 'new work' }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async (input) => {
+          evaluatorInputs.push(input)
+          return {
+            decision: 'pause',
+            reasonCode: 'blocked',
+            requestedIterations: 4,
+            nextActions: ['Handle only the new task'],
+            summary: 'Pause the new task.',
+          }
+        },
+      },
+      controlManager: manager,
+      todoStore,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: '执行另一个任务' }])
+
+    expect(evaluatorInputs[0]?.plan).toBeNull()
+    expect(evaluatorInputs[0]?.todos).toEqual([])
+  })
+
+  it('binds the current approval generation when an older completed Plan receives a late update', async () => {
+    const manager = new ControlManager(tmp('emperor-continuation-generation-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
+    const oldDraft = manager.createPlan({
+      title: 'Old plan',
+      summary: 'Completed before the current plan.',
+      planMarkdown: '# Old',
+      steps: [
+        {
+          id: 'old_step',
+          title: 'Old step',
+          description: 'done',
+          acceptance: ['done'],
+        },
+      ],
+    })
+    manager.approve(oldDraft.id)
+    todoStore.update(
+      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
+    )
+    const oldCompleted = manager.syncPlanFromTodos(todoStore.todos, {
+      evidence: { source: 'update_todos' },
+    })
+    expect(oldCompleted?.status).toBe('completed')
+
+    const currentDraft = manager.createPlan({
+      title: 'Current plan',
+      summary: 'The only executable approval generation.',
+      planMarkdown: '# Current',
+      steps: [
+        {
+          id: 'current_step',
+          title: 'Current step',
+          description: 'still running',
+          acceptance: ['done'],
+        },
+      ],
+    })
+    manager.approve(currentDraft.id)
+    const current = manager.latestExecutablePlan()
+    expect(current?.id).toBe(String(currentDraft.meta.plan_id))
+    manager.planStore.save({
+      ...oldCompleted!,
+      updatedAt: Math.max(oldCompleted!.updatedAt, current!.updatedAt) + 1,
+    })
+    expect(manager.latestExecutablePlan()?.id).toBe(current?.id)
+
+    const evaluatorInputs: TurnContinuationInput[] = []
+    const registry = new ToolRegistry()
+    registry.register(new SafeEchoTool())
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall('current_plan_progress', 'safe_echo', { value: 'x' }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: {
+        evaluate: async (input) => {
+          evaluatorInputs.push(input)
+          return {
+            decision: 'pause',
+            reasonCode: 'blocked',
+            requestedIterations: 4,
+            nextActions: ['Continue the current Plan'],
+            summary: 'Pause after checking the binding.',
+          }
+        },
+      },
+      controlManager: manager,
+      todoStore,
+    })
+
+    await runner.stepAsync([{ role: 'user', content: '继续执行' }])
+
+    expect(evaluatorInputs[0]?.plan?.id).toBe(current?.id)
+    expect(evaluatorInputs[0]?.plan?.id).not.toBe(oldCompleted?.id)
+  })
+
+  it('allows at most three continuation evaluations and 36 extra iterations', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider(
+      Array.from({ length: 40 }, (_, index) =>
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall(`progress_${index}`, 'echo', { value: `value_${index}` }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ),
+    )
+    let evaluationRound = 0
+    const evaluate = vi.fn(async () => {
+      evaluationRound += 1
+      return {
+        decision: 'continue',
+        reasonCode: 'work_remaining',
+        requestedIterations: 12,
+        nextActions: [`Continue bounded work segment ${evaluationRound}`],
+        summary: 'New work was completed in this segment.',
+      }
+    })
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+    })
+    const emitted: Msg[] = []
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: '执行复杂任务' }],
+      {
+        emit: (event) => {
+          emitted.push(event)
+        },
+      },
+    )
+
+    expect(evaluate).toHaveBeenCalledTimes(3)
+    expect(provider.seenMessages).toHaveLength(37)
+    expect(reply).toContain('执行已暂停')
+    expect(
+      emitted.filter((event) => event.event === 'turn_continuation_evaluated'),
+    ).toHaveLength(4)
+    expect(
+      emitted.filter(
+        (event) =>
+          event.event === 'turn_continuation_evaluated' &&
+          event.source === 'evaluator',
+      ),
+    ).toHaveLength(3)
+    expect(
+      emitted.filter(
+        (event) =>
+          event.event === 'turn_continuation_evaluated' &&
+          event.source === 'core_policy',
+      ),
+    ).toHaveLength(1)
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ event: 'turn_phase', phase: 'paused' }),
+    )
+    expect(
+      [...emitted]
+        .reverse()
+        .find((event) => event.event === 'turn_continuation_evaluated'),
+    ).toMatchObject({
+      decision: 'pause',
+      reasonCode: 'budget_exhausted',
+      totalIterations: 37,
+    })
+  })
+
+  it('rejects a continuation evaluator that repeats its previously granted actions', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new EchoTool())
+    const provider = new FakeProvider(
+      Array.from({ length: 5 }, (_, index) =>
+        makeResponse({
+          content: '',
+          toolCalls: [
+            toolCall(`progress_repeat_${index}`, 'echo', {
+              value: `value_${index}`,
+            }),
+          ],
+          finishReason: 'tool_calls',
+        }),
+      ),
+    )
+    const evaluate = vi.fn(async () => ({
+      decision: 'continue',
+      reasonCode: 'work_remaining',
+      requestedIterations: 4,
+      nextActions: ['Repeat the same next action'],
+      summary: 'Keep going.',
+    }))
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      maxTurns: 1,
+      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '执行复杂任务' },
+    ])
+
+    expect(evaluate).toHaveBeenCalledTimes(2)
+    expect(provider.seenMessages).toHaveLength(5)
+    expect(reply).toContain('执行已暂停')
+    expect(reply).toContain('重复了已经批准过的动作')
   })
 
   it('injects a single wrap-up reminder when the turn budget is nearly exhausted', async () => {
@@ -3099,7 +4258,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       model: 'fake',
       registry,
       systemPrompt: 'system',
-      maxTurns: 5,
+      maxTurns: 8,
     })
     const history: Msg[] = [{ role: 'user', content: '执行多步检查' }]
 

@@ -34,6 +34,9 @@ import {
   type CompactorLike,
 } from './runner'
 import { buildRoutedRunner } from './runner-factory'
+import { ModelTurnContinuationEvaluator } from './turn-continuation'
+import { isExplicitTodoContinuation } from './query-state'
+import { appendJsonl } from '../store/jsonl'
 import {
   PromptPrefetchCoordinator,
   type PromptPrefetchTask,
@@ -401,6 +404,14 @@ export class PromptQueueFullError extends Error {
     }
   }
 }
+
+const SESSION_TODO_CONTROL_METHODS = new Set<PropertyKey>([
+  'syncPlanFromTodos',
+  'normalizePlanTodoUpdate',
+  'restoreCurrentPlanTodoProjection',
+  'pausePlanExecution',
+  'resumePlanExecution',
+])
 
 export interface AgentSessionBindingState {
   session: SessionEntry
@@ -973,6 +984,13 @@ export class AgentLoop {
       },
       planStatus: (planId) =>
         this.controlManager.planStore.get(planId)?.status ?? null,
+      executionPaused: (goal) => {
+        const planId = goal.runtime.currentPlanId
+        if (!planId) return false
+        return Boolean(
+          this.controlManager.planStore.get(planId)?.metadata.execution_pause,
+        )
+      },
       validateScope: (goal) => {
         const session = this.sessionStore.get(goal.scope.sessionId)
         if (!session) return false
@@ -1763,6 +1781,10 @@ export class AgentLoop {
         this.todoStore.todos = cloneTodoItems(todos)
     })
     todoStore.todos = cloneTodoItems(this.todosBySession.get(session.id) ?? [])
+    this.controlManagerForSession(
+      session,
+      todoStore,
+    ).restoreCurrentPlanTodoProjection()
     const skillsLoader = new FileSkillsLoader(
       this.root,
       this.paths.stateRoot,
@@ -1933,6 +1955,20 @@ export class AgentLoop {
         throw new ModelConfigurationError(
           '当前激活模型不支持工具调用，无法用于 Build 或自动执行。请切换支持工具调用的模型。',
         )
+      }
+
+      if (opts.source !== 'goal' && isExplicitTodoContinuation(content)) {
+        const pausedGoal = await this.goalStore.findActiveBySession(
+          activeSession.id,
+        )
+        if (pausedGoal?.runtime.phase === 'paused') {
+          await this.goalCoordinator.resume(
+            pausedGoal.id,
+            opts.displayContent ?? content,
+          )
+          restorePreviousSession()
+          return ''
+        }
       }
     } catch (error) {
       restorePreviousSession()
@@ -3274,7 +3310,10 @@ export class AgentLoop {
     return reply
   }
 
-  private controlManagerForSession(session: SessionEntry): ControlManager {
+  private controlManagerForSession(
+    session: SessionEntry,
+    todoStore: TodoStore | null = null,
+  ): ControlManager {
     const control = this.controlManager
     const scope = this.controlRuntimeScopeForSession(session)
     return new Proxy(control, {
@@ -3282,6 +3321,11 @@ export class AgentLoop {
         const value = Reflect.get(target, property, target)
         if (typeof value !== 'function') return value
         return (...args: unknown[]) => {
+          if (todoStore && SESSION_TODO_CONTROL_METHODS.has(property))
+            return target.withTodoStore(todoStore, () => {
+              target.setRuntimeScope(scope)
+              return value.apply(target, args)
+            })
           target.setRuntimeScope(scope)
           return value.apply(target, args)
         }
@@ -3314,7 +3358,7 @@ export class AgentLoop {
     const memoryStore = bindings?.memoryStore ?? this.activeMemoryStore
     const todoStore = bindings?.todoStore ?? this.todoStore
     const controlManager = session
-      ? this.controlManagerForSession(session)
+      ? this.controlManagerForSession(session, todoStore)
       : this.controlManager
     const goalContext = session
       ? new GoalContextBuilder({
@@ -3362,6 +3406,21 @@ export class AgentLoop {
       controlManager,
       maxContext: route.snapshot.contextWindowTokens,
       maxTurns: 20,
+      continuationEvaluator: new ModelTurnContinuationEvaluator(
+        this.modelRouter as never,
+        {
+          tokenTracker: this.tokenTracker,
+          diagnosticSink: async (diagnostic) =>
+            await appendJsonl(
+              join(
+                this.paths.stateRoot,
+                'control',
+                'turn-continuation-diagnostics.jsonl',
+              ),
+              diagnostic,
+            ),
+        },
+      ),
       workspaceRoot: this.workspaceRootForSession(session),
       promptSections: projection.sections,
       promptContextPlan: projection.contextPlan,

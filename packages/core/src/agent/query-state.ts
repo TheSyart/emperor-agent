@@ -89,12 +89,15 @@ export function maxTurnsReached(state: QueryState): QueryTransition | null {
   })
 }
 
-const NEAR_MAX_TURNS_MIN_LIMIT = 5
+const NEAR_MAX_TURNS_RESERVE = 5
 
 export function nearMaxTurns(state: QueryState): QueryTransition | null {
-  if (state.maxTurns === null || state.maxTurns < NEAR_MAX_TURNS_MIN_LIMIT)
+  if (state.maxTurns === null || state.maxTurns <= NEAR_MAX_TURNS_RESERVE)
     return null
-  if (state.finalWarningIssued || state.turnCount !== state.maxTurns - 2)
+  if (
+    state.finalWarningIssued ||
+    state.turnCount !== state.maxTurns - NEAR_MAX_TURNS_RESERVE
+  )
     return null
   const content =
     '（接近回合上限，剩余轮次有限。请停止扩展新任务，收束当前工作，并在下一条回复输出最终交付报告：已完成事项、未完成事项、验证命令与结果、恢复入口。）'
@@ -215,6 +218,10 @@ export type TodoContinuationIntent = 'explicit' | 'control' | 'none'
 const EXPLICIT_TODO_CONTINUATION_RE =
   /^(?:\/continue(?:\s|$)|继续(?:执行)?(?:\s|[，,:：。!！]|$)|按原计划继续(?:\s|[，,:：。!！]|$))/i
 
+export function isExplicitTodoContinuation(content: string): boolean {
+  return EXPLICIT_TODO_CONTINUATION_RE.test(String(content ?? '').trim())
+}
+
 /**
  * Only the latest real user/control message may arm a previous todo list.
  * Old conversation text is deliberately ignored so a normal question cannot
@@ -229,10 +236,11 @@ export function todoContinuationIntent(
     const content = String(message.content ?? '').trim()
     if (
       content.startsWith('[CONTROL:PLAN_APPROVED]') ||
-      content.startsWith('[CONTROL:PERMISSION_ANSWERED]')
+      content.startsWith('[CONTROL:PERMISSION_ANSWERED]') ||
+      content.startsWith('[CONTROL:GOAL_CONTINUATION_RESUMED]')
     )
       return 'control'
-    return EXPLICIT_TODO_CONTINUATION_RE.test(content) ? 'explicit' : 'none'
+    return isExplicitTodoContinuation(content) ? 'explicit' : 'none'
   }
   return 'none'
 }

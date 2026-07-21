@@ -1400,6 +1400,20 @@ export function useRuntime(options: {
       if (assistant?.streaming) startThought(assistant, data, '处理工具错误')
       return
     }
+    if (data.event === 'turn_continuation_evaluated') {
+      if (data.decision === 'pause') {
+        busy.value = false
+        status.value = 'ready'
+        updatePending('执行已暂停', data.summary, 'done')
+      } else {
+        busy.value = true
+        updatePending(
+          data.decision === 'finalize' ? '正在整理交付' : '评估后继续执行',
+          data.summary,
+        )
+      }
+      return
+    }
     if (data.event === 'assistant_done') {
       busy.value = false
       status.value = 'ready'

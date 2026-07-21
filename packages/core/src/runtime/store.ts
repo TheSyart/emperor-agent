@@ -132,6 +132,7 @@ const INDEX_WRITE_INTERVAL_MS = 500
 const INDEX_FORCE_WRITE_EVENTS = new Set([
   'assistant_done',
   'turn_paused',
+  'turn_continuation_evaluated',
   'runtime_task_cancelled',
   'error',
   'plan_draft',

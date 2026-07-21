@@ -98,6 +98,11 @@ export const slashCommands: SlashCommand[] = [
     description: '停止当前运行中的 turn / Scheduler 任务',
   },
   {
+    name: '/continue',
+    usage: '/continue',
+    description: '恢复当前会话暂停的 Plan 或 Goal 执行',
+  },
+  {
     name: '/compact',
     usage: '/compact',
     description: '触发未归档会话压缩，写入 MEMORY/情景记忆',

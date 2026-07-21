@@ -121,6 +121,18 @@ beforeEach(() => {
   vi.mocked(core).mockReset()
 })
 
+it('forwards /continue to Core instead of treating it as a local command', () => {
+  const ctx = setup()
+
+  ctx.submitFromComposer('/continue')
+
+  expect(ctx.deps.sendMessage).toHaveBeenCalledWith({
+    content: '/continue',
+    attachments: [],
+  })
+  expect(ctx.local).not.toHaveBeenCalled()
+})
+
 describe('Goal slash command orchestration', () => {
   it('starts a Goal through the typed operation instead of chat.submit', async () => {
     const ctx = setup()

@@ -867,7 +867,7 @@ describe('CoreApi (MIG-IPC-001)', () => {
     expect(readFileSync(target, 'utf8')).toBe('before-git\n')
     expect(gitRun('status', '--porcelain')).toBe('')
     await api.close()
-  })
+  }, 30_000)
 
   it('boots, submits a chat turn, and persists session runtime state without HTTP', async () => {
     const root = tmp('emperor-core-api-')

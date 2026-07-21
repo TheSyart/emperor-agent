@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createApp, h } from 'vue'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AssistantMessage, UserMessage } from '../../types'
 import MessageRow from './MessageRow.vue'
 
@@ -59,6 +59,46 @@ describe('MessageRow prompt delivery state', () => {
     expect(
       container.querySelector('.assistant-terminal-state')?.textContent,
     ).toContain('已被插话替代')
+
+    app.unmount()
+  })
+
+  it('exposes a continue action for an evaluated pause card', () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const onContinueExecution = vi.fn()
+    const message: AssistantMessage = {
+      id: 'assistant-paused',
+      role: 'assistant',
+      content: '',
+      segments: [
+        {
+          id: 'continuation-pause',
+          type: 'plan_activity',
+          label: '执行已暂停',
+          detail: '重复读取，没有形成新进展。',
+          tone: 'error',
+          action: 'continue',
+          nextActions: ['检查阻塞原因'],
+        },
+      ],
+      streaming: false,
+    }
+    const app = createApp(() =>
+      h(MessageRow, {
+        message,
+        plans: [],
+        onContinueExecution,
+      }),
+    )
+    app.mount(container)
+
+    const button = container.querySelector<HTMLButtonElement>(
+      '.plan-activity-continue',
+    )!
+    expect(button.textContent).toContain('继续执行')
+    button.click()
+    expect(onContinueExecution).toHaveBeenCalledTimes(1)
 
     app.unmount()
   })

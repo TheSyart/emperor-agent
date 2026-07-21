@@ -68,6 +68,8 @@ Renderer 的 session、task 和 runtime replay 已使用小型 domain action red
 
 Ask/Plan 交互以完整 `ControlInteraction` 为 renderer 事实源，`meta.control_session_id` 决定 owner session；历史缺少该字段时才回退 session summary tag。等待交互若未出现在 replay 消息流，会按 interaction ID 补入并去重。时间线中的 AskHistoryCard/PlanCard 只投影静态历史和提案；waiting interaction 在底部替代 Composer。`plan_draft_delta` 只更新 provisional“生成中”卡，正式 `plan_draft` 建立 pending 后才允许显示底部审批。`plan_approved`、`plan_step_update`、`plan_verification_start/done` 与终态 `plan_runtime_update` 转为卡片之后的 `plan_activity` 时间线节点，不回写旧卡片。
 
+模型迭代达到续跑评估边界后，Core 发送 `turn_continuation_evaluated`，公开字段只有 `decision`、`reasonCode`、评估轮次、累计迭代、批准额度、裁决来源 `source`（`evaluator` 或 `core_policy`）、安全摘要和下一步；评估原始输入/输出不进入 runtime event 或聊天历史。达到三次评估或累计硬上限时，最后一条暂停事件标记为 `core_policy`，不得被统计成第四次模型评估。`continue` 在时间线显示追加额度，`finalize` 显示正在整理交付，`pause` 结束 Thought/Tool streaming、清除 session/sidebar 的运行态并显示剩余事项与“继续执行”按钮。该事件写入 session runtime store，live、切换会话、刷新和 replay 使用同一投影。
+
 重新进入 Plan 时，Core 会先原子取消同一 session/scope 的旧当前 Plan，再创建 successor DRAFT，并立即发送旧 Plan 的 `plan_runtime_update(cancelled)`；renderer 因此不能继续显示旧 Plan 为可恢复执行态。启动恢复还会核对 waiting interaction 的 Plan ID、状态和审批代次，缺失或不匹配的交互会被取消。Plan 模式连续两次没有成功调用 `propose_plan` 时，IPC 返回 `plan_generation_failed`，不会用普通回复合成审批卡。
 
 turn 取消在 IPC 使用稳定错误码 `cancelled`。Core 会先结束流式 thought/tool 状态并写入必要的 cancelled terminal/tombstone，再隔离迟到结果；renderer 只显示“已取消，内容未提交”或“任务已停止”，不得追加 `internal_error`。

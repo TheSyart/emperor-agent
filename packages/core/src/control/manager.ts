@@ -40,7 +40,10 @@ import {
   type InteractionPayload,
 } from './models'
 import { PlanDraftingManager } from './plan-drafting'
-import { PlanExecutionManager } from './plan-execution'
+import {
+  PlanExecutionManager,
+  type PlanExecutionPauseInput,
+} from './plan-execution'
 import {
   isPlanInvalidated,
   latestApprovedPlanGeneration,
@@ -187,9 +190,34 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.todoStore = todoStore
   }
 
+  /**
+   * Bind one synchronous Plan/Todo operation to its owning session store.
+   * The callback must not return a Promise: restoring immediately is what
+   * prevents another Session Actor from observing this temporary binding.
+   */
+  withTodoStore<T>(todoStore: TodoStoreLike | null, action: () => T): T {
+    const previous = this.todoStore
+    this.todoStore = todoStore
+    try {
+      const result = action()
+      if (
+        result !== null &&
+        typeof result === 'object' &&
+        typeof (result as { then?: unknown }).then === 'function'
+      )
+        throw new Error('withTodoStore only supports synchronous operations')
+      return result
+    } finally {
+      this.todoStore = previous
+    }
+  }
+
   setTaskManager(taskManager: TaskManagerLike | null): void {
     this.taskManager = taskManager
-    if (taskManager !== null) this.execution.reconcileRevokedPlanTasks()
+    if (taskManager !== null) {
+      this.execution.reconcileRevokedPlanTasks()
+      this.execution.reconcileExecutablePlanTasks()
+    }
   }
 
   setRuntimeScope(scope: ControlRuntimeScope | null): void {
@@ -917,8 +945,22 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.execution.syncPlanFromTodos(todos, opts)
   }
 
+  normalizePlanTodoUpdate(
+    todos: Array<Record<string, unknown>>,
+  ): Array<Record<string, unknown>> {
+    return this.execution.normalizeTodoUpdate(todos)
+  }
+
   restoreCurrentPlanTodoProjection(): void {
     this.execution.restoreCurrentPlanTodoProjection()
+  }
+
+  pausePlanExecution(input: PlanExecutionPauseInput): PlanRecord | null {
+    return this.execution.pauseExecution(input)
+  }
+
+  resumePlanExecution(input: { turnId: string }): PlanRecord | null {
+    return this.execution.resumeExecution(input)
   }
 
   hasAskInteraction(): boolean {

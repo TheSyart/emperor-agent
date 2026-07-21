@@ -9,7 +9,7 @@
  *  - tests/unit/test_plan_execution_state.py::test_todo_store_syncs_from_plan_steps (TodoStore)
  * 注: test_runner_* 依赖 AgentRunner (W03) — 留待 W03 测试移植。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -2179,9 +2179,11 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
   function approvedManager(): {
     manager: ControlManager
     todoStore: TodoStore
+    taskManager: TaskManager
     planId: string
   } {
-    const manager = new ControlManager(tmp('emperor-b1-'))
+    const root = tmp('emperor-b1-')
+    const manager = new ControlManager(root)
     manager.setRuntimeScope({
       sessionId: 'session-b1',
       mode: 'build',
@@ -2190,7 +2192,9 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
       projectFingerprint: 'fingerprint-b1',
     })
     const todoStore = new TodoStore()
+    const taskManager = new TaskManager(root)
     manager.setTodoStore(todoStore)
+    manager.setTaskManager(taskManager)
     manager.setMode('plan')
     new ProposePlanTool(manager).execute({
       title: 'B1 completion',
@@ -2221,8 +2225,122 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     manager.approve(String(pending.id))
     const plan = manager.planStore.latest()
     expect(plan).not.toBeNull()
-    return { manager, todoStore, planId: plan!.id }
+    return { manager, todoStore, taskManager, planId: plan!.id }
   }
+
+  it('pauses and resumes the active Plan without corrupting Plan, Task, or Todo authority', () => {
+    const { manager, todoStore, taskManager, planId } = approvedManager()
+    const running = manager.planStore.get(planId)!
+    const taskId = String(
+      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
+    )
+
+    expect(running.status).toBe(PlanStatus.EXECUTING)
+    expect(running.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
+    expect(taskManager.store.get(taskId)?.status).toBe('running')
+    expect(todoStore.todos[0]!.status).toBe('in_progress')
+
+    const paused = manager.pausePlanExecution({
+      reason: 'no_progress',
+      turnId: 'turn_pause',
+      pausedAt: 1234,
+      evaluationCount: 2,
+      totalIterations: 28,
+      nextActions: ['Run the remaining verification'],
+    })!
+
+    expect(paused.status).toBe(PlanStatus.EXECUTING)
+    expect(paused.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
+    expect(paused.metadata.execution_pause).toEqual({
+      version: 1,
+      reason: 'no_progress',
+      turn_id: 'turn_pause',
+      paused_at: 1234,
+      evaluation_count: 2,
+      total_iterations: 28,
+      next_actions: ['Run the remaining verification'],
+    })
+    expect(taskManager.store.get(taskId)?.status).toBe('pending')
+    expect(taskManager.store.get(taskId)?.progress.execution_pause).toEqual(
+      paused.metadata.execution_pause,
+    )
+    expect(todoStore.todos[0]!.status).toBe('pending')
+
+    const resumed = manager.resumePlanExecution({ turnId: 'turn_resume' })!
+
+    expect(resumed.metadata.execution_pause).toBeUndefined()
+    expect(resumed.metadata.last_execution_resume).toMatchObject({
+      turn_id: 'turn_resume',
+    })
+    expect(taskManager.store.get(taskId)?.status).toBe('running')
+    expect(
+      taskManager.store.get(taskId)?.progress.execution_pause,
+    ).toBeUndefined()
+    expect(todoStore.todos[0]!.status).toBe('in_progress')
+  })
+
+  it('does not mutate Task projection when the authoritative pause save fails', () => {
+    const { manager, taskManager, planId } = approvedManager()
+    const running = manager.planStore.get(planId)!
+    const taskId = String(
+      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
+    )
+    vi.spyOn(manager.planStore, 'save').mockImplementationOnce(() => {
+      throw new Error('injected authoritative Plan save failure')
+    })
+
+    expect(() =>
+      manager.pausePlanExecution({
+        reason: 'no_progress',
+        turnId: 'turn_save_failed',
+        pausedAt: 1234,
+        evaluationCount: 1,
+        totalIterations: 20,
+        nextActions: ['Retry later'],
+      }),
+    ).toThrow('injected authoritative Plan save failure')
+
+    expect(
+      manager.planStore.get(planId)?.metadata.execution_pause,
+    ).toBeUndefined()
+    expect(taskManager.store.get(taskId)?.status).toBe('running')
+  })
+
+  it('replays Task and Todo projections from a durable pause after an interrupted Task write', () => {
+    const { manager, todoStore, taskManager, planId } = approvedManager()
+    const running = manager.planStore.get(planId)!
+    const taskId = String(
+      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
+    )
+    const update = vi
+      .spyOn(taskManager, 'updateTask')
+      .mockImplementationOnce(() => {
+        throw new Error('injected Task projection interruption')
+      })
+
+    expect(
+      manager.pausePlanExecution({
+        reason: 'no_progress',
+        turnId: 'turn_task_interrupted',
+        pausedAt: 1234,
+        evaluationCount: 1,
+        totalIterations: 20,
+        nextActions: ['Retry later'],
+      }),
+    ).toBeTruthy()
+
+    expect(manager.planStore.get(planId)?.metadata.execution_pause).toBeTruthy()
+    expect(taskManager.store.get(taskId)?.status).toBe('pending')
+    expect(todoStore.todos[0]?.status).toBe('pending')
+
+    update.mockRestore()
+    manager.setTaskManager(null)
+    manager.setTaskManager(taskManager)
+    manager.restoreCurrentPlanTodoProjection()
+
+    expect(taskManager.store.get(taskId)?.status).toBe('pending')
+    expect(todoStore.todos[0]?.status).toBe('pending')
+  })
 
   it('projects approved Plan steps into exactly bound Todos', () => {
     const { manager, todoStore, planId } = approvedManager()
@@ -2241,6 +2359,66 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
         status: 'pending',
       }),
     ])
+  })
+
+  it('normalizes stable Plan Todo IDs, injects authority bindings, and restores omitted Plan items', () => {
+    const { manager, planId } = approvedManager()
+
+    const normalized = manager.normalizePlanTodoUpdate([
+      {
+        id: 'plan:step_1',
+        content: 'model-provided title must not replace Plan authority',
+        status: 'completed',
+      },
+      {
+        id: 'scratch',
+        content: 'Temporary investigation',
+        status: 'in_progress',
+      },
+    ])
+
+    expect(normalized).toEqual([
+      expect.objectContaining({
+        id: 'plan:step_1',
+        plan_id: planId,
+        plan_step_id: 'step_1',
+        approval_generation: 1,
+        content: 'Build it',
+        status: 'completed',
+      }),
+      expect.objectContaining({
+        id: 'plan:step_2',
+        plan_id: planId,
+        plan_step_id: 'step_2',
+        approval_generation: 1,
+        content: 'Verify it',
+        status: 'pending',
+      }),
+      expect.objectContaining({
+        id: 'scratch',
+        content: 'Temporary investigation',
+        status: 'pending',
+      }),
+    ])
+  })
+
+  it('rejects forged or stale explicit Plan Todo bindings before persistence', () => {
+    const { manager, todoStore } = approvedManager()
+    const before = todoStore.todos.map((todo) => ({ ...todo }))
+
+    expect(() =>
+      manager.normalizePlanTodoUpdate([
+        {
+          id: 'plan:step_1',
+          content: 'Build it',
+          status: 'completed',
+          planId: 'forged-plan',
+          planStepId: 'step_1',
+          approvalGeneration: 99,
+        },
+      ]),
+    ).toThrow(/binding/i)
+    expect(todoStore.todos).toEqual(before)
   })
 
   it('gives the active Plan step the single in-progress slot and preserves independent work as pending', () => {

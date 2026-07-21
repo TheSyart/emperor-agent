@@ -53,12 +53,13 @@ export interface GoalCoordinatorOptions {
   readonly pendingInteractionId?: (goal: GoalRecord) => string | null
   readonly estimatedCostUsd?: (goal: GoalRecord) => number | null
   readonly planStatus?: (planId: string) => string | null
+  readonly executionPaused?: (goal: GoalRecord) => boolean
   readonly validateScope?: (goal: GoalRecord) => boolean | Promise<boolean>
   readonly now?: () => string
 }
 
 const CONTINUE_PROMPT =
-  '继续推进当前 Goal。只依赖持久化 Goal、Plan 与 Evidence 状态；完成计划后进入验证。'
+  '[CONTROL:GOAL_CONTINUATION_RESUMED]\n继续推进当前 Goal；只依赖持久化 Goal、Plan 与 Evidence 状态，完成计划后进入验证。'
 const COMPLETE_PROMPT =
   '当前 Goal Gate 已通过。现在必须调用 complete_goal 完成 Goal；不要只用文字宣称完成。'
 
@@ -89,15 +90,21 @@ export class GoalCoordinator {
   async start(
     goalOrId: GoalRecord | string,
     initialContent?: string,
+    initialDisplayContent?: string,
   ): Promise<GoalRecord> {
     return await this.serializeLaunch(async () => {
-      return await this.startUnlocked(goalOrId, initialContent)
+      return await this.startUnlocked(
+        goalOrId,
+        initialContent,
+        initialDisplayContent,
+      )
     })
   }
 
   private async startUnlocked(
     goalOrId: GoalRecord | string,
     initialContent?: string,
+    initialDisplayContent?: string,
   ): Promise<GoalRecord> {
     let goal =
       typeof goalOrId === 'string'
@@ -124,15 +131,16 @@ export class GoalCoordinator {
       },
       { reason: 'goal_run_started', runId },
     )
-    this.launch(goal, runId, initialContent ?? goal.contract.outcome)
+    const content = initialContent ?? goal.contract.outcome
+    this.launch(goal, runId, content, initialDisplayContent ?? content)
     return goal
   }
 
-  async resume(goalId: string): Promise<GoalRecord> {
+  async resume(goalId: string, displayContent = ''): Promise<GoalRecord> {
     const goal = await this.requireGoal(goalId)
     if (goal.runtime.phase !== 'paused')
       throw new Error('Only a paused Goal can be resumed.')
-    return await this.start(goal.id, CONTINUE_PROMPT)
+    return await this.start(goal.id, CONTINUE_PROMPT, displayContent)
   }
 
   async resumeAfterControl(
@@ -146,7 +154,7 @@ export class GoalCoordinator {
     )
       throw new Error('Goal control interaction does not match.')
     goal = await this.settleAfterControl(goal, interactionId)
-    return await this.start(goal.id, CONTINUE_PROMPT)
+    return await this.start(goal.id, CONTINUE_PROMPT, '')
   }
 
   async settleControl(
@@ -248,6 +256,7 @@ export class GoalCoordinator {
     goal: GoalRecord,
     runId: string,
     initialContent: string,
+    initialDisplayContent: string,
   ): void {
     const taskId = `goal:${goal.id}`
     const abortController = new AbortController()
@@ -263,6 +272,7 @@ export class GoalCoordinator {
             goal.id,
             runId,
             initialContent,
+            initialDisplayContent,
             abortController.signal,
           ),
       })
@@ -297,6 +307,7 @@ export class GoalCoordinator {
     goalId: string,
     runId: string,
     initialContent: string,
+    initialDisplayContent: string,
     signal: AbortSignal,
   ): Promise<void> {
     let first = true
@@ -343,9 +354,9 @@ export class GoalCoordinator {
           : first
             ? initialContent
             : CONTINUE_PROMPT,
-        displayContent: first ? initialContent : '',
+        displayContent: first ? initialDisplayContent : '',
         source: 'goal',
-        uiHidden: !first,
+        uiHidden: !first || !initialDisplayContent,
         useActiveTask: false,
         taskId: `goal:${goal.id}`,
         turnId,
@@ -356,6 +367,10 @@ export class GoalCoordinator {
 
       goal = await this.requireGoal(goalId)
       if (isGoalTerminal(goal.status)) return
+      if (this.options.executionPaused?.(goal)) {
+        await this.persistPause(goal, 'continuation_pause')
+        return
+      }
       const pendingAfter = this.options.pendingInteractionId?.(goal) ?? null
       if (pendingAfter) {
         await this.awaitControl(goal, pendingAfter)

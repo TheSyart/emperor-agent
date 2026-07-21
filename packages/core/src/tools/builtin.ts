@@ -286,6 +286,7 @@ export class UpdateTodos extends Tool {
   override name = 'update_todos'
   override description =
     '创建或更新当前会话任务清单。更新清单必须与下一步实际工作的工具调用放在同一个响应里并行发出，禁止单独用一整轮只更新清单。每次传入完整 todos 数组并全量覆盖，用于拆解复杂多步骤任务和展示进度；同一时间最多只能有一个 in_progress 项。' +
+    '有活动 Plan 时只使用稳定 ID plan:<stepId> 更新对应状态，Plan 绑定由 Core 自动注入；不得填写或伪造 planId、planStepId、approvalGeneration。' +
     '简单或纯问答任务不需要使用。任务真正完成后及时标记 completed；失败、阻塞或部分完成时保持 in_progress/blocked。该工具只维护清单，不验证实现正确性，也不裁决计划步骤。'
   override parameters = toolParamsSchema(
     {
@@ -298,12 +299,6 @@ export class UpdateTodos extends Tool {
             content: S('任务内容'),
             status: S('pending|in_progress|completed|blocked'),
             activeForm: S('进行时标签'),
-            planId: S('关联计划；Goal Plan 投影时必填'),
-            planStepId: S('关联计划步骤；Goal Plan 投影时必填'),
-            approvalGeneration: {
-              type: 'integer',
-              description: '关联计划的审批代次；Goal Plan 投影时必填',
-            },
           },
           description: '任务项',
         },

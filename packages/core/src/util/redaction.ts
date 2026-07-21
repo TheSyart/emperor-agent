@@ -33,6 +33,18 @@ export function redactSensitiveOutput(
   )
   output = output.replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
   output = output.replace(
+    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+    '[REDACTED_PRIVATE_KEY]',
+  )
+  output = output.replace(
+    /\b(?:(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g,
+    '[REDACTED_TOKEN]',
+  )
+  output = output.replace(
+    /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+    '[REDACTED_JWT]',
+  )
+  output = output.replace(
     /\b(token|api[_-]?key|password|secret)=(?:"[^"\r\n]*(?:"|$)|'[^'\r\n]*(?:'|$)|[^\s,;]+)/gi,
     '$1=[REDACTED]',
   )

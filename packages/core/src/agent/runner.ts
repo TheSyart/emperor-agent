@@ -118,12 +118,42 @@ import {
   type RunnerGoalRecordingHost,
 } from './runner-goal-recording'
 import { filterGoalToolDefinitions, type GoalToolHost } from '../goals/tools'
+import { stepVerificationStatus } from '../control/plan-helpers'
+import {
+  TurnProgressLedger,
+  type TurnContinuationDecision,
+  type TurnContinuationEvaluator,
+  type TurnContinuationInput,
+} from './turn-continuation'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Msg = Record<string, unknown>
 
+type TurnContinuationOutcome =
+  | {
+      kind: 'continue'
+      decision: TurnContinuationDecision
+      grantedIterations: number
+      controlMessage: string
+    }
+  | {
+      kind: 'pause'
+      decision: TurnContinuationDecision
+      evaluationCount: number
+    }
+  | { kind: 'legacy' }
+
+type TurnPlanBinding = {
+  available: boolean
+  planId: string | null
+}
+
 const MAX_EMPTY_RETRIES = 2
 const MAX_LENGTH_RECOVERIES = 3
+const MAX_CONTINUATION_EVALUATIONS = 3
+const MAX_CONTINUATION_ITERATIONS = 12
+const MAX_TOTAL_CONTINUATION_ITERATIONS =
+  MAX_CONTINUATION_EVALUATIONS * MAX_CONTINUATION_ITERATIONS
 const ASK_GUARD_BLOCK =
   'Error: Ask Guard requires `ask_user` before this high-impact action. ' +
   'Use read-only tools if needed, then ask the user to resolve the ambiguity.'
@@ -187,6 +217,21 @@ export interface TodoStoreLike {
 /** runner 需要的 ControlManager 表面（W05）。全部可选/容错调用。 */
 export interface ControlManagerRunnerHost {
   planStore?: PlanStore
+  latestExecutablePlan?(): PlanRecord | null
+  pausePlanExecution?(input: {
+    reason:
+      | 'continuation_rejected'
+      | 'no_progress'
+      | 'evaluation_failed'
+      | 'budget_exhausted'
+      | 'verification_required'
+    turnId: string
+    pausedAt: number
+    evaluationCount: number
+    totalIterations: number
+    nextActions: string[]
+  }): PlanRecord | null
+  resumePlanExecution?(input: { turnId: string }): PlanRecord | null
   systemPrompt(): string
   toolDefinitions(registry: ToolRegistry): ToolDefinition[]
   assessPermission(
@@ -292,6 +337,9 @@ export interface ControlManagerRunnerHost {
     todos: Array<Record<string, unknown>>,
     opts?: { evidence?: Record<string, unknown> | null },
   ): PlanRecord | null
+  normalizePlanTodoUpdate?(
+    todos: Array<Record<string, unknown>>,
+  ): Array<Record<string, unknown>>
   restoreCurrentPlanTodoProjection?(): void
   claimUnverifiedPlanSteps?(): {
     planId: string
@@ -407,6 +455,7 @@ export interface AgentRunnerOptions {
   compactThreshold?: number
   autoCompact?: boolean
   maxTurns?: number | null
+  continuationEvaluator?: TurnContinuationEvaluator | null
   contextPipeline?: ContextPipeline | null
   toolExecutionEngine?: ToolExecutionEngine | null
   workspaceRoot?: string | null
@@ -484,6 +533,7 @@ export class AgentRunner implements RunnerModelHost {
   compactThreshold: number
   autoCompact: boolean
   maxTurns: number | null
+  continuationEvaluator: TurnContinuationEvaluator | null
   contextPipeline: ContextPipeline
   toolExecutionEngine: ToolExecutionEngine
   private readonly denyRefusalCounts = new Map<string, number>()
@@ -542,6 +592,7 @@ export class AgentRunner implements RunnerModelHost {
     this.compactThreshold = opts.compactThreshold ?? 0.7
     this.autoCompact = opts.autoCompact ?? true
     this.maxTurns = opts.maxTurns ?? null
+    this.continuationEvaluator = opts.continuationEvaluator ?? null
     this.contextPipeline = opts.contextPipeline ?? this.defaultContextPipeline()
     this.toolExecutionEngine =
       opts.toolExecutionEngine ?? new ToolExecutionEngine(opts.registry)
@@ -652,6 +703,16 @@ export class AgentRunner implements RunnerModelHost {
     await this.emitTurnPhase(turnState, TurnPhase.STARTED, emit, {
       history_length: history.length,
     })
+    throwIfAborted(signal)
+    if (
+      todoContinuation !== 'none' &&
+      turnId &&
+      this.controlManager?.resumePlanExecution
+    ) {
+      const resumed = this.controlManager.resumePlanExecution({ turnId })
+      if (resumed && emit)
+        await emit(runtimeEvents.planRuntimeUpdate(planToDict(resumed)))
+    }
     const entryPlanDecision = this.assessPlanDecision(history)
     if (emit && entryPlanDecision !== null) {
       await emit(
@@ -660,6 +721,13 @@ export class AgentRunner implements RunnerModelHost {
         ),
       )
     }
+    // Freeze the exact executable Plan generation owned by this turn. A later
+    // continuation decision must never inherit a terminal Plan left behind by
+    // an unrelated earlier user request in the same session/scope.
+    const turnPlanBinding =
+      todoContinuation === 'none'
+        ? { available: true, planId: null }
+        : this.executablePlanBindingForCurrentTurn()
     let queryState: QueryState = makeQueryState({
       turnId,
       maxTurns: this.maxTurns,
@@ -669,6 +737,16 @@ export class AgentRunner implements RunnerModelHost {
     let stopHookNudged = false
     let planFinalCorrections = 0
     let tokenBudgetUsed = 0
+    let continuationEvaluations = 0
+    let finalizeOnlyNextCall = false
+    let noProgressCorrectionProgress = -1
+    const continuationActionFingerprints = new Set<string>()
+    const progressLedger = new TurnProgressLedger()
+    const initialMaxTurns = this.maxTurns
+    const hardIterationLimit =
+      initialMaxTurns === null
+        ? null
+        : initialMaxTurns + MAX_TOTAL_CONTINUATION_ITERATIONS
     const clarification = this.assessClarification(history)
     if (this.memoryStore !== null) {
       this.memoryStore.writeCheckpoint(history, {
@@ -679,12 +757,139 @@ export class AgentRunner implements RunnerModelHost {
         reason: 'turn_start',
       })
     }
+    const pauseForContinuation = async (
+      decision: TurnContinuationDecision,
+      decisionEvaluationCount = continuationEvaluations,
+    ): Promise<string> => {
+      let pausedPlan: PlanRecord | null | undefined = null
+      try {
+        pausedPlan = this.controlManager?.pausePlanExecution?.({
+          reason: continuationPauseReason(decision.reasonCode),
+          turnId: turnId ?? '',
+          pausedAt: Date.now() / 1000,
+          evaluationCount: Math.min(
+            MAX_CONTINUATION_EVALUATIONS,
+            decisionEvaluationCount,
+          ),
+          totalIterations: queryState.turnCount,
+          nextActions: decision.nextActions,
+        })
+      } catch {
+        // A damaged/unavailable PlanStore must not turn a safe pause into an
+        // Internal error or allow finalization. The authority remains untouched.
+      }
+      if (pausedPlan && emit)
+        await emit(runtimeEvents.planRuntimeUpdate(planToDict(pausedPlan)))
+      const reply = this.buildContinuationPausedReply(decision)
+      const message: Msg = { role: 'assistant', content: reply }
+      if (turnId) message.turn_id = turnId
+      history.push(message)
+      if (this.memoryStore) {
+        this.memoryStore.appendHistory('assistant', reply, {
+          extra: turnId ? { turn_id: turnId } : null,
+        })
+        this.memoryStore.clearCheckpoint()
+      }
+      await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, {
+        reason: decision.reasonCode,
+        evaluation_count: Math.min(
+          MAX_CONTINUATION_EVALUATIONS,
+          decisionEvaluationCount,
+        ),
+        total_iterations: queryState.turnCount,
+      })
+      return reply
+    }
+    const grantContinuation = (
+      continuation: Extract<TurnContinuationOutcome, { kind: 'continue' }>,
+    ): void => {
+      continuationEvaluations += 1
+      finalizeOnlyNextCall = continuation.decision.decision === 'finalize'
+      queryState = {
+        ...queryState,
+        maxTurns: queryState.turnCount + continuation.grantedIterations,
+        transition: 'continuation_granted',
+        completed: false,
+        finalWarningIssued: false,
+      }
+      progressLedger.beginContinuationSegment()
+      noProgressCorrectionProgress = -1
+      history.push({
+        role: 'user',
+        content: continuation.controlMessage,
+        ...(turnId ? { turn_id: turnId } : {}),
+        ui_hidden: true,
+      })
+    }
     while (true) {
       throwIfAborted(signal)
       const beforeModel = await consumeRunnerInterjections(interjections)
       if (beforeModel.length) history.push(...beforeModel)
+      const progressSnapshot = progressLedger.snapshot()
+      if (
+        progressSnapshot.noProgressIterations >= 4 &&
+        progressSnapshot.noProgressIterations < 6 &&
+        noProgressCorrectionProgress !== progressSnapshot.meaningfulProgress
+      ) {
+        noProgressCorrectionProgress = progressSnapshot.meaningfulProgress
+        history.push({
+          role: 'user',
+          content:
+            '[CONTROL:NO_PROGRESS_CORRECTION]\n连续 4 次模型迭代没有形成新的有效进展。停止重复读取、重复命令和重复错误；修正已知错误并执行一个可验证的新动作，否则 Core 将暂停本回合。',
+          ...(turnId ? { turn_id: turnId } : {}),
+          ui_hidden: true,
+        })
+      }
+      if (
+        this.continuationEvaluator !== null &&
+        progressSnapshot.noProgressIterations >= 6
+      ) {
+        const continuation = await this.evaluateTurnContinuation({
+          history,
+          queryState,
+          progressLedger,
+          evaluationCount: continuationEvaluations,
+          actionFingerprints: continuationActionFingerprints,
+          hardIterationLimit,
+          turnId,
+          emit,
+          signal,
+          turnPlanBinding,
+        })
+        if (continuation.kind === 'continue') {
+          grantContinuation(continuation)
+          continue
+        }
+        if (continuation.kind === 'pause')
+          return await pauseForContinuation(
+            continuation.decision,
+            continuation.evaluationCount,
+          )
+      }
       const maxTurnsTransition = maxTurnsReached(queryState)
       if (maxTurnsTransition !== null) {
+        const continuation = await this.evaluateTurnContinuation({
+          history,
+          queryState,
+          progressLedger,
+          evaluationCount: continuationEvaluations,
+          actionFingerprints: continuationActionFingerprints,
+          hardIterationLimit,
+          turnId,
+          emit,
+          signal,
+          turnPlanBinding,
+        })
+        if (continuation.kind === 'continue') {
+          grantContinuation(continuation)
+          continue
+        }
+        if (continuation.kind === 'pause') {
+          return await pauseForContinuation(
+            continuation.decision,
+            continuation.evaluationCount,
+          )
+        }
         queryState = maxTurnsTransition.nextState
         const reply = buildMaxTurnsSummary({
           maxTurns: this.maxTurns,
@@ -720,8 +925,11 @@ export class AgentRunner implements RunnerModelHost {
       const permissionAuthorizationId = currentPermissionAuthorization(history)
 
       await this.emitTurnPhase(turnState, TurnPhase.MODEL_REQUEST, emit)
+      const disableToolsForThisCall = finalizeOnlyNextCall
+      finalizeOnlyNextCall = false
       const streamingTools =
         this.streamingToolExecution &&
+        !disableToolsForThisCall &&
         !interjections &&
         this.controlManager === null
           ? this.beginStreamingTools(
@@ -732,6 +940,7 @@ export class AgentRunner implements RunnerModelHost {
               executionEnvironment,
               turnId,
               taskIntent,
+              progressLedger,
             )
           : null
       let response: LLMResponse
@@ -753,6 +962,7 @@ export class AgentRunner implements RunnerModelHost {
           turnId,
           turnStartLength,
           streamingTools?.onToolCallComplete ?? null,
+          disableToolsForThisCall,
         )
         throwIfAborted(signal)
       } catch (error) {
@@ -787,6 +997,17 @@ export class AgentRunner implements RunnerModelHost {
         tool_call_count: response.toolCalls.length,
         content_chars: (response.content ?? '').length,
       })
+      if (disableToolsForThisCall && shouldExecuteTools(response)) {
+        await streamingTools?.cancel('finalize_tools_forbidden')
+        return await pauseForContinuation({
+          decision: 'pause',
+          reasonCode: 'blocked',
+          requestedIterations: 0,
+          nextActions: ['重新整理不调用工具的最终交付回复'],
+          summary:
+            '模型在无工具收尾阶段仍请求了工具调用，Core 已拒绝执行并安全暂停。',
+        })
+      }
       const superseding = await consumeRunnerInterjections(interjections)
       if (superseding.length) {
         await streamingTools?.cancel('interjected')
@@ -988,6 +1209,7 @@ export class AgentRunner implements RunnerModelHost {
                 turnId,
                 taskIntent,
                 permissionAuthorizationId,
+                progressLedger,
               )
           throwIfAborted(signal)
         } catch (pause) {
@@ -1021,6 +1243,7 @@ export class AgentRunner implements RunnerModelHost {
           throw pause
         }
         history.push(...toolMessages)
+        progressLedger.finishIteration()
         await this.emitTurnPhase(turnState, TurnPhase.TOOL_BATCH_DONE, emit, {
           count: toolMessages.length,
         })
@@ -1037,6 +1260,7 @@ export class AgentRunner implements RunnerModelHost {
       }
 
       const reply = response.content ?? ''
+      progressLedger.finishIteration()
 
       // 空响应救援
       if (!reply.trim() && !response.toolCalls.length) {
@@ -1127,6 +1351,25 @@ export class AgentRunner implements RunnerModelHost {
             unfinishedCount: unfinished.length,
           })
           if (t === null) {
+            if (this.activePlanForSummary()) {
+              const decision: TurnContinuationDecision = {
+                decision: 'pause',
+                reasonCode: 'no_progress',
+                requestedIterations: 0,
+                nextActions: unfinished
+                  .slice(0, 3)
+                  .map((todo) => String(todo.content ?? todo.id ?? '')),
+                summary:
+                  '在两次收尾纠正后，权威 Plan 仍有未完成步骤，Core 已暂停而不是留下永久运行中的任务。',
+              }
+              await this.emitContinuationDecision(emit, decision, {
+                evaluationRound: continuationEvaluations + 1,
+                totalIterations: queryState.turnCount,
+                grantedIterations: 0,
+                source: 'core_policy',
+              })
+              return await pauseForContinuation(decision)
+            }
             const pausedReply = buildTodoContinuationPausedSummary(
               this.todoStore.todos,
             )
@@ -1265,6 +1508,7 @@ export class AgentRunner implements RunnerModelHost {
     stableBoundary: number,
     onToolCallComplete?:
       ((call: ToolCallRequest) => void | Promise<void>) | null,
+    disableTools = false,
   ): Promise<LLMResponse> {
     try {
       return await this.callModelWithProjection(
@@ -1276,6 +1520,7 @@ export class AgentRunner implements RunnerModelHost {
         false,
         stableBoundary,
         onToolCallComplete,
+        disableTools,
       )
     } catch (exc) {
       if (!isContextOverflowProviderError(exc)) throw exc
@@ -1321,6 +1566,7 @@ export class AgentRunner implements RunnerModelHost {
           true,
           undefined,
           onToolCallComplete,
+          disableTools,
         )
         await this.runHookEvent(
           'PostCompact',
@@ -1372,6 +1618,7 @@ export class AgentRunner implements RunnerModelHost {
     stableBoundary: number | undefined,
     onToolCallComplete?:
       ((call: ToolCallRequest) => void | Promise<void>) | null,
+    disableTools = false,
   ): Promise<LLMResponse> {
     const pipeline = emergencyShrink
       ? this.emergencyContextPipeline()
@@ -1464,6 +1711,7 @@ export class AgentRunner implements RunnerModelHost {
       toolDefinitions,
       visibleGoalTools,
     )
+    if (disableTools) toolDefinitions = []
     const snapshotMessages = [
       { role: 'system', content: systemPrompt },
       ...(governed as Array<Record<string, unknown>>),
@@ -1590,6 +1838,7 @@ export class AgentRunner implements RunnerModelHost {
     executionEnvironment: ExecutionEnvironment | null
     turnId: string | null
     taskIntent: string | null
+    progressLedger?: TurnProgressLedger | null
     preparedCalls?: Map<string, ToolCallRequest>
     preflightResults?: Map<string, ToolResultObj>
   }): {
@@ -1728,6 +1977,10 @@ export class AgentRunner implements RunnerModelHost {
       await emitPlanStepTransitions(this.controlManager, planStepsBefore, emit)
       await this.emitToolResult(call, result, emit)
       await recordGoalResult(verificationUpdate)
+      ctx.progressLedger?.recordToolResult(executedCall, result, {
+        executed: outcome.executed,
+        readOnly: this.toolCallIsReadOnly(executedCall),
+      })
       return result
     }
 
@@ -1777,6 +2030,7 @@ export class AgentRunner implements RunnerModelHost {
     executionEnvironment: ExecutionEnvironment | null,
     turnId: string | null,
     taskIntent: string | null,
+    progressLedger: TurnProgressLedger,
   ): {
     onToolCallComplete: (call: ToolCallRequest) => void
     finish: (
@@ -1796,6 +2050,7 @@ export class AgentRunner implements RunnerModelHost {
       executionEnvironment,
       turnId,
       taskIntent,
+      progressLedger,
     })
     const run = this.toolExecutionEngine.createStreamingRun({
       emit,
@@ -1831,6 +2086,7 @@ export class AgentRunner implements RunnerModelHost {
     turnId: string | null,
     taskIntent: string | null,
     permissionAuthorizationId: string | null,
+    progressLedger: TurnProgressLedger,
   ): Promise<Msg[]> {
     const preflight =
       this.controlManager === null
@@ -1856,6 +2112,7 @@ export class AgentRunner implements RunnerModelHost {
       executionEnvironment,
       turnId,
       taskIntent,
+      progressLedger,
       preparedCalls: preflight?.preparedCalls,
       preflightResults: preflight?.results,
     })
@@ -1891,7 +2148,10 @@ export class AgentRunner implements RunnerModelHost {
       try {
         prepared = {
           ...call,
-          arguments: this.registry.prepareCall(call.name, call.arguments),
+          arguments: this.prepareControlToolArguments(
+            call.name,
+            call.arguments,
+          ),
         }
       } catch (error) {
         failures.set(call.id, toolPreparationError(error))
@@ -1922,7 +2182,7 @@ export class AgentRunner implements RunnerModelHost {
         try {
           prepared = {
             ...prepared,
-            arguments: this.registry.prepareCall(
+            arguments: this.prepareControlToolArguments(
               prepared.name,
               preTool.updatedInput,
             ),
@@ -2014,7 +2274,7 @@ export class AgentRunner implements RunnerModelHost {
         try {
           updated = {
             ...call,
-            arguments: this.registry.prepareCall(
+            arguments: this.prepareControlToolArguments(
               call.name,
               hookDecision.updatedInput,
             ),
@@ -2094,6 +2354,32 @@ export class AgentRunner implements RunnerModelHost {
       ),
     )
     return blockedToolBatch(toolCalls, preparedCalls, failures)
+  }
+
+  private normalizeControlToolArguments(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (
+      name !== 'update_todos' ||
+      typeof this.controlManager?.normalizePlanTodoUpdate !== 'function'
+    )
+      return args
+    const todos = Array.isArray(args.todos)
+      ? (args.todos as Array<Record<string, unknown>>)
+      : []
+    return {
+      ...args,
+      todos: this.controlManager.normalizePlanTodoUpdate(todos),
+    }
+  }
+
+  private prepareControlToolArguments(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const prepared = this.registry.prepareCall(name, args)
+    return this.normalizeControlToolArguments(name, prepared)
   }
 
   private async assessPermissionBatch(
@@ -2550,25 +2836,443 @@ export class AgentRunner implements RunnerModelHost {
     }
   }
 
-  private activePlanForSummary(): PlanRecord | null {
+  private async evaluateTurnContinuation(opts: {
+    history: Msg[]
+    queryState: QueryState
+    progressLedger: TurnProgressLedger
+    evaluationCount: number
+    actionFingerprints: Set<string>
+    hardIterationLimit: number | null
+    turnId: string | null
+    emit: StreamEmitter | null
+    signal: AbortSignal | null
+    turnPlanBinding: TurnPlanBinding
+  }): Promise<TurnContinuationOutcome> {
+    throwIfAborted(opts.signal)
+    if (this.continuationEvaluator === null) return { kind: 'legacy' }
+    const progress = opts.progressLedger.snapshot()
+    const evaluationRound = opts.evaluationCount + 1
+    if (
+      opts.evaluationCount >= MAX_CONTINUATION_EVALUATIONS ||
+      (opts.hardIterationLimit !== null &&
+        opts.queryState.turnCount >= opts.hardIterationLimit)
+    ) {
+      const decision: TurnContinuationDecision = {
+        decision: 'pause',
+        reasonCode: 'budget_exhausted',
+        requestedIterations: 0,
+        nextActions: [],
+        summary: '续跑评估次数或累计执行额度已达到安全上限。',
+      }
+      await this.emitContinuationDecision(opts.emit, decision, {
+        evaluationRound: Math.max(1, opts.evaluationCount),
+        totalIterations: opts.queryState.turnCount,
+        grantedIterations: 0,
+        source: 'core_policy',
+      })
+      return {
+        kind: 'pause',
+        decision,
+        evaluationCount: opts.evaluationCount,
+      }
+    }
+    const input = this.turnContinuationInput(
+      opts.history,
+      progress,
+      {
+        evaluationRound,
+        totalIterations: opts.queryState.turnCount,
+      },
+      opts.turnPlanBinding,
+    )
+    let decision = await this.continuationEvaluator.evaluate(input, {
+      signal: opts.signal,
+    })
+    throwIfAborted(opts.signal)
+    let grantedIterations = 0
+    if (decision.decision === 'continue') {
+      if (
+        progress.meaningfulProgress <= 0 ||
+        progress.noProgressIterations >= 6
+      ) {
+        decision = {
+          decision: 'pause',
+          reasonCode: 'no_progress',
+          requestedIterations: 0,
+          nextActions: decision.nextActions,
+          summary: '本执行段没有形成新的有效进展，Core 已阻止继续空转。',
+        }
+      } else {
+        const actionFingerprints = decision.nextActions.map((action) =>
+          continuationActionFingerprint(action),
+        )
+        if (
+          actionFingerprints.length === 0 ||
+          actionFingerprints.every((fingerprint) =>
+            opts.actionFingerprints.has(fingerprint),
+          )
+        ) {
+          decision = {
+            decision: 'pause',
+            reasonCode: 'no_progress',
+            requestedIterations: 0,
+            nextActions: decision.nextActions,
+            summary: '续跑评估重复了已经批准过的动作，Core 已阻止循环。',
+          }
+        } else {
+          for (const fingerprint of actionFingerprints)
+            opts.actionFingerprints.add(fingerprint)
+        }
+      }
+      if (decision.decision === 'continue') {
+        const remaining =
+          opts.hardIterationLimit === null
+            ? MAX_CONTINUATION_ITERATIONS
+            : Math.max(0, opts.hardIterationLimit - opts.queryState.turnCount)
+        grantedIterations = Math.min(
+          MAX_CONTINUATION_ITERATIONS,
+          decision.requestedIterations,
+          remaining,
+        )
+        if (grantedIterations <= 0) {
+          decision = {
+            decision: 'pause',
+            reasonCode: 'budget_exhausted',
+            requestedIterations: 0,
+            nextActions: decision.nextActions,
+            summary: '累计执行额度已达到安全上限。',
+          }
+        }
+      }
+    } else if (decision.decision === 'finalize') {
+      if (this.authoritativeReadyToFinalize(progress, opts.turnPlanBinding)) {
+        const remaining =
+          opts.hardIterationLimit === null
+            ? 1
+            : Math.max(0, opts.hardIterationLimit - opts.queryState.turnCount)
+        grantedIterations = Math.min(1, remaining)
+        if (grantedIterations <= 0) {
+          decision = {
+            decision: 'pause',
+            reasonCode: 'budget_exhausted',
+            requestedIterations: 0,
+            nextActions: [],
+            summary: '权威状态已完成，但最终回复额度已经耗尽。',
+          }
+        }
+      } else {
+        decision = {
+          decision: 'pause',
+          reasonCode: 'verification_remaining',
+          requestedIterations: 0,
+          nextActions: decision.nextActions,
+          summary: '权威 Plan 或必需验证尚未完成，Core 拒绝提前收尾。',
+        }
+      }
+    }
+    await this.emitContinuationDecision(opts.emit, decision, {
+      evaluationRound,
+      totalIterations: opts.queryState.turnCount,
+      grantedIterations,
+      source: 'evaluator',
+    })
+    if (
+      (decision.decision === 'continue' || decision.decision === 'finalize') &&
+      grantedIterations > 0
+    ) {
+      return {
+        kind: 'continue',
+        decision,
+        grantedIterations,
+        controlMessage: continuationControlMessage(decision, grantedIterations),
+      }
+    }
+    return {
+      kind: 'pause',
+      decision,
+      evaluationCount: evaluationRound,
+    }
+  }
+
+  private turnContinuationInput(
+    history: Msg[],
+    progress: ReturnType<TurnProgressLedger['snapshot']>,
+    budget: { evaluationRound: number; totalIterations: number },
+    turnPlanBinding: TurnPlanBinding,
+  ): TurnContinuationInput {
+    const plan = this.planForTurnBinding(turnPlanBinding).plan
+    const lastAssistant = [...history]
+      .reverse()
+      .find((message) => message.role === 'assistant')
+    return {
+      taskIntent: currentTaskIntent(history),
+      plan: plan
+        ? {
+            id: plan.id,
+            title: plan.title,
+            status: plan.status,
+            steps: plan.steps.map((step) => ({
+              id: step.id,
+              title: step.title,
+              status: step.status,
+              verificationStatus: stepVerificationStatus(step),
+            })),
+          }
+        : null,
+      todos: (this.todoStore?.todos ?? [])
+        .filter((todo) => {
+          const planId = String(todo.plan_id ?? todo.planId ?? '').trim()
+          return !planId || planId === plan?.id
+        })
+        .map((todo) => ({
+          id: String(todo.id ?? ''),
+          content: String(todo.content ?? ''),
+          status: String(todo.status ?? 'pending'),
+          planStepId:
+            String(todo.plan_step_id ?? todo.planStepId ?? '').trim() || null,
+        })),
+      successfulChanges: progress.successfulChanges,
+      successfulEvidence: progress.successfulEvidence,
+      recentErrors: progress.recentErrors,
+      repeatedReadCount: progress.repeatedReadCount,
+      noProgressIterations: progress.noProgressIterations,
+      lastIterationHadError: progress.lastIterationHadError,
+      totalIterations: budget.totalIterations,
+      evaluationRound: budget.evaluationRound,
+      lastAssistantProgress: String(lastAssistant?.content ?? '').slice(0, 500),
+    }
+  }
+
+  private async emitContinuationDecision(
+    emit: StreamEmitter | null,
+    decision: TurnContinuationDecision,
+    budget: {
+      evaluationRound: number
+      totalIterations: number
+      grantedIterations: number
+      source: 'evaluator' | 'core_policy'
+    },
+  ): Promise<void> {
+    if (!emit) return
+    await emit(
+      runtimeEvents.turnContinuationEvaluated({
+        decision: decision.decision,
+        reasonCode: decision.reasonCode,
+        evaluationRound: budget.evaluationRound,
+        totalIterations: budget.totalIterations,
+        grantedIterations: budget.grantedIterations,
+        source: budget.source,
+        summary: decision.summary,
+        nextActions: decision.nextActions,
+      }),
+    )
+  }
+
+  private authoritativeReadyToFinalize(
+    progress: ReturnType<TurnProgressLedger['snapshot']>,
+    turnPlanBinding: TurnPlanBinding = { available: true, planId: null },
+  ): boolean {
+    const lookup = this.planForTurnBinding(turnPlanBinding)
+    if (!lookup.available) return false
+    if (progress.lastIterationHadError) return false
+    const plan = lookup.plan
+    if (plan) {
+      if (plan.status !== PlanStatus.COMPLETED) return false
+      if (plan.goalId) return false
+      if (
+        !plan.steps.every(
+          (step) =>
+            ['done', 'skipped'].includes(step.status) &&
+            ['passed', 'not_required'].includes(stepVerificationStatus(step)),
+        )
+      )
+        return false
+      if (!this.todoStore) return true
+      const generation = Number(plan.metadata.approval_generation ?? 0)
+      const bound = this.todoStore.todos.filter(
+        (todo) => String(todo.plan_id ?? todo.planId ?? '') === plan.id,
+      )
+      if (bound.length !== plan.steps.length) return false
+      if (
+        !plan.steps.every((step) =>
+          bound.some(
+            (todo) =>
+              String(todo.plan_step_id ?? todo.planStepId ?? '') === step.id &&
+              Number(todo.approval_generation ?? todo.approvalGeneration) ===
+                generation &&
+              String(todo.status ?? '') === 'completed',
+          ),
+        )
+      )
+        return false
+      return this.todoStore.todos
+        .filter(
+          (todo) =>
+            !String(todo.plan_id ?? todo.planId ?? '').trim() &&
+            !String(todo.plan_step_id ?? todo.planStepId ?? '').trim(),
+        )
+        .every((todo) => String(todo.status ?? '') === 'completed')
+    }
+    const todos = this.todoStore?.todos ?? []
+    if (todos.length > 0)
+      return (
+        todos.every((todo) => String(todo.status ?? '') === 'completed') &&
+        progress.meaningfulProgress > 0
+      )
+    return progress.meaningfulProgress > 0
+  }
+
+  private buildContinuationPausedReply(
+    decision: TurnContinuationDecision,
+  ): string {
+    const plan = this.activePlanForSummary()
+    const lines = ['执行已暂停：' + decision.summary]
+    if (plan) {
+      const done = plan.steps.filter((step) =>
+        ['done', 'skipped'].includes(step.status),
+      ).length
+      lines.push(`计划「${plan.title}」步骤完成 ${done}/${plan.steps.length}。`)
+      const unfinished = plan.steps.filter(
+        (step) => !['done', 'skipped'].includes(step.status),
+      )
+      if (unfinished.length) {
+        lines.push('未完成：')
+        for (const step of unfinished.slice(0, 10))
+          lines.push(`- ${step.title}`)
+      }
+    }
+    if (decision.nextActions.length) {
+      lines.push('建议下一步：')
+      for (const action of decision.nextActions) lines.push(`- ${action}`)
+    }
+    lines.push('恢复方式：发送 /continue 或“继续执行”。')
+    return lines.join('\n')
+  }
+
+  private latestPlanForCurrentScope(): PlanRecord | null {
+    return this.latestPlanLookupForCurrentScope().plan
+  }
+
+  private executablePlanBindingForCurrentTurn(): TurnPlanBinding {
+    if (typeof this.controlManager?.latestExecutablePlan === 'function') {
+      try {
+        return {
+          available: true,
+          planId: this.controlManager.latestExecutablePlan()?.id ?? null,
+        }
+      } catch {
+        return { available: false, planId: null }
+      }
+    }
     const store = this.controlManager?.planStore
-    if (!store) return null
+    if (!store) return { available: true, planId: null }
+    let plan: PlanRecord | null = null
     try {
-      const record = store.latest()
-      if (record === null) return null
+      plan = store
+        .list()
+        .filter((record) => {
+          if (
+            record.status !== PlanStatus.APPROVED &&
+            record.status !== PlanStatus.EXECUTING
+          )
+            return false
+          if (
+            typeof this.controlManager?.planMatchesCurrentScope === 'function'
+          )
+            return this.controlManager.planMatchesCurrentScope(record)
+          return true
+        })
+        .reduce<PlanRecord | null>(
+          (latest, record) =>
+            latest === null ||
+            Number(record.metadata.approval_generation ?? 0) >
+              Number(latest.metadata.approval_generation ?? 0) ||
+            (Number(record.metadata.approval_generation ?? 0) ===
+              Number(latest.metadata.approval_generation ?? 0) &&
+              record.updatedAt > latest.updatedAt)
+              ? record
+              : latest,
+          null,
+        )
+    } catch {
+      return { available: false, planId: null }
+    }
+    if (
+      !plan ||
+      (plan.status !== PlanStatus.APPROVED &&
+        plan.status !== PlanStatus.EXECUTING)
+    )
+      return { available: true, planId: null }
+    return { available: true, planId: plan.id }
+  }
+
+  private planForTurnBinding(binding: TurnPlanBinding): {
+    available: boolean
+    plan: PlanRecord | null
+  } {
+    if (!binding.available) return { available: false, plan: null }
+    const store = this.controlManager?.planStore
+    if (!binding.planId) {
+      if (!store) return { available: true, plan: null }
+      try {
+        // Availability remains part of the completion authority even when the
+        // turn is intentionally not bound to a historical Plan.
+        store.list()
+        return { available: true, plan: null }
+      } catch {
+        return { available: false, plan: null }
+      }
+    }
+    if (!store) return { available: false, plan: null }
+    try {
+      const plan = store.get(binding.planId)
+      if (!plan) return { available: false, plan: null }
       if (
         typeof this.controlManager?.planMatchesCurrentScope === 'function' &&
-        !this.controlManager.planMatchesCurrentScope(record)
-      ) {
-        return null
-      }
-      return record.status === PlanStatus.APPROVED ||
-        record.status === PlanStatus.EXECUTING
-        ? record
-        : null
+        !this.controlManager.planMatchesCurrentScope(plan)
+      )
+        return { available: false, plan: null }
+      return { available: true, plan }
     } catch {
-      return null
+      return { available: false, plan: null }
     }
+  }
+
+  private latestPlanLookupForCurrentScope(): {
+    available: boolean
+    plan: PlanRecord | null
+  } {
+    const store = this.controlManager?.planStore
+    if (!store) return { available: true, plan: null }
+    try {
+      const matches = store.list().filter((record) => {
+        if (typeof this.controlManager?.planMatchesCurrentScope !== 'function')
+          return true
+        return this.controlManager.planMatchesCurrentScope(record)
+      })
+      return {
+        available: true,
+        plan: matches.reduce<PlanRecord | null>(
+          (latest, record) =>
+            latest === null ||
+            record.updatedAt > latest.updatedAt ||
+            (record.updatedAt === latest.updatedAt && record.id > latest.id)
+              ? record
+              : latest,
+          null,
+        ),
+      }
+    } catch {
+      return { available: false, plan: null }
+    }
+  }
+
+  private activePlanForSummary(): PlanRecord | null {
+    const record = this.latestPlanForCurrentScope()
+    return record?.status === PlanStatus.APPROVED ||
+      record?.status === PlanStatus.EXECUTING
+      ? record
+      : null
   }
 
   private assessClarification(history: Msg[]): Clarification {
@@ -2591,6 +3295,16 @@ export class AgentRunner implements RunnerModelHost {
     const tool = this.registry.get(name)
     if (!tool) return false
     return !tool.readOnly
+  }
+
+  private toolCallIsReadOnly(call: ToolCallRequest): boolean {
+    const tool = this.registry.get(call.name)
+    if (!tool) return false
+    try {
+      return tool.isReadOnly(call.arguments)
+    } catch {
+      return tool.readOnly
+    }
   }
 
   private planGuardBlocksTool(
@@ -3006,6 +3720,48 @@ function blockedToolBatch(
     )
   }
   return { preparedCalls, results }
+}
+
+function continuationControlMessage(
+  decision: TurnContinuationDecision,
+  grantedIterations: number,
+): string {
+  const actions = decision.nextActions
+    .slice(0, 3)
+    .map((action, index) => `${index + 1}. ${action}`)
+    .join('\n')
+  const tag =
+    decision.decision === 'finalize'
+      ? '[CONTROL:FINALIZE_GRANTED]'
+      : '[CONTROL:CONTINUATION_GRANTED]'
+  return [
+    tag,
+    `Core 已批准最多 ${grantedIterations} 次额外模型迭代。`,
+    decision.summary,
+    actions,
+    '只执行以上剩余动作；停止扩展范围，优先完成验证和诚实交付。',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function continuationPauseReason(
+  reasonCode: TurnContinuationDecision['reasonCode'],
+):
+  | 'continuation_rejected'
+  | 'no_progress'
+  | 'evaluation_failed'
+  | 'budget_exhausted'
+  | 'verification_required' {
+  if (reasonCode === 'no_progress') return 'no_progress'
+  if (reasonCode === 'evaluation_failed') return 'evaluation_failed'
+  if (reasonCode === 'budget_exhausted') return 'budget_exhausted'
+  if (reasonCode === 'verification_remaining') return 'verification_required'
+  return 'continuation_rejected'
+}
+
+function continuationActionFingerprint(action: string): string {
+  return String(action).trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 interface PlanStepSnapshot {

@@ -11,6 +11,7 @@ import {
   maxTurnsReached,
   nearMaxTurns,
   todoContinuationIntent,
+  isExplicitTodoContinuation,
   todoFollowup,
   toolFollowup,
 } from './query-state'
@@ -29,8 +30,8 @@ describe('query_state (test_query_state.py)', () => {
     )
   })
 
-  it('nearMaxTurns injects a one-shot wrap-up reminder two turns before the limit', () => {
-    const state = makeQueryState({ maxTurns: 5, turnCount: 3 })
+  it('nearMaxTurns injects a one-shot wrap-up reminder five turns before the limit', () => {
+    const state = makeQueryState({ maxTurns: 20, turnCount: 15 })
     const warning = nearMaxTurns(state)
     expect(warning).not.toBeNull()
     expect(warning!.messages).toHaveLength(1)
@@ -49,7 +50,10 @@ describe('query_state (test_query_state.py)', () => {
       nearMaxTurns(makeQueryState({ maxTurns: 4, turnCount: 2 })),
     ).toBeNull()
     expect(
-      nearMaxTurns(makeQueryState({ maxTurns: 5, turnCount: 2 })),
+      nearMaxTurns(makeQueryState({ maxTurns: 5, turnCount: 3 })),
+    ).toBeNull()
+    expect(
+      nearMaxTurns(makeQueryState({ maxTurns: 20, turnCount: 14 })),
     ).toBeNull()
     expect(
       nearMaxTurns(makeQueryState({ maxTurns: null, turnCount: 3 })),
@@ -146,12 +150,22 @@ describe('query_state (test_query_state.py)', () => {
   })
 
   it('recognizes only explicit or trusted todo continuation prompts', () => {
+    expect(isExplicitTodoContinuation('继续执行')).toBe(true)
+    expect(isExplicitTodoContinuation('继续推进当前 Goal')).toBe(false)
     expect(
       todoContinuationIntent([{ role: 'user', content: '继续执行 step_1' }]),
     ).toBe('explicit')
     expect(
       todoContinuationIntent([
         { role: 'user', content: '[CONTROL:PLAN_APPROVED]\nplan_id: plan_1' },
+      ]),
+    ).toBe('control')
+    expect(
+      todoContinuationIntent([
+        {
+          role: 'user',
+          content: '[CONTROL:GOAL_CONTINUATION_RESUMED]\n继续推进当前 Goal。',
+        },
       ]),
     ).toBe('control')
     expect(

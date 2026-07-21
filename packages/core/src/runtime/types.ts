@@ -340,6 +340,17 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         detail?: RuntimeEventPayload
       }
     | {
+        event: 'turn_continuation_evaluated'
+        decision: 'continue' | 'finalize' | 'pause'
+        reasonCode: string
+        evaluationRound: number
+        totalIterations: number
+        grantedIterations: number
+        source?: 'evaluator' | 'core_policy'
+        summary: string
+        nextActions: string[]
+      }
+    | {
         event: 'turn_scope'
         mode?: string
         workspace_root?: string

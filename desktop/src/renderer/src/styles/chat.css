@@ -366,6 +366,32 @@
   border-left-color: var(--danger);
 }
 
+.plan-activity-actions {
+  margin: 4px 0 0 18px;
+  flex-basis: 100%;
+  color: rgb(var(--fg-muted));
+  list-style: disc;
+}
+
+.plan-activity-node:has(.plan-activity-actions),
+.plan-activity-node:has(.plan-activity-continue) {
+  flex-wrap: wrap;
+}
+
+.plan-activity-continue {
+  margin: 4px 0 2px;
+  padding: 5px 10px;
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: var(--radius-sm);
+  color: rgb(var(--fg));
+  background: rgb(var(--surface-2));
+}
+
+.plan-activity-continue:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ── Thought quote block(引述块式,PLAN-20260721-THEME-THINK) ─────────────── */
 .thought-status-node {
   @apply flex w-fit max-w-full items-center gap-1.5 px-2 py-0.5;

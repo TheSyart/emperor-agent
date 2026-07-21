@@ -18,6 +18,7 @@ const props = defineProps<{
   messages: ChatMessage[]
   plans?: RuntimePlanRecord[]
 }>()
+const emit = defineEmits<{ continueExecution: [] }>()
 const scroller = ref<HTMLElement | null>(null)
 const followBottom = ref(true)
 
@@ -116,7 +117,11 @@ function sizeDependencies(message: ChatMessage): unknown[] {
           :size-dependencies="sizeDependencies(item)"
         >
           <div class="message-stack-virtual-row">
-            <MessageRow :message="item" :plans="props.plans || []" />
+            <MessageRow
+              :message="item"
+              :plans="props.plans || []"
+              @continue-execution="emit('continueExecution')"
+            />
           </div>
         </DynamicScrollerItem>
       </template>
@@ -127,6 +132,7 @@ function sizeDependencies(message: ChatMessage): unknown[] {
         :key="message.id"
         :message="message"
         :plans="props.plans || []"
+        @continue-execution="emit('continueExecution')"
       />
     </div>
 

@@ -42,6 +42,7 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'message_delta',
   'message_tombstoned',
   'agent_thought',
+  'turn_continuation_evaluated',
   'tool_call',
   'tool_result',
   'tool_error',
@@ -98,6 +99,8 @@ export function applyChatProjectionEvent(
   }
 
   if (event.event === 'user_message') {
+    if (isExplicitContinuationMessage(String(event.content ?? '')))
+      settleContinuationActions(state)
     applyUserMessage(state, event, runtime)
     return state
   }
@@ -307,6 +310,35 @@ export function applyChatProjectionEvent(
     return state
   }
 
+  if (event.event === 'turn_continuation_evaluated') {
+    const assistant = assistantForEvent(state, event, runtime)!
+    finishActiveThought(assistant, event)
+    const id = `turn-continuation-${event.seq || event.evaluationRound}`
+    if (!assistant.segments.some((segment) => segment.id === id)) {
+      const presentation = continuationActivityPresentation(event)
+      assistant.segments.push({
+        id,
+        type: 'plan_activity',
+        ...presentation,
+      })
+    }
+    if (event.decision === 'pause') {
+      const endedAt = eventTimeMs(event)
+      finishTimedState(assistant, endedAt)
+      settleRunningToolSegments(assistant, {
+        endedAt,
+        summary: '执行已暂停',
+      })
+      assistant.streaming = false
+      if (event.turn_id) {
+        runtime.resumeTurnTargets.delete(event.turn_id)
+        runtime.turnClock.delete(event.turn_id)
+      }
+      state.currentAssistantId = null
+    }
+    return state
+  }
+
   if (event.event === 'assistant_done') {
     const assistant =
       assistantForEvent(state, event, runtime, false) || currentAssistant(state)
@@ -385,6 +417,53 @@ export function applyChatProjectionEvent(
   }
 
   return state
+}
+
+function isExplicitContinuationMessage(content: string): boolean {
+  return /^(?:\/continue(?:\s|$)|继续(?:执行)?(?:\s|[，,:：。!！]|$)|按原计划继续(?:\s|[，,:：。!！]|$))/i.test(
+    content.trim(),
+  )
+}
+
+function settleContinuationActions(state: ChatProjectionState): void {
+  for (const message of state.messages) {
+    if (message.role !== 'assistant') continue
+    for (const segment of message.segments) {
+      if (segment.type !== 'plan_activity' || segment.action !== 'continue')
+        continue
+      delete segment.action
+    }
+  }
+}
+
+function continuationActivityPresentation(
+  event: Extract<WsEvent, { event: 'turn_continuation_evaluated' }>,
+): {
+  label: string
+  detail?: string
+  tone: 'running' | 'success' | 'error' | 'neutral'
+  action?: 'continue'
+  nextActions?: string[]
+} {
+  if (event.decision === 'continue')
+    return {
+      label: `评估后继续执行 · 追加 ${event.grantedIterations} 次迭代`,
+      detail: event.summary,
+      tone: 'running',
+    }
+  if (event.decision === 'finalize')
+    return {
+      label: '执行完成，正在整理交付',
+      detail: event.summary,
+      tone: 'success',
+    }
+  return {
+    label: '执行已暂停',
+    detail: event.summary,
+    tone: 'error',
+    action: 'continue',
+    nextActions: event.nextActions,
+  }
 }
 
 export function createProjectionRuntime(): ProjectionRuntime {

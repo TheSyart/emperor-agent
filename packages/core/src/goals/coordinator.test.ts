@@ -23,6 +23,7 @@ async function fixture(
       pass: boolean
       [key: string]: unknown
     }>
+    executionPaused?: () => boolean
     now?: () => string
   } = {},
 ) {
@@ -77,6 +78,7 @@ async function fixture(
     activeTasks,
     pendingInteractionId: options.pendingInteractionId,
     evaluateGate: options.evaluateGate as never,
+    executionPaused: options.executionPaused,
     now: options.now,
     runTurn: async (input) => {
       turns.push(input)
@@ -92,6 +94,49 @@ async function settle(coordinator: GoalCoordinator, goalId: string) {
 }
 
 describe('GoalCoordinator', () => {
+  it('stops automatic Goal cycles when the Plan execution is paused for continuation', async () => {
+    let paused = false
+    const f = await fixture({
+      executionPaused: () => paused,
+      runTurn: async () => {
+        paused = true
+      },
+    })
+
+    await f.coordinator.start(f.goal.id, 'Visible request')
+    await settle(f.coordinator, f.goal.id)
+
+    expect(f.turns).toHaveLength(1)
+    await expect(f.store.get(f.goal.id)).resolves.toMatchObject({
+      runtime: {
+        phase: 'paused',
+        currentRunId: null,
+        pauseReason: 'continuation_pause',
+      },
+    })
+  })
+
+  it('resumes a paused Goal with an explicit continuation prompt', async () => {
+    const f = await fixture({
+      runTurn: async () => {
+        await f.coordinator.pause(f.goal.id, 'continuation_pause')
+      },
+    })
+    await f.coordinator.start(f.goal.id, 'Visible request')
+    await settle(f.coordinator, f.goal.id)
+
+    const resumed = await f.coordinator.resume(f.goal.id, '继续执行')
+    expect(resumed.runtime.phase).not.toBe('paused')
+    for (let attempt = 0; attempt < 10 && f.turns.length < 2; attempt += 1)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    expect(f.turns.at(-1)?.content).toContain(
+      '[CONTROL:GOAL_CONTINUATION_RESUMED]',
+    )
+    expect(f.turns.at(-1)?.displayContent).toBe('继续执行')
+    await f.coordinator.pause(f.goal.id, 'test_done')
+    await settle(f.coordinator, f.goal.id)
+  })
+
   it('owns one ActiveTask across turns and hides only continuation cycles', async () => {
     let calls = 0
     const f = await fixture({

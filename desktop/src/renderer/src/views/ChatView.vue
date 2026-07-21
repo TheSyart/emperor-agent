@@ -275,6 +275,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
       <MessageList
         :messages="ctx.messages.value"
         :plans="ctx.planProjection.plans"
+        @continue-execution="ctx.submitFromComposer('继续执行')"
       />
 
       <div class="chat-bottom-stack">
