@@ -52,4 +52,74 @@ describe('theme tokens', () => {
     const entry = readThemeFile('../styles.css')
     expect(entry).not.toContain(':root')
   })
+
+  const REQUIRED_KEYS = [
+    '--radius-xs',
+    '--radius-md',
+    '--radius-lg',
+    '--radius-xl',
+    '--shadow-color',
+    '--shadow-sm',
+    '--shadow-md',
+    '--shadow-lg',
+    '--font-size-2xs',
+    '--font-size-xs',
+    '--font-size-sm',
+    '--font-size-md',
+    '--font-size-lg',
+    '--space-1',
+    '--space-2',
+    '--space-3',
+    '--space-4',
+    '--space-5',
+    '--space-6',
+    '--tone-cyan',
+    '--tone-violet',
+    '--tone-blue',
+  ]
+
+  it.each(['dark.css', 'light.css'])('%s defines the full token ladder', (f) => {
+    const keys = tokenKeys(readThemeFile(f))
+    for (const required of REQUIRED_KEYS) {
+      expect(keys).toContain(required)
+    }
+  })
+
+  it.each(['dark.css', 'light.css'])(
+    '%s stores RGB colors as space-separated triplets',
+    (f) => {
+      const css = readThemeFile(f)
+      const colorKeys = [
+        '--bg',
+        '--bg-elevated',
+        '--bg-inset',
+        '--fg',
+        '--fg-muted',
+        '--fg-subtle',
+        '--border',
+        '--border-strong',
+        '--accent',
+        '--accent-fg',
+        '--danger',
+        '--warn',
+        '--ok',
+        '--shadow-color',
+        '--tone-cyan',
+        '--tone-violet',
+        '--tone-blue',
+      ]
+      for (const key of colorKeys) {
+        const re = new RegExp(`${key}:\\s*(\\d+ \\d+ \\d+)\\s*;`)
+        expect(css, `${key} must be an RGB triplet`).toMatch(re)
+      }
+    },
+  )
+
+  it('applies the spec 3.3 palette adjustments', () => {
+    const dark = readThemeFile('dark.css')
+    const light = readThemeFile('light.css')
+    expect(dark).toContain('--border-strong: 74 74 82;')
+    expect(dark).toContain('--warn: 240 186 60;')
+    expect(light).toContain('--fg-muted: 96 96 106;')
+  })
 })

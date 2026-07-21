@@ -19,7 +19,11 @@ export default {
         danger: 'rgb(var(--danger) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
         ok: 'rgb(var(--ok) / <alpha-value>)',
-        /* legacy aliases (remapped to neutral palette in styles.css) */
+        /* categorical tones (capability tags / data-tone) */
+        'tone-cyan': 'rgb(var(--tone-cyan) / <alpha-value>)',
+        'tone-violet': 'rgb(var(--tone-violet) / <alpha-value>)',
+        'tone-blue': 'rgb(var(--tone-blue) / <alpha-value>)',
+        /* legacy aliases (deprecated; removed after consumers migrate) */
         paper: 'rgb(var(--paper) / <alpha-value>)',
         paper2: 'rgb(var(--paper-2) / <alpha-value>)',
         ink: 'rgb(var(--ink) / <alpha-value>)',
@@ -58,7 +62,11 @@ export default {
         ],
       },
       boxShadow: {
-        imperial: '0 8px 28px rgb(0 0 0 / 0.28)',
+        sm: 'var(--shadow-sm)',
+        DEFAULT: 'var(--shadow-md)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+        imperial: '0 8px 28px rgb(var(--shadow-color) / 0.28)',
         insetPaper: 'inset 0 0 0 1px rgb(var(--border) / 0.7)',
       },
       backgroundImage: {

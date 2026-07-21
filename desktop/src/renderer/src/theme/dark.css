@@ -10,14 +10,46 @@
   --fg-muted: 161 161 170;
   --fg-subtle: 113 113 122;
   --border: 39 39 45;
-  --border-strong: 63 63 70;
+  --border-strong: 74 74 82;
   --accent: 110 168 254;
   --accent-fg: 9 11 18;
   --danger: 248 113 113;
-  --warn: 234 179 8;
+  --warn: 240 186 60;
   --ok: 52 211 153;
-  --radius: 10px;
+
+  /* 圆角阶梯(--radius-sm / --radius 为既有命名,保留) */
+  --radius-xs: 4px;
   --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* 阴影 */
+  --shadow-color: 0 0 0;
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.35);
+  --shadow-md: 0 6px 20px rgb(var(--shadow-color) / 0.36);
+  --shadow-lg: 0 18px 48px rgb(var(--shadow-color) / 0.42);
+
+  /* 字号阶梯(命名避开 Tailwind text-xs/text-sm 语义) */
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+
+  /* 间距(4px 基网,仅供手写 / scoped CSS) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* 分类色(capability tag / data-tone) */
+  --tone-cyan: 103 232 249;
+  --tone-violet: 196 181 253;
+  --tone-blue: 147 197 253;
 
   /* deprecated: 旧别名 → 中性调色板映射,仅供兼容,新代码禁止消费(审计测试强制) */
   --paper: var(--bg);
