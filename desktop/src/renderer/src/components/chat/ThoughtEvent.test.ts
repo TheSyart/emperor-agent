@@ -49,9 +49,12 @@ afterEach(() => {
 
 describe('ThoughtEvent quote-block presentation', () => {
   it('expands the quote block with spinner while running', () => {
-    const el = mount(thought({ status: 'running', summary: '先读配置再动手' }), {
-      store: createExpansionStore(),
-    })
+    const el = mount(
+      thought({ status: 'running', summary: '先读配置再动手' }),
+      {
+        store: createExpansionStore(),
+      },
+    )
     const quote = el.querySelector('.thought-quote')
     expect(quote).toBeTruthy()
     expect(quote!.classList.contains('running')).toBe(true)

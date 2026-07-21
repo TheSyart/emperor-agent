@@ -32,10 +32,13 @@ function read(rel: string): string {
   return readFileSync(join(SRC, rel), 'utf-8')
 }
 
-describe('style audit: color convergence', () => {  it('no bare hex colors outside theme/*.css', () => {
+describe('style audit: color convergence', () => {
+  it('no bare hex colors outside theme/*.css', () => {
     const offenders: string[] = []
     for (const rel of SCANNED) {
-      const hits = read(rel).match(/#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g)
+      const hits = read(rel).match(
+        /#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g,
+      )
       if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
     }
     expect(offenders, offenders.join('\n')).toEqual([])

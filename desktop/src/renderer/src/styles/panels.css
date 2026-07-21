@@ -326,11 +326,7 @@
       rgb(var(--border) / 0.08) 51%,
       transparent
     ),
-    radial-gradient(
-      circle at 50% 0%,
-      rgb(var(--ok) / 0.08),
-      transparent 28rem
-    );
+    radial-gradient(circle at 50% 0%, rgb(var(--ok) / 0.08), transparent 28rem);
 }
 
 .scheduler-run {
