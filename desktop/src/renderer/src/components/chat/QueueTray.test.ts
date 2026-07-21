@@ -32,7 +32,10 @@ describe('QueueTray single-slot projection', () => {
     container = document.createElement('div')
     document.body.append(container)
     createApp(QueueTray, {
-      items: [queued('second', '第二条旧消息', 20), queued('first', '第一条消息', 10)],
+      items: [
+        queued('second', '第二条旧消息', 20),
+        queued('first', '第一条消息', 10),
+      ],
     }).mount(container)
 
     expect(container.querySelectorAll('.queue-item')).toHaveLength(1)

@@ -79,9 +79,9 @@ describe('Composer single queue slot', () => {
     })
     await nextTick()
 
-    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(
-      '继续处理 /skill:reviewer',
-    )
+    expect(
+      container.querySelector<HTMLTextAreaElement>('textarea')?.value,
+    ).toBe('继续处理 /skill:reviewer')
     expect(container.textContent).toContain('evidence.md')
   })
 })
