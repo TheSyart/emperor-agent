@@ -131,8 +131,10 @@ export interface RuntimeArchiveStats {
 const INDEX_WRITE_INTERVAL_MS = 500
 const INDEX_FORCE_WRITE_EVENTS = new Set([
   'assistant_done',
+  'turn_change_snapshot',
+  'plan_execution_settled',
+  'git_operation_completed',
   'turn_paused',
-  'turn_continuation_evaluated',
   'runtime_task_cancelled',
   'error',
   'plan_draft',

@@ -6,7 +6,7 @@
 import type { ToolCallRequest } from '../providers/base'
 import type { ToolResultObj } from '../tools/base'
 import type { ToolRegistry } from '../tools/registry'
-import { planToDict } from '../plans/models'
+import { planToDict, type PlanRecord } from '../plans/models'
 import { type VerificationCommand } from '../plans/verification'
 import type { ControlManagerRunnerHost } from './runner'
 import {
@@ -29,10 +29,19 @@ export function recordPlanDiscovery(
   )
     return
   const source = String(result.metadata.tool ?? call.name)
-  if (source !== 'read_file' && source !== 'grep') return
+  if (source !== 'read_file' && source !== 'grep' && source !== 'glob') return
   const files = discoveryFiles(source, result)
   if (source === 'grep' && !files.length) return
-  const evidenceRefs = discoveryEvidenceRefs(source, result, files)
+  const evidenceRefs =
+    source === 'glob'
+      ? [
+          `scope:${
+            String(
+              call.arguments.pattern ?? call.arguments.path ?? '.',
+            ).trim() || '.'
+          }`,
+        ]
+      : discoveryEvidenceRefs(source, result, files)
   try {
     cm.recordPlanDiscovery({
       source,
@@ -79,6 +88,30 @@ export function planIndependentVerificationFollowup(
   return cm.planIndependentVerificationFollowup({
     dispatchAvailable: registry.get('dispatch_subagent') !== undefined,
   })
+}
+
+export function recordIndependentVerificationToolResult(
+  cm: ControlManagerRunnerHost | null,
+  call: ToolCallRequest,
+  result: ToolResultObj,
+): PlanRecord | null {
+  if (
+    result.isError ||
+    call.name !== 'dispatch_subagent' ||
+    String(call.arguments.agent_type ?? '') !== 'verification_reviewer' ||
+    cm === null ||
+    typeof cm.recordIndependentVerificationToolResult !== 'function'
+  )
+    return null
+  try {
+    return cm.recordIndependentVerificationToolResult({
+      toolCallId: call.id,
+      agentType: 'verification_reviewer',
+      output: result.modelContent,
+    })
+  } catch {
+    return null
+  }
 }
 
 export function planVerificationTarget(

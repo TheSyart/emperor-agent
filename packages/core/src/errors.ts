@@ -2,7 +2,7 @@
  * 领域错误基类 (MIG-FND-008)。
  *
  * 对齐 Python 侧散落的 `class XxxError(ValueError/RuntimeError)`（SchedulerStoreCorrupt、
- * PlanQualityError、PlanEvidenceError、CompactionParseError 等）。所有错误可被 IPC 边界
+ * PlanQualityError、PlanEvidenceError 等）。所有错误可被 IPC 边界
  * 序列化为「安全错误」——只暴露 code/message，不泄内部细节。
  */
 export interface SafeErrorPayload {
@@ -53,7 +53,7 @@ export class StoreCorruptError extends EmperorError {
   }
 }
 
-/** 解析错误（如压缩结果 XML 缺标签）。对齐 `CompactionParseError`。 */
+/** 解析错误（如结构化模型输出不符合 schema）。 */
 export class ParseError extends EmperorError {
   constructor(message: string, options?: ErrorOptions) {
     super(message, 'parse_error', options)

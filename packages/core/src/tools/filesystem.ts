@@ -203,6 +203,7 @@ export class WriteFileTool extends Tool {
   )
   override maxResultChars = 5000
   override evidencePolicy = 'eligible' as const
+  override workspaceMutation = true
 
   private readonly workspace: string | null
 
@@ -231,7 +232,9 @@ export class WriteFileTool extends Tool {
     if (!decision.allowed) return formatWorkspacePolicyError(decision)
     const p = decision.resolvedPath
     const overwrote = existsSync(p)
+    throwIfToolAborted(ctx)
     await mkdir(dirname(p), { recursive: true })
+    throwIfToolAborted(ctx)
     await fsWriteFile(p, content, 'utf8')
     await notifyManagedMutation(
       this.mutationObserver,
@@ -274,6 +277,7 @@ export class EditFileTool extends Tool {
     ['path', 'old_text', 'new_text'],
   )
   override evidencePolicy = 'eligible' as const
+  override workspaceMutation = true
 
   private readonly workspace: string | null
 
@@ -344,6 +348,7 @@ export class EditFileTool extends Tool {
       }
     }
     if (next === content) return '[ERR] edit would not change file content'
+    throwIfToolAborted(ctx)
     const result = await replaceFile(p, next, raw)
     await notifyManagedMutation(
       this.mutationObserver,
@@ -411,6 +416,7 @@ export class ApplyPatchTool extends Tool {
     ['path', 'old_text', 'new_text'],
   )
   override evidencePolicy = 'eligible' as const
+  override workspaceMutation = true
 
   constructor(
     private readonly workspace: string | null,
@@ -450,6 +456,7 @@ export class ApplyPatchTool extends Tool {
     const next = replaceAll
       ? content.replaceAll(oldText, newText)
       : content.replace(oldText, newText)
+    throwIfToolAborted(ctx)
     await fsWriteFile(path, next, 'utf8')
     await notifyManagedMutation(
       this.mutationObserver,
@@ -476,6 +483,7 @@ export class DeleteFileTool extends Tool {
     'path',
   ])
   override evidencePolicy = 'eligible' as const
+  override workspaceMutation = true
 
   constructor(
     private readonly workspace: string | null,
@@ -500,6 +508,7 @@ export class DeleteFileTool extends Tool {
     if (!decision.allowed) return formatWorkspacePolicyError(decision)
     const info = await regularFileInfo(decision.resolvedPath)
     if (typeof info === 'string') return info
+    throwIfToolAborted(ctx)
     await unlink(decision.resolvedPath)
     await notifyManagedMutation(
       this.mutationObserver,
@@ -530,6 +539,7 @@ export class RenameFileTool extends Tool {
     ['source', 'destination'],
   )
   override evidencePolicy = 'eligible' as const
+  override workspaceMutation = true
 
   constructor(
     private readonly workspace: string | null,
@@ -564,7 +574,9 @@ export class RenameFileTool extends Tool {
     if (typeof sourceInfo === 'string') return sourceInfo
     if (existsSync(destination.resolvedPath))
       return '[ERR] rename destination already exists'
+    throwIfToolAborted(ctx)
     await mkdir(dirname(destination.resolvedPath), { recursive: true })
+    throwIfToolAborted(ctx)
     await fsRename(source.resolvedPath, destination.resolvedPath)
     await notifyManagedMutation(
       this.mutationObserver,
@@ -607,6 +619,14 @@ async function replaceFile(
 ): Promise<string> {
   await fsWriteFile(p, newContent, 'utf8')
   return `Edited ${label}`
+}
+
+function throwIfToolAborted(context?: ToolExecutionContext): void {
+  const signal = context?.signal
+  if (!signal?.aborted) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('The operation was aborted', 'AbortError')
 }
 
 async function notifyManagedMutation(

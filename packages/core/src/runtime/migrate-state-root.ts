@@ -34,8 +34,6 @@ export interface LegacyStateMigrationEntry {
     | 'memory-scheduler'
     | 'tasks'
     | 'memory-tasks'
-    | 'external'
-    | 'memory-external'
     | 'tokens'
     | 'config'
     | 'projects-index'
@@ -124,11 +122,6 @@ export function migrateLegacyStateRoot(
       to: paths.tasksRoot,
     },
     {
-      path: join(paths.runtimeRoot, 'external'),
-      legacy: 'external',
-      to: paths.externalRoot,
-    },
-    {
       path: join(paths.runtimeRoot, 'tokens'),
       legacy: 'tokens',
       to: join(paths.stateRoot, 'tokens'),
@@ -179,9 +172,13 @@ export function migrateLegacyStateRoot(
     result,
     excludeTopLevelDirs: [
       'templates',
+      'external',
       ...(opts.excludePreviousStateSkills ? ['skills'] : []),
     ],
-    excludeRelPrefixes: LEGACY_DOTEMPEROR_STATE_PREFIXES,
+    excludeRelPrefixes: [
+      ...LEGACY_DOTEMPEROR_STATE_PREFIXES,
+      'external_config.json',
+    ],
   })
   migrateLegacyStateSubdirsFromMemory(
     previousStateRoot,
@@ -227,11 +224,6 @@ function migrateLegacyStateSubdirsFromMemory(
     kind,
     existed: existsSync(join(memoryRoot, 'tasks')),
   })
-  result.legacyStateRoots.push({
-    path: join(memoryRoot, 'external'),
-    kind,
-    existed: existsSync(join(memoryRoot, 'external')),
-  })
   const mappings: Array<{
     legacy: LegacyStateMigrationEntry['legacy']
     from: string
@@ -251,11 +243,6 @@ function migrateLegacyStateSubdirsFromMemory(
       legacy: 'memory-tasks',
       from: join(memoryRoot, 'tasks'),
       to: paths.tasksRoot,
-    },
-    {
-      legacy: 'memory-external',
-      from: join(memoryRoot, 'external'),
-      to: paths.externalRoot,
     },
   ]
   for (const mapping of mappings) {

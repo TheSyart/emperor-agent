@@ -25,6 +25,7 @@ export interface MainlineSubmitInput {
   clientMessageId?: string | null
   memoryExtra?: Record<string, unknown> | null
   turnId?: string | null
+  executionId?: string | null
   label?: string | null
   sessionId?: string | null
   source?: string | null
@@ -180,6 +181,7 @@ export class MainlineTurnService {
         sessionId: runSessionId,
         restoreActiveSessionAfterTurn: source === 'goal',
         turnId,
+        executionId: input.executionId ?? null,
         emit: input.emit ?? null,
         displayContent,
         clientMessageId: input.clientMessageId ?? turnId,

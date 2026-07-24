@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者<br>
-> 最后核验：2026-07-21<br>
+> 最后核验：2026-07-22<br>
 > 事实源：`packages/core/src/control/`、`packages/core/src/permissions/`、`packages/core/src/plans/`、`packages/core/src/environment/sandbox.ts`、slash command parser
 
 Control 系统把“模型想做什么”和“Core 允许做什么”分开。界面、模型、Goal、Scheduler、Team 和 Hook 都不能自行扩大权限；最终决定由 Core 的 permission pipeline、pending interaction、workspace policy 和 mutation guard 共同完成。
@@ -81,6 +81,12 @@ Permission decision 只回答“Core 是否授权尝试这个 effect”，不等
 
 Linux 的生产 backend 当前只有 bwrap：probe 不只检查文件存在，还实际启动最小 namespace。直接 Landlock 需要经过审核的 native helper，当前未随包提供，因此 capability matrix 把它视为“尚无实现”，不能用 kernel 版本推测 available。Windows 同理保留 Job Object + ACL 研究项，但在实现、攻击测试和 package receipt 完成前保持 unsupported。
 
+### 用户直控 Terminal 不属于 Agent Permission
+
+右侧项目工作台的 Terminal 是用户本人直接操作的系统 Shell，不是模型提出的 `run_command`，因此不进入 `ask_before_edit / smart_auto / full_access`、Permission Ask、Plan token、聊天历史或模型上下文。这个边界不能被复用于 Agent：模型、Hook、MCP、Scheduler、Team 和子代理都没有 Terminal write operation 的调用权，也不能把命令伪装成 renderer 输入。
+
+Terminal 仍不是无边界 IPC。只有受信主窗口可调用固定 operation；Core 从 Build session 解析初始项目 cwd，校验 session/terminal owner、每会话最多 8 个终端并在关闭时清理。用户可以在 Shell 内自行 `cd` 到其他目录，这是明确的系统终端语义。相对地，Review 的 Git mutation 虽不生成聊天 Permission Ask，仍要求 trusted Renderer IPC、schema、session/project 归属、expected revision 和对应二次确认；discard 还必须先生成 FileCheckpoint。这些用户点击入口不能被 Agent 工具调用或普通网页调用。
+
 ## Ask 生命周期
 
 Ask 是持久的用户交互，不是普通 assistant 文本：
@@ -95,7 +101,7 @@ Ask 是持久的用户交互，不是普通 assistant 文本：
 
 ## Plan 生命周期
 
-进入 Plan 时，Core 把当前执行权限保存在 `previous_mode`，并立即用一个新的 DRAFT 原子替换同一 session/scope 中尚未终结的当前 Plan。被替换 Plan 的 permission token、PlanStep task 与 Todo 绑定都会撤销；旧记录只保留审计用途，后续取消新 Plan 也不会恢复旧 Plan。Plan 阶段允许只读探索、`ask_user` 和 `propose_plan`，不允许项目写入或 `update_todos`；用户仍可调用 `control.setPermissionMode` 修改 `previous_mode`，而不退出 Plan。批准方案或执行 `/plan off` 后，Core 使用最新保存的权限继续。
+进入 Plan 时，Core 把当前执行权限保存在 `previous_mode`，并立即用一个新的 DRAFT 原子替换同一 session/scope 中尚未终结的当前 Plan。被替换 Plan 的 permission token 与既有后台/Goal PlanStep 调度 Task 会撤销；普通前台 Plan 不自动创建 Task。旧版本遗留的 `plan:<stepId>` Todo 镜像在会话绑定时一次性清理，旧 Plan 记录只保留审计用途，后续取消新 Plan 也不会恢复旧 Plan。Plan 阶段允许只读探索、`ask_user` 和 `propose_plan`，不允许项目写入或 `update_todos`；用户仍可调用 `control.setPermissionMode` 修改 `previous_mode`，而不退出 Plan。批准方案或执行 `/plan off` 后，Core 使用最新保存的权限继续。
 
 Renderer 还维护一个会话级 Goal capture 投影，表示“已经选择 Goal，正在等待 Outcome”。它不是 Core control mode，也不是持久 Goal。裸 `/goal` 和 Composer 菜单共用这个投影；下一条纯文字才会调用 `goals.start`。会话切换、应用重启或用户关闭标识都会清除该投影。Goal 创建失败时投影回到待输入状态，避免把失败当成已启动。
 
@@ -115,9 +121,15 @@ Goal 取消成功但 Plan 开启失败属于不可回滚的部分成功：旧 Go
 
 Plan 保存步骤、依赖和验证要求。只有成功的 `propose_plan` 能把 DRAFT 提交为 waiting 审批；普通 assistant 最终文本不会创建 PlanCard。模型未提交工具时 Runner 只纠正一次，再次失败返回 `plan_generation_failed`。对同一草稿提出修改意见时复用 Plan ID、递增审批代次并覆盖正文；未知、重复、过期或代次不匹配的决定均 fail closed。
 
-Plan permission token 只授权与已批准方案匹配的执行，不覆盖高风险限制、workspace policy 或新的 Ask。方案被修改、替换或失效后，旧 token 不能继续使用。批准后 Core 按 PlanStep 投影带 `plan_id`、`plan_step_id` 和 `approval_generation` 的绑定 Todo；Todo 只是执行便笺，不能单独宣告 Plan 完成。实现完成声明与步骤要求的验证证据同时满足后，权威 PlanStep 才能完成并激活下一步；旧 Plan、错误步骤或错误审批代次的更新被拒绝并校正回权威投影。
+Plan 批准后的步骤以 `implementing / verifying / repairing / waiting_user / completed / cancelled` 阶段执行。模型必须用 `complete_plan_step` 提交实现声明；required verification 通过或被用户明确豁免后才能完成步骤。人工验证、验证工具不可用或连续相同验证失败会进入 `waiting_user`，Core 停止继续修改项目并生成签名决策卡。卡片动作绑定 session、Plan、Step、`approval_generation`、验证项和 interaction，不能由中文“取消/跳过/强制完成”等普通文本触发。人工通过记录 `user_manual_verification` 证据；豁免把指定 requirement 标为 `skipped` 并保存用户批准 receipt；取消会撤销 Plan permission token、取消非终态 Task并清理旧版本 Todo 镜像，但不会回滚已经写入的文件，也不会删除独立 WorkItem。
 
-模型更新 Plan Todo 时只提交稳定 ID `plan:<stepId>` 与状态，绑定字段由 Core 注入且不再出现在工具公开 schema 中。Core 在 `update_todos` 真正写入前完成规范化、遗漏步骤合并、审批代次和依赖预检；因此伪造绑定或提前完成后续步骤不会先写入错误 Todo 再事后回滚。执行额度评估触发暂停时，Plan/Step 保持 `executing/active`，`execution_pause` 持久化剩余动作与预算事实，PlanStep Task 和 Todo 转为 `pending`；明确继续后才恢复运行。
+非平凡 Plan 的 `verification_reviewer` 结果也由 Core 结算，而不是由模型转述：Runner 只采信当前 session、当前 Plan generation 下由 Core 实际执行的 reviewer 工具结果，解析其终态 `verdict` 与 command evidence，并幂等写入 `independent_verification` receipt。同一工具结果不会重复入账，同一模型批次只允许一个 reviewer。PASS 且命令证据完整后，Final Reply Gate 只允许一次无工具最终交付；`ask_user` 不能再用于“是否满意/是否结束”等交付确认，也不能改变 Plan 终态。FAIL 才回到修复和重新验证；证据缺失不能伪造 PASS。
+
+Plan 执行结算使用 `stateRoot/control/plan-execution-settlements.json` 的 prepared/applied 私有事务记录。Plan、Step、验证证据、可选的后台/Goal 调度 Task、pending interaction、checkpoint、变更快照和唯一 runtime 里程碑按幂等顺序收敛；独立 WorkItem 不参与 Plan 终态裁决。进程中断后 prepared 记录会重放，Plan metadata 中的 settlement receipt 防止重复应用。普通 Ask 被关闭时只暂停当前 Plan；若存在既有后台 Task 则同步为 pending，普通前台 Plan不会为此合成 Task，也不让 sidebar 保留假 running。
+
+Plan permission token 只授权与已批准方案匹配的执行，不覆盖高风险限制、workspace policy 或新的 Ask。方案被修改、替换或失效后，旧 token 不能继续使用。PlanStep 是前台计划事实；Task 只用于 Goal、子代理、Team、后台进程、Scheduler 或具有 owner/dependency/lease 的跨回合调度，普通 PlanStep 不自动创建 Task。`update_todos` 只维护至少三个独立工作单元或用户明确要求的 WorkItem；三者不再逐项镜像。任何带 `plan_id`、`plan_step_id`、`approval_generation` 或 `plan:<stepId>` 的新 Todo 更新都会在副作用前拒绝或按旧镜像丢弃，不能推进 Plan。实现声明与步骤要求的验证证据同时满足后，权威 PlanStep 才能完成并激活下一步。
+
+进展看门狗触发暂停时，Plan/Step 保持 `executing/active`，`execution_pause` 持久化剩余动作与迭代事实；仅既有后台/Goal 调度 Task 转为 `pending`，普通前台 Plan 不创建 Task。独立 WorkItem 保持自身状态，明确继续后才恢复 Plan 执行。
 
 Renderer 中 PlanCard 是静态提案历史卡，不承载活动审批控件或执行进度。`plan_draft_delta` 形成的 provisional 卡只显示“生成中”；Core 提交正式 `plan_draft` 并建立 waiting interaction 后，底部才用 Plan 决策面板替代 Composer。批准、步骤开始/完成/失败、验证开始/通过/失败及计划终态都按 runtime event 顺序投影为卡片下方的 `plan_activity` 时间线节点；thought、文本与 ToolGroup 继续插在这些里程碑之间。Ask/Plan 回答、批准、评论或取消后恢复原 Composer，renderer 通过 `v-show` 保留草稿、附件和能力引用，并恢复输入焦点。
 

@@ -18,6 +18,26 @@ export interface PackagedSmokeCore {
       projectRoot: string
     }): Promise<unknown>
   }
+  sessions: {
+    create(input: { title: string; mode: 'build'; project_path: string }): {
+      id: string
+    }
+  }
+  terminals: {
+    create(input: { sessionId: string; cols: number; rows: number }): {
+      id: string
+    }
+    write(input: {
+      sessionId: string
+      terminalId: string
+      data: string
+    }): unknown
+    read(input: { sessionId: string; terminalId: string; afterSeq: number }): {
+      chunks: Array<{ seq: number; data: string }>
+      latestSeq: number
+    }
+    close(input: { sessionId: string; terminalId: string }): unknown
+  }
 }
 
 export interface PackagedSmokeOptions {
@@ -55,6 +75,7 @@ export interface PackagedSmokeReceipt {
     environment: { ok: boolean; tools: number; blockedSkills: number }
     glob: { ok: boolean; matches: number }
     grep: { ok: boolean; matches: number }
+    terminal: { ok: boolean; outputBytes: number }
     renderer: PackagedRendererSmokeReceipt
   }
   installJobs: { before: number; after: number }
@@ -138,6 +159,11 @@ export async function runPackagedSmoke(
     )
     assertSearchResult(globOutput, 'src/smoke.ts', 'glob')
     assertSearchResult(grepOutput, 'src/smoke.ts', 'grep')
+    const terminal = await verifyPackagedTerminal(
+      opts.core,
+      workspaceRoot,
+      opts.platform,
+    )
 
     const environmentAfter = asSmokeStatus(
       await opts.core.environment.getStatus({
@@ -169,6 +195,7 @@ export async function runPackagedSmoke(
         },
         glob: { ok: true, matches: lineCount(globOutput) },
         grep: { ok: true, matches: lineCount(grepOutput) },
+        terminal,
         renderer,
       },
       installJobs: { before: jobsBefore, after: jobsAfter },
@@ -194,6 +221,7 @@ export async function runPackagedSmoke(
         environment: { ok: false, tools: 0, blockedSkills: 0 },
         glob: { ok: false, matches: 0 },
         grep: { ok: false, matches: 0 },
+        terminal: { ok: false, outputBytes: 0 },
         renderer: failedRendererReceipt(),
       },
       installJobs: { before: 0, after: 0 },
@@ -210,8 +238,54 @@ export async function runPackagedSmoke(
 
 export type PackagedSmokeCoreApi = Pick<
   CoreApi,
-  'bootstrap' | 'diagnostics' | 'environment'
+  'bootstrap' | 'diagnostics' | 'environment' | 'sessions' | 'terminals'
 >
+
+async function verifyPackagedTerminal(
+  core: PackagedSmokeCore,
+  workspaceRoot: string,
+  platform: string,
+): Promise<{ ok: true; outputBytes: number }> {
+  const session = core.sessions.create({
+    title: 'Packaged PTY smoke',
+    mode: 'build',
+    project_path: workspaceRoot,
+  })
+  const terminal = core.terminals.create({
+    sessionId: session.id,
+    cols: 80,
+    rows: 24,
+  })
+  try {
+    const command =
+      platform === 'win32'
+        ? 'Write-Output emperor-pty-smoke\r\nexit\r\n'
+        : "printf 'emperor-pty-smoke\\n'\nexit\n"
+    core.terminals.write({
+      sessionId: session.id,
+      terminalId: terminal.id,
+      data: command,
+    })
+    const deadline = Date.now() + 3_000
+    while (Date.now() < deadline) {
+      const replay = core.terminals.read({
+        sessionId: session.id,
+        terminalId: terminal.id,
+        afterSeq: 0,
+      })
+      const output = replay.chunks.map((chunk) => chunk.data).join('')
+      if (output.includes('emperor-pty-smoke'))
+        return { ok: true, outputBytes: Buffer.byteLength(output) }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
+    }
+    throw new Error('packaged PTY did not produce expected output')
+  } finally {
+    core.terminals.close({
+      sessionId: session.id,
+      terminalId: terminal.id,
+    })
+  }
+}
 
 async function receiptBase(
   opts: PackagedSmokeOptions,

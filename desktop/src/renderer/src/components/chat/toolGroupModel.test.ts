@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolSegment } from '../../types'
-import { toolCardDefaultOpen, toolGroupDetailText } from './toolGroupModel'
+import {
+  toolBatchTitle,
+  toolCardDefaultOpen,
+  toolGroupDetailText,
+} from './toolGroupModel'
 
 function tool(
   name: string,
@@ -43,9 +47,9 @@ describe('tool group model', () => {
     ).toBe('已更新 2 个任务步骤')
   })
 
-  it('keeps every tool card collapsed until the user expands it', () => {
+  it('keeps successful batches collapsed and opens failed batches', () => {
     expect(toolCardDefaultOpen([tool('run_command', 'running')])).toBe(false)
-    expect(toolCardDefaultOpen([tool('update_todos', 'error')])).toBe(false)
+    expect(toolCardDefaultOpen([tool('update_todos', 'error')])).toBe(true)
     expect(
       toolCardDefaultOpen([
         tool('dispatch_subagent', 'done', {
@@ -62,5 +66,29 @@ describe('tool group model', () => {
         }),
       ]),
     ).toBe(false)
+  })
+
+  it('builds concise Codex-style batch titles', () => {
+    expect(toolBatchTitle([tool('read_file'), tool('run_command')])).toBe(
+      '读取文件、运行命令',
+    )
+    expect(
+      toolBatchTitle([
+        tool('write_file'),
+        tool('edit_file'),
+        tool('delete_file'),
+      ]),
+    ).toBe('修改 3 个文件')
+    expect(toolBatchTitle([tool('grep'), tool('glob')])).toBe('搜索代码 · 2 项')
+  })
+
+  it('renders an independent reviewer as one compact verification node', () => {
+    const reviewer = tool('dispatch_subagent', 'done', {
+      arguments: { agent_type: 'verification_reviewer' },
+      output:
+        '```verdict\n{"passed":true,"commands":["npm test"],"command_evidence":[{"command":"npm test","exit_code":0}]}\n```',
+    })
+    expect(toolBatchTitle([reviewer])).toBe('独立复核')
+    expect(toolGroupDetailText([reviewer])).toBe('复核通过')
   })
 })

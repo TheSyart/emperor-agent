@@ -10,6 +10,11 @@ import Composer from '../components/chat/Composer.vue'
 import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import QueueTray from '../components/chat/QueueTray.vue'
+import TurnChangesStatus from '../components/chat/TurnChangesStatus.vue'
+import { shouldShowTurnChangesStatus } from '../components/chat/turnChangesModel'
+import RightWorkspace from '../components/workspace/RightWorkspace.vue'
+import type { WorkspaceSource } from '../components/workspace/workspaceTypes'
+import { useSession } from '../composables/useSession'
 import type {
   ChatSendPayload,
   ModelConfigPayload,
@@ -19,11 +24,13 @@ import { activeGoalForSession } from '../runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from '../runtime/goalRender'
 
 const ctx = useAppContext()
+const sessionStore = useSession()
 const composer = ref<{
   setDraft: (text: string) => void
   focusInput: () => void
   restoreDraft: (payload: ChatSendPayload) => void
 } | null>(null)
+const rightWorkspace = ref<{ openReview: () => void } | null>(null)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -86,6 +93,57 @@ const goalActionPending = ref<GoalCardAction | null>(null)
 const goalReplacing = ref(false)
 const goalReplaceError = ref('')
 const goalReplacementDraft = ref('')
+const activeSession = computed(() =>
+  sessionStore.getSession(ctx.sessionId.value),
+)
+const workspaceSources = computed<WorkspaceSource[]>(() => {
+  const seen = new Set<string>()
+  const sources: WorkspaceSource[] = []
+  for (const message of ctx.messages.value) {
+    if (message.role === 'user') {
+      for (const attachment of message.attachments ?? []) {
+        if (!rememberSource(seen, attachment.id)) continue
+        sources.push({
+          id: attachment.id,
+          name: attachment.name,
+          kind: 'attachment',
+        })
+      }
+      continue
+    }
+    for (const segment of message.segments) {
+      if (segment.type !== 'tool') continue
+      for (const artifact of segment.artifacts ?? []) {
+        const media = artifact.media
+        if (!media || !rememberSource(seen, media.id)) continue
+        sources.push({ id: media.id, name: media.name, kind: 'media' })
+      }
+    }
+  }
+  return sources
+})
+const turnChanges = computed(() =>
+  Object.values(ctx.turnChangeProjection.byTurn).filter(
+    (snapshot) => snapshot.sessionId === ctx.sessionId.value,
+  ),
+)
+const liveTurnChange = computed(() => {
+  const snapshot = ctx.activeTurnChange.value
+  return shouldShowTurnChangesStatus(snapshot, ctx.busy.value) &&
+    snapshot.filesChanged > 0
+    ? snapshot
+    : null
+})
+
+function openTaskReview(): void {
+  rightWorkspace.value?.openReview()
+}
+
+function rememberSource(seen: Set<string>, id: string): boolean {
+  if (seen.has(id)) return false
+  seen.add(id)
+  return true
+}
 
 watch(
   () => activeGoal.value?.id,
@@ -257,141 +315,146 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
 <template>
   <section class="main-view chat-view">
-    <header class="view-head">
-      <div class="min-w-0">
-        <h1>对话</h1>
-        <p class="truncate">
-          {{ ctx.runtimeText() }} ·
-          {{
-            ctx.boot.value?.modelConfig?.current?.effectiveDisplayName ||
-            ctx.boot.value?.model ||
-            'model'
-          }}
-        </p>
-      </div>
-    </header>
-
-    <div class="chat-body">
-      <MessageList
-        :messages="ctx.messages.value"
-        :plans="ctx.planProjection.plans"
-        @continue-execution="ctx.submitFromComposer('继续执行')"
-      />
-
-      <div class="chat-bottom-stack">
-        <div
-          v-if="showProfileOnboardingPrompt"
-          class="profile-onboarding-banner"
-          role="status"
-        >
-          <div>
-            <strong>补充个人偏好</strong>
-            <span>用一个简短访谈设置称呼、沟通方式和工作偏好。</span>
-          </div>
-          <div class="profile-onboarding-actions">
-            <button type="button" @click="ctx.skipProfileInterview">
-              不再提醒
-            </button>
-            <button
-              type="button"
-              class="primary"
-              @click="ctx.startProfileInterview"
-            >
-              开始访谈
-            </button>
-          </div>
-        </div>
-        <GoalStatusBar
-          v-if="activeGoal && !isTerminalGoal(activeGoal)"
-          :goal="activeGoal"
-          :action-pending="goalActionPending"
-          :replacing="goalReplacing"
-          :replace-error="goalReplaceError"
-          @action="runGoalStatusAction"
-          @edit="replaceGoal"
-        />
-        <form
-          v-else-if="goalReplaceError && goalReplacementDraft"
-          class="goal-replacement-recovery"
-          @submit.prevent="retryGoalReplacement"
-        >
-          <div>
-            <strong>Goal 替换未完成</strong>
-            <span>{{ goalReplaceError }}</span>
-          </div>
-          <input
-            v-model="goalReplacementDraft"
-            aria-label="待重试的 Goal Outcome"
-            maxlength="4000"
-            :disabled="goalReplacing"
+    <div class="chat-workspace-layout">
+      <div class="chat-content-column">
+        <div class="chat-body">
+          <MessageList
+            :messages="ctx.messages.value"
+            :plans="ctx.planProjection.plans"
+            :turn-changes="turnChanges"
+            @continue-execution="ctx.submitFromComposer('继续执行')"
+            @open-review="openTaskReview"
           />
-          <button type="submit" :disabled="goalReplacing">
-            {{ goalReplacing ? '创建中…' : '重新创建 Goal' }}
-          </button>
-          <button
-            type="button"
-            :disabled="goalReplacing"
-            @click="dismissGoalReplacementError"
-          >
-            关闭
-          </button>
-        </form>
-        <ActiveAskPanel
-          v-if="activeBottomControl?.kind === 'ask'"
-          :interaction="activeBottomControl.interaction"
-        />
-        <ActivePlanDecisionPanel
-          v-else-if="activeBottomControl?.kind === 'plan'"
-          :interaction="activeBottomControl.interaction"
-        />
-        <div class="composer-wrap">
-          <Composer
-            v-show="!activeBottomControl"
-            ref="composer"
-            :busy="composerBusy"
-            :interaction-blocked="Boolean(pendingInteraction)"
-            :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
-            :goal="activeGoal"
-            :goal-capture-status="goalCaptureStatus"
-            :lifecycle-mode="composerLifecycleMode"
-            :commands="ctx.commands.value"
-            :tools="ctx.boot.value?.tools || []"
-            :mcp-content="ctx.mcpContent.value"
-            :context-used="ctx.boot.value?.context_used ?? 0"
-            :context-max="
-              ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0
-            "
-            :control="ctx.boot.value?.control || null"
-            :current-model="currentModel"
-            :model-entries="modelEntries"
-            :provider-options="providerOptions"
-            :supports-vision="
-              ctx.boot.value?.modelConfig?.current?.capabilities?.vision ??
-              false
-            "
-            :send-blocked-reason="sendBlockedReason"
-            @set-permission="ctx.setPermissionMode"
-            @activate-plan="activatePlan"
-            @activate-goal="activateGoalCapture"
-            @dismiss-lifecycle="dismissLifecycle"
-            @start-goal="startGoalWithLifecycle"
-            @switch-model="switchModel"
-            @set-reasoning-effort="setReasoningEffort"
-            @send="ctx.submitFromComposer($event)"
-            @stop="ctx.stopActive"
-            @error="ctx.showToast"
-          >
-            <template #queue>
-              <QueueTray
-                :items="ctx.queuedPrompts.value"
-                @edit="editQueuedPrompt"
-                @interject="interjectQueuedPrompt"
-                @cancel="cancelQueuedPrompt"
+
+          <div class="chat-bottom-stack">
+            <TurnChangesStatus
+              v-if="liveTurnChange"
+              :snapshot="liveTurnChange"
+              @open-review="openTaskReview"
+            />
+            <div
+              v-if="showProfileOnboardingPrompt"
+              class="profile-onboarding-banner"
+              role="status"
+            >
+              <div>
+                <strong>补充个人偏好</strong>
+                <span>用一个简短访谈设置称呼、沟通方式和工作偏好。</span>
+              </div>
+              <div class="profile-onboarding-actions">
+                <button type="button" @click="ctx.skipProfileInterview">
+                  不再提醒
+                </button>
+                <button
+                  type="button"
+                  class="primary"
+                  @click="ctx.startProfileInterview"
+                >
+                  开始访谈
+                </button>
+              </div>
+            </div>
+            <GoalStatusBar
+              v-if="activeGoal && !isTerminalGoal(activeGoal)"
+              :goal="activeGoal"
+              :action-pending="goalActionPending"
+              :replacing="goalReplacing"
+              :replace-error="goalReplaceError"
+              @action="runGoalStatusAction"
+              @edit="replaceGoal"
+            />
+            <form
+              v-else-if="goalReplaceError && goalReplacementDraft"
+              class="goal-replacement-recovery"
+              @submit.prevent="retryGoalReplacement"
+            >
+              <div>
+                <strong>Goal 替换未完成</strong>
+                <span>{{ goalReplaceError }}</span>
+              </div>
+              <input
+                v-model="goalReplacementDraft"
+                aria-label="待重试的 Goal Outcome"
+                maxlength="4000"
+                :disabled="goalReplacing"
               />
-            </template>
-          </Composer>
+              <button type="submit" :disabled="goalReplacing">
+                {{ goalReplacing ? '创建中…' : '重新创建 Goal' }}
+              </button>
+              <button
+                type="button"
+                :disabled="goalReplacing"
+                @click="dismissGoalReplacementError"
+              >
+                关闭
+              </button>
+            </form>
+            <ActiveAskPanel
+              v-if="activeBottomControl?.kind === 'ask'"
+              :interaction="activeBottomControl.interaction"
+            />
+            <ActivePlanDecisionPanel
+              v-else-if="activeBottomControl?.kind === 'plan'"
+              :interaction="activeBottomControl.interaction"
+            />
+            <div class="composer-wrap">
+              <Composer
+                v-show="!activeBottomControl"
+                ref="composer"
+                :busy="composerBusy"
+                :interaction-blocked="Boolean(pendingInteraction)"
+                :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
+                :goal="activeGoal"
+                :goal-capture-status="goalCaptureStatus"
+                :lifecycle-mode="composerLifecycleMode"
+                :commands="ctx.commands.value"
+                :tools="ctx.boot.value?.tools || []"
+                :mcp-content="ctx.mcpContent.value"
+                :context-used="ctx.boot.value?.context_used ?? 0"
+                :context-max="
+                  ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0
+                "
+                :control="ctx.boot.value?.control || null"
+                :current-model="currentModel"
+                :model-entries="modelEntries"
+                :provider-options="providerOptions"
+                :supports-vision="
+                  ctx.boot.value?.modelConfig?.current?.capabilities?.vision ??
+                  false
+                "
+                :send-blocked-reason="sendBlockedReason"
+                @set-permission="ctx.setPermissionMode"
+                @activate-plan="activatePlan"
+                @activate-goal="activateGoalCapture"
+                @dismiss-lifecycle="dismissLifecycle"
+                @start-goal="startGoalWithLifecycle"
+                @switch-model="switchModel"
+                @set-reasoning-effort="setReasoningEffort"
+                @send="ctx.submitFromComposer($event)"
+                @stop="ctx.stopActive"
+                @error="ctx.showToast"
+              >
+                <template #queue>
+                  <QueueTray
+                    :items="ctx.queuedPrompts.value"
+                    @edit="editQueuedPrompt"
+                    @interject="interjectQueuedPrompt"
+                    @cancel="cancelQueuedPrompt"
+                  />
+                </template>
+              </Composer>
+            </div>
+          </div>
         </div>
       </div>
+      <RightWorkspace
+        ref="rightWorkspace"
+        :session-id="ctx.sessionId.value"
+        :project-path="activeSession?.project_path || ''"
+        :sources="workspaceSources"
+        :agent-busy="ctx.busy.value"
+        :refresh-key="ctx.messages.value.length"
+      />
     </div>
   </section>
 </template>

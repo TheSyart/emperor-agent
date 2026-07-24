@@ -17,6 +17,7 @@ export interface VerificationRequirement {
   id: string
   kind: string
   required: boolean
+  humanRequired?: boolean
   command: string
   description: string
   status: string
@@ -31,6 +32,7 @@ export function makeRequirement(
     id: p.id,
     kind: p.kind ?? 'command',
     required: p.required ?? true,
+    humanRequired: p.humanRequired ?? false,
     command: p.command ?? '',
     description: p.description ?? '',
     status: p.status ?? 'pending',
@@ -46,6 +48,7 @@ export function requirementToDict(
     id: r.id,
     kind: r.kind,
     required: r.required,
+    human_required: Boolean(r.humanRequired),
     command: r.command,
     description: r.description,
     status: r.status,
@@ -59,10 +62,20 @@ export function requirementFromDict(
 ): VerificationRequirement {
   let status = String(raw.status ?? 'pending').trim()
   if (!VALID_REQUIREMENT_STATUSES.has(status)) status = 'pending'
+  const kind = String(raw.kind ?? 'command').trim() || 'command'
+  const humanRequired = Boolean(
+    raw.human_required ?? raw.humanRequired ?? false,
+  )
+  const requestedRequired =
+    raw.required === undefined ? true : Boolean(raw.required)
   return {
     id: String(raw.id ?? raw.requirement_id ?? '').trim(),
-    kind: String(raw.kind ?? 'command').trim() || 'command',
-    required: raw.required === undefined ? true : Boolean(raw.required),
+    kind,
+    required:
+      kind === 'manual'
+        ? requestedRequired && humanRequired
+        : requestedRequired,
+    humanRequired,
     command: String(raw.command ?? '').trim(),
     description: String(raw.description ?? '').trim(),
     status,
@@ -148,6 +161,16 @@ function applyEvidence(
   const matched = matchingEvidence(requirement, evidence)
   if (matched === null) return requirement
   const passed = matched.passed
+  if (matched.waived === true) {
+    return {
+      ...requirement,
+      status: 'skipped',
+      evidenceRefs: evidenceRefs(matched),
+      reason: String(
+        matched.reason ?? 'user explicitly waived verification',
+      ).trim(),
+    }
+  }
   if (passed === true) {
     return {
       ...requirement,

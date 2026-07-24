@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-07-22<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`、`AGENTS.md`
 
 这里提供源码开发的最短入口。工程约束、关键目录和禁止提交项以根目录 [AGENTS.md](../../AGENTS.md) 为准；系统边界先读[架构总览](../architecture/overview.md)。
@@ -12,6 +12,7 @@
 - Node.js 22 或更高版本。
 - npm；根 workspace 与 `desktop/` 各有独立 lockfile 和依赖安装。
 - macOS、Windows 或 Linux 桌面环境。普通安装包用户不需要 Node.js。
+- 构建桌面安装包需要可编译 Electron 原生依赖的 C/C++ 工具链；`node-pty` 在 CI 的目标平台按 Electron ABI rebuild。发布包只携带运行时 JS、目标原生 binding 和 helper，不携带其测试或构建脚本。
 
 当前主线是 TypeScript / Electron。不要新增 Python runtime、Python CLI、HTTP / WebSocket backend 或 browser-only 产品 fallback。
 
@@ -45,6 +46,7 @@ npm --prefix desktop run package:verify
 
 - 修改 renderer 视觉或交互时运行 `screenshots`，检查生成结果，不把临时产物混入提交。
 - 修改打包、资源路径、Electron main、preload、`app://` protocol 或 release contract 时运行 `package:verify`。该命令不只检查 Core：schema 2 smoke 会加载真实 sandboxed renderer，验证 CJS preload、Core bridge 和 attachment fetch；只跑 `package:dir` 不构成通过证据。
+- 修改 Terminal 时还要运行 `npm --prefix desktop run terminal:smoke`，并在目标 Electron ABI 下创建真实 PTY；afterPack 必须验证目标 platform/arch 对应的 `pty.node`（Unix 还包括可执行 `spawn-helper`），三平台 Preview candidate 必须完成 native rebuild/package smoke。
 - 文档改动至少运行 `npm run format:check`、`git diff --check` 和相关 contract test。
 
 ## 修改从哪里开始
@@ -59,6 +61,8 @@ npm --prefix desktop run package:verify
 | Session / Memory       | `packages/core/src/sessions/`、`memory/`、`projects/`                      |
 | Goal                   | `packages/core/src/goals/`、`packages/core/src/agent/goal-*`               |
 | Scheduler / Team / MCP | `packages/core/src/<domain>/` 与对应 API service                           |
+| Snapshot / Git / Files | `packages/core/src/workspace/`                                             |
+| 用户 Terminal          | `packages/core/src/workspace/terminal.ts`、`desktop/src/main/terminal-*`   |
 | Electron host / IPC    | `desktop/src/main/`、`desktop/src/preload/`                                |
 | Headless / ACP stdio   | `packages/core/src/acp/`、`scripts/build-acp.mjs`                          |
 | Vue UI                 | `desktop/src/renderer/src/`                                                |

@@ -119,7 +119,7 @@ describe('migrateLegacyStateRoot', () => {
     ensureRuntimeStateDirs(paths)
     const result = migrateLegacyStateRoot(paths)
 
-    expect(result.copied).toBe(5)
+    expect(result.copied).toBe(4)
     expect(
       readFileSync(join(paths.controlRoot, 'state.json'), 'utf8'),
     ).toContain('pending')
@@ -129,16 +129,15 @@ describe('migrateLegacyStateRoot', () => {
     expect(readFileSync(join(paths.tasksRoot, 'index.json'), 'utf8')).toContain(
       'tasks',
     )
-    expect(
-      readFileSync(join(paths.externalRoot, 'inbound.json'), 'utf8'),
-    ).toContain('queue')
+    expect(existsSync(join(stateRoot, 'external', 'inbound.json'))).toBe(false)
+    expect(existsSync(join(runtimeRoot, 'external', 'inbound.json'))).toBe(true)
     expect(
       readFileSync(join(stateRoot, 'tokens', 'tokens.jsonl'), 'utf8'),
     ).toContain('model')
     expect(existsSync(join(runtimeRoot, 'control', 'state.json'))).toBe(true)
   })
 
-  it('copies previous memory-scoped control/scheduler/tasks/external state into top-level state dirs', () => {
+  it('copies supported memory-scoped state while leaving retired bridge data untouched', () => {
     const runtimeRoot = tmp('emperor-legacy-memory-subdirs-runtime-')
     const stateRoot = tmp('emperor-legacy-memory-subdirs-state-')
     const paths = resolveRuntimePaths(runtimeRoot, { stateRoot })
@@ -188,15 +187,11 @@ describe('migrateLegacyStateRoot', () => {
     expect(
       readFileSync(join(paths.tasksRoot, 'task_1', 'transcript.jsonl'), 'utf8'),
     ).toContain('task_1')
-    expect(
-      readFileSync(join(paths.externalRoot, 'state.json'), 'utf8'),
-    ).toContain('outbox')
     expect(result.entries.map((entry) => entry.legacy)).toEqual(
       expect.arrayContaining([
         'memory-control',
         'memory-scheduler',
         'memory-tasks',
-        'memory-external',
       ]),
     )
     expect(existsSync(join(stateRoot, 'memory', 'control', 'state.json'))).toBe(
@@ -211,6 +206,9 @@ describe('migrateLegacyStateRoot', () => {
     expect(
       existsSync(join(stateRoot, 'memory', 'external', 'state.json')),
     ).toBe(false)
+    expect(existsSync(join(previous, 'memory', 'external', 'state.json'))).toBe(
+      true,
+    )
     expect(existsSync(join(previous, 'memory', 'control', 'state.json'))).toBe(
       true,
     )
@@ -281,7 +279,7 @@ describe('migrateLegacyStateRoot', () => {
     expect(log).toContain('sessions/index.json')
   })
 
-  it('migrates an entire previous runtimeRoot/.emperor state root (incl. control/scheduler/tasks/external/tokens) into the new global stateRoot', () => {
+  it('migrates supported previous state while leaving retired bridge files in place', () => {
     const runtimeRoot = tmp('emperor-legacy-dotemperor-runtime-')
     const stateRoot = tmp('emperor-legacy-dotemperor-newstate-')
     const paths = resolveRuntimePaths(runtimeRoot, { stateRoot })
@@ -325,6 +323,11 @@ describe('migrateLegacyStateRoot', () => {
       'utf8',
     )
     writeFileSync(
+      join(previous, 'external_config.json'),
+      '{"enabled":true}\n',
+      'utf8',
+    )
+    writeFileSync(
       join(previous, 'tokens', 'tokens.jsonl'),
       '{"model":"x"}\n',
       'utf8',
@@ -348,9 +351,10 @@ describe('migrateLegacyStateRoot', () => {
     expect(
       readFileSync(join(stateRoot, 'tasks', 'index.json'), 'utf8'),
     ).toContain('tasks')
-    expect(
-      readFileSync(join(stateRoot, 'external', 'inbound.json'), 'utf8'),
-    ).toContain('queue')
+    expect(existsSync(join(stateRoot, 'external', 'inbound.json'))).toBe(false)
+    expect(existsSync(join(previous, 'external', 'inbound.json'))).toBe(true)
+    expect(existsSync(join(stateRoot, 'external_config.json'))).toBe(false)
+    expect(existsSync(join(previous, 'external_config.json'))).toBe(true)
     expect(
       readFileSync(join(stateRoot, 'tokens', 'tokens.jsonl'), 'utf8'),
     ).toContain('model')
@@ -361,7 +365,7 @@ describe('migrateLegacyStateRoot', () => {
     const emperorEntries = result.entries.filter(
       (entry) => entry.legacy === 'emperor-state-root',
     )
-    expect(emperorEntries.length).toBeGreaterThanOrEqual(7)
+    expect(emperorEntries.length).toBeGreaterThanOrEqual(6)
 
     // Re-running does not re-copy or duplicate log entries.
     const second = migrateLegacyStateRoot(paths)

@@ -27,6 +27,8 @@ export function isGoalRuntimeEvent(
   return GOAL_RUNTIME_EVENT_NAME_SET.has(String(event.event))
 }
 
-export function sortRuntimeEvents(events: RuntimeEventEnvelope[]) {
+export function sortRuntimeEvents<T extends { seq?: number }>(
+  events: T[],
+): T[] {
   return [...events].sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0))
 }

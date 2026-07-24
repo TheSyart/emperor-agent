@@ -1,4 +1,5 @@
 import type { RuntimeStatus, WsEvent } from '../types'
+import { adaptLegacyRuntimeEvent } from './legacyRuntimeAdapter'
 import type {
   ActionEffectDescriptor,
   ActionEffectTaskResult,
@@ -245,7 +246,7 @@ export function reduceSessionProjection(
     })
   }
 
-  return reduceRuntimeEvent(state, action.event)
+  return reduceRuntimeEvent(state, adaptLegacyRuntimeEvent(action.event))
 }
 
 export function eventOwnerSessionId(data: unknown): string {
@@ -356,9 +357,9 @@ function reduceRuntimeEvent(
       next.running = false
       next.attention = foreign
     }
-    if (event.event === 'turn_continuation_evaluated') {
-      next.running = event.decision !== 'pause'
-      if (event.decision === 'pause') next.attention = foreign
+    if (event.event === 'historical_runtime_activity') {
+      next.running = event.running
+      if (!event.running) next.attention = foreign
     }
     sessions = { ...state.sessions, [sessionKey]: next }
   }

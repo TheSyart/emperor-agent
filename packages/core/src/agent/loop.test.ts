@@ -31,7 +31,7 @@ import {
 import { GoalPlanBridge } from '../goals/plan-bridge'
 import { GoalReviewerPolicy } from '../goals/reviewer'
 import { GoalGateMutationLedger } from '../goals/mutation-ledger'
-import { PlanStatus, PlanStepStatus } from '../plans/models'
+import { PlanStatus, PlanStepStatus, type PlanRecord } from '../plans/models'
 import { ToolResultObj } from '../tools/base'
 import { GOAL_REVIEWER_WAIVER_APPROVE_LABEL } from '../control/plan-verification'
 import {
@@ -182,12 +182,6 @@ async function createInterruptedSkip(
     goalStore: loop.goalStore,
     planStore: manager.planStore,
     taskManager: loop.taskManager,
-    todoStore: {
-      todos: [],
-      syncFromPlanSteps(): string {
-        throw new Error(`injected startup Todo interruption ${label}`)
-      },
-    },
     resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
       kind: 'explicit_user_plan_step_waiver',
       issuedBy: 'core',
@@ -198,13 +192,22 @@ async function createInterruptedSkip(
       stepId,
     }),
   })
+  const originalSave = manager.planStore.save.bind(manager.planStore)
+  manager.planStore.save = ((candidate: PlanRecord) => {
+    const intent = candidate.metadata.goal_skip_intent as
+      Record<string, unknown> | undefined
+    if (intent?.stage === 'completed')
+      throw new Error(`injected startup settlement interruption ${label}`)
+    return originalSave(candidate)
+  }) as typeof manager.planStore.save
   await expect(
     interrupted.skipStepWithWaiver({
       goalId: planning.id,
       planId,
       stepId: 'step_1',
     }),
-  ).rejects.toThrow(`startup Todo interruption ${label}`)
+  ).rejects.toThrow(`startup settlement interruption ${label}`)
+  manager.planStore.save = originalSave
   return {
     planId,
     approvalGeneration: Number(
@@ -1184,12 +1187,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       goalStore: first.goalStore,
       planStore: manager.planStore,
       taskManager: first.taskManager,
-      todoStore: {
-        todos: [],
-        syncFromPlanSteps(): string {
-          throw new Error('injected startup Todo interruption')
-        },
-      },
       resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
         kind: 'explicit_user_plan_step_waiver',
         issuedBy: 'core',
@@ -1200,13 +1197,22 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         stepId,
       }),
     })
+    const originalSave = manager.planStore.save.bind(manager.planStore)
+    manager.planStore.save = ((candidate: PlanRecord) => {
+      const intent = candidate.metadata.goal_skip_intent as
+        Record<string, unknown> | undefined
+      if (intent?.stage === 'completed')
+        throw new Error('injected startup settlement interruption')
+      return originalSave(candidate)
+    }) as typeof manager.planStore.save
     await expect(
       interrupted.skipStepWithWaiver({
         goalId: planning.id,
         planId,
         stepId: 'step_1',
       }),
-    ).rejects.toThrow(/startup Todo/)
+    ).rejects.toThrow(/startup settlement/)
+    manager.planStore.save = originalSave
 
     const restarted = await AgentLoop.create({
       root,
@@ -1223,10 +1229,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
           .goal_skip_intent as Record<string, unknown>
       ).stage,
     ).toBe('completed')
-    expect(restarted.todoStore.todos).toMatchObject([
-      { plan_id: planId, plan_step_id: 'step_1', status: 'completed' },
-      { plan_id: planId, plan_step_id: 'step_2', status: 'in_progress' },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
     const planTasks = restarted.taskManager.store
       .list()
       .filter((task) => task.metadata.plan_id === planId)
@@ -1241,7 +1244,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ).toHaveLength(1)
   })
 
-  it('routes a non-current session skip recovery only to that session Todo cache', async () => {
+  it('keeps non-current Goal skip recovery free of session WorkItem mirrors', async () => {
     const root = tmp('emperor-agent-loop-skip-recovery-background-')
     const stateRoot = join(root, '.emperor')
     const first = await AgentLoop.create({
@@ -1253,11 +1256,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
     const sessionA = first.activeSessionId!
     const sessionB = first.sessionStore.create('Background B')
-    const recoveredB = await createInterruptedSkip(
-      first,
-      sessionB.id,
-      'background_b',
-    )
+    await createInterruptedSkip(first, sessionB.id, 'background_b')
     await new Promise<void>((resolve) => setTimeout(resolve, 5))
     first.sessionStore.touch(sessionA, 'Keep A current at restart')
     first.sessionStore.archive(sessionB.id)
@@ -1273,20 +1272,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     expect(restarted.activeSessionId).toBe(sessionA)
     expect(restarted.todoStore.todos).toEqual([])
     restarted.activateSession(sessionB.id)
-    expect(restarted.todoStore.todos).toMatchObject([
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_1',
-        approval_generation: recoveredB.approvalGeneration,
-        status: 'completed',
-      },
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_2',
-        approval_generation: recoveredB.approvalGeneration,
-        status: 'in_progress',
-      },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
     restarted.activateSession(sessionA)
     expect(restarted.todoStore.todos).toEqual([])
   })
@@ -1331,7 +1317,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ).toBe('completed')
   })
 
-  it('restores exact Todo projections for every recovered session and preserves them on a no-op replay', async () => {
+  it('does not recreate legacy Todo projections for recovered short Plans', async () => {
     const root = tmp('emperor-agent-loop-skip-recovery-multi-session-')
     const stateRoot = join(root, '.emperor')
     const first = await AgentLoop.create({
@@ -1342,13 +1328,9 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       initializeMcp: false,
     })
     const sessionA = first.activeSessionId!
-    const recoveredA = await createInterruptedSkip(first, sessionA, 'multi_a')
+    await createInterruptedSkip(first, sessionA, 'multi_a')
     const sessionB = first.sessionStore.create('Recovered B')
-    const recoveredB = await createInterruptedSkip(
-      first,
-      sessionB.id,
-      'multi_b',
-    )
+    await createInterruptedSkip(first, sessionB.id, 'multi_b')
     await new Promise<void>((resolve) => setTimeout(resolve, 5))
     first.sessionStore.touch(sessionA, 'Keep A current at restart')
     first.sessionStore.archive(sessionB.id)
@@ -1362,65 +1344,20 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
 
     expect(restarted.activeSessionId).toBe(sessionA)
-    expect(restarted.todoStore.todos).toMatchObject([
-      {
-        plan_id: recoveredA.planId,
-        plan_step_id: 'step_1',
-        approval_generation: recoveredA.approvalGeneration,
-      },
-      {
-        plan_id: recoveredA.planId,
-        plan_step_id: 'step_2',
-        approval_generation: recoveredA.approvalGeneration,
-      },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
     restarted.activateSession(sessionB.id)
-    expect(restarted.todoStore.todos).toMatchObject([
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_1',
-        approval_generation: recoveredB.approvalGeneration,
-      },
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_2',
-        approval_generation: recoveredB.approvalGeneration,
-      },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
 
     expect(await restarted.goalPlanBridge.recoverIncompleteSkips()).toEqual({
       count: 0,
-      todoProjections: [],
     })
     restarted.activateSession(sessionA)
-    expect(restarted.todoStore.todos).toMatchObject([
-      {
-        plan_id: recoveredA.planId,
-        plan_step_id: 'step_1',
-        approval_generation: recoveredA.approvalGeneration,
-      },
-      {
-        plan_id: recoveredA.planId,
-        plan_step_id: 'step_2',
-        approval_generation: recoveredA.approvalGeneration,
-      },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
     restarted.activateSession(sessionB.id)
-    expect(restarted.todoStore.todos).toMatchObject([
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_1',
-        approval_generation: recoveredB.approvalGeneration,
-      },
-      {
-        plan_id: recoveredB.planId,
-        plan_step_id: 'step_2',
-        approval_generation: recoveredB.approvalGeneration,
-      },
-    ])
+    expect(restarted.todoStore.todos).toEqual([])
   })
 
-  it('binds Plan pause and Todo projection to the owning session while another session is active', async () => {
+  it('binds Plan pause to the owning session without projecting short Plans into Todo', async () => {
     const root = tmp('emperor-agent-loop-plan-pause-scope-')
     const stateRoot = join(root, '.emperor')
     const loop = await AgentLoop.create({
@@ -1442,7 +1379,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         ],
       })
       loop.controlManager.approve(interactionA.id)
-      bindingsA.runner.controlManager?.restoreCurrentPlanTodoProjection?.()
+      bindingsA.runner.controlManager?.migrateLegacyPlanTodoMirrors?.()
       const planA = String(interactionA.meta.plan_id)
 
       const sessionB = loop.sessionStore.create('Session B')
@@ -1457,7 +1394,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         ],
       })
       loop.controlManager.approve(interactionB.id)
-      bindingsB.runner.controlManager?.restoreCurrentPlanTodoProjection?.()
+      bindingsB.runner.controlManager?.migrateLegacyPlanTodoMirrors?.()
       const planB = String(interactionB.meta.plan_id)
 
       bindingsA.runner.controlManager?.pausePlanExecution?.({
@@ -1475,14 +1412,14 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       expect(
         loop.controlManager.planStore.get(planB)?.metadata.execution_pause,
       ).toBeUndefined()
-      expect(bindingsA.todoStore.todos[0]?.status).toBe('pending')
-      expect(bindingsB.todoStore.todos[0]?.status).toBe('in_progress')
+      expect(bindingsA.todoStore.todos).toEqual([])
+      expect(bindingsB.todoStore.todos).toEqual([])
     } finally {
       await loop.close()
     }
   })
 
-  it('restores a paused Plan Todo projection from durable metadata after restart', async () => {
+  it('restores a paused short Plan without recreating a Todo projection', async () => {
     const root = tmp('emperor-agent-loop-plan-pause-restart-')
     const stateRoot = join(root, '.emperor')
     const first = await AgentLoop.create({
@@ -1507,11 +1444,11 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
     first.controlManager.approve(interaction.id)
     first.controlManager.pausePlanExecution({
-      reason: 'budget_exhausted',
+      reason: 'no_progress',
       turnId: 'turn_restart_pause',
       pausedAt: Date.now() / 1000,
-      evaluationCount: 3,
-      totalIterations: 56,
+      evaluationCount: 0,
+      totalIterations: 12,
       nextActions: ['Resume explicitly'],
     })
     await first.close()
@@ -1524,19 +1461,65 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       initializeMcp: false,
     })
     try {
-      expect(restarted.todoStore.todos).toMatchObject([
-        {
-          id: 'plan:step_restart',
-          plan_id: String(interaction.meta.plan_id),
-          status: 'pending',
-        },
-      ])
+      expect(restarted.todoStore.todos).toEqual([])
       expect(
         restarted.controlManager.planStore.get(String(interaction.meta.plan_id))
           ?.metadata.execution_pause,
-      ).toMatchObject({ reason: 'budget_exhausted' })
+      ).toMatchObject({ reason: 'no_progress' })
     } finally {
       await restarted.close()
+    }
+  })
+
+  it('inherits the paused Plan execution identity for an explicit continue turn', async () => {
+    const root = tmp('emperor-agent-loop-plan-execution-identity-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    try {
+      const interaction = loop.controlManager.createPlan({
+        title: 'Continue the same task',
+        summary: 'Keep one task-level change ledger.',
+        planMarkdown: '# Continue',
+        steps: [
+          {
+            id: 'step_continue',
+            title: 'Continue step',
+            description: 'Resume explicitly.',
+            acceptance: ['resumed'],
+          },
+        ],
+      })
+      loop.controlManager.approve(interaction.id)
+      loop.controlManager.pausePlanExecution({
+        reason: 'no_progress',
+        turnId: 'turn_original',
+        executionId: 'execution_original',
+        pausedAt: Date.now() / 1000,
+        evaluationCount: 0,
+        totalIterations: 12,
+        nextActions: ['Continue'],
+      })
+      let observedExecutionId: string | null = null
+      vi.spyOn(loop.runner, 'stepStream').mockImplementation(async () => {
+        observedExecutionId = loop.runner.executionId
+        return 'resumed'
+      })
+
+      await expect(
+        loop.runUserTurn('继续执行', {
+          sessionId: loop.activeSessionId,
+          turnId: 'turn_resumed',
+        }),
+      ).resolves.toBe('resumed')
+
+      expect(observedExecutionId).toBe('execution_original')
+    } finally {
+      await loop.close()
     }
   })
 

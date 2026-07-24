@@ -21,7 +21,6 @@ const {
 const TEMPLATE_RUNTIME_FILES = [
   'SOUL.md',
   'TOOL.md',
-  'agent/compact_prompt.md',
   'agent/identity.md',
   'agent/skills_section.md',
   'init/MEMORY.md',

@@ -3,7 +3,11 @@ import { computed, nextTick, provide, ref, watch } from 'vue'
 // @ts-expect-error vue-virtual-scroller v2 beta 无类型声明（见 shims）
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
-import type { ChatMessage, RuntimePlanRecord } from '../../types'
+import type {
+  ChatMessage,
+  RuntimePlanRecord,
+  TurnChangeSnapshot,
+} from '../../types'
 import MessageRow from './MessageRow.vue'
 import { CHAT_EXPANSION_STORE_KEY } from './expansionStoreKey'
 import {
@@ -17,8 +21,12 @@ import wordmarkUrl from '../../../../../../assets/generated/emperoragent-wordmar
 const props = defineProps<{
   messages: ChatMessage[]
   plans?: RuntimePlanRecord[]
+  turnChanges?: TurnChangeSnapshot[]
 }>()
-const emit = defineEmits<{ continueExecution: [] }>()
+const emit = defineEmits<{
+  continueExecution: []
+  openReview: []
+}>()
 const scroller = ref<HTMLElement | null>(null)
 const followBottom = ref(true)
 
@@ -77,7 +85,20 @@ function sizeDependencies(message: ChatMessage): unknown[] {
     message.streaming,
     message.todos?.length ?? 0,
     expansion.version.value,
+    changesFor(message)?.seq ?? 0,
   ]
+}
+
+function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
+  if (message.role !== 'assistant' || !message.turn_id) return undefined
+  return props.turnChanges?.find(
+    (snapshot) =>
+      (snapshot.turnId === message.turn_id ||
+        snapshot.rootTurnId === message.turn_id ||
+        snapshot.activeTurnId === message.turn_id) &&
+      (snapshot.status === 'complete' || snapshot.status === 'partial') &&
+      snapshot.filesChanged > 0,
+  )
 }
 </script>
 
@@ -120,7 +141,9 @@ function sizeDependencies(message: ChatMessage): unknown[] {
             <MessageRow
               :message="item"
               :plans="props.plans || []"
+              :turn-change="changesFor(item)"
               @continue-execution="emit('continueExecution')"
+              @open-review="emit('openReview')"
             />
           </div>
         </DynamicScrollerItem>
@@ -132,7 +155,9 @@ function sizeDependencies(message: ChatMessage): unknown[] {
         :key="message.id"
         :message="message"
         :plans="props.plans || []"
+        :turn-change="changesFor(message)"
         @continue-execution="emit('continueExecution')"
+        @open-review="emit('openReview')"
       />
     </div>
 

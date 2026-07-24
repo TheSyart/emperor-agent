@@ -17,7 +17,7 @@ import { PlanExecutionState } from './execution-state'
 import { assessStepVerification } from './evidence'
 import { parseReviewerVerdict } from './reviewer'
 import { PlanQualityGate } from './quality'
-import { makeRequirement } from './verification'
+import { makeRequirement, requirementFromDict } from './verification'
 import {
   PlanStatus,
   PlanStepStatus,
@@ -906,6 +906,27 @@ describe('Plan dependency quality', () => {
 // ── test_plan_verification_matrix.py (assess_step_verification) ──
 
 describe('assess_step_verification (test_plan_verification_matrix.py)', () => {
+  it('keeps model-authored manual checks non-blocking unless the user explicitly requires them', () => {
+    const suggested = requirementFromDict({
+      id: 'manual_ui',
+      kind: 'manual',
+      required: true,
+      description: 'Open the page in a browser.',
+    })
+    const explicitlyRequired = requirementFromDict({
+      id: 'manual_acceptance',
+      kind: 'manual',
+      required: true,
+      human_required: true,
+      description: 'The user explicitly requested final visual acceptance.',
+    })
+
+    expect(suggested.required).toBe(false)
+    expect(suggested.humanRequired).toBe(false)
+    expect(explicitlyRequired.required).toBe(true)
+    expect(explicitlyRequired.humanRequired).toBe(true)
+  })
+
   it('optional command failure becomes a risk note', () => {
     const step = makeStep({
       id: 'step_1',
@@ -1002,6 +1023,129 @@ describe('assess_step_verification (test_plan_verification_matrix.py)', () => {
 
 describe('PlanQualityGate', () => {
   const gate = new PlanQualityGate()
+  const exploredDraft = (
+    id = 'disc_plan_quality',
+    files: string[] = ['index.html'],
+  ) => ({
+    ...emptyDraft(),
+    discoveries: [
+      {
+        id,
+        source: files.length ? 'read_file' : 'glob',
+        summary: files.length
+          ? 'Inspected the relevant implementation.'
+          : 'Inspected the empty project scope.',
+        files,
+        symbols: [],
+        evidence_refs: files.map((file) => `path:${file}`),
+        created_at: 1,
+      },
+    ],
+    relevantFiles: files,
+    lastContextRefreshAt: 1,
+  })
+
+  it('rejects a concrete plan that has no successful exploration evidence', () => {
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Create the product introduction page',
+          description:
+            'Create index.html using the project visual conventions and required sections.',
+          files: ['index.html'],
+          commands: ['npm test'],
+          acceptance: ['the introduction page renders the required sections'],
+          risk: 'low',
+        }),
+      ],
+      draft: emptyDraft(),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain(
+      'plan has no successful read-only exploration evidence',
+    )
+  })
+
+  it('rejects a plan while design questions remain unresolved', () => {
+    const draft = {
+      ...emptyDraft(),
+      discoveries: [
+        {
+          id: 'disc_1',
+          source: 'read_file',
+          summary: 'Read the existing HTML entry point.',
+          files: ['index.html'],
+          symbols: [],
+          evidence_refs: ['path:index.html'],
+          created_at: 1,
+        },
+      ],
+      relevantFiles: ['index.html'],
+      openQuestions: [{ id: 'visual_direction' }],
+      lastContextRefreshAt: 1,
+    }
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Update the introduction page',
+          description:
+            'Update index.html using the existing layout and component conventions.',
+          files: ['index.html'],
+          discoveryRefs: ['disc_1'],
+          commands: ['npm test'],
+          acceptance: ['the page preserves the existing visual direction'],
+          risk: 'low',
+        }),
+      ],
+      draft,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain(
+      'plan has unresolved design questions and cannot enter approval',
+    )
+  })
+
+  it('requires the submitted plan to cite recorded exploration evidence', () => {
+    const draft = {
+      ...emptyDraft(),
+      discoveries: [
+        {
+          id: 'disc_1',
+          source: 'glob',
+          summary: 'Inspected the project root and found no existing files.',
+          files: [],
+          symbols: [],
+          evidence_refs: ['scope:.'],
+          created_at: 1,
+        },
+      ],
+      lastContextRefreshAt: 1,
+    }
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Create the introduction page',
+          description:
+            'Create index.html after confirming the project root is empty.',
+          files: ['index.html'],
+          commands: ['npm test'],
+          acceptance: ['the page contains all required sections'],
+          risk: 'low',
+        }),
+      ],
+      draft,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain(
+      'plan steps do not cite any recorded exploration evidence',
+    )
+  })
 
   it('rejects weak steps: generic title + no scope + no verification', () => {
     const result = gate.assess({
@@ -1060,6 +1204,7 @@ describe('PlanQualityGate', () => {
           title: 'Add plan quality gate tests',
           description: 'Cover weak plans and accepted concrete plans.',
           files: ['tests/unit/test_plan_quality_gate.py'],
+          discoveryRefs: ['disc_plan_quality'],
           commands: [
             '.venv/bin/python -m pytest tests/unit/test_plan_quality_gate.py -q',
           ],
@@ -1072,6 +1217,7 @@ describe('PlanQualityGate', () => {
           description:
             'Wire the gate through ProposePlanTool without changing approved execution state.',
           files: ['agent/control/tools.py', 'agent/plans/quality.py'],
+          discoveryRefs: ['disc_plan_quality'],
           commands: [
             '.venv/bin/python -m pytest tests/unit/test_plan_runtime.py -q',
           ],
@@ -1083,10 +1229,112 @@ describe('PlanQualityGate', () => {
             'Disable enforce_quality on ProposePlanTool while keeping low-level create_plan available.',
         }),
       ],
-      draft: emptyDraft(),
+      draft: exploredDraft('disc_plan_quality', [
+        'tests/unit/test_plan_quality_gate.py',
+        'agent/control/tools.py',
+        'agent/plans/quality.py',
+      ]),
     })
     expect(result.ok).toBe(true)
     expect(result.errors).toEqual([])
+  })
+
+  it('requires browser inspection to be declared as manual verification', () => {
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Verify the rendered page',
+          description: 'Inspect the completed page in a real browser.',
+          files: ['index.html'],
+          discoveryRefs: ['disc_manual'],
+          acceptance: ['layout is visually correct'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'command',
+              required: true,
+              command: 'Open index.html in a browser and inspect it',
+              description: 'Visual browser inspection',
+              status: 'pending',
+              evidenceRefs: [],
+              reason: '',
+            },
+          ],
+        }),
+      ],
+      draft: exploredDraft('disc_manual'),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain(
+      'step_1 verification browser_check requires manual verification; it is not an executable command',
+    )
+  })
+
+  it('accepts an explicit manual verification entry with a concrete instruction', () => {
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Verify the rendered page',
+          description: 'Inspect the completed page in a real browser.',
+          files: ['index.html'],
+          discoveryRefs: ['disc_manual'],
+          acceptance: ['layout is visually correct'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'manual',
+              required: true,
+              humanRequired: true,
+              command: '',
+              description: 'Open index.html in a browser and inspect it.',
+              status: 'pending',
+              evidenceRefs: [],
+              reason: '',
+            },
+          ],
+        }),
+      ],
+      draft: exploredDraft('disc_manual'),
+    })
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a blocking manual check that was not explicitly required by the user', () => {
+    const result = gate.assess({
+      steps: [
+        makeStep({
+          id: 'step_1',
+          title: 'Verify the rendered page',
+          description: 'Inspect the completed page in a real browser.',
+          files: ['index.html'],
+          discoveryRefs: ['disc_manual'],
+          acceptance: ['layout is visually correct'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'manual',
+              required: true,
+              humanRequired: false,
+              command: '',
+              description: 'Open index.html in a browser and inspect it.',
+              status: 'pending',
+              evidenceRefs: [],
+              reason: '',
+            },
+          ],
+        }),
+      ],
+      draft: exploredDraft('disc_manual'),
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain(
+      'step_1 verification browser_check cannot block completion unless the user explicitly requires manual acceptance',
+    )
   })
 
   it('rejects empty steps', () => {

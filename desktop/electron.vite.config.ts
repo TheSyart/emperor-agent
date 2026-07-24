@@ -6,7 +6,7 @@ const repoRoot = resolve(__dirname, '..')
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ include: ['typescript'] })],
+    plugins: [externalizeDepsPlugin({ include: ['typescript', 'node-pty'] })],
     build: { outDir: 'out/main' },
   },
   preload: {

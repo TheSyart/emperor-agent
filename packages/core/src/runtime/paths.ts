@@ -22,7 +22,6 @@ export interface RuntimePaths {
   tasksRoot: string
   processesRoot: string
   controlRoot: string
-  externalRoot: string
 }
 
 export interface RuntimePathOptions {
@@ -73,7 +72,6 @@ export function resolveRuntimePaths(
     tasksRoot: join(stateRoot, 'tasks'),
     processesRoot: join(stateRoot, 'processes'),
     controlRoot: join(stateRoot, 'control'),
-    externalRoot: join(stateRoot, 'external'),
   }
 }
 
@@ -90,7 +88,6 @@ export function ensureRuntimeStateDirs(paths: RuntimePaths): void {
     paths.tasksRoot,
     paths.processesRoot,
     paths.controlRoot,
-    paths.externalRoot,
   ]) {
     mkdirSync(dir, { recursive: true })
   }

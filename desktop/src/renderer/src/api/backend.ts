@@ -6,6 +6,7 @@ import type {
   CoreOperationArgs,
   CoreOperationKey,
   CoreOperationResult,
+  TerminalEvent,
 } from '@emperor/core'
 
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
@@ -22,6 +23,10 @@ interface EmperorBridge {
     ...args: CoreOperationArgs<Key>
   ) => Promise<CoreOperationResult<Key> | CoreIpcErrorEnvelope>
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
+  onTerminalEvent?: (
+    listener: (event: TerminalEvent) => void,
+    scope: { sessionId: string; terminalId: string },
+  ) => () => void
 }
 
 function bridge(): EmperorBridge | undefined {
@@ -88,6 +93,15 @@ export function onCoreEvent(listener: (event: unknown) => void): () => void {
   const subscribe = bridge()?.onCoreEvent
   if (typeof subscribe !== 'function') return () => {}
   return subscribe(listener)
+}
+
+export function onTerminalEvent(
+  listener: (event: TerminalEvent) => void,
+  scope: { sessionId: string; terminalId: string },
+): () => void {
+  const subscribe = bridge()?.onTerminalEvent
+  if (typeof subscribe !== 'function') return () => {}
+  return subscribe(listener, scope)
 }
 
 function isCoreIpcErrorEnvelope(value: unknown): value is CoreIpcErrorEnvelope {

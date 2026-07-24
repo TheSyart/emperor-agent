@@ -56,7 +56,7 @@ Coordinator 以 `goal:<goalId>` 注册一条 `ActiveTask(kind=goal)`，外层 Go
 
 模型只能通过五个 Goal 工具提交意图：`get_goal`、`define_goal_contract`、`record_goal_evidence`、`complete_goal`、`block_goal`。工具不接受 `goalId`、Outcome、终态、路径、hash 或工具名等权威字段；当前 Goal 从 `ToolExecutionContext.sessionId` 和 Store 推导。终态 Goal 只暴露 `get_goal`。
 
-Contract 包含 in/out of scope、约束、required/optional acceptance criteria 和升级条件。锁定后进入 planning。GoalPlanBridge 负责 Goal 与 Plan 的完整 scope、approval generation、依赖、step verification、skip waiver、replan/supersession 和 Todo 投影；Todo 只是执行清单，不能决定 Goal 完成。
+Contract 包含 in/out of scope、约束、required/optional acceptance criteria 和升级条件。锁定后进入 planning。GoalPlanBridge 负责 Goal 与 Plan 的完整 scope、approval generation、依赖、step verification、skip waiver 和 replan/supersession；它不再把 PlanStep 投影成 Todo。独立 WorkItem 只是执行清单，不能决定 Goal 完成。
 
 每轮模型上下文由 GoalContextBuilder 从 Store 重建，顺序固定在 Plan/control 上下文之前。首次、每五轮、阶段变化、恢复和压缩后附加完整上下文，其余使用有界 sparse 摘要；压缩摘要只提供 ID/seq 提示，不能替代 Store 真相。
 

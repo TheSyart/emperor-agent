@@ -11,9 +11,11 @@ import {
   type PromptProfile,
 } from '../config/local-config'
 import type { PromptContextPlan } from '../prompts/manifest'
+import type { PromptSectionOwner } from '../prompts/manifest'
 import { ContextAssembler } from '../context/assembler'
 import { ContextPlanner } from '../context/planner'
 import { ContextPolicyRegistry } from '../context/policy'
+import { PromptPolicy } from '../prompts/policy'
 
 const DEFAULT_MEMORY_BUDGET_CHARS = 12_000
 
@@ -26,6 +28,8 @@ export interface ContextSection {
   version: string | null
   scope?: string | null
   stability?: 'stable' | 'dynamic'
+  owner?: PromptSectionOwner
+  ruleIds?: string[]
 }
 
 export interface ContextProjection {
@@ -166,26 +170,23 @@ export class ContextBuilder {
     const sections: ContextSection[] = []
     const policy = this.policyRegistry.policyForMode(this.sessionMode)
 
-    const bootstrapParts: string[] = []
-    const versions: string[] = []
     for (const name of ContextBuilder.BOOTSTRAP_FILES) {
       const path = this.bootstrapPath(name)
       if (!existsSync(path)) continue
       const text = readFileSync(path, 'utf8').trim()
-      bootstrapParts.push(text)
       const version = promptVersion(text)
-      if (version) versions.push(`${name}:${version}`)
-    }
-    const bootstrap = bootstrapParts.join('\n\n')
-    if (bootstrap) {
+      if (!text) continue
+      const isSoul = name === 'SOUL.md'
       sections.push({
-        name: 'bootstrap',
-        content: bootstrap,
-        source: bootstrapSource(),
-        priority: 100,
+        name: isSoul ? 'bootstrap' : 'tool_guidance',
+        content: text,
+        source: path,
+        priority: isSoul ? 100 : 40,
         budgetChars: null,
-        version: versions.join(', ') || null,
+        version,
         scope: 'prompt',
+        owner: isSoul ? 'core' : 'tool',
+        ruleIds: [isSoul ? 'core.identity' : 'tool.default_guidance'],
       })
     }
 
@@ -201,6 +202,8 @@ export class ContextBuilder {
           budgetChars: null,
           version: promptVersion(userProfile),
           scope: 'user_profile',
+          owner: 'memory',
+          ruleIds: ['memory.user_profile'],
         })
       }
     }
@@ -213,6 +216,8 @@ export class ContextBuilder {
       budgetChars: null,
       version: 'prompt-profile-v1',
       scope: 'prompt',
+      owner: 'agent_role',
+      ruleIds: ['communication.profile'],
     })
 
     const workspace =
@@ -232,6 +237,8 @@ export class ContextBuilder {
         budgetChars: null,
         version: promptVersion(identity),
         scope: 'runtime',
+        owner: 'default',
+        ruleIds: ['execution.default_contract'],
       })
     }
 
@@ -251,6 +258,8 @@ export class ContextBuilder {
         budgetChars: this.memoryBudgetChars,
         version: null,
         scope: 'project',
+        owner: 'project',
+        ruleIds: ['project.instructions'],
       })
     }
 
@@ -270,6 +279,8 @@ export class ContextBuilder {
           budgetChars: this.memoryBudgetChars,
           version: null,
           scope: 'global',
+          owner: 'memory',
+          ruleIds: ['memory.long_term'],
         })
       }
     }
@@ -286,6 +297,8 @@ export class ContextBuilder {
         budgetChars: null,
         version: null,
         scope: 'project_index',
+        owner: 'project',
+        ruleIds: ['project.index'],
       })
     }
 
@@ -301,6 +314,8 @@ export class ContextBuilder {
           budgetChars: null,
           version: null,
           scope: 'skills',
+          owner: 'tool',
+          ruleIds: ['tool.active_skills'],
         })
       }
     }
@@ -320,13 +335,17 @@ export class ContextBuilder {
         budgetChars: null,
         version: promptVersion(skillsSection),
         scope: 'skills',
+        owner: 'tool',
+        ruleIds: ['tool.skill_catalog'],
       })
     }
 
-    return sections.map((section) => ({
-      ...section,
-      stability: section.stability ?? 'stable',
-    }))
+    return new PromptPolicy().resolve(
+      sections.map((section) => ({
+        ...section,
+        stability: section.stability ?? 'stable',
+      })),
+    ).active
   }
 
   private buildContextPlan(sections: ContextSection[]): PromptContextPlan {
@@ -358,10 +377,6 @@ export class ContextBuilder {
       return '(subagent registry not yet attached)'
     return this.subagentRegistry.describe()
   }
-}
-
-function bootstrapSource(): string {
-  return 'templates/SOUL.md+templates/TOOL.md'
 }
 
 function profilePrompt(profile: PromptProfile): string {

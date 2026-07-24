@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { HistoryLog, type HistoryArchiveGate } from '../memory/history'
 import type { MemoryStore } from '../memory/store'
 import { nowIsoUtc8 } from '../memory/time-utc8'
@@ -19,9 +19,12 @@ export class ConversationStore {
   readonly checkpointFile: string
   readonly historyLog: HistoryLog
   readonly messageGraph: MessageGraphStore
+  readonly sessionId: string
 
-  constructor(sessionDir: string) {
+  constructor(sessionDir: string, opts?: { sessionId?: string | null }) {
     this.sessionDir = sessionDir
+    this.sessionId =
+      String(opts?.sessionId ?? '').trim() || basename(this.sessionDir)
     mkdirSync(this.sessionDir, { recursive: true })
     this.historyFile = join(this.sessionDir, 'history.jsonl')
     this.checkpointFile = join(this.sessionDir, '_checkpoint.json')
@@ -140,6 +143,7 @@ export class ConversationStore {
   writeCheckpoint(history: Row[], opts: CheckpointWriteOptions = {}): void {
     writeTurnCheckpoint(this.checkpointFile, history, {
       ...opts,
+      sessionId: String(opts.sessionId ?? '').trim() || this.sessionId,
       baseHistorySeq:
         opts.baseHistorySeq ?? Number(this.historyLog.stats().latest_seq ?? 0),
     })
@@ -147,6 +151,7 @@ export class ConversationStore {
 
   readCheckpoint(): Row[] | null {
     return readRecoverableCheckpointHistory(this.checkpointFile, {
+      sessionId: this.sessionId,
       lastHistorySeq: Number(this.historyLog.stats().latest_seq ?? 0),
     }) as Row[] | null
   }

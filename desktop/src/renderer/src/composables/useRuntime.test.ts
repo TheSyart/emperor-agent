@@ -1584,10 +1584,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const proposeTool = assistants[0]!.segments.find(
       (segment) => segment.type === 'tool' && segment.toolId === 'call_pp',
     )
-    expect(proposeTool).toMatchObject({
-      status: 'done',
-      summary: 'waiting for user (plan:plan_live)',
-    })
+    expect(proposeTool).toBeUndefined()
     const resumeTool = assistants[0]!.segments.find(
       (segment) => segment.type === 'tool' && segment.toolId === 'call_wf',
     )

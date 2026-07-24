@@ -9,6 +9,7 @@ import type {
   TokenTrackerLike,
 } from '../agent/runner'
 import type { ModelRouter } from '../model/router'
+import type { WorkspaceMutationHost } from '../workspace/mutation-coordinator'
 import type { ToolRegistry } from '../tools/registry'
 import type {
   DispatchRunner,
@@ -33,6 +34,7 @@ export interface RoutedDispatchRunnerFactoryOptions {
     ((args: DispatchRunnerFactoryArgs) => AgentRunnerHookHost | null) | null
   goalObservationRecorder?: RunnerGoalRecordingHost | null
   fileCheckpoints?: FileCheckpointCaptureHost | null
+  workspaceMutations?: WorkspaceMutationHost | null
 }
 
 export function buildDispatchRunnerFactory(
@@ -49,10 +51,18 @@ export function buildDispatchRunner(
     args.goalObservationRecorder ?? opts.goalObservationRecorder ?? null
   const route = opts.modelRouter.route('subagent', args.spec.name, args.task)
   assertAgentModelPolicy(args, route.snapshot)
+  const systemPrompt =
+    args.contextMode === 'fork' && args.parentSystemPrompt?.trim()
+      ? [
+          args.parentSystemPrompt.trim(),
+          '# Specialized Subagent Role',
+          args.spec.systemPrompt,
+        ].join('\n\n')
+      : args.spec.systemPrompt
   const runner = buildRoutedRunner({
     route,
     registry: args.subRegistry as ToolRegistry,
-    systemPrompt: args.spec.systemPrompt,
+    systemPrompt,
     tokenTracker: opts.tokenTracker ?? null,
     usageType: `subagent:${args.spec.name}`,
     maxTokensCap: opts.maxTokensCap ?? null,
@@ -78,6 +88,7 @@ export function buildDispatchRunner(
           })
         : null,
     fileCheckpoints: opts.fileCheckpoints ?? null,
+    workspaceMutations: opts.workspaceMutations ?? null,
   })
   return {
     step: (history, stepOpts) =>

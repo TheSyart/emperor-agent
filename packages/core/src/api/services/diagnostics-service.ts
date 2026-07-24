@@ -49,7 +49,6 @@ export interface CoreDiagnosticsServiceDeps {
   hybridMemory?: () => HybridMemoryServiceDiagnostics
   codeIntelligence?: () => CodeIntelligenceServiceDiagnostics
   mcp?: () => MCPClientSnapshot
-  externalPayload?: () => Dict
   activeTasks?: () => unknown[]
   sessionRuntimes?: () => SessionRuntimeActorSnapshot[]
   desktopPetPayload?: () =>
@@ -78,7 +77,6 @@ export interface CoreDiagnosticsPayload {
   codeIntelligence: CodeIntelligenceServiceDiagnostics | Dict
   mcp: MCPClientSnapshot
   promptSnapshots: Dict
-  external: Dict
   activeTasks: ActiveTaskInfo[]
   sessionRuntimes: SessionRuntimeActorSnapshot[]
   desktopPet: CoreDesktopPetPayload
@@ -123,7 +121,6 @@ export class CoreDiagnosticsService {
         tools: 0,
       },
       promptSnapshots: this.promptSnapshotsPayload(),
-      external: this.deps.externalPayload?.() ?? {},
       activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
       sessionRuntimes: this.deps.sessionRuntimes?.() ?? [],
       desktopPet: desktopPetPayload(await this.deps.desktopPetPayload?.()),

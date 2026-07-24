@@ -5,7 +5,7 @@
 > 最后核验：2026-07-21<br>
 > 事实源：DiagnosticsService、桌面诊断面板、当前构建与运行脚本
 
-先进入“设置 → 诊断”。诊断页会集中显示生效路径、配置文件状态、workspace fence、生命周期、迁移结果、环境能力、Scheduler、External 和桌宠信息。不要先手工删除 `stateRoot`。
+先进入“设置 → 诊断”。诊断页会集中显示生效路径、配置文件状态、workspace fence、生命周期、迁移结果、环境能力、Scheduler 和桌宠信息。不要先手工删除 `stateRoot`。
 
 ## 快速判断
 
@@ -29,7 +29,6 @@
 | Scheduler 没执行                       | job 是否启用、next run、run history、pending Ask/Plan、owner session actor 和 Goal 全局锁                                |
 | Core 暂不可用                          | `Lifecycle Supervisor` 是否 ready；具体 service 是 failed、stop_timeout 还是尚未 ready                                   |
 | Hooks 不生效                           | hooks enabled、matcher、项目 trust/digest、测试结果和 audit                                                              |
-| External adapter 未就绪                | `external_config.json` 的 mode/config status、owner session、`secretEnv` 环境变量、loopback 端口和 External audit reason |
 | 文件回退按钮不可用                     | 文件检查点是否启用、检查点是否 ready、冲突列表和私有制品完整性                                                           |
 | Git 软回退按钮不可用                   | `workspace.gitRewind.mode`、evaluation receipt、HEAD ancestor、Git operation/index/submodule/sparse/filter、无关脏路径   |
 
@@ -62,9 +61,9 @@ Diagnostics 的 `Owned Process Runtime` 行是另一层状态：`owned · proces
 
 ## 有效配置与来源
 
-“设置 → 诊断 → 配置”会在模型/本地配置状态之后列出 `permissions.rules`、`sandbox.runtime`、`mcp.config`、`external.signedWebhook`、`code.intelligence`、当前可见的 `skills.<name>` 和 `agentDefinitions.<name>`。每行显示最终 `layer:source`、trust、trace 层数、被拒绝候选数和生效值摘要。Build session 的项目 Skill 应显示 `project:skill:project:<name>`；切回 Chat 后应回到 user 或 builtin。AgentDefinition 冲突的低层来源会留在 trace，但不会把低层 prompt 正文送到 UI。
+“设置 → 诊断 → 配置”会在模型/本地配置状态之后列出 `permissions.rules`、`sandbox.runtime`、`mcp.config`、`code.intelligence`、当前可见的 `skills.<name>` 和 `agentDefinitions.<name>`。每行显示最终 `layer:source`、trust、trace 层数、被拒绝候选数和生效值摘要。Build session 的项目 Skill 应显示 `project:skill:project:<name>`；切回 Chat 后应回到 user 或 builtin。AgentDefinition 冲突的低层来源会留在 trace，但不会把低层 prompt 正文送到 UI。
 
-MCP 的 args、env、headers 和 URL，以及 External 的 owner session、`secretEnv` 名和 outbound URL，在有效配置里统一显示 `[REDACTED]`；secret source 只说明来自哪层，不返回值。该 snapshot 没有时间戳，相同事实源会产生相同 revision，适合对比两次刷新。`config.effective` 和 Diagnostics 都是只读解释面：读取损坏配置不会移动、重写或隔离原文件；正常 runtime 启动时的 corrupt recovery 仍按各 config store 的既有规则执行。
+MCP 的 args、env、headers 和 URL 在有效配置里统一显示 `[REDACTED]`；secret source 只说明来自哪层，不返回值。该 snapshot 没有时间戳，相同事实源会产生相同 revision，适合对比两次刷新。`config.effective` 和 Diagnostics 都是只读解释面：读取损坏配置不会移动、重写或隔离原文件；正常 runtime 启动时的 corrupt recovery 仍按各 config store 的既有规则执行。
 
 有效配置不是新配置文件，也没有统一“保存”按钮。修改仍回到原入口：权限/local 字段修改 `emperor.local.json`，MCP 使用插件页，Skill 使用对应目录/Skill 管理入口，AgentDefinition 使用受信 manifest。看到 untrusted project candidate 被拒绝时，不要通过复制到 managed/user 层伪造信任；先核对项目绑定和来源。
 

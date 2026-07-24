@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
-import { relative, resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
 import { EmperorError } from '../errors'
 import {
   NodeEnvironmentProcessRunner,
   type EnvironmentProcessRunner,
 } from '../environment/process-runner'
-import { readJson, writeJsonAtomic } from '../store/atomic-json'
+import { GitRepositoryResolver } from '../workspace/git-repository'
+import { HardenedGitRunner } from '../workspace/git-runner'
+import {
+  GitWorktreeManager,
+  WorkspaceBindingStore,
+} from '../workspace/git-worktrees'
 import type { TaskManager, TaskTransitionResult } from '../tasks/manager'
 import {
   isTerminalTaskStatus,
@@ -530,17 +534,48 @@ class SharedOnlySubagentWorkspaceProvider implements SubagentWorkspaceProvider {
 export class GitWorktreeSubagentWorkspaceProvider implements SubagentWorkspaceProvider {
   readonly worktreeRoot: string
   readonly manifestPath: string
-  private readonly resolveRuntime: (
-    sourceRoot: string,
-  ) => Promise<GitWorktreeRuntime | null>
-  private readonly runner: EnvironmentProcessRunner
-  private manifestQueue: Promise<unknown> = Promise.resolve()
+  private readonly manager: GitWorktreeManager
 
   constructor(opts: GitWorktreeSubagentWorkspaceProviderOptions) {
     this.worktreeRoot = resolve(opts.worktreeRoot)
-    this.manifestPath = resolve(this.worktreeRoot, '.leases.json')
-    this.resolveRuntime = opts.resolveRuntime
-    this.runner = opts.runner ?? new NodeEnvironmentProcessRunner()
+    const processRunner = opts.runner ?? new NodeEnvironmentProcessRunner()
+    const runner = new HardenedGitRunner({
+      resolveRuntime: async (sourceRoot) => {
+        const runtime = await opts.resolveRuntime(sourceRoot)
+        if (!runtime?.executable)
+          throw new SubagentWorkspaceUnavailableError('Git is not ready')
+        return runtime
+      },
+      run: async (request) => {
+        const result = await processRunner.run({
+          ...request,
+          timeoutMs: 60_000,
+          maxOutputBytes: 64 * 1024,
+          outputPolicy: 'truncate_tail',
+          outputQuotaScope: 'per_stream',
+        })
+        return {
+          exitCode: result.exitCode ?? (result.status === 'completed' ? 0 : 1),
+          stdout: result.stdout,
+          stderr: result.stderr || result.error || '',
+          stdoutTruncated: result.stdoutTruncated === true,
+          stderrTruncated: result.stderrTruncated === true,
+        }
+      },
+      privateHome: resolve(this.worktreeRoot, '.git-home'),
+    })
+    const resolver = new GitRepositoryResolver({
+      execute: (cwd, args, options) => runner.execute(cwd, args, options),
+    })
+    const stateRoot = resolve(this.worktreeRoot, '..')
+    this.manager = new GitWorktreeManager({
+      stateRoot,
+      subagentWorktreeRoot: this.worktreeRoot,
+      bindings: new WorkspaceBindingStore(stateRoot),
+      resolver,
+      execute: (cwd, args, options) => runner.execute(cwd, args, options),
+    })
+    this.manifestPath = this.manager.subagentManifestPath
   }
 
   async acquire(
@@ -552,197 +587,18 @@ export class GitWorktreeSubagentWorkspaceProvider implements SubagentWorkspacePr
         root: input.sourceRoot,
         cleanup: () => undefined,
       }
-    if (!/^[A-Za-z0-9_-]+$/.test(input.taskId))
-      throw new SubagentWorkspaceUnavailableError('invalid task identity')
-    const runtime = await this.resolveRuntime(input.sourceRoot).catch(
-      () => null,
-    )
-    if (!runtime?.executable)
-      throw new SubagentWorkspaceUnavailableError('Git is not ready')
-    mkdirSync(this.worktreeRoot, { recursive: true, mode: 0o700 })
-    const target = resolve(this.worktreeRoot, input.taskId)
-    assertContainedWorktree(this.worktreeRoot, target)
-    if (existsSync(target))
-      throw new SubagentWorkspaceUnavailableError(
-        'the isolated workspace already exists',
-      )
-    const repoResult = await this.runGit(runtime, [
-      '-C',
-      input.sourceRoot,
-      'rev-parse',
-      '--show-toplevel',
-    ])
-    if (!processSucceeded(repoResult))
-      throw new SubagentWorkspaceUnavailableError(
-        gitFailure('source is not a Git worktree', repoResult),
-      )
-    const repositoryRoot = String(repoResult.stdout).trim()
-    if (!repositoryRoot)
-      throw new SubagentWorkspaceUnavailableError(
-        'Git did not return a repository root',
-      )
-    const addResult = await this.runGit(runtime, [
-      '-C',
-      repositoryRoot,
-      'worktree',
-      'add',
-      '--detach',
-      target,
-      'HEAD',
-    ])
-    if (!processSucceeded(addResult))
-      throw new SubagentWorkspaceUnavailableError(
-        gitFailure('Git worktree add failed', addResult),
-      )
     try {
-      await this.rememberLease(input.taskId, repositoryRoot)
+      const lease = await this.manager.acquireSubagent(input)
+      return { mode: 'worktree', ...lease }
     } catch (error) {
-      await this.removeWorktree(runtime, repositoryRoot, target).catch(
-        () => undefined,
-      )
-      throw new SubagentWorkspaceUnavailableError(
-        `lease persistence failed: ${safeError(error)}`,
-      )
-    }
-    let cleaned = false
-    let cleanupPromise: Promise<void> | null = null
-    return {
-      mode: 'worktree',
-      root: target,
-      cleanup: async () => {
-        if (cleaned) return
-        if (!cleanupPromise)
-          cleanupPromise = (async () => {
-            const removeResult = await this.removeWorktree(
-              runtime,
-              repositoryRoot,
-              target,
-            )
-            if (!processSucceeded(removeResult))
-              throw new SubagentWorkspaceUnavailableError(
-                gitFailure('Git worktree cleanup failed', removeResult),
-              )
-            await this.forgetLease(input.taskId)
-            cleaned = true
-          })()
-        try {
-          await cleanupPromise
-        } finally {
-          if (!cleaned) cleanupPromise = null
-        }
-      },
+      if (error instanceof SubagentWorkspaceUnavailableError) throw error
+      throw new SubagentWorkspaceUnavailableError(safeError(error))
     }
   }
 
   async reconcile(): Promise<void> {
-    await this.serializeManifest(async () => {
-      const document = await this.readLeaseDocument()
-      let changed = false
-      for (const [taskId, lease] of Object.entries(document.leases)) {
-        if (!/^[A-Za-z0-9_-]+$/.test(taskId) || !lease.repositoryRoot) {
-          delete document.leases[taskId]
-          changed = true
-          continue
-        }
-        const target = resolve(this.worktreeRoot, taskId)
-        try {
-          assertContainedWorktree(this.worktreeRoot, target)
-          const runtime = await this.resolveRuntime(lease.repositoryRoot)
-          if (!runtime?.executable) continue
-          const result = await this.removeWorktree(
-            runtime,
-            lease.repositoryRoot,
-            target,
-          )
-          if (processSucceeded(result) || !existsSync(target)) {
-            delete document.leases[taskId]
-            changed = true
-          }
-        } catch {
-          // Keep the durable lease for a later startup retry.
-        }
-      }
-      if (changed) await this.writeLeaseDocument(document)
-    })
+    await this.manager.reconcileSubagents()
   }
-
-  private async runGit(runtime: GitWorktreeRuntime, args: string[]) {
-    return await this.runner.run({
-      executable: runtime.executable,
-      args,
-      env: { ...runtime.env },
-      timeoutMs: 60_000,
-      maxOutputBytes: 64 * 1024,
-    })
-  }
-
-  private async removeWorktree(
-    runtime: GitWorktreeRuntime,
-    repositoryRoot: string,
-    target: string,
-  ) {
-    const result = await this.runGit(runtime, [
-      '-C',
-      repositoryRoot,
-      'worktree',
-      'remove',
-      '--force',
-      target,
-    ])
-    await this.runGit(runtime, [
-      '-C',
-      repositoryRoot,
-      'worktree',
-      'prune',
-    ]).catch(() => undefined)
-    return result
-  }
-
-  private async rememberLease(
-    taskId: string,
-    repositoryRoot: string,
-  ): Promise<void> {
-    await this.serializeManifest(async () => {
-      const document = await this.readLeaseDocument()
-      document.leases[taskId] = { repositoryRoot }
-      await this.writeLeaseDocument(document)
-    })
-  }
-
-  private async forgetLease(taskId: string): Promise<void> {
-    await this.serializeManifest(async () => {
-      const document = await this.readLeaseDocument()
-      if (!(taskId in document.leases)) return
-      delete document.leases[taskId]
-      await this.writeLeaseDocument(document)
-    })
-  }
-
-  private async readLeaseDocument(): Promise<GitWorktreeLeaseDocument> {
-    return await readJson(this.manifestPath, emptyLeaseDocument(), {
-      validate: validateLeaseDocument,
-    })
-  }
-
-  private async writeLeaseDocument(
-    document: GitWorktreeLeaseDocument,
-  ): Promise<void> {
-    await writeJsonAtomic(this.manifestPath, document, { mode: 0o600 })
-  }
-
-  private serializeManifest<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.manifestQueue.then(operation, operation)
-    this.manifestQueue = result.then(
-      () => undefined,
-      () => undefined,
-    )
-    return result
-  }
-}
-
-interface GitWorktreeLeaseDocument {
-  version: 1
-  leases: Record<string, { repositoryRoot: string }>
 }
 
 function terminalEvent(record: TaskRecord): Record<string, unknown> {
@@ -796,60 +652,4 @@ function safeError(error: unknown): string {
   return error instanceof Error
     ? error.message.slice(0, 500)
     : String(error).slice(0, 500)
-}
-
-function emptyLeaseDocument(): GitWorktreeLeaseDocument {
-  return { version: 1, leases: {} }
-}
-
-function validateLeaseDocument(value: unknown): GitWorktreeLeaseDocument {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('invalid Git worktree lease document')
-  const record = value as Record<string, unknown>
-  if (record.version !== 1)
-    throw new Error('unsupported Git worktree lease document')
-  const rawLeases = record.leases
-  if (!rawLeases || typeof rawLeases !== 'object' || Array.isArray(rawLeases))
-    throw new Error('invalid Git worktree leases')
-  const leases: GitWorktreeLeaseDocument['leases'] = {}
-  for (const [taskId, rawLease] of Object.entries(rawLeases)) {
-    if (
-      !/^[A-Za-z0-9_-]+$/.test(taskId) ||
-      !rawLease ||
-      typeof rawLease !== 'object' ||
-      Array.isArray(rawLease)
-    )
-      continue
-    const repositoryRoot = String(
-      (rawLease as Record<string, unknown>).repositoryRoot ?? '',
-    ).trim()
-    if (!repositoryRoot || repositoryRoot.length > 4_096) continue
-    leases[taskId] = { repositoryRoot }
-  }
-  return { version: 1, leases }
-}
-
-function processSucceeded(result: {
-  status: string
-  exitCode: number | null
-}): boolean {
-  return result.status === 'completed' && result.exitCode === 0
-}
-
-function gitFailure(
-  prefix: string,
-  result: { status: string; exitCode: number | null; stderr: string },
-): string {
-  const detail = String(result.stderr ?? '')
-    .trim()
-    .slice(0, 300)
-  return `${prefix} (${result.status}/${String(result.exitCode)})${detail ? `: ${detail}` : ''}`
-}
-
-function assertContainedWorktree(root: string, target: string): void {
-  const rel = relative(root, target)
-  if (!rel || rel === '..' || rel.startsWith(`..${sep}`))
-    throw new SubagentWorkspaceUnavailableError(
-      'workspace target escapes the private worktree root',
-    )
 }

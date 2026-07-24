@@ -124,7 +124,8 @@ function contextKind(section: ContextSection): ContextPlanItemKind {
   if (section.name === 'persona') return 'persona'
   if (section.name === 'active_skills' || section.name === 'skills_summary')
     return 'skills'
-  if (section.name === 'identity') return 'tool_instructions'
+  if (section.name === 'identity' || section.name === 'tool_guidance')
+    return 'tool_instructions'
   return section.name
 }
 

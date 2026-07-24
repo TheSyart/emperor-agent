@@ -58,6 +58,13 @@ export const defaultSidebarState: SidebarState = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  right_workspace: {
+    version: 3,
+    workbenchOpen: false,
+    width: 840,
+    filesTreeWidth: 280,
+    pane: 'launcher',
+  },
 }
 
 export function normalizeSidebarState(
@@ -73,6 +80,81 @@ export function normalizeSidebarState(
       value?.project_session_order,
     ),
     collapsed_project_ids: arrayOfStrings(value?.collapsed_project_ids),
+    right_workspace: normalizeRightWorkspace(value?.right_workspace),
+  }
+}
+
+function normalizeRightWorkspace(
+  value:
+    | (Partial<SidebarState['right_workspace']> & {
+        open?: boolean
+        pane?: SidebarState['right_workspace']['pane'] | 'environment'
+      })
+    | undefined,
+): SidebarState['right_workspace'] {
+  if (value?.version === 3) {
+    const width = Number(value.width)
+    const filesTreeWidth = Number(value.filesTreeWidth)
+    return {
+      version: 3,
+      workbenchOpen: value.workbenchOpen === true,
+      width: Number.isFinite(width)
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+      filesTreeWidth: Number.isFinite(filesTreeWidth)
+        ? Math.max(240, Math.min(320, Math.round(filesTreeWidth)))
+        : 280,
+      pane:
+        value.pane === 'review' ||
+        value.pane === 'terminal' ||
+        value.pane === 'files'
+          ? value.pane
+          : 'launcher',
+    }
+  }
+  if (Number(value?.version) === 2) {
+    const legacyV2 = value as unknown as {
+      width?: number
+      filesTreeWidth?: number
+      pane?: string
+      workbenchOpen?: boolean
+    }
+    const width = Number(legacyV2.width)
+    const filesTreeWidth = Number(legacyV2.filesTreeWidth)
+    const pane = legacyV2.pane
+    return {
+      version: 3,
+      workbenchOpen: legacyV2.workbenchOpen === true,
+      width: Number.isFinite(width)
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+      filesTreeWidth: Number.isFinite(filesTreeWidth)
+        ? Math.max(240, Math.min(320, Math.round(filesTreeWidth)))
+        : 280,
+      pane:
+        pane === 'review' || pane === 'terminal' || pane === 'files'
+          ? pane
+          : 'launcher',
+    }
+  }
+  const legacy = value as
+    { open?: boolean; width?: number; pane?: string } | undefined
+  const width = Number(legacy?.width)
+  const pane = legacy?.pane
+  const open = legacy?.open === undefined ? true : legacy.open === true
+  const selected =
+    pane === 'review' || pane === 'terminal' || pane === 'files'
+      ? pane
+      : 'launcher'
+  return {
+    version: 3,
+    workbenchOpen: open && selected !== 'launcher',
+    width:
+      Number.isFinite(width) && width >= 520
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+    filesTreeWidth: 280,
+    pane: selected,
   }
 }
 

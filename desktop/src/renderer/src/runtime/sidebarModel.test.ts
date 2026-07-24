@@ -23,6 +23,13 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
     chat_order: [],
     project_session_order: {},
     collapsed_project_ids: [],
+    right_workspace: {
+      version: 3,
+      workbenchOpen: false,
+      width: 840,
+      filesTreeWidth: 280,
+      pane: 'launcher',
+    },
     ...overrides,
   }
 }

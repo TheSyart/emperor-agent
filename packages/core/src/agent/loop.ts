@@ -34,14 +34,13 @@ import {
   type CompactorLike,
 } from './runner'
 import { buildRoutedRunner } from './runner-factory'
-import { ModelTurnContinuationEvaluator } from './turn-continuation'
 import { isExplicitTodoContinuation } from './query-state'
-import { appendJsonl } from '../store/jsonl'
 import {
   PromptPrefetchCoordinator,
   type PromptPrefetchTask,
 } from '../prompts/prefetch'
 import { FileCheckpointService } from '../checkpoints/file-checkpoints'
+import { TurnChangeLedger } from '../changes/turn-change-ledger'
 import {
   SoftGitRewindService,
   type SoftGitRewindEvaluationGateReceipt,
@@ -64,6 +63,7 @@ import type { ControlStatePayload, Interaction } from '../control/models'
 import { TurnPaused } from '../control/exceptions'
 import {
   AskUserTool,
+  CompletePlanStepTool,
   ProposePlanTool,
   RequestPlanModeTool,
 } from '../control/tools'
@@ -119,6 +119,7 @@ import {
 import { WorkspacePolicy } from '../permissions/workspace-policy'
 import { ProjectStore } from '../projects/store'
 import { ActiveTaskRegistry, TurnBusyError } from '../runtime/active'
+import { WorkspaceMutationCoordinator } from '../workspace/mutation-coordinator'
 import { GoalCoordinator } from '../goals/coordinator'
 import { GoalContextBuilder } from '../goals/context'
 import {
@@ -347,6 +348,7 @@ export interface RunUserTurnOptions {
   sessionId?: string | null
   restoreActiveSessionAfterTurn?: boolean | null
   turnId?: string | null
+  executionId?: string | null
   emit?: StreamEmitter | null
   displayContent?: string | null
   clientMessageId?: string | null
@@ -406,9 +408,8 @@ export class PromptQueueFullError extends Error {
 }
 
 const SESSION_TODO_CONTROL_METHODS = new Set<PropertyKey>([
-  'syncPlanFromTodos',
   'normalizePlanTodoUpdate',
-  'restoreCurrentPlanTodoProjection',
+  'migrateLegacyPlanTodoMirrors',
   'pausePlanExecution',
   'resumePlanExecution',
 ])
@@ -466,6 +467,7 @@ export class AgentLoop {
   readonly schedulerStore: SchedulerStore
   readonly schedulerService: SchedulerService
   readonly activeTasks = new ActiveTaskRegistry()
+  readonly workspaceMutations = new WorkspaceMutationCoordinator()
   readonly sessionRuntimes: SessionRuntimeManager<AgentSessionBindings>
   readonly lifecycleSupervisor: LifecycleSupervisor
   readonly skillsLoader: FileSkillsLoader
@@ -476,6 +478,7 @@ export class AgentLoop {
   readonly mcpClient: MCPClient
   readonly promptPrefetch = new PromptPrefetchCoordinator()
   readonly fileCheckpoints: FileCheckpointService
+  readonly turnChanges: TurnChangeLedger
   readonly softGitRewind: SoftGitRewindService
   readonly goalStore: GoalStore
   readonly goalPlanBridge: GoalPlanBridge
@@ -514,6 +517,10 @@ export class AgentLoop {
   private readonly todosBySession = new Map<
     string,
     Array<Record<string, unknown>>
+  >()
+  private readonly activeExecutionBySession = new Map<
+    string,
+    { executionId: string; rootTurnId: string; activeTurnId: string }
   >()
   private readonly teamManagersByProject = new Map<string, TeamManager>()
   private readonly sessionStartHooksRun = new Set<string>()
@@ -670,6 +677,7 @@ export class AgentLoop {
       gitCapture:
         this.softGitRewind.requestedMode === 'off' ? null : this.softGitRewind,
     })
+    this.turnChanges = new TurnChangeLedger({ stateRoot: this.paths.stateRoot })
     this.hookService = new HookService({
       stateRoot: this.paths.stateRoot,
       modelRouter: {
@@ -818,7 +826,6 @@ export class AgentLoop {
       goalStore: this.goalStore,
       planStore: this.controlManager.planStore,
       taskManager: this.taskManager,
-      todoStore: this.todoStore,
       resolveStepWaiver: (context, snapshot) =>
         this.controlManager.resolvePlanStepWaiverFact(
           snapshot.goal,
@@ -909,6 +916,7 @@ export class AgentLoop {
             : null,
         goalObservationRecorder: this.goalRecordingService,
         fileCheckpoints: this.fileCheckpoints,
+        workspaceMutations: this.workspaceMutations,
       }),
     })
     this.goalCompletionGate = createAuthorizedGoalCompletionGate({
@@ -1044,6 +1052,10 @@ export class AgentLoop {
     this.controlManager.setTaskManager(this.taskManager)
     this.controlManager.setAskMetaProvider(() => {
       const state = this.profileOnboarding.payload()
+      const controlScope = this.controlManager.runtimeScopeSnapshot()
+      const execution = controlScope?.sessionId
+        ? this.activeExecutionBySession.get(controlScope.sessionId)
+        : null
       const profileMeta =
         state.status !== 'in_progress' ||
         state.sessionId !== this.activeSessionId
@@ -1055,6 +1067,13 @@ export class AgentLoop {
       const goalHandle = this.goalCoordinator.listActive()[0]
       return {
         ...profileMeta,
+        ...(execution
+          ? {
+              execution_id: execution.executionId,
+              execution_root_turn_id: execution.rootTurnId,
+              control_turn_id: execution.activeTurnId,
+            }
+          : {}),
         ...(goalHandle
           ? {
               goal_id: goalHandle.goalId,
@@ -1148,7 +1167,7 @@ export class AgentLoop {
     )
     await loop.goalCompletionGate.recoverPostCommitCleanup()
     await loop.goalPlanBridge.recoverQuarantinedApprovals()
-    const recoveredSkips = await loop.goalPlanBridge.recoverIncompleteSkips()
+    await loop.goalPlanBridge.recoverIncompleteSkips()
     await loop.goalPlanBridge.recoverIncompleteReplans()
     // Finish already-persisted Goal/Plan transactions before the generic
     // restart policy pauses orphaned execution. Pausing first would make the
@@ -1165,13 +1184,6 @@ export class AgentLoop {
           : 'session_missing',
       }),
     }).recoverOnStartup()
-    for (const projection of recoveredSkips.todoProjections) {
-      if (!loop.sessionStore.get(projection.sessionId)) continue
-      loop.todosBySession.set(
-        projection.sessionId,
-        cloneTodoItems(projection.todos),
-      )
-    }
     const session = loop.ensureActiveSession()
     loop.activateSession(session.id)
     await loop.lifecycleSupervisor.start()
@@ -1768,6 +1780,7 @@ export class AgentLoop {
     if (!session) throw new Error(`unknown session: ${sessionId}`)
     const conversationStore = new ConversationStore(
       this.sessionStore.sessionDir(session.id),
+      { sessionId: session.id },
     )
     const memoryStore = this.memoryStoreForSession(session, conversationStore)
     const runtimeStore = new RuntimeEventStore(conversationStore.sessionDir, {
@@ -1784,7 +1797,7 @@ export class AgentLoop {
     this.controlManagerForSession(
       session,
       todoStore,
-    ).restoreCurrentPlanTodoProjection()
+    ).migrateLegacyPlanTodoMirrors()
     const skillsLoader = new FileSkillsLoader(
       this.root,
       this.paths.stateRoot,
@@ -1968,6 +1981,14 @@ export class AgentLoop {
           )
           restorePreviousSession()
           return ''
+        }
+        if (!String(opts.executionId ?? '').trim()) {
+          this.controlManager.setRuntimeScope(
+            this.controlRuntimeScopeForSession(activeSession),
+          )
+          const pausedExecutionId = this.controlManager.pausedPlanExecutionId()
+          if (pausedExecutionId)
+            opts = { ...opts, executionId: pausedExecutionId }
         }
       }
     } catch (error) {
@@ -2218,6 +2239,32 @@ export class AgentLoop {
       )
     this.scheduleQueuedPromptRecovery(id)
     return queued
+  }
+
+  async finalizeExecutionChanges(input: {
+    sessionId: string
+    executionId: string
+    activeTurnId: string
+  }): Promise<
+    import('../changes/turn-change-ledger').TurnChangeSnapshot | null
+  > {
+    const sessionId = String(input.sessionId ?? '').trim()
+    const executionId = String(input.executionId ?? '').trim()
+    const activeTurnId = String(input.activeTurnId ?? '').trim()
+    if (!sessionId || !executionId || !activeTurnId) return null
+    const bindings = this.sessionRuntimes.actor(sessionId).bindings
+    bindings.memoryStore.clearCheckpoint()
+    return await this.turnChanges.finalize({
+      sessionId,
+      executionId,
+      turnId: activeTurnId,
+    })
+  }
+
+  clearSessionCheckpoint(sessionId: string): void {
+    const id = String(sessionId ?? '').trim()
+    if (!id || !this.sessionStore.get(id)) return
+    this.sessionRuntimes.actor(id).bindings.memoryStore.clearCheckpoint()
   }
 
   async manageQueuedPrompt(input: {
@@ -2995,6 +3042,16 @@ export class AgentLoop {
   ): Promise<string> {
     const session = bindings.session
     const sessionId = session.id
+    const executionId = String(opts.executionId ?? '').trim() || turnId
+    const rootTurnId =
+      String(opts.memoryExtra?.execution_root_turn_id ?? '').trim() ||
+      executionId
+    const executionContext = {
+      executionId,
+      rootTurnId,
+      activeTurnId: turnId,
+    }
+    this.activeExecutionBySession.set(sessionId, executionContext)
     const history = bindings.history
     const memoryStore = bindings.memoryStore
     const runner = bindings.runner
@@ -3083,6 +3140,7 @@ export class AgentLoop {
     runner.promptSections = contextProjection.sections
     runner.promptContextPlan = contextProjection.contextPlan
     runner.promptPrefetchReport = prefetched.report
+    runner.executionId = executionId
     const executionEnvironment = prefetched.values
       .execution_environment as ExecutionEnvironment
     const requestedSkillContext = requestedSkills.length
@@ -3187,6 +3245,8 @@ export class AgentLoop {
     const displayContent = opts.displayContent ?? content
     const userMessage: Msg = { role: 'user', content: modelContent }
     if (turnId) userMessage.turn_id = turnId
+    userMessage.execution_id = executionId
+    userMessage.execution_root_turn_id = rootTurnId
     if (opts.uiHidden) userMessage.ui_hidden = true
     if (attachmentPayloads.length) userMessage.attachments = attachmentPayloads
     if (displayContent !== updatedPrompt || attachmentPayloads.length)
@@ -3196,6 +3256,8 @@ export class AgentLoop {
       extra: {
         ...(opts.memoryExtra ?? {}),
         turn_id: turnId,
+        execution_id: executionId,
+        execution_root_turn_id: rootTurnId,
         ...(attachmentPayloads.length
           ? { attachments: attachmentPayloads }
           : {}),
@@ -3305,6 +3367,10 @@ export class AgentLoop {
         )
       }
       throw error
+    } finally {
+      if (this.activeExecutionBySession.get(sessionId) === executionContext)
+        this.activeExecutionBySession.delete(sessionId)
+      if (runner.executionId === executionId) runner.executionId = null
     }
     this.sessionStore.touch(sessionId, reply, { incrementMessages: true })
     return reply
@@ -3405,22 +3471,7 @@ export class AgentLoop {
       todoStore,
       controlManager,
       maxContext: route.snapshot.contextWindowTokens,
-      maxTurns: 20,
-      continuationEvaluator: new ModelTurnContinuationEvaluator(
-        this.modelRouter as never,
-        {
-          tokenTracker: this.tokenTracker,
-          diagnosticSink: async (diagnostic) =>
-            await appendJsonl(
-              join(
-                this.paths.stateRoot,
-                'control',
-                'turn-continuation-diagnostics.jsonl',
-              ),
-              diagnostic,
-            ),
-        },
-      ),
+      maxTurns: null,
       workspaceRoot: this.workspaceRootForSession(session),
       promptSections: projection.sections,
       promptContextPlan: projection.contextPlan,
@@ -3430,6 +3481,8 @@ export class AgentLoop {
       sessionId: session?.id ?? null,
       goalObservationRecorder: this.goalRecordingService,
       fileCheckpoints: this.fileCheckpoints,
+      turnChangeLedger: this.turnChanges,
+      workspaceMutations: this.workspaceMutations,
       goalToolHost: this.goalToolHost,
       goalContextProvider: goalContext
         ? async (history) => {
@@ -3531,6 +3584,14 @@ export class AgentLoop {
         ]),
       },
     }
+  }
+
+  async resolveWorkspaceGitRuntime(projectRoot: string): Promise<{
+    executable: string
+    gitVersion: string
+    env: Record<string, string>
+  } | null> {
+    return await this.resolveSoftGitRuntime(projectRoot)
   }
 
   private isTrustedTaskTranscriptRef(ref: string): boolean {
@@ -3706,6 +3767,11 @@ export class AgentLoop {
       ),
     )
     this.registry.register(
+      new CompletePlanStepTool((sessionId) =>
+        this.controlManagerForSessionId(sessionId),
+      ),
+    )
+    this.registry.register(
       new RequestPlanModeTool((sessionId) =>
         this.controlManagerForSessionId(sessionId),
       ),
@@ -3755,6 +3821,7 @@ export class AgentLoop {
               : null,
           goalObservationRecorder: this.goalRecordingService,
           fileCheckpoints: this.fileCheckpoints,
+          workspaceMutations: this.workspaceMutations,
           maxTokensCap: this.subagentSupervisor.tokenBudget,
           tokenBudget: this.subagentSupervisor.tokenBudget,
         }),
@@ -4387,6 +4454,7 @@ export class AgentLoop {
             : this.workspaceRootForActiveSession(),
           sessionId: this.activeSessionId,
           fileCheckpoints: this.fileCheckpoints,
+          workspaceMutations: this.workspaceMutations,
           hooks: this.scopedAgentRunnerHooks(
             agentId,
             'TeammateIdle',

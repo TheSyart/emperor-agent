@@ -1112,6 +1112,14 @@ describe('Goal evidence trust chain', () => {
     manager.setTodoStore(new TodoStore())
     const approvePlan = (title: string, command: string): string => {
       manager.setMode('plan')
+      const draft = manager.recordPlanDiscovery({
+        source: 'read_file',
+        summary: 'Inspected the Goal verification implementation.',
+        files: ['packages/core/src/goals/evidence.ts'],
+        evidenceRefs: ['path:packages/core/src/goals/evidence.ts'],
+      })
+      const discoveryId = String(draft?.draft.discoveries.at(-1)?.id ?? '')
+      if (!discoveryId) throw new Error('test discovery was not recorded')
       new ProposePlanTool(manager).execute({
         title,
         summary: `${title} summary`,
@@ -1124,6 +1132,7 @@ describe('Goal evidence trust chain', () => {
             files: [],
             commands: [command],
             acceptance: ['command passes'],
+            discovery_refs: [discoveryId],
           },
         ],
         assumptions: [],

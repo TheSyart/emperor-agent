@@ -18,13 +18,6 @@ import {
   GOAL_PERMISSION_BLOCKER_DENIED_LABEL,
   GOAL_PERMISSION_BLOCKER_QUESTION_ID,
 } from '../control/goal-blocker'
-import { ExternalBridgeService } from '../external/service'
-import { ExternalAuditStore } from '../external/audit'
-import {
-  loadExternalConfig,
-  type LoadedExternalConfig,
-} from '../external/config'
-import { SignedWebhookAdapter } from '../external/signed-webhook'
 import {
   AgentLoop,
   type AgentLoopCreateOptions,
@@ -32,7 +25,6 @@ import {
 } from '../agent/loop'
 import type { RuntimePaths } from '../runtime/paths'
 import type { EventEnvelopeV2 } from '../runtime/envelope'
-import { LifecycleSupervisor } from '../runtime/lifecycle'
 import { RuntimeEventStore } from '../runtime/store'
 import {
   assertCoreMutationAllowed,
@@ -73,6 +65,31 @@ import {
 import type { CoreOperationKey } from './operations'
 import { missingSkillRequirementsFromStatus } from '../environment/probe'
 import type { SkillRequirements } from '../skills/manager'
+import { NodeEnvironmentProcessRunner } from '../environment/process-runner'
+import {
+  WorkspaceFilesService,
+  type WorkspaceFileListResult,
+  type WorkspaceFileReadResult,
+} from '../workspace/files'
+import { WorkspaceGitService, type GitStatusResult } from '../workspace/git'
+import { WorkspaceBindingStore } from '../workspace/git-worktrees'
+import { GitOperationReceiptStore } from '../workspace/git-receipts'
+import {
+  TerminalService,
+  type PtyHost,
+  type TerminalEvent,
+} from '../workspace/terminal'
+import { WorkspaceOperationError } from '../workspace/common'
+import { FileCheckpointService } from '../checkpoints/file-checkpoints'
+import {
+  projectWorkspaceGoal,
+  projectWorkspacePlan,
+  projectWorkspaceProcess,
+  projectWorkspaceSubagent,
+  projectWorkspaceTeam,
+  projectWorkspaceTerminal,
+  type WorkspaceSnapshot,
+} from '../workspace/snapshot'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Dict = Record<string, unknown>
@@ -81,6 +98,8 @@ export interface CoreApiCreateOptions extends AgentLoopCreateOptions {
   loop?: AgentLoop | null
   appVersion?: string
   runtimeRevision?: string
+  terminalHost?: PtyHost | null
+  terminalEventSink?: ((event: TerminalEvent) => void) | null
 }
 
 export interface RouteOperation {
@@ -181,7 +200,40 @@ const CORE_API_ROUTE_OPERATION_LIST = [
   op('team.sendMessage', 'POST', '/api/team/messages'),
   op('team.wakeMember', 'POST', '/api/team/members/{name}/wake'),
   op('team.shutdownMember', 'POST', '/api/team/members/{name}/shutdown'),
-  op('external.get', 'GET', '/api/external'),
+  op('workspace.snapshot', 'IPC', 'workspace.snapshot'),
+  op('git.status', 'IPC', 'git.status'),
+  op('git.repository', 'IPC', 'git.repository'),
+  op('git.log', 'IPC', 'git.log'),
+  op('git.worktrees', 'IPC', 'git.worktrees'),
+  op('git.enterWorktree', 'IPC', 'git.enterWorktree'),
+  op('git.exitWorktree', 'IPC', 'git.exitWorktree'),
+  op('git.pullRequest', 'IPC', 'git.pullRequest'),
+  op('git.publishPreview', 'IPC', 'git.publishPreview'),
+  op('git.publishPullRequest', 'IPC', 'git.publishPullRequest'),
+  op('git.readyPullRequest', 'IPC', 'git.readyPullRequest'),
+  op('git.mergePullRequest', 'IPC', 'git.mergePullRequest'),
+  op('git.closePullRequest', 'IPC', 'git.closePullRequest'),
+  op('git.diff', 'IPC', 'git.diff'),
+  op('git.branches', 'IPC', 'git.branches'),
+  op('git.compare', 'IPC', 'git.compare'),
+  op('git.stage', 'IPC', 'git.stage'),
+  op('git.unstage', 'IPC', 'git.unstage'),
+  op('git.discard', 'IPC', 'git.discard'),
+  op('git.commit', 'IPC', 'git.commit'),
+  op('git.fetch', 'IPC', 'git.fetch'),
+  op('git.pull', 'IPC', 'git.pull'),
+  op('git.push', 'IPC', 'git.push'),
+  op('git.createBranch', 'IPC', 'git.createBranch'),
+  op('git.switchBranch', 'IPC', 'git.switchBranch'),
+  op('files.list', 'IPC', 'files.list'),
+  op('files.search', 'IPC', 'files.search'),
+  op('files.read', 'IPC', 'files.read'),
+  op('terminals.list', 'IPC', 'terminals.list'),
+  op('terminals.create', 'IPC', 'terminals.create'),
+  op('terminals.read', 'IPC', 'terminals.read'),
+  op('terminals.write', 'IPC', 'terminals.write'),
+  op('terminals.resize', 'IPC', 'terminals.resize'),
+  op('terminals.close', 'IPC', 'terminals.close'),
   op('fileCheckpoints.list', 'IPC', 'fileCheckpoints.list'),
   op('fileCheckpoints.preview', 'IPC', 'fileCheckpoints.preview'),
   op('fileCheckpoints.rewind', 'IPC', 'fileCheckpoints.rewind'),
@@ -262,8 +314,6 @@ export class CoreApi {
   readonly loop: AgentLoop
   readonly attachmentStore: AttachmentStore
   readonly watchlist: WatchlistService
-  readonly externalBridge: ExternalBridgeService
-  readonly externalLifecycle: LifecycleSupervisor
   readonly mainline: MainlineTurnService
   readonly chatService: ChatService
   readonly configService: CoreConfigService
@@ -278,12 +328,19 @@ export class CoreApi {
   readonly skillService: CoreSkillService
   readonly teamService: CoreTeamService
   readonly goalService: GoalService
+  readonly workspaceFilesService: WorkspaceFilesService
+  readonly workspaceGitService: WorkspaceGitService
+  readonly workspaceBindings: WorkspaceBindingStore
+  readonly gitReceipts: GitOperationReceiptStore
+  readonly terminalService: TerminalService
 
   private constructor(
     root: string,
     loop: AgentLoop,
-    externalConfig: LoadedExternalConfig,
-    opts: Pick<CoreApiCreateOptions, 'appVersion' | 'runtimeRevision'> = {},
+    opts: Pick<
+      CoreApiCreateOptions,
+      'appVersion' | 'runtimeRevision' | 'terminalHost' | 'terminalEventSink'
+    > = {},
   ) {
     this.root = resolve(root)
     this.loop = loop
@@ -403,6 +460,115 @@ export class CoreApi {
         this.requireReadableSession(sessionId, operation) as never,
       assertMutation: (area, action) => this.assertMutation(area, action),
     })
+    this.workspaceBindings = new WorkspaceBindingStore(this.paths.stateRoot)
+    this.gitReceipts = new GitOperationReceiptStore(this.paths.stateRoot)
+    const resolveWorkspaceProject = (sessionId: string) => {
+      const session = this.requireReadableSession(sessionId, 'workspace') as {
+        id: string
+        mode?: string | null
+        project_path?: string | null
+        project_name?: string | null
+        title?: string | null
+      }
+      if (session.mode !== 'build' || !session.project_path)
+        throw new WorkspaceOperationError(
+          'workspace_project_required',
+          '当前会话没有绑定 Build 项目。',
+        )
+      return {
+        sessionId: session.id,
+        projectRoot: this.workspaceBindings.resolve(
+          session.id,
+          resolve(session.project_path),
+        ),
+        projectName:
+          String(session.project_name ?? session.title ?? '').trim() ||
+          session.project_path.split(/[\\/]/).pop() ||
+          '项目',
+      }
+    }
+    const gitProcessRunner = new NodeEnvironmentProcessRunner()
+    const workspaceFileCheckpoints = this.loop.fileCheckpoints.enabled
+      ? this.loop.fileCheckpoints
+      : new FileCheckpointService({
+          stateRoot: this.paths.stateRoot,
+          enabled: true,
+          gitCapture:
+            this.loop.softGitRewind.requestedMode === 'off'
+              ? null
+              : this.loop.softGitRewind,
+        })
+    this.workspaceGitService = new WorkspaceGitService({
+      resolveProject: resolveWorkspaceProject,
+      resolveRuntime: async (projectRoot) => {
+        const runtime = await this.loop.resolveWorkspaceGitRuntime(projectRoot)
+        if (!runtime)
+          throw new WorkspaceOperationError(
+            'git_unavailable',
+            '当前签名执行环境中没有可用 Git。',
+          )
+        return runtime
+      },
+      run: async (request) => {
+        const result = await gitProcessRunner.run({
+          ...request,
+          timeoutMs: 120_000,
+          maxOutputBytes: 4 * 1024 * 1024,
+          outputPolicy: 'truncate_tail',
+          outputQuotaScope: 'per_stream',
+        })
+        return {
+          exitCode: result.exitCode ?? (result.status === 'completed' ? 0 : 1),
+          stdout: result.stdout,
+          stderr: result.stderr || result.error || '',
+          stdoutTruncated: result.stdoutTruncated === true,
+          stderrTruncated: result.stderrTruncated === true,
+        }
+      },
+      checkpoint: async ({ sessionId, projectRoot, paths, effect }) =>
+        (
+          await workspaceFileCheckpoints.capture(
+            {
+              sessionId,
+              turnId: `workspace-git-${Date.now()}`,
+              toolCallId: `workspace-discard-${Date.now()}`,
+              toolName: 'git.discard',
+              workspaceRoot: projectRoot,
+              paths,
+            },
+            effect,
+          )
+        ).value,
+      hasActiveWriter: (sessionId) =>
+        this.loop.activeTasks.hasActiveForSession(sessionId) ||
+        this.loop.taskManager.store
+          .list()
+          .some(
+            (task) =>
+              task.session_id === sessionId && task.status === 'running',
+          ),
+      stateRoot: this.paths.stateRoot,
+      bindings: this.workspaceBindings,
+      receipts: this.gitReceipts,
+      emitReceipt: async (sessionId, receipt) => {
+        await this.emitRuntime(
+          { event: 'git_operation_completed', ...receipt },
+          { sessionId },
+        )
+      },
+    })
+    this.workspaceFilesService = new WorkspaceFilesService({
+      resolveProject: resolveWorkspaceProject,
+      filterIgnored: async (sessionId, _projectRoot, paths) =>
+        await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
+    })
+    this.terminalService = new TerminalService({
+      host: opts.terminalHost ?? unavailablePtyHost(),
+      resolveProject: resolveWorkspaceProject,
+      shell: defaultSystemShell,
+      env: terminalEnvironment,
+      emit: opts.terminalEventSink ?? undefined,
+    })
     this.mainline = new MainlineTurnService(this.loop)
     this.chatService = new ChatService(this.mainline)
     this.goalService = new GoalService({
@@ -433,83 +599,6 @@ export class CoreApi {
     this.loop.setSchedulerAgentTurnSubmitter((payload) =>
       this.mainline.submitSchedulerTurn(payload),
     )
-    this.externalBridge = new ExternalBridgeService({
-      root: this.paths.stateRoot,
-      canAcceptTurn: () =>
-        !this.loop.activeTasks.hasActiveKind('goal') &&
-        !this.loop.activeTasks.hasActiveForSession(this.loop.activeSessionId) &&
-        !this.loop.controlManager.payload().pending,
-      targetSessionId: () => this.loop.activeSessionId,
-      eventSink: async (event) => {
-        await this.emitRuntime(event, {
-          sessionId: runtimeEventSessionId(event) || this.loop.activeSessionId,
-        })
-      },
-      submitTurn: async (payload, context) => {
-        const turnId = String(
-          payload.client_message_id ?? payload.clientMessageId ?? '',
-        )
-        const result = await this.mainline.submit({
-          content: String(payload.content ?? ''),
-          turnId: turnId || null,
-          displayContent: String(
-            payload.display_content ??
-              payload.displayContent ??
-              payload.content ??
-              '',
-          ),
-          source: 'external',
-          sessionId:
-            String(payload.session_id ?? payload.sessionId ?? '').trim() ||
-            null,
-          memoryExtra: isRecord(payload.memory_extra)
-            ? payload.memory_extra
-            : isRecord(payload.memoryExtra)
-              ? payload.memoryExtra
-              : null,
-          signal: context?.signal ?? null,
-        })
-        return { turnId: result.turnId, content: result.content }
-      },
-    })
-    const signedWebhookConfig = externalConfig.config.signedWebhook
-    const externalAudit = new ExternalAuditStore(this.paths.stateRoot)
-    this.externalBridge.registerAdapter(
-      new SignedWebhookAdapter({
-        config: signedWebhookConfig,
-        secret: signedWebhookConfig.secretEnv
-          ? (process.env[signedWebhookConfig.secretEnv] ?? '')
-          : '',
-        auditStore: externalAudit,
-        configDiagnostics: {
-          path: externalConfig.diagnostics.path,
-          status: externalConfig.diagnostics.status,
-        },
-        preflight: () => {
-          if (signedWebhookConfig.mode === 'off') return null
-          const session = this.loop.sessionStore.get(
-            signedWebhookConfig.sessionId,
-          )
-          return session && !session.archived_at ? null : 'session_unavailable'
-        },
-        ingest: async (message, context) =>
-          await this.externalBridge.ingest(message, context),
-      }),
-    )
-    this.externalLifecycle = new LifecycleSupervisor(
-      [
-        {
-          id: 'external-bridge',
-          required: false,
-          dependsOn: [],
-          reconcile: () => undefined,
-          start: async () => await this.externalBridge.start(),
-          ready: () => undefined,
-          stop: async () => await this.externalBridge.stop(),
-        },
-      ],
-      { startTimeoutMs: 30_000, stopTimeoutMs: 5_000 },
-    )
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
       legacyStateMigration: this.loop.legacyStateMigration,
@@ -535,7 +624,6 @@ export class CoreApi {
       hybridMemory: () => this.loop.hybridMemory.diagnostics(),
       codeIntelligence: () => this.loop.codeIntelligence.diagnostics(),
       mcp: () => this.loop.mcpClient.snapshot(),
-      externalPayload: () => this.externalPayload(),
       activeTasks: () => this.loop.activeTasks.list(),
       sessionRuntimes: () => this.loop.sessionRuntimes.snapshot(),
       desktopPetPayload: () => this.desktopPet.get(),
@@ -548,10 +636,8 @@ export class CoreApi {
     const loop = opts.loop ?? (await AgentLoop.create(opts))
     let api: CoreApi | null = null
     try {
-      const externalConfig = await loadExternalConfig(loop.paths.stateRoot)
-      api = new CoreApi(root, loop, externalConfig, opts)
+      api = new CoreApi(root, loop, opts)
       await api.environmentService.initialize()
-      await api.externalLifecycle.start()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -561,7 +647,7 @@ export class CoreApi {
   }
 
   async close(): Promise<void> {
-    await this.externalLifecycle.stop('shutdown')
+    this.terminalService.closeAll()
     await this.loop.close()
   }
 
@@ -1053,8 +1139,17 @@ export class CoreApi {
     cancelInteraction: async (id: string): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
       const result = this.loop.controlManager.cancel(id)
-      const event = { ...result, control: this.loop.controlManager.payload() }
+      const event: Dict = {
+        ...result,
+        control: this.loop.controlManager.payload(),
+      }
       await this.emitRuntime(event, { sessionId: ownerSessionId })
+      if (
+        ownerSessionId &&
+        event.event === 'plan_execution_settled' &&
+        event.disposition === 'pause'
+      )
+        this.loop.clearSessionCheckpoint(ownerSessionId)
       await this.loop.deferProfileInterview(id)
       return event
     },
@@ -1258,6 +1353,7 @@ export class CoreApi {
       await this.loop.endSession(sessionId, 'deleted')
       if (!this.loop.sessionStore.delete(sessionId))
         throw new Error('cannot delete session')
+      this.terminalService.closeSession(sessionId)
       await this.goalService.cancelAndSettleBySession(
         sessionId,
         'session_deleted',
@@ -1273,13 +1369,6 @@ export class CoreApi {
       this.loop.activateSession(sessionId)
       return { active: sessionId, complete: true }
     },
-  }
-
-  private externalPayload(): Dict {
-    return {
-      ...this.externalBridge.payload(),
-      lifecycle: this.externalLifecycle.snapshot(),
-    }
   }
 
   readonly team = {
@@ -1298,10 +1387,6 @@ export class CoreApi {
       opts: { purpose?: string; recovery?: 'auto' | 'retry' } = {},
     ) => this.teamService.wakeMember(name, opts),
     shutdownMember: (name: string) => this.teamService.shutdownMember(name),
-  }
-
-  readonly external = {
-    get: (): Dict => this.externalPayload(),
   }
 
   readonly processes = {
@@ -1424,6 +1509,231 @@ export class CoreApi {
         task: launched.task.toDict(),
         mode: launched.mode,
       }
+    },
+  }
+
+  readonly workspace = {
+    snapshot: async (input: {
+      sessionId: string
+    }): Promise<WorkspaceSnapshot> => {
+      const session = this.requireReadableSession(
+        input.sessionId,
+        'workspace.snapshot',
+      ) as {
+        id: string
+        mode?: string | null
+        project_id?: string | null
+        project_path?: string | null
+        project_name?: string | null
+        title?: string | null
+      }
+      if (session.mode !== 'build' || !session.project_path)
+        throw new WorkspaceOperationError(
+          'workspace_project_required',
+          '当前会话没有绑定 Build 项目。',
+        )
+      let git: GitStatusResult | { repository: false; error: string }
+      let worktrees: WorkspaceSnapshot['worktrees'] = {
+        worktrees: [],
+        owned: [],
+      }
+      try {
+        git = await this.workspaceGitService.status(input)
+        worktrees = await this.workspaceGitService.worktrees(input)
+      } catch (error) {
+        git = {
+          repository: false,
+          error:
+            error instanceof WorkspaceOperationError
+              ? error.message
+              : '无法读取 Git 状态。',
+        }
+      }
+      const plans = this.loop.controlManager.planStore
+        .list()
+        .filter((plan) => plan.sessionId === input.sessionId)
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+      const currentPlan = plans.find(
+        (plan) => !['completed', 'failed', 'cancelled'].includes(plan.status),
+      )
+      const goals = await this.goalService.list({ sessionId: input.sessionId })
+      const tasks = this.loop.taskManager.store
+        .list()
+        .filter((task) => task.session_id === input.sessionId)
+      const subagents = tasks
+        .filter((task) => task.kind === 'subagent')
+        .sort((left, right) => {
+          const leftActive = ['pending', 'running'].includes(left.status)
+          const rightActive = ['pending', 'running'].includes(right.status)
+          if (leftActive !== rightActive) return leftActive ? -1 : 1
+          return right.started_at - left.started_at
+        })
+        .slice(0, 12)
+        .map(projectWorkspaceSubagent)
+      const team = projectWorkspaceTeam(
+        this.loop.teamManagerForSession(session as never)?.payload() ?? null,
+      )
+      const currentGoal =
+        goals.find(
+          (goal) => !['completed', 'cancelled', 'failed'].includes(goal.status),
+        ) ?? null
+      return {
+        version: 1,
+        sessionId: input.sessionId,
+        project: {
+          id: session.project_id ?? null,
+          name:
+            String(session.project_name ?? session.title ?? '').trim() ||
+            session.project_path.split(/[\\/]/).pop() ||
+            '项目',
+          path: this.workspaceBindings.resolve(
+            session.id,
+            resolve(session.project_path),
+          ),
+        },
+        git,
+        worktrees,
+        gitReceipts: this.gitReceipts.list(input.sessionId).slice(-8),
+        plan: projectWorkspacePlan(currentPlan ?? null),
+        goal: projectWorkspaceGoal(currentGoal),
+        subagents,
+        team,
+        processes: this.loop.processRuntime
+          .list({ sessionId: input.sessionId, activeOnly: true })
+          .map(projectWorkspaceProcess),
+        terminals: this.terminalService
+          .list(input)
+          .map(projectWorkspaceTerminal),
+        capturedAt: Date.now(),
+      }
+    },
+  }
+
+  readonly git = {
+    status: (input: Parameters<WorkspaceGitService['status']>[0]) =>
+      this.workspaceGitService.status(input),
+    repository: (input: Parameters<WorkspaceGitService['repository']>[0]) =>
+      this.workspaceGitService.repository(input),
+    log: (input: Parameters<WorkspaceGitService['log']>[0]) =>
+      this.workspaceGitService.log(input),
+    worktrees: (input: Parameters<WorkspaceGitService['worktrees']>[0]) =>
+      this.workspaceGitService.worktrees(input),
+    enterWorktree: (
+      input: Parameters<WorkspaceGitService['enterWorktree']>[0],
+    ) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.enterWorktree(input),
+      ),
+    exitWorktree: (input: Parameters<WorkspaceGitService['exitWorktree']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.exitWorktree(input),
+      ),
+    pullRequest: (input: Parameters<WorkspaceGitService['pullRequest']>[0]) =>
+      this.workspaceGitService.pullRequest(input),
+    publishPreview: (
+      input: Parameters<WorkspaceGitService['publishPreview']>[0],
+    ) => this.workspaceGitService.publishPreview(input),
+    publishPullRequest: (
+      input: Parameters<WorkspaceGitService['publishPullRequest']>[0],
+    ) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.publishPullRequest(input),
+      ),
+    readyPullRequest: (
+      input: Parameters<WorkspaceGitService['readyPullRequest']>[0],
+    ) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.readyPullRequest(input),
+      ),
+    mergePullRequest: (
+      input: Parameters<WorkspaceGitService['mergePullRequest']>[0],
+    ) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.mergePullRequest(input),
+      ),
+    closePullRequest: (
+      input: Parameters<WorkspaceGitService['closePullRequest']>[0],
+    ) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.closePullRequest(input),
+      ),
+    diff: (input: Parameters<WorkspaceGitService['diff']>[0]) =>
+      this.workspaceGitService.diff(input),
+    branches: (input: Parameters<WorkspaceGitService['branches']>[0]) =>
+      this.workspaceGitService.branches(input),
+    compare: (input: Parameters<WorkspaceGitService['compare']>[0]) =>
+      this.workspaceGitService.compare(input),
+    stage: (input: Parameters<WorkspaceGitService['stage']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.stage(input),
+      ),
+    unstage: (input: Parameters<WorkspaceGitService['unstage']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.unstage(input),
+      ),
+    discard: (input: Parameters<WorkspaceGitService['discard']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.discard(input),
+      ),
+    commit: (input: Parameters<WorkspaceGitService['commit']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.commit(input),
+      ),
+    fetch: (input: Parameters<WorkspaceGitService['fetch']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.fetch(input),
+      ),
+    pull: (input: Parameters<WorkspaceGitService['pull']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.pull(input),
+      ),
+    push: (input: Parameters<WorkspaceGitService['push']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.push(input),
+      ),
+    createBranch: (input: Parameters<WorkspaceGitService['createBranch']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.createBranch(input),
+      ),
+    switchBranch: (input: Parameters<WorkspaceGitService['switchBranch']>[0]) =>
+      this.withWorkspaceGitMutation(input.sessionId, () =>
+        this.workspaceGitService.switchBranch(input),
+      ),
+  }
+
+  readonly files = {
+    list: (
+      input: Parameters<WorkspaceFilesService['list']>[0],
+    ): Promise<WorkspaceFileListResult> =>
+      this.workspaceFilesService.list(input),
+    search: (
+      input: Parameters<WorkspaceFilesService['search']>[0],
+    ): Promise<WorkspaceFileListResult> =>
+      this.workspaceFilesService.search(input),
+    read: (
+      input: Parameters<WorkspaceFilesService['read']>[0],
+    ): Promise<WorkspaceFileReadResult> =>
+      this.workspaceFilesService.read(input),
+  }
+
+  readonly terminals = {
+    list: (input: Parameters<TerminalService['list']>[0]) =>
+      this.terminalService.list(input),
+    create: (input: Parameters<TerminalService['create']>[0]) =>
+      this.terminalService.create(input),
+    read: (input: Parameters<TerminalService['read']>[0]) =>
+      this.terminalService.read(input),
+    write: (input: Parameters<TerminalService['write']>[0]) => {
+      this.terminalService.write(input)
+      return { written: true }
+    },
+    resize: (input: Parameters<TerminalService['resize']>[0]) => {
+      this.terminalService.resize(input)
+      return { resized: true }
+    },
+    close: (input: Parameters<TerminalService['close']>[0]) => {
+      this.terminalService.close(input)
+      return { closed: true }
     },
   }
 
@@ -1566,6 +1876,26 @@ export class CoreApi {
     })
   }
 
+  private async withWorkspaceGitMutation<T>(
+    sessionId: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const session = this.requireReadableSession(sessionId, 'workspace.git') as {
+      mode?: string | null
+      project_path?: string | null
+    }
+    if (session.mode !== 'build' || !session.project_path)
+      throw new WorkspaceOperationError(
+        'workspace_project_required',
+        '当前会话没有绑定 Build 项目。',
+      )
+    return await this.loop.workspaceMutations.runExclusive(
+      this.workspaceBindings.resolve(sessionId, resolve(session.project_path)),
+      'renderer_git',
+      action,
+    )
+  }
+
   private assertProcessOwner(processId: string): void {
     const receipt = this.loop.processRuntime.get(processId)
     if (!receipt || receipt.owner.sessionId !== this.loop.activeSessionId)
@@ -1588,6 +1918,29 @@ export class CoreApi {
         emit: opts.emit ?? null,
         sessionId: ownerSessionId,
       })
+    if (
+      resume.executionDisposition === 'cancel' &&
+      ownerSessionId &&
+      resume.executionId
+    ) {
+      const interactionMeta = isRecord(resume.interaction.meta)
+        ? resume.interaction.meta
+        : {}
+      const activeTurnId =
+        String(
+          opts.turnId ?? interactionMeta.control_turn_id ?? resume.executionId,
+        ).trim() || resume.executionId
+      const changes = await this.loop.finalizeExecutionChanges({
+        sessionId: ownerSessionId,
+        executionId: resume.executionId,
+        activeTurnId,
+      })
+      if (changes && (changes.filesChanged > 0 || changes.status === 'partial'))
+        await this.emitRuntime(changes as unknown as Dict, {
+          emit: opts.emit ?? null,
+          sessionId: ownerSessionId,
+        })
+    }
     if (event?.event === 'plan_approved' && isRecord(event.plan)) {
       const planId = String(event.plan.id ?? '').trim()
       const steps = Array.isArray(event.plan.steps) ? event.plan.steps : []
@@ -1633,9 +1986,16 @@ export class CoreApi {
             : (opts.displayContent ?? String(resume.message ?? '')),
           clientMessageId: opts.clientMessageId ?? null,
           turnId: opts.turnId ?? null,
+          executionId: resume.executionId ?? null,
           source: 'control',
           sessionId: ownerSessionId,
           uiHidden,
+          memoryExtra: resume.executionId
+            ? {
+                execution_id: resume.executionId,
+                execution_root_turn_id: resume.executionId,
+              }
+            : null,
           emit: opts.emit ?? null,
         })) as unknown as Dict
       } finally {
@@ -1749,6 +2109,13 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  right_workspace: {
+    version: 3,
+    workbenchOpen: false,
+    width: 840,
+    filesTreeWidth: 280,
+    pane: 'launcher',
+  },
 }
 
 function normalizeSidebarState(value: unknown): Dict {
@@ -1763,6 +2130,54 @@ function normalizeSidebarState(value: unknown): Dict {
       raw.project_session_order,
     ),
     collapsed_project_ids: stringList(raw.collapsed_project_ids),
+    right_workspace: normalizeRightWorkspace(raw.right_workspace),
+  }
+}
+
+function normalizeRightWorkspace(value: unknown): Dict {
+  const raw = isRecord(value) ? value : {}
+  const width = Number(raw.width)
+  const filesTreeWidth = Number(raw.filesTreeWidth)
+  const pane = String(raw.pane ?? '')
+  if (Number(raw.version) === 3) {
+    return {
+      version: 3,
+      workbenchOpen: raw.workbenchOpen === true,
+      width: Number.isFinite(width)
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+      filesTreeWidth: Number.isFinite(filesTreeWidth)
+        ? Math.max(240, Math.min(320, Math.round(filesTreeWidth)))
+        : 280,
+      pane: ['review', 'terminal', 'files'].includes(pane) ? pane : 'launcher',
+    }
+  }
+  if (Number(raw.version) === 2) {
+    return {
+      version: 3,
+      workbenchOpen: raw.workbenchOpen === true,
+      width: Number.isFinite(width)
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+      filesTreeWidth: Number.isFinite(filesTreeWidth)
+        ? Math.max(240, Math.min(320, Math.round(filesTreeWidth)))
+        : 280,
+      pane: ['review', 'terminal', 'files'].includes(pane) ? pane : 'launcher',
+    }
+  }
+  const open = raw.open === undefined ? true : raw.open === true
+  const migratedPane = ['review', 'terminal', 'files'].includes(pane)
+    ? pane
+    : 'launcher'
+  return {
+    version: 3,
+    workbenchOpen: open && migratedPane !== 'launcher',
+    width:
+      Number.isFinite(width) && width >= 520
+        ? Math.max(520, Math.min(960, Math.round(width)))
+        : 840,
+    filesTreeWidth: 280,
+    pane: migratedPane,
   }
 }
 
@@ -1810,16 +2225,6 @@ function normalizedBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === '1' || value === 1
 }
 
-function runtimeEventSessionId(event: unknown): string {
-  if (!isRecord(event)) return ''
-  const direct = String(event.session_id ?? event.sessionId ?? '').trim()
-  if (direct) return direct
-  const owner = event.owner
-  return isRecord(owner)
-    ? String(owner.session_id ?? owner.sessionId ?? '').trim()
-    : ''
-}
-
 function interactionAnswerChoice(
   interaction: unknown,
   questionId: string,
@@ -1836,6 +2241,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requiredRecord(value: unknown, label: string): Dict {
   if (!isRecord(value)) throw new Error(`${label} must be an object`)
   return value
+}
+
+function unavailablePtyHost(): PtyHost {
+  return {
+    spawn: () => {
+      throw new WorkspaceOperationError(
+        'terminal_unavailable',
+        '当前宿主没有提供 PTY 终端能力。',
+      )
+    },
+  }
+}
+
+function defaultSystemShell(): { executable: string; args: string[] } {
+  if (process.platform === 'win32') {
+    const windowsRoot = process.env.SystemRoot || process.env.WINDIR
+    return {
+      executable: windowsRoot
+        ? join(
+            windowsRoot,
+            'System32',
+            'WindowsPowerShell',
+            'v1.0',
+            'powershell.exe',
+          )
+        : 'powershell.exe',
+      args: ['-NoLogo'],
+    }
+  }
+  return { executable: process.env.SHELL || '/bin/sh', args: [] }
+}
+
+function terminalEnvironment(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') env[key] = value
+  }
+  env.TERM ||= 'xterm-256color'
+  env.COLORTERM ||= 'truecolor'
+  return env
 }
 
 function schedulerPayloadFromApi(

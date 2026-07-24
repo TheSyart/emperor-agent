@@ -5,6 +5,7 @@ import { compactJson } from '../../utils/format'
 import { avatarIcons, toolIcon } from '../../icons'
 import ExpandableText from './ExpandableText.vue'
 import MarkdownBlock from './MarkdownBlock.vue'
+import { subagentNodeOpen } from './subagentTrailModel'
 
 const props = defineProps<{ subagents: SubagentState[] }>()
 
@@ -48,7 +49,7 @@ function fullJson(value: unknown) {
       :key="sub.id || sub.agent_type"
       class="agent-node"
       :class="[sub.status, sub.kind || 'subagent']"
-      open
+      :open="subagentNodeOpen(sub)"
     >
       <summary class="agent-node-head">
         <component

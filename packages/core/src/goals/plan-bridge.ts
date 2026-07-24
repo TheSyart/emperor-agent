@@ -157,7 +157,6 @@ export interface GoalPlanBridgeOptions {
   readonly goalStore: GoalStore
   readonly planStore: PlanStore
   readonly taskManager?: TaskManager | null
-  readonly todoStore?: GoalPlanTodoStore | null
   readonly now?: () => string
   readonly resolveStepWaiver?: PlanStepWaiverResolver | null
   readonly resolveStepVerification?: PlanStepVerificationResolver | null
@@ -170,24 +169,8 @@ export interface GoalPlanBridgeOptions {
   } | null
 }
 
-export interface GoalPlanTodoStore {
-  readonly todos: Array<Record<string, unknown>>
-  syncFromPlanSteps(
-    steps: Array<Record<string, unknown>>,
-    binding: { planId: string; approvalGeneration: number },
-  ): string
-}
-
-export interface GoalPlanTodoProjection {
-  readonly sessionId: string
-  readonly planId: string
-  readonly approvalGeneration: number
-  readonly todos: Array<Record<string, unknown>>
-}
-
 export interface GoalPlanSkipRecoveryResult {
   readonly count: number
-  readonly todoProjections: GoalPlanTodoProjection[]
 }
 
 export type ReplanIntentStage =
@@ -235,7 +218,6 @@ export class GoalPlanBridge {
   private readonly goalStore: GoalStore
   private readonly planStore: PlanStore
   private readonly taskManager: TaskManager | null
-  private readonly todoStore: GoalPlanTodoStore | null
   private readonly now: () => string
   private readonly resolveStepWaiver: PlanStepWaiverResolver | null
   private readonly resolveStepVerification: PlanStepVerificationResolver | null
@@ -250,7 +232,6 @@ export class GoalPlanBridge {
     this.goalStore = options.goalStore
     this.planStore = options.planStore
     this.taskManager = options.taskManager ?? null
-    this.todoStore = options.todoStore ?? null
     this.now = options.now ?? (() => new Date().toISOString())
     this.resolveStepWaiver = options.resolveStepWaiver ?? null
     this.resolveStepVerification = options.resolveStepVerification ?? null
@@ -330,6 +311,7 @@ export class GoalPlanBridge {
       if (!plan) throw new Error('Plan does not exist')
       if (this.goalIsExactlyBound(goal, plan)) {
         this.assertApprovalProvenance(goal, plan, { allowQuarantine: true })
+        plan = this.ensureGoalPlanTasks(plan)
         this.clearBoundApprovalQuarantine(plan.id)
         return { goal, plan: this.planStore.get(plan.id) ?? plan }
       }
@@ -337,6 +319,10 @@ export class GoalPlanBridge {
       // Pure identity/scope/generation validation must finish before any
       // quarantine or compensation mutation is allowed.
       this.assertBindable(goal, plan)
+      // Foreground Plans do not create persistent step Tasks. Goal execution
+      // is a durable coordinator workflow, so GoalPlanBridge owns the task
+      // projection and creates it only after Goal scope/provenance validation.
+      plan = this.ensureGoalPlanTasks(plan)
       plan = this.planStore.prepareApprovalQuarantine({
         planId: plan.id,
         goalId: goal.id,
@@ -568,25 +554,18 @@ export class GoalPlanBridge {
         bySession.set(sessionId, candidate)
     }
     let recovered = 0
-    const todoProjections: GoalPlanTodoProjection[] = []
     const selected = [...bySession.entries()].sort(([left], [right]) =>
       left.localeCompare(right),
     )
-    for (const [sessionId, candidate] of selected) {
+    for (const [, candidate] of selected) {
       const changed = await GLOBAL_SKIP_MUTEX.run(
         `${this.planStore.root}:${candidate.plan.id}`,
         async () => this.recoverSkip(candidate.plan.id),
       )
       if (!changed) continue
       recovered += 1
-      todoProjections.push({
-        sessionId,
-        planId: candidate.plan.id,
-        approvalGeneration: candidate.intent.approvalGeneration,
-        todos: this.skipTodoSnapshot(),
-      })
     }
-    return { count: recovered, todoProjections }
+    return { count: recovered }
   }
 
   private async recoverSkip(planId: string): Promise<boolean> {
@@ -641,13 +620,8 @@ export class GoalPlanBridge {
     }
 
     if (skipStageBefore(intent.stage, 'todo_synced')) {
-      this.syncSkipTodos(plan, intent)
       plan = this.persistSkipStage(plan, 'todo_synced')
       intent = planSkipIntent(plan)!
-    } else if (intent.stage === 'todo_synced') {
-      // TodoStore is an in-memory projection. A fresh process must replay it
-      // before completing an interrupted durable skip.
-      this.syncSkipTodos(plan, intent)
     }
 
     if (skipStageBefore(intent.stage, 'completed'))
@@ -1468,25 +1442,23 @@ export class GoalPlanBridge {
     return mapping
   }
 
-  private syncSkipTodos(plan: PlanRecord, intent: PlanSkipIntent): void {
-    if (!this.todoStore)
-      throw new Error('Todo store is required for durable Plan skip recovery')
-    const result = this.todoStore.syncFromPlanSteps(
-      plan.steps.map((step) => ({ ...step })),
-      {
-        planId: plan.id,
-        approvalGeneration: intent.approvalGeneration,
-      },
-    )
-    if (/^Error:/i.test(result.trim())) throw new Error(result)
-  }
-
-  private skipTodoSnapshot(): Array<Record<string, unknown>> {
-    if (!this.todoStore || !Array.isArray(this.todoStore.todos))
-      throw new Error(
-        'Todo store snapshot is required for durable Plan skip recovery',
+  private ensureGoalPlanTasks(plan: PlanRecord): PlanRecord {
+    const mapping = this.syncSkipTasks(plan)
+    const current = planStepTaskMap(plan)
+    if (
+      Object.keys(mapping).length === Object.keys(current).length &&
+      Object.entries(mapping).every(
+        ([stepId, taskId]) => current[stepId] === taskId,
       )
-    return this.todoStore.todos.map((todo) => structuredClone(todo))
+    )
+      return plan
+    return this.planStore.save({
+      ...plan,
+      metadata: {
+        ...plan.metadata,
+        plan_step_tasks: mapping,
+      },
+    })
   }
 
   private persistSkipStage(

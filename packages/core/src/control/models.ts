@@ -315,6 +315,21 @@ export function interactionToDict(i: Interaction): InteractionPayload {
   }
 }
 
+/**
+ * Public Renderer/runtime projection. Core-signed Plan execution requests stay
+ * in the private ControlStore and settlement store; the UI only needs stable
+ * option IDs and safe ownership metadata.
+ */
+export function interactionToPublicDict(i: Interaction): InteractionPayload {
+  const payload = interactionToDict(i)
+  if (payload.meta?.interaction_type === 'plan_execution') {
+    const meta = { ...payload.meta }
+    delete meta.plan_execution_action_request
+    payload.meta = meta
+  }
+  return payload
+}
+
 export function touchInteraction(
   i: Interaction,
   opts?: { status?: string },
@@ -410,6 +425,15 @@ export function controlStateToDict(s: ControlState): ControlStatePayload {
       : null,
     updated_at: s.updatedAt,
   }
+}
+
+export function controlStateToPublicDict(s: ControlState): ControlStatePayload {
+  const payload = controlStateToDict(s)
+  payload.pending = s.pending ? interactionToPublicDict(s.pending) : null
+  payload.last_interaction = s.lastInteraction
+    ? interactionToPublicDict(s.lastInteraction)
+    : null
+  return payload
 }
 
 function interactionCommentPayload(

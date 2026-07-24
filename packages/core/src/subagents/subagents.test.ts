@@ -118,6 +118,7 @@ describe('SubagentRegistry (W08)', () => {
     expect(registry.names()).toEqual([
       'dongchang_tanshi',
       'neiguan_yingzao',
+      'plan_architect',
       'shangbao_dianbu',
       'sili_suitang',
       'verification_reviewer',
@@ -126,12 +127,18 @@ describe('SubagentRegistry (W08)', () => {
     expect(registry.names({ includeAliases: true })).toContain('researcher')
     expect(registry.aliases()).toEqual({
       general: 'neiguan_yingzao',
+      planner: 'plan_architect',
       researcher: 'dongchang_tanshi',
       reviewer: 'verification_reviewer',
     })
     expect(registry.get('researcher')?.name).toBe('dongchang_tanshi')
-    expect(registry.get('sili_suitang')?.systemPrompt).toContain('司礼监随堂')
+    expect(registry.get('sili_suitang')?.systemPrompt).toContain(
+      'Explore Agent',
+    )
     expect(registry.get('sili_suitang')?.systemPrompt).toContain('demo')
+    expect(registry.get('verification_reviewer')?.systemPrompt).toMatch(
+      /能力发现|对抗性检查|PASS \| FAIL \| PARTIAL/,
+    )
     expect(registry.snapshot()).toMatchObject({
       schemaVersion: 1,
       sources: [
@@ -234,6 +241,72 @@ describe('SubagentRegistry (W08)', () => {
 })
 
 describe('DispatchSubagentTool (W04-014/W08)', () => {
+  it('keeps workspace mutation leases on tools wrapped for a real routed subagent', async () => {
+    const root = tmp('emperor-subagent-mutation-lease-')
+    const parent = new ToolRegistry()
+    const writeTool = new PolicyProbeTool('write_file', false)
+    writeTool.workspaceMutation = true
+    parent.register(writeTool)
+    let modelCalls = 0
+    const modelRouter = {
+      route: () => ({
+        snapshot: {
+          ...snapshot('subagent-model', 'secondary'),
+          provider: {
+            chat: async (): Promise<LLMResponse> => {
+              modelCalls += 1
+              return modelCalls === 1
+                ? {
+                    ...response(''),
+                    content: null,
+                    finishReason: 'tool_calls',
+                    toolCalls: [
+                      {
+                        id: 'call-write',
+                        name: 'write_file',
+                        arguments: { name: 'leased' },
+                      },
+                    ],
+                  }
+                : response('结论: mutation completed')
+            },
+          },
+        },
+        fallback: null,
+        useCase: 'subagent',
+        reason: 'mutation lease test',
+        estimatedTokens: null,
+      }),
+    } as unknown as ModelRouter
+    const leases: Array<{ root: string; owner: string }> = []
+    const routedFactory = buildDispatchRunnerFactory({
+      modelRouter,
+      workspaceMutations: {
+        async runExclusive<T>(
+          workspaceRoot: string,
+          owner: 'agent' | 'renderer_git',
+          action: () => Promise<T>,
+        ): Promise<T> {
+          leases.push({ root: workspaceRoot, owner })
+          return await action()
+        },
+      },
+    })
+    const tool = new DispatchSubagentTool({
+      parentRegistry: parent,
+      subagentRegistry: new SubagentRegistry(TEMPLATES),
+      runnerFactory: (args) => routedFactory(args),
+    })
+
+    await expect(
+      tool.execute(
+        { agent_type: 'neiguan_yingzao', task: 'mutate workspace' },
+        { root, workspaceRoot: root, arguments: {} },
+      ),
+    ).resolves.toContain('mutation completed')
+    expect(leases).toEqual([{ root, owner: 'agent' }])
+  })
+
   it('enforces Skill, Hook, and sandbox restrictions from the materialized definition', async () => {
     const registry = new SubagentRegistry(TEMPLATES, null, {
       sessionPolicy: {
@@ -347,11 +420,21 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
 
   it('composes contract text and extracts evidence refs', () => {
     const task = composeSubagentTask('阅读核心流程', {
+      contextMode: 'fresh',
+      rationale: '主线程需要隔离大量只读探索。',
+      knownFacts: ['入口位于 packages/core/src/agent/loop.ts'],
+      rejectedApproaches: ['不读取整个仓库'],
+      targetFiles: ['packages/core/src/agent/loop.ts'],
       expectedOutput: '列出结论',
       evidenceRequired: '文件路径/行号',
       scopeLimit: '只读 agent/',
     })
-    expect(task).toContain('## 差事契约')
+    expect(task).toContain('## Fresh Agent Brief')
+    expect(task).toContain('目标: 阅读核心流程')
+    expect(task).toContain('原因: 主线程需要隔离大量只读探索。')
+    expect(task).toContain('已知事实: 入口位于 packages/core/src/agent/loop.ts')
+    expect(task).toContain('已排除方案: 不读取整个仓库')
+    expect(task).toContain('目标文件: packages/core/src/agent/loop.ts')
     expect(task).toContain('期望产物: 列出结论')
     const refs = extractEvidenceRefs(
       '证据: agent/runner.py:10 docs/migration/ts/README.md https://example.com',
@@ -361,6 +444,68 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
       'agent/runner.py',
       'docs/migration/ts/README.md',
     ])
+  })
+
+  it('forks only normalized parent conversation context and appends the focused task', async () => {
+    const root = tmp('emperor-dispatch-fork-context-')
+    let capturedHistory: Array<Record<string, unknown>> = []
+    let capturedContextMode = ''
+    let capturedParentPrompt = ''
+    const tool = new DispatchSubagentTool({
+      parentRegistry: new ToolRegistry(),
+      subagentRegistry: new SubagentRegistry(TEMPLATES),
+      runnerFactory: (args) => {
+        capturedContextMode = String(args.contextMode)
+        capturedParentPrompt = String(args.parentSystemPrompt)
+        return {
+          step: (history) => {
+            capturedHistory = history
+            return '结论: fork complete'
+          },
+        }
+      },
+    })
+
+    const result = await tool.execute(
+      {
+        agent_type: 'sili_suitang',
+        task: '只分析权限调用链',
+        context_mode: 'fork',
+        scope_limit: '只读 packages/core/src/permissions',
+        expected_output: '调用链摘要',
+        evidence_required: '路径和符号',
+      },
+      {
+        root,
+        arguments: {},
+        parentSystemPrompt: 'parent immutable contract',
+        parentContext: [
+          { role: 'system', content: 'must not leak this duplicate system' },
+          { role: 'user', content: '检查权限设计' },
+          {
+            role: 'assistant',
+            content: '准备派遣',
+            tool_calls: [{ id: 'dispatching' }],
+          },
+          { role: 'tool', content: 'private raw tool output' },
+          { role: 'assistant', content: '已定位权限入口。' },
+        ],
+      },
+    )
+
+    expect(result).toContain('fork complete')
+    expect(capturedContextMode).toBe('fork')
+    expect(capturedParentPrompt).toBe('parent immutable contract')
+    expect(capturedHistory).toEqual([
+      { role: 'user', content: '检查权限设计' },
+      { role: 'assistant', content: '已定位权限入口。' },
+      expect.objectContaining({
+        role: 'user',
+        content: expect.stringContaining('只分析权限调用链'),
+      }),
+    ])
+    expect(JSON.stringify(capturedHistory)).not.toContain('private raw')
+    expect(JSON.stringify(capturedHistory)).not.toContain('dispatching')
   })
 
   it('records task and sidechain while running an isolated fake runner', async () => {
@@ -635,12 +780,28 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
     })
 
     expect(
+      (
+        tool as DispatchSubagentTool & {
+          supportsPlanReadonlyExploration?: boolean
+        }
+      ).supportsPlanReadonlyExploration,
+    ).toBe(true)
+    expect(
       tool.isReadOnly({
         agent_type: 'sili_suitang',
         task: 'read',
         expected_output: 'summary',
         evidence_required: 'files',
         scope_limit: 'only docs',
+      }),
+    ).toBe(true)
+    expect(
+      tool.isReadOnly({
+        agent_type: 'plan_architect',
+        task: 'design from recorded evidence',
+        expected_output: 'recommended approach and tradeoffs',
+        evidence_required: 'discovery ids and file paths',
+        scope_limit: 'read-only design; no implementation',
       }),
     ).toBe(true)
     expect(tool.isReadOnly({ agent_type: 'sili_suitang', task: 'read' })).toBe(

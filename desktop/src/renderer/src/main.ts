@@ -12,6 +12,7 @@ import './styles/activity.css'
 import './styles/panels.css'
 import './styles/responsive.css'
 import './styles/codex-v2.css'
+import './styles/workspace.css'
 
 applyTheme(document, localStorage.getItem('emperor.theme') ?? DEFAULT_THEME)
 

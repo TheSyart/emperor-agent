@@ -16,9 +16,36 @@ describe('Core operation registry', () => {
   it('covers every public CoreApi route exactly once', () => {
     const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
 
-    expect(coreOperationKeys()).toHaveLength(120)
+    expect(coreOperationKeys()).toHaveLength(153)
     expect(coreOperationKeys()).toEqual(routeKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
+    expect(coreOperationKeys()).toEqual(
+      expect.arrayContaining([
+        'workspace.snapshot',
+        'git.status',
+        'git.diff',
+        'git.branches',
+        'git.compare',
+        'git.stage',
+        'git.unstage',
+        'git.discard',
+        'git.commit',
+        'git.fetch',
+        'git.pull',
+        'git.push',
+        'git.createBranch',
+        'git.switchBranch',
+        'files.list',
+        'files.search',
+        'files.read',
+        'terminals.list',
+        'terminals.create',
+        'terminals.read',
+        'terminals.write',
+        'terminals.resize',
+        'terminals.close',
+      ]),
+    )
   })
 
   it('keeps Plan outside the public permission selector and validates Goal replacement input', () => {

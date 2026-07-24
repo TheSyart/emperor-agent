@@ -88,6 +88,12 @@ import {
   createRendererProjectionState,
   replayRendererProjection,
 } from '../runtime/rendererProjection'
+import { adaptLegacyRuntimeEvents } from '../runtime/legacyRuntimeAdapter'
+import {
+  applyTurnChangeSnapshot,
+  createTurnChangeProjection,
+  latestTurnChangeForSession,
+} from '../runtime/turnChangeProjection'
 
 function nextId(prefix: string) {
   const random =
@@ -136,6 +142,23 @@ export function useRuntime(options: {
   const taskProjection = reactive<TaskProjection>({ tasks: [] })
   const goalProjection = reactive<GoalProjectionState>(
     createGoalProjectionState(),
+  )
+  const turnChangeProjection = reactive(createTurnChangeProjection())
+  const activeTurnChange = computed(() =>
+    (() => {
+      const snapshot = latestTurnChangeForSession(
+        turnChangeProjection,
+        sessionId.value,
+      )
+      const assistantTurnId = currentAssistant.value?.turn_id
+      return snapshot &&
+        assistantTurnId &&
+        (snapshot.turnId === assistantTurnId ||
+          snapshot.rootTurnId === assistantTurnId ||
+          snapshot.activeTurnId === assistantTurnId)
+        ? snapshot
+        : null
+    })(),
   )
   // P1-7：per-session 瞬态运行/提醒状态，不落盘
   const sessionRuntimeStates = reactive<
@@ -547,10 +570,28 @@ export function useRuntime(options: {
     interactionId: string,
     answers: Record<string, unknown>,
   ) {
+    const planExecutionAction = Object.values(answers)
+      .filter((answer): answer is Record<string, unknown> =>
+        Boolean(answer && typeof answer === 'object' && !Array.isArray(answer)),
+      )
+      .map((answer) => String(answer.option_id || ''))
+      .find((optionId) =>
+        [
+          'continue_verification',
+          'manual_verification_passed',
+          'waive_verification_and_complete',
+          'cancel_plan',
+        ].includes(optionId),
+      )
+    const expectAssistant = planExecutionAction !== 'cancel_plan'
     return sendControlPayload(
       { type: 'interaction_answer', interaction_id: interactionId, answers },
-      '已回答澄清问题',
-      true,
+      planExecutionAction
+        ? planExecutionAction === 'cancel_plan'
+          ? '已取消计划'
+          : '已处理计划验证'
+        : '已回答澄清问题',
+      expectAssistant,
     )
   }
 
@@ -1035,17 +1076,19 @@ export function useRuntime(options: {
       0,
       planProjection.entryDecisions.length,
     )
+    Object.assign(turnChangeProjection, createTurnChangeProjection())
     updatePending()
     projectionRuntime = createProjectionRuntime()
     rehydrating = true
     try {
+      const adaptedEvents = adaptLegacyRuntimeEvents(events)
       const scope =
         sessionId.value || options.boot.value?.runtime?.sessionId || null
       const replay = replayRendererProjection(
         createRendererProjectionState(String(scope || '')),
-        events,
+        adaptedEvents,
       )
-      for (const event of sortRuntimeEvents(events)) {
+      for (const event of sortRuntimeEvents(adaptedEvents)) {
         if (isChatProjectionEvent(event)) {
           applyChatProjectionEvent(
             liveProjection,
@@ -1152,6 +1195,10 @@ export function useRuntime(options: {
     data: WsEvent,
     origin: 'live' | 'replay',
   ): void {
+    if (data.event === 'turn_change_snapshot') {
+      applyTurnChangeSnapshot(turnChangeProjection, data)
+      return
+    }
     if (data.event === 'session_created') {
       if (
         data.client_draft_id &&
@@ -1254,10 +1301,6 @@ export function useRuntime(options: {
 
     if (data.event.startsWith('scheduler_')) {
       handleSchedulerEvent(data)
-      return
-    }
-
-    if (data.event.startsWith('external_')) {
       return
     }
 
@@ -1398,20 +1441,6 @@ export function useRuntime(options: {
     if (data.event === 'tool_error') {
       const assistant = assistantForTurn(data.turn_id)
       if (assistant?.streaming) startThought(assistant, data, '处理工具错误')
-      return
-    }
-    if (data.event === 'turn_continuation_evaluated') {
-      if (data.decision === 'pause') {
-        busy.value = false
-        status.value = 'ready'
-        updatePending('执行已暂停', data.summary, 'done')
-      } else {
-        busy.value = true
-        updatePending(
-          data.decision === 'finalize' ? '正在整理交付' : '评估后继续执行',
-          data.summary,
-        )
-      }
       return
     }
     if (data.event === 'assistant_done') {
@@ -2120,6 +2149,8 @@ export function useRuntime(options: {
     planProjection,
     taskProjection,
     goalProjection,
+    turnChangeProjection,
+    activeTurnChange,
     sessionRuntimeStates,
     clearSessionAttention,
     dispose() {

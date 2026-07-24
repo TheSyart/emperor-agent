@@ -13,6 +13,11 @@ files:
   - '!node_modules{,/**/*}'
   - node_modules/typescript/package.json
   - node_modules/typescript/lib/typescript.js
+  - node_modules/node-pty/package.json
+  - node_modules/node-pty/lib/**/*.js
+  - '!node_modules/node-pty/lib/**/*.test.js'
+  - node_modules/node-pty/prebuilds/**/*
+  - node_modules/node-pty/build/Release/**/*
 
 extraResources:
   - from: build/icon.png
@@ -22,7 +27,6 @@ extraResources:
     filter:
       - SOUL.md
       - TOOL.md
-      - agent/compact_prompt.md
       - agent/identity.md
       - agent/skills_section.md
       - init/MEMORY.md
@@ -57,6 +61,9 @@ extraResources:
       - idle-scenes.js
 
 asar: true
+asarUnpack:
+  - node_modules/node-pty/prebuilds/**/*
+  - node_modules/node-pty/build/Release/**/*
 
 mac:
   target:

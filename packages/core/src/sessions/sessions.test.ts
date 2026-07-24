@@ -88,6 +88,22 @@ describe('ConversationStore (test_conversation_store.py)', () => {
     expect(store.readCheckpoint()).toBeNull()
   })
 
+  it('binds checkpoints to the owning session when callers omit sessionId', () => {
+    const store = new ConversationStore(
+      join(tmp('emperor-session-checkpoint-owner-'), 'session_bound'),
+    )
+    store.writeCheckpoint([
+      { role: 'user', content: 'in-flight', turn_id: 'turn_bound' },
+    ])
+
+    expect(
+      JSON.parse(readFileSync(store.checkpointFile, 'utf8')),
+    ).toMatchObject({
+      sessionId: 'session_bound',
+      turnId: 'turn_bound',
+    })
+  })
+
   it('writes new history through the V2 message graph sidecar without changing V1 replay', () => {
     const store = new ConversationStore(
       join(tmp('emperor-session-message-graph-'), 's1'),

@@ -41,7 +41,10 @@ export async function pauseForClarification(
   if (turnId) message.turn_id = turnId
   history.push(message)
   if (host.memoryStore !== null)
-    host.memoryStore.writeCheckpoint(history, pauseCheckpointOpts(turnId))
+    host.memoryStore.writeCheckpoint(
+      history,
+      pauseCheckpointOpts(turnId, host.sessionId ?? null),
+    )
   const payload = interactionToDict(interaction)
   if (emit) {
     await emit(controlInteractionEvent(payload))
@@ -50,8 +53,11 @@ export async function pauseForClarification(
   throw new TurnPaused(payload, [])
 }
 
-function pauseCheckpointOpts(turnId: string | null): CheckpointWriteOptions {
-  return { turnId, phase: 'assistant_response_pending' }
+function pauseCheckpointOpts(
+  turnId: string | null,
+  sessionId: string | null,
+): CheckpointWriteOptions {
+  return { sessionId, turnId, phase: 'assistant_response_pending' }
 }
 
 export function maybePauseForControl(

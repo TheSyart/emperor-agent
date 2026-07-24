@@ -538,8 +538,8 @@ select:focus-visible {
 
 .tool-group-card {
   border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border)) !important;
-  background: rgb(var(--bg-elevated) / 0.82) !important;
+  border-color: transparent !important;
+  background: transparent !important;
   box-shadow: none !important;
 }
 
@@ -553,7 +553,7 @@ select:focus-visible {
 }
 
 .tool-group-summary {
-  min-height: 48px;
+  min-height: 34px;
 }
 
 .tool-group-body {
@@ -1241,6 +1241,178 @@ select:focus-visible {
       rgb(var(--shadow-color) / 0.16),
       transparent 62%
     );
+}
+
+.turn-changes-status {
+  display: flex;
+  width: max-content;
+  max-width: min(760px, 100%);
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 auto 8px;
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: 999px;
+  padding: 6px 11px;
+  color: rgb(var(--fg-muted));
+  background: rgb(var(--bg-elevated) / 0.96);
+  box-shadow: 0 7px 20px rgb(var(--shadow-color) / 0.12);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.turn-changes-status:hover {
+  border-color: rgb(var(--accent) / 0.48);
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-elevated));
+}
+
+.turn-changes-card {
+  width: min(760px, calc(100% - 32px));
+  margin: 8px auto 18px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-elevated) / 0.58);
+  box-shadow: 0 10px 28px rgb(var(--shadow-color) / 0.08);
+}
+
+.turn-changes-card > header {
+  display: flex;
+  min-height: 50px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.turn-changes-card-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius);
+  color: rgb(var(--fg-muted));
+  background: rgb(var(--bg-inset));
+}
+
+.turn-changes-card > header > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.turn-changes-card > header strong {
+  font-size: var(--font-size-sm);
+}
+
+.turn-changes-card > header span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-changes-card > header b {
+  color: rgb(var(--ok));
+  font-weight: 500;
+}
+
+.turn-changes-card > header em {
+  color: rgb(var(--danger));
+  font-style: normal;
+}
+
+.turn-changes-card > header button {
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-card > header button:hover {
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-inset));
+}
+
+.turn-changes-card ul {
+  border-top: 1px solid rgb(var(--border));
+}
+
+.turn-changes-card li {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 12px;
+  border-top: 1px solid rgb(var(--border) / 0.65);
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-card li:first-child {
+  border-top: 0;
+}
+
+.turn-changes-card li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-changes-card li small {
+  flex: 0 0 auto;
+  color: rgb(var(--ok));
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-changes-card li small.binary {
+  color: rgb(var(--fg-subtle));
+}
+
+.turn-changes-expand {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-top: 1px solid rgb(var(--border));
+  padding: 7px 12px;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-expand:hover {
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-inset) / 0.6);
+}
+
+.turn-changes-expand svg {
+  transition: transform 150ms ease;
+}
+
+.turn-changes-expand svg.rotated {
+  transform: rotate(180deg);
+}
+
+.turn-changes-partial {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid rgb(var(--warn) / 0.3);
+  padding: 8px 12px;
+  color: rgb(var(--warn));
+  background: rgb(var(--warn) / 0.06);
+  font-size: var(--font-size-xs);
 }
 
 .profile-onboarding-banner {

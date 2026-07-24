@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-07-23<br>
 > 事实源：`packages/core/src/api/core-api.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi` host；Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 TypeScript `CoreApi` host。当前产品主线没有 Python runtime、Python CLI、HTTP backend 或 WebSocket backend。
@@ -22,7 +22,7 @@ flowchart LR
   Core --> Agent["Agent loop 与工具"]
   Core --> Stores["stateRoot 私有存储"]
   Core --> Provider["模型 Provider"]
-  Core --> External["Web / MCP / 外部服务"]
+  Core --> RemoteServices["Web / MCP / 远程服务"]
   Core -->|"runtime events"| Main
   Main --> Renderer
 ```
@@ -31,20 +31,21 @@ flowchart LR
 
 ## 主要层次
 
-| 层次              | 责任                                                                      | 主要位置                                                   |
-| ----------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Renderer          | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态 | `desktop/src/renderer/src/`                                |
-| Preload / IPC     | 限定 renderer 可调用的 operation 和可订阅事件                             | `desktop/src/preload/`、`desktop/src/main/core-host.ts`    |
-| CoreApi           | 进程内 API 门面、输入校验、服务组合与 mutation guard                      | `packages/core/src/api/`                                   |
-| ACP adapter       | 有界 stdio、稳定 V1 request、Build 会话绑定、事件白名单投影和取消         | `packages/core/src/acp/`                                   |
-| Agent runtime     | 上下文构建、模型回合、工具执行、压缩、Ask / Plan 暂停                     | `packages/core/src/agent/`                                 |
-| Extension policy  | AgentDefinition schema、source/trust/precedence 与冲突诊断                | `packages/core/src/extensions/`、`templates/subagents/`    |
-| Config resolution | 分层值、来源、信任、覆盖轨迹与 secret 脱敏快照                            | `packages/core/src/config/resolver.ts`                     |
-| Domain services   | Session、Memory、Code Intelligence、Scheduler、Goal、Team、MCP 等领域逻辑 | `packages/core/src/<domain>/`                              |
-| Lifecycle         | required service 的 reconcile/start/ready/逆序 stop 与 deadline           | `packages/core/src/runtime/lifecycle.ts`                   |
-| Process runtime   | 子进程 owner/lease、stdio、配额、进程树取消与崩溃孤儿回收                 | `packages/core/src/processes/`                             |
-| Stores            | `stateRoot` 下的文件持久化、事件账本和可重建投影                          | 各领域的 `store` / `repository`                            |
-| Provider / Tools  | 外部模型调用与受策略约束的本地或联网能力                                  | `packages/core/src/providers/`、`packages/core/src/tools/` |
+| 层次               | 责任                                                                      | 主要位置                                                      |
+| ------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Renderer           | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态 | `desktop/src/renderer/src/`                                   |
+| Preload / IPC      | 限定 renderer 可调用的 operation 和可订阅事件                             | `desktop/src/preload/`、`desktop/src/main/core-host.ts`       |
+| CoreApi            | 进程内 API 门面、输入校验、服务组合与 mutation guard                      | `packages/core/src/api/`                                      |
+| ACP adapter        | 有界 stdio、稳定 V1 request、Build 会话绑定、事件白名单投影和取消         | `packages/core/src/acp/`                                      |
+| Agent runtime      | 上下文构建、模型回合、工具执行、压缩、Ask / Plan 暂停                     | `packages/core/src/agent/`                                    |
+| Extension policy   | AgentDefinition schema、source/trust/precedence 与冲突诊断                | `packages/core/src/extensions/`、`templates/subagents/`       |
+| Config resolution  | 分层值、来源、信任、覆盖轨迹与 secret 脱敏快照                            | `packages/core/src/config/resolver.ts`                        |
+| Domain services    | Session、Memory、Code Intelligence、Scheduler、Goal、Team、MCP 等领域逻辑 | `packages/core/src/<domain>/`                                 |
+| Lifecycle          | required service 的 reconcile/start/ready/逆序 stop 与 deadline           | `packages/core/src/runtime/lifecycle.ts`                      |
+| Process runtime    | 子进程 owner/lease、stdio、配额、进程树取消与崩溃孤儿回收                 | `packages/core/src/processes/`                                |
+| Workspace services | 右侧项目工作台的 Snapshot、Git、只读 Files 与用户直控 Terminal            | `packages/core/src/workspace/`、`desktop/src/main/terminal-*` |
+| Stores             | `stateRoot` 下的文件持久化、事件账本和可重建投影                          | 各领域的 `store` / `repository`                               |
+| Provider / Tools   | 外部模型调用与受策略约束的本地或联网能力                                  | `packages/core/src/providers/`、`packages/core/src/tools/`    |
 
 ## 一次会话请求
 
@@ -57,6 +58,8 @@ flowchart LR
 7. Core 把历史、checkpoint 和 runtime events 写入 `stateRoot`，renderer 只消费白名单化投影。
 
 后台入口如 Scheduler、Goal continuation 和 Team 任务会复用同一条主线 turn 服务，不拥有另一套绕过权限的 runtime。主线由 `SessionRuntimeManager` 路由到 owner session actor：同 session mailbox 严格串行，不同 session 可并行；桌面当前选中的 `activeSession` 不是后台执行所有权。
+
+右侧区域由宽屏常驻 Environment 与可调整宽度的工作区共享同一位置。Environment 通过 `workspace.snapshot` 读取 Git/worktree/receipt、Plan/Goal、子代理、Team、进程和来源的安全聚合投影；Review、Terminal 和 Files 打开时原位替代 Environment，关闭后自动恢复。Review 使用 Core 分层的 Repository Resolver、Hardened Git Runner、Status/Diff、Mutation、Worktree、PR 与 Receipt Store；Files 使用只读多标签预览与右侧懒加载树。它们都不是 renderer 的本机权限旁路：Git 根、签名可执行文件、revision、路径、owner lease 和确认均由 Core 校验；Files 只允许当前 session workspace binding 内的有界只读访问。Terminal 的 PTY 由 Electron main 注入 Core TerminalService，Renderer 只持有 session-scoped ID 与字节流。Terminal 是用户直接操作系统 Shell，不进入 Agent loop 或 Agent 权限模式，也不写聊天/runtime store；Core 仍拥有 session 归属、并发上限、内存缓冲和进程清理。
 
 Headless ACP 的 `session/prompt` 也进入同一个 `chat.submit` / mainline turn。`session/new` 只能创建 canonical workspace 的 Build 会话，`session/load` 先从持久 runtime ledger 做无副作用回放，再返回响应。ACP client 不能提供 MCP command 或 `additionalDirectories`，只能使用 Emperor 受信配置已经解析出的能力。同一 session 的 prompt 串行、跨 session 可并行；session cancel、协议 request cancel、连接关闭和 Core shutdown 汇入同一 AbortSignal 链。wire 输入、投影内容、并发、request ledger 都有硬上限，终态之后的迟到事件不会再发送。具体协议面见 [Headless ACP operator preview](../development/headless-acp.md)。
 

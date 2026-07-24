@@ -1,4 +1,10 @@
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -52,6 +58,7 @@ afterEach(() => {
 describe('Goal mode deterministic E2E', () => {
   it('runs Contract -> Plan awaiting -> CoreApi approval -> Goal coordinator resume through the real model loop', async () => {
     const root = temp('goal-e2e-plan-control-')
+    writeFileSync(join(root, 'README.md'), '# Goal Plan fixture\n', 'utf8')
     const events: Record<string, unknown>[] = []
     const provider = new GoalPlanProvider()
     const api = await CoreApi.create({
@@ -124,6 +131,7 @@ describe('Goal mode deterministic E2E', () => {
 
   it('keeps background Goal control and runtime ownership on session A when the user switches to session B', async () => {
     const root = temp('goal-e2e-session-switch-')
+    writeFileSync(join(root, 'README.md'), '# Goal Plan fixture\n', 'utf8')
     const provider = new SwitchableGoalPlanProvider()
     const api = await createApi(root, join(root, 'state'), provider)
     const sessionA = api.sessions.create({
@@ -1018,7 +1026,7 @@ class StaticProvider extends LLMProvider {
     super({ defaultModel: 'goal-e2e-static' })
   }
 
-  async chat(): Promise<LLMResponse> {
+  async chat(_args: ChatArgs): Promise<LLMResponse> {
     return response('No new evidence in this deterministic cycle.')
   }
 }
@@ -1050,7 +1058,7 @@ class GoalPlanProvider extends LLMProvider {
     super({ defaultModel: 'goal-e2e-plan' })
   }
 
-  async chat(): Promise<LLMResponse> {
+  async chat(args: ChatArgs): Promise<LLMResponse> {
     this.calls += 1
     if (this.calls === 1) {
       return toolResponse('define_contract', 'define_goal_contract', {
@@ -1072,6 +1080,13 @@ class GoalPlanProvider extends LLMProvider {
       })
     }
     if (this.calls === 2) {
+      return toolResponse('discover_scope', 'read_file', {
+        path: 'README.md',
+      })
+    }
+    if (this.calls === 3) {
+      const discoveryId =
+        JSON.stringify(args.messages ?? []).match(/disc_[a-z0-9]+/)?.[0] ?? ''
       return toolResponse('propose_plan', 'propose_plan', {
         title: 'Durable Goal Plan',
         summary: 'Approve the Goal-bound Plan.',
@@ -1089,6 +1104,7 @@ class GoalPlanProvider extends LLMProvider {
             risk: 'low',
             risk_note: '',
             rollback: '',
+            discovery_refs: [discoveryId],
           },
         ],
       })
@@ -1109,7 +1125,7 @@ class SwitchableGoalPlanProvider extends GoalPlanProvider {
     this.releaseFirst()
   }
 
-  override async chat(): Promise<LLMResponse> {
+  override async chat(args: ChatArgs): Promise<LLMResponse> {
     if (this.first) {
       this.first = false
       this.markEntered()
@@ -1117,7 +1133,7 @@ class SwitchableGoalPlanProvider extends GoalPlanProvider {
         this.releaseFirst = resolve
       })
     }
-    return await super.chat()
+    return await super.chat(args)
   }
 }
 

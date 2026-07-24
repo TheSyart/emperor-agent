@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import type { ToolSegment, ToolStatus } from '../../types'
 import { toolIcon } from '../../icons'
 import type { AssistantFlowBlock } from './assistantFlowProjection'
@@ -18,6 +18,30 @@ type ToolGroupBlock = Extract<AssistantFlowBlock, { kind: 'tool_group' }>
 const props = defineProps<{ block: ToolGroupBlock }>()
 
 const defaultOpen = computed(() => toolCardDefaultOpen(props.block.tools))
+const firstFailedToolId = computed(
+  () =>
+    props.block.tools.find(
+      (tool) => tool.status === 'error' || tool.status === 'error_aborted',
+    )?.id,
+)
+const selectedToolId = ref(
+  firstFailedToolId.value || props.block.tools[0]?.id || '',
+)
+watch(
+  () => props.block.id,
+  () => {
+    selectedToolId.value =
+      firstFailedToolId.value || props.block.tools[0]?.id || ''
+  },
+)
+watch(firstFailedToolId, (toolId) => {
+  if (toolId) selectedToolId.value = toolId
+})
+const selectedTool = computed(
+  () =>
+    props.block.tools.find((tool) => tool.id === selectedToolId.value) ||
+    props.block.tools[0],
+)
 
 // Wave6：展开态存到 MessageList 提供的 store，虚拟滚动卸载重挂不丢
 const expansion = inject(CHAT_EXPANSION_STORE_KEY, null)
@@ -37,13 +61,13 @@ function onToggle(event: Event) {
 const primaryTool = computed(() => props.block.tools[0])
 const agentCount = computed(() =>
   props.block.tools.reduce((count, tool) => {
-    const ownAgent = tool.name === 'dispatch_subagent' ? 1 : 0
-    return count + ownAgent + (tool.subagents?.length || 0)
+    if (tool.name !== 'dispatch_subagent')
+      return count + (tool.subagents?.length || 0)
+    return count + Math.max(1, tool.subagents?.length || 0)
   }, 0),
 )
 
 const statusText = computed(() => statusLabel(props.block.status))
-const singleTool = computed(() => props.block.tools.length === 1)
 const detailText = computed(() => toolGroupDetailText(props.block.tools))
 
 function statusLabel(status: ToolStatus) {
@@ -54,8 +78,8 @@ function toolStatusLabel(tool: ToolSegment) {
   return statusLabel(tool.status)
 }
 
-function isTodoTool(tool: ToolSegment) {
-  return tool.name === 'update_todos' && Boolean(tool.todos?.length)
+function selectTool(tool: ToolSegment) {
+  selectedToolId.value = tool.id
 }
 </script>
 
@@ -84,31 +108,36 @@ function isTodoTool(tool: ToolSegment) {
     </summary>
 
     <div class="tool-group-body">
-      <template v-for="tool in props.block.tools" :key="tool.id">
-        <details v-if="isTodoTool(tool)" class="tool-raw-details">
-          <summary>查看原始工具详情</summary>
-          <ToolDetailBody :segment="tool" />
-        </details>
-        <ToolDetailBody v-else-if="singleTool" :segment="tool" />
-        <section v-else class="tool-group-tool-row" :class="tool.status">
-          <header class="tool-group-tool-head">
-            <span class="tool-group-tool-icon" aria-hidden="true">
-              <component :is="toolIcon(tool.name)" :size="14" />
-            </span>
-            <span class="tool-group-tool-title">
-              <strong>{{ toolTitle(tool) }}</strong>
-              <small>{{ toolPurpose(tool.name) }}</small>
-            </span>
-            <span class="tool-group-tool-meta">
-              <em>{{ toolStatusLabel(tool) }}</em>
-              <time v-if="durationLabel(tool.durationMs)">{{
-                durationLabel(tool.durationMs)
-              }}</time>
-            </span>
-          </header>
-          <ToolDetailBody :segment="tool" />
-        </section>
-      </template>
+      <div class="tool-group-tool-list" role="list">
+        <button
+          v-for="tool in props.block.tools"
+          :key="tool.id"
+          type="button"
+          class="tool-group-tool-row"
+          :class="[tool.status, { selected: selectedTool?.id === tool.id }]"
+          role="listitem"
+          @click="selectTool(tool)"
+        >
+          <span class="tool-group-tool-icon" aria-hidden="true">
+            <component :is="toolIcon(tool.name)" :size="14" />
+          </span>
+          <span class="tool-group-tool-title">
+            <strong>{{ toolTitle(tool) }}</strong>
+            <small>{{ toolPurpose(tool.name) }}</small>
+          </span>
+          <span class="tool-group-tool-meta">
+            <em>{{ toolStatusLabel(tool) }}</em>
+            <time v-if="durationLabel(tool.durationMs)">{{
+              durationLabel(tool.durationMs)
+            }}</time>
+          </span>
+        </button>
+      </div>
+      <ToolDetailBody
+        v-if="selectedTool"
+        class="tool-group-selected-detail"
+        :segment="selectedTool"
+      />
     </div>
   </details>
 </template>

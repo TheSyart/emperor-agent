@@ -194,9 +194,16 @@ export function lengthRecovery(
 
 export function todoFollowup(
   state: QueryState,
-  opts: { unfinishedText: string; unfinishedCount: number },
+  opts: {
+    unfinishedText: string
+    unfinishedCount: number
+    maxContinuations?: number | null
+  },
 ): QueryTransition | null {
-  if (state.todoContinuations >= 2) return null
+  const maxContinuations =
+    opts.maxContinuations === undefined ? 2 : opts.maxContinuations
+  if (maxContinuations !== null && state.todoContinuations >= maxContinuations)
+    return null
   const content =
     '差事尚未办妥，以下任务仍未完成，请按计划继续执行，并按规矩更新 todolist 状态：\n' +
     opts.unfinishedText

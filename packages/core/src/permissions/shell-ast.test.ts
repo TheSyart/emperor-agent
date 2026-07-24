@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   analyzeShellCommand,
   analyzeShellCommandFailClosed,
+  gitShellExplicitDenyReason,
   isShellAstReadonly,
+  isShellAstReadonlySequence,
   shellAstSummary,
   type ShellAstAnalysis,
 } from './shell-ast'
@@ -149,5 +151,53 @@ describe('AST-backed command risk corpus', () => {
     'pwd -P',
   ])('keeps a narrow positively-proven read-only subset: %s', (command) => {
     expect(isReadonlyCommand(command)).toBe(true)
+  })
+})
+
+describe('Git command security matrix', () => {
+  it.each([
+    ['git push --force origin main', 'force_push'],
+    ['git reset --hard HEAD~1', 'history_rewrite'],
+    ['git commit --amend --no-edit', 'history_rewrite'],
+    ['git commit --no-verify -m unsafe', 'hooks_bypass'],
+    ['git -c alias.status=!rm status', 'dynamic_config'],
+    ['git --git-dir=.git status', 'repository_override'],
+    ['git diff --ext-diff', 'external_diff'],
+    ['git update-ref refs/heads/main HEAD', 'git_internal_write'],
+  ])('hard-denies %s as %s', (command, reason) => {
+    expect(
+      gitShellExplicitDenyReason(analyzeShellCommand(command), {
+        workspaceRoot: process.cwd(),
+        cwd: process.cwd(),
+      }),
+    ).toBe(reason)
+  })
+
+  it('allows only contained -C and --no-index read paths', () => {
+    const context = { workspaceRoot: process.cwd(), cwd: process.cwd() }
+    expect(
+      isShellAstReadonlySequence(
+        analyzeShellCommand('git -C . status --short'),
+        context,
+      ),
+    ).toBe(true)
+    expect(
+      isShellAstReadonlySequence(
+        analyzeShellCommand('git diff --no-index package.json src/index.ts'),
+        context,
+      ),
+    ).toBe(true)
+    expect(
+      gitShellExplicitDenyReason(
+        analyzeShellCommand('git -C /tmp status'),
+        context,
+      ),
+    ).toBe('repository_override')
+    expect(
+      gitShellExplicitDenyReason(
+        analyzeShellCommand('git diff --no-index package.json /etc/passwd'),
+        context,
+      ),
+    ).toBe('no_index_containment')
   })
 })

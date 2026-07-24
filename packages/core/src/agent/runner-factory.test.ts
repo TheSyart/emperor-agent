@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ToolRegistry } from '../tools/registry'
 import { buildRoutedRunner } from './runner-factory'
-import type { TurnContinuationEvaluator } from './turn-continuation'
 
-describe('buildRoutedRunner continuation evaluator wiring', () => {
-  it('passes the isolated continuation evaluator only when explicitly supplied', () => {
-    const continuationEvaluator: TurnContinuationEvaluator = {
-      evaluate: vi.fn(),
-    }
+describe('buildRoutedRunner execution budget wiring', () => {
+  it('does not install the retired model continuation evaluator', () => {
     const runner = buildRoutedRunner({
       route: {
         snapshot: {
@@ -36,9 +32,43 @@ describe('buildRoutedRunner continuation evaluator wiring', () => {
       systemPrompt: 'system',
       tokenTracker: null,
       usageType: 'main_agent',
-      continuationEvaluator,
     })
 
-    expect(runner.continuationEvaluator).toBe(continuationEvaluator)
+    expect('continuationEvaluator' in runner).toBe(false)
+  })
+
+  it('preserves an explicit unlimited turn budget for the interactive main runner', () => {
+    const runner = buildRoutedRunner({
+      route: {
+        snapshot: {
+          provider: { chat: vi.fn() } as never,
+          providerName: 'openai',
+          providerLabel: 'OpenAI',
+          model: 'active-model',
+          apiBase: null,
+          generation: {
+            maxTokens: 2_000,
+            temperature: 0.1,
+            reasoningEffort: null,
+          },
+          contextWindowTokens: 128_000,
+          config: {},
+          supportsVision: false,
+          entryName: 'active-entry',
+          entryLabel: 'active-model',
+          routeReason: 'main_agent',
+        },
+        useCase: 'main_agent',
+        reason: 'main_agent',
+        estimatedTokens: null,
+      },
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      tokenTracker: null,
+      usageType: 'main_agent',
+      maxTurns: null,
+    })
+
+    expect(runner.maxTurns).toBeNull()
   })
 })

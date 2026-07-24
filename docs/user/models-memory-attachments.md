@@ -81,6 +81,8 @@ Chat 压缩主要更新全局长期记忆和用户档案；Build 压缩把项目
 
 达到 token threshold 时，Core 会在最终回复已经保存后自动执行同一套语义压缩，不需要环境变量或日志轮转触发。连续失败三次后会停止自动重试并留下 degraded 诊断；手动 `/compact` 仍是独立操作。自动压缩只处理 history 副本，不会把局部 microcompact 或 provider 请求裁剪反写到权威会话历史。
 
+当前手动与自动压缩统一使用版本化 JSON draft、schema/scope repair 和原子 patch commit。旧 XML `compact_prompt.md` 与“返回完整 MEMORY/USER 文件”的覆盖式链路已经移除；压缩失败时不会回退到旧 XML 协议。
+
 ## 附件
 
 Composer 一次最多保留 5 个待发送附件。支持：

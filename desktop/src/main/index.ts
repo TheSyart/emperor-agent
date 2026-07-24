@@ -38,6 +38,9 @@ import {
   type TrustedRendererPolicy,
 } from './trusted-renderer'
 import { mainWindowWebPreferences } from './window-security'
+import { NodePtyHost } from './terminal-host'
+import { TerminalEventBridge } from './terminal-event-bridge'
+import { TERMINAL_SUBSCRIPTION_CHANNEL } from '../shared/ipc-contract'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
@@ -54,6 +57,7 @@ const appIconPath = resolveAppIconPath({
 
 let coreApi: CoreApi | null = null
 const coreEventBridge = new CoreEventBridge()
+const terminalEventBridge = new TerminalEventBridge()
 let runtimeReady = false
 let mainWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
@@ -75,6 +79,34 @@ const trustedPetPolicy = createTrustedRendererPolicy({
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
 })
+
+ipcMain.on(TERMINAL_SUBSCRIPTION_CHANNEL, (event, payload: unknown) => {
+  trustedRendererPolicy.authorizeIpc(event)
+  terminalEventBridge.setSubscription(
+    event.sender,
+    terminalSubscription(payload),
+  )
+})
+
+function terminalSubscription(
+  payload: unknown,
+): { sessionId: string; terminalId: string } | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+    return null
+  const record = payload as Record<string, unknown>
+  const sessionId =
+    typeof record.sessionId === 'string' ? record.sessionId.trim() : ''
+  const terminalId =
+    typeof record.terminalId === 'string' ? record.terminalId.trim() : ''
+  if (
+    !sessionId ||
+    !terminalId ||
+    sessionId.length > 256 ||
+    terminalId.length > 256
+  )
+    return null
+  return { sessionId, terminalId }
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -265,6 +297,7 @@ function createWindow(): void {
     webPreferences: mainWindowWebPreferences(mainDir),
   })
   coreEventBridge.attach(mainWindow.webContents)
+  terminalEventBridge.attach(mainWindow.webContents)
   secureWindowNavigation(mainWindow, trustedRendererPolicy)
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
@@ -298,6 +331,7 @@ function createWindow(): void {
   })
   mainWindow.on('closed', () => {
     if (mainWindow) coreEventBridge.detach(mainWindow.webContents)
+    if (mainWindow) terminalEventBridge.detach(mainWindow.webContents)
     mainWindow = null
   })
 
@@ -425,6 +459,8 @@ async function startup(): Promise<void> {
         stateRoot: config.stateRoot,
         legacyRuntimeRoot: app.isPackaged ? legacyRuntimeRoot : null,
         legacyRuntimeSkillsHandled: app.isPackaged,
+        terminalHost: new NodePtyHost(),
+        terminalEventSink: terminalEventBridge.sink(),
       },
     })
     registerAppProtocol()

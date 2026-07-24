@@ -4,16 +4,23 @@ import {
   renderComposerInlineTokens,
 } from '../../capabilities/composerCapabilityTokens'
 import { isPathLikeSlashToken, slashCommands } from '../../commands'
-import type { ChatMessage, RuntimePlanRecord, UserMessage } from '../../types'
+import type {
+  ChatMessage,
+  RuntimePlanRecord,
+  TurnChangeSnapshot,
+  UserMessage,
+} from '../../types'
 import { avatarIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
+import TurnChangesCard from './TurnChangesCard.vue'
 
 const props = defineProps<{
   message: ChatMessage
   plans: RuntimePlanRecord[]
+  turnChange?: TurnChangeSnapshot
 }>()
-const emit = defineEmits<{ continueExecution: [] }>()
+const emit = defineEmits<{ continueExecution: []; openReview: [] }>()
 const schedulerClientIdPrefix = 'scheduler:'
 const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
 
@@ -166,10 +173,16 @@ function deliveryLabel(message: UserMessage): string {
       </div>
     </div>
   </article>
-  <AssistantFlow
-    v-else
-    :message="props.message"
-    :plans="props.plans"
-    @continue-execution="emit('continueExecution')"
-  />
+  <template v-else>
+    <AssistantFlow
+      :message="props.message"
+      :plans="props.plans"
+      @continue-execution="emit('continueExecution')"
+    />
+    <TurnChangesCard
+      v-if="props.turnChange"
+      :snapshot="props.turnChange"
+      @open-review="emit('openReview')"
+    />
+  </template>
 </template>

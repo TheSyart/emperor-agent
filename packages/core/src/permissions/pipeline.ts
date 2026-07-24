@@ -31,6 +31,7 @@ import {
 import {
   analyzeShellCommand,
   analyzeShellCommandFailClosed,
+  gitShellExplicitDenyReason,
   isShellAstReadonlySequence,
   shellAstSummary,
   type ShellAstAnalysis,
@@ -107,6 +108,24 @@ export class PermissionPipeline {
     )
     if (containment)
       return explainDecision(containment, resolution, profile, shellAnalysis)
+    const gitDenyReason =
+      shellAnalysis && profile.name === 'run_command'
+        ? gitShellExplicitDenyReason(shellAnalysis, opts ?? {})
+        : null
+    if (gitDenyReason) {
+      trace.push(traceEntry('core.git.explicit_deny', 'deny', gitDenyReason))
+      return explainDecision(
+        deny(
+          profile,
+          'core.git.explicit_deny',
+          `Git safety policy denied this command: ${gitDenyReason}.`,
+          trace,
+        ),
+        resolution,
+        profile,
+        shellAnalysis,
+      )
+    }
     for (const candidate of resolution.candidates) {
       if (!candidate.matched) continue
       trace.push(

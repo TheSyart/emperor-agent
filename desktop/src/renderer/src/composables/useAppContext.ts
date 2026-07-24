@@ -17,6 +17,7 @@ import type {
   QueueDraftRecovery,
   QueuedPromptItem,
   RuntimeStatus,
+  TurnChangeSnapshot,
   GoalProjectionState,
   GoalOperationResult,
   TokensPayload,
@@ -27,6 +28,7 @@ import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
 import type { LifecycleTransitionResult } from './composerLifecycle'
+import type { TurnChangeProjectionState } from '../runtime/turnChangeProjection'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -46,6 +48,8 @@ export interface AppContext {
   pending: PendingState
   planProjection: PlanProjection
   goalProjection: GoalProjectionState
+  turnChangeProjection: TurnChangeProjectionState
+  activeTurnChange: ComputedRef<TurnChangeSnapshot | null>
   goalCaptureState: Ref<GoalCaptureProjection>
   sessionId: Ref<string>
   sessionRuntimeStates: Record<string, { running: boolean; attention: boolean }>

@@ -65,6 +65,18 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
       })),
     },
     environment: { getStatus },
+    sessions: {
+      create: vi.fn(() => ({ id: 'packaged-smoke-build' })),
+    },
+    terminals: {
+      create: vi.fn(() => ({ id: 'terminal-smoke' })),
+      write: vi.fn(),
+      read: vi.fn(() => ({
+        chunks: [{ seq: 1, data: 'emperor-pty-smoke\r\n' }],
+        latestSeq: 1,
+      })),
+      close: vi.fn(),
+    },
     ...overrides,
   }
   return { core, getStatus }
@@ -154,6 +166,7 @@ describe('packaged smoke contract', () => {
       environment: { ok: true },
       glob: { ok: true },
       grep: { ok: true },
+      terminal: { ok: true, outputBytes: 19 },
       renderer: rendererReceipt(),
     })
     expect(receipt.installJobs).toEqual({ before: 0, after: 0 })

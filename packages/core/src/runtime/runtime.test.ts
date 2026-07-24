@@ -105,19 +105,6 @@ describe('runtime events (test_runtime_events.py)', () => {
     })
     expect(runtimeEventVisibility(String(mcpState.event))).toBe('diagnostic')
 
-    const message = { platform: 'fake', external_message_id: 'm1' }
-    expect(runtimeEvents.externalInbound(message)).toEqual({
-      event: 'external_inbound',
-      message,
-    })
-    expect(
-      runtimeEvents.externalQueued(message, { reason: 'busy' }).reason,
-    ).toBe('busy')
-    expect(
-      runtimeEvents.externalOutboundSent(message, { delivery: { ok: true } })
-        .delivery,
-    ).toEqual({ ok: true })
-
     const session = { id: 's1', title: '新会话' }
     expect(
       runtimeEvents.sessionCreated(session, { clientDraftId: 'draft-1' }),

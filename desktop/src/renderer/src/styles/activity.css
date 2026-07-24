@@ -344,9 +344,9 @@
 }
 
 .tool-group-card {
-  @apply relative w-full max-w-full overflow-visible rounded-md border text-sm;
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
+  @apply relative w-full max-w-full overflow-visible rounded-md text-sm;
+  border: 0;
+  background: transparent;
 }
 
 .tool-group-card.running {
@@ -365,7 +365,7 @@
 }
 
 .tool-group-summary {
-  @apply grid cursor-pointer items-center gap-2.5 px-3 py-2.5;
+  @apply grid cursor-pointer items-center gap-2 px-1 py-1.5;
   grid-template-columns: auto minmax(0, 1fr) auto;
   list-style: none;
 }
@@ -375,8 +375,7 @@
 }
 
 .tool-group-icon {
-  @apply grid size-7 shrink-0 place-items-center rounded border;
-  border-color: rgb(var(--border));
+  @apply grid size-6 shrink-0 place-items-center rounded;
   color: rgb(var(--fg-muted));
   background: rgb(var(--bg-inset));
 }
@@ -386,7 +385,7 @@
 }
 
 .tool-group-main strong {
-  @apply min-w-0 truncate font-mono text-[13px] font-semibold;
+  @apply min-w-0 truncate text-[13px] font-medium;
   color: rgb(var(--fg));
 }
 
@@ -416,7 +415,7 @@
 }
 
 .tool-group-body {
-  @apply grid gap-2 border-t px-2.5 py-2.5;
+  @apply grid gap-2 border-t px-1 py-2;
   border-color: rgb(var(--border));
   background: rgb(var(--bg) / 0.34);
 }
@@ -434,10 +433,10 @@
 }
 
 .tool-group-tool-row {
-  @apply rounded-md border;
-  border-color: rgb(var(--border) / 0.72);
-  background: rgb(var(--bg) / 0.2);
-  overflow: hidden;
+  @apply grid w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  border-color: transparent;
+  background: transparent;
 }
 
 .tool-group-tool-row.running {
@@ -447,6 +446,16 @@
 .tool-group-tool-row.error,
 .tool-group-tool-row.error_aborted {
   border-color: rgb(var(--danger) / 0.36);
+}
+
+.tool-group-tool-row:hover,
+.tool-group-tool-row.selected {
+  border-color: rgb(var(--border) / 0.72);
+  background: rgb(var(--bg-inset));
+}
+
+.tool-group-tool-list {
+  @apply grid gap-0.5;
 }
 
 .tool-group-tool-head {
@@ -491,6 +500,11 @@
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+.tool-group-selected-detail {
+  max-height: 340px;
+  overflow: auto;
 }
 
 .tool-raw-details {
@@ -969,8 +983,8 @@
 
 /* ── Subagent timeline ───────────────────────────────────────────────────── */
 .agent-timeline {
-  @apply relative mt-3 space-y-3 border-l pl-4;
-  border-color: rgb(var(--border));
+  @apply relative mt-2 space-y-1.5 border-l pl-3.5;
+  border-color: rgb(var(--border) / 0.62);
 }
 
 .agent-node {
@@ -979,8 +993,9 @@
 
 .agent-node::before {
   content: '';
-  @apply absolute -left-[1.36rem] top-4 size-2 rounded-full;
+  @apply absolute -left-[1.08rem] top-[0.9rem] size-1.5 rounded-full;
   background: rgb(var(--fg-subtle));
+  box-shadow: 0 0 0 3px rgb(var(--bg));
 }
 
 .agent-node.running::before {
@@ -998,11 +1013,25 @@
 }
 
 .agent-node-head {
-  @apply grid cursor-pointer items-center gap-2 rounded-md border px-3 py-2;
+  @apply grid cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-inset));
+  border-color: transparent;
+  background: transparent;
   list-style: none;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.agent-node-head:hover,
+.agent-node[open] > .agent-node-head {
+  border-color: rgb(var(--border) / 0.7);
+  background: rgb(var(--bg-inset) / 0.56);
+}
+
+.agent-node.running > .agent-node-head {
+  border-color: rgb(var(--warn) / 0.22);
+  background: rgb(var(--warn) / 0.045);
 }
 
 .agent-node-head::-webkit-details-marker {
@@ -1014,25 +1043,26 @@
 }
 
 .agent-node-title > span {
-  @apply font-mono text-[10px] uppercase tracking-wider;
+  @apply font-mono text-[9px] uppercase tracking-wider;
   color: rgb(var(--fg-subtle));
 }
 
 .agent-node-title strong {
-  @apply truncate text-[13px] font-semibold;
+  @apply truncate text-xs font-medium;
   color: rgb(var(--fg));
 }
 
 .agent-node-title small {
-  @apply truncate text-xs;
+  @apply truncate text-[11px];
   color: rgb(var(--fg-muted));
 }
 
 .agent-role-badge,
 .agent-state-badge,
 .agent-duration {
-  @apply shrink-0 rounded border px-2 py-0.5 font-mono text-[10px];
-  border-color: rgb(var(--border));
+  @apply shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px];
+  border: 0;
+  background: rgb(var(--bg-inset) / 0.72);
   color: rgb(var(--fg-subtle));
 }
 
@@ -1050,19 +1080,21 @@
 }
 
 .agent-node-body {
-  @apply ml-1 mt-2 space-y-3 rounded-md border px-3 py-3;
-  border-color: rgb(var(--border));
+  @apply ml-1 mt-1.5 max-h-[22rem] space-y-2.5 overflow-auto rounded-md border px-3 py-2.5;
+  border-color: rgb(var(--border) / 0.72);
+  background: rgb(var(--bg-inset) / 0.28);
 }
 
 .agent-thinking,
 .agent-summary {
-  @apply min-w-0 break-words rounded-md border px-3 py-2 text-xs leading-6;
-  border-color: rgb(var(--border));
+  @apply min-w-0 break-words rounded-md px-2.5 py-2 text-xs leading-6;
+  border: 0;
+  background: rgb(var(--bg) / 0.44);
   color: rgb(var(--fg));
 }
 
 .agent-summary {
-  border-color: rgb(var(--ok) / 0.3);
+  box-shadow: inset 2px 0 0 rgb(var(--ok) / 0.48);
   color: rgb(var(--fg-muted));
 }
 

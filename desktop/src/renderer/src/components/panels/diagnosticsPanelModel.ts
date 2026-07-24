@@ -9,7 +9,6 @@ import type {
   HybridMemoryDiagnosticsPayload,
   LifecycleDiagnosticsPayload,
   DiagnosticsRuntimePaths,
-  ExternalDiagnosticsPayload,
   LegacyStateMigrationPayload,
   MemoryContextExplanationPayload,
   ProjectLegacyPrivateDataPayload,
@@ -139,12 +138,9 @@ export function diagnosticRows(
       ],
     },
     {
-      id: 'external',
-      title: '外部能力',
-      rows: [
-        externalRow(diagnostics.external),
-        desktopPetRow(diagnostics.desktopPet),
-      ],
+      id: 'desktop',
+      title: '桌面能力',
+      rows: [desktopPetRow(diagnostics.desktopPet)],
     },
     {
       id: 'dependencies',
@@ -828,74 +824,6 @@ function contextModeDetail(
       ? `${sessionId} / ${turnId}`
       : joinParts([sessionId, turnId])
   return joinParts([pair, String(explanation.reason || '')])
-}
-
-function externalRow(
-  external: ExternalDiagnosticsPayload | undefined,
-): DiagnosticRow {
-  const pending = numberOrZero(external?.inbox?.pending)
-  const errors = count(external?.recentErrors)
-  const backups = count(external?.store?.corruptBackups)
-  const adapters = external?.adapters ?? []
-  const ready = adapters.filter((adapter) => adapter.state === 'ready').length
-  const unhealthy = adapters.filter(
-    (adapter) =>
-      ['auth_failed', 'degraded'].includes(String(adapter.state)) ||
-      adapter.configuration?.status === 'invalid',
-  )
-  const auditFailures = adapters.reduce(
-    (sum, adapter) => sum + numberOrZero(adapter.audit?.writeFailures),
-    0,
-  )
-  const auditBadLines = adapters.reduce(
-    (sum, adapter) => sum + numberOrZero(adapter.audit?.badLines),
-    0,
-  )
-  const tone: DiagnosticTone =
-    errors || backups || unhealthy.length || auditFailures || auditBadLines
-      ? 'error'
-      : ready
-        ? 'ok'
-        : external?.running
-          ? 'warn'
-          : 'muted'
-  const adapterDetail = adapters
-    .map((adapter) => {
-      const name = adapter.display_name || adapter.name || 'adapter'
-      const state = adapter.state || 'unknown'
-      const mode = adapter.effectiveMode || adapter.requestedMode || 'off'
-      const accepted = numberOrZero(adapter.accepted)
-      const rejected = numberOrZero(adapter.rejected)
-      const sent = numberOrZero(adapter.outboundSent)
-      const dead = numberOrZero(adapter.outboundDeadLetter)
-      const reason = adapter.lastReason ? ` · reason ${adapter.lastReason}` : ''
-      return `${name}: ${state}/${mode} · in ${accepted}/${rejected} · out ${sent}/${dead}${reason}`
-    })
-    .join(' · ')
-  const auditPath = adapters.find((adapter) => adapter.audit?.path)?.audit?.path
-  return {
-    id: 'external-bridge',
-    label: 'External Bridge',
-    value: external
-      ? ready
-        ? `${ready}/${adapters.length} adapter 已就绪`
-        : external.running
-          ? '桥接已启动，adapter 未启用'
-          : '已停止'
-      : '未返回',
-    detail: joinParts([
-      adapterDetail,
-      `${pending} 条待处理`,
-      errors ? `${errors} 个近期错误` : '',
-      backups ? `${backups} 个腐化备份` : '',
-      unhealthy.length ? `${unhealthy.length} 个 adapter 异常` : '',
-      auditFailures ? `${auditFailures} 个审计写入失败` : '',
-      auditBadLines ? `${auditBadLines} 个审计坏行` : '',
-      external?.store?.path || auditPath || '',
-    ]),
-    tone,
-    path: external?.store?.path || auditPath || undefined,
-  }
 }
 
 function desktopPetRow(

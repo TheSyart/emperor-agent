@@ -253,38 +253,6 @@ export function sessionTitleUpdated(session: EventPayload): EventPayload {
   return runtimeEvent('session_title_updated', { session })
 }
 
-export function externalInbound(message: EventPayload): EventPayload {
-  return runtimeEvent('external_inbound', { message })
-}
-
-export function externalQueued(
-  message: EventPayload,
-  opts: { reason: string },
-): EventPayload {
-  return runtimeEvent('external_queued', { message, reason: opts.reason })
-}
-
-export function externalOutboundQueued(message: EventPayload): EventPayload {
-  return runtimeEvent('external_outbound_queued', { message })
-}
-
-export function externalOutboundSent(
-  message: EventPayload,
-  opts: { delivery: EventPayload },
-): EventPayload {
-  return runtimeEvent('external_outbound_sent', {
-    message,
-    delivery: opts.delivery,
-  })
-}
-
-export function externalOutboundError(
-  message: EventPayload,
-  opts: { error: string },
-): EventPayload {
-  return runtimeEvent('external_outbound_error', { message, error: opts.error })
-}
-
 export function schedulerJobUpdate(
   job: EventPayload,
   opts: { action: string },

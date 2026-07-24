@@ -139,6 +139,10 @@ export interface ToolExecutionContext {
   signal?: AbortSignal | null
   /** Subagent supervisor depth; main turns are 0 and children cannot exceed 1. */
   subagentDepth?: number
+  /** Normalized parent conversation used only by an explicit fork subagent. */
+  parentContext?: Array<Record<string, unknown>>
+  /** Stable parent system contract inherited only by an explicit fork. */
+  parentSystemPrompt?: string | null
 }
 
 // ── tool base ──
@@ -160,6 +164,7 @@ export abstract class Tool {
   requiresRuntimeContext = false
   maxResultChars = 12_000
   concurrencySafe = false
+  workspaceMutation = false
   evidencePolicy: ToolEvidencePolicy = 'context_only'
   classifiesStringErrors = false
 
@@ -174,6 +179,11 @@ export abstract class Tool {
 
   isConcurrencySafe(_args?: Record<string, unknown>): boolean {
     return this.concurrencySafe && !this.exclusive
+  }
+
+  /** Only direct local workspace writers participate in the Git/workspace lease. */
+  mutatesWorkspace(_args: Record<string, unknown>): boolean {
+    return this.workspaceMutation
   }
 
   /** 可选：返回该调用影响的路径（供权限画像/敏感路径判定）。对齐 `get_path(arguments)`。 */

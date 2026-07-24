@@ -11,6 +11,7 @@ import type {
   ToolStatus,
 } from '../../types'
 import { toolTitle } from './toolDisplay'
+import { toolBatchTitle } from './toolGroupModel'
 
 export type AssistantFlowBlock =
   | {
@@ -38,6 +39,13 @@ export interface ProjectAssistantFlowOptions {
 }
 
 const THOUGHT_MIN_DURATION_MS = 120
+const ABSORBED_TOOL_NAMES = new Set([
+  'ask_user',
+  'propose_plan',
+  'update_todos',
+  'complete_plan_step',
+])
+const MIN_VISIBLE_TODO_ITEMS = 3
 
 export function projectAssistantFlow(
   message: AssistantMessage,
@@ -96,15 +104,30 @@ export function projectAssistantFlow(
 
     if (segment.type === 'tool') {
       const group = [segment]
-      blocks.push({
-        kind: 'tool_group',
-        id: `tool-group-${group.map((item) => item.toolId || item.id).join('-')}`,
-        title: toolGroupTitle(group),
-        status: toolGroupStatus(group),
-        tools: group,
-        durationMs: toolGroupDuration(group),
-      })
-      const media = mediaArtifacts(group)
+      let cursor = index + 1
+      while (
+        visible[cursor]?.type === 'tool' &&
+        belongsToSameToolBatch(segment, visible[cursor] as ToolSegment)
+      ) {
+        group.push(visible[cursor] as ToolSegment)
+        cursor += 1
+      }
+      const batchIdentity =
+        segment.batchId || group.map((item) => item.toolId || item.id).join('-')
+      const timelineTools = group.filter(
+        (tool) => !ABSORBED_TOOL_NAMES.has(tool.name),
+      )
+      if (timelineTools.length) {
+        blocks.push({
+          kind: 'tool_group',
+          id: `tool-group-${batchIdentity}`,
+          title: toolGroupTitle(timelineTools),
+          status: toolGroupStatus(timelineTools),
+          tools: timelineTools,
+          durationMs: toolGroupDuration(timelineTools),
+        })
+      }
+      const media = mediaArtifacts(timelineTools)
       if (media.length) {
         blocks.push({
           kind: 'media',
@@ -113,14 +136,15 @@ export function projectAssistantFlow(
         })
       }
       const todos = latestToolTodos(group)
-      if (todos?.todos.length) {
+      const visibleTodos = independentTodos(todos?.todos)
+      if (visibleTodos.length >= MIN_VISIBLE_TODO_ITEMS) {
         blocks.push({
           kind: 'todos',
-          id: `todos-${todos.id}`,
-          todos: todos.todos,
+          id: `todos-${todos?.id || batchIdentity}`,
+          todos: visibleTodos,
         })
       }
-      index += 1
+      index = cursor
       continue
     }
 
@@ -139,14 +163,19 @@ export function projectAssistantFlow(
     index += 1
   }
 
+  const fallbackTodos = independentTodos(message.todos)
   if (
-    message.todos?.length &&
+    fallbackTodos.length >= MIN_VISIBLE_TODO_ITEMS &&
     !blocks.some((block) => block.kind === 'todos')
   ) {
-    blocks.push({ kind: 'todos', id: 'todos-fallback', todos: message.todos })
+    blocks.push({ kind: 'todos', id: 'todos-fallback', todos: fallbackTodos })
   }
 
   return blocks
+}
+
+function independentTodos(todos: TodoItem[] | null | undefined): TodoItem[] {
+  return (todos || []).filter((todo) => !String(todo.plan_step_id ?? '').trim())
 }
 
 function mediaArtifacts(tools: ToolSegment[]): MediaArtifactRef[] {
@@ -217,6 +246,12 @@ function visibleSegment(segment: AssistantSegment) {
 function visibleThoughtSummary(segment: ThoughtSegment) {
   const summary = segment.summary?.trim()
   if (!summary) return false
+  if (
+    segment.stage === 'tool_intent' &&
+    segment.source === 'audit' &&
+    segment.toolIds?.length
+  )
+    return false
   if (segment.stage !== 'tool_result_summary') return true
   return /失败|出错|中断|未返回|识别到|图片|media|artifact/i.test(summary)
 }
@@ -231,7 +266,13 @@ function toolGroupStatus(tools: ToolSegment[]): ToolStatus {
 }
 
 function toolGroupTitle(tools: ToolSegment[]) {
-  return toolTitle(tools[0])
+  return tools.length === 1 ? toolTitle(tools[0]) : toolBatchTitle(tools)
+}
+
+function belongsToSameToolBatch(first: ToolSegment, next: ToolSegment) {
+  if (first.batchId || next.batchId)
+    return Boolean(first.batchId && first.batchId === next.batchId)
+  return true
 }
 
 function toolGroupDuration(tools: ToolSegment[]) {

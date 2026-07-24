@@ -800,7 +800,7 @@ describe('GoalPlanBridge.bindApprovedPlan', () => {
 })
 
 describe('GoalPlanBridge.skipStepWithWaiver', () => {
-  it('persists a trusted skip, advances the successor, and synchronizes task and Todo bindings', async () => {
+  it('persists a trusted skip, advances the successor, and leaves Todo independent', async () => {
     const root = tmp('emperor-goal-plan-production-skip-')
     const goalStore = new GoalStore(root)
     const goal = await planningGoal(goalStore, 'goal_production_skip')
@@ -812,7 +812,6 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       goalStore,
       planStore: manager.planStore,
       taskManager,
-      todoStore,
       resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
         kind: 'explicit_user_plan_step_waiver',
         issuedBy: 'core',
@@ -858,20 +857,7 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
         approval_generation: Number(before.metadata.approval_generation),
       },
     })
-    expect(todoStore.todos).toMatchObject([
-      {
-        plan_id: planId,
-        plan_step_id: 'step_1',
-        approval_generation: Number(before.metadata.approval_generation),
-        status: 'completed',
-      },
-      {
-        plan_id: planId,
-        plan_step_id: 'step_2',
-        approval_generation: Number(before.metadata.approval_generation),
-        status: 'in_progress',
-      },
-    ])
+    expect(todoStore.todos).toEqual([])
     const duplicate = await bridge.skipStepWithWaiver({
       goalId: goal.id,
       planId,
@@ -897,7 +883,6 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       goalStore,
       planStore: manager.planStore,
       taskManager,
-      todoStore,
       resolveStepWaiver: () => null,
     })
     await bridge.bindApprovedPlan({ goalId: goal.id, planId })
@@ -918,37 +903,18 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
     expect(todoStore.todos).toEqual(beforeTodos)
   })
 
-  it.each([
-    'plan',
-    'task_cancel',
-    'task_update',
-    'todo',
-    'completion',
-  ] as const)(
+  it.each(['plan', 'task_cancel', 'task_update', 'completion'] as const)(
     'recovers a durable skip after a %s persistence failure',
     async (failure) => {
       const root = tmp(`emperor-goal-plan-skip-recovery-${failure}-`)
       const goalStore = new GoalStore(root)
       const goal = await planningGoal(goalStore, `goal_skip_${failure}`)
-      const { manager, taskManager, todoStore, planId } = approvedGoalPlan(
-        root,
-        goal,
-      )
+      const { manager, taskManager, planId } = approvedGoalPlan(root, goal)
       const beforeBind = manager.planStore.get(planId)!
-      const bridgeTodo =
-        failure === 'todo'
-          ? {
-              todos: [],
-              syncFromPlanSteps(): string {
-                throw new Error('injected persistent Todo sync failure')
-              },
-            }
-          : todoStore
       const bridge = new GoalPlanBridge({
         goalStore,
         planStore: manager.planStore,
         taskManager,
-        todoStore: bridgeTodo,
         resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
           kind: 'explicit_user_plan_step_waiver',
           issuedBy: 'core',
@@ -1003,9 +969,7 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
           ? 'intent_persisted'
           : failure === 'completion'
             ? 'todo_synced'
-            : failure === 'todo'
-              ? 'tasks_synced'
-              : 'plan_skipped'
+            : 'plan_skipped'
       expect(skipIntentStage(failed)).toBe(expectedStage)
       expect(
         new ControlManager(root).planStore.isExecutionBlocked(planId),
@@ -1018,55 +982,16 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
         }),
       ).toBeNull()
 
-      if (failure === 'todo') {
-        const persistent = new GoalPlanBridge({
-          goalStore: new GoalStore(root),
-          planStore: new ControlManager(root).planStore,
-          taskManager: new TaskManager(root),
-          todoStore: bridgeTodo,
-        })
-        const beforePersistent = new ControlManager(root).planStore.get(planId)!
-        await expect(persistent.recoverIncompleteSkips()).rejects.toThrow(
-          /persistent Todo/,
-        )
-        expect(new ControlManager(root).planStore.get(planId)!.eventSeq).toBe(
-          beforePersistent.eventSeq,
-        )
-        expect(
-          new ControlManager(root).planStore.isExecutionBlocked(planId),
-        ).toBe(true)
-      }
-
       const recoveredTasks = new TaskManager(root)
       const recoveredTodos = new TodoStore()
       const recovered = new GoalPlanBridge({
         goalStore: new GoalStore(root),
         planStore: new ControlManager(root).planStore,
         taskManager: recoveredTasks,
-        todoStore: recoveredTodos,
       })
       const recovery = await recovered.recoverIncompleteSkips()
       expect(recovery).toMatchObject({
         count: 1,
-        todoProjections: [
-          {
-            sessionId: goal.scope.sessionId,
-            planId,
-            approvalGeneration: Number(before.metadata.approval_generation),
-            todos: [
-              {
-                plan_id: planId,
-                plan_step_id: 'step_1',
-                status: 'completed',
-              },
-              {
-                plan_id: planId,
-                plan_step_id: 'step_2',
-                status: 'in_progress',
-              },
-            ],
-          },
-        ],
       })
       const finalStore = new ControlManager(root).planStore
       const final = finalStore.get(planId)!
@@ -1090,24 +1015,10 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
         )
       expect(running).toHaveLength(1)
       expect(running[0]?.metadata.plan_step_id).toBe('step_2')
-      expect(recoveredTodos.todos).toMatchObject([
-        {
-          plan_id: planId,
-          plan_step_id: 'step_1',
-          approval_generation: Number(before.metadata.approval_generation),
-          status: 'completed',
-        },
-        {
-          plan_id: planId,
-          plan_step_id: 'step_2',
-          approval_generation: Number(before.metadata.approval_generation),
-          status: 'in_progress',
-        },
-      ])
+      expect(recoveredTodos.todos).toEqual([])
       const completedSeq = final.eventSeq
       expect(await recovered.recoverIncompleteSkips()).toEqual({
         count: 0,
-        todoProjections: [],
       })
       expect(finalStore.get(planId)!.eventSeq).toBe(completedSeq)
 
@@ -1239,24 +1150,13 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       goalStore,
       planStore: manager.planStore,
       taskManager,
-      todoStore: todos,
     })
     const result = await recovery.recoverIncompleteSkips()
 
     expect(result).toMatchObject({
       count: 1,
-      todoProjections: [
-        {
-          sessionId: goal.scope.sessionId,
-          planId: currentPlan.id,
-          approvalGeneration: currentIntent.approval_generation,
-        },
-      ],
     })
-    expect(todos.todos).toMatchObject([
-      { plan_id: currentPlan.id, plan_step_id: 'step_1' },
-      { plan_id: currentPlan.id, plan_step_id: 'step_2' },
-    ])
+    expect(todos.todos).toEqual([])
     expect(skipIntentStage(manager.planStore.get(currentPlan.id)!)).toBe(
       'completed',
     )
@@ -1270,17 +1170,10 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
     const goalStore = new GoalStore(root)
     const goal = await planningGoal(goalStore, 'goal_skip_review_block')
     const { manager, taskManager, planId } = approvedGoalPlan(root, goal)
-    const failingTodo = {
-      todos: [],
-      syncFromPlanSteps(): string {
-        throw new Error('injected Todo review failure')
-      },
-    }
     const bridge = new GoalPlanBridge({
       goalStore,
       planStore: manager.planStore,
       taskManager,
-      todoStore: failingTodo,
       resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
         kind: 'explicit_user_plan_step_waiver',
         issuedBy: 'core',
@@ -1301,6 +1194,14 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
           : step,
       ),
     })
+    const originalSave = manager.planStore.save.bind(manager.planStore)
+    manager.planStore.save = ((candidate: PlanRecord) => {
+      const intent = candidate.metadata.goal_skip_intent as
+        Record<string, unknown> | undefined
+      if (intent?.stage === 'completed')
+        throw new Error('injected skip completion failure')
+      return originalSave(candidate)
+    }) as typeof manager.planStore.save
 
     await expect(
       bridge.skipStepWithWaiver({
@@ -1308,10 +1209,11 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
         planId,
         stepId: 'step_1',
       }),
-    ).rejects.toThrow(/Todo review/)
+    ).rejects.toThrow(/completion failure/)
+    manager.planStore.save = originalSave
 
     expect(manager.planStore.get(planId)?.status).toBe(PlanStatus.COMPLETED)
-    expect(skipIntentStage(manager.planStore.get(planId)!)).toBe('tasks_synced')
+    expect(skipIntentStage(manager.planStore.get(planId)!)).toBe('todo_synced')
     expect(manager.latestReviewablePlan()).toBeNull()
     expect((await bridge.currentPlanAssessment(goal.id)).status).toBe('invalid')
   })
@@ -1320,10 +1222,7 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
     const root = tmp('emperor-goal-plan-skip-concurrent-')
     const bootstrap = new GoalStore(root)
     const goal = await planningGoal(bootstrap, 'goal_skip_concurrent')
-    const { manager, taskManager, todoStore, planId } = approvedGoalPlan(
-      root,
-      goal,
-    )
+    const { manager, taskManager, planId } = approvedGoalPlan(root, goal)
     await new GoalPlanBridge({
       goalStore: bootstrap,
       planStore: manager.planStore,
@@ -1366,14 +1265,12 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       goalStore: new GoalStore(root),
       planStore: new ControlManager(root).planStore,
       taskManager,
-      todoStore,
       resolveStepWaiver: resolver,
     })
     const second = new GoalPlanBridge({
       goalStore: new GoalStore(root),
       planStore: new ControlManager(root).planStore,
       taskManager,
-      todoStore,
       resolveStepWaiver: resolver,
     })
 
@@ -1413,12 +1310,6 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       goalStore,
       planStore: manager.planStore,
       taskManager,
-      todoStore: {
-        todos: [],
-        syncFromPlanSteps(): string {
-          throw new Error('injected isolated Todo failure')
-        },
-      },
       resolveStepWaiver: ({ goalId, planId: sourcePlanId, stepId }) => ({
         kind: 'explicit_user_plan_step_waiver',
         issuedBy: 'core',
@@ -1430,15 +1321,24 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
       }),
     })
     await bridge.bindApprovedPlan({ goalId: goal.id, planId })
+    const originalSave = manager.planStore.save.bind(manager.planStore)
+    manager.planStore.save = ((candidate: PlanRecord) => {
+      const intent = candidate.metadata.goal_skip_intent as
+        Record<string, unknown> | undefined
+      if (intent?.stage === 'completed')
+        throw new Error('injected isolated completion failure')
+      return originalSave(candidate)
+    }) as typeof manager.planStore.save
     await expect(
       bridge.skipStepWithWaiver({
         goalId: goal.id,
         planId,
         stepId: 'step_1',
       }),
-    ).rejects.toThrow(/isolated Todo/)
+    ).rejects.toThrow(/isolated completion/)
+    manager.planStore.save = originalSave
     const interrupted = manager.planStore.get(planId)!
-    expect(skipIntentStage(interrupted)).toBe('tasks_synced')
+    expect(skipIntentStage(interrupted)).toBe('todo_synced')
 
     manager.planStore.quarantine(planId, 'stale_approval_sidecar')
     expect(await bridge.recoverQuarantinedApprovals()).toBe(1)
@@ -1450,7 +1350,7 @@ describe('GoalPlanBridge.skipStepWithWaiver', () => {
     const unchanged = manager.planStore.get(planId)!
     expect(unchanged.status).toBe(PlanStatus.EXECUTING)
     expect(unchanged.eventSeq).toBe(interrupted.eventSeq)
-    expect(skipIntentStage(unchanged)).toBe('tasks_synced')
+    expect(skipIntentStage(unchanged)).toBe('todo_synced')
     expect(manager.planStore.isExecutionBlocked(planId)).toBe(true)
   })
 })

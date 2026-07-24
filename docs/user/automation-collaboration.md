@@ -58,50 +58,6 @@ Hooks 可以返回 allow、ask、deny 或 passthrough，但不能覆盖 workspac
 
 桌宠可以投影空闲、工作、派遣队友等状态，但不能代替真实 task/Goal 状态。桌宠触发的 mutation 同样受 pending Ask/Plan 和 CoreApi guard 约束。
 
-## External Bridge 与 Watchlist
+## Watchlist
 
-这两项仍没有普通用户连接器 UI：
-
-- External Bridge 内置一个默认关闭的 `signed-webhook` operator preview。它不是 Slack、邮件或社交平台 adapter，只接收经受信反向代理或自有 connector 转发到本机 loopback 的严格 v1 JSON；
-- `off` 不做网络操作，`eval` 只检查配置、credential 和 capability，`on` 才监听。配置保存在 `stateRoot/external_config.json`；secret 值不写文件，只填写 `secretEnv` 并由启动 Emperor 的受信环境提供至少 32 bytes 的值。Listener 只允许 `127.0.0.1`、`::1` 或 `localhost`，outbound 只允许固定 HTTPS URL；
-- Inbound 使用 HMAC-SHA256、timestamp、nonce、请求体上限和 token bucket，再进入持久 dedupe ledger。失败可以按 attempt policy 重试，达到上限进入 dead-letter；终态受 TTL/容量约束，活跃 lease 不会被回收；
-- Agent reply 在 inbound `dispatched` 后单独发送，带稳定 `Idempotency-Key`。远端 4xx/5xx、redirect、timeout 或网络失败只把 delivery 记为 dead-letter，不会重跑 Agent；审计位于 `stateRoot/external/audit.jsonl`，不保存消息正文、secret 或原始 header；
-- Watchlist 供受控检查和 Scheduler 维护链路使用，不是独立用户订阅产品。
-
-最小 `on` 配置如下；`sessionId` 必须是已经存在、未归档的真实会话，修改后重启应用：
-
-```json
-{
-  "version": 1,
-  "signedWebhook": {
-    "mode": "on",
-    "bindHost": "127.0.0.1",
-    "port": 9876,
-    "path": "/v1/external/events",
-    "sessionId": "<real-session-id>",
-    "keyId": "operator-key",
-    "secretEnv": "EMPEROR_EXTERNAL_WEBHOOK_SECRET",
-    "outboundUrl": "https://connector.example/emperor/replies"
-  }
-}
-```
-
-Connector 对 exact raw body 计算 `HMAC-SHA256(secret, "<timestamp>.<nonce>.<raw-body>")`，发送 `X-Emperor-Key-Id`、`X-Emperor-Timestamp`、`X-Emperor-Nonce` 和 `X-Emperor-Signature: sha256=<hex>`。Ingress body 固定为：
-
-```json
-{
-  "version": 1,
-  "message": {
-    "id": "provider-stable-message-id",
-    "senderId": "remote-user",
-    "targetId": "remote-thread",
-    "content": "untrusted message"
-  }
-}
-```
-
-未知字段会被拒绝；remote payload 不能提供 session、attachment path、metadata、tool、permission 或 config。`202` 只表示本地 durable admission 已接受，最终 Agent/delivery 结果应从 Diagnostics、`external/state.json` 和脱敏 audit 判断。
-
-Diagnostics 会显示 adapter 的 `off/eval/on` 请求模式、实际状态、收发/拒绝/dead-letter 计数和审计路径。出现 `auth_failed` 时先检查 `secretEnv` 对应环境变量；出现 `degraded/session_unavailable` 时检查配置的真实 owner session 是否存在且未归档。不要把 listener 改成公网 bind，也不要把 secret、session ID 或 outbound URL放进项目配置、消息正文或模型提示。
-
-文档和界面不得把它们描述成现成的 Slack、邮件、社交平台或任意消息连接器。Transport 采用 at-least-once 语义；本地 dedupe 和 idempotency key 不能证明远端 exactly-once。
+Watchlist 供受控检查和 Scheduler 维护链路使用，不是独立用户订阅产品，也不提供 Slack、邮件或社交平台连接器。

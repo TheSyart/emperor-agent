@@ -28,13 +28,24 @@ interface RuntimeManifestHook {
 
 type AfterPackHook = (context: {
   appOutDir: string
+  electronPlatformName: string
+  arch: string | number
   packager: {
     appInfo: { version: string; productFilename: string }
   }
 }) => Promise<void>
 
 interface PackagedResourceHook {
-  validatePackagedAppResources(resourcesRoot: string): void
+  validatePackagedAppResources(
+    resourcesRoot: string,
+    platform?: string,
+    arch?: string,
+  ): void
+  targetNodePtyFiles(
+    root: string,
+    platform: string,
+    arch: string,
+  ): { binding: string; helper: string | null }
 }
 
 interface PreloadAudit {
@@ -100,6 +111,12 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('!node_modules{,/**/*}')
     expect(config).toContain('node_modules/typescript/package.json')
     expect(config).toContain('node_modules/typescript/lib/typescript.js')
+    expect(config).toContain('node_modules/node-pty/package.json')
+    expect(config).toContain('node_modules/node-pty/lib/**/*.js')
+    expect(config).toContain("'!node_modules/node-pty/lib/**/*.test.js'")
+    expect(config).toContain('node_modules/node-pty/prebuilds/**/*')
+    expect(config).toContain('node_modules/node-pty/build/Release/**/*')
+    expect(config).not.toContain('node_modules/node-pty/**/*')
     expect(config).toContain('from: ../assets/desktop-pet')
     expect(config).toContain(
       'from: ../config/examples/model_config.example.json',
@@ -140,8 +157,28 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(pkg.dependencies?.typescript).toMatch(/^\d+\.\d+\.\d+$/)
     expect(pkg.devDependencies?.typescript).toBeUndefined()
     expect(viteConfig).toContain('externalizeDepsPlugin')
-    expect(viteConfig).toContain("include: ['typescript']")
+    expect(viteConfig).toContain("include: ['typescript', 'node-pty']")
+    expect(pkg.scripts?.['terminal:smoke']).toContain('smoke-node-pty.cjs')
     expect(pkg.scripts?.build).toContain('node scripts/audit-preload.cjs')
+  })
+
+  it('selects the node-pty runtime for every supported package target', () => {
+    const hook = require(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+    ) as PackagedResourceHook
+
+    expect(hook.targetNodePtyFiles('/native', 'darwin', 'arm64')).toEqual({
+      binding: path.join('/native', 'prebuilds', 'darwin-arm64', 'pty.node'),
+      helper: path.join('/native', 'prebuilds', 'darwin-arm64', 'spawn-helper'),
+    })
+    expect(hook.targetNodePtyFiles('/native', 'win32', 'x64')).toEqual({
+      binding: path.join('/native', 'prebuilds', 'win32-x64', 'pty.node'),
+      helper: null,
+    })
+    expect(hook.targetNodePtyFiles('/native', 'linux', 'x64')).toEqual({
+      binding: path.join('/native', 'build', 'Release', 'pty.node'),
+      helper: path.join('/native', 'build', 'Release', 'spawn-helper'),
+    })
   })
 
   it('rejects ESM, Node builtins and oversized sandbox preload bundles', () => {
@@ -304,7 +341,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       JSON.stringify({
         name: 'emperor-agent-desktop',
         main: 'out/main/index.js',
-        dependencies: { typescript: '5.9.3' },
+        dependencies: { typescript: '5.9.3', 'node-pty': '1.1.0' },
       }),
     )
     const parserStage = path.join(appStage, 'node_modules', 'typescript', 'lib')
@@ -323,10 +360,34 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ),
       path.join(parserStage, 'typescript.js'),
     )
+    const ptyStage = path.join(appStage, 'node_modules', 'node-pty')
+    fs.mkdirSync(path.join(ptyStage, 'lib'), { recursive: true })
+    fs.copyFileSync(
+      path.join(desktopRoot, 'node_modules', 'node-pty', 'package.json'),
+      path.join(ptyStage, 'package.json'),
+    )
+    fs.writeFileSync(
+      path.join(ptyStage, 'lib', 'index.js'),
+      'module.exports={};\n',
+    )
     const asarPath = path.join(appOutDir, 'resources', 'app.asar')
     const payloadBytes = regularFileBytes(appStage)
     await createPackage(appStage, asarPath)
     await waitForCompleteAsar(asarPath, payloadBytes)
+    const ptyUnpacked = path.join(
+      appOutDir,
+      'resources',
+      'app.asar.unpacked',
+      'node_modules',
+      'node-pty',
+      'prebuilds',
+      'darwin-arm64',
+    )
+    fs.mkdirSync(ptyUnpacked, { recursive: true })
+    fs.writeFileSync(path.join(ptyUnpacked, 'pty.node'), 'native-fixture')
+    fs.writeFileSync(path.join(ptyUnpacked, 'spawn-helper'), 'helper', {
+      mode: 0o755,
+    })
     const petRoot = path.join(appOutDir, 'resources', 'desktop-pet')
     fs.mkdirSync(petRoot, { recursive: true })
     for (const file of petResourceFiles)
@@ -343,6 +404,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     await expect(
       afterPack({
         appOutDir,
+        electronPlatformName: 'darwin',
+        arch: 3,
         packager: {
           appInfo: { version: '0.1.0', productFilename: 'Emperor Agent' },
         },
@@ -350,11 +413,19 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     ).resolves.toBeUndefined()
 
     expect(() =>
-      afterPack.validatePackagedAppResources(path.join(appOutDir, 'resources')),
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      ),
     ).not.toThrow()
     fs.writeFileSync(path.join(petRoot, 'package.json'), '{}')
     expect(() =>
-      afterPack.validatePackagedAppResources(path.join(appOutDir, 'resources')),
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      ),
     ).toThrow(/desktop-pet/i)
     fs.rmSync(path.join(petRoot, 'package.json'))
 
@@ -362,6 +433,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     await expect(
       afterPack({
         appOutDir,
+        electronPlatformName: 'darwin',
+        arch: 3,
         packager: {
           appInfo: { version: '0.1.0', productFilename: 'Emperor Agent' },
         },

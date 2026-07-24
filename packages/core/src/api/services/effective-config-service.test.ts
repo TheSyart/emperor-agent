@@ -118,7 +118,6 @@ describe('CoreEffectiveConfigService', () => {
 
     expect(payload.entries.map((entry) => entry.key)).toEqual([
       'code.intelligence',
-      'external.signedWebhook',
       'mcp.config',
       'memory.hybrid',
       'permissions.rules',
@@ -245,7 +244,6 @@ describe('CoreEffectiveConfigService', () => {
     expect(first.revision).toMatch(/^[a-f0-9]{64}$/)
     expect(first.entries.map((entry) => entry.key)).toEqual([
       'code.intelligence',
-      'external.signedWebhook',
       'mcp.config',
       'memory.hybrid',
       'permissions.rules',

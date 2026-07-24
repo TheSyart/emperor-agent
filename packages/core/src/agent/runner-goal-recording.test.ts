@@ -1166,6 +1166,14 @@ function approveCommandPlan(
   commands: string[],
 ): string {
   manager.setMode('plan')
+  const draft = manager.recordPlanDiscovery({
+    source: 'read_file',
+    summary: 'Inspected the command verification implementation.',
+    files: ['packages/core/src/agent/runner.ts'],
+    evidenceRefs: ['path:packages/core/src/agent/runner.ts'],
+  })
+  const discoveryId = String(draft?.draft.discoveries.at(-1)?.id ?? '')
+  if (!discoveryId) throw new Error('test discovery was not recorded')
   new ProposePlanTool(manager).execute({
     title,
     summary: `${title} command verification plan.`,
@@ -1178,6 +1186,7 @@ function approveCommandPlan(
         files: ['packages/core/src/agent/runner.ts'],
         commands,
         acceptance: ['all approved commands complete'],
+        discovery_refs: [discoveryId],
       },
     ],
     assumptions: [],

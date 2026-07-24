@@ -29,8 +29,8 @@ import {
   ControlMode,
   InteractionKind,
   InteractionStatus,
-  controlStateToDict,
-  interactionToDict,
+  controlStateToPublicDict,
+  interactionToPublicDict,
   makeAsk,
   questionFromDict,
   touchInteraction,
@@ -44,6 +44,7 @@ import {
   PlanExecutionManager,
   type PlanExecutionPauseInput,
 } from './plan-execution'
+import { PlanExecutionActionManager } from './plan-execution-actions'
 import {
   isPlanInvalidated,
   latestApprovedPlanGeneration,
@@ -74,6 +75,9 @@ export interface ControlResume {
   message: string
   event: Record<string, unknown>
   resume: boolean
+  executionId?: string
+  executionDisposition?: 'resume' | 'pause' | 'complete' | 'cancel'
+  settlementId?: string
 }
 
 export interface ControlPendingObserver {
@@ -94,6 +98,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   readonly verification: PlanVerificationManager
   readonly drafting: PlanDraftingManager
   readonly execution: PlanExecutionManager
+  readonly planExecutionActions: PlanExecutionActionManager
   readonly goalBlocker: GoalBlockerControlManager
   readonly goalManualEvidence: GoalManualEvidenceControlManager
   todoStore: TodoStoreLike | null = null
@@ -131,8 +136,10 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.verification = new PlanVerificationManager(this)
     this.drafting = new PlanDraftingManager(this)
     this.execution = new PlanExecutionManager(this)
+    this.planExecutionActions = new PlanExecutionActionManager(this)
     this.goalBlocker = new GoalBlockerControlManager(this)
     this.goalManualEvidence = new GoalManualEvidenceControlManager(this)
+    this.planExecutionActions.reconcilePrepared()
     this.reconcilePendingInteraction()
   }
 
@@ -264,7 +271,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 
   payload(): ControlStatePayload {
-    return controlStateToDict(this.store.load())
+    return controlStateToPublicDict(this.store.load())
   }
 
   setMode(mode: string): ControlStatePayload {
@@ -427,7 +434,13 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     meta?: Record<string, unknown> | null
     enforceQuality?: boolean
   }): Interaction {
-    return this.drafting.createPlan(opts)
+    return this.drafting.createPlan({
+      ...opts,
+      meta: {
+        ...(this.askMetaProvider?.() ?? {}),
+        ...(opts.meta ?? {}),
+      },
+    })
   }
 
   assessClarification(
@@ -474,6 +487,27 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       status: InteractionStatus.ANSWERED,
     })
     updated.answers = normalized
+    const planExecutionAnswer = this.planExecutionActions.resolve(updated)
+    if (planExecutionAnswer) {
+      const resumeModel = planExecutionAnswer.disposition !== 'cancel'
+      this.complete(updated)
+      this.planExecutionActions.completeSettlement(
+        planExecutionAnswer.settlementId,
+      )
+      return {
+        interaction: interactionToPublicDict(updated),
+        message: planExecutionAnswer.message,
+        event: {
+          ...planExecutionAnswer.event,
+          interaction: interactionToPublicDict(updated),
+          resume_model: resumeModel,
+        },
+        resume: resumeModel,
+        ...executionResumeIdentity(updated),
+        executionDisposition: planExecutionAnswer.disposition,
+        settlementId: planExecutionAnswer.settlementId,
+      }
+    }
     const permissionAnswer = this.permissionManager.recordAnswer(
       updated as unknown as {
         meta?: Record<string, unknown>
@@ -481,19 +515,19 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       },
     )
     this.drafting.recordPlanResolvedQuestions(updated)
-    this.cancelExecutablePlanIfRequested(updated)
     this.complete(updated)
     this.maybeEnterPlanModeFromAnswer(updated)
     const message = this.answerMessage(updated, permissionAnswer)
     return {
-      interaction: interactionToDict(updated),
+      interaction: interactionToPublicDict(updated),
       message,
       event: {
         event: 'ask_answered',
-        interaction: interactionToDict(updated),
+        interaction: interactionToPublicDict(updated),
         resume_model: true,
       },
       resume: true,
+      ...executionResumeIdentity(updated),
     }
   }
 
@@ -524,14 +558,15 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     this.complete(updated)
     const message = this.commentMessage(updated, text)
     return {
-      interaction: interactionToDict(updated),
+      interaction: interactionToPublicDict(updated),
       message,
       event: {
         event: 'plan_comment_added',
-        interaction: interactionToDict(updated),
+        interaction: interactionToPublicDict(updated),
         comment: text,
       },
       resume: true,
+      ...executionResumeIdentity(updated),
     }
   }
 
@@ -576,16 +611,17 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     const message = this.approvalMessage(updated, planRecord)
     const event: Record<string, unknown> = {
       event: 'plan_approved',
-      interaction: interactionToDict(updated),
+      interaction: interactionToPublicDict(updated),
       control: this.payload(),
     }
     if (planRecord !== null) event.plan = planToDict(planRecord)
     if (this.todoStore !== null) event.todos = [...this.todoStore.todos]
     return {
-      interaction: interactionToDict(updated),
+      interaction: interactionToPublicDict(updated),
       message,
       event,
       resume: true,
+      ...executionResumeIdentity(updated),
     }
   }
 
@@ -607,10 +643,35 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       this.notifyPendingCleared(updated)
     } else {
       this.complete(updated)
+      const runningPlan = this.latestExecutablePlan()
+      if (runningPlan !== null) {
+        const paused = this.execution.pauseExecution({
+          reason: 'user_input_required',
+          turnId: String(
+            pending.meta?.control_turn_id ?? pending.meta?.turn_id ?? '',
+          ).trim(),
+          executionId: String(pending.meta?.execution_id ?? '').trim(),
+          pausedAt: nowTs(),
+          evaluationCount: 0,
+          totalIterations: 0,
+          nextActions: ['继续执行当前计划或明确取消计划'],
+        })
+        if (paused !== null) {
+          return {
+            event: 'plan_execution_settled',
+            action: 'pause',
+            disposition: 'pause',
+            interaction: interactionToPublicDict(updated),
+            plan: planToDict(paused),
+            control: this.payload(),
+            message: '计划已暂停，等待用户明确继续或取消。',
+          }
+        }
+      }
     }
     return {
       event: 'interaction_cancelled',
-      interaction: interactionToDict(updated),
+      interaction: interactionToPublicDict(updated),
       control: this.payload(),
       message: this.cancelMessage(updated),
     }
@@ -623,47 +684,6 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     state.updatedAt = nowTs()
     this.store.save(state)
     this.notifyPendingCleared(interaction)
-  }
-
-  private cancelExecutablePlanIfRequested(
-    interaction: Interaction,
-  ): PlanRecord | null {
-    const record = this.latestExecutablePlan()
-    if (record === null) return null
-    if (!askAnswerCancelsPlan(interaction)) return null
-    const now = nowTs()
-    const evidence = {
-      source: 'ask_answer',
-      interaction_id: interaction.id,
-      reason: 'user chose to abandon or ignore the active plan',
-      cancelled_at: now,
-    }
-    const steps = record.steps.map((step) => {
-      if (
-        step.status === PlanStepStatus.DONE ||
-        step.status === PlanStepStatus.SKIPPED
-      )
-        return step
-      return {
-        ...step,
-        status: PlanStepStatus.SKIPPED,
-        evidence: [...step.evidence, evidence],
-      }
-    })
-    const metadata = {
-      ...record.metadata,
-      cancelled_by: 'ask_answer',
-      cancelled_interaction_id: interaction.id,
-      cancel_reason: 'user chose to abandon or ignore the active plan',
-    }
-    const updated: PlanRecord = {
-      ...record,
-      status: PlanStatus.CANCELLED,
-      updatedAt: now,
-      steps,
-      metadata,
-    }
-    return this.planStore.save(updated)
   }
 
   private notifyPendingSet(interaction: Interaction): void {
@@ -719,15 +739,40 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     for (const [qid, value] of Object.entries(answers)) {
       if (!questionIds.has(qid) && qid !== '_freeform') continue
       if (value && typeof value === 'object') {
+        const requestedOptionId = String(
+          (value as Record<string, unknown>).option_id ??
+            (value as Record<string, unknown>).optionId ??
+            '',
+        ).trim()
+        const requestedChoice = String(
+          (value as Record<string, unknown>).choice ?? '',
+        ).trim()
+        const question = interaction.questions.find(
+          (candidate) => candidate.id === qid,
+        )
+        const optionById = requestedOptionId
+          ? question?.options.find((option) => option.id === requestedOptionId)
+          : undefined
+        const legacyOption =
+          !requestedOptionId && requestedChoice
+            ? question?.options.find(
+                (option) => option.label === requestedChoice,
+              )
+            : undefined
+        if (
+          requestedOptionId &&
+          !optionById &&
+          interaction.meta?.interaction_type !== 'permission'
+        )
+          throw new Error(`unknown option id for ${qid}: ${requestedOptionId}`)
         normalized[qid] = {
-          option_id: String(
-            (value as Record<string, unknown>).option_id ??
-              (value as Record<string, unknown>).optionId ??
-              '',
-          ).trim(),
-          choice: String(
-            (value as Record<string, unknown>).choice ?? '',
-          ).trim(),
+          option_id:
+            optionById?.id ??
+            legacyOption?.id ??
+            (interaction.meta?.interaction_type === 'permission'
+              ? requestedOptionId
+              : ''),
+          choice: optionById?.label ?? legacyOption?.label ?? requestedChoice,
           freeform: String(
             (value as Record<string, unknown>).freeform ?? '',
           ).trim(),
@@ -814,13 +859,15 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       interaction.planMarkdown,
       '',
       '[PLAN_EXECUTION_CONTRACT]',
-      '- Treat the approved plan as execution context, not as a live task database.',
-      '- Use update_todos as the session checklist for complex work; it is not a verification tool and does not decide PlanStep status.',
-      '- Keep exactly one active todo while executing. Mark a todo completed only when the described work is actually complete.',
+      '- PlanRecord and PlanStep are the authoritative execution state.',
+      '- Do not create a Todo merely to mirror a one-step or otherwise simple Plan.',
+      '- After the active step implementation is actually complete, call complete_plan_step with its stable step id and a concrete summary.',
+      '- complete_plan_step records an implementation claim only; Core still enforces every required verification.',
+      '- Use update_todos only when the work contains multiple independent implementation items that need an additional session checklist. Todo never decides PlanStep or verification status.',
       '- Run relevant tests, builds, commands, or an independent reviewer before final reporting when the change is non-trivial.',
-      '- If verification failed, keep the relevant todo in_progress or blocked, diagnose and repair the failure, rerun checks, then continue.',
+      '- If verification failed, diagnose and repair the failure, rerun checks, then call complete_plan_step again only after the implementation is ready.',
       '- If the step is blocked by missing input, access, cost, safety, or unrecoverable ambiguity, call ask_user and keep the step blocked until resolved.',
-      '- Do not claim completion while the session todo list still has pending, in_progress, or blocked items.',
+      '- Do not claim final completion while PlanStep or required verification remains unfinished.',
     )
     if (planRecord !== null && planRecord.steps.length) {
       lines.push('', '[PLAN_STEPS]')
@@ -850,11 +897,22 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     if (this.mode === ControlMode.PLAN) {
       return (
         '# Control Mode: Plan\n\n' +
-        '- 当前处于 Plan 模式。你必须先通过只读探索理解环境，不允许修改文件、运行命令执行变更、派遣子代理或创建队友。\n' +
-        '- 若需求存在会影响方案的偏好或取舍，调用 `ask_user` 提问。\n' +
-        '- 当方案足够明确时，必须调用 `propose_plan` 提交完整计划，等待用户评论或批准。\n' +
-        '- 用户批准前不要执行计划。\n' +
-        '- 不允许用普通最终回复替代计划卡；最终必须通过 `propose_plan` 进入 PlanCard。'
+        '当前阶段只允许探索、提问、设计、复核和提交计划；用户批准前不得实施。\n\n' +
+        '## Workflow\n' +
+        '1. Explore：读取现有实现、关键文件、复用点、调用方和验证入口。\n' +
+        '2. Question：只有会改变方案且无法由代码回答的产品取舍才调用 `ask_user`。\n' +
+        '3. Design：提出一个推荐方案，列出拒绝的替代方案、依赖、风险与回滚。\n' +
+        '4. Review：对照原任务和 discovery 复核覆盖范围与验证能力。\n' +
+        '5. Submit：门禁满足后只能通过 `propose_plan` 进入 PlanCard。\n\n' +
+        '## Boundaries\n' +
+        '- 不允许修改文件、执行变更命令、更新 Todo 或创建队友。\n' +
+        '- 可派遣 registry 明确标记的 Plan 只读 Explore/Inventory/Planner/Verifier；主 Agent 必须综合并复核关键证据。\n' +
+        '- 不得猜测 discovery_refs，不得用普通最终回复替代计划卡。\n' +
+        '- 浏览器目视与主观观感默认 optional。只有用户明确要求由其人工验收时，才可设 `human_required=true` 并阻塞完成。\n' +
+        '- 没有 Browser 工具时，优先规划可执行的结构、测试或静态验证，并在计划中披露视觉回归限制。\n\n' +
+        '## Submission gate\n' +
+        '- 至少一条成功 discovery、无未解决问题、步骤引用真实证据、验证与当前能力匹配，并存在 review receipt。\n\n' +
+        this.drafting.promptContext()
       )
     }
     return (
@@ -938,11 +996,11 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.permissionManager.requireApprovalBatch(batch, opts)
   }
 
-  syncPlanFromTodos(
-    todos: Array<Record<string, unknown>>,
-    opts?: { evidence?: Record<string, unknown> | null },
-  ): PlanRecord | null {
-    return this.execution.syncPlanFromTodos(todos, opts)
+  requestPlanExecutionDecision(input: {
+    turnId: string
+    executionId: string
+  }): Interaction | null {
+    return this.planExecutionActions.request(input)
   }
 
   normalizePlanTodoUpdate(
@@ -951,8 +1009,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.execution.normalizeTodoUpdate(todos)
   }
 
-  restoreCurrentPlanTodoProjection(): void {
-    this.execution.restoreCurrentPlanTodoProjection()
+  migrateLegacyPlanTodoMirrors(): void {
+    this.execution.migrateLegacyPlanTodoMirrors()
   }
 
   pausePlanExecution(input: PlanExecutionPauseInput): PlanRecord | null {
@@ -961,6 +1019,20 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   resumePlanExecution(input: { turnId: string }): PlanRecord | null {
     return this.execution.resumeExecution(input)
+  }
+
+  pausedPlanExecutionId(): string | null {
+    const record = this.latestExecutablePlan()
+    const pause =
+      record?.metadata.execution_pause &&
+      typeof record.metadata.execution_pause === 'object' &&
+      !Array.isArray(record.metadata.execution_pause)
+        ? (record.metadata.execution_pause as Record<string, unknown>)
+        : null
+    const executionId = String(
+      pause?.execution_id ?? pause?.turn_id ?? '',
+    ).trim()
+    return executionId || null
   }
 
   hasAskInteraction(): boolean {
@@ -1047,6 +1119,21 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.execution.recordPlanStepToolOutput(opts)
   }
 
+  completePlanStep(
+    input: Parameters<PlanExecutionManager['completePlanStep']>[0],
+  ): PlanRecord {
+    return this.execution.completePlanStep(input)
+  }
+
+  hasExecutablePlan(): boolean {
+    return this.latestExecutablePlan() !== null
+  }
+
+  shouldExposeUpdateTodos(): boolean {
+    const record = this.latestExecutablePlan()
+    return record === null || record.steps.length >= 3
+  }
+
   recordPlanVerificationResult(opts: {
     planId: string
     stepId: string
@@ -1056,6 +1143,38 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return saved === null
       ? null
       : this.execution.reconcileAfterVerification(saved)
+  }
+
+  currentPlanExecutionPhase(): {
+    planId: string
+    stepId: string
+    phase:
+      | 'implementing'
+      | 'verifying'
+      | 'repairing'
+      | 'waiting_user'
+      | 'completed'
+      | 'cancelled'
+  } | null {
+    const record = this.latestExecutablePlan()
+    const step = record?.steps.find(
+      (candidate) => candidate.status === PlanStepStatus.ACTIVE,
+    )
+    if (!record || !step) return null
+    const phases = record.metadata.plan_step_execution_phases
+    const raw =
+      phases && typeof phases === 'object' && !Array.isArray(phases)
+        ? String((phases as Record<string, unknown>)[step.id] ?? '')
+        : ''
+    const phase =
+      raw === 'verifying' ||
+      raw === 'repairing' ||
+      raw === 'waiting_user' ||
+      raw === 'completed' ||
+      raw === 'cancelled'
+        ? raw
+        : 'implementing'
+    return { planId: record.id, stepId: step.id, phase }
   }
 
   appendPlanStepVerification(
@@ -1132,6 +1251,26 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
     return this.verification.recordIndependentVerificationResult(opts)
   }
 
+  recordIndependentVerificationToolResult(opts: {
+    toolCallId: string
+    agentType: string
+    output: string
+  }): PlanRecord | null {
+    return this.verification.recordIndependentVerificationToolResult(opts)
+  }
+
+  independentVerificationDispatchGuard(agentType: string): string | null {
+    return this.verification.independentVerificationDispatchGuard(agentType)
+  }
+
+  independentVerificationAskGuard(): string | null {
+    return this.verification.independentVerificationAskGuard()
+  }
+
+  markIndependentVerificationDelivered(): PlanRecord | null {
+    return this.verification.markIndependentVerificationDelivered()
+  }
+
   waiveIndependentVerification(opts: {
     planId: string
     reason: string
@@ -1169,20 +1308,40 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 
   /**
-   * 收尾诚实性（2026-07-05 B4.2）：取当前 scope 内最新计划中「有验证要求但无命令证据」
-   * 的步骤，并在计划上盖章防止跨 turn 重复提醒。一次性领取语义。
+   * 收尾诚实性：返回当前 scope 内「实现已声明完成，但必需验证尚未满足」
+   * 的步骤。执行中的验证门禁必须在每次过早 final reply 时继续生效；
+   * 已经终结的历史计划仍只提醒一次，避免跨 turn 重复噪声。
    */
   claimUnverifiedPlanSteps(): {
     planId: string
     steps: Array<{ id: string; title: string }>
   } | null {
     const record = this.latestReviewablePlan()
-    if (record === null || record.metadata.verification_honesty_nudged)
-      return null
-    // 只在「宣称完工」时提醒（步骤全部 done/skipped 或计划已 COMPLETED）；执行中途的 stop 不拦
+    if (record === null) return null
+    const implementationClaims =
+      record.metadata.implementation_claims &&
+      typeof record.metadata.implementation_claims === 'object' &&
+      !Array.isArray(record.metadata.implementation_claims)
+        ? (record.metadata.implementation_claims as Record<string, unknown>)
+        : {}
+    const activeUnverified = record.steps.filter(
+      (step) =>
+        step.status === PlanStepStatus.ACTIVE &&
+        implementationClaims[step.id] !== undefined &&
+        stepVerificationStatus(step) === 'pending',
+    )
+    if (activeUnverified.length)
+      return {
+        planId: record.id,
+        steps: activeUnverified.map((step) => ({
+          id: step.id,
+          title: step.title,
+        })),
+      }
+
+    if (record.metadata.verification_honesty_nudged) return null
     if (record.status !== PlanStatus.COMPLETED && !planStepsFinished(record))
       return null
-    // stepVerificationStatus='pending' 即「有验证要求（含从 commands 派生）但缺必需证据」
     const unverified = record.steps.filter(
       (step) =>
         step.status !== PlanStepStatus.SKIPPED &&
@@ -1230,7 +1389,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   static interactionEvent(interaction: Interaction): Record<string, unknown> {
     const event =
       interaction.kind === InteractionKind.ASK ? 'ask_request' : 'plan_draft'
-    return { event, interaction: interactionToDict(interaction) }
+    return { event, interaction: interactionToPublicDict(interaction) }
   }
 
   static interactionFromMarker(marker: string): Record<string, unknown> | null {
@@ -1248,6 +1407,15 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       ? (interaction as Record<string, unknown>)
       : null
   }
+}
+
+function executionResumeIdentity(
+  interaction: Interaction,
+): { executionId: string } | Record<string, never> {
+  const executionId = String(
+    interaction.meta.execution_id ?? interaction.meta.control_turn_id ?? '',
+  ).trim()
+  return executionId ? { executionId } : {}
 }
 
 function isObsoleteLegacyGuard(interaction: Interaction): boolean {
@@ -1347,26 +1515,4 @@ function planRuntimeScope(
     ),
   })
   return normalized
-}
-
-function askAnswerCancelsPlan(interaction: Interaction): boolean {
-  const parts: string[] = []
-  for (const question of interaction.questions) {
-    parts.push(question.id, question.header, question.question)
-  }
-  for (const answer of Object.values(interaction.answers)) {
-    if (answer && typeof answer === 'object') {
-      parts.push(String((answer as Record<string, unknown>).choice ?? ''))
-      parts.push(String((answer as Record<string, unknown>).freeform ?? ''))
-    } else {
-      parts.push(String(answer ?? ''))
-    }
-  }
-  const text = parts.join('\n').toLowerCase()
-  return (
-    /无视系统继续|放弃该计划|放弃这个计划|放弃旧计划|取消计划|终止计划|停止计划/.test(
-      text,
-    ) ||
-    /\b(abandon|cancel|ignore)\b[\s\S]{0,40}\b(plan|stuck plan)\b/i.test(text)
-  )
 }

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { createCoreBridge } from './core-ipc'
 import { createCoreEventBridge } from './core-events'
+import { createTerminalEventBridge } from './terminal-events'
 
 // Expose a minimal, read-only desktop surface to the renderer.
 contextBridge.exposeInMainWorld('emperor', {
@@ -15,4 +16,5 @@ contextBridge.exposeInMainWorld('emperor', {
   petStatus: () => ipcRenderer.invoke('emperor:pet:status'),
   ...createCoreBridge(ipcRenderer),
   ...createCoreEventBridge(ipcRenderer),
+  ...createTerminalEventBridge(ipcRenderer),
 })

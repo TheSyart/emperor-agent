@@ -36,6 +36,22 @@ export class PlanQualityGate {
         if (id) discoveryIds.add(id)
       }
     }
+    if (discoveryIds.size === 0) {
+      errors.push('plan has no successful read-only exploration evidence')
+    }
+    if (opts.draft.openQuestions.length > 0) {
+      errors.push(
+        'plan has unresolved design questions and cannot enter approval',
+      )
+    }
+    if (
+      discoveryIds.size > 0 &&
+      !opts.steps.some((step) =>
+        step.discoveryRefs.some((ref) => discoveryIds.has(ref)),
+      )
+    ) {
+      errors.push('plan steps do not cite any recorded exploration evidence')
+    }
     const hasDraftVerification = opts.draft.verificationStrategy.length > 0
     for (const step of opts.steps) {
       errors.push(...assessStep(step, discoveryIds, hasDraftVerification))
@@ -144,6 +160,7 @@ function assessStep(
       `${sid} has no verification command or manual verification rule`,
     )
   }
+  errors.push(...verificationCapabilityErrors(step))
   if (step.risk.trim().toLowerCase() === 'high') {
     if (!step.riskNote.trim())
       errors.push(`${sid} is high risk but has no risk note`)
@@ -194,6 +211,60 @@ function hasVerification(
   hasDraftVerification: boolean,
 ): boolean {
   return Boolean(
-    step.commands.length || step.acceptance.length || hasDraftVerification,
+    step.commands.length ||
+    step.verification.length ||
+    step.acceptance.length ||
+    hasDraftVerification,
+  )
+}
+
+function verificationCapabilityErrors(step: PlanStep): string[] {
+  const errors: string[] = []
+  for (const requirement of step.verification) {
+    const kind = String(requirement.kind || 'command').trim()
+    const command = String(requirement.command || '').trim()
+    const description = String(requirement.description || '').trim()
+    if (kind === 'manual') {
+      if (!description && !command)
+        errors.push(
+          `${step.id} verification ${requirement.id} has no manual verification instruction`,
+        )
+      if (requirement.required && !requirement.humanRequired)
+        errors.push(
+          `${step.id} verification ${requirement.id} cannot block completion unless the user explicitly requires manual acceptance`,
+        )
+      continue
+    }
+    if (!command) {
+      errors.push(
+        `${step.id} verification ${requirement.id} has no executable command`,
+      )
+      continue
+    }
+    if (looksLikeManualBrowserInstruction(command)) {
+      errors.push(
+        `${step.id} verification ${requirement.id} requires manual verification; it is not an executable command`,
+      )
+    }
+    if (createsTemporaryVerificationSource(command)) {
+      errors.push(
+        `${step.id} verification ${requirement.id} writes a temporary verification source file`,
+      )
+    }
+  }
+  return errors
+}
+
+function looksLikeManualBrowserInstruction(command: string): boolean {
+  return (
+    /\b(?:open|launch|inspect|view)\b.*\b(?:browser|page|website)\b/i.test(
+      command,
+    ) || /(?:浏览器|目视|人工查看|视觉检查)/.test(command)
+  )
+}
+
+function createsTemporaryVerificationSource(command: string): boolean {
+  return /(?:^|[/\\])_(?:verify|verification|chk|check)\.(?:py|js|mjs|cjs|ts)\b/i.test(
+    command,
   )
 }

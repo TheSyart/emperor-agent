@@ -184,6 +184,7 @@ function validateReceipt(receipt) {
     'environment',
     'glob',
     'grep',
+    'terminal',
     'renderer',
   ]) {
     if (receipt.operations?.[name]?.ok !== true)

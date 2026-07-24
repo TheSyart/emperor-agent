@@ -6,7 +6,13 @@
  * 注: ToolResultStore 相关断言（large tool result 替换、registered budget）依赖 ContextPipeline 升级，单列。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentRunner, type MemoryStoreLike } from './runner'
@@ -24,17 +30,24 @@ import { okResult, type ToolResult } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
 import { ControlManager } from '../control/manager'
-import { AskUserTool, ProposePlanTool } from '../control/tools'
+import {
+  AskUserTool,
+  CompletePlanStepTool,
+  ProposePlanTool,
+} from '../control/tools'
 import { TodoStore, UpdateTodos } from '../tools/builtin'
 import { MemoryStore } from '../memory/store'
 import { ExecutionEnvironment } from '../environment/snapshot'
 import { CancelledTaskError } from '../runtime/active'
-import { PlanGenerationFailedError } from '../control/exceptions'
+import { PlanGenerationFailedError, TurnPaused } from '../control/exceptions'
 import { TaskManager } from '../tasks/manager'
-import type {
-  TurnContinuationEvaluator,
-  TurnContinuationInput,
-} from './turn-continuation'
+import { TurnChangeLedger } from '../changes/turn-change-ledger'
+import {
+  makePlanRecord,
+  makeStep,
+  PlanStatus,
+  PlanStepStatus,
+} from '../plans/models'
 
 type Msg = Record<string, unknown>
 
@@ -152,7 +165,7 @@ class FlakyProvider extends LLMProvider {
 }
 
 class StreamingToolDeltaProvider extends LLMProvider {
-  constructor() {
+  constructor(private readonly discoveryId: string) {
     super({ defaultModel: 'fake' })
   }
 
@@ -162,7 +175,7 @@ class StreamingToolDeltaProvider extends LLMProvider {
 
   override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
     const partial = '{"title":"迁移计划","summary":"迁移 TS"}'
-    const full = JSON.stringify(streamingPlanArgs())
+    const full = JSON.stringify(streamingPlanArgs(this.discoveryId))
     await args.onToolCallDelta?.({
       index: 0,
       id: 'call_plan',
@@ -177,13 +190,19 @@ class StreamingToolDeltaProvider extends LLMProvider {
     })
     return makeResponse({
       content: '',
-      toolCalls: [toolCall('call_plan', 'propose_plan', streamingPlanArgs())],
+      toolCalls: [
+        toolCall(
+          'call_plan',
+          'propose_plan',
+          streamingPlanArgs(this.discoveryId),
+        ),
+      ],
       finishReason: 'tool_calls',
     })
   }
 }
 
-function streamingPlanArgs(): Record<string, unknown> {
+function streamingPlanArgs(discoveryId: string): Record<string, unknown> {
   return {
     title: '迁移计划',
     summary: '迁移 TS',
@@ -197,12 +216,32 @@ function streamingPlanArgs(): Record<string, unknown> {
         description:
           '调整 renderer 时间线与底部控制面板，保持 plan 卡片单一来源。',
         files: ['desktop/src/renderer/src/views/ChatView.vue'],
+        discovery_refs: [discoveryId],
         commands: ['npm --prefix desktop run test'],
         acceptance: ['底部只显示决策面板，时间线保留单张计划卡'],
         risk: 'medium',
       },
     ],
   }
+}
+
+function seedRunnerPlanDiscovery(
+  manager: ControlManager,
+  files: string[] = [],
+): string {
+  const record = manager.recordPlanDiscovery({
+    source: files.length ? 'read_file' : 'glob',
+    summary: files.length
+      ? `Inspected ${files.join(', ')}.`
+      : 'Inspected the current project scope.',
+    files,
+    evidenceRefs: files.length
+      ? files.map((file) => `path:${file}`)
+      : ['scope:.'],
+  })
+  const id = String(record?.draft.discoveries.at(-1)?.id ?? '')
+  if (!id) throw new Error('test discovery was not recorded')
+  return id
 }
 
 class EchoTool extends Tool {
@@ -222,6 +261,30 @@ class SafeEchoTool extends Tool {
   override concurrencySafe = true
   execute(args: Record<string, unknown>): string {
     return String(args.value)
+  }
+}
+
+class VerificationReviewerTool extends Tool {
+  override name = 'dispatch_subagent'
+  override description = 'Run one independent verification reviewer.'
+  override parameters = toolParamsSchema(
+    { agent_type: S('agent type'), task: S('task') },
+    ['agent_type', 'task'],
+  )
+  override readOnly = true
+  override concurrencySafe = true
+  execute(): string {
+    return [
+      '独立复核完成。',
+      '```verdict',
+      JSON.stringify({
+        passed: true,
+        summary: 'All declared checks passed.',
+        commands: ['npm test'],
+        command_evidence: [{ command: 'npm test', exit_code: 0 }],
+      }),
+      '```',
+    ].join('\n')
   }
 }
 
@@ -483,6 +546,184 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ])
     expect(phases.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5])
     expect(phases.every((e) => e.turn_id === 'turn_1')).toBe(true)
+  })
+
+  it('routes explicitly marked workspace tools through the shared mutation host', async () => {
+    const registry = new ToolRegistry()
+    const tool = new EchoTool()
+    tool.workspaceMutation = true
+    registry.register(tool)
+    const calls: Array<{ root: string; owner: string }> = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          finishReason: 'tool_calls',
+          toolCalls: [toolCall('call_1', 'echo', { value: 'changed' })],
+        }),
+        makeResponse({ content: 'done' }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      workspaceRoot: '/workspace/project',
+      workspaceMutations: {
+        async runExclusive<T>(
+          root: string,
+          owner: 'agent' | 'renderer_git',
+          action: () => Promise<T>,
+        ): Promise<T> {
+          calls.push({ root, owner })
+          return await action()
+        },
+      },
+    })
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'change it' }]),
+    ).resolves.toBe('done')
+    expect(calls).toEqual([{ root: '/workspace/project', owner: 'agent' }])
+  })
+
+  it('emits turn-scoped changes and appends an exact final change summary', async () => {
+    class WriteTrackedFileTool extends Tool {
+      override name = 'write_file'
+      override description = 'write tracked file'
+      override parameters = toolParamsSchema(
+        { path: S('path'), content: S('content') },
+        ['path', 'content'],
+      )
+      override workspaceMutation = true
+      override getPath(args: Record<string, unknown>): string {
+        return String(args.path ?? '')
+      }
+      execute(
+        args: Record<string, unknown>,
+        ctx?: ToolExecutionContext,
+      ): string {
+        writeFileSync(
+          join(String(ctx?.workspaceRoot), String(args.path)),
+          String(args.content),
+        )
+        return 'written'
+      }
+    }
+
+    const root = mkdtempSync(join(tmpdir(), 'emperor-runner-changes-'))
+    const workspaceRoot = join(root, 'workspace')
+    mkdirSync(workspaceRoot, { recursive: true })
+    const registry = new ToolRegistry()
+    registry.register(new WriteTrackedFileTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        finishReason: 'tool_calls',
+        toolCalls: [
+          toolCall('call_write', 'write_file', {
+            path: 'app.ts',
+            content: 'created\n',
+          }),
+        ],
+      }),
+      makeResponse({ content: 'done' }),
+    ])
+    const emitted: Msg[] = []
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      workspaceRoot,
+      sessionId: 'session_1',
+      turnChangeLedger: new TurnChangeLedger({
+        stateRoot: join(root, '.emperor'),
+      }),
+    })
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: 'create app.ts' }],
+      {
+        turnId: 'turn_1',
+        emit: (event) => {
+          emitted.push(event)
+        },
+      },
+    )
+
+    expect(reply).toBe('done\n\n本次净变更：1 个文件，+1 / −0。')
+    expect(
+      emitted.filter((event) => event.event === 'turn_change_snapshot'),
+    ).toEqual([
+      expect.objectContaining({
+        status: 'tracking',
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+      }),
+      expect.objectContaining({
+        status: 'complete',
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+      }),
+    ])
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      '[CONTROL:TURN_CHANGE_SUMMARY]',
+    )
+  })
+
+  it('does not mark a proven read-only workspace command as a partial change', async () => {
+    class ReadOnlyWorkspaceCommand extends Tool {
+      override name = 'readonly_workspace_command'
+      override description = 'read workspace evidence'
+      override parameters = toolParamsSchema({}, [])
+      override workspaceMutation = true
+      override isReadOnly(): boolean {
+        return true
+      }
+      execute(): ToolResult {
+        return okResult('read-only evidence')
+      }
+    }
+    const root = mkdtempSync(join(tmpdir(), 'emperor-readonly-ledger-'))
+    const workspaceRoot = join(root, 'workspace')
+    mkdirSync(workspaceRoot, { recursive: true })
+    const registry = new ToolRegistry()
+    registry.register(new ReadOnlyWorkspaceCommand())
+    const emitted: Msg[] = []
+    const runner = new AgentRunner({
+      provider: new FakeProvider([
+        makeResponse({
+          content: '',
+          finishReason: 'tool_calls',
+          toolCalls: [
+            toolCall('readonly_evidence', 'readonly_workspace_command', {}),
+          ],
+        }),
+        makeResponse({ content: 'done' }),
+      ]),
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      workspaceRoot,
+      sessionId: 'session_readonly_ledger',
+      turnChangeLedger: new TurnChangeLedger({
+        stateRoot: join(root, '.emperor'),
+      }),
+    })
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: 'inspect' }],
+      {
+        turnId: 'turn_readonly_ledger',
+        emit: (event) => void emitted.push(event),
+      },
+    )
+
+    expect(reply).toBe('done')
+    expect(
+      emitted.filter((event) => event.event === 'turn_change_snapshot'),
+    ).toEqual([])
   })
 
   it('normalizes a provider AbortError only when this turn signal is aborted', async () => {
@@ -1934,6 +2175,40 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const phases = emitted.filter((e) => e.event === 'turn_phase')
     expect(phases.map((e) => e.phase)).toContain('tool_batch_start')
     expect(phases.map((e) => e.phase)).toContain('tool_batch_done')
+    const start = phases.find((e) => e.phase === 'tool_batch_start')
+    const done = phases.find((e) => e.phase === 'tool_batch_done')
+    const toolEvents = emitted.filter((event) =>
+      [
+        'tool_call',
+        'tool_result',
+        'tool_run_queued',
+        'tool_run_started',
+        'tool_run_completed',
+      ].includes(String(event.event)),
+    )
+    expect(start?.detail).toMatchObject({
+      tool_batch_id: 'turn:tool_batch:1',
+      iteration: 1,
+      tool_call_ids: ['call_1'],
+      tool_names: ['echo'],
+      count: 1,
+    })
+    expect(done?.detail).toMatchObject({
+      tool_batch_id: 'turn:tool_batch:1',
+      iteration: 1,
+      tool_call_ids: ['call_1'],
+      tool_names: ['echo'],
+      count: 1,
+    })
+    expect(toolEvents.length).toBeGreaterThan(0)
+    expect(toolEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tool_batch_id: 'turn:tool_batch:1' }),
+      ]),
+    )
+    expect(
+      toolEvents.every((event) => event.tool_batch_id === 'turn:tool_batch:1'),
+    ).toBe(true)
     expect(
       phases.filter((e) => e.phase === 'model_request').map((e) => e.iteration),
     ).toEqual([1, 2])
@@ -2468,10 +2743,10 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       contents.find((content) => content.includes('[PLAN_RUNTIME_CONTEXT]')) ??
       ''
     expect(planContext).toContain('plan_id:')
-    expect(planContext).toContain('status: approved')
+    expect(planContext).toContain('status: executing')
   })
 
-  it('reconciles an exactly bound update_todos completion into the authoritative Plan', async () => {
+  it('completes a short Plan directly without creating a redundant Todo', async () => {
     const manager = new ControlManager(tmp('emperor-runner-todo-decoupled-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
@@ -2493,20 +2768,15 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     manager.approve(interaction.id)
     const planId = String(interaction.meta.plan_id)
     expect(manager.planStore.get(planId)!.steps[0]!.status).toBe('active')
-    const stableTodoUpdate = {
-      id: 'plan:step_1',
-      content: 'The model must not supply authority bindings',
-      status: 'completed',
-    }
-
     const registry = new ToolRegistry()
-    registry.register(new UpdateTodos(todoStore))
+    registry.register(new CompletePlanStepTool(manager))
     const provider = new FakeProvider([
       makeResponse({
         content: '',
         toolCalls: [
-          toolCall('todo_1', 'update_todos', {
-            todos: [stableTodoUpdate],
+          toolCall('complete_step_1', 'complete_plan_step', {
+            step_id: 'step_1',
+            summary: 'Executed the approved Plan step.',
           }),
         ],
         finishReason: 'tool_calls',
@@ -2534,30 +2804,236 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     )
 
     expect(reply).toBe('done')
-    const todoResult = emitted.find(
-      (event) => event.event === 'tool_result' && event.name === 'update_todos',
+    const completionResult = emitted.find(
+      (event) =>
+        event.event === 'tool_result' && event.name === 'complete_plan_step',
     )
-    expect(todoResult).toMatchObject({
+    expect(completionResult).toMatchObject({
       event: 'tool_result',
-      name: 'update_todos',
-      todos: [
-        {
-          id: 'plan:step_1',
-          plan_id: planId,
-          plan_step_id: 'step_1',
-          approval_generation: 1,
-          content: 'Run matrix',
-          status: 'completed',
-        },
-      ],
+      name: 'complete_plan_step',
     })
+    expect(todoStore.todos).toEqual([])
     const finished = manager.planStore.get(planId)!
     expect(finished.steps[0]!.status).toBe('done')
     expect(finished.status).toBe('completed')
     expect(finished.completedAt).not.toBeNull()
     expect(JSON.stringify(finished.steps[0]!.evidence)).toContain(
-      'todo_implementation_claim',
+      'plan_step_completion',
     )
+  })
+
+  it('pauses immediately for a Core verification decision after implementation is claimed', async () => {
+    const root = tmp('emperor-runner-manual-verification-decision-')
+    const manager = new ControlManager(root)
+    const todoStore = new TodoStore()
+    const taskManager = new TaskManager(root)
+    manager.setRuntimeScope({
+      sessionId: 'session_manual_verification',
+      mode: 'build',
+    })
+    manager.setTodoStore(todoStore)
+    manager.setTaskManager(taskManager)
+    const interaction = manager.createPlan({
+      title: 'Manual verification plan',
+      summary: 'Stop after implementation and wait for a signed user action.',
+      planMarkdown: '# Plan\n\n- Implement\n- Verify in browser',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement and inspect',
+          description: 'Implement the page and verify it manually.',
+          acceptance: ['page is implemented'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'manual',
+              command: 'Open the page in a browser',
+              required: true,
+              human_required: true,
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const planId = String(interaction.meta.plan_id)
+    const registry = new ToolRegistry()
+    registry.register(new CompletePlanStepTool(manager))
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('implementation_complete', 'complete_plan_step', {
+            step_id: 'step_1',
+            summary: 'Implemented the page; manual verification remains.',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'must not continue without the user' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: manager,
+      todoStore,
+      sessionId: 'session_manual_verification',
+      maxTurns: null,
+    })
+    const emitted: Msg[] = []
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'continue' }], {
+        turnId: 'turn_manual_verification',
+        emit: (event) => void emitted.push(event),
+      }),
+    ).rejects.toBeInstanceOf(TurnPaused)
+
+    expect(provider.seenMessages).toHaveLength(1)
+    expect(manager.payload().pending).toMatchObject({
+      kind: 'ask',
+      status: 'waiting',
+      meta: {
+        interaction_type: 'plan_execution',
+        execution_id: 'turn_manual_verification',
+      },
+    })
+    expect(manager.planStore.get(planId)?.metadata).toMatchObject({
+      plan_step_execution_phases: { step_1: 'waiting_user' },
+      execution_pause: { reason: 'user_input_required' },
+    })
+    expect(taskManager.store.list()).toEqual([])
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ event: 'ask_request' }),
+    )
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ event: 'turn_paused' }),
+    )
+  })
+
+  it('blocks unrelated mutations while verifying but permits the declared verification command', async () => {
+    class UnrelatedMutation extends Tool {
+      override name = 'write_probe'
+      override description = 'attempt an unrelated mutation'
+      override parameters = toolParamsSchema({}, [])
+      override workspaceMutation = true
+      calls = 0
+      execute(): ToolResult {
+        this.calls += 1
+        return okResult('mutated')
+      }
+    }
+    class DeclaredCommand extends Tool {
+      override name = 'run_command'
+      override description = 'run the declared verification command'
+      override parameters = toolParamsSchema({ command: S('command') }, [
+        'command',
+      ])
+      override workspaceMutation = true
+      override isReadOnly(): boolean {
+        return false
+      }
+      execute(): ToolResult {
+        return okResult('tests passed', {
+          summary: 'tests passed',
+          meta: { exitCode: 0 },
+        })
+      }
+    }
+
+    const manager = new ControlManager(tmp('emperor-verifying-tool-guard-'))
+    const todoStore = new TodoStore()
+    manager.setRuntimeScope({
+      sessionId: 'session_verifying_tool_guard',
+      mode: 'build',
+    })
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Verification phase guard',
+      summary: 'Do not mutate while the declared verification is pending.',
+      planMarkdown: '# Plan\n\n- Implement\n- Verify',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement and verify',
+          description: 'Complete the implementation and run the test.',
+          files: ['a.html'],
+          acceptance: ['test passes'],
+          verification: [
+            {
+              id: 'test',
+              kind: 'command',
+              command: 'npm test',
+              required: true,
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    manager.setMode('full_access')
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implementation is complete; run the declared test.',
+      toolCallId: 'implementation_claim',
+    })
+
+    const mutation = new UnrelatedMutation()
+    const registry = new ToolRegistry()
+    registry.register(mutation)
+    registry.register(new DeclaredCommand())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [toolCall('write_during_verify', 'write_probe', {})],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('run_declared_verify', 'run_command', {
+            command: 'npm test',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '完成' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: manager,
+      todoStore,
+      sessionId: 'session_verifying_tool_guard',
+      maxTurns: 6,
+    })
+    const history: Msg[] = [{ role: 'user', content: '继续验证' }]
+
+    const reply = await runner.stepAsync(history)
+
+    expect(reply).toBe('完成')
+    expect(mutation.calls).toBe(0)
+    expect(
+      history.find(
+        (message) =>
+          message.tool_call_id === 'write_during_verify' &&
+          String(message.content).includes('is verifying'),
+      ),
+    ).toBeTruthy()
+    expect(
+      manager.planStore.get(String(interaction.meta.plan_id)),
+    ).toMatchObject({
+      status: 'completed',
+      steps: [expect.objectContaining({ status: 'done' })],
+    })
   })
 
   it('rejects an impossible Plan Todo transition before mutating TodoStore', async () => {
@@ -2609,8 +3085,18 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
                   id: 'plan:step_1',
                   content: 'Implement',
                   status: 'completed',
+                  plan_id: String(interaction.meta.plan_id),
+                  plan_step_id: 'step_1',
+                  approval_generation: 1,
                 },
-                { id: 'plan:step_2', content: 'Deliver', status: 'completed' },
+                {
+                  id: 'plan:step_2',
+                  content: 'Deliver',
+                  status: 'completed',
+                  plan_id: String(interaction.meta.plan_id),
+                  plan_step_id: 'step_2',
+                  approval_generation: 1,
+                },
               ],
             }),
           ],
@@ -2726,39 +3212,50 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(todoStore.todos).toHaveLength(1)
   })
 
-  it('caps explicit todo continuation at two corrections and returns an honest partial report', async () => {
+  it('keeps correcting unfinished todos until progress is made instead of stopping after two replies', async () => {
     const todoStore = new TodoStore()
     todoStore.todos = [
       { id: 1, content: '仍需完成实现', status: 'in_progress' },
     ]
+    const registry = new ToolRegistry()
+    registry.register(new UpdateTodos(todoStore))
     const provider = new FakeProvider([
       makeResponse({ content: '第一次误报完成。' }),
       makeResponse({ content: '第二次仍未执行。' }),
-      makeResponse({ content: '全部完成。' }),
-      makeResponse({ content: '不应无限续跑。' }),
+      makeResponse({ content: '第三次开始修正。' }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('todo_finish_after_corrections', 'update_todos', {
+            todos: [{ id: 1, content: '仍需完成实现', status: 'completed' }],
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '当前任务已经完成。' }),
     ])
     const runner = new AgentRunner({
       provider,
       model: 'fake',
-      registry: new ToolRegistry(),
+      registry,
       systemPrompt: 'system',
       todoStore,
-      maxTurns: 8,
+      maxTurns: null,
     })
     const history: Msg[] = [{ role: 'user', content: '继续执行 step_1' }]
 
     const reply = await runner.stepAsync(history)
 
-    expect(provider.seenMessages).toHaveLength(3)
-    expect(reply).toContain('执行已暂停')
-    expect(reply).toContain('仍需完成实现')
-    expect(reply).toContain('/continue')
-    expect(reply).not.toContain('全部完成')
+    expect(provider.seenMessages).toHaveLength(5)
+    expect(reply).toContain('当前任务已经完成。')
+    expect(todoStore.todos).toEqual([
+      { id: 1, content: '仍需完成实现', status: 'completed' },
+    ])
     expect(
       history.filter((message) =>
         String(message.content ?? '').includes('差事尚未办妥'),
       ),
-    ).toHaveLength(2)
+    ).toHaveLength(3)
   })
 
   it('continues a todo list created by the current prompt even without an explicit continue command', async () => {
@@ -2958,6 +3455,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
     manager.setMode('plan')
+    const discoveryId = seedRunnerPlanDiscovery(manager, ['a.html'])
     new ProposePlanTool(manager).execute({
       title: 'Honesty plan',
       summary: 'Step carries a verification requirement.',
@@ -2970,6 +3468,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
           title: 'Ship it',
           description: 'do the work',
           files: ['a.html'],
+          discovery_refs: [discoveryId],
           commands: ['npm test'],
           acceptance: ['tests pass'],
         },
@@ -2977,11 +3476,10 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     })
     const pendingHonesty = manager.payload().pending as Record<string, unknown>
     manager.approve(String(pendingHonesty.id))
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
-    manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implementation is complete; verification remains.',
+      toolCallId: 'implementation_claim',
     })
     const provider = new FakeProvider([
       makeResponse({ content: '全部完成，交付。' }),
@@ -3003,15 +3501,15 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
     const reply = await runner.stepAsync(history)
 
-    expect(reply).toContain('执行已暂停')
-    expect(reply).toContain('Ship it')
+    expect(reply).toContain('执行已安全暂停')
+    expect(reply).toContain('验证未完成')
     expect(reply).not.toContain('全部完成')
     const followups = history.filter(
       (message) =>
         message.role === 'user' &&
-        String(message.content).includes('差事尚未办妥'),
+        String(message.content).includes('[PLAN_VERIFICATION_UNRECORDED]'),
     )
-    expect(followups).toHaveLength(2)
+    expect(followups.length).toBeGreaterThanOrEqual(2)
     expect(provider.responses).toHaveLength(0)
     expect(
       manager.planStore.get(
@@ -3045,6 +3543,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
     manager.setMode('plan')
+    const discoveryId = seedRunnerPlanDiscovery(manager, ['a.html'])
     new ProposePlanTool(manager).execute({
       title: 'Verified plan',
       summary: 'Verification already recorded.',
@@ -3057,6 +3556,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
           title: 'Ship it',
           description: 'work',
           files: ['a.html'],
+          discovery_refs: [discoveryId],
           commands: ['npm test'],
           acceptance: ['ok'],
         },
@@ -3072,11 +3572,10 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       stepId: 'step_1',
       result: { command: 'npm test', passed: true, summary: 'pass' },
     })
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
-    manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implementation is complete and verification already passed.',
+      toolCallId: 'implementation_claim',
     })
     const provider = new FakeProvider([makeResponse({ content: '完成' })])
     const runner = new AgentRunner({
@@ -3091,6 +3590,75 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     const reply = await runner.stepAsync([{ role: 'user', content: '继续' }])
 
     expect(reply).toBe('完成')
+  })
+
+  it('appends the signed manual-verification waiver disclosure exactly once', async () => {
+    const manager = new ControlManager(tmp('emperor-waiver-final-disclosure-'))
+    const todoStore = new TodoStore()
+    manager.setRuntimeScope({
+      sessionId: 'session_waiver_final_disclosure',
+      mode: 'build',
+    })
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Manual verification disclosure',
+      summary: 'The final reply must disclose the signed waiver.',
+      planMarkdown: '# Plan\n\n- Implement\n- Verify manually',
+      assumptions: [],
+      riskLevel: 'low',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement page',
+          description: 'Implement the page.',
+          files: ['index.html'],
+          acceptance: ['page implemented'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'manual',
+              required: true,
+              human_required: true,
+              description: 'Inspect the page in a browser.',
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary:
+        'Implemented the page; the explicitly required manual check remains.',
+      toolCallId: 'call_waiver_implementation_complete',
+    })
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_waiver_final_disclosure',
+      executionId: 'execution_waiver_final_disclosure',
+    })!
+    manager.answer(decision.id, {
+      plan_execution_action: {
+        option_id: 'waive_verification_and_complete',
+        choice: '跳过验证并完成',
+        freeform: '',
+      },
+    })
+
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: '实现完成。' })]),
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+      controlManager: manager,
+      todoStore,
+      sessionId: 'session_waiver_final_disclosure',
+    })
+
+    const reply = await runner.stepAsync([{ role: 'user', content: '收尾' }])
+
+    const disclosure = '实现已完成，手动验证已由用户明确豁免。'
+    expect(reply).toContain(disclosure)
+    expect(reply.split(disclosure)).toHaveLength(2)
   })
 
   it("freezes the shrink boundary end-to-end so the prefix stays byte-stable across a turn's model calls (2026-07-05 B3)", async () => {
@@ -3214,477 +3782,6 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(reply).not.toContain('max_turns')
   })
 
-  it('evaluates a progressed turn at the iteration boundary and continues inside the same turn', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('progress_1', 'echo', { value: 'changed' })],
-        finishReason: 'tool_calls',
-      }),
-      makeResponse({ content: '验证完成并交付。' }),
-    ])
-    const evaluate = vi.fn(async (_input: TurnContinuationInput) => {
-      const decision: Awaited<
-        ReturnType<TurnContinuationEvaluator['evaluate']>
-      > = {
-        decision: 'continue',
-        reasonCode: 'verification_remaining',
-        requestedIterations: 4,
-        nextActions: ['完成验证'],
-        summary: '已有修改，仍需验证。',
-      }
-      return decision
-    })
-    const continuationEvaluator: TurnContinuationEvaluator = { evaluate }
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator,
-    })
-    const emitted: Msg[] = []
-
-    const reply = await runner.stepAsync(
-      [{ role: 'user', content: '完成实现并验证' }],
-      {
-        turnId: 'turn_continue',
-        emit: (event) => {
-          emitted.push(event)
-        },
-      },
-    )
-
-    expect(reply).toBe('验证完成并交付。')
-    expect(evaluate).toHaveBeenCalledTimes(1)
-    expect(evaluate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskIntent: '完成实现并验证',
-        totalIterations: 1,
-        evaluationRound: 1,
-        successfulChanges: expect.arrayContaining([
-          expect.stringContaining('echo'),
-        ]),
-      }),
-      expect.objectContaining({ signal: null }),
-    )
-    expect(provider.seenMessages).toHaveLength(2)
-    expect(JSON.stringify(provider.seenMessages[1])).toContain(
-      '[CONTROL:CONTINUATION_GRANTED]',
-    )
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        event: 'turn_continuation_evaluated',
-        decision: 'continue',
-        grantedIterations: 4,
-        evaluationRound: 1,
-      }),
-    )
-  })
-
-  it('allows exactly one tool-free final reply after authoritative finalize approval', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('progress_finalize', 'echo', { value: 'done' })],
-        finishReason: 'tool_calls',
-      }),
-      makeResponse({ content: '最终交付报告。' }),
-    ])
-    const evaluate = vi.fn(async () => ({
-      decision: 'finalize',
-      reasonCode: 'ready_to_finalize',
-      requestedIterations: 4,
-      nextActions: ['整理最终交付'],
-      summary: '权威状态已经完成。',
-    }))
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-    })
-    const emitted: Msg[] = []
-
-    const reply = await runner.stepAsync(
-      [{ role: 'user', content: '完成并交付' }],
-      { emit: (event) => void emitted.push(event) },
-    )
-
-    expect(reply).toBe('最终交付报告。')
-    expect(provider.seenTools).toEqual([['echo'], []])
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        event: 'turn_continuation_evaluated',
-        decision: 'finalize',
-        grantedIterations: 1,
-      }),
-    )
-  })
-
-  it('never executes provider tool calls returned during the tool-free final reply', async () => {
-    const registry = new ToolRegistry()
-    const echo = new EchoTool()
-    const execute = vi.spyOn(echo, 'execute')
-    registry.register(echo)
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('progress_finalize', 'echo', { value: 'done' })],
-        finishReason: 'tool_calls',
-      }),
-      makeResponse({
-        content: '',
-        toolCalls: [
-          toolCall('forbidden_finalize_tool', 'echo', {
-            value: 'must-not-run',
-          }),
-        ],
-        finishReason: 'tool_calls',
-      }),
-    ])
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async () => ({
-          decision: 'finalize',
-          reasonCode: 'ready_to_finalize',
-          requestedIterations: 4,
-          nextActions: ['整理最终交付'],
-          summary: '权威状态已经完成。',
-        }),
-      },
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '完成并交付' },
-    ])
-
-    expect(execute).toHaveBeenCalledTimes(1)
-    expect(provider.seenTools).toEqual([['echo'], []])
-    expect(reply).toContain('无工具收尾阶段仍请求了工具调用')
-  })
-
-  it('rejects finalize when all tools failed and no authoritative progress exists', async () => {
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('failed_finalize', 'missing_tool', {})],
-        finishReason: 'tool_calls',
-      }),
-    ])
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async () => ({
-          decision: 'finalize',
-          reasonCode: 'ready_to_finalize',
-          requestedIterations: 4,
-          nextActions: ['整理最终交付'],
-          summary: '错误地宣称完成。',
-        }),
-      },
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '执行任务' },
-    ])
-
-    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
-    expect(provider.seenMessages).toHaveLength(1)
-  })
-
-  it('rejects finalize when the latest tool iteration failed after earlier progress', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('earlier_progress', 'echo', { value: 'done' })],
-        finishReason: 'tool_calls',
-      }),
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('latest_failure', 'missing_tool', {})],
-        finishReason: 'tool_calls',
-      }),
-    ])
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 2,
-      continuationEvaluator: {
-        evaluate: async () => ({
-          decision: 'finalize',
-          reasonCode: 'ready_to_finalize',
-          requestedIterations: 4,
-          nextActions: ['整理最终交付'],
-          summary: '错误地忽略了最后一次失败。',
-        }),
-      },
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '执行任务' },
-    ])
-
-    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
-    expect(provider.seenMessages).toHaveLength(2)
-  })
-
-  it('rejects finalize for an empty authority with no successful fact', () => {
-    const provider = new FakeProvider([
-      makeResponse({ content: '只做了说明。' }),
-    ])
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async () => ({
-          decision: 'finalize',
-          reasonCode: 'ready_to_finalize',
-          requestedIterations: 4,
-          nextActions: ['整理最终交付'],
-          summary: '错误地宣称完成。',
-        }),
-      },
-    })
-
-    expect(
-      (
-        runner as unknown as {
-          authoritativeReadyToFinalize(progress: {
-            meaningfulProgress: number
-            successfulChanges: string[]
-            successfulEvidence: string[]
-            recentErrors: string[]
-            repeatedReadCount: number
-            noProgressIterations: number
-            lastIterationHadError: boolean
-          }): boolean
-        }
-      ).authoritativeReadyToFinalize({
-        meaningfulProgress: 0,
-        successfulChanges: [],
-        successfulEvidence: [],
-        recentErrors: [],
-        repeatedReadCount: 0,
-        noProgressIterations: 0,
-        lastIterationHadError: false,
-      }),
-    ).toBe(false)
-  })
-
-  it('fails closed when PlanStore is unavailable during finalize adjudication', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [
-          toolCall('progress_before_store_error', 'safe_echo', {
-            value: 'done',
-          }),
-        ],
-        finishReason: 'tool_calls',
-      }),
-    ])
-    const manager = new ControlManager(tmp('emperor-finalize-store-error-'))
-    const originalList = manager.planStore.list.bind(manager.planStore)
-    let injectStoreFailure = false
-    vi.spyOn(manager.planStore, 'list').mockImplementation(() => {
-      if (injectStoreFailure) throw new Error('injected PlanStore failure')
-      return originalList()
-    })
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      controlManager: manager,
-      continuationEvaluator: {
-        evaluate: async () => {
-          injectStoreFailure = true
-          return {
-            decision: 'finalize',
-            reasonCode: 'ready_to_finalize',
-            requestedIterations: 4,
-            nextActions: ['整理最终交付'],
-            summary: '错误地宣称完成。',
-          }
-        },
-      },
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '执行任务' },
-    ])
-
-    expect(reply).toContain('权威 Plan 或必需验证尚未完成')
-    expect(provider.seenMessages).toHaveLength(1)
-  })
-
-  it('rejects evaluator continuation when the segment made no meaningful progress', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider([
-      makeResponse({
-        content: '',
-        toolCalls: [toolCall('failed_1', 'missing_tool', {})],
-        finishReason: 'tool_calls',
-      }),
-      makeResponse({ content: 'must not run' }),
-    ])
-    const evaluate = vi.fn(async () => ({
-      decision: 'continue',
-      reasonCode: 'work_remaining',
-      requestedIterations: 12,
-      nextActions: ['Retry the same operation'],
-      summary: 'Keep trying.',
-    }))
-    const manager = new ControlManager(tmp('emperor-continuation-pause-'))
-    const pausePlanExecution = vi.spyOn(manager, 'pausePlanExecution')
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-      controlManager: manager,
-    })
-    const emitted: Msg[] = []
-
-    const reply = await runner.stepAsync(
-      [{ role: 'user', content: '完成任务' }],
-      {
-        emit: (event) => {
-          emitted.push(event)
-        },
-      },
-    )
-
-    expect(provider.seenMessages).toHaveLength(1)
-    expect(reply).toContain('执行已暂停')
-    expect(reply).not.toContain('max_turns')
-    expect(pausePlanExecution).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: 'no_progress',
-        totalIterations: 1,
-        nextActions: ['Retry the same operation'],
-      }),
-    )
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        event: 'turn_continuation_evaluated',
-        decision: 'pause',
-        reasonCode: 'no_progress',
-        grantedIterations: 0,
-      }),
-    )
-  })
-
-  it('persists an evaluated pause into the authoritative Plan and PlanStep Task', async () => {
-    const root = tmp('emperor-runner-plan-pause-')
-    const manager = new ControlManager(root)
-    manager.setRuntimeScope({ sessionId: 'session_pause', mode: 'build' })
-    const todoStore = new TodoStore()
-    const taskManager = new TaskManager(root)
-    manager.setTodoStore(todoStore)
-    manager.setTaskManager(taskManager)
-    const interaction = manager.createPlan({
-      title: 'Pause persistence',
-      summary: 'Keep the active step authoritative while paused.',
-      planMarkdown: '# Plan',
-      steps: [
-        {
-          id: 'step_1',
-          title: 'Implement and verify',
-          description: 'Perform the remaining work.',
-          acceptance: ['verified'],
-          verification: [
-            {
-              id: 'test',
-              kind: 'command',
-              command: 'npm test',
-              required: true,
-            },
-          ],
-        },
-      ],
-    })
-    manager.approve(interaction.id)
-    const planId = String(interaction.meta.plan_id)
-    const taskId = String(
-      (
-        manager.planStore.get(planId)!.metadata.plan_step_tasks as Record<
-          string,
-          string
-        >
-      ).step_1,
-    )
-    const runner = new AgentRunner({
-      provider: new FakeProvider([
-        makeResponse({
-          content: '',
-          toolCalls: [toolCall('missing', 'missing_tool', {})],
-          finishReason: 'tool_calls',
-        }),
-      ]),
-      model: 'fake',
-      registry: new ToolRegistry(),
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async () => ({
-          decision: 'pause',
-          reasonCode: 'no_progress',
-          requestedIterations: 4,
-          nextActions: ['修复工具调用后继续'],
-          summary: '没有有效进展。',
-        }),
-      },
-      controlManager: manager,
-      todoStore,
-    })
-
-    await runner.stepAsync([{ role: 'user', content: '继续执行' }], {
-      turnId: 'turn_pause',
-    })
-
-    const paused = manager.planStore.get(planId)!
-    expect(paused.status).toBe('executing')
-    expect(paused.steps[0]!.status).toBe('active')
-    expect(paused.metadata.execution_pause).toMatchObject({
-      reason: 'no_progress',
-      turn_id: 'turn_pause',
-      total_iterations: 1,
-    })
-    expect(taskManager.store.get(taskId)?.status).toBe('pending')
-    expect(todoStore.todos[0]!.status).toBe('pending')
-  })
-
   it('resumes a paused Plan only for an explicit continuation prompt', async () => {
     const manager = new ControlManager(tmp('emperor-continuation-resume-'))
     const resumePlanExecution = vi.spyOn(manager, 'resumePlanExecution')
@@ -3755,481 +3852,46 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(resumePlanExecution).not.toHaveBeenCalled()
   })
 
-  it('triggers continuation evaluation early after six no-progress iterations', async () => {
+  it('uses the deterministic watchdog when an unlimited main turn makes no progress', async () => {
     const provider = new FakeProvider([
-      ...Array.from({ length: 6 }, (_, index) =>
+      ...Array.from({ length: 13 }, (_, index) =>
         makeResponse({
           content: '',
-          toolCalls: [toolCall(`missing_${index}`, 'missing_tool', {})],
+          toolCalls: [
+            toolCall(`missing_watchdog_${index}`, 'missing_tool', {}),
+          ],
           finishReason: 'tool_calls',
         }),
       ),
       makeResponse({ content: 'must not run' }),
     ])
-    const evaluate = vi.fn(async () => ({
-      decision: 'pause',
-      reasonCode: 'no_progress',
-      requestedIterations: 4,
-      nextActions: ['Inspect the repeated failure'],
-      summary: 'The turn is repeating the same failed operation.',
-    }))
+    const emitted: Msg[] = []
     const runner = new AgentRunner({
       provider,
       model: 'fake',
       registry: new ToolRegistry(),
       systemPrompt: 'system',
-      maxTurns: 20,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
+      maxTurns: null,
     })
 
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '完成任务' },
-    ])
-
-    expect(provider.seenMessages).toHaveLength(6)
-    expect(evaluate).toHaveBeenCalledTimes(1)
-    expect(evaluate).toHaveBeenCalledWith(
-      expect.objectContaining({ noProgressIterations: 6 }),
-      expect.objectContaining({ signal: null }),
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: '完成任务' }],
+      { emit: (event) => void emitted.push(event) },
     )
-    expect(JSON.stringify(provider.seenMessages[4])).toContain(
+
+    expect(provider.seenMessages).toHaveLength(12)
+    expect(JSON.stringify(provider.seenMessages[6])).toContain(
       '[CONTROL:NO_PROGRESS_CORRECTION]',
     )
     expect(reply).toContain('执行已暂停')
-  })
-
-  it('applies an early finalize grant instead of discarding the evaluator decision', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    const provider = new FakeProvider([
-      ...Array.from({ length: 7 }, (_, index) =>
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall(`repeat_early_${index}`, 'safe_echo', {
-              value: 'same-evidence',
-            }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ),
-      makeResponse({ content: '已按评估建议整理交付。' }),
-    ])
-    const evaluate = vi.fn(async () => ({
-      decision: 'finalize',
-      reasonCode: 'ready_to_finalize',
-      requestedIterations: 4,
-      nextActions: ['Summarize the completed evidence'],
-      summary: 'The authoritative state is ready for a final reply.',
-    }))
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 20,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '完成任务' },
-    ])
-
-    expect(reply).toBe('已按评估建议整理交付。')
-    expect(evaluate).toHaveBeenCalledTimes(1)
-    expect(JSON.stringify(provider.seenMessages[7])).toContain(
-      '[CONTROL:FINALIZE_GRANTED]',
-    )
-    expect(provider.seenTools[7]).toEqual([])
-  })
-
-  it('lets turn cancellation preempt an in-flight continuation evaluation', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    let releaseEvaluation: () => void = () => undefined
-    let markEvaluationStarted: () => void = () => undefined
-    const evaluationStarted = new Promise<void>((resolve) => {
-      markEvaluationStarted = resolve
-    })
-    const evaluate = vi.fn(
-      async () =>
-        await new Promise<
-          Awaited<ReturnType<TurnContinuationEvaluator['evaluate']>>
-        >((resolve) => {
-          markEvaluationStarted()
-          releaseEvaluation = () =>
-            resolve({
-              decision: 'continue',
-              reasonCode: 'work_remaining',
-              requestedIterations: 4,
-              nextActions: ['Continue writing'],
-              summary: 'Work remains.',
-            })
-        }),
-    )
-    const manager = new ControlManager(tmp('emperor-continuation-cancel-'))
-    const pausePlanExecution = vi.spyOn(manager, 'pausePlanExecution')
-    const controller = new AbortController()
-    const history: Msg[] = [{ role: 'user', content: '执行任务' }]
-    const runner = new AgentRunner({
-      provider: new FakeProvider([
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall('progress_before_cancel', 'safe_echo', { value: 'x' }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ]),
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-      controlManager: manager,
-    })
-
-    const pending = runner.stepAsync(history, { signal: controller.signal })
-    await evaluationStarted
-    controller.abort()
-    releaseEvaluation()
-
-    await expect(pending).rejects.toBeInstanceOf(CancelledTaskError)
-    expect(pausePlanExecution).not.toHaveBeenCalled()
-    expect(
-      history.some((message) =>
-        String(message.content ?? '').includes('执行已暂停'),
-      ),
-    ).toBe(false)
-  })
-
-  it('evaluates the latest Plan in the current session scope, not the global latest Plan', async () => {
-    const manager = new ControlManager(tmp('emperor-continuation-scope-'))
-    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
-    const planA = manager.createPlan({
-      title: 'Session A plan',
-      summary: 'Current scoped plan.',
-      planMarkdown: '# A',
-      steps: [{ id: 'a', title: 'A', description: 'A', acceptance: ['A'] }],
-    })
-    manager.approve(planA.id)
-    manager.setRuntimeScope({ sessionId: 'session_b', mode: 'build' })
-    const planB = manager.createPlan({
-      title: 'Session B plan',
-      summary: 'Newer foreign plan.',
-      planMarkdown: '# B',
-      steps: [{ id: 'b', title: 'B', description: 'B', acceptance: ['B'] }],
-    })
-    manager.approve(planB.id)
-    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
-    const evaluatorInputs: TurnContinuationInput[] = []
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    const runner = new AgentRunner({
-      provider: new FakeProvider([
-        makeResponse({
-          content: '',
-          toolCalls: [toolCall('scope_progress', 'safe_echo', { value: 'x' })],
-          finishReason: 'tool_calls',
-        }),
-      ]),
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async (input) => {
-          evaluatorInputs.push(input)
-          return {
-            decision: 'pause',
-            reasonCode: 'blocked',
-            requestedIterations: 4,
-            nextActions: ['Resolve the scoped blocker'],
-            summary: 'Paused for scope test.',
-          }
-        },
-      },
-      controlManager: manager,
-    })
-
-    await runner.stepAsync([{ role: 'user', content: '继续 A' }])
-
-    expect(evaluatorInputs[0]?.plan?.id).toBe(String(planA.meta.plan_id))
-    expect(evaluatorInputs[0]?.plan?.id).not.toBe(String(planB.meta.plan_id))
-  })
-
-  it('does not inherit a completed Plan or its bound Todos in a new unrelated turn', async () => {
-    const manager = new ControlManager(tmp('emperor-continuation-stale-plan-'))
-    const todoStore = new TodoStore()
-    manager.setTodoStore(todoStore)
-    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
-    const draft = manager.createPlan({
-      title: 'Earlier completed plan',
-      summary: 'Belongs to a previous user turn.',
-      planMarkdown: '# Earlier plan',
-      steps: [
-        {
-          id: 'old_step',
-          title: 'Old work',
-          description: 'Already completed.',
-          acceptance: ['done'],
-        },
-      ],
-    })
-    manager.approve(draft.id)
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
-    const completed = manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
-    })
-    expect(completed?.status).toBe('completed')
-
-    const evaluatorInputs: TurnContinuationInput[] = []
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    const runner = new AgentRunner({
-      provider: new FakeProvider([
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall('new_turn_progress', 'safe_echo', { value: 'new work' }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ]),
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async (input) => {
-          evaluatorInputs.push(input)
-          return {
-            decision: 'pause',
-            reasonCode: 'blocked',
-            requestedIterations: 4,
-            nextActions: ['Handle only the new task'],
-            summary: 'Pause the new task.',
-          }
-        },
-      },
-      controlManager: manager,
-      todoStore,
-    })
-
-    await runner.stepAsync([{ role: 'user', content: '执行另一个任务' }])
-
-    expect(evaluatorInputs[0]?.plan).toBeNull()
-    expect(evaluatorInputs[0]?.todos).toEqual([])
-  })
-
-  it('binds the current approval generation when an older completed Plan receives a late update', async () => {
-    const manager = new ControlManager(tmp('emperor-continuation-generation-'))
-    const todoStore = new TodoStore()
-    manager.setTodoStore(todoStore)
-    manager.setRuntimeScope({ sessionId: 'session_a', mode: 'build' })
-    const oldDraft = manager.createPlan({
-      title: 'Old plan',
-      summary: 'Completed before the current plan.',
-      planMarkdown: '# Old',
-      steps: [
-        {
-          id: 'old_step',
-          title: 'Old step',
-          description: 'done',
-          acceptance: ['done'],
-        },
-      ],
-    })
-    manager.approve(oldDraft.id)
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
-    const oldCompleted = manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
-    })
-    expect(oldCompleted?.status).toBe('completed')
-
-    const currentDraft = manager.createPlan({
-      title: 'Current plan',
-      summary: 'The only executable approval generation.',
-      planMarkdown: '# Current',
-      steps: [
-        {
-          id: 'current_step',
-          title: 'Current step',
-          description: 'still running',
-          acceptance: ['done'],
-        },
-      ],
-    })
-    manager.approve(currentDraft.id)
-    const current = manager.latestExecutablePlan()
-    expect(current?.id).toBe(String(currentDraft.meta.plan_id))
-    manager.planStore.save({
-      ...oldCompleted!,
-      updatedAt: Math.max(oldCompleted!.updatedAt, current!.updatedAt) + 1,
-    })
-    expect(manager.latestExecutablePlan()?.id).toBe(current?.id)
-
-    const evaluatorInputs: TurnContinuationInput[] = []
-    const registry = new ToolRegistry()
-    registry.register(new SafeEchoTool())
-    const runner = new AgentRunner({
-      provider: new FakeProvider([
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall('current_plan_progress', 'safe_echo', { value: 'x' }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ]),
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: {
-        evaluate: async (input) => {
-          evaluatorInputs.push(input)
-          return {
-            decision: 'pause',
-            reasonCode: 'blocked',
-            requestedIterations: 4,
-            nextActions: ['Continue the current Plan'],
-            summary: 'Pause after checking the binding.',
-          }
-        },
-      },
-      controlManager: manager,
-      todoStore,
-    })
-
-    await runner.stepAsync([{ role: 'user', content: '继续执行' }])
-
-    expect(evaluatorInputs[0]?.plan?.id).toBe(current?.id)
-    expect(evaluatorInputs[0]?.plan?.id).not.toBe(oldCompleted?.id)
-  })
-
-  it('allows at most three continuation evaluations and 36 extra iterations', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider(
-      Array.from({ length: 40 }, (_, index) =>
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall(`progress_${index}`, 'echo', { value: `value_${index}` }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ),
-    )
-    let evaluationRound = 0
-    const evaluate = vi.fn(async () => {
-      evaluationRound += 1
-      return {
-        decision: 'continue',
-        reasonCode: 'work_remaining',
-        requestedIterations: 12,
-        nextActions: [`Continue bounded work segment ${evaluationRound}`],
-        summary: 'New work was completed in this segment.',
-      }
-    })
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-    })
-    const emitted: Msg[] = []
-
-    const reply = await runner.stepAsync(
-      [{ role: 'user', content: '执行复杂任务' }],
-      {
-        emit: (event) => {
-          emitted.push(event)
-        },
-      },
-    )
-
-    expect(evaluate).toHaveBeenCalledTimes(3)
-    expect(provider.seenMessages).toHaveLength(37)
-    expect(reply).toContain('执行已暂停')
-    expect(
-      emitted.filter((event) => event.event === 'turn_continuation_evaluated'),
-    ).toHaveLength(4)
-    expect(
-      emitted.filter(
-        (event) =>
-          event.event === 'turn_continuation_evaluated' &&
-          event.source === 'evaluator',
-      ),
-    ).toHaveLength(3)
-    expect(
-      emitted.filter(
-        (event) =>
-          event.event === 'turn_continuation_evaluated' &&
-          event.source === 'core_policy',
-      ),
-    ).toHaveLength(1)
+    expect(reply).toContain('没有形成新的有效进展')
     expect(emitted).toContainEqual(
-      expect.objectContaining({ event: 'turn_phase', phase: 'paused' }),
+      expect.objectContaining({
+        event: 'turn_phase',
+        phase: 'paused',
+        detail: expect.objectContaining({ reason: 'no_progress' }),
+      }),
     )
-    expect(
-      [...emitted]
-        .reverse()
-        .find((event) => event.event === 'turn_continuation_evaluated'),
-    ).toMatchObject({
-      decision: 'pause',
-      reasonCode: 'budget_exhausted',
-      totalIterations: 37,
-    })
-  })
-
-  it('rejects a continuation evaluator that repeats its previously granted actions', async () => {
-    const registry = new ToolRegistry()
-    registry.register(new EchoTool())
-    const provider = new FakeProvider(
-      Array.from({ length: 5 }, (_, index) =>
-        makeResponse({
-          content: '',
-          toolCalls: [
-            toolCall(`progress_repeat_${index}`, 'echo', {
-              value: `value_${index}`,
-            }),
-          ],
-          finishReason: 'tool_calls',
-        }),
-      ),
-    )
-    const evaluate = vi.fn(async () => ({
-      decision: 'continue',
-      reasonCode: 'work_remaining',
-      requestedIterations: 4,
-      nextActions: ['Repeat the same next action'],
-      summary: 'Keep going.',
-    }))
-    const runner = new AgentRunner({
-      provider,
-      model: 'fake',
-      registry,
-      systemPrompt: 'system',
-      maxTurns: 1,
-      continuationEvaluator: { evaluate } as TurnContinuationEvaluator,
-    })
-
-    const reply = await runner.stepAsync([
-      { role: 'user', content: '执行复杂任务' },
-    ])
-
-    expect(evaluate).toHaveBeenCalledTimes(2)
-    expect(provider.seenMessages).toHaveLength(5)
-    expect(reply).toContain('执行已暂停')
-    expect(reply).toContain('重复了已经批准过的动作')
   })
 
   it('injects a single wrap-up reminder when the turn budget is nearly exhausted', async () => {
@@ -4416,6 +4078,134 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
   })
 })
 
+describe('independent reviewer terminal delivery', () => {
+  it('records one reviewer PASS, blocks delivery-confirmation Ask, and finalizes once', async () => {
+    const root = tmp('emperor-runner-independent-review-')
+    const manager = new ControlManager(root)
+    manager.setRuntimeScope({
+      sessionId: 'session-runner-independent-review',
+      mode: 'build',
+      projectId: 'project-runner-independent-review',
+      workspaceRoot: '/workspace/runner-independent-review',
+      projectFingerprint: 'fingerprint-runner-independent-review',
+    })
+    manager.setMode('full_access')
+    const plan = manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_runner_independent_review',
+        title: 'Sensitive implementation',
+        summary: 'Review backend and IPC changes before delivery.',
+        status: PlanStatus.COMPLETED,
+        createdAt: 1,
+        updatedAt: 2,
+        approvedAt: 1,
+        sessionId: 'session-runner-independent-review',
+        steps: [
+          makeStep({
+            id: 'step_1',
+            title: 'Implement',
+            status: PlanStepStatus.DONE,
+            files: [
+              'packages/core/src/agent/runner.ts',
+              'desktop/src/main/ipc.ts',
+              'desktop/src/renderer/src/App.vue',
+            ],
+          }),
+        ],
+        metadata: {
+          approval_generation: 1,
+          scope: {
+            session_id: 'session-runner-independent-review',
+            mode: 'build',
+            project_id: 'project-runner-independent-review',
+            workspace_root: '/workspace/runner-independent-review',
+            project_fingerprint: 'fingerprint-runner-independent-review',
+          },
+        },
+      }),
+    )
+    expect(
+      manager.planIndependentVerificationFollowup({
+        dispatchAvailable: true,
+      }),
+    ).toMatchObject({ status: 'required' })
+
+    const registry = new ToolRegistry()
+    registry.register(new VerificationReviewerTool())
+    registry.register(new AskUserTool(manager))
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_reviewer_terminal', 'dispatch_subagent', {
+            agent_type: 'verification_reviewer',
+            task: 'Review the completed Plan.',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_delivery_confirmation', 'ask_user', {
+            questions: [
+              {
+                id: 'satisfied',
+                header: '确认',
+                question: '是否满意并结束？',
+                options: [
+                  {
+                    id: 'yes',
+                    label: '满意',
+                    description: '结束会话',
+                  },
+                ],
+              },
+            ],
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: '实现和独立复核均已完成。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: manager,
+      sessionId: 'session-runner-independent-review',
+      workspaceRoot: '/workspace/runner-independent-review',
+    })
+    const history: Msg[] = [{ role: 'user', content: '完成当前计划' }]
+
+    const reply = await runner.stepAsync(history, {
+      turnId: 'turn-runner-independent-review',
+    })
+
+    expect(reply).toBe('实现和独立复核均已完成。')
+    expect(manager.payload().pending).toBeNull()
+    const saved = manager.planStore.get(plan.id)!
+    expect(
+      saved.verification.filter(
+        (item) => item.source === 'independent_verification',
+      ),
+    ).toHaveLength(1)
+    expect(saved.metadata.independent_verification_terminal).toMatchObject({
+      status: 'delivered',
+      tool_call_id: 'call_reviewer_terminal',
+    })
+    expect(provider.seenMessages).toHaveLength(3)
+    expect(
+      history.find(
+        (message) =>
+          message.role === 'tool' &&
+          String(message.content).includes('Do not ask whether the user'),
+      ),
+    ).toBeTruthy()
+  })
+})
+
 // ── test_control.py::test_runner_* (deferred from W05) ──
 
 class MemoryFake implements MemoryStoreLike {
@@ -4514,6 +4304,7 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
     const manager = new ControlManager(tmp('emperor-runner-plan-'))
     manager.setRuntimeScope({ sessionId: 'session_plain_plan_owner' })
     manager.setMode('plan')
+    const discoveryId = seedRunnerPlanDiscovery(manager, ['src/example.ts'])
     const registry = controlRegistry(manager)
     const provider = new FakeProvider([
       makeResponse({ content: '我会先读代码，然后实现并测试。' }),
@@ -4532,6 +4323,7 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
                 title: '修改并验证',
                 description: '实施目标改动并运行测试。',
                 files: ['src/example.ts'],
+                discovery_refs: [discoveryId],
                 commands: ['npm test'],
                 acceptance: ['测试通过'],
               },
@@ -4608,8 +4400,11 @@ describe('AgentRunner control integration (test_control.py::test_runner_*)', () 
   it('streams partial propose_plan arguments as plan_draft_delta events', async () => {
     const manager = new ControlManager(tmp('emperor-runner-plan-stream-'))
     manager.setMode('plan')
+    const discoveryId = seedRunnerPlanDiscovery(manager, [
+      'desktop/src/renderer/src/views/ChatView.vue',
+    ])
     const registry = controlRegistry(manager)
-    const provider = new StreamingToolDeltaProvider()
+    const provider = new StreamingToolDeltaProvider(discoveryId)
     const runner = new AgentRunner({
       provider,
       model: 'fake',

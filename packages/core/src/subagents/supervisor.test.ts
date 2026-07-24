@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -91,6 +91,7 @@ describe('SubagentSupervisor', () => {
         env: { PATH: '/usr/bin' },
       }),
     })
+    const expectedTarget = join(realpathSync(worktreeRoot), 'subagent_123')
 
     const lease = await provider.acquire({
       taskId: 'subagent_123',
@@ -101,38 +102,26 @@ describe('SubagentSupervisor', () => {
     await lease.cleanup()
 
     expect(lease.mode).toBe('worktree')
-    expect(lease.root).toBe(join(worktreeRoot, 'subagent_123'))
-    expect(calls).toEqual([
+    expect(lease.root).toBe(expectedTarget)
+    expect(
+      calls
+        .filter((call) => call.args.includes('worktree'))
+        .map((call) => ({
+          cwd: call.cwd,
+          args: call.args.slice(call.args.indexOf('worktree')),
+        })),
+    ).toEqual([
       {
-        executable: '/usr/bin/git',
-        args: ['-C', '/repo', 'rev-parse', '--show-toplevel'],
+        cwd: '/repo',
+        args: ['worktree', 'add', '--detach', expectedTarget, 'HEAD'],
       },
       {
-        executable: '/usr/bin/git',
-        args: [
-          '-C',
-          '/repo',
-          'worktree',
-          'add',
-          '--detach',
-          join(worktreeRoot, 'subagent_123'),
-          'HEAD',
-        ],
+        cwd: '/repo',
+        args: ['worktree', 'remove', '--force', expectedTarget],
       },
       {
-        executable: '/usr/bin/git',
-        args: [
-          '-C',
-          '/repo',
-          'worktree',
-          'remove',
-          '--force',
-          join(worktreeRoot, 'subagent_123'),
-        ],
-      },
-      {
-        executable: '/usr/bin/git',
-        args: ['-C', '/repo', 'worktree', 'prune'],
+        cwd: '/repo',
+        args: ['worktree', 'prune'],
       },
     ])
   })
@@ -162,6 +151,7 @@ describe('SubagentSupervisor', () => {
       }),
     }
     const first = new GitWorktreeSubagentWorkspaceProvider(options)
+    const expectedTarget = join(realpathSync(worktreeRoot), 'subagent_crashed')
     await first.acquire({
       taskId: 'subagent_crashed',
       sessionId: 'session_1',
@@ -172,16 +162,11 @@ describe('SubagentSupervisor', () => {
     const restarted = new GitWorktreeSubagentWorkspaceProvider(options)
     await restarted.reconcile()
 
-    expect(calls.slice(-2)).toEqual([
-      [
-        '-C',
-        '/repo',
-        'worktree',
-        'remove',
-        '--force',
-        join(worktreeRoot, 'subagent_crashed'),
-      ],
-      ['-C', '/repo', 'worktree', 'prune'],
+    expect(
+      calls.slice(-2).map((args) => args.slice(args.indexOf('worktree'))),
+    ).toEqual([
+      ['worktree', 'remove', '--force', expectedTarget],
+      ['worktree', 'prune'],
     ])
     expect(JSON.parse(readFileSync(restarted.manifestPath, 'utf8'))).toEqual({
       version: 1,

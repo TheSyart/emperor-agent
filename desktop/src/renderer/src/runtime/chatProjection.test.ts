@@ -325,6 +325,42 @@ describe('chatProjection', () => {
     )
   })
 
+  it('preserves the runtime tool batch identity on every projected tool segment', () => {
+    const state = projectChatEvents([
+      {
+        event: 'tool_call',
+        seq: 1,
+        session_id: 's1',
+        turn_id: 'turn_batch',
+        id: 'call_1',
+        name: 'read_file',
+        arguments: { path: 'a.ts' },
+        tool_batch_id: 'turn_batch:tool_batch:1',
+      },
+      {
+        event: 'tool_run_completed',
+        seq: 2,
+        session_id: 's1',
+        turn_id: 'turn_batch',
+        id: 'call_1',
+        name: 'read_file',
+        summary: 'done',
+        tool_batch_id: 'turn_batch:tool_batch:1',
+      },
+    ])
+    const assistant = state.messages.find(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )
+
+    expect(assistant?.segments).toContainEqual(
+      expect.objectContaining({
+        type: 'tool',
+        toolId: 'call_1',
+        batchId: 'turn_batch:tool_batch:1',
+      }),
+    )
+  })
+
   it('deduplicates replay events by seq and ignores other sessions', () => {
     const state = projectChatEvents(
       [
@@ -704,11 +740,7 @@ describe('chatProjection', () => {
     const proposeTool = assistant.segments.find(
       (segment) => segment.type === 'tool' && segment.toolId === 'call_1',
     )
-    expect(proposeTool).toBeDefined()
-    expect(
-      proposeTool!.type === 'tool' &&
-        (proposeTool!.status === 'running' || proposeTool!.status === 'queued'),
-    ).toBe(false)
+    expect(proposeTool).toBeUndefined()
 
     const blocks = projectAssistantFlow(assistant)
     const kinds = blocks.map((block) => block.kind)
@@ -722,6 +754,152 @@ describe('chatProjection', () => {
     expect(
       lastText && lastText.kind === 'text' ? lastText.content : '',
     ).toContain('计划批准，开始执行。')
+  })
+
+  it('projects ask_user only as the dedicated Ask card', () => {
+    const state = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 'turn_A', content: 'ask' },
+      {
+        event: 'tool_call',
+        seq: 2,
+        turn_id: 'turn_A',
+        id: 'call_ask',
+        name: 'ask_user',
+        arguments: { questions: [{ id: 'scope' }] },
+      },
+      {
+        event: 'ask_request',
+        seq: 3,
+        turn_id: 'turn_A',
+        interaction: {
+          id: 'ask_1',
+          kind: 'ask',
+          status: 'waiting',
+          parent_call_id: 'call_ask',
+          questions: [],
+          meta: {},
+        },
+      },
+      {
+        event: 'tool_result',
+        seq: 4,
+        turn_id: 'turn_A',
+        id: 'call_ask',
+        name: 'ask_user',
+        summary: '{"interaction":{"id":"ask_1"}}',
+        output: '{"interaction":{"id":"ask_1"}}',
+      },
+      {
+        event: 'turn_paused',
+        seq: 5,
+        turn_id: 'turn_A',
+        interaction: { id: 'ask_1', kind: 'ask', status: 'waiting' },
+      },
+    ] as never)
+    const assistant = state.messages.find(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )!
+
+    expect(
+      assistant.segments.filter((segment) => segment.type === 'ask'),
+    ).toHaveLength(1)
+    expect(
+      assistant.segments.find(
+        (segment) => segment.type === 'tool' && segment.toolId === 'call_ask',
+      ),
+    ).toBeUndefined()
+    expect(JSON.stringify(assistant)).not.toContain('"questions":[{"id"')
+  })
+
+  it('suppresses legacy control tool follow-up events even when they omit the tool name', () => {
+    const state = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 'turn_A', content: 'ask' },
+      {
+        event: 'tool_call',
+        seq: 2,
+        turn_id: 'turn_A',
+        id: 'call_legacy_ask',
+        name: 'ask_user',
+        arguments: { questions: [{ id: 'scope' }] },
+      },
+      {
+        event: 'tool_result',
+        seq: 3,
+        turn_id: 'turn_A',
+        id: 'call_legacy_ask',
+        summary: '{"interaction":{"id":"ask_legacy"}}',
+        output: '{"interaction":{"id":"ask_legacy"}}',
+      },
+      {
+        event: 'ask_request',
+        seq: 4,
+        turn_id: 'turn_A',
+        interaction: {
+          id: 'ask_legacy',
+          kind: 'ask',
+          status: 'waiting',
+          parent_call_id: 'call_legacy_ask',
+          questions: [],
+          meta: {},
+        },
+      },
+    ] as never)
+    const assistant = state.messages.find(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )!
+
+    expect(
+      assistant.segments.filter((segment) => segment.type === 'tool'),
+    ).toHaveLength(0)
+    expect(
+      assistant.segments.filter((segment) => segment.type === 'ask'),
+    ).toHaveLength(1)
+  })
+
+  it('projects a signed verification waiver as a Plan settlement milestone', () => {
+    const state = projectChatEvents([
+      { event: 'user_message', seq: 1, turn_id: 'turn_A', content: 'run' },
+      {
+        event: 'ask_request',
+        seq: 2,
+        turn_id: 'turn_A',
+        interaction: {
+          id: 'ask_plan_action',
+          kind: 'ask',
+          status: 'waiting',
+          questions: [],
+          meta: { interaction_type: 'plan_execution' },
+        },
+      },
+      {
+        event: 'plan_execution_settled',
+        seq: 3,
+        turn_id: 'turn_A',
+        action: 'waive_verification_and_complete',
+        disposition: 'complete',
+        interaction: {
+          id: 'ask_plan_action',
+          kind: 'ask',
+          status: 'answered',
+          questions: [],
+          meta: { interaction_type: 'plan_execution' },
+        },
+        plan: { id: 'plan_1', status: 'completed' },
+      },
+    ] as never)
+    const assistant = state.messages.find(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )!
+
+    expect(assistant.segments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'plan_activity',
+          label: '已豁免验证并完成',
+          tone: 'success',
+        }),
+      ]),
+    )
   })
 
   it('replays ask answer resume across turns into the same assistant', () => {
@@ -1235,8 +1413,8 @@ describe('chatProjection', () => {
   })
 })
 
-describe('turn continuation timeline projection', () => {
-  it('projects continue, finalize, and pause decisions and settles streaming on pause', () => {
+describe('legacy continuation replay adapter', () => {
+  it('projects retired decisions as historical activities and settles streaming on pause', () => {
     const state = projectChatEvents([
       { event: 'user_message', seq: 1, turn_id: 't1', content: '执行复杂任务' },
       {
@@ -1292,15 +1470,15 @@ describe('turn continuation timeline projection', () => {
     )
     expect(activities).toEqual([
       expect.objectContaining({
-        label: '评估后继续执行 · 追加 8 次迭代',
+        label: '历史记录：评估后继续执行 · 追加 8 次迭代',
         tone: 'running',
       }),
       expect.objectContaining({
-        label: '执行完成，正在整理交付',
+        label: '历史记录：执行完成，正在整理交付',
         tone: 'success',
       }),
       expect.objectContaining({
-        label: '执行已暂停',
+        label: '历史记录：执行已暂停',
         detail: '重复读取，没有形成新进展。',
         tone: 'error',
         action: 'continue',
@@ -1336,7 +1514,7 @@ describe('turn continuation timeline projection', () => {
       .flatMap((message) => message.segments)
       .filter((segment) => segment.type === 'plan_activity')
     expect(activities).toEqual([
-      expect.objectContaining({ label: '执行已暂停' }),
+      expect.objectContaining({ label: '历史记录：执行已暂停' }),
     ])
     expect(activities[0]).not.toHaveProperty('action')
   })

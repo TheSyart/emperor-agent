@@ -245,31 +245,6 @@ describe('diagnostics panel model', () => {
           },
         ],
       },
-      external: {
-        running: true,
-        adapters: [
-          {
-            name: 'signed-webhook',
-            display_name: 'Signed Webhook',
-            state: 'ready',
-            requestedMode: 'on',
-            effectiveMode: 'on',
-            accepted: 4,
-            rejected: 2,
-            outboundSent: 3,
-            outboundDeadLetter: 1,
-            audit: {
-              path: '/Users/me/.emperor-agent/external/audit.jsonl',
-              records: 12,
-              badLines: 0,
-              archives: 0,
-              writeFailures: 0,
-            },
-          },
-        ],
-        inbox: { pending: 3 },
-        store: { exists: true, corruptBackups: [] },
-      },
       activeTasks: [
         {
           id: 'task_1',
@@ -301,7 +276,7 @@ describe('diagnostics panel model', () => {
       '存储路径',
       '配置',
       '运行时',
-      '外部能力',
+      '桌面能力',
       '依赖',
     ])
     expect(
@@ -430,14 +405,6 @@ describe('diagnostics panel model', () => {
         'turn turn_2 · first section:section:bootstrap[0] · stable abcdef012345',
       tone: 'error',
     })
-    expect(rows.find((row) => row.id === 'external-bridge')).toMatchObject({
-      label: 'External Bridge',
-      value: '1/1 adapter 已就绪',
-      tone: 'ok',
-      detail:
-        'Signed Webhook: ready/on · in 4/2 · out 3/1 · 3 条待处理 · /Users/me/.emperor-agent/external/audit.jsonl',
-      path: '/Users/me/.emperor-agent/external/audit.jsonl',
-    })
     expect(rows.find((row) => row.id === 'desktop-renderer')).toMatchObject({
       label: '桌面 Renderer',
       value: '已构建',
@@ -471,38 +438,6 @@ describe('diagnostics panel model', () => {
     expect(rows.find((row) => row.id === 'active-project-path')).toMatchObject({
       value: '未绑定',
       tone: 'muted',
-    })
-  })
-
-  it('does not describe a running bridge with an off adapter as externally ready', () => {
-    const rows = diagnosticRows({
-      root: '/repo',
-      external: {
-        running: true,
-        adapters: [
-          {
-            name: 'signed-webhook',
-            display_name: 'Signed Webhook',
-            state: 'stopped',
-            requestedMode: 'off',
-            effectiveMode: 'off',
-            lastReason: 'mode_off',
-            audit: { path: '/state/external/audit.jsonl' },
-            configuration: {
-              path: '/state/external_config.json',
-              status: 'missing',
-            },
-          },
-        ],
-        inbox: { pending: 0 },
-      },
-    }).flatMap((group) => group.rows)
-
-    expect(rows.find((row) => row.id === 'external-bridge')).toMatchObject({
-      value: '桥接已启动，adapter 未启用',
-      tone: 'warn',
-      detail:
-        'Signed Webhook: stopped/off · in 0/0 · out 0/0 · reason mode_off · 0 条待处理 · /state/external/audit.jsonl',
     })
   })
 

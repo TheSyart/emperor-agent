@@ -289,6 +289,23 @@ export function isShellAstReadonlySequence(
   )
 }
 
+/**
+ * Core-level Git deny rules. These represent structural safety invariants, not
+ * approval preferences, so full_access and user allow rules cannot override
+ * them.
+ */
+export function gitShellExplicitDenyReason(
+  analysis: ShellAstAnalysis,
+  context: ShellReadonlyContext = {},
+): string | null {
+  if (analysis.status !== 'parsed') return null
+  for (const command of analysis.commands) {
+    const reason = gitArgvExplicitDenyReason(command.argv, context)
+    if (reason) return reason
+  }
+  return null
+}
+
 export function shellAstSummary(analysis: ShellAstAnalysis): ShellAstSummary {
   return {
     parser: analysis.parser,
@@ -797,8 +814,20 @@ function isReadonlyArgv(
   if (head !== 'git') return false
 
   let index = 1
-  while (argv[index] === '--no-pager' || argv[index] === '--literal-pathspecs')
-    index += 1
+  while (index < argv.length) {
+    const argument = argv[index]
+    if (argument === '--no-pager' || argument === '--literal-pathspecs') {
+      index += 1
+      continue
+    }
+    if (argument === '-C') {
+      const directory = argv[index + 1] ?? ''
+      if (!isProvenWorkspacePath(directory, context)) return false
+      index += 2
+      continue
+    }
+    break
+  }
   const subcommand = argv[index]
   if (!subcommand) return false
   const args = argv.slice(index + 1)
@@ -811,16 +840,32 @@ function isReadonlyArgv(
         argument.startsWith('--config='),
     )
   if (subcommand === 'diff' || subcommand === 'log' || subcommand === 'show') {
-    return !args.some(
-      (argument) =>
-        argument === '--ext-diff' ||
-        argument === '--help' ||
-        argument === '-h' ||
-        argument === '--textconv' ||
-        argument === '--no-textconv' ||
-        argument === '--output' ||
-        argument.startsWith('--output='),
+    if (
+      args.some(
+        (argument) =>
+          argument === '--ext-diff' ||
+          argument === '--help' ||
+          argument === '-h' ||
+          argument === '--textconv' ||
+          argument === '--no-textconv' ||
+          argument === '--output' ||
+          argument.startsWith('--output='),
+      )
     )
+      return false
+    if (subcommand === 'diff' && args.includes('--no-index')) {
+      const separator = args.indexOf('--')
+      const operands = (
+        separator >= 0
+          ? args.slice(separator + 1)
+          : args.filter((argument) => !argument.startsWith('-'))
+      ).slice(-2)
+      return (
+        operands.length === 2 &&
+        operands.every((operand) => isProvenWorkspacePath(operand, context))
+      )
+    }
+    return true
   }
   if (subcommand === 'branch') {
     if (!args.length) return true
@@ -845,6 +890,131 @@ function isReadonlyArgv(
     return args.every((argument) => argument.startsWith('-')) || permitsPatterns
   }
   return false
+}
+
+function gitArgvExplicitDenyReason(
+  argv: string[],
+  context: ShellReadonlyContext,
+): string | null {
+  if (baseName(argv[0] ?? '') !== 'git') return null
+  let index = 1
+  while (index < argv.length) {
+    const argument = argv[index] ?? ''
+    if (argument === '--no-pager' || argument === '--literal-pathspecs') {
+      index += 1
+      continue
+    }
+    if (argument === '-C') {
+      const directory = argv[index + 1] ?? ''
+      if (!isProvenWorkspacePath(directory, context))
+        return 'repository_override'
+      index += 2
+      continue
+    }
+    if (
+      argument === '-c' ||
+      argument.startsWith('-c') ||
+      argument === '--config-env' ||
+      argument.startsWith('--config-env=')
+    )
+      return 'dynamic_config'
+    if (
+      argument === '--git-dir' ||
+      argument.startsWith('--git-dir=') ||
+      argument === '--work-tree' ||
+      argument.startsWith('--work-tree=')
+    )
+      return 'repository_override'
+    break
+  }
+  const subcommand = String(argv[index] ?? '').toLowerCase()
+  const args = argv.slice(index + 1)
+  if (!subcommand) return null
+
+  if (
+    subcommand === 'push' &&
+    args.some(
+      (argument) =>
+        argument === '-f' ||
+        argument === '--force' ||
+        argument === '--force-with-lease' ||
+        argument.startsWith('--force-with-lease=') ||
+        argument === '--force-if-includes',
+    )
+  )
+    return 'force_push'
+
+  if (
+    subcommand === 'reset' ||
+    subcommand === 'rebase' ||
+    subcommand === 'filter-branch' ||
+    (subcommand === 'commit' &&
+      args.some(
+        (argument) => argument === '--amend' || argument.startsWith('--fixup='),
+      ))
+  )
+    return 'history_rewrite'
+
+  if (
+    args.some(
+      (argument) =>
+        argument === '--no-verify' ||
+        argument === '--no-hooks' ||
+        argument.startsWith('--hooks-path='),
+    )
+  )
+    return 'hooks_bypass'
+
+  if (
+    subcommand === 'config' ||
+    [
+      'update-ref',
+      'symbolic-ref',
+      'replace',
+      'prune',
+      'gc',
+      'reflog',
+      'pack-refs',
+      'commit-tree',
+      'mktree',
+    ].includes(subcommand) ||
+    (subcommand === 'hash-object' && args.includes('-w'))
+  )
+    return 'git_internal_write'
+
+  if (
+    ['diff', 'show', 'log'].includes(subcommand) &&
+    args.some(
+      (argument) =>
+        argument === '--ext-diff' ||
+        argument === '--textconv' ||
+        argument === '--no-textconv' ||
+        argument === '--output' ||
+        argument.startsWith('--output='),
+    )
+  )
+    return subcommand === 'diff' &&
+      args.some(
+        (argument) =>
+          argument === '--output' || argument.startsWith('--output='),
+      )
+      ? 'output_redirection'
+      : 'external_diff'
+
+  if (subcommand === 'diff' && args.includes('--no-index')) {
+    const separator = args.indexOf('--')
+    const operands = (
+      separator >= 0
+        ? args.slice(separator + 1)
+        : args.filter((argument) => !argument.startsWith('-'))
+    ).slice(-2)
+    if (
+      operands.length !== 2 ||
+      operands.some((operand) => !isProvenWorkspacePath(operand, context))
+    )
+      return 'no_index_containment'
+  }
+  return null
 }
 
 function readonlyFileOperands(head: string, args: string[]): string[] | null {

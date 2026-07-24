@@ -28,7 +28,6 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         jobsFile: join(root, 'scheduler', 'jobs.json'),
       }),
       runtimeStats: () => ({ events: 2, archiveFiles: 1 }),
-      externalPayload: () => ({ running: true, store: { exists: true } }),
       lifecycle: () => ({
         state: 'ready',
         failedServiceId: null,
@@ -188,7 +187,6 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       jobsFile: join(root, 'scheduler', 'jobs.json'),
     })
     expect(payload.runtime).toMatchObject({ events: 2, archiveFiles: 1 })
-    expect(payload.external).toMatchObject({ running: true })
     expect(payload.lifecycle).toMatchObject({
       state: 'ready',
       services: [{ id: 'scheduler', state: 'ready' }],
@@ -279,7 +277,6 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         tasksRoot: join(stateRoot, 'tasks'),
         processesRoot: join(stateRoot, 'processes'),
         controlRoot: join(stateRoot, 'control'),
-        externalRoot: join(stateRoot, 'external'),
       },
       workspacePolicy: () => ({
         workspaceRoot: workspace,

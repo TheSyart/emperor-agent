@@ -209,13 +209,6 @@ export function isPositiveInt(value: unknown): boolean {
   return Number.isInteger(n) && n > 0
 }
 
-export function planStatusFromTodo(status: string): string {
-  if (status === 'completed') return PlanStepStatus.DONE
-  if (status === 'in_progress') return PlanStepStatus.ACTIVE
-  if (status === 'blocked') return PlanStepStatus.BLOCKED
-  return PlanStepStatus.PENDING
-}
-
 export function normalizeCommand(command: unknown): string {
   return String(command ?? '')
     .trim()
@@ -343,16 +336,6 @@ function appendFileRiskSignals(signals: string[], path: string): void {
         '/runtime/',
       ],
       'runtime',
-    ],
-    [
-      [
-        'packages/core/src/external/',
-        'agent/external/',
-        'external',
-        'outbox',
-        'outbound',
-      ],
-      'external_send',
     ],
     [
       [

@@ -75,64 +75,70 @@ describe('assistant flow projection', () => {
     expect(blocks[0]).toMatchObject({ kind: 'text', streaming: true })
   })
 
-  it('keeps every tool call as an independent execution node', () => {
+  it('groups tools from the same model batch into one execution node', () => {
     const blocks = projectAssistantFlow(
       message([
-        tool('glob-1', 'glob', 'done', { durationMs: 5 }),
-        tool('glob-2', 'glob', 'done', { durationMs: 7 }),
+        tool('glob-1', 'glob', 'done', {
+          batchId: 'batch-1',
+          startedAt: 10,
+          endedAt: 15,
+        }),
+        tool('glob-2', 'glob', 'done', {
+          batchId: 'batch-1',
+          startedAt: 12,
+          endedAt: 22,
+        }),
       ]),
     )
 
-    expect(blocks).toHaveLength(2)
+    expect(blocks).toHaveLength(1)
     expect(blocks[0]).toMatchObject({
       kind: 'tool_group',
-      id: 'tool-group-glob-1',
-      title: 'Glob · 匹配路径',
+      id: 'tool-group-batch-1',
+      title: '搜索代码 · 2 项',
       status: 'done',
-      durationMs: 5,
-    })
-    expect(blocks[1]).toMatchObject({
-      kind: 'tool_group',
-      id: 'tool-group-glob-2',
-      title: 'Glob · 匹配路径',
-      status: 'done',
-      durationMs: 7,
+      durationMs: 12,
+      tools: expect.arrayContaining([
+        expect.objectContaining({ toolId: 'glob-1' }),
+        expect.objectContaining({ toolId: 'glob-2' }),
+      ]),
     })
   })
 
-  it('keeps consecutive file write tools as separate execution nodes', () => {
+  it('summarizes a batch of file mutations without rendering three full cards', () => {
     const blocks = projectAssistantFlow(
       message([
         tool('write-1', 'write_file', 'done', {
+          batchId: 'batch-write',
           arguments: { path: 'src/App.vue' },
         }),
         tool('write-2', 'write_file', 'done', {
+          batchId: 'batch-write',
           arguments: { path: 'src/main.ts' },
         }),
         tool('write-3', 'write_file', 'done', {
+          batchId: 'batch-write',
           arguments: { path: 'README.md' },
         }),
       ]),
     )
 
-    expect(blocks).toHaveLength(3)
-    expect(blocks.map((block) => block.kind)).toEqual([
-      'tool_group',
-      'tool_group',
-      'tool_group',
-    ])
-    expect(
-      blocks.map((block) => (block.kind === 'tool_group' ? block.title : '')),
-    ).toEqual(['Write · App.vue', 'Write · main.ts', 'Write · README.md'])
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({
+      kind: 'tool_group',
+      title: '修改 3 个文件',
+    })
   })
 
   it('uses actual file targets in read and edit tool titles', () => {
     const blocks = projectAssistantFlow(
       message([
         tool('read-1', 'read_file', 'done', {
+          batchId: 'batch-read',
           arguments: { path: 'agent/runner.py' },
         }),
         tool('edit-1', 'edit_file', 'done', {
+          batchId: 'batch-edit',
           metadata: { path: 'desktop/src/renderer/src/App.vue' },
         }),
       ]),
@@ -148,13 +154,13 @@ describe('assistant flow projection', () => {
     const running = projectAssistantFlow(
       message([
         tool('bash-1', 'run_command', 'done'),
-        tool('bash-2', 'run_command', 'running'),
+        tool('bash-2', 'run_command', 'running', { batchId: 'batch-2' }),
       ]),
     )
     const errored = projectAssistantFlow(
       message([
         tool('bash-1', 'run_command', 'running'),
-        tool('bash-2', 'run_command', 'error'),
+        tool('bash-2', 'run_command', 'error', { batchId: 'batch-2' }),
       ]),
     )
 
@@ -246,6 +252,27 @@ describe('assistant flow projection', () => {
     )
 
     expect(blocks).toHaveLength(0)
+  })
+
+  it('absorbs generated tool intent copy when the batch already explains the action', () => {
+    const blocks = projectAssistantFlow(
+      message([
+        tool('read-1', 'read_file', 'done', { batchId: 'batch-read' }),
+        {
+          id: 'thought-intent',
+          type: 'thought',
+          status: 'done',
+          label: '思考参考',
+          stage: 'tool_intent',
+          source: 'audit',
+          summary: '准备调用 read_file，先收集上下文。',
+          toolIds: ['read-1'],
+          toolNames: ['read_file'],
+        },
+      ]),
+    )
+
+    expect(blocks.map((block) => block.kind)).toEqual(['tool_group'])
   })
 
   it('keeps notable tool result summaries for errors and media artifacts', () => {
@@ -364,7 +391,7 @@ describe('assistant flow projection', () => {
     })
   })
 
-  it('promotes tool todos into a task step strip after the tool group', () => {
+  it('absorbs update_todos and omits a one-item checklist from the timeline', () => {
     const todos = [{ id: 1, content: '检查结果', status: 'pending' }]
     const blocks = projectAssistantFlow(
       message(
@@ -374,8 +401,57 @@ describe('assistant flow projection', () => {
       ),
     )
 
-    expect(blocks.map((block) => block.kind)).toEqual(['tool_group', 'todos'])
-    expect(blocks[1]).toEqual({ kind: 'todos', id: 'todos-todo-tool', todos })
+    expect(blocks).toEqual([])
+  })
+
+  it('shows only a complex independent checklist and never its update tool card', () => {
+    const todos = [
+      { id: 1, content: '检查入口', status: 'completed' },
+      { id: 2, content: '修改实现', status: 'in_progress' },
+      { id: 3, content: '完成验证', status: 'pending' },
+    ]
+    const blocks = projectAssistantFlow(
+      message(
+        [tool('todo-tool', 'update_todos', 'done', { todos })],
+        false,
+        todos,
+      ),
+    )
+
+    expect(blocks).toEqual([{ kind: 'todos', id: 'todos-todo-tool', todos }])
+  })
+
+  it('suppresses legacy Plan-bound Todo mirrors', () => {
+    const todos = [
+      {
+        id: 'plan:step_1',
+        plan_step_id: 'step_1',
+        content: '创建介绍页',
+        status: 'in_progress',
+      },
+      {
+        id: 'plan:step_2',
+        plan_step_id: 'step_2',
+        content: '验证介绍页',
+        status: 'pending',
+      },
+      {
+        id: 'plan:step_3',
+        plan_step_id: 'step_3',
+        content: '整理报告',
+        status: 'pending',
+      },
+    ]
+
+    expect(
+      projectAssistantFlow(
+        message(
+          [tool('todo-tool', 'update_todos', 'done', { todos })],
+          false,
+          todos,
+        ),
+      ),
+    ).toEqual([])
   })
 
   it('projects image media artifacts as an inline media block after the tool group', () => {
@@ -415,7 +491,7 @@ describe('assistant flow projection', () => {
     })
   })
 
-  it('adds fallback todos only when no tool already promoted todos', () => {
+  it('adds a fallback only for a complex independent checklist', () => {
     const todos = [{ id: 1, content: '检查结果', status: 'pending' }]
     const withoutToolTodos = projectAssistantFlow(
       message([{ id: 't1', type: 'text', content: '开始' }], false, todos),
@@ -428,13 +504,7 @@ describe('assistant flow projection', () => {
       ),
     )
 
-    expect(withoutToolTodos.at(-1)).toEqual({
-      kind: 'todos',
-      id: 'todos-fallback',
-      todos,
-    })
-    expect(
-      withToolTodos.filter((block) => block.kind === 'todos'),
-    ).toHaveLength(1)
+    expect(withoutToolTodos.map((block) => block.kind)).toEqual(['text'])
+    expect(withToolTodos).toEqual([])
   })
 })

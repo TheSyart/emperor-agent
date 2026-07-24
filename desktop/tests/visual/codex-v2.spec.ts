@@ -19,6 +19,7 @@ type VisualBridge = {
   selectDirectory: () => Promise<string>
   getPathForFile: (file: File) => string
   onCoreEvent: (listener: VisualCoreListener) => () => void
+  onTerminalEvent: (listener: VisualCoreListener) => () => void
   invokeCore: (operationKey: string, ...args: unknown[]) => Promise<unknown>
 }
 
@@ -227,6 +228,111 @@ for (const scenario of scenarios) {
     await page.screenshot({
       path: resolve(screenshotDir, `${scenario.name}.png`),
       fullPage: false,
+    })
+  })
+}
+
+test('captures the Environment card and three desktop workbench panes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat')
+
+  await expect(page.locator('.view-head')).toHaveCount(0)
+  const environment = page.locator('.environment-floating-card')
+  await expect(page.locator('.right-workspace')).toHaveCount(0)
+  await expect(environment).toBeVisible()
+  await expect(page.locator('.environment-pane')).toContainText(
+    'Visual Build Project',
+  )
+  await expect(page.locator('.environment-pane')).toContainText(
+    'Review Git service',
+  )
+  await expect(
+    page
+      .locator('.right-workspace-controls')
+      .getByRole('button', { name: '显示或刷新 Environment' }),
+  ).toHaveClass(/active/)
+  await page.waitForTimeout(220)
+  await page.screenshot({
+    path: resolve(screenshotDir, 'workspace-environment-desktop.png'),
+  })
+
+  await page
+    .locator('.right-workspace-controls')
+    .getByRole('button', { name: '打开右侧工作区' })
+    .click()
+  const workspace = page.locator('.right-workspace')
+  await expect(workspace).toBeVisible()
+  await expect(environment).toHaveCount(0)
+  await page
+    .locator('.workspace-launcher')
+    .getByRole('button', { name: /Review/ })
+    .click()
+  await expect(page.locator('.git-review-pane')).toContainText('README.md')
+  await page.locator('.git-file-name').filter({ hasText: 'README.md' }).click()
+  await expect(page.locator('.git-diff-preview')).toContainText(
+    'Workspace review',
+  )
+  await page.screenshot({
+    path: resolve(screenshotDir, 'workspace-review-desktop.png'),
+  })
+
+  await workspace.getByRole('button', { name: '返回工作区启动器' }).click()
+  await page
+    .locator('.workspace-launcher')
+    .getByRole('button', { name: /Files/ })
+    .click()
+  await expect(page.locator('.files-pane-wide')).toContainText('package.json')
+  await page.locator('.file-tree-row').filter({ hasText: 'README.md' }).click()
+  await expect(page.locator('.file-preview-content')).toContainText(
+    'A project workspace visual fixture.',
+  )
+  await page.screenshot({
+    path: resolve(screenshotDir, 'workspace-files-desktop.png'),
+  })
+
+  await workspace.getByRole('button', { name: '返回工作区启动器' }).click()
+  await page
+    .locator('.workspace-launcher')
+    .getByRole('button', { name: /Terminal/ })
+    .click()
+  await expect(page.locator('.terminal-pane')).toBeVisible()
+  await expect(page.locator('.xterm-screen')).toBeVisible()
+  await page.screenshot({
+    path: resolve(screenshotDir, 'workspace-terminal-desktop.png'),
+  })
+})
+
+for (const viewport of [
+  { name: 'drawer', width: 900, height: 820 },
+  { name: 'fullscreen', width: 390, height: 844 },
+] as const) {
+  test(`captures responsive project workspace ${viewport.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await page.goto('/chat?visualTheme=light')
+    await expect(page.locator('.right-workspace')).toHaveCount(0)
+    await expect(page.locator('.composer')).toBeVisible()
+    await page
+      .locator('.right-workspace-controls')
+      .getByRole('button', { name: '打开右侧工作区' })
+      .click()
+    const panel = page.locator('.right-workspace')
+    await expect(panel).toBeVisible()
+    await expect(panel).toHaveClass(new RegExp(`presentation-${viewport.name}`))
+    const bounds = await panel.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1)
+    if (viewport.name === 'fullscreen') {
+      expect(bounds!.y).toBeLessThanOrEqual(1)
+      expect(bounds!.height).toBeGreaterThanOrEqual(viewport.height - 1)
+    }
+    await page.waitForTimeout(220)
+    await page.screenshot({
+      path: resolve(screenshotDir, `workspace-${viewport.name}-light.png`),
     })
   })
 }
@@ -1534,6 +1640,84 @@ async function installVisualCoreBridge(page: Page) {
         ],
       }
       const environmentListeners = new Set<VisualCoreListener>()
+      const terminalListeners = new Set<VisualCoreListener>()
+      const visualSidebarState = {
+        section_order: ['projects', 'chats'],
+        project_sort: 'updated_at',
+        chat_sort: 'updated_at',
+        project_order: [],
+        chat_order: [],
+        project_session_order: {},
+        collapsed_project_ids: [],
+        right_workspace: {
+          open: true,
+          width: 360,
+          pane: 'environment',
+        },
+      }
+      const visualGitStatus = {
+        repository: {
+          root: projectDir,
+          commonDir: `${projectDir}/.git`,
+          worktreeRoot: projectDir,
+          branch: 'main',
+          headOid: '18d26534aabbccddeeff00112233445566778899',
+          defaultBranch: 'main',
+          detached: false,
+          unborn: false,
+          objectFormat: 'sha1' as const,
+          transientState: 'none' as const,
+        },
+        root: projectDir,
+        branch: 'main',
+        head: '18d26534aabbccddeeff00112233445566778899',
+        upstream: 'origin/main',
+        detached: false,
+        ahead: 2,
+        behind: 0,
+        files: [
+          {
+            path: 'src/workspace.ts',
+            index: 'M',
+            worktree: '.',
+            conflict: false,
+            untracked: false,
+          },
+          {
+            path: 'README.md',
+            index: '.',
+            worktree: 'M',
+            conflict: false,
+            untracked: false,
+          },
+          {
+            path: 'notes/验收记录.md',
+            index: '?',
+            worktree: '?',
+            conflict: false,
+            untracked: true,
+          },
+        ],
+        summary: {
+          changedFiles: 3,
+          additions: 18,
+          deletions: 4,
+          untracked: 1,
+          binary: 0,
+        },
+        truncated: false,
+        revision: 'visual-git-revision',
+      }
+      const visualTerminal = {
+        id: 'terminal_visual',
+        sessionId: 'build-ui',
+        pid: 4242,
+        cwd: projectDir,
+        title: 'zsh',
+        createdAt: Date.parse(now),
+        exited: false,
+        exitCode: null,
+      }
       const environmentTools = [
         {
           id: 'git',
@@ -2045,6 +2229,10 @@ async function installVisualCoreBridge(page: Page) {
           )
           return () => environmentListeners.delete(listener)
         },
+        onTerminalEvent: (listener: VisualCoreListener) => {
+          terminalListeners.add(listener)
+          return () => terminalListeners.delete(listener)
+        },
         invokeCore: async (operationKey: string, ...args: unknown[]) => {
           switch (operationKey) {
             case 'bootstrap':
@@ -2078,6 +2266,189 @@ async function installVisualCoreBridge(page: Page) {
               return project
             case 'projects.list':
               return [project]
+            case 'workspace.snapshot':
+              return {
+                version: 1,
+                sessionId: 'build-ui',
+                project: {
+                  id: project.project_id,
+                  name: project.project_name,
+                  path: project.project_path,
+                },
+                git: visualGitStatus,
+                plan: {
+                  id: 'plan_visual_workspace',
+                  title: '完成右侧项目工作台',
+                  status: 'executing',
+                  steps: [
+                    { id: 'step_core', status: 'completed' },
+                    { id: 'step_renderer', status: 'active' },
+                    { id: 'step_verify', status: 'pending' },
+                  ],
+                },
+                goal: {
+                  outcome: '交付可验证的项目工作台',
+                  phase: 'execution',
+                },
+                subagents: [
+                  {
+                    id: 'subagent_visual',
+                    title: 'Review Git service',
+                    status: 'completed',
+                    started_at: Date.parse(now) - 84_000,
+                    ended_at: Date.parse(now),
+                    metadata: {
+                      agent_type: 'reviewer',
+                      workspace_mode: 'shared',
+                    },
+                  },
+                ],
+                team: {
+                  members: team.members,
+                  leadUnread: 1,
+                },
+                processes: [
+                  {
+                    id: 'process_visual_dev',
+                    label: 'npm run dev',
+                    status: 'running',
+                  },
+                ],
+                terminals: [visualTerminal],
+                capturedAt: Date.parse(now),
+              }
+            case 'git.status':
+              return visualGitStatus
+            case 'git.branches':
+              return {
+                current: 'main',
+                branches: [
+                  {
+                    name: 'main',
+                    head: visualGitStatus.head,
+                    upstream: 'origin/main',
+                  },
+                  {
+                    name: 'codex/workspace-panel',
+                    head: '99887766554433221100ffeeddccbbaa00112233',
+                    upstream: null,
+                  },
+                ],
+              }
+            case 'git.worktrees':
+              return {
+                worktrees: [
+                  {
+                    path: projectDir,
+                    head: visualGitStatus.head,
+                    branch: 'main',
+                    detached: false,
+                    locked: false,
+                    prunable: false,
+                    ownerSessionId: null,
+                    owned: false,
+                    active: true,
+                  },
+                ],
+                owned: [],
+              }
+            case 'git.pullRequest':
+              return null
+            case 'git.diff':
+              return {
+                content:
+                  'diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,3 @@\n # Visual Build Project\n+\n+Workspace review fixture.\n',
+                truncated: false,
+              }
+            case 'git.compare':
+              return {
+                baseRef: 'codex/workspace-panel',
+                headRef: 'HEAD',
+                ahead: 2,
+                behind: 0,
+                diff: 'diff --git a/README.md b/README.md\n',
+                truncated: false,
+              }
+            case 'git.stage':
+            case 'git.unstage':
+            case 'git.discard':
+            case 'git.commit':
+            case 'git.fetch':
+            case 'git.pull':
+            case 'git.push':
+            case 'git.createBranch':
+            case 'git.switchBranch':
+              return visualGitStatus
+            case 'files.list':
+            case 'files.search':
+              return {
+                projectRoot: projectDir,
+                relativePath: '',
+                entries: [
+                  {
+                    name: 'src',
+                    path: 'src',
+                    kind: 'directory',
+                    bytes: 96,
+                    modifiedAt: Date.parse(now),
+                    hidden: false,
+                  },
+                  {
+                    name: 'README.md',
+                    path: 'README.md',
+                    kind: 'file',
+                    bytes: 68,
+                    modifiedAt: Date.parse(now),
+                    hidden: false,
+                  },
+                  {
+                    name: 'package.json',
+                    path: 'package.json',
+                    kind: 'file',
+                    bytes: 420,
+                    modifiedAt: Date.parse(now),
+                    hidden: false,
+                  },
+                ],
+                nextCursor: null,
+                truncated: false,
+              }
+            case 'files.read':
+              return {
+                projectRoot: projectDir,
+                relativePath: String(
+                  ((args[0] || {}) as { relativePath?: string }).relativePath ||
+                    'README.md',
+                ),
+                name: 'README.md',
+                kind: 'text',
+                mimeType: 'text/markdown',
+                bytes: 68,
+                truncated: false,
+                content:
+                  '# Visual Build Project\n\nA project workspace visual fixture.\n',
+              }
+            case 'terminals.list':
+              return [visualTerminal]
+            case 'terminals.create':
+              return visualTerminal
+            case 'terminals.read':
+              return {
+                terminalId: visualTerminal.id,
+                chunks: [
+                  {
+                    seq: 1,
+                    data: `\u001b[32mvisual@emperor\u001b[0m ${projectDir}\r\n$ git status --short\r\n M README.md\r\n`,
+                  },
+                ],
+                latestSeq: 1,
+                exited: false,
+                exitCode: null,
+              }
+            case 'terminals.write':
+            case 'terminals.resize':
+            case 'terminals.close':
+              return { ok: true }
             case 'memory.get':
               return memory
             case 'memory.tokens':
@@ -2500,15 +2871,12 @@ async function installVisualCoreBridge(page: Page) {
                 thread: [],
               }
             case 'sidebar.get':
-              return {
-                section_order: ['projects', 'chats'],
-                project_sort: 'updated_at',
-                chat_sort: 'updated_at',
-                project_order: [],
-                chat_order: [],
-                project_session_order: {},
-                collapsed_project_ids: [],
-              }
+              return visualSidebarState
+            case 'sidebar.patch': {
+              const patch = (args[0] || {}) as Record<string, unknown>
+              Object.assign(visualSidebarState, patch)
+              return visualSidebarState
+            }
             case 'desktopPet.get':
               return boot.desktopPet
             case 'diagnostics.get':

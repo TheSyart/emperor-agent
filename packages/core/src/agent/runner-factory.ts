@@ -12,6 +12,7 @@ import {
   type ControlManagerRunnerHost,
   type AgentRunnerHookHost,
   type FileCheckpointCaptureHost,
+  type TurnChangeLedgerHost,
   type MemoryStoreLike,
   type TodoStoreLike,
   type TokenTrackerLike,
@@ -21,7 +22,7 @@ import type { ProviderSnapshot } from '../model/router'
 import type { RunnerGoalRecordingHost } from './runner-goal-recording'
 import type { GoalContextProvider } from '../context/pipeline'
 import type { GoalToolHost } from '../goals/tools'
-import type { TurnContinuationEvaluator } from './turn-continuation'
+import type { WorkspaceMutationHost } from '../workspace/mutation-coordinator'
 
 export function buildRoutedRunner(opts: {
   route: ModelRoute
@@ -35,13 +36,13 @@ export function buildRoutedRunner(opts: {
   todoStore?: TodoStoreLike | null
   controlManager?: ControlManagerRunnerHost | null
   maxContext?: number | null
-  maxTurns?: number
-  continuationEvaluator?: TurnContinuationEvaluator | null
+  maxTurns?: number | null
   workspaceRoot?: string | null
   promptSections?: PromptSectionInput[] | null
   promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
   sessionId?: string | null
+  executionId?: string | null
   taskId?: string | null
   subagentDepth?: number
   tokenBudget?: number | null
@@ -58,6 +59,8 @@ export function buildRoutedRunner(opts: {
     | null
   onGoalCompacted?: (() => void) | null
   fileCheckpoints?: FileCheckpointCaptureHost | null
+  turnChangeLedger?: TurnChangeLedgerHost | null
+  workspaceMutations?: WorkspaceMutationHost | null
 }): AgentRunner {
   const snapshot = opts.route.snapshot
   let maxTokens = snapshot.generation.maxTokens
@@ -89,13 +92,13 @@ export function buildRoutedRunner(opts: {
       opts.maxContext ??
       snapshot.profile?.contextWindowTokens ??
       snapshot.contextWindowTokens,
-    maxTurns: opts.maxTurns ?? 12,
-    continuationEvaluator: opts.continuationEvaluator ?? null,
+    maxTurns: opts.maxTurns === undefined ? 12 : opts.maxTurns,
     workspaceRoot: opts.workspaceRoot ?? null,
     promptSections: opts.promptSections ?? null,
     promptContextPlan: opts.promptContextPlan ?? null,
     promptSnapshotDir: opts.promptSnapshotDir ?? null,
     sessionId: opts.sessionId ?? null,
+    executionId: opts.executionId ?? null,
     taskId: opts.taskId ?? null,
     subagentDepth: opts.subagentDepth ?? 0,
     tokenBudget: opts.tokenBudget ?? null,
@@ -107,6 +110,8 @@ export function buildRoutedRunner(opts: {
     goalContextHint: opts.goalContextHint ?? null,
     onGoalCompacted: opts.onGoalCompacted ?? null,
     fileCheckpoints: opts.fileCheckpoints ?? null,
+    turnChangeLedger: opts.turnChangeLedger ?? null,
+    workspaceMutations: opts.workspaceMutations ?? null,
   })
 }
 

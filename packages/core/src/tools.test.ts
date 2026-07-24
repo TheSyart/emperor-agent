@@ -379,6 +379,25 @@ describe('WriteFileTool + EditFileTool', () => {
     expect(out).toContain(`allowed_roots: ${workspace}`)
     expect(existsSync(targetPath)).toBe(false)
   })
+
+  it('rechecks cancellation immediately before a workspace side effect', async () => {
+    const target = join(dir, 'cancelled.txt')
+    const controller = new AbortController()
+    controller.abort(new DOMException('cancelled', 'AbortError'))
+
+    await expect(
+      new WriteFileTool(dir).execute(
+        { path: target, content: 'must not be written' },
+        {
+          root: dir,
+          workspaceRoot: dir,
+          arguments: { path: target, content: 'must not be written' },
+          signal: controller.signal,
+        },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(existsSync(target)).toBe(false)
+  })
 })
 
 describe('managed destructive file tools', () => {
@@ -505,6 +524,23 @@ describe('RunCommand is_read_only delegates to resolvers', () => {
     expect(r.isReadOnly({ command: 'git status' })).toBe(true)
     expect(r.isReadOnly({ command: 'npm test' })).toBe(false)
     expect(r.isReadOnly({ command: 'curl example.com' })).toBe(false)
+  })
+
+  it('extracts exact workspace mutation paths from parsed shell commands', () => {
+    const r = new RunCommand(dir)
+    expect(r.getPaths({ command: 'echo hello > reports/result.txt' })).toEqual([
+      'reports/result.txt',
+    ])
+    expect(r.getPaths({ command: 'mv old.txt archive/new.txt' })).toEqual([
+      'old.txt',
+      'archive/new.txt',
+    ])
+    expect(
+      r.getPaths({ command: 'grep hello README.md && wc -l README.md' }),
+    ).toEqual([])
+    expect(r.getPaths({ command: 'echo ignored > /tmp/outside.txt' })).toEqual(
+      [],
+    )
   })
 })
 

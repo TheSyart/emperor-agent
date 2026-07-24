@@ -3,7 +3,16 @@
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import { applyUserProfileMarkdownPatch } from '../memory/user-profile'
 import type { MemoryVersionStore } from '../memory/versions'
 import {
@@ -20,6 +29,7 @@ import { Tool, type ToolResult, type ToolExecutionContext } from './base'
 import { S, toolParamsSchema } from './schema'
 import { isReadonlyCommand } from './resolvers'
 import { pathsEqual } from '../util/paths'
+import { analyzeShellCommandFailClosed } from '../permissions/shell-ast'
 
 export { GlobTool, GrepTool } from './search'
 export { WebFetch } from './web-fetch'
@@ -141,6 +151,20 @@ export class TodoStore {
         t.blocked_reason ?? t.blockedReason ?? '',
       ).trim()
       if (blockedReason) item.blocked_reason = blockedReason.slice(0, 1000)
+      if (t.work_item === true || t.workItem === true) item.work_item = true
+      const ownerPlanId = String(t.owner_plan_id ?? t.ownerPlanId ?? '').trim()
+      if (ownerPlanId) item.owner_plan_id = ownerPlanId.slice(0, 96)
+      const coveredSteps = (
+        Array.isArray(t.covers_plan_step_ids)
+          ? t.covers_plan_step_ids
+          : Array.isArray(t.coversPlanStepIds)
+            ? t.coversPlanStepIds
+            : []
+      )
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 32)
+      if (coveredSteps.length) item.covers_plan_step_ids = coveredSteps
       cleaned.push(item)
     })
 
@@ -158,39 +182,6 @@ export class TodoStore {
     const summary = `todos updated: total=${this.todos.length}, completed=${completed}, in_progress=${inProgressCount}, pending=${pending}`
     const nudge = todoVerificationNudge(this.todos)
     return summary + '\n\n当前列表：\n' + renderTodos(this.todos) + nudge
-  }
-
-  /** Legacy projection helper for old tests/importers only; runner mainline must not call this. */
-  syncFromPlanSteps(
-    steps: Array<Record<string, unknown>>,
-    binding?: { planId: string; approvalGeneration: number },
-  ): string {
-    const statusMap: Record<string, string> = {
-      pending: 'pending',
-      active: 'in_progress',
-      done: 'completed',
-      failed: 'pending',
-      blocked: 'pending',
-      skipped: 'completed',
-    }
-    const todos: Array<Record<string, unknown>> = []
-    steps.forEach((step, idx) => {
-      const index = idx + 1
-      const title = String(step.title ?? '').trim()
-      if (!title) return
-      const item: Record<string, unknown> = {
-        id: index,
-        ...(binding ? { plan_id: binding.planId } : {}),
-        plan_step_id: String(step.id ?? '').trim() || null,
-        ...(binding ? { approval_generation: binding.approvalGeneration } : {}),
-        content: title,
-        status: statusMap[String(step.status ?? 'pending')] ?? 'pending',
-      }
-      if (step.blocked_reason)
-        item.blocked_reason = String(step.blocked_reason ?? '').trim()
-      todos.push(item)
-    })
-    return this.update(todos)
   }
 
   render(): string {
@@ -285,9 +276,9 @@ export class SaveUserProfileTool extends Tool {
 export class UpdateTodos extends Tool {
   override name = 'update_todos'
   override description =
-    '创建或更新当前会话任务清单。更新清单必须与下一步实际工作的工具调用放在同一个响应里并行发出，禁止单独用一整轮只更新清单。每次传入完整 todos 数组并全量覆盖，用于拆解复杂多步骤任务和展示进度；同一时间最多只能有一个 in_progress 项。' +
-    '有活动 Plan 时只使用稳定 ID plan:<stepId> 更新对应状态，Plan 绑定由 Core 自动注入；不得填写或伪造 planId、planStepId、approvalGeneration。' +
-    '简单或纯问答任务不需要使用。任务真正完成后及时标记 completed；失败、阻塞或部分完成时保持 in_progress/blocked。该工具只维护清单，不验证实现正确性，也不裁决计划步骤。'
+    '为当前会话中至少三个独立执行单元创建或更新额外工作清单。用户给出多项清单、任务跨多个自然阶段或明确要求 Todo 时才使用；单一任务、一个 PlanStep、两个短步骤、纯问答和一次命令禁止调用。' +
+    '更新清单必须与下一步实际工作的工具调用放在同一个响应里并行发出，禁止单独用一整轮只更新清单。每次传入完整 todos 数组并全量覆盖；同一时间最多只能有一个 in_progress 项。' +
+    'PlanStep 由 Core 管理，不用 Todo 机械镜像；若 Core 在复杂 Plan 中暴露本工具，只使用稳定 ID plan:<stepId>，不得填写或伪造 planId、planStepId、approvalGeneration。任务真正完成后及时标记 completed；失败或阻塞时保持 in_progress/blocked。该工具不验证实现正确性，也不裁决计划步骤。'
   override parameters = toolParamsSchema(
     {
       todos: {
@@ -372,8 +363,58 @@ interface RunCommandExecutionOutcome {
     | null
 }
 
+function shellMutationPathCandidates(command: string): string[] {
+  const analysis = analyzeShellCommandFailClosed(command)
+  if (
+    analysis.status !== 'parsed' ||
+    analysis.reasonCodes.includes('dynamic_expansion')
+  )
+    return []
+  const paths: string[] = []
+  const add = (value: unknown) => {
+    const path = String(value ?? '').trim()
+    if (path && path !== '-' && path !== '/dev/null' && !paths.includes(path))
+      paths.push(path)
+  }
+  for (const node of analysis.commands) {
+    for (const redirect of node.redirects) {
+      if (
+        redirect.operator.includes('>') &&
+        redirect.target !== '__SHELL_DYNAMIC__'
+      )
+        add(redirect.target)
+    }
+    const executable = basename(String(node.argv[0] ?? ''))
+    const positional = node.argv
+      .slice(1)
+      .filter(
+        (argument) =>
+          argument &&
+          argument !== '--' &&
+          !argument.startsWith('-') &&
+          argument !== '__SHELL_DYNAMIC__',
+      )
+    if (
+      executable === 'touch' ||
+      executable === 'mkdir' ||
+      executable === 'rm' ||
+      executable === 'rmdir' ||
+      executable === 'unlink' ||
+      executable === 'tee'
+    ) {
+      positional.forEach(add)
+    } else if (executable === 'mv') {
+      positional.forEach(add)
+    } else if (executable === 'cp' || executable === 'install') {
+      add(positional.at(-1))
+    }
+  }
+  return paths
+}
+
 export class RunCommand extends Tool {
   override name = 'run_command'
+  override workspaceMutation = true
   override description =
     '在当前工作区终端执行一条 shell 命令并返回输出；rm -rf /、curl/wget、python -c、管道到 sh/bash 等危险模式会被安全策略直接拒绝。' +
     '仅用于测试、构建、git、包管理器或必须由 shell 执行的系统操作；不要用它读写搜文件或向用户输出文本。' +
@@ -518,6 +559,19 @@ export class RunCommand extends Tool {
 
   override isReadOnly(args: Record<string, unknown>): boolean {
     return isReadonlyCommand(String(args.command ?? ''))
+  }
+
+  override getPaths(args: Record<string, unknown>): string[] {
+    const candidates = shellMutationPathCandidates(String(args.command ?? ''))
+    const out: string[] = []
+    for (const candidate of candidates) {
+      const absolute = resolve(this.workspace, candidate)
+      const rel = relative(this.workspace, absolute)
+      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+        continue
+      if (!out.includes(rel)) out.push(rel)
+    }
+    return out
   }
 
   override mapResult(raw: string, ctx: ToolExecutionContext): ToolResult {

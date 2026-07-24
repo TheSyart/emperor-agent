@@ -217,6 +217,135 @@ const manageQueuedPromptSchema = z
   })
   .strict()
 
+const workspaceSessionSchema = z.object({ sessionId: idSchema }).strict()
+const workspaceRelativePathSchema = z
+  .string()
+  .max(4_096)
+  .refine((value) => !value.includes('\0'), 'invalid workspace path')
+const workspaceFilePageSchema = z
+  .object({
+    sessionId: idSchema,
+    relativePath: workspaceRelativePathSchema,
+    cursor: z.string().max(64).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+    showHidden: z.boolean().optional(),
+    showIgnored: z.boolean().optional(),
+  })
+  .strict()
+const workspaceFileSearchSchema = workspaceFilePageSchema
+  .omit({ relativePath: true })
+  .extend({ query: z.string().trim().min(1).max(500) })
+  .strict()
+const workspaceFileReadSchema = z
+  .object({ sessionId: idSchema, relativePath: workspaceRelativePathSchema })
+  .strict()
+const gitStatusSchema = workspaceSessionSchema
+const gitDiffSchema = z
+  .object({
+    sessionId: idSchema,
+    path: workspaceRelativePathSchema.optional(),
+    area: z.enum(['worktree', 'staged', 'compare']),
+    baseRef: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict()
+const gitCompareSchema = z
+  .object({
+    sessionId: idSchema,
+    baseRef: z.string().trim().min(1).max(512),
+    headRef: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict()
+const gitPathsMutationSchema = z
+  .object({
+    sessionId: idSchema,
+    paths: z.array(workspaceRelativePathSchema).min(1).max(500),
+    expectedRevision: sha256Schema,
+  })
+  .strict()
+const gitDiscardSchema = gitPathsMutationSchema.extend({
+  confirmed: z.literal(true),
+})
+const gitCommitSchema = z
+  .object({
+    sessionId: idSchema,
+    message: z.string().trim().min(1).max(10_000),
+    expectedRevision: sha256Schema,
+  })
+  .strict()
+const gitConfirmedSessionSchema = workspaceSessionSchema.extend({
+  confirmed: z.literal(true),
+})
+const gitPullSchema = gitConfirmedSessionSchema.extend({
+  expectedRevision: sha256Schema,
+})
+const gitPushSchema = gitConfirmedSessionSchema.extend({
+  expectedRevision: sha256Schema,
+  setUpstream: z.boolean().optional(),
+})
+const gitCreateBranchSchema = z
+  .object({
+    sessionId: idSchema,
+    name: z.string().trim().min(1).max(512),
+    expectedRevision: sha256Schema,
+    startPoint: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict()
+const gitSwitchBranchSchema = gitConfirmedSessionSchema.extend({
+  name: z.string().trim().min(1).max(512),
+  expectedRevision: sha256Schema,
+})
+const gitLogSchema = workspaceSessionSchema.extend({
+  baseRef: z.string().trim().min(1).max(512).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+})
+const gitEnterWorktreeSchema = gitConfirmedSessionSchema.extend({
+  name: z.string().trim().min(1).max(128).optional(),
+  startPoint: z.string().trim().min(1).max(512).optional(),
+  expectedRevision: sha256Schema,
+})
+const gitExitWorktreeSchema = gitConfirmedSessionSchema.extend({
+  action: z.enum(['keep', 'remove']),
+  discardChanges: z.boolean(),
+  expectedRevision: sha256Schema,
+})
+const gitPublishPreviewSchema = workspaceSessionSchema.extend({
+  baseRef: z.string().trim().min(1).max(512).optional(),
+})
+const gitPublishPullRequestSchema = gitConfirmedSessionSchema.extend({
+  title: z.string().trim().min(1).max(256),
+  body: z.string().max(64 * 1024),
+  draft: z.boolean(),
+  expectedRevision: sha256Schema,
+})
+const gitPullRequestMutationSchema = gitConfirmedSessionSchema.extend({
+  number: z.number().int().positive(),
+  expectedRevision: sha256Schema,
+})
+const gitMergePullRequestSchema = gitPullRequestMutationSchema.extend({
+  method: z.enum(['merge', 'squash', 'rebase']),
+  deleteBranch: z.boolean(),
+})
+const terminalIdentitySchema = z
+  .object({ sessionId: idSchema, terminalId: idSchema })
+  .strict()
+const terminalCreateSchema = z
+  .object({
+    sessionId: idSchema,
+    cols: z.number().int().min(2).max(1_000),
+    rows: z.number().int().min(2).max(1_000),
+  })
+  .strict()
+const terminalReadSchema = terminalIdentitySchema.extend({
+  afterSeq: z.number().int().nonnegative(),
+})
+const terminalWriteSchema = terminalIdentitySchema.extend({
+  data: z.string().max(64 * 1_024),
+})
+const terminalResizeSchema = terminalIdentitySchema.extend({
+  cols: z.number().int().min(2).max(1_000),
+  rows: z.number().int().min(2).max(1_000),
+})
+
 const draftSessionSchema = z
   .object({
     mode: nullableStringSchema,
@@ -574,7 +703,6 @@ export const CORE_OPERATION_REGISTRY = {
   'goals.start': operation(z.tuple([goalStartSchema]), (api, [input]) =>
     api.goals.start(input),
   ),
-  'external.get': operation(z.tuple([]), (api) => api.external.get()),
   'fileCheckpoints.list': operation(
     z.tuple([fileCheckpointSessionSchema.optional()]),
     (api, [input]) => api.fileCheckpoints.list(input),
@@ -590,6 +718,97 @@ export const CORE_OPERATION_REGISTRY = {
   'fileCheckpoints.rewindGit': operation(
     z.tuple([fileCheckpointGitRewindSchema]),
     (api, [input]) => api.fileCheckpoints.rewindGit(input),
+  ),
+  'files.list': operation(z.tuple([workspaceFilePageSchema]), (api, [input]) =>
+    api.files.list(input),
+  ),
+  'files.read': operation(z.tuple([workspaceFileReadSchema]), (api, [input]) =>
+    api.files.read(input),
+  ),
+  'files.search': operation(
+    z.tuple([workspaceFileSearchSchema]),
+    (api, [input]) => api.files.search(input),
+  ),
+  'git.branches': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.branches(input),
+  ),
+  'git.commit': operation(z.tuple([gitCommitSchema]), (api, [input]) =>
+    api.git.commit(input),
+  ),
+  'git.compare': operation(z.tuple([gitCompareSchema]), (api, [input]) =>
+    api.git.compare(input),
+  ),
+  'git.createBranch': operation(
+    z.tuple([gitCreateBranchSchema]),
+    (api, [input]) => api.git.createBranch(input),
+  ),
+  'git.diff': operation(z.tuple([gitDiffSchema]), (api, [input]) =>
+    api.git.diff(input),
+  ),
+  'git.repository': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.repository(input),
+  ),
+  'git.log': operation(z.tuple([gitLogSchema]), (api, [input]) =>
+    api.git.log(input),
+  ),
+  'git.worktrees': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.worktrees(input),
+  ),
+  'git.enterWorktree': operation(
+    z.tuple([gitEnterWorktreeSchema]),
+    (api, [input]) => api.git.enterWorktree(input),
+  ),
+  'git.exitWorktree': operation(
+    z.tuple([gitExitWorktreeSchema]),
+    (api, [input]) => api.git.exitWorktree(input),
+  ),
+  'git.pullRequest': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.pullRequest(input),
+  ),
+  'git.publishPreview': operation(
+    z.tuple([gitPublishPreviewSchema]),
+    (api, [input]) => api.git.publishPreview(input),
+  ),
+  'git.publishPullRequest': operation(
+    z.tuple([gitPublishPullRequestSchema]),
+    (api, [input]) => api.git.publishPullRequest(input),
+  ),
+  'git.readyPullRequest': operation(
+    z.tuple([gitPullRequestMutationSchema]),
+    (api, [input]) => api.git.readyPullRequest(input),
+  ),
+  'git.mergePullRequest': operation(
+    z.tuple([gitMergePullRequestSchema]),
+    (api, [input]) => api.git.mergePullRequest(input),
+  ),
+  'git.closePullRequest': operation(
+    z.tuple([gitPullRequestMutationSchema]),
+    (api, [input]) => api.git.closePullRequest(input),
+  ),
+  'git.discard': operation(z.tuple([gitDiscardSchema]), (api, [input]) =>
+    api.git.discard(input),
+  ),
+  'git.fetch': operation(z.tuple([gitConfirmedSessionSchema]), (api, [input]) =>
+    api.git.fetch(input),
+  ),
+  'git.pull': operation(z.tuple([gitPullSchema]), (api, [input]) =>
+    api.git.pull(input),
+  ),
+  'git.push': operation(z.tuple([gitPushSchema]), (api, [input]) =>
+    api.git.push(input),
+  ),
+  'git.stage': operation(z.tuple([gitPathsMutationSchema]), (api, [input]) =>
+    api.git.stage(input),
+  ),
+  'git.status': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.status(input),
+  ),
+  'git.switchBranch': operation(
+    z.tuple([gitSwitchBranchSchema]),
+    (api, [input]) => api.git.switchBranch(input),
+  ),
+  'git.unstage': operation(z.tuple([gitPathsMutationSchema]), (api, [input]) =>
+    api.git.unstage(input),
   ),
   'hooks.cancelRun': operation(z.tuple([dictSchema]), (api, [input]) =>
     api.hooks.cancelRun(input),
@@ -972,9 +1191,35 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [name, options]) => api.team.wakeMember(name, options),
   ),
+  'terminals.close': operation(
+    z.tuple([terminalIdentitySchema]),
+    (api, [input]) => api.terminals.close(input),
+  ),
+  'terminals.create': operation(
+    z.tuple([terminalCreateSchema]),
+    (api, [input]) => api.terminals.create(input),
+  ),
+  'terminals.list': operation(
+    z.tuple([workspaceSessionSchema]),
+    (api, [input]) => api.terminals.list(input),
+  ),
+  'terminals.read': operation(z.tuple([terminalReadSchema]), (api, [input]) =>
+    api.terminals.read(input),
+  ),
+  'terminals.resize': operation(
+    z.tuple([terminalResizeSchema]),
+    (api, [input]) => api.terminals.resize(input),
+  ),
+  'terminals.write': operation(z.tuple([terminalWriteSchema]), (api, [input]) =>
+    api.terminals.write(input),
+  ),
   'tools.readResult': operation(
     z.tuple([z.object({ ref: idSchema }).strict()]),
     (api, [input]) => api.tools.readResult(input),
+  ),
+  'workspace.snapshot': operation(
+    z.tuple([workspaceSessionSchema]),
+    (api, [input]) => api.workspace.snapshot(input),
   ),
 } as const
 

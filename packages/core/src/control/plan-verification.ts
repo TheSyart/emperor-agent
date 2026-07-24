@@ -22,6 +22,7 @@ import type {
   GoalReviewerWaiverActionContext,
   GoalReviewerWaiverActionFact,
 } from '../goals/reviewer'
+import { parseReviewerVerdict, verdictToPayload } from '../plans/reviewer'
 import {
   PlanStatus,
   PlanStepStatus,
@@ -462,13 +463,34 @@ export class PlanVerificationManager {
     planId: string
     result: Record<string, unknown>
   }): PlanRecord | null {
+    return this.saveIndependentVerificationResult(opts, false)
+  }
+
+  private saveIndependentVerificationResult(
+    opts: {
+      planId: string
+      result: Record<string, unknown>
+    },
+    trusted: boolean,
+  ): PlanRecord | null {
     const record = this.cm.planStore.get(opts.planId)
     if (record === null) return null
     const now = nowTs()
     const payload = { ...(opts.result ?? {}) }
     payload.source = INDEPENDENT_VERIFICATION_SOURCE
-    delete payload.issued_by
-    delete payload.receipt_id
+    if (trusted) {
+      payload.issued_by = 'core'
+      const suppliedReceipt = String(payload.receipt_id ?? '').trim()
+      payload.receipt_id =
+        suppliedReceipt ||
+        `independent_review_${record.id}_${record.eventSeq + 1}`
+    } else {
+      // This compatibility entry point may be reached with model-authored
+      // payloads. Keep the observation for Plan follow-up, but never let
+      // caller-supplied trust fields become a Core/Goal reviewer receipt.
+      delete payload.issued_by
+      delete payload.receipt_id
+    }
     payload.checked_at = Number(payload.checked_at ?? now) || now
     if ('commands' in payload) {
       payload.commands = dedupeStrings(
@@ -484,6 +506,128 @@ export class PlanVerificationManager {
       metadata,
     }
     return this.cm.planStore.save(updated)
+  }
+
+  /**
+   * Consume a Core-executed verification_reviewer result as authoritative Plan
+   * evidence. The model never writes this evidence directly.
+   */
+  recordIndependentVerificationToolResult(opts: {
+    toolCallId: string
+    agentType: string
+    output: string
+  }): PlanRecord | null {
+    const toolCallId = String(opts.toolCallId ?? '').trim()
+    if (
+      String(opts.agentType ?? '').trim() !== 'verification_reviewer' ||
+      !toolCallId
+    )
+      return null
+    const record = this.cm.latestReviewablePlan()
+    if (
+      record === null ||
+      !record.steps.length ||
+      !planStepsFinished(record) ||
+      !record.metadata.independent_verification_request
+    )
+      return null
+    const duplicate = record.verification.some(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        String((item as Record<string, unknown>).source ?? '') ===
+          INDEPENDENT_VERIFICATION_SOURCE &&
+        String((item as Record<string, unknown>).tool_call_id ?? '') ===
+          toolCallId,
+    )
+    if (duplicate) return record
+
+    const verdict = parseReviewerVerdict(String(opts.output ?? ''))
+    if (verdict === null) return null
+    const payload = {
+      ...verdictToPayload(verdict),
+      reviewer: 'verification_reviewer',
+      tool_call_id: toolCallId,
+      receipt_id: `independent_review_${record.id}_${toolCallId}`,
+      checked_at: nowTs(),
+    }
+    const saved = this.saveIndependentVerificationResult(
+      {
+        planId: record.id,
+        result: payload,
+      },
+      true,
+    )
+    if (saved === null) return null
+    return this.cm.planStore.save({
+      ...saved,
+      metadata: {
+        ...saved.metadata,
+        independent_verification_terminal: {
+          status: 'ready',
+          tool_call_id: toolCallId,
+          approval_generation: Number(saved.metadata.approval_generation ?? 0),
+          passed: verdict.passed,
+          checked_at: payload.checked_at,
+        },
+      },
+    })
+  }
+
+  independentVerificationDispatchGuard(agentType: string): string | null {
+    if (String(agentType ?? '').trim() !== 'verification_reviewer') return null
+    const record = this.cm.latestReviewablePlan()
+    if (record === null) return null
+    const latest = latestIndependentVerificationEvidence(record)
+    if (latest?.passed === true && hasCommandEvidence(latest)) {
+      return (
+        'Error: independent verification already passed for the current Plan ' +
+        'generation. Do not dispatch another reviewer; produce the final reply.'
+      )
+    }
+    return null
+  }
+
+  independentVerificationAskGuard(): string | null {
+    const record = this.cm.latestReviewablePlan()
+    if (record === null) return null
+    const terminal = record.metadata.independent_verification_terminal
+    if (
+      !terminal ||
+      typeof terminal !== 'object' ||
+      Array.isArray(terminal) ||
+      String((terminal as Record<string, unknown>).status ?? '') !== 'ready'
+    )
+      return null
+    return (
+      'Error: the current Plan has passed independent verification and is ' +
+      'ready for its single final delivery. Do not ask whether the user is ' +
+      'satisfied or whether the session should end; produce the final reply now.'
+    )
+  }
+
+  markIndependentVerificationDelivered(): PlanRecord | null {
+    const record = this.cm.latestReviewablePlan()
+    if (record === null) return null
+    const terminal = record.metadata.independent_verification_terminal
+    if (
+      !terminal ||
+      typeof terminal !== 'object' ||
+      Array.isArray(terminal) ||
+      String((terminal as Record<string, unknown>).status ?? '') !== 'ready'
+    )
+      return record
+    return this.cm.planStore.save({
+      ...record,
+      metadata: {
+        ...record.metadata,
+        independent_verification_terminal: {
+          ...(terminal as Record<string, unknown>),
+          status: 'delivered',
+          delivered_at: nowTs(),
+        },
+      },
+    })
   }
 
   waiveIndependentVerification(opts: {

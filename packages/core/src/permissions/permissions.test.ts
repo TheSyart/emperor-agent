@@ -519,7 +519,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     expect(plan.requiresApproval).toBe(false)
   })
 
-  it('requires approval for history-rewriting local Git commits', () => {
+  it('hard-denies history-rewriting local Git commits', () => {
     const decision = new PermissionPipeline().assess(
       'run_command',
       { command: 'git commit --amend --no-edit' },
@@ -527,7 +527,8 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
     )
 
     expect(decision.allowed).toBe(false)
-    expect(decision.requiresApproval).toBe(true)
+    expect(decision.requiresApproval).toBe(false)
+    expect(decision.rule).toBe('core.git.explicit_deny')
   })
 
   it('applies user deny rules before mode allow rules', () => {
@@ -1136,6 +1137,29 @@ describe('PermissionPipeline v2 permission modes', () => {
       allowed: false,
       requiresApproval: false,
       rule: 'user_rule.deny-production-push',
+    })
+  })
+
+  it.each([
+    'git push --force origin main',
+    'git reset --hard HEAD~1',
+    'git commit --amend --no-edit',
+    'git commit --no-verify -m unsafe',
+    'git -c core.hooksPath=/tmp/hooks status',
+    'git --work-tree=/tmp status',
+    'git diff --output=/tmp/leak.patch',
+  ])('full_access cannot bypass Git hard deny: %s', (command) => {
+    expect(
+      new PermissionPipeline().assess(
+        'run_command',
+        { command },
+        'full_access',
+        { workspaceRoot: process.cwd(), cwd: process.cwd() },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'core.git.explicit_deny',
     })
   })
 })

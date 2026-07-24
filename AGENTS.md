@@ -28,14 +28,14 @@
 7. `packages/core/src/control/*` + `packages/core/src/permissions/*` + `packages/core/src/plans/*`
 8. `packages/core/src/memory/*` + `packages/core/src/sessions/*` + `packages/core/src/runtime/*`
 9. `packages/core/src/scheduler/*` + `packages/core/src/watchlist/*`
-10. `packages/core/src/team/*` + `packages/core/src/external/*` + `packages/core/src/mcp/*`
+10. `packages/core/src/team/*` + `packages/core/src/mcp/*`
 11. `desktop/src/main/*` + `desktop/src/preload/*`
 12. `desktop/src/renderer/src/api/*` + `desktop/src/renderer/src/composables/*` + `desktop/src/renderer/src/runtime/*`
 13. `desktop/src/renderer/src/components/*` + `desktop/src/renderer/src/views/*`
 
 ## 3. 关键目录
 
-- `packages/core/`：核心 Agent runtime、CoreApi、模型/provider、工具、记忆、会话、Scheduler、Team、External、MCP、权限与计划系统。
+- `packages/core/`：核心 Agent runtime、CoreApi、模型/provider、工具、记忆、会话、Scheduler、Team、MCP、权限、计划与项目工作台系统。
 - `desktop/`：Electron app。`src/main` 托管 CoreApi 和 `app://` 协议；`src/preload` 暴露 Core IPC；`src/renderer` 是 Vue 桌面应用。
 - `desktop/src/pet/`：主进程内托管的可选桌宠 companion；生产包仅内嵌其 allowlist 资源，不存在独立桌宠 runtime。
 - `templates/`：系统提示词、初始化用户档案和记忆模板。
@@ -94,7 +94,7 @@ npm --prefix desktop run screenshots
 - 新 AgentDefinition/source：更新 `templates/subagents/agents.json` 与 `packages/core/src/extensions/resolver.ts`；source trust 只能由 host 注入，session policy 只能收紧，并同步打包资源 allowlist、Diagnostics 和兼容测试。
 - 新 CoreApi 能力：`packages/core/src/api/services/*` + `core-api.ts`，同步 `desktop/src/main/core-host.test.ts` 和 renderer API。
 - 新 Control/Plan/Permission 能力：优先放在 `packages/core/src/control/*`、`plans/*`、`permissions/*`，不要把策略散落到 UI 或 prompt 文案。
-- 新会话/记忆/Scheduler/Team/External/MCP 能力：优先在 `packages/core/src/<domain>/` 内保持 store/service/model 分层，再接 CoreApi。
+- 新会话/记忆/Scheduler/Team/MCP 能力：优先在 `packages/core/src/<domain>/` 内保持 store/service/model 分层，再接 CoreApi。
 - 新桌面 UI：遵循现有 Vue composable/panel/runtime 分层；图标优先用 `lucide-vue-next` 并在 `desktop/src/renderer/src/icons.ts` 统一映射。
 
 ## 7. 不应提交

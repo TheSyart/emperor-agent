@@ -15,6 +15,7 @@ import {
   applyToolRunUpdateToSegment,
   settleRunningToolSegments,
 } from './toolStatus'
+import { adaptLegacyRuntimeEvent } from './legacyRuntimeAdapter'
 
 export interface ChatProjectionState {
   messages: ChatMessage[]
@@ -26,6 +27,7 @@ export interface ProjectionRuntime {
   seenSeqs: Set<number>
   turnClock: Map<string, number>
   resumeTurnTargets: Map<string, string>
+  controlToolIds: Set<string>
   pendingControlResumeAssistantId: string | null
 }
 
@@ -42,7 +44,7 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'message_delta',
   'message_tombstoned',
   'agent_thought',
-  'turn_continuation_evaluated',
+  'historical_runtime_activity',
   'tool_call',
   'tool_result',
   'tool_error',
@@ -61,13 +63,14 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'plan_step_update',
   'plan_verification_start',
   'plan_verification_done',
+  'plan_execution_settled',
   'interaction_cancelled',
   'assistant_done',
   'turn_paused',
   'runtime_task_cancelled',
 ])
 
-export function isChatProjectionEvent(event: RuntimeEventEnvelope): boolean {
+export function isChatProjectionEvent(event: { event: string }): boolean {
   return CHAT_PROJECTION_EVENTS.has(String(event.event || ''))
 }
 
@@ -78,7 +81,12 @@ export function projectChatEvents(
   const state = emptyChatProjection()
   const runtime: ProjectionRuntime = createProjectionRuntime()
   for (const event of sortRuntimeEvents(events))
-    applyChatProjectionEvent(state, event as WsEvent, runtime, opts)
+    applyChatProjectionEvent(
+      state,
+      adaptLegacyRuntimeEvent(event),
+      runtime,
+      opts,
+    )
   return state
 }
 
@@ -164,6 +172,7 @@ export function applyChatProjectionEvent(
     event.event === 'tool_run_queued' ||
     event.event === 'tool_run_started'
   ) {
+    if (isControlToolEvent(event, runtime)) return state
     const assistant = assistantForEvent(state, event, runtime)!
     finishActiveThought(assistant, event)
     const seg = ensureToolSegment(assistant, event)
@@ -174,6 +183,7 @@ export function applyChatProjectionEvent(
   }
 
   if (event.event === 'tool_result') {
+    if (isControlToolEvent(event, runtime)) return state
     const assistant = assistantForEvent(state, event, runtime)!
     const seg = ensureToolSegment(assistant, event)
     applyToolResultToSegment(seg, {
@@ -199,6 +209,7 @@ export function applyChatProjectionEvent(
     event.event === 'tool_run_failed' ||
     event.event === 'tool_run_cancelled'
   ) {
+    if (isControlToolEvent(event, runtime)) return state
     const assistant = assistantForEvent(state, event, runtime)!
     const seg = ensureToolSegment(assistant, event)
     applyToolRunUpdateToSegment(seg, {
@@ -234,6 +245,7 @@ export function applyChatProjectionEvent(
   }
 
   if (event.event === 'tool_error') {
+    if (isControlToolEvent(event, runtime)) return state
     const assistant = assistantForEvent(state, event, runtime, false)
     const seg = findToolSegment(assistant, event.id)
     if (seg) {
@@ -295,6 +307,18 @@ export function applyChatProjectionEvent(
     return state
   }
 
+  if (event.event === 'plan_execution_settled') {
+    const assistantId = event.interaction
+      ? updateControlSegment(state, event.interaction)
+      : null
+    appendPlanActivity(state, event, runtime, assistantId)
+    runtime.pendingControlResumeAssistantId =
+      event.disposition === 'resume' || event.disposition === 'complete'
+        ? assistantId
+        : null
+    return state
+  }
+
   if (
     event.event === 'plan_runtime_update' ||
     event.event === 'plan_step_update' ||
@@ -310,19 +334,22 @@ export function applyChatProjectionEvent(
     return state
   }
 
-  if (event.event === 'turn_continuation_evaluated') {
+  if (event.event === 'historical_runtime_activity') {
     const assistant = assistantForEvent(state, event, runtime)!
     finishActiveThought(assistant, event)
-    const id = `turn-continuation-${event.seq || event.evaluationRound}`
+    const id = `historical-runtime-activity-${event.seq || event.turn_id || 'legacy'}`
     if (!assistant.segments.some((segment) => segment.id === id)) {
-      const presentation = continuationActivityPresentation(event)
       assistant.segments.push({
         id,
         type: 'plan_activity',
-        ...presentation,
+        label: event.label,
+        detail: event.detail,
+        tone: event.tone,
+        action: event.action,
+        nextActions: event.nextActions,
       })
     }
-    if (event.decision === 'pause') {
+    if (!event.running) {
       const endedAt = eventTimeMs(event)
       finishTimedState(assistant, endedAt)
       settleRunningToolSegments(assistant, {
@@ -425,6 +452,22 @@ function isExplicitContinuationMessage(content: string): boolean {
   )
 }
 
+function isControlToolName(name: unknown): boolean {
+  return name === 'ask_user' || name === 'propose_plan'
+}
+
+function isControlToolEvent(
+  event: { id?: string; name?: unknown },
+  runtime: ProjectionRuntime,
+): boolean {
+  const toolId = String(event.id ?? '').trim()
+  if (isControlToolName(event.name)) {
+    if (toolId) runtime.controlToolIds.add(toolId)
+    return true
+  }
+  return Boolean(toolId && runtime.controlToolIds.has(toolId))
+}
+
 function settleContinuationActions(state: ChatProjectionState): void {
   for (const message of state.messages) {
     if (message.role !== 'assistant') continue
@@ -436,41 +479,12 @@ function settleContinuationActions(state: ChatProjectionState): void {
   }
 }
 
-function continuationActivityPresentation(
-  event: Extract<WsEvent, { event: 'turn_continuation_evaluated' }>,
-): {
-  label: string
-  detail?: string
-  tone: 'running' | 'success' | 'error' | 'neutral'
-  action?: 'continue'
-  nextActions?: string[]
-} {
-  if (event.decision === 'continue')
-    return {
-      label: `评估后继续执行 · 追加 ${event.grantedIterations} 次迭代`,
-      detail: event.summary,
-      tone: 'running',
-    }
-  if (event.decision === 'finalize')
-    return {
-      label: '执行完成，正在整理交付',
-      detail: event.summary,
-      tone: 'success',
-    }
-  return {
-    label: '执行已暂停',
-    detail: event.summary,
-    tone: 'error',
-    action: 'continue',
-    nextActions: event.nextActions,
-  }
-}
-
 export function createProjectionRuntime(): ProjectionRuntime {
   return {
     seenSeqs: new Set(),
     turnClock: new Map(),
     resumeTurnTargets: new Map(),
+    controlToolIds: new Set(),
     pendingControlResumeAssistantId: null,
   }
 }
@@ -503,6 +517,7 @@ function appendPlanActivity(
         | 'plan_step_update'
         | 'plan_verification_start'
         | 'plan_verification_done'
+        | 'plan_execution_settled'
     }
   >,
   runtime: ProjectionRuntime,
@@ -542,6 +557,7 @@ function planActivityPresentation(
         | 'plan_step_update'
         | 'plan_verification_start'
         | 'plan_verification_done'
+        | 'plan_execution_settled'
     }
   >,
 ): {
@@ -551,6 +567,22 @@ function planActivityPresentation(
 } | null {
   if (event.event === 'plan_approved')
     return { label: '计划已批准', tone: 'success' }
+  if (event.event === 'plan_execution_settled') {
+    if (event.action === 'manual_verification_passed')
+      return { label: '人工验证通过', tone: 'success' }
+    if (event.action === 'waive_verification_and_complete')
+      return { label: '已豁免验证并完成', tone: 'success' }
+    if (event.action === 'cancel_plan')
+      return { label: '计划已取消', tone: 'neutral' }
+    if (event.action === 'pause')
+      return {
+        label: '等待用户后暂停',
+        detail: event.message,
+        tone: 'neutral',
+      }
+    if (event.action === 'continue_verification')
+      return { label: '继续验证', tone: 'running' }
+  }
   if (event.event === 'plan_step_update') {
     const status = String(event.step?.status || '')
     const title = String(event.step?.title || event.plan_id || '')
@@ -776,6 +808,7 @@ function ensureToolSegment(
     id?: string
     name?: string
     arguments?: unknown
+    tool_batch_id?: string
     ts?: number
     seq?: number
   },
@@ -795,12 +828,14 @@ function ensureToolSegment(
     existing.name = name
     existing.displayName ||= toolDisplayName(name)
     existing.arguments = args
+    existing.batchId = event.tool_batch_id || existing.batchId
     return existing
   }
   const segment: ToolSegment = {
     id: `tool-${event.id || event.seq || assistant.segments.length + 1}`,
     type: 'tool',
     toolId: event.id,
+    batchId: event.tool_batch_id,
     name,
     displayName: toolDisplayName(name),
     inputLabel: 'IN',

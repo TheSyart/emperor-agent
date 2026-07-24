@@ -10,6 +10,18 @@ import {
 import { join } from 'node:path'
 import type { PromptProjectionSnapshot } from './projection'
 
+export type PromptSectionOwner =
+  | 'core'
+  | 'agent_role'
+  | 'mode'
+  | 'plan'
+  | 'goal'
+  | 'project'
+  | 'memory'
+  | 'default'
+  | 'tool'
+  | 'user_append'
+
 export interface PromptSectionInput {
   name: string
   content: string
@@ -19,6 +31,8 @@ export interface PromptSectionInput {
   version: string | null
   scope?: string | null
   stability?: 'stable' | 'dynamic'
+  owner?: PromptSectionOwner
+  ruleIds?: string[]
 }
 
 export interface PromptManifestSection {
@@ -29,6 +43,8 @@ export interface PromptManifestSection {
   version: string | null
   scope: string | null
   stability: 'stable' | 'dynamic'
+  owner: string | null
+  ruleIds: string[]
   hash: string
   charCount: number
   tokenEstimate: number
@@ -106,6 +122,15 @@ export interface PromptSnapshot {
   checkpoint: PromptCheckpointSummary
   memoryVersions: PromptMemoryVersionSummary[]
   sections: PromptManifestSection[]
+  promptPolicy?: {
+    version: 1
+    replaced: Array<{
+      name: string
+      source: string
+      replacedBy: string
+      conflictingRuleIds: string[]
+    }>
+  }
   contextPlan: PromptContextPlan
   projection?: PromptProjectionSnapshot
   totals: {
@@ -127,6 +152,8 @@ export function toPromptManifestSection(
     version: section.version ?? null,
     scope: section.scope ?? null,
     stability: section.stability === 'dynamic' ? 'dynamic' : 'stable',
+    owner: section.owner ?? null,
+    ruleIds: [...new Set(section.ruleIds ?? [])],
     hash: createHash('sha256').update(content, 'utf8').digest('hex'),
     charCount: content.length,
     tokenEstimate: estimateTokens(content),
@@ -152,6 +179,7 @@ export function writePromptSnapshot(opts: {
   checkpoint?: Record<string, unknown> | null
   memoryVersions?: Array<Record<string, unknown>> | null
   projection?: PromptProjectionSnapshot | null
+  promptPolicy?: PromptSnapshot['promptPolicy']
 }): PromptSnapshot {
   mkdirSync(opts.dir, { recursive: true })
   const sections = opts.sections.map(toPromptManifestSection)
@@ -170,6 +198,7 @@ export function writePromptSnapshot(opts: {
     checkpoint: summarizeCheckpoint(opts.checkpoint ?? null),
     memoryVersions: summarizeMemoryVersions(opts.memoryVersions ?? null),
     sections,
+    ...(opts.promptPolicy ? { promptPolicy: opts.promptPolicy } : {}),
     contextPlan: buildContextPlan(sections, opts.contextPlan ?? null),
     ...(opts.projection
       ? { projection: cloneProjection(opts.projection) }

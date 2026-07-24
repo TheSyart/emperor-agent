@@ -19,6 +19,7 @@ import { TaskStoreConflictError } from '../tasks/store'
 import * as runtimeEvents from '../runtime/events'
 import type { SubagentRegistry } from '../subagents/registry'
 import type { SubagentSpec } from '../subagents/spec'
+import type { SubagentContextMode } from '../subagents/spec'
 import type { HookAggregateDecision } from '../hooks/models'
 import type { ExecutionEnvironment } from '../environment/snapshot'
 import type { RunnerGoalRecordingHost } from '../agent/runner-goal-recording'
@@ -56,6 +57,8 @@ export interface DispatchRunnerFactoryArgs {
   executionEnvironment?: ExecutionEnvironment | null
   goalObservationRecorder?: RunnerGoalRecordingHost | null
   expectedGoalId?: string | null
+  contextMode?: SubagentContextMode
+  parentSystemPrompt?: string | null
 }
 
 export interface DispatchSubagentHookHost {
@@ -81,6 +84,7 @@ export interface DispatchSubagentToolOptions {
 
 export class DispatchSubagentTool extends Tool {
   override name = 'dispatch_subagent'
+  readonly supportsPlanReadonlyExploration = true
   override exclusive = false
   override requiresRuntimeContext = true
   override concurrencySafe = true
@@ -122,7 +126,7 @@ export class DispatchSubagentTool extends Tool {
     return (
       '派遣一个子代理独立执行只读调研、批量搜索、跨文件查找或试错探索。' +
       '不要委派理解或让子代理自行决定最终实现；主 Agent 必须给出明确范围、期望产物和证据要求。' +
-      '子代理使用独立上下文，完成后只回传总结，避免污染主上下文。' +
+      'fresh 从零上下文开始，必须提供完整 brief；fork 继承经 Core 净化的父系统契约和对话事实，只需聚焦具体子任务；resume 通过 manage_subagent 恢复原 Task。' +
       '计划模式下只允许具备只读探索权限的子代理，并必须填写 scope_limit、expected_output、evidence_required；写入型子代理仍被禁止。' +
       '多项互不依赖的任务可在同一回合并发派遣；失败后诊断原因，不要盲目重复同一派遣。'
     )
@@ -137,6 +141,22 @@ export class DispatchSubagentTool extends Tool {
       {
         agent_type: agentType,
         task: S('交代给小太监的差事, 写清要做什么、希望返回什么格式的总结'),
+        context_mode: {
+          ...S(
+            '上下文模式：fresh 从零开始；fork 继承经净化的父上下文。恢复旧 Task 请用 manage_subagent resume。',
+          ),
+          enum: ['fresh', 'fork'],
+          nullable: true,
+        } as ParamSchema,
+        rationale: {
+          ...S('为什么需要派遣该子代理，以及它如何帮助主任务'),
+          nullable: true,
+        } as ParamSchema,
+        known_facts: stringArray(
+          'fresh brief 已确认的事实；不要让子代理重复发现这些内容',
+        ),
+        rejected_approaches: stringArray('已经排除的方案及边界'),
+        target_files: stringArray('需要重点读取或修改的相对路径'),
         purpose: {
           ...S('一句话用途标签, 仅用于终端打印'),
           nullable: true,
@@ -192,6 +212,7 @@ export class DispatchSubagentTool extends Tool {
   ): Promise<string> {
     const agentType = String(args.agent_type ?? '')
     const task = String(args.task ?? '')
+    const contextMode = normalizeContextMode(args.context_mode)
     const spec = this.subagentRegistry.get(agentType)
     if (!spec) {
       return `Error: unknown subagent '${agentType}'. Available: ${this.subagentRegistry.names({ includeAliases: true })}`
@@ -212,6 +233,11 @@ export class DispatchSubagentTool extends Tool {
 
     const subRegistry = this.registryForSpec(spec)
     const subagentTask = composeSubagentTask(task, {
+      contextMode,
+      rationale: asOptional(args.rationale),
+      knownFacts: asStringArray(args.known_facts),
+      rejectedApproaches: asStringArray(args.rejected_approaches),
+      targetFiles: asStringArray(args.target_files),
       expectedOutput: asOptional(args.expected_output),
       evidenceRequired: asOptional(args.evidence_required),
       scopeLimit: asOptional(args.scope_limit),
@@ -219,9 +245,11 @@ export class DispatchSubagentTool extends Tool {
     const workspaceRoot = ctx?.workspaceRoot ?? ctx?.root ?? process.cwd()
     const agentId = `subagent_${randomUUID().replace(/-/g, '').slice(0, 12)}`
     const turnId = `subagent_turn_${randomUUID().replace(/-/g, '').slice(0, 12)}`
-    const history: Array<Record<string, unknown>> = [
-      { role: 'user', content: subagentTask },
-    ]
+    const history = buildSubagentHistory(
+      contextMode,
+      ctx?.parentContext,
+      subagentTask,
+    )
     let taskRecord: TaskRecord | null = null
     let hookScopeStarted = false
 
@@ -260,6 +288,7 @@ export class DispatchSubagentTool extends Tool {
             scope_limit: asOptional(args.scope_limit) || '',
             expected_output: asOptional(args.expected_output) || '',
             evidence_required: asOptional(args.evidence_required) || '',
+            context_mode: contextMode,
           },
         })
         if (!taskRecord)
@@ -277,6 +306,9 @@ export class DispatchSubagentTool extends Tool {
         turnId,
         sessionId: ctx?.sessionId ?? null,
         executionEnvironment: ctx?.executionEnvironment ?? null,
+        contextMode,
+        parentSystemPrompt:
+          contextMode === 'fork' ? (ctx?.parentSystemPrompt ?? null) : null,
       })
 
       if (this.taskRuntime && this.taskManager && taskRecord) {
@@ -383,6 +415,11 @@ export class DispatchSubagentTool extends Tool {
     if (planError) throw new Error(planError)
     const subRegistry = this.registryForSpec(spec)
     const subagentTask = composeSubagentTask(String(args.task ?? ''), {
+      contextMode: normalizeContextMode(args.context_mode),
+      rationale: asOptional(args.rationale),
+      knownFacts: asStringArray(args.known_facts),
+      rejectedApproaches: asStringArray(args.rejected_approaches),
+      targetFiles: asStringArray(args.target_files),
       expectedOutput: asOptional(args.expected_output),
       evidenceRequired: asOptional(args.evidence_required),
       scopeLimit: asOptional(args.scope_limit),
@@ -391,9 +428,12 @@ export class DispatchSubagentTool extends Tool {
     const sessionId = String(ctx?.sessionId ?? '').trim() || 'session:unbound'
     const agentId = `subagent_${randomUUID().replace(/-/g, '').slice(0, 12)}`
     const turnId = `subagent_turn_${randomUUID().replace(/-/g, '').slice(0, 12)}`
-    const history: Array<Record<string, unknown>> = [
-      { role: 'user', content: subagentTask },
-    ]
+    const contextMode = normalizeContextMode(args.context_mode)
+    const history = buildSubagentHistory(
+      contextMode,
+      ctx?.parentContext,
+      subagentTask,
+    )
     let hookScopeStarted = false
     if (this.hooks && spec.definition.hooks.allow.includes('SubagentStart')) {
       const start = await this.hooks.begin({
@@ -447,6 +487,7 @@ export class DispatchSubagentTool extends Tool {
           scope_limit: asOptional(args.scope_limit),
           expected_output: asOptional(args.expected_output),
           evidence_required: asOptional(args.evidence_required),
+          context_mode: contextMode,
         },
         execute: async ({ signal, taskId, workspaceRoot }) => {
           managedTaskId = taskId
@@ -461,6 +502,9 @@ export class DispatchSubagentTool extends Tool {
             turnId,
             sessionId,
             executionEnvironment: ctx?.executionEnvironment ?? null,
+            contextMode,
+            parentSystemPrompt:
+              contextMode === 'fork' ? (ctx?.parentSystemPrompt ?? null) : null,
           })
           return await runner.step(history, { signal })
         },
@@ -584,6 +628,10 @@ class AgentPolicyTool extends Tool {
     return this.delegate.isConcurrencySafe(args)
   }
 
+  override mutatesWorkspace(args: Record<string, unknown>): boolean {
+    return this.delegate.mutatesWorkspace(args)
+  }
+
   override getPath(args: Record<string, unknown>): string | null {
     return this.delegate.getPath?.(args) ?? null
   }
@@ -662,18 +710,37 @@ function safePolicyLabel(value: string): string {
 export function composeSubagentTask(
   task: string,
   opts: {
+    contextMode?: SubagentContextMode
+    rationale?: string | null
+    knownFacts?: string[]
+    rejectedApproaches?: string[]
+    targetFiles?: string[]
     expectedOutput?: string | null
     evidenceRequired?: string | null
     scopeLimit?: string | null
   } = {},
 ): string {
+  const contextMode = opts.contextMode === 'fork' ? 'fork' : 'fresh'
   const contract: string[] = []
+  contract.push(`- 目标: ${task.trim()}`)
+  if (opts.rationale) contract.push(`- 原因: ${opts.rationale}`)
+  if (opts.knownFacts?.length)
+    contract.push(`- 已知事实: ${opts.knownFacts.join('；')}`)
+  if (opts.rejectedApproaches?.length)
+    contract.push(`- 已排除方案: ${opts.rejectedApproaches.join('；')}`)
+  if (opts.targetFiles?.length)
+    contract.push(`- 目标文件: ${opts.targetFiles.join('、')}`)
   if (opts.expectedOutput) contract.push(`- 期望产物: ${opts.expectedOutput}`)
   if (opts.evidenceRequired)
     contract.push(`- 证据要求: ${opts.evidenceRequired}`)
   if (opts.scopeLimit) contract.push(`- 范围限制: ${opts.scopeLimit}`)
-  contract.push('- 最终回禀必须包含: 结论、证据、风险、建议下一步。')
-  return `${task.trimEnd()}\n\n## 差事契约\n${contract.join('\n')}`
+  contract.push(
+    contextMode === 'fork'
+      ? '- 只处理本 brief 的聚焦目标；父上下文仅作为事实背景，不得擅自扩展范围。'
+      : '- 你从零上下文开始；不得假定看过主对话，缺失事实必须自行用允许的工具核验。',
+  )
+  contract.push('- 最终只返回可合并的结论和证据，不回放完整工具 transcript。')
+  return `## ${contextMode === 'fork' ? 'Fork Agent Task' : 'Fresh Agent Brief'}\n${contract.join('\n')}`
 }
 
 export function extractEvidenceRefs(text: string): string[] {
@@ -715,6 +782,61 @@ function missingPlanContract(args: Record<string, unknown>): string[] {
 
 function asOptional(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+function stringArray(description: string): ParamSchema {
+  return {
+    type: 'array',
+    description,
+    items: S(description),
+    nullable: true,
+  } as ParamSchema
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return dedupe(
+    value
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 32),
+  )
+}
+
+function normalizeContextMode(
+  value: unknown,
+): Exclude<SubagentContextMode, 'resume'> {
+  return String(value ?? '').trim() === 'fork' ? 'fork' : 'fresh'
+}
+
+function buildSubagentHistory(
+  mode: Exclude<SubagentContextMode, 'resume'>,
+  parentContext: Array<Record<string, unknown>> | undefined,
+  task: string,
+): Array<Record<string, unknown>> {
+  const focusedTask = { role: 'user', content: task }
+  if (mode !== 'fork') return [focusedTask]
+  return [...normalizeForkParentContext(parentContext), focusedTask]
+}
+
+function normalizeForkParentContext(
+  parentContext: Array<Record<string, unknown>> | undefined,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(parentContext)) return []
+  const normalized: Array<Record<string, unknown>> = []
+  for (const message of parentContext.slice(-48)) {
+    const role = String(message.role ?? '')
+    if (role !== 'user' && role !== 'assistant') continue
+    if (message.ui_hidden === true) continue
+    if (role === 'assistant' && Array.isArray(message.tool_calls)) continue
+    const content = String(message.content ?? '').trim()
+    if (!content || content.startsWith('[CONTROL:')) continue
+    normalized.push({
+      role,
+      content: content.length > 8_000 ? `${content.slice(0, 8_000)}…` : content,
+    })
+  }
+  return normalized.slice(-24)
 }
 
 function agentDefinitionMetadata(spec: SubagentSpec): Record<string, unknown> {

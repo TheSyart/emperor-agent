@@ -35,6 +35,38 @@ export class PlanDraftingManager {
     this.cm = cm
   }
 
+  promptContext(): string {
+    const record = this.latestDraftPlan()
+    if (record === null) {
+      return [
+        '## Active Plan draft',
+        '- phase: exploring',
+        '- exploration receipts: 0',
+        '- approval gate: blocked until successful read-only exploration is recorded',
+      ].join('\n')
+    }
+    const discoveries = record.draft.discoveries
+      .map((item) => {
+        const id = String(item.id ?? '').trim()
+        const source = String(item.source ?? 'tool').trim()
+        const summary = String(item.summary ?? '').trim()
+        const files = Array.isArray(item.files)
+          ? item.files.map((file) => String(file)).filter(Boolean)
+          : []
+        return `  - ${id} [${source}] ${summary}${files.length ? ` · files: ${files.join(', ')}` : ''}`
+      })
+      .filter((line) => !line.startsWith('  -  '))
+    return [
+      '## Active Plan draft',
+      `- phase: ${record.draft.phase}`,
+      `- exploration receipts: ${discoveries.length}`,
+      ...(discoveries.length ? ['- discoveries:', ...discoveries] : []),
+      `- unresolved questions: ${record.draft.openQuestions.length}`,
+      `- relevant files: ${record.draft.relevantFiles.join(', ') || '(none)'}`,
+      '- approval gate: every submitted plan must cite at least one discovery id and have no unresolved questions',
+    ].join('\n')
+  }
+
   createPlan(opts: {
     title: string
     summary: string
@@ -88,6 +120,18 @@ export class PlanDraftingManager {
     if (opts.enforceQuality) {
       new PlanQualityGate().requireOk({ steps: structuredSteps, draft })
     }
+    const discoveryIds = draft.discoveries
+      .map((item) => String(item.id ?? '').trim())
+      .filter(Boolean)
+    const reviewReceipt = {
+      version: 1,
+      from_phase: existing?.draft.phase ?? PlanDraftPhase.EXPLORING,
+      reviewed_phase: PlanDraftPhase.REVIEWING,
+      discovery_ids: discoveryIds,
+      relevant_files: [...draft.relevantFiles],
+      unresolved_questions: draft.openQuestions.length,
+      reviewed_at: now,
+    }
     const scope = this.cm.planScopeMetadata()
     this.cm.planStore.save(
       makePlanRecord({
@@ -109,6 +153,7 @@ export class PlanDraftingManager {
           ...(existing !== null ? existing.metadata : {}),
           approval_generation: approvalGeneration,
           risk_level: interaction.riskLevel,
+          plan_review_receipt: reviewReceipt,
           ...(scope ? { scope } : {}),
         }),
         eventSeq: existing?.eventSeq ?? 0,

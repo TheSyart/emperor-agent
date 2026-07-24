@@ -169,6 +169,31 @@
         "process": "policy"
       },
       "delegation": { "planReadonlyExplorer": false }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "plan_architect",
+      "aliases": ["planner"],
+      "description": "方案设计 Agent。基于已经记录的项目证据进行只读架构设计，输出推荐方案、复用点、关键文件、权衡与可执行验证，不直接实施。",
+      "prompt": "plan_architect.md",
+      "model": { "inherit": true, "allowedProfiles": [] },
+      "tools": {
+        "allow": ["read_file", "glob", "grep", "run_command"]
+      },
+      "skills": { "allow": [] },
+      "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
+      "mcp": { "servers": [] },
+      "memory": { "mode": "none", "scopes": [] },
+      "completion": {
+        "maxTurns": 14,
+        "requiredSections": ["推荐方案", "复用点", "关键文件", "验证", "权衡"]
+      },
+      "sandbox": {
+        "filesystem": "read-only",
+        "network": "deny",
+        "process": "policy"
+      },
+      "delegation": { "planReadonlyExplorer": true }
     }
   ]
 }

@@ -18,6 +18,7 @@ import { ControlMode } from './models'
 import { PlanDecisionPolicy } from './plan-policy'
 import {
   AskUserTool,
+  CompletePlanStepTool,
   ProposePlanTool,
   RequestPlanModeTool,
   parsePauseResult,
@@ -34,6 +35,7 @@ import {
   PlanStepStatus,
 } from '../plans/models'
 import { independentVerificationRiskSignals } from './plan-helpers'
+import { requirementsForStep } from '../plans/verification'
 import { TaskManager } from '../tasks/manager'
 import { GoalContractValidator, newGoalRecord } from '../goals/validation'
 import type {
@@ -75,8 +77,29 @@ function makeRegistry(manager: ControlManager): ToolRegistry {
   registry.register(new SchedulerStub())
   registry.register(new AskUserTool(manager))
   registry.register(new ProposePlanTool(manager))
+  registry.register(new CompletePlanStepTool(manager))
   registry.register(new RequestPlanModeTool(manager))
   return registry
+}
+
+function seedPlanDiscovery(
+  manager: ControlManager,
+  files: string[] = [],
+): string {
+  const plan = manager.recordPlanDiscovery({
+    source: files.length ? 'read_file' : 'glob',
+    summary: files.length
+      ? `Inspected ${files.join(', ')}.`
+      : 'Inspected the current project scope.',
+    files,
+    evidenceRefs: files.length
+      ? files.map((file) => `path:${file}`)
+      : ['scope:.'],
+  })
+  const discovery = plan?.draft.discoveries.at(-1)
+  const id = String(discovery?.id ?? '')
+  if (!id) throw new Error('test discovery was not recorded')
+  return id
 }
 
 function lockedGoal(
@@ -159,7 +182,7 @@ describe('ControlManager (test_control.py)', () => {
     )
   })
 
-  it('cancels an executable plan when the user answers to ignore or abandon the stuck plan', () => {
+  it('does not cancel an executable plan from ordinary Ask wording', () => {
     const manager = new ControlManager(tmp('emperor-ctrl-abandon-plan-'))
     const planInteraction = manager.createPlan({
       title: 'Stale game plan',
@@ -178,7 +201,7 @@ describe('ControlManager (test_control.py)', () => {
       ],
     })
     manager.approve(planInteraction.id)
-    expect(manager.latestExecutablePlan()?.status).toBe(PlanStatus.APPROVED)
+    expect(manager.latestExecutablePlan()?.status).toBe(PlanStatus.EXECUTING)
 
     const ask = manager.createAsk({
       questions: [
@@ -202,8 +225,54 @@ describe('ControlManager (test_control.py)', () => {
     })
 
     const latest = manager.planStore.latest()
-    expect(latest?.status).toBe(PlanStatus.CANCELLED)
-    expect(manager.latestExecutablePlan()).toBeNull()
+    expect(latest?.status).toBe(PlanStatus.EXECUTING)
+    expect(manager.latestExecutablePlan()?.id).toBe(latest?.id)
+  })
+
+  it('validates stable option ids and derives the visible label from Core state', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-option-id-'))
+    const interaction = manager.createAsk({
+      questions: [
+        {
+          id: 'scope',
+          header: '范围',
+          question: '如何推进？',
+          options: [
+            {
+              id: 'minimal',
+              label: '最小修复',
+              description: '只修复当前问题',
+            },
+            {
+              id: 'complete',
+              label: '完整修复',
+              description: '补齐状态闭环',
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(() =>
+      manager.answer(interaction.id, {
+        scope: {
+          option_id: 'forged',
+          choice: '完整修复',
+          freeform: '',
+        },
+      }),
+    ).toThrow(/option/i)
+    expect(manager.payload().pending).toMatchObject({ id: interaction.id })
+
+    const resume = manager.answer(interaction.id, {
+      scope: {
+        option_id: 'complete',
+        choice: '伪造标签',
+        freeform: '',
+      },
+    })
+    expect(resume.message).toContain('完整修复')
+    expect(resume.message).not.toContain('伪造标签')
   })
 
   it('does not expose executable plans across different session or project scopes', () => {
@@ -270,7 +339,7 @@ describe('ControlManager (test_control.py)', () => {
     expect(manager.planStore.get(planId)?.sessionId).toBe('sess_p')
   })
 
-  it('tags plan step tasks with the current runtime scope', () => {
+  it('keeps foreground Plan scope on the Plan without creating step Tasks', () => {
     const root = tmp('emperor-ctrl-plan-task-scope-')
     const manager = new ControlManager(root)
     const taskManager = new TaskManager(root)
@@ -301,14 +370,12 @@ describe('ControlManager (test_control.py)', () => {
     manager.approve(planInteraction.id)
 
     const plan = manager.planStore.latest()
-    const taskId = String(
-      (plan!.metadata.plan_step_tasks as Record<string, string>).step_1,
-    )
-    expect(taskManager.store.get(taskId)?.metadata.scope).toEqual({
+    expect(plan?.metadata.scope).toEqual({
       session_id: 'session_1',
       project_id: 'project_1',
       workspace_root: '/tmp/project_1',
     })
+    expect(taskManager.store.list()).toEqual([])
   })
 
   it('Core injects the active Goal binding and preserves dependency input across revision', () => {
@@ -653,6 +720,19 @@ describe('ControlManager (test_control.py)', () => {
     expect(names).not.toContain('write_file')
     expect(names).not.toContain('update_todos')
     expect(manager.isToolAllowed('write_file', registry)).toBe(false)
+  })
+
+  it('renders the active Plan phase and exploration receipts into the control prompt', () => {
+    const manager = new ControlManager(tmp('emperor-ctrl-plan-prompt-'))
+    manager.setMode(ControlMode.PLAN)
+    const discoveryId = seedPlanDiscovery(manager, ['src/index.ts'])
+
+    const prompt = manager.systemPrompt()
+
+    expect(prompt).toContain('phase: exploring')
+    expect(prompt).toContain(discoveryId)
+    expect(prompt).toContain('src/index.ts')
+    expect(prompt).toContain('门禁满足后只能通过 `propose_plan` 进入 PlanCard')
   })
 
   it('exposes request_plan_mode outside plan mode and hides it inside plan mode', () => {
@@ -1544,6 +1624,13 @@ describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
 // ── test_plan_quality_gate.py (ProposePlanTool integration) ──
 
 describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
+  it('requires structured steps in the provider schema', () => {
+    const manager = new ControlManager(tmp('emperor-propose-schema-'))
+    const tool = new ProposePlanTool(manager)
+
+    expect(tool.parameters.required).toContain('steps')
+  })
+
   it('rejects weak plan without pending card', () => {
     const manager = new ControlManager(tmp('emperor-qg-weak-'))
     manager.setMode('plan')
@@ -1612,6 +1699,11 @@ describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
   it('accepts a concrete verifiable plan and creates a waiting card', () => {
     const manager = new ControlManager(tmp('emperor-qg-ok-'))
     manager.setMode('plan')
+    const discoveryId = seedPlanDiscovery(manager, [
+      'tests/unit/test_plan_quality_gate.py',
+      'agent/control/tools.py',
+      'agent/plans/quality.py',
+    ])
     const result = new ProposePlanTool(manager).execute(
       {
         title: 'Plan quality gate',
@@ -1624,6 +1716,7 @@ describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
             title: 'Add plan quality gate tests',
             description: 'Cover weak plans and accepted concrete plans.',
             files: ['tests/unit/test_plan_quality_gate.py'],
+            discovery_refs: [discoveryId],
             commands: [
               '.venv/bin/python -m pytest tests/unit/test_plan_quality_gate.py -q',
             ],
@@ -1636,6 +1729,7 @@ describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
             description:
               'Wire the gate through ProposePlanTool without changing approved execution state.',
             files: ['agent/control/tools.py', 'agent/plans/quality.py'],
+            discovery_refs: [discoveryId],
             commands: [
               '.venv/bin/python -m pytest tests/unit/test_plan_runtime.py -q',
             ],
@@ -1671,6 +1765,11 @@ describe('ProposePlanTool quality gate (test_plan_quality_gate.py)', () => {
     )
     expect(saved).not.toBeNull()
     expect(saved!.status).toBe(PlanStatus.WAITING_APPROVAL)
+    expect(saved!.metadata.plan_review_receipt).toMatchObject({
+      version: 1,
+      discovery_ids: [discoveryId],
+      unresolved_questions: 0,
+    })
     expect(
       saved!.steps[1]!.riskNote.startsWith('The gate can over-block'),
     ).toBe(true)
@@ -1695,6 +1794,7 @@ describe('Plan verification matrix integration (test_plan_verification_matrix.py
     })
     manager.setTodoStore(new TodoStore())
     manager.setMode('plan')
+    const discoveryId = seedPlanDiscovery(manager, ['agent/runner.py'])
     new ProposePlanTool(manager).execute({
       title: 'Verification matrix',
       summary: 'Require all verification requirements before completion.',
@@ -1705,6 +1805,7 @@ describe('Plan verification matrix integration (test_plan_verification_matrix.py
           title: 'Run matrix',
           description: 'Execute required verification.',
           files: ['agent/runner.py'],
+          discovery_refs: [discoveryId],
           commands,
           acceptance: ['verification requirements are satisfied'],
           ...extraStep,
@@ -2140,42 +2241,326 @@ describe('Plan risk signals', () => {
   })
 })
 
-// ── test_plan_execution_state.py::test_todo_store_syncs_from_plan_steps ──
-
-describe('TodoStore.syncFromPlanSteps (test_plan_execution_state.py)', () => {
-  it('syncs todos from plan steps', () => {
-    const store = new TodoStore()
-    const steps = [
-      { id: 'step_1', title: 'Edit code', status: 'active' },
-      { id: 'step_2', title: 'Run tests', status: 'pending' },
-    ]
-    const result = store.syncFromPlanSteps(steps, {
-      planId: 'plan_1',
-      approvalGeneration: 3,
+describe('independent Plan verification terminal flow', () => {
+  function completedReviewablePlan(): {
+    manager: ControlManager
+    planId: string
+  } {
+    const manager = new ControlManager(tmp('emperor-independent-review-'))
+    manager.setRuntimeScope({
+      sessionId: 'session-independent-review',
+      mode: 'build',
+      projectId: 'project-independent-review',
+      workspaceRoot: '/workspace/independent-review',
+      projectFingerprint: 'fingerprint-independent-review',
     })
-    expect(result).toContain('todos updated')
-    expect(store.todos).toEqual([
-      {
-        id: 1,
-        plan_id: 'plan_1',
-        plan_step_id: 'step_1',
-        approval_generation: 3,
-        content: 'Edit code',
-        status: 'in_progress',
-      },
-      {
-        id: 2,
-        plan_id: 'plan_1',
-        plan_step_id: 'step_2',
-        approval_generation: 3,
-        content: 'Run tests',
-        status: 'pending',
-      },
+    const plan = manager.planStore.save(
+      makePlanRecord({
+        id: 'plan_independent_review',
+        title: 'Independent review',
+        summary: 'The implementation is complete and needs one review.',
+        status: PlanStatus.COMPLETED,
+        createdAt: 1,
+        updatedAt: 2,
+        approvedAt: 1,
+        sessionId: 'session-independent-review',
+        steps: [
+          makeStep({
+            id: 'step_1',
+            title: 'Implement',
+            status: PlanStepStatus.DONE,
+            files: [
+              'index.html',
+              'packages/core/src/agent/runner.ts',
+              'desktop/src/main/ipc.ts',
+            ],
+            evidence: [
+              {
+                source: 'edit_file',
+                tool_call_id: 'call_edit',
+                path: 'index.html',
+              },
+            ],
+          }),
+        ],
+        metadata: {
+          approval_generation: 1,
+          scope: {
+            session_id: 'session-independent-review',
+            mode: 'build',
+            project_id: 'project-independent-review',
+            workspace_root: '/workspace/independent-review',
+            project_fingerprint: 'fingerprint-independent-review',
+          },
+        },
+      }),
+    )
+    expect(
+      manager.planIndependentVerificationFollowup({
+        dispatchAvailable: true,
+      }),
+    ).toMatchObject({ status: 'required', plan_id: plan.id })
+    return { manager, planId: plan.id }
+  }
+
+  it('automatically records one trusted reviewer PASS and ends the followup', () => {
+    const { manager, planId } = completedReviewablePlan()
+    const output = [
+      '复核完成。',
+      '```verdict',
+      JSON.stringify({
+        passed: true,
+        summary: 'HTML structure and declared checks passed.',
+        commands: ["grep -c '</html>' index.html"],
+        command_evidence: [
+          {
+            command: "grep -c '</html>' index.html",
+            exit_code: 0,
+          },
+        ],
+      }),
+      '```',
+    ].join('\n')
+
+    const saved = manager.recordIndependentVerificationToolResult({
+      toolCallId: 'call_reviewer_once',
+      agentType: 'verification_reviewer',
+      output,
+    })
+    const duplicate = manager.recordIndependentVerificationToolResult({
+      toolCallId: 'call_reviewer_once',
+      agentType: 'verification_reviewer',
+      output,
+    })
+
+    expect(saved).toMatchObject({ id: planId })
+    expect(duplicate).toMatchObject({ id: planId })
+    const record = manager.planStore.get(planId)!
+    expect(
+      record.verification.filter(
+        (item) => item.source === 'independent_verification',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        passed: true,
+        issued_by: 'core',
+        tool_call_id: 'call_reviewer_once',
+        receipt_id: expect.stringMatching(/^independent_review_/),
+        commands: ["grep -c '</html>' index.html"],
+      }),
     ])
+    expect(
+      manager.planIndependentVerificationFollowup({
+        dispatchAvailable: true,
+      }),
+    ).toBeNull()
+  })
+
+  it('does not trust an ordinary subagent result as independent verification', () => {
+    const { manager, planId } = completedReviewablePlan()
+
+    expect(
+      manager.recordIndependentVerificationToolResult({
+        toolCallId: 'call_wrong_agent',
+        agentType: 'code_reviewer',
+        output:
+          '```verdict\n{"passed":true,"commands":["npm test"],"command_evidence":[{"command":"npm test","exit_code":0}]}\n```',
+      }),
+    ).toBeNull()
+    expect(manager.planStore.get(planId)!.verification).toHaveLength(0)
   })
 })
 
-describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () => {
+describe('Plan execution authority and legacy WorkItem migration', () => {
+  it('keeps a one-step Plan authoritative without creating a redundant Todo', () => {
+    const manager = new ControlManager(tmp('emperor-plan-no-single-todo-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode(ControlMode.PLAN)
+    const interaction = manager.createPlan({
+      title: 'Create one page',
+      summary: 'Create a single self-contained HTML page.',
+      planMarkdown: '# Plan\n\n1. Create the page',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Create index.html',
+          description: 'Create the requested page.',
+          files: ['index.html'],
+          commands: [],
+          acceptance: ['the requested page is created'],
+        },
+      ],
+    })
+
+    manager.approve(interaction.id)
+
+    expect(todoStore.todos).toEqual([])
+    const active = manager.latestExecutablePlan()
+    expect(active?.steps[0]?.status).toBe(PlanStepStatus.ACTIVE)
+
+    const completed = (
+      manager as unknown as {
+        completePlanStep(input: {
+          stepId: string
+          summary: string
+          toolCallId: string
+        }): ReturnType<ControlManager['latestExecutablePlan']>
+      }
+    ).completePlanStep({
+      stepId: 'step_1',
+      summary: 'Created index.html and satisfied the implementation scope.',
+      toolCallId: 'call_complete_step',
+    })
+
+    expect(completed?.status).toBe(PlanStatus.COMPLETED)
+    expect(completed?.steps[0]?.status).toBe(PlanStepStatus.DONE)
+    expect(completed?.metadata.implementation_claims).toMatchObject({
+      step_1: expect.objectContaining({
+        source: 'plan_step_completion',
+        tool_call_id: 'call_complete_step',
+      }),
+    })
+  })
+
+  it('does not manufacture Todos for two short Plan steps', () => {
+    const manager = new ControlManager(tmp('emperor-plan-no-two-todos-'))
+    const todoStore = new TodoStore()
+    manager.setTodoStore(todoStore)
+    manager.setMode(ControlMode.PLAN)
+    const interaction = manager.createPlan({
+      title: 'Small two-step fix',
+      summary: 'Edit one file and run its focused check.',
+      planMarkdown: '# Plan\n\n1. Edit\n2. Check',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Edit index.html',
+          files: ['index.html'],
+          acceptance: ['content updated'],
+        },
+        {
+          id: 'step_2',
+          title: 'Check structure',
+          depends_on: ['step_1'],
+          files: ['index.html'],
+          acceptance: ['structure is valid'],
+        },
+      ],
+    })
+
+    manager.approve(interaction.id)
+
+    expect(todoStore.todos).toEqual([])
+    expect(manager.latestExecutablePlan()?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'step_1',
+          status: PlanStepStatus.ACTIVE,
+        }),
+        expect.objectContaining({
+          id: 'step_2',
+          status: PlanStepStatus.PENDING,
+        }),
+      ]),
+    )
+    const registry = makeRegistry(manager)
+    registry.register(new UpdateTodos(todoStore))
+    expect(
+      manager.toolDefinitions(registry).map((definition) => definition.name),
+    ).not.toContain('update_todos')
+  })
+
+  it('lets the model report PlanStep completion without manufacturing a Todo', () => {
+    const manager = new ControlManager(tmp('emperor-plan-step-tool-'))
+    manager.setTodoStore(new TodoStore())
+    manager.setMode(ControlMode.PLAN)
+    const interaction = manager.createPlan({
+      title: 'Create one page',
+      summary: 'Create a single self-contained HTML page.',
+      planMarkdown: '# Plan\n\n1. Create the page',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Create index.html',
+          description: 'Create the requested page.',
+          files: ['index.html'],
+          acceptance: ['the requested page is created'],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const tool = new CompletePlanStepTool(manager)
+    const result = tool.execute(
+      {
+        step_id: 'step_1',
+        summary: 'Created index.html and satisfied the implementation scope.',
+      },
+      {
+        root: '/tmp',
+        arguments: {},
+        turnId: 'turn_complete_step',
+        parentCallId: 'call_complete_step',
+      },
+    )
+
+    expect(String(result)).toContain('Plan step completed')
+    expect(manager.planStore.list().at(-1)?.status).toBe(PlanStatus.COMPLETED)
+  })
+
+  it('does not stop a completed implementation for a model-suggested browser check', () => {
+    const manager = new ControlManager(tmp('emperor-plan-optional-manual-'))
+    manager.setTodoStore(new TodoStore())
+    manager.setRuntimeScope({
+      sessionId: 'session_optional_manual',
+      mode: 'build',
+    })
+    manager.setMode(ControlMode.PLAN)
+    const interaction = manager.createPlan({
+      title: 'Create one page',
+      summary: 'Create and visually inspect a single HTML page.',
+      planMarkdown: '# Plan\n\n1. Create the page',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Create index.html',
+          description: 'Create the requested page.',
+          files: ['index.html'],
+          acceptance: ['the requested page is created'],
+          verification: [
+            {
+              id: 'browser_check',
+              kind: 'manual',
+              required: true,
+              description: 'Open index.html in a browser and inspect it.',
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Created the requested page.',
+      toolCallId: 'call_optional_manual',
+    })
+
+    const saved = manager.planStore.list().at(-1)!
+    expect(saved.status).toBe(PlanStatus.COMPLETED)
+    expect(requirementsForStep(saved.steps[0]!)[0]).toMatchObject({
+      id: 'browser_check',
+      required: false,
+      humanRequired: false,
+    })
+    expect(
+      manager.requestPlanExecutionDecision({
+        turnId: 'turn_optional_manual',
+        executionId: 'execution_optional_manual',
+      }),
+    ).toBeNull()
+  })
+
   function approvedManager(): {
     manager: ControlManager
     todoStore: TodoStore
@@ -2196,6 +2581,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     manager.setTodoStore(todoStore)
     manager.setTaskManager(taskManager)
     manager.setMode('plan')
+    const discoveryId = seedPlanDiscovery(manager, ['a.html'])
     new ProposePlanTool(manager).execute({
       title: 'B1 completion',
       summary: 'Two-step plan for todo-sync completion.',
@@ -2206,6 +2592,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'Build it',
           description: 'write the file',
           files: ['a.html'],
+          discovery_refs: [discoveryId],
           commands: [],
           acceptance: ['built'],
         },
@@ -2214,6 +2601,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'Verify it',
           description: 'check output',
           files: [],
+          discovery_refs: [discoveryId],
           commands: [],
           acceptance: ['checked'],
         },
@@ -2228,17 +2616,95 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     return { manager, todoStore, taskManager, planId: plan!.id }
   }
 
-  it('pauses and resumes the active Plan without corrupting Plan, Task, or Todo authority', () => {
+  function seedLegacyPlanTodos(
+    manager: ControlManager,
+    todoStore: TodoStore,
+  ): void {
+    const plan = manager.latestExecutablePlan()
+    if (!plan) throw new Error('expected an executable Plan')
+    const statusMap: Record<string, string> = {
+      pending: 'pending',
+      active: 'in_progress',
+      done: 'completed',
+      failed: 'pending',
+      blocked: 'pending',
+      skipped: 'completed',
+    }
+    todoStore.update(
+      plan.steps.map((step) => ({
+        id: `plan:${step.id}`,
+        plan_id: plan.id,
+        plan_step_id: step.id,
+        approval_generation: Number(plan.metadata.approval_generation ?? 0),
+        content: step.title,
+        status: statusMap[step.status] ?? 'pending',
+      })),
+    )
+  }
+
+  function manualVerificationManager(): {
+    root: string
+    manager: ControlManager
+    todoStore: TodoStore
+    taskManager: TaskManager
+    planId: string
+  } {
+    const root = tmp('emperor-plan-manual-verification-')
+    const manager = new ControlManager(root)
+    manager.setRuntimeScope({
+      sessionId: 'session-manual-verification',
+      mode: 'build',
+      projectId: 'project-manual-verification',
+      workspaceRoot: '/workspace/manual-verification',
+      projectFingerprint: 'fingerprint-manual-verification',
+    })
+    const todoStore = new TodoStore()
+    const taskManager = new TaskManager(root)
+    manager.setTodoStore(todoStore)
+    manager.setTaskManager(taskManager)
+    manager.setMode('plan')
+    const interaction = manager.createPlan({
+      title: 'Manual browser verification',
+      summary: 'Implement an HTML page and let the user verify it.',
+      planMarkdown: '# Plan\n\n1. Implement\n2. Verify manually',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement page',
+          description: 'Create the page.',
+          files: ['index.html'],
+          commands: [],
+          acceptance: ['page is implemented'],
+          verification: [
+            {
+              id: 'manual_browser',
+              kind: 'manual',
+              required: true,
+              human_required: true,
+              description: 'Open the page in a browser and inspect it.',
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const plan = manager.planStore.latest()!
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implemented the page and reached the verification phase.',
+      toolCallId: 'complete_step_claim',
+    })
+    return { root, manager, todoStore, taskManager, planId: plan.id }
+  }
+
+  it('pauses and resumes the active foreground Plan without creating Task or Todo mirrors', () => {
     const { manager, todoStore, taskManager, planId } = approvedManager()
     const running = manager.planStore.get(planId)!
-    const taskId = String(
-      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
-    )
 
     expect(running.status).toBe(PlanStatus.EXECUTING)
     expect(running.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
-    expect(taskManager.store.get(taskId)?.status).toBe('running')
-    expect(todoStore.todos[0]!.status).toBe('in_progress')
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
 
     const paused = manager.pausePlanExecution({
       reason: 'no_progress',
@@ -2260,11 +2726,8 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
       total_iterations: 28,
       next_actions: ['Run the remaining verification'],
     })
-    expect(taskManager.store.get(taskId)?.status).toBe('pending')
-    expect(taskManager.store.get(taskId)?.progress.execution_pause).toEqual(
-      paused.metadata.execution_pause,
-    )
-    expect(todoStore.todos[0]!.status).toBe('pending')
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
 
     const resumed = manager.resumePlanExecution({ turnId: 'turn_resume' })!
 
@@ -2272,19 +2735,31 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     expect(resumed.metadata.last_execution_resume).toMatchObject({
       turn_id: 'turn_resume',
     })
-    expect(taskManager.store.get(taskId)?.status).toBe('running')
-    expect(
-      taskManager.store.get(taskId)?.progress.execution_pause,
-    ).toBeUndefined()
-    expect(todoStore.todos[0]!.status).toBe('in_progress')
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
   })
 
-  it('does not mutate Task projection when the authoritative pause save fails', () => {
+  it('persists the owning execution identity for an explicit Plan continuation', () => {
+    const { manager } = approvedManager()
+    const paused = manager.pausePlanExecution({
+      reason: 'no_progress',
+      turnId: 'turn_before_explicit_continue',
+      executionId: 'execution_original_task',
+      pausedAt: 1234,
+      evaluationCount: 0,
+      totalIterations: 12,
+      nextActions: ['继续验证'],
+    })!
+
+    expect(paused.metadata.execution_pause).toMatchObject({
+      turn_id: 'turn_before_explicit_continue',
+      execution_id: 'execution_original_task',
+    })
+    expect(manager.pausedPlanExecutionId()).toBe('execution_original_task')
+  })
+
+  it('does not synthesize a Task when the authoritative pause save fails', () => {
     const { manager, taskManager, planId } = approvedManager()
-    const running = manager.planStore.get(planId)!
-    const taskId = String(
-      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
-    )
     vi.spyOn(manager.planStore, 'save').mockImplementationOnce(() => {
       throw new Error('injected authoritative Plan save failure')
     })
@@ -2303,20 +2778,11 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     expect(
       manager.planStore.get(planId)?.metadata.execution_pause,
     ).toBeUndefined()
-    expect(taskManager.store.get(taskId)?.status).toBe('running')
+    expect(taskManager.store.list()).toEqual([])
   })
 
-  it('replays Task and Todo projections from a durable pause after an interrupted Task write', () => {
+  it('replays a durable pause without recreating foreground Task or Todo mirrors', () => {
     const { manager, todoStore, taskManager, planId } = approvedManager()
-    const running = manager.planStore.get(planId)!
-    const taskId = String(
-      (running.metadata.plan_step_tasks as Record<string, string>).step_1,
-    )
-    const update = vi
-      .spyOn(taskManager, 'updateTask')
-      .mockImplementationOnce(() => {
-        throw new Error('injected Task projection interruption')
-      })
 
     expect(
       manager.pausePlanExecution({
@@ -2330,44 +2796,55 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     ).toBeTruthy()
 
     expect(manager.planStore.get(planId)?.metadata.execution_pause).toBeTruthy()
-    expect(taskManager.store.get(taskId)?.status).toBe('pending')
-    expect(todoStore.todos[0]?.status).toBe('pending')
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
 
-    update.mockRestore()
     manager.setTaskManager(null)
     manager.setTaskManager(taskManager)
-    manager.restoreCurrentPlanTodoProjection()
+    manager.migrateLegacyPlanTodoMirrors()
 
-    expect(taskManager.store.get(taskId)?.status).toBe('pending')
-    expect(todoStore.todos[0]?.status).toBe('pending')
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
   })
 
-  it('projects approved Plan steps into exactly bound Todos', () => {
-    const { manager, todoStore, planId } = approvedManager()
+  it('keeps two-step Plan progress in PlanRecord instead of bound Todos', () => {
+    const { manager, todoStore, taskManager } = approvedManager()
     expect(manager.planStore.latest()?.status).toBe(PlanStatus.EXECUTING)
-    expect(todoStore.todos).toEqual([
-      expect.objectContaining({
-        plan_id: planId,
-        plan_step_id: 'step_1',
-        approval_generation: 1,
-        status: 'in_progress',
-      }),
-      expect.objectContaining({
-        plan_id: planId,
-        plan_step_id: 'step_2',
-        approval_generation: 1,
-        status: 'pending',
-      }),
-    ])
+    expect(todoStore.todos).toEqual([])
+    expect(
+      taskManager.store.list().filter((task) => task.kind === 'plan_step'),
+    ).toEqual([])
   })
 
-  it('normalizes stable Plan Todo IDs, injects authority bindings, and restores omitted Plan items', () => {
+  it('never projects a three-step Plan into Todo and removes legacy mirrors', () => {
+    const { manager, todoStore } = approvedManager()
+    const current = manager.planStore.latest()!
+    manager.planStore.save({
+      ...current,
+      steps: [
+        ...current.steps,
+        {
+          ...current.steps[1]!,
+          id: 'step_3',
+          title: 'Document it',
+          status: PlanStepStatus.PENDING,
+        },
+      ],
+    })
+    seedLegacyPlanTodos(manager, todoStore)
+
+    manager.migrateLegacyPlanTodoMirrors()
+
+    expect(todoStore.todos).toEqual([])
+  })
+
+  it('keeps update_todos independent from PlanStep authority', () => {
     const { manager, planId } = approvedManager()
 
     const normalized = manager.normalizePlanTodoUpdate([
       {
         id: 'plan:step_1',
-        content: 'model-provided title must not replace Plan authority',
+        content: 'legacy Plan mirror',
         status: 'completed',
       },
       {
@@ -2379,27 +2856,14 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
 
     expect(normalized).toEqual([
       expect.objectContaining({
-        id: 'plan:step_1',
-        plan_id: planId,
-        plan_step_id: 'step_1',
-        approval_generation: 1,
-        content: 'Build it',
-        status: 'completed',
-      }),
-      expect.objectContaining({
-        id: 'plan:step_2',
-        plan_id: planId,
-        plan_step_id: 'step_2',
-        approval_generation: 1,
-        content: 'Verify it',
-        status: 'pending',
-      }),
-      expect.objectContaining({
         id: 'scratch',
         content: 'Temporary investigation',
-        status: 'pending',
+        status: 'in_progress',
       }),
     ])
+    expect(manager.planStore.get(planId)?.steps[0]?.status).toBe(
+      PlanStepStatus.ACTIVE,
+    )
   })
 
   it('rejects forged or stale explicit Plan Todo bindings before persistence', () => {
@@ -2417,11 +2881,11 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           approvalGeneration: 99,
         },
       ]),
-    ).toThrow(/binding/i)
+    ).toThrow(/bind|authority/i)
     expect(todoStore.todos).toEqual(before)
   })
 
-  it('gives the active Plan step the single in-progress slot and preserves independent work as pending', () => {
+  it('does not let a one-step Plan displace an independent Todo', () => {
     const manager = new ControlManager(tmp('emperor-plan-todo-active-slot-'))
     manager.setRuntimeScope({
       sessionId: 'session-plan-todo-active-slot',
@@ -2440,6 +2904,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     ])
     manager.setTodoStore(todoStore)
     manager.setMode(ControlMode.PLAN)
+    const discoveryId = seedPlanDiscovery(manager)
     new ProposePlanTool(manager).execute({
       title: 'Authoritative active step',
       summary: 'The Plan step owns the active Todo slot.',
@@ -2450,6 +2915,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'Implement the change',
           description: 'Implement it.',
           files: [],
+          discovery_refs: [discoveryId],
           commands: [],
           acceptance: ['done'],
         },
@@ -2463,12 +2929,8 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
 
     expect(todoStore.todos).toEqual([
       expect.objectContaining({
-        plan_step_id: 'step_1',
-        status: 'in_progress',
-      }),
-      expect.objectContaining({
         id: 'independent-active',
-        status: 'pending',
+        status: 'in_progress',
       }),
     ])
   })
@@ -2964,49 +3426,12 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     })
   })
 
-  it('projects model-style camelCase todo completion into plan steps and completes the plan', () => {
-    const { manager, todoStore, planId } = approvedManager()
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
-    const updated = manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos', tool_call_id: 'call_1' },
-    })
-
-    expect(updated).not.toBeNull()
-    expect(updated!.id).toBe(planId)
-    expect(updated!.status).toBe(PlanStatus.COMPLETED)
-    expect(updated!.completedAt).not.toBeNull()
-    expect(updated!.steps.map((step) => step.status)).toEqual(['done', 'done'])
-    expect(updated!.steps[0]!.evidence.at(-1)).toMatchObject({
-      source: 'todo_implementation_claim',
-      todo_status: 'completed',
-    })
-  })
-
-  it('keeps the plan executing while todos are still in flight', () => {
-    const { manager, todoStore } = approvedManager()
-    todoStore.update(
-      todoStore.todos.map((todo) => ({
-        ...todo,
-        status: todo.plan_step_id === 'step_1' ? 'completed' : 'in_progress',
-      })),
-    )
-    const updated = manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
-    })
-    expect(updated!.status).toBe(PlanStatus.EXECUTING)
-    expect(updated!.steps.map((step) => step.status)).toEqual([
-      'done',
-      'active',
-    ])
-  })
-
   it('records a Todo completion claim but completes only after required verification passes', () => {
     const manager = new ControlManager(tmp('emperor-plan-verified-claim-'))
     const todoStore = new TodoStore()
     manager.setTodoStore(todoStore)
     manager.setMode(ControlMode.PLAN)
+    const discoveryId = seedPlanDiscovery(manager, ['src/example.ts'])
     new ProposePlanTool(manager).execute({
       title: 'Verified completion',
       summary: 'Implementation and verification are separate facts.',
@@ -3019,6 +3444,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'Implement and test',
           description: 'Change the implementation and run its test.',
           files: ['src/example.ts'],
+          discovery_refs: [discoveryId],
           commands: ['npm test'],
           acceptance: ['npm test passes'],
         },
@@ -3027,19 +3453,21 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     const pending = manager.payload().pending as Record<string, unknown>
     const planId = String((pending.meta as Record<string, unknown>).plan_id)
     manager.approve(String(pending.id))
-    todoStore.update(
-      todoStore.todos.map((todo) => ({ ...todo, status: 'completed' })),
-    )
 
-    const claimed = manager.syncPlanFromTodos(todoStore.todos, {
-      evidence: { source: 'update_todos' },
-    })!
+    const claimed = manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implementation is complete; run the required test.',
+      toolCallId: 'complete_verified_step',
+    })
 
     expect(claimed.status).toBe(PlanStatus.EXECUTING)
     expect(claimed.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
-    expect(todoStore.todos[0]!.status).toBe('in_progress')
+    expect(todoStore.todos).toEqual([])
     expect(claimed.metadata.implementation_claims).toMatchObject({
-      step_1: expect.objectContaining({ source: 'todo_implementation_claim' }),
+      step_1: expect.objectContaining({ source: 'plan_step_completion' }),
+    })
+    expect(claimed.metadata.plan_step_execution_phases).toMatchObject({
+      step_1: 'verifying',
     })
 
     const failed = manager.recordPlanVerificationResult({
@@ -3049,6 +3477,44 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     })!
     expect(failed.status).toBe(PlanStatus.EXECUTING)
     expect(failed.steps[0]!.status).toBe(PlanStepStatus.ACTIVE)
+    expect(failed.metadata.plan_step_execution_phases).toMatchObject({
+      step_1: 'repairing',
+    })
+    expect(
+      manager.requestPlanExecutionDecision({
+        turnId: 'turn_repair_failed_verification',
+        executionId: 'execution_repair_failed_verification',
+      }),
+    ).toBeNull()
+
+    manager.recordPlanVerificationResult({
+      planId,
+      stepId: 'step_1',
+      result: { command: 'npm test', passed: false, summary: 'failed' },
+    })
+    manager.recordPlanVerificationResult({
+      planId,
+      stepId: 'step_1',
+      result: { command: 'npm test', passed: false, summary: 'failed' },
+    })
+    expect(
+      manager.requestPlanExecutionDecision({
+        turnId: 'turn_repeated_verification_failure',
+        executionId: 'execution_repeated_verification_failure',
+      }),
+    ).toMatchObject({
+      kind: 'ask',
+      status: 'waiting',
+      meta: {
+        interaction_type: 'plan_execution',
+      },
+    })
+    manager.cancel(
+      String((manager.payload().pending as Record<string, unknown>).id),
+    )
+    manager.resumePlanExecution({
+      turnId: 'turn_resume_after_repeated_failure',
+    })
 
     const passed = manager.recordPlanVerificationResult({
       planId,
@@ -3057,155 +3523,384 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     })!
     expect(passed.status).toBe(PlanStatus.COMPLETED)
     expect(passed.steps[0]!.status).toBe(PlanStepStatus.DONE)
-    expect(todoStore.todos[0]!.status).toBe('completed')
+    expect(passed.metadata.plan_step_execution_phases).toMatchObject({
+      step_1: 'completed',
+    })
+    expect(todoStore.todos).toEqual([])
   })
 
-  it('rejects stale Todo bindings for a non-Goal Plan and restores the canonical projection', () => {
-    const { manager, todoStore, planId } = approvedManager()
-    const canonical = todoStore.todos.map((todo) => ({ ...todo }))
-    todoStore.update(
-      canonical.map((todo) => ({
-        ...todo,
-        approval_generation: Number(todo.approval_generation) + 1,
-      })),
-    )
+  it('uses a signed stable action to waive manual verification and complete the Plan', () => {
+    const { manager, todoStore, taskManager, planId } =
+      manualVerificationManager()
 
-    expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
-      /approval_generation/,
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_manual_waiver',
+      executionId: 'execution_manual_waiver',
+    })
+    expect(decision).toMatchObject({
+      kind: 'ask',
+      status: 'waiting',
+      meta: {
+        interaction_type: 'plan_execution',
+        execution_id: 'execution_manual_waiver',
+      },
+    })
+    expect(decision!.questions[0]!.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'manual_verification_passed' }),
+        expect.objectContaining({ id: 'waive_verification_and_complete' }),
+        expect.objectContaining({ id: 'cancel_plan' }),
+      ]),
     )
-    manager.restoreCurrentPlanTodoProjection()
+    expect(
+      (manager.payload().pending as Record<string, unknown>).meta,
+    ).not.toHaveProperty('plan_execution_action_request')
+
+    const resume = manager.answer(decision!.id, {
+      plan_execution_action: {
+        option_id: 'waive_verification_and_complete',
+        choice: '任意伪造标签',
+        freeform: '',
+      },
+    })
+
+    expect(resume).toMatchObject({
+      resume: true,
+      executionId: 'execution_manual_waiver',
+      executionDisposition: 'complete',
+      settlementId: expect.stringMatching(/^plan_settlement_/),
+    })
+    expect(JSON.stringify(resume)).not.toContain('coreSignature')
+    const completed = manager.planStore.get(planId)!
+    expect(completed.status).toBe(PlanStatus.COMPLETED)
+    expect(completed.steps[0]!.status).toBe(PlanStepStatus.DONE)
+    expect(completed.steps[0]!.verification).toEqual([
+      expect.objectContaining({
+        id: 'manual_browser',
+        status: 'skipped',
+        reason: expect.stringContaining('user'),
+      }),
+    ])
+    expect(completed.steps[0]!.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'user_plan_verification_waiver',
+          approved_by: 'user',
+          issued_by: 'core',
+        }),
+      ]),
+    )
+    expect(todoStore.todos).toEqual([])
+    expect(taskManager.store.list()).toEqual([])
+  })
+
+  it('cancels an active Plan only through the signed cancel action', () => {
+    const { manager, todoStore, taskManager, planId } =
+      manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_cancel_plan',
+      executionId: 'execution_cancel_plan',
+    })!
+
+    const resume = manager.answer(decision.id, {
+      plan_execution_action: {
+        option_id: 'cancel_plan',
+        choice: '取消计划',
+        freeform: '',
+      },
+    })
+
+    expect(resume).toMatchObject({
+      resume: false,
+      executionDisposition: 'cancel',
+    })
+    expect(manager.planStore.get(planId)?.status).toBe(PlanStatus.CANCELLED)
+    expect(manager.latestExecutablePlan()).toBeNull()
+    expect(taskManager.store.list()).toEqual([])
+    expect(todoStore.todos).toEqual([])
+  })
+
+  it('rejects a tampered signed Plan action request with zero lifecycle side effects', () => {
+    const { manager, todoStore, taskManager, planId } =
+      manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_tampered_action',
+      executionId: 'execution_tampered_action',
+    })!
+    const state = manager.store.load()
+    const request = state.pending!.meta.plan_execution_action_request as Record<
+      string,
+      unknown
+    >
+    state.pending!.meta.plan_execution_action_request = {
+      ...request,
+      approvalGeneration: Number(request.approvalGeneration) + 1,
+    }
+    manager.store.save(state)
+
+    expect(() =>
+      manager.answer(decision.id, {
+        plan_execution_action: {
+          option_id: 'cancel_plan',
+          choice: '取消计划',
+          freeform: '',
+        },
+      }),
+    ).toThrow(/invalid/)
+    expect(manager.planStore.get(planId)?.status).toBe(PlanStatus.EXECUTING)
+    expect(todoStore.todos).toEqual([])
+    expect(taskManager.store.list()).toEqual([])
+    expect(manager.payload().pending).toMatchObject({
+      id: decision.id,
+      status: 'waiting',
+    })
+  })
+
+  it('records manual verification as user evidence without calling it automatic', () => {
+    const { manager, planId } = manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_manual_pass',
+      executionId: 'execution_manual_pass',
+    })!
+
+    const resume = manager.answer(decision.id, {
+      plan_execution_action: {
+        option_id: 'manual_verification_passed',
+        choice: '我已人工验证通过',
+        freeform: '',
+      },
+    })
+
+    expect(resume.executionDisposition).toBe('complete')
+    const completed = manager.planStore.get(planId)!
+    expect(completed.status).toBe(PlanStatus.COMPLETED)
+    expect(completed.steps[0]!.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'user_manual_verification',
+          issued_by: 'core',
+          approved_by: 'user',
+          passed: true,
+        }),
+      ]),
+    )
+    expect(completed.steps[0]!.evidence).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'core_plan_step_verification',
+        }),
+      ]),
+    )
+  })
+
+  it('manual confirmation resolves only manual requirements in a mixed verification step', () => {
+    const root = tmp('emperor-plan-mixed-verification-')
+    const manager = new ControlManager(root)
+    const todoStore = new TodoStore()
+    manager.setRuntimeScope({
+      sessionId: 'session-mixed-verification',
+      mode: 'build',
+    })
+    manager.setTodoStore(todoStore)
+    const interaction = manager.createPlan({
+      title: 'Mixed verification',
+      summary: 'Manual confirmation must not replace command evidence.',
+      planMarkdown: '# Plan',
+      steps: [
+        {
+          id: 'step_1',
+          title: 'Implement and verify',
+          description: 'Implement and verify automatically and manually.',
+          files: ['index.html'],
+          acceptance: ['implementation is complete'],
+          verification: [
+            {
+              id: 'command_test',
+              kind: 'command',
+              command: 'npm test',
+              required: true,
+            },
+            {
+              id: 'manual_browser',
+              kind: 'manual',
+              description: 'Inspect the page in a browser.',
+              required: true,
+              human_required: true,
+            },
+          ],
+        },
+      ],
+    })
+    manager.approve(interaction.id)
+    const planId = String(interaction.meta.plan_id)
+    manager.completePlanStep({
+      stepId: 'step_1',
+      summary: 'Implementation is complete; verification remains.',
+      toolCallId: 'complete_mixed_step',
+    })
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_mixed_manual',
+      executionId: 'execution_mixed_manual',
+    })!
+
+    const resume = manager.answer(decision.id, {
+      plan_execution_action: {
+        option_id: 'manual_verification_passed',
+        choice: '我已人工验证通过',
+        freeform: '',
+      },
+    })
+
+    expect(resume.executionDisposition).toBe('resume')
+    const partiallyVerified = manager.planStore.get(planId)!
+    expect(partiallyVerified.status).toBe(PlanStatus.EXECUTING)
+    expect(requirementsForStep(partiallyVerified.steps[0]!)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'manual_browser',
+          status: 'passed',
+        }),
+        expect.objectContaining({
+          id: 'command_test',
+          status: 'pending',
+        }),
+      ]),
+    )
+    expect(
+      partiallyVerified.steps[0]!.evidence.filter(
+        (item) => item.source === 'user_manual_verification',
+      ),
+    ).toEqual([expect.objectContaining({ requirement_id: 'manual_browser' })])
+  })
+
+  it('replays a prepared verification settlement after a crash', () => {
+    const { root, manager, planId } = manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_settlement_recovery',
+      executionId: 'execution_settlement_recovery',
+    })!
+    const save = vi
+      .spyOn(manager.planStore, 'save')
+      .mockImplementationOnce(() => {
+        throw new Error('injected crash after settlement prepare')
+      })
+
+    expect(() =>
+      manager.answer(decision.id, {
+        plan_execution_action: {
+          option_id: 'waive_verification_and_complete',
+          choice: '跳过验证并完成',
+          freeform: '',
+        },
+      }),
+    ).toThrow('injected crash after settlement prepare')
+    save.mockRestore()
+
+    const restarted = new ControlManager(root)
+    expect(restarted.planStore.get(planId)?.status).toBe(PlanStatus.COMPLETED)
+    expect(restarted.payload().pending).toBeNull()
+    expect(restarted.payload().last_interaction).toMatchObject({
+      id: decision.id,
+      status: 'answered',
+    })
+  })
+
+  it('replays a settlement when the process crashes after Plan apply but before pending clear', () => {
+    const { root, manager, planId } = manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_settlement_pending_clear',
+      executionId: 'execution_settlement_pending_clear',
+    })!
+    const save = vi.spyOn(manager.store, 'save').mockImplementationOnce(() => {
+      throw new Error('injected crash before pending clear')
+    })
+
+    expect(() =>
+      manager.answer(decision.id, {
+        plan_execution_action: {
+          option_id: 'waive_verification_and_complete',
+          choice: '跳过验证并完成',
+          freeform: '',
+        },
+      }),
+    ).toThrow('injected crash before pending clear')
+    save.mockRestore()
+
+    expect(manager.planStore.get(planId)?.status).toBe(PlanStatus.COMPLETED)
+    expect(manager.payload().pending).toMatchObject({ id: decision.id })
+
+    const restarted = new ControlManager(root)
+    expect(restarted.planStore.get(planId)?.status).toBe(PlanStatus.COMPLETED)
+    expect(restarted.payload().pending).toBeNull()
+    expect(restarted.payload().last_interaction).toMatchObject({
+      id: decision.id,
+      status: 'answered',
+    })
+  })
+
+  it('pauses the foreground Plan without creating a Task when a verification decision is dismissed', () => {
+    const { manager, taskManager, planId } = manualVerificationManager()
+    const decision = manager.requestPlanExecutionDecision({
+      turnId: 'turn_dismiss_verification',
+      executionId: 'execution_dismiss_verification',
+    })!
+
+    const event = manager.cancel(decision.id)
+
+    expect(event).toMatchObject({
+      event: 'plan_execution_settled',
+      action: 'pause',
+      disposition: 'pause',
+    })
+    const paused = manager.planStore.get(planId)!
+    expect(paused.status).toBe(PlanStatus.EXECUTING)
+    expect(paused.metadata.execution_pause).toMatchObject({
+      reason: 'user_input_required',
+      turn_id: 'turn_dismiss_verification',
+    })
+    expect(taskManager.store.list()).toEqual([])
+
+    const resumed = manager.resumePlanExecution({
+      turnId: 'turn_resume_verification',
+    })!
+    expect(resumed.metadata.execution_pause).toBeUndefined()
+    expect(resumed.metadata.plan_step_execution_phases).toMatchObject({
+      step_1: 'verifying',
+    })
+    expect(taskManager.store.list()).toEqual([])
+  })
+
+  it('removes stale legacy Todo bindings without mutating Plan authority', () => {
+    const { manager, todoStore, planId } = approvedManager()
+    seedLegacyPlanTodos(manager, todoStore)
+    manager.migrateLegacyPlanTodoMirrors()
 
     expect(manager.planStore.get(planId)!.steps[0]!.status).toBe(
       PlanStepStatus.ACTIVE,
     )
-    expect(todoStore.todos).toEqual(canonical)
+    expect(todoStore.todos).toEqual([])
   })
 
-  it('requires explicit plan_step_id bindings and rejects dependency bypass', () => {
-    const { manager, todoStore } = approvedManager()
-    todoStore.update([
-      { id: 1, content: 'Build it', status: 'completed' },
-      { id: 2, content: 'Verify it', status: 'completed' },
-    ])
-    expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
-      /Plan Todo/i,
-    )
-
-    const current = manager.planStore.latest()!
-    manager.planStore.save({
-      ...current,
-      steps: [
-        { ...current.steps[0]!, status: PlanStepStatus.ACTIVE },
+  it('rejects explicit Plan bindings at update_todos normalization', () => {
+    const { manager } = approvedManager()
+    expect(() =>
+      manager.normalizePlanTodoUpdate([
         {
-          ...current.steps[1]!,
-          status: PlanStepStatus.PENDING,
-          dependsOn: [current.steps[0]!.id],
-        },
-      ],
-    })
-    const generation = Number(current.metadata.approval_generation)
-    todoStore.update([
-      {
-        id: 1,
-        plan_id: current.id,
-        approval_generation: generation,
-        content: 'Build it',
-        status: 'in_progress',
-        planStepId: 'step_1',
-      },
-      {
-        id: 2,
-        plan_id: current.id,
-        approval_generation: generation,
-        content: 'Verify it',
-        status: 'completed',
-        planStepId: 'step_2',
-      },
-    ])
-    expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
-      /dependenc/i,
-    )
-    expect(
-      manager.planStore.latest()!.steps.map((step) => step.status),
-    ).toEqual([PlanStepStatus.ACTIVE, PlanStepStatus.PENDING])
-  })
-
-  it('requires exact current Goal Plan and approval-generation Todo bindings', () => {
-    const root = tmp('emperor-goal-todo-binding-')
-    const manager = new ControlManager(root)
-    const todoStore = new TodoStore()
-    const goal = lockedGoal('goal_todo_binding', {
-      sessionId: 'session_todo_binding',
-      mode: 'build',
-      projectId: 'project_todo_binding',
-      workspaceRoot: '/workspace/todo-binding',
-    })
-    manager.setRuntimeScope(goal.scope)
-    manager.setActiveGoalPlanContext(goal)
-    manager.setTodoStore(todoStore)
-    manager.setMode('plan')
-    new ProposePlanTool(manager).execute({
-      title: 'Goal Todo binding',
-      summary: 'Bind Todo projection to the exact approved Goal Plan.',
-      plan_markdown: '# Plan',
-      steps: [
-        {
-          id: 'step_1',
-          title: 'Bound work',
-          description: 'work',
-          files: [],
-          commands: [],
-          acceptance: ['done'],
-        },
-      ],
-      assumptions: [],
-      risk_level: 'low',
-    })
-    const pending = manager.payload().pending as Record<string, unknown>
-    manager.approve(String(pending.id))
-    const plan = manager.planStore.latest()!
-    const generation = Number(plan.metadata.approval_generation)
-
-    for (const binding of [
-      { plan_id: 'stale-plan', approval_generation: generation },
-      { plan_id: plan.id, approval_generation: generation - 1 },
-      { plan_id: plan.id },
-    ]) {
-      todoStore.update([
-        {
-          id: 1,
-          content: 'Bound work',
+          id: 'forged',
+          content: 'Cannot complete a Plan step',
           status: 'completed',
+          plan_id: 'plan-forged',
           plan_step_id: 'step_1',
-          ...binding,
+          approval_generation: 1,
         },
-      ])
-      expect(() => manager.syncPlanFromTodos(todoStore.todos)).toThrow(
-        /binding|generation/i,
-      )
-      expect(manager.planStore.get(plan.id)!.steps[0]!.status).toBe(
-        PlanStepStatus.ACTIVE,
-      )
-    }
-
-    todoStore.update([
-      {
-        id: 1,
-        content: 'Bound work',
-        status: 'completed',
-        plan_id: plan.id,
-        plan_step_id: 'step_1',
-        approval_generation: generation,
-      },
-    ])
-    expect(manager.syncPlanFromTodos(todoStore.todos)?.status).toBe(
-      PlanStatus.COMPLETED,
-    )
+      ]),
+    ).toThrow(/cannot bind to PlanStep authority/)
   })
 
   it('supersedes stale executing plans when a new plan is approved', () => {
     const { manager, planId: firstPlanId } = approvedManager()
     manager.setMode('plan')
+    const discoveryId = seedPlanDiscovery(manager)
     new ProposePlanTool(manager).execute({
       title: 'B1 successor',
       summary: 'Second plan should supersede the zombie.',
@@ -3216,6 +3911,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'Redo',
           description: 'redo',
           files: [],
+          discovery_refs: [discoveryId],
           commands: [],
           acceptance: ['ok'],
         },
@@ -3311,6 +4007,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
     )
 
     manager.setMode('plan')
+    const discoveryId = seedPlanDiscovery(manager)
     new ProposePlanTool(manager).execute({
       title: 'Scoped successor',
       summary: 'Only the exact Goal predecessor is superseded.',
@@ -3321,6 +4018,7 @@ describe('Legacy plan completion projection via todo sync (2026-07-05 B1)', () =
           title: 'New step',
           description: 'new work',
           files: [],
+          discovery_refs: [discoveryId],
           commands: [],
           acceptance: ['done'],
         },

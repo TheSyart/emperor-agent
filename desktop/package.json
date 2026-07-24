@@ -8,6 +8,7 @@
   "homepage": "https://github.com/TheSyart/emperor-agent",
   "main": "out/main/index.js",
   "scripts": {
+    "postinstall": "node scripts/fix-node-pty-permissions.cjs",
     "dev": "electron-vite dev",
     "dev:renderer": "vite --config vite.renderer.config.ts",
     "build": "electron-vite build && node scripts/audit-preload.cjs",
@@ -20,17 +21,21 @@
     "package:dir": "electron-builder --dir --publish never",
     "package:smoke": "node scripts/run-packaged-smoke.cjs",
     "package:verify": "npm run package:dir && npm run package:smoke",
+    "terminal:smoke": "node scripts/fix-node-pty-permissions.cjs && node scripts/smoke-node-pty.cjs",
     "dist:mac": "cd .. && scripts/build_desktop_release.sh",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
     "dist": "npm run dist:mac"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "typescript": "5.9.3"
   },
   "devDependencies": {
-    "@emperor/core": "file:../packages/core",
     "@electron/asar": "^3.4.1",
+    "@emperor/core": "file:../packages/core",
     "@playwright/test": "^1.61.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.10.2",
@@ -52,7 +57,7 @@
     "vue": "^3.5.13",
     "vue-eslint-parser": "^9.4.3",
     "vue-router": "^4.6.4",
-    "vue-virtual-scroller": "^2.0.0-beta.8",
-    "vue-tsc": "^2.2.0"
+    "vue-tsc": "^2.2.0",
+    "vue-virtual-scroller": "^2.0.0-beta.8"
   }
 }

@@ -699,61 +699,6 @@ export interface SchedulerDiagnosticsPayload {
   corruptActionFiles?: DiagnosticsFileInfo[]
 }
 
-export interface ExternalDiagnosticsPayload {
-  running?: boolean
-  lifecycle?: LifecycleDiagnosticsPayload
-  adapters?: Array<{
-    name?: string
-    display_name?: string
-    state?:
-      | 'idle'
-      | 'eval'
-      | 'starting'
-      | 'ready'
-      | 'auth_failed'
-      | 'degraded'
-      | 'stopping'
-      | 'stopped'
-      | string
-    requestedMode?: 'off' | 'eval' | 'on' | string
-    effectiveMode?: 'off' | 'eval' | 'on' | string
-    endpoint?: string | null
-    accepted?: number
-    rejected?: number
-    outboundSent?: number
-    outboundDeadLetter?: number
-    active?: number
-    lastReason?: string | null
-    audit?: {
-      path?: string
-      records?: number
-      badLines?: number
-      archives?: number
-      writeFailures?: number
-    }
-    configuration?: {
-      path?: string
-      status?: DiagnosticsStatus
-    }
-  }>
-  inbox?: {
-    pending?: number
-    seen?: number
-    recent?: unknown[]
-  }
-  outbox?: {
-    recent?: unknown[]
-  }
-  recentErrors?: unknown[]
-  store?: {
-    path?: string | null
-    exists?: boolean
-    bytes?: number
-    durable?: boolean
-    corruptBackups?: DiagnosticsFileInfo[]
-  }
-}
-
 export interface DiagnosticsDependencyPayload {
   nodeRuntime?: boolean
   desktopRenderer?: boolean
@@ -838,7 +783,6 @@ export interface DiagnosticsRuntimePaths {
   tasksRoot?: string
   processesRoot?: string
   controlRoot?: string
-  externalRoot?: string
   mcpConfigPath?: string
   runtimeManifestPath?: string
   legacyRuntimeSkillsReceiptPath?: string
@@ -1052,7 +996,6 @@ export interface DiagnosticsPayload {
   promptSnapshots?: PromptSnapshotsDiagnosticsPayload
   hybridMemory?: HybridMemoryDiagnosticsPayload
   codeIntelligence?: CodeIntelligenceDiagnosticsPayload
-  external?: ExternalDiagnosticsPayload
   activeTasks?: ActiveRuntimeTask[]
   desktopPet?: DesktopPetPayload & Record<string, unknown>
   environment?: DiagnosticsEnvironmentSummary
@@ -1141,6 +1084,32 @@ export interface RuntimeEventEnvelope {
   attempt_id?: string
   client_message_id?: string
   [key: string]: unknown
+}
+
+export interface TurnChangedFile {
+  path: string
+  kind: 'created' | 'modified' | 'deleted' | 'renamed'
+  additions: number | null
+  deletions: number | null
+  binary: boolean
+}
+
+export interface TurnChangeSnapshot {
+  version: 1 | 2
+  sessionId: string
+  turnId: string
+  executionId?: string
+  rootTurnId?: string
+  activeTurnId?: string
+  status: 'tracking' | 'complete' | 'partial'
+  filesChanged: number
+  additions: number
+  deletions: number
+  binaryFiles: number
+  truncated: boolean
+  files: TurnChangedFile[]
+  seq: number
+  updatedAt: number
 }
 
 export interface RuntimeReplayPayload {
@@ -1234,6 +1203,7 @@ export interface ToolSegment {
   id: string
   type: 'tool'
   toolId?: string
+  batchId?: string
   name: string
   displayName?: string
   inputLabel?: string
@@ -1725,15 +1695,33 @@ export interface SchedulerPayload {
   diagnostics?: Record<string, unknown>
 }
 
-export type WsEvent = CoreRuntimeEvent &
-  ({
-    seq?: number
-    ts?: number
-    session_id?: string
-    turn_id?: string
-    client_message_id?: string
-    owner?: Record<string, unknown>
-  } & WsEventVariants)
+export interface HistoricalRuntimeActivityEvent {
+  event: 'historical_runtime_activity'
+  seq?: number
+  ts?: number
+  session_id?: string
+  turn_id?: string
+  client_message_id?: string
+  owner?: Record<string, unknown>
+  label: string
+  detail?: string
+  tone: 'running' | 'success' | 'error' | 'neutral'
+  running: boolean
+  action?: 'continue'
+  nextActions?: string[]
+}
+
+export type WsEvent =
+  | (CoreRuntimeEvent &
+      ({
+        seq?: number
+        ts?: number
+        session_id?: string
+        turn_id?: string
+        client_message_id?: string
+        owner?: Record<string, unknown>
+      } & WsEventVariants))
+  | HistoricalRuntimeActivityEvent
 
 interface HookRuntimeEventFields {
   hook_id?: string
@@ -1932,28 +1920,12 @@ type WsEventVariants =
       client_draft_id?: string
     }
   | { event: 'session_title_updated'; session?: SessionInfo }
-  | { event: 'external_inbound'; message?: Record<string, unknown> }
-  | {
-      event: 'external_queued'
-      message?: Record<string, unknown>
-      reason?: string
-    }
-  | { event: 'external_outbound_queued'; message?: Record<string, unknown> }
-  | {
-      event: 'external_outbound_sent'
-      message?: Record<string, unknown>
-      delivery?: Record<string, unknown>
-    }
-  | {
-      event: 'external_outbound_error'
-      message?: Record<string, unknown>
-      error?: string
-    }
   | {
       event: 'tool_call'
       id?: string
       name: string
       arguments?: Record<string, unknown>
+      tool_batch_id?: string
     }
   | {
       event: 'tool_result'
@@ -1966,6 +1938,7 @@ type WsEventVariants =
       metadata?: Record<string, unknown>
       todos?: TodoItem[]
       is_error?: boolean
+      tool_batch_id?: string
     }
   | { event: 'tool_error'; id?: string; name?: string; message?: string }
   | {
@@ -1973,8 +1946,14 @@ type WsEventVariants =
       id?: string
       name: string
       arguments?: Record<string, unknown>
+      tool_batch_id?: string
     }
-  | { event: 'tool_run_started'; id?: string; name: string }
+  | {
+      event: 'tool_run_started'
+      id?: string
+      name: string
+      tool_batch_id?: string
+    }
   | {
       event: 'tool_run_completed'
       id?: string
@@ -1984,6 +1963,7 @@ type WsEventVariants =
       output_truncated?: boolean
       artifacts?: ToolArtifactRef[]
       metadata?: Record<string, unknown>
+      tool_batch_id?: string
     }
   | {
       event: 'tool_run_failed'
@@ -1992,8 +1972,15 @@ type WsEventVariants =
       message?: string
       reason_kind?: 'safety_refusal' | 'error' | string
       metadata?: Record<string, unknown>
+      tool_batch_id?: string
     }
-  | { event: 'tool_run_cancelled'; id?: string; name: string; reason?: string }
+  | {
+      event: 'tool_run_cancelled'
+      id?: string
+      name: string
+      reason?: string
+      tool_batch_id?: string
+    }
   | {
       event: 'process_containment'
       id?: string
@@ -2039,17 +2026,6 @@ type WsEventVariants =
       detail?: Record<string, unknown>
     }
   | {
-      event: 'turn_continuation_evaluated'
-      decision: 'continue' | 'finalize' | 'pause'
-      reasonCode: string
-      evaluationRound: number
-      totalIterations: number
-      grantedIterations: number
-      source?: 'evaluator' | 'core_policy'
-      summary: string
-      nextActions: string[]
-    }
-  | {
       event: 'turn_scope'
       mode?: string
       workspace_root?: string
@@ -2058,6 +2034,57 @@ type WsEventVariants =
       project_id?: string | null
       project_state_root?: string | null
       active_memory_binding?: Record<string, unknown>
+    }
+  | {
+      event: 'turn_change_snapshot'
+      version: 1 | 2
+      turnId: string
+      executionId?: string
+      rootTurnId?: string
+      activeTurnId?: string
+      status: 'tracking' | 'complete' | 'partial'
+      filesChanged: number
+      additions: number
+      deletions: number
+      binaryFiles: number
+      truncated: boolean
+      files: TurnChangedFile[]
+    }
+  | {
+      event: 'plan_execution_settled'
+      settlement_id?: string
+      action:
+        | 'continue_verification'
+        | 'manual_verification_passed'
+        | 'waive_verification_and_complete'
+        | 'cancel_plan'
+        | 'pause'
+      disposition: 'resume' | 'pause' | 'complete' | 'cancel'
+      interaction?: ControlInteraction
+      plan?: Record<string, unknown>
+      message?: string
+    }
+  | {
+      event: 'git_operation_completed'
+      action:
+        | 'commit'
+        | 'push'
+        | 'pull'
+        | 'switch_branch'
+        | 'create_worktree'
+        | 'remove_worktree'
+        | 'publish_pr'
+        | 'merge_pr'
+        | 'close_pr'
+      branch?: string
+      commitOid?: string
+      remoteHost?: string
+      pullRequest?: {
+        number: number
+        url: string
+        state: string
+      }
+      completedAt: number
     }
   | { event: 'assistant_done'; content?: string }
   | {
@@ -2405,6 +2432,14 @@ export interface SessionControlPending {
 
 export type SidebarSortMode = 'manual' | 'created_at' | 'updated_at'
 
+export interface RightWorkspaceState {
+  version: 3
+  workbenchOpen: boolean
+  width: number
+  filesTreeWidth: number
+  pane: 'launcher' | 'review' | 'terminal' | 'files'
+}
+
 export interface SidebarState {
   section_order: Array<'projects' | 'chats'>
   project_sort: SidebarSortMode
@@ -2413,4 +2448,5 @@ export interface SidebarState {
   chat_order: string[]
   project_session_order: Record<string, string[]>
   collapsed_project_ids: string[]
+  right_workspace: RightWorkspaceState
 }

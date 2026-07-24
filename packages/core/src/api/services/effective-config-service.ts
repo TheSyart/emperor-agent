@@ -35,7 +35,6 @@ import {
   resolveSoftGitRewindMode,
   type SoftGitRewindModeValue,
 } from '../../checkpoints/soft-git-rewind'
-import { loadExternalConfig } from '../../external/config'
 import {
   defaultModelExecutionPolicy,
   MODEL_CONFIG_FILE,
@@ -74,10 +73,6 @@ export class CoreEffectiveConfigService {
     resolutions.push(this.sandboxResolution())
     resolutions.push(
       (await resolveMcpConfig(this.root, {}, { preserveCorrupt: false }))
-        .resolution,
-    )
-    resolutions.push(
-      (await loadExternalConfig(this.root, { preserveInvalid: false }))
         .resolution,
     )
     resolutions.push(...this.skillResolutions())

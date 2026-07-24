@@ -11,6 +11,7 @@ import {
   type ParamSchema,
 } from '../tools/schema'
 import { PlanQualityError } from '../plans/quality'
+import type { PlanRecord } from '../plans/models'
 import { interactionToDict, type Interaction } from './models'
 
 export const CONTROL_PAUSE_PREFIX = '__CONTROL_PAUSE__:'
@@ -46,7 +47,7 @@ export function parsePauseResult(
     : null
 }
 
-/** ask_user / propose_plan 调用的 ControlManager 表面。 */
+/** Control 工具调用的 ControlManager 表面。 */
 export interface ToolManagerHost {
   createAsk(opts: {
     questions: Array<Record<string, unknown>>
@@ -65,6 +66,12 @@ export interface ToolManagerHost {
     meta?: Record<string, unknown> | null
     enforceQuality?: boolean
   }): Interaction
+  completePlanStep?(input: {
+    stepId: string
+    summary: string
+    toolCallId?: string | null
+    turnId?: string | null
+  }): PlanRecord
 }
 
 type ToolManagerHostProvider =
@@ -249,6 +256,9 @@ export class ProposePlanTool extends Tool {
                   id: S('稳定 requirement id'),
                   kind: S('验证类型 command/manual/reviewer/smoke'),
                   required: B('是否为阻塞性必需验证'),
+                  human_required: B(
+                    '仅当用户明确要求必须由人工验收时设为 true；普通浏览器目视建议保持 false',
+                  ),
                   command: S('命令型验证的命令'),
                   description: S('验证说明'),
                 },
@@ -263,7 +273,7 @@ export class ProposePlanTool extends Tool {
         ),
       ),
     },
-    ['title', 'summary', 'plan_markdown'],
+    ['title', 'summary', 'plan_markdown', 'steps'],
   )
 
   private readonly managerProvider: ToolManagerHostProvider
@@ -291,5 +301,51 @@ export class ProposePlanTool extends Tool {
       throw exc
     }
     return makePauseResult(interactionToDict(interaction))
+  }
+}
+
+export class CompletePlanStepTool extends Tool {
+  override name = 'complete_plan_step'
+  override exclusive = true
+  override requiresRuntimeContext = true
+  override evidencePolicy = 'forbidden' as const
+  override readOnly = true
+  override description =
+    '报告当前活动 PlanStep 的实现工作已经完成，由 Core 记录实现声明并进入验证或下一步骤。' +
+    '只在已批准计划的执行阶段使用；它不会伪造验证成功，也不会绕过必需验证。' +
+    '不要为了镜像单个 PlanStep 创建 Todo；只有确有多个独立执行事项时才使用 update_todos。'
+
+  override parameters = toolParamsSchema(
+    {
+      step_id: S('当前活动 PlanStep 的稳定 id'),
+      summary: S('本步骤实际完成的实现内容和关键变更摘要'),
+    },
+    ['step_id', 'summary'],
+  )
+
+  private readonly managerProvider: ToolManagerHostProvider
+  constructor(manager: ToolManagerHostProvider) {
+    super()
+    this.managerProvider = manager
+  }
+
+  execute(args: Record<string, unknown>, ctx?: ToolExecutionContext): string {
+    const stepId = String(args.step_id ?? '').trim()
+    const summary = String(args.summary ?? '').trim()
+    const manager = resolveToolManager(this.managerProvider, ctx)
+    if (typeof manager.completePlanStep !== 'function')
+      throw new Error('complete_plan_step is unavailable')
+    const record = manager.completePlanStep({
+      stepId,
+      summary,
+      toolCallId: ctx?.parentCallId ?? null,
+      turnId: ctx?.turnId ?? null,
+    })
+    const step = record.steps.find((item) => item.id === stepId)
+    return [
+      `Plan step completed: ${stepId}`,
+      `step_status=${step?.status ?? 'unknown'}`,
+      `plan_status=${record.status}`,
+    ].join('\n')
   }
 }

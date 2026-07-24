@@ -228,28 +228,12 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         client_draft_id?: string
       }
     | { event: 'session_title_updated'; session?: RuntimeEventPayload }
-    | { event: 'external_inbound'; message?: RuntimeEventPayload }
-    | {
-        event: 'external_queued'
-        message?: RuntimeEventPayload
-        reason?: string
-      }
-    | { event: 'external_outbound_queued'; message?: RuntimeEventPayload }
-    | {
-        event: 'external_outbound_sent'
-        message?: RuntimeEventPayload
-        delivery?: RuntimeEventPayload
-      }
-    | {
-        event: 'external_outbound_error'
-        message?: RuntimeEventPayload
-        error?: string
-      }
     | {
         event: 'tool_call'
         id?: string
         name: string
         arguments?: RuntimeEventPayload
+        tool_batch_id?: string
       }
     | {
         event: 'tool_result'
@@ -262,6 +246,7 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         metadata?: RuntimeEventPayload
         todos?: RuntimeEventPayload[]
         is_error?: boolean
+        tool_batch_id?: string
       }
     | { event: 'tool_error'; id?: string; name?: string; message?: string }
     | {
@@ -269,8 +254,14 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         id?: string
         name: string
         arguments?: RuntimeEventPayload
+        tool_batch_id?: string
       }
-    | { event: 'tool_run_started'; id?: string; name: string }
+    | {
+        event: 'tool_run_started'
+        id?: string
+        name: string
+        tool_batch_id?: string
+      }
     | {
         event: 'tool_run_completed'
         id?: string
@@ -280,6 +271,7 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         output_truncated?: boolean
         artifacts?: RuntimeEventPayload[]
         metadata?: RuntimeEventPayload
+        tool_batch_id?: string
       }
     | {
         event: 'tool_run_failed'
@@ -288,12 +280,14 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         message?: string
         reason_kind?: 'safety_refusal' | 'error' | string
         metadata?: RuntimeEventPayload
+        tool_batch_id?: string
       }
     | {
         event: 'tool_run_cancelled'
         id?: string
         name: string
         reason?: string
+        tool_batch_id?: string
       }
     | {
         event: 'process_containment'
@@ -340,17 +334,6 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         detail?: RuntimeEventPayload
       }
     | {
-        event: 'turn_continuation_evaluated'
-        decision: 'continue' | 'finalize' | 'pause'
-        reasonCode: string
-        evaluationRound: number
-        totalIterations: number
-        grantedIterations: number
-        source?: 'evaluator' | 'core_policy'
-        summary: string
-        nextActions: string[]
-      }
-    | {
         event: 'turn_scope'
         mode?: string
         workspace_root?: string
@@ -359,6 +342,63 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         project_id?: string | null
         project_state_root?: string | null
         active_memory_binding?: RuntimeEventPayload
+      }
+    | {
+        event: 'turn_change_snapshot'
+        version: 1 | 2
+        turnId: string
+        executionId?: string
+        rootTurnId?: string
+        activeTurnId?: string
+        status: 'tracking' | 'complete' | 'partial'
+        filesChanged: number
+        additions: number
+        deletions: number
+        binaryFiles: number
+        truncated: boolean
+        files: Array<{
+          path: string
+          kind: 'created' | 'modified' | 'deleted' | 'renamed'
+          additions: number | null
+          deletions: number | null
+          binary: boolean
+        }>
+      }
+    | {
+        event: 'plan_execution_settled'
+        settlement_id?: string
+        action:
+          | 'continue_verification'
+          | 'manual_verification_passed'
+          | 'waive_verification_and_complete'
+          | 'cancel_plan'
+          | 'pause'
+        disposition: 'resume' | 'pause' | 'complete' | 'cancel'
+        interaction?: RuntimeEventPayload
+        plan?: RuntimeEventPayload
+        message?: string
+      }
+    | {
+        event: 'git_operation_completed'
+        action:
+          | 'commit'
+          | 'push'
+          | 'pull'
+          | 'switch_branch'
+          | 'create_worktree'
+          | 'remove_worktree'
+          | 'publish_pr'
+          | 'merge_pr'
+          | 'close_pr'
+        branch?: string
+        commitOid?: string
+        remoteHost?: string
+        pullRequest?: {
+          number: number
+          url: string
+          state: string
+        }
+        completedAt: number
       }
     | { event: 'assistant_done'; content?: string }
     | {

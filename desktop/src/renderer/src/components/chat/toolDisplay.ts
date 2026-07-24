@@ -58,6 +58,11 @@ export function toolTargetLabel(
 export function toolTitle(
   tool: Pick<ToolSegment, 'name' | 'displayName' | 'arguments' | 'metadata'>,
 ) {
+  if (
+    tool.name === 'dispatch_subagent' &&
+    String(tool.arguments?.agent_type ?? '') === 'verification_reviewer'
+  )
+    return '独立复核'
   const name = tool.displayName || toolDisplayName(tool.name)
   const target = toolTargetLabel(tool)
   return target ? `${name} · ${target}` : `${name} · ${toolPurpose(tool.name)}`
