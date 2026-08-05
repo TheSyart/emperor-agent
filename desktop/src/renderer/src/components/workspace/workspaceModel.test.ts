@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   availableWorkspacePanes,
   clampWorkspaceWidth,
+  filterGitFilesByPaths,
   gitFileChangeLabel,
   gitTransientLabel,
   groupGitFiles,
@@ -140,5 +141,36 @@ describe('right workspace model', () => {
     ).toBe('binary')
     expect(gitTransientLabel('rebase')).toBe('Rebase 尚未完成')
     expect(gitTransientLabel('none')).toBe('')
+  })
+
+  it('filters Review files to exact task paths without path-prefix collisions', () => {
+    const files = [
+      {
+        path: 'src/a.ts',
+        index: 'M',
+        worktree: '.',
+        conflict: false,
+        untracked: false,
+      },
+      {
+        path: 'src/a.ts.bak',
+        index: 'M',
+        worktree: '.',
+        conflict: false,
+        untracked: false,
+      },
+      {
+        path: 'src/b.ts',
+        index: '.',
+        worktree: 'M',
+        conflict: false,
+        untracked: false,
+      },
+    ]
+
+    expect(
+      filterGitFilesByPaths(files, ['src/a.ts']).map((file) => file.path),
+    ).toEqual(['src/a.ts'])
+    expect(filterGitFilesByPaths(files, [])).toEqual(files)
   })
 })

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-08-05<br>
 > 事实源：当前桌面路由、设置页、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -10,7 +10,7 @@
 ## 推荐阅读顺序
 
 1. [首次使用](getting-started.md)：安装、模型配置、第一次 Chat 或 Build。
-2. [Chat 与 Build](chat-build.md)：会话、项目绑定和上下文边界。
+2. [Chat 与 Build](chat-build.md)：会话、项目绑定、斜杠命令和上下文边界。
 3. [Plan 与 Goal](plan-goal.md)：权限模式、先规划再执行和长任务验收。
 4. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
 5. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。

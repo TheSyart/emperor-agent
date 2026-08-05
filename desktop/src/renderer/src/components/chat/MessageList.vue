@@ -9,6 +9,7 @@ import type {
   TurnChangeSnapshot,
 } from '../../types'
 import MessageRow from './MessageRow.vue'
+import { turnChangesByAssistantMessage } from './turnChangesAttachmentModel'
 import { CHAT_EXPANSION_STORE_KEY } from './expansionStoreKey'
 import {
   createExpansionStore,
@@ -25,7 +26,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   continueExecution: []
-  openReview: []
+  openReview: [paths: string[]]
 }>()
 const scroller = ref<HTMLElement | null>(null)
 const followBottom = ref(true)
@@ -35,6 +36,9 @@ const expansion = createExpansionStore()
 provide(CHAT_EXPANSION_STORE_KEY, expansion)
 
 const virtualized = computed(() => shouldVirtualize(props.messages.length))
+const changesByMessage = computed(() =>
+  turnChangesByAssistantMessage(props.messages, props.turnChanges || []),
+)
 
 function pinToBottom() {
   const el = scroller.value
@@ -90,15 +94,9 @@ function sizeDependencies(message: ChatMessage): unknown[] {
 }
 
 function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
-  if (message.role !== 'assistant' || !message.turn_id) return undefined
-  return props.turnChanges?.find(
-    (snapshot) =>
-      (snapshot.turnId === message.turn_id ||
-        snapshot.rootTurnId === message.turn_id ||
-        snapshot.activeTurnId === message.turn_id) &&
-      (snapshot.status === 'complete' || snapshot.status === 'partial') &&
-      snapshot.filesChanged > 0,
-  )
+  return message.role === 'assistant'
+    ? changesByMessage.value.get(message.id)
+    : undefined
 }
 </script>
 
@@ -143,7 +141,7 @@ function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
               :plans="props.plans || []"
               :turn-change="changesFor(item)"
               @continue-execution="emit('continueExecution')"
-              @open-review="emit('openReview')"
+              @open-review="emit('openReview', $event)"
             />
           </div>
         </DynamicScrollerItem>
@@ -157,7 +155,7 @@ function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
         :plans="props.plans || []"
         :turn-change="changesFor(message)"
         @continue-execution="emit('continueExecution')"
-        @open-review="emit('openReview')"
+        @open-review="emit('openReview', $event)"
       />
     </div>
 

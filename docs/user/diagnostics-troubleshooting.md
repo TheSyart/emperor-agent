@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-07-21<br>
+> 最后核验：2026-08-05<br>
 > 事实源：DiagnosticsService、桌面诊断面板、当前构建与运行脚本
 
 先进入“设置 → 诊断”。诊断页会集中显示生效路径、配置文件状态、workspace fence、生命周期、迁移结果、环境能力、Scheduler 和桌宠信息。不要先手工删除 `stateRoot`。
@@ -39,11 +39,11 @@
 ```text
 /status
 /model
-/tokens
+/cost
 /tools
 /skills
 /memory
-/mode status
+/permissions
 /plan status
 /goal status
 ```
@@ -112,7 +112,7 @@ Lifecycle 中 `mcp=ready` 只表示 MCP 管理服务已经启动，不表示每�
 /reload
 ```
 
-`/clear` 只清空当前屏幕，不删除会话、记忆或 runtime 文件。
+`/clear` 会通过可恢复事务创建一个真正不含当前历史的新 session，并切换到它；旧 session、全局长期记忆和项目记忆不会删除。新 session 不继承旧 history、Plan、Goal、Todo、队列、checkpoint、runtime timeline 或附件投影。若只想减少上下文占用并保留摘要，使用 `/compact [instructions]`。转换失败时检查 `stateRoot/control/session-transitions.json`，不要手工伪造 `applied` 状态。
 
 ## Prompt Cache Break
 

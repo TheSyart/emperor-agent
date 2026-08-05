@@ -217,6 +217,34 @@ const manageQueuedPromptSchema = z
   })
   .strict()
 
+const commandInvocationSourceSchema = z.enum(['desktop', 'automation', 'acp'])
+const commandListSchema = z
+  .object({
+    sessionId: idSchema,
+    includeUnavailable: z.boolean().optional(),
+    invocationSource: commandInvocationSourceSchema.optional(),
+  })
+  .strict()
+const commandCompleteSchema = z
+  .object({
+    sessionId: idSchema,
+    commandId: idSchema,
+    rawArgs: z.string().max(8_192),
+    cursor: z.number().int().min(0).max(8_192),
+    invocationSource: commandInvocationSourceSchema,
+  })
+  .strict()
+const commandInvokeSchema = z
+  .object({
+    sessionId: idSchema,
+    commandId: idSchema,
+    rawInput: z.string().trim().min(1).max(16_384),
+    invocationId: idSchema,
+    invocationSource: commandInvocationSourceSchema,
+    attachments: z.array(idSchema).max(64).optional(),
+  })
+  .strict()
+
 const workspaceSessionSchema = z.object({ sessionId: idSchema }).strict()
 const workspaceRelativePathSchema = z
   .string()
@@ -608,6 +636,16 @@ export const CORE_OPERATION_REGISTRY = {
   'chat.manageQueuedPrompt': operation(
     z.tuple([manageQueuedPromptSchema]),
     (api, [input]) => api.chat.manageQueuedPrompt(input),
+  ),
+  'commands.complete': operation(
+    z.tuple([commandCompleteSchema]),
+    (api, [input]) => api.commands.complete(input),
+  ),
+  'commands.invoke': operation(z.tuple([commandInvokeSchema]), (api, [input]) =>
+    api.commands.invoke(input),
+  ),
+  'commands.list': operation(z.tuple([commandListSchema]), (api, [input]) =>
+    api.commands.list(input),
   ),
   'config.effective': operation(z.tuple([]), (api) => api.config.effective()),
   'config.get': operation(z.tuple([]), (api) => api.config.get()),

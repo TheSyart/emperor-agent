@@ -1,4 +1,5 @@
 import type { ThoughtSegment } from '../../types'
+import { durationLabel as toolDurationLabel } from './toolDisplay'
 
 export type ThoughtPresentation =
   { kind: 'summary'; summary: string } | { kind: 'status'; label: string }
@@ -36,9 +37,7 @@ export function thoughtStatusLabel(
   return `${phase} · ${durationLabel(segment.durationMs)}`
 }
 
-// 注意：与 toolDisplay.durationLabel 不同——缺失时长时显示 '0ms' 而非空串（思考标签需要占位）
+// 复用 toolDisplay.durationLabel(分钟级),仅补占位语义:缺失时长显示 '0ms' 而非空串
 function durationLabel(ms?: number) {
-  if (!ms && ms !== 0) return '0ms'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  return toolDurationLabel(ms) || '0ms'
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { environmentSubagentGroups } from './environmentModel'
+import {
+  environmentSubagentGroups,
+  subagentStatusTone,
+} from './environmentModel'
 
 describe('Environment subagent projection', () => {
   it('shows every active agent and only the latest three completed agents', () => {
@@ -19,5 +22,17 @@ describe('Environment subagent projection', () => {
       failedCount: 1,
       hiddenCount: 2,
     })
+  })
+
+  it('maps subagent status to a colored dot tone', () => {
+    expect(subagentStatusTone({ status: 'running' })).toBe('running')
+    expect(subagentStatusTone({ status: 'queued' })).toBe('pending')
+    expect(subagentStatusTone({ status: 'pending' })).toBe('pending')
+    expect(subagentStatusTone({ status: 'completed' })).toBe('completed')
+    expect(subagentStatusTone({ status: 'failed' })).toBe('failed')
+    expect(subagentStatusTone({ status: 'error' })).toBe('failed')
+    expect(subagentStatusTone({ status: 'cancelled' })).toBe('cancelled')
+    expect(subagentStatusTone({ status: 'interrupted' })).toBe('cancelled')
+    expect(subagentStatusTone({ status: 'mystery' })).toBe('unknown')
   })
 })

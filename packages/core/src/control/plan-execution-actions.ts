@@ -163,10 +163,7 @@ export class PlanExecutionActionManager {
     this.settlements = new PlanExecutionSettlementStore(cm.store.root)
   }
 
-  request(input: {
-    turnId: string
-    executionId: string
-  }): Interaction | null {
+  request(input: { turnId: string; executionId: string }): Interaction | null {
     const record = this.cm.latestExecutablePlan()
     if (
       record === null ||
@@ -186,8 +183,7 @@ export class PlanExecutionActionManager {
         requirement.status !== 'skipped',
     )
     if (!unresolved.length) return null
-    const repeatedVerificationFailure =
-      hasRepeatedVerificationFailure(step)
+    const repeatedVerificationFailure = hasRepeatedVerificationFailure(step)
     if (
       phase === 'completed' ||
       phase === 'cancelled' ||
@@ -306,7 +302,10 @@ export class PlanExecutionActionManager {
           requirement.status !== 'skipped',
       )
       .map((requirement) => requirement.id)
-    if (canonicalJson(currentIds as never) !== canonicalJson(request.requirementIds as never))
+    if (
+      canonicalJson(currentIds as never) !==
+      canonicalJson(request.requirementIds as never)
+    )
       throw new Error('Plan verification requirements changed')
 
     const settlement = this.settlements.prepare({
@@ -553,9 +552,9 @@ function hasImplementationClaim(record: PlanRecord, stepId: string): boolean {
   const claims = record.metadata.implementation_claims
   return Boolean(
     claims &&
-      typeof claims === 'object' &&
-      !Array.isArray(claims) &&
-      (claims as Record<string, unknown>)[stepId],
+    typeof claims === 'object' &&
+    !Array.isArray(claims) &&
+    (claims as Record<string, unknown>)[stepId],
   )
 }
 
@@ -629,9 +628,9 @@ function stampSettlement(
   settlement: PlanExecutionSettlementRecord,
 ): PlanRecord {
   const receipts = [
-    ...(((record.metadata.plan_execution_settlements as unknown[]) ?? [])
+    ...((record.metadata.plan_execution_settlements as unknown[]) ?? [])
       .filter((item) => item && typeof item === 'object')
-      .map((item) => ({ ...(item as Record<string, unknown>) }))),
+      .map((item) => ({ ...(item as Record<string, unknown>) })),
     {
       settlement_id: settlement.id,
       interaction_id: settlement.request.interactionId,

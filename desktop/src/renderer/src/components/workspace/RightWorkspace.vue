@@ -53,6 +53,7 @@ const viewportWidth = ref(window.innerWidth)
 const snapshot = ref<WorkspaceSnapshot | null>(null)
 const loading = ref(false)
 const error = ref('')
+const reviewFilterPaths = ref<string[]>([])
 const panel = ref<HTMLElement | null>(null)
 let refreshTimer: number | undefined
 let pollTimer: number | undefined
@@ -76,9 +77,7 @@ const effectiveProjectPath = computed(
 const presentation = computed(() => workspacePresentation(viewportWidth.value))
 const workbenchVisible = computed(() => state.workbenchOpen)
 const environmentVisible = computed(
-  () =>
-    !state.workbenchOpen &&
-    presentation.value === 'fixed',
+  () => !state.workbenchOpen && presentation.value === 'fixed',
 )
 const panes = computed(() => availableWorkspacePanes(hasProject.value))
 const workbenchTitle = computed(
@@ -134,6 +133,7 @@ watch(
   async () => {
     snapshot.value = null
     error.value = ''
+    reviewFilterPaths.value = []
     coercePane()
     await refreshSnapshot()
   },
@@ -204,11 +204,18 @@ function openPane(pane: WorkspacePaneId): void {
   setWorkbench(true)
 }
 
-function openReview(): void {
+function openReview(paths: string[] = []): void {
+  reviewFilterPaths.value = [...new Set(paths.filter(Boolean))]
   openPane('review')
 }
 
-defineExpose({ openReview, refreshSnapshot })
+defineExpose({
+  openReview,
+  openPane,
+  openLauncher,
+  showEnvironment,
+  refreshSnapshot,
+})
 
 function setFilesTreeWidth(width: number): void {
   state.filesTreeWidth = width
@@ -469,6 +476,7 @@ const FOCUSABLE_SELECTOR =
         :session-id="sessionId"
         :has-project="hasProject"
         :agent-busy="agentBusy"
+        :focus-paths="reviewFilterPaths"
       />
       <TerminalPane
         v-else-if="state.pane === 'terminal' && hasProject"

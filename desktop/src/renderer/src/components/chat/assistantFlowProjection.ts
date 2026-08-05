@@ -6,7 +6,6 @@ import type {
   PlanSegment,
   PlanActivitySegment,
   ThoughtSegment,
-  TodoItem,
   ToolSegment,
   ToolStatus,
 } from '../../types'
@@ -32,7 +31,6 @@ export type AssistantFlowBlock =
   | { kind: 'media'; id: string; items: MediaArtifactRef[] }
   | { kind: 'control'; id: string; segment: AskSegment | PlanSegment }
   | { kind: 'plan_activity'; id: string; segment: PlanActivitySegment }
-  | { kind: 'todos'; id: string; todos: TodoItem[] }
 
 export interface ProjectAssistantFlowOptions {
   now?: number
@@ -45,7 +43,6 @@ const ABSORBED_TOOL_NAMES = new Set([
   'update_todos',
   'complete_plan_step',
 ])
-const MIN_VISIBLE_TODO_ITEMS = 3
 
 export function projectAssistantFlow(
   message: AssistantMessage,
@@ -135,15 +132,6 @@ export function projectAssistantFlow(
           items: media,
         })
       }
-      const todos = latestToolTodos(group)
-      const visibleTodos = independentTodos(todos?.todos)
-      if (visibleTodos.length >= MIN_VISIBLE_TODO_ITEMS) {
-        blocks.push({
-          kind: 'todos',
-          id: `todos-${todos?.id || batchIdentity}`,
-          todos: visibleTodos,
-        })
-      }
       index = cursor
       continue
     }
@@ -163,19 +151,7 @@ export function projectAssistantFlow(
     index += 1
   }
 
-  const fallbackTodos = independentTodos(message.todos)
-  if (
-    fallbackTodos.length >= MIN_VISIBLE_TODO_ITEMS &&
-    !blocks.some((block) => block.kind === 'todos')
-  ) {
-    blocks.push({ kind: 'todos', id: 'todos-fallback', todos: fallbackTodos })
-  }
-
   return blocks
-}
-
-function independentTodos(todos: TodoItem[] | null | undefined): TodoItem[] {
-  return (todos || []).filter((todo) => !String(todo.plan_step_id ?? '').trim())
 }
 
 function mediaArtifacts(tools: ToolSegment[]): MediaArtifactRef[] {
@@ -192,16 +168,10 @@ function mediaArtifacts(tools: ToolSegment[]): MediaArtifactRef[] {
   return out
 }
 
-function latestToolTodos(tools: ToolSegment[]) {
-  for (let index = tools.length - 1; index >= 0; index -= 1) {
-    const tool = tools[index]
-    if (tool?.todos?.length)
-      return { id: tool.toolId || tool.id, todos: tool.todos }
-  }
-  return undefined
-}
-
-function assistantExecutionDuration(message: AssistantMessage, now: number) {
+export function assistantExecutionDuration(
+  message: AssistantMessage,
+  now: number,
+) {
   if (typeof message.durationMs === 'number')
     return Math.max(0, message.durationMs)
   if (

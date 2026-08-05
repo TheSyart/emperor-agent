@@ -9,8 +9,9 @@ import {
   normalizeComposerCapabilityInput,
   renderComposerInlineTokens,
 } from '../../capabilities/composerCapabilityTokens'
-import { isPathLikeSlashToken } from '../../commands'
+import { isPathLikeSlashToken, rankSlashPaletteItems } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
+import type { CommandCompletion } from '@emperor/core'
 import type {
   ChatSendPayload,
   ControlPayload,
@@ -59,6 +60,11 @@ const props = defineProps<{
   lifecycleMode?: ComposerLifecycleMode
   interactionBlocked?: boolean
   queueOccupied?: boolean
+  completeCommand?: (
+    commandId: string,
+    rawArgs: string,
+    cursor: number,
+  ) => Promise<CommandCompletion[]>
 }>()
 const emit = defineEmits<{
   send: [payload: ChatSendPayload]
@@ -123,25 +129,18 @@ const modeMenuPlacement = modeFloatingMenu.placement
 const ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
 const QUEUE_FULL_MESSAGE = '已有一条消息排队，请先编辑、插入或删除后再发送。'
+const argumentCompletions = ref<CommandCompletion[]>([])
+const paletteSelectionIndex = ref(0)
+const dismissedSlashInput = ref('')
+let completionGeneration = 0
 
 const suggestions = computed(() => {
   const text = value.value
   if (!text.startsWith('/')) return []
+  if (dismissedSlashInput.value === text) return []
   if (/^\/\S+\s/.test(text)) return []
   const query = text.slice(1).split(/\s+/, 1)[0].toLowerCase()
-  return props.commands.filter((item) => {
-    if (!query) return true
-    const haystack = [
-      item.name,
-      item.usage,
-      item.description,
-      item.tags || '',
-      ...(item.aliases || []),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(query)
-  })
+  return rankSlashPaletteItems(props.commands, query)
 })
 const commandSuggestions = computed(() =>
   suggestions.value.filter((item) => item.kind === 'command'),
@@ -149,22 +148,55 @@ const commandSuggestions = computed(() =>
 const skillSuggestions = computed(() =>
   suggestions.value.filter((item) => item.kind === 'skill'),
 )
-const slashPaletteGroups = computed(() =>
-  [
-    {
-      label: '命令',
-      items: commandSuggestions.value.map((item) =>
-        paletteItemFromSlash(item, '命令'),
-      ),
-    },
-    {
-      label: 'Skills',
-      items: skillSuggestions.value.map((item) =>
-        paletteItemFromSlash(item, 'Skill'),
-      ),
-    },
-  ].filter((group) => group.items.length),
-)
+const slashPaletteGroups = computed(() => {
+  if (argumentCompletions.value.length) {
+    const command = exactComposerCommand.value
+    if (!command) return []
+    return [
+      {
+        label: command.name,
+        items: argumentCompletions.value.map((item, index) => ({
+          id: `completion:${command.commandId}:${index}`,
+          action: 'insert_command' as const,
+          label: item.label,
+          description: item.description || command.description,
+          meta: item.kind || '参数',
+          completion: `${command.name} ${item.value}`,
+          icon: commandIcon(command.name),
+          tone: 'slate' as const,
+        })),
+      },
+    ]
+  }
+  const groups = new Map<string, SlashPaletteItem[]>()
+  const ordered = [...commandSuggestions.value, ...skillSuggestions.value]
+  for (const item of ordered) {
+    const label = item.recent
+      ? '最近使用'
+      : item.kind === 'command'
+        ? '内置命令'
+        : skillSourceLabel(item.source)
+    const bucket = groups.get(label) ?? []
+    bucket.push(item)
+    groups.set(label, bucket)
+  }
+  const groupOrder = [
+    '最近使用',
+    '内置命令',
+    '项目 Skill',
+    '用户 Skill',
+    '内置 Skill',
+    '受信插件 Skill',
+  ]
+  return [...groups.entries()]
+    .sort(
+      ([left], [right]) => groupOrder.indexOf(left) - groupOrder.indexOf(right),
+    )
+    .map(([label, items]) => ({
+      label,
+      items: items.map((item) => paletteItemFromSlash(item, label)),
+    }))
+})
 const addPaletteGroups = computed(() =>
   buildCapabilityPickerGroups({
     commands: props.commands,
@@ -182,6 +214,14 @@ const paletteGroups = computed(() =>
     ? addPaletteGroups.value
     : slashPaletteGroups.value,
 )
+const flatPaletteItems = computed(() =>
+  paletteGroups.value.flatMap((group) => group.items),
+)
+const activePaletteItem = computed(() => {
+  const items = flatPaletteItems.value
+  if (!items.length) return undefined
+  return items[Math.min(paletteSelectionIndex.value, items.length - 1)]
+})
 const paletteHeading = computed(() =>
   paletteMode.value === 'add' ? '添加能力' : '斜杠命令',
 )
@@ -192,6 +232,44 @@ const paletteHint = computed(() =>
 )
 const inlineSegments = computed(() => renderComposerInlineTokens(value.value))
 const hasInlineTokens = computed(() => hasComposerCapabilityTokens(value.value))
+const exactComposerCommand = computed(() => {
+  const text = value.value
+  const token = text.match(/^\/\S+/)?.[0]?.toLowerCase()
+  if (!token) return null
+  return (
+    props.commands.find(
+      (item) =>
+        item.name.toLowerCase() === token ||
+        item.aliases?.some((alias) => alias.toLowerCase() === token),
+    ) || null
+  )
+})
+
+watch(
+  () => value.value,
+  async (text) => {
+    if (dismissedSlashInput.value && dismissedSlashInput.value !== text)
+      dismissedSlashInput.value = ''
+    paletteSelectionIndex.value = 0
+    const generation = ++completionGeneration
+    argumentCompletions.value = []
+    const command = exactComposerCommand.value
+    const token = text.match(/^\/\S+/)?.[0] || ''
+    if (!command || !props.completeCommand || !/^\/\S+\s/.test(text)) return
+    const rawArgs = text.slice(token.length).trimStart()
+    try {
+      const completions = await props.completeCommand(
+        command.commandId,
+        rawArgs,
+        rawArgs.length,
+      )
+      if (generation === completionGeneration)
+        argumentCompletions.value = completions
+    } catch {
+      if (generation === completionGeneration) argumentCompletions.value = []
+    }
+  },
+)
 const composerSlashParts = computed(
   (): { token: string; rest: string } | null => {
     const text = value.value
@@ -337,25 +415,32 @@ function paletteItemFromSlash(
   item: SlashPaletteItem,
   meta: string,
 ): CapabilityPickerItem {
-  const skillName = item.skillName || item.name.replace(/^\//, '')
   return {
     id: item.id,
     action:
-      item.kind === 'skill'
-        ? 'insert_capability_token'
-        : item.name === '/plan'
-          ? 'activate_plan'
-          : item.name === '/goal'
-            ? 'activate_goal'
-            : 'insert_command',
+      item.name === '/plan'
+        ? 'activate_plan'
+        : item.name === '/goal'
+          ? 'activate_goal'
+          : 'insert_command',
     label: item.name,
     description: item.description,
-    meta: item.kind === 'skill' ? item.tags || meta : item.usage,
-    completion:
-      item.kind === 'skill' ? `@skill(${skillName})` : item.completion,
+    meta: item.dangerous
+      ? `需确认 · ${item.kind === 'skill' ? meta : item.usage}`
+      : item.kind === 'skill'
+        ? meta
+        : item.usage,
+    completion: item.completion,
     icon: item.kind === 'skill' ? toolIcon('skill') : commandIcon(item.name),
     tone: item.kind === 'skill' ? 'cyan' : 'slate',
   }
+}
+
+function skillSourceLabel(source: SlashPaletteItem['source']): string {
+  if (source === 'project_skill') return '项目 Skill'
+  if (source === 'user_skill') return '用户 Skill'
+  if (source === 'verified_plugin') return '受信插件 Skill'
+  return '内置 Skill'
 }
 
 function commandIcon(name: string): IconComponent {
@@ -443,13 +528,48 @@ function submit(delivery?: 'queue' | 'interject') {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Tab' && firstPaletteItem.value) {
+  if (
+    (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+    flatPaletteItems.value.length
+  ) {
     event.preventDefault()
-    applyPaletteItem(firstPaletteItem.value)
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    paletteSelectionIndex.value =
+      (paletteSelectionIndex.value + delta + flatPaletteItems.value.length) %
+      flatPaletteItems.value.length
+    return
+  }
+  if (event.key === 'Escape' && paletteMode.value === 'slash') {
+    event.preventDefault()
+    dismissedSlashInput.value = value.value
+    return
+  }
+  if (event.key === 'Tab' && activePaletteItem.value) {
+    event.preventDefault()
+    applyPaletteItem(activePaletteItem.value)
     return
   }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
   event.preventDefault()
+  const exact = exactComposerCommand.value
+  const token = value.value.match(/^\/\S+/)?.[0] || ''
+  if (
+    activePaletteItem.value &&
+    (!exact ||
+      paletteSelectionIndex.value > 0 ||
+      argumentCompletions.value.length > 0)
+  ) {
+    applyPaletteItem(activePaletteItem.value)
+    return
+  }
+  if (
+    exact?.requiresArguments &&
+    value.value.trim().toLowerCase() === token.toLowerCase()
+  ) {
+    value.value = `${token} `
+    void nextTick(resize)
+    return
+  }
   submit()
 }
 
@@ -475,8 +595,6 @@ function restoreDraft(payload: ChatSendPayload) {
 }
 
 defineExpose({ setDraft, focusInput, restoreDraft })
-
-const firstPaletteItem = computed(() => paletteGroups.value[0]?.items[0])
 
 function applyPaletteItem(item: CapabilityPickerItem | undefined) {
   if (!item) return
@@ -506,6 +624,8 @@ function applyPaletteItem(item: CapabilityPickerItem | undefined) {
   }
   if (!item.completion) return
   value.value = item.completion
+  paletteSelectionIndex.value = 0
+  dismissedSlashInput.value = ''
   closeAddMenu()
   closeModelMenu()
   closeModeMenu()
@@ -806,6 +926,7 @@ onBeforeUnmount(() => {
       :heading="paletteHeading"
       :hint="paletteHint"
       :mode="paletteMode"
+      :active-id="activePaletteItem?.id"
       @select="applyPaletteItem"
     />
 

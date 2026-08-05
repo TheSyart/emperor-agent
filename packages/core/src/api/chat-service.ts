@@ -226,6 +226,11 @@ export class MainlineTurnService {
           `${operation} received unknown session ${sessionId}`,
           sessionId,
         )
+      if (session.transitioned_to_session_id)
+        throw new InvalidSessionError(
+          `${operation} cannot append to transitioned session ${sessionId}`,
+          sessionId,
+        )
       return { session, promoted: false, clientDraftId: null }
     }
     const draft = input.draftSession ?? {}

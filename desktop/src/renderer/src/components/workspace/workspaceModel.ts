@@ -131,6 +131,19 @@ export function groupGitFiles(files: GitFileStatus[]): {
   }
 }
 
+export function filterGitFilesByPaths(
+  files: GitFileStatus[],
+  paths: string[],
+): GitFileStatus[] {
+  if (!paths.length) return files
+  const accepted = new Set(
+    paths.map((path) => path.replaceAll('\\', '/').replace(/^\.\/+/, '')),
+  )
+  return files.filter((file) =>
+    accepted.has(file.path.replaceAll('\\', '/').replace(/^\.\/+/, '')),
+  )
+}
+
 export function gitFileChangeLabel(file: GitFileStatus): string {
   if (file.binary) return 'binary'
   const additions = Math.max(0, Math.floor(file.additions ?? 0))

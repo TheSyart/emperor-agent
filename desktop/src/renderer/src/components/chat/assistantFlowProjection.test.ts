@@ -404,7 +404,7 @@ describe('assistant flow projection', () => {
     expect(blocks).toEqual([])
   })
 
-  it('shows only a complex independent checklist and never its update tool card', () => {
+  it('absorbs a complex independent checklist instead of rendering a timeline card', () => {
     const todos = [
       { id: 1, content: '检查入口', status: 'completed' },
       { id: 2, content: '修改实现', status: 'in_progress' },
@@ -418,7 +418,7 @@ describe('assistant flow projection', () => {
       ),
     )
 
-    expect(blocks).toEqual([{ kind: 'todos', id: 'todos-todo-tool', todos }])
+    expect(blocks).toEqual([])
   })
 
   it('suppresses legacy Plan-bound Todo mirrors', () => {
@@ -491,7 +491,7 @@ describe('assistant flow projection', () => {
     })
   })
 
-  it('adds a fallback only for a complex independent checklist', () => {
+  it('does not add a fallback checklist to the timeline', () => {
     const todos = [{ id: 1, content: '检查结果', status: 'pending' }]
     const withoutToolTodos = projectAssistantFlow(
       message([{ id: 't1', type: 'text', content: '开始' }], false, todos),

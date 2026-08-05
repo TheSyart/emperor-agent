@@ -1,63 +1,43 @@
-/**
- * 斜杠命令解释器（W6：从 App.vue 下沉）。
- * 文本渲染在 runtime/statusRender.ts（纯函数）；这里只做命令分发与副作用编排。
- */
 import type { Ref } from 'vue'
-import {
-  parseSkillSlashCommand,
-  parseSlashCommand,
-  parseGoalSlashCommand,
-  type SlashCommand,
-} from '../commands'
+import type {
+  CommandDescriptor,
+  CommandInvocationResult,
+  CommandSurface,
+} from '@emperor/core'
 import { core } from '../api/http'
+import {
+  rankSlashPaletteItems,
+  resolveSlashInvocation,
+  buildSlashPaletteItems,
+} from '../commands'
 import type {
   BootstrapPayload,
   ChatSendPayload,
-  CompactResult,
-  PendingState,
   GoalOperationResult,
   RuntimeGoalSummary,
+  SessionInfo,
 } from '../types'
-import {
-  inlineCode,
-  renderCommandHelp,
-  renderCompactResult,
-  renderConfigInfo,
-  renderMemoryInfo,
-  renderMemoryVersions,
-  renderModeStatus,
-  renderModelInfo,
-  renderPlanStatus,
-  renderSkillsInfo,
-  renderStatus,
-  renderTokenInfo,
-  renderToolsInfo,
-  renderGoalStatus,
-} from '../runtime/statusRender'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureStatus } from './goalCapture'
 import { createComposerLifecycleController } from './composerLifecycle'
 
 export interface SlashCommandDeps {
   boot: Ref<BootstrapPayload | null>
-  configContent: Ref<string>
   busy: Ref<boolean>
-  pending: PendingState
-  routeName: () => string
-  runtimeText: () => string
-  eventTransportText: () => string
+  commandDescriptors: Ref<CommandDescriptor[]>
+  resolveSessionId: () => Promise<string>
   sendMessage: (payload: string | ChatSendPayload) => boolean
-  addLocalCommand: (command: string, content: string) => void
-  clearChat: () => void
-  stopActive: () => Promise<boolean>
-  compactMemory: () => Promise<CompactResult>
-  restoreMemoryVersion: (id: string) => Promise<{ restored: { path: string } }>
-  refreshAll: () => Promise<void>
   showToast: (message: string) => void
+  reloadCommands: (includeUnavailable?: boolean) => Promise<void>
+  refreshAll: () => Promise<void>
+  openCommandSurface: (
+    surface: CommandSurface,
+    params?: Record<string, unknown>,
+  ) => void | Promise<void>
+  activateTransitionedSession: (session: SessionInfo) => Promise<void>
+  copyLastAssistant: () => Promise<boolean>
   currentGoal: () => RuntimeGoalSummary | null
   startGoal: (outcome: string) => Promise<GoalOperationResult>
-  listGoals: () => Promise<RuntimeGoalSummary[]>
-  getGoal: (goalId: string) => Promise<RuntimeGoalSummary>
   runGoalAction: (
     goalId: string,
     action: GoalCardAction,
@@ -70,18 +50,15 @@ export interface SlashCommandDeps {
 }
 
 export function useSlashCommands(deps: SlashCommandDeps) {
-  const { boot, busy, pending } = deps
-  let commandDispatching = false
-  let busyBeforeCommand = false
-
+  const queuedPolls = new Map<string, ReturnType<typeof setTimeout>>()
   const lifecycle = createComposerLifecycleController({
-    currentControl: () => boot.value?.control,
+    currentControl: () => deps.boot.value?.control,
     currentGoal: deps.currentGoal,
     currentGoalCaptureStatus: deps.currentGoalCaptureStatus,
-    agentBusy: () => (commandDispatching ? busyBeforeCommand : busy.value),
+    agentBusy: () => deps.busy.value,
     setPlanEnabled: async (enabled) => {
       await writeControlMode(
-        enabled ? 'plan' : savedExecutionPermission(boot.value?.control),
+        enabled ? 'plan' : savedExecutionPermission(deps.boot.value?.control),
       )
     },
     cancelGoal: (goalId, reason) =>
@@ -92,301 +69,187 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     startCapturedGoal: deps.startCapturedGoal,
   })
 
-  function submitFromComposer(payload: string | ChatSendPayload) {
-    const obj =
+  function submitFromComposer(payload: string | ChatSendPayload): void {
+    const normalized: ChatSendPayload =
       typeof payload === 'string'
         ? { content: payload, attachments: [] }
         : {
-            content: payload.content,
-            attachments: payload.attachments || [],
-            requestedSkills: payload.requestedSkills || [],
-            displayContent: payload.displayContent,
-            delivery: payload.delivery,
+            ...payload,
+            content: String(payload.content ?? ''),
+            attachments: payload.attachments ?? [],
           }
-    if (obj.delivery) {
-      deps.sendMessage(obj)
+    if (normalized.delivery) {
+      deps.sendMessage(normalized)
       return
     }
-    const parsed = parseSlashCommand(obj.content)
-    if (!obj.attachments.length && parsed?.name === '/continue') {
-      deps.sendMessage(obj)
-      return
-    }
-    if (!obj.attachments.length && parsed?.command) {
-      void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
-      return
-    }
-    const skillRequest = parseSkillSlashCommand(
-      obj.content,
-      boot.value?.skills || [],
+    const invocation = resolveSlashInvocation(
+      normalized.content,
+      deps.commandDescriptors.value,
     )
-    if (skillRequest) {
-      if (!skillRequest.task && !obj.attachments.length) {
-        deps.addLocalCommand(
-          skillRequest.raw,
-          `请在 ${inlineCode(`/${skillRequest.name}`)} 后面补上要办的事，例如：${inlineCode(`/${skillRequest.name} 帮我设计一个设置页`)}`,
-        )
-        return
-      }
-      const outgoing: ChatSendPayload = {
-        content: skillRequest.task,
-        attachments: obj.attachments,
-        requestedSkills: [skillRequest.requestedSkill],
-        displayContent: skillRequest.raw,
-        delivery: obj.delivery,
-      }
-      deps.sendMessage(outgoing)
+    if (!invocation) {
+      deps.sendMessage(normalized)
       return
     }
-    if (!obj.attachments.length && parsed) {
-      void executeSlashCommand(parsed.raw, parsed.name, parsed.command)
+    if (!invocation.descriptor) {
+      showUnknownCommand(invocation.name)
       return
     }
-    deps.sendMessage(obj)
+    void executeSlashCommand(
+      invocation.raw,
+      invocation.descriptor,
+      (normalized.attachments ?? []).map((attachment) => attachment.id),
+    )
   }
 
   async function executeSlashCommand(
-    raw: string,
-    name: string,
-    command: SlashCommand | undefined,
-  ) {
-    busyBeforeCommand = busy.value
-    commandDispatching = true
-    busy.value = true
+    rawInput: string,
+    knownDescriptor?: CommandDescriptor,
+    attachments: string[] = [],
+  ): Promise<CommandInvocationResult | null> {
+    const invocation = resolveSlashInvocation(
+      rawInput,
+      deps.commandDescriptors.value,
+    )
+    const descriptor = knownDescriptor ?? invocation?.descriptor ?? null
+    if (!invocation || !descriptor) {
+      showUnknownCommand(invocation?.name ?? rawInput.replace(/^\//, ''))
+      return null
+    }
     try {
-      if (!command) {
-        deps.addLocalCommand(
-          raw,
-          `未知命令：${inlineCode(name)}\n\n输入 ${inlineCode('/help')} 查看可用命令。`,
-        )
-        return
-      }
-      if (command.name === '/help')
-        return deps.addLocalCommand(raw, renderCommandHelp())
-      if (command.name === '/status') {
-        return deps.addLocalCommand(
-          raw,
-          renderStatus({
-            boot: boot.value,
-            busy: busy.value,
-            runtimeText: deps.runtimeText(),
-            eventTransportText: deps.eventTransportText(),
-            routeName: deps.routeName(),
-          }),
-        )
-      }
-      if (command.name === '/model')
-        return deps.addLocalCommand(raw, renderModelInfo(boot.value))
-      if (command.name === '/tokens')
-        return deps.addLocalCommand(raw, renderTokenInfo(boot.value))
-      if (command.name === '/tools')
-        return deps.addLocalCommand(raw, renderToolsInfo(boot.value))
-      if (command.name === '/skills')
-        return deps.addLocalCommand(raw, renderSkillsInfo(boot.value))
-      if (command.name === '/config')
-        return deps.addLocalCommand(
-          raw,
-          renderConfigInfo(deps.configContent.value),
-        )
-      if (command.name === '/memory')
-        return deps.addLocalCommand(raw, renderMemoryInfo(boot.value))
-      if (command.name === '/memory-log')
-        return deps.addLocalCommand(raw, renderMemoryVersions(boot.value))
-      if (command.name === '/memory-restore')
-        return await handleMemoryRestoreCommand(raw)
-      if (command.name === '/plan') return await handlePlanCommand(raw)
-      if (command.name === '/goal' || command.name === '/goals')
-        return await handleGoalCommand(raw)
-      if (command.name === '/mode') return await handleModeCommand(raw)
-      if (command.name === '/stop') {
-        const goalActive = Boolean(deps.currentGoal())
-        const stopped = await deps.stopActive()
-        return deps.addLocalCommand(
-          raw,
-          stopped
-            ? goalActive
-              ? '已暂停 Goal。可使用 `/goal resume` 继续。'
-              : '已请求停止当前运行任务。'
-            : '当前没有正在运行的任务。',
-        )
-      }
-      if (command.name === '/compact') {
-        pending.label = '正在压缩未归档会话...'
-        pending.detail = ''
-        try {
-          const result = await deps.compactMemory()
-          deps.addLocalCommand(raw, renderCompactResult(result))
-        } catch (err) {
-          deps.addLocalCommand(
-            raw,
-            `压缩失败：${err instanceof Error ? err.message : String(err)}`,
+      const request = {
+        sessionId: await deps.resolveSessionId(),
+        commandId: descriptor.id,
+        rawInput: invocation.raw,
+        invocationId: createInvocationId(),
+        invocationSource: 'desktop',
+        attachments,
+      } as const
+      const result = await core('commands.invoke', request)
+      await projectInvocationResult(result)
+      showCompatibilityNotice(descriptor, invocation.name, invocation.rawArgs)
+      if (result.status === 'queued') scheduleQueuedResultPoll(request)
+      rememberCommand(descriptor.id)
+      return result
+    } catch (error) {
+      deps.showToast(displayError(error))
+      return null
+    }
+  }
+
+  function showCompatibilityNotice(
+    descriptor: CommandDescriptor,
+    invokedName: string,
+    rawArgs: string,
+  ): void {
+    if (!(descriptor.hiddenAliases ?? []).includes(invokedName)) return
+    let replacement = `/${descriptor.name}`
+    if (invokedName.startsWith('goal-'))
+      replacement = `/goal ${invokedName.slice('goal-'.length)}`
+    else if (invokedName.startsWith('memory-'))
+      replacement = `/memory ${invokedName.slice('memory-'.length)}`
+    else if (invokedName === 'mode') {
+      const mode = rawArgs.trim().toLowerCase()
+      const migrated =
+        mode === 'edits' ? 'smart' : mode === 'auto' ? 'full' : mode
+      replacement = `/permissions${migrated ? ` ${migrated}` : ''}`
+    } else if (invokedName === 'goals') replacement = '/goal list'
+    deps.showToast(`旧命令 /${invokedName} 仍可用；建议改用 ${replacement}。`)
+  }
+
+  function scheduleQueuedResultPoll(request: {
+    sessionId: string
+    commandId: string
+    rawInput: string
+    invocationId: string
+    invocationSource: 'desktop'
+    attachments: string[]
+  }): void {
+    if (queuedPolls.has(request.invocationId)) return
+    const poll = async () => {
+      try {
+        const result = await core('commands.invoke', request)
+        if (result.status === 'queued') {
+          queuedPolls.set(
+            request.invocationId,
+            globalThis.setTimeout(poll, 750),
           )
+          return
         }
-        return
+        queuedPolls.delete(request.invocationId)
+        await projectInvocationResult(result)
+      } catch (error) {
+        queuedPolls.delete(request.invocationId)
+        deps.showToast(displayError(error))
       }
-      if (command.name === '/clear') return deps.clearChat()
-      if (command.name === '/reload') {
-        await deps.refreshAll()
-        return deps.addLocalCommand(raw, '工作台状态已刷新。')
-      }
-    } finally {
-      busy.value = busyBeforeCommand
-      commandDispatching = false
-      pending.label = ''
-      pending.detail = ''
     }
+    queuedPolls.set(request.invocationId, globalThis.setTimeout(poll, 750))
   }
 
-  async function handleGoalCommand(raw: string) {
-    const action = parseGoalSlashCommand(raw)
-    if (!action) return
-    if (action.kind === 'missing') {
-      const result = await lifecycle.activateGoalCapture()
-      if (!result.ok)
-        deps.addLocalCommand(raw, result.error || 'Goal 待输入状态开启失败。')
+  async function projectInvocationResult(
+    result: CommandInvocationResult,
+  ): Promise<void> {
+    if (result.status === 'rejected') {
+      deps.showToast(result.message)
       return
     }
-    if (action.kind === 'list') {
-      const goals = await deps.listGoals()
-      deps.addLocalCommand(raw, renderGoalStatus(goals, deps.currentGoal()?.id))
+    if (result.status === 'queued') {
+      deps.showToast('命令已排队，将在当前任务结束后执行。')
       return
     }
-    if (action.kind === 'status') {
-      const active = deps.currentGoal()
-      if (!active) {
-        deps.addLocalCommand(raw, '当前会话没有 active Goal。')
+    if (result.status === 'submitted') return
+    if (result.status === 'opened') {
+      await deps.openCommandSurface(result.surface, result.params)
+      return
+    }
+    const receipt = result.receipt
+    if (!receipt) return
+    if (receipt.code === 'session_transitioned') {
+      const session = receipt.data?.session as SessionInfo | undefined
+      if (!session?.id) {
+        deps.showToast('新会话已经创建，但返回结果缺少会话标识。')
         return
       }
-      try {
-        const goal = await deps.getGoal(active.id)
-        deps.addLocalCommand(raw, renderGoalStatus([goal], goal.id))
-      } catch (err) {
-        deps.addLocalCommand(
-          raw,
-          `Goal 状态读取失败：${err instanceof Error ? err.message : String(err)}`,
-        )
-      }
+      await deps.activateTransitionedSession(session)
+      deps.showToast(receipt.message)
       return
     }
-    if (action.kind === 'start') {
-      if (deps.currentGoal()) {
-        deps.addLocalCommand(
-          raw,
-          '当前会话已有 active Goal；请先暂停后恢复，或取消后再创建。',
-        )
-        return
-      }
-      try {
-        const result = await lifecycle.startGoalWithLifecycle(action.outcome)
-        deps.addLocalCommand(
-          raw,
-          renderGoalStatus([result.goal], result.goal.id),
-        )
-      } catch (err) {
-        deps.addLocalCommand(
-          raw,
-          `Goal 启动失败：${err instanceof Error ? err.message : String(err)}`,
-        )
-      }
+    if (receipt.code === 'copy_last_assistant') {
+      const copied = await deps.copyLastAssistant()
+      deps.showToast(copied ? '已复制最后一条回复。' : '当前没有可复制的回复。')
       return
     }
-    const active = deps.currentGoal()
-    if (!active) {
-      deps.addLocalCommand(
-        raw,
-        `当前没有可${goalActionVerb(action.kind)}的 Goal。`,
-      )
-      return
+    if (receipt.code === 'reloaded') {
+      await deps.refreshAll()
+      await deps.reloadCommands()
     }
-    try {
-      const result = await deps.runGoalAction(active.id, action.kind)
-      deps.addLocalCommand(raw, renderGoalStatus([result.goal], result.goal.id))
-    } catch (err) {
-      deps.addLocalCommand(
-        raw,
-        `Goal 操作失败：${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
+    if (
+      receipt.code === 'model_activated' ||
+      receipt.code === 'effort_updated' ||
+      receipt.code === 'permission_mode_updated' ||
+      receipt.code.startsWith('plan_') ||
+      receipt.code.startsWith('goal_') ||
+      receipt.code === 'session_renamed'
+    )
+      await deps.refreshAll()
+    deps.showToast(
+      receipt.replacementSyntax
+        ? `${receipt.message} 新语法：${receipt.replacementSyntax}`
+        : receipt.message,
+    )
   }
 
-  async function handlePlanCommand(raw: string) {
-    const [, arg = 'on'] = raw.trim().split(/\s+/, 2)
-    const normalized = arg.toLowerCase()
-    if (normalized === 'on' || normalized === 'plan') {
-      const result = await lifecycle.activatePlan()
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? 'Plan 模式已开启：只读探索、提问、计划预览；批准前不会执行写操作。'
-          : `Plan 模式开启失败：${result.error}`,
-      )
-      return
-    }
-    if (normalized === 'off' || normalized === 'normal') {
-      const restored = savedExecutionPermission(boot.value?.control)
-      const result = await lifecycle.deactivatePlan()
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? `Plan 模式已关闭，执行权限恢复为：${permissionLabel(restored)}。`
-          : `Plan 模式关闭失败：${result.error}`,
-      )
-      return
-    }
-    if (deps.currentGoal()) {
-      deps.addLocalCommand(
-        raw,
-        '当前顶层模式是 Goal；Goal 内部可能处于规划阶段，但不会作为独立 Plan 显示。',
-      )
-      return
-    }
-    deps.addLocalCommand(raw, renderPlanStatus(boot.value?.control))
-  }
-
-  async function handleModeCommand(raw: string) {
-    const [, arg = 'status'] = raw.trim().split(/\s+/, 2)
-    const normalized = arg.toLowerCase()
-    if (['ask', 'ask_before_edit', 'edit_before_ask'].includes(normalized)) {
-      const result = await setPermissionMode('ask_before_edit')
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? '权限模式已切换为：编辑前询问。'
-          : `权限模式切换失败：${result.error}`,
-      )
-      return
-    }
-    if (['accept_edits', 'accept-edits', 'edits'].includes(normalized)) {
-      const result = await setPermissionMode('smart_auto')
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? '权限模式已切换为：智能自动。'
-          : `权限模式切换失败：${result.error}`,
-      )
-      return
-    }
-    if (['smart', 'smart_auto', 'smart-auto'].includes(normalized)) {
-      const result = await setPermissionMode('smart_auto')
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? '权限模式已切换为：智能自动。'
-          : `权限模式切换失败：${result.error}`,
-      )
-      return
-    }
-    if (normalized === 'auto' || normalized === 'full_access') {
-      const result = await setPermissionMode('full_access')
-      deps.addLocalCommand(
-        raw,
-        result.ok
-          ? '权限模式已切换为：完全访问。'
-          : `权限模式切换失败：${result.error}`,
-      )
-      return
-    }
-    deps.addLocalCommand(raw, renderModeStatus(boot.value?.control))
+  function showUnknownCommand(name: string): void {
+    const candidates = rankSlashPaletteItems(
+      buildSlashPaletteItems(deps.commandDescriptors.value),
+      name,
+    )
+      .slice(0, 3)
+      .map((item) => item.name)
+    deps.showToast(
+      candidates.length
+        ? `未知命令 /${name}。你是否想输入：${candidates.join('、')}`
+        : `未知命令 /${name}。输入 /help 查看可用命令。`,
+    )
   }
 
   async function setPermissionMode(
@@ -394,13 +257,13 @@ export function useSlashCommands(deps: SlashCommandDeps) {
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       const data = await core('control.setPermissionMode', mode)
-      if (boot.value) boot.value.control = data
+      if (deps.boot.value) deps.boot.value.control = data
       deps.showToast(`执行权限已切换为${permissionLabel(mode)}`)
       return { ok: true }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
-      deps.showToast(error)
-      return { ok: false, error }
+    } catch (error) {
+      const message = displayError(error)
+      deps.showToast(message)
+      return { ok: false, error: message }
     }
   }
 
@@ -408,9 +271,10 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     mode: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan',
   ) {
     const data = await core('control.setMode', mode)
-    if (boot.value) boot.value.control = data
-    const label = mode === 'plan' ? '计划模式' : permissionLabel(mode)
-    deps.showToast(`已切换为${label}`)
+    if (deps.boot.value) deps.boot.value.control = data
+    deps.showToast(
+      `已切换为${mode === 'plan' ? '计划模式' : permissionLabel(mode)}`,
+    )
     return data
   }
 
@@ -420,10 +284,10 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     try {
       await writeControlMode(mode)
       return { ok: true }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
-      deps.showToast(error)
-      return { ok: false, error }
+    } catch (error) {
+      const message = displayError(error)
+      deps.showToast(message)
+      return { ok: false, error: message }
     }
   }
 
@@ -434,26 +298,6 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       ? await lifecycle.activatePlan()
       : await lifecycle.deactivatePlan()
     return result.ok ? { ok: true } : { ok: false, error: result.error }
-  }
-
-  async function handleMemoryRestoreCommand(raw: string) {
-    const [, id = ''] = raw.trim().split(/\s+/, 2)
-    if (!id) {
-      deps.addLocalCommand(
-        raw,
-        `请提供版本 id，例如：${inlineCode('/memory-restore memv_...')}`,
-      )
-      return
-    }
-    try {
-      const result = await deps.restoreMemoryVersion(id)
-      deps.addLocalCommand(raw, `已恢复：${inlineCode(result.restored.path)}`)
-    } catch (err) {
-      deps.addLocalCommand(
-        raw,
-        `恢复失败：${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
   }
 
   return {
@@ -468,6 +312,32 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     dismissLifecycle: lifecycle.dismissLifecycle,
     reconcileTerminalGoal: lifecycle.reconcileTerminalGoal,
     lifecycleMode: lifecycle.mode,
+  }
+}
+
+function createInvocationId(): string {
+  const suffix =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `desktop_command_${suffix}`
+}
+
+function rememberCommand(commandId: string): void {
+  try {
+    const key = 'emperor.recent_commands.v1'
+    const current = JSON.parse(localStorage.getItem(key) || '[]') as unknown
+    const ids = Array.isArray(current)
+      ? current.map(String).filter(Boolean)
+      : []
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        [commandId, ...ids.filter((id) => id !== commandId)].slice(0, 12),
+      ),
+    )
+  } catch {
+    // Recent command ranking is a private UI preference, never a command dependency.
   }
 }
 
@@ -489,8 +359,6 @@ function permissionLabel(
   return '询问确认'
 }
 
-function goalActionVerb(action: GoalCardAction) {
-  if (action === 'pause') return '暂停'
-  if (action === 'resume') return '恢复'
-  return '取消'
+function displayError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

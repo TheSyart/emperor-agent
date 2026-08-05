@@ -375,9 +375,35 @@
 }
 
 .tool-group-icon {
-  @apply grid size-6 shrink-0 place-items-center rounded;
+  @apply relative grid size-6 shrink-0 place-items-center rounded;
   color: rgb(var(--fg-muted));
   background: rgb(var(--bg-inset));
+}
+
+/* 状态圆点:running=warn 脉冲 / done=ok / error=danger / queued=中性灰 */
+.tool-status-dot {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(var(--fg-subtle));
+  box-shadow: 0 0 0 2px rgb(var(--bg));
+}
+
+.tool-status-dot[data-status='running'] {
+  @apply animate-pulse-seal;
+  background: rgb(var(--warn));
+}
+
+.tool-status-dot[data-status='done'] {
+  background: rgb(var(--ok));
+}
+
+.tool-status-dot[data-status='error'],
+.tool-status-dot[data-status='error_aborted'] {
+  background: rgb(var(--danger));
 }
 
 .tool-group-main {
@@ -465,10 +491,16 @@
 }
 
 .tool-group-tool-icon {
-  @apply grid size-6 shrink-0 place-items-center rounded border;
+  @apply relative grid size-6 shrink-0 place-items-center rounded border;
   border-color: rgb(var(--border));
   color: rgb(var(--fg-muted));
   background: rgb(var(--bg-inset));
+}
+
+/* 工具行结果小字:名称→目标→结果 的第三级 */
+.tool-result-line {
+  @apply truncate text-[11px];
+  color: rgb(var(--fg-subtle));
 }
 
 .tool-group-tool-title {
@@ -1014,7 +1046,7 @@
 
 .agent-node-head {
   @apply grid cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   border-color: transparent;
   background: transparent;
   list-style: none;
@@ -1059,6 +1091,7 @@
 
 .agent-role-badge,
 .agent-state-badge,
+.agent-stat-badge,
 .agent-duration {
   @apply shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px];
   border: 0;
@@ -1179,72 +1212,6 @@
 .subagent-avatar {
   @apply shrink-0;
   color: rgb(var(--fg-muted));
-}
-
-/* ── Todo panel ──────────────────────────────────────────────────────────── */
-.todo-panel {
-  @apply max-w-[720px] rounded-md border p-2.5;
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated) / 0.44);
-}
-
-.todo-panel-head {
-  @apply mb-2 flex items-center justify-between gap-3 px-0.5;
-}
-
-.todo-panel-head h3 {
-  @apply font-mono text-xs font-semibold;
-  color: rgb(var(--fg));
-}
-
-.todo-panel-head span {
-  @apply shrink-0 font-mono text-[11px];
-  color: rgb(var(--fg-subtle));
-}
-
-.todo-items {
-  @apply grid gap-1.5;
-}
-
-.todo-item {
-  @apply grid items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  border-color: rgb(var(--border) / 0.72);
-  color: rgb(var(--fg));
-  background: rgb(var(--bg) / 0.22);
-}
-
-.todo-item em {
-  @apply font-mono text-[11px] not-italic;
-  color: rgb(var(--fg-subtle));
-}
-
-.todo-item p {
-  @apply min-w-0 truncate;
-}
-
-.todo-item.completed {
-  color: rgb(var(--fg-subtle));
-  @apply line-through;
-}
-
-.todo-item.in_progress {
-  border-color: rgb(var(--warn) / 0.4);
-  background: rgb(var(--warn) / 0.06);
-}
-
-.todo-mark {
-  @apply grid size-5 shrink-0 place-items-center rounded font-mono text-xs font-semibold;
-  background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-subtle));
-}
-
-.todo-item.completed .todo-mark {
-  color: rgb(var(--ok));
-}
-
-.todo-item.in_progress .todo-mark {
-  color: rgb(var(--warn));
 }
 
 /* ── Pending bar ─────────────────────────────────────────────────────────── */

@@ -409,6 +409,66 @@ test('shows Plan approval only after the streamed proposal is complete', async (
   })
 })
 
+test('captures the composer execution progress pill and hover details', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat?visualProgress=running')
+  const trigger = page.locator('.composer-progress-trigger')
+  await expect(trigger).toBeVisible()
+  await expect(trigger).toContainText('Step 2 / 6 · 3 files changed · +301 −0')
+  await page.screenshot({
+    path: resolve(screenshotDir, 'composer-progress-running.png'),
+    fullPage: false,
+  })
+
+  await trigger.hover()
+  const popover = page.locator('.composer-progress-popover')
+  await expect(popover).toBeVisible()
+  await expect(popover.locator('.composer-progress-item')).toHaveCount(6)
+  await page.screenshot({
+    path: resolve(screenshotDir, 'composer-progress-hover.png'),
+    fullPage: false,
+  })
+})
+
+test('keeps the progress popover inside a narrow light viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/chat?visualProgress=running&visualTheme=light')
+  const trigger = page.locator('.composer-progress-trigger')
+  await trigger.click()
+  const popover = page.locator('.composer-progress-popover')
+  await expect(popover).toBeVisible()
+  const bounds = await popover.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(8)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(382)
+  await page.screenshot({
+    path: resolve(screenshotDir, 'composer-progress-mobile-light.png'),
+    fullPage: false,
+  })
+})
+
+test('captures one final inline changes summary inside the assistant flow', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/chat?visualProgress=final')
+  const assistant = page.locator('.message-row.assistant').last()
+  const card = assistant.locator('.turn-changes-card')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('修改了 1 个文件')
+  await expect(card).toContainText('+366')
+  await expect(page.locator('.turn-changes-card')).toHaveCount(1)
+  await expect(page.locator('.composer-progress')).toHaveCount(0)
+  await page.screenshot({
+    path: resolve(screenshotDir, 'final-inline-changes.png'),
+    fullPage: false,
+  })
+})
+
 test('model editor discovers candidates and retains a custom model id', async ({
   page,
 }) => {
@@ -952,6 +1012,28 @@ test('slash menu activates Goal and Plan without inserting usage text', async ({
   await page.goto('/chat')
   const textarea = page.locator('.composer textarea')
 
+  await textarea.fill('/')
+  const slashPalette = page.locator('.capability-picker[data-mode="slash"]')
+  await expect(slashPalette).toBeVisible()
+  await expect(slashPalette).toContainText('内置命令')
+  await expect(slashPalette).toContainText('项目 Skill')
+  await expect(
+    slashPalette.getByRole('button', { name: /^\/help\b/ }),
+  ).toBeVisible()
+  await page.screenshot({
+    path: resolve(screenshotDir, 'composer-slash-command-platform.png'),
+    fullPage: false,
+  })
+  const projectSkill = slashPalette.getByRole('button', {
+    name: /^\/visual-audit\b/,
+  })
+  await projectSkill.scrollIntoViewIfNeeded()
+  await expect(projectSkill).toBeVisible()
+  await page.screenshot({
+    path: resolve(screenshotDir, 'composer-slash-project-skill.png'),
+    fullPage: false,
+  })
+
   await textarea.fill('/go')
   await page
     .locator('.composer-palette-item[data-action="activate_goal"]')
@@ -1203,6 +1285,7 @@ async function installVisualCoreBridge(page: Page) {
       const visualTheme = visualParams.get('visualTheme')
       const visualQueueEnabled = visualParams.get('visualQueue') === 'on'
       const visualControlMode = visualParams.get('visualControl')
+      const visualProgressMode = visualParams.get('visualProgress')
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
       const project = {
@@ -1211,6 +1294,54 @@ async function installVisualCoreBridge(page: Page) {
         project_name: 'Visual Build Project',
         summary: 'Fixture project for renderer visual tests.',
       }
+      const visualCommands = [
+        visualCommand('help', '系统与诊断', '打开命令中心', {
+          kind: 'local_ui',
+          surface: 'command_center',
+        }),
+        visualCommand('status', '系统与诊断', '查看当前执行状态', {
+          kind: 'local_ui',
+          surface: 'status',
+        }),
+        visualCommand('clear', '会话与历史', '创建全新上下文', {
+          busyPolicy: 'after_turn',
+          dangerous: true,
+        }),
+        visualCommand('plan', '模型与执行', '开启 Plan 并生成实施方案', {
+          busyPolicy: 'after_turn',
+          argumentHint: '[on|off|status|open|description]',
+        }),
+        visualCommand('goal', '模型与执行', '启动或管理长期 Goal', {
+          busyPolicy: 'after_turn',
+          argumentHint: '[start|status|list|pause|resume|cancel]',
+        }),
+        visualCommand('files', '能力与工作台', '打开项目文件工作区', {
+          kind: 'local_ui',
+          surface: 'files',
+          argumentHint: '[path|query]',
+        }),
+        {
+          ...visualCommand(
+            'visual-audit',
+            '项目 Skill',
+            '运行项目专属视觉审计',
+            {
+              kind: 'agent_prompt',
+              busyPolicy: 'after_turn',
+              argumentHint: '[scope]',
+            },
+          ),
+          id: 'skill.project.visual-audit',
+          source: 'project_skill',
+          skill: {
+            name: 'visual-audit',
+            context: 'inline',
+            agent: null,
+            allowedTools: [],
+            effort: null,
+          },
+        },
+      ]
       const sessions = [
         session('build-ui', '构建 Visual UI', 'build', project),
         session('build-api', '构建 Visual API', 'build', project),
@@ -2176,6 +2307,153 @@ async function installVisualCoreBridge(page: Page) {
           },
         ]
       }
+      if (visualProgressMode === 'running') {
+        boot.runtime.busy = true
+        boot.runtime.latestSeq = 5
+        boot.runtime.events = [
+          {
+            event: 'user_message',
+            seq: 1,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_progress',
+            content: '实现底部执行进度',
+            timestamp: now,
+          },
+          {
+            event: 'message_delta',
+            seq: 2,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_progress',
+            delta: '正在实现执行进度胶囊，并同步核对文件变更。',
+            timestamp: now,
+          },
+          {
+            event: 'plan_runtime_update',
+            seq: 3,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_progress',
+            plan: {
+              id: 'plan_visual_progress',
+              title: '执行进度与变更摘要',
+              status: 'executing',
+              steps: [
+                { id: 'step-1', title: '读取执行要求', status: 'completed' },
+                { id: 'step-2', title: '实现进度胶囊', status: 'active' },
+                { id: 'step-3', title: '接入变更统计', status: 'pending' },
+                { id: 'step-4', title: '精简历史 Todo', status: 'pending' },
+                { id: 'step-5', title: '验证键盘交互', status: 'pending' },
+                { id: 'step-6', title: '完成视觉回归', status: 'pending' },
+              ],
+            },
+            timestamp: now,
+          },
+          {
+            event: 'turn_change_snapshot',
+            version: 2,
+            seq: 4,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_progress',
+            turnId: 'turn_visual_progress',
+            executionId: 'execution_visual_progress',
+            rootTurnId: 'turn_visual_progress',
+            activeTurnId: 'turn_visual_progress',
+            status: 'tracking',
+            filesChanged: 3,
+            additions: 301,
+            deletions: 0,
+            binaryFiles: 0,
+            truncated: false,
+            files: [
+              {
+                path: 'ComposerProgressStatus.vue',
+                kind: 'created',
+                additions: 148,
+                deletions: 0,
+                binary: false,
+              },
+              {
+                path: 'ChatView.vue',
+                kind: 'modified',
+                additions: 42,
+                deletions: 0,
+                binary: false,
+              },
+              {
+                path: 'codex-v2.css',
+                kind: 'modified',
+                additions: 111,
+                deletions: 0,
+                binary: false,
+              },
+            ],
+            timestamp: now,
+          },
+          {
+            event: 'thought_delta',
+            seq: 5,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_progress',
+            content: '核对弹框位置和底部安全间距。',
+            timestamp: now,
+          },
+        ]
+      } else if (visualProgressMode === 'final') {
+        boot.runtime.busy = false
+        boot.runtime.latestSeq = 4
+        boot.runtime.events = [
+          {
+            event: 'user_message',
+            seq: 1,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_final',
+            content: '修复最终文件变更摘要',
+            timestamp: now,
+          },
+          {
+            event: 'message_delta',
+            seq: 2,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_final',
+            delta: '最终摘要已经并入回答时间线，并保持与正文相同的内容宽度。',
+            timestamp: now,
+          },
+          {
+            event: 'assistant_done',
+            seq: 3,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_final',
+            content: '最终摘要已经并入回答时间线，并保持与正文相同的内容宽度。',
+            timestamp: now,
+          },
+          {
+            event: 'turn_change_snapshot',
+            version: 2,
+            seq: 4,
+            session_id: 'build-ui',
+            turn_id: 'turn_visual_final',
+            turnId: 'turn_visual_final',
+            executionId: 'execution_visual_final',
+            rootTurnId: 'turn_visual_final',
+            activeTurnId: 'turn_visual_final',
+            status: 'complete',
+            filesChanged: 1,
+            additions: 366,
+            deletions: 0,
+            binaryFiles: 0,
+            truncated: false,
+            files: [
+              {
+                path: 'index.html',
+                kind: 'created',
+                additions: 366,
+                deletions: 0,
+                binary: false,
+              },
+            ],
+            timestamp: now,
+          },
+        ]
+      }
       let visualRuntimeSeq = boot.runtime.latestSeq
 
       function emitVisualRuntime(event: Record<string, unknown>) {
@@ -2210,6 +2488,38 @@ async function installVisualCoreBridge(page: Page) {
         }
       }
 
+      function visualCommand(
+        name: string,
+        category: string,
+        description: string,
+        options: {
+          kind?: 'local_ui' | 'core_action' | 'agent_prompt'
+          busyPolicy?: 'immediate' | 'after_turn' | 'reject_when_busy'
+          surface?: string
+          argumentHint?: string
+          dangerous?: boolean
+        } = {},
+      ) {
+        return {
+          id: `builtin.${name}`,
+          name,
+          aliases: [],
+          hiddenAliases: [],
+          category,
+          description,
+          kind: options.kind ?? 'core_action',
+          source: 'builtin',
+          busyPolicy: options.busyPolicy ?? 'immediate',
+          argumentSchema: [],
+          argumentHint: options.argumentHint,
+          userInvocable: true,
+          invocationSources: ['desktop'],
+          available: true,
+          uiSurface: options.surface,
+          dangerous: options.dangerous,
+        }
+      }
+
       window.emperor = {
         version: '0.1.0-visual',
         platform: 'visual',
@@ -2237,6 +2547,16 @@ async function installVisualCoreBridge(page: Page) {
           switch (operationKey) {
             case 'bootstrap':
               return boot
+            case 'commands.list':
+              return visualCommands
+            case 'commands.complete':
+              return []
+            case 'commands.invoke':
+              return {
+                status: 'rejected',
+                code: 'visual_command_not_executed',
+                message: '视觉夹具不执行命令副作用。',
+              }
             case 'sessions.list':
               return sessions
             case 'sessions.activate':

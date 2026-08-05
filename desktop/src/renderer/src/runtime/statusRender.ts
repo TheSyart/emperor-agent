@@ -2,7 +2,6 @@
  * 斜杠命令输出的纯文本渲染器（W6：从 App.vue 下沉）。
  * 全部为显式输入的纯函数，便于 headless 测试；不得触碰组件作用域。
  */
-import { slashCommands } from '../commands'
 import type {
   BootstrapPayload,
   CompactResult,
@@ -20,16 +19,7 @@ export function renderCommandHelp() {
   return [
     '## 斜杠命令',
     '',
-    ...slashCommands.map(
-      (command) => `- ${inlineCode(command.usage)}：${command.description}`,
-    ),
-    '',
-    '### Skill 快捷调用',
-    '',
-    `- ${inlineCode('/<skill-name> 任务')}：强制本轮预加载并使用指定 Skill`,
-    `- ${inlineCode('/<skill-name>-skill 任务')}：当名称与系统命令冲突时使用 Skill 别名`,
-    '',
-    '提示：输入 `/` 会显示候选，按 `Tab` 可补全第一项。',
+    '命令目录由 Core 动态提供。输入 `/help` 打开命令中心，或在 Composer 输入 `/` 搜索当前会话可用命令。',
   ].join('\n')
 }
 

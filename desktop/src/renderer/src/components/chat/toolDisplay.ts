@@ -151,5 +151,13 @@ export function toolStatusText(status: ToolStatus): string {
 export function durationLabel(ms?: number): string {
   if (!ms && ms !== 0) return ''
   if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  // 长任务走分钟级(对齐 Codex「14m 26s」),避免 830s 这种难读的大秒数
+  const totalSeconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes < 60) return `${minutes}m ${seconds}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
 }

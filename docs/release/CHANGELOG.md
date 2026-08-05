@@ -6,6 +6,7 @@
 
 ### Added
 
+- 增加 Core 权威 Slash command 平台、动态参数补全和 Skill 命令 frontmatter；`/clear` 现在通过可恢复事务创建真正无旧会话历史的新上下文。
 - 增加 Chat 右侧项目工作台：Environment 聚合状态、Git Review、应用内系统 Terminal 和只读 Files 浏览/预览。
 - 增加每个用户 turn 的净变更账本：执行中实时显示文件数与增删行，最终 Changes 卡和回复共享同一 Core 事实源。
 - 增加结构化 Git 仓库身份、状态/Diff、worktree、操作凭据和 PR 工作流；子代理隔离 worktree 复用同一安全管理器。

@@ -60,7 +60,7 @@ function toggle() {
     <span class="thought-status-label">{{ statusLabel }}</span>
   </div>
 
-  <!-- 有 summary 且收起:单行按钮 -->
+  <!-- 有 summary 且收起:单行按钮(带内容预览,扫读可见) -->
   <button
     v-else-if="!isOpen"
     type="button"
@@ -73,10 +73,11 @@ function toggle() {
       isError ? '!' : '✓'
     }}</span>
     <span class="thought-collapsed-label">{{ statusLabel }}</span>
+    <span class="thought-preview">{{ summary }}</span>
     <span class="thought-chevron" aria-hidden="true">›</span>
   </button>
 
-  <!-- 有 summary 且展开:引述块 -->
+  <!-- 有 summary 且展开:引述块(限高内部滚动 + 上下 fade) -->
   <div
     v-else
     class="timeline-node thought-quote"
@@ -92,12 +93,21 @@ function toggle() {
       <span v-else class="thought-state-icon" aria-hidden="true">{{
         isError ? '!' : '✓'
       }}</span>
-      <span>{{ isRunning ? '思考中…' : statusLabel }}</span>
+      <span v-if="isRunning" class="shimmer-text thought-running-label"
+        >思考中…</span
+      >
+      <span v-else>{{ statusLabel }}</span>
       <span class="thought-chevron" aria-hidden="true">⌄</span>
     </button>
-    <div class="thought-quote-body">
-      {{ summary
-      }}<span v-if="isRunning" class="thought-live-cursor" aria-hidden="true" />
+    <div class="thought-quote-scroll">
+      <div class="thought-quote-body">
+        {{ summary
+        }}<span
+          v-if="isRunning"
+          class="thought-live-cursor"
+          aria-hidden="true"
+        />
+      </div>
     </div>
   </div>
 </template>

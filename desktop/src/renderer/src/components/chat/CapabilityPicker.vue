@@ -9,6 +9,7 @@ const props = defineProps<{
   heading: string
   hint: string
   mode: 'add' | 'slash'
+  activeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -34,8 +35,10 @@ const emit = defineEmits<{
         :key="item.id"
         type="button"
         class="composer-palette-item capability-picker-item"
+        :class="{ active: item.id === props.activeId }"
         :data-action="item.action"
         :data-tone="item.tone || item.capability?.tone || 'slate'"
+        :aria-current="item.id === props.activeId ? 'true' : undefined"
         @click="emit('select', item)"
       >
         <span class="composer-palette-item-icon">

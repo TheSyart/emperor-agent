@@ -2869,6 +2869,28 @@ export class AgentLoop {
     this.hookService.clearSession(sessionId)
   }
 
+  /**
+   * Emits the lifecycle boundary used by `/clear` without closing runtimes that
+   * still belong to the old, resumable session. Background work remains owned
+   * by that session and cannot leak into the new context.
+   */
+  async notifySessionTransitionEnd(
+    sessionId: string,
+    reason: 'clear',
+  ): Promise<void> {
+    const session = this.sessionStore.get(sessionId)
+    if (!session) return
+    await this.hookService
+      .run('SessionEnd', {
+        sessionId,
+        cwd: this.workspaceRootForSession(session),
+        projectRoot:
+          session.mode === 'build' ? (session.project_path ?? null) : null,
+        reason,
+      })
+      .catch(() => {})
+  }
+
   refreshRuntimeContext(): void {
     for (const actor of this.sessionRuntimes.listActors()) {
       const bindings = actor.bindings
@@ -2923,6 +2945,12 @@ export class AgentLoop {
 
   effectiveSkillConfigResolutions(): Array<Resolved<any>> {
     return this.skillsLoader.configResolutions()
+  }
+
+  resolvedSkillsForSession(sessionId: string): FileSkillValue[] {
+    const actor = this.sessionRuntimes.get(sessionId)
+    if (!actor) return []
+    return actor.bindings.skillsLoader.resolvedSkills()
   }
 
   async refreshModelConfig(): Promise<void> {
@@ -4752,6 +4780,13 @@ class FileSkillsLoader implements SkillsLoaderLike, ToolSkillsLoader {
         })),
       })
     })
+  }
+
+  resolvedSkills(): FileSkillValue[] {
+    return this.skillNames()
+      .map((name) => this.resolveSkill(name).value)
+      .filter((value): value is FileSkillValue => Boolean(value))
+      .map((value) => ({ ...value }))
   }
 
   private resolveSkill(name: string): Resolved<FileSkillValue | null> {

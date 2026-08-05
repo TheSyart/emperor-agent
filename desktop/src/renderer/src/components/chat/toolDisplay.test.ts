@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ToolSegment } from '../../types'
 import {
+  durationLabel,
   fullOutputRef,
   toolStatusText,
   toolTargetLabel,
@@ -120,5 +121,20 @@ describe('toolStatusText (Wave4.2)', () => {
     expect(toolStatusText('done')).toBe('完成')
     expect(toolStatusText('error')).toBe('出错')
     expect(toolStatusText('error_aborted')).toBe('已中断')
+  })
+})
+
+describe('durationLabel', () => {
+  it('formats sub-second, seconds, minute, and hour tiers', () => {
+    expect(durationLabel(undefined)).toBe('')
+    expect(durationLabel(0)).toBe('0ms')
+    expect(durationLabel(420)).toBe('420ms')
+    expect(durationLabel(1500)).toBe('1.5s')
+    expect(durationLabel(9_999)).toBe('10.0s')
+    expect(durationLabel(12_000)).toBe('12s')
+    expect(durationLabel(59_500)).toBe('60s')
+    expect(durationLabel(830_000)).toBe('13m 50s')
+    expect(durationLabel(866_000)).toBe('14m 26s')
+    expect(durationLabel(3_900_000)).toBe('1h 5m')
   })
 })

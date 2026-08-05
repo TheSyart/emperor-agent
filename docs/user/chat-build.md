@@ -43,7 +43,21 @@ Build 会话默认在消息区右上角始终显示紧凑的 Environment 浮卡�
 
 Review 始终保留入口；当前目录不是 Git 仓库时显示不可用。没有项目绑定的 Chat 不显示 Terminal 和 Files。Files 本轮不提供保存、重命名、删除、LSP 或内置代码编辑器。
 
-Agent 执行受管文件修改时，Composer 或底部 Ask/Plan 面板上方会实时显示“当前步骤 · N files changed · +A −D”。统计只覆盖本次用户任务相对起点的净变化，不混入任务前脏文件；一次任务跨 Ask、Permission、Plan 审批或明确继续后仍沿用同一统计，不会拆成多张卡。点击可打开 Review 并查看本次涉及文件。最终答复下方保留静态 Changes 卡，正文也会准确写明同一组总数。已证明只读的 Shell 不会把状态污染为 partial；只有成功执行且无法精确归因的 workspace 写入才会标为“已确认的变更 / partial”。
+Agent 执行时，Composer 上方会用一个紧凑胶囊合并显示 `Step X / N` 与 `N files changed · +A −D`；悬停、键盘聚焦或点击胶囊可查看完整 Plan 步骤或独立 Todo，因而不会再在聊天时间线中重复插入大型 Todo 卡。等待 Ask、Permission 或 Plan 审批时胶囊隐藏，任务终结后立即消失。文件统计只覆盖本次用户任务相对起点的净变化，不混入任务前脏文件；一次任务跨 Ask、Permission、Plan 审批或明确继续后仍沿用同一统计，不会拆成多张卡。胶囊和最终 Changes 摘要都可打开 Review，并默认只显示本次任务涉及的精确文件；Review 内可切回全部变更。最终摘要作为回答时间线内的紧凑辅助卡只出现一次，正文也会准确写明同一组总数。已证明只读的 Shell 不会把状态污染为 partial；只有成功执行且无法精确归因的 workspace 写入才会标为“已确认的变更 / partial”。
+
+## 斜杠命令
+
+Composer 输入 `/` 后显示由 Core 返回的命令和 active Skill。候选按最近使用、内置命令、项目 Skill、用户 Skill和内置/受信插件 Skill 分组；上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。模型、文件、工具、会话等参数候选也由 Core 按当前 session 动态补全。
+
+- `/help` 打开命令中心，`/help --all` 同时显示当前不可用的命令和原因。
+- `/clear` 创建一个新的 session 上下文；旧 session 仍在侧栏，新 session 继承 Chat/Build、项目、活动 worktree、全局模型与权限，但不继承历史、Plan、Goal、Todo、消息队列、checkpoint、execution ledger 或附件。
+- `/compact [instructions]` 在同一 session 中压缩历史并保留摘要，不等同于 `/clear`。
+- `/resume` 搜索历史会话；`/continue` 只恢复暂停的 Plan 或 Goal，两者不再互为别名。
+- `/permissions ask|smart|full` 管理三档权限；旧 `/mode` 只作为隐藏兼容语法。
+- `/files`、`/terminal`、`/review` 和 `/git` 打开右侧项目工作台，不产生聊天气泡。
+- `/<skill-name> [task]` 调用 Skill，并只在时间线保留一条原始用户消息，不泄漏展开后的 Skill prompt。
+
+未知命令或不可用命令只显示本地错误，不会作为普通文本发送给模型。模型回复中的斜杠文本也不会执行。带附件的内置控制命令会被拒绝；Skill 命令可以携带附件。完整目录、忙碌调度、兼容别名和安全边界见 [Slash command 平台](../architecture/slash-command-platform.md)。
 
 ## 会话操作
 

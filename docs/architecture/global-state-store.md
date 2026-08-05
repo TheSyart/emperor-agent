@@ -105,6 +105,8 @@ Emperor Agent 区分两个互不重叠的根目录概念：
   control/
     state.json
     core-action.key
+    command-invocations.json      # Slash command 幂等调用的脱敏 receipt
+    session-transitions.json      # /clear prepared → applied 会话转换事务
     turn-continuation-diagnostics.jsonl # 历史版本续跑评估诊断；新主回合不再写入
   hooks/
     audit.jsonl
@@ -153,6 +155,8 @@ Code Graph 最多索引 200 个受支持文件、累计 5 MiB、单文件 5 MiB�
 活动或暂停用户任务的 `turn-changes/<session>/<executionId>.json` 只保存归因所需的受控基线，不把文件正文写入聊天或 runtime event。Ask、Permission、Plan 审批与明确继续共享原 `executionId`；普通新请求建立新账本。受管文件工具成功后，Core 相对任务起点计算净创建、修改、删除、重命名、二进制与 `+/-` 行数；恢复原状的文件退出集合。任务终态后删除基线正文，只保留有界 V2 `turn_change_snapshot` 公开统计。已证明只读的 Shell 不触碰账本，只有成功且无法精确归因的 workspace 写入才降为 `partial`，不能伪造总数。
 
 `control/plan-execution-settlements.json` 保存 Plan 执行动作的私有 prepared/applied 事务，`control/core-action.key` 只用于本机 Core 签名。记录绑定 interaction、session、Plan、Step、审批代次和验证 requirement；不会把签名密钥、完整诊断或文件正文暴露给 renderer。启动恢复会幂等重放未完成结算，已写入 Plan metadata 的 receipt 防止同一动作重复生效。
+
+`control/command-invocations.json` 保存按 session + invocation ID 去重的命令摘要和结果，不保存敏感参数。`control/session-transitions.json` 保存 `/clear` 的 `prepared → ended → created → applied` 事务；目标 session ID 在 prepare 时即固定，重启恢复不会创建第二个 child。新 SessionEntry 记录 `parent_session_id`、`lineage_root_id` 与 `transition_reason=clear`；旧 session 不删除，进入转换屏障后不再接收新的聊天提交。命令平台不创建项目内 `.emperor/commands/` 或其他动态代码目录。
 
 `git/worktree-leases.json`、`subagent-worktrees/.leases.json` 与 `git/receipts/*.jsonl` 均为 Core 私有数据。Session 和子代理 worktree 都由同一个 `GitWorktreeManager` 校验仓库身份、受控路径和 lease，只允许 Emperor 创建且归属可验证的目录被自动清理。Receipt 只保存 action、branch、commit OID、脱敏 remote host、PR 编号/HTTPS URL/状态和完成时间，不保存 argv、环境变量或凭据。
 

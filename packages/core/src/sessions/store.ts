@@ -34,13 +34,22 @@ export interface SessionEntry {
   project_name: string | null
   archived_at: string | null
   control_pending: SessionControlPending | null
+  parent_session_id: string | null
+  lineage_root_id: string | null
+  transition_reason: 'clear' | null
+  transitioned_to_session_id: string | null
+  transitioned_at: string | null
   version: number
 }
 
 export interface SessionCreateOptions {
+  id?: string | null
   titleStatus?: string | null
   mode?: string
   project?: Record<string, unknown> | null
+  parentSessionId?: string | null
+  lineageRootId?: string | null
+  transitionReason?: 'clear' | null
 }
 
 export type SessionIndexSource = 'cache' | 'rebuilt'
@@ -105,7 +114,7 @@ export class SessionStore {
     const mode = opts.mode === 'build' ? 'build' : 'chat'
     const project = opts.project ?? {}
     const entry: SessionEntry = {
-      id: randomUUID().replace(/-/g, '').slice(0, 16),
+      id: sessionId(opts.id),
       title: cleanTitle || 'Untitled',
       created_at: now,
       updated_at: now,
@@ -118,6 +127,11 @@ export class SessionStore {
       project_name: nullableText(project.project_name),
       archived_at: null,
       control_pending: null,
+      parent_session_id: nullableText(opts.parentSessionId),
+      lineage_root_id: nullableText(opts.lineageRootId),
+      transition_reason: opts.transitionReason === 'clear' ? 'clear' : null,
+      transitioned_to_session_id: null,
+      transitioned_at: null,
       version: VERSION,
     }
     this.appendSnapshot(entry)
@@ -219,6 +233,23 @@ export class SessionStore {
     for (const item of items) {
       if (item.id !== sessionId) continue
       item.control_pending = null
+      item.updated_at = stamp()
+      this.appendSnapshot(item)
+      this.load()
+      return cloneSession(item)
+    }
+    return null
+  }
+
+  markTransitioned(
+    sessionId: string,
+    targetSessionId: string,
+  ): SessionEntry | null {
+    const items = this.load()
+    for (const item of items) {
+      if (item.id !== sessionId) continue
+      item.transitioned_to_session_id = targetSessionId
+      item.transitioned_at = stamp()
       item.updated_at = stamp()
       this.appendSnapshot(item)
       this.load()
@@ -556,6 +587,11 @@ export class SessionStore {
       project_name: null,
       archived_at: null,
       control_pending: null,
+      parent_session_id: null,
+      lineage_root_id: null,
+      transition_reason: null,
+      transitioned_to_session_id: null,
+      transitioned_at: null,
       version: VERSION,
     }
     this.appendSnapshot(entry)
@@ -564,6 +600,13 @@ export class SessionStore {
     diagnostics.rebuildReasons.push(`recovered_session:${sessionId}`)
     return entry
   }
+}
+
+function sessionId(requested: string | null | undefined): string {
+  const value = String(requested ?? '').trim()
+  if (value && /^[A-Za-z0-9][A-Za-z0-9_.-]{7,95}$/.test(value)) return value
+  if (value) throw new Error('invalid session id')
+  return randomUUID().replace(/-/g, '').slice(0, 16)
 }
 
 function normalizeSession(raw: Record<string, unknown>): SessionEntry {
@@ -597,6 +640,18 @@ function normalizeSession(raw: Record<string, unknown>): SessionEntry {
     control_pending: normalizeControlPending(
       raw.control_pending ?? raw.controlPending,
     ),
+    parent_session_id: nullableText(
+      raw.parent_session_id ?? raw.parentSessionId,
+    ),
+    lineage_root_id: nullableText(raw.lineage_root_id ?? raw.lineageRootId),
+    transition_reason:
+      String(raw.transition_reason ?? raw.transitionReason ?? '') === 'clear'
+        ? 'clear'
+        : null,
+    transitioned_to_session_id: nullableText(
+      raw.transitioned_to_session_id ?? raw.transitionedToSessionId,
+    ),
+    transitioned_at: nullableText(raw.transitioned_at ?? raw.transitionedAt),
     version: toInt(raw.version, VERSION),
   }
 }

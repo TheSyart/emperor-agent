@@ -44,6 +44,9 @@ const EXPECTED_OPERATIONS = [
   'chat.manageQueuedPrompt',
   'chat.stopRuntime',
   'chat.submit',
+  'commands.complete',
+  'commands.invoke',
+  'commands.list',
   'config.effective',
   'config.get',
   'config.save',
@@ -3886,6 +3889,133 @@ describe('CoreApi (MIG-IPC-001)', () => {
       running: false,
       lastError: null,
     })
+
+    await api.close()
+  })
+
+  it('owns slash command discovery and creates a real clear-session boundary', async () => {
+    const root = tmp('emperor-core-api-commands-')
+    const stateRoot = join(root, '.emperor')
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    await api.bootstrap()
+    const previousSessionId = String(api.loop.activeSessionId)
+    const commands = await api.commands.list({
+      sessionId: previousSessionId,
+      invocationSource: 'desktop',
+    })
+    expect(commands.find((item) => item.id === 'builtin.clear')).toMatchObject({
+      name: 'clear',
+      kind: 'core_action',
+    })
+
+    const result = await api.commands.invoke({
+      sessionId: previousSessionId,
+      commandId: 'builtin.clear',
+      rawInput: '/clear',
+      invocationId: 'clear-core-api-1',
+      invocationSource: 'desktop',
+    })
+    expect(result).toMatchObject({
+      status: 'completed',
+      receipt: { code: 'session_transitioned' },
+    })
+    const nextSessionId = String(api.loop.activeSessionId)
+    expect(nextSessionId).not.toBe(previousSessionId)
+    expect(api.loop.sessionStore.get(nextSessionId)).toMatchObject({
+      parent_session_id: previousSessionId,
+      message_count: 0,
+    })
+    expect(api.loop.sessionStore.get(previousSessionId)).toMatchObject({
+      transitioned_to_session_id: nextSessionId,
+    })
+
+    await api.close()
+  })
+
+  it('builds the slash command catalog from the current session skill resolution', async () => {
+    const root = tmp('emperor-core-api-command-skills-')
+    const stateRoot = join(root, '.emperor')
+    const projectRoot = tmp('emperor-core-api-command-project-')
+    const userSkillDir = join(stateRoot, 'skills', 'greet')
+    const projectSkillDir = join(projectRoot, '.emperor', 'skills', 'greet')
+    mkdirSync(userSkillDir, { recursive: true })
+    mkdirSync(projectSkillDir, { recursive: true })
+    writeFileSync(
+      join(userSkillDir, 'SKILL.md'),
+      `---
+name: greet
+description: User greeting
+---
+
+Greet from the user profile.
+`,
+      'utf8',
+    )
+    writeFileSync(
+      join(projectSkillDir, 'SKILL.md'),
+      `---
+name: greet
+description: Project greeting
+metadata:
+  emperor:
+    command:
+      user_invocable: true
+      name: project-greet
+      aliases: [pgreet]
+---
+
+Greet from the project.
+`,
+      'utf8',
+    )
+
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    await api.bootstrap()
+    const chatSessionId = String(api.loop.activeSessionId)
+    const project = api.loop.projectStore.resolve(projectRoot)
+    const build = api.loop.sessionStore.create('Project commands', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    api.loop.activateSession(build.id)
+
+    const buildCommands = await api.commands.list({
+      sessionId: build.id,
+      invocationSource: 'desktop',
+    })
+    expect(
+      buildCommands.find((command) => command.id === 'skill.project.greet'),
+    ).toMatchObject({
+      name: 'project-greet',
+      aliases: ['pgreet'],
+      source: 'project_skill',
+      skill: { name: 'greet', context: 'inline' },
+    })
+
+    api.loop.activateSession(chatSessionId)
+    const chatCommands = await api.commands.list({
+      sessionId: chatSessionId,
+      invocationSource: 'desktop',
+    })
+    expect(
+      chatCommands.find((command) => command.id === 'skill.user.greet'),
+    ).toMatchObject({
+      name: 'greet',
+      source: 'user_skill',
+    })
+    expect(
+      chatCommands.some((command) => command.name === 'project-greet'),
+    ).toBe(false)
 
     await api.close()
   })

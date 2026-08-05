@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
@@ -7,11 +7,11 @@ import { activeBottomControlPanelForInteraction } from '../components/chat/botto
 import ActiveAskPanel from '../components/chat/ActiveAskPanel.vue'
 import ActivePlanDecisionPanel from '../components/chat/ActivePlanDecisionPanel.vue'
 import Composer from '../components/chat/Composer.vue'
+import ComposerProgressStatus from '../components/chat/ComposerProgressStatus.vue'
 import GoalStatusBar from '../components/chat/GoalStatusBar.vue'
 import MessageList from '../components/chat/MessageList.vue'
 import QueueTray from '../components/chat/QueueTray.vue'
-import TurnChangesStatus from '../components/chat/TurnChangesStatus.vue'
-import { shouldShowTurnChangesStatus } from '../components/chat/turnChangesModel'
+import { executionProgressForSession } from '../components/chat/executionProgressModel'
 import RightWorkspace from '../components/workspace/RightWorkspace.vue'
 import type { WorkspaceSource } from '../components/workspace/workspaceTypes'
 import { useSession } from '../composables/useSession'
@@ -30,7 +30,45 @@ const composer = ref<{
   focusInput: () => void
   restoreDraft: (payload: ChatSendPayload) => void
 } | null>(null)
-const rightWorkspace = ref<{ openReview: () => void } | null>(null)
+const rightWorkspace = ref<{
+  openReview: (paths?: string[]) => void
+  openPane: (pane: 'review' | 'terminal' | 'files') => void
+} | null>(null)
+
+function openWorkspaceFromCommand(event: Event): void {
+  const detail = (
+    event as CustomEvent<{
+      pane?: 'review' | 'terminal' | 'files'
+      paths?: string[]
+    }>
+  ).detail
+  if (!detail?.pane) return
+  if (detail.pane === 'review') rightWorkspace.value?.openReview(detail.paths)
+  else rightWorkspace.value?.openPane(detail.pane)
+}
+
+function setComposerDraftFromCommand(event: Event): void {
+  const text = String(
+    (event as CustomEvent<{ text?: string }>).detail?.text ?? '',
+  )
+  if (!text) return
+  void nextTick(() => composer.value?.setDraft(text))
+}
+
+onMounted(() => {
+  window.addEventListener('emperor:open-workspace', openWorkspaceFromCommand)
+  window.addEventListener(
+    'emperor:set-composer-draft',
+    setComposerDraftFromCommand,
+  )
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('emperor:open-workspace', openWorkspaceFromCommand)
+  window.removeEventListener(
+    'emperor:set-composer-draft',
+    setComposerDraftFromCommand,
+  )
+})
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -129,14 +167,25 @@ const turnChanges = computed(() =>
 )
 const liveTurnChange = computed(() => {
   const snapshot = ctx.activeTurnChange.value
-  return shouldShowTurnChangesStatus(snapshot, ctx.busy.value) &&
-    snapshot.filesChanged > 0
-    ? snapshot
-    : null
+  // tracking 期间显示实时累计;partial/complete 后展示确认总数(回合小结)
+  return snapshot && snapshot.filesChanged > 0 ? snapshot : null
 })
+const executionProgress = computed(() =>
+  executionProgressForSession({
+    busy: ctx.busy.value,
+    blockedByControl: Boolean(activeBottomControl.value),
+    plans: ctx.planProjection.plans,
+    messages: ctx.messages.value,
+  }),
+)
+const showComposerProgress = computed(
+  () =>
+    !activeBottomControl.value &&
+    Boolean(executionProgress.value || liveTurnChange.value),
+)
 
-function openTaskReview(): void {
-  rightWorkspace.value?.openReview()
+function openTaskReview(paths: string[] = []): void {
+  rightWorkspace.value?.openReview(paths)
 }
 
 function rememberSource(seen: Set<string>, id: string): boolean {
@@ -327,8 +376,9 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           />
 
           <div class="chat-bottom-stack">
-            <TurnChangesStatus
-              v-if="liveTurnChange"
+            <ComposerProgressStatus
+              v-if="showComposerProgress"
+              :progress="executionProgress"
               :snapshot="liveTurnChange"
               @open-review="openTaskReview"
             />
@@ -423,6 +473,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
                   false
                 "
                 :send-blocked-reason="sendBlockedReason"
+                :complete-command="ctx.completeSlashCommand"
                 @set-permission="ctx.setPermissionMode"
                 @activate-plan="activatePlan"
                 @activate-goal="activateGoalCapture"

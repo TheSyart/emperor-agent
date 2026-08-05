@@ -140,6 +140,7 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     expect(service.list()).toEqual([
       {
         always: true,
+        command: null,
         description: 'Audit code changes',
         name: 'code-audit',
         path: 'skills/code-audit/SKILL.md',
@@ -151,6 +152,7 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       },
       {
         always: false,
+        command: null,
         description: 'Create skills.',
         name: 'skill-creator',
         path: 'skills/skill-creator/SKILL.md',
@@ -189,6 +191,69 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       'Skill name must be a safe directory name',
     )
     expect(() => service.delete('skill-creator')).toThrow(/read-only/i)
+  })
+
+  it('parses Emperor slash-command metadata without trusting renderer-owned fields', () => {
+    const root = tmp('emperor-skill-command-metadata-')
+    const stateRoot = join(root, 'state')
+    const skillDir = join(stateRoot, 'skills', 'review-code')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: review-code',
+        'description: Review a selected scope',
+        'metadata:',
+        '  emperor:',
+        '    command:',
+        '      user_invocable: true',
+        '      name: review-code',
+        '      aliases: [audit-now]',
+        '      argument_hint: "[scope]"',
+        '      context: fork',
+        '      agent: sili_suitang',
+        '      allowed_tools: [read_file, grep]',
+        '      effort: high',
+        '      invocation_sources: [desktop]',
+        '      sensitive_arguments: [token]',
+        '      arguments:',
+        '        - name: scope',
+        '          type: relative_path',
+        '          required: true',
+        '          positional: true',
+        '---',
+        '',
+        '# Review code',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const service = new CoreSkillService(stateRoot)
+
+    expect(service.get('review-code').command).toEqual({
+      userInvocable: true,
+      name: 'review-code',
+      aliases: ['audit-now'],
+      argumentHint: '[scope]',
+      arguments: [
+        {
+          name: 'scope',
+          type: 'relative_path',
+          required: true,
+          positional: true,
+          values: [],
+          description: undefined,
+          variadic: false,
+        },
+      ],
+      context: 'fork',
+      agent: 'sili_suitang',
+      allowedTools: ['read_file', 'grep'],
+      effort: 'high',
+      invocationSources: ['desktop'],
+      sensitiveArguments: ['token'],
+    })
   })
 
   it('uses user precedence and never scans a sibling skills-catalog', () => {

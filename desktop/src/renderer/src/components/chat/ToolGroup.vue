@@ -78,6 +78,17 @@ function toolStatusLabel(tool: ToolSegment) {
   return statusLabel(tool.status)
 }
 
+/** 工具行结果小字:名称→目标→结果 的第三级信息(summary 非语义摘要,仅截断展示) */
+function toolResultLine(tool: ToolSegment) {
+  if (tool.status === 'queued') return '排队中'
+  if (tool.status === 'running') return '等待结果…'
+  const summary = (tool.summary || '').replace(/\s+/g, ' ').trim()
+  if (summary) return summary
+  if (tool.status === 'error' || tool.status === 'error_aborted')
+    return '工具执行出错'
+  return ''
+}
+
 function selectTool(tool: ToolSegment) {
   selectedToolId.value = tool.id
 }
@@ -93,6 +104,7 @@ function selectTool(tool: ToolSegment) {
     <summary class="tool-group-summary">
       <span class="tool-group-icon" aria-hidden="true">
         <component :is="toolIcon(primaryTool?.name || 'tool')" :size="15" />
+        <span class="tool-status-dot" :data-status="props.block.status" />
       </span>
       <span class="tool-group-main">
         <strong>{{ props.block.title }}</strong>
@@ -120,10 +132,17 @@ function selectTool(tool: ToolSegment) {
         >
           <span class="tool-group-tool-icon" aria-hidden="true">
             <component :is="toolIcon(tool.name)" :size="14" />
+            <span class="tool-status-dot" :data-status="tool.status" />
           </span>
           <span class="tool-group-tool-title">
             <strong>{{ toolTitle(tool) }}</strong>
             <small>{{ toolPurpose(tool.name) }}</small>
+            <span
+              v-if="toolResultLine(tool)"
+              class="tool-result-line"
+              :class="{ 'dim-blink': tool.status === 'running' }"
+              >{{ toolResultLine(tool) }}</span
+            >
           </span>
           <span class="tool-group-tool-meta">
             <em>{{ toolStatusLabel(tool) }}</em>

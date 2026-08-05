@@ -1,230 +1,163 @@
-import type { RequestedSkill, SkillInfo } from './types'
-
-export interface SlashCommand {
-  name: string
-  usage: string
-  description: string
-  aliases?: string[]
-}
+import type { CommandDescriptor } from '@emperor/core'
 
 export interface SlashPaletteItem {
   id: string
+  commandId: string
   kind: 'command' | 'skill'
   name: string
   usage: string
   completion: string
   description: string
   aliases?: string[]
-  tags?: string
-  always?: boolean
+  category: string
+  source: CommandDescriptor['source']
+  available: boolean
+  unavailableReason?: string
+  dangerous?: boolean
+  argumentHint?: string
+  recent?: boolean
   skillName?: string
+  tags?: string
+  requiresArguments?: boolean
 }
 
-export type GoalSlashAction =
-  | { kind: 'start'; outcome: string }
-  | { kind: 'status' }
-  | { kind: 'list' }
-  | { kind: 'pause' }
-  | { kind: 'resume' }
-  | { kind: 'cancel' }
-  | { kind: 'missing' }
-
-export const slashCommands: SlashCommand[] = [
-  {
-    name: '/help',
-    usage: '/help',
-    description: '显示可用斜杠命令',
-    aliases: ['/commands'],
-  },
-  {
-    name: '/status',
-    usage: '/status',
-    description: '查看运行状态、模型、Token 与资源计数',
-  },
-  {
-    name: '/model',
-    usage: '/model',
-    description: '输出当前模型与 Provider 配置信息',
-  },
-  {
-    name: '/tokens',
-    usage: '/tokens',
-    description: '输出 Token 消耗统计',
-    aliases: ['/token'],
-  },
-  { name: '/tools', usage: '/tools', description: '输出可用工具摘要' },
-  { name: '/skills', usage: '/skills', description: '输出可用 Skill 摘要' },
-  {
-    name: '/config',
-    usage: '/config',
-    description: '查看并编辑用户配置文件 (USER.local.md)',
-    aliases: ['/configs'],
-  },
-  { name: '/memory', usage: '/memory', description: '输出记忆状态摘要' },
-  {
-    name: '/memory-log',
-    usage: '/memory-log',
-    description: '列出最近的记忆版本快照',
-  },
-  {
-    name: '/memory-restore',
-    usage: '/memory-restore <id>',
-    description: '恢复指定记忆版本快照',
-  },
-  {
-    name: '/plan',
-    usage: '/plan on|off|status',
-    description: '查看或切换 Plan 模式',
-  },
-  {
-    name: '/goal',
-    usage: '/goal <outcome>|status|pause|resume|cancel',
-    description: '启动或管理当前会话的 Goal',
-    aliases: ['/goal-pause', '/goal-resume', '/goal-cancel'],
-  },
-  {
-    name: '/goals',
-    usage: '/goals',
-    description: '列出当前会话的 Goal',
-  },
-  {
-    name: '/mode',
-    usage: '/mode ask|edits|auto|status',
-    description: '查看或切换权限模式',
-  },
-  {
-    name: '/stop',
-    usage: '/stop',
-    description: '停止当前运行中的 turn / Scheduler 任务',
-  },
-  {
-    name: '/continue',
-    usage: '/continue',
-    description: '恢复当前会话暂停的 Plan 或 Goal 执行',
-  },
-  {
-    name: '/compact',
-    usage: '/compact',
-    description: '触发未归档会话压缩，写入 MEMORY/情景记忆',
-  },
-  {
-    name: '/clear',
-    usage: '/clear',
-    description: '清空当前屏幕，不删除运行期记忆',
-  },
-  {
-    name: '/reload',
-    usage: '/reload',
-    description: '刷新 bootstrap、模型、skills、tools、memory',
-  },
-]
+export interface ResolvedSlashInvocation {
+  raw: string
+  token: string
+  name: string
+  rawArgs: string
+  descriptor: CommandDescriptor | null
+}
 
 export function buildSlashPaletteItems(
-  skills: SkillInfo[] = [],
+  descriptors: CommandDescriptor[] = [],
+  recentCommandIds: string[] = [],
 ): SlashPaletteItem[] {
-  const commandItems = slashCommands.map((command) => ({
-    id: `command:${command.name}`,
-    kind: 'command' as const,
-    name: command.name,
-    usage: command.usage,
-    completion:
-      command.usage === command.name ? command.name : `${command.name} `,
-    description: command.description,
-    aliases: command.aliases,
-  }))
-  const skillItems = skills
-    .filter(isCallableSkill)
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((skill) => ({
-      id: `skill:${skill.name}`,
-      kind: 'skill' as const,
-      name: `/${skill.name}`,
-      usage: `/${skill.name}`,
-      completion: `/${skill.name} `,
-      description: skill.description || skill.path,
-      aliases: [`/${skill.name}-skill`],
-      tags: skill.tags,
-      always: skill.always,
-      skillName: skill.name,
+  const recentRank = new Map(
+    recentCommandIds.map((id, index) => [id, index] as const),
+  )
+  return descriptors
+    .map((descriptor) => ({
+      ...descriptorToPaletteItem(descriptor),
+      recent: recentRank.has(descriptor.id),
     }))
-  return [...commandItems, ...skillItems]
+    .sort((left, right) => {
+      const a = recentRank.get(left.commandId)
+      const b = recentRank.get(right.commandId)
+      if (a !== undefined || b !== undefined)
+        return (a ?? Number.MAX_SAFE_INTEGER) - (b ?? Number.MAX_SAFE_INTEGER)
+      return left.name.localeCompare(right.name)
+    })
 }
 
-export function parseSlashCommand(input: string) {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith('/')) return null
-  const [name, ...args] = trimmed.split(/\s+/)
-  if (isPathLikeSlashToken(name)) return null
-  const normalized = name.toLowerCase()
-  const command = slashCommands.find(
-    (item) => item.name === normalized || item.aliases?.includes(normalized),
-  )
-  return { raw: trimmed, name: normalized, command, args }
-}
-
-export function parseGoalSlashCommand(input: string): GoalSlashAction | null {
-  const trimmed = input.trim()
-  if (/^\/goals$/i.test(trimmed)) return { kind: 'list' }
-  const alias = trimmed.match(/^\/goal-(pause|resume|cancel)$/i)
-  if (alias)
-    return {
-      kind: alias[1]!.toLowerCase() as 'pause' | 'resume' | 'cancel',
-    }
-  const match = trimmed.match(/^\/goal(?:\s+(.*))?$/i)
-  if (!match) return null
-  const tail = String(match[1] || '').trim()
-  if (!tail) return { kind: 'missing' }
-  const normalized = tail.toLowerCase()
-  if (normalized === 'status') return { kind: 'status' }
-  if (normalized === 'pause') return { kind: 'pause' }
-  if (normalized === 'resume') return { kind: 'resume' }
-  if (normalized === 'cancel') return { kind: 'cancel' }
-  const explicit = tail.match(/^start(?:\s+(.*))?$/i)
-  if (explicit) {
-    const outcome = String(explicit[1] || '').trim()
-    return outcome ? { kind: 'start', outcome } : { kind: 'missing' }
-  }
-  return { kind: 'start', outcome: tail }
-}
-
-export function parseSkillSlashCommand(
+export function resolveSlashInvocation(
   input: string,
-  skills: SkillInfo[] = [],
-) {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith('/')) return null
-  const [token, ...rest] = trimmed.split(/\s+/)
-  if (isPathLikeSlashToken(token)) return null
-  const normalized = token.slice(1).toLowerCase()
-  const callableSkills = skills.filter(isCallableSkill)
-  const exact = callableSkills.find(
-    (skill) => skill.name.toLowerCase() === normalized,
-  )
-  const alias =
-    !exact && normalized.endsWith('-skill')
-      ? callableSkills.find(
-          (skill) =>
-            skill.name.toLowerCase() === normalized.slice(0, -'-skill'.length),
-        )
-      : undefined
-  const skill = exact || alias
-  if (!skill) return null
-  const requestedSkill: RequestedSkill = { name: skill.name, source: 'slash' }
+  descriptors: CommandDescriptor[],
+): ResolvedSlashInvocation | null {
+  const raw = String(input ?? '').trim()
+  if (!raw.startsWith('/')) return null
+  const token = raw.match(/^\/\S+/)?.[0] ?? ''
+  if (!token || isPathLikeSlashToken(token)) return null
+  const name = token.slice(1).toLowerCase()
+  const descriptor =
+    descriptors.find(
+      (item) =>
+        item.name.toLowerCase() === name ||
+        item.aliases.some((alias) => alias.toLowerCase() === name) ||
+        (item.hiddenAliases ?? []).some(
+          (alias) => alias.toLowerCase() === name,
+        ),
+    ) ?? null
   return {
-    raw: trimmed,
-    name: skill.name,
+    raw,
     token,
-    task: rest.join(' ').trim(),
-    requestedSkill,
+    name,
+    rawArgs: raw.slice(token.length).trimStart(),
+    descriptor,
   }
 }
 
-function isCallableSkill(skill: SkillInfo): boolean {
-  return !skill.status || skill.status === 'active'
+export function rankSlashPaletteItems(
+  items: SlashPaletteItem[],
+  query: string,
+): SlashPaletteItem[] {
+  const normalized = query.trim().replace(/^\//, '').toLowerCase()
+  if (!normalized) return [...items]
+  return items
+    .map((item) => ({ item, score: scoreItem(item, normalized) }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort(
+      (left, right) =>
+        left.score - right.score ||
+        left.item.name.localeCompare(right.item.name),
+    )
+    .map((entry) => entry.item)
 }
 
 export function isPathLikeSlashToken(token: string): boolean {
   const text = token.trim()
   if (!text.startsWith('/') || text === '/') return false
   return text.slice(1).includes('/')
+}
+
+function descriptorToPaletteItem(
+  descriptor: CommandDescriptor,
+): SlashPaletteItem {
+  const name = `/${descriptor.name}`
+  const argumentHint = descriptor.argumentHint?.trim() || ''
+  return {
+    id: `command:${descriptor.id}`,
+    commandId: descriptor.id,
+    kind: descriptor.kind === 'agent_prompt' ? 'skill' : 'command',
+    name,
+    usage: argumentHint ? `${name} ${argumentHint}` : name,
+    completion: argumentHint ? `${name} ` : name,
+    description: descriptor.description,
+    aliases: descriptor.aliases.map((alias) => `/${alias}`),
+    category: descriptor.category,
+    source: descriptor.source,
+    available: descriptor.available,
+    unavailableReason: descriptor.unavailableReason,
+    dangerous: descriptor.dangerous,
+    argumentHint,
+    skillName: descriptor.skill?.name,
+    tags:
+      descriptor.source === 'project_skill'
+        ? 'Project Skill'
+        : descriptor.source === 'user_skill'
+          ? 'User Skill'
+          : descriptor.source === 'verified_plugin'
+            ? 'Plugin Skill'
+            : descriptor.kind === 'agent_prompt'
+              ? 'Built-in Skill'
+              : undefined,
+    requiresArguments: descriptor.argumentSchema.some(
+      (argument) => argument.required,
+    ),
+  }
+}
+
+function scoreItem(item: SlashPaletteItem, query: string): number {
+  const name = item.name.slice(1).toLowerCase()
+  const aliases = (item.aliases ?? []).map((alias) =>
+    alias.replace(/^\//, '').toLowerCase(),
+  )
+  if (name === query) return 0
+  if (aliases.includes(query)) return 1
+  if (name.startsWith(query)) return 2
+  if (aliases.some((alias) => alias.startsWith(query))) return 3
+  if (name.split(/[-_:]/).some((part) => part.startsWith(query))) return 4
+  const haystack =
+    `${name} ${aliases.join(' ')} ${item.description}`.toLowerCase()
+  if (subsequence(query, haystack)) return 5
+  return Number.POSITIVE_INFINITY
+}
+
+function subsequence(needle: string, haystack: string): boolean {
+  let cursor = 0
+  for (const character of haystack) {
+    if (character === needle[cursor]) cursor += 1
+    if (cursor === needle.length) return true
+  }
+  return false
 }

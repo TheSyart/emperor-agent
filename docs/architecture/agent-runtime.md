@@ -43,6 +43,8 @@ flowchart TD
 
 普通 turn 的 busy/cancel/replay 按 session 归属判断。取消 session A 只中止 A 的 signal 和 mailbox command，不取消 B；同一 session 的下一条命令要等前一条进入 terminal 后才执行。Goal 仍保留全局 mutation owner，Goal 运行时普通 turn 不并发进入，避免在后续专门迁移 Goal 所有权前破坏 Completion Gate。当前 actor 数量、running/queued、receipt 数量和非法状态迁移计数可在 Diagnostics 的 `sessionRuntimes` 查看。
 
+用户斜杠命令先由 Core command platform 解析并校验，再按 descriptor 的 `immediate | after_turn | reject_when_busy` 进入对应边界。`after_turn` 使用同一个 actor mailbox，与已提交的用户输入保持顺序；`invocationId` 让双击、IPC 重放和结果轮询只消费一次。`local_ui` 不进入模型历史，`core_action` 只产生脱敏回执，只有受信 Skill 的 `agent_prompt` 会提交一条用户消息。`/clear` 通过持久 SessionTransition 结束旧 session、创建 lineage child 并激活新上下文，不修改全局/项目长期记忆。
+
 每个 actor 的内部 command mailbox 仍以 64 条作为防失控安全上限；面向用户的聊天 prompt queue 另有更严格的每 session 单槽限制。同一 session 已存在尚未开始的 queued/interject prompt 时，新增 busy prompt 在写 message graph 或 runtime event 前返回 `prompt_queue_full`（`capacity=1`），不会创建用户气泡或影响首项；不同 session 的槽互不影响。取消或正式 dequeue 后槽立即释放。升级前已经持久化的多条旧队列不会被删除，Core 会按 FIFO 排空，排空期间拒绝新增。
 
 忙碌 session 在单槽空闲时按 Enter 默认 `queue`，等待当前 command 收口后启动新 turn；文字、附件、Skill 与 MCP 引用都可排队。用户可从 Composer 顶部的队列栏把仍未开始且支持插话的项原子替换成 `interject`，绑定当前 running command，并只在 runner 的模型请求前或模型响应后、工具执行前的安全边界消费。Actor 在替换前同时确认旧项仍 queued 且 owner turn 仍 running；竞态失败时保留原队列项。取消与替换事件幂等，旧项不会丢失或执行两次。附件和显式 Skill 请求不走 interject；已展开为文字上下文的 MCP inline token 可以插话。

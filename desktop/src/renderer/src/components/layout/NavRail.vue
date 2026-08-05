@@ -76,13 +76,6 @@ const modelLabel = computed(
           :size="16"
         />
       </button>
-      <button
-        class="rail-icon-button"
-        title="清空当前屏幕"
-        @click="ctx.clearChat()"
-      >
-        <component :is="actionIcons.clear" :size="16" />
-      </button>
     </div>
   </aside>
 </template>

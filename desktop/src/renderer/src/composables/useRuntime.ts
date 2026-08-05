@@ -989,35 +989,6 @@ export function useRuntime(options: {
     return undefined
   }
 
-  function clearChat() {
-    messages.value = []
-    currentAssistantId.value = null
-    busy.value = false
-    projectionRuntime = createProjectionRuntime()
-    updatePending()
-    options.showToast('当前屏幕已清空')
-  }
-
-  function addLocalCommand(command: string, content: string) {
-    messages.value.push({
-      id: nextId('command'),
-      role: 'user',
-      content: command,
-      local: true,
-    })
-    messages.value.push({
-      id: nextId('command-result'),
-      role: 'assistant',
-      content,
-      segments: content
-        ? [{ id: nextId('segment'), type: 'text', content }]
-        : [],
-      todos: null,
-      streaming: false,
-      local: true,
-    })
-  }
-
   function restoreFromHistory(history: RuntimeHistoryItem[] = []) {
     sessionStore.dispatch({
       type: 'session_bootstrap_tasks',
@@ -2193,8 +2164,6 @@ export function useRuntime(options: {
     approvePlan,
     cancelInteraction,
     stopActive,
-    clearChat,
-    addLocalCommand,
     restoreFromHistory,
   }
 }

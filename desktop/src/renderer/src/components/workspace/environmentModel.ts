@@ -9,6 +9,20 @@ export interface EnvironmentSubagentGroups<T extends object> {
 const ACTIVE_STATUSES = new Set(['running', 'queued', 'pending'])
 const FAILED_STATUSES = new Set(['failed', 'error', 'cancelled', 'interrupted'])
 
+/** Subagent 状态点色调(对齐 Codex 右栏彩点):运行脉冲/排队高亮/完成绿/失败红/取消灰 */
+export function subagentStatusTone(value: unknown): string {
+  const status =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? String((value as Record<string, unknown>)['status'] ?? '')
+      : ''
+  if (status === 'running') return 'running'
+  if (status === 'queued' || status === 'pending') return 'pending'
+  if (status === 'completed') return 'completed'
+  if (status === 'failed' || status === 'error') return 'failed'
+  if (status === 'cancelled' || status === 'interrupted') return 'cancelled'
+  return 'unknown'
+}
+
 export function environmentSubagentGroups<T extends object>(
   agents: T[],
 ): EnvironmentSubagentGroups<T> {

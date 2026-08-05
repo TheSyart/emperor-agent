@@ -5,23 +5,32 @@ import type {
   ControlInteraction,
   RuntimePlanRecord,
   ThoughtSegment,
+  TurnChangeSnapshot,
 } from '../../types'
-import { actionIcons, avatarIcons } from '../../icons'
+import { actionIcons, avatarIcons, checkpointIcons } from '../../icons'
 import { latestPlanForInteraction } from '../../runtime/handlers/plans'
 import MarkdownBlock from './MarkdownBlock.vue'
-import TodoPanel from './TodoPanel.vue'
+import TurnChangesCard from './TurnChangesCard.vue'
 import ToolGroup from './ToolGroup.vue'
 import AskHistoryCard from './AskHistoryCard.vue'
 import PlanCard from './PlanCard.vue'
 import ThoughtEvent from './ThoughtEvent.vue'
 import MediaBlock from './MediaBlock.vue'
-import { projectAssistantFlow } from './assistantFlowProjection'
+import {
+  assistantExecutionDuration,
+  projectAssistantFlow,
+} from './assistantFlowProjection'
+import { durationLabel } from './toolDisplay'
 
 const props = defineProps<{
   message: AssistantMessage
   plans?: RuntimePlanRecord[]
+  turnChange?: TurnChangeSnapshot
 }>()
-const emit = defineEmits<{ continueExecution: [] }>()
+const emit = defineEmits<{
+  continueExecution: []
+  openReview: [paths: string[]]
+}>()
 const copied = ref(false)
 const flowClock = ref(Date.now())
 let flowClockTimer: number | undefined
@@ -37,6 +46,29 @@ const messageText = computed(() => {
 const flowBlocks = computed(() =>
   projectAssistantFlow(props.message, { now: flowClock.value }),
 )
+
+/** streaming 末尾的活体状态行:shimmer 动词 + 耗时 + 当前活动(无 token 数据,不展示) */
+const liveStatus = computed(() => {
+  if (!props.message.streaming) return null
+  const elapsedMs = assistantExecutionDuration(props.message, flowClock.value)
+  let activity = ''
+  for (let index = flowBlocks.value.length - 1; index >= 0; index -= 1) {
+    const block = flowBlocks.value[index]
+    if (!block) continue
+    if (block.kind === 'tool_group' && block.status === 'running') {
+      activity = block.title
+      break
+    }
+    if (block.kind === 'thought' && block.segment.status === 'running') {
+      activity = block.segment.label || '思考中'
+      break
+    }
+  }
+  return {
+    elapsed: durationLabel(elapsedMs),
+    activity,
+  }
+})
 
 const terminalLabel = computed(() => {
   if (!props.message.tombstoned) return ''
@@ -57,6 +89,14 @@ const fallbackThought = computed<ThoughtSegment>(() => ({
 
 function planForInteraction(interaction: ControlInteraction) {
   return latestPlanForInteraction(props.plans || [], interaction)
+}
+
+/** plan 活动节点的 tone 图标:running 旋转 / success 勾 / error 叹号 / neutral 圆点 */
+function planActivityIcon(tone: 'running' | 'success' | 'error' | 'neutral') {
+  if (tone === 'running') return checkpointIcons.loading
+  if (tone === 'success') return checkpointIcons.ok
+  if (tone === 'error') return actionIcons.statusError
+  return actionIcons.statusOnline
 }
 
 async function copyMessage() {
@@ -157,7 +197,13 @@ onBeforeUnmount(stopFlowClock)
             class="timeline-node plan-activity-node"
             :data-tone="block.segment.tone"
           >
-            <span>{{ block.segment.label }}</span>
+            <component
+              :is="planActivityIcon(block.segment.tone)"
+              :size="14"
+              class="plan-activity-icon"
+              aria-hidden="true"
+            />
+            <span class="plan-activity-label">{{ block.segment.label }}</span>
             <strong v-if="block.segment.detail">{{
               block.segment.detail
             }}</strong>
@@ -195,13 +241,22 @@ onBeforeUnmount(stopFlowClock)
               :plan="planForInteraction(block.segment.interaction)"
             />
           </div>
-          <div
-            v-else-if="block.kind === 'todos'"
-            class="timeline-node todo-fallback-node"
-          >
-            <TodoPanel :todos="block.todos" />
-          </div>
         </template>
+        <div v-if="liveStatus" class="timeline-node run-status-node">
+          <span class="run-status-verb shimmer-text">执行中…</span>
+          <span v-if="liveStatus.elapsed" class="run-status-stats">{{
+            liveStatus.elapsed
+          }}</span>
+          <span v-if="liveStatus.activity" class="run-status-activity">{{
+            liveStatus.activity
+          }}</span>
+        </div>
+        <div v-if="props.turnChange" class="timeline-node changes-summary-node">
+          <TurnChangesCard
+            :snapshot="props.turnChange"
+            @open-review="emit('openReview', $event)"
+          />
+        </div>
       </div>
       <div v-if="terminalLabel" class="assistant-terminal-state" role="status">
         {{ terminalLabel }}

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-07-21<br>
+> 最后核验：2026-08-05<br>
 > 事实源：当前 CoreApi / IPC / runtime event / domain service 分层与 `AGENTS.md`
 
 Emperor Agent 的扩展通常横跨 Core、Electron contract、renderer 投影、持久化和文档。先确定权威状态属于哪个领域，再从 domain service 向外接入；不要把策略散落到组件或 prompt 文案。
@@ -85,6 +85,16 @@ flowchart LR
 - Mutation 接入 pending Ask / Plan 与领域 guard；owner session 必须明确。
 - 同步 main operation allowlist、preload 类型、renderer API 和 contract test。
 - 错误使用稳定 code 与安全消息，不回传堆栈、凭证或任意本机路径。
+
+## 新 Slash command 或 Skill 命令
+
+- 内置命令只在 `packages/core/src/commands/builtins.ts` 声明 descriptor；解析、参数 schema、可用性、busy policy、来源白名单和幂等执行留在 command platform，不在 Vue 组件增加平行 `if` 分发。
+- Renderer 只能调用 `commands.list/complete/invoke`，并提交 Core 返回的稳定 command ID。新增字段时同步 CoreApi operation schema、Electron registry、preload、Renderer 类型和 parity 测试。
+- `local_ui` 不进入聊天；`core_action` 只产生专用投影或脱敏 receipt；`agent_prompt` 才提交一次用户消息。未知命令禁止降级为模型 prompt。
+- 内置名称与正式别名受保护。动态 Prompt 命令通过 Skill frontmatter `metadata.emperor.command` 声明；不要新增 `.emperor/commands/`。source、trust、Skill 路径、AgentDefinition 和 allowed tools 只能来自 Core 解析结果。
+- busy 调度必须明确选 `immediate`、`after_turn` 或 `reject_when_busy`。`after_turn` 复用 owner Session Actor 串行边界；命令队列不能绕过用户消息单槽或造成跨 session 乱序。
+- 高影响命令继续复用领域确认、revision、checkpoint、Permission 和 containment。`full_access` 不能扩大 invocation source 或覆盖 Core deny。
+- `/clear` 语义由 `SessionTransitionService` 独占；修改时覆盖 boundary、lineage、旧 session 可恢复、worktree binding、prepared 崩溃恢复、幂等调用和旧 session 提交屏障。
 
 右侧项目工作台 operation 还要遵守以下边界：
 

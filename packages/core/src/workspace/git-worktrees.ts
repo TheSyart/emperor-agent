@@ -33,6 +33,7 @@ interface WorktreeLease {
 interface WorktreeState {
   version: 1
   leases: WorktreeLease[]
+  aliases?: Record<string, string>
 }
 
 interface SubagentWorktreeLease {
@@ -69,28 +70,48 @@ export class WorkspaceBindingStore {
   }
 
   resolve(sessionId: string, originalProjectRoot: string): string {
-    const lease = this.read().leases.find(
-      (item) => item.sessionId === sessionId && item.active,
+    const state = this.read()
+    const owner = state.aliases?.[sessionId] || sessionId
+    const lease = state.leases.find(
+      (item) => item.sessionId === owner && item.active,
     )
     return lease?.path || originalProjectRoot
   }
 
   active(sessionId: string): WorktreeLease | null {
-    return (
-      this.read().leases.find(
-        (item) => item.sessionId === sessionId && item.active,
-      ) || null
-    )
+    const state = this.read()
+    const owner = state.aliases?.[sessionId] || sessionId
+    const lease =
+      state.leases.find((item) => item.sessionId === owner && item.active) ||
+      null
+    return lease && owner !== sessionId ? { ...lease, sessionId } : lease
   }
 
   leases(sessionId?: string): WorktreeLease[] {
-    return this.read().leases.filter(
-      (lease) => !sessionId || lease.sessionId === sessionId,
+    const state = this.read()
+    if (!sessionId) return state.leases
+    const owner = state.aliases?.[sessionId] || sessionId
+    return state.leases
+      .filter((lease) => lease.sessionId === owner)
+      .map((lease) => (owner === sessionId ? lease : { ...lease, sessionId }))
+  }
+
+  inherit(sourceSessionId: string, targetSessionId: string): void {
+    const state = this.read()
+    const owner = state.aliases?.[sourceSessionId] || sourceSessionId
+    if (
+      !state.leases.some((lease) => lease.sessionId === owner && lease.active)
     )
+      return
+    state.aliases = { ...(state.aliases ?? {}), [targetSessionId]: owner }
+    this.write(state)
   }
 
   saveLease(lease: WorktreeLease): void {
     const state = this.read()
+    if (state.aliases?.[lease.sessionId]) {
+      delete state.aliases[lease.sessionId]
+    }
     state.leases = state.leases
       .map((item) =>
         item.sessionId === lease.sessionId ? { ...item, active: false } : item,
@@ -102,6 +123,11 @@ export class WorkspaceBindingStore {
 
   deactivate(sessionId: string): void {
     const state = this.read()
+    if (state.aliases?.[sessionId]) {
+      delete state.aliases[sessionId]
+      this.write(state)
+      return
+    }
     state.leases = state.leases.map((lease) =>
       lease.sessionId === sessionId ? { ...lease, active: false } : lease,
     )
@@ -118,7 +144,14 @@ export class WorkspaceBindingStore {
     if (!existsSync(this.path)) return { version: 1, leases: [] }
     try {
       const value = JSON.parse(readFileSync(this.path, 'utf8')) as WorktreeState
-      if (value.version !== 1 || !Array.isArray(value.leases))
+      if (
+        value.version !== 1 ||
+        !Array.isArray(value.leases) ||
+        (value.aliases !== undefined &&
+          (!value.aliases ||
+            typeof value.aliases !== 'object' ||
+            Array.isArray(value.aliases)))
+      )
         throw new Error('invalid worktree lease store')
       const leases = value.leases.map((raw) => {
         if (
@@ -146,6 +179,7 @@ export class WorkspaceBindingStore {
       return {
         version: 1,
         leases,
+        aliases: value.aliases ? { ...value.aliases } : {},
       }
     } catch (error) {
       throw new WorkspaceOperationError(

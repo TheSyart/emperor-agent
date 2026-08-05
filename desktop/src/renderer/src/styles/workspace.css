@@ -226,6 +226,47 @@
   box-shadow: inset 2px 0 0 rgb(var(--warn) / 0.52);
 }
 
+.environment-agent-icon {
+  position: relative;
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.environment-agent-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(var(--fg-subtle));
+  box-shadow: 0 0 0 2px rgb(var(--bg-elevated));
+}
+
+.environment-agent-dot[data-tone='running'] {
+  @apply animate-pulse-seal;
+  background: rgb(var(--warn));
+}
+
+.environment-agent-dot[data-tone='pending'] {
+  background: rgb(var(--accent));
+}
+
+.environment-agent-dot[data-tone='completed'] {
+  background: rgb(var(--ok));
+}
+
+.environment-agent-dot[data-tone='failed'] {
+  background: rgb(var(--danger));
+}
+
+.environment-agent-dot[data-tone='cancelled'] {
+  background: rgb(var(--fg-subtle));
+}
+
 .environment-subagent-overflow {
   padding: 5px 7px 1px 30px;
   color: rgb(var(--fg-subtle));
@@ -497,6 +538,36 @@
   gap: 5px;
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
+}
+
+.git-task-filter {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  border: 1px solid rgb(var(--accent) / 0.28);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  color: rgb(var(--fg-muted));
+  background: rgb(var(--accent) / 0.05);
+  font-size: var(--font-size-xs);
+}
+
+.git-task-filter span {
+  min-width: 0;
+  flex: 1;
+}
+
+.git-task-filter button {
+  flex: 0 0 auto;
+  color: rgb(var(--accent));
+  font-size: var(--font-size-2xs);
+}
+
+.git-task-filter button:hover,
+.git-task-filter button:focus-visible {
+  color: rgb(var(--fg));
 }
 
 .git-sync-bar {

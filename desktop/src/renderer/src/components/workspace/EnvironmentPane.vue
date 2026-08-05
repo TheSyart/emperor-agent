@@ -18,7 +18,10 @@ import {
 import { computed } from 'vue'
 import type { WorkspaceSnapshot, WorkspaceSource } from './workspaceTypes'
 import { isGitStatus } from './workspaceTypes'
-import { environmentSubagentGroups } from './environmentModel'
+import {
+  environmentSubagentGroups,
+  subagentStatusTone,
+} from './environmentModel'
 
 const props = defineProps<{
   snapshot: WorkspaceSnapshot | null
@@ -284,7 +287,14 @@ function timestampMs(value: number): number {
               'environment-agent-active': subagentGroups.active.includes(agent),
             }"
           >
-            <Bot :size="14" />
+            <span class="environment-agent-icon">
+              <Bot :size="14" />
+              <span
+                class="environment-agent-dot"
+                :data-tone="subagentStatusTone(agent)"
+                :title="subagentStatusLabel(agent)"
+              />
+            </span>
             <div>
               <strong>{{ recordText(agent, 'title') || 'Subagent' }}</strong>
               <span>

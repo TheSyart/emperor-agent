@@ -42,4 +42,15 @@ describe('thought display helpers', () => {
       label: '整理工具结果 · 2.6s',
     })
   })
+
+  it('uses minute-level duration for long thoughts and 0ms placeholder when missing', () => {
+    expect(thoughtPresentation(thought({ durationMs: 125_000 }))).toEqual({
+      kind: 'status',
+      label: '思考了 2m 5s',
+    })
+    expect(thoughtPresentation(thought({ durationMs: undefined }))).toEqual({
+      kind: 'status',
+      label: '思考了 0ms',
+    })
+  })
 })

@@ -5,25 +5,25 @@ import type { TurnChangeSnapshot } from '../../types'
 import { turnChangesHeadline } from './turnChangesModel'
 
 const props = defineProps<{ snapshot: TurnChangeSnapshot }>()
-const emit = defineEmits<{ openReview: [] }>()
+const emit = defineEmits<{ openReview: [paths: string[]] }>()
 const expanded = ref(false)
 const visibleFiles = computed(() =>
   expanded.value ? props.snapshot.files : props.snapshot.files.slice(0, 3),
 )
 
-function lineText(additions: number | null, deletions: number | null): string {
-  if (additions === null || deletions === null) return 'binary'
-  return `+${additions} −${deletions}`
+function openReview(): void {
+  emit(
+    'openReview',
+    props.snapshot.files.map((file) => file.path),
+  )
 }
 </script>
 
 <template>
   <section class="turn-changes-card" aria-label="本次任务文件变更">
     <header>
-      <span class="turn-changes-card-icon" aria-hidden="true">
-        <FileDiff :size="16" />
-      </span>
-      <div>
+      <div class="turn-changes-card-summary">
+        <FileDiff :size="15" aria-hidden="true" />
         <strong>{{ turnChangesHeadline(snapshot) }}</strong>
         <span>
           <b>+{{ snapshot.additions }}</b>
@@ -33,13 +33,19 @@ function lineText(additions: number | null, deletions: number | null): string {
           >
         </span>
       </div>
-      <button type="button" @click="emit('openReview')">Review</button>
+      <button type="button" @click="openReview">Review</button>
     </header>
     <ul v-if="visibleFiles.length">
       <li v-for="file in visibleFiles" :key="`${file.kind}:${file.path}`">
         <span>{{ file.path }}</span>
         <small :class="{ binary: file.binary }">
-          {{ lineText(file.additions, file.deletions) }}
+          <template v-if="file.additions === null || file.deletions === null"
+            >binary</template
+          >
+          <template v-else
+            ><b class="stat-add">+{{ file.additions }}</b>
+            <i class="stat-del">−{{ file.deletions }}</i></template
+          >
         </small>
       </li>
     </ul>

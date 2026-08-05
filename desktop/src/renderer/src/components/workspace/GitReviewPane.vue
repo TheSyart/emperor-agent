@@ -26,6 +26,7 @@ import { core } from '../../api/http'
 import {
   gitFileChangeLabel,
   gitTransientLabel,
+  filterGitFilesByPaths,
   groupGitFiles,
 } from './workspaceModel'
 
@@ -33,6 +34,7 @@ const props = defineProps<{
   sessionId: string
   hasProject: boolean
   agentBusy: boolean
+  focusPaths?: string[]
 }>()
 
 const status = ref<GitStatusResult | null>(null)
@@ -66,11 +68,17 @@ const pullRequestDraft = ref(true)
 const branches = ref<
   Array<{ name: string; head: string; upstream: string | null }>
 >([])
+const focusFilterActive = ref(Boolean(props.focusPaths?.length))
 let refreshGeneration = 0
 let diffGeneration = 0
 let pollTimer: number | undefined
 
-const groups = computed(() => groupGitFiles(status.value?.files ?? []))
+const visibleFiles = computed(() =>
+  focusFilterActive.value
+    ? filterGitFilesByPaths(status.value?.files ?? [], props.focusPaths || [])
+    : (status.value?.files ?? []),
+)
+const groups = computed(() => groupGitFiles(visibleFiles.value))
 const transientLabel = computed(() =>
   status.value ? gitTransientLabel(status.value.repository.transientState) : '',
 )
@@ -115,6 +123,14 @@ watch(
     diffTruncated.value = false
     compareBase.value = ''
     void refresh()
+  },
+)
+watch(
+  () => (props.focusPaths || []).join('\u0000'),
+  (paths) => {
+    focusFilterActive.value = Boolean(paths)
+    selectedPath.value = ''
+    diff.value = ''
   },
 )
 
@@ -579,6 +595,16 @@ function friendlyPullRequestError(value: unknown): string {
     </div>
     <div v-else-if="error" class="workspace-inline-error">{{ error }}</div>
     <template v-if="status">
+      <div
+        v-if="focusFilterActive && props.focusPaths?.length"
+        class="git-task-filter"
+      >
+        <FileDiff :size="14" />
+        <span>本次任务 · {{ props.focusPaths.length }} 个文件</span>
+        <button type="button" @click="focusFilterActive = false">
+          显示全部
+        </button>
+      </div>
       <div v-if="transientLabel" class="workspace-inline-warning">
         <ShieldAlert :size="15" />
         <span

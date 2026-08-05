@@ -239,9 +239,22 @@ export class CoreMemoryService {
     }
   }
 
-  async compact(opts: { force?: boolean } = {}): Promise<CoreCompactPayload> {
-    const rawUnarchivedHistory =
-      this.loop.activeMemoryStore.loadUnarchivedHistory()
+  async compact(
+    opts: {
+      force?: boolean
+      sessionId?: string | null
+      instructions?: string | null
+    } = {},
+  ): Promise<CoreCompactPayload> {
+    const sessionId = String(
+      opts.sessionId ?? this.loop.activeSessionId ?? '',
+    ).trim()
+    const session = sessionId ? this.loop.sessionStore.get(sessionId) : null
+    if (!session) throw new Error('session is required for compaction')
+    const bindings = this.loop.sessionRuntimes.actor(sessionId).bindings
+    const memoryStore = bindings.memoryStore
+    const runtimeStore = bindings.runtimeStore
+    const rawUnarchivedHistory = memoryStore.loadUnarchivedHistory()
     const unarchivedHistory = rawUnarchivedHistory
       .map(historyItemFromRow)
       .filter((item): item is CoreHistoryItem => item !== null)
@@ -256,7 +269,9 @@ export class CoreMemoryService {
       }
     }
 
-    const hookScope = await this.loop.beginCompactionHooks('manual')
+    const hookScope = await this.loop.beginCompactionHooks('manual', {
+      session,
+    })
     if (!hookScope.allowed) {
       return {
         status: 'skipped',
@@ -269,19 +284,15 @@ export class CoreMemoryService {
 
     const route = this.loop.modelRouter.route('memory_compaction')
     const snapshot = route.snapshot
-    const sessionId = this.loop.activeSessionId || 'default'
-    const mode = this.loop.activeSession?.mode === 'build' ? 'build' : 'chat'
-    const projectId =
-      mode === 'build'
-        ? String(this.loop.activeSession?.project_id || '')
-        : null
+    const mode = session.mode === 'build' ? 'build' : 'chat'
+    const projectId = mode === 'build' ? String(session.project_id || '') : null
     let result: Awaited<ReturnType<typeof compactSession>>
     try {
       result = await compactSession({
         sessionId,
         mode,
         projectId,
-        historyFile: this.loop.activeMemoryStore.historyFile,
+        historyFile: memoryStore.historyFile,
         trigger: opts.force
           ? { kind: 'manual', force: true }
           : { kind: 'manual' },
@@ -307,7 +318,12 @@ export class CoreMemoryService {
           routeReason: snapshot.routeReason,
         },
         tokenTracker: this.loop.tokenTracker,
-        instructions: hookScope.instructions,
+        instructions: [
+          hookScope.instructions,
+          String(opts.instructions ?? '').trim(),
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
       })
     } catch (exc) {
       await this.loop.finishCompactionHooks(hookScope, {
@@ -320,10 +336,10 @@ export class CoreMemoryService {
       try {
         const cursorStore = new CompactionCursorStore(this.loop.paths.stateRoot)
         const activeHistory = activeHistoryAfterSeq(
-          this.loop.activeMemoryStore,
+          memoryStore,
           result.compaction.range.toSeq,
         )
-        this.loop.activeMemoryStore.appendCompactMarker(
+        memoryStore.appendCompactMarker(
           activeHistory,
           cursorStore.archiveGate(sessionId),
         )
@@ -342,9 +358,7 @@ export class CoreMemoryService {
       error: result.error ?? null,
       compaction: result.compaction ?? null,
     })
-    const runtime = this.loop.runtimeStore.compact(
-      this.loop.activeMemoryStore.loadUnarchivedTurnIds(),
-    )
+    const runtime = runtimeStore.compact(memoryStore.loadUnarchivedTurnIds())
     this.refreshRuntimeContext?.()
     if (result.status !== 'compacted') {
       return {
@@ -352,7 +366,10 @@ export class CoreMemoryService {
         count,
         message: result.message,
         memory: this.getMemory(),
-        unarchivedHistory: this.historyPayload(),
+        unarchivedHistory: memoryStore
+          .loadUnarchivedHistory()
+          .map(historyItemFromRow)
+          .filter((item): item is CoreHistoryItem => item !== null),
         runtime,
         error: result.error,
       }
@@ -362,7 +379,10 @@ export class CoreMemoryService {
       count,
       message: result.message,
       memory: this.getMemory(),
-      unarchivedHistory: this.historyPayload(),
+      unarchivedHistory: memoryStore
+        .loadUnarchivedHistory()
+        .map(historyItemFromRow)
+        .filter((item): item is CoreHistoryItem => item !== null),
       runtime,
       compaction: result.compaction,
     }

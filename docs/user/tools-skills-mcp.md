@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-07-20<br>
+> 最后核验：2026-08-05<br>
 > 事实源：ToolRegistry、SkillManager、MCP config/client、插件页
 
 “插件”页面分成 Skills、Tools 和 MCP 三个标签。三者作用不同：Tool 是可执行接口，Skill 是按需加载的工作说明和资源包，MCP 把外部 server 暴露的工具接入当前 ToolRegistry。
@@ -48,6 +48,30 @@ Skill 至少包含一个带 frontmatter 的 `SKILL.md`，可以附带 `scripts/`
 - 让 Agent 在需要时调用 `load_skill`。
 
 Blocked 或 invalid Skill 不会出现在可调用快捷方式中。
+
+active Skill 默认作为 `/<skill-name>` 命令进入 Core 命令目录。需要自定义名称、参数或隔离执行时，可在 frontmatter 中声明：
+
+```yaml
+metadata:
+  emperor:
+    command:
+      user_invocable: true
+      name: review-code
+      aliases: [audit-now]
+      argument_hint: '[scope]'
+      arguments:
+        - name: scope
+          type: relative_path
+          required: true
+      context: fork # inline | fork
+      agent: sili_suitang
+      allowed_tools: [read_file, grep]
+      effort: high
+      invocation_sources: [desktop]
+      sensitive_arguments: [token]
+```
+
+Core 从受信 Skill 记录读取这些字段；Composer 不能提交 Skill 路径、source、Agent 或工具范围。`fork` 会校验 Agent 存在且工具范围没有超过 AgentDefinition。内置命令名不可覆盖，冲突 Skill 改用 `/skill:<name>`；旧 `/<name>-skill` 仅作为隐藏兼容别名。Emperor 不扫描 `.emperor/commands/`，动态 Prompt 命令只使用 Skill。详细规则见 [Slash command 平台](../architecture/slash-command-platform.md)。
 
 ### 安装 Skill
 

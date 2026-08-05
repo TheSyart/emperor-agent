@@ -2418,6 +2418,11 @@ export interface SessionInfo {
   title_status?: string
   archived_at?: string | null
   control_pending?: SessionControlPending | null
+  parent_session_id?: string | null
+  lineage_root_id?: string | null
+  transition_reason?: 'clear' | null
+  transitioned_to_session_id?: string | null
+  transitioned_at?: string | null
   version: number
   draft?: boolean
 }

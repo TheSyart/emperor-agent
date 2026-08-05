@@ -1,7 +1,4 @@
-import type {
-  TurnChangeSnapshot,
-  WsEvent,
-} from '../types'
+import type { TurnChangeSnapshot, WsEvent } from '../types'
 
 export interface TurnChangeProjectionState {
   byTurn: Record<string, TurnChangeSnapshot>
@@ -50,10 +47,8 @@ export function applyTurnChangeSnapshot(
     files: (event.files || []).map((file) => ({
       path: String(file.path || ''),
       kind: file.kind,
-      additions:
-        typeof file.additions === 'number' ? file.additions : null,
-      deletions:
-        typeof file.deletions === 'number' ? file.deletions : null,
+      additions: typeof file.additions === 'number' ? file.additions : null,
+      deletions: typeof file.deletions === 'number' ? file.deletions : null,
       binary: Boolean(file.binary),
     })),
     seq,

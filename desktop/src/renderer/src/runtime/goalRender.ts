@@ -83,8 +83,11 @@ export function toGoalCardViewModel({
           id: plan.id,
           title: bounded(plan.title || '当前计划', 160),
           activeStep:
-            plan.steps?.find((step) => step.status === 'in_progress')?.title ||
-            null,
+            plan.steps?.find((step) =>
+              ['active', 'in_progress', 'executing', 'running'].includes(
+                step.status,
+              ),
+            )?.title || null,
         }
       : null,
     notice: noticeForGoal(goal, gate),

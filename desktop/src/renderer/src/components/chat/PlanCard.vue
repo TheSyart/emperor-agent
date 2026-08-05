@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Check, ChevronsUpDown, Copy } from 'lucide-vue-next'
 import type { ControlInteraction, RuntimePlanRecord } from '../../types'
 import MarkdownBlock from './MarkdownBlock.vue'
 import { planDisplayMarkdown, planStatusPresentation } from './planDisplay'
@@ -9,6 +10,9 @@ const props = defineProps<{
   plan?: RuntimePlanRecord | null
 }>()
 
+const copied = ref(false)
+const collapsed = ref(false)
+
 const comments = computed(() => props.interaction.comments || [])
 const presentation = computed(() =>
   planStatusPresentation(props.interaction, props.plan || null),
@@ -16,6 +20,20 @@ const presentation = computed(() =>
 const markdownContent = computed(() =>
   planDisplayMarkdown(props.interaction, props.plan || null),
 )
+
+async function copyPlan(): Promise<void> {
+  const text = markdownContent.value
+  if (!text) return
+  await navigator.clipboard?.writeText(text)
+  copied.value = true
+  window.setTimeout(() => {
+    copied.value = false
+  }, 1400)
+}
+
+function toggleCollapsed(): void {
+  collapsed.value = !collapsed.value
+}
 </script>
 
 <template>
@@ -25,7 +43,30 @@ const markdownContent = computed(() =>
     :data-tone="presentation.tone"
   >
     <header class="plan-card-hero">
-      <div class="plan-card-kicker">计划提案</div>
+      <div class="plan-card-hero-top">
+        <div class="plan-card-kicker">计划提案</div>
+        <div class="plan-card-actions">
+          <button
+            type="button"
+            class="plan-card-icon-button"
+            :aria-label="copied ? '已复制' : '复制计划'"
+            @click="copyPlan"
+          >
+            <Check v-if="copied" :size="14" />
+            <Copy v-else :size="14" />
+          </button>
+          <button
+            type="button"
+            class="plan-card-icon-button"
+            :class="{ active: collapsed }"
+            :aria-label="collapsed ? '展开计划正文' : '收起计划正文'"
+            :aria-expanded="!collapsed"
+            @click="toggleCollapsed"
+          >
+            <ChevronsUpDown :size="14" />
+          </button>
+        </div>
+      </div>
       <div class="plan-card-title-row">
         <strong>{{
           props.interaction.title || props.plan?.title || '待批准计划'
@@ -41,7 +82,10 @@ const markdownContent = computed(() =>
       {{ props.interaction.summary }}
     </p>
 
-    <div class="plan-markdown plan-markdown-primary">
+    <div
+      class="plan-markdown plan-markdown-primary"
+      :class="{ 'plan-markdown-collapsed': collapsed }"
+    >
       <MarkdownBlock :content="markdownContent" />
     </div>
 
@@ -60,9 +104,5 @@ const markdownContent = computed(() =>
         {{ item.content }}
       </p>
     </div>
-
-    <footer class="control-footnote">
-      状态：{{ props.interaction.status }}
-    </footer>
   </section>
 </template>

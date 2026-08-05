@@ -99,6 +99,7 @@ Plan 用于在动手前看清问题、确认方案。进入 Plan 后，Agent 只
 /plan on
 /plan off
 /plan status
+/plan 为现有项目设计一套迁移方案
 ```
 
 `/plan` 与 `/plan on` 的效果相同。Agent 空闲时，把鼠标移到 Plan 标识上可以点击右上角关闭按钮；系统会退出 Plan，并恢复进入 Plan 前保存的最新执行权限。Agent 正在运行时，这个快捷按钮不可用。
@@ -106,10 +107,9 @@ Plan 用于在动手前看清问题、确认方案。进入 Plan 后，Agent 只
 Plan 会记录步骤、依赖和验证要求，但它不是长期目标，也不会单独决定 Goal 是否完成。权限模式还可以通过下面的命令查看或切换：
 
 ```text
-/mode ask
-/mode edits
-/mode auto
-/mode status
+/permissions ask
+/permissions smart
+/permissions full
 ```
 
 ### Goal：持续完成结果
@@ -160,14 +160,19 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 
 ### 其他常用命令
 
-| 命令                           | 作用                                             |
-| ------------------------------ | ------------------------------------------------ |
-| `/help`                        | 查看当前可用的 slash commands                    |
-| `/status`、`/model`、`/tokens` | 查看运行状态、模型配置摘要和 Token 消耗          |
-| `/tools`、`/skills`            | 查看当前会话可以使用的工具与 Skills              |
-| `/memory`、`/compact`          | 查看记忆状态或主动压缩当前会话                   |
-| `/stop`                        | 停止当前 turn；Goal 运行中会转成 Pause           |
-| `/reload`                      | 重新加载 bootstrap、模型、Skills、工具和记忆状态 |
+| 命令                             | 作用                                               |
+| -------------------------------- | -------------------------------------------------- |
+| `/help`、`/help --all`           | 打开 Core 命令中心；后者同时显示不可用原因         |
+| `/status`、`/model`、`/cost`     | 查看运行状态、模型和 Token/成本账本                |
+| `/permissions ask                | smart                                              | full` | 管理询问确认、智能自动和完全访问 |
+| `/clear`、`/compact`             | 创建全新会话上下文，或在当前会话中保留摘要后压缩   |
+| `/resume`、`/rename`、`/export`  | 恢复、重命名或导出会话                             |
+| `/tools`、`/skills`、`/mcp`      | 打开当前会话的工具、Skill 与 MCP 能力              |
+| `/files`、`/terminal`、`/review` | 打开项目文件、系统终端与结构化 Git 工作区          |
+| `/stop`、`/continue`             | 停止前台 turn，或恢复暂停的 Plan/Goal              |
+| `/reload`                        | 重新加载 bootstrap、命令、模型、Skills、MCP 和状态 |
+
+命令目录由 Core 生成，Renderer 不再维护静态数组。未知命令只在本地报错，不会发送给模型；active Skill 默认可用 `/<skill-name>` 调用。`/clear` 会创建继承项目、模型和权限的新 session，但不继承聊天历史、Plan、Goal、Todo、队列、checkpoint 或附件；旧 session 仍可恢复，长期用户/项目记忆也不会被删除。完整语义见 [Slash command 平台](docs/architecture/slash-command-platform.md)。
 
 <a id="capabilities"></a>
 
@@ -234,11 +239,11 @@ Build 项目目录不会承载私有 session、memory、attachments 或 Goal 数
 
 ### 权限模式
 
-| 内部模式          | 命令          | 行为                                                                                     |
-| ----------------- | ------------- | ---------------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/mode ask`   | 只读文件、搜索和诊断直接执行；文件修改、Shell、外部写入及持久任务变更需要确认            |
-| `smart_auto`      | `/mode edits` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险副作用需要确认 |
-| `full_access`     | `/mode auto`  | 普通操作不再产生权限审批；Core deny、Plan、schema、workspace 和 OS containment 仍然生效  |
+| 内部模式          | 命令                 | 行为                                                                                     |
+| ----------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `ask_before_edit` | `/permissions ask`   | 只读文件、搜索和诊断直接执行；文件修改、Shell、外部写入及持久任务变更需要确认            |
+| `smart_auto`      | `/permissions smart` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险副作用需要确认 |
+| `full_access`     | `/permissions full`  | 普通操作不再产生权限审批；Core deny、Plan、schema、workspace 和 OS containment 仍然生效  |
 
 Plan 通过 `/plan` 或 `/plan on|off|status` 独立管理，不属于权限菜单，并与顶层 Goal 互斥。Goal 内部仍可复用 Plan 引擎，但不会产生第二个用户模式。上述三种权限都不会关闭路径安全、schema 校验或 Core deny。存在未处理的 Ask 或 Plan 时，执行型 Scheduler、Team 和桌宠 mutation 会被 CoreApi guard 拒绝；Agent Hooks 也不能覆盖 workspace policy 或 Core deny。Goal 同样复用这套规则，不会因为运行时间更长而获得额外权限。
 

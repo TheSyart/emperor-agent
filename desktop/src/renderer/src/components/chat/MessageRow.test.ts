@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { createApp, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AssistantMessage, UserMessage } from '../../types'
+import type {
+  AssistantMessage,
+  TurnChangeSnapshot,
+  UserMessage,
+} from '../../types'
 import MessageRow from './MessageRow.vue'
 
 let container: HTMLDivElement | null = null
@@ -99,6 +103,50 @@ describe('MessageRow prompt delivery state', () => {
     expect(button.textContent).toContain('继续执行')
     button.click()
     expect(onContinueExecution).toHaveBeenCalledTimes(1)
+
+    app.unmount()
+  })
+
+  it('keeps the final changes summary inside the assistant response flow', () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const message: AssistantMessage = {
+      id: 'assistant-complete',
+      role: 'assistant',
+      content: '任务完成。',
+      segments: [{ id: 'text-complete', type: 'text', content: '任务完成。' }],
+      streaming: false,
+    }
+    const turnChange: TurnChangeSnapshot = {
+      version: 2,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      status: 'complete',
+      filesChanged: 1,
+      additions: 366,
+      deletions: 0,
+      binaryFiles: 0,
+      truncated: false,
+      files: [
+        {
+          path: 'index.html',
+          kind: 'created',
+          additions: 366,
+          deletions: 0,
+          binary: false,
+        },
+      ],
+      seq: 1,
+      updatedAt: 1,
+    }
+    const app = createApp(() =>
+      h(MessageRow, { message, plans: [], turnChange }),
+    )
+    app.mount(container)
+
+    const assistant = container.querySelector('.message-row.assistant')
+    expect(assistant?.querySelector('.turn-changes-card')).not.toBeNull()
+    expect(container.querySelectorAll('.turn-changes-card')).toHaveLength(1)
 
     app.unmount()
   })

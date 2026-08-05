@@ -3,7 +3,7 @@ import {
   hasComposerCapabilityTokens,
   renderComposerInlineTokens,
 } from '../../capabilities/composerCapabilityTokens'
-import { isPathLikeSlashToken, slashCommands } from '../../commands'
+import { isPathLikeSlashToken } from '../../commands'
 import type {
   ChatMessage,
   RuntimePlanRecord,
@@ -13,14 +13,16 @@ import type {
 import { avatarIcons } from '../../icons'
 import AssistantFlow from './AssistantFlow.vue'
 import AttachmentChip from './AttachmentChip.vue'
-import TurnChangesCard from './TurnChangesCard.vue'
 
 const props = defineProps<{
   message: ChatMessage
   plans: RuntimePlanRecord[]
   turnChange?: TurnChangeSnapshot
 }>()
-const emit = defineEmits<{ continueExecution: []; openReview: [] }>()
+const emit = defineEmits<{
+  continueExecution: []
+  openReview: [paths: string[]]
+}>()
 const schedulerClientIdPrefix = 'scheduler:'
 const schedulerTriggerPrefixes = ['定时任务触发 ·', '司时台触发 ·']
 
@@ -32,12 +34,6 @@ function skillSlashParts(
   const [token] = text.split(/\s+/, 1)
   if (!token || token === '/') return null
   if (isPathLikeSlashToken(token)) return null
-  const normalized = token.toLowerCase()
-  const isSystemCommand = slashCommands.some(
-    (command) =>
-      command.name === normalized || command.aliases?.includes(normalized),
-  )
-  if (isSystemCommand) return null
   return { token, rest: text.slice(token.length).trimStart() }
 }
 
@@ -177,12 +173,9 @@ function deliveryLabel(message: UserMessage): string {
     <AssistantFlow
       :message="props.message"
       :plans="props.plans"
+      :turn-change="props.turnChange"
       @continue-execution="emit('continueExecution')"
-    />
-    <TurnChangesCard
-      v-if="props.turnChange"
-      :snapshot="props.turnChange"
-      @open-review="emit('openReview')"
+      @open-review="emit('openReview', $event)"
     />
   </template>
 </template>

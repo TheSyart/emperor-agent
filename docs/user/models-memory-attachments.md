@@ -64,7 +64,7 @@ API Key 和本地绝对路径不应出现在普通模型上下文中。MCP、网
 
 Chat 压缩主要更新全局长期记忆和用户档案；Build 压缩把项目事实写入项目私有记忆。Scope repair 会阻止项目事实误写入全局记忆。项目源码里的 `AGENTS.md` 不属于这个写入链路。
 
-可以使用 `/memory` 查看摘要、`/memory-log` 查看版本、`/memory-restore <id>` 恢复指定快照。设置页的“记忆”也提供内容、上下文解释和版本操作。
+可以使用 `/memory` 查看摘要、`/memory log` 查看版本、`/memory restore <id>` 恢复指定快照。旧 `/memory-log` 和 `/memory-restore` 仍可执行一个迁移周期，但不会出现在普通命令面板。设置页的“记忆”也提供内容、上下文解释和版本操作。
 
 源码中包含默认关闭的 Hybrid Memory 实验路径。`off` 不建立派生索引；`eval` 只做影子检索并在诊断页显示有效模式、检索策略、fallback 次数和索引大小，不改变发送给模型的内容。即使配置为 `on`，缺少与当前 embedding provider 绑定的通过评估时也会自动降为 `eval`。当前发行物不内置生产 embedding provider，因此这不是设置页里可直接开启的正式功能；Markdown 记忆仍是权威数据，删除 `memory/hybrid-index/` 不会删除记忆。
 

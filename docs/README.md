@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-08-05<br>
 > 事实源：当前 TypeScript / Electron 主线、根目录 `README.md` 与 `AGENTS.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、发布流程和历史记录。
@@ -16,6 +16,7 @@
 | 先规划再执行，或持续推进长任务     | [Plan 与 Goal](user/plan-goal.md)                            |
 | 配置模型、记忆和附件               | [模型、记忆与附件](user/models-memory-attachments.md)        |
 | 使用 Tools、Skills 或 MCP          | [工具与扩展能力](user/tools-skills-mcp.md)                   |
+| 使用 `/` 命令和真正的新上下文      | [Slash command 平台](architecture/slash-command-platform.md) |
 | 使用 Scheduler、Team、Hooks 或桌宠 | [自动化与协作](user/automation-collaboration.md)             |
 | 排查启动、模型、数据或打包问题     | [诊断与排障](user/diagnostics-troubleshooting.md)            |
 | 了解系统为什么这样设计             | [架构总览](architecture/overview.md)                         |
@@ -41,6 +42,7 @@
 - [架构总览](architecture/overview.md)
 - [Agent 执行链路](architecture/agent-runtime.md)
 - [Control 与权限](architecture/control-and-permissions.md)
+- [Slash command 平台](architecture/slash-command-platform.md)
 - [IPC 与 Runtime Events](architecture/ipc-and-runtime-events.md)
 - [Goal 模式架构](architecture/goal-mode.md)
 - [全局私有存储根](architecture/global-state-store.md)

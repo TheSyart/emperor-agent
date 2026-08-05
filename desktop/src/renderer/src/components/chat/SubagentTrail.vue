@@ -63,6 +63,9 @@ function fullJson(value: unknown) {
           <small v-if="sub.purpose">{{ sub.purpose }}</small>
         </span>
         <span v-if="sub.role" class="agent-role-badge">{{ sub.role }}</span>
+        <span v-if="sub.tools?.length" class="agent-stat-badge"
+          >{{ sub.tools.length }} 次工具</span
+        >
         <span class="agent-state-badge">{{ statusLabel(sub.status) }}</span>
         <time v-if="durationLabel(sub.durationMs)" class="agent-duration">{{
           durationLabel(sub.durationMs)

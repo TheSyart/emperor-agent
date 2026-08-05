@@ -24,6 +24,7 @@ import type {
   WatchlistDecision,
 } from '../types'
 import type { SlashPaletteItem } from '../commands'
+import type { CommandCompletion } from '@emperor/core'
 import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
@@ -57,6 +58,11 @@ export interface AppContext {
   eventTransportText: () => string
 
   commands: ComputedRef<SlashPaletteItem[]>
+  completeSlashCommand: (
+    commandId: string,
+    rawArgs: string,
+    cursor: number,
+  ) => Promise<CommandCompletion[]>
 
   refreshAll: () => Promise<void>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
@@ -113,7 +119,6 @@ export interface AppContext {
   ) => Promise<GoalOperationResult>
   replaceGoal: (goalId: string, outcome: string) => Promise<GoalOperationResult>
   startGoal: (outcome: string) => Promise<GoalOperationResult>
-  clearChat: () => void
   submitFromComposer: (payload: string | ChatSendPayload) => void
 
   showToast: (message: string) => void

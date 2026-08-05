@@ -671,15 +671,15 @@ function validateRecord(
     throw new Error('invalid turn change record')
   const legacy = Number(raw.version) === 1
   const storedExecutionId = String(
-    legacy ? raw.turnId ?? '' : raw.executionId ?? '',
+    legacy ? (raw.turnId ?? '') : (raw.executionId ?? ''),
   )
   if (storedExecutionId !== executionId)
     throw new Error('invalid turn change execution identity')
   const rootTurnId = validatedTurnId(
-    String(legacy ? raw.turnId ?? '' : raw.rootTurnId ?? ''),
+    String(legacy ? (raw.turnId ?? '') : (raw.rootTurnId ?? '')),
   )
   const activeTurnId = validatedTurnId(
-    String(legacy ? raw.turnId ?? '' : raw.activeTurnId ?? ''),
+    String(legacy ? (raw.turnId ?? '') : (raw.activeTurnId ?? '')),
   )
   const workspaceRoot = resolve(raw.workspaceRoot)
   const partialReasons = [...raw.partialReasons] as string[]

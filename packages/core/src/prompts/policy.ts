@@ -1,7 +1,4 @@
-import type {
-  PromptSectionInput,
-  PromptSectionOwner,
-} from './manifest'
+import type { PromptSectionInput, PromptSectionOwner } from './manifest'
 
 export interface PromptPolicySection extends PromptSectionInput {
   owner?: PromptSectionOwner
@@ -128,9 +125,7 @@ function compareSections(
 function normalizedRuleIds(value: string[] | undefined): string[] {
   return [
     ...new Set(
-      (value ?? [])
-        .map((item) => String(item ?? '').trim())
-        .filter(Boolean),
+      (value ?? []).map((item) => String(item ?? '').trim()).filter(Boolean),
     ),
   ]
 }

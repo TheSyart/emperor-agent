@@ -2,20 +2,22 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者<br>
-> 最后核验：2026-07-22<br>
-> 事实源：`packages/core/src/control/`、`packages/core/src/permissions/`、`packages/core/src/plans/`、`packages/core/src/environment/sandbox.ts`、slash command parser
+> 最后核验：2026-08-05<br>
+> 事实源：`packages/core/src/control/`、`packages/core/src/permissions/`、`packages/core/src/plans/`、`packages/core/src/environment/sandbox.ts`、`packages/core/src/commands/`
 
 Control 系统把“模型想做什么”和“Core 允许做什么”分开。界面、模型、Goal、Scheduler、Team 和 Hook 都不能自行扩大权限；最终决定由 Core 的 permission pipeline、pending interaction、workspace policy 和 mutation guard 共同完成。
 
 ## 三种执行权限与 Plan 状态
 
-| 内部值            | Slash command | 语义                                                                                           |
-| ----------------- | ------------- | ---------------------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/mode ask`   | 只读文件、搜索、列表和诊断直接执行；文件修改、Shell、外部写入、Team 与 Scheduler 变更需要确认  |
-| `smart_auto`      | `/mode edits` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；发布、外部写入和高风险操作需确认 |
-| `full_access`     | `/mode auto`  | 关闭普通权限审批；显式 deny、Plan 只读、schema、workspace、Goal 和 OS containment 仍然生效     |
+| 内部值            | Slash command        | 语义                                                                                           |
+| ----------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| `ask_before_edit` | `/permissions ask`   | 只读文件、搜索、列表和诊断直接执行；文件修改、Shell、外部写入、Team 与 Scheduler 变更需要确认  |
+| `smart_auto`      | `/permissions smart` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；发布、外部写入和高风险操作需确认 |
+| `full_access`     | `/permissions full`  | 关闭普通权限审批；显式 deny、Plan 只读、schema、workspace、Goal 和 OS containment 仍然生效     |
 
-Plan 仍以内部 `mode === plan` 表示只读运行状态，但不再作为第四种用户权限。`/mode ask|edits|auto|status` 只管理执行权限；`/plan` 默认开启 Plan，`/plan on|off|status` 保留完整控制语义。Composer 的 `/` 菜单、裸命令和显式命令都经过同一个 renderer 生命周期控制器，不把命令帮助文字插入输入框。
+Plan 仍以内部 `mode === plan` 表示只读运行状态，但不再作为第四种用户权限。`/permissions ask|smart|full` 只管理执行权限；旧 `/mode ask|edits|auto|status` 作为隐藏兼容语法映射到同一个 Core handler。`/plan` 默认开启 Plan，`/plan on|off|status|open|description` 保留完整控制语义。
+
+命令目录、解析、argument schema、调用来源和 busy policy 都由 Core command platform 管理。Renderer 只能提交稳定 command ID 与原始用户输入，不能指定权限、handler 或 Skill source。Slash command 不绕过 permission pipeline、Plan 只读、Goal Gate 或 workspace containment；`full_access` 也不能扩大命令自身声明的 invocation source。详见 [Slash command 平台](slash-command-platform.md)。
 
 ## 决策顺序
 

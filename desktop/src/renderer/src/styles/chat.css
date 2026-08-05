@@ -334,36 +334,86 @@
   @apply absolute bottom-2.5 right-3 size-1.5 rounded-full bg-warn animate-pulse-seal;
 }
 
+/* plan 活动节点:色调胶囊行(图标 + label + detail),轴点随 tone 染色 */
 .plan-activity-node {
   min-height: 34px;
-  padding: 6px 10px;
+  padding: 7px 12px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  border-left: 2px solid rgb(var(--border-strong));
-  color: var(--fg-muted);
+  border: 1px solid rgb(var(--border) / 0.7);
+  border-radius: var(--radius-sm);
+  background: rgb(var(--bg-elevated) / 0.5);
+  color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
+}
+
+.plan-activity-icon {
+  flex-shrink: 0;
+  color: rgb(var(--fg-subtle));
+}
+
+.plan-activity-label {
+  flex-shrink: 0;
+  font-weight: 550;
+  color: rgb(var(--fg));
 }
 
 .plan-activity-node strong {
   min-width: 0;
   overflow: hidden;
-  color: var(--fg);
+  color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .plan-activity-node[data-tone='running'] {
-  border-left-color: var(--accent);
+  border-color: rgb(var(--accent) / 0.32);
+  background: rgb(var(--accent) / 0.06);
+}
+
+.plan-activity-node[data-tone='running'] .plan-activity-icon {
+  color: rgb(var(--accent));
+  animation: spin360 0.9s linear infinite;
+}
+
+.plan-activity-node[data-tone='running']::before {
+  @apply animate-pulse-seal;
+  background: rgb(var(--accent));
 }
 
 .plan-activity-node[data-tone='success'] {
-  border-left-color: var(--ok);
+  border-color: rgb(var(--ok) / 0.28);
+  background: rgb(var(--ok) / 0.06);
+}
+
+.plan-activity-node[data-tone='success'] .plan-activity-icon {
+  color: rgb(var(--ok));
+}
+
+.plan-activity-node[data-tone='success']::before {
+  background: rgb(var(--ok));
 }
 
 .plan-activity-node[data-tone='error'] {
-  border-left-color: var(--danger);
+  border-color: rgb(var(--danger) / 0.3);
+  background: rgb(var(--danger) / 0.06);
+}
+
+.plan-activity-node[data-tone='error'] .plan-activity-icon {
+  color: rgb(var(--danger));
+}
+
+.plan-activity-node[data-tone='error']::before {
+  background: rgb(var(--danger));
+}
+
+@keyframes spin360 {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .plan-activity-actions {
@@ -406,15 +456,29 @@
 }
 
 .thought-collapsed {
-  @apply flex w-fit max-w-full items-center gap-1.5 px-2 py-0.5 transition;
-  border-radius: var(--radius-md);
+  @apply flex w-fit max-w-full items-center gap-1.5 px-2.5 py-0.5 transition;
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
 }
 
 .thought-collapsed:hover {
+  border-color: rgb(var(--border) / 0.6);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-muted));
+}
+
+/* 收起态内容预览:扫读时不展开也能知道这段思考在做什么 */
+.thought-preview {
+  @apply min-w-0 truncate italic;
+  color: rgb(var(--fg-subtle) / 0.85);
+}
+
+.thought-preview::before {
+  content: '·';
+  margin-right: 6px;
+  font-style: normal;
 }
 
 .thought-state-icon {
@@ -459,10 +523,76 @@
   color: rgb(var(--fg-muted));
 }
 
-.thought-quote-body {
+/* running 思考正文:限高内部滚动 + 上下 fade 提示可滚(不撑开页面) */
+.thought-quote-scroll {
+  position: relative;
   margin-top: var(--space-1);
-  max-height: 40vh;
+  max-height: 32vh;
   overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    rgb(0 0 0) 14px,
+    rgb(0 0 0) calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    rgb(0 0 0) 14px,
+    rgb(0 0 0) calc(100% - 18px),
+    transparent 100%
+  );
+}
+
+/* shimmer 扫光:running 态的"活"用光表达(参考 Claude Code shimmer verb 的 GUI 转译) */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    100deg,
+    rgb(var(--fg-subtle)) 20%,
+    rgb(var(--accent)) 42%,
+    rgb(var(--fg)) 50%,
+    rgb(var(--accent)) 58%,
+    rgb(var(--fg-subtle)) 80%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 2.4s linear infinite;
+}
+
+.thought-running-label {
+  font-weight: 600;
+}
+
+/* 呼吸闪烁:running 结果占位等弱提示 */
+@keyframes soft-blink {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.dim-blink {
+  animation: soft-blink 1.6s ease-in-out infinite;
+}
+
+.thought-quote-body {
+  padding: 4px 0 10px;
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   line-height: 1.7;
@@ -487,7 +617,42 @@
   color: rgb(var(--fg-subtle));
 }
 
-.control-node > .control-card,
-.todo-fallback-node > .todo-panel {
+.control-node > .control-card {
   @apply w-full max-w-none;
+}
+
+/* ── live 运行状态节点(streaming 回合末尾的活体状态行) ──────────────────── */
+.run-status-node {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgb(var(--border) / 0.7);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  background: rgb(var(--bg-elevated) / 0.5);
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-xs);
+}
+
+.run-status-node::before {
+  @apply animate-pulse-seal;
+  background: rgb(var(--accent));
+}
+
+.run-status-verb {
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.run-status-stats {
+  @apply shrink-0 font-mono text-[10px] tabular-nums;
+  color: rgb(var(--fg-subtle));
+}
+
+.run-status-activity {
+  @apply min-w-0 truncate font-mono;
+  margin-left: auto;
+  color: rgb(var(--fg-subtle));
 }
