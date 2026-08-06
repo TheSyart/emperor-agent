@@ -637,7 +637,7 @@ select:focus-visible {
 
 .plan-markdown-primary.plan-markdown-collapsed {
   position: relative;
-  max-height: 9.5rem !important;
+  max-height: 9.5rem;
   overflow: hidden;
 }
 
@@ -2192,12 +2192,6 @@ select:focus-visible {
   height: 14px;
 }
 
-.context-ring {
-  width: 20px !important;
-  height: 20px !important;
-  color: rgb(var(--fg)) !important;
-}
-
 .send-button:disabled {
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg-subtle));
@@ -2456,9 +2450,9 @@ select:focus-visible {
 
 .model-menu-floating,
 .mode-menu-floating {
-  position: fixed !important;
-  right: auto !important;
-  bottom: auto !important;
+  position: fixed;
+  right: auto;
+  bottom: auto;
   z-index: var(--z-menu);
   overflow-x: hidden;
   overflow-y: auto;
@@ -2490,26 +2484,6 @@ select:focus-visible {
 .mode-menu-head {
   padding: 4px 7px 7px;
   border-bottom: 0;
-}
-
-.model-menu-head span,
-.mode-menu-head span {
-  color: rgb(var(--fg-muted)) !important;
-  font-size: var(--font-size-2xs) !important;
-  letter-spacing: 0.08em !important;
-}
-
-.model-menu-head em,
-.mode-menu-head em {
-  color: rgb(var(--fg-subtle)) !important;
-  font-size: var(--font-size-xs) !important;
-}
-
-.model-option,
-.mode-option {
-  min-height: 48px;
-  border-radius: var(--radius-md) !important;
-  padding: 8px 9px !important;
 }
 
 .model-button-label {
@@ -2710,14 +2684,8 @@ select:focus-visible {
 }
 
 .model-badge-context {
-  border-color: rgb(var(--accent) / 0.45) !important;
-  color: rgb(var(--accent)) !important;
-}
-
-.model-option b,
-.mode-option b {
-  border-radius: var(--radius-sm) !important;
-  padding: 1px 6px !important;
+  border-color: rgb(var(--accent) / 0.45);
+  color: rgb(var(--accent));
 }
 
 .model-menu-empty {
@@ -3060,7 +3028,7 @@ select:focus-visible {
 
   .plan-card-hero,
   .plan-markdown-primary {
-    margin-inline: 0 !important;
+    margin-inline: 0;
   }
 
   .messages-pane {
@@ -3151,12 +3119,12 @@ select:focus-visible {
 
   .model-form-grid,
   .advanced-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .model-form-v2 .form-row.span-2,
   .advanced-grid .form-row.span-2 {
-    grid-column: span 1 !important;
+    grid-column: span 1;
   }
 
   .composer-palette {
@@ -3187,7 +3155,7 @@ select:focus-visible {
   .model-option,
   .mode-option {
     min-height: 46px;
-    gap: 8px !important;
+    gap: 8px;
   }
 }
 

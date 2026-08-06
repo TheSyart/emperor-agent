@@ -1656,20 +1656,26 @@
 
 .model-menu-head span,
 .mode-menu-head span {
-  @apply font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  @apply font-mono uppercase;
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.08em;
 }
 
 .model-menu-head em,
 .mode-menu-head em {
-  @apply text-[11px] not-italic;
+  @apply not-italic;
   color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
 }
 
 .model-option,
 .mode-option {
-  @apply relative z-10 grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition;
+  @apply relative z-10 grid w-full items-center gap-3 rounded-md text-left transition;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 9px;
   color: rgb(var(--fg));
 }
 
@@ -1707,7 +1713,9 @@
 
 .model-option b,
 .mode-option b {
-  @apply rounded border px-2 py-0.5 font-mono text-[10px];
+  @apply rounded border font-mono text-[10px];
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
   border-color: rgb(var(--border));
   color: rgb(var(--fg-subtle));
 }
