@@ -2099,13 +2099,6 @@ select:focus-visible {
   background: rgb(var(--border));
 }
 
-.attach-button,
-.send-button,
-.model-button,
-.mode-button {
-  border-radius: var(--radius-md) !important;
-}
-
 .model-button,
 .mode-button {
   min-height: 32px;
@@ -2119,10 +2112,6 @@ select:focus-visible {
 .send-button {
   width: 32px;
   height: 32px;
-}
-
-.attach-button {
-  border-radius: 999px !important;
 }
 
 .model-button {
@@ -2207,12 +2196,6 @@ select:focus-visible {
   width: 20px !important;
   height: 20px !important;
   color: rgb(var(--fg)) !important;
-}
-
-.send-button {
-  border-radius: 999px !important;
-  background: rgb(var(--fg));
-  color: rgb(var(--bg));
 }
 
 .send-button:disabled {

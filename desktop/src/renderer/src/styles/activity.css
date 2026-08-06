@@ -1527,17 +1527,18 @@
   @apply grid shrink-0 place-items-center overflow-hidden border font-semibold transition disabled:opacity-50;
   width: 2rem;
   height: 2rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .send-button {
-  background: rgb(var(--accent));
+  background: rgb(var(--fg));
   border-color: transparent;
-  color: rgb(var(--accent-fg));
+  border-radius: 999px;
+  color: rgb(var(--bg));
 }
 
 .send-button:hover:not(:disabled) {
-  background: rgb(var(--accent) / 0.85);
+  background: rgb(var(--fg) / 0.85);
 }
 
 .send-button:disabled {
@@ -1576,6 +1577,7 @@
 .attach-button {
   background: transparent;
   border-color: rgb(var(--border));
+  border-radius: 999px;
   color: rgb(var(--fg-muted));
 }
 
@@ -1597,8 +1599,11 @@
 .model-button,
 .mode-button {
   @apply inline-flex h-8 max-w-[13.75rem] items-center gap-2 rounded-md border px-2.5 text-left transition disabled:opacity-60;
+  min-height: 32px;
   border-color: rgb(var(--border));
-  background: transparent;
+  background: rgb(var(--bg));
+  padding-inline: var(--space-2);
+  font-size: var(--font-size-sm);
   color: rgb(var(--fg));
 }
 
