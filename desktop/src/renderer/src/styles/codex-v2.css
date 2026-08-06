@@ -503,64 +503,8 @@ select:focus-visible {
   padding-inline: 0;
 }
 
-.timeline-node.text-node.streaming {
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-.tool-group-card {
-  border-radius: var(--radius-md) !important;
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.tool-group-card.running {
-  border-color: rgb(var(--warn) / 0.38) !important;
-}
-
-.tool-group-card.error,
-.tool-group-card.error_aborted {
-  border-color: rgb(var(--danger) / 0.42) !important;
-}
-
 .tool-group-summary {
   min-height: 34px;
-}
-
-.tool-group-body {
-  background: rgb(var(--bg) / 0.38) !important;
-}
-
-.tool-detail-body {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border) / 0.68) !important;
-  background: rgb(var(--bg) / 0.24) !important;
-}
-
-.tool-group-body > .tool-detail-body,
-.tool-group-tool-row > .tool-detail-body {
-  border-color: transparent !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-}
-
-.tool-group-tool-row {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border) / 0.72) !important;
-  background: rgb(var(--bg) / 0.2) !important;
-  box-shadow: none !important;
-}
-
-.tool-raw-details {
-  border-color: rgb(var(--border) / 0.72) !important;
-  background: rgb(var(--bg) / 0.24) !important;
-}
-
-.tool-raw-details .tool-detail-body {
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
 }
 
 .assistant-timeline-shell {
