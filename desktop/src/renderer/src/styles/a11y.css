@@ -12,14 +12,16 @@
     --duration: 1ms;
     --duration-slow: 1ms;
   }
-  /* 兜底:任何残留 CSS 动画/过渡也压到瞬时。
-     audit-allow: important —— 全局无障碍覆盖,须压过局部声明。 */
   *,
   *::before,
   *::after {
+    /* audit-allow: important —— 全局无障碍覆盖,须压过局部声明。 */
     animation-duration: 1ms !important;
+    /* audit-allow: important */
     animation-iteration-count: 1 !important;
+    /* audit-allow: important */
     transition-duration: 1ms !important;
+    /* audit-allow: important */
     scroll-behavior: auto !important;
   }
 }

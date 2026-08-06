@@ -1596,7 +1596,7 @@
   place-items: center;
   padding: 24px;
   background: rgb(var(--shadow-color) / 0.78);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--material-1-blur));
 }
 
 .attachment-preview-stage {
@@ -2310,7 +2310,7 @@
 
 .model-setup-backdrop {
   background: rgb(var(--shadow-color) / 0.46);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(var(--material-1-blur));
 }
 
 .model-setup-modal {
@@ -2345,7 +2345,7 @@
   border-radius: var(--radius-md);
   background: rgb(var(--bg) / 0.62);
   color: rgb(var(--fg-muted));
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--material-1-blur));
   transition:
     border-color 140ms ease,
     background 140ms ease,

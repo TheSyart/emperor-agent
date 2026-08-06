@@ -111,7 +111,7 @@ function onKeydown(event: KeyboardEvent): void {
   place-items: start center;
   padding: max(10vh, 72px) 24px 24px;
   background: rgb(var(--shadow-color) / 0.5);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--material-1-blur));
 }
 
 .command-center-dialog {

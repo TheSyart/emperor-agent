@@ -421,7 +421,7 @@ function logDetails(details: Record<string, unknown>): string {
         </div>
       </div>
       <div class="environment-progress-track" aria-hidden="true">
-        <span :style="{ width: `${progressPercent}%` }" />
+        <span :style="{ transform: `scaleX(${progressPercent / 100})` }" />
       </div>
     </div>
 
@@ -791,9 +791,12 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-progress-track span {
   display: block;
+  width: 100%;
   height: 100%;
   background: rgb(var(--accent));
-  transition: width 180ms ease;
+  transform-origin: left;
+  /* 用 transform(scaleX) 而非 width 过渡:仅合成器,避免每帧 reflow。 */
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .environment-empty {

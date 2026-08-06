@@ -1323,7 +1323,7 @@ select:focus-visible {
   transform: translateX(-50%);
   transform-origin: bottom center;
   animation: composer-progress-enter 150ms cubic-bezier(0.22, 1, 0.36, 1);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(var(--material-2-blur));
 }
 
 .composer-progress-list {
@@ -2370,7 +2370,7 @@ select:focus-visible {
   padding: 7px;
   background: rgb(var(--bg-elevated) / 0.98);
   box-shadow: 0 16px 46px rgb(var(--shadow-color) / 0.28);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(var(--material-2-blur));
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--border-strong) / 0.72) transparent;
 }
@@ -2616,7 +2616,7 @@ select:focus-visible {
   border: 1px solid rgb(var(--border-strong));
   padding: 5px;
   background: rgb(var(--bg-elevated) / 0.98);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(var(--material-2-blur));
 }
 
 .model-menu-floating {
