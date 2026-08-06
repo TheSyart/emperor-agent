@@ -218,8 +218,8 @@ header button:hover {
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
 }
-.command-disabled-reason {
-  color: rgb(var(--warn)) !important;
+.command-center-copy small.command-disabled-reason {
+  color: rgb(var(--warn));
 }
 .command-center-meta {
   flex: none;

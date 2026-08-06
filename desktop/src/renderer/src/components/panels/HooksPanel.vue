@@ -1384,9 +1384,6 @@ function sourceStatus(source: {
   align-items: baseline;
   gap: 0.55rem;
 }
-.advanced-actions {
-  align-items: center !important;
-}
 .advanced-editor textarea {
   min-height: 420px;
 }
@@ -1509,8 +1506,8 @@ function sourceStatus(source: {
 
 .hooks-head {
   min-height: 58px;
-  flex-direction: row !important;
-  align-items: center !important;
+  flex-direction: row;
+  align-items: center;
 }
 
 .hooks-head > .tool-button {
@@ -1543,7 +1540,7 @@ function sourceStatus(source: {
 
 .hooks-content {
   display: grid;
-  height: auto !important;
+  height: auto;
   gap: var(--space-4);
 }
 

@@ -235,10 +235,7 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
   // 清理时把数字往下调,直到只剩白名单。新增文件不得出现(默认基线 0)。
   const IMPORTANT_BASELINE: Record<string, number> = {
     'styles/a11y.css': 4, // 全部带 audit-allow 注释(全局无障碍覆盖)
-    'styles/codex-v2.css': 144,
-    'styles/workspace.css': 4,
-    'components/panels/HooksPanel.vue': 4,
-    'components/commands/CommandCenterDialog.vue': 1,
+    'styles/workspace.css': 2, // .workspace-resizing 全局拖拽态(带 audit-allow)
   }
 
   it('!important count does not exceed baseline, and is audit-allow commented', () => {
