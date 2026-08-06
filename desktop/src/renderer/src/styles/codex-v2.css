@@ -2790,30 +2790,30 @@ select:focus-visible {
 .scheduler-meta-grid span,
 .test-row,
 .attach-chip {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border)) !important;
-  background: rgb(var(--bg-elevated)) !important;
-  box-shadow: none !important;
+  border-radius: var(--radius-md);
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg-elevated));
+  box-shadow: none;
 }
 
 .team-avatar,
 .scheduler-job-icon,
 .team-stamp img,
 .team-tool-cloud img {
-  image-rendering: auto !important;
-  border-radius: var(--radius-md) !important;
+  image-rendering: auto;
+  border-radius: var(--radius-md);
 }
 
 .model-form-section,
 .advanced-panel {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border)) !important;
-  background: rgb(var(--bg-inset) / 0.34) !important;
-  box-shadow: none !important;
+  border-radius: var(--radius-md);
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg-inset) / 0.34);
+  box-shadow: none;
 }
 
 .model-form-section {
-  padding: 10px !important;
+  padding: 10px;
 }
 
 .model-form-section-head {
@@ -2821,50 +2821,50 @@ select:focus-visible {
 }
 
 .model-form-section-head h4 {
-  color: rgb(var(--fg)) !important;
-  font-size: var(--font-size-md) !important;
-  font-weight: 650 !important;
+  color: rgb(var(--fg));
+  font-size: var(--font-size-md);
+  font-weight: 650;
 }
 
 .model-form-section-head span {
-  color: rgb(var(--fg-subtle)) !important;
-  font-size: var(--font-size-xs) !important;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
 }
 
 .model-form-grid {
-  gap: 8px !important;
+  gap: 8px;
 }
 
 .model-form-v2 .form-label {
-  color: rgb(var(--fg-subtle)) !important;
-  font-size: var(--font-size-2xs) !important;
-  letter-spacing: 0.08em !important;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.08em;
 }
 
 .model-form-v2 .form-input,
 .model-form-v2 .form-select,
 .advanced-grid textarea {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border)) !important;
-  background: rgb(var(--bg)) !important;
-  box-shadow: none !important;
+  border-radius: var(--radius-md);
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg));
+  box-shadow: none;
 }
 
 .advanced-panel {
-  margin-top: 0 !important;
-  padding: 9px 10px !important;
+  margin-top: 0;
+  padding: 9px 10px;
 }
 
 .advanced-toggle {
-  font-family: inherit !important;
-  font-size: var(--font-size-md) !important;
-  font-weight: 650 !important;
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 650;
 }
 
 .team-section-head,
 .entry-editor-head {
-  border-color: rgb(var(--border)) !important;
-  background: rgb(var(--bg-inset) / 0.45) !important;
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg-inset) / 0.45);
 }
 
 .team-section-head h2,
@@ -2873,15 +2873,15 @@ select:focus-visible {
 .scheduler-summary strong,
 .scheduler-job-row strong,
 .entry-editor-head h3 {
-  font-family: inherit !important;
-  font-size: var(--font-size-lg) !important;
-  font-weight: 650 !important;
-  color: rgb(var(--fg)) !important;
+  font-family: inherit;
+  font-size: var(--font-size-lg);
+  font-weight: 650;
+  color: rgb(var(--fg));
 }
 
 .team-message-scroll,
 .scheduler-run-scroll {
-  background: rgb(var(--bg)) !important;
+  background: rgb(var(--bg));
 }
 
 .tool-button {
