@@ -6,6 +6,8 @@ import './styles.css'
 import './theme/dark.css'
 import './theme/light.css'
 import './theme/base.css'
+import './styles/materials.css'
+import './styles/a11y.css'
 import './styles/layout.css'
 import './styles/chat.css'
 import './styles/activity.css'
@@ -13,6 +15,7 @@ import './styles/panels.css'
 import './styles/responsive.css'
 import './styles/codex-v2.css'
 import './styles/workspace.css'
+import './styles/files-highlight.css'
 
 applyTheme(document, localStorage.getItem('emperor.theme') ?? DEFAULT_THEME)
 

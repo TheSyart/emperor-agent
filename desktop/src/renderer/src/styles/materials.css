@@ -1,0 +1,94 @@
+/* ── Material & depth utilities ─────────────────────────────────────────────
+   单一材质配方,只消费 theme/*.css 的玻璃/材质 token(唯一事实源)。
+   复合类遵循 grok-app 范式:色块 + 发丝边 + 软阴影 + blur + saturate,
+   并用 translateZ(0)+isolation 触发合成层,保证 backdrop-filter 平滑。
+
+   无障碍降级集中在 styles/a11y.css(reduced-transparency → 提高 alpha、
+   去掉 blur);这些类自身不写媒体查询。 */
+
+/* 玻璃(单数配方,供浮层/菜单/对话框直接复用) */
+.glass {
+  background: rgb(var(--glass-bg) / var(--glass-alpha));
+  border: 1px solid rgb(var(--glass-border) / var(--glass-border-a));
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(
+      var(--glass-saturate)
+    );
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+/* 材质分级:越大/越结构化的表面读作越厚(更深 alpha + 更强 blur + 更深阴影) */
+
+/* 交互层:chips、菜单、小型浮件 */
+.material-1 {
+  background: rgb(var(--material-1-bg) / var(--material-1-alpha));
+  backdrop-filter: blur(var(--material-1-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--material-1-blur)) saturate(1.4);
+  box-shadow: var(--shadow-sm);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+/* 结构层:侧栏、composer 等持久区域 */
+.material-2 {
+  background: rgb(var(--material-2-bg) / var(--material-2-alpha));
+  backdrop-filter: blur(var(--material-2-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--material-2-blur)) saturate(1.5);
+  box-shadow: var(--shadow-md);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+/* 覆盖层:sheet、dialog、命令面板 —— 最厚,接近纯玻璃 */
+.material-3 {
+  background: rgb(var(--material-3-bg) / var(--material-3-alpha));
+  backdrop-filter: blur(var(--material-3-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--material-3-blur)) saturate(
+      var(--glass-saturate)
+    );
+  box-shadow: var(--glass-shadow);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+/* dim-to-focus 遮罩(modal/sheet 用;并行非阻塞面板不用) */
+.scrim {
+  background: rgb(var(--shadow-color) / var(--scrim-a));
+}
+
+/* 滚动边缘渐隐:替代列表上下硬分隔线(仅浮动 UI 与内容交叠处用) */
+.scroll-fade-y {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--space-3),
+    black calc(100% - var(--space-3)),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--space-3),
+    black calc(100% - var(--space-3)),
+    transparent 100%
+  );
+}
+
+/* 统一焦点环(键盘 :focus-visible;鼠标点击不触发) */
+.focus-ring:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.7);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* 按压反馈:pointer-down 即缩放,仅 transform(合成器),响应即时。
+   用 :active 而非 click,反馈发生在按压当下。 */
+.pressable {
+  transition: transform var(--duration-fast) var(--ease-out);
+  will-change: transform;
+}
+.pressable:active {
+  transform: scale(0.96);
+}

@@ -1,0 +1,50 @@
+/* ── Centralized accessibility adaptation ───────────────────────────────────
+   三种独立偏好信号集中在此处理,组件自身零 a11y 代码:
+   - prefers-reduced-motion    → 动效塌缩为 1ms(弹簧在 JS 侧另行直达)
+   - prefers-reduced-transparency → 材质实体化:提高 alpha、去掉 blur
+   - prefers-contrast: more     → 边框/底色增强对比
+   在 surface 样式之前导入(见 main.ts),媒体查询只负责覆盖 token。 */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 1ms;
+    --duration-fast: 1ms;
+    --duration: 1ms;
+    --duration-slow: 1ms;
+  }
+  /* 兜底:任何残留 CSS 动画/过渡也压到瞬时。
+     audit-allow: important —— 全局无障碍覆盖,须压过局部声明。 */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --material-1-alpha: 0.97;
+    --material-2-alpha: 0.98;
+    --material-3-alpha: 0.99;
+    --material-1-blur: 0px;
+    --material-2-blur: 0px;
+    --material-3-blur: 0px;
+    --glass-alpha: var(--glass-solid-alpha);
+    --glass-blur: 0px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root,
+  :root[data-theme='dark'] {
+    --border: 88 88 98;
+    --border-strong: 140 140 150;
+  }
+  :root[data-theme='light'] {
+    --border: 150 150 158;
+    --border-strong: 120 120 128;
+  }
+}
