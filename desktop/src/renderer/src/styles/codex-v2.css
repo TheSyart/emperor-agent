@@ -543,72 +543,13 @@ select:focus-visible {
   background: rgb(var(--fg-subtle));
 }
 
-.tool-event,
-.activity-card,
-.agent-node,
-.control-card {
-  border-radius: var(--radius-md) !important;
-  border-color: rgb(var(--border)) !important;
-  box-shadow: none !important;
-}
-
-.tool-event,
-.activity-card,
-.agent-node,
-.control-card {
-  background: rgb(var(--bg-elevated)) !important;
-}
-
-.control-card {
-  padding: 14px !important;
-  border-radius: var(--radius) !important;
-}
-
-.control-card-head {
-  gap: 8px !important;
-  align-items: center !important;
-}
-
-.control-card-head span {
-  letter-spacing: 0.08em !important;
-}
-
-.control-card-head em {
-  border-radius: var(--radius-sm) !important;
-  padding: 2px 7px !important;
-  background: rgb(var(--bg-inset) / 0.5);
-}
-
-.control-context {
-  margin-top: 8px !important;
-  color: rgb(var(--fg-muted)) !important;
-  font-size: var(--font-size-md) !important;
-  line-height: 1.65 !important;
-}
-
-.plan-action-zone textarea {
-  min-height: 70px;
-  border-color: rgb(var(--border)) !important;
-  border-radius: var(--radius-md) !important;
-  background: rgb(var(--bg) / 0.58) !important;
-  color: rgb(var(--fg)) !important;
-  resize: vertical;
-}
-
-.plan-markdown {
-  max-height: 28rem !important;
-  border-radius: var(--radius-md) !important;
-  padding: 12px 14px !important;
-  background: rgb(var(--bg) / 0.58) !important;
-}
-
 .plan-large-card {
   width: 100%;
   max-width: 760px;
-  padding: 0 !important;
+  padding: 0;
   overflow: hidden;
-  border-radius: var(--radius) !important;
-  background: rgb(var(--bg-elevated)) !important;
+  border-radius: var(--radius);
+  background: rgb(var(--bg-elevated));
 }
 
 .plan-card-hero {

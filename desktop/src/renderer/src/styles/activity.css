@@ -1,8 +1,10 @@
 /* ── Tool / activity cards ────────────────────────────────────────────────── */
 .activity-card {
   @apply relative w-full max-w-full overflow-visible rounded-md border text-sm;
+  border-radius: var(--radius-md);
   border-color: rgb(var(--border));
   background: rgb(var(--bg-elevated));
+  box-shadow: none;
 }
 
 .activity-card[open] {
@@ -581,9 +583,12 @@
 
 /* ── Control cards (Ask / Plan) ──────────────────────────────────────────── */
 .control-card {
-  @apply w-full max-w-full overflow-hidden rounded-md border p-4 text-sm;
+  @apply w-full max-w-full overflow-hidden rounded-md border text-sm;
+  padding: var(--space-3);
+  border-radius: var(--radius);
   border-color: rgb(var(--border));
   background: rgb(var(--bg-elevated));
+  box-shadow: none;
 }
 
 .control-card.waiting {
@@ -600,11 +605,14 @@
 }
 
 .control-card-head {
-  @apply flex flex-wrap items-center justify-between gap-2;
+  @apply flex flex-wrap items-center justify-between;
+  gap: var(--space-2);
+  align-items: center;
 }
 
 .control-card-head span {
   @apply font-mono text-[10px] uppercase tracking-wider;
+  letter-spacing: 0.08em;
   color: rgb(var(--fg-subtle));
 }
 
@@ -614,18 +622,30 @@
 }
 
 .control-card-head em {
-  @apply rounded border px-2 py-0.5 font-mono text-[10px] not-italic;
+  @apply rounded border font-mono text-[10px] not-italic;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
   border-color: rgb(var(--border));
+  background: rgb(var(--bg-inset) / 0.5);
   color: rgb(var(--fg-subtle));
 }
 
 .control-context {
-  @apply mt-2 text-xs leading-6;
+  @apply text-xs;
+  margin-top: var(--space-2);
   color: rgb(var(--fg-muted));
+  font-size: var(--font-size-md);
+  line-height: 1.65;
 }
 
 .plan-action-zone textarea {
   @apply mt-2 text-sm;
+  min-height: 70px;
+  border-color: rgb(var(--border));
+  border-radius: var(--radius-md);
+  background: rgb(var(--bg) / 0.58);
+  color: rgb(var(--fg));
+  resize: vertical;
 }
 
 .control-actions {
@@ -663,9 +683,12 @@
 }
 
 .plan-markdown {
-  @apply mt-3 max-h-[32rem] overflow-y-auto rounded-md border px-3.5 py-3;
+  @apply mt-3 overflow-y-auto rounded-md border;
+  max-height: 28rem;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-3);
   border-color: rgb(var(--border));
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--bg) / 0.58);
 }
 
 .plan-assumptions,
@@ -1070,6 +1093,10 @@
 
 .agent-node {
   @apply relative min-w-0;
+  border-radius: var(--radius-md);
+  border-color: rgb(var(--border));
+  background: rgb(var(--bg-elevated));
+  box-shadow: none;
 }
 
 .agent-node::before {
