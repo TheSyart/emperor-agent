@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowLeft,
+  Globe2,
   Files,
   GitCompareArrows,
   ListTree,
@@ -21,6 +22,7 @@ import { core } from '../../api/http'
 import type { RightWorkspaceState, SidebarState } from '../../types'
 import { normalizeSidebarState } from '../../runtime/sidebarModel'
 import EnvironmentPane from './EnvironmentPane.vue'
+import BrowserPane from './BrowserPane.vue'
 import FilesPane from './FilesPane.vue'
 import GitReviewPane from './GitReviewPane.vue'
 import TerminalPane from './TerminalPane.vue'
@@ -37,6 +39,7 @@ import {
   type WorkspaceSnapshot,
   type WorkspaceSource,
 } from './workspaceTypes'
+import { useResizable } from '../../composables/useResizable'
 
 const props = defineProps<{
   sessionId: string
@@ -55,10 +58,13 @@ const loading = ref(false)
 const error = ref('')
 const reviewFilterPaths = ref<string[]>([])
 const panel = ref<HTMLElement | null>(null)
+const filesPane = ref<{
+  openPath: (path: string, line?: number) => Promise<void>
+} | null>(null)
+const pendingFile = ref<{ path: string; line?: number } | null>(null)
+const pendingPreviewId = ref('')
 let refreshTimer: number | undefined
 let pollTimer: number | undefined
-let dragStartX = 0
-let dragStartWidth = 840
 let snapshotGeneration = 0
 let refreshingSession = ''
 let focusBeforeOverlay: HTMLElement | null = null
@@ -125,7 +131,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleWindowKeydown)
   window.clearTimeout(refreshTimer)
   window.clearInterval(pollTimer)
-  stopResize()
 })
 
 watch(
@@ -157,6 +162,7 @@ function refreshSnapshotOnFocus(): void {
 function coercePane(): void {
   if (
     state.pane === 'launcher' ||
+    (state.pane === 'browser' && Boolean(pendingPreviewId.value)) ||
     panes.value.some((pane) => pane.id === state.pane)
   )
     return
@@ -198,7 +204,9 @@ function openLauncher(): void {
 
 function openPane(pane: WorkspacePaneId): void {
   if (pane === 'launcher') return
-  if (!panes.value.some((entry) => entry.id === pane)) return
+  if (pane !== 'browser' && !panes.value.some((entry) => entry.id === pane))
+    return
+  if (pane === 'browser' && !pendingPreviewId.value) return
   if (pane === 'review' && !hasGit.value) return
   state.pane = pane
   setWorkbench(true)
@@ -209,12 +217,30 @@ function openReview(paths: string[] = []): void {
   openPane('review')
 }
 
+function openFile(relativePath: string, line?: number): void {
+  pendingFile.value = { path: relativePath, ...(line ? { line } : {}) }
+  openPane('files')
+  void nextTick(async () => {
+    const request = pendingFile.value
+    if (!request || !filesPane.value) return
+    pendingFile.value = null
+    await filesPane.value.openPath(request.path, request.line)
+  })
+}
+
+function openPreview(previewId: string): void {
+  pendingPreviewId.value = previewId
+  openPane('browser')
+}
+
 defineExpose({
   openReview,
   openPane,
   openLauncher,
   showEnvironment,
   refreshSnapshot,
+  openFile,
+  openPreview,
 })
 
 function setFilesTreeWidth(width: number): void {
@@ -269,17 +295,24 @@ function clampedWidth(value: number): number {
   return Math.min(viewportMaximum, clampWorkspaceWidth(value))
 }
 
-function resizeWithKeyboard(event: KeyboardEvent): void {
-  let next = state.width
-  if (event.key === 'ArrowLeft') next += event.shiftKey ? 40 : 10
-  else if (event.key === 'ArrowRight') next -= event.shiftKey ? 40 : 10
-  else if (event.key === 'Home') next = 520
-  else if (event.key === 'End') next = 960
-  else return
-  event.preventDefault()
-  state.width = clampedWidth(next)
-  void persist()
-}
+// Bridge the reactive state.width into a ref the resizable primitive drives.
+const workspaceWidth = computed({
+  get: () => state.width,
+  set: (value) => {
+    state.width = clampedWidth(value)
+  },
+})
+
+const { separatorProps: workspaceResizerProps } = useResizable({
+  size: workspaceWidth,
+  min: 520,
+  max: 960,
+  edge: 'left',
+  snap: [520, DEFAULT_WORKSPACE_WIDTH, 960],
+  snapThreshold: 28,
+  enabled: () => presentation.value === 'fixed',
+  onCommit: () => void persist(),
+})
 
 async function persist(): Promise<void> {
   try {
@@ -325,34 +358,11 @@ function scheduleRefresh(): void {
   refreshTimer = window.setTimeout(() => void refreshSnapshot(), 280)
 }
 
-function startResize(event: MouseEvent): void {
-  if (presentation.value !== 'fixed') return
-  dragStartX = event.clientX
-  dragStartWidth = panel.value?.getBoundingClientRect().width ?? state.width
-  document.body.classList.add('workspace-resizing')
-  window.addEventListener('mousemove', resize)
-  window.addEventListener('mouseup', finishResize, { once: true })
-}
-
-function resize(event: MouseEvent): void {
-  state.width = clampedWidth(dragStartWidth + dragStartX - event.clientX)
-}
-
-function finishResize(): void {
-  stopResize()
-  void persist()
-}
-
-function stopResize(): void {
-  document.body.classList.remove('workspace-resizing')
-  window.removeEventListener('mousemove', resize)
-  window.removeEventListener('mouseup', finishResize)
-}
-
 const iconForPane: Record<string, typeof GitCompareArrows> = {
   review: GitCompareArrows,
   terminal: TerminalSquare,
   files: Files,
+  browser: Globe2,
 }
 
 const FOCUSABLE_SELECTOR =
@@ -396,6 +406,7 @@ const FOCUSABLE_SELECTOR =
       :has-project="hasProject"
       @refresh="refreshSnapshot"
       @open-pane="openPane"
+      @open-preview="openPreview"
     />
   </aside>
 
@@ -423,13 +434,7 @@ const FOCUSABLE_SELECTOR =
       type="button"
       class="right-workspace-resizer"
       aria-label="调整项目工作台宽度"
-      role="separator"
-      aria-orientation="vertical"
-      aria-valuemin="520"
-      aria-valuemax="960"
-      :aria-valuenow="state.width"
-      @mousedown="startResize"
-      @keydown="resizeWithKeyboard"
+      v-bind="workspaceResizerProps"
     ></button>
     <header class="right-workspace-head">
       <div>
@@ -484,10 +489,16 @@ const FOCUSABLE_SELECTOR =
       />
       <FilesPane
         v-else-if="state.pane === 'files' && hasProject"
+        ref="filesPane"
         :session-id="sessionId"
         :project-path="effectiveProjectPath"
         :tree-width="state.filesTreeWidth"
         @tree-width="setFilesTreeWidth"
+      />
+      <BrowserPane
+        v-else-if="state.pane === 'browser' && hasProject"
+        :session-id="sessionId"
+        :preview-id="pendingPreviewId"
       />
     </div>
   </aside>

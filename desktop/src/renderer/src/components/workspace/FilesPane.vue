@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  File,
   Folder,
   FolderOpen,
   PanelRightClose,
@@ -13,9 +12,13 @@ import {
   Search,
   X,
 } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useResizable } from '../../composables/useResizable'
 import { core } from '../../api/http'
 import { useMarkdown } from '../../composables/useMarkdown'
+import { handleMarkdownChipClick } from '../../composables/useMarkdownLinks'
+import { fileIconFor } from './fileIcon'
+import { highlightFile } from './fileHighlight'
 
 interface FileTab {
   path: string
@@ -45,23 +48,39 @@ const query = ref('')
 const loading = ref(false)
 const error = ref('')
 const resultsTruncated = ref(false)
-const showHidden = ref(false)
-const showIgnored = ref(false)
 const treeVisible = ref(true)
+const activeLine = ref<number | null>(null)
 let requestGeneration = 0
-let dragStartX = 0
-let dragStartWidth = 280
 
 const activeTab = computed(
   () => tabs.value.find((tab) => tab.path === activePath.value) || null,
 )
+
+// Bridge the parent-owned treeWidth into a ref the resizable primitive drives;
+// writes emit back up so the parent stays the source of truth.
+const treeWidthRef = computed({
+  get: () => props.treeWidth,
+  set: (width) => emit('treeWidth', Math.max(240, Math.min(320, width))),
+})
+const { separatorProps: treeResizerProps } = useResizable({
+  size: treeWidthRef,
+  min: 240,
+  max: 320,
+  edge: 'left',
+  snap: [240, 280, 320],
+  snapThreshold: 20,
+})
+
 const markdownSource = computed(() => activeTab.value?.preview.content || '')
 const { rendered: renderedMarkdown } = useMarkdown(markdownSource)
 const isMarkdown = computed(() =>
   /(?:^|\.)md(?:own)?$/i.test(activeTab.value?.preview.name || ''),
 )
-const codeLines = computed(() =>
-  (activeTab.value?.preview.content || '').split('\n'),
+const codeView = computed(() =>
+  highlightFile(
+    activeTab.value?.preview.name || '',
+    activeTab.value?.preview.content || '',
+  ),
 )
 const treeRows = computed<TreeRow[]>(() => {
   if (searchResults.value)
@@ -73,13 +92,10 @@ const treeRows = computed<TreeRow[]>(() => {
 const panelStyle = computed(() => ({ width: `${props.treeWidth}px` }))
 
 onMounted(() => void loadDirectory(''))
-onBeforeUnmount(stopTreeResize)
 watch(
   () => props.sessionId,
   () => void resetSession(),
 )
-watch(showHidden, () => void reloadTree())
-watch(showIgnored, () => void reloadTree())
 
 function appendDirectoryRows(path: string, level: number, rows: TreeRow[]) {
   for (const entry of treeByDirectory.value[path] || []) {
@@ -124,8 +140,6 @@ async function loadDirectory(path: string): Promise<void> {
     const result = await core('files.list', {
       sessionId: owner,
       relativePath: path,
-      showHidden: showHidden.value,
-      showIgnored: showIgnored.value,
       limit: 500,
     })
     if (!isCurrent(owner, generation)) return
@@ -168,8 +182,6 @@ async function searchFiles(): Promise<void> {
     const result = await core('files.search', {
       sessionId: owner,
       query: searchTerm,
-      showHidden: showHidden.value,
-      showIgnored: showIgnored.value,
       limit: 500,
     })
     if (!isCurrent(owner, generation)) return
@@ -212,6 +224,70 @@ async function openEntry(entry: WorkspaceFileEntry): Promise<void> {
   }
 }
 
+async function openPath(relativePath: string, line?: number): Promise<void> {
+  const path = relativePath.replaceAll('\\', '/').replace(/^\.\/+/, '')
+  if (!path) return
+  activeLine.value = normalizeLine(line)
+  const existing = tabs.value.find((tab) => tab.path === path)
+  if (existing) {
+    activePath.value = path
+    await revealActiveLine()
+    return
+  }
+  const owner = props.sessionId
+  const generation = ++requestGeneration
+  loading.value = true
+  error.value = ''
+  try {
+    const preview = await core('files.read', {
+      sessionId: owner,
+      relativePath: path,
+    })
+    if (!isCurrent(owner, generation)) return
+    tabs.value = [...tabs.value, { path, preview, sourceMode: false }]
+    activePath.value = path
+    await expandAncestors(path)
+    await revealActiveLine()
+  } catch (cause) {
+    if (isCurrent(owner, generation)) error.value = message(cause)
+  } finally {
+    if (isCurrent(owner, generation)) loading.value = false
+  }
+}
+
+async function expandAncestors(path: string): Promise<void> {
+  const parts = path.split('/').slice(0, -1)
+  let current = ''
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part
+    expanded.value = new Set([...expanded.value, current])
+    if (!treeByDirectory.value[current]) await loadDirectory(current)
+  }
+}
+
+function normalizeLine(value?: number): number | null {
+  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : null
+}
+
+async function revealActiveLine(): Promise<void> {
+  await nextTick()
+  if (!activeLine.value) return
+  document
+    .querySelector<HTMLElement>(
+      `.file-code-line[data-line="${activeLine.value}"]`,
+    )
+    ?.scrollIntoView({ block: 'center' })
+}
+
+function handleMarkdownClick(event: MouseEvent): void {
+  handleMarkdownChipClick(
+    event,
+    `file-preview:${activeTab.value?.path || 'unknown'}`,
+  )
+}
+
+defineExpose({ openPath })
+
 function closeTab(path: string): void {
   const index = tabs.value.findIndex((tab) => tab.path === path)
   if (index < 0) return
@@ -235,31 +311,6 @@ async function copyPath(relative: boolean): Promise<void> {
   )
 }
 
-function startTreeResize(event: MouseEvent): void {
-  dragStartX = event.clientX
-  dragStartWidth = props.treeWidth
-  document.body.classList.add('workspace-resizing')
-  window.addEventListener('mousemove', resizeTree)
-  window.addEventListener('mouseup', finishTreeResize, { once: true })
-}
-
-function resizeTree(event: MouseEvent): void {
-  emit(
-    'treeWidth',
-    Math.max(240, Math.min(320, dragStartWidth + dragStartX - event.clientX)),
-  )
-}
-
-function finishTreeResize(): void {
-  stopTreeResize()
-}
-
-function stopTreeResize(): void {
-  document.body.classList.remove('workspace-resizing')
-  window.removeEventListener('mousemove', resizeTree)
-  window.removeEventListener('mouseup', finishTreeResize)
-}
-
 function isCurrent(owner: string, generation: number): boolean {
   return props.sessionId === owner && requestGeneration === generation
 }
@@ -280,7 +331,11 @@ function message(value: unknown): string {
           :class="{ active: tab.path === activePath }"
         >
           <button type="button" role="tab" @click="activePath = tab.path">
-            <File :size="13" />
+            <component
+              :is="fileIconFor(tab.preview.name, false).icon"
+              :size="13"
+              :class="`file-icon-tone-${fileIconFor(tab.preview.name, false).tone}`"
+            />
             <span>{{ tab.preview.name }}</span>
           </button>
           <button
@@ -342,18 +397,21 @@ function message(value: unknown): string {
               v-else-if="isMarkdown && !activeTab.sourceMode"
               class="markdown-body file-markdown-preview"
               v-html="renderedMarkdown"
+              @click="handleMarkdownClick"
             ></div>
             <div
               v-else-if="activeTab.preview.kind === 'text'"
               class="file-code-view"
             >
               <div
-                v-for="(line, index) in codeLines"
+                v-for="(line, index) in codeView.lines"
                 :key="index"
                 class="file-code-line"
+                :class="{ 'reference-line-active': activeLine === index + 1 }"
+                :data-line="index + 1"
               >
                 <span>{{ index + 1 }}</span
-                ><code>{{ line || ' ' }}</code>
+                ><code v-html="line || ' '"></code>
               </div>
             </div>
             <div v-else class="workspace-empty-state">
@@ -374,7 +432,7 @@ function message(value: unknown): string {
           type="button"
           class="file-tree-resizer"
           aria-label="调整文件树宽度"
-          @mousedown="startTreeResize"
+          v-bind="treeResizerProps"
         ></button>
         <form class="workspace-search" @submit.prevent="searchFiles">
           <Search :size="14" />
@@ -386,8 +444,6 @@ function message(value: unknown): string {
           />
         </form>
         <div class="file-tree-options">
-          <label><input v-model="showHidden" type="checkbox" /> 隐藏文件</label>
-          <label><input v-model="showIgnored" type="checkbox" /> ignored</label>
           <button type="button" aria-label="刷新文件树" @click="reloadTree">
             <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
           </button>
@@ -418,7 +474,12 @@ function message(value: unknown): string {
               :size="14"
             />
             <Folder v-else-if="isDirectory(row.entry)" :size="14" />
-            <File v-else :size="14" />
+            <component
+              :is="fileIconFor(row.entry.name, false).icon"
+              v-else
+              :size="14"
+              :class="`file-icon-tone-${fileIconFor(row.entry.name, false).tone}`"
+            />
             <span>{{ row.entry.name }}</span>
           </button>
           <div v-if="!treeRows.length && !loading" class="workspace-muted">
