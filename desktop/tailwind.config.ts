@@ -61,6 +61,29 @@ export default {
         imperial: '0 8px 28px rgb(var(--shadow-color) / 0.28)',
         insetPaper: 'inset 0 0 0 1px rgb(var(--border) / 0.7)',
       },
+      zIndex: {
+        base: 'var(--z-base)',
+        raised: 'var(--z-raised)',
+        sticky: 'var(--z-sticky)',
+        overlay: 'var(--z-overlay)',
+        drawer: 'var(--z-drawer)',
+        popover: 'var(--z-popover)',
+        toast: 'var(--z-toast)',
+        modal: 'var(--z-modal)',
+        menu: 'var(--z-menu)',
+        lightbox: 'var(--z-lightbox)',
+      },
+      transitionDuration: {
+        instant: 'var(--duration-instant)',
+        fast: 'var(--duration-fast)',
+        DEFAULT: 'var(--duration)',
+        slow: 'var(--duration-slow)',
+      },
+      transitionTimingFunction: {
+        apple: 'var(--ease-out)',
+        spring: 'var(--ease-spring)',
+        'apple-in': 'var(--ease-in)',
+      },
       backgroundImage: {
         grain:
           'linear-gradient(180deg, rgb(var(--bg)) 0%, rgb(var(--bg-inset)) 100%)',

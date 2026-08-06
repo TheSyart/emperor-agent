@@ -51,6 +51,70 @@
   --tone-violet: 124 58 237;
   --tone-blue: 37 99 235;
 
+  /* ── 文本层级(alpha 派生,grok-app 分类法) ── */
+  --text-primary: 0.88;
+  --text-secondary: 0.55;
+  --text-tertiary: 0.36;
+  --hover-bg-a: 0.04;
+  --active-bg-a: 0.06;
+
+  /* ── 统一玻璃/材质系统(蓝本 grok-app tokens.css) ──
+     单数玻璃配方:色块 + 发丝边 + 软阴影 + blur + saturate;
+     复合类(.glass/.material-*)只消费这些 token,便于全局一致与无障碍降级。 */
+  --glass-bg: 255 255 255;
+  --glass-alpha: 0.72;
+  --glass-border: 0 0 0;
+  --glass-border-a: 0.08;
+  --glass-blur: 48px;
+  --glass-saturate: 1.7;
+  --glass-shadow:
+    0 0 0 0.5px rgb(255 255 255 / 0.7) inset,
+    0 8px 28px rgb(var(--shadow-color) / 0.1),
+    0 20px 48px rgb(var(--shadow-color) / 0.08);
+  --glass-solid-alpha: 0.96; /* reduced-transparency / 实体回退 */
+
+  /* 材质分级(深度递增;更大/更结构化的表面读作更厚) */
+  --material-1-bg: var(--bg-elevated);
+  --material-1-alpha: 0.68;
+  --material-1-blur: 12px; /* 交互层:chips、菜单 */
+  --material-2-bg: var(--bg-elevated);
+  --material-2-alpha: 0.78;
+  --material-2-blur: 24px; /* 结构层:侧栏、composer */
+  --material-3-bg: 255 255 255;
+  --material-3-alpha: 0.85;
+  --material-3-blur: 48px; /* 覆盖层:sheet、dialog、palette(≈glass) */
+  --scrim-a: 0.24; /* dim-to-focus 遮罩 */
+
+  /* ── 层叠标度(替换全部魔法 z-index;按语义归位) ── */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-overlay: 40;
+  --z-drawer: 60;
+  --z-popover: 80;
+  --z-toast: 100;
+  --z-modal: 120;
+  --z-menu: 140;
+  --z-lightbox: 160;
+
+  /* ── 动效(单一主曲线;弹簧数值镜像在 composables/useSpring.ts) ── */
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration: 220ms;
+  --duration-slow: 340ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* 主曲线 */
+  --ease-spring: cubic-bezier(0.34, 1.2, 0.64, 1); /* 轻回弹,仅 momentum 场景 */
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0); /* 仅退场,镜像 */
+
+  /* ── 字体层级(tracking/leading 随字号变化,Apple 排版纪律) ── */
+  --font-size-xl: 17px;
+  --font-size-2xl: 20px;
+  --tracking-tight: -0.02em;
+  --tracking-body: 0;
+  --leading-tight: 1.25;
+  --leading-body: 1.45;
+  --leading-caption: 1.3;
+
   /* deprecated: 旧别名 → 中性调色板映射,仅供兼容,新代码禁止消费(审计测试强制) */
   --paper: var(--bg);
   --paper-2: var(--bg-inset);
