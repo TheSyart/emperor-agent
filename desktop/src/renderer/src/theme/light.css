@@ -2,16 +2,17 @@
    主题 token 表:key 集合必须与 dark.css 完全一致(tokens.test.ts 强制)。
    亮色不是暗色反色:阴影透明度、边框强度、accent 对比度按本主题单独调。 */
 :root[data-theme='light'] {
-  --bg: 255 255 255;
-  --bg-elevated: 250 250 250;
-  --bg-inset: 244 244 245;
-  --fg: 24 24 27;
-  --fg-muted: 96 96 106;
-  --fg-subtle: 113 113 122;
-  --border: 228 228 231;
-  --border-strong: 212 212 216;
+  --bg: 252 252 253;
+  --bg-elevated: 246 246 247;
+  --bg-inset: 239 240 242;
+  --fg: 28 28 31;
+  --fg-muted: 82 82 91;
+  --fg-subtle: 120 120 128;
+  --border: 226 226 230;
+  --border-strong: 205 206 212;
   --accent: 37 99 235;
   --accent-fg: 255 255 255;
+  --brand: 155 111 35; /* accent-2 / Emperor gold(二等强调色) */
   --danger: 220 38 38;
   --warn: 202 138 4;
   --ok: 22 163 74;

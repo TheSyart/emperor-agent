@@ -103,6 +103,7 @@ describe('theme tokens', () => {
         '--border-strong',
         '--accent',
         '--accent-fg',
+        '--brand',
         '--danger',
         '--warn',
         '--ok',
@@ -118,11 +119,18 @@ describe('theme tokens', () => {
     },
   )
 
-  it('applies the spec 3.3 palette adjustments', () => {
+  it('applies the unified canonical palette (codex-v2 values folded in)', () => {
     const dark = readThemeFile('dark.css')
     const light = readThemeFile('light.css')
-    expect(dark).toContain('--border-strong: 74 74 82;')
+    // codex-v2's :root block was the de-facto rendered palette; these lock it in
+    // as the single source of truth after the token dedupe.
+    expect(dark).toContain('--bg: 12 12 14;')
+    expect(dark).toContain('--border-strong: 62 62 70;')
+    expect(dark).toContain('--accent: 99 153 255;')
+    expect(dark).toContain('--brand: 203 158 72;')
     expect(dark).toContain('--warn: 240 186 60;')
-    expect(light).toContain('--fg-muted: 96 96 106;')
+    expect(light).toContain('--bg: 252 252 253;')
+    expect(light).toContain('--fg-muted: 82 82 91;')
+    expect(light).toContain('--brand: 155 111 35;')
   })
 })

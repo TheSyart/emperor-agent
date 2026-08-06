@@ -1,34 +1,6 @@
-/* Codex UI V2: compact workbench shell with restrained Emperor accents. */
-:root,
-:root[data-theme='dark'] {
-  --bg: 12 12 14;
-  --bg-elevated: 19 19 22;
-  --bg-inset: 27 27 31;
-  --fg: 238 238 241;
-  --fg-muted: 166 166 174;
-  --fg-subtle: 113 113 122;
-  --border: 39 39 44;
-  --border-strong: 62 62 70;
-  --accent: 99 153 255;
-  --accent-fg: 8 10 16;
-  --brand: 203 158 72;
-  --radius: 8px;
-  --radius-sm: 5px;
-}
-
-:root[data-theme='light'] {
-  --bg: 252 252 253;
-  --bg-elevated: 246 246 247;
-  --bg-inset: 239 240 242;
-  --fg: 28 28 31;
-  --fg-muted: 82 82 91;
-  --fg-subtle: 120 120 128;
-  --border: 226 226 230;
-  --border-strong: 205 206 212;
-  --accent: 37 99 235;
-  --accent-fg: 255 255 255;
-  --brand: 155 111 35;
-}
+/* Codex UI V2: compact workbench shell with restrained Emperor accents.
+   主题 token 已统一收归 theme/dark.css、theme/light.css(唯一事实源,
+   奇偶测试强制);本文件不再定义任何 token,仅含 surface 样式。 */
 
 body {
   background:
@@ -2185,8 +2157,24 @@ select:focus-visible {
   line-height: 1.6;
 }
 
-.composer-drafts-inline {
-  margin: 0 12px 7px;
+.composer-attachments-tray {
+  position: relative;
+  z-index: 2;
+  max-height: 168px;
+  margin: 0 10px -1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid rgb(var(--border));
+  border-bottom-color: rgb(var(--border) / 0.65);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 9px 10px 11px;
+  background: rgb(var(--bg-elevated));
+  box-shadow: 0 -8px 24px rgb(var(--shadow-color) / 0.12);
+}
+
+.composer-attachments-tray + .composer {
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
 }
 
 .composer-inline-token {

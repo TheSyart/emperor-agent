@@ -16,6 +16,7 @@ export default {
         'border-strong': 'rgb(var(--border-strong) / <alpha-value>)',
         accent: 'rgb(var(--accent) / <alpha-value>)',
         'accent-fg': 'rgb(var(--accent-fg) / <alpha-value>)',
+        brand: 'rgb(var(--brand) / <alpha-value>)',
         danger: 'rgb(var(--danger) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
         ok: 'rgb(var(--ok) / <alpha-value>)',
