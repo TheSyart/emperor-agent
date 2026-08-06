@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { AttachmentRef } from '../../types'
 import { attachmentRawUrl } from '../../api/attachments'
 import { attachmentIcon } from '../../icons'
@@ -9,6 +9,8 @@ const emit = defineEmits<{ (e: 'remove'): void }>()
 
 const isImage = computed(() => props.data.kind === 'image')
 const thumbFailed = ref(false)
+const previewOpen = ref(false)
+const closeButton = ref<HTMLButtonElement | null>(null)
 const previewUrl = computed(() =>
   isImage.value && !thumbFailed.value ? attachmentRawUrl(props.data.id) : null,
 )
@@ -22,18 +24,49 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
+
+function openPreview() {
+  if (!previewUrl.value) return
+  previewOpen.value = true
+  void nextTick(() => closeButton.value?.focus())
+}
+
+function closePreview() {
+  previewOpen.value = false
+}
+
+function onPreviewKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  closePreview()
+}
+
+watch(previewOpen, (open) => {
+  if (open) window.addEventListener('keydown', onPreviewKeydown)
+  else window.removeEventListener('keydown', onPreviewKeydown)
+})
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
 </script>
 
 <template>
   <div class="attach-chip" :class="{ 'is-image': isImage }" :title="data.name">
-    <img
+    <button
       v-if="previewUrl"
-      class="attach-thumb"
-      :src="previewUrl"
-      :alt="data.name"
-      loading="lazy"
-      @error="thumbFailed = true"
-    />
+      type="button"
+      class="attach-preview-trigger"
+      :aria-label="`放大预览 ${data.name}`"
+      :title="`放大预览 ${data.name}`"
+      @click="openPreview"
+    >
+      <img
+        class="attach-thumb"
+        :src="previewUrl"
+        :alt="data.name"
+        loading="lazy"
+        @error="thumbFailed = true"
+      />
+    </button>
     <span v-else class="attach-doc-icon" aria-hidden="true">
       <component :is="iconComp" :size="22" />
     </span>
@@ -55,4 +88,32 @@ function formatBytes(n: number): string {
       ×
     </button>
   </div>
+
+  <Teleport to="body">
+    <div
+      v-if="previewOpen && previewUrl"
+      class="attachment-preview-modal"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="`图片预览：${data.name}`"
+      @click.self="closePreview"
+    >
+      <div class="attachment-preview-stage">
+        <button
+          ref="closeButton"
+          type="button"
+          class="attachment-preview-close"
+          aria-label="关闭图片预览"
+          @click="closePreview"
+        >
+          ×
+        </button>
+        <img :src="previewUrl" :alt="data.name" />
+        <div class="attachment-preview-caption">
+          <strong>{{ data.name }}</strong>
+          <span>{{ data.mime }} · {{ formatBytes(data.size) }}</span>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

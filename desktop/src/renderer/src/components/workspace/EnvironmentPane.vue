@@ -6,16 +6,21 @@ import {
   GitCompareArrows,
   GitCommitHorizontal,
   GitPullRequest,
+  ExternalLink,
   Image,
   ListChecks,
   MonitorCog,
   RefreshCw,
+  RotateCw,
+  ScrollText,
+  Square,
   Target,
   TerminalSquare,
   Users,
   Workflow,
 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { core } from '../../api/http'
 import type { WorkspaceSnapshot, WorkspaceSource } from './workspaceTypes'
 import { isGitStatus } from './workspaceTypes'
 import {
@@ -31,10 +36,15 @@ const props = defineProps<{
   hasProject: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   refresh: []
-  openPane: [pane: 'review' | 'terminal' | 'files']
+  openPane: [pane: 'review' | 'terminal' | 'files' | 'browser']
+  openPreview: [previewId: string]
 }>()
+
+const processBusy = ref('')
+const processLogs = ref<Record<string, string>>({})
+const processErrors = ref<Record<string, string>>({})
 
 const git = computed(() =>
   isGitStatus(props.snapshot?.git) ? props.snapshot?.git : null,
@@ -120,6 +130,112 @@ function durationLabel(value: unknown): string {
 function timestampMs(value: number): number {
   if (!value) return 0
   return value < 1_000_000_000_000 ? value * 1000 : value
+}
+
+function processDuration(value: unknown): string {
+  const started = Date.parse(recordText(value, 'startedAt'))
+  if (!Number.isFinite(started)) return ''
+  const finished =
+    recordNumber(value, 'finishedAt') ||
+    props.snapshot?.capturedAt ||
+    Date.now()
+  const seconds = Math.max(0, Math.floor((finished - started) / 1000))
+  return seconds < 60
+    ? `${seconds}s`
+    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+function processPreview(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const preview = (value as Record<string, unknown>).preview
+  return preview && typeof preview === 'object' && !Array.isArray(preview)
+    ? (preview as Record<string, unknown>)
+    : null
+}
+
+async function toggleLogs(value: unknown): Promise<void> {
+  const processId = recordText(value, 'id')
+  const sessionId = props.snapshot?.sessionId || ''
+  if (!processId || !sessionId) return
+  if (processLogs.value[processId] !== undefined) {
+    const next = { ...processLogs.value }
+    delete next[processId]
+    processLogs.value = next
+    return
+  }
+  try {
+    const result = await core('projectProcesses.readOutput', {
+      sessionId,
+      processId,
+      afterSeq: 0,
+    })
+    processLogs.value = {
+      ...processLogs.value,
+      [processId]: result.chunks
+        .map((chunk) => chunk.data)
+        .join('')
+        .slice(-8_000),
+    }
+  } catch (cause) {
+    processLogs.value = {
+      ...processLogs.value,
+      [processId]: cause instanceof Error ? cause.message : String(cause),
+    }
+  }
+}
+
+async function stopProcess(value: unknown): Promise<void> {
+  const processId = recordText(value, 'id')
+  if (!processId || !props.snapshot?.sessionId) return
+  processBusy.value = processId
+  clearProcessError(processId)
+  try {
+    await core('projectProcesses.stop', {
+      sessionId: props.snapshot.sessionId,
+      processId,
+      expectedRevision: recordNumber(value, 'revision'),
+    })
+    emit('refresh')
+  } catch (cause) {
+    setProcessError(processId, cause)
+  } finally {
+    processBusy.value = ''
+  }
+}
+
+async function restartProcess(value: unknown): Promise<void> {
+  const processId = recordText(value, 'id')
+  if (!processId || !props.snapshot?.sessionId) return
+  if (!window.confirm('重启这个项目进程？')) return
+  processBusy.value = processId
+  clearProcessError(processId)
+  try {
+    await core('projectProcesses.restart', {
+      sessionId: props.snapshot.sessionId,
+      processId,
+      expectedRevision: recordNumber(value, 'revision'),
+      confirmed: true,
+      invocationId: crypto.randomUUID(),
+    })
+    emit('refresh')
+  } catch (cause) {
+    setProcessError(processId, cause)
+  } finally {
+    processBusy.value = ''
+  }
+}
+
+function clearProcessError(processId: string): void {
+  const next = { ...processErrors.value }
+  delete next[processId]
+  processErrors.value = next
+}
+
+function setProcessError(processId: string, cause: unknown): void {
+  processErrors.value = {
+    ...processErrors.value,
+    [processId]: cause instanceof Error ? cause.message : String(cause),
+  }
 }
 </script>
 
@@ -282,7 +398,7 @@ function timestampMs(value: number): number {
               ...subagentGroups.recent,
             ]"
             :key="recordText(agent, 'id') || index"
-            class="workspace-list-row workspace-feature-row"
+            class="workspace-list-row workspace-feature-row environment-subagent-row"
             :class="{
               'environment-agent-active': subagentGroups.active.includes(agent),
             }"
@@ -295,7 +411,7 @@ function timestampMs(value: number): number {
                 :title="subagentStatusLabel(agent)"
               />
             </span>
-            <div>
+            <div class="environment-agent-copy">
               <strong>{{ recordText(agent, 'title') || 'Subagent' }}</strong>
               <span>
                 {{ metadataText(agent, 'agent_type') || 'agent' }} ·
@@ -347,15 +463,91 @@ function timestampMs(value: number): number {
           <div
             v-for="(process, index) in snapshot.processes"
             :key="recordText(process, 'id') || index"
-            class="workspace-list-row"
+            class="environment-process-item"
           >
-            <CircleDot :size="14" />
-            <span>{{
-              recordText(process, 'label') || recordText(process, 'id')
-            }}</span>
-            <span class="workspace-row-value">{{
-              recordText(process, 'status')
-            }}</span>
+            <div class="workspace-list-row environment-process-row">
+              <CircleDot
+                :size="14"
+                :data-status="recordText(process, 'status')"
+              />
+              <div class="environment-process-copy">
+                <strong>{{
+                  recordText(process, 'label') || recordText(process, 'id')
+                }}</strong>
+                <span>
+                  {{ recordText(process, 'ecosystem') || 'process' }} ·
+                  {{ recordText(process, 'status') }} ·
+                  {{ recordText(process, 'health') }}
+                  <template v-if="processDuration(process)">
+                    · {{ processDuration(process) }}
+                  </template>
+                </span>
+              </div>
+              <span
+                v-if="recordText(process, 'primary') === 'true'"
+                class="environment-primary-badge"
+                >Preview</span
+              >
+              <div class="environment-process-actions">
+                <button
+                  v-if="processPreview(process)?.status === 'ready'"
+                  type="button"
+                  title="打开预览"
+                  aria-label="打开网站预览"
+                  @click="
+                    $emit(
+                      'openPreview',
+                      String(processPreview(process)?.id || ''),
+                    )
+                  "
+                >
+                  <ExternalLink :size="13" />
+                </button>
+                <button
+                  type="button"
+                  title="查看日志"
+                  aria-label="查看进程日志"
+                  @click="toggleLogs(process)"
+                >
+                  <ScrollText :size="13" />
+                </button>
+                <button
+                  v-if="
+                    ['running', 'starting'].includes(
+                      recordText(process, 'status'),
+                    )
+                  "
+                  type="button"
+                  title="停止"
+                  aria-label="停止项目进程"
+                  :disabled="processBusy === recordText(process, 'id')"
+                  @click="stopProcess(process)"
+                >
+                  <Square :size="12" />
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  title="重启"
+                  aria-label="重启项目进程"
+                  :disabled="processBusy === recordText(process, 'id')"
+                  @click="restartProcess(process)"
+                >
+                  <RotateCw :size="13" />
+                </button>
+              </div>
+            </div>
+            <pre
+              v-if="processLogs[recordText(process, 'id')] !== undefined"
+              class="environment-process-log"
+              >{{ processLogs[recordText(process, 'id')] || '暂无日志' }}</pre>
+            <p
+              v-if="processErrors[recordText(process, 'id')]"
+              class="environment-process-error"
+              role="alert"
+            >
+              {{ processErrors[recordText(process, 'id')] }}
+            </p>
           </div>
           <div
             v-for="(terminal, index) in snapshot.terminals"

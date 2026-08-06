@@ -130,6 +130,48 @@ describe('assistant flow projection', () => {
     })
   })
 
+  it('creates a Website card only from a completed Core process result', () => {
+    const blocks = projectAssistantFlow(
+      message([
+        tool('process-1', 'manage_project_process', 'done', {
+          output: JSON.stringify({
+            name: 'Static website',
+            preview: { id: 'preview-1', status: 'ready' },
+          }),
+        }),
+      ]),
+    )
+
+    expect(blocks).toEqual([
+      expect.objectContaining({ kind: 'tool_group' }),
+      {
+        kind: 'website',
+        id: 'website-preview-1',
+        previewId: 'preview-1',
+        title: 'Static website',
+        status: 'ready',
+      },
+    ])
+  })
+
+  it('does not create a Website card before the Core health receipt is ready', () => {
+    for (const status of ['probing', 'unreachable']) {
+      const blocks = projectAssistantFlow(
+        message([
+          tool(`process-${status}`, 'manage_project_process', 'done', {
+            output: JSON.stringify({
+              name: 'Project website',
+              preview: { id: `preview-${status}`, status },
+            }),
+          }),
+        ]),
+      )
+
+      expect(blocks).toHaveLength(1)
+      expect(blocks[0]).toMatchObject({ kind: 'tool_group' })
+    }
+  })
+
   it('uses actual file targets in read and edit tool titles', () => {
     const blocks = projectAssistantFlow(
       message([

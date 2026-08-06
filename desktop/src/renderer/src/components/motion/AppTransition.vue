@@ -48,7 +48,11 @@ const ENTER_FROM: Record<Preset, FrameSpec> = {
     filter: 'blur(8px) saturate(1.2)',
   },
 }
-const ENTER_TO: FrameSpec = { opacity: 1, transform: 'none', filter: 'blur(0px)' }
+const ENTER_TO: FrameSpec = {
+  opacity: 1,
+  transform: 'none',
+  filter: 'blur(0px)',
+}
 
 function durationMs(): number {
   return reducedMotion.value ? 140 : 240

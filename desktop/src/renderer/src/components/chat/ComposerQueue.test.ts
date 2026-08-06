@@ -84,4 +84,49 @@ describe('Composer single queue slot', () => {
     ).toBe('继续处理 /skill:reviewer')
     expect(container.textContent).toContain('evidence.md')
   })
+
+  it('renders pending image attachments in a tray above the composer form', async () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const component = createApp(Composer, {
+      busy: false,
+      queueOccupied: false,
+      commands: [],
+      tools: [],
+      contextUsed: 0,
+      contextMax: 0,
+      modelEntries: [],
+      providerOptions: [],
+    }).mount(container) as unknown as {
+      restoreDraft: (payload: Record<string, unknown>) => void
+    }
+
+    component.restoreDraft({
+      content: '分析图片',
+      attachments: [
+        {
+          id: 'att_image',
+          name: 'reference.png',
+          mime: 'image/png',
+          size: 2048,
+          kind: 'image',
+          hasText: false,
+          hasImage: true,
+          path: 'attachments/reference.png',
+        },
+      ],
+    })
+    await nextTick()
+
+    const shell = container.querySelector('.composer-shell')!
+    const tray = shell.querySelector('.composer-attachments-tray')!
+    const form = shell.querySelector('.composer')!
+    expect(tray).not.toBeNull()
+    expect(form.contains(tray)).toBe(false)
+    expect(
+      Boolean(
+        tray.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true)
+  })
 })

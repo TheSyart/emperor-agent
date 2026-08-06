@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue'
+import { onBeforeUnmount, ref, type Ref } from 'vue'
 import { animateSpring } from './useSpring'
 
 // Shared resizable-pane primitive. Replaces per-component mouse-only resizers
@@ -38,7 +38,7 @@ export interface UseResizable {
     role: 'separator'
     tabindex: 0
     'aria-orientation': 'vertical' | 'horizontal'
-    'aria-valuenow': ComputedRef<number>
+    'aria-valuenow': number
     'aria-valuemin': number
     'aria-valuemax': number
     onPointerdown: (event: PointerEvent) => void
@@ -232,7 +232,8 @@ export function useResizable(opts: UseResizableOptions): UseResizable {
     const shrink = event.key === (horizontal ? 'ArrowRight' : 'ArrowDown')
     // Match the existing left-edge convention (ArrowLeft grows a left panel).
     const growKey = opts.edge === 'left' || opts.edge === 'top' ? grow : shrink
-    const shrinkKey = opts.edge === 'left' || opts.edge === 'top' ? shrink : grow
+    const shrinkKey =
+      opts.edge === 'left' || opts.edge === 'top' ? shrink : grow
     if (growKey) next += event.shiftKey ? largeStep : step
     else if (shrinkKey) next -= event.shiftKey ? largeStep : step
     else if (event.key === 'Home') next = opts.min
@@ -257,7 +258,9 @@ export function useResizable(opts: UseResizableOptions): UseResizable {
       role: 'separator',
       tabindex: 0,
       'aria-orientation': horizontal ? 'vertical' : 'horizontal',
-      'aria-valuenow': computed(() => Math.round(opts.size.value)),
+      get 'aria-valuenow'() {
+        return Math.round(opts.size.value)
+      },
       'aria-valuemin': opts.min,
       'aria-valuemax': opts.max,
       onPointerdown,

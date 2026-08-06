@@ -86,7 +86,10 @@ function toggleCollapsed(): void {
       class="plan-markdown plan-markdown-primary"
       :class="{ 'plan-markdown-collapsed': collapsed }"
     >
-      <MarkdownBlock :content="markdownContent" />
+      <MarkdownBlock
+        :content="markdownContent"
+        :source-message-id="`plan:${props.interaction.id}`"
+      />
     </div>
 
     <div v-if="props.interaction.assumptions?.length" class="plan-assumptions">

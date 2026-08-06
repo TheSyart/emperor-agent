@@ -1,6 +1,7 @@
 import type { GitFileStatus } from '@emperor/core'
 
-export type WorkspacePaneId = 'launcher' | 'review' | 'terminal' | 'files'
+export type WorkspacePaneId =
+  'launcher' | 'review' | 'terminal' | 'files' | 'browser'
 export type WorkspacePresentation = 'fixed' | 'drawer' | 'fullscreen'
 
 export interface RightWorkspaceState {
@@ -33,6 +34,15 @@ const PANES: WorkspacePaneOption[] = [
   { id: 'files', label: 'Files', projectOnly: true },
 ]
 
+function validPane(value: unknown): value is WorkspacePaneId {
+  return (
+    value === 'review' ||
+    value === 'terminal' ||
+    value === 'files' ||
+    value === 'browser'
+  )
+}
+
 export const DEFAULT_WORKSPACE_WIDTH = 840
 
 export function clampWorkspaceWidth(value: number): number {
@@ -52,10 +62,7 @@ export function normalizeRightWorkspaceState(
   const raw = (value || {}) as Partial<RightWorkspaceState> &
     LegacyRightWorkspaceState
   if (raw.version === 3) {
-    const pane =
-      raw.pane === 'review' || raw.pane === 'terminal' || raw.pane === 'files'
-        ? raw.pane
-        : 'launcher'
+    const pane = validPane(raw.pane) ? raw.pane : 'launcher'
     return {
       version: 3,
       workbenchOpen: raw.workbenchOpen === true,
@@ -65,10 +72,7 @@ export function normalizeRightWorkspaceState(
     }
   }
   if (raw.version === 2) {
-    const pane =
-      raw.pane === 'review' || raw.pane === 'terminal' || raw.pane === 'files'
-        ? raw.pane
-        : 'launcher'
+    const pane = validPane(raw.pane) ? raw.pane : 'launcher'
     return {
       version: 3,
       workbenchOpen: raw.workbenchOpen === true,
@@ -79,12 +83,7 @@ export function normalizeRightWorkspaceState(
   }
   const legacyPane = raw.pane
   const legacyOpen = raw.open === undefined ? true : raw.open === true
-  const pane =
-    legacyPane === 'review' ||
-    legacyPane === 'terminal' ||
-    legacyPane === 'files'
-      ? legacyPane
-      : 'launcher'
+  const pane = validPane(legacyPane) ? legacyPane : 'launcher'
   const legacyWidth = Number(raw.width)
   return {
     version: 3,

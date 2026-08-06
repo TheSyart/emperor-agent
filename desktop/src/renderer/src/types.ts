@@ -2086,6 +2086,8 @@ type WsEventVariants =
       }
       completedAt: number
     }
+  | { event: 'project_process_update'; process?: Record<string, unknown> }
+  | { event: 'website_preview_update'; preview?: Record<string, unknown> }
   | { event: 'assistant_done'; content?: string }
   | {
       event: 'error'
@@ -2442,7 +2444,7 @@ export interface RightWorkspaceState {
   workbenchOpen: boolean
   width: number
   filesTreeWidth: number
-  pane: 'launcher' | 'review' | 'terminal' | 'files'
+  pane: 'launcher' | 'review' | 'terminal' | 'files' | 'browser'
 }
 
 export interface SidebarState {

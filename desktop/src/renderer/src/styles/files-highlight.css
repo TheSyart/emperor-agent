@@ -1,0 +1,77 @@
+/* 手写 highlight.js 主题,仅作用于 Files 面板代码查看器(.file-code-view)。
+   全部 token 色(style-audit 强制),dark/light 随主题 token 自动切换。
+   作用域限定 .file-code-view,不外泄到 MarkdownBlock / GitReviewPane。 */
+
+.file-code-view .hljs-comment,
+.file-code-view .hljs-quote {
+  color: rgb(var(--fg-subtle));
+  font-style: italic;
+}
+
+.file-code-view .hljs-keyword,
+.file-code-view .hljs-selector-tag,
+.file-code-view .hljs-template-tag,
+.file-code-view .hljs-tag,
+.file-code-view .hljs-name,
+.file-code-view .hljs-selector-id,
+.file-code-view .hljs-selector-class,
+.file-code-view .hljs-selector-pseudo {
+  color: rgb(var(--accent));
+}
+
+.file-code-view .hljs-string,
+.file-code-view .hljs-regexp,
+.file-code-view .hljs-link,
+.file-code-view .hljs-meta .hljs-string,
+.file-code-view .hljs-addition {
+  color: rgb(var(--ok));
+}
+
+.file-code-view .hljs-number,
+.file-code-view .hljs-literal,
+.file-code-view .hljs-symbol,
+.file-code-view .hljs-bullet,
+.file-code-view .hljs-char.escape_ {
+  color: rgb(var(--warn));
+}
+
+.file-code-view .hljs-title,
+.file-code-view .hljs-section,
+.file-code-view .hljs-title.function_ {
+  color: rgb(var(--brand));
+}
+
+.file-code-view .hljs-title.class_,
+.file-code-view .hljs-type,
+.file-code-view .hljs-built_in {
+  color: rgb(var(--tone-cyan));
+}
+
+.file-code-view .hljs-attr,
+.file-code-view .hljs-attribute,
+.file-code-view .hljs-variable,
+.file-code-view .hljs-template-variable,
+.file-code-view .hljs-selector-attr {
+  color: rgb(var(--tone-blue));
+}
+
+.file-code-view .hljs-deletion {
+  color: rgb(var(--danger));
+}
+
+.file-code-view .hljs-operator,
+.file-code-view .hljs-punctuation,
+.file-code-view .hljs-subst,
+.file-code-view .hljs-params,
+.file-code-view .hljs-meta,
+.file-code-view .hljs-doctag {
+  color: rgb(var(--fg-muted));
+}
+
+.file-code-view .hljs-emphasis {
+  font-style: italic;
+}
+
+.file-code-view .hljs-strong {
+  font-weight: 700;
+}

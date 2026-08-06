@@ -962,6 +962,51 @@
   color: rgb(var(--accent));
 }
 
+/* 链接/文档 chip 卡：图标用 CSS mask + data-URI SVG(命名色,无 # 过审计),
+   颜色取自 token。比 `.markdown-body a` 更具体,覆盖其下划线与 accent 色。 */
+.markdown-body a.md-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0 0.375em;
+  margin: 0 0.125em;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-md);
+  background: rgb(var(--bg-elevated));
+  color: rgb(var(--fg));
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.markdown-body a.md-link-chip:hover {
+  border-color: rgb(var(--border-strong));
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+}
+
+.markdown-body a.md-link-chip::before {
+  content: '';
+  flex: none;
+  width: 0.875em;
+  height: 0.875em;
+  background-color: rgb(var(--fg-subtle));
+  -webkit-mask: var(--md-link-ico) center / contain no-repeat;
+  mask: var(--md-link-ico) center / contain no-repeat;
+}
+
+.markdown-body a.md-link-chip[data-md-link='web'] {
+  --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
+}
+
+.markdown-body a.md-link-chip[data-md-link='file'] {
+  --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3C/svg%3E");
+}
+
 .markdown-body ul,
 .markdown-body ol {
   @apply ml-5 space-y-1;
@@ -1680,4 +1725,73 @@
 .context-tooltip em {
   @apply mt-1 block text-[11px] not-italic tracking-wider uppercase;
   color: rgb(var(--fg-subtle));
+}
+
+.website-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  background: rgb(var(--bg-elevated));
+}
+
+.website-card-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: rgb(var(--tone-blue));
+  background: rgb(var(--tone-blue) / 0.11);
+}
+
+.website-card > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.website-card strong,
+.website-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.website-card > div > span {
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-xs);
+}
+
+.website-card > .website-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.website-card-actions button:last-child {
+  padding-inline: 7px;
+}
+
+.website-card button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-sm);
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-xs);
+}
+
+.website-card button:hover:not(:disabled) {
+  color: rgb(var(--fg));
+  border-color: rgb(var(--border-strong));
+}
+
+.website-card button:disabled {
+  opacity: 0.45;
 }

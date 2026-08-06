@@ -930,6 +930,38 @@ onBeforeUnmount(() => {
       @select="applyPaletteItem"
     />
 
+    <div
+      v-if="drafts.length || uploading.size"
+      class="composer-drafts composer-attachments-tray"
+      aria-label="待发送附件"
+    >
+      <AttachmentChip
+        v-for="(d, i) in drafts"
+        :key="d.id"
+        :data="d"
+        removable
+        @remove="removeDraft(i)"
+      />
+      <div
+        v-for="name in Array.from(uploading)"
+        :key="name"
+        class="attach-chip uploading"
+        :title="name"
+      >
+        <span class="attach-doc-icon">
+          <component
+            :is="actionIcons.statusBusy"
+            class="animate-spin"
+            :size="14"
+          />
+        </span>
+        <div class="attach-meta">
+          <div class="attach-name">{{ name }}</div>
+          <div class="attach-sub">上传中…</div>
+        </div>
+      </div>
+    </div>
+
     <form
       class="composer"
       @submit.prevent="submit()"
@@ -998,37 +1030,6 @@ onBeforeUnmount(() => {
             @scroll="syncHighlightScroll"
             @keydown="handleKeydown"
           />
-        </div>
-      </div>
-
-      <div
-        v-if="drafts.length || uploading.size"
-        class="composer-drafts composer-drafts-inline"
-      >
-        <AttachmentChip
-          v-for="(d, i) in drafts"
-          :key="d.id"
-          :data="d"
-          removable
-          @remove="removeDraft(i)"
-        />
-        <div
-          v-for="name in Array.from(uploading)"
-          :key="name"
-          class="attach-chip uploading"
-          :title="name"
-        >
-          <span class="attach-doc-icon">
-            <component
-              :is="actionIcons.statusBusy"
-              class="animate-spin"
-              :size="14"
-            />
-          </span>
-          <div class="attach-meta">
-            <div class="attach-name">{{ name }}</div>
-            <div class="attach-sub">上传中…</div>
-          </div>
         </div>
       </div>
 

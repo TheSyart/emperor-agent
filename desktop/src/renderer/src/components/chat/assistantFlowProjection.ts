@@ -29,6 +29,13 @@ export type AssistantFlowBlock =
       durationMs?: number
     }
   | { kind: 'media'; id: string; items: MediaArtifactRef[] }
+  | {
+      kind: 'website'
+      id: string
+      previewId: string
+      title: string
+      status: 'ready' | 'probing' | 'unreachable' | 'stopped'
+    }
   | { kind: 'control'; id: string; segment: AskSegment | PlanSegment }
   | { kind: 'plan_activity'; id: string; segment: PlanActivitySegment }
 
@@ -132,6 +139,13 @@ export function projectAssistantFlow(
           items: media,
         })
       }
+      for (const website of websitePreviews(timelineTools)) {
+        blocks.push({
+          kind: 'website',
+          id: `website-${website.previewId}`,
+          ...website,
+        })
+      }
       index = cursor
       continue
     }
@@ -152,6 +166,42 @@ export function projectAssistantFlow(
   }
 
   return blocks
+}
+
+function websitePreviews(tools: ToolSegment[]): Array<{
+  previewId: string
+  title: string
+  status: 'ready' | 'probing' | 'unreachable' | 'stopped'
+}> {
+  const results: Array<{
+    previewId: string
+    title: string
+    status: 'ready' | 'probing' | 'unreachable' | 'stopped'
+  }> = []
+  for (const tool of tools) {
+    if (tool.name !== 'manage_project_process' || tool.status !== 'done')
+      continue
+    try {
+      const value = JSON.parse(tool.output || '') as Record<string, unknown>
+      const preview = value.preview
+      if (!preview || typeof preview !== 'object' || Array.isArray(preview))
+        continue
+      const record = preview as Record<string, unknown>
+      const previewId = String(record.id ?? '')
+      const status = String(record.status ?? '')
+      // A process record is not a Website receipt until Core has completed the
+      // health probe. Failed/probing starts remain visible in Environment.
+      if (!previewId || !['ready', 'stopped'].includes(status)) continue
+      results.push({
+        previewId,
+        title: String(value.name ?? record.title ?? 'Web preview'),
+        status: status as 'ready' | 'probing' | 'unreachable' | 'stopped',
+      })
+    } catch {
+      // Only Core-produced structured process results can create Website cards.
+    }
+  }
+  return results
 }
 
 function mediaArtifacts(tools: ToolSegment[]): MediaArtifactRef[] {

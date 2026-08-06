@@ -10,6 +10,121 @@ import { projectAssistantFlow } from '../components/chat/assistantFlowProjection
 import type { AssistantMessage, WsEvent } from '../types'
 
 describe('chatProjection', () => {
+  it('projects a truncated tool batch as one compact retry milestone without tool errors', () => {
+    const state = projectChatEvents(
+      [
+        {
+          event: 'user_message',
+          seq: 1,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          content: '创建五个页面',
+        },
+        {
+          event: 'message_delta',
+          seq: 2,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          delta: '准备批量写入。',
+        },
+        {
+          event: 'message_tombstoned',
+          seq: 3,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          reason: 'model_output_truncated',
+          content_chars: 7,
+        },
+        {
+          event: 'turn_phase',
+          seq: 4,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          phase: 'length_retry',
+          detail: {
+            kind: 'tool_batch_truncated',
+            attempt: 1,
+            max: 3,
+            discardedToolCalls: 5,
+            nextContentWriteLimit: 2,
+          },
+        },
+        {
+          event: 'message_delta',
+          seq: 5,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          delta: '按较小批次重试。',
+        },
+        {
+          event: 'message_tombstoned',
+          seq: 6,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          reason: 'model_output_truncated',
+          content_chars: 9,
+        },
+        {
+          event: 'turn_phase',
+          seq: 7,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          phase: 'length_retry',
+          detail: {
+            kind: 'tool_batch_truncated',
+            attempt: 2,
+            max: 3,
+            discardedToolCalls: 2,
+            nextContentWriteLimit: 1,
+          },
+        },
+        {
+          event: 'assistant_done',
+          seq: 8,
+          session_id: 's1',
+          turn_id: 'turn_truncated',
+          content: '全部完成。',
+        },
+      ],
+      { sessionId: 's1' },
+    )
+
+    const assistants = state.messages.filter(
+      (message): message is AssistantMessage => message.role === 'assistant',
+    )
+    const visible = assistants.find((message) => !message.tombstoned)!
+    expect(
+      visible.segments.filter((segment) => segment.type === 'thought'),
+    ).toEqual([
+      expect.objectContaining({
+        stage: 'tool_batch_retry',
+        status: 'done',
+        summary: '工具输出过长，已自动拆分后重试',
+      }),
+    ])
+    expect(
+      visible.segments.filter((segment) => segment.type === 'tool'),
+    ).toEqual([])
+    expect(
+      assistants.flatMap((message) =>
+        message.segments.filter(
+          (segment) =>
+            segment.type === 'thought' && segment.stage === 'tool_batch_retry',
+        ),
+      ),
+    ).toHaveLength(1)
+    expect(projectAssistantFlow(visible)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'thought',
+          segment: expect.objectContaining({
+            summary: '工具输出过长，已自动拆分后重试',
+          }),
+        }),
+      ]),
+    )
+  })
+
   it('projects queued, interjected, and cancelled prompt states idempotently', () => {
     const state = projectChatEvents([
       {
@@ -1296,7 +1411,7 @@ describe('chatProjection', () => {
     ])
   })
 
-  it('keeps every Plan execution milestone in event order, including a terminal update after assistant_done', () => {
+  it('keeps only meaningful Plan milestones and omits routine step progress already shown by the composer status', () => {
     const state = projectChatEvents(
       [
         {
@@ -1404,12 +1519,39 @@ describe('chatProjection', () => {
       .map((segment) => segment.label)
     expect(labels).toEqual([
       '计划已批准',
-      '开始步骤',
-      '步骤完成',
-      '开始验证',
-      '验证通过',
+      // 常规步骤进度由底部进度胶囊呈现，验证命令由工具组呈现。
       '计划完成',
     ])
+  })
+
+  it('keeps blocked Plan step updates visible because they require attention', () => {
+    const state = projectChatEvents(
+      [
+        {
+          event: 'user_message',
+          seq: 1,
+          session_id: 's1',
+          turn_id: 'turn_1',
+          content: '执行计划',
+        },
+        {
+          event: 'plan_step_update',
+          seq: 2,
+          session_id: 's1',
+          turn_id: 'turn_1',
+          plan_id: 'runtime_plan',
+          step: { id: 'step_1', title: '运行验证', status: 'blocked' },
+        },
+      ] as never,
+      { sessionId: 's1' },
+    )
+
+    const labels = state.messages
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.segments)
+      .filter((segment) => segment.type === 'plan_activity')
+      .map((segment) => segment.label)
+    expect(labels).toEqual(['步骤阻塞'])
   })
 })
 

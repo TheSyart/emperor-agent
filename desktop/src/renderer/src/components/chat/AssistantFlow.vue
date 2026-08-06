@@ -16,6 +16,7 @@ import AskHistoryCard from './AskHistoryCard.vue'
 import PlanCard from './PlanCard.vue'
 import ThoughtEvent from './ThoughtEvent.vue'
 import MediaBlock from './MediaBlock.vue'
+import WebsiteCard from './WebsiteCard.vue'
 import {
   assistantExecutionDuration,
   projectAssistantFlow,
@@ -188,10 +189,19 @@ onBeforeUnmount(stopFlowClock)
             class="timeline-node text-node"
             :class="{ streaming: block.streaming }"
           >
-            <MarkdownBlock :content="block.content" />
+            <MarkdownBlock
+              :content="block.content"
+              :source-message-id="props.message.id"
+            />
           </div>
           <ToolGroup v-else-if="block.kind === 'tool_group'" :block="block" />
           <MediaBlock v-else-if="block.kind === 'media'" :items="block.items" />
+          <WebsiteCard
+            v-else-if="block.kind === 'website'"
+            :preview-id="block.previewId"
+            :title="block.title"
+            :status="block.status"
+          />
           <div
             v-else-if="block.kind === 'plan_activity'"
             class="timeline-node plan-activity-node"

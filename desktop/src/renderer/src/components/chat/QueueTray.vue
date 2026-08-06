@@ -125,7 +125,7 @@ onBeforeUnmount(() =>
 <style scoped>
 .queue-tray {
   position: relative;
-  z-index: 0;
+  z-index: var(--z-base);
   width: 100%;
   margin-bottom: -10px;
   padding: 0 8px 10px;
@@ -233,7 +233,7 @@ onBeforeUnmount(() =>
 
 .queue-menu-popover {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-popover);
   right: 0;
   bottom: 34px;
   width: 142px;

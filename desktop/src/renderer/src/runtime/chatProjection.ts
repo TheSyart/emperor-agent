@@ -43,6 +43,7 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'prompt_cancelled',
   'message_delta',
   'message_tombstoned',
+  'turn_phase',
   'agent_thought',
   'historical_runtime_activity',
   'tool_call',
@@ -134,7 +135,10 @@ export function applyChatProjectionEvent(
       settleRunningToolSegments(assistant, {
         endedAt,
         status: 'error_aborted',
-        summary: '回答已被新的用户指令替代',
+        summary:
+          event.reason === 'model_output_truncated'
+            ? '工具输出过长，批次未执行'
+            : '回答已被新的用户指令替代',
       })
       assistant.streaming = false
       assistant.tombstoned = true
@@ -164,6 +168,49 @@ export function applyChatProjectionEvent(
     const assistant = assistantForEvent(state, event, runtime)!
     finishActiveThought(assistant, event)
     upsertThoughtSegment(assistant, event)
+    return state
+  }
+
+  if (
+    event.event === 'turn_phase' &&
+    event.phase === 'length_retry' &&
+    event.detail?.kind === 'tool_batch_truncated'
+  ) {
+    const assistant = assistantForEvent(state, event, runtime)!
+    finishActiveThought(assistant, event)
+    const id = `thought-${event.turn_id || 'global'}-tool-batch-retry`
+    for (const message of state.messages) {
+      if (
+        message.role !== 'assistant' ||
+        message.id === assistant.id ||
+        message.turn_id !== event.turn_id
+      )
+        continue
+      message.segments = message.segments.filter((segment) => segment.id !== id)
+    }
+    const existing = assistant.segments.find((segment) => segment.id === id)
+    if (existing?.type === 'thought') {
+      existing.summary = '工具输出过长，已自动拆分后重试'
+      existing.status = 'done'
+      existing.endedAt = eventTimeMs(event)
+      existing.durationMs = Math.max(
+        0,
+        (existing.endedAt ?? 0) - (existing.startedAt ?? existing.endedAt ?? 0),
+      )
+    } else {
+      assistant.segments.push({
+        id,
+        type: 'thought',
+        stage: 'tool_batch_retry',
+        source: 'core',
+        label: '自动拆分重试',
+        summary: '工具输出过长，已自动拆分后重试',
+        status: 'done',
+        startedAt: eventTimeMs(event),
+        endedAt: eventTimeMs(event),
+        durationMs: 0,
+      })
+    }
     return state
   }
 
@@ -523,6 +570,12 @@ function appendPlanActivity(
   runtime: ProjectionRuntime,
   assistantId: string | null = null,
 ): void {
+  // 验证命令已由工具组(run_command)完整呈现,开始/通过验证条与之重复,不再投影为时间线节点
+  if (
+    event.event === 'plan_verification_start' ||
+    event.event === 'plan_verification_done'
+  )
+    return
   const presentation = planActivityPresentation(event)
   if (!presentation) return
   const assistant =
@@ -586,15 +639,17 @@ function planActivityPresentation(
   if (event.event === 'plan_step_update') {
     const status = String(event.step?.status || '')
     const title = String(event.step?.title || event.plan_id || '')
+    // 常规步骤开始/完成已经由 Composer 进度胶囊持续呈现。再次把它们
+    // 投影为整行时间线节点会在每个工具批次之间制造重复的蓝绿状态条。
+    // 这里只保留真正需要用户注意的异常步骤状态。
     if (
       status === 'active' ||
       status === 'executing' ||
       status === 'in_progress' ||
       status === 'running'
     )
-      return { label: '开始步骤', detail: title, tone: 'running' }
-    if (status === 'done' || status === 'completed')
-      return { label: '步骤完成', detail: title, tone: 'success' }
+      return null
+    if (status === 'done' || status === 'completed') return null
     if (status === 'failed' || status === 'blocked')
       return {
         label: status === 'blocked' ? '步骤阻塞' : '步骤失败',
@@ -603,20 +658,11 @@ function planActivityPresentation(
       }
     return null
   }
-  if (event.event === 'plan_verification_start')
-    return {
-      label: '开始验证',
-      detail: event.command || event.step_id || '',
-      tone: 'running',
-    }
-  if (event.event === 'plan_verification_done') {
-    const passed = event.result?.passed === true
-    return {
-      label: passed ? '验证通过' : '验证失败',
-      detail: String(event.result?.summary || event.step_id || ''),
-      tone: passed ? 'success' : 'error',
-    }
-  }
+  if (
+    event.event === 'plan_verification_start' ||
+    event.event === 'plan_verification_done'
+  )
+    return null
   const status = String(event.plan?.status || '')
   if (status === 'completed' || status === 'done')
     return { label: '计划完成', tone: 'success' }

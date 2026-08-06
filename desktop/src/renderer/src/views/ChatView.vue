@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  openExternal,
+  openPreviewExternal,
+  revealReference,
+} from '../api/backend'
+import { core } from '../api/http'
 import { activateModelEntry, setModelReasoningEffort } from '../api/model'
 import { useAppContext } from '../composables/useAppContext'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../composables/composerLifecycle'
@@ -32,7 +38,9 @@ const composer = ref<{
 } | null>(null)
 const rightWorkspace = ref<{
   openReview: (paths?: string[]) => void
-  openPane: (pane: 'review' | 'terminal' | 'files') => void
+  openPane: (pane: 'review' | 'terminal' | 'files' | 'browser') => void
+  openFile: (relativePath: string, line?: number) => void
+  openPreview: (previewId: string) => void
 } | null>(null)
 
 function openWorkspaceFromCommand(event: Event): void {
@@ -47,6 +55,56 @@ function openWorkspaceFromCommand(event: Event): void {
   else rightWorkspace.value?.openPane(detail.pane)
 }
 
+async function resolveMarkdownReference(event: Event): Promise<void> {
+  const detail = (
+    event as CustomEvent<{
+      href?: string
+      label?: string
+      sourceMessageId?: string
+    }>
+  ).detail
+  if (!detail?.href || !ctx.sessionId.value) return
+  try {
+    const reference = await core('references.resolve', {
+      sessionId: ctx.sessionId.value,
+      sourceMessageId: detail.sourceMessageId || 'markdown',
+      href: detail.href,
+      label: detail.label || detail.href,
+    })
+    if (!reference.available) return
+    if (
+      reference.kind === 'project_file' &&
+      reference.relativePath &&
+      reference.actions.includes('open_files')
+    ) {
+      rightWorkspace.value?.openFile(reference.relativePath, reference.line)
+      return
+    }
+    if (
+      reference.kind === 'preview' &&
+      reference.previewId &&
+      reference.actions.includes('open_preview')
+    ) {
+      rightWorkspace.value?.openPreview(reference.previewId)
+      return
+    }
+    if (
+      reference.kind === 'external_file' &&
+      reference.actions.includes('reveal')
+    ) {
+      await revealReference({
+        sessionId: ctx.sessionId.value,
+        referenceId: reference.id,
+      })
+      return
+    }
+    if (reference.actions.includes('open_external'))
+      await openExternal(reference.tooltip)
+  } catch {
+    // A stale or unavailable reference remains inert; chat must stay usable.
+  }
+}
+
 function setComposerDraftFromCommand(event: Event): void {
   const text = String(
     (event as CustomEvent<{ text?: string }>).detail?.text ?? '',
@@ -55,8 +113,34 @@ function setComposerDraftFromCommand(event: Event): void {
   void nextTick(() => composer.value?.setDraft(text))
 }
 
+function openRegisteredPreview(event: Event): void {
+  const previewId = String(
+    (event as CustomEvent<{ previewId?: string }>).detail?.previewId ?? '',
+  )
+  if (previewId) rightWorkspace.value?.openPreview(previewId)
+}
+
+function openRegisteredPreviewExternal(event: Event): void {
+  const previewId = String(
+    (event as CustomEvent<{ previewId?: string }>).detail?.previewId ?? '',
+  )
+  if (previewId && ctx.sessionId.value)
+    void openPreviewExternal({
+      sessionId: ctx.sessionId.value,
+      previewId,
+    }).catch(() => {
+      // A stopped/stale preview remains inert without breaking the chat view.
+    })
+}
+
 onMounted(() => {
   window.addEventListener('emperor:open-workspace', openWorkspaceFromCommand)
+  window.addEventListener('emperor:resolve-reference', resolveMarkdownReference)
+  window.addEventListener('emperor:open-preview', openRegisteredPreview)
+  window.addEventListener(
+    'emperor:open-preview-external',
+    openRegisteredPreviewExternal,
+  )
   window.addEventListener(
     'emperor:set-composer-draft',
     setComposerDraftFromCommand,
@@ -64,6 +148,15 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('emperor:open-workspace', openWorkspaceFromCommand)
+  window.removeEventListener(
+    'emperor:resolve-reference',
+    resolveMarkdownReference,
+  )
+  window.removeEventListener('emperor:open-preview', openRegisteredPreview)
+  window.removeEventListener(
+    'emperor:open-preview-external',
+    openRegisteredPreviewExternal,
+  )
   window.removeEventListener(
     'emperor:set-composer-draft',
     setComposerDraftFromCommand,

@@ -1123,7 +1123,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .model-dialog-backdrop {
   position: fixed;
-  z-index: 80;
+  z-index: var(--z-popover);
   inset: 0;
   display: grid;
   place-items: center;
@@ -1294,7 +1294,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .provider-results {
   position: absolute;
-  z-index: 4;
+  z-index: var(--z-raised);
   top: calc(100% + 4px);
   right: 0;
   left: 0;

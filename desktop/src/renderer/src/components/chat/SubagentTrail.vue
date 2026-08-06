@@ -74,7 +74,10 @@ function fullJson(value: unknown) {
 
       <div class="agent-node-body">
         <div v-if="sub.content || sub.error" class="agent-thinking">
-          <MarkdownBlock :content="sub.content || sub.error || ''" />
+          <MarkdownBlock
+            :content="sub.content || sub.error || ''"
+            :source-message-id="`subagent:${sub.id || sub.agent_type}:content`"
+          />
         </div>
 
         <div v-if="sub.messages?.length" class="agent-message-stack">
@@ -93,7 +96,10 @@ function fullJson(value: unknown) {
         </div>
 
         <div v-if="sub.summary" class="agent-summary">
-          <MarkdownBlock :content="sub.summary" />
+          <MarkdownBlock
+            :content="sub.summary"
+            :source-message-id="`subagent:${sub.id || sub.agent_type}:summary`"
+          />
         </div>
 
         <div v-if="sub.tools?.length" class="agent-tool-list">

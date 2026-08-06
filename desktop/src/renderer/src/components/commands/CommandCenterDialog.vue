@@ -106,7 +106,7 @@ function onKeydown(event: KeyboardEvent): void {
 .command-center-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: var(--z-modal);
   display: grid;
   place-items: start center;
   padding: max(10vh, 72px) 24px 24px;

@@ -129,7 +129,7 @@ select:focus-visible {
 
 .session-create-menu {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-popover);
   top: 34px;
   right: 0;
   display: grid;
@@ -1246,7 +1246,7 @@ select:focus-visible {
 .chat-bottom-stack {
   position: sticky;
   bottom: 0;
-  z-index: 35;
+  z-index: var(--z-sticky);
   flex: 0 0 auto;
   margin-top: auto;
   padding: 0 16px 18px;
@@ -1262,7 +1262,7 @@ select:focus-visible {
 
 .composer-progress {
   position: relative;
-  z-index: 48;
+  z-index: var(--z-overlay);
   width: max-content;
   max-width: min(760px, 100%);
   margin: 0 auto 8px;
@@ -2108,7 +2108,7 @@ select:focus-visible {
 
 .composer {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-base);
   overflow: visible;
   border-radius: var(--radius-lg);
   border-color: rgb(var(--border));
@@ -2159,7 +2159,7 @@ select:focus-visible {
 
 .composer-attachments-tray {
   position: relative;
-  z-index: 2;
+  z-index: var(--z-raised);
   max-height: 168px;
   margin: 0 10px -1px;
   overflow-x: hidden;
@@ -2356,7 +2356,7 @@ select:focus-visible {
 
 .composer-palette {
   position: absolute;
-  z-index: 60;
+  z-index: var(--z-popover);
   bottom: calc(100% + 8px);
   left: 0;
   display: flex;
@@ -2610,7 +2610,7 @@ select:focus-visible {
   position: fixed !important;
   right: auto !important;
   bottom: auto !important;
-  z-index: 240;
+  z-index: var(--z-menu);
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgb(var(--border-strong));
@@ -3492,7 +3492,7 @@ select:focus-visible {
 
 .sidebar-popover {
   position: absolute;
-  z-index: 40;
+  z-index: var(--z-popover);
   top: 28px;
   display: grid;
   min-width: 176px;
@@ -3606,7 +3606,7 @@ select:focus-visible {
 
 .sidebar-search-backdrop {
   position: fixed;
-  z-index: 100;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   place-items: start center;

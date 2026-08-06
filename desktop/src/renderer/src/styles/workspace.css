@@ -22,7 +22,7 @@
 
 .right-workspace-controls {
   position: absolute;
-  z-index: 58;
+  z-index: var(--z-popover);
   top: 10px;
   right: 10px;
   display: flex;
@@ -72,7 +72,7 @@
 
 .right-workspace {
   position: relative;
-  z-index: 55;
+  z-index: var(--z-drawer);
   display: flex;
   min-width: 300px;
   min-height: 0;
@@ -129,7 +129,7 @@
 
 .right-workspace-resizer {
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-raised);
   top: 0;
   bottom: 0;
   left: -3px;
@@ -987,7 +987,7 @@
 
 .right-workspace-backdrop {
   position: absolute;
-  z-index: 50;
+  z-index: var(--z-overlay);
   inset: 0;
   background: rgb(0 0 0 / 0.35);
   backdrop-filter: blur(1px);
@@ -1002,7 +1002,7 @@
 
 .right-workspace.presentation-fullscreen {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-modal);
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1046,12 +1046,12 @@
 
 /* Codex-style split: compact Environment card and a separate wide workbench. */
 .right-workspace-controls {
-  z-index: 66;
+  z-index: var(--z-popover);
 }
 
 .environment-floating-card {
   position: absolute;
-  z-index: 60;
+  z-index: var(--z-drawer);
   top: 52px;
   right: 14px;
   width: 320px;
@@ -1442,7 +1442,7 @@
 
 .browser-error {
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-raised);
   inset: 52px 12px auto;
 }
 
@@ -1556,7 +1556,7 @@
 
 .file-tree-resizer {
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-raised);
   top: 0;
   bottom: 0;
   left: -3px;
@@ -1663,7 +1663,7 @@
 
   .file-tree-panel {
     position: absolute;
-    z-index: 4;
+    z-index: var(--z-raised);
     top: 40px;
     right: 0;
     bottom: 0;

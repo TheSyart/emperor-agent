@@ -107,7 +107,8 @@ function normalizeRightWorkspace(
       pane:
         value.pane === 'review' ||
         value.pane === 'terminal' ||
-        value.pane === 'files'
+        value.pane === 'files' ||
+        value.pane === 'browser'
           ? value.pane
           : 'launcher',
     }
@@ -132,7 +133,10 @@ function normalizeRightWorkspace(
         ? Math.max(240, Math.min(320, Math.round(filesTreeWidth)))
         : 280,
       pane:
-        pane === 'review' || pane === 'terminal' || pane === 'files'
+        pane === 'review' ||
+        pane === 'terminal' ||
+        pane === 'files' ||
+        pane === 'browser'
           ? pane
           : 'launcher',
     }
@@ -143,7 +147,10 @@ function normalizeRightWorkspace(
   const pane = legacy?.pane
   const open = legacy?.open === undefined ? true : legacy.open === true
   const selected =
-    pane === 'review' || pane === 'terminal' || pane === 'files'
+    pane === 'review' ||
+    pane === 'terminal' ||
+    pane === 'files' ||
+    pane === 'browser'
       ? pane
       : 'launcher'
   return {

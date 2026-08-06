@@ -12,9 +12,8 @@
   border: 1px solid rgb(var(--glass-border) / var(--glass-border-a));
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(
-      var(--glass-saturate)
-    );
+  -webkit-backdrop-filter: blur(var(--glass-blur))
+    saturate(var(--glass-saturate));
   transform: translateZ(0);
   isolation: isolate;
 }
@@ -45,9 +44,8 @@
 .material-3 {
   background: rgb(var(--material-3-bg) / var(--material-3-alpha));
   backdrop-filter: blur(var(--material-3-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--material-3-blur)) saturate(
-      var(--glass-saturate)
-    );
+  -webkit-backdrop-filter: blur(var(--material-3-blur))
+    saturate(var(--glass-saturate));
   box-shadow: var(--glass-shadow);
   transform: translateZ(0);
   isolation: isolate;

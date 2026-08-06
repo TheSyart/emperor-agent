@@ -554,7 +554,7 @@
 /* ── 底部 sticky 操作栏 ── */
 .model-action-bar {
   @apply sticky bottom-0 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-xl)] border border-border/70 bg-bg/90 px-4 py-3 shadow-imperial backdrop-blur;
-  z-index: 10;
+  z-index: var(--z-raised);
 }
 
 .model-action-bar.dirty {
@@ -1547,6 +1547,15 @@
   @apply h-12 w-12 rounded-lg object-cover;
   flex-shrink: 0;
 }
+.attach-preview-trigger {
+  @apply block shrink-0 rounded-lg outline-none transition;
+}
+.attach-preview-trigger:hover {
+  transform: scale(1.03);
+}
+.attach-preview-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.62);
+}
 .attach-chip .attach-doc-icon {
   @apply grid h-12 w-12 place-items-center rounded-lg border border-border/45 bg-bg-inset;
   flex-shrink: 0;
@@ -1577,6 +1586,87 @@
 /* 用户消息气泡上方的 attach 行 */
 .user-attach-row {
   @apply mb-2 flex flex-wrap justify-end gap-2;
+}
+
+.attachment-preview-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-lightbox);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(var(--shadow-color) / 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.attachment-preview-stage {
+  position: relative;
+  display: flex;
+  max-height: calc(100vh - 48px);
+  max-width: min(94vw, 1440px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: var(--radius-xl);
+  background: rgb(var(--bg-elevated));
+  box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
+}
+
+.attachment-preview-stage > img {
+  min-height: 0;
+  max-height: calc(100vh - 118px);
+  max-width: min(94vw, 1440px);
+  object-fit: contain;
+  background: rgb(var(--bg-inset));
+}
+
+.attachment-preview-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: var(--z-base);
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgb(var(--border-strong));
+  border-radius: 999px;
+  background: rgb(var(--bg-elevated) / 0.9);
+  color: rgb(var(--fg));
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: 0 6px 20px rgb(var(--shadow-color) / 0.24);
+}
+
+.attachment-preview-close:hover,
+.attachment-preview-close:focus-visible {
+  border-color: rgb(var(--accent));
+  outline: none;
+  color: rgb(var(--accent));
+}
+
+.attachment-preview-caption {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 11px 14px;
+  color: rgb(var(--fg));
+}
+
+.attachment-preview-caption strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-preview-caption span {
+  flex-shrink: 0;
+  color: rgb(var(--fg-muted));
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
 }
 
 /* ModelPanel: 视觉徽章 + 连通测试 */
@@ -2246,7 +2336,7 @@
   position: absolute;
   top: 12px;
   right: 12px;
-  z-index: 2;
+  z-index: var(--z-raised);
   display: grid;
   width: 32px;
   height: 32px;

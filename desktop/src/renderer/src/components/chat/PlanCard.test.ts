@@ -12,7 +12,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function interaction(extra: Partial<ControlInteraction> = {}): ControlInteraction {
+function interaction(
+  extra: Partial<ControlInteraction> = {},
+): ControlInteraction {
   return {
     id: 'plan-1',
     kind: 'plan',

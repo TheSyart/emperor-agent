@@ -18,6 +18,13 @@ interface EmperorBridge {
   openPath?: (
     target: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
+  revealReference?: (input: {
+    sessionId: string
+    referenceId: string
+  }) => Promise<{ ok?: boolean; error?: string } | void>
+  openExternal?: (
+    url: string,
+  ) => Promise<{ ok?: boolean; error?: string } | void>
   invokeCore?: <Key extends CoreOperationKey>(
     operationKey: Key,
     ...args: CoreOperationArgs<Key>
@@ -27,6 +34,33 @@ interface EmperorBridge {
     listener: (event: TerminalEvent) => void,
     scope: { sessionId: string; terminalId: string },
   ) => () => void
+  previewOpen?: (input: {
+    sessionId: string
+    previewId: string
+  }) => Promise<void>
+  previewExternal?: (input: {
+    sessionId: string
+    previewId: string
+  }) => Promise<void>
+  previewBounds?: (bounds: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }) => void
+  previewAction?: (action: 'back' | 'forward' | 'reload') => void
+  previewClose?: () => void
+  onPreviewState?: (listener: (state: PreviewViewState) => void) => () => void
+}
+
+export interface PreviewViewState {
+  sessionId: string
+  previewId: string
+  url: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
 }
 
 function bridge(): EmperorBridge | undefined {
@@ -58,6 +92,32 @@ export async function openPath(target: string): Promise<void> {
       typeof result.error === 'string' && result.error
         ? result.error
         : 'Failed to open path',
+    )
+  }
+}
+
+export async function revealReference(input: {
+  sessionId: string
+  referenceId: string
+}): Promise<void> {
+  const reveal = bridge()?.revealReference
+  if (typeof reveal !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await reveal(input)
+  if (result && typeof result === 'object' && result.ok === false)
+    throw new Error(result.error || 'Failed to reveal reference')
+}
+
+export async function openExternal(url: string): Promise<void> {
+  const opener = bridge()?.openExternal
+  if (typeof opener !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await opener(url)
+  if (result && typeof result === 'object' && result.ok === false) {
+    throw new Error(
+      typeof result.error === 'string' && result.error
+        ? result.error
+        : 'Failed to open external url',
     )
   }
 }
@@ -102,6 +162,47 @@ export function onTerminalEvent(
   const subscribe = bridge()?.onTerminalEvent
   if (typeof subscribe !== 'function') return () => {}
   return subscribe(listener, scope)
+}
+
+export async function openPreviewView(input: {
+  sessionId: string
+  previewId: string
+}): Promise<void> {
+  const fn = bridge()?.previewOpen
+  if (typeof fn !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  await fn(input)
+}
+
+export async function openPreviewExternal(input: {
+  sessionId: string
+  previewId: string
+}): Promise<void> {
+  const fn = bridge()?.previewExternal
+  if (typeof fn !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  await fn(input)
+}
+
+export function setPreviewBounds(bounds: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): void {
+  bridge()?.previewBounds?.(bounds)
+}
+
+export function previewAction(action: 'back' | 'forward' | 'reload'): void {
+  bridge()?.previewAction?.(action)
+}
+
+export function closePreviewView(): void {
+  bridge()?.previewClose?.()
+}
+
+export function onPreviewState(
+  listener: (state: PreviewViewState) => void,
+): () => void {
+  return bridge()?.onPreviewState?.(listener) ?? (() => {})
 }
 
 function isCoreIpcErrorEnvelope(value: unknown): value is CoreIpcErrorEnvelope {
