@@ -1662,10 +1662,10 @@ select:focus-visible {
 .active-ask-freeform textarea {
   min-height: 44px;
   resize: vertical;
-  border-color: rgb(var(--border)) !important;
-  border-radius: var(--radius) !important;
-  background: rgb(var(--bg) / 0.58) !important;
-  color: rgb(var(--fg)) !important;
+  border-color: rgb(var(--border));
+  border-radius: var(--radius);
+  background: rgb(var(--bg) / 0.58);
+  color: rgb(var(--fg));
 }
 
 .active-ask-actions {
@@ -1775,13 +1775,13 @@ select:focus-visible {
   width: 100%;
   min-height: 22px;
   resize: none;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  padding: 0 !important;
-  color: rgb(var(--fg)) !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: rgb(var(--fg));
   line-height: 1.45;
-  outline: none !important;
+  outline: none;
 }
 
 .active-plan-decision-freeform textarea::placeholder {
@@ -2010,9 +2010,9 @@ select:focus-visible {
 
 .composer textarea:focus,
 .composer textarea:focus-visible {
-  border-color: transparent !important;
-  outline: none !important;
-  box-shadow: none !important;
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
 }
 
 .composer-highlight-layer {
