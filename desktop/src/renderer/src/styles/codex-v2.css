@@ -1011,7 +1011,7 @@ select:focus-visible {
 }
 
 .plan-large-card .control-context {
-  margin: 12px 18px 0 !important;
+  margin: 12px 18px 0;
 }
 
 .plan-progress-strip {
@@ -1040,10 +1040,10 @@ select:focus-visible {
 }
 
 .plan-markdown-primary {
-  margin: 14px 18px 0 !important;
-  max-height: none !important;
-  padding: 16px 18px !important;
-  background: rgb(var(--bg) / 0.42) !important;
+  margin: 14px 18px 0;
+  max-height: none;
+  padding: 16px 18px;
+  background: rgb(var(--bg) / 0.42);
 }
 
 .plan-large-card .plan-runtime,
@@ -1051,48 +1051,29 @@ select:focus-visible {
 .plan-large-card .plan-comments,
 .plan-large-card .plan-action-zone,
 .plan-large-card .control-footnote {
-  margin-left: 18px !important;
-  margin-right: 18px !important;
+  margin-left: 18px;
+  margin-right: 18px;
 }
 
 .plan-large-card .plan-action-zone,
 .plan-large-card .control-footnote {
-  margin-bottom: 18px !important;
+  margin-bottom: 18px;
 }
 
 .plan-large-card[data-tone='waiting'] {
-  border-color: rgb(var(--warn) / 0.38) !important;
+  border-color: rgb(var(--warn) / 0.38);
 }
 
 .plan-large-card[data-tone='running'] {
-  border-color: rgb(var(--accent) / 0.38) !important;
+  border-color: rgb(var(--accent) / 0.38);
 }
 
 .plan-large-card[data-tone='done'] {
-  border-color: rgb(var(--ok) / 0.34) !important;
+  border-color: rgb(var(--ok) / 0.34);
 }
 
 .plan-large-card[data-tone='error'] {
-  border-color: rgb(var(--danger) / 0.45) !important;
-}
-
-.plan-assumptions,
-.plan-comments {
-  border-radius: var(--radius-md) !important;
-  background: rgb(var(--bg) / 0.36) !important;
-}
-
-.control-actions {
-  margin-top: 10px !important;
-  gap: 8px !important;
-}
-
-.control-primary,
-.control-secondary {
-  min-height: 30px !important;
-  border-radius: var(--radius-md) !important;
-  padding: 0 12px !important;
-  font-size: var(--font-size-sm) !important;
+  border-color: rgb(var(--danger) / 0.45);
 }
 
 .pending-bar {

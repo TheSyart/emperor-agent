@@ -649,12 +649,18 @@
 }
 
 .control-actions {
-  @apply mt-3 flex flex-wrap items-center justify-end gap-2;
+  @apply flex flex-wrap items-center justify-end;
+  margin-top: var(--space-3);
+  gap: var(--space-2);
 }
 
 .control-primary,
 .control-secondary {
-  @apply inline-flex items-center justify-center rounded-md border px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-50;
+  @apply inline-flex items-center justify-center rounded-md border font-medium transition disabled:opacity-50;
+  min-height: 30px;
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-sm);
   border-color: rgb(var(--border));
 }
 
@@ -694,7 +700,9 @@
 .plan-assumptions,
 .plan-comments {
   @apply mt-3 rounded-md border px-3 py-2;
+  border-radius: var(--radius-md);
   border-color: rgb(var(--border));
+  background: rgb(var(--bg) / 0.36);
 }
 
 .plan-assumptions span,
