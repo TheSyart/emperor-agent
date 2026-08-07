@@ -81,7 +81,6 @@
   border-left: 1px solid rgb(var(--border));
   background: rgb(var(--bg-elevated));
   color: rgb(var(--fg));
-  animation: workspace-enter 160ms ease-out;
 }
 
 .right-workspace-head {
@@ -988,12 +987,11 @@
   height: 100%;
 }
 
+/* 遮罩色由 .scrim 提供(--scrim-a);并行非阻塞,不再额外 blur。 */
 .right-workspace-backdrop {
   position: absolute;
   z-index: var(--z-overlay);
   inset: 0;
-  background: rgb(0 0 0 / 0.35);
-  backdrop-filter: blur(1px);
 }
 
 .right-workspace.presentation-drawer {
@@ -1019,16 +1017,6 @@
   }
   to {
     opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .right-workspace,
-  .workspace-control-button,
-  .workspace-icon-button,
-  .right-workspace-head nav button {
-    animation: none;
-    transition: none;
   }
 }
 
@@ -1067,7 +1055,7 @@
     0 18px 54px rgb(var(--shadow-color) / 0.18),
     0 1px 0 rgb(255 255 255 / 0.025) inset;
   backdrop-filter: blur(var(--material-2-blur));
-  animation: workspace-enter 160ms ease-out;
+  animation: workspace-enter var(--duration-fast) var(--ease-out);
 }
 
 @media (min-width: 1180px) {

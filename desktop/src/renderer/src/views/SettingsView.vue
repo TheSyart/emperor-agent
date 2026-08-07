@@ -163,7 +163,7 @@ async function deleteArchived(id: string) {
             <p>当前本地 Agent 的运行状态与基础信息</p>
           </div>
         </header>
-        <div class="view-body">
+        <div class="view-body scroll-fade-y">
           <div class="settings-list">
             <div class="settings-row">
               <Bot :size="18" />
@@ -207,7 +207,7 @@ async function deleteArchived(id: string) {
             <p>主题只影响本地桌面端显示</p>
           </div>
         </header>
-        <div class="view-body">
+        <div class="view-body scroll-fade-y">
           <div class="settings-list">
             <button
               class="settings-row selectable"
@@ -244,7 +244,7 @@ async function deleteArchived(id: string) {
             <p>恢复后会重新出现在主侧边栏</p>
           </div>
         </header>
-        <div class="view-body">
+        <div class="view-body scroll-fade-y">
           <div v-if="archivedLoading" class="empty-note">加载归档对话中...</div>
           <div v-else-if="!archivedSessions.length" class="empty-note">
             暂无归档对话。

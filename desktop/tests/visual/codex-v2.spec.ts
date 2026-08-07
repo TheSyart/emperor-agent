@@ -322,6 +322,9 @@ for (const viewport of [
     const panel = page.locator('.right-workspace')
     await expect(panel).toBeVisible()
     await expect(panel).toHaveClass(new RegExp(`presentation-${viewport.name}`))
+    // The workbench materializes in (scale+blur); let the enter transition settle
+    // before reading bounds so the mid-flight scale doesn't skew the measurement.
+    await page.waitForTimeout(260)
     const bounds = await panel.boundingBox()
     expect(bounds).not.toBeNull()
     expect(bounds!.x).toBeGreaterThanOrEqual(0)
@@ -330,7 +333,6 @@ for (const viewport of [
       expect(bounds!.y).toBeLessThanOrEqual(1)
       expect(bounds!.height).toBeGreaterThanOrEqual(viewport.height - 1)
     }
-    await page.waitForTimeout(220)
     await page.screenshot({
       path: resolve(screenshotDir, `workspace-${viewport.name}-light.png`),
     })

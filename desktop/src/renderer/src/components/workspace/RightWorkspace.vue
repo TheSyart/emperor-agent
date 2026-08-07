@@ -40,6 +40,7 @@ import {
   type WorkspaceSource,
 } from './workspaceTypes'
 import { useResizable } from '../../composables/useResizable'
+import AppTransition from '../motion/AppTransition.vue'
 
 const props = defineProps<{
   sessionId: string
@@ -413,93 +414,98 @@ const FOCUSABLE_SELECTOR =
   <button
     v-if="workbenchVisible && presentation !== 'fixed'"
     type="button"
-    class="right-workspace-backdrop"
+    class="right-workspace-backdrop scrim"
     aria-label="关闭项目工作台"
     @click="setWorkbench(false)"
   ></button>
 
-  <aside
-    v-if="workbenchVisible"
-    ref="panel"
-    class="right-workspace"
-    :class="`presentation-${presentation}`"
-    :style="panelStyle"
-    aria-label="项目工作台"
-    :role="presentation === 'fixed' ? undefined : 'dialog'"
-    :aria-modal="presentation === 'fixed' ? undefined : 'true'"
-    :tabindex="presentation === 'fixed' ? undefined : -1"
+  <AppTransition
+    :preset="presentation === 'fixed' ? 'fade' : 'materialize'"
+    origin="right center"
   >
-    <button
-      v-if="presentation === 'fixed'"
-      type="button"
-      class="right-workspace-resizer"
-      aria-label="调整项目工作台宽度"
-      v-bind="workspaceResizerProps"
-    ></button>
-    <header class="right-workspace-head">
-      <div>
+    <aside
+      v-if="workbenchVisible"
+      ref="panel"
+      class="right-workspace"
+      :class="`presentation-${presentation}`"
+      :style="panelStyle"
+      aria-label="项目工作台"
+      :role="presentation === 'fixed' ? undefined : 'dialog'"
+      :aria-modal="presentation === 'fixed' ? undefined : 'true'"
+      :tabindex="presentation === 'fixed' ? undefined : -1"
+    >
+      <button
+        v-if="presentation === 'fixed'"
+        type="button"
+        class="right-workspace-resizer"
+        aria-label="调整项目工作台宽度"
+        v-bind="workspaceResizerProps"
+      ></button>
+      <header class="right-workspace-head">
+        <div>
+          <button
+            v-if="state.pane !== 'launcher'"
+            type="button"
+            class="workspace-icon-button"
+            aria-label="返回工作区启动器"
+            @click="openLauncher"
+          >
+            <ArrowLeft :size="15" />
+          </button>
+          <strong>{{
+            state.pane === 'launcher' ? 'Workspace' : workbenchTitle
+          }}</strong>
+        </div>
         <button
-          v-if="state.pane !== 'launcher'"
           type="button"
           class="workspace-icon-button"
-          aria-label="返回工作区启动器"
-          @click="openLauncher"
+          aria-label="关闭项目工作台"
+          @click="setWorkbench(false)"
         >
-          <ArrowLeft :size="15" />
+          <X :size="15" />
         </button>
-        <strong>{{
-          state.pane === 'launcher' ? 'Workspace' : workbenchTitle
-        }}</strong>
-      </div>
-      <button
-        type="button"
-        class="workspace-icon-button"
-        aria-label="关闭项目工作台"
-        @click="setWorkbench(false)"
-      >
-        <X :size="15" />
-      </button>
-    </header>
-    <div class="right-workspace-body">
-      <div v-if="state.pane === 'launcher'" class="workspace-launcher">
-        <button
-          v-for="pane in panes"
-          :key="pane.id"
-          type="button"
-          :disabled="pane.id === 'review' && !hasGit"
-          @click="openPane(pane.id)"
-        >
-          <component :is="iconForPane[pane.id]" :size="15" />
-          <span>{{ pane.label }}</span>
-          <small v-if="pane.id === 'review' && !hasGit"
-            >当前项目未初始化 Git</small
+      </header>
+      <div class="right-workspace-body">
+        <div v-if="state.pane === 'launcher'" class="workspace-launcher">
+          <button
+            v-for="pane in panes"
+            :key="pane.id"
+            type="button"
+            :disabled="pane.id === 'review' && !hasGit"
+            @click="openPane(pane.id)"
           >
-        </button>
+            <component :is="iconForPane[pane.id]" :size="15" />
+            <span>{{ pane.label }}</span>
+            <small v-if="pane.id === 'review' && !hasGit"
+              >当前项目未初始化 Git</small
+            >
+          </button>
+        </div>
+        <GitReviewPane
+          v-else-if="state.pane === 'review'"
+          :session-id="sessionId"
+          :has-project="hasProject"
+          :agent-busy="agentBusy"
+          :focus-paths="reviewFilterPaths"
+        />
+        <TerminalPane
+          v-else-if="state.pane === 'terminal' && hasProject"
+          :session-id="sessionId"
+        />
+        <FilesPane
+          v-else-if="state.pane === 'files' && hasProject"
+          ref="filesPane"
+          :session-id="sessionId"
+          :project-path="effectiveProjectPath"
+          :tree-width="state.filesTreeWidth"
+          @tree-width="setFilesTreeWidth"
+        />
+        <BrowserPane
+          v-else-if="state.pane === 'browser' && hasProject"
+          :session-id="sessionId"
+          :preview-id="pendingPreviewId"
+        />
       </div>
-      <GitReviewPane
-        v-else-if="state.pane === 'review'"
-        :session-id="sessionId"
-        :has-project="hasProject"
-        :agent-busy="agentBusy"
-        :focus-paths="reviewFilterPaths"
-      />
-      <TerminalPane
-        v-else-if="state.pane === 'terminal' && hasProject"
-        :session-id="sessionId"
-      />
-      <FilesPane
-        v-else-if="state.pane === 'files' && hasProject"
-        ref="filesPane"
-        :session-id="sessionId"
-        :project-path="effectiveProjectPath"
-        :tree-width="state.filesTreeWidth"
-        @tree-width="setFilesTreeWidth"
-      />
-      <BrowserPane
-        v-else-if="state.pane === 'browser' && hasProject"
-        :session-id="sessionId"
-        :preview-id="pendingPreviewId"
-      />
-    </div>
-  </aside>
+    </aside>
+  </AppTransition>
 </template>

@@ -278,7 +278,7 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     'styles/surfaces/menus.css': 26,
     'styles/surfaces/panels.css': 15,
     'styles/surfaces/sidebar.css': 20,
-    'styles/surfaces/settings.css': 22,
+    'styles/surfaces/settings.css': 13,
     'components/chat/QueueTray.vue': 4,
     'components/chat/ComposerLifecycleIndicator.vue': 2,
     'components/panels/FileCheckpointsSection.vue': 2,

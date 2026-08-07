@@ -1,4 +1,7 @@
-/* Codex V2 — settings views + diagnostics + archived sessions + responsive. Split from codex-v2.css (pure move, order preserved). */
+/* Settings 表面 —— 分组内联列表(Apple Settings 风)。
+   侧栏是结构层(material-2 语义:elevated 底 + 发丝边);内容区行卡片聚合进
+   共享 inset 容器(单层圆角卡片 + 行下发丝分隔),替代逐行描边的卡片阵列。
+   间距全部消费 var(--space-*),焦点环走 .focus-ring 同款 token。 */
 .settings-shell {
   display: grid;
   height: 100dvh;
@@ -12,7 +15,7 @@
   overflow-y: auto;
   border-right: 1px solid rgb(var(--border));
   background: rgb(var(--bg-elevated));
-  padding: 14px 8px;
+  padding: var(--space-3) var(--space-2);
 }
 
 .settings-back {
@@ -21,9 +24,12 @@
   min-height: 32px;
   align-items: center;
   border-radius: var(--radius-md);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-md);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .settings-back:hover {
@@ -32,20 +38,22 @@
 }
 
 .settings-search {
-  margin: 10px 0 14px;
+  margin: var(--space-2) 0 var(--space-3);
   height: 30px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
 }
 
+/* 分区标题:小号 caption + 字距,靠层级(而非全大写)区分。 */
 .settings-group-label {
-  margin: 16px 8px 6px;
+  margin: var(--space-4) var(--space-2) var(--space-1);
   color: rgb(var(--fg-subtle));
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: 650;
+  letter-spacing: 0.02em;
 }
 
 .settings-nav-item {
@@ -53,13 +61,16 @@
   width: 100%;
   min-height: 32px;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   border-radius: var(--radius-md);
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   font-weight: 600;
   text-align: left;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .settings-nav-item:hover,
@@ -98,14 +109,20 @@
 .model-settings-view .model-panel-shell {
   container-name: model-settings;
   container-type: inline-size;
-  gap: 18px;
-  padding: 0 0 8px;
+  gap: var(--space-4);
+  padding: 0 0 var(--space-2);
 }
 
+/* 分组内联卡片:行共享一个圆角 inset 容器,逐行的边框/圆角收敛到这里,
+   行间靠发丝分隔线区分(替代逐行描边的卡片阵列)。 */
 .settings-list {
   display: grid;
   max-width: 820px;
-  gap: 8px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--bg-inset));
 }
 
 .settings-row {
@@ -113,13 +130,18 @@
   min-height: 52px;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  border: 1px solid rgb(var(--border));
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  background: rgb(var(--bg-elevated));
+  gap: var(--space-3);
+  border: 0;
+  border-radius: 0;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
   color: rgb(var(--fg-muted));
   text-align: left;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.settings-row + .settings-row {
+  box-shadow: inset 0 1px 0 rgb(var(--border));
 }
 
 .settings-row > div {
@@ -150,7 +172,7 @@
   overflow: hidden;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-sm);
-  padding: 2px 7px;
+  padding: 2px var(--space-2);
   color: rgb(var(--fg-muted));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--font-size-xs);
@@ -158,10 +180,21 @@
   white-space: nowrap;
 }
 
-.settings-row.selectable:hover,
+.settings-row.selectable:hover {
+  background: rgb(var(--bg-elevated));
+}
+
 .settings-row.selectable.active {
-  border-color: rgb(var(--accent) / 0.45);
   background: rgb(var(--accent) / 0.1);
+}
+
+.settings-row.selectable.active strong {
+  color: rgb(var(--accent));
+}
+
+.settings-row:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.7);
+  outline-offset: -2px;
 }
 
 .diagnostics-list {
