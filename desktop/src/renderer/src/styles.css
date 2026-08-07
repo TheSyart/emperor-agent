@@ -7,6 +7,38 @@
    @layer base 必须留在本文件——Tailwind 按文件处理,它依赖同文件的
    @tailwind base 指令。 */
 
+/* ── 样式写法规范(统一约定,审计强制)────────────────────────────────────────
+   目标:样式代码高度规范、统一、可控。新代码一律遵守下列分层;违反者会被
+   style-audit.test.ts 拦截(裸值 / !important / token 重定义 / 魔法 z-index)。
+
+   1. 设计 token 只在 theme/{dark,light}.css 定义(唯一事实源,奇偶测试强制
+      两表键集合一致)。任何其他文件禁止给 token 赋值;只许 var(--x) 消费。
+      值统一用 RGB 三元组 + rgb(var(--x) / <alpha>) 表达透明度。
+   2. 颜色/材质/动效/层级一律消费 token 或工具类,禁止裸值:
+      - 颜色 → rgb(var(--bg|fg|border|accent|brand|...)/<a>)
+      - 材质 → materials.css 的 .glass / .material-1..3 / .scrim
+      - 模糊 → var(--material-*-blur|--glass-blur),禁止 blur(<px>)
+      - 层级 → var(--z-base..--z-lightbox),禁止数字 z-index
+      - 间距 → var(--space-1..6);圆角 → var(--radius*);时长/缓动 → var(--duration-*|--ease-*)
+      - 文字层级 → var(--text-primary|secondary|tertiary) 等
+   3. 写法三分层:
+      - 全局 surface 类 → styles/{activity,chat,panels,workspace}.css 与
+        styles/surfaces/*.css(按界面拆分)。可复用、跨组件共享的样式写这里。
+      - 复合工具类(材质/聚焦环/滚动渐隐/可按压) → materials.css。
+      - 组件私有、一次性、强耦合 DOM 结构的样式 → <style scoped>,
+        同样只消费 token,禁止裸值与 !important。
+   4. !important 默认禁止。仅两类合法且必须紧邻 audit-allow 注释:
+      (a) a11y.css 的全局无障碍覆盖;(b) 全局拖拽态(.workspace-resizing)
+      这类必须压过任意子元素自身光标的场景。
+   5. 动效:进出场/跟随一律走 AppTransition / useSpring(JS 弹簧,可中断、
+      速度感知);CSS 过渡只许 var(--duration-*) + var(--ease-*)。
+      布局属性(width/height/padding/margin/top/left)不得做过渡——只动
+      transform 与 opacity(合成器路径)。无障碍降级集中在 a11y.css,
+      组件内不写 prefers-reduced-* 媒体查询。
+   6. 层叠纪律:同优先级冲突靠"后加载者胜",每个选择器只在一处定义。
+      禁止同一类名在多个文件重复定义后靠 !important 或顺序互殴
+      (历史上 codex-v2 与 activity/chat/panels 的双源战争即此反例)。 */
+
 @layer base {
   button,
   input,

@@ -1,0 +1,225 @@
+/* Codex V2 — turn-changes/profile/config cards. Split from codex-v2.css (pure move, order preserved). */
+.changes-summary-node::before {
+  background: rgb(var(--ok));
+}
+
+.turn-changes-card {
+  width: 100%;
+  margin: 2px 0;
+  overflow: hidden;
+  border: 1px solid rgb(var(--border) / 0.78);
+  border-radius: var(--radius-md);
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-elevated) / 0.36);
+}
+
+.turn-changes-card > header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.turn-changes-card-summary {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: rgb(var(--fg-muted));
+}
+
+.turn-changes-card-summary strong {
+  color: rgb(var(--fg));
+  font-size: var(--font-size-sm);
+  font-weight: 550;
+}
+
+.turn-changes-card-summary span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-changes-card-summary b {
+  color: rgb(var(--ok));
+  font-weight: 500;
+}
+
+.turn-changes-card-summary em {
+  color: rgb(var(--danger));
+  font-style: normal;
+}
+
+.turn-changes-card > header button {
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-card > header button:hover {
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-inset));
+}
+
+.turn-changes-card ul {
+  border-top: 1px solid rgb(var(--border));
+}
+
+.turn-changes-card li {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 10px;
+  border-top: 1px solid rgb(var(--border) / 0.65);
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-card li:first-child {
+  border-top: 0;
+}
+
+.turn-changes-card li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-changes-card li small {
+  flex: 0 0 auto;
+  color: rgb(var(--fg-subtle));
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-changes-card li small.binary {
+  color: rgb(var(--fg-subtle));
+}
+
+/* 增删行统计:加=绿,减=红(变更卡 / 进度胶囊等共用) */
+.stat-add {
+  color: rgb(var(--ok));
+  font-weight: 500;
+  font-style: normal;
+}
+
+.stat-del {
+  color: rgb(var(--danger));
+  font-weight: 500;
+  font-style: normal;
+}
+
+.turn-changes-expand {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-top: 1px solid rgb(var(--border));
+  padding: 7px 12px;
+  color: rgb(var(--fg-subtle));
+  font-size: var(--font-size-xs);
+}
+
+.turn-changes-expand:hover {
+  color: rgb(var(--fg));
+  background: rgb(var(--bg-inset) / 0.6);
+}
+
+.turn-changes-expand svg {
+  transition: transform 150ms ease;
+}
+
+.turn-changes-expand svg.rotated {
+  transform: rotate(180deg);
+}
+
+.turn-changes-partial {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid rgb(var(--warn) / 0.3);
+  padding: 8px 12px;
+  color: rgb(var(--warn));
+  background: rgb(var(--warn) / 0.06);
+  font-size: var(--font-size-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-progress-live-dot,
+  .composer-progress-spinner,
+  .composer-progress-popover {
+    animation: none;
+  }
+}
+
+.profile-onboarding-banner {
+  display: flex;
+  width: min(760px, 100%);
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  background: rgb(var(--bg-elevated) / 0.97);
+  box-shadow: 0 8px 24px rgb(var(--shadow-color) / 0.16);
+}
+
+.profile-onboarding-banner > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.profile-onboarding-banner strong {
+  color: rgb(var(--fg));
+  font-size: var(--font-size-md);
+  font-weight: 650;
+}
+
+.profile-onboarding-banner span {
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-sm);
+}
+
+.profile-onboarding-actions,
+.config-profile-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-onboarding-actions button {
+  min-height: 28px;
+  border-radius: var(--radius-md);
+  padding: 0 9px;
+  color: rgb(var(--fg-muted));
+  font-size: var(--font-size-sm);
+}
+
+.profile-onboarding-actions button:hover {
+  background: rgb(var(--bg-inset));
+  color: rgb(var(--fg));
+}
+
+.profile-onboarding-actions button.primary {
+  background: rgb(var(--accent));
+  color: rgb(var(--accent-fg));
+}
+
+.config-profile-status {
+  margin-bottom: 10px;
+}
+
