@@ -3744,3 +3744,60 @@ async function assertComposerAddMenu(page: Page) {
   expect(Math.abs(menuBox.width - composerBox.width)).toBeLessThanOrEqual(24)
   expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(composerBox.y - 6)
 }
+
+// ── Stage6: 无障碍媒体特征降级断言 ─────────────────────────────────────────
+// a11y.css 集中处理三条偏好信号,组件零 a11y 代码;此处验证浏览器实际计算值。
+test.describe('a11y media-feature degradation (Stage6)', () => {
+  test('prefers-reduced-motion collapses durations to 1ms', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/chat')
+    await expect(page.locator('.composer')).toBeVisible()
+    const fast = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--duration-fast',
+      ),
+    )
+    expect(fast.trim()).toBe('1ms')
+    // 全局 * { transition-duration: 1ms !important } 压过组件局部 transition
+    const durations = await page.evaluate(() => {
+      const el = document.querySelector('.workspace-control-button')
+      if (!el) return null
+      return getComputedStyle(el).transitionDuration
+    })
+    expect(durations).not.toBeNull()
+    // Chromium 把 1ms 序列化为 '0.001s'(秒),两种写法都接受。
+    const durationMs = durations!
+      .split(',')
+      .map((value) => {
+        const trimmed = value.trim()
+        if (trimmed.endsWith('ms')) return parseFloat(trimmed)
+        if (trimmed.endsWith('s')) return parseFloat(trimmed) * 1000
+        return NaN
+      })
+    expect(durationMs.every((ms) => Math.abs(ms - 1) <= 1)).toBe(true)
+  })
+
+  test('prefers-contrast more raises border tokens in both themes', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ contrast: 'more' })
+    await page.goto('/chat?visualTheme=dark')
+    await expect(page.locator('.composer')).toBeVisible()
+    const darkBorder = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+    )
+    expect(darkBorder.trim()).toBe('88 88 98')
+    const darkBorderColor = await page.evaluate(() => {
+      const el = document.querySelector('.composer')
+      if (!el) return null
+      return getComputedStyle(el).borderTopColor
+    })
+    expect(darkBorderColor).toContain('88, 88, 98')
+    await page.goto('/chat?visualTheme=light')
+    await expect(page.locator('.composer')).toBeVisible()
+    const lightBorder = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+    )
+    expect(lightBorder.trim()).toBe('150 150 158')
+  })
+})

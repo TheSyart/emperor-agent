@@ -6,7 +6,11 @@
    在 surface 样式之前导入(见 main.ts),媒体查询只负责覆盖 token。 */
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  /* 必须与主题表同特异性(:root[data-theme]),否则主题的 :root[data-theme]
+     声明会按特异性胜出,覆盖失效——Playwright a11y 断言强制这一点。 */
+  :root,
+  :root[data-theme='dark'],
+  :root[data-theme='light'] {
     --duration-instant: 1ms;
     --duration-fast: 1ms;
     --duration: 1ms;
@@ -27,7 +31,9 @@
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root {
+  :root,
+  :root[data-theme='dark'],
+  :root[data-theme='light'] {
     --material-1-alpha: 0.97;
     --material-2-alpha: 0.98;
     --material-3-alpha: 0.99;

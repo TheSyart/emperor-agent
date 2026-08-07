@@ -263,6 +263,55 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 
+  // ── 无障碍降级单源规则(Stage6)──────────────────────────────────────────
+  // 三条偏好信号集中写在 styles/a11y.css;样式/组件不得再出现散落的
+  // prefers-reduced-motion 块(JS 弹簧由 useReducedMotion 门控,属另一条路径)。
+  it('a11y.css centralizes all three preference signals', () => {
+    const a11y = read('styles/a11y.css')
+    const motion = /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(
+      a11y,
+    )?.[1]
+    expect(motion).toBeTruthy()
+    expect(motion).toContain('--duration-fast: 1ms')
+    expect(motion).toContain('animation-duration: 1ms !important')
+    expect(motion).toContain('transition-duration: 1ms !important')
+    // 覆盖选择器必须与主题表同特异性(:root[data-theme]),否则主题声明按
+    // 特异性胜出、覆盖静默失效(曾真实发生,Playwright 断言捕获)。
+    expect(motion).toMatch(/:root\[data-theme='dark'\]/)
+    const transparency = /@media \(prefers-reduced-transparency: reduce\) \{\n([\s\S]*?)\n\}/.exec(
+      a11y,
+    )?.[1]
+    expect(transparency).toBeTruthy()
+    expect(transparency).toContain('--material-1-alpha: 0.97')
+    expect(transparency).toContain('--material-1-blur: 0px')
+    expect(transparency).toContain('--glass-blur: 0px')
+    expect(transparency).toMatch(/:root\[data-theme='dark'\]/)
+    const contrast = /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(
+      a11y,
+    )?.[1]
+    expect(contrast).toBeTruthy()
+    expect(contrast).toContain('--border: 88 88 98')
+  })
+
+  it('no scattered prefers-reduced-motion blocks outside a11y.css', () => {
+    const offenders: string[] = []
+    for (const rel of STYLE_FILES) {
+      if (rel === 'styles/a11y.css') continue
+      if (read(rel).includes('prefers-reduced-motion')) {
+        const lines = read(rel)
+          .split('\n')
+          .filter((line) => line.includes('prefers-reduced-motion'))
+        offenders.push(`${rel}: ${lines.join(' | ')}`)
+      }
+    }
+    for (const rel of VUE_FILES) {
+      const blocks = styleBlocks(rel)
+      if (blocks.includes('prefers-reduced-motion'))
+        offenders.push(`${rel}: <style> contains prefers-reduced-motion`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
   const SPACING_BASELINE: Record<string, number> = {
     // Stage6 收敛后:3-14px 裸间距全部吸附到 var(--space-*)(±2px 内),
     // 余值仅为不可吸附的定位偏移(-3px resizer、52px/348px 浮层锚点)。
