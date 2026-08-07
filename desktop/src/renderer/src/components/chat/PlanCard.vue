@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Check, ChevronsUpDown, Copy } from 'lucide-vue-next'
 import type { ControlInteraction, RuntimePlanRecord } from '../../types'
+import AppTransition from '../motion/AppTransition.vue'
 import MarkdownBlock from './MarkdownBlock.vue'
 import { planDisplayMarkdown, planStatusPresentation } from './planDisplay'
 
@@ -37,75 +38,80 @@ function toggleCollapsed(): void {
 </script>
 
 <template>
-  <section
-    class="control-card plan-card plan-large-card"
-    :class="props.interaction.status"
-    :data-tone="presentation.tone"
-  >
-    <header class="plan-card-hero">
-      <div class="plan-card-hero-top">
-        <div class="plan-card-kicker">计划提案</div>
-        <div class="plan-card-actions">
-          <button
-            type="button"
-            class="plan-card-icon-button"
-            :aria-label="copied ? '已复制' : '复制计划'"
-            @click="copyPlan"
-          >
-            <Check v-if="copied" :size="14" />
-            <Copy v-else :size="14" />
-          </button>
-          <button
-            type="button"
-            class="plan-card-icon-button"
-            :class="{ active: collapsed }"
-            :aria-label="collapsed ? '展开计划正文' : '收起计划正文'"
-            :aria-expanded="!collapsed"
-            @click="toggleCollapsed"
-          >
-            <ChevronsUpDown :size="14" />
-          </button>
-        </div>
-      </div>
-      <div class="plan-card-title-row">
-        <strong>{{
-          props.interaction.title || props.plan?.title || '待批准计划'
-        }}</strong>
-        <div class="plan-card-chips">
-          <em>{{ presentation.label }}</em>
-          <em>{{ presentation.risk }}</em>
-        </div>
-      </div>
-    </header>
-
-    <p v-if="props.interaction.summary" class="control-context">
-      {{ props.interaction.summary }}
-    </p>
-
-    <div
-      class="plan-markdown plan-markdown-primary"
-      :class="{ 'plan-markdown-collapsed': collapsed }"
+  <AppTransition preset="materialize" origin="50% 0%" appear>
+    <section
+      class="control-card plan-card plan-large-card material-2"
+      :class="props.interaction.status"
+      :data-tone="presentation.tone"
     >
-      <MarkdownBlock
-        :content="markdownContent"
-        :source-message-id="`plan:${props.interaction.id}`"
-      />
-    </div>
+      <header class="plan-card-hero">
+        <div class="plan-card-hero-top">
+          <div class="plan-card-kicker">计划提案</div>
+          <div class="plan-card-actions">
+            <button
+              type="button"
+              class="plan-card-icon-button pressable"
+              :aria-label="copied ? '已复制' : '复制计划'"
+              @click="copyPlan"
+            >
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
+            </button>
+            <button
+              type="button"
+              class="plan-card-icon-button pressable"
+              :class="{ active: collapsed }"
+              :aria-label="collapsed ? '展开计划正文' : '收起计划正文'"
+              :aria-expanded="!collapsed"
+              @click="toggleCollapsed"
+            >
+              <ChevronsUpDown :size="14" />
+            </button>
+          </div>
+        </div>
+        <div class="plan-card-title-row">
+          <strong>{{
+            props.interaction.title || props.plan?.title || '待批准计划'
+          }}</strong>
+          <div class="plan-card-chips">
+            <em>{{ presentation.label }}</em>
+            <em>{{ presentation.risk }}</em>
+          </div>
+        </div>
+      </header>
 
-    <div v-if="props.interaction.assumptions?.length" class="plan-assumptions">
-      <span>Assumptions</span>
-      <ul>
-        <li v-for="item in props.interaction.assumptions" :key="item">
-          {{ item }}
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="comments.length" class="plan-comments">
-      <span>评论历史</span>
-      <p v-for="item in comments" :key="`${item.timestamp}-${item.content}`">
-        {{ item.content }}
+      <p v-if="props.interaction.summary" class="control-context">
+        {{ props.interaction.summary }}
       </p>
-    </div>
-  </section>
+
+      <div
+        class="plan-markdown plan-markdown-primary"
+        :class="{ 'plan-markdown-collapsed': collapsed }"
+      >
+        <MarkdownBlock
+          :content="markdownContent"
+          :source-message-id="`plan:${props.interaction.id}`"
+        />
+      </div>
+
+      <div
+        v-if="props.interaction.assumptions?.length"
+        class="plan-assumptions"
+      >
+        <span>Assumptions</span>
+        <ul>
+          <li v-for="item in props.interaction.assumptions" :key="item">
+            {{ item }}
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="comments.length" class="plan-comments">
+        <span>评论历史</span>
+        <p v-for="item in comments" :key="`${item.timestamp}-${item.content}`">
+          {{ item.content }}
+        </p>
+      </div>
+    </section>
+  </AppTransition>
 </template>

@@ -2,6 +2,7 @@
 import { computed, reactive, watch } from 'vue'
 import type { ControlInteraction, ControlQuestion } from '../../types'
 import { useAppContext } from '../../composables/useAppContext'
+import AppTransition from '../motion/AppTransition.vue'
 import {
   allAskQuestionsAnswered,
   askFreeformPresentation,
@@ -141,82 +142,90 @@ function skipPermanently() {
 </script>
 
 <template>
-  <section
-    v-if="currentQuestion"
-    class="active-ask-panel"
-    @keydown.esc.prevent="cancel"
-  >
-    <header class="active-ask-head">
-      <strong>{{ currentQuestion.question }}</strong>
-      <div class="active-ask-counter">
+  <AppTransition preset="materialize" origin="50% 100%" appear>
+    <section
+      v-if="currentQuestion"
+      class="active-ask-panel material-3"
+      @keydown.esc.prevent="cancel"
+    >
+      <header class="active-ask-head">
+        <strong>{{ currentQuestion.question }}</strong>
+        <div class="active-ask-counter">
+          <button
+            type="button"
+            class="pressable"
+            :disabled="currentIndex.value === 0"
+            @click="move(-1)"
+          >
+            ‹
+          </button>
+          <span>{{ progressLabel }}</span>
+          <button
+            type="button"
+            class="pressable"
+            :disabled="currentIndex.value >= total - 1 || !canContinue"
+            @click="move(1)"
+          >
+            ›
+          </button>
+        </div>
+      </header>
+
+      <div class="active-ask-options">
         <button
+          v-for="(option, index) in currentQuestion.options"
+          :key="option.label"
           type="button"
-          :disabled="currentIndex.value === 0"
-          @click="move(-1)"
+          class="active-ask-option pressable"
+          :data-active="currentDraft.choice === option.label"
+          @click="choose(currentQuestion, option)"
         >
-          ‹
-        </button>
-        <span>{{ progressLabel }}</span>
-        <button
-          type="button"
-          :disabled="currentIndex.value >= total - 1 || !canContinue"
-          @click="move(1)"
-        >
-          ›
+          <span class="active-ask-number">{{ index + 1 }}</span>
+          <span class="active-ask-option-copy">
+            <strong>{{ option.label }}</strong>
+            <small>{{ option.description }}</small>
+          </span>
         </button>
       </div>
-    </header>
 
-    <div class="active-ask-options">
-      <button
-        v-for="(option, index) in currentQuestion.options"
-        :key="option.label"
-        type="button"
-        class="active-ask-option"
-        :data-active="currentDraft.choice === option.label"
-        @click="choose(currentQuestion, option)"
-      >
-        <span class="active-ask-number">{{ index + 1 }}</span>
-        <span class="active-ask-option-copy">
-          <strong>{{ option.label }}</strong>
-          <small>{{ option.description }}</small>
-        </span>
-      </button>
-    </div>
+      <label v-if="!isPermission" class="active-ask-freeform">
+        <span>{{ freeformPresentation.label }}</span>
+        <textarea
+          v-model="currentDraft.freeform"
+          rows="2"
+          :placeholder="freeformPresentation.placeholder"
+        />
+      </label>
 
-    <label v-if="!isPermission" class="active-ask-freeform">
-      <span>{{ freeformPresentation.label }}</span>
-      <textarea
-        v-model="currentDraft.freeform"
-        rows="2"
-        :placeholder="freeformPresentation.placeholder"
-      />
-    </label>
-
-    <footer class="active-ask-actions">
-      <button class="active-ask-ignore" type="button" @click="cancel">
-        <span>{{ isProfileOnboarding ? '稍后再说' : '忽略' }}</span>
-        <kbd>ESC</kbd>
-      </button>
-      <button
-        v-if="isProfileOnboarding"
-        class="active-ask-ignore"
-        type="button"
-        @click="skipPermanently"
-      >
-        不再提醒
-      </button>
-      <button
-        class="active-ask-submit"
-        type="button"
-        :disabled="
-          !canContinue || (currentIndex.value >= total - 1 && !canSubmit)
-        "
-        @click="submitOrNext"
-      >
-        {{ submitLabel }}
-        <span aria-hidden="true">↩</span>
-      </button>
-    </footer>
-  </section>
+      <footer class="active-ask-actions">
+        <button
+          class="active-ask-ignore pressable"
+          type="button"
+          @click="cancel"
+        >
+          <span>{{ isProfileOnboarding ? '稍后再说' : '忽略' }}</span>
+          <kbd>ESC</kbd>
+        </button>
+        <button
+          v-if="isProfileOnboarding"
+          class="active-ask-ignore pressable"
+          type="button"
+          @click="skipPermanently"
+        >
+          不再提醒
+        </button>
+        <button
+          class="active-ask-submit pressable"
+          type="button"
+          :disabled="
+            !canContinue || (currentIndex.value >= total - 1 && !canSubmit)
+          "
+          @click="submitOrNext"
+        >
+          {{ submitLabel }}
+          <span aria-hidden="true">↩</span>
+        </button>
+      </footer>
+    </section>
+  </AppTransition>
 </template>

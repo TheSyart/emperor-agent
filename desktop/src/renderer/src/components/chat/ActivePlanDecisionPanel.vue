@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ControlInteraction } from '../../types'
 import { useAppContext } from '../../composables/useAppContext'
+import AppTransition from '../motion/AppTransition.vue'
 import { planDecisionVisible } from './planDisplay'
 
 const props = defineProps<{ interaction: ControlInteraction }>()
@@ -26,53 +27,59 @@ function cancel() {
 </script>
 
 <template>
-  <section
-    v-if="visible"
-    class="active-plan-decision-panel"
-    @keydown.esc.prevent="cancel"
-  >
-    <header class="active-plan-decision-head">
-      <strong>实施此计划？</strong>
-    </header>
-
-    <button
-      type="button"
-      class="active-plan-decision-option"
-      :data-active="!comment.trim()"
-      @click="comment = ''"
+  <AppTransition preset="materialize" origin="50% 100%" appear>
+    <section
+      v-if="visible"
+      class="active-plan-decision-panel material-3"
+      @keydown.esc.prevent="cancel"
     >
-      <span class="active-ask-number">1</span>
-      <span class="active-plan-decision-copy">
-        <strong>是，实施此计划</strong>
-      </span>
-    </button>
+      <header class="active-plan-decision-head">
+        <strong>实施此计划？</strong>
+      </header>
 
-    <label
-      class="active-plan-decision-option active-plan-decision-freeform"
-      :data-active="Boolean(comment.trim())"
-    >
-      <span class="active-ask-number">2</span>
-      <textarea
-        v-model="comment"
-        rows="1"
-        placeholder="否，请告诉emperor如何调整"
-      />
-    </label>
-
-    <footer class="active-plan-decision-actions">
-      <button class="active-ask-ignore" type="button" @click="cancel">
-        <span>忽略</span>
-        <kbd>ESC</kbd>
-      </button>
       <button
-        class="active-ask-submit"
         type="button"
-        :disabled="!canSubmit"
-        @click="submit"
+        class="active-plan-decision-option pressable"
+        :data-active="!comment.trim()"
+        @click="comment = ''"
       >
-        提交
-        <span aria-hidden="true">↩</span>
+        <span class="active-ask-number">1</span>
+        <span class="active-plan-decision-copy">
+          <strong>是，实施此计划</strong>
+        </span>
       </button>
-    </footer>
-  </section>
+
+      <label
+        class="active-plan-decision-option active-plan-decision-freeform"
+        :data-active="Boolean(comment.trim())"
+      >
+        <span class="active-ask-number">2</span>
+        <textarea
+          v-model="comment"
+          rows="1"
+          placeholder="否，请告诉emperor如何调整"
+        />
+      </label>
+
+      <footer class="active-plan-decision-actions">
+        <button
+          class="active-ask-ignore pressable"
+          type="button"
+          @click="cancel"
+        >
+          <span>忽略</span>
+          <kbd>ESC</kbd>
+        </button>
+        <button
+          class="active-ask-submit pressable"
+          type="button"
+          :disabled="!canSubmit"
+          @click="submit"
+        >
+          提交
+          <span aria-hidden="true">↩</span>
+        </button>
+      </footer>
+    </section>
+  </AppTransition>
 </template>
