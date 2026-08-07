@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Archive,
@@ -24,6 +24,7 @@ import { core } from '../../api/http'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
+import { useSpring } from '../../composables/useSpring'
 import {
   buildSidebarGroups,
   completeManualOrder,
@@ -86,6 +87,68 @@ const searchResults = computed(() =>
 const schedulerCount = computed(
   () => ctx.boot.value?.scheduler?.jobs?.length || 0,
 )
+
+// ── Active-session pill (layoutId-style) ──────────────────────────────────
+// 单个绝对定位 pill,弹簧平移到当前 active 行的 offsetTop;行本身只保留
+// active 语义(class/aria),不再各自切换背景。
+const sessionListEl = ref<HTMLElement | null>(null)
+const pillVisible = ref(false)
+const pillTarget = ref(0)
+const pillLeft = ref(0)
+const pillWidth = ref(0)
+const pillHeight = ref(0)
+const sprungPillY = useSpring(pillTarget, 'snappy')
+// 首帧吸附:挂载/重新出现时弹簧从旧值出发会扫过整列 —— 先直出目标值,
+// 等弹簧在后台追平(|Δ| < 0.5px)后,再把渲染权交还给弹簧。
+const pillSeeded = ref(Math.abs(sprungPillY.value - pillTarget.value) < 0.5)
+const pillY = computed(() =>
+  pillSeeded.value ? sprungPillY.value : pillTarget.value,
+)
+const pillStyle = computed(() => ({
+  transform: `translateY(${pillY.value}px)`,
+  left: `${pillLeft.value}px`,
+  width: `${pillWidth.value}px`,
+  height: `${pillHeight.value}px`,
+}))
+
+watch(sprungPillY, (v) => {
+  if (!pillSeeded.value && Math.abs(v - pillTarget.value) < 0.5) {
+    pillSeeded.value = true
+  }
+})
+
+function updateActivePill() {
+  const list = sessionListEl.value
+  const row = list?.querySelector<HTMLElement>('.session-row.active') ?? null
+  if (!list || !row || sidebarCollapsed.value) {
+    pillVisible.value = false
+    pillSeeded.value = false
+    return
+  }
+  pillTarget.value = row.offsetTop
+  pillLeft.value = row.offsetLeft
+  pillWidth.value = row.offsetWidth
+  pillHeight.value = row.offsetHeight
+  pillVisible.value = true
+}
+
+watch(
+  [
+    activeId,
+    grouped,
+    loading,
+    sidebarCollapsed,
+    projectsSectionCollapsed,
+    chatsSectionCollapsed,
+  ],
+  () => {
+    void nextTick(updateActivePill)
+  },
+)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateActivePill)
+})
 
 function controlPendingTag(session: SessionInfo) {
   return sessionControlPendingTag(session)
@@ -348,17 +411,19 @@ function relativeDate(value?: string) {
 }
 
 onMounted(async () => {
+  window.addEventListener('resize', updateActivePill)
   await Promise.all([
     loadSidebarState(),
     sessions.value.length ? Promise.resolve() : load(),
   ])
   if (activeId.value) emit('activate', activeId.value)
+  void nextTick(updateActivePill)
 })
 </script>
 
 <template>
   <aside
-    class="session-sidebar codex-sidebar"
+    class="session-sidebar codex-sidebar material-2"
     :class="{ collapsed: sidebarCollapsed }"
     aria-label="Emperor Agent sidebar"
     @mouseleave="closeMenus"
@@ -398,7 +463,13 @@ onMounted(async () => {
 
     <div v-if="loading" class="session-sidebar-empty"><p>Loading...</p></div>
 
-    <div v-else class="session-list codex-session-list">
+    <div v-else ref="sessionListEl" class="session-list codex-session-list">
+      <span
+        v-if="pillVisible"
+        class="session-active-pill"
+        aria-hidden="true"
+        :style="pillStyle"
+      />
       <section
         v-if="sidebarState.section_order.includes('projects')"
         class="sidebar-section"

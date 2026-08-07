@@ -8,13 +8,19 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.codex-sidebar {
-  background: rgb(var(--bg-elevated));
-}
-
 .codex-sidebar.collapsed {
   width: 52px;
   min-width: 52px;
+}
+
+/* Apple-fluid surface:半透明结构材质(.material-2 类提供 blur/合成层),
+   硬边框让位给发丝内阴影;覆盖 shell-base/layout 的实心背景与 border-r。 */
+.session-sidebar.codex-sidebar {
+  border-right-color: transparent;
+  background: rgb(var(--material-2-bg) / var(--material-2-alpha));
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 0 0.5px rgb(var(--border) / 0.45);
 }
 
 .sidebar-window-controls {
@@ -106,7 +112,38 @@
 }
 
 .codex-session-list {
+  position: relative;
   padding: 0 8px 8px;
+}
+
+/* ── Active-session pill(layoutId 式单例指示器)──────────────────────────
+   绝对定位单元素,JS 弹簧驱动 translateY;行通过 position:relative 叠于其
+   上(背景透明),pill 只负责 active 背景 + 发丝描边。 */
+.session-active-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-md);
+  background: rgb(var(--bg-inset));
+  box-shadow: inset 0 0 0 0.5px rgb(var(--border) / 0.6);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* 行:hover 背景快速淡入(仅 background,不动 layout);active 视觉移交给
+   pill,行只保留前景色语义。 */
+.session-row {
+  position: relative;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.session-row:hover {
+  background: rgb(var(--bg-inset) / 0.6);
+}
+
+.session-row.active {
+  border-color: transparent;
+  background: transparent;
 }
 
 .sidebar-section {
