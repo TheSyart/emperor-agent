@@ -1566,7 +1566,7 @@ function sourceStatus(source: {
   flex: 0 0 auto;
   border: 0;
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
   white-space: nowrap;
@@ -1678,7 +1678,7 @@ function sourceStatus(source: {
   overflow: hidden;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-xs);
-  padding: 2px 6px;
+  padding: 2px var(--space-2);
   color: rgb(var(--ok));
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
@@ -1797,7 +1797,7 @@ function sourceStatus(source: {
 }
 
 .detail-head {
-  padding: 0 0 10px;
+  padding: 0 0 var(--space-3);
 }
 
 .detail-head h3 {
@@ -1909,7 +1909,7 @@ function sourceStatus(source: {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg));
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg));
 }
 
@@ -1949,7 +1949,7 @@ function sourceStatus(source: {
 .event-capabilities span {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-xs);
-  padding: 2px 5px;
+  padding: 2px var(--space-1);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-2xs);
 }
@@ -1998,7 +1998,7 @@ function sourceStatus(source: {
   align-items: center;
   gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
-  padding: 0 8px 0 11px;
+  padding: 0 var(--space-2) 0 11px;
 }
 
 .async-runs code {
@@ -2026,7 +2026,7 @@ function sourceStatus(source: {
   justify-content: flex-end;
   gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
-  padding: 0 8px;
+  padding: 0 var(--space-2);
 }
 
 .audit-detail {
