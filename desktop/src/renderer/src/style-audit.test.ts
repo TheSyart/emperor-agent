@@ -72,6 +72,28 @@ describe('style audit: color convergence', () => {
     }
     expect(offenders, offenders.join('\n')).toEqual([])
   })
+
+  it('no var(--fg-muted/--fg-subtle) consumption (use fg / text-secondary / text-tertiary)', () => {
+    // grok 式文本层级已收敛:次级/三级文字一律 rgb(var(--fg) / var(--text-*)),
+    // 实体 --fg-muted/--fg-subtle 已删除,禁止回流。
+    const dead = /var\(--fg-(?:muted|subtle)\b/g
+    const offenders: string[] = []
+    for (const rel of SCANNED) {
+      const hits = read(rel).match(dead)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('no legacy text-fg-muted / text-fg-subtle Tailwind classes (use text-secondary/text-tertiary)', () => {
+    const deadClass = /\b(?:text|bg|border)-fg-(?:muted|subtle)\b/g
+    const offenders: string[] = []
+    for (const rel of SCANNED) {
+      const hits = read(rel).match(deadClass)
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
 })
 
 describe('style audit: bare-value convergence (vue scoped)', () => {
@@ -268,9 +290,10 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
   // prefers-reduced-motion 块(JS 弹簧由 useReducedMotion 门控,属另一条路径)。
   it('a11y.css centralizes all three preference signals', () => {
     const a11y = read('styles/a11y.css')
-    const motion = /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(
-      a11y,
-    )?.[1]
+    const motion =
+      /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(
+        a11y,
+      )?.[1]
     expect(motion).toBeTruthy()
     expect(motion).toContain('--duration-fast: 1ms')
     expect(motion).toContain('animation-duration: 1ms !important')
@@ -278,17 +301,17 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     // 覆盖选择器必须与主题表同特异性(:root[data-theme]),否则主题声明按
     // 特异性胜出、覆盖静默失效(曾真实发生,Playwright 断言捕获)。
     expect(motion).toMatch(/:root\[data-theme='dark'\]/)
-    const transparency = /@media \(prefers-reduced-transparency: reduce\) \{\n([\s\S]*?)\n\}/.exec(
-      a11y,
-    )?.[1]
+    const transparency =
+      /@media \(prefers-reduced-transparency: reduce\) \{\n([\s\S]*?)\n\}/.exec(
+        a11y,
+      )?.[1]
     expect(transparency).toBeTruthy()
     expect(transparency).toContain('--material-1-alpha: 0.97')
     expect(transparency).toContain('--material-1-blur: 0px')
     expect(transparency).toContain('--glass-blur: 0px')
     expect(transparency).toMatch(/:root\[data-theme='dark'\]/)
-    const contrast = /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(
-      a11y,
-    )?.[1]
+    const contrast =
+      /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(a11y)?.[1]
     expect(contrast).toBeTruthy()
     expect(contrast).toContain('--border: 88 88 98')
   })
@@ -354,4 +377,3 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 })
-

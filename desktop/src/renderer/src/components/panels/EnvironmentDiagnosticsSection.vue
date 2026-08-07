@@ -721,7 +721,7 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-head > div:first-child span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -761,7 +761,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-error span,
 .environment-plan-warnings span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -778,7 +778,7 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-progress-head span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -801,7 +801,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-empty {
   grid-template-columns: 20px minmax(0, 1fr);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -819,7 +819,7 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-tool-group-head span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -835,7 +835,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-tool-row small {
   overflow: hidden;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -888,7 +888,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-skill-row span {
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -922,7 +922,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-job-tabs code,
 .environment-job-step code,
 .environment-job-error code {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -940,7 +940,7 @@ function logDetails(details: Record<string, unknown>): string {
   min-height: 40px;
   cursor: pointer;
   padding: var(--space-2) var(--space-3);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   list-style: none;
 }
 
@@ -967,13 +967,13 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-log-list > div code {
   grid-column: 2;
   overflow-wrap: anywhere;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   white-space: normal;
 }
 
 .environment-log-list p {
   padding: var(--space-3);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1012,7 +1012,7 @@ function logDetails(details: Record<string, unknown>): string {
 
 .environment-confirm-modal header p {
   margin-top: 2px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1052,13 +1052,13 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-plan-steps dt {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
 .environment-plan-steps dd {
   overflow: hidden;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1077,7 +1077,7 @@ function logDetails(details: Record<string, unknown>): string {
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 

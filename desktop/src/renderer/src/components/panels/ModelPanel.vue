@@ -980,7 +980,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   justify-content: center;
   min-height: 220px;
   gap: var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
@@ -1005,7 +1005,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .model-config-note span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1033,7 +1033,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .policy-head p {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1053,7 +1053,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .policy-field > span,
 .trigger-field legend {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   font-weight: 550;
 }
@@ -1073,7 +1073,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .policy-field small,
 .pricing-note {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   line-height: 1.5;
 }
@@ -1166,7 +1166,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .dialog-head p {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1178,7 +1178,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   cursor: pointer;
 }
 
@@ -1221,7 +1221,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .form-section-title small,
 .field small {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1239,7 +1239,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .field > label,
 .field > span:first-child,
 .field-label {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   font-weight: 550;
 }
@@ -1282,7 +1282,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .search-input-wrap {
   padding-left: var(--space-3);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .search-input-wrap input {
@@ -1330,7 +1330,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .provider-results code,
 .no-results {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1354,7 +1354,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   cursor: pointer;
 }
 
@@ -1387,7 +1387,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   height: 29px;
   border: 0;
   background: transparent;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   cursor: pointer;
 }
 
@@ -1395,7 +1395,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1458,7 +1458,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .pricing-toggle {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -1478,7 +1478,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .capability-grid small {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1503,7 +1503,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .test-result {
   overflow: hidden;
   max-width: 360px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1566,5 +1566,4 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
     flex-direction: column;
   }
 }
-
 </style>

@@ -37,7 +37,7 @@ body,
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--fg-subtle) / 0.78);
+  background: rgb(var(--fg) / calc(var(--text-tertiary) * 0.78));
   background-clip: content-box;
 }
 
@@ -113,7 +113,7 @@ select:focus-visible {
   height: 50px;
   padding: 0 var(--space-3) 0 var(--space-3);
   border-bottom: 1px solid rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   letter-spacing: 0;
   text-transform: none;
 }
@@ -150,7 +150,7 @@ select:focus-visible {
   min-height: 32px;
   border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
   text-align: left;
 }
@@ -174,7 +174,7 @@ select:focus-visible {
   gap: var(--space-2);
   border-radius: var(--radius-md);
   padding: 0 var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   font-weight: 600;
   transition:
@@ -191,7 +191,7 @@ select:focus-visible {
 .session-del-btn {
   display: grid;
   place-items: center;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   transition:
     background 140ms ease,
     color 140ms ease;
@@ -227,7 +227,7 @@ select:focus-visible {
   gap: var(--space-2);
   min-height: 28px;
   padding: var(--space-2) var(--space-2) var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   font-weight: 650;
   text-transform: uppercase;
@@ -244,7 +244,7 @@ select:focus-visible {
   gap: var(--space-2);
   border-radius: var(--radius-md);
   padding: var(--space-1) var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .project-row:hover {
@@ -257,7 +257,7 @@ select:focus-visible {
   height: 22px;
   flex: 0 0 auto;
   place-items: center;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .project-meta {
@@ -281,7 +281,7 @@ select:focus-visible {
 
 .project-meta small {
   margin-top: 1px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -292,14 +292,14 @@ select:focus-visible {
   place-items: center;
   border-radius: 999px;
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   font-style: normal;
 }
 
 .session-empty-row {
   padding: var(--space-2) var(--space-3);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -311,7 +311,7 @@ select:focus-visible {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   cursor: pointer;
   transition:
     background 140ms ease,
@@ -384,7 +384,7 @@ select:focus-visible {
   display: block;
   overflow: hidden;
   margin-top: 2px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -395,7 +395,7 @@ select:focus-visible {
   width: 5px;
   height: 5px;
   border-radius: 999px;
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .session-row.active::before {
@@ -408,4 +408,3 @@ select:focus-visible {
   padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-sm);
 }
-

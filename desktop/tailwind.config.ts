@@ -10,8 +10,9 @@ export default {
         'bg-elevated': 'rgb(var(--bg-elevated) / <alpha-value>)',
         'bg-inset': 'rgb(var(--bg-inset) / <alpha-value>)',
         fg: 'rgb(var(--fg) / <alpha-value>)',
-        'fg-muted': 'rgb(var(--fg-muted) / <alpha-value>)',
-        'fg-subtle': 'rgb(var(--fg-subtle) / <alpha-value>)',
+        /* grok 式文本层级:fg 叠 text-* alpha(玻璃上透出环境色) */
+        secondary: 'rgb(var(--fg) / var(--text-secondary))',
+        tertiary: 'rgb(var(--fg) / var(--text-tertiary))',
         border: 'rgb(var(--border) / <alpha-value>)',
         'border-strong': 'rgb(var(--border-strong) / <alpha-value>)',
         accent: 'rgb(var(--accent) / <alpha-value>)',

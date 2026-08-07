@@ -59,7 +59,7 @@ function dismiss(): void {
   gap: var(--space-1);
   border-radius: var(--radius-md);
   padding: 0 var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   font-weight: 620;
 }
@@ -86,7 +86,7 @@ function dismiss(): void {
   border-radius: 999px;
   background: rgb(var(--bg-elevated));
   box-shadow: 0 3px 10px rgb(var(--shadow-color) / 0.18);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   opacity: 0;
   pointer-events: none;
   transform: scale(0.82);
@@ -116,7 +116,7 @@ function dismiss(): void {
 
 .composer-lifecycle-dismiss[aria-disabled='true'] {
   cursor: not-allowed;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .composer-lifecycle-indicator:hover
@@ -125,5 +125,4 @@ function dismiss(): void {
   .composer-lifecycle-dismiss[aria-disabled='true'] {
   opacity: 0.58;
 }
-
 </style>

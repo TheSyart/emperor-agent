@@ -75,7 +75,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: rgb(var(--fg-subtle));
+    color: rgb(var(--fg) / var(--text-tertiary));
   }
 
   textarea {

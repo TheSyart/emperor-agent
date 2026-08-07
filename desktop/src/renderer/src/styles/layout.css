@@ -26,7 +26,7 @@
 
 .rail-status {
   @apply mb-2 grid size-9 shrink-0 place-items-center rounded-md;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .rail-status .status-icon.error {
@@ -39,7 +39,7 @@
 
 .rail-action {
   @apply grid size-9 shrink-0 place-items-center rounded-md transition;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .rail-action:hover {
@@ -58,7 +58,7 @@
 
 .rail-icon-button {
   @apply grid size-9 place-items-center rounded-md transition;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .rail-icon-button:hover {
@@ -75,12 +75,12 @@
 
 .session-sidebar-head {
   @apply shrink-0 px-3 py-3 text-[11px] font-semibold uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .session-sidebar-empty {
   @apply flex flex-1 items-center justify-center px-4 text-center text-xs;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 /* ── Main view ──────────────────────────────────────────────────────────── */
@@ -128,14 +128,14 @@
 .status-pill {
   @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-inset));
 }
 
 .mini-code {
   @apply rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 /* ── Dots ───────────────────────────────────────────────────────────────── */
@@ -197,7 +197,7 @@
 }
 
 .tool-button.ink:hover {
-  background: rgb(var(--fg-muted));
+  background: rgb(var(--fg) / var(--text-secondary));
 }
 
 .tool-button.danger {
@@ -227,7 +227,7 @@
 .icon-button {
   @apply grid size-9 shrink-0 place-items-center rounded-md border transition;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .icon-button:hover {

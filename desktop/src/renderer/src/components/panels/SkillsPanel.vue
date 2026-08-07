@@ -608,7 +608,7 @@ function missingCount() {
 
 .skill-link-modal header p,
 .skill-link-modal label > span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -644,7 +644,7 @@ function missingCount() {
   max-width: 520px;
   margin-top: 2px;
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -664,7 +664,7 @@ function missingCount() {
 }
 
 .skill-install-summary span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -706,7 +706,7 @@ function missingCount() {
 
 .skill-candidate-list small {
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -729,7 +729,7 @@ function missingCount() {
 
 .skill-risk-block.blocked {
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .skill-risk-block > div {
@@ -745,7 +745,7 @@ function missingCount() {
 
 .skill-risk-block span {
   overflow-wrap: anywhere;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--font-size-2xs);
 }
@@ -758,7 +758,7 @@ function missingCount() {
 .skill-file-list summary {
   cursor: pointer;
   padding: var(--space-2) 10px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -767,7 +767,7 @@ function missingCount() {
   overflow-wrap: anywhere;
   border-top: 1px solid rgb(var(--border));
   padding: var(--space-1) 10px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 

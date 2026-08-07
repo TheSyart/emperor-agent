@@ -42,7 +42,7 @@
 }
 
 .team-section-head p {
-  @apply mt-1 text-xs text-fg-muted;
+  @apply mt-1 text-xs text-secondary;
 }
 
 .team-member-list {
@@ -75,12 +75,12 @@
 }
 
 .team-member-row small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-secondary;
 }
 
 .team-member-row em,
 .team-status-pill {
-  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
+  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-secondary;
 }
 
 .team-status-pill.working {
@@ -159,7 +159,7 @@
 }
 
 .team-message-top span {
-  @apply shrink-0 font-mono text-[10px] text-fg-muted;
+  @apply shrink-0 font-mono text-[10px] text-secondary;
 }
 
 .team-message p {
@@ -167,7 +167,7 @@
 }
 
 .team-empty {
-  @apply grid h-full min-h-[16rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
+  @apply grid h-full min-h-[16rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-secondary;
 }
 
 .team-empty img {
@@ -180,7 +180,7 @@
 }
 
 .team-detail-body.muted {
-  @apply justify-center text-center text-fg-muted;
+  @apply justify-center text-center text-secondary;
 }
 
 .team-stamp {
@@ -197,7 +197,7 @@
 }
 
 .team-stamp span {
-  @apply mt-1 block font-mono text-xs text-fg-muted;
+  @apply mt-1 block font-mono text-xs text-secondary;
 }
 
 .team-tool-cloud {
@@ -205,7 +205,7 @@
 }
 
 .team-tool-cloud span {
-  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/55 bg-bg/70 px-2.5 py-1 font-mono text-[10px] text-fg-muted;
+  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/55 bg-bg/70 px-2.5 py-1 font-mono text-[10px] text-secondary;
 }
 
 .team-tool-cloud img {
@@ -252,7 +252,7 @@
 }
 
 .scheduler-summary span {
-  @apply block font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
+  @apply block font-mono text-[10px] uppercase tracking-[0.14em] text-secondary;
 }
 
 .scheduler-summary strong {
@@ -284,11 +284,11 @@
 }
 
 .scheduler-job-row small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-secondary;
 }
 
 .scheduler-job-row em {
-  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
+  @apply shrink-0 rounded-full border border-border/60 bg-bg px-2 py-1 text-[10px] not-italic text-secondary;
 }
 
 .scheduler-job-icon {
@@ -309,7 +309,7 @@
 }
 
 .scheduler-check {
-  @apply inline-flex items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/55 px-3 py-2 text-xs text-fg-muted;
+  @apply inline-flex items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/55 px-3 py-2 text-xs text-secondary;
 }
 
 .scheduler-check input {
@@ -354,7 +354,7 @@
 }
 
 .scheduler-empty {
-  @apply grid min-h-[10rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-fg-muted;
+  @apply grid min-h-[10rem] place-items-center rounded-[var(--radius-xl)] border border-dashed border-border/70 bg-bg-inset/35 text-sm text-secondary;
 }
 
 .scheduler-detail-body {
@@ -362,7 +362,7 @@
 }
 
 .scheduler-detail-body.muted {
-  @apply justify-center text-center text-fg-muted;
+  @apply justify-center text-center text-secondary;
 }
 
 .scheduler-meta-grid {
@@ -374,7 +374,7 @@
 }
 
 .scheduler-meta-grid b {
-  @apply mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
+  @apply mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-secondary;
 }
 
 .scheduler-action-grid {
@@ -390,7 +390,7 @@
 }
 
 .model-form label {
-  @apply flex flex-col gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-fg-muted;
+  @apply flex flex-col gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-secondary;
 }
 
 .model-form .span-2,
@@ -416,7 +416,7 @@
 }
 
 .model-form-section-head span {
-  @apply text-xs text-fg-muted;
+  @apply text-xs text-secondary;
 }
 
 .model-form-grid {
@@ -436,7 +436,7 @@
 }
 
 .model-form-v2 .form-label {
-  @apply text-xs font-semibold uppercase tracking-[0.12em] text-fg-muted;
+  @apply text-xs font-semibold uppercase tracking-[0.12em] text-secondary;
 }
 
 .model-form-v2 .form-input,
@@ -461,11 +461,11 @@
 }
 
 .provider-meta-row {
-  @apply flex min-h-5 flex-wrap items-center gap-2 text-xs text-fg-muted;
+  @apply flex min-h-5 flex-wrap items-center gap-2 text-xs text-secondary;
 }
 
 .provider-meta-row a {
-  @apply rounded-md border border-border/60 bg-bg-inset/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted transition hover:border-accent/40 hover:text-accent;
+  @apply rounded-md border border-border/60 bg-bg-inset/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-secondary transition hover:border-accent/40 hover:text-accent;
 }
 
 .model-discovery-message {
@@ -498,7 +498,7 @@
 }
 
 .advanced-toggle small {
-  @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-fg-muted;
+  @apply font-mono text-[10px] font-normal uppercase tracking-[0.12em] text-secondary;
 }
 
 .advanced-grid {
@@ -540,7 +540,7 @@
 }
 
 .entry-list-title small {
-  @apply font-mono text-[10px] uppercase tracking-[0.12em] text-fg-muted;
+  @apply font-mono text-[10px] uppercase tracking-[0.12em] text-secondary;
 }
 
 .tool-button.compact {
@@ -602,7 +602,7 @@
 }
 
 .entry-activate-btn {
-  @apply shrink-0 rounded-full border border-border/70 bg-bg px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-fg-muted opacity-0 transition hover:border-accent/40 hover:text-accent;
+  @apply shrink-0 rounded-full border border-border/70 bg-bg px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wide text-secondary opacity-0 transition hover:border-accent/40 hover:text-accent;
 }
 
 /* hover 任意条目时露出激活按钮；当前编辑也露出，方便快速切 */
@@ -624,7 +624,7 @@
 }
 
 .entry-sub {
-  @apply mt-1 truncate font-mono text-[11px] text-fg-muted;
+  @apply mt-1 truncate font-mono text-[11px] text-secondary;
 }
 
 .entry-sub code {
@@ -691,7 +691,7 @@
 }
 
 .item-desc {
-  @apply mt-1 line-clamp-2 text-xs leading-5 text-fg-muted;
+  @apply mt-1 line-clamp-2 text-xs leading-5 text-secondary;
 }
 
 .badge-row {
@@ -699,7 +699,7 @@
 }
 
 .badge {
-  @apply inline-flex items-center rounded-full border border-border/70 bg-bg-inset px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-fg-muted;
+  @apply inline-flex items-center rounded-full border border-border/70 bg-bg-inset px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-secondary;
 }
 
 .badge.green {
@@ -723,7 +723,7 @@
 }
 
 .filter-badge {
-  @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] font-bold text-fg-muted;
+  @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] font-bold text-secondary;
 }
 
 .editor {
@@ -731,7 +731,7 @@
 }
 
 .editor-title {
-  @apply shrink-0 border-b border-border/70 bg-bg-inset/55 px-4 py-3 font-mono text-xs font-bold text-fg-muted;
+  @apply shrink-0 border-b border-border/70 bg-bg-inset/55 px-4 py-3 font-mono text-xs font-bold text-secondary;
 }
 
 .editor textarea {
@@ -755,7 +755,7 @@
 }
 
 .skill-editor-file {
-  @apply rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] text-fg-muted;
+  @apply rounded-full bg-bg-inset px-2 py-0.5 font-mono text-[10px] text-secondary;
 }
 
 .skill-editor-badges {
@@ -763,7 +763,7 @@
 }
 
 .empty-state {
-  @apply grid min-h-48 place-items-center rounded-[1.5rem] border border-dashed border-border/80 bg-bg/50 p-6 text-center text-sm leading-7 text-fg-muted;
+  @apply grid min-h-48 place-items-center rounded-[1.5rem] border border-dashed border-border/80 bg-bg/50 p-6 text-center text-sm leading-7 text-secondary;
 }
 
 .illustrated-empty {
@@ -796,7 +796,7 @@
 }
 
 .empty-note {
-  @apply rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/50 p-3 text-xs leading-6 text-fg-muted;
+  @apply rounded-[var(--radius-xl)] border border-border/60 bg-bg-inset/50 p-3 text-xs leading-6 text-secondary;
 }
 
 .empty-note.compact {
@@ -860,7 +860,7 @@
 }
 
 .usage-row span {
-  @apply text-[11px] text-fg-muted;
+  @apply text-[11px] text-secondary;
 }
 
 .usage-number {
@@ -910,7 +910,7 @@
 }
 
 .tokens-pill {
-  @apply rounded-full px-3 py-1 text-xs font-semibold text-fg-muted transition;
+  @apply rounded-full px-3 py-1 text-xs font-semibold text-secondary transition;
 }
 
 .tokens-pill[data-active='true'] {
@@ -950,7 +950,7 @@
 }
 
 .stat-card-label {
-  @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-fg-muted;
+  @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-secondary;
 }
 
 .stat-card-value {
@@ -976,7 +976,7 @@
 }
 
 .stat-card-hint {
-  @apply mt-1 block text-[11px] text-fg-muted;
+  @apply mt-1 block text-[11px] text-secondary;
 }
 
 .activity-heatmap-card {
@@ -988,7 +988,7 @@
 }
 
 .heatmap-legend {
-  @apply inline-flex items-center gap-1 text-[11px] text-fg-muted;
+  @apply inline-flex items-center gap-1 text-[11px] text-secondary;
 }
 
 .heatmap-legend em {
@@ -1018,7 +1018,7 @@
 }
 
 .heatmap-months {
-  @apply mb-1 grid pl-7 text-[10px] text-fg-muted;
+  @apply mb-1 grid pl-7 text-[10px] text-secondary;
   column-gap: 0;
 }
 
@@ -1031,7 +1031,7 @@
 }
 
 .heatmap-weekdays {
-  @apply grid w-6 text-[10px] text-fg-muted;
+  @apply grid w-6 text-[10px] text-secondary;
   grid-template-rows: repeat(7, 14px);
   row-gap: 2px;
 }
@@ -1099,7 +1099,7 @@
 }
 
 .bars-head p {
-  @apply mt-1 text-[11px] text-fg-muted;
+  @apply mt-1 text-[11px] text-secondary;
 }
 
 .bars-legend {
@@ -1193,7 +1193,7 @@
 }
 
 .bars-axis {
-  @apply relative mt-2 h-4 text-[10px] text-fg-muted;
+  @apply relative mt-2 h-4 text-[10px] text-secondary;
 }
 
 .bars-axis span {
@@ -1215,7 +1215,7 @@
 }
 
 .list-head small {
-  @apply text-[11px] text-fg-muted;
+  @apply text-[11px] text-secondary;
 }
 
 .model-list {
@@ -1224,7 +1224,7 @@
 }
 
 .model-list th {
-  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-muted;
+  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary;
 }
 
 .model-list th.num,
@@ -1241,7 +1241,7 @@
 }
 
 .model-list td small {
-  @apply block text-[11px] text-fg-muted;
+  @apply block text-[11px] text-secondary;
 }
 
 .row-model {
@@ -1261,7 +1261,7 @@
 }
 
 .col-share em {
-  @apply mt-1 block text-right text-[11px] not-italic font-mono text-fg-muted;
+  @apply mt-1 block text-right text-[11px] not-italic font-mono text-secondary;
 }
 
 .model-list-bar {
@@ -1332,7 +1332,7 @@
 }
 
 .cache-section-head p {
-  @apply mt-1 text-[11px] text-fg-muted;
+  @apply mt-1 text-[11px] text-secondary;
 }
 
 .cache-section-head span {
@@ -1352,7 +1352,7 @@
 }
 
 .cache-legend span {
-  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-fg-muted;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-secondary;
 }
 
 .cache-legend i {
@@ -1380,7 +1380,7 @@
 }
 
 .token-composition-legend span {
-  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-fg-muted;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-bg/70 px-2.5 py-1 text-[11px] text-secondary;
 }
 
 .token-composition-legend i {
@@ -1405,7 +1405,7 @@
 }
 
 .tokens-quick-grid em {
-  @apply block truncate text-[10px] not-italic uppercase tracking-[0.14em] text-fg-muted;
+  @apply block truncate text-[10px] not-italic uppercase tracking-[0.14em] text-secondary;
 }
 
 .tokens-quick-grid strong {
@@ -1443,7 +1443,7 @@
 }
 
 .cache-trend-axis {
-  @apply mt-2 flex min-w-[36rem] justify-between px-3 font-mono text-[10px] text-fg-muted;
+  @apply mt-2 flex min-w-[36rem] justify-between px-3 font-mono text-[10px] text-secondary;
 }
 
 .cache-split-grid {
@@ -1468,7 +1468,7 @@
 }
 
 .cache-rank-row small {
-  @apply block truncate text-[11px] text-fg-muted;
+  @apply block truncate text-[11px] text-secondary;
 }
 
 .cache-rank-row em {
@@ -1493,7 +1493,7 @@
 }
 
 .cache-table th {
-  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-muted;
+  @apply border-b border-border/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary;
 }
 
 .cache-table td {
@@ -1574,10 +1574,10 @@
   @apply truncate font-mono text-xs font-bold text-fg;
 }
 .attach-chip .attach-sub {
-  @apply truncate font-mono text-[10px] text-fg-muted;
+  @apply truncate font-mono text-[10px] text-secondary;
 }
 .attach-chip .attach-remove {
-  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-fg-muted transition;
+  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-secondary transition;
 }
 .attach-chip .attach-remove:hover {
   @apply bg-accent/15 text-accent;
@@ -1664,7 +1664,7 @@
 
 .attachment-preview-caption span {
   flex-shrink: 0;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
 }
@@ -1689,10 +1689,10 @@
   @apply flex flex-col gap-0.5;
 }
 .test-label > span {
-  @apply font-mono text-xs font-bold uppercase tracking-wide text-fg-muted;
+  @apply font-mono text-xs font-bold uppercase tracking-wide text-secondary;
 }
 .test-label .hint {
-  @apply text-xs text-fg-muted;
+  @apply text-xs text-secondary;
 }
 .test-actions {
   @apply flex flex-wrap gap-2;
@@ -1730,7 +1730,7 @@
   @apply text-warn;
 }
 .test-result .meta {
-  @apply text-fg-muted;
+  @apply text-secondary;
 }
 .test-result .meta.jade {
   @apply text-ok;
@@ -1764,7 +1764,7 @@
 }
 
 .tool-card-desc {
-  @apply mt-0.5 text-xs leading-5 text-fg-muted;
+  @apply mt-0.5 text-xs leading-5 text-secondary;
 }
 
 .tool-badge-row {
@@ -1776,7 +1776,7 @@
 }
 
 .tool-param-toggle {
-  @apply flex items-center gap-1 text-xs font-medium text-fg-muted transition-colors hover:text-fg;
+  @apply flex items-center gap-1 text-xs font-medium text-secondary transition-colors hover:text-fg;
 }
 
 .tool-param-caret {
@@ -1792,7 +1792,7 @@
 }
 
 .tool-param-chip {
-  @apply inline-flex rounded-md bg-bg-inset/80 px-2 py-0.5 text-[11px] text-fg-muted ring-1 ring-border/50;
+  @apply inline-flex rounded-md bg-bg-inset/80 px-2 py-0.5 text-[11px] text-secondary ring-1 ring-border/50;
 }
 
 .tool-empty {
@@ -1828,7 +1828,7 @@
 }
 
 .skill-card-desc {
-  @apply mt-0.5 text-xs leading-5 text-fg-muted;
+  @apply mt-0.5 text-xs leading-5 text-secondary;
 }
 
 .skill-badge-row {
@@ -1836,11 +1836,11 @@
 }
 
 .skill-card-path {
-  @apply truncate font-mono text-[10px] text-fg-muted/60;
+  @apply truncate font-mono text-[10px] text-secondary/60;
 }
 
 .skill-delete {
-  @apply absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-sm text-fg-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-accent;
+  @apply absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full text-sm text-secondary opacity-0 transition-opacity hover:bg-danger/10 hover:text-accent;
 }
 
 .skill-card:hover .skill-delete {
@@ -1868,7 +1868,7 @@
 }
 
 .memory-tab {
-  @apply rounded-full px-3.5 py-1.5 text-xs font-semibold text-fg-muted transition;
+  @apply rounded-full px-3.5 py-1.5 text-xs font-semibold text-secondary transition;
 }
 
 .memory-tab[data-active='true'] {
@@ -1893,7 +1893,7 @@
 
 .memory-stat-card span,
 .memory-stat-card small {
-  @apply block truncate text-[11px] font-semibold text-fg-muted;
+  @apply block truncate text-[11px] font-semibold text-secondary;
 }
 
 .memory-stat-card strong {
@@ -1910,7 +1910,7 @@
 
 .memory-context-strip span,
 .memory-context-strip small {
-  @apply block truncate text-[11px] font-semibold text-fg-muted;
+  @apply block truncate text-[11px] font-semibold text-secondary;
 }
 
 .memory-context-strip strong {
@@ -1962,7 +1962,7 @@
 }
 
 .capability-card-icon {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-lg)] border border-border/60 bg-bg-inset/60 text-fg-muted;
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-lg)] border border-border/60 bg-bg-inset/60 text-secondary;
 }
 
 .capability-card[data-tone='cyan'] .capability-card-icon {
@@ -1974,7 +1974,7 @@
 }
 
 .capability-card[data-tone='slate'] .capability-card-icon {
-  @apply border-border/70 bg-bg-inset text-fg-muted;
+  @apply border-border/70 bg-bg-inset text-secondary;
 }
 
 .capability-card-name {
@@ -1982,7 +1982,7 @@
 }
 
 .capability-card-desc {
-  @apply mt-1 overflow-hidden text-xs leading-5 text-fg-muted;
+  @apply mt-1 overflow-hidden text-xs leading-5 text-secondary;
   display: -webkit-box;
   height: 5rem;
   -webkit-box-orient: vertical;
@@ -1995,7 +1995,7 @@
 }
 
 .capability-card-path {
-  @apply mt-2 truncate font-mono text-[10px] text-fg-muted/70;
+  @apply mt-2 truncate font-mono text-[10px] text-secondary/70;
 }
 
 .capability-detail-drawer {
@@ -2038,7 +2038,7 @@
 
 .capability-drawer-head p,
 .scheduler-drawer-head p {
-  @apply mt-1 truncate font-mono text-[11px] text-fg-muted;
+  @apply mt-1 truncate font-mono text-[11px] text-secondary;
 }
 
 .capability-drawer-badges {
@@ -2062,7 +2062,7 @@
 }
 
 .capability-schema {
-  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-bg-inset/35 p-4 font-mono text-[11px] leading-6 text-fg-muted;
+  @apply min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-bg-inset/35 p-4 font-mono text-[11px] leading-6 text-secondary;
 }
 
 .tool-param-list.expanded {
@@ -2114,7 +2114,7 @@
 }
 
 .mcp-advanced-config summary em {
-  @apply not-italic text-xs font-normal text-fg-muted;
+  @apply not-italic text-xs font-normal text-secondary;
 }
 
 .mcp-layout {
@@ -2157,7 +2157,7 @@
 }
 
 .scheduler-overview span {
-  @apply inline-flex min-h-9 items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/65 px-3 text-xs text-fg-muted;
+  @apply inline-flex min-h-9 items-center gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-bg/65 px-3 text-xs text-secondary;
 }
 
 .scheduler-overview b {
@@ -2203,7 +2203,7 @@
 }
 
 .scheduler-table-head {
-  @apply shrink-0 border-b border-border/60 bg-bg-inset/50 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-fg-muted;
+  @apply shrink-0 border-b border-border/60 bg-bg-inset/50 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-secondary;
 }
 
 .scheduler-table-scroll {
@@ -2211,7 +2211,7 @@
 }
 
 .scheduler-table-row {
-  @apply min-h-[4.4rem] w-full border-b border-border/45 bg-transparent py-2 text-left text-xs text-fg-muted transition hover:bg-bg-inset/65;
+  @apply min-h-[4.4rem] w-full border-b border-border/45 bg-transparent py-2 text-left text-xs text-secondary transition hover:bg-bg-inset/65;
 }
 
 .scheduler-table-row.active {
@@ -2239,11 +2239,11 @@
 }
 
 .scheduler-cell-main small {
-  @apply mt-0.5 block truncate font-mono text-[10px] text-fg-muted;
+  @apply mt-0.5 block truncate font-mono text-[10px] text-secondary;
 }
 
 .scheduler-inline-icon {
-  @apply shrink-0 text-fg-muted;
+  @apply shrink-0 text-secondary;
 }
 
 .scheduler-status-wrap {
@@ -2251,11 +2251,11 @@
 }
 
 .scheduler-status-wrap em {
-  @apply rounded-full border border-border/55 bg-bg px-2 py-1 text-[10px] not-italic text-fg-muted;
+  @apply rounded-full border border-border/55 bg-bg px-2 py-1 text-[10px] not-italic text-secondary;
 }
 
 .scheduler-field {
-  @apply flex flex-col gap-1.5 text-xs font-semibold text-fg-muted;
+  @apply flex flex-col gap-1.5 text-xs font-semibold text-secondary;
 }
 
 .scheduler-field input,
@@ -2281,7 +2281,7 @@
 }
 
 .scheduler-history-head span {
-  @apply font-mono text-[10px] text-fg-muted;
+  @apply font-mono text-[10px] text-secondary;
 }
 
 .compact-run {
@@ -2344,7 +2344,7 @@
   border: 1px solid rgb(var(--border) / 0.72);
   border-radius: var(--radius-md);
   background: rgb(var(--bg) / 0.62);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   backdrop-filter: blur(var(--material-1-blur));
   transition:
     border-color 140ms ease,
@@ -2400,7 +2400,7 @@
 
 .model-setup-intro p {
   max-width: 420px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-lg);
   line-height: 1.72;
   text-wrap: pretty;
@@ -2428,7 +2428,7 @@
 }
 
 .model-setup-status p {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   line-height: 1.55;
 }
@@ -2445,7 +2445,7 @@
 
 .model-setup-actions p {
   max-width: 250px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
   line-height: 1.55;
   text-wrap: pretty;

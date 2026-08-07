@@ -67,7 +67,7 @@
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
   padding: var(--space-2) 11px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-elevated) / 0.96);
   box-shadow: 0 7px 20px rgb(var(--shadow-color) / 0.12);
   font-size: var(--font-size-xs);
@@ -131,7 +131,7 @@
   gap: var(--space-2);
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .composer-progress-item[data-status='active'] {
@@ -140,7 +140,7 @@
 }
 
 .composer-progress-item[data-status='completed'] {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .composer-progress-item[data-status='blocked'] {
@@ -183,7 +183,7 @@
 
 .composer-progress-item-copy small {
   overflow-wrap: anywhere;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -194,7 +194,7 @@
   gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
   padding: var(--space-2) var(--space-3);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -230,4 +230,3 @@
     transform: rotate(360deg);
   }
 }
-

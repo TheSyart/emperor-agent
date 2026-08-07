@@ -177,7 +177,7 @@ function toggleDesktopPet() {
 
 .pet-meta-label {
   font-size: var(--font-size-xs);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   text-transform: uppercase;
 }
 
@@ -207,7 +207,7 @@ function toggleDesktopPet() {
 
 .section-desc {
   font-size: var(--font-size-md);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   margin-bottom: var(--space-4);
 }
 
@@ -240,6 +240,6 @@ function toggleDesktopPet() {
 
 .sprite-card figcaption {
   font-size: var(--font-size-xs);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 </style>

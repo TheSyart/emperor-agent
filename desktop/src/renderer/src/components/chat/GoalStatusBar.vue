@@ -253,7 +253,7 @@ function actionLabel(action: GoalCardAction): string {
 .goal-status-copy strong {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   font-weight: 500;
   text-overflow: ellipsis;
@@ -262,7 +262,7 @@ function actionLabel(action: GoalCardAction): string {
 
 .goal-status-copy time {
   flex: 0 0 auto;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -281,7 +281,7 @@ function actionLabel(action: GoalCardAction): string {
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   cursor: pointer;
 }
 
@@ -310,7 +310,7 @@ function actionLabel(action: GoalCardAction): string {
 }
 
 .goal-status-editor > label {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-2xs);
   font-weight: 620;
 }
@@ -343,7 +343,7 @@ function actionLabel(action: GoalCardAction): string {
 .goal-status-editor small,
 .goal-status-error {
   margin: 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -376,5 +376,4 @@ function actionLabel(action: GoalCardAction): string {
     justify-self: end;
   }
 }
-
 </style>

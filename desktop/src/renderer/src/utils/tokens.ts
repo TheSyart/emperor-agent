@@ -81,7 +81,7 @@ const PALETTE = [
   'rgb(var(--warn))',
   'rgb(var(--ok))',
   'rgb(var(--fg) / 0.78)',
-  'rgb(var(--fg-muted))',
+  'rgb(var(--fg) / var(--text-secondary))',
   'rgb(var(--accent) / 0.55)',
 ]
 
@@ -323,7 +323,7 @@ export function buildStackedBars(
       segments.push({
         model: otherKey,
         total: otherTotal,
-        color: 'rgb(var(--fg-muted) / 0.65)',
+        color: 'rgb(var(--fg) / calc(var(--text-secondary) * 0.65))',
       })
     }
     const total = segments.reduce((acc, s) => acc + s.total, 0)

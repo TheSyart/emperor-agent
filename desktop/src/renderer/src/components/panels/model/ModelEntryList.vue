@@ -129,7 +129,7 @@ function effectiveLabel(entry: ModelEntry): string {
 
 .model-list-head p {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -197,7 +197,7 @@ function effectiveLabel(entry: ModelEntry): string {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-lg);
   font-weight: 700;
 }
@@ -238,7 +238,7 @@ function effectiveLabel(entry: ModelEntry): string {
 }
 
 .model-card-copy code {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
@@ -246,7 +246,7 @@ function effectiveLabel(entry: ModelEntry): string {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -289,7 +289,7 @@ function effectiveLabel(entry: ModelEntry): string {
   border: 1px dashed rgb(var(--border));
   border-radius: var(--radius);
   background: transparent;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   cursor: pointer;
 }
 
@@ -323,5 +323,4 @@ function effectiveLabel(entry: ModelEntry): string {
     justify-content: flex-end;
   }
 }
-
 </style>

@@ -76,6 +76,10 @@ describe('theme tokens', () => {
     '--tone-cyan',
     '--tone-violet',
     '--tone-blue',
+    /* grok 式文本层级(unitless alpha,驱动 fg/二级/三级文字) */
+    '--text-primary',
+    '--text-secondary',
+    '--text-tertiary',
   ]
 
   it.each(['dark.css', 'light.css'])(
@@ -97,8 +101,6 @@ describe('theme tokens', () => {
         '--bg-elevated',
         '--bg-inset',
         '--fg',
-        '--fg-muted',
-        '--fg-subtle',
         '--border',
         '--border-strong',
         '--accent',
@@ -130,7 +132,7 @@ describe('theme tokens', () => {
     expect(dark).toContain('--brand: 203 158 72;')
     expect(dark).toContain('--warn: 240 186 60;')
     expect(light).toContain('--bg: 252 252 253;')
-    expect(light).toContain('--fg-muted: 82 82 91;')
+    expect(light).toContain('--text-secondary: 0.55;')
     expect(light).toContain('--brand: 155 111 35;')
   })
 })

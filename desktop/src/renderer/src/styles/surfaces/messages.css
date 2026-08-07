@@ -62,7 +62,7 @@
 
 .welcome-card p {
   max-width: 560px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .brand-seal-sm {
@@ -132,7 +132,7 @@
 
 .timeline-node.text-node::before {
   top: var(--space-3);
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-large-card {
@@ -154,7 +154,7 @@
 .plan-card-kicker {
   font-size: var(--font-size-xs);
   line-height: 1;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-card-title-row {
@@ -186,7 +186,7 @@
   border-radius: 999px;
   padding: var(--space-1) var(--space-2);
   background: rgb(var(--bg) / 0.48);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   font-style: normal;
   line-height: 1.2;
@@ -211,7 +211,7 @@
   height: 26px;
   place-items: center;
   border-radius: calc(var(--radius) - 2px);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   transition:
     color 160ms ease,
     background 160ms ease;

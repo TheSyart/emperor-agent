@@ -48,7 +48,7 @@
 
 .welcome-card p {
   @apply mt-3 text-sm leading-6;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .brand-seal-sm {
@@ -90,7 +90,7 @@
 .avatar {
   @apply mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-elevated));
 }
 
@@ -103,12 +103,12 @@
 }
 
 .assistant-mini-avatar {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .message-meta {
   @apply inline-flex items-center gap-1.5 text-[11px] font-medium;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .message-meta small {
@@ -116,13 +116,13 @@
 }
 
 .message-meta.user {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .prompt-delivery-state {
   @apply rounded-full border px-1.5 py-0.5 text-[10px] font-medium;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-elevated));
 }
 
@@ -143,12 +143,12 @@
 .assistant-terminal-state {
   @apply mt-1 inline-flex w-fit rounded-full border px-2 py-0.5 text-[10px] font-medium;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   background: rgb(var(--bg-elevated));
 }
 
 .message-meta.assistant {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 /* ── Scheduler trigger card ──────────────────────────────────────────────── */
@@ -175,7 +175,7 @@
 
 .scheduler-trigger-name {
   @apply truncate font-mono text-[11px];
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .scheduler-trigger-body {
@@ -265,7 +265,7 @@
 .copy-message-button {
   @apply inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium transition;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   background: transparent;
 }
 
@@ -312,7 +312,7 @@
   );
   width: var(--timeline-dot-size);
   height: var(--timeline-dot-size);
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
   box-sizing: border-box;
 }
 
@@ -324,7 +324,7 @@
 }
 
 .timeline-node.text-node::before {
-  background: rgb(var(--fg-muted));
+  background: rgb(var(--fg) / var(--text-secondary));
 }
 
 .timeline-node.text-node.streaming {
@@ -346,13 +346,13 @@
   border: 1px solid rgb(var(--border) / 0.7);
   border-radius: var(--radius-sm);
   background: rgb(var(--bg-elevated) / 0.5);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
 .plan-activity-icon {
   flex-shrink: 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-activity-label {
@@ -364,7 +364,7 @@
 .plan-activity-node strong {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   font-weight: 400;
   text-overflow: ellipsis;
@@ -421,7 +421,7 @@
 .plan-activity-actions {
   margin: var(--space-1) 0 0 18px;
   flex-basis: 100%;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   list-style: disc;
 }
 
@@ -447,7 +447,7 @@
 /* ── Thought quote block(引述块式,PLAN-20260721-THEME-THINK) ─────────────── */
 .thought-status-node {
   @apply flex w-fit max-w-full items-center gap-1.5 px-2 py-0.5;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -461,20 +461,20 @@
   @apply flex w-fit max-w-full items-center gap-1.5 px-2.5 py-0.5 transition;
   border: 1px solid transparent;
   border-radius: 999px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
 .thought-collapsed:hover {
   border-color: rgb(var(--border) / 0.6);
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 /* 收起态内容预览:扫读时不展开也能知道这段思考在做什么 */
 .thought-preview {
   @apply min-w-0 truncate italic;
-  color: rgb(var(--fg-subtle) / 0.85);
+  color: rgb(var(--fg) / calc(var(--text-tertiary) * 0.85));
 }
 
 .thought-preview::before {
@@ -517,12 +517,12 @@
 .thought-quote-head {
   @apply flex items-center gap-1.5 transition;
   border-radius: var(--radius-md);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
 .thought-quote-head:hover {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 /* running 思考正文:限高内部滚动 + 上下 fade 提示可滚(不撑开页面) */
@@ -561,11 +561,11 @@
 .shimmer-text {
   background: linear-gradient(
     100deg,
-    rgb(var(--fg-subtle)) 20%,
+    rgb(var(--fg) / var(--text-tertiary)) 20%,
     rgb(var(--accent)) 42%,
     rgb(var(--fg)) 50%,
     rgb(var(--accent)) 58%,
-    rgb(var(--fg-subtle)) 80%
+    rgb(var(--fg) / var(--text-tertiary)) 80%
   );
   background-size: 250% 100%;
   -webkit-background-clip: text;
@@ -595,7 +595,7 @@
 
 .thought-quote-body {
   padding: var(--space-1) 0 var(--space-3);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   line-height: 1.7;
   white-space: pre-wrap;
@@ -616,7 +616,7 @@
 }
 
 .thought-chevron {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .control-node > .control-card {
@@ -633,7 +633,7 @@
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   background: rgb(var(--bg-elevated) / 0.5);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -650,11 +650,11 @@
 
 .run-status-stats {
   @apply shrink-0 font-mono text-[10px] tabular-nums;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .run-status-activity {
   @apply min-w-0 truncate font-mono;
   margin-left: auto;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }

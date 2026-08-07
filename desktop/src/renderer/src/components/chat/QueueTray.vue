@@ -148,7 +148,7 @@ onBeforeUnmount(() =>
 
 .queue-leading-icon {
   flex: none;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .queue-copy {
@@ -161,7 +161,7 @@ onBeforeUnmount(() =>
 
 .queue-state {
   flex: none;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -169,7 +169,7 @@ onBeforeUnmount(() =>
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   line-height: 20px;
   text-overflow: ellipsis;
@@ -178,7 +178,7 @@ onBeforeUnmount(() =>
 
 .queue-copy small {
   flex: none;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -195,7 +195,7 @@ onBeforeUnmount(() =>
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   cursor: pointer;
 }
 

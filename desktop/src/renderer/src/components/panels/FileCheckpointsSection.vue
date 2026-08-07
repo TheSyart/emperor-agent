@@ -419,7 +419,7 @@ function message(reason: unknown): string {
 .checkpoint-head span,
 .checkpoint-card-head span,
 .checkpoint-empty span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
@@ -465,7 +465,7 @@ function message(reason: unknown): string {
 }
 
 .checkpoint-git-preview > span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
 }
@@ -504,7 +504,7 @@ function message(reason: unknown): string {
   display: grid;
   gap: var(--space-1);
   margin: var(--space-2) 0 0 26px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font:
     12px/1.4 ui-monospace,
     SFMono-Regular,

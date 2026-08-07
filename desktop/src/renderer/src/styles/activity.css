@@ -37,7 +37,7 @@
 .activity-rail {
   @apply relative grid size-7 shrink-0 place-items-center rounded border;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-inset));
 }
 
@@ -47,7 +47,7 @@
 
 .activity-status-dot {
   @apply absolute -bottom-1 -right-1 size-2 rounded-full;
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .activity-card.running .activity-status-dot {
@@ -70,7 +70,7 @@
 
 .activity-kicker {
   @apply font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .activity-main strong {
@@ -80,12 +80,12 @@
 
 .activity-main strong em {
   @apply ml-1 font-mono text-[10px] font-normal not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .activity-main small {
   @apply line-clamp-1 text-xs leading-5;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .activity-meta {
@@ -96,7 +96,7 @@
 .activity-meta time {
   @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .activity-card.running .activity-meta em {
@@ -130,12 +130,12 @@
 .tool-io-panel > span {
   @apply block border-b px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-summary {
   @apply px-2.5 py-2 text-xs leading-5;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .tool-code {
@@ -159,7 +159,7 @@
 .tool-diff > span {
   @apply block border-b px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-artifact-list {
@@ -170,7 +170,7 @@
   @apply grid min-w-0 items-center gap-2 rounded border px-2.5 py-1.5 text-xs;
   grid-template-columns: minmax(0, 1fr) auto auto;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .tool-artifact-item strong {
@@ -182,7 +182,7 @@
 .tool-artifact-item small {
   @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .media-node {
@@ -198,7 +198,7 @@
 .media-node-icon {
   @apply grid size-7 shrink-0 place-items-center rounded border;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-elevated));
 }
 
@@ -213,7 +213,7 @@
 
 .media-node-main small {
   @apply truncate text-xs;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .media-preview-grid {
@@ -243,7 +243,7 @@
 
 .media-preview-item span {
   @apply truncate px-1 font-mono text-[10px];
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .media-preview-modal {
@@ -267,7 +267,7 @@
 .media-preview-caption {
   @apply fixed bottom-5 left-1/2 grid max-w-[92vw] -translate-x-1/2 gap-1 rounded border px-3 py-2 text-xs;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-elevated));
 }
 
@@ -295,7 +295,7 @@
 .tool-todo-head span {
   @apply rounded border px-2 py-0.5 font-mono text-[10px];
   border-color: rgb(var(--warn) / 0.35);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-todo-items {
@@ -312,12 +312,12 @@
 .tool-todo-item span {
   @apply grid size-4 place-items-center rounded font-mono text-[10px];
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-todo-item em {
   @apply font-mono text-[10px] not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-todo-item p {
@@ -325,7 +325,7 @@
 }
 
 .tool-todo-item.completed {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-todo-item.completed p {
@@ -380,7 +380,7 @@
 
 .tool-group-icon {
   @apply relative grid size-6 shrink-0 place-items-center rounded;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-inset));
 }
 
@@ -392,7 +392,7 @@
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
   box-shadow: 0 0 0 2px rgb(var(--bg));
 }
 
@@ -421,7 +421,7 @@
 
 .tool-group-main small {
   @apply truncate text-xs;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .tool-group-meta {
@@ -432,7 +432,7 @@
 .tool-group-meta time {
   @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-group-card.running .tool-group-meta em:last-of-type {
@@ -499,14 +499,14 @@
 .tool-group-tool-icon {
   @apply relative grid size-6 shrink-0 place-items-center rounded border;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-inset));
 }
 
 /* 工具行结果小字:名称→目标→结果 的第三级 */
 .tool-result-line {
   @apply truncate text-[11px];
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-group-tool-title {
@@ -520,7 +520,7 @@
 
 .tool-group-tool-title small {
   @apply truncate text-[11px];
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .tool-group-tool-meta {
@@ -531,7 +531,7 @@
 .tool-group-tool-meta time {
   @apply rounded border px-1.5 py-0.5 font-mono text-[10px] not-italic;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-group-tool-row > .tool-detail-body {
@@ -553,7 +553,7 @@
 
 .tool-raw-details > summary {
   @apply cursor-pointer px-3 py-2 font-mono text-[11px];
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   list-style: none;
 }
 
@@ -564,7 +564,7 @@
 .tool-raw-details > summary::after {
   content: '›';
   margin-left: var(--space-2);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .tool-raw-details[open] > summary {
@@ -612,7 +612,7 @@
 .control-card-head span {
   @apply font-mono text-[10px] uppercase tracking-wider;
   letter-spacing: 0.08em;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .control-card-head strong {
@@ -626,13 +626,13 @@
   border-radius: var(--radius-sm);
   border-color: rgb(var(--border));
   background: rgb(var(--bg-inset) / 0.5);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .control-context {
   @apply text-xs;
   margin-top: var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   line-height: 1.65;
 }
@@ -684,7 +684,7 @@
 
 .control-footnote {
   @apply mt-3 text-xs;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-markdown {
@@ -707,18 +707,18 @@
 .plan-assumptions span,
 .plan-comments span {
   @apply block font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-assumptions ul {
   @apply mt-2 list-disc space-y-1 pl-5 text-xs leading-5;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-comments p {
   @apply mt-2 whitespace-pre-wrap break-words rounded-md px-3 py-2 text-xs leading-5;
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-runtime {
@@ -733,7 +733,7 @@
 
 .plan-runtime-head span {
   @apply font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-execution-summary {
@@ -745,7 +745,7 @@
   @apply min-w-0 rounded-md border px-3 py-2 text-xs leading-5;
   border-color: rgb(var(--border));
   background: rgb(var(--bg-elevated));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-summary-item.active {
@@ -769,7 +769,7 @@
 
 .plan-summary-item span {
   @apply block font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-summary-item strong {
@@ -780,7 +780,7 @@
 .plan-summary-item p,
 .plan-summary-item small {
   @apply mt-1 block break-words text-[11px] leading-5;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-summary-item code {
@@ -793,7 +793,7 @@
 .plan-step-status {
   @apply rounded border px-2 py-0.5 font-mono text-[10px] not-italic;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-runtime-status.executing,
@@ -846,7 +846,7 @@
 .plan-step-index {
   @apply flex h-5 w-5 items-center justify-center rounded-full border font-mono text-[10px];
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-step-copy {
@@ -860,12 +860,12 @@
 
 .plan-step-copy p {
   @apply mt-1 break-words text-xs leading-5;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-step-meta {
   @apply mt-2 flex flex-wrap gap-2 pl-7 text-[11px] leading-5;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-step-meta span {
@@ -878,7 +878,7 @@
   @apply mt-2 space-y-1 rounded-md border px-3 py-2 text-xs leading-5;
   border-color: rgb(var(--ok) / 0.28);
   background: rgb(var(--ok) / 0.06);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .plan-step-evidence.failed {
@@ -888,7 +888,7 @@
 
 .plan-step-evidence span {
   @apply block font-mono text-[10px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-step-evidence code {
@@ -905,7 +905,7 @@
 
 .plan-runtime-empty {
   @apply mt-2 text-xs leading-5;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .plan-toggle {
@@ -930,13 +930,13 @@
 
 .plan-toggle em {
   @apply text-[11px] not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 /* ── Expandable text ─────────────────────────────────────────────────────── */
 .expandable-text {
   @apply min-w-0 text-xs leading-6;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .expandable-text span {
@@ -1028,7 +1028,7 @@
   flex: none;
   width: 0.875em;
   height: 0.875em;
-  background-color: rgb(var(--fg-subtle));
+  background-color: rgb(var(--fg) / var(--text-tertiary));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
@@ -1057,7 +1057,7 @@
 .markdown-body blockquote {
   @apply border-l-2 py-1 pl-4;
   border-color: rgb(var(--border-strong));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .markdown-body code {
@@ -1109,7 +1109,7 @@
 .agent-node::before {
   content: '';
   @apply absolute -left-[1.08rem] top-[0.9rem] size-1.5 rounded-full;
-  background: rgb(var(--fg-subtle));
+  background: rgb(var(--fg) / var(--text-tertiary));
   box-shadow: 0 0 0 3px rgb(var(--bg));
 }
 
@@ -1159,7 +1159,7 @@
 
 .agent-node-title > span {
   @apply font-mono text-[9px] uppercase tracking-wider;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .agent-node-title strong {
@@ -1169,7 +1169,7 @@
 
 .agent-node-title small {
   @apply truncate text-[11px];
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .agent-role-badge,
@@ -1179,7 +1179,7 @@
   @apply shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px];
   border: 0;
   background: rgb(var(--bg-inset) / 0.72);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .agent-node.running .agent-state-badge {
@@ -1211,7 +1211,7 @@
 
 .agent-summary {
   box-shadow: inset 2px 0 0 rgb(var(--ok) / 0.48);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .agent-message-stack {
@@ -1237,7 +1237,7 @@
 
 .agent-message-head {
   @apply flex items-center justify-between gap-2 font-mono text-[10px];
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .agent-message-head strong {
@@ -1270,7 +1270,7 @@
 
 .mini-tool-icon {
   @apply size-4 shrink-0;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .mini-tool-main {
@@ -1289,12 +1289,12 @@
 .mini-tool-head em,
 .mini-tool-head time {
   @apply shrink-0 rounded px-2 py-0.5 text-[10px] not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .subagent-avatar {
   @apply shrink-0;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 /* ── Pending bar ─────────────────────────────────────────────────────────── */
@@ -1318,7 +1318,7 @@
 .pending-seal {
   @apply grid size-7 place-items-center rounded border;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .pending-title {
@@ -1328,13 +1328,13 @@
 
 .pending-detail {
   @apply truncate font-mono text-xs;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .pending-label {
   @apply shrink-0 rounded border px-2 py-0.5 font-mono text-[10px];
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .pending-bar.running .pending-label {
@@ -1369,12 +1369,12 @@
 .slash-menu-head {
   @apply mb-1 flex items-center justify-between gap-3 border-b px-3 pb-2 pt-1 font-mono text-[0.68rem] uppercase tracking-wider;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .slash-menu-head em {
   @apply not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .slash-menu-group {
@@ -1384,7 +1384,7 @@
 .slash-menu-label {
   @apply sticky top-0 z-10 px-3 py-1 font-mono text-[0.68rem] uppercase tracking-wider;
   background: rgb(var(--bg-elevated));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .slash-menu-item {
@@ -1403,13 +1403,13 @@
 
 .slash-menu-item span {
   @apply min-w-0 truncate text-xs;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .slash-menu-item b {
   @apply max-w-[8rem] truncate rounded border px-2 py-0.5 font-mono text-[0.65rem] font-semibold;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .slash-menu-item[data-kind='skill'] strong {
@@ -1543,7 +1543,7 @@
 .send-button:disabled {
   background: rgb(var(--bg-inset));
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .send-button .send-icon {
@@ -1553,7 +1553,7 @@
 .busy-delivery-button {
   @apply h-8 shrink-0 rounded-md border px-2.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40;
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg));
 }
 
@@ -1577,7 +1577,7 @@
   background: transparent;
   border-color: rgb(var(--border));
   border-radius: 999px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .attach-button:hover {
@@ -1628,7 +1628,7 @@
 
 .mode-button em {
   @apply hidden shrink-0 text-[11px] not-italic sm:inline;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .model-caret,
@@ -1656,7 +1656,7 @@
 .model-menu-head span,
 .mode-menu-head span {
   @apply font-mono uppercase;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-2xs);
   letter-spacing: 0.08em;
 }
@@ -1664,7 +1664,7 @@
 .model-menu-head em,
 .mode-menu-head em {
   @apply not-italic;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1707,7 +1707,7 @@
 .model-option small,
 .mode-option small {
   @apply mt-1 block text-[11px] leading-5;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .model-option b,
@@ -1716,7 +1716,7 @@
   border-radius: var(--radius-sm);
   padding: 1px var(--space-2);
   border-color: rgb(var(--border));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 /* ── Context ring ────────────────────────────────────────────────────────── */
@@ -1775,7 +1775,7 @@
 
 .context-tooltip em {
   @apply mt-1 block text-[11px] not-italic tracking-wider uppercase;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .website-card {
@@ -1813,7 +1813,7 @@
 }
 
 .website-card > div > span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -1834,7 +1834,7 @@
   padding: var(--space-2) var(--space-2);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-sm);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 

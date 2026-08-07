@@ -100,7 +100,9 @@ function onKeydown(event: KeyboardEvent): void {
                 item.meta
               }}</span>
             </button>
-            <p v-if="!filtered.length" class="command-center-empty">没有匹配项</p>
+            <p v-if="!filtered.length" class="command-center-empty">
+              没有匹配项
+            </p>
           </div>
         </section>
       </AppTransition>
@@ -144,7 +146,7 @@ h2 {
 }
 p {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 header button {
@@ -154,7 +156,7 @@ header button {
   height: 30px;
   border: 0;
   border-radius: var(--radius-md);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: transparent;
   transition:
     background-color var(--duration-fast) var(--ease-out),
@@ -173,7 +175,7 @@ header button:hover {
   padding: var(--space-2) var(--space-3);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   background: rgb(var(--bg-inset));
 }
 .command-search input {
@@ -222,7 +224,7 @@ header button:hover {
     monospace;
 }
 .command-center-copy small {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 .command-center-copy small.command-disabled-reason {
@@ -230,7 +232,7 @@ header button:hover {
 }
 .command-center-meta {
   flex: none;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-2xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;

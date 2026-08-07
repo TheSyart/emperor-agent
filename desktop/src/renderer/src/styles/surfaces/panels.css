@@ -71,7 +71,7 @@
 }
 
 .model-form-section-head span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -80,7 +80,7 @@
 }
 
 .model-form-v2 .form-label {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   letter-spacing: 0.08em;
 }
@@ -451,4 +451,3 @@
     gap: var(--space-2);
   }
 }
-

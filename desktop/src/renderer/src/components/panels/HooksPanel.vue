@@ -914,7 +914,7 @@ function sourceStatus(source: {
   min-width: 0;
 }
 .hooks-title code {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.72rem;
 }
 .hooks-tabs {
@@ -927,7 +927,7 @@ function sourceStatus(source: {
 .hooks-tab {
   min-height: 39px;
   padding: 0 0.8rem;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   font-size: 0.82rem;
@@ -987,7 +987,7 @@ function sourceStatus(source: {
   border-left: 0;
 }
 .hooks-status-strip span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.78rem;
 }
 .hooks-status-strip strong {
@@ -1013,7 +1013,7 @@ function sourceStatus(source: {
   display: block;
 }
 .trust-bar span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.72rem;
   overflow-wrap: anywhere;
   margin-top: 0.15rem;
@@ -1036,7 +1036,7 @@ function sourceStatus(source: {
   font: 800 0.86rem var(--font-display);
 }
 .band-head span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.72rem;
 }
 .source-grid {
@@ -1063,14 +1063,14 @@ function sourceStatus(source: {
   font-size: 0.75rem;
 }
 .source-kind small {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font: 0.62rem var(--font-mono);
 }
 .source-item code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.7rem;
 }
 .state-label {
@@ -1153,7 +1153,7 @@ function sourceStatus(source: {
 }
 .effective-row span,
 .audit-row span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.7rem;
   margin-top: 0.18rem;
 }
@@ -1177,7 +1177,7 @@ function sourceStatus(source: {
   border-bottom: 1px solid rgb(var(--border) / 0.55);
 }
 .detail-head span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.7rem;
 }
 .detail-head h2 {
@@ -1199,7 +1199,7 @@ function sourceStatus(source: {
   grid-column: 1 / -1;
 }
 .hooks-detail dt {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.66rem;
   text-transform: uppercase;
 }
@@ -1227,7 +1227,7 @@ function sourceStatus(source: {
   font-size: 0.76rem;
 }
 .handler-row span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.68rem;
 }
 .test-layout,
@@ -1247,7 +1247,7 @@ function sourceStatus(source: {
   gap: 0.35rem;
   padding: 0.75rem 1rem 0;
   font-size: 0.72rem;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 .test-form select,
 .audit-toolbar select {
@@ -1293,7 +1293,7 @@ function sourceStatus(source: {
   border-radius: var(--radius-xs);
   padding: 0.2rem 0.38rem;
   font-size: 0.66rem;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 .match-row {
   display: grid;
@@ -1316,7 +1316,7 @@ function sourceStatus(source: {
   overflow-wrap: anywhere;
 }
 .match-row span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.7rem;
   margin-top: 0.18rem;
 }
@@ -1411,7 +1411,7 @@ function sourceStatus(source: {
   display: grid;
   place-items: center;
   min-height: 100px;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: 0.78rem;
 }
 
@@ -1526,7 +1526,7 @@ function sourceStatus(source: {
 
 .hooks-title code {
   flex: 0 0 auto;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1567,7 +1567,7 @@ function sourceStatus(source: {
   border: 0;
   border-radius: var(--radius-sm);
   padding: 0 var(--space-3);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
   white-space: nowrap;
 }
@@ -1595,7 +1595,7 @@ function sourceStatus(source: {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   padding: 2px 1px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1613,7 +1613,7 @@ function sourceStatus(source: {
 
 .hooks-section > h2,
 .hooks-section-title h2 {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
   font-weight: 650;
 }
@@ -1626,7 +1626,7 @@ function sourceStatus(source: {
 }
 
 .hooks-section-title > span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -1646,7 +1646,7 @@ function sourceStatus(source: {
 .hooks-source-row > div span,
 .diagnostic-row > div span {
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1654,7 +1654,7 @@ function sourceStatus(source: {
 
 .hooks-source-row small {
   margin-left: var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
   font-weight: 500;
@@ -1667,7 +1667,7 @@ function sourceStatus(source: {
 .diagnostic-row code {
   max-width: 240px;
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1766,7 +1766,7 @@ function sourceStatus(source: {
 .effective-row span,
 .audit-row span {
   margin-top: 2px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1811,7 +1811,7 @@ function sourceStatus(source: {
 .detail-head span,
 .surface-head > span,
 .surface-head > div > span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1832,14 +1832,14 @@ function sourceStatus(source: {
 }
 
 .hooks-detail dt {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   text-transform: uppercase;
 }
 
 .hooks-detail dd {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
@@ -1867,7 +1867,7 @@ function sourceStatus(source: {
 }
 
 .handler-row span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1899,7 +1899,7 @@ function sourceStatus(source: {
   flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-3) 11px 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1950,7 +1950,7 @@ function sourceStatus(source: {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-xs);
   padding: 2px var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -1977,7 +1977,7 @@ function sourceStatus(source: {
 
 .match-row span {
   margin-top: 2px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -2085,7 +2085,7 @@ function sourceStatus(source: {
   display: grid;
   min-height: 96px;
   place-items: center;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 

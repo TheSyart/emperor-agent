@@ -28,7 +28,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .turn-changes-card-summary strong {
@@ -37,30 +37,20 @@
   font-weight: 550;
 }
 
-.turn-changes-card-summary span {
+.turn-changes-card-stats {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
-}
-
-.turn-changes-card-summary b {
-  color: rgb(var(--ok));
-  font-weight: 500;
-}
-
-.turn-changes-card-summary em {
-  color: rgb(var(--danger));
-  font-style: normal;
 }
 
 .turn-changes-card > header button {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   padding: var(--space-1) var(--space-3);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
 }
 
@@ -96,15 +86,23 @@
 
 .turn-changes-card li small {
   flex: 0 0 auto;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-variant-numeric: tabular-nums;
 }
 
 .turn-changes-card li small.binary {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
-/* 增删行统计:加=绿,减=红(变更卡 / 进度胶囊等共用) */
+.diff-stat-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 增删行统计：加=绿，减=红（变更卡 / 进度胶囊等共用） */
 .stat-add {
   color: rgb(var(--ok));
   font-weight: 500;
@@ -125,7 +123,7 @@
   gap: var(--space-1);
   border-top: 1px solid rgb(var(--border));
   padding: var(--space-2) var(--space-3);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -140,17 +138,6 @@
 
 .turn-changes-expand svg.rotated {
   transform: rotate(180deg);
-}
-
-.turn-changes-partial {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  border-top: 1px solid rgb(var(--warn) / 0.3);
-  padding: var(--space-2) var(--space-3);
-  color: rgb(var(--warn));
-  background: rgb(var(--warn) / 0.06);
-  font-size: var(--font-size-xs);
 }
 
 .profile-onboarding-banner {
@@ -181,7 +168,7 @@
 }
 
 .profile-onboarding-banner span {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
@@ -197,7 +184,7 @@
   min-height: 28px;
   border-radius: var(--radius-md);
   padding: 0 var(--space-2);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
 }
 
@@ -214,4 +201,3 @@
 .config-profile-status {
   margin-bottom: var(--space-3);
 }
-

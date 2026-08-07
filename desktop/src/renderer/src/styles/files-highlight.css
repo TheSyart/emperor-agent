@@ -4,7 +4,7 @@
 
 .file-code-view .hljs-comment,
 .file-code-view .hljs-quote {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-style: italic;
 }
 
@@ -65,7 +65,7 @@
 .file-code-view .hljs-params,
 .file-code-view .hljs-meta,
 .file-code-view .hljs-doctag {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .file-code-view .hljs-emphasis {

@@ -36,7 +36,7 @@
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg));
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-sm);
   font-weight: 720;
 }
@@ -94,7 +94,7 @@
 
 .send-button:disabled {
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
 }
 
 .composer-palette {
@@ -135,7 +135,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: 0 var(--space-2) var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -156,7 +156,7 @@
 
 .composer-palette-label {
   padding: var(--space-1) var(--space-2) var(--space-1);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -190,7 +190,7 @@
   width: 18px;
   height: 18px;
   place-items: center;
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .composer-palette-item strong {
@@ -207,7 +207,7 @@
 .composer-palette-item span:not(.composer-palette-item-icon) {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-sm);
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -220,7 +220,7 @@
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-sm);
   padding: 1px var(--space-2);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--font-size-2xs);
   font-weight: 500;
@@ -263,7 +263,7 @@
   grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-md);
   line-height: 1.25;
 }
@@ -295,7 +295,7 @@
 .composer-capability-meta {
   overflow: hidden;
   min-width: 0;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -307,7 +307,7 @@
   height: 18px;
   place-items: center;
   border-radius: 999px;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   transition:
     background 120ms ease,
     color 120ms ease;
@@ -397,7 +397,7 @@
 .model-button-meta,
 .model-button-separator {
   flex: 0 0 auto;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   font-weight: 500;
 }
@@ -425,7 +425,7 @@
 }
 
 .model-current-copy > small {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   font-weight: 650;
   letter-spacing: 0.07em;
@@ -448,12 +448,12 @@
 }
 
 .model-current-copy > code {
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-2xs);
 }
 
 .model-current-copy > span {
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
 }
 
@@ -480,7 +480,7 @@
 .reasoning-row > span,
 .model-menu-label {
   display: block;
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   line-height: 1.35;
 }
@@ -518,7 +518,7 @@
   min-width: 0;
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-1);
-  color: rgb(var(--fg-muted));
+  color: rgb(var(--fg) / var(--text-secondary));
   font-size: var(--font-size-xs);
   line-height: 1.2;
   transition:
@@ -569,7 +569,7 @@
   border-radius: var(--radius-xs);
   padding: 1px var(--space-1);
   background: rgb(var(--bg-inset));
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-2xs);
   font-style: normal;
   line-height: 1.3;
@@ -593,7 +593,7 @@
   border-radius: var(--radius-md);
   padding: var(--space-3);
   background: rgb(var(--bg-inset) / 0.52);
-  color: rgb(var(--fg-subtle));
+  color: rgb(var(--fg) / var(--text-tertiary));
   font-size: var(--font-size-xs);
   text-align: center;
 }
@@ -605,4 +605,3 @@
   outline: 2px solid rgb(var(--accent));
   outline-offset: 1px;
 }
-
