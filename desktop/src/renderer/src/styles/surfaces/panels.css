@@ -201,7 +201,7 @@
     min-height: 48px;
     border-right: 0;
     border-bottom: 1px solid rgb(var(--border));
-    padding: 6px 8px;
+    padding: var(--space-2) var(--space-2);
   }
 
   .rail-actions {
@@ -231,9 +231,9 @@
     min-width: 0;
     display: flex;
     align-items: stretch;
-    gap: 6px;
+    gap: var(--space-2);
     overflow-x: auto;
-    padding: 8px;
+    padding: var(--space-2);
   }
 
   .session-group-label {
@@ -270,19 +270,19 @@
   }
 
   .chat-bottom-stack {
-    padding: 8px;
+    padding: var(--space-2);
   }
 
   .active-ask-panel {
     width: 100%;
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
     border-radius: var(--radius-lg);
   }
 
   .profile-onboarding-banner {
     align-items: stretch;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .profile-onboarding-actions {
@@ -291,7 +291,7 @@
 
   .active-plan-decision-panel {
     width: 100%;
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
     border-radius: var(--radius-lg);
   }
 
@@ -325,7 +325,7 @@
   }
 
   .messages-pane {
-    padding-inline: 12px;
+    padding-inline: var(--space-3);
   }
 
   .message-cluster,
@@ -423,7 +423,7 @@
   .composer-palette {
     max-height: min(310px, 48vh);
     border-radius: var(--radius);
-    padding: 6px;
+    padding: var(--space-2);
   }
 
   .composer-palette-head em {
@@ -433,7 +433,7 @@
   .composer-palette-item {
     min-height: 32px;
     grid-template-columns: 20px minmax(116px, 0.55fr) minmax(0, 1fr);
-    gap: 7px;
+    gap: var(--space-2);
   }
 
   .composer-palette-item b {
@@ -448,7 +448,7 @@
   .model-option,
   .mode-option {
     min-height: 46px;
-    gap: 8px;
+    gap: var(--space-2);
   }
 }
 

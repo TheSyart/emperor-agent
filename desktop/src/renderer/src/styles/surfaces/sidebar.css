@@ -28,7 +28,7 @@
   align-items: center;
   justify-content: flex-end;
   height: 38px;
-  padding: 6px 10px 0;
+  padding: var(--space-2) var(--space-3) 0;
 }
 
 .sidebar-icon-button {
@@ -56,7 +56,7 @@
 .sidebar-top-actions {
   display: grid;
   gap: 2px;
-  padding: 10px 10px 12px;
+  padding: var(--space-3) var(--space-3) var(--space-3);
 }
 
 .sidebar-top-actions button,
@@ -64,9 +64,9 @@
   display: flex;
   min-height: 32px;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   border-radius: var(--radius-md);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   font-weight: 600;
@@ -94,7 +94,7 @@
 }
 
 .codex-sidebar.collapsed .sidebar-top-actions {
-  padding-inline: 8px;
+  padding-inline: var(--space-2);
 }
 
 .codex-sidebar.collapsed .sidebar-top-actions button,
@@ -113,7 +113,7 @@
 
 .codex-session-list {
   position: relative;
-  padding: 0 8px 8px;
+  padding: 0 var(--space-2) var(--space-2);
 }
 
 /* ── Active-session pill(layoutId 式单例指示器)──────────────────────────
@@ -148,7 +148,7 @@
 
 .sidebar-section {
   position: relative;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .sidebar-section-head {
@@ -157,13 +157,13 @@
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
-  padding: 0 4px 0 8px;
+  padding: 0 var(--space-1) 0 var(--space-2);
 }
 
 .sidebar-section-title {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
   font-weight: 650;
@@ -193,7 +193,7 @@
   gap: 2px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  padding: 4px;
+  padding: var(--space-1);
   background: rgb(var(--bg-inset));
   box-shadow: 0 14px 36px rgb(var(--shadow-color) / 0.28);
 }
@@ -210,9 +210,9 @@
   display: flex;
   min-height: 30px;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border-radius: var(--radius-sm);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
   text-align: left;
@@ -229,7 +229,7 @@
 
 .codex-project-row {
   min-height: 32px;
-  padding: 2px 4px;
+  padding: 2px var(--space-1);
 }
 
 .project-main {
@@ -237,7 +237,7 @@
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   font-weight: 600;
@@ -289,12 +289,12 @@
 }
 
 .sidebar-settings-button {
-  margin: auto 8px 10px;
+  margin: auto var(--space-2) var(--space-3);
   min-height: 34px;
 }
 
 .codex-sidebar.collapsed .sidebar-settings-button {
-  margin-inline: 8px;
+  margin-inline: var(--space-2);
   width: 36px;
 }
 
@@ -312,7 +312,7 @@
   width: min(520px, calc(100vw - 32px));
   border: 1px solid rgb(var(--border-strong));
   border-radius: var(--radius-lg);
-  padding: 8px;
+  padding: var(--space-2);
   background: rgb(var(--bg-inset));
   box-shadow: 0 24px 80px rgb(var(--shadow-color) / 0.38);
 }
@@ -320,8 +320,8 @@
 .sidebar-search-input-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px 8px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2);
   color: rgb(var(--fg-subtle));
 }
 
@@ -334,7 +334,7 @@
 }
 
 .search-section-label {
-  padding: 8px 8px 5px;
+  padding: var(--space-2) var(--space-2) var(--space-1);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
 }
@@ -344,9 +344,9 @@
   width: 100%;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
   border-radius: var(--radius-md);
-  padding: 7px 9px;
+  padding: var(--space-2) var(--space-2);
   color: rgb(var(--fg-muted));
   text-align: left;
 }
@@ -369,7 +369,7 @@
   display: inline-flex;
   max-width: 190px;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   overflow: hidden;
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
@@ -380,7 +380,7 @@
 .plugins-head-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .segmented-control {
@@ -395,7 +395,7 @@
 .segmented-control button {
   min-height: 28px;
   border-radius: var(--radius-sm);
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
 }

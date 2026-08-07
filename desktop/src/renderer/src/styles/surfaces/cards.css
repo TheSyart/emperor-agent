@@ -17,8 +17,8 @@
   display: flex;
   min-height: 42px;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
 }
 
 .turn-changes-card-summary {
@@ -27,7 +27,7 @@
   flex: 1;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   color: rgb(var(--fg-muted));
 }
 
@@ -40,7 +40,7 @@
 .turn-changes-card-summary span {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
@@ -59,7 +59,7 @@
 .turn-changes-card > header button {
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-3);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
 }
@@ -78,8 +78,8 @@
   min-height: 32px;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 6px 10px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid rgb(var(--border) / 0.65);
   font-size: var(--font-size-xs);
 }
@@ -122,9 +122,9 @@
   width: 100%;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-1);
   border-top: 1px solid rgb(var(--border));
-  padding: 7px 12px;
+  padding: var(--space-2) var(--space-3);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
 }
@@ -145,20 +145,12 @@
 .turn-changes-partial {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   border-top: 1px solid rgb(var(--warn) / 0.3);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   color: rgb(var(--warn));
   background: rgb(var(--warn) / 0.06);
   font-size: var(--font-size-xs);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-progress-live-dot,
-  .composer-progress-spinner,
-  .composer-progress-popover {
-    animation: none;
-  }
 }
 
 .profile-onboarding-banner {
@@ -168,10 +160,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 auto 8px;
+  margin: 0 auto var(--space-2);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
-  padding: 9px 11px;
+  padding: var(--space-2) 11px;
   background: rgb(var(--bg-elevated) / 0.97);
   box-shadow: 0 8px 24px rgb(var(--shadow-color) / 0.16);
 }
@@ -198,13 +190,13 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .profile-onboarding-actions button {
   min-height: 28px;
   border-radius: var(--radius-md);
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
 }
@@ -220,6 +212,6 @@
 }
 
 .config-profile-status {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3);
 }
 

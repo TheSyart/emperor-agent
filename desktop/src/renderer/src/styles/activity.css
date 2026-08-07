@@ -563,7 +563,7 @@
 
 .tool-raw-details > summary::after {
   content: '›';
-  margin-left: 6px;
+  margin-left: var(--space-2);
   color: rgb(var(--fg-subtle));
 }
 
@@ -1461,7 +1461,7 @@
   margin: 0 2px;
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
@@ -1714,7 +1714,7 @@
 .mode-option b {
   @apply rounded border font-mono text-[10px];
   border-radius: var(--radius-sm);
-  padding: 1px 6px;
+  padding: 1px var(--space-2);
   border-color: rgb(var(--border));
   color: rgb(var(--fg-subtle));
 }
@@ -1782,8 +1782,8 @@
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   background: rgb(var(--bg-elevated));
@@ -1820,18 +1820,18 @@
 .website-card > .website-card-actions {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .website-card-actions button:last-child {
-  padding-inline: 7px;
+  padding-inline: var(--space-2);
 }
 
 .website-card button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 9px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-sm);
   color: rgb(var(--fg-muted));

@@ -1062,7 +1062,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .policy-field > input {
   width: 100%;
   min-height: 35px;
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg-inset));
@@ -1165,7 +1165,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .dialog-head p {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
 }
@@ -1261,7 +1261,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .field input,
 .field select,
 .capability-grid select {
-  padding: 0 10px;
+  padding: 0 var(--space-3);
 }
 
 .field input:focus,
@@ -1314,7 +1314,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   justify-content: space-between;
   gap: var(--space-3);
   min-height: 32px;
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1421,7 +1421,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   justify-content: center;
   min-height: 34px;
   gap: var(--space-2);
-  padding: 0 12px;
+  padding: 0 var(--space-3);
   border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--font-size-xs);
@@ -1567,9 +1567,4 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .spin {
-    animation: none;
-  }
-}
 </style>

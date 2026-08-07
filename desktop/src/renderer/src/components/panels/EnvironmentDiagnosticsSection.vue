@@ -1112,14 +1112,6 @@ function logDetails(details: Record<string, unknown>): string {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .spinning,
-  .environment-progress-track span {
-    animation: none;
-    transition: none;
-  }
-}
-
 @media (max-width: 640px) {
   .environment-head,
   .environment-progress-head {

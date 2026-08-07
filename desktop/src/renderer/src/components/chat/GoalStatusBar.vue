@@ -377,9 +377,4 @@ function actionLabel(action: GoalCardAction): string {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .goal-status-spin {
-    animation: none;
-  }
-}
 </style>

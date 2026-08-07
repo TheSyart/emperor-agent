@@ -212,7 +212,7 @@
   margin: 0 2px;
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
@@ -339,10 +339,10 @@
 /* plan 活动节点:色调胶囊行(图标 + label + detail),轴点随 tone 染色 */
 .plan-activity-node {
   min-height: 34px;
-  padding: 7px 12px;
+  padding: var(--space-2) var(--space-3);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border: 1px solid rgb(var(--border) / 0.7);
   border-radius: var(--radius-sm);
   background: rgb(var(--bg-elevated) / 0.5);
@@ -419,7 +419,7 @@
 }
 
 .plan-activity-actions {
-  margin: 4px 0 0 18px;
+  margin: var(--space-1) 0 0 18px;
   flex-basis: 100%;
   color: rgb(var(--fg-muted));
   list-style: disc;
@@ -431,8 +431,8 @@
 }
 
 .plan-activity-continue {
-  margin: 4px 0 2px;
-  padding: 5px 10px;
+  margin: var(--space-1) 0 2px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid rgb(var(--border-strong));
   border-radius: var(--radius-sm);
   color: rgb(var(--fg));
@@ -479,7 +479,7 @@
 
 .thought-preview::before {
   content: '·';
-  margin-right: 6px;
+  margin-right: var(--space-2);
   font-style: normal;
 }
 
@@ -594,7 +594,7 @@
 }
 
 .thought-quote-body {
-  padding: 4px 0 10px;
+  padding: var(--space-1) 0 var(--space-3);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   line-height: 1.7;
@@ -628,10 +628,10 @@
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   border: 1px solid rgb(var(--border) / 0.7);
   border-radius: var(--radius-sm);
-  padding: 7px 12px;
+  padding: var(--space-2) var(--space-3);
   background: rgb(var(--bg-elevated) / 0.5);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);

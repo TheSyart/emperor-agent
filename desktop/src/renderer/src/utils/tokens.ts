@@ -77,12 +77,12 @@ export interface TokenComposition {
 const DAY = 24 * 60 * 60 * 1000
 
 const PALETTE = [
-  'rgb(var(--seal))',
-  'rgb(var(--amber))',
-  'rgb(var(--jade))',
-  'rgb(var(--ink) / 0.78)',
-  'rgb(var(--muted))',
-  'rgb(var(--seal) / 0.55)',
+  'rgb(var(--accent))',
+  'rgb(var(--warn))',
+  'rgb(var(--ok))',
+  'rgb(var(--fg) / 0.78)',
+  'rgb(var(--fg-muted))',
+  'rgb(var(--accent) / 0.55)',
 ]
 
 const MONTH_LABELS_CN = [
@@ -323,7 +323,7 @@ export function buildStackedBars(
       segments.push({
         model: otherKey,
         total: otherTotal,
-        color: 'rgb(var(--muted) / 0.65)',
+        color: 'rgb(var(--fg-muted) / 0.65)',
       })
     }
     const total = segments.reduce((acc, s) => acc + s.total, 0)
@@ -415,19 +415,19 @@ export function buildTokenComposition(
         key: 'cache_hit',
         label: '输入缓存命中',
         value: cacheHit,
-        color: 'rgb(var(--jade) / 0.9)',
+        color: 'rgb(var(--ok) / 0.9)',
       },
       {
         key: 'cache_miss',
         label: '输入缓存未命中',
         value: cacheMiss,
-        color: 'rgb(var(--seal) / 0.42)',
+        color: 'rgb(var(--accent) / 0.42)',
       },
       {
         key: 'output',
         label: '输出',
         value: output,
-        color: 'rgb(var(--amber) / 0.9)',
+        color: 'rgb(var(--warn) / 0.9)',
       },
     ].filter((part) => part.value > 0) as TokenCompositionPart[],
   }

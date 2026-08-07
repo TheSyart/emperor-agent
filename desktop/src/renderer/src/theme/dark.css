@@ -115,14 +115,4 @@
   --leading-tight: 1.25;
   --leading-body: 1.45;
   --leading-caption: 1.3;
-
-  /* deprecated: 旧别名 → 中性调色板映射,仅供兼容,新代码禁止消费(审计测试强制) */
-  --paper: var(--bg);
-  --paper-2: var(--bg-inset);
-  --ink: var(--fg);
-  --muted: var(--fg-muted);
-  --line: var(--border);
-  --seal: var(--accent);
-  --jade: var(--ok);
-  --amber: var(--warn);
 }

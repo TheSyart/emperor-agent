@@ -100,7 +100,7 @@
 }
 
 .assistant-timeline-shell {
-  gap: 8px;
+  gap: var(--space-2);
   --timeline-axis-x: 7px;
   --timeline-content-inset: 20px;
   --timeline-dot-size: 11px;
@@ -111,8 +111,8 @@
 .assistant-timeline-shell::before {
   display: block;
   left: var(--timeline-axis-x);
-  top: 4px;
-  bottom: 4px;
+  top: var(--space-1);
+  bottom: var(--space-1);
   background: rgb(var(--border) / 0.72);
 }
 
@@ -131,7 +131,7 @@
 }
 
 .timeline-node.text-node::before {
-  top: 14px;
+  top: var(--space-3);
   background: rgb(var(--fg-subtle));
 }
 
@@ -145,8 +145,8 @@
 
 .plan-card-hero {
   display: grid;
-  gap: 8px;
-  padding: 16px 18px 12px;
+  gap: var(--space-2);
+  padding: 16px 18px var(--space-3);
   border-bottom: 1px solid rgb(var(--border));
   background: linear-gradient(180deg, rgb(var(--bg-inset) / 0.42), transparent);
 }
@@ -162,7 +162,7 @@
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .plan-card-title-row strong {
@@ -178,13 +178,13 @@
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .plan-card-chips em {
   border: 1px solid rgb(var(--border));
   border-radius: 999px;
-  padding: 3px 8px;
+  padding: var(--space-1) var(--space-2);
   background: rgb(var(--bg) / 0.48);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
@@ -196,7 +196,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .plan-card-actions {

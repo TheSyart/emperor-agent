@@ -152,7 +152,7 @@ function effectiveLabel(entry: ModelEntry): string {
   align-items: center;
   gap: var(--space-2);
   min-height: 34px;
-  padding: 0 12px;
+  padding: 0 var(--space-3);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
@@ -259,7 +259,7 @@ function effectiveLabel(entry: ModelEntry): string {
 
 .card-action {
   min-height: 30px;
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   font-size: var(--font-size-xs);
 }
 
@@ -324,10 +324,4 @@ function effectiveLabel(entry: ModelEntry): string {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .model-add-button,
-  .card-action {
-    transition: none;
-  }
-}
 </style>

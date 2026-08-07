@@ -16,7 +16,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px 6px;
+  padding: var(--space-3) 16px var(--space-2);
 }
 
 .active-ask-head strong {
@@ -31,7 +31,7 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
 }
@@ -56,18 +56,18 @@
 
 .active-ask-options {
   display: grid;
-  gap: 3px;
-  padding: 0 10px;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
 }
 
 .active-ask-option {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--space-3);
   align-items: start;
   min-height: 30px;
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   color: rgb(var(--fg-muted));
 }
@@ -108,7 +108,7 @@
 }
 
 .active-ask-option-copy small {
-  margin-left: 8px;
+  margin-left: var(--space-2);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
   line-height: 1.45;
@@ -116,8 +116,8 @@
 
 .active-ask-freeform {
   display: grid;
-  gap: 6px;
-  padding: 7px 16px 0;
+  gap: var(--space-2);
+  padding: var(--space-2) 16px 0;
 }
 
 .active-ask-freeform span {
@@ -138,8 +138,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 9px 10px 11px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) 11px;
 }
 
 .active-ask-ignore,
@@ -148,9 +148,9 @@
   min-height: 32px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-2);
   border-radius: 999px;
-  padding: 0 13px;
+  padding: 0 var(--space-3);
   font-size: var(--font-size-md);
 }
 
@@ -165,7 +165,7 @@
 
 .active-ask-ignore kbd {
   border-radius: var(--radius-xs);
-  padding: 1px 5px;
+  padding: 1px var(--space-1);
   background: rgb(var(--fg) / 0.12);
   color: rgb(var(--fg));
   font-size: var(--font-size-xs);
@@ -189,7 +189,7 @@
 }
 
 .active-plan-decision-head {
-  padding: 14px 16px 4px;
+  padding: var(--space-3) 16px var(--space-1);
 }
 
 .active-plan-decision-head strong {
@@ -202,13 +202,13 @@
 .active-plan-decision-option {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
   width: calc(100% - 20px);
   min-height: 34px;
-  margin: 0 10px;
+  margin: 0 var(--space-3);
   border-radius: var(--radius);
-  padding: 7px 10px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   color: rgb(var(--fg-muted));
 }
@@ -231,7 +231,7 @@
 }
 
 .active-plan-decision-freeform {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   cursor: text;
 }
 
@@ -266,17 +266,17 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 9px 10px 11px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) 11px;
 }
 
 .ask-history-card {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
-  padding: 12px;
+  padding: var(--space-3);
   background: rgb(var(--bg-elevated) / 0.76);
 }
 
@@ -284,14 +284,14 @@
   display: flex;
   min-width: 0;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .ask-history-dot {
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
-  margin-top: 6px;
+  margin-top: var(--space-2);
   border-radius: 999px;
   background: rgb(var(--fg-subtle));
 }
@@ -333,21 +333,21 @@
   width: fit-content;
   border: 1px solid rgb(var(--border));
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
 }
 
 .ask-history-answers {
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .ask-history-answer {
   display: grid;
-  gap: 3px;
+  gap: var(--space-1);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   background: rgb(var(--bg) / 0.48);
 }
 
@@ -375,10 +375,10 @@
   align-items: end;
   width: min(760px, 100%);
   margin-inline: auto;
-  gap: 7px;
+  gap: var(--space-2);
   border: 1px solid rgb(var(--danger) / 0.42);
   border-radius: var(--radius);
-  padding: 9px 10px;
+  padding: var(--space-2) var(--space-3);
   background: rgb(var(--bg-elevated) / 0.97);
   box-shadow: 0 10px 28px rgb(var(--shadow-color) / 0.16);
 }
@@ -404,7 +404,7 @@
   min-height: 32px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   background: rgb(var(--bg-inset));
   color: rgb(var(--fg));
   font: inherit;
@@ -415,7 +415,7 @@
   min-height: 32px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  padding: 0 10px;
+  padding: 0 var(--space-3);
   background: rgb(var(--bg));
   color: rgb(var(--fg));
   font-size: var(--font-size-xs);
@@ -460,7 +460,7 @@
 .composer textarea {
   min-height: 58px;
   max-height: 150px;
-  padding: 13px 16px 10px;
+  padding: var(--space-3) 16px var(--space-3);
   font-size: var(--font-size-md);
   line-height: 1.6;
   scrollbar-width: thin;
@@ -488,7 +488,7 @@
 .composer-highlight-layer {
   min-height: 58px;
   max-height: 150px;
-  padding: 13px 16px 10px;
+  padding: var(--space-3) 16px var(--space-3);
   font-size: var(--font-size-md);
   line-height: 1.6;
 }
@@ -497,13 +497,13 @@
   position: relative;
   z-index: var(--z-raised);
   max-height: 168px;
-  margin: 0 10px -1px;
+  margin: 0 var(--space-3) -1px;
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgb(var(--border));
   border-bottom-color: rgb(var(--border) / 0.65);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  padding: 9px 10px 11px;
+  padding: var(--space-2) var(--space-3) 11px;
   background: rgb(var(--bg-elevated));
   box-shadow: 0 -8px 24px rgb(var(--shadow-color) / 0.12);
 }
@@ -537,7 +537,7 @@
   margin: 0 2px;
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   font-size: var(--font-size-sm);
   font-weight: 650;
   line-height: 1.45;
@@ -569,13 +569,13 @@
   border: 0;
   border-radius: 0;
   min-height: 44px;
-  padding: 4px 8px 7px;
+  padding: var(--space-1) var(--space-2) var(--space-2);
   background: transparent;
 }
 
 .composer-left-actions,
 .composer-right-actions {
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .composer-action-divider {

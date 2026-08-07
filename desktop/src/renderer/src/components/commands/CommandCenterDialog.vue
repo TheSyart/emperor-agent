@@ -116,7 +116,7 @@ function onKeydown(event: KeyboardEvent): void {
   z-index: var(--z-modal);
   display: grid;
   place-items: start center;
-  padding: max(10vh, 72px) 24px 24px;
+  padding: max(10vh, 72px) var(--space-6) var(--space-6);
 }
 
 /* 表面(背景/blur/阴影/发丝边)由 .material-3 提供;此处只留结构与圆角。 */
@@ -213,7 +213,7 @@ header button:hover {
 .command-center-copy {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: var(--space-1);
 }
 .command-center-copy strong {
   font:

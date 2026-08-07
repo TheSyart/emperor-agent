@@ -58,7 +58,7 @@ function dismiss(): void {
   align-items: center;
   gap: var(--space-1);
   border-radius: var(--radius-md);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-xs);
   font-weight: 620;
@@ -126,9 +126,4 @@ function dismiss(): void {
   opacity: 0.58;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .composer-lifecycle-dismiss {
-    transition: none;
-  }
-}
 </style>

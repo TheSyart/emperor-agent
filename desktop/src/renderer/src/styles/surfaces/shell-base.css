@@ -70,7 +70,7 @@ select:focus-visible {
 }
 
 .nav-rail {
-  padding-block: 10px;
+  padding-block: var(--space-3);
 }
 
 .rail-brand,
@@ -109,9 +109,9 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   height: 50px;
-  padding: 0 12px 0 14px;
+  padding: 0 var(--space-3) 0 var(--space-3);
   border-bottom: 1px solid rgb(var(--border));
   color: rgb(var(--fg-muted));
   letter-spacing: 0;
@@ -138,7 +138,7 @@ select:focus-visible {
   gap: 2px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  padding: 4px;
+  padding: var(--space-1);
   background: rgb(var(--bg-elevated));
   box-shadow: 0 12px 32px rgb(var(--shadow-color) / 0.12);
 }
@@ -146,10 +146,10 @@ select:focus-visible {
 .session-create-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 32px;
   border-radius: var(--radius-sm);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
   text-align: left;
@@ -162,8 +162,8 @@ select:focus-visible {
 
 .session-primary-actions {
   display: grid;
-  gap: 4px;
-  padding: 10px 8px 8px;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2) var(--space-2);
   border-bottom: 1px solid rgb(var(--border));
 }
 
@@ -171,9 +171,9 @@ select:focus-visible {
   display: flex;
   min-height: 34px;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   border-radius: var(--radius-md);
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-md);
   font-weight: 600;
@@ -218,15 +218,15 @@ select:focus-visible {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 8px 8px 14px;
+  padding: var(--space-2) var(--space-2) var(--space-3);
 }
 
 .session-group-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-height: 28px;
-  padding: 8px 8px 4px;
+  padding: var(--space-2) var(--space-2) var(--space-1);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
   font-weight: 650;
@@ -234,16 +234,16 @@ select:focus-visible {
 }
 
 .session-group-label.chat-label {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .project-row {
   display: flex;
   min-height: 42px;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border-radius: var(--radius-md);
-  padding: 5px 7px;
+  padding: var(--space-1) var(--space-2);
   color: rgb(var(--fg-muted));
 }
 
@@ -298,7 +298,7 @@ select:focus-visible {
 }
 
 .session-empty-row {
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-sm);
 }
@@ -307,10 +307,10 @@ select:focus-visible {
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  padding: 6px 6px 6px 9px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2);
   color: rgb(var(--fg-muted));
   cursor: pointer;
   transition:
@@ -337,7 +337,7 @@ select:focus-visible {
 .session-row.build-row {
   margin-left: 22px;
   min-height: 40px;
-  padding-left: 8px;
+  padding-left: var(--space-2);
 }
 
 .session-row-main {
@@ -351,7 +351,7 @@ select:focus-visible {
   overflow: hidden;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 2px var(--space-2);
   font-size: var(--font-size-2xs);
   font-weight: 650;
   line-height: 1.35;
@@ -405,7 +405,7 @@ select:focus-visible {
 .session-rename-wrap input {
   height: 30px;
   border-radius: var(--radius-sm);
-  padding: 4px 7px;
+  padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-sm);
 }
 

@@ -128,7 +128,7 @@ onBeforeUnmount(() =>
   z-index: var(--z-base);
   width: 100%;
   margin-bottom: -10px;
-  padding: 0 8px 10px;
+  padding: 0 var(--space-2) var(--space-3);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-lg) var(--radius-lg) var(--radius) var(--radius);
   /* material-1(交互层 chip):半透明 + blur,贴入 composer 顶部。 */
@@ -156,7 +156,7 @@ onBeforeUnmount(() =>
   flex: 1;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .queue-state {
@@ -220,7 +220,7 @@ onBeforeUnmount(() =>
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   font-size: var(--font-size-xs);
 }
 
@@ -240,7 +240,7 @@ onBeforeUnmount(() =>
   right: 0;
   bottom: 34px;
   width: 142px;
-  padding: 4px;
+  padding: var(--space-1);
   border: 1px solid rgb(var(--border-strong));
   border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated));
@@ -250,7 +250,7 @@ onBeforeUnmount(() =>
 .queue-menu-popover button {
   width: 100%;
   min-height: 32px;
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   display: flex;
   align-items: center;
   gap: var(--space-2);

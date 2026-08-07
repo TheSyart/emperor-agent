@@ -1594,7 +1594,7 @@
   z-index: var(--z-lightbox);
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-6);
   background: rgb(var(--shadow-color) / 0.78);
   backdrop-filter: blur(var(--material-1-blur));
 }
@@ -1622,8 +1622,8 @@
 
 .attachment-preview-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: var(--space-3);
+  right: var(--space-3);
   z-index: var(--z-base);
   display: grid;
   width: 34px;
@@ -1651,7 +1651,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 20px;
-  padding: 11px 14px;
+  padding: 11px var(--space-3);
   color: rgb(var(--fg));
 }
 
