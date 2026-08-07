@@ -134,18 +134,18 @@ function toggleDesktopPet() {
 <style scoped>
 .pet-hero {
   display: flex;
-  gap: 24px;
+  gap: var(--space-6);
   align-items: center;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 24px;
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid rgb(var(--border));
+  margin-bottom: var(--space-6);
 }
 
 .pet-preview {
   width: 140px;
   height: 160px;
   border-radius: var(--radius-lg);
-  background: var(--color-surface-variant);
+  background: rgb(var(--bg-inset));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -177,7 +177,7 @@ function toggleDesktopPet() {
 
 .pet-meta-label {
   font-size: var(--font-size-xs);
-  color: var(--color-text-fg-muted);
+  color: rgb(var(--fg-muted));
   text-transform: uppercase;
 }
 
@@ -187,7 +187,7 @@ function toggleDesktopPet() {
 }
 
 .pet-error {
-  color: var(--color-error);
+  color: rgb(var(--danger));
   font-size: var(--font-size-md);
   margin-bottom: var(--space-3);
 }
@@ -197,18 +197,18 @@ function toggleDesktopPet() {
 }
 
 .pet-sprites {
-  padding-top: 8px;
+  padding-top: var(--space-2);
 }
 
 .pet-sprites h2 {
-  font-size: 16px;
-  margin-bottom: 4px;
+  font-size: var(--font-size-xl);
+  margin-bottom: var(--space-1);
 }
 
 .section-desc {
   font-size: var(--font-size-md);
-  color: var(--color-text-fg-muted);
-  margin-bottom: 16px;
+  color: rgb(var(--fg-muted));
+  margin-bottom: var(--space-4);
 }
 
 .sprite-grid {
@@ -222,14 +222,14 @@ function toggleDesktopPet() {
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) 8px;
+  padding: var(--space-3) var(--space-2);
   border-radius: var(--radius-lg);
-  background: var(--color-surface-variant);
-  transition: background 0.15s;
+  background: rgb(var(--bg-inset));
+  transition: background var(--duration-fast);
 }
 
 .sprite-card:hover {
-  background: var(--color-surface-hover);
+  background: rgb(var(--border-strong) / 0.34);
 }
 
 .sprite-img {
@@ -240,6 +240,6 @@ function toggleDesktopPet() {
 
 .sprite-card figcaption {
   font-size: var(--font-size-xs);
-  color: var(--color-text-fg-muted);
+  color: rgb(var(--fg-muted));
 }
 </style>

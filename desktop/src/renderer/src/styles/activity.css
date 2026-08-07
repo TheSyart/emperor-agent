@@ -582,13 +582,12 @@
 }
 
 /* ── Control cards (Ask / Plan) ──────────────────────────────────────────── */
+/* 内联时间线卡片:背景/blur/阴影由 .material-2 提供,此处只留结构与状态边框。 */
 .control-card {
   @apply w-full max-w-full overflow-hidden rounded-md border text-sm;
   padding: var(--space-3);
   border-radius: var(--radius);
   border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
-  box-shadow: none;
 }
 
 .control-card.waiting {

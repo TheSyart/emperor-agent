@@ -2334,8 +2334,8 @@
 
 .model-setup-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: var(--space-3);
+  right: var(--space-3);
   z-index: var(--z-raised);
   display: grid;
   width: 32px;
@@ -2367,7 +2367,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 22px;
+  gap: var(--space-6);
   padding: 32px 30px 28px;
 }
 
@@ -2385,8 +2385,8 @@
 
 .model-setup-intro {
   display: grid;
-  gap: 12px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
 .model-setup-intro h2 {
@@ -2409,12 +2409,12 @@
 .model-setup-status {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   max-width: 420px;
   border: 1px solid rgb(var(--border) / 0.72);
   border-radius: var(--radius-md);
   background: rgb(var(--bg-inset) / 0.36);
-  padding: 11px 12px;
+  padding: var(--space-3);
 }
 
 .model-setup-status::before {
@@ -2438,9 +2438,9 @@
   margin-top: auto;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 18px;
+  gap: var(--space-4);
   border-top: 1px solid rgb(var(--border) / 0.7);
-  padding-top: 18px;
+  padding-top: var(--space-5);
 }
 
 .model-setup-actions p {
@@ -2455,7 +2455,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .model-setup-visual {
@@ -2491,7 +2491,7 @@
   }
 
   .model-setup-copy {
-    padding: 24px;
+    padding: var(--space-6);
   }
 
   .model-setup-visual {

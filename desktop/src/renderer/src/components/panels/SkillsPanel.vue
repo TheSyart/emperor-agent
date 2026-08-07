@@ -686,7 +686,7 @@ function missingCount() {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 44px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);

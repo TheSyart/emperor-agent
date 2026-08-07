@@ -705,7 +705,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-tool-list,
 .environment-history {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .environment-head > div:first-child,
@@ -717,7 +717,7 @@ function logDetails(details: Record<string, unknown>): string {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .environment-head > div:first-child span {
@@ -939,7 +939,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-logs summary {
   min-height: 40px;
   cursor: pointer;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   color: rgb(var(--fg-muted));
   list-style: none;
 }
@@ -957,7 +957,7 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-log-list > div {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--space-2);
   border-bottom: 1px solid rgb(var(--border));
   padding: var(--space-2) 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -978,7 +978,7 @@ function logDetails(details: Record<string, unknown>): string {
 }
 
 .environment-more {
-  margin: 8px 10px;
+  margin: var(--space-2) var(--space-3);
 }
 
 .environment-confirm-modal {
@@ -1029,12 +1029,12 @@ function logDetails(details: Record<string, unknown>): string {
 .environment-plan-steps,
 .environment-license-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .environment-plan-steps article {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
   padding-top: var(--space-3);
 }
@@ -1076,7 +1076,7 @@ function logDetails(details: Record<string, unknown>): string {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
-  gap: 8px;
+  gap: var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
 }

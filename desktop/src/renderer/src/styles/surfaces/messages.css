@@ -5,14 +5,15 @@
 
 .view-head {
   min-height: 48px;
-  padding: 0 18px;
+  padding: 0 var(--space-4);
   border-color: rgb(var(--border));
-  background: rgb(var(--bg));
+  background: rgb(var(--bg-elevated) / 0.6);
 }
 
 .view-head h1 {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-lg);
   font-weight: 650;
+  letter-spacing: var(--tracking-tight);
 }
 
 .view-head p {
@@ -21,7 +22,7 @@
 }
 
 .view-readable .view-body {
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .view-readable .view-body > * {
@@ -140,7 +141,6 @@
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius);
-  background: rgb(var(--bg-elevated));
 }
 
 .plan-card-hero {

@@ -458,7 +458,7 @@ function message(reason: unknown): string {
 
 .checkpoint-git-preview {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid rgb(var(--border));
@@ -502,7 +502,7 @@ function message(reason: unknown): string {
 .checkpoint-paths,
 .checkpoint-conflicts {
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
   margin: var(--space-2) 0 0 26px;
   color: rgb(var(--fg-muted));
   font:

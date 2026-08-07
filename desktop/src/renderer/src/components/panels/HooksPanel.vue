@@ -1534,7 +1534,7 @@ function sourceStatus(source: {
   display: block;
   overflow-x: hidden;
   overflow-y: auto;
-  padding-bottom: 20px;
+  padding-bottom: var(--space-5);
   scrollbar-gutter: stable;
 }
 
@@ -1593,7 +1593,7 @@ function sourceStatus(source: {
 .hooks-summary-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: var(--space-2) var(--space-4);
   padding: 2px 1px;
   color: rgb(var(--fg-subtle));
   font-size: var(--font-size-xs);
@@ -1722,7 +1722,7 @@ function sourceStatus(source: {
   align-items: center;
   gap: var(--space-3);
   border-top: 1px solid rgb(var(--border));
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
 }
 
@@ -1943,7 +1943,7 @@ function sourceStatus(source: {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  padding: 8px 11px 0;
+  padding: var(--space-2) var(--space-3) 0;
 }
 
 .event-capabilities span {
@@ -1959,9 +1959,9 @@ function sourceStatus(source: {
   min-height: 52px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
-  padding: 8px 11px;
+  padding: var(--space-2) var(--space-3);
 }
 
 .match-row strong,
@@ -1996,7 +1996,7 @@ function sourceStatus(source: {
   min-height: 38px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   border-top: 1px solid rgb(var(--border));
   padding: 0 8px 0 11px;
 }
@@ -2070,7 +2070,7 @@ function sourceStatus(source: {
 .validation-list > div {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   border-top: 1px solid rgb(var(--border));
   padding: var(--space-3) 11px;
   font-size: var(--font-size-2xs);
@@ -2174,7 +2174,7 @@ function sourceStatus(source: {
     align-items: flex-start;
     flex-direction: column;
     justify-content: center;
-    padding-block: 8px;
+    padding-block: var(--space-2);
   }
 }
 </style>

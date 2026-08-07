@@ -970,7 +970,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .model-panel-shell {
   position: relative;
   display: grid;
-  gap: 20px;
+  gap: var(--space-5);
   min-height: 260px;
 }
 
@@ -979,7 +979,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   align-items: center;
   justify-content: center;
   min-height: 220px;
-  gap: 8px;
+  gap: var(--space-2);
   color: rgb(var(--fg-muted));
   font-size: var(--font-size-sm);
 }
@@ -987,8 +987,8 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 .model-config-note {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 13px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
   background: rgb(var(--bg-elevated) / 0.44);
@@ -1011,8 +1011,8 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .execution-policy-card {
   display: grid;
-  gap: 16px;
-  padding: 16px;
+  gap: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   background: rgb(var(--bg-elevated) / 0.52);
@@ -1022,7 +1022,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .policy-head h2 {
@@ -1127,7 +1127,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-6);
   background: rgb(var(--shadow-color) / 0.64);
   backdrop-filter: blur(2px);
 }
@@ -1149,8 +1149,8 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
+  gap: var(--space-4);
+  padding: var(--space-4);
 }
 
 .dialog-head {
@@ -1191,14 +1191,14 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: grid;
   gap: var(--space-3);
   overflow: auto;
-  padding: 16px 18px 24px;
+  padding: var(--space-4) var(--space-4) var(--space-6);
 }
 
 .form-section {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
-  padding: 15px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   background: rgb(var(--bg-elevated) / 0.46);
@@ -1380,7 +1380,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 
 .secret-input-wrap button {
   position: absolute;
-  right: 3px;
+  right: var(--space-1);
   display: grid;
   place-items: center;
   width: 31px;
@@ -1407,7 +1407,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
 }
 
 .model-id-row {
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .model-id-row input {
@@ -1497,7 +1497,7 @@ async function runTest(kind: 'text' | 'vision'): Promise<void> {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .test-result {

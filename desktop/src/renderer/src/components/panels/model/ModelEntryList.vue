@@ -117,7 +117,7 @@ function effectiveLabel(entry: ModelEntry): string {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .model-list-head h2 {
@@ -184,7 +184,7 @@ function effectiveLabel(entry: ModelEntry): string {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 13px;
+  gap: var(--space-3);
 }
 
 .provider-avatar {
@@ -215,14 +215,14 @@ function effectiveLabel(entry: ModelEntry): string {
 .model-card-copy {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .model-card-title-row {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .model-card-title-row strong,

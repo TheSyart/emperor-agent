@@ -92,17 +92,20 @@
 .view-head {
   @apply relative flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3;
   border-color: rgb(var(--border));
-  background: rgb(var(--bg));
+  background: rgb(var(--bg-elevated) / 0.6);
 }
 
 .view-head h1 {
-  @apply text-sm font-semibold;
+  font-size: var(--font-size-lg);
+  font-weight: 650;
+  letter-spacing: var(--tracking-tight);
   color: rgb(var(--fg));
 }
 
 .view-head p {
-  @apply mt-0.5 text-xs;
-  color: rgb(var(--fg-subtle));
+  @apply mt-0.5;
+  font-size: var(--font-size-xs);
+  color: rgb(var(--fg) / var(--text-secondary));
 }
 
 .view-body {
