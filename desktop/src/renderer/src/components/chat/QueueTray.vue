@@ -131,7 +131,10 @@ onBeforeUnmount(() =>
   padding: 0 8px 10px;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-lg) var(--radius-lg) var(--radius) var(--radius);
-  background: rgb(var(--bg-inset));
+  /* material-1(交互层 chip):半透明 + blur,贴入 composer 顶部。 */
+  background: rgb(var(--material-1-bg) / var(--material-1-alpha));
+  backdrop-filter: blur(var(--material-1-blur));
+  -webkit-backdrop-filter: blur(var(--material-1-blur));
   color: rgb(var(--fg));
   overflow: visible;
 }
