@@ -44,6 +44,23 @@ export function shouldVirtualize(messageCount: number): boolean {
   return messageCount >= VIRTUALIZE_THRESHOLD
 }
 
+export const APPEND_BATCH_LIMIT = 4
+
+/**
+ * 仅追加判定（Stage5 消息流 stagger）：前缀一致且尾部增量 <= 4 才算"新消息到达"。
+ * 会话切换 / 历史装载 / 替换 / 删除都会破坏前缀或超出增量 → 返回 false,
+ * 调用方据此 remount 消息栈(静默呈现),避免 TransitionGroup 对整批旧行触发进场风暴。
+ */
+export function isAppendChange(
+  prev: ChatMessage[] | undefined,
+  next: ChatMessage[],
+): boolean {
+  if (!prev) return false
+  const delta = next.length - prev.length
+  if (delta < 0 || delta > APPEND_BATCH_LIMIT) return false
+  return prev.every((message, index) => next[index]?.id === message.id)
+}
+
 export interface ExpansionStore {
   isOpen(key: string, fallback: boolean): boolean
   setOpen(key: string, open: boolean): void

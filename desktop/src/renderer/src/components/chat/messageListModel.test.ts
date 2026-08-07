@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   createExpansionStore,
+  isAppendChange,
   messageScrollSignature,
   shouldFollowBottom,
   shouldVirtualize,
 } from './messageListModel'
 import type { AssistantMessage, ChatMessage } from '../../types'
+
+function row(id: string): ChatMessage {
+  return { id, role: 'user', content: id }
+}
 
 describe('messageScrollSignature', () => {
   it('tracks only the last visible message changes needed for bottom pinning', () => {
@@ -86,6 +91,51 @@ describe('shouldVirtualize (Wave6)', () => {
     expect(shouldVirtualize(119)).toBe(false)
     expect(shouldVirtualize(120)).toBe(true)
     expect(shouldVirtualize(1000)).toBe(true)
+  })
+})
+
+describe('isAppendChange (Stage5)', () => {
+  it('accepts a 1-2 row append with identical prefix', () => {
+    const prev = [row('u1'), row('a1')]
+    expect(isAppendChange(prev, [...prev, row('u2')])).toBe(true)
+    expect(isAppendChange(prev, [...prev, row('u2'), row('a2')])).toBe(true)
+  })
+
+  it('accepts the first message after an empty conversation', () => {
+    expect(isAppendChange([], [row('u1')])).toBe(true)
+  })
+
+  it('rejects bulk loads and session switches (wholesale id replacement)', () => {
+    const prev = [row('u1'), row('a1')]
+    expect(isAppendChange(undefined, [row('u1')])).toBe(false)
+    expect(isAppendChange(prev, [row('n1'), row('n2')])).toBe(false)
+  })
+
+  it('treats a small burst from an empty conversation as append', () => {
+    // 空数组的前缀检查是空真;3 条 <= 批量上限,新会话开场动画是期望行为。
+    expect(isAppendChange([], [row('u1'), row('a1'), row('u2')])).toBe(true)
+  })
+
+  it('rejects in-place replacement and removal even at the same count', () => {
+    const prev = [row('u1'), row('a1'), row('u2')]
+    const replaced = [row('u1'), row('a1'), row('u3')]
+    expect(isAppendChange(prev, replaced)).toBe(false)
+    expect(isAppendChange(prev, [row('u1'), row('a1')])).toBe(false)
+  })
+
+  it('rejects bursts beyond the batch limit', () => {
+    const prev = [row('u1')]
+    const withinLimit = [row('u1'), row('a1'), row('u2'), row('a2'), row('u3')]
+    expect(isAppendChange(prev, withinLimit)).toBe(true)
+    const beyond = [
+      row('u1'),
+      row('a1'),
+      row('u2'),
+      row('a2'),
+      row('u3'),
+      row('a3'),
+    ]
+    expect(isAppendChange(prev, beyond)).toBe(false)
   })
 })
 

@@ -16,7 +16,9 @@
   padding-bottom: 1.25rem;
 }
 
-/* 滚动锁定（Wave4.1）：解锁跟随时的回底浮钮 */
+/* 滚动锁定（Wave4.1）：解锁跟随时的回底浮钮。
+   ⚠ 必须保持 bottom >= 16px：.messages-pane 的 scroll-fade-y 底部淡出带是 12px,
+   低于 16px 按钮会被遮罩渐隐裁切。 */
 .scroll-to-bottom-btn {
   @apply sticky bottom-4 z-10 mx-auto block rounded-full border border-border bg-bg-elevated/90 px-4 py-1.5 text-xs shadow-md backdrop-blur transition hover:bg-bg-elevated;
 }

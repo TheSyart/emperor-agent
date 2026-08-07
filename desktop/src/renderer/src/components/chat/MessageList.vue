@@ -13,10 +13,12 @@ import { turnChangesByAssistantMessage } from './turnChangesAttachmentModel'
 import { CHAT_EXPANSION_STORE_KEY } from './expansionStoreKey'
 import {
   createExpansionStore,
+  isAppendChange,
   messageScrollSignature,
   shouldFollowBottom,
   shouldVirtualize,
 } from './messageListModel'
+import TransitionSpringGroup from '../motion/TransitionSpringGroup.vue'
 import wordmarkUrl from '../../../../../../assets/generated/emperoragent-wordmark.png'
 
 const props = defineProps<{
@@ -30,6 +32,17 @@ const emit = defineEmits<{
 }>()
 const scroller = ref<HTMLElement | null>(null)
 const followBottom = ref(true)
+
+// Stage5：消息栈 remount 键。仅"新消息到达"逐行进场;会话切换/历史装载/
+// 替换/删除都 bump 此键整体 remount(静默呈现),避免 TransitionGroup 对整批
+// 旧行触发进场风暴(每行一次同步 reflow)。
+const stackKey = ref(0)
+watch(
+  () => props.messages,
+  (next, prev) => {
+    if (!isAppendChange(prev, next)) stackKey.value += 1
+  },
+)
 
 // Wave6：展开态提升——虚拟卸载重挂不丢 <details> 展开，version 触发行高重测
 const expansion = createExpansionStore()
@@ -101,7 +114,11 @@ function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
 </script>
 
 <template>
-  <section ref="scroller" class="messages-pane" @scroll.passive="onScroll">
+  <section
+    ref="scroller"
+    class="messages-pane scroll-fade-y"
+    @scroll.passive="onScroll"
+  >
     <div v-if="!props.messages.length" class="welcome-card animate-rise-in">
       <div class="welcome-brand-lockup" aria-label="emperoragent">
         <img
@@ -147,7 +164,13 @@ function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
         </DynamicScrollerItem>
       </template>
     </DynamicScroller>
-    <div v-else class="message-stack">
+    <TransitionSpringGroup
+      v-else
+      :key="stackKey"
+      tag="div"
+      class="message-stack"
+      :appear="false"
+    >
       <MessageRow
         v-for="message in props.messages"
         :key="message.id"
@@ -157,7 +180,7 @@ function changesFor(message: ChatMessage): TurnChangeSnapshot | undefined {
         @continue-execution="emit('continueExecution')"
         @open-review="emit('openReview', $event)"
       />
-    </div>
+    </TransitionSpringGroup>
 
     <button
       v-if="!followBottom && props.messages.length"
