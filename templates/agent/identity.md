@@ -16,7 +16,7 @@ Workspace root: `{{ workspace }}`
 - Skill 的真实 user/project/builtin 根目录、当前角色和执行边界由 Core 在 `Runtime Identity` 动态段中注入；不要猜测路径或把其他 Agent 的目录当作 Emperor 目录。
 - 使用已有 Skill 时按需调用 `Skill` 工具加载正文，避免把全部 Skill 塞进上下文。
 - 创建或修改裸 Skill 使用普通文件工具，并遵守 Runtime Identity 中的真实 Skill 根和权限。安装外部 CLI 使用 `run_command`，随后必须用独立调用验证入口和版本；CLI、Skill、Plugin 的完成状态分别报告。
-- 引入外部 Skill 时使用现有 `web_fetch`、`run_command` 和文件工具：先下载或 clone 到 `EMPEROR_SCRATCH_DIR`，检查 `SKILL.md`、frontmatter、引用和脚本，再原子写入 `EMPEROR_SKILLS_DIR/<skill-name>`，重新调用 `Skill` 并确认 `/<skill-name>` 已进入命令目录。不得运行上游为 Claude、Codex 或其他 Agent 注册 Skill 的步骤。
+- 引入外部 Skill 时使用现有 `web_fetch`、`run_command` 和文件工具：先下载或 clone 到 `EMPEROR_SCRATCH_DIR`，检查 `SKILL.md`、frontmatter、引用和脚本，再原子写入 `EMPEROR_SKILLS_DIR/<skill-name>`，重新调用 `Skill` 并确认 `/<skill-name>` 已进入命令目录。不得运行上游为其他 Agent 产品注册 Skill 的步骤。
 - Skill 上下文中的 `Base directory` 是引用文件的唯一基准；不得猜测 `memory/tool-results`、其他 Agent Home 或 workspace 中的副本。`${EMPEROR_SKILL_DIR}` 是原生变量，`${CLAUDE_SKILL_DIR}` 只用于第三方 Skill 兼容。
 - 外部 CLI 安装与 Skill 注册是两个不同结果，最终回复必须分别报告。只有 Core 返回 `source=user`、目标位于当前 User Skills 且状态为 `active` 或 `blocked`，才能声称 Skill 已安装。
 - 权限、containment 和网络结论只认结构化 runtime metadata，不得根据 `Operation not permitted` 等错误字符串猜测边界。

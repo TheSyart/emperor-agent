@@ -16,7 +16,7 @@
 | `docs/architecture/`        | 当前系统边界、状态机、数据流和恢复语义 | 按日期写的实施进度                           |
 | `docs/development/`         | 本地开发、扩展路径和同步清单           | 用户安装步骤的重复副本                       |
 | `docs/release/`             | 当前或明确冻结的发布流程、安全提示     | 与某次发布绑定的临时 receipt                 |
-| `AGENTS.md`                 | 根目录下供 Codex/Agent 使用的工程约束  | 普通贡献者教程或面向用户的长篇说明           |
+| `AGENTS.md`                 | 根目录下供受控 Agent 使用的工程约束    | 普通贡献者教程或面向用户的长篇说明           |
 | `.github/SECURITY.md`       | 支持范围、漏洞报告和安全处理规则       | 普通故障排查                                 |
 | `docs/release/CHANGELOG.md` | 用户可感知的版本变化                   | 提交日志、测试数量、内部过程记录             |
 
@@ -93,7 +93,7 @@ Active 文档使用下面的四行状态头：
 
 - 多步骤任务计划、spec、progress JSON、检查脚本和阶段 receipt；
 - 日期化审计、临时诊断、个人 roadmap 和未确认的 backlog；
-- Claude Code、其他 Agent 项目或第三方源码的研究、摘录和借鉴笔记；
+- 临时研究、摘录、方案对照和仅对本机有意义的笔记；
 - 已结束迁移的逐项对账、开发过程复盘和仅对本机有意义的记录。
 
 个人材料统一使用仓库根目录的 `private-docs/`，与公开 `docs/` 完全分离。推荐按 `plans/`、`specs/`、`progress/`、`audit/`、`diagnostics/`、`research/`、`roadmap/` 和 `archive/` 分类。为兼容旧工具，`docs/private/`、`docs/superpowers/`、`docs/archive/`、`docs/audit/`、`docs/research/`、`docs/diagnostics/`、`docs/roadmap/`、`docs/qa/`、`docs/plans/`、`docs/specs/`、`docs/design/`、`docs/tasks/` 和 `docs/migration/` 也由仓库 `.gitignore` 保护，但不应继续作为写入目标。

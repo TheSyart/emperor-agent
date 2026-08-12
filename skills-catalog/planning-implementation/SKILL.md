@@ -60,11 +60,11 @@ These thoughts mean STOP — you're producing an insufficient plan:
 
 ### Phase 0: Setup
 
-**Goal:** Confirm toolchain and reference sources are ready. Create directory skeleton.
+**Goal:** Confirm toolchain and task inputs are ready. Create directory skeleton.
 
-1. Verify toolchain (Claude Code/Codex version, skill-creator available)
-2. Locate and read all input materials (requirements docs, specs, issues, designs, reference code)
-3. For migrations/refactors: confirm reference source is complete and readable
+1. Verify toolchain (runtime version, skill-creator available)
+2. Locate and read all input materials (requirements docs, specs, issues, designs, relevant project files)
+3. For migrations/refactors: confirm the target files and constraints are complete and readable
 4. Determine plan output location: `docs/superpowers/plans/YYYY-MM-DD-<name>.md`
 
 **Output:** Toolchain confirmed, reference source inventory, output path ready.

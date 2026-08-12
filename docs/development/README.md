@@ -79,7 +79,7 @@ Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/co
 
 ## 文档责任
 
-行为变化不是“代码完成、文档以后再补”。根据[文档维护规范](../DOCUMENTATION.md)定位事实源和受影响文档；新增当前说明加入[文档中心](../README.md)。任务计划、审计过程、progress、研究和外部源码借鉴材料统一保存在仓库根目录下被 Git 忽略的 `private-docs/` 中。
+行为变化不是“代码完成、文档以后再补”。根据[文档维护规范](../DOCUMENTATION.md)定位事实源和受影响文档；新增当前说明加入[文档中心](../README.md)。任务计划、审计过程、progress、研究和临时对照材料统一保存在仓库根目录下被 Git 忽略的 `private-docs/` 中。
 
 ## 提交前
 

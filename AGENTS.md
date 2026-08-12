@@ -1,6 +1,6 @@
 # AGENTS.md · Emperor Agent 协作指南
 
-> 本文件固定保存在仓库根目录，供 Codex 和其他受控 Agent 在开发 Emperor Agent 时读取。普通用户说明以 `README.md` 和 `docs/user/` 为准；面向人工开发者的操作指南以 `docs/development/` 为准。
+> 本文件固定保存在仓库根目录，供参与开发的受控 Agent 读取。普通用户说明以 `README.md` 和 `docs/user/` 为准；面向人工开发者的操作指南以 `docs/development/` 为准。
 
 ## 0. 沟通与原则
 
@@ -45,7 +45,7 @@
 - `docs/architecture/`：当前系统边界、执行链路、权限、Goal 与全局存储架构。
 - `docs/development/`：源码开发和跨层扩展清单。
 - `docs/release/`：当前 Preview、安全说明、冻结 Stable 流程和工具供应链审核。
-- `private-docs/`：仓库根目录下的本地个人开发资料，保存实施计划、审计、研究、进度和外部源码借鉴材料；整个目录被 Git 忽略。
+- `private-docs/`：仓库根目录下的本地个人开发资料，保存实施计划、审计、研究、进度和临时对照材料；整个目录被 Git 忽略。
 - `memory/`：旧版本地运行数据残留位置，永不提交。当前 Emperor Home 默认是 `~/.emperor`（内部兼容名 `stateRoot`，可用 `EMPEROR_CONFIG_DIR` 整体覆盖），不再默认写入仓库或项目源码目录，详见 `docs/architecture/global-state-store.md`。
 
 ## 4. 本地运行
@@ -113,7 +113,7 @@ npm --prefix desktop run screenshots
 - `emperor.local.json`（旧配置迁移残留）
 - `.env`
 - `private-docs/`；兼容旧工具的 `docs/private/`、`docs/superpowers/`、`docs/archive/` 也不得提交
-- 日期化任务计划、progress、审计、研究和外部源码借鉴材料
+- 日期化任务计划、progress、审计、研究和临时对照材料
 - `desktop/node_modules/`
 - `desktop/out/`
 - `desktop/dist/`
@@ -141,5 +141,5 @@ npm --prefix desktop run screenshots
 - 文档总入口是 `docs/README.md`，分类、状态和事实源映射见 `docs/DOCUMENTATION.md`。
 - 公共文档只维护当前有效的 `Active` 内容；被替代但暂留原位的说明标为 `Superseded` 并链接新入口。
 - Slash command、权限、模型 schema、CoreApi、runtime event、`stateRoot`、Goal、Release workflow 或 renderer 路由变化时，必须按事实源映射同步所有受影响的 Active 文档。
-- 多步骤实施计划、progress、检查脚本、日期化审计、研究和外部源码借鉴材料统一写入根目录 `private-docs/`；公共文档不得链接这些材料。
+- 多步骤实施计划、progress、检查脚本、日期化审计、研究和临时对照材料统一写入根目录 `private-docs/`；公共文档不得链接这些材料。
 - Active 文档不写固定 Preview 版本、测试数量、临时 commit 或未开放的产品入口。存在 store/service 不等于已经提供用户界面。
