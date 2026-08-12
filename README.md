@@ -312,7 +312,7 @@ npm --prefix desktop run package:verify
 
 `package:verify` 会加载真实打包后的 sandboxed renderer，并验证 preload Core bridge 与受管附件协议；仅生成未打包目录不能替代该门禁。
 
-分支、目录约定、不应提交的数据和扩展方式统一记录在 [`AGENTS.md`](AGENTS.md)，README 不重复维护这些规则。
+分支、目录约定、不应提交的数据和扩展方式统一记录在[开发指南](docs/development/README.md)，README 不重复维护这些规则。
 
 <a id="docs"></a>
 
@@ -335,7 +335,7 @@ npm --prefix desktop run package:verify
 | 安全边界与私密报告           | [Security Policy](.github/SECURITY.md)                            |
 | 版本变化                     | [Changelog](docs/release/CHANGELOG.md)                            |
 | 文档维护机制                 | [文档维护规范](docs/DOCUMENTATION.md)                             |
-| 开发协作规范                 | [AGENTS.md](AGENTS.md)                                            |
+| 开发协作规范                 | [开发指南](docs/development/README.md)                            |
 
 ## License
 

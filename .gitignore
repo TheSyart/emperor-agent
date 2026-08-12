@@ -1,4 +1,5 @@
 # Environment / local config
+/AGENTS.md
 .env
 .env.*
 !.env.example

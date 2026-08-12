@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
 > 最后核验：2026-08-12<br>
-> 事实源：当前 TypeScript / Electron 主线、根目录 `README.md` 与 `AGENTS.md`
+> 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、发布流程和历史记录。
 
@@ -73,4 +73,4 @@
 
 ## 维护规则
 
-文档分类、事实源映射、归档规则和人工验收清单见 [文档维护规范](DOCUMENTATION.md)。开发改动仍需遵守根目录 [AGENTS.md](../AGENTS.md)。
+文档分类、事实源映射、归档规则和人工验收清单见 [文档维护规范](DOCUMENTATION.md)。源码开发约定见[开发指南](development/README.md)。

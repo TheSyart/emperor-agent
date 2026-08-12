@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、文档作者<br>
 > 最后核验：2026-08-12<br>
-> 事实源：仓库文档结构、`AGENTS.md`、`scripts/check.sh`、`scripts/check_public_docs.mjs`
+> 事实源：仓库文档结构、`scripts/check.sh`、`scripts/check_public_docs.mjs`
 
 本规范解决三个问题：一份说明应该放在哪里，什么变化必须同步哪些文档，怎样判断文档可以合并。
 
@@ -16,7 +16,6 @@
 | `docs/architecture/`        | 当前系统边界、状态机、数据流和恢复语义 | 按日期写的实施进度                           |
 | `docs/development/`         | 本地开发、扩展路径和同步清单           | 用户安装步骤的重复副本                       |
 | `docs/release/`             | 当前或明确冻结的发布流程、安全提示     | 与某次发布绑定的临时 receipt                 |
-| `AGENTS.md`                 | 根目录下供受控 Agent 使用的工程约束    | 普通贡献者教程或面向用户的长篇说明           |
 | `.github/SECURITY.md`       | 支持范围、漏洞报告和安全处理规则       | 普通故障排查                                 |
 | `docs/release/CHANGELOG.md` | 用户可感知的版本变化                   | 提交日志、测试数量、内部过程记录             |
 
@@ -49,7 +48,7 @@ Active 文档使用下面的四行状态头：
 | ACP method / capability     | `packages/core/src/acp/`、官方 ACP schema、wire test                     | README、架构总览、Headless ACP 指南                                                 |
 | Runtime event               | Core event 类型、renderer reducer/handler                                | Agent runtime、IPC 文档、相关用户手册                                               |
 | 调研证据与最终答复门禁      | Research Evidence Ledger、最终答复校验、ModelCaller reviewer             | README、Agent runtime、工具手册、诊断、安全政策、Changelog                          |
-| `stateRoot` 路径或迁移      | runtime paths、store、migration service                                  | README、数据手册、存储架构、AGENTS                                                  |
+| `stateRoot` 路径或迁移      | runtime paths、store、migration service                                  | README、数据手册、存储架构、开发指南                                                |
 | Goal 状态或 Gate            | Goal models、coordinator、Gate、renderer projection                      | README、Plan/Goal 手册、Goal 架构                                                   |
 | Scheduler、Team、Hooks、MCP | 对应 service/store/schema 和当前 renderer 路由                           | 自动化手册、工具扩展手册、[可选能力生命周期](architecture/optional-capabilities.md) |
 | Release workflow            | `.github/workflows/release*.yml` 与发布脚本                              | Preview/Stable 手册、安全说明、README                                               |
@@ -70,7 +69,7 @@ Active 文档使用下面的四行状态头：
 
 1. 先确定文档状态和读者，不把个人实施过程写入公共文档。
 2. 对照上表找到事实源，确认当前入口、默认值、失败语义和数据位置。
-3. 更新所有受影响的 Active 文档；路径变化同时修正 README、AGENTS 和引用脚本。
+3. 更新所有受影响的 Active 文档；路径变化同时修正 README、开发指南和引用脚本。
 4. 新增当前文档时，把入口加入 [文档中心](README.md)。个人计划、审计和研究材料不加入公共导航。
 5. 运行格式、链接和相关产品测试；涉及 Release 文案时运行对应 release test。
 6. 在 review 中逐项核对下面的验收清单。

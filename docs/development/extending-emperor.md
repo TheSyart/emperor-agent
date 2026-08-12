@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
 > 最后核验：2026-08-12<br>
-> 事实源：当前 CoreApi / IPC / runtime event / domain service 分层与 `AGENTS.md`
+> 事实源：当前 CoreApi / IPC / runtime event / domain service 分层
 
 Emperor Agent 的扩展通常横跨 Core、Electron contract、renderer 投影、持久化和文档。先确定权威状态属于哪个领域，再从 domain service 向外接入；不要把策略散落到组件或 prompt 文案。
 

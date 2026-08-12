@@ -3,9 +3,9 @@
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
 > 最后核验：2026-08-12<br>
-> 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`、`AGENTS.md`
+> 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`
 
-这里提供源码开发的最短入口。工程约束、关键目录和禁止提交项以根目录 [AGENTS.md](../../AGENTS.md) 为准；系统边界先读[架构总览](../architecture/overview.md)。
+这里提供源码开发的最短入口，并维护公共的工程约束、关键目录和禁止提交项；系统边界先读[架构总览](../architecture/overview.md)。
 
 ## 环境
 
@@ -75,7 +75,7 @@ Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/co
 
 运行态数据默认写入 Emperor Home（`~/.emperor`）。测试必须使用临时 `HOME` 和临时 `stateRoot`，不能读取、迁移或覆盖开发者的真实模型配置、会话、Skills、受管环境、记忆和凭证。Build workspace 也不能承载 session、附件或 Goal 私有数据。
 
-不要提交 `memory/`、`sessions/`、`.emperor/`、`.team/`、本地配置、`.env`、`node_modules`、构建目录、screenshots 或 test results。完整清单见 [AGENTS.md](../../AGENTS.md)。
+不要提交 `memory/`、`sessions/`、`.emperor/`、`.team/`、`private-docs/`、本地配置、`.env`、`node_modules`、构建目录、screenshots 或 test results；完整规则以仓库 `.gitignore` 为准。
 
 ## 文档责任
 
