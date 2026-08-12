@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { isAbsolute, join, normalize, resolve } from 'node:path'
+import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import {
   canonicalizeExistingPath,
   isPathWithin,
@@ -26,6 +26,28 @@ export interface WorkspacePolicyOptions {
 export interface WorkspacePolicyExecutionContext {
   root?: string | null
   workspaceRoot?: string | null
+  /** Host-derived scope for ordinary file tools; never accepted from model input. */
+  fileExecutionScopes?: readonly FileExecutionScope[]
+  /** Exact host-issued read authority; never accepted from model arguments. */
+  fileAccessAuthorization?: FileAccessAuthorization | null
+}
+
+export interface FileAccessAuthorization {
+  readonly version: 1
+  readonly toolName: 'read_file' | 'glob' | 'grep'
+  readonly operationFingerprint: string
+  readonly canonicalPaths: readonly string[]
+  readonly source: 'permission_rule' | 'user_approved_once' | 'full_access'
+  readonly permissionMode: 'ask_before_edit' | 'smart_auto' | 'full_access'
+  readonly authorizationId: string | null
+}
+
+export interface FileExecutionScope {
+  readonly kind:
+    'user_skill' | 'active_skill' | 'session_tool_result' | 'session_scratch'
+  readonly root: string
+  readonly skillName: string
+  readonly access: 'read' | 'write'
 }
 
 export interface WorkspaceRootReceipt {
@@ -219,15 +241,113 @@ export class WorkspacePolicy {
 export function workspacePolicyForTool(
   ctx: WorkspacePolicyExecutionContext | null | undefined,
   fallbackWorkspace: string | null,
+  toolName?: FileAccessAuthorization['toolName'],
 ): WorkspacePolicy {
   const workspaceRoot =
     normalizeRoot(ctx?.workspaceRoot) ??
     normalizeRoot(ctx?.root) ??
     normalizeRoot(fallbackWorkspace)
   const root = normalizeRoot(ctx?.root)
+  const scopes = validFileExecutionScopes(ctx?.fileExecutionScopes)
+  const authorization = validFileAccessAuthorization(
+    ctx?.fileAccessAuthorization,
+    toolName,
+  )
+  if (scopes.length || authorization) {
+    return new WorkspacePolicy({
+      workspaceRoot,
+      allowRoots: [
+        ...(workspaceRoot ? [{ path: workspaceRoot, label: 'workspace' }] : []),
+        ...scopes.map((scope) => ({
+          path: scope.root,
+          label: `${scope.kind}:${scope.skillName}`,
+        })),
+        ...(authorization?.canonicalPaths ?? []).map((path) => ({
+          path,
+          label: 'authorized_read',
+        })),
+      ],
+      // A nested, host-issued Skill scope is more specific than stateRoot. The
+      // rest of stateRoot remains outside all allow roots and therefore denied.
+      denyRoots: [],
+    })
+  }
   const stateRoot =
     root && workspaceRoot && !pathsEqual(root, workspaceRoot) ? root : null
   return new WorkspacePolicy({ workspaceRoot, stateRoot })
+}
+
+function validFileAccessAuthorization(
+  authorization: FileAccessAuthorization | null | undefined,
+  toolName: FileAccessAuthorization['toolName'] | undefined,
+): FileAccessAuthorization | null {
+  if (
+    !authorization ||
+    authorization.version !== 1 ||
+    !toolName ||
+    authorization.toolName !== toolName ||
+    !/^[a-f0-9]{64}$/.test(authorization.operationFingerprint) ||
+    !authorization.canonicalPaths.length
+  )
+    return null
+  const canonicalPaths = authorization.canonicalPaths
+    .map((path) => normalizeRoot(path))
+    .filter((path): path is string => Boolean(path))
+  if (!canonicalPaths.length) return null
+  return { ...authorization, canonicalPaths }
+}
+
+export function validFileExecutionScopes(
+  scopes: readonly FileExecutionScope[] | null | undefined,
+): FileExecutionScope[] {
+  return (scopes ?? []).filter(
+    (scope) =>
+      (scope?.kind === 'user_skill' ||
+        scope?.kind === 'active_skill' ||
+        scope?.kind === 'session_tool_result' ||
+        scope?.kind === 'session_scratch') &&
+      Boolean(String(scope.root ?? '').trim()) &&
+      Boolean(String(scope.skillName ?? '').trim()) &&
+      (scope.access === 'read' || scope.access === 'write'),
+  )
+}
+
+/**
+ * Derive one narrow Skill subtree from final, prepared file-tool arguments.
+ * The returned value is trusted runtime context, never part of a tool schema.
+ */
+export function deriveUserSkillFileScope(
+  paths: readonly string[],
+  userSkillsRoot: string | null | undefined,
+  baseRoot: string | null | undefined,
+): FileExecutionScope | null {
+  const skillsRoot = normalizeRoot(userSkillsRoot)
+  if (!skillsRoot) return null
+  const realSkillsRoot = canonicalizeExistingPath(skillsRoot)
+  let skillName: string | null = null
+  for (const rawPath of paths) {
+    const resolvedPath = resolveCandidatePath(
+      String(rawPath ?? ''),
+      baseRoot ?? null,
+    )
+    const realPath = canonicalizeExistingPath(resolvedPath)
+    if (
+      !isPathWithin(resolvedPath, skillsRoot) ||
+      !isPathWithin(realPath, realSkillsRoot)
+    )
+      continue
+    const segment = relative(skillsRoot, resolvedPath).split(sep)[0] ?? ''
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(segment)) return null
+    if (skillName !== null && skillName !== segment) return null
+    skillName = segment
+  }
+  if (!skillName) return null
+  return {
+    kind: 'user_skill',
+    root: join(skillsRoot, skillName),
+    skillName,
+    access: 'write',
+  }
 }
 
 export function formatWorkspacePolicyError(

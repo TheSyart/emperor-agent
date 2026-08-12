@@ -293,6 +293,48 @@ describe('GoalCoordinator', () => {
     })
   })
 
+  it('retries an internal-error pause after a concurrent Goal update without leaking a rejection', async () => {
+    let rejectTurn!: (error: Error) => void
+    let markTurnStarted!: () => void
+    const turnStarted = new Promise<void>((resolve) => {
+      markTurnStarted = resolve
+    })
+    const f = await fixture({
+      runTurn: async () =>
+        await new Promise<void>((_resolve, reject) => {
+          rejectTurn = reject
+          markTurnStarted()
+        }),
+    })
+    await f.coordinator.start(f.goal.id)
+    const handle = f.coordinator.active(f.goal.id)!
+    await turnStarted
+    const append = f.store.append.bind(f.store)
+    let conflictInjected = false
+    f.store.append = async (goalId, input) => {
+      if (
+        !conflictInjected &&
+        input.type === 'goal_updated' &&
+        input.data?.reason === 'internal_error'
+      ) {
+        conflictInjected = true
+        throw Object.assign(new Error('concurrent update'), {
+          code: 'goal_event_conflict',
+        })
+      }
+      return await append(goalId, input)
+    }
+
+    rejectTurn(new Error('runner exploded'))
+
+    await expect(handle.promise).resolves.toBeUndefined()
+    expect(conflictInjected).toBe(true)
+    expect(await f.store.get(f.goal.id)).toMatchObject({
+      status: 'active',
+      runtime: { phase: 'paused', pauseReason: 'internal_error' },
+    })
+  })
+
   it('uses one bounded hidden cycle for a passing Gate and never auto-completes', async () => {
     const f = await fixture({
       evaluateGate: async () => ({ pass: true }),

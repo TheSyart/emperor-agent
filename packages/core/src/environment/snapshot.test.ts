@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadBundledToolCatalog } from './catalog'
 import type { EnvironmentProbeStatus } from './probe'
@@ -100,6 +104,68 @@ class FakeProbe implements ExecutionEnvironmentProbe {
 }
 
 describe('ExecutionEnvironmentService', () => {
+  it('puts the managed bin first and exposes only active managed command entries', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-managed-env-'))
+    const managedBinRoot = join(root, 'environment', 'bin')
+    const registryFile = join(root, 'environment', 'registry.v1.json')
+    mkdirSync(managedBinRoot, { recursive: true })
+    writeFileSync(
+      registryFile,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        tools: {
+          'agent-reach': {
+            placement: 'managed',
+            activeVersion: '1.2.3',
+            commands: { 'agent-reach': 'agent-reach' },
+          },
+          external: {
+            placement: 'external',
+            activeVersion: '4.0.0',
+            commands: { external: '/usr/local/bin/external' },
+          },
+          broken: {
+            placement: 'managed',
+            activeVersion: null,
+            commands: { broken: '../escape' },
+          },
+        },
+      })}\n`,
+    )
+    const probe = new FakeProbe()
+    const service = new ExecutionEnvironmentService({
+      probe,
+      env: { HOME: '/Users/tester', PATH: '/host/bin' },
+      managedBinRoot,
+      managedRegistryFile: registryFile,
+      now: () => new Date('2026-07-11T02:00:00.000Z'),
+    })
+
+    const snapshot = await service.create({ projectRoot: '/workspace' })
+
+    expect(snapshot.pathEntries).toEqual([
+      managedBinRoot,
+      '/opt/volta/bin',
+      '/usr/bin',
+    ])
+    expect(snapshot.env.PATH).toBe(`${managedBinRoot}:/opt/volta/bin:/usr/bin`)
+    expect(snapshot.hostProcessEnv().PATH).toBe(snapshot.env.PATH)
+    expect(snapshot.managedBinRoot).toBe(managedBinRoot)
+    expect(snapshot.managedCommands).toEqual({
+      'agent-reach': join(managedBinRoot, 'agent-reach'),
+      external: '/usr/local/bin/external',
+    })
+    expect(snapshot.managedSources).toEqual({
+      'agent-reach': { placement: 'managed', version: '1.2.3' },
+      external: { placement: 'external', version: '4.0.0' },
+    })
+    expect(probe.lastRequest?.envOverride?.PATH).toBe(
+      `${managedBinRoot}:/host/bin`,
+    )
+    expect(Object.isFrozen(snapshot.managedCommands)).toBe(true)
+    expect(Object.isFrozen(snapshot.managedSources)).toBe(true)
+  })
+
   it('creates a deeply immutable minimal snapshot without serializing secrets', async () => {
     const probe = new FakeProbe()
     const service = new ExecutionEnvironmentService({
@@ -137,6 +203,60 @@ describe('ExecutionEnvironmentService', () => {
     expect(Object.isFrozen(snapshot.env)).toBe(true)
     expect(Object.isFrozen(snapshot.pathEntries)).toBe(true)
     expect(Object.isFrozen(snapshot.toolPaths)).toBe(true)
+  })
+
+  it('injects Emperor-owned paths and a verified CA bundle into the private host environment', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-env-paths-'))
+    const caBundle = join(root, 'cert.pem')
+    writeFileSync(caBundle, 'test certificate bundle', 'utf8')
+    const probe = new FakeProbe()
+    const service = new ExecutionEnvironmentService({
+      probe,
+      env: {
+        HOME: '/Users/tester',
+        PATH: '/host/bin',
+        HTTPS_PROXY: 'http://proxy.test:7890',
+      },
+      emperorHome: root,
+      userSkillsRoot: join(root, 'skills'),
+      environmentRoot: join(root, 'environment'),
+      scratchRoot: join(root, 'sessions', '.scratch'),
+      systemCaBundle: caBundle,
+    })
+
+    const snapshot = await service.create({ projectRoot: '/workspace' })
+    expect(snapshot.hostProcessEnv()).toMatchObject({
+      EMPEROR_HOME: root,
+      EMPEROR_SKILLS_DIR: join(root, 'skills'),
+      EMPEROR_ENVIRONMENT_DIR: join(root, 'environment'),
+      EMPEROR_SCRATCH_DIR: join(root, 'sessions', '.scratch'),
+      NODE_EXTRA_CA_CERTS: caBundle,
+      HTTPS_PROXY: 'http://proxy.test:7890',
+    })
+    expect(snapshot.caSource).toBe('system_bundle')
+    expect(snapshot.emperorPaths).toEqual({
+      home: root,
+      skills: join(root, 'skills'),
+      environment: join(root, 'environment'),
+      scratch: join(root, 'sessions', '.scratch'),
+    })
+  })
+
+  it('preserves an explicit NODE_EXTRA_CA_CERTS value', async () => {
+    const probe = new FakeProbe()
+    const service = new ExecutionEnvironmentService({
+      probe,
+      env: {
+        HOME: '/Users/tester',
+        PATH: '/host/bin',
+        NODE_EXTRA_CA_CERTS: '/custom/ca.pem',
+      },
+      systemCaBundle: '/system/ca.pem',
+    })
+
+    const snapshot = await service.create({ projectRoot: '/workspace' })
+    expect(snapshot.hostProcessEnv().NODE_EXTRA_CA_CERTS).toBe('/custom/ca.pem')
+    expect(snapshot.caSource).toBe('user')
   })
 
   it('keeps revisions stable for identical inputs and changes on executable environment changes', async () => {

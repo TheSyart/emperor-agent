@@ -1,5 +1,5 @@
 /**
- * PermissionPipeline (MIG-CTRL-016/017)。对齐 Python `agent/permissions/pipeline.py`。
+ * PermissionPipeline。
  * 参数感知的三模式权限评估。规则名逐字保真。
  * PE-13: 高风险命令即便在已批准计划中仍需审批 —— 由 PermissionManager 在 token 前评估高风险体现。
  */
@@ -33,15 +33,23 @@ import {
   analyzeShellCommandFailClosed,
   gitShellExplicitDenyReason,
   isShellAstReadonlySequence,
+  shellCatastrophicDestructionReason,
+  shellPrivilegeEscalationReason,
   shellAstSummary,
   type ShellAstAnalysis,
   type ShellCommandAnalyzer,
   type ShellReadonlyContext,
 } from './shell-ast'
-import { WorkspacePolicy } from './workspace-policy'
+import {
+  WorkspacePolicy,
+  validFileExecutionScopes,
+  type FileExecutionScope,
+} from './workspace-policy'
+import { isPathWithin } from '../util/paths'
 
 interface PermissionAssessmentContext extends ShellReadonlyContext {
   readonly registry?: ToolRegistry | null
+  readonly fileExecutionScopes?: readonly FileExecutionScope[]
 }
 
 export class PermissionPipeline {
@@ -60,7 +68,7 @@ export class PermissionPipeline {
       {
         source: {
           kind: 'local_config',
-          id: 'emperor.local.json',
+          id: 'settings.json',
           trust: 'user',
         },
         rules: opts.rules ?? [],
@@ -105,9 +113,56 @@ export class PermissionPipeline {
       profile,
       trace,
       opts ?? {},
+      normalizedMode,
     )
     if (containment)
       return explainDecision(containment, resolution, profile, shellAnalysis)
+    const privilegeEscalation = shellAnalysis
+      ? shellPrivilegeEscalationReason(shellAnalysis)
+      : null
+    if (privilegeEscalation) {
+      trace.push(
+        traceEntry(
+          'core.process.privilege_escalation',
+          'deny',
+          privilegeEscalation,
+        ),
+      )
+      return explainDecision(
+        deny(
+          profile,
+          'core.process.privilege_escalation',
+          `Privilege escalation is not supported: ${privilegeEscalation}.`,
+          trace,
+        ),
+        resolution,
+        profile,
+        shellAnalysis,
+      )
+    }
+    const catastrophicDestruction = shellAnalysis
+      ? shellCatastrophicDestructionReason(profile.command, shellAnalysis)
+      : null
+    if (catastrophicDestruction) {
+      trace.push(
+        traceEntry(
+          'core.process.catastrophic_destruction',
+          'deny',
+          catastrophicDestruction,
+        ),
+      )
+      return explainDecision(
+        deny(
+          profile,
+          'core.process.catastrophic_destruction',
+          `Catastrophic host destruction is not supported: ${catastrophicDestruction}.`,
+          trace,
+        ),
+        resolution,
+        profile,
+        shellAnalysis,
+      )
+    }
     const gitDenyReason =
       shellAnalysis && profile.name === 'run_command'
         ? gitShellExplicitDenyReason(shellAnalysis, opts ?? {})
@@ -136,6 +191,51 @@ export class PermissionPipeline {
         ),
       )
     }
+    const userSkillScope = this.matchUserSkillWriteScope(profile, opts ?? {})
+    if (userSkillScope) {
+      if (normalizedMode === PermissionMode.PLAN) {
+        trace.push(
+          traceEntry(
+            'plan.write_block',
+            'deny',
+            `user Skill ${userSkillScope.skillName}`,
+          ),
+        )
+        return explainDecision(
+          deny(
+            profile,
+            'plan.write_block',
+            'Plan mode cannot modify user Skills.',
+            trace,
+          ),
+          resolution,
+          profile,
+          shellAnalysis,
+        )
+      }
+      const tightening = this.assessTighteningRule(profile, trace, resolution)
+      if (tightening)
+        return explainDecision(tightening, resolution, profile, shellAnalysis)
+      trace.push(
+        traceEntry(
+          'scope.user_skill.write',
+          'approval',
+          userSkillScope.skillName,
+        ),
+      )
+      return explainDecision(
+        approval(
+          profile,
+          'scope.user_skill.write',
+          `writing user Skill ${userSkillScope.skillName} requires exact approval.`,
+          trace,
+          RiskLevel.MEDIUM,
+        ),
+        resolution,
+        profile,
+        shellAnalysis,
+      )
+    }
     const decision = this.assessProfile(
       profile,
       normalizedMode,
@@ -152,16 +252,54 @@ export class PermissionPipeline {
     profile: ToolPermissionProfile,
     trace: PermissionTraceEntry[],
     context: PermissionAssessmentContext,
+    mode: string,
   ): PermissionDecision | null {
     const workspaceRoot = String(context.workspaceRoot ?? '').trim()
     if (!workspaceRoot || !profile.paths.length) return null
-    const policy = new WorkspacePolicy({ workspaceRoot })
+    const scopes = validFileExecutionScopes(context.fileExecutionScopes)
+    const policy = new WorkspacePolicy({
+      workspaceRoot,
+      allowRoots: [
+        { path: workspaceRoot, label: 'workspace' },
+        ...scopes.map((scope) => ({
+          path: scope.root,
+          label: `${scope.kind}:${scope.skillName}`,
+        })),
+      ],
+    })
     const access = profile.readOnly ? 'read' : 'write'
     for (const path of profile.paths) {
       const decision = policy.resolvePath(path, access, {
         baseRoot: context.cwd ?? workspaceRoot,
       })
       if (decision.allowed) continue
+      const lexicalInsideWorkspace = isPathWithin(
+        decision.resolvedPath,
+        workspaceRoot,
+      )
+      if (
+        profile.readOnly &&
+        decision.reason === 'path is outside workspace' &&
+        !lexicalInsideWorkspace
+      ) {
+        if (mode === PermissionMode.FULL_ACCESS) continue
+        if (mode !== PermissionMode.PLAN) {
+          trace.push(
+            traceEntry(
+              'containment.external_read',
+              'approval',
+              decision.resolvedPath,
+            ),
+          )
+          return approval(
+            profile,
+            'containment.external_read',
+            'reading outside the workspace requires exact approval.',
+            trace,
+            RiskLevel.MEDIUM,
+          )
+        }
+      }
       trace.push(
         traceEntry(
           'containment.workspace',
@@ -175,6 +313,31 @@ export class PermissionPipeline {
         `workspace containment denied ${profile.name}: ${decision.reason}`,
         trace,
       )
+    }
+    return null
+  }
+
+  private matchUserSkillWriteScope(
+    profile: ToolPermissionProfile,
+    context: PermissionAssessmentContext,
+  ): FileExecutionScope | null {
+    if (profile.readOnly || !profile.paths.length) return null
+    const scopes = validFileExecutionScopes(context.fileExecutionScopes).filter(
+      (scope) => scope.access === 'write',
+    )
+    for (const scope of scopes) {
+      const policy = new WorkspacePolicy({
+        allowRoots: [{ path: scope.root, label: scope.skillName }],
+      })
+      if (
+        profile.paths.some(
+          (path) =>
+            policy.resolvePath(path, 'write', {
+              baseRoot: context.cwd ?? context.workspaceRoot ?? null,
+            }).allowed,
+        )
+      )
+        return scope
     }
     return null
   }

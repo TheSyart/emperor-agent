@@ -4,7 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { createRequire } from 'node:module'
 import { createPackage, getRawHeader } from '@electron/asar'
-import { validateRuntimeManifest } from '@emperor/core'
+import { validateRuntimeManifest } from '@emperor/core/host-capabilities'
 
 const desktopRoot = path.resolve(__dirname, '..', '..')
 const repoRoot = path.resolve(desktopRoot, '..')
@@ -51,6 +51,7 @@ interface PackagedResourceHook {
 interface PreloadAudit {
   validatePetPreloadSource(value: string | Buffer): void
   validatePreloadSource(value: string | Buffer): void
+  validateRecoveryPreloadSource(value: string | Buffer): void
 }
 
 const petResourceFiles = [
@@ -215,6 +216,16 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         'const fs=require("fs"); const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorPet", {})',
       ),
     ).toThrow(/forbidden module/i)
+    expect(() =>
+      audit.validateRecoveryPreloadSource(
+        'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorRecovery", {})',
+      ),
+    ).not.toThrow()
+    expect(() =>
+      audit.validateRecoveryPreloadSource(
+        'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {})',
+      ),
+    ).toThrow(/emperorRecovery/i)
   })
 
   it('runs the packaged binary headlessly with a minimal non-shell environment', () => {
@@ -331,6 +342,10 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     fs.writeFileSync(
       path.join(appStage, 'out', 'preload', 'index.cjs'),
       'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperor", {})\n',
+    )
+    fs.writeFileSync(
+      path.join(appStage, 'out', 'preload', 'recovery.cjs'),
+      'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorRecovery", {})\n',
     )
     fs.writeFileSync(
       path.join(appStage, 'out', 'renderer', 'index.html'),

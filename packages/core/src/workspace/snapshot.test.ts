@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { TaskRecord } from '../tasks/models'
 import { TeamStatus } from '../team/models'
 import {
+  projectWorkspaceProjectProcess,
   projectWorkspaceProcess,
   projectWorkspaceSubagent,
   projectWorkspaceTeam,
@@ -9,6 +10,57 @@ import {
 } from './snapshot'
 
 describe('workspace snapshot safe projections', () => {
+  it('projects logical project processes without owner, invocation, argv or environment', () => {
+    const projected = projectWorkspaceProjectProcess({
+      id: 'project-process-1',
+      sessionId: 'session-secret',
+      candidateId: 'candidate-secret',
+      name: 'Vite dev server',
+      ecosystem: 'node',
+      status: 'running',
+      health: 'ready',
+      revision: 3,
+      primary: true,
+      startedAt: 1_785_000_000_000,
+      finishedAt: null,
+      errorSummary: 'safe summary',
+      preview: {
+        id: 'preview-1',
+        sessionId: 'session-secret',
+        processId: 'project-process-1',
+        revision: 3,
+        title: 'Vite dev server',
+        url: 'http://127.0.0.1:43121/',
+        status: 'ready',
+        primary: true,
+      },
+    })
+
+    expect(projected).toEqual({
+      id: 'project-process-1',
+      label: 'Vite dev server',
+      ecosystem: 'node',
+      status: 'running',
+      health: 'ready',
+      revision: 3,
+      primary: true,
+      startedAt: 1_785_000_000_000,
+      finishedAt: null,
+      errorSummary: 'safe summary',
+      preview: {
+        id: 'preview-1',
+        revision: 3,
+        title: 'Vite dev server',
+        url: 'http://127.0.0.1:43121/',
+        status: 'ready',
+        primary: true,
+      },
+    })
+    expect(JSON.stringify(projected)).not.toMatch(
+      /session-secret|candidate-secret|argv|environment|invocation/i,
+    )
+  })
+
   it('does not expose subagent transcript paths or arbitrary metadata', () => {
     const projected = projectWorkspaceSubagent(
       new TaskRecord({

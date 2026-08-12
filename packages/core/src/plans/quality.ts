@@ -1,5 +1,5 @@
 /**
- * PlanQualityGate (MIG-CTRL-013)。对齐 Python `agent/plans/quality.py`。
+ * PlanQualityGate。
  * 在计划成为审批卡前拒绝弱计划：scope / 未知 discovery / 泛标题 / 验证 / 高风险 note+rollback。
  */
 import type { PlanDraftState, PlanStep } from './models'

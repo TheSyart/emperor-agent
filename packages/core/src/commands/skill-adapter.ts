@@ -1,36 +1,98 @@
 import type { SkillInfoPayload } from '../api/services/skill-service'
 import type { CommandDescriptor } from './types'
 
+export interface SkillCommandConflict {
+  token: string
+  skillName: string
+  source: SkillInfoPayload['source']
+  reason: 'builtin_collision' | 'skill_collision' | 'alias_collision'
+  winnerSkillName: string | null
+  winnerSource: SkillInfoPayload['source'] | 'builtin'
+}
+
+export interface SkillCommandCatalog {
+  descriptors: CommandDescriptor[]
+  conflicts: SkillCommandConflict[]
+}
+
 export function skillCommandDescriptors(
   skills: SkillInfoPayload[],
   reservedNames: Set<string> = builtinReservedNames(),
 ): CommandDescriptor[] {
+  return resolveSkillCommandCatalog(skills, reservedNames).descriptors
+}
+
+export function resolveSkillCommandCatalog(
+  skills: SkillInfoPayload[],
+  reservedNames: Set<string> = builtinReservedNames(),
+): SkillCommandCatalog {
   const descriptors: CommandDescriptor[] = []
-  for (const skill of skills) {
+  const conflicts: SkillCommandConflict[] = []
+  const claims = new Map<
+    string,
+    {
+      skillName: string | null
+      source: SkillInfoPayload['source'] | 'builtin'
+    }
+  >()
+  for (const name of reservedNames)
+    claims.set(normalizeExplicitName(name), {
+      skillName: null,
+      source: 'builtin',
+    })
+  const orderedSkills = [...skills].sort(
+    (left, right) =>
+      sourcePriority(left.source) - sourcePriority(right.source) ||
+      left.name.localeCompare(right.name),
+  )
+  for (const skill of orderedSkills) {
     if (skill.status !== 'active') continue
     const metadata = skill.command
     if (metadata && !metadata.userInvocable) continue
-    const requestedName = normalize(metadata?.name || skill.name)
+    const requestedName = metadata?.name
+      ? normalizeExplicitName(metadata.name)
+      : normalizeSkillName(skill.name)
     if (!isCommandName(requestedName)) continue
-    const collides = reservedNames.has(requestedName)
-    const name = collides ? `skill:${skill.name}` : requestedName
-    const aliases = (metadata?.aliases ?? [])
-      .map(normalize)
-      .filter(
-        (value) =>
-          isCommandName(value) && !reservedNames.has(value) && value !== name,
-      )
+    const winner = claims.get(requestedName)
+    if (winner) {
+      conflicts.push({
+        token: requestedName,
+        skillName: skill.name,
+        source: skill.source,
+        reason:
+          winner.source === 'builtin' ? 'builtin_collision' : 'skill_collision',
+        winnerSkillName: winner.skillName,
+        winnerSource: winner.source,
+      })
+      continue
+    }
+    const uniqueAliases: string[] = []
+    for (const alias of [
+      ...new Set((metadata?.aliases ?? []).map(normalizeExplicitName)),
+    ]) {
+      if (!isCommandName(alias) || alias === requestedName) continue
+      const aliasWinner = claims.get(alias)
+      if (aliasWinner) {
+        conflicts.push({
+          token: alias,
+          skillName: skill.name,
+          source: skill.source,
+          reason: 'alias_collision',
+          winnerSkillName: aliasWinner.skillName,
+          winnerSource: aliasWinner.source,
+        })
+        continue
+      }
+      uniqueAliases.push(alias)
+    }
+    const claim = { skillName: skill.name, source: skill.source }
+    claims.set(requestedName, claim)
+    for (const alias of uniqueAliases) claims.set(alias, claim)
     descriptors.push({
       id: `skill.${skill.source}.${skill.name}`,
-      name,
-      aliases: [...new Set(aliases)],
-      hiddenAliases: [`${skill.name}-skill`],
-      category:
-        skill.source === 'project'
-          ? '项目 Skill'
-          : skill.source === 'user'
-            ? '用户 Skill'
-            : '内置 Skill',
+      name: requestedName,
+      aliases: uniqueAliases,
+      category: 'Skills',
       description: skill.description || skill.name,
       kind: 'agent_prompt',
       source:
@@ -38,7 +100,11 @@ export function skillCommandDescriptors(
           ? 'project_skill'
           : skill.source === 'user'
             ? 'user_skill'
-            : 'builtin_skill',
+            : skill.source === 'plugin'
+              ? 'plugin'
+              : skill.source === 'verified_plugin'
+                ? 'verified_plugin'
+                : 'builtin_skill',
       busyPolicy: 'after_turn',
       argumentSchema: metadata?.arguments?.length
         ? metadata.arguments
@@ -64,63 +130,44 @@ export function skillCommandDescriptors(
       },
     })
   }
-  return descriptors
+  return { descriptors, conflicts }
+}
+
+function sourcePriority(source: SkillInfoPayload['source']): number {
+  if (source === 'project') return 0
+  if (source === 'user') return 1
+  if (source === 'plugin' || source === 'verified_plugin') return 2
+  return 3
 }
 
 function builtinReservedNames(): Set<string> {
   return new Set([
-    'help',
-    'commands',
-    'status',
-    'doctor',
-    'context',
-    'cost',
-    'tokens',
-    'token',
-    'usage',
-    'config',
-    'configs',
-    'theme',
-    'reload',
-    'clear',
-    'reset',
     'new',
     'compact',
-    'resume',
-    'rename',
-    'export',
-    'copy',
     'model',
-    'effort',
+    'reasoning',
     'permissions',
-    'allowed-tools',
-    'mode',
     'plan',
     'goal',
-    'goals',
     'stop',
     'continue',
-    'memory',
-    'skills',
-    'tools',
-    'mcp',
-    'hooks',
-    'agents',
-    'tasks',
-    'diff',
-    'files',
-    'terminal',
-    'review',
-    'git',
-    'scheduler',
-    'plugins',
   ])
 }
 
-function normalize(value: string): string {
+function normalizeExplicitName(value: string): string {
   return String(value ?? '')
     .trim()
     .replace(/^\//, '')
+    .toLowerCase()
+}
+
+function normalizeSkillName(value: string): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^\//, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
     .toLowerCase()
 }
 

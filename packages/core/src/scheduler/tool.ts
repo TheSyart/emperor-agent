@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { Tool } from '../tools/base'
+import { Tool, type ToolExecutionContext } from '../tools/base'
 import { B, I, S, toolParamsSchema, type ParamSchema } from '../tools/schema'
-import { SchedulerPayload, SchedulerSchedule } from './models'
+import {
+  SchedulerPayload,
+  SchedulerSchedule,
+  schedulerPayloadSessionId,
+  withSchedulerPayloadSession,
+} from './models'
 import { SchedulerService } from './service'
 
 const schedulerRun = new AsyncLocalStorage<boolean>()
@@ -30,6 +35,7 @@ export class SchedulerTool extends Tool {
   override description =
     '管理本地持久定时任务：查看、创建、更新、暂停、恢复、删除或手动运行。只读检查使用 list；只有用户明确要求长期、未来或周期性自动执行时，才使用 add/update/remove/run。不要把一次性普通任务伪装成定时任务；调度器失败时报告调度器错误，不要改用系统 cron 或 crontab。'
   override requiresRuntimeContext = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override parameters = toolParamsSchema(
     {
@@ -63,7 +69,10 @@ export class SchedulerTool extends Tool {
     return String(args.action || '').toLowerCase() === 'list'
   }
 
-  override async execute(args: Record<string, unknown>): Promise<string> {
+  override async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<string> {
     const action = String(args.action || '')
       .trim()
       .toLowerCase()
@@ -71,11 +80,11 @@ export class SchedulerTool extends Tool {
     if (action === 'add') {
       if (inSchedulerRun())
         return 'Error: scheduler jobs cannot create new scheduler jobs while running.'
-      return this.addJob(args)
+      return this.addJob(args, ctx?.sessionId ?? null)
     }
     if (action === 'update') {
       if (!args.job_id) return 'Error: action=update requires job_id.'
-      return this.updateJob(String(args.job_id), args)
+      return this.updateJob(String(args.job_id), args, ctx?.sessionId ?? null)
     }
     if (['remove', 'pause', 'resume', 'run'].includes(action)) {
       if (!args.job_id) return `Error: action=${action} requires job_id.`
@@ -87,10 +96,16 @@ export class SchedulerTool extends Tool {
     return `Error: unsupported scheduler action '${action}'.`
   }
 
-  private addJob(args: Record<string, unknown>): string {
+  private addJob(
+    args: Record<string, unknown>,
+    sessionId: string | null,
+  ): string {
     try {
       const schedule = scheduleFromFields(args)
-      const payload = payloadFromFields(args)
+      const payload = withSchedulerPayloadSession(
+        payloadFromFields(args),
+        sessionId,
+      )
       const job = this.service.addJob({
         name: String(args.name || '') || defaultName(payload),
         schedule,
@@ -103,7 +118,11 @@ export class SchedulerTool extends Tool {
     }
   }
 
-  private updateJob(jobId: string, args: Record<string, unknown>): string {
+  private updateJob(
+    jobId: string,
+    args: Record<string, unknown>,
+    sessionId: string | null,
+  ): string {
     try {
       const schedule =
         args.at || args.every_seconds !== undefined || args.cron_expr
@@ -118,13 +137,16 @@ export class SchedulerTool extends Tool {
       ) {
         const current = this.service.getJob(jobId)
         if (!current) return `Error: scheduler job not found: ${jobId}`
-        payload = payloadFromFields({
-          payload_kind: args.payload_kind || current.payload.kind,
-          message: args.message ?? current.payload.message,
-          target: args.target ?? current.payload.target,
-          project_id: args.project_id ?? current.payload.project_id,
-          deliver: args.deliver ?? current.payload.deliver,
-        })
+        payload = withSchedulerPayloadSession(
+          payloadFromFields({
+            payload_kind: args.payload_kind || current.payload.kind,
+            message: args.message ?? current.payload.message,
+            target: args.target ?? current.payload.target,
+            project_id: args.project_id ?? current.payload.project_id,
+            deliver: args.deliver ?? current.payload.deliver,
+          }),
+          schedulerPayloadSessionId(current.payload) || sessionId,
+        )
       }
       const result = this.service.updateJob(jobId, {
         name: args.name as string | null | undefined,

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import type { ManagedEnvironmentService } from '../../environment/managed'
 import type { LoadedToolCatalog } from '../../environment/catalog'
 import { EnvironmentError } from '../../environment/errors'
 import {
@@ -51,7 +52,13 @@ export interface CoreEnvironmentServiceOptions {
   env?: Record<string, string | undefined>
   emitRuntime?: (event: Record<string, unknown>) => void | Promise<void>
   reconcileBlockedSkills?: () => Promise<unknown>
+  managedEnvironment?: ManagedEnvironmentHost
 }
+
+export type ManagedEnvironmentHost = Pick<
+  ManagedEnvironmentService,
+  'initialize' | 'status'
+>
 
 export interface CoreEnvironmentStatusPayload {
   status: EnvironmentProbeStatus
@@ -83,6 +90,7 @@ export interface CoreEnvironmentStatusPayload {
   }
   activeJob: EnvironmentJobRecord | null
   recentJobs: EnvironmentJobRecord[]
+  managed: Awaited<ReturnType<ManagedEnvironmentHost['status']>>
 }
 
 export interface CoreEnvironmentDiagnosticsSummary {
@@ -103,6 +111,7 @@ export interface CoreEnvironmentDiagnosticsSummary {
 export class CoreEnvironmentService {
   readonly stateRoot: string
   readonly orchestrator: EnvironmentInstallOrchestrator
+  readonly managedEnvironment: ManagedEnvironmentHost
   private readonly catalog: LoadedToolCatalog
   private readonly probe: EnvironmentProbeLike
   private readonly skillManager: SkillManager
@@ -122,6 +131,8 @@ export class CoreEnvironmentService {
     this.emitRuntime = opts.emitRuntime ?? null
     this.reconcileBlockedSkills =
       opts.reconcileBlockedSkills ?? (async () => undefined)
+    this.managedEnvironment =
+      opts.managedEnvironment ?? defaultManagedEnvironmentHost()
     this.orchestrator = new EnvironmentInstallOrchestrator({
       stateRoot: this.stateRoot,
       catalog: this.catalog,
@@ -158,6 +169,7 @@ export class CoreEnvironmentService {
       throw error
     }
     try {
+      await this.managedEnvironment.initialize()
       await this.reconcileBlockedSkills()
     } catch {
       // A failed Skill recheck must not prevent the desktop from starting.
@@ -177,6 +189,7 @@ export class CoreEnvironmentService {
       .slice()
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, RECENT_JOB_LIMIT)
+    const managed = await this.managedEnvironment.status()
     return {
       status,
       catalog: {
@@ -213,6 +226,7 @@ export class CoreEnvironmentService {
         recentJobs.find((job) => !TERMINAL_JOB_STATUSES.has(job.status)) ??
         null,
       recentJobs,
+      managed,
     }
   }
 
@@ -400,4 +414,15 @@ function platformExecutor(opts: {
 function supportedArch(value: string): EnvironmentArch {
   if (value === 'arm64' || value === 'x64') return value
   throw new EnvironmentError('unsupported_arch')
+}
+
+function defaultManagedEnvironmentHost(): ManagedEnvironmentHost {
+  return {
+    async initialize() {
+      return { interrupted: [] }
+    },
+    async status() {
+      return { schemaVersion: 1 as const, tools: {}, jobs: [] }
+    },
+  }
 }

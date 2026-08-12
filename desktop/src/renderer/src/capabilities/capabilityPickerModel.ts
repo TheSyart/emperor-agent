@@ -57,7 +57,7 @@ export function buildCapabilityPickerGroups(
 function prioritizedCommands(
   commands: SlashPaletteItem[],
 ): CapabilityPickerItem[] {
-  const priority = ['/plan', '/goal', '/tools', '/skills', '/mode', '/status']
+  const priority = ['/plan', '/goal', '/model', '/permissions']
   return priority
     .map((name) =>
       commands.find((item) => item.kind === 'command' && item.name === name),
@@ -71,9 +71,9 @@ function prioritizedCommands(
           : item.name === '/goal'
             ? ('activate_goal' as const)
             : ('insert_command' as const),
-      label: item.name,
+      label: item.title,
       description: item.description,
-      meta: item.usage,
+      meta: item.name,
       completion: item.completion,
       icon: commandIcon(item.name),
       tone: 'slate' as const,
@@ -85,7 +85,7 @@ function skillPickerItem(item: SlashPaletteItem): CapabilityPickerItem {
   return {
     id: item.id,
     action: 'insert_capability_token',
-    label: item.name,
+    label: item.title,
     description: item.description,
     meta: item.tags || 'Skill',
     completion: `@skill(${name})`,
@@ -131,9 +131,7 @@ function mcpServerNamesFromConfig(mcpContent?: string): string[] {
 
 function commandIcon(name: string) {
   if (name === '/plan') return actionIcons.modePlan
-  if (name === '/mode') return actionIcons.modeAskBeforeEdit
-  if (name === '/tools') return toolIcon('default')
-  if (name === '/skills') return toolIcon('skill')
-  if (name === '/status') return actionIcons.statusOnline
+  if (name === '/permissions') return actionIcons.modeAskBeforeEdit
+  if (name === '/model') return actionIcons.commandModel
   return toolIcon('shell')
 }

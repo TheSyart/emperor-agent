@@ -56,7 +56,8 @@ export const composerModeOptions: ComposerModeOption[] = [
     value: 'full_access',
     label: '完全访问',
     short: '完全',
-    description: '不再请求普通权限，但仍遵守明确拒绝和系统边界',
+    description:
+      '主 Agent 命令宿主直执且免询问；明确拒绝、Plan 与子代理边界仍有效',
   },
 ]
 

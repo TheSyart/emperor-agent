@@ -10,12 +10,12 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createNodePersistenceAdapter } from '../store/persistence'
 import { HookAuditStore } from './audit'
 import { HookConfigLoader } from './config'
 import { aggregateHookResults } from './decision'
 import { executeHook } from './executor'
 import { buildHookInput, findMatchingHooks } from './matcher'
-import { HookRuntime } from './runtime'
 import { parseHooksConfig } from './schema'
 
 function tmp(prefix: string): string {
@@ -297,6 +297,34 @@ describe('hooks config loading, execution, and decision aggregation', () => {
     ).toContain('"mcp"')
   })
 
+  it('keeps the previous global hooks config when durable rename fails', async () => {
+    const stateRoot = tmp('emperor-hooks-persistence-failure-')
+    const healthy = new HookConfigLoader({ stateRoot })
+    await healthy.saveGlobalConfig({ enabled: true, hooks: {} })
+    const path = join(stateRoot, 'hooks_config.json')
+    const before = readFileSync(path, 'utf8')
+
+    const failing = new HookConfigLoader({
+      stateRoot,
+      persistenceAdapter: createNodePersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+    await expect(
+      failing.saveGlobalConfig({ enabled: false, hooks: {} }),
+    ).rejects.toMatchObject({
+      code: 'persistence_io',
+      operation: 'rename',
+    })
+
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(
+      readdirSync(stateRoot).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
+  })
+
   it('executes command hooks with stdin JSON, exit-code deny, timeout, and bounded output', async () => {
     const input = buildHookInput('PreToolUse', {
       sessionId: 's1',
@@ -481,61 +509,6 @@ describe('hooks config loading, execution, and decision aggregation', () => {
       },
     ])
     expect(update.updatedInput).toEqual({ content: 'changed' })
-  })
-
-  it('runs matching hooks through runtime events, audit, and aggregate decisions', async () => {
-    const stateRoot = tmp('emperor-hooks-runtime-state-')
-    const events: Array<Record<string, unknown>> = []
-    writeFileSync(
-      join(stateRoot, 'hooks_config.json'),
-      JSON.stringify({
-        hooks: {
-          PreToolUse: [
-            {
-              id: 'deny-write',
-              matcher: 'write_file',
-              handler: {
-                type: 'command',
-                command: process.execPath,
-                args: [
-                  '-e',
-                  'process.stdout.write(JSON.stringify({decision:"deny",reason:"no writes"}))',
-                ],
-              },
-            },
-          ],
-        },
-      }),
-    )
-    const runtime = new HookRuntime({
-      stateRoot,
-      emit: (event) => {
-        events.push(event)
-      },
-    })
-
-    const decision = await runtime.run('PreToolUse', {
-      sessionId: 's1',
-      cwd: process.cwd(),
-      projectRoot: null,
-      toolName: 'write_file',
-      toolInput: { path: 'README.md' },
-    })
-
-    expect(decision).toMatchObject({ decision: 'deny', reason: 'no writes' })
-    expect(events.map((event) => event.event)).toEqual([
-      'hook_run_started',
-      'hook_run_progress',
-      'hook_run_completed',
-      'hook_decision_applied',
-    ])
-    const audit = await runtime.audit.replay()
-    expect(audit.records).toHaveLength(1)
-    expect(audit.records[0]).toMatchObject({
-      hookId: 'deny-write',
-      eventName: 'PreToolUse',
-      decision: 'deny',
-    })
   })
 })
 

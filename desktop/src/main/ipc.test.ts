@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { EnvironmentError, PromptQueueFullError } from '@emperor/core'
+import { EnvironmentError, PromptQueueFullError } from '@emperor/core/api'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { registerCoreIpc, type CoreApiLike } from './ipc'
 

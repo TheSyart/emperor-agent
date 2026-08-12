@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import {
   DEFAULT_PROJECT_MEMORY_BLOCK,
@@ -20,6 +13,11 @@ import {
   type MemoryPatchOperation,
 } from '../memory/patch'
 import type { MemoryVersionStore } from '../memory/versions'
+import {
+  AtomicSnapshotSync,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 export { PROJECT_MEMORY_END, PROJECT_MEMORY_START } from './state-store'
 
@@ -57,6 +55,7 @@ export class ProjectStore {
     MemoryVersionStore,
     'snapshotPath' | 'nextVersionForPath'
   > | null
+  private readonly indexSnapshot: AtomicSnapshotSync<ProjectEntry[]>
 
   constructor(
     root: string,
@@ -65,6 +64,7 @@ export class ProjectStore {
         MemoryVersionStore,
         'snapshotPath' | 'nextVersionForPath'
       > | null
+      persistenceAdapter?: SyncPersistenceAdapter
     } = {},
   ) {
     this.root = resolve(root)
@@ -72,6 +72,12 @@ export class ProjectStore {
     this.indexPath = join(this.projectsDir, 'index.json')
     this.stateStore = new ProjectStateStore(this.projectsDir)
     this.versions = opts.versions ?? null
+    this.indexSnapshot = new AtomicSnapshotSync({
+      path: this.indexPath,
+      codec: projectIndexCodec(this.projectsDir),
+      adapter: opts.persistenceAdapter,
+      fileMode: 0o600,
+    })
   }
 
   resolve(path: string): ProjectEntry {
@@ -222,25 +228,31 @@ export class ProjectStore {
   }
 
   private load(): ProjectEntry[] {
-    if (!existsSync(this.indexPath)) return []
-    try {
-      const data = JSON.parse(readFileSync(this.indexPath, 'utf8') || '[]')
-      return Array.isArray(data)
-        ? data
-            .filter(isObject)
-            .map((item) => normalizeProject(item, this.projectsDir))
-        : []
-    } catch {
-      return []
-    }
+    return this.indexSnapshot.read({ fallback: [] }).value
   }
 
   private saveSorted(items: ProjectEntry[]): void {
     items.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    mkdirSync(this.projectsDir, { recursive: true })
-    const tmp = this.indexPath.replace(/\.json$/, '.json.tmp')
-    writeFileSync(tmp, JSON.stringify(items, null, 2) + '\n', 'utf8')
-    renameSync(tmp, this.indexPath)
+    this.indexSnapshot.write(items)
+  }
+}
+
+function projectIndexCodec(projectsDir: string): SnapshotCodec<ProjectEntry[]> {
+  return {
+    schemaVersion: VERSION,
+    encode(items) {
+      return items
+    },
+    decode(input) {
+      return {
+        value: Array.isArray(input)
+          ? input
+              .filter(isObject)
+              .map((item) => normalizeProject(item, projectsDir))
+          : [],
+        schemaVersion: VERSION,
+      }
+    },
   }
 }
 

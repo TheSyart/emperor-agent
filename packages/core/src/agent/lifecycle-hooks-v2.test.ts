@@ -250,9 +250,14 @@ describe('AgentLoop hooks v2 lifecycle', () => {
       const failing = new LifecycleProvider([new Error('provider exploded')])
       ;(loop as unknown as { modelRouter: unknown }).modelRouter =
         router(failing)
+      const bindings = loop.sessionRuntimes.actor(
+        loop.activeSessionId!,
+      ).bindings
       loop.runner = (
-        loop as unknown as { buildMainRunner(): typeof loop.runner }
-      ).buildMainRunner()
+        loop as unknown as {
+          buildMainRunner(input: typeof bindings): typeof loop.runner
+        }
+      ).buildMainRunner(bindings)
       await expect(loop.runUserTurn('fail now')).rejects.toThrow()
       const audit = await loop.hookService.audit.replayRuns({ limit: 50 })
       expect(
@@ -362,9 +367,11 @@ describe('AgentLoop hooks v2 lifecycle', () => {
         }),
       ],
     })
+    const finalTeamReport =
+      'final team report\n结论: complete\n证据: hook continuation observed\n风险: none\n建议下一步: none'
     const provider = new LifecycleProvider([
       'draft team report',
-      'final team report',
+      finalTeamReport,
     ])
     const loop = await AgentLoop.create({
       ...paths,
@@ -380,7 +387,7 @@ describe('AgentLoop hooks v2 lifecycle', () => {
         }),
       )
 
-      expect(payload.result).toBe('draft team reportfinal team report')
+      expect(payload.result).toBe(`draft team report${finalTeamReport}`)
       expect(provider.messages).toHaveLength(2)
       expect(JSON.stringify(provider.messages[1])).toContain(
         'send a stronger report',
@@ -410,9 +417,11 @@ describe('AgentLoop hooks v2 lifecycle', () => {
         }),
       ],
     })
+    const finalSubagentReport =
+      'final subagent report\n结论: complete\n证据: hook continuation observed\n风险: none\n建议下一步: none'
     const provider = new LifecycleProvider([
       'draft subagent report',
-      'final subagent report',
+      finalSubagentReport,
     ])
     const loop = await AgentLoop.create({
       ...paths,
@@ -436,7 +445,7 @@ describe('AgentLoop hooks v2 lifecycle', () => {
       )
 
       expect(result.modelContent).toBe(
-        'draft subagent reportfinal subagent report',
+        `draft subagent report${finalSubagentReport}`,
       )
       expect(JSON.stringify(provider.messages[0])).toContain(
         'nested start context',

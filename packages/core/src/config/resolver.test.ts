@@ -62,6 +62,34 @@ describe('ConfigResolver', () => {
     )
   })
 
+  it('treats an untrusted local layer like project data and allows only declared tightening', () => {
+    const key = defineConfigKey({
+      id: 'example.local-restriction',
+      builtin: { network: 'policy' as 'policy' | 'deny' },
+      restrictUntrustedProject: (
+        current,
+        next,
+      ): { network: 'policy' | 'deny' } => ({
+        network:
+          current.network === 'deny' || next.value.network === 'deny'
+            ? 'deny'
+            : 'policy',
+      }),
+    })
+    const resolved = new ConfigResolver().resolve(key, {
+      candidates: [
+        candidate('user', { network: 'policy' as const }),
+        candidate('local', { network: 'deny' as const }, 'untrusted'),
+      ],
+    })
+
+    expect(resolved.value).toEqual({ network: 'deny' })
+    expect(resolved.source).toMatchObject({
+      kind: 'local',
+      trust: 'untrusted',
+    })
+  })
+
   it('uses a stable source-id tie break within one layer', () => {
     const first = candidate('user', 'first')
     first.source.id = 'a-user-source'
@@ -275,7 +303,13 @@ function precedenceCases(): Array<{
   layers: ConfigLayerKind[]
   expected: ConfigLayerKind
 }> {
-  const optional: ConfigLayerKind[] = ['user', 'project', 'session', 'managed']
+  const optional: ConfigLayerKind[] = [
+    'user',
+    'project',
+    'local',
+    'session',
+    'managed',
+  ]
   return Array.from({ length: 2 ** optional.length }, (_, mask) => {
     const layers = optional.filter((_, index) => (mask & (1 << index)) !== 0)
     return {

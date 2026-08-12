@@ -2,11 +2,16 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(join(__dirname, 'Composer.vue'), 'utf8')
+const componentSource = readFileSync(join(__dirname, 'Composer.vue'), 'utf8')
+const controllerSource = readFileSync(
+  join(__dirname, 'composerController.ts'),
+  'utf8',
+)
+const source = `${componentSource}\n${controllerSource}`
 
 describe('Composer single-model controls', () => {
   it('switches by entry id and displays only one model id', () => {
-    expect(source).toContain("'switch-model': [entryId: string]")
+    expect(source).toContain("event: 'switch-model', entryId: string")
     expect(source).toContain('entry.entryId === activeModelId')
     expect(source).toContain("entry.modelId || '未配置'")
     expect(source).not.toContain('mainModelId')
@@ -24,18 +29,20 @@ describe('Composer single-model controls', () => {
 
   it('renders exactly one mutually exclusive lifecycle indicator', () => {
     expect(source).toContain('ComposerLifecycleIndicator')
-    expect(source.match(/<ComposerLifecycleIndicator/g)).toHaveLength(1)
+    expect(componentSource.match(/<ComposerLifecycleIndicator/g)).toHaveLength(
+      1,
+    )
     expect(source).toContain(':kind="props.lifecycleMode"')
     expect(source).toContain('@dismiss="emit(\'dismiss-lifecycle\')"')
     expect(source).not.toContain('kind="goal"')
     expect(source).not.toContain('kind="plan"')
-    expect(source).toContain("'set-permission': [mode: ControlModeValue]")
+    expect(source).toContain("event: 'set-permission', mode: ControlModeValue")
     expect(source).not.toContain("'set-mode': [mode: ControlModeValue]")
   })
 
   it('activates lifecycle palette items without inserting command usage', () => {
-    expect(source).toContain("'activate-plan': []")
-    expect(source).toContain("'activate-goal': []")
+    expect(source).toContain("event: 'activate-plan'")
+    expect(source).toContain("event: 'activate-goal'")
     expect(source).toContain("item.action === 'activate_plan'")
     expect(source).toContain("item.action === 'activate_goal'")
     expect(source).toContain("emit('activate-plan')")
@@ -70,9 +77,7 @@ describe('Composer single-model controls', () => {
 
   it('moves keyboard focus into the model menu and keeps navigation inside it', () => {
     expect(source).toContain('focusModelMenuItem(0)')
-    expect(source).toContain("event.key !== 'ArrowDown'")
-    expect(source).toContain("event.key !== 'ArrowUp'")
-    expect(source).toContain("event.key !== 'Tab'")
+    expect(source).toContain("['ArrowDown', 'ArrowUp', 'Home', 'End', 'Tab']")
     expect(source).toContain('@keydown="onModelMenuKeydown"')
   })
 })

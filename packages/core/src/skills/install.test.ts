@@ -16,7 +16,7 @@ import { SkillManager } from './manager'
 import { SkillInstallService, type SkillMissingRequirements } from './install'
 
 describe('SkillInstallService', () => {
-  it('previews local archives, reports risk, and installs dependency-blocked Skills only after confirmation', async () => {
+  it('preserves a legacy blocked receipt without making it resolver authority', async () => {
     const missing: SkillMissingRequirements = {
       bins: [],
       runtimes: [],
@@ -91,12 +91,29 @@ describe('SkillInstallService', () => {
     })
     const target = join(fixture.stateRoot, 'skills', 'review-skill')
     expect(isSkillBlocked(target)).toBe(true)
-    expect(fixture.manager.resolve('review-skill')?.status).toBe('blocked')
+    expect(fixture.manager.resolve('review-skill')?.status).toBe('active')
     expect(existsSync(join(target, 'scripts', 'run.sh'))).toBe(true)
     expect(existsSync(join(fixture.stateRoot, 'skills', '.staging'))).toBe(true)
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(fixture.stateRoot, 'skills', 'installed.v1.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      schemaVersion: 1,
+      skills: {
+        'review-skill': {
+          sourceDigest: preview.digest,
+          status: 'blocked',
+          missing,
+        },
+      },
+    })
   })
 
-  it('reactivates installed Skills after requirements become available', async () => {
+  it('ignores a legacy blocked receipt while the filesystem Skill stays active', async () => {
     let missing: SkillMissingRequirements = {
       bins: ['git'],
       runtimes: [],
@@ -109,11 +126,11 @@ describe('SkillInstallService', () => {
       bins: ['git'],
     })
     await fixture.confirm(preview)
-    expect(fixture.manager.resolve('dependency-skill')?.status).toBe('blocked')
+    expect(fixture.manager.resolve('dependency-skill')?.status).toBe('active')
 
     missing = { bins: [], runtimes: [], env: [] }
     await expect(fixture.service.reconcileBlocked()).resolves.toEqual({
-      activated: ['dependency-skill'],
+      activated: [],
       blocked: [],
     })
     expect(fixture.manager.resolve('dependency-skill')?.status).toBe('active')
@@ -218,6 +235,8 @@ describe('SkillInstallService', () => {
         requests.push(url)
         if (url.endsWith('/commits/feature%2Ffoo'))
           writeFileSync(destination, JSON.stringify({ sha: 'a'.repeat(40) }))
+        else if (url.endsWith('/commits/main'))
+          writeFileSync(destination, JSON.stringify({ sha: 'b'.repeat(40) }))
         else if (url.includes('/commits/')) throw new Error('commit not found')
         else if (url.startsWith('https://api.github.com/'))
           writeFileSync(destination, JSON.stringify({ default_branch: 'main' }))
@@ -231,8 +250,8 @@ describe('SkillInstallService', () => {
     expect(repo.source).toMatchObject({
       kind: 'github_repo',
       repository: 'acme/repo',
-      ref: 'main',
-      resolvedUrl: 'https://codeload.github.com/acme/repo/zip/refs/heads/main',
+      ref: 'b'.repeat(40),
+      resolvedUrl: `https://codeload.github.com/acme/repo/zip/${'b'.repeat(40)}`,
     })
     expect(repo.candidates).toHaveLength(2)
     expect(requests[0]).toBe('https://api.github.com/repos/acme/repo')
@@ -247,10 +266,41 @@ describe('SkillInstallService', () => {
     expect(tree.source).toMatchObject({
       kind: 'github_tree',
       repository: 'acme/repo',
-      ref: 'feature/foo',
+      ref: 'a'.repeat(40),
       requestedPath: 'skills/beta',
     })
     expect(tree.candidates.map((candidate) => candidate.name)).toEqual(['beta'])
+
+    const rawFixture = installFixture({ downloader })
+    const raw = await rawFixture.service.previewInstall({
+      source: {
+        kind: 'url',
+        url: 'https://raw.githubusercontent.com/acme/repo/main/docs/install.md',
+      },
+    })
+    expect(raw.source).toMatchObject({
+      kind: 'github_tree',
+      repository: 'acme/repo',
+      ref: 'b'.repeat(40),
+      requestedPath: null,
+    })
+    expect(raw.candidates.map((candidate) => candidate.name)).toEqual([
+      'alpha',
+      'beta',
+    ])
+
+    const blobFixture = installFixture({ downloader })
+    const blob = await blobFixture.service.previewInstall({
+      source: {
+        kind: 'url',
+        url: 'https://github.com/acme/repo/blob/main/skills/beta/SKILL.md',
+      },
+    })
+    expect(blob.source).toMatchObject({
+      ref: 'b'.repeat(40),
+      requestedPath: 'skills/beta',
+    })
+    expect(blob.candidates.map((candidate) => candidate.name)).toEqual(['beta'])
   })
 
   it('accepts HTTPS .skill/.zip links and rejects unsupported network sources', async () => {
@@ -276,7 +326,6 @@ describe('SkillInstallService', () => {
       'https://example.com/page',
       'https://user:secret@example.com/skill.zip',
       'https://example.com/skill.zip?token=secret',
-      'https://github.com/acme/repo/blob/main/SKILL.md',
     ])
       await expect(
         installFixture().service.previewInstall({

@@ -887,10 +887,7 @@ export class SchedulerService {
     event: Record<string, unknown>,
     job: SchedulerJob,
   ): Record<string, unknown> {
-    const sessionId =
-      schedulerPayloadSessionId(job.payload) ||
-      cleanString(this.targetSessionId()) ||
-      'scheduler'
+    const sessionId = schedulerPayloadSessionId(job.payload) || 'scheduler'
     return { ...event, session_id: sessionId }
   }
 }

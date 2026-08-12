@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-07-22<br>
+> 最后核验：2026-08-12<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`、`AGENTS.md`
 
 这里提供源码开发的最短入口。工程约束、关键目录和禁止提交项以根目录 [AGENTS.md](../../AGENTS.md) 为准；系统边界先读[架构总览](../architecture/overview.md)。
@@ -69,9 +69,11 @@ npm --prefix desktop run package:verify
 
 跨层改动请使用[扩展 Emperor Agent](extending-emperor.md)的同步清单，不要只修改最先报错的一层。
 
+Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/core/runtime-contract` 和 `@emperor/core/host-capabilities`。Desktop、脚本与新 package consumer 不得从 `@emperor/core` root 或 `packages/core/src/*` 深路径导入；renderer 共享的 replay/type 只允许使用 browser-safe `runtime-contract`。
+
 ## 数据与测试隔离
 
-运行态数据默认写入 `~/.emperor-agent`。测试必须使用临时 `stateRoot`，不能读取或覆盖开发者的真实模型配置、会话、记忆和凭证。Build workspace 也不能承载 session、附件或 Goal 私有数据。
+运行态数据默认写入 Emperor Home（`~/.emperor`）。测试必须使用临时 `HOME` 和临时 `stateRoot`，不能读取、迁移或覆盖开发者的真实模型配置、会话、Skills、受管环境、记忆和凭证。Build workspace 也不能承载 session、附件或 Goal 私有数据。
 
 不要提交 `memory/`、`sessions/`、`.emperor/`、`.team/`、本地配置、`.env`、`node_modules`、构建目录、screenshots 或 test results。完整清单见 [AGENTS.md](../../AGENTS.md)。
 

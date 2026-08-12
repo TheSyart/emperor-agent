@@ -17,12 +17,12 @@ import { PlanStatus } from '../plans/models'
 import { SchedulerTool } from '../scheduler/tool'
 import { TeamTool } from '../team/tools'
 import {
-  LoadSkill,
   RunCommand,
   SaveUserProfileTool,
   TodoStore,
   UpdateTodos,
 } from '../tools/builtin'
+import { SkillTool } from '../tools/skill'
 import { DispatchSubagentTool } from '../tools/dispatch'
 import { EditFileTool, ReadFileTool, WriteFileTool } from '../tools/filesystem'
 import { ManageSkillTool } from '../tools/manage-skill'
@@ -111,7 +111,7 @@ describe('AgentRunner Goal final-result recording', () => {
     await activeGoal('goal_order', 'session-order')
     const order: string[] = []
     const tool = new ProbeTool('mcp_probe', () => order.push('execute'))
-    tool.evidencePolicy = 'eligible'
+    declareMcpTestCapability(tool, 'test', 'probe')
     const captured: Array<
       Parameters<RunnerGoalRecordingHost['recordToolResult']>[0]
     > = []
@@ -161,7 +161,7 @@ describe('AgentRunner Goal final-result recording', () => {
       turnId: 'turn-order',
       toolCallId: 'call-1',
       toolName: 'mcp_probe',
-      evidencePolicy: 'eligible',
+      evidencePolicy: 'context_only',
       executed: true,
     })
     expect(captured[0]!.result.modelContent).toBe(
@@ -354,7 +354,7 @@ describe('AgentRunner Goal final-result recording', () => {
   it('persists the final PostToolUse result and hashes exactly what the model receives', async () => {
     const goal = await activeGoal('goal_final', 'session-final')
     const tool = new ProbeTool('mcp_final')
-    tool.evidencePolicy = 'eligible'
+    declareMcpTestCapability(tool, 'test', 'final')
     const runner = runnerFor(tool, {
       sessionId: goal.scope.sessionId,
       goalObservationRecorder: recorder,
@@ -939,7 +939,7 @@ describe('Tool Goal evidence policy allowlist', () => {
     })
   })
 
-  it('defaults new tools to context_only and explicitly opts execution, file, search, web, and MCP into eligible', () => {
+  it('defaults new tools to context_only, opts local facts into evidence, and keeps external content context-only', () => {
     expect(new ProbeTool('new_tool').evidencePolicy).toBe('context_only')
     const eligible = [
       new RunCommand('/workspace'),
@@ -958,9 +958,17 @@ describe('Tool Goal evidence policy allowlist', () => {
         connection: {} as never,
       }),
     ]
-    expect(eligible.map((tool) => [tool.name, tool.evidencePolicy])).toEqual(
-      eligible.map((tool) => [tool.name, 'eligible']),
-    )
+    expect(eligible.map((tool) => [tool.name, tool.evidencePolicy])).toEqual([
+      ['run_command', 'eligible'],
+      ['read_file', 'eligible'],
+      ['write_file', 'eligible'],
+      ['edit_file', 'eligible'],
+      ['glob', 'eligible'],
+      ['grep', 'eligible'],
+      ['web_fetch', 'context_only'],
+      ['web_search', 'context_only'],
+      ['mcp_test_probe', 'context_only'],
+    ])
   })
 
   it('explicitly forbids control, todo, skill, scheduler, team, subagent, and profile tools', () => {
@@ -971,7 +979,7 @@ describe('Tool Goal evidence policy allowlist', () => {
       new ProposePlanTool(manager),
       new RequestPlanModeTool(manager),
       new UpdateTodos(todos),
-      new LoadSkill(),
+      new SkillTool(null),
       new ManageSkillTool(manager),
       new SchedulerTool(manager),
       new TeamTool(() => null),
@@ -999,6 +1007,10 @@ class SequenceProvider extends LLMProvider {
       response(null, [
         { id: 'call-1', name: toolName, arguments: toolArguments },
       ]),
+      response('done'),
+      // External-content fixtures now receive one bounded correction before
+      // Core fails the research gate closed. Non-external fixtures leave this
+      // response unused.
       response('done'),
     ]
   }
@@ -1028,6 +1040,24 @@ class ProbeTool extends Tool {
     this.executions += 1
     this.onExecute?.()
     return this.output
+  }
+}
+
+function declareMcpTestCapability(
+  tool: Tool,
+  serverName: string,
+  toolName: string,
+): void {
+  tool.externalContent = true
+  tool.capabilityProvenance = {
+    kind: 'mcp_declaration',
+    serverName,
+    toolName,
+    transport: 'test',
+    readOnlySource: 'tool_override',
+    exclusiveSource: 'tool_override',
+    generation: 1,
+    clientId: 'test-client',
   }
 }
 

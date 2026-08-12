@@ -1,10 +1,19 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createNodePersistenceAdapter } from '../store/persistence'
 import {
   loadLocalConfig,
+  loadProjectPermissionRuleLayers,
   localConfigDiagnostics,
   localConfigPath,
   mergeWebuiOverrides,
@@ -18,6 +27,51 @@ beforeEach(async () => {
 })
 
 describe('local config', () => {
+  it('loads only permission rules from project and local settings layers', async () => {
+    const projectSettings = join(dir, '.emperor')
+    await mkdir(projectSettings, { recursive: true })
+    await writeFile(
+      join(projectSettings, 'settings.json'),
+      JSON.stringify({
+        emperorHome: '/outside',
+        permissions: {
+          rules: [{ id: 'project-ask', action: 'ask', tool: 'write_file' }],
+        },
+      }),
+    )
+    await writeFile(
+      join(projectSettings, 'settings.local.json'),
+      JSON.stringify({
+        runtimeRoot: '/outside',
+        permissions: {
+          rules: [{ id: 'local-deny', action: 'deny', tool: 'delete_file' }],
+        },
+      }),
+    )
+
+    expect(loadProjectPermissionRuleLayers(dir)).toEqual([
+      {
+        source: {
+          kind: 'project',
+          id: 'settings.json',
+          trust: 'project',
+        },
+        rules: [{ id: 'project-ask', action: 'ask', tool: 'write_file' }],
+      },
+      {
+        source: {
+          kind: 'project-local',
+          id: 'settings.local.json',
+          trust: 'project',
+        },
+        rules: [{ id: 'local-deny', action: 'deny', tool: 'delete_file' }],
+      },
+    ])
+    expect(JSON.stringify(loadProjectPermissionRuleLayers(dir))).not.toContain(
+      '/outside',
+    )
+  })
+
   it('round-trips webui and desktop pet preferences with Python-compatible field names', async () => {
     await saveLocalConfig(dir, {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
@@ -42,7 +96,7 @@ describe('local config', () => {
     })
 
     const onDisk = JSON.parse(
-      await readFile(join(dir, 'emperor.local.json'), 'utf8'),
+      await readFile(join(dir, 'settings.json'), 'utf8'),
     )
     expect(onDisk).toEqual({
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
@@ -96,6 +150,41 @@ describe('local config', () => {
       },
     ])
     expect(prefs).toEqual({ host: '127.0.0.1', port: 8765, openBrowser: false })
+    expect((await stat(join(dir, 'settings.json'))).mode & 0o777).toBe(0o600)
+    expect(
+      (await readdir(dir)).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
+  })
+
+  it('preserves the previous config when the durable rename fails', async () => {
+    const original = parseLocalConfig({
+      webui: { host: '127.0.0.7', port: 9001 },
+    })
+    await saveLocalConfig(dir, original)
+
+    await expect(
+      saveLocalConfig(
+        dir,
+        parseLocalConfig({ webui: { host: '127.0.0.8', port: 9002 } }),
+        {
+          persistenceAdapter: createNodePersistenceAdapter({
+            beforeOperation(operation) {
+              if (operation === 'rename') throw new Error('injected rename')
+            },
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'persistence_io',
+      operation: 'rename',
+    })
+
+    await expect(loadLocalConfig(dir)).resolves.toMatchObject({
+      webui: { host: '127.0.0.7', port: 9001 },
+    })
+    expect(
+      (await readdir(dir)).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 
   it('parses legacy snake_case desktop pet and open_browser keys', () => {
@@ -175,7 +264,7 @@ describe('local config', () => {
     expect(diagnostics.exists).toBe(false)
     expect(diagnostics.corruptBackups).toHaveLength(1)
     expect(diagnostics.corruptBackups[0]!.path).toContain(
-      'emperor.local.json.corrupt-',
+      'settings.json.corrupt-',
     )
     expect(diagnostics.corruptBackups[0]!.bytes).toBe('{bad json'.length)
   })

@@ -1,5 +1,5 @@
 /**
- * Provider Registry (MIG-PROV-002)。
+ * Provider Registry。
  *
  * ProviderSpec 只描述访问方式，不内嵌 model 列表。
  * 对外协议固定为 OpenAI Chat Completions 与 Anthropic Messages。

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-07-24<br>
+> 最后核验：2026-08-12<br>
 > 事实源：SessionStore、ProjectStateStore、ContextBuilder、桌面会话入口
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 能看到哪些长期上下文，不决定权限级别。
@@ -20,6 +20,8 @@ Chat 适合问答、整理资料、解释内容和不依赖固定 workspace 的�
 - 当前请求的附件和工具结果。
 
 Chat 不会自动读取某个 Build 项目的私有记忆。需要处理本地项目时，创建或切换到对应 Build。
+
+普通问答的最终回复只表示当前 Agent turn 已收口。互联网搜索、今日/最新新闻或实际调用外部内容工具的任务会额外进入 Core 来源门禁：工具和 Skill 找到的 URL 先作为候选，正文验证、逐项引用与隔离复核通过后才发布最终内容。校验期间的草稿不会先显示再撤回。
 
 ## Build
 
@@ -47,17 +49,18 @@ Agent 执行时，Composer 上方会用一个紧凑胶囊合并显示 `Step X / 
 
 ## 斜杠命令
 
-Composer 输入 `/` 后显示由 Core 返回的命令和 active Skill。候选按最近使用、内置命令、项目 Skill、用户 Skill和内置/受信插件 Skill 分组；上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。模型、文件、工具、会话等参数候选也由 Core 按当前 session 动态补全。
+Composer 输入 `/` 后显示由 Core 返回的命令和 active Skill。菜单只分为 `Commands` 与 `Skills`；命令固定排序，Skill 按易读标题排序并标注 `Personal`、`Project`、`Built-in` 或 `Plugin`。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
 
-- `/help` 打开命令中心，`/help --all` 同时显示当前不可用的命令和原因。
-- `/clear` 创建一个新的 session 上下文；旧 session 仍在侧栏，新 session 继承 Chat/Build、项目、活动 worktree、全局模型与权限，但不继承历史、Plan、Goal、Todo、消息队列、checkpoint、execution ledger 或附件。
-- `/compact [instructions]` 在同一 session 中压缩历史并保留摘要，不等同于 `/clear`。
-- `/resume` 搜索历史会话；`/continue` 只恢复暂停的 Plan 或 Goal，两者不再互为别名。
-- `/permissions ask|smart|full` 管理三档权限；旧 `/mode` 只作为隐藏兼容语法。
-- `/files`、`/terminal`、`/review` 和 `/git` 打开右侧项目工作台，不产生聊天气泡。
-- `/<skill-name> [task]` 调用 Skill，并只在时间线保留一条原始用户消息，不泄漏展开后的 Skill prompt。
+- `/new` 创建一个新的 session 上下文；旧 session 仍在侧栏，新 session 继承 Chat/Build、项目、活动 worktree、全局模型与权限，但不继承历史、Plan、Goal、Todo、消息队列、checkpoint、execution ledger 或附件。
+- `/compact [instructions]` 在同一 session 中压缩历史并保留摘要，不等同于 `/new`。
+- `/model` 和 `/reasoning` 选择当前会话的模型与思考强度。
+- `/permissions ask|smart|full` 管理三档权限。
+- `/plan` 与 `/goal` 管理规划和持续目标；`/stop` 只在任务执行中显示，`/continue` 只在 Plan 或 Goal 可恢复时显示。
+- 每个 Skill 使用自己的命令，例如 `/agent-reach 搜索 Emperor Agent 的相关讨论`，不经过 `/skill` 或 `/skills`。
 
-未知命令或不可用命令只显示本地错误，不会作为普通文本发送给模型。模型回复中的斜杠文本也不会执行。带附件的内置控制命令会被拒绝；Skill 命令可以携带附件。完整目录、忙碌调度、兼容别名和安全边界见 [Slash command 平台](../architecture/slash-command-platform.md)。
+任务收到 `assistant_done` 后及每次打开菜单时，Renderer 都会重新读取 Core 命令目录；新安装的 Skill 无需重启。Settings、Skills、Plugins、Memory、Diagnostics、Git、Files 和 Terminal 继续从应用导航进入，不再提供斜杠入口。未知命令或不可用命令只显示本地错误，不会作为普通文本发送给模型。模型回复中的斜杠文本也不会执行。带附件的内置控制命令会被拒绝；Skill 命令可以携带附件。完整目录、忙碌调度和安全边界见 [Slash command 平台](../architecture/slash-command-platform.md)。
+
+纯调研命令没有修改 workspace 时不会生成零文件 Changes 卡。只有 Core 观察到真实文件变化时，时间线末尾才显示最终文件与增删统计；无法精确归因但确有文件变化的情况仍会在 Diagnostics 和非零 partial 摘要中保留。
 
 ## 会话操作
 
@@ -98,9 +101,11 @@ Build 绑定目录并不意味着 Agent 可以任意访问整台机器。每次�
 2. workspace policy 和路径解析；
 3. 工具输入 schema；
 4. pending Ask/Plan 与其他 Core mutation guard。
-5. 对 shell 命令，操作系统 containment capability 与实际 backend receipt。
+5. 对 shell 命令，可信 host/sandbox 执行边界与实际 process receipt。
 
-`full_access` 只关闭普通权限审批，不会关闭这些检查。workspace 外路径或 Core deny 仍会直接拒绝。批准命令不代表系统会假装存在 sandbox：macOS 使用 Seatbelt，Linux 需要可用的 bwrap；所有 `run_command` 都要求真实 containment receipt，backend 不可用、返回 `unsandboxed` 或平台不支持时命令不会启动。诊断面板会显示当前平台真实能力。
+主 Agent 在非 Plan 模式获准后会在宿主环境执行 `run_command`：cwd 仍固定为 workspace，但 HOME、PATH、Git/npm 用户配置和本机网络真实可用。`full_access` 表示这类宿主命令免询问，不会关闭 Core 明确 deny、workspace、Goal 或 AgentDefinition 检查。Plan、子代理、Team、Hook、MCP、LSP 和受管 Git 继续使用 OS sandbox；其 required backend 不可用时命令不会启动。每次执行都记录真实 `host` 或 `sandbox` receipt，诊断面板不会根据权限模式伪造边界。
+
+宿主直执不等于系统提权：`sudo`、`su`、`doas`、`pkexec` 和明确的根目录、磁盘、文件系统或 fork-bomb 破坏模式始终在 spawn 前拒绝；`curl`、`wget`、解释器动态代码和管道到 shell 由统一权限规则按真实风险决定询问或执行。Emperor 不处理管理员密码，也不为 Agent 命令提供 PTY。
 
 Agent 实际启动的命令还会绑定当前 session；子代理内的命令绑定对应 Task。取消 turn/Task、关闭 session 或退出应用会清理完整进程组，输出超过命令配额也会终止进程。Emperor 当前不提供可脱离应用长期存活的 daemon。右侧 Terminal 是另一条明确的用户直控 PTY：用户键入的命令不属于 Agent 工具调用，不进入三档 Agent 权限审批、聊天历史、模型上下文或持久 runtime event；它仍由 Core 校验 owner session、项目初始 cwd、terminal ID 和最多 8 个标签，并在 session/app 关闭时清理。
 

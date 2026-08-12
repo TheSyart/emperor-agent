@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -15,6 +16,7 @@ import { TaskKind, TaskRecord, TaskStatus } from './models'
 import { TaskManager } from './manager'
 import { SidechainTranscript } from './sidechain'
 import { TaskStore, TaskStoreConflictError } from './store'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -57,6 +59,29 @@ describe('TaskStore (test_tasks_store.py)', () => {
         name.startsWith('index.json.corrupt-'),
       ),
     ).toBe(true)
+    expect(statSync(store.indexFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('preserves the previous Task index when durable rename fails', () => {
+    const root = tmp('emperor-task-persistence-failure-')
+    const healthy = new TaskStore(root)
+    healthy.upsert(rec(1))
+    const before = readFileSync(healthy.indexFile, 'utf8')
+    const failing = new TaskStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() => failing.upsert(rec(2))).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.indexFile, 'utf8')).toBe(before)
+    expect(
+      readdirSync(join(root, 'tasks')).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 
   it('round-trips session ownership and tolerates legacy records without it', () => {

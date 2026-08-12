@@ -1,14 +1,20 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import {
+  AppendOnlyJournalSync,
+  AtomicSnapshotSync,
+  type JournalCodec,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 const VERSION = 1
 
@@ -69,6 +75,7 @@ export class SessionStore {
   readonly root: string
   readonly sessionsDir: string
   readonly indexPath: string
+  private readonly persistenceAdapter?: SyncPersistenceAdapter
   private lastDiagnostics: SessionStoreDiagnostics = {
     sessionIndexSource: 'cache',
     repairedSessions: 0,
@@ -76,10 +83,14 @@ export class SessionStore {
     legacyBackupPath: null,
   }
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    opts: { persistenceAdapter?: SyncPersistenceAdapter } = {},
+  ) {
     this.root = root
     this.sessionsDir = join(root, 'sessions')
     this.indexPath = join(this.sessionsDir, 'index.json')
+    this.persistenceAdapter = opts.persistenceAdapter
   }
 
   sessionDir(sessionId: string): string {
@@ -241,6 +252,19 @@ export class SessionStore {
     return null
   }
 
+  reconcileSessionControlPending(
+    sessionId: string,
+    pending: SessionControlPending | null,
+  ): void {
+    const current = this.get(sessionId)
+    if (!current) return
+    const normalized = normalizeControlPending(pending)
+    if (JSON.stringify(current.control_pending) === JSON.stringify(normalized))
+      return
+    if (normalized) this.setControlPending(sessionId, normalized)
+    else this.clearControlPending(sessionId)
+  }
+
   markTransitioned(
     sessionId: string,
     targetSessionId: string,
@@ -349,64 +373,29 @@ export class SessionStore {
   }
 
   private loadIndex(diagnostics: SessionStoreDiagnostics): SessionEntry[] {
-    if (!existsSync(this.indexPath)) return []
-    try {
-      const text = readFileSync(this.indexPath, 'utf8').trim()
-      if (!text) return []
-      const data = JSON.parse(text)
-      if (!Array.isArray(data)) throw new Error('index.json must be a list')
-      const normalized: SessionEntry[] = []
-      for (const item of data) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          diagnostics.sessionIndexSource = 'rebuilt'
-          diagnostics.rebuildReasons.push('index_entry_invalid')
-          continue
-        }
-        const clean = normalizeSession(item as Record<string, unknown>)
-        if (!clean.id) {
-          diagnostics.sessionIndexSource = 'rebuilt'
-          diagnostics.rebuildReasons.push('index_entry_missing_id')
-          continue
-        }
-        if (JSON.stringify(clean) !== JSON.stringify(item)) {
-          diagnostics.sessionIndexSource = 'rebuilt'
-          diagnostics.rebuildReasons.push(`index_entry_normalized:${clean.id}`)
-        }
-        normalized.push(clean)
-      }
-      return normalized
-    } catch {
-      this.quarantineIndex()
+    const loaded = this.indexSnapshot(diagnostics).read({ fallback: [] })
+    if (loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
       diagnostics.sessionIndexSource = 'rebuilt'
       diagnostics.rebuildReasons.push('index_corrupt')
-      return []
     }
+    return loaded.value
   }
 
   private save(items: SessionEntry[]): void {
-    mkdirSync(this.sessionsDir, { recursive: true })
-    const tmp = this.indexPath.replace(/\.json$/, '.json.tmp')
-    const normalized = items
-      .map((item) =>
-        normalizeSession(item as unknown as Record<string, unknown>),
-      )
-      .filter((item) => item.id)
-    writeFileSync(tmp, JSON.stringify(normalized, null, 2) + '\n', 'utf8')
-    renameSync(tmp, this.indexPath)
+    this.indexSnapshot().write(items)
   }
 
-  private quarantineIndex(): void {
-    mkdirSync(this.sessionsDir, { recursive: true })
-    if (!existsSync(this.indexPath)) return
-    const target = join(
-      this.sessionsDir,
-      `index.corrupt-${stampForFilename()}.json`,
-    )
-    try {
-      renameSync(this.indexPath, target)
-    } catch {
-      /* ignore */
-    }
+  private indexSnapshot(
+    diagnostics?: SessionStoreDiagnostics,
+  ): AtomicSnapshotSync<SessionEntry[]> {
+    return new AtomicSnapshotSync({
+      path: this.indexPath,
+      codec: sessionIndexCodec(diagnostics),
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      corruptionBackupPath: () =>
+        join(this.sessionsDir, `index.corrupt-${stampForFilename()}.json`),
+    })
   }
 
   private legacyBackupPath(): string {
@@ -457,16 +446,12 @@ export class SessionStore {
       session as unknown as Record<string, unknown>,
     )
     if (!clean.id) return
-    mkdirSync(this.sessionDir(clean.id), { recursive: true })
     const event: SessionMetaEvent = {
       type: 'session_snapshot',
       ts: stamp(),
       session: clean,
     }
-    writeFileSync(this.metaPath(clean.id), JSON.stringify(event) + '\n', {
-      encoding: 'utf8',
-      flag: 'a',
-    })
+    this.metaJournal(clean.id).append(event)
   }
 
   private scanSessionDirectories(
@@ -503,25 +488,15 @@ export class SessionStore {
     if (!existsSync(path)) return null
     let latest: SessionEntry | null = null
     let deleted = false
-    const text = readFileSync(path, 'utf8')
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
+    const replay = this.metaJournal(sessionId).replay({ repairTail: true })
+    if (replay.receipt.recoveryAction !== 'none')
+      diagnostics.rebuildReasons.push(`meta_line_invalid:${sessionId}`)
+    for (const entry of replay.entries) {
+      const event = entry.payload
       try {
-        const event = JSON.parse(trimmed) as Partial<SessionMetaEvent> &
-          Record<string, unknown>
         if (event.type === 'session_deleted') {
           deleted = true
           latest = null
-          continue
-        }
-        if (
-          event.type !== 'session_snapshot' ||
-          !event.session ||
-          typeof event.session !== 'object' ||
-          Array.isArray(event.session)
-        ) {
-          diagnostics.rebuildReasons.push(`meta_event_ignored:${sessionId}`)
           continue
         }
         const session = event.session as unknown as Record<string, unknown>
@@ -534,6 +509,18 @@ export class SessionStore {
     }
     if (deleted) return null
     return latest
+  }
+
+  private metaJournal(
+    sessionId: string,
+  ): AppendOnlyJournalSync<SessionMetaEvent> {
+    return new AppendOnlyJournalSync({
+      path: this.metaPath(sessionId),
+      codec: SESSION_META_JOURNAL_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      recoveryMode: 'tolerant',
+    })
   }
 
   private recoverFromSessionFiles(
@@ -599,6 +586,99 @@ export class SessionStore {
     diagnostics.repairedSessions += 1
     diagnostics.rebuildReasons.push(`recovered_session:${sessionId}`)
     return entry
+  }
+}
+
+const SESSION_META_JOURNAL_CODEC: JournalCodec<SessionMetaEvent> = {
+  schemaVersion: VERSION,
+  create(seq, payload) {
+    return {
+      schemaVersion: VERSION,
+      seq,
+      checksum: sessionMetaChecksum(payload),
+      payload,
+    }
+  },
+  encode(entry) {
+    return entry.payload
+  },
+  decode(input, context) {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('session meta row must be an object')
+    const row = input as Record<string, unknown>
+    let payload: SessionMetaEvent
+    if (row.type === 'session_deleted' && typeof row.id === 'string') {
+      payload = {
+        type: 'session_deleted',
+        ts: typeof row.ts === 'string' ? row.ts : '',
+        id: row.id,
+      }
+    } else if (
+      row.type === 'session_snapshot' &&
+      row.session &&
+      typeof row.session === 'object' &&
+      !Array.isArray(row.session)
+    ) {
+      payload = {
+        type: 'session_snapshot',
+        ts: typeof row.ts === 'string' ? row.ts : '',
+        session: row.session as unknown as SessionEntry,
+      }
+    } else {
+      throw new Error('session meta event is invalid')
+    }
+    return {
+      schemaVersion: VERSION,
+      seq: context.expectedSeq,
+      checksum: sessionMetaChecksum(payload),
+      payload,
+    }
+  },
+}
+
+function sessionMetaChecksum(event: SessionMetaEvent): string {
+  return createHash('sha256').update(JSON.stringify(event)).digest('hex')
+}
+
+function sessionIndexCodec(
+  diagnostics?: SessionStoreDiagnostics,
+): SnapshotCodec<SessionEntry[]> {
+  return {
+    schemaVersion: VERSION,
+    encode(items) {
+      return items
+        .map((item) =>
+          normalizeSession(item as unknown as Record<string, unknown>),
+        )
+        .filter((item) => item.id)
+    },
+    decode(input) {
+      if (!Array.isArray(input)) throw new Error('index.json must be a list')
+      const normalized: SessionEntry[] = []
+      for (const item of input) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          if (diagnostics) {
+            diagnostics.sessionIndexSource = 'rebuilt'
+            diagnostics.rebuildReasons.push('index_entry_invalid')
+          }
+          continue
+        }
+        const clean = normalizeSession(item as Record<string, unknown>)
+        if (!clean.id) {
+          if (diagnostics) {
+            diagnostics.sessionIndexSource = 'rebuilt'
+            diagnostics.rebuildReasons.push('index_entry_missing_id')
+          }
+          continue
+        }
+        if (diagnostics && JSON.stringify(clean) !== JSON.stringify(item)) {
+          diagnostics.sessionIndexSource = 'rebuilt'
+          diagnostics.rebuildReasons.push(`index_entry_normalized:${clean.id}`)
+        }
+        normalized.push(clean)
+      }
+      return { value: normalized, schemaVersion: VERSION }
+    },
   }
 }
 

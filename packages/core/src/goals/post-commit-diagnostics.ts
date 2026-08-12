@@ -6,20 +6,14 @@ import { writeJsonAtomic } from '../store/atomic-json'
 import { canonicalJson } from './events'
 import { syncDirectoryBestEffort } from '../util/fs-durability'
 import { GoalGateMutationLedger } from './mutation-ledger'
-import type { GoalPostCommitFailureCode } from './completion-gate'
+import type {
+  GoalPostCommitDiagnostic,
+  GoalPostCommitFailureCode,
+} from './contracts/completion'
+export type { GoalPostCommitDiagnostic } from './contracts/completion'
 
 export const GOAL_POST_COMMIT_DIAGNOSTIC_SCHEMA_VERSION =
   'emperor.goal.post-commit-diagnostic.v1' as const
-
-export interface GoalPostCommitDiagnostic {
-  readonly schemaVersion: typeof GOAL_POST_COMMIT_DIAGNOSTIC_SCHEMA_VERSION
-  readonly id: string
-  readonly goalId: string
-  readonly code: Exclude<GoalPostCommitFailureCode, 'diagnostic_persist_failed'>
-  readonly occurredAt: string
-  readonly recordedAt: string
-  readonly integritySha256: string
-}
 
 export interface GoalPostCommitDiagnosticInspection {
   readonly records: readonly GoalPostCommitDiagnostic[]

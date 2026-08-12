@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -40,7 +41,7 @@ export class SubagentRegistry {
     const userSource = opts.userSourceRoot
       ? userAgentSource(opts.userSourceRoot)
       : null
-    this.extensionSnapshot = new ExtensionResolver({
+    const resolvedSnapshot = new ExtensionResolver({
       sources: [
         {
           id: 'emperor-builtin-agents',
@@ -54,6 +55,7 @@ export class SubagentRegistry {
         ...(opts.additionalSources ?? []),
       ],
     }).resolve()
+    this.extensionSnapshot = supportedRuntimeSnapshot(resolvedSnapshot)
     this.loadAll(opts.sessionPolicy ?? null)
   }
 
@@ -122,19 +124,63 @@ export class SubagentRegistry {
     toolNames: readonly string[],
   ): string {
     let systemPrompt = resolved.systemPrompt
-    if (!this.skillsLoader || !toolNames.includes('load_skill'))
-      return systemPrompt
+    if (!this.skillsLoader || !toolNames.includes('Skill')) return systemPrompt
     const summary =
       this.skillsLoader.buildSkillsSummary?.() ||
       this.skillsLoader.summary?.() ||
       ''
     if (!summary) return systemPrompt
     systemPrompt +=
-      '\n\n## 可加载的技能 (load_skill)\n\n' +
+      '\n\n## 可加载的技能 (Skill)\n\n' +
       `${summary}\n\n` +
-      '遇到对应专题时, 先调 load_skill 把技能内容拉进上下文。'
+      '遇到对应专题时, 先调 Skill 把技能内容拉进上下文。'
     return systemPrompt
   }
+}
+
+function supportedRuntimeSnapshot(
+  snapshot: ExtensionSnapshot,
+): ExtensionSnapshot {
+  const unsupported = snapshot.agents.filter(
+    (agent) => agent.definition.memory.mode !== 'none',
+  )
+  if (unsupported.length === 0) return snapshot
+  const rejected = new Set(unsupported.map((agent) => agent.definition.name))
+  const diagnostics = [
+    ...snapshot.diagnostics,
+    ...unsupported.map((agent) => ({
+      code: 'agent_memory_unsupported',
+      severity: 'error' as const,
+      sourceId: agent.source.id,
+      path: agent.definition.prompt,
+      agentName: agent.definition.name,
+      message:
+        'AgentDefinition memory modes are not supported by the current subagent runtime; the agent was disabled.',
+    })),
+  ]
+  const agents = snapshot.agents.filter(
+    (agent) => !rejected.has(agent.definition.name),
+  )
+  const aliases = Object.fromEntries(
+    Object.entries(snapshot.aliases).filter(([, name]) => !rejected.has(name)),
+  )
+  const revision = createHash('sha256')
+    .update(
+      JSON.stringify({
+        base: snapshot.revision,
+        rejected: [...rejected].sort(),
+      }),
+    )
+    .digest('hex')
+  return Object.freeze({
+    ...snapshot,
+    revision,
+    agents: Object.freeze(agents) as unknown as ExtensionSnapshot['agents'],
+    aliases: Object.freeze(aliases),
+    diagnostics: Object.freeze(
+      diagnostics,
+    ) as unknown as ExtensionSnapshot['diagnostics'],
+  })
 }
 
 function userAgentSource(root: string): ExtensionSourceInput | null {

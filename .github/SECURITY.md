@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安全研究者、用户、维护者<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-08-12<br>
 > 事实源：Electron IPC、Core 权限与 workspace policy、Release workflows、GitHub Private Vulnerability Reporting
 
 ## 支持范围
@@ -13,7 +13,7 @@ Emperor Agent 是本地单用户 Electron 应用。当前接受以下主线代�
 - 模型或工具对本地文件、进程和 workspace 的越权访问；
 - Ask / Plan、权限模式、Goal、Scheduler、Team 或 Hook 绕过 Core guard；
 - `stateRoot` 私有数据、附件、凭证、日志或 runtime event 泄露；
-- MCP、Web 与 External Bridge 输入导致的注入或不安全执行；
+- MCP、Web、Skill、Plugin 与其他外部工具输出导致的注入或不安全执行；
 - 官方 GitHub Actions、安装包、checksum、SBOM、attestation 和更新说明的供应链问题。
 
 退役的 Python runtime、Python CLI、HTTP / WebSocket backend，以及第三方修改版或用户自行改变安全策略后的环境，不属于当前支持产品线。仓库中的 Historical / Frozen 文档也不构成受支持行为。
@@ -40,7 +40,7 @@ Emperor Agent 是本地单用户 Electron 应用。当前接受以下主线代�
 报告中不要上传：
 
 - API key、token、cookie、MCP 凭证或环境变量；
-- 完整 `~/.emperor-agent`、`model_config.json`、`mcp_config.json` 或 `.env`；
+- 完整 Emperor Home（默认 `~/.emperor`）、`model_config.json`、`mcp_config.json` 或 `.env`；
 - 私人对话、附件、项目源码或未经授权的第三方数据；
 - 未脱敏的 HOME、用户名、绝对路径和组织内部地址。
 
@@ -57,6 +57,6 @@ Emperor Agent 是本地单用户 Electron 应用。当前接受以下主线代�
 ## 用户安全边界
 
 - “本地运行”不等于完全离线；模型 Provider、MCP、Web 和外部工具可能收到任务内容。
-- MCP、网页和 External Bridge 消息按不可信输入处理。
-- `auto` 不关闭路径安全、schema、Core deny 或高风险命令确认。
+- MCP、网页、Skill/Plugin 来源和外部工具输出按不可信输入处理。网络调研的来源核验用于防止未经验证的草稿发布，不能替代权限、SSRF、凭据或 workspace 边界。
+- `smart_auto` 与 `full_access` 都不关闭路径安全、schema、Core deny、Goal 或 AgentDefinition；`full_access` 只让主 Agent、非 Plan 的已授权宿主命令免询问，Plan、子代理和其他隔离执行器仍使用各自 containment。
 - 未签名 Preview 的安装说明见 [`docs/release/unsigned-preview-notice.md`](../docs/release/unsigned-preview-notice.md)；不要关闭整机 Gatekeeper、Defender 或 SmartScreen。

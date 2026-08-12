@@ -29,7 +29,7 @@ export interface GoalContextBuildOptions {
 }
 
 interface GoalContextBuilderOptions {
-  readonly goalStore: Pick<GoalStore, 'list'>
+  readonly goalStore: Pick<GoalStore, 'listReadonly'>
   readonly evidenceLedger?: Pick<GoalEvidenceLedger, 'listEvidence'> | null
   readonly planProvider?: (
     goal: GoalRecord,
@@ -130,7 +130,7 @@ export class GoalContextBuilder {
   }
 
   private async currentGoal(sessionId: string): Promise<GoalRecord | null> {
-    const scoped = (await this.options.goalStore.list()).filter(
+    const scoped = (await this.options.goalStore.listReadonly()).filter(
       (goal) => goal.scope.sessionId === sessionId,
     )
     return (

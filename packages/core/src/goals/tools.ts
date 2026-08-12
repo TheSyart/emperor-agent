@@ -61,7 +61,7 @@ export class GoalToolError extends EmperorError {
 }
 
 interface GoalToolHostOptions {
-  readonly goalStore: Pick<GoalStore, 'list' | 'append'>
+  readonly goalStore: Pick<GoalStore, 'listReadonly' | 'append'>
   readonly evidenceLedger: Pick<GoalEvidenceLedger, 'record' | 'listEvidence'>
   readonly completionGate: Pick<GoalCompletionGate, 'complete'>
   readonly blockGoal: (
@@ -102,7 +102,7 @@ export class GoalToolHost {
   ): Promise<GoalRecord | null> {
     const sessionId = String(sessionIdValue ?? '').trim()
     if (!sessionId) return null
-    const scoped = (await this.options.goalStore.list()).filter(
+    const scoped = (await this.options.goalStore.listReadonly()).filter(
       (goal) => goal.scope.sessionId === sessionId,
     )
     return (
@@ -253,6 +253,7 @@ export class GetGoalTool extends GoalTool {
 
 export class DefineGoalContractTool extends GoalTool {
   override readonly name = 'define_goal_contract'
+  override readonly domainStateMutation = true
   override readonly description =
     '锁定当前 Goal 的范围、约束与验收条件并进入 planning。Outcome 由 Core 保持不变；仍有关键不确定项时先 ask_user。'
   override readonly parameters = strictSchema(
@@ -318,6 +319,7 @@ export class DefineGoalContractTool extends GoalTool {
 
 export class RecordGoalEvidenceTool extends GoalTool {
   override readonly name = 'record_goal_evidence'
+  override readonly domainStateMutation = true
   override readonly description =
     '把已由 Core 捕获的 observation/receipt source IDs 关联到当前 Goal 验收项；不能提交路径、hash、工具名或原始输出。'
   override readonly parameters = strictSchema(
@@ -369,6 +371,7 @@ export class RecordGoalEvidenceTool extends GoalTool {
 
 export class CompleteGoalTool extends GoalTool {
   override readonly name = 'complete_goal'
+  override readonly domainStateMutation = true
   override readonly description =
     '请求 Core 对当前 Goal 执行完成门禁与终态提交。不能直接指定完成状态；失败时返回稳定 Gate reason codes。'
   override readonly parameters = strictSchema({})
@@ -406,6 +409,7 @@ export class CompleteGoalTool extends GoalTool {
 
 export class BlockGoalTool extends GoalTool {
   override readonly name = 'block_goal'
+  override readonly domainStateMutation = true
   override readonly description =
     '仅在缺失权限可能使当前 Goal 无法继续时请求专用用户确认。确认拒绝后由 Core 写入 terminal block；测试失败继续修复。'
   override readonly parameters = strictSchema(

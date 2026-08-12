@@ -6,7 +6,7 @@ import type {
 
 export interface RuntimeEffect extends ActionEffectDescriptor {
   domain: 'runtime'
-  type: 'refresh_memory'
+  type: 'refresh_memory' | 'refresh_commands'
   sessionId: string
   eventSeq: number
 }
@@ -45,9 +45,27 @@ export function reduceRuntimeEffects(
   action: RuntimeEffectAction,
 ): { state: RuntimeEffectState; effects: RuntimeEffect[] } {
   if (action.type === 'runtime_event_committed') {
-    if (action.origin !== 'live' || action.event.event !== 'assistant_done')
+    if (
+      action.origin !== 'live' ||
+      !['assistant_done', 'skill_catalog_changed'].includes(action.event.event)
+    )
       return { state, effects: [] }
     const seq = Math.max(0, Number(action.event.seq || 0))
+    if (action.event.event === 'skill_catalog_changed')
+      return {
+        state,
+        effects: [
+          {
+            id: `runtime:refresh-commands:${action.sessionId || 'none'}:${seq}`,
+            key: `runtime:refresh-commands:${action.sessionId || 'none'}`,
+            domain: 'runtime',
+            type: 'refresh_commands',
+            sessionId: action.sessionId,
+            eventSeq: seq,
+            timeoutMs: 10_000,
+          },
+        ],
+      }
     return {
       state,
       effects: [
@@ -56,6 +74,15 @@ export function reduceRuntimeEffects(
           key: `runtime:refresh-memory:${action.sessionId || 'none'}`,
           domain: 'runtime',
           type: 'refresh_memory',
+          sessionId: action.sessionId,
+          eventSeq: seq,
+          timeoutMs: 10_000,
+        },
+        {
+          id: `runtime:refresh-commands:${action.sessionId || 'none'}:${seq}`,
+          key: `runtime:refresh-commands:${action.sessionId || 'none'}`,
+          domain: 'runtime',
+          type: 'refresh_commands',
           sessionId: action.sessionId,
           eventSeq: seq,
           timeoutMs: 10_000,

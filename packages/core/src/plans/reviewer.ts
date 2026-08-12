@@ -1,5 +1,5 @@
 /**
- * 独立 reviewer verdict 解析 (MIG-CTRL-008)。对齐 Python `agent/plans/reviewer.py`。
+ * 独立 reviewer verdict 解析。
  * 解析 ```verdict ...``` JSON 块（最后一个生效）。
  */
 const VERDICT_BLOCK = /```verdict\s*([\s\S]*?)```/gi

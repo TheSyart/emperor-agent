@@ -1,5 +1,5 @@
 /**
- * Provider 工厂 (MIG-PROV-006)。
+ * Provider 工厂。
  * 仅按调用方已经解析完成的公开协议创建 provider。
  * snapshot 装配（`build_provider_snapshot`）依赖 model_config + credentials 解析 —— 在 CFG-004 ModelRouter。
  */

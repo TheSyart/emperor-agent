@@ -84,7 +84,7 @@ describe('ExtensionResolver AgentDefinition sources (P1-6)', () => {
       plugin: 200,
       user: 300,
       project: 400,
-      managed: 500,
+      managed: 600,
     })
     const sources = [
       source('project', [definition('project_only'), definition('shared')], {
@@ -111,7 +111,7 @@ describe('ExtensionResolver AgentDefinition sources (P1-6)', () => {
     ])
     expect(
       snapshot.agents.find((item) => item.definition.name === 'shared')?.source,
-    ).toMatchObject({ kind: 'managed', trust: 'managed', rank: 500 })
+    ).toMatchObject({ kind: 'managed', trust: 'managed', rank: 600 })
     expect(
       snapshot.agents
         .find((item) => item.definition.name === 'shared')
@@ -120,7 +120,7 @@ describe('ExtensionResolver AgentDefinition sources (P1-6)', () => {
     expect(
       snapshot.sources.map((item) => [item.kind, item.trust, item.rank]),
     ).toEqual([
-      ['managed', 'managed', 500],
+      ['managed', 'managed', 600],
       ['project', 'project', 400],
       ['user', 'user', 300],
       ['plugin', 'verified_plugin', 200],

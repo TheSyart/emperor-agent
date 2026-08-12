@@ -1,10 +1,10 @@
 /**
- * AgentRunner 回合状态机 (MIG-CORE-008/009)。对齐 Python `agent/runner.py`。
+ * AgentRunner 回合状态机。
  * 单轮执行、工具循环、并发执行、plan guard / ask guard、暂停/checkpoint、query_state 恢复。
  * 不变量: INV-001 (tool_use↔tool_result 配对)、INV-002 (高影响命令审批)。
- * 未迁移波次的协作者（memory/W06、tokenTracker/W06、compactor/W06、runtime task/W14）以 null 守卫。
+ * Memory、token tracker、compactor 和 runtime task 通过可选宿主能力注入，缺失时显式降级。
  */
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   isTruncated,
   shouldExecuteTools,
@@ -45,21 +45,7 @@ import {
   readTurnCheckpoint,
   type CheckpointWriteOptions,
 } from '../sessions/checkpoint'
-import {
-  TransitionReason,
-  beginIteration,
-  emptyResponseRetry,
-  lengthRecovery,
-  makeQueryState,
-  markCompleted,
-  markPaused,
-  maxTurnsReached,
-  nearMaxTurns,
-  todoContinuationIntent,
-  todoFollowup,
-  toolFollowup,
-  type QueryState,
-} from './query-state'
+import { todoContinuationIntent, TransitionReason } from './query-state'
 import { TurnPhase, TurnState } from './turn-state'
 import {
   createModelPolicyTurnState,
@@ -69,6 +55,15 @@ import {
   type ModelPolicyTurnState,
   type RunnerModelHost,
 } from './model-caller'
+import {
+  assessResearchRequirement,
+  parseGroundingReviewVerdict,
+  ResearchEvidenceLedger,
+  validateResearchReply,
+  type GroundingReviewVerdict,
+  type ResearchSourceRecord,
+  type ResearchValidationDecision,
+} from './research-evidence'
 import type { ModelPricing } from '../config/model-config'
 import { CancelledTaskError } from '../runtime/active'
 import {
@@ -114,6 +109,21 @@ import {
   unverifiedPlanHonestyFollowup,
 } from './runner-plan-recording'
 import type { ExecutionEnvironment } from '../environment/snapshot'
+import type { TurnExecutionContext } from './turn-execution-context'
+import type { HostExecutionAuthorization } from '../environment/process-runner'
+import { analyzeShellCommandFailClosed } from '../permissions/shell-ast'
+import {
+  ToolBatchCoordinator,
+  createToolBatchContext,
+  type ToolBatchExecutionOutcome,
+  type ToolBatchProcessExecution,
+} from './tool-batch-coordinator'
+import {
+  ModelIterationCoordinator,
+  type ModelIterationProgressPauseDecision,
+} from './model-iteration-coordinator'
+import { PlanTurnCoordinator } from './plan-turn-coordinator'
+import { TurnFinalizer } from './turn-finalizer'
 import {
   recordRunnerGoalToolResult,
   recordRunnerPlanVerificationReceipt,
@@ -122,19 +132,21 @@ import {
 import { filterGoalToolDefinitions, type GoalToolHost } from '../goals/tools'
 import { TurnProgressLedger } from './turn-progress'
 import type { WorkspaceMutationHost } from '../workspace/mutation-coordinator'
+import type { PlanningRunnerUseCases } from '../plans/application-service'
 import type {
   TurnChangeSnapshot,
   TurnMutationInput,
 } from '../changes/turn-change-ledger'
+import {
+  deriveUserSkillFileScope,
+  type FileAccessAuthorization,
+  type FileExecutionScope,
+} from '../permissions/workspace-policy'
 
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Msg = Record<string, unknown>
 
-type ProgressPauseDecision = {
-  reasonCode: 'no_progress' | 'blocked' | 'verification_remaining'
-  nextActions: string[]
-  summary: string
-}
+type ProgressPauseDecision = ModelIterationProgressPauseDecision
 
 type TurnPlanBinding = {
   available: boolean
@@ -143,6 +155,7 @@ type TurnPlanBinding = {
 
 const MAX_EMPTY_RETRIES = 2
 const MAX_LENGTH_RECOVERIES = 3
+const MAX_RESEARCH_DRAFT_CHARS = 200_000
 const ASK_GUARD_BLOCK =
   'Error: Ask Guard requires `ask_user` before this high-impact action. ' +
   'Use read-only tools if needed, then ask the user to resolve the ambiguity.'
@@ -203,8 +216,9 @@ export interface TodoStoreLike {
   revision?: number
 }
 
-/** runner 需要的 ControlManager 表面（W05）。全部可选/容错调用。 */
+/** Runner 需要的最小 ControlManager 表面；能力按装配可选。 */
 export interface ControlManagerRunnerHost {
+  readonly mode?: string
   planStore?: PlanStore
   latestExecutablePlan?(): PlanRecord | null
   requestPlanExecutionDecision?(input: {
@@ -223,7 +237,11 @@ export interface ControlManagerRunnerHost {
       | 'cancelled'
   } | null
   pausePlanExecution?(input: {
-    reason: 'continuation_rejected' | 'no_progress' | 'verification_required'
+    reason:
+      | 'continuation_rejected'
+      | 'no_progress'
+      | 'verification_required'
+      | 'user_input_required'
     turnId: string
     executionId?: string | null
     pausedAt: number
@@ -245,6 +263,8 @@ export interface ControlManagerRunnerHost {
       cwd?: string | null
       taskIntent?: string | null
       authorizationId?: string | null
+      executionBoundary?: 'sandbox' | 'host'
+      fileExecutionScopes?: readonly FileExecutionScope[]
     },
   ):
     | Promise<{
@@ -281,6 +301,8 @@ export interface ControlManagerRunnerHost {
       cwd?: string | null
       taskIntent?: string | null
       authorizationId?: string | null
+      executionBoundary?: 'sandbox' | 'host'
+      fileExecutionScopes?: readonly FileExecutionScope[]
     },
   ): Promise<{
     allowed: boolean
@@ -302,6 +324,9 @@ export interface ControlManagerRunnerHost {
       callId: string
       fingerprint: string
       decision: unknown
+      executionBoundary?: 'sandbox' | 'host'
+      executionAuthorization?: HostExecutionAuthorization | null
+      fileAccessAuthorization?: FileAccessAuthorization | null
     }>
     authorizationId?: string | null
   }>
@@ -383,13 +408,11 @@ interface RunnerPermissionBatch {
     callId: string
     fingerprint: string
     decision: unknown
+    executionBoundary?: 'sandbox' | 'host'
+    executionAuthorization?: HostExecutionAuthorization | null
+    fileAccessAuthorization?: FileAccessAuthorization | null
   }>
   authorizationId?: string | null
-}
-
-interface ToolBatchPreflight {
-  preparedCalls: Map<string, ToolCallRequest>
-  results: Map<string, ToolResultObj>
 }
 
 const EMPTY_CLARIFICATION = {
@@ -399,6 +422,17 @@ const EMPTY_CLARIFICATION = {
   categories: [] as string[],
 }
 type Clarification = typeof EMPTY_CLARIFICATION
+
+interface RunnerModelSampleRequest {
+  history: Msg[]
+  emit: StreamEmitter | null
+  clarification: Clarification | null
+  signal: AbortSignal | null
+  turnId: string | null
+  stableBoundary: number
+  onToolCallComplete?: ((call: ToolCallRequest) => void | Promise<void>) | null
+  disableTools?: boolean
+}
 
 function clarificationPrompt(c: Clarification): string {
   if (!c.required) return ''
@@ -462,11 +496,32 @@ function renderTurnChangeControl(snapshot: TurnChangeSnapshot): string {
     .join('\n')
 }
 
+function planningCompatibilityPort(
+  control: ControlManagerRunnerHost | null,
+): PlanningRunnerUseCases | null {
+  if (control === null) return null
+  return {
+    recordPlanDiscovery: (input) =>
+      (control.recordPlanDiscovery?.(
+        input as unknown as Record<string, unknown>,
+      ) as PlanRecord | null) ?? null,
+    recordPlanStepToolOutput: (input) =>
+      control.recordPlanStepToolOutput?.(
+        input as unknown as Record<string, unknown>,
+      ) ?? null,
+    recordPlanVerificationResult: (input) =>
+      control.recordPlanVerificationResult?.(input) ?? null,
+    pausePlanExecution: (input) => control.pausePlanExecution?.(input) ?? null,
+    resumePlanExecution: (input) =>
+      control.resumePlanExecution?.(input) ?? null,
+  }
+}
+
 function appendTurnChangeSummary(
   reply: string,
   snapshot: TurnChangeSnapshot,
 ): string {
-  if (snapshot.filesChanged === 0 && snapshot.status !== 'partial') return reply
+  if (snapshot.filesChanged === 0) return reply
   const summary =
     snapshot.status === 'partial'
       ? snapshot.filesChanged > 0
@@ -529,6 +584,7 @@ export interface AgentRunnerOptions {
   compactor?: CompactorLike | null
   todoStore?: TodoStoreLike | null
   controlManager?: ControlManagerRunnerHost | null
+  planning?: PlanningRunnerUseCases | null
   maxContext?: number
   compactThreshold?: number
   autoCompact?: boolean
@@ -536,6 +592,8 @@ export interface AgentRunnerOptions {
   contextPipeline?: ContextPipeline | null
   toolExecutionEngine?: ToolExecutionEngine | null
   workspaceRoot?: string | null
+  /** Main-Agent-only root used to derive exact ordinary file-tool scopes. */
+  userSkillsRoot?: string | null
   promptSections?: PromptSectionInput[] | null
   promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
@@ -636,6 +694,7 @@ export class AgentRunner implements RunnerModelHost {
   compactor: CompactorLike | null
   todoStore: TodoStoreLike | null
   controlManager: ControlManagerRunnerHost | null
+  planning: PlanningRunnerUseCases | null
   maxContext: number
   compactThreshold: number
   autoCompact: boolean
@@ -644,6 +703,7 @@ export class AgentRunner implements RunnerModelHost {
   toolExecutionEngine: ToolExecutionEngine
   private readonly denyRefusalCounts = new Map<string, number>()
   workspaceRoot: string | null
+  userSkillsRoot: string | null
   promptSections: PromptSectionInput[]
   promptContextPlan: PromptContextPlan | null
   promptSnapshotDir: string | null
@@ -667,6 +727,13 @@ export class AgentRunner implements RunnerModelHost {
   fileCheckpoints: FileCheckpointCaptureHost | null
   turnChangeLedger: TurnChangeLedgerHost | null
   workspaceMutations: WorkspaceMutationHost | null
+  activeSkillAllowedTools: ReadonlySet<string> | null = null
+  activeSkillReadScopes: readonly FileExecutionScope[] = []
+  sessionToolResultsRoot: string | null = null
+  activeExternalEvidenceRequired = false
+  private activeResearchEvidenceLedger: ResearchEvidenceLedger | null = null
+  private stagedResearchHistory: { history: Msg[]; messages: Msg[] } | null =
+    null
   lastEstimatedInputTokens: number | null = null
   lastContextProjectionReport: Record<string, unknown> | null = null
   lastPromptProjection: PromptProjectionSnapshot | null = null
@@ -697,11 +764,12 @@ export class AgentRunner implements RunnerModelHost {
     this.compactor = opts.compactor ?? null
     this.todoStore = opts.todoStore ?? null
     this.controlManager = opts.controlManager ?? null
+    this.planning =
+      opts.planning ?? planningCompatibilityPort(this.controlManager)
     this.maxContext = opts.maxContext ?? 200_000
     this.compactThreshold = opts.compactThreshold ?? 0.7
     this.autoCompact = opts.autoCompact ?? true
     this.maxTurns = opts.maxTurns ?? null
-    this.contextPipeline = opts.contextPipeline ?? this.defaultContextPipeline()
     this.toolExecutionEngine =
       opts.toolExecutionEngine ?? new ToolExecutionEngine(opts.registry)
     this.workspaceRoot = opts.workspaceRoot ?? null
@@ -720,6 +788,8 @@ export class AgentRunner implements RunnerModelHost {
       0,
       Math.trunc(Number(opts.subagentDepth ?? 0)),
     )
+    this.userSkillsRoot =
+      this.subagentDepth === 0 ? (opts.userSkillsRoot ?? null) : null
     this.tokenBudget = positiveOptionalInt(opts.tokenBudget)
     this.streamingToolExecution = opts.streamingToolExecution ?? false
     this.hooks = opts.hooks ?? null
@@ -728,6 +798,10 @@ export class AgentRunner implements RunnerModelHost {
     this.goalContextProvider = opts.goalContextProvider ?? null
     this.goalContextHint = opts.goalContextHint ?? null
     this.onGoalCompacted = opts.onGoalCompacted ?? null
+    // The default pipeline derives its artifact root and goal provider from
+    // runner state. Initialize those dependencies before constructing it so a
+    // session-bound runner never falls back to the legacy global result store.
+    this.contextPipeline = opts.contextPipeline ?? this.defaultContextPipeline()
     this.fileCheckpoints = opts.fileCheckpoints ?? null
     this.turnChangeLedger = opts.turnChangeLedger ?? null
     this.workspaceMutations = opts.workspaceMutations ?? null
@@ -757,6 +831,7 @@ export class AgentRunner implements RunnerModelHost {
       signal?: AbortSignal | null
       executionEnvironment?: ExecutionEnvironment | null
       interjections?: AgentRunnerInterjectionHost | null
+      turnContext?: TurnExecutionContext | null
     },
   ): Promise<string> {
     const reply = await this.stepAsync(history, {
@@ -765,6 +840,7 @@ export class AgentRunner implements RunnerModelHost {
       signal: opts?.signal ?? null,
       executionEnvironment: opts?.executionEnvironment ?? null,
       interjections: opts?.interjections ?? null,
+      turnContext: opts?.turnContext ?? null,
     })
     throwIfAborted(opts?.signal ?? null)
     await emit({ event: 'assistant_done', content: reply })
@@ -779,6 +855,7 @@ export class AgentRunner implements RunnerModelHost {
       signal?: AbortSignal | null
       executionEnvironment?: ExecutionEnvironment | null
       interjections?: AgentRunnerInterjectionHost | null
+      turnContext?: TurnExecutionContext | null
     },
   ): Promise<string> {
     this.modelPolicyTurn = createModelPolicyTurnState()
@@ -793,6 +870,11 @@ export class AgentRunner implements RunnerModelHost {
       throw error
     } finally {
       this.modelPolicyTurn = createModelPolicyTurnState()
+      this.activeSkillAllowedTools = null
+      this.activeSkillReadScopes = []
+      this.activeExternalEvidenceRequired = false
+      this.activeResearchEvidenceLedger = null
+      this.clearStagedResearchHistory()
     }
   }
 
@@ -804,12 +886,21 @@ export class AgentRunner implements RunnerModelHost {
       signal?: AbortSignal | null
       executionEnvironment?: ExecutionEnvironment | null
       interjections?: AgentRunnerInterjectionHost | null
+      turnContext?: TurnExecutionContext | null
     },
   ): Promise<string> {
     const emit = opts?.emit ?? null
-    const turnId = opts?.turnId ?? null
+    const turnContext = opts?.turnContext ?? null
+    const turnId = turnContext?.identity.turnId ?? opts?.turnId ?? null
     const signal = opts?.signal ?? null
-    const executionEnvironment = opts?.executionEnvironment ?? null
+    const executionEnvironment =
+      turnContext?.executionEnvironment ?? opts?.executionEnvironment ?? null
+    if (
+      turnContext &&
+      (this.sessionId !== turnContext.identity.sessionId ||
+        this.workspaceRoot !== turnContext.scope.workspaceRoot)
+    )
+      throw new Error('Runner binding does not match TurnExecutionContext')
     const interjections = opts?.interjections ?? null
     throwIfAborted(signal)
     const todoRevisionAtStart = this.todoStore?.revision ?? 0
@@ -822,16 +913,46 @@ export class AgentRunner implements RunnerModelHost {
       history_length: history.length,
     })
     throwIfAborted(signal)
-    if (
-      todoContinuation !== 'none' &&
-      turnId &&
-      this.controlManager?.resumePlanExecution
-    ) {
-      const resumed = this.controlManager.resumePlanExecution({ turnId })
-      if (resumed && emit)
-        await emit(runtimeEvents.planRuntimeUpdate(planToDict(resumed)))
-    }
-    const entryPlanDecision = this.assessPlanDecision(history)
+    const planTurn = new PlanTurnCoordinator({
+      turnId,
+      continuation: todoContinuation,
+      ports: {
+        resumePlanExecution: (currentTurnId) =>
+          this.planning?.resumePlanExecution({
+            turnId: currentTurnId,
+          }) ?? null,
+        assessEntryDecision: (messages) =>
+          this.assessPlanDecision(messages as Msg[]),
+        executablePlanBinding: () => this.executablePlanBindingForCurrentTurn(),
+        shouldEnforcePlanFinal: () => this.mustPauseForPlan(),
+        independentVerificationFollowup: () =>
+          planIndependentVerificationFollowup(
+            this.controlManager,
+            this.registry,
+          ),
+        honestyFollowup: () =>
+          unverifiedPlanHonestyFollowup(this.controlManager),
+        pauseForExecutionDecision: async (messages, currentEmit) =>
+          await this.pauseForPlanExecutionDecision(
+            messages,
+            currentEmit,
+            turnId,
+          ),
+        appendExecutionDisclosure: (reply) =>
+          appendPlanExecutionDisclosure(reply, this.controlManager),
+        markIndependentVerificationDelivered: () => {
+          this.controlManager?.markIndependentVerificationDelivered?.()
+        },
+      },
+    })
+    const planEntry = planTurn.enter(history)
+    if (planEntry.resumedPlan && emit)
+      await emit(
+        runtimeEvents.planRuntimeUpdate(
+          planToDict(planEntry.resumedPlan as PlanRecord),
+        ),
+      )
+    const entryPlanDecision = planEntry.entryDecision
     if (emit && entryPlanDecision !== null) {
       await emit(
         runtimeEvents.planEntryDecision(
@@ -839,24 +960,107 @@ export class AgentRunner implements RunnerModelHost {
         ),
       )
     }
-    // Freeze the exact executable Plan generation owned by this turn. A later
-    // continuation decision must never inherit a terminal Plan left behind by
-    // an unrelated earlier user request in the same session/scope.
-    const turnPlanBinding =
-      todoContinuation === 'none'
-        ? { available: true, planId: null }
-        : this.executablePlanBindingForCurrentTurn()
-    let queryState: QueryState = makeQueryState({
+    const iterations = new ModelIterationCoordinator<
+      RunnerModelSampleRequest,
+      LLMResponse
+    >({
       turnId,
       maxTurns: this.maxTurns,
+      maxEmptyRetries: MAX_EMPTY_RETRIES,
+      maxLengthRecoveries: MAX_LENGTH_RECOVERIES,
+      samplingPort: {
+        sample: async (request) =>
+          await this.askModel(
+            request.history,
+            request.emit,
+            request.clarification,
+            request.signal,
+            request.turnId,
+            request.stableBoundary,
+            request.onToolCallComplete,
+            request.disableTools,
+          ),
+      },
     })
     const finalParts: string[] = []
-    let stopHookNudged = false
-    let planFinalCorrections = 0
     let tokenBudgetUsed = 0
-    let noProgressCorrectionProgress = -1
     const progressLedger = new TurnProgressLedger()
+    const researchTaskIntent = currentTaskIntent(history)
+    const initialResearchRequirement = assessResearchRequirement(
+      researchTaskIntent,
+      this.activeExternalEvidenceRequired,
+    )
+    this.activeExternalEvidenceRequired = initialResearchRequirement.required
+    this.activeResearchEvidenceLedger = new ResearchEvidenceLedger()
+    let researchCorrectionIssued = false
     const clarification = this.assessClarification(history)
+    let finalizingAssistantMessage: Msg | null = null
+    const turnFinalizer = new TurnFinalizer({
+      sessionId: this.sessionId ?? '',
+      cwd: this.workspaceRoot ?? process.cwd(),
+      turnId,
+      ports: {
+        planSubmissionDecision: () => planTurn.planSubmissionDecision(),
+        independentVerificationFollowup: () =>
+          planTurn.independentVerificationFollowup(),
+        honestyFollowup: () => planTurn.honestyFollowup(),
+        runStopHook: async (input) =>
+          await this.runHookEvent('Stop', input, emit),
+        appendHistory: (message) => {
+          history.push(message)
+        },
+        persistStopContinuation: (continuation) => {
+          this.memoryStore?.appendHistory('user', continuation, {
+            extra: {
+              ...(turnId ? { turn_id: turnId } : {}),
+              ui_hidden: true,
+              hook_event_name: 'Stop',
+            },
+          })
+        },
+        emitPlanFollowup: async (detail) =>
+          await this.emitTurnPhase(
+            turnState,
+            TurnPhase.PLAN_FOLLOWUP,
+            emit,
+            detail,
+          ),
+        appendExecutionDisclosure: (reply) =>
+          planTurn.appendExecutionDisclosure(reply),
+        finalizeReplyChanges: async (reply) => {
+          const finalizedChanges = await this.finalizeTurnChanges(turnId, emit)
+          return finalizedChanges
+            ? appendTurnChangeSummary(reply, finalizedChanges)
+            : reply
+        },
+        updateAssistantMessage: (reply) => {
+          if (!finalizingAssistantMessage)
+            throw new Error('assistant terminal message is unavailable')
+          finalizingAssistantMessage.content = reply
+        },
+        persistAssistant: (reply) => {
+          if (this.memoryStore !== null) {
+            this.memoryStore.appendHistory('assistant', reply, {
+              extra: turnId ? { turn_id: turnId } : null,
+            })
+            this.memoryStore.clearCheckpoint()
+          }
+        },
+        compact: async () => {
+          await this.emitTurnPhase(turnState, TurnPhase.COMPACT_CHECK, emit)
+          await this.maybeCompact(history, emit, turnId)
+        },
+        completeIteration: () => {
+          iterations.complete()
+        },
+        emitCompleted: async (reply) =>
+          await this.emitTurnPhase(turnState, TurnPhase.COMPLETED, emit, {
+            content_chars: reply.length,
+          }),
+        markIndependentVerificationDelivered: () =>
+          planTurn.markIndependentVerificationDelivered(),
+      },
+    })
     if (this.memoryStore !== null) {
       this.memoryStore.writeCheckpoint(history, {
         sessionId: this.sessionId,
@@ -872,13 +1076,13 @@ export class AgentRunner implements RunnerModelHost {
     ): Promise<string> => {
       let pausedPlan: PlanRecord | null | undefined = null
       try {
-        pausedPlan = this.controlManager?.pausePlanExecution?.({
+        pausedPlan = this.planning?.pausePlanExecution({
           reason: progressPauseReason(decision.reasonCode),
           turnId: turnId ?? '',
           executionId: this.executionId,
           pausedAt: Date.now() / 1000,
           evaluationCount: 0,
-          totalIterations: queryState.turnCount,
+          totalIterations: iterations.state.turnCount,
           nextActions: decision.nextActions,
         })
       } catch {
@@ -900,7 +1104,7 @@ export class AgentRunner implements RunnerModelHost {
       await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, {
         reason: decision.reasonCode,
         evaluation_count: 0,
-        total_iterations: queryState.turnCount,
+        total_iterations: iterations.state.turnCount,
       })
       return reply
     }
@@ -909,39 +1113,25 @@ export class AgentRunner implements RunnerModelHost {
       const beforeModel = await consumeRunnerInterjections(interjections)
       if (beforeModel.length) history.push(...beforeModel)
       const progressSnapshot = progressLedger.snapshot()
-      const usesDeterministicProgressWatchdog = this.maxTurns === null
-      if (
-        usesDeterministicProgressWatchdog &&
-        progressSnapshot.noProgressIterations >= 12
-      ) {
-        return await pauseForProgressGuard({
-          reasonCode: 'no_progress',
-          nextActions: (this.todoStore?.todos ?? [])
-            .filter((todo) => todo.status !== 'completed')
-            .slice(0, 3)
-            .map((todo) => String(todo.content ?? todo.id ?? '')),
-          summary:
-            '连续 12 次模型迭代没有形成新的有效进展，Core 已暂停当前执行以阻止重复循环。',
-        })
-      }
-      if (
-        usesDeterministicProgressWatchdog &&
-        progressSnapshot.noProgressIterations >= 6 &&
-        progressSnapshot.noProgressIterations < 12 &&
-        noProgressCorrectionProgress !== progressSnapshot.meaningfulProgress
-      ) {
-        noProgressCorrectionProgress = progressSnapshot.meaningfulProgress
+      const progressDecision = iterations.evaluateProgress(
+        progressSnapshot,
+        (this.todoStore?.todos ?? [])
+          .filter((todo) => todo.status !== 'completed')
+          .slice(0, 3)
+          .map((todo) => String(todo.content ?? todo.id ?? '')),
+      )
+      if (progressDecision.kind === 'pause')
+        return await pauseForProgressGuard(progressDecision.decision)
+      if (progressDecision.kind === 'correction') {
         history.push({
           role: 'user',
-          content:
-            '[CONTROL:NO_PROGRESS_CORRECTION]\n连续 6 次模型迭代没有形成新的有效进展。停止重复读取、重复命令和重复错误；选择新的验证路径并执行一个可验证的新动作。若连续 12 次仍无进展，Core 将暂停本回合。',
+          content: progressDecision.message,
           ...(turnId ? { turn_id: turnId } : {}),
           ui_hidden: true,
         })
       }
-      const maxTurnsTransition = maxTurnsReached(queryState)
+      const maxTurnsTransition = iterations.maxTurnsReached()
       if (maxTurnsTransition !== null) {
-        queryState = maxTurnsTransition.nextState
         const reply = buildMaxTurnsSummary({
           maxTurns: this.maxTurns,
           todos: this.todoStore?.todos ?? [],
@@ -964,15 +1154,14 @@ export class AgentRunner implements RunnerModelHost {
         })
         return reply
       }
-      const wrapUpWarning = nearMaxTurns(queryState)
+      const wrapUpWarning = iterations.nearMaxTurns()
       if (wrapUpWarning !== null) {
-        queryState = wrapUpWarning.nextState
         for (const message of wrapUpWarning.messages)
           history.push({ ...message } as Msg)
       }
-      queryState = beginIteration(queryState).nextState
+      iterations.beginIteration()
       turnState.startIteration()
-      const toolBatchId = `${turnId || 'turn'}:tool_batch:${queryState.turnCount}`
+      const toolBatchId = `${turnId || 'turn'}:tool_batch:${iterations.state.turnCount}`
       const toolEmit = toolBatchEmitter(emit, toolBatchId)
       const taskIntent = currentTaskIntent(history)
       const permissionAuthorizationId = currentPermissionAuthorization(history)
@@ -996,25 +1185,45 @@ export class AgentRunner implements RunnerModelHost {
           : null
       let response: LLMResponse
       let streamedPartial = ''
+      const stagedMessageDeltas: string[] = []
+      let stagedMessageChars = 0
+      let stagedMessageOverflow = false
       const modelEmit =
         emit || interjections
           ? async (event: Record<string, unknown>) => {
-              if (event.event === 'message_delta')
-                streamedPartial += String(event.delta ?? '')
+              if (event.event === 'message_delta') {
+                const delta = String(event.delta ?? '')
+                streamedPartial = appendBounded(
+                  streamedPartial,
+                  delta,
+                  MAX_RESEARCH_DRAFT_CHARS,
+                )
+                if (
+                  !stagedMessageOverflow &&
+                  stagedMessageChars + delta.length <= MAX_RESEARCH_DRAFT_CHARS
+                ) {
+                  stagedMessageDeltas.push(delta)
+                  stagedMessageChars += delta.length
+                } else {
+                  stagedMessageOverflow = true
+                  stagedMessageDeltas.length = 0
+                }
+                return
+              }
               if (emit) await emit(event)
             }
           : null
       try {
-        response = await this.askModel(
+        response = await iterations.sample({
           history,
-          modelEmit,
+          emit: modelEmit,
           clarification,
           signal,
           turnId,
-          turnStartLength,
-          streamingTools?.onToolCallComplete ?? null,
-          false,
-        )
+          stableBoundary: turnStartLength,
+          onToolCallComplete: streamingTools?.onToolCallComplete ?? null,
+          disableTools: false,
+        })
         throwIfAborted(signal)
       } catch (error) {
         // Capture cancellation synchronously at the provider failure boundary.
@@ -1040,6 +1249,24 @@ export class AgentRunner implements RunnerModelHost {
         }
         if (cancelled) throw cancelled
         throw error
+      }
+      const responseUsesExternalTool = response.toolCalls.some(
+        (call) =>
+          Boolean(this.registry.get(call.name)?.externalContent) ||
+          (call.name === 'run_command' &&
+            runCommandProvidesExternalContent(
+              String(call.arguments.command ?? ''),
+            )),
+      )
+      if (responseUsesExternalTool) this.activeExternalEvidenceRequired = true
+      if (!this.activeExternalEvidenceRequired && emit) {
+        if (stagedMessageOverflow) {
+          const content = String(response.content ?? '')
+          if (content) await emit({ event: 'message_delta', delta: content })
+        } else {
+          for (const delta of stagedMessageDeltas)
+            await emit({ event: 'message_delta', delta })
+        }
       }
       if (streamingTools && !shouldExecuteTools(response))
         await streamingTools.cancel('not_in_final_response')
@@ -1170,7 +1397,9 @@ export class AgentRunner implements RunnerModelHost {
         const userInput = lastUser
           ? String(lastUser.content ?? '').slice(0, 500)
           : ''
-        const aiOutput = String(response.content ?? '').slice(0, 500)
+        const aiOutput = this.activeExternalEvidenceRequired
+          ? ''
+          : String(response.content ?? '').slice(0, 500)
         let cmdEvent: string | null = null
         if (userInput.startsWith('/'))
           cmdEvent = userInput.split(/\s+/)[0] ?? null
@@ -1212,7 +1441,7 @@ export class AgentRunner implements RunnerModelHost {
       }
 
       if (shouldExecuteTools(response)) {
-        queryState = toolFollowup(queryState).nextState
+        iterations.toolFollowup()
         const assistantContent = response.content ?? ''
         // B8：伴随工具批次的过场白只进 history 与流式展示，不进最终回复
         // （2026-07-05 会话的交付报告被 19 段「Step N 完成。」碎片淹没）
@@ -1232,7 +1461,7 @@ export class AgentRunner implements RunnerModelHost {
         await this.emitAgentThought(toolIntentThought(response.toolCalls), emit)
         await this.emitTurnPhase(turnState, TurnPhase.TOOL_BATCH_START, emit, {
           tool_batch_id: toolBatchId,
-          iteration: queryState.turnCount,
+          iteration: iterations.state.turnCount,
           tool_call_ids: response.toolCalls.map((call) => call.id),
           tool_names: response.toolCalls.map((call) => call.name),
           count: response.toolCalls.length,
@@ -1295,7 +1524,7 @@ export class AgentRunner implements RunnerModelHost {
         progressLedger.finishIteration()
         await this.emitTurnPhase(turnState, TurnPhase.TOOL_BATCH_DONE, emit, {
           tool_batch_id: toolBatchId,
-          iteration: queryState.turnCount,
+          iteration: iterations.state.turnCount,
           tool_call_ids: response.toolCalls.map((call) => call.id),
           tool_names: response.toolCalls.map((call) => call.name),
           count: toolMessages.length,
@@ -1310,23 +1539,20 @@ export class AgentRunner implements RunnerModelHost {
             reason: 'tool_batch',
           })
         }
-        await this.pauseForPlanExecutionDecision(history, emit, turnId)
+        await planTurn.pauseForExecutionDecision(history, emit)
         continue
       }
 
-      const reply = response.content ?? ''
+      let reply = response.content ?? ''
       progressLedger.finishIteration()
 
       // 空响应救援
       if (!reply.trim() && !response.toolCalls.length) {
-        const t = emptyResponseRetry(queryState, {
-          maxRetries: MAX_EMPTY_RETRIES,
-        })
+        const t = iterations.emptyResponseRetry()
         if (t !== null) {
-          queryState = t.nextState
           history.push(...t.messages)
           await this.emitTurnPhase(turnState, TurnPhase.EMPTY_RETRY, emit, {
-            attempt: queryState.emptyRetries,
+            attempt: iterations.state.emptyRetries,
             max: MAX_EMPTY_RETRIES,
           })
           if (emit) for (const event of t.events) await emit(event)
@@ -1336,15 +1562,12 @@ export class AgentRunner implements RunnerModelHost {
 
       // 截断续写
       if (isTruncated(response.finishReason)) {
-        const t = lengthRecovery(queryState, reply, {
-          maxRetries: MAX_LENGTH_RECOVERIES,
-        })
+        const t = iterations.lengthRecovery(reply)
         if (t !== null) {
-          queryState = t.nextState
           if (reply) finalParts.push(reply)
           history.push(...t.messages)
           await this.emitTurnPhase(turnState, TurnPhase.LENGTH_RETRY, emit, {
-            attempt: queryState.lengthRetries,
+            attempt: iterations.state.lengthRetries,
             max: MAX_LENGTH_RECOVERIES,
           })
           if (emit) for (const event of t.events) await emit(event)
@@ -1353,10 +1576,7 @@ export class AgentRunner implements RunnerModelHost {
       }
 
       if (clarification.required && reply.trim()) {
-        queryState = markPaused(
-          queryState,
-          TransitionReason.ASK_PAUSE,
-        ).nextState
+        iterations.pause(TransitionReason.ASK_PAUSE)
         await this.emitTurnPhase(turnState, TurnPhase.PAUSED, emit, {
           kind: 'ask',
           source: 'clarification',
@@ -1364,9 +1584,101 @@ export class AgentRunner implements RunnerModelHost {
         await pauseForClarification(this, history, clarification, emit, turnId)
       }
 
-      if (this.mustPauseForPlan()) {
-        if (planFinalCorrections >= 1) throw new PlanGenerationFailedError()
-        planFinalCorrections += 1
+      if (this.activeExternalEvidenceRequired) {
+        const draft = `${finalParts.join('')}${reply}`
+        const sources =
+          this.activeResearchEvidenceLedger?.snapshot().verified ?? []
+        const deterministic =
+          draft.length > MAX_RESEARCH_DRAFT_CHARS
+            ? researchDraftTooLargeDecision()
+            : validateResearchReply(draft, sources)
+        if (emit)
+          await emit(
+            runtimeEvents.researchValidation({
+              stage: 'deterministic',
+              sourceCount: sources.length,
+              factUnitCount: deterministic.units.length,
+              reasonCode: deterministic.reasonCodes[0] ?? null,
+            }),
+          )
+        let review: GroundingReviewVerdict | null = null
+        let reasonCodes = deterministic.reasonCodes
+        if (deterministic.passed) {
+          if (emit)
+            await emit(
+              runtimeEvents.researchValidation({
+                stage: 'grounding_review',
+                sourceCount: sources.length,
+                factUnitCount: deterministic.units.length,
+              }),
+            )
+          review = await this.reviewResearchDraft({
+            task: researchTaskIntent ?? '',
+            draft,
+            validation: deterministic,
+            sources,
+            signal,
+          })
+          if (!review?.passed)
+            reasonCodes = review?.reasonCodes.length
+              ? review.reasonCodes
+              : ['grounding_review_unavailable']
+        }
+        if (!deterministic.passed || !review?.passed) {
+          if (emit)
+            await emit(
+              runtimeEvents.researchValidation({
+                stage: 'failed',
+                sourceCount: sources.length,
+                factUnitCount: deterministic.units.length,
+                reasonCode: reasonCodes[0] ?? null,
+              }),
+            )
+          if (!researchCorrectionIssued) {
+            researchCorrectionIssued = true
+            const stagedMessages: Msg[] = [
+              {
+                role: 'assistant',
+                content: reply,
+                ...(turnId ? { turn_id: turnId } : {}),
+              },
+              {
+                role: 'user',
+                content: researchCorrectionMessage({
+                  reasonCodes,
+                  validation: deterministic,
+                  sources,
+                  unsupportedUnitIds: review?.unsupportedUnitIds ?? [],
+                }),
+                ui_hidden: true,
+                ...(turnId ? { turn_id: turnId } : {}),
+              },
+            ]
+            history.push(...stagedMessages)
+            this.stagedResearchHistory = {
+              history,
+              messages: stagedMessages,
+            }
+            continue
+          }
+          reply = researchBlockedReply(reasonCodes)
+          finalParts.length = 0
+        } else if (emit) {
+          await emit(
+            runtimeEvents.researchValidation({
+              stage: 'passed',
+              sourceCount: sources.length,
+              factUnitCount: deterministic.units.length,
+            }),
+          )
+        }
+        this.clearStagedResearchHistory()
+      }
+
+      const planSubmission = turnFinalizer.planSubmissionDecision()
+      if (planSubmission.kind === 'exhausted')
+        throw new PlanGenerationFailedError()
+      if (planSubmission.kind === 'followup') {
         const attemptedMessage: Msg = { role: 'assistant', content: reply }
         if (turnId) attemptedMessage.turn_id = turnId
         history.push(attemptedMessage, {
@@ -1377,13 +1689,17 @@ export class AgentRunner implements RunnerModelHost {
         })
         await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, {
           reason: 'propose_plan_required',
-          attempt: planFinalCorrections,
+          attempt: planSubmission.attempt,
         })
         continue
       }
 
+      if (this.activeExternalEvidenceRequired && emit) {
+        const published = `${finalParts.join('')}${reply}`
+        if (published) await emit({ event: 'message_delta', delta: published })
+      }
       finalParts.push(reply)
-      let finalReply = finalParts.join('')
+      const finalReply = finalParts.join('')
       const assistantMessage: Msg = { role: 'assistant', content: reply }
       if (turnId) assistantMessage.turn_id = turnId
       if (response.reasoningContent !== null)
@@ -1401,7 +1717,7 @@ export class AgentRunner implements RunnerModelHost {
           (t) => t.status !== 'completed',
         )
         if (unfinished.length) {
-          const t = todoFollowup(queryState, {
+          const t = iterations.todoFollowup({
             unfinishedText: renderTodos(unfinished),
             unfinishedCount: unfinished.length,
             maxContinuations: this.maxTurns === null ? null : 2,
@@ -1439,7 +1755,6 @@ export class AgentRunner implements RunnerModelHost {
             })
             return pausedReply
           }
-          queryState = t.nextState
           history.push(...t.messages)
           await this.emitTurnPhase(turnState, TurnPhase.TODO_FOLLOWUP, emit, {
             unfinished: unfinished.length,
@@ -1451,100 +1766,20 @@ export class AgentRunner implements RunnerModelHost {
         // continuation is prompt-scoped.
       }
 
-      const verificationFollowup = planIndependentVerificationFollowup(
-        this.controlManager,
-        this.registry,
-      )
-      if (verificationFollowup !== null) {
-        history.push({
-          role: 'user',
-          content: String(verificationFollowup.message),
-        })
-        await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, {
-          plan_id: verificationFollowup.plan_id,
-          verification: verificationFollowup.status,
-        })
-        continue
-      }
-
       // 验证要求无证据时持续拦截过早 final reply。真正的反循环由
       // TurnProgressWatchdog 负责，而不是放行一条虚假的完成声明。
-      const honesty =
-        turnPlanBinding.planId === null
-          ? null
-          : unverifiedPlanHonestyFollowup(this.controlManager)
-      if (honesty !== null) {
-        history.push(honesty)
-        await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, {
-          honesty: 'verification_unrecorded',
-        })
-        continue
+      finalizingAssistantMessage = assistantMessage
+      let finalization
+      try {
+        finalization = await turnFinalizer.finalize(finalReply)
+      } finally {
+        finalizingAssistantMessage = null
       }
-
-      const stopDecision = await this.runHookEvent(
-        'Stop',
-        {
-          sessionId: this.sessionId ?? '',
-          cwd: this.workspaceRoot ?? process.cwd(),
-          lastAssistantMessage: finalReply,
-          stopHookActive: stopHookNudged,
-        },
-        emit,
-      )
-      if (
-        (stopDecision.continue === true ||
-          stopDecision.decision === 'deny' ||
-          stopDecision.decision === 'ask') &&
-        !stopHookNudged
-      ) {
-        stopHookNudged = true
-        const continuation = `[Stop hook] ${stopDecision.stopReason || stopDecision.reason || 'Continue until the stop hook passes.'}`
-        history.push({
-          role: 'user',
-          content: continuation,
-          ui_hidden: true,
-          ...(turnId ? { turn_id: turnId } : {}),
-        })
-        this.memoryStore?.appendHistory('user', continuation, {
-          extra: {
-            ...(turnId ? { turn_id: turnId } : {}),
-            ui_hidden: true,
-            hook_event_name: 'Stop',
-          },
-        })
-        await this.emitTurnPhase(turnState, TurnPhase.PLAN_FOLLOWUP, emit, {
-          hook: 'Stop',
-          decision: stopDecision.decision,
-        })
-        continue
-      }
-
-      finalReply = appendPlanExecutionDisclosure(
-        finalReply,
-        this.controlManager,
-      )
-      const finalizedChanges = await this.finalizeTurnChanges(turnId, emit)
-      if (finalizedChanges) {
-        finalReply = appendTurnChangeSummary(finalReply, finalizedChanges)
-      }
-      assistantMessage.content = finalReply
-      if (this.memoryStore !== null) {
-        this.memoryStore.appendHistory('assistant', finalReply, {
-          extra: turnId ? { turn_id: turnId } : null,
-        })
-        this.memoryStore.clearCheckpoint()
-      }
-      await this.emitTurnPhase(turnState, TurnPhase.COMPACT_CHECK, emit)
-      await this.maybeCompact(history, emit, turnId)
-      queryState = markCompleted(queryState).nextState
-      await this.emitTurnPhase(turnState, TurnPhase.COMPLETED, emit, {
-        content_chars: finalReply.length,
-      })
-      this.controlManager?.markIndependentVerificationDelivered?.()
+      if (finalization.kind === 'continue') continue
       // COMPLETED here is a single model turn. Goal terminal truth is owned
       // exclusively by GoalCompletionGate.complete(), never by final prose or
       // a permissive Stop hook.
-      return finalReply
+      return finalization.reply
     }
   }
 
@@ -1601,11 +1836,7 @@ export class AgentRunner implements RunnerModelHost {
       turnId,
       executionId: this.executionId ?? turnId,
     })
-    if (
-      !snapshot ||
-      (snapshot.filesChanged === 0 && snapshot.status !== 'partial')
-    )
-      return
+    if (!snapshot || snapshot.filesChanged === 0) return
     const content = renderTurnChangeControl(snapshot)
     for (let index = history.length - 1; index >= 0; index -= 1) {
       const message = history[index]
@@ -1637,11 +1868,7 @@ export class AgentRunner implements RunnerModelHost {
       turnId,
       executionId: this.executionId ?? turnId,
     })
-    if (
-      snapshot &&
-      emit &&
-      (snapshot.filesChanged > 0 || snapshot.status === 'partial')
-    )
+    if (snapshot && emit && snapshot.filesChanged > 0)
       await emit(snapshot as unknown as Record<string, unknown>)
     return snapshot
   }
@@ -1985,6 +2212,100 @@ export class AgentRunner implements RunnerModelHost {
     })
   }
 
+  private async reviewResearchDraft(input: {
+    task: string
+    draft: string
+    validation: ResearchValidationDecision
+    sources: readonly ResearchSourceRecord[]
+    signal: AbortSignal | null
+  }): Promise<GroundingReviewVerdict | null> {
+    const cited = new Set(input.validation.citedSourceIds)
+    const sources = input.sources
+      .filter((source) => cited.has(source.id))
+      .slice(0, 12)
+      .map((source) => ({
+        id: source.id,
+        url: source.url,
+        content_sha256: source.contentSha256,
+        excerpt: source.excerpt,
+      }))
+    try {
+      const response = await new ModelCaller(
+        this,
+        this.samplingCoordinator,
+      ).ask({
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are an isolated research-grounding reviewer.',
+              'Check whether every factual unit is supported by its cited source excerpt.',
+              'Do not use outside knowledge. Return JSON only:',
+              '{"passed":boolean,"unsupported_unit_ids":string[],"reason_codes":string[]}',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              task: input.task,
+              draft: input.draft,
+              units: input.validation.units.map((unit) => ({
+                id: unit.id,
+                text: unit.text,
+                cited_source_ids: unit.citedSourceIds,
+              })),
+              sources,
+            }),
+          },
+        ],
+        tools: null,
+        emit: null,
+        signal: input.signal,
+        usageType: 'research_grounding_review',
+        maxTokens: 384,
+      })
+      if (
+        response.usage &&
+        Object.keys(response.usage).length &&
+        this.tokenTracker
+      ) {
+        const callMeta = this.lastModelCall
+        this.tokenTracker.record(
+          String(callMeta.model || this.model),
+          response.usage,
+          {
+            provider: String(
+              callMeta.provider || this.providerName || 'unknown',
+            ),
+            usageType: 'research_grounding_review',
+            modelEntryId: String(callMeta.modelEntryId || this.modelEntryId),
+            costUsdNanos: callMeta.costUsdNanos,
+            turnCostUsdNanos: callMeta.turnCostUsdNanos,
+            costCapUsdNanos: callMeta.costCapUsdNanos,
+            costComplete: callMeta.costComplete,
+            usedFallback: callMeta.usedFallback,
+            fallbackReason: callMeta.fallbackReason || null,
+          },
+        )
+      }
+      return parseGroundingReviewVerdict(response.content)
+    } catch (error) {
+      const cancelled = cancellationForAbortedTurn(error, input.signal)
+      if (cancelled) throw cancelled
+      return null
+    }
+  }
+
+  private clearStagedResearchHistory(): void {
+    const staged = this.stagedResearchHistory
+    this.stagedResearchHistory = null
+    if (!staged) return
+    for (const message of staged.messages) {
+      const index = staged.history.indexOf(message)
+      if (index >= 0) staged.history.splice(index, 1)
+    }
+  }
+
   private checkpointForPromptSnapshot(): Record<string, unknown> | null {
     const checkpointFile = this.memoryStore?.checkpointFile
     if (!checkpointFile) return null
@@ -2025,6 +2346,8 @@ export class AgentRunner implements RunnerModelHost {
     parentContext?: Msg[]
     preparedCalls?: Map<string, ToolCallRequest>
     preflightResults?: Map<string, ToolResultObj>
+    processExecutions?: Map<string, ToolBatchProcessExecution>
+    fileAccessAuthorizations?: Map<string, FileAccessAuthorization>
   }): {
     runOne: (
       call: ToolCallRequest,
@@ -2059,116 +2382,202 @@ export class AgentRunner implements RunnerModelHost {
             ctx.turnId,
             ctx.taskIntent,
             ctx.preparedCalls?.get(call.id),
+            ctx.processExecutions?.get(call.id),
+            ctx.fileAccessAuthorizations?.get(call.id),
             ctx.parentContext,
           )
       const result = outcome.result
-      const executedCall = outcome.executedCall ?? call
-      const verificationTarget = outcome.verificationTarget ?? null
       throwIfAborted(childSignal)
-      applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
-      recordPlanDiscovery(this.controlManager, call, result)
-      recordPlanStepToolOutput(this.controlManager, call, result)
-      const independentReview = recordIndependentVerificationToolResult(
-        this.controlManager,
-        executedCall,
-        result,
-      )
-      if (independentReview !== null) {
-        planFollowups.push({
-          role: 'user',
-          content: [
-            '[PLAN_INDEPENDENT_VERIFICATION_RECORDED]',
-            `plan_id: ${independentReview.id}`,
-            'Core 已记录当前 Plan generation 的独立复核裁决。',
-            '若裁决通过且命令证据完整，现在只输出一次最终交付；不要再调用工具，也不要询问用户是否满意或是否结束。',
-          ].join('\n'),
-          ui_hidden: true,
-        })
-        if (emit)
-          await emit(
-            runtimeEvents.planRuntimeUpdate(planToDict(independentReview)),
-          )
-      }
-      const content = result.modelContent
       resultsById.set(call.id, result)
-      const recordGoalResult = async (
-        verificationUpdate: ReturnType<typeof recordPlanVerification>,
-      ): Promise<void> => {
-        try {
-          const observation = await recordRunnerGoalToolResult(
-            this.goalObservationRecorder,
-            this.registry,
-            {
-              expectedGoalId: outcome.expectedGoalId,
-              sessionId: this.sessionId ?? '',
-              turnId: ctx.turnId ?? '',
-              toolCallId: call.id,
-              toolName: executedCall.name,
-              arguments: executedCall.arguments,
-              executed: outcome.executed,
-              result,
-            },
-          )
-          await recordRunnerPlanVerificationReceipt(
-            this.goalObservationRecorder,
-            observation,
-            verificationUpdate,
-          )
-        } catch {
-          try {
-            if (emit) {
-              await emit({
-                event: 'record_degraded',
-                kind: 'goal_observation',
-                reason:
-                  'Goal observation could not be persisted; completion evidence was not recorded.',
-                taskId: ctx.turnId ?? undefined,
-              })
-            }
-          } catch {
-            // Persistence diagnostics are best-effort and never replace a tool result.
-          }
-        }
-      }
-      if (parsePauseResult(content) !== null) {
-        await recordGoalResult(null)
-      }
-      maybePauseForControl(content, ctx.toolCallsRef.current, resultsById)
-      const verificationUpdate = recordPlanVerification(
-        this.controlManager,
-        executedCall,
-        result,
-        verificationTarget,
+      planFollowups.push(
+        ...(await this.observeToolResult({
+          call,
+          outcome,
+          toolCalls: ctx.toolCallsRef.current,
+          resultsById,
+          emit,
+          turnId: ctx.turnId,
+          progressLedger: ctx.progressLedger ?? null,
+          planStepsBefore,
+          planPhaseBefore,
+        })),
       )
-      if (verificationUpdate !== null && emit) {
-        await emit(
-          runtimeEvents.planVerificationDone({
-            planId: verificationUpdate.target.plan_id!,
-            stepId: verificationUpdate.target.step_id!,
-            result: verificationUpdate.result,
-          }),
-        )
-        await emit(runtimeEvents.planRuntimeUpdate(verificationUpdate.plan))
-      }
-      if (verificationUpdate !== null) {
-        const followup = planVerificationFollowup(verificationUpdate)
-        if (followup !== null) planFollowups.push(followup)
-      }
-      await emitPlanStepTransitions(this.controlManager, planStepsBefore, emit)
-      await this.emitToolResult(call, result, emit)
-      await recordGoalResult(verificationUpdate)
-      ctx.progressLedger?.recordToolResult(executedCall, result, {
-        executed: outcome.executed,
-        readOnly: this.toolCallIsReadOnly(executedCall),
-        planPhase: planPhaseBefore,
-        verificationEvidence:
-          verificationUpdate !== null &&
-          verificationUpdate.result.passed === true,
-      })
       return result
     }
 
     return { runOne, resultsById, planFollowups }
+  }
+
+  private async observeToolResult(input: {
+    call: ToolCallRequest
+    outcome: ToolBatchExecutionOutcome
+    toolCalls: readonly ToolCallRequest[]
+    resultsById: ReadonlyMap<string, ToolResultObj>
+    emit: StreamEmitter | null
+    turnId: string | null
+    progressLedger: TurnProgressLedger | null
+    planStepsBefore: PlanStepSnapshot | null
+    planPhaseBefore: string | null
+  }): Promise<Msg[]> {
+    const { call, outcome, emit } = input
+    const result = outcome.result
+    const executedCall = outcome.executedCall ?? call
+    const verificationTarget = outcome.verificationTarget ?? null
+    const followups: Msg[] = []
+    applyRepeatedRefusalNudge(this.denyRefusalCounts, result)
+    recordPlanDiscovery(this.planning, call, result)
+    recordPlanStepToolOutput(this.planning, call, result)
+    const independentReview = recordIndependentVerificationToolResult(
+      this.controlManager,
+      executedCall,
+      result,
+    )
+    if (independentReview !== null) {
+      followups.push({
+        role: 'user',
+        content: [
+          '[PLAN_INDEPENDENT_VERIFICATION_RECORDED]',
+          `plan_id: ${independentReview.id}`,
+          'Core 已记录当前 Plan generation 的独立复核裁决。',
+          '若裁决通过且命令证据完整，现在只输出一次最终交付；不要再调用工具，也不要询问用户是否满意或是否结束。',
+        ].join('\n'),
+        ui_hidden: true,
+      })
+      if (emit)
+        await emit(
+          runtimeEvents.planRuntimeUpdate(planToDict(independentReview)),
+        )
+    }
+    const recordGoalResult = async (
+      verificationUpdate: ReturnType<typeof recordPlanVerification>,
+    ): Promise<void> => {
+      try {
+        const observation = await recordRunnerGoalToolResult(
+          this.goalObservationRecorder,
+          this.registry,
+          {
+            expectedGoalId: outcome.expectedGoalId,
+            sessionId: this.sessionId ?? '',
+            turnId: input.turnId ?? '',
+            toolCallId: call.id,
+            toolName: executedCall.name,
+            arguments: executedCall.arguments,
+            executed: outcome.executed,
+            result,
+          },
+        )
+        await recordRunnerPlanVerificationReceipt(
+          this.goalObservationRecorder,
+          observation,
+          verificationUpdate,
+        )
+      } catch {
+        try {
+          if (emit) {
+            await emit({
+              event: 'record_degraded',
+              kind: 'goal_observation',
+              reason:
+                'Goal observation could not be persisted; completion evidence was not recorded.',
+              taskId: input.turnId ?? undefined,
+            })
+          }
+        } catch {
+          // Persistence diagnostics are best-effort and never replace a tool result.
+        }
+      }
+    }
+    if (parsePauseResult(result.modelContent) !== null)
+      await recordGoalResult(null)
+    maybePauseForControl(
+      result.modelContent,
+      [...input.toolCalls],
+      new Map(input.resultsById),
+    )
+    const verificationUpdate = recordPlanVerification(
+      this.planning,
+      executedCall,
+      result,
+      verificationTarget,
+    )
+    if (verificationUpdate !== null && emit) {
+      await emit(
+        runtimeEvents.planVerificationDone({
+          planId: verificationUpdate.target.plan_id!,
+          stepId: verificationUpdate.target.step_id!,
+          result: verificationUpdate.result,
+        }),
+      )
+      await emit(runtimeEvents.planRuntimeUpdate(verificationUpdate.plan))
+    }
+    if (verificationUpdate !== null) {
+      const followup = planVerificationFollowup(verificationUpdate)
+      if (followup !== null) followups.push(followup)
+    }
+    await emitPlanStepTransitions(
+      this.controlManager,
+      input.planStepsBefore,
+      emit,
+    )
+    this.activateLoadedSkillScope(executedCall, result)
+    await this.emitToolResult(call, result, emit)
+    await recordGoalResult(verificationUpdate)
+    const externalContent = this.toolCallProvidesExternalContent(executedCall)
+    if (externalContent) {
+      this.activeExternalEvidenceRequired = true
+      this.activeResearchEvidenceLedger?.recordToolResult(
+        executedCall,
+        result,
+        {
+          externalContent: true,
+        },
+      )
+    }
+    input.progressLedger?.recordToolResult(executedCall, result, {
+      executed: outcome.executed,
+      readOnly: this.toolCallIsReadOnly(executedCall),
+      planPhase: input.planPhaseBefore,
+      verificationEvidence:
+        verificationUpdate !== null &&
+        verificationUpdate.result.passed === true,
+      externalContent,
+    })
+    return followups
+  }
+
+  private toolCallProvidesExternalContent(call: ToolCallRequest): boolean {
+    if (this.registry.get(call.name)?.externalContent) return true
+    if (!this.activeExternalEvidenceRequired || call.name !== 'run_command')
+      return false
+    const command = String(call.arguments.command ?? '')
+    return runCommandProvidesExternalContent(command)
+  }
+
+  private activateLoadedSkillScope(
+    call: ToolCallRequest,
+    result: ToolResultObj,
+  ): void {
+    if (call.name !== 'Skill' || result.isError) return
+    const name = String(result.metadata.skill_name ?? '').trim()
+    const root = String(result.metadata.skill_root ?? '').trim()
+    if (!name || !root) return
+    this.activeSkillReadScopes = [
+      {
+        kind: 'active_skill',
+        root,
+        skillName: name,
+        access: 'read',
+      },
+    ]
+    const allowed = Array.isArray(result.metadata.skill_allowed_tools)
+      ? result.metadata.skill_allowed_tools
+          .map((tool) => String(tool).trim())
+          .filter(Boolean)
+      : null
+    this.activeSkillAllowedTools = allowed ? new Set(allowed) : null
+    this.activeExternalEvidenceRequired =
+      this.activeExternalEvidenceRequired ||
+      result.metadata.requires_external_evidence === true
   }
 
   /** 某工具能否在流式期间提前起跑：只读 + 并发安全 + 不会触发 Ask/Plan Guard 或权限审批。 */
@@ -2226,7 +2635,7 @@ export class AgentRunner implements RunnerModelHost {
   } {
     const toolCallsRef: { current: ToolCallRequest[] } = { current: [] }
     const planDecisionRef: { current: unknown } = { current: entryPlanDecision }
-    const { runOne, resultsById, planFollowups } = this.buildToolRunOne({
+    const { runOne, planFollowups } = this.buildToolRunOne({
       toolCallsRef,
       planDecisionRef,
       emit,
@@ -2238,10 +2647,45 @@ export class AgentRunner implements RunnerModelHost {
       progressLedger,
       parentContext,
     })
-    const run = this.toolExecutionEngine.createStreamingRun({
+    const coordinator = new ToolBatchCoordinator<Msg, never>({
+      executionEngine: this.toolExecutionEngine,
+      ports: {
+        controlEnabled: false,
+        prepareCall: (call) => call,
+        guardCall: () => null,
+        runHook: async () => ({ decision: 'passthrough', reason: '' }),
+        assessPermissionBatch: async () => {
+          throw new Error(
+            'streaming tool execution cannot assess permission batches',
+          )
+        },
+        approvalResult: () =>
+          ToolResultObj.fromText('Error: approval is unavailable', {
+            isError: true,
+          }),
+        pauseForApproval: () => undefined,
+        emitToolCall: async () => undefined,
+        executeCall: async ({ call, signal: childSignal }) => ({
+          result: await runOne(call, childSignal),
+          executed: true,
+          executedCall: call,
+        }),
+        observeResult: async () => undefined,
+        emitResultSummary: async (calls, results) => {
+          const resultThought = toolResultSummaryThought(
+            [...calls],
+            new Map(results),
+          )
+          if (resultThought) await this.emitAgentThought(resultThought, emit)
+        },
+      },
+    })
+    const run = coordinator.createStreamingRun({
       emit,
-      runOne,
       signal,
+      turnId,
+      taskIntent,
+      permissionAuthorizationId: null,
       canStartEarly: (call) =>
         this.canStartToolEarly(call, clarification, planDecisionRef.current),
     })
@@ -2250,11 +2694,8 @@ export class AgentRunner implements RunnerModelHost {
       finish: async (toolCalls, planDecision): Promise<Msg[]> => {
         toolCallsRef.current = toolCalls
         planDecisionRef.current = planDecision
-        const toolMessages = await run.finish(toolCalls)
-        throwIfAborted(signal)
-        const resultThought = toolResultSummaryThought(toolCalls, resultsById)
-        if (resultThought) await this.emitAgentThought(resultThought, emit)
-        return [...toolMessages, ...planFollowups]
+        const result = await run.finish(toolCalls)
+        return [...(result.messages as Msg[]), ...planFollowups]
       },
       cancel: async (reason): Promise<void> => {
         await run.cancel(reason)
@@ -2275,290 +2716,159 @@ export class AgentRunner implements RunnerModelHost {
     progressLedger: TurnProgressLedger,
     parentContext: Msg[],
   ): Promise<Msg[]> {
-    const preflight =
-      this.controlManager === null
-        ? null
-        : await this.preflightToolBatch(
-            toolCalls,
-            emit,
-            clarification,
-            planDecision,
-            signal,
-            turnId,
-            taskIntent,
-            permissionAuthorizationId,
-          )
-    const toolCallsRef = { current: toolCalls }
-    const planDecisionRef = { current: planDecision }
-    const { runOne, resultsById, planFollowups } = this.buildToolRunOne({
-      toolCallsRef,
-      planDecisionRef,
-      emit,
-      clarification,
-      signal,
-      executionEnvironment,
-      turnId,
-      taskIntent,
-      progressLedger,
-      parentContext,
-      preparedCalls: preflight?.preparedCalls,
-      preflightResults: preflight?.results,
-    })
-    const toolMessages = await this.toolExecutionEngine.runBatch(toolCalls, {
-      emit,
-      runOne,
-      signal,
-    })
-    throwIfAborted(signal)
-    const resultThought = toolResultSummaryThought(toolCalls, resultsById)
-    if (resultThought) await this.emitAgentThought(resultThought, emit)
-    return [...toolMessages, ...planFollowups]
-  }
-
-  private async preflightToolBatch(
-    toolCalls: ToolCallRequest[],
-    emit: StreamEmitter | null,
-    clarification: Clarification | null,
-    planDecision: unknown,
-    signal: AbortSignal | null,
-    turnId: string | null,
-    taskIntent: string | null,
-    permissionAuthorizationId: string | null,
-  ): Promise<ToolBatchPreflight> {
     const control = this.controlManager
-    if (!control) return { preparedCalls: new Map(), results: new Map() }
-    const preparedCalls = new Map<string, ToolCallRequest>()
-    const failures = new Map<string, ToolResultObj>()
+    const planStateBefore = new Map<
+      string,
+      {
+        steps: PlanStepSnapshot | null
+        phase: string | null
+      }
+    >()
     let independentReviewerSeen = false
-
-    for (const call of toolCalls) {
-      throwIfAborted(signal)
-      let prepared: ToolCallRequest
-      try {
-        prepared = {
+    const coordinator = new ToolBatchCoordinator<Msg, never>({
+      executionEngine: this.toolExecutionEngine,
+      ports: {
+        controlEnabled: control !== null,
+        prepareCall: (call) => ({
           ...call,
           arguments: this.prepareControlToolArguments(
             call.name,
             call.arguments,
           ),
-        }
-      } catch (error) {
-        failures.set(call.id, toolPreparationError(error))
-        continue
-      }
-      if (
-        prepared.name === 'dispatch_subagent' &&
-        String(prepared.arguments.agent_type ?? '') === 'verification_reviewer'
-      ) {
-        if (independentReviewerSeen) {
-          failures.set(
-            call.id,
-            ToolResultObj.fromText(
+        }),
+        validatePreparedCall: (call) => {
+          if (
+            call.name !== 'dispatch_subagent' ||
+            String(call.arguments.agent_type ?? '') !== 'verification_reviewer'
+          )
+            return null
+          if (independentReviewerSeen)
+            return ToolResultObj.fromText(
               'Error: only one verification_reviewer may run in a model tool batch.',
               { isError: true },
-            ),
-          )
-          continue
-        }
-        independentReviewerSeen = true
-      }
-      const guard = this.toolGuardResult(prepared, clarification, planDecision)
-      if (guard) {
-        failures.set(call.id, guard)
-        continue
-      }
-      const preTool = await this.runHookEvent(
-        'PreToolUse',
-        this.toolHookInput(prepared, signal),
-        emit,
-      )
-      throwIfAborted(signal)
-      if (preTool.decision === 'deny') {
-        failures.set(
-          call.id,
-          ToolResultObj.fromText(
-            `Error: hook denied ${call.name}: ${preTool.reason}`,
-            { isError: true, meta: { hook_decision: preTool.decision } },
+            )
+          independentReviewerSeen = true
+          return null
+        },
+        guardCall: (call) =>
+          this.toolGuardResult(call, clarification, planDecision),
+        runHook: async (event, call, permission) =>
+          await this.runHookEvent(
+            event,
+            {
+              ...this.toolHookInput(call, signal),
+              ...(permission
+                ? { permission: permissionHookPayload(permission) }
+                : {}),
+            },
+            emit,
           ),
-        )
-        continue
-      }
-      if (preTool.updatedInput) {
-        try {
-          prepared = {
-            ...prepared,
-            arguments: this.prepareControlToolArguments(
-              prepared.name,
-              preTool.updatedInput,
-            ),
+        assessPermissionBatch: async (calls, context) =>
+          await this.assessPermissionBatch(
+            [...calls],
+            context.turnId,
+            context.taskIntent,
+            context.permissionAuthorizationId,
+          ),
+        approvalResult: (permission, parentCall) => {
+          if (!control)
+            return ToolResultObj.fromText(
+              'Error: permission control is unavailable',
+              { isError: true },
+            )
+          const assessment = permission as RunnerPermissionBatch
+          const pauseContent = control.permissionBatchApprovalResult
+            ? control.permissionBatchApprovalResult(assessment, {
+                parentCallId: parentCall.id,
+                sessionId: this.sessionId,
+                workspaceRoot: this.workspaceRoot,
+                cwd: this.workspaceRoot,
+              })
+            : control.permissionApprovalResult(
+                assessment.decisions.find(
+                  (decision) => decision.requiresApproval,
+                ) ?? assessment.decisions[0]!,
+                {
+                  parentCallId: parentCall.id,
+                  sessionId: this.sessionId,
+                },
+              )
+          return ToolResultObj.fromText(pauseContent)
+        },
+        pauseForApproval: (result, calls, results) =>
+          maybePauseForControl(
+            result.modelContent,
+            [...calls],
+            new Map(results),
+          ),
+        emitToolCall: async (call) => await this.emitToolCall(call, emit),
+        executeCall: async ({
+          call,
+          preparedCall,
+          processExecution,
+          fileAccessAuthorization,
+          signal: childSignal,
+        }) => {
+          planStateBefore.set(call.id, {
+            steps: snapshotPlanSteps(this.controlManager),
+            phase:
+              this.controlManager?.currentPlanExecutionPhase?.()?.phase ?? null,
+          })
+          return await this.executeToolWithHooks(
+            call,
+            emit,
+            clarification,
+            planDecision,
+            childSignal,
+            executionEnvironment,
+            turnId,
+            taskIntent,
+            preparedCall,
+            processExecution,
+            fileAccessAuthorization,
+            parentContext,
+          )
+        },
+        observeResult: async ({ call, outcome, results }) => {
+          const before = planStateBefore.get(call.id) ?? {
+            steps: snapshotPlanSteps(this.controlManager),
+            phase:
+              this.controlManager?.currentPlanExecutionPhase?.()?.phase ?? null,
           }
-        } catch (error) {
-          failures.set(call.id, toolPreparationError(error))
-          continue
-        }
-        const transformedGuard = this.toolGuardResult(
-          prepared,
-          clarification,
-          planDecision,
-        )
-        if (transformedGuard) {
-          failures.set(call.id, transformedGuard)
-          continue
-        }
-      }
-      preparedCalls.set(call.id, prepared)
-    }
-    if (failures.size)
-      return blockedToolBatch(toolCalls, preparedCalls, failures)
-
-    for (let reassessment = 0; reassessment < 3; reassessment += 1) {
-      const ordered = toolCalls.map((call) => preparedCalls.get(call.id)!)
-      const permission = await this.assessPermissionBatch(
-        ordered,
+          return {
+            followupMessages: await this.observeToolResult({
+              call,
+              outcome,
+              toolCalls,
+              resultsById: results,
+              emit,
+              turnId,
+              progressLedger,
+              planStepsBefore: before.steps,
+              planPhaseBefore: before.phase,
+            }),
+          }
+        },
+        emitResultSummary: async (calls, results) => {
+          const resultThought = toolResultSummaryThought(
+            [...calls],
+            new Map(results),
+          )
+          if (resultThought) await this.emitAgentThought(resultThought, emit)
+        },
+      },
+    })
+    const result = await coordinator.run(
+      createToolBatchContext({
+        toolCalls,
+        emit,
+        signal,
         turnId,
         taskIntent,
         permissionAuthorizationId,
-      )
-      const deniedIndexes = permission.decisions.flatMap((decision, index) =>
-        !decision.allowed && !decision.requiresApproval ? [index] : [],
-      )
-      if (deniedIndexes.length) {
-        for (const index of deniedIndexes) {
-          const call = ordered[index]!
-          const decision = permission.decisions[index]!
-          await this.runHookEvent(
-            'PermissionDenied',
-            {
-              ...this.toolHookInput(call, signal),
-              permission: permissionHookPayload(decision),
-            },
-            emit,
-          )
-          failures.set(
-            call.id,
-            ToolResultObj.fromText(
-              `Error: permission denied for ${call.name}: ${decision.reason}`,
-              { isError: true },
-            ),
-          )
-        }
-        return blockedToolBatch(toolCalls, preparedCalls, failures)
-      }
-
-      const approvalIndexes = permission.decisions.flatMap((decision, index) =>
-        decision.requiresApproval ? [index] : [],
-      )
-      if (!approvalIndexes.length) return { preparedCalls, results: new Map() }
-
-      let transformed = false
-      for (const index of approvalIndexes) {
-        const call = ordered[index]!
-        const decision = permission.decisions[index]!
-        const hookDecision = await this.runHookEvent(
-          'PermissionRequest',
-          {
-            ...this.toolHookInput(call, signal),
-            permission: permissionHookPayload(decision),
-          },
-          emit,
-        )
-        throwIfAborted(signal)
-        if (hookDecision.decision === 'deny') {
-          failures.set(
-            call.id,
-            ToolResultObj.fromText(
-              `Error: hook denied permission for ${call.name}: ${hookDecision.reason}`,
-              { isError: true, meta: { hook_decision: 'deny' } },
-            ),
-          )
-          return blockedToolBatch(toolCalls, preparedCalls, failures)
-        }
-        if (!hookDecision.updatedInput) continue
-
-        let updated: ToolCallRequest
-        try {
-          updated = {
-            ...call,
-            arguments: this.prepareControlToolArguments(
-              call.name,
-              hookDecision.updatedInput,
-            ),
-          }
-        } catch (error) {
-          failures.set(call.id, toolPreparationError(error))
-          return blockedToolBatch(toolCalls, preparedCalls, failures)
-        }
-        const transformedGuard = this.toolGuardResult(
-          updated,
-          clarification,
-          planDecision,
-        )
-        if (transformedGuard) {
-          failures.set(call.id, transformedGuard)
-          return blockedToolBatch(toolCalls, preparedCalls, failures)
-        }
-        const replayPre = await this.runHookEvent(
-          'PreToolUse',
-          this.toolHookInput(updated, signal),
-          emit,
-        )
-        throwIfAborted(signal)
-        if (replayPre.decision === 'deny') {
-          failures.set(
-            call.id,
-            ToolResultObj.fromText(
-              `Error: hook denied transformed ${call.name}: ${replayPre.reason}`,
-              { isError: true, meta: { hook_decision: 'deny' } },
-            ),
-          )
-          return blockedToolBatch(toolCalls, preparedCalls, failures)
-        }
-        if (replayPre.updatedInput) {
-          failures.set(
-            call.id,
-            ToolResultObj.fromText(
-              'Error: hook input transform limit exceeded during permission recheck',
-              { isError: true },
-            ),
-          )
-          return blockedToolBatch(toolCalls, preparedCalls, failures)
-        }
-        preparedCalls.set(call.id, updated)
-        transformed = true
-      }
-      if (transformed) continue
-
-      const parentCall = ordered[approvalIndexes[0]!]!
-      const pauseContent = control.permissionBatchApprovalResult
-        ? control.permissionBatchApprovalResult(permission, {
-            parentCallId: parentCall.id,
-            sessionId: this.sessionId,
-            workspaceRoot: this.workspaceRoot,
-            cwd: this.workspaceRoot,
-          })
-        : control.permissionApprovalResult(
-            permission.decisions[approvalIndexes[0]!]!,
-            {
-              parentCallId: parentCall.id,
-              sessionId: this.sessionId,
-            },
-          )
-      const pauseResult = ToolResultObj.fromText(pauseContent)
-      const pauseResults = new Map<string, ToolResultObj>([
-        [parentCall.id, pauseResult],
-      ])
-      maybePauseForControl(pauseContent, toolCalls, pauseResults)
-      return blockedToolBatch(toolCalls, preparedCalls, pauseResults)
-    }
-
-    failures.set(
-      toolCalls[0]!.id,
-      ToolResultObj.fromText(
-        'Error: permission hook transform limit exceeded for tool batch',
-        { isError: true },
-      ),
+      }),
     )
-    return blockedToolBatch(toolCalls, preparedCalls, failures)
+    return [...(result.messages as Msg[]), ...result.followupMessages]
   }
 
   private normalizeControlToolArguments(
@@ -2601,6 +2911,8 @@ export class AgentRunner implements RunnerModelHost {
       cwd: this.workspaceRoot,
       taskIntent,
       authorizationId,
+      executionBoundary: this.commandExecutionBoundary(),
+      fileExecutionScopes: this.fileExecutionScopesForCalls(calls),
     }
     if (control.assessPermissionBatch)
       return await control.assessPermissionBatch(calls, this.registry, opts)
@@ -2632,6 +2944,72 @@ export class AgentRunner implements RunnerModelHost {
     }
   }
 
+  private fileExecutionScopesForCalls(
+    calls: readonly ToolCallRequest[],
+  ): FileExecutionScope[] {
+    const scopes: FileExecutionScope[] = [
+      ...(this.sessionToolResultsRoot
+        ? [
+            {
+              kind: 'session_tool_result' as const,
+              root: this.sessionToolResultsRoot,
+              skillName: 'current-session-tool-results',
+              access: 'read' as const,
+            },
+            {
+              kind: 'session_scratch' as const,
+              root: join(dirname(this.sessionToolResultsRoot), 'scratch'),
+              skillName: 'current-session-scratch',
+              access: 'read' as const,
+            },
+          ]
+        : []),
+      ...this.activeSkillReadScopes,
+      ...calls
+        .map((call) => this.fileExecutionScopeForCall(call))
+        .filter((scope): scope is FileExecutionScope => scope !== null),
+    ]
+    return [
+      ...new Map(scopes.map((scope) => [scope.root, scope] as const)).values(),
+    ]
+  }
+
+  private fileExecutionScopeForCall(
+    call: ToolCallRequest,
+  ): FileExecutionScope | null {
+    if (
+      !this.userSkillsRoot ||
+      this.subagentDepth !== 0 ||
+      this.controlManager?.mode === 'plan'
+    )
+      return null
+    const tool = this.registry.get(call.name)
+    if (!tool || tool.isReadOnly(call.arguments)) return null
+    const paths =
+      typeof tool.getPaths === 'function'
+        ? tool.getPaths(call.arguments)
+        : typeof tool.getPath === 'function'
+          ? [tool.getPath(call.arguments)]
+          : []
+    return deriveUserSkillFileScope(
+      paths.map((path) => String(path ?? '')).filter(Boolean),
+      this.userSkillsRoot,
+      this.workspaceRoot,
+    )
+  }
+
+  private commandExecutionBoundary(): 'sandbox' | 'host' {
+    const mode = String(this.controlManager?.mode ?? '')
+    if (
+      this.subagentDepth === 0 &&
+      (mode === 'ask_before_edit' ||
+        mode === 'smart_auto' ||
+        mode === 'full_access')
+    )
+      return 'host'
+    return 'sandbox'
+  }
+
   private async executeToolWithHooks(
     call: ToolCallRequest,
     emit: StreamEmitter | null,
@@ -2642,6 +3020,10 @@ export class AgentRunner implements RunnerModelHost {
     turnId: string | null,
     taskIntent: string | null,
     preflightedCall?: ToolCallRequest,
+    trustedProcessExecution?:
+      | { kind: 'sandbox' }
+      | { kind: 'host'; authorization: HostExecutionAuthorization },
+    trustedFileAccessAuthorization?: FileAccessAuthorization,
     parentContext?: Msg[],
   ): Promise<{
     result: ToolResultObj
@@ -2719,6 +3101,9 @@ export class AgentRunner implements RunnerModelHost {
             workspaceRoot: this.workspaceRoot,
             cwd: this.workspaceRoot,
             taskIntent,
+            fileExecutionScopes: this.fileExecutionScopesForCalls([
+              effectiveCall,
+            ]),
           },
         )
         if (!permission.allowed && !permission.requiresApproval) {
@@ -2823,6 +3208,9 @@ export class AgentRunner implements RunnerModelHost {
                 workspaceRoot: this.workspaceRoot,
                 cwd: this.workspaceRoot,
                 taskIntent,
+                fileExecutionScopes: this.fileExecutionScopesForCalls([
+                  effectiveCall,
+                ]),
               },
             )
             if (!permission.allowed && !permission.requiresApproval) {
@@ -2858,6 +3246,12 @@ export class AgentRunner implements RunnerModelHost {
       }
     }
     const tool = this.registry.get(effectiveCall.name)
+    const managedPathCapability = tool?.issueManagedPathCapability?.(
+      effectiveCall.arguments,
+    )
+    const fileExecutionScopes = this.fileExecutionScopesForCalls([
+      effectiveCall,
+    ])
     const ctx = {
       ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
       ...(emit && tool && tool.requiresRuntimeContext ? { emit } : {}),
@@ -2869,6 +3263,14 @@ export class AgentRunner implements RunnerModelHost {
       executionEnvironment,
       parentContext,
       parentSystemPrompt: this.systemPrompt,
+      ...(trustedProcessExecution
+        ? { processExecution: trustedProcessExecution }
+        : {}),
+      ...(managedPathCapability ? { managedPathCapability } : {}),
+      ...(fileExecutionScopes.length ? { fileExecutionScopes } : {}),
+      ...(trustedFileAccessAuthorization
+        ? { fileAccessAuthorization: trustedFileAccessAuthorization }
+        : {}),
     }
     let expectedGoalId: string | null | undefined
     if (this.goalObservationRecorder?.captureExpectedGoalId) {
@@ -2971,7 +3373,8 @@ export class AgentRunner implements RunnerModelHost {
             workspaceRoot: this.workspaceRoot,
             reason: `unattributed:${effectiveCall.name}`,
           })
-          if (emit) await emit(snapshot as unknown as Record<string, unknown>)
+          if (emit && snapshot.filesChanged > 0)
+            await emit(snapshot as unknown as Record<string, unknown>)
         }
         return value
       }
@@ -3037,6 +3440,23 @@ export class AgentRunner implements RunnerModelHost {
     clarification: Clarification | null,
     planDecision: unknown,
   ): ToolResultObj | null {
+    if (
+      this.activeSkillAllowedTools !== null &&
+      !this.activeSkillAllowedTools.has(call.name)
+    ) {
+      return ToolResultObj.fromText(
+        `Error: the selected Skill does not allow tool "${call.name}" for this invocation.`,
+        {
+          isError: true,
+          meta: {
+            outcome: 'failure',
+            failure_kind: 'skill_tool_not_allowed',
+            retryable: false,
+            strategy_key: `skill_allowed_tools:${call.name}`,
+          },
+        },
+      )
+    }
     if (call.name === 'ask_user') {
       const terminalGuard =
         this.controlManager?.independentVerificationAskGuard?.() ?? null
@@ -3526,6 +3946,7 @@ export class AgentRunner implements RunnerModelHost {
       return new ContextPipeline({
         toolResultStore: new ToolResultStore(
           dirname(this.memoryStore.memoryDir),
+          { sessionId: this.sessionId },
         ),
         toolResultLimits: this.registry.toolResultLimits(),
         goalContextProvider: this.goalContextProvider,
@@ -3560,6 +3981,7 @@ export class AgentRunner implements RunnerModelHost {
         ...common,
         toolResultStore: new ToolResultStore(
           dirname(this.memoryStore.memoryDir),
+          { sessionId: this.sessionId },
         ),
         toolResultLimits: this.registry.toolResultLimits(),
       })
@@ -3746,6 +4168,78 @@ function currentTaskIntent(history: Msg[]): string | null {
   return null
 }
 
+function runCommandProvidesExternalContent(command: string): boolean {
+  const analysis = analyzeShellCommandFailClosed(command)
+  if (analysis.status !== 'parsed') return false
+  return analysis.commands.some((entry) => {
+    const executable = basename(String(entry.argv[0] ?? '')).toLowerCase()
+    const subcommand = String(entry.argv[1] ?? '').toLowerCase()
+    if (executable === 'curl' || executable === 'wget') return true
+    if (executable === 'mcporter') return subcommand === 'call'
+    if (executable === 'gh')
+      return ['api', 'search', 'repo', 'issue', 'pr', 'release'].includes(
+        subcommand,
+      )
+    if (['yt-dlp', 'twitter', 'xreach', 'bili', 'rdt'].includes(executable))
+      return true
+    if (executable === 'opencli')
+      return !['', '--help', 'help', 'doctor', 'version'].includes(subcommand)
+    return false
+  })
+}
+
+function appendBounded(current: string, delta: string, limit: number): string {
+  if (current.length >= limit) return current
+  return `${current}${delta}`.slice(0, limit)
+}
+
+function researchDraftTooLargeDecision(): ResearchValidationDecision {
+  return {
+    passed: false,
+    reasonCodes: ['research_draft_too_large'],
+    units: [],
+    citedSourceIds: [],
+  }
+}
+
+function researchCorrectionMessage(input: {
+  reasonCodes: readonly string[]
+  validation: ResearchValidationDecision
+  sources: readonly ResearchSourceRecord[]
+  unsupportedUnitIds: readonly string[]
+}): string {
+  if (!input.sources.length) {
+    return [
+      '[CONTROL:EXTERNAL_EVIDENCE_REQUIRED]',
+      '本轮网络调研尚无经 Core web_fetch 获取 2xx 正文的可验证来源。',
+      'Bash、Skill、CLI、搜索摘要和其中的 URL 只能作为候选线索；请用 web_fetch 逐项验证。',
+      '若无法取得正文，明确报告阻塞，不得根据模型记忆、错误页或候选 URL 宣称完成。',
+    ].join('\n')
+  }
+  const uncited = input.validation.units
+    .filter((unit) => !unit.citedSourceIds.length)
+    .map((unit) => unit.id)
+  return [
+    '[CONTROL:RESEARCH_CITATIONS_REQUIRED]',
+    '研究草稿未通过发布门禁。每个事实性段落、列表项、表格数据行和事实性标题都必须包含支持该项的 Markdown 来源链接。',
+    '结尾来源列表不能替代逐项引用；只能引用下面本轮已验证的来源。',
+    `reason_codes: ${input.reasonCodes.join(',') || 'grounding_review_failed'}`,
+    ...(uncited.length ? [`uncited_unit_ids: ${uncited.join(',')}`] : []),
+    ...(input.unsupportedUnitIds.length
+      ? [`unsupported_unit_ids: ${input.unsupportedUnitIds.join(',')}`]
+      : []),
+    'verified_sources:',
+    ...input.sources.slice(0, 12).map((source) => `- ${source.url}`),
+  ].join('\n')
+}
+
+function researchBlockedReply(reasonCodes: readonly string[]): string {
+  if (reasonCodes.includes('no_verified_sources')) {
+    return '外部调研未完成：本轮没有取得任何经 Core 验证的来源正文。候选链接、CLI 输出和搜索摘要不能作为完成证据。'
+  }
+  return '外部调研未完成：草稿的逐项引用或来源支持关系未通过校验，因此没有发布未经验证的调研结论。'
+}
+
 function currentPermissionAuthorization(history: Msg[]): string | null {
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const message = history[index]
@@ -3756,25 +4250,6 @@ function currentPermissionAuthorization(history: Msg[]): string | null {
     return match?.[1]?.trim() || null
   }
   return null
-}
-
-function blockedToolBatch(
-  calls: ToolCallRequest[],
-  preparedCalls: Map<string, ToolCallRequest>,
-  failures: Map<string, ToolResultObj>,
-): ToolBatchPreflight {
-  const results = new Map(failures)
-  for (const call of calls) {
-    if (results.has(call.id)) continue
-    results.set(
-      call.id,
-      ToolResultObj.fromText(
-        'Error: skipped because another operation in the same tool batch failed preflight',
-        { isError: true, meta: { reason_kind: 'batch_preflight_failed' } },
-      ),
-    )
-  }
-  return { preparedCalls, results }
 }
 
 function progressPauseReason(

@@ -96,7 +96,7 @@ describe('SkillManager', () => {
     expect(second.digest).toBe(first.digest)
   })
 
-  it('recognizes dependency-blocked user Skills without packaging the state marker', () => {
+  it('ignores legacy dependency state markers as resolver authority', () => {
     const { manager, stateRoot } = fixture()
     const skill = join(stateRoot, 'skills', 'blocked-skill')
     mkdirSync(skill, { recursive: true })
@@ -109,13 +109,15 @@ describe('SkillManager', () => {
       JSON.stringify({ schemaVersion: 1, status: 'blocked' }),
     )
 
-    expect(manager.resolve('blocked-skill')?.status).toBe('blocked')
+    expect(manager.resolve('blocked-skill')?.status).toBe('active')
     expect(manager.validate({ name: 'blocked-skill' })).toMatchObject({
-      valid: false,
-      status: 'blocked',
+      valid: true,
+      status: 'active',
       files: ['blocked-skill/SKILL.md'],
     })
-    expect(() => manager.package({ name: 'blocked-skill' })).toThrow(/blocked/)
+    expect(manager.package({ name: 'blocked-skill' }).files).toEqual([
+      'blocked-skill/SKILL.md',
+    ])
   })
   it('creates a valid user Skill with only requested resource directories', () => {
     const { manager, stateRoot } = fixture()
@@ -174,7 +176,7 @@ describe('SkillManager', () => {
     ).toThrow(/already exists/i)
   })
 
-  it('validates frontmatter, directory structure, and requirements metadata', () => {
+  it('validates frontmatter and requirements while allowing auxiliary files', () => {
     const { manager, stateRoot } = fixture()
     const skillRoot = join(stateRoot, 'skills', 'environment-report')
     mkdirSync(join(skillRoot, 'scripts'), { recursive: true })
@@ -215,11 +217,18 @@ describe('SkillManager', () => {
     )
 
     mkdirSync(join(skillRoot, 'docs'))
-    writeFileSync(join(skillRoot, 'docs', 'unexpected.md'), 'bad\n')
-    const invalid = manager.validate({ name: 'environment-report' })
-    expect(invalid.valid).toBe(false)
-    expect(invalid.errors.join('\n')).toMatch(
-      /unsupported top-level entry.*docs/i,
+    writeFileSync(join(skillRoot, 'docs', 'notes.md'), 'notes\n')
+    writeFileSync(join(skillRoot, 'SKILL_en.md'), '# English instructions\n')
+    const withAuxiliaryFiles = manager.validate({
+      name: 'environment-report',
+    })
+    expect(withAuxiliaryFiles.valid).toBe(true)
+    expect(withAuxiliaryFiles.errors).toEqual([])
+    expect(withAuxiliaryFiles.files).toEqual(
+      expect.arrayContaining([
+        'environment-report/SKILL_en.md',
+        'environment-report/docs/notes.md',
+      ]),
     )
 
     expect(

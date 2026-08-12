@@ -75,6 +75,20 @@ Publish job 会重新验证 contract、checksums 和 attestations，先创建 dr
 
 Attestation 证明 GitHub workflow 的来源和完整性，不等于 Apple Developer ID、Apple notarization 或 Windows trusted publisher 签名。
 
+## 首次启动与恢复验收
+
+Release 首次启动先验证 `resources/runtime-defaults` manifest，再初始化 Emperor Home；不自动联网、不自动安装 Skill，也不扫描其他 Agent 的目录。正常初始化不显示额外向导。打包验收至少覆盖：
+
+- 创建 user Skills、session scratch/tool-results 与 `environment/data` 骨架，并在 CoreHost 启动后启用 Skill watcher；
+- Node 本地 TLS fixture 验证显式 CA 优先、平台 CA fallback 与代理变量继承，严禁关闭 TLS 校验；
+
+- 全新 `~/.emperor` 的最小骨架与 `0700/0600` 权限；
+- 唯一旧 `~/.emperor-agent` 的原子 rename 与 prepared/applied receipt；
+- 新旧根并存时新根优先、旧根字节不变；
+- 更高 layout version、runtime manifest 损坏和 Home 不可写时不启动 Core，转入独立恢复页。
+
+恢复页使用单独的 sandboxed CommonJS preload 和最小 bootstrap IPC，只允许重试、打开新/旧目录和退出。`afterPack` 必须验证 `out/preload/index.cjs` 与 `out/preload/recovery.cjs` 均存在且只导入 Electron；恢复页不复用尚未启动的 Core bridge。
+
 ## 用户遇到系统拦截
 
 不要在 Release notes 或问题回复中建议关闭整机防护。让用户先核验来源和 SHA-256，再按[未签名 Preview 安全说明](unsigned-preview-notice.md)使用系统提供的单应用确认入口。官方参考：

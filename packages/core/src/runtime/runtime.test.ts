@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -14,12 +20,45 @@ import {
   runtimeEventVisibility,
 } from './envelope'
 import { RuntimeEventStore, compactReplayEvents } from './store'
+import { RuntimeEventStoreRegistry } from './session-store-registry'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
 describe('runtime events (test_runtime_events.py)', () => {
+  it('shares one writer per session and preserves monotonic sequence numbers', () => {
+    const sessionRoot = join(
+      tmp('emperor-runtime-registry-'),
+      'sessions',
+      'session_a',
+    )
+    const registry = new RuntimeEventStoreRegistry()
+
+    const first = registry.get('session_a', sessionRoot)
+    const second = registry.get('session_a', sessionRoot)
+
+    expect(second).toBe(first)
+    expect(first.append({ event: 'ask_answered' }).seq).toBe(1)
+    expect(second.append({ event: 'turn_scope' }).seq).toBe(2)
+    expect(
+      readdirSync(join(sessionRoot, 'runtime')).some((name) =>
+        name.startsWith('events.jsonl.corrupt-'),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects rebinding one session id to a different directory', () => {
+    const root = tmp('emperor-runtime-registry-mismatch-')
+    const registry = new RuntimeEventStoreRegistry()
+    registry.get('session_a', join(root, 'sessions', 'session_a'))
+
+    expect(() =>
+      registry.get('session_a', join(root, 'other', 'session_a')),
+    ).toThrow(/runtime store directory changed/i)
+  })
+
   it('builds scheduler, external, session, task, and tool event payloads', () => {
     const job = { id: 'job-1', name: 'demo' }
     expect(
@@ -180,6 +219,9 @@ describe('runtime events (test_runtime_events.py)', () => {
       completedSteps: -3,
       totalSteps: 99_999,
       errorCode: 'download_failed',
+      installSource: 'skill',
+      placement: 'managed',
+      recipeTrust: 'installed_skill_source',
     })
 
     expect(event).toEqual({
@@ -191,6 +233,9 @@ describe('runtime events (test_runtime_events.py)', () => {
       completed_steps: 0,
       total_steps: 10_000,
       error_code: 'download_failed',
+      install_source: 'skill',
+      placement: 'managed',
+      recipe_trust: 'installed_skill_source',
     })
     expect(JSON.stringify(event)).not.toContain('token=secret')
   })
@@ -594,6 +639,37 @@ describe('RuntimeEventStore (test_runtime_events.py)', () => {
     expect(
       store.eventsForTurns(['turn_b']).map((event) => event.event),
     ).toEqual(['user_message', 'assistant_done'])
+    expect(readFileSync(eventsFile, 'utf8')).not.toContain('{bad json')
+    expect(
+      readdirSync(join(root, 'memory', 'runtime')).some((name) =>
+        name.startsWith('events.jsonl.corrupt-'),
+      ),
+    ).toBe(true)
+  })
+
+  it('preserves the previous journal when append fsync fails', () => {
+    const root = tmp('emperor-runtime-persistence-failure-')
+    const healthy = new RuntimeEventStore(root)
+    healthy.append({ event: 'user_message', content: 'before' })
+    const before = readFileSync(healthy.eventsFile, 'utf8')
+    const failing = new RuntimeEventStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'append_sync')
+            throw new Error('injected append sync')
+        },
+      }),
+    })
+
+    expect(() =>
+      failing.append({ event: 'assistant_done', content: 'after' }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'persistence_io',
+        operation: 'append_sync',
+      }),
+    )
+    expect(readFileSync(healthy.eventsFile, 'utf8')).toBe(before)
   })
 
   it('adds session receipts and filters replay by session owner', () => {
@@ -872,7 +948,7 @@ describe('compactReplayEvents (P1-5 replay compaction)', () => {
       ['plan_draft', 5],
       ['assistant_done', 6],
     ])
-    expect(out[1]!.interaction.title).toBe('ABC')
+    expect(out[1]).toMatchObject({ interaction: { title: 'ABC' } })
   })
 
   it('merges contiguous message_delta runs keeping the first seq and joined text', () => {

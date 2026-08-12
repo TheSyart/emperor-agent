@@ -1,5 +1,5 @@
 /**
- * Plan-domain 纯函数 (MIG-CTRL-010)。对齐 Python `agent/control/plan_helpers.py`。
+ * Plan-domain 纯函数。
  * 无 ControlManager 状态；只接受 plain values / PlanRecord / PlanStep。
  */
 import { nowTs } from '../util/time'
@@ -67,7 +67,7 @@ export function latestApprovedPlanGeneration(
     )
 }
 
-// Task status string values (W14 tasks/ not migrated — values match agent/tasks TaskStatus).
+// Task status values are intentionally string-based to keep the adapter decoupled from task storage.
 const TASK_STATUS = {
   RUNNING: 'running',
   QUEUED: 'queued',

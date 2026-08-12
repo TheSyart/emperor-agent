@@ -9,10 +9,8 @@ import {
 import { dirname } from 'node:path'
 
 /**
- * JSONL append-only 日志 + 归档 (MIG-FND-007)。
- *
- * 对齐 Python：`memory` HistoryLog 热段/归档、`runtime/store` events.jsonl + archive、
- * `team/bus` inbox jsonl。逐行 JSON；读时隔离坏行（不整体失败）；热段超阈值轮转到归档。
+ * JSONL append-only 日志 + 归档。`memory` HistoryLog、runtime events 和
+ * Team inbox 共享逐行 JSON 格式；读时隔离坏行（不整体失败）；热段超阈值轮转到归档。
  */
 
 /** 追加一行 JSON。 */

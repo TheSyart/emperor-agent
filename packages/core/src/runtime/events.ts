@@ -18,6 +18,14 @@ export function runtimeEvent(
   return data
 }
 
+export function skillCatalogChanged(opts: {
+  catalogVersion: number
+}): EventPayload {
+  return runtimeEvent('skill_catalog_changed', {
+    catalog_version: opts.catalogVersion,
+  })
+}
+
 export function modelAttemptStarted(opts: {
   requestId: string
   attemptId: string
@@ -845,6 +853,9 @@ export interface EnvironmentInstallEventOptions {
   toolId?: string | null
   stepId?: string | null
   errorCode?: string | null
+  installSource?: 'skill' | 'url' | 'catalog' | null
+  placement?: 'managed' | 'external' | null
+  recipeTrust?: string | null
 }
 
 export function environmentInstallStarted(
@@ -897,6 +908,11 @@ function environmentInstallEvent(
     completed_steps: boundedCount(opts.completedSteps),
     total_steps: boundedCount(opts.totalSteps),
     error_code: opts.errorCode ? safeIdentifier(opts.errorCode) : null,
+    install_source: opts.installSource
+      ? safeIdentifier(opts.installSource)
+      : null,
+    placement: opts.placement ? safeIdentifier(opts.placement) : null,
+    recipe_trust: opts.recipeTrust ? safeIdentifier(opts.recipeTrust) : null,
   })
 }
 

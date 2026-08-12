@@ -36,11 +36,6 @@ function onSave(content: string) {
 function onDelete(name: string) {
   void ctx.runSafely(() => ctx.deleteSkill(name))
 }
-
-async function onInstalled(name: string) {
-  await ctx.refreshAll()
-  onLoad(name)
-}
 </script>
 
 <template>
@@ -48,7 +43,7 @@ async function onInstalled(name: string) {
     <header class="view-head">
       <div class="min-w-0">
         <h1>能力包 · Skills</h1>
-        <p>查看、编辑、导入与删除当前 Agent 可加载的 SKILL.md</p>
+        <p>查看、创建、编辑与删除当前 Agent 可加载的 SKILL.md</p>
       </div>
       <button
         class="tool-button asset-button refresh-action"
@@ -68,7 +63,6 @@ async function onInstalled(name: string) {
         @new="onNew"
         @save="onSave"
         @delete="onDelete"
-        @installed="onInstalled"
       />
     </div>
   </section>

@@ -1041,6 +1041,150 @@ describe('PlanDecisionPolicy (test_plan_decision_policy.py)', () => {
 // ── PE-13: test_permission_pipeline_v2.py::test_high_risk_in_approved_plan_still_requires_approval ──
 
 describe('PermissionManager PE-13 (test_permission_pipeline_v2.py)', () => {
+  it('binds host execution authorization to the assessed boundary and permission mode', async () => {
+    const root = tmp('emperor-host-authorization-')
+    const manager = new ControlManager(root)
+    manager.setPermissionMode('full_access')
+    const call = {
+      id: 'call_host',
+      name: 'run_command',
+      arguments: { command: 'git status --short' },
+    }
+
+    const host = await manager.assessPermissionBatch([call], null, {
+      sessionId: 'session_host',
+      workspaceRoot: root,
+      cwd: root,
+      executionBoundary: 'host',
+    })
+    const sandbox = await manager.assessPermissionBatch([call], null, {
+      sessionId: 'session_host',
+      workspaceRoot: root,
+      cwd: root,
+      executionBoundary: 'sandbox',
+    })
+
+    expect(host.operations[0]).toMatchObject({
+      executionBoundary: 'host',
+      executionAuthorization: {
+        version: 1,
+        toolName: 'run_command',
+        source: 'full_access',
+        permissionMode: 'full_access',
+        rule: 'mode.full_access',
+        authorizationId: null,
+      },
+    })
+    expect(host.operations[0]!.executionAuthorization).toMatchObject({
+      operationFingerprint: host.operations[0]!.fingerprint,
+    })
+    expect(sandbox.operations[0]).toMatchObject({
+      executionBoundary: 'sandbox',
+      executionAuthorization: null,
+    })
+    expect(host.operations[0]!.fingerprint).not.toBe(
+      sandbox.operations[0]!.fingerprint,
+    )
+  })
+
+  it('publishes host capabilities without exposing exact authorization material', async () => {
+    const root = tmp('emperor-host-permission-view-')
+    const manager = new ControlManager(root)
+    const batch = await manager.assessPermissionBatch(
+      [
+        {
+          id: 'call_install',
+          name: 'run_command',
+          arguments: { command: 'pipx install package.zip' },
+        },
+      ],
+      null,
+      {
+        sessionId: 'session_install',
+        workspaceRoot: root,
+        cwd: root,
+        executionBoundary: 'host',
+      },
+    )
+
+    manager.permissionBatchApprovalResult(batch, {
+      sessionId: 'session_install',
+      workspaceRoot: root,
+      cwd: root,
+    })
+
+    const permission = manager.payload().pending!.meta.permission as Record<
+      string,
+      unknown
+    >
+    expect(permission).toMatchObject({
+      version: 2,
+      operations: [
+        {
+          execution_boundary: 'host',
+          filesystem_access: 'unrestricted',
+          network_access: 'unrestricted',
+        },
+      ],
+    })
+    expect(JSON.stringify(permission)).not.toContain(
+      batch.operations[0]!.fingerprint,
+    )
+    expect(JSON.stringify(permission)).not.toContain(root)
+  })
+
+  it('consumes an exact host approval once and rejects boundary replay', async () => {
+    const root = tmp('emperor-host-allow-once-')
+    const manager = new ControlManager(root)
+    const call = {
+      id: 'call_install',
+      name: 'run_command',
+      arguments: { command: 'npm install' },
+    }
+    const options = {
+      sessionId: 'session_install',
+      workspaceRoot: root,
+      cwd: root,
+      executionBoundary: 'host' as const,
+    }
+    const batch = await manager.assessPermissionBatch([call], null, options)
+    manager.permissionBatchApprovalResult(batch, options)
+    const pending = manager.payload().pending!
+    const requestId = String(
+      (pending.meta.permission as Record<string, unknown>).request_id,
+    )
+    manager.answer(pending.id, {
+      permission: { option_id: 'allow_once', choice: '允许本次' },
+    })
+
+    await expect(
+      manager.assessPermissionBatch([call], null, {
+        ...options,
+        executionBoundary: 'sandbox',
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({ requiresApproval: true })
+
+    const authorized = await manager.assessPermissionBatch([call], null, {
+      ...options,
+      authorizationId: requestId,
+    })
+    expect(authorized.operations[0]).toMatchObject({
+      executionBoundary: 'host',
+      executionAuthorization: {
+        source: 'user_approved_once',
+        authorizationId: requestId,
+      },
+    })
+
+    await expect(
+      manager.assessPermissionBatch([call], null, {
+        ...options,
+        authorizationId: requestId,
+      }),
+    ).resolves.toMatchObject({ requiresApproval: true })
+  })
+
   it('high-risk command in approved plan still requires approval; a plan token may approve one ordinary shell command', async () => {
     const manager = new ControlManager(tmp('emperor-pe13-'))
     // 注入一个 token 消费者：始终返回 token（模拟已批准计划）

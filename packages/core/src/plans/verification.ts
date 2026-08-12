@@ -1,5 +1,5 @@
 /**
- * Plan 验证模型 (MIG-CTRL-008/013)。对齐 Python `agent/plans/verification.py`。
+ * Plan 验证模型。
  * VerificationRequirement / Command / Result + requirements_for_step + 证据应用。
  */
 import { nowTs } from '../util/time'

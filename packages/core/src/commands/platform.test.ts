@@ -11,16 +11,16 @@ function setup(opts: { busy?: boolean } = {}) {
   const executeBuiltin = vi.fn(async (): Promise<CommandInvocationResult> => ({
     status: 'completed',
     receipt: {
-      commandId: 'builtin.reload',
-      code: 'refreshed',
-      message: 'refreshed',
+      commandId: 'builtin.new',
+      code: 'session_transitioned',
+      message: 'created',
     },
   }))
   const queueAfterTurn = vi.fn(async () => 'command-request-1')
   const platform = new CommandPlatform({
     stateRoot,
     listSkills: () => [],
-    sessionContext: () => ({ exists: true, hasProject: true, hasGit: true }),
+    sessionContext: () => ({ exists: true }),
     isBusy: () => Boolean(opts.busy),
     executeBuiltin,
     submitSkill: vi.fn(async (): Promise<CommandInvocationResult> => ({
@@ -49,16 +49,26 @@ function skill(name: string): SkillInfoPayload {
 }
 
 describe('CommandPlatform', () => {
-  it('lists the Core-owned catalog and resolves compatibility aliases', async () => {
+  it('lists the nine Core-owned everyday commands without compatibility aliases', async () => {
     const { platform } = setup()
     const listed = await platform.list({
       sessionId: 'session-1',
       invocationSource: 'desktop',
     })
-    expect(listed.find((item) => item.id === 'builtin.clear')).toMatchObject({
-      name: 'clear',
+    expect(listed.map((item) => item.name)).toEqual([
+      'new',
+      'compact',
+      'model',
+      'reasoning',
+      'permissions',
+      'plan',
+      'goal',
+      'stop',
+      'continue',
+    ])
+    expect(listed.find((item) => item.id === 'builtin.new')).toMatchObject({
+      name: 'new',
       aliases: [],
-      hiddenAliases: ['reset', 'new'],
       busyPolicy: 'after_turn',
     })
     expect(listed.some((item) => item.name === 'branch')).toBe(false)
@@ -82,8 +92,8 @@ describe('CommandPlatform', () => {
     const { platform, executeBuiltin } = setup()
     const input = {
       sessionId: 'session-1',
-      commandId: 'builtin.reload',
-      rawInput: '/reload',
+      commandId: 'builtin.new',
+      rawInput: '/new',
       invocationId: 'invocation-1',
       invocationSource: 'desktop' as const,
     }
@@ -97,8 +107,8 @@ describe('CommandPlatform', () => {
     expect(
       await platform.invoke({
         sessionId: 'session-1',
-        commandId: 'builtin.clear',
-        rawInput: '/clear',
+        commandId: 'builtin.new',
+        rawInput: '/new',
         invocationId: 'invocation-clear',
         invocationSource: 'desktop',
       }),
@@ -112,8 +122,8 @@ describe('CommandPlatform', () => {
     await expect(
       platform.invoke({
         sessionId: 'session-1',
-        commandId: 'builtin.clear',
-        rawInput: '/reload',
+        commandId: 'builtin.new',
+        rawInput: '/compact',
         invocationId: 'forged-1',
         invocationSource: 'desktop',
       }),
@@ -121,8 +131,8 @@ describe('CommandPlatform', () => {
     await expect(
       platform.invoke({
         sessionId: 'session-1',
-        commandId: 'builtin.clear',
-        rawInput: '/clear',
+        commandId: 'builtin.new',
+        rawInput: '/new',
         invocationId: 'forged-2',
         invocationSource: 'automation',
       }),
@@ -135,8 +145,8 @@ describe('CommandPlatform', () => {
     await expect(
       platform.invoke({
         sessionId: 'session-1',
-        commandId: 'builtin.rename',
-        rawInput: '/rename "unfinished',
+        commandId: 'builtin.compact',
+        rawInput: '/compact "unfinished',
         invocationId: 'malformed-quote',
         invocationSource: 'desktop',
       }),
@@ -156,8 +166,8 @@ describe('CommandPlatform', () => {
     )
     const input = {
       sessionId: 'session-1',
-      commandId: 'builtin.clear',
-      rawInput: '/clear',
+      commandId: 'builtin.new',
+      rawInput: '/new',
       invocationId: 'clear-blocked',
       invocationSource: 'desktop' as const,
     }
@@ -182,8 +192,8 @@ describe('CommandPlatform', () => {
     await expect(
       platform.invoke({
         sessionId: 'session-1',
-        commandId: 'builtin.reload',
-        rawInput: '/reload',
+        commandId: 'builtin.new',
+        rawInput: '/new',
         invocationId: 'corrupt-ledger',
         invocationSource: 'desktop',
       }),
@@ -195,7 +205,7 @@ describe('CommandPlatform', () => {
     expect(executeBuiltin).not.toHaveBeenCalled()
   })
 
-  it('keeps existing Skills callable with a free-form task and hides the legacy suffix alias', async () => {
+  it('invokes a Skill directly by its own token with a free-form task', async () => {
     const submitSkill = vi.fn(async (): Promise<CommandInvocationResult> => ({
       status: 'submitted',
       promptId: 'skill-prompt',
@@ -203,7 +213,7 @@ describe('CommandPlatform', () => {
     const platform = new CommandPlatform({
       stateRoot: mkdtempSync(join(tmpdir(), 'emperor-skill-commands-')),
       listSkills: () => [skill('code-audit')],
-      sessionContext: () => ({ exists: true, hasProject: true, hasGit: true }),
+      sessionContext: () => ({ exists: true }),
       isBusy: () => false,
       executeBuiltin: vi.fn(),
       submitSkill,
@@ -215,8 +225,8 @@ describe('CommandPlatform', () => {
       invocationSource: 'desktop',
     })
     const descriptor = listed.find((item) => item.name === 'code-audit')!
-    expect(descriptor.aliases).not.toContain('code-audit-skill')
-    expect(descriptor.hiddenAliases).toContain('code-audit-skill')
+    expect(descriptor.aliases).toEqual([])
+    expect(descriptor.hiddenAliases).toBeUndefined()
     await expect(
       platform.invoke({
         sessionId: 'session-1',
@@ -227,5 +237,51 @@ describe('CommandPlatform', () => {
       }),
     ).resolves.toMatchObject({ status: 'submitted' })
     expect(submitSkill).toHaveBeenCalledOnce()
+    expect(submitSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parsed: expect.objectContaining({
+          name: 'code-audit',
+          args: ['检查', '权限', '边界'],
+        }),
+        arguments: {
+          positional: { task: ['检查', '权限', '边界'] },
+          options: {},
+        },
+      }),
+    )
+  })
+
+  it('discovers a newly installed Skill on the next list request', async () => {
+    let skills: SkillInfoPayload[] = []
+    const platform = new CommandPlatform({
+      stateRoot: mkdtempSync(join(tmpdir(), 'emperor-live-skill-commands-')),
+      listSkills: () => skills,
+      sessionContext: () => ({ exists: true }),
+      isBusy: () => false,
+      executeBuiltin: vi.fn(),
+      submitSkill: vi.fn(),
+      queueAfterTurn: vi.fn(async () => 'unused'),
+      completeDynamic: vi.fn(async () => []),
+    })
+
+    const before = await platform.list({
+      sessionId: 'session-1',
+      invocationSource: 'desktop',
+    })
+    skills = [skill('Agent Reach')]
+    const after = await platform.list({
+      sessionId: 'session-1',
+      invocationSource: 'desktop',
+    })
+
+    expect(before.some((item) => item.name === 'agent-reach')).toBe(false)
+    expect(after).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'agent-reach',
+          skill: expect.objectContaining({ name: 'Agent Reach' }),
+        }),
+      ]),
+    )
   })
 })

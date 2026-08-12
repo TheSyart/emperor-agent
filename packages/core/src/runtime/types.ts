@@ -60,6 +60,9 @@ export interface EnvironmentRuntimeEventFields {
   completed_steps?: number
   total_steps?: number
   error_code?: string | null
+  install_source?: 'skill' | 'url' | 'catalog' | string | null
+  placement?: 'managed' | 'external' | string | null
+  recipe_trust?: string | null
   catalog_revision?: string
   project_fingerprint?: string
 }
@@ -300,6 +303,9 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         process_tree?: boolean
         policy_hash?: string
         reason?: string
+        execution_boundary?: 'sandbox' | 'host' | string
+        authorization_source?:
+          'permission_rule' | 'user_approved_once' | 'full_access' | string
       }
     | (HookRuntimeEventFields & { event: 'hook_run_started' })
     | (HookRuntimeEventFields & {
@@ -400,7 +406,16 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         }
         completedAt: number
       }
+    | {
+        event: 'project_process_update'
+        process?: RuntimeEventPayload
+      }
+    | {
+        event: 'website_preview_update'
+        preview?: RuntimeEventPayload
+      }
     | { event: 'assistant_done'; content?: string }
+    | { event: 'skill_catalog_changed'; catalog_version?: number }
     | {
         event: 'error'
         message?: string
@@ -463,6 +478,13 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         plan_id?: string
         step_id?: string
         result?: RuntimeEventPayload
+      }
+    | {
+        event: 'research_validation'
+        stage?: 'deterministic' | 'grounding_review' | 'passed' | 'failed'
+        source_count?: number
+        fact_unit_count?: number
+        reason_code?: string
       }
     | (GoalRuntimeEventBase & {
         event: 'goal_created'

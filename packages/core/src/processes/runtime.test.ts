@@ -14,6 +14,7 @@ import {
   stableProcessStartIdentity,
   systemBootMarker,
 } from '../util/stable-process-identity'
+import type { ProcessContainmentController } from '../environment/sandbox'
 
 const owner = {
   kind: 'session' as const,
@@ -21,18 +22,104 @@ const owner = {
   sessionId: 'session-a',
 }
 
-function containment(root: string) {
+function sandboxExecution(root: string) {
   return {
-    mode: 'preferred' as const,
-    workspaceRoot: root,
-    stateRoot: null,
-    tempRoot: root,
-    readOnlyRoots: [] as string[],
-    network: 'deny' as const,
+    kind: 'sandbox' as const,
+    policy: {
+      mode: 'preferred' as const,
+      workspaceRoot: root,
+      stateRoot: null,
+      tempRoot: root,
+      readOnlyRoots: [] as string[],
+      network: 'deny' as const,
+    },
   }
 }
 
 describe('OwnedProcessRuntime receipts', () => {
+  it('owns an authorized host process and persists only a bounded authorization summary', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-owned-host-'))
+    let sandboxPrepareCalls = 0
+    const sandbox: ProcessContainmentController = {
+      capability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'ready',
+      }),
+      prepare: () => {
+        sandboxPrepareCalls += 1
+        throw new Error('host execution must bypass sandbox preparation')
+      },
+    }
+    const runtime = new OwnedProcessRuntime(root, { sandbox })
+    const authorizationId = 'permission_secret_request'
+
+    const result = await runtime.run({
+      executable: process.execPath,
+      args: ['-e', 'process.stdout.write("host-runtime")'],
+      cwd: root,
+      env: {},
+      owner,
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'run_command',
+          operationFingerprint: 'f'.repeat(64),
+          source: 'user_approved_once',
+          permissionMode: 'smart_auto',
+          rule: 'user.approved_once',
+          authorizationId,
+        },
+      },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      stdout: 'host-runtime',
+      containment: { decision: 'unsandboxed', backend: 'none' },
+    })
+    expect(sandboxPrepareCalls).toBe(0)
+    expect(runtime.list()[0]).toMatchObject({
+      executionBoundary: {
+        kind: 'host',
+        authorization: {
+          source: 'user_approved_once',
+          permissionMode: 'smart_auto',
+          rule: 'user.approved_once',
+          operationFingerprintDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+          authorizationIdDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      },
+      containment: {
+        decision: 'unsandboxed',
+        filesystem: 'unrestricted',
+        network: 'unrestricted',
+      },
+    })
+    expect(readFileSync(runtime.receiptsPath, 'utf8')).not.toContain(
+      authorizationId,
+    )
+    expect(readFileSync(runtime.receiptsPath, 'utf8')).not.toContain(
+      'f'.repeat(64),
+    )
+  })
+
+  it('normalizes a legacy receipt without an execution boundary as sandboxed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-owned-legacy-'))
+    const runtime = new OwnedProcessRuntime(root, {
+      initialReceipts: [runningReceipt()],
+    })
+
+    expect(runtime.list()[0]).toMatchObject({
+      executionBoundary: { kind: 'sandbox', authorization: null },
+    })
+  })
+
   it('persists owner, lease, cwd capability, sandbox and bounded quota without raw command data', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-owned-process-'))
     const runtime = new OwnedProcessRuntime(root)
@@ -44,7 +131,7 @@ describe('OwnedProcessRuntime receipts', () => {
       cwd: root,
       env: {},
       owner,
-      containment: containment(root),
+      execution: sandboxExecution(root),
       maxOutputBytes: 4_096,
     })
 
@@ -80,7 +167,7 @@ describe('OwnedProcessRuntime receipts', () => {
       env: {},
       stdin: Buffer.alloc(2 * 1_024 * 1_024, 'x'),
       owner,
-      containment: containment(root),
+      execution: sandboxExecution(root),
     })
     await delay(20)
 
@@ -106,7 +193,7 @@ describe('OwnedProcessRuntime receipts', () => {
         cwd: root,
         env: { PATH: process.env.PATH ?? '' },
         owner,
-        containment: containment(root),
+        execution: sandboxExecution(root),
         timeoutMs: 5_000,
       })
       await waitFor(() => runtime.list({ activeOnly: true }).length === 1)
@@ -132,7 +219,7 @@ describe('OwnedProcessRuntime receipts', () => {
       cwd: root,
       env: {},
       owner,
-      containment: containment(root),
+      execution: sandboxExecution(root),
       timeoutMs: 5_000,
     })
     await waitFor(() => runtime.list({ activeOnly: true }).length === 1)
@@ -169,7 +256,7 @@ describe('OwnedProcessRuntime receipts', () => {
       cwd: root,
       env: {},
       owner,
-      containment: containment(root),
+      execution: sandboxExecution(root),
       maxOutputBytes: 1_024,
     })
 
@@ -196,7 +283,7 @@ describe('OwnedProcessRuntime receipts', () => {
         cwd: root,
         env: {},
         owner,
-        containment: containment(root),
+        execution: sandboxExecution(root),
         timeoutMs: 20,
       }),
     ).resolves.toMatchObject({ status: 'timeout' })
@@ -219,7 +306,7 @@ describe('OwnedProcessRuntime receipts', () => {
       cwd: root,
       env: {},
       owner: { kind: 'mcp', id: 'server-a', sessionId: 'session-a' },
-      containment: containment(root),
+      execution: sandboxExecution(root),
       maxOutputBytes: 4_096,
     })
     let stdout = ''

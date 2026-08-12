@@ -1,51 +1,21 @@
 import { createHash } from 'node:crypto'
-import type { PromptSectionInput } from './manifest'
-
-export type PromptSectionStability = 'stable' | 'dynamic'
-export type PromptCacheBreakClassification =
-  'initial' | 'none' | 'expected' | 'unexpected'
-
-export interface PromptProjectionLeaf {
-  id: string
-  kind: 'section' | 'message' | 'tools'
-  index: number
-  name: string
-  hash: string
-  byteCount: number
-  version: string | null
-  source: string
-  stability: PromptSectionStability
-  hasAttachment?: boolean
-}
-
-export interface PromptProjectionHashGroup {
-  hash: string
-  byteCount: number
-  leaves: PromptProjectionLeaf[]
-}
-
-export interface PromptCacheBreak {
-  classification: PromptCacheBreakClassification
-  reasonCode: string
-  firstChanged: {
-    kind: PromptProjectionLeaf['kind']
-    id: string
-    index: number
-  } | null
-  previousStablePrefixHash: string | null
-}
-
-export interface PromptProjectionSnapshot {
-  version: 1
-  sessionId: string | null
-  turnId: string
-  stablePrefix: PromptProjectionHashGroup
-  dynamicSuffix: PromptProjectionHashGroup
-  canonicalHistoryHash: string
-  projectedMessagesHash: string
-  toolDefinitionsHash: string
-  cacheBreak: PromptCacheBreak
-}
+import type {
+  PromptCacheBreak,
+  PromptCacheBreakClassification,
+  PromptProjectionHashGroup,
+  PromptProjectionLeaf,
+  PromptProjectionSnapshot,
+  PromptSectionInput,
+  PromptSectionStability,
+} from './contracts'
+export type {
+  PromptCacheBreak,
+  PromptCacheBreakClassification,
+  PromptProjectionHashGroup,
+  PromptProjectionLeaf,
+  PromptProjectionSnapshot,
+  PromptSectionStability,
+} from './contracts'
 
 export interface PromptProjectionInput {
   sessionId?: string | null

@@ -76,10 +76,23 @@ class PolicyProbeTool extends Tool {
     this.name = name
     this.readOnly = readOnly
     this.mcpServerName = mcpServerName
+    if (mcpServerName) {
+      this.externalContent = true
+      this.capabilityProvenance = {
+        kind: 'mcp_declaration',
+        serverName: mcpServerName,
+        toolName: name.replace(`mcp_${mcpServerName}_`, ''),
+        transport: 'stdio',
+        readOnlySource: 'tool_override',
+        exclusiveSource: 'tool_override',
+        generation: 1,
+        clientId: 'test-client',
+      }
+    }
   }
 
   execute(args: Record<string, unknown>): string {
-    return `${this.name}:${String(args.name ?? 'ok')}`
+    return `${this.name}:${String(args.skill ?? args.name ?? 'ok')}`
   }
 }
 
@@ -155,7 +168,7 @@ describe('SubagentRegistry (W08)', () => {
       source: { kind: 'builtin', trust: 'system' },
       definition: {
         schemaVersion: 1,
-        tools: { allow: ['load_skill', 'read_file', 'glob', 'grep'] },
+        tools: { allow: ['Skill', 'read_file', 'glob', 'grep'] },
         skills: { allow: ['*'] },
         hooks: { allow: ['SubagentStart', 'SubagentStop'] },
         mcp: { servers: [] },
@@ -173,6 +186,51 @@ describe('SubagentRegistry (W08)', () => {
       expect(tools).not.toContain('dispatch_subagent')
       expect(tools).not.toContain('update_todos')
     }
+    for (const name of ['xiaohuangmen', 'dongchang_tanshi']) {
+      expect(registry.get(name)?.definition.sandbox.filesystem).toBe(
+        'read-only',
+      )
+    }
+  })
+
+  it('fails closed with a diagnostic for unsupported AgentDefinition memory modes', () => {
+    const sourceRoot = tmp('emperor-agent-definition-memory-')
+    const builtinBundle = JSON.parse(
+      readFileSync(join(TEMPLATES, 'agents.json'), 'utf8'),
+    ) as { agents: Array<Record<string, unknown>> }
+    const custom = {
+      ...builtinBundle.agents[0],
+      name: 'memory_agent',
+      prompt: 'memory_agent.md',
+      memory: { mode: 'read', scopes: ['session'] },
+    }
+    writeFileSync(join(sourceRoot, 'memory_agent.md'), 'memory prompt', 'utf8')
+    writeFileSync(
+      join(sourceRoot, 'agents.json'),
+      JSON.stringify({ schemaVersion: 1, agents: [custom] }),
+      'utf8',
+    )
+
+    const registry = new SubagentRegistry(TEMPLATES, null, {
+      additionalSources: [
+        {
+          id: 'memory-agents',
+          kind: 'user',
+          root: sourceRoot,
+          manifests: ['agents.json'],
+          trusted: true,
+        },
+      ],
+    })
+
+    expect(registry.get('memory_agent')).toBeNull()
+    expect(registry.snapshot().diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'agent_memory_unsupported',
+        severity: 'error',
+        agentName: 'memory_agent',
+      }),
+    )
   })
 
   it('materializes valid additional definitions and applies session restrictions without losing builtins', () => {
@@ -310,7 +368,7 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
   it('enforces Skill, Hook, and sandbox restrictions from the materialized definition', async () => {
     const registry = new SubagentRegistry(TEMPLATES, null, {
       sessionPolicy: {
-        toolNames: ['load_skill', 'write_file'],
+        toolNames: ['Skill', 'write_file'],
         skillNames: ['skill-a'],
         hookIds: [],
         sandbox: {
@@ -321,7 +379,7 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
       },
     })
     const parent = new ToolRegistry()
-    parent.register(new PolicyProbeTool('load_skill', true))
+    parent.register(new PolicyProbeTool('Skill', true))
     parent.register(new PolicyProbeTool('write_file', false))
     const observed: string[] = []
     let hookBegins = 0
@@ -332,10 +390,10 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
       runnerFactory: ({ subRegistry }) => ({
         step: async () => {
           observed.push(
-            await subRegistry.execute('load_skill', { name: 'skill-a' }),
+            await subRegistry.execute('Skill', { skill: 'skill-a' }),
           )
           observed.push(
-            await subRegistry.execute('load_skill', { name: 'skill-b' }),
+            await subRegistry.execute('Skill', { skill: 'skill-b' }),
           )
           observed.push(await subRegistry.execute('write_file', {}))
           return '结论: policy checked'
@@ -361,7 +419,7 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
       tool.execute({ agent_type: 'neiguan_yingzao', task: 'policy probe' }),
     ).resolves.toBe('结论: policy checked')
     expect(observed).toEqual([
-      'load_skill:skill-a',
+      'Skill:skill-a',
       '[ERR] AgentDefinition denied Skill: skill-b',
       '[ERR] AgentDefinition read-only sandbox denied destructive tool: write_file',
     ])
@@ -854,7 +912,10 @@ describe('DispatchSubagentTool (W04-014/W08)', () => {
     })
 
     const result = await runner.step([{ role: 'user', content: '阅读 docs' }])
-    expect(result).toBe('结论: routed')
+    expect(result).toContain(
+      '[ERR] AgentDefinition completion contract remains incomplete after one repair.',
+    )
+    expect(result).toContain('Missing: 证据, 风险, 建议下一步')
     expect(calls[0]).toMatchObject({
       useCase: 'subagent',
       agentType: 'sili_suitang',

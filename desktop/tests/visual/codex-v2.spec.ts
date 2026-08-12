@@ -3748,7 +3748,9 @@ async function assertComposerAddMenu(page: Page) {
 // ── Stage6: 无障碍媒体特征降级断言 ─────────────────────────────────────────
 // a11y.css 集中处理三条偏好信号,组件零 a11y 代码;此处验证浏览器实际计算值。
 test.describe('a11y media-feature degradation (Stage6)', () => {
-  test('prefers-reduced-motion collapses durations to 1ms', async ({ page }) => {
+  test('prefers-reduced-motion collapses durations to 1ms', async ({
+    page,
+  }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/chat')
     await expect(page.locator('.composer')).toBeVisible()
@@ -3766,14 +3768,12 @@ test.describe('a11y media-feature degradation (Stage6)', () => {
     })
     expect(durations).not.toBeNull()
     // Chromium 把 1ms 序列化为 '0.001s'(秒),两种写法都接受。
-    const durationMs = durations!
-      .split(',')
-      .map((value) => {
-        const trimmed = value.trim()
-        if (trimmed.endsWith('ms')) return parseFloat(trimmed)
-        if (trimmed.endsWith('s')) return parseFloat(trimmed) * 1000
-        return NaN
-      })
+    const durationMs = durations!.split(',').map((value) => {
+      const trimmed = value.trim()
+      if (trimmed.endsWith('ms')) return parseFloat(trimmed)
+      if (trimmed.endsWith('s')) return parseFloat(trimmed) * 1000
+      return NaN
+    })
     expect(durationMs.every((ms) => Math.abs(ms - 1) <= 1)).toBe(true)
   })
 

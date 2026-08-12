@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -69,6 +70,44 @@ describe('OsSandboxController capability and preparation', () => {
     expect(profile).toContain('(deny network*)')
     expect(profile).not.toContain('/Users/example/private')
     expect(prepared.args.slice(-3)).toEqual(['/bin/sh', '-c', 'pwd'])
+  })
+
+  it('allows only metadata reads for ancestors of a read-only runtime root', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'emperor-sandbox-profile-'))
+    const outside = mkdtempSync(join(tmpdir(), 'emperor-runtime-root-'))
+    cleanup.push(workspace, outside)
+    const runtimeRoot = join(outside, 'opt', 'homebrew', 'bin')
+    const stateRoot = join(workspace, '.emperor')
+    const tempRoot = join(workspace, '.tmp')
+    mkdirSync(runtimeRoot, { recursive: true })
+    mkdirSync(stateRoot, { recursive: true })
+    mkdirSync(tempRoot, { recursive: true })
+    const controller = new OsSandboxController({
+      platform: 'darwin',
+      pathExists: (path) =>
+        path === '/usr/bin/sandbox-exec' || existsSync(path),
+      probeProcess: () => ({ ok: true, detail: 'seatbelt probe passed' }),
+    })
+
+    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], {
+      mode: 'required',
+      workspaceRoot: workspace,
+      stateRoot,
+      tempRoot,
+      readOnlyRoots: [runtimeRoot],
+      network: 'deny',
+    })
+    const profile = prepared.args[1]!
+    const canonicalOutside = realpathSync(outside)
+
+    expect(profile).toContain('(allow file-read-metadata')
+    expect(profile).toContain(`(literal "${canonicalOutside}")`)
+    expect(profile).toContain(
+      `(literal "${join(canonicalOutside, 'opt', 'homebrew')}")`,
+    )
+    expect(profile).not.toContain(
+      `(subpath "${join(canonicalOutside, 'opt')}")`,
+    )
   })
 
   it('prepares Linux bwrap without a read-only bind of the whole host root', () => {
@@ -153,13 +192,16 @@ describe('NodeOwnedProcessRunner containment', () => {
           HOME: workspace,
         },
         timeoutMs: 5_000,
-        containment: {
-          mode: 'required' as const,
-          workspaceRoot: workspace,
-          stateRoot,
-          tempRoot,
-          readOnlyRoots: [dirname(process.execPath)],
-          network: 'deny' as const,
+        execution: {
+          kind: 'sandbox' as const,
+          policy: {
+            mode: 'required' as const,
+            workspaceRoot: workspace,
+            stateRoot,
+            tempRoot,
+            readOnlyRoots: [dirname(process.execPath)],
+            network: 'deny' as const,
+          },
         },
       }
 

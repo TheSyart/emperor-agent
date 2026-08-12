@@ -1,24 +1,20 @@
 /**
- * PlanStore (MIG-CTRL-012)。对齐 Python `agent/plans/store.py`。
+ * PlanStore。
  * 磁盘格式: <root>/memory/plans/index.json，按 plan id 的字典；indent=2；腐坏隔离为 index.json.corrupt-*。
  */
-import {
-  existsSync,
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { planFromDict, planToDict, PlanStatus, type PlanRecord } from './models'
 import { GoalGateMutationLedger } from '../goals/mutation-ledger'
 import type { GoalMutationLease } from '../goals/mutation-guard'
+import {
+  AtomicSnapshotSync,
+  PersistenceIoError,
+  withPersistenceLockSync,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 const TERMINAL = new Set<string>([
   PlanStatus.COMPLETED,
@@ -111,14 +107,22 @@ export class PlanStore {
   readonly maxTerminal: number
   private readonly quarantinedMemory = new Set<string>()
   private readonly goalMutations: GoalGateMutationLedger
+  private readonly persistenceAdapter?: SyncPersistenceAdapter
 
-  constructor(root: string, opts: { maxTerminal?: number } = {}) {
+  constructor(
+    root: string,
+    opts: {
+      maxTerminal?: number
+      persistenceAdapter?: SyncPersistenceAdapter
+    } = {},
+  ) {
     this.root = resolve(root)
     this.planDir = join(this.root, 'memory', 'plans')
     this.indexFile = join(this.planDir, 'index.json')
     this.archiveDir = join(this.planDir, 'archive')
     this.quarantineFile = join(this.planDir, 'quarantine.json')
     this.maxTerminal = Math.max(1, Math.trunc(opts.maxTerminal ?? 500))
+    this.persistenceAdapter = opts.persistenceAdapter
     this.goalMutations = new GoalGateMutationLedger(this.root)
     if (!existsSync(this.indexFile))
       this.goalMutations.withSynchronousMutation(
@@ -656,37 +660,31 @@ export class PlanStore {
     lease: GoalMutationLease,
     opts: { onCorruptWriteEmpty?: boolean } = {},
   ): Record<string, unknown> {
-    let raw: unknown
-    try {
-      raw = JSON.parse(readFileSync(path, 'utf8') || '{}')
-    } catch {
+    const loaded = this.snapshot(path).read({ fallback: {} })
+    if (loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
       this.goalMutations.recordUnderLease(
         lease,
         'plan',
         `plan-store:recover:${basename(path)}:${Date.now()}`,
       )
-      const corrupt = `${path}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`
-      try {
-        renameSync(path, corrupt)
-      } catch {
-        /* ignore */
-      }
       if (opts.onCorruptWriteEmpty) this.writeAt(path, {})
-      return {}
     }
-    return raw && typeof raw === 'object' && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {}
+    return loaded.value
   }
 
   private writeAt(path: string, data: Record<string, unknown>): void {
-    mkdirSync(dirname(path), { recursive: true })
-    const tmp = join(
-      dirname(path),
-      `.${basename(path)}.${randomUUID().replace(/-/g, '')}.tmp`,
-    )
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
-    renameSync(tmp, path)
+    this.snapshot(path).write(data)
+  }
+
+  private snapshot(path: string): AtomicSnapshotSync<Record<string, unknown>> {
+    return new AtomicSnapshotSync({
+      path,
+      codec: PLAN_DOCUMENT_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      corruptionBackupPath: (target) =>
+        `${target}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`,
+    })
   }
 
   private retryQuarantineWrite(action: () => void): void {
@@ -705,37 +703,40 @@ export class PlanStore {
   }
 
   private withWriteLock<T>(action: () => T): T {
-    const lockPath = `${this.indexFile}.lock`
-    const deadline = Date.now() + 5_000
-    let handle: number | null = null
-    while (handle === null) {
-      try {
-        handle = openSync(lockPath, 'wx')
-        writeFileSync(handle, String(process.pid), 'utf8')
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        try {
-          if (Date.now() - statSync(lockPath).mtimeMs > 30_000)
-            unlinkSync(lockPath)
-        } catch {
-          // Another writer released or recovered the lock.
-        }
-        if (Date.now() > deadline)
-          throw new PlanStoreConflictError('Plan store lock timed out.')
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
-      }
-    }
     try {
-      return action()
-    } finally {
-      closeSync(handle)
-      try {
-        unlinkSync(lockPath)
-      } catch {
-        // A stale-lock recovery may already have removed it.
-      }
+      return withPersistenceLockSync(this.indexFile, action, {
+        adapter: this.persistenceAdapter,
+        timeoutMs: 5_000,
+        staleMs: 30_000,
+        retryMs: 25,
+        fileMode: 0o600,
+      })
+    } catch (cause) {
+      if (
+        cause instanceof PersistenceIoError &&
+        cause.path === `${this.indexFile}.lock` &&
+        String(cause.cause).includes('persistence lock timeout')
+      )
+        throw new PlanStoreConflictError('Plan store lock timed out.')
+      throw cause
     }
   }
+}
+
+const PLAN_DOCUMENT_CODEC: SnapshotCodec<Record<string, unknown>> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return {
+      value:
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {},
+      schemaVersion: 1,
+    }
+  },
 }
 
 export function planApprovalIntent(

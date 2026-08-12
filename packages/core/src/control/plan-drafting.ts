@@ -1,5 +1,5 @@
 /**
- * PlanDraftingManager (MIG-CTRL-006)。对齐 Python `agent/control/plan_drafting.py`。
+ * PlanDraftingManager。
  * propose_plan / 草稿生命周期 / discovery ledger / draft Q&A / executing-plan 豁免。
  */
 import { nowTs } from '../util/time'

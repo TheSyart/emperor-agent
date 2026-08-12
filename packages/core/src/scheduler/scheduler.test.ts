@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,11 +15,13 @@ import {
   SchedulerSchedule,
   SchedulerStatus,
   computeNextRunMs,
+  schedulerPayloadSessionId,
   validateSchedule,
 } from './models'
 import { SchedulerService } from './service'
 import { SchedulerStore, SchedulerStoreCorrupt } from './store'
 import { resetSchedulerRun, SchedulerTool, setSchedulerRun } from './tool'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -64,6 +67,31 @@ describe('scheduler models/store', () => {
     expect(loaded.state.run_history[0]!.run_at_ms).toBe(5)
     expect(raw.jobs[0].schedule.everyMs).toBe(60_000)
     expect(raw.jobs[0].state.runHistory[0].durationMs).toBe(12)
+    expect(statSync(store.jobsFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('preserves the previous jobs snapshot when durable rename fails', () => {
+    const root = tmp('emperor-scheduler-persistence-failure-')
+    const healthy = new SchedulerStore(root)
+    healthy.upsertJob(makeJob('job-before'))
+    const before = readFileSync(healthy.jobsFile, 'utf8')
+    const failing = new SchedulerStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() => failing.upsertJob(makeJob('job-after'))).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.jobsFile, 'utf8')).toBe(before)
+    expect(
+      readdirSync(healthy.schedulerDir).filter((name) =>
+        name.includes('.tmp-'),
+      ),
+    ).toEqual([])
   })
 
   it('merges action logs and isolates invalid lines', () => {
@@ -94,6 +122,31 @@ describe('scheduler models/store', () => {
       ),
     ).toBe(true)
     expect(store.diagnostics().lastActionErrors).toHaveLength(2)
+  })
+
+  it('preserves the previous action journal when append fsync fails', () => {
+    const root = tmp('emperor-scheduler-action-failure-')
+    const healthy = new SchedulerStore(root)
+    healthy.appendAction('add', { job: makeJob('job-before') })
+    const before = readFileSync(healthy.actionFile, 'utf8')
+    const failing = new SchedulerStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'append_sync')
+            throw new Error('injected append sync')
+        },
+      }),
+    })
+
+    expect(() =>
+      failing.appendAction('add', { job: makeJob('job-after') }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'persistence_io',
+        operation: 'append_sync',
+      }),
+    )
+    expect(readFileSync(healthy.actionFile, 'utf8')).toBe(before)
   })
 
   it('preserves corrupt jobs store and can return last good snapshot', () => {
@@ -445,15 +498,23 @@ describe('scheduler service/tool', () => {
     })
     const tool = new SchedulerTool(service)
 
-    const created = await tool.execute({
-      action: 'add',
-      name: 'daily summary',
-      payload_kind: 'agent_turn',
-      message: 'Summarize today',
-      every_seconds: 60,
-    })
+    const created = await tool.execute(
+      {
+        action: 'add',
+        name: 'daily summary',
+        payload_kind: 'agent_turn',
+        message: 'Summarize today',
+        every_seconds: 60,
+      },
+      {
+        root,
+        arguments: {},
+        sessionId: 'session-tool-owner',
+      },
+    )
     expect(created).toContain('Scheduler job created')
     const job = service.listJobs()[0]!
+    expect(schedulerPayloadSessionId(job.payload)).toBe('session-tool-owner')
     expect(await tool.execute({ action: 'list' })).toContain('daily summary')
     expect(await tool.execute({ action: 'pause', job_id: job.id })).toContain(
       'paused',

@@ -8,7 +8,7 @@ import type { ToolResultObj } from '../tools/base'
 import type { ToolRegistry } from '../tools/registry'
 import { planToDict, type PlanRecord } from '../plans/models'
 import { type VerificationCommand } from '../plans/verification'
-import type { ControlManagerRunnerHost } from './runner'
+import type { PlanningRunnerUseCases } from '../plans/application-service'
 import {
   discoveryEvidenceRefs,
   discoveryFiles,
@@ -17,8 +17,24 @@ import {
 
 type Msg = Record<string, unknown>
 
+interface PlanVerificationControlHost {
+  claimUnverifiedPlanSteps?(): {
+    planId: string
+    steps: Array<{ id: string; title: string }>
+  } | null
+  planIndependentVerificationFollowup?(opts?: {
+    dispatchAvailable?: boolean
+  }): Record<string, unknown> | null
+  recordIndependentVerificationToolResult?(opts: {
+    toolCallId: string
+    agentType: string
+    output: string
+  }): PlanRecord | null
+  planVerificationTarget?(command: string): Record<string, string> | null
+}
+
 export function recordPlanDiscovery(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanningRunnerUseCases | null,
   call: ToolCallRequest,
   result: ToolResultObj,
 ): void {
@@ -56,7 +72,7 @@ export function recordPlanDiscovery(
 }
 
 export function recordPlanStepToolOutput(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanningRunnerUseCases | null,
   call: ToolCallRequest,
   result: ToolResultObj,
 ): void {
@@ -77,7 +93,7 @@ export function recordPlanStepToolOutput(
 }
 
 export function planIndependentVerificationFollowup(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanVerificationControlHost | null,
   registry: ToolRegistry,
 ): Record<string, unknown> | null {
   if (
@@ -91,7 +107,7 @@ export function planIndependentVerificationFollowup(
 }
 
 export function recordIndependentVerificationToolResult(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanVerificationControlHost | null,
   call: ToolCallRequest,
   result: ToolResultObj,
 ): PlanRecord | null {
@@ -115,7 +131,7 @@ export function recordIndependentVerificationToolResult(
 }
 
 export function planVerificationTarget(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanVerificationControlHost | null,
   call: ToolCallRequest,
 ): Record<string, string> | null {
   if (call.name !== 'run_command' || cm === null) return null
@@ -129,7 +145,7 @@ export function planVerificationTarget(
 }
 
 export function recordPlanVerification(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanningRunnerUseCases | null,
   call: ToolCallRequest,
   toolResult: ToolResultObj,
   target: Record<string, string> | null,
@@ -181,7 +197,7 @@ export function recordPlanVerification(
 
 /** B4.2：领取未验证步骤并生成一次性诚实性 followup；宿主缺失或无未验证项返回 null。 */
 export function unverifiedPlanHonestyFollowup(
-  cm: ControlManagerRunnerHost | null,
+  cm: PlanVerificationControlHost | null,
 ): Msg | null {
   if (cm === null || typeof cm.claimUnverifiedPlanSteps !== 'function')
     return null

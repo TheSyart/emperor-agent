@@ -1,7 +1,8 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { GoalMutationGuardError } from '../goals/mutation-guard'
 import { PlanContextBuilder } from './context'
 import { PlanStatus, PlanStepStatus, makePlanRecord, makeStep } from './models'
 import { PlanStore } from './store'
@@ -38,6 +39,29 @@ function seedPlan(
 }
 
 describe('PlanContextBuilder throttling (Wave4.4)', () => {
+  it('omits the optional projection while a terminal Goal commit owns the shared lock', () => {
+    const store = new PlanStore(tmp('emperor-plan-ctx-busy-'))
+    vi.spyOn(store, 'list').mockImplementation(() => {
+      throw new GoalMutationGuardError(
+        'goal_mutation_guard_busy',
+        'Goal state root is owned by another mutation or terminal commit.',
+      )
+    })
+    const builder = new PlanContextBuilder(store)
+
+    expect(builder.messageFor([])).toBeNull()
+  })
+
+  it('does not hide non-contention Plan store failures', () => {
+    const store = new PlanStore(tmp('emperor-plan-ctx-error-'))
+    vi.spyOn(store, 'list').mockImplementation(() => {
+      throw new Error('plan storage is corrupt')
+    })
+    const builder = new PlanContextBuilder(store)
+
+    expect(() => builder.messageFor([])).toThrow('plan storage is corrupt')
+  })
+
   it('injects the full block on first sight, then sparse while plan state is unchanged', () => {
     const store = new PlanStore(tmp('emperor-plan-ctx-'))
     seedPlan(store)

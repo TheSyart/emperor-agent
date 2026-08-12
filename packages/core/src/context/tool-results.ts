@@ -1,11 +1,10 @@
 /**
- * context_pipeline: 工具结果截断/摘要 (MIG-CORE-003)。
- * 对齐 Python `agent/context_pipeline/tool_results.py`。
+ * context_pipeline: 工具结果截断/摘要。
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { isPathWithin, relativePortable } from '../util/paths'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isPathWithin } from '../util/paths'
 import type { OpenAiMsg } from './pairing'
 
 export const DEFAULT_KEEP_RECENT = 10
@@ -99,10 +98,16 @@ export function shrinkOldToolResults(
 export class ToolResultStore {
   readonly root: string
   readonly dir: string
+  readonly legacyDir: string
+  readonly sessionId: string | null
 
-  constructor(root: string) {
+  constructor(root: string, opts: { sessionId?: string | null } = {}) {
     this.root = resolve(root)
-    this.dir = join(this.root, 'memory', 'tool-results')
+    this.sessionId = safeSessionId(opts.sessionId)
+    this.legacyDir = join(this.root, 'memory', 'tool-results')
+    this.dir = this.sessionId
+      ? join(this.root, 'sessions', this.sessionId, 'tool-results')
+      : this.legacyDir
     mkdirSync(this.dir, { recursive: true })
   }
 
@@ -124,7 +129,7 @@ export class ToolResultStore {
       turn_id: turnId,
       tool_call_id: toolCallId,
       tool_name: toolName,
-      artifact_path: relativePortable(this.root, artifact),
+      artifact_path: artifact,
       preview: content.slice(0, opts.previewChars ?? 1000),
       original_chars: content.length,
     }
@@ -142,17 +147,37 @@ export class ToolResultStore {
     return record
   }
 
-  /** 按 ref（root 相对路径）回读完整输出；路径围栏拒绝逃出 tool-results 目录的 ref。 */
+  /** Read an absolute/current ref while fencing access to tool-result roots. */
   readArtifact(ref: string): string {
     const trimmed = String(ref || '').trim()
     if (!trimmed) throw new Error('tool result ref is required')
-    const resolved = resolve(this.root, trimmed)
-    if (!isPathWithin(resolved, this.dir)) {
+    const resolved = isAbsolute(trimmed)
+      ? resolve(trimmed)
+      : resolve(this.root, trimmed)
+    if (!this.isReadableArtifact(resolved)) {
       throw new Error('tool result ref escapes the tool-results directory')
     }
     if (!existsSync(resolved)) throw new Error('tool result artifact not found')
     return readFileSync(resolved, 'utf8')
   }
+
+  private isReadableArtifact(path: string): boolean {
+    if (isPathWithin(path, this.dir) || isPathWithin(path, this.legacyDir))
+      return true
+    if (this.sessionId) return false
+    const sessionsRoot = join(this.root, 'sessions')
+    const rel = relative(sessionsRoot, path)
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) return false
+    const parts = rel.split(sep)
+    return parts.length >= 3 && parts[1] === 'tool-results'
+  }
+}
+
+function safeSessionId(value: string | null | undefined): string | null {
+  const sessionId = String(value ?? '').trim()
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$/.test(sessionId)
+    ? sessionId
+    : null
 }
 
 export function replaceLargeToolResults(

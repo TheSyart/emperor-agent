@@ -1,7 +1,7 @@
 /**
- * 结构化日志 (MIG-FND-006)。
+ * 结构化日志。
  *
- * 替代 Python `loguru`。当前是零依赖 console 封装，保留 level 过滤与结构化字段；
+ * 零依赖 console 封装，保留 level 过滤与结构化字段；
  * 后续可在不改调用点的前提下换成 pino/consola。
  */
 

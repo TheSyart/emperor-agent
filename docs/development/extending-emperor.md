@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-08-05<br>
+> 最后核验：2026-08-12<br>
 > 事实源：当前 CoreApi / IPC / runtime event / domain service 分层与 `AGENTS.md`
 
 Emperor Agent 的扩展通常横跨 Core、Electron contract、renderer 投影、持久化和文档。先确定权威状态属于哪个领域，再从 domain service 向外接入；不要把策略散落到组件或 prompt 文案。
@@ -54,7 +54,7 @@ flowchart LR
 
 - 不要新造另一套 `source` / `rank` / provenance。使用 `packages/core/src/config/resolver.ts` 的 `ConfigResolver` 与 `defineConfigKey()`；builtin、user、project、session、managed 的稳定次序由 resolver 统一维护。
 - 普通 key 对 untrusted project 默认 reject。确有单向收紧语义时必须单独实现 `restrictUntrustedProject`；不要复用普通 merge 后在调用方补 if。allowlist 用交集，deny/require 用安全 lattice，managed constraint 必须最终生效。
-- 旧 JSON、目录和 manifest 保持各自 writer 与 schema，只增加输入 adapter。除非另有经过迁移/回滚审核的任务，不要把 `emperor.local.json`、`mcp_config.json`、Skill 或 AgentDefinition 合并成一个文件。
+- `settings.json`、MCP 配置、Skill registry 和 AgentDefinition manifest 保持各自 writer 与 schema，只增加输入 adapter。除非另有经过迁移/回滚审核的任务，不要把这些事实源合并成一个文件。
 - Secret 路径必须在 key 上显式声明。effective snapshot 只能返回 `[REDACTED]`、source 和基于脱敏值的 fingerprint；不得把 secret、原始 credential 或可恢复值写进 runtime event、诊断错误或覆盖轨迹。
 - 新 key 同步 `CoreEffectiveConfigService`、`config.effective` contract、Diagnostics renderer 类型/投影和表驱动测试。测试至少覆盖全部层组合、同层确定性、untrusted restriction、managed clamp、旧 loader 等价与序列化后无 secret。
 - 子代理 Task 要保留 definition revision 与 source ID/kind/trust；新增 source 必须同步 Diagnostics `agentDefinitions`，以便用户区分“没有 agent”和“source 被 trust/collision/schema 阻断”。
@@ -64,15 +64,16 @@ flowchart LR
 ## 新工具
 
 - 实现统一工具 contract：稳定名称、描述、输入 schema 和有界输出。
+- 每个工具必须声明完整 `ToolCapabilityDescriptor`，包含 provenance、mutability（包括 `domainStateMutation`）、external channel、scheduling 与 evidence policy。Registry 对缺失或矛盾声明 fail closed；禁止根据工具名或自然语言描述猜测能力。
 - 在 composition root 注册；声明读写性质、权限行为，以及准确的 `concurrencySafe` / `exclusive` 调度属性。只有能证明无共享可变状态、无顺序依赖的工具才能标记为并发安全；不安全或独占工具是完整屏障，必须等待之前的安全组并阻止后续调用提前执行。
 - 文件路径必须走 workspace policy；shell 需要可靠的只读判断，无法证明时按受控操作处理。
 - 新增 shell/terminal/command-hook 入口必须复用 `analyzeShellCommandFailClosed` 与 `ShellCommandAnalyzer` capability。allow 只能来自单命令、无 redirect/env/dynamic/compound 且 flags 通过正向证明的 AST；旧 regex/token resolver 只能收紧。parser exception、invalid adapter result、复杂度上限和未知结构必须在 spawn 前转 Ask 或 deny，禁止降级为字符串首词 allowlist。
 - 新增权限来源通过 `PermissionRuleLayerInput.source` 由可信 composition root 注入，不得让 project/local rule 内容填写自己的 trust。规则解析后保留 source、candidate 和 precedence；任何新策略层都要覆盖 `deny > ask > allow`、同 action trust 顺序、引号混淆、命令边界和低信任层不可放宽测试。
 - 新工具必须兼容 Runner 两阶段批量预检：schema、Guard、PreToolUse、workspace 和 Permission 在副作用前完成；批次中任一失败不得让其他调用先执行。PermissionRequest Hook 的 `allow` 不能替代用户审批，updated input 必须触发整批重新判权。
 - Permission interaction 只能公开 v2 安全摘要和稳定 option ID。fingerprint、normalize 后参数、规则 trace/explanation 与一次性凭据只能进入私有 PermissionRequestStore/Diagnostics；不得新增 renderer 或 runtime event 字段泄漏这些数据。
-- Permission allow 与 OS containment 必须分开建模。新的命令入口复用 `OwnedProcessRunner` 与 `ProcessContainmentReceipt`；不得直接 `spawn`/`exec` 后声称 sandboxed。`run_command` 一律使用 required，backend unavailable/error/unsupported 或 runner 返回 `unsandboxed` 时 fail closed；如其他只读诊断入口确需 preferred，必须独立建模、记录真实 receipt，不能借此放宽 `run_command`。
+- Permission allow 与进程执行边界必须分开建模。新的命令入口复用 `OwnedProcessRunner` 与 `ProcessContainmentReceipt`；不得直接 `spawn`/`exec` 后声称 sandboxed。只有主 Agent、非 Plan 的 `run_command` 能接收 Runner 在权限评估后签发的 host authorization；其他入口必须显式选择 sandbox policy，required backend unavailable/error/unsupported 或返回 `unsandboxed` 时 fail closed。模型参数、项目配置和普通 ToolExecutionContext 不得创建或扩大 host authorization。
 - 扩展 sandbox backend 时同步 capability probe、固定 argv/profile 生成、stateRoot 隐藏、workspace 外读写、symlink、子进程、network 和 backend-missing 测试。profile/helper 不接受 renderer、模型或远程配置提供的命令、路径模板或 argv。
-- 联网工具把外部内容视为不可信输入，不把网页或 MCP 返回值当作系统指令。
+- 联网工具、MCP 和 HTTP Hook 把外部内容视为不可信输入，必须通过 `ExternalContentEnvelope` 生成 data-only 模型内容。字节上限覆盖完整 envelope，注入检测检查 raw content，不得把网页/MCP/Hook 返回值当作系统指令或默认 Goal evidence。
 - 产物进入受管 attachment / media store，不把任意绝对路径直接交给 renderer。
 - 若结果能成为 Goal evidence，还需定义 Core observation eligibility，不能让模型自报 PASS。
 - 执行实现必须使用调度器提供的 child `AbortSignal`，不能缓存父 signal 或忽略取消。不得自行补写 `tool_run_*` 终态；调度器负责 queued 到恰好一个 completed / failed / cancelled 的转换，以及流式 partial 被最终响应删除时的 tombstone。
@@ -91,10 +92,10 @@ flowchart LR
 - 内置命令只在 `packages/core/src/commands/builtins.ts` 声明 descriptor；解析、参数 schema、可用性、busy policy、来源白名单和幂等执行留在 command platform，不在 Vue 组件增加平行 `if` 分发。
 - Renderer 只能调用 `commands.list/complete/invoke`，并提交 Core 返回的稳定 command ID。新增字段时同步 CoreApi operation schema、Electron registry、preload、Renderer 类型和 parity 测试。
 - `local_ui` 不进入聊天；`core_action` 只产生专用投影或脱敏 receipt；`agent_prompt` 才提交一次用户消息。未知命令禁止降级为模型 prompt。
-- 内置名称与正式别名受保护。动态 Prompt 命令通过 Skill frontmatter `metadata.emperor.command` 声明；不要新增 `.emperor/commands/`。source、trust、Skill 路径、AgentDefinition 和 allowed tools 只能来自 Core 解析结果。
+- 九个内置名称受保护且不提供兼容别名。动态 Prompt 命令通过 Skill frontmatter `metadata.emperor.command` 声明；不要新增 `/skill` 中转或 `.emperor/commands/`。source、trust、Skill 路径、AgentDefinition 和 allowed tools 只能来自 Core 解析结果。
 - busy 调度必须明确选 `immediate`、`after_turn` 或 `reject_when_busy`。`after_turn` 复用 owner Session Actor 串行边界；命令队列不能绕过用户消息单槽或造成跨 session 乱序。
 - 高影响命令继续复用领域确认、revision、checkpoint、Permission 和 containment。`full_access` 不能扩大 invocation source 或覆盖 Core deny。
-- `/clear` 语义由 `SessionTransitionService` 独占；修改时覆盖 boundary、lineage、旧 session 可恢复、worktree binding、prepared 崩溃恢复、幂等调用和旧 session 提交屏障。
+- `/new` 的会话转换语义由 `SessionTransitionService` 独占；修改时覆盖 boundary、lineage、旧 session 可恢复、worktree binding、prepared 崩溃恢复、幂等调用和旧 session 提交屏障。内部 `transition_reason=clear` 是兼容持久化值，不是公开命令别名。
 
 右侧项目工作台 operation 还要遵守以下边界：
 
@@ -146,7 +147,7 @@ flowchart LR
 
 ### Hybrid Memory 评估与启用
 
-- `emperor.local.json` 的 `memory.hybridMemory` 只能是 `off`、`eval` 或 `on`，缺失/非法值必须回到 `off`；通过 `ConfigResolver` 解释来源，未信任 project 只能收紧，不能启用。
+- `settings.json` 的 `memory.hybridMemory` 只能是 `off`、`eval` 或 `on`，缺失/非法值必须回到 `off`；通过 `ConfigResolver` 解释来源，未信任 project 只能收紧，不能启用。
 - 新 embedding provider 必须有稳定 `id` 和固定 `dimensions`，实现批量 `embed(texts, signal)` 并尊重 abort。provider/index/query 失败必须回退 FTS；不得把原始异常、记忆正文或绝对路径写入普通 runtime event。
 - 先运行 `npm run eval:hybrid-memory --workspace @emperor/core`。门禁必须证明 factual hit 提升、stale violation 降低、cross-project pollution 为零且不回归、真实 embedding 故障可降级，并记录 dataset SHA-256、延迟和派生磁盘增量。
 - 离线 fixture 的通过结果不能替代生产证明。运行时 receipt 必须绑定同一 `embeddingProviderId` 和 dataset SHA-256；缺 provider、receipt 未通过或 provider ID 不匹配时，显式 `on` 仍降为 `eval`，不允许修改 prompt。
@@ -154,7 +155,7 @@ flowchart LR
 
 ### Code Intelligence / LSP 评估与启用
 
-- `emperor.local.json` 的 `codeIntelligence.mode` 只能是 `off`、`eval` 或 `on`，非法/缺失值回到 `off`。`on` 必须同时匹配当前 `CODE_GRAPH_PARSER_REVISION` 与 trusted host 注入的 passed receipt；本机一次通过结果不能自动进入发行配置。
+- `settings.json` 的 `codeIntelligence.mode` 只能是 `off`、`eval` 或 `on`，非法/缺失值回到 `off`。`on` 必须同时匹配当前 `CODE_GRAPH_PARSER_REVISION` 与 trusted host 注入的 passed receipt；本机一次通过结果不能自动进入发行配置。
 - Code Graph 必须保持 lazy parser、single-owner mailbox、immutable old snapshot、workspace-relative output、5 MiB 单文件/累计源字节门和 200 文件门。扩大任何容量前先重新跑 RSS/cache gate，不能只改常量；partial 结果必须保留 limitation，不能伪装完整语义图。
 - cache 只能写 `stateRoot/code-intelligence/`，是可删除派生物。保留 gzip、`0600` temp、file fsync、rename、directory fsync、corrupt/revision/root mismatch rebuild；file event persistence 只能由同一 owner debounce，`close()` 必须 flush。
 - TypeScript parser 是精确版本的 runtime dependency；`CODE_GRAPH_PARSER_REVISION` 必须与实际 `TypeScript.versionMajorMinor` 一致。Electron main 只保留 lazy external import，发行 ASAR 只 allowlist parser 的 `package.json` 与 `lib/typescript.js`。升级 parser 时必须同步 lock、revision、真实仓库 receipt，并重新通过 `build`、`package:dir` 与 packaged smoke，不能只改 semver 范围。

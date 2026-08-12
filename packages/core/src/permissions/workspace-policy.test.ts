@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { WorkspacePolicy } from './workspace-policy'
+import { WorkspacePolicy, workspacePolicyForTool } from './workspace-policy'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -58,5 +58,39 @@ describe('WorkspacePolicy', () => {
 
     expect(denied.allowed).toBe(false)
     expect(denied.reason).toContain('outside workspace')
+  })
+
+  it('limits a trusted user Skill scope to one named Skill subtree', () => {
+    const workspace = tmp('emperor-workspace-policy-project-')
+    const emperorHome = tmp('emperor-workspace-policy-home-')
+    const userSkillsRoot = join(emperorHome, 'skills')
+    const skillRoot = join(userSkillsRoot, 'agent-reach')
+    mkdirSync(skillRoot, { recursive: true })
+    const policy = workspacePolicyForTool(
+      {
+        root: emperorHome,
+        workspaceRoot: workspace,
+        fileExecutionScopes: [
+          {
+            kind: 'user_skill',
+            root: skillRoot,
+            skillName: 'agent-reach',
+            access: 'write',
+          },
+        ],
+      },
+      workspace,
+    )
+
+    expect(
+      policy.resolvePath(join(skillRoot, 'SKILL.md'), 'write').allowed,
+    ).toBe(true)
+    expect(
+      policy.resolvePath(join(userSkillsRoot, 'other', 'SKILL.md'), 'write')
+        .allowed,
+    ).toBe(false)
+    expect(
+      policy.resolvePath(join(emperorHome, 'settings.json'), 'write').allowed,
+    ).toBe(false)
   })
 })

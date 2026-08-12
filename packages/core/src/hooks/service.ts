@@ -12,6 +12,7 @@ import {
   PromptHookExecutor,
   RoutedHookModelGateway,
   type HookModelRouter,
+  type HookTokenTracker,
 } from './model-executor'
 import type {
   HookAggregateDecision,
@@ -28,8 +29,7 @@ import {
   HookOrchestrator,
   type HookOrchestratorEmitter,
 } from './orchestrator'
-import type { HookRuntimeRunOptions } from './runtime'
-import type { TokenTrackerLike } from '../agent/runner'
+import type { HookRuntimeRunOptions } from './contracts'
 import { writeJsonAtomic } from '../store/atomic-json'
 import { parseHooksConfigV2, serializeHooksConfigV2 } from './schema'
 import type { ExecutionEnvironment } from '../environment/snapshot'
@@ -76,7 +76,7 @@ export class HookService {
     stateRoot: string
     executors?: HookExecutorRegistry
     modelRouter?: HookModelRouter | null
-    tokenTracker?: Pick<TokenTrackerLike, 'record'> | null
+    tokenTracker?: HookTokenTracker | null
     executionEnvironment?: HookExecutionEnvironmentProvider | null
     ownedProcessRunner?: OwnedProcessRunner | null
   }) {
@@ -475,7 +475,7 @@ export class HookService {
 
 function defaultExecutors(
   modelRouter: HookModelRouter | null,
-  tokenTracker: Pick<TokenTrackerLike, 'record'> | null,
+  tokenTracker: HookTokenTracker | null,
   ownedProcessRunner: OwnedProcessRunner | null,
 ): HookExecutorRegistry {
   const registry = new HookExecutorRegistry()

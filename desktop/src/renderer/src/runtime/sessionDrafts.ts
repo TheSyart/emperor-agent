@@ -1,6 +1,6 @@
 import type { SessionControlPending, SessionInfo, WsEvent } from '../types'
 
-import { DRAFT_SESSION_PREFIX } from '@emperor/core/sessions/constants'
+import { DRAFT_SESSION_PREFIX } from '@emperor/core/runtime-contract'
 
 export { DRAFT_SESSION_PREFIX }
 

@@ -218,10 +218,18 @@ function safeInteractionDetail(
         const risk = String(operation.risk || 'unknown')
         const reason = String(operation.reason || '').trim()
         const summary = String(operation.summary || '').trim()
+        const executionBoundary = String(
+          operation.execution_boundary || '',
+        ).trim()
+        const boundaryDisclosure =
+          executionBoundary === 'host'
+            ? '执行范围：宿主直执；可读写真实用户环境（含 HOME 与用户配置），并可使用本机网络。'
+            : ''
         return [
           `${index + 1}. ${tool} · 风险 ${risk}`,
           reason,
           summary ? `摘要：${summary}` : '',
+          boundaryDisclosure,
         ]
           .filter(Boolean)
           .join('\n')

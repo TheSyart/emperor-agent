@@ -1,6 +1,5 @@
 /**
- * 文件系统工具 (MIG-TOOL-006/007)。
- * 对齐 Python `agent/tools/filesystem.py`：ReadFileTool/WriteFileTool/EditFileTool。
+ * 文件系统工具：ReadFileTool/WriteFileTool/EditFileTool。
  * 工作区路径禁闭：expanduser + resolve 规范化后 relative_to 检查。
  */
 import { existsSync } from 'node:fs'
@@ -144,10 +143,11 @@ export class ReadFileTool extends Tool {
     const raw = String(args.path ?? '')
     const offset = Number(args.offset ?? 1) || 1
     const limit = Number(args.limit) || 2000
-    const decision = workspacePolicyForTool(ctx, this.workspace).resolvePath(
-      raw,
-      'read',
-    )
+    const decision = workspacePolicyForTool(
+      ctx,
+      this.workspace,
+      'read_file',
+    ).resolvePath(raw, 'read')
     if (!decision.allowed) return formatWorkspacePolicyError(decision)
     const p = decision.resolvedPath
     if (!existsSync(p)) return '[ERR] file not found'

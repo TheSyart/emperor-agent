@@ -25,7 +25,7 @@ export const routeRecords: RouteRecordRaw[] = [
   },
   {
     path: '/plugins',
-    redirect: '/plugins/skills',
+    redirect: '/plugins/plugins',
   },
   {
     path: '/plugins/:tab?',

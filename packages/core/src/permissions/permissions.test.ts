@@ -227,6 +227,116 @@ describe('PermissionPolicy (test_permissions.py)', () => {
     }
   })
 
+  it('asks for an exact external file read and lets full_access authorize it', () => {
+    const registry = makeRegistry(root)
+    const policy = new PermissionPolicy()
+    const external = join(tmpdir(), 'emperor-external-read.txt')
+
+    for (const mode of [
+      PermissionMode.ASK_BEFORE_EDIT,
+      PermissionMode.SMART_AUTO,
+    ]) {
+      expect(
+        policy.assess('read_file', { path: external }, mode, {
+          registry,
+          workspaceRoot: root,
+          cwd: root,
+        }),
+        mode,
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: true,
+        rule: 'containment.external_read',
+      })
+    }
+
+    expect(
+      policy.assess(
+        'read_file',
+        { path: external },
+        PermissionMode.FULL_ACCESS,
+        {
+          registry,
+          workspaceRoot: root,
+          cwd: root,
+        },
+      ),
+    ).toMatchObject({
+      allowed: true,
+      requiresApproval: false,
+      rule: 'mode.full_access',
+    })
+  })
+
+  it('asks for an exact external user Skill write and denies sibling state paths', () => {
+    const registry = makeRegistry(root)
+    const policy = new PermissionPolicy()
+    const userSkillsRoot = '/tmp/emperor-home/skills'
+    const skillRoot = join(userSkillsRoot, 'agent-reach')
+    const context = {
+      registry,
+      workspaceRoot: root,
+      cwd: root,
+      fileExecutionScopes: [
+        {
+          kind: 'user_skill' as const,
+          root: skillRoot,
+          skillName: 'agent-reach',
+          access: 'write' as const,
+        },
+      ],
+    }
+
+    for (const mode of [
+      PermissionMode.ASK_BEFORE_EDIT,
+      PermissionMode.SMART_AUTO,
+      PermissionMode.FULL_ACCESS,
+    ]) {
+      expect(
+        policy.assess(
+          'write_file',
+          { path: join(skillRoot, 'SKILL.md'), content: '# Skill' },
+          mode,
+          context,
+        ),
+        mode,
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: true,
+        rule: 'scope.user_skill.write',
+      })
+      expect(
+        policy.assess(
+          'write_file',
+          {
+            path: join(userSkillsRoot, 'other', 'SKILL.md'),
+            content: '# Other',
+          },
+          mode,
+          context,
+        ),
+        mode,
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: false,
+        rule: 'containment.workspace',
+      })
+      expect(
+        policy.assess(
+          'write_file',
+          { path: '/tmp/emperor-home/settings.json', content: '{}' },
+          mode,
+          context,
+        ),
+        mode,
+      ).toMatchObject({
+        allowed: false,
+        requiresApproval: false,
+        rule: 'containment.workspace',
+      })
+    }
+  })
+
   it('matches rename permission rules against both source and destination', () => {
     const registry = makeRegistry(root)
     const decision = new PermissionPipeline({
@@ -861,7 +971,7 @@ describe('PermissionPipeline (test_permission_pipeline_v2.py)', () => {
       id: 'spoof-system',
       source: {
         kind: 'local_config',
-        id: 'emperor.local.json',
+        id: 'settings.json',
         trust: 'user',
       },
     })
@@ -1160,6 +1270,26 @@ describe('PermissionPipeline v2 permission modes', () => {
       allowed: false,
       requiresApproval: false,
       rule: 'core.git.explicit_deny',
+    })
+  })
+
+  it.each([
+    'sudo id',
+    '/usr/bin/doas id',
+    'env LANG=C pkexec id',
+    "sh -c 'su - root'",
+  ])('full_access cannot bypass privilege escalation deny: %s', (command) => {
+    expect(
+      new PermissionPipeline().assess(
+        'run_command',
+        { command },
+        'full_access',
+        { workspaceRoot: process.cwd(), cwd: process.cwd() },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      requiresApproval: false,
+      rule: 'core.process.privilege_escalation',
     })
   })
 })

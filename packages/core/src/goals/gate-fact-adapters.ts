@@ -28,7 +28,9 @@ export class GoalGateCoreFactAdapters {
   constructor(
     readonly factStore: GoalGateFactStore,
     private readonly goalStore: Pick<GoalStore, 'inspect' | 'diagnostics'>,
-    private readonly controlStore: Pick<ControlStore, 'inspect'>,
+    private readonly controlStore:
+      | Pick<ControlStore, 'inspect'>
+      | ((goal: GoalRecord) => Pick<ControlStore, 'inspect'>),
   ) {
     this.mutations = new GoalGateMutationLedger(factStore.stateRoot)
   }
@@ -77,7 +79,11 @@ export class GoalGateCoreFactAdapters {
       this.goalStore.inspect(goal.id),
       this.goalStore.diagnostics(),
     ])
-    const control = this.controlStore.inspect()
+    const controlStore =
+      typeof this.controlStore === 'function'
+        ? this.controlStore(goal)
+        : this.controlStore
+    const control = controlStore.inspect()
     const pending = control.record?.pending ?? null
     const controlHealthy = control.issue === null && control.record !== null
     const goalStorageHealthy =

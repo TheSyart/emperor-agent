@@ -172,13 +172,16 @@ export class CommandHookExecutor implements HookHandlerExecutor<HookCommandHandl
         ),
         sessionId: context.sessionId ?? null,
       },
-      containment: {
-        mode: 'preferred',
-        workspaceRoot: context.cwd,
-        stateRoot: String(input.state_root ?? '').trim() || null,
-        tempRoot: context.cwd,
-        readOnlyRoots: [],
-        network: 'allow',
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'preferred',
+          workspaceRoot: context.cwd,
+          stateRoot: String(input.state_root ?? '').trim() || null,
+          tempRoot: context.cwd,
+          readOnlyRoots: [],
+          network: 'allow',
+        },
       },
     })
     stdout.append(result.stdout)
@@ -867,13 +870,16 @@ async function executeCommandHook(
     outputPolicy: 'truncate_tail',
     outputQuotaScope: 'per_stream',
     owner: { kind: 'hook', id: hookId, sessionId: null },
-    containment: {
-      mode: 'preferred',
-      workspaceRoot: cwd,
-      stateRoot: null,
-      tempRoot: cwd,
-      readOnlyRoots: [],
-      network: 'allow',
+    execution: {
+      kind: 'sandbox',
+      policy: {
+        mode: 'preferred',
+        workspaceRoot: cwd,
+        stateRoot: null,
+        tempRoot: cwd,
+        readOnlyRoots: [],
+        network: 'allow',
+      },
     },
   })
   const stdout = capOutput(result.stdout)

@@ -46,6 +46,7 @@ import {
   GOAL_MANUAL_EVIDENCE_QUESTION_ID,
 } from '../control/goal-manual-evidence'
 import { CODE_GRAPH_PARSER_REVISION } from '../code-intelligence/models'
+import { bootstrapEmperorHome } from '../runtime/installation'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
@@ -100,6 +101,59 @@ class FakeProvider extends LLMProvider {
   }
 }
 
+class ImmediateProvider extends LLMProvider {
+  calls: ChatArgs[] = []
+  constructor() {
+    super({ defaultModel: 'fake-main' })
+  }
+  async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.calls.push(args)
+    return response('done')
+  }
+}
+
+class OneToolProvider extends LLMProvider {
+  calls: ChatArgs[] = []
+  constructor(
+    readonly toolCall: {
+      id: string
+      name: string
+      arguments: Record<string, unknown>
+    },
+  ) {
+    super({ defaultModel: 'fake-main' })
+  }
+  async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.calls.push(args)
+    return this.calls.length === 1
+      ? response(null, {
+          toolCalls: [this.toolCall],
+          finishReason: 'tool_calls',
+        })
+      : response('done')
+  }
+}
+
+class ToolSequenceProvider extends LLMProvider {
+  calls: ChatArgs[] = []
+  constructor(
+    private readonly toolCalls: Array<{
+      id: string
+      name: string
+      arguments: Record<string, unknown>
+    }>,
+  ) {
+    super({ defaultModel: 'fake-main' })
+  }
+  async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.calls.push(args)
+    const call = this.toolCalls[this.calls.length - 1]
+    return call
+      ? response(null, { toolCalls: [call], finishReason: 'tool_calls' })
+      : response('done')
+  }
+}
+
 async function createInterruptedSkip(
   loop: AgentLoop,
   sessionId: string,
@@ -142,14 +196,7 @@ async function createInterruptedSkip(
     ),
     expectedLastEventSeq: created.lastEventSeq,
   })
-  const manager = loop.controlManager
-  manager.setRuntimeScope({
-    sessionId,
-    mode: planning.scope.mode,
-    projectId: planning.scope.projectId,
-    workspaceRoot: planning.scope.workspaceRoot,
-    projectFingerprint: planning.scope.projectFingerprint,
-  })
+  const manager = loop.controlManagerForSessionId(sessionId)
   manager.setActiveGoalPlanContext(planning)
   manager.setMode('plan')
   const interaction = manager.createPlan({
@@ -217,6 +264,51 @@ async function createInterruptedSkip(
 }
 
 describe('AgentLoop (MIG-CORE-011)', () => {
+  it('exposes Claude-style Skill loading without model-facing installers', async () => {
+    const root = tmp('emperor-agent-loop-native-skill-install-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+
+    const names = loop.registry.getDefinitions().map((tool) => tool.name)
+    expect(names).toContain('Skill')
+    expect(names).not.toContain('load_skill')
+    expect(names).not.toContain('install_skill')
+    expect(names).not.toContain('manage_environment')
+    await loop.close()
+  })
+
+  it('does not overwrite a host-prepared Emperor Home installation receipt', async () => {
+    const root = tmp('emperor-agent-loop-prepared-home-')
+    const stateRoot = join(root, '.emperor')
+    bootstrapEmperorHome({
+      emperorHome: stateRoot,
+      source: 'explicit',
+      appVersion: 'desktop-bootstrap',
+      runtimeRevision: 'signed-runtime',
+      now: () => '2026-08-10T00:00:00.000Z',
+    })
+    const receipt = readFileSync(join(stateRoot, 'installation.json'), 'utf8')
+
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+      emperorHomePrepared: true,
+      appVersion: 'core-would-overwrite',
+      runtimeRevision: 'core-would-overwrite',
+    })
+
+    expect(readFileSync(join(stateRoot, 'installation.json'), 'utf8')).toBe(
+      receipt,
+    )
+    await loop.close()
+  })
   it('keeps code intelligence absent by default and exposes it only for a gated Build scope', async () => {
     const defaultRoot = tmp('emperor-agent-loop-code-default-')
     const defaultLoop = await AgentLoop.create({
@@ -326,10 +418,41 @@ describe('AgentLoop (MIG-CORE-011)', () => {
 
     expect(reply).toBe('读完了。')
     expect(loop.registry.has('read_file')).toBe(true)
-    expect(loop.registry.has('web_search')).toBe(true)
+    expect(loop.registry.has('web_search')).toBe(false)
     expect(loop.registry.has('dispatch_subagent')).toBe(true)
     expect(loop.registry.has('scheduler')).toBe(true)
     expect(loop.registry.has('spawn_teammate')).toBe(true)
+    const definitions = loop.registry.getDefinitions()
+    const capabilities = loop.registry.getCapabilityDescriptors()
+    expect(capabilities.map((item) => item.toolName)).toEqual(
+      definitions
+        .map((item) => item.name)
+        .sort((left, right) => left.localeCompare(right)),
+    )
+    for (const capability of capabilities) {
+      if (capability.externalContent)
+        expect(capability.evidencePolicy).toBe('context_only')
+      if (capability.mutationScope === 'workspace')
+        expect(capability.readMode).not.toBe('static_read_only')
+    }
+    expect(
+      capabilities
+        .filter((item) => item.mutationScope === 'domain_or_external')
+        .map((item) => item.toolName),
+    ).toEqual([])
+    expect(
+      capabilities.find((item) => item.toolName === 'web_fetch'),
+    ).toMatchObject({
+      externalContent: true,
+      evidencePolicy: 'context_only',
+      provenance: { kind: 'external_transport' },
+    })
+    expect(
+      capabilities.find((item) => item.toolName === 'complete_plan_step'),
+    ).toMatchObject({
+      readMode: 'static_read_only',
+      mutationScope: 'domain',
+    })
     expect(loop.environmentCatalog.catalog.catalogId).toBe(
       'emperor-environment-tools',
     )
@@ -362,6 +485,77 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         ),
       ),
     ).toBe(true)
+  })
+
+  it('registers web_search only when the trusted host injects an adapter', async () => {
+    const root = tmp('emperor-agent-loop-web-search-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+      webSearchAdapter: {
+        name: 'trusted-search',
+        search: async () => [
+          {
+            title: 'Result',
+            url: 'https://example.com/',
+            snippet: 'Snippet',
+          },
+        ],
+      },
+    })
+
+    expect(loop.registry.has('web_search')).toBe(true)
+    await expect(
+      loop.registry.executeResult('web_search', { query: 'emperor' }),
+    ).resolves.toMatchObject({
+      isError: false,
+      modelContent: expect.stringContaining('instruction_policy: data_only'),
+      rawContent: expect.stringContaining('snippet: Snippet'),
+      metadata: {
+        backend: 'trusted-search',
+        external_content: expect.objectContaining({
+          schema_version: 'emperor.external_content.v1',
+        }),
+      },
+    })
+    await loop.close()
+  })
+
+  it('uses the trusted host web fetch client when one is injected', async () => {
+    const root = tmp('emperor-agent-loop-web-fetch-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+      webFetchClient: {
+        get: async (request) => ({
+          url: request.url,
+          status: 200,
+          headers: {},
+          body: Buffer.from('<main>trusted transport</main>'),
+        }),
+      },
+    })
+
+    await expect(
+      loop.registry.executeResult('web_fetch', {
+        url: 'https://example.com/',
+      }),
+    ).resolves.toMatchObject({
+      isError: false,
+      modelContent: expect.stringContaining('trusted transport'),
+      metadata: {
+        external_content: expect.objectContaining({
+          schema_version: 'emperor.external_content.v1',
+        }),
+      },
+    })
+    await loop.close()
   })
 
   it('wires active Goal observation recording into the mainline runner', async () => {
@@ -1665,7 +1859,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         await loop.runUserTurn(input.content, {
           displayContent: input.displayContent,
           sessionId: input.goal.scope.sessionId,
-          restoreActiveSessionAfterTurn: true,
           source: 'goal',
           uiHidden: input.uiHidden,
           useActiveTask: false,
@@ -1948,9 +2141,11 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         services: [
           { id: 'process-runtime', state: 'ready' },
           { id: 'code-intelligence', state: 'ready' },
+          { id: 'managed-environment', state: 'ready' },
           { id: 'task-runtime', state: 'ready' },
           { id: 'subagent-supervisor', state: 'ready' },
           { id: 'session-runtime', state: 'ready' },
+          { id: 'skill-catalog', state: 'ready' },
           { id: 'mcp', state: 'ready' },
           { id: 'scheduler', state: 'ready' },
         ],
@@ -1967,9 +2162,11 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         services: [
           { id: 'process-runtime', state: 'stopped' },
           { id: 'code-intelligence', state: 'stopped' },
+          { id: 'managed-environment', state: 'stopped' },
           { id: 'task-runtime', state: 'stopped' },
           { id: 'subagent-supervisor', state: 'stopped' },
           { id: 'session-runtime', state: 'stopped' },
+          { id: 'skill-catalog', state: 'stopped' },
           { id: 'mcp', state: 'stopped' },
           { id: 'scheduler', state: 'stopped' },
         ],
@@ -2232,7 +2429,6 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     await expect(
       loop.runUserTurn('自动执行', {
         sessionId: background.id,
-        restoreActiveSessionAfterTurn: true,
         source: 'scheduler',
         useActiveTask: false,
       }),
@@ -2332,9 +2528,13 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       visibility: 'user',
       idempotencyKey: 'call_pwd:process_containment',
       payload: {
-        decision: expect.stringMatching(/^(sandboxed|unsandboxed)$/),
-        backend: expect.any(String),
-        capability_status: expect.any(String),
+        decision: 'unsandboxed',
+        backend: 'none',
+        capability_status: 'not_required',
+        filesystem: 'unrestricted',
+        network: 'unrestricted',
+        execution_boundary: 'host',
+        authorization_source: 'permission_rule',
         policy_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     })
@@ -2369,13 +2569,13 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       fileCheckpointsEnabled: true,
       softGitRewindMode: 'eval',
     })
-    loop.controlManager.setPermissionMode('smart_auto')
     const project = loop.projectStore.resolve(projectRoot)
     const buildSession = loop.sessionStore.create('Checkpoint build', {
       mode: 'build',
       project: project as unknown as Record<string, unknown>,
     })
     loop.activateSession(buildSession.id)
+    loop.controlManager.setPermissionMode('smart_auto')
 
     await loop.runUserTurn('修改 managed.txt', {
       turnId: 'turn_checkpoint_edit',
@@ -2519,7 +2719,9 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     )
 
     expect(await settled).not.toBeNull()
-    const pending = loop.controlManager.store.load().pending
+    const pending = loop
+      .controlManagerForSessionId(firstSessionId)
+      .store.load().pending
     expect(pending?.meta.control_session_id).toBe(firstSessionId)
     expect(
       loop.sessionStore.get(firstSessionId)?.control_pending,
@@ -2528,9 +2730,10 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       interaction_id: pending?.id,
     })
     expect(loop.sessionStore.get(second.id)?.control_pending).toBeNull()
+    expect(loop.controlManager.store.load().pending).toBeNull()
   })
 
-  it('restores the previous active session after a background turn targets another session', async () => {
+  it('never changes the selected session for a targeted background turn', async () => {
     const root = tmp('emperor-agent-loop-bg-session-')
     const provider = new DelayedProvider()
     const loop = await AgentLoop.create({
@@ -2544,11 +2747,10 @@ describe('AgentLoop (MIG-CORE-011)', () => {
 
     const running = loop.runUserTurn('后台会话执行', {
       sessionId: second.id,
-      restoreActiveSessionAfterTurn: true,
       turnId: 'turn_background_session',
     })
     await provider.started
-    expect(loop.activeSessionId).toBe(second.id)
+    expect(loop.activeSessionId).toBe(firstSessionId)
     provider.finish(response('后台完成。'))
 
     await expect(running).resolves.toBe('后台完成。')
@@ -2559,6 +2761,38 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       'utf8',
     )
     expect(secondHistory).toContain('后台完成。')
+  })
+
+  it('keeps Team execution managers bound to their owning Build session', async () => {
+    const root = tmp('emperor-agent-loop-team-session-owner-')
+    const projectRoot = tmp('emperor-agent-loop-team-project-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+      initializeMcp: false,
+    })
+    const project = loop.projectStore.resolve(projectRoot)
+    const first = loop.sessionStore.create('Team owner A', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    const second = loop.sessionStore.create('Team owner B', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+
+    const firstManager = loop.teamManagerForSession(first)!
+    const secondManager = loop.teamManagerForSession(second)!
+    expect(firstManager).not.toBe(secondManager)
+    expect(firstManager.ownerSessionId).toBe(first.id)
+    expect(secondManager.ownerSessionId).toBe(second.id)
+
+    loop.activateSession(second.id)
+    expect(loop.teamManagerForSession(first)).toBe(firstManager)
+    expect(firstManager.ownerSessionId).toBe(first.id)
+    await loop.close()
   })
 
   it('auto-compacts stable completed turns through compactSession when explicitly enabled', async () => {
@@ -2959,20 +3193,24 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     }
   })
 
-  it('loads local permission rules into the real permission pipeline', async () => {
+  it('loads project-local permission rules into the real Build permission pipeline', async () => {
     const root = tmp('emperor-agent-loop-permission-rules-')
-    mkdirSync(join(root, '.emperor'), { recursive: true })
+    const stateRoot = tmp('emperor-agent-loop-permission-state-')
+    const projectRoot = tmp('emperor-agent-loop-permission-project-')
+    mkdirSync(join(projectRoot, '.emperor'), { recursive: true })
+    mkdirSync(join(projectRoot, 'secrets'), { recursive: true })
+    writeFileSync(join(projectRoot, 'secrets', 'key.md'), 'private', 'utf8')
     writeFileSync(
-      join(root, '.emperor', 'emperor.local.json'),
+      join(projectRoot, '.emperor', 'settings.local.json'),
       JSON.stringify({
         permissions: {
           rules: [
             {
               id: 'deny-secrets',
               action: 'deny',
-              tool: 'write_file',
+              tool: 'read_file',
               pathGlob: 'secrets/**',
-              reason: 'secret writes need manual handling',
+              reason: 'project-local secret reads are denied',
             },
           ],
         },
@@ -2984,8 +3222,8 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         toolCalls: [
           {
             id: 'call_1',
-            name: 'write_file',
-            arguments: { path: 'secrets/key.md', content: 'secret' },
+            name: 'read_file',
+            arguments: { path: 'secrets/key.md' },
           },
         ],
         finishReason: 'tool_calls',
@@ -2994,12 +3232,18 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     ])
     const loop = await AgentLoop.create({
       root,
-      stateRoot: join(root, '.emperor'),
+      stateRoot,
       templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(provider),
     })
+    const project = loop.projectStore.resolve(projectRoot)
+    const buildSession = loop.sessionStore.create('Permission project', {
+      mode: 'build',
+      project: project as unknown as Record<string, unknown>,
+    })
+    loop.activateSession(buildSession.id)
 
-    await loop.runUserTurn('写入 secret', {
+    await loop.runUserTurn('读取 secret', {
       turnId: 'turn_rules',
       emit: async () => {},
     })
@@ -3010,8 +3254,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       .map((message) => String(message.content ?? ''))
       .join('\n')
     expect(toolOutput).toContain('permission denied')
-    expect(toolOutput).toContain('secret writes need manual handling')
-    expect(existsSync(join(root, 'secrets', 'key.md'))).toBe(false)
+    expect(toolOutput).toContain('project-local secret reads are denied')
   })
 
   it('stops a cancelled turn from continuing after the model returns late', async () => {
@@ -3133,12 +3376,12 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
-    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
+    expect(await loop.registry.execute('Skill', { skill: 'greet' })).toContain(
       userGreet,
     )
     expect(
-      await loop.registry.execute('load_skill', { name: 'user-only' }),
-    ).toBe(userOnly)
+      await loop.registry.execute('Skill', { skill: 'user-only' }),
+    ).toContain(userOnly)
 
     const project = loop.projectStore.resolve(projectRoot)
     mkdirSync(join(projectRoot, '.emperor', 'skills', 'greet'), {
@@ -3155,7 +3398,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
     loop.activateSession(buildSession.id)
 
-    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
+    expect(await loop.registry.execute('Skill', { skill: 'greet' })).toContain(
       projectGreet,
     )
     expect(
@@ -3166,9 +3409,12 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       source: { kind: 'project', trust: 'trusted' },
       value: { name: 'greet', source: 'project', readOnly: true },
     })
+    expect(loop.contextBuilder.buildSystemPrompt()).toContain(
+      '- greet: Greet from the active project. [source=project status=active readOnly=true]',
+    )
     expect(
-      await loop.registry.execute('load_skill', { name: 'user-only' }),
-    ).toBe(userOnly)
+      await loop.registry.execute('Skill', { skill: 'user-only' }),
+    ).toContain(userOnly)
 
     loop.activateSession(
       loop.sessionStore
@@ -3176,7 +3422,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
         .find((s) => s.id !== buildSession.id)!.id,
     )
 
-    expect(await loop.registry.execute('load_skill', { name: 'greet' })).toBe(
+    expect(await loop.registry.execute('Skill', { skill: 'greet' })).toContain(
       userGreet,
     )
     expect(
@@ -3189,7 +3435,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
   })
 
-  it('expands {{skill_dir}} to the selected canonical directory without rewriting SKILL.md', async () => {
+  it('provides the canonical Skill base directory and compatibility variables without rewriting SKILL.md', async () => {
     const root = tmp('emperor-agent-loop-skill-placeholder-root-')
     const stateRoot = join(root, '.emperor')
     const skillDir = join(stateRoot, 'skills', 'path-aware')
@@ -3197,7 +3443,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     const source = skillDocument(
       'path-aware',
       'Resolve bundled file paths.',
-      'Run {{skill_dir}}/scripts/check.mjs',
+      'Run {{skill_dir}}/scripts/check.mjs from ${EMPEROR_SKILL_DIR}; legacy=${CLAUDE_SKILL_DIR}',
     )
     mkdirSync(skillDir, { recursive: true })
     writeFileSync(skillFile, source, 'utf8')
@@ -3209,56 +3455,299 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
-    expect(
-      await loop.registry.execute('load_skill', { name: 'path-aware' }),
-    ).toBe(source.replaceAll('{{skill_dir}}', realpathSync(skillDir)))
+    const output = await loop.registry.execute('Skill', {
+      skill: 'path-aware',
+    })
+    expect(output).toContain(`Base directory: ${realpathSync(skillDir)}`)
+    expect(output).toContain('Source: user')
+    expect(output).toContain('Read-only: false')
+    expect(output).toContain(
+      source
+        .replaceAll('{{skill_dir}}', realpathSync(skillDir))
+        .replaceAll('${EMPEROR_SKILL_DIR}', realpathSync(skillDir))
+        .replaceAll('${CLAUDE_SKILL_DIR}', realpathSync(skillDir)),
+    )
     expect(readFileSync(skillFile, 'utf8')).toBe(source)
   })
 
-  it('exposes Core-native create, validate, and package actions through manage_skill', async () => {
-    const root = tmp('emperor-agent-loop-manage-skill-root-')
+  it('injects explicitly requested Skills as hidden meta-user context instead of system authority', async () => {
+    const root = tmp('emperor-agent-loop-requested-skill-context-')
     const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'research')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      skillDocument('research', 'Research safely.', 'Read references/news.md'),
+      'utf8',
+    )
+    const provider = new ImmediateProvider()
     const loop = await AgentLoop.create({
       root,
       stateRoot,
       templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+
+    await loop.runUserTurn('today news', {
+      turnId: 'turn_requested_skill_context',
+      requestedSkills: [{ name: 'research', source: 'slash_command' }],
+    })
+
+    const skillMessages = provider.calls[0]!.messages.filter((message) =>
+      String(message.content ?? '').includes('<requested-skill-context>'),
+    )
+    expect(skillMessages).toHaveLength(1)
+    expect(skillMessages[0]!.role).toBe('user')
+    expect(String(skillMessages[0]!.content)).toContain(
+      `Base directory: ${realpathSync(skillDir)}`,
+    )
+    expect(
+      provider.calls[0]!.messages.some(
+        (message) =>
+          message.role === 'system' &&
+          String(message.content ?? '').includes('Read references/news.md'),
+      ),
+    ).toBe(false)
+  })
+
+  it('applies Claude-compatible allowed-tools only for the selected Skill invocation', async () => {
+    const root = tmp('emperor-agent-loop-skill-allowed-tools-')
+    const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'read-only-skill')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: read-only-skill',
+        'description: Read only.',
+        'allowed-tools: [read_file]',
+        '---',
+        '',
+        'Read files only.',
+      ].join('\n'),
+      'utf8',
+    )
+    const provider = new OneToolProvider({
+      id: 'call_forbidden',
+      name: 'run_command',
+      arguments: { command: 'pwd' },
+    })
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+
+    await loop.runUserTurn('use it', {
+      turnId: 'turn_skill_allowed_tools',
+      requestedSkills: [{ name: 'read-only-skill' }],
+    })
+
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'does not allow tool',
+    )
+    expect(loop.runner.activeSkillAllowedTools).toBeNull()
+  })
+
+  it('automatically grants read-only access to the selected Skill root', async () => {
+    const root = tmp('emperor-agent-loop-skill-reference-read-')
+    const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'reference-skill')
+    mkdirSync(join(skillDir, 'references'), { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      skillDocument(
+        'reference-skill',
+        'Read a reference.',
+        'Read references/news.md',
+      ),
+      'utf8',
+    )
+    const referenceFile = join(skillDir, 'references', 'news.md')
+    writeFileSync(referenceFile, 'verified reference content', 'utf8')
+    const provider = new OneToolProvider({
+      id: 'call_reference',
+      name: 'read_file',
+      arguments: { path: referenceFile },
+    })
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+
+    await loop.runUserTurn('use the reference', {
+      turnId: 'turn_skill_reference_read',
+      requestedSkills: [{ name: 'reference-skill' }],
+    })
+
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'verified reference content',
+    )
+  })
+
+  it('does not let a network research Skill claim completion without external URL evidence', async () => {
+    const root = tmp('emperor-agent-loop-network-skill-evidence-')
+    const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'agent-reach')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      skillDocument(
+        'agent-reach',
+        'Search the internet.',
+        'Find current news.',
+      ),
+      'utf8',
+    )
+    const provider = new ImmediateProvider()
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+
+    const reply = await loop.runUserTurn('search today news', {
+      turnId: 'turn_network_skill_evidence',
+      requestedSkills: [{ name: 'agent-reach' }],
+    })
+
+    expect(provider.calls).toHaveLength(2)
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'EXTERNAL_EVIDENCE_REQUIRED',
+    )
+    expect(reply).toContain('外部调研未完成')
+    expect(reply).not.toBe('done')
+  })
+
+  it('automatically reads current-session large tool results by absolute path', async () => {
+    const root = tmp('emperor-agent-loop-session-tool-result-read-')
+    const stateRoot = join(root, '.emperor')
+    const provider = new OneToolProvider({
+      id: 'call_tool_result',
+      name: 'read_file',
+      arguments: { path: 'placeholder' },
+    })
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const resultFile = join(
+      stateRoot,
+      'sessions',
+      loop.activeSessionId!,
+      'tool-results',
+      'large-output.txt',
+    )
+    writeFileSync(resultFile, 'full oversized tool output', 'utf8')
+    provider.toolCall.arguments.path = resultFile
+
+    await loop.runUserTurn('read the complete result', {
+      turnId: 'turn_session_tool_result_read',
+    })
+
+    expect(JSON.stringify(provider.calls[1]!.messages)).toContain(
+      'full oversized tool output',
+    )
+  })
+
+  it('emits a path-free catalog version when a user Skill is installed', async () => {
+    const root = tmp('emperor-agent-loop-skill-catalog-event-')
+    const stateRoot = join(root, '.emperor')
+    const events: Array<Record<string, unknown>> = []
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new ImmediateProvider()),
+      eventSink: async (event) => {
+        events.push(event)
+      },
+    })
+    try {
+      const skillDir = join(stateRoot, 'skills', 'fresh-skill')
+      mkdirSync(skillDir, { recursive: true })
+      writeFileSync(
+        join(skillDir, 'SKILL.md'),
+        skillDocument('fresh-skill', 'Freshly installed.', 'Use it.'),
+        'utf8',
+      )
+
+      await vi.waitFor(
+        () =>
+          expect(
+            events.find((event) => event.event === 'skill_catalog_changed'),
+          ).toMatchObject({ catalog_version: 1 }),
+        { timeout: 3_000 },
+      )
+      const event = events.find(
+        (item) => item.event === 'skill_catalog_changed',
+      )!
+      expect(JSON.stringify(event)).not.toContain(stateRoot)
+      expect(
+        await loop.registry.execute('Skill', { skill: 'fresh-skill' }),
+      ).toContain('Freshly installed.')
+    } finally {
+      await loop.close()
+    }
+  })
+
+  it('grants the same reference scope when the model loads a Skill tool mid-turn', async () => {
+    const root = tmp('emperor-agent-loop-loaded-skill-scope-')
+    const stateRoot = join(root, '.emperor')
+    const skillDir = join(stateRoot, 'skills', 'manual-load')
+    mkdirSync(join(skillDir, 'references'), { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      skillDocument(
+        'manual-load',
+        'Load a local reference.',
+        'Read references/data.md',
+      ),
+      'utf8',
+    )
+    const referenceFile = join(skillDir, 'references', 'data.md')
+    writeFileSync(referenceFile, 'manual Skill reference', 'utf8')
+    const provider = new ToolSequenceProvider([
+      { id: 'load_skill', name: 'Skill', arguments: { skill: 'manual-load' } },
+      {
+        id: 'read_reference',
+        name: 'read_file',
+        arguments: { path: referenceFile },
+      },
+    ])
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+
+    await loop.runUserTurn('load and use the Skill', {
+      turnId: 'turn_loaded_skill_scope',
+    })
+
+    expect(JSON.stringify(provider.calls[2]!.messages)).toContain(
+      'manual Skill reference',
+    )
+  })
+
+  it('does not expose the legacy manage_skill model tool', async () => {
+    const root = tmp('emperor-agent-loop-no-manage-skill-')
+    const loop = await AgentLoop.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
       modelRouter: fakeRouter(new FakeProvider()),
     })
-    const refreshRuntimeContext = vi.spyOn(loop, 'refreshRuntimeContext')
 
-    const created = JSON.parse(
-      await loop.registry.execute('manage_skill', {
-        action: 'create',
-        name: 'release-audit',
-        description: 'Audit release artifacts and integrity evidence.',
-        resources: ['references'],
-      }),
-    ) as Record<string, unknown>
-    expect(created).toMatchObject({ name: 'release-audit', valid: true })
-    expect(refreshRuntimeContext).toHaveBeenCalledOnce()
-
-    const validated = JSON.parse(
-      await loop.registry.execute('manage_skill', {
-        action: 'validate',
-        name: 'release-audit',
-      }),
-    ) as Record<string, unknown>
-    expect(validated).toMatchObject({ name: 'release-audit', valid: true })
-
-    const packaged = JSON.parse(
-      await loop.registry.execute('manage_skill', {
-        action: 'package',
-        name: 'release-audit',
-      }),
-    ) as Record<string, unknown>
-    expect(packaged).toMatchObject({
-      name: 'release-audit',
-      path: join(
-        realpathSync(stateRoot),
-        'skill-packages',
-        'release-audit.skill',
-      ),
-    })
+    expect(loop.registry.get('manage_skill')).toBeUndefined()
   })
 
   it('does not load a Skill through a symbolic-link root', async () => {
@@ -3276,12 +3765,12 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
-    expect(await loop.registry.execute('load_skill', { name: 'linked' })).toBe(
+    expect(await loop.registry.execute('Skill', { skill: 'linked' })).toBe(
       '[ERR] skill "linked" not found',
     )
   })
 
-  it('does not expose a dependency-blocked user Skill to model context or load_skill', async () => {
+  it('treats a legacy dependency state marker as non-authoritative', async () => {
     const root = tmp('emperor-agent-loop-blocked-skill-root-')
     const stateRoot = join(root, '.state')
     const blocked = join(stateRoot, 'skills', 'blocked-skill')
@@ -3307,9 +3796,9 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
 
     expect(
-      await loop.registry.execute('load_skill', { name: 'blocked-skill' }),
-    ).toBe('[ERR] skill "blocked-skill" not found')
-    expect(loop.skillsLoader.summary()).not.toContain('BLOCKED_CONTENT')
+      await loop.registry.execute('Skill', { skill: 'blocked-skill' }),
+    ).toContain('BLOCKED_CONTENT')
+    expect(loop.skillsLoader.summary()).toContain('blocked-skill')
   })
 
   it('does not load project Skills through a symlinked .emperor ancestor', async () => {
@@ -3335,7 +3824,7 @@ describe('AgentLoop (MIG-CORE-011)', () => {
     })
     loop.activateSession(session.id)
 
-    expect(await loop.registry.execute('load_skill', { name: 'escaped' })).toBe(
+    expect(await loop.registry.execute('Skill', { skill: 'escaped' })).toBe(
       '[ERR] skill "escaped" not found',
     )
   })
@@ -3363,11 +3852,12 @@ describe('AgentLoop (MIG-CORE-011)', () => {
       modelRouter: fakeRouter(new FakeProvider()),
     })
 
-    expect(
-      await loop.registry.execute('load_skill', { name: 'reviewer' }),
-    ).toBe(
-      '---\nname: reviewer\ndescription: Review code safely.\n---\n\nVALID_BUILTIN\n',
-    )
+    const loaded = await loop.registry.execute('Skill', { skill: 'reviewer' })
+    expect(loaded).toContain('<skill-context>')
+    expect(loaded).toContain('Source: builtin')
+    expect(loaded).toContain('Read-only: true')
+    expect(loaded).toContain('VALID_BUILTIN')
+    expect(loaded).not.toContain('INVALID_USER')
     expect(loop.skillsLoader.summary()).not.toContain('INVALID_USER')
   })
 })

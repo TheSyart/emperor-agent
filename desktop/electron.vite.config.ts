@@ -7,12 +7,19 @@ const repoRoot = resolve(__dirname, '..')
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ include: ['typescript', 'node-pty'] })],
-    build: { outDir: 'out/main' },
+    build: {
+      outDir: 'out/main',
+      rollupOptions: { external: ['turndown'] },
+    },
   },
   preload: {
     build: {
       outDir: 'out/preload',
       rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          recovery: resolve(__dirname, 'src/preload/recovery.ts'),
+        },
         output: {
           format: 'cjs',
           entryFileNames: '[name].cjs',

@@ -2,10 +2,10 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  readJson,
-  writeJsonAtomic,
-  type ConfigRecoveryInfo,
-} from '../store/atomic-json'
+  AtomicSnapshot,
+  type PersistenceAdapter,
+  type SnapshotCodec,
+} from '../store/persistence'
 import { logger } from '../util/log'
 import {
   ConfigResolver,
@@ -40,6 +40,10 @@ export const DEFAULT_MCP_CONFIG = {
 } satisfies Record<string, unknown>
 
 export const MCP_CONFIG_FILE = 'mcp_config.json'
+
+export interface McpConfigPersistenceOptions {
+  persistenceAdapter?: PersistenceAdapter
+}
 
 const MCP_CONFIG_KEY = defineConfigKey<Record<string, unknown>>({
   id: 'mcp.config',
@@ -79,23 +83,33 @@ export interface ResolvedMcpConfig {
 export async function resolveMcpConfig(
   root: string,
   env: EnvironmentValueSource = process.env,
-  opts: { preserveCorrupt?: boolean } = {},
+  opts: { preserveCorrupt?: boolean } & McpConfigPersistenceOptions = {},
 ): Promise<ResolvedMcpConfig> {
   const path = join(root, MCP_CONFIG_FILE)
   const candidates: ConfigCandidate<Record<string, unknown>>[] = []
   if (existsSync(path)) {
-    const loaded =
-      opts.preserveCorrupt === false
-        ? await readMcpConfigWithoutRecovery(path)
-        : await readJson<Record<string, unknown>>(
-            path,
-            structuredClone(DEFAULT_MCP_CONFIG),
-            {
-              validate: validateRawConfig,
-              onCorrupt: reportMcpConfigRecovery,
-            },
-          )
-    if (loaded && (opts.preserveCorrupt === false || existsSync(path)))
+    let loaded: Record<string, unknown> | null
+    let found = true
+    if (opts.preserveCorrupt === false) {
+      loaded = await readMcpConfigWithoutRecovery(path)
+    } else {
+      const snapshot = await mcpConfigSnapshot(
+        path,
+        opts.persistenceAdapter,
+      ).read({ fallback: structuredClone(DEFAULT_MCP_CONFIG) })
+      loaded = snapshot.value
+      found = snapshot.found
+      if (snapshot.receipt.recoveryAction === 'quarantined_corrupt_snapshot')
+        reportMcpConfigRecovery({
+          path,
+          backupPath: snapshot.receipt.corruptionBackup ?? '',
+          error: new Error('MCP config failed schema validation'),
+        })
+    }
+    if (
+      loaded &&
+      (opts.preserveCorrupt === false || (found && existsSync(path)))
+    )
       candidates.push({
         source: {
           kind: 'user',
@@ -154,6 +168,7 @@ function maskSecretLeaf(value: string): string {
 export async function saveMcpConfig(
   root: string,
   raw: Record<string, unknown>,
+  opts: McpConfigPersistenceOptions = {},
 ): Promise<void> {
   if (
     !raw.servers ||
@@ -161,7 +176,15 @@ export async function saveMcpConfig(
     Array.isArray(raw.servers)
   )
     throw new Error("mcp_config: 'servers' must be an object")
-  const stored = await loadMcpConfig(root, {})
+  const stored = (
+    await resolveMcpConfig(
+      root,
+      {},
+      {
+        persistenceAdapter: opts.persistenceAdapter,
+      },
+    )
+  ).config
   const data = restoreMcpEditorSecrets(raw, stored)
   if (
     !data.defaults ||
@@ -169,7 +192,10 @@ export async function saveMcpConfig(
     Array.isArray(data.defaults)
   )
     data.defaults = DEFAULT_MCP_CONFIG.defaults
-  await writeJsonAtomic(join(root, MCP_CONFIG_FILE), data, { mode: 0o600 })
+  await mcpConfigSnapshot(
+    join(root, MCP_CONFIG_FILE),
+    opts.persistenceAdapter,
+  ).write(data)
 }
 
 function restoreMcpEditorSecrets(
@@ -409,7 +435,36 @@ function validateRawConfig(value: unknown): Record<string, unknown> {
   return raw
 }
 
-function reportMcpConfigRecovery(info: ConfigRecoveryInfo): void {
+const MCP_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<Record<string, unknown>> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return {
+      value: validateRawConfig(input),
+      schemaVersion: 1,
+    }
+  },
+}
+
+function mcpConfigSnapshot(
+  path: string,
+  adapter?: PersistenceAdapter,
+): AtomicSnapshot<Record<string, unknown>> {
+  return new AtomicSnapshot({
+    path,
+    codec: MCP_CONFIG_SNAPSHOT_CODEC,
+    adapter,
+    fileMode: 0o600,
+  })
+}
+
+function reportMcpConfigRecovery(info: {
+  path: string
+  backupPath: string
+  error: unknown
+}): void {
   logger.warn('Invalid MCP config isolated; using defaults', {
     path: info.path,
     backupPath: info.backupPath,

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-08-05<br>
+> 最后核验：2026-08-12<br>
 > 事实源：DiagnosticsService、桌面诊断面板、当前构建与运行脚本
 
 先进入“设置 → 诊断”。诊断页会集中显示生效路径、配置文件状态、workspace fence、生命周期、迁移结果、环境能力、Scheduler 和桌宠信息。不要先手工删除 `stateRoot`。
@@ -32,32 +32,31 @@
 | 文件回退按钮不可用                     | 文件检查点是否启用、检查点是否 ready、冲突列表和私有制品完整性                                                           |
 | Git 软回退按钮不可用                   | `workspace.gitRewind.mode`、evaluation receipt、HEAD ancestor、Git operation/index/submodule/sparse/filter、无关脏路径   |
 
-## 本地命令
+## 常用状态入口
 
-查看基础状态：
+Composer 保留以下与当前任务直接相关的命令：
 
 ```text
-/status
 /model
-/cost
-/tools
-/skills
-/memory
+/reasoning
 /permissions
 /plan status
 /goal status
 ```
 
-Diagnostics 的 `Command OS Sandbox` 行显示实际 backend 和 capability：
+运行状态、Token、Tools、Skills、Memory、MCP、Hooks 和其他诊断信息从对应应用页面查看，不再提供同名斜杠入口。
+
+Diagnostics 的 `Command OS Sandbox` 行显示隔离执行器实际 backend 和 capability：
 
 - `macos-seatbelt · 可用`：命令由系统 Seatbelt profile 包装；
 - `linux-bwrap · 可用/不可用`：同时反映 helper 与 user namespace probe，不以文件存在冒充可执行；
 - `windows-unsupported · 不支持`：当前没有 Job Object + ACL 等价实现，mutation command 会在 spawn 前拒绝；
-- `run_command` 要求 `decision=sandboxed`。若 runner 异常返回 `decision=unsandboxed`，工具会把结果按失败处理；`decision=denied` 或 `containment_unavailable` 表示命令没有启动。
+- 主 Agent、非 Plan 的授权 `run_command` 应记录 `execution_boundary=host`、`decision=unsandboxed`、`backend=none` 和 `capability_status=not_required`；只有有效内部授权允许这种组合。
+- Plan、子代理和其他隔离执行器应记录 `execution_boundary=sandbox` 与 `decision=sandboxed`。其 runner 异常返回 `unsandboxed` 时按失败处理；`decision=denied` 或 `containment_unavailable` 表示命令没有启动。
 
-Sandboxed 命令默认不能访问 `stateRoot`、workspace 外文件或网络。依赖 HOME 配置、联网下载或写系统目录的命令因此失败是策略结果，不要通过 symlink、子 shell 或换解释器绕过；应改用受管安装/网络能力，或等待对应平台 backend/policy 明确开放。
+Sandboxed 命令默认不能访问 `stateRoot`、workspace 外文件或网络。主 Agent host 命令则有意继承真实 HOME、PATH、Git/npm 用户配置与本机网络，但 cwd 仍固定为 workspace，并继续经过 Permission 与硬拒绝策略。任何边界都不支持 `sudo/su/doas/pkexec`、管理员密码或 Agent PTY。
 
-Diagnostics 的 `Owned Process Runtime` 行是另一层状态：`owned · process_group/taskkill` 表示 owner/lease/reparent/orphan reconcile 已启用，不表示所有平台都有同等 sandbox。当前只提供受管 interactive stdio，没有 PTY 和 resize，也没有独立桌面终端。命令、Hook 和 MCP stdio 都有明确 output quota；普通 `run_command` 超额会终止，Hook 使用逐流尾部截断策略。应用关闭默认清理所有 owned process，不支持让 daemon 脱离 Emperor 长期存活。
+Diagnostics 的 `Owned Process Runtime` 行是另一层状态：`owned · process_group/taskkill` 表示 owner/lease/reparent/orphan reconcile 已启用，不表示所有平台都有同等 sandbox。Agent 进程只提供受管 stdio，没有 PTY 和 resize；Build 工作台中的 Terminal 是受信 Renderer 发起、由 main/Core 按 session owner 管理的独立用户直控入口，不能被 Agent、Hook、MCP 或网页当作绕过权限的进程 API。命令、Hook 和 MCP stdio 都有明确 output quota；普通 `run_command` 超额会终止，Hook 使用逐流尾部截断策略。应用关闭默认清理所有 owned process，不支持让 daemon 脱离 Emperor 长期存活。
 
 ## 有效配置与来源
 
@@ -65,13 +64,13 @@ Diagnostics 的 `Owned Process Runtime` 行是另一层状态：`owned · proces
 
 MCP 的 args、env、headers 和 URL 在有效配置里统一显示 `[REDACTED]`；secret source 只说明来自哪层，不返回值。该 snapshot 没有时间戳，相同事实源会产生相同 revision，适合对比两次刷新。`config.effective` 和 Diagnostics 都是只读解释面：读取损坏配置不会移动、重写或隔离原文件；正常 runtime 启动时的 corrupt recovery 仍按各 config store 的既有规则执行。
 
-有效配置不是新配置文件，也没有统一“保存”按钮。修改仍回到原入口：权限/local 字段修改 `emperor.local.json`，MCP 使用插件页，Skill 使用对应目录/Skill 管理入口，AgentDefinition 使用受信 manifest。看到 untrusted project candidate 被拒绝时，不要通过复制到 managed/user 层伪造信任；先核对项目绑定和来源。
+有效配置不是新配置文件，也没有统一“保存”按钮。修改仍回到原入口：用户权限/local 字段修改 Emperor Home 下的 `settings.json`，MCP 使用插件页，Skill 使用对应目录/Skill 管理入口，AgentDefinition 使用受信 manifest。看到 untrusted project candidate 被拒绝时，不要通过复制到 managed/user 层伪造信任；先核对项目绑定和来源。
 
-权限 Ask 的聊天卡片只显示脱敏工具名、风险、短原因和命令摘要，不显示 trace、explanation 或参数 JSON。完整规则候选、source/trust/precedence、Shell AST 摘要与 fingerprint 只保存在本机私有 diagnostics 元数据。`pipeline`、`redirection`、`command_substitution`、`outside_path_argument`、`dynamic_expansion`、`too_complex` 或 `parser_failure` 表示 Core 无法确定性分类；在 `smart_auto` 中语义分类失败会回退 Ask。批准只回答“本次是否尝试”，后续仍须通过 OS containment。
+权限 Ask 的聊天卡片只显示脱敏工具名、风险、短原因、命令摘要和 host/sandbox 能力，不显示 trace、explanation、授权 ID、环境变量或参数 JSON。完整规则候选、source/trust/precedence、Shell AST 摘要与 fingerprint 只保存在本机私有 diagnostics 元数据。`pipeline`、`redirection`、`command_substitution`、`outside_path_argument`、`dynamic_expansion`、`too_complex` 或 `parser_failure` 表示 Core 无法确定性分类；在 `smart_auto` 中语义分类失败会回退 Ask。批准只回答“本次是否尝试”，实际执行仍须匹配同一命令、cwd、workspace、session 和边界。
 
 ## 文件检查点与回退（Beta）
 
-文件检查点默认关闭。需要试用时，在“设置 → 配置”编辑 `emperor.local.json`，加入以下字段并重启应用：
+文件检查点默认关闭。需要试用时，在“设置 → 配置”编辑 `settings.json`，加入以下字段并重启应用：
 
 ```json
 {
@@ -100,19 +99,21 @@ Git 路径绝不执行 hard reset、checkout 或 clean。目标 HEAD 不是当�
 
 ## Lifecycle Supervisor
 
-正常启动时，诊断行显示全部 required service ready；当前集合是 `process-runtime`、`code-intelligence`、`task-runtime`、`subagent-supervisor`、`session-runtime`、`mcp`、`scheduler`。Code Intelligence 默认 `off · idle`，这不影响 lifecycle ready；`eval` 表示只允许内部评估，`on` 才可能注册 Build 工具。该行会显示 graph manager/file/cache、skipped/parse、LSP ready/restart/protocol、query/fallback/event；protocol hard failure 变红，`eval` 或降级为黄色。`Subagent Supervisor` 行另列 active/global/per-session 容量；达到容量时新派遣会被拒绝，等待或取消既有 Task，不要递归重试。出现 `core_unavailable` 表示请求在进入领域 API 前已被拒绝，并不表示 turn 已提交；等待应用完成启动后重试。若长期停在 failed，查看该行列出的 service/phase，再检查 process receipt、Code Intelligence/LSP、MCP 配置、Task 数据或 Scheduler store。`stop_timeout` 表示关闭 deadline 已到，Supervisor 已继续关闭其他服务；重启后会重新 reconcile，不能把旧 `running` 记录理解为仍在运行。
+正常启动时，诊断行显示全部 required service ready；当前集合是 `process-runtime`、`code-intelligence`、`managed-environment`、`task-runtime`、`subagent-supervisor`、`session-runtime`、`mcp`、`scheduler`。Code Intelligence 默认 `off · idle`，这不影响 lifecycle ready；`eval` 表示只允许内部评估，`on` 才可能注册 Build 工具。Managed Environment 在启动时修复 active command 入口并把遗留 running job 收敛为 interrupted。该行会显示 graph manager/file/cache、skipped/parse、LSP ready/restart/protocol、query/fallback/event；protocol hard failure 变红，`eval` 或降级为黄色。`Subagent Supervisor` 行另列 active/global/per-session 容量；达到容量时新派遣会被拒绝，等待或取消既有 Task，不要递归重试。出现 `core_unavailable` 表示请求在进入领域 API 前已被拒绝，并不表示 turn 已提交；等待应用完成启动后重试。若长期停在 failed，查看该行列出的 service/phase，再检查 process receipt、Managed Environment job、Code Intelligence/LSP、MCP 配置、Task 数据或 Scheduler store。`stop_timeout` 表示关闭 deadline 已到，Supervisor 已继续关闭其他服务；重启后会重新 reconcile，不能把旧 `running` 记录理解为仍在运行。
 
 `Agent Definitions` 行显示已 materialize 的 agent 数和 active/total source。正常安装至少有 `builtin:system`；出现 resolver 冲突/错误时该行变红。`project_untrusted`、`plugin_signature_unverified` 表示来源未激活，不是空 agent；`manifest_path_traversal`、`prompt_symlink_rejected`、`invalid_manifest_json/schema` 应先隔离对应 source 文件；`cross_source_collision` / `alias_collision` 表示低优先级候选已被拒绝。可选全局 user source 位于 `stateRoot/agents/agents.json`，当前没有项目自动扫描或未签名 plugin 安装 fallback。不要通过手改 trust/rank、软链接 prompt 或把 command/URL 塞进 manifest 绕过错误。
 
 Lifecycle 中 `mcp=ready` 只表示 MCP 管理服务已经启动，不表示每个外部 server 都健康。具体连接以 `mcp.status` / Diagnostics 的 per-server state 为准：`auth_failed` 先修 credential；`backoff` 显示下一次有界重试；`failed` 表示重启预算已耗尽；`degraded` 表示当前 generation 的 transport/call 已异常，后续调用会先恢复连接。`mcp_connection_state` 是 diagnostic event，不会成为聊天消息或模型上下文。
 
-刷新 bootstrap、模型、Skills、Tools 和记忆：
+命令与 Skill 目录在应用启动、切换会话、任务收到 `assistant_done` 和每次打开斜杠菜单时自动刷新；运行时还监听 user/project Skill 根，300ms debounce 后发送不含路径的 `skill_catalog_changed` 并刷新目录。没有 `/reload`。刷新失败时菜单保留上一次成功列表，并在本地记录非阻塞错误。
 
-```text
-/reload
-```
+工具诊断以结构化 `outcome`、`progress`、`evidence_disposition`、`workspace_effect`、`verification_required`、`failure_kind`、`retryable`、`strategy_key` 和 HTTP status 为准。401/404、权限拒绝、跨域重定向、错误页、空输出与重复 URL 不是已验证证据；同一策略连续失败三次应出现纠偏而不是等价命令重试。Node 证书问题需核对 CA source 与代理继承，不能通过 `NODE_TLS_REJECT_UNAUTHORIZED=0` 掩盖。
 
-`/clear` 会通过可恢复事务创建一个真正不含当前历史的新 session，并切换到它；旧 session、全局长期记忆和项目记忆不会删除。新 session 不继承旧 history、Plan、Goal、Todo、队列、checkpoint、runtime timeline 或附件投影。若只想减少上下文占用并保留摘要，使用 `/compact [instructions]`。转换失败时检查 `stateRoot/control/session-transitions.json`，不要手工伪造 `applied` 状态。
+网络调研期间，`research_validation` 只向状态区投影核验阶段、来源数、事实单元数和稳定 reason code。看到“正在核验来源”表示草稿仍在 Core 的有界暂存区，尚未写入 UI 或历史；`deterministic_validation_failed`、`grounding_review_failed`、`reviewer_unavailable` 或 `insufficient_source_content` 表示逐项引用或隔离复核未通过。CLI、Skill、MCP 或 `web_search` 的 URL 只能成为 candidate；只有本轮 `web_fetch` 取得 2xx 正文后才可成为 verified source。不要通过手工补写历史或删除诊断事件强制发布草稿。
+
+Diagnostics 的 `externalToolConfig.mcporter` 同时显示 Emperor 管理位置和当前 Build workspace 的 `config/mcporter.json` 是否存在。workspace 文件没有 Emperor-owned receipt 时只报告、绝不自动删除；后续调用必须显式把配置定向到 Emperor Home 的 `environment/data/mcporter/`。
+
+`/new` 会通过可恢复事务创建一个真正不含当前历史的新 session，并切换到它；旧 session、全局长期记忆和项目记忆不会删除。新 session 不继承旧 history、Plan、Goal、Todo、队列、checkpoint、runtime timeline 或附件投影。若只想减少上下文占用并保留摘要，使用 `/compact [instructions]`。转换失败时检查 `stateRoot/control/session-transitions.json`，不要手工伪造 `applied` 状态。
 
 ## Prompt Cache Break
 
@@ -155,13 +156,13 @@ Model、MCP、local config 和 Hooks 使用原子写或损坏保留策略。无�
 
 子代理 Task 的权威状态位于 `stateRoot/tasks/index.json`，sidechain 与完整输出分别位于 task 子目录的 `transcript.jsonl` 和 `output.log`。后台派遣会返回 Task ID；主 Agent 使用 `manage_subagent`，桌面 IPC 使用 `tasks.wait/readOutput/cancel/resume`。控制入口只接受 owner session。取消会先提交 durable `cancelled`，再 abort 内存 handle；如果模型、工具、命令或 MCP 返回迟到结果，Task revision/CAS 会拒绝它，不应出现 terminal 回退。应用在运行中崩溃后，旧 runtime-managed `running` 记录会在下次启动标为 `interrupted`，不会假装恢复原 Promise；`stateRoot/subagent-worktrees/.leases.json` 中的遗留 worktree lease 会在启动 reconcile 时重试清理。
 
-Task metadata 中的 `agent_definition_revision` 和 `agent_source_id/kind/trust` 是本次执行实际 materialize 的来源证据。model profile、Skill、Hook、MCP server 或 sandbox 被 Definition 拒绝时会在副作用前 fail closed；不要把它误判为工具缺失后改用未受控 shell。Definition allow 也不能覆盖 Permission、workspace 或 OS sandbox deny。
+Task metadata 中的 `agent_definition_revision` 和 `agent_source_id/kind/trust` 是本次执行实际 materialize 的来源证据。model profile、Skill、Hook、MCP server 或 sandbox 被 Definition 拒绝时会在副作用前 fail closed；不要把它误判为工具缺失后改用未受控 shell。Definition allow 也不能覆盖 Permission、workspace 或子代理 OS sandbox deny。
 
 `task_output_truncated` 表示输出已达到固定字节配额：已保存前缀仍可按 cursor 读取，metadata 会记录 limit 和累计 dropped bytes。它不是文件损坏。不要把 task 目录改成 symlink，也不要直接改写 `index.json`、output 或 metadata；复制整个 task 目录后再做只读分析。
 
 ## Owned process 与孤儿回收
 
-进程最小账本位于 `stateRoot/processes/receipts.v1.json`。它只保存 owner/lease、脱敏 digest、sandbox、配额、PID/start identity 和终态，不保存命令、argv、环境变量或输出。`running` receipt 不是可恢复终端；应用重启后，Core 只在 boot marker 和 start identity 精确相同时终止并验证旧进程，PID 已消失/改变记为 `interrupted`，无法证明时记为 `orphan_unverified` 且不盲杀。不要手工把后者改成 reaped，也不要根据 receipt 中的 PID 自行批量 kill。
+进程最小账本位于 `stateRoot/processes/receipts.v1.json`。它只保存 owner/lease、脱敏 digest、host/sandbox 边界摘要、配额、PID/start identity 和终态，不保存命令、argv、授权 ID、环境变量或输出。旧记录缺少执行边界时按 legacy sandbox receipt 读取。`running` receipt 不是可恢复终端；应用重启后，Core 只在 boot marker 和 start identity 精确相同时终止并验证旧进程，PID 已消失/改变记为 `interrupted`，无法证明时记为 `orphan_unverified` 且不盲杀。不要手工把后者改成 reaped，也不要根据 receipt 中的 PID 自行批量 kill。
 
 内部/IPC 控制使用 `processes.list/cancel/reparent`，只接受 active session。Cancel 和 reparent 都要求 receipt 当前 lease；reparent 会签发新 lease，旧 owner 的后续操作自然失败，且不能跨 session。当前 UI 主要通过 Diagnostics 观察，不提供任意命令 spawn 或原始 stdio 控制面。
 

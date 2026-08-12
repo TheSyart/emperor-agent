@@ -150,4 +150,115 @@ describe('MessageRow prompt delivery state', () => {
 
     app.unmount()
   })
+
+  it('does not show the changes summary while the assistant is streaming', () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const message: AssistantMessage = {
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '仍在执行。',
+      segments: [{ id: 'text-streaming', type: 'text', content: '仍在执行。' }],
+      streaming: true,
+    }
+    const turnChange: TurnChangeSnapshot = {
+      version: 2,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      status: 'complete',
+      filesChanged: 1,
+      additions: 12,
+      deletions: 3,
+      binaryFiles: 0,
+      truncated: false,
+      files: [],
+      seq: 1,
+      updatedAt: 1,
+    }
+    const app = createApp(() =>
+      h(MessageRow, { message, plans: [], turnChange }),
+    )
+    app.mount(container)
+
+    expect(container.querySelector('.turn-changes-card')).toBeNull()
+
+    app.unmount()
+  })
+
+  it('does not show the changes summary for a tombstoned assistant', () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const message: AssistantMessage = {
+      id: 'assistant-tombstoned',
+      role: 'assistant',
+      content: '已作废。',
+      segments: [{ id: 'text-tombstoned', type: 'text', content: '已作废。' }],
+      streaming: false,
+      tombstoned: true,
+      terminalReason: 'interjected',
+    }
+    const turnChange: TurnChangeSnapshot = {
+      version: 2,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      status: 'partial',
+      filesChanged: 1,
+      additions: 12,
+      deletions: 3,
+      binaryFiles: 0,
+      truncated: false,
+      files: [],
+      seq: 1,
+      updatedAt: 1,
+    }
+    const app = createApp(() =>
+      h(MessageRow, { message, plans: [], turnChange }),
+    )
+    app.mount(container)
+
+    expect(container.querySelector('.turn-changes-card')).toBeNull()
+
+    app.unmount()
+  })
+
+  it('does not show the changes summary after execution is cancelled', () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    const message: AssistantMessage = {
+      id: 'assistant-cancelled',
+      role: 'assistant',
+      content: '（任务已停止。）',
+      segments: [
+        {
+          id: 'tool-cancelled',
+          type: 'tool',
+          name: 'write_file',
+          status: 'error_aborted',
+        },
+      ],
+      streaming: false,
+    }
+    const turnChange: TurnChangeSnapshot = {
+      version: 2,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      status: 'partial',
+      filesChanged: 1,
+      additions: 12,
+      deletions: 3,
+      binaryFiles: 0,
+      truncated: false,
+      files: [],
+      seq: 1,
+      updatedAt: 1,
+    }
+    const app = createApp(() =>
+      h(MessageRow, { message, plans: [], turnChange }),
+    )
+    app.mount(container)
+
+    expect(container.querySelector('.turn-changes-card')).toBeNull()
+
+    app.unmount()
+  })
 })

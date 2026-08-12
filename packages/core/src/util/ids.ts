@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { ValidationError } from '../errors'
 
 /**
- * id 工具 (MIG-FND-004)。
+ * id 工具。
  *
- * 对齐 Python `new_id(prefix)` / `f"plan_{uuid4().hex[:12]}"` / `f"disc_{hex[:10]}"` 等：
- * 前缀 + 截断的 uuid hex。前缀与长度保持，便于磁盘可读（非格式契约）。
+ * 生成“前缀 + 截断的 UUID hex”。前缀与长度保持，
+ * 便于磁盘可读（非格式契约）。
  */
 
-/** 生成 `${prefix}${hex[:len]}`。默认 12 位 hex（对齐 plan_ 等）。 */
+/** 生成 `${prefix}${hex[:len]}`。默认 12 位 hex。 */
 export function newId(prefix: string, len = 12): string {
   const hex = randomUUID().replace(/-/g, '')
   return `${prefix}${hex.slice(0, len)}`

@@ -113,6 +113,9 @@ export function diagnosticRows(
         configRow('model-config', '模型配置', diagnostics.modelConfig),
         configRow('local-config', '本地配置', diagnostics.localConfig),
         ...effectiveConfigRows(diagnostics.effectiveConfig),
+        ...(diagnostics.commandCatalog
+          ? [commandCatalogRow(diagnostics.commandCatalog)]
+          : []),
       ],
     },
     ...contextExplanationGroup(diagnostics.contextExplanation),
@@ -148,6 +151,27 @@ export function diagnosticRows(
       rows: dependencyRows(diagnostics.dependencies),
     },
   ]
+}
+
+function commandCatalogRow(
+  catalog: NonNullable<DiagnosticsPayload['commandCatalog']>,
+): DiagnosticRow {
+  const conflicts = catalog.conflicts ?? []
+  const detail = conflicts
+    .map((conflict) => {
+      const winner = conflict.winnerSkillName
+        ? `${conflict.winnerSource}:${conflict.winnerSkillName}`
+        : String(conflict.winnerSource || 'builtin')
+      return `/${String(conflict.token || 'unknown')} · ${String(conflict.source || 'unknown')}:${String(conflict.skillName || 'unknown')} → ${winner} (${String(conflict.reason || 'collision')})`
+    })
+    .join(' · ')
+  return {
+    id: 'slash-command-catalog',
+    label: 'Slash command catalog',
+    value: `${Number(catalog.registeredSkills || 0)} Skills · ${conflicts.length} conflicts`,
+    detail: detail || 'Skill token 无冲突',
+    tone: conflicts.length ? 'warn' : 'ok',
+  }
 }
 
 function effectiveConfigRows(
@@ -369,7 +393,7 @@ function pathRow(
 function sourceLabel(source: string | undefined): string {
   if (source === 'explicit') return '显式指定'
   if (source === 'env') return '环境变量 EMPEROR_CONFIG_DIR'
-  if (source === 'default') return '默认 ~/.emperor-agent'
+  if (source === 'default') return '默认 ~/.emperor'
   return '未知'
 }
 

@@ -1,6 +1,5 @@
 /**
- * context_pipeline: tool_call↔tool_result 配对 (MIG-CORE-002)。
- * 对齐 Python `agent/context_pipeline/pairing.py:pair_tool_calls`。
+ * context_pipeline: tool_call↔tool_result 配对。
  */
 export interface OpenAiMsg {
   role: string

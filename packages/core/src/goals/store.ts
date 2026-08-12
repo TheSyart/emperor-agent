@@ -1,9 +1,16 @@
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, open, readFile, readdir, rm } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { EmperorError } from '../errors'
-import { isolateCorrupt, writeJsonAtomic } from '../store/atomic-json'
 import { readJsonl, type ReadJsonlResult } from '../store/jsonl'
+import {
+  AppendOnlyJournal,
+  AtomicSnapshot,
+  PersistenceCorruptionError,
+  type JournalCodec,
+  type PersistenceAdapter,
+  type SnapshotCodec,
+} from '../store/persistence'
 import {
   isGoalTerminal,
   type GoalPhase,
@@ -28,12 +35,11 @@ import {
   assertGoalTransition,
   parseGoalRecord,
 } from './validation'
-import {
-  GoalGateMutationLedger,
-  type GoalGateMutationSnapshot,
-} from './mutation-ledger'
+import { GoalGateMutationLedger } from './mutation-ledger'
 import type { GoalMutationLease } from './mutation-guard'
 import { registerGoalTerminalCommitter } from './goal-terminal-internal'
+import type { GoalTerminalCommitInput } from './contracts/completion'
+export type { GoalTerminalCommitInput } from './contracts/completion'
 
 export const GOAL_INDEX_SCHEMA_VERSION = 'emperor.goal.index.v1' as const
 
@@ -127,15 +133,6 @@ export interface GoalAppendInput {
   readonly expectedLastEventSeq?: number
 }
 
-export interface GoalTerminalCommitInput {
-  readonly record: GoalRecord
-  readonly createdAt?: string
-  readonly data?: Readonly<JsonObject>
-  readonly expectedLastEventSeq: number
-  readonly mutationPrecondition: GoalGateMutationSnapshot
-  readonly validatePrecondition: () => void | Promise<void>
-}
-
 interface GoalEventInput extends Omit<GoalAppendInput, 'type'> {
   readonly type: GoalDomainEventType
 }
@@ -143,6 +140,7 @@ interface GoalEventInput extends Omit<GoalAppendInput, 'type'> {
 export interface GoalStoreOptions {
   readonly hooks?: GoalStoreHooks
   readonly now?: () => string
+  readonly persistenceAdapter?: PersistenceAdapter
 }
 
 interface GoalIndexDocument {
@@ -182,6 +180,7 @@ export class GoalStore {
 
   private readonly hooks: GoalStoreHooks
   private readonly now: () => string
+  private readonly persistenceAdapter?: PersistenceAdapter
   private readonly mutationLedger: GoalGateMutationLedger
   private activeMutationLease: GoalMutationLease | null = null
   private diagnosticsLoaded = false
@@ -195,6 +194,7 @@ export class GoalStore {
     this.diagnosticsPath = join(this.goalsRoot, 'diagnostics.json')
     this.hooks = options.hooks ?? {}
     this.now = options.now ?? (() => new Date().toISOString())
+    this.persistenceAdapter = options.persistenceAdapter
     this.mutationLedger = new GoalGateMutationLedger(this.stateRoot)
     registerGoalTerminalCommitter(this, (goalId, type, input) =>
       this.commitTerminal(goalId, type, input),
@@ -292,19 +292,39 @@ export class GoalStore {
     })
   }
 
+  /** Ledger-authoritative list for prompt/tool reads; never repairs snapshots or indexes. */
+  async listReadonly(): Promise<GoalRecord[]> {
+    return this.withLifecycleLock(async () => {
+      const { records } = await this.scanGoalRecordsReadonly()
+      return records.map((record) => structuredClone(record))
+    })
+  }
+
   async findActiveBySession(
     sessionIdValue: string,
   ): Promise<GoalRecord | null> {
     const sessionId = String(sessionIdValue ?? '').trim()
     if (!sessionId) return null
-    const records = await this.list()
-    return (
-      records.find(
+    return this.withLifecycleLock(async () => {
+      const { records, issues } = await this.scanGoalRecordsReadonly()
+      if (
+        issues.some(
+          ({ record }) =>
+            record?.scope.sessionId === sessionId &&
+            !isGoalTerminal(record.status),
+        )
+      )
+        throw new GoalStoreError(
+          'storage_recovery_required',
+          'Goal storage requires recovery before the session can run.',
+        )
+      const active = records.find(
         (record) =>
           record.scope.sessionId === sessionId &&
           !isGoalTerminal(record.status),
-      ) ?? null
-    )
+      )
+      return active ? structuredClone(active) : null
+    })
   }
 
   async append(
@@ -452,9 +472,9 @@ export class GoalStore {
     observation: unknown,
   ): Promise<void> {
     const goalId = validateGoalId(goalIdValue)
-    let body: string
+    let normalized: JsonValue
     try {
-      body = `${JSON.stringify(normalizeJsonValue(observation))}\n`
+      normalized = normalizeJsonValue(observation)
     } catch (cause) {
       throw jsonValueError(cause)
     }
@@ -463,14 +483,7 @@ export class GoalStore {
         throw new GoalStoreError('goal_not_found', 'Goal does not exist.')
       this.recordMutation('observation', `${goalId}:${this.now()}`)
       await this.ensureGoalRoot(goalId)
-      const handle = await open(this.observationsPath(goalId), 'a', 0o600)
-      try {
-        await handle.chmod(0o600)
-        await handle.writeFile(body, 'utf8')
-        await handle.sync()
-      } finally {
-        await handle.close()
-      }
+      await this.observationJournal(goalId).append(normalized)
     })
   }
 
@@ -482,10 +495,8 @@ export class GoalStore {
     const goalId = validateGoalId(goalIdValue)
     const sessionId = String(sessionIdValue ?? '').trim()
     let normalized: JsonValue
-    let body: string
     try {
       normalized = normalizeJsonValue(observation)
-      body = `${JSON.stringify(normalized)}\n`
     } catch (cause) {
       throw jsonValueError(cause)
     }
@@ -521,14 +532,7 @@ export class GoalStore {
           'A Goal tool call can be observed only once.',
         )
       await this.ensureGoalRoot(goalId)
-      const handle = await open(this.observationsPath(goalId), 'a', 0o600)
-      try {
-        await handle.chmod(0o600)
-        await handle.writeFile(body, 'utf8')
-        await handle.sync()
-      } finally {
-        await handle.close()
-      }
+      await this.observationJournal(goalId).append(normalized)
       return true
     })
   }
@@ -830,14 +834,7 @@ export class GoalStore {
   ): Promise<void> {
     this.recordMutation('goal', `${event.goalId}:${event.seq}:${event.hash}`)
     await this.ensureGoalRoot(event.goalId)
-    const handle = await open(this.eventsPath(event.goalId), 'a', 0o600)
-    try {
-      await handle.chmod(0o600)
-      await handle.writeFile(`${JSON.stringify(event)}\n`, 'utf8')
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
+    await this.eventJournal(event.goalId).appendAtSequence(event, event.seq)
   }
 
   private async writeSnapshot(record: GoalRecord): Promise<void> {
@@ -846,7 +843,7 @@ export class GoalStore {
       `${record.id}:snapshot:${record.lastEventSeq}`,
     )
     await this.ensureGoalRoot(record.id)
-    await writeJsonAtomic(this.snapshotPath(record.id), record, { mode: 0o600 })
+    await this.goalSnapshot(record.id).write(record)
   }
 
   private async rebuildSnapshotInternal(
@@ -1001,24 +998,27 @@ export class GoalStore {
 
   private async readSnapshot(goalId: string): Promise<GoalRecord | null> {
     const path = this.snapshotPath(goalId)
-    if (!existsSync(path)) return null
     try {
-      return parseGoalRecord(JSON.parse(await readFile(path, 'utf8')))
-    } catch {
-      let backupPath = ''
-      try {
+      const loaded = await this.goalSnapshot(goalId).read({ fallback: null })
+      if (loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
         this.recordMutation(
           'storage',
           `${goalId}:snapshot-quarantine:${this.now()}`,
         )
-        backupPath = await isolateCorrupt(path)
-      } catch {
-        // The ledger remains authoritative even when quarantine cannot rename.
+        await this.recordIssue({
+          goalId,
+          code: 'snapshot_stale',
+          path: loaded.receipt.corruptionBackup ?? path,
+          recovered: true,
+        })
       }
+      return loaded.value
+    } catch (cause) {
+      if (!(cause instanceof PersistenceCorruptionError)) throw cause
       await this.recordIssue({
         goalId,
         code: 'snapshot_stale',
-        path: backupPath || path,
+        path: cause.corruptionBackup ?? path,
         recovered: true,
       })
       return null
@@ -1054,6 +1054,34 @@ export class GoalStore {
     return records
   }
 
+  private async scanGoalRecordsReadonly(): Promise<{
+    records: GoalRecord[]
+    issues: Array<{ issue: GoalRecoveryIssue; record: GoalRecord | null }>
+  }> {
+    if (!existsSync(this.goalsRoot)) return { records: [], issues: [] }
+    const records: GoalRecord[] = []
+    const issues: Array<{
+      issue: GoalRecoveryIssue
+      record: GoalRecord | null
+    }> = []
+    for (const entry of await readdir(this.goalsRoot, {
+      withFileTypes: true,
+    })) {
+      if (!entry.isDirectory() || !isSafeGoalId(entry.name)) continue
+      const ledger = await this.readLedger(entry.name)
+      if (ledger.issue) {
+        issues.push({ issue: ledger.issue, record: ledger.trustedRecord })
+        continue
+      }
+      if (ledger.trustedRecord) records.push(ledger.trustedRecord)
+    }
+    records.sort((left, right) => {
+      const byTime = right.updatedAt.localeCompare(left.updatedAt)
+      return byTime || left.id.localeCompare(right.id)
+    })
+    return { records, issues }
+  }
+
   private async syncIndex(context?: GoalWriteContext): Promise<void> {
     if (context) await this.hooks.beforeIndexWrite?.(context)
     await this.writeIndex(await this.scanGoalRecords())
@@ -1061,21 +1089,20 @@ export class GoalStore {
 
   private async validateIndex(): Promise<GoalIndexDocument | null> {
     await this.ensureRoot()
-    if (!existsSync(this.indexPath)) return null
     try {
-      const parsed = JSON.parse(await readFile(this.indexPath, 'utf8'))
-      if (!isIndexDocument(parsed)) throw new Error('Goal index is invalid.')
-      return parsed
-    } catch {
-      let backupPath = ''
-      try {
+      const loaded = await this.indexSnapshot().read({ fallback: null })
+      if (loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
         this.recordMutation('storage', `goal-index-quarantine:${this.now()}`)
-        backupPath = await isolateCorrupt(this.indexPath)
-      } catch {
-        // A failed quarantine is still reported; rebuilding remains best effort.
+        this.diagnosticsState.indexRebuilt = true
+        this.diagnosticsState.indexCorruptBackup =
+          loaded.receipt.corruptionBackup
+        await this.persistDiagnostics()
       }
+      return loaded.value
+    } catch (cause) {
+      if (!(cause instanceof PersistenceCorruptionError)) throw cause
       this.diagnosticsState.indexRebuilt = true
-      this.diagnosticsState.indexCorruptBackup = backupPath || null
+      this.diagnosticsState.indexCorruptBackup = cause.corruptionBackup
       await this.persistDiagnostics()
       return null
     }
@@ -1095,7 +1122,7 @@ export class GoalStore {
       schemaVersion: GOAL_INDEX_SCHEMA_VERSION,
       goals,
     }
-    await writeJsonAtomic(this.indexPath, document, { mode: 0o600 })
+    await this.indexSnapshot().write(document)
   }
 
   private hasBlockingIssue(goalId: string): boolean {
@@ -1143,8 +1170,53 @@ export class GoalStore {
     await this.hooks.beforeDiagnosticsWrite?.()
     await mkdir(this.goalsRoot, { recursive: true, mode: 0o700 })
     await chmod(this.goalsRoot, 0o700)
-    await writeJsonAtomic(this.diagnosticsPath, this.diagnosticsState, {
-      mode: 0o600,
+    await this.diagnosticsSnapshot().write(this.diagnosticsState)
+  }
+
+  private goalSnapshot(goalId: string): AtomicSnapshot<GoalRecord | null> {
+    return new AtomicSnapshot({
+      path: this.snapshotPath(goalId),
+      codec: GOAL_RECORD_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
+  }
+
+  private indexSnapshot(): AtomicSnapshot<GoalIndexDocument | null> {
+    return new AtomicSnapshot({
+      path: this.indexPath,
+      codec: GOAL_INDEX_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
+  }
+
+  private diagnosticsSnapshot(): AtomicSnapshot<MutableDiagnostics> {
+    return new AtomicSnapshot({
+      path: this.diagnosticsPath,
+      codec: GOAL_DIAGNOSTICS_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
+  }
+
+  private eventJournal(
+    goalId: string,
+  ): AppendOnlyJournal<GoalEventEnvelope<GoalEventPayload>> {
+    return new AppendOnlyJournal({
+      path: this.eventsPath(goalId),
+      codec: GOAL_EVENT_JOURNAL_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
+  }
+
+  private observationJournal(goalId: string): AppendOnlyJournal<JsonValue> {
+    return new AppendOnlyJournal({
+      path: this.observationsPath(goalId),
+      codec: GOAL_OBSERVATION_JOURNAL_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
     })
   }
 
@@ -1163,6 +1235,103 @@ export class GoalStore {
   private observationsPath(goalId: string): string {
     return join(this.goalRoot(goalId), 'observations.jsonl')
   }
+}
+
+const GOAL_RECORD_CODEC: SnapshotCodec<GoalRecord | null> = {
+  schemaVersion: 1,
+  encode(value) {
+    if (!value) throw new Error('Goal snapshot cannot be null.')
+    return value
+  },
+  decode(input) {
+    return { value: parseGoalRecord(input), schemaVersion: 1 }
+  },
+}
+
+const GOAL_INDEX_CODEC: SnapshotCodec<GoalIndexDocument | null> = {
+  schemaVersion: 1,
+  encode(value) {
+    if (!value) throw new Error('Goal index cannot be null.')
+    return value
+  },
+  decode(input) {
+    if (!isIndexDocument(input)) throw new Error('Goal index is invalid.')
+    return { value: input, schemaVersion: 1 }
+  },
+}
+
+const GOAL_DIAGNOSTICS_CODEC: SnapshotCodec<MutableDiagnostics> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    if (!isMutableDiagnostics(input))
+      throw new Error('Goal diagnostics are invalid.')
+    return { value: input, schemaVersion: 1 }
+  },
+}
+
+const GOAL_EVENT_JOURNAL_CODEC: JournalCodec<
+  GoalEventEnvelope<GoalEventPayload>
+> = {
+  schemaVersion: 1,
+  create(seq, payload) {
+    const event = parseGoalEventEnvelope(
+      payload,
+    ) as GoalEventEnvelope<GoalEventPayload>
+    normalizeJsonValue(event)
+    if (event.seq !== seq || computeGoalEventHash(event) !== event.hash)
+      throw new Error('Goal journal event does not match its sequence or hash.')
+    return {
+      schemaVersion: 1,
+      seq,
+      checksum: event.hash,
+      payload: event,
+    }
+  },
+  encode(entry) {
+    return entry.payload
+  },
+  decode(input) {
+    const event = parseGoalEventEnvelope(
+      input,
+    ) as GoalEventEnvelope<GoalEventPayload>
+    normalizeJsonValue(event)
+    if (computeGoalEventHash(event) !== event.hash)
+      throw new Error('Goal journal event hash is invalid.')
+    return {
+      schemaVersion: 1,
+      seq: event.seq,
+      checksum: event.hash,
+      payload: event,
+    }
+  },
+}
+
+const GOAL_OBSERVATION_JOURNAL_CODEC: JournalCodec<JsonValue> = {
+  schemaVersion: 1,
+  create(seq, payload) {
+    const value = normalizeJsonValue(payload)
+    return {
+      schemaVersion: 1,
+      seq,
+      checksum: JSON.stringify(value),
+      payload: value,
+    }
+  },
+  encode(entry) {
+    return entry.payload
+  },
+  decode(input, context) {
+    const value = normalizeJsonValue(input)
+    return {
+      schemaVersion: 1,
+      seq: context.expectedSeq,
+      checksum: JSON.stringify(value),
+      payload: value,
+    }
+  },
 }
 
 function projectEvent(

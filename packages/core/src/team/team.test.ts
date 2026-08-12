@@ -3,14 +3,18 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Tool } from '../tools/base'
 import { ToolRegistry } from '../tools/registry'
 import { toolParamsSchema } from '../tools/schema'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
+import { SubagentRegistry } from '../subagents/registry'
+import type { SubagentSpec } from '../subagents/spec'
 import { MessageBus } from './bus'
 import * as teamEvents from './events'
 import { TeamManager, roleToAgentType } from './manager'
@@ -37,6 +41,16 @@ function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
+const SUBAGENT_TEMPLATES = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'templates',
+  'subagents',
+)
+
 class EchoTool extends Tool {
   override name = 'echo'
   override description = 'echo'
@@ -48,10 +62,27 @@ class EchoTool extends Tool {
 }
 
 function fakeSubagents() {
-  const specs = new Map<string, { name: string; tool_names: string[] }>([
-    ['sili_suitang', { name: 'sili_suitang', tool_names: ['echo'] }],
-    ['neiguan_yingzao', { name: 'neiguan_yingzao', tool_names: ['echo'] }],
-  ])
+  const builtin = new SubagentRegistry(SUBAGENT_TEMPLATES)
+  const specs = new Map<string, SubagentSpec>(
+    ['sili_suitang', 'neiguan_yingzao'].map((name) => {
+      const source = builtin.get(name)!
+      return [
+        name,
+        {
+          ...source,
+          toolNames: ['echo'],
+          definition: {
+            ...source.definition,
+            tools: { allow: ['echo'] },
+            completion: {
+              ...source.definition.completion,
+              requiredSections: [],
+            },
+          },
+        },
+      ]
+    }),
+  )
   return {
     get: (name: string) => specs.get(name) ?? null,
     resolveName: (name: string) => specs.get(name)?.name ?? name,
@@ -119,6 +150,35 @@ describe('TeamStore and MessageBus', () => {
     ).toEqual(['m1'])
     expect(reopened.readCursor('alice')).toBe(3)
     expect(existsSync(join(root, '.team', 'threads', 'alice.json'))).toBe(true)
+    expect(statSync(reopened.configFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('preserves the previous Team config when durable rename fails', () => {
+    const root = tmp('emperor-team-persistence-failure-')
+    const healthy = new TeamStore(root)
+    healthy.saveConfig({
+      version: 1,
+      team_name: 'before',
+      members: [],
+    })
+    const before = readFileSync(healthy.configFile, 'utf8')
+    const failing = new TeamStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() =>
+      failing.saveConfig({ version: 1, team_name: 'after', members: [] }),
+    ).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.configFile, 'utf8')).toBe(before)
+    expect(
+      readdirSync(healthy.teamDir).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 
   it('isolates a corrupt config.json instead of silently discarding it (audit P1-5)', () => {
@@ -190,6 +250,118 @@ describe('TeamStore and MessageBus', () => {
 })
 
 describe('TeamManager and tools', () => {
+  it('resolves the Team manager from the trusted tool execution session', () => {
+    const manager = new TeamManager({
+      root: tmp('emperor-team-context-owner-'),
+      subagentRegistry: fakeSubagents(),
+    })
+    const provider = vi.fn((_sessionId: string | null) => manager)
+    const tool = new TeamListTool(provider as never)
+
+    tool.execute(
+      {},
+      { root: '/workspace', arguments: {}, sessionId: 'session-a' },
+    )
+
+    expect(provider).toHaveBeenCalledWith('session-a')
+  })
+
+  it('applies the materialized AgentDefinition policy before injecting teammate tools', async () => {
+    const builtin = new SubagentRegistry(SUBAGENT_TEMPLATES)
+    const source = builtin.get('neiguan_yingzao')!
+    const spec = {
+      ...source,
+      toolNames: ['write_file'],
+      definition: {
+        ...source.definition,
+        tools: { allow: ['write_file'] },
+        sandbox: {
+          filesystem: 'read-only' as const,
+          network: 'deny' as const,
+          process: 'deny' as const,
+        },
+      },
+    }
+    const registry = new ToolRegistry()
+    let executions = 0
+    class WriteTool extends Tool {
+      override name = 'write_file'
+      override description = 'write'
+      override parameters = toolParamsSchema({})
+      execute(): string {
+        executions += 1
+        return 'mutated'
+      }
+    }
+    registry.register(new WriteTool())
+    const manager = new TeamManager({
+      root: tmp('emperor-team-agent-policy-'),
+      parentRegistry: registry,
+      subagentRegistry: {
+        get: (name) => (name === spec.name ? spec : null),
+        resolveName: (name) => name,
+        names: () => [spec.name],
+      },
+      runnerFactory: ({ subRegistry }) => ({
+        step: async () => await subRegistry.execute('write_file', {}),
+      }),
+    })
+
+    const result = await manager.spawnTeammate({
+      name: 'alice',
+      role: 'coder',
+      agent_type: spec.name,
+      task: 'attempt a write',
+    })
+
+    expect(result).toContain(
+      '[ERR] AgentDefinition read-only sandbox denied destructive tool: write_file',
+    )
+    expect(executions).toBe(0)
+  })
+
+  it('enforces required completion sections with one teammate repair turn', async () => {
+    const builtin = new SubagentRegistry(SUBAGENT_TEMPLATES)
+    const source = builtin.get('sili_suitang')!
+    const spec = {
+      ...source,
+      definition: {
+        ...source.definition,
+        completion: {
+          ...source.definition.completion,
+          requiredSections: ['结论', '证据'],
+        },
+      },
+    }
+    let calls = 0
+    const manager = new TeamManager({
+      root: tmp('emperor-team-completion-contract-'),
+      subagentRegistry: {
+        get: (name) => (name === spec.name ? spec : null),
+        resolveName: (name) => name,
+        names: () => [spec.name],
+      },
+      runnerFactory: () => ({
+        step: () => {
+          calls += 1
+          return calls === 1
+            ? '完成。'
+            : ['## 结论', '完成。', '## 证据', '检查通过。'].join('\n')
+        },
+      }),
+    })
+
+    const result = await manager.spawnTeammate({
+      name: 'alice',
+      role: 'reader',
+      agent_type: spec.name,
+      task: 'read files',
+    })
+
+    expect(result).toContain('## 结论')
+    expect(calls).toBe(2)
+  })
+
   it('resumes a prepared checkpoint without duplicating the pending inbox turn', async () => {
     const root = tmp('emperor-team-checkpoint-prepared-')
     const store = new TeamStore(root)

@@ -1,7 +1,19 @@
 /**
- * RunCommand scaffold (MIG-TOOL-011) + skills (MIG-TOOL-012)。
+ * RunCommand scaffold + skills。
  */
-import { mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import {
   basename,
@@ -19,6 +31,7 @@ import {
   NodeOwnedProcessRunner,
   type OwnedProcessResult,
   type OwnedProcessRunner,
+  type OwnedProcessStatus,
 } from '../environment/process-runner'
 import type { ProcessContainmentReceipt } from '../environment/sandbox'
 import {
@@ -28,55 +41,18 @@ import {
 import { Tool, type ToolResult, type ToolExecutionContext } from './base'
 import { S, toolParamsSchema } from './schema'
 import { isReadonlyCommand } from './resolvers'
-import { pathsEqual } from '../util/paths'
-import { analyzeShellCommandFailClosed } from '../permissions/shell-ast'
+import { canonicalizeExistingPath, pathsEqual } from '../util/paths'
+import {
+  analyzeShellCommandFailClosed,
+  shellCatastrophicDestructionReason,
+  shellPrivilegeEscalationReason,
+} from '../permissions/shell-ast'
 
 export { GlobTool, GrepTool } from './search'
 export { WebFetch } from './web-fetch'
 
 /** 安全策略拒绝文案前缀：execution 引擎据此给 tool_run_failed 打 reason_kind（B4.3）。 */
 export const SAFETY_REFUSAL_PREFIX = 'Error: command refused by safety policy'
-
-// ── LoadSkill ──
-
-export interface SkillsLoader {
-  getContent(name: string): string | null
-  summary(): string
-}
-
-type SkillsLoaderProvider =
-  SkillsLoader | ((sessionId?: string | null) => SkillsLoader | null)
-
-export class LoadSkill extends Tool {
-  override name = 'load_skill'
-  override description =
-    '按名称加载指定 Skill 的详细知识内容。用户显式选择 Skill 或任务明显匹配某个 Skill 时先调用；不要绕过本工具直接 read_file 读取 SKILL.md。' +
-    '加载失败时报告缺失或名称不匹配，不要编造 Skill 内容。'
-  override parameters = toolParamsSchema({ name: S('Skill 名称') }, ['name'])
-  override readOnly = true
-  override evidencePolicy = 'forbidden' as const
-
-  private readonly loaderProvider: SkillsLoaderProvider | null
-
-  constructor(loader?: SkillsLoaderProvider) {
-    super()
-    this.loaderProvider = loader ?? null
-  }
-
-  async execute(
-    args: Record<string, unknown>,
-    ctx?: ToolExecutionContext,
-  ): Promise<string> {
-    const name = String(args.name ?? '')
-    const loader =
-      typeof this.loaderProvider === 'function'
-        ? this.loaderProvider(ctx?.sessionId)
-        : this.loaderProvider
-    if (!loader) return '[ERR] no skills loader configured'
-    const c = loader.getContent(name)
-    return c ?? `[ERR] skill "${name}" not found`
-  }
-}
 
 // ── UpdateTodos ──
 
@@ -222,6 +198,7 @@ export class SaveUserProfileTool extends Tool {
     ['content'],
   )
   override readOnly = false
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
 
   private readonly writer: UserProfileWriter
@@ -299,6 +276,7 @@ export class UpdateTodos extends Tool {
     ['todos'],
   )
   override readOnly = false
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override exclusive = true
 
@@ -328,30 +306,10 @@ export class UpdateTodos extends Tool {
 
 // ── RunCommand ──
 
-const DENY_PATTERNS = [
-  /\brm\s+-rf\s+\//,
-  /\bmkfs\./,
-  /\bdd\s+if=/,
-  /:\s*\(\s*\)\s*\{/,
-  />\s*\/dev\/sda/,
-  />\s*\/dev\/nvme/,
-  /\bcurl\b/,
-  /\bwget\b/,
-  /\bpython3?\s+-c\b/,
-  /\|.*\bsh\b/,
-  /\|.*\bbash\b/,
-  // 审计 P1-1：ln -s 是符号链接工作区逃逸（P0-2）的前置步骤；其余解释器的 -e
-  // 直接执行任意代码，属于和 python -c 同一类的绕过。
-  /\bln\s+-[a-z]*s[a-z]*\b/,
-  /\bperl\s+-e\b/,
-  /\bruby\s+-e\b/,
-  /\bnode\s+-e\b/,
-  /\bosascript\s+-e\b/,
-]
-
 const MAX_OUTPUT_CHARS = 20_000
 
 interface RunCommandExecutionOutcome {
+  status: OwnedProcessStatus
   stdout: string
   stderr: string
   error:
@@ -385,6 +343,30 @@ function shellMutationPathCandidates(command: string): string[] {
         add(redirect.target)
     }
     const executable = basename(String(node.argv[0] ?? ''))
+    if (executable === 'curl') {
+      for (let index = 1; index < node.argv.length; index += 1) {
+        const argument = String(node.argv[index] ?? '')
+        if (argument === '-o' || argument === '--output') {
+          add(node.argv[index + 1])
+          index += 1
+        } else if (argument.startsWith('--output=')) {
+          add(argument.slice('--output='.length))
+        }
+      }
+      continue
+    }
+    if (executable === 'wget') {
+      for (let index = 1; index < node.argv.length; index += 1) {
+        const argument = String(node.argv[index] ?? '')
+        if (argument === '-O' || argument === '--output-document') {
+          add(node.argv[index + 1])
+          index += 1
+        } else if (argument.startsWith('--output-document=')) {
+          add(argument.slice('--output-document='.length))
+        }
+      }
+      continue
+    }
     const positional = node.argv
       .slice(1)
       .filter(
@@ -416,10 +398,11 @@ export class RunCommand extends Tool {
   override name = 'run_command'
   override workspaceMutation = true
   override description =
-    '在当前工作区终端执行一条 shell 命令并返回输出；rm -rf /、curl/wget、python -c、管道到 sh/bash 等危险模式会被安全策略直接拒绝。' +
+    '在当前工作区终端执行一条 shell 命令并返回输出；权限层会评估联网、动态代码、解释器和远程脚本链，只有明确的系统提权与灾难性磁盘命令会在执行前硬拒绝。' +
     '仅用于测试、构建、git、包管理器或必须由 shell 执行的系统操作；不要用它读写搜文件或向用户输出文本。' +
-    '命令运行在受限的最小环境变量（仅 HOME/PATH/LANG 等）下；OS sandbox 默认只允许 workspace 与隔离临时目录写入并阻断网络。' +
+    '主 Agent 在非 Plan 模式获准后使用宿主环境（真实 HOME、PATH、用户配置和本机网络）；Plan、子代理和其他隔离执行器继续使用 OS sandbox。' +
     '未证明只读的命令在 sandbox backend 不可用时会 fail closed；单条命令超过 120 秒会被硬超时中断。' +
+    '复合命令、pipeline 和 command list 的 exit 0 只证明整个 shell list 的最终状态，安装或修改完成后必须另起一次独立 probe。' +
     '失败后先阅读 stdout/stderr 诊断根因，不要盲目重试或绕过安全检查。'
   override parameters = toolParamsSchema(
     { command: S('要执行的 shell 命令') },
@@ -449,6 +432,20 @@ export class RunCommand extends Tool {
     ctx?: ToolExecutionContext,
   ): Promise<ToolResult> {
     const command = String(args.command ?? '')
+    const processExecution = ctx?.processExecution ?? {
+      kind: 'sandbox' as const,
+    }
+    if (
+      processExecution.kind === 'host' &&
+      (String(ctx?.arguments?.command ?? '') !== command ||
+        !ctx?.executionEnvironment)
+    )
+      return this.policyFailureResult(
+        command,
+        'Error: authorized host execution is missing trusted command context',
+        null,
+        'authorization_missing',
+      )
     const workspace = ctx?.workspaceRoot ?? ctx?.root ?? this.workspace
     const cwdDecision = workspacePolicyForTool(ctx, this.workspace).resolvePath(
       '.',
@@ -459,18 +456,37 @@ export class RunCommand extends Tool {
       const content = `Error: command cwd blocked by workspace policy: ${formatWorkspacePolicyError(cwdDecision)}`
       return this.policyFailureResult(command, content)
     }
-    for (const pat of DENY_PATTERNS) {
-      if (pat.test(command)) {
-        const content =
-          `${SAFETY_REFUSAL_PREFIX} (matches dangerous pattern: ${pat})\n` +
-          '替代方案：改用具备明确安全边界的专用工具；若确需执行，请说明影响并请求用户明确批准。不要重试同类命令或尝试绕过安全检查。'
-        return this.policyFailureResult(command, content)
-      }
+    const privilegeEscalation = shellPrivilegeEscalationReason(
+      analyzeShellCommandFailClosed(command),
+    )
+    if (privilegeEscalation) {
+      const content =
+        `${SAFETY_REFUSAL_PREFIX} (privilege escalation command: ${privilegeEscalation})\n` +
+        'Administrator credentials, interactive authentication, and system privilege escalation are not supported.'
+      return this.policyFailureResult(
+        command,
+        content,
+        null,
+        'interactive_auth_required',
+      )
+    }
+    const catastrophicDestruction = shellCatastrophicDestructionReason(
+      command,
+      analyzeShellCommandFailClosed(command),
+    )
+    if (catastrophicDestruction) {
+      const content =
+        `${SAFETY_REFUSAL_PREFIX} (catastrophic operation: ${catastrophicDestruction})\n` +
+        '该操作可能破坏磁盘、根文件系统或进程宿主，Emperor 不会执行。'
+      return this.policyFailureResult(command, content)
     }
     let outcome: RunCommandExecutionOutcome
     let containment: ProcessContainmentReceipt | null = null
     try {
-      const snapshotEnv = ctx?.executionEnvironment?.env
+      const snapshotEnv =
+        processExecution.kind === 'host'
+          ? ctx?.executionEnvironment?.hostProcessEnv()
+          : ctx?.executionEnvironment?.env
       const env: Record<string, string> = snapshotEnv
         ? {
             ...snapshotEnv,
@@ -485,23 +501,43 @@ export class RunCommand extends Tool {
             USER: process.env.USER ?? '',
           }
       const tempRoot = mkdtempSync(join(tmpdir(), 'emperor-command-'))
+      const scratchRoot =
+        processExecution.kind === 'host'
+          ? sessionScratchRoot(ctx, tempRoot)
+          : tempRoot
+      mkdirSync(scratchRoot, { recursive: true, mode: 0o700 })
       try {
+        const shell = commandShell(command)
+        const commandEnv =
+          processExecution.kind === 'host'
+            ? withEmperorCommandShims(env, scratchRoot, command)
+            : env
         const owned = await this.ownedRunner.run({
-          executable:
-            process.platform === 'win32'
-              ? process.env.ComSpec || 'cmd.exe'
-              : '/bin/sh',
-          args:
-            process.platform === 'win32'
-              ? ['/d', '/s', '/c', command]
-              : ['-c', command],
+          executable: shell.executable,
+          args: shell.args,
           cwd: cwdDecision.realPath,
-          env: {
-            ...env,
-            TMPDIR: tempRoot,
-            TMP: tempRoot,
-            TEMP: tempRoot,
-          },
+          env:
+            processExecution.kind === 'host'
+              ? {
+                  ...env,
+                  ...commandEnv,
+                  PWD: cwdDecision.realPath,
+                  TMPDIR: tempRoot,
+                  TMP: tempRoot,
+                  TEMP: tempRoot,
+                  EMPEROR_SCRATCH_DIR: scratchRoot,
+                }
+              : {
+                  ...env,
+                  ...commandEnv,
+                  GIT_CONFIG_GLOBAL: '/dev/null',
+                  NPM_CONFIG_USERCONFIG: '/dev/null',
+                  PWD: cwdDecision.realPath,
+                  TMPDIR: tempRoot,
+                  TMP: tempRoot,
+                  TEMP: tempRoot,
+                  EMPEROR_SCRATCH_DIR: scratchRoot,
+                },
           timeoutMs: 120_000,
           maxOutputBytes: MAX_OUTPUT_CHARS * 4,
           owner: {
@@ -513,26 +549,48 @@ export class RunCommand extends Tool {
           },
           ...(ctx?.signal ? { signal: ctx.signal } : {}),
           onContainment: async (receipt) =>
-            await emitContainmentReceipt(ctx, receipt),
-          containment: {
-            mode: 'required',
-            workspaceRoot: cwdDecision.realPath,
-            stateRoot:
-              ctx?.root && !pathsEqual(ctx.root, cwdDecision.realPath)
-                ? ctx.root
-                : null,
-            tempRoot,
-            readOnlyRoots: commandRuntimeReadRoots(env.PATH),
-            network: 'deny',
-          },
+            await emitContainmentReceipt(ctx, receipt, processExecution),
+          execution:
+            processExecution.kind === 'host'
+              ? {
+                  kind: 'host',
+                  authorization: processExecution.authorization,
+                }
+              : {
+                  kind: 'sandbox',
+                  policy: {
+                    mode: 'required',
+                    workspaceRoot: cwdDecision.realPath,
+                    stateRoot:
+                      ctx?.root &&
+                      !pathsEqual(
+                        canonicalizeExistingPath(ctx.root),
+                        cwdDecision.realPath,
+                      )
+                        ? ctx.root
+                        : null,
+                    tempRoot,
+                    readOnlyRoots: commandRuntimeReadRoots(commandEnv.PATH),
+                    network: 'deny',
+                  },
+                },
         })
         containment = owned.containment
         if (
           owned.status === 'containment_unavailable' ||
-          containment.decision !== 'sandboxed'
+          (processExecution.kind === 'host'
+            ? containment.decision !== 'unsandboxed'
+            : containment.decision !== 'sandboxed')
         ) {
           const content = `Error: OS sandbox unavailable; command was not started (${containment.backend}: ${containment.reason || containment.capabilityStatus})`
-          return this.policyFailureResult(command, content, containment)
+          return this.policyFailureResult(
+            command,
+            content,
+            containment,
+            processExecution.kind === 'host'
+              ? 'authorization_missing'
+              : 'containment_unavailable',
+          )
         }
         outcome = ownedProcessOutcome(owned)
       } finally {
@@ -540,6 +598,7 @@ export class RunCommand extends Tool {
       }
     } catch (error) {
       outcome = {
+        status: 'spawn_error',
         stdout: '',
         stderr: '',
         error:
@@ -551,7 +610,8 @@ export class RunCommand extends Tool {
     if (outcome.error === null)
       return this.successResult(
         command,
-        outcome.stdout.trim() || '(command completed with no output)',
+        formatProcessStreams(outcome.stdout, outcome.stderr) ||
+          '(command completed with no output)',
         containment,
       )
     return this.failedProcessResult(command, outcome, ctx, containment)
@@ -559,6 +619,10 @@ export class RunCommand extends Tool {
 
   override isReadOnly(args: Record<string, unknown>): boolean {
     return isReadonlyCommand(String(args.command ?? ''))
+  }
+
+  override mutatesWorkspace(args: Record<string, unknown>): boolean {
+    return runCommandWorkspaceEffect(String(args.command ?? '')) !== 'none'
   }
 
   override getPaths(args: Record<string, unknown>): string[] {
@@ -583,8 +647,18 @@ export class RunCommand extends Tool {
     content: string,
     containment: ProcessContainmentReceipt | null = null,
   ): ToolResult {
+    const scope = shellCommandResultScope(command)
+    const successScope =
+      scope.compound_command &&
+      analyzeShellCommandFailClosed(command).features.includes('pipeline') &&
+      !commandShellSupportsPipefail()
+        ? 'last_pipeline_command'
+        : 'process_exit_zero'
+    const modelContent = scope.verification_required
+      ? `${content}\n\n[verification required] This compound shell result does not prove every step succeeded. Run a separate probe for the intended artifact.`
+      : content
     return {
-      modelContent: content,
+      modelContent,
       displaySummary: `run_command exit 0: ${command.slice(0, 120)}`,
       rawContent: content,
       artifacts: [],
@@ -594,6 +668,17 @@ export class RunCommand extends Tool {
         exitCode: 0,
         signal: null,
         timedOut: false,
+        outcome: 'success',
+        progress: content.trim()
+          ? scope.evidence_disposition === 'candidate'
+            ? 'discovery'
+            : 'execution'
+          : 'none',
+        retryable: false,
+        strategy_key: 'run_command:process',
+        success_scope: successScope,
+        evidence: { exit_code: 0 },
+        ...scope,
         ...(containment ? { containment } : {}),
       },
       isError: false,
@@ -604,7 +689,9 @@ export class RunCommand extends Tool {
     command: string,
     content: string,
     containment: ProcessContainmentReceipt | null = null,
+    commandFailureKind = 'policy_denied',
   ): ToolResult {
+    const scope = shellCommandResultScope(command)
     return {
       modelContent: content,
       displaySummary: `run_command exit non-zero: ${command.slice(0, 120)}`,
@@ -616,6 +703,13 @@ export class RunCommand extends Tool {
         exitCode: null,
         signal: null,
         timedOut: false,
+        command_failure_kind: commandFailureKind,
+        outcome: 'failure',
+        failure_kind: commandFailureKind,
+        retryable: false,
+        strategy_key: runCommandFailureStrategyKey(command, commandFailureKind),
+        evidence: { exit_code: null },
+        ...scope,
         ...(containment ? { containment } : {}),
       },
       isError: true,
@@ -638,7 +732,17 @@ export class RunCommand extends Tool {
         ? error.code
         : null
     const signal = typeof error.signal === 'string' ? error.signal : null
-    const body = outcome.stdout || outcome.stderr
+    const commandFailureKind = cancelled
+      ? 'cancelled'
+      : timedOut
+        ? 'timeout'
+        : outcome.status === 'output_limit'
+          ? 'output_limit'
+          : outcome.status === 'spawn_error'
+            ? 'spawn_error'
+            : 'process_failed'
+    const body = formatProcessStreams(outcome.stdout, outcome.stderr)
+    const scope = shellCommandResultScope(command)
     let content: string
     if (cancelled) content = 'Error: command cancelled'
     else if (timedOut) content = 'Error: command timed out after 120 seconds'
@@ -659,6 +763,13 @@ export class RunCommand extends Tool {
         exitCode,
         signal,
         timedOut,
+        command_failure_kind: commandFailureKind,
+        outcome: 'failure',
+        failure_kind: commandFailureKind,
+        retryable: timedOut,
+        strategy_key: runCommandFailureStrategyKey(command, commandFailureKind),
+        evidence: { exit_code: exitCode, signal },
+        ...scope,
         ...(containment ? { containment } : {}),
       },
       isError: true,
@@ -666,11 +777,330 @@ export class RunCommand extends Tool {
   }
 }
 
+function runCommandFailureStrategyKey(
+  command: string,
+  failureKind: string,
+): string {
+  const urls = new Set<string>()
+  for (const candidate of String(command ?? '').match(
+    /https?:\/\/[^\s'"|;&)]+/g,
+  ) ?? []) {
+    try {
+      const url = new URL(candidate)
+      url.hash = ''
+      urls.add(url.toString())
+    } catch {
+      // Fall back to command identity when the shell token is not a URL.
+    }
+  }
+  const normalized = urls.size
+    ? `external_url:${[...urls].sort().join(',')}`
+    : String(command ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+  const fingerprint = createHash('sha256')
+    .update(normalized)
+    .digest('hex')
+    .slice(0, 16)
+  return `run_command:${failureKind}:${fingerprint}`
+}
+
+function shellCommandResultScope(command: string): {
+  result_scope: 'shell_command'
+  compound_command: boolean
+  verification_required: boolean
+  workspace_effect: 'none' | 'known_paths' | 'unattributed'
+  evidence_disposition: 'none' | 'candidate'
+} {
+  const analysis = analyzeShellCommandFailClosed(command)
+  const compoundFeatures = new Set([
+    'pipeline',
+    'and',
+    'or',
+    'sequence',
+    'background',
+    'subshell',
+    'brace_group',
+    'control_flow',
+  ])
+  const compound =
+    analysis.commands.length > 1 ||
+    analysis.features.some((feature) => compoundFeatures.has(feature))
+  const externalCandidate = runCommandProvidesExternalCandidate(command)
+  return {
+    result_scope: 'shell_command',
+    compound_command: compound,
+    verification_required: compound || externalCandidate,
+    workspace_effect: runCommandWorkspaceEffect(command),
+    evidence_disposition: externalCandidate ? 'candidate' : 'none',
+  }
+}
+
+function runCommandWorkspaceEffect(
+  command: string,
+): 'none' | 'known_paths' | 'unattributed' {
+  if (shellMutationPathCandidates(command).length) return 'known_paths'
+  if (isReadonlyCommand(command) || isExternalReadCommand(command))
+    return 'none'
+  return 'unattributed'
+}
+
+function runCommandProvidesExternalCandidate(command: string): boolean {
+  const analysis = analyzeShellCommandFailClosed(command)
+  if (analysis.status !== 'parsed') return false
+  return analysis.commands.some((node) => {
+    const executable = basename(String(node.argv[0] ?? '')).toLowerCase()
+    const subcommand = String(node.argv[1] ?? '').toLowerCase()
+    if (executable === 'curl' || executable === 'wget') return true
+    if (executable === 'mcporter') return subcommand === 'call'
+    if (executable === 'gh') return ['api', 'search'].includes(subcommand)
+    if (
+      ['yt-dlp', 'twitter', 'xreach', 'bili', 'rdt', 'opencli'].includes(
+        executable,
+      )
+    )
+      return true
+    return false
+  })
+}
+
+function isExternalReadCommand(command: string): boolean {
+  const analysis = analyzeShellCommandFailClosed(command)
+  if (analysis.status !== 'parsed' || !analysis.commands.length) return false
+  if (
+    analysis.commands.some((node) =>
+      node.redirects.some((redirect) => redirect.operator.includes('>')),
+    )
+  )
+    return false
+  const transforms = new Set([
+    'awk',
+    'cat',
+    'cut',
+    'grep',
+    'head',
+    'jq',
+    'rg',
+    'sed',
+    'sort',
+    'tail',
+    'tr',
+    'uniq',
+    'wc',
+  ])
+  let sawExternal = false
+  for (const node of analysis.commands) {
+    const executable = basename(String(node.argv[0] ?? '')).toLowerCase()
+    const subcommand = String(node.argv[1] ?? '').toLowerCase()
+    if (executable === 'curl') {
+      if (curlWritesFile(node.argv)) return false
+      sawExternal = true
+      continue
+    }
+    if (executable === 'wget') {
+      if (!wgetWritesStdoutOnly(node.argv)) return false
+      sawExternal = true
+      continue
+    }
+    if (executable === 'mcporter' && subcommand === 'call') {
+      sawExternal = true
+      continue
+    }
+    if (executable === 'gh' && ['api', 'search'].includes(subcommand)) {
+      sawExternal = true
+      continue
+    }
+    if (transforms.has(executable)) continue
+    return false
+  }
+  return sawExternal
+}
+
+function curlWritesFile(argv: readonly string[]): boolean {
+  return argv.some(
+    (argument) =>
+      argument === '-o' ||
+      argument === '-O' ||
+      argument === '--output' ||
+      argument === '--remote-name' ||
+      argument.startsWith('--output='),
+  )
+}
+
+function wgetWritesStdoutOnly(argv: readonly string[]): boolean {
+  return argv.some(
+    (argument, index) =>
+      argument === '-qO-' ||
+      argument === '-O-' ||
+      argument === '--output-document=-' ||
+      ((argument === '-O' || argument === '--output-document') &&
+        argv[index + 1] === '-'),
+  )
+}
+
+function formatProcessStreams(stdout: string, stderr: string): string {
+  const out = stdout.trim()
+  const err = stderr.trim()
+  if (out && err) return `stdout:\n${out}\n\nstderr:\n${err}`
+  return out || err
+}
+
+function commandShell(command: string): {
+  executable: string
+  args: string[]
+} {
+  if (process.platform === 'win32') {
+    return {
+      executable: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', command],
+    }
+  }
+  const executable = existsSync('/bin/bash')
+    ? '/bin/bash'
+    : existsSync('/bin/zsh')
+      ? '/bin/zsh'
+      : '/bin/sh'
+  return executable === '/bin/sh'
+    ? { executable, args: ['-c', command] }
+    : { executable, args: ['-o', 'pipefail', '-c', command] }
+}
+
+function commandShellSupportsPipefail(): boolean {
+  return (
+    process.platform !== 'win32' &&
+    (existsSync('/bin/bash') || existsSync('/bin/zsh'))
+  )
+}
+
+function sessionScratchRoot(
+  ctx: ToolExecutionContext | undefined,
+  fallback: string,
+): string {
+  const sessionId = String(ctx?.sessionId ?? '').trim()
+  const stateRoot = String(ctx?.root ?? '').trim()
+  if (!stateRoot || !/^[A-Za-z0-9._-]{1,160}$/.test(sessionId)) return fallback
+  return join(resolve(stateRoot), 'sessions', sessionId, 'scratch')
+}
+
+/**
+ * Some third-party CLIs resolve configuration relative to cwd. mcporter is one
+ * of them: without --config it reads and may create ./config/mcporter.json,
+ * which would pollute whichever project happens to be active. Keep the model's
+ * command unchanged (and therefore keep its permission fingerprint valid), but
+ * resolve the real executable from the trusted turn PATH and place a
+ * session-owned shim in front of it. Nested tools such as agent-reach inherit
+ * the same PATH, so their mcporter probes use Emperor Home as well.
+ */
+function withEmperorCommandShims(
+  env: Record<string, string>,
+  scratchRoot: string,
+  command: string,
+): Record<string, string> {
+  const environmentRoot = String(env.EMPEROR_ENVIRONMENT_DIR ?? '').trim()
+  const pathValue = String(env.PATH ?? '').trim()
+  if (!environmentRoot || !pathValue) return env
+  const executable = resolveExecutableOnPath('mcporter', pathValue)
+  if (!executable) return env
+
+  const configPath = join(
+    resolve(environmentRoot),
+    'data',
+    'mcporter',
+    'mcporter.json',
+  )
+  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 })
+  if (commandMayUseMcporter(command)) ensureManagedMcporterConfig(configPath)
+  const shimRoot = join(scratchRoot, '.command-shims')
+  mkdirSync(shimRoot, { recursive: true, mode: 0o700 })
+
+  if (process.platform === 'win32') {
+    const shim = join(shimRoot, 'mcporter.cmd')
+    writeFileSync(
+      shim,
+      `@echo off\r\n"${executable.replaceAll('"', '""')}" --config "${configPath.replaceAll('"', '""')}" %*\r\n`,
+      { mode: 0o700 },
+    )
+  } else {
+    const shim = join(shimRoot, 'mcporter')
+    writeFileSync(
+      shim,
+      `#!/bin/sh\nexec ${shellSingleQuote(executable)} --config ${shellSingleQuote(configPath)} "$@"\n`,
+      { mode: 0o700 },
+    )
+    chmodSync(shim, 0o700)
+  }
+  return { ...env, PATH: `${shimRoot}${delimiter}${pathValue}` }
+}
+
+function commandMayUseMcporter(command: string): boolean {
+  const analysis = analyzeShellCommandFailClosed(command)
+  if (analysis.status !== 'parsed') return false
+  return analysis.commands.some((entry) => {
+    const executable = basename(String(entry.argv[0] ?? '')).toLowerCase()
+    return executable === 'mcporter' || executable === 'agent-reach'
+  })
+}
+
+function ensureManagedMcporterConfig(configPath: string): void {
+  if (existsSync(configPath)) return
+  const initialConfig = {
+    mcpServers: {
+      exa: { baseUrl: 'https://mcp.exa.ai/mcp' },
+    },
+  }
+  try {
+    writeFileSync(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+}
+
+function resolveExecutableOnPath(
+  name: string,
+  pathValue: string,
+): string | null {
+  const suffixes =
+    process.platform === 'win32'
+      ? String(process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+          .split(';')
+          .filter(Boolean)
+      : ['']
+  for (const entry of pathValue.split(delimiter)) {
+    const root = entry.trim()
+    if (!root) continue
+    for (const suffix of suffixes) {
+      const candidate = join(root, `${name}${suffix}`)
+      try {
+        const canonical = realpathSync(candidate)
+        if (!statSync(canonical).isFile()) continue
+        if (process.platform !== 'win32') accessSync(canonical, constants.X_OK)
+        return canonical
+      } catch {
+        // Keep scanning the trusted PATH snapshot.
+      }
+    }
+  }
+  return null
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function ownedProcessOutcome(
   result: OwnedProcessResult,
 ): RunCommandExecutionOutcome {
   if (result.status === 'completed' && result.exitCode === 0)
-    return { stdout: result.stdout, stderr: result.stderr, error: null }
+    return {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      error: null,
+    }
   const error = new Error(
     result.error ||
       (result.status === 'timeout'
@@ -693,7 +1123,12 @@ function ownedProcessOutcome(
     error.killed = true
   } else if (result.exitCode !== null) error.code = result.exitCode
   if (result.signal) error.signal = result.signal
-  return { stdout: result.stdout, stderr: result.stderr, error }
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error,
+  }
 }
 
 function commandRuntimeReadRoots(pathValue: string | undefined): string[] {
@@ -708,6 +1143,7 @@ function commandRuntimeReadRoots(pathValue: string | undefined): string[] {
 async function emitContainmentReceipt(
   ctx: ToolExecutionContext | undefined,
   receipt: ProcessContainmentReceipt,
+  processExecution: NonNullable<ToolExecutionContext['processExecution']>,
 ): Promise<void> {
   if (!ctx?.emit) return
   await ctx.emit({
@@ -721,5 +1157,10 @@ async function emitContainmentReceipt(
     process_tree: receipt.processTree,
     policy_hash: receipt.policyHash,
     reason: receipt.reason || undefined,
+    execution_boundary: processExecution.kind,
+    authorization_source:
+      processExecution.kind === 'host'
+        ? processExecution.authorization.source
+        : undefined,
   })
 }

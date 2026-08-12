@@ -160,7 +160,9 @@
   font-size: var(--font-size-xs);
 }
 
-.composer-palette-group:first-of-type .composer-palette-label {
+.composer-palette[data-mode='add']
+  .composer-palette-group:first-of-type
+  .composer-palette-label {
   display: none;
 }
 
@@ -227,6 +229,17 @@
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-palette[data-mode='slash'] .composer-palette-item b {
+  max-width: 92px;
+  border: 0;
+  padding: 0;
+  color: rgb(var(--fg) / var(--text-tertiary));
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  text-align: right;
 }
 
 .composer-palette-item[data-action='insert_skill'] .composer-palette-item-icon,

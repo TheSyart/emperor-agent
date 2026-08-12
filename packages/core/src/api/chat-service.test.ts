@@ -57,25 +57,26 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     expect(result).toMatchObject({
       turnId: 'turn_main_1',
       content: 'pong',
-      activeSessionId: api.loop.activeSessionId,
+      activeSessionId: String(session.id),
     })
     expect(events.map((event) => event.event)).toContain('user_message')
     expect(events.map((event) => event.event)).toContain('assistant_done')
     expect(
-      api.loop.activeMemoryStore.loadUnarchivedHistory().map((row) => row.role),
+      api.loop.sessionRuntimes
+        .get(String(session.id))!
+        .bindings.memoryStore.loadUnarchivedHistory()
+        .map((row) => row.role),
     ).toEqual(['user', 'assistant'])
     expect(
-      JSON.stringify(api.loop.activeMemoryStore.loadUnarchivedHistory()),
+      JSON.stringify(
+        api.loop.sessionRuntimes
+          .get(String(session.id))!
+          .bindings.memoryStore.loadUnarchivedHistory(),
+      ),
     ).toContain('Ping display')
     expect(
       existsSync(
-        join(
-          root,
-          '.emperor',
-          'sessions',
-          api.loop.activeSessionId!,
-          'history.jsonl',
-        ),
+        join(root, '.emperor', 'sessions', String(session.id), 'history.jsonl'),
       ),
     ).toBe(true)
 
@@ -144,14 +145,30 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     })
 
     const userMessage = provider.calls[0]?.messages.find(
-      (message) => message.role === 'user',
+      (message) =>
+        message.role === 'user' &&
+        String(message.content).includes('attachment evidence'),
     )
     expect(String(userMessage?.content)).toContain('attachment evidence')
-    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
+    const requestedSkillContext = provider.calls[0]?.messages.find(
+      (message) =>
+        message.role === 'user' &&
+        String(message.content).includes('REQUESTED_SKILL_CONTEXT_MARKER'),
+    )
+    expect(String(requestedSkillContext?.content)).toContain(
+      '<requested-skill-context>',
+    )
+    expect(String(requestedSkillContext?.content)).toContain(
       'REQUESTED_SKILL_CONTEXT_MARKER',
     )
-    const history = api.loop.activeMemoryStore.loadUnarchivedHistory()
-    expect(history.find((row) => row.role === 'user')).toMatchObject({
+    const history = api.loop.sessionRuntimes
+      .get(String(session.id))!
+      .bindings.memoryStore.loadUnarchivedHistory()
+    expect(
+      history.find(
+        (row) => row.role === 'user' && Array.isArray(row.attachments),
+      ),
+    ).toMatchObject({
       attachments: [expect.objectContaining({ id: attachment.id })],
       requestedSkills: [{ name: 'reviewer', source: 'slash' }],
     })
@@ -277,13 +294,13 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     await api.close()
   })
 
-  it('keeps flat user Skills visible in the runtime Skill summary', async () => {
+  it('keeps canonical user Skills visible with parsed provenance in the runtime summary', async () => {
     const root = tmp('emperor-mainline-flat-skill-')
     const stateRoot = join(root, '.emperor')
-    mkdirSync(join(stateRoot, 'skills'), { recursive: true })
+    mkdirSync(join(stateRoot, 'skills', 'flat-review'), { recursive: true })
     writeFileSync(
-      join(stateRoot, 'skills', 'flat-review.md'),
-      '# Flat Review\n\nGeneral flat reviewer.\n',
+      join(stateRoot, 'skills', 'flat-review', 'SKILL.md'),
+      '---\nname: flat-review\ndescription: General flat reviewer.\n---\n\n# Flat Review\n',
       'utf8',
     )
     const provider = new FakeProvider()
@@ -298,7 +315,7 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     await api.chat.submit({ content: 'hello', sessionId: String(session.id) })
 
     expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
-      '- flat-review: General flat reviewer.',
+      '- flat-review: General flat reviewer. [source=user status=active readOnly=false]',
     )
     await api.close()
   })
@@ -465,6 +482,126 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
     )
 
     await api.close()
+  })
+
+  it('persists, restores, and settles simultaneous pending Ask interactions per session', async () => {
+    const root = tmp('emperor-mainline-concurrent-control-')
+    const stateRoot = join(root, '.emperor')
+    const provider = new ConcurrentBlockingProvider()
+    const stage = async <T>(label: string, promise: Promise<T>): Promise<T> =>
+      await Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`control stage timed out: ${label}`)),
+            3_000,
+          ),
+        ),
+      ])
+    const api = await CoreApi.create({
+      root,
+      stateRoot,
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(provider),
+    })
+    const first = api.sessions.create({ title: 'First control owner' })
+    const second = api.sessions.create({ title: 'Second control owner' })
+
+    const askResponse = (callId: string, questionId: string) =>
+      response(null, {
+        toolCalls: [
+          {
+            id: callId,
+            name: 'ask_user',
+            arguments: {
+              questions: [
+                {
+                  id: questionId,
+                  header: 'Scope',
+                  question: 'Continue this session?',
+                  options: [
+                    { id: 'yes', label: 'Yes', description: 'Continue.' },
+                    { id: 'no', label: 'No', description: 'Stop.' },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        finishReason: 'tool_calls',
+      })
+    const firstTurn = api.chat.submit({
+      content: 'ask first',
+      turnId: 'turn_control_first',
+      sessionId: String(first.id),
+    })
+    await stage('first model call', provider.waitForCalls(1))
+    provider.finish(0, askResponse('call_first_ask', 'first_scope'))
+    await expect(stage('first Ask pause', firstTurn)).rejects.toMatchObject({
+      name: 'TurnPaused',
+    })
+
+    const secondTurn = api.chat.submit({
+      content: 'ask second',
+      turnId: 'turn_control_second',
+      sessionId: String(second.id),
+    })
+    await stage('second model call', provider.waitForCalls(2))
+    provider.finish(1, askResponse('call_second_ask', 'second_scope'))
+    await expect(stage('second Ask pause', secondTurn)).rejects.toMatchObject({
+      name: 'TurnPaused',
+    })
+
+    const firstPending = api.loop
+      .controlManagerForSessionId(String(first.id))
+      .store.load().pending
+    const secondPending = api.loop
+      .controlManagerForSessionId(String(second.id))
+      .store.load().pending
+    expect(firstPending).toMatchObject({
+      meta: { control_session_id: String(first.id) },
+    })
+    expect(secondPending).toMatchObject({
+      meta: { control_session_id: String(second.id) },
+    })
+    expect(firstPending?.id).not.toBe(secondPending?.id)
+
+    api.loop
+      .controlManagerForSessionId(String(first.id))
+      .answer(firstPending!.id, { first_scope: { option_id: 'yes' } })
+    expect(
+      api.loop.controlManagerForSessionId(String(first.id)).payload().pending,
+    ).toBeNull()
+    expect(
+      api.loop.controlManagerForSessionId(String(second.id)).payload().pending,
+    ).toMatchObject({ id: secondPending!.id })
+    await stage('first close', api.close())
+
+    const restarted = await stage(
+      'restart',
+      CoreApi.create({
+        root,
+        stateRoot,
+        templatesDir: TEMPLATES_DIR,
+        modelRouter: fakeRouter(new FakeProvider()),
+      }),
+    )
+    expect(
+      restarted.loop.controlManagerForSessionId(String(first.id)).payload()
+        .pending,
+    ).toBeNull()
+    expect(
+      restarted.loop.controlManagerForSessionId(String(second.id)).payload()
+        .pending,
+    ).toMatchObject({ id: secondPending!.id })
+    restarted.loop
+      .controlManagerForInteraction(secondPending!.id)
+      .answer(secondPending!.id, { second_scope: { option_id: 'yes' } })
+    expect(
+      restarted.loop.controlManagerForSessionId(String(second.id)).payload()
+        .pending,
+    ).toBeNull()
+    await stage('restart close', restarted.close())
   })
 
   it('serializes two submits to the same session mailbox by command id', async () => {
@@ -1810,6 +1947,62 @@ describe('MainlineTurnService (MIG-IPC-005)', () => {
 
     await api.close()
   })
+
+  it('runs a target Scheduler session while another session is awaiting Control', async () => {
+    const root = tmp('emperor-mainline-scheduler-control-isolation-')
+    const api = await CoreApi.create({
+      root,
+      stateRoot: join(root, '.emperor'),
+      templatesDir: TEMPLATES_DIR,
+      modelRouter: fakeRouter(new FakeProvider()),
+    })
+    const waiting = api.sessions.create({ title: 'Waiting session' })
+    const target = api.sessions.create({ title: 'Scheduler session' })
+    const pending = api.loop
+      .controlManagerForSessionId(String(waiting.id))
+      .createAsk({
+        questions: [
+          {
+            id: 'scope',
+            header: 'Scope',
+            question: 'Continue waiting?',
+            options: [
+              { id: 'yes', label: 'Yes', description: 'Continue.' },
+              { id: 'no', label: 'No', description: 'Stop.' },
+            ],
+          },
+        ],
+      })
+    const job = api.loop.schedulerService.addJob({
+      name: 'isolated scheduler turn',
+      schedule: new SchedulerSchedule({ kind: 'every', every_ms: 60_000 }),
+      payload: new SchedulerPayload({
+        kind: 'agent_turn',
+        message: 'run outside the waiting session',
+        deliver: false,
+        meta: {
+          [SCHEDULER_TARGET_SESSION_METADATA_KEY]: String(target.id),
+        },
+      }),
+    })
+
+    await expect(
+      api.loop.schedulerService.runJob(job.id, { force: true }),
+    ).resolves.toBe(true)
+    expect(
+      api.loop.controlManagerForSessionId(String(waiting.id)).payload().pending,
+    ).toMatchObject({ id: pending.id })
+    expect(
+      api.loop.controlManagerForSessionId(String(target.id)).payload().pending,
+    ).toBeNull()
+    expect(
+      readFileSync(
+        join(root, '.emperor', 'sessions', String(target.id), 'history.jsonl'),
+        'utf8',
+      ),
+    ).toContain('[SCHEDULER_TRIGGER]')
+    await api.close()
+  })
 })
 
 function tmp(prefix: string): string {
@@ -1924,7 +2117,10 @@ function snapshot(
   }
 }
 
-function response(content: string): LLMResponse {
+function response(
+  content: string | null,
+  overrides: Partial<LLMResponse> = {},
+): LLMResponse {
   return {
     content,
     toolCalls: [],
@@ -1932,5 +2128,6 @@ function response(content: string): LLMResponse {
     usage: { input: 1, output: 1 },
     reasoningContent: null,
     thinkingBlocks: null,
+    ...overrides,
   }
 }

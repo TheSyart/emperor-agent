@@ -1,5 +1,5 @@
 /**
- * PlanVerificationManager (MIG-CTRL-008)。对齐 Python `agent/control/plan_verification.py`。
+ * PlanVerificationManager。
  * 命令型 step 验证 + 独立 reviewer 流程。
  */
 import { nowTs } from '../util/time'
@@ -11,13 +11,15 @@ import {
 import type { GoalRecord } from '../goals/models'
 import { planMatchesGoalScope } from '../goals/scope'
 import type {
-  PlanReviewerContext,
-  PlanReviewerFact,
   PlanStepVerificationContext,
   PlanStepVerificationFact,
   PlanStepWaiverContext,
   PlanStepWaiverFact,
 } from '../goals/plan-bridge'
+import type {
+  PlanReviewerContext,
+  PlanReviewerFact,
+} from '../goals/contracts/planning'
 import type {
   GoalReviewerWaiverActionContext,
   GoalReviewerWaiverActionFact,

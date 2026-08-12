@@ -1,4 +1,4 @@
-import type { ContextSection } from '../agent/context-builder'
+import type { ContextSection } from './contracts'
 import type {
   PromptContextPlan,
   PromptContextPlanItem,

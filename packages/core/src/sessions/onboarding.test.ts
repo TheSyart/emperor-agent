@@ -582,9 +582,9 @@ describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-0
     const oldPending = first.controlManager.payload().pending as {
       id: string
     }
+    const controlPath = first.controlManager.store.stateFile
     await first.close()
 
-    const controlPath = join(stateRoot, 'control', 'state.json')
     const control = JSON.parse(readFileSync(controlPath, 'utf8')) as {
       pending: { meta: Record<string, unknown> }
     }

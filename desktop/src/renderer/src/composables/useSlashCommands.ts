@@ -3,7 +3,7 @@ import type {
   CommandDescriptor,
   CommandInvocationResult,
   CommandSurface,
-} from '@emperor/core'
+} from '@emperor/core/api'
 import { core } from '../api/http'
 import {
   rankSlashPaletteItems,
@@ -28,14 +28,12 @@ export interface SlashCommandDeps {
   resolveSessionId: () => Promise<string>
   sendMessage: (payload: string | ChatSendPayload) => boolean
   showToast: (message: string) => void
-  reloadCommands: (includeUnavailable?: boolean) => Promise<void>
   refreshAll: () => Promise<void>
   openCommandSurface: (
     surface: CommandSurface,
     params?: Record<string, unknown>,
   ) => void | Promise<void>
   activateTransitionedSession: (session: SessionInfo) => Promise<void>
-  copyLastAssistant: () => Promise<boolean>
   currentGoal: () => RuntimeGoalSummary | null
   startGoal: (outcome: string) => Promise<GoalOperationResult>
   runGoalAction: (
@@ -126,34 +124,12 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       } as const
       const result = await core('commands.invoke', request)
       await projectInvocationResult(result)
-      showCompatibilityNotice(descriptor, invocation.name, invocation.rawArgs)
       if (result.status === 'queued') scheduleQueuedResultPoll(request)
-      rememberCommand(descriptor.id)
       return result
     } catch (error) {
       deps.showToast(displayError(error))
       return null
     }
-  }
-
-  function showCompatibilityNotice(
-    descriptor: CommandDescriptor,
-    invokedName: string,
-    rawArgs: string,
-  ): void {
-    if (!(descriptor.hiddenAliases ?? []).includes(invokedName)) return
-    let replacement = `/${descriptor.name}`
-    if (invokedName.startsWith('goal-'))
-      replacement = `/goal ${invokedName.slice('goal-'.length)}`
-    else if (invokedName.startsWith('memory-'))
-      replacement = `/memory ${invokedName.slice('memory-'.length)}`
-    else if (invokedName === 'mode') {
-      const mode = rawArgs.trim().toLowerCase()
-      const migrated =
-        mode === 'edits' ? 'smart' : mode === 'auto' ? 'full' : mode
-      replacement = `/permissions${migrated ? ` ${migrated}` : ''}`
-    } else if (invokedName === 'goals') replacement = '/goal list'
-    deps.showToast(`旧命令 /${invokedName} 仍可用；建议改用 ${replacement}。`)
   }
 
   function scheduleQueuedResultPoll(request: {
@@ -213,22 +189,12 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       deps.showToast(receipt.message)
       return
     }
-    if (receipt.code === 'copy_last_assistant') {
-      const copied = await deps.copyLastAssistant()
-      deps.showToast(copied ? '已复制最后一条回复。' : '当前没有可复制的回复。')
-      return
-    }
-    if (receipt.code === 'reloaded') {
-      await deps.refreshAll()
-      await deps.reloadCommands()
-    }
     if (
       receipt.code === 'model_activated' ||
-      receipt.code === 'effort_updated' ||
+      receipt.code === 'reasoning_updated' ||
       receipt.code === 'permission_mode_updated' ||
       receipt.code.startsWith('plan_') ||
-      receipt.code.startsWith('goal_') ||
-      receipt.code === 'session_renamed'
+      receipt.code.startsWith('goal_')
     )
       await deps.refreshAll()
     deps.showToast(
@@ -248,7 +214,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     deps.showToast(
       candidates.length
         ? `未知命令 /${name}。你是否想输入：${candidates.join('、')}`
-        : `未知命令 /${name}。输入 /help 查看可用命令。`,
+        : `未知命令 /${name}。输入 / 查看可用命令。`,
     )
   }
 
@@ -321,24 +287,6 @@ function createInvocationId(): string {
       ? crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(16).slice(2)}`
   return `desktop_command_${suffix}`
-}
-
-function rememberCommand(commandId: string): void {
-  try {
-    const key = 'emperor.recent_commands.v1'
-    const current = JSON.parse(localStorage.getItem(key) || '[]') as unknown
-    const ids = Array.isArray(current)
-      ? current.map(String).filter(Boolean)
-      : []
-    localStorage.setItem(
-      key,
-      JSON.stringify(
-        [commandId, ...ids.filter((id) => id !== commandId)].slice(0, 12),
-      ),
-    )
-  } catch {
-    // Recent command ranking is a private UI preference, never a command dependency.
-  }
 }
 
 function savedExecutionPermission(

@@ -1,14 +1,8 @@
 import { createHash } from 'node:crypto'
 import { EmperorError } from '../errors'
 import { canonicalJson } from './events'
-import type { GoalEvidence } from './evidence'
-import {
-  verifyGoalPlanCompletionReceiptIntegrity,
-  type GoalPlanCompletionReceipt,
-} from './plan-bridge'
-import type { GoalReviewerReceipt, GoalReviewerWaiverReceipt } from './reviewer'
+import { verifyGoalPlanCompletionReceiptIntegrity } from './plan-bridge'
 import type { GoalGateReasonCode, GoalRecord } from './models'
-import type { GoalStore } from './store'
 import {
   commitAuthorizedGoalTerminal,
   goalCompletionGateOptions,
@@ -20,152 +14,59 @@ import {
   type GoalGateMutationSnapshot,
 } from './mutation-ledger'
 import type { GoalMutationLease } from './mutation-guard'
-import {
-  GoalPostCommitDiagnosticsStore,
-  type GoalPostCommitDiagnostic,
-} from './post-commit-diagnostics'
-import {
-  GoalGateFactStore,
-  type GoalGateFactBundle,
-  type GoalGateFactRecord,
-} from './gate-facts'
+import { GoalPostCommitDiagnosticsStore } from './post-commit-diagnostics'
+import { type GoalGateFactBundle, type GoalGateFactRecord } from './gate-facts'
 import {
   GoalCleanupJournal,
   type GoalCleanupObligation,
 } from './cleanup-journal'
 import {
-  GoalBlockerFactStore,
   goalBlockReasonSha256,
   normalizeGoalBlockReason,
   type GoalBlockerFact,
   type GoalTypedBlockerCode,
 } from './blocker-facts'
-
-export interface GoalGateReason {
-  readonly code: GoalGateReasonCode
-  readonly message: string
-  readonly criterionId?: string
-  readonly planStepId?: string
-}
-
-export type GoalGateRiskCode =
-  | 'optional_criterion_missing_evidence'
-  | 'optional_criterion_latest_failed'
-  | 'optional_criterion_evidence_invalid'
-  | 'independent_verification_waived'
-
-export interface GoalGateRiskDisclosure {
-  readonly code: GoalGateRiskCode
-  readonly criterionId?: string
-}
-
-export interface GoalGateResult {
-  readonly pass: boolean
-  readonly goalId: string
-  readonly evaluatedAt: string
-  readonly reasons: readonly GoalGateReason[]
-  readonly evidenceIds: readonly string[]
-  readonly planReceiptId: string | null
-  readonly reviewerReceiptId: string | null
-  readonly verificationWaived: boolean
-  readonly riskDisclosures: readonly GoalGateRiskDisclosure[]
-  readonly factVersions: GoalGateFactVersions
-  readonly mutationPrecondition: GoalGateMutationSnapshot | null
-}
-
-export interface GoalGateFactVersions {
-  readonly runtime: string | null
-  /** @deprecated Runtime facts supersede the legacy Control resolver version. */
-  readonly control: string | null
-  readonly scope: string | null
-  readonly storage: string | null
-  readonly hardConstraints: string | null
-  readonly cost: string | null
-}
-
-export const GOAL_COMPLETION_RECEIPT_SCHEMA_VERSION =
-  'emperor.goal.completion-receipt.v1' as const
-
-export interface GoalCompletionReceipt {
-  readonly schemaVersion: typeof GOAL_COMPLETION_RECEIPT_SCHEMA_VERSION
-  readonly id: string
-  readonly goalId: string
-  readonly goalEventSeq: number
-  readonly planReceiptId: string
-  readonly reviewerReceiptId: string | null
-  readonly evidenceIds: readonly string[]
-  readonly verificationWaived: boolean
-  readonly riskDisclosures: readonly GoalGateRiskDisclosure[]
-  readonly factVersions: GoalGateFactVersions
-  readonly mutationEpoch: number
-  readonly mutationVersions: Readonly<Record<string, string>>
-  readonly cleanupObligations: readonly GoalCleanupObligationRecord[]
-  readonly createdAt: string
-  readonly integritySha256: string
-}
-
-export type GoalPostCommitFailureCode =
-  | 'plan_token_revoke_failed'
-  | 'active_run_clear_failed'
-  | 'pending_interaction_clear_failed'
-  | 'runtime_event_emit_failed'
-  | 'diagnostic_persist_failed'
+import {
+  GOAL_COMPLETION_RECEIPT_SCHEMA_VERSION,
+  type GoalCleanupExecutionContext,
+  type GoalCleanupObligationRecord,
+  type GoalCleanupRecoveryResult,
+  type GoalCompletionGateOptions,
+  type GoalCompletionReceipt,
+  type GoalCompletionResult,
+  type GoalEvidenceFact,
+  type GoalGateFactVersions,
+  type GoalGateReason,
+  type GoalGateResult,
+  type GoalGateRiskDisclosure,
+  type GoalGateRiskCode,
+  type GoalPostCommitFailure,
+  type GoalPostCommitFailureCode,
+  type GoalReviewerDecision,
+} from './contracts/completion'
+import type { GoalPlanCompletionReceipt } from './contracts/planning'
+export { GOAL_COMPLETION_RECEIPT_SCHEMA_VERSION } from './contracts/completion'
+export type {
+  GoalCleanupExecutionContext,
+  GoalCleanupObligationRecord,
+  GoalCleanupRecoveryResult,
+  GoalCompletionCleanup,
+  GoalCompletionGateOptions,
+  GoalCompletionReceipt,
+  GoalCompletionResult,
+  GoalGateFactVersions,
+  GoalGateReason,
+  GoalGateResult,
+  GoalGateRiskCode,
+  GoalGateRiskDisclosure,
+  GoalPostCommitFailure,
+  GoalPostCommitFailureCode,
+} from './contracts/completion'
 
 type GoalPostCommitActionFailureCode = Exclude<
   GoalPostCommitFailureCode,
   'diagnostic_persist_failed'
 >
-
-export interface GoalPostCommitFailure {
-  readonly code: GoalPostCommitFailureCode
-}
-
-export interface GoalCompletionResult {
-  readonly goal: GoalRecord
-  readonly gate: GoalGateResult
-  readonly receipt: GoalCompletionReceipt
-  readonly postCommitFailures: readonly GoalPostCommitFailure[]
-}
-
-/**
- * Stable idempotency key for an at-least-once cleanup side effect. A process
- * can exit after the callback succeeds but before its acknowledgement is
- * durable, so callbacks must deduplicate retries by receiptId + obligation.
- */
-export interface GoalCleanupExecutionContext {
-  readonly receiptId: string
-  readonly goalId: string
-  readonly obligation: GoalCleanupObligation
-}
-
-export interface GoalCompletionCleanup {
-  readonly revokePlanTokens?: (
-    planId: string,
-    context: GoalCleanupExecutionContext,
-  ) => void | Promise<void>
-  readonly clearActiveRun?: (
-    goal: GoalRecord,
-    runId: string,
-    context: GoalCleanupExecutionContext,
-  ) => void | Promise<void>
-  readonly clearPendingInteraction?: (
-    goal: GoalRecord,
-    interactionId: string,
-    context: GoalCleanupExecutionContext,
-  ) => void | Promise<void>
-}
-
-export interface GoalCleanupObligationRecord {
-  readonly obligation: GoalCleanupObligation
-  readonly targetId: string
-}
-
-export interface GoalCleanupRecoveryResult {
-  readonly pending: number
-  readonly recovered: number
-  readonly failed: number
-  readonly journalCorrupt: boolean
-}
 
 export type GoalBlockerCode = GoalTypedBlockerCode
 
@@ -189,58 +90,6 @@ export class GoalCompletionGateError extends EmperorError {
     super(message, code)
     this.gate = gate
   }
-}
-
-type ReviewerDecision = GoalReviewerReceipt | GoalReviewerWaiverReceipt
-
-export interface GoalCompletionGateOptions {
-  readonly goalStore: GoalStore
-  readonly planBridge: Pick<
-    import('./plan-bridge').GoalPlanBridge,
-    'planCompletionReceipt'
-  >
-  readonly evidenceLedger: Pick<
-    import('./evidence').GoalEvidenceLedger,
-    'validatedEvidenceById'
-  >
-  readonly reviewerLedger: {
-    latestReviewerDecision(
-      goalId: string,
-      knownGoal?: GoalRecord | null,
-    ): Promise<ReviewerDecision | null>
-  }
-  readonly factStore: GoalGateFactStore
-  readonly blockerFactStore: GoalBlockerFactStore
-  /** Core-owned pure read of concrete live Gate sources. */
-  readonly inspectLiveFacts?: (
-    goal: GoalRecord,
-  ) => GoalGateFactBundle | Promise<GoalGateFactBundle>
-  readonly cleanup?: GoalCompletionCleanup
-  readonly emitRuntimeEvent?: (event: {
-    readonly type: 'goal_completed'
-    readonly goalId: string
-    readonly receiptId: string
-    readonly occurredAt: string
-  }) => void | Promise<void>
-  readonly recordDiagnostic?: (diagnostic: {
-    readonly goalId: string
-    readonly code: GoalPostCommitFailureCode
-    readonly occurredAt: string
-  }) => void | Promise<void>
-  readonly beforeDiagnosticAppend?: (
-    diagnostic: GoalPostCommitDiagnostic,
-  ) => void | Promise<void>
-  readonly beforeCleanupAck?: (
-    acknowledgement: import('./cleanup-journal').GoalCleanupAcknowledgement,
-  ) => void | Promise<void>
-  readonly onCleanupClaimTrace?: (
-    trace: import('./cleanup-journal').GoalCleanupClaimTrace,
-  ) => void
-  readonly beforeCompletionWrite?: (goal: GoalRecord) => void | Promise<void>
-  readonly beforeCompletionRecheck?: (goal: GoalRecord) => void | Promise<void>
-  readonly beforeBlockerRecheck?: () => void | Promise<void>
-  readonly beforeBlockerTerminalValidation?: () => void | Promise<void>
-  readonly now?: () => string
 }
 
 export class GoalCompletionGate {
@@ -383,7 +232,7 @@ export class GoalCompletionGate {
           })
         continue
       }
-      let evidence: GoalEvidence | null = null
+      let evidence: GoalEvidenceFact | null = null
       try {
         evidence = await options.evidenceLedger.validatedEvidenceById(
           goal.id,
@@ -423,7 +272,7 @@ export class GoalCompletionGate {
       }
     }
 
-    let reviewerDecision: ReviewerDecision | null = null
+    let reviewerDecision: GoalReviewerDecision | null = null
     let reviewerReceiptId: string | null = null
     let verificationWaived = false
     if (planReceipt?.reviewer.required) {

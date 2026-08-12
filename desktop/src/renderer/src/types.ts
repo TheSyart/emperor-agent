@@ -6,8 +6,9 @@ import type {
   InteractionStatus as CoreInteractionStatus,
   HooksConfigV2 as CoreHooksConfigV2,
   MemoryScope as CoreMemoryScope,
-  RuntimeEvent as CoreRuntimeEvent,
-} from '@emperor/core'
+  CoreOperationResult,
+} from '@emperor/core/api'
+import type { RuntimeEvent as CoreRuntimeEvent } from '@emperor/core/runtime-contract'
 
 export interface ToolInfo {
   name: string
@@ -81,6 +82,18 @@ export interface McpStatusPayload {
   ready: number
   configured: number
   tools: number
+  toolCapabilities?: Array<{
+    name: string
+    serverName: string
+    toolName: string
+    readOnly: boolean
+    exclusive: boolean
+    evidencePolicy: 'context_only' | string
+    readOnlySource: string
+    exclusiveSource: string
+    generation: number | null
+    clientId: string | null
+  }>
 }
 
 export interface HookSourcePayload {
@@ -203,7 +216,7 @@ export interface SkillInfo {
   path: string
   tags?: string
   always?: boolean
-  source?: 'builtin' | 'user' | 'project'
+  source?: 'builtin' | 'plugin' | 'verified_plugin' | 'user' | 'project'
   status?: 'active' | 'blocked' | 'blocked_pending_review' | 'invalid'
   readOnly?: boolean
   requirements?: {
@@ -212,6 +225,8 @@ export interface SkillInfo {
     env: string[]
   }
 }
+
+export type PluginSummary = CoreOperationResult<'plugins.list'>[number]
 
 export interface RequestedSkill {
   name: string
@@ -992,6 +1007,18 @@ export interface DiagnosticsPayload {
   subagents?: SubagentSupervisorDiagnosticsPayload
   agentDefinitions?: AgentDefinitionDiagnosticsPayload
   effectiveConfig?: EffectiveConfigSnapshotPayload
+  commandCatalog?: {
+    status?: string
+    registeredSkills?: number
+    conflicts?: Array<{
+      token?: string
+      skillName?: string
+      source?: string
+      reason?: string
+      winnerSkillName?: string | null
+      winnerSource?: string
+    }>
+  }
   mcp?: McpStatusPayload
   promptSnapshots?: PromptSnapshotsDiagnosticsPayload
   hybridMemory?: HybridMemoryDiagnosticsPayload
@@ -1023,6 +1050,7 @@ export interface BootstrapPayload {
   providerLabel?: string
   tools: ToolInfo[]
   skills: SkillInfo[]
+  plugins?: PluginSummary[]
   memory: MemoryPayload
   modelConfig: ModelConfigPayload
   profileOnboarding: ProfileOnboardingPayload
@@ -1711,700 +1739,29 @@ export interface HistoricalRuntimeActivityEvent {
   nextActions?: string[]
 }
 
+/**
+ * Core owns the wire discriminant and payload union. Renderer only narrows the
+ * generic domain payload slots into view-model shapes consumed by projectors.
+ */
+type RendererRuntimePayloadProjection = {
+  attachments?: AttachmentRef[]
+  artifacts?: ToolArtifactRef[]
+  control?: ControlPayload
+  interaction?: ControlInteraction
+  job?: SchedulerJob
+  member?: TeamMember
+  message?: TeamMessage
+  plan?: RuntimePlanRecord
+  profile_onboarding?: ProfileOnboardingPayload
+  session?: SessionInfo
+  step?: RuntimePlanStep
+  task?: RuntimeTaskRecord & { label?: string }
+  todos?: TodoItem[]
+}
+
 export type WsEvent =
-  | (CoreRuntimeEvent &
-      ({
-        seq?: number
-        ts?: number
-        session_id?: string
-        turn_id?: string
-        client_message_id?: string
-        owner?: Record<string, unknown>
-      } & WsEventVariants))
+  | (CoreRuntimeEvent & RendererRuntimePayloadProjection)
   | HistoricalRuntimeActivityEvent
-
-interface HookRuntimeEventFields {
-  hook_id?: string
-  hook_run_id?: string
-  event_name?: string
-  group_id?: string
-  handler_id?: string
-  handler_type?: string
-  snapshot_revision?: string
-  hook_source?: Record<string, unknown> | null
-  status?: string
-  decision?: string
-  reason?: string
-  duration_ms?: number
-}
-
-interface EnvironmentRuntimeEventFields {
-  job_id?: string
-  tool_id?: string | null
-  step_id?: string | null
-  status?: string
-  completed_steps?: number
-  total_steps?: number
-  error_code?: string | null
-  catalog_revision?: string
-  project_fingerprint?: string
-}
-
-interface GoalRuntimeEventFields {
-  goal_id: string
-  session_id: string
-  last_event_seq: number
-  updated_at: string
-}
-
-type WsEventVariants =
-  | {
-      event: 'ready'
-      model?: string
-      provider?: string
-      latest_seq?: number
-      replay_count?: number
-      resume_from?: number
-      busy?: boolean
-      control?: ControlPayload
-    }
-  | {
-      event: 'user_message'
-      content?: string
-      attachments?: AttachmentRef[]
-      source?: string
-      scheduler?: SchedulerMessageMeta
-      ui_hidden?: boolean
-    }
-  | {
-      event:
-        | 'prompt_queued'
-        | 'prompt_dequeued'
-        | 'prompt_interjected'
-        | 'prompt_cancelled'
-      prompt_id: string
-      client_message_id?: string
-      delivery?: 'queue' | 'interject'
-      target_turn_id?: string | null
-      reason?: string
-      content?: string
-    }
-  | {
-      event: 'message_tombstoned'
-      reason?: string
-      content_chars?: number
-    }
-  | { event: 'message_delta'; delta?: string }
-  | {
-      event: 'agent_thought'
-      stage?: string
-      label?: string
-      summary?: string
-      source?: string
-      status?: 'done' | 'running' | string
-      tool_call_ids?: string[]
-      tool_names?: string[]
-    }
-  | {
-      event: 'context_usage'
-      used?: number
-      max?: number
-      threshold?: number
-      usage_type?: string
-      model_entry_id?: string
-      /** Historical replay compatibility only. */
-      model_role?: string
-      model?: string
-      provider?: string
-      route_reason?: string
-      estimated_input_tokens?: number
-      /** Historical replay compatibility only. */
-      used_fallback?: boolean
-      /** Historical replay compatibility only. */
-      fallback_reason?: string
-      cost_usd_nanos?: number
-      turn_cost_usd_nanos?: number
-      cost_cap_usd_nanos?: number
-      cost_complete?: boolean
-      provider_retry_count?: number
-      provider_error_kind?: string
-      replaced_tool_results?: number
-      aggregate_replaced_tool_results?: number
-      aggregate_tool_result_budget?: number
-    }
-  | {
-      event: 'context_projection'
-      report?: Record<string, unknown>
-      message_count?: number
-    }
-  | {
-      event: 'mcp_connection_state'
-      server_name: string
-      transport?: string
-      generation: number
-      client_id?: string | null
-      state: string
-      health?: string
-      auth?: string
-      tool_count?: number
-      tools?: string[]
-      restart_attempts?: number
-      next_retry_at?: number | null
-      active_request_count?: number
-      active_request_ids?: string[]
-      last_error?: Record<string, unknown> | null
-    }
-  | {
-      event: 'model_provider_retry'
-      model?: string
-      provider?: string | null
-      usage_type?: string
-      attempt?: number
-      max_retries?: number
-      error_kind?: string
-      retry_delay_ms?: number
-      reason?: string
-    }
-  | {
-      event: 'model_attempt_started'
-      request_id: string
-      attempt_id: string
-      attempt: number
-      max_attempts: number
-      idempotency_key?: string
-    }
-  | {
-      event: 'model_attempt_succeeded'
-      request_id: string
-      attempt_id: string
-      attempt: number
-      max_attempts: number
-      idempotency_key?: string
-      duration_ms: number
-    }
-  | {
-      event: 'model_attempt_failed'
-      request_id: string
-      attempt_id: string
-      attempt: number
-      max_attempts: number
-      idempotency_key?: string
-      duration_ms: number
-      error_kind?: string
-      will_retry?: boolean
-      retry_delay_ms?: number
-    }
-  | {
-      event: 'model_attempt_cancelled'
-      request_id: string
-      attempt_id: string
-      attempt: number
-      max_attempts: number
-      idempotency_key?: string
-      duration_ms: number
-      reason?: string
-    }
-  | {
-      event: 'model_route_fallback'
-      from_model?: string
-      from_model_entry_id?: string
-      to_model?: string
-      to_model_entry_id?: string
-      reason?: string
-      error_kind?: string
-      usage_type?: string
-    }
-  | {
-      event: 'session_created'
-      session?: SessionInfo
-      client_draft_id?: string
-    }
-  | { event: 'session_title_updated'; session?: SessionInfo }
-  | {
-      event: 'tool_call'
-      id?: string
-      name: string
-      arguments?: Record<string, unknown>
-      tool_batch_id?: string
-    }
-  | {
-      event: 'tool_result'
-      id?: string
-      name?: string
-      summary?: string
-      output?: string
-      output_truncated?: boolean
-      artifacts?: ToolArtifactRef[]
-      metadata?: Record<string, unknown>
-      todos?: TodoItem[]
-      is_error?: boolean
-      tool_batch_id?: string
-    }
-  | { event: 'tool_error'; id?: string; name?: string; message?: string }
-  | {
-      event: 'tool_run_queued'
-      id?: string
-      name: string
-      arguments?: Record<string, unknown>
-      tool_batch_id?: string
-    }
-  | {
-      event: 'tool_run_started'
-      id?: string
-      name: string
-      tool_batch_id?: string
-    }
-  | {
-      event: 'tool_run_completed'
-      id?: string
-      name: string
-      summary?: string
-      output?: string
-      output_truncated?: boolean
-      artifacts?: ToolArtifactRef[]
-      metadata?: Record<string, unknown>
-      tool_batch_id?: string
-    }
-  | {
-      event: 'tool_run_failed'
-      id?: string
-      name: string
-      message?: string
-      reason_kind?: 'safety_refusal' | 'error' | string
-      metadata?: Record<string, unknown>
-      tool_batch_id?: string
-    }
-  | {
-      event: 'tool_run_cancelled'
-      id?: string
-      name: string
-      reason?: string
-      tool_batch_id?: string
-    }
-  | {
-      event: 'process_containment'
-      id?: string
-      backend?: string
-      decision?: 'sandboxed' | 'unsandboxed' | 'denied' | string
-      capability_status?: string
-      filesystem?: string
-      network?: string
-      process_tree?: boolean
-      policy_hash?: string
-      reason?: string
-    }
-  | (HookRuntimeEventFields & { event: 'hook_run_started' })
-  | (HookRuntimeEventFields & {
-      event: 'hook_run_progress'
-      message?: string | null
-    })
-  | (HookRuntimeEventFields & { event: 'hook_run_completed' })
-  | (HookRuntimeEventFields & { event: 'hook_run_failed' })
-  | (HookRuntimeEventFields & {
-      event: 'hook_decision_applied'
-      hook_ids?: string[]
-      hook_run_ids?: string[]
-    })
-  | (EnvironmentRuntimeEventFields & {
-      event: 'environment_install_started'
-    })
-  | (EnvironmentRuntimeEventFields & {
-      event: 'environment_install_progress'
-    })
-  | (EnvironmentRuntimeEventFields & {
-      event: 'environment_install_completed'
-    })
-  | (EnvironmentRuntimeEventFields & {
-      event: 'environment_install_failed'
-    })
-  | (EnvironmentRuntimeEventFields & { event: 'environment_changed' })
-  | {
-      event: 'turn_phase'
-      phase?: string
-      sequence?: number
-      iteration?: number
-      detail?: Record<string, unknown>
-    }
-  | {
-      event: 'turn_scope'
-      mode?: string
-      workspace_root?: string
-      state_root?: string
-      session_root?: string
-      project_id?: string | null
-      project_state_root?: string | null
-      active_memory_binding?: Record<string, unknown>
-    }
-  | {
-      event: 'turn_change_snapshot'
-      version: 1 | 2
-      turnId: string
-      executionId?: string
-      rootTurnId?: string
-      activeTurnId?: string
-      status: 'tracking' | 'complete' | 'partial'
-      filesChanged: number
-      additions: number
-      deletions: number
-      binaryFiles: number
-      truncated: boolean
-      files: TurnChangedFile[]
-    }
-  | {
-      event: 'plan_execution_settled'
-      settlement_id?: string
-      action:
-        | 'continue_verification'
-        | 'manual_verification_passed'
-        | 'waive_verification_and_complete'
-        | 'cancel_plan'
-        | 'pause'
-      disposition: 'resume' | 'pause' | 'complete' | 'cancel'
-      interaction?: ControlInteraction
-      plan?: Record<string, unknown>
-      message?: string
-    }
-  | {
-      event: 'git_operation_completed'
-      action:
-        | 'commit'
-        | 'push'
-        | 'pull'
-        | 'switch_branch'
-        | 'create_worktree'
-        | 'remove_worktree'
-        | 'publish_pr'
-        | 'merge_pr'
-        | 'close_pr'
-      branch?: string
-      commitOid?: string
-      remoteHost?: string
-      pullRequest?: {
-        number: number
-        url: string
-        state: string
-      }
-      completedAt: number
-    }
-  | { event: 'project_process_update'; process?: Record<string, unknown> }
-  | { event: 'website_preview_update'; preview?: Record<string, unknown> }
-  | { event: 'assistant_done'; content?: string }
-  | {
-      event: 'error'
-      message?: string
-      code?: string
-      action?: string
-      partial?: boolean
-    }
-  | { event: 'control_mode_update'; control?: ControlPayload }
-  | {
-      event: 'profile_onboarding_status_changed'
-      profile_onboarding?: ProfileOnboardingPayload
-      reason?: string
-    }
-  | { event: 'ask_request'; interaction?: ControlInteraction }
-  | {
-      event: 'ask_answered'
-      interaction?: ControlInteraction
-      resume_model?: boolean
-    }
-  | { event: 'plan_draft'; interaction?: ControlInteraction }
-  | {
-      event: 'plan_draft_delta'
-      tool_call_id?: string
-      interaction?: ControlInteraction
-    }
-  | {
-      event: 'plan_comment_added'
-      interaction?: ControlInteraction
-      comment?: string
-    }
-  | {
-      event: 'plan_approved'
-      interaction?: ControlInteraction
-      control?: ControlPayload
-      plan?: RuntimePlanRecord
-      todos?: TodoItem[]
-    }
-  | {
-      event: 'plan_entry_decision'
-      decision?: string
-      reason?: string
-      triggers?: string[]
-      suggested_questions?: string[]
-      recommended_readonly_scopes?: string[]
-    }
-  | { event: 'plan_runtime_update'; plan?: RuntimePlanRecord }
-  | { event: 'plan_step_update'; plan_id?: string; step?: RuntimePlanStep }
-  | {
-      event: 'plan_verification_start'
-      plan_id?: string
-      step_id?: string
-      command?: string
-    }
-  | {
-      event: 'plan_verification_done'
-      plan_id?: string
-      step_id?: string
-      result?: Record<string, unknown>
-    }
-  | (GoalRuntimeEventFields & {
-      event: 'goal_created'
-      goal: RuntimeGoalSummary
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_runtime_update'
-      goal: RuntimeGoalSummary
-      plan?: {
-        completed: number
-        failed: number
-        blocked: number
-        total: number
-      }
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_evidence_recorded'
-      goal?: RuntimeGoalSummary
-      criterion_id: string
-      verdict: 'pass' | 'fail'
-      source_count: number
-      summary: string
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_gate_evaluated'
-      passed: boolean
-      reason_codes: string[]
-      reason_count: number
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_completed'
-      goal: RuntimeGoalSummary
-      summary?: string
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_blocked'
-      goal: RuntimeGoalSummary
-      reason?: string
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_paused'
-      goal: RuntimeGoalSummary
-      reason?: string
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_resumed'
-      goal: RuntimeGoalSummary
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_cancelled'
-      goal: RuntimeGoalSummary
-      reason?: string
-    })
-  | (GoalRuntimeEventFields & {
-      event: 'goal_policy_stopped'
-      goal: RuntimeGoalSummary
-      reason?: string
-    })
-  | { event: 'task_started'; task?: RuntimeTaskRecord }
-  | {
-      event: 'task_progress'
-      task?: RuntimeTaskRecord
-      progress?: Record<string, unknown>
-    }
-  | {
-      event: 'task_output'
-      task?: RuntimeTaskRecord
-      offset?: number
-      chunk?: string
-    }
-  | { event: 'task_done'; task?: RuntimeTaskRecord }
-  | { event: 'task_error'; task?: RuntimeTaskRecord; error?: string }
-  | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
-  | {
-      event: 'interaction_cancelled'
-      interaction?: ControlInteraction
-      control?: ControlPayload
-    }
-  | { event: 'turn_paused'; interaction?: ControlInteraction }
-  | {
-      event: 'subagent_start'
-      parent_id?: string
-      subagent_id?: string
-      agent_type?: string
-      purpose?: string
-    }
-  | {
-      event: 'subagent_delta'
-      parent_id?: string
-      subagent_id?: string
-      agent_type?: string
-      delta?: string
-    }
-  | {
-      event: 'subagent_tool_call'
-      parent_id?: string
-      subagent_id?: string
-      id?: string
-      name: string
-      arguments?: Record<string, unknown>
-    }
-  | {
-      event: 'subagent_tool_result'
-      parent_id?: string
-      subagent_id?: string
-      id?: string
-      name?: string
-      summary?: string
-    }
-  | {
-      event: 'subagent_tool_error'
-      parent_id?: string
-      subagent_id?: string
-      id?: string
-      name?: string
-      message?: string
-    }
-  | {
-      event: 'subagent_done'
-      parent_id?: string
-      subagent_id?: string
-      agent_type?: string
-      summary?: string
-    }
-  | {
-      event: 'subagent_error'
-      parent_id?: string
-      subagent_id?: string
-      agent_type?: string
-      message?: string
-    }
-  | { event: 'team_member_update'; member?: TeamMember }
-  | { event: 'team_message'; message?: TeamMessage }
-  | {
-      event: 'team_run_start'
-      parent_id?: string
-      teammate?: string
-      role?: string
-      agent_type?: string
-      purpose?: string
-    }
-  | {
-      event: 'team_run_delta'
-      parent_id?: string
-      teammate?: string
-      delta?: string
-    }
-  | {
-      event: 'team_run_tool_call'
-      parent_id?: string
-      teammate?: string
-      id?: string
-      name: string
-      arguments?: Record<string, unknown>
-    }
-  | {
-      event: 'team_run_tool_result'
-      parent_id?: string
-      teammate?: string
-      id?: string
-      name?: string
-      summary?: string
-    }
-  | {
-      event: 'team_run_tool_error'
-      parent_id?: string
-      teammate?: string
-      id?: string
-      name?: string
-      message?: string
-    }
-  | {
-      event: 'team_run_done'
-      parent_id?: string
-      teammate?: string
-      summary?: string
-    }
-  | {
-      event: 'team_run_error'
-      parent_id?: string
-      teammate?: string
-      message?: string
-    }
-  | { event: 'scheduler_job_update'; job?: SchedulerJob; action?: string }
-  | {
-      event: 'scheduler_run_start' | 'scheduler_run_done'
-      job?: SchedulerJob
-      run?: SchedulerActiveRun
-      run_id?: string
-      task_id?: string
-    }
-  | {
-      event: 'scheduler_run_error'
-      job?: SchedulerJob
-      error?: string
-      run?: SchedulerActiveRun
-      run_id?: string
-      task_id?: string
-    }
-  | {
-      event:
-        | 'scheduler_run_cancelled'
-        | 'scheduler_run_skipped'
-        | 'scheduler_run_interrupted'
-      job?: SchedulerJob
-      reason?: string
-      run?: SchedulerActiveRun
-      run_id?: string
-      task_id?: string
-    }
-  | { event: 'task_started'; task?: RuntimeTaskRecord }
-  | {
-      event: 'task_progress'
-      task?: RuntimeTaskRecord
-      progress?: Record<string, unknown>
-    }
-  | {
-      event: 'task_output'
-      task?: RuntimeTaskRecord
-      offset?: number
-      chunk?: string
-    }
-  | { event: 'task_done'; task?: RuntimeTaskRecord }
-  | { event: 'task_error'; task?: RuntimeTaskRecord; error?: string }
-  | { event: 'task_cancelled'; task?: RuntimeTaskRecord; reason?: string }
-  | {
-      event: 'runtime_task_cancelled'
-      task?: {
-        id?: string
-        kind?: string
-        label?: string
-        turnId?: string
-        jobId?: string
-      }
-      reason?: string
-    }
-  | {
-      event: 'record_degraded'
-      kind?: string
-      reason?: string
-      taskId?: string
-    }
-
-// INV-005 绊线：desktop 手抄的事件 union 与 core RuntimeEvent 的事件名必须保持一一对应。
-// 任一侧新增/改名事件而另一侧未同步时，这两行在编译期直接报错（此前漂移是静默的）。
-type _WsEventName = WsEventVariants['event']
-type _CoreEventName = CoreRuntimeEvent['event']
-type _AssertDesktopSubset = [_WsEventName] extends [_CoreEventName]
-  ? true
-  : ['desktop 声明了 core 不存在的事件', Exclude<_WsEventName, _CoreEventName>]
-type _AssertCoreCovered = [_CoreEventName] extends [_WsEventName]
-  ? true
-  : ['core 事件未在 desktop union 声明', Exclude<_CoreEventName, _WsEventName>]
-export const WS_EVENT_NAME_PARITY: _AssertDesktopSubset extends true
-  ? _AssertCoreCovered extends true
-    ? true
-    : _AssertCoreCovered
-  : _AssertDesktopSubset = true
 
 export interface SessionInfo {
   id: string

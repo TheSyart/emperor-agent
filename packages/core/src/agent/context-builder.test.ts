@@ -11,6 +11,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import {
   ContextBuilder,
+  buildRuntimeIdentity,
   type MemoryLike,
   type SkillsLoaderLike,
   type SubagentRegistryLike,
@@ -53,7 +54,8 @@ describe('ContextBuilder (test_agent_prompt_contracts.py — template-driven)', 
   it('assembles bootstrap + identity phrases', () => {
     const prompt = build().buildSystemPrompt()
     // identity / SOUL / TOOL 短语
-    expect(prompt).toContain('调用 `load_skill` 工具')
+    expect(prompt).toContain('调用 `Skill` 工具')
+    expect(prompt).not.toMatch(/install_skill|manage_environment|load_skill/)
     expect(prompt).not.toContain('read_file 工具读取其 SKILL.md')
     expect(prompt).not.toContain('source=`')
     expect(prompt).toContain('由 `SubagentRegistry` 动态注入')
@@ -109,6 +111,76 @@ describe('ContextBuilder (test_agent_prompt_contracts.py — template-driven)', 
     expect(prompt).toContain('Workspace root: `')
     expect(prompt).not.toContain('{{ workspace }}')
     expect(prompt).not.toContain('{{ subagents_summary }}')
+  })
+
+  it('injects exact host identity after the stable prompt boundary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-runtime-identity-'))
+    const builder = new ContextBuilder(TEMPLATES_DIR, EMPTY_SKILLS, {
+      runtimeIdentity: () => ({
+        surface: 'desktop',
+        role: 'main',
+        workspace: join(root, 'workspace'),
+        emperorHome: join(root, '.emperor'),
+        emperorHomeSource: 'env',
+        userSkills: join(root, '.emperor', 'skills'),
+        projectSkills: join(root, 'workspace', '.emperor', 'skills'),
+        projectSkillsPresent: false,
+        builtinSkills: join(root, 'runtime', 'skills'),
+        managedEnvironment: join(root, '.emperor', 'environment'),
+        executionBoundary: 'host',
+      }),
+    })
+
+    const sections = builder.buildSections()
+    const identity = sections.find(
+      (section) => section.name === 'runtime_identity',
+    )!
+
+    expect(identity.stability).toBe('dynamic')
+    expect(identity.content).toContain('Product: Emperor Agent')
+    expect(identity.content).toContain('Surface: desktop')
+    expect(identity.content).toContain('Role: main')
+    expect(identity.content).toContain(`Workspace: ${join(root, 'workspace')}`)
+    expect(identity.content).toContain(
+      `Emperor Home: ${join(root, '.emperor')} (env)`,
+    )
+    expect(identity.content).toContain('Project Skills:')
+    expect(identity.content).toContain('read-only, missing')
+    expect(identity.content).toContain(
+      'Plugin Skills: Core-resolved enabled Plugin roots, read-only',
+    )
+    expect(identity.content).toContain('Skill tool: Skill')
+    expect(identity.content).toContain('Skill creation: normal file tools')
+    expect(identity.content).toContain(
+      'Dependency installation: run_command with a separate verification call',
+    )
+    expect(identity.content).toContain('Execution boundary: host')
+  })
+
+  it('identifies Plan and subagent roles as sandboxed without inheriting main-agent claims', () => {
+    const common = {
+      surface: 'headless' as const,
+      workspace: '/workspace',
+      emperorHome: '/home/me/.emperor',
+      emperorHomeSource: 'default' as const,
+      userSkills: '/home/me/.emperor/skills',
+      projectSkills: '/workspace/.emperor/skills',
+      projectSkillsPresent: true,
+      builtinSkills: '/runtime/skills',
+      managedEnvironment: '/home/me/.emperor/environment',
+      executionBoundary: 'sandbox' as const,
+    }
+
+    expect(buildRuntimeIdentity({ ...common, role: 'plan' })).toContain(
+      'Role: plan',
+    )
+    const subagent = buildRuntimeIdentity({
+      ...common,
+      role: 'subagent:reviewer',
+    })
+    expect(subagent).toContain('Role: subagent:reviewer')
+    expect(subagent).not.toContain('Role: main')
+    expect(subagent).toContain('Execution boundary: sandbox')
   })
 
   it('keeps ceremonial wording behind the explicit classic prompt profile', () => {

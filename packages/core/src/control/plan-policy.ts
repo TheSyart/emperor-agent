@@ -1,5 +1,5 @@
 /**
- * PlanDecisionPolicy (MIG-CTRL-005)。对齐 Python `agent/control/plan_policy.py`。
+ * PlanDecisionPolicy。
  * 信号集 / hard 信号 / 跳过条件 / to_runtime_contract 逐字保真。
  */
 import { ControlMode } from './models'

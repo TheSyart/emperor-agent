@@ -10,7 +10,7 @@
     "test": "npm test --workspace @emperor/core && npm --prefix desktop run test",
     "typecheck:test": "npm --prefix desktop run typecheck:test",
     "typecheck": "npm run typecheck --workspace @emperor/core && npm --prefix desktop run typecheck",
-    "build": "npm --prefix desktop run build"
+    "build": "npm run typecheck && npm --prefix desktop run build"
   },
   "workspaces": [
     "packages/*"

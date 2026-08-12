@@ -1,5 +1,5 @@
 /**
- * runner_factory (MIG-CORE-010)。对齐 Python `agent/runner_factory.py:build_routed_runner`。
+ * runner_factory。
  * 按单一激活模型构造 AgentRunner，供主 Agent、子代理和 Team 复用。
  */
 import type { LLMProvider } from '../providers/base'
@@ -23,6 +23,7 @@ import type { RunnerGoalRecordingHost } from './runner-goal-recording'
 import type { GoalContextProvider } from '../context/pipeline'
 import type { GoalToolHost } from '../goals/tools'
 import type { WorkspaceMutationHost } from '../workspace/mutation-coordinator'
+import type { PlanningRunnerUseCases } from '../plans/application-service'
 
 export function buildRoutedRunner(opts: {
   route: ModelRoute
@@ -35,9 +36,11 @@ export function buildRoutedRunner(opts: {
   compactor?: CompactorLike | null
   todoStore?: TodoStoreLike | null
   controlManager?: ControlManagerRunnerHost | null
+  planning?: PlanningRunnerUseCases | null
   maxContext?: number | null
   maxTurns?: number | null
   workspaceRoot?: string | null
+  userSkillsRoot?: string | null
   promptSections?: PromptSectionInput[] | null
   promptContextPlan?: PromptContextPlan | null
   promptSnapshotDir?: string | null
@@ -88,12 +91,14 @@ export function buildRoutedRunner(opts: {
     compactor: opts.compactor ?? null,
     todoStore: opts.todoStore ?? null,
     controlManager: opts.controlManager ?? null,
+    planning: opts.planning ?? null,
     maxContext:
       opts.maxContext ??
       snapshot.profile?.contextWindowTokens ??
       snapshot.contextWindowTokens,
     maxTurns: opts.maxTurns === undefined ? 12 : opts.maxTurns,
     workspaceRoot: opts.workspaceRoot ?? null,
+    userSkillsRoot: opts.userSkillsRoot ?? null,
     promptSections: opts.promptSections ?? null,
     promptContextPlan: opts.promptContextPlan ?? null,
     promptSnapshotDir: opts.promptSnapshotDir ?? null,

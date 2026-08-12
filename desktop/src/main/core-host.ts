@@ -2,7 +2,7 @@ import {
   CoreApi,
   coreOperationKeys as registryCoreOperationKeys,
   type CoreApiCreateOptions,
-} from '@emperor/core'
+} from '@emperor/core/api'
 import { CoreEventBridge } from './event-bridge'
 import {
   registerCoreIpc,

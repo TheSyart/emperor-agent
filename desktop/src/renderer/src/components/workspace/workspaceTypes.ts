@@ -1,4 +1,4 @@
-import type { GitStatusResult, WorkspaceSnapshot } from '@emperor/core'
+import type { GitStatusResult, WorkspaceSnapshot } from '@emperor/core/api'
 
 export type { WorkspaceSnapshot }
 

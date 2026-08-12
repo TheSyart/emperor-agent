@@ -246,9 +246,9 @@ describe('migrateLegacyStateRoot', () => {
     expect(
       readFileSync(join(stateRoot, 'model_config.json'), 'utf8'),
     ).toContain('legacy')
-    expect(
-      readFileSync(join(stateRoot, 'emperor.local.json'), 'utf8'),
-    ).toContain('classic')
+    expect(readFileSync(join(stateRoot, 'settings.json'), 'utf8')).toContain(
+      'classic',
+    )
     expect(readFileSync(join(stateRoot, 'mcp_config.json'), 'utf8')).toContain(
       'kept',
     )

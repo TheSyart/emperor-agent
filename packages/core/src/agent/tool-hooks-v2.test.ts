@@ -46,6 +46,19 @@ class GuardedTool extends Tool {
   constructor(name = 'guarded') {
     super()
     this.name = name
+    if (name.startsWith('mcp_')) {
+      this.externalContent = true
+      this.capabilityProvenance = {
+        kind: 'mcp_declaration',
+        serverName: 'test',
+        toolName: name.slice('mcp_'.length),
+        transport: 'test',
+        readOnlySource: 'tool_override',
+        exclusiveSource: 'tool_override',
+        generation: 1,
+        clientId: 'test-client',
+      }
+    }
   }
   override isReadOnly(args: Dict): boolean {
     return args.mode === 'read'
@@ -196,6 +209,7 @@ async function runTool(opts: {
         opts.arguments ?? { mode: 'read', value: 'original' },
       ),
     ]),
+    response('done'),
     response('done'),
   ])
   const runner = new AgentRunner({

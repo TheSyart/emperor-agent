@@ -2,37 +2,55 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-07-23<br>
-> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/migrate-state-root.ts`、各领域 Store
+> 最后核验：2026-08-12<br>
+> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、各领域 Store
 
 ## 两个根的区分
 
 Emperor Agent 区分两个互不重叠的根目录概念：
 
-| 概念          | 含义                                                       | 默认值                                                   | 环境变量                        |
-| ------------- | ---------------------------------------------------------- | -------------------------------------------------------- | ------------------------------- |
-| `runtimeRoot` | 应用内置资源根：模板、内置技能、静态资源                   | 开发模式为仓库根；打包模式为 Electron `userData/runtime` | `--root` / `EMPEROR_AGENT_ROOT` |
-| `stateRoot`   | 全局私有数据根：会话、记忆、配置、附件等一切运行期私有状态 | `~/.emperor-agent`（开发与打包模式一致）                 | `EMPEROR_CONFIG_DIR`            |
+| 概念                        | 含义                                                      | 默认值                                                        | 环境变量                        |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------- |
+| `runtimeRoot`               | 应用内置资源根：模板、内置技能、静态资源                  | 开发模式为仓库根；Release 为只读 `resources/runtime-defaults` | `--root` / `EMPEROR_AGENT_ROOT` |
+| Emperor Home（`stateRoot`） | 全局私有数据根：会话、记忆、配置、附件、Skills 与受管环境 | `~/.emperor`                                                  | `EMPEROR_CONFIG_DIR`            |
 
 `runtimeRoot` 里的内容是只读或半只读的“应用资源”，例如 `templates/`、`skills/`、`model_config.example.json`、`mcp_config.example.json`；仓库中的两个配置示例源文件位于 `config/examples/`，打包后仍使用前述 runtime 文件名。`stateRoot` 里的内容是持续被读写的“用户私有状态”。两者刻意分离，且默认值**不再有包含关系**（旧模型里 `stateRoot` 是 `runtimeRoot/.emperor`，新模型里两者是完全独立的目录树）。
 
 解析优先级（`packages/core/src/runtime/paths.ts` 的 `resolveRuntimePaths()`）：
 
-- `runtimeRoot`：显式 `--root`/`root` 参数 > `EMPEROR_AGENT_ROOT` > 开发模式的仓库根 / 打包模式的 `userData/runtime`。
-- `stateRoot`：显式 `stateRoot` 参数 > `EMPEROR_CONFIG_DIR` > `~/.emperor-agent`（`defaultStateRoot()`)。
+- `runtimeRoot`：显式 `--root`/`root` 参数 > `EMPEROR_AGENT_ROOT` > 开发模式的仓库根 / Release 的 `resources/runtime-defaults`。
+- Emperor Home：显式 `stateRoot` 参数 > `EMPEROR_CONFIG_DIR` > `~/.emperor`（`defaultEmperorHome()`；`defaultStateRoot()` 是兼容别名）。
 
 ## 目标目录模型
 
 ```text
-~/.emperor-agent/
-  emperor.local.json
+~/.emperor/
+  installation.json      # layout/app/runtime revision 与首次启动/迁移状态
+  settings.json          # 用户通用配置；旧 emperor.local.json 仅作一次迁移输入
   model_config.json       # schemaVersion 2；多个模型、单 active、可选显式 fallback/cost policy
   mcp_config.json
   hooks_config.json
   onboarding.json
   agents/
     agents.json           # 可选全局 user AgentDefinition source；strict schema/containment
-  skills/                # 用户全局技能（Skill API 的写入目标）
+  skills/                # 用户全局裸 Skills；文件系统是事实源
+    <skill-name>/
+      SKILL.md
+  plugins/
+    known_marketplaces.json
+    installed_plugins.json # 已物化版本；与 settings 中启用意图分离
+    marketplaces/
+    cache/               # 不可变版本内容
+    data/                # 跨版本持久数据
+    staging/             # 有界安装预览
+  environment/
+    bin/                 # Emperor ExecutionEnvironment 的 PATH 首位
+    tools/               # managed 不可变版本目录
+    data/                # 支持重定向的第三方数据根
+    downloads/           # 可删除的 SHA-256 内容寻址归档缓存
+    jobs/                # 安装计划与任务恢复状态
+    receipts/            # 来源、recipe trust、placement 与验证结果
+    registry.v1.json     # managed/external active version 与入口事实源
   memory/
     profile/
       USER.local.md      # 用户偏好档案；由 ensureUserProfileFile() 播种/维护
@@ -47,7 +65,7 @@ Emperor Agent 区分两个互不重叠的根目录概念：
     watchlist.md
     watchlist_state.json
     patch-ledger.jsonl
-    tool-results/         # 截断工具结果的内容寻址完整正文与元数据
+    tool-results/         # 仅 legacy 兼容；新结果写入对应 session/tool-results
     hybrid-index/
       index.v1.json       # 可从 Markdown 权威记忆重建的派生检索索引
     attachments/<month>/
@@ -63,6 +81,8 @@ Emperor Agent 区分两个互不重叠的根目录概念：
       message_graph.v2.jsonl # append-only message/branch/prompt queue sidecar
       runtime/events.jsonl # 兼容平面 V1 / EventEnvelope V2 的 renderer 回放日志
       _checkpoint.json
+      scratch/            # 当前 session 的下载/clone 检查区；可清理、非事实源
+      tool-results/       # 当前 session 截断工具结果的完整正文与元数据
       turn-changes/       # 活动/暂停 turn 的私有变更基线与归因账本
       prompt-snapshots/
       file-checkpoints/
@@ -106,7 +126,7 @@ Emperor Agent 区分两个互不重叠的根目录概念：
     state.json
     core-action.key
     command-invocations.json      # Slash command 幂等调用的脱敏 receipt
-    session-transitions.json      # /clear prepared → applied 会话转换事务
+    session-transitions.json      # /new prepared → applied 会话转换事务
     turn-continuation-diagnostics.jsonl # 历史版本续跑评估诊断；新主回合不再写入
   hooks/
     audit.jsonl
@@ -156,7 +176,7 @@ Code Graph 最多索引 200 个受支持文件、累计 5 MiB、单文件 5 MiB�
 
 `control/plan-execution-settlements.json` 保存 Plan 执行动作的私有 prepared/applied 事务，`control/core-action.key` 只用于本机 Core 签名。记录绑定 interaction、session、Plan、Step、审批代次和验证 requirement；不会把签名密钥、完整诊断或文件正文暴露给 renderer。启动恢复会幂等重放未完成结算，已写入 Plan metadata 的 receipt 防止同一动作重复生效。
 
-`control/command-invocations.json` 保存按 session + invocation ID 去重的命令摘要和结果，不保存敏感参数。`control/session-transitions.json` 保存 `/clear` 的 `prepared → ended → created → applied` 事务；目标 session ID 在 prepare 时即固定，重启恢复不会创建第二个 child。新 SessionEntry 记录 `parent_session_id`、`lineage_root_id` 与 `transition_reason=clear`；旧 session 不删除，进入转换屏障后不再接收新的聊天提交。命令平台不创建项目内 `.emperor/commands/` 或其他动态代码目录。
+`control/command-invocations.json` 保存按 session + invocation ID 去重的命令摘要和结果，不保存敏感参数。`control/session-transitions.json` 保存 `/new` 的 `prepared → ended → created → applied` 事务；目标 session ID 在 prepare 时即固定，重启恢复不会创建第二个 child。新 SessionEntry 记录 `parent_session_id`、`lineage_root_id` 与内部兼容值 `transition_reason=clear`；旧 session 不删除，进入转换屏障后不再接收新的聊天提交。命令平台不创建项目内 `.emperor/commands/` 或其他动态代码目录。
 
 `git/worktree-leases.json`、`subagent-worktrees/.leases.json` 与 `git/receipts/*.jsonl` 均为 Core 私有数据。Session 和子代理 worktree 都由同一个 `GitWorktreeManager` 校验仓库身份、受控路径和 lease，只允许 Emperor 创建且归属可验证的目录被自动清理。Receipt 只保存 action、branch、commit OID、脱敏 remote host、PR 编号/HTTPS URL/状态和完成时间，不保存 argv、环境变量或凭据。
 
@@ -227,23 +247,35 @@ prepared -> running -> terminal_pending -> cleared
 ## 命名易混淆点：两个 `AGENTS` 系文件
 
 - `<project>/AGENTS.md`：项目源码里的协作文档，用户手写、可提交、可 code review。Core 只读取，从不自动改写。
-- `~/.emperor-agent/projects/<project-id>/AGENTS.local.md`：**全局私有 store** 下的项目记忆，由压缩算法维护，用户一般不直接编辑，物理上完全不在项目源码树里。
+- `~/.emperor/projects/<project-id>/AGENTS.local.md`：**全局私有 store** 下的项目记忆，由压缩算法维护，用户一般不直接编辑，物理上完全不在项目源码树里。
 
 两者只差一个 `.local` 后缀，语义完全不同。任何 diagnostics/UI 文案提到后者时必须带"全局私有项目记忆"一类限定词，不能只显示裸文件名 `AGENTS.local.md`。
 
 ## 技能与模板加载顺序
 
-技能解析优先级（内容冲突时高优先级覆盖低优先级；列表展示时三层取并集）：
+技能解析优先级（内容冲突时高优先级覆盖低优先级；列表展示时各层取并集）：
 
 1. 项目技能：`<project>/.emperor/skills`（只读，仅 build 会话且绑定了项目时生效）
-2. 用户全局技能：`stateRoot/skills`（可读写，Skill API 的默认操作目标）
-3. 内置技能：`runtimeRoot/skills`（只读）
+2. 用户全局技能：`~/.emperor/skills`（普通文件语义；写入仍需权限）
+3. 已启用、已物化 Plugin 内的技能（只读）
+4. 内置技能：`runtimeRoot/skills`（只读）
 
-`ContextBuilder`（系统提示词装配）与 `LoadSkill` 工具共用同一个 `FileSkillsLoader` 实例，因此提示词里看到的技能摘要与工具实际加载到的内容永远一致。
+`ContextBuilder`（系统提示词装配）与 `Skill` 工具共用同一个 `FileSkillsLoader` 实例，因此提示词里看到的技能摘要与工具实际加载到的内容一致。项目 Skill 可以覆盖同名用户、Plugin 或内置 Skill，但 Core 对项目和 Plugin 目录只读；模型不能把安装 scope、目标路径或内部确认字段塞进工具参数。
+
+裸 Skill 不需要 `skills/installed.v1.json` 才能 active；该文件和旧 `.staging` 只作为迁移/诊断输入保留，新 Home 不创建它们。需要版本和更新语义的扩展由 Plugin application service 管理：`settings.json` 中 `enabledPlugins` 保存 scope 启用意图，`plugins/installed_plugins.json` 保存物化记录，`plugins/cache` 保存不可变内容。外部 CLI 与 Skill/Plugin 是独立结果，通过普通命令权限和独立 probe 验证，不能因为 CLI 可执行就声称 Skill 已加载。
 
 ## 迁移策略
 
-见 `packages/core/src/runtime/migrate-state-root.ts`。每次 `AgentLoop.create()` 启动都会尝试迁移，规则：
+Release 在创建 CoreHost 前先验证 runtime manifest，再由 `bootstrapEmperorHome()` 执行默认根迁移：
+
+1. 设置 `EMPEROR_CONFIG_DIR` 或显式 `stateRoot` 时不探测默认旧根。
+2. `~/.emperor` 不存在而 `~/.emperor-agent` 存在时，先在旧根写 prepared receipt，再在同一父目录原子 rename，随后规范化配置、路径字段、权限并写 applied receipt。
+3. 两个默认根并存时只使用 `~/.emperor`；不合并、不删除、不读取旧根，Diagnostics 报告遗留目录。
+4. 旧 `emperor.local.json` 在没有 `settings.json` 时原子改名；两者并存时新文件优先，旧文件移入迁移冲突区并停止读取。
+5. `installation.json` 的 layout version 高于当前应用时拒绝写入并进入恢复页，防止降级破坏数据。
+6. Skill/Plugin 语义迁移只写幂等 receipt：统计现有裸 Skill 和陈旧 legacy registry，不创建缺失目录、不删除旧数据，也不改动 `environment/bin`。
+
+更早的仓库内/runtime 布局仍由 `packages/core/src/runtime/migrate-state-root.ts` 兼容处理，规则：
 
 1. **只复制，不删除**：旧数据永远保留在原位置。
 2. **不覆盖已有文件**：目标路径已存在文件时跳过。
@@ -253,25 +285,11 @@ prepared -> running -> terminal_pending -> cleared
 4. **`USER.local.md` 路径改名单独处理**：旧路径 `runtimeRoot/.emperor/templates/USER.local.md` 复制到新路径 `stateRoot/memory/profile/USER.local.md`（这是一次路径改名，不是原样搬运，所以第 3 步特意排除了 `templates/`）。
 5. 每次迁移写入两份审计材料：`stateRoot/migrations/state-root-migration.json` 是稳定 JSON report，`stateRoot/migration-log.jsonl` 是逐文件明细日志；CoreApi diagnostics 暴露 `legacyStateMigration`（检测到的旧目录列表、复制/跳过的文件数、report/log 路径）。
 
-## 与 Claude Code 的对照证据
-
-本设计参考 Claude Code CLI 的分层模型：
-
-- 全局根目录默认 `~/.claude`，可用 `CLAUDE_CONFIG_DIR` 覆盖：`src/utils/envUtils.ts:7`
-- session transcript 存在全局 `projects/<sanitized-project-path>/<sessionId>.jsonl`，不是项目源码目录：`src/utils/sessionStorage.ts:198,202,436`
-- 输入历史是全局共享文件 `~/.claude/history.jsonl`：`src/history.ts:112`
-- settings 分层包含 `userSettings`、`projectSettings`、`localSettings`、`flagSettings`、`policySettings`：`src/utils/settings/constants.ts:7`
-- user settings 在全局，project/local settings 在项目 `.claude/`：`src/utils/settings/settings.ts:274,298`
-- auto memory 在全局 root 下按项目分区：`src/memdir/paths.ts:79,223`
-- agent memory 也区分 user/project/local scope：`src/tools/AgentTool/agentMemory.ts:12`
-
-（路径相对 `claude-code-source-code` checkout；具体行号可能随上游版本漂移，仅作架构对照参考。）
-
 ## 诊断字段速查
 
 `CoreApi.diagnostics.get()` 返回的 payload 里，与本文档相关的字段：
 
-- `paths.runtimeRoot` / `paths.stateRoot` / `paths.stateRootSource`：当前生效的两个根及 `stateRoot` 的来源（`explicit` / `env` / `default`）。
+- `paths.runtimeRoot` / `paths.stateRoot` / `paths.stateRootSource`：当前 runtimeRoot、Emperor Home 及其来源（`explicit` / `env` / `default`）。
 - `paths.sessionsRoot` / `paths.tasksRoot` / `paths.processesRoot` / `paths.attachmentsRoot` / `paths.mediaRoot` / `paths.mcpConfigPath`：具体子路径（`attachmentsRoot`/`mediaRoot` 已修正为 `stateRoot/memory/{attachments,media}` 的真实落盘位置）。
 - `legacyStateMigration`：本次启动检测到的旧存储位置、已复制/跳过的文件数。
 - `projectLegacyPrivateData`：当前绑定项目的源码目录里检测到的私有旧数据（仅提示，不自动处理）。

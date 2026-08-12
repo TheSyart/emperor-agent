@@ -262,6 +262,39 @@ describe('explicit model fallback policy', () => {
 })
 
 describe('per-Agent-turn cost cap', () => {
+  it('supports an isolated internal review usage type and output cap without tools', async () => {
+    const seen: Array<ChatArgs> = []
+    const provider = new ScriptProvider('primary', async (args, call) => {
+      seen.push(args as ChatArgs)
+      if (call === 1) throw providerError(503, 'retry review')
+      return response('{"passed":true}')
+    })
+    const runner = host(target(provider, 'primary'), null)
+    const emitted: Array<Record<string, unknown>> = []
+
+    await caller(runner).ask({
+      messages: [{ role: 'user', content: 'review' }],
+      tools: null,
+      emit: (event) => {
+        emitted.push(event)
+      },
+      usageType: 'research_grounding_review',
+      maxTokens: 384,
+    })
+
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toMatchObject({
+      maxTokens: 384,
+      tools: null,
+    })
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        event: 'model_provider_retry',
+        usage_type: 'research_grounding_review',
+      }),
+    )
+  })
+
   it('bounds output before the call, records actual cost, and blocks the next call after exhaustion', async () => {
     const maxTokens: number[] = []
     const provider = new ScriptProvider('primary', async (args) => {

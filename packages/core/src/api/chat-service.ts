@@ -101,11 +101,16 @@ export class MainlineTurnService {
 
   async submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
     const source = String(input.source ?? 'chat').trim() || 'chat'
-    if (source !== 'goal' && this.loop.activeTasks.hasActiveKind('goal')) {
-      throw new TurnBusyError()
-    }
     const turnId = input.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
     const sessionId = String(input.sessionId ?? '').trim()
+    if (
+      source !== 'goal' &&
+      sessionId &&
+      this.loop.activeTasks
+        .list()
+        .some((task) => task.kind === 'goal' && task.session_id === sessionId)
+    )
+      throw new TurnBusyError()
     const content = String(input.content ?? '')
     // P1-6：draft 首条提交在这里晋升为真实 session，先广播 session_created 再进 turn
     let promoted: SessionEntry | null = null
@@ -113,7 +118,7 @@ export class MainlineTurnService {
       const materialized = await this.materializeSession(input, 'chat.submit')
       if (materialized.promoted) promoted = materialized.session
     } else if (sessionId && source !== 'goal') {
-      this.activateOptionalSession(sessionId, `${source}.submit`)
+      this.validateOptionalSession(sessionId, `${source}.submit`)
     } else if (sessionId && !this.loop.sessionStore.get(sessionId)) {
       throw new InvalidSessionError(
         `${source}.submit received unknown session ${sessionId}`,
@@ -179,7 +184,6 @@ export class MainlineTurnService {
       }
       const reply = await this.loop.runUserTurn(content, {
         sessionId: runSessionId,
-        restoreActiveSessionAfterTurn: source === 'goal',
         turnId,
         executionId: input.executionId ?? null,
         emit: input.emit ?? null,
@@ -219,7 +223,7 @@ export class MainlineTurnService {
   ): Promise<MaterializedSession> {
     const sessionId = String(input.sessionId ?? '').trim()
     if (!sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
-      this.activateRequiredSession(sessionId, operation)
+      this.validateRequiredSession(sessionId, operation)
       const session = this.loop.sessionStore.get(sessionId)
       if (!session)
         throw new InvalidSessionError(
@@ -244,7 +248,6 @@ export class MainlineTurnService {
         project_name: project.project_name ?? null,
       },
     })
-    this.loop.activateSession(session.id)
     const clientDraftId =
       String(input.clientDraftId ?? sessionId).trim() || sessionId
     await this.emitSessionEvent(
@@ -307,48 +310,32 @@ export class MainlineTurnService {
   async submitSchedulerTurn(
     payload: SchedulerAgentTurnPayload,
   ): Promise<string> {
-    const previousSessionId = this.loop.activeSessionId
     const targetSessionId = String(payload.sessionId ?? '').trim()
-    try {
-      const result = await this.submit({
-        content: payload.content,
-        displayContent: payload.displayContent,
-        clientMessageId: payload.clientMessageId,
-        turnId: payload.clientMessageId,
-        source: payload.source,
-        sessionId: targetSessionId || null,
-        scheduler: payload.scheduler,
-        taskId: payload.taskId,
-        emit: payload.deliver ? this.loop.eventSink : async () => undefined,
-      })
-      return result.content
-    } finally {
-      if (
-        targetSessionId &&
-        previousSessionId &&
-        previousSessionId !== targetSessionId &&
-        this.loop.activeSessionId === targetSessionId
-      ) {
-        try {
-          this.loop.activateSession(previousSessionId)
-        } catch {
-          // The previously active session may have been deleted while the scheduled turn ran.
-        }
-      }
-    }
+    const result = await this.submit({
+      content: payload.content,
+      displayContent: payload.displayContent,
+      clientMessageId: payload.clientMessageId,
+      turnId: payload.clientMessageId,
+      source: payload.source,
+      sessionId: targetSessionId || null,
+      scheduler: payload.scheduler,
+      taskId: payload.taskId,
+      emit: payload.deliver ? this.loop.eventSink : async () => undefined,
+    })
+    return result.content
   }
 
-  private activateRequiredSession(sessionId: string, operation: string): void {
+  private validateRequiredSession(sessionId: string, operation: string): void {
     if (!sessionId) {
       throw new InvalidSessionError(
         `${operation} requires a real sessionId`,
         null,
       )
     }
-    this.activateOptionalSession(sessionId, operation)
+    this.validateOptionalSession(sessionId, operation)
   }
 
-  private activateOptionalSession(sessionId: string, operation: string): void {
+  private validateOptionalSession(sessionId: string, operation: string): void {
     if (sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
       throw new InvalidSessionError(
         `${operation} cannot submit draft session ${sessionId}`,
@@ -362,7 +349,6 @@ export class MainlineTurnService {
         sessionId,
       )
     }
-    this.loop.activateSession(session.id)
   }
 }
 

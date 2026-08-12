@@ -1,5 +1,11 @@
+import { createHash, randomBytes } from 'node:crypto'
 import type { SkillManager, SkillResourceDirectory } from '../skills/manager'
-import { Tool } from './base'
+import {
+  Tool,
+  type ManageSkillPathCapability,
+  type ManagedPathCapability,
+  type ToolExecutionContext,
+} from './base'
 import type { ToolParamsSchema } from './schema'
 
 const ACTIONS = new Set(['create', 'validate', 'package'])
@@ -37,33 +43,57 @@ export class ManageSkillTool extends Tool {
     },
     required: ['action', 'name'],
   }
+  override readonly domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
 
   private readonly manager: SkillManager
   private readonly onSkillsChanged: (() => void) | null
+  private readonly issuerId = randomBytes(16).toString('hex')
+  private readonly rootDigest: string
 
   constructor(manager: SkillManager, onSkillsChanged?: () => void) {
     super()
     this.manager = manager
     this.onSkillsChanged = onSkillsChanged ?? null
+    this.rootDigest = sha256(`manage_skill\0${manager.userSkillsDir}`)
   }
 
   override isReadOnly(args: Record<string, unknown>): boolean {
     return String(args.action ?? '') === 'validate'
   }
 
-  override getPath(args: Record<string, unknown>): string {
-    const name = String(args.name ?? '').trim()
-    return String(args.action ?? '') === 'package'
-      ? this.manager.packageOutputDir()
-      : this.manager.userSkillPath(name)
+  override getPath(_args: Record<string, unknown>): null {
+    // The user Skill root is outside the workspace. Runner-issued capability
+    // validation below is its sole path authority.
+    return null
   }
 
-  execute(args: Record<string, unknown>): string {
+  override issueManagedPathCapability(
+    args: Record<string, unknown>,
+  ): ManageSkillPathCapability {
+    const action = managedAction(args.action)
+    const name = String(args.name ?? '').trim()
+    const relativeTarget =
+      action === 'package' ? `skill-packages/${name}.skill` : `skills/${name}`
+    return Object.freeze({
+      version: 1,
+      toolName: 'manage_skill',
+      issuer: 'core_tool_host',
+      issuerId: this.issuerId,
+      rootDigest: this.rootDigest,
+      action,
+      relativeTarget,
+      operationFingerprint: operationFingerprint(args),
+    })
+  }
+
+  execute(args: Record<string, unknown>, ctx?: ToolExecutionContext): string {
     const action = String(args.action ?? '').trim()
     const name = String(args.name ?? '').trim()
     if (!ACTIONS.has(action))
       return 'Error: manage_skill action must be create, validate, or package'
+    if (!this.authorized(args, ctx?.managedPathCapability))
+      return 'Error: authorization_missing: manage_skill requires a trusted managed path capability'
 
     try {
       if (action === 'create') {
@@ -100,4 +130,52 @@ export class ManageSkillTool extends Tool {
       return `Error: ${error instanceof Error ? error.message : String(error)}`
     }
   }
+
+  private authorized(
+    args: Record<string, unknown>,
+    capability: ManagedPathCapability | undefined,
+  ): boolean {
+    if (!capability) return false
+    let expected: ManageSkillPathCapability
+    try {
+      expected = this.issueManagedPathCapability(args)
+    } catch {
+      return false
+    }
+    return (
+      capability.version === expected.version &&
+      capability.toolName === expected.toolName &&
+      capability.issuer === expected.issuer &&
+      capability.issuerId === expected.issuerId &&
+      capability.rootDigest === expected.rootDigest &&
+      capability.action === expected.action &&
+      capability.relativeTarget === expected.relativeTarget &&
+      capability.operationFingerprint === expected.operationFingerprint
+    )
+  }
+}
+
+function managedAction(value: unknown): ManageSkillPathCapability['action'] {
+  const action = String(value ?? '').trim()
+  if (action === 'create' || action === 'validate' || action === 'package')
+    return action
+  throw new Error('invalid manage_skill action')
+}
+
+function operationFingerprint(args: Record<string, unknown>): string {
+  return sha256(
+    JSON.stringify({
+      action: String(args.action ?? '').trim(),
+      name: String(args.name ?? '').trim(),
+      description: String(args.description ?? ''),
+      resources: Array.isArray(args.resources)
+        ? args.resources.map((item) => String(item))
+        : [],
+      content: typeof args.content === 'string' ? args.content : null,
+    }),
+  )
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
 }

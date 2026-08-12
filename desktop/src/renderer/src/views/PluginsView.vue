@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import SkillsPanel from '../components/panels/SkillsPanel.vue'
 import ToolsPanel from '../components/panels/ToolsPanel.vue'
 import McpPanel from '../components/panels/McpPanel.vue'
+import PluginsPanel from '../components/panels/PluginsPanel.vue'
 import { useAppContext } from '../composables/useAppContext'
 import { actionIcons } from '../icons'
 
@@ -11,14 +12,14 @@ const ctx = useAppContext()
 const route = useRoute()
 const router = useRouter()
 
-type PluginTab = 'skills' | 'tools' | 'mcp'
+type PluginTab = 'plugins' | 'skills' | 'tools' | 'mcp'
 
 const activeTab = computed<PluginTab>(() => {
   const raw = Array.isArray(route.params.tab)
     ? route.params.tab[0]
     : route.params.tab
-  if (raw === 'tools' || raw === 'mcp') return raw
-  return 'skills'
+  if (raw === 'skills' || raw === 'tools' || raw === 'mcp') return raw
+  return 'plugins'
 })
 
 watch(
@@ -70,11 +71,6 @@ function onSave(content: string) {
 function onDelete(name: string) {
   void ctx.runSafely(() => ctx.deleteSkill(name))
 }
-
-async function onInstalled(name: string) {
-  await ctx.refreshAll()
-  onLoad(name)
-}
 </script>
 
 <template>
@@ -82,10 +78,16 @@ async function onInstalled(name: string) {
     <header class="view-head">
       <div class="min-w-0">
         <h1>插件</h1>
-        <p>技能、工具与 MCP 是对话中可调用能力的入口</p>
+        <p>Plugin 管理版本化扩展；裸 Skill 仍是普通文件</p>
       </div>
       <div class="plugins-head-actions">
         <div class="segmented-control">
+          <button
+            :class="{ active: activeTab === 'plugins' }"
+            @click="switchTab('plugins')"
+          >
+            Plugin
+          </button>
           <button
             :class="{ active: activeTab === 'skills' }"
             @click="switchTab('skills')"
@@ -125,7 +127,11 @@ async function onInstalled(name: string) {
         @new="onNew"
         @save="onSave"
         @delete="onDelete"
-        @installed="onInstalled"
+      />
+      <PluginsPanel
+        v-else-if="activeTab === 'plugins'"
+        :plugins="ctx.boot.value?.plugins || []"
+        @changed="ctx.refreshAll()"
       />
       <ToolsPanel
         v-else-if="activeTab === 'tools'"

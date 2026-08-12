@@ -9,6 +9,7 @@ export class SubagentTaskControlTool extends Tool {
   override exclusive = false
   override requiresRuntimeContext = true
   override concurrencySafe = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
 
   constructor(private readonly supervisor: SubagentSupervisor) {

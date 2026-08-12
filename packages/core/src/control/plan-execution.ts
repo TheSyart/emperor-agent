@@ -1,5 +1,5 @@
 /**
- * PlanExecutionManager (MIG-CTRL-007)。对齐 Python `agent/control/plan_execution.py`。
+ * PlanExecutionManager。
  * approved→executing 激活、legacy Todo 迁移、已有后台 step 任务同步与工具输出 sidechain。
  * 前台 PlanStep 本身不创建持久 Task；Goal/后台协调器若显式建立了 task binding，
  * 本管理器只负责按 Plan 权威状态更新该既有绑定。

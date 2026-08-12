@@ -12,6 +12,75 @@ afterEach(() => {
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
+  it('shows source validation progress without exposing research payloads', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    emitCoreEvent(listener, {
+      event: 'research_validation',
+      stage: 'grounding_review',
+      source_count: 2,
+      fact_unit_count: 4,
+      session_id: 's1',
+      seq: 1,
+    })
+    expect(runtime.pending).toMatchObject({
+      label: '正在核验来源',
+      detail: '4 项事实 · 2 个来源',
+      tone: 'running',
+    })
+
+    emitCoreEvent(listener, {
+      event: 'research_validation',
+      stage: 'failed',
+      source_count: 2,
+      fact_unit_count: 4,
+      reason_code: 'unsupported_claim',
+      session_id: 's1',
+      seq: 2,
+    })
+    expect(runtime.pending).toMatchObject({
+      label: '来源核验未通过，正在修订',
+      tone: 'running',
+    })
+  })
+
+  it('refreshes memory and slash Skills after a live assistant completes', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 1,
+      session_id: 's1',
+      turn_id: 'turn-1',
+      content: 'done',
+    })
+    await flushPromises()
+
+    expect(options.refreshMemory).toHaveBeenCalledOnce()
+    expect(options.refreshCommands).toHaveBeenCalledOnce()
+  })
+
   it('applies live profile onboarding state changes to bootstrap', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -1700,6 +1769,49 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
   })
 
+  it('keeps background pending state session-scoped and restores it on switch', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    emitCoreEvent(listener, {
+      event: 'ask_request',
+      seq: 1,
+      session_id: 's2',
+      turn_id: 't2',
+      interaction: {
+        id: 'ask-s2',
+        kind: 'ask',
+        status: 'waiting',
+        title: '后台问题',
+      },
+    })
+
+    expect(runtime.pending.label).toBe('')
+    expect(runtime.sessionRuntimeStates.s2?.pending).toMatchObject({
+      label: '等待你回答',
+      detail: '后台问题',
+      tone: 'done',
+    })
+
+    runtime.switchSession('s2')
+    expect(runtime.pending).toMatchObject({
+      label: '等待你回答',
+      detail: '后台问题',
+      tone: 'done',
+    })
+  })
+
   it('does not resurrect a terminal session spinner from duplicate or out-of-order events', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -1788,6 +1900,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     expect(setTimeoutSpy).not.toHaveBeenCalled()
     expect(options.refreshMemory).not.toHaveBeenCalled()
+    expect(options.refreshCommands).not.toHaveBeenCalled()
     expect(runtime.messages.value.at(-1)).toMatchObject({
       role: 'assistant',
       content: 'done',
@@ -2197,6 +2310,7 @@ function testOptions() {
       runtime: { events: [], latestSeq: 0 },
     } as unknown as BootstrapPayload),
     refreshMemory: vi.fn(async () => {}),
+    refreshCommands: vi.fn(async () => {}),
     showToast: vi.fn(),
   }
 }

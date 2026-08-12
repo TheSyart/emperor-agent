@@ -64,6 +64,7 @@ const CHAT_PROJECTION_EVENTS = new Set([
   'plan_step_update',
   'plan_verification_start',
   'plan_verification_done',
+  'research_validation',
   'plan_execution_settled',
   'interaction_cancelled',
   'assistant_done',

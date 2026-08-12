@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { describe, expect, it } from 'vitest'
 import {
+  managedEnvironmentOperationFingerprint,
   NodeEnvironmentProcessRunner,
   NodeOwnedProcessRunner,
 } from './process-runner'
@@ -137,6 +138,192 @@ describe('NodeEnvironmentProcessRunner', () => {
 })
 
 describe('NodeOwnedProcessRunner', () => {
+  it('runs a managed installer only when authorization matches executable argv and cwd', async () => {
+    let sandboxPrepareCalls = 0
+    const sandbox: ProcessContainmentController = {
+      capability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'ready',
+      }),
+      prepare: () => {
+        sandboxPrepareCalls += 1
+        throw new Error(
+          'managed installation must not prepare workspace sandbox',
+        )
+      },
+    }
+    const runner = new NodeOwnedProcessRunner({ sandbox })
+    const cwd = process.cwd()
+    const args = ['-e', 'process.stdout.write("managed-ok")']
+    const fingerprint = managedEnvironmentOperationFingerprint({
+      executable: process.execPath,
+      args,
+      cwd,
+    })
+
+    const result = await runner.run({
+      executable: process.execPath,
+      args,
+      cwd,
+      env: {},
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'manage_environment',
+          operationFingerprint: fingerprint,
+          source: 'managed_environment_install',
+          planId: 'env_plan_01',
+          recipeDigest: 'b'.repeat(64),
+          toolId: 'agent-reach',
+          toolVersion: '1.2.3',
+          emperorHomeDigest: 'c'.repeat(64),
+          sessionId: 'session-01',
+          authorizationId: 'env_plan_01',
+        },
+      },
+      owner: {
+        kind: 'environment',
+        id: 'env_plan_01',
+        sessionId: 'session-01',
+      },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      exitCode: 0,
+      stdout: 'managed-ok',
+      containment: {
+        decision: 'unsandboxed',
+        backend: 'none',
+        reason: 'authorized managed environment install',
+      },
+    })
+    expect(sandboxPrepareCalls).toBe(0)
+
+    const denied = await runner.run({
+      executable: process.execPath,
+      args: [...args, 'changed'],
+      cwd,
+      env: {},
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'manage_environment',
+          operationFingerprint: fingerprint,
+          source: 'managed_environment_install',
+          planId: 'env_plan_01',
+          recipeDigest: 'b'.repeat(64),
+          toolId: 'agent-reach',
+          toolVersion: '1.2.3',
+          emperorHomeDigest: 'c'.repeat(64),
+          sessionId: 'session-01',
+          authorizationId: 'env_plan_01',
+        },
+      },
+    })
+    expect(denied).toMatchObject({
+      status: 'containment_unavailable',
+      containment: { decision: 'denied' },
+    })
+  })
+
+  it('runs an authorized host process without preparing an OS sandbox', async () => {
+    let sandboxPrepareCalls = 0
+    const observed: Array<Record<string, unknown>> = []
+    const sandbox: ProcessContainmentController = {
+      capability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'ready',
+      }),
+      prepare: () => {
+        sandboxPrepareCalls += 1
+        throw new Error('host execution must not prepare the sandbox')
+      },
+    }
+    const runner = new NodeOwnedProcessRunner({
+      sandbox,
+      onSpawn: (options) => observed.push(options),
+    })
+
+    const result = await runner.run({
+      executable: process.execPath,
+      args: ['-e', 'process.stdout.write("host-ok")'],
+      env: {},
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'run_command',
+          operationFingerprint: 'a'.repeat(64),
+          source: 'full_access',
+          permissionMode: 'full_access',
+          rule: 'mode.full_access',
+          authorizationId: null,
+        },
+      },
+    })
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      exitCode: 0,
+      stdout: 'host-ok',
+      containment: {
+        decision: 'unsandboxed',
+        backend: 'none',
+        capabilityStatus: 'not_required',
+        filesystem: 'unrestricted',
+        network: 'unrestricted',
+      },
+    })
+    expect(sandboxPrepareCalls).toBe(0)
+    expect(observed).toHaveLength(1)
+  })
+
+  it('rejects a malformed host authorization before spawn', async () => {
+    let spawned = false
+    const runner = new NodeOwnedProcessRunner({
+      onSpawn: () => {
+        spawned = true
+      },
+    })
+
+    const result = await runner.run({
+      executable: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      env: {},
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'read_file',
+          operationFingerprint: 'not-a-fingerprint',
+          source: 'full_access',
+          permissionMode: 'full_access',
+          rule: '',
+          authorizationId: null,
+        },
+      },
+    } as never)
+
+    expect(result).toMatchObject({
+      status: 'containment_unavailable',
+      containment: { decision: 'denied', backend: 'none' },
+    })
+    expect(spawned).toBe(false)
+  })
+
   it('fails closed before spawn when required containment is unavailable', async () => {
     let spawned = false
     const sandbox: ProcessContainmentController = {
@@ -177,13 +364,16 @@ describe('NodeOwnedProcessRunner', () => {
       executable: process.execPath,
       args: ['-e', 'process.exit(0)'],
       env: {},
-      containment: {
-        mode: 'required',
-        workspaceRoot: process.cwd(),
-        stateRoot: null,
-        tempRoot: process.cwd(),
-        readOnlyRoots: [],
-        network: 'deny',
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'required',
+          workspaceRoot: process.cwd(),
+          stateRoot: null,
+          tempRoot: process.cwd(),
+          readOnlyRoots: [],
+          network: 'deny',
+        },
       },
     })
 
@@ -238,13 +428,16 @@ describe('NodeOwnedProcessRunner', () => {
         executable: process.execPath,
         args: ['-e', 'process.exit(0)'],
         env: {},
-        containment: {
-          mode: 'required',
-          workspaceRoot: process.cwd(),
-          stateRoot: null,
-          tempRoot: process.cwd(),
-          readOnlyRoots: [],
-          network: 'deny',
+        execution: {
+          kind: 'sandbox',
+          policy: {
+            mode: 'required',
+            workspaceRoot: process.cwd(),
+            stateRoot: null,
+            tempRoot: process.cwd(),
+            readOnlyRoots: [],
+            network: 'deny',
+          },
         },
         onContainment: () => {
           throw new Error('receipt store unavailable')

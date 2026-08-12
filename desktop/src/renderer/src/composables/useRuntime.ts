@@ -1,4 +1,5 @@
 import { computed, reactive, ref, type Ref } from 'vue'
+import { isRuntimeEventWire } from '@emperor/core/runtime-contract'
 import type {
   AssistantMessage,
   AttachmentRef,
@@ -25,7 +26,6 @@ import {
   finishActiveThought,
   finishTimedState as finishTimedStateAt,
   ensureControlInteractionInTimeline,
-  isChatProjectionEvent,
   type ChatProjectionState,
 } from '../runtime/chatProjection'
 import { isGoalRuntimeEvent, sortRuntimeEvents } from '../runtime/events'
@@ -94,6 +94,8 @@ import {
   createTurnChangeProjection,
   latestTurnChangeForSession,
 } from '../runtime/turnChangeProjection'
+import { RuntimeControllerManager } from '../runtime/runtimeController'
+import { runtimeEventDescriptor } from '../runtime/runtimeDispatcher'
 
 function nextId(prefix: string) {
   const random =
@@ -110,6 +112,7 @@ const PROMPT_QUEUE_FULL_MESSAGE =
 export function useRuntime(options: {
   boot: Ref<BootstrapPayload | null>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
+  refreshCommands: () => Promise<void>
   showToast: (message: string) => void
   resolveDraftSession?: (id: string) => SessionInfo | undefined
   onSessionCreated?: (
@@ -162,7 +165,15 @@ export function useRuntime(options: {
   )
   // P1-7：per-session 瞬态运行/提醒状态，不落盘
   const sessionRuntimeStates = reactive<
-    Record<string, { running: boolean; attention: boolean }>
+    Record<
+      string,
+      {
+        running: boolean
+        attention: boolean
+        lastSeq: number
+        pending: PendingState
+      }
+    >
   >({})
   const lastSeq = ref(0)
   let rehydrating = false
@@ -170,6 +181,7 @@ export function useRuntime(options: {
   // W2：live 与 replay 共用 chatProjection reducer；此 adapter 把 reducer 的 state 桥到响应式 refs
   let projectionRuntime = createProjectionRuntime()
   let taskActionState = createTaskProjectionState()
+  const runtimeControllers = new RuntimeControllerManager()
 
   const pendingStore = new ActionEffectStore<
     PendingProjectionState,
@@ -195,9 +207,10 @@ export function useRuntime(options: {
   >({
     initialState: createRuntimeEffectState(),
     reducer: reduceRuntimeEffects,
-    execute: async (_effect, signal) => {
+    execute: async (effect, signal) => {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-      await options.refreshMemory(false)
+      if (effect.type === 'refresh_commands') await options.refreshCommands()
+      else await options.refreshMemory(false)
       return { refreshed: true }
     },
     taskResultAction: (result) => ({
@@ -848,15 +861,31 @@ export function useRuntime(options: {
     sessionId.value = state.activeSessionId
     lastSeq.value = state.activeLastSeq
     status.value = state.transport
-    for (const id of Object.keys(sessionRuntimeStates)) {
-      if (!state.sessions[id]) delete sessionRuntimeStates[id]
-    }
     for (const [id, value] of Object.entries(state.sessions)) {
       sessionRuntimeStates[id] = {
         running: value.running,
         attention: value.attention,
+        lastSeq: value.lastSeq,
+        pending:
+          sessionRuntimeStates[id]?.pending ??
+          createPendingProjectionState().pending,
       }
     }
+    syncRuntimeControllerStates()
+  }
+
+  function syncRuntimeControllerStates(): void {
+    const states = runtimeControllers.states()
+    for (const [id, value] of Object.entries(states)) {
+      sessionRuntimeStates[id] = {
+        running: value.running,
+        attention: value.attention,
+        lastSeq: value.lastSeq,
+        pending: { ...value.pending },
+      }
+    }
+    const selected = runtimeControllers.selected()
+    if (selected) lastSeq.value = selected.state.lastSeq
   }
 
   function settleSessionRuntime(
@@ -865,22 +894,28 @@ export function useRuntime(options: {
   ): void {
     const owner = String(id || '').trim()
     if (!owner) return
+    runtimeControllers.settle(owner, attention)
     sessionStore.dispatch({
       type: 'session_settled',
       sessionId: owner,
       attention,
     })
+    syncRuntimeControllerStates()
   }
 
   function clearAllSessionRunning(): void {
+    runtimeControllers.clearRunning()
     sessionStore.dispatch({ type: 'session_running_cleared' })
+    syncRuntimeControllerStates()
   }
 
   function clearSessionAttention(id: string): void {
+    runtimeControllers.clearAttention(id)
     sessionStore.dispatch({
       type: 'session_attention_cleared',
       sessionId: id,
     })
+    syncRuntimeControllerStates()
   }
 
   function syncSessionControlPendingFromEvent(data: WsEvent): void {
@@ -1055,12 +1090,15 @@ export function useRuntime(options: {
       const adaptedEvents = adaptLegacyRuntimeEvents(events)
       const scope =
         sessionId.value || options.boot.value?.runtime?.sessionId || null
+      runtimeControllers.replay(String(scope || ''), adaptedEvents as WsEvent[])
+      syncRuntimeControllerStates()
       const replay = replayRendererProjection(
         createRendererProjectionState(String(scope || '')),
         adaptedEvents,
       )
       for (const event of sortRuntimeEvents(adaptedEvents)) {
-        if (isChatProjectionEvent(event)) {
+        const descriptor = runtimeEventDescriptor(event.event)
+        if (descriptor?.projectors.includes('chat')) {
           applyChatProjectionEvent(
             liveProjection,
             event as WsEvent,
@@ -1084,7 +1122,7 @@ export function useRuntime(options: {
       })
       syncTaskProjection(replay.state.tasks)
       for (const event of replay.acceptedEvents) {
-        if (!isChatProjectionEvent(event as RuntimeEventEnvelope))
+        if (!runtimeEventDescriptor(event.event)?.projectors.includes('chat'))
           applyNonChatProjection(event, 'replay')
       }
       sessionStore.dispatch({
@@ -1105,36 +1143,49 @@ export function useRuntime(options: {
   }
 
   function handleSocketEvent(raw: string) {
-    let data: WsEvent
+    let parsed: unknown
     try {
-      data = JSON.parse(raw) as WsEvent
+      parsed = JSON.parse(raw)
     } catch {
       handleChatError('事件通道返回了无法解析的数据', { transport: true })
       return
     }
+    if (!isRuntimeEventWire(parsed)) {
+      handleChatError('事件通道返回了未注册的事件', { transport: true })
+      return
+    }
+    const data = parsed as WsEvent
 
     const sessionTransition = sessionStore.dispatch({
       type: 'runtime_event_received',
       origin: 'live',
       event: data,
     })
-    const decision = sessionTransition.meta
+    const sessionDecision = sessionTransition.meta
+    const controllerDecision = runtimeControllers.accept(data, 'live')
+    syncRuntimeControllerStates()
 
     if (data.event === 'ready') {
-      handleReadyEvent(data, Boolean(decision?.serverRestarted))
+      handleReadyEvent(data, Boolean(sessionDecision?.serverRestarted))
       return
     }
 
-    if (!decision?.duplicate) syncSessionControlPendingFromEvent(data)
-    if (decision?.foreign) return
-    if (decision?.accepted === false) return
+    if (!controllerDecision.duplicate && !controllerDecision.stale)
+      syncSessionControlPendingFromEvent(data)
+    if (controllerDecision.foreign) return
+    if (!controllerDecision.accepted) return
 
-    runtimeEffectStore.dispatch({
-      type: 'runtime_event_committed',
-      origin: 'live',
-      sessionId: eventOwnerSessionId(data) || sessionId.value,
-      event: data,
-    })
+    if (
+      controllerDecision.effects.some(
+        (effect) => effect.type === 'refresh_memory',
+      )
+    )
+      runtimeEffectStore.dispatch({
+        type: 'runtime_event_committed',
+        origin: 'live',
+        sessionId: eventOwnerSessionId(data) || sessionId.value,
+        event: data,
+      })
 
     if (data.event === 'record_degraded') {
       updatePending(
@@ -1146,7 +1197,7 @@ export function useRuntime(options: {
       return
     }
 
-    if (isChatProjectionEvent(data as RuntimeEventEnvelope)) {
+    if (runtimeEventDescriptor(data.event)?.projectors.includes('chat')) {
       const assistantBefore = currentAssistant.value
       applyChatProjectionEvent(liveProjection, data, projectionRuntime)
       applyPlanProjectionEvent(data)
@@ -1176,6 +1227,7 @@ export function useRuntime(options: {
         data.client_draft_id === sessionId.value &&
         data.session?.id
       ) {
+        runtimeControllers.promote(data.client_draft_id, data.session.id)
         sessionStore.dispatch({
           type: 'session_draft_materialized',
           draftId: data.client_draft_id,
@@ -1373,6 +1425,19 @@ export function useRuntime(options: {
     if (data.event === 'agent_thought') {
       return
     }
+    if (data.event === 'research_validation') {
+      const factCount = Math.max(0, Number(data.fact_unit_count || 0))
+      const sourceCount = Math.max(0, Number(data.source_count || 0))
+      const detail = `${factCount} 项事实 · ${sourceCount} 个来源`
+      if (data.stage === 'failed') {
+        updatePending('来源核验未通过，正在修订', detail)
+      } else if (data.stage === 'passed') {
+        updatePending('来源核验完成', detail, 'done', 1500)
+      } else {
+        updatePending('正在核验来源', detail)
+      }
+      return
+    }
     if (data.event === 'tool_run_queued' || data.event === 'tool_run_started') {
       return
     }
@@ -1452,7 +1517,8 @@ export function useRuntime(options: {
     }
     if (data.event === 'runtime_task_cancelled') {
       const assistant =
-        assistantForTurn(data.turn_id || data.task?.turnId) || assistantBefore
+        assistantForTurn(data.turn_id || data.task?.turnId || undefined) ||
+        assistantBefore
       if (assistant) appendInterruptionNotice(assistant, '（任务已停止。）')
       busy.value = false
       updatePending('任务已停止', data.task?.label || data.reason || '', 'done')
@@ -2133,6 +2199,7 @@ export function useRuntime(options: {
     runtimeText,
     eventTransportText,
     switchSession(id: string) {
+      const selectedController = runtimeControllers.select(id)
       messages.value = []
       queuedPrompts.value = []
       currentAssistantId.value = null
@@ -2146,6 +2213,7 @@ export function useRuntime(options: {
       syncTaskProjection(createTaskProjectionState())
       Object.assign(goalProjection, createGoalProjectionState())
       updatePending()
+      Object.assign(pending, selectedController.state.pending)
       hydratePendingInteraction(id)
       if (hasCoreBridge())
         sessionStore.dispatch({ type: 'session_switched', sessionId: id })
@@ -2153,6 +2221,7 @@ export function useRuntime(options: {
         sessionStore.dispatch({ type: 'session_switched', sessionId: id })
         markCoreBridgeUnavailable(true)
       }
+      syncRuntimeControllerStates()
       void refreshQueuedPrompts(id)
     },
     connectSocket,

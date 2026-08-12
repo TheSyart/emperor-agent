@@ -10,7 +10,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./sessions/constants": "./src/sessions/constants.ts"
+    "./api": "./src/public/api.ts",
+    "./runtime-contract": "./src/public/runtime-contract.ts",
+    "./host-capabilities": "./src/public/host-capabilities.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:acp",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/turndown": "^5.0.5",
     "esbuild": "0.21.5",
     "eslint": "^9.39.4",
     "typescript-eslint": "^8.62.1",
@@ -34,10 +37,12 @@
     "@agentclientprotocol/sdk": "1.2.1",
     "@anthropic-ai/sdk": "^0.106.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "chokidar": "^4.0.3",
     "croner": "^10.0.1",
     "jsonrepair": "^3.14.1",
     "openai": "^6.45.0",
     "smol-toml": "^1.7.0",
+    "turndown": "^7.2.1",
     "typescript": "5.9.3",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

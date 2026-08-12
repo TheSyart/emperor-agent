@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type {
   CommandCompletion,
   CommandDescriptor,
   CommandSurface,
-} from '@emperor/core'
+} from '@emperor/core/api'
 import SessionSidebar from './components/layout/SessionSidebar.vue'
-import CommandCenterDialog, {
-  type CommandCenterItem,
-} from './components/commands/CommandCenterDialog.vue'
 import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
+import { createCommandCatalogLoader } from './commandCatalog'
 import { core } from './api/http'
 import { useBootstrap } from './composables/useBootstrap'
 import { useRuntime } from './composables/useRuntime'
@@ -24,7 +22,6 @@ import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
 import { activeGoalForSession } from './runtime/selectors'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
-import { applyTheme } from './theme/tokens'
 import type {
   GoalOperationResult,
   RuntimeGoalSummary,
@@ -40,19 +37,6 @@ const hideAppSidebar = computed(
 const modelSetupPromptOpen = ref(false)
 const modelSetupDismissed = ref(false)
 const commandDescriptors = ref<CommandDescriptor[]>([])
-const commandDialog = reactive<{
-  open: boolean
-  title: string
-  description: string
-  items: CommandCenterItem[]
-  mode: 'commands' | 'sessions' | 'info'
-}>({
-  open: false,
-  title: '',
-  description: '',
-  items: [],
-  mode: 'info',
-})
 
 function showToast(message: string) {
   toast.value = message
@@ -104,6 +88,7 @@ const {
 const runtime = useRuntime({
   boot,
   refreshMemory,
+  refreshCommands: () => loadCommands(),
   showToast,
   resolveDraftSession: sessionStore.getSession,
   onSessionCreated: sessionStore.applySessionCreatedEvent,
@@ -284,7 +269,7 @@ const {
   load: loadTokens,
 } = tokensClient
 const slashPaletteItems = computed(() =>
-  buildSlashPaletteItems(commandDescriptors.value, recentCommandIds()),
+  buildSlashPaletteItems(commandDescriptors.value),
 )
 const modelSetupMessage = computed(
   () =>
@@ -316,31 +301,30 @@ async function refreshAll() {
 
 watch(sessionId, () => void loadCommands())
 
-async function loadCommands(includeUnavailable = false): Promise<void> {
-  const owner = commandCatalogSessionId()
-  if (!owner) {
-    commandDescriptors.value = []
-    return
-  }
-  try {
-    commandDescriptors.value = await core('commands.list', {
-      sessionId: owner,
-      includeUnavailable,
-      invocationSource: 'desktop',
-    })
-  } catch (cause) {
-    commandDescriptors.value = []
-    if (includeUnavailable)
-      showToast(cause instanceof Error ? cause.message : String(cause))
-  }
-}
-
 function commandCatalogSessionId(): string {
   return (
     sessionStore.backendSessionId() ||
     sessionStore.sessions.value.find((item) => !item.draft)?.id ||
     ''
   )
+}
+
+const commandCatalog = createCommandCatalogLoader({
+  currentSessionId: commandCatalogSessionId,
+  list: (owner) =>
+    core('commands.list', {
+      sessionId: owner,
+      includeUnavailable: false,
+      invocationSource: 'desktop',
+    }),
+  apply: (commands) => {
+    commandDescriptors.value = commands
+  },
+  onError: (cause) => console.warn('Unable to refresh slash commands', cause),
+})
+
+async function loadCommands(): Promise<void> {
+  await commandCatalog.refresh()
 }
 
 async function resolveCommandSessionId(): Promise<string> {
@@ -390,222 +374,24 @@ async function activateTransitionedSession(
   await loadCommands()
 }
 
-async function copyLastAssistant(): Promise<boolean> {
-  const last = [...messages.value]
-    .reverse()
-    .find((message) => message.role === 'assistant' && message.content.trim())
-  if (!last) return false
-  await navigator.clipboard.writeText(last.content)
-  return true
-}
-
 async function openCommandSurface(
   surface: CommandSurface,
-  params: Record<string, unknown> = {},
+  _params: Record<string, unknown> = {},
 ): Promise<void> {
-  const rawArgs = String(params.rawArgs ?? '').trim()
-  if (surface === 'command_center') {
-    const options = (params.options ?? {}) as Record<string, unknown>
-    const catalog =
-      options.all === true
-        ? await core('commands.list', {
-            sessionId: commandCatalogSessionId(),
-            includeUnavailable: true,
-            invocationSource: 'desktop',
-          })
-        : commandDescriptors.value
-    commandDialog.open = true
-    commandDialog.mode = 'commands'
-    commandDialog.title = '命令中心'
-    commandDialog.description =
-      '命令由 Core 校验并执行；不可用项不会绕过安全边界。'
-    commandDialog.items = catalog.map((command) => ({
-      id: command.id,
-      label: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`,
-      description: command.description,
-      meta: `${command.dangerous ? '需确认 · ' : ''}${command.source === 'builtin' ? command.category : command.source}`,
-      disabled: !command.available,
-      disabledReason: command.unavailableReason,
-    }))
+  if (surface === 'model' || surface === 'reasoning') {
+    await router.push('/settings/model').catch(() => undefined)
     return
   }
-  if (surface === 'session_search') {
-    const sessions = await sessionStore.loadArchived()
-    const needle = rawArgs.toLowerCase()
-    const matches = sessions.filter((item) =>
-      !needle
-        ? true
-        : `${item.id} ${item.title} ${item.preview}`
-            .toLowerCase()
-            .includes(needle),
-    )
-    if (needle && matches.length === 1) {
-      await onSessionActivate(matches[0]!.id)
-      await router.push('/chat').catch(() => undefined)
-      return
-    }
-    commandDialog.open = true
-    commandDialog.mode = 'sessions'
-    commandDialog.title = '恢复历史会话'
-    commandDialog.description = needle
-      ? `找到 ${matches.length} 个匹配会话`
-      : '选择要恢复的会话；当前会话不会被删除。'
-    commandDialog.items = matches.map((item) => ({
-      id: `session:${item.id}`,
-      label: item.title,
-      description: item.preview || '暂无摘要',
-      meta: item.archived_at ? '已归档' : item.mode || 'chat',
-    }))
+  if (surface === 'permissions') {
+    await router.push('/settings/general').catch(() => undefined)
     return
   }
-  if (surface === 'rename_session') {
-    const title = window.prompt('输入新的会话标题')?.trim()
-    if (title) {
-      const renamed = await sessionStore.rename(sessionId.value, title)
-      showToast(renamed ? '会话已重命名。' : '会话重命名失败。')
-    }
+  if (surface === 'plan') {
+    await activatePlan()
     return
   }
-  if (surface === 'export_session') {
-    exportCurrentConversation(rawArgs)
-    return
-  }
-  if (surface === 'theme') {
-    if (rawArgs === 'dark' || rawArgs === 'light') {
-      applyTheme(document, rawArgs)
-      localStorage.setItem('emperor.theme', rawArgs)
-    } else await router.push('/settings/appearance').catch(() => undefined)
-    return
-  }
-  const route = routeForCommandSurface(surface, rawArgs)
-  if (route) {
-    await router.push(route).catch(() => undefined)
-    return
-  }
-  if (surface === 'review' || surface === 'files' || surface === 'terminal') {
-    await router.push('/chat').catch(() => undefined)
-    window.dispatchEvent(
-      new CustomEvent('emperor:open-workspace', {
-        detail: {
-          pane: surface,
-          paths: surface === 'review' && rawArgs ? [rawArgs] : [],
-          query: surface === 'files' ? rawArgs : '',
-        },
-      }),
-    )
-    return
-  }
-  showInfoSurface(surface)
-}
-
-function routeForCommandSurface(
-  surface: CommandSurface,
-  rawArgs: string,
-): string {
-  if (surface === 'cost') return '/tokens'
-  if (surface === 'config') return '/configs'
-  if (surface === 'diagnostics') return '/settings/diagnostics'
-  if (surface === 'model' || surface === 'effort') return '/settings/model'
-  if (surface === 'permissions') return '/settings/general'
-  if (surface === 'memory') return '/memory'
-  if (surface === 'skills') return `/skills/${encodeURIComponent(rawArgs)}`
-  if (surface === 'tools') return '/tools'
-  if (surface === 'mcp') return '/plugins/mcp'
-  if (surface === 'hooks') return '/plugins/hooks'
-  if (surface === 'scheduler') return '/scheduler'
-  if (surface === 'plugins') return '/plugins/skills'
-  return ''
-}
-
-function showInfoSurface(surface: CommandSurface): void {
-  const activeTasks = boot.value?.runtime?.active_tasks ?? []
-  const descriptions: Partial<Record<CommandSurface, string>> = {
-    status: `会话：${sessionId.value}\n模型：${boot.value?.modelConfig?.current?.effectiveDisplayName || '未配置'}\n状态：${status.value}`,
-    context: `已用上下文：${boot.value?.context_used ?? 0} tokens\n运行事件：${boot.value?.runtime?.events?.length ?? 0}`,
-    plan: (() => {
-      const active = [...planProjection.plans]
-        .reverse()
-        .find((plan) =>
-          ['draft', 'waiting', 'approved', 'executing'].includes(plan.status),
-        )
-      return active ? `当前计划：${active.title}` : '当前没有活动 Plan。'
-    })(),
-    goal: currentGoal.value
-      ? `当前 Goal：${currentGoal.value.outcome}`
-      : '当前没有活动 Goal。',
-    agents: `当前活动任务：${activeTasks.length}`,
-    tasks: activeTasks.length
-      ? `${activeTasks.length} 个后台或前台任务`
-      : '当前没有后台任务。',
-  }
-  commandDialog.open = true
-  commandDialog.mode = 'info'
-  commandDialog.title = surfaceLabel(surface)
-  commandDialog.description = descriptions[surface] || '该面板已打开。'
-  commandDialog.items = []
-}
-
-async function selectCommandCenterItem(item: CommandCenterItem): Promise<void> {
-  if (item.disabled) return
-  if (item.id.startsWith('session:')) {
-    commandDialog.open = false
-    await onSessionActivate(item.id.slice('session:'.length))
-    await router.push('/chat').catch(() => undefined)
-    return
-  }
-  const command = commandDescriptors.value.find(
-    (candidate) => candidate.id === item.id,
-  )
-  if (!command) return
-  commandDialog.open = false
-  await router.push('/chat').catch(() => undefined)
-  window.dispatchEvent(
-    new CustomEvent('emperor:set-composer-draft', {
-      detail: {
-        text: `/${command.name}${command.argumentSchema.some((arg) => arg.required) ? ' ' : ''}`,
-      },
-    }),
-  )
-}
-
-function exportCurrentConversation(filename: string): void {
-  const body = messages.value
-    .map(
-      (message) =>
-        `${message.role === 'user' ? 'User' : 'Assistant'}\n${message.content}`,
-    )
-    .join('\n\n---\n\n')
-  const blob = new Blob([body], { type: 'text/markdown;charset=utf-8' })
-  const href = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = href
-  link.download =
-    filename ||
-    `${sessionStore.getSession(sessionId.value)?.title || 'conversation'}.md`
-  link.click()
-  URL.revokeObjectURL(href)
-}
-
-function surfaceLabel(surface: CommandSurface): string {
-  const labels: Partial<Record<CommandSurface, string>> = {
-    status: '当前状态',
-    context: '上下文',
-    plan: 'Plan',
-    goal: 'Goal',
-    agents: 'Agents',
-    tasks: '任务',
-  }
-  return labels[surface] || surface
-}
-
-function recentCommandIds(): string[] {
-  try {
-    const value = JSON.parse(
-      localStorage.getItem('emperor.recent_commands.v1') || '[]',
-    )
-    return Array.isArray(value) ? value.map(String) : []
-  } catch {
-    return []
+  if (surface === 'goal') {
+    await activateGoalCapture()
   }
 }
 
@@ -652,11 +438,9 @@ const {
   commandDescriptors,
   resolveSessionId: resolveCommandSessionId,
   sendMessage,
-  reloadCommands: loadCommands,
   refreshAll,
   openCommandSurface,
   activateTransitionedSession,
-  copyLastAssistant,
   showToast,
   currentGoal: () => currentGoal.value,
   startGoal,
@@ -706,6 +490,7 @@ provideAppContext({
   runtimeText,
   eventTransportText,
   commands: slashPaletteItems,
+  refreshCommands: loadCommands,
   completeSlashCommand,
   refreshAll,
   refreshMemory,
@@ -784,14 +569,6 @@ provideAppContext({
       :message="modelSetupMessage"
       @close="closeModelSetupPrompt"
       @configure="configureModelFromPrompt"
-    />
-    <CommandCenterDialog
-      :open="commandDialog.open"
-      :title="commandDialog.title"
-      :description="commandDialog.description"
-      :items="commandDialog.items"
-      @close="commandDialog.open = false"
-      @select="selectCommandCenterItem"
     />
   </template>
 

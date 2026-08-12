@@ -58,13 +58,13 @@ API Key 和本地绝对路径不应出现在普通模型上下文中。MCP、网
 | 文件检查点   | `sessions/<session-id>/file-checkpoints/` | 受管文件工具的本地回退  |
 | 记忆版本     | `memory/versions/` 及相关索引             | 查看和恢复历史快照      |
 
-表中路径都相对 `stateRoot`。默认 `stateRoot` 是 `~/.emperor-agent`。
+表中路径都相对 Emperor Home（内部兼容名 `stateRoot`）。默认位置是 `~/.emperor`。
 
 `_checkpoint.json` 是 turn/压缩恢复边界，不保存项目文件内容；`file-checkpoints/` 是默认关闭的 Beta 文件快照，两者不是同一协议。文件检查点只通过诊断页的预览与确认入口使用，详见[诊断与排障](diagnostics-troubleshooting.md#文件检查点与回退beta)。
 
 Chat 压缩主要更新全局长期记忆和用户档案；Build 压缩把项目事实写入项目私有记忆。Scope repair 会阻止项目事实误写入全局记忆。项目源码里的 `AGENTS.md` 不属于这个写入链路。
 
-可以使用 `/memory` 查看摘要、`/memory log` 查看版本、`/memory restore <id>` 恢复指定快照。旧 `/memory-log` 和 `/memory-restore` 仍可执行一个迁移周期，但不会出现在普通命令面板。设置页的“记忆”也提供内容、上下文解释和版本操作。
+设置页的“记忆”提供摘要、内容、上下文解释、版本记录和恢复操作。斜杠菜单不再提供 Memory 管理命令。
 
 源码中包含默认关闭的 Hybrid Memory 实验路径。`off` 不建立派生索引；`eval` 只做影子检索并在诊断页显示有效模式、检索策略、fallback 次数和索引大小，不改变发送给模型的内容。即使配置为 `on`，缺少与当前 embedding provider 绑定的通过评估时也会自动降为 `eval`。当前发行物不内置生产 embedding provider，因此这不是设置页里可直接开启的正式功能；Markdown 记忆仍是权威数据，删除 `memory/hybrid-index/` 不会删除记忆。
 
@@ -96,7 +96,7 @@ Composer 一次最多保留 5 个待发送附件。支持：
 
 ## 备份与迁移
 
-备份时应先完全退出应用，再复制整个 `stateRoot`。只复制 `memory/` 会遗漏 sessions、Goal、Scheduler、MCP 和模型配置。
+备份时应先完全退出应用，再复制整个 Emperor Home。只复制 `memory/` 会遗漏 sessions、Goal、Scheduler、MCP、用户 Skills、受管工具环境和模型配置。
 
 旧布局迁移采用“只复制、不删除、不覆盖已有目标”的策略。迁移结果可在诊断页查看。不要在应用运行时手工改写 JSONL、Goal ledger 或 checkpoint。
 

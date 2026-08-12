@@ -1,13 +1,13 @@
 /**
- * 控制态模型 (MIG-CTRL-001)。对齐 Python `agent/control/models.py`。
+ * 控制态模型。
  * Interaction/Question/QuestionOption/ControlState + from_dict/to_dict 校验逐字保真。
- * Control v2 会由 ControlStore.load() 将 v1 的 accept_edits/auto 以及 Plan
- * previous_mode 原子迁移为 smart_auto/full_access。
+ * Control v3 会由 ControlStore.load() 将旧版 full_access 原子迁移为
+ * smart_auto，避免宿主直执行语义升级后静默扩大既有会话权限。
  */
 import { nowTs } from '../util/time'
 import { randomUUID } from 'node:crypto'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/
 
 export enum ControlMode {
@@ -463,11 +463,16 @@ function migratePermissionMode(value: string, sourceVersion: number): string {
     .toLowerCase()
   if (!normalized || normalized === 'normal') return ControlMode.ASK_BEFORE_EDIT
   if (normalized === 'accept_edits') return ControlMode.SMART_AUTO
-  if (normalized === 'auto') return ControlMode.FULL_ACCESS
+  if (normalized === 'auto')
+    return sourceVersion < SCHEMA_VERSION
+      ? ControlMode.SMART_AUTO
+      : ControlMode.FULL_ACCESS
+  if (normalized === ControlMode.FULL_ACCESS && sourceVersion < SCHEMA_VERSION)
+    return ControlMode.SMART_AUTO
   if (sourceVersion < SCHEMA_VERSION) {
     if (normalized === 'accept-edits' || normalized === 'accept edits')
       return ControlMode.SMART_AUTO
-    if (normalized === 'automatic') return ControlMode.FULL_ACCESS
+    if (normalized === 'automatic') return ControlMode.SMART_AUTO
   }
   return normalized
 }

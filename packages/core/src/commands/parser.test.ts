@@ -7,18 +7,21 @@ import {
 
 describe('command parser', () => {
   it('only treats a leading slash command token as a command', () => {
-    expect(parseCommandInput('请打开 /help')).toBeNull()
+    expect(parseCommandInput('请打开 /model')).toBeNull()
     expect(parseCommandInput('/Users/anhuike/project')).toBeNull()
-    expect(parseCommandInput('/help')).toMatchObject({ name: 'help', args: [] })
+    expect(parseCommandInput('/model')).toMatchObject({
+      name: 'model',
+      args: [],
+    })
   })
 
   it('tokenizes quotes, escaped whitespace, options and the option terminator deterministically', () => {
     expect(
       tokenizeCommandInput(
-        String.raw`/export "日报 1.md" --format=markdown --flag path\ with\ spaces -- --literal`,
+        String.raw`/compact "日报 1.md" --format=markdown --flag path\ with\ spaces -- --literal`,
       ),
     ).toEqual([
-      '/export',
+      '/compact',
       '日报 1.md',
       '--format=markdown',
       '--flag',
@@ -29,19 +32,19 @@ describe('command parser', () => {
 
     expect(
       parseCommandInput(
-        String.raw`/export "日报 1.md" --format=markdown --flag -- --literal`,
+        String.raw`/compact "日报 1.md" --format=markdown --flag -- --literal`,
       ),
     ).toMatchObject({
-      name: 'export',
+      name: 'compact',
       args: ['日报 1.md', '--literal'],
       options: { format: 'markdown', flag: true },
     })
   })
 
   it('rejects unterminated quotes and never performs shell expansion', () => {
-    expect(() => tokenizeCommandInput(`/rename "unfinished`)).toThrow(
+    expect(() => tokenizeCommandInput(`/goal "unfinished`)).toThrow(
       CommandParseError,
     )
-    expect(parseCommandInput('/rename $(whoami)')?.args).toEqual(['$(whoami)'])
+    expect(parseCommandInput('/goal $(whoami)')?.args).toEqual(['$(whoami)'])
   })
 })

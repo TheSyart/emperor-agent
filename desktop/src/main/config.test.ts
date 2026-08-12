@@ -7,19 +7,19 @@ const throwingRead = (): string => {
 }
 
 describe('resolveConfig', () => {
-  it('falls back to defaults when emperor.local.json is unreadable', () => {
+  it('falls back to defaults when settings.json is unreadable', () => {
     const cfg = resolveConfig({ readFile: throwingRead })
     expect(cfg.configSource).toBe('default')
   })
 
-  it('detects a readable emperor.local.json', () => {
+  it('detects a readable settings.json', () => {
     const readFile = () =>
       JSON.stringify({ webui: { host: '0.0.0.0', port: 9100 } })
     const cfg = resolveConfig({ readFile })
     expect(cfg.configSource).toBe('file')
   })
 
-  it('honors --root and EMPEROR_AGENT_ROOT for runtimeRoot only (emperor.local.json now lives under stateRoot)', () => {
+  it('honors --root and EMPEROR_AGENT_ROOT for runtimeRoot only (settings.json lives under stateRoot)', () => {
     const readFile = throwingRead
 
     const explicit = resolveConfig({
@@ -85,7 +85,7 @@ describe('resolveConfig', () => {
     expect(withEnv.stateRoot).toBe('/manual-state')
     expect(withEnv.stateRootSource).toBe('env')
 
-    // Without EMPEROR_CONFIG_DIR, stateRoot falls back to the real ~/.emperor-agent default —
+    // Without EMPEROR_CONFIG_DIR, stateRoot falls back to the real ~/.emperor default —
     // only assert the source tag here, never assert/act on the literal path in a unit test.
     const withoutEnv = resolveConfig({
       argv: ['--root', '/manual-runtime'],
@@ -110,7 +110,7 @@ describe('resolveConfig', () => {
     expect(cfg.stateRoot).toBe('/private-state')
   })
 
-  it('reads emperor.local.json from stateRoot, not runtimeRoot', () => {
+  it('reads settings.json from stateRoot, not runtimeRoot', () => {
     const seen: string[] = []
     const readFile = (p: string): string => {
       seen.push(p)
@@ -124,6 +124,6 @@ describe('resolveConfig', () => {
     })
 
     expect(cfg.configSource).toBe('file')
-    expect(seen).toEqual([path.join('/manual-state', 'emperor.local.json')])
+    expect(seen).toEqual([path.join('/manual-state', 'settings.json')])
   })
 })

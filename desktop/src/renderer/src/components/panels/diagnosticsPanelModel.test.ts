@@ -225,6 +225,20 @@ describe('diagnostics panel model', () => {
           },
         ],
       },
+      commandCatalog: {
+        status: 'warning',
+        registeredSkills: 3,
+        conflicts: [
+          {
+            token: 'new',
+            skillName: 'new',
+            source: 'user',
+            reason: 'builtin_collision',
+            winnerSkillName: null,
+            winnerSource: 'builtin',
+          },
+        ],
+      },
       promptSnapshots: {
         count: 2,
         recent: [
@@ -288,7 +302,7 @@ describe('diagnostics panel model', () => {
     })
     expect(rows.find((row) => row.id === 'global-state-root')).toMatchObject({
       label: '全局私有数据根',
-      value: '默认 ~/.emperor-agent',
+      value: '默认 ~/.emperor',
       detail: '/Users/me/.emperor-agent',
       path: '/Users/me/.emperor-agent',
     })
@@ -335,6 +349,15 @@ describe('diagnostics panel model', () => {
     expect(
       rows.find((row) => row.id === 'effective-config-mcp-config')?.detail,
     ).toContain('[REDACTED]')
+    expect(
+      rows.find((row) => row.id === 'slash-command-catalog'),
+    ).toMatchObject({
+      value: '3 Skills · 1 conflicts',
+      tone: 'warn',
+    })
+    expect(
+      rows.find((row) => row.id === 'slash-command-catalog')?.detail,
+    ).toContain('/new · user:new → builtin (builtin_collision)')
     expect(rows.find((row) => row.id === 'scheduler-store')).toMatchObject({
       label: 'Scheduler Store',
       value: '异常',

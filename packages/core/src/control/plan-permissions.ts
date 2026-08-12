@@ -1,5 +1,5 @@
 /**
- * PlanPermissionTokenManager (MIG-CTRL-009)。对齐 Python `agent/control/plan_permissions.py`。
+ * PlanPermissionTokenManager。
  * approved plan active step 的一次性 run_command token；高风险命令永不发放 token (PE-13)。
  */
 import { nowTs } from '../util/time'

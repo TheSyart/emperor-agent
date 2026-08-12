@@ -123,13 +123,19 @@ describe('LspSupervisor trust and lifecycle', () => {
       executable: '/trusted/typescript-language-server',
       args: ['--stdio'],
       owner: { kind: 'lsp', sessionId: 'session-a' },
-      containment: {
-        mode: 'required',
-        network: 'deny',
-        readOnlyRoots: [await realpath(workspaceRoot)],
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'required',
+          network: 'deny',
+          readOnlyRoots: [await realpath(workspaceRoot)],
+        },
       },
     })
-    expect(runtime.requests[0]!.containment.workspaceRoot).not.toBe(
+    expect(runtime.requests[0]!.execution.kind).toBe('sandbox')
+    const execution = runtime.requests[0]!.execution
+    if (execution.kind !== 'sandbox') throw new Error('expected sandbox')
+    expect(execution.policy.workspaceRoot).not.toBe(
       await realpath(workspaceRoot),
     )
     expect(runtime.children[0]!.clientMessages).toEqual(

@@ -24,7 +24,7 @@ import type {
   WatchlistDecision,
 } from '../types'
 import type { SlashPaletteItem } from '../commands'
-import type { CommandCompletion } from '@emperor/core'
+import type { CommandCompletion } from '@emperor/core/api'
 import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
@@ -58,6 +58,7 @@ export interface AppContext {
   eventTransportText: () => string
 
   commands: ComputedRef<SlashPaletteItem[]>
+  refreshCommands: () => Promise<void>
   completeSlashCommand: (
     commandId: string,
     rawArgs: string,

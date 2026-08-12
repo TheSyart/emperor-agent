@@ -1,9 +1,10 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { SessionEntry } from '../sessions/store'
 import { CoreUnavailableError } from '../runtime/lifecycle'
-import { CORE_API_ROUTE_OPERATIONS, type CoreApi } from './core-api'
+import type { CoreApi } from './core-api'
 import {
   CORE_OPERATION_REGISTRY,
+  coreOperationDescriptors,
   coreOperationKeys,
   invokeCoreOperation,
   isCoreOperationKey,
@@ -13,12 +14,24 @@ import {
 } from './operations'
 
 describe('Core operation registry', () => {
-  it('covers every public CoreApi route exactly once', () => {
-    const routeKeys = CORE_API_ROUTE_OPERATIONS.map((entry) => entry.key).sort()
+  it('owns every public CoreApi operation in one descriptor registry', () => {
+    const descriptors = coreOperationDescriptors()
+    const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(156)
-    expect(coreOperationKeys()).toEqual(routeKeys)
-    expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(routeKeys)
+    expect(coreOperationKeys()).toHaveLength(165)
+    expect(coreOperationKeys()).toEqual(descriptorKeys)
+    expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
+    expect(
+      descriptors.every((descriptor) =>
+        Boolean(
+          descriptor.handlerKey === descriptor.key &&
+          descriptor.audience === 'main_renderer' &&
+          descriptor.classification === 'application_operation' &&
+          descriptor.inputSchema ===
+            CORE_OPERATION_REGISTRY[descriptor.key].args,
+        ),
+      ),
+    ).toBe(true)
     expect(coreOperationKeys()).toEqual(
       expect.arrayContaining([
         'workspace.snapshot',
@@ -44,8 +57,96 @@ describe('Core operation registry', () => {
         'terminals.write',
         'terminals.resize',
         'terminals.close',
+        'projectProcesses.readOutput',
+        'projectProcesses.stop',
+        'projectProcesses.restart',
+        'references.resolve',
       ]),
     )
+  })
+
+  it('validates the complete project runtime and reference operation boundary', () => {
+    const registry = CORE_OPERATION_REGISTRY as unknown as Record<
+      string,
+      { args: { parse(input: unknown): unknown } }
+    >
+
+    expect(
+      registry['projectProcesses.readOutput']?.args.parse([
+        { sessionId: 'session-1', processId: 'process-1', afterSeq: 0 },
+      ]),
+    ).toEqual([{ sessionId: 'session-1', processId: 'process-1', afterSeq: 0 }])
+    expect(
+      registry['projectProcesses.stop']?.args.parse([
+        { sessionId: 'session-1', processId: 'process-1', expectedRevision: 2 },
+      ]),
+    ).toEqual([
+      { sessionId: 'session-1', processId: 'process-1', expectedRevision: 2 },
+    ])
+    expect(
+      registry['projectProcesses.restart']?.args.parse([
+        {
+          sessionId: 'session-1',
+          processId: 'process-1',
+          expectedRevision: 2,
+          confirmed: true,
+          invocationId: 'restart-1',
+        },
+      ]),
+    ).toEqual([
+      {
+        sessionId: 'session-1',
+        processId: 'process-1',
+        expectedRevision: 2,
+        confirmed: true,
+        invocationId: 'restart-1',
+      },
+    ])
+    expect(
+      registry['references.resolve']?.args.parse([
+        {
+          sessionId: 'session-1',
+          sourceMessageId: 'message-1',
+          href: 'docs/guide.md#L4',
+          label: 'Guide',
+        },
+      ]),
+    ).toEqual([
+      {
+        sessionId: 'session-1',
+        sourceMessageId: 'message-1',
+        href: 'docs/guide.md#L4',
+        label: 'Guide',
+      },
+    ])
+
+    expect(() =>
+      registry['projectProcesses.readOutput']?.args.parse([
+        { sessionId: 'session-1', processId: 'process-1', afterSeq: -1 },
+      ]),
+    ).toThrow()
+    expect(() =>
+      registry['projectProcesses.restart']?.args.parse([
+        {
+          sessionId: 'session-1',
+          processId: 'process-1',
+          expectedRevision: 2,
+          confirmed: false,
+          invocationId: 'restart-1',
+        },
+      ]),
+    ).toThrow()
+    expect(() =>
+      registry['references.resolve']?.args.parse([
+        {
+          sessionId: 'session-1',
+          sourceMessageId: 'message-1',
+          href: 'docs/guide.md',
+          label: 'Guide',
+          absolutePath: '/forged/path',
+        },
+      ]),
+    ).toThrow()
   })
 
   it('keeps Plan outside the public permission selector and validates Goal replacement input', () => {
@@ -514,7 +615,7 @@ type ToolResult = CoreOperationResult<'tools.readResult'>
 expectTypeOf<Awaited<ToolResult>>().toEqualTypeOf<{ content: string }>()
 
 expectTypeOf<
-  (typeof CORE_API_ROUTE_OPERATIONS)[number]['key']
+  ReturnType<typeof coreOperationDescriptors>[number]['key']
 >().toEqualTypeOf<CoreOperationKey>()
 
 // @ts-expect-error operation keys are a closed union

@@ -1,17 +1,23 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
-  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   statSync,
-  writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { SCHEMA_VERSION, SchedulerJob, validateJobId } from './models'
+import {
+  AppendOnlyJournalSync,
+  AtomicSnapshotSync,
+  PersistenceCorruptionError,
+  durableReplaceSync,
+  type JournalCodec,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 export class SchedulerStoreCorrupt extends Error {}
 
@@ -45,17 +51,40 @@ export class SchedulerStore {
   readonly lockFile: string
   private lastActionErrors: Array<Record<string, unknown>> = []
   private lastGood: SchedulerStoreData | null = null
+  private readonly jobsSnapshot: AtomicSnapshotSync<SchedulerStoreData>
+  private readonly actionJournal: AppendOnlyJournalSync<Record<string, unknown>>
+  private readonly persistenceAdapter?: SyncPersistenceAdapter
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    opts: { persistenceAdapter?: SyncPersistenceAdapter } = {},
+  ) {
     this.root = root
     this.schedulerDir = join(root, 'scheduler')
     this.jobsFile = join(this.schedulerDir, 'jobs.json')
     this.actionFile = join(this.schedulerDir, 'action.jsonl')
     this.lockFile = join(this.schedulerDir, 'scheduler.lock')
+    this.persistenceAdapter = opts.persistenceAdapter
+    this.jobsSnapshot = new AtomicSnapshotSync({
+      path: this.jobsFile,
+      codec: SCHEDULER_STORE_CODEC,
+      adapter: opts.persistenceAdapter,
+      fileMode: 0o600,
+      corruptionPolicy: 'quarantine_and_throw',
+      corruptionBackupPath: (path) =>
+        `${path}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`,
+    })
+    this.actionJournal = new AppendOnlyJournalSync({
+      path: this.actionFile,
+      codec: SCHEDULER_ACTION_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      recoveryMode: 'tolerant',
+    })
     mkdirSync(this.schedulerDir, { recursive: true })
     this.copyLegacyFilesIfNeeded()
     if (!existsSync(this.jobsFile))
-      this.atomicWriteJson(this.jobsFile, new SchedulerStoreData().toDict())
+      this.jobsSnapshot.write(new SchedulerStoreData())
   }
 
   load(
@@ -76,7 +105,7 @@ export class SchedulerStore {
   }
 
   save(data: SchedulerStoreData): void {
-    this.atomicWriteJson(this.jobsFile, data.toDict())
+    this.jobsSnapshot.write(data)
     this.lastGood = SchedulerStoreData.fromDict(
       data.toDict() as Record<string, any>,
     )
@@ -129,7 +158,7 @@ export class SchedulerStore {
     const payload: Record<string, unknown> = { action }
     if (opts.job) payload.job = opts.job.toDict()
     if (opts.jobId) payload.jobId = validateJobId(opts.jobId)
-    appendFileSync(this.actionFile, JSON.stringify(payload) + '\n', 'utf8')
+    this.actionJournal.append(payload)
   }
 
   diagnostics(): Record<string, unknown> {
@@ -156,23 +185,18 @@ export class SchedulerStore {
 
   private readStore(): SchedulerStoreData {
     try {
-      const raw = JSON.parse(readFileSync(this.jobsFile, 'utf8') || '{}')
-      if (!isObject(raw))
-        throw new Error('scheduler store root must be an object')
-      const data = SchedulerStoreData.fromDict(raw)
+      const data = this.jobsSnapshot.read({
+        fallback: new SchedulerStoreData(),
+      }).value
       this.lastGood = data
       return data
     } catch (error) {
-      const backup = `${this.jobsFile}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`
-      if (existsSync(this.jobsFile)) {
-        try {
-          renameSync(this.jobsFile, backup)
-        } catch {
-          /* ignore */
-        }
-      }
+      const backup =
+        error instanceof PersistenceCorruptionError
+          ? error.corruptionBackup
+          : null
       throw new SchedulerStoreCorrupt(
-        `scheduler store at ${this.jobsFile} is corrupt; preserved at ${backup}`,
+        `scheduler store at ${this.jobsFile} is corrupt; preserved at ${String(backup ?? '')}`,
         { cause: error },
       )
     }
@@ -197,14 +221,14 @@ export class SchedulerStore {
     const jobs = new Map(data.jobs.map((job) => [job.id, job]))
     let changed = false
     const corruptRecords: Array<Record<string, unknown>> = []
-    const lines = readFileSync(this.actionFile, 'utf8').split('\n')
-    lines.forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) return
+    const replay = this.actionJournal.replay({ repairTail: true })
+    if (replay.receipt.corruptionBackup)
+      corruptRecords.push(
+        ...collectInvalidSchedulerActionRows(replay.receipt.corruptionBackup),
+      )
+    replay.entries.forEach((entry, index) => {
+      const action = entry.payload
       try {
-        const action = JSON.parse(line)
-        if (!isObject(action))
-          throw new Error('action log row must be an object')
         const kind = action.action
         if (kind === 'add' || kind === 'update') {
           const job = SchedulerJob.fromDict(
@@ -224,7 +248,7 @@ export class SchedulerStore {
         corruptRecords.push({
           line: index + 1,
           error: String(error instanceof Error ? error.message : error),
-          raw: rawLine,
+          raw: JSON.stringify(action),
         })
       }
     })
@@ -239,8 +263,11 @@ export class SchedulerStore {
           jobs: [...jobs.values()],
         })
       : data
-    if (changed) this.atomicWriteJson(this.jobsFile, merged.toDict())
-    writeFileSync(this.actionFile, '', 'utf8')
+    if (changed) this.jobsSnapshot.write(merged)
+    durableReplaceSync(this.actionFile, '', {
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
     return merged
   }
 
@@ -249,26 +276,77 @@ export class SchedulerStore {
       this.schedulerDir,
       `action.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}.jsonl`,
     )
-    writeFileSync(
+    durableReplaceSync(
       path,
       records.map((record) => JSON.stringify(record)).join('\n') + '\n',
-      'utf8',
+      { adapter: this.persistenceAdapter, fileMode: 0o600 },
     )
     return path
   }
+}
 
-  private atomicWriteJson(
-    path: string,
-    payload: Record<string, unknown>,
-  ): void {
-    mkdirSync(dirname(path), { recursive: true })
-    const tmp = join(
-      dirname(path),
-      `.${basename(path)}.${randomUUID().replace(/-/g, '')}.tmp`,
-    )
-    writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', 'utf8')
-    renameSync(tmp, path)
+const SCHEDULER_STORE_CODEC: SnapshotCodec<SchedulerStoreData> = {
+  schemaVersion: SCHEMA_VERSION,
+  encode(value) {
+    return value.toDict()
+  },
+  decode(input) {
+    if (!isObject(input))
+      throw new Error('scheduler store root must be an object')
+    const value = SchedulerStoreData.fromDict(input)
+    return { value, schemaVersion: value.version }
+  },
+}
+
+const SCHEDULER_ACTION_CODEC: JournalCodec<Record<string, unknown>> = {
+  schemaVersion: 1,
+  create(seq, payload) {
+    return {
+      schemaVersion: 1,
+      seq,
+      checksum: schedulerActionChecksum(payload),
+      payload,
+    }
+  },
+  encode(entry) {
+    return entry.payload
+  },
+  decode(input, context) {
+    if (!isObject(input)) throw new Error('action log row must be an object')
+    return {
+      schemaVersion: 1,
+      seq: context.expectedSeq,
+      checksum: schedulerActionChecksum(input),
+      payload: input,
+    }
+  },
+}
+
+function schedulerActionChecksum(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+function collectInvalidSchedulerActionRows(
+  path: string,
+): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = []
+  for (const [index, rawLine] of readFileSync(path, 'utf8')
+    .split('\n')
+    .entries()) {
+    const line = rawLine.trim()
+    if (!line) continue
+    try {
+      if (!isObject(JSON.parse(line)))
+        throw new Error('action log row must be an object')
+    } catch (error) {
+      records.push({
+        line: index + 1,
+        error: String(error instanceof Error ? error.message : error),
+        raw: rawLine,
+      })
+    }
   }
+  return records
 }
 
 function isObject(value: unknown): value is Record<string, any> {

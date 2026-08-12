@@ -109,6 +109,32 @@ export const executionEnvironmentSnapshotSchema = z
       environmentToolIdSchema,
       z.string().min(1).max(4_096),
     ),
+    managedBinRoot: z.string().min(1).max(4_096).nullable().optional(),
+    managedCommands: z
+      .record(z.string().min(1).max(128), z.string().min(1).max(4_096))
+      .optional(),
+    managedSources: z
+      .record(
+        z.string().min(1).max(128),
+        z
+          .object({
+            placement: z.enum(['managed', 'external']),
+            version: z.string().min(1).max(256),
+          })
+          .strict(),
+      )
+      .optional(),
+    emperorPaths: z
+      .object({
+        home: z.string().min(1).max(4_096),
+        skills: z.string().min(1).max(4_096),
+        environment: z.string().min(1).max(4_096),
+        scratch: z.string().min(1).max(4_096),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    caSource: z.enum(['user', 'system_bundle', 'none']).optional(),
   })
   .strict()
 

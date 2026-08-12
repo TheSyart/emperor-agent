@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { CommandDescriptor } from '@emperor/core'
+import type { CommandDescriptor } from '@emperor/core/api'
 import {
   buildSlashPaletteItems,
+  buildSlashPaletteGroups,
   isPathLikeSlashToken,
   rankSlashPaletteItems,
   resolveSlashInvocation,
@@ -31,7 +32,9 @@ function command(
 describe('Core-owned slash palette projection', () => {
   it('projects descriptors without maintaining a renderer command catalog', () => {
     const items = buildSlashPaletteItems([
-      command('help', { aliases: ['commands'] }),
+      command('model', {
+        description: 'Choose the model for this chat',
+      }),
       command('audit', {
         id: 'skill.user.audit',
         source: 'user_skill',
@@ -41,30 +44,111 @@ describe('Core-owned slash palette projection', () => {
       }),
     ])
     expect(items).toMatchObject([
-      { commandId: 'skill.user.audit', name: '/audit', kind: 'skill' },
       {
-        commandId: 'builtin.help',
-        name: '/help',
-        aliases: ['/commands'],
+        commandId: 'builtin.model',
+        name: '/model',
+        title: 'Model',
         kind: 'command',
+      },
+      {
+        commandId: 'skill.user.audit',
+        name: '/audit',
+        title: 'Audit',
+        sourceLabel: 'Personal',
+        kind: 'skill',
       },
     ])
   })
 
+  it('keeps product order and exposes only Commands and Skills groups', () => {
+    const items = buildSlashPaletteItems([
+      command('continue'),
+      command('stop'),
+      command('goal'),
+      command('new'),
+      command('compact'),
+      command('model'),
+      command('reasoning'),
+      command('permissions'),
+      command('plan'),
+      command('zeta', {
+        id: 'skill.user.zeta',
+        kind: 'agent_prompt',
+        source: 'user_skill',
+      }),
+      command('alpha', {
+        id: 'skill.project.alpha',
+        kind: 'agent_prompt',
+        source: 'project_skill',
+      }),
+    ])
+
+    expect(items.map((item) => item.name)).toEqual([
+      '/new',
+      '/compact',
+      '/model',
+      '/reasoning',
+      '/permissions',
+      '/plan',
+      '/goal',
+      '/stop',
+      '/continue',
+      '/alpha',
+      '/zeta',
+    ])
+    expect(
+      buildSlashPaletteGroups(items, { busy: false, canContinue: false }).map(
+        (group) => ({
+          label: group.label,
+          names: group.items.map((item) => item.name),
+        }),
+      ),
+    ).toEqual([
+      {
+        label: 'Commands',
+        names: [
+          '/new',
+          '/compact',
+          '/model',
+          '/reasoning',
+          '/permissions',
+          '/plan',
+          '/goal',
+        ],
+      },
+      { label: 'Skills', names: ['/alpha', '/zeta'] },
+    ])
+  })
+
+  it('shows Stop only while busy and Continue only when work can resume', () => {
+    const items = buildSlashPaletteItems([
+      command('new'),
+      command('stop'),
+      command('continue'),
+    ])
+
+    expect(
+      buildSlashPaletteGroups(items, {
+        busy: true,
+        canContinue: false,
+      })[0]?.items.map((item) => item.name),
+    ).toEqual(['/new', '/stop'])
+    expect(
+      buildSlashPaletteGroups(items, {
+        busy: false,
+        canContinue: true,
+      })[0]?.items.map((item) => item.name),
+    ).toEqual(['/new', '/continue'])
+  })
+
   it('resolves aliases but does not treat absolute paths as commands', () => {
-    const descriptors = [
-      command('cost', { aliases: ['tokens'] }),
-      command('memory', { hiddenAliases: ['memory-log'] }),
-    ]
-    expect(resolveSlashInvocation('/tokens', descriptors)?.descriptor?.id).toBe(
-      'builtin.cost',
+    const descriptors = [command('model')]
+    expect(resolveSlashInvocation('/model', descriptors)?.descriptor?.id).toBe(
+      'builtin.model',
     )
     expect(
       resolveSlashInvocation('/missing', descriptors)?.descriptor,
     ).toBeNull()
-    expect(
-      resolveSlashInvocation('/memory-log', descriptors)?.descriptor?.id,
-    ).toBe('builtin.memory')
     expect(
       resolveSlashInvocation('/Users/anhuike/project', descriptors),
     ).toBeNull()
@@ -73,12 +157,14 @@ describe('Core-owned slash palette projection', () => {
 
   it('ranks exact name, alias, prefix and fuzzy description in that order', () => {
     const items = buildSlashPaletteItems([
-      command('status'),
-      command('cost', { aliases: ['tokens'], description: 'Token 成本账本' }),
-      command('context', { description: '上下文占用' }),
+      command('model'),
+      command('reasoning', { description: 'Choose thinking depth' }),
+      command('permissions', { description: 'Choose what Emperor may do' }),
     ])
-    expect(rankSlashPaletteItems(items, 'tokens')[0]?.name).toBe('/cost')
-    expect(rankSlashPaletteItems(items, 'sta')[0]?.name).toBe('/status')
-    expect(rankSlashPaletteItems(items, '上下文')[0]?.name).toBe('/context')
+    expect(rankSlashPaletteItems(items, 'model')[0]?.name).toBe('/model')
+    expect(rankSlashPaletteItems(items, 'rea')[0]?.name).toBe('/reasoning')
+    expect(rankSlashPaletteItems(items, 'Emperor')[0]?.name).toBe(
+      '/permissions',
+    )
   })
 })

@@ -22,7 +22,9 @@ const THRESHOLD = arg > -1 ? Number(process.argv[arg + 1]) : 0.01
 // varies run-to-run (verified 8.17% diff even with zero CSS change). Excluded.
 const EXCLUDE = new Set(['settings-model-mobile.png'])
 
-const files = readdirSync(BASE).filter((f) => f.endsWith('.png') && !EXCLUDE.has(f))
+const files = readdirSync(BASE).filter(
+  (f) => f.endsWith('.png') && !EXCLUDE.has(f),
+)
 let failed = 0
 let checked = 0
 for (const f of files) {
@@ -35,7 +37,9 @@ for (const f of files) {
   const a = PNG.sync.read(readFileSync(`${BASE}/${f}`))
   const b = PNG.sync.read(readFileSync(curPath))
   if (a.width !== b.width || a.height !== b.height) {
-    console.log(`RESIZED  ${f}  ${a.width}x${a.height} -> ${b.width}x${b.height}`)
+    console.log(
+      `RESIZED  ${f}  ${a.width}x${a.height} -> ${b.width}x${b.height}`,
+    )
     failed++
     continue
   }
@@ -51,5 +55,7 @@ for (const f of files) {
     console.log(`DIFF     ${f}  ${(ratio * 100).toFixed(3)}% (${mismatched}px)`)
   }
 }
-console.log(`\nchecked=${checked} failed=${failed} threshold=${THRESHOLD * 100}%`)
+console.log(
+  `\nchecked=${checked} failed=${failed} threshold=${THRESHOLD * 100}%`,
+)
 process.exit(failed > 0 ? 1 : 0)

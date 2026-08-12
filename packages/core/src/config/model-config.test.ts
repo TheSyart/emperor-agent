@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ValidationError } from '../errors'
+import { createNodePersistenceAdapter } from '../store/persistence'
 import {
   activateModelEntry,
   activeEntry,
@@ -518,6 +519,43 @@ describe('model-config IO recovery', () => {
 
     expect((await loadModelConfig(path)).raw).toEqual(data)
     expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('keeps the previous v2 snapshot when its durable rename fails', async () => {
+    const path = join(dir, 'model_config.json')
+    const original: ModelConfigV2 = {
+      schemaVersion: 2,
+      activeModelId: 'entry-openai',
+      models: [entry({ modelId: 'gpt-5' })],
+    }
+    await saveModelConfig(path, original)
+
+    await expect(
+      saveModelConfig(
+        path,
+        {
+          ...original,
+          models: [entry({ modelId: 'gpt-5.1' })],
+        },
+        {
+          persistenceAdapter: createNodePersistenceAdapter({
+            beforeOperation(operation) {
+              if (operation === 'rename') throw new Error('injected rename')
+            },
+          }),
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'persistence_io',
+      operation: 'rename',
+    })
+
+    await expect(loadModelConfig(path)).resolves.toMatchObject({
+      raw: original,
+    })
+    expect(
+      (await readdir(dir)).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 
   it('isolates malformed JSON and invalid v2 schema into corrupt backups', async () => {

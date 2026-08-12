@@ -1,6 +1,8 @@
 import type { GoalRecord } from './models'
-import type { GoalCompletionGateOptions } from './completion-gate'
-import type { GoalTerminalCommitInput } from './store'
+import type {
+  GoalCompletionGateOptions,
+  GoalTerminalCommitInput,
+} from './contracts/completion'
 
 type GoalTerminalType = 'goal_completed' | 'goal_blocked'
 type GoalTerminalCommitter = (

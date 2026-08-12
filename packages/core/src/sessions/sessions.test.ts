@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MemoryStore } from '../memory/store'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 import {
   ConversationStore,
   ProjectSessionMemoryStore,
@@ -332,6 +333,30 @@ describe('SessionStore (test_session_store.py)', () => {
     expect(existsSync(join(sessionsDir, 'index.json'))).toBe(true)
   })
 
+  it('preserves the previous derived session index when durable rename fails', () => {
+    const root = tmp('emperor-session-index-failure-')
+    const healthy = new SessionStore(root)
+    healthy.create('Existing Session', { id: 'session_existing' })
+    const before = readFileSync(healthy.indexPath, 'utf8')
+    const failing = new SessionStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() => failing.list()).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.indexPath, 'utf8')).toBe(before)
+    expect(
+      readdirSync(join(root, 'sessions')).filter((name) =>
+        name.includes('.tmp-'),
+      ),
+    ).toEqual([])
+  })
+
   it('backs up a valid legacy index once when materializing metadata', () => {
     const root = tmp('emperor-session-legacy-backup-')
     const sessionsDir = join(root, 'sessions')
@@ -471,6 +496,14 @@ describe('SessionStore (test_session_store.py)', () => {
       preview: 'metadata preview',
       message_count: 4,
     })
+    expect(readFileSync(join(sessionDir, 'meta.jsonl'), 'utf8')).not.toContain(
+      'not-json',
+    )
+    expect(
+      readdirSync(sessionDir).some((name) =>
+        name.startsWith('meta.jsonl.corrupt-'),
+      ),
+    ).toBe(true)
   })
 
   it('persists and normalizes lightweight control pending summaries', () => {

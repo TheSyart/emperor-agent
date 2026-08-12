@@ -412,6 +412,10 @@ class PassingCommandTool extends Tool {
   override readonly parameters = toolParamsSchema({ command: S('command') })
   override readonly evidencePolicy = 'eligible' as const
 
+  override isReadOnly(args: Record<string, unknown>): boolean {
+    return String(args.command ?? '') === 'npm test'
+  }
+
   execute(): ToolResultObj {
     return new ToolResultObj({
       modelContent: 'tests passed',

@@ -1,5 +1,5 @@
 /**
- * ClarificationPolicy (MIG-CTRL-003)。对齐 Python `agent/control/clarification.py`。
+ * ClarificationPolicy。
  * 高影响歧义统一判断是否先 ask_user。_CONTROL_RESUME_RE 导出供 plan-drafting 复用。
  */
 

@@ -236,6 +236,7 @@ function options(events: RuntimeEventEnvelope[]) {
   return {
     boot,
     refreshMemory: vi.fn(async () => {}),
+    refreshCommands: vi.fn(async () => {}),
     showToast: vi.fn(),
   }
 }

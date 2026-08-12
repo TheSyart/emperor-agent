@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { defaultStateRoot } from '@emperor/core'
+import { defaultStateRoot } from '@emperor/core/host-capabilities'
 import { moduleDirFromUrl } from './esm-path'
 
 export type RootSource = 'explicit' | 'env' | 'default' | 'packaged'
@@ -77,10 +77,10 @@ export function resolveConfig({
 
   let configSource: 'file' | 'default' = 'default'
   try {
-    JSON.parse(readFile(path.join(stateRoot, 'emperor.local.json')))
+    JSON.parse(readFile(path.join(stateRoot, 'settings.json')))
     configSource = 'file'
   } catch {
-    // Missing or malformed emperor.local.json must not crash the shell; we
+    // Missing or malformed settings.json must not crash the shell; we
     // silently continue with the packaged Core runtime defaults.
     configSource = 'default'
   }

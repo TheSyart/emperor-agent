@@ -24,7 +24,7 @@ export class PublicHttpError extends Error {
   }
 }
 
-export interface ResolvedAddress {
+export interface PublicHttpResolvedAddress {
   address: string
   family: 4 | 6
 }
@@ -35,6 +35,7 @@ export interface PublicHttpRequest {
   maxBytes: number
   signal: AbortSignal
   headers?: Record<string, string>
+  redirectMode?: 'follow_validated' | 'manual_cross_origin'
 }
 
 export interface PublicHttpTransportRequest {
@@ -63,15 +64,40 @@ export interface PublicHttpResponse {
   body: Uint8Array
 }
 
+export interface PublicHttpRedirectResponse {
+  kind: 'redirect'
+  originalUrl: string
+  redirectUrl: string
+  status: number
+}
+
+export type PublicHttpGetResponse =
+  PublicHttpResponse | PublicHttpRedirectResponse
+
+export function isPublicHttpRedirectResponse(
+  response:
+    | PublicHttpGetResponse
+    | PublicHttpOpenedResponse
+    | PublicHttpRedirectResponse,
+): response is PublicHttpRedirectResponse {
+  return (response as Partial<PublicHttpRedirectResponse>).kind === 'redirect'
+}
+
 export interface PublicHttpTransport {
   request(
     request: PublicHttpTransportRequest,
   ): Promise<PublicHttpTransportResponse>
 }
 
+export interface PublicHttpSyntheticProxyRoute {
+  transport: PublicHttpTransport
+  canRoute(url: URL): boolean | Promise<boolean>
+}
+
 export interface PublicHttpClientOptions {
-  resolve?: (hostname: string) => Promise<ResolvedAddress[]>
+  resolve?: (hostname: string) => Promise<PublicHttpResolvedAddress[]>
   transport?: PublicHttpTransport
+  syntheticProxyRoute?: PublicHttpSyntheticProxyRoute | null
   maxRedirects?: number
   timeoutMs?: number
 }
@@ -81,8 +107,11 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const ABSOLUTE_MAX_BYTES = 20_000_000_000
 
 export class PublicHttpClient {
-  private readonly resolve: (hostname: string) => Promise<ResolvedAddress[]>
+  private readonly resolve: (
+    hostname: string,
+  ) => Promise<PublicHttpResolvedAddress[]>
   private readonly transport: PublicHttpTransport
+  private readonly syntheticProxyRoute: PublicHttpSyntheticProxyRoute | null
   private readonly maxRedirects: number
 
   constructor(opts: PublicHttpClientOptions = {}) {
@@ -90,12 +119,15 @@ export class PublicHttpClient {
     this.transport =
       opts.transport ??
       new NodePublicHttpTransport(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    this.syntheticProxyRoute = opts.syntheticProxyRoute ?? null
     this.maxRedirects = normalizeRedirectLimit(
       opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
     )
   }
 
-  async open(request: PublicHttpRequest): Promise<PublicHttpOpenedResponse> {
+  async open(
+    request: PublicHttpRequest,
+  ): Promise<PublicHttpOpenedResponse | PublicHttpRedirectResponse> {
     const maxBytes = normalizeMaxBytes(request.maxBytes)
     throwIfCancelled(request.signal)
     let url = parsePublicUrl(request.url, request.protocols)
@@ -103,7 +135,7 @@ export class PublicHttpClient {
     for (let redirects = 0; ; redirects += 1) {
       throwIfCancelled(request.signal)
       const hostname = normalizedHostname(url)
-      let addresses: ResolvedAddress[]
+      let addresses: PublicHttpResolvedAddress[]
       try {
         addresses = await this.resolve(hostname)
       } catch (cause) {
@@ -111,13 +143,25 @@ export class PublicHttpClient {
           throw new PublicHttpError('cancelled', cause)
         throw new PublicHttpError('dns_failed', cause)
       }
-      if (!addresses.length || addresses.some((entry) => !isPublicIp(entry)))
-        throw new PublicHttpError('blocked_address')
+      if (!addresses.length) throw new PublicHttpError('blocked_address')
+
+      let transport = this.transport
+      if (!addresses.every(isPublicIp)) {
+        const proxyRoute = this.syntheticProxyRoute
+        if (
+          !proxyRoute ||
+          isIP(hostname) !== 0 ||
+          !addresses.every(isProxySyntheticIp) ||
+          !(await canUseSyntheticProxyRoute(proxyRoute, url))
+        )
+          throw new PublicHttpError('blocked_address')
+        transport = proxyRoute.transport
+      }
 
       const selected = addresses[0]!
       let response: PublicHttpTransportResponse
       try {
-        response = await this.transport.request({
+        response = await transport.request({
           url,
           address: selected.address,
           family: selected.family,
@@ -143,7 +187,18 @@ export class PublicHttpClient {
         } catch (cause) {
           throw new PublicHttpError('blocked_url', cause)
         }
-        url = parsePublicUrl(redirected, request.protocols)
+        const nextUrl = parsePublicUrl(redirected, request.protocols)
+        if (
+          request.redirectMode === 'manual_cross_origin' &&
+          !isPermittedAutomaticRedirect(url, nextUrl)
+        )
+          return {
+            kind: 'redirect',
+            originalUrl: url.toString(),
+            redirectUrl: nextUrl.toString(),
+            status: response.statusCode,
+          }
+        url = nextUrl
         continue
       }
 
@@ -164,9 +219,10 @@ export class PublicHttpClient {
     }
   }
 
-  async get(request: PublicHttpRequest): Promise<PublicHttpResponse> {
+  async get(request: PublicHttpRequest): Promise<PublicHttpGetResponse> {
     const maxBytes = normalizeMaxBytes(request.maxBytes)
     const response = await this.open(request)
+    if (isPublicHttpRedirectResponse(response)) return response
     const chunks: Buffer[] = []
     let bytes = 0
     try {
@@ -187,6 +243,14 @@ export class PublicHttpClient {
       response.close()
     }
   }
+}
+
+function isPermittedAutomaticRedirect(current: URL, next: URL): boolean {
+  if (current.protocol !== next.protocol || current.port !== next.port)
+    return false
+  const stripWww = (hostname: string): string =>
+    hostname.toLowerCase().replace(/^www\./, '')
+  return stripWww(current.hostname) === stripWww(next.hostname)
 }
 
 export class NodePublicHttpTransport implements PublicHttpTransport {
@@ -236,7 +300,7 @@ export class NodePublicHttpTransport implements PublicHttpTransport {
 
 export async function resolvePublicAddresses(
   hostname: string,
-): Promise<ResolvedAddress[]> {
+): Promise<PublicHttpResolvedAddress[]> {
   const addresses = await lookup(hostname, { all: true, verbatim: true })
   return addresses
     .filter(
@@ -248,12 +312,34 @@ export async function resolvePublicAddresses(
 
 const blockedAddresses = createBlockedAddressLists()
 
-export function isPublicIp(entry: ResolvedAddress): boolean {
+export function isPublicIp(entry: PublicHttpResolvedAddress): boolean {
   if (isIP(entry.address) !== entry.family) return false
   return !blockedAddresses[entry.family].check(
     entry.address,
     entry.family === 4 ? 'ipv4' : 'ipv6',
   )
+}
+
+export function isProxySyntheticIp(entry: PublicHttpResolvedAddress): boolean {
+  return (
+    entry.family === 4 &&
+    isIP(entry.address) === 4 &&
+    syntheticProxyAddresses.check(entry.address, 'ipv4')
+  )
+}
+
+const syntheticProxyAddresses = new BlockList()
+syntheticProxyAddresses.addSubnet('198.18.0.0', 15, 'ipv4')
+
+async function canUseSyntheticProxyRoute(
+  route: PublicHttpSyntheticProxyRoute,
+  url: URL,
+): Promise<boolean> {
+  try {
+    return (await route.canRoute(url)) === true
+  } catch {
+    return false
+  }
 }
 
 function createBlockedAddressLists(): Record<4 | 6, BlockList> {

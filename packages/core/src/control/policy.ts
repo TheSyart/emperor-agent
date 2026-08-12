@@ -1,5 +1,5 @@
 /**
- * ControlPolicy (MIG-CTRL-002)。对齐 Python `agent/control/policy.py`。
+ * ControlPolicy。
  * 经 PermissionPipeline.isToolExposed 暴露工具；plan 模式过滤 definitions。
  */
 import { PermissionPipeline } from '../permissions/pipeline'

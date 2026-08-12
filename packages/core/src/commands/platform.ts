@@ -11,7 +11,7 @@ import {
   type ParsedCommandInput,
 } from './parser'
 import { CommandRegistry } from './registry'
-import { skillCommandDescriptors } from './skill-adapter'
+import { resolveSkillCommandCatalog } from './skill-adapter'
 import type {
   CommandCompletion,
   CommandDescriptor,
@@ -26,8 +26,6 @@ import {
 
 export interface CommandSessionContext {
   exists: boolean
-  hasProject: boolean
-  hasGit: boolean
 }
 
 export interface CommandExecutionContext {
@@ -87,6 +85,24 @@ export class CommandPlatform {
       .list()
       .map((descriptor) => availability(descriptor, session, source))
       .filter((descriptor) => input.includeUnavailable || descriptor.available)
+  }
+
+  diagnostics(sessionId: string): {
+    status: 'ok' | 'warning'
+    registeredSkills: number
+    conflicts: ReturnType<typeof resolveSkillCommandCatalog>['conflicts']
+  } {
+    const registry = new CommandRegistry()
+    registry.registerMany(builtinCommandDescriptors())
+    const catalog = resolveSkillCommandCatalog(
+      this.deps.listSkills(sessionId),
+      registry.reservedNames(),
+    )
+    return {
+      status: catalog.conflicts.length ? 'warning' : 'ok',
+      registeredSkills: catalog.descriptors.length,
+      conflicts: catalog.conflicts,
+    }
   }
 
   async complete(input: {
@@ -242,10 +258,10 @@ export class CommandPlatform {
     const registry = new CommandRegistry()
     registry.registerMany(builtinCommandDescriptors())
     registry.registerMany(
-      skillCommandDescriptors(
+      resolveSkillCommandCatalog(
         this.deps.listSkills(sessionId),
         registry.reservedNames(),
-      ),
+      ).descriptors,
     )
     return registry
   }
@@ -280,16 +296,6 @@ function availability(
   if (!session.exists) reason = '会话不存在。'
   else if (!descriptor.invocationSources.includes(source))
     reason = '当前调用来源不支持此命令。'
-  else if (
-    ['files', 'terminal'].includes(descriptor.name) &&
-    !session.hasProject
-  )
-    reason = '当前会话没有绑定项目。'
-  else if (
-    ['review', 'diff', 'git'].includes(descriptor.name) &&
-    !session.hasGit
-  )
-    reason = '当前项目尚未初始化 Git 仓库。'
   return {
     ...descriptor,
     available: !reason,

@@ -1,5 +1,5 @@
 /**
- * 回合阶段状态 (MIG-CORE-008 支撑)。对齐 Python `agent/runner_state.py`。
+ * 回合阶段状态。
  * TurnPhase / TurnState / TurnPhaseEvent — turn_phase 运行时事件。
  */
 

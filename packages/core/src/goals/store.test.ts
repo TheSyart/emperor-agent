@@ -23,6 +23,7 @@ import {
   type GoalEventEnvelope,
 } from './events'
 import { GoalStore, type GoalAppendInput } from './store'
+import { createNodePersistenceAdapter } from '../store/persistence'
 
 const T0 = '2026-07-15T10:00:00.000Z'
 const T1 = '2026-07-15T10:01:00.000Z'
@@ -77,6 +78,21 @@ describe('GoalStore durable ledger', () => {
         outcomePreview: 'Ship a durable goal',
       }),
     ])
+  })
+
+  it('reads the current Goal from the ledger without repairing a stale index', async () => {
+    const store = new GoalStore(stateRoot)
+    const created = await store.create(
+      draft('goal_readonly_current', 'session-readonly-current'),
+    )
+    const indexPath = join(stateRoot, 'goals', 'index.json')
+    await writeFile(indexPath, '{"stale":true}\n', 'utf8')
+
+    await expect(store.listReadonly()).resolves.toEqual([created])
+    await expect(
+      store.findActiveBySession('session-readonly-current'),
+    ).resolves.toEqual(created)
+    expect(await readFile(indexPath, 'utf8')).toBe('{"stale":true}\n')
   })
 
   it('serializes concurrent creates for one session and releases the keyed lock', async () => {
@@ -221,6 +237,48 @@ describe('GoalStore durable ledger', () => {
     expect(recovered).toMatchObject({
       status: 'active',
       runtime: { phase: 'planning' },
+      lastEventSeq: 2,
+    })
+  })
+
+  it('preserves the last good Goal snapshot when durable rename fails', async () => {
+    const healthy = new GoalStore(stateRoot)
+    const created = await healthy.create(
+      draft('goal_snapshot_rename_failure', 'session-snapshot-rename-failure'),
+    )
+    const snapshotPath = join(stateRoot, 'goals', created.id, 'goal.json')
+    const before = await readFile(snapshotPath, 'utf8')
+    const failing = new GoalStore(stateRoot, {
+      persistenceAdapter: createNodePersistenceAdapter({
+        beforeOperation(operation, path) {
+          if (operation === 'rename' && path === snapshotPath)
+            throw new Error('injected Goal snapshot rename')
+        },
+      }),
+    })
+    const next = GoalContractValidator.lock(created, definition(), T1)
+
+    await expect(
+      failing.append(created.id, {
+        type: 'goal_updated',
+        record: next,
+        createdAt: T1,
+      }),
+    ).rejects.toMatchObject({
+      code: 'persistence_io',
+      operation: 'rename',
+    })
+    expect(await readFile(snapshotPath, 'utf8')).toBe(before)
+    expect(
+      (await readdir(join(stateRoot, 'goals', created.id))).filter((name) =>
+        name.includes('.tmp-'),
+      ),
+    ).toEqual([])
+    expect(await readEvents(join(stateRoot, 'goals', created.id))).toHaveLength(
+      2,
+    )
+    await expect(new GoalStore(stateRoot).get(created.id)).resolves.toEqual({
+      ...next,
       lastEventSeq: 2,
     })
   })

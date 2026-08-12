@@ -91,7 +91,7 @@ export class GlobTool extends Tool {
       assertWorkspaceRelative(pattern, 'glob pattern')
 
       const workspace = ctx?.workspaceRoot ?? ctx?.root ?? this.workspace
-      const policy = workspacePolicyForTool(ctx, this.workspace)
+      const policy = workspacePolicyForTool(ctx, this.workspace, 'glob')
       const root = await resolveSearchRoot(workspace, workspace, policy, signal)
       if (!root.stats.isDirectory()) {
         throw new SearchDiagnostic('[ERR] glob root is not a directory')
@@ -187,7 +187,7 @@ export class GrepTool extends Tool {
 
       const workspace = ctx?.workspaceRoot ?? ctx?.root ?? this.workspace
       const requestedPath = normalizePortablePath(String(args.path ?? '.'))
-      const policy = workspacePolicyForTool(ctx, this.workspace)
+      const policy = workspacePolicyForTool(ctx, this.workspace, 'grep')
       const root = await resolveSearchRoot(
         requestedPath || '.',
         workspace,
@@ -308,7 +308,10 @@ async function* walkDirectory(
   const directory = await opendir(physicalDirectory)
   const names: string[] = []
   for await (const directoryEntry of directory) {
-    if (!IGNORED_DIRECTORIES.has(directoryEntry.name)) {
+    if (
+      !IGNORED_DIRECTORIES.has(directoryEntry.name) &&
+      !directoryEntry.name.toLowerCase().endsWith('.asar')
+    ) {
       names.push(directoryEntry.name)
     }
   }

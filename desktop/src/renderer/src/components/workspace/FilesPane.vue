@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { WorkspaceFileEntry, WorkspaceFileReadResult } from '@emperor/core'
+import type {
+  WorkspaceFileEntry,
+  WorkspaceFileReadResult,
+} from '@emperor/core/api'
 import {
   ChevronDown,
   ChevronRight,

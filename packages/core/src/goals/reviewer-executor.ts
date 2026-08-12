@@ -12,6 +12,7 @@ import type {
   DispatchRunner,
 } from '../tools/dispatch'
 import { ToolRegistry } from '../tools/registry'
+import { AgentToolPolicyFactory } from '../tools/agent-policy'
 import type {
   RecordToolResultInput,
   GoalEvidence,
@@ -81,11 +82,9 @@ export class GoalReviewerExecutor {
           'goal_reviewer_agent_unavailable',
           'Verification reviewer subagent is unavailable.',
         )
-      const registry = new ToolRegistry()
-      for (const toolName of spec.toolNames) {
-        const tool = this.options.parentRegistry.get(toolName)
-        if (tool) registry.register(tool)
-      }
+      const registry = new AgentToolPolicyFactory(
+        this.options.parentRegistry,
+      ).create(spec, 'goal_reviewer').registry
       const history = this.options.taskManager.readSidechain(dispatch.task.id, {
         limit: 10_000,
       }).messages
@@ -101,6 +100,7 @@ export class GoalReviewerExecutor {
         executionEnvironment: input.executionEnvironment ?? null,
         goalObservationRecorder: this.recording,
         expectedGoalId: input.goalId,
+        enforceCompletionContract: false,
       })
       const modelFinal = await runner.step(history)
       const evidence = this.recording.evidenceForTask(dispatch.task.id)

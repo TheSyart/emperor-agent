@@ -2,23 +2,23 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进长任务的用户<br>
-> 最后核验：2026-08-05<br>
+> 最后核验：2026-08-12<br>
 > 事实源：Core command platform、ControlManager、PermissionPipeline、GoalCoordinator 与 Completion Gate
 
 Plan（规划模式）和 Goal（目标模式）解决不同问题，但在 Composer 中是互斥的顶层模式。Plan 控制“先提出什么方案、何时允许执行”；Goal 管理“跨多少回合持续推进、满足什么条件才算完成”。Goal 可以在内部使用 Plan 引擎，界面仍只显示 Goal。
 
 ## 权限模式
 
-| 界面命令             | 内部模式          | 行为                                                                                     |
-| -------------------- | ----------------- | ---------------------------------------------------------------------------------------- |
-| `/permissions ask`   | `ask_before_edit` | 只读文件、搜索与诊断直接执行；文件修改、Shell、外部写入和持久任务变更先询问              |
-| `/permissions smart` | `smart_auto`      | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险操作先询问     |
-| `/permissions full`  | `full_access`     | 普通操作不再请求权限；显式拒绝、Plan 约束、schema、workspace 和系统 containment 继续生效 |
-| `/permissions`       | —                 | 打开权限面板并查看当前模式                                                               |
+| 界面命令             | 内部模式          | 行为                                                                                                                  |
+| -------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `/permissions ask`   | `ask_before_edit` | 只读文件、搜索与诊断直接执行；文件修改、Shell、外部写入和持久任务变更先询问                                           |
+| `/permissions smart` | `smart_auto`      | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险操作先询问                                  |
+| `/permissions full`  | `full_access`     | 主 Agent 的 `run_command` 在宿主环境直执且免询问；显式拒绝、Plan、AgentDefinition、schema、workspace 与 Goal 继续生效 |
+| `/permissions`       | —                 | 打开权限面板并查看当前模式                                                                                            |
 
 模式不会关闭路径安全、schema 校验、workspace policy 或 Core deny。
 
-`smart_auto` 会直接执行常见构建、测试、格式化、本地 Git 和逐段安全的复合诊断命令；无法确定副作用时会先做一次脱敏语义分类，失败则询问。`full_access` 不再产生 Permission Ask，但普通 `ask_user` 仍可用于需求澄清；所有模式都不能绕过 OS containment 和 Core deny。
+`smart_auto` 会让主 Agent 在宿主环境直接执行常见构建、测试、格式化、本地 Git 和逐段安全的复合诊断命令；无法确定副作用时会先做一次脱敏语义分类，失败则询问。`full_access` 让后续主 Agent 宿主命令免询问，但普通 `ask_user` 仍可用于需求澄清；Plan、子代理和其他隔离执行器继续使用 OS containment，所有模式都不能绕过 Core deny。
 
 ## Plan：先规划再执行
 
@@ -68,10 +68,10 @@ Goal 常用命令：
 | `/goal`                                      | 等待下一条纯文字作为 Outcome         |
 | `/goal <outcome>` 或 `/goal start <outcome>` | 创建当前会话的 Goal                  |
 | `/goal status`                               | 读取当前 Goal                        |
-| `/goals`                                     | 列出当前会话的 Goal                  |
-| `/goal pause` 或 `/goal-pause`               | 安全暂停                             |
-| `/goal resume` 或 `/goal-resume`             | 重新校验 session 和 workspace 后继续 |
-| `/goal cancel` 或 `/goal-cancel`             | 永久取消                             |
+| `/goal list`                                 | 列出当前会话的 Goal                  |
+| `/goal pause`                                | 安全暂停                             |
+| `/goal resume`                               | 重新校验 session 和 workspace 后继续 |
+| `/goal cancel`                               | 永久取消                             |
 
 每个 session 最多有一个非终态 Goal。Stop 在 Goal 中会转成可恢复的 Pause；Cancel 是不可恢复终态。应用重启不会自动恢复写操作，用户必须显式 Resume。
 

@@ -6,7 +6,10 @@
 
 ### Added
 
-- 增加 Core 权威 Slash command 平台、动态参数补全和 Skill 命令 frontmatter；`/clear` 现在通过可恢复事务创建真正无旧会话历史的新上下文。
+- 增加 Emperor Home（默认 `~/.emperor`）、旧根原子迁移、state layout 防降级与独立首次启动恢复页。
+- 增加文件系统 Skills 与受管 Plugins：裸 Skill 无需 registry，Plugin 提供来源、版本、启用、更新和卸载语义，外部 CLI 通过普通命令与独立 probe 验证。
+- 增加与 Skill 无关的网络调研证据链：外部工具只登记 candidate，Core `web_fetch` 的 2xx 正文才能升级 verified source；最终答复执行逐事实单元引用校验和隔离 grounding review。
+- 精简 Core 权威 Slash command 平台为九个普通用户命令；`/new` 通过可恢复事务创建真正无旧会话历史的新上下文，每个 active Skill 直接注册自己的斜杠 token，并在任务完成或菜单打开时自动刷新。
 - 增加 Chat 右侧项目工作台：Environment 聚合状态、Git Review、应用内系统 Terminal 和只读 Files 浏览/预览。
 - 增加每个用户 turn 的净变更账本：执行中实时显示文件数与增删行，最终 Changes 卡和回复共享同一 Core 事实源。
 - 增加结构化 Git 仓库身份、状态/Diff、worktree、操作凭据和 PR 工作流；子代理隔离 worktree 复用同一安全管理器。
@@ -21,6 +24,8 @@
 
 ### Changed
 
+- Prompt 动态注入产品、surface、main/plan/subagent 角色、真实 Skill 根、Plugin 解析、受管环境和 host/sandbox 边界；Skill、Plugin 与外部 CLI 必须分别报告。
+- 模型工具统一为 `Skill` 按需加载；不再暴露 `load_skill`、`install_skill` 或 `manage_environment`。Skills 页面变为解析结果 inventory，版本化安装移动到用户发起的 Plugins 页面。
 - Chat 移除顶部“对话 / 正在办差 · 模型”标题栏；Environment 在桌面宽屏常驻，Review、Terminal 或 Files 以 520–960px 宽工作区原位替代，并支持窄屏抽屉/全屏和布局状态恢复。
 - 删除已退役的桥接接入模块及其 API、运行事件、诊断和界面投影；旧安装私有文件不会被读取、迁移或自动删除。
 - 模型配置统一为 schema v2：可保存多个标准接口模型，全局只激活一个。
@@ -34,10 +39,13 @@
 
 - 修复 `packages/core/src/memory/history.ts` 源码签名中的二进制 NUL 字节。
 - 完成 TypeScript / Electron 迁移审计后的主线加固与 parity 收尾。
+- 修复进程 exit 0、搜索线索和任务完成被混为一谈的问题；重复 URL、空输出、错误页和等价命令不再重置无进展保护。
+- 修复网络调研未校验草稿提前进入 UI/历史，以及纯调研命令错误生成零文件 partial Changes 卡的问题。
 
 ### Security
 
 - Git、Files 和 Terminal 由 Core 按 Build session 所有权授权；Renderer 不获得 Node/fs/shell，Git mutation 使用 revision/确认，Files 拒绝 traversal/symlink escape，Terminal 高频字节流不进入聊天或持久事件。
 - Electron 主界面与桌宠现在显式运行在 renderer sandbox 中；preload 改为受构建/打包审计的最小 CommonJS，桌宠不再直接读取文件系统，packaged smoke 会真实验证 Core bridge 与受管附件协议。
 - 明确 MCP、Web 与外部消息是不可信输入，Goal 完成态只能由 Core Completion Gate 提交。
+- 网络调研回复只有在逐项引用本轮 verified source 并通过隔离复核后才发布；核验事件不包含 URL、正文、命令、本机路径或 reviewer prompt。
 - 发布文档区分当前未签名 Preview 与尚未启用的受信 Stable 流程。

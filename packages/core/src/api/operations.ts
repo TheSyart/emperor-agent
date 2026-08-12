@@ -109,6 +109,35 @@ const skillConfirmInstallSchema = z
     permissionConfirmed: z.literal(true),
   })
   .strict()
+const pluginIdSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)?$/,
+    'invalid Plugin id',
+  )
+const pluginScopeSchema = z.enum(['user', 'project', 'local'])
+const pluginInstallSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('local'), path: z.string().min(1).max(4_096) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('url'),
+      url: z.string().url().startsWith('https://').max(2_048),
+    })
+    .strict(),
+])
+const pluginInstallSchema = z
+  .object({
+    previewId: z.string().regex(/^plugin_preview_[a-f0-9]{24}$/),
+    digest: sha256Schema,
+    scope: pluginScopeSchema,
+  })
+  .strict()
+const pluginTargetSchema = z
+  .object({ pluginId: pluginIdSchema, scope: pluginScopeSchema })
+  .strict()
 const nullableStringSchema = z.string().nullable().optional()
 const numberLikeSchema = z.union([z.number(), z.string()]).nullable().optional()
 const booleanLikeSchema = z
@@ -373,6 +402,30 @@ const terminalResizeSchema = terminalIdentitySchema.extend({
   cols: z.number().int().min(2).max(1_000),
   rows: z.number().int().min(2).max(1_000),
 })
+const projectProcessIdentitySchema = z
+  .object({
+    sessionId: idSchema,
+    processId: idSchema,
+  })
+  .strict()
+const projectProcessReadOutputSchema = projectProcessIdentitySchema.extend({
+  afterSeq: z.number().int().nonnegative().optional(),
+})
+const projectProcessStopSchema = projectProcessIdentitySchema.extend({
+  expectedRevision: z.number().int().positive(),
+})
+const projectProcessRestartSchema = projectProcessStopSchema.extend({
+  confirmed: z.literal(true),
+  invocationId: idSchema,
+})
+const referenceResolveSchema = z
+  .object({
+    sessionId: idSchema,
+    sourceMessageId: idSchema,
+    href: z.string().trim().min(1).max(4_096),
+    label: z.string().max(500),
+  })
+  .strict()
 
 const draftSessionSchema = z
   .object({
@@ -574,6 +627,8 @@ type AnyArgsSchema = z.ZodType<unknown[]>
 
 export interface CoreOperationSpec<Schema extends AnyArgsSchema, Result> {
   readonly args: Schema
+  readonly audience: 'main_renderer'
+  readonly classification: 'application_operation'
   readonly invoke: (api: CoreApi, args: z.output<Schema>) => Result
   readonly parseAndInvoke: (api: CoreApi, input: unknown) => Result
 }
@@ -584,6 +639,8 @@ function operation<Schema extends AnyArgsSchema, Result>(
 ): CoreOperationSpec<Schema, Result> {
   return {
     args,
+    audience: 'main_renderer',
+    classification: 'application_operation',
     invoke,
     parseAndInvoke: (api, input) => invoke(api, args.parse(input)),
   }
@@ -986,6 +1043,22 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'plans.get': operation(z.tuple([idSchema]), (api, [id]) => api.plans.get(id)),
   'plans.list': operation(z.tuple([]), (api) => api.plans.list()),
+  'plugins.inspect': operation(
+    z.tuple([pluginInstallSourceSchema]),
+    (api, [input]) => api.plugins.inspect(input),
+  ),
+  'plugins.install': operation(z.tuple([pluginInstallSchema]), (api, [input]) =>
+    api.plugins.install(input),
+  ),
+  'plugins.list': operation(z.tuple([]), (api) => api.plugins.list()),
+  'plugins.setEnabled': operation(
+    z.tuple([pluginTargetSchema.extend({ enabled: z.boolean() }).strict()]),
+    (api, [input]) => api.plugins.setEnabled(input),
+  ),
+  'plugins.uninstall': operation(
+    z.tuple([pluginTargetSchema]),
+    (api, [input]) => api.plugins.uninstall(input),
+  ),
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
@@ -1229,6 +1302,22 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [name, options]) => api.team.wakeMember(name, options),
   ),
+  'projectProcesses.readOutput': operation(
+    z.tuple([projectProcessReadOutputSchema]),
+    (api, [input]) => api.projectProcesses.readOutput(input),
+  ),
+  'projectProcesses.stop': operation(
+    z.tuple([projectProcessStopSchema]),
+    (api, [input]) => api.projectProcesses.stop(input),
+  ),
+  'projectProcesses.restart': operation(
+    z.tuple([projectProcessRestartSchema]),
+    (api, [input]) => api.projectProcesses.restart(input),
+  ),
+  'references.resolve': operation(
+    z.tuple([referenceResolveSchema]),
+    (api, [input]) => api.references.resolve(input),
+  ),
   'terminals.close': operation(
     z.tuple([terminalIdentitySchema]),
     (api, [input]) => api.terminals.close(input),
@@ -1288,6 +1377,34 @@ export function isCoreOperationKey(value: string): value is CoreOperationKey {
 
 export function coreOperationKeys(): CoreOperationKey[] {
   return Object.keys(CORE_OPERATION_REGISTRY).sort() as CoreOperationKey[]
+}
+
+export interface CoreOperationDescriptor<Key extends CoreOperationKey> {
+  readonly key: Key
+  readonly handlerKey: Key
+  readonly audience: 'main_renderer'
+  readonly classification: 'application_operation'
+  readonly inputSchema: (typeof CORE_OPERATION_REGISTRY)[Key]['args']
+}
+
+/**
+ * Canonical IPC descriptors. Electron and renderer consumers derive their
+ * allowlists from these registry-owned keys instead of a retired HTTP route
+ * table.
+ */
+export function coreOperationDescriptors(): Array<
+  CoreOperationDescriptor<CoreOperationKey>
+> {
+  return coreOperationKeys().map((key) => {
+    const spec = CORE_OPERATION_REGISTRY[key]
+    return Object.freeze({
+      key,
+      handlerKey: key,
+      audience: spec.audience,
+      classification: spec.classification,
+      inputSchema: spec.args,
+    }) as CoreOperationDescriptor<CoreOperationKey>
+  })
 }
 
 export class CoreOperationArgumentsError extends Error {

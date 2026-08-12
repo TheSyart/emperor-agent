@@ -1,7 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { resolveRuntimePaths } from '../../runtime/paths'
 import { CoreDiagnosticsService } from './diagnostics-service'
 
 function tmp(prefix: string): string {
@@ -11,9 +18,9 @@ function tmp(prefix: string): string {
 describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
   it('summarizes diagnostics without mutating missing or corrupt config files', async () => {
     const root = tmp('emperor-diagnostics-service-')
-    writeFileSync(join(root, 'emperor.local.json'), '{bad json', 'utf8')
+    writeFileSync(join(root, 'settings.json'), '{bad json', 'utf8')
     writeFileSync(
-      join(root, 'emperor.local.json.corrupt-1'),
+      join(root, 'settings.json.corrupt-1'),
       '{old bad json',
       'utf8',
     )
@@ -80,6 +87,20 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
             trust: 'trusted',
             trace: [],
             secretSources: [],
+          },
+        ],
+      }),
+      commandCatalog: () => ({
+        status: 'warning',
+        registeredSkills: 1,
+        conflicts: [
+          {
+            token: 'new',
+            skillName: 'new',
+            source: 'user',
+            reason: 'builtin_collision',
+            winnerSkillName: null,
+            winnerSource: 'builtin',
           },
         ],
       }),
@@ -166,7 +187,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     const payload = await service.payload()
 
     expect(existsSync(join(root, 'model_config.json'))).toBe(false)
-    expect(existsSync(join(root, 'emperor.local.json'))).toBe(true)
+    expect(existsSync(join(root, 'settings.json'))).toBe(true)
     expect(payload.modelConfig).toMatchObject({
       path: join(root, 'model_config.json'),
       exists: false,
@@ -174,13 +195,13 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       error: '',
     })
     expect(payload.localConfig).toMatchObject({
-      path: join(root, 'emperor.local.json'),
+      path: join(root, 'settings.json'),
       exists: true,
       status: 'corrupt',
     })
     expect((payload.localConfig as any).corruptBackups).toEqual([
       expect.objectContaining({
-        path: join(root, 'emperor.local.json.corrupt-1'),
+        path: join(root, 'settings.json.corrupt-1'),
       }),
     ])
     expect(payload.scheduler).toMatchObject({
@@ -208,6 +229,11 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     expect(payload.effectiveConfig).toMatchObject({
       revision: 'a'.repeat(64),
       entries: [{ key: 'sandbox.runtime' }],
+    })
+    expect(payload.commandCatalog).toMatchObject({
+      status: 'warning',
+      registeredSkills: 1,
+      conflicts: [{ token: 'new', reason: 'builtin_collision' }],
     })
     expect(payload.hybridMemory).toMatchObject({
       capability: {
@@ -252,6 +278,13 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       desktopRenderer: true,
       desktopPetModules: false,
     })
+    expect(payload.optionalCapabilities.map((item) => item.id)).toEqual([
+      'code_intelligence',
+      'hybrid_memory',
+      'soft_git_rewind',
+      'watchlist',
+    ])
+    expect(JSON.stringify(payload.optionalCapabilities)).not.toContain(root)
   })
 
   it('reports the effective workspace fence separately from runtime paths', async () => {
@@ -259,25 +292,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     const workspace = join(root, 'project')
     const stateRoot = join(root, '.emperor')
     const service = new CoreDiagnosticsService(root, {
-      runtimePaths: {
-        runtimeRoot: root,
-        stateRoot,
-        stateRootSource: 'explicit',
-        templatesDir: join(root, 'templates'),
-        skillsDir: join(root, 'skills'),
-        assetsDir: join(root, 'assets'),
-        memoryRoot: join(stateRoot, 'memory'),
-        sessionsRoot: join(stateRoot, 'sessions'),
-        projectsRoot: join(stateRoot, 'projects'),
-        attachmentsRoot: join(stateRoot, 'memory', 'attachments'),
-        mediaRoot: join(stateRoot, 'memory', 'media'),
-        teamRoot: join(stateRoot, 'team'),
-        tokensFile: join(stateRoot, 'tokens', 'tokens.jsonl'),
-        schedulerRoot: join(stateRoot, 'scheduler'),
-        tasksRoot: join(stateRoot, 'tasks'),
-        processesRoot: join(stateRoot, 'processes'),
-        controlRoot: join(stateRoot, 'control'),
-      },
+      runtimePaths: resolveRuntimePaths(root, { stateRoot }),
       workspacePolicy: () => ({
         workspaceRoot: workspace,
         stateRoot,
@@ -327,6 +342,35 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       processTree: true,
       reason: 'probe passed',
     })
+  })
+
+  it('reports workspace mcporter config without claiming ownership or deleting it', async () => {
+    const root = tmp('emperor-diagnostics-external-tool-config-')
+    const workspaceConfig = join(root, 'project', 'config', 'mcporter.json')
+    mkdirSync(join(root, 'project', 'config'), { recursive: true })
+    writeFileSync(workspaceConfig, '{"mcpServers":{}}', 'utf8')
+    const service = new CoreDiagnosticsService(root, {
+      externalToolConfig: () => ({
+        mcporter: {
+          workspacePath: workspaceConfig,
+          workspacePathExists: true,
+          workspacePathOwnedByEmperor: false,
+          autoCleanupAllowed: false,
+        },
+      }),
+    })
+
+    const payload = await service.payload()
+
+    expect(payload.externalToolConfig).toMatchObject({
+      mcporter: {
+        workspacePath: workspaceConfig,
+        workspacePathExists: true,
+        workspacePathOwnedByEmperor: false,
+        autoCleanupAllowed: false,
+      },
+    })
+    expect(readFileSync(workspaceConfig, 'utf8')).toBe('{"mcpServers":{}}')
   })
 
   it('contains Environment probe failures without leaking diagnostics internals', async () => {
@@ -406,6 +450,27 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
           existed: true,
         },
       ],
+    })
+  })
+
+  it('keeps diagnostics available when the command catalog cannot be scanned', async () => {
+    const root = tmp('emperor-diagnostics-command-catalog-')
+    const service = new CoreDiagnosticsService(root, {
+      commandCatalog: () => {
+        throw new Error('catalog scan failed')
+      },
+    })
+
+    await expect(service.payload()).resolves.toMatchObject({
+      commandCatalog: {
+        status: 'unavailable',
+        error: {
+          code: 'internal_error',
+          message: '发生内部错误，请查看日志。',
+        },
+        registeredSkills: 0,
+        conflicts: [],
+      },
     })
   })
 })

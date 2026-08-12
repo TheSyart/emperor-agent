@@ -109,6 +109,10 @@ describe('composer control model', () => {
       short: '智能',
     })
     expect(currentComposerMode('normal').value).toBe('ask_before_edit')
+    expect(currentComposerMode('full_access').description).toContain(
+      '宿主直执且免询问',
+    )
+    expect(currentComposerMode('full_access').description).toContain('明确拒绝')
   })
 
   it('shows the saved execution permission while Plan remains active', () => {

@@ -2,7 +2,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import type { TerminalEvent, TerminalSummary } from '@emperor/core'
+import type { TerminalEvent, TerminalSummary } from '@emperor/core/api'
 import { Plus, TerminalSquare, X } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onTerminalEvent } from '../../api/backend'

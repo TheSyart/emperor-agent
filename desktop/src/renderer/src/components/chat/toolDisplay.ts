@@ -14,6 +14,7 @@ export function toolDisplayName(name: string) {
     edit_file: 'Edit',
     glob: 'Glob',
     grep: 'Search',
+    Skill: 'Skill',
     load_skill: 'Skill',
     propose_plan: 'Plan',
     read_file: 'Read',
@@ -33,6 +34,7 @@ export function toolPurpose(name: string) {
     edit_file: '修改文件',
     glob: '匹配路径',
     grep: '搜索文本',
+    Skill: '加载 Skill',
     load_skill: '加载 Skill',
     propose_plan: '提交计划',
     read_file: '读取文件',
@@ -85,7 +87,7 @@ function rawToolTarget(
   if (name === 'web_fetch') {
     return firstString(args.url)
   }
-  if (name === 'load_skill') {
+  if (name === 'Skill' || name === 'load_skill') {
     return firstString(args.name, args.skill, args.skill_name)
   }
   if (name === 'scheduler') {

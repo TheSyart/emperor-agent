@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compactReplayEvents } from '@emperor/core'
+import { compactReplayEvents } from '@emperor/core/runtime-contract'
 import {
   applyChatProjectionEvent,
   createProjectionRuntime,

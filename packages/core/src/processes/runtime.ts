@@ -20,9 +20,11 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import {
+  prepareOwnedProcessExecution,
   type OwnedProcessRequest,
   type OwnedProcessResult,
   type OwnedProcessRunner,
+  type ProcessExecutionBoundary,
 } from '../environment/process-runner'
 import {
   OsSandboxController,
@@ -45,7 +47,14 @@ const MAX_OUTPUT_BYTES = 8 * 1_024 * 1_024
 const MAX_RECEIPTS = 10_000
 
 export type ProcessOwnerKind =
-  'app' | 'session' | 'task' | 'hook' | 'mcp' | 'terminal' | 'lsp'
+  | 'app'
+  | 'session'
+  | 'task'
+  | 'hook'
+  | 'mcp'
+  | 'terminal'
+  | 'lsp'
+  | 'environment'
 
 export interface ProcessOwner {
   kind: ProcessOwnerKind
@@ -84,6 +93,29 @@ export interface OwnedProcessReceipt {
     withinWorkspace: boolean
   }
   containment: ProcessContainmentReceipt
+  executionBoundary?: {
+    kind: 'sandbox' | 'host'
+    authorization:
+      | {
+          kind: 'run_command'
+          source: 'permission_rule' | 'user_approved_once' | 'full_access'
+          permissionMode: 'ask_before_edit' | 'smart_auto' | 'full_access'
+          rule: string
+          operationFingerprintDigest: string
+          authorizationIdDigest: string | null
+        }
+      | {
+          kind: 'managed_environment_install'
+          source: 'managed_environment_install'
+          planIdDigest: string
+          recipeDigest: string
+          toolId: string
+          toolVersion: string
+          operationFingerprintDigest: string
+          authorizationIdDigest: string
+        }
+      | null
+  }
   outputQuota: {
     maxBytes: number
     strategy: 'terminate' | 'truncate_tail'
@@ -193,7 +225,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     this.killProcessTree =
       opts.killTree ?? ((pid) => defaultKillProcessTree(pid, this.platform))
     for (const receipt of opts.initialReceipts ?? this.loadReceipts())
-      this.receipts.set(receipt.id, cloneReceipt(receipt))
+      this.receipts.set(receipt.id, normalizeReceipt(receipt))
     if (opts.initialReceipts) this.persistReceipts()
   }
 
@@ -223,11 +255,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
   }
 
   async run(request: ManagedOwnedProcessRequest): Promise<OwnedProcessResult> {
-    const prepared = this.sandbox.prepare(
-      request.executable,
-      request.args,
-      request.containment,
-    )
+    const prepared = prepareOwnedProcessExecution(this.sandbox, request)
     await request.onContainment?.(prepared.receipt)
     if (prepared.receipt.decision === 'denied' || !prepared.executable)
       return {
@@ -250,14 +278,16 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     )
     const outputPolicy = request.outputPolicy ?? 'terminate'
     const outputScope = request.outputQuotaScope ?? 'combined'
-    const cwd = resolve(request.cwd ?? request.containment.workspaceRoot)
+    const workspaceRoot = requestWorkspaceRoot(request)
+    const cwd = resolve(request.cwd ?? workspaceRoot)
     const receipt = this.createReceipt({
       owner,
       executable: request.executable,
       args: request.args,
       cwd,
-      workspaceRoot: request.containment.workspaceRoot,
+      workspaceRoot,
       containment: prepared.receipt,
+      execution: requestExecutionBoundary(request),
       maxOutputBytes,
       outputPolicy,
       outputScope,
@@ -432,11 +462,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
   async spawn(
     request: ManagedOwnedProcessRequest,
   ): Promise<OwnedProcessHandle> {
-    const prepared = this.sandbox.prepare(
-      request.executable,
-      request.args,
-      request.containment,
-    )
+    const prepared = prepareOwnedProcessExecution(this.sandbox, request)
     await request.onContainment?.(prepared.receipt)
     if (prepared.receipt.decision === 'denied' || !prepared.executable)
       throw new Error(
@@ -453,14 +479,16 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     )
     const outputPolicy = request.outputPolicy ?? 'terminate'
     const outputScope = request.outputQuotaScope ?? 'combined'
-    const cwd = resolve(request.cwd ?? request.containment.workspaceRoot)
+    const workspaceRoot = requestWorkspaceRoot(request)
+    const cwd = resolve(request.cwd ?? workspaceRoot)
     const receipt = this.createReceipt({
       owner,
       executable: request.executable,
       args: request.args,
       cwd,
-      workspaceRoot: request.containment.workspaceRoot,
+      workspaceRoot,
       containment: prepared.receipt,
+      execution: requestExecutionBoundary(request),
       maxOutputBytes,
       outputPolicy,
       outputScope,
@@ -818,6 +846,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     cwd: string
     workspaceRoot: string
     containment: ProcessContainmentReceipt
+    execution: ProcessExecutionBoundary
     maxOutputBytes: number
     outputPolicy: 'terminate' | 'truncate_tail'
     outputScope: 'combined' | 'per_stream'
@@ -837,6 +866,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
         withinWorkspace: isPathWithin(workspaceRoot, opts.cwd),
       },
       containment: structuredClone(opts.containment),
+      executionBoundary: executionBoundaryReceipt(opts.execution),
       outputQuota: {
         maxBytes: opts.maxOutputBytes,
         strategy: opts.outputPolicy,
@@ -986,7 +1016,16 @@ function normalizeOwner(
 ): ProcessOwner {
   const kind = String(value?.kind ?? 'app') as ProcessOwnerKind
   if (
-    !['app', 'session', 'task', 'hook', 'mcp', 'terminal', 'lsp'].includes(kind)
+    ![
+      'app',
+      'session',
+      'task',
+      'hook',
+      'mcp',
+      'terminal',
+      'lsp',
+      'environment',
+    ].includes(kind)
   )
     throw new ProcessOwnerError(`Unknown process owner kind: ${kind}`)
   const id = String(value?.id ?? 'emperor-app').trim()
@@ -1130,6 +1169,88 @@ function isOwnedProcessReceipt(value: unknown): value is OwnedProcessReceipt {
 
 function cloneReceipt(receipt: OwnedProcessReceipt): OwnedProcessReceipt {
   return structuredClone(receipt)
+}
+
+function normalizeReceipt(receipt: OwnedProcessReceipt): OwnedProcessReceipt {
+  const cloned = cloneReceipt(receipt)
+  cloned.executionBoundary ??= { kind: 'sandbox', authorization: null }
+  const rawAuthorization = cloned.executionBoundary.authorization as Record<
+    string,
+    unknown
+  > | null
+  if (
+    cloned.executionBoundary.kind === 'host' &&
+    rawAuthorization &&
+    !('kind' in rawAuthorization)
+  )
+    cloned.executionBoundary.authorization = {
+      kind: 'run_command',
+      ...(rawAuthorization as Omit<
+        Extract<
+          NonNullable<
+            OwnedProcessReceipt['executionBoundary']
+          >['authorization'],
+          { kind: 'run_command' }
+        >,
+        'kind'
+      >),
+    } as Extract<
+      NonNullable<OwnedProcessReceipt['executionBoundary']>['authorization'],
+      { kind: 'run_command' }
+    >
+  return cloned
+}
+
+function requestExecutionBoundary(
+  request: ManagedOwnedProcessRequest,
+): ProcessExecutionBoundary {
+  return request.execution
+}
+
+function requestWorkspaceRoot(request: ManagedOwnedProcessRequest): string {
+  const execution = requestExecutionBoundary(request)
+  if (execution.kind === 'sandbox') return execution.policy.workspaceRoot
+  const cwd = String(request.cwd ?? '').trim()
+  if (!cwd)
+    throw new ProcessOwnerError(
+      'Host process requires an explicit workspace cwd',
+    )
+  return cwd
+}
+
+function executionBoundaryReceipt(
+  execution: ProcessExecutionBoundary,
+): NonNullable<OwnedProcessReceipt['executionBoundary']> {
+  if (execution.kind === 'sandbox')
+    return { kind: 'sandbox', authorization: null }
+  const authorization = execution.authorization
+  if (authorization.toolName === 'manage_environment')
+    return {
+      kind: 'host',
+      authorization: {
+        kind: 'managed_environment_install',
+        source: authorization.source,
+        planIdDigest: sha256(authorization.planId),
+        recipeDigest: authorization.recipeDigest,
+        toolId: authorization.toolId.slice(0, 128),
+        toolVersion: authorization.toolVersion.slice(0, 128),
+        operationFingerprintDigest: sha256(authorization.operationFingerprint),
+        authorizationIdDigest: sha256(authorization.authorizationId),
+      },
+    }
+  return {
+    kind: 'host',
+    authorization: {
+      kind: 'run_command',
+      source: authorization.source,
+      permissionMode: authorization.permissionMode,
+      rule: authorization.rule.slice(0, 160),
+      operationFingerprintDigest: sha256(authorization.operationFingerprint),
+      authorizationIdDigest: authorization.authorizationId
+        ? sha256(authorization.authorizationId)
+        : null,
+    },
+  }
 }
 
 function boundedInteger(

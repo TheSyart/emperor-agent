@@ -1,5 +1,5 @@
 /**
- * Plan 领域模型 (MIG-CTRL-012)。对齐 Python `agent/plans/models.py`。
+ * Plan 领域模型。
  * 磁盘兼容: PlanRecord/Step/DraftState/Discovery 的 from_dict/to_dict 字段与回退逐字保真。
  */
 import {

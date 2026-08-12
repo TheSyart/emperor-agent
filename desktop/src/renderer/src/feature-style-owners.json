@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "cascadeOrder": [
+    "styles/activity.css",
+    "styles/panels.css",
+    "styles/responsive.css",
+    "styles/surfaces/composer.css",
+    "styles/surfaces/decision.css",
+    "styles/surfaces/menus.css",
+    "styles/surfaces/panels.css"
+  ],
+  "features": {
+    "composer": {
+      "view": "components/chat/Composer.vue",
+      "controller": "components/chat/composerController.ts",
+      "layers": [
+        {
+          "role": "legacy-foundation",
+          "path": "styles/activity.css"
+        },
+        {
+          "role": "attachment-and-draft-support",
+          "path": "styles/panels.css"
+        },
+        {
+          "role": "legacy-responsive",
+          "path": "styles/responsive.css"
+        },
+        {
+          "role": "progress-and-change-surface",
+          "path": "styles/surfaces/composer.css"
+        },
+        {
+          "role": "active-composer-surface",
+          "path": "styles/surfaces/decision.css"
+        },
+        {
+          "role": "palette-and-picker-surface",
+          "path": "styles/surfaces/menus.css"
+        },
+        {
+          "role": "current-responsive-overrides",
+          "path": "styles/surfaces/panels.css"
+        }
+      ]
+    },
+    "hooks": {
+      "view": "components/panels/HooksPanel.vue",
+      "controller": "components/panels/hooksPanelController.ts",
+      "layers": [
+        {
+          "role": "component-scoped",
+          "path": "components/panels/HooksPanel.vue",
+          "scoped": true
+        }
+      ]
+    }
+  }
+}

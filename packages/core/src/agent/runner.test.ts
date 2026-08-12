@@ -25,7 +25,11 @@ import {
   type LLMResponse,
   type ToolCallRequest,
 } from '../providers/base'
-import { Tool, type ToolExecutionContext } from '../tools/base'
+import {
+  Tool,
+  type ManagedPathCapability,
+  type ToolExecutionContext,
+} from '../tools/base'
 import { okResult, type ToolResult } from '../tools/base'
 import { toolParamsSchema, S } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
@@ -124,6 +128,23 @@ class FakeProvider extends LLMProvider {
     return this.responses.length
       ? this.responses.shift()!
       : makeResponse({ content: 'done' })
+  }
+}
+
+class StreamingResearchProvider extends LLMProvider {
+  seenMessages: ChatArgs['messages'][] = []
+  constructor(private readonly responses: LLMResponse[]) {
+    super({ defaultModel: 'fake' })
+  }
+  async chat(args: ChatArgs): Promise<LLMResponse> {
+    this.seenMessages.push(args.messages)
+    return this.responses.shift() ?? makeResponse({ content: 'done' })
+  }
+  override async chatStream(args: ChatStreamArgs): Promise<LLMResponse> {
+    this.seenMessages.push(args.messages)
+    const response = this.responses.shift() ?? makeResponse({ content: 'done' })
+    if (response.content) await args.onContentDelta?.(response.content)
+    return response
   }
 }
 
@@ -439,6 +460,67 @@ class StructuredEchoTool extends Tool {
   }
 }
 
+class ResearchCommandFixtureTool extends Tool {
+  override name = 'run_command'
+  override description = 'Return deterministic external command fixtures.'
+  override parameters = toolParamsSchema({ command: S('command') }, ['command'])
+  override readOnly = true
+
+  execute(args: Record<string, unknown>): ToolResult {
+    const command = String(args.command ?? '')
+    const rawContent = command.includes('curl')
+      ? 'Current headline\nhttps://news.example/story'
+      : 'Doctor setup help\nhttps://setup.example/extension'
+    return {
+      modelContent: rawContent,
+      displaySummary: 'fixture command completed',
+      rawContent,
+      artifacts: [],
+      metadata: {
+        outcome: 'success',
+        success_scope: 'process_exit_zero',
+        evidence_disposition: 'candidate',
+        workspace_effect: 'none',
+        verification_required: true,
+      },
+      isError: false,
+    }
+  }
+}
+
+class VerifiedResearchFixtureTool extends Tool {
+  override name = 'web_fetch'
+  override description = 'Return a deterministic verified external fixture.'
+  override parameters = toolParamsSchema({ url: S('url') }, ['url'])
+  override readOnly = true
+  override externalContent = true
+  override capabilityProvenance = {
+    kind: 'external_transport' as const,
+    transport: 'fixture',
+    source: 'runner_test',
+  }
+
+  execute(args: Record<string, unknown>): ToolResult {
+    const url = String(args.url ?? '')
+    return {
+      modelContent: `Current headline\n${url}`,
+      displaySummary: 'fixture fetch completed',
+      rawContent: 'Current headline',
+      artifacts: [],
+      metadata: {
+        outcome: 'success',
+        success_scope: 'response_body',
+        http_status: 200,
+        url,
+        evidence_disposition: 'verified',
+        workspace_effect: 'none',
+        verification_required: false,
+      },
+      isError: false,
+    }
+  }
+}
+
 class MediaArtifactTool extends Tool {
   override name = 'media_result'
   override description = 'Return an image artifact.'
@@ -724,6 +806,59 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(
       emitted.filter((event) => event.event === 'turn_change_snapshot'),
     ).toEqual([])
+  })
+
+  it('keeps zero-file unattributed command changes diagnostic-only', async () => {
+    class UnattributedCommand extends Tool {
+      override name = 'unattributed_command'
+      override description = 'command with unknown workspace side effects'
+      override parameters = toolParamsSchema({}, [])
+      override workspaceMutation = true
+      execute(): ToolResult {
+        return okResult('completed without workspace changes')
+      }
+    }
+    const root = mkdtempSync(join(tmpdir(), 'emperor-zero-partial-ledger-'))
+    const workspaceRoot = join(root, 'workspace')
+    mkdirSync(workspaceRoot, { recursive: true })
+    const registry = new ToolRegistry()
+    registry.register(new UnattributedCommand())
+    const emitted: Msg[] = []
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        finishReason: 'tool_calls',
+        toolCalls: [toolCall('unknown_effect', 'unattributed_command', {})],
+      }),
+      makeResponse({ content: 'done' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      workspaceRoot,
+      sessionId: 'session_zero_partial',
+      turnChangeLedger: new TurnChangeLedger({
+        stateRoot: join(root, '.emperor'),
+      }),
+    })
+
+    const reply = await runner.stepAsync(
+      [{ role: 'user', content: 'inspect external information' }],
+      {
+        turnId: 'turn_zero_partial',
+        emit: (event) => void emitted.push(event),
+      },
+    )
+
+    expect(reply).toBe('done')
+    expect(
+      emitted.filter((event) => event.event === 'turn_change_snapshot'),
+    ).toEqual([])
+    expect(JSON.stringify(provider.seenMessages)).not.toContain(
+      'TURN_CHANGE_SUMMARY',
+    )
   })
 
   it('normalizes a provider AbortError only when this turn signal is aborted', async () => {
@@ -1992,6 +2127,254 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ])
   })
 
+  it('creates the default tool-result store under the runner session', () => {
+    const stateRoot = mkdtempSync(
+      join(tmpdir(), 'emperor-runner-session-tool-results-'),
+    )
+    const memoryDir = join(stateRoot, 'memory')
+    const runner = new AgentRunner({
+      provider: new FakeProvider([makeResponse({ content: 'done' })]),
+      model: 'fake',
+      registry: new ToolRegistry(stateRoot),
+      systemPrompt: 'system',
+      memoryStore: new MemoryStore(memoryDir, join(memoryDir, 'USER.local.md')),
+      sessionId: 'session_scoped_results',
+    })
+
+    expect(runner.contextPipeline.toolResultStore?.dir).toBe(
+      join(stateRoot, 'sessions', 'session_scoped_results', 'tool-results'),
+    )
+    expect(existsSync(join(stateRoot, 'memory', 'tool-results'))).toBe(false)
+  })
+
+  it('does not accept diagnostic URLs as external research evidence', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new ResearchCommandFixtureTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_doctor', 'run_command', {
+            command: 'agent-reach doctor --json',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'Research complete.' }),
+      makeResponse({ content: 'Still no research result.' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+    })
+    runner.activeExternalEvidenceRequired = true
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: 'Find current news.' },
+    ])
+
+    expect(provider.seenMessages).toHaveLength(3)
+    expect(JSON.stringify(provider.seenMessages[2])).toContain(
+      'EXTERNAL_EVIDENCE_REQUIRED',
+    )
+    expect(reply).toContain('外部调研未完成')
+  })
+
+  it('enforces external evidence for an explicit current-news request without Skill metadata', async () => {
+    const provider = new FakeProvider([
+      makeResponse({ content: '今日政治新闻已经整理完成。' }),
+      makeResponse({ content: '仍然没有外部来源。' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry: new ToolRegistry(),
+      systemPrompt: 'system',
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '搜索今日政治新闻' },
+    ])
+
+    expect(provider.seenMessages).toHaveLength(2)
+    expect(JSON.stringify(provider.seenMessages[1])).toContain(
+      'EXTERNAL_EVIDENCE_REQUIRED',
+    )
+    expect(reply).toContain('外部调研未完成')
+  })
+
+  it('requires the final research reply to cite a URL returned by the successful fetch', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new VerifiedResearchFixtureTool())
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_fetch', 'web_fetch', {
+            url: 'https://news.example/story',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'Current headline.' }),
+      makeResponse({
+        content: 'Current headline. [Source](https://news.example/story)',
+      }),
+      makeResponse({
+        content: JSON.stringify({
+          passed: true,
+          unsupported_unit_ids: [],
+          reason_codes: [],
+        }),
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+    })
+    runner.activeExternalEvidenceRequired = true
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: 'Find current news.' },
+    ])
+
+    expect(provider.seenMessages).toHaveLength(4)
+    expect(JSON.stringify(provider.seenMessages[2])).toContain(
+      'RESEARCH_CITATIONS_REQUIRED',
+    )
+    expect(reply).toContain('https://news.example/story')
+  })
+
+  it('requires every factual unit to cite verified content and reviews the corrected draft in isolation', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new VerifiedResearchFixtureTool())
+    const corrected = [
+      '- 事件 A 已于周二发生。[来源](https://news.example/a)',
+      '- 事件 B 已于周三发生。[来源](https://news.example/b)',
+    ].join('\n')
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('fetch_a', 'web_fetch', {
+            url: 'https://news.example/a',
+          }),
+          toolCall('fetch_b', 'web_fetch', {
+            url: 'https://news.example/b',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({
+        content: [
+          '- 事件 A 已于周二发生。[来源](https://news.example/a)',
+          '- 事件 B 已于周三发生。',
+        ].join('\n'),
+      }),
+      makeResponse({ content: corrected }),
+      makeResponse({
+        content: JSON.stringify({
+          passed: true,
+          unsupported_unit_ids: [],
+          reason_codes: [],
+        }),
+      }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+    })
+
+    const reply = await runner.stepAsync([
+      { role: 'user', content: '搜索今日政治新闻' },
+    ])
+
+    expect(reply).toBe(corrected)
+    expect(provider.seenMessages).toHaveLength(4)
+    expect(JSON.stringify(provider.seenMessages[2])).toContain(
+      'RESEARCH_CITATIONS_REQUIRED',
+    )
+    expect(provider.seenMessages[3]).toHaveLength(2)
+    expect(provider.seenMessages[3]?.[0]).toMatchObject({ role: 'system' })
+    expect(String(provider.seenMessages[3]?.[1]?.content)).toContain('unit_1')
+    expect(JSON.stringify(provider.seenMessages[3])).not.toContain(
+      'RESEARCH_CITATIONS_REQUIRED',
+    )
+  })
+
+  it('stages research deltas until the corrected draft passes both validation layers', async () => {
+    const registry = new ToolRegistry()
+    registry.register(new VerifiedResearchFixtureTool())
+    const badDraft = '事件已经发生，但没有逐项来源。'
+    const corrected = '事件已经发生。[来源](https://news.example/story)'
+    const provider = new StreamingResearchProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('fetch_story', 'web_fetch', {
+            url: 'https://news.example/story',
+          }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: badDraft }),
+      makeResponse({ content: corrected }),
+      makeResponse({
+        content: JSON.stringify({
+          passed: true,
+          unsupported_unit_ids: [],
+          reason_codes: [],
+        }),
+      }),
+    ])
+    const events: Array<Record<string, unknown>> = []
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+    })
+    const history: Msg[] = [{ role: 'user', content: '搜索今日新闻' }]
+
+    const reply = await runner.stepAsync(history, {
+      emit: (event) => {
+        events.push(event)
+      },
+    })
+
+    expect(reply).toBe(corrected)
+    expect(
+      events
+        .filter((event) => event.event === 'message_delta')
+        .map((event) => String(event.delta ?? '')),
+    ).toEqual([corrected])
+    expect(JSON.stringify(events)).not.toContain(badDraft)
+    expect(JSON.stringify(history)).not.toContain(badDraft)
+    const validationEvents = events.filter(
+      (event) => event.event === 'research_validation',
+    )
+    expect(validationEvents.map((event) => event.stage)).toEqual([
+      'deterministic',
+      'failed',
+      'deterministic',
+      'grounding_review',
+      'passed',
+    ])
+    expect(validationEvents.at(-1)).toMatchObject({
+      source_count: 1,
+      fact_unit_count: 1,
+    })
+    expect(JSON.stringify(validationEvents)).not.toContain(
+      'https://news.example/story',
+    )
+  })
+
   it('streaming tool execution produces the same final reply and tool messages as batch (Wave5 golden)', async () => {
     async function runTurn(
       streaming: boolean,
@@ -2268,6 +2651,90 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     expect(String(toolMessage?.content ?? '')).toContain('blocked by hook')
   })
 
+  it('issues managed path authority only after the final hook transform', async () => {
+    class ManagedPathTool extends Tool {
+      override name = 'manage_skill'
+      override description = 'Exercises trusted managed path authority.'
+      override parameters = toolParamsSchema({ name: S('Skill name.') }, [
+        'name',
+      ])
+      readonly issuedFor: string[] = []
+
+      override issueManagedPathCapability(
+        args: Record<string, unknown>,
+      ): ManagedPathCapability {
+        const name = String(args.name)
+        this.issuedFor.push(name)
+        return {
+          version: 1,
+          toolName: 'manage_skill',
+          issuer: 'core_tool_host',
+          issuerId: 'runner-test',
+          rootDigest: 'managed-root',
+          action: 'validate',
+          relativeTarget: `skills/${name}`,
+          operationFingerprint: name,
+        }
+      }
+
+      execute(
+        args: Record<string, unknown>,
+        ctx?: ToolExecutionContext,
+      ): string {
+        return ctx?.managedPathCapability?.operationFingerprint === args.name
+          ? `authorized:${String(args.name)}`
+          : 'Error: authorization_missing'
+      }
+    }
+
+    const tool = new ManagedPathTool()
+    const registry = new ToolRegistry()
+    registry.register(tool)
+    const provider = new FakeProvider([
+      makeResponse({
+        content: '',
+        toolCalls: [
+          toolCall('call_1', 'manage_skill', { name: 'model-proposed' }),
+        ],
+        finishReason: 'tool_calls',
+      }),
+      makeResponse({ content: 'done' }),
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      hooks: {
+        run: async (eventName) =>
+          eventName === 'PreToolUse'
+            ? {
+                decision: 'passthrough',
+                reason: '',
+                results: [],
+                additionalContext: '',
+                updatedInput: { name: 'hook-approved' },
+              }
+            : {
+                decision: 'passthrough',
+                reason: '',
+                results: [],
+                additionalContext: '',
+              },
+      },
+    })
+
+    await runner.stepAsync([{ role: 'user', content: 'create it' }])
+
+    expect(tool.issuedFor).toEqual(['hook-approved'])
+    const toolMessage = (provider.seenMessages[1] ?? []).find(
+      (message) => message.role === 'tool',
+    )
+    expect(String(toolMessage?.content ?? '')).toContain(
+      'authorized:hook-approved',
+    )
+  })
+
   it('adds PostToolUse hook context to the next model call', async () => {
     const registry = new ToolRegistry()
     registry.register(new EchoTool())
@@ -2480,7 +2947,10 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
     ])
     expect(completedEvent.summary).toBe('summary:large')
     expect(completedEvent.output).toBe('model:large')
-    expect(completedEvent.metadata).toEqual({ source: 'runner-test' })
+    expect(completedEvent.metadata).toMatchObject({
+      source: 'runner-test',
+      outcome: 'success',
+    })
   })
 
   it('emits error tool result and failed run event', async () => {
@@ -2617,9 +3087,9 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
 
     expect(replacement.tool_name).toBe('budgeted_echo')
     expect(String(projectedTool.content)).toContain('original_chars: 3000')
-    expect(
-      readFileSync(join(root, String(replacement.artifact_path)), 'utf8'),
-    ).toBe(content)
+    expect(readFileSync(String(replacement.artifact_path), 'utf8')).toBe(
+      content,
+    )
   })
 
   it('default context pipeline reports aggregate tool result replacements', async () => {
@@ -2689,10 +3159,7 @@ describe('AgentRunner turn phases (test_runner_state.py)', () => {
       String(toolMessages.at(-1)!.content),
     )
     expect(
-      readFileSync(
-        join(root, String(aggregateRecords[0]!.artifact_path)),
-        'utf8',
-      ),
+      readFileSync(String(aggregateRecords[0]!.artifact_path), 'utf8'),
     ).toBe(toolMessages[0]!.content)
   })
 

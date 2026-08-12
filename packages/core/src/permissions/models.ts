@@ -1,5 +1,5 @@
 /**
- * 权限模型 (MIG-CTRL-014)。对齐 Python `agent/permissions/models.py`。
+ * 权限模型。
  * PermissionDecision 字段集合: allowed/requiresApproval/risk/reason/toolName/arguments/rule/trace —— 无 `behavior`。
  */
 import { createHash } from 'node:crypto'
@@ -8,7 +8,9 @@ import type {
   PermissionRuleAction,
   PermissionRuleCandidate,
   PermissionRuleSource,
-} from './rules'
+  ToolPermissionProfile,
+} from './contracts'
+export type { ToolPermissionProfile } from './contracts'
 
 export enum PermissionMode {
   ASK_BEFORE_EDIT = 'ask_before_edit',
@@ -35,18 +37,6 @@ export function traceEntry(
   detail = '',
 ): PermissionTraceEntry {
   return { rule, outcome, detail }
-}
-
-export interface ToolPermissionProfile {
-  name: string
-  arguments: Record<string, unknown>
-  readOnly: boolean
-  concurrencySafe: boolean
-  destructive: boolean
-  path: string | null
-  paths: string[]
-  command: string
-  schedulerAction: string
 }
 
 export function makeProfile(
@@ -181,7 +171,7 @@ export const PermissionDecision = {
   },
 }
 
-/** 稳定 JSON: sort_keys + 无空格。对齐 Python json.dumps(..., sort_keys=True, separators=(",",":"))。 */
+/** 稳定 JSON：key 排序且不添加多余空格，用于可重现指纹。 */
 export function stableJson(value: unknown): string {
   return JSON.stringify(sortKeysDeep(jsonSafe(value)))
 }

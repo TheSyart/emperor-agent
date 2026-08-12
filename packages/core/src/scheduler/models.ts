@@ -258,6 +258,22 @@ export function schedulerPayloadSessionId(payload: SchedulerPayload): string {
   return strOrNull(payload.meta[SCHEDULER_TARGET_SESSION_METADATA_KEY]) ?? ''
 }
 
+export function withSchedulerPayloadSession(
+  payload: SchedulerPayload,
+  sessionId: string | null | undefined,
+): SchedulerPayload {
+  if (schedulerPayloadSessionId(payload)) return payload
+  const normalized = String(sessionId ?? '').trim()
+  if (!normalized) return payload
+  return SchedulerPayload.fromDict({
+    ...payload.toDict(),
+    meta: {
+      ...payload.meta,
+      [SCHEDULER_TARGET_SESSION_METADATA_KEY]: normalized,
+    },
+  })
+}
+
 export function normalizeSchedulerMisfirePolicy(
   value: unknown,
 ): SchedulerMisfirePolicy {

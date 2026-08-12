@@ -1,5 +1,5 @@
 /**
- * PlanContextBuilder (MIG-CTRL-013)。对齐 Python `agent/plans/context.py`。
+ * PlanContextBuilder。
  * 为当前 plan runtime 生成紧凑的模型可见附件（durable runtime state）。
  */
 import {
@@ -9,6 +9,7 @@ import {
   type PlanStep,
 } from './models'
 import type { PlanStore } from './store'
+import { GoalMutationGuardError } from '../goals/mutation-guard'
 
 const ACTIVE_STATUSES = new Set<string>([
   PlanStatus.APPROVED,
@@ -53,7 +54,21 @@ export class PlanContextBuilder {
   messageFor(
     history: Array<Record<string, unknown>>,
   ): { role: string; content: string } | null {
-    const record = this.latestScopedPlan()
+    let record: PlanRecord | null
+    try {
+      record = this.latestScopedPlan()
+    } catch (error) {
+      // The Plan block is a derived prompt projection, not the authority that
+      // permits execution. A concurrent terminal Goal commit must not abort an
+      // unrelated session while it briefly owns the shared state-root guard.
+      // Preserve fail-closed behavior for corruption and every other failure.
+      if (
+        error instanceof GoalMutationGuardError &&
+        error.code === 'goal_mutation_guard_busy'
+      )
+        return null
+      throw error
+    }
     if (record === null) return null
     if (!ACTIVE_STATUSES.has(record.status)) {
       if (

@@ -1,5 +1,5 @@
 /**
- * Plan 证据门 (MIG-CTRL-008)。对齐 Python `agent/plans/evidence.py`。
+ * Plan 证据门。
  * 评估 step 的 verification 是否满足证据要求；blocking_errors / risk_notes。
  */
 import {

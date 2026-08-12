@@ -178,8 +178,10 @@ export function migrateLegacyStateRoot(
     excludeRelPrefixes: [
       ...LEGACY_DOTEMPEROR_STATE_PREFIXES,
       'external_config.json',
+      'emperor.local.json',
     ],
   })
+  copyPreviousStateSettings(previousStateRoot, paths, logPath, logged, result)
   migrateLegacyStateSubdirsFromMemory(
     previousStateRoot,
     paths,
@@ -198,6 +200,56 @@ export function migrateLegacyStateRoot(
 
   writeMigrationReport(paths, result)
   return result
+}
+
+function copyPreviousStateSettings(
+  previousStateRoot: string,
+  paths: RuntimePaths,
+  logPath: string,
+  logged: Set<string>,
+  result: LegacyStateMigrationResult,
+): void {
+  const source = join(previousStateRoot, 'emperor.local.json')
+  const dest = paths.settingsFile
+  const sourceStatus = legacyFileStatus(source)
+  if (sourceStatus === 'missing' || pathEntryExists(dest)) return
+  const opts = {
+    legacy: 'config' as const,
+    logPath,
+    logged,
+    result,
+  }
+  if (sourceStatus === 'unsafe') {
+    appendLog(opts, {
+      action: 'skipped_unsafe_path',
+      rel_path: '.emperor/emperor.local.json',
+      source,
+      dest: null,
+      reason: 'legacy config is not a regular file',
+    })
+    result.skipped += 1
+    return
+  }
+  if (!isValidJson(source)) {
+    appendLog(opts, {
+      action: 'skipped_corrupt_json',
+      rel_path: '.emperor/emperor.local.json',
+      source,
+      dest: null,
+      reason: 'invalid json',
+    })
+    result.skipped += 1
+    return
+  }
+  mkdirSync(dirname(dest), { recursive: true })
+  copyFileSync(source, dest)
+  appendLog(opts, {
+    action: 'copied',
+    rel_path: '.emperor/emperor.local.json -> settings.json',
+    source,
+    dest,
+  })
+  result.copied += 1
 }
 
 function migrateLegacyStateSubdirsFromMemory(
@@ -263,13 +315,13 @@ function copyLegacyRootConfigFiles(
   logged: Set<string>,
   result: LegacyStateMigrationResult,
 ): void {
-  for (const name of [
-    'emperor.local.json',
-    'model_config.json',
-    'mcp_config.json',
+  for (const mapping of [
+    { sourceName: 'emperor.local.json', destName: 'settings.json' },
+    { sourceName: 'model_config.json', destName: 'model_config.json' },
+    { sourceName: 'mcp_config.json', destName: 'mcp_config.json' },
   ]) {
-    const source = join(paths.runtimeRoot, name)
-    const dest = join(paths.stateRoot, name)
+    const source = join(paths.runtimeRoot, mapping.sourceName)
+    const dest = join(paths.stateRoot, mapping.destName)
     const sourceStatus = legacyFileStatus(source)
     if (sourceStatus === 'missing' || pathEntryExists(dest)) continue
     if (sourceStatus === 'unsafe') {
@@ -277,7 +329,7 @@ function copyLegacyRootConfigFiles(
         { legacy: 'config', logPath, logged, result },
         {
           action: 'skipped_unsafe_path',
-          rel_path: name,
+          rel_path: mapping.sourceName,
           source,
           dest: null,
           reason: 'legacy config is not a regular file',
@@ -291,7 +343,7 @@ function copyLegacyRootConfigFiles(
         { legacy: 'config', logPath, logged, result },
         {
           action: 'skipped_corrupt_json',
-          rel_path: name,
+          rel_path: mapping.sourceName,
           source,
           dest: null,
           reason: 'invalid json',
@@ -306,7 +358,10 @@ function copyLegacyRootConfigFiles(
       { legacy: 'config', logPath, logged, result },
       {
         action: 'copied',
-        rel_path: name,
+        rel_path:
+          mapping.sourceName === mapping.destName
+            ? mapping.sourceName
+            : `${mapping.sourceName} -> ${mapping.destName}`,
         source,
         dest,
       },

@@ -1,16 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
+import { statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+  AtomicSnapshotSync,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 import type {
   HybridMemoryChunkInput,
   HybridMemorySource,
@@ -60,26 +55,38 @@ export class HybridMemoryDerivedIndexStore {
   readonly root: string
   readonly indexDir: string
   readonly indexPath: string
+  private readonly snapshot: AtomicSnapshotSync<StoredIndex>
 
-  constructor(stateRoot: string) {
+  constructor(
+    stateRoot: string,
+    opts: { persistenceAdapter?: SyncPersistenceAdapter } = {},
+  ) {
     this.root = resolve(stateRoot)
     this.indexDir = join(this.root, 'memory', 'hybrid-index')
     this.indexPath = join(this.indexDir, 'index.v1.json')
+    this.snapshot = new AtomicSnapshotSync({
+      path: this.indexPath,
+      codec: STORED_INDEX_CODEC,
+      adapter: opts.persistenceAdapter,
+      fileMode: 0o600,
+    })
   }
 
   load(): HybridMemoryDerivedIndexSnapshot {
-    if (!existsSync(this.indexPath)) return emptySnapshot('missing')
-    try {
-      const parsed = JSON.parse(readFileSync(this.indexPath, 'utf8'))
-      if (!isStoredIndex(parsed)) return emptySnapshot('corrupt')
-      return {
-        schemaVersion: 1,
-        status: 'ok',
-        sourceDigest: parsed.sourceDigest,
-        chunks: parsed.chunks.map(cloneChunk),
-      }
-    } catch {
-      return emptySnapshot('corrupt')
+    const loaded = this.snapshot.read({
+      fallback: { schemaVersion: 1, sourceDigest: '', chunks: [] },
+    })
+    if (!loaded.found)
+      return emptySnapshot(
+        loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot'
+          ? 'corrupt'
+          : 'missing',
+      )
+    return {
+      schemaVersion: 1,
+      status: 'ok',
+      sourceDigest: loaded.value.sourceDigest,
+      chunks: loaded.value.chunks.map(cloneChunk),
     }
   }
 
@@ -103,7 +110,7 @@ export class HybridMemoryDerivedIndexStore {
     const previousIds = new Set(current.chunks.map((chunk) => chunk.id))
     const nextIds = new Set(chunks.map((chunk) => chunk.id))
     const stored: StoredIndex = { schemaVersion: 1, sourceDigest, chunks }
-    atomicWriteJson(this.indexPath, stored)
+    this.snapshot.write(stored)
     return {
       schemaVersion: 1,
       status: 'ok',
@@ -328,27 +335,22 @@ function digestDocuments(
   )
 }
 
-function atomicWriteJson(path: string, value: StoredIndex): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const tmp = join(dirname(path), `.index.${randomUUID()}.tmp`)
-  const payload = `${JSON.stringify(value, null, 2)}\n`
-  let fileDescriptor: number | null = null
-  try {
-    writeFileSync(tmp, payload, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-    fileDescriptor = openSync(tmp, 'r')
-    fsyncSync(fileDescriptor)
-    closeSync(fileDescriptor)
-    fileDescriptor = null
-    renameSync(tmp, path)
-    const directoryDescriptor = openSync(dirname(path), 'r')
-    try {
-      fsyncSync(directoryDescriptor)
-    } finally {
-      closeSync(directoryDescriptor)
+const STORED_INDEX_CODEC: SnapshotCodec<StoredIndex> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    if (!isStoredIndex(input)) throw new Error('invalid hybrid memory index')
+    return {
+      value: {
+        schemaVersion: 1,
+        sourceDigest: input.sourceDigest,
+        chunks: input.chunks.map(cloneChunk),
+      },
+      schemaVersion: 1,
     }
-  } finally {
-    if (fileDescriptor !== null) closeSync(fileDescriptor)
-  }
+  },
 }
 
 function isStoredIndex(value: unknown): value is StoredIndex {

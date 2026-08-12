@@ -14,7 +14,7 @@
 
 - Electron main 进程内托管 `@emperor/core`，renderer 通过 preload IPC 调用 CoreApi。
 - Vue 3 + TypeScript + Tailwind 桌面端提供 Chat / Build 多会话、项目级记忆、工具调用、Scheduler、MCP、Team、Ask / Plan、附件与桌宠 companion。
-- 运行数据落在本地全局私有目录（`stateRoot`，默认 `~/.emperor-agent`）里的 `memory/`、`model_config.json`、`mcp_config.json`、`emperor.local.json` 等文件中，不写入仓库或项目源码目录。
+- 运行数据落在 Emperor Home（内部兼容名 `stateRoot`，默认 `~/.emperor`）里的 `memory/`、`skills/`、`environment/`、`settings.json`、`model_config.json`、`mcp_config.json` 等文件中，不写入仓库或项目源码目录。
 - 旧 Python 版只作为迁移背景，不再是可运行产品线；公共仓库不维护旧实现的任务清单或源码对账文档。
 
 ## 2. 先看哪里
@@ -46,7 +46,7 @@
 - `docs/development/`：源码开发和跨层扩展清单。
 - `docs/release/`：当前 Preview、安全说明、冻结 Stable 流程和工具供应链审核。
 - `private-docs/`：仓库根目录下的本地个人开发资料，保存实施计划、审计、研究、进度和外部源码借鉴材料；整个目录被 Git 忽略。
-- `memory/`：旧版本地运行数据残留位置，永不提交。当前默认私有数据根是 `~/.emperor-agent`（`stateRoot`，可用 `EMPEROR_CONFIG_DIR` 覆盖），不再默认写入这里或项目源码目录，详见 `docs/architecture/global-state-store.md`。
+- `memory/`：旧版本地运行数据残留位置，永不提交。当前 Emperor Home 默认是 `~/.emperor`（内部兼容名 `stateRoot`，可用 `EMPEROR_CONFIG_DIR` 整体覆盖），不再默认写入仓库或项目源码目录，详见 `docs/architecture/global-state-store.md`。
 
 ## 4. 本地运行
 
@@ -81,7 +81,7 @@ npm --prefix desktop run screenshots
 - Electron main 通过 `createCoreHost()` 初始化 `CoreApi`，不再 probe/spawn/wait 外部 Python server。
 - Renderer 使用 `window.emperor.invokeCore()`；`api/http.ts` 只是历史命名的 IPC 薄封装，Core bridge 不可用时直接失败，不提供 browser HTTP/WS fallback。
 - 附件原图通过 `app://attachments/{id}/raw` 读取，避免恢复旧 `/api/attachments/*` server 依赖；解析优先查 `stateRoot`，对旧安装保留只读 legacy fallback。
-- 每个 session 独立持久化 `stateRoot/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`（`stateRoot` 默认 `~/.emperor-agent`，与 `runtimeRoot` 是两个独立的根，见 `docs/architecture/global-state-store.md`）。
+- 每个 session 独立持久化 `stateRoot/sessions/<id>/history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl`（Emperor Home 默认 `~/.emperor`，与 `runtimeRoot` 是两个独立的根，见 `docs/architecture/global-state-store.md`）。
 - 新增 CoreApi operation 时必须同步 IPC contract、preload bridge、renderer API 映射和相关类型/测试。
 - 新增 runtime event 时必须同步 `packages/core/src/runtime/events.ts`、renderer `types.ts`、`runtime/*` reducer/handlers 和 `useRuntime.ts`。
 - 当前公开 Preview 必须通过 `.github/workflows/release-preview.yml` 的三平台 candidate、receipt、SBOM、attestation 和最终聚合门禁。`.github/workflows/release.yml` 的受信 Stable 链仍为 Frozen；不得从平台 build job 直接发布，也不得混用 `UNSIGNED-INTERNAL`、`UNSIGNED-PREVIEW` 和 Stable 产物。
@@ -99,7 +99,7 @@ npm --prefix desktop run screenshots
 
 ## 7. 不应提交
 
-运行态私有数据默认写入全局 `stateRoot`（`~/.emperor-agent`），不在项目目录里；以下条目主要防的是旧数据残留或显式把 `EMPEROR_CONFIG_DIR` 指回仓库的开发场景：
+运行态私有数据默认写入全局 Emperor Home（`~/.emperor`），不在项目目录里；以下条目主要防的是旧数据残留或显式把 `EMPEROR_CONFIG_DIR` 指回仓库的开发场景：
 
 严格不要提交：
 
@@ -109,7 +109,8 @@ npm --prefix desktop run screenshots
 - `.team/`
 - `model_config.json`
 - `mcp_config.json`
-- `emperor.local.json`
+- `settings.json`
+- `emperor.local.json`（旧配置迁移残留）
 - `.env`
 - `private-docs/`；兼容旧工具的 `docs/private/`、`docs/superpowers/`、`docs/archive/` 也不得提交
 - 日期化任务计划、progress、审计、研究和外部源码借鉴材料

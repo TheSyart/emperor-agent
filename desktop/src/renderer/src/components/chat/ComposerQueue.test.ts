@@ -63,7 +63,7 @@ describe('Composer single queue slot', () => {
 
     component.restoreDraft({
       content: '继续处理',
-      displayContent: '继续处理 /skill:reviewer',
+      displayContent: '继续处理 /agent-reach',
       attachments: [
         {
           id: 'att_restore',
@@ -81,7 +81,7 @@ describe('Composer single queue slot', () => {
 
     expect(
       container.querySelector<HTMLTextAreaElement>('textarea')?.value,
-    ).toBe('继续处理 /skill:reviewer')
+    ).toBe('继续处理 /agent-reach')
     expect(container.textContent).toContain('evidence.md')
   })
 

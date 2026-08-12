@@ -10,6 +10,13 @@ export function useBootstrap(showToast: (message: string) => void) {
   const skillContent = ref('')
   const configContent = ref('')
   const mcpContent = ref('')
+  ;(window as any).emperor?.onPetStatus?.(
+    (status: { open?: boolean; error?: string | null }) => {
+      if (!boot.value?.desktopPet) return
+      boot.value.desktopPet.running = Boolean(status?.open)
+      boot.value.desktopPet.lastError = status?.error || null
+    },
+  )
 
   async function loadBootstrap(showLoading = true, sessionId = '') {
     try {
@@ -18,6 +25,11 @@ export function useBootstrap(showToast: (message: string) => void) {
       const payload = await core('bootstrap', {
         sessionId: sessionId || null,
       })
+      if (payload.desktopPet) {
+        const status = await (window as any).emperor?.petStatus?.()
+        payload.desktopPet.running = Boolean(status?.open)
+        payload.desktopPet.lastError = status?.error || null
+      }
       boot.value = payload
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
@@ -164,20 +176,22 @@ export function useBootstrap(showToast: (message: string) => void) {
 
   async function setDesktopPetEnabled(enabled: boolean) {
     const payload = await core('desktopPet.setEnabled', enabled)
-    if (boot.value) boot.value.desktopPet = payload
-
-    // Open or close the companion pet window via main-process IPC.
+    const emperor = (window as any).emperor
+    let windowStatus: { open?: boolean; error?: string } | undefined
     if (enabled) {
-      const emperor = (window as any).emperor
-      await emperor?.openPet?.()
+      windowStatus = await emperor?.openPet?.()
       showToast(
-        payload.lastError ? `桌宠未启动：${payload.lastError}` : '桌宠已启动',
+        windowStatus?.error
+          ? `桌宠未启动：${windowStatus.error}`
+          : '桌宠已启动',
       )
     } else {
-      const emperor = (window as any).emperor
-      await emperor?.closePet?.()
+      windowStatus = await emperor?.closePet?.()
       showToast('桌宠已关闭')
     }
+    payload.running = Boolean(windowStatus?.open)
+    payload.lastError = windowStatus?.error || null
+    if (boot.value) boot.value.desktopPet = payload
     return payload
   }
 

@@ -7,7 +7,7 @@ import type {
   CoreOperationKey,
   CoreOperationResult,
   TerminalEvent,
-} from '@emperor/core'
+} from '@emperor/core/api'
 
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
   'Core IPC bridge is unavailable; use the Electron desktop window.'

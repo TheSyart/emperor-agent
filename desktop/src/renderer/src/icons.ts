@@ -107,6 +107,14 @@ export const actionIcons = {
   interject: ArrowDownToLine,
   remove: X,
   more: Ellipsis,
+  commandNew: MessageSquare,
+  commandCompact: Eraser,
+  commandModel: Cpu,
+  commandReasoning: Brain,
+  commandPermissions: ShieldQuestion,
+  commandPlan: ClipboardList,
+  commandGoal: Target,
+  commandContinue: Play,
 } satisfies Record<string, IconComponent>
 
 export const goalIcons = {

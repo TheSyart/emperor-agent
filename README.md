@@ -128,15 +128,15 @@ Plan 执行完不等于 Goal 已完成。系统还会检查每条必需的验收
 
 Goal 常用命令：
 
-| 命令                             | 作用                            |
-| -------------------------------- | ------------------------------- |
-| `/goal`                          | 等待下一条纯文字作为 Outcome    |
-| `/goal <outcome>`                | 创建当前会话的 Goal             |
-| `/goal status`                   | 查看当前 Goal                   |
-| `/goals`                         | 列出当前会话的 Goal             |
-| `/goal pause` 或 `/goal-pause`   | 安全暂停                        |
-| `/goal resume` 或 `/goal-resume` | 重新校验会话和 workspace 后继续 |
-| `/goal cancel` 或 `/goal-cancel` | 永久取消                        |
+| 命令              | 作用                            |
+| ----------------- | ------------------------------- |
+| `/goal`           | 等待下一条纯文字作为 Outcome    |
+| `/goal <outcome>` | 创建当前会话的 Goal             |
+| `/goal status`    | 查看当前 Goal                   |
+| `/goal list`      | 列出当前会话的 Goal             |
+| `/goal pause`     | 安全暂停                        |
+| `/goal resume`    | 重新校验会话和 workspace 后继续 |
+| `/goal cancel`    | 永久取消                        |
 
 Stop 在 Goal 中表示可恢复的 Pause，不表示已经完成。Cancel 才是不可恢复的终态。应用重启也不会自动恢复写操作，必须由用户显式 Resume。
 
@@ -158,21 +158,18 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 | 权限变化     | 使用当前模式                     | 规划阶段限制为只读和控制操作 | 沿用权限规则，不自动提权                      |
 | 适合场景     | 问答、轻量修改、明确的一次性任务 | 希望先审阅方案的复杂任务     | 多阶段开发、迁移、反复修复和严格验收          |
 
-### 其他常用命令
+### 斜杠命令
 
-| 命令                             | 作用                                               |
-| -------------------------------- | -------------------------------------------------- |
-| `/help`、`/help --all`           | 打开 Core 命令中心；后者同时显示不可用原因         |
-| `/status`、`/model`、`/cost`     | 查看运行状态、模型和 Token/成本账本                |
-| `/permissions ask                | smart                                              | full` | 管理询问确认、智能自动和完全访问 |
-| `/clear`、`/compact`             | 创建全新会话上下文，或在当前会话中保留摘要后压缩   |
-| `/resume`、`/rename`、`/export`  | 恢复、重命名或导出会话                             |
-| `/tools`、`/skills`、`/mcp`      | 打开当前会话的工具、Skill 与 MCP 能力              |
-| `/files`、`/terminal`、`/review` | 打开项目文件、系统终端与结构化 Git 工作区          |
-| `/stop`、`/continue`             | 停止前台 turn，或恢复暂停的 Plan/Goal              |
-| `/reload`                        | 重新加载 bootstrap、命令、模型、Skills、MCP 和状态 |
+| 命令                                                          | 作用                                 |
+| ------------------------------------------------------------- | ------------------------------------ |
+| `/new`                                                        | 在当前工作区创建一条空白会话         |
+| `/compact [instructions]`                                     | 保留摘要并释放当前会话的上下文空间   |
+| `/model`、`/reasoning`                                        | 选择模型和思考强度                   |
+| `/permissions ask`、`/permissions smart`、`/permissions full` | 选择 Emperor 可以执行的操作范围      |
+| `/plan`、`/goal`                                              | 开启规划或持续目标                   |
+| `/stop`、`/continue`                                          | 停止当前任务，或恢复暂停的 Plan/Goal |
 
-命令目录由 Core 生成，Renderer 不再维护静态数组。未知命令只在本地报错，不会发送给模型；active Skill 默认可用 `/<skill-name>` 调用。`/clear` 会创建继承项目、模型和权限的新 session，但不继承聊天历史、Plan、Goal、Todo、队列、checkpoint 或附件；旧 session 仍可恢复，长期用户/项目记忆也不会被删除。完整语义见 [Slash command 平台](docs/architecture/slash-command-platform.md)。
+命令目录由 Core 生成，Renderer 不维护静态数组。菜单只包含 `Commands` 与 `Skills`；每个 active、可由用户调用的 Skill 都直接使用自己的 token，例如 `/agent-reach 搜索相关讨论`，不经过 `/skill` 或 `/skills`。任务完成后及每次打开菜单时都会重新扫描，安装后的 Skill 无需重启即可出现。未知命令只在本地报错，不会发送给模型。`/new` 创建继承项目、模型和权限的新 session，但不继承聊天历史、Plan、Goal、Todo、队列、checkpoint 或附件；旧 session 仍保留，长期用户/项目记忆也不会被删除。Settings、Skills、Plugins、Memory、Git 和 Terminal 等能力继续从应用页面进入。完整语义见 [Slash command 平台](docs/architecture/slash-command-platform.md)。
 
 <a id="capabilities"></a>
 
@@ -190,6 +187,7 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 | 记忆                | 全局长期记忆、用户档案、项目私有记忆和版本恢复     |
 | 附件                | 保存图片、文本和受支持的文档，并传入模型上下文     |
 | 本地工具            | 文件读取与修改、搜索、命令执行和 Todo 更新         |
+| 网络调研            | 候选来源发现、2xx 正文验证、逐项引用和隔离来源复核 |
 | Skills / MCP        | 加载本地技能并接入已配置的 MCP server              |
 | Token / Diagnostics | 查看消耗、上下文、运行状态和环境问题               |
 
@@ -218,10 +216,10 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 
 Emperor Agent 把应用资源和用户私有数据分开：
 
-- `runtimeRoot` 保存内置模板、Skills 和静态资源。开发模式默认是仓库根，打包模式默认是 Electron `userData/runtime`。
-- `stateRoot` 保存会话、记忆、配置、附件和其他运行数据，默认是 `~/.emperor-agent`。
+- `runtimeRoot` 保存内置模板、Skills 和静态资源。开发模式默认是仓库根，Release 来自只读的 `resources/runtime-defaults`。
+- Emperor Home（内部兼容名 `stateRoot`）保存会话、记忆、配置、附件、用户 Skills 和受管工具环境，默认是 `~/.emperor`。
 
-可以通过 `EMPEROR_CONFIG_DIR` 覆盖 `stateRoot`。完整的解析优先级、迁移规则和目录说明见[全局私有存储根架构](docs/architecture/global-state-store.md)。
+可以通过 `EMPEROR_CONFIG_DIR` 整体覆盖 Emperor Home。默认位置首次启动时会把唯一存在的旧 `~/.emperor-agent` 原子迁移为 `~/.emperor`；两个目录并存时只使用新目录，不自动合并或删除旧目录。完整规则见[全局私有存储根架构](docs/architecture/global-state-store.md)。
 
 常用私有路径都相对 `stateRoot`：
 
@@ -234,20 +232,24 @@ Emperor Agent 把应用资源和用户私有数据分开：
 | 附件            | `memory/attachments/`                   |
 | Goal 状态与证据 | `goals/<goal-id>/`                      |
 | Hooks 审计      | `hooks/audit.jsonl`                     |
+| 用户 Skills     | `skills/`                               |
+| 受管工具环境    | `environment/`                          |
 
 Build 项目目录不会承载私有 session、memory、attachments 或 Goal 数据。项目中允许存在协作文档 `AGENTS.md`，以及 `.emperor/settings*.json`、`rules/` 和项目级 Skills；这些内容与全局私有 store 不是一回事。
 
 ### 权限模式
 
-| 内部模式          | 命令                 | 行为                                                                                     |
-| ----------------- | -------------------- | ---------------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/permissions ask`   | 只读文件、搜索和诊断直接执行；文件修改、Shell、外部写入及持久任务变更需要确认            |
-| `smart_auto`      | `/permissions smart` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险副作用需要确认 |
-| `full_access`     | `/permissions full`  | 普通操作不再产生权限审批；Core deny、Plan、schema、workspace 和 OS containment 仍然生效  |
+| 内部模式          | 命令                 | 行为                                                                                                                 |
+| ----------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `ask_before_edit` | `/permissions ask`   | 只读文件、搜索和诊断直接执行；文件修改、Shell、外部写入及持久任务变更需要确认                                        |
+| `smart_auto`      | `/permissions smart` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险副作用需要确认                             |
+| `full_access`     | `/permissions full`  | 主 Agent 的 `run_command` 在宿主环境直执且免询问；Core deny、Plan、AgentDefinition、schema、workspace 与 Goal 仍生效 |
 
 Plan 通过 `/plan` 或 `/plan on|off|status` 独立管理，不属于权限菜单，并与顶层 Goal 互斥。Goal 内部仍可复用 Plan 引擎，但不会产生第二个用户模式。上述三种权限都不会关闭路径安全、schema 校验或 Core deny。存在未处理的 Ask 或 Plan 时，执行型 Scheduler、Team 和桌宠 mutation 会被 CoreApi guard 拒绝；Agent Hooks 也不能覆盖 workspace policy 或 Core deny。Goal 同样复用这套规则，不会因为运行时间更长而获得额外权限。
 
 MCP 工具结果、网页内容和外部消息都按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
+
+网络调研不把“工具调用成功”当作“事实已经证实”。Skill、CLI、MCP 和可选 `web_search` 找到的 URL 只是候选；只有 Core `web_fetch` 成功取得 2xx 正文后才能成为本轮已验证来源。最终答复按事实项检查 Markdown 引用，并经过无工具、无会话历史的隔离来源复核；未通过的草稿不会提前进入界面或持久化历史。
 
 <a id="boundaries"></a>
 
@@ -262,6 +264,7 @@ MCP 工具结果、网页内容和外部消息都按不可信输入处理。涉�
 - Goal 默认没有总 cycle、总时长或总成本上限；无进展暂停和显式 guard 负责控制长循环。
 - Watchlist 仍属于受控后台维护基础设施，不代表已经提供外部消息平台连接器。
 - 损坏或无法证明安全的中间状态会 fail closed。Goal 不会被隐式降级成普通 Chat 后继续写入。
+- 网络调研在没有可验证正文、逐项引用不完整或隔离复核不可用时会明确阻塞，不会用模型记忆或拼造链接补齐。
 
 <a id="source"></a>
 

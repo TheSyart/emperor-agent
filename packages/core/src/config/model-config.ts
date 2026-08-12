@@ -6,10 +6,10 @@ import { ValidationError } from '../errors'
 import { PROVIDERS, findByName, normalizeApiBase } from '../providers/registry'
 import { logger } from '../util/log'
 import {
-  readJson,
-  writeJsonAtomic,
-  type ConfigRecoveryInfo,
-} from '../store/atomic-json'
+  AtomicSnapshot,
+  type PersistenceAdapter,
+  type SnapshotCodec,
+} from '../store/persistence'
 
 /** 单模型配置文件。磁盘只保存 schemaVersion=2；旧字段仅通过只读 adapter 暂时兼容。 */
 export const MODEL_CONFIG_FILE = 'model_config.json'
@@ -152,6 +152,10 @@ export type ModelEntryUpdate = Omit<Partial<ModelEntryV2>, 'pricing'> & {
 }
 
 type RawRecord = Record<string, any>
+
+export interface ModelConfigPersistenceOptions {
+  persistenceAdapter?: PersistenceAdapter
+}
 
 const REMOVED_PROVIDERS = new Set([
   'azure_openai',
@@ -798,18 +802,32 @@ function configPath(rootOrFile: string): string {
     : join(path, MODEL_CONFIG_FILE)
 }
 
-export async function ensureModelConfig(rootOrFile: string): Promise<string> {
+export async function ensureModelConfig(
+  rootOrFile: string,
+  opts: ModelConfigPersistenceOptions = {},
+): Promise<string> {
   const path = configPath(rootOrFile)
   if (!existsSync(path))
-    await writeJsonAtomic(path, defaultModelConfig(), { mode: 0o600 })
+    await writeModelConfigSnapshot(
+      path,
+      defaultModelConfig(),
+      opts.persistenceAdapter,
+    )
   return path
 }
 
-export async function ensureExampleConfig(root: string): Promise<string> {
+export async function ensureExampleConfig(
+  root: string,
+  opts: ModelConfigPersistenceOptions = {},
+): Promise<string> {
   const path = join(resolve(root), MODEL_CONFIG_EXAMPLE_FILE)
   const desired = `${JSON.stringify(defaultModelConfig(), null, 2)}\n`
   if (!existsSync(path) || (await readFile(path, 'utf8')) !== desired)
-    await writeJsonAtomic(path, defaultModelConfig())
+    await writeModelConfigSnapshot(
+      path,
+      defaultModelConfig(),
+      opts.persistenceAdapter,
+    )
   return path
 }
 
@@ -843,6 +861,42 @@ function validateDiskConfig(value: unknown): RawRecord {
   return value
 }
 
+const MODEL_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<RawRecord> = {
+  schemaVersion: 2,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    const value = validateDiskConfig(input)
+    const current = value.schemaVersion === 2
+    return {
+      value,
+      schemaVersion: current ? 2 : 1,
+      migrated: !current,
+    }
+  },
+}
+
+function modelConfigSnapshot(
+  path: string,
+  adapter?: PersistenceAdapter,
+): AtomicSnapshot<RawRecord> {
+  return new AtomicSnapshot({
+    path,
+    codec: MODEL_CONFIG_SNAPSHOT_CODEC,
+    adapter,
+    fileMode: 0o600,
+  })
+}
+
+async function writeModelConfigSnapshot(
+  path: string,
+  value: RawRecord,
+  adapter?: PersistenceAdapter,
+): Promise<void> {
+  await modelConfigSnapshot(path, adapter).write(value)
+}
+
 async function backupV1(path: string, source: string): Promise<void> {
   const backupPath = join(dirname(path), MODEL_CONFIG_V1_BACKUP_FILE)
   if (existsSync(backupPath)) return
@@ -859,34 +913,47 @@ async function backupV1(path: string, source: string): Promise<void> {
 
 export async function loadModelConfig(
   rootOrFile: string,
-  opts: { create?: boolean } = {},
+  opts: { create?: boolean } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
   if (opts.create !== false && !existsSync(path))
-    await writeJsonAtomic(path, defaultModelConfig(), { mode: 0o600 })
+    await writeModelConfigSnapshot(
+      path,
+      defaultModelConfig(),
+      opts.persistenceAdapter,
+    )
   if (!existsSync(path)) return runtimeConfig(defaultModelConfig())
 
   const source = await readFile(path, 'utf8')
-  const loaded = await readJson<RawRecord>(path, defaultModelConfig(), {
-    validate: validateDiskConfig,
-    onCorrupt: reportModelConfigRecovery,
+  const loadedSnapshot = await modelConfigSnapshot(
+    path,
+    opts.persistenceAdapter,
+  ).read({
+    fallback: defaultModelConfig(),
   })
-  // readJson isolates invalid files by renaming them. Do not immediately
+  if (loadedSnapshot.receipt.recoveryAction === 'quarantined_corrupt_snapshot')
+    reportModelConfigRecovery({
+      path,
+      backupPath: loadedSnapshot.receipt.corruptionBackup ?? '',
+      error: new Error('model config failed schema validation'),
+    })
+  const loaded = loadedSnapshot.value
+  // AtomicSnapshot isolates invalid files by renaming them. Do not immediately
   // recreate the invalid path here; the next normal load/explicit save owns
   // creation, matching the existing recovery contract.
   if (!existsSync(path)) return runtimeConfig(defaultModelConfig())
   if (loaded.schemaVersion !== 2) {
     await backupV1(path, source)
     const migrated = migrateV1(loaded)
-    await writeJsonAtomic(path, migrated, { mode: 0o600 })
+    await writeModelConfigSnapshot(path, migrated, opts.persistenceAdapter)
     return runtimeConfig(migrated)
   }
   const normalized = normalizeV2(loaded)
   try {
     if (JSON.stringify(JSON.parse(source)) !== JSON.stringify(normalized))
-      await writeJsonAtomic(path, normalized, { mode: 0o600 })
+      await writeModelConfigSnapshot(path, normalized, opts.persistenceAdapter)
   } catch {
-    // readJson 已负责隔离畸形文件；这里不重复恢复。
+    // AtomicSnapshot 已负责隔离畸形文件；这里不重复恢复。
   }
   return runtimeConfig(normalized)
 }
@@ -894,13 +961,13 @@ export async function loadModelConfig(
 export async function saveModelConfig(
   rootOrFile: string,
   data: ModelConfigV2 | RawRecord,
-  opts: { validateComplete?: boolean } = {},
+  opts: { validateComplete?: boolean } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
   const merged = await preserveStoredApiKeys(path, data)
   const config = parseModelConfig(merged)
   if (opts.validateComplete) validateCompleteModelEntries(config.raw)
-  await writeJsonAtomic(path, config.raw, { mode: 0o600 })
+  await writeModelConfigSnapshot(path, config.raw, opts.persistenceAdapter)
   return config
 }
 
@@ -1135,7 +1202,11 @@ export async function markEntryVision(
   })
 }
 
-function reportModelConfigRecovery(info: ConfigRecoveryInfo): void {
+function reportModelConfigRecovery(info: {
+  path: string
+  backupPath: string
+  error: unknown
+}): void {
   logger.warn('Invalid model config isolated; using defaults', {
     path: info.path,
     backupPath: info.backupPath,

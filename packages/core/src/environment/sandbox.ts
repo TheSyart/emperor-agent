@@ -13,7 +13,7 @@ export type ProcessSandboxBackend =
   | 'unsupported'
   | 'none'
 export type ProcessSandboxCapabilityStatus =
-  'available' | 'unavailable' | 'unsupported' | 'error'
+  'available' | 'unavailable' | 'unsupported' | 'error' | 'not_required'
 
 export interface ProcessSandboxCapability {
   platform: NodeJS.Platform
@@ -365,6 +365,9 @@ function macosSeatbeltProfile(
     ...MACOS_SYSTEM_READ_ROOTS.filter(pathExists).map(canonicalRoot),
     ...policy.readOnlyRoots,
   ])
+  const metadataRoots = uniqueRoots(
+    readRoots.flatMap((root) => pathAncestors(root)),
+  )
   const workspaceFilter = seatbeltRootFilter(
     policy.workspaceRoot,
     policy.stateRoot,
@@ -376,6 +379,13 @@ function macosSeatbeltProfile(
     '(import "system.sb")',
     '(allow process*)',
     '(allow signal (target same-sandbox))',
+    ...(metadataRoots.length
+      ? [
+          `(allow file-read-metadata ${metadataRoots
+            .map((root) => `(literal ${seatbeltString(root)})`)
+            .join(' ')})`,
+        ]
+      : []),
     ...readRoots.map(
       (root) =>
         `(allow file-read* ${seatbeltRootFilter(root, policy.stateRoot)})`,
@@ -441,6 +451,16 @@ function uniqueRoots(roots: string[]): string[] {
   return [...new Set(roots.filter(Boolean))].sort(
     (left, right) => left.length - right.length || left.localeCompare(right),
   )
+}
+
+function pathAncestors(path: string): string[] {
+  const ancestors: string[] = []
+  let current = dirname(path)
+  while (current !== dirname(current)) {
+    ancestors.push(current)
+    current = dirname(current)
+  }
+  return ancestors
 }
 
 function seatbeltString(value: string): string {

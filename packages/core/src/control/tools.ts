@@ -1,5 +1,5 @@
 /**
- * 控制工具 ask_user / propose_plan (MIG-CTRL-004)。对齐 Python `agent/control/tools.py`。
+ * 控制工具 ask_user / propose_plan。
  * 生成 waiting tool result（__CONTROL_PAUSE__ 前缀）；propose_plan 经质量门。
  */
 import { Tool, type ToolExecutionContext } from '../tools/base'
@@ -47,14 +47,16 @@ export function parsePauseResult(
     : null
 }
 
-/** Control 工具调用的 ControlManager 表面。 */
-export interface ToolManagerHost {
+export interface AskToolHost {
   createAsk(opts: {
     questions: Array<Record<string, unknown>>
     context?: string
     parentCallId?: string | null
     meta?: Record<string, unknown> | null
   }): Interaction
+}
+
+export interface PlanProposalToolHost {
   createPlan(opts: {
     title: string
     summary: string
@@ -66,6 +68,9 @@ export interface ToolManagerHost {
     meta?: Record<string, unknown> | null
     enforceQuality?: boolean
   }): Interaction
+}
+
+export interface PlanStepToolHost {
   completePlanStep?(input: {
     stepId: string
     summary: string
@@ -74,14 +79,19 @@ export interface ToolManagerHost {
   }): PlanRecord
 }
 
-type ToolManagerHostProvider =
-  ToolManagerHost | ((sessionId?: string | null) => ToolManagerHost)
+/** Control 工具调用的完整兼容表面。 */
+export interface ToolManagerHost
+  extends AskToolHost, PlanProposalToolHost, PlanStepToolHost {}
 
-function resolveToolManager(
-  provider: ToolManagerHostProvider,
+type ToolHostProvider<THost> = THost | ((sessionId?: string | null) => THost)
+
+function resolveToolManager<THost>(
+  provider: ToolHostProvider<THost>,
   ctx?: ToolExecutionContext,
-): ToolManagerHost {
-  return typeof provider === 'function' ? provider(ctx?.sessionId) : provider
+): THost {
+  return typeof provider === 'function'
+    ? (provider as (sessionId?: string | null) => THost)(ctx?.sessionId)
+    : provider
 }
 
 function obj(
@@ -100,6 +110,7 @@ export class AskUserTool extends Tool {
   override name = 'ask_user'
   override exclusive = true
   override requiresRuntimeContext = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override description =
     '向用户提出结构化澄清问题并暂停当前回合。' +
@@ -138,8 +149,8 @@ export class AskUserTool extends Tool {
     ['questions'],
   )
 
-  private readonly managerProvider: ToolManagerHostProvider
-  constructor(manager: ToolManagerHostProvider) {
+  private readonly managerProvider: ToolHostProvider<ToolManagerHost>
+  constructor(manager: ToolHostProvider<ToolManagerHost>) {
     super()
     this.managerProvider = manager
   }
@@ -165,6 +176,7 @@ export class RequestPlanModeTool extends Tool {
   override name = 'request_plan_mode'
   override exclusive = true
   override requiresRuntimeContext = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override description =
     '当任务属于高影响改动（多文件重构、后端/权限/调度变更等）且当前不在计划模式时，' +
@@ -176,8 +188,8 @@ export class RequestPlanModeTool extends Tool {
     ['reason'],
   )
 
-  private readonly managerProvider: ToolManagerHostProvider
-  constructor(manager: ToolManagerHostProvider) {
+  private readonly managerProvider: ToolHostProvider<ToolManagerHost>
+  constructor(manager: ToolHostProvider<ToolManagerHost>) {
     super()
     this.managerProvider = manager
   }
@@ -219,6 +231,7 @@ export class ProposePlanTool extends Tool {
   override name = 'propose_plan'
   override exclusive = true
   override requiresRuntimeContext = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override description =
     '提交等待用户预览、评论或批准的计划，并暂停当前回合。' +
@@ -276,8 +289,8 @@ export class ProposePlanTool extends Tool {
     ['title', 'summary', 'plan_markdown', 'steps'],
   )
 
-  private readonly managerProvider: ToolManagerHostProvider
-  constructor(manager: ToolManagerHostProvider) {
+  private readonly managerProvider: ToolHostProvider<PlanProposalToolHost>
+  constructor(manager: ToolHostProvider<PlanProposalToolHost>) {
     super()
     this.managerProvider = manager
   }
@@ -308,6 +321,7 @@ export class CompletePlanStepTool extends Tool {
   override name = 'complete_plan_step'
   override exclusive = true
   override requiresRuntimeContext = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   override readOnly = true
   override description =
@@ -323,8 +337,8 @@ export class CompletePlanStepTool extends Tool {
     ['step_id', 'summary'],
   )
 
-  private readonly managerProvider: ToolManagerHostProvider
-  constructor(manager: ToolManagerHostProvider) {
+  private readonly managerProvider: ToolHostProvider<PlanStepToolHost>
+  constructor(manager: ToolHostProvider<PlanStepToolHost>) {
     super()
     this.managerProvider = manager
   }

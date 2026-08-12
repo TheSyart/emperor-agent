@@ -1,6 +1,6 @@
 /**
- * MemoryStore — 三层记忆（原始 history / 每日情景 / 长期记忆）(MIG-MEM-001)。
- * 对齐 Python `agent/memory.py`。磁盘兼容: 行 schema + checkpoint JSON 不变。
+ * MemoryStore — 三层记忆（原始 history / 每日情景 / 长期记忆）。
+ * 磁盘兼容：行 schema + checkpoint JSON 不变。
  * 实现 runner 的 MemoryStoreLike（writeCheckpoint/clearCheckpoint/readCheckpoint/appendHistory）。
  */
 import {

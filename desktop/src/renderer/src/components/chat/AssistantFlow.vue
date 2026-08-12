@@ -80,6 +80,19 @@ const terminalLabel = computed(() => {
   return '内容已作废'
 })
 
+const finalTurnChange = computed<TurnChangeSnapshot | null>(() => {
+  const snapshot = props.turnChange
+  if (!snapshot || props.message.streaming || props.message.tombstoned)
+    return null
+  if (
+    props.message.segments.some(
+      (segment) => 'status' in segment && segment.status === 'error_aborted',
+    )
+  )
+    return null
+  return snapshot
+})
+
 const fallbackThought = computed<ThoughtSegment>(() => ({
   id: 'fallback-thought',
   type: 'thought',
@@ -261,9 +274,9 @@ onBeforeUnmount(stopFlowClock)
             liveStatus.activity
           }}</span>
         </div>
-        <div v-if="props.turnChange" class="timeline-node changes-summary-node">
+        <div v-if="finalTurnChange" class="timeline-node changes-summary-node">
           <TurnChangesCard
-            :snapshot="props.turnChange"
+            :snapshot="finalTurnChange"
             @open-review="emit('openReview', $event)"
           />
         </div>

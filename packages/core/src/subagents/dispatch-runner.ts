@@ -1,4 +1,9 @@
 import { buildRoutedRunner } from '../agent/runner-factory'
+import {
+  buildRuntimeIdentity,
+  stripRuntimeIdentity,
+  type RuntimeIdentityInput,
+} from '../agent/context-builder'
 import type {
   AgentRunnerHookHost,
   CompactorLike,
@@ -19,6 +24,7 @@ import {
   bindRunnerGoalRecordingContext,
   type RunnerGoalRecordingHost,
 } from '../agent/runner-goal-recording'
+import { enforceAgentCompletionContract } from './completion-contract'
 
 export interface RoutedDispatchRunnerFactoryOptions {
   modelRouter: Pick<ModelRouter, 'route'>
@@ -26,7 +32,10 @@ export interface RoutedDispatchRunnerFactoryOptions {
   memoryStore?: MemoryStoreLike | null
   compactor?: CompactorLike | null
   todoStore?: TodoStoreLike | null
-  controlManager?: ControlManagerRunnerHost | null
+  controlManager?:
+    | ControlManagerRunnerHost
+    | ((args: DispatchRunnerFactoryArgs) => ControlManagerRunnerHost | null)
+    | null
   maxTokensCap?: number | null
   tokenBudget?: number | null
   maxContext?: number | null
@@ -35,6 +44,8 @@ export interface RoutedDispatchRunnerFactoryOptions {
   goalObservationRecorder?: RunnerGoalRecordingHost | null
   fileCheckpoints?: FileCheckpointCaptureHost | null
   workspaceMutations?: WorkspaceMutationHost | null
+  runtimeIdentity?:
+    ((args: DispatchRunnerFactoryArgs) => RuntimeIdentityInput) | null
 }
 
 export function buildDispatchRunnerFactory(
@@ -51,14 +62,22 @@ export function buildDispatchRunner(
     args.goalObservationRecorder ?? opts.goalObservationRecorder ?? null
   const route = opts.modelRouter.route('subagent', args.spec.name, args.task)
   assertAgentModelPolicy(args, route.snapshot)
-  const systemPrompt =
+  const baseSystemPrompt =
     args.contextMode === 'fork' && args.parentSystemPrompt?.trim()
       ? [
-          args.parentSystemPrompt.trim(),
+          stripRuntimeIdentity(args.parentSystemPrompt.trim()),
           '# Specialized Subagent Role',
           args.spec.systemPrompt,
         ].join('\n\n')
       : args.spec.systemPrompt
+  const runtimeIdentity = opts.runtimeIdentity?.(args) ?? null
+  const systemPrompt = runtimeIdentity
+    ? `${baseSystemPrompt}\n\n---\n\n${buildRuntimeIdentity(runtimeIdentity)}`
+    : baseSystemPrompt
+  const controlManager =
+    typeof opts.controlManager === 'function'
+      ? opts.controlManager(args)
+      : (opts.controlManager ?? null)
   const runner = buildRoutedRunner({
     route,
     registry: args.subRegistry as ToolRegistry,
@@ -70,7 +89,7 @@ export function buildDispatchRunner(
     memoryStore: opts.memoryStore ?? null,
     compactor: opts.compactor ?? null,
     todoStore: opts.todoStore ?? null,
-    controlManager: opts.controlManager ?? null,
+    controlManager,
     maxContext: opts.maxContext ?? route.snapshot.contextWindowTokens ?? null,
     maxTurns: args.spec.maxTurns,
     workspaceRoot: args.workspaceRoot ?? null,
@@ -91,12 +110,26 @@ export function buildDispatchRunner(
     workspaceMutations: opts.workspaceMutations ?? null,
   })
   return {
-    step: (history, stepOpts) =>
-      runner.stepAsync(history, {
-        turnId: args.turnId ?? null,
-        signal: stepOpts?.signal ?? null,
-        executionEnvironment: args.executionEnvironment ?? null,
-      }),
+    step: async (history, stepOpts) => {
+      const run = (messages: Array<Record<string, unknown>>) =>
+        runner.stepAsync(messages, {
+          turnId: args.turnId ?? null,
+          signal: stepOpts?.signal ?? null,
+          executionEnvironment: args.executionEnvironment ?? null,
+        })
+      const final = await run(history)
+      if (args.enforceCompletionContract === false) return final
+      return await enforceAgentCompletionContract({
+        final,
+        requiredSections: args.spec.definition.completion.requiredSections,
+        runRepair: async (prompt) =>
+          await run([
+            ...history,
+            { role: 'assistant', content: final, ui_hidden: true },
+            { role: 'user', content: prompt, ui_hidden: true },
+          ]),
+      })
+    },
   }
 }
 

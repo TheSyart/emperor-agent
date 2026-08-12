@@ -1,6 +1,9 @@
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CommandDescriptor, CommandInvocationResult } from '@emperor/core'
+import type {
+  CommandDescriptor,
+  CommandInvocationResult,
+} from '@emperor/core/api'
 import type {
   BootstrapPayload,
   GoalOperationResult,
@@ -35,8 +38,8 @@ function descriptor(
 
 function setup() {
   const commandDescriptors = ref<CommandDescriptor[]>([
-    descriptor('help', { kind: 'local_ui', uiSurface: 'command_center' }),
-    descriptor('clear', { aliases: ['reset'], busyPolicy: 'after_turn' }),
+    descriptor('model', { kind: 'local_ui', uiSurface: 'model' }),
+    descriptor('new', { busyPolicy: 'after_turn' }),
     descriptor('audit', {
       id: 'skill.audit',
       kind: 'agent_prompt',
@@ -51,13 +54,11 @@ function setup() {
     resolveSessionId: async () => 'session-1',
     sendMessage: vi.fn(() => true),
     showToast: vi.fn(),
-    reloadCommands: vi.fn(async () => undefined),
     refreshAll: vi.fn(async () => undefined),
     openCommandSurface: vi.fn(async () => undefined),
     activateTransitionedSession: vi.fn(
       async (_session: SessionInfo) => undefined,
     ),
-    copyLastAssistant: vi.fn(async () => true),
     currentGoal: () => currentGoal.value,
     startGoal: vi.fn(async (): Promise<GoalOperationResult> => ({
       accepted: true,
@@ -91,7 +92,7 @@ describe('Core-owned slash command dispatch', () => {
     ctx.submitFromComposer('/hep')
     expect(ctx.deps.sendMessage).not.toHaveBeenCalled()
     expect(ctx.deps.showToast).toHaveBeenCalledWith(
-      expect.stringContaining('/help'),
+      '未知命令 /hep。输入 / 查看可用命令。',
     )
   })
 
@@ -99,23 +100,23 @@ describe('Core-owned slash command dispatch', () => {
     const ctx = setup()
     vi.mocked(core).mockResolvedValue({
       status: 'opened',
-      surface: 'command_center',
-      params: { commandId: 'builtin.help' },
+      surface: 'model',
+      params: { commandId: 'builtin.model' },
     } as never)
 
-    await ctx.executeSlashCommand('/help')
+    await ctx.executeSlashCommand('/model')
 
     expect(core).toHaveBeenCalledWith(
       'commands.invoke',
       expect.objectContaining({
         sessionId: 'session-1',
-        commandId: 'builtin.help',
-        rawInput: '/help',
+        commandId: 'builtin.model',
+        rawInput: '/model',
         invocationSource: 'desktop',
       }),
     )
-    expect(ctx.deps.openCommandSurface).toHaveBeenCalledWith('command_center', {
-      commandId: 'builtin.help',
+    expect(ctx.deps.openCommandSurface).toHaveBeenCalledWith('model', {
+      commandId: 'builtin.model',
     })
   })
 
@@ -151,20 +152,20 @@ describe('Core-owned slash command dispatch', () => {
     expect(ctx.deps.sendMessage).not.toHaveBeenCalled()
   })
 
-  it('activates the durable child session returned by /clear', async () => {
+  it('activates the durable child session returned by /new', async () => {
     const ctx = setup()
     const session = { id: 'session-2', title: '新会话' } as SessionInfo
     vi.mocked(core).mockResolvedValue({
       status: 'completed',
       receipt: {
-        commandId: 'builtin.clear',
+        commandId: 'builtin.new',
         code: 'session_transitioned',
         message: '已创建全新上下文。',
         data: { session },
       },
     } satisfies CommandInvocationResult as never)
 
-    await ctx.executeSlashCommand('/reset')
+    await ctx.executeSlashCommand('/new')
 
     expect(ctx.deps.activateTransitionedSession).toHaveBeenCalledWith(session)
   })
@@ -181,13 +182,13 @@ describe('Core-owned slash command dispatch', () => {
       .mockResolvedValueOnce({
         status: 'completed',
         receipt: {
-          commandId: 'builtin.clear',
+          commandId: 'builtin.new',
           code: 'session_transitioned',
           message: '已创建全新上下文。',
           data: { session },
         },
       } as never)
-    await ctx.executeSlashCommand('/clear')
+    await ctx.executeSlashCommand('/new')
     expect(ctx.deps.showToast).toHaveBeenCalledWith(
       '命令已排队，将在当前任务结束后执行。',
     )

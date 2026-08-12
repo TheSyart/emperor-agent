@@ -17,7 +17,7 @@ import {
 } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseDocument } from 'yaml'
-import { LEGACY_SKILL_STATE_FILE, skillBlockStatus } from '../runtime/resources'
+import { LEGACY_SKILL_STATE_FILE } from '../runtime/resources'
 import {
   ConfigResolver,
   defineConfigKey,
@@ -33,7 +33,8 @@ const MAX_SKILL_DEPTH = 32
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export type SkillResourceDirectory = (typeof RESOURCE_DIRS)[number]
-export type SkillSource = 'builtin' | 'user' | 'project'
+export type SkillSource =
+  'builtin' | 'plugin' | 'verified_plugin' | 'user' | 'project'
 export type SkillStatus =
   'active' | 'blocked' | 'blocked_pending_review' | 'invalid'
 
@@ -390,8 +391,7 @@ export class SkillManager {
       root,
       skillFile,
       source,
-      status:
-        source === 'user' ? (skillBlockStatus(root) ?? 'active') : 'active',
+      status: 'active',
       readOnly: source === 'builtin',
     }
   }
@@ -565,19 +565,8 @@ function collectSkillFiles(
       }
       if (depth === 0) {
         if (entry === LEGACY_SKILL_STATE_FILE) continue
-        const supported =
-          entry === 'SKILL.md' ||
-          RESOURCE_DIRS.includes(entry as SkillResourceDirectory)
-        if (!supported) {
-          addError(`Unsupported top-level entry: ${entry}`)
-          continue
-        }
         if (entry === 'SKILL.md' && !stat.isFile()) {
           addError('SKILL.md must be a regular file')
-          continue
-        }
-        if (entry !== 'SKILL.md' && !stat.isDirectory()) {
-          addError(`Resource entry must be a directory: ${entry}`)
           continue
         }
       }

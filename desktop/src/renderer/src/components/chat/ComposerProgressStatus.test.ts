@@ -64,6 +64,9 @@ describe('ComposerProgressStatus', () => {
     expect(trigger.textContent).toContain(
       'Step 2 / 3 · 3 files changed · +301 −0',
     )
+    const triggerPair = trigger.querySelector('.diff-stat-pair')
+    expect(triggerPair?.querySelector('.stat-add')?.textContent).toBe('+301')
+    expect(triggerPair?.querySelector('.stat-del')?.textContent).toBe('−0')
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('.composer-progress-popover')).toBeNull()
 
@@ -73,6 +76,11 @@ describe('ComposerProgressStatus', () => {
     expect(container.querySelectorAll('.composer-progress-item')).toHaveLength(
       3,
     )
+    const reviewPair = container.querySelector(
+      '.composer-progress-review .diff-stat-pair',
+    )
+    expect(reviewPair?.querySelector('.stat-add')?.textContent).toBe('+301')
+    expect(reviewPair?.querySelector('.stat-del')?.textContent).toBe('−0')
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await nextTick()

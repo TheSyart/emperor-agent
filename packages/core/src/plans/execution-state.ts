@@ -1,5 +1,5 @@
 /**
- * PlanExecutionState (MIG-CTRL-013)。对齐 Python `agent/plans/execution.py`。
+ * PlanExecutionState。
  * start_next_step / complete_step / fail_step 的不可变状态机。
  */
 import { nowTs } from '../util/time'

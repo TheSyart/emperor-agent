@@ -1,22 +1,22 @@
-import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import {
-  mkdir,
-  readFile,
-  readdir,
-  rename,
-  stat,
-  writeFile,
-} from 'node:fs/promises'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import {
   parsePermissionRules,
   type PermissionRuleDiagnostics,
   type PermissionRuleInput,
+  type PermissionRuleLayerInput,
 } from '../permissions/rules'
 import type { SoftGitRewindMode } from '../checkpoints/soft-git-rewind'
+import {
+  AtomicSnapshot,
+  type PersistenceAdapter,
+  type SnapshotCodec,
+} from '../store/persistence'
 
-export const LOCAL_CONFIG_FILE = 'emperor.local.json'
+export const LOCAL_CONFIG_FILE = 'settings.json'
+export const LEGACY_LOCAL_CONFIG_FILE = 'emperor.local.json'
+const PROJECT_CONFIG_MAX_BYTES = 1024 * 1024
 
 export interface WebUIPreferences {
   host: string
@@ -87,6 +87,10 @@ export interface LocalConfigDiagnostics {
   error: string
   permissions: PermissionRuleDiagnostics
   corruptBackups: LocalConfigBackup[]
+}
+
+export interface LocalConfigPersistenceOptions {
+  persistenceAdapter?: PersistenceAdapter
 }
 
 function defaultLocalConfig(): LocalConfig {
@@ -182,16 +186,70 @@ export function localConfigPath(root: string): string {
   return join(resolve(root), LOCAL_CONFIG_FILE)
 }
 
+/**
+ * Reads only the explicitly supported project-local key. These files cannot
+ * redirect Emperor Home/runtime roots or inject credentials/executables.
+ */
+export function loadProjectPermissionRuleLayers(
+  projectRoot: string,
+): PermissionRuleLayerInput[] {
+  const emperorRoot = join(resolve(projectRoot), '.emperor')
+  try {
+    const rootStat = lstatSync(emperorRoot)
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return []
+  } catch {
+    return []
+  }
+  const layers: PermissionRuleLayerInput[] = []
+  for (const [file, kind] of [
+    ['settings.json', 'project'],
+    ['settings.local.json', 'project-local'],
+  ] as const) {
+    const path = join(emperorRoot, file)
+    try {
+      const fileStat = lstatSync(path)
+      if (
+        fileStat.isSymbolicLink() ||
+        !fileStat.isFile() ||
+        fileStat.size > PROJECT_CONFIG_MAX_BYTES
+      )
+        continue
+      const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
+      const data = objectOrEmpty(raw)
+      const permissions = objectOrEmpty(data.permissions)
+      const rules = Array.isArray(permissions.rules)
+        ? (permissions.rules.filter(
+            (item) => item && typeof item === 'object' && !Array.isArray(item),
+          ) as PermissionRuleInput[])
+        : []
+      if (rules.length)
+        layers.push({
+          source: { kind, id: file, trust: 'project' },
+          rules,
+        })
+    } catch {
+      // Invalid project candidates are inert; diagnostics can inspect the file.
+    }
+  }
+  return layers
+}
+
 export async function loadLocalConfig(
   root: string,
-  opts: { preserveCorrupt?: boolean } = {},
+  opts: { preserveCorrupt?: boolean } & LocalConfigPersistenceOptions = {},
 ): Promise<LocalConfig> {
   const path = localConfigPath(root)
+  if (opts.preserveCorrupt !== false)
+    return (
+      await localConfigSnapshot(path, opts.persistenceAdapter).read({
+        fallback: defaultLocalConfig(),
+      })
+    ).value
+
   if (!existsSync(path)) return defaultLocalConfig()
   try {
     return parseLocalConfig(JSON.parse((await readFile(path, 'utf8')) || '{}'))
   } catch {
-    if (opts.preserveCorrupt !== false) await preserveCorruptLocalConfig(path)
     return defaultLocalConfig()
   }
 }
@@ -199,9 +257,10 @@ export async function loadLocalConfig(
 export async function saveLocalConfig(
   root: string,
   config: LocalConfigInput,
+  opts: LocalConfigPersistenceOptions = {},
 ): Promise<string> {
   const path = localConfigPath(root)
-  const payload = {
+  const payload: LocalConfig = {
     webui: {
       host: config.webui.host,
       port: config.webui.port,
@@ -234,14 +293,37 @@ export async function saveLocalConfig(
         : [],
     },
   }
-  await mkdir(dirname(path), { recursive: true })
-  const tmp = join(
-    dirname(path),
-    `.${LOCAL_CONFIG_FILE}.${randomUUID().replace(/-/g, '')}.tmp`,
-  )
-  await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
-  await rename(tmp, path)
+  await localConfigSnapshot(path, opts.persistenceAdapter).write(payload)
   return path
+}
+
+const LOCAL_CONFIG_CODEC: SnapshotCodec<LocalConfig> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return {
+      value: parseLocalConfig(
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {},
+      ),
+      schemaVersion: 1,
+    }
+  },
+}
+
+function localConfigSnapshot(
+  path: string,
+  adapter?: PersistenceAdapter,
+): AtomicSnapshot<LocalConfig> {
+  return new AtomicSnapshot({
+    path,
+    codec: LOCAL_CONFIG_CODEC,
+    adapter,
+    fileMode: 0o600,
+  })
 }
 
 export function normalizePromptProfile(value: unknown): PromptProfile {
@@ -318,13 +400,6 @@ export async function localConfigDiagnostics(
     permissions: parsePermissionRules([]).diagnostics,
     corruptBackups: await listCorruptBackups(path),
   }
-}
-
-async function preserveCorruptLocalConfig(path: string): Promise<void> {
-  if (!existsSync(path)) return
-  const seconds = Math.trunc(Date.now() / 1000)
-  const suffix = randomUUID().replace(/-/g, '').slice(0, 8)
-  await rename(path, `${path}.corrupt-${seconds}-${suffix}`).catch(() => {})
 }
 
 async function listCorruptBackups(path: string): Promise<LocalConfigBackup[]> {

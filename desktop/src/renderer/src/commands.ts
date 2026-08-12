@@ -1,25 +1,52 @@
-import type { CommandDescriptor } from '@emperor/core'
+import type { CommandDescriptor } from '@emperor/core/api'
 
 export interface SlashPaletteItem {
   id: string
   commandId: string
   kind: 'command' | 'skill'
   name: string
-  usage: string
+  title: string
   completion: string
   description: string
   aliases?: string[]
   category: string
   source: CommandDescriptor['source']
+  sourceLabel: string
   available: boolean
   unavailableReason?: string
-  dangerous?: boolean
-  argumentHint?: string
-  recent?: boolean
   skillName?: string
   tags?: string
   requiresArguments?: boolean
 }
+
+export interface SlashPaletteGroup {
+  label: 'Commands' | 'Skills'
+  items: SlashPaletteItem[]
+}
+
+const BUILTIN_ORDER = [
+  'new',
+  'compact',
+  'model',
+  'reasoning',
+  'permissions',
+  'plan',
+  'goal',
+  'stop',
+  'continue',
+] as const
+
+const BUILTIN_TITLES = new Map<string, string>([
+  ['new', 'New chat'],
+  ['compact', 'Compact'],
+  ['model', 'Model'],
+  ['reasoning', 'Reasoning'],
+  ['permissions', 'Permissions'],
+  ['plan', 'Plan mode'],
+  ['goal', 'Goal'],
+  ['stop', 'Stop'],
+  ['continue', 'Continue'],
+])
 
 export interface ResolvedSlashInvocation {
   raw: string
@@ -31,23 +58,32 @@ export interface ResolvedSlashInvocation {
 
 export function buildSlashPaletteItems(
   descriptors: CommandDescriptor[] = [],
-  recentCommandIds: string[] = [],
 ): SlashPaletteItem[] {
-  const recentRank = new Map(
-    recentCommandIds.map((id, index) => [id, index] as const),
-  )
-  return descriptors
-    .map((descriptor) => ({
-      ...descriptorToPaletteItem(descriptor),
-      recent: recentRank.has(descriptor.id),
-    }))
-    .sort((left, right) => {
-      const a = recentRank.get(left.commandId)
-      const b = recentRank.get(right.commandId)
-      if (a !== undefined || b !== undefined)
-        return (a ?? Number.MAX_SAFE_INTEGER) - (b ?? Number.MAX_SAFE_INTEGER)
-      return left.name.localeCompare(right.name)
-    })
+  return descriptors.map(descriptorToPaletteItem).sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'command' ? -1 : 1
+    if (left.kind === 'skill') return left.title.localeCompare(right.title)
+    return builtinOrder(left.name) - builtinOrder(right.name)
+  })
+}
+
+export function buildSlashPaletteGroups(
+  items: SlashPaletteItem[],
+  state: { busy: boolean; canContinue: boolean },
+): SlashPaletteGroup[] {
+  const visible = items.filter((item) => {
+    if (item.kind !== 'command') return true
+    if (item.name === '/stop') return state.busy
+    if (item.name === '/continue') return !state.busy && state.canContinue
+    return true
+  })
+  const commands = visible.filter((item) => item.kind === 'command')
+  const skills = visible.filter((item) => item.kind === 'skill')
+  return [
+    ...(commands.length
+      ? [{ label: 'Commands' as const, items: commands }]
+      : []),
+    ...(skills.length ? [{ label: 'Skills' as const, items: skills }] : []),
+  ]
 }
 
 export function resolveSlashInvocation(
@@ -110,23 +146,27 @@ function descriptorToPaletteItem(
     commandId: descriptor.id,
     kind: descriptor.kind === 'agent_prompt' ? 'skill' : 'command',
     name,
-    usage: argumentHint ? `${name} ${argumentHint}` : name,
+    title:
+      descriptor.kind === 'agent_prompt'
+        ? displaySkillName(descriptor.skill?.name || descriptor.name)
+        : BUILTIN_TITLES.get(descriptor.name) ||
+          displaySkillName(descriptor.name),
     completion: argumentHint ? `${name} ` : name,
     description: descriptor.description,
     aliases: descriptor.aliases.map((alias) => `/${alias}`),
     category: descriptor.category,
     source: descriptor.source,
+    sourceLabel: sourceLabel(descriptor.source),
     available: descriptor.available,
     unavailableReason: descriptor.unavailableReason,
-    dangerous: descriptor.dangerous,
-    argumentHint,
     skillName: descriptor.skill?.name,
     tags:
       descriptor.source === 'project_skill'
         ? 'Project Skill'
         : descriptor.source === 'user_skill'
           ? 'User Skill'
-          : descriptor.source === 'verified_plugin'
+          : descriptor.source === 'plugin' ||
+              descriptor.source === 'verified_plugin'
             ? 'Plugin Skill'
             : descriptor.kind === 'agent_prompt'
               ? 'Built-in Skill'
@@ -135,6 +175,34 @@ function descriptorToPaletteItem(
       (argument) => argument.required,
     ),
   }
+}
+
+function builtinOrder(name: string): number {
+  const index = BUILTIN_ORDER.indexOf(
+    name.replace(/^\//, '') as (typeof BUILTIN_ORDER)[number],
+  )
+  return index < 0 ? Number.MAX_SAFE_INTEGER : index
+}
+
+function sourceLabel(source: CommandDescriptor['source']): string {
+  if (source === 'project_skill') return 'Project'
+  if (source === 'user_skill') return 'Personal'
+  if (source === 'plugin' || source === 'verified_plugin') return 'Plugin'
+  if (source === 'builtin_skill') return 'Built-in'
+  return ''
+}
+
+function displaySkillName(value: string): string {
+  const acronyms = new Set(['ai', 'api', 'mcp', 'pdf', 'ui', 'ux'])
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) =>
+      acronyms.has(part.toLowerCase())
+        ? part.toUpperCase()
+        : `${part.charAt(0).toUpperCase()}${part.slice(1)}`,
+    )
+    .join(' ')
 }
 
 function scoreItem(item: SlashPaletteItem, query: string): number {
@@ -148,7 +216,7 @@ function scoreItem(item: SlashPaletteItem, query: string): number {
   if (aliases.some((alias) => alias.startsWith(query))) return 3
   if (name.split(/[-_:]/).some((part) => part.startsWith(query))) return 4
   const haystack =
-    `${name} ${aliases.join(' ')} ${item.description}`.toLowerCase()
+    `${name} ${item.title} ${aliases.join(' ')} ${item.description} ${item.sourceLabel}`.toLowerCase()
   if (subsequence(query, haystack)) return 5
   return Number.POSITIVE_INFINITY
 }

@@ -1,10 +1,9 @@
 /**
- * CoreApi (MIG-IPC-001)。
+ * CoreApi。
  * 进程内核心 API 门面，替代 aiohttp routes；Electron main 进程持有此单例，
  * renderer 后续通过 IPC 调用这些方法。
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import { dirname, join, resolve } from 'node:path'
 import { AttachmentStore } from '../attachments/store'
@@ -26,7 +25,6 @@ import {
 } from '../agent/loop'
 import type { RuntimePaths } from '../runtime/paths'
 import type { EventEnvelopeV2 } from '../runtime/envelope'
-import { RuntimeEventStore } from '../runtime/store'
 import {
   assertCoreMutationAllowed,
   CoreMutationGuardError,
@@ -49,11 +47,13 @@ import { CoreFileCheckpointService } from './services/file-checkpoint-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { CoreModelService } from './services/model-service'
-import {
-  CoreSkillService,
-  type SkillInfoPayload,
-} from './services/skill-service'
+import { CoreSkillService } from './services/skill-service'
+import { PluginApplicationService } from '../plugins/service'
+import { OperationRetiredError } from '../errors'
 import { CoreTeamService } from './services/team-service'
+import { CoreSessionApplicationService } from './services/session-application-service'
+import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
+import { CoreCommandApplicationService } from './services/command-application-service'
 import { GoalService } from './services/goal-service'
 import { goalSummary, type GoalRecord } from '../goals/models'
 import { planToDict } from '../plans/models'
@@ -66,16 +66,13 @@ import {
   SchedulerSchedule,
   schedulerJobPublicPayload,
 } from '../scheduler/models'
-import type { CoreOperationKey } from './operations'
-import { missingSkillRequirementsFromStatus } from '../environment/probe'
-import type { SkillRequirements } from '../skills/manager'
 import { NodeEnvironmentProcessRunner } from '../environment/process-runner'
 import {
   WorkspaceFilesService,
   type WorkspaceFileListResult,
   type WorkspaceFileReadResult,
 } from '../workspace/files'
-import { WorkspaceGitService, type GitStatusResult } from '../workspace/git'
+import { WorkspaceGitService } from '../workspace/git'
 import { WorkspaceBindingStore } from '../workspace/git-worktrees'
 import { GitOperationReceiptStore } from '../workspace/git-receipts'
 import {
@@ -84,20 +81,12 @@ import {
   type TerminalEvent,
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
+import { ProjectProcessService } from '../workspace/project-processes'
+import { WorkspaceReferenceService } from '../workspace/references'
+import { ManageProjectProcessTool } from '../tools/project-processes'
 import { FileCheckpointService } from '../checkpoints/file-checkpoints'
-import {
-  projectWorkspaceGoal,
-  projectWorkspacePlan,
-  projectWorkspaceProcess,
-  projectWorkspaceSubagent,
-  projectWorkspaceTeam,
-  projectWorkspaceTerminal,
-  type WorkspaceSnapshot,
-} from '../workspace/snapshot'
-import {
-  CommandPlatform,
-  type CommandExecutionContext,
-} from '../commands/platform'
+import type { WorkspaceSnapshot } from '../workspace/snapshot'
+import { CommandPlatform } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
 import type {
   CommandCompletion,
@@ -114,12 +103,6 @@ export interface CoreApiCreateOptions extends AgentLoopCreateOptions {
   runtimeRevision?: string
   terminalHost?: PtyHost | null
   terminalEventSink?: ((event: TerminalEvent) => void) | null
-}
-
-export interface RouteOperation {
-  key: CoreOperationKey
-  method: string
-  route: string
 }
 
 export interface CoreRuntimeEventPayload {
@@ -142,189 +125,6 @@ export interface CoreRuntimeReplayPayload<
   [key: string]: unknown
 }
 
-const CORE_API_ROUTE_OPERATION_LIST = [
-  op('chat.submit', 'IPC', 'chat.submit'),
-  op('chat.listQueuedPrompts', 'IPC', 'chat.listQueuedPrompts'),
-  op('chat.manageQueuedPrompt', 'IPC', 'chat.manageQueuedPrompt'),
-  op('bootstrap', 'GET', '/api/bootstrap'),
-  op('chat.stopRuntime', 'POST', '/api/runtime/stop'),
-  op('commands.list', 'IPC', 'commands.list'),
-  op('commands.complete', 'IPC', 'commands.complete'),
-  op('commands.invoke', 'IPC', 'commands.invoke'),
-  op('config.effective', 'GET', '/api/config/effective'),
-  op('config.get', 'GET', '/api/config'),
-  op('config.save', 'POST', '/api/config'),
-  op('attachments.save', 'POST', '/api/attachments'),
-  op('attachments.rawPath', 'GET', '/api/attachments/{id}/raw'),
-  op('mcp.getConfig', 'GET', '/api/mcp-config'),
-  op('mcp.status', 'GET', '/api/mcp-status'),
-  op('mcp.saveConfig', 'POST', '/api/mcp-config'),
-  op('model.discoverModels', 'IPC', 'model.discoverModels'),
-  op('model.getConfig', 'GET', '/api/model-config'),
-  op('model.resolveProfile', 'IPC', 'model.resolveProfile'),
-  op('model.saveEntry', 'POST', '/api/models'),
-  op('model.savePolicy', 'PATCH', '/api/model-policy'),
-  op('model.deleteEntry', 'DELETE', '/api/models/{entryId}'),
-  op('model.activate', 'POST', '/api/models/{entryId}/activate'),
-  op(
-    'model.setReasoningEffort',
-    'PATCH',
-    '/api/models/{entryId}/reasoning-effort',
-  ),
-  op('model.test', 'POST', '/api/model-test'),
-  op('onboarding.getProfileStatus', 'GET', '/api/onboarding/profile'),
-  op(
-    'onboarding.startProfileInterview',
-    'POST',
-    '/api/onboarding/profile/start',
-  ),
-  op('onboarding.skipProfileInterview', 'POST', '/api/onboarding/profile/skip'),
-  op('control.get', 'GET', '/api/control'),
-  op('control.setPermissionMode', 'IPC', 'control.setPermissionMode'),
-  op('control.setMode', 'POST', '/api/control/mode'),
-  op('control.answerInteraction', 'IPC', 'control.answerInteraction'),
-  op('control.commentPlan', 'IPC', 'control.commentPlan'),
-  op('control.approvePlan', 'IPC', 'control.approvePlan'),
-  op(
-    'control.cancelInteraction',
-    'POST',
-    '/api/control/interactions/{id}/cancel',
-  ),
-  op('goals.start', 'IPC', 'goals.start'),
-  op('goals.list', 'IPC', 'goals.list'),
-  op('goals.get', 'IPC', 'goals.get'),
-  op('goals.pause', 'IPC', 'goals.pause'),
-  op('goals.resume', 'IPC', 'goals.resume'),
-  op('goals.replace', 'IPC', 'goals.replace'),
-  op('goals.cancel', 'IPC', 'goals.cancel'),
-  op('plans.list', 'GET', '/api/plans'),
-  op('plans.get', 'GET', '/api/plans/{plan_id}'),
-  op('scheduler.get', 'GET', '/api/scheduler'),
-  op('scheduler.createJob', 'POST', '/api/scheduler/jobs'),
-  op('scheduler.updateJob', 'PATCH', '/api/scheduler/jobs/{id}'),
-  op('scheduler.runJob', 'POST', '/api/scheduler/jobs/{id}/run'),
-  op('scheduler.pauseJob', 'POST', '/api/scheduler/jobs/{id}/pause'),
-  op('scheduler.resumeJob', 'POST', '/api/scheduler/jobs/{id}/resume'),
-  op('scheduler.deleteJob', 'DELETE', '/api/scheduler/jobs/{id}'),
-  op('sessions.list', 'GET', '/api/sessions'),
-  op('sessions.create', 'POST', '/api/sessions'),
-  op('sessions.rename', 'PATCH', '/api/sessions/{id}'),
-  op('sessions.delete', 'DELETE', '/api/sessions/{id}'),
-  op('sessions.activate', 'POST', '/api/sessions/{id}/activate'),
-  op('team.get', 'GET', '/api/team'),
-  op('team.spawnMember', 'POST', '/api/team/members'),
-  op('team.getMember', 'GET', '/api/team/members/{name}'),
-  op('team.sendMessage', 'POST', '/api/team/messages'),
-  op('team.wakeMember', 'POST', '/api/team/members/{name}/wake'),
-  op('team.shutdownMember', 'POST', '/api/team/members/{name}/shutdown'),
-  op('workspace.snapshot', 'IPC', 'workspace.snapshot'),
-  op('git.status', 'IPC', 'git.status'),
-  op('git.repository', 'IPC', 'git.repository'),
-  op('git.log', 'IPC', 'git.log'),
-  op('git.worktrees', 'IPC', 'git.worktrees'),
-  op('git.enterWorktree', 'IPC', 'git.enterWorktree'),
-  op('git.exitWorktree', 'IPC', 'git.exitWorktree'),
-  op('git.pullRequest', 'IPC', 'git.pullRequest'),
-  op('git.publishPreview', 'IPC', 'git.publishPreview'),
-  op('git.publishPullRequest', 'IPC', 'git.publishPullRequest'),
-  op('git.readyPullRequest', 'IPC', 'git.readyPullRequest'),
-  op('git.mergePullRequest', 'IPC', 'git.mergePullRequest'),
-  op('git.closePullRequest', 'IPC', 'git.closePullRequest'),
-  op('git.diff', 'IPC', 'git.diff'),
-  op('git.branches', 'IPC', 'git.branches'),
-  op('git.compare', 'IPC', 'git.compare'),
-  op('git.stage', 'IPC', 'git.stage'),
-  op('git.unstage', 'IPC', 'git.unstage'),
-  op('git.discard', 'IPC', 'git.discard'),
-  op('git.commit', 'IPC', 'git.commit'),
-  op('git.fetch', 'IPC', 'git.fetch'),
-  op('git.pull', 'IPC', 'git.pull'),
-  op('git.push', 'IPC', 'git.push'),
-  op('git.createBranch', 'IPC', 'git.createBranch'),
-  op('git.switchBranch', 'IPC', 'git.switchBranch'),
-  op('files.list', 'IPC', 'files.list'),
-  op('files.search', 'IPC', 'files.search'),
-  op('files.read', 'IPC', 'files.read'),
-  op('terminals.list', 'IPC', 'terminals.list'),
-  op('terminals.create', 'IPC', 'terminals.create'),
-  op('terminals.read', 'IPC', 'terminals.read'),
-  op('terminals.write', 'IPC', 'terminals.write'),
-  op('terminals.resize', 'IPC', 'terminals.resize'),
-  op('terminals.close', 'IPC', 'terminals.close'),
-  op('fileCheckpoints.list', 'IPC', 'fileCheckpoints.list'),
-  op('fileCheckpoints.preview', 'IPC', 'fileCheckpoints.preview'),
-  op('fileCheckpoints.rewind', 'IPC', 'fileCheckpoints.rewind'),
-  op('fileCheckpoints.rewindGit', 'IPC', 'fileCheckpoints.rewindGit'),
-  op('hooks.getConfig', 'GET', '/api/hooks'),
-  op('hooks.saveConfig', 'POST', '/api/hooks'),
-  op('hooks.getAudit', 'GET', '/api/hooks/audit'),
-  op('hooks.getMetadata', 'GET', '/api/hooks/metadata'),
-  op('hooks.validateConfig', 'POST', '/api/hooks/validate'),
-  op('hooks.setProjectTrust', 'POST', '/api/hooks/project-trust'),
-  op('hooks.testMatch', 'POST', '/api/hooks/test-match'),
-  op('hooks.testRun', 'POST', '/api/hooks/test-run'),
-  op('hooks.cancelRun', 'POST', '/api/hooks/cancel-run'),
-  op('tasks.list', 'GET', '/api/tasks'),
-  op('tasks.get', 'GET', '/api/tasks/{task_id}'),
-  op('tasks.transcript', 'GET', '/api/tasks/{task_id}/transcript'),
-  op('tasks.wait', 'IPC', 'tasks.wait'),
-  op('tasks.readOutput', 'GET', '/api/tasks/{task_id}/output'),
-  op('tasks.cancel', 'POST', '/api/tasks/{task_id}/cancel'),
-  op('tasks.resume', 'POST', '/api/tasks/{task_id}/resume'),
-  op('processes.list', 'GET', '/api/processes'),
-  op('processes.cancel', 'POST', '/api/processes/{process_id}/cancel'),
-  op('processes.reparent', 'POST', '/api/processes/{process_id}/reparent'),
-  op('tools.readResult', 'GET', '/api/tools/results/{ref}'),
-  op('memory.get', 'GET', '/api/memory'),
-  op('memory.save', 'POST', '/api/memory'),
-  op('memory.getEpisode', 'GET', '/api/memory/episode'),
-  op('memory.saveEpisode', 'POST', '/api/memory/episode'),
-  op('memory.listVersions', 'GET', '/api/memory/versions'),
-  op('memory.getVersion', 'GET', '/api/memory/versions/{id}'),
-  op('memory.restoreVersion', 'POST', '/api/memory/versions/{id}/restore'),
-  op('memory.getWatchlist', 'GET', '/api/watchlist'),
-  op('memory.saveWatchlist', 'POST', '/api/watchlist'),
-  op('memory.checkWatchlist', 'POST', '/api/watchlist/check'),
-  op('memory.tokens', 'GET', '/api/tokens'),
-  op('memory.compact', 'POST', '/api/compact'),
-  op('memory.explainContext', 'GET', '/api/memory/explain-context'),
-  op('projects.list', 'GET', '/api/projects'),
-  op('projects.resolve', 'POST', '/api/projects/resolve'),
-  op('runtime.replay', 'GET', '/api/runtime/replay'),
-  op('skills.tools', 'GET', '/api/tools'),
-  op('skills.list', 'GET', '/api/skills'),
-  op('skills.get', 'GET', '/api/skill'),
-  op('skills.create', 'POST', '/api/skills/create'),
-  op('skills.validate', 'POST', '/api/skills/validate'),
-  op('skills.package', 'POST', '/api/skills/package'),
-  op('skills.save', 'POST', '/api/skill'),
-  op('skills.delete', 'DELETE', '/api/skill'),
-  op('skills.previewInstall', 'POST', '/api/skills/install/preview'),
-  op('skills.confirmInstall', 'POST', '/api/skills/install/confirm'),
-  op('sidebar.get', 'GET', '/api/sidebar-state'),
-  op('sidebar.patch', 'PATCH', '/api/sidebar-state'),
-  op('diagnostics.get', 'GET', '/api/diagnostics'),
-  op('desktopPet.get', 'GET', '/api/desktop-pet'),
-  op('desktopPet.setEnabled', 'POST', '/api/desktop-pet'),
-  op('environment.getStatus', 'GET', '/api/environment'),
-  op('environment.createInstallPlan', 'POST', '/api/environment/plans'),
-  op('environment.install', 'POST', '/api/environment/install'),
-  op('environment.cancelInstall', 'POST', '/api/environment/cancel'),
-  op('environment.getInstallLog', 'GET', '/api/environment/install-log'),
-] as const
-
-type MissingRouteOperation = Exclude<
-  CoreOperationKey,
-  (typeof CORE_API_ROUTE_OPERATION_LIST)[number]['key']
->
-const _coreApiRouteCoverage: [MissingRouteOperation] extends [never]
-  ? true
-  : never = true
-
-export const CORE_API_ROUTE_OPERATIONS: RouteOperation[] = [
-  ...CORE_API_ROUTE_OPERATION_LIST,
-].sort((a, b) => a.key.localeCompare(b.key))
-
 export class CoreApi {
   readonly root: string
   readonly paths: RuntimePaths
@@ -343,13 +143,19 @@ export class CoreApi {
   readonly memoryService: CoreMemoryService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
+  readonly pluginService: PluginApplicationService
   readonly teamService: CoreTeamService
   readonly goalService: GoalService
   readonly workspaceFilesService: WorkspaceFilesService
   readonly workspaceGitService: WorkspaceGitService
+  readonly projectProcessService: ProjectProcessService
+  readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly gitReceipts: GitOperationReceiptStore
   readonly terminalService: TerminalService
+  readonly sessionApplicationService: CoreSessionApplicationService
+  readonly workspaceApplicationService: CoreWorkspaceApplicationService
+  readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
   readonly commandPlatform: CommandPlatform
 
@@ -418,31 +224,30 @@ export class CoreApi {
         this.loop.refreshRuntimeContext()
       },
     })
+    this.pluginService = new PluginApplicationService({
+      emperorHome: this.paths.stateRoot,
+      webFetchClient: this.loop.webFetchClient,
+      activeWorkspaceRoot: () =>
+        this.loop.activeSession?.mode === 'build'
+          ? (this.loop.activeSession.project_path ?? this.root)
+          : null,
+      onChanged: () => {
+        this.loop.setPluginSkillRoots(this.pluginService.enabledSkillRoots())
+        this.loop.refreshRuntimeContext()
+      },
+    })
+    this.loop.setPluginSkillRoots(this.pluginService.enabledSkillRoots())
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: this.loop.skillManager,
+      installService: this.loop.skillInstallService,
       registry: this.loop.registry,
+      resolvedSkills: () =>
+        this.loop.activeSessionId
+          ? this.loop.resolvedSkillsForSession(this.loop.activeSessionId)
+          : this.loop.skillsLoader.resolvedSkills(),
       refreshRuntimeContext: () => {
         this.loop.refreshRuntimeContext()
-      },
-      resolveMissing: async (requirements: SkillRequirements) => {
-        const skillName = 'install-candidate'
-        const projectRoot =
-          this.loop.activeSession?.mode === 'build'
-            ? (this.loop.activeSession.project_path ?? this.root)
-            : this.root
-        const status = await this.loop.environmentProbe.getStatus({
-          projectRoot,
-          forceRefresh: true,
-          skillRequirements: [
-            { skillName, skillStatus: 'active', requirements },
-          ],
-        })
-        return missingSkillRequirementsFromStatus(
-          status,
-          skillName,
-          requirements,
-        )
       },
     })
     this.environmentService = new CoreEnvironmentService({
@@ -464,6 +269,7 @@ export class CoreApi {
       },
       reconcileBlockedSkills: async () =>
         await this.skillService.reconcileBlocked(),
+      managedEnvironment: this.loop.managedEnvironmentService,
     })
     this.teamService = new CoreTeamService({
       teamManager: () => this.loop.teamManagerForActiveSession(),
@@ -581,6 +387,39 @@ export class CoreApi {
       filterIgnored: async (sessionId, _projectRoot, paths) =>
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
+    this.projectProcessService = new ProjectProcessService({
+      stateRoot: this.paths.stateRoot,
+      resolveProjectRoot: (sessionId) =>
+        resolveWorkspaceProject(sessionId).projectRoot,
+      resolveEnvironment: async (projectRoot) => {
+        const environment = await this.loop.executionEnvironmentService.create({
+          projectRoot,
+        })
+        return {
+          toolPaths: environment.toolPaths,
+          env: environment.env,
+        }
+      },
+      processRuntime: this.loop.processRuntime,
+      emit: async (sessionId, event) => {
+        await this.emitRuntime(event, { sessionId })
+      },
+    })
+    this.workspaceReferenceService = new WorkspaceReferenceService({
+      resolveProject: resolveWorkspaceProject,
+      resolvePreview: (sessionId, url) => {
+        const preview = this.projectProcessService.previews
+          .list(sessionId)
+          .find(
+            (candidate) =>
+              candidate.url === url && candidate.status === 'ready',
+          )
+        return preview ? { previewId: preview.id } : null
+      },
+    })
+    this.loop.registry.register(
+      new ManageProjectProcessTool(this.projectProcessService),
+    )
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
       resolveProject: resolveWorkspaceProject,
@@ -608,12 +447,66 @@ export class CoreApi {
       activeSessionId: () => this.loop.activeSessionId,
       summarize: async (goal) => await this.goalSummary(goal),
       clearPendingInteraction: (goal) => {
+        const controlManager = this.loop.requireControlManagerForSessionId(
+          goal.scope.sessionId,
+        )
         if (goal.runtime.pendingInteractionId)
-          this.loop.controlManager.clearPendingInteractionForGoal(
+          controlManager.clearPendingInteractionForGoal(
             goal.runtime.pendingInteractionId,
           )
-        this.loop.controlManager.clearPendingInteractionForGoal(goal.id)
+        controlManager.clearPendingInteractionForGoal(goal.id)
       },
+    })
+    this.sessionApplicationService = new CoreSessionApplicationService({
+      sessions: this.loop.sessionStore,
+      reconcileControlPending: () => this.loop.reconcileSessionControlPending(),
+      resolveProject: (projectPath) =>
+        this.loop.projectStore.resolve(projectPath) as unknown as Dict,
+      pauseGoalsBySession: (sessionId, reason) =>
+        this.goalService.pauseBySession(sessionId, reason),
+      activeGoalPromise: (goalId) =>
+        this.loop.goalCoordinator.active(goalId)?.promise ?? null,
+      stopProjectProcesses: async (sessionId, reason) => {
+        await this.projectProcessService.stopSession(sessionId, reason)
+      },
+      endSession: async (sessionId, reason) => {
+        await this.loop.endSession(sessionId, reason)
+      },
+      closeTerminals: (sessionId) =>
+        this.terminalService.closeSession(sessionId),
+      cancelGoalsBySession: async (sessionId, reason) => {
+        await this.goalService.cancelAndSettleBySession(sessionId, reason)
+      },
+      deleteGoalsBySession: (sessionId) =>
+        this.loop.goalStore.deleteBySession(sessionId),
+      deleteTasksBySession: (sessionId) =>
+        this.loop.taskManager.store.deleteBySession(sessionId),
+      deletePlansBySession: (sessionId) =>
+        this.loop
+          .controlManagerForSessionId(sessionId)
+          .planStore.deleteBySession(sessionId),
+      activateSession: (sessionId) => this.loop.activateSession(sessionId),
+    })
+    this.workspaceApplicationService = new CoreWorkspaceApplicationService({
+      requireReadableSession: (sessionId, operation) =>
+        this.requireReadableSession(sessionId, operation),
+      workspaceGit: this.workspaceGitService,
+      plansForSession: (sessionId) =>
+        this.loop
+          .controlManagerForSessionId(sessionId)
+          .planStore.list()
+          .filter((plan) => plan.sessionId === sessionId),
+      goalsForSession: (sessionId) => this.goalService.list({ sessionId }),
+      tasksForSession: (sessionId) =>
+        this.loop.taskManager.store
+          .list()
+          .filter((task) => task.session_id === sessionId),
+      teamForSession: (session) =>
+        this.loop.teamManagerForSession(session as never)?.payload() ?? null,
+      bindings: this.workspaceBindings,
+      gitReceipts: this.gitReceipts,
+      projectProcesses: this.projectProcessService,
+      terminals: this.terminalService,
     })
     this.sessionTransitionService = new SessionTransitionService({
       stateRoot: this.paths.stateRoot,
@@ -625,15 +518,76 @@ export class CoreApi {
       inheritWorkspaceBinding: (sourceSessionId, targetSessionId) =>
         this.workspaceBindings.inherit(sourceSessionId, targetSessionId),
     })
+    this.commandApplicationService = new CoreCommandApplicationService({
+      models: this.modelService,
+      memory: this.memoryService,
+      goals: this.goalService,
+      sessionTransitions: this.sessionTransitionService,
+      getSession: (sessionId) => this.loop.sessionStore.get(sessionId),
+      skillsForSession: (sessionId) => {
+        const resolved = this.loop.resolvedSkillsForSession(sessionId)
+        if (!resolved.length) return this.skillService.list()
+        return resolved.map((skill) =>
+          this.skillService.describeResolved(skill),
+        )
+      },
+      sessionBusy: (sessionId) => {
+        const actor = this.loop.sessionRuntimes.get(sessionId)
+        return (
+          this.loop.activeTasks.hasActiveForSession(sessionId) ||
+          Boolean(actor?.activeCommandId) ||
+          Number(actor?.snapshot().queued ?? 0) > 0
+        )
+      },
+      listTasks: (sessionId) =>
+        this.loop.activeTasks
+          .list()
+          .filter((task) => task.session_id === sessionId),
+      cancelTask: (taskId) => {
+        this.loop.activeTasks.cancel({ taskId })
+      },
+      cancelSessionRuntime: (sessionId) =>
+        this.loop.sessionRuntimes.cancel(sessionId),
+      activateModel: async (entryId) => {
+        await this.model.activate({ entryId })
+      },
+      setReasoningEffort: async (entryId, reasoningEffort) => {
+        await this.model.setReasoningEffort({ entryId, reasoningEffort })
+      },
+      setPermissionMode: (sessionId, mode) => {
+        this.loop
+          .requireControlManagerForSessionId(sessionId)
+          .setPermissionMode(mode)
+      },
+      controlPayload: (sessionId) =>
+        this.loop.requireControlManagerForSessionId(sessionId).payload(),
+      setControlMode: async (sessionId, mode) => {
+        await this.loop.setControlModeForSession(sessionId, mode)
+      },
+      defaultSubagentName: (requested) =>
+        requested ||
+        (this.loop.subagentRegistry.get('xiaohuangmen')
+          ? 'xiaohuangmen'
+          : this.loop.subagentRegistry.names({ includeAliases: false })[0] ||
+            null),
+      subagentToolNames: (name) =>
+        this.loop.subagentRegistry.get(name)?.toolNames ?? null,
+      submitPrompt: async (input) => {
+        await this.chat.submit(input)
+      },
+    })
     this.commandPlatform = new CommandPlatform({
       stateRoot: this.paths.stateRoot,
-      listSkills: (sessionId) => this.commandSkillsForSession(sessionId),
+      listSkills: (sessionId) =>
+        this.commandApplicationService.skillsForSession(sessionId),
       sessionContext: async (sessionId) =>
-        await this.commandSessionContext(sessionId),
-      isBusy: (sessionId) => this.commandSessionBusy(sessionId),
+        await this.commandApplicationService.sessionContext(sessionId),
+      isBusy: (sessionId) =>
+        this.commandApplicationService.sessionBusy(sessionId),
       executeBuiltin: async (context) =>
-        await this.executeBuiltinCommand(context),
-      submitSkill: async (context) => await this.submitSkillCommand(context),
+        await this.commandApplicationService.executeBuiltin(context),
+      submitSkill: async (context) =>
+        await this.commandApplicationService.submitSkill(context),
       queueAfterTurn: async ({ sessionId, requestId, run }) => {
         const promise = this.loop.sessionRuntimes.run(
           sessionId,
@@ -644,7 +598,12 @@ export class CoreApi {
         return requestId
       },
       completeDynamic: async (descriptor, rawArgs, cursor, sessionId) =>
-        await this.completeCommand(descriptor.name, rawArgs, cursor, sessionId),
+        await this.commandApplicationService.complete(
+          descriptor.name,
+          rawArgs,
+          cursor,
+          sessionId,
+        ),
     })
     this.loop.setSchedulerAgentTurnSubmitter((payload) =>
       this.mainline.submitSchedulerTurn(payload),
@@ -671,6 +630,12 @@ export class CoreApi {
       subagents: () => this.loop.subagentSupervisor.snapshot(),
       agentDefinitions: () => this.loop.subagentRegistry.snapshot(),
       effectiveConfig: () => this.effectiveConfigService.payload(),
+      commandCatalog: () => {
+        const sessionId = this.loop.activeSessionId
+        return sessionId
+          ? this.commandPlatform.diagnostics(sessionId)
+          : { status: 'ok', registeredSkills: 0, conflicts: [] }
+      },
       hybridMemory: () => this.loop.hybridMemory.diagnostics(),
       codeIntelligence: () => this.loop.codeIntelligence.diagnostics(),
       mcp: () => this.loop.mcpClient.snapshot(),
@@ -678,6 +643,27 @@ export class CoreApi {
       sessionRuntimes: () => this.loop.sessionRuntimes.snapshot(),
       desktopPetPayload: () => this.desktopPet.get(),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
+      externalToolConfig: () => {
+        const projectPath = this.loop.activeSession?.project_path
+        const workspaceConfig = projectPath
+          ? join(projectPath, 'config', 'mcporter.json')
+          : null
+        return {
+          mcporter: {
+            managedPath: join(
+              this.paths.environmentDataRoot,
+              'mcporter',
+              'mcporter.json',
+            ),
+            workspacePath: workspaceConfig,
+            workspacePathExists: Boolean(
+              workspaceConfig && existsSync(workspaceConfig),
+            ),
+            workspacePathOwnedByEmperor: false,
+            autoCleanupAllowed: false,
+          },
+        }
+      },
     })
   }
 
@@ -699,6 +685,7 @@ export class CoreApi {
 
   async close(): Promise<void> {
     this.terminalService.closeAll()
+    await this.projectProcessService.shutdown()
     await this.loop.close()
   }
 
@@ -724,6 +711,7 @@ export class CoreApi {
       providerLabel: route.snapshot.providerLabel,
       tools: this.skills.tools(),
       skills: this.skills.list(),
+      plugins: this.plugins.list(),
       memory: this.memory.get(),
       modelConfig: await this.model.getConfig(),
       profileOnboarding: this.onboarding.getProfileStatus(),
@@ -874,10 +862,7 @@ export class CoreApi {
       const compact =
         opts.compact === undefined ? true : normalizedBoolean(opts.compact)
       const format = opts.format ?? 'projection'
-      const store = new RuntimeEventStore(
-        this.loop.sessionStore.sessionDir(sessionId),
-        { sessionDirOverride: true },
-      )
+      const store = this.loop.runtimeStoreForSession(sessionId)
       return {
         sessionId,
         afterSeq,
@@ -1065,10 +1050,11 @@ export class CoreApi {
       opts: ControlResumeOptions = {},
     ): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
+      const controlManager = this.loop.controlManagerForInteraction(id)
       const isProfileOnboarding = this.loop.isProfileOnboardingInteraction(id)
-      const pending = this.loop.controlManager.store.load().pending
-      const resume = this.loop.controlManager.answer(id, answers)
-      const answered = this.loop.controlManager.store.load().lastInteraction
+      const pending = controlManager.store.load().pending
+      const resume = controlManager.answer(id, answers)
+      const answered = controlManager.store.load().lastInteraction
       const manualRequest =
         pending?.id === id &&
         isRecord(pending.meta.goal_manual_evidence_request)
@@ -1151,7 +1137,7 @@ export class CoreApi {
     ): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
       return this.resumeControl(
-        this.loop.controlManager.comment(id, comment),
+        this.loop.planningApplicationService.comment(id, comment),
         opts,
         ownerSessionId,
       )
@@ -1161,61 +1147,16 @@ export class CoreApi {
       opts: ControlResumeOptions = {},
     ): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      const pending = this.loop.controlManager.payload().pending
-      const pendingMeta =
-        isRecord(pending) && isRecord(pending.meta) ? pending.meta : null
-      const pendingPlanId = String(pendingMeta?.plan_id ?? '').trim()
-      const pendingPlan = pendingPlanId
-        ? this.loop.controlManager.planStore.get(pendingPlanId)
-        : null
-      if (pendingPlan?.goalId) {
-        const approvalInput = {
-          goalId: pendingPlan.goalId,
-          planId: pendingPlan.id,
-          interactionId: id,
-          approvalGeneration: Number(
-            pendingMeta?.approval_generation ?? Number.NaN,
-          ),
-        }
-        await this.loop.goalPlanBridge.preflightApproval(approvalInput)
-        await this.loop.goalPlanBridge.prepareApproval(approvalInput)
-      }
-      const resume = await (async () => {
-        try {
-          const approval = this.loop.controlManager.approve(id)
-          const planPayload = isRecord(approval.event.plan)
-            ? approval.event.plan
-            : null
-          const planId = String(planPayload?.id ?? '').trim()
-          if (planId) {
-            const plan = this.loop.controlManager.planStore.get(planId)
-            if (plan?.goalId) {
-              await this.loop.goalPlanBridge.bindApprovedPlan({
-                goalId: plan.goalId,
-                planId,
-              })
-              const rebound = this.loop.controlManager.planStore.get(planId)
-              if (rebound) approval.event.plan = planToDict(rebound)
-            }
-          }
-          return approval
-        } catch (cause) {
-          if (pendingPlan?.goalId)
-            this.loop.goalPlanBridge.abortFailedApproval({
-              goalId: pendingPlan.goalId,
-              planId: pendingPlan.id,
-            })
-          throw cause
-        }
-      })()
+      const resume = await this.loop.planningApplicationService.approve(id)
       return this.resumeControl(resume, opts, ownerSessionId)
     },
     cancelInteraction: async (id: string): Promise<Dict> => {
       const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      const result = this.loop.controlManager.cancel(id)
+      const controlManager = this.loop.controlManagerForInteraction(id)
+      const result = this.loop.planningApplicationService.cancel(id)
       const event: Dict = {
         ...result,
-        control: this.loop.controlManager.payload(),
+        control: controlManager.payload(),
       }
       await this.emitRuntime(event, { sessionId: ownerSessionId })
       if (
@@ -1360,12 +1301,8 @@ export class CoreApi {
   }
 
   readonly sessions = {
-    list: (opts: { includeArchived?: boolean } = {}) => {
-      this.loop.reconcileSessionControlPending()
-      return this.loop.sessionStore.list({
-        includeArchived: opts.includeArchived ?? false,
-      })
-    },
+    list: (opts: { includeArchived?: boolean } = {}) =>
+      this.sessionApplicationService.list(opts),
     create: (
       opts: {
         title?: string
@@ -1373,76 +1310,15 @@ export class CoreApi {
         project?: Dict | null
         project_path?: string | null
       } = {},
-    ) => {
-      let project = opts.project ?? null
-      const mode = opts.mode === 'build' ? 'build' : 'chat'
-      if (mode === 'build' && !project) {
-        const projectPath = String(opts.project_path || '').trim()
-        if (!projectPath) throw new Error('Build session requires project_path')
-        project = this.loop.projectStore.resolve(projectPath) as unknown as Dict
-      }
-      return this.loop.sessionStore.create(opts.title ?? 'Untitled', {
-        mode,
-        project,
-      })
-    },
+    ) => this.sessionApplicationService.create(opts),
     rename: async (
       sessionId: string,
       patch: string | { title?: string | null; archived?: boolean | null },
-    ) => {
-      if (typeof patch === 'object' && patch !== null && 'archived' in patch) {
-        if (patch.archived)
-          await this.goalService.pauseBySession(sessionId, 'session_archived')
-        const entry = patch.archived
-          ? this.loop.sessionStore.archive(sessionId)
-          : this.loop.sessionStore.restore(sessionId)
-        if (!entry) throw new Error('session not found')
-        return entry
-      }
-      const title =
-        typeof patch === 'string' ? patch : String(patch?.title ?? '').trim()
-      if (!title) throw new Error('title is required')
-      if (!this.loop.sessionStore.rename(sessionId, title))
-        throw new Error('session not found')
-      const entry = this.loop.sessionStore.get(sessionId)
-      if (!entry) throw new Error('session not found')
-      return entry
-    },
-    delete: async (sessionId: string): Promise<Dict> => {
-      if (!this.loop.sessionStore.get(sessionId))
-        throw new Error('cannot delete session')
-      if (this.loop.sessionStore.list({ includeArchived: true }).length <= 1)
-        throw new CoreMutationGuardError(
-          409,
-          'Cannot delete the last persisted session.',
-        )
-      const pausedGoal = await this.goalService.pauseBySession(
-        sessionId,
-        'session_delete_pending',
-      )
-      const activeGoal = pausedGoal
-        ? this.loop.goalCoordinator.active(pausedGoal.id)
-        : null
-      if (activeGoal) await activeGoal.promise
-      await this.loop.endSession(sessionId, 'deleted')
-      if (!this.loop.sessionStore.delete(sessionId))
-        throw new Error('cannot delete session')
-      this.terminalService.closeSession(sessionId)
-      await this.goalService.cancelAndSettleBySession(
-        sessionId,
-        'session_deleted',
-      )
-      const removedGoals = await this.loop.goalStore.deleteBySession(sessionId)
-      const removedTasks =
-        this.loop.taskManager.store.deleteBySession(sessionId)
-      const removedPlans =
-        this.loop.controlManager.planStore.deleteBySession(sessionId)
-      return { deleted: true, removedGoals, removedTasks, removedPlans }
-    },
-    activate: (sessionId: string) => {
-      this.loop.activateSession(sessionId)
-      return { active: sessionId, complete: true }
-    },
+    ) => this.sessionApplicationService.rename(sessionId, patch),
+    delete: (sessionId: string): Promise<Dict> =>
+      this.sessionApplicationService.delete(sessionId),
+    activate: (sessionId: string) =>
+      this.sessionApplicationService.activate(sessionId),
   }
 
   readonly team = {
@@ -1461,6 +1337,41 @@ export class CoreApi {
       opts: { purpose?: string; recovery?: 'auto' | 'retry' } = {},
     ) => this.teamService.wakeMember(name, opts),
     shutdownMember: (name: string) => this.teamService.shutdownMember(name),
+  }
+
+  readonly projectProcesses = {
+    /** Electron main-only capability; intentionally absent from the renderer operation registry. */
+    authorizePreview: (input: { sessionId: string; previewId: string }) =>
+      this.projectProcessService.previews.authorize(
+        input.previewId,
+        input.sessionId,
+      ),
+    readOutput: (input: Parameters<ProjectProcessService['readOutput']>[0]) =>
+      this.projectProcessService.readOutput(input),
+    stop: (input: Parameters<ProjectProcessService['stop']>[0]) =>
+      this.projectProcessService.stop(input),
+    restart: (
+      input: Parameters<ProjectProcessService['restart']>[0] & {
+        confirmed: true
+      },
+    ) =>
+      this.projectProcessService.restart({
+        sessionId: input.sessionId,
+        processId: input.processId,
+        expectedRevision: input.expectedRevision,
+        invocationId: input.invocationId,
+      }),
+  }
+
+  readonly references = {
+    resolve: (input: Parameters<WorkspaceReferenceService['resolve']>[0]) =>
+      this.workspaceReferenceService.resolve(input),
+    /** Electron main-only capability; returns a path only after reference ownership checks. */
+    revealPath: (input: { sessionId: string; referenceId: string }) =>
+      this.workspaceReferenceService.revealPath(
+        input.referenceId,
+        input.sessionId,
+      ),
   }
 
   readonly processes = {
@@ -1587,100 +1498,8 @@ export class CoreApi {
   }
 
   readonly workspace = {
-    snapshot: async (input: {
-      sessionId: string
-    }): Promise<WorkspaceSnapshot> => {
-      const session = this.requireReadableSession(
-        input.sessionId,
-        'workspace.snapshot',
-      ) as {
-        id: string
-        mode?: string | null
-        project_id?: string | null
-        project_path?: string | null
-        project_name?: string | null
-        title?: string | null
-      }
-      if (session.mode !== 'build' || !session.project_path)
-        throw new WorkspaceOperationError(
-          'workspace_project_required',
-          '当前会话没有绑定 Build 项目。',
-        )
-      let git: GitStatusResult | { repository: false; error: string }
-      let worktrees: WorkspaceSnapshot['worktrees'] = {
-        worktrees: [],
-        owned: [],
-      }
-      try {
-        git = await this.workspaceGitService.status(input)
-        worktrees = await this.workspaceGitService.worktrees(input)
-      } catch (error) {
-        git = {
-          repository: false,
-          error:
-            error instanceof WorkspaceOperationError
-              ? error.message
-              : '无法读取 Git 状态。',
-        }
-      }
-      const plans = this.loop.controlManager.planStore
-        .list()
-        .filter((plan) => plan.sessionId === input.sessionId)
-        .sort((left, right) => right.updatedAt - left.updatedAt)
-      const currentPlan = plans.find(
-        (plan) => !['completed', 'failed', 'cancelled'].includes(plan.status),
-      )
-      const goals = await this.goalService.list({ sessionId: input.sessionId })
-      const tasks = this.loop.taskManager.store
-        .list()
-        .filter((task) => task.session_id === input.sessionId)
-      const subagents = tasks
-        .filter((task) => task.kind === 'subagent')
-        .sort((left, right) => {
-          const leftActive = ['pending', 'running'].includes(left.status)
-          const rightActive = ['pending', 'running'].includes(right.status)
-          if (leftActive !== rightActive) return leftActive ? -1 : 1
-          return right.started_at - left.started_at
-        })
-        .slice(0, 12)
-        .map(projectWorkspaceSubagent)
-      const team = projectWorkspaceTeam(
-        this.loop.teamManagerForSession(session as never)?.payload() ?? null,
-      )
-      const currentGoal =
-        goals.find(
-          (goal) => !['completed', 'cancelled', 'failed'].includes(goal.status),
-        ) ?? null
-      return {
-        version: 1,
-        sessionId: input.sessionId,
-        project: {
-          id: session.project_id ?? null,
-          name:
-            String(session.project_name ?? session.title ?? '').trim() ||
-            session.project_path.split(/[\\/]/).pop() ||
-            '项目',
-          path: this.workspaceBindings.resolve(
-            session.id,
-            resolve(session.project_path),
-          ),
-        },
-        git,
-        worktrees,
-        gitReceipts: this.gitReceipts.list(input.sessionId).slice(-8),
-        plan: projectWorkspacePlan(currentPlan ?? null),
-        goal: projectWorkspaceGoal(currentGoal),
-        subagents,
-        team,
-        processes: this.loop.processRuntime
-          .list({ sessionId: input.sessionId, activeOnly: true })
-          .map(projectWorkspaceProcess),
-        terminals: this.terminalService
-          .list(input)
-          .map(projectWorkspaceTerminal),
-        capturedAt: Date.now(),
-      }
-    },
+    snapshot: (input: { sessionId: string }): Promise<WorkspaceSnapshot> =>
+      this.workspaceApplicationService.snapshot(input),
   }
 
   readonly git = {
@@ -1872,13 +1691,44 @@ export class CoreApi {
       return this.skillService.delete(name)
     },
     previewInstall: (
-      input: Parameters<CoreSkillService['previewInstall']>[0],
-    ) => this.skillService.previewInstall(input),
+      _input: Parameters<CoreSkillService['previewInstall']>[0],
+    ): Promise<never> =>
+      Promise.reject(
+        new OperationRetiredError(
+          'Skill 安装接口已退役。请使用普通文件工具创建裸 Skill，或通过 Plugins 页面安装版本化扩展。',
+          'open_plugins',
+        ),
+      ),
     confirmInstall: (
-      input: Parameters<CoreSkillService['confirmInstall']>[0],
+      _input: Parameters<CoreSkillService['confirmInstall']>[0],
+    ): Promise<never> =>
+      Promise.reject(
+        new OperationRetiredError(
+          'Skill 安装接口已退役。请使用普通文件工具创建裸 Skill，或通过 Plugins 页面安装版本化扩展。',
+          'open_plugins',
+        ),
+      ),
+  }
+
+  readonly plugins = {
+    list: () => this.pluginService.list(),
+    inspect: (input: Parameters<PluginApplicationService['inspect']>[0]) =>
+      this.pluginService.inspect(input),
+    install: (input: Parameters<PluginApplicationService['install']>[0]) => {
+      this.assertMutation('plugins', 'install')
+      return this.pluginService.install(input)
+    },
+    uninstall: (
+      input: Parameters<PluginApplicationService['uninstall']>[0],
     ) => {
-      this.assertMutation('skills', 'confirm install')
-      return this.skillService.confirmInstall(input)
+      this.assertMutation('plugins', 'uninstall')
+      return this.pluginService.uninstall(input)
+    },
+    setEnabled: (
+      input: Parameters<PluginApplicationService['setEnabled']>[0],
+    ) => {
+      this.assertMutation('plugins', input.enabled ? 'enable' : 'disable')
+      return this.pluginService.setEnabled(input)
     },
   }
 
@@ -1887,12 +1737,23 @@ export class CoreApi {
       input: Parameters<CoreEnvironmentService['getStatus']>[0] = {},
     ) => this.environmentService.getStatus(input),
     createInstallPlan: (
-      input: Parameters<CoreEnvironmentService['createInstallPlan']>[0],
-    ) => this.environmentService.createInstallPlan(input),
-    install: (input: Parameters<CoreEnvironmentService['install']>[0]) => {
-      this.assertMutation('environment', 'install')
-      return this.environmentService.install(input)
-    },
+      _input: Parameters<CoreEnvironmentService['createInstallPlan']>[0],
+    ): Promise<never> =>
+      Promise.reject(
+        new OperationRetiredError(
+          '环境配方安装接口已退役。请在普通命令权限下安装依赖，并使用独立命令验证结果。',
+          'review_environment',
+        ),
+      ),
+    install: (
+      _input: Parameters<CoreEnvironmentService['install']>[0],
+    ): Promise<never> =>
+      Promise.reject(
+        new OperationRetiredError(
+          '环境配方安装接口已退役。请在普通命令权限下安装依赖，并使用独立命令验证结果。',
+          'review_environment',
+        ),
+      ),
     cancelInstall: (
       input: Parameters<CoreEnvironmentService['cancelInstall']>[0],
     ) => {
@@ -1930,38 +1791,6 @@ export class CoreApi {
       this.desktopPetService.setEnabled(enabled),
   }
 
-  private async commandSessionContext(sessionId: string): Promise<{
-    exists: boolean
-    hasProject: boolean
-    hasGit: boolean
-  }> {
-    const session = this.loop.sessionStore.get(sessionId)
-    if (!session) return { exists: false, hasProject: false, hasGit: false }
-    const hasProject = session.mode === 'build' && Boolean(session.project_path)
-    if (!hasProject) return { exists: true, hasProject: false, hasGit: false }
-    try {
-      await this.workspaceGitService.status({ sessionId })
-      return { exists: true, hasProject: true, hasGit: true }
-    } catch {
-      return { exists: true, hasProject: true, hasGit: false }
-    }
-  }
-
-  private commandSkillsForSession(sessionId: string): SkillInfoPayload[] {
-    const resolved = this.loop.resolvedSkillsForSession(sessionId)
-    if (!resolved.length) return this.skillService.list()
-    return resolved.map((skill) => this.skillService.describeResolved(skill))
-  }
-
-  private commandSessionBusy(sessionId: string): boolean {
-    const actor = this.loop.sessionRuntimes.get(sessionId)
-    return (
-      this.loop.activeTasks.hasActiveForSession(sessionId) ||
-      Boolean(actor?.activeCommandId) ||
-      Number(actor?.snapshot().queued ?? 0) > 0
-    )
-  }
-
   private assertClearBoundary(sessionId: string): void {
     const session = this.requireReadableSession(
       sessionId,
@@ -1979,416 +1808,6 @@ export class CoreApi {
         409,
         '请先处理当前会话中的排队消息，再创建新上下文。',
       )
-  }
-
-  private async completeCommand(
-    name: string,
-    rawArgs: string,
-    _cursor: number,
-    sessionId: string,
-  ): Promise<CommandCompletion[]> {
-    const query = String(rawArgs ?? '')
-      .trim()
-      .toLowerCase()
-    if (name === 'model') {
-      const config = await this.modelService.getConfig()
-      return config.models
-        .filter((item) =>
-          [item.entryId, item.modelId, item.effectiveDisplayName]
-            .join(' ')
-            .toLowerCase()
-            .includes(query),
-        )
-        .map((item) => ({
-          value: item.entryId,
-          label: item.effectiveDisplayName,
-          description: `${item.provider} · ${item.modelId}`,
-          kind: 'model',
-        }))
-    }
-    if (name === 'effort') {
-      const config = await this.modelService.getConfig()
-      return (config.current?.reasoningEfforts ?? [])
-        .filter((value) => value.toLowerCase().includes(query))
-        .map((value) => ({ value, label: value, kind: 'reasoning_effort' }))
-    }
-    if (name === 'resume') {
-      return this.loop.sessionStore
-        .list({ includeArchived: true })
-        .filter((item) =>
-          [item.id, item.title, item.preview]
-            .join(' ')
-            .toLowerCase()
-            .includes(query),
-        )
-        .slice(0, 20)
-        .map((item) => ({
-          value: item.id,
-          label: item.title,
-          description: item.preview,
-          kind: 'session',
-        }))
-    }
-    if (name === 'skills') {
-      return this.skillService
-        .list()
-        .filter((item) => item.status === 'active' && item.name.includes(query))
-        .map((item) => ({
-          value: item.name,
-          label: item.name,
-          description: item.description,
-          kind: 'skill',
-        }))
-    }
-    if (name === 'tools') {
-      return this.skillService
-        .tools()
-        .filter((item) =>
-          `${item.name} ${item.description}`.toLowerCase().includes(query),
-        )
-        .slice(0, 30)
-        .map((item) => ({
-          value: item.name,
-          label: item.name,
-          description: item.description,
-          kind: item.source === 'mcp' ? 'mcp_tool' : 'tool',
-        }))
-    }
-    if (name === 'files' || name === 'diff') {
-      if (!query) return []
-      try {
-        const result = await this.workspaceFilesService.search({
-          sessionId,
-          query,
-          limit: 20,
-        })
-        return result.entries.map((entry) => ({
-          value: entry.path,
-          label: entry.name,
-          description: entry.path,
-          kind: entry.kind,
-        }))
-      } catch {
-        return []
-      }
-    }
-    return []
-  }
-
-  private async executeBuiltinCommand(
-    context: CommandExecutionContext,
-  ): Promise<CommandInvocationResult> {
-    const { descriptor, parsed, sessionId, invocationId } = context
-    const name = descriptor.name
-    const tail = parsed.args.join(' ').trim()
-    const completed = (
-      code: string,
-      message: string,
-      data?: Record<string, unknown>,
-    ): CommandInvocationResult => ({
-      status: 'completed',
-      receipt: {
-        commandId: descriptor.id,
-        code,
-        message,
-        ...(data ? { data } : {}),
-      },
-    })
-
-    if (name === 'reload') {
-      await this.loop.refreshModelConfig()
-      await this.loop.reloadMcp()
-      this.loop.refreshRuntimeContext()
-      return completed('reloaded', '工作台状态已刷新。')
-    }
-    if (name === 'clear') {
-      const result = await this.sessionTransitionService.clear({
-        sessionId,
-        invocationId,
-      })
-      return completed('session_transitioned', '已创建全新上下文。', {
-        session: result.session as unknown as Record<string, unknown>,
-        previousSessionId: sessionId,
-      })
-    }
-    if (name === 'compact') {
-      const result = await this.memoryService.compact({
-        force: true,
-        sessionId,
-        instructions: tail,
-      })
-      return completed('compacted', '当前会话已压缩并保留摘要。', {
-        result: result as unknown as Record<string, unknown>,
-      })
-    }
-    if (name === 'copy')
-      return completed('copy_last_assistant', '已准备复制最后一条回复。')
-    if (name === 'stop') {
-      const tasks = this.loop.activeTasks
-        .list()
-        .filter((task) => task.session_id === sessionId)
-      for (const task of tasks) {
-        if (task.kind === 'goal')
-          await this.goalService.pause(
-            task.id.replace(/^goal:/, ''),
-            sessionId,
-            'user_stop',
-          )
-        this.loop.activeTasks.cancel({ taskId: task.id })
-      }
-      const actorCancelled = this.loop.sessionRuntimes.cancel(sessionId)
-      const cancelled = tasks.length > 0 || actorCancelled
-      return completed(
-        cancelled ? 'stop_requested' : 'nothing_running',
-        cancelled ? '已请求停止当前任务。' : '当前没有正在运行的任务。',
-      )
-    }
-    if (name === 'rename' && tail) {
-      const session = await this.sessions.rename(sessionId, { title: tail })
-      return completed(
-        'session_renamed',
-        `会话已重命名为“${session.title}”。`,
-        {
-          session: session as unknown as Record<string, unknown>,
-        },
-      )
-    }
-    if (name === 'model' && tail) {
-      const config = await this.modelService.getConfig()
-      const model = config.models.find(
-        (item) => item.entryId === tail || item.modelId === tail,
-      )
-      if (!model)
-        return {
-          status: 'rejected',
-          code: 'model_not_found',
-          message: `找不到模型：${tail}`,
-        }
-      await this.model.activate({ entryId: model.entryId })
-      return completed(
-        'model_activated',
-        `已切换到 ${model.effectiveDisplayName}。`,
-      )
-    }
-    if (name === 'effort' && tail) {
-      const config = await this.modelService.getConfig()
-      if (!config.current)
-        return {
-          status: 'rejected',
-          code: 'model_unavailable',
-          message: '当前没有可用模型。',
-        }
-      await this.model.setReasoningEffort({
-        entryId: config.current.entryId,
-        reasoningEffort: tail,
-      })
-      return completed('effort_updated', `思考强度已切换为 ${tail}。`)
-    }
-    if (name === 'permissions' && tail) {
-      if (tail === 'status')
-        return {
-          status: 'opened',
-          surface: 'permissions',
-          params: {
-            rawArgs: '',
-            invokedName: parsed.name,
-            commandId: descriptor.id,
-          },
-        }
-      const mode =
-        tail === 'ask'
-          ? 'ask_before_edit'
-          : tail === 'smart' || tail === 'edits'
-            ? 'smart_auto'
-            : tail === 'full' || tail === 'auto'
-              ? 'full_access'
-              : null
-      if (!mode)
-        return {
-          status: 'rejected',
-          code: 'invalid_permission_mode',
-          message: '权限模式必须是 ask、smart 或 full。',
-        }
-      this.control.setPermissionMode(mode)
-      return completed('permission_mode_updated', '执行权限已更新。', { mode })
-    }
-    if (name === 'plan') return await this.executePlanCommand(context)
-    if (name === 'goal') return await this.executeGoalCommand(context)
-    if (name === 'continue') {
-      const promptId = this.scheduleCommandPrompt(context, '继续执行')
-      return { status: 'submitted', promptId }
-    }
-
-    if (descriptor.uiSurface) {
-      return {
-        status: 'opened',
-        surface: descriptor.uiSurface,
-        params: {
-          rawArgs: parsed.args.join(' '),
-          options: parsed.options,
-          invokedName: parsed.name,
-          commandId: descriptor.id,
-        },
-      }
-    }
-    return completed('completed', '命令已执行。')
-  }
-
-  private async executePlanCommand(
-    context: CommandExecutionContext,
-  ): Promise<CommandInvocationResult> {
-    const tail = context.parsed.args.join(' ').trim()
-    const normalized = tail.toLowerCase()
-    if (!tail || normalized === 'status' || normalized === 'open')
-      return {
-        status: 'opened',
-        surface: 'plan',
-        params: { action: normalized || 'open' },
-      }
-    if (normalized === 'on') {
-      await this.control.setMode('plan')
-      return commandCompleted(context, 'plan_enabled', 'Plan 模式已开启。')
-    }
-    if (normalized === 'off') {
-      const control = this.control.get()
-      const restore =
-        control.mode === 'plan' && control.previous_mode
-          ? control.previous_mode
-          : 'smart_auto'
-      await this.control.setMode(restore)
-      return commandCompleted(context, 'plan_disabled', 'Plan 模式已关闭。')
-    }
-    await this.control.setMode('plan')
-    const promptId = this.scheduleCommandPrompt(
-      context,
-      tail,
-      context.parsed.raw,
-    )
-    return { status: 'submitted', promptId }
-  }
-
-  private async executeGoalCommand(
-    context: CommandExecutionContext,
-  ): Promise<CommandInvocationResult> {
-    const legacyAction = context.parsed.name.startsWith('goal-')
-      ? context.parsed.name.slice('goal-'.length)
-      : ''
-    const explicitTail = context.parsed.args.join(' ').trim()
-    const tail = legacyAction
-      ? `${legacyAction}${explicitTail ? ` ${explicitTail}` : ''}`
-      : explicitTail
-    if (!tail || tail === 'status' || tail === 'list')
-      return {
-        status: 'opened',
-        surface: 'goal',
-        params: { action: tail || 'open' },
-      }
-    const goals = await this.goalService.list({ sessionId: context.sessionId })
-    const active = goals.find(
-      (goal) => goal.status !== 'completed' && goal.status !== 'cancelled',
-    )
-    if (tail === 'pause' || tail === 'resume' || tail === 'cancel') {
-      if (!active)
-        return {
-          status: 'rejected',
-          code: 'goal_not_found',
-          message: '当前会话没有可操作的 Goal。',
-        }
-      if (tail === 'pause')
-        await this.goalService.pause(active.id, context.sessionId)
-      else if (tail === 'resume')
-        await this.goalService.resume(active.id, context.sessionId)
-      else
-        await this.goalService.cancel(
-          active.id,
-          'slash_command',
-          context.sessionId,
-        )
-      return commandCompleted(
-        context,
-        `goal_${tail}`,
-        `Goal 已${tail === 'pause' ? '暂停' : tail === 'resume' ? '恢复' : '取消'}。`,
-      )
-    }
-    const outcome = tail.replace(/^start\s+/i, '').trim()
-    if (!outcome)
-      return { status: 'opened', surface: 'goal', params: { action: 'start' } }
-    await this.goalService.start({ outcome, sessionId: context.sessionId })
-    return commandCompleted(context, 'goal_started', 'Goal 已启动。')
-  }
-
-  private async submitSkillCommand(
-    context: CommandExecutionContext,
-  ): Promise<CommandInvocationResult> {
-    const binding = context.descriptor.skill
-    if (!binding)
-      return {
-        status: 'rejected',
-        code: 'skill_binding_missing',
-        message: 'Skill 命令绑定缺失。',
-      }
-    const task = context.parsed.args.join(' ').trim()
-    let forkAgent = binding.agent
-    if (binding.context === 'fork') {
-      forkAgent =
-        forkAgent ||
-        (this.loop.subagentRegistry.get('xiaohuangmen')
-          ? 'xiaohuangmen'
-          : this.loop.subagentRegistry.names({ includeAliases: false })[0] ||
-            null)
-      const spec = forkAgent ? this.loop.subagentRegistry.get(forkAgent) : null
-      if (!spec)
-        return {
-          status: 'rejected',
-          code: 'skill_fork_agent_unavailable',
-          message: 'Skill 指定的子代理不可用。',
-        }
-      const unsupportedTools = binding.allowedTools.filter(
-        (tool) => !spec.toolNames.includes(tool),
-      )
-      if (unsupportedTools.length)
-        return {
-          status: 'rejected',
-          code: 'skill_fork_tool_scope_invalid',
-          message: `Skill 请求了子代理未获授权的工具：${unsupportedTools.join('、')}`,
-        }
-    }
-    const content =
-      binding.context === 'fork'
-        ? `[CONTROL:SKILL_FORK]\nAgent: ${forkAgent}\nAllowed tools: ${binding.allowedTools.join(', ') || 'agent definition'}\nEffort: ${binding.effort || 'inherit'}\nTask: ${task || '按 Skill 默认流程执行'}`
-        : task || '按 Skill 默认流程执行'
-    const promptId = this.scheduleCommandPrompt(
-      context,
-      content,
-      context.parsed.raw,
-      binding.name,
-    )
-    return { status: 'submitted', promptId }
-  }
-
-  private scheduleCommandPrompt(
-    context: CommandExecutionContext,
-    content: string,
-    displayContent = context.parsed.raw,
-    skillName?: string,
-  ): string {
-    const promptId = `command_prompt_${randomUUID().replace(/-/g, '').slice(0, 20)}`
-    void this.chat
-      .submit({
-        sessionId: context.sessionId,
-        content,
-        displayContent,
-        clientMessageId: promptId,
-        turnId: promptId,
-        delivery: 'queue',
-        source: 'command',
-        requestedSkills: skillName
-          ? [{ name: skillName, source: 'slash' }]
-          : [],
-        attachments: context.attachments,
-      })
-      .catch(() => undefined)
-    return promptId
   }
 
   private async goalSummary(goal: GoalRecord) {
@@ -2445,8 +1864,11 @@ export class CoreApi {
     opts: ControlResumeOptions,
     ownerSessionId: string | null,
   ): Promise<Dict> {
+    const controlManager = ownerSessionId
+      ? this.loop.controlManagerForSessionId(ownerSessionId)
+      : this.loop.controlManager
     const event: Dict | null = isRecord(resume.event)
-      ? { ...resume.event, control: this.loop.controlManager.payload() }
+      ? { ...resume.event, control: controlManager.payload() }
       : null
     if (event)
       await this.emitRuntime(event, {
@@ -2490,8 +1912,7 @@ export class CoreApi {
     let result: Dict | null = null
     if (resume.resume === true) {
       const interactionId = String(resume.interaction.id ?? '')
-      const explicitGoalId =
-        this.loop.controlManager.goalIdForInteraction(interactionId)
+      const explicitGoalId = controlManager.goalIdForInteraction(interactionId)
       const sessionGoal = ownerSessionId
         ? await this.loop.goalStore.findActiveBySession(ownerSessionId)
         : null
@@ -2549,14 +1970,11 @@ export class CoreApi {
     opts: { emit?: StreamEmitter | null; sessionId?: string | null } = {},
   ): Promise<Dict> {
     const targetSessionId = String(opts.sessionId ?? '').trim()
-    const store =
-      targetSessionId && targetSessionId !== this.loop.activeSessionId
-        ? new RuntimeEventStore(
-            this.loop.sessionStore.sessionDir(targetSessionId),
-            { sessionDirOverride: true },
-          )
-        : this.loop.runtimeStore
-    const payload = store.append(event, { sessionId: targetSessionId || null })
+    const ownerSessionId = targetSessionId || this.loop.activeSessionId
+    if (!ownerSessionId)
+      throw new Error('runtime event session id is unavailable')
+    const store = this.loop.runtimeStoreForSession(ownerSessionId)
+    const payload = store.append(event, { sessionId: ownerSessionId })
     const sink = opts.emit ?? this.loop.eventSink
     if (sink) await sink(payload)
     return payload
@@ -2610,31 +2028,6 @@ interface ControlResumeOptions {
   displayContent?: string | null
   uiHidden?: boolean | null
   emit?: StreamEmitter | null
-}
-
-function commandCompleted(
-  context: CommandExecutionContext,
-  code: string,
-  message: string,
-  data?: Record<string, unknown>,
-): CommandInvocationResult {
-  return {
-    status: 'completed',
-    receipt: {
-      commandId: context.descriptor.id,
-      code,
-      message,
-      ...(data ? { data } : {}),
-    },
-  }
-}
-
-function op<const Key extends CoreOperationKey>(
-  key: Key,
-  method: string,
-  route: string,
-): RouteOperation & { key: Key } {
-  return { key, method, route }
 }
 
 function readJson(path: string, fallback: Dict): Dict {

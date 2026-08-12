@@ -1,4 +1,16 @@
-import type { ToolPermissionProfile } from './models'
+import type {
+  PermissionRuleAction,
+  PermissionRuleCandidate,
+  PermissionRuleSource,
+  PermissionRuleTrust,
+  ToolPermissionProfile,
+} from './contracts'
+export type {
+  PermissionRuleAction,
+  PermissionRuleCandidate,
+  PermissionRuleSource,
+  PermissionRuleTrust,
+} from './contracts'
 import { analyzeShellCommandFailClosed } from './shell-ast'
 import {
   ConfigResolver,
@@ -7,22 +19,6 @@ import {
   type ConfigLayerKind,
   type ConfigSourceTrust,
 } from '../config/resolver'
-
-export type PermissionRuleAction = 'allow' | 'ask' | 'deny'
-export type PermissionRuleTrust =
-  | 'system'
-  | 'managed'
-  | 'user'
-  | 'project'
-  | 'runtime'
-  | 'untrusted'
-  | 'unknown'
-
-export interface PermissionRuleSource {
-  kind: string
-  id: string
-  trust: PermissionRuleTrust
-}
 
 export interface PermissionRuleLayerInput {
   source: PermissionRuleSource
@@ -54,14 +50,6 @@ export interface PermissionRule {
   specificity: number
 }
 
-export interface PermissionRuleCandidate {
-  id: string
-  action: PermissionRuleAction
-  matched: boolean
-  source: PermissionRuleSource
-  precedence: string
-}
-
 export interface PermissionRuleResolution {
   winner: PermissionRule | null
   candidates: PermissionRuleCandidate[]
@@ -83,7 +71,7 @@ export function parsePermissionRules(rawRules: unknown): PermissionRuleSet {
     {
       source: {
         kind: 'local_config',
-        id: 'emperor.local.json',
+        id: 'settings.json',
         trust: 'user',
       },
       rules: Array.isArray(rawRules) ? (rawRules as PermissionRuleInput[]) : [],
@@ -218,7 +206,11 @@ function permissionConfigSource(
   if (source?.trust === 'runtime')
     return { kind: 'session', id, trust: 'trusted' }
   if (source?.trust === 'project')
-    return { kind: 'project', id, trust: 'trusted' }
+    return {
+      kind: source.kind === 'project-local' ? 'local' : 'project',
+      id,
+      trust: 'trusted',
+    }
   return { kind: 'project', id, trust: 'untrusted' }
 }
 

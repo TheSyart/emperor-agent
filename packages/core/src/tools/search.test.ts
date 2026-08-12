@@ -104,10 +104,13 @@ describe('GlobTool node-native traversal', () => {
     await put(root, '__pycache__/hidden.ts')
     await put(root, '.emperor/hidden.ts')
     await put(root, '.team/hidden.ts')
+    await put(root, 'bundle.asar/hidden.ts')
+    await put(root, 'bundle.asar.unpacked/visible.ts')
 
     const result = await glob(root, '**/*.ts')
 
     expect(result.split('\n').sort()).toEqual([
+      'bundle.asar.unpacked/visible.ts',
       'src/index.ts',
       'src/nested/value.ts',
     ])

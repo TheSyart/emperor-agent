@@ -39,18 +39,9 @@ const changeSummary = computed<ProgressChangeSummary | null>(() => {
 const summary = computed(() =>
   progressStatusText(props.progress || null, changeSummary.value),
 )
-/** 分段渲染:+/− 需要分别上色(stat-add 绿 / stat-del 红),二者空格相连 */
-const summarySegments = computed(() => {
-  const parts = progressStatusParts(props.progress || null, changeSummary.value)
-  const segments: { text: string; tone?: 'add' | 'del'; tight?: boolean }[] = []
-  if (parts.stepText) segments.push({ text: parts.stepText })
-  if (parts.changesText) segments.push({ text: parts.changesText })
-  if (parts.additions !== undefined)
-    segments.push({ text: `+${parts.additions}`, tone: 'add' })
-  if (parts.deletions !== undefined)
-    segments.push({ text: `−${parts.deletions}`, tone: 'del', tight: true })
-  return segments
-})
+const summaryParts = computed(() =>
+  progressStatusParts(props.progress || null, changeSummary.value),
+)
 
 function togglePinned(): void {
   pinned.value = !pinned.value
@@ -148,9 +139,9 @@ onBeforeUnmount(() => {
       >
         <FileDiff :size="14" aria-hidden="true" />
         <span>在 Review 中查看变更</span>
-        <span
-          ><b class="stat-add">+{{ changeSummary.additions }}</b>
-          <i class="stat-del">−{{ changeSummary.deletions }}</i></span
+        <span class="diff-stat-pair"
+          ><b class="stat-add">+{{ changeSummary.additions }}</b
+          >{{ ' ' }}<i class="stat-del">−{{ changeSummary.deletions }}</i></span
         >
       </button>
     </div>
@@ -165,18 +156,27 @@ onBeforeUnmount(() => {
     >
       <span class="composer-progress-live-dot" aria-hidden="true"></span>
       <span>
-        <template v-for="(segment, index) in summarySegments" :key="index">
-          <span v-if="index > 0">{{ segment.tight ? ' ' : ' · ' }}</span>
+        <span v-if="summaryParts.stepText">{{ summaryParts.stepText }}</span>
+        <template v-if="summaryParts.changesText">
+          <span v-if="summaryParts.stepText"> · </span>
+          <span>{{ summaryParts.changesText }}</span>
+        </template>
+        <template
+          v-if="
+            summaryParts.additions !== undefined &&
+            summaryParts.deletions !== undefined
+          "
+        >
           <span
-            :class="
-              segment.tone === 'add'
-                ? 'stat-add'
-                : segment.tone === 'del'
-                  ? 'stat-del'
-                  : ''
-            "
-            >{{ segment.text }}</span
+            v-if="summaryParts.stepText || summaryParts.changesText"
+            aria-hidden="true"
           >
+            ·
+          </span>
+          <span class="diff-stat-pair">
+            <b class="stat-add">+{{ summaryParts.additions }}</b
+            >{{ ' ' }}<i class="stat-del">−{{ summaryParts.deletions }}</i>
+          </span>
         </template>
       </span>
     </button>

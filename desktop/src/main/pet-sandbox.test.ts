@@ -23,8 +23,17 @@ describe('desktop pet renderer sandbox', () => {
     )
     expect(preloadSource).not.toContain('EMPEROR_AGENT_ROOT')
     expect(preloadSource).not.toContain('emperor:core:bootstrap')
+    expect(preloadSource).not.toContain('emperor:core:event')
     expect(preloadSource).not.toContain('emperor:pet:close')
     expect(preloadSource).toContain('emperor:pet:renderer-bootstrap')
     expect(preloadSource).toContain('emperor:pet:renderer-close')
+    expect(preloadSource).toContain('emperor:pet:event')
+    expect(mainSource).toContain('coreEventBridge.attachPet(win.webContents)')
+    expect(mainSource).toContain("win.webContents.on('render-process-gone'")
+    expect(mainSource).toContain("win.webContents.on('did-fail-load'")
+    expect(mainSource).toContain('PET_STATUS_CHANNEL')
+    expect(mainSource).not.toContain(
+      "coreEventBridge.attach(win.webContents)\n\n  win.on('closed'",
+    )
   })
 })

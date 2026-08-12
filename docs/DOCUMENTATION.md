@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、文档作者<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-08-12<br>
 > 事实源：仓库文档结构、`AGENTS.md`、`scripts/check.sh`、`scripts/check_public_docs.mjs`
 
 本规范解决三个问题：一份说明应该放在哪里，什么变化必须同步哪些文档，怎样判断文档可以合并。
@@ -39,19 +39,21 @@ Active 文档使用下面的四行状态头：
 
 ## 事实源映射
 
-| 变化                        | 首要事实源                                                               | 必须检查的文档                                               |
-| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| Slash command 或权限模式    | `packages/core/src/commands/`、CoreApi `commands.*`、permission pipeline | README、Chat/Build、Plan/Goal、Slash command 与 Control 架构 |
-| Chat / Build 会话语义       | Session、Project、ContextBuilder                                         | README、Chat/Build 手册、存储架构                            |
-| 模型 schema 或 Provider     | model config schema、Provider registry、模型面板                         | 首次使用、模型手册、示例配置                                 |
-| CoreApi operation           | CoreApi、IPC contract、renderer API                                      | 架构总览、IPC 文档、开发扩展指南                             |
-| ACP method / capability     | `packages/core/src/acp/`、官方 ACP schema、wire test                     | README、架构总览、Headless ACP 指南                          |
-| Runtime event               | Core event 类型、renderer reducer/handler                                | Agent runtime、IPC 文档、相关用户手册                        |
-| `stateRoot` 路径或迁移      | runtime paths、store、migration service                                  | README、数据手册、存储架构、AGENTS                           |
-| Goal 状态或 Gate            | Goal models、coordinator、Gate、renderer projection                      | README、Plan/Goal 手册、Goal 架构                            |
-| Scheduler、Team、Hooks、MCP | 对应 service/store/schema 和当前 renderer 路由                           | 自动化手册、工具扩展手册、能力成熟度                         |
-| Release workflow            | `.github/workflows/release*.yml` 与发布脚本                              | Preview/Stable 手册、安全说明、README                        |
-| 安全边界                    | IPC trust、permission、network/store policy                              | SECURITY、用户安全说明、架构文档                             |
+| 变化                        | 首要事实源                                                               | 必须检查的文档                                                                      |
+| --------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Slash command 或权限模式    | `packages/core/src/commands/`、CoreApi `commands.*`、permission pipeline | README、Chat/Build、Plan/Goal、Slash command 与 Control 架构                        |
+| Chat / Build 会话语义       | Session、Project、ContextBuilder                                         | README、Chat/Build 手册、存储架构                                                   |
+| 模型 schema 或 Provider     | model config schema、Provider registry、模型面板                         | 首次使用、模型手册、示例配置                                                        |
+| CoreApi operation           | CoreApi、IPC contract、renderer API                                      | 架构总览、IPC 文档、开发扩展指南                                                    |
+| Core package 导出           | `packages/core/src/public/`、`packages/core/package.json`                | 架构总览、Agent runtime、开发指南                                                   |
+| ACP method / capability     | `packages/core/src/acp/`、官方 ACP schema、wire test                     | README、架构总览、Headless ACP 指南                                                 |
+| Runtime event               | Core event 类型、renderer reducer/handler                                | Agent runtime、IPC 文档、相关用户手册                                               |
+| 调研证据与最终答复门禁      | Research Evidence Ledger、最终答复校验、ModelCaller reviewer             | README、Agent runtime、工具手册、诊断、安全政策、Changelog                          |
+| `stateRoot` 路径或迁移      | runtime paths、store、migration service                                  | README、数据手册、存储架构、AGENTS                                                  |
+| Goal 状态或 Gate            | Goal models、coordinator、Gate、renderer projection                      | README、Plan/Goal 手册、Goal 架构                                                   |
+| Scheduler、Team、Hooks、MCP | 对应 service/store/schema 和当前 renderer 路由                           | 自动化手册、工具扩展手册、[可选能力生命周期](architecture/optional-capabilities.md) |
+| Release workflow            | `.github/workflows/release*.yml` 与发布脚本                              | Preview/Stable 手册、安全说明、README                                               |
+| 安全边界                    | IPC trust、permission、network/store policy                              | SECURITY、用户安全说明、架构文档                                                    |
 
 ## 写作规则
 

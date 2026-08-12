@@ -5,8 +5,8 @@ import {
   GlobTool,
   GrepTool,
   writeJsonAtomic,
-  type CoreApi,
-} from '@emperor/core'
+} from '@emperor/core/host-capabilities'
+import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 
 export interface PackagedSmokeCore {

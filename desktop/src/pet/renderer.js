@@ -13,7 +13,6 @@ let bubbleTimer = null
 let idleSceneTimer = null
 let idleSceneIndex = 0
 let subagentCount = 0
-let assistantDraft = ''
 let pendingInteractionActive = false
 
 function assetUrl(animation) {
@@ -111,21 +110,16 @@ function updateBadge(delta) {
   }
 }
 
-function applyRuntimeEvent(event, options = {}) {
+function applyPetEvent(event) {
   if (!event || typeof event !== 'object') return
-  if (['ask_request', 'plan_draft', 'turn_paused'].includes(event.event)) {
+  if (event.type === 'attention' && event.kind === 'approval') {
     pendingInteractionActive = true
   }
-  if (
-    ['ask_answered', 'plan_approved', 'interaction_cancelled'].includes(
-      event.event,
-    )
-  ) {
+  if (event.type === 'attention' && event.kind !== 'approval') {
     pendingInteractionActive = false
     if (currentAnimation === 'notification') setAnimation('idle')
   }
-  if (event.event === 'user_message') assistantDraft = ''
-  const effect = mapper.mapRuntimeEvent(event)
+  const effect = mapper.mapPetEvent(event)
   if (!effect) return
   updateBadge(effect.subagentDelta)
   if (resetTimer) {
@@ -133,44 +127,19 @@ function applyRuntimeEvent(event, options = {}) {
     resetTimer = null
   }
   if (effect.animation) setAnimation(effect.animation)
-  let nextBubble = effect.bubble
-  if (effect.appendAssistantDelta) {
-    assistantDraft = `${assistantDraft}${event.delta || ''}`.slice(-600)
-    nextBubble = mapper.bubbleForContent(
-      '正在回复：',
-      assistantDraft,
-      effect.bubble || '正在回复。',
-    )
-  }
-  if (!options.replay && nextBubble) {
-    showBubble(nextBubble, effect.bubbleDurationMs ?? 3600)
-  }
-  if (!options.replay && effect.resetAfterMs) {
+  if (effect.bubble) showBubble(effect.bubble, effect.bubbleDurationMs ?? 3600)
+  if (effect.resetAfterMs) {
     resetTimer = setTimeout(() => {
       resetTimer = null
       setAnimation(subagentCount > 0 ? 'conducting' : 'idle')
     }, effect.resetAfterMs)
   }
-  if (event.event === 'assistant_done') assistantDraft = ''
 }
 
 async function loadBootstrap() {
   try {
     const boot = await cfg.readBootstrap?.()
-    for (const event of boot?.runtime?.events || []) {
-      applyRuntimeEvent(event, { replay: true })
-    }
-    const pending = boot?.control?.pending
-    if (pending) {
-      pendingInteractionActive = true
-      setAnimation('notification')
-      const kind = pending.kind === 'plan' ? 'plan_draft' : 'ask_request'
-      const pendingEffect = mapper.mapRuntimeEvent({
-        event: kind,
-        interaction: pending,
-      })
-      showBubble(pendingEffect?.bubble || '需要主人拍板。', 0)
-    }
+    if (boot?.event) applyPetEvent(boot.event)
   } catch {
     setAnimation('disconnected')
     showBubble('连接 Agent 事件失败，等待重试。', 4000)
@@ -181,25 +150,14 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(async () => {
     try {
-      const events = await cfg.readRuntimeEvents?.()
+      const events = await cfg.readPetEvents?.()
       if (currentAnimation === 'disconnected') {
         hideBubble()
         setAnimation('idle')
       }
-      for (const event of events || []) applyRuntimeEvent(event)
+      for (const event of events || []) applyPetEvent(event)
     } catch {
-      setAnimation('disconnected')
-      showBubble('读取本地事件失败，等待重试。', 4000)
-    }
-  }, 1000)
-
-  // Faster IPC poll for live events from the main process.
-  setInterval(async () => {
-    try {
-      const ipcEvents = await cfg.readIpcEvents?.()
-      for (const event of ipcEvents || []) applyRuntimeEvent(event)
-    } catch {
-      // IPC events are best-effort; the next bootstrap restores recent state.
+      applyPetEvent({ type: 'connection', online: false })
     }
   }, 200)
 }

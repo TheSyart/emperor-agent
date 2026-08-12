@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, rename, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
+  isPublicHttpRedirectResponse,
   NodePublicHttpTransport,
   PublicHttpClient,
   PublicHttpError,
@@ -9,7 +10,7 @@ import {
   type PublicHttpTransport,
   type PublicHttpTransportRequest,
   type PublicHttpTransportResponse,
-  type ResolvedAddress as PublicResolvedAddress,
+  type PublicHttpResolvedAddress as PublicResolvedAddress,
 } from '../network/public-http'
 import { EnvironmentError } from './errors'
 
@@ -53,7 +54,7 @@ export class NodeHttpsAssetDownloader implements AssetDownloader {
     const maxBytes = validateMaxBytes(request.maxBytes)
     let response: PublicHttpOpenedResponse
     try {
-      response = await this.client.open({
+      const opened = await this.client.open({
         url: request.url,
         protocols: ['https:'],
         maxBytes,
@@ -63,6 +64,9 @@ export class NodeHttpsAssetDownloader implements AssetDownloader {
           'user-agent': 'Emperor-Agent-Environment/1',
         },
       })
+      if (isPublicHttpRedirectResponse(opened))
+        throw new PublicHttpError('invalid_response')
+      response = opened
     } catch (cause) {
       throw mapDownloadError(cause, request.signal)
     }

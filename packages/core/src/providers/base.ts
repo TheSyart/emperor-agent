@@ -5,8 +5,7 @@ import {
 } from '../model/profile'
 
 /**
- * Provider 基类 + 类型 + 工具/消息转换 (MIG-PROV-001)。
- * 对齐 Python `agent/providers/base.py`。chat/chatStream 在 TS 下原生 async（无需 run_sync）。
+ * Provider 基类 + 类型 + 工具/消息转换。chat/chatStream 使用原生 async。
  */
 
 /** SDK 层禁止隐式重试；SamplingCoordinator 是唯一 attempt budget owner。 */

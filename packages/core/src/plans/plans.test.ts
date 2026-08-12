@@ -9,7 +9,13 @@
  * 注: 经 ControlManager/ProposePlanTool 的集成断言在 control.test.ts。
  */
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  statSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PlanStore, PlanStoreConflictError } from './store'
@@ -28,6 +34,7 @@ import {
   planToDict,
   type PlanRecord,
 } from './models'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -577,6 +584,40 @@ describe('PlanStore (test_plan_store.py)', () => {
         f.startsWith('index.json.corrupt-'),
       ),
     ).toBe(true)
+  })
+
+  it('preserves the previous Plan index when durable rename fails', () => {
+    const root = tmp('emperor-plan-persistence-failure-')
+    const healthy = new PlanStore(root)
+    healthy.save(samplePlan())
+    const before = readFileSync(healthy.indexFile, 'utf8')
+    const failing = new PlanStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() =>
+      failing.save(
+        makePlanRecord({
+          id: 'plan_2',
+          title: 'Second plan',
+          summary: 'Must not replace the last good snapshot.',
+          status: PlanStatus.DRAFT,
+          createdAt: 2,
+          updatedAt: 2,
+        }),
+      ),
+    ).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.indexFile, 'utf8')).toBe(before)
+    expect(statSync(healthy.indexFile).mode & 0o777).toBe(0o600)
+    expect(
+      readdirSync(healthy.planDir).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 
   it('writes index.json keyed by plan id (disk-format compat)', () => {

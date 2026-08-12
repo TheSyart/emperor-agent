@@ -2,12 +2,14 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 import {
   HybridMemoryDerivedIndexStore,
   chunkHybridMemoryDocuments,
@@ -87,12 +89,42 @@ describe('hybrid memory derived index', () => {
     writeFileSync(store.indexPath, '{truncated', 'utf8')
 
     const loaded = store.load()
-    const rebuilt = store.sync([source])
 
     expect(loaded).toMatchObject({ status: 'corrupt', chunks: [] })
+    expect(existsSync(store.indexPath)).toBe(false)
+    expect(
+      readdirSync(store.indexDir).some((name) =>
+        name.startsWith('index.v1.json.corrupt-'),
+      ),
+    ).toBe(true)
+    const rebuilt = store.sync([source])
     expect(rebuilt.changed).toBe(true)
     expect(rebuilt.chunks[0]!.text).toContain('SAFE-99')
     expect(readFileSync(source.path, 'utf8')).toBe(source.content)
+  })
+
+  it('preserves the previous derivative when durable rename fails', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-hybrid-failure-'))
+    const first = doc('global', '## Fact\n\nFirst value.', root)
+    const healthy = new HybridMemoryDerivedIndexStore(root)
+    healthy.sync([first])
+    const before = readFileSync(healthy.indexPath, 'utf8')
+    const second = { ...first, content: '## Fact\n\nSecond value.' }
+    const failing = new HybridMemoryDerivedIndexStore(root, {
+      persistenceAdapter: createNodeSyncPersistenceAdapter({
+        beforeOperation(operation) {
+          if (operation === 'rename') throw new Error('injected rename')
+        },
+      }),
+    })
+
+    expect(() => failing.sync([second])).toThrow(
+      expect.objectContaining({ code: 'persistence_io', operation: 'rename' }),
+    )
+    expect(readFileSync(healthy.indexPath, 'utf8')).toBe(before)
+    expect(
+      readdirSync(healthy.indexDir).filter((name) => name.includes('.tmp-')),
+    ).toEqual([])
   })
 })
 

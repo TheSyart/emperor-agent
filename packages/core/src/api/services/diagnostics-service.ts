@@ -24,6 +24,10 @@ import type { ExtensionSnapshot } from '../../extensions/resolver'
 import type { EffectiveConfigSnapshot } from '../../config/resolver'
 import type { HybridMemoryServiceDiagnostics } from '../../memory/hybrid-service'
 import type { CodeIntelligenceServiceDiagnostics } from '../../code-intelligence/service'
+import {
+  optionalCapabilityPortfolio,
+  type OptionalCapabilityPortfolioEntry,
+} from '../../capabilities/portfolio'
 
 type Dict = Record<string, unknown>
 
@@ -46,6 +50,7 @@ export interface CoreDiagnosticsServiceDeps {
   subagents?: () => SubagentSupervisorSnapshot
   agentDefinitions?: () => ExtensionSnapshot
   effectiveConfig?: () => Promise<EffectiveConfigSnapshot>
+  commandCatalog?: () => Dict
   hybridMemory?: () => HybridMemoryServiceDiagnostics
   codeIntelligence?: () => CodeIntelligenceServiceDiagnostics
   mcp?: () => MCPClientSnapshot
@@ -55,6 +60,7 @@ export interface CoreDiagnosticsServiceDeps {
     Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
   environmentSummary?: () => Dict | Promise<Dict>
   goalDiagnostics?: () => Dict | Promise<Dict>
+  externalToolConfig?: () => Dict
 }
 
 export interface CoreDiagnosticsPayload {
@@ -73,6 +79,7 @@ export interface CoreDiagnosticsPayload {
   subagents: SubagentSupervisorSnapshot | Dict
   agentDefinitions: ExtensionSnapshot | Dict
   effectiveConfig: EffectiveConfigSnapshot | Dict
+  commandCatalog: Dict
   hybridMemory: HybridMemoryServiceDiagnostics | Dict
   codeIntelligence: CodeIntelligenceServiceDiagnostics | Dict
   mcp: MCPClientSnapshot
@@ -83,6 +90,8 @@ export interface CoreDiagnosticsPayload {
   environment: Dict
   goals: Dict
   dependencies: Dict
+  optionalCapabilities: OptionalCapabilityPortfolioEntry[]
+  externalToolConfig: Dict
 }
 
 export class CoreDiagnosticsService {
@@ -111,6 +120,7 @@ export class CoreDiagnosticsService {
       subagents: this.deps.subagents?.() ?? {},
       agentDefinitions: this.deps.agentDefinitions?.() ?? {},
       effectiveConfig: await this.effectiveConfigPayload(),
+      commandCatalog: this.commandCatalogPayload(),
       hybridMemory: this.deps.hybridMemory?.() ?? {},
       codeIntelligence: this.deps.codeIntelligence?.() ?? {},
       mcp: this.deps.mcp?.() ?? {
@@ -119,6 +129,7 @@ export class CoreDiagnosticsService {
         ready: 0,
         configured: 0,
         tools: 0,
+        toolCapabilities: [],
       },
       promptSnapshots: this.promptSnapshotsPayload(),
       activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
@@ -127,11 +138,15 @@ export class CoreDiagnosticsService {
       environment: await this.environmentSummaryPayload(),
       goals: await this.goalDiagnosticsPayload(),
       dependencies: this.dependencies(),
+      optionalCapabilities: optionalCapabilityPortfolio(),
+      externalToolConfig: this.deps.externalToolConfig?.() ?? {},
     }
   }
 
   async modelConfig(): Promise<Dict> {
-    const path = join(this.configRoot(), 'model_config.json')
+    const path =
+      this.deps.runtimePaths?.modelConfigFile ??
+      join(this.configRoot(), 'model_config.json')
     const exists = existsSync(path)
     const payload: Dict = {
       path,
@@ -166,7 +181,7 @@ export class CoreDiagnosticsService {
     }
   }
 
-  /** `emperor.local.json`/`model_config.json` now live under `stateRoot`, not `runtimeRoot`.
+  /** `settings.json`/`model_config.json` live under Emperor Home, not `runtimeRoot`.
    * Falls back to `this.root` when no `runtimePaths` dep is supplied (simple unit tests). */
   private configRoot(): string {
     return this.deps.runtimePaths?.stateRoot ?? this.root
@@ -195,9 +210,11 @@ export class CoreDiagnosticsService {
   private pathsPayload(): Dict {
     const paths = this.deps.runtimePaths
     if (!paths) return { runtimeRoot: this.root, stateRoot: this.root }
+    const { pathCatalog, ...runtimePaths } = paths
     return {
-      ...paths,
-      mcpConfigPath: join(paths.stateRoot, 'mcp_config.json'),
+      ...runtimePaths,
+      catalog: pathCatalog.list(),
+      mcpConfigPath: paths.mcpConfigFile,
       runtimeManifestPath: join(paths.runtimeRoot, RUNTIME_MANIFEST_FILE),
       legacyRuntimeSkillsReceiptPath: join(
         paths.stateRoot,
@@ -239,6 +256,20 @@ export class CoreDiagnosticsService {
       return await this.deps.effectiveConfig()
     } catch (error) {
       return { status: 'unavailable', error: toSafeError(error), entries: [] }
+    }
+  }
+
+  private commandCatalogPayload(): Dict {
+    if (!this.deps.commandCatalog) return {}
+    try {
+      return this.deps.commandCatalog()
+    } catch (error) {
+      return {
+        status: 'unavailable',
+        error: toSafeError(error),
+        registeredSkills: 0,
+        conflicts: [],
+      }
     }
   }
 }

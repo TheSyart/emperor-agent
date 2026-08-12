@@ -1,7 +1,7 @@
 import { EmperorError } from '../errors'
 
 /**
- * 控制流异常 (MIG-CTRL-011)。对齐 Python `agent/control/exceptions.py`。
+ * 控制流异常。
  * TurnPaused: 暂停当前回合，携带 interaction + tool_messages。
  */
 export class PlanGenerationFailedError extends EmperorError {

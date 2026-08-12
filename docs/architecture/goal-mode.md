@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Goal 与 Agent runtime 开发者<br>
-> 最后核验：2026-07-17<br>
+> 最后核验：2026-08-12<br>
 > 事实源：`packages/core/src/goals/`、`packages/core/src/agent/goal-*`、Goal CoreApi 与 renderer runtime projection
 
 Goal 模式是 Emperor Agent 的 TypeScript-only 长任务执行能力。它把“持续推进一个结果”建模为独立于单次模型回合的持久状态机，并复用现有 Session、Plan、Ask、权限、工具与 runtime event 链路。它不是 Python 教学实现的运行时移植，也不会启动 Python、HTTP 或 WebSocket fallback。
@@ -11,7 +11,7 @@ Goal 模式是 Emperor Agent 的 TypeScript-only 长任务执行能力。它把�
 
 - 在 Chat 或 Build 会话输入 `/goal <outcome>` 可以直接创建 Goal；草稿会话会先经 CoreApi 原子 materialize，再创建 Goal。
 - 从 Composer 的 `/` 菜单选择 Goal，或输入裸 `/goal`，会先建立 renderer 内存中的会话级 Goal capture 投影。下一条纯文字才会作为 Outcome 调用 `goals.start`。该投影不属于 Goal Store，切换会话或重启应用时清除；启动失败则回到待输入状态。
-- `/goal status` 查看当前 Goal，`/goals` 查看当前会话最近 Goal；`/goal pause` / `/goal-pause`、`/goal resume` / `/goal-resume`、`/goal cancel` / `/goal-cancel` 分别暂停、恢复和取消当前 Goal。
+- `/goal status` 查看当前 Goal，`/goal list` 查看当前会话最近 Goal；`/goal pause`、`/goal resume`、`/goal cancel` 分别暂停、恢复和取消当前 Goal。旧 `/goals` 与连字符别名不再解析。
 - 桌面端 Project Execution 面板展示 Outcome、状态/阶段、cycle、当前 Plan、验收汇总、最近 evidence/Gate 结果及合法操作。
 - Composer 上方展示非终态 Goal 的紧凑状态条。权限选择器右侧只有一个顶层生命周期标识；Goal 存续时始终显示 Goal，内部 planning 只体现在状态条，不额外显示 Plan。标识的快捷关闭在 Agent 运行期间不可用，Goal 暂停或等待用户时可调用现有 `goals.cancel`。Outcome 编辑调用 `goals.replace`：校验 owner session 和新 Outcome 后终止旧 Goal，再创建带 `supersedesGoalId` 的替代 Goal；旧 ledger 不会被改写。
 - 每个 session 最多有一个非终态 Goal。Goal 只能读取或修改所属 session；跨 session 的 `get`、`resume` 等操作由 Core 拒绝。
@@ -96,7 +96,7 @@ Manual/reviewer/blocker 不是只存在于测试夹具里的 resolver：Coordina
 
 ## 磁盘布局
 
-所有 Goal 数据都在全局私有 `stateRoot`（默认 `~/.emperor-agent`），不会写入项目源码目录：
+所有 Goal 数据都在全局私有 Emperor Home（内部兼容名 `stateRoot`，默认 `~/.emperor`），不会写入项目源码目录：
 
 ```text
 stateRoot/goals/
@@ -152,6 +152,6 @@ Renderer 对 live、replay 和 bootstrap 使用同一 reducer；按 `last_event_
 2. `post-commit-diagnostics.jsonl`：Plan token、active run、pending interaction 或 runtime event 等终态后清理失败。
 3. `mutation-guard-recovery.jsonl` 与 cleanup claims/acks：崩溃后的 mutation owner、claim 接管和重试轨迹。
 4. Session `runtime/events.jsonl`：桌面卡片缺失或 live/replay 不一致时核对 Goal 事件 seq；事件只用于 UI 投影，不能替代 Goal ledger。
-5. `CoreApi.goals.list/get` 与 `/goals`：确认当前 session 的 Store 摘要；如果 phase 为 `paused` 且 reason 为 `recovery_required` 或 `scope_mismatch`，先修复 workspace/session 绑定，再显式 Resume。
+5. `CoreApi.goals.list/get` 与 `/goal list`：确认当前 session 的 Store 摘要；如果 phase 为 `paused` 且 reason 为 `recovery_required` 或 `scope_mismatch`，先修复 workspace/session 绑定，再显式 Resume。
 
 不要手工编辑 Goal JSONL、snapshot、Gate fact 或 cleanup 文件，也不要通过删除 diagnostics 强制继续。需要隔离损坏数据时保留整个 `stateRoot/goals/<goal-id>` 目录供审计；当前版本不提供把损坏 Goal 隐式转换成普通 Chat 的回退路径。

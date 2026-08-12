@@ -20,7 +20,7 @@
         "requiredSections": ["结论", "证据", "风险", "建议下一步"]
       },
       "sandbox": {
-        "filesystem": "workspace-write",
+        "filesystem": "read-only",
         "network": "deny",
         "process": "policy"
       },
@@ -34,7 +34,7 @@
       "prompt": "sili_suitang.md",
       "model": { "inherit": true, "allowedProfiles": [] },
       "tools": {
-        "allow": ["load_skill", "read_file", "glob", "grep"]
+        "allow": ["Skill", "read_file", "glob", "grep"]
       },
       "skills": { "allow": ["*"] },
       "hooks": { "allow": ["SubagentStart", "SubagentStop"] },
@@ -62,7 +62,7 @@
         "allow": [
           "run_command",
           "web_fetch",
-          "load_skill",
+          "Skill",
           "read_file",
           "glob",
           "grep"
@@ -77,7 +77,7 @@
         "requiredSections": ["结论", "证据", "风险", "建议下一步"]
       },
       "sandbox": {
-        "filesystem": "workspace-write",
+        "filesystem": "read-only",
         "network": "policy",
         "process": "policy"
       },
@@ -144,7 +144,7 @@
         "allow": [
           "run_command",
           "web_fetch",
-          "load_skill",
+          "Skill",
           "read_file",
           "write_file",
           "edit_file",

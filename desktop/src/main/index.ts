@@ -12,7 +12,12 @@ import {
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { CoreApi } from '@emperor/core'
+import type { CoreApi } from '@emperor/core/api'
+import {
+  bootstrapEmperorHome,
+  legacyDefaultStateRoot,
+  loadBundledToolCatalog,
+} from '@emperor/core/host-capabilities'
 
 import { resolveConfig } from './config'
 import { resolveAppIconPath } from './icon'
@@ -40,7 +45,23 @@ import {
 import { mainWindowWebPreferences } from './window-security'
 import { NodePtyHost } from './terminal-host'
 import { TerminalEventBridge } from './terminal-event-bridge'
-import { TERMINAL_SUBSCRIPTION_CHANNEL } from '../shared/ipc-contract'
+import { PreviewViewHost } from './preview-view'
+import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
+import {
+  createDesktopWebFetchClient,
+  type ElectronRequestLike,
+} from './public-http-client'
+import {
+  RECOVERY_ACTION_CHANNEL,
+  createRecoveryActionHandler,
+  createRecoveryHtml,
+  recoveryPayload,
+  recoveryWindowWebPreferences,
+} from './recovery'
+import {
+  PET_STATUS_CHANNEL,
+  TERMINAL_SUBSCRIPTION_CHANNEL,
+} from '../shared/ipc-contract'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
@@ -60,7 +81,10 @@ const coreEventBridge = new CoreEventBridge()
 const terminalEventBridge = new TerminalEventBridge()
 let runtimeReady = false
 let mainWindow: BrowserWindow | null = null
+let recoveryWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
+let petLastError: string | null = null
+let previewViewHost: PreviewViewHost | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://bundle/index.html',
@@ -147,36 +171,54 @@ ipcMain.handle('emperor:pet:open', async (event) => {
     return { open: true }
   }
   if (!runtimeReady) return { open: false, error: 'core not ready' }
-  createPetWindow()
-  return { open: true }
+  try {
+    petLastError = null
+    createPetWindow()
+    return petStatus()
+  } catch (error) {
+    petLastError = errMessage(error)
+    emitPetStatus()
+    return petStatus()
+  }
 })
 
 ipcMain.handle('emperor:pet:close', async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
+  petLastError = null
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.close()
   }
-  return { open: false }
+  return petStatus()
 })
 
 ipcMain.handle('emperor:pet:status', async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
-  const open = petWindow !== null && !petWindow.isDestroyed()
-  return { open }
+  return petStatus()
 })
 
 ipcMain.handle('emperor:pet:renderer-bootstrap', async (event) => {
   trustedPetPolicy.authorizeIpc(event)
-  if (!coreApi) throw new Error('core not ready')
-  const boot = await coreApi.bootstrap()
-  return { runtime: boot.runtime, control: boot.control }
+  return { event: { type: 'connection', online: runtimeReady } }
 })
 
 ipcMain.handle('emperor:pet:renderer-close', async (event) => {
   trustedPetPolicy.authorizeIpc(event)
+  petLastError = null
   if (petWindow && !petWindow.isDestroyed()) petWindow.close()
-  return { open: false }
+  return petStatus()
 })
+
+function petStatus(): { open: boolean; error: string | null } {
+  return {
+    open: petWindow !== null && !petWindow.isDestroyed(),
+    error: petLastError,
+  }
+}
+
+function emitPetStatus(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(PET_STATUS_CHANNEL, petStatus())
+}
 
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -200,6 +242,14 @@ function prepareMainRuntime(): void {
       userDataPath: app.getPath('userData'),
       stateRoot: config.stateRoot,
       appVersion: app.getVersion(),
+      stateRootSource:
+        config.stateRootSource === 'default'
+          ? 'default'
+          : config.stateRootSource === 'env'
+            ? 'env'
+            : 'explicit',
+      legacyStateRoot:
+        config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
     })
     legacyRuntimeRoot = prepared.legacyRuntimeRoot
     packagedRuntimeRevision = prepared.manifest.runtimeRevision
@@ -207,9 +257,25 @@ function prepareMainRuntime(): void {
   }
   config = resolveConfig({ argv: mainArgv, env: process.env })
   legacyRuntimeRoot = config.runtimeRoot
+  loadBundledToolCatalog()
+  bootstrapEmperorHome({
+    emperorHome: config.stateRoot,
+    source:
+      config.stateRootSource === 'default'
+        ? 'default'
+        : config.stateRootSource === 'env'
+          ? 'env'
+          : 'explicit',
+    legacyHome:
+      config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
+    appVersion: app.getVersion(),
+    runtimeRevision: 'development',
+  })
 }
 
 function closeCoreHost(): void {
+  previewViewHost?.close()
+  previewViewHost = null
   if (!coreApi) return
   const current = coreApi
   coreApi = null
@@ -221,6 +287,59 @@ function closeCoreHost(): void {
 function fail(title: string, message: string): void {
   dialog.showErrorBox(title, message)
   app.quit()
+}
+
+async function showBootstrapRecovery(error: unknown): Promise<void> {
+  runtimeReady = false
+  if (coreApi) await coreApi.close().catch(() => {})
+  coreApi = null
+  if (recoveryWindow && !recoveryWindow.isDestroyed()) recoveryWindow.close()
+  ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+  const legacyHome =
+    config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null
+  const payload = recoveryPayload(error, {
+    emperorHome: config.stateRoot,
+    legacyHome,
+  })
+  const win = new BrowserWindow({
+    width: 720,
+    height: 560,
+    minWidth: 560,
+    minHeight: 480,
+    title: 'Emperor Agent · Recovery',
+    icon: appIconPath,
+    backgroundColor: '#0c0c0e',
+    show: false,
+    webPreferences: recoveryWindowWebPreferences(mainDir),
+  })
+  recoveryWindow = win
+  win.webContents.on('will-navigate', (event) => event.preventDefault())
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const handle = createRecoveryActionHandler({
+    senderId: win.webContents.id,
+    emperorHome: payload.emperorHome,
+    legacyHome: payload.legacyHome,
+    retry: async () => {
+      ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+      if (!win.isDestroyed()) win.close()
+      recoveryWindow = null
+      await startup()
+    },
+    openPath: (target) => shell.openPath(target),
+    exit: () => app.quit(),
+  })
+  ipcMain.handle(RECOVERY_ACTION_CHANNEL, async (event, action: unknown) =>
+    handle(event.sender.id, action),
+  )
+  win.once('ready-to-show', () => win.show())
+  win.on('closed', () => {
+    if (recoveryWindow !== win) return
+    recoveryWindow = null
+    ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+  })
+  await win.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent(createRecoveryHtml(payload))}`,
+  )
 }
 
 function registerAppProtocol(): void {
@@ -296,6 +415,7 @@ function createWindow(): void {
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir),
   })
+  if (coreApi) previewViewHost = new PreviewViewHost(mainWindow, coreApi)
   coreEventBridge.attach(mainWindow.webContents)
   terminalEventBridge.attach(mainWindow.webContents)
   secureWindowNavigation(mainWindow, trustedRendererPolicy)
@@ -330,6 +450,8 @@ function createWindow(): void {
     }
   })
   mainWindow.on('closed', () => {
+    previewViewHost?.close()
+    previewViewHost = null
     if (mainWindow) coreEventBridge.detach(mainWindow.webContents)
     if (mainWindow) terminalEventBridge.detach(mainWindow.webContents)
     mainWindow = null
@@ -414,14 +536,26 @@ function createPetWindow(): void {
   petWindow = win
   secureWindowNavigation(win, trustedPetPolicy)
   win.loadURL('app://pet/renderer.html')
-  win.once('ready-to-show', () => win.showInactive())
+  win.once('ready-to-show', () => {
+    petLastError = null
+    win.showInactive()
+    emitPetStatus()
+  })
 
-  // Wire pet into core event bridge so it receives live runtime events.
-  coreEventBridge.attach(win.webContents)
+  coreEventBridge.attachPet(win.webContents)
 
   win.on('closed', () => {
-    coreEventBridge.detach(win.webContents)
+    coreEventBridge.detachPet(win.webContents)
     petWindow = null
+    emitPetStatus()
+  })
+  win.webContents.on('did-fail-load', (_event, code, description) => {
+    petLastError = `load failed (${code}): ${description}`
+    if (!win.isDestroyed()) win.close()
+  })
+  win.webContents.on('render-process-gone', (_event, details) => {
+    petLastError = `renderer stopped: ${details.reason}`
+    if (!win.isDestroyed()) win.close()
   })
 
   let saveTimer: NodeJS.Timeout | null = null
@@ -452,16 +586,48 @@ async function startup(): Promise<void> {
       eventBridge: coreEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        surface: 'desktop',
         appVersion: app.getVersion(),
         ...(packagedRuntimeRevision
           ? { runtimeRevision: packagedRuntimeRevision }
           : {}),
         stateRoot: config.stateRoot,
+        emperorHomePrepared: true,
+        stateRootSource:
+          config.stateRootSource === 'default'
+            ? 'default'
+            : config.stateRootSource === 'env'
+              ? 'env'
+              : 'explicit',
         legacyRuntimeRoot: app.isPackaged ? legacyRuntimeRoot : null,
         legacyRuntimeSkillsHandled: app.isPackaged,
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
+        webFetchClient: createDesktopWebFetchClient({
+          resolveProxy: async (url) => await app.resolveProxy(url),
+          request: (options) =>
+            net.request(options) as unknown as ElectronRequestLike,
+        }),
       },
+    })
+    registerDesktopCapabilityIpc({
+      ipcMain,
+      authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+      preview: {
+        open: (input) => requirePreviewViewHost().open(input),
+        openExternal: (input) => requirePreviewViewHost().openExternal(input),
+        setBounds: (bounds) => requirePreviewViewHost().setBounds(bounds),
+        action: (action) => requirePreviewViewHost().action(action),
+        close: () => previewViewHost?.close(),
+      },
+      references: {
+        revealPath: (input) => {
+          if (!coreApi) throw new Error('core not ready')
+          return coreApi.references.revealPath(input)
+        },
+      },
+      showItemInFolder: (target) => shell.showItemInFolder(target),
+      openExternal: (url) => shell.openExternal(url),
     })
     registerAppProtocol()
     if (packagedSmoke) {
@@ -513,7 +679,7 @@ async function startup(): Promise<void> {
       app.exit(1)
       return
     }
-    fail('CoreApi 初始化失败', errMessage(err))
+    await showBootstrapRecovery(err)
     return
   }
   runtimeReady = true
@@ -524,6 +690,10 @@ async function startup(): Promise<void> {
 app.whenReady().then(startup)
 
 app.on('activate', () => {
+  if (recoveryWindow && !recoveryWindow.isDestroyed()) {
+    recoveryWindow.show()
+    return
+  }
   if (BrowserWindow.getAllWindows().length === 0 && runtimeReady) createWindow()
 })
 
@@ -534,5 +704,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
   closeCoreHost()
 })
+
+function requirePreviewViewHost(): PreviewViewHost {
+  if (!previewViewHost) throw new Error('preview host is not ready')
+  return previewViewHost
+}

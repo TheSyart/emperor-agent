@@ -7,10 +7,12 @@ import { createHash } from 'node:crypto'
  */
 export const CONFIG_LAYER_PRECEDENCE = {
   builtin: 100,
+  plugin: 200,
   user: 300,
   project: 400,
-  session: 450,
-  managed: 500,
+  local: 450,
+  session: 500,
+  managed: 600,
 } as const
 
 export type ConfigLayerKind = keyof typeof CONFIG_LAYER_PRECEDENCE
@@ -143,7 +145,8 @@ export class ConfigResolver {
         continue
       }
       const untrustedProject =
-        candidate.source.kind === 'project' &&
+        (candidate.source.kind === 'project' ||
+          candidate.source.kind === 'local') &&
         candidate.source.trust === 'untrusted'
       if (untrustedProject && !key.restrictUntrustedProject) {
         trace.push(
@@ -318,7 +321,11 @@ function invalidSourceReason(source: ConfigSource): string | null {
     return 'managed_source_not_verified'
   if (source.kind !== 'managed' && source.trust === 'managed')
     return 'managed_trust_kind_mismatch'
-  if (source.trust === 'untrusted' && source.kind !== 'project')
+  if (
+    source.trust === 'untrusted' &&
+    source.kind !== 'project' &&
+    source.kind !== 'local'
+  )
     return 'untrusted_source_not_allowed'
   return null
 }

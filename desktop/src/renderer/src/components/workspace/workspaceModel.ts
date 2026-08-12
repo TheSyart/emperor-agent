@@ -1,4 +1,4 @@
-import type { GitFileStatus } from '@emperor/core'
+import type { GitFileStatus } from '@emperor/core/api'
 
 export type WorkspacePaneId =
   'launcher' | 'review' | 'terminal' | 'files' | 'browser'

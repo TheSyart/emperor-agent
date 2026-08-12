@@ -1,6 +1,5 @@
 /**
- * 工具参数 schema (MIG-TOOL-001)。
- * 对齐 Python `agent/tools/schema.py`：StringSchema/IntegerSchema/… + tool_parameters_schema。
+ * 工具参数 schema：StringSchema/IntegerSchema/… + toolParamsSchema。
  */
 export interface StringSchema {
   type: 'string'

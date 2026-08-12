@@ -21,6 +21,20 @@ export interface MCPClientSnapshot {
   readonly ready: number
   readonly configured: number
   readonly tools: number
+  readonly toolCapabilities: MCPToolCapabilitySnapshot[]
+}
+
+export interface MCPToolCapabilitySnapshot {
+  readonly name: string
+  readonly serverName: string
+  readonly toolName: string
+  readonly readOnly: boolean
+  readonly exclusive: boolean
+  readonly evidencePolicy: 'context_only'
+  readonly readOnlySource: string
+  readonly exclusiveSource: string
+  readonly generation: number | null
+  readonly clientId: string | null
 }
 
 export interface MCPClientOptions {
@@ -138,6 +152,7 @@ export class MCPClient {
       const discovered = await conn.listTools()
       for (const tool of discovered) {
         const overrides = effectiveConfig.tool_overrides[tool.name] ?? {}
+        const connectionSnapshot = conn.snapshot()
         this.tools.push(
           new MCPToolAdapter({
             serverName: server.name,
@@ -149,6 +164,7 @@ export class MCPClient {
               required: [],
             },
             connection: conn,
+            transport: effectiveConfig.transport,
             readOnly: booleanOption(
               overrides.read_only,
               defaults.read_only,
@@ -159,6 +175,18 @@ export class MCPClient {
               defaults.exclusive,
               false,
             ),
+            readOnlySource: booleanOptionSource(
+              overrides.read_only,
+              defaults.read_only,
+              'fallback_write',
+            ),
+            exclusiveSource: booleanOptionSource(
+              overrides.exclusive,
+              defaults.exclusive,
+              'fallback_serialized',
+            ),
+            generation: connectionSnapshot.generation || null,
+            clientId: connectionSnapshot.clientId,
             maxResultChars: positiveInt(
               overrides.max_result_chars ?? defaults.max_result_chars,
             ),
@@ -190,12 +218,41 @@ export class MCPClient {
     const servers = [...this.connections.values()]
       .map((connection) => connection.snapshot())
       .sort((left, right) => left.serverName.localeCompare(right.serverName))
+    const serverByName = new Map(
+      servers.map((server) => [server.serverName, server]),
+    )
+    const toolCapabilities = this.tools
+      .map((tool): MCPToolCapabilitySnapshot => {
+        const descriptor = tool.capabilityDescriptor()
+        const provenance = descriptor.provenance
+        const server = serverByName.get(tool.mcpServerName)
+        return {
+          name: tool.name,
+          serverName: tool.mcpServerName,
+          toolName: tool.mcpToolName,
+          readOnly: tool.readOnly,
+          exclusive: tool.exclusive,
+          evidencePolicy: 'context_only',
+          readOnlySource:
+            provenance.kind === 'mcp_declaration'
+              ? provenance.readOnlySource
+              : 'fallback_write',
+          exclusiveSource:
+            provenance.kind === 'mcp_declaration'
+              ? provenance.exclusiveSource
+              : 'fallback_serialized',
+          generation: server?.generation ?? null,
+          clientId: server?.clientId ?? null,
+        }
+      })
+      .sort((left, right) => left.name.localeCompare(right.name))
     return {
       initialized: this.initialized,
       servers,
       ready: servers.filter((server) => server.state === 'ready').length,
       configured,
       tools: this.tools.length,
+      toolCapabilities,
     }
   }
 
@@ -269,6 +326,18 @@ function booleanOption(
   if (typeof value === 'boolean') return value
   if (typeof fallback === 'boolean') return fallback
   return defaultValue
+}
+
+function booleanOptionSource<
+  T extends 'fallback_write' | 'fallback_serialized',
+>(
+  value: unknown,
+  fallback: unknown,
+  defaultSource: T,
+): 'tool_override' | 'config_default' | T {
+  if (typeof value === 'boolean') return 'tool_override'
+  if (typeof fallback === 'boolean') return 'config_default'
+  return defaultSource
 }
 
 function positiveInt(value: unknown): number | null {

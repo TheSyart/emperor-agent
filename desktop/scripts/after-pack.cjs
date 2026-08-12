@@ -11,6 +11,7 @@ const { validateRuntimeManifest } = require('./before-pack.cjs')
 const {
   validatePetPreloadSource,
   validatePreloadSource,
+  validateRecoveryPreloadSource,
 } = require('./audit-preload.cjs')
 
 const PET_RESOURCE_FILES = [
@@ -63,6 +64,7 @@ function validatePackagedAppResources(
   const required = [
     '/out/main/index.js',
     '/out/preload/index.cjs',
+    '/out/preload/recovery.cjs',
     '/out/renderer/index.html',
     '/package.json',
     '/node_modules/typescript/package.json',
@@ -99,6 +101,9 @@ function validatePackagedAppResources(
   if (packageJson?.main !== 'out/main/index.js')
     throw new Error('packaged app main entry is invalid')
   validatePreloadSource(extractFile(asarPath, 'out/preload/index.cjs'))
+  validateRecoveryPreloadSource(
+    extractFile(asarPath, 'out/preload/recovery.cjs'),
+  )
   const typescriptPackage = JSON.parse(
     extractFile(asarPath, 'node_modules/typescript/package.json').toString(
       'utf8',

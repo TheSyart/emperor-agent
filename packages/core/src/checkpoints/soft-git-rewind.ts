@@ -1101,13 +1101,16 @@ export class SoftGitRewindService {
       maxOutputBytes: MAX_GIT_OUTPUT_BYTES,
       outputPolicy: 'terminate',
       outputQuotaScope: 'combined',
-      containment: {
-        mode: 'required',
-        workspaceRoot: workspace,
-        stateRoot: null,
-        tempRoot: scratchRoot,
-        readOnlyRoots: [dirname(runtime.executable)],
-        network: 'deny',
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'required',
+          workspaceRoot: workspace,
+          stateRoot: null,
+          tempRoot: scratchRoot,
+          readOnlyRoots: [dirname(runtime.executable)],
+          network: 'deny',
+        },
       },
       owner: {
         kind: 'session',

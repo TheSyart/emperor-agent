@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -53,6 +54,26 @@ function receipt(): EnvironmentReceipt {
 }
 
 describe('EnvironmentStore', () => {
+  it('initializes only bootstrap managed roots and leaves tool/data roots lazy', () => {
+    const store = new EnvironmentStore(root())
+
+    store.initialize()
+
+    expect(store.paths).toMatchObject({
+      bin: join(store.paths.root, 'bin'),
+      tools: join(store.paths.root, 'tools'),
+      data: join(store.paths.root, 'data'),
+      registry: join(store.paths.root, 'registry.v1.json'),
+    })
+    expect(lstatSync(store.paths.bin).isDirectory()).toBe(true)
+    expect(existsSync(store.paths.tools)).toBe(false)
+    expect(existsSync(store.paths.data)).toBe(false)
+    expect(JSON.parse(readFileSync(store.paths.registry, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      tools: {},
+    })
+  })
+
   it('atomically writes and strictly reads jobs and receipts', async () => {
     const store = new EnvironmentStore(root(), {
       now: () => '2026-07-11T00:00:00.000Z',

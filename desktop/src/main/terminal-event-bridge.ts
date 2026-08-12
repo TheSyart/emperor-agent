@@ -1,4 +1,4 @@
-import type { TerminalEvent } from '@emperor/core'
+import type { TerminalEvent } from '@emperor/core/api'
 import { TERMINAL_EVENT_CHANNEL } from '../shared/ipc-contract'
 import type { WebContentsLike } from './event-bridge'
 

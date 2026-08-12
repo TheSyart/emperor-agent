@@ -6,14 +6,17 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import { TaskRecord } from './models'
 import { GoalGateMutationLedger } from '../goals/mutation-ledger'
 import type { GoalMutationLease } from '../goals/mutation-guard'
+import {
+  AtomicSnapshotSync,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 const GOAL_REVIEWER_SOURCE = 'goal_reviewer_dispatch'
@@ -44,10 +47,15 @@ export class TaskStore {
   readonly maxTerminal: number
   private readonly goalMutations: GoalGateMutationLedger
   private readonly reviewerCapability: object | null
+  private readonly persistenceAdapter?: SyncPersistenceAdapter
 
   constructor(
     root: string,
-    opts: { maxTerminal?: number; reviewerCapability?: object | null } = {},
+    opts: {
+      maxTerminal?: number
+      reviewerCapability?: object | null
+      persistenceAdapter?: SyncPersistenceAdapter
+    } = {},
   ) {
     this.root = root
     this.tasksDir = join(root, 'tasks')
@@ -55,6 +63,7 @@ export class TaskStore {
     this.archiveDir = join(this.tasksDir, 'archive')
     this.maxTerminal = Math.max(1, Math.trunc(opts.maxTerminal ?? 500))
     this.reviewerCapability = opts.reviewerCapability ?? null
+    this.persistenceAdapter = opts.persistenceAdapter
     this.goalMutations = new GoalGateMutationLedger(this.root)
     if (!existsSync(this.indexFile))
       this.goalMutations.withSynchronousMutation(
@@ -379,37 +388,31 @@ export class TaskStore {
   }
 
   private read(path: string, lease: GoalMutationLease): Record<string, any> {
-    try {
-      const raw = JSON.parse(readFileSync(path, 'utf8') || '{}')
-      return isObject(raw) ? raw : {}
-    } catch (error) {
-      if (existsSync(path)) {
-        this.goalMutations.recordUnderLease(
-          lease,
-          'task',
-          `task-store:recover:${basename(path)}:${Date.now()}`,
-        )
-        const corrupt = `${path}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`
-        try {
-          renameSync(path, corrupt)
-        } catch {
-          /* ignore */
-        }
-        this.write(path, {})
-      }
-      void error
-      return {}
+    const loaded = this.snapshot(path).read({ fallback: {} })
+    if (loaded.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
+      this.goalMutations.recordUnderLease(
+        lease,
+        'task',
+        `task-store:recover:${basename(path)}:${Date.now()}`,
+      )
+      this.write(path, {})
     }
+    return loaded.value
   }
 
   private write(path: string, data: Record<string, any>): void {
-    mkdirSync(dirname(path), { recursive: true })
-    const tmp = join(
-      dirname(path),
-      `.${basename(path)}.${randomUUID().replace(/-/g, '')}.tmp`,
-    )
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
-    renameSync(tmp, path)
+    this.snapshot(path).write(data)
+  }
+
+  private snapshot(path: string): AtomicSnapshotSync<Record<string, any>> {
+    return new AtomicSnapshotSync({
+      path,
+      codec: TASK_DOCUMENT_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      corruptionBackupPath: (target) =>
+        `${target}.corrupt-${Math.trunc(Date.now() / 1000)}-${randomUUID().replace(/-/g, '').slice(0, 8)}`,
+    })
   }
 
   private copyLegacyFilesIfNeeded(): void {
@@ -514,6 +517,19 @@ export class TaskStore {
       },
     })
   }
+}
+
+const TASK_DOCUMENT_CODEC: SnapshotCodec<Record<string, any>> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return {
+      value: isObject(input) ? input : {},
+      schemaVersion: 1,
+    }
+  },
 }
 
 function isObject(value: unknown): value is Record<string, any> {

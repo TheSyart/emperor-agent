@@ -1,6 +1,7 @@
 import type { GoalSummary } from '../goals/models'
 import type { PlanRecord } from '../plans/models'
 import type { OwnedProcessReceipt } from '../processes/runtime'
+import type { ProjectProcessDescriptor } from './project-processes'
 import type { TaskRecord } from '../tasks/models'
 import type { TeamManagerPayload } from '../team/manager'
 import type { GitStatusResult } from './git'
@@ -65,6 +66,29 @@ export interface WorkspaceTeamSummary {
 }
 
 export interface WorkspaceProcessSummary {
+  id: string
+  label: string
+  ecosystem: string
+  status: string
+  health: string
+  revision: number
+  primary: boolean
+  startedAt: number
+  finishedAt: number | null
+  errorSummary?: string
+  preview: WorkspacePreviewSummary | null
+}
+
+export interface WorkspacePreviewSummary {
+  id: string
+  revision: number
+  title: string
+  url: string
+  status: string
+  primary: boolean
+}
+
+export interface WorkspaceOwnedProcessSummary {
   id: string
   label: string
   status: string
@@ -144,12 +168,41 @@ export function projectWorkspaceTeam(
 
 export function projectWorkspaceProcess(
   process: OwnedProcessReceipt,
-): WorkspaceProcessSummary {
+): WorkspaceOwnedProcessSummary {
   return {
     id: process.id,
     label: process.owner.kind,
     status: process.status,
     startedAt: process.startedAt,
+  }
+}
+
+export function projectWorkspaceProjectProcess(
+  process: ProjectProcessDescriptor,
+): WorkspaceProcessSummary {
+  return {
+    id: process.id,
+    label: process.name,
+    ecosystem: process.ecosystem,
+    status: process.status,
+    health: process.health,
+    revision: process.revision,
+    primary: process.primary,
+    startedAt: process.startedAt,
+    finishedAt: process.finishedAt,
+    ...(process.errorSummary
+      ? { errorSummary: safeMetadataText(process.errorSummary) }
+      : {}),
+    preview: process.preview
+      ? {
+          id: process.preview.id,
+          revision: process.preview.revision,
+          title: process.preview.title,
+          url: process.preview.url,
+          status: process.preview.status,
+          primary: process.preview.primary,
+        }
+      : null,
   }
 }
 

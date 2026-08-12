@@ -7,7 +7,7 @@ import type {
   CoreOperationArgs,
   CoreOperationKey,
   CoreOperationResult,
-} from '@emperor/core'
+} from '@emperor/core/api'
 
 /**
  * Core IPC 薄封装：按 op 名直接调用（W4 移除了假 REST 路由表）。

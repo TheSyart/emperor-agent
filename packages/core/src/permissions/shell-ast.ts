@@ -306,6 +306,182 @@ export function gitShellExplicitDenyReason(
   return null
 }
 
+const PRIVILEGE_ESCALATION_COMMANDS = new Set(['sudo', 'su', 'doas', 'pkexec'])
+const SHELL_COMMANDS = new Set([
+  'sh',
+  'bash',
+  'dash',
+  'zsh',
+  'ksh',
+  'csh',
+  'tcsh',
+])
+
+/**
+ * Structural hard-deny used immediately before spawning a shell command.
+ * It follows common command wrappers and literal `shell -c` scripts so an
+ * approval or full-access mode cannot turn into an interactive privilege
+ * escalation prompt. Command names appearing only as ordinary arguments are
+ * intentionally not rejected.
+ */
+export function shellPrivilegeEscalationReason(
+  analysis: ShellAstAnalysis,
+): string | null {
+  if (analysis.status !== 'parsed') return null
+  for (const command of analysis.commands) {
+    const reason = privilegeEscalationInArgv(command.argv, 0)
+    if (reason) return reason
+  }
+  return null
+}
+
+/**
+ * Non-overridable protection for operations whose target is the host itself,
+ * not an ordinary user file. Network clients, interpreters, symlinks and
+ * remote-script pipelines deliberately do not belong here; the permission
+ * pipeline assesses those according to the active mode.
+ */
+export function shellCatastrophicDestructionReason(
+  source: string,
+  analysis: ShellAstAnalysis,
+): string | null {
+  if (analysis.status !== 'parsed') return null
+  if (/^\s*:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?/m.test(source))
+    return 'fork_bomb'
+  for (const command of analysis.commands) {
+    const redirect = command.redirects.find((item) =>
+      /^\/dev\/(?:sd[a-z]|nvme\d+n\d+|disk\d+)(?:p\d+)?$/i.test(item.target),
+    )
+    if (redirect) return `device_redirect:${redirect.target}`
+    const reason = catastrophicInArgv(command.argv, 0)
+    if (reason) return reason
+  }
+  return null
+}
+
+function catastrophicInArgv(argv: string[], depth: number): string | null {
+  if (!argv.length || depth > 4) return null
+  const executable = baseName(argv[0] ?? '')
+  if (/^mkfs(?:\.|$)/.test(executable)) return executable
+  if (executable === 'wipefs') return executable
+  if (executable === 'diskutil' && argv[1]?.toLowerCase() === 'erasedisk')
+    return 'diskutil eraseDisk'
+  if (executable === 'dd') {
+    const device = argv.find((part) =>
+      /^of=\/dev\/(?:sd[a-z]|nvme\d+n\d+|disk\d+)(?:p\d+)?$/i.test(part),
+    )
+    if (device) return `dd ${device}`
+  }
+  if (executable === 'rm' && removesFilesystemRoot(argv.slice(1)))
+    return 'rm recursive-force root'
+
+  if (SHELL_COMMANDS.has(executable)) {
+    const commandIndex = argv.findIndex(
+      (argument, index) => index > 0 && argument === '-c',
+    )
+    const script = commandIndex >= 0 ? argv[commandIndex + 1] : null
+    return script
+      ? shellCatastrophicDestructionReason(
+          script,
+          analyzeShellCommandFailClosed(script),
+        )
+      : null
+  }
+  if (executable === 'eval') {
+    const script = argv.slice(1).join(' ').trim()
+    return script
+      ? shellCatastrophicDestructionReason(
+          script,
+          analyzeShellCommandFailClosed(script),
+        )
+      : null
+  }
+  const wrapped = unwrapCommandArgv(executable, argv)
+  return wrapped ? catastrophicInArgv(wrapped, depth + 1) : null
+}
+
+function removesFilesystemRoot(args: string[]): boolean {
+  let recursive = false
+  let force = false
+  const targets: string[] = []
+  for (const argument of args) {
+    if (argument === '--recursive') recursive = true
+    else if (argument === '--force') force = true
+    else if (/^-[^-]/.test(argument)) {
+      recursive ||=
+        argument.slice(1).includes('r') || argument.slice(1).includes('R')
+      force ||= argument.slice(1).includes('f')
+    } else if (
+      argument !== '--preserve-root' &&
+      argument !== '--no-preserve-root'
+    )
+      targets.push(argument)
+  }
+  return (
+    recursive &&
+    force &&
+    targets.some((target) => target === '/' || target === '/*')
+  )
+}
+
+function privilegeEscalationInArgv(
+  argv: string[],
+  depth: number,
+): string | null {
+  if (!argv.length || depth > 4) return null
+  const executable = baseName(argv[0] ?? '')
+  if (PRIVILEGE_ESCALATION_COMMANDS.has(executable)) return executable
+  if (argv[0] === DYNAMIC_PLACEHOLDER) return 'dynamic_executable'
+
+  if (SHELL_COMMANDS.has(executable)) {
+    const commandIndex = argv.findIndex(
+      (argument, index) => index > 0 && argument === '-c',
+    )
+    const script = commandIndex >= 0 ? argv[commandIndex + 1] : null
+    return script
+      ? shellPrivilegeEscalationReason(analyzeShellCommandFailClosed(script))
+      : null
+  }
+  if (executable === 'eval') {
+    const script = argv.slice(1).join(' ').trim()
+    return script
+      ? shellPrivilegeEscalationReason(analyzeShellCommandFailClosed(script))
+      : null
+  }
+
+  const wrapped = unwrapCommandArgv(executable, argv)
+  return wrapped ? privilegeEscalationInArgv(wrapped, depth + 1) : null
+}
+
+function unwrapCommandArgv(
+  executable: string,
+  argv: string[],
+): string[] | null {
+  if (!['env', 'command', 'exec', 'nohup', 'nice', 'time'].includes(executable))
+    return null
+  let index = 1
+  while (index < argv.length) {
+    const argument = argv[index]!
+    if (argument === '--') {
+      index += 1
+      break
+    }
+    if (executable === 'env' && ENV_ASSIGNMENT.test(argument)) {
+      index += 1
+      continue
+    }
+    if (!argument.startsWith('-') || argument === '-') break
+    if (
+      (executable === 'env' && (argument === '-u' || argument === '--unset')) ||
+      (executable === 'nice' &&
+        (argument === '-n' || argument === '--adjustment'))
+    )
+      index += 1
+    index += 1
+  }
+  return index < argv.length ? argv.slice(index) : null
+}
+
 export function shellAstSummary(analysis: ShellAstAnalysis): ShellAstSummary {
   return {
     parser: analysis.parser,

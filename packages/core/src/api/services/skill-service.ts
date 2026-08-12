@@ -45,6 +45,7 @@ export interface CoreSkillServiceDeps {
   resolveMissing?: (
     requirements: SkillRequirements,
   ) => Promise<SkillMissingRequirements>
+  resolvedSkills?: () => ResolvedSkillPayloadInput[]
 }
 
 export interface SkillInfoPayload {
@@ -131,6 +132,9 @@ export class CoreSkillService {
   }
 
   list(): SkillInfoPayload[] {
+    const resolved = this.deps.resolvedSkills?.() ?? []
+    if (resolved.length)
+      return resolved.map((skill) => this.describeResolved(skill))
     return this.manager.listRecords().map((record) => this.info(record.name))
   }
 
@@ -146,13 +150,18 @@ export class CoreSkillService {
       status: 'active',
       readOnly: input.readOnly,
       requirements: { bins: [], runtimes: [], env: [] },
-      command: commandMetadata(meta.data.metadata),
+      command: commandMetadata(meta.data),
     }
   }
 
   get(name: string): SkillDetailPayload {
     const safe = safeSkillName(name)
     if (!safe) throw new Error('Invalid skill name')
+    const resolved = this.deps
+      .resolvedSkills?.()
+      .find((skill) => skill.name === safe)
+    if (resolved)
+      return { ...this.describeResolved(resolved), content: resolved.content }
     const path = this.skillPath(safe)
     if (!path) throw new Error(`Skill not found: ${safe}`)
     return { ...this.info(safe), content: readFileSync(path, 'utf8') }
@@ -179,6 +188,8 @@ export class CoreSkillService {
         throw new Error(`Built-in Skill is read-only: ${safe}`)
       throw new Error(`Skill not found: ${safe}`)
     }
+    assertWritableSkillPath(this.skillsDir, safe)
+    this.installService.removeInstallationRecord(safe)
     rmSync(dir, { recursive: true, force: true })
     this.deps.refreshRuntimeContext?.()
     return { deleted: safe }
@@ -253,7 +264,7 @@ export class CoreSkillService {
             : 'active',
       readOnly: record.readOnly,
       requirements: validation.requirements,
-      command: commandMetadata(meta.data.metadata),
+      command: commandMetadata(meta.data),
     }
   }
 
@@ -262,10 +273,25 @@ export class CoreSkillService {
   }
 }
 
-function commandMetadata(metadata: unknown): SkillCommandMetadata | null {
-  const root = record(metadata)
-  const emperor = record(root.emperor)
-  const command = record(emperor.command)
+function commandMetadata(frontmatter: unknown): SkillCommandMetadata | null {
+  const top = record(frontmatter)
+  const metadata = record(top.metadata)
+  const emperor = record(metadata.emperor)
+  const nested = record(emperor.command)
+  const hasTopLevelCommand = [
+    'user-invocable',
+    'user_invocable',
+    'argument-hint',
+    'argument_hint',
+    'allowed-tools',
+    'allowed_tools',
+    'context',
+  ].some((key) => Object.prototype.hasOwnProperty.call(top, key))
+  const command = Object.keys(nested).length
+    ? nested
+    : hasTopLevelCommand
+      ? top
+      : {}
   if (!Object.keys(command).length) return null
   const context = stringValue(command.context) === 'fork' ? 'fork' : 'inline'
   const rawSources = stringList(
@@ -277,17 +303,25 @@ function commandMetadata(metadata: unknown): SkillCommandMetadata | null {
   )
   return {
     userInvocable: boolMeta(
-      command.user_invocable ?? command.userInvocable ?? true,
+      command['user-invocable'] ??
+        command.user_invocable ??
+        command.userInvocable ??
+        true,
     ),
     name: nullableString(command.name),
     aliases: stringList(command.aliases),
     argumentHint: stringValue(
-      command.argument_hint ?? command.argumentHint ?? '[task]',
+      command['argument-hint'] ??
+        command.argument_hint ??
+        command.argumentHint ??
+        '[task]',
     ),
     arguments: argumentSpecs(command.arguments),
     context,
     agent: nullableString(command.agent),
-    allowedTools: stringList(command.allowed_tools ?? command.allowedTools),
+    allowedTools: stringList(
+      command['allowed-tools'] ?? command.allowed_tools ?? command.allowedTools,
+    ),
     effort: nullableString(command.effort),
     invocationSources: invocationSources.length
       ? invocationSources

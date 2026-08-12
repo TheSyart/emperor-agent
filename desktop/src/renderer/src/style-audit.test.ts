@@ -360,7 +360,6 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     'components/panels/HooksPanel.vue': 0,
     'components/panels/SkillsPanel.vue': 1,
     'components/panels/model/ModelEntryList.vue': 1,
-    'components/commands/CommandCenterDialog.vue': 0,
     'views/PetView.vue': 1,
   }
 

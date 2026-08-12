@@ -3,7 +3,7 @@ import type {
   CoreOperationArgs,
   CoreOperationKey,
   CoreOperationResult,
-} from '@emperor/core'
+} from '@emperor/core/api'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 
 export interface CoreIpcRendererLike {

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-07-23<br>
+> 最后核验：2026-08-12<br>
 > 事实源：`desktop/src/main/core-host.ts`、`desktop/src/preload/`、`packages/core/src/runtime/events.ts`、`packages/core/src/runtime/envelope.ts`、`packages/core/src/runtime/store.ts`、`desktop/src/renderer/src/runtime/`
 
 Electron renderer 不直接导入 Core，也不访问本地 Store。同步请求通过 preload 的 Core IPC contract，异步过程通过 runtime events。两条链路共同构成桌面主路径。
@@ -27,9 +27,9 @@ sequenceDiagram
 
 operation 是显式 allowlist。Renderer 传入的数据必须在 Core 边界重新校验；renderer 已校验、TypeScript 类型或隐藏按钮都不是安全边界。
 
-Slash command 只使用 `commands.list`、`commands.complete` 和 `commands.invoke`。List 返回按 session/source 计算可用性的 descriptor；Complete 只返回有界候选；Invoke 同时校验稳定 command ID、原始命令名、参数 schema、session ownership、invocation source、附件规则和幂等 invocation ID。命令本身不新增通用 runtime event：本地 UI 不进历史，Core action 使用既有领域投影或脱敏 receipt，Skill prompt 走正常聊天事件。Electron operation registry、preload 和 Renderer 类型必须保持一一对应。
+Slash command 只使用 `commands.list`、`commands.complete` 和 `commands.invoke`。List 返回按 session/source 计算可用性的 descriptor；Complete 只返回有界候选；Invoke 同时校验稳定 command ID、原始命令名、参数 schema、session ownership、invocation source、附件规则和幂等 invocation ID。命令调用本身不新增通用 runtime event：本地 UI 不进历史，Core action 使用既有领域投影或脱敏 receipt，Skill prompt 走正常聊天事件。Skill 文件目录变化例外地发送不含路径的 `skill_catalog_changed(catalog_version)`，只用于让 Renderer 刷新命令目录。Electron operation registry、preload 和 Renderer 类型必须保持一一对应。
 
-所有 operation 在参数解析和领域调用前先经过 `LifecycleSupervisor.assertReady()`。required service 尚未全部 ready、启动已失败或 Core 正在关闭时，IPC 返回 `{ ok: false, error: { code: "core_unavailable", action: "retry" } }`，领域方法没有被调用。Electron main 只有在 `CoreApi.create()` 和后续初始化都成功后才把 host 视为 ready。
+所有 operation 在参数解析和领域调用前先经过 `LifecycleSupervisor.assertReady()`。required service 尚未全部 ready、启动已失败或 Core 正在关闭时，IPC 返回 `{ ok: false, error: { code: "core_unavailable", action: "retry" } }`，领域方法没有被调用。Electron main 只有在 `CoreApi.create()` 和后续初始化都成功后才把 host 视为 ready。网络调研的 `research_validation` 事件只包含 `stage/source_count/fact_unit_count/reason_code`，用于状态区显示来源核验进度；它不携带 URL、正文、命令、本机路径或 reviewer prompt。
 
 ## 项目工作台 IPC
 

@@ -5,6 +5,7 @@ import {
   gitShellExplicitDenyReason,
   isShellAstReadonly,
   isShellAstReadonlySequence,
+  shellPrivilegeEscalationReason,
   shellAstSummary,
   type ShellAstAnalysis,
 } from './shell-ast'
@@ -109,6 +110,27 @@ describe('shell AST permission analysis', () => {
       reasonCodes: ['parser_invalid_result'],
     })
     expect(isShellAstReadonly(malformed)).toBe(false)
+  })
+
+  it.each([
+    ['sudo id', 'sudo'],
+    ['/usr/bin/doas id', 'doas'],
+    ['env LANG=C pkexec id', 'pkexec'],
+    ['command su - root', 'su'],
+    ["sh -c 'sudo id'", 'sudo'],
+    ['echo "$(sudo id)"', 'sudo'],
+  ])('detects privilege escalation structurally in %s', (command, reason) => {
+    expect(shellPrivilegeEscalationReason(analyzeShellCommand(command))).toBe(
+      reason,
+    )
+  })
+
+  it('does not reject privilege command names used only as data', () => {
+    expect(
+      shellPrivilegeEscalationReason(
+        analyzeShellCommand('printf "%s\\n" sudo doas pkexec su'),
+      ),
+    ).toBeNull()
   })
 })
 

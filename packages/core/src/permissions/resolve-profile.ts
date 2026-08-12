@@ -1,5 +1,5 @@
 /**
- * 工具画像解析 (MIG-CTRL-015)。对齐 Python `agent/permissions/resolvers.py:resolve_tool_profile`。
+ * 工具画像解析。
  * 经工具的 isReadOnly/isConcurrencySafe/isDestructive/getPath 取属性，异常回退。
  */
 import type { Tool } from '../tools/base'
@@ -86,7 +86,7 @@ export function resolveToolProfile(
 const FALLBACK_READ_ONLY_TOOLS = new Set([
   'glob',
   'grep',
-  'load_skill',
+  'Skill',
   'read_file',
   'web_fetch',
   'web_search',

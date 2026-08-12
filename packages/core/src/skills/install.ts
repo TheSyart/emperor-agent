@@ -368,6 +368,16 @@ export class SkillInstallService {
       }
       this.rename(stage, target)
       activated = true
+      this.recordInstallation({
+        name: candidate.name,
+        status,
+        source: preview.source,
+        sourceDigest: preview.digest,
+        candidateDigest: candidate.digest,
+        requirements: snapshot.requirements,
+        missing,
+        installedAt,
+      })
       if (movedExisting) rmSync(backup, { recursive: true, force: true })
     } catch (error) {
       rmSync(stage, { recursive: true, force: true })
@@ -386,6 +396,88 @@ export class SkillInstallService {
       missing,
       installedAt,
     }
+  }
+
+  private recordInstallation(input: {
+    name: string
+    status: 'active' | 'blocked'
+    source: ResolvedSkillInstallSource
+    sourceDigest: string
+    candidateDigest: string
+    requirements: SkillRequirements
+    missing: SkillMissingRequirements
+    installedAt: string
+  }): void {
+    const registryPath = join(
+      this.manager.userSkillsDirectory(),
+      'installed.v1.json',
+    )
+    let registry: { schemaVersion: 1; skills: Record<string, unknown> } = {
+      schemaVersion: 1,
+      skills: {},
+    }
+    if (pathEntryExists(registryPath)) {
+      const raw = JSON.parse(
+        readBoundedRegularFile(
+          registryPath,
+          MAX_GITHUB_METADATA_BYTES,
+        ).toString('utf8'),
+      ) as unknown
+      if (
+        !raw ||
+        typeof raw !== 'object' ||
+        Array.isArray(raw) ||
+        Number((raw as Record<string, unknown>).schemaVersion) !== 1 ||
+        !(raw as Record<string, unknown>).skills ||
+        typeof (raw as Record<string, unknown>).skills !== 'object'
+      )
+        throw new Error('Skill installation registry is invalid')
+      registry = raw as typeof registry
+    }
+    registry.skills[input.name] = {
+      name: input.name,
+      source: input.source,
+      sourceDigest: input.sourceDigest,
+      candidateDigest: input.candidateDigest,
+      status: input.status,
+      requirements: input.requirements,
+      missing: input.missing,
+      installedAt: input.installedAt,
+      updatedAt: input.installedAt,
+    }
+    atomicWriteJson(registryPath, registry)
+  }
+
+  removeInstallationRecord(name: string): void {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test(name))
+      throw new Error('Invalid Skill installation record name')
+    const registryPath = join(
+      this.manager.userSkillsDirectory(),
+      'installed.v1.json',
+    )
+    if (!pathEntryExists(registryPath)) return
+    const raw = JSON.parse(
+      readBoundedRegularFile(registryPath, MAX_GITHUB_METADATA_BYTES).toString(
+        'utf8',
+      ),
+    ) as unknown
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      Array.isArray(raw) ||
+      Number((raw as Record<string, unknown>).schemaVersion) !== 1 ||
+      !(raw as Record<string, unknown>).skills ||
+      typeof (raw as Record<string, unknown>).skills !== 'object' ||
+      Array.isArray((raw as Record<string, unknown>).skills)
+    )
+      throw new Error('Skill installation registry is invalid')
+    const registry = raw as {
+      schemaVersion: 1
+      skills: Record<string, unknown>
+    }
+    if (!Object.prototype.hasOwnProperty.call(registry.skills, name)) return
+    delete registry.skills[name]
+    atomicWriteJson(registryPath, registry)
   }
 
   async reconcileBlocked(): Promise<{
@@ -448,7 +540,7 @@ export class SkillInstallService {
         requestedPath: null,
       }
     }
-    const github = parseGithubUrl(url)
+    const github = parseGithubSourceUrl(url)
     const metadataPath = join(previewRoot, '.github-metadata.json')
     let ref: string
     let requestedPath: string | null
@@ -461,22 +553,27 @@ export class SkillInstallService {
         metadataPath,
       )
       ref = resolved.ref
-      requestedPath = resolved.requestedPath
+      requestedPath = requestedCandidatePath(
+        resolved.requestedPath,
+        github.pathKind,
+      )
       kind = 'github_tree'
     } else {
       const apiUrl = `https://api.github.com/repos/${github.owner}/${github.repository}`
       await this.downloadMetadata(apiUrl, metadataPath)
       const metadata = parseGithubJson(metadataPath)
-      ref = safeGithubRef(metadata.default_branch)
+      ref = await this.resolveGithubCommit(
+        github.owner,
+        github.repository,
+        safeGithubRef(metadata.default_branch),
+        metadataPath,
+      )
       requestedPath = null
       kind = 'github_repo'
     }
     rmSync(metadataPath, { force: true })
     const repository = `${github.owner}/${github.repository}`
-    const resolvedUrl =
-      kind === 'github_repo'
-        ? `https://codeload.github.com/${repository}/zip/refs/heads/${encodeRef(ref)}`
-        : `https://codeload.github.com/${repository}/zip/${encodeRef(ref)}`
+    const resolvedUrl = `https://codeload.github.com/${repository}/zip/${encodeRef(ref)}`
     await this.downloadArchive(resolvedUrl, archivePath)
     return {
       kind,
@@ -507,7 +604,7 @@ export class SkillInstallService {
         )
           throw new Error('GitHub commit metadata is invalid')
         return {
-          ref,
+          ref: String(metadata.sha).toLowerCase(),
           requestedPath:
             split < parts.length ? parts.slice(split).join('/') : null,
         }
@@ -516,6 +613,21 @@ export class SkillInstallService {
       }
     }
     throw new Error('GitHub tree ref could not be resolved')
+  }
+
+  private async resolveGithubCommit(
+    owner: string,
+    repository: string,
+    ref: string,
+    metadataPath: string,
+  ): Promise<string> {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repository}/commits/${encodeURIComponent(ref)}`
+    await this.downloadMetadata(apiUrl, metadataPath)
+    const metadata = parseGithubJson(metadataPath)
+    const sha = String(metadata.sha ?? '').toLowerCase()
+    if (!/^[a-f0-9]{40,64}$/.test(sha))
+      throw new Error('GitHub commit metadata is invalid')
+    return sha
   }
 
   private async downloadMetadata(
@@ -771,12 +883,14 @@ function isDirectArchiveUrl(url: URL): boolean {
   return path.endsWith('.skill') || path.endsWith('.zip')
 }
 
-function parseGithubUrl(url: URL): {
+function parseGithubSourceUrl(url: URL): {
   owner: string
   repository: string
   treeParts: string[]
+  pathKind: 'tree' | 'blob' | 'raw' | null
 } {
-  if (url.hostname.toLowerCase() !== 'github.com')
+  const host = url.hostname.toLowerCase()
+  if (host !== 'github.com' && host !== 'raw.githubusercontent.com')
     throw new Error('Network Skill source must be GitHub or a .skill/.zip URL')
   const parts = url.pathname
     .split('/')
@@ -787,9 +901,19 @@ function parseGithubUrl(url: URL): {
   const repository = parts[1]!.replace(/\.git$/i, '')
   if (!SAFE_GITHUB_PART.test(repository))
     throw new Error('Invalid GitHub repository name')
-  if (parts.length === 2) return { owner: parts[0]!, repository, treeParts: [] }
-  if (parts[2] !== 'tree' || parts.length < 4)
-    throw new Error('Only GitHub repo and tree URLs are supported')
+  if (host === 'raw.githubusercontent.com') {
+    if (parts.length < 4) throw new Error('Invalid raw GitHub Skill source')
+    return {
+      owner: parts[0]!,
+      repository,
+      treeParts: parts.slice(2),
+      pathKind: 'raw',
+    }
+  }
+  if (parts.length === 2)
+    return { owner: parts[0]!, repository, treeParts: [], pathKind: null }
+  if ((parts[2] !== 'tree' && parts[2] !== 'blob') || parts.length < 4)
+    throw new Error('Only GitHub repo, tree, and blob URLs are supported')
   const treeParts = parts.slice(3)
   if (
     treeParts.length > MAX_PATH_DEPTH ||
@@ -798,7 +922,27 @@ function parseGithubUrl(url: URL): {
     )
   )
     throw new Error('Invalid GitHub tree path')
-  return { owner: parts[0]!, repository, treeParts }
+  return {
+    owner: parts[0]!,
+    repository,
+    treeParts,
+    pathKind: parts[2] as 'tree' | 'blob',
+  }
+}
+
+function requestedCandidatePath(
+  requestedPath: string | null,
+  kind: 'tree' | 'blob' | 'raw' | null,
+): string | null {
+  if (!requestedPath) return null
+  const normalized = slash(requestedPath)
+  if (/\/(?:docs\/)?install\.md$/i.test(`/${normalized}`)) return null
+  if (
+    (kind === 'blob' || kind === 'raw') &&
+    /\/SKILL\.md$/i.test(`/${normalized}`)
+  )
+    return slash(dirname(normalized)) === '.' ? '' : slash(dirname(normalized))
+  return normalized
 }
 
 function safeGithubRef(value: unknown): string {

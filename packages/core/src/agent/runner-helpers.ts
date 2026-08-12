@@ -1,5 +1,5 @@
 /**
- * Runner 纯辅助函数 (MIG-CORE-008 支撑)。对齐 Python `agent/runner_helpers.py`。
+ * Runner 纯辅助函数。
  */
 import type { ToolCallRequest } from '../providers/base'
 import type { ToolResultObj } from '../tools/base'

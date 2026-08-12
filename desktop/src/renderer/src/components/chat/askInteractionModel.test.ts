@@ -189,10 +189,15 @@ describe('ask interaction model', () => {
             operations: [
               {
                 operation_id: 'operation_1',
-                tool_name: 'delete_file',
+                tool_name: 'run_command',
                 risk: 'high',
-                reason: '删除文件',
-                summary: 'delete_file a.txt',
+                reason: '执行安装命令',
+                summary: 'run_command npm install',
+                execution_boundary: 'host',
+                filesystem_access: 'unrestricted',
+                network_access: 'unrestricted',
+                operation_fingerprint: 'must-not-leak',
+                authorization_id: 'must-not-leak',
               },
               {
                 operation_id: 'operation_2',
@@ -210,10 +215,15 @@ describe('ask interaction model', () => {
     expect(presentation.title).toBe('2 项操作需要权限确认')
     expect(presentation.status).toBe('等待决定')
     expect(presentation.detail).toContain('2 项操作')
-    expect(presentation.detail).toContain('delete_file a.txt')
+    expect(presentation.detail).toContain('run_command npm install')
     expect(presentation.detail).toContain('delete_file b.txt')
+    expect(presentation.detail).toContain('宿主直执')
+    expect(presentation.detail).toContain('HOME')
+    expect(presentation.detail).toContain('用户配置')
+    expect(presentation.detail).toContain('本机网络')
     expect(presentation.detail).not.toContain('permission_private')
     expect(presentation.detail).not.toContain('内部上下文')
+    expect(presentation.detail).not.toContain('must-not-leak')
   })
 
   it('does not render historical Ask Guard diagnostics verbatim', () => {

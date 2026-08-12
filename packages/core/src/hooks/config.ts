@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile, realpath } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { readJson, writeJsonAtomic } from '../store/atomic-json'
+import {
+  AtomicSnapshot,
+  type PersistenceAdapter,
+  type SnapshotCodec,
+} from '../store/persistence'
 import {
   HOOK_EVENT_NAMES,
   type HookDefinition,
@@ -39,10 +43,15 @@ export interface HookConfigLoadResult {
 export class HookConfigLoader {
   readonly stateRoot: string
   readonly globalConfigPath: string
+  private readonly persistenceAdapter?: PersistenceAdapter
 
-  constructor(opts: { stateRoot: string }) {
+  constructor(opts: {
+    stateRoot: string
+    persistenceAdapter?: PersistenceAdapter
+  }) {
     this.stateRoot = resolve(opts.stateRoot)
     this.globalConfigPath = join(this.stateRoot, HOOKS_CONFIG_FILE)
+    this.persistenceAdapter = opts.persistenceAdapter
   }
 
   async load(
@@ -54,14 +63,19 @@ export class HookConfigLoader {
       path: this.globalConfigPath,
       readonly: false,
     }
-    const globalRaw = await readJson<unknown>(this.globalConfigPath, null, {
-      onCorrupt: (info) =>
-        diagnostics.push({
-          code: 'corrupt_config',
-          path: info.path,
-          message: `Corrupt hooks config preserved at ${info.backupPath}`,
-        }),
-    })
+    const globalSnapshot = await hookJsonSnapshot(
+      this.globalConfigPath,
+      this.persistenceAdapter,
+    ).read({ fallback: null })
+    if (
+      globalSnapshot.receipt.recoveryAction === 'quarantined_corrupt_snapshot'
+    )
+      diagnostics.push({
+        code: 'corrupt_config',
+        path: this.globalConfigPath,
+        message: `Corrupt hooks config preserved at ${String(globalSnapshot.receipt.corruptionBackup ?? '')}`,
+      })
+    const globalRaw = globalSnapshot.value
     const globalParsed = parseHooksConfig(globalRaw, { source: globalSource })
     diagnostics.push(...globalParsed.diagnostics)
     const sources: HookConfigSourceInfo[] = [
@@ -114,7 +128,10 @@ export class HookConfigLoader {
         ],
       }
     }
-    await writeJsonAtomic(this.globalConfigPath, serializeConfig(parsed.config))
+    await hookJsonSnapshot(
+      this.globalConfigPath,
+      this.persistenceAdapter,
+    ).write(serializeConfig(parsed.config))
     return this.load()
   }
 
@@ -182,10 +199,15 @@ interface SessionHookSource {
 export class ProjectHookTrustStore {
   readonly stateRoot: string
   readonly path: string
+  private readonly persistenceAdapter?: PersistenceAdapter
 
-  constructor(opts: { stateRoot: string }) {
+  constructor(opts: {
+    stateRoot: string
+    persistenceAdapter?: PersistenceAdapter
+  }) {
     this.stateRoot = resolve(opts.stateRoot)
     this.path = join(this.stateRoot, PROJECT_TRUST_FILE)
+    this.persistenceAdapter = opts.persistenceAdapter
   }
 
   async status(projectRoot: string): Promise<ProjectHookTrustStatus> {
@@ -218,12 +240,16 @@ export class ProjectHookTrustStore {
           trustedAt: file.records[current.canonicalRoot]?.trustedAt ?? null,
           revokedAt: now,
         }
-    await writeJsonAtomic(this.path, file)
+    await hookJsonSnapshot(this.path, this.persistenceAdapter).write(file)
     return { ...current, status: opts.trusted ? 'trusted' : 'untrusted' }
   }
 
   private async read(): Promise<ProjectTrustFile> {
-    const loaded = await readJson<unknown>(this.path, null)
+    const loaded = (
+      await hookJsonSnapshot(this.path, this.persistenceAdapter).read({
+        fallback: null,
+      })
+    ).value
     const data = objectOrNull(loaded)
     const recordsRaw = objectOrNull(data?.records)
     const records: Record<string, ProjectTrustRecord> = {}
@@ -277,14 +303,20 @@ export class HookSourceResolver {
   readonly globalConfigPath: string
   readonly trustStore: ProjectHookTrustStore
   readonly sessionRegistry: HookSessionRegistry
+  private readonly persistenceAdapter?: PersistenceAdapter
 
   constructor(opts: {
     stateRoot: string
     sessionRegistry?: HookSessionRegistry
+    persistenceAdapter?: PersistenceAdapter
   }) {
     this.stateRoot = resolve(opts.stateRoot)
     this.globalConfigPath = join(this.stateRoot, HOOKS_CONFIG_FILE)
-    this.trustStore = new ProjectHookTrustStore({ stateRoot: this.stateRoot })
+    this.persistenceAdapter = opts.persistenceAdapter
+    this.trustStore = new ProjectHookTrustStore({
+      stateRoot: this.stateRoot,
+      persistenceAdapter: this.persistenceAdapter,
+    })
     this.sessionRegistry = opts.sessionRegistry ?? new HookSessionRegistry()
   }
 
@@ -295,14 +327,19 @@ export class HookSourceResolver {
     const sources: HookSourceV2[] = []
     const effective = new Map<string, ResolvedHookGroup>()
 
-    const globalRaw = await readJson<unknown>(this.globalConfigPath, null, {
-      onCorrupt: (info) =>
-        diagnostics.push({
-          code: 'corrupt_config',
-          path: info.path,
-          message: `Corrupt hooks config preserved at ${info.backupPath}`,
-        }),
-    })
+    const globalSnapshot = await hookJsonSnapshot(
+      this.globalConfigPath,
+      this.persistenceAdapter,
+    ).read({ fallback: null })
+    if (
+      globalSnapshot.receipt.recoveryAction === 'quarantined_corrupt_snapshot'
+    )
+      diagnostics.push({
+        code: 'corrupt_config',
+        path: this.globalConfigPath,
+        message: `Corrupt hooks config preserved at ${String(globalSnapshot.receipt.corruptionBackup ?? '')}`,
+      })
+    const globalRaw = globalSnapshot.value
     const globalParsed = parseHooksConfigV2(globalRaw, { sourceKind: 'global' })
     diagnostics.push(...globalParsed.diagnostics)
     const globalSource = sourceV2({
@@ -490,6 +527,28 @@ function snapshotKey(opts: {
   sessionId?: string | null
 }): string {
   return `${resolve(opts.projectRoot ?? '')}\0${String(opts.sessionId ?? '')}`
+}
+
+const HOOK_JSON_SNAPSHOT_CODEC: SnapshotCodec<unknown> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return { value: input, schemaVersion: 1 }
+  },
+}
+
+function hookJsonSnapshot(
+  path: string,
+  adapter?: PersistenceAdapter,
+): AtomicSnapshot<unknown> {
+  return new AtomicSnapshot({
+    path,
+    codec: HOOK_JSON_SNAPSHOT_CODEC,
+    adapter,
+    fileMode: 0o600,
+  })
 }
 
 function cloneConfig(config: HooksConfig): HooksConfig {

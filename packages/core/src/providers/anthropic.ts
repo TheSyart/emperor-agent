@@ -15,7 +15,7 @@ import {
 } from './base'
 
 /**
- * Anthropic provider (MIG-PROV-004)。对齐 Python `agent/providers/anthropic_provider.py`。
+ * Anthropic provider。
  * 原生端点对 system 前缀与最后一个 tool 加 ephemeral cache_control；第三方代理保持 system 为字符串。
  */
 
@@ -243,7 +243,7 @@ export class AnthropicProvider extends LLMProvider {
   }
 }
 
-// ── module-private helpers（对齐 Python 静态方法）──
+// ── module-private helpers ──
 
 function requestOptions(
   signal?: AbortSignal | null,

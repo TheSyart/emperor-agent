@@ -1,6 +1,5 @@
 /**
- * query_state 恢复状态机 (MIG-CORE-007)。
- * 对齐 Python `agent/query_state/models.py` + `transitions.py`。
+ * query_state 恢复状态机。
  * 空响应重试 / length 续写 / todo 续跑 / 暂停-完成 的状态转移；阈值与文案逐字保真。
  */
 

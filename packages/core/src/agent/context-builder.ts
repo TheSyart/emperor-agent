@@ -1,8 +1,8 @@
 /**
- * 系统提示词构建 ContextBuilder (MIG-CORE-006)。对齐 Python `agent/context.py`。
+ * 系统提示词构建 ContextBuilder。
  * bootstrap(SOUL/TOOL/USER) + identity + memory + skills 拼装；段以 \n\n---\n\n 连接。
  * jinja → 手写插值（仅 workspace / subagents_summary / skills_summary 三个变量）。
- * skills/subagent/memory 以注入接口给入（完整实现来自各自波次）。
+ * skills/subagent/memory 通过最小能力接口注入。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -11,26 +11,14 @@ import {
   type PromptProfile,
 } from '../config/local-config'
 import type { PromptContextPlan } from '../prompts/manifest'
-import type { PromptSectionOwner } from '../prompts/manifest'
 import { ContextAssembler } from '../context/assembler'
 import { ContextPlanner } from '../context/planner'
 import { ContextPolicyRegistry } from '../context/policy'
+import type { ContextSection } from '../context/contracts'
+export type { ContextSection } from '../context/contracts'
 import { PromptPolicy } from '../prompts/policy'
 
 const DEFAULT_MEMORY_BUDGET_CHARS = 12_000
-
-export interface ContextSection {
-  name: string
-  content: string
-  source: string
-  priority: number
-  budgetChars: number | null
-  version: string | null
-  scope?: string | null
-  stability?: 'stable' | 'dynamic'
-  owner?: PromptSectionOwner
-  ruleIds?: string[]
-}
 
 export interface ContextProjection {
   sections: ContextSection[]
@@ -38,23 +26,74 @@ export interface ContextProjection {
   prompt: string
 }
 
-/** 完整 SkillsLoader 的最小表面（W04/技能波次提供实现）。 */
+/** ContextBuilder 需要的最小 SkillsLoader 表面。 */
 export interface SkillsLoaderLike {
   getAlwaysSkills(): string[]
   loadSkillsForContext(names: string[]): string
   buildSkillsSummary(opts?: { exclude?: Set<string> }): string
 }
 
-/** SubagentRegistry 的最小表面（W08 提供实现）。 */
+/** ContextBuilder 需要的最小 SubagentRegistry 表面。 */
 export interface SubagentRegistryLike {
   describe(): string
 }
 
-/** MemoryStore 的最小表面（W06 提供实现）。 */
+/** ContextBuilder 需要的最小 MemoryStore 表面。 */
 export interface MemoryLike {
   readMemory(): string
   memoryFile?: string
   memoryDir?: string
+}
+
+export interface RuntimeIdentityInput {
+  surface: 'desktop' | 'headless'
+  role: 'main' | 'plan' | `subagent:${string}`
+  workspace: string
+  emperorHome: string
+  emperorHomeSource: 'default' | 'env' | 'explicit'
+  userSkills: string
+  projectSkills: string
+  projectSkillsPresent: boolean
+  builtinSkills: string
+  managedEnvironment: string
+  executionBoundary: 'host' | 'sandbox'
+}
+
+export const RUNTIME_IDENTITY_START = '<!-- emperor-runtime-identity:start -->'
+export const RUNTIME_IDENTITY_END = '<!-- emperor-runtime-identity:end -->'
+
+export function buildRuntimeIdentity(input: RuntimeIdentityInput): string {
+  return [
+    RUNTIME_IDENTITY_START,
+    '# Runtime Identity',
+    '',
+    'This Core-generated block is authoritative for the current agent invocation.',
+    `Product: Emperor Agent`,
+    `Surface: ${input.surface}`,
+    `Role: ${input.role}`,
+    `Workspace: ${input.workspace}`,
+    `Emperor Home: ${input.emperorHome} (${input.emperorHomeSource})`,
+    `User Skills: ${input.userSkills}, writable through normal file tools after permission`,
+    `Project Skills: ${input.projectSkills}, read-only, ${input.projectSkillsPresent ? 'present' : 'missing'}`,
+    'Plugin Skills: Core-resolved enabled Plugin roots, read-only, cache paths hidden',
+    `Built-in Skills: ${input.builtinSkills}, read-only`,
+    `Managed Environment: ${input.managedEnvironment}, compatibility PATH and diagnostics`,
+    'Skill tool: Skill',
+    'Skill creation: normal file tools',
+    'Dependency installation: run_command with a separate verification call',
+    `Execution boundary: ${input.executionBoundary}`,
+    RUNTIME_IDENTITY_END,
+  ].join('\n')
+}
+
+export function stripRuntimeIdentity(input: string): string {
+  const start = input.indexOf(RUNTIME_IDENTITY_START)
+  if (start < 0) return input
+  const end = input.indexOf(RUNTIME_IDENTITY_END, start)
+  if (end < 0) return input
+  return `${input.slice(0, start)}${input.slice(end + RUNTIME_IDENTITY_END.length)}`
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export class ContextBuilder {
@@ -66,6 +105,7 @@ export class ContextBuilder {
   readonly memoryBudgetChars: number
   readonly userFile: string | null
   readonly promptProfile: PromptProfile
+  readonly runtimeIdentity: (() => RuntimeIdentityInput) | null
   readonly policyRegistry = new ContextPolicyRegistry()
   subagentRegistry: SubagentRegistryLike | null = null
   sessionMode: 'chat' | 'build' = 'chat'
@@ -89,6 +129,7 @@ export class ContextBuilder {
       memoryBudgetChars?: number
       userFile?: string | null
       promptProfile?: PromptProfile | string | null
+      runtimeIdentity?: (() => RuntimeIdentityInput) | null
     },
   ) {
     this.docsDir = docsDir
@@ -98,6 +139,7 @@ export class ContextBuilder {
       opts?.memoryBudgetChars ?? DEFAULT_MEMORY_BUDGET_CHARS
     this.userFile = opts?.userFile ?? null
     this.promptProfile = normalizePromptProfile(opts?.promptProfile)
+    this.runtimeIdentity = opts?.runtimeIdentity ?? null
   }
 
   setSubagentRegistry(subagentRegistry: SubagentRegistryLike | null): void {
@@ -239,6 +281,22 @@ export class ContextBuilder {
         scope: 'runtime',
         owner: 'default',
         ruleIds: ['execution.default_contract'],
+      })
+    }
+
+    const runtimeIdentity = this.runtimeIdentity?.()
+    if (runtimeIdentity) {
+      sections.push({
+        name: 'runtime_identity',
+        content: buildRuntimeIdentity(runtimeIdentity),
+        source: 'Core.runtime_identity',
+        priority: 89,
+        budgetChars: null,
+        version: null,
+        stability: 'dynamic',
+        scope: 'runtime',
+        owner: 'agent_role',
+        ruleIds: ['runtime.identity'],
       })
     }
 

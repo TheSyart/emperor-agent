@@ -1,8 +1,5 @@
 /**
- * 领域错误基类 (MIG-FND-008)。
- *
- * 对齐 Python 侧散落的 `class XxxError(ValueError/RuntimeError)`（SchedulerStoreCorrupt、
- * PlanQualityError、PlanEvidenceError 等）。所有错误可被 IPC 边界
+ * 领域错误基类。所有错误可被 IPC 边界
  * 序列化为「安全错误」——只暴露 code/message，不泄内部细节。
  */
 export interface SafeErrorPayload {
@@ -42,7 +39,7 @@ export class EmperorError extends Error {
   }
 }
 
-/** 持久化文件损坏（解析失败）。对齐 Python `SchedulerStoreCorrupt` 等。 */
+/** 持久化文件损坏（解析失败）。 */
 export class StoreCorruptError extends EmperorError {
   /** 被隔离的损坏文件备份路径（若已隔离）。 */
   readonly backupPath?: string
@@ -64,6 +61,15 @@ export class ParseError extends EmperorError {
 export class ValidationError extends EmperorError {
   constructor(message: string, options?: ErrorOptions) {
     super(message, 'validation_error', options)
+  }
+}
+
+/** A compatibility operation remains addressable for old clients but accepts no new work. */
+export class OperationRetiredError extends EmperorError {
+  constructor(message: string, action?: string) {
+    super(message, 'operation_retired', {
+      ...(action ? { action } : {}),
+    })
   }
 }
 

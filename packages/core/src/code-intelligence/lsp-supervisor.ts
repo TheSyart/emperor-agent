@@ -405,13 +405,16 @@ export class LspSupervisor {
       maxOutputBytes: LSP_OUTPUT_QUOTA_BYTES,
       outputPolicy: 'truncate_tail',
       outputQuotaScope: 'combined',
-      containment: {
-        mode: 'required',
-        workspaceRoot: instance.scratchRoot,
-        stateRoot: null,
-        tempRoot: instance.scratchRoot,
-        readOnlyRoots: [instance.workspaceRoot],
-        network: 'deny',
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'required',
+          workspaceRoot: instance.scratchRoot,
+          stateRoot: null,
+          tempRoot: instance.scratchRoot,
+          readOnlyRoots: [instance.workspaceRoot],
+          network: 'deny',
+        },
       },
     }
   }

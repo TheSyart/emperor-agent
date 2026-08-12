@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { CoreOperationResult } from '@emperor/core'
+import type { CoreOperationResult } from '@emperor/core/api'
 import { core } from '../../api/http'
 import { checkpointIcons } from '../../icons'
 
@@ -246,7 +246,7 @@ function message(reason: unknown): string {
         <div>
           <strong>默认关闭</strong>
           <span>
-            在 emperor.local.json 设置 workspace.fileCheckpoints.enabled=true
+            在 settings.json 设置 workspace.fileCheckpoints.enabled=true
             后重启。
           </span>
         </div>

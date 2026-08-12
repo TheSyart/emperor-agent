@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isPublicHttpRedirectResponse,
   PublicHttpClient,
   type PublicHttpTransport,
   type PublicHttpTransportRequest,
@@ -66,6 +67,8 @@ describe('PublicHttpClient', () => {
 
     const result = await client.get(request('https://example.com/docs'))
 
+    if (isPublicHttpRedirectResponse(result))
+      throw new Error('unexpected redirect response')
     expect(Buffer.from(result.body).toString('utf8')).toBe('public')
     expect(transport.requests[0]).toMatchObject({
       address: '93.184.216.34',
@@ -111,6 +114,115 @@ describe('PublicHttpClient', () => {
       client.get(request('https://mixed.example/')),
     ).rejects.toMatchObject({ code: 'blocked_address' })
     expect(transport.requests).toEqual([])
+  })
+
+  it('routes a hostname with only proxy-synthetic addresses through the trusted proxy transport', async () => {
+    const directTransport = new FakeTransport()
+    const proxyTransport = new FakeTransport()
+    proxyTransport.responses.push(
+      response({ chunks: [Buffer.from('proxied')] }),
+    )
+    const checkedUrls: string[] = []
+    const client = new PublicHttpClient({
+      transport: directTransport,
+      resolve: async () => [{ address: '198.18.0.102', family: 4 }],
+      syntheticProxyRoute: {
+        transport: proxyTransport,
+        canRoute: async (url) => {
+          checkedUrls.push(url.toString())
+          return true
+        },
+      },
+    })
+
+    const result = await client.get(
+      request('https://raw.githubusercontent.com/project/file'),
+    )
+
+    if (isPublicHttpRedirectResponse(result))
+      throw new Error('unexpected redirect response')
+    expect(Buffer.from(result.body).toString('utf8')).toBe('proxied')
+    expect(checkedUrls).toEqual([
+      'https://raw.githubusercontent.com/project/file',
+    ])
+    expect(directTransport.requests).toEqual([])
+    expect(proxyTransport.requests).toHaveLength(1)
+  })
+
+  it.each([
+    [
+      'no trusted route',
+      'https://example.com/',
+      async (): Promise<boolean> => false,
+    ],
+    [
+      'route detection failure',
+      'https://example.com/',
+      async (): Promise<boolean> => {
+        throw new Error('proxy lookup failed')
+      },
+    ],
+    ['IP literal', 'https://198.18.0.102/', async (): Promise<boolean> => true],
+  ] as const)(
+    'blocks proxy-synthetic addresses for %s',
+    async (_label, url, canRoute) => {
+      const proxyTransport = new FakeTransport()
+      const client = new PublicHttpClient({
+        transport: new FakeTransport(),
+        resolve: async () => [{ address: '198.18.0.102', family: 4 }],
+        syntheticProxyRoute: { transport: proxyTransport, canRoute },
+      })
+
+      await expect(client.get(request(url))).rejects.toMatchObject({
+        code: 'blocked_address',
+      })
+      expect(proxyTransport.requests).toEqual([])
+    },
+  )
+
+  it('blocks mixed public and proxy-synthetic DNS answers', async () => {
+    const proxyTransport = new FakeTransport()
+    const client = new PublicHttpClient({
+      transport: new FakeTransport(),
+      resolve: async () => [
+        { address: '93.184.216.34', family: 4 },
+        { address: '198.18.0.102', family: 4 },
+      ],
+      syntheticProxyRoute: {
+        transport: proxyTransport,
+        canRoute: async () => true,
+      },
+    })
+
+    await expect(
+      client.get(request('https://mixed.example/')),
+    ).rejects.toMatchObject({ code: 'blocked_address' })
+    expect(proxyTransport.requests).toEqual([])
+  })
+
+  it('revalidates the trusted proxy route for every synthetic redirect hop', async () => {
+    const proxyTransport = new FakeTransport()
+    proxyTransport.responses.push(
+      response({ status: 302, location: 'https://second.example/final' }),
+    )
+    const checkedHosts: string[] = []
+    const client = new PublicHttpClient({
+      transport: new FakeTransport(),
+      resolve: async () => [{ address: '198.18.0.102', family: 4 }],
+      syntheticProxyRoute: {
+        transport: proxyTransport,
+        canRoute: async (url) => {
+          checkedHosts.push(url.hostname)
+          return url.hostname === 'first.example'
+        },
+      },
+    })
+
+    await expect(
+      client.get(request('https://first.example/start')),
+    ).rejects.toMatchObject({ code: 'blocked_address' })
+    expect(checkedHosts).toEqual(['first.example', 'second.example'])
+    expect(proxyTransport.requests).toHaveLength(1)
   })
 
   it('rejects credentials, localhost, local domains, and unapproved protocols before DNS', async () => {
@@ -161,6 +273,56 @@ describe('PublicHttpClient', () => {
     ).rejects.toMatchObject({ code: 'blocked_address' })
     expect(transport.requests).toHaveLength(1)
     expect(firstClosed).toBe(1)
+  })
+
+  it('returns a cross-origin redirect without requesting the second host in manual mode', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push(
+      response({
+        status: 302,
+        location: 'https://other.example/final',
+      }),
+    )
+    const client = new PublicHttpClient({
+      transport,
+      resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+    })
+
+    await expect(
+      client.get({
+        ...request('https://first.example/start'),
+        redirectMode: 'manual_cross_origin',
+      }),
+    ).resolves.toEqual({
+      kind: 'redirect',
+      originalUrl: 'https://first.example/start',
+      redirectUrl: 'https://other.example/final',
+      status: 302,
+    })
+    expect(transport.requests).toHaveLength(1)
+  })
+
+  it('follows same-origin redirects in manual cross-origin mode', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push(
+      response({ status: 302, location: '/final' }),
+      response({ chunks: [Buffer.from('done')] }),
+    )
+    const client = new PublicHttpClient({
+      transport,
+      resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+    })
+
+    const result = await client.get({
+      ...request('https://first.example/start'),
+      redirectMode: 'manual_cross_origin',
+    })
+
+    expect(result).toMatchObject({
+      url: 'https://first.example/final',
+      status: 200,
+    })
+    expect(transport.requests).toHaveLength(2)
   })
 
   it('enforces the redirect limit and closes every redirected response', async () => {

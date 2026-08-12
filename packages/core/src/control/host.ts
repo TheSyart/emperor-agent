@@ -1,12 +1,11 @@
 /**
- * ControlManagerHost — sub-manager 依赖的 ControlManager 表面（打破 TS 循环依赖）。
- * 对齐 Python 各 sub-manager 通过 `self._cm` 访问的共享状态/方法。
+ * ControlManagerHost — sub-manager 依赖的最小 ControlManager 表面，
+ * 用于打破 TypeScript 循环依赖并约束共享状态访问。
  */
 import type { PlanRecord } from '../plans/models'
 import type { GoalRecord } from '../goals/models'
 import type { PlanStore } from '../plans/store'
 import type { ControlStore } from './store'
-import type { PlanPermissionTokenManager } from './plan-permissions'
 
 export interface ControlRuntimeScope {
   sessionId?: string | null
@@ -42,10 +41,14 @@ export interface TaskManagerLike {
   }): { id: string }
 }
 
+export interface PlanPermissionTokenPort {
+  issue(record: PlanRecord): PlanRecord
+}
+
 export interface ControlManagerHost {
   readonly planStore: PlanStore
   readonly store: ControlStore
-  readonly permissionTokens: PlanPermissionTokenManager
+  readonly permissionTokens: PlanPermissionTokenPort
   readonly planDecisionPolicy: import('./plan-policy').PlanDecisionPolicy
   readonly mode: string
   todoStore: TodoStoreLike | null

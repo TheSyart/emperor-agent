@@ -64,8 +64,8 @@ export class SchedulerJobExecutor {
     payload: SchedulerAgentTurnPayload,
   ) => Promise<string>
   private readonly teamManagerForProject:
-    ((projectId: string) => TeamWakeManager) | null
-  private readonly controlPending: () => boolean
+    ((projectId: string, sessionId: string | null) => TeamWakeManager) | null
+  private readonly controlPending: (sessionId: string | null) => boolean
   private readonly toolCallingAvailable: () => boolean
   private readonly systemHandlers: Record<string, SchedulerSystemHandler>
   private readonly watchlistService: WatchlistServiceLike | null
@@ -75,8 +75,9 @@ export class SchedulerJobExecutor {
     taskManager: TaskManager
     taskRuntime: TaskRuntimeRegistry
     submitAgentTurn: (payload: SchedulerAgentTurnPayload) => Promise<string>
-    teamManagerForProject?: ((projectId: string) => TeamWakeManager) | null
-    controlPending?: (() => boolean) | null
+    teamManagerForProject?:
+      ((projectId: string, sessionId: string | null) => TeamWakeManager) | null
+    controlPending?: ((sessionId: string | null) => boolean) | null
     toolCallingAvailable?: (() => boolean) | null
     systemHandlers?: Record<string, SchedulerSystemHandler>
     watchlistService?: WatchlistServiceLike | null
@@ -218,7 +219,7 @@ export class SchedulerJobExecutor {
     const message = job.payload.message.trim()
     if (!message)
       throw new Error('agent_turn scheduler job requires payload.message')
-    if (this.controlPending())
+    if (this.controlPending(schedulerPayloadSessionId(job.payload) || null))
       throw new Error(
         'cannot run scheduler agent_turn while Ask / Plan is pending',
       )
@@ -264,7 +265,10 @@ export class SchedulerJobExecutor {
     }
     if (!this.teamManagerForProject)
       throw new Error('team manager lookup is unavailable')
-    const manager = this.teamManagerForProject(projectId)
+    const manager = this.teamManagerForProject(
+      projectId,
+      schedulerPayloadSessionId(job.payload) || null,
+    )
     return String(
       await manager.sendMessage({
         to: target,

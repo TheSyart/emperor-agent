@@ -21,6 +21,9 @@ import {
 import type { TeamConfigPayload } from './store'
 import { TeamReadInboxTool, TeamSendMessageTool } from './tools'
 import type { HookAggregateDecision } from '../hooks/models'
+import type { SubagentSpec } from '../subagents/spec'
+import { AgentToolPolicyFactory } from '../tools/agent-policy'
+import { enforceAgentCompletionContract } from '../subagents/completion-contract'
 
 const ROLE_AGENT_TYPES: Record<string, string> = {
   coder: 'neiguan_yingzao',
@@ -40,10 +43,10 @@ export function roleToAgentType(role: string): string {
   )
 }
 
-export interface TeamSubagentSpec {
+export type TeamSubagentSpec = Partial<SubagentSpec> & {
   name?: string
-  tool_names?: string[]
-  toolNames?: string[]
+  tool_names?: readonly string[]
+  toolNames?: readonly string[]
 }
 export interface TeamSubagentRegistry {
   get(name: string): TeamSubagentSpec | null | undefined
@@ -103,6 +106,7 @@ interface ValidatedTeamCheckpoint {
 
 export class TeamManager {
   readonly projectId: string | null
+  readonly ownerSessionId: string | null
   readonly store: TeamStore
   readonly bus: MessageBus
   readonly parentRegistry: ToolRegistry
@@ -116,6 +120,7 @@ export class TeamManager {
     root: string
     teamDir?: string | null
     projectId?: string | null
+    ownerSessionId?: string | null
     parentRegistry?: ToolRegistry | null
     subagentRegistry: TeamSubagentRegistry
     runnerFactory?: TeamRunnerFactory | null
@@ -123,6 +128,7 @@ export class TeamManager {
     hooks?: TeamHookHost | null
   }) {
     this.projectId = opts.projectId?.trim() || null
+    this.ownerSessionId = opts.ownerSessionId?.trim() || null
     this.store = new TeamStore(opts.root, { teamDir: opts.teamDir ?? null })
     this.bus = new MessageBus(this.store)
     this.parentRegistry = opts.parentRegistry ?? new ToolRegistry()
@@ -494,15 +500,30 @@ export class TeamManager {
       })
       this.writeRunCheckpoint(working.name, run, 'running')
       executionStarted = true
-      const final = runner.stepStream
-        ? await runner.stepStream(run.history, async (evt) => {
-            await this.emit(
-              this.mapRunnerEvent(evt, working, opts.parent_call_id ?? null) ??
-                evt,
-              opts.eventSink,
-            )
-          })
-        : await runner.step(run.history)
+      const execute = async (history: Array<Record<string, unknown>>) =>
+        runner.stepStream
+          ? await runner.stepStream(history, async (evt) => {
+              await this.emit(
+                this.mapRunnerEvent(
+                  evt,
+                  working,
+                  opts.parent_call_id ?? null,
+                ) ?? evt,
+                opts.eventSink,
+              )
+            })
+          : await runner.step(history)
+      const initialFinal = await execute(run.history)
+      const final = await enforceAgentCompletionContract({
+        final: initialFinal,
+        requiredSections: spec.definition?.completion.requiredSections ?? [],
+        runRepair: async (prompt) =>
+          await execute([
+            ...run.history,
+            { role: 'assistant', content: initialFinal, ui_hidden: true },
+            { role: 'user', content: prompt, ui_hidden: true },
+          ]),
+      })
       const explicitReply = this.bus
         .allMessages(LEAD_ACTOR)
         .some(
@@ -729,11 +750,10 @@ export class TeamManager {
     member: TeamMember,
     spec: TeamSubagentSpec,
   ): ToolRegistry {
-    const registry = new ToolRegistry()
-    for (const name of toolNames(spec)) {
-      const tool = this.parentRegistry.get(name)
-      if (tool) registry.register(tool)
-    }
+    const registry = isMaterializedSubagentSpec(spec)
+      ? new AgentToolPolicyFactory(this.parentRegistry).create(spec, 'team')
+          .registry
+      : new ToolRegistry()
     registry.register(
       new TeamSendMessageTool(this, { sender: member.name, allowWake: false }),
     )
@@ -835,7 +855,19 @@ export class TeamManager {
 }
 
 function toolNames(spec: TeamSubagentSpec): string[] {
-  return spec.tool_names ?? spec.toolNames ?? []
+  return [...(spec.tool_names ?? spec.toolNames ?? [])]
+}
+
+function isMaterializedSubagentSpec(
+  spec: TeamSubagentSpec,
+): spec is SubagentSpec {
+  return Boolean(
+    spec.name &&
+    spec.definition &&
+    spec.source &&
+    spec.revision &&
+    Array.isArray(spec.toolNames),
+  )
 }
 
 function stringOrNull(value: unknown): string | null {

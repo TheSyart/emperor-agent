@@ -10,7 +10,9 @@
 1. 打开项目的 [GitHub Releases](https://github.com/TheSyart/emperor-agent/releases)。
 2. 根据操作系统和 CPU 架构选择 macOS、Windows 或 Linux 安装包。
 3. 当前公开包是未签名 Preview，不是 Stable。校验摘要、GitHub 构建来源和系统提示的方法见[未签名 Preview 安全说明](../release/unsigned-preview-notice.md)。
-4. 安装并启动应用。安装包已经包含 Electron/Node runtime，不需要另外安装 Node.js 或 Python。
+4. 安装并启动应用。安装包已经包含 Electron/Node runtime，不需要另外安装 Node.js 或 Python。首次启动会离线创建 Emperor Home、校验只读 runtime 并恢复中断的安装账本；正常完成时不显示额外向导。
+
+如果首次启动进入恢复页，按稳定错误码处理：可以重试、打开 Emperor Home 或退出。布局版本过新表示当前应用版本不能安全写入该目录，应升级应用；不要手工降低 `installation.json` 的版本号。
 
 没有公开安装包或不希望运行未签名版本时，可以按 [README 的源码运行说明](../../README.md#source) 启动开发版。
 
@@ -48,15 +50,15 @@
 完成下面四项即可确认基础链路可用：
 
 - 在 Chat 发送一个不需要工具的问题并收到模型回复。
-- 输入 `/status`，确认显示当前模型、会话和运行状态。
-- 输入 `/tools` 和 `/skills`，确认能看到当前可用能力。
+- 在 Composer 输入 `/`，确认菜单只显示核心 `Commands` 和当前可用 `Skills`。
+- 输入 `/model`，确认可以选择当前会话使用的模型；已安装 Skill 应以自己的 token 出现，例如 `/agent-reach`。
 - 创建 Build 后让 Agent 读取一个项目文件，确认路径属于刚才选择的 workspace。
 
 如果模型回复正常但文件或命令被拒绝，先查看当前权限模式，而不是反复重试。详见 [Plan 与 Goal](plan-goal.md) 和 [诊断与排障](diagnostics-troubleshooting.md)。
 
 ## 5. 数据与联网
 
-会话、记忆、模型配置和附件保存在本机；默认私有数据根是 `~/.emperor-agent`。以下操作仍会把必要内容发送到外部：
+会话、记忆、模型配置和附件保存在本机；默认 Emperor Home 是 `~/.emperor`。以下操作仍会把必要内容发送到外部：
 
 - 调用已配置的模型 Provider；
 - 使用网页搜索、网页抓取或远程 MCP；

@@ -9,6 +9,11 @@ import type {
   HookSourceV2,
 } from './models'
 import { parseHookOutput } from './schema'
+import {
+  createBoundedExternalContentEnvelope,
+  renderExternalContentEnvelope,
+  type ExternalContentSource,
+} from '../external-content'
 
 export interface HookExecutorHost {
   execute(
@@ -35,6 +40,7 @@ export interface HookOrchestratorRunResult {
   durationMs: number
   asyncRewakeEligible: boolean
   failureMode: 'open' | 'closed'
+  externalContentSource?: ExternalContentSource | null
 }
 
 export interface HookOrchestrationResult {
@@ -564,6 +570,18 @@ function runResult(
     durationMs: Date.now() - started,
     asyncRewakeEligible,
     failureMode: item.group.failureMode,
+    externalContentSource:
+      item.handler.type === 'http'
+        ? {
+            kind: 'hook_http',
+            locator: hookHttpExternalLocator(item.handler.url),
+            transport: 'hook_http',
+            provenance: {
+              handler_id: item.handler.id,
+              source_kind: item.source.kind,
+            },
+          }
+        : null,
   }
 }
 
@@ -671,18 +689,48 @@ function boundedContext(
   }>,
   maxBytes: number,
 ): string {
-  const combined = outputs
-    .filter(
-      ({ output }) =>
-        typeof output.additionalContext === 'string' &&
-        output.additionalContext.trim(),
+  const maximum = Math.max(0, maxBytes)
+  let combined = ''
+  for (const { result, output } of outputs) {
+    if (
+      typeof output.additionalContext !== 'string' ||
+      !output.additionalContext.trim()
     )
-    .map(
-      ({ result, output }) =>
-        `[${result.handlerId}]\n${String(output.additionalContext)}`,
-    )
-    .join('\n\n')
-  return truncateUtf8(combined, Math.max(0, maxBytes))
+      continue
+    const separator = combined ? '\n\n' : ''
+    const prefix = `${separator}[${result.handlerId}]\n`
+    const available =
+      maximum - Buffer.byteLength(combined) - Buffer.byteLength(prefix)
+    if (available <= 0) break
+    if (!result.externalContentSource) {
+      const content = truncateUtf8(output.additionalContext, available)
+      combined += prefix + content
+      if (content !== output.additionalContext) break
+      continue
+    }
+    const envelope = createBoundedExternalContentEnvelope({
+      source: result.externalContentSource,
+      content: output.additionalContext,
+      maxBytes: available,
+    })
+    const rendered = renderExternalContentEnvelope(envelope)
+    if (Buffer.byteLength(rendered) > available) break
+    combined += prefix + rendered
+  }
+  return combined
+}
+
+function hookHttpExternalLocator(value: string): string | null {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 function truncateUtf8(value: string, maxBytes: number): string {

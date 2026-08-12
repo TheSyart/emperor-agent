@@ -163,9 +163,11 @@ describe('ToolRegistry', () => {
       untrusted: true,
       backend: 'fake-search',
       query: 'agent runtime',
+      evidence_disposition: 'candidate',
     })
     expect(result.modelContent).toContain('[web_search_results]')
-    expect(result.modelContent).toContain('UNTRUSTED')
+    expect(result.modelContent).toContain('trust: untrusted_external')
+    expect(result.modelContent).toContain('instruction_policy: data_only')
     expect(result.modelContent).toContain('https://example.com/a')
     expect(result.modelContent).not.toContain('<script>')
   })
@@ -183,6 +185,28 @@ describe('ToolRegistry', () => {
     expect(result.metadata).toMatchObject({
       tool: 'web_search',
       backend: 'missing',
+    })
+  })
+
+  it('does not treat an empty search response as successful evidence', async () => {
+    const reg = new ToolRegistry()
+    reg.register(
+      new WebSearchTool({
+        name: 'empty-search',
+        search: async () => [],
+      }),
+    )
+
+    const result = await reg.executeResult('web_search', { query: 'news' })
+
+    expect(result).toMatchObject({
+      isError: true,
+      metadata: {
+        outcome: 'failure',
+        failure_kind: 'no_results',
+        retryable: true,
+        strategy_key: 'web_search:empty-search:no_results',
+      },
     })
   })
 
@@ -334,9 +358,9 @@ describe('context_pipeline', () => {
     expect(projectionAgain.report.tool_result_replacements).toEqual(
       projection.report.tool_result_replacements,
     )
-    expect(
-      readFileSync(join(root, String(replacement.artifact_path)), 'utf8'),
-    ).toBe(content)
+    expect(readFileSync(String(replacement.artifact_path), 'utf8')).toBe(
+      content,
+    )
     expect(String(toolMessage.content)).toContain(
       'Tool result stored outside the model context',
     )
@@ -432,16 +456,10 @@ describe('context_pipeline', () => {
       aggregateRecords,
     )
     expect(
-      readFileSync(
-        join(root, String(aggregateRecords[0]!.artifact_path)),
-        'utf8',
-      ),
+      readFileSync(String(aggregateRecords[0]!.artifact_path), 'utf8'),
     ).toBe(mediumA)
     expect(
-      readFileSync(
-        join(root, String(aggregateRecords[1]!.artifact_path)),
-        'utf8',
-      ),
+      readFileSync(String(aggregateRecords[1]!.artifact_path), 'utf8'),
     ).toBe(mediumB)
   })
 

@@ -25,6 +25,9 @@ export function permissionOnlyControlHost(
   control: ControlManager,
 ): ControlManagerRunnerHost {
   return {
+    get mode(): string {
+      return control.mode
+    },
     systemPrompt: () => '',
     toolDefinitions: (registry) => control.toolDefinitions(registry),
     assessPermission: (name, args, registry, opts) =>

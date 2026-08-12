@@ -5,6 +5,7 @@ import {
   mkdirSync,
   realpathSync,
   renameSync,
+  writeFileSync,
 } from 'node:fs'
 import {
   appendFile,
@@ -43,6 +44,10 @@ export interface EnvironmentStoreOptions {
 
 export interface EnvironmentStorePaths {
   root: string
+  bin: string
+  tools: string
+  data: string
+  registry: string
   jobs: string
   installations: string
   receipts: string
@@ -81,6 +86,10 @@ export class EnvironmentStore {
     const root = join(this.stateRoot, 'environment')
     this.paths = {
       root,
+      bin: join(root, 'bin'),
+      tools: join(root, 'tools'),
+      data: join(root, 'data'),
+      registry: join(root, 'registry.v1.json'),
       jobs: join(root, 'jobs'),
       installations: join(root, 'installations'),
       receipts: join(root, 'receipts'),
@@ -288,12 +297,26 @@ export class EnvironmentStore {
     mkdirSync(this.stateRoot, { recursive: true })
     ensureManagedDirectory(this.stateRoot, this.paths.root)
     for (const path of [
+      this.paths.bin,
       this.paths.jobs,
       this.paths.installations,
       this.paths.receipts,
       this.paths.downloads,
     ])
       ensureManagedDirectory(this.paths.root, path)
+    if (existsSync(this.paths.registry)) {
+      const stat = lstatSync(this.paths.registry)
+      if (stat.isSymbolicLink() || !stat.isFile())
+        throw new Error(
+          `Environment managed registry is unsafe: ${this.paths.registry}`,
+        )
+    } else {
+      writeFileSync(
+        this.paths.registry,
+        `${JSON.stringify({ schemaVersion: 1, tools: {} }, null, 2)}\n`,
+        { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+      )
+    }
   }
 
   private async readValidatedJson<T>(

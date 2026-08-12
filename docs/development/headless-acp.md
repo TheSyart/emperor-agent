@@ -18,7 +18,7 @@ npm ci
 npm run headless:acp -- --runtime-root "$PWD"
 ```
 
-进程从 stdin 读取一行一条的 JSON-RPC 消息，只把 ACP NDJSON 写到 stdout。启动失败和诊断写到 stderr。默认 `runtimeRoot` 是启动命令的当前目录，也可以用 `EMPEROR_AGENT_ROOT` 或 `--runtime-root` 指定；私有数据仍使用默认 `~/.emperor-agent`、`EMPEROR_CONFIG_DIR`，或显式 `--state-root`：
+进程从 stdin 读取一行一条的 JSON-RPC 消息，只把 ACP NDJSON 写到 stdout。启动失败和诊断写到 stderr。默认 `runtimeRoot` 是启动命令的当前目录，也可以用 `EMPEROR_AGENT_ROOT` 或 `--runtime-root` 指定；Emperor Home 使用默认 `~/.emperor`、`EMPEROR_CONFIG_DIR`，或显式 `--state-root`：
 
 ```bash
 EMPEROR_CONFIG_DIR=/absolute/private/state \

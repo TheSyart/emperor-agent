@@ -1,17 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import {
-  Tool,
-  type ToolExecutionContext,
-  type ToolExecutionResult,
-  type ToolResult,
-} from './base'
-import {
-  S,
-  toolParamsSchema,
-  type ParamSchema,
-  type ToolParamsSchema,
-} from './schema'
+import { Tool, type ToolExecutionContext } from './base'
+import { S, toolParamsSchema, type ParamSchema } from './schema'
 import { ToolRegistry } from './registry'
+import { AgentToolPolicyFactory } from './agent-policy'
 import { TaskKind, TaskStatus, type TaskRecord } from '../tasks/models'
 import type { TaskManager } from '../tasks/manager'
 import { TaskRuntimeRegistry, type TaskTerminalResult } from '../tasks/runtime'
@@ -59,6 +50,8 @@ export interface DispatchRunnerFactoryArgs {
   expectedGoalId?: string | null
   contextMode?: SubagentContextMode
   parentSystemPrompt?: string | null
+  /** Specialized Core-owned finalizers may enforce a stricter canonical contract. */
+  enforceCompletionContract?: boolean
 }
 
 export interface DispatchSubagentHookHost {
@@ -78,7 +71,13 @@ export interface DispatchSubagentToolOptions {
   taskManager?: TaskManager | null
   taskRuntime?: TaskRuntimeRegistry | null
   supervisor?: SubagentSupervisor | null
-  controlManager?: { mode?: string; [key: string]: unknown } | null
+  controlManager?:
+    | { mode?: string; [key: string]: unknown }
+    | ((sessionId: string | null) => {
+        mode?: string
+        [key: string]: unknown
+      } | null)
+    | null
   hooks?: DispatchSubagentHookHost | null
 }
 
@@ -88,6 +87,7 @@ export class DispatchSubagentTool extends Tool {
   override exclusive = false
   override requiresRuntimeContext = true
   override concurrencySafe = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
 
   private readonly parentRegistry: ToolRegistry
@@ -98,10 +98,16 @@ export class DispatchSubagentTool extends Tool {
   private readonly taskManager: TaskManager | null
   private readonly taskRuntime: TaskRuntimeRegistry | null
   private readonly supervisor: SubagentSupervisor | null
-  private readonly controlManager: {
-    mode?: string
-    [key: string]: unknown
-  } | null
+  private readonly controlManager:
+    | {
+        mode?: string
+        [key: string]: unknown
+      }
+    | ((sessionId: string | null) => {
+        mode?: string
+        [key: string]: unknown
+      } | null)
+    | null
   private readonly hooks: DispatchSubagentHookHost | null
 
   constructor(opts: DispatchSubagentToolOptions) {
@@ -217,7 +223,11 @@ export class DispatchSubagentTool extends Tool {
     if (!spec) {
       return `Error: unknown subagent '${agentType}'. Available: ${this.subagentRegistry.names({ includeAliases: true })}`
     }
-    const planError = this.planExplorationError(spec, args)
+    const planError = this.planExplorationError(
+      spec,
+      args,
+      ctx?.sessionId ?? null,
+    )
     if (planError) return planError
     if (this.supervisor && this.taskManager) {
       try {
@@ -387,8 +397,13 @@ export class DispatchSubagentTool extends Tool {
   private planExplorationError(
     spec: SubagentSpec,
     args: Record<string, unknown>,
+    sessionId: string | null = null,
   ): string {
-    if (String(this.controlManager?.mode ?? '') !== 'plan') return ''
+    const control =
+      typeof this.controlManager === 'function'
+        ? this.controlManager(sessionId)
+        : this.controlManager
+    if (String(control?.mode ?? '') !== 'plan') return ''
     if (!spec.planReadonlyExplorer) {
       return 'Error: Plan mode only allows dispatch_subagent for registry-marked read-only explorer subagents.'
     }
@@ -411,7 +426,11 @@ export class DispatchSubagentTool extends Tool {
   ): Promise<SubagentLaunchResult<string>> {
     if (!this.supervisor || !this.taskManager)
       throw new Error('subagent supervisor is unavailable')
-    const planError = this.planExplorationError(spec, args)
+    const planError = this.planExplorationError(
+      spec,
+      args,
+      ctx?.sessionId ?? null,
+    )
     if (planError) throw new Error(planError)
     const subRegistry = this.registryForSpec(spec)
     const subagentTask = composeSubagentTask(String(args.task ?? ''), {
@@ -578,133 +597,11 @@ export class DispatchSubagentTool extends Tool {
   }
 
   private registryForSpec(spec: SubagentSpec): ToolRegistry {
-    const names = new Set(spec.toolNames)
-    for (const definition of this.parentRegistry.getDefinitions()) {
-      const tool = this.parentRegistry.get(definition.name)
-      if (tool && allowedMcpTool(spec, definition.name, tool))
-        names.add(definition.name)
-    }
-    const registry = new ToolRegistry()
-    for (const name of names) {
-      const tool = this.parentRegistry.get(name)
-      if (tool) registry.register(new AgentPolicyTool(tool, spec))
-    }
-    return registry
+    return new AgentToolPolicyFactory(this.parentRegistry).create(
+      spec,
+      'dispatch',
+    ).registry
   }
-}
-
-class AgentPolicyTool extends Tool {
-  override readonly name: string
-  override readonly description: string
-  override readonly parameters: ToolParamsSchema
-  private readonly delegate: Tool
-  private readonly spec: SubagentSpec
-
-  constructor(delegate: Tool, spec: SubagentSpec) {
-    super()
-    this.delegate = delegate
-    this.spec = spec
-    this.name = delegate.name
-    this.description = delegate.description
-    this.parameters = delegate.parameters
-    this.readOnly = delegate.readOnly
-    this.exclusive = delegate.exclusive
-    this.requiresRuntimeContext = delegate.requiresRuntimeContext
-    this.maxResultChars = delegate.maxResultChars
-    this.concurrencySafe = delegate.concurrencySafe
-    this.evidencePolicy = delegate.evidencePolicy
-    this.classifiesStringErrors = delegate.classifiesStringErrors
-  }
-
-  override isReadOnly(args: Record<string, unknown>): boolean {
-    return this.delegate.isReadOnly(args)
-  }
-
-  override isDestructive(args?: Record<string, unknown>): boolean {
-    return this.delegate.isDestructive(args)
-  }
-
-  override isConcurrencySafe(args?: Record<string, unknown>): boolean {
-    return this.delegate.isConcurrencySafe(args)
-  }
-
-  override mutatesWorkspace(args: Record<string, unknown>): boolean {
-    return this.delegate.mutatesWorkspace(args)
-  }
-
-  override getPath(args: Record<string, unknown>): string | null {
-    return this.delegate.getPath?.(args) ?? null
-  }
-
-  override getPaths(args: Record<string, unknown>): string[] {
-    if (this.delegate.getPaths) return this.delegate.getPaths(args)
-    const path = this.delegate.getPath?.(args)
-    return path ? [path] : []
-  }
-
-  override execute(
-    args: Record<string, unknown>,
-    ctx?: ToolExecutionContext,
-  ): Promise<ToolExecutionResult> | ToolExecutionResult {
-    const denial = agentPolicyDenial(this.delegate, this.spec, args)
-    return denial ?? this.delegate.execute(args, ctx)
-  }
-
-  override mapResult(raw: string, ctx: ToolExecutionContext): ToolResult {
-    return this.delegate.mapResult(raw, ctx)
-  }
-}
-
-function agentPolicyDenial(
-  tool: Tool,
-  spec: SubagentSpec,
-  args: Record<string, unknown>,
-): string | null {
-  const definition = spec.definition
-  if (tool.name === 'load_skill') {
-    const name = String(args.name ?? '').trim()
-    const allowed = definition.skills.allow
-    if (!allowed.includes('*') && !allowed.includes(name))
-      return `[ERR] AgentDefinition denied Skill: ${safePolicyLabel(name)}`
-  }
-  if (isMcpTool(tool.name) && !allowedMcpTool(spec, tool.name, tool))
-    return `[ERR] AgentDefinition denied MCP tool: ${safePolicyLabel(tool.name)}`
-  if (definition.sandbox.process === 'deny' && tool.name === 'run_command')
-    return '[ERR] AgentDefinition sandbox denied process execution'
-  if (
-    definition.sandbox.network === 'deny' &&
-    (tool.name === 'web_fetch' || isMcpTool(tool.name))
-  )
-    return `[ERR] AgentDefinition sandbox denied network tool: ${safePolicyLabel(tool.name)}`
-  if (definition.sandbox.filesystem === 'read-only' && tool.isDestructive(args))
-    return `[ERR] AgentDefinition read-only sandbox denied destructive tool: ${safePolicyLabel(tool.name)}`
-  return null
-}
-
-function allowedMcpTool(
-  spec: SubagentSpec,
-  toolName: string,
-  tool?: Tool,
-): boolean {
-  if (!isMcpTool(toolName)) return false
-  const exactServer = String(
-    (tool as { mcpServerName?: unknown } | undefined)?.mcpServerName ?? '',
-  ).trim()
-  if (exactServer) return spec.definition.mcp.servers.includes(exactServer)
-  return spec.definition.mcp.servers.some((server) =>
-    toolName.startsWith(`mcp_${server}_`),
-  )
-}
-
-function isMcpTool(toolName: string): boolean {
-  return toolName.startsWith('mcp_')
-}
-
-function safePolicyLabel(value: string): string {
-  const cleaned = String(value ?? '')
-    .replace(/[^A-Za-z0-9_.:-]/g, '_')
-    .slice(0, 128)
-  return cleaned || 'unknown'
 }
 
 export function composeSubagentTask(

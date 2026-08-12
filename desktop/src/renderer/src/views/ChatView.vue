@@ -220,6 +220,10 @@ const composerLifecycleMode = computed(() =>
     goalCaptureStatus.value,
   ),
 )
+const planPaused = computed(() => {
+  const plans = ctx.planProjection.plans
+  return Boolean(plans[plans.length - 1]?.metadata?.execution_pause)
+})
 const goalActionPending = ref<GoalCardAction | null>(null)
 const goalReplacing = ref(false)
 const goalReplaceError = ref('')
@@ -548,6 +552,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
                 :interaction-blocked="Boolean(pendingInteraction)"
                 :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
                 :goal="activeGoal"
+                :plan-paused="planPaused"
                 :goal-capture-status="goalCaptureStatus"
                 :lifecycle-mode="composerLifecycleMode"
                 :commands="ctx.commands.value"
@@ -567,6 +572,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
                 "
                 :send-blocked-reason="sendBlockedReason"
                 :complete-command="ctx.completeSlashCommand"
+                :refresh-commands="ctx.refreshCommands"
                 @set-permission="ctx.setPermissionMode"
                 @activate-plan="activatePlan"
                 @activate-goal="activateGoalCapture"

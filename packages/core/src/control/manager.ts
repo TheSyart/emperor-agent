@@ -1,11 +1,14 @@
 /**
- * ControlManager (MIG-CTRL-002/011)。对齐 Python `agent/control/manager.py`。
+ * ControlManager。
  * 薄门面，委托 8 个子管理器；Ask/Plan 交互流 + 模式管理 + resume 消息逐字保真。
  */
 import { nowTs } from '../util/time'
 import { PermissionManager } from '../permissions/manager'
 import type { PlanPermissionToken } from '../permissions/models'
-import type { PermissionRuleInput } from '../permissions/rules'
+import type {
+  PermissionRuleInput,
+  PermissionRuleLayerInput,
+} from '../permissions/rules'
 import type { PermissionSemanticClassifier } from '../permissions/semantic-classifier'
 import type { ModelRouter } from '../model/router'
 import {
@@ -88,6 +91,7 @@ export interface ControlPendingObserver {
 export type AskMetaProvider = () => Record<string, unknown> | null
 
 export class ControlManager implements ControlManagerHost, ToolManagerHost {
+  readonly sessionId: string | null
   readonly store: ControlStore
   readonly planStore: PlanStore
   readonly policy: ControlPolicy
@@ -112,14 +116,23 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   constructor(
     root: string,
     opts: {
+      sessionId?: string | null
+      runtimeScope?: ControlRuntimeScope | null
+      store?: ControlStore
+      planStore?: PlanStore
+      goalMutations?: GoalGateMutationLedger
       permissionRules?: PermissionRuleInput[] | null
+      permissionRuleLayers?: PermissionRuleLayerInput[] | null
       permissionClassifier?: PermissionSemanticClassifier | null
       modelRouter?: Pick<ModelRouter, 'route'> | null
     } = {},
   ) {
-    this.store = new ControlStore(root)
-    this.goalMutations = new GoalGateMutationLedger(root)
-    this.planStore = new PlanStore(root)
+    this.sessionId = String(opts.sessionId ?? '').trim() || null
+    this.runtimeScope = normalizeRuntimeScope(opts.runtimeScope)
+    this.store =
+      opts.store ?? new ControlStore(root, { sessionId: this.sessionId })
+    this.goalMutations = opts.goalMutations ?? new GoalGateMutationLedger(root)
+    this.planStore = opts.planStore ?? new PlanStore(root)
     this.policy = new ControlPolicy(this)
     this.clarificationPolicy = new ClarificationPolicy()
     this.planDecisionPolicy = new PlanDecisionPolicy()
@@ -128,6 +141,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       {
         stateRoot: root,
         rules: opts.permissionRules ?? [],
+        layers: opts.permissionRuleLayers ?? [],
         classifier: opts.permissionClassifier,
         modelRouter: opts.modelRouter,
       },
@@ -458,12 +472,27 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
   }
 
   setPending(interaction: Interaction): void {
+    this.assertInteractionOwnership(interaction)
     const state = this.store.load()
     state.pending = interaction
     state.lastInteraction = interaction
     state.updatedAt = nowTs()
     this.store.save(state)
     this.notifyPendingSet(interaction)
+  }
+
+  private assertInteractionOwnership(interaction: Interaction): void {
+    if (!this.sessionId) return
+    for (const [key, value] of [
+      ['control_session_id', interaction.meta.control_session_id],
+      ['goal_session_id', interaction.meta.goal_session_id],
+    ] as const) {
+      const declared = String(value ?? '').trim()
+      if (declared && declared !== this.sessionId)
+        throw new Error(
+          `Control interaction ${key} does not match the session-owned manager.`,
+        )
+    }
   }
 
   updatePendingMeta(
@@ -920,7 +949,7 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       `- 当前权限模式：${this.mode}。\n` +
       '- `ask_before_edit`（询问确认）只自动执行只读操作；编辑、Shell 与外部写入会先询问。\n' +
       '- `smart_auto`（智能自动）会自动执行工作区编辑、构建测试和确定安全的本地命令；高影响或不确定操作会先询问。\n' +
-      '- `full_access`（完全访问）不发起普通权限审批，但仍受明确拒绝、Plan 只读、schema、工具可用性和系统边界约束。\n' +
+      '- `full_access`（完全访问）让主 Agent 的 `run_command` 在宿主环境直执且免询问；明确拒绝、Plan 只读、子代理/AgentDefinition、schema 和工具可用性边界仍有效。\n' +
       '- `ask_user` 只用于目标、范围、产品取舍等真实歧义，绝不能代替运行时权限审批。\n' +
       '- 删除、覆盖、提交、推送、发布和部署是否需要确认，只由权限层按当前模式判断。目标和精确对象已经明确时，直接调用工具；不要再次用自然语言要求确认。\n' +
       '- 可通过只读探索确认的事实先探索；只有仍存在会改变实施方案的关键取舍时才提问。\n' +
@@ -948,6 +977,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       cwd?: string | null
       taskIntent?: string | null
       authorizationId?: string | null
+      executionBoundary?: 'sandbox' | 'host'
+      fileExecutionScopes?: readonly import('../permissions/workspace-policy').FileExecutionScope[]
     },
   ) {
     return await this.permissionManager.assess(name, args, {
@@ -966,6 +997,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
       cwd?: string | null
       taskIntent?: string | null
       authorizationId?: string | null
+      executionBoundary?: 'sandbox' | 'host'
+      fileExecutionScopes?: readonly import('../permissions/workspace-policy').FileExecutionScope[]
     },
   ) {
     return await this.permissionManager.assessBatch(calls, {
@@ -1080,8 +1113,8 @@ export class ControlManager implements ControlManagerHost, ToolManagerHost {
 
   resolvePlanReviewerFact(
     goal: import('../goals/models').GoalRecord,
-    context: import('../goals/plan-bridge').PlanReviewerContext,
-  ): import('../goals/plan-bridge').PlanReviewerFact | null {
+    context: import('../goals/contracts/planning').PlanReviewerContext,
+  ): import('../goals/contracts/planning').PlanReviewerFact | null {
     return this.verification.resolvePlanReviewerFact(goal, context)
   }
 

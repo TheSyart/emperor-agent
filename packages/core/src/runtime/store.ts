@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { cleanString } from '../util/strings'
 import {
   appendFileSync,
@@ -6,12 +6,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
+import { compactReplayEvents } from './replay'
 import { relativePortable } from '../util/paths'
 import {
   adaptRuntimeEventToEnvelope,
@@ -21,8 +21,18 @@ import {
   type EventEnvelopeV2,
   type EventVisibility,
 } from './envelope'
+import {
+  AppendOnlyJournalSync,
+  AtomicSnapshotSync,
+  durableReplaceSync,
+  type JournalCodec,
+  type SnapshotCodec,
+  type SyncPersistenceAdapter,
+} from '../store/persistence'
 
 type Row = Record<string, any>
+
+export { compactReplayEvents } from './replay'
 
 export interface RuntimeAppendOptions {
   turnId?: string | null
@@ -47,61 +57,6 @@ export interface RuntimeReplayOptions {
   includeArchive?: boolean | null
   compact?: boolean | null
   visibility?: EventVisibility | EventVisibility[] | null
-}
-
-/**
- * replay 读取侧压缩（P1-5）：磁盘 events.jsonl 不变，只收敛回放流里的高频中间态。
- * - 连续的同流 plan_draft_delta 只保留最后一条（终态草稿覆盖前序增量）。
- * - 连续的同 turn message_delta 合并为一条（保留首个 seq，文本拼接）。
- * - 连续的同 Goal goal_runtime_update 只保留最后一条。
- * 任何其他事件都会打断 run，保证投影出的消息结构与不压缩时一致。
- */
-export function compactReplayEvents(rows: Row[]): Row[] {
-  const out: Row[] = []
-  for (const row of rows) {
-    const prev = out[out.length - 1]
-    if (
-      row.event === 'goal_runtime_update' &&
-      prev?.event === 'goal_runtime_update' &&
-      cleanString(prev.goal_id) === cleanString(row.goal_id)
-    ) {
-      out[out.length - 1] = row
-      continue
-    }
-    if (
-      row.event === 'plan_draft_delta' &&
-      prev?.event === 'plan_draft_delta' &&
-      planDeltaStreamKey(prev) === planDeltaStreamKey(row) &&
-      String(prev.turn_id ?? '') === String(row.turn_id ?? '')
-    ) {
-      out[out.length - 1] = row
-      continue
-    }
-    if (
-      row.event === 'message_delta' &&
-      prev?.event === 'message_delta' &&
-      String(prev.turn_id ?? '') === String(row.turn_id ?? '')
-    ) {
-      out[out.length - 1] = {
-        ...prev,
-        delta: String(prev.delta ?? '') + String(row.delta ?? ''),
-      }
-      continue
-    }
-    out.push(row)
-  }
-  return out
-}
-
-function planDeltaStreamKey(row: Row): string {
-  const interaction = isRecord(row.interaction) ? row.interaction : {}
-  const meta = isRecord(interaction.meta) ? interaction.meta : {}
-  return (
-    cleanString(meta.plan_stream_id) ||
-    cleanString(interaction.parent_call_id) ||
-    cleanString(row.tool_call_id) ||
-    cleanString(interaction.id)
-  )
 }
 
 export interface RuntimeStats {
@@ -161,6 +116,9 @@ export class RuntimeEventStore {
   readonly indexFile: string
   private readonly sessionId: string | null
   private readonly writeEnvelopeV2: boolean
+  private readonly persistenceAdapter?: SyncPersistenceAdapter
+  private readonly eventJournal: AppendOnlyJournalSync<Row>
+  private readonly indexSnapshot: AtomicSnapshotSync<Row>
   private readonly idempotencyIndex = new Map<string, Row>()
   private _latestSeq = 0
   private lastIndexWriteMs = 0
@@ -170,18 +128,33 @@ export class RuntimeEventStore {
     opts: {
       sessionDirOverride?: boolean
       writeEnvelopeV2?: boolean | null
+      persistenceAdapter?: SyncPersistenceAdapter
     } = {},
   ) {
     this.root = root
     this.sessionId = opts.sessionDirOverride ? basename(root) || null : null
     this.writeEnvelopeV2 =
       opts.writeEnvelopeV2 ?? process.env.EMPEROR_EVENT_ENVELOPE_V2 === '1'
+    this.persistenceAdapter = opts.persistenceAdapter
     this.runtimeDir = opts.sessionDirOverride
       ? join(root, 'runtime')
       : join(root, 'memory', 'runtime')
     this.eventsFile = join(this.runtimeDir, 'events.jsonl')
     this.archiveDir = join(this.runtimeDir, 'archive')
     this.indexFile = join(this.runtimeDir, 'index.json')
+    this.eventJournal = new AppendOnlyJournalSync({
+      path: this.eventsFile,
+      codec: RUNTIME_EVENT_JOURNAL_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+      recoveryMode: 'tolerant',
+    })
+    this.indexSnapshot = new AtomicSnapshotSync({
+      path: this.indexFile,
+      codec: RUNTIME_INDEX_CODEC,
+      adapter: this.persistenceAdapter,
+      fileMode: 0o600,
+    })
     this.ensure()
     this._latestSeq = this.scanLatestSeq()
     this.rebuildIdempotencyIndex()
@@ -245,7 +218,7 @@ export class RuntimeEventStore {
           }) as unknown as Row)
         : payload
     const projected = this.normalizeEvent(stored)!
-    appendFileSync(this.eventsFile, JSON.stringify(stored) + '\n', 'utf8')
+    this.eventJournal.appendAtSequence(stored, this._latestSeq)
     if (idempotencyKey) this.idempotencyIndex.set(idempotencyKey, stored)
     // B6：index 重建是 O(全部事件) 的全量扫描，高频 delta 期间按时间窗节流；
     // 终态事件强制落盘，保证崩溃后 index 至多落后一个窗口。
@@ -348,7 +321,11 @@ export class RuntimeEventStore {
   private ensure(): void {
     mkdirSync(this.runtimeDir, { recursive: true })
     mkdirSync(this.archiveDir, { recursive: true })
-    if (!existsSync(this.eventsFile)) writeFileSync(this.eventsFile, '', 'utf8')
+    if (!existsSync(this.eventsFile))
+      durableReplaceSync(this.eventsFile, '', {
+        adapter: this.persistenceAdapter,
+        fileMode: 0o600,
+      })
     if (!existsSync(this.indexFile))
       this.writeIndex(this.statsFromIndex({ version: 1 }))
   }
@@ -386,8 +363,9 @@ export class RuntimeEventStore {
   }
 
   private iterStoredHotEvents(): Row[] {
-    if (!existsSync(this.eventsFile)) return []
-    return this.parseStoredJsonl(readFileSync(this.eventsFile, 'utf8'))
+    return this.eventJournal
+      .replay({ repairTail: true })
+      .entries.map((entry) => entry.payload)
   }
 
   private iterStoredArchiveEvents(): Row[] {
@@ -513,24 +491,14 @@ export class RuntimeEventStore {
   }
 
   private loadIndex(): Row {
-    try {
-      const raw = JSON.parse(readFileSync(this.indexFile, 'utf8') || '{}')
-      return raw && typeof raw === 'object' && !Array.isArray(raw)
-        ? raw
-        : { version: 1, latestSeq: this._latestSeq }
-    } catch {
-      return { version: 1, latestSeq: this._latestSeq }
-    }
+    return this.indexSnapshot.read({
+      fallback: { version: 1, latestSeq: this._latestSeq },
+    }).value
   }
 
   private writeIndex(index: Row): void {
     const payload = { ...(jsonSafe(index) as Row), version: 1 }
-    const tmp = join(
-      this.runtimeDir,
-      `.${basename(this.indexFile)}.${randomUUID().replace(/-/g, '')}.tmp`,
-    )
-    writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8')
-    renameSync(tmp, this.indexFile)
+    this.indexSnapshot.write(payload)
   }
 
   private appendArchive(events: Row[]): void {
@@ -552,17 +520,70 @@ export class RuntimeEventStore {
   }
 
   private rewriteHot(events: Row[]): void {
-    const tmp = join(
-      dirname(this.eventsFile),
-      `.${basename(this.eventsFile)}.${randomUUID().replace(/-/g, '')}.tmp`,
-    )
-    writeFileSync(
-      tmp,
+    durableReplaceSync(
+      this.eventsFile,
       events.map((event) => JSON.stringify(jsonSafe(event)) + '\n').join(''),
-      'utf8',
+      { adapter: this.persistenceAdapter, fileMode: 0o600 },
     )
-    renameSync(tmp, this.eventsFile)
   }
+}
+
+const RUNTIME_EVENT_JOURNAL_CODEC: JournalCodec<Row> = {
+  schemaVersion: 2,
+  create(_seq, payload) {
+    const seq = storedSequence(payload)
+    if (!Number.isSafeInteger(seq) || seq < 1)
+      throw new Error('runtime event sequence is invalid')
+    return {
+      schemaVersion: isEventEnvelopeV2(payload) ? 2 : 1,
+      seq,
+      checksum: runtimeRowChecksum(payload),
+      payload,
+    }
+  },
+  encode(entry) {
+    return entry.payload
+  },
+  decode(input) {
+    if (
+      !isEventEnvelopeV2(input) &&
+      (!input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        typeof (input as Row).event !== 'string')
+    )
+      throw new Error('runtime journal row is invalid')
+    const payload = jsonSafe({ ...(input as Row) }) as Row
+    const seq = storedSequence(payload)
+    if (!Number.isSafeInteger(seq) || seq < 1)
+      throw new Error('runtime event sequence is invalid')
+    return {
+      schemaVersion: isEventEnvelopeV2(payload) ? 2 : 1,
+      seq,
+      checksum: runtimeRowChecksum(payload),
+      payload,
+    }
+  },
+}
+
+const RUNTIME_INDEX_CODEC: SnapshotCodec<Row> = {
+  schemaVersion: 1,
+  encode(value) {
+    return value
+  },
+  decode(input) {
+    return {
+      value:
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? (input as Row)
+          : { version: 1 },
+      schemaVersion: 1,
+    }
+  },
+}
+
+function runtimeRowChecksum(row: Row): string {
+  return createHash('sha256').update(JSON.stringify(row)).digest('hex')
 }
 
 function eventTsSeconds(event: Row): number {

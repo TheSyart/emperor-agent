@@ -1,5 +1,5 @@
 import * as nodePty from 'node-pty'
-import type { PtyHandle, PtyHost } from '@emperor/core'
+import type { PtyHandle, PtyHost } from '@emperor/core/host-capabilities'
 
 export class NodePtyHost implements PtyHost {
   spawn(input: {

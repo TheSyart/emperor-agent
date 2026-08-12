@@ -1,5 +1,5 @@
 /**
- * 历史 jsonl 热段 + 归档 (MIG-MEM-001)。对齐 Python `agent/memory_history.py`。
+ * 历史 jsonl 热段 + 归档。
  * 热段保持小；compact 时把不再活跃的行归档到 history_archive/<month>.jsonl.gz。
  * 磁盘兼容: history.jsonl 行 schema + history_index.json 不变。
  */
@@ -339,7 +339,7 @@ export class HistoryLog {
     }
     for (const [month, items] of grouped) {
       const path = join(this.archiveDir, `${month}.jsonl.gz`)
-      // gzip 成员可拼接：现有 gz + 新 gz 段。对齐 Python gzip.open(at) 行为。
+      // gzip 允许拼接成员：现有 gz + 新 gz 段仍可流式解压。
       const body = items
         .map((row) => JSON.stringify(jsonSafe(row)) + '\n')
         .join('')

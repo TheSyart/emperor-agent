@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { todayUtc8 } from '../memory/time-utc8'
 import type { PromptContextPlan } from '../prompts/manifest'
-import type { ContextSection } from '../agent/context-builder'
+import type { ContextSection } from './contracts'
 import {
   contextPolicyForMode,
   type ContextMode,

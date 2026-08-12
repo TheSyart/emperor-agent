@@ -42,6 +42,22 @@ class FakeTool extends Tool {
     this.description = opts.description ?? `${name} description`
     this.readOnly = opts.readOnly ?? false
     this.concurrencySafe = opts.concurrencySafe ?? false
+    if (name.startsWith('mcp_')) {
+      const [serverName = 'test', ...toolNameParts] = name
+        .slice('mcp_'.length)
+        .split('_')
+      this.externalContent = true
+      this.capabilityProvenance = {
+        kind: 'mcp_declaration',
+        serverName,
+        toolName: toolNameParts.join('_') || name,
+        transport: 'test',
+        readOnlySource: 'tool_override',
+        exclusiveSource: 'tool_override',
+        generation: 1,
+        clientId: 'test-client',
+      }
+    }
   }
 
   execute(): string {
@@ -184,8 +200,28 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     ).toContain('# Writer')
     expect(refreshes).toBe(1)
 
+    writeFileSync(
+      join(stateRoot, 'skills', 'installed.v1.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        skills: {
+          writer: { name: 'writer', status: 'active' },
+          retained: { name: 'retained', status: 'blocked' },
+        },
+      })}\n`,
+      'utf8',
+    )
+
     expect(service.delete('writer')).toEqual({ deleted: 'writer' })
     expect(existsSync(join(stateRoot, 'skills', 'writer'))).toBe(false)
+    expect(
+      JSON.parse(
+        readFileSync(join(stateRoot, 'skills', 'installed.v1.json'), 'utf8'),
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      skills: { retained: { name: 'retained', status: 'blocked' } },
+    })
     expect(refreshes).toBe(2)
     expect(() => service.save('../bad', '# Bad')).toThrow(
       'Skill name must be a safe directory name',
@@ -253,6 +289,37 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       effort: 'high',
       invocationSources: ['desktop'],
       sensitiveArguments: ['token'],
+    })
+  })
+
+  it('parses Claude-compatible top-level command frontmatter', () => {
+    const stateRoot = tmp('emperor-skill-service-claude-frontmatter-')
+    const skillDir = join(stateRoot, 'skills', 'web-research')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: web-research',
+        'description: Research public sources.',
+        'user-invocable: false',
+        'argument-hint: "[query]"',
+        'allowed-tools: [web_fetch, run_command]',
+        'context: fork',
+        '---',
+        '',
+        '# Research',
+      ].join('\n'),
+      'utf8',
+    )
+
+    expect(
+      new CoreSkillService(stateRoot).get('web-research').command,
+    ).toMatchObject({
+      userInvocable: false,
+      argumentHint: '[query]',
+      allowedTools: ['web_fetch', 'run_command'],
+      context: 'fork',
     })
   })
 
@@ -339,7 +406,7 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     })
   })
 
-  it('preserves blocked_pending_review even when blocked content is invalid', () => {
+  it('treats legacy blocked markers as non-authoritative filesystem metadata', () => {
     const stateRoot = tmp('emperor-skill-service-blocked-')
     const skillDir = join(stateRoot, 'skills', 'legacy-script')
     mkdirSync(skillDir, { recursive: true })
@@ -352,7 +419,7 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     expect(new CoreSkillService(stateRoot).list()).toEqual([
       expect.objectContaining({
         name: 'legacy-script',
-        status: 'blocked_pending_review',
+        status: 'invalid',
       }),
     ])
   })

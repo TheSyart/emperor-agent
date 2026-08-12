@@ -1,5 +1,5 @@
 /**
- * ToolExecutionEngine (MIG-CORE-008 支撑)。对齐 Python `agent/tools/execution.py`。
+ * ToolExecutionEngine。
  * concurrency_safe 连续工具成组并发，其余顺序执行；emit tool_run_* 事件；TurnPaused 冒泡。
  */
 import type { ToolCallRequest } from '../providers/base'

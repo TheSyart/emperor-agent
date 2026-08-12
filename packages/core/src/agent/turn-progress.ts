@@ -10,6 +10,10 @@ export interface TurnProgressSnapshot {
   readonly repeatedReadCount: number
   readonly noProgressIterations: number
   readonly lastIterationHadError: boolean
+  readonly repeatedFailureStrategyKey?: string | null
+  readonly repeatedFailureStrategyCount?: number
+  readonly externalEvidenceUrls?: string[]
+  readonly externalCandidateUrls?: string[]
 }
 
 interface ReadCoverage {
@@ -30,6 +34,10 @@ export class TurnProgressLedger {
   private noProgressIterations = 0
   private iterationHadError = false
   private lastIterationHadError = false
+  private repeatedFailureStrategyKey: string | null = null
+  private repeatedFailureStrategyCount = 0
+  private readonly externalEvidenceUrls = new Set<string>()
+  private readonly externalCandidateUrls = new Set<string>()
 
   recordToolResult(
     call: ToolCallRequest,
@@ -39,13 +47,57 @@ export class TurnProgressLedger {
       readonly readOnly: boolean
       readonly planPhase?: string | null
       readonly verificationEvidence?: boolean
+      readonly externalContent?: boolean
     },
   ): void {
-    if (!opts.executed || result.isError) {
-      this.iterationHadError = true
-      this.pushError(`${call.name}:${errorKind(result.summary)}`)
+    const outcome = String(
+      result.metadata.outcome ?? (result.isError ? 'failure' : 'success'),
+    )
+    if (!opts.executed || result.isError || outcome !== 'success') {
+      if (result.isError || outcome === 'failure') this.iterationHadError = true
+      const strategyKey = String(
+        result.metadata.strategy_key ??
+          `${call.name}:${String(result.metadata.failure_kind ?? errorKind(result.summary))}`,
+      )
+      if (strategyKey === this.repeatedFailureStrategyKey)
+        this.repeatedFailureStrategyCount += 1
+      else {
+        this.repeatedFailureStrategyKey = strategyKey
+        this.repeatedFailureStrategyCount = 1
+      }
+      this.pushError(
+        `${call.name}:${String(result.metadata.failure_kind ?? errorKind(result.summary))}`,
+      )
       return
     }
+    this.repeatedFailureStrategyKey = null
+    this.repeatedFailureStrategyCount = 0
+    const evidenceDisposition = String(
+      result.metadata.evidence_disposition ?? 'none',
+    )
+    if (opts.externalContent && evidenceDisposition === 'candidate') {
+      let discovered = false
+      for (const url of externalEvidenceUrls(result)) {
+        if (this.externalCandidateUrls.size >= 64) break
+        if (!this.externalCandidateUrls.has(url)) discovered = true
+        this.externalCandidateUrls.add(url)
+      }
+      if (discovered) this.markProgress()
+      return
+    }
+    if (opts.externalContent && evidenceDisposition === 'verified') {
+      for (const url of externalEvidenceUrls(result)) {
+        if (this.externalEvidenceUrls.size >= 64) break
+        this.externalEvidenceUrls.add(url)
+      }
+    }
+    const workspaceEffect = String(result.metadata.workspace_effect ?? '')
+    if (
+      call.name === 'run_command' &&
+      workspaceEffect === 'none' &&
+      !opts.verificationEvidence
+    )
+      return
     const argumentsFingerprint = digest(stableJson(call.arguments))
     if (opts.planPhase === 'verifying') {
       if (!opts.verificationEvidence) return
@@ -111,6 +163,10 @@ export class TurnProgressLedger {
       repeatedReadCount: this.repeatedReadCount,
       noProgressIterations: this.noProgressIterations,
       lastIterationHadError: this.lastIterationHadError,
+      repeatedFailureStrategyKey: this.repeatedFailureStrategyKey,
+      repeatedFailureStrategyCount: this.repeatedFailureStrategyCount,
+      externalEvidenceUrls: [...this.externalEvidenceUrls],
+      externalCandidateUrls: [...this.externalCandidateUrls],
     }
   }
 
@@ -177,6 +233,35 @@ export class TurnProgressLedger {
     if (!target.includes(value)) target.push(value)
     if (target.length > 32) target.shift()
   }
+}
+
+function externalEvidenceUrls(result: ToolResultObj): string[] {
+  const evidence =
+    result.metadata.evidence &&
+    typeof result.metadata.evidence === 'object' &&
+    !Array.isArray(result.metadata.evidence)
+      ? (result.metadata.evidence as Record<string, unknown>)
+      : {}
+  const resultRows = Array.isArray(result.metadata.results)
+    ? (result.metadata.results as Array<Record<string, unknown>>)
+    : []
+  const candidates = [
+    result.metadata.url,
+    evidence.url,
+    ...resultRows.map((row) => row?.url),
+    ...(result.rawContent.match(/https?:\/\/[^\s<>()"']+/g) ?? []),
+  ]
+  const urls = new Set<string>()
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(String(candidate ?? ''))
+      if (url.protocol === 'http:' || url.protocol === 'https:')
+        urls.add(url.toString())
+    } catch {
+      // Ignore malformed external evidence locators.
+    }
+  }
+  return [...urls]
 }
 
 function positiveInteger(value: unknown, fallback: number): number {

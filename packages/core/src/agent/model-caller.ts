@@ -1,5 +1,5 @@
 /**
- * ModelCaller (MIG-CORE-001)。对齐 Python `agent/runner_model.py`。
+ * ModelCaller。
  * 统一调用全局激活模型并记录重试元数据；不执行跨模型 fallback。
  */
 import {
@@ -126,6 +126,8 @@ export class ModelCaller {
     tools: Array<Record<string, unknown>> | null
     emit: StreamEmitter | null
     signal?: AbortSignal | null
+    usageType?: string
+    maxTokens?: number
     onToolCallComplete?:
       ((call: ToolCallRequest) => void | Promise<void>) | null
   }): Promise<LLMResponse> {
@@ -172,7 +174,7 @@ export class ModelCaller {
           to_model_entry_id: fallback.modelEntryId,
           reason: turn.fallbackReason,
           error_kind: turn.fallbackReason,
-          usage_type: runner.usageType,
+          usage_type: opts.usageType ?? runner.usageType,
         })
       return await this.askTarget({
         target: fallback,
@@ -194,6 +196,8 @@ export class ModelCaller {
       tools: Array<Record<string, unknown>> | null
       emit: StreamEmitter | null
       signal?: AbortSignal | null
+      usageType?: string
+      maxTokens?: number
       onToolCallComplete?:
         ((call: ToolCallRequest) => void | Promise<void>) | null
     }
@@ -213,7 +217,7 @@ export class ModelCaller {
       streamEmit,
       PLAN_DELTA_INTERVAL_MS,
     )
-    const maxTokens = costBoundMaxTokens({
+    const budgetBoundMaxTokens = costBoundMaxTokens({
       policy,
       turn,
       target,
@@ -223,6 +227,10 @@ export class ModelCaller {
           target.supportsToolCall ? opts.tools : null,
         ),
     })
+    const requestedMaxTokens = Number.isFinite(opts.maxTokens)
+      ? Math.max(1, Math.trunc(opts.maxTokens!))
+      : budgetBoundMaxTokens
+    const maxTokens = Math.min(budgetBoundMaxTokens, requestedMaxTokens)
     this.runner.lastModelCall = initialCallMeta(
       this.runner,
       target,
@@ -235,7 +243,7 @@ export class ModelCaller {
         provider: target.provider,
         model: target.model,
         providerName: target.providerName,
-        usageType: this.runner.usageType,
+        usageType: opts.usageType ?? this.runner.usageType,
         maxTokens,
         temperature: target.temperature,
         reasoningEffort: target.reasoningEffort,

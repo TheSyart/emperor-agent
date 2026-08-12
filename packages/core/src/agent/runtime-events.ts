@@ -1,7 +1,6 @@
 /**
- * Runtime 事件工厂子集 (runner/engine 用；W14 RTE-001 的最小切片)。
- * 对齐 Python `agent/runtime/events.py` 被 runner.py + tools/execution.py 引用的部分。
- * 返回纯事件 dict，供 emit 透传。
+ * Runner/ToolExecutionEngine 共用的 Runtime 事件工厂。
+ * 返回纯事件 payload，供 emitter 透传。
  */
 
 const MAX_RUNTIME_TOOL_OUTPUT_CHARS = 12_000
@@ -104,6 +103,21 @@ export function planVerificationDone(opts: {
     plan_id: opts.planId,
     step_id: opts.stepId,
     result: opts.result,
+  }
+}
+
+export function researchValidation(opts: {
+  stage: 'deterministic' | 'grounding_review' | 'passed' | 'failed'
+  sourceCount: number
+  factUnitCount: number
+  reasonCode?: string | null
+}): Record<string, unknown> {
+  return {
+    event: 'research_validation',
+    stage: opts.stage,
+    source_count: Math.max(0, Math.trunc(opts.sourceCount)),
+    fact_unit_count: Math.max(0, Math.trunc(opts.factUnitCount)),
+    ...(opts.reasonCode ? { reason_code: opts.reasonCode.slice(0, 80) } : {}),
   }
 }
 

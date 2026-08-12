@@ -4,7 +4,7 @@ import type {
   GitStatusResult,
   GitWorktreeSummary,
   PullRequestSummary,
-} from '@emperor/core'
+} from '@emperor/core/api'
 import {
   ArrowDown,
   ArrowUp,

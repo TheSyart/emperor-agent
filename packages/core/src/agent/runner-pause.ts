@@ -4,20 +4,27 @@
  * 配对补齐（INV-001）。与 runner 内原实现语义逐字一致。
  */
 import { TurnPaused } from '../control/exceptions'
-import { interactionToDict } from '../control/models'
+import { interactionToDict, type Interaction } from '../control/models'
 import { controlSessionMeta, parsePauseResult } from '../control/tools'
 import type { ToolCallRequest } from '../providers/base'
 import type { CheckpointWriteOptions } from '../sessions/checkpoint'
 import type { ToolResultObj } from '../tools/base'
 import { controlInteractionEvent } from './runner-helpers'
-import type { ControlManagerRunnerHost, MemoryStoreLike } from './runner'
 
 type Msg = Record<string, unknown>
 type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 
 export interface PauseHost {
-  controlManager: ControlManagerRunnerHost | null
-  memoryStore: MemoryStoreLike | null
+  controlManager: {
+    createAsk(opts: {
+      questions: Array<Record<string, unknown>>
+      context?: string
+      meta?: Record<string, unknown> | null
+    }): Interaction
+  } | null
+  memoryStore: {
+    writeCheckpoint(history: Msg[], opts?: CheckpointWriteOptions): void
+  } | null
   sessionId?: string | null
 }
 

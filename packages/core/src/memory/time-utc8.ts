@@ -1,5 +1,5 @@
 /**
- * UTC+8 ISO 时间戳 (memory 层用)。对齐 Python `datetime.now(_UTC8).isoformat(timespec="seconds")`。
+ * UTC+8 ISO 时间戳 (memory 层用)。
  * 输出形如 2026-06-26T14:28:01+08:00。
  */
 export function nowIsoUtc8(epochMs: number = Date.now()): string {

@@ -282,13 +282,7 @@ export class GoalCoordinator {
           abortController.signal.aborted
         )
           return
-        const current = await this.options.goalStore.inspect(goal.id)
-        if (
-          current.record &&
-          !current.issue &&
-          !isGoalTerminal(current.record.status)
-        )
-          await this.persistPause(current.record, 'internal_error')
+        await this.persistBackgroundFailurePause(goal.id)
       })
       .finally(() => {
         if (this.handles.get(goal.id)?.promise === promise)
@@ -301,6 +295,31 @@ export class GoalCoordinator {
       promise,
       abortController,
     })
+  }
+
+  /**
+   * A background run may fail at the same time as a user/API mutation advances
+   * the Goal ledger. Re-read and retry the internal-error pause on CAS conflict
+   * so the detached handle never leaks an unhandled rejection. Other storage
+   * failures remain fail-closed: the run has ended and the promise settles,
+   * while startup recovery can inspect the unchanged durable state.
+   */
+  private async persistBackgroundFailurePause(goalId: string): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const current = await this.options.goalStore.inspect(goalId)
+        if (
+          current.issue ||
+          !current.record ||
+          isGoalTerminal(current.record.status)
+        )
+          return
+        await this.persistPause(current.record, 'internal_error')
+        return
+      } catch (error) {
+        if (!isGoalEventConflict(error)) return
+      }
+    }
   }
 
   private async runLoop(

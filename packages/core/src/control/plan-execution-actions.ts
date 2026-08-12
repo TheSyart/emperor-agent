@@ -28,7 +28,25 @@ import {
   type Interaction,
 } from './models'
 import { CoreControlActionSigner } from './core-action-signature'
-import type { ControlManager } from './manager'
+import type { ControlStore } from './store'
+import type { PlanStore } from '../plans/store'
+import type { PlanExecutionManager } from './plan-execution'
+
+interface PlanExecutionActionControlHost {
+  readonly planStore: PlanStore
+  readonly store: ControlStore
+  readonly execution: Pick<
+    PlanExecutionManager,
+    | 'pauseExecution'
+    | 'cancelPlanFromUserAction'
+    | 'resumeExecution'
+    | 'reconcileAfterVerification'
+  >
+  latestExecutablePlan(): PlanRecord | null
+  planScopeMetadata(): Record<string, unknown> | null
+  ensureNoPending(): void
+  setPending(interaction: Interaction): void
+}
 
 export const PLAN_EXECUTION_ACTION_QUESTION_ID = 'plan_execution_action'
 
@@ -158,7 +176,7 @@ export class PlanExecutionActionManager {
   private readonly signer: CoreControlActionSigner
   private readonly settlements: PlanExecutionSettlementStore
 
-  constructor(private readonly cm: ControlManager) {
+  constructor(private readonly cm: PlanExecutionActionControlHost) {
     this.signer = new CoreControlActionSigner(cm.store.root)
     this.settlements = new PlanExecutionSettlementStore(cm.store.root)
   }
@@ -589,7 +607,10 @@ function hasRepeatedVerificationFailure(
   return false
 }
 
-function planSessionId(record: PlanRecord, cm: ControlManager): string {
+function planSessionId(
+  record: PlanRecord,
+  cm: PlanExecutionActionControlHost,
+): string {
   const scope = cm.planScopeMetadata()
   return String(
     record.sessionId ?? scope?.session_id ?? record.metadata.session_id ?? '',

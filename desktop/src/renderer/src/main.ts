@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { router } from './router'
 import { applyTheme, DEFAULT_THEME } from './theme/tokens'
+// Feature CSS responsibilities and effective cascade order are guarded by
+// feature-style-owners.json + featureStyleOwnership.test.ts.
 import './styles.css'
 import './theme/dark.css'
 import './theme/light.css'

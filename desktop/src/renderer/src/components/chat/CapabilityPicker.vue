@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="composer-palette capability-picker" :data-mode="props.mode">
-    <div class="composer-palette-head">
+    <div v-if="props.mode === 'add'" class="composer-palette-head">
       <span>{{ props.heading }}</span>
       <em>{{ props.hint }}</em>
     </div>

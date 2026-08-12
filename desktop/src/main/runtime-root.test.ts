@@ -3,7 +3,10 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { runtimeRevision } from '@emperor/core'
+import {
+  CURRENT_STATE_LAYOUT_VERSION,
+  runtimeRevision,
+} from '@emperor/core/host-capabilities'
 import {
   legacyPackagedRuntimeRoot,
   preparePackagedRuntime,
@@ -109,6 +112,7 @@ describe('preparePackagedRuntime', () => {
     expect(prepared.runtimeRoot).toBe(signedRoot)
     expect(prepared.legacyRuntimeRoot).toBe(legacyRoot)
     expect(prepared.manifest.runtimeRevision).toMatch(/^[a-f0-9]{64}$/)
+    expect(prepared.toolCatalogRevision).toMatch(/^[a-f0-9]{64}$/)
     expect(prepared.migration.entries).toEqual([
       expect.objectContaining({
         name: 'custom',
@@ -141,6 +145,26 @@ describe('preparePackagedRuntime', () => {
     expect(fs.existsSync(stateRoot)).toBe(false)
   })
 
+  it('fails before creating Emperor Home when the bundled Tool Catalog is invalid', () => {
+    const root = tmp('emperor-packaged-catalog-invalid-')
+    const resourcesPath = path.join(root, 'resources')
+    const stateRoot = path.join(root, 'state')
+    writeRuntimeDefaults(resourcesPath)
+
+    expect(() =>
+      preparePackagedRuntime({
+        resourcesPath,
+        userDataPath: path.join(root, 'user-data'),
+        stateRoot,
+        appVersion: '0.1.0',
+        loadToolCatalog: () => {
+          throw new Error('ToolCatalog 校验失败：tampered')
+        },
+      }),
+    ).toThrow(/ToolCatalog.*tampered/i)
+    expect(fs.existsSync(stateRoot)).toBe(false)
+  })
+
   it('rejects a stateRoot that overlaps signed runtime resources', () => {
     const root = tmp('emperor-packaged-runtime-overlap-')
     const resourcesPath = path.join(root, 'resources')
@@ -156,5 +180,80 @@ describe('preparePackagedRuntime', () => {
       }),
     ).toThrow(/separate|overlap/i)
     expect(fs.existsSync(stateRoot)).toBe(false)
+  })
+
+  it('atomically migrates the sole legacy default Home before Core starts', () => {
+    const root = tmp('emperor-packaged-home-migration-')
+    const resourcesPath = path.join(root, 'resources')
+    const legacyStateRoot = path.join(root, '.emperor-agent')
+    const stateRoot = path.join(root, '.emperor')
+    writeRuntimeDefaults(resourcesPath)
+    fs.mkdirSync(legacyStateRoot, { recursive: true })
+    fs.writeFileSync(
+      path.join(legacyStateRoot, 'emperor.local.json'),
+      '{"prompt":{"profile":"classic"}}\n',
+    )
+
+    const prepared = preparePackagedRuntime({
+      resourcesPath,
+      userDataPath: path.join(root, 'user-data'),
+      stateRoot,
+      stateRootSource: 'default',
+      legacyStateRoot,
+      appVersion: '0.1.0',
+    })
+
+    expect(prepared.installation.migration).toBe('renamed_legacy')
+    expect(fs.existsSync(legacyStateRoot)).toBe(false)
+    expect(fs.existsSync(path.join(stateRoot, 'settings.json'))).toBe(true)
+  })
+
+  it('keeps the new default Home authoritative when both roots exist', () => {
+    const root = tmp('emperor-packaged-home-conflict-')
+    const resourcesPath = path.join(root, 'resources')
+    const legacyStateRoot = path.join(root, '.emperor-agent')
+    const stateRoot = path.join(root, '.emperor')
+    writeRuntimeDefaults(resourcesPath)
+    fs.mkdirSync(legacyStateRoot, { recursive: true })
+    fs.mkdirSync(stateRoot, { recursive: true })
+    fs.writeFileSync(path.join(legacyStateRoot, 'sentinel'), 'untouched')
+
+    const prepared = preparePackagedRuntime({
+      resourcesPath,
+      userDataPath: path.join(root, 'user-data'),
+      stateRoot,
+      stateRootSource: 'default',
+      legacyStateRoot,
+      appVersion: '0.1.0',
+    })
+
+    expect(prepared.installation.migration).toBe('legacy_conflict')
+    expect(
+      fs.readFileSync(path.join(legacyStateRoot, 'sentinel'), 'utf8'),
+    ).toBe('untouched')
+  })
+
+  it('refuses a newer Home layout without rewriting its installation state', () => {
+    const root = tmp('emperor-packaged-newer-home-')
+    const resourcesPath = path.join(root, 'resources')
+    const stateRoot = path.join(root, '.emperor')
+    writeRuntimeDefaults(resourcesPath)
+    fs.mkdirSync(stateRoot, { recursive: true })
+    const installation = JSON.stringify({
+      stateLayoutVersion: CURRENT_STATE_LAYOUT_VERSION + 1,
+    })
+    fs.writeFileSync(path.join(stateRoot, 'installation.json'), installation)
+
+    expect(() =>
+      preparePackagedRuntime({
+        resourcesPath,
+        userDataPath: path.join(root, 'user-data'),
+        stateRoot,
+        appVersion: '0.1.0',
+      }),
+    ).toThrow(/newer than supported layout/i)
+    expect(
+      fs.readFileSync(path.join(stateRoot, 'installation.json'), 'utf8'),
+    ).toBe(installation)
   })
 })

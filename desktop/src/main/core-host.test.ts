@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CoreUnavailableError } from '@emperor/core'
+import { CoreUnavailableError } from '@emperor/core/api'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { coreOperationKeys, registerCoreHostIpc } from './core-host'
 import type { CoreApiLike } from './ipc'

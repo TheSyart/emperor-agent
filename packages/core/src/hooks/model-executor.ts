@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import type { TokenTrackerLike } from '../agent/runner'
 import { ModelConfigurationError } from '../errors'
 import type { ModelRole, ModelRoute } from '../model/router'
 import {
@@ -60,13 +59,18 @@ export interface HookModelRouter {
   ): ModelRoute
 }
 
+export interface HookTokenTracker {
+  record(
+    model: string,
+    usage: Record<string, number>,
+    opts: Record<string, unknown>,
+  ): void
+}
+
 export class RoutedHookModelGateway implements HookModelGateway {
   constructor(
     private readonly router: HookModelRouter,
-    private readonly tokenTracker: Pick<
-      TokenTrackerLike,
-      'record'
-    > | null = null,
+    private readonly tokenTracker: HookTokenTracker | null = null,
   ) {}
 
   async call(request: HookModelRequest): Promise<HookModelResponse> {
@@ -274,6 +278,7 @@ export class SubmitHookResultTool extends Tool {
     required: ['ok'],
   }
   override readOnly = true
+  override domainStateMutation = true
   override evidencePolicy = 'forbidden' as const
   output: Record<string, unknown> | null = null
   reason = ''

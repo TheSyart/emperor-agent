@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Agent runtime 开发者<br>
-> 最后核验：2026-07-23<br>
+> 最后核验：2026-08-12<br>
 > 事实源：`packages/core/src/agent/`、`packages/core/src/api/services/`、`packages/core/src/runtime/`、`packages/core/src/sessions/`、`desktop/src/renderer/src/composables/useRuntime.ts`
 
 本文记录当前 TypeScript / Electron 主线的一次 Agent turn 如何进入 Core、构建上下文、调用模型、执行工具并持久化。旧 Python CLI、Web backend 和 HTTP / WebSocket fallback 不属于当前产品链路。
@@ -39,11 +39,13 @@ flowchart TD
 
 `SessionRuntimeManager` 按 session ID 定位 actor。每个 actor 独占一组 `SessionBindings`：`ConversationStore`、session memory、runtime event store、history、Todo、Skill scope、ContextBuilder 和主 Runner。`activeSession` 只表示当前桌面 UI 所选会话；正在运行的 turn 始终使用启动时捕获的 bindings，不会因用户切换侧栏而改写执行归属。
 
-同一 session 的命令进入串行 mailbox，command ID 重复时复用第一次 receipt；不同 session 的 actor 可以并行运行。turn command ID 由本轮 `turnId` 派生，和长生命周期 owner `taskId` 分离：例如同一个 `goal:<id>` 的多个 continuation cycle 必须各自执行，但同一 `turnId` 的重试只消费一次。当前迁移阶段最多同时保留 2 个 actor：容量满时只淘汰最久未使用的 idle actor；两个 actor 都有运行或排队命令时 fail closed，不创建无限后台并发。Actor 被淘汰、session 关闭或进程重启后，从既有 session store 重建 bindings，不把内存对象当作持久真相。
+同一 session 的命令进入串行 mailbox，command ID 重复时复用第一次 receipt；不同 session 的 actor 可以并行运行。turn command ID 由本轮 `turnId` 派生，和长生命周期 owner `taskId` 分离：例如同一个 `goal:<id>` 的多个 continuation cycle 必须各自执行，但同一 `turnId` 的重试只消费一次。当前实现最多同时保留 2 个 actor：容量满时只淘汰最久未使用的 idle actor；两个 actor 都有运行或排队命令时 fail closed，不创建无限后台并发。Actor 被淘汰、session 关闭或进程重启后，从既有 session store 重建 bindings，不把内存对象当作持久真相。
+
+每个 session 的 runtime journal 还由 `SessionRuntimeStoreRegistry` 保证进程内单 writer：CoreApi、主 loop、恢复与事件桥接按 session ID 复用同一个 `RuntimeEventStore`，不会各自打开并竞争同一 `events.jsonl`。跨 session 可并行追加，同一 session 的 sequence、flush、close 和 replay 游标保持单调；历史 V1/V2 journal 仍由同一读取边界兼容。
 
 普通 turn 的 busy/cancel/replay 按 session 归属判断。取消 session A 只中止 A 的 signal 和 mailbox command，不取消 B；同一 session 的下一条命令要等前一条进入 terminal 后才执行。Goal 仍保留全局 mutation owner，Goal 运行时普通 turn 不并发进入，避免在后续专门迁移 Goal 所有权前破坏 Completion Gate。当前 actor 数量、running/queued、receipt 数量和非法状态迁移计数可在 Diagnostics 的 `sessionRuntimes` 查看。
 
-用户斜杠命令先由 Core command platform 解析并校验，再按 descriptor 的 `immediate | after_turn | reject_when_busy` 进入对应边界。`after_turn` 使用同一个 actor mailbox，与已提交的用户输入保持顺序；`invocationId` 让双击、IPC 重放和结果轮询只消费一次。`local_ui` 不进入模型历史，`core_action` 只产生脱敏回执，只有受信 Skill 的 `agent_prompt` 会提交一条用户消息。`/clear` 通过持久 SessionTransition 结束旧 session、创建 lineage child 并激活新上下文，不修改全局/项目长期记忆。
+用户斜杠命令先由 Core command platform 解析并校验，再按 descriptor 的 `immediate | after_turn | reject_when_busy` 进入对应边界。`after_turn` 使用同一个 actor mailbox，与已提交的用户输入保持顺序；`invocationId` 让双击、IPC 重放和结果轮询只消费一次。`local_ui` 不进入模型历史，`core_action` 只产生脱敏回执，只有受信 Skill 的 `agent_prompt` 会提交一条用户消息。`/new` 通过持久 SessionTransition 结束旧 session、创建 lineage child 并激活新上下文，不修改全局/项目长期记忆。每个 active、可调用 Skill 直接暴露自己的 `/<skill-token>`，不存在 `/skill` 中转命令。
 
 每个 actor 的内部 command mailbox 仍以 64 条作为防失控安全上限；面向用户的聊天 prompt queue 另有更严格的每 session 单槽限制。同一 session 已存在尚未开始的 queued/interject prompt 时，新增 busy prompt 在写 message graph 或 runtime event 前返回 `prompt_queue_full`（`capacity=1`），不会创建用户气泡或影响首项；不同 session 的槽互不影响。取消或正式 dequeue 后槽立即释放。升级前已经持久化的多条旧队列不会被删除，Core 会按 FIFO 排空，排空期间拒绝新增。
 
@@ -99,7 +101,7 @@ Supervisor 固定最大深度为 1，默认全局最多 6 个、单 session 最�
 
 每个 manifest 与 prompt 都执行 source-root containment、realpath、regular-file、symlink 和大小上限检查。路径穿越、同一 canonical manifest 重复、同名 agent/alias 跨 source 冲突都会产生稳定 diagnostic；高优先级候选是唯一 winner，冲突 loser 不会 materialize。单个 JSON、bundle 或 agent entry 无效时只隔离该项，不能让其余有效 agent 消失。schema 是 strict allowlist：MCP 只能声明 server ID，Hook 只能声明 hook ID，不能携带 command、shell、URL、argv、transport 或 LSP/MCP 进程定义；未签名 plugin 不能借 manifest 获得可信执行资源。
 
-Session policy 只做单向收紧：list policy 求交集，`maxTurns` 取更小值，memory 与 sandbox 取更严格等级；后续 session policy 不能把已经移除的 tool/Skill/MCP、写权限、网络、进程或 turn budget 加回来。materialize 后，model profile 不匹配会在 runner 创建前 fail closed；`load_skill`、MCP server、SubagentStart/Stop 和 read-only/network/process sandbox 继续在子 ToolRegistry/runner 边界检查。Definition 不是 Permission 或 OS containment 的替代品，三者取最严格结果。
+Session policy 只做单向收紧：list policy 求交集，`maxTurns` 取更小值，memory 与 sandbox 取更严格等级；后续 session policy 不能把已经移除的 tool/Skill/MCP、写权限、网络、进程或 turn budget 加回来。materialize 后，model profile 不匹配会在 runner 创建前 fail closed；`Skill`、MCP server、SubagentStart/Stop 和 read-only/network/process sandbox 继续在子 ToolRegistry/runner 边界检查。Definition 不是 Permission 或 OS containment 的替代品，三者取最严格结果。
 
 AgentDefinition 的 source winner 与被覆盖 source 会进入 effective-config trace；低优先级定义正文和 system prompt 不进入该 trace。Skill 内容解析也复用同一层级内核：活动 Build session 的 project > user-global > builtin，切回 Chat 后 project candidate 立即退出有效集合。诊断只投影名称、来源、只读属性和 canonical path，不返回 Skill 正文。项目 Skill 仍是当前明确绑定 Build project 的只读输入，不等于 managed policy，也不能覆盖 Permission、workspace 或 sandbox deny。
 
@@ -109,9 +111,9 @@ workspace 默认共享当前 root。显式 `workspace_mode=worktree` 时，子�
 
 ## Owned process 与 stdio runtime
 
-生产组合根里的 `run_command`、command Hook 和 MCP stdio server 都通过同一个 `OwnedProcessRuntime` 创建。主 turn 命令归 `session` owner，子代理命令归 durable `task` owner，Hook 和 MCP 分别归 `hook` / `mcp` owner；每个已启动进程都有随机 lease、单调 revision、cwd capability、containment receipt、组合或逐流 output quota、PID 与系统启动相关的 start identity。取消 owner、session 关闭或应用退出会终止完整进程组；普通父进程退出后仍会清理同组的 daemonized descendant。
+生产组合根里的 `run_command`、command Hook 和 MCP stdio server 都通过同一个 `OwnedProcessRuntime` 创建。主 turn 命令归 `session` owner，子代理命令归 durable `task` owner，Hook 和 MCP 分别归 `hook` / `mcp` owner；每个已启动进程都有随机 lease、单调 revision、cwd capability、真实 host/sandbox execution boundary、containment receipt、组合或逐流 output quota、PID 与系统启动相关的 start identity。取消 owner、session 关闭或应用退出会终止完整进程组；普通父进程退出后仍会清理同组的 daemonized descendant。
 
-`stateRoot/processes/receipts.v1.json` 是最多 10,000 条的原子最小账本。它只保存 command/cwd/workspace 的 SHA-256、owner/lease、PID/start identity、sandbox 和配额终态，不保存 argv、命令正文、stdout/stderr 或 Node stream/handle。启动 reconcile 只在 boot marker 与 start identity 精确相同且 kill 后可验证退出时记为 `orphan_reaped`；PID 已消失或 identity 改变记为 `interrupted`，identity 无法证明时记为 `orphan_unverified` 且不杀可能被复用的 PID。任何情况都不会把磁盘 receipt 伪装成可恢复 handle 或重新 attach。
+`stateRoot/processes/receipts.v1.json` 是最多 10,000 条的原子最小账本。它只保存 command/cwd/workspace 的 SHA-256、owner/lease、PID/start identity、执行边界、脱敏授权摘要和配额终态，不保存 argv、命令正文、授权 ID、stdout/stderr 或 Node stream/handle；缺少新字段的旧记录按 legacy sandbox 读取。启动 reconcile 只在 boot marker 与 start identity 精确相同且 kill 后可验证退出时记为 `orphan_reaped`；PID 已消失或 identity 改变记为 `interrupted`，identity 无法证明时记为 `orphan_unverified` 且不杀可能被复用的 PID。任何情况都不会把磁盘 receipt 伪装成可恢复 handle 或重新 attach。
 
 `processes.list` 只列 active session 的 receipt；`processes.cancel` 和 `processes.reparent` 还必须通过 mutation guard、owner fence 和当前 lease。显式 reparent 会更换 lease 并增加 revision，旧 owner 或旧 lease 随即失效，且不允许跨 session 转移。当前交互能力是受管 stdin/stdout/stderr，供 MCP transport 等内部消费者使用；产品没有 PTY、resize 或独立桌面终端，也不承诺应用退出后让 daemon 长期存活。Diagnostics 会明确显示这一能力边界。
 
@@ -119,7 +121,7 @@ workspace 默认共享当前 root。显式 `workspace_mode=worktree` 时，子�
 
 Electron main 通过 `createCoreHost()` 创建 `CoreApi`，注册 IPC operation 和 event bridge。`CoreApi.create()` 组合 Agent loop、附件、配置、模型、诊断、记忆、Skill、Team、Scheduler、Goal 等服务。
 
-`AgentLoop` 不再分别手写 Scheduler、MCP、SessionRuntime、SubagentSupervisor、TaskRuntime 和 ProcessRuntime 的启动/关闭顺序。这六项通过 `LifecycleService` adapter 声明 `reconcile/start/ready/stop` 与依赖，由 `LifecycleSupervisor` 拓扑启动、逆序关闭。重复 start/stop 复用同一 Promise；required service 在 reconcile、start 或 ready 任一阶段失败时，已尝试服务立即逆序 stop。ProcessRuntime 先回收可证明身份的崩溃孤儿；TaskRuntime 再把遗留的 owned `running` 记录标为 `interrupted`；SubagentSupervisor 随后清理 durable worktree lease，关闭时取消 owner work并释放 workspace；MCP partial connection 会在补偿路径 close；Scheduler stop 会停止 admission、清除 timer、取消 queued/running 并在 lifecycle signal 允许的时间内等待。Diagnostics 的 `lifecycle`、`processRuntime`、`subagents` 与 Scheduler status 快照显示服务状态、进程能力和并发容量。
+`AgentLoop` 不再分别手写 ProcessRuntime、CodeIntelligence、ManagedEnvironment、TaskRuntime、SubagentSupervisor、SessionRuntime、MCP 和 Scheduler 的启动/关闭顺序。这八项通过 `LifecycleService` adapter 声明 `reconcile/start/ready/stop` 与依赖，由 `LifecycleSupervisor` 拓扑启动、逆序关闭。重复 start/stop 复用同一 Promise；required service 在 reconcile、start 或 ready 任一阶段失败时，已尝试服务立即逆序 stop。ProcessRuntime 先回收可证明身份的崩溃孤儿；ManagedEnvironment 修复 active command 并收敛遗留安装 job；TaskRuntime 再把遗留的 owned `running` 记录标为 `interrupted`；SubagentSupervisor 随后清理 durable worktree lease，关闭时取消 owner work并释放 workspace；MCP partial connection 会在补偿路径 close；Scheduler stop 会停止 admission、清除 timer、取消 queued/running 并在 lifecycle signal 允许的时间内等待。Diagnostics 的 `lifecycle`、`processRuntime`、`subagents` 与 Scheduler status 快照显示服务状态、进程能力和并发容量。
 
 MCP lifecycle 内部再由每 server 的 `MCPConnectionSupervisor` 管理。每个实例拥有单调 generation、随机 client ID、auth/health/state、活动 request 和冻结的 tool snapshot；replacement 先连接并发现工具，再成为 current，旧 client 随后关闭。所有 liveness callback 都带 generation/client ID，旧连接的迟到 close/error 不能把 replacement 标成断开。配置 reload 按完整 server 配置 diff，未变化且健康的连接不会重启；变更连接失败时保留旧 generation 的工具和旧的有效 tool policy，不把失败配置半应用到正在服务的 adapter。
 
@@ -140,6 +142,10 @@ Core operation registry 在参数解析或领域调用前检查 lifecycle ready�
 - 权限模式、pending Ask / Plan 和批准范围；
 - 当前 Goal contract、phase、Plan、验收与 evidence 摘要。
 
+稳定产品身份仍来自 `SOUL.md`；Core 在 prompt cache 的动态边界之后生成 `runtime_identity`，注入真实 `desktop | headless` surface、`main | plan | subagent:<id>` 角色、workspace、Emperor Home 来源、user/project/builtin Skill 根、Plugin Skill 解析说明、managed environment 和当前 `host | sandbox` 执行边界。Plan 和子代理因此不会沿用主 Agent 的宿主直执描述，项目与 Plugin Skill 明确标为只读。Prompt snapshot 只记录该段的元数据、长度与 hash，不落盘含本机私有路径的正文。
+
+系统提示采用文件系统 Skill 语义：已有 Skill 只通过 `Skill` 加载，创建或引入裸 Skill 使用普通文件与命令工具，外部 CLI 使用普通 `run_command` 后再做独立 probe；模型不再看到 `install_skill`、`manage_environment` 或旧 `load_skill`。显式 Skill 以隐藏 meta-user 消息进入 turn，不成为更高权威的 system 消息；Core 注入 canonical base directory、source/readOnly/status 与本轮 `allowed-tools` 收紧范围。需要来源、版本、更新和卸载的分发单元使用用户发起的 Plugin service。最终答复分别报告 Skill、Plugin、CLI、外部配置和 doctor 状态，命令 containment 与网络结论只认结构化 runtime metadata，不根据错误字符串猜测。
+
 上下文超出模型窗口时由 Core 压缩。压缩文本是导航摘要，不取代 session、Plan 或 Goal Store 中的权威状态。
 
 ## 模型与工具循环
@@ -154,11 +160,25 @@ Core operation registry 在参数解析或领域调用前检查 lifecycle ready�
 4. workspace 路径约束和工具自身安全策略；
 5. 执行、结果规范化与 runtime event 投影。
 
+ToolRegistry 注册时必须校验 `ToolCapabilityDescriptor`：可变性、外部通道、调度和 evidence policy 不能再依赖名称或描述推断。会修改领域权威状态的工具还必须显式声明 `domainStateMutation`；MCP 适配器在每个 live generation 生成来源与 client provenance，Diagnostics 可以区分 Core 内建声明与外部 transport 声明。
+
+Web、MCP 和 HTTP Hook 的正文在进入模型上下文前统一封装为 `ExternalContentEnvelope`。Envelope 用结构化 JSON 分隔宿主 metadata 与不可信正文，执行完整 payload 字节上限，并保留 raw content 供安全扫描与精确 artifact 存储。外部返回的“忽略上述规则”、伪造 delimiter 或工具调用文本仍只是 data；默认 evidence policy 为 `context_only`，不得直接成为 Goal 完成证据。
+
+Research 门禁属于 Core，不依赖某个 Skill。Skill 声明需要外部证据、用户明确要求互联网搜索/今日/最新新闻、用户给出 URL，或本轮实际调用外部内容工具时都会启用；本地代码搜索和普通知识问答不会误触发。`run_command`、Skill、CLI、`web_search` 和 MCP 输出中的 URL 只进入 turn-scoped candidate ledger；只有 Core `web_fetch` 取得 2xx 正文后才升级为 verified source。跨域重定向逐跳重新校验，并把已验证的原始/最终 URL 作为同一来源别名。
+
+研究最终答复先做确定性 Markdown 事实单元校验：每个事实性段落、列表项、表格数据行和事实性标题必须引用本轮 verified source，结尾来源列表不能替代逐项引用，单次最多使用 12 个来源。随后用当前会话模型执行无工具、无历史、无 Skill/权限/workspace 上下文的隔离 grounding review，只接收严格 JSON 裁决；复核只可否决，不能把确定性失败升级为通过。首次失败给主模型一次精确修订机会，再失败、复核不可用或正文不足时 fail closed。校验前的 `message_delta` 有界暂存，未通过草稿不进入 UI 或持久化历史；`research_validation` 事件只公开阶段、来源数、事实单元数和稳定原因码。
+
+工具完成、有效进展、外部证据和 workspace effect 分开记录。进程 exit 0 只证明进程退出状态；空输出、错误页、HTTP 状态文本、搜索摘要和复合/pipeline 结果都不能自动成为完成证据。新候选只记录一次发现进展，重复候选不重置无进展计数。等价命令访问同一外部 URL 时共享失败策略，换 shell 包装或换 `curl`/`wget` 不会绕过重复失败保护；互不相关的目标仍保持隔离。
+
 工具调度器以 tool call ID 建立逐调用状态机。每个已写入 `tool_run_queued` 的调用必须恰好写入一个 `tool_run_completed`、`tool_run_failed` 或 `tool_run_cancelled` 终态；流式模型在 partial delta 中提出、但未出现在最终响应里的调用，会中止自己的 child `AbortController` 并写入 `not_in_final_response` tombstone。父 turn 取消时，已经执行和仍在队列中的调用也都会收敛到单一 cancelled 终态，迟到 Promise 不能补写第二个结果。
 
 工具是否可以并行由 Core 根据工具定义的 `concurrencySafe` / `exclusive` 属性决定，不能由 provider 的流式提示绕过。连续的安全调用可以并行；不安全或独占调用必须等待之前的安全组完成，并阻止之后的调用提前开始。历史和最终模型输入仍严格按 provider 的原始 tool call 顺序组装，与真实完成先后无关。该屏障用包含一万次混合安全/不安全调用的确定性性质测试验证零重叠、结果有序和终态唯一。
 
-MCP tool call 由 supervisor 分配 request ID，并把父 `AbortSignal` 与默认 60 秒或配置的 `call_timeout_ms` 传到 SDK。用户取消、elicitation 等待取消和 timeout 都只终止当前请求；Core 不自动重放可能有副作用的工具调用。连接/transport 失败只触发后续连接恢复，重启 singleflight 且使用 1/4/16 秒有界退避，三次后进入 `failed`；认证失败进入 `auth_failed`，只有显式配置 reload 才会再试。单条结果按 adapter limit 截断，完整正文写入 `memory/tool-results/` 的内容寻址制品，runtime event 和模型只收到有界预览与 ref。
+MCP tool call 由 supervisor 分配 request ID，并把父 `AbortSignal` 与默认 60 秒或配置的 `call_timeout_ms` 传到 SDK。用户取消、elicitation 等待取消和 timeout 都只终止当前请求；Core 不自动重放可能有副作用的工具调用。连接/transport 失败只触发后续连接恢复，重启 singleflight 且使用 1/4/16 秒有界退避，三次后进入 `failed`；认证失败进入 `auth_failed`，只有显式配置 reload 才会再试。单条结果按 adapter limit 截断，完整正文写入 `sessions/<session-id>/tool-results/` 的内容寻址制品，runtime event 和模型只收到有界预览与绝对可读路径；默认 ContextPipeline 在构造时绑定当前 session，不能回退写入全局 legacy 目录。当前 session 自动获得只读范围；历史 `memory/tool-results/` 只保留受限兼容读取。
+
+user/project Skill 根由 `SkillChangeDetector` 使用 300ms debounce 监听。文件变化只产生递增版本的 `skill_catalog_changed`，不携带本机路径；Core 刷新解析上下文，Renderer single-flight 重读 `commands.list`。`assistant_done` 与打开菜单时刷新仍是容错路径。
+
+每个 ToolResult 在 Registry 边界归一化 `outcome=success|failure|followup_required`。HTTP 4xx/5xx、权限拒绝、跨域重定向和错误页不能形成进展；同一 `strategy_key` 连续失败三次会先触发策略纠偏，既有六次/十二次全局无进展纠偏与暂停仍保留。
 
 默认关闭的文件检查点 Beta 在 permission/hook 已允许、ToolRegistry 真正执行之前接入同一 runner 边界。只有 Core 已知路径参数的 `write_file`、`edit_file`、`delete_file`、`rename_file` 和 `apply_patch` 会被捕获；before durable commit 成功后才执行工具，after 再以精确哈希收口。检查点按 session、turn、tool call 和 workspace 绑定，保存于 `stateRoot/sessions/<id>/file-checkpoints/`，不进入模型 history 或 runtime event。命令、MCP 和外部进程写入不在本阶段覆盖范围内。
 
@@ -168,7 +188,7 @@ MCP tool call 由 supervisor 分配 request ID，并把父 `AbortSignal` 与默�
 
 可选 Soft Git rewind 与纯文件回退是两条独立路径。开启 `workspace.gitRewind.mode=eval|on` 后，文件工具执行前会额外只读捕获 repo identity、HEAD、branch 和 index/staged fingerprint；Git 捕获失败不阻塞原文件工具。`eval` 只允许预览；`on` 还必须匹配 trusted host 注入的 platform/Git-version-bound safety receipt。执行路径重新校验 opaque preview revision、HEAD ancestor、index、Git operation marker 和脏路径，mutation 前为原 HEAD 与 index tree 创建 `refs/emperor-agent/rewind/<transaction>/` 救援引用及 reflog。受管路径外有脏改动时默认 abort；只有独立确认才允许创建并保留 rescue stash。成功路径仅执行 `reset --soft` 和 index unstage，再调用原 FileCheckpointService；失败 rollback 只恢复 HEAD/index，绝不执行 hard reset、checkout、clean 或自动 stash drop/pop。
 
-`run_command` 在 permission/workspace 通过后仍不能直接 spawn。`OwnedProcessRuntime` 先取得 OS capability 与 containment preparation：macOS Seatbelt、Linux bwrap 或明确 unsupported；未证明只读的命令要求真实 backend，不可用时 spawn 次数必须为零。它再提交脱敏 process receipt 后启动进程，默认 120 秒命令 deadline、组合输出超额即终止，并让 owner cancel 清理整个进程组。每次 containment 决定仍写入 correlated `process_containment` EventEnvelope V2，并把同一有界 sandbox receipt 放进工具 metadata，renderer 与 Diagnostics 显示实际 backend，而不是根据 permission mode 推断“已 sandbox”。
+`run_command` 在 permission/workspace 通过后仍不能自行选择 spawn 边界。Runner 对主 Agent、非 Plan 调用签发模型不可见且绑定 command/cwd/workspace/session/boundary 的 host authorization；Plan、子代理、Team、Hook、MCP、LSP、受管 Git 和缺少可信上下文的调用固定为 sandbox。Host 分支跳过 OS sandbox，但保留 owner/lease、120 秒 deadline、取消、组合输出配额和进程组清理，并继承 turn 捕获的真实 HOME、PATH、用户 Git/npm 配置与本机网络。Sandbox 分支继续要求 macOS Seatbelt、Linux bwrap 或明确 unsupported；required backend 不可用时 spawn 次数为零。每次决定写入 correlated `process_containment` EventEnvelope V2，包含可选 `execution_boundary` 与 `authorization_source`，renderer 与 Diagnostics 显示真实边界而不是根据 permission mode 推断。
 
 `ask_user` 和 `propose_plan` 会创建可恢复 interaction。Runner 在等待用户时保存带真实 session 归属的 checkpoint，不用普通 assistant 文本伪造批准。它们属于 Control 工具，renderer 只显示专用 Ask/Plan 卡，不再同时显示工具参数、marker 或 IN/OUT JSON；旧 replay 也按 tool call ID 去重。
 

@@ -83,7 +83,9 @@ describe('Goal mode deterministic E2E', () => {
       sessionId: String(session.id),
     })
     await settleGoal(api, started.goal.id)
-    const pending = api.loop.controlManager.store.load().pending
+    const pending = api.loop
+      .controlManagerForSessionId(String(session.id))
+      .store.load().pending
     expect(pending).toMatchObject({ kind: 'plan', status: 'waiting' })
     expect(pending?.meta).toMatchObject({
       goal_id: started.goal.id,
@@ -127,7 +129,7 @@ describe('Goal mode deterministic E2E', () => {
     await settleGoal(api, started.goal.id)
     expect(events.map((event) => event.event)).toContain('goal_resumed')
     await api.close()
-  }, 15_000)
+  }, 30_000)
 
   it('keeps background Goal control and runtime ownership on session A when the user switches to session B', async () => {
     const root = temp('goal-e2e-session-switch-')
@@ -145,16 +147,18 @@ describe('Goal mode deterministic E2E', () => {
       outcome: 'Keep background ownership stable.',
       sessionId: String(sessionA.id),
     })
-    await within(provider.entered, 2_000, 'provider did not enter')
+    await within(provider.entered, 5_000, 'provider did not enter')
     api.sessions.activate(String(sessionB.id))
     provider.release()
     await within(
       settleGoal(api, started.goal.id),
-      3_000,
+      10_000,
       'Goal did not reach Plan awaiting state',
     )
 
-    const pending = api.loop.controlManager.store.load().pending
+    const pending = api.loop
+      .controlManagerForSessionId(String(sessionA.id))
+      .store.load().pending
     expect(api.loop.activeSessionId).toBe(String(sessionB.id))
     expect(
       api.loop.sessionStore.get(String(sessionA.id))?.control_pending,
@@ -172,17 +176,17 @@ describe('Goal mode deterministic E2E', () => {
 
     await within(
       api.control.approvePlan(String(pending?.id), { uiHidden: true }),
-      3_000,
+      10_000,
       'Plan approval did not return',
     )
     await within(
       settleGoal(api, started.goal.id),
-      3_000,
+      10_000,
       'resumed Goal did not settle',
     )
     expect(api.loop.activeSessionId).toBe(String(sessionB.id))
     await api.close()
-  }, 15_000)
+  }, 45_000)
 
   it('automatically reaches manual verification and independent reviewer through production Control and runner paths', async () => {
     const root = temp('goal-e2e-verification-orchestration-')

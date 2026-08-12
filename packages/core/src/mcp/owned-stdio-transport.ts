@@ -59,13 +59,16 @@ export class OwnedStdioClientTransport implements Transport {
         id: this.opts.serverName,
         sessionId: this.opts.ownerSessionId ?? null,
       },
-      containment: {
-        mode: 'preferred',
-        workspaceRoot: this.opts.workspaceRoot,
-        stateRoot: this.opts.stateRoot,
-        tempRoot: this.opts.workspaceRoot,
-        readOnlyRoots: [],
-        network: 'allow',
+      execution: {
+        kind: 'sandbox',
+        policy: {
+          mode: 'preferred',
+          workspaceRoot: this.opts.workspaceRoot,
+          stateRoot: this.opts.stateRoot,
+          tempRoot: this.opts.workspaceRoot,
+          readOnlyRoots: [],
+          network: 'allow',
+        },
       },
     })
     this.handle = handle

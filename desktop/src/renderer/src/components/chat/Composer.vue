@@ -1,93 +1,29 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { GoalCaptureStatus } from '../../composables/goalCapture'
-import type { ComposerLifecycleMode } from '../../composables/composerLifecycle'
-import type { CapabilityPickerItem } from '../../capabilities/capabilityPicker'
-import { buildCapabilityPickerGroups } from '../../capabilities/capabilityPickerModel'
-import {
-  hasComposerCapabilityTokens,
-  normalizeComposerCapabilityInput,
-  renderComposerInlineTokens,
-} from '../../capabilities/composerCapabilityTokens'
-import { isPathLikeSlashToken, rankSlashPaletteItems } from '../../commands'
-import type { SlashPaletteItem } from '../../commands'
-import type { CommandCompletion } from '@emperor/core'
-import type {
-  ChatSendPayload,
-  ControlPayload,
-  CurrentModelConfig,
-  ModelEntry,
-  ProviderOption,
-  RuntimeGoalSummary,
-  ToolInfo,
-} from '../../types'
-import { actionIcons, toolIcon } from '../../icons'
-import type { IconComponent } from '../../icons'
-import {
-  providerIconAsset,
-  providerIconFallback,
-  providerIconIsMonochrome,
-  providerIconMaskCssUrl,
-} from '../../model/providerIcons'
-import { useAttachments } from '../../composables/useAttachments'
 import AttachmentChip from './AttachmentChip.vue'
 import CapabilityPicker from './CapabilityPicker.vue'
 import ComposerLifecycleIndicator from './ComposerLifecycleIndicator.vue'
 import {
-  composerModeOptions,
-  composerSendDisabled,
-  composerStopPresentation,
-  currentComposerPermission,
-  type ControlModeValue,
-} from './composerControls'
-import { useFloatingMenu } from './floatingMenu'
+  COMPOSER_ACCEPT_LIST,
+  COMPOSER_QUEUE_FULL_MESSAGE,
+  useComposerController,
+  type ComposerControllerProps,
+  type ComposerEmit,
+} from './composerController'
 
-const props = defineProps<{
-  busy: boolean
-  commands: SlashPaletteItem[]
-  tools: ToolInfo[]
-  mcpContent?: string
-  contextUsed: number
-  contextMax: number
-  control?: ControlPayload | null
-  currentModel?: CurrentModelConfig | null
-  modelEntries: ModelEntry[]
-  providerOptions: ProviderOption[]
-  supportsVision?: boolean
-  sendBlockedReason?: string | null
-  goal?: RuntimeGoalSummary | null
-  goalCaptureStatus?: GoalCaptureStatus
-  lifecycleMode?: ComposerLifecycleMode
-  interactionBlocked?: boolean
-  queueOccupied?: boolean
-  completeCommand?: (
-    commandId: string,
-    rawArgs: string,
-    cursor: number,
-  ) => Promise<CommandCompletion[]>
-}>()
-const emit = defineEmits<{
-  send: [payload: ChatSendPayload]
-  stop: []
-  error: [message: string]
-  'set-permission': [mode: ControlModeValue]
-  'switch-model': [entryId: string]
-  'set-reasoning-effort': [level: string | null]
-  'activate-plan': []
-  'activate-goal': []
-  'dismiss-lifecycle': []
-  'start-goal': [outcome: string]
-}>()
-const value = ref('')
-const shell = ref<HTMLElement | null>(null)
-const input = ref<HTMLTextAreaElement | null>(null)
-const highlightLayer = ref<HTMLElement | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
-const modelButton = ref<HTMLButtonElement | null>(null)
-const modelMenu = ref<HTMLElement | null>(null)
-const modeButton = ref<HTMLButtonElement | null>(null)
-const modeMenu = ref<HTMLElement | null>(null)
+const props = defineProps<ComposerControllerProps>()
+const emit = defineEmits<ComposerEmit>()
+const controller = useComposerController(props, emit)
 const {
+  actionIcons,
+  value,
+  shell,
+  input,
+  highlightLayer,
+  fileInput,
+  modelButton,
+  modelMenu,
+  modeButton,
+  modeMenu,
   drafts,
   uploading,
   dragActive,
@@ -97,815 +33,72 @@ const {
   onDragLeave,
   onDrop,
   removeDraft,
-  takeDrafts,
-  restoreDrafts,
-} = useAttachments({
-  onError: (message) => emit('error', message),
-})
-const addMenuOpen = ref(false)
-const modelMenuOpen = ref(false)
-const modeMenuOpen = ref(false)
-const modelFloatingMenu = useFloatingMenu({
-  open: modelMenuOpen,
-  button: modelButton,
-  menu: modelMenu,
-  fallbackWidth: 390,
-  fallbackHeight: 420,
-  onClose: closeModelMenu,
-})
-const modeFloatingMenu = useFloatingMenu({
-  open: modeMenuOpen,
-  button: modeButton,
-  menu: modeMenu,
-  fallbackWidth: 320,
-  fallbackHeight: 220,
-  onClose: closeModeMenu,
-})
-const modelMenuStyle = modelFloatingMenu.style
-const modelMenuPlacement = modelFloatingMenu.placement
-const modeMenuStyle = modeFloatingMenu.style
-const modeMenuPlacement = modeFloatingMenu.placement
+  modelMenuOpen,
+  modeMenuOpen,
+  modelMenuStyle,
+  modelMenuPlacement,
+  modeMenuStyle,
+  modeMenuPlacement,
+  paletteMode,
+  paletteGroups,
+  activePaletteItem,
+  paletteHeading,
+  paletteHint,
+  inlineSegments,
+  hasInlineTokens,
+  composerSlashParts,
+  attachTitle,
+  modeOptions,
+  currentMode,
+  modeTitle,
+  permissionAppliesAfterPlan,
+  goalCaptureActive,
+  goalCaptureStarting,
+  otherModelEntries,
+  showModelSwitcher,
+  currentModelLabel,
+  currentProviderLabel,
+  currentProviderIcon,
+  currentProviderIconMonochrome,
+  currentProviderMaskStyle,
+  currentProviderFallback,
+  currentModelId,
+  currentProtocolLabel,
+  currentReasoningLabel,
+  currentReasoningValue,
+  modelTitle,
+  reasoningOptions,
+  arcLength,
+  arcColor,
+  percentLabel,
+  contextLabel,
+  sendDisabled,
+  stopPresentation,
+  resize,
+  syncHighlightScroll,
+  submit,
+  handleKeydown,
+  applyPaletteItem,
+  toggleAddMenu,
+  closeComposerMenus,
+  toggleModeMenu,
+  closeModeMenu,
+  selectMode,
+  toggleModelMenu,
+  onModelMenuKeydown,
+  selectModel,
+  selectReasoning,
+  fmt,
+  modelEntryLabel,
+  providerLabel,
+  providerIcon,
+  providerFallback,
+  protocolLabel,
+} = controller
 
-const ACCEPT_LIST =
-  'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
-const QUEUE_FULL_MESSAGE = '已有一条消息排队，请先编辑、插入或删除后再发送。'
-const argumentCompletions = ref<CommandCompletion[]>([])
-const paletteSelectionIndex = ref(0)
-const dismissedSlashInput = ref('')
-let completionGeneration = 0
-
-const suggestions = computed(() => {
-  const text = value.value
-  if (!text.startsWith('/')) return []
-  if (dismissedSlashInput.value === text) return []
-  if (/^\/\S+\s/.test(text)) return []
-  const query = text.slice(1).split(/\s+/, 1)[0].toLowerCase()
-  return rankSlashPaletteItems(props.commands, query)
-})
-const commandSuggestions = computed(() =>
-  suggestions.value.filter((item) => item.kind === 'command'),
-)
-const skillSuggestions = computed(() =>
-  suggestions.value.filter((item) => item.kind === 'skill'),
-)
-const slashPaletteGroups = computed(() => {
-  if (argumentCompletions.value.length) {
-    const command = exactComposerCommand.value
-    if (!command) return []
-    return [
-      {
-        label: command.name,
-        items: argumentCompletions.value.map((item, index) => ({
-          id: `completion:${command.commandId}:${index}`,
-          action: 'insert_command' as const,
-          label: item.label,
-          description: item.description || command.description,
-          meta: item.kind || '参数',
-          completion: `${command.name} ${item.value}`,
-          icon: commandIcon(command.name),
-          tone: 'slate' as const,
-        })),
-      },
-    ]
-  }
-  const groups = new Map<string, SlashPaletteItem[]>()
-  const ordered = [...commandSuggestions.value, ...skillSuggestions.value]
-  for (const item of ordered) {
-    const label = item.recent
-      ? '最近使用'
-      : item.kind === 'command'
-        ? '内置命令'
-        : skillSourceLabel(item.source)
-    const bucket = groups.get(label) ?? []
-    bucket.push(item)
-    groups.set(label, bucket)
-  }
-  const groupOrder = [
-    '最近使用',
-    '内置命令',
-    '项目 Skill',
-    '用户 Skill',
-    '内置 Skill',
-    '受信插件 Skill',
-  ]
-  return [...groups.entries()]
-    .sort(
-      ([left], [right]) => groupOrder.indexOf(left) - groupOrder.indexOf(right),
-    )
-    .map(([label, items]) => ({
-      label,
-      items: items.map((item) => paletteItemFromSlash(item, label)),
-    }))
-})
-const addPaletteGroups = computed(() =>
-  buildCapabilityPickerGroups({
-    commands: props.commands,
-    tools: props.tools,
-    mcpContent: props.mcpContent || '',
-  }),
-)
-const paletteMode = computed<'add' | 'slash' | null>(() => {
-  if (addMenuOpen.value) return 'add'
-  if (slashPaletteGroups.value.length) return 'slash'
-  return null
-})
-const paletteGroups = computed(() =>
-  paletteMode.value === 'add'
-    ? addPaletteGroups.value
-    : slashPaletteGroups.value,
-)
-const flatPaletteItems = computed(() =>
-  paletteGroups.value.flatMap((group) => group.items),
-)
-const activePaletteItem = computed(() => {
-  const items = flatPaletteItems.value
-  if (!items.length) return undefined
-  return items[Math.min(paletteSelectionIndex.value, items.length - 1)]
-})
-const paletteHeading = computed(() =>
-  paletteMode.value === 'add' ? '添加能力' : '斜杠命令',
-)
-const paletteHint = computed(() =>
-  paletteMode.value === 'add'
-    ? '插入附件、Skill 或 MCP 占位符'
-    : 'Tab 补全第一项',
-)
-const inlineSegments = computed(() => renderComposerInlineTokens(value.value))
-const hasInlineTokens = computed(() => hasComposerCapabilityTokens(value.value))
-const exactComposerCommand = computed(() => {
-  const text = value.value
-  const token = text.match(/^\/\S+/)?.[0]?.toLowerCase()
-  if (!token) return null
-  return (
-    props.commands.find(
-      (item) =>
-        item.name.toLowerCase() === token ||
-        item.aliases?.some((alias) => alias.toLowerCase() === token),
-    ) || null
-  )
-})
-
-watch(
-  () => value.value,
-  async (text) => {
-    if (dismissedSlashInput.value && dismissedSlashInput.value !== text)
-      dismissedSlashInput.value = ''
-    paletteSelectionIndex.value = 0
-    const generation = ++completionGeneration
-    argumentCompletions.value = []
-    const command = exactComposerCommand.value
-    const token = text.match(/^\/\S+/)?.[0] || ''
-    if (!command || !props.completeCommand || !/^\/\S+\s/.test(text)) return
-    const rawArgs = text.slice(token.length).trimStart()
-    try {
-      const completions = await props.completeCommand(
-        command.commandId,
-        rawArgs,
-        rawArgs.length,
-      )
-      if (generation === completionGeneration)
-        argumentCompletions.value = completions
-    } catch {
-      if (generation === completionGeneration) argumentCompletions.value = []
-    }
-  },
-)
-const composerSlashParts = computed(
-  (): { token: string; rest: string } | null => {
-    const text = value.value
-    if (!text.startsWith('/')) return null
-    const token = text.match(/^\/\S+/)?.[0]
-    if (!token || token === '/') return null
-    if (isPathLikeSlashToken(token)) return null
-    const normalized = token.toLowerCase()
-    const isSystemCommand = props.commands.some(
-      (item) =>
-        item.kind === 'command' &&
-        (item.name === normalized || item.aliases?.includes(normalized)),
-    )
-    if (isSystemCommand) return null
-    return { token, rest: text.slice(token.length) }
-  },
-)
-
-const attachTitle = computed(() => 'Add files and more')
-
-const modeOptions = composerModeOptions.map((option) => ({
-  ...option,
-  icon:
-    option.value === 'ask_before_edit'
-      ? actionIcons.modeAskBeforeEdit
-      : option.value === 'smart_auto'
-        ? actionIcons.modeAcceptEdits
-        : actionIcons.modeAuto,
-}))
-
-const currentMode = computed(() => {
-  const option = currentComposerPermission(props.control)
-  return (
-    modeOptions.find((item) => item.value === option.value) || modeOptions[0]
-  )
-})
-const modeTitle = computed(() =>
-  props.busy ? '等待当前任务结束后再切换' : '切换执行权限',
-)
-const permissionAppliesAfterPlan = computed(
-  () => props.control?.mode === 'plan',
-)
-const goalCaptureActive = computed(
-  () =>
-    props.goalCaptureStatus === 'armed' ||
-    props.goalCaptureStatus === 'starting',
-)
-const goalCaptureStarting = computed(
-  () => props.goalCaptureStatus === 'starting',
-)
-const availableModelEntries = computed(() =>
-  props.modelEntries.filter((entry) => entry.entryId),
-)
-const activeModelId = computed(
-  () => props.currentModel?.entryId || props.modelEntries[0]?.entryId || '',
-)
-const currentModelEntry = computed(
-  () =>
-    availableModelEntries.value.find(
-      (entry) => entry.entryId === activeModelId.value,
-    ) ||
-    availableModelEntries.value[0] ||
-    null,
-)
-const otherModelEntries = computed(() =>
-  availableModelEntries.value.filter(
-    (entry) => entry.entryId !== activeModelId.value,
-  ),
-)
-const showModelSwitcher = computed(() => availableModelEntries.value.length > 0)
-const currentModelLabel = computed(() => {
-  const entry = currentModelEntry.value
-  if (entry) return entry.effectiveDisplayName || entry.modelId || '模型'
-  return (
-    props.currentModel?.effectiveDisplayName ||
-    props.currentModel?.modelId ||
-    '模型'
-  )
-})
-const currentProviderName = computed(
-  () => currentModelEntry.value?.provider || props.currentModel?.provider || '',
-)
-const currentProviderLabel = computed(() =>
-  providerLabel(currentProviderName.value),
-)
-const currentProviderIconId = computed(
-  () =>
-    providerOption(currentProviderName.value)?.iconId ||
-    currentProviderName.value,
-)
-const currentProviderIcon = computed(() =>
-  providerIconAsset(currentProviderIconId.value),
-)
-const currentProviderIconMonochrome = computed(() =>
-  providerIconIsMonochrome(currentProviderIconId.value),
-)
-const currentProviderMaskStyle = computed((): Record<string, string> => {
-  if (!currentProviderIcon.value) return {}
-  return {
-    '--provider-icon': providerIconMaskCssUrl(currentProviderIcon.value),
-  }
-})
-const currentProviderFallback = computed(() =>
-  providerIconFallback(currentProviderLabel.value),
-)
-const currentModelId = computed(
-  () => currentModelEntry.value?.modelId || props.currentModel?.modelId || '',
-)
-const currentProtocolLabel = computed(() =>
-  protocolLabel(
-    currentModelEntry.value?.protocol ||
-      props.currentModel?.protocol ||
-      'openai',
-  ),
-)
-const currentReasoningLabel = computed(() =>
-  reasoningLabel(
-    props.currentModel?.reasoningEffort ??
-      currentModelEntry.value?.reasoningEffort ??
-      null,
-  ),
-)
-const currentReasoningValue = computed(() =>
-  normalizeReasoningValue(
-    props.currentModel?.reasoningEffort ??
-      currentModelEntry.value?.reasoningEffort ??
-      null,
-  ),
-)
-const modelTitle = computed(() => {
-  if (props.busy) return '等待当前任务结束后再切换模型'
-  return `${currentModelLabel.value} · 思考 ${currentReasoningLabel.value}`
-})
-const reasoningOptions = computed(() => [
-  { value: null, label: 'Default' },
-  ...(props.currentModel?.reasoningEfforts || []).map((value) => ({
-    value,
-    label: reasoningLabel(value),
-  })),
-])
-
-function paletteItemFromSlash(
-  item: SlashPaletteItem,
-  meta: string,
-): CapabilityPickerItem {
-  return {
-    id: item.id,
-    action:
-      item.name === '/plan'
-        ? 'activate_plan'
-        : item.name === '/goal'
-          ? 'activate_goal'
-          : 'insert_command',
-    label: item.name,
-    description: item.description,
-    meta: item.dangerous
-      ? `需确认 · ${item.kind === 'skill' ? meta : item.usage}`
-      : item.kind === 'skill'
-        ? meta
-        : item.usage,
-    completion: item.completion,
-    icon: item.kind === 'skill' ? toolIcon('skill') : commandIcon(item.name),
-    tone: item.kind === 'skill' ? 'cyan' : 'slate',
-  }
-}
-
-function skillSourceLabel(source: SlashPaletteItem['source']): string {
-  if (source === 'project_skill') return '项目 Skill'
-  if (source === 'user_skill') return '用户 Skill'
-  if (source === 'verified_plugin') return '受信插件 Skill'
-  return '内置 Skill'
-}
-
-function commandIcon(name: string): IconComponent {
-  if (name === '/plan') return actionIcons.modePlan
-  if (name === '/mode') return actionIcons.modeAskBeforeEdit
-  if (name === '/tools') return toolIcon('default')
-  if (name === '/skills') return toolIcon('skill')
-  if (name === '/status') return actionIcons.statusOnline
-  return toolIcon('shell')
-}
-
-function resize() {
-  const el = input.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 180)}px`
-  syncHighlightScroll()
-}
-
-function syncHighlightScroll() {
-  if (!input.value || !highlightLayer.value) return
-  highlightLayer.value.scrollTop = input.value.scrollTop
-}
-
-function submit(delivery?: 'queue' | 'interject') {
-  if (goalCaptureStarting.value) return
-  if (props.sendBlockedReason) {
-    emit('error', props.sendBlockedReason)
-    return
-  }
-  const normalized = normalizeComposerCapabilityInput(value.value.trim())
-  const content = normalized.content.trim()
-  if (props.busy) {
-    if (!content && drafts.value.length === 0) return
-    if (props.queueOccupied) {
-      emit('error', QUEUE_FULL_MESSAGE)
-      return
-    }
-    if (uploading.value.size > 0) {
-      emit('error', '附件仍在处理中，请等待完成后再排队。')
-      return
-    }
-    emit('send', {
-      content,
-      attachments: takeDrafts(),
-      requestedSkills: normalized.requestedSkills,
-      displayContent: normalized.displayContent,
-      delivery: delivery || 'queue',
-    })
-    value.value = ''
-    closeComposerMenus()
-    void nextTick(resize)
-    return
-  }
-  if (goalCaptureActive.value) {
-    if (
-      drafts.value.length > 0 ||
-      uploading.value.size > 0 ||
-      normalized.requestedSkills.length > 0 ||
-      hasInlineTokens.value
-    ) {
-      emit(
-        'error',
-        'Goal Outcome 暂仅支持纯文字；请先移除附件、Skill 或 MCP 引用。',
-      )
-      return
-    }
-    if (!content) return
-    emit('start-goal', content)
-    closeComposerMenus()
-    return
-  }
-  if (!content && drafts.value.length === 0) return
-  emit('send', {
-    content,
-    attachments: takeDrafts(),
-    requestedSkills: normalized.requestedSkills,
-    displayContent: normalized.displayContent,
-  })
-  value.value = ''
-  closeAddMenu()
-  closeModelMenu()
-  closeModeMenu()
-  void nextTick(resize)
-}
-
-function handleKeydown(event: KeyboardEvent) {
-  if (
-    (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
-    flatPaletteItems.value.length
-  ) {
-    event.preventDefault()
-    const delta = event.key === 'ArrowDown' ? 1 : -1
-    paletteSelectionIndex.value =
-      (paletteSelectionIndex.value + delta + flatPaletteItems.value.length) %
-      flatPaletteItems.value.length
-    return
-  }
-  if (event.key === 'Escape' && paletteMode.value === 'slash') {
-    event.preventDefault()
-    dismissedSlashInput.value = value.value
-    return
-  }
-  if (event.key === 'Tab' && activePaletteItem.value) {
-    event.preventDefault()
-    applyPaletteItem(activePaletteItem.value)
-    return
-  }
-  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
-  event.preventDefault()
-  const exact = exactComposerCommand.value
-  const token = value.value.match(/^\/\S+/)?.[0] || ''
-  if (
-    activePaletteItem.value &&
-    (!exact ||
-      paletteSelectionIndex.value > 0 ||
-      argumentCompletions.value.length > 0)
-  ) {
-    applyPaletteItem(activePaletteItem.value)
-    return
-  }
-  if (
-    exact?.requiresArguments &&
-    value.value.trim().toLowerCase() === token.toLowerCase()
-  ) {
-    value.value = `${token} `
-    void nextTick(resize)
-    return
-  }
-  submit()
-}
-
-function setDraft(text: string) {
-  value.value = text
-  void nextTick(() => {
-    resize()
-    input.value?.focus()
-  })
-}
-
-function focusInput() {
-  input.value?.focus()
-}
-
-function restoreDraft(payload: ChatSendPayload) {
-  value.value = String(payload.displayContent || payload.content || '')
-  restoreDrafts(payload.attachments || [])
-  void nextTick(() => {
-    resize()
-    input.value?.focus()
-  })
-}
-
-defineExpose({ setDraft, focusInput, restoreDraft })
-
-function applyPaletteItem(item: CapabilityPickerItem | undefined) {
-  if (!item) return
-  if (item.action === 'files') {
-    closeAddMenu()
-    pickFiles()
-    return
-  }
-  if (item.action === 'insert_capability_token') {
-    insertInlineToken(item.completion || item.label)
-    closeAddMenu()
-    closeModelMenu()
-    closeModeMenu()
-    return
-  }
-  if (item.action === 'activate_plan' || item.action === 'activate_goal') {
-    const fromSlashPalette = paletteMode.value === 'slash'
-    if (fromSlashPalette) value.value = ''
-    closeAddMenu()
-    closeModelMenu()
-    closeModeMenu()
-    if (item.action === 'activate_plan') emit('activate-plan')
-    else emit('activate-goal')
-    input.value?.focus()
-    void nextTick(resize)
-    return
-  }
-  if (!item.completion) return
-  value.value = item.completion
-  paletteSelectionIndex.value = 0
-  dismissedSlashInput.value = ''
-  closeAddMenu()
-  closeModelMenu()
-  closeModeMenu()
-  input.value?.focus()
-  void nextTick(resize)
-}
-
-function insertInlineToken(token: string) {
-  const insertion = token.trim()
-  if (!insertion) return
-  const el = input.value
-  if (!el) {
-    value.value = appendInlineToken(value.value, insertion)
-    void nextTick(resize)
-    return
-  }
-  const start = el.selectionStart ?? value.value.length
-  const end = el.selectionEnd ?? start
-  const before = value.value.slice(0, start)
-  const after = value.value.slice(end)
-  const prefix = before && !/\s$/.test(before) ? ' ' : ''
-  const suffix = after && !/^\s/.test(after) ? ' ' : ''
-  value.value = `${before}${prefix}${insertion}${suffix}${after}`
-  const nextPos =
-    before.length + prefix.length + insertion.length + suffix.length
-  void nextTick(() => {
-    input.value?.focus()
-    input.value?.setSelectionRange(nextPos, nextPos)
-    resize()
-  })
-}
-
-function appendInlineToken(text: string, token: string) {
-  const trimmed = text.trimEnd()
-  return trimmed ? `${trimmed} ${token}` : token
-}
-
-async function toggleModeMenu() {
-  if (props.busy) return
-  closeAddMenu()
-  closeModelMenu()
-  if (modeMenuOpen.value) {
-    closeModeMenu()
-    return
-  }
-  modeMenuOpen.value = true
-  modeFloatingMenu.addListeners()
-  await nextTick()
-  modeFloatingMenu.position()
-}
-
-function selectMode(mode: ControlModeValue) {
-  if (props.busy) return
-  closeModeMenu()
-  if (mode !== currentMode.value?.value) emit('set-permission', mode)
-  input.value?.focus()
-}
-
-async function toggleModelMenu() {
-  if (props.busy || !showModelSwitcher.value) return
-  closeAddMenu()
-  closeModeMenu()
-  if (modelMenuOpen.value) {
-    closeModelMenu()
-    return
-  }
-  modelMenuOpen.value = true
-  modelFloatingMenu.addListeners()
-  await nextTick()
-  modelFloatingMenu.position()
-  focusModelMenuItem(0)
-}
-
-function modelMenuItems(): HTMLButtonElement[] {
-  if (!modelMenu.value) return []
-  return Array.from(
-    modelMenu.value.querySelectorAll<HTMLButtonElement>(
-      'button:not(:disabled)',
-    ),
-  )
-}
-
-function focusModelMenuItem(index: number): void {
-  const items = modelMenuItems()
-  if (!items.length) return
-  items[((index % items.length) + items.length) % items.length]?.focus()
-}
-
-function onModelMenuKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeModelMenu()
-    modelButton.value?.focus()
-    return
-  }
-  if (
-    event.key !== 'ArrowDown' &&
-    event.key !== 'ArrowUp' &&
-    event.key !== 'Home' &&
-    event.key !== 'End' &&
-    event.key !== 'Tab'
-  )
-    return
-  const items = modelMenuItems()
-  if (!items.length) return
-  event.preventDefault()
-  const current = items.indexOf(document.activeElement as HTMLButtonElement)
-  if (event.key === 'Home') focusModelMenuItem(0)
-  else if (event.key === 'End') focusModelMenuItem(items.length - 1)
-  else if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey))
-    focusModelMenuItem(current <= 0 ? items.length - 1 : current - 1)
-  else focusModelMenuItem(current < 0 ? 0 : current + 1)
-}
-
-function selectModel(entryId: string) {
-  if (props.busy) return
-  closeModelMenu()
-  if (entryId !== activeModelId.value) emit('switch-model', entryId)
-  input.value?.focus()
-}
-
-function selectReasoning(value: string | null) {
-  if (props.busy) return
-  const next = normalizeReasoningValue(value) || null
-  if ((currentReasoningValue.value || '') === (next || '')) return
-  emit('set-reasoning-effort', next)
-}
-
-function toggleAddMenu() {
-  closeModelMenu()
-  closeModeMenu()
-  if (addMenuOpen.value) {
-    closeAddMenu()
-    return
-  }
-  addMenuOpen.value = true
-  document.addEventListener('pointerdown', onAddMenuPointerDown, true)
-}
-
-function closeAddMenu() {
-  if (!addMenuOpen.value) return
-  addMenuOpen.value = false
-  document.removeEventListener('pointerdown', onAddMenuPointerDown, true)
-}
-
-function closeComposerMenus() {
-  closeAddMenu()
-  closeModelMenu()
-  closeModeMenu()
-}
-
-function onAddMenuPointerDown(event: PointerEvent) {
-  const target = event.target
-  if (!(target instanceof Node)) return
-  if (shell.value?.contains(target)) return
-  closeAddMenu()
-}
-
-function closeModeMenu() {
-  if (!modeMenuOpen.value) return
-  modeMenuOpen.value = false
-  modeFloatingMenu.removeListeners()
-}
-
-function closeModelMenu() {
-  if (!modelMenuOpen.value) return
-  modelMenuOpen.value = false
-  modelFloatingMenu.removeListeners()
-}
-
-function pickFiles() {
-  closeAddMenu()
-  fileInput.value?.click()
-}
-
-const pct = computed(() =>
-  props.contextMax > 0 ? props.contextUsed / props.contextMax : 0,
-)
-const arcLength = computed(() => Math.min(Math.round(pct.value * 100), 100))
-const arcColor = computed(() => {
-  return 'currentColor'
-})
-const percentLabel = computed(
-  () => `${Math.min(Math.round(pct.value * 100), 100)}%`,
-)
-const contextLabel = computed(
-  () =>
-    `上下文长度 ${fmt(props.contextUsed)} / ${fmt(props.contextMax)}，已用 ${percentLabel.value}`,
-)
-
-function fmt(n: number) {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
-  return String(n)
-}
-
-function modelEntryLabel(entry: ModelEntry) {
-  return entry.effectiveDisplayName || entry.modelId || '模型'
-}
-
-function providerOption(name: string): ProviderOption | undefined {
-  return props.providerOptions.find((option) => option.name === name)
-}
-
-function providerLabel(name: string): string {
-  const option = providerOption(name)
-  return option?.displayName || option?.name || name || 'Provider'
-}
-
-function providerIcon(entry: ModelEntry): string | null {
-  return providerIconAsset(
-    providerOption(entry.provider)?.iconId || entry.provider,
-  )
-}
-
-function providerFallback(entry: ModelEntry): string {
-  return providerIconFallback(providerLabel(entry.provider))
-}
-
-function protocolLabel(protocol: 'openai' | 'anthropic'): string {
-  return protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'
-}
-
-function normalizeReasoningValue(value?: string | null) {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-  if (!normalized) return ''
-  if (
-    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
-      normalized,
-    )
-  )
-    return normalized
-  return normalized
-}
-
-function reasoningLabel(value?: string | null) {
-  const normalized = normalizeReasoningValue(value)
-  if (!normalized) return 'Default'
-  if (normalized === 'max') return 'Max'
-  if (normalized === 'xhigh') return 'XHigh'
-  if (normalized === 'high') return 'High'
-  if (normalized === 'medium') return 'Medium'
-  if (normalized === 'low') return 'Low'
-  if (normalized === 'minimal') return 'Minimal'
-  if (normalized === 'none') return 'None'
-  return normalized
-}
-
-const sendDisabled = computed(
-  () =>
-    goalCaptureStarting.value ||
-    props.interactionBlocked ||
-    composerSendDisabled({
-      busy: props.busy,
-      content: value.value,
-      attachmentCount: drafts.value.length,
-      queueOccupied: props.queueOccupied,
-      sendBlockedReason: props.sendBlockedReason || null,
-    }),
-)
-const stopPresentation = computed(() =>
-  composerStopPresentation(Boolean(props.goal)),
-)
-
-watch(
-  () => props.goalCaptureStatus,
-  (status, previous) => {
-    if (previous !== 'starting' || status !== 'idle') return
-    value.value = ''
-    void nextTick(resize)
-  },
-)
-
-onBeforeUnmount(() => {
-  closeAddMenu()
-  closeModelMenu()
-  closeModeMenu()
-})
+const ACCEPT_LIST = COMPOSER_ACCEPT_LIST
+const QUEUE_FULL_MESSAGE = COMPOSER_QUEUE_FULL_MESSAGE
+defineExpose(controller.expose)
 </script>
 
 <template>

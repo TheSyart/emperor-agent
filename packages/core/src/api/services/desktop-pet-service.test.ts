@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -9,7 +9,7 @@ function tmp(prefix: string): string {
 }
 
 describe('CoreDesktopPetService', () => {
-  it('persists enabled preference and reports running state', async () => {
+  it('persists enabled preference without claiming window runtime state', async () => {
     const root = tmp('emperor-pet-service-')
     const stateRoot = tmp('emperor-pet-service-state-')
     const service = new CoreDesktopPetService(root, { stateRoot })
@@ -18,17 +18,20 @@ describe('CoreDesktopPetService', () => {
 
     expect(enabled).toMatchObject({
       enabled: true,
-      running: true,
+      running: false,
       managedBy: 'Electron main process',
       available: true,
     })
     expect(enabled.pid).toBeNull()
     expect(enabled.lastError).toBeNull()
     expect(enabled.installCommand).toBe('')
-    expect(
-      readFileSync(join(stateRoot, 'emperor.local.json'), 'utf8'),
-    ).toContain('"enabled": true')
+    expect(readFileSync(join(stateRoot, 'settings.json'), 'utf8')).toContain(
+      '"enabled": true',
+    )
     expect((await service.get()).enabled).toBe(true)
+    expect(
+      existsSync(join(stateRoot, 'memory', 'desktop_pet', 'state.json')),
+    ).toBe(false)
 
     const disabled = await service.setEnabled(false)
 
@@ -37,29 +40,9 @@ describe('CoreDesktopPetService', () => {
       running: false,
       lastError: null,
     })
-    expect(
-      readFileSync(join(stateRoot, 'emperor.local.json'), 'utf8'),
-    ).toContain('"enabled": false')
-  })
-
-  it('marks stopped and error state', async () => {
-    const root = tmp('emperor-pet-service-state-')
-    const stateRoot = tmp('emperor-pet-service-state2-')
-    const service = new CoreDesktopPetService(root, { stateRoot })
-
-    // Enable first
-    await service.setEnabled(true)
-    expect((await service.get()).running).toBe(true)
-
-    // Mark stopped
-    service.markStopped()
-    expect((await service.get()).running).toBe(false)
-
-    // Mark error
-    service.markError('something went wrong')
-    const afterError = await service.get()
-    expect(afterError.running).toBe(false)
-    expect(afterError.lastError).toBe('something went wrong')
+    expect(readFileSync(join(stateRoot, 'settings.json'), 'utf8')).toContain(
+      '"enabled": false',
+    )
   })
 
   it('runs mutation checks synchronously before toggling', () => {

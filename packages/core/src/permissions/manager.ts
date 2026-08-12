@@ -1,5 +1,5 @@
 /**
- * PermissionManager (MIG-CTRL-017)。对齐 Python `agent/permissions/manager.py`。
+ * PermissionManager。
  * approve/deny-once 指纹 + plan token；高风险 run_command 在 token 前先评估 (PE-13)。
  */
 import { createHash, randomUUID } from 'node:crypto'
@@ -18,7 +18,7 @@ import {
 } from './models'
 import { PermissionPolicy } from './policy'
 import { isHighRiskCommand } from '../tools/resolvers'
-import type { PermissionRuleInput } from './rules'
+import type { PermissionRuleInput, PermissionRuleLayerInput } from './rules'
 import type { PermissionRuleAction, PermissionRuleTrust } from './rules'
 import { analyzeShellCommandFailClosed, shellAstSummary } from './shell-ast'
 import {
@@ -31,6 +31,11 @@ import {
   PermissionRequestStore,
   type PermissionRequestOutcome,
 } from './request-store'
+import type { HostExecutionAuthorization } from '../environment/process-runner'
+import type {
+  FileAccessAuthorization,
+  FileExecutionScope,
+} from './workspace-policy'
 
 /** PermissionManager 依赖的 ControlManager 表面。 */
 export interface PermissionControlHost {
@@ -72,12 +77,18 @@ export interface PermissionAssessmentOptions {
   cwd?: string | null
   taskIntent?: string | null
   authorizationId?: string | null
+  executionBoundary?: 'sandbox' | 'host'
+  permissionMode?: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan'
+  fileExecutionScopes?: readonly FileExecutionScope[]
 }
 
 export interface PermissionBatchOperation {
   callId: string
   fingerprint: string
   decision: PermissionDecision
+  executionBoundary: 'sandbox' | 'host'
+  executionAuthorization: HostExecutionAuthorization | null
+  fileAccessAuthorization: FileAccessAuthorization | null
 }
 
 export interface PermissionBatchAssessment {
@@ -107,6 +118,7 @@ export class PermissionManager {
     controlManager: PermissionControlHost,
     opts: {
       rules?: PermissionRuleInput[] | null
+      layers?: PermissionRuleLayerInput[] | null
       classifier?: PermissionSemanticClassifier | null
       modelRouter?: Pick<ModelRouter, 'route'> | null
       stateRoot?: string
@@ -117,7 +129,10 @@ export class PermissionManager {
       throw new Error('PermissionManager stateRoot is required')
     this.requestStore = new PermissionRequestStore(opts.stateRoot)
     this.requestStore.cleanup()
-    this.policy = new PermissionPolicy(undefined, { rules: opts.rules ?? [] })
+    this.policy = new PermissionPolicy(undefined, {
+      rules: opts.rules ?? [],
+      layers: opts.layers ?? [],
+    })
     this.classifier =
       opts.classifier ??
       (opts.modelRouter
@@ -141,6 +156,10 @@ export class PermissionManager {
     calls: PermissionAssessmentCall[],
     opts: PermissionAssessmentOptions = {},
   ): Promise<PermissionBatchAssessment> {
+    opts = {
+      ...opts,
+      permissionMode: normalizedPermissionMode(this.controlManager.mode),
+    }
     if (!calls.length) return emptyBatch()
     if (calls.length > 64)
       return deniedBatch(
@@ -224,6 +243,7 @@ export class PermissionManager {
         registry: opts.registry ?? null,
         workspaceRoot: opts.workspaceRoot ?? null,
         cwd: opts.cwd ?? null,
+        fileExecutionScopes: opts.fileExecutionScopes ?? [],
       },
     )
     if (decision.rule !== 'mode.smart_auto.semantic_review' || !this.classifier)
@@ -367,7 +387,8 @@ export class PermissionManager {
               {
                 id: 'allow_and_full_access',
                 label: '允许并切换到完全访问',
-                description: '批准当前操作，并让后续普通操作不再请求权限。',
+                description:
+                  '批准当前操作；本会话后续主 Agent 命令将宿主直执且不再询问，明确拒绝、Plan 和 AgentDefinition 仍有效。',
               },
             ],
           },
@@ -393,6 +414,15 @@ export class PermissionManager {
                 workspaceRoot: opts?.workspaceRoot ?? null,
                 cwd: opts?.cwd ?? null,
               }),
+              execution_boundary: operation.executionBoundary,
+              filesystem_access:
+                operation.executionBoundary === 'host'
+                  ? 'unrestricted'
+                  : 'workspace-write',
+              network_access:
+                operation.executionBoundary === 'host'
+                  ? 'unrestricted'
+                  : 'denied',
             })),
           },
         },
@@ -670,6 +700,7 @@ function fingerprintOf(
     workspaceRoot,
     cwd,
     targets: canonicalTargets(call.arguments ?? {}, cwd || workspaceRoot),
+    executionBoundary: normalizedExecutionBoundary(opts.executionBoundary),
   }
   return createHash('sha256').update(stableJson(payload), 'utf8').digest('hex')
 }
@@ -721,12 +752,125 @@ function batchFrom(
     reason: primary?.reason ?? '',
     rule: primary?.rule ?? '',
     decisions,
-    operations: decisions.map((decision, index) => ({
-      callId: calls[index]?.id ?? `call_${index + 1}`,
-      fingerprint: fingerprintOf(calls[index]!, opts),
-      decision,
-    })),
+    operations: decisions.map((decision, index) => {
+      const call = calls[index]!
+      const fingerprint = fingerprintOf(call, opts)
+      const executionBoundary = normalizedExecutionBoundary(
+        opts.executionBoundary,
+      )
+      return {
+        callId: call?.id ?? `call_${index + 1}`,
+        fingerprint,
+        decision,
+        executionBoundary,
+        executionAuthorization: hostExecutionAuthorization({
+          call,
+          decision,
+          fingerprint,
+          authorizationId,
+          executionBoundary,
+          permissionMode: opts.permissionMode,
+        }),
+        fileAccessAuthorization: fileAccessAuthorization({
+          call,
+          decision,
+          fingerprint,
+          authorizationId,
+          permissionMode: opts.permissionMode,
+          cwd: canonicalPath(opts.cwd ?? opts.workspaceRoot),
+        }),
+      }
+    }),
     authorizationId,
+  }
+}
+
+function normalizedExecutionBoundary(
+  value: PermissionAssessmentOptions['executionBoundary'],
+): 'sandbox' | 'host' {
+  return value === 'host' ? 'host' : 'sandbox'
+}
+
+function normalizedPermissionMode(
+  value: string,
+): NonNullable<PermissionAssessmentOptions['permissionMode']> {
+  if (value === 'smart_auto' || value === 'full_access' || value === 'plan')
+    return value
+  return 'ask_before_edit'
+}
+
+function hostExecutionAuthorization(opts: {
+  call: PermissionAssessmentCall
+  decision: PermissionDecision
+  fingerprint: string
+  authorizationId: string | null
+  executionBoundary: 'sandbox' | 'host'
+  permissionMode: PermissionAssessmentOptions['permissionMode']
+}): HostExecutionAuthorization | null {
+  if (
+    opts.executionBoundary !== 'host' ||
+    opts.call.name !== 'run_command' ||
+    !opts.decision.allowed ||
+    opts.permissionMode === 'plan'
+  )
+    return null
+  const source: HostExecutionAuthorization['source'] =
+    opts.decision.rule === 'user.approved_once' && opts.authorizationId
+      ? 'user_approved_once'
+      : opts.decision.rule === 'mode.full_access'
+        ? 'full_access'
+        : 'permission_rule'
+  return {
+    version: 1,
+    toolName: 'run_command',
+    operationFingerprint: opts.fingerprint,
+    source,
+    permissionMode:
+      opts.permissionMode === 'smart_auto' ||
+      opts.permissionMode === 'full_access'
+        ? opts.permissionMode
+        : 'ask_before_edit',
+    rule: opts.decision.rule || 'permission.allow',
+    authorizationId:
+      source === 'user_approved_once' ? opts.authorizationId : null,
+  }
+}
+
+function fileAccessAuthorization(opts: {
+  call: PermissionAssessmentCall
+  decision: PermissionDecision
+  fingerprint: string
+  authorizationId: string | null
+  permissionMode: PermissionAssessmentOptions['permissionMode']
+  cwd: string
+}): FileAccessAuthorization | null {
+  if (
+    !['read_file', 'glob', 'grep'].includes(opts.call.name) ||
+    !opts.decision.allowed ||
+    opts.permissionMode === 'plan'
+  )
+    return null
+  const canonicalPaths = canonicalTargets(opts.call.arguments, opts.cwd)
+  if (!canonicalPaths.length) return null
+  const source: FileAccessAuthorization['source'] =
+    opts.decision.rule === 'user.approved_once' && opts.authorizationId
+      ? 'user_approved_once'
+      : opts.decision.rule === 'mode.full_access'
+        ? 'full_access'
+        : 'permission_rule'
+  return {
+    version: 1,
+    toolName: opts.call.name as FileAccessAuthorization['toolName'],
+    operationFingerprint: opts.fingerprint,
+    canonicalPaths,
+    source,
+    permissionMode:
+      opts.permissionMode === 'smart_auto' ||
+      opts.permissionMode === 'full_access'
+        ? opts.permissionMode
+        : 'ask_before_edit',
+    authorizationId:
+      source === 'user_approved_once' ? opts.authorizationId : null,
   }
 }
 

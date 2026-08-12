@@ -19,7 +19,7 @@ export function renderCommandHelp() {
   return [
     '## 斜杠命令',
     '',
-    '命令目录由 Core 动态提供。输入 `/help` 打开命令中心，或在 Composer 输入 `/` 搜索当前会话可用命令。',
+    '命令目录由 Core 动态提供。在 Composer 输入 `/` 搜索当前会话可用的命令与 Skills。',
   ].join('\n')
 }
 
@@ -212,7 +212,7 @@ export function renderMemoryVersions(boot: BootstrapPayload | null) {
         ].join('\n'),
       ),
     '',
-    `恢复：${inlineCode('/memory-restore <id>')}`,
+    '需要恢复时，请在“设置 → 记忆”中选择对应版本。',
   ].join('\n')
 }
 

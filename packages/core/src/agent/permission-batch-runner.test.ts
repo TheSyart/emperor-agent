@@ -6,9 +6,16 @@ import { ControlManager } from '../control/manager'
 import { TurnPaused } from '../control/exceptions'
 import { ControlMode } from '../control/models'
 import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
-import { DeleteFileTool } from '../tools/filesystem'
+import { DeleteFileTool, ReadFileTool } from '../tools/filesystem'
+import {
+  Tool,
+  okResult,
+  type ToolExecutionContext,
+  type ToolResult,
+} from '../tools/base'
+import { S, toolParamsSchema } from '../tools/schema'
 import { ToolRegistry } from '../tools/registry'
-import { AgentRunner } from './runner'
+import { AgentRunner, type ControlManagerRunnerHost } from './runner'
 
 class SequenceProvider extends LLMProvider {
   constructor(private readonly responses: LLMResponse[]) {
@@ -38,6 +45,179 @@ function response(content: string | null, paths: string[] = []): LLMResponse {
 }
 
 describe('AgentRunner permission batch preflight', () => {
+  it('carries full-access external read authorization into the file tool context', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'emperor-read-workspace-'))
+    const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-read-state-'))
+    const outside = mkdtempSync(join(tmpdir(), 'emperor-read-outside-'))
+    const external = join(outside, 'install.md')
+    writeFileSync(external, 'external installation guide', 'utf8')
+    const control = new ControlManager(stateRoot)
+    control.setMode(ControlMode.FULL_ACCESS)
+    const registry = new ToolRegistry(stateRoot)
+    const seen: string[] = []
+    class ReadProbe extends ReadFileTool {
+      override async execute(
+        args: Record<string, unknown>,
+        ctx?: ToolExecutionContext,
+      ): Promise<string> {
+        const result = await super.execute(args, ctx)
+        seen.push(result)
+        return result
+      }
+    }
+    registry.register(new ReadProbe(workspace))
+    const provider = new SequenceProvider([
+      {
+        content: null,
+        toolCalls: [
+          {
+            id: 'read_external',
+            name: 'read_file',
+            arguments: { path: external },
+          },
+        ],
+        finishReason: 'tool_calls',
+        usage: {},
+        reasoningContent: null,
+        thinkingBlocks: null,
+      },
+      {
+        content: 'done',
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: {},
+        reasoningContent: null,
+        thinkingBlocks: null,
+      },
+    ])
+    const runner = new AgentRunner({
+      provider,
+      model: 'fake',
+      registry,
+      systemPrompt: 'system',
+      controlManager: control,
+      workspaceRoot: workspace,
+      sessionId: 'session_external_read',
+    })
+
+    await expect(
+      runner.stepAsync([{ role: 'user', content: 'read it' }]),
+    ).resolves.toBe('done')
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toContain('external installation guide')
+  })
+
+  it.each([
+    ['Plan main agent', 'plan', 0],
+    ['full-access subagent', 'full_access', 1],
+  ] as const)(
+    'keeps %s run_command execution sandboxed',
+    async (_label, mode, subagentDepth) => {
+      class BoundaryProbe extends Tool {
+        override name = 'run_command'
+        override description = 'capture trusted process boundary'
+        override parameters = toolParamsSchema({ command: S('command') }, [
+          'command',
+        ])
+        seen: Array<string | undefined> = []
+        execute(
+          _args: Record<string, unknown>,
+          ctx?: ToolExecutionContext,
+        ): ToolResult {
+          this.seen.push(ctx?.processExecution?.kind)
+          return okResult('sandboxed')
+        }
+      }
+      const boundaries: Array<string | undefined> = []
+      const allow = {
+        allowed: true,
+        requiresApproval: false,
+        reason: 'allowed',
+        rule: 'test.allow',
+      }
+      const control = {
+        mode,
+        systemPrompt: () => '',
+        toolDefinitions: (registry: ToolRegistry) => registry.getDefinitions(),
+        assessPermission: () => allow,
+        assessPermissionBatch: async (
+          calls: Array<{
+            id: string
+            name: string
+            arguments: Record<string, unknown>
+          }>,
+          _registry: ToolRegistry | null,
+          opts?: { executionBoundary?: 'sandbox' | 'host' },
+        ) => {
+          boundaries.push(opts?.executionBoundary)
+          return {
+            ...allow,
+            decisions: calls.map(() => allow),
+            operations: calls.map((call) => ({
+              callId: call.id,
+              fingerprint: 'f'.repeat(64),
+              decision: allow,
+              executionBoundary: opts?.executionBoundary,
+              executionAuthorization: null,
+            })),
+            authorizationId: null,
+          }
+        },
+        permissionApprovalResult: () => 'approval required',
+        assessClarification: () => ({
+          required: false,
+          reason: '',
+          questions: [],
+          categories: [],
+        }),
+        shouldEnforcePlanFinal: () => false,
+      } as unknown as ControlManagerRunnerHost
+      const tool = new BoundaryProbe()
+      const registry = new ToolRegistry()
+      registry.register(tool)
+      const provider = new SequenceProvider([
+        {
+          content: null,
+          toolCalls: [
+            {
+              id: 'call_pwd',
+              name: 'run_command',
+              arguments: { command: 'pwd' },
+            },
+          ],
+          finishReason: 'tool_calls',
+          usage: {},
+          reasoningContent: null,
+          thinkingBlocks: null,
+        },
+        {
+          content: 'done',
+          toolCalls: [],
+          finishReason: 'stop',
+          usage: {},
+          reasoningContent: null,
+          thinkingBlocks: null,
+        },
+      ])
+      const runner = new AgentRunner({
+        provider,
+        model: 'fake',
+        registry,
+        systemPrompt: 'system',
+        controlManager: control,
+        workspaceRoot: process.cwd(),
+        sessionId: 'session_boundary',
+        subagentDepth,
+      })
+
+      await expect(
+        runner.stepAsync([{ role: 'user', content: 'pwd' }]),
+      ).resolves.toBe('done')
+      expect(boundaries).toEqual(['sandbox'])
+      expect(tool.seen).toEqual(['sandbox'])
+    },
+  )
+
   it('pauses three destructive calls behind one exact request and executes once after approval', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'emperor-batch-workspace-'))
     const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-batch-state-'))

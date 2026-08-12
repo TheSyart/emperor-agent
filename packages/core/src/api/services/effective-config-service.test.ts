@@ -179,7 +179,7 @@ describe('CoreEffectiveConfigService', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-must-not-escape')
   })
 
-  it('adapts legacy permission/MCP/skill sources into a reproducible redacted snapshot', async () => {
+  it('adapts canonical permission/MCP/skill sources into a reproducible redacted snapshot', async () => {
     const root = tmp('emperor-effective-config-')
     const runtimeRoot = join(root, 'runtime')
     const stateRoot = join(root, 'state')
@@ -192,7 +192,7 @@ describe('CoreEffectiveConfigService', () => {
       '---\nname: builtin-skill\ndescription: Built in\n---\n',
     )
     writeFileSync(
-      join(stateRoot, 'emperor.local.json'),
+      join(stateRoot, 'settings.json'),
       JSON.stringify({
         codeIntelligence: { mode: 'eval' },
         memory: { hybridMemory: 'eval' },
@@ -254,25 +254,25 @@ describe('CoreEffectiveConfigService', () => {
     expect(
       first.entries.find((entry) => entry.key === 'code.intelligence'),
     ).toMatchObject({
-      source: { kind: 'user', id: 'emperor.local.json' },
+      source: { kind: 'user', id: 'settings.json' },
       value: { mode: 'eval' },
     })
     expect(
       first.entries.find((entry) => entry.key === 'memory.hybrid'),
     ).toMatchObject({
-      source: { kind: 'user', id: 'emperor.local.json' },
+      source: { kind: 'user', id: 'settings.json' },
       value: { mode: 'eval' },
     })
     expect(
       first.entries.find((entry) => entry.key === 'workspace.gitRewind'),
     ).toMatchObject({
-      source: { kind: 'user', id: 'emperor.local.json' },
+      source: { kind: 'user', id: 'settings.json' },
       value: { mode: 'eval' },
     })
     expect(
       first.entries.find((entry) => entry.key === 'permissions.rules'),
     ).toMatchObject({
-      source: { kind: 'user', id: 'emperor.local.json' },
+      source: { kind: 'user', id: 'settings.json' },
       value: [expect.objectContaining({ id: 'deny-secrets' })],
     })
     expect(
