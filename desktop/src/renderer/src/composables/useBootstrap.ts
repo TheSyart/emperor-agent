@@ -6,8 +6,6 @@ export function useBootstrap(showToast: (message: string) => void) {
   const boot = ref<BootstrapPayload | null>(null)
   const loading = ref(true)
   const error = ref('')
-  const activeSkill = ref<string | null>(null)
-  const skillContent = ref('')
   const configContent = ref('')
   const mcpContent = ref('')
   ;(window as any).emperor?.onPetStatus?.(
@@ -30,7 +28,10 @@ export function useBootstrap(showToast: (message: string) => void) {
         payload.desktopPet.running = Boolean(status?.open)
         payload.desktopPet.lastError = status?.error || null
       }
-      boot.value = payload
+      boot.value = {
+        ...payload,
+        control: payload.control as unknown as BootstrapPayload['control'],
+      }
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -66,35 +67,6 @@ export function useBootstrap(showToast: (message: string) => void) {
     return data
   }
 
-  async function loadSkill(name: string) {
-    const data = await core('skills.get', name)
-    activeSkill.value = data.name
-    skillContent.value = data.content
-  }
-
-  function startNewSkill(name: string) {
-    activeSkill.value = name
-    skillContent.value = `---\nname: ${name}\ndescription: Describe when to use this skill.\n---\n\n# ${name}\n\n## When to use\n\nUse this skill when...\n`
-  }
-
-  async function saveSkill(content: string) {
-    if (!activeSkill.value) return
-    await core('skills.save', activeSkill.value, content)
-    await loadBootstrap(false)
-    await loadSkill(activeSkill.value)
-    showToast('Skill 已保存，并刷新了 Agent 上下文')
-  }
-
-  async function deleteSkill(name: string) {
-    await core('skills.delete', name)
-    if (activeSkill.value === name) {
-      activeSkill.value = null
-      skillContent.value = ''
-    }
-    await loadBootstrap(false)
-    showToast(`Skill「${name}」已删除`)
-  }
-
   async function loadConfig() {
     const data = await core('config.get')
     configContent.value = data.content
@@ -110,12 +82,6 @@ export function useBootstrap(showToast: (message: string) => void) {
   async function loadMcpConfig() {
     const data = await core('mcp.getConfig')
     mcpContent.value = JSON.stringify(data, null, 2)
-  }
-
-  async function loadMcpStatus() {
-    const status = await core('mcp.status')
-    if (boot.value) boot.value.mcp = status
-    return status
   }
 
   async function saveMcpConfig(content: string) {
@@ -199,8 +165,6 @@ export function useBootstrap(showToast: (message: string) => void) {
     boot,
     loading,
     error,
-    activeSkill,
-    skillContent,
     configContent,
     mcpContent,
     loadBootstrap,
@@ -208,14 +172,8 @@ export function useBootstrap(showToast: (message: string) => void) {
     startProfileInterview,
     skipProfileInterview,
     compactMemory,
-    loadSkill,
-    startNewSkill,
-    saveSkill,
-    deleteSkill,
     loadConfig,
     saveConfig,
-    loadMcpConfig,
-    loadMcpStatus,
     saveMcpConfig,
     saveMemory,
     loadEpisode,

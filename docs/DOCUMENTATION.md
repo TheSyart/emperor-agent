@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、文档作者<br>
-> 最后核验：2026-08-12<br>
+> 最后核验：2026-09-22<br>
 > 事实源：仓库文档结构、`scripts/check.sh`、`scripts/check_public_docs.mjs`
 
 本规范解决三个问题：一份说明应该放在哪里，什么变化必须同步哪些文档，怎样判断文档可以合并。
@@ -38,21 +38,29 @@ Active 文档使用下面的四行状态头：
 
 ## 事实源映射
 
-| 变化                        | 首要事实源                                                               | 必须检查的文档                                                                      |
-| --------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Slash command 或权限模式    | `packages/core/src/commands/`、CoreApi `commands.*`、permission pipeline | README、Chat/Build、Plan/Goal、Slash command 与 Control 架构                        |
-| Chat / Build 会话语义       | Session、Project、ContextBuilder                                         | README、Chat/Build 手册、存储架构                                                   |
-| 模型 schema 或 Provider     | model config schema、Provider registry、模型面板                         | 首次使用、模型手册、示例配置                                                        |
-| CoreApi operation           | CoreApi、IPC contract、renderer API                                      | 架构总览、IPC 文档、开发扩展指南                                                    |
-| Core package 导出           | `packages/core/src/public/`、`packages/core/package.json`                | 架构总览、Agent runtime、开发指南                                                   |
-| ACP method / capability     | `packages/core/src/acp/`、官方 ACP schema、wire test                     | README、架构总览、Headless ACP 指南                                                 |
-| Runtime event               | Core event 类型、renderer reducer/handler                                | Agent runtime、IPC 文档、相关用户手册                                               |
-| 调研证据与最终答复门禁      | Research Evidence Ledger、最终答复校验、ModelCaller reviewer             | README、Agent runtime、工具手册、诊断、安全政策、Changelog                          |
-| `stateRoot` 路径或迁移      | runtime paths、store、migration service                                  | README、数据手册、存储架构、开发指南                                                |
-| Goal 状态或 Gate            | Goal models、coordinator、Gate、renderer projection                      | README、Plan/Goal 手册、Goal 架构                                                   |
-| Scheduler、Team、Hooks、MCP | 对应 service/store/schema 和当前 renderer 路由                           | 自动化手册、工具扩展手册、[可选能力生命周期](architecture/optional-capabilities.md) |
-| Release workflow            | `.github/workflows/release*.yml` 与发布脚本                              | Preview/Stable 手册、安全说明、README                                               |
-| 安全边界                    | IPC trust、permission、network/store policy                              | SECURITY、用户安全说明、架构文档                                                    |
+| 变化                             | 首要事实源                                                                                                              | 必须检查的文档                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Slash command                    | `packages/core/src/commands/`、`api/services/command-application-service.ts`                                            | README、Chat/Build、Plan/Goal、Slash command 架构                               |
+| 权限预设、沙箱或审批             | `harness/sandbox/`、`harness/approval/`、`commands/builtins.ts`                                                         | README、Chat/Build、Plan/Goal、工具手册、权限与 Plan 架构                       |
+| Plan 模式或用户问题              | `harness/plan/plan-mode.ts`、`harness/questions/`、`harness/host/interactions.ts`                                       | README、Plan/Goal、权限与 Plan 架构、IPC 文档                                   |
+| Agent loop、middleware 或组合根  | `harness/agent/`、`harness/host/host.ts`                                                                                | 架构总览、Agent 执行链路、开发指南、扩展指南                                    |
+| Session log、崩溃修复或 fork     | `packages/core/src/session-log/`、`harness/host/services.ts`                                                            | Agent 执行链路、存储架构、模型记忆手册、诊断                                    |
+| 压缩或长期上下文注入             | `harness/compaction/`、`harness/memory/memory.ts`、`harness/prompt/agent-instructions.ts`                               | 模型记忆手册、Chat/Build、Agent 执行链路                                        |
+| 工具新增或语义变化               | `harness/tools/builtin/`、`HarnessHost.compose()`                                                                       | README、工具手册、Agent 执行链路、扩展指南                                      |
+| 模型 schema 或 Provider          | `config/model-config.ts`、`llm/catalog.ts`、`llm/route.ts`、模型面板                                                    | 首次使用、模型手册、示例配置、扩展指南                                          |
+| CoreApi operation                | `api/operations.ts`、`api/core-api.ts`、IPC contract、renderer API                                                      | 架构总览、IPC 文档、开发扩展指南                                                |
+| Core package 导出                | `packages/core/src/public/`、`packages/core/package.json`                                                               | 架构总览、开发指南                                                              |
+| ACP method / capability          | `packages/core/src/acp/`、官方 ACP schema、wire test                                                                    | README、架构总览、Headless ACP 指南                                             |
+| Runtime event                    | `harness/projection/`（projector、wire 名单）、`public/runtime-contract.ts`、renderer runtime                           | IPC 文档、Agent 执行链路、相关用户手册                                          |
+| 原始 session 事件与 Chat 投影    | `session-log/history.ts`、`harness/host/session-views.ts`、`desktop/src/main/event-bridge.ts`、renderer `conversation/` | IPC 文档、Chat/Build                                                            |
+| `stateRoot` 路径或迁移           | `runtime/paths.ts`、store、`runtime/migrate-state-root.ts`、`archiveLegacySessions()`                                   | README、数据手册、存储架构、开发指南                                            |
+| Goal                             | `harness/goal/`、`api/services/goal-service.ts`、projector                                                              | README、Plan/Goal 手册、Goal 架构                                               |
+| 子代理或后台 job                 | `harness/subagent/`、`harness/jobs/`、CoreApi `tasks.*`                                                                 | 工具手册、Agent 执行链路、诊断                                                  |
+| Scheduler、Hooks、MCP、Watchlist | 对应 service/store/schema、`harness/hooks/`、`harness/host/scheduler.ts` 和当前 renderer 路由                           | 自动化手册、工具手册、[可选能力生命周期](architecture/optional-capabilities.md) |
+| Skills、Plugins 或配置管理工具   | `packages/core/src/skills/`、`plugins/`、`mcp/manage.ts`、`harness/tools/builtin/skill-manage.ts` 与 `mcp-config.ts`    | README、工具手册、Plan/Goal、Agent 执行链路、存储架构、IPC 文档                 |
+| 设置弹窗分区                     | `desktop/src/renderer/src/components/settings/`（`settingsSections.ts`、各 `*Section.vue`、`ui/`）                      | 用户手册首页的设置分区表、相关用户手册、扩展指南                                |
+| Release workflow                 | `.github/workflows/release*.yml` 与发布脚本                                                                             | Preview/Stable 手册、安全说明、README                                           |
+| 安全边界                         | IPC trust、沙箱与审批、network/store policy                                                                             | SECURITY、用户安全说明、架构文档                                                |
 
 ## 写作规则
 

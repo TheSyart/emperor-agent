@@ -2,121 +2,195 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-08-12<br>
-> 事实源：ToolRegistry、SkillManager、MCP config/client、插件页
+> 最后核验：2026-09-22<br>
+> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区）
 
-“插件”页面分成 Plugins、Skills、Tools 和 MCP 四个标签。Tool 是可执行接口，Skill 是按需加载的工作说明和资源包，Plugin 是带来源、版本和启用态的受管分发单元，MCP 把外部 server 暴露的工具接入当前 ToolRegistry。
+Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。设置弹窗中的“插件”“Skills”“MCP”和“工具”四个分区分别管理它们。
 
 ## Tools
 
-内建工具主要分为：
+| 类别       | 工具                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| 文件       | `read`、`write`、`edit`                                                                              |
+| 搜索       | `glob`、`grep`                                                                                       |
+| 命令       | `bash`；后台命令用 `job_output`、`job_list`、`job_kill` 管理                                         |
+| 规划与交互 | `todo_write`、`ask_user_question`、`exit_plan_mode`                                                  |
+| 子代理     | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`；子代理内另有 `report` |
+| 编排       | `workflow`、`ralph`                                                                                  |
+| 上下文     | `skill`、`memory_edit`                                                                               |
+| 扩展管理   | `skill_manage`、`mcp_config`                                                                         |
+| 目标与定时 | `get_goal`、`create_goal`、`update_goal`、`scheduler`                                                |
+| MCP        | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个                                                |
 
-- 文件与搜索：`read_file`、`write_file`、`edit_file`、`apply_patch`、`delete_file`、`rename_file`、`glob`、`grep`；
-- 命令与网页：`run_command`、`web_fetch`，以及宿主已配置真实搜索适配器时才出现的 `web_search`；
-- 控制与计划：`ask_user`、`propose_plan`、`request_plan_mode`、`update_todos`；
-- 长任务与协作：Goal tools、Scheduler、subagent 和 Team tools；
-- 上下文：`Skill`、用户档案和其他受控管理工具。
+打开“设置 → 工具”查看当前实际注册的工具：内置工具在前，MCP 工具按 server 分组，可以按名称、描述和 server 搜索，展开后查看参数和 JSON schema。
 
-源码中还包含默认关闭的 `code_intelligence` 实验工具。只有当前配置请求 `on`、parser-bound 真实仓库评估 receipt 通过且 Build session 绑定项目时，它才会注册；Chat 不可调用。它支持按符号查定义/引用和按文件位置跳转，输出会标明 `graph`、`lsp` 或 `graph_fallback`，以及是否因容量、大文件、symlink 或 parse error 形成 partial result。当前发行物没有 production LSP descriptor/发行 receipt，因此普通用户的工具列表不会看到它，也没有设置页开关。
+要点：
 
-实际可用列表取决于会话类型、Goal 状态、已加载 MCP 和权限模式。打开“插件 → 工具”查看当前注册结果。
+- **文件**：`write` 与 `edit` 受当前权限预设的写入范围约束，超出范围时可以为单次调用请求批准。`read` 不受写入沙箱限制。
+- **搜索**：`grep` 优先使用受管执行环境中的 ripgrep，找不到时使用内置的纯 JS 实现；`glob` 与 `grep` 的超大结果会把完整结果保存到本地。
+- **命令**：`bash` 在 macOS / Linux 的系统沙箱中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。没有沙箱后端的平台只有 `danger-full-access` 才能运行 `bash`。
+- **子代理**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子代理继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子代理最多嵌套 3 层，不能请求提权。
+- **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子代理（在对话的工具卡片下流式显示，并出现在 Task 面板）；`ralph` 以同一目标反复启动全新子代理，每轮只传递一份有界的结构化交接，默认最多 64 轮。两者都在前台运行，调用返回时整个运行已结束；可以在 Task 面板查看记录或停止。
+- **记忆**：`memory_edit` 修改用户档案、全局长期记忆或当前项目的私有记忆，不需要审批。
+- **扩展管理**：`skill_manage` 管理 Skills，`mcp_config` 管理 MCP server，见下文。查看、校验和重新连接不需要审批；修改 Skill 文件或 MCP 配置的动作跟随当前权限预设，除 `danger-full-access` 外每次写入都会先请求你批准。
+- **Scheduler**：`scheduler` 让 Agent 创建和管理定时任务，不需要审批。
+- **大结果**：超过 50,000 字节的纯文本结果会完整保存到 `stateRoot/spill/`，模型只看到首尾预览和文件路径。
+- **网页**：默认没有网页抓取工具。`web_search` 只在宿主配置了搜索后端时才会出现，桌面版当前没有配置。需要联网时可以使用 MCP server、会联网的 Skill，或在权限允许时用 `bash` 调用命令行工具。
 
-`web_search` 不提供无后端的占位实现：宿主没有注入真实搜索适配器时，它不会注册，也不会出现在工具列表。`web_fetch` 可直接读取用户提供的 HTTP(S) URL，并允许多个互不依赖的读取并发；HTML 会先去除 script/style/navigation 噪声再转为 Markdown，JSON 会规范化，二进制和超长结果写入当前 session 的 `tool-results/`。只有 2xx 是成功；4xx/5xx、跨域重定向和 transport 错误分别返回结构化 `failure` 或 `followup_required`。跨域重定向不会自动继承敏感 header，每一跳都重新校验。桌面端检测到系统代理和 Clash/TUN Fake-IP 时使用 Electron 的系统网络栈，headless 环境仍执行严格公网 DNS/IP 校验。网页正文会被标记为不可信 data-only 内容，其中要求 Agent 忽略规则或执行命令的文本不会获得更高指令权限。
-
-网络调研使用 Core 证据链，而不是把“命令成功”当作“新闻已证实”。Agent Reach、其他 Skill、CLI、MCP 和 `web_search` 找到的链接都只是待核实线索；只有 `web_fetch` 成功读取 2xx 正文后才成为已验证来源。最终答复中的每个事实段落或列表项都要附支持该项的 Markdown 链接，并经过隔离来源复核。校验期间界面显示“正在核验来源”；未通过的草稿不会先显示再撤回。没有可验证正文时，Emperor 会明确报告阻塞，不会根据模型记忆或拼造链接补齐结果。
-
-只读、可并发和是否需要确认由 Core 决定。工具卡显示的是执行投影，不能替代实际 store、command receipt 或 Goal evidence。
-
-`read_file`、`edit_file`、`apply_patch` 和 PDF 文本 sidecar 共用 8 MiB 单文件读取上限，超限会在完整载入或写回前拒绝，并响应 turn 取消。`edit_file` 拒绝空 needle；精确和 trim 匹配失败后可按空白差异定位真实源码跨度，多处命中仍要求更多上下文或 `replace_all=true`，实际内容不变时不会写盘或生成修改事件。`apply_patch` 是单文件精确文本 patch，不做模糊匹配；`delete_file` 只删除普通文件，`rename_file` 不覆盖既有目标，两者都拒绝目录和符号链接。删除与重命名在 `ask_before_edit` 和 `smart_auto` 下需要显式批准；同一次模型回复中的多个精确目标只出现一张权限卡，卡片列出全部操作，批准只对该批次有效。`full_access` 直接执行，但明确 deny、Plan 只读和 workspace containment 仍生效。rename 的来源和目标会同时进入权限 path rule 与 workspace 检查。可选文件检查点启用后，这五种写工具会在执行边界保存 before/after。
-
-主 Agent 在非 Plan 模式执行 `run_command` 时使用宿主环境：cwd 固定为当前 workspace，但可读取真实 HOME、PATH、Git/npm 用户配置，并可访问公网、localhost 和局域网；shell 不加载 login/rc 文件。`ask_before_edit` 先显示明确的宿主能力审批，`smart_auto` 按风险规则决定是否询问，`full_access` 对后续主 Agent 宿主命令免询问。Plan、子代理、Team、Hook、MCP、LSP 和受管 Git 继续使用 OS sandbox。`curl`、`wget`、解释器动态代码、符号链接和 pipe-to-shell 由统一 shell AST 与权限规则按真实风险处理，不再被工具层重复拒绝；所有模式仍在 spawn 前硬拒绝 `sudo/su/doas/pkexec` 和明确的根目录、磁盘设备、文件系统破坏或 fork bomb，且不支持管理员密码或 PTY。bash/zsh 使用 `pipefail`，其他 shell 会披露结果只覆盖最后一个 pipeline command；复合命令仍必须用独立 probe 验证实际产物。
-
-`ask_user` 只用于目标或范围不明确。例如“删除项目内文件”可以先询问具体删除哪些；用户回答“全部删除”后，Agent 应直接调用删除工具，不能再用普通对话要求确认。是否弹出权限卡由当前权限模式和 Core 权限层决定。
+工具卡显示的是执行投影；真实状态以 session log 为准。
 
 ## Skills
 
-Skill 至少包含一个带 frontmatter 的 `SKILL.md`，可以附带 `scripts/`、`references/` 和 `assets/`。
+Skill 是一个包含 `SKILL.md` 的文件夹，可以附带 `scripts/`、`references/`、`assets/` 等文件。`SKILL.md` 以 YAML frontmatter 开头，至少包含 `name` 和 `description`：
 
-加载优先级：
+```markdown
+---
+name: my-skill
+description: 一句话说明什么时候使用这个 Skill。
+---
 
-1. Build 项目的 `<project>/.emperor/skills`；
-2. 用户全局 `stateRoot/skills`；
-3. 已启用且已物化 Plugin 内的只读 Skills；
-4. 应用内置 `runtimeRoot/skills`。
+# My Skill
 
-同名时高优先级覆盖低优先级。项目和内置 Skill 是只读来源；插件页的新建、编辑、删除默认作用于用户全局 Skill。
+具体的工作说明……
+```
 
-当前生效来源可在“设置 → 诊断 → 配置”的 `skills.<name>` 行核对。它使用与 `Skill` 相同的活动 session 解析结果，不会出现诊断说 user、实际却加载 project 的双轨状态；切换 Build/Chat session 会相应改变 project candidate 是否参与。诊断只显示来源与路径，不显示 Skill 正文。
+Skills 文件夹中直接放置的 `<name>.md` 文件，只要 frontmatter 同时声明了 `name` 和 `description`，也会作为 Skill 加载。
+
+### 来源与优先级
+
+| 优先级 | 来源   | 位置                                                         | 能否修改 |
+| ------ | ------ | ------------------------------------------------------------ | -------- |
+| 1      | 项目   | `<project>/.emperor/skills`，只在绑定该项目的 Build 会话可见 | 可以     |
+| 2      | 个人   | `~/.emperor/skills`（`stateRoot/skills`）                    | 可以     |
+| 3      | Plugin | 已启用并激活的 Plugin 内的 Skills                            | 只读     |
+| 4      | 内置   | 应用内置的 `runtimeRoot/skills`                              | 只读     |
+
+同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在“设置 → 诊断”的“配置”分组中核对 `skills.<name>` 行。
+
+### 名称与校验规则
+
+- Skill 的名称取自 frontmatter 的 `name`：以小写字母或数字开头，只能包含小写字母、数字、`.`、`_` 和 `-`，最多 64 个字符。文件夹名与它不同时只给出警告，Skill 仍以 frontmatter 名称为准。
+- 校验只检查 `SKILL.md` 和其中按相对路径引用的文件；文件夹里的其他文件只做链接安全扫描。
+- `node_modules`、`.venv`、`venv`、`.git` 和 `__pycache__` 不遍历、不计数，导入时也不复制。
+- 指向 Skill 文件夹内部的符号链接可以使用；绝对路径链接和指向文件夹外部的链接会让校验失败。Skill 文件夹本身不能是符号链接。
+- frontmatter 按宽松模式解析：重复的键以最后一个值为准，不严格合法的 YAML 会尽量解析，同时给出警告。
+
+未通过校验的 Skill 不会加载。它们出现在“设置 → Skills”顶部的「不合格的 Skill」列表中，并附上具体原因；个人和项目中的不合格 Skill 可以直接打开所在文件夹或删除。
+
+### 在设置中管理 Skills
+
+“设置 → Skills”的列表支持搜索，并可按“全部 / 个人 / 项目 / 插件 / 内置”筛选来源。右上角的「新增」提供四种方式：
+
+1. **粘贴 SKILL.md**：粘贴内容后自动从 frontmatter 读取名称并实时校验。
+2. **选择本地文件夹**：导入一个包含 `SKILL.md` 的文件夹。
+3. **导入 zip 或 GitHub 链接**：选择本地 zip 文件，或填写 `https://` 链接，可以是 GitHub 仓库链接、`…/tree/<分支>/<目录>` 形式的目录链接，也可以是直接的 zip 下载地址。
+4. **打开 Skills 文件夹**：在文件管理器中打开个人 Skills 文件夹，或在 Build 会话中打开项目 Skills 文件夹，直接放入或修改文件。
+
+导入时选择保存位置：“个人”，或只在 Build 会话中可选的“当前项目”。一个来源里有多个 Skill 文件夹时会逐个导入并分别报告结果；已有同名 Skill 时会提示，确认「覆盖」后才替换。
+
+点开一个 Skill 可以查看来源、文件位置和 `SKILL.md`：
+
+- 个人和项目 Skill 可以直接编辑（输入时实时校验，⌘S 保存）、还原或删除；删除会从磁盘移除该 Skill，无法撤销。
+- 内置和 Plugin Skill 只读，可以「复制为个人 Skill」得到一份可编辑的副本，已有同名个人 Skill 时会先询问是否覆盖。个人副本的优先级高于同名的内置或 Plugin 版本。
+
+你在文件管理器中修改个人、项目或 Plugin 的 Skills 文件夹后，设置中的列表会自动刷新；Agent 从下一步开始看到更新后的 Skill 目录。
+
+### 让 Agent 管理 Skills
+
+Agent 使用 `skill_manage` 工具管理 Skills，不应使用文件或 Shell 工具直接修改 Skills 文件夹：
+
+- `list`（包括不合格的 Skill 及原因）和 `validate` 只读，不需要审批；
+- `create`、`update`、`delete` 和 `import`（本地文件夹、本地 zip、粘贴的 `SKILL.md` 或 `https://` 链接）写入个人 Skills 文件夹，或在 Build 会话中写入当前项目的 Skills 文件夹；
+- 除 `danger-full-access` 外，每次写入都会先弹出审批，拒绝即取消该操作；内置和 Plugin Skill 不能通过它修改。
 
 ### 调用 Skill
 
 - 在 Composer 的能力选择器中选择；
 - 输入 `/<skill-name> 任务内容`；
-- 让 Agent 在需要时调用 `Skill`。
+- 让 Agent 在需要时调用 `skill` 工具。
 
-Blocked 或 invalid Skill 不会出现在可调用快捷方式中。
+所有 active Skill 的名称和描述会作为目录提供给 Agent；frontmatter 设置 `disable-model-invocation: true` 的 Skill 不进入该目录，只能由你手动调用。Skill 的斜杠命令行为可以在 frontmatter 的 `metadata.emperor.command` 中定制（名称、别名、参数提示、参数、调用来源、敏感参数），见 [Slash command 平台](../architecture/slash-command-platform.md#skill-命令)。
 
-active Skill 默认作为 `/<skill-name>` 命令进入 Core 命令目录。需要自定义名称、参数或隔离执行时，可在 frontmatter 中声明：
+## Plugins
 
-```yaml
-metadata:
-  emperor:
-    command:
-      user_invocable: true
-      name: review-code
-      aliases: [audit-now]
-      argument_hint: '[scope]'
-      arguments:
-        - name: scope
-          type: relative_path
-          required: true
-      context: fork # inline | fork
-      agent: sili_suitang
-      allowed_tools: [read_file, grep]
-      effort: high
-      invocation_sources: [desktop]
-      sensitive_arguments: [token]
-```
+需要来源、版本、更新和卸载语义的扩展使用 Plugin。“设置 → 插件”右上角的「安装」菜单提供三种来源：
 
-Core 从受信 Skill 记录读取这些字段；Composer 不能提交 Skill 路径、source、Agent 或工具范围。`fork` 会校验 Agent 存在且工具范围没有超过 AgentDefinition。内置命令名不可覆盖；发生 token 冲突的 Skill 不注册斜杠入口，可在 Diagnostics 核对最终生效来源。Emperor 不提供 `/skill`、`/skills` 或兼容中转别名，也不扫描 `.emperor/commands/`；动态 Prompt 命令只使用 Skill。详细规则见 [Slash command 平台](../architecture/slash-command-platform.md)。
+- **选择本地文件夹**：从解压后的 Plugin 目录安装；
+- **选择 zip 文件**：从本地 Plugin 压缩包安装；
+- **从 URL 安装**：填写 `https://` 地址。
 
-### 创建或引入裸 Skill
+每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（写入当前项目的 `.emperor/settings.json`）或本地项目（写入当前项目的 `.emperor/settings.local.json`，不随仓库提交）。确认后才会安装。
 
-Emperor 的裸 Skill 使用文件系统语义，不需要安装 registry。只要合法目录中存在通过校验的 `SKILL.md`，resolver 就会发现并激活；`SKILL_en.md`、`references/`、`scripts/`、`assets/` 等普通附属文件不会使它失效。
+本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。
 
-Agent 创建或引入裸 Skill 时使用普通网页、文件和命令工具：先下载或 clone 到当前 session scratch，检查 `SKILL.md`、frontmatter、引用和脚本，再原子写入 Runtime Identity 给出的 User Skills 目录，重新调用 `Skill` 并确认专属斜杠 token 已进入命令目录。Skill 内容以隐藏的 meta-user 上下文进入 turn，不提升为 system 权威；Core 同时注入 canonical base directory、来源和只读状态。当前调用 Skill 根自动获得只读范围，`allowed-tools` 只在本次调用内进一步收紧 Core 权限。项目和内置 Skill 保持只读。Emperor 不扫描、复制或删除 `.agents/skills`、`.claude/skills`、`.codex/skills`，也不会把其他 Agent 的安装结果冒充为 Emperor Skill。
+已安装的 Plugin 可以启用、停用或卸载，只有已激活 Plugin 内的 Skill 会进入 Skill 目录。用户范围的启用意图保存在 `stateRoot/settings.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在设置中发起，没有对应的模型工具。
 
-### Plugins 与外部依赖
-
-需要来源、版本、更新、卸载和能力清单的扩展使用 Plugin。Plugins 页面执行 `inspect → 精确确认 → install`，确认卡展示来源、scope、版本、digest、签名状态和包含的能力。启用意图与本地物化状态分开保存，因此内容丢失时会明确显示 `missing`；禁用或卸载不会同步删除不可变缓存和持久数据。
-
-Plugin 安装是用户发起的产品操作，不是模型工具。模型注册表不暴露 `install_skill`、`manage_environment` 或旧 `load_skill`。外部 CLI、Skill/Plugin、外部配置和 doctor 是彼此独立的结果：Agent 可在普通权限规则下使用 `run_command` 调用 Git、npm、pipx 等既有工具，并必须再用独立命令探测入口和版本。复合 shell 命令整体 exit 0 不能替代每个结果的独立 probe。Node 子进程保留用户显式 CA 设置，否则使用平台验证过的 CA bundle，并继承标准代理变量；不会通过关闭 TLS 校验绕过证书错误。`mcporter` 等会按 cwd 落配置的程序必须显式定向到 Emperor Home 的 `environment/data/`；首次实际调用 mcporter 或 Agent Reach 且配置缺失时，Core 只创建包含公共 Exa endpoint 的最小 `0600` 配置，不导入项目配置，也不覆盖已有用户配置。最终回复必须分别报告 Skill、Plugin、CLI dependency、配置和 doctor 状态；网络调研还必须逐项引用本轮经 `web_fetch` 验证的来源。
+旧的 Skill 安装接口和环境配方安装接口已下线；需要外部 CLI 依赖时，在权限允许的情况下用普通命令安装，并单独验证结果。
 
 ## MCP
 
-MCP 配置保存在 `stateRoot/mcp_config.json`。入口是“插件 → MCP”；斜杠菜单不再提供 MCP 导航命令。
+Emperor 只读取自己的 MCP 配置文件 `stateRoot/mcp_config.json`（默认 `~/.emperor/mcp_config.json`），不读取 Claude Desktop、Cursor、VS Code 等其他客户端的配置，也不通过 mcporter 管理 server。
 
-当前支持：
+### 添加 server
 
-- `stdio`：启动本地命令作为 MCP server；
-- `sse`：连接远程 SSE server；
-- `enabled`：按 server 启停；
-- `${ENV_NAME}`：从执行环境展开环境变量；
-- `tool_overrides` 和 defaults：补充只读、独占等工具属性。
-- `call_timeout_ms`：为全部或单个工具设置请求 deadline；未配置时为 60 秒。
+在“设置 → MCP”点击右上角的「添加」，有两种方式：
 
-保存配置后，Core 按 server 配置 diff：未变化且健康的连接保留原 generation，变化的连接先建立 replacement 并取得工具快照，再关闭旧 client。插件页会明确显示“已连接、连接中、等待重试、认证失败、连接异常、连接失败或未连接”、generation 和工具数；零工具不再等同于连接正常。
+- **粘贴 JSON**：直接粘贴其他客户端的 MCP 配置。可以识别 Claude Desktop、Claude Code、Cursor 使用的 `{"mcpServers": {...}}`，VS Code 或 Emperor 使用的 `{"servers": {...}}`，带 `name` 字段的单个 server 对象，以及不带外层容器的“名称 → 配置”映射。带注释、尾逗号或缺少外层花括号的片段会自动修复并提示。
+- **表单**：填写名称，选择 HTTP、SSE 或 stdio，再填写服务地址和可选的请求头，或者启动命令、参数和可选的环境变量。
 
-传输失败后的连接重启会合并并发请求，按 1、4、16 秒最多三次退避。认证失败不会无限重试；修正 credential 或配置并再次保存才会重新连接。取消当前 turn 会取消仍在等待的 MCP 请求，timeout 也不会自动重放可能产生副作用的 tool call。超出结果上限时只把有界预览交给模型，完整结果保存在本机私有 tool-result artifact。MCP 正文与网页一样使用不可信 data-only 边界；来自 server 的指令性文本不会绕过 Core 规则。Diagnostics 还会标明每个工具声明来自 Core 还是当前 MCP generation/client。
+两种方式都会先预览将要新增、覆盖或跳过的 server，并列出警告；同名 server 默认跳过，勾选「覆盖」后才替换。点击「导入」后立即写入配置并连接。例如：
+
+```json
+{
+  "mcpServers": {
+    "example": { "type": "http", "url": "https://example.com/mcp" }
+  }
+}
+```
+
+### 传输方式与字段
+
+| transport | 用途                                                            | 主要字段                 |
+| --------- | --------------------------------------------------------------- | ------------------------ |
+| `stdio`   | 在本机启动一个进程，通过标准输入输出通信                        | `command`、`args`、`env` |
+| `sse`     | 旧版 SSE 端点，URL 通常以 `/sse` 结尾                           | `url`、`headers`         |
+| `http`    | Streamable HTTP；首次连接失败时自动回退到 SSE，认证失败时不回退 | `url`、`headers`         |
+
+- 没有写 `type` 时，有 `command` 视为 `stdio`，有 `url` 视为 `http`；`streamable-http` 等写法会规范为 `http`。远程 server 的 `url` 必须是 `http(s)` 地址。
+- server 名称只能包含字母、数字、`-` 和 `_`，最多 64 个字符；导入时不合规的名称会被规范化并给出提示。
+- `enabled`：按 server 启停，导入的 `disabled: true` 会转换为停用。
+- `${ENV_NAME}`：从执行环境展开环境变量，适合放置 API Key。
+- `tool_overrides` 和 `defaults`：补充只读、独占等工具属性，以及 `call_timeout_ms` 请求超时。
+
+### 管理已有 server
+
+每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；删除会从配置中移除它并断开连接。
+
+需要批量调整或设置 `tool_overrides` 时，展开页面底部“高级”中的“原始配置”，直接编辑 `mcp_config.json`。
+
+每次写入后，Core 按 server 做 diff：未变化且健康的连接保留，变化的连接重建。传输失败后按 1、4、16 秒最多重试三次；认证失败不会无限重试，修正配置并再次保存才会重新连接。取消当前 turn 会取消仍在等待的 MCP 请求。
+
+### 让 Agent 管理 MCP
+
+Agent 使用 `mcp_config` 工具管理同一份 `mcp_config.json`：
+
+- `list` 查看 server、transport、状态和工具数，不需要审批；
+- `add` 接受与设置页相同的 JSON，同名 server 默认跳过，明确要求覆盖时才替换；
+- `remove`、`enable`、`disable` 按名称修改，`reload` 重新连接全部 server；
+- 除 `danger-full-access` 外，`add`、`remove`、`enable`、`disable` 每次写入前都会请求你批准。写入成功后 MCP 自动重载，新的 `mcp_<server>_<tool>` 工具从下一步起可用。
+
+Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也不修改其他客户端的配置文件。
+
+### MCP 工具
+
+每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具不经过文件沙箱，也不需要审批；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
 
 ## 安全边界
 
-- MCP server 名称、命令和 URL 来自用户配置，不接受模型动态改写。
-- `stdio` server 可以启动本地进程，应像命令执行一样审查来源和参数。
-- 远程 MCP、网页和 Plugin/Skill 来源内容都按不可信输入处理。
-- MCP 工具仍经过 schema、权限和 workspace policy；它不能因为来自 server 就绕过 Core deny。
-- 不要把 API Key 直接写进可提交的项目文件。MCP header 可以引用环境变量；插件页读取编辑配置时保留 `${ENV_NAME}`，并把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`，renderer 不会取得磁盘中的字面 credential。
-- 保存时未改动的 `[REDACTED]` 只会从同一 server 和同一字段位置回填；没有旧值的掩码会被拒绝。输入新值会替换旧值，清空字段或删除 server 也会真实保存。
-- `config.effective` / Diagnostics 会把 MCP args、env、headers、URL 整段脱敏，只显示 secret 来源；它与插件页的逐叶编辑掩码是两个不同的只读投影。
+- MCP server 的名称、命令和 URL 来自你的配置。Agent 只能通过 `mcp_config` 修改配置，在 `danger-full-access` 以外的预设中每次修改都需要你批准。
+- `stdio` server 会启动本地进程，应像审查命令一样审查它的来源和参数。
+- MCP 工具的副作用不受 Emperor 权限预设约束，只配置你信任的 server。
+- 远程 MCP、Skill 脚本和 Plugin 内容都按不可信输入处理。导入 Skill 或安装 Plugin 前确认来源可信。
+- 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 分区读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
-需要排查加载问题时，先看“插件 → MCP”的明确 state 与错误码，再检查配置 JSON、执行环境、server 日志和“设置 → 诊断”。
+排查加载问题时，先看“设置 → MCP”中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 诊断”。

@@ -4,212 +4,19 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { MemoryStore } from '../memory/store'
 import { createNodeSyncPersistenceAdapter } from '../store/persistence'
-import {
-  ConversationStore,
-  ProjectSessionMemoryStore,
-  SessionMemoryStore,
-} from './conversation'
-import { migrateLegacyMainlineToDefaultSession } from './migrate'
 import { SessionStore } from './store'
 import { fallbackSessionTitle, sanitizeSessionTitle } from './title'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
-
-describe('ConversationStore (test_conversation_store.py)', () => {
-  it('keeps separate session histories isolated', () => {
-    const root = tmp('emperor-session-conv-')
-    const a = new ConversationStore(join(root, 'a'))
-    const b = new ConversationStore(join(root, 'b'))
-
-    a.appendHistory('user', 'hello a')
-    b.appendHistory('user', 'hello b')
-
-    expect(a.loadUnarchivedHistory().map((r) => r.content)).toContain('hello a')
-    expect(a.loadUnarchivedHistory().map((r) => r.content)).not.toContain(
-      'hello b',
-    )
-    expect(b.loadUnarchivedHistory().map((r) => r.content)).toContain('hello b')
-  })
-
-  it('round-trips history rows, checkpoints, and turn ids', () => {
-    const store = new ConversationStore(
-      join(tmp('emperor-session-round-'), 's1'),
-    )
-    store.appendHistory('user', 'hi', { extra: { turn_id: 't1' } })
-    store.appendHistory('assistant', 'hello', { extra: { turn_id: 't1' } })
-    store.appendHistory('user', 'hidden', {
-      extra: { turn_id: 'hidden', hidden: true },
-    })
-    store.appendHistory('assistant', 'hidden reply', {
-      extra: { turn_id: 'hidden' },
-    })
-
-    expect(store.loadUnarchivedHistory()).toEqual([
-      { role: 'user', content: 'hi', seq: 1, turn_id: 't1' },
-      { role: 'assistant', content: 'hello', seq: 2, turn_id: 't1' },
-    ])
-    expect(store.loadUnarchivedTurnIds()).toEqual(['t1'])
-
-    expect(store.readCheckpoint()).toBeNull()
-    store.writeCheckpoint(
-      [{ role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' }],
-      {
-        sessionId: 'session_1',
-        turnId: 'turn_checkpoint',
-        phase: 'tool_calls_pending',
-        baseHistorySeq: 2,
-      },
-    )
-    expect(store.readCheckpoint()).toEqual([
-      { role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' },
-    ])
-    const checkpoint = JSON.parse(readFileSync(store.checkpointFile, 'utf8'))
-    expect(checkpoint).toMatchObject({
-      schemaVersion: 'emperor.turn-checkpoint.v1',
-      sessionId: 'session_1',
-      turnId: 'turn_checkpoint',
-      baseHistorySeq: 2,
-      phase: 'tool_calls_pending',
-      partialMessages: [
-        { role: 'user', content: 'in-flight', turn_id: 'turn_checkpoint' },
-      ],
-    })
-    store.clearCheckpoint()
-    expect(store.readCheckpoint()).toBeNull()
-  })
-
-  it('binds checkpoints to the owning session when callers omit sessionId', () => {
-    const store = new ConversationStore(
-      join(tmp('emperor-session-checkpoint-owner-'), 'session_bound'),
-    )
-    store.writeCheckpoint([
-      { role: 'user', content: 'in-flight', turn_id: 'turn_bound' },
-    ])
-
-    expect(
-      JSON.parse(readFileSync(store.checkpointFile, 'utf8')),
-    ).toMatchObject({
-      sessionId: 'session_bound',
-      turnId: 'turn_bound',
-    })
-  })
-
-  it('writes new history through the V2 message graph sidecar without changing V1 replay', () => {
-    const store = new ConversationStore(
-      join(tmp('emperor-session-message-graph-'), 's1'),
-    )
-
-    store.appendHistory('user', 'hello graph', {
-      extra: { turn_id: 'turn_graph' },
-    })
-    store.appendHistory('assistant', 'hello branch', {
-      extra: { turn_id: 'turn_graph' },
-    })
-    store.appendCompactMarker()
-
-    const rawRows = readFileSync(store.historyFile, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line))
-    expect(rawRows.slice(0, 2)).toEqual([
-      expect.objectContaining({
-        seq: 1,
-        role: 'user',
-        content: 'hello graph',
-        message_id: expect.any(String),
-      }),
-      expect.objectContaining({
-        seq: 2,
-        role: 'assistant',
-        content: 'hello branch',
-        message_id: expect.any(String),
-      }),
-    ])
-    expect(store.loadUnarchivedHistory()).toEqual([
-      { role: 'user', content: 'hello graph', seq: 1, turn_id: 'turn_graph' },
-      {
-        role: 'assistant',
-        content: 'hello branch',
-        seq: 2,
-        turn_id: 'turn_graph',
-      },
-    ])
-    expect(store.messageGraph.snapshot()).toMatchObject({
-      leafId: rawRows[1]!.message_id,
-      nodes: [
-        { id: rawRows[0]!.message_id, parentId: null, status: 'committed' },
-        {
-          id: rawRows[1]!.message_id,
-          parentId: rawRows[0]!.message_id,
-          status: 'committed',
-        },
-      ],
-      compactBoundaries: [
-        {
-          parentLeafId: rawRows[1]!.message_id,
-          compactedUntilHistorySeq: 3,
-        },
-      ],
-    })
-  })
-
-  it('SessionMemoryStore delegates history to conversation and memory to shared store', () => {
-    const root = tmp('emperor-session-memory-')
-    const userFile = join(root, 'templates', 'USER.local.md')
-    const shared = new MemoryStore(join(root, 'memory'), userFile)
-    const conversation = new ConversationStore(join(root, 'sessions', 's1'))
-    const scoped = new SessionMemoryStore(shared, conversation)
-
-    scoped.writeMemory('# Shared\n')
-    scoped.appendHistory('user', 'session message')
-
-    expect(shared.readMemory()).toContain('Shared')
-    expect(shared.loadUnarchivedHistory()).toEqual([])
-    expect(scoped.loadUnarchivedHistory()).toEqual([
-      { role: 'user', content: 'session message', seq: 1 },
-    ])
-  })
-
-  it('ProjectSessionMemoryStore writes project memory without touching global memory', () => {
-    const root = tmp('emperor-project-session-memory-')
-    const userFile = join(root, 'templates', 'USER.local.md')
-    const shared = new MemoryStore(join(root, 'memory'), userFile)
-    shared.writeMemory('# Global\n\nOriginal global memory')
-    const conversation = new ConversationStore(join(root, 'sessions', 's1'))
-    const projectStore = {
-      memory: '',
-      readManagedMemory: () => projectStore.memory,
-      updateMemory: (_projectId: string, content: string) => {
-        projectStore.memory = content
-      },
-    }
-    const scoped = new ProjectSessionMemoryStore(
-      shared,
-      conversation,
-      projectStore,
-      'project_1',
-    )
-
-    scoped.writeMemory('## 项目情况\n\n- 项目使用 Electron + Vue。')
-    scoped.writeUser('# User\n\nShould not overwrite')
-    scoped.appendEpisode('Should not create global episode')
-
-    expect(shared.readMemory()).toContain('Original global memory')
-    expect(projectStore.memory).toContain('项目使用 Electron')
-    expect(scoped.readTodayEpisode()).toBe('')
-  })
-})
 
 describe('SessionStore (test_session_store.py)', () => {
   it('creates, lists, renames, touches, archives, restores, and deletes sessions', () => {
@@ -586,52 +393,6 @@ describe('SessionStore (test_session_store.py)', () => {
 
     expect(store.get(current.id)?.control_pending).toBeNull()
     expect(store.get(stale.id)?.control_pending).toBeNull()
-  })
-})
-
-describe('session migration (test_loop_sessions.py)', () => {
-  it('moves legacy mainline history, checkpoint, and runtime events into a default session once', () => {
-    const root = tmp('emperor-session-migrate-')
-    const memoryDir = join(root, 'memory')
-    rmSync(memoryDir, { recursive: true, force: true })
-    mkdirSync(memoryDir, { recursive: true })
-    writeFileSync(
-      join(memoryDir, 'history.jsonl'),
-      '{"ts":"2026-01-01","role":"user","content":"old"}\n',
-      { encoding: 'utf8', flag: 'w' },
-    )
-    writeFileSync(
-      join(memoryDir, '_checkpoint.json'),
-      '{"history":[{"role":"user","content":"ck"}]}',
-      { encoding: 'utf8', flag: 'w' },
-    )
-    mkdirSync(join(memoryDir, 'runtime'), { recursive: true })
-    writeFileSync(
-      join(memoryDir, 'runtime', 'events.jsonl'),
-      '{"type":"ready"}\n',
-      'utf8',
-    )
-
-    const migrated = migrateLegacyMainlineToDefaultSession(root)
-    const again = migrateLegacyMainlineToDefaultSession(root)
-
-    expect(migrated).not.toBeNull()
-    expect(again).toBeNull()
-    expect(existsSync(join(memoryDir, 'history.jsonl'))).toBe(false)
-    expect(
-      existsSync(join(root, 'sessions', migrated!.id, 'history.jsonl')),
-    ).toBe(true)
-    expect(
-      existsSync(join(root, 'sessions', migrated!.id, '_checkpoint.json')),
-    ).toBe(true)
-    expect(
-      existsSync(
-        join(root, 'sessions', migrated!.id, 'runtime', 'events.jsonl'),
-      ),
-    ).toBe(true)
-    expect(existsSync(join(root, 'sessions', migrated!.id, 'meta.jsonl'))).toBe(
-      true,
-    )
   })
 })
 

@@ -1,20 +1,15 @@
 import { resolve } from 'node:path'
-import type { GoalSummary } from '../../goals/models'
-import type { PlanRecord } from '../../plans/models'
-import type { TaskRecord } from '../../tasks/models'
-import type { TeamManagerPayload } from '../../team/manager'
 import { WorkspaceOperationError } from '../../workspace/common'
 import type { GitStatusResult, WorkspaceGitService } from '../../workspace/git'
 import type { GitOperationReceiptStore } from '../../workspace/git-receipts'
 import type { WorkspaceBindingStore } from '../../workspace/git-worktrees'
-import type { ProjectProcessService } from '../../workspace/project-processes'
 import {
+  emptyWorkspaceTeam,
   projectWorkspaceGoal,
-  projectWorkspacePlan,
-  projectWorkspaceProjectProcess,
+  projectWorkspaceJob,
   projectWorkspaceSubagent,
-  projectWorkspaceTeam,
   projectWorkspaceTerminal,
+  type WorkspaceJobSummary,
   type WorkspaceSnapshot,
 } from '../../workspace/snapshot'
 import type { TerminalService } from '../../workspace/terminal'
@@ -34,18 +29,17 @@ export interface WorkspaceApplicationServiceDeps {
     operation: string,
   ): WorkspaceApplicationSession
   workspaceGit: Pick<WorkspaceGitService, 'status' | 'worktrees'>
-  plansForSession(sessionId: string): PlanRecord[]
-  goalsForSession(sessionId: string): Promise<GoalSummary[]>
-  tasksForSession(sessionId: string): TaskRecord[]
-  teamForSession(
-    session: WorkspaceApplicationSession,
-  ): TeamManagerPayload | null
+  /** Current kernel goal for the session (HarnessHost.goalView). */
+  goalForSession(sessionId: string): Record<string, unknown> | null
+  /** Kernel jobs owned by the session (JobRegistry snapshots). */
+  jobsForSession(sessionId: string): WorkspaceJobSummary[]
   bindings: WorkspaceBindingStore
   gitReceipts: GitOperationReceiptStore
-  projectProcesses: ProjectProcessService
   terminals: TerminalService
   now?(): number
 }
+
+const ACTIVE_JOB_STATUSES = new Set(['running', 'stopping', 'pending'])
 
 export class CoreWorkspaceApplicationService {
   private readonly deps: WorkspaceApplicationServiceDeps
@@ -81,28 +75,19 @@ export class CoreWorkspaceApplicationService {
             : '无法读取 Git 状态。',
       }
     }
-    const currentPlan = this.deps
-      .plansForSession(input.sessionId)
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .find(
-        (plan) => !['completed', 'failed', 'cancelled'].includes(plan.status),
-      )
-    const goals = await this.deps.goalsForSession(input.sessionId)
-    const tasks = this.deps.tasksForSession(input.sessionId)
-    const subagents = tasks
-      .filter((task) => task.kind === 'subagent')
+    const jobs = this.deps
+      .jobsForSession(input.sessionId)
+      .map(projectWorkspaceJob)
+    const subagents = jobs
+      .filter((job) => job.kind === 'subagent')
       .sort((left, right) => {
-        const leftActive = ['pending', 'running'].includes(left.status)
-        const rightActive = ['pending', 'running'].includes(right.status)
+        const leftActive = ACTIVE_JOB_STATUSES.has(left.status)
+        const rightActive = ACTIVE_JOB_STATUSES.has(right.status)
         if (leftActive !== rightActive) return leftActive ? -1 : 1
-        return right.started_at - left.started_at
+        return (right.startedAt ?? 0) - (left.startedAt ?? 0)
       })
       .slice(0, 12)
       .map(projectWorkspaceSubagent)
-    const currentGoal =
-      goals.find(
-        (goal) => !['completed', 'cancelled', 'failed'].includes(goal.status),
-      ) ?? null
     return {
       version: 1,
       sessionId: input.sessionId,
@@ -120,13 +105,12 @@ export class CoreWorkspaceApplicationService {
       git,
       worktrees,
       gitReceipts: this.deps.gitReceipts.list(input.sessionId).slice(-8),
-      plan: projectWorkspacePlan(currentPlan ?? null),
-      goal: projectWorkspaceGoal(currentGoal),
+      plan: null,
+      goal: projectWorkspaceGoal(this.deps.goalForSession(input.sessionId)),
       subagents,
-      team: projectWorkspaceTeam(this.deps.teamForSession(session)),
-      processes: this.deps.projectProcesses
-        .list(input.sessionId)
-        .map(projectWorkspaceProjectProcess),
+      jobs,
+      team: emptyWorkspaceTeam(),
+      processes: [],
       terminals: this.deps.terminals.list(input).map(projectWorkspaceTerminal),
       capturedAt: (this.deps.now ?? Date.now)(),
     }

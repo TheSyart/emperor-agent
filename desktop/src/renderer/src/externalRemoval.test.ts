@@ -8,7 +8,7 @@ describe('External Bridge renderer removal', () => {
     const productionFiles = [
       'types.ts',
       'composables/useRuntime.ts',
-      'components/panels/diagnosticsPanelModel.ts',
+      'components/settings/diagnostics/diagnosticsModel.ts',
     ]
 
     for (const relativePath of productionFiles) {

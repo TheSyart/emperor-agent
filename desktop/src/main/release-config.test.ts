@@ -11,6 +11,7 @@ const repoRoot = path.resolve(desktopRoot, '..')
 const require = createRequire(import.meta.url)
 
 interface RuntimeManifestHook {
+  OS_METADATA_FILES: ReadonlySet<string>
   createRuntimeManifest(opts: {
     repoRoot: string
     appVersion: string
@@ -275,7 +276,11 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       const source = path.join(repoRoot, mapping.source)
       const destination = path.join(runtimeRoot, mapping.target)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
-      fs.cpSync(source, destination, { recursive: true })
+      // Like electron-builder, the packaged tree never carries OS metadata files.
+      fs.cpSync(source, destination, {
+        recursive: true,
+        filter: (file) => !hook.OS_METADATA_FILES.has(path.basename(file)),
+      })
     }
     const generated = hook.createRuntimeManifest({
       repoRoot,
@@ -287,7 +292,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     })
 
     expect(validated).toEqual(generated)
-    expect(generated.files.length).toBeGreaterThan(30)
+    expect(generated.files.length).toBeGreaterThan(20)
     expect(generated.builtInSkills).toEqual(['skill-creator'])
     expect(
       generated.files
@@ -313,11 +318,6 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       expect(
         fs.readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8'),
       ).toContain(`- ${template}`)
-    expect(
-      hook.SOURCE_MAPPINGS.some((mapping) =>
-        mapping.source.includes('skills-catalog'),
-      ),
-    ).toBe(false)
     expect(hook.SOURCE_MAPPINGS).toEqual(
       expect.arrayContaining([
         {

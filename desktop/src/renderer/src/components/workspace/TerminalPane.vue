@@ -338,7 +338,7 @@ function message(value: unknown): string {
 </script>
 
 <template>
-  <div class="workspace-pane terminal-pane">
+  <div class="terminal-pane">
     <div class="terminal-tabs" role="tablist" aria-label="项目终端">
       <div
         v-for="(item, index) in terminals"
@@ -381,7 +381,7 @@ function message(value: unknown): string {
         <Plus :size="14" />
       </button>
     </div>
-    <div v-if="error" class="workspace-inline-error">{{ error }}</div>
+    <div v-if="error" class="terminal-error" role="alert">{{ error }}</div>
     <button
       v-if="!terminals.length"
       type="button"
@@ -401,3 +401,145 @@ function message(value: unknown): string {
     ></div>
   </div>
 </template>
+
+<style scoped>
+.terminal-pane {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: rgb(var(--bg-base));
+}
+
+.terminal-tabs {
+  display: flex;
+  min-height: calc(var(--space-8) + var(--space-2));
+  flex: none;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: 0 var(--space-2);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-l1);
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-tab-item {
+  display: inline-flex;
+  max-width: 140px;
+  flex: none;
+  align-items: center;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-tertiary));
+}
+
+.terminal-tab-item:hover {
+  color: rgb(var(--label-secondary));
+  background: var(--interactive-bg-hover);
+}
+
+.terminal-tab-item.active {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-active);
+}
+
+.terminal-tab-item.exited {
+  opacity: 0.6;
+}
+
+.terminal-tab-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  color: inherit;
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.terminal-tab-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tab-close {
+  display: inline-grid;
+  place-items: center;
+  margin-right: var(--space-1);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  color: inherit;
+}
+
+.terminal-tab-close:hover {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.terminal-new-tab {
+  display: inline-grid;
+  width: var(--space-7);
+  height: var(--space-7);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-secondary));
+}
+
+.terminal-new-tab:hover:not(:disabled) {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.terminal-new-tab:disabled {
+  opacity: 0.4;
+}
+
+.terminal-error {
+  flex: none;
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-row);
+  color: rgb(var(--danger));
+  background: rgb(var(--danger-soft));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.terminal-empty-action {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-6);
+  padding: var(--space-1-5) var(--space-3);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-pill);
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.terminal-empty-action:hover {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.terminal-surface {
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-2) var(--space-1) var(--space-1) var(--space-2);
+  overflow: hidden;
+  background: rgb(var(--bg-base));
+}
+
+.terminal-surface :deep(.xterm) {
+  height: 100%;
+}
+</style>

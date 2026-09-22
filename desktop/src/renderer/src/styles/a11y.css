@@ -15,6 +15,26 @@
     --duration-fast: 1ms;
     --duration: 1ms;
     --duration-slow: 1ms;
+    --duration-ds-fast: 1ms;
+    --duration-ds: 1ms;
+    --duration-ds-slow: 1ms;
+  }
+  /* dsh 连续动效(styles/dsh/animations.css):扫光直接移除;shimmer 退回
+     静态实色文字;StateDot 追逐环定格为半亮。html:root 前缀用于压过
+     组件 scoped 选择器的特异性(无需强制优先级标记)。 */
+  html:root .ds-glare::after {
+    content: none;
+  }
+  html:root .ds-shimmer {
+    background: none;
+    color: rgb(var(--accent-fill));
+    -webkit-text-fill-color: currentColor;
+  }
+  html:root .ds-shimmer[data-tone='neutral'] {
+    color: rgb(var(--label-secondary));
+  }
+  html:root .ds-chase-cell {
+    opacity: 0.6;
   }
   *,
   *::before,

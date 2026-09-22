@@ -1,5 +1,3 @@
-import type { ModelRouter } from '../model/router'
-
 const FORBIDDEN_PREFIXES = [
   '关于',
   '帮我',
@@ -14,44 +12,6 @@ const FORBIDDEN_PREFIXES = [
 const PUNCT_RE =
   /[`~!@#$%^&*()_=+[\]{}\\|;:'",.<>/?，。！？、；：“”‘’（）【】《》「」『』…—-]+/g
 const SPACE_RE = /\s+/g
-
-export class SessionTitleService {
-  readonly modelRouter: Pick<ModelRouter, 'route'>
-
-  constructor(modelRouter: Pick<ModelRouter, 'route'>) {
-    this.modelRouter = modelRouter
-  }
-
-  async generate(firstMessage: string): Promise<string> {
-    const fallback = fallbackSessionTitle(firstMessage)
-    const prompt = titlePrompt(firstMessage)
-    const route = this.modelRouter.route('session_title', null, firstMessage)
-    const snapshot = route.snapshot
-    try {
-      const generation = snapshot.generation
-      const response = await snapshot.provider.chat({
-        messages: [
-          {
-            role: 'system',
-            content:
-              '你只负责给聊天会话命名。必须只输出标题本身，不要解释，不要标点，不要换行。',
-          },
-          { role: 'user', content: prompt },
-        ],
-        tools: null,
-        model: snapshot.model,
-        maxTokens: Math.min(64, Number(generation.maxTokens || 64)),
-        temperature: 0.1,
-        reasoningEffort: generation.reasoningEffort,
-      })
-      const title = sanitizeSessionTitle(response.content || '')
-      if (title) return title
-    } catch {
-      // 标题失败仅回退到本地确定性标题，不再跨模型重试。
-    }
-    return fallback
-  }
-}
 
 export function sanitizeSessionTitle(value: string): string {
   let text = String(value || '').trim()
@@ -74,7 +34,7 @@ export function fallbackSessionTitle(firstMessage: string): string {
   return sanitizeSessionTitle(firstMessage) || '新会话'
 }
 
-function titlePrompt(firstMessage: string): string {
+export function titlePrompt(firstMessage: string): string {
   return (
     '根据下面第一条用户消息生成会话标题。\n' +
     '规则：2-12 个中文字符，或非常简短的中英混合任务名；' +

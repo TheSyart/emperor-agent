@@ -35,43 +35,23 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         jobsFile: join(root, 'scheduler', 'jobs.json'),
       }),
       runtimeStats: () => ({ events: 2, archiveFiles: 1 }),
-      lifecycle: () => ({
-        state: 'ready',
-        failedServiceId: null,
-        failedPhase: null,
-        services: [
-          {
-            id: 'scheduler',
-            required: true,
-            dependsOn: ['session-runtime'],
-            state: 'ready',
-            error: null,
-          },
-        ],
+      subagents: () => [
+        {
+          id: 'child_1',
+          parentId: 'session_1',
+          description: 'explore repo',
+          mode: 'spawn',
+          depth: 1,
+          createdAt: 3,
+          status: 'running',
+        },
+      ],
+      kernel: () => ({
+        activeAgents: 2,
+        busySessions: ['session_1'],
+        sandbox: { backend: 'macos-seatbelt', available: true },
+        modelRoutes: [{ entryId: 'primary', protocol: 'openai' }],
       }),
-      subagents: () => ({
-        active: 2,
-        maxGlobal: 6,
-        maxPerSession: 3,
-        bySession: { session_1: 2 },
-        taskIds: ['subagent_1', 'subagent_2'],
-      }),
-      agentDefinitions: () =>
-        ({
-          schemaVersion: 1,
-          revision: 'agents-r1',
-          sources: [
-            {
-              id: 'emperor-builtin-agents',
-              kind: 'builtin',
-              trust: 'system',
-              active: true,
-            },
-          ],
-          agents: [{ definition: { name: 'sili_suitang' } }],
-          aliases: { researcher: 'dongchang_tanshi' },
-          diagnostics: [],
-        }) as never,
       effectiveConfig: async () => ({
         schemaVersion: 1,
         revision: 'a'.repeat(64),
@@ -104,72 +84,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
           },
         ],
       }),
-      hybridMemory: () => ({
-        capability: {
-          requestedMode: 'on',
-          effectiveMode: 'eval',
-          promptMutationAllowed: false,
-          reason: 'embedding_unavailable',
-          evaluationDatasetSha256: null,
-          embeddingProviderId: null,
-        },
-        indexPath: join(root, 'memory', 'hybrid-index', 'index.v1.json'),
-        searches: 3,
-        promptMutations: 0,
-        embeddingFallbacks: 1,
-        lastStrategy: 'fts_fallback',
-        lastResultCount: 4,
-        lastSourceDigest: 'a'.repeat(64),
-        derivedDiskBytes: 4096,
-      }),
-      codeIntelligence: () => ({
-        capability: {
-          requestedMode: 'on',
-          effectiveMode: 'eval',
-          toolAllowed: false,
-          reason: 'gate_missing',
-          evaluationDatasetSha256: null,
-          parserRevision: 'typescript-5.9-code-graph-v1',
-        },
-        graphManagers: 0,
-        queries: 0,
-        lspQueries: 0,
-        graphFallbacks: 0,
-        notifications: 0,
-        lastStrategy: null,
-        lastLatencyMs: null,
-        graph: {
-          state: 'idle',
-          version: 0,
-          indexedFiles: 0,
-          sourceBytes: 0,
-          parserLoads: 0,
-          parseErrors: 0,
-          skippedOversized: 0,
-          skippedSymlinks: 0,
-          skippedBinary: 0,
-          skippedUnsupported: 0,
-          skippedCapacity: 0,
-          oversizedFileGateVerified: false,
-          cacheStatus: 'not_checked',
-          cacheBytes: 0,
-        },
-        lsp: [],
-      }),
       activeTasks: () => [{ id: 'turn:1', status: 'running' }],
-      sessionRuntimes: () => [
-        {
-          sessionId: 'session_1',
-          running: true,
-          queued: 1,
-          closed: false,
-          commandReceipts: 2,
-          pendingInterjections: 0,
-          interjectionReceipts: 0,
-          illegalTransitions: 0,
-          lastUsed: 4,
-        },
-      ],
       desktopPetPayload: async () => ({ enabled: false, running: false }),
       environmentSummary: async () => ({
         platform: 'darwin',
@@ -208,24 +123,19 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       jobsFile: join(root, 'scheduler', 'jobs.json'),
     })
     expect(payload.runtime).toMatchObject({ events: 2, archiveFiles: 1 })
-    expect(payload.lifecycle).toMatchObject({
-      state: 'ready',
-      services: [{ id: 'scheduler', state: 'ready' }],
+    expect(payload.subagents).toEqual([
+      expect.objectContaining({ id: 'child_1', status: 'running', depth: 1 }),
+    ])
+    expect(payload.kernel).toMatchObject({
+      activeAgents: 2,
+      busySessions: ['session_1'],
+      sandbox: { backend: 'macos-seatbelt', available: true },
     })
-    expect(payload.subagents).toEqual({
-      active: 2,
-      maxGlobal: 6,
-      maxPerSession: 3,
-      bySession: { session_1: 2 },
-      taskIds: ['subagent_1', 'subagent_2'],
-    })
-    expect(payload.agentDefinitions).toMatchObject({
-      schemaVersion: 1,
-      revision: 'agents-r1',
-      sources: [{ kind: 'builtin', trust: 'system', active: true }],
-      agents: [{ definition: { name: 'sili_suitang' } }],
-      diagnostics: [],
-    })
+    expect(payload).not.toHaveProperty('lifecycle')
+    expect(payload).not.toHaveProperty('agentDefinitions')
+    expect(payload).not.toHaveProperty('hybridMemory')
+    expect(payload).not.toHaveProperty('codeIntelligence')
+    expect(payload).not.toHaveProperty('sessionRuntimes')
     expect(payload.effectiveConfig).toMatchObject({
       revision: 'a'.repeat(64),
       entries: [{ key: 'sandbox.runtime' }],
@@ -235,31 +145,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       registeredSkills: 1,
       conflicts: [{ token: 'new', reason: 'builtin_collision' }],
     })
-    expect(payload.hybridMemory).toMatchObject({
-      capability: {
-        requestedMode: 'on',
-        effectiveMode: 'eval',
-        reason: 'embedding_unavailable',
-      },
-      searches: 3,
-      promptMutations: 0,
-      embeddingFallbacks: 1,
-    })
-    expect(payload.codeIntelligence).toMatchObject({
-      capability: {
-        requestedMode: 'on',
-        effectiveMode: 'eval',
-        toolAllowed: false,
-        reason: 'gate_missing',
-      },
-      graphManagers: 0,
-      graph: { state: 'idle', indexedFiles: 0 },
-      lsp: [],
-    })
     expect(payload.activeTasks).toHaveLength(1)
-    expect(payload.sessionRuntimes).toEqual([
-      expect.objectContaining({ sessionId: 'session_1', running: true }),
-    ])
     expect(payload.desktopPet).toMatchObject({ enabled: false, running: false })
     expect(payload.environment).toEqual({
       platform: 'darwin',
@@ -279,11 +165,10 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       desktopPetModules: false,
     })
     expect(payload.optionalCapabilities.map((item) => item.id)).toEqual([
-      'code_intelligence',
-      'hybrid_memory',
-      'soft_git_rewind',
       'watchlist',
     ])
+    expect(payload.promptSnapshots).toEqual({ count: 0, recent: [] })
+    expect(payload.localConfig).not.toHaveProperty('permissions')
     expect(JSON.stringify(payload.optionalCapabilities)).not.toContain(root)
   })
 
@@ -451,6 +336,25 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
         },
       ],
     })
+  })
+
+  it('contains kernel/subagent probe failures and defaults them to empty', async () => {
+    const root = tmp('emperor-diagnostics-kernel-')
+    const empty = await new CoreDiagnosticsService(root, {}).payload()
+    expect(empty.subagents).toEqual([])
+    expect(empty.kernel).toEqual({})
+
+    const failing = await new CoreDiagnosticsService(root, {
+      subagents: () => {
+        throw new Error('manager disposed')
+      },
+      kernel: () => {
+        throw new Error('secret kernel detail')
+      },
+    }).payload()
+    expect(failing.subagents).toEqual([])
+    expect(failing.kernel).toMatchObject({ status: 'unavailable' })
+    expect(JSON.stringify(failing.kernel)).not.toContain('secret')
   })
 
   it('keeps diagnostics available when the command catalog cannot be scanned', async () => {

@@ -2,27 +2,27 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-08-12<br>
+> 最后核验：2026-09-22<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
-这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、发布流程和历史记录。
+这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南和发布流程。
 
 ## 我想做什么
 
-| 目的                               | 从这里开始                                                   |
-| ---------------------------------- | ------------------------------------------------------------ |
-| 安装并完成第一次对话               | [首次使用](user/getting-started.md)                          |
-| 理解 Chat 与 Build                 | [会话与项目工作](user/chat-build.md)                         |
-| 先规划再执行，或持续推进长任务     | [Plan 与 Goal](user/plan-goal.md)                            |
-| 配置模型、记忆和附件               | [模型、记忆与附件](user/models-memory-attachments.md)        |
-| 使用 Tools、Skills、MCP 或网络调研 | [工具与扩展能力](user/tools-skills-mcp.md)                   |
-| 使用 `/` 命令和真正的新上下文      | [Slash command 平台](architecture/slash-command-platform.md) |
-| 使用 Scheduler、Team、Hooks 或桌宠 | [自动化与协作](user/automation-collaboration.md)             |
-| 排查启动、模型、数据或打包问题     | [诊断与排障](user/diagnostics-troubleshooting.md)            |
-| 了解系统为什么这样设计             | [架构总览](architecture/overview.md)                         |
-| 修改或扩展项目                     | [开发指南](development/README.md)                            |
-| 通过 ACP stdio 运行 Headless Core  | [Headless ACP operator preview](development/headless-acp.md) |
-| 构建公开 Preview                   | [Preview 发布手册](release/preview-release-runbook.md)       |
+| 目的                                 | 从这里开始                                                   |
+| ------------------------------------ | ------------------------------------------------------------ |
+| 安装并完成第一次对话                 | [首次使用](user/getting-started.md)                          |
+| 理解 Chat 与 Build                   | [会话与项目工作](user/chat-build.md)                         |
+| 权限预设、先规划再执行或持续推进目标 | [Plan 与 Goal](user/plan-goal.md)                            |
+| 配置模型、记忆和附件                 | [模型、记忆与附件](user/models-memory-attachments.md)        |
+| 使用 Tools、Skills、Plugins 或 MCP   | [工具与扩展能力](user/tools-skills-mcp.md)                   |
+| 使用 `/` 命令和真正的新上下文        | [Slash command 平台](architecture/slash-command-platform.md) |
+| 使用 Scheduler、Hooks 或桌宠         | [自动化与 Hooks](user/automation-collaboration.md)           |
+| 排查启动、模型、数据或打包问题       | [诊断与排障](user/diagnostics-troubleshooting.md)            |
+| 了解系统为什么这样设计               | [架构总览](architecture/overview.md)                         |
+| 修改或扩展项目                       | [开发指南](development/README.md)                            |
+| 通过 ACP stdio 运行 Headless Core    | [Headless ACP operator preview](development/headless-acp.md) |
+| 构建公开 Preview                     | [Preview 发布手册](release/preview-release-runbook.md)       |
 
 ## 当前维护的文档
 
@@ -34,17 +34,17 @@
 - [Plan 与 Goal](user/plan-goal.md)
 - [模型、记忆与附件](user/models-memory-attachments.md)
 - [Tools、Skills 与 MCP](user/tools-skills-mcp.md)
-- [Scheduler、Team、Hooks 与桌宠](user/automation-collaboration.md)
+- [Scheduler、Hooks 与桌宠](user/automation-collaboration.md)
 - [诊断与排障](user/diagnostics-troubleshooting.md)
 
 ### 架构与开发
 
 - [架构总览](architecture/overview.md)
 - [Agent 执行链路](architecture/agent-runtime.md)
-- [Control 与权限](architecture/control-and-permissions.md)
+- [权限与 Plan 架构](architecture/control-and-permissions.md)
 - [Slash command 平台](architecture/slash-command-platform.md)
 - [IPC 与 Runtime Events](architecture/ipc-and-runtime-events.md)
-- [Goal 模式架构](architecture/goal-mode.md)
+- [Goal 架构](architecture/goal-mode.md)
 - [全局私有存储根](architecture/global-state-store.md)
 - [可选能力生命周期](architecture/optional-capabilities.md)
 - [开发指南](development/README.md)

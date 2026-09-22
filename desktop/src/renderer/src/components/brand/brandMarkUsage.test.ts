@@ -24,8 +24,8 @@ describe('brand mark usage', () => {
 
   it('keeps key brand surfaces on project logo assets instead of brandIcon', () => {
     const files = [
-      'components/layout/NavRail.vue',
-      'components/panels/ModelPanel.vue',
+      'components/sidebar/SidebarRoot.vue',
+      'components/sidebar/SidebarRail.vue',
     ]
 
     for (const file of files) {

@@ -78,6 +78,28 @@ describe('SessionTransitionService', () => {
     expect(ctx.runSessionEnd).toHaveBeenCalledTimes(1)
   })
 
+  it('carries the source permission preset into the new session', async () => {
+    const ctx = setup()
+    const applyPermissionPreset = vi.fn()
+    const service = new SessionTransitionService({
+      ...ctx.service.deps,
+      permissionPresetOf: (sessionId) =>
+        sessionId === ctx.parent.id ? 'full-access' : null,
+      applyPermissionPreset,
+    })
+    const result = await service.clear({
+      sessionId: ctx.parent.id,
+      invocationId: 'clear-preset',
+    })
+    expect(applyPermissionPreset).toHaveBeenCalledWith(
+      result.session.id,
+      'full-access',
+    )
+    expect(applyPermissionPreset.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.activate.mock.invocationCallOrder.at(-1)!,
+    )
+  })
+
   it('checks pending interactions and queued prompts before preparing a transition', async () => {
     const ctx = setup()
     vi.mocked(ctx.service.deps.assertBoundary).mockImplementation(() => {

@@ -1,13 +1,6 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import {
-  parsePermissionRules,
-  type PermissionRuleDiagnostics,
-  type PermissionRuleInput,
-  type PermissionRuleLayerInput,
-} from '../permissions/rules'
-import type { SoftGitRewindMode } from '../checkpoints/soft-git-rewind'
 import {
   AtomicSnapshot,
   type PersistenceAdapter,
@@ -16,7 +9,6 @@ import {
 
 export const LOCAL_CONFIG_FILE = 'settings.json'
 export const LEGACY_LOCAL_CONFIG_FILE = 'emperor.local.json'
-const PROJECT_CONFIG_MAX_BYTES = 1024 * 1024
 
 export interface WebUIPreferences {
   host: string
@@ -35,44 +27,19 @@ export interface PromptPreferences {
   profile: PromptProfile
 }
 
-export interface PermissionPreferences {
-  rules: PermissionRuleInput[]
-}
-
-export interface WorkspacePreferences {
-  fileCheckpoints: { enabled: boolean }
-  gitRewind: { mode: SoftGitRewindMode }
-}
-
-export type HybridMemoryMode = 'off' | 'eval' | 'on'
-
-export interface MemoryPreferences {
-  hybridMemory: HybridMemoryMode
-}
-
-export type CodeIntelligenceMode = 'off' | 'eval' | 'on'
-
-export interface CodeIntelligencePreferences {
-  mode: CodeIntelligenceMode
-}
-
+/**
+ * `settings.json` preferences. Retired keys from the old kernel
+ * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
+ * `memory.hybridMemory`, `codeIntelligence`) are ignored when reading so old
+ * files keep loading; they are not written back.
+ */
 export interface LocalConfig {
   webui: WebUIPreferences
   desktopPet: DesktopPetPreferences
   prompt: PromptPreferences
-  memory: MemoryPreferences
-  codeIntelligence: CodeIntelligencePreferences
-  workspace: WorkspacePreferences
-  permissions: PermissionPreferences
 }
 
-export type LocalConfigInput = Omit<
-  LocalConfig,
-  'memory' | 'codeIntelligence'
-> & {
-  memory?: MemoryPreferences
-  codeIntelligence?: CodeIntelligencePreferences
-}
+export type LocalConfigInput = LocalConfig
 
 export interface LocalConfigBackup {
   path: string
@@ -85,7 +52,6 @@ export interface LocalConfigDiagnostics {
   exists: boolean
   status: 'missing' | 'ok' | 'corrupt'
   error: string
-  permissions: PermissionRuleDiagnostics
   corruptBackups: LocalConfigBackup[]
 }
 
@@ -98,13 +64,6 @@ function defaultLocalConfig(): LocalConfig {
     webui: { host: '127.0.0.1', port: 8765, openBrowser: false },
     desktopPet: { enabled: false, autoStartWithWebui: true },
     prompt: { profile: 'technical' },
-    memory: { hybridMemory: 'off' },
-    codeIntelligence: { mode: 'off' },
-    workspace: {
-      fileCheckpoints: { enabled: false },
-      gitRewind: { mode: 'off' },
-    },
-    permissions: { rules: [] },
   }
 }
 
@@ -131,16 +90,6 @@ export function parseLocalConfig(
   if (Object.keys(desktopPet).length === 0)
     desktopPet = objectOrEmpty(data.desktop_pet)
   const prompt = objectOrEmpty(data.prompt)
-  const memory = objectOrEmpty(data.memory)
-  const codeIntelligence = objectOrEmpty(
-    data.codeIntelligence ?? data.code_intelligence,
-  )
-  const workspace = objectOrEmpty(data.workspace)
-  const fileCheckpoints = objectOrEmpty(
-    workspace.fileCheckpoints ?? workspace.file_checkpoints,
-  )
-  const gitRewind = objectOrEmpty(workspace.gitRewind ?? workspace.git_rewind)
-  const permissions = objectOrEmpty(data.permissions)
   return {
     webui: {
       host: String(webui.host || '127.0.0.1'),
@@ -158,80 +107,11 @@ export function parseLocalConfig(
     prompt: {
       profile: normalizePromptProfile(prompt.profile),
     },
-    memory: {
-      hybridMemory: normalizeHybridMemoryMode(
-        memory.hybridMemory ?? memory.hybrid_memory,
-      ),
-    },
-    codeIntelligence: {
-      mode: normalizeCodeIntelligenceMode(codeIntelligence.mode),
-    },
-    workspace: {
-      fileCheckpoints: {
-        enabled: Boolean(fileCheckpoints.enabled ?? false),
-      },
-      gitRewind: { mode: normalizeSoftGitRewindMode(gitRewind.mode) },
-    },
-    permissions: {
-      rules: Array.isArray(permissions.rules)
-        ? (permissions.rules.filter(
-            (item) => item && typeof item === 'object' && !Array.isArray(item),
-          ) as PermissionRuleInput[])
-        : [],
-    },
   }
 }
 
 export function localConfigPath(root: string): string {
   return join(resolve(root), LOCAL_CONFIG_FILE)
-}
-
-/**
- * Reads only the explicitly supported project-local key. These files cannot
- * redirect Emperor Home/runtime roots or inject credentials/executables.
- */
-export function loadProjectPermissionRuleLayers(
-  projectRoot: string,
-): PermissionRuleLayerInput[] {
-  const emperorRoot = join(resolve(projectRoot), '.emperor')
-  try {
-    const rootStat = lstatSync(emperorRoot)
-    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return []
-  } catch {
-    return []
-  }
-  const layers: PermissionRuleLayerInput[] = []
-  for (const [file, kind] of [
-    ['settings.json', 'project'],
-    ['settings.local.json', 'project-local'],
-  ] as const) {
-    const path = join(emperorRoot, file)
-    try {
-      const fileStat = lstatSync(path)
-      if (
-        fileStat.isSymbolicLink() ||
-        !fileStat.isFile() ||
-        fileStat.size > PROJECT_CONFIG_MAX_BYTES
-      )
-        continue
-      const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
-      const data = objectOrEmpty(raw)
-      const permissions = objectOrEmpty(data.permissions)
-      const rules = Array.isArray(permissions.rules)
-        ? (permissions.rules.filter(
-            (item) => item && typeof item === 'object' && !Array.isArray(item),
-          ) as PermissionRuleInput[])
-        : []
-      if (rules.length)
-        layers.push({
-          source: { kind, id: file, trust: 'project' },
-          rules,
-        })
-    } catch {
-      // Invalid project candidates are inert; diagnostics can inspect the file.
-    }
-  }
-  return layers
 }
 
 export async function loadLocalConfig(
@@ -273,25 +153,6 @@ export async function saveLocalConfig(
     prompt: {
       profile: normalizePromptProfile(config.prompt?.profile),
     },
-    memory: {
-      hybridMemory: normalizeHybridMemoryMode(config.memory?.hybridMemory),
-    },
-    codeIntelligence: {
-      mode: normalizeCodeIntelligenceMode(config.codeIntelligence?.mode),
-    },
-    workspace: {
-      fileCheckpoints: {
-        enabled: Boolean(config.workspace?.fileCheckpoints?.enabled ?? false),
-      },
-      gitRewind: {
-        mode: normalizeSoftGitRewindMode(config.workspace?.gitRewind?.mode),
-      },
-    },
-    permissions: {
-      rules: Array.isArray(config.permissions?.rules)
-        ? config.permissions.rules
-        : [],
-    },
   }
   await localConfigSnapshot(path, opts.persistenceAdapter).write(payload)
   return path
@@ -332,20 +193,6 @@ export function normalizePromptProfile(value: unknown): PromptProfile {
     : 'technical'
 }
 
-export function normalizeSoftGitRewindMode(value: unknown): SoftGitRewindMode {
-  return value === 'eval' || value === 'on' ? value : 'off'
-}
-
-export function normalizeHybridMemoryMode(value: unknown): HybridMemoryMode {
-  return value === 'eval' || value === 'on' ? value : 'off'
-}
-
-export function normalizeCodeIntelligenceMode(
-  value: unknown,
-): CodeIntelligenceMode {
-  return value === 'eval' || value === 'on' ? value : 'off'
-}
-
 export function mergeWebuiOverrides(
   config: LocalConfig,
   overrides: {
@@ -373,20 +220,8 @@ export async function localConfigDiagnostics(
   let error = ''
   if (exists) {
     try {
-      const raw = JSON.parse((await readFile(path, 'utf8')) || '{}')
-      const parsed = parseLocalConfig(raw)
-      const permissionDiagnostics = parsePermissionRules(
-        parsed.permissions.rules,
-      ).diagnostics
+      parseLocalConfig(JSON.parse((await readFile(path, 'utf8')) || '{}'))
       status = 'ok'
-      return {
-        path,
-        exists,
-        status,
-        error,
-        permissions: permissionDiagnostics,
-        corruptBackups: await listCorruptBackups(path),
-      }
     } catch (err) {
       status = 'corrupt'
       error = err instanceof Error ? err.message : String(err)
@@ -397,7 +232,6 @@ export async function localConfigDiagnostics(
     exists,
     status,
     error,
-    permissions: parsePermissionRules([]).diagnostics,
     corruptBackups: await listCorruptBackups(path),
   }
 }

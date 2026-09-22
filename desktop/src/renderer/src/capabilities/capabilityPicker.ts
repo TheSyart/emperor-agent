@@ -1,8 +1,7 @@
 import type { IconComponent } from '../icons'
-import type {
-  CapabilityDisplayItem,
-  CapabilityTone,
-} from './capabilityProjection'
+
+export type CapabilityTone =
+  'red' | 'cyan' | 'blue' | 'slate' | 'gold' | 'green' | 'violet'
 
 export type CapabilityPickerAction =
   | 'files'
@@ -20,7 +19,6 @@ export interface CapabilityPickerItem {
   completion?: string
   icon: IconComponent
   tone?: CapabilityTone
-  capability?: CapabilityDisplayItem
 }
 
 export interface CapabilityPickerGroup {

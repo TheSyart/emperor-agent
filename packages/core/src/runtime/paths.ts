@@ -54,6 +54,7 @@ export type EmperorPathId =
   | 'git'
   | 'codeIntelligence'
   | 'migrations'
+  | 'writeStaging'
   | 'projectEmperor'
   | 'projectSkills'
 
@@ -126,6 +127,7 @@ export interface RuntimePaths {
   gitRoot: string
   codeIntelligenceRoot: string
   migrationsRoot: string
+  writeStagingRoot: string
   projectEmperorRoot: string | null
   projectSkillsRoot: string | null
 }
@@ -136,6 +138,9 @@ export interface RuntimePathOptions {
   templatesDir?: string | null
   workspaceRoot?: string | null
 }
+
+/** Emperor Home directory that stages atomic file writes. */
+const WRITE_STAGING_DIR = 'write-staging'
 
 /** Canonical default global private data root. Pure: never touches disk. */
 export function defaultEmperorHome(): string {
@@ -164,6 +169,15 @@ function resolveStateRoot(opts: RuntimePathOptions): {
   const envDir = process.env.EMPEROR_CONFIG_DIR
   if (envDir) return { stateRoot: resolve(envDir), source: 'env' }
   return { stateRoot: resolve(defaultEmperorHome()), source: 'default' }
+}
+
+/**
+ * The atomic-write staging root, resolved the same way the catalog does.
+ * The fs tools stage a write here and rename it onto the target, so a
+ * half-written temp file never appears inside the user's project.
+ */
+export function resolveWriteStagingRoot(opts: RuntimePathOptions = {}): string {
+  return join(resolveStateRoot(opts).stateRoot, WRITE_STAGING_DIR)
 }
 
 function descriptor(
@@ -612,6 +626,15 @@ export function createEmperorPathCatalog(
       true,
       'bootstrap',
     ),
+    descriptor(
+      'writeStaging',
+      join(emperorHome, WRITE_STAGING_DIR),
+      'user',
+      source,
+      true,
+      true,
+      'lazy',
+    ),
     ...(workspaceRoot
       ? [
           descriptor(
@@ -700,6 +723,7 @@ export function createEmperorPathCatalog(
         gitRoot: path('git')!,
         codeIntelligenceRoot: path('codeIntelligence')!,
         migrationsRoot: path('migrations')!,
+        writeStagingRoot: path('writeStaging')!,
         projectEmperorRoot: path('projectEmperor'),
         projectSkillsRoot: path('projectSkills'),
       }
@@ -727,15 +751,9 @@ export function ensureRuntimeStateDirs(paths: RuntimePaths): void {
     paths.environmentDataRoot,
     paths.projectsRoot,
     paths.attachmentsRoot,
-    paths.mediaRoot,
     paths.schedulerRoot,
-    paths.teamRoot,
-    paths.tasksRoot,
     paths.processesRoot,
-    paths.controlRoot,
-    paths.goalsRoot,
     paths.gitRoot,
-    paths.codeIntelligenceRoot,
     paths.migrationsRoot,
   ]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })

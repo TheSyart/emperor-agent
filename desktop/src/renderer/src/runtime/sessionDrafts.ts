@@ -57,7 +57,15 @@ export function applySessionCreated(
 ) {
   const incoming = normalizeBackendSession(event.session)
   if (!incoming) return sessions
-  const draftId = event.client_draft_id || ''
+  return promoteDraftSession(sessions, event.client_draft_id || '', incoming)
+}
+
+/** Replace the draft row with the session Core created for it, in place. */
+export function promoteDraftSession(
+  sessions: SessionInfo[],
+  draftId: string,
+  incoming: SessionInfo,
+) {
   const index = sessions.findIndex(
     (session) => session.id === draftId || session.id === incoming.id,
   )

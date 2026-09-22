@@ -1,20 +1,17 @@
-import type { RuntimeTaskRecord, WsEvent } from '../types'
-import {
-  applyTaskEvent,
-  taskForPlanStep,
-  type TaskProjection,
-} from './handlers/tasks'
+import type { RuntimeTaskEventRecord, WsEvent } from '../types'
+import { applyTaskEvent, type TaskProjection } from './handlers/tasks'
 
 export type TaskRuntimeEvent = Extract<
   WsEvent,
   {
     event:
       | 'task_started'
-      | 'task_progress'
-      | 'task_output'
       | 'task_done'
       | 'task_error'
       | 'task_cancelled'
+      | 'workflow_started'
+      | 'workflow_progress'
+      | 'workflow_finished'
   }
 >
 
@@ -34,16 +31,19 @@ export type TaskProjectionAction = {
 
 const TASK_EVENTS = new Set<string>([
   'task_started',
-  'task_progress',
-  'task_output',
   'task_done',
   'task_error',
   'task_cancelled',
+  'workflow_started',
+  'workflow_progress',
+  'workflow_finished',
 ])
 
-const TERMINAL_TASK_STATUSES = new Set<RuntimeTaskRecord['status']>([
+const TERMINAL_TASK_STATUSES = new Set<string>([
   'completed',
+  'error',
   'failed',
+  'killed',
   'cancelled',
   'interrupted',
 ])
@@ -54,6 +54,10 @@ export function createTaskProjectionState(): TaskProjectionState {
 
 export function isTaskRuntimeEvent(event: WsEvent): event is TaskRuntimeEvent {
   return TASK_EVENTS.has(event.event)
+}
+
+export function isTerminalTask(task: RuntimeTaskEventRecord): boolean {
+  return TERMINAL_TASK_STATUSES.has(String(task.status || ''))
 }
 
 export function reduceTaskProjection(
@@ -69,15 +73,11 @@ export function reduceTaskProjection(
 
   const previous = state.tasks.find((task) => task.id === taskId)
   const applied = applyTaskEvent({ tasks: state.tasks }, event)
-  if (previous && TERMINAL_TASK_STATUSES.has(previous.status)) {
+  if (previous && isTerminalTask(previous)) {
     const index = applied.tasks.findIndex((task) => task.id === taskId)
     const candidate = applied.tasks[index]
     if (candidate)
-      applied.tasks[index] = {
-        ...candidate,
-        status: previous.status,
-        endedAt: previous.endedAt,
-      }
+      applied.tasks[index] = { ...candidate, status: previous.status }
   }
 
   return {
@@ -106,5 +106,3 @@ export function replayTaskProjection(
     }).state
   return state
 }
-
-export { taskForPlanStep }

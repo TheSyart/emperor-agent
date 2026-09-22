@@ -23,10 +23,7 @@ function collect(dir: string, exts: string[]): string[] {
 
 const STYLE_FILES = collect('styles', ['.css'])
 const THEME_FILES = collect('theme', ['.css'])
-const VUE_FILES = [
-  ...collect('components', ['.vue']),
-  ...collect('views', ['.vue']),
-]
+const VUE_FILES = collect('components', ['.vue'])
 const SCANNED = [...STYLE_FILES, ...THEME_FILES, ...VUE_FILES]
 
 function read(rel: string): string {
@@ -170,16 +167,9 @@ describe('style audit: bare-value convergence (styles/)', () => {
   })
 
   it('no converged-range rounded-[Nrem]/[Npx] arbitrary radius classes', () => {
-    // Δ≤2px 的值必须归位到 var(--radius-*);偏差更大的保留值登记于此白名单。
-    const KEEP = new Set([
-      'rounded-[1.05rem]',
-      'rounded-[1.1rem]',
-      'rounded-[1.4rem]',
-      'rounded-[1.45rem]',
-      'rounded-[1.5rem]',
-      'rounded-[1.6rem]',
-      'rounded-[1.7rem]',
-    ])
+    // Δ≤2px 的值必须归位到 var(--radius-*);偏差更大的保留值登记于此白名单
+    // (旧设置视图删除后已清空,只许保持为空或继续删减)。
+    const KEEP = new Set<string>()
     const re = /rounded-\[(?!var\()[0-9.]+(?:rem|px)\]/g
     const offenders: string[] = []
     for (const rel of STYLE_FILES) {
@@ -338,29 +328,11 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
   const SPACING_BASELINE: Record<string, number> = {
     // Stage6 收敛后:3-14px 裸间距全部吸附到 var(--space-*)(±2px 内),
     // 余值仅为不可吸附的定位偏移(-3px resizer、52px/348px 浮层锚点)。
-    'styles/activity.css': 2,
-    'styles/chat.css': 0,
+    'styles/activity.css': 0,
     'styles/panels.css': 3,
-    'styles/workspace.css': 8,
-    'styles/surfaces/shell-base.css': 2,
-    'styles/surfaces/messages.css': 6,
-    'styles/surfaces/goal.css': 6,
-    'styles/surfaces/composer.css': 0,
-    'styles/surfaces/cards.css': 1,
-    'styles/surfaces/decision.css': 1,
+    'styles/workspace.css': 0,
     'styles/surfaces/menus.css': 0,
-    'styles/surfaces/panels.css': 1,
-    'styles/surfaces/sidebar.css': 2,
-    'styles/surfaces/settings.css': 0,
-    'components/chat/QueueTray.vue': 2,
-    'components/chat/ComposerLifecycleIndicator.vue': 2,
-    'components/panels/FileCheckpointsSection.vue': 0,
-    'components/panels/EnvironmentDiagnosticsSection.vue': 1,
-    'components/panels/ModelPanel.vue': 1,
-    'components/panels/HooksPanel.vue': 0,
-    'components/panels/SkillsPanel.vue': 1,
-    'components/panels/model/ModelEntryList.vue': 1,
-    'views/PetView.vue': 1,
+    'styles/surfaces/panels.css': 0,
   }
 
   it('bare px spacing count does not exceed baseline (use var(--space-*))', () => {

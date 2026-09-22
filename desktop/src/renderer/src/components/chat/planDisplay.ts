@@ -1,4 +1,4 @@
-import type { ControlInteraction, RuntimePlanRecord } from '../../types'
+import type { ControlInteraction } from '../../types'
 
 export type PlanTone = 'waiting' | 'running' | 'done' | 'error' | 'default'
 
@@ -8,16 +8,8 @@ export interface PlanStatusPresentation {
   risk: string
 }
 
-export function planDisplayMarkdown(
-  interaction: ControlInteraction,
-  plan?: RuntimePlanRecord | null,
-): string {
-  return String(
-    interaction.plan_markdown ||
-      plan?.plan_markdown ||
-      plan?.planMarkdown ||
-      '',
-  ).trim()
+export function planDisplayMarkdown(interaction: ControlInteraction): string {
+  return String(interaction.plan_markdown || '').trim()
 }
 
 export function planDecisionVisible(interaction: ControlInteraction): boolean {
@@ -28,7 +20,6 @@ export function planDecisionVisible(interaction: ControlInteraction): boolean {
 
 export function planStatusPresentation(
   interaction: ControlInteraction,
-  plan?: RuntimePlanRecord | null,
 ): PlanStatusPresentation {
   if (interaction.meta?.provisional === true) {
     return {
@@ -37,7 +28,7 @@ export function planStatusPresentation(
       risk: riskLabel(interaction.risk_level),
     }
   }
-  const status = String(interaction.status || plan?.status || '')
+  const status = String(interaction.status || '')
   return {
     label: statusLabel(status),
     tone: statusTone(status),
@@ -48,6 +39,7 @@ export function planStatusPresentation(
 export function statusLabel(status?: string): string {
   const labels: Record<string, string> = {
     waiting: '等待批准',
+    commented: '已反馈',
     waiting_approval: '等待批准',
     approved: '已批准',
     executing: '执行中',

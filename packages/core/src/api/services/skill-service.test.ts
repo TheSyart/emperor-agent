@@ -9,89 +9,64 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Tool } from '../../tools/base'
-import { ToolRegistry } from '../../tools/registry'
-import type { ToolParamsSchema } from '../../tools/schema'
 import { CoreSkillService } from './skill-service'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
-class FakeTool extends Tool {
-  readonly name: string
-  readonly description: string
-  readonly parameters: ToolParamsSchema = {
-    type: 'object',
-    properties: { q: { type: 'string', description: 'query' } },
-    required: [],
-  }
-  override readOnly: boolean
-  override concurrencySafe: boolean
+function writeSkill(
+  base: string,
+  folder: string,
+  frontmatter: string,
+  body = '',
+): string {
+  const dir = join(base, folder)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), `---\n${frontmatter}\n---\n${body}`)
+  return dir
+}
 
-  constructor(
-    name: string,
-    opts: {
-      description?: string
-      readOnly?: boolean
-      concurrencySafe?: boolean
-    } = {},
-  ) {
-    super()
-    this.name = name
-    this.description = opts.description ?? `${name} description`
-    this.readOnly = opts.readOnly ?? false
-    this.concurrencySafe = opts.concurrencySafe ?? false
-    if (name.startsWith('mcp_')) {
-      const [serverName = 'test', ...toolNameParts] = name
-        .slice('mcp_'.length)
-        .split('_')
-      this.externalContent = true
-      this.capabilityProvenance = {
-        kind: 'mcp_declaration',
-        serverName,
-        toolName: toolNameParts.join('_') || name,
-        transport: 'test',
-        readOnlySource: 'tool_override',
-        exclusiveSource: 'tool_override',
-        generation: 1,
-        clientId: 'test-client',
-      }
-    }
-  }
-
-  execute(): string {
-    return 'ok'
-  }
+function roots(prefix: string) {
+  const root = tmp(prefix)
+  const stateRoot = join(root, 'state')
+  const runtimeRoot = join(root, 'runtime')
+  const project = join(root, 'project')
+  mkdirSync(join(stateRoot, 'skills'), { recursive: true })
+  mkdirSync(join(runtimeRoot, 'skills'), { recursive: true })
+  mkdirSync(project, { recursive: true })
+  return { root, stateRoot, runtimeRoot, project }
 }
 
 describe('CoreSkillService (MIG-IPC-007)', () => {
-  it('maps installer internals to stable safe API errors', async () => {
-    const service = new CoreSkillService(tmp('emperor-skill-safe-error-'))
-
-    await expect(
-      service.previewInstall({
-        source: { kind: 'local', path: '/missing/private/skill.zip' },
-      }),
-    ).rejects.toMatchObject({
-      code: 'skill_preview_failed',
-      action: 'review_skill_install',
-    })
-  })
-
   it('projects tool definitions into WebUI capability payloads', () => {
-    const registry = new ToolRegistry()
-    registry.register(
-      new FakeTool('read_file', { readOnly: true, concurrencySafe: true }),
-    )
-    registry.register(
-      new FakeTool('mcp_docs_search', {
-        description: '[MCP:docs] Search docs',
-        readOnly: true,
-      }),
-    )
+    const parameters = {
+      type: 'object',
+      properties: { q: { type: 'string', description: 'query' } },
+      required: [],
+    }
     const service = new CoreSkillService(tmp('emperor-skill-service-tools-'), {
-      registry,
+      toolNames: () => [
+        {
+          name: 'read_file',
+          description: 'read_file description',
+          parameters,
+          readOnly: true,
+          concurrencySafe: true,
+        },
+        {
+          name: 'mcp_docs_search',
+          description: '[MCP:docs] Search docs',
+          mcpServer: 'docs',
+        },
+        {
+          name: 'mcp_my_server_search',
+          description: '[MCP:my_server] Search',
+          mcpServer: 'my_server',
+        },
+        { name: 'mcp_config', description: 'Manage MCP config' },
+        { name: 'write_file', description: 'write' },
+      ],
     })
 
     expect(service.tools()).toEqual([
@@ -110,40 +85,43 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       expect.objectContaining({
         name: 'mcp_docs_search',
         description: '[MCP:docs] Search docs',
-        read_only: true,
+        parameters: {},
+        read_only: false,
         source: 'mcp',
         server: 'docs',
+      }),
+      expect.objectContaining({
+        name: 'mcp_my_server_search',
+        source: 'mcp',
+        server: 'my_server',
+      }),
+      expect.objectContaining({
+        name: 'mcp_config',
+        source: 'builtin',
+        server: '',
+      }),
+      expect.objectContaining({
+        name: 'write_file',
+        read_only: false,
+        exclusive: false,
+        concurrency_safe: false,
+        source: 'builtin',
       }),
     ])
   })
 
   it('lists, reads, writes, and deletes skills with frontmatter metadata', () => {
-    const root = tmp('emperor-skill-service-skills-')
-    const stateRoot = join(root, 'state')
-    const runtimeRoot = join(root, 'runtime')
-    const skillDir = join(stateRoot, 'skills', 'code-audit')
-    const builtinDir = join(runtimeRoot, 'skills', 'skill-creator')
-    mkdirSync(skillDir, { recursive: true })
-    mkdirSync(builtinDir, { recursive: true })
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
-      [
-        '---',
-        'name: code-audit',
-        'description: Audit code changes',
-        'tags: review backend',
-        'always: true',
-        '---',
-        '',
-        '# Code Audit',
-        '',
-      ].join('\n'),
-      'utf8',
+    const { stateRoot, runtimeRoot } = roots('emperor-skill-service-skills-')
+    writeSkill(
+      join(stateRoot, 'skills'),
+      'code-audit',
+      'name: code-audit\ndescription: Audit code changes\ntags: review backend\nalways: true',
+      '\n# Code Audit\n',
     )
-    writeFileSync(
-      join(builtinDir, 'SKILL.md'),
-      '---\nname: skill-creator\ndescription: Create skills.\n---\n',
-      'utf8',
+    writeSkill(
+      join(runtimeRoot, 'skills'),
+      'skill-creator',
+      'name: skill-creator\ndescription: Create skills.',
     )
     let refreshes = 0
     const service = new CoreSkillService(stateRoot, {
@@ -153,8 +131,10 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       },
     })
 
-    expect(service.list()).toEqual([
-      {
+    const listed = service.list()
+    expect(listed.invalid).toEqual([])
+    expect(listed.skills).toEqual([
+      expect.objectContaining({
         always: true,
         command: null,
         description: 'Audit code changes',
@@ -165,39 +145,34 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
         source: 'user',
         status: 'active',
         tags: 'review backend',
-      },
-      {
-        always: false,
-        command: null,
-        description: 'Create skills.',
+        flat: false,
+        warnings: [],
+      }),
+      expect.objectContaining({
         name: 'skill-creator',
         path: 'skills/skill-creator/SKILL.md',
         readOnly: true,
-        requirements: { bins: [], runtimes: [], env: [] },
         source: 'builtin',
-        status: 'active',
-        tags: '',
-      },
+      }),
     ])
     expect(service.get('code-audit')).toMatchObject({
       name: 'code-audit',
-      path: 'skills/code-audit/SKILL.md',
       content: expect.stringContaining('# Code Audit'),
     })
 
     const saved = service.save(
       'writer',
-      '---\ndescription: Write docs\n---\n\n# Writer\n\n',
+      '---\nname: writer\ndescription: Write docs\n---\n\n# Writer\n\n',
     )
-
     expect(saved).toMatchObject({
       name: 'writer',
+      source: 'user',
       path: 'skills/writer/SKILL.md',
       content: expect.stringContaining('# Writer'),
     })
     expect(
       readFileSync(join(stateRoot, 'skills', 'writer', 'SKILL.md'), 'utf8'),
-    ).toContain('# Writer')
+    ).toBe('---\nname: writer\ndescription: Write docs\n---\n\n# Writer\n')
     expect(refreshes).toBe(1)
 
     writeFileSync(
@@ -212,7 +187,10 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       'utf8',
     )
 
-    expect(service.delete('writer')).toEqual({ deleted: 'writer' })
+    expect(service.delete('writer')).toMatchObject({
+      deleted: 'writer',
+      scope: 'user',
+    })
     expect(existsSync(join(stateRoot, 'skills', 'writer'))).toBe(false)
     expect(
       JSON.parse(
@@ -223,10 +201,168 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       skills: { retained: { name: 'retained', status: 'blocked' } },
     })
     expect(refreshes).toBe(2)
-    expect(() => service.save('../bad', '# Bad')).toThrow(
-      'Skill name must be a safe directory name',
+    expect(() => service.save('../bad', '# Bad')).toThrow(/Skill name/)
+    expect(() =>
+      service.save('writer', '---\nname: other\ndescription: x\n---\n'),
+    ).toThrow(/does not match/)
+  })
+
+  it('keeps builtin and Plugin Skills read-only and copies them to the user folder', () => {
+    const { stateRoot, runtimeRoot } = roots('emperor-skill-service-readonly-')
+    writeSkill(
+      join(runtimeRoot, 'skills'),
+      'skill-creator',
+      'name: skill-creator\ndescription: Create skills.',
+      '\nSee [guide](references/guide.md).\n',
     )
-    expect(() => service.delete('skill-creator')).toThrow(/read-only/i)
+    mkdirSync(join(runtimeRoot, 'skills', 'skill-creator', 'references'))
+    writeFileSync(
+      join(runtimeRoot, 'skills', 'skill-creator', 'references', 'guide.md'),
+      '# Guide\n',
+    )
+    const service = new CoreSkillService(stateRoot, { runtimeRoot })
+
+    expect(() =>
+      service.save(
+        'skill-creator',
+        '---\nname: skill-creator\ndescription: Changed\n---\n',
+      ),
+    ).toThrow(expect.objectContaining({ code: 'skill_read_only' }))
+    expect(() => service.delete('skill-creator')).toThrow(
+      expect.objectContaining({ code: 'skill_read_only' }),
+    )
+    expect(existsSync(join(stateRoot, 'skills', 'skill-creator'))).toBe(false)
+
+    const copy = service.copyToUser({ name: 'skill-creator' })
+    expect(copy).toMatchObject({
+      name: 'skill-creator',
+      source: 'user',
+      readOnly: false,
+    })
+    expect(
+      readFileSync(
+        join(stateRoot, 'skills', 'skill-creator', 'references', 'guide.md'),
+        'utf8',
+      ),
+    ).toBe('# Guide\n')
+    expect(service.get('skill-creator').source).toBe('user')
+    expect(() => service.copyToUser({ name: 'skill-creator' })).toThrow(
+      expect.objectContaining({ code: 'skill_exists' }),
+    )
+    const edited = service.save(
+      'skill-creator',
+      '---\nname: skill-creator\ndescription: Mine now\n---\n',
+    )
+    expect(edited).toMatchObject({ source: 'user', description: 'Mine now' })
+  })
+
+  it('writes and deletes project Skills in the project folder of the session', () => {
+    const { stateRoot, runtimeRoot, project } = roots(
+      'emperor-skill-service-project-',
+    )
+    const projectSkills = join(project, '.emperor', 'skills')
+    writeSkill(projectSkills, 'deploy', 'name: deploy\ndescription: Deploy it')
+    const service = new CoreSkillService(stateRoot, {
+      runtimeRoot,
+      projectRootFor: (sessionId) => (sessionId === 'build-1' ? project : null),
+    })
+
+    expect(service.list().skills.map((skill) => skill.name)).toEqual([])
+    expect(
+      service
+        .list({ sessionId: 'build-1' })
+        .skills.map((skill) => [skill.name, skill.source, skill.path]),
+    ).toEqual([['deploy', 'project', '.emperor/skills/deploy/SKILL.md']])
+
+    service.save(
+      'deploy',
+      '---\nname: deploy\ndescription: Deploy it safely\n---\n',
+      { sessionId: 'build-1' },
+    )
+    expect(
+      readFileSync(join(projectSkills, 'deploy', 'SKILL.md'), 'utf8'),
+    ).toContain('Deploy it safely')
+    expect(existsSync(join(stateRoot, 'skills', 'deploy'))).toBe(false)
+    expect(service.delete('deploy', { sessionId: 'build-1' })).toMatchObject({
+      scope: 'project',
+    })
+    expect(existsSync(join(projectSkills, 'deploy'))).toBe(false)
+    expect(() =>
+      service.folderPath({ scope: 'project', sessionId: 'chat-1' }),
+    ).toThrow(expect.objectContaining({ code: 'skill_scope_unavailable' }))
+    expect(service.folderPath({ scope: 'project', sessionId: 'build-1' })).toBe(
+      projectSkills,
+    )
+    expect(service.folderPath({ scope: 'user' })).toBe(
+      join(stateRoot, 'skills'),
+    )
+  })
+
+  it('never creates the project Skills folder just to report its path', () => {
+    const { stateRoot, runtimeRoot, project } = roots(
+      'emperor-skill-service-folder-',
+    )
+    const service = new CoreSkillService(stateRoot, {
+      runtimeRoot,
+      projectRootFor: (sessionId) => (sessionId === 'build-1' ? project : null),
+    })
+
+    expect(() =>
+      service.folderPath({ scope: 'project', sessionId: 'build-1' }),
+    ).toThrow(expect.objectContaining({ code: 'skill_scope_unavailable' }))
+    expect(existsSync(join(project, '.emperor'))).toBe(false)
+    // Emperor Home is ours, so the user folder is still created on demand.
+    expect(service.folderPath({ scope: 'user' })).toBe(
+      join(stateRoot, 'skills'),
+    )
+    expect(existsSync(join(stateRoot, 'skills'))).toBe(true)
+  })
+
+  it('reports invalid Skills with reasons instead of dropping them', () => {
+    const { stateRoot } = roots('emperor-skill-service-invalid-')
+    const skills = join(stateRoot, 'skills')
+    writeSkill(
+      skills,
+      'invalid-skill',
+      'name: invalid-skill',
+      '\n# Missing description\n',
+    )
+    writeSkill(skills, 'Bad Name', 'name: Bad Name\ndescription: nope')
+    mkdirSync(join(skills, 'no-skill-file'))
+    writeFileSync(join(skills, 'README.md'), '# Not a Skill\n')
+
+    const listed = new CoreSkillService(stateRoot).list()
+    expect(listed.skills).toEqual([])
+    expect(listed.invalid).toEqual([
+      expect.objectContaining({
+        name: 'Bad Name',
+        source: 'user',
+        reason: expect.stringMatching(/Skill name must start/),
+      }),
+      expect.objectContaining({
+        name: 'invalid-skill',
+        path: join(skills, 'invalid-skill'),
+        reason: 'Frontmatter field "description" is required',
+      }),
+    ])
+    expect(
+      new CoreSkillService(stateRoot).validate({ name: 'invalid-skill' }),
+    ).toMatchObject({ valid: false, source: 'user' })
+    expect(
+      new CoreSkillService(stateRoot).validate({
+        content: '---\nname: pasted\ndescription: ok\n---\n',
+      }),
+    ).toMatchObject({ valid: true, name: 'pasted', source: 'virtual' })
+    const service = new CoreSkillService(stateRoot)
+    expect(() => service.delete('Bad Name')).toThrow(/Skill name must start/)
+    expect(service.delete('Bad Name', { scope: 'user' })).toMatchObject({
+      scope: 'user',
+      path: join(skills, 'Bad Name'),
+    })
+    expect(existsSync(join(skills, 'Bad Name'))).toBe(false)
+    expect(() => service.delete('../escape', { scope: 'user' })).toThrow(
+      /Invalid Skill folder name/,
+    )
   })
 
   it('parses Emperor slash-command metadata without trusting renderer-owned fields', () => {
@@ -294,23 +430,18 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
 
   it('parses Claude-compatible top-level command frontmatter', () => {
     const stateRoot = tmp('emperor-skill-service-claude-frontmatter-')
-    const skillDir = join(stateRoot, 'skills', 'web-research')
-    mkdirSync(skillDir, { recursive: true })
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
+    writeSkill(
+      join(stateRoot, 'skills'),
+      'web-research',
       [
-        '---',
         'name: web-research',
         'description: Research public sources.',
         'user-invocable: false',
         'argument-hint: "[query]"',
         'allowed-tools: [web_fetch, run_command]',
         'context: fork',
-        '---',
-        '',
-        '# Research',
       ].join('\n'),
-      'utf8',
+      '\n# Research',
     )
 
     expect(
@@ -323,26 +454,24 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     })
   })
 
-  it('uses user precedence and never scans a sibling skills-catalog', () => {
-    const root = tmp('emperor-skill-service-precedence-')
-    const stateRoot = join(root, 'state')
-    const runtimeRoot = join(root, 'runtime')
+  it('uses user precedence and never scans a sibling skill directory', () => {
+    const { root, stateRoot, runtimeRoot } = roots(
+      'emperor-skill-service-precedence-',
+    )
     for (const [base, body] of [
       [runtimeRoot, 'builtin'],
       [stateRoot, 'user'],
-    ] as const) {
-      const dir = join(base, 'skills', 'same-name')
-      mkdirSync(dir, { recursive: true })
-      writeFileSync(
-        join(dir, 'SKILL.md'),
-        `---\nname: same-name\ndescription: ${body}\n---\n\n${body}\n`,
+    ] as const)
+      writeSkill(
+        join(base, 'skills'),
+        'same-name',
+        `name: same-name\ndescription: ${body}`,
+        `\n${body}\n`,
       )
-    }
-    const catalogDir = join(root, 'skills-catalog', 'catalog-only')
-    mkdirSync(catalogDir, { recursive: true })
-    writeFileSync(
-      join(catalogDir, 'SKILL.md'),
-      '---\nname: catalog-only\ndescription: Catalog only\n---\n',
+    writeSkill(
+      join(root, 'sibling-skills'),
+      'sibling-only',
+      'name: sibling-only\ndescription: Sibling only',
     )
 
     const service = new CoreSkillService(stateRoot, { runtimeRoot })
@@ -351,8 +480,10 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       description: 'user',
       content: expect.stringContaining('\nuser\n'),
     })
-    expect(service.list().map((skill) => skill.name)).toEqual(['same-name'])
-    expect(() => service.get('catalog-only')).toThrow(/not found/i)
+    expect(service.list().skills.map((skill) => skill.name)).toEqual([
+      'same-name',
+    ])
+    expect(() => service.get('sibling-only')).toThrow(/not found/i)
   })
 
   it('refuses to save through a symbolic-link Skill directory', () => {
@@ -361,7 +492,10 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     const outside = join(root, 'outside')
     mkdirSync(join(stateRoot, 'skills'), { recursive: true })
     mkdirSync(outside)
-    writeFileSync(join(outside, 'SKILL.md'), 'outside\n')
+    writeFileSync(
+      join(outside, 'SKILL.md'),
+      '---\nname: linked\ndescription: outside\n---\n',
+    )
     symlinkSync(
       outside,
       join(stateRoot, 'skills', 'linked'),
@@ -369,75 +503,36 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     )
 
     const service = new CoreSkillService(stateRoot)
-    expect(() => service.save('linked', '# Replaced')).toThrow(/symbolic link/i)
-    expect(readFileSync(join(outside, 'SKILL.md'), 'utf8')).toBe('outside\n')
-  })
-
-  it('round-trips a deterministic Core package through preview and confirm', async () => {
-    const sourceRoot = tmp('emperor-skill-service-package-source-')
-    const destinationRoot = tmp('emperor-skill-service-package-destination-')
-    const source = new CoreSkillService(sourceRoot)
-    const destination = new CoreSkillService(destinationRoot)
-
-    source.create({
-      name: 'release-audit',
-      description: 'Audit release artifacts and integrity evidence.',
-      resources: ['references'],
-    })
-    const packaged = source.package({ name: 'release-audit' })
-
-    const preview = await destination.previewInstall({
-      source: { kind: 'local', path: packaged.path },
-    })
-    await expect(
-      destination.confirmInstall({
-        previewId: preview.previewId,
-        digest: preview.digest,
-        candidateId: preview.candidates[0]!.candidateId,
-        permissionConfirmed: true,
-      }),
-    ).resolves.toMatchObject({ name: 'release-audit', status: 'active' })
-    expect(destination.get('release-audit')).toMatchObject({
-      name: 'release-audit',
-      source: 'user',
-      content: expect.stringContaining(
-        'Audit release artifacts and integrity evidence.',
-      ),
-    })
-  })
-
-  it('treats legacy blocked markers as non-authoritative filesystem metadata', () => {
-    const stateRoot = tmp('emperor-skill-service-blocked-')
-    const skillDir = join(stateRoot, 'skills', 'legacy-script')
-    mkdirSync(skillDir, { recursive: true })
-    writeFileSync(join(skillDir, 'SKILL.md'), '# Missing frontmatter\n')
-    writeFileSync(
-      join(skillDir, '.emperor-skill-state.json'),
-      JSON.stringify({ status: 'blocked_pending_review' }),
-    )
-
-    expect(new CoreSkillService(stateRoot).list()).toEqual([
+    expect(service.list().invalid).toEqual([
       expect.objectContaining({
-        name: 'legacy-script',
-        status: 'invalid',
+        name: 'linked',
+        reason: expect.stringMatching(/symbolic link/i),
       }),
     ])
+    expect(() =>
+      service.save('linked', '---\nname: linked\ndescription: x\n---\n'),
+    ).toThrow(/symbolic link/i)
+    expect(readFileSync(join(outside, 'SKILL.md'), 'utf8')).toContain('outside')
   })
 
-  it('marks structurally invalid Skills as invalid even when YAML parses', () => {
-    const stateRoot = tmp('emperor-skill-service-invalid-')
-    const skillDir = join(stateRoot, 'skills', 'invalid-skill')
-    mkdirSync(join(skillDir, 'unsupported'), { recursive: true })
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
-      '---\nname: invalid-skill\n---\n\n# Missing description\n',
-    )
-
-    expect(new CoreSkillService(stateRoot).list()).toEqual([
-      expect.objectContaining({
-        name: 'invalid-skill',
-        status: 'invalid',
-      }),
+  it('imports pasted SKILL.md content under the chosen name', async () => {
+    const { stateRoot } = roots('emperor-skill-service-import-')
+    const service = new CoreSkillService(stateRoot)
+    const result = await service.import({
+      source: {
+        kind: 'content',
+        content: '---\nname: draft\ndescription: Pasted skill\n---\n# Body\n',
+        name: 'pasted-skill',
+      },
+      scope: 'user',
+    })
+    expect(result.errors).toEqual([])
+    expect(result.imported).toEqual([
+      expect.objectContaining({ name: 'pasted-skill', scope: 'user' }),
     ])
+    expect(service.get('pasted-skill')).toMatchObject({
+      description: 'Pasted skill',
+      content: expect.stringContaining('name: pasted-skill'),
+    })
   })
 })

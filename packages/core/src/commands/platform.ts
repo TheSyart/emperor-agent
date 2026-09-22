@@ -91,6 +91,7 @@ export class CommandPlatform {
     status: 'ok' | 'warning'
     registeredSkills: number
     conflicts: ReturnType<typeof resolveSkillCommandCatalog>['conflicts']
+    warnings: ReturnType<typeof resolveSkillCommandCatalog>['warnings']
   } {
     const registry = new CommandRegistry()
     registry.registerMany(builtinCommandDescriptors())
@@ -99,9 +100,11 @@ export class CommandPlatform {
       registry.reservedNames(),
     )
     return {
-      status: catalog.conflicts.length ? 'warning' : 'ok',
+      status:
+        catalog.conflicts.length || catalog.warnings.length ? 'warning' : 'ok',
       registeredSkills: catalog.descriptors.length,
       conflicts: catalog.conflicts,
+      warnings: catalog.warnings,
     }
   }
 

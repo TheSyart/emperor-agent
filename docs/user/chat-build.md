@@ -2,123 +2,130 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-08-12<br>
-> 事实源：SessionStore、ProjectStateStore、ContextBuilder、桌面会话入口
+> 最后核验：2026-09-22<br>
+> 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/sidebar/`
 
-Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 能看到哪些长期上下文，不决定权限级别。
+Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
 
 ## Chat
 
-Chat 适合问答、整理资料、解释内容和不依赖固定 workspace 的轻量工具任务。
+Chat 适合问答、整理资料、解释内容和不依赖固定项目的轻量任务。上下文包括：
 
-上下文通常包括：
+- 系统提示词和当前可用的 Skill 目录；
+- 全局工作区说明 `~/.emperor/AGENTS.md`（如存在）；
+- 用户档案 `USER.local.md` 与全局长期记忆 `MEMORY.local.md`；
+- 当前会话的历史、附件和工具结果。
 
-- 系统提示词和当前生效的 Skills；
-- 用户档案 `USER.local.md`；
-- 全局长期记忆 `MEMORY.local.md`；
-- 当前 session 的历史与 checkpoint；
-- 当前请求的附件和工具结果。
-
-Chat 不会自动读取某个 Build 项目的私有记忆。需要处理本地项目时，创建或切换到对应 Build。
-
-普通问答的最终回复只表示当前 Agent turn 已收口。互联网搜索、今日/最新新闻或实际调用外部内容工具的任务会额外进入 Core 来源门禁：工具和 Skill 找到的 URL 先作为候选，正文验证、逐项引用与隔离复核通过后才发布最终内容。校验期间的草稿不会先显示再撤回。
+Chat 的工作目录是 Emperor Home 下的 `workspace/`，Agent 在这里创建的文件不会落到你的项目里。Chat 不会读取任何 Build 项目的私有记忆。
 
 ## Build
 
-Build 绑定一个本地文件夹。Agent 会在该 workspace 内读取项目文件、执行允许的命令，并装配以下项目上下文：
+Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当前权限写入和执行命令，并装配：
 
-- workspace 中的 `AGENTS.md`；
-- `stateRoot/projects/<project-id>/AGENTS.local.md` 中的项目私有记忆；
-- 项目 prompt overlay、规则和项目级 Skills；
-- 当前 Build session 的历史和 runtime 状态。
+- 从项目根到当前目录逐级发现的 `AGENTS.md`、`CLAUDE.md`、`AGENTS.local.md`、`CLAUDE.local.md`（总预算 64 KiB，越具体的说明优先级越高）；
+- `stateRoot/projects/<project-id>/AGENTS.local.md` 中的全局私有项目记忆；
+- 项目级 Skills `<project>/.emperor/skills`；
+- 当前 Build session 的历史。
 
-`<project>/AGENTS.md` 是可提交的协作说明，Core 只读，不会自动改写。`AGENTS.local.md` 是全局私有项目记忆，物理位置不在项目源码树中。
+项目中的 `AGENTS.md` 等文件由你维护，Core 只读取，不会改写。全局私有项目记忆不在项目源码树中，Agent 可以通过 `memory_edit` 更新它。
 
-## 右侧项目工作台
+## 对话视图
 
-Build 会话默认在消息区右上角始终显示紧凑的 Environment 浮卡，右侧宽工作区默认关闭。Chat 顶部不再保留“对话 / 正在办差 · 模型”标题栏；模型、权限和运行状态仍由 Composer、时间线与侧边栏投影表达。打开 Review、Terminal 或 Files 时，工作区在同一右侧区域原位替代 Environment；关闭工作区后 Environment 自动恢复。工作区宽度可在 520–960px 且不超过窗口 72% 的范围内拖动，关闭、宽度、Files 树宽度和当前面板会随桌面侧栏状态保存；中窄屏分别使用抽屉和全屏布局。
+会话头部有 Chat / Trajectory 两个标签，右上角按钮用于打开或收起右侧详情栏。
 
-- **Environment**：独立浮卡汇总 Git 文件/行数、同步与瞬态状态、分支、活动 worktree、最近安全操作凭据、Plan/Goal、子代理、非空 Team、后台进程和前三项来源；空模块不占空间。Commit/Compare/PR 快捷项会打开 Review。
-- **Review**：按 staged、unstaged、untracked 和 conflict 查看 Diff 与逐文件增删行，执行 stage、unstage、discard、commit、fetch、fast-forward pull、push、建分支、切分支和分支比较；还可创建/退出 Emperor 托管 worktree，并预览、发布、转 Ready、合并或关闭当前分支 PR。状态写操作携带 revision，外部改动导致状态过期时会拒绝旧操作并刷新；discard 会先建立可恢复文件检查点。PR 依赖签名工具目录中经过供应链审核的 GitHub CLI；未安装、未登录或尚未通过目录审核时只返回可操作错误，不回退到任意系统二进制。monorepo 会严格限制在当前 Build 项目子目录，项目外已有暂存内容时不会代为提交；若当前 Build 只绑定仓库子目录，影响整个工作树的 pull、切换分支和 worktree 会被拒绝，应改从仓库根项目操作。
-- **Terminal**：在当前项目目录启动用户系统 Shell，支持 ANSI、交互程序、多个标签、Ctrl+C、复制粘贴和 resize。关闭工作台不结束终端，关闭标签、删除所属 session 或退出应用才会终止；应用重启不伪造恢复。
-- **Files**：占满宽工作区，顶部是 session 隔离的只读文件标签，主体左侧预览、右侧为可调宽文件树；Markdown 默认渲染并可切换 source，代码/文本显示行号，图片居中预览。目录按需展开并支持文件名/相对路径搜索；`.git` 永不展示，隐藏文件和 Git ignored 文件由独立开关控制，符号链接只有目标仍在项目内时才允许读取。超大目录和仓库搜索都有硬扫描上限，达到上限时界面会明确标记当前结果不完整。
+- **空会话**：输入框居中显示；发送后你的消息以气泡出现，Agent 的回复随即流式输出。
+- **思考**：模型的思考过程显示为可折叠的「思考」行，流式输出时只显示最新一行。
+- **工具调用**：每次调用占一行，格式为 `图标 标题 · 摘要`。点开后按工具类型展示：终端输出、Diff、读取片段、搜索结果、网页来源、待办清单、已回答的问题、最终 Plan，其他工具显示通用的 IN / OUT。
+- **运行状态**：正在进行的 turn 只显示一行状态和已用时间。每个完成的 turn 末尾有复制按钮，悬停可看到首字耗时（TTFT）和 tok/s 等信息。
+- 重试、错误、达到最大输出 token、上下文压缩等情况以单独的行插在时间线中。
 
-Review 始终保留入口；当前目录不是 Git 仓库时显示不可用。没有项目绑定的 Chat 不显示 Terminal 和 Files。Files 本轮不提供保存、重命名、删除、LSP 或内置代码编辑器。
+悬停工具行时出现 **Inspect**：点击后在右侧详情栏的 Inspect 标签中显示该调用的工具名与状态、输入、输出、元数据和耗时。其中的「在轨迹中查看」按钮会跳到本会话的 Trajectory 标签（`/chat/:id/trajectory?call=<callId>`）并定位到这次调用。
 
-Agent 执行时，Composer 上方会用一个紧凑胶囊合并显示 `Step X / N` 与 `N files changed · +A −D`；悬停、键盘聚焦或点击胶囊可查看完整 Plan 步骤或独立 Todo，因而不会再在聊天时间线中重复插入大型 Todo 卡。等待 Ask、Permission 或 Plan 审批时胶囊隐藏，任务终结后立即消失。文件统计只覆盖本次用户任务相对起点的净变化，不混入任务前脏文件；一次任务跨 Ask、Permission、Plan 审批或明确继续后仍沿用同一统计，不会拆成多张卡。胶囊和最终 Changes 摘要都可打开 Review，并默认只显示本次任务涉及的精确文件；Review 内可切回全部变更。最终摘要作为回答时间线内的紧凑辅助卡只出现一次，正文也会准确写明同一组总数。已证明只读的 Shell 不会把状态污染为 partial；只有成功执行且无法精确归因的 workspace 写入才会标为“已确认的变更 / partial”。
+## 轨迹（Trajectory）
+
+Trajectory 标签把同一份会话记录按 Turn → Step 展开成账本，便于逐条核对 Agent 实际做了什么：
+
+- **账本**：每个 Turn 下依次列出用户输入、上下文注入、每次模型请求（Step）的消息、工具调用与结果、压缩；Turn 与工具调用都可以折叠。
+- **时间线**：顶部按输入、模型、工具三条泳道显示耗时；拖动选区只看这段时间内的记录，滚轮缩放，右键拖动平移，右键或 Esc 清除。
+- **搜索**：工具栏搜索框在全部记录中查找，回车 / Shift+回车在命中之间跳转。
+- **检查器**：选中一条记录后，右侧详情栏显示它的详情。请求头可看 System Prompt、工具目录和与上一版的 Diff；模型请求可看参数、用量（输入、缓存、输出、推理）和 TTFT / tok/s；工具调用可看参数、结果、调用时的工具 Schema 与耗时；压缩可看摘要和原始输出。
+- 过大的工具参数或结果在传输时会被截断，检查器会给出提示，点「加载完整内容」可从本地会话记录读取全文。
+
+## 子代理
+
+子代理的工具行可以点击，在同一视图中打开子会话（`/chat/<childId>`）：
+
+- 头部显示面包屑链（根会话 → … → 当前子会话），点击任一上级即可返回。
+- 子会话的输入框是只读的，提供「返回父会话」；子代理仍在运行时可以点「停止」中断它。
+- 子代理运行期间，侧栏中父会话行显示「N 个子代理运行中」。子会话本身不会出现在侧栏列表里。
+
+## 右侧详情栏
+
+会话头部右上角的按钮打开右侧详情栏（默认 360px，可拖动在 300–520px 之间调整；窗口过窄时自动收起）。详情栏按标签页组织：Inspect、Git、Files、Terminal、Environment，以及有预览时出现的 Browser。
+
+- **Inspect**：查看在对话中通过 Inspect 选中的工具调用详情，见上文“对话视图”。
+- **Environment**：汇总 Git 状态、分支、活动 worktree、最近的安全 Git 操作凭据、当前 Goal、后台任务、子代理和终端。
+- **Git**：按 staged、unstaged、untracked 和 conflict 查看 Diff；执行 stage、unstage、discard、commit、fetch、fast-forward pull、push、建分支、切分支和分支比较；创建或退出 Emperor 托管的 worktree；预览、发布、转 Ready、合并或关闭当前分支 PR。写操作携带 revision，外部改动导致状态过期时拒绝旧操作并刷新。PR 依赖通过签名工具目录审核且已登录的 GitHub CLI。
+- **Terminal**：在当前项目目录启动你的系统 Shell，支持多个标签。关闭详情栏不结束终端；关闭标签、删除所属 session 或退出应用才会终止，重启后不恢复。
+- **Files**：只读的多标签文件预览与文件树，支持 Markdown 渲染、行号、图片预览和文件名搜索；`.git` 不展示，目录与搜索都有扫描上限。
+
+当前目录不是 Git 仓库时 Git 标签不可用。没有项目绑定的 Chat 不能打开 Terminal 和 Files。
 
 ## 斜杠命令
 
-Composer 输入 `/` 后显示由 Core 返回的命令和 active Skill。菜单只分为 `Commands` 与 `Skills`；命令固定排序，Skill 按易读标题排序并标注 `Personal`、`Project`、`Built-in` 或 `Plugin`。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
+Composer 输入 `/` 后显示 Core 返回的命令和 active Skill，分为 `Commands` 与 `Skills`：
 
-- `/new` 创建一个新的 session 上下文；旧 session 仍在侧栏，新 session 继承 Chat/Build、项目、活动 worktree、全局模型与权限，但不继承历史、Plan、Goal、Todo、消息队列、checkpoint、execution ledger 或附件。
-- `/compact [instructions]` 在同一 session 中压缩历史并保留摘要，不等同于 `/new`。
-- `/model` 和 `/reasoning` 选择当前会话的模型与思考强度。
-- `/permissions ask|smart|full` 管理三档权限。
-- `/plan` 与 `/goal` 管理规划和持续目标；`/stop` 只在任务执行中显示，`/continue` 只在 Plan 或 Goal 可恢复时显示。
-- 每个 Skill 使用自己的命令，例如 `/agent-reach 搜索 Emperor Agent 的相关讨论`，不经过 `/skill` 或 `/skills`。
+- `/new`：在同一工作区创建新会话；旧会话保留在侧栏。新会话继承 Chat/Build 类型、项目、活动 worktree 和当前权限预设，不继承对话、Plan 模式、Goal 或排队消息。
+- `/compact`：在当前会话中压缩历史并保留摘要。
+- `/model`、`/reasoning`：选择模型和思考强度。
+- `/permissions`：查看或切换权限预设。
+- `/plan`、`/goal`：进入 Plan 模式或设置 Goal，见 [Plan 与 Goal](plan-goal.md)。
+- `/stop`：停止当前任务；`/continue`：让 Agent 继续上一项工作。
+- 每个 Skill 使用自己的命令，例如 `/agent-reach 搜索相关讨论`。
 
-任务收到 `assistant_done` 后及每次打开菜单时，Renderer 都会重新读取 Core 命令目录；新安装的 Skill 无需重启。Settings、Skills、Plugins、Memory、Diagnostics、Git、Files 和 Terminal 继续从应用导航进入，不再提供斜杠入口。未知命令或不可用命令只显示本地错误，不会作为普通文本发送给模型。模型回复中的斜杠文本也不会执行。带附件的内置控制命令会被拒绝；Skill 命令可以携带附件。完整目录、忙碌调度和安全边界见 [Slash command 平台](../architecture/slash-command-platform.md)。
-
-纯调研命令没有修改 workspace 时不会生成零文件 Changes 卡。只有 Core 观察到真实文件变化时，时间线末尾才显示最终文件与增删统计；无法精确归因但确有文件变化的情况仍会在 Diagnostics 和非零 partial 摘要中保留。
+未知命令只显示本地错误，不会发给模型；模型回复中的斜杠文本也不会执行。只有 Skill 命令可以携带附件。完整规则见 [Slash command 平台](../architecture/slash-command-platform.md)。
 
 ## 会话操作
 
-侧边栏会话支持重命名、归档和删除：
+左侧会话栏按项目和日期分组；悬停会话行后点击 `…` 可以重命名、归档和删除（双击标题也可以重命名）。会话栏可以用左上角按钮收起为图标栏，窗口宽度小于 1024px 时自动收起。运行中的会话会显示运行状态，以及「N 个子代理运行中」。
 
-- 归档会话会从主列表移除，可以在“设置 → 已归档对话”恢复。
-- 删除是持久操作。删除带有活动 Goal 的 session 时，Core 会先取消并等待 Goal 收口，再删除相关状态。
-- 切换会话不会把进行中的后台 turn 重新绑定到新会话；runtime event 仍写入原 owner session。
+- 归档会话从主列表移除，可以在“设置 → 常规 → 已归档对话”恢复。
+- 删除会移除该会话的 log、子代理和后台任务，是持久操作。
+- 切换会话不会把进行中的后台 turn 转移到新会话。
+- 新建会话时界面先创建本地草稿，发送第一条消息后才创建真实会话；首条消息之后会自动生成标题。
 
 ## 运行中继续发送
 
-Agent 正在回复时，Composer 仍可输入文字、添加附件并引用 Skill 或 MCP。每个会话只有一个用户可见队列槽：槽空闲时按 Enter 或发送按钮默认排队，已排队消息以与 Composer 同宽的附着栏显示在输入框顶部：
+Agent 正在回复时仍可输入文字、添加附件和引用 Skill：
 
-- **编辑消息**：取消仍在等待的原项，并把文字恢复到输入框。
-- **插入当前执行**：原子替换为插话，在下一个模型或工具安全边界进入当前 turn；若当前执行刚好结束，原队列项会保留。
-- **删除**：只取消尚未开始的项目。
-- **停止**：取消当前任务；普通队列中的下一轮不会被默认删除。
+- **发送**：消息排队，当前 turn 结束后作为下一轮开始。排队的消息显示在 Composer 顶部，不会提前出现在聊天时间线中。
+- **插入当前执行**：把排队的消息提升为插话，在下一个 step 进入当前 turn。
+- **删除**：取消尚未开始的排队消息。
+- **停止**：取消当前 turn；排队的下一轮不会被删除。
 
-槽已占用时仍可继续撰写下一条草稿，但 Enter 不发送，发送按钮也会禁用；文字、附件和 Skill 引用都不会被清空。若并发 IPC 提交在 Core 端撞上同一单槽，界面会恢复完整 payload 并刷新权威队列。升级前已有多条旧队列时只显示 FIFO 首项和“另有 N 条旧队列”，Core 会依次排空且期间拒绝新增。
+审批、问题（支持多选）和 Plan 审阅出现时，会以卡片形式在底部接管 Composer 的位置；回答、批准、提交意见或取消后，Composer 连同原草稿恢复。
 
-队列项只显示在 Composer 附着栏中，不会提前生成普通用户气泡；真正收到 `user_message` 后才进入聊天时间线，因此不会重复。如果旧回答已经流出一部分，插话后旧内容会保留为灰色、标记“已被插话替代”，新回答单独显示。队列会在切换会话或重启后从 Core 恢复；Core 会对退出前处于 queued、running 或 interjected 的记录和持久聊天历史进行对账，未进入历史的消息重新排队，已经进入历史的消息不再重放。附件和显式 Skill 请求可正常排队，但不能改成插话；普通文字和已经展开为文字上下文的 MCP 引用可插入当前执行。
-
-普通 Ask、Permission Ask 或 Plan 审批进入 waiting 后，会在底部替代 Composer；时间线中的原 Ask/Plan 卡只保留静态内容和历史状态。回答、批准、评论或取消后，Composer 连同原草稿和附件恢复并重新聚焦。Plan 流式生成期间只显示“生成中”的提案，完整 `plan_draft` 形成后才出现底部“实施此计划？”面板。
-
-Plan 实现完成但仍需人工验证时，底部会出现 Core 决策卡，Agent 此时停止继续修改项目。你可以继续自动验证、确认自己已人工验证通过、明确“跳过验证并完成”，或取消计划。人工通过会在最终报告中注明由用户确认；跳过会留下可审计豁免，并明确写明手动验证未执行；取消不会自动撤销已经写入的文件。普通文字里的“取消、跳过、强制结束”不会被当作这些动作，只有卡片的稳定选项会改变 Plan 生命周期。Ask 和 Plan 控制工具也不会再额外显示原始 arguments/JSON 工具卡。
-
-需要独立复核的 Plan 会显示一条紧凑的“独立复核”节点。复核通过且命令证据完整后，Core 直接结算并生成一次最终交付，不再追问“是否满意”或“是否结束会话”；完成的复核默认折叠，可按需展开查看原始证据。Environment 只展示正在运行的子代理和少量最近记录，其余历史以数量汇总，避免重复 reviewer 占满侧栏。
-
-旧任务清单不会自动劫持新的普通问答。只有当前请求确实更新了清单、刚批准 Plan、刚恢复 Permission，或你明确输入 `/continue`、`继续`、`继续执行`、`按原计划继续` 时，Agent 才续跑未完成任务。因此“我们刚刚说什么了”只会回答历史，不会顺带执行旧步骤。停止当前任务会稳定显示取消状态；已经确认取消后，迟到的模型错误不会再变成“Internal error”。
-
-复杂任务不会再因 20/56 等固定模型轮数突然“无疾而终”。只要文件、Plan/Goal/Todo、验证或新证据仍在推进，主 Agent 就持续执行；连续 6 次没有有效进展时 Core 会要求换一条验证路径，连续 12 次仍只是重复读取、重复命令或重复错误时才以 `no_progress` 暂停。暂停卡会列出原因和剩余动作，点击“继续执行”可恢复同一 Plan；切换会话、刷新、重启或发送普通问题都不会自动恢复写操作。子代理和后台隔离执行器仍有自己的资源/轮数上限。
+复杂任务不会因为固定的步数上限突然停止：内核不限制一个 turn 的步数。连续重复完全相同的工具调用时，Agent 会收到提醒。
 
 ## 权限和路径
 
-Build 绑定目录并不意味着 Agent 可以任意访问整台机器。每次文件或命令操作仍需通过：
+Build 绑定目录并不意味着 Agent 可以任意写整台机器：
 
-1. 当前权限模式；
-2. workspace policy 和路径解析；
-3. 工具输入 schema；
-4. pending Ask/Plan 与其他 Core mutation guard。
-5. 对 shell 命令，可信 host/sandbox 执行边界与实际 process receipt。
+- 权限预设决定写入范围。默认的 `workspace-write` 只允许写入当前 workspace 和系统临时目录；`read-only` 不允许写入；`danger-full-access` 不限制。
+- 超出范围时，Agent 可以为单次调用请求提权，由你批准或拒绝，批准只对这一次调用有效。
+- `read`、`glob`、`grep` 可以读取工作区之外的文件；沙箱不限制网络访问。
+- Shell 命令在 macOS 和 Linux 上由系统沙箱执行；其他平台只有 `danger-full-access` 才能运行 Shell。
 
-主 Agent 在非 Plan 模式获准后会在宿主环境执行 `run_command`：cwd 仍固定为 workspace，但 HOME、PATH、Git/npm 用户配置和本机网络真实可用。`full_access` 表示这类宿主命令免询问，不会关闭 Core 明确 deny、workspace、Goal 或 AgentDefinition 检查。Plan、子代理、Team、Hook、MCP、LSP 和受管 Git 继续使用 OS sandbox；其 required backend 不可用时命令不会启动。每次执行都记录真实 `host` 或 `sandbox` receipt，诊断面板不会根据权限模式伪造边界。
-
-宿主直执不等于系统提权：`sudo`、`su`、`doas`、`pkexec` 和明确的根目录、磁盘、文件系统或 fork-bomb 破坏模式始终在 spawn 前拒绝；`curl`、`wget`、解释器动态代码和管道到 shell 由统一权限规则按真实风险决定询问或执行。Emperor 不处理管理员密码，也不为 Agent 命令提供 PTY。
-
-Agent 实际启动的命令还会绑定当前 session；子代理内的命令绑定对应 Task。取消 turn/Task、关闭 session 或退出应用会清理完整进程组，输出超过命令配额也会终止进程。Emperor 当前不提供可脱离应用长期存活的 daemon。右侧 Terminal 是另一条明确的用户直控 PTY：用户键入的命令不属于 Agent 工具调用，不进入三档 Agent 权限审批、聊天历史、模型上下文或持久 runtime event；它仍由 Core 校验 owner session、项目初始 cwd、terminal ID 和最多 8 个标签，并在 session/app 关闭时清理。
-
-可选的文件检查点 Beta 只为 Core 受管文件工具记录 before/after，并在“设置 → 诊断”提供哈希冲突预览和显式回退。它默认关闭，不覆盖 shell、MCP 或外部编辑；启用方法和边界见[诊断与排障](diagnostics-troubleshooting.md#文件检查点与回退beta)。
+右侧 Terminal 是你直接操作的 Shell，不属于 Agent 工具调用，不受权限预设约束，也不进入聊天记录或模型上下文。
 
 ## 什么时候切换类型
 
-| 任务                           | 建议                               |
-| ------------------------------ | ---------------------------------- |
-| 普通问答、总结一段文本         | Chat                               |
-| 修改一个明确项目中的代码或文档 | Build                              |
-| 同时维护两个项目               | 为每个项目建立独立 Build           |
-| 需要先审查实施方案             | 在 Chat 或 Build 中开启 Plan       |
-| 需要跨多轮修复并严格验收       | 在合适的 Chat 或 Build 中创建 Goal |
+| 任务                           | 建议                         |
+| ------------------------------ | ---------------------------- |
+| 普通问答、总结一段文本         | Chat                         |
+| 修改一个明确项目中的代码或文档 | Build                        |
+| 同时维护两个项目               | 为每个项目建立独立 Build     |
+| 需要先审查实施方案             | 在 Chat 或 Build 中进入 Plan |
+| 需要 Agent 持续推进直到完成    | 在合适的会话中设置 Goal      |
 
-Plan 和 Goal 的差异见 [Plan 与 Goal](plan-goal.md)。数据隔离细节见[全局私有存储根](../architecture/global-state-store.md)。
+Plan 和 Goal 见 [Plan 与 Goal](plan-goal.md)。数据隔离细节见[全局私有存储根](../architecture/global-state-store.md)。

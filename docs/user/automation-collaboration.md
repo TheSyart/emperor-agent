@@ -1,63 +1,70 @@
-# Scheduler、Team、Hooks 与桌宠
+# Scheduler、Hooks 与桌宠
 
 > 文档状态：Active<br>
-> 面向读者：使用预览自动化和协作能力的用户<br>
-> 最后核验：2026-07-19<br>
-> 事实源：Scheduler/Team/Hooks/DesktopPet service、当前桌面路由和面板
+> 面向读者：使用自动化能力的用户<br>
+> 最后核验：2026-09-22<br>
+> 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/settings/`（Scheduler / Hooks / 记忆 / 桌宠分区）
 
-本页介绍预览能力。它们已经有持久化和 CoreApi 链路，但入口、权限和恢复边界比 Chat/Build 更严格。
+本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
 
 ## Scheduler
 
-“定时任务”页面可以创建、编辑、暂停、恢复、手动运行和删除任务。界面支持：
+“设置 → Scheduler”可以创建、编辑、暂停、恢复、手动运行和删除任务，Agent 也可以通过 `scheduler` 工具管理任务。
+
+页面顶部用一行汇总服务状态、任务数、启用数、下次运行时间和并发占用。每个任务是一张卡片，显示名称、调度规则与下次运行时间、状态和启用开关（关闭即暂停，打开即恢复）；展开后查看任务详情、最近错误和运行历史，并在卡片内直接编辑，底部提供「删除」（需再次确认）、「立即运行」和「保存」。右上角「新增任务」会在列表顶部展开一张新建卡片。受保护的系统任务可以暂停、恢复或立即运行，但不能编辑或删除。
+
+任务支持：
 
 - `at`：指定时间运行一次；
-- `every`：按固定分钟间隔运行；
+- `every`：按固定间隔运行；
 - `cron`：按 cron 表达式和时区运行；
-- `misfirePolicy`：选择应用停机期间错过触发点后的处理方式；
+- `misfirePolicy`：应用停机期间错过触发点后的处理方式；
 - `deleteAfterRun`：运行后删除一次性任务；
 - `deliver`：把结果投递到会话界面。
 
-当前创建表单生成 `agent_turn` 任务。底层还认识用于唤醒 Team member 的 payload，但普通用户表单不把它当作通用入口。
+任务类型：
 
-`misfirePolicy` 有三种选择：`skip`（默认）只记录错过并移到下一个未来触发点；`latest` 只补跑最后一个错过的触发点；`catch-up-one` 只补跑最早一个错过的触发点。后两种都不是无限追赶：无论停机期间错过多少次，每个 Job 每次启动最多产生一次执行。
+- `agent_turn`：把任务消息作为一条用户消息提交到任务绑定的会话（未绑定时使用当前活动会话），并等待这一轮结束。目标会话有待回答的问题或审批时，本次运行会报错而不是跳过交互。
+- `system_event`：系统任务。`watchlist-check` 会检查 Watchlist，需要时再发起一轮 `agent_turn`。
 
-Scheduler 不会获得独立权限。任务进入目标 session 的 runtime actor，继续受 Ask/Plan、权限、workspace、Goal mutation owner 和工具策略约束。Scheduler 自身最多同时运行 2 个 run、同一 owner 最多 1 个，最多排队 100 个；这些上限由 Core 固定，Job、模型和界面不能放宽。达到容量时，自动触发会留下 `skipped` receipt，手动触发会返回明确错误。
+旧版本创建的 `team_wake` 任务已不再支持，运行时会报错，请删除或改为 `agent_turn`。
 
-面板会显示 active/queued 容量、计划时间与实际时间、timer/manual/misfire 来源、missed count、run ID、Task ID，以及 `ok/error/skipped/cancelled/interrupted` 历史。暂停会取消尚未开始的 queued run，但不会暗中终止已经运行的用户任务；仍在运行时删除会被拒绝。
+`misfirePolicy` 有三种：`skip`（默认）只记录错过并移到下一个未来触发点；`latest` 只补跑最后一个错过的触发点；`catch-up-one` 只补跑最早一个错过的触发点。无论错过多少次，每个任务每次启动最多补跑一次。
 
-应用退出时 Scheduler 停止接收新 run，取消 queued/running 工作，并在生命周期时限内等待收敛；它不会作为系统后台 daemon 继续运行。重启后，可证明尚未开始的 queued run 可以恢复一次，已经进入 running 的 run 永不自动重放；无法证明终态时记录为 `interrupted`，避免重复未知副作用。这是可审计的 at-most-one 自动恢复边界，不是对任意外部副作用的 exactly-once 承诺。
+Scheduler 最多同时运行 2 个任务、同一目标最多 1 个，最多排队 100 个，这些上限不能从界面或任务放宽。应用退出时 Scheduler 停止接收新任务并取消进行中的工作，它不会作为系统后台服务继续运行。重启后已经开始运行的任务不会自动重放，无法确认结果时记为 `interrupted`。
 
-## Team
+## Hooks
 
-Team 提供成员、Inbox、消息、唤醒和 shutdown 的 Core 能力，并允许 Agent 通过 Team tools 派发受控任务。当前独立 `/team` 路由没有开放，会重定向到 Chat；不要把它当成已经完成的独立工作台。
+入口是“设置 → Hooks”。Hooks 使用与 Claude Code 相同的 `hooks.json` 协议，只支持 `command` 类型的 handler。
 
-用户目前能看到的主要结果是会话中的 subagent/team trail，以及模型或 Scheduler 触发的协作记录。Team 仍受当前 session、workspace、permission 和 mutation guard 约束。
+- 配置文件：`stateRoot/hooks.json`，按“事件 → matcher 分组 → hooks”组织，可以在“配置”标签编辑；保存时会校验并立即重新加载。
+- 支持的事件：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`。其他事件和非 `command` 类型的 handler 会被忽略，页面会列出被跳过的项。
+- Hook 在会话工作目录中按配置顺序串行运行，多个结果取最严格的决定。环境变量 `CLAUDE_PROJECT_DIR` 指向当前项目目录，单个 Hook 默认超时 10 分钟。
 
-Team 唤醒会先写入版本化 checkpoint。应用中断后，尚未开始执行的 `prepared` turn 会安全续跑；已经得到结果的 `terminal_pending` turn 只补齐 thread、Inbox receipt 和 cursor，不会再次调用模型。处于 `running` 的 turn 可能已经执行过外部工具，默认会进入 Error 而不是自动重放，以避免重复产生非幂等副作用。维护者核对外部结果后，才可通过 `team.wakeMember` 的 `recovery: 'retry'` 显式重试。损坏、旧版本或 revision/cursor 不匹配的 checkpoint 同样 fail closed，原文件保留用于诊断。
+| 事件               | 可以做什么                                   |
+| ------------------ | -------------------------------------------- |
+| `SessionStart`     | 追加上下文                                   |
+| `UserPromptSubmit` | 拒绝本次提交，或追加上下文                   |
+| `PreToolUse`       | 拒绝工具调用，或要求先询问你                 |
+| `PostToolUse`      | 阻止结果并返回反馈，或追加上下文             |
+| `Stop`             | 阻止本轮结束、让 Agent 继续（每轮最多 3 次） |
+| `SubagentStart`    | 为子代理追加上下文                           |
+| `SubagentStop`     | 仅观察                                       |
 
-## Agent Hooks
+Hook 输出中的 `updatedInput`、`systemMessage` 和 `continue: false` 会被解析并记录警告，但不会生效。Hook 不能放宽权限预设或沙箱。
 
-入口是“设置 → Hooks”。页面分为有效配置、测试、审计和高级编辑。
+“设置 → Hooks”分为三个标签：
 
-Hooks 可以在 Session、用户输入、工具调用、权限、Stop、压缩和配置变更等生命周期点运行确定性 handler。当前支持 `command` 与 `http` handler。
+- **配置**：查看已加载的配置文件、加载错误和各事件的命令数，编辑 `hooks.json`，支持「还原」「校验」「保存」（⌘S 保存）。
+- **测试**：选择事件并输入 matcher 查询，查看会匹配到的命令；对某条命令点击「执行」后还需「确认执行」才会真正运行，结果显示决定、退出码和耗时。编辑器中尚未保存的内容也按当前内容匹配和运行。
+- **审计**：按事件和结果筛选当前会话的 Hook 运行记录，展开查看 matcher、退出码、耗时和 stderr。审计记录来自当前会话 log 中的 Hook 调用与结果事件。
 
-配置来源：
-
-- 全局：`stateRoot/hooks_config.json`，可以在设置页编辑；
-- 项目：`<project>/.emperor/settings.json` 与 `settings.local.json` 中的 hooks block，只读导入；
-- session/agent：由受控运行时注册，不能伪装成全局配置。
-
-项目 Hooks 必须对当前 canonical project 和当前配置 digest 建立信任。项目文件发生变化后，旧信任不会自动沿用。
-
-Hooks 可以返回 allow、ask、deny 或 passthrough，但不能覆盖 workspace policy 或 Core deny。测试运行要求明确确认；Plan 模式或存在 pending Ask/Plan 时，Core 会在启动 handler 和写入审计前拒绝测试执行。成功运行的审计记录保存在 `stateRoot/hooks/audit.jsonl` 及相关目录。
-
-## 桌宠 companion
-
-“桌宠”页面可以启用或关闭 companion。默认关闭；窗口由主 Electron 进程托管，不是独立 Electron runtime。
-
-桌宠可以投影空闲、工作、派遣队友等状态，但不能代替真实 task/Goal 状态。桌宠触发的 mutation 同样受 pending Ask/Plan 和 CoreApi guard 约束。
+项目目录中的 `.claude/settings.json` 当前不会被加载，项目信任设置接口也已下线。
 
 ## Watchlist
 
-Watchlist 供受控检查和 Scheduler 维护链路使用，不是独立用户订阅产品，也不提供 Slack、邮件或社交平台连接器。
+Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”的“Watchlist”标签中编辑。可以在该标签点击右上角的「手动检查」，也可以由 Scheduler 的 `watchlist-check` 系统任务定期检查；判断需要处理时会发起一轮普通 Agent turn。它不提供 Slack、邮件或社交平台连接器。
+
+## 桌宠 companion
+
+“设置 → 桌宠”可以启用或关闭 companion，默认关闭；页面还可以预览各运行状态的动画，并显示启动方式和最近的窗口错误。窗口由主 Electron 进程托管。桌宠只投影空闲、工作等状态，不能代替真实的任务状态，也不能直接修改 Core 状态。

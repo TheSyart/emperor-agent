@@ -1,19 +1,11 @@
 import { existsSync } from 'node:fs'
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  stat,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createNodePersistenceAdapter } from '../store/persistence'
 import {
   loadLocalConfig,
-  loadProjectPermissionRuleLayers,
   localConfigDiagnostics,
   localConfigPath,
   mergeWebuiOverrides,
@@ -27,72 +19,11 @@ beforeEach(async () => {
 })
 
 describe('local config', () => {
-  it('loads only permission rules from project and local settings layers', async () => {
-    const projectSettings = join(dir, '.emperor')
-    await mkdir(projectSettings, { recursive: true })
-    await writeFile(
-      join(projectSettings, 'settings.json'),
-      JSON.stringify({
-        emperorHome: '/outside',
-        permissions: {
-          rules: [{ id: 'project-ask', action: 'ask', tool: 'write_file' }],
-        },
-      }),
-    )
-    await writeFile(
-      join(projectSettings, 'settings.local.json'),
-      JSON.stringify({
-        runtimeRoot: '/outside',
-        permissions: {
-          rules: [{ id: 'local-deny', action: 'deny', tool: 'delete_file' }],
-        },
-      }),
-    )
-
-    expect(loadProjectPermissionRuleLayers(dir)).toEqual([
-      {
-        source: {
-          kind: 'project',
-          id: 'settings.json',
-          trust: 'project',
-        },
-        rules: [{ id: 'project-ask', action: 'ask', tool: 'write_file' }],
-      },
-      {
-        source: {
-          kind: 'project-local',
-          id: 'settings.local.json',
-          trust: 'project',
-        },
-        rules: [{ id: 'local-deny', action: 'deny', tool: 'delete_file' }],
-      },
-    ])
-    expect(JSON.stringify(loadProjectPermissionRuleLayers(dir))).not.toContain(
-      '/outside',
-    )
-  })
-
   it('round-trips webui and desktop pet preferences with Python-compatible field names', async () => {
     await saveLocalConfig(dir, {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
-      memory: { hybridMemory: 'eval' },
-      codeIntelligence: { mode: 'eval' },
-      workspace: {
-        fileCheckpoints: { enabled: true },
-        gitRewind: { mode: 'eval' },
-      },
-      permissions: {
-        rules: [
-          {
-            id: 'ask-publish',
-            action: 'ask',
-            tool: 'run_command',
-            commandPrefix: 'npm publish',
-          },
-        ],
-      },
     })
 
     const onDisk = JSON.parse(
@@ -102,22 +33,6 @@ describe('local config', () => {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
-      memory: { hybridMemory: 'eval' },
-      codeIntelligence: { mode: 'eval' },
-      workspace: {
-        fileCheckpoints: { enabled: true },
-        gitRewind: { mode: 'eval' },
-      },
-      permissions: {
-        rules: [
-          {
-            id: 'ask-publish',
-            action: 'ask',
-            tool: 'run_command',
-            commandPrefix: 'npm publish',
-          },
-        ],
-      },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -137,18 +52,6 @@ describe('local config', () => {
       autoStartWithWebui: false,
     })
     expect(loaded.prompt).toEqual({ profile: 'classic' })
-    expect(loaded.memory).toEqual({ hybridMemory: 'eval' })
-    expect(loaded.codeIntelligence).toEqual({ mode: 'eval' })
-    expect(loaded.workspace.fileCheckpoints).toEqual({ enabled: true })
-    expect(loaded.workspace.gitRewind).toEqual({ mode: 'eval' })
-    expect(loaded.permissions.rules).toEqual([
-      {
-        id: 'ask-publish',
-        action: 'ask',
-        tool: 'run_command',
-        commandPrefix: 'npm publish',
-      },
-    ])
     expect(prefs).toEqual({ host: '127.0.0.1', port: 8765, openBrowser: false })
     expect((await stat(join(dir, 'settings.json'))).mode & 0o777).toBe(0o600)
     expect(
@@ -214,41 +117,48 @@ describe('local config', () => {
       autoStartWithWebui: false,
     })
     expect(parsed.prompt).toEqual({ profile: 'technical' })
-    expect(parsed.memory).toEqual({ hybridMemory: 'off' })
-    expect(parsed.codeIntelligence).toEqual({ mode: 'off' })
-    expect(parsed.workspace.fileCheckpoints).toEqual({ enabled: false })
-    expect(parsed.workspace.gitRewind).toEqual({ mode: 'off' })
-    expect(parsed.permissions.rules).toHaveLength(2)
+    expect(Object.keys(parsed).sort()).toEqual([
+      'desktopPet',
+      'prompt',
+      'webui',
+    ])
   })
 
-  it('accepts only typed hybrid memory modes and defaults invalid values off', () => {
-    expect(
-      parseLocalConfig({ memory: { hybrid_memory: 'on' } }).memory,
-    ).toEqual({ hybridMemory: 'on' })
-    expect(
-      parseLocalConfig({ memory: { hybridMemory: 'surprise' } }).memory,
-    ).toEqual({ hybridMemory: 'off' })
-  })
+  it('tolerates retired settings keys and drops them on save', async () => {
+    const path = localConfigPath(dir)
+    await writeFile(
+      path,
+      JSON.stringify({
+        webui: { port: 9100 },
+        memory: { hybridMemory: 'on' },
+        codeIntelligence: { mode: 'on' },
+        workspace: {
+          fileCheckpoints: { enabled: true },
+          git_rewind: { mode: 'on' },
+        },
+        permissions: { rules: [{ id: 'x', action: 'deny', tool: 'bash' }] },
+        someFutureKey: { nested: true },
+      }),
+      'utf8',
+    )
 
-  it('accepts canonical and snake-case code intelligence modes and defaults invalid values off', () => {
-    expect(
-      parseLocalConfig({ code_intelligence: { mode: 'on' } }).codeIntelligence,
-    ).toEqual({ mode: 'on' })
-    expect(
-      parseLocalConfig({ codeIntelligence: { mode: 'surprise' } })
-        .codeIntelligence,
-    ).toEqual({ mode: 'off' })
-  })
+    const loaded = await loadLocalConfig(dir)
+    expect(loaded.webui.port).toBe(9100)
+    expect(Object.keys(loaded).sort()).toEqual([
+      'desktopPet',
+      'prompt',
+      'webui',
+    ])
+    expect(existsSync(path)).toBe(true)
+    expect(await localConfigDiagnostics(dir)).toMatchObject({
+      status: 'ok',
+      exists: true,
+    })
 
-  it('accepts canonical and snake-case soft Git rewind modes and defaults invalid values off', () => {
+    await saveLocalConfig(dir, loaded)
     expect(
-      parseLocalConfig({ workspace: { git_rewind: { mode: 'on' } } }).workspace
-        .gitRewind,
-    ).toEqual({ mode: 'on' })
-    expect(
-      parseLocalConfig({ workspace: { gitRewind: { mode: 'surprise' } } })
-        .workspace.gitRewind,
-    ).toEqual({ mode: 'off' })
+      Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(),
+    ).toEqual(['desktopPet', 'prompt', 'webui'])
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {
@@ -267,33 +177,5 @@ describe('local config', () => {
       'settings.json.corrupt-',
     )
     expect(diagnostics.corruptBackups[0]!.bytes).toBe('{bad json'.length)
-  })
-
-  it('reports permission rule diagnostics from local config', async () => {
-    const path = localConfigPath(dir)
-    await writeFile(
-      path,
-      JSON.stringify({
-        permissions: {
-          rules: [
-            {
-              id: 'deny-secrets',
-              action: 'deny',
-              tool: 'write_file',
-              pathGlob: 'secrets/**',
-            },
-            { id: '', action: 'allow', tool: 'read_file' },
-          ],
-        },
-      }),
-      'utf8',
-    )
-
-    const diagnostics = await localConfigDiagnostics(dir)
-
-    expect(diagnostics.permissions).toMatchObject({
-      loaded: 1,
-      invalid: 1,
-    })
   })
 })

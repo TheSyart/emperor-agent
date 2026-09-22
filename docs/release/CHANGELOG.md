@@ -21,6 +21,10 @@
 - 增加 MCP 工具结果的不可信标记和协议 `isError` 传递。
 - 增加 token 使用热日志的按月归档，同时保持聚合统计覆盖热数据与归档数据。
 - 建立中文优先的文档中心、完整用户手册、当前架构与扩展指南，并为发布、安全、归档和文档维护定义统一机制。
+- 设置 → MCP 支持粘贴 Claude Desktop、Cursor、VS Code 等客户端的 MCP 配置或用表单添加 server，导入前预览新增、覆盖与跳过；新增 Streamable HTTP（`http`）传输，首次连接失败时回退到 SSE；每个 server 可以单独启停和删除。
+- 设置 → Skills 支持粘贴 `SKILL.md`、导入本地文件夹、zip 或 GitHub 链接，并可打开个人或项目 Skills 文件夹；列出不合格的 Skill 及原因，只读 Skill 可以复制为个人 Skill，文件夹变化后列表自动刷新。
+- 增加 `skill_manage` 与 `mcp_config` 工具，让 Agent 管理 Skills 和 Emperor 自己的 MCP 配置；写入跟随权限预设，`danger-full-access` 以外每次写入都需要批准。
+- 设置 → 插件支持从本地文件夹或 zip 安装；从 URL 安装的 Plugin 在签名验证通过前不会激活。
 
 ### Changed
 
@@ -34,6 +38,8 @@
 - Composer 的模型 / 模式菜单逻辑收敛到共享 helper。
 - Chat 消息列表滚动监听改为跟踪最新可见消息签名，避免深度监听完整时间线。
 - README 改为面向普通用户的产品入口，并把详细操作、架构、发布与维护内容分层到文档中心。
+- 设置弹窗的全部分区改用统一的设置组件重写：Scheduler 改为任务卡片并在卡片内编辑，记忆按“长期 / 用户档案 / 情景 / Watchlist / 版本”切换，用量提供活跃度、趋势、模型和缓存视图，Hooks 分为配置 / 测试 / 审计，常规外观支持跟随系统。
+- Skill 校验放宽为只检查 `SKILL.md` 及其引用的文件，名称以 frontmatter 为准；项目 Skills 在对应 Build 会话中可以写入，每个项目使用独立的 Skill 目录。`skills.previewInstall`、`skills.confirmInstall` 与 `skills.package` 已移除，Skill 安装统一使用 `skills.import`。
 
 ### Fixed
 

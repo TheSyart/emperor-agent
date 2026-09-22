@@ -20,6 +20,27 @@ describe('typed runtime dispatcher', () => {
   })
 })
 
+describe('Skill catalog live effects', () => {
+  it('turns a host skill_catalog_changed into a refresh_skills effect', () => {
+    const manager = new RuntimeControllerManager()
+    manager.select('s1')
+    const result = manager.accept(
+      { event: 'skill_catalog_changed', seq: 0, catalog_version: 3 } as WsEvent,
+      'live',
+    )
+    expect(result.accepted).toBe(true)
+    expect(result.effects).toEqual([
+      expect.objectContaining({ type: 'refresh_skills', sessionId: 's1' }),
+    ])
+    expect(
+      manager.accept(
+        { event: 'skill_catalog_changed', seq: 0 } as WsEvent,
+        'replay',
+      ).effects,
+    ).toEqual([])
+  })
+})
+
 describe('SessionRuntimeController', () => {
   it('produces the same projection digest for live delivery and replay', () => {
     const events = sessionEvents('s1')
@@ -77,39 +98,36 @@ describe('SessionRuntimeController', () => {
       ),
     ).toMatchObject({ accepted: false, foreign: true })
     expect(controller.state.running).toBe(false)
-    expect(controller.state.chat.messages.join('')).not.toContain('stale')
+    expect(controller.state.lastSeq).toBe(3)
+    expect(controller.state).not.toHaveProperty('chat')
   })
 
-  it('settles a streaming session when its partial assistant is tombstoned', () => {
+  it('settles a streaming session when its turn is cancelled', () => {
     const controller = new SessionRuntimeController('s1')
     controller.accept(
       event({
         event: 'message_delta',
-        seq: 1,
+        seq: 17,
         session_id: 's1',
-        turn_id: 't1',
+        turn_id: 's1:1',
         delta: 'partial',
       }),
       'live',
     )
+    expect(controller.state.running).toBe(true)
     const result = controller.accept(
       event({
-        event: 'message_tombstoned',
-        seq: 2,
+        event: 'runtime_task_cancelled',
+        seq: 33,
         session_id: 's1',
-        turn_id: 't1',
-        reason: 'interjected',
+        turn_id: 's1:1',
+        reason: 'interrupted',
       }),
       'live',
     )
 
     expect(result.accepted).toBe(true)
     expect(controller.state.running).toBe(false)
-    expect(controller.state.chat.messages.at(-1)).toMatchObject({
-      role: 'assistant',
-      streaming: false,
-      tombstoned: true,
-    })
   })
 })
 
@@ -134,7 +152,7 @@ describe('RuntimeControllerManager', () => {
         seq: 1,
         session_id: 's2',
         turn_id: 't2',
-        delta: 'background',
+        delta: 'background done',
       }),
       'live',
     )
@@ -150,16 +168,13 @@ describe('RuntimeControllerManager', () => {
     )
 
     expect(background).toMatchObject({ accepted: true, foreign: true })
-    expect(manager.controller('s1').state.chat.messages).not.toEqual(
-      manager.controller('s2').state.chat.messages,
-    )
+    expect(manager.controller('s1').state.running).toBe(true)
+    expect(manager.controller('s2').state.running).toBe(false)
     expect(manager.controller('s2').state.attention).toBe(true)
 
     const selected = manager.select('s2')
     expect(selected.state.attention).toBe(false)
-    expect(
-      selected.state.chat.messages.map((message) => message.content).join('\n'),
-    ).toContain('background done')
+    expect(selected.state.lastSeq).toBe(2)
   })
 
   it('never emits presentation effects during replay, including terminal events', () => {
@@ -196,24 +211,17 @@ function sessionEvents(sessionId: string): WsEvent[] {
       event: 'task_started',
       seq: 3,
       session_id: sessionId,
-      task: {
-        id: 'task-1',
-        kind: 'subagent',
-        status: 'running',
-        title: 'inspect',
-        source: 'dispatch_subagent',
-      },
+      task: { id: 'job-1', kind: 'bash', label: 'inspect', status: 'running' },
     }),
     event({
       event: 'task_done',
       seq: 4,
       session_id: sessionId,
       task: {
-        id: 'task-1',
-        kind: 'subagent',
+        id: 'job-1',
+        kind: 'bash',
+        label: 'inspect',
         status: 'completed',
-        title: 'inspect',
-        source: 'dispatch_subagent',
       },
     }),
     event({

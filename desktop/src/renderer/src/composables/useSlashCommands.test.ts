@@ -7,7 +7,7 @@ import type {
 import type {
   BootstrapPayload,
   GoalOperationResult,
-  RuntimeGoalSummary,
+  RuntimeGoalView,
   SessionInfo,
 } from '../types'
 import { core } from '../api/http'
@@ -46,7 +46,7 @@ function setup() {
       source: 'project_skill',
     }),
   ])
-  const currentGoal = ref<RuntimeGoalSummary | null>(null)
+  const currentGoal = ref<RuntimeGoalView | null>(null)
   const deps: SlashCommandDeps = {
     boot: ref(null as BootstrapPayload | null),
     busy: ref(false),
@@ -62,8 +62,7 @@ function setup() {
     currentGoal: () => currentGoal.value,
     startGoal: vi.fn(async (): Promise<GoalOperationResult> => ({
       accepted: true,
-      goal: {} as RuntimeGoalSummary,
-      activeTask: null,
+      goal: null,
     })),
     runGoalAction: vi.fn(async () => ({}) as GoalOperationResult),
     currentGoalCaptureStatus: () => 'idle',

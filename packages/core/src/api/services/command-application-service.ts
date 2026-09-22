@@ -1,58 +1,88 @@
 import { randomUUID } from 'node:crypto'
+import { PERMISSION_PRESET_VALUES } from '../../commands/builtins'
 import type { CommandExecutionContext } from '../../commands/platform'
+import type { ParsedCommandInput } from '../../commands/parser'
+import type { SessionTransitionService } from '../../commands/session-transition'
 import type {
   CommandCompletion,
   CommandInvocationResult,
 } from '../../commands/types'
-import type { GoalService } from './goal-service'
-import type { CoreMemoryService } from './memory-service'
 import type { CoreModelService } from './model-service'
 import type { SkillInfoPayload } from './skill-service'
-import type { SessionTransitionService } from '../../commands/session-transition'
 
-interface CommandSessionEntry {
-  id: string
+/** One selectable permission preset (mirrors `PermissionPresetService.options()`). */
+export interface CommandPermissionPreset {
+  value: string
+  name: string
+  description?: string
 }
 
-interface CommandTask {
-  id: string
-  kind: string
+/** Outcome of a user plan-mode switch (mirrors `PlanModeController.set`). */
+export type CommandPlanSwitchOutcome =
+  'committed' | 'queued' | 'cancelled' | 'noop'
+
+/** Result of the harness `/goal` command (mirrors `GoalCommandResult`). */
+export interface CommandGoalResult {
+  kind: 'success' | 'error'
+  text: string
 }
 
-interface CommandControlPayload {
-  mode: string
-  previous_mode: string | null
+export interface CommandPromptSubmission {
+  sessionId: string
+  content: string
+  displayContent: string
+  clientMessageId: string
+  delivery: 'queue'
+  source: 'command'
+  attachmentIds: string[]
 }
 
+/** A `context: fork` skill command, run as a forked subagent of the session. */
+export interface CommandSkillFork {
+  sessionId: string
+  skillName: string
+  task: string
+  /** Child tool allow-list (empty: the parent's full tool set). */
+  allowedTools: string[]
+  /** Reasoning effort for the child's requests (null: inherit). */
+  effort: string | null
+}
+
+/**
+ * Everything the slash-command use cases need, expressible from
+ * `HarnessHost` + `CoreModelService` + the session transition service.
+ */
 export interface CommandApplicationServiceDeps {
-  models: CoreModelService
-  memory: CoreMemoryService
-  goals: GoalService
-  sessionTransitions: SessionTransitionService
-  getSession(sessionId: string): CommandSessionEntry | null
+  models: Pick<CoreModelService, 'getConfig'>
+  sessionTransitions: Pick<SessionTransitionService, 'clear'>
+  getSession(sessionId: string): { id: string } | null
   skillsForSession(sessionId: string): SkillInfoPayload[]
   sessionBusy(sessionId: string): boolean
-  listTasks(sessionId: string): CommandTask[]
-  cancelTask(taskId: string): void
-  cancelSessionRuntime(sessionId: string): boolean
+  /** `host.compactNow(sessionId)`. */
+  compact(
+    sessionId: string,
+  ): Promise<{ compacted: boolean; shadowedTokenCount?: number }>
+  /** `host.stop(sessionId)`: true when a running turn was cancelled. */
+  stop(sessionId: string): boolean
   activateModel(entryId: string): Promise<unknown>
   setReasoningEffort(entryId: string, effort: string): Promise<unknown>
-  setPermissionMode(sessionId: string, mode: string): void
-  controlPayload(sessionId: string): CommandControlPayload
-  setControlMode(sessionId: string, mode: string): Promise<unknown>
-  defaultSubagentName(requested: string | null): string | null
-  subagentToolNames(name: string): string[] | null
-  submitPrompt(input: {
-    sessionId: string
-    content: string
-    displayContent: string
-    clientMessageId: string
-    turnId: string
-    delivery: 'queue'
-    source: 'command'
-    requestedSkills: Array<{ name: string; source: 'slash' }>
-    attachments: string[]
-  }): Promise<unknown>
+  /** `host.setPermissionPreset(sessionId, preset)`; returns the control payload. */
+  setPermissionPreset(
+    sessionId: string,
+    preset: string,
+  ): Record<string, unknown> | void
+  /** `host.presets.options()`. */
+  presets(): CommandPermissionPreset[]
+  /** `host.controlPayload(sessionId)`. */
+  controlPayload(sessionId: string): Record<string, unknown>
+  /** `host.setPlanMode(sessionId, active)`. */
+  setPlanMode(sessionId: string, active: boolean): CommandPlanSwitchOutcome
+  /** `runGoalCommand(host.goals, host.agentFor(sessionId), rawInput)`. */
+  runGoalCommand(sessionId: string, rawInput: string): CommandGoalResult
+  /** Queue one user prompt (`host.submit`); resolves when its turn ends. */
+  submitPrompt(input: CommandPromptSubmission): Promise<unknown>
+  /** Start a forked skill subagent (`host.subagents.start(root, {mode:'fork'})`). */
+  forkSkill(input: CommandSkillFork): { subagentId: string }
 }
 
 /** Session-explicit application use cases behind the slash-command platform. */
@@ -106,6 +136,18 @@ export class CoreCommandApplicationService {
         .filter((value) => value.toLowerCase().includes(query))
         .map((value) => ({ value, label: value, kind: 'reasoning_effort' }))
     }
+    if (name === 'permissions') {
+      return this.permissionPresets()
+        .filter((item) =>
+          [item.value, item.name].join(' ').toLowerCase().includes(query),
+        )
+        .map((item) => ({
+          value: item.value,
+          label: item.name,
+          ...(item.description ? { description: item.description } : {}),
+          kind: 'permission_preset',
+        }))
+    }
     return []
   }
 
@@ -127,28 +169,17 @@ export class CoreCommandApplicationService {
       })
     }
     if (name === 'compact') {
-      const result = await this.deps.memory.compact({
-        force: true,
-        sessionId,
-        instructions: tail,
-      })
-      return completed(context, 'compacted', '当前会话已压缩并保留摘要。', {
-        result: result as unknown as Record<string, unknown>,
-      })
+      const result = await this.deps.compact(sessionId)
+      return result.compacted
+        ? completed(context, 'compacted', '当前会话已压缩并保留摘要。', {
+            result,
+          })
+        : completed(context, 'nothing_to_compact', '当前会话无需压缩。', {
+            result,
+          })
     }
     if (name === 'stop') {
-      const tasks = this.deps.listTasks(sessionId)
-      for (const task of tasks) {
-        if (task.kind === 'goal')
-          await this.deps.goals.pause(
-            task.id.replace(/^goal:/, ''),
-            sessionId,
-            'user_stop',
-          )
-        this.deps.cancelTask(task.id)
-      }
-      const cancelled =
-        tasks.length > 0 || this.deps.cancelSessionRuntime(sessionId)
+      const cancelled = this.deps.stop(sessionId)
       return completed(
         context,
         cancelled ? 'stop_requested' : 'nothing_running',
@@ -160,12 +191,7 @@ export class CoreCommandApplicationService {
       const model = config.models.find(
         (item) => item.entryId === tail || item.modelId === tail,
       )
-      if (!model)
-        return {
-          status: 'rejected',
-          code: 'model_not_found',
-          message: `找不到模型：${tail}`,
-        }
+      if (!model) return rejected('model_not_found', `找不到模型：${tail}`)
       await this.deps.activateModel(model.entryId)
       return completed(
         context,
@@ -176,11 +202,7 @@ export class CoreCommandApplicationService {
     if (name === 'reasoning' && tail) {
       const config = await this.deps.models.getConfig()
       if (!config.current)
-        return {
-          status: 'rejected',
-          code: 'model_unavailable',
-          message: '当前没有可用模型。',
-        }
+        return rejected('model_unavailable', '当前没有可用模型。')
       await this.deps.setReasoningEffort(config.current.entryId, tail)
       return completed(
         context,
@@ -188,40 +210,12 @@ export class CoreCommandApplicationService {
         `思考强度已切换为 ${tail}。`,
       )
     }
-    if (name === 'permissions' && tail) {
-      if (tail === 'status')
-        return {
-          status: 'opened',
-          surface: 'permissions',
-          params: {
-            rawArgs: '',
-            invokedName: parsed.name,
-            commandId: descriptor.id,
-          },
-        }
-      const mode =
-        tail === 'ask'
-          ? 'ask_before_edit'
-          : tail === 'smart' || tail === 'edits'
-            ? 'smart_auto'
-            : tail === 'full' || tail === 'auto'
-              ? 'full_access'
-              : null
-      if (!mode)
-        return {
-          status: 'rejected',
-          code: 'invalid_permission_mode',
-          message: '权限模式必须是 ask、smart 或 full。',
-        }
-      this.deps.setPermissionMode(sessionId, mode)
-      return completed(context, 'permission_mode_updated', '执行权限已更新。', {
-        mode,
-      })
-    }
+    if (name === 'permissions' && tail)
+      return this.executePermissions(context, tail.toLowerCase())
     if (name === 'plan') return await this.executePlan(context)
-    if (name === 'goal') return await this.executeGoal(context)
+    if (name === 'goal') return this.executeGoal(context)
     if (name === 'continue') {
-      const promptId = this.schedulePrompt(context, '继续执行')
+      const promptId = this.schedulePrompt(context, 'continue')
       return { status: 'submitted', promptId }
     }
     if (descriptor.uiSurface)
@@ -238,130 +232,122 @@ export class CoreCommandApplicationService {
     return completed(context, 'completed', '命令已执行。')
   }
 
+  /**
+   * Inline skill commands become a `/skill-name task` user prompt; the
+   * kernel's skill middleware resolves the gesture and injects the
+   * instructions. `context: fork` skills run as a forked background
+   * subagent narrowed by `allowed_tools` / `effort` (`agent` is ignored:
+   * there are no AgentDefinitions; diagnostics report it).
+   */
   async submitSkill(
     context: CommandExecutionContext,
   ): Promise<CommandInvocationResult> {
     const binding = context.descriptor.skill
     if (!binding)
-      return {
-        status: 'rejected',
-        code: 'skill_binding_missing',
-        message: 'Skill 命令绑定缺失。',
-      }
-    const task = context.parsed.args.join(' ').trim()
-    let forkAgent = binding.agent
+      return rejected('skill_binding_missing', 'Skill 命令绑定缺失。')
+    const task = rawTail(context.parsed)
     if (binding.context === 'fork') {
-      forkAgent = this.deps.defaultSubagentName(forkAgent)
-      const toolNames = forkAgent
-        ? this.deps.subagentToolNames(forkAgent)
-        : null
-      if (!forkAgent || !toolNames)
-        return {
-          status: 'rejected',
-          code: 'skill_fork_agent_unavailable',
-          message: 'Skill 指定的子代理不可用。',
-        }
-      const unsupportedTools = binding.allowedTools.filter(
-        (tool) => !toolNames.includes(tool),
+      if (context.attachments.length)
+        return rejected(
+          'skill_fork_attachments_unsupported',
+          'fork Skill 不支持附件；请移除附件后重试。',
+        )
+      const { subagentId } = this.deps.forkSkill({
+        sessionId: context.sessionId,
+        skillName: binding.name,
+        task,
+        allowedTools: [...binding.allowedTools],
+        effort: binding.effort,
+      })
+      return completed(
+        context,
+        'skill_forked',
+        `Skill ${binding.name} 已在子代理中运行。`,
+        { subagentId, skill: binding.name },
       )
-      if (unsupportedTools.length)
-        return {
-          status: 'rejected',
-          code: 'skill_fork_tool_scope_invalid',
-          message: `Skill 请求了子代理未获授权的工具：${unsupportedTools.join('、')}`,
-        }
     }
-    const content =
-      binding.context === 'fork'
-        ? `[CONTROL:SKILL_FORK]\nAgent: ${forkAgent}\nAllowed tools: ${binding.allowedTools.join(', ') || 'agent definition'}\nEffort: ${binding.effort || 'inherit'}\nTask: ${task || '按 Skill 默认流程执行'}`
-        : task || '按 Skill 默认流程执行'
-    const promptId = this.schedulePrompt(
-      context,
-      content,
-      context.parsed.raw,
-      binding.name,
-    )
+    const content = task ? `/${binding.name} ${task}` : `/${binding.name}`
+    const promptId = this.schedulePrompt(context, content)
     return { status: 'submitted', promptId }
   }
 
+  private permissionPresets(): CommandPermissionPreset[] {
+    const presets = this.deps.presets()
+    if (presets.length) return presets
+    return PERMISSION_PRESET_VALUES.map((value) => ({ value, name: value }))
+  }
+
+  private executePermissions(
+    context: CommandExecutionContext,
+    value: string,
+  ): CommandInvocationResult {
+    if (value === 'status')
+      return {
+        status: 'opened',
+        surface: 'permissions',
+        params: {
+          rawArgs: '',
+          invokedName: context.parsed.name,
+          commandId: context.descriptor.id,
+        },
+      }
+    const preset = this.permissionPresets().find((item) => item.value === value)
+    if (!preset)
+      return rejected(
+        'invalid_permission_preset',
+        `权限预设必须是 ${this.permissionPresets()
+          .map((item) => item.value)
+          .join('、')} 之一。`,
+      )
+    const control =
+      this.deps.setPermissionPreset(context.sessionId, preset.value) ??
+      this.deps.controlPayload(context.sessionId)
+    return completed(
+      context,
+      'permission_preset_updated',
+      `执行权限已切换为 ${preset.name}。`,
+      { preset: preset.value, control },
+    )
+  }
+
+  /** dsh semantics: `/plan` enters plan mode, `/plan <message>` also submits it, `/plan off` leaves. */
   private async executePlan(
     context: CommandExecutionContext,
   ): Promise<CommandInvocationResult> {
-    const tail = context.parsed.args.join(' ').trim()
-    const normalized = tail.toLowerCase()
-    if (!tail || normalized === 'status' || normalized === 'open')
-      return {
-        status: 'opened',
-        surface: 'plan',
-        params: { action: normalized || 'open' },
-      }
-    if (normalized === 'on') {
-      await this.deps.setControlMode(context.sessionId, 'plan')
-      return completed(context, 'plan_enabled', 'Plan 模式已开启。')
+    const message = rawTail(context.parsed)
+    if (message.toLowerCase() === 'off') {
+      const outcome = this.deps.setPlanMode(context.sessionId, false)
+      return completed(context, 'plan_disabled', planMessage(outcome, false), {
+        outcome,
+        control: this.deps.controlPayload(context.sessionId),
+      })
     }
-    if (normalized === 'off') {
-      const control = this.deps.controlPayload(context.sessionId)
-      const restore =
-        control.mode === 'plan' && control.previous_mode
-          ? control.previous_mode
-          : 'smart_auto'
-      await this.deps.setControlMode(context.sessionId, restore)
-      return completed(context, 'plan_disabled', 'Plan 模式已关闭。')
-    }
-    await this.deps.setControlMode(context.sessionId, 'plan')
-    const promptId = this.schedulePrompt(context, tail, context.parsed.raw)
+    const outcome = this.deps.setPlanMode(context.sessionId, true)
+    if (!message)
+      return completed(context, 'plan_enabled', planMessage(outcome, true), {
+        outcome,
+        control: this.deps.controlPayload(context.sessionId),
+      })
+    const promptId = this.schedulePrompt(context, message)
     return { status: 'submitted', promptId }
   }
 
-  private async executeGoal(
+  private executeGoal(
     context: CommandExecutionContext,
-  ): Promise<CommandInvocationResult> {
-    const tail = context.parsed.args.join(' ').trim()
-    if (!tail || tail === 'status' || tail === 'list')
-      return {
-        status: 'opened',
-        surface: 'goal',
-        params: { action: tail || 'open' },
-      }
-    const goals = await this.deps.goals.list({ sessionId: context.sessionId })
-    const active = goals.find(
-      (goal) => goal.status !== 'completed' && goal.status !== 'cancelled',
+  ): CommandInvocationResult {
+    const result = this.deps.runGoalCommand(
+      context.sessionId,
+      rawTail(context.parsed),
     )
-    if (tail === 'pause' || tail === 'resume' || tail === 'cancel') {
-      if (!active)
-        return {
-          status: 'rejected',
-          code: 'goal_not_found',
-          message: '当前会话没有可操作的 Goal。',
-        }
-      if (tail === 'pause')
-        await this.deps.goals.pause(active.id, context.sessionId)
-      else if (tail === 'resume')
-        await this.deps.goals.resume(active.id, context.sessionId)
-      else
-        await this.deps.goals.cancel(
-          active.id,
-          'slash_command',
-          context.sessionId,
-        )
-      return completed(
-        context,
-        `goal_${tail}`,
-        `Goal 已${tail === 'pause' ? '暂停' : tail === 'resume' ? '恢复' : '取消'}。`,
-      )
-    }
-    const outcome = tail.replace(/^start\s+/i, '').trim()
-    if (!outcome)
-      return { status: 'opened', surface: 'goal', params: { action: 'start' } }
-    await this.deps.goals.start({ outcome, sessionId: context.sessionId })
-    return completed(context, 'goal_started', 'Goal 已启动。')
+    if (result.kind === 'error')
+      return rejected('goal_command_invalid', result.text)
+    return completed(context, 'goal', result.text)
   }
 
   private schedulePrompt(
     context: CommandExecutionContext,
     content: string,
     displayContent = context.parsed.raw,
-    skillName?: string,
   ): string {
     const promptId = `command_prompt_${randomUUID().replace(/-/g, '').slice(0, 20)}`
     void this.deps
@@ -370,17 +356,36 @@ export class CoreCommandApplicationService {
         content,
         displayContent,
         clientMessageId: promptId,
-        turnId: promptId,
         delivery: 'queue',
         source: 'command',
-        requestedSkills: skillName
-          ? [{ name: skillName, source: 'slash' }]
-          : [],
-        attachments: context.attachments,
+        attachmentIds: context.attachments,
       })
       .catch(() => undefined)
     return promptId
   }
+}
+
+/** The text after the command token, exactly as typed. */
+function rawTail(parsed: ParsedCommandInput): string {
+  return parsed.raw.replace(/^\S+/, '').trim()
+}
+
+function planMessage(
+  outcome: CommandPlanSwitchOutcome,
+  active: boolean,
+): string {
+  if (outcome === 'noop')
+    return active ? '已处于 Plan 模式。' : '当前未处于 Plan 模式。'
+  if (outcome === 'queued')
+    return active
+      ? 'Plan 模式将在当前步骤结束后开启。'
+      : 'Plan 模式将在当前步骤结束后关闭。'
+  if (outcome === 'cancelled') return '已撤销尚未生效的 Plan 模式切换。'
+  return active ? 'Plan 模式已开启。' : 'Plan 模式已关闭。'
+}
+
+function rejected(code: string, message: string): CommandInvocationResult {
+  return { status: 'rejected', code, message }
 }
 
 function completed(

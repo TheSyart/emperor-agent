@@ -1,130 +1,66 @@
 import { describe, expect, it } from 'vitest'
-import { TaskRecord } from '../tasks/models'
-import { TeamStatus } from '../team/models'
 import {
-  projectWorkspaceProjectProcess,
+  emptyWorkspaceTeam,
+  projectWorkspaceGoal,
+  projectWorkspaceJob,
   projectWorkspaceProcess,
   projectWorkspaceSubagent,
-  projectWorkspaceTeam,
   projectWorkspaceTerminal,
 } from './snapshot'
 
 describe('workspace snapshot safe projections', () => {
-  it('projects logical project processes without owner, invocation, argv or environment', () => {
-    const projected = projectWorkspaceProjectProcess({
-      id: 'project-process-1',
-      sessionId: 'session-secret',
-      candidateId: 'candidate-secret',
-      name: 'Vite dev server',
-      ecosystem: 'node',
+  it('projects kernel jobs and subagent jobs into bounded summaries', () => {
+    const job = projectWorkspaceJob({
+      id: 'job-1',
+      kind: 'subagent',
+      label: 'x'.repeat(400),
       status: 'running',
-      health: 'ready',
-      revision: 3,
-      primary: true,
-      startedAt: 1_785_000_000_000,
-      finishedAt: null,
-      errorSummary: 'safe summary',
-      preview: {
-        id: 'preview-1',
-        sessionId: 'session-secret',
-        processId: 'project-process-1',
-        revision: 3,
-        title: 'Vite dev server',
-        url: 'http://127.0.0.1:43121/',
-        status: 'ready',
-        primary: true,
-      },
+      startedAt: 100,
+      ...({ secret: 'job-secret' } as object),
     })
-
-    expect(projected).toEqual({
-      id: 'project-process-1',
-      label: 'Vite dev server',
-      ecosystem: 'node',
+    expect(job).toEqual({
+      id: 'job-1',
+      kind: 'subagent',
+      label: 'x'.repeat(160),
       status: 'running',
-      health: 'ready',
-      revision: 3,
-      primary: true,
-      startedAt: 1_785_000_000_000,
-      finishedAt: null,
-      errorSummary: 'safe summary',
-      preview: {
-        id: 'preview-1',
-        revision: 3,
-        title: 'Vite dev server',
-        url: 'http://127.0.0.1:43121/',
-        status: 'ready',
-        primary: true,
-      },
+      startedAt: 100,
     })
-    expect(JSON.stringify(projected)).not.toMatch(
-      /session-secret|candidate-secret|argv|environment|invocation/i,
-    )
-  })
-
-  it('does not expose subagent transcript paths or arbitrary metadata', () => {
-    const projected = projectWorkspaceSubagent(
-      new TaskRecord({
-        id: 'task-1',
+    expect(JSON.stringify(job)).not.toContain('secret')
+    expect(
+      projectWorkspaceSubagent({
+        id: 'job-2',
         kind: 'subagent',
-        status: 'running',
-        title: 'Review',
-        source: 'agent',
-        started_at: 100,
-        output_path: '/private/output.json',
-        transcript_path: '/private/transcript.jsonl',
-        progress: { secret: 'progress-secret' },
-        metadata: {
-          agent_type: 'reviewer',
-          workspace_mode: 'shared',
-          secret: 'metadata-secret',
-        },
+        label: 'Review',
+        status: 'completed',
+        startedAt: 5,
+        finishedAt: 9,
       }),
-    )
-
-    expect(projected).toEqual({
-      id: 'task-1',
+    ).toEqual({
+      id: 'job-2',
       title: 'Review',
-      status: 'running',
-      started_at: 100,
-      ended_at: null,
-      metadata: { agent_type: 'reviewer', workspace_mode: 'shared' },
+      status: 'completed',
+      started_at: 5,
+      ended_at: 9,
+      metadata: { agent_type: 'subagent', workspace_mode: '' },
     })
-    expect(JSON.stringify(projected)).not.toMatch(/private|secret/)
   })
 
-  it('does not expose team messages, process identity or terminal PID and cwd', () => {
-    const team = projectWorkspaceTeam({
-      config: { team_name: 'test', members: [] },
-      members: [
-        {
-          name: 'reviewer',
-          role: 'Review',
-          agent_type: 'reviewer',
-          status: TeamStatus.WORKING,
-          created_at: 1,
-          updated_at: 2,
-          last_error: 'private error',
-          unread: 2,
-          recent_messages: [
-            {
-              id: 'message-1',
-              type: 'message',
-              from: 'lead',
-              to: 'reviewer',
-              content: 'private body',
-              timestamp: 1,
-              task_id: null,
-              in_reply_to: null,
-              meta: {},
-            },
-          ],
-          thread_count: 1,
-          tools: ['read_file'],
-        },
-      ],
-      leadUnread: 3,
-      leadInbox: [],
-    })
+  it('passes the kernel goal view through and treats missing goals as null', () => {
+    expect(projectWorkspaceGoal(null)).toBeNull()
+    expect(projectWorkspaceGoal(undefined)).toBeNull()
+    const view = {
+      id: 'goal-1',
+      revision: 2,
+      objective: 'Ship',
+      phase: 'active',
+    }
+    const projected = projectWorkspaceGoal(view)
+    expect(projected).toEqual(view)
+    expect(projected).not.toBe(view)
+    expect(emptyWorkspaceTeam()).toEqual({ members: [], leadUnread: 0 })
+  })
+
+  it('does not expose process identity or terminal PID and cwd', () => {
     const process = projectWorkspaceProcess({
       schemaVersion: 1,
       id: 'process-1',
@@ -174,18 +110,6 @@ describe('workspace snapshot safe projections', () => {
       exitCode: null,
     })
 
-    expect(team).toEqual({
-      members: [
-        {
-          name: 'reviewer',
-          role: 'Review',
-          agent_type: 'reviewer',
-          status: 'working',
-          unread: 2,
-        },
-      ],
-      leadUnread: 3,
-    })
     expect(process).toEqual({
       id: 'process-1',
       label: 'task',
@@ -199,7 +123,7 @@ describe('workspace snapshot safe projections', () => {
       exited: false,
       exitCode: null,
     })
-    expect(JSON.stringify({ team, process, terminal })).not.toMatch(
+    expect(JSON.stringify({ process, terminal })).not.toMatch(
       /private|secret|999/,
     )
   })

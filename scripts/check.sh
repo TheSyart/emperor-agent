@@ -13,6 +13,8 @@ npm run format:check
 
 echo "== bash -n =="
 while IFS= read -r script; do
+  # git still lists deletions that are not staged yet; skip what is gone.
+  [ -f "$script" ] || continue
   bash -n "$script"
 done < <(git ls-files '*.sh')
 

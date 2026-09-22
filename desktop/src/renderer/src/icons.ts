@@ -36,26 +36,16 @@ import {
   Globe,
   Bot,
   Boxes,
-  Type,
-  Eye,
-  CircleCheck,
-  CircleX,
   Brain,
   Inbox,
   File as FileIcon,
   Image as ImageIcon,
   FileType,
-  User,
   X,
   Cat,
   Target,
-  Pause,
   Play,
-  Ban,
   ArrowDownToLine,
-  FileClock,
-  RotateCcw,
-  TriangleAlert,
   Square,
   Ellipsis,
 } from 'lucide-vue-next'
@@ -117,36 +107,6 @@ export const actionIcons = {
   commandContinue: Play,
 } satisfies Record<string, IconComponent>
 
-export const goalIcons = {
-  goal: Target,
-  plan: ClipboardList,
-  focus: ArrowDownToLine,
-  pause: Pause,
-  resume: Play,
-  cancel: Ban,
-  pass: CircleCheck,
-  fail: CircleX,
-  missing: CircleAlert,
-  notice: CircleAlert,
-} satisfies Record<string, IconComponent>
-
-export const checkpointIcons = {
-  alert: CircleAlert,
-  ok: CircleCheck,
-  file: FileClock,
-  loading: LoaderCircle,
-  refresh: RotateCw,
-  rewind: RotateCcw,
-  warning: TriangleAlert,
-} satisfies Record<string, IconComponent>
-
-export function modeIcon(mode: string): IconComponent {
-  if (mode === 'smart_auto' || mode === 'accept_edits') return FilePen
-  if (mode === 'full_access' || mode === 'auto') return Zap
-  if (mode === 'plan') return ClipboardList
-  return ShieldQuestion
-}
-
 // ── Tools ───────────────────────────────────────────────────────────────────
 export const toolIconMap = {
   default: Boxes,
@@ -164,12 +124,13 @@ export const toolIconMap = {
 
 export function toolIcon(name: string): IconComponent {
   const lower = name.toLowerCase()
-  if (lower.includes('dispatch') || lower.includes('subagent'))
-    return toolIconMap.subagent
+  if (lower === 'bash' || lower === 'pwsh' || lower.startsWith('job_'))
+    return toolIconMap.shell
   if (
-    lower.includes('team') ||
-    lower.includes('teammate') ||
-    lower.includes('broadcast')
+    lower.includes('subagent') ||
+    lower.includes('agent') ||
+    lower === 'send_message' ||
+    lower === 'report'
   )
     return toolIconMap.subagent
   if (lower.includes('todo')) return toolIconMap.todo
@@ -188,32 +149,6 @@ export function toolIcon(name: string): IconComponent {
     return toolIconMap.shell
   return toolIconMap.default
 }
-
-// ── Model capability ────────────────────────────────────────────────────────
-export const modelIcons = {
-  text: Type,
-  vision: Eye,
-  testOk: CircleCheck,
-  testFail: CircleX,
-  primary: Cpu,
-  secondary: Brain,
-  guidance: CircleCheck,
-} satisfies Record<string, IconComponent>
-
-// ── Empty states ────────────────────────────────────────────────────────────
-export const emptyIcons = {
-  memory: Brain,
-  skills: Sparkles,
-  tools: Wrench,
-  welcome: Inbox,
-} satisfies Record<string, IconComponent>
-
-// ── Avatars (neutral) ───────────────────────────────────────────────────────
-export const avatarIcons = {
-  emperor: User,
-  eunuch: Bot,
-  subagent: Boxes,
-} satisfies Record<string, IconComponent>
 
 // ── Attachments ─────────────────────────────────────────────────────────────
 export function attachmentIcon(

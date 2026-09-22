@@ -1,23 +1,34 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { loadLocalConfig } from '../config/local-config'
 import { activeEntry, loadModelConfig } from '../config/model-config'
 import { MemoryStore } from '../memory/store'
 import { loadMcpConfig } from '../mcp/config'
-import { ConversationStore } from '../sessions/conversation'
 import { SessionStore } from '../sessions/store'
-import { MessageBus } from '../team/bus'
-import { TeamStore } from '../team/store'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixtureDir = join(here, '..', '..', 'fixtures', 'python-runtime')
 
 describe('Python runtime data compatibility (MIG-REL-003)', () => {
-  it('loads Python-layout memory, model_config, mcp_config, sessions, and team data without migration prompts', async () => {
+  it('loads Python-layout settings, memory, model_config, mcp_config, and session index without migration prompts', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-python-runtime-'))
     cpSync(fixtureDir, root, { recursive: true })
+
+    // Retired keys (permissions.rules, workspace.git_rewind, memory.hybrid_memory)
+    // are tolerated and ignored.
+    const settings = await loadLocalConfig(root)
+    expect(settings.desktopPet).toEqual({
+      enabled: true,
+      autoStartWithWebui: false,
+    })
+    expect(Object.keys(settings).sort()).toEqual([
+      'desktopPet',
+      'prompt',
+      'webui',
+    ])
 
     const model = await loadModelConfig(root, { create: false })
     expect(activeEntry(model)).toMatchObject({
@@ -46,14 +57,15 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
     expect(
       readFileSync(join(root, 'memory', '2026-06-25.md'), 'utf8'),
     ).toContain('Python 版情景记忆')
-    expect(memory.loadUnarchivedHistory().map((row) => row.content)).toEqual([
-      '旧会话用户消息',
-      '旧会话助手消息',
-    ])
-    expect(existsSync(join(root, 'memory', 'history_index.json'))).toBe(true)
-    expect(
-      existsSync(join(root, 'memory', 'history.legacy-backup.jsonl')),
-    ).toBe(true)
+    // Legacy history.jsonl is left untouched: the session log is the only
+    // trajectory now, so the memory store neither reads nor rewrites it.
+    const legacyHistory = readFileSync(
+      join(fixtureDir, 'memory', 'history.jsonl'),
+      'utf8',
+    )
+    expect(readFileSync(join(root, 'memory', 'history.jsonl'), 'utf8')).toBe(
+      legacyHistory,
+    )
 
     const sessions = new SessionStore(root).list()
     expect(sessions).toHaveLength(1)
@@ -62,31 +74,5 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
       title: 'Python 默认会话',
       message_count: 2,
     })
-    const conversation = new ConversationStore(
-      join(root, 'sessions', 'default'),
-    )
-    expect(
-      conversation.loadUnarchivedHistory().map((row) => row.content),
-    ).toEqual(['session user', 'session assistant'])
-    expect(
-      JSON.parse(
-        readFileSync(
-          join(root, 'sessions', 'default', '_checkpoint.json'),
-          'utf8',
-        ),
-      ).history[0].content,
-    ).toBe('checkpoint user')
-
-    const teamStore = new TeamStore(root)
-    expect(teamStore.listMembers()).toHaveLength(1)
-    expect(teamStore.getMember('reviewer')?.status).toBe('offline')
-    expect(
-      teamStore.readThread('reviewer').map((row) => row.content),
-    ).toContain('thread context')
-    expect(
-      new MessageBus(teamStore)
-        .recent('lead')
-        .map((message) => message.content),
-    ).toContain('ready for review')
   })
 })

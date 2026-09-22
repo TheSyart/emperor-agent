@@ -1,83 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
-  availableWorkspacePanes,
-  clampWorkspaceWidth,
+  clampFilesTreeWidth,
   filterGitFilesByPaths,
   gitFileChangeLabel,
   gitTransientLabel,
   groupGitFiles,
-  normalizeRightWorkspaceState,
-  workspacePresentation,
 } from './workspaceModel'
 
-describe('right workspace model', () => {
-  it('migrates missing state and clamps persisted width', () => {
-    expect(normalizeRightWorkspaceState(undefined)).toEqual({
-      version: 3,
-      workbenchOpen: false,
-      width: 840,
-      filesTreeWidth: 280,
-      pane: 'launcher',
-    })
-    expect(
-      normalizeRightWorkspaceState({
-        open: false,
-        width: 999,
-        pane: 'terminal',
-      }),
-    ).toEqual({
-      version: 3,
-      workbenchOpen: false,
-      width: 960,
-      filesTreeWidth: 280,
-      pane: 'terminal',
-    })
-    expect(
-      normalizeRightWorkspaceState({ open: true, pane: 'environment' }),
-    ).toMatchObject({
-      workbenchOpen: false,
-      pane: 'launcher',
-    })
-    expect(
-      normalizeRightWorkspaceState({
-        open: true,
-        width: 360,
-        pane: 'files',
-      }),
-    ).toMatchObject({ width: 840, workbenchOpen: true, pane: 'files' })
-    expect(
-      normalizeRightWorkspaceState({ open: true, pane: 'files' }),
-    ).toMatchObject({
-      workbenchOpen: true,
-      pane: 'files',
-    })
-    expect(
-      normalizeRightWorkspaceState({
-        version: 2,
-        environmentOpen: false,
-        workbenchOpen: true,
-        pane: 'review',
-      }),
-    ).toMatchObject({
-      version: 3,
-      workbenchOpen: true,
-      pane: 'review',
-    })
-    expect(clampWorkspaceWidth(120)).toBe(520)
-  })
-
-  it('hides project-only panes and selects responsive presentation', () => {
-    expect(availableWorkspacePanes(false).map((pane) => pane.id)).toEqual([
-      'review',
-    ])
-    expect(availableWorkspacePanes(true).map((pane) => pane.id)).toEqual([
-      'review',
-      'terminal',
-      'files',
-    ])
-    expect(workspacePresentation(1300)).toBe('fixed')
-    expect(workspacePresentation(900)).toBe('drawer')
-    expect(workspacePresentation(700)).toBe('fullscreen')
+describe('workspace model', () => {
+  it('clamps the persisted files tree size', () => {
+    expect(clampFilesTreeWidth(120)).toBe(240)
+    expect(clampFilesTreeWidth(999)).toBe(320)
+    expect(clampFilesTreeWidth(Number.NaN)).toBe(280)
+    expect(clampFilesTreeWidth(301.4)).toBe(301)
   })
 
   it('projects Git files into staged, unstaged, untracked and conflict groups', () => {

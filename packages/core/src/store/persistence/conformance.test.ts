@@ -7,27 +7,78 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  AppendOnlyJournal,
   AppendOnlyJournalSync,
   AtomicSnapshot,
   AtomicSnapshotSync,
-  CasAggregate,
-  LeaseIntentStore,
-  PersistenceConflictError,
-  PersistenceCorruptionError,
-  PersistenceTerminalError,
-  createEnvelopeJournalCodec,
   createNodePersistenceAdapter,
   createNodeSyncPersistenceAdapter,
+  type JournalCodec,
   type SnapshotCodec,
 } from './index'
 
 interface SnapshotValue {
   label: string
+}
+
+/**
+ * 测试夹具：带 schema 信封和 sha256 校验和的 JSONL 行编解码器。
+ * 生产代码的 journal 使用各自领域自带的 codec，这里只为约束 kernel 行为。
+ */
+function createEnvelopeJournalCodec<T>(options: {
+  readonly schemaVersion: number
+  validatePayload(input: unknown): T
+}): JournalCodec<T> {
+  const checksumFor = (schemaVersion: number, seq: number, payload: unknown) =>
+    createHash('sha256')
+      .update(JSON.stringify({ schemaVersion, seq, payload }))
+      .digest('hex')
+  return {
+    schemaVersion: options.schemaVersion,
+    create(seq, payload) {
+      return {
+        schemaVersion: options.schemaVersion,
+        seq,
+        checksum: checksumFor(options.schemaVersion, seq, payload),
+        payload,
+      }
+    },
+    encode(entry) {
+      return {
+        schema_version: entry.schemaVersion,
+        seq: entry.seq,
+        checksum: entry.checksum,
+        payload: entry.payload,
+      }
+    },
+    decode(input) {
+      if (!isRecord(input)) throw new Error('journal row must be an object')
+      const schemaVersion = Number(input.schema_version)
+      const seq = Number(input.seq)
+      const checksum = String(input.checksum ?? '')
+      if (
+        !Number.isSafeInteger(schemaVersion) ||
+        schemaVersion < 1 ||
+        schemaVersion > options.schemaVersion ||
+        !Number.isSafeInteger(seq) ||
+        seq < 1 ||
+        !checksum
+      )
+        throw new Error('invalid journal envelope')
+      if (checksum !== checksumFor(schemaVersion, seq, input.payload))
+        throw new Error('journal checksum mismatch')
+      return {
+        schemaVersion,
+        seq,
+        checksum,
+        payload: options.validatePayload(input.payload),
+      }
+    },
+  }
 }
 
 const snapshotCodec: SnapshotCodec<SnapshotValue> = {
@@ -341,442 +392,6 @@ describe('synchronous append journal conformance', () => {
     )
     expect(replayed.receipt.corruptionBackup).toContain('events.jsonl.corrupt-')
     expect((await readFile(path, 'utf8')).includes('not-json')).toBe(false)
-  })
-})
-
-describe('append journal conformance', () => {
-  const journalCodec = createEnvelopeJournalCodec<{ value: number }>({
-    schemaVersion: 1,
-    validatePayload(input) {
-      if (!isRecord(input) || !Number.isInteger(input.value))
-        throw new Error('invalid journal payload')
-      return { value: Number(input.value) }
-    },
-  })
-
-  it('assigns unique checksummed sequences under concurrent writers', async () => {
-    const path = join(root, 'events.jsonl')
-    const first = new AppendOnlyJournal({ path, codec: journalCodec })
-    const second = new AppendOnlyJournal({ path, codec: journalCodec })
-
-    await Promise.all(
-      Array.from({ length: 8 }, (_, value) =>
-        (value % 2 === 0 ? first : second).append({ value }),
-      ),
-    )
-    const replay = await first.replay()
-
-    expect(replay.entries.map((entry) => entry.seq)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8,
-    ])
-    expect(new Set(replay.entries.map((entry) => entry.checksum)).size).toBe(8)
-    expect(replay.receipt).toMatchObject({
-      schemaVersion: 1,
-      lastGoodSeq: 8,
-      recoveryAction: 'none',
-    })
-    expect((await stat(path)).mode & 0o777).toBe(0o600)
-  })
-
-  it('supports a sequence owned by a serialized domain writer', async () => {
-    const path = join(root, 'domain-sequence.jsonl')
-    const journal = new AppendOnlyJournal({ path, codec: journalCodec })
-
-    await journal.appendAtSequence({ value: 1 }, 1)
-    await journal.appendAtSequence({ value: 2 }, 2)
-
-    await expect(journal.replay()).resolves.toMatchObject({
-      entries: [
-        { seq: 1, payload: { value: 1 } },
-        { seq: 2, payload: { value: 2 } },
-      ],
-      receipt: { lastGoodSeq: 2 },
-    })
-  })
-
-  it('backs up and truncates only an invalid partial tail', async () => {
-    const path = join(root, 'events.jsonl')
-    const journal = new AppendOnlyJournal({ path, codec: journalCodec })
-    await journal.append({ value: 1 })
-    await journal.append({ value: 2 })
-    await appendFile(path, '{"schema_version":1', 'utf8')
-
-    const replay = await journal.replay({ repairTail: true })
-
-    expect(replay.entries.map((entry) => entry.payload.value)).toEqual([1, 2])
-    expect(replay.receipt).toMatchObject({
-      lastGoodSeq: 2,
-      recoveryAction: 'truncated_partial_tail',
-    })
-    expect(await readFile(replay.receipt.corruptionBackup!, 'utf8')).toBe(
-      '{"schema_version":1',
-    )
-    expect((await readFile(path, 'utf8')).endsWith('\n')).toBe(true)
-  })
-
-  it('fails closed on a corrupt committed line', async () => {
-    const path = join(root, 'events.jsonl')
-    const journal = new AppendOnlyJournal({ path, codec: journalCodec })
-    await journal.append({ value: 1 })
-    await appendFile(path, 'not-json\n', 'utf8')
-
-    const failure = await journal
-      .replay({ repairTail: true })
-      .then(() => null)
-      .catch((cause: unknown) => cause)
-    expect(failure).toBeInstanceOf(PersistenceCorruptionError)
-    expect(failure).toMatchObject({ lastGoodSeq: 1 })
-    expect((failure as PersistenceCorruptionError).corruptionBackup).toContain(
-      'events.jsonl.corrupt-',
-    )
-    expect(
-      await readFile(
-        (failure as PersistenceCorruptionError).corruptionBackup!,
-        'utf8',
-      ),
-    ).toContain('not-json')
-    expect(await readFile(path, 'utf8')).toContain('not-json')
-  })
-
-  it('reports the schema version actually read instead of the writer maximum', async () => {
-    const path = join(root, 'reader-version.jsonl')
-    const versionOne = new AppendOnlyJournal({ path, codec: journalCodec })
-    await versionOne.append({ value: 1 })
-    const readerCodec = {
-      ...journalCodec,
-      schemaVersion: 2,
-    }
-
-    await expect(
-      new AppendOnlyJournal({ path, codec: readerCodec }).replay(),
-    ).resolves.toMatchObject({
-      receipt: { schemaVersion: 1, lastGoodSeq: 1 },
-    })
-  })
-
-  it('checksums the persisted payload independently of validator key order', async () => {
-    const path = join(root, 'normalized-payload.jsonl')
-    const codec = createEnvelopeJournalCodec<{ a: number; b: number }>({
-      schemaVersion: 1,
-      validatePayload(input) {
-        if (!isRecord(input)) throw new Error('invalid normalized payload')
-        return { a: Number(input.a), b: Number(input.b) }
-      },
-    })
-    const journal = new AppendOnlyJournal({ path, codec })
-    const payload = { b: 2, a: 1 } as { a: number; b: number }
-
-    await journal.append(payload)
-
-    await expect(journal.replay()).resolves.toMatchObject({
-      entries: [{ payload: { a: 1, b: 2 } }],
-    })
-  })
-
-  it('rejects a line codec that produces no JSON row before appending', async () => {
-    const path = join(root, 'invalid-row.jsonl')
-    const invalidCodec = {
-      ...journalCodec,
-      encode: () => undefined,
-    }
-    const journal = new AppendOnlyJournal({ path, codec: invalidCodec })
-
-    await expect(journal.append({ value: 1 })).rejects.toMatchObject({
-      code: 'persistence_io',
-      operation: 'serialize',
-    })
-    expect(await readdir(root)).not.toContain('invalid-row.jsonl')
-  })
-
-  it('retains a bounded hot segment and archives older entries', async () => {
-    const path = join(root, 'events.jsonl')
-    const archivePath = join(root, 'archive', 'events.jsonl')
-    const journal = new AppendOnlyJournal({ path, codec: journalCodec })
-    for (let value = 1; value <= 5; value += 1) await journal.append({ value })
-
-    const retained = await journal.retain({ maxRecords: 2, archivePath })
-
-    expect(retained).toMatchObject({ archived: 3, retained: 2 })
-    expect(
-      (await journal.replay()).entries.map((entry) => entry.payload.value),
-    ).toEqual([4, 5])
-    expect(
-      (
-        await new AppendOnlyJournal({
-          path: archivePath,
-          codec: journalCodec,
-        }).replay()
-      ).entries.map((entry) => entry.payload.value),
-    ).toEqual([1, 2, 3])
-  })
-
-  it('recovers idempotently when archive append committed before hot rewrite', async () => {
-    const path = join(root, 'retention-crash.jsonl')
-    const archivePath = join(root, 'archive-crash.jsonl')
-    const journal = new AppendOnlyJournal({ path, codec: journalCodec })
-    for (let value = 1; value <= 5; value += 1) await journal.append({ value })
-    const entries = (await journal.replay()).entries
-    await writeFile(
-      archivePath,
-      `${entries
-        .slice(0, 3)
-        .map((entry) => JSON.stringify(journalCodec.encode(entry)))
-        .join('\n')}\n`,
-      { encoding: 'utf8', mode: 0o600 },
-    )
-
-    await expect(
-      journal.retain({ maxRecords: 2, archivePath }),
-    ).resolves.toEqual({ archived: 3, retained: 2 })
-    expect(
-      (
-        await new AppendOnlyJournal({
-          path: archivePath,
-          codec: journalCodec,
-        }).replay()
-      ).entries,
-    ).toHaveLength(3)
-    expect(
-      (await journal.replay()).entries.map((entry) => entry.payload.value),
-    ).toEqual([4, 5])
-  })
-})
-
-describe('CAS aggregate conformance', () => {
-  interface Aggregate {
-    count: number
-    status: 'active' | 'done'
-  }
-
-  function aggregate(path: string) {
-    return new CasAggregate<Aggregate>({
-      path,
-      schemaVersion: 1,
-      initial: () => ({ count: 0, status: 'active' }),
-      validateValue(input) {
-        if (
-          !isRecord(input) ||
-          !Number.isInteger(input.count) ||
-          (input.status !== 'active' && input.status !== 'done')
-        )
-          throw new Error('invalid aggregate')
-        return { count: Number(input.count), status: input.status }
-      },
-      isTerminal: (value) => value.status === 'done',
-    })
-  }
-
-  it('rejects stale and concurrent writers with an exact revision conflict', async () => {
-    const path = join(root, 'aggregate.json')
-    const first = aggregate(path)
-    const second = aggregate(path)
-
-    const outcomes = await Promise.allSettled([
-      first.compareAndSwap({
-        expectedRevision: 0,
-        value: { count: 1, status: 'active' },
-      }),
-      second.compareAndSwap({
-        expectedRevision: 0,
-        value: { count: 2, status: 'active' },
-      }),
-    ])
-
-    expect(
-      outcomes.filter((outcome) => outcome.status === 'fulfilled'),
-    ).toHaveLength(1)
-    const rejected = outcomes.find(
-      (outcome): outcome is PromiseRejectedResult =>
-        outcome.status === 'rejected',
-    )
-    expect(rejected?.reason).toBeInstanceOf(PersistenceConflictError)
-    expect(rejected?.reason).toMatchObject({
-      expectedRevision: 0,
-      actualRevision: 1,
-    })
-  })
-
-  it('makes terminal state monotonic', async () => {
-    const store = aggregate(join(root, 'terminal.json'))
-    const terminal = await store.compareAndSwap({
-      expectedRevision: 0,
-      value: { count: 1, status: 'done' },
-    })
-    expect(terminal).toMatchObject({ revision: 1, terminal: true })
-
-    await expect(
-      store.compareAndSwap({
-        expectedRevision: 1,
-        value: { count: 2, status: 'active' },
-      }),
-    ).rejects.toBeInstanceOf(PersistenceTerminalError)
-  })
-
-  it('fails closed on corrupt authority instead of resetting to the initial value', async () => {
-    const path = join(root, 'corrupt-cas.json')
-    await writeFile(path, '{broken', 'utf8')
-    const store = aggregate(path)
-
-    await expect(store.read()).rejects.toBeInstanceOf(
-      PersistenceCorruptionError,
-    )
-    expect(
-      (await readdir(root)).some((name) =>
-        name.startsWith('corrupt-cas.json.corrupt-'),
-      ),
-    ).toBe(true)
-  })
-
-  it('allows a domain codec to preserve and read a legacy CAS document shape', async () => {
-    const path = join(root, 'legacy-cas.json')
-    await writeFile(
-      path,
-      JSON.stringify({ revision: 7, status: 'active', count: 3 }),
-      'utf8',
-    )
-    const store = new CasAggregate<Aggregate>({
-      path,
-      schemaVersion: 1,
-      initial: () => ({ count: 0, status: 'active' }),
-      validateValue: (input) => input as Aggregate,
-      isTerminal: (value) => value.status === 'done',
-      codec: {
-        schemaVersion: 1,
-        encode(state) {
-          return {
-            revision: state.revision,
-            status: state.value.status,
-            count: state.value.count,
-          }
-        },
-        decode(input) {
-          if (!isRecord(input)) throw new Error('invalid legacy CAS')
-          return {
-            schemaVersion: 1,
-            value: {
-              revision: Number(input.revision),
-              terminal: input.status === 'done',
-              value: {
-                count: Number(input.count),
-                status: input.status === 'done' ? 'done' : 'active',
-              },
-            },
-          }
-        },
-      },
-    })
-
-    await expect(store.read()).resolves.toMatchObject({
-      revision: 7,
-      terminal: false,
-      value: { count: 3, status: 'active' },
-    })
-  })
-})
-
-describe('lease/intent conformance', () => {
-  function leases(path: string) {
-    return new LeaseIntentStore<{ action: string }>({
-      path,
-      schemaVersion: 1,
-      retentionMs: 50,
-      validatePayload(input) {
-        if (!isRecord(input) || typeof input.action !== 'string')
-          throw new Error('invalid intent payload')
-        return { action: input.action }
-      },
-    })
-  }
-
-  it('prepares idempotently, enforces owner/expiry, and applies once', async () => {
-    const store = leases(join(root, 'leases.json'))
-    const prepared = await store.prepare({
-      id: 'install',
-      owner: 'session-a',
-      now: 100,
-      ttlMs: 50,
-      payload: { action: 'download' },
-    })
-    const repeated = await store.prepare({
-      id: 'install',
-      owner: 'session-a',
-      now: 110,
-      ttlMs: 50,
-      payload: { action: 'download' },
-    })
-    expect(repeated).toEqual(prepared)
-
-    await expect(
-      store.prepare({
-        id: 'install',
-        owner: 'session-b',
-        now: 120,
-        ttlMs: 50,
-        payload: { action: 'download' },
-      }),
-    ).rejects.toBeInstanceOf(PersistenceConflictError)
-
-    const replaced = await store.prepare({
-      id: 'install',
-      owner: 'session-b',
-      now: 151,
-      ttlMs: 50,
-      payload: { action: 'download' },
-    })
-    expect(replaced).toMatchObject({ owner: 'session-b', revision: 2 })
-    const applied = await store.markApplied({
-      id: 'install',
-      owner: 'session-b',
-      now: 160,
-    })
-    expect(applied).toMatchObject({ phase: 'applied', appliedAt: 160 })
-    await expect(
-      store.markApplied({ id: 'install', owner: 'session-b', now: 170 }),
-    ).resolves.toEqual(applied)
-    await expect(
-      store.prepare({
-        id: 'install',
-        owner: 'session-c',
-        now: 250,
-        ttlMs: 50,
-        payload: { action: 'download' },
-      }),
-    ).rejects.toBeInstanceOf(PersistenceConflictError)
-  })
-
-  it('reports expired prepared intents and prunes applied retention', async () => {
-    const store = leases(join(root, 'recover.json'))
-    await store.prepare({
-      id: 'prepared',
-      owner: 'session-a',
-      now: 100,
-      ttlMs: 10,
-      payload: { action: 'resume' },
-    })
-    await store.prepare({
-      id: 'applied',
-      owner: 'session-a',
-      now: 100,
-      ttlMs: 10,
-      payload: { action: 'settled' },
-    })
-    await store.markApplied({ id: 'applied', owner: 'session-a', now: 105 })
-
-    const first = await store.recover({ now: 120 })
-    const second = await store.recover({ now: 120 })
-    expect(first.expiredPrepared.map((entry) => entry.id)).toEqual(['prepared'])
-    expect(second.expiredPrepared).toEqual(first.expiredPrepared)
-
-    const pruned = await store.recover({ now: 156 })
-    expect(pruned.prunedApplied).toBe(1)
-    expect((await store.list()).map((entry) => entry.id)).toEqual(['prepared'])
-    await expect(store.inspect()).resolves.toMatchObject({
-      receipt: {
-        primitive: 'lease_intent',
-        schemaVersion: 1,
-        recoveryAction: 'none',
-      },
-    })
   })
 })
 

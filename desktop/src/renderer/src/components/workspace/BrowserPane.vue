@@ -89,7 +89,7 @@ function scheduleBounds(): void {
 </script>
 
 <template>
-  <div class="workspace-pane browser-pane">
+  <div class="browser-pane">
     <header class="browser-toolbar">
       <button
         type="button"
@@ -110,7 +110,9 @@ function scheduleBounds(): void {
       <button type="button" aria-label="刷新" @click="previewAction('reload')">
         <RefreshCw :size="14" :class="{ 'animate-spin': state?.loading }" />
       </button>
-      <span class="browser-address">{{ state?.url || '受控本地预览' }}</span>
+      <span class="browser-address" :title="state?.url || undefined">{{
+        state?.url || '受控本地预览'
+      }}</span>
       <button
         type="button"
         aria-label="在系统浏览器打开"
@@ -119,7 +121,7 @@ function scheduleBounds(): void {
         <ExternalLink :size="14" />
       </button>
     </header>
-    <div v-if="error" class="workspace-inline-error browser-error">
+    <div v-if="error" class="browser-error" role="alert">
       {{ error }}
     </div>
     <div
@@ -131,3 +133,78 @@ function scheduleBounds(): void {
     </div>
   </div>
 </template>
+
+<style scoped>
+.browser-pane {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.browser-toolbar {
+  display: flex;
+  min-width: 0;
+  height: calc(var(--space-8) + var(--space-2));
+  flex: none;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border-l1);
+}
+
+.browser-toolbar button {
+  display: inline-grid;
+  width: var(--space-7);
+  height: var(--space-7);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-secondary));
+}
+
+.browser-toolbar button:hover:not(:disabled) {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.browser-toolbar button:disabled {
+  opacity: 0.35;
+}
+
+.browser-address {
+  min-width: 0;
+  flex: 1;
+  margin: 0 var(--space-1);
+  padding: var(--space-1) var(--space-2-5);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  color: rgb(var(--label-secondary));
+  background: rgb(var(--input-major));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-error {
+  flex: none;
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-row);
+  color: rgb(var(--danger));
+  background: rgb(var(--danger-soft));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.browser-viewport {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+</style>

@@ -6,7 +6,7 @@ import type {
 
 export interface RuntimeEffect extends ActionEffectDescriptor {
   domain: 'runtime'
-  type: 'refresh_memory' | 'refresh_commands'
+  type: 'refresh_memory' | 'refresh_commands' | 'refresh_skills'
   sessionId: string
   eventSeq: number
 }
@@ -60,6 +60,15 @@ export function reduceRuntimeEffects(
             key: `runtime:refresh-commands:${action.sessionId || 'none'}`,
             domain: 'runtime',
             type: 'refresh_commands',
+            sessionId: action.sessionId,
+            eventSeq: seq,
+            timeoutMs: 10_000,
+          },
+          {
+            id: `runtime:refresh-skills:${action.sessionId || 'none'}:${seq}`,
+            key: `runtime:refresh-skills:${action.sessionId || 'none'}`,
+            domain: 'runtime',
+            type: 'refresh_skills',
             sessionId: action.sessionId,
             eventSeq: seq,
             timeoutMs: 10_000,

@@ -16,13 +16,18 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { parseDocument } from 'yaml'
 import { LEGACY_SKILL_STATE_FILE } from '../runtime/resources'
 import {
   ConfigResolver,
   defineConfigKey,
   type Resolved,
 } from '../config/resolver'
+import { skillNameError } from './name'
+import {
+  checkSkillContent,
+  checkSkillFolder,
+  parseSkillFrontmatter,
+} from './validate'
 
 const RESOURCE_DIRS = ['scripts', 'references', 'assets'] as const
 const MAX_SKILL_FILES = 1_000
@@ -30,7 +35,6 @@ const MAX_SKILL_FILE_BYTES = 20 * 1024 * 1024
 const MAX_SKILL_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_SKILL_ENTRIES = 2_000
 const MAX_SKILL_DEPTH = 32
-const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export type SkillResourceDirectory = (typeof RESOURCE_DIRS)[number]
 export type SkillSource =
@@ -60,10 +64,6 @@ export interface SkillValidateInput {
   content?: string
 }
 
-export interface SkillPackageInput {
-  name: string
-}
-
 export interface SkillRecord {
   name: string
   root: string
@@ -89,14 +89,6 @@ export interface SkillCreateResult extends SkillValidationResult {
   path: string
 }
 
-export interface SkillPackageResult {
-  name: string
-  path: string
-  sha256: string
-  size: number
-  files: string[]
-}
-
 export interface SkillDirectorySnapshot {
   name: string
   valid: boolean
@@ -106,11 +98,6 @@ export interface SkillDirectorySnapshot {
   digest: string
   totalBytes: number
   files: Array<{ path: string; data: Buffer }>
-}
-
-interface ParsedSkillMetadata {
-  data: Record<string, unknown>
-  errors: string[]
 }
 
 interface CollectedSkillFiles {
@@ -261,20 +248,17 @@ export class SkillManager {
     return this.validateRecord(record)
   }
 
+  /** Relaxed folder validation (see `validate.ts`); the folder name only warns on mismatch. */
   validateRecord(record: SkillRecord): SkillValidationResult {
-    const contentResult = validateSkillContent(
-      record.name,
-      readFileSync(record.skillFile, 'utf8'),
-    )
-    const collected = collectSkillFiles(record.root, record.name)
-    const errors = [...contentResult.errors, ...collected.errors]
+    const check = checkSkillFolder(record.root, { folderName: record.name })
+    const errors = [...check.errors]
     if (record.status === 'blocked_pending_review')
       errors.push('Skill is blocked pending review')
     if (record.status === 'blocked')
       errors.push('Skill is blocked by missing requirements')
     const valid = errors.length === 0 && record.status === 'active'
     return {
-      ...contentResult,
+      name: check.name || record.name,
       valid,
       source: record.source,
       status: valid
@@ -284,49 +268,12 @@ export class SkillManager {
           : record.status,
       readOnly: record.readOnly,
       errors,
-      files: collected.files.map((file) => file.relativePath),
-    }
-  }
-
-  package(input: SkillPackageInput): SkillPackageResult {
-    const name = assertCreatorSkillName(input.name)
-    const record = this.resolve(name)
-    if (!record) throw new Error(`Skill not found: ${name}`)
-    if (record.status !== 'active')
-      throw new Error(`Skill validation failed: Skill is ${record.status}`)
-
-    const collected = collectSkillFiles(record.root, name, {
-      readContents: true,
-    })
-    if (collected.errors.length)
-      throw new Error(`Skill validation failed: ${collected.errors.join('; ')}`)
-    const skillEntry = collected.files.find(
-      (file) => file.relativePath === `${name}/SKILL.md`,
-    )
-    const snapshotValidation = this.validate({
-      name,
-      content: skillEntry?.data?.toString('utf8') ?? '',
-    })
-    if (!snapshotValidation.valid)
-      throw new Error(
-        `Skill validation failed: ${snapshotValidation.errors.join('; ')}`,
-      )
-    const entries = collected.files.map((file) => ({
-      name: file.relativePath,
-      data: file.data!,
-    }))
-    const archive = createDeterministicZip(entries)
-    const path = join(
-      this.managedDirectory('skill-packages', true),
-      `${name}.skill`,
-    )
-    atomicWriteBuffer(path, archive)
-    return {
-      name,
-      path,
-      sha256: createHash('sha256').update(archive).digest('hex'),
-      size: archive.byteLength,
-      files: entries.map((entry) => entry.name),
+      warnings: check.warnings,
+      files: [
+        `${record.name}/SKILL.md`,
+        ...check.references.map((ref) => `${record.name}/${ref}`),
+      ],
+      requirements: requirementsFromMetadata(check.frontmatter.metadata),
     }
   }
 
@@ -400,14 +347,7 @@ export class SkillManager {
     return join(this.managedDirectory('skills', false), name)
   }
 
-  packageOutputDir(): string {
-    return this.managedDirectory('skill-packages', false)
-  }
-
-  private managedDirectory(
-    name: 'skills' | 'skill-packages',
-    create: boolean,
-  ): string {
+  private managedDirectory(name: 'skills', create: boolean): string {
     if (create) mkdirSync(this.stateRoot, { recursive: true })
     if (!existsSync(this.stateRoot)) return join(this.stateRoot, name)
     const stateStat = lstatSync(this.stateRoot)
@@ -442,7 +382,8 @@ export function parseSkillMetadata(content: string): {
 } {
   const parsed = parseSkillFrontmatter(content)
   return {
-    ...parsed,
+    data: parsed.data,
+    errors: parsed.errors,
     requirements: requirementsFromMetadata(parsed.data.metadata),
   }
 }
@@ -451,62 +392,21 @@ function validateSkillContent(
   requestedName: string,
   content: string,
 ): SkillValidationResult {
-  const parsed = parseSkillFrontmatter(content)
-  const errors = [...parsed.errors]
-  const nameError = creatorSkillNameError(requestedName)
-  if (nameError) errors.unshift(nameError)
-  const declaredName = stringValue(parsed.data.name)
-  const description = stringValue(parsed.data.description)
-  if (!declaredName) errors.push('Frontmatter field "name" is required')
-  else if (declaredName !== requestedName)
-    errors.push(
-      `Frontmatter name must match directory name: expected ${requestedName}, got ${declaredName}`,
-    )
-  if (!description) errors.push('Frontmatter field "description" is required')
-  else if (description.length > 1_024)
-    errors.push('Frontmatter description must be at most 1024 characters')
+  const check = checkSkillContent(content, { folderName: requestedName })
+  const errors = [...check.errors]
+  const nameError = skillNameError(requestedName)
+  if (nameError && !check.name) errors.unshift(nameError)
   return {
-    name: requestedName,
+    name: check.name || requestedName,
     valid: errors.length === 0,
     source: 'virtual',
     status: errors.length === 0 ? 'active' : 'invalid',
     readOnly: false,
     errors,
-    warnings: [],
-    files: [`${requestedName}/SKILL.md`],
-    requirements: requirementsFromMetadata(parsed.data.metadata),
+    warnings: check.warnings,
+    files: [`${check.name || requestedName}/SKILL.md`],
+    requirements: requirementsFromMetadata(check.frontmatter.metadata),
   }
-}
-
-function parseSkillFrontmatter(content: string): ParsedSkillMetadata {
-  const normalized = String(content)
-    .replace(/^\uFEFF/, '')
-    .replace(/\r\n?/g, '\n')
-  if (!normalized.startsWith('---\n'))
-    return { data: {}, errors: ['SKILL.md must start with YAML frontmatter'] }
-  const end = normalized.indexOf('\n---\n', 4)
-  const terminalEnd = normalized.endsWith('\n---') ? normalized.length - 4 : -1
-  const boundary = end >= 0 ? end : terminalEnd
-  if (boundary < 0)
-    return { data: {}, errors: ['SKILL.md frontmatter is not closed'] }
-
-  const document = parseDocument(normalized.slice(4, boundary), {
-    prettyErrors: false,
-    strict: true,
-    uniqueKeys: true,
-  })
-  if (document.errors.length) {
-    return {
-      data: {},
-      errors: document.errors.map(
-        (error) => `Invalid YAML frontmatter: ${error.message}`,
-      ),
-    }
-  }
-  const value = document.toJS() as unknown
-  if (!isRecord(value))
-    return { data: {}, errors: ['YAML frontmatter must be an object'] }
-  return { data: value, errors: [] }
 }
 
 function requirementsFromMetadata(metadata: unknown): SkillRequirements {
@@ -695,88 +595,6 @@ function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   )
 }
 
-function createDeterministicZip(
-  entries: Array<{ name: string; data: Buffer }>,
-): Buffer {
-  const localParts: Buffer[] = []
-  const centralParts: Buffer[] = []
-  let localOffset = 0
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name, 'utf8')
-    const crc = crc32(entry.data)
-    const local = Buffer.alloc(30)
-    local.writeUInt32LE(0x04034b50, 0)
-    local.writeUInt16LE(20, 4)
-    local.writeUInt16LE(0x0800, 6)
-    local.writeUInt16LE(0, 8)
-    local.writeUInt16LE(0, 10)
-    local.writeUInt16LE(0x0021, 12)
-    local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(entry.data.byteLength, 18)
-    local.writeUInt32LE(entry.data.byteLength, 22)
-    local.writeUInt16LE(name.byteLength, 26)
-    local.writeUInt16LE(0, 28)
-    localParts.push(local, name, entry.data)
-
-    const central = Buffer.alloc(46)
-    central.writeUInt32LE(0x02014b50, 0)
-    central.writeUInt16LE(0x031e, 4)
-    central.writeUInt16LE(20, 6)
-    central.writeUInt16LE(0x0800, 8)
-    central.writeUInt16LE(0, 10)
-    central.writeUInt16LE(0, 12)
-    central.writeUInt16LE(0x0021, 14)
-    central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(entry.data.byteLength, 20)
-    central.writeUInt32LE(entry.data.byteLength, 24)
-    central.writeUInt16LE(name.byteLength, 28)
-    central.writeUInt16LE(0, 30)
-    central.writeUInt16LE(0, 32)
-    central.writeUInt16LE(0, 34)
-    central.writeUInt16LE(0, 36)
-    central.writeUInt32LE((0o100644 << 16) >>> 0, 38)
-    central.writeUInt32LE(localOffset, 42)
-    centralParts.push(central, name)
-    localOffset += local.byteLength + name.byteLength + entry.data.byteLength
-  }
-
-  const centralSize = centralParts.reduce(
-    (size, part) => size + part.byteLength,
-    0,
-  )
-  const end = Buffer.alloc(22)
-  end.writeUInt32LE(0x06054b50, 0)
-  end.writeUInt16LE(0, 4)
-  end.writeUInt16LE(0, 6)
-  end.writeUInt16LE(entries.length, 8)
-  end.writeUInt16LE(entries.length, 10)
-  end.writeUInt32LE(centralSize, 12)
-  end.writeUInt32LE(localOffset, 16)
-  end.writeUInt16LE(0, 20)
-  return Buffer.concat([...localParts, ...centralParts, end])
-}
-
-function crc32(data: Buffer): number {
-  let crc = 0xffffffff
-  for (const byte of data) {
-    crc ^= byte
-    for (let bit = 0; bit < 8; bit += 1)
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
-  }
-  return (crc ^ 0xffffffff) >>> 0
-}
-
-function atomicWriteBuffer(path: string, content: Buffer): void {
-  const temp = `${path}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`
-  try {
-    writeFileSync(temp, content, { flag: 'wx' })
-    replaceFileAtomic(temp, path)
-  } catch (error) {
-    rmSync(temp, { force: true })
-    throw error
-  }
-}
-
 export function replaceFileAtomic(
   temp: string,
   target: string,
@@ -851,11 +669,7 @@ function assertCreatorSkillName(name: string): string {
 }
 
 function creatorSkillNameError(name: string): string {
-  if (!name) return 'Skill name is required'
-  if (name.length > 64) return 'Skill name must be at most 64 characters'
-  if (!SKILL_NAME_PATTERN.test(name))
-    return 'Skill name must use lowercase letters, digits, and single hyphens'
-  return ''
+  return skillNameError(name)
 }
 
 function safeRuntimeSkillName(name: string): string {

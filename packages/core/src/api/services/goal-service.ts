@@ -1,46 +1,49 @@
-import { EmperorError } from '../../errors'
-import type { GoalCoordinator } from '../../goals/coordinator'
-import {
-  goalSummary,
-  isGoalTerminal,
-  type GoalGuardPolicy,
-  type GoalRecord,
-  type GoalSummary,
-} from '../../goals/models'
-import type { GoalStore } from '../../goals/store'
-import { newGoalRecord } from '../../goals/validation'
-import type { ActiveTaskInfo, ActiveTaskRegistry } from '../../runtime/active'
-import type { DraftSessionInput } from '../chat-service'
+/**
+ * CoreApi `goals.*` facade over the harness same-session goal domain. One
+ * current goal per session lives in the session log; this facade resolves
+ * the session, checks the caller's goal id, and applies user-authority
+ * mutations through the harness `GoalService`.
+ */
+
+import { EmperorError, OperationRetiredError } from '../../errors'
+import type { Agent } from '../../harness/agent/agent'
+import type { GoalService as HarnessGoalService } from '../../harness/goal/service'
+import type { GoalRef, GoalView } from '../../harness/goal/types'
+
+/** A live goal view, or the host's projected view for a session without a live agent. */
+export type GoalPayload = GoalView | Readonly<Record<string, unknown>>
 
 export interface GoalStartInput {
-  outcome: string
   sessionId: string
+  objective: string
+  maxRounds?: number | null
   clientDraftId?: string | null
-  draftSession?: DraftSessionInput | null
-  guardPolicy?: Partial<GoalGuardPolicy> | null
-}
-
-export interface GoalReplaceInput {
-  goalId: string
-  outcome: string
-  sessionId: string
+  draftSession?: unknown
 }
 
 export interface GoalOperationResult {
   accepted: boolean
-  goal: GoalSummary
-  activeTask: ActiveTaskInfo | null
+  /** Post-mutation goal; `null` after a cancel (clear). */
+  goal: GoalView | null
+  /** Tombstone ref written by a cancel. */
+  cleared?: GoalRef
 }
 
 export interface BootstrapGoalsPayload {
-  active: GoalSummary | null
-  recent: GoalSummary[]
+  active: GoalPayload | null
 }
 
-export interface GoalSessionLike {
-  id: string
-  mode: 'chat' | 'build'
-  project_id: string | null
+export interface GoalServiceDeps {
+  goals: HarnessGoalService
+  agentFor(sessionId: string): Agent
+  goalView(sessionId: string): GoalPayload | null
+  activeSessionId(): string | null
+  /** Materialize a draft session before the first goal starts in it. */
+  materializeSession?(input: {
+    sessionId: string
+    clientDraftId?: string | null
+    draftSession?: unknown
+  }): Promise<unknown>
 }
 
 export class GoalServiceError extends EmperorError {
@@ -49,297 +52,128 @@ export class GoalServiceError extends EmperorError {
   }
 }
 
-interface GoalServiceOptions {
-  readonly goalStore: GoalStore
-  readonly coordinator: GoalCoordinator
-  readonly activeTasks: ActiveTaskRegistry
-  readonly materializeSession: (input: {
-    sessionId: string
-    clientDraftId?: string | null
-    draftSession?: DraftSessionInput | null
-  }) => Promise<GoalSessionLike>
-  readonly requireReadableSession: (
-    sessionId: string,
-    operation: string,
-  ) => GoalSessionLike
-  readonly scopeForSession: (session: GoalSessionLike) => {
-    sessionId: string
-    mode: 'chat' | 'build'
-    projectId: string | null
-    workspaceRoot: string
-  }
-  readonly activeSessionId?: () => string | null
-  readonly summarize?: (goal: GoalRecord) => Promise<GoalSummary>
-  readonly clearPendingInteraction?: (goal: GoalRecord) => void | Promise<void>
-}
-
 export class GoalService {
-  private startBarrier: Promise<void> = Promise.resolve()
-
-  constructor(readonly options: GoalServiceOptions) {}
+  constructor(private readonly deps: GoalServiceDeps) {}
 
   async start(input: GoalStartInput): Promise<GoalOperationResult> {
-    return await this.serializeStart(
-      async () => await this.startUnlocked(input),
-    )
-  }
-
-  async replace(input: GoalReplaceInput): Promise<GoalOperationResult> {
-    return await this.serializeStart(async () => {
-      const previous = await this.requireOwnedGoal(
-        input.goalId,
-        input.sessionId,
-        'goals.replace',
+    const sessionId = this.sessionId(input.sessionId, 'goals.start')
+    const objective = String(input.objective ?? '').trim()
+    if (!objective)
+      throw new GoalServiceError(
+        'goal_objective_invalid',
+        'Goal 目标不能为空。',
       )
-      if (isGoalTerminal(previous.status))
-        throw new GoalServiceError(
-          'goal_terminal',
-          'A terminal Goal cannot be replaced.',
-        )
-
-      const session = this.options.requireReadableSession(
-        input.sessionId,
-        'goals.replace',
-      )
-      const replacement = newGoalRecord({
-        outcome: input.outcome,
-        scope: this.options.scopeForSession(session),
-        guardPolicy: previous.guardPolicy,
-        supersedesGoalId: previous.id,
+    if (this.deps.materializeSession) {
+      await this.deps.materializeSession({
+        sessionId,
+        ...(input.clientDraftId !== undefined
+          ? { clientDraftId: input.clientDraftId }
+          : {}),
+        ...(input.draftSession !== undefined
+          ? { draftSession: input.draftSession }
+          : {}),
       })
-      const unrelatedTask = this.options.activeTasks
-        .list()
-        .find((task) => task.id !== `goal:${previous.id}`)
-      if (unrelatedTask)
-        throw new GoalServiceError(
-          'goal_mutation_busy',
-          'Another mutation runtime is already active.',
-        )
-
-      const previousHandle = this.options.coordinator.active(previous.id)
-      await this.options.coordinator.cancel(previous.id, 'goal_replaced')
-      if (previousHandle) await previousHandle.promise
-      await this.options.clearPendingInteraction?.(previous)
-      if (this.options.activeTasks.hasActive())
-        throw new GoalServiceError(
-          'goal_mutation_busy',
-          'The previous Goal runtime has not released mutation ownership.',
-        )
-
-      const created = await this.options.goalStore.create(replacement)
-      try {
-        const running = await this.options.coordinator.start(
-          created,
-          created.contract.outcome,
-        )
-        return await this.result(running, true)
-      } catch (error) {
-        await this.options.coordinator
-          .cancel(created.id, 'replacement_start_failed')
-          .catch(() => undefined)
-        throw error
-      }
-    })
-  }
-
-  private async startUnlocked(
-    input: GoalStartInput,
-  ): Promise<GoalOperationResult> {
-    if (this.options.activeTasks.hasActive())
-      throw new GoalServiceError(
-        'goal_mutation_busy',
-        'Another mutation runtime is already active.',
-      )
-    const session = await this.options.materializeSession(input)
-    if (await this.options.goalStore.findActiveBySession(session.id))
-      throw new GoalServiceError(
-        'goal_active_exists',
-        'This session already has a non-terminal Goal.',
-      )
-    const created = await this.options.goalStore.create(
-      newGoalRecord({
-        outcome: input.outcome,
-        scope: this.options.scopeForSession(session),
-        guardPolicy: input.guardPolicy ?? null,
-      }),
-    )
-    const running = await this.options.coordinator.start(
-      created,
-      created.contract.outcome,
-    )
-    return await this.result(running, true)
-  }
-
-  private async serializeStart<T>(action: () => Promise<T>): Promise<T> {
-    const previous = this.startBarrier
-    let release!: () => void
-    this.startBarrier = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    await previous
-    try {
-      return await action()
-    } finally {
-      release()
     }
+    const agent = this.deps.agentFor(sessionId)
+    const maxRounds = input.maxRounds ?? undefined
+    const goal = this.deps.goals.create(
+      agent,
+      {
+        objective,
+        ...(maxRounds !== undefined ? { maxGoalRounds: maxRounds } : {}),
+      },
+      'user',
+    )
+    return { accepted: true, goal }
+  }
+
+  async replace(_input: unknown): Promise<never> {
+    throw new OperationRetiredError(
+      'Goal 替换已下线：请先取消当前 Goal，再启动新的 Goal。',
+    )
   }
 
   async list(
     input: { sessionId?: string | null } = {},
-  ): Promise<GoalSummary[]> {
-    const sessionId = this.ownerSessionId(input.sessionId, 'goals.list')
-    this.options.requireReadableSession(sessionId, 'goals.list')
-    const records = (await this.options.goalStore.list())
-      .filter((goal) => goal.scope.sessionId === sessionId)
-      .slice(0, 50)
-    return await Promise.all(records.map((goal) => this.summarize(goal)))
+  ): Promise<GoalPayload[]> {
+    const sessionId = this.optionalSessionId(input.sessionId)
+    if (!sessionId) return []
+    const goal = this.deps.goalView(sessionId)
+    return goal ? [goal] : []
   }
 
   async bootstrap(sessionId?: string | null): Promise<BootstrapGoalsPayload> {
-    const recent = await this.list({ sessionId })
-    return {
-      active: recent.find((goal) => !isGoalTerminal(goal.status)) ?? null,
-      recent,
-    }
+    const id = this.optionalSessionId(sessionId)
+    return { active: id ? this.deps.goalView(id) : null }
   }
 
   async get(
     goalId: string,
     ownerSessionId?: string | null,
-  ): Promise<GoalSummary> {
-    return await this.summarize(
-      await this.requireOwnedGoal(goalId, ownerSessionId, 'goals.get'),
-    )
+  ): Promise<GoalPayload> {
+    const sessionId = this.sessionId(ownerSessionId, 'goals.get')
+    const goal = this.deps.goalView(sessionId)
+    if (!goal || goal.id !== goalId) throw notFound()
+    return goal
   }
 
   async pause(
     goalId: string,
     ownerSessionId?: string | null,
-    reason = 'user_pause',
   ): Promise<GoalOperationResult> {
-    await this.requireOwnedGoal(goalId, ownerSessionId, 'goals.pause')
-    const goal = await this.options.coordinator.pause(
-      goalId,
-      boundedReason(reason),
-    )
-    return await this.result(goal, true)
+    const { agent, ref } = this.current(goalId, ownerSessionId, 'goals.pause')
+    return { accepted: true, goal: this.deps.goals.pause(agent, ref) }
   }
 
   async resume(
     goalId: string,
     ownerSessionId?: string | null,
   ): Promise<GoalOperationResult> {
-    await this.requireOwnedGoal(goalId, ownerSessionId, 'goals.resume')
-    const goal = await this.options.coordinator.resume(goalId)
-    return await this.result(goal, true)
+    const { agent, ref } = this.current(goalId, ownerSessionId, 'goals.resume')
+    return { accepted: true, goal: this.deps.goals.resume(agent, ref) }
   }
 
+  /** Clears the current goal (revisioned tombstone); `reason` is accepted for compatibility. */
   async cancel(
     goalId: string,
-    reason?: string | null,
+    _reason?: string | null,
     ownerSessionId?: string | null,
   ): Promise<GoalOperationResult> {
-    const previous = await this.requireOwnedGoal(
-      goalId,
-      ownerSessionId,
-      'goals.cancel',
-    )
-    const goal = await this.options.coordinator.cancel(
-      goalId,
-      boundedReason(reason || 'user_cancelled'),
-    )
-    await this.options.clearPendingInteraction?.(previous)
-    return await this.result(goal, true)
+    const { agent, ref } = this.current(goalId, ownerSessionId, 'goals.cancel')
+    const cleared = this.deps.goals.clear(agent, ref)
+    return { accepted: true, goal: null, cleared }
   }
 
-  async pauseBySession(
-    sessionId: string,
-    reason: string,
-  ): Promise<GoalRecord | null> {
-    const goal = await this.options.goalStore.findActiveBySession(sessionId)
-    if (!goal) return null
-    const paused = await this.options.coordinator.pause(
-      goal.id,
-      boundedReason(reason),
-    )
-    return paused
-  }
-
-  async cancelAndSettleBySession(
-    sessionId: string,
-    reason: string,
-  ): Promise<GoalRecord | null> {
-    const goal = await this.options.goalStore.findActiveBySession(sessionId)
-    if (!goal) return null
-    const handle = this.options.coordinator.active(goal.id)
-    const cancelled = await this.options.coordinator.cancel(
-      goal.id,
-      boundedReason(reason),
-    )
-    if (handle) await handle.promise
-    await this.options.clearPendingInteraction?.(goal)
-    return cancelled
-  }
-
-  private async requireOwnedGoal(
+  private current(
     goalId: string,
     ownerSessionId: string | null | undefined,
     operation: string,
-  ): Promise<GoalRecord> {
-    const sessionId = this.ownerSessionId(ownerSessionId, operation)
-    this.options.requireReadableSession(sessionId, operation)
-    const goal = await this.options.goalStore.get(goalId)
-    if (!goal)
-      throw new GoalServiceError('goal_not_found', 'Goal does not exist.')
-    if (goal.scope.sessionId !== sessionId)
-      throw new GoalServiceError(
-        'goal_session_mismatch',
-        'Goal does not belong to the readable session.',
-      )
-    return goal
+  ): { agent: Agent; ref: GoalRef } {
+    const sessionId = this.sessionId(ownerSessionId, operation)
+    const agent = this.deps.agentFor(sessionId)
+    const goal = this.deps.goals.get(agent)
+    if (!goal || goal.id !== goalId) throw notFound()
+    return { agent, ref: { id: goal.id, revision: goal.revision } }
   }
 
-  private ownerSessionId(
+  private optionalSessionId(explicit: string | null | undefined): string {
+    return String(explicit ?? this.deps.activeSessionId() ?? '').trim()
+  }
+
+  private sessionId(
     explicit: string | null | undefined,
     operation: string,
   ): string {
-    const sessionId = String(
-      explicit ?? this.options.activeSessionId?.() ?? '',
-    ).trim()
+    const sessionId = this.optionalSessionId(explicit)
     if (!sessionId)
       throw new GoalServiceError(
         'goal_session_required',
-        `${operation} requires a readable session.`,
+        `${operation} 需要一个会话。`,
       )
     return sessionId
   }
-
-  private async summarize(goal: GoalRecord): Promise<GoalSummary> {
-    return this.options.summarize?.(goal) ?? goalSummary(goal)
-  }
-
-  private async result(
-    goal: GoalRecord,
-    accepted: boolean,
-  ): Promise<GoalOperationResult> {
-    return {
-      accepted,
-      goal: await this.summarize(goal),
-      activeTask:
-        this.options.activeTasks
-          .list()
-          .find((task) => task.id === `goal:${goal.id}`) ?? null,
-    }
-  }
 }
 
-function boundedReason(value: string): string {
-  const clean = String(value ?? '')
-    .replace(
-      /\b(Bearer|token|api[_-]?key|password|secret)\b[^\s]*/gi,
-      '$1 [REDACTED]',
-    )
-    .replace(/[\r\n]+/g, ' ')
-    .trim()
-  return (clean || 'unspecified').slice(0, 500)
+function notFound(): GoalServiceError {
+  return new GoalServiceError('goal_not_found', '当前会话中不存在该 Goal。')
 }

@@ -13,8 +13,10 @@ import {
 import type {
   BootstrapPayload,
   ChatSendPayload,
+  ControlPayload,
   GoalOperationResult,
-  RuntimeGoalSummary,
+  PermissionPreset,
+  RuntimeGoalView,
   SessionInfo,
 } from '../types'
 import type { GoalCardAction } from '../runtime/goalRender'
@@ -26,6 +28,8 @@ export interface SlashCommandDeps {
   busy: Ref<boolean>
   commandDescriptors: Ref<CommandDescriptor[]>
   resolveSessionId: () => Promise<string>
+  /** Backend session that control changes apply to (null for drafts). */
+  controlSessionId?: () => string | null
   sendMessage: (payload: string | ChatSendPayload) => boolean
   showToast: (message: string) => void
   refreshAll: () => Promise<void>
@@ -34,7 +38,7 @@ export interface SlashCommandDeps {
     params?: Record<string, unknown>,
   ) => void | Promise<void>
   activateTransitionedSession: (session: SessionInfo) => Promise<void>
-  currentGoal: () => RuntimeGoalSummary | null
+  currentGoal: () => RuntimeGoalView | null
   startGoal: (outcome: string) => Promise<GoalOperationResult>
   runGoalAction: (
     goalId: string,
@@ -55,9 +59,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     currentGoalCaptureStatus: deps.currentGoalCaptureStatus,
     agentBusy: () => deps.busy.value,
     setPlanEnabled: async (enabled) => {
-      await writeControlMode(
-        enabled ? 'plan' : savedExecutionPermission(deps.boot.value?.control),
-      )
+      await writeControlMode(enabled ? 'plan' : 'default')
     },
     cancelGoal: (goalId, reason) =>
       deps.runGoalAction(goalId, 'cancel', reason),
@@ -218,13 +220,22 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     )
   }
 
+  function applyControl(control: unknown): void {
+    if (!deps.boot.value || !control || typeof control !== 'object') return
+    deps.boot.value.control = control as ControlPayload
+  }
+
   async function setPermissionMode(
-    mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
+    preset: PermissionPreset,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const data = await core('control.setPermissionMode', mode)
-      if (deps.boot.value) deps.boot.value.control = data
-      deps.showToast(`执行权限已切换为${permissionLabel(mode)}`)
+      const data = await core(
+        'control.setPermissionMode',
+        preset,
+        deps.controlSessionId?.() ?? null,
+      )
+      applyControl(data)
+      deps.showToast(`执行权限已切换为${permissionLabel(preset)}`)
       return { ok: true }
     } catch (error) {
       const message = displayError(error)
@@ -233,19 +244,20 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     }
   }
 
-  async function writeControlMode(
-    mode: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan',
-  ) {
-    const data = await core('control.setMode', mode)
-    if (deps.boot.value) deps.boot.value.control = data
-    deps.showToast(
-      `已切换为${mode === 'plan' ? '计划模式' : permissionLabel(mode)}`,
+  /** Plan mode is a toggle separate from the permission preset. */
+  async function writeControlMode(mode: 'plan' | 'default') {
+    const data = await core(
+      'control.setMode',
+      mode,
+      deps.controlSessionId?.() ?? null,
     )
+    applyControl(data.control)
+    deps.showToast(mode === 'plan' ? '已进入计划模式' : '已退出计划模式')
     return data
   }
 
   async function setControlMode(
-    mode: 'ask_before_edit' | 'smart_auto' | 'full_access' | 'plan',
+    mode: 'plan' | 'default',
   ): Promise<{ ok: boolean; error?: string }> {
     try {
       await writeControlMode(mode)
@@ -289,22 +301,10 @@ function createInvocationId(): string {
   return `desktop_command_${suffix}`
 }
 
-function savedExecutionPermission(
-  control: BootstrapPayload['control'] | undefined,
-): 'ask_before_edit' | 'smart_auto' | 'full_access' {
-  if (control?.mode === 'plan' && control.previous_mode)
-    return control.previous_mode
-  if (control?.mode === 'smart_auto' || control?.mode === 'full_access')
-    return control.mode
-  return 'ask_before_edit'
-}
-
-function permissionLabel(
-  mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
-): string {
-  if (mode === 'full_access') return '完全访问'
-  if (mode === 'smart_auto') return '智能自动'
-  return '询问确认'
+function permissionLabel(preset: PermissionPreset): string {
+  if (preset === 'danger-full-access') return '完全访问'
+  if (preset === 'read-only') return '只读'
+  return '工作区可写'
 }
 
 function displayError(error: unknown): string {

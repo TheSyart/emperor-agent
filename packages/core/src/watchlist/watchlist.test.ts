@@ -9,8 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { TokenTracker } from '../memory/token-tracker'
-import type { ModelRouter, ProviderSnapshot } from '../model/router'
-import type { LLMResponse } from '../providers/base'
+import { LlmClient } from '../llm/client'
+import { ScriptedAdapter, testRoute } from '../harness/testing'
 import { parseWatchlistDecision, WatchlistDecision } from './models'
 import { WatchlistService } from './service'
 import { WatchlistStore } from './store'
@@ -103,7 +103,7 @@ describe('WatchlistDecision and service', () => {
     const root = tmp('emperor-watchlist-model-')
     const tracker = new TokenTracker(join(root, 'memory', 'token_ledger.jsonl'))
     const service = new WatchlistService(root, {
-      modelRouter: fakeRouter(),
+      llm: fakeLlm(),
       tokenTracker: tracker,
     })
     service.write('- Check incident queue')
@@ -112,6 +112,7 @@ describe('WatchlistDecision and service', () => {
     expect(decision.action).toBe('run')
     expect(decision.model).toBe('active-model')
     expect(decision.model_entry_id).toBe('active-entry')
+    expect(decision.provider).toBe('active-entry')
     expect(decision.model_role).toBeNull()
     const ledger = readFileSync(tracker.logFile, 'utf8')
     expect(ledger).toContain('"usage_type":"watchlist_check"')
@@ -120,50 +121,16 @@ describe('WatchlistDecision and service', () => {
   })
 })
 
-function fakeRouter(): ModelRouter {
-  const active = snapshot('active-model', async () =>
-    response(
-      '{"action":"run","reason":"timely","message":"Check incident queue"}',
-    ),
+function fakeLlm(): LlmClient {
+  const adapter = new ScriptedAdapter([
+    {
+      text: '{"action":"run","reason":"timely","message":"Check incident queue"}',
+    },
+  ])
+  const llm = new LlmClient({ adapterFor: () => adapter })
+  llm.setRoutes(
+    [testRoute({ id: 'active-entry', modelId: 'active-model' })],
+    'active-entry',
   )
-  return {
-    route: () => ({
-      snapshot: active,
-      useCase: 'watchlist_check',
-      reason: 'watchlist_check',
-      estimatedTokens: 10,
-    }),
-  } as unknown as ModelRouter
-}
-
-function snapshot(
-  model: string,
-  chat: (args: Record<string, unknown>) => Promise<LLMResponse>,
-): ProviderSnapshot {
-  return {
-    provider: { chat } as never,
-    providerName: 'fake',
-    providerLabel: 'Fake',
-    model,
-    apiBase: null,
-    generation: { maxTokens: 2000, temperature: 0.1, reasoningEffort: null },
-    contextWindowTokens: 100_000,
-    config: {},
-    supportsVision: false,
-    modelEntryId: 'active-entry',
-    entryName: 'active-entry',
-    entryLabel: 'Fake',
-    routeReason: 'watchlist_check',
-  }
-}
-
-function response(content: string): LLMResponse {
-  return {
-    content,
-    toolCalls: [],
-    finishReason: 'stop',
-    usage: { input: 3, output: 2 },
-    reasoningContent: null,
-    thinkingBlocks: null,
-  }
+  return llm
 }

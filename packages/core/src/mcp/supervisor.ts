@@ -557,6 +557,9 @@ function diagnosticError(
   error: MCPConnectionError,
 ): MCPConnectionDiagnosticError {
   const code = error.code as MCPConnectionErrorCode
+  // Configuration errors are composed locally from names only (no secrets).
+  if (code === 'mcp_config_invalid')
+    return { code, message: error.message.slice(0, 240) }
   return { code, message: diagnosticMessage(code) }
 }
 
@@ -568,6 +571,8 @@ function diagnosticMessage(code: MCPConnectionErrorCode): string {
   if (code === 'mcp_restart_exhausted')
     return 'MCP server restart budget was exhausted'
   if (code === 'mcp_unavailable') return 'MCP server is unavailable'
+  if (code === 'mcp_config_invalid')
+    return 'MCP server configuration is invalid'
   return 'MCP server connection failed'
 }
 

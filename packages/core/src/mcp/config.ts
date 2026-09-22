@@ -6,7 +6,9 @@ import {
   type PersistenceAdapter,
   type SnapshotCodec,
 } from '../store/persistence'
+import { EmperorError } from '../errors'
 import { logger } from '../util/log'
+import { normalizeMcpTransport } from './import'
 import {
   ConfigResolver,
   defineConfigKey,
@@ -16,7 +18,8 @@ import {
 
 export interface ServerConfig {
   name: string
-  transport: 'stdio' | 'sse' | string
+  /** `stdio` | `sse` | `http` (Streamable HTTP); anything else is a configuration error. */
+  transport: 'stdio' | 'sse' | 'http' | string
   enabled: boolean
   command: string | null
   args: string[]
@@ -40,6 +43,13 @@ export const DEFAULT_MCP_CONFIG = {
 } satisfies Record<string, unknown>
 
 export const MCP_CONFIG_FILE = 'mcp_config.json'
+
+/** A rejected `mcp_config.json` write; the message names paths only, never values. */
+export class McpConfigError extends EmperorError {
+  constructor(message: string) {
+    super(message, 'mcp_config_invalid')
+  }
+}
 
 export interface McpConfigPersistenceOptions {
   persistenceAdapter?: PersistenceAdapter
@@ -148,9 +158,102 @@ function maskMcpEditorSecrets(config: MCPConfig): MCPConfig {
     server.args = server.args.map(maskSecretLeaf)
     server.env = maskSecretRecord(server.env)
     server.headers = maskSecretRecord(server.headers)
-    server.url = server.url === null ? null : maskSecretLeaf(server.url)
+    server.url = server.url === null ? null : maskSecretUrl(server.url)
   }
   return masked
+}
+
+/** The stored `mcp_config.json` as written: no env expansion, no masking, unknown fields kept. */
+export async function loadMcpConfigRaw(
+  root: string,
+  opts: McpConfigPersistenceOptions = {},
+): Promise<Record<string, unknown>> {
+  const path = join(root, MCP_CONFIG_FILE)
+  const fallback = structuredClone(DEFAULT_MCP_CONFIG) as Record<
+    string,
+    unknown
+  >
+  if (!existsSync(path)) return fallback
+  const snapshot = await mcpConfigSnapshot(path, opts.persistenceAdapter).read({
+    fallback,
+  })
+  const value = structuredClone(snapshot.value)
+  if (!objectOrNull(value.servers)) value.servers = {}
+  return value
+}
+
+interface UrlParts {
+  scheme: string
+  userinfo: string | null
+  host: string
+  path: string
+  query: Array<{ key: string; value: string | null }> | null
+  fragment: string | null
+}
+
+const URL_PARTS_RE =
+  /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s
+
+/** Split a URL without re-encoding it (placeholders and spelling stay verbatim). */
+function splitUrl(value: string): UrlParts | null {
+  const match = URL_PARTS_RE.exec(value)
+  if (!match) return null
+  const authority = match[2] ?? ''
+  const at = authority.lastIndexOf('@')
+  const query = match[4]
+  return {
+    scheme: match[1] ?? '',
+    userinfo: at >= 0 ? authority.slice(0, at) : null,
+    host: at >= 0 ? authority.slice(at + 1) : authority,
+    path: match[3] ?? '',
+    query:
+      query === undefined
+        ? null
+        : query.split('&').map((part) => {
+            const eq = part.indexOf('=')
+            return eq < 0
+              ? { key: part, value: null }
+              : { key: part.slice(0, eq), value: part.slice(eq + 1) }
+          }),
+    fragment: match[5] ?? null,
+  }
+}
+
+function joinUrl(parts: UrlParts): string {
+  const query =
+    parts.query === null
+      ? ''
+      : `?${parts.query
+          .map((pair) =>
+            pair.value === null ? pair.key : `${pair.key}=${pair.value}`,
+          )
+          .join('&')}`
+  return (
+    parts.scheme +
+    (parts.userinfo === null ? '' : `${parts.userinfo}@`) +
+    parts.host +
+    parts.path +
+    query +
+    (parts.fragment === null ? '' : `#${parts.fragment}`)
+  )
+}
+
+/** Editor view of a URL: scheme/host/path stay readable; userinfo, query values, and fragment are secrets. */
+export function maskSecretUrl(value: string): string {
+  const parts = splitUrl(value)
+  if (parts === null) return maskSecretLeaf(value)
+  const maskPart = (part: string | null): string | null =>
+    part === null || part === '' ? part : maskSecretLeaf(part)
+  return joinUrl({
+    ...parts,
+    userinfo: maskPart(parts.userinfo),
+    query:
+      parts.query?.map((pair) => ({
+        key: pair.key,
+        value: maskPart(pair.value),
+      })) ?? null,
+    fragment: maskPart(parts.fragment),
+  })
 }
 
 function maskSecretRecord(
@@ -175,7 +278,7 @@ export async function saveMcpConfig(
     typeof raw.servers !== 'object' ||
     Array.isArray(raw.servers)
   )
-    throw new Error("mcp_config: 'servers' must be an object")
+    throw new McpConfigError("mcp_config: 'servers' must be an object")
   const stored = (
     await resolveMcpConfig(
       root,
@@ -232,8 +335,8 @@ function restoreMcpEditorSecrets(
       previous?.headers,
       `servers.${serverName}.headers`,
     )
-    if (submitted.url === MCP_EDITOR_SECRET_MARKER) {
-      submitted.url = restoreSecretLeaf(
+    if (typeof submitted.url === 'string') {
+      submitted.url = restoreSecretUrl(
         submitted.url,
         previous?.url,
         `servers.${serverName}.url`,
@@ -261,6 +364,58 @@ function restoreSecretRecord(
   return submitted
 }
 
+function restoreSecretUrl(
+  submitted: string,
+  previous: string | null | undefined,
+  path: string,
+): string {
+  if (!submitted.includes(MCP_EDITOR_SECRET_MARKER)) return submitted
+  if (submitted === MCP_EDITOR_SECRET_MARKER)
+    return restoreSecretLeaf(submitted, previous, path) as string
+  const missing = (): Error =>
+    new McpConfigError(
+      `mcp_config: secret marker has no stored value at ${path}`,
+    )
+  if (typeof previous !== 'string') throw missing()
+  if (maskSecretUrl(previous) === submitted) return previous
+  const next = splitUrl(submitted)
+  const prior = splitUrl(previous)
+  if (next === null || prior === null) throw missing()
+  // Masked values never follow the URL to another origin.
+  if (
+    next.scheme.toLowerCase() !== prior.scheme.toLowerCase() ||
+    next.host.toLowerCase() !== prior.host.toLowerCase()
+  )
+    throw new McpConfigError(
+      `mcp_config: masked URL secrets at ${path} can only be kept for the same host`,
+    )
+  const restorePart = (
+    part: string | null,
+    stored: string | null | undefined,
+  ): string | null => {
+    if (part !== MCP_EDITOR_SECRET_MARKER) return part
+    if (typeof stored !== 'string') throw missing()
+    return stored
+  }
+  const seen = new Map<string, number>()
+  const restored = joinUrl({
+    ...next,
+    userinfo: restorePart(next.userinfo, prior.userinfo),
+    query:
+      next.query?.map((pair) => {
+        const occurrence = seen.get(pair.key) ?? 0
+        seen.set(pair.key, occurrence + 1)
+        const stored = prior.query?.filter((item) => item.key === pair.key)[
+          occurrence
+        ]?.value
+        return { key: pair.key, value: restorePart(pair.value, stored) }
+      }) ?? null,
+    fragment: restorePart(next.fragment, prior.fragment),
+  })
+  if (restored.includes(MCP_EDITOR_SECRET_MARKER)) throw missing()
+  return restored
+}
+
 function restoreSecretLeaf(
   submitted: unknown,
   previous: unknown,
@@ -268,7 +423,9 @@ function restoreSecretLeaf(
 ): unknown {
   if (submitted !== MCP_EDITOR_SECRET_MARKER) return submitted
   if (typeof previous !== 'string') {
-    throw new Error(`mcp_config: secret marker has no stored value at ${path}`)
+    throw new McpConfigError(
+      `mcp_config: secret marker has no stored value at ${path}`,
+    )
   }
   return previous
 }
@@ -367,7 +524,7 @@ function parseConfig(raw: Record<string, unknown>): MCPConfig {
     const obj = cfg as Record<string, unknown>
     servers[name] = {
       name,
-      transport: stringValue(obj.transport, 'stdio'),
+      transport: transportValue(obj),
       enabled: obj.enabled === undefined ? true : Boolean(obj.enabled),
       command: nullableString(obj.command),
       args: Array.isArray(obj.args) ? obj.args.map((item) => String(item)) : [],
@@ -386,9 +543,19 @@ function parseConfig(raw: Record<string, unknown>): MCPConfig {
   return { servers, defaults }
 }
 
-function stringValue(value: unknown, fallback: string): string {
-  const text = String(value ?? '').trim()
-  return text || fallback
+/** Explicit transport (client spellings normalized), else url-only → http, else stdio. */
+function transportValue(obj: Record<string, unknown>): string {
+  const declared = String(obj.transport ?? obj.type ?? '').trim()
+  if (declared) return normalizeMcpTransport(declared) ?? declared
+  return nullableString(obj.url) && !nullableString(obj.command)
+    ? 'http'
+    : 'stdio'
+}
+
+function objectOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function nullableString(value: unknown): string | null {

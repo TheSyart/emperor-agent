@@ -7,12 +7,7 @@ describe('optional capability portfolio lifecycle', () => {
   it('registers every maintained optional capability with a complete lifecycle', () => {
     const portfolio = optionalCapabilityPortfolio()
 
-    expect(portfolio.map((item) => item.id)).toEqual([
-      'code_intelligence',
-      'hybrid_memory',
-      'soft_git_rewind',
-      'watchlist',
-    ])
+    expect(portfolio.map((item) => item.id)).toEqual(['watchlist'])
     for (const item of portfolio) {
       expect(item.owner).not.toBe('')
       expect(item.userEntry).not.toBe('')

@@ -28,9 +28,23 @@ describe('builtin slash command catalog', () => {
       'builtin.continue',
     ])
     expect(commands.every((command) => command.aliases.length === 0)).toBe(true)
-    expect(commands.every((command) => !command.hiddenAliases?.length)).toBe(
-      true,
+    expect(
+      commands
+        .filter((command) => command.hiddenAliases?.length)
+        .map((command) => [command.name, command.hiddenAliases]),
+    ).toEqual([['permissions', ['permission']]])
+  })
+
+  it('offers the three harness permission presets', () => {
+    const permissions = builtinCommandDescriptors().find(
+      (command) => command.name === 'permissions',
     )
+    expect(permissions?.argumentSchema[0]?.values).toEqual([
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
+      'status',
+    ])
   })
 
   it('uses plain English product copy instead of developer categories', () => {

@@ -7,6 +7,8 @@ import {
   PREVIEW_EXTERNAL_CHANNEL,
   PREVIEW_OPEN_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
+  SELECT_FILE_CHANNEL,
+  SKILLS_OPEN_FOLDER_CHANNEL,
 } from '../shared/ipc-contract'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
 
@@ -96,6 +98,78 @@ describe('desktop capability IPC', () => {
       )
     }
     expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('opens Skills folders and picks files through validated main-only capabilities', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const folderPath = vi.fn((input: { scope: string }) => {
+      if (input.scope === 'project')
+        throw Object.assign(new Error('internal detail'), {
+          toSafe: () => ({
+            code: 'skill_scope_unavailable',
+            message: 'Project Skills need a Build session bound to a project',
+          }),
+        })
+      return '/home/me/.emperor/skills'
+    })
+    const openPath = vi.fn(async () => '')
+    const selectFile = vi.fn(async () => '/tmp/skill.zip')
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      preview: {
+        open: vi.fn(),
+        openExternal: vi.fn(),
+        setBounds: vi.fn(),
+        action: vi.fn(),
+        close: vi.fn(),
+      },
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      skills: { folderPath },
+      openPath,
+      selectFile,
+    })
+
+    await expect(
+      ipc.invoke(SKILLS_OPEN_FOLDER_CHANNEL, { scope: 'user' }),
+    ).resolves.toEqual({ ok: true, path: '/home/me/.emperor/skills' })
+    expect(folderPath).toHaveBeenCalledWith({ scope: 'user', sessionId: null })
+    expect(openPath).toHaveBeenCalledWith('/home/me/.emperor/skills')
+    await expect(
+      ipc.invoke(SKILLS_OPEN_FOLDER_CHANNEL, {
+        scope: 'project',
+        sessionId: 'session-1',
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Project Skills need a Build session bound to a project',
+      // The code travels to the renderer, which turns a missing project folder
+      // into its own message instead of surfacing a raw error.
+      code: 'skill_scope_unavailable',
+    })
+    await expect(
+      ipc.invoke(SKILLS_OPEN_FOLDER_CHANNEL, { scope: '../etc' }),
+    ).rejects.toThrow(/scope/)
+
+    await expect(
+      ipc.invoke(SELECT_FILE_CHANNEL, {
+        title: 'Pick a zip',
+        filters: [{ name: 'Zip', extensions: ['zip'] }],
+      }),
+    ).resolves.toBe('/tmp/skill.zip')
+    expect(selectFile).toHaveBeenCalledWith({
+      title: 'Pick a zip',
+      filters: [{ name: 'Zip', extensions: ['zip'] }],
+    })
+    await expect(
+      ipc.invoke(SELECT_FILE_CHANNEL, {
+        filters: [{ name: 'Bad', extensions: ['../x'] }],
+      }),
+    ).rejects.toThrow(/filters/)
+    expect(authorize).toHaveBeenCalledTimes(5)
   })
 })
 

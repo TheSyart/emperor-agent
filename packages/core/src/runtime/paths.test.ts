@@ -8,6 +8,7 @@ import {
   defaultStateRoot,
   ensureRuntimeStateDirs,
   resolveRuntimePaths,
+  resolveWriteStagingRoot,
 } from './paths'
 
 function tmp(prefix: string): string {
@@ -42,6 +43,26 @@ describe('RuntimePaths', () => {
     // real directories under the machine's actual ~/.emperor.
     expect(paths.memoryRoot).toBe(join(defaultStateRoot(), 'memory'))
     expect(paths.sessionsRoot).toBe(join(defaultStateRoot(), 'sessions'))
+  })
+
+  it('resolves the write-staging root from Emperor Home, never from the project', () => {
+    const envStateRoot = tmp('emperor-env-state-root-')
+    process.env[ENV_KEY] = envStateRoot
+    const explicitStateRoot = tmp('emperor-explicit-state-root-')
+
+    expect(resolveWriteStagingRoot()).toBe(join(envStateRoot, 'write-staging'))
+    expect(resolveWriteStagingRoot({ stateRoot: explicitStateRoot })).toBe(
+      join(explicitStateRoot, 'write-staging'),
+    )
+    // Staged writes are created on demand, so bootstrap leaves the dir absent.
+    const paths = resolveRuntimePaths(tmp('emperor-runtime-paths-'), {
+      stateRoot: explicitStateRoot,
+    })
+    ensureRuntimeStateDirs(paths)
+    expect(paths.writeStagingRoot).toBe(
+      join(explicitStateRoot, 'write-staging'),
+    )
+    expect(existsSync(paths.writeStagingRoot)).toBe(false)
   })
 
   it('EMPEROR_CONFIG_DIR overrides the default when no explicit stateRoot is passed', () => {
@@ -95,12 +116,12 @@ describe('RuntimePaths', () => {
     expect(existsSync(paths.sessionsRoot)).toBe(true)
     expect(existsSync(paths.projectsRoot)).toBe(true)
     expect(existsSync(paths.attachmentsRoot)).toBe(true)
-    expect(existsSync(paths.mediaRoot)).toBe(true)
+    expect(existsSync(paths.mediaRoot)).toBe(false)
     expect(existsSync(paths.schedulerRoot)).toBe(true)
-    expect(existsSync(paths.teamRoot)).toBe(true)
-    expect(existsSync(paths.tasksRoot)).toBe(true)
+    expect(existsSync(paths.teamRoot)).toBe(false)
+    expect(existsSync(paths.tasksRoot)).toBe(false)
     expect(existsSync(paths.processesRoot)).toBe(true)
-    expect(existsSync(paths.controlRoot)).toBe(true)
+    expect(existsSync(paths.controlRoot)).toBe(false)
     expect(existsSync(join(paths.stateRoot, 'external'))).toBe(false)
     expect(existsSync(paths.templatesDir)).toBe(false)
     expect(existsSync(paths.skillsDir)).toBe(false)
@@ -144,6 +165,13 @@ describe('RuntimePaths', () => {
       path: join(emperorHome, 'plugins', 'installed_plugins.json'),
       sensitive: true,
       createPolicy: 'bootstrap',
+    })
+    expect(catalog.get('writeStaging')).toMatchObject({
+      path: join(emperorHome, 'write-staging'),
+      scope: 'user',
+      writable: true,
+      sensitive: true,
+      createPolicy: 'lazy',
     })
     expect(catalog.get('builtinSkills')).toMatchObject({
       path: join(runtimeRoot, 'skills'),

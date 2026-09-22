@@ -1,12 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import type {
   CommandCompletion,
   CommandDescriptor,
   CommandSurface,
 } from '@emperor/core/api'
-import SessionSidebar from './components/layout/SessionSidebar.vue'
+import AppFrame from './components/shell/AppFrame.vue'
+import SidebarRoot from './components/sidebar/SidebarRoot.vue'
+import { useSubagentCounts } from './components/sidebar/subagentCounts'
+import { workspaceSourcesFromSnapshot } from './components/details/detailsSources'
+import { useLazySessionConversation } from './composables/useLazySessionConversation'
+import { useSettingsRoute } from './components/settings/useSettingsRoute'
+import Toast from './components/ui/Toast.vue'
+import { sessionLocation } from './router'
 import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
@@ -20,30 +34,34 @@ import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
 import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
-import { activeGoalForSession } from './runtime/selectors'
+import { activeGoalForSession, hasProjectedGoal } from './runtime/selectors'
+import { normalizeGoal } from './runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
-import type {
-  GoalOperationResult,
-  RuntimeGoalSummary,
-  SessionInfo,
-} from './types'
+import { shouldFollowActiveSession } from './runtime/routeFollow'
+import type { GoalOperationResult, RuntimeGoalView, SessionInfo } from './types'
+
+// The details column (git / files / xterm) and the settings modal are heavy
+// and not needed for first paint: split them out of the initial chunk.
+const DetailsPanel = defineAsyncComponent(
+  () => import('./components/details/DetailsPanel.vue'),
+)
+const SettingsModal = defineAsyncComponent(
+  () => import('./components/settings/SettingsModal.vue'),
+)
 
 const router = useRouter()
+const route = useRoute()
+const settingsRoute = useSettingsRoute()
+const subagentCounts = useSubagentCounts()
 const toast = ref('')
-let toastTimer: number | undefined
-const hideAppSidebar = computed(
-  () => router.currentRoute.value.meta?.hideAppSidebar === true,
-)
+const toastOpen = ref(false)
 const modelSetupPromptOpen = ref(false)
 const modelSetupDismissed = ref(false)
 const commandDescriptors = ref<CommandDescriptor[]>([])
 
 function showToast(message: string) {
   toast.value = message
-  if (toastTimer) window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => {
-    toast.value = ''
-  }, 2600)
+  toastOpen.value = Boolean(message)
 }
 
 function closeModelSetupPrompt() {
@@ -57,8 +75,6 @@ const {
   boot,
   loading,
   error,
-  activeSkill,
-  skillContent,
   configContent,
   mcpContent,
   loadBootstrap,
@@ -66,14 +82,8 @@ const {
   startProfileInterview: startProfileInterviewBase,
   skipProfileInterview: skipProfileInterviewBase,
   compactMemory,
-  loadSkill,
-  startNewSkill,
-  saveSkill,
-  deleteSkill,
   loadConfig,
   saveConfig,
-  loadMcpConfig,
-  loadMcpStatus,
   saveMcpConfig,
   saveMemory,
   loadEpisode,
@@ -95,9 +105,9 @@ const runtime = useRuntime({
   onSessionTitleUpdated: sessionStore.applySessionTitleUpdatedEvent,
   onSessionControlPendingChanged: sessionStore.applySessionControlPending,
   refreshSessions: sessionStore.load,
+  onSubagentEvent: (owner) => subagentCounts.schedule(owner),
 })
 const {
-  messages,
   queuedPrompts,
   queueDraftRecovery,
   clearQueueDraftRecovery,
@@ -106,10 +116,8 @@ const {
   status,
   switchSession,
   pending,
-  planProjection,
   goalProjection,
-  turnChangeProjection,
-  activeTurnChange,
+  setSessionGoal,
   sessionId,
   sessionRuntimeStates,
   runtimeText,
@@ -123,50 +131,36 @@ const {
   approvePlan,
   cancelInteraction,
   stopActive,
-  restoreFromHistory,
+  restoreRuntimeState,
 } = runtime
 
-const currentGoal = computed(() => {
-  const projected = activeGoalForSession(goalProjection, sessionId.value)
-  if (projected) return projected
-  const bootstrapActive = boot.value?.goals?.active
-  return bootstrapActive?.sessionId === sessionId.value &&
-    !goalProjection.byId[bootstrapActive.id]
-    ? bootstrapActive
-    : null
+/** The session's goal: live projection first, bootstrap snapshot as fallback. */
+const sessionGoal = computed<RuntimeGoalView | null>(() => {
+  const owner = sessionId.value
+  if (hasProjectedGoal(goalProjection, owner))
+    return activeGoalForSession(goalProjection, owner)
+  return normalizeGoal(boot.value?.goals?.active)
 })
 
-function applyGoalSummary(goal: RuntimeGoalSummary) {
-  goalProjection.byId[goal.id] = goal
-  if (isTerminalGoal(goal)) {
-    if (goalProjection.activeBySession[goal.sessionId] === goal.id)
-      delete goalProjection.activeBySession[goal.sessionId]
-  } else {
-    goalProjection.activeBySession[goal.sessionId] = goal.id
-  }
-  if (boot.value) {
-    const recent = [
-      goal,
-      ...(boot.value.goals?.recent || []).filter((item) => item.id !== goal.id),
-    ].slice(0, 50)
-    boot.value.goals = {
-      active: isTerminalGoal(goal)
-        ? boot.value.goals?.active?.id === goal.id
-          ? null
-          : boot.value.goals?.active || null
-        : goal,
-      recent,
-    }
-  }
+/** The current non-terminal goal (a completed goal no longer drives the UI). */
+const currentGoal = computed<RuntimeGoalView | null>(() => {
+  const goal = sessionGoal.value
+  return goal && !isTerminalGoal(goal) ? goal : null
+})
+
+function applyGoalResult(owner: string, result: GoalOperationResult) {
+  setSessionGoal(owner, result.goal)
+  if (boot.value && owner === sessionId.value)
+    boot.value.goals = { active: result.goal }
 }
 
-async function startGoal(outcome: string): Promise<GoalOperationResult> {
+async function startGoal(objective: string): Promise<GoalOperationResult> {
   const owner = sessionId.value
   const draft = sessionStore.isDraftSessionId(owner)
     ? sessionStore.getSession(owner)
     : null
   const result = await core('goals.start', {
-    outcome,
+    objective,
     sessionId: owner,
     ...(draft
       ? {
@@ -183,7 +177,7 @@ async function startGoal(outcome: string): Promise<GoalOperationResult> {
         }
       : {}),
   })
-  applyGoalSummary(result.goal)
+  applyGoalResult(sessionId.value, result)
   return result
 }
 
@@ -202,34 +196,21 @@ async function runGoalAction(
   action: GoalCardAction,
   reason = 'user_confirmed_cancel',
 ): Promise<GoalOperationResult> {
+  const owner = sessionId.value
   const result =
     action === 'pause'
       ? await core('goals.pause', goalId)
       : action === 'resume'
         ? await core('goals.resume', goalId)
         : await core('goals.cancel', goalId, reason)
-  applyGoalSummary(result.goal)
+  applyGoalResult(owner, result)
   showToast(
     action === 'pause'
       ? 'Goal 已暂停'
       : action === 'resume'
         ? 'Goal 已恢复'
-        : 'Goal 已取消',
+        : 'Goal 已清除',
   )
-  return result
-}
-
-async function replaceGoal(
-  goalId: string,
-  outcome: string,
-): Promise<GoalOperationResult> {
-  const result = await core('goals.replace', {
-    goalId,
-    outcome,
-    sessionId: sessionId.value,
-  })
-  applyGoalSummary(result.goal)
-  showToast('已创建替代 Goal')
   return result
 }
 
@@ -238,14 +219,14 @@ async function onSessionActivate(id: string) {
   switchSession(id)
   if (sessionStore.isDraftSessionId(id)) return
   await bootstrap.loadBootstrap(false, sessionStore.backendSessionId())
-  restoreFromHistory(boot.value?.unarchivedHistory || [])
+  restoreRuntimeState()
 }
 
 async function openProfileInterviewSession(sessionId: string | null) {
   if (!sessionId) return
   await sessionStore.load()
   await onSessionActivate(sessionId)
-  await router.push('/').catch(() => undefined)
+  await router.push(sessionLocation(sessionId)).catch(() => undefined)
 }
 
 async function startProfileInterview() {
@@ -282,9 +263,10 @@ onMounted(async () => {
     sessionStore,
     bootstrap,
     switchSession,
-    restoreFromHistory,
+    restoreRuntimeState,
     connectSocket,
   })
+  startupDone.value = true
   await loadCommands()
 })
 
@@ -330,7 +312,8 @@ async function loadCommands(): Promise<void> {
 async function resolveCommandSessionId(): Promise<string> {
   const current = sessionStore.backendSessionId()
   if (current) return current
-  const draft = sessionStore.getSession(sessionId.value)
+  const draftId = sessionId.value
+  const draft = sessionStore.getSession(draftId)
   const created = await core('sessions.create', {
     title: draft?.title || '新会话',
     mode: draft?.mode || 'chat',
@@ -343,7 +326,9 @@ async function resolveCommandSessionId(): Promise<string> {
           }
         : null,
   })
-  await sessionStore.load()
+  // Same promotion path as a first message: swap the draft row in place so the
+  // route watcher follows to the real session instead of losing the draft id.
+  sessionStore.promoteDraft(draftId, created)
   await onSessionActivate(created.id)
   await loadCommands()
   return created.id
@@ -370,7 +355,7 @@ async function activateTransitionedSession(
 ): Promise<void> {
   await sessionStore.load()
   await onSessionActivate(session.id)
-  await router.push('/chat').catch(() => undefined)
+  await router.push(sessionLocation(session.id)).catch(() => undefined)
   await loadCommands()
 }
 
@@ -379,11 +364,11 @@ async function openCommandSurface(
   _params: Record<string, unknown> = {},
 ): Promise<void> {
   if (surface === 'model' || surface === 'reasoning') {
-    await router.push('/settings/model').catch(() => undefined)
+    await settingsRoute.openSettings('model')
     return
   }
   if (surface === 'permissions') {
-    await router.push('/settings/general').catch(() => undefined)
+    await settingsRoute.openSettings('general')
     return
   }
   if (surface === 'plan') {
@@ -398,7 +383,7 @@ async function openCommandSurface(
 async function configureModelFromPrompt() {
   modelSetupDismissed.value = true
   modelSetupPromptOpen.value = false
-  await router.push('/settings/model').catch(() => undefined)
+  await settingsRoute.openSettings('model')
 }
 
 watch(
@@ -437,6 +422,7 @@ const {
   busy,
   commandDescriptors,
   resolveSessionId: resolveCommandSessionId,
+  controlSessionId: () => sessionStore.backendSessionId() || null,
   sendMessage,
   refreshAll,
   openCommandSurface,
@@ -456,23 +442,113 @@ watch(
   (current, previous) => {
     if (!previous || current.sessionId !== previous.sessionId) return
     if (!previous.goalId || current.goalId) return
-    const goal = goalProjection.byId[previous.goalId]
-    if (!goal || !isTerminalGoal(goal)) return
+    const goal = sessionGoal.value
+    if (!goal || goal.id !== previous.goalId || !isTerminalGoal(goal)) return
     void reconcileTerminalGoal(previous.goalId).then((result) => {
       if (!result.ok && result.error) showToast(result.error)
     })
   },
 )
 
+// ── route ⇄ active session ───────────────────────────────────────────────
+// /chat/:sessionId is the source of truth for which conversation is shown.
+// Known sessions (sidebar list + drafts) activate the runtime; unknown ids
+// are child (subagent) sessions viewed read-only by ConversationView. The
+// route follows back when the active session moves — see routeFollow.ts for
+// the draft-promotion case.
+const routeSessionId = computed(() => {
+  const raw = route.params.sessionId
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return typeof value === 'string' ? value : ''
+})
+const startupDone = ref(false)
+let activating: string | null = null
+
+async function syncRouteSession(): Promise<void> {
+  if (!startupDone.value) return
+  if (route.name !== 'chat' && route.name !== 'trajectory') return
+  const target = routeSessionId.value
+  const active = sessionStore.activeId.value
+  if (!target) {
+    if (active)
+      await router
+        .replace({ ...(sessionLocation(active) as object), query: route.query })
+        .catch(() => undefined)
+    return
+  }
+  if (target === activating) return
+  // The sidebar store and the runtime each track an active session; creating
+  // a draft only moves the store. Activate unless BOTH already point here, or
+  // sends would still go to the previously active runtime session.
+  if (target === active && target === sessionId.value) return
+  if (!sessionStore.getSession(target)) return
+  activating = target
+  try {
+    await onSessionActivate(target)
+  } finally {
+    activating = null
+  }
+}
+
+watch([routeSessionId, startupDone], () => void syncRouteSession())
+watch(
+  () => sessionStore.activeId.value,
+  (active) => {
+    if (!startupDone.value) return
+    if (route.name !== 'chat' && route.name !== 'trajectory') return
+    if (
+      !shouldFollowActiveSession({
+        routeSessionId: routeSessionId.value,
+        activeId: active ?? '',
+        routeSessionKnown: Boolean(
+          routeSessionId.value && sessionStore.getSession(routeSessionId.value),
+        ),
+        routeSessionIsDraft: sessionStore.isDraftSessionId(
+          routeSessionId.value,
+        ),
+      })
+    )
+      return
+    void router
+      .replace({
+        ...(sessionLocation(
+          active,
+          route.name === 'trajectory' ? 'trajectory' : 'chat',
+        ) as object),
+        query: route.query,
+      })
+      .catch(() => undefined)
+  },
+)
+
+// The details column follows the active session's raw-log conversation
+// (Environment sources; workspace refresh as the transcript grows).
+const activeConversation = useLazySessionConversation(() => sessionId.value)
+const detailsSources = computed(() =>
+  workspaceSourcesFromSnapshot(activeConversation.value?.snapshot.value),
+)
+const detailsRefreshKey = computed(
+  () => activeConversation.value?.order.value.length ?? 0,
+)
+/** Session of the active Trajectory tab (the details inspector follows it). */
+const trajectorySessionId = computed(() =>
+  route.name === 'trajectory' ? routeSessionId.value : '',
+)
+
+function openChildSession(childId: string): void {
+  void router.push(sessionLocation(childId)).catch(() => undefined)
+}
+
+const activeSessionInfo = computed(() =>
+  sessionStore.getSession(sessionId.value),
+)
+
 provideAppContext({
   boot,
   loading,
   error,
-  activeSkill,
-  skillContent,
   configContent,
   mcpContent,
-  messages,
   queuedPrompts,
   queueDraftRecovery,
   clearQueueDraftRecovery,
@@ -480,10 +556,7 @@ provideAppContext({
   busy,
   status,
   pending,
-  planProjection,
   goalProjection,
-  turnChangeProjection,
-  activeTurnChange,
   goalCaptureState: goalCapture.state,
   sessionId,
   sessionRuntimeStates,
@@ -498,14 +571,8 @@ provideAppContext({
   startProfileInterview,
   skipProfileInterview,
   compactMemory,
-  loadSkill,
-  startNewSkill,
-  saveSkill,
-  deleteSkill,
   loadConfig,
   saveConfig,
-  loadMcpConfig,
-  loadMcpStatus,
   saveMcpConfig,
   saveMemory,
   loadEpisode,
@@ -528,7 +595,6 @@ provideAppContext({
   cancelInteraction,
   stopActive,
   runGoalAction,
-  replaceGoal,
   startGoal,
   submitFromComposer,
   showToast,
@@ -540,30 +606,45 @@ provideAppContext({
 </script>
 
 <template>
-  <div v-if="loading" class="loading-shell">
-    <div class="seal">令</div>
-    <div class="status-pill">
-      <span class="dot busy" />正在连接本地智能体服务
+  <div v-if="loading" class="boot-screen">
+    <div class="boot-card" role="status">
+      <span class="boot-dot" />正在连接本地智能体服务
     </div>
   </div>
 
-  <div v-else-if="error" class="loading-shell">
-    <div class="editor error-panel">
-      <div class="editor-title">Web UI 启动失败</div>
-      <div class="empty-note">{{ error }}</div>
-      <button class="tool-button ink mt-4" @click="refreshAll">重新连接</button>
+  <div v-else-if="error" class="boot-screen">
+    <div class="boot-card boot-error" role="alert">
+      <strong>桌面端启动失败</strong>
+      <p>{{ error }}</p>
+      <button type="button" class="boot-retry" @click="refreshAll">
+        重新连接
+      </button>
     </div>
   </div>
 
   <template v-else>
-    <div class="app-shell" :class="{ 'settings-app-shell': hideAppSidebar }">
-      <SessionSidebar v-if="!hideAppSidebar" @activate="onSessionActivate" />
+    <AppFrame>
+      <template #sidebar="{ collapsed, width, toggle }">
+        <SidebarRoot :collapsed="collapsed" :width="width" @toggle="toggle" />
+      </template>
       <router-view v-slot="{ Component }">
         <keep-alive>
           <component :is="Component" />
         </keep-alive>
       </router-view>
-    </div>
+      <template #details>
+        <DetailsPanel
+          :session-id="sessionId"
+          :project-path="activeSessionInfo?.project_path || ''"
+          :sources="detailsSources"
+          :agent-busy="busy"
+          :refresh-key="detailsRefreshKey"
+          :trajectory-session-id="trajectorySessionId"
+          @open-subagent="openChildSession"
+        />
+      </template>
+    </AppFrame>
+    <SettingsModal />
     <ModelSetupRequiredDialog
       :open="modelSetupPromptOpen"
       :message="modelSetupMessage"
@@ -572,5 +653,66 @@ provideAppContext({
     />
   </template>
 
-  <div class="toast" :class="{ show: toast }" role="status">{{ toast }}</div>
+  <Toast v-model:open="toastOpen" :message="toast" />
 </template>
+
+<style scoped>
+.boot-screen {
+  display: grid;
+  place-items: center;
+  height: 100dvh;
+  background: rgb(var(--bg-base));
+  color: rgb(var(--label-secondary));
+}
+
+.boot-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-takeover);
+  background: rgb(var(--bg-layer-1));
+  box-shadow: var(--shadow-lv2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  text-align: center;
+}
+
+.boot-card:not(.boot-error) {
+  flex-direction: row;
+}
+
+.boot-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-fill));
+  animation: ds-fade-in 1s ease-in-out infinite alternate;
+}
+
+.boot-error strong {
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+
+.boot-error p {
+  margin: 0;
+  color: rgb(var(--danger));
+  word-break: break-word;
+}
+
+.boot-retry {
+  height: calc(var(--space-8) + var(--space-1));
+  padding: 0 var(--space-3-5);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--button-primary-fill));
+  color: rgb(var(--button-primary-fg));
+  font-size: var(--fs-s);
+  cursor: pointer;
+}
+</style>

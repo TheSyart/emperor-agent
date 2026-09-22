@@ -9,9 +9,9 @@
   日常对话 · 项目工作 · 先规划再执行 · 持续完成长任务
 </p>
 
-Emperor Agent 是一款面向个人长期使用的桌面 Agent。你可以用它处理日常问答，也可以绑定本地项目，让 Agent 在明确的权限和验收条件下读取文件、运行工具并持续推进任务。
+Emperor Agent 是一款面向个人长期使用的桌面 Agent。你可以用它处理日常问答，也可以绑定本地项目，让 Agent 在明确的权限范围内读取文件、运行工具并持续推进任务。
 
-桌面端直接托管 TypeScript Core，界面通过 Electron IPC 与核心能力通信。已经退役的 Python CLI、HTTP server 和 WebSocket server 不再参与运行。
+桌面端直接托管 TypeScript Core 与 Agent 内核，界面通过 Electron IPC 与核心能力通信。已经退役的 Python CLI、HTTP server 和 WebSocket server 不再参与运行。
 
 <p align="center">
   <img src="assets/generated/readme-product-hero.png" alt="Emperor Agent 桌面工作区" width="920" />
@@ -34,21 +34,19 @@ Emperor Agent 是一款面向个人长期使用的桌面 Agent。你可以用它
 
 Emperor Agent 里有几组名称看起来相似，实际处在不同层级：
 
-| 层级               | 含义                                                 |
-| ------------------ | ---------------------------------------------------- |
-| Chat / Build       | 会话和工作区类型：一个用于普通对话，一个绑定本地项目 |
-| 询问 / 智能 / 完全 | 三种执行权限：决定哪些操作需要先询问                 |
-| Plan               | 独立的规划生命周期：只读探索、提问并提交方案         |
-| Goal               | 跨多个模型回合持续推进的长任务生命周期               |
-| Scheduler          | 按时间或条件触发任务的机制                           |
+| 层级         | 含义                                                                      |
+| ------------ | ------------------------------------------------------------------------- |
+| Chat / Build | 会话类型：一个用于普通对话，一个绑定本地项目                              |
+| 权限预设     | `read-only`、`workspace-write`、`danger-full-access`：决定 Agent 能写哪里 |
+| Plan         | 规划模式：先只读探索并提交方案，批准后再执行                              |
+| Goal         | 让 Agent 在你不再输入时一轮轮继续推进同一个目标                           |
+| Scheduler    | 按时间触发 Agent turn 的机制                                              |
 
-应用会把会话、记忆、配置、附件和运行轨迹保存在本机。Chat（普通对话）适合问答和轻量任务；Build（项目工作）会绑定本地目录，并读取项目的 `AGENTS.md` 和工作区上下文。
+应用会把会话、记忆、配置和附件保存在本机。Chat（普通对话）适合问答和轻量任务；Build（项目工作）绑定本地目录，并读取项目中的 `AGENTS.md` / `CLAUDE.md`。
 
-Plan（规划模式）用于先探索、再提交方案。Goal（目标模式）则负责持续完成一个结果：它会锁定范围和验收条件，执行过程中可以重新规划，但只有证据和 Completion Gate 都通过后才能标记为完成。
+每个会话的全部内容都记录在一份只追加的 session log 中：模型看到的内容与记录一一对应，应用崩溃后可以自动修复并继续使用。
 
-Plan 和 Goal 是互斥的顶层模式，Composer 同一时间只显示一个标识。Goal 内部可以使用 Plan 引擎规划和审批，但这只是 Goal 的“规划中”阶段，不会再显示一个独立 Plan。
-
-“本地优先”不等于完全离线。模型请求会发送给你配置的 Provider；调用网页、远程 MCP 或其他联网工具时，对应内容也会离开本机。Emperor Agent 负责把本地运行数据和项目数据边界分开，但无法替代外部服务自身的隐私政策。
+“本地优先”不等于完全离线。模型请求会发送给你配置的 Provider；调用远程 MCP、会联网的 Skill 或命令时，对应内容也会离开本机。
 
 <a id="download"></a>
 
@@ -62,15 +60,13 @@ Plan 和 Goal 是互斥的顶层模式，Composer 同一时间只显示一个标
 4. 第一次启动后进入设置页，添加模型 Provider、API Key 和模型 ID。
 5. 创建 Chat 开始普通对话，或者选择本地目录创建 Build 会话。
 
-启动过程不会强制要求你立刻配置模型。没有可用模型时，对话和模型测试会给出配置入口；已经熟悉配置文件的用户也可以参考 [`config/examples/model_config.example.json`](config/examples/model_config.example.json)。
+没有可用模型时，对话和模型测试会给出配置入口；熟悉配置文件的用户也可以参考 [`config/examples/model_config.example.json`](config/examples/model_config.example.json)。
 
 ### 模型配置
 
-你可以在设置页保存多个标准接口模型。设置页管理 Provider、协议、凭证、能力和可选的用户单价；当前对话使用哪个模型，统一在聊天输入框中选择。收起的模型按钮只显示 Provider Logo 和模型名，展开后可以切换模型、调整该模型支持的思考强度。切换结果从下一轮请求开始生效。旧版双角色字段只用于兼容迁移，不再是当前界面语义。
+设置页可以保存多个标准接口模型，管理 Provider、协议、凭证和能力；当前使用哪个模型在聊天输入框中选择，切换从下一次请求开始生效。Provider 为 `deepseek` 时使用内置的 DeepSeek 适配器，其他 Provider 按所选协议走 OpenAI Chat Completions 或 Anthropic Messages。可重试的错误最多自动重试 5 次，不会暗中切换模型。
 
-模型失败时默认不会暗中切换。设置页可以显式选择一个备用模型、允许触发的错误类型，以及可选的“每 Agent 轮”成本上限。成本来自用户填写的每百万 token 单价；未知或失败重试成本不会被当作零，也不应把这个本地上限理解为 Provider 账单保证。
-
-模型配置、连接测试、视觉能力和数据边界见[模型、记忆与附件](docs/user/models-memory-attachments.md)。
+模型配置、记忆和附件见[模型、记忆与附件](docs/user/models-memory-attachments.md)。
 
 <a id="workflows"></a>
 
@@ -78,98 +74,72 @@ Plan 和 Goal 是互斥的顶层模式，Composer 同一时间只显示一个标
 
 ### Chat：普通对话
 
-Chat 适合日常问答、资料整理和一次性的工具任务。它会使用用户档案、全局长期记忆和当前会话历史，但不会自动绑定某个项目目录。
-
-一次请求通常在当前 Agent turn 内结束。最终回复表示这一轮已经停止生成，不代表系统做过 Goal 式验收。如果结果需要多轮修复、独立复核或可追溯的完成条件，应使用 Goal。
+Chat 适合日常问答、资料整理和一次性的工具任务。它使用用户档案、全局长期记忆和当前会话历史，工作目录是 Emperor Home 下的 `workspace/`，不绑定你的项目。
 
 ### Build：项目工作
 
-Build 会话绑定一个本地文件夹，适合代码、文档和其他项目任务。Agent 可以读取项目 `AGENTS.md`、当前 workspace 和该项目的私有记忆。
+Build 会话绑定一个本地文件夹，适合代码、文档和其他项目任务。Agent 会读取项目中逐级的 `AGENTS.md` / `CLAUDE.md` 和该项目的私有记忆。项目私有记忆保存在全局 `stateRoot`，不会写回项目文件。
 
-项目私有记忆保存在全局 `stateRoot`，不会自动改写项目中的 `AGENTS.md`。文件修改和命令执行仍受当前权限模式、workspace policy 和工具 schema 约束。
+### 权限预设
+
+| 命令                              | 行为                                                          |
+| --------------------------------- | ------------------------------------------------------------- |
+| `/permissions read-only`          | 可以读取；任何写入都需要你逐次批准                            |
+| `/permissions workspace-write`    | 默认。可以写当前 workspace 和临时目录；超出范围时逐次请求批准 |
+| `/permissions danger-full-access` | 不限制写入，也不弹出审批                                      |
+
+批准只对那一次工具调用有效。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上由系统沙箱执行；其他平台没有沙箱后端，只有 `danger-full-access` 才能运行 Shell 命令。沙箱只限制文件写入，不限制读取和网络。
 
 ### Plan：先规划再执行
 
-Plan 用于在动手前看清问题、确认方案。进入 Plan 后，Agent 只能进行只读探索、询问用户和提交计划；它不会成为第四种执行权限。Plan 期间仍可在输入框选择询问确认、智能自动或完全访问，批准方案后使用最新选择的权限执行具体步骤。
-
-在输入框的 `/` 菜单选择 Plan 会立即进入规划模式，权限选择器右侧同时出现 Plan 标识。也可以手动输入：
-
 ```text
 /plan
-/plan on
-/plan off
-/plan status
 /plan 为现有项目设计一套迁移方案
+/plan off
 ```
 
-`/plan` 与 `/plan on` 的效果相同。Agent 空闲时，把鼠标移到 Plan 标识上可以点击右上角关闭按钮；系统会退出 Plan，并恢复进入 Plan 前保存的最新执行权限。Agent 正在运行时，这个快捷按钮不可用。
+进入 Plan 后，Agent 先只读探索、必要时向你提问，然后提交一份完整计划。你可以选择 **Approve**（退出 Plan 并开始执行）或 **Keep planning**（附上意见让它修改）。Plan 通过提示词约束 Agent，实际写入范围仍由当前权限预设决定。
 
-Plan 会记录步骤、依赖和验证要求，但它不是长期目标，也不会单独决定 Goal 是否完成。权限模式还可以通过下面的命令查看或切换：
+### Goal：持续推进一个目标
 
 ```text
-/permissions ask
-/permissions smart
-/permissions full
+/goal 让项目的全部测试通过
 ```
 
-### Goal：持续完成结果
+设置 Goal 后，每当 Agent 空闲，系统会自动发起新一轮续跑，直到 Agent 判断目标完成、报告受阻，或达到轮数上限（默认 256 轮）。你的消息始终优先。
 
-Goal 用于需要跨多个回合推进、修复和验收的任务。可以直接输入完整命令：
+| 命令                | 作用          |
+| ------------------- | ------------- |
+| `/goal`             | 查看当前 Goal |
+| `/goal <目标>`      | 设置 Goal     |
+| `/goal edit <目标>` | 修改目标      |
+| `/goal pause`       | 暂停自动续跑  |
+| `/goal resume`      | 恢复自动续跑  |
+| `/goal clear`       | 清除当前 Goal |
 
-```text
-/goal 完成项目的 Goal 模式升级并通过全部验收
-```
-
-也可以从 `/` 菜单选择 Goal，或单独输入 `/goal`。此时权限选择器右侧会先出现 Goal 标识，下一条纯文字会作为 Outcome 创建并启动 Goal。若独立 Plan 已开启，系统会先退出 Plan，再进入 Goal。这个待输入状态只属于当前会话，不会写入 Goal 账本；切换会话或重启应用后会清除。Goal Outcome 暂不接受附件、Skill 或 MCP 引用，界面会阻止提交，不会静默丢弃这些内容。
-
-Goal 创建后会锁定 Outcome、范围、约束和 Acceptance Criteria。它通常会进入 Plan 阶段提出方案，等待批准后再由普通 Agent turns 和工具完成步骤。
-
-Plan 执行完不等于 Goal 已完成。系统还会检查每条必需的验收条件、真实工具 Observation、人工确认或 reviewer 结果。模型回复、Todo、Plan 状态和界面操作都不能直接把 Goal 写成 `completed`；最终状态由 Core 的 Completion Gate 决定。
-
-Goal 常用命令：
-
-| 命令              | 作用                            |
-| ----------------- | ------------------------------- |
-| `/goal`           | 等待下一条纯文字作为 Outcome    |
-| `/goal <outcome>` | 创建当前会话的 Goal             |
-| `/goal status`    | 查看当前 Goal                   |
-| `/goal list`      | 列出当前会话的 Goal             |
-| `/goal pause`     | 安全暂停                        |
-| `/goal resume`    | 重新校验会话和 workspace 后继续 |
-| `/goal cancel`    | 永久取消                        |
-
-Stop 在 Goal 中表示可恢复的 Pause，不表示已经完成。Cancel 才是不可恢复的终态。应用重启也不会自动恢复写操作，必须由用户显式 Resume。
-
-Composer 同一时间只显示 Goal 或 Plan 其中一个标识。Goal 进入内部规划阶段时仍显示 Goal，状态条会标注“规划中”。鼠标悬浮或键盘聚焦后，标识右上角会出现关闭按钮。尚未创建 Goal 时，关闭只退出待输入状态并保留输入框文字；正式 Goal 处于暂停或等待用户状态时，切换到 Plan 会永久取消旧 Goal，再开启独立 Plan，旧记录仍保留用于审计。Goal 正在 Contract、规划、执行或核验时不能切换，应先停止或暂停。
-
-反向切换同样自动处理：Goal 待输入状态切换到 Plan 时会保留输入框文字；独立 Plan 切换到 Goal 时，必须先成功退出 Plan。`/plan off` 不会关闭 Goal 内部规划，`/plan status` 在 Goal 存续期间只报告当前顶层模式为 Goal。
-
-Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal、Plan、Observation、Evidence 或交互进展时，Coordinator 会安全暂停。默认不设置总 cycle、总时长或总成本上限；需要这些限制时，应显式配置 guard。
+应用重启后 Goal 保留，但需要 `/goal resume` 才会继续续跑。Goal 不提高权限。
 
 ### 怎么选择
 
-| 对比项       | 普通 Chat / Build                | Plan                         | Goal                                          |
-| ------------ | -------------------------------- | ---------------------------- | --------------------------------------------- |
-| 核心对象     | 当前请求                         | 一份待确认的执行方案         | 锁定的结果、范围和验收条件                    |
-| 是否先规划   | 可选                             | 必须先规划                   | 通常会使用 Plan，也允许后续 replan            |
-| 生命周期     | 通常是一个 Agent turn            | 提案、审批、分步执行         | 跨多个 turn、Plan 和应用重启                  |
-| 完成条件     | 当前回复结束                     | Plan 步骤与验证要求完成      | 必需 AC、Plan、Evidence、复核和 Gate 全部通过 |
-| 重启后的状态 | 恢复历史，不自动重跑未完成 turn  | 恢复 Plan 和交互状态         | 从持久账本恢复为安全状态，显式 Resume 后继续  |
-| 权限变化     | 使用当前模式                     | 规划阶段限制为只读和控制操作 | 沿用权限规则，不自动提权                      |
-| 适合场景     | 问答、轻量修改、明确的一次性任务 | 希望先审阅方案的复杂任务     | 多阶段开发、迁移、反复修复和严格验收          |
+| 情况                             | 使用              |
+| -------------------------------- | ----------------- |
+| 问答、轻量修改、明确的一次性任务 | 普通 Chat / Build |
+| 希望先审阅方案                   | Plan              |
+| 希望 Agent 自己一轮轮推进到完成  | Goal              |
+| 希望按时间定期发起任务           | Scheduler         |
 
 ### 斜杠命令
 
-| 命令                                                          | 作用                                 |
-| ------------------------------------------------------------- | ------------------------------------ |
-| `/new`                                                        | 在当前工作区创建一条空白会话         |
-| `/compact [instructions]`                                     | 保留摘要并释放当前会话的上下文空间   |
-| `/model`、`/reasoning`                                        | 选择模型和思考强度                   |
-| `/permissions ask`、`/permissions smart`、`/permissions full` | 选择 Emperor 可以执行的操作范围      |
-| `/plan`、`/goal`                                              | 开启规划或持续目标                   |
-| `/stop`、`/continue`                                          | 停止当前任务，或恢复暂停的 Plan/Goal |
+| 命令                   | 作用                                    |
+| ---------------------- | --------------------------------------- |
+| `/new`                 | 在当前工作区创建一条空白会话            |
+| `/compact`             | 保留摘要并释放当前会话的上下文空间      |
+| `/model`、`/reasoning` | 选择模型和思考强度                      |
+| `/permissions <预设>`  | 查看或切换权限预设                      |
+| `/plan`、`/goal`       | 进入规划模式或设置持续目标              |
+| `/stop`、`/continue`   | 停止当前任务，或让 Agent 继续上一项工作 |
 
-命令目录由 Core 生成，Renderer 不维护静态数组。菜单只包含 `Commands` 与 `Skills`；每个 active、可由用户调用的 Skill 都直接使用自己的 token，例如 `/agent-reach 搜索相关讨论`，不经过 `/skill` 或 `/skills`。任务完成后及每次打开菜单时都会重新扫描，安装后的 Skill 无需重启即可出现。未知命令只在本地报错，不会发送给模型。`/new` 创建继承项目、模型和权限的新 session，但不继承聊天历史、Plan、Goal、Todo、队列、checkpoint 或附件；旧 session 仍保留，长期用户/项目记忆也不会被删除。Settings、Skills、Plugins、Memory、Git 和 Terminal 等能力继续从应用页面进入。完整语义见 [Slash command 平台](docs/architecture/slash-command-platform.md)。
+命令目录由 Core 生成。每个 active Skill 直接使用自己的 token，例如 `/agent-reach 搜索相关讨论`。未知命令只在本地报错，不会发送给模型。完整语义见 [Slash command 平台](docs/architecture/slash-command-platform.md)。
 
 <a id="capabilities"></a>
 
@@ -179,28 +149,28 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 
 ### 可直接使用
 
-| 能力                | 当前用途                                           |
-| ------------------- | -------------------------------------------------- |
-| Chat / Build        | 多会话对话和项目工作区隔离                         |
-| Ask / Plan          | 澄清问题、审批计划和恢复执行                       |
-| 模型配置            | 保存多个 Provider 模型、激活一个模型并标记视觉能力 |
-| 记忆                | 全局长期记忆、用户档案、项目私有记忆和版本恢复     |
-| 附件                | 保存图片、文本和受支持的文档，并传入模型上下文     |
-| 本地工具            | 文件读取与修改、搜索、命令执行和 Todo 更新         |
-| 网络调研            | 候选来源发现、2xx 正文验证、逐项引用和隔离来源复核 |
-| Skills / MCP        | 加载本地技能并接入已配置的 MCP server              |
-| Token / Diagnostics | 查看消耗、上下文、运行状态和环境问题               |
+| 能力                   | 当前用途                                                         |
+| ---------------------- | ---------------------------------------------------------------- |
+| Chat / Build           | 多会话对话和项目工作区隔离                                       |
+| 权限预设与 Plan        | 控制写入范围、一次性提权、先规划再执行                           |
+| 模型配置               | 保存多个 Provider 模型、激活一个模型并标记视觉能力               |
+| 记忆                   | 用户档案、全局长期记忆、项目私有记忆、版本恢复和 `memory_edit`   |
+| 附件                   | 保存图片、文本和受支持的文档，并传入模型上下文                   |
+| 本地工具               | 文件读写与编辑、搜索、Shell（含后台任务）、Todo 与提问           |
+| 子代理                 | 在后台委派独立或继承上下文的子任务                               |
+| Skills / Plugins / MCP | 导入和编辑本地 Skill、安装版本化 Plugin、粘贴配置接入 MCP server |
+| 右侧工作台             | Build 会话的 Git Review、只读 Files 和用户终端                   |
+| Token / Diagnostics    | 查看消耗、上下文、运行状态和环境问题                             |
 
 ### 预览能力
 
-| 能力            | 入口与限制                                                                |
-| --------------- | ------------------------------------------------------------------------- |
-| Goal            | 在 Chat 或 Build 中使用 `/goal`；当前按单 Core host 串行推进写任务        |
-| Scheduler       | Scheduler 面板和工具；任务仍受权限、控制交互和运行锁限制                  |
-| Team            | 已有成员、Inbox 和任务工具；独立 `/team` 页面尚未开放                     |
-| Agent Hooks     | Settings → Hooks；v1 支持 `command` 和 `http` handler，不能覆盖 Core deny |
-| Headless ACP V1 | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关         |
-| 桌宠 companion  | 设置页手动启用；默认关闭，由主 Electron 进程托管                          |
+| 能力            | 入口与限制                                                            |
+| --------------- | --------------------------------------------------------------------- |
+| Goal            | `/goal`；同一会话内自动续跑，重启后需要显式恢复                       |
+| Scheduler       | 定时任务页面和 `scheduler` 工具；任务使用与普通对话相同的权限         |
+| Hooks           | Settings → Hooks；Claude Code `hooks.json` 协议，仅 `command` handler |
+| Headless ACP V1 | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关     |
+| 桌宠 companion  | 设置页手动启用；默认关闭，由主 Electron 进程托管                      |
 
 ### 基础设施
 
@@ -214,42 +184,35 @@ Goal 不会提高当前权限。连续三个 cycle 没有产生可确认的 Goal
 
 ### 本地数据放在哪里
 
-Emperor Agent 把应用资源和用户私有数据分开：
-
 - `runtimeRoot` 保存内置模板、Skills 和静态资源。开发模式默认是仓库根，Release 来自只读的 `resources/runtime-defaults`。
-- Emperor Home（内部兼容名 `stateRoot`）保存会话、记忆、配置、附件、用户 Skills 和受管工具环境，默认是 `~/.emperor`。
-
-可以通过 `EMPEROR_CONFIG_DIR` 整体覆盖 Emperor Home。默认位置首次启动时会把唯一存在的旧 `~/.emperor-agent` 原子迁移为 `~/.emperor`；两个目录并存时只使用新目录，不自动合并或删除旧目录。完整规则见[全局私有存储根架构](docs/architecture/global-state-store.md)。
+- Emperor Home（内部兼容名 `stateRoot`）保存会话、记忆、配置、附件、用户 Skills 和受管工具环境，默认是 `~/.emperor`，可以通过 `EMPEROR_CONFIG_DIR` 整体覆盖。
 
 常用私有路径都相对 `stateRoot`：
 
-| 数据            | 路径                                    |
-| --------------- | --------------------------------------- |
-| 模型配置        | `model_config.json`                     |
-| 会话历史与事件  | `sessions/<session-id>/`                |
-| 全局长期记忆    | `memory/MEMORY.local.md`                |
-| 项目私有记忆    | `projects/<project-id>/AGENTS.local.md` |
-| 附件            | `memory/attachments/`                   |
-| Goal 状态与证据 | `goals/<goal-id>/`                      |
-| Hooks 审计      | `hooks/audit.jsonl`                     |
-| 用户 Skills     | `skills/`                               |
-| 受管工具环境    | `environment/`                          |
+| 数据         | 路径                                    |
+| ------------ | --------------------------------------- |
+| 模型配置     | `model_config.json`                     |
+| 会话记录     | `sessions/<session-id>/log.jsonl`       |
+| 全局长期记忆 | `memory/MEMORY.local.md`                |
+| 项目私有记忆 | `projects/<project-id>/AGENTS.local.md` |
+| 附件         | `memory/attachments/`                   |
+| Hooks 配置   | `hooks.json`                            |
+| 用户 Skills  | `skills/`                               |
+| 大工具结果   | `spill/`                                |
+| 受管工具环境 | `environment/`                          |
 
-Build 项目目录不会承载私有 session、memory、attachments 或 Goal 数据。项目中允许存在协作文档 `AGENTS.md`，以及 `.emperor/settings*.json`、`rules/` 和项目级 Skills；这些内容与全局私有 store 不是一回事。
+首次启动当前版本时，旧版本的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>/` 保留，新版本从空的会话列表开始。完整规则见[全局私有存储根架构](docs/architecture/global-state-store.md)。
 
-### 权限模式
+Build 项目目录不会承载私有会话、记忆或附件数据。
 
-| 内部模式          | 命令                 | 行为                                                                                                                 |
-| ----------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `ask_before_edit` | `/permissions ask`   | 只读文件、搜索和诊断直接执行；文件修改、Shell、外部写入及持久任务变更需要确认                                        |
-| `smart_auto`      | `/permissions smart` | 自动执行工作区编辑、构建测试、安全复合命令和本地非破坏性 Git；外部或高风险副作用需要确认                             |
-| `full_access`     | `/permissions full`  | 主 Agent 的 `run_command` 在宿主环境直执且免询问；Core deny、Plan、AgentDefinition、schema、workspace 与 Goal 仍生效 |
+### 安全要点
 
-Plan 通过 `/plan` 或 `/plan on|off|status` 独立管理，不属于权限菜单，并与顶层 Goal 互斥。Goal 内部仍可复用 Plan 引擎，但不会产生第二个用户模式。上述三种权限都不会关闭路径安全、schema 校验或 Core deny。存在未处理的 Ask 或 Plan 时，执行型 Scheduler、Team 和桌宠 mutation 会被 CoreApi guard 拒绝；Agent Hooks 也不能覆盖 workspace policy 或 Core deny。Goal 同样复用这套规则，不会因为运行时间更长而获得额外权限。
-
-MCP 工具结果、网页内容和外部消息都按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
-
-网络调研不把“工具调用成功”当作“事实已经证实”。Skill、CLI、MCP 和可选 `web_search` 找到的 URL 只是候选；只有 Core `web_fetch` 成功取得 2xx 正文后才能成为本轮已验证来源。最终答复按事实项检查 Markdown 引用，并经过无工具、无会话历史的隔离来源复核；未通过的草稿不会提前进入界面或持久化历史。
+- 权限预设限制 Agent 的文件写入；读取文件和网络访问不受沙箱限制。
+- 子代理继承当前沙箱模式，但不能请求提权。
+- 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不需要审批；只配置你信任的 MCP server。
+- Agent 用 `skill_manage` 修改 Skills、用 `mcp_config` 修改 MCP 配置时，除 `danger-full-access` 外每次写入都需要你批准。
+- 存在待回答的问题或审批，或处于 Plan 模式时，由界面发起的 Scheduler、Skill、Plugin、模型和 MCP 配置修改会被 CoreApi guard 拒绝。
+- MCP 结果和外部内容按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
 
 <a id="boundaries"></a>
 
@@ -258,13 +221,11 @@ MCP 工具结果、网页内容和外部消息都按不可信输入处理。涉�
 - 公开安装包目前是未签名 Preview，不是 Stable。
 - Emperor Agent 是本地单用户 Electron 应用，不提供多人服务端部署。
 - 桌面主链路必须经过 Electron IPC；普通浏览器不能直接运行完整产品。
-- Headless ACP 是源码级、本机 stdio operator preview，不随当前桌面安装包提供服务端入口；它复用 TypeScript Core，不是 IPC、HTTP 或 WebSocket fallback。
+- Headless ACP 是源码级、本机 stdio operator preview，不随当前桌面安装包提供服务端入口；它复用 TypeScript Core，不能回答问题或审批。
 - Python runtime、Python CLI 和 HTTP/WS backend 已退役，不是备用执行路径。
-- Goal 的支持边界是单 Core host 串行 mutation owner，不允许两个写任务同时占用全局执行槽。
-- Goal 默认没有总 cycle、总时长或总成本上限；无进展暂停和显式 guard 负责控制长循环。
-- Watchlist 仍属于受控后台维护基础设施，不代表已经提供外部消息平台连接器。
-- 损坏或无法证明安全的中间状态会 fail closed。Goal 不会被隐式降级成普通 Chat 后继续写入。
-- 网络调研在没有可验证正文、逐项引用不完整或隔离复核不可用时会明确阻塞，不会用模型记忆或拼造链接补齐。
+- 默认没有内置网页搜索或网页抓取工具。
+- 没有 macOS / Linux 以外的 Shell 沙箱后端。
+- Watchlist 仍属于受控后台维护基础设施，不提供外部消息平台连接器。
 
 <a id="source"></a>
 
@@ -320,22 +281,22 @@ npm --prefix desktop run package:verify
 
 完整入口见[文档中心](docs/README.md)。公开文档按用户手册、当前架构、开发和发布说明分层维护。
 
-| 想了解什么                   | 文档                                                              |
-| ---------------------------- | ----------------------------------------------------------------- |
-| 从安装到完整界面能力         | [用户手册](docs/user/README.md)                                   |
-| 当前系统边界和执行链路       | [架构总览](docs/architecture/overview.md)                         |
-| Goal 状态机、Evidence 和恢复 | [Goal 模式架构](docs/architecture/goal-mode.md)                   |
-| 私有数据位置与旧数据迁移     | [全局私有存储根架构](docs/architecture/global-state-store.md)     |
-| 源码开发和扩展清单           | [开发指南](docs/development/README.md)                            |
-| Headless ACP stdio           | [Headless ACP operator preview](docs/development/headless-acp.md) |
-| 未签名 Preview 的安装安全    | [未签名预览版说明](docs/release/unsigned-preview-notice.md)       |
-| 当前 Preview 构建与发布      | [Preview 发布手册](docs/release/preview-release-runbook.md)       |
-| 未来 Stable 发布边界         | [Stable 发布手册](docs/release/stable-release-runbook.md)         |
-| 环境工具 catalog 变更        | [工具 catalog 审查流程](docs/release/tool-catalog-review.md)      |
-| 安全边界与私密报告           | [Security Policy](.github/SECURITY.md)                            |
-| 版本变化                     | [Changelog](docs/release/CHANGELOG.md)                            |
-| 文档维护机制                 | [文档维护规范](docs/DOCUMENTATION.md)                             |
-| 开发协作规范                 | [开发指南](docs/development/README.md)                            |
+| 想了解什么                | 文档                                                              |
+| ------------------------- | ----------------------------------------------------------------- |
+| 从安装到完整界面能力      | [用户手册](docs/user/README.md)                                   |
+| 当前系统边界和执行链路    | [架构总览](docs/architecture/overview.md)                         |
+| Goal 状态、续跑与授权     | [Goal 架构](docs/architecture/goal-mode.md)                       |
+| 私有数据位置与旧数据迁移  | [全局私有存储根架构](docs/architecture/global-state-store.md)     |
+| 源码开发和扩展清单        | [开发指南](docs/development/README.md)                            |
+| Headless ACP stdio        | [Headless ACP operator preview](docs/development/headless-acp.md) |
+| 未签名 Preview 的安装安全 | [未签名预览版说明](docs/release/unsigned-preview-notice.md)       |
+| 当前 Preview 构建与发布   | [Preview 发布手册](docs/release/preview-release-runbook.md)       |
+| 未来 Stable 发布边界      | [Stable 发布手册](docs/release/stable-release-runbook.md)         |
+| 环境工具 catalog 变更     | [工具 catalog 审查流程](docs/release/tool-catalog-review.md)      |
+| 安全边界与私密报告        | [Security Policy](.github/SECURITY.md)                            |
+| 版本变化                  | [Changelog](docs/release/CHANGELOG.md)                            |
+| 文档维护机制              | [文档维护规范](docs/DOCUMENTATION.md)                             |
+| 开发协作规范              | [开发指南](docs/development/README.md)                            |
 
 ## License
 

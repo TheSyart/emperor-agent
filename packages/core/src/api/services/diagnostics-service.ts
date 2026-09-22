@@ -8,28 +8,52 @@ import {
   loadModelConfig,
   validateCompleteModelEntries,
 } from '../../config/model-config'
-import { listRecentPromptSnapshots } from '../../prompts/manifest'
 import type { RuntimePaths } from '../../runtime/paths'
 import type { LegacyStateMigrationResult } from '../../runtime/migrate-state-root'
-import type { ActiveTaskInfo, ActiveTaskKind } from '../../runtime/active'
-import type { RuntimeStats } from '../../runtime/store'
-import type { SessionRuntimeActorSnapshot } from '../../runtime/session-runtime'
-import type { LifecycleSupervisorSnapshot } from '../../runtime/lifecycle'
-import type { SubagentSupervisorSnapshot } from '../../subagents/supervisor'
 import type { CoreDesktopPetPayload } from './desktop-pet-service'
 import { RUNTIME_MANIFEST_FILE } from '../../runtime/resources'
 import { toSafeError } from '../../errors'
 import type { MCPClientSnapshot } from '../../mcp/client'
-import type { ExtensionSnapshot } from '../../extensions/resolver'
+import type { SubagentRecord } from '../../harness/subagent/manager'
 import type { EffectiveConfigSnapshot } from '../../config/resolver'
-import type { HybridMemoryServiceDiagnostics } from '../../memory/hybrid-service'
-import type { CodeIntelligenceServiceDiagnostics } from '../../code-intelligence/service'
 import {
   optionalCapabilityPortfolio,
   type OptionalCapabilityPortfolioEntry,
 } from '../../capabilities/portfolio'
 
 type Dict = Record<string, unknown>
+
+/** Event-store statistics (kept for payload compatibility; optional source). */
+export interface RuntimeStats {
+  version: number
+  path: string
+  bytes: number
+  events: number
+  latestSeq: number
+  latestTs: number | null
+  activeTurnEvents: number
+  activeTurns: number
+  archiveFiles: number
+  archiveBytes: number
+  archives: unknown[]
+  lastArchiveAt: number | null
+  hotLimitEvents: number
+  hotLimitBytes: number
+  needsRotation: boolean
+}
+
+export type ActiveTaskKind = 'turn' | 'scheduler' | 'team' | 'watchlist'
+
+export interface ActiveTaskInfo {
+  id: string
+  kind: ActiveTaskKind
+  label: string
+  started_at: number
+  turn_id: string | null
+  job_id: string | null
+  session_id: string | null
+  cancelled: boolean
+}
 
 export interface CoreDiagnosticsServiceDeps {
   runtimePaths?: RuntimePaths | null
@@ -46,16 +70,15 @@ export interface CoreDiagnosticsServiceDeps {
   workspacePolicy?: () => Dict
   sandboxCapability?: () => Dict
   processRuntime?: () => Dict
-  lifecycle?: () => LifecycleSupervisorSnapshot
-  subagents?: () => SubagentSupervisorSnapshot
-  agentDefinitions?: () => ExtensionSnapshot
+  /** Live subagent records (HarnessHost SubagentManager). */
+  subagents?: () => SubagentRecord[]
+  /** Host-provided kernel summary: active agents, busy sessions, sandbox
+   * backend availability, model routes. */
+  kernel?: () => Dict
   effectiveConfig?: () => Promise<EffectiveConfigSnapshot>
   commandCatalog?: () => Dict
-  hybridMemory?: () => HybridMemoryServiceDiagnostics
-  codeIntelligence?: () => CodeIntelligenceServiceDiagnostics
   mcp?: () => MCPClientSnapshot
   activeTasks?: () => unknown[]
-  sessionRuntimes?: () => SessionRuntimeActorSnapshot[]
   desktopPetPayload?: () =>
     Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
   environmentSummary?: () => Dict | Promise<Dict>
@@ -75,17 +98,13 @@ export interface CoreDiagnosticsPayload {
   workspacePolicy: Dict
   sandbox: Dict
   processRuntime: Dict
-  lifecycle: LifecycleSupervisorSnapshot | Dict
-  subagents: SubagentSupervisorSnapshot | Dict
-  agentDefinitions: ExtensionSnapshot | Dict
+  subagents: SubagentRecord[]
+  kernel: Dict
   effectiveConfig: EffectiveConfigSnapshot | Dict
   commandCatalog: Dict
-  hybridMemory: HybridMemoryServiceDiagnostics | Dict
-  codeIntelligence: CodeIntelligenceServiceDiagnostics | Dict
   mcp: MCPClientSnapshot
   promptSnapshots: Dict
   activeTasks: ActiveTaskInfo[]
-  sessionRuntimes: SessionRuntimeActorSnapshot[]
   desktopPet: CoreDesktopPetPayload
   environment: Dict
   goals: Dict
@@ -116,13 +135,10 @@ export class CoreDiagnosticsService {
       workspacePolicy: this.deps.workspacePolicy?.() ?? {},
       sandbox: this.deps.sandboxCapability?.() ?? {},
       processRuntime: this.deps.processRuntime?.() ?? {},
-      lifecycle: this.deps.lifecycle?.() ?? {},
-      subagents: this.deps.subagents?.() ?? {},
-      agentDefinitions: this.deps.agentDefinitions?.() ?? {},
+      subagents: this.subagentsPayload(),
+      kernel: this.kernelPayload(),
       effectiveConfig: await this.effectiveConfigPayload(),
       commandCatalog: this.commandCatalogPayload(),
-      hybridMemory: this.deps.hybridMemory?.() ?? {},
-      codeIntelligence: this.deps.codeIntelligence?.() ?? {},
       mcp: this.deps.mcp?.() ?? {
         initialized: false,
         servers: [],
@@ -133,7 +149,6 @@ export class CoreDiagnosticsService {
       },
       promptSnapshots: this.promptSnapshotsPayload(),
       activeTasks: activeTasksPayload(this.deps.activeTasks?.()),
-      sessionRuntimes: this.deps.sessionRuntimes?.() ?? [],
       desktopPet: desktopPetPayload(await this.deps.desktopPetPayload?.()),
       environment: await this.environmentSummaryPayload(),
       goals: await this.goalDiagnosticsPayload(),
@@ -224,10 +239,28 @@ export class CoreDiagnosticsService {
     }
   }
 
+  /** Prompt snapshots were written by the retired kernel; the key stays for
+   * payload compatibility and is always empty. */
   private promptSnapshotsPayload(): Dict {
-    const paths = this.deps.runtimePaths
-    if (!paths) return { count: 0, recent: [] }
-    return listRecentPromptSnapshots(paths.sessionsRoot, 5)
+    return { count: 0, recent: [] }
+  }
+
+  private subagentsPayload(): SubagentRecord[] {
+    if (!this.deps.subagents) return []
+    try {
+      return this.deps.subagents().map((record) => ({ ...record }))
+    } catch {
+      return []
+    }
+  }
+
+  private kernelPayload(): Dict {
+    if (!this.deps.kernel) return {}
+    try {
+      return this.deps.kernel()
+    } catch (error) {
+      return { status: 'unavailable', error: toSafeError(error) }
+    }
   }
 
   private async environmentSummaryPayload(): Promise<Dict> {

@@ -30,8 +30,22 @@ export type PetEvent =
   | { type: 'attention'; kind: 'approval' | 'error' | 'done' }
   | { type: 'connection'; online: boolean }
 
-const READ_TOOLS = new Set(['read_file', 'grep', 'glob'])
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'update_todos'])
+const READ_TOOLS = new Set(['read', 'grep', 'glob'])
+const WRITE_TOOLS = new Set(['write', 'edit', 'todo_write', 'memory_edit'])
+const SHELL_TOOLS = new Set([
+  'bash',
+  'pwsh',
+  'job_output',
+  'job_kill',
+  'job_list',
+])
+const DELEGATION_TOOLS = new Set([
+  'subagent',
+  'subagent_fork',
+  'send_message',
+  'interrupt_agent',
+  'list_agents',
+])
 
 export function projectPetEvent(
   event: Record<string, unknown>,
@@ -40,27 +54,22 @@ export function projectPetEvent(
   if (type === 'user_message') return activity('thinking', 'thinking')
   if (type === 'message_delta') return activity('typing', 'replying')
   if (type === 'scheduler_run_start') return activity('thinking', 'scheduling')
-  if (
-    type === 'tool_call' ||
-    type === 'subagent_tool_call' ||
-    type === 'team_run_tool_call'
-  ) {
-    if (type === 'team_run_tool_call')
-      return activity('conducting', 'delegating')
+  if (type === 'tool_call' || type === 'subagent_tool_call')
     return toolActivity(event.name)
-  }
-  if (type === 'subagent_start' || type === 'team_run_start')
+  if (type === 'subagent_start')
     return { ...activity('conducting', 'delegating'), subagentDelta: 1 }
-  if (type === 'subagent_delta' || type === 'team_run_delta')
-    return activity('conducting', 'delegating')
-  if (type === 'subagent_done' || type === 'team_run_done')
-    return { ...activity('typing', 'delegating'), subagentDelta: -1 }
-  if (type === 'subagent_error' || type === 'team_run_error')
-    return { type: 'attention', kind: 'error' }
-  if (type === 'ask_request' || type === 'plan_draft' || type === 'turn_paused')
+  if (type === 'subagent_delta') return activity('conducting', 'delegating')
+  // Host `subagent_done` carries the spawning call; the log-projected
+  // duplicate (no parent_id) must not decrement twice.
+  if (type === 'subagent_done')
+    return typeof event.parent_id === 'string' && event.parent_id
+      ? { ...activity('typing', 'delegating'), subagentDelta: -1 }
+      : null
+  if (type === 'subagent_error') return { type: 'attention', kind: 'error' }
+  if (type === 'ask_request' || type === 'plan_draft')
     return { type: 'attention', kind: 'approval' }
   if (
-    type === 'tool_error' ||
+    type === 'tool_run_failed' ||
     type === 'scheduler_run_error' ||
     type === 'scheduler_run_cancelled' ||
     type === 'runtime_task_cancelled' ||
@@ -75,18 +84,14 @@ export function projectPetEvent(
 function toolActivity(value: unknown): PetEvent {
   const tool = typeof value === 'string' ? value.toLowerCase() : ''
   if (READ_TOOLS.has(tool)) return activity('debugger', 'reading')
-  if (WRITE_TOOLS.has(tool) || tool === 'Skill' || tool === 'load_skill')
+  if (WRITE_TOOLS.has(tool) || tool === 'skill')
     return activity('typing', 'editing')
-  if (tool === 'run_command') return activity('building', 'running')
+  if (SHELL_TOOLS.has(tool)) return activity('building', 'running')
   if (tool === 'scheduler') return activity('thinking', 'scheduling')
-  if (tool === 'web_fetch') return activity('wizard', 'browsing')
-  if (
-    tool === 'dispatch_subagent' ||
-    tool.includes('team') ||
-    tool.includes('broadcast')
-  )
-    return activity('conducting', 'delegating')
-  if (tool.startsWith('mcp_')) return activity('beacon', 'external')
+  if (tool === 'web_search') return activity('wizard', 'browsing')
+  if (DELEGATION_TOOLS.has(tool)) return activity('conducting', 'delegating')
+  if (tool.startsWith('mcp_') && tool !== 'mcp_config')
+    return activity('beacon', 'external')
   return activity('typing', 'editing')
 }
 

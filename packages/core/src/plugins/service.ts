@@ -25,7 +25,7 @@ import {
 import { canonicalizeExistingPath, isPathWithin } from '../util/paths'
 import { extractBoundedZip } from '../environment/zip'
 import { isPublicHttpRedirectResponse } from '../network/public-http'
-import type { WebFetchClient } from '../tools/web-fetch'
+import type { WebFetchClient } from '../network/web-fetch-client'
 import {
   assertPluginId,
   isPluginScope,
@@ -174,6 +174,16 @@ export class PluginApplicationService {
   ): Promise<{ root: string; source: PluginSource }> {
     if (source.kind === 'local') {
       const root = resolve(source.path)
+      // A local .zip is extracted like a downloaded archive (local install from a file).
+      if (
+        existsSync(root) &&
+        lstatSync(root).isFile() &&
+        root.toLowerCase().endsWith('.zip')
+      )
+        return {
+          root: extractPluginArchive(root, previewRoot),
+          source: { kind: 'local', label: basename(root) },
+        }
       assertRegularDirectory(root, 'Plugin source')
       return { root, source: { kind: 'local', label: basename(root) } }
     }
@@ -198,18 +208,8 @@ export class PluginApplicationService {
       throw new Error(`Plugin download failed with HTTP ${response.status}`)
     const archive = join(previewRoot, 'source.zip')
     writeFileSync(archive, response.body, { mode: 0o600 })
-    const extracted = join(previewRoot, 'extracted')
-    extractBoundedZip({
-      archive,
-      destination: extracted,
-      maxArchiveBytes: MAX_PLUGIN_TOTAL_BYTES,
-      maxFiles: MAX_PLUGIN_FILES,
-      maxFileBytes: MAX_PLUGIN_FILE_BYTES,
-      maxTotalBytes: MAX_PLUGIN_TOTAL_BYTES,
-      maxPathDepth: 32,
-    })
     return {
-      root: findSinglePluginRoot(extracted),
+      root: extractPluginArchive(archive, previewRoot),
       source: { kind: 'url', url: response.url },
     }
   }
@@ -523,6 +523,21 @@ function inspectTree(root: string): { fileCount: number; totalBytes: number } {
   }
   visit(root)
   return { fileCount, totalBytes }
+}
+
+/** Extract a Plugin archive into the preview folder and locate its single manifest root. */
+function extractPluginArchive(archive: string, previewRoot: string): string {
+  const extracted = join(previewRoot, 'extracted')
+  extractBoundedZip({
+    archive,
+    destination: extracted,
+    maxArchiveBytes: MAX_PLUGIN_TOTAL_BYTES,
+    maxFiles: MAX_PLUGIN_FILES,
+    maxFileBytes: MAX_PLUGIN_FILE_BYTES,
+    maxTotalBytes: MAX_PLUGIN_TOTAL_BYTES,
+    maxPathDepth: 32,
+  })
+  return findSinglePluginRoot(extracted)
 }
 
 function findSinglePluginRoot(extractedRoot: string): string {

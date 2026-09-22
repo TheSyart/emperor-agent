@@ -1,43 +1,33 @@
-import { randomUUID } from 'node:crypto'
-import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
-import { TurnPaused } from '../control/exceptions'
-import type { AgentLoop } from '../agent/loop'
-import { TurnBusyError } from '../runtime/active'
-import { sessionCreated, sessionTitleUpdated } from '../runtime/events'
-import {
-  fallbackSessionTitle,
-  sanitizeSessionTitle,
-  SessionTitleService,
-} from '../sessions/title'
-import type { SessionEntry } from '../sessions/store'
-import type { SchedulerAgentTurnPayload } from '../scheduler/executor'
+/**
+ * Chat submission on the harness kernel: validates the target session,
+ * promotes a draft session on its first message (broadcasting
+ * `session_created` before the turn starts), turns requested skills into
+ * `/skill` gestures, hands the prompt to `HarnessHost.submit`, and
+ * generates the first title once.
+ */
 
-export type MainlineEventSink = (
-  event: Record<string, unknown>,
-) => void | Promise<void>
+import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import { fallbackSessionTitle, sanitizeSessionTitle } from '../sessions/title'
+import type { SessionEntry } from '../sessions/store'
+import type { HarnessHost } from '../harness/host/host'
+import { isSkillName } from '../skills/name'
 
 export interface MainlineSubmitInput {
   content: string
   displayContent?: string | null
-  attachments?: Array<Record<string, unknown>> | null
   attachmentIds?: string[] | null
   requestedSkills?: Array<{ name: string; source?: string }> | null
   clientMessageId?: string | null
-  memoryExtra?: Record<string, unknown> | null
-  turnId?: string | null
-  executionId?: string | null
-  label?: string | null
   sessionId?: string | null
   source?: string | null
   scheduler?: Record<string, unknown> | null
   uiHidden?: boolean | null
-  taskId?: string | null
-  useActiveTask?: boolean
   signal?: AbortSignal | null
-  emit?: MainlineEventSink | null
   clientDraftId?: string | null
   draftSession?: DraftSessionInput | null
   delivery?: 'queue' | 'interject' | null
+  /** In-process adapters: receive this session's UI events while the submit runs. */
+  emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
 }
 
 export interface DraftSessionInput {
@@ -50,11 +40,11 @@ export interface DraftSessionInput {
 }
 
 export interface MainlineSubmitResult {
-  turnId: string
+  turnId: string | null
+  messageId: string
   content: string
   activeSessionId: string | null
-  delivery?: 'completed' | 'interjected'
-  targetTurnId?: string | null
+  delivery: 'completed' | 'interjected'
 }
 
 export interface MaterializedSession {
@@ -74,158 +64,104 @@ export class InvalidSessionError extends Error {
   }
 }
 
-export class MainlineTurnService {
-  readonly loop: AgentLoop
+export interface QueuedPromptRecord {
+  id: string
+  turnId: string
+  clientMessageId: string
+  delivery: 'queue' | 'interject'
+  targetCommandId: null
+  content: string
+  displayContent: string
+  source: string | null
+  uiHidden: boolean
+  attachmentIds: string[]
+  requestedSkills: Array<{ name: string; source?: string }>
+  createdOrder: number
+  supportsInterjection: boolean
+  state: 'queued'
+  reason: null
+  createdAt: string
+  updatedAt: string
+}
 
-  constructor(loop: AgentLoop) {
-    this.loop = loop
-    this.loop.goalCoordinator.setTurnSubmitter(async (input) => {
-      try {
-        await this.submit({
-          content: input.content,
-          displayContent: input.displayContent,
-          turnId: input.turnId,
-          clientMessageId: input.turnId,
-          sessionId: input.goal.scope.sessionId,
-          source: 'goal',
-          uiHidden: input.uiHidden,
-          taskId: input.taskId,
-          useActiveTask: false,
-          signal: input.signal,
-        })
-      } catch (error) {
-        if (!(error instanceof TurnPaused)) throw error
-      }
-    })
-  }
+export class ChatService {
+  constructor(private readonly host: HarnessHost) {}
 
   async submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
     const source = String(input.source ?? 'chat').trim() || 'chat'
-    const turnId = input.turnId || randomUUID().replace(/-/g, '').slice(0, 16)
-    const sessionId = String(input.sessionId ?? '').trim()
-    if (
-      source !== 'goal' &&
-      sessionId &&
-      this.loop.activeTasks
-        .list()
-        .some((task) => task.kind === 'goal' && task.session_id === sessionId)
-    )
-      throw new TurnBusyError()
     const content = String(input.content ?? '')
-    // P1-6：draft 首条提交在这里晋升为真实 session，先广播 session_created 再进 turn
-    let promoted: SessionEntry | null = null
-    if (source === 'chat') {
-      const materialized = await this.materializeSession(input, 'chat.submit')
-      if (materialized.promoted) promoted = materialized.session
-    } else if (sessionId && source !== 'goal') {
-      this.validateOptionalSession(sessionId, `${source}.submit`)
-    } else if (sessionId && !this.loop.sessionStore.get(sessionId)) {
-      throw new InvalidSessionError(
-        `${source}.submit received unknown session ${sessionId}`,
-        sessionId,
-      )
-    }
-
-    // B7：超短首条消息（如 "hi"）延迟到回合结束后用回复做标题材料，避免生成无信息量标题
+    const materialized = await this.materializeSession(
+      input,
+      `${source}.submit`,
+    )
+    const sessionId = materialized.session.id
+    const gestures = (input.requestedSkills ?? [])
+      .map((skill) => String(skill.name ?? '').trim())
+      .filter((name) => isSkillName(name))
+      .map((name) => `/${name}`)
+    const modelContent =
+      gestures.length > 0 ? `${gestures.join(' ')}\n${content}` : content
     let replyResolve: (reply: string) => void = () => {}
-    const replyPromise = new Promise<string>((resolve) => {
+    const reply = new Promise<string>((resolve) => {
       replyResolve = resolve
     })
-    const titleTask = promoted
-      ? this.generateInitialTitle(
-          promoted.id,
-          content,
-          input.emit ?? null,
-          replyPromise,
-        )
+    const titleTask = materialized.promoted
+      ? this.generateInitialTitle(sessionId, content, reply)
       : null
-    const displayContent = input.displayContent ?? content
-    const runSessionId =
-      promoted?.id ??
-      (sessionId && !sessionId.startsWith(DRAFT_SESSION_PREFIX)
-        ? sessionId
-        : null)
+    const emit = input.emit ?? null
+    const untap =
+      emit === null
+        ? null
+        : this.host.tap(async (event) => {
+            if (event.session_id === sessionId) await emit(event)
+          })
     try {
-      if (
-        input.delivery === 'interject' &&
-        source === 'chat' &&
-        runSessionId &&
-        !(input.attachmentIds?.length || input.attachments?.length) &&
-        !input.requestedSkills?.length
-      ) {
-        const interjected = await this.loop.interjectUserTurn(
-          {
-            sessionId: runSessionId,
-            promptId: input.clientMessageId ?? turnId,
-            turnId,
-            clientMessageId: input.clientMessageId ?? turnId,
-            content,
-            displayContent,
-            source,
-            uiHidden: input.uiHidden ?? false,
-          },
-          { emit: input.emit ?? null },
-        )
-        if (interjected.accepted) {
-          replyResolve('')
-          return {
-            turnId,
-            content: '',
-            activeSessionId: runSessionId,
-            delivery: 'interjected',
-            targetTurnId: interjected.targetTurnId,
-          }
-        }
-        if (
-          interjected.reason === 'prompt_id_conflict' ||
-          interjected.reason === 'prompt_cancelled'
-        )
-          throw new Error(`interjection rejected: ${interjected.reason}`)
-      }
-      const reply = await this.loop.runUserTurn(content, {
-        sessionId: runSessionId,
-        turnId,
-        executionId: input.executionId ?? null,
-        emit: input.emit ?? null,
-        displayContent,
-        clientMessageId: input.clientMessageId ?? turnId,
+      const result = await this.host.submit({
+        sessionId,
+        content: modelContent,
+        displayContent: input.displayContent ?? content,
+        clientMessageId: input.clientMessageId ?? null,
+        attachmentIds: input.attachmentIds ?? null,
         source,
         scheduler: input.scheduler ?? null,
         uiHidden: input.uiHidden ?? false,
-        memoryExtra: input.memoryExtra ?? null,
-        attachmentIds: input.attachmentIds ?? null,
-        requestedSkills: input.requestedSkills ?? null,
-        taskId: input.taskId ?? null,
-        useActiveTask: input.useActiveTask,
-        signal: input.signal ?? null,
         delivery: input.delivery ?? 'queue',
+        signal: input.signal ?? null,
       })
-      replyResolve(reply)
+      replyResolve(result.content)
       return {
-        turnId,
-        content: reply,
-        activeSessionId: runSessionId ?? this.loop.activeSessionId,
-        delivery: 'completed',
-        targetTurnId: null,
+        turnId: result.turnId,
+        messageId: result.messageId,
+        content: result.content,
+        activeSessionId: sessionId,
+        delivery: result.delivery,
       }
     } finally {
+      untap?.()
       replyResolve('')
-      if (titleTask) await titleTask
+      if (titleTask !== null) await titleTask
     }
   }
 
+  /** Resolve the target session; a draft id becomes a real session. */
   async materializeSession(
     input: Pick<
       MainlineSubmitInput,
-      'sessionId' | 'clientDraftId' | 'draftSession' | 'emit'
+      'sessionId' | 'clientDraftId' | 'draftSession'
     >,
     operation = 'chat.submit',
   ): Promise<MaterializedSession> {
     const sessionId = String(input.sessionId ?? '').trim()
+    // Never guess a target: a missing id used to fall back to the default
+    // session, which silently appended new conversations to an old one.
+    if (!sessionId)
+      throw new InvalidSessionError(
+        `${operation} requires a sessionId or a draft session id`,
+        null,
+      )
     if (!sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
-      this.validateRequiredSession(sessionId, operation)
-      const session = this.loop.sessionStore.get(sessionId)
-      if (!session)
+      const session = this.host.kept.sessionStore.get(sessionId)
+      if (!session || session.archived_at)
         throw new InvalidSessionError(
           `${operation} received unknown session ${sessionId}`,
           sessionId,
@@ -239,7 +175,7 @@ export class MainlineTurnService {
     }
     const draft = input.draftSession ?? {}
     const project = draft.project ?? {}
-    const session = this.loop.sessionStore.create('新会话', {
+    const session = this.host.kept.sessionStore.create('新会话', {
       mode: draft.mode === 'build' ? 'build' : 'chat',
       titleStatus: 'pending',
       project: {
@@ -250,128 +186,110 @@ export class MainlineTurnService {
     })
     const clientDraftId =
       String(input.clientDraftId ?? sessionId).trim() || sessionId
-    await this.emitSessionEvent(
-      sessionCreated(session as unknown as Record<string, unknown>, {
-        clientDraftId,
-      }),
-      input.emit ?? null,
-    )
+    this.host.emitHost({
+      event: 'session_created',
+      session_id: session.id,
+      session,
+      client_draft_id: clientDraftId,
+    })
     return { session, promoted: true, clientDraftId }
   }
 
-  /** 首条消息后一次性生成标题；失败走 fallback，绝不让 submit 失败。 */
-  private async generateInitialTitle(
-    sessionId: string,
-    firstMessage: string,
-    emit: MainlineEventSink | null,
-    replyPromise?: Promise<string>,
-  ): Promise<void> {
-    // 可见字符 <4 的输入（"hi"/"你好"）单独生成只会得到原话；等回合结束用回复摘要补充材料
-    let material = firstMessage
-    if (
-      replyPromise &&
-      sanitizeSessionTitle(firstMessage).replace(/ /g, '').length < 4
-    ) {
-      const reply = String((await replyPromise.catch(() => '')) ?? '')
-      if (reply.trim())
-        material = `${firstMessage}\n助手回复摘要：${reply.slice(0, 200)}`
-    }
-    let title = ''
-    try {
-      title = await new SessionTitleService(this.loop.modelRouter).generate(
-        material,
-      )
-    } catch {
-      title = ''
-    }
-    try {
-      const updated = this.loop.sessionStore.setGeneratedTitle(
-        sessionId,
-        title || fallbackSessionTitle(firstMessage),
-      )
-      if (updated)
-        await this.emitSessionEvent(
-          sessionTitleUpdated(updated as unknown as Record<string, unknown>),
-          emit,
+  /** Queued user prompts in the renderer's queue-record shape. */
+  listQueuedPrompts(input: { sessionId: string }): QueuedPromptRecord[] {
+    const sessionId = String(input.sessionId ?? '').trim()
+    if (!sessionId || !this.host.kept.sessionStore.get(sessionId))
+      throw new Error(`unknown session: ${sessionId || '<empty>'}`)
+    const queued = this.host.queuedPrompts(sessionId)
+    if (queued.length === 0) return []
+    const metas = new Map<string, Record<string, unknown>>()
+    for (const event of this.host.agentFor(sessionId).session.events) {
+      if (event.type === 'host/user-meta')
+        metas.set(
+          event.data.messageId,
+          event.data as unknown as Record<string, unknown>,
         )
-    } catch {
-      // 标题失败不影响回合结果
     }
-  }
-
-  private async emitSessionEvent(
-    event: Record<string, unknown>,
-    emit: MainlineEventSink | null,
-  ): Promise<void> {
-    const sink = emit ?? this.loop.eventSink
-    if (sink) await sink(event)
-  }
-
-  async submitSchedulerTurn(
-    payload: SchedulerAgentTurnPayload,
-  ): Promise<string> {
-    const targetSessionId = String(payload.sessionId ?? '').trim()
-    const result = await this.submit({
-      content: payload.content,
-      displayContent: payload.displayContent,
-      clientMessageId: payload.clientMessageId,
-      turnId: payload.clientMessageId,
-      source: payload.source,
-      sessionId: targetSessionId || null,
-      scheduler: payload.scheduler,
-      taskId: payload.taskId,
-      emit: payload.deliver ? this.loop.eventSink : async () => undefined,
+    const now = new Date().toISOString()
+    return queued.map((prompt, index) => {
+      const meta = metas.get(prompt.prompt_id) ?? {}
+      const attachments = Array.isArray(meta.attachments)
+        ? (meta.attachments as Array<{ id?: unknown }>)
+        : []
+      return {
+        id: prompt.prompt_id,
+        turnId: '',
+        clientMessageId:
+          typeof meta.clientMessageId === 'string'
+            ? meta.clientMessageId
+            : prompt.prompt_id,
+        delivery: prompt.target === 'next-step' ? 'interject' : 'queue',
+        targetCommandId: null,
+        content: prompt.content,
+        displayContent:
+          typeof meta.displayContent === 'string'
+            ? meta.displayContent
+            : prompt.content,
+        source: typeof meta.source === 'string' ? meta.source : null,
+        uiHidden: meta.uiHidden === true,
+        attachmentIds: attachments
+          .map((item) => String(item.id ?? ''))
+          .filter(Boolean),
+        requestedSkills: [],
+        createdOrder: index,
+        supportsInterjection: prompt.target === 'next-turn',
+        state: 'queued',
+        reason: null,
+        createdAt: now,
+        updatedAt: now,
+      }
     })
-    return result.content
-  }
-
-  private validateRequiredSession(sessionId: string, operation: string): void {
-    if (!sessionId) {
-      throw new InvalidSessionError(
-        `${operation} requires a real sessionId`,
-        null,
-      )
-    }
-    this.validateOptionalSession(sessionId, operation)
-  }
-
-  private validateOptionalSession(sessionId: string, operation: string): void {
-    if (sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
-      throw new InvalidSessionError(
-        `${operation} cannot submit draft session ${sessionId}`,
-        sessionId,
-      )
-    }
-    const session = this.loop.sessionStore.get(sessionId)
-    if (!session || session.archived_at) {
-      throw new InvalidSessionError(
-        `${operation} received unknown session ${sessionId}`,
-        sessionId,
-      )
-    }
-  }
-}
-
-export class ChatService {
-  readonly mainline: MainlineTurnService
-
-  constructor(mainline: MainlineTurnService) {
-    this.mainline = mainline
-  }
-
-  submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
-    return this.mainline.submit({ ...input, source: input.source ?? 'chat' })
-  }
-
-  listQueuedPrompts(input: { sessionId: string }) {
-    return this.mainline.loop.listQueuedPrompts(input.sessionId)
   }
 
   manageQueuedPrompt(input: {
     sessionId: string
     promptId: string
     action: 'cancel' | 'interject'
-  }) {
-    return this.mainline.loop.manageQueuedPrompt(input)
+  }): { ok: boolean; reason?: string } {
+    const applied = this.host.manageQueuedPrompt(
+      input.sessionId,
+      input.promptId,
+      input.action,
+    )
+    return applied ? { ok: true } : { ok: false, reason: 'prompt_not_queued' }
+  }
+
+  /** One title per promoted session; failures fall back and never fail submit. */
+  private async generateInitialTitle(
+    sessionId: string,
+    firstMessage: string,
+    reply: Promise<string>,
+  ): Promise<void> {
+    let material = firstMessage
+    // Very short openers ("hi") only produce useless titles: wait for the reply.
+    if (sanitizeSessionTitle(firstMessage).replace(/ /g, '').length < 4) {
+      const answer = String((await reply.catch(() => '')) ?? '')
+      if (answer.trim())
+        material = `${firstMessage}\n助手回复摘要：${answer.slice(0, 200)}`
+    }
+    let updated: SessionEntry | null = null
+    try {
+      updated = await this.host.generateTitle(sessionId, material)
+    } catch {
+      try {
+        updated = this.host.kept.sessionStore.setGeneratedTitle(
+          sessionId,
+          fallbackSessionTitle(firstMessage),
+        )
+      } catch {
+        updated = null
+      }
+    }
+    if (updated)
+      this.host.emitHost({
+        event: 'session_title_updated',
+        session_id: sessionId,
+        session: updated,
+      })
   }
 }

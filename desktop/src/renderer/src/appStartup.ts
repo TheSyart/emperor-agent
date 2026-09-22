@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import type { BootstrapPayload, RuntimeHistoryItem } from './types'
+import type { BootstrapPayload } from './types'
 
 interface StartupSessionStore {
   activeId: Ref<string>
@@ -18,7 +18,8 @@ export interface InitialStartupDeps {
   sessionStore: StartupSessionStore
   bootstrap: StartupBootstrap
   switchSession: (sessionId: string) => void
-  restoreFromHistory: (history: RuntimeHistoryItem[]) => void
+  /** Rebuild the non-chat runtime state from the bootstrap replay. */
+  restoreRuntimeState: () => void
   connectSocket: () => void
 }
 
@@ -26,7 +27,7 @@ export async function runInitialStartup({
   sessionStore,
   bootstrap,
   switchSession,
-  restoreFromHistory,
+  restoreRuntimeState,
   connectSocket,
 }: InitialStartupDeps): Promise<void> {
   try {
@@ -41,7 +42,7 @@ export async function runInitialStartup({
   if (bootstrap.error.value) return
 
   if (!sessionStore.isDraftSessionId(sessionStore.activeId.value)) {
-    restoreFromHistory(bootstrap.boot.value?.unarchivedHistory || [])
+    restoreRuntimeState()
   }
   connectSocket()
 }

@@ -7,7 +7,6 @@ import {
 } from 'vue'
 import type {
   BootstrapPayload,
-  ChatMessage,
   ChatSendPayload,
   ControlInteraction,
   CompactResult,
@@ -17,29 +16,24 @@ import type {
   QueueDraftRecovery,
   QueuedPromptItem,
   RuntimeStatus,
-  TurnChangeSnapshot,
   GoalProjectionState,
   GoalOperationResult,
+  PermissionPreset,
   TokensPayload,
   WatchlistDecision,
 } from '../types'
 import type { SlashPaletteItem } from '../commands'
 import type { CommandCompletion } from '@emperor/core/api'
-import type { PlanProjection } from '../runtime/handlers/plans'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
 import type { LifecycleTransitionResult } from './composerLifecycle'
-import type { TurnChangeProjectionState } from '../runtime/turnChangeProjection'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
   loading: Ref<boolean>
   error: Ref<string>
-  activeSkill: Ref<string | null>
-  skillContent: Ref<string>
   configContent: Ref<string>
 
-  messages: Ref<ChatMessage[]>
   queuedPrompts: Ref<QueuedPromptItem[]>
   queueDraftRecovery: Ref<QueueDraftRecovery | null>
   clearQueueDraftRecovery: (sessionId?: string) => void
@@ -47,10 +41,7 @@ export interface AppContext {
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>
   pending: PendingState
-  planProjection: PlanProjection
   goalProjection: GoalProjectionState
-  turnChangeProjection: TurnChangeProjectionState
-  activeTurnChange: ComputedRef<TurnChangeSnapshot | null>
   goalCaptureState: Ref<GoalCaptureProjection>
   sessionId: Ref<string>
   sessionRuntimeStates: Record<string, { running: boolean; attention: boolean }>
@@ -71,15 +62,9 @@ export interface AppContext {
   startProfileInterview: () => Promise<void>
   skipProfileInterview: () => Promise<void>
   compactMemory: () => Promise<CompactResult>
-  loadSkill: (name: string) => Promise<void>
-  startNewSkill: (name: string) => void
-  saveSkill: (content: string) => Promise<void>
-  deleteSkill: (name: string) => Promise<void>
   loadConfig: () => Promise<void>
   saveConfig: (content: string) => Promise<void>
   mcpContent: Ref<string>
-  loadMcpConfig: () => Promise<void>
-  loadMcpStatus: () => Promise<BootstrapPayload['mcp']>
   saveMcpConfig: (content: string) => Promise<void>
   saveMemory: (content: string) => Promise<void>
   loadEpisode: (date: string) => Promise<{ date: string; content: string }>
@@ -94,7 +79,7 @@ export interface AppContext {
   setDesktopPetEnabled: (enabled: boolean) => Promise<DesktopPetPayload>
 
   setPermissionMode: (
-    mode: 'ask_before_edit' | 'smart_auto' | 'full_access',
+    preset: PermissionPreset,
   ) => Promise<{ ok: boolean; error?: string }>
   activatePlan: () => Promise<LifecycleTransitionResult>
   activateGoalCapture: () => Promise<LifecycleTransitionResult>
@@ -118,7 +103,6 @@ export interface AppContext {
     action: GoalCardAction,
     reason?: string,
   ) => Promise<GoalOperationResult>
-  replaceGoal: (goalId: string, outcome: string) => Promise<GoalOperationResult>
   startGoal: (outcome: string) => Promise<GoalOperationResult>
   submitFromComposer: (payload: string | ChatSendPayload) => void
 

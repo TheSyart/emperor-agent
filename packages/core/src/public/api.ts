@@ -9,19 +9,12 @@ export type {
 } from '../api/operations'
 export { CoreUnavailableError } from '../runtime/lifecycle'
 export { EnvironmentError } from '../environment/errors'
-export { PromptQueueFullError } from '../agent/loop'
 export type {
   CommandCompletion,
   CommandDescriptor,
   CommandInvocationResult,
   CommandSurface,
 } from '../commands/types'
-export {
-  ControlMode,
-  InteractionKind,
-  InteractionStatus,
-} from '../control/models'
-export type { HooksConfigV2 } from '../hooks/models'
 export type { MemoryScope } from '../memory/patch'
 export type {
   CompactionDecision,
@@ -36,3 +29,41 @@ export type {
 } from '../workspace/files'
 export type { WorkspaceSnapshot } from '../workspace/snapshot'
 export type { TerminalEvent, TerminalSummary } from '../workspace/terminal'
+export type {
+  CoreHookAuditRecordPayload,
+  CoreHookMatchItemPayload,
+  CoreHooksAuditPayload,
+  CoreHooksConfigPayload,
+  CoreHooksMatchPayload,
+  CoreHooksMetadataPayload,
+  CoreHooksTestRunPayload,
+  CoreHooksValidationPayload,
+} from '../api/services/hooks-service'
+export type { GoalOperationResult } from '../api/services/goal-service'
+export type {
+  InvalidSkillPayload,
+  SkillDeletePayload,
+  SkillDetailPayload,
+  SkillImportPayload,
+  SkillInfoPayload,
+  SkillListPayload,
+  SkillValidationPayload,
+} from '../api/services/skill-service'
+export type {
+  SkillImportFailure,
+  SkillImportFailureCode,
+  SkillImportSource,
+  ImportedSkill,
+} from '../skills/import'
+export type { GoalView, GoalPhase } from '../harness/goal/types'
+export type { CoreTaskRecord } from '../api/core-api'
+export { sanitizeForWire } from '../session-log/history'
+export type { RawSessionTap } from '../harness/host/host'
+export type {
+  SessionHistoryPage,
+  WireSessionEvent,
+} from '../session-log/history'
+export type {
+  SessionLineage,
+  SubagentChildView,
+} from '../harness/host/session-views'

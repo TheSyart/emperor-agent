@@ -48,19 +48,16 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
           backend: 'macos-seatbelt',
           status: 'available',
         },
-        lifecycle: {
-          state: 'ready',
-          failedServiceId: null,
-          failedPhase: null,
-          services: [
-            { id: 'process-runtime', required: true, state: 'ready' },
-            { id: 'code-intelligence', required: true, state: 'ready' },
-            { id: 'task-runtime', required: true, state: 'ready' },
-            { id: 'subagent-supervisor', required: true, state: 'ready' },
-            { id: 'session-runtime', required: true, state: 'ready' },
-            { id: 'mcp', required: true, state: 'ready' },
-            { id: 'scheduler', required: true, state: 'ready' },
-          ],
+        kernel: {
+          lifecycle: {
+            state: 'ready',
+            services: [
+              { id: 'process-runtime', required: true, state: 'ready' },
+              { id: 'harness-kernel', required: true, state: 'ready' },
+              { id: 'mcp', required: true, state: 'ready' },
+              { id: 'scheduler', required: true, state: 'ready' },
+            ],
+          },
         },
       })),
     },
@@ -153,13 +150,10 @@ describe('packaged smoke contract', () => {
         lifecycle: {
           state: 'ready',
           readyServices: [
-            'code-intelligence',
+            'harness-kernel',
             'mcp',
             'process-runtime',
             'scheduler',
-            'session-runtime',
-            'subagent-supervisor',
-            'task-runtime',
           ],
         },
       },
@@ -242,21 +236,16 @@ describe('packaged smoke contract', () => {
       diagnostics: {
         get: vi.fn(async () => ({
           sandbox: { backend: 'macos-seatbelt', status: 'available' },
-          lifecycle: {
-            state: 'starting',
-            services: [
-              { id: 'process-runtime', required: true, state: 'ready' },
-              { id: 'code-intelligence', required: true, state: 'ready' },
-              { id: 'task-runtime', required: true, state: 'ready' },
-              {
-                id: 'subagent-supervisor',
-                required: true,
-                state: 'ready',
-              },
-              { id: 'session-runtime', required: true, state: 'starting' },
-              { id: 'mcp', required: true, state: 'pending' },
-              { id: 'scheduler', required: true, state: 'pending' },
-            ],
+          kernel: {
+            lifecycle: {
+              state: 'degraded',
+              services: [
+                { id: 'process-runtime', required: true, state: 'ready' },
+                { id: 'harness-kernel', required: true, state: 'ready' },
+                { id: 'mcp', required: true, state: 'unavailable' },
+                { id: 'scheduler', required: true, state: 'ready' },
+              ],
+            },
           },
         })),
       },

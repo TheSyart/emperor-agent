@@ -1,7 +1,12 @@
-import type { ToolRegistry } from '../tools/registry'
 import { MCPToolAdapter } from './adapter'
 import { loadMcpConfig, type MCPConfig, type ServerConfig } from './config'
-import { MCPConnection, SSEConnection, StdioConnection } from './connection'
+import {
+  HttpConnection,
+  InvalidConfigConnection,
+  MCPConnection,
+  SSEConnection,
+  StdioConnection,
+} from './connection'
 import type { ExecutionEnvironment } from '../environment/snapshot'
 import {
   MCPConnectionSupervisor,
@@ -203,10 +208,6 @@ export class MCPClient {
     return [...this.tools]
   }
 
-  registerTools(registry: ToolRegistry): void {
-    for (const tool of this.tools) registry.register(tool)
-  }
-
   getConnection(serverName: string): MCPConnection | undefined {
     return this.connections.get(serverName)
   }
@@ -233,14 +234,8 @@ export class MCPClient {
           readOnly: tool.readOnly,
           exclusive: tool.exclusive,
           evidencePolicy: 'context_only',
-          readOnlySource:
-            provenance.kind === 'mcp_declaration'
-              ? provenance.readOnlySource
-              : 'fallback_write',
-          exclusiveSource:
-            provenance.kind === 'mcp_declaration'
-              ? provenance.exclusiveSource
-              : 'fallback_serialized',
+          readOnlySource: provenance.readOnlySource,
+          exclusiveSource: provenance.exclusiveSource,
           generation: server?.generation ?? null,
           clientId: server?.clientId ?? null,
         }
@@ -272,7 +267,7 @@ export class MCPClient {
   ): Promise<ServerConfig | null> {
     const config = (await loadMcpConfigForEnvironment(this.root, snapshot))
       .servers[serverName]
-    return config?.enabled && config.transport !== 'sse' ? config : null
+    return config?.enabled ? config : null
   }
 }
 
@@ -296,16 +291,31 @@ function createConnection(
     ownerSessionId: null,
   },
 ): MCPConnection {
-  return cfg.transport === 'sse'
-    ? new SSEConnection(cfg.name, cfg)
-    : new StdioConnection(cfg.name, cfg, {
-        executionEnvironment,
-        configResolver,
-        processRuntime: owned.processRuntime,
-        workspaceRoot: owned.workspaceRoot,
-        stateRoot: owned.stateRoot,
-        ownerSessionId: owned.ownerSessionId,
-      })
+  const invalid = invalidConfigReason(cfg)
+  if (invalid !== null) return new InvalidConfigConnection(cfg.name, invalid)
+  if (cfg.transport === 'http') return new HttpConnection(cfg.name, cfg)
+  if (cfg.transport === 'sse') return new SSEConnection(cfg.name, cfg)
+  return new StdioConnection(cfg.name, cfg, {
+    executionEnvironment,
+    configResolver,
+    processRuntime: owned.processRuntime,
+    workspaceRoot: owned.workspaceRoot,
+    stateRoot: owned.stateRoot,
+    ownerSessionId: owned.ownerSessionId,
+  })
+}
+
+/** Why a server cannot be connected as configured, or null. Never falls back to stdio. */
+export function invalidConfigReason(cfg: ServerConfig): string | null {
+  if (cfg.transport === 'stdio')
+    return cfg.command
+      ? null
+      : `MCP server '${cfg.name}' uses stdio but has no command`
+  if (cfg.transport === 'http' || cfg.transport === 'sse')
+    return cfg.url
+      ? null
+      : `MCP server '${cfg.name}' uses ${cfg.transport} but has no url`
+  return `MCP server '${cfg.name}' has unsupported transport '${String(cfg.transport).slice(0, 40)}' (expected stdio, sse, or http)`
 }
 
 async function loadMcpConfigForEnvironment(

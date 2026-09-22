@@ -7,9 +7,10 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createLogger, type Logger } from '../util/log'
 import {
   CURRENT_STATE_LAYOUT_VERSION,
   InstallationBootstrapError,
@@ -18,6 +19,30 @@ import {
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
+}
+
+interface CapturedLog {
+  logger: Logger
+  lines: { level: string; msg: string; fields: Record<string, unknown> }[]
+}
+
+function capturedLogger(): CapturedLog {
+  const lines: CapturedLog['lines'] = []
+  return {
+    logger: createLogger({ level: 'debug', sink: (line) => lines.push(line) }),
+    lines,
+  }
+}
+
+/** A bootstrap lock as a previous run would have left it on disk. */
+function writeLock(
+  parent: string,
+  owner: Record<string, unknown>,
+): { path: string; raw: string } {
+  const path = join(parent, '.emperor.bootstrap.lock')
+  const raw = `${JSON.stringify(owner)}\n`
+  writeFileSync(path, raw)
+  return { path, raw }
 }
 
 describe('bootstrapEmperorHome', () => {
@@ -236,10 +261,18 @@ describe('bootstrapEmperorHome', () => {
     expect(lstatSync(staging).isDirectory()).toBe(true)
   })
 
-  it('classifies only an existing bootstrap lock as lock contention', () => {
-    const parent = tmp('emperor-installation-lock-')
+  it('keeps failing fast while the recorded bootstrap lock holder is alive and fresh', () => {
+    const parent = tmp('emperor-installation-lock-live-')
     const emperorHome = join(parent, '.emperor')
-    writeFileSync(join(parent, '.emperor.bootstrap.lock'), 'occupied')
+    const lock = writeLock(parent, {
+      schemaVersion: 1,
+      pid: process.pid,
+      host: hostname(),
+      token: 'other-run',
+      emperorHome,
+      startedAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+    })
 
     try {
       bootstrapEmperorHome({
@@ -247,6 +280,7 @@ describe('bootstrapEmperorHome', () => {
         source: 'explicit',
         appVersion: '2.0.0',
         runtimeRevision: 'runtime-2',
+        pidAlive: () => true,
       })
       throw new Error('expected bootstrap lock failure')
     } catch (error) {
@@ -254,6 +288,89 @@ describe('bootstrapEmperorHome', () => {
       expect((error as InstallationBootstrapError).code).toBe(
         'installation_lock_busy',
       )
+      expect((error as InstallationBootstrapError).message).toContain(
+        `pid ${process.pid}`,
+      )
     }
+    expect(readFileSync(lock.path, 'utf8')).toBe(lock.raw)
+    expect(existsSync(join(emperorHome, 'installation.json'))).toBe(false)
+  })
+
+  it('takes over a bootstrap lock whose recorded process no longer exists', () => {
+    const parent = tmp('emperor-installation-lock-dead-')
+    const emperorHome = join(parent, '.emperor')
+    const lock = writeLock(parent, {
+      schemaVersion: 1,
+      pid: 424242,
+      host: hostname(),
+      token: 'killed-run',
+      emperorHome,
+      startedAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+    })
+    const log = capturedLogger()
+
+    const result = bootstrapEmperorHome({
+      emperorHome,
+      source: 'explicit',
+      appVersion: '2.0.0',
+      runtimeRevision: 'runtime-2',
+      pidAlive: () => false,
+      logger: log.logger,
+    })
+
+    expect(result.status).toBe('ready')
+    expect(existsSync(lock.path)).toBe(false)
+    const warning = log.lines.find((line) => line.level === 'warn')
+    expect(warning?.msg).toContain('Reclaimed')
+    expect(String(warning?.fields.holder)).toContain('pid 424242')
+  })
+
+  it('treats an unreadable bootstrap lock as contention until it stops being refreshed', () => {
+    const parent = tmp('emperor-installation-lock-corrupt-')
+    const emperorHome = join(parent, '.emperor')
+    writeFileSync(join(parent, '.emperor.bootstrap.lock'), 'occupied')
+
+    expect(() =>
+      bootstrapEmperorHome({
+        emperorHome,
+        source: 'explicit',
+        appVersion: '2.0.0',
+        runtimeRevision: 'runtime-2',
+      }),
+    ).toThrowError(InstallationBootstrapError)
+
+    const log = capturedLogger()
+    const result = bootstrapEmperorHome({
+      emperorHome,
+      source: 'explicit',
+      appVersion: '2.0.0',
+      runtimeRevision: 'runtime-2',
+      // A clock far past the lock's own mtime: the residue is unreadable and
+      // nothing is refreshing it, so it is abandoned rather than authoritative.
+      now: () => '2126-01-01T00:00:00.000Z',
+      logger: log.logger,
+    })
+
+    expect(result.status).toBe('ready')
+    expect(existsSync(join(parent, '.emperor.bootstrap.lock'))).toBe(false)
+    expect(log.lines.find((line) => line.level === 'warn')?.fields.holder).toBe(
+      'an unreadable lock',
+    )
+  })
+
+  it('removes the bootstrap lock again once bootstrap succeeds', () => {
+    const parent = tmp('emperor-installation-lock-release-')
+    const emperorHome = join(parent, '.emperor')
+
+    const result = bootstrapEmperorHome({
+      emperorHome,
+      source: 'explicit',
+      appVersion: '2.0.0',
+      runtimeRevision: 'runtime-2',
+    })
+
+    expect(result.status).toBe('ready')
+    expect(existsSync(join(parent, '.emperor.bootstrap.lock'))).toBe(false)
   })
 })

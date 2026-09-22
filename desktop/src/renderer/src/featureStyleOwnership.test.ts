@@ -23,9 +23,16 @@ describe('renderer feature style ownership', () => {
     expect(existsSync(manifestPath)).toBe(true)
     if (!existsSync(manifestPath)) return
     const manifest = readManifest()
-    const declared = manifest.features.composer.layers.map(
-      (layer) => layer.path,
+    const declared = manifest.features.composer.layers
+      .filter((layer) => !layer.scoped)
+      .map((layer) => layer.path)
+    const scoped = manifest.features.composer.layers.filter(
+      (layer) => layer.scoped,
     )
+    for (const layer of scoped)
+      expect(readFileSync(join(rendererRoot, layer.path), 'utf8')).toContain(
+        '<style scoped>',
+      )
     const actual = collectFiles(join(rendererRoot, 'styles'), '.css')
       .filter((path) => {
         const source = readFileSync(join(rendererRoot, path), 'utf8')
@@ -46,20 +53,33 @@ describe('renderer feature style ownership', () => {
     )
   })
 
-  it('keeps HooksPanel styling private to its scoped feature view', () => {
+  it('keeps Hooks styling private to its scoped settings section views', () => {
     const manifest = readManifest()
     const hooks = manifest.features.hooks
     const component = readFileSync(join(rendererRoot, hooks.view), 'utf8')
 
-    expect(hooks.layers).toEqual([
-      {
-        role: 'component-scoped',
-        path: 'components/panels/HooksPanel.vue',
-        scoped: true,
-      },
+    expect(hooks.view).toBe('components/settings/HooksSection.vue')
+    expect(hooks.layers.map((layer) => layer.path)).toEqual([
+      'components/settings/HooksSection.vue',
+      'components/settings/hooks/HooksConfigTab.vue',
+      'components/settings/hooks/HooksTestTab.vue',
+      'components/settings/hooks/HooksAuditTab.vue',
     ])
-    expect(component).toContain('<style scoped>')
-    expect(component).toContain('class="main-view view-readable hooks-panel"')
+    for (const layer of hooks.layers) {
+      expect(layer).toMatchObject({ role: 'component-scoped', scoped: true })
+      expect(readFileSync(join(rendererRoot, layer.path), 'utf8')).toContain(
+        '<style scoped>',
+      )
+    }
+    expect(component).toContain('class="hooks-section"')
+    // No global stylesheet styles the Hooks section.
+    const globalHooksRules = collectFiles(
+      join(rendererRoot, 'styles'),
+      '.css',
+    ).filter((path) =>
+      /\.hooks-/.test(readFileSync(join(rendererRoot, path), 'utf8')),
+    )
+    expect(globalHooksRules).toEqual([])
   })
 
   it('points feature contracts only at existing files', () => {

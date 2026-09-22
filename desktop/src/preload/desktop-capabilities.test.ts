@@ -8,6 +8,8 @@ import {
   PREVIEW_OPEN_CHANNEL,
   PREVIEW_STATE_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
+  SELECT_FILE_CHANNEL,
+  SKILLS_OPEN_FOLDER_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
 
@@ -48,6 +50,24 @@ describe('desktop capability preload bridge', () => {
     ])
     expect(listener).toHaveBeenCalledWith({ previewId: 'preview-1' })
     expect(ipc.removed).toHaveLength(1)
+  })
+
+  it('exposes the Skills folder and file picker channels', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+
+    await bridge.openSkillsFolder({ scope: 'project', sessionId: 's1' })
+    await bridge.selectFile({ filters: [{ name: 'Zip', extensions: ['zip'] }] })
+    await bridge.selectFile()
+
+    expect(ipc.invoked).toEqual([
+      [SKILLS_OPEN_FOLDER_CHANNEL, { scope: 'project', sessionId: 's1' }],
+      [
+        SELECT_FILE_CHANNEL,
+        { filters: [{ name: 'Zip', extensions: ['zip'] }] },
+      ],
+      [SELECT_FILE_CHANNEL, {}],
+    ])
   })
 })
 

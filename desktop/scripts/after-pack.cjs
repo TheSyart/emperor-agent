@@ -80,9 +80,7 @@ function validatePackagedAppResources(
     if (
       ((entry === '/node_modules' || entry.startsWith('/node_modules/')) &&
         !isAllowedNodeModuleEntry(entry)) ||
-      /(?:^|\/)(?:fixtures|tests|skills-catalog|desktop-pet)(?:\/|$)/i.test(
-        entry,
-      ) ||
+      /(?:^|\/)(?:fixtures|tests|desktop-pet)(?:\/|$)/i.test(entry) ||
       /(?:\.py|requirements[^/]*\.txt)$/i.test(entry)
     )
       throw new Error(`packaged app contains forbidden ASAR entry: ${entry}`)
@@ -138,7 +136,7 @@ function validatePackagedAppResources(
     assertRegularFile(join(petRoot, name), `desktop-pet/${name}`)
   validatePetPreloadSource(readFileSync(join(petRoot, 'preload.js')))
 
-  for (const forbidden of ['backend', 'node_modules', 'skills-catalog']) {
+  for (const forbidden of ['backend', 'node_modules']) {
     if (existsSync(join(resourcesRoot, forbidden)))
       throw new Error(`packaged resources contain forbidden path: ${forbidden}`)
   }

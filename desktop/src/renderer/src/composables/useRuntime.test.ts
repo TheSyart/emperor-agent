@@ -12,48 +12,6 @@ afterEach(() => {
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
-  it('shows source validation progress without exposing research payloads', () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (callback: (event: unknown) => void) => {
-        listener = callback
-        return () => undefined
-      },
-    })
-    const runtime = useRuntime(testOptions())
-    runtime.connectSocket()
-    runtime.switchSession('s1')
-
-    emitCoreEvent(listener, {
-      event: 'research_validation',
-      stage: 'grounding_review',
-      source_count: 2,
-      fact_unit_count: 4,
-      session_id: 's1',
-      seq: 1,
-    })
-    expect(runtime.pending).toMatchObject({
-      label: '正在核验来源',
-      detail: '4 项事实 · 2 个来源',
-      tone: 'running',
-    })
-
-    emitCoreEvent(listener, {
-      event: 'research_validation',
-      stage: 'failed',
-      source_count: 2,
-      fact_unit_count: 4,
-      reason_code: 'unsupported_claim',
-      session_id: 's1',
-      seq: 2,
-    })
-    expect(runtime.pending).toMatchObject({
-      label: '来源核验未通过，正在修订',
-      tone: 'running',
-    })
-  })
-
   it('refreshes memory and slash Skills after a live assistant completes', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -79,6 +37,67 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     expect(options.refreshMemory).toHaveBeenCalledOnce()
     expect(options.refreshCommands).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes the queue tray on live prompt_queued / prompt_dequeued events', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    let queue: Array<Record<string, unknown>> = []
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.listQueuedPrompts') return queue
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    await flushPromises()
+    const listCalls = () =>
+      calls.filter((call) => call[0] === 'chat.listQueuedPrompts').length
+    const before = listCalls()
+
+    queue = [
+      {
+        id: 'p1',
+        turnId: null,
+        clientMessageId: 'p1',
+        content: 'later',
+        displayContent: 'later',
+        delivery: 'queue',
+        supportsInterjection: true,
+        createdOrder: 1,
+        attachmentIds: [],
+        requestedSkills: [],
+      },
+    ]
+    emitCoreEvent(listener, {
+      event: 'prompt_queued',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+    })
+    await flushPromises()
+    expect(listCalls()).toBe(before + 1)
+    expect(runtime.queuedPrompts.value).toEqual([
+      expect.objectContaining({ id: 'p1', content: 'later' }),
+    ])
+
+    queue = []
+    emitCoreEvent(listener, {
+      event: 'prompt_dequeued',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+    })
+    await flushPromises()
+    expect(listCalls()).toBe(before + 2)
+    expect(runtime.queuedPrompts.value).toEqual([])
   })
 
   it('applies live profile onboarding state changes to bootstrap', () => {
@@ -176,6 +195,8 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.status.value).toBe('ready')
     runtime.switchSession('s1')
     expect(runtime.sendMessage('hello')).toBe(true)
+    // No optimistic chat bubble: the transcript renders from the raw log.
+    expect(runtime).not.toHaveProperty('messages')
     await Promise.resolve()
 
     expect(calls.find((call) => call[0] === 'chat.submit')).toEqual([
@@ -187,11 +208,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       }),
     ])
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(runtime.messages.value.at(-1)).toMatchObject({
-      role: 'assistant',
-      content: 'pong',
-      streaming: false,
-    })
     expect(runtime.busy.value).toBe(false)
   })
 
@@ -218,7 +234,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(listener).toBeNull()
   })
 
-  it('submits a busy prompt as an interjection without creating a second optimistic assistant', async () => {
+  it('submits a busy prompt as an interjection and keeps the turn busy', async () => {
     const calls: unknown[][] = []
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -263,9 +279,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       content: 'interrupt now',
       delivery: 'interject',
     })
-    expect(
-      runtime.messages.value.filter((message) => message.role === 'assistant'),
-    ).toHaveLength(1)
     expect(runtime.busy.value).toBe(true)
 
     emitCoreEvent(listener, {
@@ -364,7 +377,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     )
   })
 
-  it('queues attachments and requested Skills while a turn is busy without creating a chat bubble', async () => {
+  it('queues attachments and requested Skills while a turn is busy', async () => {
     const calls: unknown[][] = []
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
@@ -415,24 +428,35 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         supportsInterjection: false,
       }),
     ])
-    expect(runtime.messages.value).toEqual([])
   })
 
-  it('does not append an error message when a chat turn pauses for user input', async () => {
+  it('keeps the turn busy while an ask waits inside the running turn', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit') {
           emitCoreEvent(listener, {
-            event: 'turn_paused',
-            seq: 1,
-            turn_id: 'turn-paused',
-            interaction: { id: 'ask_1', kind: 'ask', status: 'waiting' },
+            event: 'turn_phase',
+            seq: 17,
+            session_id: 's1',
+            turn_id: 's1:1',
+            phase: 'started',
           })
-          return {
-            ok: false,
-            error: { message: 'Turn paused', code: 'turn_paused' },
-          }
+          emitCoreEvent(listener, {
+            event: 'ask_request',
+            seq: 33,
+            session_id: 's1',
+            turn_id: 's1:1',
+            interaction: {
+              id: 'ask_q1',
+              kind: 'ask',
+              status: 'waiting',
+              questions: [
+                { id: 'q', header: '', question: '选哪个？', options: [] },
+              ],
+            },
+          })
+          return new Promise(() => {})
         }
         return { ok: true }
       },
@@ -443,20 +467,22 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         }
       },
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
     expect(runtime.sendMessage('需要澄清')).toBe(true)
     await flushPromises()
 
-    expect(
-      runtime.messages.value.map((message) => message.content).join('\n'),
-    ).not.toContain('出错了')
-    expect(runtime.busy.value).toBe(false)
-    expect(runtime.pending.label).toBe('等待你定夺')
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.busy.value).toBe(true)
+    expect(runtime.pending.label).toBe('等待你回答')
+    expect(runtime.pendingInteractionsBySession.s1?.id).toBe('ask_q1')
   })
 
-  it('does not append an error message when a stopped chat turn rejects as cancelled', async () => {
+  it('does not surface an error when a stopped chat turn rejects as cancelled', async () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit')
@@ -468,19 +494,21 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       },
       onCoreEvent: () => () => {},
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
     expect(runtime.sendMessage('停止我')).toBe(true)
     await flushPromises()
 
-    expect(
-      runtime.messages.value.map((message) => message.content).join('\n'),
-    ).not.toContain('出错了')
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.pending.label).toBe('任务已停止')
     expect(runtime.busy.value).toBe(false)
   })
 
-  it('does not append an error message when Core rejects a concurrent chat turn as busy', async () => {
+  it('does not surface an error when Core rejects a concurrent chat turn as busy', async () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         if (args[0] === 'chat.submit')
@@ -495,18 +523,17 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       },
       onCoreEvent: () => () => {},
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
     expect(runtime.sendMessage('第二条')).toBe(true)
     await flushPromises()
 
-    expect(
-      runtime.messages.value.map((message) => message.content).join('\n'),
-    ).not.toContain('出错了')
-    expect(
-      runtime.messages.value.map((message) => message.content).join('\n'),
-    ).toContain('已有任务正在运行')
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.pending.label).toBe('已有任务正在运行')
     expect(runtime.busy.value).toBe(false)
   })
 
@@ -542,7 +569,8 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         }
       },
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
     expect(runtime.sendMessage('hi')).toBe(true)
@@ -554,9 +582,10 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       running: false,
       attention: false,
     })
-    expect(
-      runtime.messages.value.map((message) => message.content).join('\n'),
-    ).toContain('还没有可用模型，请先配置模型。')
+    // A rejected submit has no log row: it surfaces as a toast.
+    expect(options.showToast).toHaveBeenCalledWith(
+      '出错了：还没有可用模型，请先配置模型。',
+    )
   })
 
   it('deduplicates a runtime error event followed by the matching submit rejection', async () => {
@@ -600,25 +629,25 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         }
       },
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
     expect(runtime.sendMessage('hi')).toBe(true)
     await flushPromises()
 
-    const rendered = runtime.messages.value
-      .map((message) => message.content)
-      .join('\n')
-    expect(
-      rendered.match(/出错了：还没有可用模型，请先配置模型。/g),
-    ).toHaveLength(1)
+    // The turn error renders as a log row; the matching rejection stays quiet.
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.busy.value).toBe(false)
     expect(runtime.sessionRuntimeStates['s1']).toMatchObject({
       running: false,
       attention: false,
     })
   })
 
-  it('ignores live runtime events from another session without advancing the active replay cursor', async () => {
+  it('ignores live runtime events from another session for the active busy state', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
       invokeCore: async () => ({ ok: true }),
@@ -633,26 +662,32 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     runtime.switchSession('session-current')
     emitCoreEvent(listener, {
-      event: 'message_delta',
+      event: 'turn_phase',
       seq: 99,
       session_id: 'session-other',
       turn_id: 'turn-other',
-      delta: 'foreign text',
+      phase: 'started',
+    })
+    expect(runtime.busy.value).toBe(false)
+    expect(runtime.sessionRuntimeStates['session-other']).toMatchObject({
+      running: true,
     })
     emitCoreEvent(listener, {
-      event: 'user_message',
+      event: 'turn_phase',
       seq: 1,
       session_id: 'session-current',
       turn_id: 'turn-current',
-      content: 'local user',
+      phase: 'started',
     })
+    expect(runtime.busy.value).toBe(true)
     emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 2,
-      session_id: 'session-current',
-      turn_id: 'turn-current',
-      delta: 'local answer',
+      event: 'assistant_done',
+      seq: 100,
+      session_id: 'session-other',
+      turn_id: 'turn-other',
+      content: 'foreign done',
     })
+    expect(runtime.busy.value).toBe(true)
     emitCoreEvent(listener, {
       event: 'assistant_done',
       seq: 3,
@@ -660,13 +695,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       turn_id: 'turn-current',
       content: 'local answer',
     })
-
-    const text = runtime.messages.value
-      .map((message) => message.content)
-      .join('\n')
-    expect(text).toContain('local user')
-    expect(text).toContain('local answer')
-    expect(text).not.toContain('foreign text')
+    expect(runtime.busy.value).toBe(false)
   })
 
   it('drops foreign-session events while a draft session is active, then accepts events for the promoted id', async () => {
@@ -727,13 +756,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
 
     expect(runtime.sessionId.value).toBe('session-real')
-    const text = runtime.messages.value
-      .map((message) => message.content)
-      .join('\n')
-    expect(text).not.toContain('foreign user')
-    expect(text).not.toContain('foreign text')
-    expect(text).toContain('real user')
-    expect(text).toContain('real answer')
+    expect(runtime.busy.value).toBe(false)
+    expect(runtime.sessionRuntimeStates['session-other']).toMatchObject({
+      running: true,
+    })
+    expect(runtime.sessionRuntimeStates['session-real']).toMatchObject({
+      running: false,
+    })
   })
 
   it('applies control pending changes to the event owner session instead of the currently open session', async () => {
@@ -883,238 +912,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     )
   })
 
-  it('projects agent_thought events into completed thought segments', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async (...args: unknown[]) => {
-        if (args[0] === 'chat.submit') {
-          emitCoreEvent(listener, {
-            event: 'user_message',
-            seq: 1,
-            turn_id: 'turn-thought',
-            content: 'show image',
-          })
-          emitCoreEvent(listener, {
-            event: 'agent_thought',
-            seq: 2,
-            turn_id: 'turn-thought',
-            stage: 'tool_intent',
-            label: '思考参考',
-            summary: '准备调用 read_file，先确认图片路径。',
-            source: 'audit',
-            status: 'done',
-            tool_call_ids: ['call_1'],
-            tool_names: ['read_file'],
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_call',
-            seq: 3,
-            turn_id: 'turn-thought',
-            id: 'call_1',
-            name: 'read_file',
-            arguments: { path: 'screen.png' },
-          })
-          emitCoreEvent(listener, {
-            event: 'assistant_done',
-            seq: 4,
-            turn_id: 'turn-thought',
-            content: 'done',
-          })
-          return { turnId: 'turn-thought', content: 'done' }
-        }
-        return { ok: true }
-      },
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.connectSocket()
-    runtime.switchSession('s1')
-    expect(runtime.sendMessage('show image')).toBe(true)
-    await Promise.resolve()
-
-    const assistant = runtime.messages.value.find(
-      (message) => message.role === 'assistant',
-    )
-    const thought = assistant?.segments.find(
-      (segment) =>
-        segment.type === 'thought' && segment.stage === 'tool_intent',
-    )
-    expect(thought).toMatchObject({
-      type: 'thought',
-      status: 'done',
-      label: '思考参考',
-      summary: '准备调用 read_file，先确认图片路径。',
-      source: 'audit',
-      toolIds: ['call_1'],
-      toolNames: ['read_file'],
-    })
-  })
-
-  it('keeps tool cards stable for tool_run-only, result-first, and malformed payload events', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async (...args: unknown[]) => {
-        if (args[0] === 'chat.submit') {
-          emitCoreEvent(listener, {
-            event: 'user_message',
-            seq: 1,
-            turn_id: 'turn-tools',
-            content: 'run tools',
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_run_queued',
-            seq: 2,
-            turn_id: 'turn-tools',
-            id: 'run_1',
-            name: 'unknown_new_tool',
-            arguments: { value: 1 },
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_run_completed',
-            seq: 3,
-            turn_id: 'turn-tools',
-            id: 'run_1',
-            name: 'unknown_new_tool',
-            summary: 'ok',
-            artifacts: { bad: true },
-            metadata: 'bad',
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_run_failed',
-            seq: 4,
-            turn_id: 'turn-tools',
-            id: 'run_2',
-            name: 'grep',
-            message: 'grep failed',
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_run_cancelled',
-            seq: 5,
-            turn_id: 'turn-tools',
-            id: 'run_3',
-            name: 'run_command',
-            reason: 'cancelled',
-          })
-          emitCoreEvent(listener, {
-            event: 'tool_result',
-            seq: 6,
-            turn_id: 'turn-tools',
-            id: 'result_first',
-            name: 'read_file',
-            summary: 'late call result',
-            artifacts: [null, { path: 'ok.png', kind: 'image' }],
-          })
-          emitCoreEvent(listener, {
-            event: 'assistant_done',
-            seq: 7,
-            turn_id: 'turn-tools',
-            content: 'done',
-          })
-          return { turnId: 'turn-tools', content: 'done' }
-        }
-        return { ok: true }
-      },
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.switchSession('s1')
-    expect(runtime.sendMessage('run tools')).toBe(true)
-    await flushPromises()
-
-    const assistant = runtime.messages.value.find(
-      (message) => message.role === 'assistant',
-    )
-    const tools =
-      assistant?.segments.filter((segment) => segment.type === 'tool') || []
-    expect(tools.map((tool) => tool.name)).toEqual([
-      'unknown_new_tool',
-      'grep',
-      'run_command',
-      'read_file',
-    ])
-    expect(tools[0]).toMatchObject({ status: 'done', summary: 'ok' })
-    expect(tools[0]!.artifacts).toBeUndefined()
-    expect(tools[0]!.metadata).toBeUndefined()
-    expect(tools[1]).toMatchObject({ status: 'error', summary: 'grep failed' })
-    expect(tools[2]).toMatchObject({
-      status: 'error_aborted',
-      summary: 'cancelled',
-    })
-    expect(tools[3]).toMatchObject({
-      status: 'done',
-      summary: 'late call result',
-    })
-    expect(tools[3]!.artifacts).toEqual([{ path: 'ok.png', kind: 'image' }])
-  })
-
-  it('restores agent_thought events from runtime replay', () => {
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: () => () => {},
-    })
-    const boot = ref({
-      app: 'Emperor Agent',
-      runtime: {
-        latestSeq: 3,
-        events: [
-          {
-            event: 'user_message',
-            seq: 1,
-            turn_id: 'turn-replay',
-            content: 'show image',
-          },
-          {
-            event: 'agent_thought',
-            seq: 2,
-            turn_id: 'turn-replay',
-            stage: 'tool_result_summary',
-            label: '思考参考',
-            summary: 'read_file 失败但识别到 1 个图片 artifact。',
-            source: 'audit',
-            status: 'done',
-            tool_call_ids: ['call_1'],
-            tool_names: ['read_file'],
-          },
-          {
-            event: 'assistant_done',
-            seq: 3,
-            turn_id: 'turn-replay',
-            content: 'done',
-          },
-        ],
-      },
-    } as unknown as BootstrapPayload)
-    const runtime = useRuntime({ ...testOptions(), boot })
-
-    runtime.restoreFromHistory([])
-
-    const assistant = runtime.messages.value.find(
-      (message) => message.role === 'assistant',
-    )
-    expect(assistant?.segments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'thought',
-          status: 'done',
-          stage: 'tool_result_summary',
-          summary: 'read_file 失败但识别到 1 个图片 artifact。',
-        }),
-      ]),
-    )
-  })
-
   it('settles stale runtime replay when bootstrap says no task is busy', () => {
     g.window = fakeWindow({
       invokeCore: async () => ({ ok: true }),
@@ -1151,14 +948,48 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     } as unknown as BootstrapPayload)
     const runtime = useRuntime({ ...testOptions(), boot })
 
-    runtime.restoreFromHistory([])
+    runtime.restoreRuntimeState()
 
-    const assistant = runtime.messages.value.find(
-      (message) => message.role === 'assistant',
-    )
     expect(runtime.busy.value).toBe(false)
-    expect(assistant).toMatchObject({ streaming: false })
-    expect(JSON.stringify(assistant)).toContain('后端没有正在运行的任务')
+    expect(
+      runtime.sessionRuntimeStates['s1'] ?? { running: false },
+    ).toMatchObject({ running: false })
+  })
+
+  it('restores a busy session from a replay whose turn is still open', () => {
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: () => () => {},
+    })
+    const boot = ref({
+      app: 'Emperor Agent',
+      runtime: {
+        latestSeq: 2,
+        busy: true,
+        events: [
+          {
+            event: 'user_message',
+            seq: 1,
+            session_id: 's1',
+            turn_id: 'turn-open',
+            content: 'build it',
+          },
+          {
+            event: 'turn_phase',
+            seq: 2,
+            session_id: 's1',
+            turn_id: 'turn-open',
+            phase: 'started',
+          },
+        ],
+      },
+    } as unknown as BootstrapPayload)
+    const runtime = useRuntime({ ...testOptions(), boot })
+    runtime.switchSession('s1')
+
+    runtime.restoreRuntimeState()
+
+    expect(runtime.busy.value).toBe(true)
   })
 
   it('clears stale local streaming state when stop finds no backend task', async () => {
@@ -1191,15 +1022,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       },
     } as unknown as BootstrapPayload)
     const runtime = useRuntime({ ...testOptions(), boot })
-    runtime.restoreFromHistory([])
+    runtime.restoreRuntimeState()
     expect(runtime.busy.value).toBe(false)
 
     await expect(runtime.stopActive()).resolves.toBe(false)
 
     expect(runtime.busy.value).toBe(false)
-    expect(
-      runtime.messages.value.find((message) => message.role === 'assistant'),
-    ).toMatchObject({ streaming: false })
+    expect(runtime.pending.label).toBe('没有正在运行的任务')
   })
 
   it('stops active runtime tasks through Core IPC when the bridge is available', async () => {
@@ -1236,7 +1065,8 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       },
       onCoreEvent: () => () => {},
     })
-    const runtime = useRuntime(testOptions())
+    const options = testOptions()
+    const runtime = useRuntime(options)
     runtime.switchSession('s1')
 
     expect(runtime.sendMessage('hello')).toBe(true)
@@ -1246,16 +1076,18 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(runtime.status.value).toBe('ready')
-    expect(JSON.stringify(runtime.messages.value)).not.toContain('出错了')
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
     expect(runtime.busy.value).toBe(false)
   })
 
-  it('answers pending interactions through Core IPC when the bridge is available', async () => {
+  it('answers pending interactions through Core IPC without a resume turn', async () => {
     const calls: unknown[][] = []
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {
         calls.push(args)
-        return { resume: true }
+        return { interactionId: 'ask_1', sessionId: 's1', control: null }
       },
       onCoreEvent: () => () => {},
     })
@@ -1267,27 +1099,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     await Promise.resolve()
 
     expect(calls).toEqual([
-      [
-        'control.answerInteraction',
-        'ask_1',
-        { scope: { choice: '完整' } },
-        expect.objectContaining({
-          clientMessageId: expect.any(String),
-          displayContent: '',
-          uiHidden: true,
-        }),
-      ],
+      ['control.answerInteraction', 'ask_1', { scope: { choice: '完整' } }, {}],
     ])
-    expect(
-      runtime.messages.value.some(
-        (message) =>
-          message.role === 'user' && message.content === '已回答澄清问题',
-      ),
-    ).toBe(false)
-    expect(runtime.messages.value[0]).toMatchObject({
-      role: 'assistant',
-      streaming: true,
-    })
+    expect(runtime.busy.value).toBe(false)
   })
 
   it('rolls back optimistic control resume UI and refreshes state when Core IPC rejects', async () => {
@@ -1337,7 +1151,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(refreshSessions).toHaveBeenCalledTimes(1)
     expect(boot.value.control?.pending).toBeNull()
     expect(runtime.busy.value).toBe(false)
-    expect(runtime.messages.value).toEqual([])
     expect(showToast).toHaveBeenCalledWith('Internal error · ipc_deadbeef')
   })
 
@@ -1369,19 +1182,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         'control.answerInteraction',
         'ask_1',
         { scope: { choice: '完整', freeform: '' } },
-        expect.objectContaining({
-          clientMessageId: expect.any(String),
-          displayContent: '',
-          uiHidden: true,
-        }),
+        {},
       ],
     ])
-    expect(
-      runtime.messages.value.some((message) => message.role === 'user'),
-    ).toBe(false)
   })
 
-  it('ignores hidden control resume user_message events so ask and plan stay continuous', async () => {
+  it('does not end the busy turn on hidden control resume user_message events', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
       invokeCore: async () => ({ ok: true }),
@@ -1395,9 +1201,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.connectSocket()
+    runtime.switchSession('s1')
+    runtime.busy.value = true
     emitCoreEvent(listener, {
       event: 'user_message',
       seq: 1,
+      session_id: 's1',
       turn_id: 'turn-control',
       client_message_id: 'control-msg-1',
       source: 'control',
@@ -1405,303 +1214,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       content: '',
     })
 
-    expect(runtime.messages.value).toEqual([])
-  })
-
-  it('continues a live ask resume turn in the paused assistant flow', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.connectSocket()
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 1,
-      turn_id: 'turn-ask',
-      content: 'clarify first',
-    })
-    emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 2,
-      turn_id: 'turn-ask',
-      delta: 'before ',
-    })
-    emitCoreEvent(listener, {
-      event: 'ask_request',
-      seq: 3,
-      turn_id: 'turn-ask',
-      interaction: {
-        id: 'ask_1',
-        kind: 'ask',
-        status: 'waiting',
-        context: 'scope?',
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'turn_paused',
-      seq: 4,
-      turn_id: 'turn-ask',
-      interaction: { id: 'ask_1', kind: 'ask', status: 'waiting' },
-    })
-    emitCoreEvent(listener, {
-      event: 'ask_answered',
-      seq: 5,
-      interaction: { id: 'ask_1', kind: 'ask', status: 'answered' },
-    })
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 6,
-      turn_id: 'turn-ask-resume',
-      source: 'control',
-      ui_hidden: true,
-      content: '',
-    })
-    emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 7,
-      turn_id: 'turn-ask-resume',
-      delta: 'after',
-    })
-    emitCoreEvent(listener, {
-      event: 'assistant_done',
-      seq: 8,
-      turn_id: 'turn-ask-resume',
-      content: 'before after',
-    })
-
-    const assistants = runtime.messages.value.filter(
-      (message) => message.role === 'assistant',
-    )
-    expect(assistants).toHaveLength(1)
-    expect(assistants[0]).toMatchObject({
-      content: 'before after',
-      streaming: false,
-    })
-    expect(assistants[0]?.segments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'text', content: 'before ' }),
-        expect.objectContaining({
-          type: 'ask',
-          interaction: expect.objectContaining({
-            id: 'ask_1',
-            status: 'answered',
-          }),
-        }),
-        expect.objectContaining({ type: 'text', content: 'after' }),
-      ]),
-    )
-  })
-
-  it('keeps the live plan approve/resume sequence in one continuous assistant flow (P1-3 fixture)', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.connectSocket()
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 1,
-      turn_id: 'turn-plan',
-      content: '随便做点东西',
-    })
-    emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 2,
-      turn_id: 'turn-plan',
-      delta: '先出个计划。',
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_run_started',
-      seq: 3,
-      turn_id: 'turn-plan',
-      id: 'call_pp',
-      name: 'propose_plan',
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_call',
-      seq: 4,
-      turn_id: 'turn-plan',
-      id: 'call_pp',
-      name: 'propose_plan',
-      arguments: {},
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_draft_delta',
-      seq: 5,
-      turn_id: 'turn-plan',
-      tool_call_id: 'call_pp',
-      interaction: {
-        id: 'provisional-plan-call_pp',
-        kind: 'plan',
-        status: 'waiting',
-        title: 'Term',
-        meta: { plan_stream_id: 'call_pp', provisional: true },
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_run_cancelled',
-      seq: 6,
-      turn_id: 'turn-plan',
-      id: 'call_pp',
-      name: 'propose_plan',
-      reason: 'turn_paused',
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_result',
-      seq: 7,
-      turn_id: 'turn-plan',
-      id: 'call_pp',
-      name: 'propose_plan',
-      summary: 'waiting for user (plan:plan_live)',
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_draft',
-      seq: 8,
-      turn_id: 'turn-plan',
-      interaction: {
-        id: 'plan_live',
-        kind: 'plan',
-        status: 'waiting',
-        parent_call_id: 'call_pp',
-        title: 'Terminal Dreamscape',
-        plan_markdown: '# Plan',
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'turn_paused',
-      seq: 9,
-      turn_id: 'turn-plan',
-      interaction: { id: 'plan_live', kind: 'plan', status: 'waiting' },
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_approved',
-      seq: 10,
-      interaction: { id: 'plan_live', kind: 'plan', status: 'approved' },
-    })
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 11,
-      turn_id: 'turn-plan-resume',
-      source: 'control',
-      ui_hidden: true,
-      content: '',
-    })
-    emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 12,
-      turn_id: 'turn-plan-resume',
-      delta: '计划批准，开始执行。',
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_call',
-      seq: 13,
-      turn_id: 'turn-plan-resume',
-      id: 'call_wf',
-      name: 'write_file',
-      arguments: { path: 'main.py' },
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_result',
-      seq: 14,
-      turn_id: 'turn-plan-resume',
-      id: 'call_wf',
-      name: 'write_file',
-      summary: 'written',
-    })
-    emitCoreEvent(listener, {
-      event: 'assistant_done',
-      seq: 15,
-      turn_id: 'turn-plan-resume',
-      content: '先出个计划。计划批准，开始执行。',
-    })
-
-    const assistants = runtime.messages.value.filter(
-      (message) => message.role === 'assistant',
-    )
-    expect(assistants).toHaveLength(1)
-    expect(
-      runtime.messages.value.filter((message) => message.role === 'user'),
-    ).toHaveLength(1)
-    expect(assistants[0]).toMatchObject({
-      content: '先出个计划。计划批准，开始执行。',
-      streaming: false,
-    })
-    const planSegments = assistants[0]!.segments.filter(
-      (segment) => segment.type === 'plan',
-    )
-    expect(planSegments).toHaveLength(1)
-    expect(planSegments[0]!.interaction).toMatchObject({
-      id: 'plan_live',
-      status: 'approved',
-    })
-    const proposeTool = assistants[0]!.segments.find(
-      (segment) => segment.type === 'tool' && segment.toolId === 'call_pp',
-    )
-    expect(proposeTool).toBeUndefined()
-    const resumeTool = assistants[0]!.segments.find(
-      (segment) => segment.type === 'tool' && segment.toolId === 'call_wf',
-    )
-    expect(resumeTool).toMatchObject({ status: 'done' })
-  })
-
-  it('updates the Plan runtime projection for chat timeline Plan events', () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.connectSocket()
-    emitCoreEvent(listener, {
-      event: 'plan_approved',
-      seq: 1,
-      interaction: { id: 'interaction-plan', kind: 'plan', status: 'approved' },
-      plan: {
-        id: 'plan-runtime',
-        title: 'Runtime Plan',
-        status: 'executing',
-        steps: [{ id: 'step-1', title: 'Implement', status: 'active' }],
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_step_update',
-      seq: 2,
-      plan_id: 'plan-runtime',
-      step: { id: 'step-1', title: 'Implement', status: 'done' },
-    })
-
-    expect(runtime.planProjection.plans).toContainEqual(
-      expect.objectContaining({
-        id: 'plan-runtime',
-        steps: [expect.objectContaining({ id: 'step-1', status: 'done' })],
-      }),
-    )
-
-    runtime.switchSession('session-without-plan')
-    expect(runtime.planProjection.plans).toEqual([])
-    expect(runtime.planProjection.entryDecisions).toEqual([])
+    expect(runtime.busy.value).toBe(true)
   })
 
   it('tracks per-session running state and flags background completion for attention (P1-7)', async () => {
@@ -1728,7 +1241,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
     expect(runtime.sessionRuntimeStates['s1']).toMatchObject({ running: true })
 
-    const before = runtime.messages.value.length
     emitCoreEvent(listener, {
       event: 'message_delta',
       seq: 2,
@@ -1737,7 +1249,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       delta: 'bg',
     })
     expect(runtime.sessionRuntimeStates['s2']).toMatchObject({ running: true })
-    expect(runtime.messages.value).toHaveLength(before)
 
     emitCoreEvent(listener, {
       event: 'assistant_done',
@@ -1846,7 +1357,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       running: false,
       attention: false,
     })
-    expect(runtime.messages.value).toEqual([])
+    expect(runtime.busy.value).toBe(false)
   })
 
   it('rehydrates runtime state without scheduling live timers or refresh effects', () => {
@@ -1896,16 +1407,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
     runtime.switchSession('s1')
 
-    runtime.restoreFromHistory([])
+    runtime.restoreRuntimeState()
 
     expect(setTimeoutSpy).not.toHaveBeenCalled()
     expect(options.refreshMemory).not.toHaveBeenCalled()
     expect(options.refreshCommands).not.toHaveBeenCalled()
-    expect(runtime.messages.value.at(-1)).toMatchObject({
-      role: 'assistant',
-      content: 'done',
-      streaming: false,
-    })
+    expect(runtime.busy.value).toBe(false)
   })
 
   it('uses the task reducer for sorted replay and fences stale live progress', () => {
@@ -1953,7 +1460,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
     const runtime = useRuntime(options)
     runtime.switchSession('s1')
-    runtime.restoreFromHistory([])
+    runtime.restoreRuntimeState()
 
     expect(runtime.taskProjection.tasks).toEqual([
       expect.objectContaining({
@@ -2002,224 +1509,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
     runtime.connectSocket()
 
-    runtime.restoreFromHistory([])
+    runtime.restoreRuntimeState()
 
     expect(runtime.sessionRuntimeStates['s9']).toMatchObject({ running: true })
-  })
-
-  it('does not restore hidden onboarding trigger messages from history fallback', () => {
-    const options = testOptions()
-    ;(options.boot.value as any).runtime.events = []
-    const runtime = useRuntime(options)
-
-    runtime.restoreFromHistory([
-      {
-        role: 'user',
-        content: '[PROFILE_ONBOARDING]',
-        source: 'onboarding',
-        ui_hidden: true,
-      },
-      {
-        role: 'assistant',
-        content: '初次见面，我先了解一下你的偏好。',
-        source: 'onboarding',
-      },
-    ])
-
-    expect(runtime.messages.value).toMatchObject([
-      {
-        role: 'assistant',
-        content: '初次见面，我先了解一下你的偏好。',
-      },
-    ])
-  })
-
-  it('merges streaming plan_draft_delta events into the final plan card', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-
-    runtime.connectSocket()
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 1,
-      turn_id: 'turn-plan',
-      content: '制定计划',
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_draft_delta',
-      seq: 2,
-      turn_id: 'turn-plan',
-      tool_call_id: 'call_plan',
-      interaction: {
-        id: 'provisional-plan-call_plan',
-        kind: 'plan',
-        status: 'waiting',
-        title: '迁移计划',
-        plan_markdown: '# 计划',
-        meta: { plan_stream_id: 'call_plan', provisional: true },
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_draft_delta',
-      seq: 3,
-      turn_id: 'turn-plan',
-      tool_call_id: 'call_plan',
-      interaction: {
-        id: 'provisional-plan-call_plan',
-        kind: 'plan',
-        status: 'waiting',
-        title: '迁移计划',
-        plan_markdown: '# 计划\n- 改 UI',
-        meta: { plan_stream_id: 'call_plan', provisional: true },
-      },
-    })
-    emitCoreEvent(listener, {
-      event: 'plan_draft',
-      seq: 4,
-      turn_id: 'turn-plan',
-      interaction: {
-        id: 'plan-real',
-        kind: 'plan',
-        status: 'waiting',
-        parent_call_id: 'call_plan',
-        title: '迁移计划',
-        plan_markdown: '# 计划\n- 改 UI',
-      },
-    })
-
-    const assistant = runtime.messages.value.find(
-      (message) => message.role === 'assistant',
-    )
-    const planSegments =
-      assistant?.segments.filter((segment) => segment.type === 'plan') || []
-    expect(planSegments).toHaveLength(1)
-    expect(planSegments[0]).toMatchObject({
-      type: 'plan',
-      interaction: {
-        id: 'plan-real',
-        parent_call_id: 'call_plan',
-        plan_markdown: '# 计划\n- 改 UI',
-      },
-    })
-  })
-
-  it('surfaces model fallback events as a transient pending notice (Wave4.3)', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-    runtime.switchSession('s1')
-
-    emitCoreEvent(listener, {
-      event: 'model_route_fallback',
-      seq: 1,
-      from_model: 'claude-opus',
-      to_model: 'gpt-4o',
-      reason: 'provider timeout',
-      usage_type: 'main_agent',
-    })
-    expect(runtime.pending.label).toContain('备用模型')
-    expect(runtime.pending.detail).toContain('gpt-4o')
-
-    emitCoreEvent(listener, {
-      event: 'context_usage',
-      seq: 2,
-      usage_type: 'main_agent',
-      used: 100,
-      max: 1000,
-      used_fallback: true,
-      fallback_reason: 'rate_limited',
-    })
-    expect(runtime.pending.label).toContain('备用模型')
-    expect(runtime.pending.detail).toContain('rate_limited')
-  })
-
-  it('distinguishes queued tools from running tools and settles both on turn end (Wave4.2)', async () => {
-    let listener: ((event: unknown) => void) | null = null
-    g.window = fakeWindow({
-      invokeCore: async () => ({ ok: true }),
-      onCoreEvent: (cb: (event: unknown) => void) => {
-        listener = cb
-        return () => {
-          listener = null
-        }
-      },
-    })
-    const runtime = useRuntime(testOptions())
-    runtime.switchSession('s1')
-
-    emitCoreEvent(listener, {
-      event: 'user_message',
-      seq: 1,
-      turn_id: 'turn-q',
-      content: 'go',
-    })
-    emitCoreEvent(listener, {
-      event: 'message_delta',
-      seq: 2,
-      turn_id: 'turn-q',
-      delta: 'working',
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_run_queued',
-      seq: 3,
-      turn_id: 'turn-q',
-      id: 'call_a',
-      name: 'read_file',
-      arguments: {},
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_run_queued',
-      seq: 4,
-      turn_id: 'turn-q',
-      id: 'call_b',
-      name: 'grep',
-      arguments: {},
-    })
-    emitCoreEvent(listener, {
-      event: 'tool_run_started',
-      seq: 5,
-      turn_id: 'turn-q',
-      id: 'call_a',
-      name: 'read_file',
-    })
-
-    const assistant = runtime.messages.value.find(
-      (m) => m.role === 'assistant',
-    ) as { segments: Array<{ type: string; toolId?: string; status?: string }> }
-    const toolA = assistant.segments.find(
-      (s) => s.type === 'tool' && s.toolId === 'call_a',
-    )
-    const toolB = assistant.segments.find(
-      (s) => s.type === 'tool' && s.toolId === 'call_b',
-    )
-    expect(toolA?.status).toBe('running')
-    expect(toolB?.status).toBe('queued')
-
-    // 回合结束时 queued 段也要被 settle，不能永远停在排队态
-    emitCoreEvent(listener, {
-      event: 'assistant_done',
-      seq: 6,
-      turn_id: 'turn-q',
-      content: 'done',
-    })
-    expect(toolB?.status).toBe('error_aborted')
   })
 
   it('blocks chat submit before local enqueue when the active session id is missing', async () => {
@@ -2238,7 +1530,6 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.sendMessage('hello without session')).toBe(false)
 
     expect(calls).toEqual([])
-    expect(runtime.messages.value).toEqual([])
     expect(runtime.busy.value).toBe(false)
   })
 
@@ -2293,9 +1584,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         },
       },
     })
-    expect(
-      runtime.messages.value.some((message) => message.role === 'user'),
-    ).toBe(true)
+    expect(runtime.busy.value).toBe(true)
   })
 })
 

@@ -9,10 +9,6 @@ export type MemoryArtifactKind =
   | 'project_memory'
   | 'daily_episode'
   | 'conversation_history'
-  | 'runtime_event_log'
-  | 'checkpoint'
-  | 'prompt_snapshot'
-  | 'history_archive'
   | 'model_call_audit'
 
 export type MemoryVisibility =
@@ -23,15 +19,9 @@ export type MemoryVisibility =
   | 'retrieval_only'
   | 'runtime_only'
   | 'debug_only'
-  | 'recovery_only'
-  | 'never_model_visible'
 
 export type MemoryMutability =
-  | 'append_only'
-  | 'managed_patch'
-  | 'managed_rewrite'
-  | 'replaceable_checkpoint'
-  | 'derived'
+  'append_only' | 'managed_patch' | 'managed_rewrite' | 'derived'
 
 export type MemoryWriter =
   'onboarding' | 'agent_loop' | 'user_tool' | 'compactor' | 'runtime' | 'system'
@@ -56,9 +46,8 @@ export interface BuildMemoryArtifactsOptions {
   memoryDir: string
   userFile: string
   sessionId?: string | null
-  sessionRoot?: string | null
+  /** The session log file: the only per-session trajectory. */
   historyFile?: string | null
-  runtimeEventsFile?: string | null
   projectId?: string | null
   projectMemoryPath?: string | null
   episodeDate?: string | null
@@ -68,7 +57,6 @@ export function buildMemoryArtifacts(
   opts: BuildMemoryArtifactsOptions,
 ): MemoryArtifactMeta[] {
   const sessionId = clean(opts.sessionId)
-  const sessionRoot = clean(opts.sessionRoot)
   const episodeDate = clean(opts.episodeDate)
   const items: MemoryArtifactMeta[] = [
     artifact({
@@ -137,54 +125,6 @@ export function buildMemoryArtifacts(
         writers: ['agent_loop'],
         injectedIn: [],
         path: opts.historyFile,
-      }),
-    )
-  }
-  if (sessionId && opts.runtimeEventsFile) {
-    items.push(
-      artifact({
-        kind: 'runtime_event_log',
-        scope: { kind: 'session', sessionId },
-        visibility: 'runtime_only',
-        mutability: 'append_only',
-        writers: ['runtime'],
-        injectedIn: [],
-        path: opts.runtimeEventsFile,
-      }),
-    )
-  }
-  if (sessionId && sessionRoot) {
-    items.push(
-      artifact({
-        kind: 'checkpoint',
-        scope: { kind: 'session', sessionId },
-        visibility: 'recovery_only',
-        mutability: 'replaceable_checkpoint',
-        writers: ['agent_loop'],
-        injectedIn: [],
-        path: join(sessionRoot, '_checkpoint.json'),
-      }),
-    )
-    items.push(
-      artifact({
-        kind: 'prompt_snapshot',
-        scope: { kind: 'session', sessionId },
-        visibility: 'debug_only',
-        mutability: 'derived',
-        writers: ['agent_loop'],
-        injectedIn: [],
-        path: join(sessionRoot, 'prompt-snapshots'),
-      }),
-    )
-    items.push(
-      artifact({
-        kind: 'history_archive',
-        scope: { kind: 'session', sessionId },
-        visibility: 'never_model_visible',
-        mutability: 'append_only',
-        writers: ['system'],
-        injectedIn: [],
-        path: join(sessionRoot, 'history_archive'),
       }),
     )
   }

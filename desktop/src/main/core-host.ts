@@ -3,7 +3,7 @@ import {
   coreOperationKeys as registryCoreOperationKeys,
   type CoreApiCreateOptions,
 } from '@emperor/core/api'
-import { CoreEventBridge } from './event-bridge'
+import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import {
   registerCoreIpc,
   type CoreApiLike,
@@ -29,6 +29,8 @@ export async function createCoreHost(opts: {
   root: string
   ipcMain: IpcMainLike
   eventBridge?: CoreEventBridge
+  /** Raw session-log stream (`sessions.watch` filtered); created when omitted. */
+  sessionEventBridge?: SessionEventBridge
   coreOptions?: Partial<CoreApiCreateOptions>
   authorizeIpc?: IpcAuthorizer
 }): Promise<CoreApi> {
@@ -39,6 +41,11 @@ export async function createCoreHost(opts: {
     enableFirstRunOnboarding: true,
     ...opts.coreOptions,
   })
+  const sessionBridge = opts.sessionEventBridge ?? new SessionEventBridge()
+  sessionBridge.setWatchFilter((sessionId) =>
+    coreApi.isSessionWatched(sessionId),
+  )
+  coreApi.host.rawTap(sessionBridge.tap())
   registerCoreHostIpc(opts.ipcMain, coreApi, opts.authorizeIpc)
   return coreApi
 }

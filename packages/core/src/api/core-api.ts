@@ -1,30 +1,37 @@
 /**
- * CoreApi。
- * 进程内核心 API 门面，替代 aiohttp routes；Electron main 进程持有此单例，
- * renderer 后续通过 IPC 调用这些方法。
+ * CoreApi: the in-process core facade Electron main owns and the renderer
+ * reaches through IPC. The agent kernel behind it is `HarnessHost`; CoreApi
+ * adds the operation surface (sessions, config, workspace, git, terminals,
+ * scheduler, plugins, environment, diagnostics) on top of it.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
-import { dirname, join, resolve } from 'node:path'
-import { AttachmentStore } from '../attachments/store'
-import type { ControlResume } from '../control/manager'
-import {
-  GOAL_MANUAL_EVIDENCE_DECLINE_LABEL,
-  GOAL_MANUAL_EVIDENCE_FAIL_LABEL,
-  GOAL_MANUAL_EVIDENCE_PASS_LABEL,
-  GOAL_MANUAL_EVIDENCE_QUESTION_ID,
-} from '../control/goal-manual-evidence'
-import {
-  GOAL_PERMISSION_BLOCKER_DENIED_LABEL,
-  GOAL_PERMISSION_BLOCKER_QUESTION_ID,
-} from '../control/goal-blocker'
-import {
-  AgentLoop,
-  type AgentLoopCreateOptions,
-  type LoopModelRouter,
-} from '../agent/loop'
+import type { AttachmentStore } from '../attachments/store'
 import type { RuntimePaths } from '../runtime/paths'
-import type { EventEnvelopeV2 } from '../runtime/envelope'
+import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
+import type { UiAnswers } from '../harness/host/interactions'
+import { runGoalCommand } from '../harness/goal'
+import type { Agent } from '../harness/agent/agent'
+import type { JobSnapshot } from '../harness/jobs/registry'
+import type { SubagentRecord } from '../harness/subagent/manager'
+import {
+  WorkflowRunFold,
+  workflowTaskView,
+  type WorkflowRunRecord,
+} from '../harness/workflow/records'
+import type { Session } from '../session-log/session'
+import type { SessionEvent } from '../session-log/types'
+import {
+  sanitizeForWire,
+  type SessionHistoryPage,
+} from '../session-log/history'
+import type {
+  SessionLineage,
+  SubagentChildView,
+} from '../harness/host/session-views'
+import { messageText } from '../llm/message'
+import { collectSkillEnvironmentRequirements } from '../environment/probe'
 import {
   assertCoreMutationAllowed,
   CoreMutationGuardError,
@@ -32,7 +39,6 @@ import {
 import {
   ChatService,
   InvalidSessionError,
-  MainlineTurnService,
   type DraftSessionInput,
 } from './chat-service'
 import {
@@ -43,23 +49,21 @@ import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
-import { CoreFileCheckpointService } from './services/file-checkpoint-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { CoreModelService } from './services/model-service'
 import { CoreSkillService } from './services/skill-service'
+import { OnboardingService } from './services/onboarding-service'
 import { PluginApplicationService } from '../plugins/service'
 import { OperationRetiredError } from '../errors'
-import { CoreTeamService } from './services/team-service'
 import { CoreSessionApplicationService } from './services/session-application-service'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
-import { CoreCommandApplicationService } from './services/command-application-service'
-import { GoalService } from './services/goal-service'
-import { goalSummary, type GoalRecord } from '../goals/models'
-import { planToDict } from '../plans/models'
-import { SidechainTranscript } from '../tasks/sidechain'
-import { ToolResultStore } from '../context/tool-results'
-import { WatchlistService } from '../watchlist/service'
+import {
+  CoreCommandApplicationService,
+  type CommandPlanSwitchOutcome,
+} from './services/command-application-service'
+import { GoalService, type GoalStartInput } from './services/goal-service'
+import type { WebFetchClient } from '../network/web-fetch-client'
 import {
   SchedulerMisfirePolicy,
   SchedulerPayload,
@@ -75,34 +79,37 @@ import {
 import { WorkspaceGitService } from '../workspace/git'
 import { WorkspaceBindingStore } from '../workspace/git-worktrees'
 import { GitOperationReceiptStore } from '../workspace/git-receipts'
+import { WorkspaceMutationCoordinator } from '../workspace/mutation-coordinator'
 import {
   TerminalService,
   type PtyHost,
   type TerminalEvent,
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
-import { ProjectProcessService } from '../workspace/project-processes'
 import { WorkspaceReferenceService } from '../workspace/references'
-import { ManageProjectProcessTool } from '../tools/project-processes'
-import { FileCheckpointService } from '../checkpoints/file-checkpoints'
 import type { WorkspaceSnapshot } from '../workspace/snapshot'
 import { CommandPlatform } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
+import { startSkillFork } from '../harness/subagent/skill-fork'
 import type {
   CommandCompletion,
   CommandInvocationResult,
   CommandInvocationSource,
 } from '../commands/types'
 
-type StreamEmitter = (event: Record<string, unknown>) => void | Promise<void>
 type Dict = Record<string, unknown>
 
-export interface CoreApiCreateOptions extends AgentLoopCreateOptions {
-  loop?: AgentLoop | null
+export interface CoreApiCreateOptions extends HarnessHostOptions {
+  /** Test hook: use an existing host instead of creating one. */
+  host?: HarnessHost | null
   appVersion?: string
   runtimeRevision?: string
   terminalHost?: PtyHost | null
   terminalEventSink?: ((event: TerminalEvent) => void) | null
+  /** Host HTTP client used by plugin installs. */
+  webFetchClient?: WebFetchClient | null
+  /** Start the first-run profile interview after a model is configured. */
+  enableFirstRunOnboarding?: boolean
 }
 
 export interface CoreRuntimeEventPayload {
@@ -110,47 +117,71 @@ export interface CoreRuntimeEventPayload {
   [key: string]: unknown
 }
 
-export type CoreRuntimeReplayFormat = 'projection' | 'envelope_v2'
-
-export interface CoreRuntimeReplayPayload<
-  TFormat extends CoreRuntimeReplayFormat = 'projection',
-> {
+export interface CoreRuntimeReplayPayload {
   sessionId: string
   afterSeq: number
   latestSeq: number
-  format: TFormat
-  events: Array<
-    TFormat extends 'envelope_v2' ? EventEnvelopeV2 : CoreRuntimeEventPayload
-  >
+  format: 'projection'
+  events: CoreRuntimeEventPayload[]
   [key: string]: unknown
+}
+
+/** A Task-panel row: a background job, a subagent session, or a workflow run. */
+export interface CoreTaskRecord {
+  id: string
+  kind: 'job' | 'subagent' | 'workflow'
+  job_kind?: string
+  label: string
+  description: string
+  status: string
+  session_id: string
+  owner_id: string | null
+  started_at: number
+  finished_at: number | null
+  exit_code?: number | null
+  detail?: string | null
+  depth?: number
+  mode?: string
+  last_stop_reason?: string | null
+  /** Workflow runs: which tool started the run. */
+  workflow_tool?: 'workflow' | 'ralph'
+  /** Workflow runs: accepted `agent()` calls (Ralph: rounds started). */
+  rounds?: number
+  current_phase?: string | null
+  call_id?: string | null
+  agents?: Array<{
+    seq: number
+    label: string
+    phase: string | null
+    child_id: string
+    outcome: string | null
+  }>
+  result?: string | null
 }
 
 export class CoreApi {
   readonly root: string
   readonly paths: RuntimePaths
-  readonly loop: AgentLoop
+  readonly host: HarnessHost
   readonly attachmentStore: AttachmentStore
-  readonly watchlist: WatchlistService
-  readonly mainline: MainlineTurnService
   readonly chatService: ChatService
   readonly configService: CoreConfigService
   readonly effectiveConfigService: CoreEffectiveConfigService
   readonly desktopPetService: CoreDesktopPetService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
-  readonly fileCheckpointService: CoreFileCheckpointService
   readonly hooksService: CoreHooksService
   readonly memoryService: CoreMemoryService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
-  readonly teamService: CoreTeamService
   readonly goalService: GoalService
+  readonly onboardingService: OnboardingService
   readonly workspaceFilesService: WorkspaceFilesService
   readonly workspaceGitService: WorkspaceGitService
-  readonly projectProcessService: ProjectProcessService
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
+  readonly workspaceMutations = new WorkspaceMutationCoordinator()
   readonly gitReceipts: GitOperationReceiptStore
   readonly terminalService: TerminalService
   readonly sessionApplicationService: CoreSessionApplicationService
@@ -161,38 +192,59 @@ export class CoreApi {
 
   private constructor(
     root: string,
-    loop: AgentLoop,
-    opts: Pick<
-      CoreApiCreateOptions,
-      'appVersion' | 'runtimeRevision' | 'terminalHost' | 'terminalEventSink'
-    > = {},
+    host: HarnessHost,
+    opts: CoreApiCreateOptions,
   ) {
     this.root = resolve(root)
-    this.loop = loop
-    this.paths = loop.paths
-    this.attachmentStore = new AttachmentStore(this.paths.stateRoot)
-    this.watchlist = new WatchlistService(this.paths.stateRoot, {
-      tokenTracker: this.loop.tokenTracker,
+    this.host = host
+    const kept = host.kept
+    this.paths = kept.paths
+    this.attachmentStore = host.attachments
+    this.chatService = new ChatService(host)
+    this.onboardingService = new OnboardingService({
+      stateRoot: this.paths.stateRoot,
+      templatesDir: kept.templatesDir,
+      userFile: kept.sharedMemory.userFile,
+      enabled: opts.enableFirstRunOnboarding === true,
+      readUserProfile: () => kept.sharedMemory.readUser(),
+      modelAvailable: () => host.llm.activeRoute() !== undefined,
+      anyBusy: () => host.busySessions().length > 0,
+      hasPending: (sessionId) => host.pending.hasPending(sessionId),
+      pendingInteractionId: (sessionId) => {
+        const pending = host.controlPayload(sessionId).pending
+        return isRecord(pending) && typeof pending.id === 'string'
+          ? pending.id
+          : null
+      },
+      onPendingChange: (listener) => host.pending.onChange(listener),
+      sessions: kept.sessionStore,
+      submitHidden: async (sessionId, content) =>
+        await host.submit({
+          sessionId,
+          content,
+          displayContent: '',
+          source: 'onboarding',
+          uiHidden: true,
+        }),
+      cancelInteraction: (id) => host.cancelInteraction(id),
+      emit: (event) => host.emitHost(event),
     })
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {
-          this.loop.refreshRuntimeContext()
-        },
+        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
-          this.loop.reconcileProfileOnboarding()
+          this.onboardingService.reconcile()
         },
-        reloadMcp: () => this.loop.reloadMcp(),
+        reloadMcp: () => host.reloadMcp(),
       },
-      { templatesDir: this.loop.templatesDir },
+      { templatesDir: kept.templatesDir },
     )
     this.effectiveConfigService = new CoreEffectiveConfigService(
       this.paths.stateRoot,
       {
-        skillManager: this.loop.skillManager,
-        skillResolutions: () => this.loop.effectiveSkillConfigResolutions(),
-        agentDefinitions: () => this.loop.subagentRegistry.snapshot(),
+        skillManager: kept.skillManager,
+        skillResolutions: () => kept.skillsLoader.configResolutions(),
       },
     )
     this.desktopPetService = new CoreDesktopPetService(this.root, {
@@ -200,90 +252,86 @@ export class CoreApi {
       assertMutation: (area, action) => this.assertMutation(area, action),
     })
     this.modelService = new CoreModelService(this.paths.stateRoot, {
-      router: () => this.loop.modelRouter,
-      refreshModelConfig: () => this.loop.refreshModelConfig(),
-      afterConfigSaved: () =>
-        this.loop.startProfileInterview({ manual: false }),
+      refreshModelConfig: () => host.refreshModelConfig(),
+      afterConfigSaved: () => this.onboardingService.start({ manual: false }),
     })
-    this.hooksService = new CoreHooksService(this.paths.stateRoot, {
-      service: this.loop.hookService,
-      activeSessionId: () => this.loop.activeSessionId,
-      activeWorkspaceRoot: () =>
-        (this.loop.workspacePolicyDiagnostics().workspaceRoot as string) ||
-        this.root,
-      activeProjectRoot: () =>
-        this.loop.activeSession?.mode === 'build'
-          ? (this.loop.activeSession.project_path ?? null)
-          : null,
+    this.hooksService = new CoreHooksService({
+      stateRoot: this.paths.stateRoot,
+      hooks: host.hooks,
+      activeProjectRoot: () => this.activeProjectRoot(),
       assertMutation: (area, action) => this.assertMutation(area, action),
-    })
-    this.memoryService = new CoreMemoryService(this.paths.stateRoot, {
-      loop: this.loop,
-      watchlist: this.watchlist,
-      refreshRuntimeContext: () => {
-        this.loop.refreshRuntimeContext()
+      sessionEvents: () => {
+        const sessionId = host.activeSessionId
+        return sessionId === null
+          ? []
+          : (host.sessionLog(sessionId)?.events ?? [])
       },
+    })
+    this.memoryService = new CoreMemoryService({
+      stateRoot: this.paths.stateRoot,
+      sharedMemory: kept.sharedMemory,
+      projectStore: kept.projectStore,
+      tokenTracker: kept.tokenTracker,
+      watchlist: host.watchlist,
+      sessionStore: kept.sessionStore,
+      activeSessionId: () => host.activeSessionId,
+      sessionLog: (sessionId) => host.sessionLog(sessionId),
+      compactNow: (sessionId) => host.compactNow(sessionId),
+      measureContext: (sessionId) => host.measureContext(sessionId),
+      refreshRuntimeContext: () => {},
+      schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
       emperorHome: this.paths.stateRoot,
-      webFetchClient: this.loop.webFetchClient,
-      activeWorkspaceRoot: () =>
-        this.loop.activeSession?.mode === 'build'
-          ? (this.loop.activeSession.project_path ?? this.root)
-          : null,
+      webFetchClient: opts.webFetchClient ?? null,
+      activeWorkspaceRoot: () => this.activeProjectRoot(),
       onChanged: () => {
-        this.loop.setPluginSkillRoots(this.pluginService.enabledSkillRoots())
-        this.loop.refreshRuntimeContext()
+        kept.skillLoaders.setPluginSkillsRoots(
+          this.pluginService.enabledSkillRoots(),
+        )
+        kept.skillChangeDetector.notify()
       },
     })
-    this.loop.setPluginSkillRoots(this.pluginService.enabledSkillRoots())
+    kept.skillLoaders.setPluginSkillsRoots(
+      this.pluginService.enabledSkillRoots(),
+    )
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
-      manager: this.loop.skillManager,
-      installService: this.loop.skillInstallService,
-      registry: this.loop.registry,
-      resolvedSkills: () =>
-        this.loop.activeSessionId
-          ? this.loop.resolvedSkillsForSession(this.loop.activeSessionId)
-          : this.loop.skillsLoader.resolvedSkills(),
-      refreshRuntimeContext: () => {
-        this.loop.refreshRuntimeContext()
+      manager: kept.skillManager,
+      installService: kept.skillInstallService,
+      toolNames: () => {
+        const servers = new Map(
+          kept.mcpClient
+            .getTools()
+            .map((tool) => [tool.name, tool.mcpServerName] as const),
+        )
+        return host.tools.schemas().map((schema) => {
+          const mcpServer = servers.get(schema.name)
+          return mcpServer === undefined ? schema : { ...schema, mcpServer }
+        })
       },
+      library: kept.skillLibrary,
+      // `undefined` = the active session; `null` = chat (no project Skills).
+      projectRootFor: (sessionId) =>
+        host.projectRootForSession(
+          sessionId === undefined ? host.activeSessionId : sessionId,
+        ),
+      refreshRuntimeContext: () => {},
     })
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
-      catalog: this.loop.environmentCatalog,
-      probe: this.loop.environmentProbe,
-      skillManager: this.loop.skillManager,
-      projectRoot: () =>
-        this.loop.activeSession?.mode === 'build'
-          ? (this.loop.activeSession.project_path ?? this.root)
-          : this.root,
+      catalog: kept.environmentCatalog,
+      probe: kept.environmentProbe,
+      skillManager: kept.skillManager,
+      projectRoot: () => this.activeProjectRoot() ?? this.root,
       appVersion: opts.appVersion ?? '0.0.0-dev',
-      runtimeRevision:
-        opts.runtimeRevision ?? this.loop.environmentCatalog.revision,
+      runtimeRevision: opts.runtimeRevision ?? kept.environmentCatalog.revision,
       emitRuntime: async (event) => {
-        await this.emitRuntime(event, {
-          sessionId: this.loop.activeSessionId,
-        })
+        host.emitHost({ ...event, session_id: host.activeSessionId })
       },
       reconcileBlockedSkills: async () =>
         await this.skillService.reconcileBlocked(),
-      managedEnvironment: this.loop.managedEnvironmentService,
-    })
-    this.teamService = new CoreTeamService({
-      teamManager: () => this.loop.teamManagerForActiveSession(),
-      activeSession: () => this.loop.activeSession,
-      assertMutation: (area, action) => this.assertMutation(area, action),
-    })
-    this.fileCheckpointService = new CoreFileCheckpointService({
-      checkpoints: this.loop.fileCheckpoints,
-      softGitRewind: this.loop.softGitRewind,
-      applicationRoot: this.root,
-      activeSessionId: () => this.loop.activeSessionId,
-      requireReadableSession: (sessionId, operation) =>
-        this.requireReadableSession(sessionId, operation) as never,
-      assertMutation: (area, action) => this.assertMutation(area, action),
+      managedEnvironment: kept.managedEnvironmentService,
     })
     this.workspaceBindings = new WorkspaceBindingStore(this.paths.stateRoot)
     this.gitReceipts = new GitOperationReceiptStore(this.paths.stateRoot)
@@ -313,20 +361,10 @@ export class CoreApi {
       }
     }
     const gitProcessRunner = new NodeEnvironmentProcessRunner()
-    const workspaceFileCheckpoints = this.loop.fileCheckpoints.enabled
-      ? this.loop.fileCheckpoints
-      : new FileCheckpointService({
-          stateRoot: this.paths.stateRoot,
-          enabled: true,
-          gitCapture:
-            this.loop.softGitRewind.requestedMode === 'off'
-              ? null
-              : this.loop.softGitRewind,
-        })
     this.workspaceGitService = new WorkspaceGitService({
       resolveProject: resolveWorkspaceProject,
       resolveRuntime: async (projectRoot) => {
-        const runtime = await this.loop.resolveWorkspaceGitRuntime(projectRoot)
+        const runtime = await this.resolveGitRuntime(projectRoot)
         if (!runtime)
           throw new WorkspaceOperationError(
             'git_unavailable',
@@ -350,36 +388,16 @@ export class CoreApi {
           stderrTruncated: result.stderrTruncated === true,
         }
       },
-      checkpoint: async ({ sessionId, projectRoot, paths, effect }) =>
-        (
-          await workspaceFileCheckpoints.capture(
-            {
-              sessionId,
-              turnId: `workspace-git-${Date.now()}`,
-              toolCallId: `workspace-discard-${Date.now()}`,
-              toolName: 'git.discard',
-              workspaceRoot: projectRoot,
-              paths,
-            },
-            effect,
-          )
-        ).value,
-      hasActiveWriter: (sessionId) =>
-        this.loop.activeTasks.hasActiveForSession(sessionId) ||
-        this.loop.taskManager.store
-          .list()
-          .some(
-            (task) =>
-              task.session_id === sessionId && task.status === 'running',
-          ),
+      hasActiveWriter: (sessionId) => host.isBusy(sessionId),
       stateRoot: this.paths.stateRoot,
       bindings: this.workspaceBindings,
       receipts: this.gitReceipts,
       emitReceipt: async (sessionId, receipt) => {
-        await this.emitRuntime(
-          { event: 'git_operation_completed', ...receipt },
-          { sessionId },
-        )
+        host.emitHost({
+          event: 'git_operation_completed',
+          session_id: sessionId,
+          ...receipt,
+        })
       },
     })
     this.workspaceFilesService = new WorkspaceFilesService({
@@ -387,39 +405,10 @@ export class CoreApi {
       filterIgnored: async (sessionId, _projectRoot, paths) =>
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
-    this.projectProcessService = new ProjectProcessService({
-      stateRoot: this.paths.stateRoot,
-      resolveProjectRoot: (sessionId) =>
-        resolveWorkspaceProject(sessionId).projectRoot,
-      resolveEnvironment: async (projectRoot) => {
-        const environment = await this.loop.executionEnvironmentService.create({
-          projectRoot,
-        })
-        return {
-          toolPaths: environment.toolPaths,
-          env: environment.env,
-        }
-      },
-      processRuntime: this.loop.processRuntime,
-      emit: async (sessionId, event) => {
-        await this.emitRuntime(event, { sessionId })
-      },
-    })
     this.workspaceReferenceService = new WorkspaceReferenceService({
       resolveProject: resolveWorkspaceProject,
-      resolvePreview: (sessionId, url) => {
-        const preview = this.projectProcessService.previews
-          .list(sessionId)
-          .find(
-            (candidate) =>
-              candidate.url === url && candidate.status === 'ready',
-          )
-        return preview ? { previewId: preview.id } : null
-      },
+      resolvePreview: () => null,
     })
-    this.loop.registry.register(
-      new ManageProjectProcessTool(this.projectProcessService),
-    )
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
       resolveProject: resolveWorkspaceProject,
@@ -427,153 +416,106 @@ export class CoreApi {
       env: terminalEnvironment,
       emit: opts.terminalEventSink ?? undefined,
     })
-    this.mainline = new MainlineTurnService(this.loop)
-    this.chatService = new ChatService(this.mainline)
     this.goalService = new GoalService({
-      goalStore: this.loop.goalStore,
-      coordinator: this.loop.goalCoordinator,
-      activeTasks: this.loop.activeTasks,
+      goals: host.goals,
+      agentFor: (sessionId) => host.agentFor(sessionId),
+      goalView: (sessionId) => host.goalView(sessionId),
+      activeSessionId: () => host.activeSessionId,
       materializeSession: async (input) =>
         (
-          await this.mainline.materializeSession(
-            { ...input, emit: null },
+          await this.chatService.materializeSession(
+            {
+              sessionId: input.sessionId,
+              clientDraftId: input.clientDraftId ?? null,
+              draftSession: (input.draftSession ??
+                null) as DraftSessionInput | null,
+            },
             'goals.start',
           )
         ).session,
-      requireReadableSession: (sessionId, operation) =>
-        this.requireReadableSession(sessionId, operation) as never,
-      scopeForSession: (session) =>
-        this.loop.goalScopeForSession(session as never),
-      activeSessionId: () => this.loop.activeSessionId,
-      summarize: async (goal) => await this.goalSummary(goal),
-      clearPendingInteraction: (goal) => {
-        const controlManager = this.loop.requireControlManagerForSessionId(
-          goal.scope.sessionId,
-        )
-        if (goal.runtime.pendingInteractionId)
-          controlManager.clearPendingInteractionForGoal(
-            goal.runtime.pendingInteractionId,
-          )
-        controlManager.clearPendingInteractionForGoal(goal.id)
-      },
     })
     this.sessionApplicationService = new CoreSessionApplicationService({
-      sessions: this.loop.sessionStore,
-      reconcileControlPending: () => this.loop.reconcileSessionControlPending(),
+      sessions: kept.sessionStore,
       resolveProject: (projectPath) =>
-        this.loop.projectStore.resolve(projectPath) as unknown as Dict,
-      pauseGoalsBySession: (sessionId, reason) =>
-        this.goalService.pauseBySession(sessionId, reason),
-      activeGoalPromise: (goalId) =>
-        this.loop.goalCoordinator.active(goalId)?.promise ?? null,
-      stopProjectProcesses: async (sessionId, reason) => {
-        await this.projectProcessService.stopSession(sessionId, reason)
+        kept.projectStore.resolve(projectPath) as unknown as Dict,
+      endSession: async (sessionId) => {
+        host.deleteSession(sessionId)
       },
-      endSession: async (sessionId, reason) => {
-        await this.loop.endSession(sessionId, reason)
+      stopSession: (sessionId) => {
+        host.stop(sessionId)
       },
       closeTerminals: (sessionId) =>
         this.terminalService.closeSession(sessionId),
-      cancelGoalsBySession: async (sessionId, reason) => {
-        await this.goalService.cancelAndSettleBySession(sessionId, reason)
-      },
-      deleteGoalsBySession: (sessionId) =>
-        this.loop.goalStore.deleteBySession(sessionId),
-      deleteTasksBySession: (sessionId) =>
-        this.loop.taskManager.store.deleteBySession(sessionId),
-      deletePlansBySession: (sessionId) =>
-        this.loop
-          .controlManagerForSessionId(sessionId)
-          .planStore.deleteBySession(sessionId),
-      activateSession: (sessionId) => this.loop.activateSession(sessionId),
+      activateSession: (sessionId) => host.activateSession(sessionId),
+      deleteSessionLog: (sessionId) => host.sessions.delete(sessionId),
     })
     this.workspaceApplicationService = new CoreWorkspaceApplicationService({
       requireReadableSession: (sessionId, operation) =>
         this.requireReadableSession(sessionId, operation),
       workspaceGit: this.workspaceGitService,
-      plansForSession: (sessionId) =>
-        this.loop
-          .controlManagerForSessionId(sessionId)
-          .planStore.list()
-          .filter((plan) => plan.sessionId === sessionId),
-      goalsForSession: (sessionId) => this.goalService.list({ sessionId }),
-      tasksForSession: (sessionId) =>
-        this.loop.taskManager.store
-          .list()
-          .filter((task) => task.session_id === sessionId),
-      teamForSession: (session) =>
-        this.loop.teamManagerForSession(session as never)?.payload() ?? null,
+      goalForSession: (sessionId) => host.goalView(sessionId),
+      jobsForSession: (sessionId) => this.sessionJobs(sessionId),
       bindings: this.workspaceBindings,
       gitReceipts: this.gitReceipts,
-      projectProcesses: this.projectProcessService,
       terminals: this.terminalService,
     })
     this.sessionTransitionService = new SessionTransitionService({
       stateRoot: this.paths.stateRoot,
-      sessions: this.loop.sessionStore,
+      sessions: kept.sessionStore,
       assertBoundary: (sessionId) => this.assertClearBoundary(sessionId),
-      runSessionEnd: (sessionId, reason) =>
-        this.loop.notifySessionTransitionEnd(sessionId, reason),
-      activate: (sessionId) => this.loop.activateSession(sessionId),
+      runSessionEnd: async (sessionId) => {
+        host.stop(sessionId)
+      },
+      activate: (sessionId) => host.activateSession(sessionId),
       inheritWorkspaceBinding: (sourceSessionId, targetSessionId) =>
         this.workspaceBindings.inherit(sourceSessionId, targetSessionId),
+      permissionPresetOf: (sessionId) => {
+        const session = host.sessionLog(sessionId)
+        if (session === undefined) return null
+        const preset = host.presets.current(session.events)
+        return host.presets.names.includes(preset) ? preset : null
+      },
+      applyPermissionPreset: (sessionId, preset) => {
+        host.setPermissionPreset(sessionId, preset)
+      },
     })
     this.commandApplicationService = new CoreCommandApplicationService({
       models: this.modelService,
-      memory: this.memoryService,
-      goals: this.goalService,
       sessionTransitions: this.sessionTransitionService,
-      getSession: (sessionId) => this.loop.sessionStore.get(sessionId),
-      skillsForSession: (sessionId) => {
-        const resolved = this.loop.resolvedSkillsForSession(sessionId)
-        if (!resolved.length) return this.skillService.list()
-        return resolved.map((skill) =>
-          this.skillService.describeResolved(skill),
-        )
-      },
-      sessionBusy: (sessionId) => {
-        const actor = this.loop.sessionRuntimes.get(sessionId)
-        return (
-          this.loop.activeTasks.hasActiveForSession(sessionId) ||
-          Boolean(actor?.activeCommandId) ||
-          Number(actor?.snapshot().queued ?? 0) > 0
-        )
-      },
-      listTasks: (sessionId) =>
-        this.loop.activeTasks
-          .list()
-          .filter((task) => task.session_id === sessionId),
-      cancelTask: (taskId) => {
-        this.loop.activeTasks.cancel({ taskId })
-      },
-      cancelSessionRuntime: (sessionId) =>
-        this.loop.sessionRuntimes.cancel(sessionId),
-      activateModel: async (entryId) => {
-        await this.model.activate({ entryId })
-      },
-      setReasoningEffort: async (entryId, reasoningEffort) => {
-        await this.model.setReasoningEffort({ entryId, reasoningEffort })
-      },
-      setPermissionMode: (sessionId, mode) => {
-        this.loop
-          .requireControlManagerForSessionId(sessionId)
-          .setPermissionMode(mode)
-      },
-      controlPayload: (sessionId) =>
-        this.loop.requireControlManagerForSessionId(sessionId).payload(),
-      setControlMode: async (sessionId, mode) => {
-        await this.loop.setControlModeForSession(sessionId, mode)
-      },
-      defaultSubagentName: (requested) =>
-        requested ||
-        (this.loop.subagentRegistry.get('xiaohuangmen')
-          ? 'xiaohuangmen'
-          : this.loop.subagentRegistry.names({ includeAliases: false })[0] ||
-            null),
-      subagentToolNames: (name) =>
-        this.loop.subagentRegistry.get(name)?.toolNames ?? null,
-      submitPrompt: async (input) => {
-        await this.chat.submit(input)
+      getSession: (sessionId) => kept.sessionStore.get(sessionId),
+      skillsForSession: (sessionId) =>
+        this.skillService.list({ sessionId }).skills,
+      sessionBusy: (sessionId) =>
+        host.isBusy(sessionId) || host.queuedPrompts(sessionId).length > 0,
+      compact: (sessionId) => host.compactNow(sessionId),
+      stop: (sessionId) => host.stop(sessionId),
+      activateModel: async (entryId) => await this.model.activate({ entryId }),
+      setReasoningEffort: async (entryId, reasoningEffort) =>
+        await this.model.setReasoningEffort({ entryId, reasoningEffort }),
+      setPermissionPreset: (sessionId, preset) =>
+        host.setPermissionPreset(sessionId, preset),
+      presets: () => host.presets.options(),
+      controlPayload: (sessionId) => host.controlPayload(sessionId),
+      setPlanMode: (sessionId, active) =>
+        host.setPlanMode(sessionId, active) as CommandPlanSwitchOutcome,
+      runGoalCommand: (sessionId, rawInput) =>
+        runGoalCommand(host.goals, host.agentFor(sessionId), rawInput),
+      submitPrompt: async (input) =>
+        await this.chat.submit({ ...input, attachments: input.attachmentIds }),
+      forkSkill: ({ sessionId, skillName, task, allowedTools, effort }) => {
+        const parent = host.agentFor(sessionId)
+        const skill = host.skillsLoaderFor(parent).resolve(skillName)
+        if (skill === null || skill.status !== 'active')
+          throw Object.assign(new Error(`Skill ${skillName} 不可用。`), {
+            code: 'skill_unavailable',
+          })
+        const child = startSkillFork(host, parent, {
+          skill,
+          task,
+          allowedTools,
+          effort,
+        })
+        return { subagentId: child.id }
       },
     })
     this.commandPlatform = new CommandPlatform({
@@ -589,12 +531,12 @@ export class CoreApi {
       submitSkill: async (context) =>
         await this.commandApplicationService.submitSkill(context),
       queueAfterTurn: async ({ sessionId, requestId, run }) => {
-        const promise = this.loop.sessionRuntimes.run(
-          sessionId,
-          requestId,
-          async () => await run(),
-        )
-        void promise.catch(() => undefined)
+        // After-turn commands wait for the session's agent to go idle.
+        const agent = host.agentFor(sessionId)
+        void agent
+          .whenIdle()
+          .then(run)
+          .catch(() => undefined)
         return requestId
       },
       completeDynamic: async (descriptor, rawArgs, cursor, sessionId) =>
@@ -605,46 +547,47 @@ export class CoreApi {
           sessionId,
         ),
     })
-    this.loop.setSchedulerAgentTurnSubmitter((payload) =>
-      this.mainline.submitSchedulerTurn(payload),
-    )
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
-      legacyStateMigration: this.loop.legacyStateMigration,
+      legacyStateMigration: kept.legacyStateMigration,
       activeProjectLegacyPrivateData: () => {
-        const projectPath = this.loop.activeSession?.project_path
+        const projectPath = host.activeSession()?.project_path
         if (!projectPath) return null
-        const detected =
-          this.loop.projectStore.detectLegacyPrivateData(projectPath)
-        return { projectPath, ...detected }
+        return {
+          projectPath,
+          ...kept.projectStore.detectLegacyPrivateData(projectPath),
+        }
       },
-      schedulerDiagnostics: () => this.loop.schedulerStore.diagnostics(),
-      runtimeStats: () =>
-        this.loop.runtimeStore.stats({
-          activeTurnIds: this.loop.activeMemoryStore.loadUnarchivedTurnIds(),
-        }),
-      workspacePolicy: () => this.loop.workspacePolicyDiagnostics() as Dict,
-      sandboxCapability: () => ({ ...this.loop.processSandbox.capability() }),
-      processRuntime: () => this.loop.processRuntime.capabilityReport(),
-      lifecycle: () => this.loop.lifecycleSupervisor.snapshot(),
-      subagents: () => this.loop.subagentSupervisor.snapshot(),
-      agentDefinitions: () => this.loop.subagentRegistry.snapshot(),
+      schedulerDiagnostics: () => kept.schedulerStore.diagnostics(),
+      runtimeStats: () => this.runtimeStats(host.activeSessionId),
+      workspacePolicy: () => ({
+        workspaceRoot: host.activeWorkspaceRoot(),
+        sandbox: host.controlPayload(host.activeSessionId).sandbox,
+      }),
+      sandboxCapability: () => ({ ...kept.processSandbox.capability() }),
+      processRuntime: () => kept.processRuntime.capabilityReport(),
+      subagents: () => this.allSubagents(),
+      kernel: () => ({
+        activeSessionId: host.activeSessionId,
+        busySessions: host.busySessions(),
+        activeRoute: host.llm.activeRoute()?.id ?? null,
+        tools: host.tools.schemas().map((tool) => tool.name),
+        archivedLegacySessions: kept.archivedLegacySessions,
+        lifecycle: this.lifecyclePayload(),
+      }),
       effectiveConfig: () => this.effectiveConfigService.payload(),
       commandCatalog: () => {
-        const sessionId = this.loop.activeSessionId
+        const sessionId = host.activeSessionId
         return sessionId
           ? this.commandPlatform.diagnostics(sessionId)
-          : { status: 'ok', registeredSkills: 0, conflicts: [] }
+          : { status: 'ok', registeredSkills: 0, conflicts: [], warnings: [] }
       },
-      hybridMemory: () => this.loop.hybridMemory.diagnostics(),
-      codeIntelligence: () => this.loop.codeIntelligence.diagnostics(),
-      mcp: () => this.loop.mcpClient.snapshot(),
-      activeTasks: () => this.loop.activeTasks.list(),
-      sessionRuntimes: () => this.loop.sessionRuntimes.snapshot(),
+      mcp: () => kept.mcpClient.snapshot(),
+      activeTasks: () => this.activeTaskInfos(),
       desktopPetPayload: () => this.desktopPet.get(),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
       externalToolConfig: () => {
-        const projectPath = this.loop.activeSession?.project_path
+        const projectPath = host.activeSession()?.project_path
         const workspaceConfig = projectPath
           ? join(projectPath, 'config', 'mcporter.json')
           : null
@@ -669,68 +612,69 @@ export class CoreApi {
 
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
-    const loop = opts.loop ?? (await AgentLoop.create(opts))
+    const host = opts.host ?? (await HarnessHost.create(opts))
     let api: CoreApi | null = null
     try {
-      api = new CoreApi(root, loop, opts)
+      api = new CoreApi(root, host, opts)
       await api.environmentService.initialize()
       await api.sessionTransitionService.recover()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
-      else await loop.close().catch(() => {})
+      else await host.close().catch(() => {})
       throw error
     }
   }
 
   async close(): Promise<void> {
     this.terminalService.closeAll()
-    await this.projectProcessService.shutdown()
-    await this.loop.close()
+    this.onboardingService.dispose()
+    await this.host.close()
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
     const sessionId = String(opts.sessionId ?? '').trim()
-    if (sessionId) this.activateBootstrapSession(sessionId)
-    this.loop.reconcileSessionControlPending()
-    const sessionDiagnostics = this.loop.sessionStore.diagnostics()
-    const route = this.loop.modelRouter.route('main_agent')
-    const activeTurnIds = this.loop.activeMemoryStore.loadUnarchivedTurnIds()
-    const runtimeReplay = this.runtime.replay({
-      sessionId: this.loop.activeSessionId,
-      afterSeq: 0,
-      limit: 5000,
-    })
-    const goals = await this.goalService.bootstrap(this.loop.activeSessionId)
+    if (sessionId)
+      this.host.activateSession(
+        this.requireReadableSession(sessionId, 'bootstrap').id,
+      )
+    const kept = this.host.kept
+    const activeSessionId = this.host.activeSessionId
+    const sessionDiagnostics = kept.sessionStore.diagnostics()
+    const route = this.host.llm.activeRoute()
+    const replay =
+      activeSessionId && kept.sessionStore.get(activeSessionId)
+        ? this.runtime.replay({ sessionId: activeSessionId })
+        : { events: [], latestSeq: 0 }
     return {
       app: 'Emperor Agent',
       sessionIndexSource: sessionDiagnostics.sessionIndexSource,
       repairedSessions: sessionDiagnostics.repairedSessions,
-      model: route.snapshot.model,
-      provider: route.snapshot.providerName,
-      providerLabel: route.snapshot.providerLabel,
+      model: route?.modelId ?? '',
+      provider: route?.catalogProvider ?? '',
+      providerLabel: route?.displayName ?? '',
       tools: this.skills.tools(),
-      skills: this.skills.list(),
+      ...(() => {
+        const catalog = this.skills.list({ sessionId: activeSessionId })
+        return { skills: catalog.skills, invalidSkills: catalog.invalid }
+      })(),
       plugins: this.plugins.list(),
       memory: this.memory.get(),
       modelConfig: await this.model.getConfig(),
       profileOnboarding: this.onboarding.getProfileStatus(),
-      team: this.team.get(),
       scheduler: this.scheduler.get(),
       control: this.control.get(),
-      goals,
+      goals: await this.goalService.bootstrap(activeSessionId),
       hooks: await this.hooks.getConfig(),
       desktopPet: await this.desktopPet.get(),
-      context_used: this.loop.tokenTracker.lastInputTokensValue(),
+      context_used: kept.tokenTracker.lastInputTokensValue(),
       unarchivedHistory: this.memoryService.historyPayload(),
       runtime: {
-        events: runtimeReplay.events,
-        latestSeq: runtimeReplay.latestSeq,
-        busy: this.loop.activeTasks.hasActiveForSession(
-          this.loop.activeSessionId,
-        ),
-        active_tasks: this.loop.activeTasks.list(),
-        stats: this.loop.runtimeStore.stats({ activeTurnIds }),
+        events: replay.events,
+        latestSeq: replay.latestSeq,
+        busy: this.host.isBusy(activeSessionId),
+        active_tasks: this.activeTaskInfos(),
+        stats: this.runtimeStats(activeSessionId),
       },
       mcp: this.mcp.status(),
       projects: this.projects.list(),
@@ -741,8 +685,6 @@ export class CoreApi {
   readonly chat = {
     submit: async (opts: {
       content: string
-      turnId?: string | null
-      emit?: StreamEmitter | null
       displayContent?: string | null
       clientMessageId?: string | null
       sessionId?: string | null
@@ -756,11 +698,13 @@ export class CoreApi {
       signal?: AbortSignal | null
       /** Trusted in-process adapter provenance. Browser IPC remains `chat`. */
       source?: string | null
-    }) => {
-      const result = await this.chatService.submit({
+      /** In-process adapters only: this session's UI events during the submit. */
+      emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
+      /** Accepted for adapter compatibility; turn ids are assigned by the kernel. */
+      turnId?: string | null
+    }) =>
+      await this.chatService.submit({
         content: String(opts.content ?? ''),
-        turnId: opts.turnId ?? null,
-        emit: opts.emit ?? null,
         displayContent: opts.displayContent ?? null,
         clientMessageId: opts.clientMessageId ?? null,
         sessionId: opts.sessionId ?? null,
@@ -772,9 +716,8 @@ export class CoreApi {
         requestedSkills: opts.requestedSkills ?? null,
         signal: opts.signal ?? null,
         source: opts.source ?? 'chat',
-      })
-      return result
-    },
+        emit: opts.emit ?? null,
+      }),
     listQueuedPrompts: (opts: { sessionId: string }) =>
       this.chatService.listQueuedPrompts(opts),
     manageQueuedPrompt: (opts: {
@@ -785,29 +728,20 @@ export class CoreApi {
     stopRuntime: async (
       opts: {
         taskId?: string | null
-        kind?: 'turn' | 'scheduler' | 'team' | 'watchlist' | 'goal' | null
+        kind?: string | null
+        sessionId?: string | null
       } = {},
     ) => {
-      const goalTasks = this.loop.activeTasks
-        .list()
-        .filter(
-          (task) =>
-            task.kind === 'goal' &&
-            (!opts.taskId || task.id === opts.taskId) &&
-            (!opts.kind || opts.kind === 'goal'),
-        )
-      for (const task of goalTasks) {
-        await this.goalService.pause(
-          task.id.replace(/^goal:/, ''),
-          task.session_id,
-          'user_stop',
-        )
+      const taskId = String(opts.taskId ?? '').trim()
+      let cancelled = 0
+      if (taskId) {
+        cancelled = this.cancelTask(taskId) ? 1 : 0
+      } else {
+        const sessionId =
+          String(opts.sessionId ?? '').trim() || this.host.activeSessionId
+        if (sessionId && this.host.stop(sessionId)) cancelled = 1
       }
-      const cancelled = this.loop.activeTasks.cancel({
-        taskId: opts.taskId ?? null,
-        kind: opts.kind ?? null,
-      })
-      return { cancelled, active: this.loop.activeTasks.list() }
+      return { cancelled, active: this.activeTaskInfos() }
     },
   }
 
@@ -835,96 +769,50 @@ export class CoreApi {
   }
 
   readonly runtime = {
-    replay: <TFormat extends CoreRuntimeReplayFormat = 'projection'>(
+    replay: (
       opts: {
         sessionId?: string | null
         afterSeq?: number | string | null
         after_seq?: number | string | null
         limit?: number | string | null
+        /** Accepted for compatibility; the session log has no archive or compaction split. */
         includeArchive?: boolean | string | null
-        include_archive?: boolean | string | null
         compact?: boolean | string | null
-        format?: TFormat | null
+        format?: 'projection' | null
       } = {},
-    ): CoreRuntimeReplayPayload<TFormat> => {
+    ): CoreRuntimeReplayPayload => {
       const sessionId = this.requireReadableSessionId(
-        opts.sessionId ?? this.loop.activeSessionId ?? null,
+        opts.sessionId ?? this.host.activeSessionId ?? null,
         'runtime.replay',
       )
       const afterSeq = normalizedNonNegativeNumber(
         opts.afterSeq ?? opts.after_seq ?? 0,
       )
       const limit = normalizedPositiveNumber(opts.limit ?? null)
-      const includeArchive = normalizedBoolean(
-        opts.includeArchive ?? opts.include_archive ?? false,
-      )
-      // P1-5：回放默认读取侧压缩（磁盘不变）；传 compact:false 取原始流
-      const compact =
-        opts.compact === undefined ? true : normalizedBoolean(opts.compact)
-      const format = opts.format ?? 'projection'
-      const store = this.loop.runtimeStoreForSession(sessionId)
+      const replay = this.host.replay(sessionId, afterSeq)
+      const events =
+        limit === null ? replay.events : replay.events.slice(-limit)
       return {
         sessionId,
         afterSeq,
-        latestSeq: store.latestSeq,
-        format,
-        events:
-          format === 'envelope_v2'
-            ? store.replayEnvelopesAfter(afterSeq, {
-                sessionId,
-                limit,
-                includeArchive,
-              })
-            : store
-                .replayAfter(afterSeq, {
-                  sessionId,
-                  limit,
-                  includeArchive,
-                  compact,
-                })
-                .map((event) => ({
-                  ...event,
-                  event: String(event.event ?? ''),
-                })),
-      } as CoreRuntimeReplayPayload<TFormat>
+        latestSeq: replay.latestSeq,
+        format: 'projection',
+        events: events as CoreRuntimeEventPayload[],
+      }
     },
-  }
-
-  readonly fileCheckpoints = {
-    list: (input: { sessionId?: string | null } = {}) =>
-      this.fileCheckpointService.list(input),
-    preview: (input: { sessionId: string; checkpointId: string }) =>
-      this.fileCheckpointService.preview(input),
-    rewind: (input: {
-      sessionId: string
-      checkpointId: string
-      confirmed: boolean
-    }) => this.fileCheckpointService.rewind(input),
-    rewindGit: (input: {
-      sessionId: string
-      checkpointId: string
-      confirmed: boolean
-      confirmedGitRisk: boolean
-      previewRevision: string
-      dirtyStrategy: 'abort' | 'stash'
-    }) => this.fileCheckpointService.rewindGit(input),
   }
 
   readonly config = {
     effective: () => this.effectiveConfigService.payload(),
     get: (): UserConfigPayload => this.configService.getUserConfig(),
-    save: (
+    save: async (
       body: { content?: unknown } | string = {},
     ): Promise<UserConfigPayload> => {
       this.assertMutation('config', 'save')
       const content =
         typeof body === 'string' ? body : String(body.content ?? '')
-      return (async () => {
-        await this.hooksService.authorizeConfigChange('config.save', {
-          content,
-        })
-        return this.configService.saveUserConfig(content)
-      })()
+      await this.hooksService.authorizeConfigChange('config.save', { content })
+      return this.configService.saveUserConfig(content)
     },
   }
 
@@ -941,13 +829,43 @@ export class CoreApi {
 
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
-    status: () => this.loop.mcpClient.snapshot(),
+    status: () => this.host.kept.mcpClient.snapshot(),
     saveConfig: async (raw: Dict) => {
-      // mcp.saveConfig 落盘后会经 MCPClient 以 servers.*.command 起子进程（stdio transport）；
-      // 未经审批就能被 renderer 一条 IPC 写任意 command/args 是一条进程执行 pivot（审计 P0-5）。
+      // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
       this.assertMutation('mcp', 'saveConfig')
       await this.hooksService.authorizeConfigChange('mcp.saveConfig', raw)
       return this.configService.saveMcpConfig(raw)
+    },
+    /** Merge pasted servers (Claude/Cursor/VS Code/Emperor formats) by name; `dryRun` previews. */
+    importServers: async (input: {
+      raw: unknown
+      overwrite?: boolean | string[]
+      dryRun?: boolean
+    }) => {
+      if (input.dryRun !== true) {
+        this.assertMutation('mcp', 'importServers')
+        await this.hooksService.authorizeConfigChange(
+          'mcp.importServers',
+          input,
+        )
+      }
+      const result = await this.configService.importMcpServers(input)
+      return { ...result, status: this.host.kept.mcpClient.snapshot() }
+    },
+    setServerEnabled: async (input: { name: string; enabled: boolean }) => {
+      this.assertMutation('mcp', 'setServerEnabled')
+      await this.hooksService.authorizeConfigChange(
+        'mcp.setServerEnabled',
+        input,
+      )
+      const result = await this.configService.setMcpServerEnabled(input)
+      return { ...result, status: this.host.kept.mcpClient.snapshot() }
+    },
+    removeServer: async (input: { name: string }) => {
+      this.assertMutation('mcp', 'removeServer')
+      await this.hooksService.authorizeConfigChange('mcp.removeServer', input)
+      const result = await this.configService.removeMcpServer(input)
+      return { ...result, status: this.host.kept.mcpClient.snapshot() }
     },
   }
 
@@ -1025,181 +943,65 @@ export class CoreApi {
   }
 
   readonly onboarding = {
-    getProfileStatus: () => this.loop.profileOnboardingPayload(),
-    startProfileInterview: () =>
-      this.loop.startProfileInterview({ manual: true }),
-    skipProfileInterview: async () => {
-      const state = this.loop.profileOnboardingPayload()
-      if (state.interactionId) {
-        const pending = this.loop.controlManager.payload().pending
-        if (pending?.id === state.interactionId)
-          await this.control.cancelInteraction(state.interactionId)
-      }
-      return this.loop.skipProfileInterview()
-    },
+    getProfileStatus: () => this.onboardingService.payload(),
+    startProfileInterview: async () =>
+      this.onboardingService.start({ manual: true }),
+    skipProfileInterview: async () => this.onboardingService.skip(),
   }
 
   readonly control = {
-    get: () => this.loop.controlManager.payload(),
-    setPermissionMode: (mode: string) =>
-      this.loop.controlManager.setPermissionMode(mode),
-    setMode: (mode: string) => this.loop.setControlMode(mode),
+    get: (sessionId?: string | null) =>
+      this.host.controlPayload(this.controlSessionId(sessionId)),
+    /** Switch the permission preset (`read-only` | `workspace-write` | `danger-full-access`). */
+    setPermissionMode: (preset: string, sessionId?: string | null) =>
+      this.host.setPermissionPreset(
+        this.requireControlSession(sessionId, 'control.setPermissionMode'),
+        preset,
+      ),
+    /** `plan` enters plan mode, anything else leaves it. */
+    setMode: (mode: string, sessionId?: string | null) => {
+      const id = this.requireControlSession(sessionId, 'control.setMode')
+      const outcome = this.host.setPlanMode(id, mode === 'plan')
+      return { outcome, control: this.host.controlPayload(id) }
+    },
     answerInteraction: async (
       id: string,
       answers: Dict,
-      opts: ControlResumeOptions = {},
-    ): Promise<Dict> => {
-      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      const controlManager = this.loop.controlManagerForInteraction(id)
-      const isProfileOnboarding = this.loop.isProfileOnboardingInteraction(id)
-      const pending = controlManager.store.load().pending
-      const resume = controlManager.answer(id, answers)
-      const answered = controlManager.store.load().lastInteraction
-      const manualRequest =
-        pending?.id === id &&
-        isRecord(pending.meta.goal_manual_evidence_request)
-          ? pending.meta.goal_manual_evidence_request
-          : null
-      const permissionRequest =
-        pending?.id === id &&
-        isRecord(pending.meta.goal_permission_blocker_request)
-          ? pending.meta.goal_permission_blocker_request
-          : null
-
-      if (manualRequest) {
-        const goalId = String(manualRequest.goal_id ?? '').trim()
-        const criterionId = String(manualRequest.criterion_id ?? '').trim()
-        const choice = interactionAnswerChoice(
-          answered,
-          GOAL_MANUAL_EVIDENCE_QUESTION_ID,
-        )
-        const verdict =
-          choice === GOAL_MANUAL_EVIDENCE_PASS_LABEL
-            ? 'pass'
-            : choice === GOAL_MANUAL_EVIDENCE_FAIL_LABEL
-              ? 'fail'
-              : null
-        if (goalId && criterionId && verdict) {
-          await this.loop.recordGoalManualVerification(goalId, {
-            interactionId: id,
-            criterionId,
-            verdict,
-          })
-        } else if (goalId && choice === GOAL_MANUAL_EVIDENCE_DECLINE_LABEL) {
-          await this.loop.goalCoordinator.pause(
-            goalId,
-            'manual_verification_declined',
-          )
-          return await this.resumeControl(
-            { ...resume, resume: false },
-            opts,
-            ownerSessionId,
-          )
-        }
-      }
-
-      if (permissionRequest) {
-        const goalId = String(permissionRequest.goal_id ?? '').trim()
-        const choice = interactionAnswerChoice(
-          answered,
-          GOAL_PERMISSION_BLOCKER_QUESTION_ID,
-        )
-        if (goalId && choice === GOAL_PERMISSION_BLOCKER_DENIED_LABEL) {
-          await this.loop.goalCoordinator.settleControl(goalId, id)
-          await this.loop.blockGoalFromControlPermissionDenial(
-            goalId,
-            {
-              code: 'missing_permission',
-              reason: String(pending?.context ?? 'Required permission denied.'),
-            },
-            id,
-          )
-          return await this.resumeControl(
-            { ...resume, resume: false },
-            opts,
-            ownerSessionId,
-          )
-        }
-      }
-      const result = await this.resumeControl(resume, opts, ownerSessionId)
-      if (isProfileOnboarding) {
-        return {
-          ...result,
-          profileOnboarding: this.loop.profileOnboardingPayload(),
-        }
-      }
-      return result
-    },
-    commentPlan: (
+      _opts: Dict = {},
+    ): Promise<Dict> =>
+      this.settleInteraction(id, () =>
+        this.host.answerInteraction(id, answers as UiAnswers),
+      ),
+    commentPlan: async (
       id: string,
       comment: string,
-      opts: ControlResumeOptions = {},
-    ): Promise<Dict> => {
-      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      return this.resumeControl(
-        this.loop.planningApplicationService.comment(id, comment),
-        opts,
-        ownerSessionId,
-      )
-    },
-    approvePlan: async (
-      id: string,
-      opts: ControlResumeOptions = {},
-    ): Promise<Dict> => {
-      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      const resume = await this.loop.planningApplicationService.approve(id)
-      return this.resumeControl(resume, opts, ownerSessionId)
-    },
-    cancelInteraction: async (id: string): Promise<Dict> => {
-      const ownerSessionId = this.loop.controlPendingOwnerSessionId(id)
-      const controlManager = this.loop.controlManagerForInteraction(id)
-      const result = this.loop.planningApplicationService.cancel(id)
-      const event: Dict = {
-        ...result,
-        control: controlManager.payload(),
-      }
-      await this.emitRuntime(event, { sessionId: ownerSessionId })
-      if (
-        ownerSessionId &&
-        event.event === 'plan_execution_settled' &&
-        event.disposition === 'pause'
-      )
-        this.loop.clearSessionCheckpoint(ownerSessionId)
-      await this.loop.deferProfileInterview(id)
-      return event
-    },
-  }
-
-  readonly plans = {
-    list: (): Dict[] =>
-      this.loop.controlManager.planStore.list().map(planToDict),
-    get: (planId: string): Dict | null => {
-      const plan = this.loop.controlManager.planStore.get(planId)
-      return plan ? planToDict(plan) : null
-    },
+      _opts: Dict = {},
+    ): Promise<Dict> =>
+      this.settleInteraction(id, () => this.host.commentPlan(id, comment)),
+    approvePlan: async (id: string, _opts: Dict = {}): Promise<Dict> =>
+      this.settleInteraction(id, () => this.host.approvePlan(id)),
+    cancelInteraction: async (id: string): Promise<Dict> =>
+      this.settleInteraction(id, () => this.host.cancelInteraction(id)),
   }
 
   readonly goals = {
-    start: (input: Parameters<GoalService['start']>[0]) =>
-      this.goalService.start(input),
+    start: (input: GoalStartInput) => this.goalService.start(input),
     list: (input: { sessionId?: string | null } = {}) =>
       this.goalService.list(input),
     get: (goalId: string) => this.goalService.get(goalId),
     pause: (goalId: string) => this.goalService.pause(goalId),
     resume: (goalId: string) => this.goalService.resume(goalId),
-    replace: (input: Parameters<GoalService['replace']>[0]) =>
-      this.goalService.replace(input),
     cancel: (goalId: string, reason?: string | null) =>
       this.goalService.cancel(goalId, reason),
   }
 
   readonly scheduler = {
     get: () => ({
-      status: this.loop.schedulerService.status(),
-      jobs: this.loop.schedulerService
+      status: this.host.kept.schedulerService.status(),
+      jobs: this.host.kept.schedulerService
         .listJobs({ includeDisabled: true })
         .map(schedulerJobPublicPayload),
-      diagnostics: this.loop.schedulerStore.diagnostics(),
+      diagnostics: this.host.kept.schedulerStore.diagnostics(),
     }),
     createJob: (args: Dict) => {
       this.assertMutation('scheduler', 'create')
@@ -1209,7 +1011,7 @@ export class CoreApi {
       const payload = schedulerPayloadFromApi(
         requiredRecord(args.payload, 'payload'),
       )
-      const job = this.loop.schedulerService.addJob({
+      const job = this.host.kept.schedulerService.addJob({
         name: String(args.name ?? '').trim() || 'Scheduled job',
         schedule,
         payload,
@@ -1225,11 +1027,11 @@ export class CoreApi {
     },
     updateJob: (jobId: string, args: Dict) => {
       this.assertMutation('scheduler', 'update')
-      const current = this.loop.schedulerService.getJob(jobId)
+      const current = this.host.kept.schedulerService.getJob(jobId)
       if (!current) throw new Error(`scheduler job not found: ${jobId}`)
       if (current.protected)
         throw new Error(`scheduler job is protected: ${jobId}`)
-      const result = this.loop.schedulerService.updateJob(jobId, {
+      const result = this.host.kept.schedulerService.updateJob(jobId, {
         name:
           args.name === undefined || args.name === null
             ? undefined
@@ -1261,7 +1063,7 @@ export class CoreApi {
     },
     runJob: async (jobId: string) => {
       this.assertMutation('scheduler', 'run')
-      const ran = await this.loop.schedulerService.runJob(jobId, {
+      const ran = await this.host.kept.schedulerService.runJob(jobId, {
         force: true,
       })
       if (!ran) throw new Error(`scheduler job not found: ${jobId}`)
@@ -1269,7 +1071,7 @@ export class CoreApi {
     },
     pauseJob: (jobId: string) => {
       this.assertMutation('scheduler', 'pause')
-      const job = this.loop.schedulerService.enableJob(jobId, false)
+      const job = this.host.kept.schedulerService.enableJob(jobId, false)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
       return {
@@ -1279,7 +1081,7 @@ export class CoreApi {
     },
     resumeJob: (jobId: string) => {
       this.assertMutation('scheduler', 'resume')
-      const job = this.loop.schedulerService.enableJob(jobId, true)
+      const job = this.host.kept.schedulerService.enableJob(jobId, true)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
       return {
@@ -1289,7 +1091,7 @@ export class CoreApi {
     },
     deleteJob: (jobId: string) => {
       this.assertMutation('scheduler', 'delete')
-      const result = this.loop.schedulerService.removeJob(jobId)
+      const result = this.host.kept.schedulerService.removeJob(jobId)
       if (result === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
       if (result === 'protected')
@@ -1319,48 +1121,87 @@ export class CoreApi {
       this.sessionApplicationService.delete(sessionId),
     activate: (sessionId: string) =>
       this.sessionApplicationService.activate(sessionId),
-  }
-
-  readonly team = {
-    get: () => this.teamService.get(),
-    getMember: (name: string) => this.teamService.getMember(name),
-    spawnMember: (opts: {
-      name: string
-      role: string
-      task?: string | null
-      agent_type?: string | null
-    }) => this.teamService.spawnMember(opts),
-    sendMessage: (opts: { to: string; content: string; wake?: boolean }) =>
-      this.teamService.sendMessage(opts),
-    wakeMember: (
-      name: string,
-      opts: { purpose?: string; recovery?: 'auto' | 'retry' } = {},
-    ) => this.teamService.wakeMember(name, opts),
-    shutdownMember: (name: string) => this.teamService.shutdownMember(name),
-  }
-
-  readonly projectProcesses = {
-    /** Electron main-only capability; intentionally absent from the renderer operation registry. */
-    authorizePreview: (input: { sessionId: string; previewId: string }) =>
-      this.projectProcessService.previews.authorize(
-        input.previewId,
+    /** One message-boundary page of a session's raw log, sanitized for the wire. */
+    history: (input: {
+      sessionId: string
+      beforeSeq?: number
+      maxMessages?: number
+    }): SessionHistoryPage => {
+      const sessionId = this.requireReadableLogSession(
         input.sessionId,
-      ),
-    readOutput: (input: Parameters<ProjectProcessService['readOutput']>[0]) =>
-      this.projectProcessService.readOutput(input),
-    stop: (input: Parameters<ProjectProcessService['stop']>[0]) =>
-      this.projectProcessService.stop(input),
-    restart: (
-      input: Parameters<ProjectProcessService['restart']>[0] & {
-        confirmed: true
-      },
-    ) =>
-      this.projectProcessService.restart({
-        sessionId: input.sessionId,
-        processId: input.processId,
-        expectedRevision: input.expectedRevision,
-        invocationId: input.invocationId,
-      }),
+        'sessions.history',
+      )
+      const page = this.host.history(sessionId, {
+        ...(input.beforeSeq === undefined
+          ? {}
+          : { beforeSeq: input.beforeSeq }),
+        ...(input.maxMessages === undefined
+          ? {}
+          : { maxMessages: input.maxMessages }),
+      })
+      if (page === undefined)
+        throw new InvalidSessionError(
+          `sessions.history received unknown session ${sessionId}`,
+          sessionId,
+        )
+      return { ...page, events: page.events.map(sanitizeForWire) }
+    },
+    /**
+     * One raw log event by seq, NOT sanitized: the inspector loads the full
+     * payload of an event the history page truncated (`wire` marker).
+     */
+    event: (input: { sessionId: string; seq: number }): SessionEvent => {
+      const sessionId = this.requireReadableLogSession(
+        input.sessionId,
+        'sessions.event',
+      )
+      const event = this.host.event(sessionId, input.seq)
+      if (event === undefined)
+        throw new InvalidSessionError(
+          `sessions.event found no event ${input.seq} in session ${sessionId}`,
+          sessionId,
+        )
+      return event
+    },
+    /** Ancestor chain of a (child) session, root first. */
+    lineage: (input: { sessionId: string }): SessionLineage => {
+      const sessionId = this.requireReadableLogSession(
+        input.sessionId,
+        'sessions.lineage',
+      )
+      return this.host.lineage(sessionId) ?? { chain: [{ sessionId }] }
+    },
+    /** Delegated children of a session with their live status. */
+    children: (input: { sessionId: string }): SubagentChildView[] => {
+      const sessionId = this.requireReadableLogSession(
+        input.sessionId,
+        'sessions.children',
+      )
+      return this.host.children(sessionId)
+    },
+    /**
+     * Replace the set of sessions whose raw log events the desktop bridge
+     * streams to the renderer. Unreadable ids are dropped.
+     */
+    watch: (input: { sessionIds: string[] }): { watching: string[] } => {
+      const next = new Set<string>()
+      for (const raw of input.sessionIds) {
+        try {
+          next.add(this.requireReadableLogSession(raw, 'sessions.watch'))
+        } catch {
+          // A deleted or unknown session is simply not watched.
+        }
+      }
+      this.watchedSessions = next
+      return { watching: [...next] }
+    },
+  }
+
+  private watchedSessions = new Set<string>()
+
+  /** Whether the renderer asked for this session's raw events (`sessions.watch`). */
+  isSessionWatched(sessionId: string): boolean {
+    return this.watchedSessions.has(sessionId)
   }
 
   readonly references = {
@@ -1376,10 +1217,10 @@ export class CoreApi {
 
   readonly processes = {
     list: (opts: { activeOnly?: boolean } = {}): Dict[] =>
-      this.loop.processRuntime
+      this.host.kept.processRuntime
         .list({
           activeOnly: opts.activeOnly,
-          sessionId: this.loop.activeSessionId,
+          sessionId: this.host.activeSessionId,
         })
         .map((receipt) => receipt as unknown as Dict),
     cancel: (
@@ -1388,7 +1229,7 @@ export class CoreApi {
     ): Dict => {
       this.assertMutation('processes', 'cancel')
       this.assertProcessOwner(processId)
-      return this.loop.processRuntime.cancel(
+      return this.host.kept.processRuntime.cancel(
         processId,
         opts.leaseId,
         opts.reason,
@@ -1404,96 +1245,11 @@ export class CoreApi {
     ): Dict => {
       this.assertMutation('processes', 'reparent')
       this.assertProcessOwner(processId)
-      return this.loop.processRuntime.reparent(processId, opts.leaseId, {
+      return this.host.kept.processRuntime.reparent(processId, opts.leaseId, {
         kind: opts.ownerKind,
         id: opts.ownerId,
-        sessionId: this.loop.activeSessionId,
+        sessionId: this.host.activeSessionId,
       }) as unknown as Dict
-    },
-  }
-
-  readonly tasks = {
-    list: (opts: { sessionId?: string | null } = {}): Dict[] => {
-      const sessionId = String(opts.sessionId ?? '').trim()
-      const records = this.loop.taskManager.store.list()
-      const filtered = sessionId
-        ? records.filter((task) => task.session_id === sessionId)
-        : records
-      return filtered.map((task) => task.toDict() as unknown as Dict)
-    },
-    get: (taskId: string): Dict | null =>
-      (this.loop.taskManager.store.get(taskId)?.toDict() as unknown as Dict) ??
-      null,
-    transcript: (
-      taskId: string,
-      opts: { offset?: number; limit?: number } = {},
-    ) => new SidechainTranscript(this.paths.stateRoot, taskId).read(opts),
-    wait: async (
-      taskId: string,
-      opts: { timeoutMs?: number } = {},
-    ): Promise<Dict | null> => {
-      this.loop.subagentSupervisor.assertOwner(
-        taskId,
-        this.loop.activeSessionId,
-      )
-      const terminal = await this.loop.subagentSupervisor.wait(taskId, opts)
-      if (!terminal) return null
-      return {
-        status: terminal.status,
-        task: terminal.record.toDict(),
-        ...(terminal.reason ? { reason: terminal.reason } : {}),
-        ...(terminal.error ? { error: terminal.error } : {}),
-      }
-    },
-    readOutput: async (taskId: string, opts: { cursor?: string } = {}) => {
-      this.loop.subagentSupervisor.assertOwner(
-        taskId,
-        this.loop.activeSessionId,
-      )
-      const output = await this.loop.subagentSupervisor.readOutput(
-        taskId,
-        opts.cursor,
-      )
-      return {
-        content: output.content,
-        nextCursor: output.nextCursor,
-        eof: output.eof,
-        truncated: output.truncated,
-        truncation: output.truncation,
-      }
-    },
-    cancel: async (
-      taskId: string,
-      opts: { reason?: string } = {},
-    ): Promise<Dict> => {
-      this.assertMutation('tasks', 'cancel')
-      this.loop.subagentSupervisor.assertOwner(
-        taskId,
-        this.loop.activeSessionId,
-      )
-      const task = await this.loop.subagentSupervisor.cancel(
-        taskId,
-        opts.reason,
-      )
-      return task.toDict() as unknown as Dict
-    },
-    resume: async (
-      taskId: string,
-      opts: {
-        mode?: 'foreground' | 'background'
-        ttlMs?: number
-      } = {},
-    ): Promise<Dict> => {
-      this.assertMutation('tasks', 'resume')
-      this.loop.subagentSupervisor.assertOwner(
-        taskId,
-        this.loop.activeSessionId,
-      )
-      const launched = await this.loop.subagentSupervisor.resume(taskId, opts)
-      return {
-        task: launched.task.toDict(),
-        mode: launched.mode,
-      }
     },
   }
 
@@ -1630,15 +1386,6 @@ export class CoreApi {
     },
   }
 
-  readonly tools = {
-    readResult: (opts: { ref: string }) => {
-      const content = new ToolResultStore(this.paths.stateRoot).readArtifact(
-        String(opts?.ref ?? ''),
-      )
-      return { content }
-    },
-  }
-
   readonly memory = {
     get: () => this.memoryService.getMemory(),
     save: (content: string) => this.memoryService.saveMemory(content),
@@ -1664,50 +1411,52 @@ export class CoreApi {
   }
 
   readonly projects = {
-    list: () => this.loop.projectStore.list(),
-    resolve: (path: string) => this.loop.projectStore.resolve(path),
+    list: () => this.host.kept.projectStore.list(),
+    resolve: (path: string) => this.host.kept.projectStore.resolve(path),
   }
 
   readonly skills = {
     tools: () => this.skillService.tools(),
-    list: () => this.skillService.list(),
-    get: (name: string) => this.skillService.get(name),
+    /** Effective Skills of a session (default: the active one) plus invalid Skills with reasons. */
+    list: (opts: { sessionId?: string | null } = {}) =>
+      this.skillService.list(opts),
+    get: (name: string, opts: { sessionId?: string | null } = {}) =>
+      this.skillService.get(name, opts),
     create: (input: Parameters<CoreSkillService['create']>[0]) => {
       this.assertMutation('skills', 'create')
       return this.skillService.create(input)
     },
     validate: (input: Parameters<CoreSkillService['validate']>[0]) =>
       this.skillService.validate(input),
-    package: (input: Parameters<CoreSkillService['package']>[0]) => {
-      this.assertMutation('skills', 'package')
-      return this.skillService.package(input)
-    },
-    save: (name: string, content: string) => {
+    save: (
+      name: string,
+      content: string,
+      opts: { sessionId?: string | null } = {},
+    ) => {
       this.assertMutation('skills', 'save')
-      return this.skillService.save(name, content)
+      return this.skillService.save(name, content, opts)
     },
-    delete: (name: string) => {
+    delete: (
+      name: string,
+      opts: {
+        sessionId?: string | null
+        scope?: 'user' | 'project' | null
+      } = {},
+    ) => {
       this.assertMutation('skills', 'delete')
-      return this.skillService.delete(name)
+      return this.skillService.delete(name, opts)
     },
-    previewInstall: (
-      _input: Parameters<CoreSkillService['previewInstall']>[0],
-    ): Promise<never> =>
-      Promise.reject(
-        new OperationRetiredError(
-          'Skill 安装接口已退役。请使用普通文件工具创建裸 Skill，或通过 Plugins 页面安装版本化扩展。',
-          'open_plugins',
-        ),
-      ),
-    confirmInstall: (
-      _input: Parameters<CoreSkillService['confirmInstall']>[0],
-    ): Promise<never> =>
-      Promise.reject(
-        new OperationRetiredError(
-          'Skill 安装接口已退役。请使用普通文件工具创建裸 Skill，或通过 Plugins 页面安装版本化扩展。',
-          'open_plugins',
-        ),
-      ),
+    import: async (input: Parameters<CoreSkillService['import']>[0]) => {
+      this.assertMutation('skills', 'import')
+      return await this.skillService.import(input)
+    },
+    copyToUser: (input: Parameters<CoreSkillService['copyToUser']>[0]) => {
+      this.assertMutation('skills', 'copyToUser')
+      return this.skillService.copyToUser(input)
+    },
+    /** Electron main-only capability: the Skills folder of a scope (created when missing). */
+    folderPath: (input: Parameters<CoreSkillService['folderPath']>[0]) =>
+      this.skillService.folderPath(input),
   }
 
   readonly plugins = {
@@ -1791,43 +1540,529 @@ export class CoreApi {
       this.desktopPetService.setEnabled(enabled),
   }
 
-  private assertClearBoundary(sessionId: string): void {
-    const session = this.requireReadableSession(
+  /** Electron main-only: dev-server previews were owned by the retired project-process manager. */
+  readonly projectProcesses = {
+    authorizePreview: (_input: {
+      sessionId: string
+      previewId: string
+    }): { url: string } => {
+      throw new OperationRetiredError(
+        '项目进程与预览已随新内核退役；请在终端中自行运行开发服务器并用浏览器打开。',
+        'use_terminal',
+      )
+    },
+  }
+
+  /** Task panel: background jobs and subagent sessions of a session tree. */
+  readonly tasks = {
+    list: (opts: { sessionId?: string | null } = {}): CoreTaskRecord[] => {
+      const sessionId =
+        String(opts.sessionId ?? '').trim() || this.host.activeSessionId
+      return sessionId ? this.sessionTasks(sessionId) : []
+    },
+    get: (taskId: string): CoreTaskRecord | null => this.findTask(taskId),
+    transcript: (
+      taskId: string,
+      opts: { offset?: number; limit?: number } = {},
+    ) => {
+      const task = this.requireTask(taskId)
+      const offset = Math.max(0, Math.floor(Number(opts.offset ?? 0)) || 0)
+      const limit = Math.max(
+        1,
+        Math.min(500, Math.floor(Number(opts.limit ?? 200)) || 200),
+      )
+      const entries =
+        task.kind === 'workflow'
+          ? this.workflowTranscript(task.id)
+          : task.kind === 'subagent'
+            ? this.subagentTranscript(task.id)
+            : [
+                {
+                  role: 'output',
+                  content: this.host.jobs.peek(task.id, this.jobOwner(task))
+                    .text,
+                },
+              ]
+      return {
+        taskId: task.id,
+        entries: entries.slice(offset, offset + limit),
+        offset,
+        total: entries.length,
+        eof: offset + limit >= entries.length,
+      }
+    },
+    wait: async (
+      taskId: string,
+      opts: { timeoutMs?: number } = {},
+    ): Promise<Dict | null> => {
+      const task = this.requireTask(taskId)
+      const timeoutMs = Math.max(
+        0,
+        Math.min(600_000, Number(opts.timeoutMs ?? 30_000) || 30_000),
+      )
+      if (task.kind === 'workflow') {
+        const deadline = Date.now() + timeoutMs
+        let current = this.findTask(task.id)
+        while (current?.status === 'running' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          current = this.findTask(task.id)
+        }
+        return current === null || current.status === 'running'
+          ? null
+          : { status: current.status, task: current }
+      }
+      if (task.kind === 'job') {
+        const snapshot = await this.host.jobs
+          .wait(task.id, timeoutMs, this.jobOwner(task))
+          .catch(() => null)
+        return snapshot === null
+          ? null
+          : { status: snapshot.status, task: this.findTask(task.id) }
+      }
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const settled = await this.host.subagents.waitForSettlement(
+          task.id,
+          controller.signal,
+        )
+        return { status: settled.stopReason, task: this.findTask(task.id) }
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+    readOutput: async (taskId: string, _opts: { cursor?: string } = {}) => {
+      const task = this.requireTask(taskId)
+      const content =
+        task.kind === 'job'
+          ? this.host.jobs.peek(task.id, this.jobOwner(task)).text
+          : (task.kind === 'workflow'
+              ? this.workflowTranscript(task.id)
+              : this.subagentTranscript(task.id)
+            )
+              .map((entry) => `${entry.role}: ${entry.content}`)
+              .join('\n\n')
+      return {
+        content,
+        nextCursor: null,
+        eof: true,
+        truncated: false,
+        truncation: null,
+      }
+    },
+    cancel: async (
+      taskId: string,
+      _opts: { reason?: string } = {},
+    ): Promise<Dict> => {
+      this.assertMutation('tasks', 'cancel')
+      this.requireTask(taskId)
+      this.cancelTask(taskId)
+      return { ...this.findTask(taskId) }
+    },
+    resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
+      throw new OperationRetiredError(
+        '子代理任务不再支持从面板恢复；请在对话中让主代理用 send_message 继续该子代理。',
+        'use_send_message',
+      )
+    },
+  }
+
+  readonly tools = {
+    /** Full text of a spilled tool result (`ref` is the spill file path). */
+    readResult: (opts: { ref: string }) => {
+      const spillRoot = resolve(this.paths.stateRoot, 'spill')
+      const target = resolve(String(opts?.ref ?? ''))
+      const rel = relative(spillRoot, target)
+      if (
+        !rel ||
+        rel.startsWith('..') ||
+        isAbsolute(rel) ||
+        !existsSync(target)
+      )
+        throw new CoreMutationGuardError(
+          403,
+          'tool result ref is outside the spill store',
+        )
+      return { content: readFileSync(target, 'utf8') }
+    },
+  }
+
+  // ── helpers ─────────────────────────────────────────────────────────
+
+  private activeProjectRoot(): string | null {
+    const session = this.host.activeSession()
+    return session?.mode === 'build' ? (session.project_path ?? null) : null
+  }
+
+  private controlSessionId(sessionId?: string | null): string | null {
+    const id = String(sessionId ?? '').trim()
+    return id || this.host.activeSessionId
+  }
+
+  private requireControlSession(
+    sessionId: string | null | undefined,
+    operation: string,
+  ): string {
+    const id =
+      this.controlSessionId(sessionId) ?? this.host.ensureDefaultSession().id
+    return this.requireReadableSession(id, operation).id
+  }
+
+  /** Resolve a pending interaction; the blocked turn continues on its own. */
+  private settleInteraction(id: string, action: () => void): Dict {
+    const sessionId = this.host.pending.sessionOf(id) ?? null
+    if (sessionId === null)
+      throw new CoreMutationGuardError(409, `interaction ${id} is not pending`)
+    const wasInterview = this.onboardingService.isInterviewInteraction(id)
+    action()
+    const result: Dict = {
+      interactionId: id,
       sessionId,
-      'commands.clear',
-    ) as {
-      control_pending?: unknown
+      control: this.host.controlPayload(sessionId),
     }
-    if (session.control_pending)
+    if (wasInterview)
+      result.profileOnboarding = this.onboardingService.payload()
+    return result
+  }
+
+  private rootAgentOf(sessionId: string): Agent | null {
+    if (!this.host.kept.sessionStore.get(sessionId)) return null
+    return this.host.agentFor(sessionId)
+  }
+
+  private sessionJobs(sessionId: string): JobSnapshot[] {
+    const root = this.rootAgentOf(sessionId)
+    if (root === null) return []
+    const owners = [
+      root,
+      ...this.host.subagents.list(root, 'descendants').flatMap((record) => {
+        const child = this.host.subagents.get(record.id)
+        return child === undefined ? [] : [child]
+      }),
+    ]
+    // The job registry fences owned jobs by their exact owner agent.
+    return owners.flatMap((owner) =>
+      this.host.jobs.list(owner).filter((job) => job.ownerId === owner.id),
+    )
+  }
+
+  /** The agent that owns a job task (the registry's access fence). */
+  private jobOwner(task: CoreTaskRecord): Agent | undefined {
+    const ownerId = task.owner_id
+    if (ownerId === null) return undefined
+    return (
+      this.host.subagents.get(ownerId) ?? this.rootAgentOf(ownerId) ?? undefined
+    )
+  }
+
+  private sessionTasks(sessionId: string): CoreTaskRecord[] {
+    const root = this.rootAgentOf(sessionId)
+    if (root === null) return []
+    const jobs = this.sessionJobs(sessionId).map((job) =>
+      jobTask(job, sessionId),
+    )
+    const children = this.host.subagents
+      .list(root, 'descendants')
+      .map((record) => subagentTask(record, sessionId))
+    const workflows = this.sessionWorkflowRuns(sessionId).map(
+      ({ record, ownerId }) =>
+        workflowTaskView(record, sessionId, {
+          ownerId,
+          live: this.host.workflowRuns.isLive(record.runId),
+        }) as CoreTaskRecord,
+    )
+    return [...workflows, ...children, ...jobs].sort(
+      (left, right) => right.started_at - left.started_at,
+    )
+  }
+
+  private allSubagents(): SubagentRecord[] {
+    const sessionId = this.host.activeSessionId
+    const root = sessionId === null ? null : this.rootAgentOf(sessionId)
+    return root === null ? [] : this.host.subagents.list(root, 'descendants')
+  }
+
+  private findTask(taskId: string): CoreTaskRecord | null {
+    const id = String(taskId ?? '').trim()
+    if (!id) return null
+    for (const entry of this.host.kept.sessionStore.list({
+      includeArchived: false,
+    })) {
+      const found = this.sessionTasks(entry.id).find((task) => task.id === id)
+      if (found) return found
+    }
+    return null
+  }
+
+  private requireTask(taskId: string): CoreTaskRecord {
+    const task = this.findTask(taskId)
+    if (task === null)
+      throw new CoreMutationGuardError(
+        403,
+        `task not found or not owned by an open session: ${taskId}`,
+      )
+    return task
+  }
+
+  private cancelTask(taskId: string): boolean {
+    const task = this.findTask(taskId)
+    if (task === null) return false
+    if (task.kind === 'workflow')
+      return this.host.workflowRuns.cancel(
+        task.id,
+        'cancelled from the task panel',
+      )
+    if (task.kind === 'job')
+      return (
+        this.host.jobs.kill(task.id, this.jobOwner(task), 'user') ===
+        'requested'
+      )
+    try {
+      this.host.subagents.interrupt(task.id, { kind: 'user' })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Workflow runs recorded on a session tree's logs (root + live descendants). */
+  private sessionWorkflowRuns(
+    sessionId: string,
+  ): Array<{ record: WorkflowRunRecord; ownerId: string; session: Session }> {
+    const root = this.rootAgentOf(sessionId)
+    if (root === null) return []
+    const owners: Agent[] = [
+      root,
+      ...this.host.subagents.list(root, 'descendants').flatMap((record) => {
+        const child = this.host.subagents.get(record.id)
+        return child === undefined ? [] : [child]
+      }),
+    ]
+    return owners.flatMap((owner) =>
+      WorkflowRunFold.fold(owner.session.events).map((record) => ({
+        record,
+        ownerId: owner.id,
+        session: owner.session,
+      })),
+    )
+  }
+
+  /** Chronological transcript of one workflow run: narration, members, outcome. */
+  private workflowTranscript(
+    runId: string,
+  ): Array<{ role: string; content: string }> {
+    for (const entry of this.host.kept.sessionStore.list({
+      includeArchived: false,
+    })) {
+      const found = this.sessionWorkflowRuns(entry.id).find(
+        (run) => run.record.runId === runId,
+      )
+      if (found === undefined) continue
+      const out: Array<{ role: string; content: string }> = []
+      for (const event of found.session.events) {
+        if (!event.type.startsWith('tool-workflow/')) continue
+        const data = event.data as Record<string, unknown>
+        if (data.runId !== runId) continue
+        switch (event.type) {
+          case 'tool-workflow/run-start':
+            out.push({
+              role: 'workflow',
+              content: `${found.record.tool} ${found.record.name}: ${found.record.description}`,
+            })
+            break
+          case 'tool-workflow/phase':
+            out.push({ role: 'phase', content: String(data.title ?? '') })
+            break
+          case 'tool-workflow/log':
+            out.push({ role: 'log', content: String(data.message ?? '') })
+            break
+          case 'tool-workflow/agent-start':
+            out.push({
+              role: 'agent',
+              content: `#${String(data.seq)} ${String(data.label ?? '')} started (${String(data.childId ?? '')})`,
+            })
+            break
+          case 'tool-workflow/agent-end':
+            out.push({
+              role: 'agent',
+              content: `#${String(data.seq)} ${String(data.outcome ?? '')}`,
+            })
+            break
+          case 'tool-workflow/run-end':
+            out.push({
+              role: data.stopReason === 'completed' ? 'result' : 'error',
+              content: String(
+                data.result ?? data.error ?? `run ${String(data.stopReason)}`,
+              ),
+            })
+            break
+        }
+      }
+      return out
+    }
+    return []
+  }
+
+  private subagentTranscript(
+    childId: string,
+  ): Array<{ role: string; content: string }> {
+    const session =
+      this.host.subagents.get(childId)?.session ?? this.host.sessionLog(childId)
+    if (session === undefined) return []
+    return session.deriveMessages().map((message) => ({
+      role:
+        message.role === 'user' && message.source.kind === 'tool'
+          ? 'tool'
+          : message.role,
+      content: messageText(message),
+    }))
+  }
+
+  private activeTaskInfos(): Dict[] {
+    return this.host.busySessions().map((sessionId) => ({
+      id: `turn:${sessionId}`,
+      kind: 'turn',
+      session_id: sessionId,
+      status: 'running',
+    }))
+  }
+
+  /** Required host services and whether each finished starting. */
+  private lifecyclePayload(): {
+    state: 'ready' | 'degraded'
+    services: Array<{
+      id: string
+      required: true
+      state: 'ready' | 'unavailable'
+      detail?: string
+    }>
+  } {
+    const kept = this.host.kept
+    const check = (
+      id: string,
+      ready: () => boolean,
+      detail?: () => string,
+    ): {
+      id: string
+      required: true
+      state: 'ready' | 'unavailable'
+      detail?: string
+    } => {
+      try {
+        if (ready()) return { id, required: true, state: 'ready' }
+        return {
+          id,
+          required: true,
+          state: 'unavailable',
+          ...(detail === undefined ? {} : { detail: detail() }),
+        }
+      } catch (error) {
+        return {
+          id,
+          required: true,
+          state: 'unavailable',
+          detail: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+    const services = [
+      check('process-runtime', () =>
+        Boolean(kept.processRuntime.capabilityReport()),
+      ),
+      check('harness-kernel', () => this.host.tools.schemas().length > 0),
+      check(
+        'mcp',
+        () => kept.mcpClient.snapshot().initialized === true,
+        () => 'MCP client did not initialize',
+      ),
+      check(
+        'scheduler',
+        () => kept.schedulerService.status().running,
+        () =>
+          kept.schedulerService.status().lastError ?? 'scheduler not running',
+      ),
+    ]
+    return {
+      state: services.every((service) => service.state === 'ready')
+        ? 'ready'
+        : 'degraded',
+      services,
+    }
+  }
+
+  private runtimeStats(sessionId: string | null): Dict {
+    const session =
+      sessionId === null ? undefined : this.host.sessionLog(sessionId)
+    return {
+      events: session?.events.length ?? 0,
+      latestSeq: session === undefined ? 0 : session.seq - 1,
+      busy: this.host.isBusy(sessionId),
+    }
+  }
+
+  private async resolveGitRuntime(projectRoot: string): Promise<{
+    executable: string
+    gitVersion: string
+    env: Record<string, string>
+  } | null> {
+    const kept = this.host.kept
+    const environment = await kept.executionEnvironmentService.create({
+      projectRoot,
+    })
+    const executable = environment.toolPaths.git
+    if (!executable) return null
+    const status = await kept.environmentProbe.getStatus({
+      projectRoot,
+      skillRequirements: collectSkillEnvironmentRequirements(kept.skillManager),
+    })
+    const git = status.tools.find(
+      (tool) => tool.id === 'git' && tool.status === 'ready',
+    )
+    if (!git?.detectedVersion || git.executablePath !== executable) return null
+    return {
+      executable,
+      gitVersion: git.detectedVersion,
+      env: {
+        ...environment.selectEnv([
+          'PATH',
+          'HOME',
+          'USERPROFILE',
+          'SystemRoot',
+          'TEMP',
+          'TMP',
+          'TMPDIR',
+          'LANG',
+          'LC_ALL',
+        ]),
+      },
+    }
+  }
+
+  private assertClearBoundary(sessionId: string): void {
+    this.requireReadableSession(sessionId, 'commands.clear')
+    if (this.host.pending.hasPending(sessionId))
       throw new CoreMutationGuardError(
         409,
         '请先处理当前 Ask、Permission 或 Plan 审批，再创建新上下文。',
       )
-    if (this.chatService.listQueuedPrompts({ sessionId }).length)
+    if (this.host.queuedPrompts(sessionId).length)
       throw new CoreMutationGuardError(
         409,
         '请先处理当前会话中的排队消息，再创建新上下文。',
       )
   }
 
-  private async goalSummary(goal: GoalRecord) {
-    const evidence = await this.loop.goalEvidenceLedger.listEvidence(goal.id)
-    return goalSummary(
-      goal,
-      Object.fromEntries(
-        evidence.map((item) => [
-          item.id,
-          { verdict: item.verdict, summary: item.summary },
-        ]),
-      ),
-    )
-  }
-
   private assertMutation(area: string, action: string): void {
-    assertCoreMutationAllowed(this.loop.controlManager.payload(), {
-      area,
-      action,
-    })
+    const control = this.host.controlPayload(this.host.activeSessionId)
+    assertCoreMutationAllowed(
+      {
+        pending: control.pending,
+        mode: control.plan === true ? 'plan' : control.preset,
+      },
+      { area, action },
+    )
   }
 
   private async withWorkspaceGitMutation<T>(
@@ -1843,7 +2078,7 @@ export class CoreApi {
         'workspace_project_required',
         '当前会话没有绑定 Build 项目。',
       )
-    return await this.loop.workspaceMutations.runExclusive(
+    return await this.workspaceMutations.runExclusive(
       this.workspaceBindings.resolve(sessionId, resolve(session.project_path)),
       'renderer_git',
       action,
@@ -1851,138 +2086,12 @@ export class CoreApi {
   }
 
   private assertProcessOwner(processId: string): void {
-    const receipt = this.loop.processRuntime.get(processId)
-    if (!receipt || receipt.owner.sessionId !== this.loop.activeSessionId)
+    const receipt = this.host.kept.processRuntime.get(processId)
+    if (!receipt || receipt.owner.sessionId !== this.host.activeSessionId)
       throw new CoreMutationGuardError(
         403,
         `Process is not owned by the active session: ${processId}`,
       )
-  }
-
-  private async resumeControl(
-    resume: ControlResume,
-    opts: ControlResumeOptions,
-    ownerSessionId: string | null,
-  ): Promise<Dict> {
-    const controlManager = ownerSessionId
-      ? this.loop.controlManagerForSessionId(ownerSessionId)
-      : this.loop.controlManager
-    const event: Dict | null = isRecord(resume.event)
-      ? { ...resume.event, control: controlManager.payload() }
-      : null
-    if (event)
-      await this.emitRuntime(event, {
-        emit: opts.emit ?? null,
-        sessionId: ownerSessionId,
-      })
-    if (
-      resume.executionDisposition === 'cancel' &&
-      ownerSessionId &&
-      resume.executionId
-    ) {
-      const interactionMeta = isRecord(resume.interaction.meta)
-        ? resume.interaction.meta
-        : {}
-      const activeTurnId =
-        String(
-          opts.turnId ?? interactionMeta.control_turn_id ?? resume.executionId,
-        ).trim() || resume.executionId
-      const changes = await this.loop.finalizeExecutionChanges({
-        sessionId: ownerSessionId,
-        executionId: resume.executionId,
-        activeTurnId,
-      })
-      if (changes && (changes.filesChanged > 0 || changes.status === 'partial'))
-        await this.emitRuntime(changes as unknown as Dict, {
-          emit: opts.emit ?? null,
-          sessionId: ownerSessionId,
-        })
-    }
-    if (event?.event === 'plan_approved' && isRecord(event.plan)) {
-      const planId = String(event.plan.id ?? '').trim()
-      const steps = Array.isArray(event.plan.steps) ? event.plan.steps : []
-      for (const step of steps) {
-        if (!isRecord(step) || String(step.status ?? '') !== 'active') continue
-        await this.emitRuntime(
-          { event: 'plan_step_update', plan_id: planId, step: { ...step } },
-          { emit: opts.emit ?? null, sessionId: ownerSessionId },
-        )
-      }
-    }
-    let result: Dict | null = null
-    if (resume.resume === true) {
-      const interactionId = String(resume.interaction.id ?? '')
-      const explicitGoalId = controlManager.goalIdForInteraction(interactionId)
-      const sessionGoal = ownerSessionId
-        ? await this.loop.goalStore.findActiveBySession(ownerSessionId)
-        : null
-      const goal = explicitGoalId
-        ? await this.loop.goalStore.get(explicitGoalId)
-        : sessionGoal
-      if (
-        goal?.runtime.phase === 'awaiting_user' &&
-        goal.runtime.pendingInteractionId === interactionId
-      ) {
-        await this.loop.goalCoordinator.resumeAfterControl(
-          goal.id,
-          interactionId,
-        )
-        return {
-          ...(resume as unknown as Dict),
-          event: event ?? resume.event,
-          result: null,
-        }
-      }
-      const uiHidden = opts.uiHidden ?? false
-      try {
-        result = (await this.mainline.submit({
-          content: String(resume.message ?? ''),
-          displayContent: uiHidden
-            ? ''
-            : (opts.displayContent ?? String(resume.message ?? '')),
-          clientMessageId: opts.clientMessageId ?? null,
-          turnId: opts.turnId ?? null,
-          executionId: resume.executionId ?? null,
-          source: 'control',
-          sessionId: ownerSessionId,
-          uiHidden,
-          memoryExtra: resume.executionId
-            ? {
-                execution_id: resume.executionId,
-                execution_root_turn_id: resume.executionId,
-              }
-            : null,
-          emit: opts.emit ?? null,
-        })) as unknown as Dict
-      } finally {
-        await this.loop.settleProfileInterviewResume(resume.interaction.id)
-      }
-    }
-    return {
-      ...(resume as unknown as Dict),
-      event: event ?? resume.event,
-      result,
-    }
-  }
-
-  private async emitRuntime(
-    event: Dict,
-    opts: { emit?: StreamEmitter | null; sessionId?: string | null } = {},
-  ): Promise<Dict> {
-    const targetSessionId = String(opts.sessionId ?? '').trim()
-    const ownerSessionId = targetSessionId || this.loop.activeSessionId
-    if (!ownerSessionId)
-      throw new Error('runtime event session id is unavailable')
-    const store = this.loop.runtimeStoreForSession(ownerSessionId)
-    const payload = store.append(event, { sessionId: ownerSessionId })
-    const sink = opts.emit ?? this.loop.eventSink
-    if (sink) await sink(payload)
-    return payload
-  }
-
-  private activateBootstrapSession(sessionId: string): void {
-    const session = this.requireReadableSession(sessionId, 'bootstrap')
-    this.loop.activateSession(session.id)
   }
 
   private requireReadableSessionId(
@@ -1995,39 +2104,87 @@ export class CoreApi {
     ).id
   }
 
+  /**
+   * A readable raw-log session: a sidebar session, or a delegated child
+   * session (not in the SessionStore) whose lineage root is one.
+   */
+  private requireReadableLogSession(
+    sessionId: string | null | undefined,
+    operation: string,
+  ): string {
+    const id = String(sessionId ?? '').trim()
+    if (id && !id.startsWith(DRAFT_SESSION_PREFIX)) {
+      const indexed = this.host.kept.sessionStore.get(id)
+      if (indexed === null && this.host.sessions.has(id)) {
+        const root = this.host.lineage(id)?.chain[0]?.sessionId
+        if (root !== undefined && root !== id) {
+          this.requireReadableSession(root, operation)
+          return id
+        }
+      }
+    }
+    return this.requireReadableSession(id, operation).id
+  }
+
   private requireReadableSession(
     sessionId: string,
     operation: string,
   ): { id: string; archived_at?: string | null } {
-    if (!sessionId) {
+    if (!sessionId)
       throw new InvalidSessionError(
         `${operation} requires a real sessionId`,
         null,
       )
-    }
-    if (sessionId.startsWith(DRAFT_SESSION_PREFIX)) {
+    if (sessionId.startsWith(DRAFT_SESSION_PREFIX))
       throw new InvalidSessionError(
         `${operation} cannot read draft session ${sessionId}`,
         sessionId,
       )
-    }
-    const session = this.loop.sessionStore.get(sessionId)
-    if (!session || session.archived_at) {
+    const session = this.host.kept.sessionStore.get(sessionId)
+    if (!session || session.archived_at)
       throw new InvalidSessionError(
         `${operation} received unknown session ${sessionId}`,
         sessionId,
       )
-    }
     return session
   }
 }
 
-interface ControlResumeOptions {
-  clientMessageId?: string | null
-  turnId?: string | null
-  displayContent?: string | null
-  uiHidden?: boolean | null
-  emit?: StreamEmitter | null
+function jobTask(job: JobSnapshot, sessionId: string): CoreTaskRecord {
+  return {
+    id: job.id,
+    kind: 'job',
+    job_kind: String(job.kind),
+    label: job.label,
+    description: job.label,
+    status: job.status,
+    session_id: sessionId,
+    owner_id: job.ownerId ?? null,
+    started_at: job.startedAt,
+    finished_at: job.finishedAt ?? null,
+    exit_code: job.exitCode ?? null,
+    detail: job.detail ?? null,
+  }
+}
+
+function subagentTask(
+  record: SubagentRecord,
+  sessionId: string,
+): CoreTaskRecord {
+  return {
+    id: record.id,
+    kind: 'subagent',
+    label: record.description,
+    description: record.description,
+    status: record.status,
+    session_id: sessionId,
+    owner_id: record.parentId,
+    started_at: record.createdAt,
+    finished_at: null,
+    depth: record.depth,
+    mode: record.mode,
+    last_stop_reason: record.lastStopReason ?? null,
+  }
 }
 
 function readJson(path: string, fallback: Dict): Dict {
@@ -2166,19 +2323,6 @@ function normalizedPositiveNumber(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
-function normalizedBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === '1' || value === 1
-}
-
-function interactionAnswerChoice(
-  interaction: unknown,
-  questionId: string,
-): string {
-  if (!isRecord(interaction) || !isRecord(interaction.answers)) return ''
-  const answer = interaction.answers[questionId]
-  return isRecord(answer) ? String(answer.choice ?? '') : ''
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
@@ -2236,15 +2380,11 @@ function schedulerPayloadFromApi(
   const kind = String(merged.kind ?? 'agent_turn')
   if (kind === 'system_event')
     throw new Error('system_event jobs are internal and cannot be configured')
-  if (kind !== 'agent_turn' && kind !== 'team_wake')
-    throw new Error('scheduler payload kind must be agent_turn or team_wake')
+  if (kind !== 'agent_turn')
+    throw new Error('scheduler payload kind must be agent_turn')
   const payload = SchedulerPayload.fromDict({ ...merged, kind })
   if (!payload.message.trim())
     throw new Error('message is required for scheduler jobs')
-  if (kind === 'team_wake' && !payload.target)
-    throw new Error('target is required for team_wake scheduler jobs')
-  if (kind === 'team_wake' && !payload.project_id)
-    throw new Error('projectId is required for team_wake scheduler jobs')
   return payload
 }
 
@@ -2259,5 +2399,3 @@ function schedulerMisfirePolicyFromApi(value: unknown): SchedulerMisfirePolicy {
     'scheduler misfirePolicy must be skip, latest, or catch-up-one',
   )
 }
-
-export type { LoopModelRouter }

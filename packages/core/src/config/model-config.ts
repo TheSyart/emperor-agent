@@ -3,7 +3,7 @@ import { open, readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { ValidationError } from '../errors'
-import { PROVIDERS, findByName, normalizeApiBase } from '../providers/registry'
+import { PROVIDERS, findByName, normalizeApiBase } from '../llm/catalog'
 import { logger } from '../util/log'
 import {
   AtomicSnapshot,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { ControlInteraction, RuntimePlanRecord } from '../../types'
+import type { ControlInteraction } from '../../types'
 import {
   planDecisionVisible,
   planDisplayMarkdown,
@@ -23,30 +23,16 @@ function interaction(
   }
 }
 
-function plan(extra: Partial<RuntimePlanRecord> = {}): RuntimePlanRecord {
-  return {
-    id: 'plan-record-1',
-    title: 'AI 新闻日报 PPT 制作计划',
-    status: 'executing',
-    summary: '正在执行',
-    steps: [
-      { id: 's1', title: '收集上下文', status: 'done' },
-      { id: 's2', title: '生成 PPT', status: 'active' },
-      { id: 's3', title: '验证', status: 'pending' },
-    ],
-    plan_markdown: '# Runtime Plan\n\n## Summary\n- runtime markdown',
-    ...extra,
-  }
-}
-
 describe('plan display helpers', () => {
-  it('keeps runtime progress out of the proposal card', () => {
+  it('keeps runtime progress and decisions out of the timeline plan view', () => {
     const source = readFileSync(
-      fileURLToPath(new URL('./PlanCard.vue', import.meta.url)),
+      fileURLToPath(
+        new URL('../conversation/tools/ExitPlanView.vue', import.meta.url),
+      ),
       'utf8',
     )
 
-    expect(source).not.toContain('<ActivePlanDecisionPanel')
+    expect(source).not.toContain('<PlanReviewPanel')
     expect(source).not.toContain('plan-progress-strip')
     expect(source).not.toContain('plan-step-list')
     expect(source).not.toContain('Active Step')
@@ -55,10 +41,7 @@ describe('plan display helpers', () => {
 
   it('presents provisional streamed plans as generating rather than awaiting approval', () => {
     expect(
-      planStatusPresentation(
-        interaction({ meta: { provisional: true } }),
-        null,
-      ),
+      planStatusPresentation(interaction({ meta: { provisional: true } })),
     ).toEqual({
       label: '生成中',
       tone: 'running',
@@ -67,7 +50,7 @@ describe('plan display helpers', () => {
   })
 
   it('keeps the proposal markdown static after runtime execution starts', () => {
-    expect(planDisplayMarkdown(interaction(), plan())).toContain(
+    expect(planDisplayMarkdown(interaction())).toContain(
       '# AI 新闻日报 PPT 制作计划',
     )
   })
@@ -81,7 +64,7 @@ describe('plan display helpers', () => {
   })
 
   it('keeps proposal status independent from runtime execution status', () => {
-    expect(planStatusPresentation(interaction(), plan())).toEqual({
+    expect(planStatusPresentation(interaction())).toEqual({
       label: '等待批准',
       tone: 'waiting',
       risk: '中风险',

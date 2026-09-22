@@ -1,14 +1,23 @@
 import type {
-  ControlMode as CoreControlMode,
   CompactionDecision as CoreCompactionDecision,
+  CoreHookAuditRecordPayload,
+  CoreHookMatchItemPayload,
+  CoreHooksAuditPayload,
+  CoreHooksConfigPayload,
+  CoreHooksMatchPayload,
+  CoreHooksMetadataPayload,
+  CoreHooksTestRunPayload,
+  CoreHooksValidationPayload,
+  CoreTaskRecord,
   DiscardedItem as CoreDiscardedItem,
-  InteractionKind as CoreInteractionKind,
-  InteractionStatus as CoreInteractionStatus,
-  HooksConfigV2 as CoreHooksConfigV2,
+  GoalOperationResult as CoreGoalOperationResult,
   MemoryScope as CoreMemoryScope,
   CoreOperationResult,
 } from '@emperor/core/api'
-import type { RuntimeEvent as CoreRuntimeEvent } from '@emperor/core/runtime-contract'
+import type {
+  RuntimeEvent as CoreRuntimeEvent,
+  RuntimeGoalView as CoreRuntimeGoalView,
+} from '@emperor/core/runtime-contract'
 
 export interface ToolInfo {
   name: string
@@ -96,135 +105,43 @@ export interface McpStatusPayload {
   }>
 }
 
-export interface HookSourcePayload {
-  id?: string
-  kind?: 'global' | 'project' | 'project-local' | 'session' | 'test' | string
-  rank?: number
-  path?: string
-  readonly?: boolean
-  revision?: string
-  active?: boolean
-  blockedReason?: string | null
-}
-
-export interface HookDiagnosticPayload {
-  code?: string
-  path?: string
-  message?: string
-}
-
-export interface HookHandlerPayload {
-  id?: string
-  type?: 'command' | 'http' | 'prompt' | 'agent' | string
-  enabled?: boolean
-  command?: string
-  args?: string[]
-  url?: string
-  prompt?: string
-  modelRole?: 'secondary' | 'main' | string
-  maxTurns?: number
-  timeoutMs?: number
-  statusMessage?: string
-  once?: boolean
-  shell?: 'none' | 'bash' | 'powershell' | string
-  headers?: Record<string, string>
-  async?: boolean
-  asyncRewake?: boolean
-  allowedEnv?: string[]
-}
-
-export interface HookGroupPayload {
-  id?: string
-  enabled?: boolean
-  matcher?: string
-  if?: string
-  failureMode?: 'open' | 'closed' | string
-  handlers?: HookHandlerPayload[]
-}
-
-export type HooksConfigPayload = CoreHooksConfigV2
-
-export interface EffectiveHookGroupPayload {
-  eventName?: string
-  group?: HookGroupPayload
-  source?: HookSourcePayload
-}
-
-export interface HookProjectTrustPayload {
-  canonicalRoot?: string
-  digest?: string
-  status?: 'trusted' | 'untrusted' | 'stale' | string
-}
-
-export interface HooksPayload {
-  revision?: string
-  config?: HooksConfigPayload
-  globalConfig?: HooksConfigPayload
-  effectiveGroups?: EffectiveHookGroupPayload[]
-  diagnostics?: HookDiagnosticPayload[]
-  sources?: HookSourcePayload[]
-  projectTrust?: HookProjectTrustPayload | null
-  summary?: {
-    total?: number
-    groups?: number
-    events?: Array<{ eventName?: string; groups?: number; count?: number }>
-  }
-}
-
-export interface HookEventMetadataPayload {
-  eventName: string
-  matcherField: string | null
-  mode: 'observe' | 'block' | 'transform' | 'continue' | string
-  allowedHandlers: string[]
-}
-
-export interface HooksMetadataPayload {
-  version?: number
-  events?: HookEventMetadataPayload[]
-  handlers?: Record<string, Record<string, unknown>>
-  limits?: Record<string, unknown>
-}
-
-export interface HookAuditRecordPayload {
-  hookRunId?: string
-  eventName?: string
-  groupId?: string
-  handlerId?: string
-  handlerType?: string
-  source?: HookSourcePayload
-  snapshotRevision?: string
-  startedAt?: string
-  durationMs?: number
-  status?: string
-  outcome?: string
-  reason?: string
-  inputHash?: string
-  outputHash?: string | null
-}
-
-export interface HookAuditPayload {
-  records?: HookAuditRecordPayload[]
-  badLines?: Array<{ line?: number; raw?: string }>
-  cursor?: string
-  nextCursor?: string | null
-  total?: number
-}
+// Hooks: Claude Code `hooks.json` payloads owned by Core `hooks.*`.
+export type HooksConfigPayload = CoreHooksConfigPayload
+export type HooksValidationPayload = CoreHooksValidationPayload
+export type HooksMetadataPayload = CoreHooksMetadataPayload
+export type HooksMatchPayload = CoreHooksMatchPayload
+export type HookMatchItemPayload = CoreHookMatchItemPayload
+export type HooksTestRunPayload = CoreHooksTestRunPayload
+export type HooksAuditPayload = CoreHooksAuditPayload
+export type HookAuditRecordPayload = CoreHookAuditRecordPayload
 
 export interface SkillInfo {
   name: string
   description?: string
   path: string
+  /** Absolute Skill folder (the source folder of a single-file Skill). */
+  root?: string
+  /** Absolute SKILL.md (or `<name>.md`) path. */
+  skillFile?: string
   tags?: string
   always?: boolean
   source?: 'builtin' | 'plugin' | 'verified_plugin' | 'user' | 'project'
   status?: 'active' | 'blocked' | 'blocked_pending_review' | 'invalid'
+  /** Builtin and Plugin Skills are read-only (`skills.copyToUser`). */
   readOnly?: boolean
+  /** A single `<name>.md` file instead of a Skill folder. */
+  flat?: boolean
+  warnings?: string[]
   requirements?: {
     bins: string[]
     runtimes: string[]
     env: string[]
   }
 }
+
+/** A Skill folder or file the loader rejected, with the reason (`skills.list().invalid`). */
+export type InvalidSkillInfo =
+  CoreOperationResult<'skills.list'>['invalid'][number]
 
 export type PluginSummary = CoreOperationResult<'plugins.list'>[number]
 
@@ -385,7 +302,7 @@ export interface RuntimeStats {
   activeTurns?: number
   archiveFiles?: number
   archiveBytes?: number
-  archives?: Array<{ path: string; bytes: number; updatedAt?: number }>
+  archives?: unknown[]
   lastArchiveAt?: number | string | null
   needsRotation?: boolean
 }
@@ -433,7 +350,6 @@ export interface TokensPayload {
 }
 
 export type TokensRange = 'all' | '30d' | '7d'
-export type TokensTab = 'overview' | 'models' | 'cache'
 
 export interface TokenUsageRecord {
   ts: string
@@ -1004,7 +920,8 @@ export interface DiagnosticsPayload {
   sandbox?: SandboxCapabilityDiagnosticsPayload
   processRuntime?: ProcessRuntimeDiagnosticsPayload
   lifecycle?: LifecycleDiagnosticsPayload
-  subagents?: SubagentSupervisorDiagnosticsPayload
+  /** Kernel subagent records (current Core) or the retired supervisor summary. */
+  subagents?: SubagentSupervisorDiagnosticsPayload | unknown[]
   agentDefinitions?: AgentDefinitionDiagnosticsPayload
   effectiveConfig?: EffectiveConfigSnapshotPayload
   commandCatalog?: {
@@ -1050,14 +967,16 @@ export interface BootstrapPayload {
   providerLabel?: string
   tools: ToolInfo[]
   skills: SkillInfo[]
+  /** Skills that failed validation, with reasons (not in `skills`). */
+  invalidSkills?: InvalidSkillInfo[]
   plugins?: PluginSummary[]
   memory: MemoryPayload
   modelConfig: ModelConfigPayload
   profileOnboarding: ProfileOnboardingPayload
-  team?: TeamPayload
   scheduler?: SchedulerPayload
   control?: ControlPayload
   goals?: BootstrapGoalsPayload
+  hooks?: HooksConfigPayload
   desktopPet?: DesktopPetPayload
   runtime?: RuntimeReplayPayload
   mcp?: McpStatusPayload
@@ -1082,15 +1001,15 @@ export interface CompactResultCompaction {
   compactionId?: string
   mode?: SessionMode | string
   projectId?: string | null
-  range?: { fromSeq?: number; toSeq?: number }
+  range?: { fromSeq?: number | null; toSeq?: number | null }
   cursor?: SemanticCompactionPayload['cursor']
   applied?: Array<{
     scope?: CoreMemoryScope
     path?: string
     operationCount?: number
   }>
-  discarded?: CoreDiscardedItem[]
-  decisions?: CoreCompactionDecision[]
+  discarded?: Array<CoreDiscardedItem | Record<string, unknown>>
+  decisions?: Array<CoreCompactionDecision | Record<string, unknown>>
 }
 
 export interface RuntimeHistoryItem {
@@ -1100,7 +1019,7 @@ export interface RuntimeHistoryItem {
   turn_id?: string
   source?: string
   ui_hidden?: boolean
-  scheduler?: SchedulerMessageMeta
+  scheduler?: Record<string, unknown>
 }
 
 export interface RuntimeEventEnvelope {
@@ -1114,32 +1033,6 @@ export interface RuntimeEventEnvelope {
   [key: string]: unknown
 }
 
-export interface TurnChangedFile {
-  path: string
-  kind: 'created' | 'modified' | 'deleted' | 'renamed'
-  additions: number | null
-  deletions: number | null
-  binary: boolean
-}
-
-export interface TurnChangeSnapshot {
-  version: 1 | 2
-  sessionId: string
-  turnId: string
-  executionId?: string
-  rootTurnId?: string
-  activeTurnId?: string
-  status: 'tracking' | 'complete' | 'partial'
-  filesChanged: number
-  additions: number
-  deletions: number
-  binaryFiles: number
-  truncated: boolean
-  files: TurnChangedFile[]
-  seq: number
-  updatedAt: number
-}
-
 export interface RuntimeReplayPayload {
   sessionId?: string
   afterSeq?: number
@@ -1148,7 +1041,7 @@ export interface RuntimeReplayPayload {
   busy?: boolean
   scope?: 'unarchived' | string
   events: RuntimeEventEnvelope[]
-  active_tasks?: ActiveRuntimeTask[]
+  active_tasks?: Array<ActiveRuntimeTask | Record<string, unknown>>
 }
 
 export interface ActiveRuntimeTask {
@@ -1161,42 +1054,8 @@ export interface ActiveRuntimeTask {
   cancelled?: boolean
 }
 
-export interface RuntimeTaskRecord {
-  id: string
-  kind: string
-  status: string
-  title: string
-  source: string
-  startedAt?: number
-  endedAt?: number | null
-  turnId?: string | null
-  toolCallId?: string | null
-  jobId?: string | null
-  outputPath?: string | null
-  transcriptPath?: string | null
-  progress?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-}
-
-export type ToolStatus =
-  'queued' | 'running' | 'done' | 'error' | 'error_aborted'
-
-export interface ToolArtifactRef {
-  path: string
-  kind?: string
-  bytes?: number
-  media?: MediaArtifactRef
-  metadata?: Record<string, unknown>
-}
-
-export interface MediaArtifactRef {
-  id: string
-  kind: 'image' | 'audio' | string
-  mime: string
-  name: string
-  relPath: string
-  originalPath: string
-}
+/** Task-panel row (background job, subagent, or workflow run), mirrors Core `CoreTaskRecord`. */
+export type RuntimeTaskRecord = CoreTaskRecord
 
 export interface TodoItem {
   id: string | number
@@ -1204,51 +1063,6 @@ export interface TodoItem {
   content: string
   status: 'pending' | 'in_progress' | 'completed' | string
   blocked_reason?: string | null
-}
-
-export interface TextSegment {
-  id: string
-  type: 'text'
-  content: string
-}
-
-export interface ThoughtSegment {
-  id: string
-  type: 'thought'
-  status: 'running' | 'done' | 'error' | 'error_aborted'
-  label?: string
-  stage?: string
-  source?: 'audit' | string
-  summary?: string
-  toolIds?: string[]
-  toolNames?: string[]
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
-}
-
-export interface ToolSegment {
-  id: string
-  type: 'tool'
-  toolId?: string
-  batchId?: string
-  name: string
-  displayName?: string
-  inputLabel?: string
-  outputLabel?: string
-  arguments?: Record<string, unknown>
-  status: ToolStatus
-  summary?: string
-  output?: string
-  outputMissing?: boolean
-  outputTruncated?: boolean
-  artifacts?: ToolArtifactRef[]
-  metadata?: Record<string, unknown>
-  todos?: TodoItem[]
-  subagents?: SubagentState[]
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
 }
 
 export interface ControlQuestionOption {
@@ -1262,12 +1076,16 @@ export interface ControlQuestion {
   header: string
   question: string
   options: ControlQuestionOption[]
+  /** `ask_user_question` questions that accept several options. */
+  multi_select?: boolean
 }
 
-// 控制枚举以 core control/models 为单一来源；`| string` 容忍未来后端新增值
-export type ControlMode = `${CoreControlMode}` | string
-export type InteractionKind = `${CoreInteractionKind}` | string
-export type InteractionStatus = `${CoreInteractionStatus}` | string
+/** Core permission presets (sandbox + approval bundles). */
+export type PermissionPreset =
+  'read-only' | 'workspace-write' | 'danger-full-access'
+export type InteractionKind = 'ask' | 'plan' | string
+export type InteractionStatus =
+  'waiting' | 'answered' | 'approved' | 'commented' | 'cancelled' | string
 
 export interface ControlInteraction {
   id: string
@@ -1288,239 +1106,38 @@ export interface ControlInteraction {
   meta?: Record<string, unknown>
 }
 
+export interface PermissionPresetOption {
+  value: PermissionPreset | string
+  name: string
+  description: string
+}
+
+/** Core `control.get()` payload (version 3). */
 export interface ControlPayload {
   version?: number
-  mode: ControlMode
-  previous_mode?: 'ask_before_edit' | 'smart_auto' | 'full_access' | null
+  /** Same as `preset`; kept for older consumers. */
+  mode?: PermissionPreset | string
+  preset: PermissionPreset | string
+  /** Plan mode is a separate toggle (`control.setMode('plan' | 'default')`). */
+  plan: boolean
+  approval?: string
+  sandbox?: string
+  presets?: PermissionPresetOption[]
   pending?: ControlInteraction | null
-  last_interaction?: ControlInteraction | null
-  updated_at?: number
 }
 
-export interface RuntimePlanStep {
-  id: string
-  title: string
-  status: string
-  description?: string
-  files?: string[]
-  commands?: string[]
-  acceptance?: string[]
-  discovery_refs?: string[]
-  discoveryRefs?: string[]
-  verification?: Array<Record<string, unknown>>
-  evidence?: Array<Record<string, unknown>>
-  risk?: string
-  risk_note?: string
-  rollback?: string
-  blocked_reason?: string
-}
-
-export interface RuntimePlanDraft {
-  phase?: string
-  discoveries?: Array<Record<string, unknown>>
-  relevant_files?: string[]
-  open_questions?: Array<Record<string, unknown>>
-  resolved_questions?: Array<Record<string, unknown>>
-  alternatives_considered?: string[]
-  recommended_approach?: string
-  verification_strategy?: string[]
-  last_context_refresh_at?: number | null
-}
-
-export interface RuntimePlanRecord {
-  id: string
-  title: string
-  summary?: string
-  status: string
-  updated_at?: number
-  steps: RuntimePlanStep[]
-  plan_markdown?: string
-  planMarkdown?: string
-  assumptions?: string[]
-  verification?: Array<Record<string, unknown>>
-  draft?: RuntimePlanDraft
-  metadata?: Record<string, unknown>
-}
-
-export interface RuntimePlanEntryDecision {
-  decision: 'required' | 'recommended' | 'proceed' | string
-  reason: string
-  triggers: string[]
-  suggested_questions?: string[]
-  suggestedQuestions?: string[]
-  recommended_readonly_scopes?: string[]
-  recommendedReadonlyScopes?: string[]
-}
-
-export type RuntimeGoalStatus =
-  | 'draft'
-  | 'active'
-  | 'completed'
-  | 'blocked'
-  | 'cancelled'
-  | 'stopped_by_policy'
-
-export type RuntimeGoalPhase =
-  | 'contract'
-  | 'planning'
-  | 'executing'
-  | 'verifying'
-  | 'awaiting_user'
-  | 'paused'
-  | 'terminal'
-
-export interface RuntimeGoalSummary {
-  id: string
-  status: RuntimeGoalStatus
-  phase: RuntimeGoalPhase
-  outcome: string
-  sessionId: string
-  currentPlanId: string | null
-  cyclesUsed: number
-  acceptance: {
-    passed: number
-    failed: number
-    missing: number
-    total: number
-    criteria?: ReadonlyArray<{
-      id: string
-      description: string
-      required: boolean
-      verificationKind: 'command' | 'artifact' | 'manual' | 'reviewer'
-      verdict: 'pass' | 'fail' | 'missing'
-      evidenceSummary: string | null
-    }>
-  }
-  createdAt: string
-  updatedAt: string
-  lastEventSeq: number
-}
+/** Current goal (`GoalView` projection; `activation` only on live host views). */
+export type RuntimeGoalView = CoreRuntimeGoalView
 
 export interface BootstrapGoalsPayload {
-  active: RuntimeGoalSummary | null
-  recent: RuntimeGoalSummary[]
+  active: RuntimeGoalView | Record<string, unknown> | null
 }
 
-export interface GoalOperationResult {
-  accepted: boolean
-  goal: RuntimeGoalSummary
-  activeTask: ActiveRuntimeTask | null
-}
-
-export interface GoalGateProjection {
-  goalId: string
-  sessionId: string
-  lastEventSeq: number
-  passed: boolean
-  reasonCodes: string[]
-  reasonCount: number
-  evaluatedAt: string
-}
-
-export interface GoalEvidenceProjection {
-  goalId: string
-  sessionId: string
-  lastEventSeq: number
-  criterionId: string
-  verdict: 'pass' | 'fail'
-  sourceCount: number
-  summary: string
-  recordedAt: string
-}
+export type GoalOperationResult = CoreGoalOperationResult
 
 export interface GoalProjectionState {
-  byId: Record<string, RuntimeGoalSummary>
-  activeBySession: Record<string, string>
-  latestGateByGoal: Record<string, GoalGateProjection | undefined>
-  latestEvidenceByGoal: Record<string, GoalEvidenceProjection | undefined>
-}
-
-export interface RuntimeTaskRecord {
-  id: string
-  kind: string
-  status: string
-  title: string
-  source: string
-  startedAt?: number
-  endedAt?: number | null
-  turnId?: string | null
-  toolCallId?: string | null
-  jobId?: string | null
-  outputPath?: string | null
-  transcriptPath?: string | null
-  progress?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-}
-
-export interface AskSegment {
-  id: string
-  type: 'ask'
-  interaction: ControlInteraction
-}
-
-export interface PlanSegment {
-  id: string
-  type: 'plan'
-  interaction: ControlInteraction
-}
-
-export interface PlanActivitySegment {
-  id: string
-  type: 'plan_activity'
-  label: string
-  detail?: string
-  tone: 'running' | 'success' | 'error' | 'neutral'
-  action?: 'continue'
-  nextActions?: string[]
-}
-
-export type AssistantSegment =
-  | TextSegment
-  | ThoughtSegment
-  | ToolSegment
-  | AskSegment
-  | PlanSegment
-  | PlanActivitySegment
-
-export interface SubagentToolState {
-  id?: string
-  name: string
-  arguments?: Record<string, unknown>
-  status: ToolStatus
-  summary?: string
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
-}
-
-export interface SubagentState {
-  id?: string
-  agent_type?: string
-  kind?: 'subagent' | 'team'
-  role?: string
-  purpose?: string
-  status: ToolStatus
-  content?: string
-  summary?: string
-  error?: string
-  tools?: SubagentToolState[]
-  messages?: TeamMessage[]
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
-}
-
-export interface UserMessage {
-  id: string
-  role: 'user'
-  content: string
-  attachments?: AttachmentRef[]
-  turn_id?: string
-  source?: string
-  scheduler?: SchedulerMessageMeta
-  local?: boolean
-  deliveryState?: 'queued' | 'running' | 'interjected' | 'cancelled'
-  deliveryReason?: string
+  /** Latest goal per session; `null` after a clear. */
+  bySession: Record<string, RuntimeGoalView | null>
 }
 
 export interface QueuedPromptItem {
@@ -1537,24 +1154,6 @@ export interface QueuedPromptItem {
   hasCapabilityRefs: boolean
 }
 
-export interface AssistantMessage {
-  id: string
-  role: 'assistant'
-  content: string
-  segments: AssistantSegment[]
-  todos?: TodoItem[] | null
-  streaming: boolean
-  turn_id?: string
-  local?: boolean
-  startedAt?: number
-  endedAt?: number
-  durationMs?: number
-  tombstoned?: boolean
-  terminalReason?: string
-}
-
-export type ChatMessage = UserMessage | AssistantMessage
-
 export interface PendingState {
   label: string
   detail: string
@@ -1562,53 +1161,6 @@ export interface PendingState {
 }
 
 export type RuntimeStatus = 'connecting' | 'ready' | 'error'
-
-export type TeamStatus =
-  'idle' | 'working' | 'offline' | 'shutdown' | 'error' | string
-
-export interface TeamMessage {
-  id: string
-  type: 'message' | 'task' | 'result' | 'status' | 'error' | string
-  from: string
-  to: string
-  content: string
-  timestamp: number
-  task_id?: string | null
-  in_reply_to?: string | null
-  meta?: Record<string, unknown>
-}
-
-export interface TeamMember {
-  name: string
-  role: string
-  agent_type: string
-  status: TeamStatus
-  created_at?: number
-  updated_at?: number
-  last_error?: string | null
-  unread?: number
-  recent_messages?: TeamMessage[]
-  thread_count?: number
-  tools?: string[]
-}
-
-export interface TeamPayload {
-  config?: {
-    version?: number
-    team_name?: string
-    members?: TeamMember[]
-  }
-  members: TeamMember[]
-  leadUnread?: number
-  leadInbox?: TeamMessage[]
-}
-
-export interface TeamMemberPayload {
-  member: TeamMember
-  inbox: TeamMessage[]
-  leadInbox: TeamMessage[]
-  thread: Array<{ role?: string; content?: string }>
-}
 
 export type SchedulerScheduleKind = 'at' | 'every' | 'cron'
 export type SchedulerPayloadKind = 'agent_turn' | 'team_wake' | 'system_event'
@@ -1694,15 +1246,6 @@ export interface SchedulerJob {
   purpose?: string | null
 }
 
-export interface SchedulerMessageMeta {
-  jobId?: string
-  jobName?: string
-  runId?: string
-  taskId?: string
-  scheduledForMs?: number
-  trigger?: SchedulerRunTrigger | string
-}
-
 export interface SchedulerStatusPayload {
   running: boolean
   jobs: number
@@ -1723,45 +1266,39 @@ export interface SchedulerPayload {
   diagnostics?: Record<string, unknown>
 }
 
-export interface HistoricalRuntimeActivityEvent {
-  event: 'historical_runtime_activity'
-  seq?: number
-  ts?: number
-  session_id?: string
-  turn_id?: string
-  client_message_id?: string
-  owner?: Record<string, unknown>
-  label: string
-  detail?: string
-  tone: 'running' | 'success' | 'error' | 'neutral'
-  running: boolean
-  action?: 'continue'
-  nextActions?: string[]
-}
-
 /**
  * Core owns the wire discriminant and payload union. Renderer only narrows the
  * generic domain payload slots into view-model shapes consumed by projectors.
  */
 type RendererRuntimePayloadProjection = {
   attachments?: AttachmentRef[]
-  artifacts?: ToolArtifactRef[]
   control?: ControlPayload
   interaction?: ControlInteraction
   job?: SchedulerJob
-  member?: TeamMember
-  message?: TeamMessage
-  plan?: RuntimePlanRecord
   profile_onboarding?: ProfileOnboardingPayload
   session?: SessionInfo
-  step?: RuntimePlanStep
-  task?: RuntimeTaskRecord & { label?: string }
+  task?: RuntimeTaskEventRecord
   todos?: TodoItem[]
 }
 
-export type WsEvent =
-  | (CoreRuntimeEvent & RendererRuntimePayloadProjection)
-  | HistoricalRuntimeActivityEvent
+/** `task_*` / `workflow_*` event payload: a Core job or workflow-run record projected from the session log. */
+export interface RuntimeTaskEventRecord {
+  id: string
+  kind?: string
+  label?: string
+  command?: string
+  status?: string
+  exit_code?: number | null
+  detail?: string | null
+  session_id?: string
+  /** Workflow runs: `workflow` or `ralph`. */
+  workflow_tool?: string
+  /** Workflow runs: accepted `agent()` calls (Ralph: rounds). */
+  rounds?: number
+  current_phase?: string | null
+}
+
+export type WsEvent = CoreRuntimeEvent & RendererRuntimePayloadProjection
 
 export interface SessionInfo {
   id: string

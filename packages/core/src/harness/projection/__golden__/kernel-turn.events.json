@@ -1,0 +1,366 @@
+[
+  {
+    "control": {
+      "version": 3,
+      "mode": "workspace-write",
+      "preset": "workspace-write",
+      "plan": false,
+      "approval": "ask",
+      "sandbox": "workspace-write",
+      "presets": [
+        {
+          "value": "read-only",
+          "name": "只读",
+          "description": "Read anything; every modification needs an approved escalation."
+        },
+        {
+          "value": "workspace-write",
+          "name": "工作区可写",
+          "description": "Write inside the workspace and temporary directories; wider retries require approval."
+        },
+        {
+          "value": "danger-full-access",
+          "name": "完全访问",
+          "description": "Full file access without approval prompts."
+        }
+      ],
+      "pending": null
+    },
+    "event": "control_mode_update",
+    "seq": 1,
+    "ts": 0,
+    "session_id": "<session>"
+  },
+  {
+    "control": {
+      "version": 3,
+      "mode": "workspace-write",
+      "preset": "workspace-write",
+      "plan": false,
+      "approval": "ask",
+      "sandbox": "workspace-write",
+      "presets": [
+        {
+          "value": "read-only",
+          "name": "只读",
+          "description": "Read anything; every modification needs an approved escalation."
+        },
+        {
+          "value": "workspace-write",
+          "name": "工作区可写",
+          "description": "Write inside the workspace and temporary directories; wider retries require approval."
+        },
+        {
+          "value": "danger-full-access",
+          "name": "完全访问",
+          "description": "Full file access without approval prompts."
+        }
+      ],
+      "pending": null
+    },
+    "event": "control_mode_update",
+    "seq": 17,
+    "ts": 0,
+    "session_id": "<session>"
+  },
+  {
+    "control": {
+      "version": 3,
+      "mode": "workspace-write",
+      "preset": "workspace-write",
+      "plan": false,
+      "approval": "ask",
+      "sandbox": "workspace-write",
+      "presets": [
+        {
+          "value": "read-only",
+          "name": "只读",
+          "description": "Read anything; every modification needs an approved escalation."
+        },
+        {
+          "value": "workspace-write",
+          "name": "工作区可写",
+          "description": "Write inside the workspace and temporary directories; wider retries require approval."
+        },
+        {
+          "value": "danger-full-access",
+          "name": "完全访问",
+          "description": "Full file access without approval prompts."
+        }
+      ],
+      "pending": null
+    },
+    "event": "control_mode_update",
+    "seq": 33,
+    "ts": 0,
+    "session_id": "<session>"
+  },
+  {
+    "phase": "started",
+    "event": "turn_phase",
+    "seq": 81,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "content": "pick a color",
+    "message_id": "<id1>",
+    "client_message_id": "client-1",
+    "event": "user_message",
+    "seq": 161,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "thought_id": "<session>:1:1:0",
+    "stage": "reasoning",
+    "label": "思考",
+    "status": "running",
+    "source": "model",
+    "event": "agent_thought",
+    "seq": 241,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "thought_id": "<session>:1:1:0",
+    "stage": "reasoning",
+    "label": "思考",
+    "status": "done",
+    "source": "model",
+    "summary": "I should look first.",
+    "event": "agent_thought",
+    "seq": 273,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": "Chec",
+    "event": "message_delta",
+    "seq": 305,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": "king",
+    "event": "message_delta",
+    "seq": 321,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": ".",
+    "event": "message_delta",
+    "seq": 337,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "used": 15,
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_tokens": 0,
+    "max": 100000,
+    "model": "test-model",
+    "model_entry_id": "test-route",
+    "event": "context_usage",
+    "seq": 449,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "id": "call_bash",
+    "name": "bash",
+    "tool_batch_id": "<session>:1:1",
+    "arguments": {
+      "command": "echo golden",
+      "description": "print a word"
+    },
+    "event": "tool_call",
+    "seq": 465,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "id": "call_bash",
+    "name": "bash",
+    "tool_batch_id": "<session>:1:1",
+    "event": "tool_run_started",
+    "seq": 466,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "id": "call_bash",
+    "name": "bash",
+    "output": "golden\n",
+    "is_error": false,
+    "tool_batch_id": "<session>:1:1",
+    "metadata": {
+      "kind": "foreground",
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "aborted": false,
+      "durationMs": 0,
+      "stdoutTruncated": false,
+      "stderrTruncated": false,
+      "sandbox": {
+        "mode": "workspace-write",
+        "escalated": false,
+        "denied": false
+      }
+    },
+    "event": "tool_result",
+    "seq": 481,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "used": 15,
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_tokens": 0,
+    "max": 100000,
+    "model": "test-model",
+    "model_entry_id": "test-route",
+    "event": "context_usage",
+    "seq": 609,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "interaction": {
+      "id": "ask_<id2>",
+      "kind": "ask",
+      "status": "waiting",
+      "created_at": 0,
+      "updated_at": 0,
+      "parent_call_id": "call_ask",
+      "questions": [
+        {
+          "id": "color",
+          "header": "",
+          "question": "Which color?",
+          "options": [
+            {
+              "label": "red"
+            },
+            {
+              "label": "blue"
+            }
+          ]
+        }
+      ],
+      "answers": {},
+      "meta": {
+        "interaction_type": "question",
+        "question_id": "<id2>"
+      }
+    },
+    "event": "ask_request",
+    "seq": 641,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "interaction": {
+      "id": "ask_<id2>",
+      "kind": "ask",
+      "status": "answered",
+      "created_at": 0,
+      "updated_at": 0,
+      "parent_call_id": "call_ask",
+      "questions": [
+        {
+          "id": "color",
+          "header": "",
+          "question": "Which color?",
+          "options": [
+            {
+              "label": "red"
+            },
+            {
+              "label": "blue"
+            }
+          ]
+        }
+      ],
+      "answers": {
+        "color": {
+          "choice": "blue",
+          "freeform": ""
+        }
+      },
+      "meta": {
+        "interaction_type": "question",
+        "question_id": "<id2>"
+      }
+    },
+    "event": "ask_answered",
+    "seq": 657,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": "Blue",
+    "event": "message_delta",
+    "seq": 737,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": " it ",
+    "event": "message_delta",
+    "seq": 753,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": "is.",
+    "event": "message_delta",
+    "seq": 769,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "used": 15,
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cache_read_tokens": 0,
+    "max": 100000,
+    "model": "test-model",
+    "model_entry_id": "test-route",
+    "event": "context_usage",
+    "seq": 833,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "content": "Checking.Blue it is.",
+    "stop_reason": "completed",
+    "event": "assistant_done",
+    "seq": 865,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  }
+]

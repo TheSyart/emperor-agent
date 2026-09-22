@@ -1,0 +1,3633 @@
+{
+  "root": {
+    "header": {
+      "version": 0,
+      "createdAt": 0,
+      "id": "<session>",
+      "cwd": "<root>/home/workspace"
+    },
+    "events": [
+      {
+        "type": "permission/preset",
+        "seq": 0,
+        "time": 1700000000000,
+        "data": {
+          "preset": "workspace-write"
+        }
+      },
+      {
+        "type": "sandbox/mode",
+        "seq": 1,
+        "time": 1700000000100,
+        "data": {
+          "mode": "workspace-write"
+        }
+      },
+      {
+        "type": "approval/policy",
+        "seq": 2,
+        "time": 1700000000200,
+        "data": {
+          "policy": "ask"
+        }
+      },
+      {
+        "type": "host/user-meta",
+        "seq": 3,
+        "time": 1700000000300,
+        "data": {
+          "messageId": "<id1>",
+          "clientMessageId": "client-1",
+          "displayContent": "pick a color (shown)"
+        }
+      },
+      {
+        "type": "agent/inbox/spliced",
+        "seq": 4,
+        "time": 1700000000400,
+        "data": {
+          "target": "next-turn",
+          "start": 0,
+          "inserted": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "pick a color"
+                }
+              ],
+              "source": {
+                "kind": "user"
+              },
+              "id": "<id1>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "turn/start",
+        "seq": 5,
+        "time": 1700000000500,
+        "data": {
+          "turn": 1
+        }
+      },
+      {
+        "type": "agent/inbox/spliced",
+        "seq": 6,
+        "time": 1700000000600,
+        "data": {
+          "target": "next-turn",
+          "start": 0,
+          "removedCount": 1,
+          "inserted": []
+        }
+      },
+      {
+        "type": "instructions/baseline",
+        "seq": 7,
+        "time": 1700000000700,
+        "data": {
+          "digest": "",
+          "files": []
+        }
+      },
+      {
+        "type": "memory/baseline",
+        "seq": 8,
+        "time": 1700000000800,
+        "data": {
+          "digest": ""
+        }
+      },
+      {
+        "type": "step/start",
+        "seq": 9,
+        "time": 1700000000900,
+        "data": {
+          "turn": 1,
+          "step": 1
+        }
+      },
+      {
+        "type": "user/message",
+        "seq": 10,
+        "time": 1700000001000,
+        "data": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "pick a color"
+            }
+          ],
+          "source": {
+            "kind": "user"
+          },
+          "id": "<id1>"
+        },
+        "surfaceOp": "append"
+      },
+      {
+        "type": "user/message",
+        "seq": 11,
+        "time": 1700000001100,
+        "data": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"/private<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval policy: ask. Operations that require approval ask the user; without an available answerer, the request fails closed."
+            }
+          ],
+          "source": {
+            "kind": "context",
+            "producer": "runtime-context",
+            "form": "snapshot"
+          },
+          "id": "<id2>"
+        },
+        "surfaceOp": "append"
+      },
+      {
+        "type": "user/message",
+        "seq": 12,
+        "time": 1700000001200,
+        "data": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<system-reminder>\nLong-term memory the user keeps across conversations. Treat it as background facts and preferences; the user may ask you to update it with memory_edit.\n\n<user_profile path=\"USER.md\">\n# 用户偏好\n</user_profile>\n\n<memory path=\"MEMORY.md\">\n# 长期记忆\n\n此文件常驻上下文，记录核心目标、当前任务与关键事实。\n</memory>\n</system-reminder>"
+            }
+          ],
+          "source": {
+            "kind": "context",
+            "producer": "memory",
+            "form": "instructions"
+          },
+          "id": "<id3>"
+        },
+        "surfaceOp": "append"
+      },
+      {
+        "type": "request/header",
+        "seq": 13,
+        "time": 1700000001300,
+        "data": {
+          "header": {
+            "config": {
+              "provider": "test-route",
+              "model": "test-model",
+              "maxTokens": 4096
+            },
+            "adapterDefaults": {
+              "maxTokens": true
+            },
+            "system": "You are Emperor Agent, a coding agent powered by the test-model model. Your working directory is <root>/home/workspace.\n\nUse the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.\n\nUse the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes.\n\nUse the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.\n\nUse the glob tool — not shell find — to discover files by path pattern. A pattern with no \"/\" matches basenames at any depth, so \"*\" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.\n\nUse the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.\n\nCheck the [exit code: N] marker on every bash result; investigate failures before moving on. Each call runs in a fresh shell: pass `workdir` instead of using `cd`, and do not rely on variables or functions from earlier calls.\n\nTrack every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.\n\nSkills live in <root>/home/skills/<name>/SKILL.md (personal) and, in Build sessions, <project>/.emperor/skills/<name>/SKILL.md (project). A Skill is a folder with SKILL.md (YAML frontmatter `name` + `description`, then instructions) and optional scripts/, references/, assets/. Create, update, delete, or import Skills only with the `skill_manage` tool — never with file or shell tools, and never by editing other agents’ skill folders. Built-in and Plugin Skills are read-only.\n\nUse goal tools for one long-running completion objective in the current session. create_goal may infer goal intent from a direct human request in any language; do not create a goal for routine single-turn work. Call get_goal before update_goal and copy its exact goal_id and revision. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least 3 consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.\n\nUse the workflow tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.\n\nUse the ralph tool ONLY when the direct human explicitly asks for a Ralph loop or fresh-agent iterative execution. Each Ralph round starts a fresh child with no conversation seed and uses the shared workspace as durable memory. Completion and blockers are worker reports, not independent evaluation. Use same-session goal tools for ordinary long-running objectives, and plain subagents or workflows for bounded delegation and fan-out.\n\nUse subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.\n\nEmperor's MCP servers are configured only in Emperor's own <root>/home/mcp_config.json; Emperor reads no other MCP config. To list, add, remove, enable, disable, or reload MCP servers, use the mcp_config tool — add accepts pasted JSON in Claude Desktop / Cursor (mcpServers), VS Code (servers), or single-server form. Never use mcporter, and never edit other clients' config files (~/.cursor/mcp.json, ~/.claude.json, Claude Desktop's claude_desktop_config.json, VS Code mcp.json) to add servers for Emperor. After a change the new mcp_<server>_<tool> tools are available from the next step.\nEmperor 的 MCP 配置只有 mcp_config.json 一处，只能用 mcp_config 工具管理；不要用 mcporter，也不要改其他客户端的配置文件。",
+            "tools": [
+              {
+                "name": "ask_user_question",
+                "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Stable id for this question; echoed in the answer."
+                          },
+                          "question": {
+                            "type": "string",
+                            "description": "The specific question to ask the user."
+                          },
+                          "header": {
+                            "type": "string",
+                            "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+                          },
+                          "options": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "description": "Short user-facing option label."
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "description": "One sentence explaining the tradeoff or impact."
+                                }
+                              },
+                              "required": [
+                                "label"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            "description": "Optional choices to show the user. If you recommend one, put it first and append \"(Recommended)\" to that label."
+                          },
+                          "multi_select": {
+                            "type": "boolean",
+                            "description": "Whether the user may select more than one option. Defaults to false."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "question"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      "description": "Questions to ask the user before continuing."
+                    }
+                  },
+                  "required": [
+                    "questions"
+                  ]
+                }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$EMPEROR_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`. Attempting a command the sandbox may deny is safe and expected: run it and read the marker rather than assuming the denial. When a command is denied and a wider mode would let it succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. Do not detour through chat to ask permission first — the approval prompt raised by that retry is how the user consents. If the session states approval prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. Never escalate speculatively: ground the request in a real denial — normally the one this command just hit; escalating up front is fine only when this session already denied the same access. A rejected escalation is final for that command — stop and explain, never work around it — but it does not forbid attempting or escalating other commands later.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "command": {
+                      "type": "string",
+                      "description": "The command to execute."
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+                    },
+                    "timeoutMs": {
+                      "description": "Timeout in milliseconds (default 60000, max 600000); the command is killed on expiry.",
+                      "type": "number"
+                    },
+                    "workdir": {
+                      "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.",
+                      "type": "string"
+                    },
+                    "run_in_background": {
+                      "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.",
+                      "type": "boolean"
+                    },
+                    "sandbox_permissions": {
+                      "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                      "type": "string",
+                      "enum": [
+                        "workspace-write",
+                        "danger-full-access"
+                      ]
+                    },
+                    "justification": {
+                      "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "command",
+                    "description"
+                  ]
+                }
+              },
+              {
+                "name": "create_goal",
+                "description": "Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say \"create a goal\". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "objective": {
+                      "type": "string",
+                      "description": "The concrete completion objective inferred from the direct human request."
+                    },
+                    "max_goal_rounds": {
+                      "type": "number",
+                      "description": "Optional positive safe-integer limit on automatic continuation rounds."
+                    }
+                  },
+                  "required": [
+                    "objective"
+                  ]
+                }
+              },
+              {
+                "name": "edit",
+                "description": "Edit an existing UTF-8 text file by replacing literal text.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "file_path": {
+                      "type": "string",
+                      "description": "Path to edit: absolute, or relative to the session working directory."
+                    },
+                    "old_string": {
+                      "type": "string",
+                      "description": "Literal text to replace. Must match exactly."
+                    },
+                    "new_string": {
+                      "type": "string",
+                      "description": "Literal replacement text. Use an empty string to delete the match."
+                    },
+                    "replace_all": {
+                      "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once.",
+                      "type": "boolean"
+                    },
+                    "sandbox_permissions": {
+                      "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                      "type": "string",
+                      "enum": [
+                        "workspace-write",
+                        "danger-full-access"
+                      ]
+                    },
+                    "justification": {
+                      "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_path",
+                    "old_string",
+                    "new_string"
+                  ]
+                }
+              },
+              {
+                "name": "exit_plan_mode",
+                "description": "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. Send the COMPLETE plan as markdown, starting with a # heading that names it. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {
+                      "type": "string",
+                      "description": "The complete plan, as markdown, starting with a # heading that names it."
+                    }
+                  },
+                  "required": [
+                    "plan"
+                  ]
+                }
+              },
+              {
+                "name": "get_goal",
+                "description": "Read the current same-session goal, including its exact id/revision, objective, phase, completed continuation rounds, round limit, blocker reason when present, and whether another continuation is armed. Call this before updating a goal.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              {
+                "name": "glob",
+                "description": "Find files whose paths match a glob pattern. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order (newest first); a larger result returns the first 100 paths in modification-time order, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "pattern": {
+                      "type": "string",
+                      "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+                    },
+                    "path": {
+                      "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ]
+                }
+              },
+              {
+                "name": "grep",
+                "description": "Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "pattern": {
+                      "type": "string",
+                      "description": "Regular expression to search for (ripgrep syntax)."
+                    },
+                    "path": {
+                      "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it.",
+                      "type": "string"
+                    },
+                    "include": {
+                      "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ]
+                }
+              },
+              {
+                "name": "interrupt_agent",
+                "description": "Request cancellation of a background agent's current turn by its agent id. The target may be your direct child or a deeper agent created under you. Only the current turn stops: messages already queued for the agent stay parked until a later send_message, agents it started keep running, and the agent itself stays available for follow-ups. This call returns as soon as the stop request is accepted, so the target may keep running briefly; interrupting an agent that already finished is an accepted no-op.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {
+                      "type": "string",
+                      "description": "The agent id of the running agent to interrupt."
+                    }
+                  },
+                  "required": [
+                    "agent_id"
+                  ]
+                }
+              },
+              {
+                "name": "job_kill",
+                "description": "Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "job_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Job id returned by the tool that started the background work."
+                    },
+                    "reason": {
+                      "description": "Optional short reason, recorded in the log and forwarded to the job.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "job_id"
+                  ]
+                }
+              },
+              {
+                "name": "job_list",
+                "description": "List your background jobs (running and finished) with their ids, kinds, and statuses.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              {
+                "name": "job_output",
+                "description": "Read a background job. Stream jobs return only output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "job_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Job id returned by the tool that started the background work."
+                    },
+                    "wait": {
+                      "description": "Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive.",
+                      "type": "boolean"
+                    },
+                    "timeout_ms": {
+                      "description": "Max wait in milliseconds (only meaningful with wait: true). Defaults to 30000; capped at 600000.",
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "job_id"
+                  ]
+                }
+              },
+              {
+                "name": "list_agents",
+                "description": "List the background agents you started (children) or every agent under you (descendants), with their status.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "children",
+                        "descendants"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mcp_config",
+                "description": "管理 Emperor 自己的 MCP server 配置（Emperor Home 下的 mcp_config.json；Emperor 只读取这一个文件）。list 查看 server、transport、状态与工具数；add 传入用户给的 MCP JSON（Claude Desktop / Cursor 的 mcpServers、VS Code 的 servers、或带 name 的单个 server；stdio 用 command/args/env，远程用 url + 可选 headers，type 支持 stdio/sse/http），同名 server 默认跳过，overwrite=true 才覆盖；remove / enable / disable 按 name 修改；reload 重新连接全部 server。写操作可能需要用户审批；成功后自动重载，新的 mcp_<server>_<tool> 工具从下一步起可用。不要用 mcporter 或编辑其他客户端的配置文件来添加 MCP。",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "list",
+                        "add",
+                        "remove",
+                        "enable",
+                        "disable",
+                        "reload"
+                      ],
+                      "description": "要执行的动作。"
+                    },
+                    "config": {
+                      "description": "add：MCP 配置 JSON（对象或 JSON 文本），例如 {\"mcpServers\":{\"name\":{\"type\":\"http\",\"url\":\"https://…\"}}}。",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": {}
+                        }
+                      ]
+                    },
+                    "name": {
+                      "description": "remove/enable/disable：server 名称；add 时可为不带 name 的单个 server 指定名称。",
+                      "type": "string"
+                    },
+                    "overwrite": {
+                      "description": "add：同名 server 已存在时是否覆盖（默认 false，跳过）。",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                }
+              },
+              {
+                "name": "memory_edit",
+                "description": "Edit the user's long-term memory. target \"memory\" is MEMORY.md (durable facts across conversations), \"user\" is USER.md (the user's profile and preferences), \"project\" is the current Build project's memory (markdown `##` sections). Replace an exact unique old_string with new_string, or omit old_string to append new_string. Only record information the user would want remembered; never store secrets.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "target": {
+                      "type": "string",
+                      "enum": [
+                        "memory",
+                        "user",
+                        "project"
+                      ]
+                    },
+                    "old_string": {
+                      "description": "Exact text to replace; must occur exactly once. Omit to append.",
+                      "type": "string"
+                    },
+                    "new_string": {
+                      "type": "string",
+                      "description": "Replacement (or appended) text."
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "new_string"
+                  ]
+                }
+              },
+              {
+                "name": "ralph",
+                "description": "Run a foreground fresh-agent Ralph loop toward one immutable objective. Use only when the direct human explicitly asks for Ralph or fresh-agent iteration. Each round opens a new child with no parent conversation or prior child session; the shared workspace is long-term memory, and only a bounded structured report crosses rounds. The call returns when a worker reports completion or a concrete blocker, or at the round limit. Ordinary long-running same-session work belongs to goal tools.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "objective": {
+                      "type": "string",
+                      "description": "The immutable completion objective for every fresh Ralph round."
+                    },
+                    "maxRounds": {
+                      "description": "Optional positive safe-integer round cap, bounded by the deployment ceiling.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "objective"
+                  ]
+                }
+              },
+              {
+                "name": "read",
+                "description": "Read a UTF-8 text file and return line-numbered content.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "file_path": {
+                      "type": "string",
+                      "description": "Path to read: absolute, or relative to the session working directory."
+                    },
+                    "offset": {
+                      "description": "1-based first line to return. Defaults to 1.",
+                      "type": "number"
+                    },
+                    "limit": {
+                      "description": "Maximum number of lines to return. Defaults to 2000.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "file_path"
+                  ]
+                }
+              },
+              {
+                "name": "scheduler",
+                "description": "管理本地持久定时任务：查看、创建、更新、暂停、恢复、删除或手动运行。只读检查使用 list；只有用户明确要求长期、未来或周期性自动执行时，才使用 add/update/remove/run。不要把一次性普通任务伪装成定时任务；调度器失败时报告调度器错误，不要改用系统 cron 或 crontab。新任务绑定到当前会话，触发时在本会话内作为一次新的 turn 执行。",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "add",
+                        "list",
+                        "update",
+                        "remove",
+                        "pause",
+                        "resume",
+                        "run"
+                      ],
+                      "description": "要执行的调度动作。"
+                    },
+                    "job_id": {
+                      "description": "已有定时任务 id，用于 update/remove/pause/resume/run。",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "创建或更新时使用的任务名称。",
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "任务触发时交给 Agent 的提示词。",
+                      "type": "string"
+                    },
+                    "deliver": {
+                      "description": "执行结果是否显示到本地运行界面（默认显示）。",
+                      "type": "boolean"
+                    },
+                    "at": {
+                      "description": "一次性任务的 ISO 时间，例如 2026-05-20T09:30:00+08:00。",
+                      "type": "string"
+                    },
+                    "every_seconds": {
+                      "description": "循环任务的间隔秒数。",
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "cron_expr": {
+                      "description": "循环任务使用的 cron 表达式。",
+                      "type": "string"
+                    },
+                    "tz": {
+                      "description": "cron 任务使用的 IANA 时区，例如 Asia/Shanghai。",
+                      "type": "string"
+                    },
+                    "delete_after_run": {
+                      "description": "一次性任务运行后是否自动删除。",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                }
+              },
+              {
+                "name": "send_message",
+                "description": "Send a message to a background subagent by its subagent id, continuing the same conversation. It becomes the subagent's next turn: if it is still working, the message waits until its current turn finishes, so it cannot redirect work already underway. This call returns no answer from the subagent — only confirmation that the message was delivered — so use it to give it more work. A failure means the message was NOT delivered.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "subagent_id": {
+                      "type": "string",
+                      "description": "The subagent id returned when the background subagent was started."
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "The message to deliver to the subagent."
+                    }
+                  },
+                  "required": [
+                    "subagent_id",
+                    "message"
+                  ]
+                }
+              },
+              {
+                "name": "skill",
+                "description": "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The exact skill name from the available skills list."
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
+              {
+                "name": "skill_manage",
+                "description": "Manage Emperor Skills. Read-only: list (Skills available in this session, plus invalid ones with reasons), validate (check SKILL.md text or an installed Skill). Writes: create / update (full SKILL.md in `content`, optional extra files in `files`), delete, import (from a local folder, a local .zip, pasted SKILL.md, or an https link — GitHub repository/folder links or direct .zip links). Writes need user approval unless the session runs with full access. Built-in and Plugin Skills are read-only. Use this tool instead of file or shell tools for anything under the Skills folders.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "list",
+                        "validate",
+                        "create",
+                        "update",
+                        "delete",
+                        "import"
+                      ],
+                      "description": "What to do."
+                    },
+                    "name": {
+                      "description": "Skill name (lowercase letters, digits, \".\", \"_\", \"-\"). Required for delete; for create/update it must equal the frontmatter name.",
+                      "type": "string"
+                    },
+                    "content": {
+                      "description": "Full SKILL.md text starting with YAML frontmatter (`name`, `description`). Required for create/update; optional for validate.",
+                      "type": "string"
+                    },
+                    "files": {
+                      "description": "Extra text files for create/update, keyed by path relative to the Skill folder, e.g. {\"scripts/run.py\": \"...\"}.",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "scope": {
+                      "description": "user (default) = personal Skills; project = this Build project (Build sessions only).",
+                      "type": "string",
+                      "enum": [
+                        "user",
+                        "project"
+                      ]
+                    },
+                    "source": {
+                      "description": "import only: where the Skill comes from.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "folder"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Absolute path of a local folder."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "zip"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Absolute path of a local .zip file."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "url"
+                            },
+                            "url": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "https link: https://github.com/<owner>/<repo>[/tree/<ref>/<folder>] or a direct .zip link."
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "url"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "content"
+                            },
+                            "content": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Full SKILL.md text."
+                            },
+                            "name": {
+                              "description": "Skill name; overrides the frontmatter name.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "content"
+                          ]
+                        }
+                      ]
+                    },
+                    "overwrite": {
+                      "description": "import only: replace existing Skills with the same name.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                }
+              },
+              {
+                "name": "subagent",
+                "description": "Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. Give it a complete, standalone prompt: it does not see this conversation. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string",
+                      "description": "A short (3-5 word) description of the delegated task, for display."
+                    },
+                    "prompt": {
+                      "type": "string",
+                      "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+                    },
+                    "run_in_background": {
+                      "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "prompt"
+                  ]
+                }
+              },
+              {
+                "name": "subagent_fork",
+                "description": "Delegate a task to a subagent that inherits this conversation: a child agent seeded with all completed turns so far (it does not see the current in-flight turn). Use this when the subtask builds on this conversation's context — a follow-up analysis, a review, a continuation — without consuming this conversation's context for the work itself. You receive its result, not its intermediate steps. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string",
+                      "description": "A short (3-5 word) description of the delegated task, for display."
+                    },
+                    "prompt": {
+                      "type": "string",
+                      "description": "The task for the subagent. It already sees this conversation's completed turns, so build on them freely and state only what is new."
+                    },
+                    "run_in_background": {
+                      "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "prompt"
+                  ]
+                }
+              },
+              {
+                "name": "todo_write",
+                "description": "Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished).",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "todos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "content": {
+                            "type": "string",
+                            "description": "What the task is — a short imperative line."
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "in_progress",
+                              "completed"
+                            ],
+                            "description": "pending (not started) | in_progress (now) | completed (done)."
+                          }
+                        },
+                        "required": [
+                          "content",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The COMPLETE task list, replacing any previous list."
+                    }
+                  },
+                  "required": [
+                    "todos"
+                  ]
+                }
+              },
+              {
+                "name": "update_goal",
+                "description": "Update the exact current goal revision. edit, pause, and resume require a direct top-level human request. During an automatic continuation of the current goal, complete and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "goal_id": {
+                      "type": "string",
+                      "description": "Exact id returned by get_goal."
+                    },
+                    "revision": {
+                      "type": "number",
+                      "description": "Exact positive revision returned by get_goal."
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "edit",
+                        "pause",
+                        "resume",
+                        "complete",
+                        "blocked"
+                      ],
+                      "description": "edit | pause | resume | complete | blocked"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "description": "Replacement objective; valid only with action edit."
+                    },
+                    "max_goal_rounds": {
+                      "type": "number",
+                      "description": "Replacement cap; valid only with action edit."
+                    },
+                    "blocked_reason": {
+                      "type": "string",
+                      "description": "Concrete blocking condition; required only with action blocked."
+                    }
+                  },
+                  "required": [
+                    "goal_id",
+                    "revision",
+                    "action"
+                  ]
+                }
+              },
+              {
+                "name": "workflow",
+                "description": "Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.\n\nThe workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.\n\nScript-body hooks:\n- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.\n- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.\n- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.\n- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.\n\nMisused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.\n\nConstraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "script": {
+                      "type": "string",
+                      "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "Short kebab-case workflow name."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "One-line description of what the workflow does."
+                        },
+                        "whenToUse": {
+                          "description": "Optional guidance on when this workflow applies.",
+                          "type": "string"
+                        },
+                        "phases": {
+                          "description": "Optional phase declarations matched by phase() calls.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "description": "The phase title phase() calls match by exact string."
+                              },
+                              "detail": {
+                                "description": "Optional one-line description of the phase.",
+                                "type": "string"
+                              },
+                              "provider": {
+                                "description": "Optional provider override this phase is expected to use.",
+                                "type": "string"
+                              },
+                              "model": {
+                                "description": "Optional model override this phase is expected to use.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "title"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "description"
+                      ],
+                      "additionalProperties": {},
+                      "description": "The workflow identity block (plain JSON — never code)."
+                    },
+                    "args": {
+                      "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "script",
+                    "meta"
+                  ]
+                }
+              },
+              {
+                "name": "write",
+                "description": "Create or fully replace a UTF-8 text file.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "file_path": {
+                      "type": "string",
+                      "description": "Path to write: absolute, or relative to the session working directory."
+                    },
+                    "content": {
+                      "type": "string",
+                      "description": "Full UTF-8 text content to write."
+                    },
+                    "sandbox_permissions": {
+                      "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                      "type": "string",
+                      "enum": [
+                        "workspace-write",
+                        "danger-full-access"
+                      ]
+                    },
+                    "justification": {
+                      "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_path",
+                    "content"
+                  ]
+                }
+              }
+            ]
+          },
+          "reason": "initial"
+        }
+      },
+      {
+        "type": "request/context",
+        "seq": 14,
+        "time": 1700000001400,
+        "data": {
+          "provider": "test-route",
+          "model": "test-model",
+          "contextWindow": 100000
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 15,
+        "time": 1700000001500,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "finish",
+            "reason": {
+              "kind": "error",
+              "failure": {
+                "message": "upstream exploded",
+                "code": "SERVER"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "llm/retry",
+        "seq": 16,
+        "time": 1700000001600,
+        "data": {
+          "retryId": "<id4>",
+          "turn": 1,
+          "step": 1,
+          "provider": "test-route",
+          "mode": "normal",
+          "policyKey": "normal:2:EMPTY_RESPONSE,RATE_LIMIT,SERVER,TIMEOUT,TRANSPORT:1/2/0.1",
+          "retry": 1,
+          "maxRetries": 2,
+          "delayMs": 1,
+          "failure": {
+            "message": "upstream exploded",
+            "code": "SERVER"
+          }
+        }
+      },
+      {
+        "type": "llm/retry-started",
+        "seq": 17,
+        "time": 1700000001700,
+        "data": {
+          "retryId": "<id4>",
+          "turn": 1,
+          "step": 1
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 18,
+        "time": 1700000001800,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "reasoning"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 19,
+        "time": 1700000001900,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "reasoning-delta",
+            "index": 0,
+            "text": "I should look first."
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 20,
+        "time": 1700000002000,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "reasoning",
+              "text": "I should look first."
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 21,
+        "time": 1700000002100,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-start",
+            "index": 1,
+            "blockType": "text"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 22,
+        "time": 1700000002200,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "text-delta",
+            "index": 1,
+            "text": "Chec"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 23,
+        "time": 1700000002300,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "text-delta",
+            "index": 1,
+            "text": "king"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 24,
+        "time": 1700000002400,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "text-delta",
+            "index": 1,
+            "text": "."
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 25,
+        "time": 1700000002500,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-end",
+            "index": 1,
+            "block": {
+              "type": "text",
+              "text": "Checking."
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 26,
+        "time": 1700000002600,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-start",
+            "index": 2,
+            "blockType": "tool-call"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 27,
+        "time": 1700000002700,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "tool-call-delta",
+            "index": 2,
+            "id": "call_bash_a",
+            "name": "bash",
+            "argumentsDelta": "{\"command\":\"echo alpha\",\"description\":\"print alpha\"}"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 28,
+        "time": 1700000002800,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-end",
+            "index": 2,
+            "block": {
+              "type": "tool-call",
+              "id": "call_bash_a",
+              "name": "bash",
+              "arguments": "{\"command\":\"echo alpha\",\"description\":\"print alpha\"}"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 29,
+        "time": 1700000002900,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-start",
+            "index": 3,
+            "blockType": "tool-call"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 30,
+        "time": 1700000003000,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "tool-call-delta",
+            "index": 3,
+            "id": "call_bash_b",
+            "name": "bash",
+            "argumentsDelta": "{\"command\":\"echo beta\",\"description\":\"print beta\"}"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 31,
+        "time": 1700000003100,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "block-end",
+            "index": 3,
+            "block": {
+              "type": "tool-call",
+              "id": "call_bash_b",
+              "name": "bash",
+              "arguments": "{\"command\":\"echo beta\",\"description\":\"print beta\"}"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 32,
+        "time": 1700000003200,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 120,
+              "outputTokens": 40,
+              "cacheReadTokens": 30
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 33,
+        "time": 1700000003300,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "chunk": {
+            "type": "finish",
+            "reason": {
+              "kind": "tool-calls"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/message",
+        "seq": 34,
+        "time": 1700000003400,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "reasoning",
+                "text": "I should look first."
+              },
+              {
+                "type": "text",
+                "text": "Checking."
+              },
+              {
+                "type": "tool-call",
+                "id": "call_bash_a",
+                "name": "bash",
+                "arguments": "{\"command\":\"echo alpha\",\"description\":\"print alpha\"}"
+              },
+              {
+                "type": "tool-call",
+                "id": "call_bash_b",
+                "name": "bash",
+                "arguments": "{\"command\":\"echo beta\",\"description\":\"print beta\"}"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "test-route",
+              "model": "test-model"
+            },
+            "id": "<id5>"
+          },
+          "usage": {
+            "inputTokens": 120,
+            "outputTokens": 40,
+            "cacheReadTokens": 30
+          }
+        },
+        "sourceEventSeqs": [
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "tool/call",
+        "seq": 35,
+        "time": 1700000003500,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "callId": "call_bash_a",
+          "name": "bash",
+          "arguments": "{\"command\":\"echo alpha\",\"description\":\"print alpha\"}"
+        }
+      },
+      {
+        "type": "tool/result",
+        "seq": 36,
+        "time": 1700000003600,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "message": {
+            "id": "<id6>",
+            "role": "user",
+            "source": {
+              "kind": "tool",
+              "callId": "call_bash_a"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call_bash_a",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "alpha\n"
+                  }
+                ],
+                "isError": false
+              }
+            ]
+          },
+          "meta": {
+            "kind": "foreground",
+            "exitCode": 0,
+            "signal": null,
+            "timedOut": false,
+            "aborted": false,
+            "durationMs": 0,
+            "stdoutTruncated": false,
+            "stderrTruncated": false,
+            "sandbox": {
+              "mode": "workspace-write",
+              "escalated": false,
+              "denied": false
+            }
+          }
+        },
+        "sourceEventSeqs": [
+          35
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "tool/call",
+        "seq": 37,
+        "time": 1700000003700,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "callId": "call_bash_b",
+          "name": "bash",
+          "arguments": "{\"command\":\"echo beta\",\"description\":\"print beta\"}"
+        }
+      },
+      {
+        "type": "tool/result",
+        "seq": 38,
+        "time": 1700000003800,
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "message": {
+            "id": "<id7>",
+            "role": "user",
+            "source": {
+              "kind": "tool",
+              "callId": "call_bash_b"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call_bash_b",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "beta\n"
+                  }
+                ],
+                "isError": false
+              }
+            ]
+          },
+          "meta": {
+            "kind": "foreground",
+            "exitCode": 0,
+            "signal": null,
+            "timedOut": false,
+            "aborted": false,
+            "durationMs": 0,
+            "stdoutTruncated": false,
+            "stderrTruncated": false,
+            "sandbox": {
+              "mode": "workspace-write",
+              "escalated": false,
+              "denied": false
+            }
+          }
+        },
+        "sourceEventSeqs": [
+          37
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "step/end",
+        "seq": 39,
+        "time": 1700000003900,
+        "data": {
+          "turn": 1,
+          "step": 1
+        }
+      },
+      {
+        "type": "step/start",
+        "seq": 40,
+        "time": 1700000004000,
+        "data": {
+          "turn": 1,
+          "step": 2
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 41,
+        "time": 1700000004100,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "chunk": {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "tool-call"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 42,
+        "time": 1700000004200,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "chunk": {
+            "type": "tool-call-delta",
+            "index": 0,
+            "id": "call_ask",
+            "name": "ask_user_question",
+            "argumentsDelta": "{\"questions\":[{\"id\":\"color\",\"question\":\"Which color?\",\"options\":[{\"label\":\"red\"},{\"label\":\"blue\"}]}]}"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 43,
+        "time": 1700000004300,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "chunk": {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "tool-call",
+              "id": "call_ask",
+              "name": "ask_user_question",
+              "arguments": "{\"questions\":[{\"id\":\"color\",\"question\":\"Which color?\",\"options\":[{\"label\":\"red\"},{\"label\":\"blue\"}]}]}"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 44,
+        "time": 1700000004400,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 10,
+              "outputTokens": 5
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 45,
+        "time": 1700000004500,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "chunk": {
+            "type": "finish",
+            "reason": {
+              "kind": "tool-calls"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/message",
+        "seq": 46,
+        "time": 1700000004600,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "id": "call_ask",
+                "name": "ask_user_question",
+                "arguments": "{\"questions\":[{\"id\":\"color\",\"question\":\"Which color?\",\"options\":[{\"label\":\"red\"},{\"label\":\"blue\"}]}]}"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "test-route",
+              "model": "test-model"
+            },
+            "id": "<id8>"
+          },
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5
+          }
+        },
+        "sourceEventSeqs": [
+          41,
+          42,
+          43,
+          44,
+          45
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "tool/call",
+        "seq": 47,
+        "time": 1700000004700,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "callId": "call_ask",
+          "name": "ask_user_question",
+          "arguments": "{\"questions\":[{\"id\":\"color\",\"question\":\"Which color?\",\"options\":[{\"label\":\"red\"},{\"label\":\"blue\"}]}]}"
+        }
+      },
+      {
+        "type": "question/asked",
+        "seq": 48,
+        "time": 1700000004800,
+        "data": {
+          "id": "<id9>",
+          "callId": "call_ask",
+          "questions": [
+            {
+              "id": "color",
+              "question": "Which color?",
+              "options": [
+                {
+                  "label": "red"
+                },
+                {
+                  "label": "blue"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "type": "question/answered",
+        "seq": 49,
+        "time": 1700000004900,
+        "data": {
+          "id": "<id9>",
+          "answers": {
+            "color": {
+              "selected": [
+                "blue"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "tool/result",
+        "seq": 50,
+        "time": 1700000005000,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "message": {
+            "id": "<id10>",
+            "role": "user",
+            "source": {
+              "kind": "tool",
+              "callId": "call_ask"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call_ask",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "{\"answers\":[{\"id\":\"color\",\"selected\":[\"blue\"]}]}"
+                  }
+                ],
+                "isError": false
+              }
+            ]
+          },
+          "meta": {
+            "answers": {
+              "color": {
+                "selected": [
+                  "blue"
+                ]
+              }
+            }
+          }
+        },
+        "sourceEventSeqs": [
+          47
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "step/end",
+        "seq": 51,
+        "time": 1700000005100,
+        "data": {
+          "turn": 1,
+          "step": 2
+        }
+      },
+      {
+        "type": "step/start",
+        "seq": 52,
+        "time": 1700000005200,
+        "data": {
+          "turn": 1,
+          "step": 3
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 53,
+        "time": 1700000005300,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "chunk": {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "tool-call"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 54,
+        "time": 1700000005400,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "chunk": {
+            "type": "tool-call-delta",
+            "index": 0,
+            "id": "call_delegate",
+            "name": "subagent",
+            "argumentsDelta": "{\"description\":\"research\",\"prompt\":\"find x\",\"run_in_background\":false}"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 55,
+        "time": 1700000005500,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "chunk": {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "tool-call",
+              "id": "call_delegate",
+              "name": "subagent",
+              "arguments": "{\"description\":\"research\",\"prompt\":\"find x\",\"run_in_background\":false}"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 56,
+        "time": 1700000005600,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 10,
+              "outputTokens": 5
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 57,
+        "time": 1700000005700,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "chunk": {
+            "type": "finish",
+            "reason": {
+              "kind": "tool-calls"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/message",
+        "seq": 58,
+        "time": 1700000005800,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "id": "call_delegate",
+                "name": "subagent",
+                "arguments": "{\"description\":\"research\",\"prompt\":\"find x\",\"run_in_background\":false}"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "test-route",
+              "model": "test-model"
+            },
+            "id": "<id11>"
+          },
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5
+          }
+        },
+        "sourceEventSeqs": [
+          53,
+          54,
+          55,
+          56,
+          57
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "tool/call",
+        "seq": 59,
+        "time": 1700000005900,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "callId": "call_delegate",
+          "name": "subagent",
+          "arguments": "{\"description\":\"research\",\"prompt\":\"find x\",\"run_in_background\":false}"
+        }
+      },
+      {
+        "type": "subagent/started",
+        "seq": 60,
+        "time": 1700000006000,
+        "data": {
+          "subagentId": "sub-<id12>",
+          "description": "research",
+          "mode": "spawn",
+          "background": false,
+          "callId": "call_delegate"
+        }
+      },
+      {
+        "type": "subagent/settled",
+        "seq": 61,
+        "time": 1700000006100,
+        "data": {
+          "subagentId": "sub-<id12>",
+          "stopReason": "completed",
+          "text": "child found x"
+        }
+      },
+      {
+        "type": "tool/result",
+        "seq": 62,
+        "time": 1700000006200,
+        "data": {
+          "turn": 1,
+          "step": 3,
+          "message": {
+            "id": "<id13>",
+            "role": "user",
+            "source": {
+              "kind": "tool",
+              "callId": "call_delegate"
+            },
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call_delegate",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "child found x"
+                  }
+                ],
+                "isError": false
+              }
+            ]
+          },
+          "meta": {
+            "kind": "foreground",
+            "subagentId": "sub-<id12>",
+            "description": "research",
+            "mode": "spawn"
+          }
+        },
+        "sourceEventSeqs": [
+          59
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "step/end",
+        "seq": 63,
+        "time": 1700000006300,
+        "data": {
+          "turn": 1,
+          "step": 3
+        }
+      },
+      {
+        "type": "step/start",
+        "seq": 64,
+        "time": 1700000006400,
+        "data": {
+          "turn": 1,
+          "step": 4
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 65,
+        "time": 1700000006500,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "block-start",
+            "index": 0,
+            "blockType": "text"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 66,
+        "time": 1700000006600,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "text-delta",
+            "index": 0,
+            "text": "Blue"
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 67,
+        "time": 1700000006700,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "text-delta",
+            "index": 0,
+            "text": " it "
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 68,
+        "time": 1700000006800,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "text-delta",
+            "index": 0,
+            "text": "is."
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 69,
+        "time": 1700000006900,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "block-end",
+            "index": 0,
+            "block": {
+              "type": "text",
+              "text": "Blue it is."
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 70,
+        "time": 1700000007000,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "usage",
+            "usage": {
+              "inputTokens": 200,
+              "outputTokens": 12
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/chunk",
+        "seq": 71,
+        "time": 1700000007100,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "chunk": {
+            "type": "finish",
+            "reason": {
+              "kind": "stop"
+            }
+          }
+        }
+      },
+      {
+        "type": "assistant/message",
+        "seq": 72,
+        "time": 1700000007200,
+        "data": {
+          "turn": 1,
+          "step": 4,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Blue it is."
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "test-route",
+              "model": "test-model"
+            },
+            "id": "<id14>"
+          },
+          "usage": {
+            "inputTokens": 200,
+            "outputTokens": 12
+          }
+        },
+        "sourceEventSeqs": [
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71
+        ],
+        "surfaceOp": "append"
+      },
+      {
+        "type": "step/end",
+        "seq": 73,
+        "time": 1700000007300,
+        "data": {
+          "turn": 1,
+          "step": 4
+        }
+      },
+      {
+        "type": "turn/end",
+        "seq": 74,
+        "time": 1700000007400,
+        "data": {
+          "turn": 1,
+          "reason": {
+            "kind": "completed"
+          }
+        }
+      },
+      {
+        "type": "compaction/start",
+        "seq": 75,
+        "time": 1700000007500,
+        "data": {
+          "compactionId": "<id15>",
+          "turn": null
+        }
+      },
+      {
+        "type": "compaction/summary",
+        "seq": 76,
+        "time": 1700000007600,
+        "data": {
+          "compactionId": "<id15>",
+          "summary": [
+            {
+              "type": "text",
+              "text": "Summary: the user picked blue."
+            }
+          ],
+          "shadowedRange": {
+            "start": 10,
+            "end": 62
+          },
+          "shadowedSeqs": [
+            10,
+            11,
+            12,
+            34,
+            36,
+            38,
+            46,
+            50,
+            58,
+            62
+          ],
+          "shadowedTokenCount": 415,
+          "provider": "test-route",
+          "model": "test-model",
+          "maxTokens": 8192,
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5
+          }
+        }
+      },
+      {
+        "type": "user/message",
+        "seq": 77,
+        "time": 1700000007700,
+        "data": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.\n\n<compacted-summary>"
+            },
+            {
+              "type": "text",
+              "text": "Summary: the user picked blue."
+            },
+            {
+              "type": "text",
+              "text": "</compacted-summary>"
+            }
+          ],
+          "source": {
+            "kind": "context",
+            "producer": "compaction",
+            "form": "recall"
+          },
+          "id": "<id16>"
+        },
+        "sourceEventSeqs": [
+          75,
+          76,
+          10,
+          11,
+          12,
+          34,
+          36,
+          38,
+          46,
+          50,
+          58,
+          62
+        ],
+        "surfaceOp": {
+          "op": "replace",
+          "start": 10,
+          "end": 62
+        }
+      },
+      {
+        "type": "compaction/end",
+        "seq": 78,
+        "time": 1700000007800,
+        "data": {
+          "compactionId": "<id15>",
+          "turn": null
+        }
+      }
+    ],
+    "hasMore": false,
+    "lastSeq": 78
+  },
+  "children": [
+    {
+      "header": {
+        "version": 0,
+        "createdAt": 0,
+        "id": "sub-<id12>",
+        "cwd": "<root>/home/workspace",
+        "parentSession": "<session>",
+        "origin": "subagent",
+        "delegationDepth": 1
+      },
+      "events": [
+        {
+          "type": "subagent/descriptor",
+          "seq": 0,
+          "time": 1700000000000,
+          "data": {
+            "parentSession": "<session>",
+            "description": "research",
+            "mode": "spawn",
+            "parentCallId": "call_delegate"
+          }
+        },
+        {
+          "type": "sandbox/mode",
+          "seq": 1,
+          "time": 1700000000100,
+          "data": {
+            "mode": "workspace-write",
+            "source": "delegation"
+          }
+        },
+        {
+          "type": "approval/policy",
+          "seq": 2,
+          "time": 1700000000200,
+          "data": {
+            "policy": "never",
+            "source": "delegation"
+          }
+        },
+        {
+          "type": "agent/inbox/spliced",
+          "seq": 3,
+          "time": 1700000000300,
+          "data": {
+            "target": "next-turn",
+            "start": 0,
+            "inserted": [
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "find x"
+                  }
+                ],
+                "source": {
+                  "kind": "context",
+                  "producer": "subagent",
+                  "form": "relay"
+                },
+                "id": "<id17>"
+              }
+            ]
+          }
+        },
+        {
+          "type": "turn/start",
+          "seq": 4,
+          "time": 1700000000400,
+          "data": {
+            "turn": 1
+          }
+        },
+        {
+          "type": "agent/inbox/spliced",
+          "seq": 5,
+          "time": 1700000000500,
+          "data": {
+            "target": "next-turn",
+            "start": 0,
+            "removedCount": 1,
+            "inserted": []
+          }
+        },
+        {
+          "type": "instructions/baseline",
+          "seq": 6,
+          "time": 1700000000600,
+          "data": {
+            "digest": "",
+            "files": []
+          }
+        },
+        {
+          "type": "step/start",
+          "seq": 7,
+          "time": 1700000000700,
+          "data": {
+            "turn": 1,
+            "step": 1
+          }
+        },
+        {
+          "type": "user/message",
+          "seq": 8,
+          "time": 1700000000800,
+          "data": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "find x"
+              }
+            ],
+            "source": {
+              "kind": "context",
+              "producer": "subagent",
+              "form": "relay"
+            },
+            "id": "<id17>"
+          },
+          "surfaceOp": "append"
+        },
+        {
+          "type": "user/message",
+          "seq": 9,
+          "time": 1700000000900,
+          "data": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"/private<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).\n\nYou are a delegated subagent: your permission scope was fixed when you were started and cannot be widened from inside this session — operations that require approval are rejected automatically. When the task needs access beyond that scope, do not retry the denied operation; state the limitation in your reply so the delegating agent can handle it."
+              }
+            ],
+            "source": {
+              "kind": "context",
+              "producer": "runtime-context",
+              "form": "snapshot"
+            },
+            "id": "<id18>"
+          },
+          "surfaceOp": "append"
+        },
+        {
+          "type": "request/header",
+          "seq": 10,
+          "time": 1700000001000,
+          "data": {
+            "header": {
+              "config": {
+                "provider": "test-route",
+                "model": "test-model",
+                "maxTokens": 4096
+              },
+              "adapterDefaults": {
+                "maxTokens": true
+              },
+              "system": "You are Emperor Agent, a coding agent powered by the test-model model. Your working directory is <root>/home/workspace.\n\nUse the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files.\n\nUse the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes.\n\nUse the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.\n\nUse the glob tool — not shell find — to discover files by path pattern. A pattern with no \"/\" matches basenames at any depth, so \"*\" matches every file in the tree rather than its top level. Results are files only, never directories, and include hidden and ignored files: a result that fits comes back in modification-time order, while a larger one keeps the modification-time-ordered head.\n\nUse the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context.\n\nCheck the [exit code: N] marker on every bash result; investigate failures before moving on. Each call runs in a fresh shell: pass `workdir` instead of using `cd`, and do not rely on variables or functions from earlier calls.\n\nTrack every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.\n\nSkills live in <root>/home/skills/<name>/SKILL.md (personal) and, in Build sessions, <project>/.emperor/skills/<name>/SKILL.md (project). A Skill is a folder with SKILL.md (YAML frontmatter `name` + `description`, then instructions) and optional scripts/, references/, assets/. Create, update, delete, or import Skills only with the `skill_manage` tool — never with file or shell tools, and never by editing other agents’ skill folders. Built-in and Plugin Skills are read-only.\n\nUse goal tools for one long-running completion objective in the current session. create_goal may infer goal intent from a direct human request in any language; do not create a goal for routine single-turn work. Call get_goal before update_goal and copy its exact goal_id and revision. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least 3 consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.\n\nUse the workflow tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.\n\nUse the ralph tool ONLY when the direct human explicitly asks for a Ralph loop or fresh-agent iterative execution. Each Ralph round starts a fresh child with no conversation seed and uses the shared workspace as durable memory. Completion and blockers are worker reports, not independent evaluation. Use same-session goal tools for ordinary long-running objectives, and plain subagents or workflows for bounded delegation and fan-out.\n\nUse subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.\n\nDeliver your result with the report tool before you finish: call it once with a self-contained answer. The agent that started you shares your workspace but does not automatically receive your transcript, tool output, or reasoning, so a closing remark such as \"done\" leaves it nothing it can use. Report earlier as well whenever a partial finding changes what that agent should do next; reporting never ends your turn.\n\nEmperor's MCP servers are configured only in Emperor's own <root>/home/mcp_config.json; Emperor reads no other MCP config. To list, add, remove, enable, disable, or reload MCP servers, use the mcp_config tool — add accepts pasted JSON in Claude Desktop / Cursor (mcpServers), VS Code (servers), or single-server form. Never use mcporter, and never edit other clients' config files (~/.cursor/mcp.json, ~/.claude.json, Claude Desktop's claude_desktop_config.json, VS Code mcp.json) to add servers for Emperor. After a change the new mcp_<server>_<tool> tools are available from the next step.\nEmperor 的 MCP 配置只有 mcp_config.json 一处，只能用 mcp_config 工具管理；不要用 mcporter，也不要改其他客户端的配置文件。",
+              "tools": [
+                {
+                  "name": "ask_user_question",
+                  "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "questions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "Stable id for this question; echoed in the answer."
+                            },
+                            "question": {
+                              "type": "string",
+                              "description": "The specific question to ask the user."
+                            },
+                            "header": {
+                              "type": "string",
+                              "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "description": "Short user-facing option label."
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "description": "One sentence explaining the tradeoff or impact."
+                                  }
+                                },
+                                "required": [
+                                  "label"
+                                ],
+                                "additionalProperties": {}
+                              },
+                              "description": "Optional choices to show the user. If you recommend one, put it first and append \"(Recommended)\" to that label."
+                            },
+                            "multi_select": {
+                              "type": "boolean",
+                              "description": "Whether the user may select more than one option. Defaults to false."
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "question"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "description": "Questions to ask the user before continuing."
+                      }
+                    },
+                    "required": [
+                      "questions"
+                    ]
+                  }
+                },
+                {
+                  "name": "bash",
+                  "description": "Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$EMPEROR_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`. Attempting a command the sandbox may deny is safe and expected: run it and read the marker rather than assuming the denial. When a command is denied and a wider mode would let it succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. Do not detour through chat to ask permission first — the approval prompt raised by that retry is how the user consents. If the session states approval prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. Never escalate speculatively: ground the request in a real denial — normally the one this command just hit; escalating up front is fine only when this session already denied the same access. A rejected escalation is final for that command — stop and explain, never work around it — but it does not forbid attempting or escalating other commands later.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "description": "The command to execute."
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+                      },
+                      "timeoutMs": {
+                        "description": "Timeout in milliseconds (default 60000, max 600000); the command is killed on expiry.",
+                        "type": "number"
+                      },
+                      "workdir": {
+                        "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.",
+                        "type": "string"
+                      },
+                      "run_in_background": {
+                        "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.",
+                        "type": "boolean"
+                      },
+                      "sandbox_permissions": {
+                        "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                        "type": "string",
+                        "enum": [
+                          "workspace-write",
+                          "danger-full-access"
+                        ]
+                      },
+                      "justification": {
+                        "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "command",
+                      "description"
+                    ]
+                  }
+                },
+                {
+                  "name": "create_goal",
+                  "description": "Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say \"create a goal\". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "objective": {
+                        "type": "string",
+                        "description": "The concrete completion objective inferred from the direct human request."
+                      },
+                      "max_goal_rounds": {
+                        "type": "number",
+                        "description": "Optional positive safe-integer limit on automatic continuation rounds."
+                      }
+                    },
+                    "required": [
+                      "objective"
+                    ]
+                  }
+                },
+                {
+                  "name": "edit",
+                  "description": "Edit an existing UTF-8 text file by replacing literal text.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "file_path": {
+                        "type": "string",
+                        "description": "Path to edit: absolute, or relative to the session working directory."
+                      },
+                      "old_string": {
+                        "type": "string",
+                        "description": "Literal text to replace. Must match exactly."
+                      },
+                      "new_string": {
+                        "type": "string",
+                        "description": "Literal replacement text. Use an empty string to delete the match."
+                      },
+                      "replace_all": {
+                        "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once.",
+                        "type": "boolean"
+                      },
+                      "sandbox_permissions": {
+                        "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                        "type": "string",
+                        "enum": [
+                          "workspace-write",
+                          "danger-full-access"
+                        ]
+                      },
+                      "justification": {
+                        "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "file_path",
+                      "old_string",
+                      "new_string"
+                    ]
+                  }
+                },
+                {
+                  "name": "exit_plan_mode",
+                  "description": "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. Send the COMPLETE plan as markdown, starting with a # heading that names it. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "plan": {
+                        "type": "string",
+                        "description": "The complete plan, as markdown, starting with a # heading that names it."
+                      }
+                    },
+                    "required": [
+                      "plan"
+                    ]
+                  }
+                },
+                {
+                  "name": "get_goal",
+                  "description": "Read the current same-session goal, including its exact id/revision, objective, phase, completed continuation rounds, round limit, blocker reason when present, and whether another continuation is armed. Call this before updating a goal.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                },
+                {
+                  "name": "glob",
+                  "description": "Find files whose paths match a glob pattern. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order (newest first); a larger result returns the first 100 paths in modification-time order, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+                      },
+                      "path": {
+                        "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ]
+                  }
+                },
+                {
+                  "name": "grep",
+                  "description": "Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "pattern": {
+                        "type": "string",
+                        "description": "Regular expression to search for (ripgrep syntax)."
+                      },
+                      "path": {
+                        "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it.",
+                        "type": "string"
+                      },
+                      "include": {
+                        "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ]
+                  }
+                },
+                {
+                  "name": "interrupt_agent",
+                  "description": "Request cancellation of a background agent's current turn by its agent id. The target may be your direct child or a deeper agent created under you. Only the current turn stops: messages already queued for the agent stay parked until a later send_message, agents it started keep running, and the agent itself stays available for follow-ups. This call returns as soon as the stop request is accepted, so the target may keep running briefly; interrupting an agent that already finished is an accepted no-op.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "agent_id": {
+                        "type": "string",
+                        "description": "The agent id of the running agent to interrupt."
+                      }
+                    },
+                    "required": [
+                      "agent_id"
+                    ]
+                  }
+                },
+                {
+                  "name": "job_kill",
+                  "description": "Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "job_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Job id returned by the tool that started the background work."
+                      },
+                      "reason": {
+                        "description": "Optional short reason, recorded in the log and forwarded to the job.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "job_id"
+                    ]
+                  }
+                },
+                {
+                  "name": "job_list",
+                  "description": "List your background jobs (running and finished) with their ids, kinds, and statuses.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                },
+                {
+                  "name": "job_output",
+                  "description": "Read a background job. Stream jobs return only output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "job_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Job id returned by the tool that started the background work."
+                      },
+                      "wait": {
+                        "description": "Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive.",
+                        "type": "boolean"
+                      },
+                      "timeout_ms": {
+                        "description": "Max wait in milliseconds (only meaningful with wait: true). Defaults to 30000; capped at 600000.",
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "job_id"
+                    ]
+                  }
+                },
+                {
+                  "name": "list_agents",
+                  "description": "List the background agents you started (children) or every agent under you (descendants), with their status.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "children",
+                          "descendants"
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mcp_config",
+                  "description": "管理 Emperor 自己的 MCP server 配置（Emperor Home 下的 mcp_config.json；Emperor 只读取这一个文件）。list 查看 server、transport、状态与工具数；add 传入用户给的 MCP JSON（Claude Desktop / Cursor 的 mcpServers、VS Code 的 servers、或带 name 的单个 server；stdio 用 command/args/env，远程用 url + 可选 headers，type 支持 stdio/sse/http），同名 server 默认跳过，overwrite=true 才覆盖；remove / enable / disable 按 name 修改；reload 重新连接全部 server。写操作可能需要用户审批；成功后自动重载，新的 mcp_<server>_<tool> 工具从下一步起可用。不要用 mcporter 或编辑其他客户端的配置文件来添加 MCP。",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "list",
+                          "add",
+                          "remove",
+                          "enable",
+                          "disable",
+                          "reload"
+                        ],
+                        "description": "要执行的动作。"
+                      },
+                      "config": {
+                        "description": "add：MCP 配置 JSON（对象或 JSON 文本），例如 {\"mcpServers\":{\"name\":{\"type\":\"http\",\"url\":\"https://…\"}}}。",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": {}
+                          }
+                        ]
+                      },
+                      "name": {
+                        "description": "remove/enable/disable：server 名称；add 时可为不带 name 的单个 server 指定名称。",
+                        "type": "string"
+                      },
+                      "overwrite": {
+                        "description": "add：同名 server 已存在时是否覆盖（默认 false，跳过）。",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                },
+                {
+                  "name": "memory_edit",
+                  "description": "Edit the user's long-term memory. target \"memory\" is MEMORY.md (durable facts across conversations), \"user\" is USER.md (the user's profile and preferences), \"project\" is the current Build project's memory (markdown `##` sections). Replace an exact unique old_string with new_string, or omit old_string to append new_string. Only record information the user would want remembered; never store secrets.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "memory",
+                          "user",
+                          "project"
+                        ]
+                      },
+                      "old_string": {
+                        "description": "Exact text to replace; must occur exactly once. Omit to append.",
+                        "type": "string"
+                      },
+                      "new_string": {
+                        "type": "string",
+                        "description": "Replacement (or appended) text."
+                      }
+                    },
+                    "required": [
+                      "target",
+                      "new_string"
+                    ]
+                  }
+                },
+                {
+                  "name": "ralph",
+                  "description": "Run a foreground fresh-agent Ralph loop toward one immutable objective. Use only when the direct human explicitly asks for Ralph or fresh-agent iteration. Each round opens a new child with no parent conversation or prior child session; the shared workspace is long-term memory, and only a bounded structured report crosses rounds. The call returns when a worker reports completion or a concrete blocker, or at the round limit. Ordinary long-running same-session work belongs to goal tools.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "objective": {
+                        "type": "string",
+                        "description": "The immutable completion objective for every fresh Ralph round."
+                      },
+                      "maxRounds": {
+                        "description": "Optional positive safe-integer round cap, bounded by the deployment ceiling.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "objective"
+                    ]
+                  }
+                },
+                {
+                  "name": "read",
+                  "description": "Read a UTF-8 text file and return line-numbered content.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "file_path": {
+                        "type": "string",
+                        "description": "Path to read: absolute, or relative to the session working directory."
+                      },
+                      "offset": {
+                        "description": "1-based first line to return. Defaults to 1.",
+                        "type": "number"
+                      },
+                      "limit": {
+                        "description": "Maximum number of lines to return. Defaults to 2000.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "file_path"
+                    ]
+                  }
+                },
+                {
+                  "name": "report",
+                  "description": "Report selected content to the agent that started you. Call this once before you finish, with a self-contained final result, and earlier for progress or findings that change what that agent does next. That agent shares your workspace but does not automatically receive your transcript, tool output, or reasoning, so finishing your work is not itself a result. Reporting does not end your turn or finish your work, and only your direct parent receives it. A failed call may still have arrived, so do not blindly repeat it.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "output": {
+                        "type": "string",
+                        "description": "Actionable content for your parent; summarize conclusions and reference relevant shared paths."
+                      }
+                    },
+                    "required": [
+                      "output"
+                    ]
+                  }
+                },
+                {
+                  "name": "scheduler",
+                  "description": "管理本地持久定时任务：查看、创建、更新、暂停、恢复、删除或手动运行。只读检查使用 list；只有用户明确要求长期、未来或周期性自动执行时，才使用 add/update/remove/run。不要把一次性普通任务伪装成定时任务；调度器失败时报告调度器错误，不要改用系统 cron 或 crontab。新任务绑定到当前会话，触发时在本会话内作为一次新的 turn 执行。",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "add",
+                          "list",
+                          "update",
+                          "remove",
+                          "pause",
+                          "resume",
+                          "run"
+                        ],
+                        "description": "要执行的调度动作。"
+                      },
+                      "job_id": {
+                        "description": "已有定时任务 id，用于 update/remove/pause/resume/run。",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "创建或更新时使用的任务名称。",
+                        "type": "string"
+                      },
+                      "message": {
+                        "description": "任务触发时交给 Agent 的提示词。",
+                        "type": "string"
+                      },
+                      "deliver": {
+                        "description": "执行结果是否显示到本地运行界面（默认显示）。",
+                        "type": "boolean"
+                      },
+                      "at": {
+                        "description": "一次性任务的 ISO 时间，例如 2026-05-20T09:30:00+08:00。",
+                        "type": "string"
+                      },
+                      "every_seconds": {
+                        "description": "循环任务的间隔秒数。",
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "cron_expr": {
+                        "description": "循环任务使用的 cron 表达式。",
+                        "type": "string"
+                      },
+                      "tz": {
+                        "description": "cron 任务使用的 IANA 时区，例如 Asia/Shanghai。",
+                        "type": "string"
+                      },
+                      "delete_after_run": {
+                        "description": "一次性任务运行后是否自动删除。",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                },
+                {
+                  "name": "send_message",
+                  "description": "Send a message to a background subagent by its subagent id, continuing the same conversation. It becomes the subagent's next turn: if it is still working, the message waits until its current turn finishes, so it cannot redirect work already underway. This call returns no answer from the subagent — only confirmation that the message was delivered — so use it to give it more work. A failure means the message was NOT delivered.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "subagent_id": {
+                        "type": "string",
+                        "description": "The subagent id returned when the background subagent was started."
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "The message to deliver to the subagent."
+                      }
+                    },
+                    "required": [
+                      "subagent_id",
+                      "message"
+                    ]
+                  }
+                },
+                {
+                  "name": "skill",
+                  "description": "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "The exact skill name from the available skills list."
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  }
+                },
+                {
+                  "name": "skill_manage",
+                  "description": "Manage Emperor Skills. Read-only: list (Skills available in this session, plus invalid ones with reasons), validate (check SKILL.md text or an installed Skill). Writes: create / update (full SKILL.md in `content`, optional extra files in `files`), delete, import (from a local folder, a local .zip, pasted SKILL.md, or an https link — GitHub repository/folder links or direct .zip links). Writes need user approval unless the session runs with full access. Built-in and Plugin Skills are read-only. Use this tool instead of file or shell tools for anything under the Skills folders.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "list",
+                          "validate",
+                          "create",
+                          "update",
+                          "delete",
+                          "import"
+                        ],
+                        "description": "What to do."
+                      },
+                      "name": {
+                        "description": "Skill name (lowercase letters, digits, \".\", \"_\", \"-\"). Required for delete; for create/update it must equal the frontmatter name.",
+                        "type": "string"
+                      },
+                      "content": {
+                        "description": "Full SKILL.md text starting with YAML frontmatter (`name`, `description`). Required for create/update; optional for validate.",
+                        "type": "string"
+                      },
+                      "files": {
+                        "description": "Extra text files for create/update, keyed by path relative to the Skill folder, e.g. {\"scripts/run.py\": \"...\"}.",
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "scope": {
+                        "description": "user (default) = personal Skills; project = this Build project (Build sessions only).",
+                        "type": "string",
+                        "enum": [
+                          "user",
+                          "project"
+                        ]
+                      },
+                      "source": {
+                        "description": "import only: where the Skill comes from.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "folder"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Absolute path of a local folder."
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "zip"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Absolute path of a local .zip file."
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "url"
+                              },
+                              "url": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "https link: https://github.com/<owner>/<repo>[/tree/<ref>/<folder>] or a direct .zip link."
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "url"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "content"
+                              },
+                              "content": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Full SKILL.md text."
+                              },
+                              "name": {
+                                "description": "Skill name; overrides the frontmatter name.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "content"
+                            ]
+                          }
+                        ]
+                      },
+                      "overwrite": {
+                        "description": "import only: replace existing Skills with the same name.",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ]
+                  }
+                },
+                {
+                  "name": "subagent",
+                  "description": "Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. Give it a complete, standalone prompt: it does not see this conversation. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "description": {
+                        "type": "string",
+                        "description": "A short (3-5 word) description of the delegated task, for display."
+                      },
+                      "prompt": {
+                        "type": "string",
+                        "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+                      },
+                      "run_in_background": {
+                        "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "description",
+                      "prompt"
+                    ]
+                  }
+                },
+                {
+                  "name": "subagent_fork",
+                  "description": "Delegate a task to a subagent that inherits this conversation: a child agent seeded with all completed turns so far (it does not see the current in-flight turn). Use this when the subtask builds on this conversation's context — a follow-up analysis, a review, a continuation — without consuming this conversation's context for the work itself. You receive its result, not its intermediate steps. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "description": {
+                        "type": "string",
+                        "description": "A short (3-5 word) description of the delegated task, for display."
+                      },
+                      "prompt": {
+                        "type": "string",
+                        "description": "The task for the subagent. It already sees this conversation's completed turns, so build on them freely and state only what is new."
+                      },
+                      "run_in_background": {
+                        "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "description",
+                      "prompt"
+                    ]
+                  }
+                },
+                {
+                  "name": "todo_write",
+                  "description": "Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished).",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "todos": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "content": {
+                              "type": "string",
+                              "description": "What the task is — a short imperative line."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "in_progress",
+                                "completed"
+                              ],
+                              "description": "pending (not started) | in_progress (now) | completed (done)."
+                            }
+                          },
+                          "required": [
+                            "content",
+                            "status"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "The COMPLETE task list, replacing any previous list."
+                      }
+                    },
+                    "required": [
+                      "todos"
+                    ]
+                  }
+                },
+                {
+                  "name": "update_goal",
+                  "description": "Update the exact current goal revision. edit, pause, and resume require a direct top-level human request. During an automatic continuation of the current goal, complete and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "goal_id": {
+                        "type": "string",
+                        "description": "Exact id returned by get_goal."
+                      },
+                      "revision": {
+                        "type": "number",
+                        "description": "Exact positive revision returned by get_goal."
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "edit",
+                          "pause",
+                          "resume",
+                          "complete",
+                          "blocked"
+                        ],
+                        "description": "edit | pause | resume | complete | blocked"
+                      },
+                      "objective": {
+                        "type": "string",
+                        "description": "Replacement objective; valid only with action edit."
+                      },
+                      "max_goal_rounds": {
+                        "type": "number",
+                        "description": "Replacement cap; valid only with action edit."
+                      },
+                      "blocked_reason": {
+                        "type": "string",
+                        "description": "Concrete blocking condition; required only with action blocked."
+                      }
+                    },
+                    "required": [
+                      "goal_id",
+                      "revision",
+                      "action"
+                    ]
+                  }
+                },
+                {
+                  "name": "workflow",
+                  "description": "Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.\n\nThe workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.\n\nScript-body hooks:\n- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.\n- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.\n- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.\n- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.\n\nMisused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.\n\nConstraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "script": {
+                        "type": "string",
+                        "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+                      },
+                      "meta": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Short kebab-case workflow name."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "One-line description of what the workflow does."
+                          },
+                          "whenToUse": {
+                            "description": "Optional guidance on when this workflow applies.",
+                            "type": "string"
+                          },
+                          "phases": {
+                            "description": "Optional phase declarations matched by phase() calls.",
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "title": {
+                                  "type": "string",
+                                  "description": "The phase title phase() calls match by exact string."
+                                },
+                                "detail": {
+                                  "description": "Optional one-line description of the phase.",
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "description": "Optional provider override this phase is expected to use.",
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "description": "Optional model override this phase is expected to use.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "title"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "description"
+                        ],
+                        "additionalProperties": {},
+                        "description": "The workflow identity block (plain JSON — never code)."
+                      },
+                      "args": {
+                        "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "script",
+                      "meta"
+                    ]
+                  }
+                },
+                {
+                  "name": "write",
+                  "description": "Create or fully replace a UTF-8 text file.",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "file_path": {
+                        "type": "string",
+                        "description": "Path to write: absolute, or relative to the session working directory."
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Full UTF-8 text content to write."
+                      },
+                      "sandbox_permissions": {
+                        "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                        "type": "string",
+                        "enum": [
+                          "workspace-write",
+                          "danger-full-access"
+                        ]
+                      },
+                      "justification": {
+                        "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "file_path",
+                      "content"
+                    ]
+                  }
+                }
+              ]
+            },
+            "reason": "initial"
+          }
+        },
+        {
+          "type": "request/context",
+          "seq": 11,
+          "time": 1700000001100,
+          "data": {
+            "provider": "test-route",
+            "model": "test-model",
+            "contextWindow": 100000
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 12,
+          "time": 1700000001200,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "block-start",
+              "index": 0,
+              "blockType": "text"
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 13,
+          "time": 1700000001300,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "text-delta",
+              "index": 0,
+              "text": "chil"
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 14,
+          "time": 1700000001400,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "text-delta",
+              "index": 0,
+              "text": "d fo"
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 15,
+          "time": 1700000001500,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "text-delta",
+              "index": 0,
+              "text": "und "
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 16,
+          "time": 1700000001600,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "text-delta",
+              "index": 0,
+              "text": "x"
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 17,
+          "time": 1700000001700,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "block-end",
+              "index": 0,
+              "block": {
+                "type": "text",
+                "text": "child found x"
+              }
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 18,
+          "time": 1700000001800,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "usage",
+              "usage": {
+                "inputTokens": 10,
+                "outputTokens": 5
+              }
+            }
+          }
+        },
+        {
+          "type": "assistant/chunk",
+          "seq": 19,
+          "time": 1700000001900,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "chunk": {
+              "type": "finish",
+              "reason": {
+                "kind": "stop"
+              }
+            }
+          }
+        },
+        {
+          "type": "assistant/message",
+          "seq": 20,
+          "time": 1700000002000,
+          "data": {
+            "turn": 1,
+            "step": 1,
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "child found x"
+                }
+              ],
+              "source": {
+                "kind": "model",
+                "provider": "test-route",
+                "model": "test-model"
+              },
+              "id": "<id19>"
+            },
+            "usage": {
+              "inputTokens": 10,
+              "outputTokens": 5
+            }
+          },
+          "sourceEventSeqs": [
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19
+          ],
+          "surfaceOp": "append"
+        },
+        {
+          "type": "step/end",
+          "seq": 21,
+          "time": 1700000002100,
+          "data": {
+            "turn": 1,
+            "step": 1
+          }
+        },
+        {
+          "type": "turn/end",
+          "seq": 22,
+          "time": 1700000002200,
+          "data": {
+            "turn": 1,
+            "reason": {
+              "kind": "completed"
+            }
+          }
+        }
+      ],
+      "hasMore": false,
+      "lastSeq": 22
+    }
+  ]
+}

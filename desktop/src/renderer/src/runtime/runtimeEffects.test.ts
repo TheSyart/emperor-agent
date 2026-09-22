@@ -6,7 +6,7 @@ import {
 } from './runtimeEffects'
 
 describe('runtimeEffects', () => {
-  it('refreshes only the command catalog for live Skill catalog changes', () => {
+  it('refreshes the command catalog and the Skill list for live Skill catalog changes', () => {
     const transition = reduceRuntimeEffects(createRuntimeEffectState(), {
       type: 'runtime_event_committed',
       origin: 'live',
@@ -21,6 +21,11 @@ describe('runtimeEffects', () => {
     expect(transition.effects).toEqual([
       expect.objectContaining({
         type: 'refresh_commands',
+        sessionId: 'session_1',
+        eventSeq: 8,
+      }),
+      expect.objectContaining({
+        type: 'refresh_skills',
         sessionId: 'session_1',
         eventSeq: 8,
       }),

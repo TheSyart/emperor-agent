@@ -249,6 +249,46 @@ describe('PluginApplicationService', () => {
     })
     expect(service.enabledSkillRoots()).toEqual([])
   })
+
+  it('installs a local .zip archive as a local user source', async () => {
+    const { emperorHome } = fixture()
+    const archivePath = join(emperorHome, 'agent-reach.zip')
+    writeFileSync(
+      archivePath,
+      zip([
+        {
+          name: 'agent-reach/.emperor-plugin/plugin.json',
+          data: JSON.stringify({
+            schemaVersion: 1,
+            id: 'official/agent-reach',
+            name: 'Agent Reach',
+            version: '4.0.0',
+            skills: ['skills'],
+          }),
+        },
+        {
+          name: 'agent-reach/skills/agent-reach/SKILL.md',
+          data: '---\nname: agent-reach\ndescription: zipped\n---\nZipped.\n',
+        },
+      ]),
+    )
+    const service = new PluginApplicationService({ emperorHome })
+
+    const preview = await service.inspect({ kind: 'local', path: archivePath })
+
+    expect(preview).toMatchObject({
+      version: '4.0.0',
+      source: { kind: 'local', label: 'agent-reach.zip' },
+      signature: { status: 'local_user_source' },
+    })
+    const installed = await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(installed.plugin).toMatchObject({ enabled: true })
+    expect(service.enabledSkillRoots()).toHaveLength(1)
+  })
 })
 
 function zip(entries: Array<{ name: string; data: string | Buffer }>): Buffer {

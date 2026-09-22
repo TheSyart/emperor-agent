@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
+import { SKILL_NAME, SKILL_NAME_MAX_LENGTH } from '../skills/name'
 import {
   environmentIdSchema,
   environmentToolIdSchema,
@@ -13,27 +14,30 @@ const taskIdSchema = idSchema.refine(
     /^[A-Za-z0-9_-][A-Za-z0-9_.:-]*$/.test(value) && !value.includes('..'),
   'invalid task id',
 )
-const fileCheckpointIdSchema = z
-  .string()
-  .regex(/^fcp_[a-f0-9]{24}$/, 'invalid file checkpoint id')
-const fileCheckpointSessionSchema = z
-  .object({ sessionId: idSchema.nullable().optional() })
-  .strict()
-const fileCheckpointLookupSchema = z
+const sessionLogIdSchema = idSchema
+  .max(256)
+  .refine(
+    (value) =>
+      /^[A-Za-z0-9_-][A-Za-z0-9_.:-]*$/.test(value) && !value.includes('..'),
+    'invalid session id',
+  )
+const sessionHistorySchema = z
   .object({
-    sessionId: idSchema,
-    checkpointId: fileCheckpointIdSchema,
+    sessionId: sessionLogIdSchema,
+    beforeSeq: z.number().int().nonnegative().optional(),
+    maxMessages: z.number().int().min(1).max(500).optional(),
   })
   .strict()
-const fileCheckpointRewindSchema = fileCheckpointLookupSchema.extend({
-  confirmed: z.literal(true),
-})
-const fileCheckpointGitRewindSchema = fileCheckpointLookupSchema.extend({
-  confirmed: z.literal(true),
-  confirmedGitRisk: z.literal(true),
-  previewRevision: sha256Schema,
-  dirtyStrategy: z.enum(['abort', 'stash']),
-})
+const sessionRefSchema = z.object({ sessionId: sessionLogIdSchema }).strict()
+const sessionEventSchema = z
+  .object({
+    sessionId: sessionLogIdSchema,
+    seq: z.number().int().nonnegative(),
+  })
+  .strict()
+const sessionWatchSchema = z
+  .object({ sessionIds: z.array(sessionLogIdSchema).max(64) })
+  .strict()
 const skillNameSchema = z
   .string()
   .trim()
@@ -42,8 +46,15 @@ const creatorSkillNameSchema = z
   .string()
   .trim()
   .min(1)
-  .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'invalid creator skill name')
+  .max(SKILL_NAME_MAX_LENGTH)
+  .regex(SKILL_NAME, 'invalid skill name')
+/** Skill names of read/write ops; the service reports rule violations with reasons. */
+const skillOpNameSchema = z.string().trim().min(1).max(128)
+const skillScopeSchema = z.enum(['user', 'project'])
+const skillSessionOptionsSchema = z
+  .object({ sessionId: sessionLogIdSchema.nullable().optional() })
+  .strict()
+const skillContentSchema = z.string().max(1_048_576)
 const skillCreateSchema = z
   .object({
     name: creatorSkillNameSchema,
@@ -56,11 +67,57 @@ const skillCreateSchema = z
   .strict()
 const skillValidateSchema = z
   .object({
-    name: creatorSkillNameSchema,
-    content: z.string().optional(),
+    name: skillOpNameSchema.optional(),
+    content: skillContentSchema.optional(),
+    sessionId: sessionLogIdSchema.nullable().optional(),
   })
   .strict()
-const skillPackageSchema = z.object({ name: creatorSkillNameSchema }).strict()
+  .refine(
+    (value) => value.name !== undefined || value.content !== undefined,
+    'name or content is required',
+  )
+const skillDeleteOptionsSchema = z
+  .object({
+    sessionId: sessionLogIdSchema.nullable().optional(),
+    scope: skillScopeSchema.nullable().optional(),
+  })
+  .strict()
+const skillImportSourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('content'),
+      content: skillContentSchema.min(1),
+      name: z.string().trim().max(128).nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('folder'), path: z.string().min(1).max(4_096) })
+    .strict(),
+  z
+    .object({ kind: z.literal('zip'), path: z.string().min(1).max(4_096) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('url'),
+      url: z.string().url().startsWith('https://').max(2_048),
+    })
+    .strict(),
+])
+const skillImportSchema = z
+  .object({
+    source: skillImportSourceSchema,
+    scope: skillScopeSchema,
+    sessionId: sessionLogIdSchema.nullable().optional(),
+    overwrite: z.boolean().optional(),
+  })
+  .strict()
+const skillCopyToUserSchema = z
+  .object({
+    name: skillOpNameSchema,
+    sessionId: sessionLogIdSchema.nullable().optional(),
+    overwrite: z.boolean().optional(),
+  })
+  .strict()
 const environmentStatusSchema = z
   .object({ forceRefresh: z.boolean().optional() })
   .strict()
@@ -82,31 +139,6 @@ const environmentLogSchema = z
     jobId: environmentIdSchema,
     cursor: z.number().int().nonnegative().optional(),
     limit: z.number().int().min(1).max(200).optional(),
-  })
-  .strict()
-const skillInstallSourceSchema = z.discriminatedUnion('kind', [
-  z
-    .object({ kind: z.literal('local'), path: z.string().min(1).max(4_096) })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('url'),
-      url: z.string().url().startsWith('https://').max(2_048),
-    })
-    .strict(),
-])
-const skillPreviewInstallSchema = z
-  .object({ source: skillInstallSourceSchema })
-  .strict()
-const skillConfirmInstallSchema = z
-  .object({
-    previewId: z.string().regex(/^preview_[a-f0-9]{24}$/),
-    digest: sha256Schema,
-    candidateId: z
-      .string()
-      .regex(/^candidate_[a-f0-9]{20}$/)
-      .optional(),
-    permissionConfirmed: z.literal(true),
   })
   .strict()
 const pluginIdSchema = z
@@ -402,22 +434,6 @@ const terminalResizeSchema = terminalIdentitySchema.extend({
   cols: z.number().int().min(2).max(1_000),
   rows: z.number().int().min(2).max(1_000),
 })
-const projectProcessIdentitySchema = z
-  .object({
-    sessionId: idSchema,
-    processId: idSchema,
-  })
-  .strict()
-const projectProcessReadOutputSchema = projectProcessIdentitySchema.extend({
-  afterSeq: z.number().int().nonnegative().optional(),
-})
-const projectProcessStopSchema = projectProcessIdentitySchema.extend({
-  expectedRevision: z.number().int().positive(),
-})
-const projectProcessRestartSchema = projectProcessStopSchema.extend({
-  confirmed: z.literal(true),
-  invocationId: idSchema,
-})
 const referenceResolveSchema = z
   .object({
     sessionId: idSchema,
@@ -442,30 +458,13 @@ const draftSessionSchema = z
   })
   .strict()
 
-const goalGuardPolicySchema = z
-  .object({
-    maxCycles: z.number().int().positive().nullable().optional(),
-    deadlineAt: z.string().datetime().nullable().optional(),
-    maxEstimatedCostUsd: z.number().positive().nullable().optional(),
-    noEvidencePauseAfterCycles: z.number().int().min(1).max(20).optional(),
-  })
-  .strict()
-
 const goalStartSchema = z
   .object({
-    outcome: z.string().trim().min(1).max(4_000),
+    objective: z.string().trim().min(1).max(4_000),
     sessionId: idSchema,
+    maxRounds: z.number().int().positive().max(1_000).nullable().optional(),
     clientDraftId: nullableStringSchema,
     draftSession: draftSessionSchema.nullable().optional(),
-    guardPolicy: goalGuardPolicySchema.nullable().optional(),
-  })
-  .strict()
-
-const goalReplaceSchema = z
-  .object({
-    goalId: idSchema,
-    outcome: z.string().trim().min(1).max(4_000),
-    sessionId: idSchema,
   })
   .strict()
 
@@ -573,7 +572,7 @@ const runtimeReplayOptionsSchema = z
     includeArchive: booleanLikeSchema,
     include_archive: booleanLikeSchema,
     compact: booleanLikeSchema,
-    format: z.enum(['projection', 'envelope_v2']).optional(),
+    format: z.literal('projection').optional(),
   })
   .strict()
 
@@ -612,6 +611,22 @@ const mcpConfigSchema = z
       .optional(),
   })
   .passthrough()
+
+const mcpServerNameSchema = z.string().trim().min(1).max(128)
+const mcpImportSchema = z
+  .object({
+    /** Pasted JSON text or an already-parsed object in any supported client format. */
+    raw: z.union([z.string().max(256_000), dictSchema]),
+    overwrite: z
+      .union([z.boolean(), z.array(mcpServerNameSchema).max(256)])
+      .optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .strict()
+const mcpServerEnabledSchema = z
+  .object({ name: mcpServerNameSchema, enabled: z.boolean() })
+  .strict()
+const mcpServerRefSchema = z.object({ name: mcpServerNameSchema }).strict()
 
 const sessionPatchSchema = z.union([
   z.string(),
@@ -674,9 +689,10 @@ export const CORE_OPERATION_REGISTRY = {
         .object({
           taskId: nullableStringSchema,
           kind: z
-            .enum(['turn', 'scheduler', 'team', 'watchlist', 'goal'])
+            .enum(['turn', 'scheduler', 'watchlist', 'goal', 'job', 'subagent'])
             .nullable()
             .optional(),
+          sessionId: nullableStringSchema,
         })
         .strict()
         .optional(),
@@ -734,21 +750,21 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [id, comment, options]) =>
       api.control.commentPlan(id, comment, options),
   ),
-  'control.get': operation(z.tuple([]), (api) => api.control.get()),
+  'control.get': operation(
+    z.tuple([nullableStringSchema]),
+    (api, [sessionId]) => api.control.get(sessionId),
+  ),
   'control.setPermissionMode': operation(
     z.tuple([
-      z.enum([
-        'ask_before_edit',
-        'smart_auto',
-        'full_access',
-        'accept_edits',
-        'auto',
-      ]),
+      z.enum(['read-only', 'workspace-write', 'danger-full-access']),
+      nullableStringSchema,
     ]),
-    (api, [mode]) => api.control.setPermissionMode(mode),
+    (api, [preset, sessionId]) =>
+      api.control.setPermissionMode(preset, sessionId),
   ),
-  'control.setMode': operation(z.tuple([z.string()]), (api, [mode]) =>
-    api.control.setMode(mode),
+  'control.setMode': operation(
+    z.tuple([z.enum(['plan', 'default']), nullableStringSchema]),
+    (api, [mode, sessionId]) => api.control.setMode(mode, sessionId),
   ),
   'desktopPet.get': operation(z.tuple([]), (api) => api.desktopPet.get()),
   'desktopPet.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>
@@ -792,27 +808,8 @@ export const CORE_OPERATION_REGISTRY = {
   'goals.resume': operation(z.tuple([idSchema]), (api, [id]) =>
     api.goals.resume(id),
   ),
-  'goals.replace': operation(z.tuple([goalReplaceSchema]), (api, [input]) =>
-    api.goals.replace(input),
-  ),
   'goals.start': operation(z.tuple([goalStartSchema]), (api, [input]) =>
     api.goals.start(input),
-  ),
-  'fileCheckpoints.list': operation(
-    z.tuple([fileCheckpointSessionSchema.optional()]),
-    (api, [input]) => api.fileCheckpoints.list(input),
-  ),
-  'fileCheckpoints.preview': operation(
-    z.tuple([fileCheckpointLookupSchema]),
-    (api, [input]) => api.fileCheckpoints.preview(input),
-  ),
-  'fileCheckpoints.rewind': operation(
-    z.tuple([fileCheckpointRewindSchema]),
-    (api, [input]) => api.fileCheckpoints.rewind(input),
-  ),
-  'fileCheckpoints.rewindGit': operation(
-    z.tuple([fileCheckpointGitRewindSchema]),
-    (api, [input]) => api.fileCheckpoints.rewindGit(input),
   ),
   'files.list': operation(z.tuple([workspaceFilePageSchema]), (api, [input]) =>
     api.files.list(input),
@@ -937,6 +934,16 @@ export const CORE_OPERATION_REGISTRY = {
   'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input]) =>
     api.mcp.saveConfig({ ...input }),
   ),
+  'mcp.importServers': operation(z.tuple([mcpImportSchema]), (api, [input]) =>
+    api.mcp.importServers(input),
+  ),
+  'mcp.setServerEnabled': operation(
+    z.tuple([mcpServerEnabledSchema]),
+    (api, [input]) => api.mcp.setServerEnabled(input),
+  ),
+  'mcp.removeServer': operation(z.tuple([mcpServerRefSchema]), (api, [input]) =>
+    api.mcp.removeServer(input),
+  ),
   'memory.checkWatchlist': operation(z.tuple([]), (api) =>
     api.memory.checkWatchlist(),
   ),
@@ -1041,8 +1048,6 @@ export const CORE_OPERATION_REGISTRY = {
   'onboarding.skipProfileInterview': operation(z.tuple([]), (api) =>
     api.onboarding.skipProfileInterview(),
   ),
-  'plans.get': operation(z.tuple([idSchema]), (api, [id]) => api.plans.get(id)),
-  'plans.list': operation(z.tuple([]), (api) => api.plans.list()),
   'plugins.inspect': operation(
     z.tuple([pluginInstallSourceSchema]),
     (api, [input]) => api.plugins.inspect(input),
@@ -1091,6 +1096,9 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.activate': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.activate(id),
   ),
+  'sessions.children': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
+    api.sessions.children(input),
+  ),
   'sessions.create': operation(
     z.tuple([
       z
@@ -1108,6 +1116,16 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.delete': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.delete(id),
   ),
+  'sessions.event': operation(z.tuple([sessionEventSchema]), (api, [input]) =>
+    api.sessions.event(input),
+  ),
+  'sessions.history': operation(
+    z.tuple([sessionHistorySchema]),
+    (api, [input]) => api.sessions.history(input),
+  ),
+  'sessions.lineage': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
+    api.sessions.lineage(input),
+  ),
   'sessions.list': operation(
     z.tuple([
       z.object({ includeArchived: z.boolean().optional() }).strict().optional(),
@@ -1118,34 +1136,43 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([idSchema, sessionPatchSchema]),
     (api, [id, patch]) => api.sessions.rename(id, patch),
   ),
+  'sessions.watch': operation(z.tuple([sessionWatchSchema]), (api, [input]) =>
+    api.sessions.watch(input),
+  ),
   'sidebar.get': operation(z.tuple([]), (api) => api.sidebar.get()),
   'sidebar.patch': operation(z.tuple([dictSchema]), (api, [input]) =>
     api.sidebar.patch(input),
   ),
-  'skills.delete': operation(z.tuple([idSchema]), (api, [name]) =>
-    api.skills.delete(name),
+  'skills.copyToUser': operation(
+    z.tuple([skillCopyToUserSchema]),
+    (api, [input]) => api.skills.copyToUser(input),
   ),
   'skills.create': operation(z.tuple([skillCreateSchema]), (api, [input]) =>
     api.skills.create(input),
   ),
-  'skills.get': operation(z.tuple([idSchema]), (api, [name]) =>
-    api.skills.get(name),
+  'skills.delete': operation(
+    z.tuple([skillOpNameSchema, skillDeleteOptionsSchema.optional()]),
+    (api, [name, options]) => api.skills.delete(name, options ?? {}),
   ),
-  'skills.confirmInstall': operation(
-    z.tuple([skillConfirmInstallSchema]),
-    (api, [input]) => api.skills.confirmInstall(input),
+  'skills.get': operation(
+    z.tuple([skillOpNameSchema, skillSessionOptionsSchema.optional()]),
+    (api, [name, options]) => api.skills.get(name, options ?? {}),
   ),
-  'skills.list': operation(z.tuple([]), (api) => api.skills.list()),
-  'skills.package': operation(z.tuple([skillPackageSchema]), (api, [input]) =>
-    api.skills.package(input),
+  'skills.import': operation(z.tuple([skillImportSchema]), (api, [input]) =>
+    api.skills.import(input),
   ),
-  'skills.previewInstall': operation(
-    z.tuple([skillPreviewInstallSchema]),
-    (api, [input]) => api.skills.previewInstall(input),
+  'skills.list': operation(
+    z.tuple([skillSessionOptionsSchema.optional()]),
+    (api, [options]) => api.skills.list(options ?? {}),
   ),
   'skills.save': operation(
-    z.tuple([idSchema, z.string()]),
-    (api, [name, content]) => api.skills.save(name, content),
+    z.tuple([
+      skillOpNameSchema,
+      skillContentSchema,
+      skillSessionOptionsSchema.optional(),
+    ]),
+    (api, [name, content, options]) =>
+      api.skills.save(name, content, options ?? {}),
   ),
   'skills.tools': operation(z.tuple([]), (api) => api.skills.tools()),
   'skills.validate': operation(z.tuple([skillValidateSchema]), (api, [input]) =>
@@ -1256,63 +1283,6 @@ export const CORE_OPERATION_REGISTRY = {
         .strict(),
     ]),
     (api, [id, options]) => api.processes.reparent(id, options),
-  ),
-  'team.get': operation(z.tuple([]), (api) => api.team.get()),
-  'team.getMember': operation(z.tuple([idSchema]), (api, [name]) =>
-    api.team.getMember(name),
-  ),
-  'team.sendMessage': operation(
-    z.tuple([
-      z
-        .object({
-          to: idSchema,
-          content: z.string(),
-          wake: z.boolean().optional(),
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.team.sendMessage(input),
-  ),
-  'team.shutdownMember': operation(z.tuple([idSchema]), (api, [name]) =>
-    api.team.shutdownMember(name),
-  ),
-  'team.spawnMember': operation(
-    z.tuple([
-      z
-        .object({
-          name: idSchema,
-          role: z.string(),
-          task: nullableStringSchema,
-          agent_type: nullableStringSchema,
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.team.spawnMember(input),
-  ),
-  'team.wakeMember': operation(
-    z.tuple([
-      idSchema,
-      z
-        .object({
-          purpose: z.string().optional(),
-          recovery: z.enum(['auto', 'retry']).optional(),
-        })
-        .strict()
-        .optional(),
-    ]),
-    (api, [name, options]) => api.team.wakeMember(name, options),
-  ),
-  'projectProcesses.readOutput': operation(
-    z.tuple([projectProcessReadOutputSchema]),
-    (api, [input]) => api.projectProcesses.readOutput(input),
-  ),
-  'projectProcesses.stop': operation(
-    z.tuple([projectProcessStopSchema]),
-    (api, [input]) => api.projectProcesses.stop(input),
-  ),
-  'projectProcesses.restart': operation(
-    z.tuple([projectProcessRestartSchema]),
-    (api, [input]) => api.projectProcesses.restart(input),
   ),
   'references.resolve': operation(
     z.tuple([referenceResolveSchema]),
@@ -1427,7 +1397,6 @@ export async function invokeCoreOperation<Key extends CoreOperationKey>(
   key: Key,
   input: unknown,
 ): Promise<CoreOperationResult<Key>> {
-  api.loop?.lifecycleSupervisor?.assertReady()
   const spec = CORE_OPERATION_REGISTRY[key]
   try {
     return (await spec.parseAndInvoke(api, input)) as CoreOperationResult<Key>

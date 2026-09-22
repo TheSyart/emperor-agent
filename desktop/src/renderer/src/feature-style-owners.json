@@ -1,56 +1,48 @@
 {
   "schemaVersion": 1,
-  "cascadeOrder": [
-    "styles/activity.css",
-    "styles/panels.css",
-    "styles/responsive.css",
-    "styles/surfaces/composer.css",
-    "styles/surfaces/decision.css",
-    "styles/surfaces/menus.css",
-    "styles/surfaces/panels.css"
-  ],
+  "cascadeOrder": ["styles/surfaces/menus.css", "styles/surfaces/panels.css"],
   "features": {
     "composer": {
-      "view": "components/chat/Composer.vue",
+      "view": "components/composer/ComposerCard.vue",
       "controller": "components/chat/composerController.ts",
       "layers": [
         {
-          "role": "legacy-foundation",
-          "path": "styles/activity.css"
-        },
-        {
-          "role": "attachment-and-draft-support",
-          "path": "styles/panels.css"
-        },
-        {
-          "role": "legacy-responsive",
-          "path": "styles/responsive.css"
-        },
-        {
-          "role": "progress-and-change-surface",
-          "path": "styles/surfaces/composer.css"
-        },
-        {
-          "role": "active-composer-surface",
-          "path": "styles/surfaces/decision.css"
+          "role": "component-scoped",
+          "path": "components/composer/ComposerCard.vue",
+          "scoped": true
         },
         {
           "role": "palette-and-picker-surface",
           "path": "styles/surfaces/menus.css"
         },
         {
-          "role": "current-responsive-overrides",
+          "role": "narrow-palette-overrides",
           "path": "styles/surfaces/panels.css"
         }
       ]
     },
     "hooks": {
-      "view": "components/panels/HooksPanel.vue",
-      "controller": "components/panels/hooksPanelController.ts",
+      "view": "components/settings/HooksSection.vue",
+      "controller": "components/settings/hooks/hooksController.ts",
       "layers": [
         {
           "role": "component-scoped",
-          "path": "components/panels/HooksPanel.vue",
+          "path": "components/settings/HooksSection.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/settings/hooks/HooksConfigTab.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/settings/hooks/HooksTestTab.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/settings/hooks/HooksAuditTab.vue",
           "scoped": true
         }
       ]

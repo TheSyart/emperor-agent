@@ -25,11 +25,14 @@ export function composerStopPresentation(goalActive: boolean) {
       }
 }
 
-export type ControlModeValue = 'ask_before_edit' | 'smart_auto' | 'full_access'
+export type ControlModeValue =
+  'read-only' | 'workspace-write' | 'danger-full-access'
 
 export interface ComposerControlProjection {
+  preset?: string | null
   mode?: string | null
-  previous_mode?: ControlModeValue | null
+  plan?: boolean
+  presets?: Array<{ value: string; name: string; description: string }>
 }
 
 export interface ComposerModeOption {
@@ -41,33 +44,54 @@ export interface ComposerModeOption {
 
 export const composerModeOptions: ComposerModeOption[] = [
   {
-    value: 'ask_before_edit',
-    label: '询问确认',
-    short: '询问',
-    description: '只读操作直接执行；编辑、Shell 与外部写入先确认',
+    value: 'read-only',
+    label: '只读',
+    short: '只读',
+    description: '沙箱只读；写入与命令越权先确认',
   },
   {
-    value: 'smart_auto',
-    label: '智能自动',
-    short: '智能',
-    description: '自动执行本地安全操作，高影响和不确定操作先确认',
+    value: 'workspace-write',
+    label: '工作区可写',
+    short: '工作区',
+    description: '可读写当前工作区；越出沙箱的操作先确认',
   },
   {
-    value: 'full_access',
+    value: 'danger-full-access',
     label: '完全访问',
     short: '完全',
-    description:
-      '主 Agent 命令宿主直执且免询问；明确拒绝、Plan 与子代理边界仍有效',
+    description: '不启用沙箱且免询问；请仅在可信任务中使用',
   },
 ]
+
+const PRESET_VALUES = new Set<string>(
+  composerModeOptions.map((option) => option.value),
+)
 
 export function normalizeComposerControlMode(
   mode: string | null | undefined,
 ): ControlModeValue {
-  if (mode === 'normal' || !mode) return 'ask_before_edit'
-  if (mode === 'smart_auto' || mode === 'accept_edits') return 'smart_auto'
-  if (mode === 'full_access' || mode === 'auto') return 'full_access'
-  return 'ask_before_edit'
+  return PRESET_VALUES.has(String(mode || ''))
+    ? (mode as ControlModeValue)
+    : 'workspace-write'
+}
+
+/** Preset options, preferring Core's names/descriptions from `control.presets`. */
+export function composerPresetOptions(
+  control: ComposerControlProjection | null | undefined,
+): ComposerModeOption[] {
+  const fromCore = new Map(
+    (control?.presets || []).map((preset) => [preset.value, preset]),
+  )
+  return composerModeOptions.map((option) => {
+    const core = fromCore.get(option.value)
+    return core
+      ? {
+          ...option,
+          label: core.name || option.label,
+          description: core.description || option.description,
+        }
+      : option
+  })
 }
 
 export function currentComposerMode(
@@ -76,14 +100,12 @@ export function currentComposerMode(
   const normalized = normalizeComposerControlMode(mode)
   return (
     composerModeOptions.find((item) => item.value === normalized) ??
-    composerModeOptions[0]!
+    composerModeOptions[1]!
   )
 }
 
 export function currentComposerPermission(
   control: ComposerControlProjection | null | undefined,
 ): ComposerModeOption {
-  const permission =
-    control?.mode === 'plan' ? control.previous_mode : control?.mode
-  return currentComposerMode(permission)
+  return currentComposerMode(control?.preset ?? control?.mode)
 }

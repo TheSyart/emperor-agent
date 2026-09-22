@@ -10,6 +10,8 @@ export interface FloatingMenuLayoutInput {
   viewportHeight: number
   margin?: number
   gap?: number
+  /** Preferred side; the menu flips only when that side lacks room. */
+  prefer?: FloatingMenuPlacement
 }
 
 export interface FloatingMenuLayout {
@@ -33,7 +35,10 @@ export function floatingMenuLayout(
   const spaceAbove = input.buttonRect.top - margin - gap
   const spaceBelow =
     input.viewportHeight - input.buttonRect.bottom - margin - gap
-  const placeBelow = spaceAbove < menuHeight && spaceBelow > spaceAbove
+  const placeBelow =
+    input.prefer === 'bottom'
+      ? !(spaceBelow < menuHeight && spaceAbove > spaceBelow)
+      : spaceAbove < menuHeight && spaceBelow > spaceAbove
   const maxHeight = Math.max(180, placeBelow ? spaceBelow : spaceAbove)
   const left = clamp(
     input.buttonRect.right - menuWidth,
@@ -68,6 +73,8 @@ export function useFloatingMenu(opts: {
   fallbackWidth: number
   fallbackHeight: number
   onClose: () => void
+  /** Preferred side (default 'top', the upward composer menus). */
+  prefer?: () => FloatingMenuPlacement | undefined
 }) {
   const style = ref<CSSProperties>({})
   const placement = ref<FloatingMenuPlacement>('top')
@@ -83,6 +90,7 @@ export function useFloatingMenu(opts: {
       menuHeight: menu.offsetHeight || opts.fallbackHeight,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
+      prefer: opts.prefer?.(),
     })
     placement.value = layout.placement
     style.value = {

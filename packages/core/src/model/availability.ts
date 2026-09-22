@@ -5,7 +5,7 @@ import {
   type ProviderConfig,
 } from '../config/model-config'
 import { ModelConfigurationError } from '../errors'
-import { findByName } from '../providers/registry'
+import { findByName } from '../llm/catalog'
 
 export interface ModelAvailability {
   usable: boolean

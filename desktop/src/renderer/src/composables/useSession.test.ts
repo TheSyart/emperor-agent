@@ -1,7 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSession } from './useSession'
 
 const g = globalThis as unknown as { window?: any; fetch?: unknown }
+
+// The store is module-level state: a draft left active by one case would
+// survive the next case's load(), which now keeps the active draft.
+beforeEach(() => {
+  const session = useSession()
+  session.sessions.value = []
+  session.activeId.value = ''
+})
 
 afterEach(() => {
   delete g.window
@@ -293,5 +301,76 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
       'Cannot delete the last persisted session.',
     )
     expect(session.sessions.value.map((item) => item.id)).toEqual(['s1'])
+  })
+
+  it('keeps the draft the user is writing in when the list refreshes', async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [{ id: 's1', title: 'Main', updated_at: '2026-01-01' }]
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    const draft = await session.create({ mode: 'chat', title: '新会话' })
+
+    await session.load()
+
+    expect(session.sessions.value.map((item) => item.id)).toEqual([
+      draft.id,
+      's1',
+    ])
+    expect(session.activeId.value).toBe(draft.id)
+  })
+
+  it('drops a draft the user has left for another session', async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [{ id: 's1', title: 'Main', updated_at: '2026-01-01' }]
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    await session.create({ mode: 'chat', title: '新会话' })
+    await session.activate('s1')
+
+    await session.load()
+
+    expect(session.sessions.value.map((item) => item.id)).toEqual(['s1'])
+    expect(session.activeId.value).toBe('s1')
+  })
+
+  it('promotes a draft in place when a slash command creates the session', async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list') return []
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    const draft = session.activeId.value
+
+    session.promoteDraft(draft, {
+      id: 'real-1',
+      title: '新会话',
+      updated_at: '2026-01-01',
+    } as never)
+
+    expect(session.sessions.value.map((item) => item.id)).toEqual(['real-1'])
+    expect(session.activeId.value).toBe('real-1')
+    expect(session.getSession('real-1')?.draft).toBeUndefined()
   })
 })

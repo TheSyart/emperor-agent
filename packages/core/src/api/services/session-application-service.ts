@@ -5,23 +5,15 @@ type Dict = Record<string, unknown>
 
 export interface SessionApplicationServiceDeps {
   sessions: SessionStore
-  reconcileControlPending(): void
   resolveProject(projectPath: string): Dict
-  pauseGoalsBySession(
-    sessionId: string,
-    reason: string,
-  ): Promise<{
-    id: string
-  } | null>
-  activeGoalPromise(goalId: string): Promise<unknown> | null
-  stopProjectProcesses(sessionId: string, reason: string): Promise<void>
+  /** Stop the session's agent and drop it from the kernel (host.stop + host.deleteSession). */
   endSession(sessionId: string, reason: string): Promise<void>
   closeTerminals(sessionId: string): void
-  cancelGoalsBySession(sessionId: string, reason: string): Promise<void>
-  deleteGoalsBySession(sessionId: string): Promise<number>
-  deleteTasksBySession(sessionId: string): number
-  deletePlansBySession(sessionId: string): number
   activateSession(sessionId: string): SessionEntry
+  /** Remove the session's durable log (goals/jobs/plans live there now). */
+  deleteSessionLog(sessionId: string): void
+  /** Optional: interrupt a running turn when the session is archived (host.stop). */
+  stopSession?(sessionId: string, reason: string): void
 }
 
 export class CoreSessionApplicationService {
@@ -32,7 +24,6 @@ export class CoreSessionApplicationService {
   }
 
   list(opts: { includeArchived?: boolean } = {}): SessionEntry[] {
-    this.deps.reconcileControlPending()
     return this.deps.sessions.list({
       includeArchived: opts.includeArchived ?? false,
     })
@@ -64,10 +55,7 @@ export class CoreSessionApplicationService {
     patch: string | { title?: string | null; archived?: boolean | null },
   ): Promise<SessionEntry> {
     if (typeof patch === 'object' && patch !== null && 'archived' in patch) {
-      if (patch.archived) {
-        await this.deps.pauseGoalsBySession(sessionId, 'session_archived')
-        await this.deps.stopProjectProcesses(sessionId, 'session archived')
-      }
+      if (patch.archived) this.deps.stopSession?.(sessionId, 'session archived')
       const entry = patch.archived
         ? this.deps.sessions.archive(sessionId)
         : this.deps.sessions.restore(sessionId)
@@ -84,7 +72,7 @@ export class CoreSessionApplicationService {
     return entry
   }
 
-  async delete(sessionId: string): Promise<Dict> {
+  async delete(sessionId: string): Promise<{ deleted: true }> {
     if (!this.deps.sessions.get(sessionId))
       throw new Error('cannot delete session')
     if (this.deps.sessions.list({ includeArchived: true }).length <= 1)
@@ -92,21 +80,12 @@ export class CoreSessionApplicationService {
         409,
         'Cannot delete the last persisted session.',
       )
-    const pausedGoal = await this.deps.pauseGoalsBySession(
-      sessionId,
-      'session_delete_pending',
-    )
-    if (pausedGoal) await this.deps.activeGoalPromise(pausedGoal.id)
-    await this.deps.stopProjectProcesses(sessionId, 'session deleted')
     await this.deps.endSession(sessionId, 'deleted')
     if (!this.deps.sessions.delete(sessionId))
       throw new Error('cannot delete session')
     this.deps.closeTerminals(sessionId)
-    await this.deps.cancelGoalsBySession(sessionId, 'session_deleted')
-    const removedGoals = await this.deps.deleteGoalsBySession(sessionId)
-    const removedTasks = this.deps.deleteTasksBySession(sessionId)
-    const removedPlans = this.deps.deletePlansBySession(sessionId)
-    return { deleted: true, removedGoals, removedTasks, removedPlans }
+    this.deps.deleteSessionLog(sessionId)
+    return { deleted: true }
   }
 
   activate(sessionId: string): {

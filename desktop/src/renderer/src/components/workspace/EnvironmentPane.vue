@@ -6,21 +6,18 @@ import {
   GitCompareArrows,
   GitCommitHorizontal,
   GitPullRequest,
-  ExternalLink,
   Image,
-  ListChecks,
   MonitorCog,
   RefreshCw,
-  RotateCw,
   ScrollText,
   Square,
   Target,
   TerminalSquare,
-  Users,
   Workflow,
 } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { core } from '../../api/http'
+import type { RuntimeTaskRecord } from '../../types'
 import type { WorkspaceSnapshot, WorkspaceSource } from './workspaceTypes'
 import { isGitStatus } from './workspaceTypes'
 import {
@@ -36,15 +33,15 @@ const props = defineProps<{
   hasProject: boolean
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   refresh: []
   openPane: [pane: 'review' | 'terminal' | 'files' | 'browser']
-  openPreview: [previewId: string]
 }>()
 
-const processBusy = ref('')
-const processLogs = ref<Record<string, string>>({})
-const processErrors = ref<Record<string, string>>({})
+const tasks = ref<RuntimeTaskRecord[]>([])
+const taskBusy = ref('')
+const transcripts = ref<Record<string, string>>({})
+const taskErrors = ref<Record<string, string>>({})
 
 const git = computed(() =>
   isGitStatus(props.snapshot?.git) ? props.snapshot?.git : null,
@@ -65,33 +62,86 @@ const latestPullRequest = computed(() => {
   const receipts = props.snapshot?.gitReceipts ?? []
   return [...receipts].reverse().find((receipt) => receipt.pullRequest) ?? null
 })
-const plan = computed(() => props.snapshot?.plan ?? null)
-const planSteps = computed(() => {
-  const value = plan.value?.steps
-  return Array.isArray(value) ? value : []
-})
-const donePlanSteps = computed(
-  () =>
-    planSteps.value.filter((step) =>
-      ['done', 'completed', 'skipped'].includes(recordText(step, 'status')),
-    ).length,
+const subagentTasks = computed(() =>
+  tasks.value
+    .filter((task) => task.kind === 'subagent')
+    .map((task) => ({
+      ...task,
+      title: task.description || task.label,
+      ended_at: task.finished_at,
+      status: taskStatus(task.status),
+    })),
 )
-const teamMembers = computed(() => {
-  const value = props.snapshot?.team?.members
-  return Array.isArray(value) ? value : []
-})
+const jobTasks = computed(() =>
+  tasks.value.filter((task) => task.kind === 'job'),
+)
+const workflowTasks = computed(() =>
+  tasks.value.filter((task) => task.kind === 'workflow'),
+)
 const subagentGroups = computed(() =>
-  environmentSubagentGroups(props.snapshot?.subagents ?? []),
+  environmentSubagentGroups(subagentTasks.value),
 )
+
+watch(
+  () => [props.snapshot?.sessionId, props.snapshot?.capturedAt] as const,
+  ([sessionId]) => void loadTasks(sessionId || ''),
+  { immediate: true },
+)
+
+async function loadTasks(sessionId: string): Promise<void> {
+  if (!sessionId) {
+    tasks.value = []
+    return
+  }
+  try {
+    tasks.value = await core('tasks.list', { sessionId })
+  } catch {
+    // The environment pane stays usable when the task list is unavailable.
+    tasks.value = []
+  }
+}
+
+/** Kernel statuses (`completed` / `failed` / `killed` / stop reasons) → pane tones. */
+function taskStatus(value: string): string {
+  if (value === 'running' || value === 'completed' || value === 'failed')
+    return value
+  if (value === 'killed' || value === 'interrupted' || value === 'aborted')
+    return 'cancelled'
+  if (value === 'end_turn' || value === 'done' || value === 'stop')
+    return 'completed'
+  return value || 'running'
+}
 
 function subagentStatusLabel(value: unknown): string {
   const status = recordText(value, 'status')
   if (status === 'running') return '运行中'
   if (status === 'queued' || status === 'pending') return '等待中'
   if (status === 'completed') return '完成'
-  if (status === 'cancelled') return '已取消'
+  if (status === 'cancelled') return '已停止'
   if (status === 'interrupted') return '已中断'
   return status === 'failed' || status === 'error' ? '失败' : status
+}
+
+/** Workflow-run statuses (`running` / `completed` / `cancelled` / `error` / `interrupted`). */
+function workflowStatusLabel(status: string): string {
+  if (status === 'running') return '运行中'
+  if (status === 'completed') return '完成'
+  if (status === 'cancelled') return '已停止'
+  if (status === 'interrupted') return '已中断'
+  return status === 'error' ? '失败' : status
+}
+
+function workflowSummary(task: RuntimeTaskRecord): string {
+  const rounds = Number(task.rounds ?? 0)
+  const unit = task.workflow_tool === 'ralph' ? '轮' : '个代理'
+  return [
+    task.workflow_tool === 'ralph' ? 'ralph' : 'workflow',
+    `${rounds} ${unit}`,
+    task.status === 'running' ? task.current_phase || '' : '',
+    durationLabel(task),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function recordText(value: unknown, key: string): string {
@@ -100,26 +150,11 @@ function recordText(value: unknown, key: string): string {
     : ''
 }
 
-function recordNumber(value: unknown, key: string): number {
-  const raw =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)[key]
-      : 0
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function metadataText(value: unknown, key: string): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
-  const metadata = (value as Record<string, unknown>).metadata
-  return recordText(metadata, key)
-}
-
-function durationLabel(value: unknown): string {
-  const startedAt = timestampMs(recordNumber(value, 'started_at'))
+function durationLabel(task: RuntimeTaskRecord): string {
+  const startedAt = timestampMs(Number(task.started_at || 0))
   if (!startedAt) return ''
   const endedAt =
-    timestampMs(recordNumber(value, 'ended_at')) ||
+    timestampMs(Number(task.finished_at || 0)) ||
     props.snapshot?.capturedAt ||
     startedAt
   const seconds = Math.max(0, Math.floor((endedAt - startedAt) / 1000))
@@ -132,109 +167,51 @@ function timestampMs(value: number): number {
   return value < 1_000_000_000_000 ? value * 1000 : value
 }
 
-function processDuration(value: unknown): string {
-  const started = Date.parse(recordText(value, 'startedAt'))
-  if (!Number.isFinite(started)) return ''
-  const finished =
-    recordNumber(value, 'finishedAt') ||
-    props.snapshot?.capturedAt ||
-    Date.now()
-  const seconds = Math.max(0, Math.floor((finished - started) / 1000))
-  return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-}
-
-function processPreview(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const preview = (value as Record<string, unknown>).preview
-  return preview && typeof preview === 'object' && !Array.isArray(preview)
-    ? (preview as Record<string, unknown>)
-    : null
-}
-
-async function toggleLogs(value: unknown): Promise<void> {
-  const processId = recordText(value, 'id')
-  const sessionId = props.snapshot?.sessionId || ''
-  if (!processId || !sessionId) return
-  if (processLogs.value[processId] !== undefined) {
-    const next = { ...processLogs.value }
-    delete next[processId]
-    processLogs.value = next
+async function toggleTranscript(taskId: string): Promise<void> {
+  if (!taskId) return
+  if (transcripts.value[taskId] !== undefined) {
+    const next = { ...transcripts.value }
+    delete next[taskId]
+    transcripts.value = next
     return
   }
   try {
-    const result = await core('projectProcesses.readOutput', {
-      sessionId,
-      processId,
-      afterSeq: 0,
-    })
-    processLogs.value = {
-      ...processLogs.value,
-      [processId]: result.chunks
-        .map((chunk) => chunk.data)
-        .join('')
+    const result = await core('tasks.transcript', taskId, { limit: 200 })
+    transcripts.value = {
+      ...transcripts.value,
+      [taskId]: result.entries
+        .map((entry) =>
+          entry.role === 'output'
+            ? entry.content
+            : `${entry.role}: ${entry.content}`,
+        )
+        .join('\n\n')
         .slice(-8_000),
     }
   } catch (cause) {
-    processLogs.value = {
-      ...processLogs.value,
-      [processId]: cause instanceof Error ? cause.message : String(cause),
+    transcripts.value = {
+      ...transcripts.value,
+      [taskId]: cause instanceof Error ? cause.message : String(cause),
     }
   }
 }
 
-async function stopProcess(value: unknown): Promise<void> {
-  const processId = recordText(value, 'id')
-  if (!processId || !props.snapshot?.sessionId) return
-  processBusy.value = processId
-  clearProcessError(processId)
+async function cancelTask(taskId: string): Promise<void> {
+  if (!taskId) return
+  taskBusy.value = taskId
+  const next = { ...taskErrors.value }
+  delete next[taskId]
+  taskErrors.value = next
   try {
-    await core('projectProcesses.stop', {
-      sessionId: props.snapshot.sessionId,
-      processId,
-      expectedRevision: recordNumber(value, 'revision'),
-    })
-    emit('refresh')
+    await core('tasks.cancel', taskId, {})
+    await loadTasks(props.snapshot?.sessionId || '')
   } catch (cause) {
-    setProcessError(processId, cause)
+    taskErrors.value = {
+      ...taskErrors.value,
+      [taskId]: cause instanceof Error ? cause.message : String(cause),
+    }
   } finally {
-    processBusy.value = ''
-  }
-}
-
-async function restartProcess(value: unknown): Promise<void> {
-  const processId = recordText(value, 'id')
-  if (!processId || !props.snapshot?.sessionId) return
-  if (!window.confirm('重启这个项目进程？')) return
-  processBusy.value = processId
-  clearProcessError(processId)
-  try {
-    await core('projectProcesses.restart', {
-      sessionId: props.snapshot.sessionId,
-      processId,
-      expectedRevision: recordNumber(value, 'revision'),
-      confirmed: true,
-      invocationId: crypto.randomUUID(),
-    })
-    emit('refresh')
-  } catch (cause) {
-    setProcessError(processId, cause)
-  } finally {
-    processBusy.value = ''
-  }
-}
-
-function clearProcessError(processId: string): void {
-  const next = { ...processErrors.value }
-  delete next[processId]
-  processErrors.value = next
-}
-
-function setProcessError(processId: string, cause: unknown): void {
-  processErrors.value = {
-    ...processErrors.value,
-    [processId]: cause instanceof Error ? cause.message : String(cause),
+    taskBusy.value = ''
   }
 }
 </script>
@@ -343,28 +320,68 @@ function setProcessError(processId: string, cause: unknown): void {
         <div v-else class="workspace-muted">未初始化 Git 仓库</div>
       </section>
 
-      <section v-if="plan || snapshot.goal" class="workspace-section">
-        <h3>Plan</h3>
-        <div v-if="plan" class="workspace-list-row workspace-feature-row">
-          <ListChecks :size="16" />
-          <div>
-            <strong>{{ recordText(plan, 'title') || '当前计划' }}</strong>
-            <span>
-              {{ donePlanSteps }}/{{ planSteps.length }} 步 ·
-              {{ recordText(plan, 'status') }}
-            </span>
-          </div>
-        </div>
-        <div
-          v-if="snapshot.goal"
-          class="workspace-list-row workspace-feature-row"
-        >
+      <section v-if="snapshot.goal" class="workspace-section">
+        <h3>Goal</h3>
+        <div class="workspace-list-row workspace-feature-row">
           <Target :size="16" />
           <div>
             <strong>{{
-              recordText(snapshot.goal, 'outcome') || '当前 Goal'
+              recordText(snapshot.goal, 'objective') || '当前 Goal'
             }}</strong>
             <span>{{ recordText(snapshot.goal, 'phase') }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="workflowTasks.length" class="workspace-section">
+        <h3>Workflows</h3>
+        <div class="workspace-list">
+          <div
+            v-for="run in workflowTasks"
+            :key="run.id"
+            class="environment-process-item"
+          >
+            <div class="workspace-list-row environment-process-row">
+              <Workflow :size="14" :data-status="run.status" />
+              <div class="environment-process-copy">
+                <strong>{{ run.label || run.id }}</strong>
+                <span>{{ workflowSummary(run) }}</span>
+              </div>
+              <span class="workspace-row-value">
+                {{ workflowStatusLabel(run.status) }}
+              </span>
+              <div class="environment-process-actions">
+                <button
+                  type="button"
+                  title="查看记录"
+                  aria-label="查看工作流记录"
+                  @click="toggleTranscript(run.id)"
+                >
+                  <ScrollText :size="13" />
+                </button>
+                <button
+                  v-if="run.status === 'running'"
+                  type="button"
+                  title="停止"
+                  aria-label="停止工作流"
+                  :disabled="taskBusy === run.id"
+                  @click="cancelTask(run.id)"
+                >
+                  <Square :size="12" />
+                </button>
+              </div>
+            </div>
+            <pre
+              v-if="transcripts[run.id] !== undefined"
+              class="environment-process-log"
+              >{{ transcripts[run.id] || '暂无记录' }}</pre>
+            <p
+              v-if="taskErrors[run.id]"
+              class="environment-process-error"
+              role="alert"
+            >
+              {{ taskErrors[run.id] }}
+            </p>
           </div>
         </div>
       </section>
@@ -397,7 +414,7 @@ function setProcessError(processId: string, cause: unknown): void {
               ...subagentGroups.active,
               ...subagentGroups.recent,
             ]"
-            :key="recordText(agent, 'id') || index"
+            :key="agent.id || index"
             class="workspace-list-row workspace-feature-row environment-subagent-row"
             :class="{
               'environment-agent-active': subagentGroups.active.includes(agent),
@@ -407,22 +424,56 @@ function setProcessError(processId: string, cause: unknown): void {
               <Bot :size="14" />
               <span
                 class="environment-agent-dot"
+                :class="{
+                  'animate-pulse-seal': subagentStatusTone(agent) === 'running',
+                }"
                 :data-tone="subagentStatusTone(agent)"
                 :title="subagentStatusLabel(agent)"
               />
             </span>
             <div class="environment-agent-copy">
-              <strong>{{ recordText(agent, 'title') || 'Subagent' }}</strong>
+              <strong>{{ agent.title || 'Subagent' }}</strong>
               <span>
-                {{ metadataText(agent, 'agent_type') || 'agent' }} ·
-                {{ metadataText(agent, 'workspace_mode') || 'shared' }} ·
+                {{ agent.mode || 'agent' }} ·
                 {{ durationLabel(agent) }}
               </span>
             </div>
             <span class="workspace-row-value">
               {{ subagentStatusLabel(agent) }}
             </span>
+            <div class="environment-process-actions">
+              <button
+                type="button"
+                title="查看记录"
+                aria-label="查看子代理记录"
+                @click="toggleTranscript(agent.id)"
+              >
+                <ScrollText :size="13" />
+              </button>
+              <button
+                v-if="agent.status === 'running'"
+                type="button"
+                title="中断"
+                aria-label="中断子代理"
+                :disabled="taskBusy === agent.id"
+                @click="cancelTask(agent.id)"
+              >
+                <Square :size="12" />
+              </button>
+            </div>
           </div>
+          <template
+            v-for="agent in [
+              ...subagentGroups.active,
+              ...subagentGroups.recent,
+            ]"
+            :key="`transcript:${agent.id}`"
+          >
+            <pre
+              v-if="transcripts[agent.id] !== undefined"
+              class="environment-process-log"
+              >{{ transcripts[agent.id] || '暂无记录' }}</pre>
+          </template>
           <div
             v-if="subagentGroups.hiddenCount"
             class="environment-subagent-overflow"
@@ -432,121 +483,62 @@ function setProcessError(processId: string, cause: unknown): void {
         </div>
       </section>
 
-      <section v-if="teamMembers.length" class="workspace-section">
-        <h3>
-          Team
-          <span v-if="recordNumber(snapshot.team, 'leadUnread')">
-            {{ recordNumber(snapshot.team, 'leadUnread') }} unread
-          </span>
-        </h3>
-        <div class="workspace-list">
-          <div
-            v-for="(member, index) in teamMembers"
-            :key="recordText(member, 'name') || index"
-            class="workspace-list-row"
-          >
-            <Users :size="15" />
-            <span>{{ recordText(member, 'name') }}</span>
-            <span class="workspace-row-value">
-              {{ recordText(member, 'status') || 'idle' }}
-            </span>
-          </div>
-        </div>
-      </section>
-
       <section
-        v-if="snapshot.processes.length || snapshot.terminals.length"
+        v-if="jobTasks.length || snapshot.terminals.length"
         class="workspace-section"
       >
-        <h3>Background processes</h3>
+        <h3>Background jobs</h3>
         <div class="workspace-list">
           <div
-            v-for="(process, index) in snapshot.processes"
-            :key="recordText(process, 'id') || index"
+            v-for="job in jobTasks"
+            :key="job.id"
             class="environment-process-item"
           >
             <div class="workspace-list-row environment-process-row">
-              <CircleDot
-                :size="14"
-                :data-status="recordText(process, 'status')"
-              />
+              <CircleDot :size="14" :data-status="job.status" />
               <div class="environment-process-copy">
-                <strong>{{
-                  recordText(process, 'label') || recordText(process, 'id')
-                }}</strong>
+                <strong>{{ job.label || job.id }}</strong>
                 <span>
-                  {{ recordText(process, 'ecosystem') || 'process' }} ·
-                  {{ recordText(process, 'status') }} ·
-                  {{ recordText(process, 'health') }}
-                  <template v-if="processDuration(process)">
-                    · {{ processDuration(process) }}
+                  {{ job.job_kind || 'job' }} · {{ job.status }}
+                  <template v-if="job.exit_code != null">
+                    · exit {{ job.exit_code }}
+                  </template>
+                  <template v-if="durationLabel(job)">
+                    · {{ durationLabel(job) }}
                   </template>
                 </span>
               </div>
-              <span
-                v-if="recordText(process, 'primary') === 'true'"
-                class="environment-primary-badge"
-                >Preview</span
-              >
               <div class="environment-process-actions">
                 <button
-                  v-if="processPreview(process)?.status === 'ready'"
                   type="button"
-                  title="打开预览"
-                  aria-label="打开网站预览"
-                  @click="
-                    $emit(
-                      'openPreview',
-                      String(processPreview(process)?.id || ''),
-                    )
-                  "
-                >
-                  <ExternalLink :size="13" />
-                </button>
-                <button
-                  type="button"
-                  title="查看日志"
-                  aria-label="查看进程日志"
-                  @click="toggleLogs(process)"
+                  title="查看输出"
+                  aria-label="查看后台任务输出"
+                  @click="toggleTranscript(job.id)"
                 >
                   <ScrollText :size="13" />
                 </button>
                 <button
-                  v-if="
-                    ['running', 'starting'].includes(
-                      recordText(process, 'status'),
-                    )
-                  "
+                  v-if="job.status === 'running'"
                   type="button"
                   title="停止"
-                  aria-label="停止项目进程"
-                  :disabled="processBusy === recordText(process, 'id')"
-                  @click="stopProcess(process)"
+                  aria-label="停止后台任务"
+                  :disabled="taskBusy === job.id"
+                  @click="cancelTask(job.id)"
                 >
                   <Square :size="12" />
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  title="重启"
-                  aria-label="重启项目进程"
-                  :disabled="processBusy === recordText(process, 'id')"
-                  @click="restartProcess(process)"
-                >
-                  <RotateCw :size="13" />
                 </button>
               </div>
             </div>
             <pre
-              v-if="processLogs[recordText(process, 'id')] !== undefined"
+              v-if="transcripts[job.id] !== undefined"
               class="environment-process-log"
-              >{{ processLogs[recordText(process, 'id')] || '暂无日志' }}</pre>
+              >{{ transcripts[job.id] || '暂无输出' }}</pre>
             <p
-              v-if="processErrors[recordText(process, 'id')]"
+              v-if="taskErrors[job.id]"
               class="environment-process-error"
               role="alert"
             >
-              {{ processErrors[recordText(process, 'id')] }}
+              {{ taskErrors[job.id] }}
             </p>
           </div>
           <div
@@ -587,3 +579,385 @@ function setProcessError(processId: string, cause: unknown): void {
     </section>
   </div>
 </template>
+
+<style scoped>
+.workspace-pane {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: var(--space-3) var(--space-3) var(--space-4);
+}
+
+.workspace-pane-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+  padding-left: var(--space-2);
+}
+
+.workspace-pane-heading > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.workspace-pane-heading strong {
+  overflow: hidden;
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-eyebrow {
+  overflow: hidden;
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-icon-button {
+  display: inline-grid;
+  width: var(--space-7);
+  height: var(--space-7);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-secondary));
+}
+
+.workspace-icon-button:hover:not(:disabled) {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.workspace-icon-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.workspace-section {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-l1);
+}
+
+.workspace-section:first-of-type {
+  border-top: 0;
+}
+
+.workspace-section h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  font-weight: 500;
+}
+
+.environment-section-summary {
+  display: inline-flex;
+  gap: var(--space-2);
+  color: rgb(var(--label-tertiary));
+  font-weight: 400;
+}
+
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-list-row {
+  display: flex;
+  min-width: 0;
+  min-height: var(--space-8);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.workspace-list-row > svg {
+  flex: none;
+  color: rgb(var(--label-secondary));
+}
+
+.workspace-list-row
+  > span:not(.workspace-row-value):not(.environment-agent-icon) {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-row-value {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-1);
+  color: rgb(var(--label-tertiary));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.environment-action-row {
+  width: 100%;
+  text-align: left;
+}
+
+.environment-action-row:hover {
+  background: var(--interactive-bg-hover);
+}
+
+.change-count b {
+  color: rgb(var(--ok));
+  font-weight: 500;
+}
+
+.change-count i {
+  color: rgb(var(--danger));
+  font-style: normal;
+}
+
+.change-count em {
+  color: rgb(var(--label-tertiary));
+  font-style: normal;
+}
+
+.environment-warning-row {
+  color: rgb(var(--warn));
+}
+
+.workspace-feature-row > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workspace-feature-row strong,
+.workspace-feature-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-feature-row strong {
+  font-weight: 500;
+}
+
+.workspace-feature-row span {
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.environment-subagents .workspace-feature-row {
+  min-height: calc(var(--space-8) + var(--space-0-5));
+}
+
+.environment-subagent-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.environment-subagent-row .environment-agent-icon {
+  width: 18px;
+  min-width: 18px;
+  flex: none;
+}
+
+.environment-agent-copy {
+  min-width: 0;
+}
+
+.environment-subagent-row > .workspace-row-value {
+  justify-self: end;
+}
+
+.environment-agent-active {
+  background: rgb(var(--warn) / 0.055);
+  box-shadow: inset 2px 0 0 rgb(var(--warn) / 0.52);
+}
+
+.environment-agent-icon {
+  position: relative;
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  place-items: center;
+  color: rgb(var(--label-secondary));
+}
+
+.environment-agent-dot {
+  position: absolute;
+  right: calc(var(--space-1-5) / -2);
+  bottom: calc(var(--space-1-5) / -2);
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(var(--label-tertiary));
+  box-shadow: 0 0 0 2px rgb(var(--bg-base));
+}
+
+.environment-agent-dot[data-tone='running'] {
+  background: rgb(var(--warn));
+}
+
+.environment-agent-dot[data-tone='pending'] {
+  background: rgb(var(--accent));
+}
+
+.environment-agent-dot[data-tone='completed'] {
+  background: rgb(var(--ok));
+}
+
+.environment-agent-dot[data-tone='failed'] {
+  background: rgb(var(--danger));
+}
+
+.environment-agent-dot[data-tone='cancelled'] {
+  background: rgb(var(--label-tertiary));
+}
+
+.environment-subagent-overflow {
+  padding: var(--space-1) var(--space-2) 1px var(--space-7);
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.environment-process-item {
+  min-width: 0;
+  border-radius: var(--radius-row);
+}
+
+.environment-process-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.environment-process-copy strong,
+.environment-process-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-process-copy strong {
+  font-weight: 500;
+}
+
+.environment-process-copy span {
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.environment-process-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-ds-fast) ease;
+}
+
+.environment-process-row:hover .environment-process-actions,
+.environment-process-row:focus-within .environment-process-actions,
+.environment-subagent-row:hover .environment-process-actions,
+.environment-subagent-row:focus-within .environment-process-actions {
+  opacity: 1;
+}
+
+.environment-process-actions button {
+  display: grid;
+  width: var(--space-6);
+  height: var(--space-6);
+  place-items: center;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-secondary));
+}
+
+.environment-process-actions button:hover:not(:disabled) {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.environment-process-log {
+  max-height: 140px;
+  margin: 2px var(--space-2) var(--space-2) var(--space-7);
+  padding: var(--space-2) var(--space-2-5);
+  overflow: auto;
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-secondary));
+  background: rgb(var(--code-block-bg));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.environment-process-error {
+  margin: var(--space-1) var(--space-2) var(--space-2) var(--space-7);
+  color: rgb(var(--danger));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.workspace-muted,
+.workspace-empty-state {
+  padding: var(--space-2);
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.workspace-inline-error {
+  margin: var(--space-2) 0;
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-row);
+  color: rgb(var(--danger));
+  background: rgb(var(--danger-soft));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.workspace-source-name {
+  color: rgb(var(--label-secondary));
+}
+
+.workspace-view-all {
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-row);
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.workspace-view-all:hover {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+</style>

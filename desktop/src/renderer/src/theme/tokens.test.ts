@@ -48,6 +48,20 @@ describe('theme tokens', () => {
     expect([...dark].sort()).toEqual([...light].sort())
   })
 
+  it.each(['dark.css', 'light.css'])(
+    '%s has no stray comment terminators (sheet must parse as one rule)',
+    (f) => {
+      // A `*/` inside prose (e.g. "border-l*/…") closes the header early and
+      // silently drops the whole token table in the browser.
+      const stripped = readThemeFile(f)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .trim()
+      expect(stripped.startsWith(':root')).toBe(true)
+      expect(stripped.match(/\{/g)).toHaveLength(1)
+      expect(stripped.endsWith('}')).toBe(true)
+    },
+  )
+
   it('styles.css no longer carries :root token blocks', () => {
     const entry = readThemeFile('../styles.css')
     expect(entry).not.toContain(':root')
@@ -92,11 +106,119 @@ describe('theme tokens', () => {
     },
   )
 
+  const DSH_KEYS = [
+    /* dsh neutral-bluish scale */
+    ...[
+      '00',
+      '50',
+      '60',
+      '75',
+      '100',
+      '150',
+      '200',
+      '300',
+      '400',
+      '500',
+      '600',
+      '700',
+      '750',
+      '800',
+      '850',
+      '875',
+      '900',
+      '950',
+      '1000',
+    ].map((step) => `--nb-${step}`),
+    /* surfaces */
+    '--bg-base',
+    '--bg-layer-1',
+    '--bg-layer-2',
+    '--bg-layer-3',
+    '--sidebar-fill',
+    '--menu-fill',
+    '--selector-fill',
+    '--tip-fill',
+    '--code-block-bg',
+    '--code-banner-bg',
+    '--inline-code-bg',
+    '--tooltip-bg',
+    '--toast-bg',
+    /* translucent overlays */
+    '--border-l1',
+    '--border-l2',
+    '--border-l3',
+    '--border-l4',
+    '--interactive-bg-hover',
+    '--interactive-bg-active',
+    '--mask-1',
+    /* labels */
+    '--label-primary',
+    '--label-secondary',
+    '--label-tertiary',
+    '--label-caption',
+    '--label-dimmed',
+    /* gold accent family */
+    '--accent-fill',
+    '--accent-hover',
+    '--accent-strong',
+    '--accent-soft',
+    '--bubble-user',
+    '--focus-ring',
+    /* states */
+    '--approval',
+    '--approval-strong',
+    '--approval-soft',
+    '--ok-soft',
+    '--warn-soft',
+    '--danger-soft',
+    /* semantic state family (settings StatusBadge / diagnostics) */
+    ...['ok', 'warn', 'error'].flatMap((tone) => [
+      `--state-${tone}`,
+      `--state-${tone}-soft`,
+      `--state-${tone}-label`,
+    ]),
+    /* code highlight */
+    '--code-keyword',
+    '--code-string',
+    '--code-function',
+    '--code-comment',
+    /* shadows / radii / type */
+    '--shadow-lv1',
+    '--shadow-lv2',
+    '--shadow-lv3',
+    '--radius-row',
+    '--radius-cell',
+    '--radius-card',
+    '--radius-takeover',
+    '--radius-composer',
+    '--radius-modal',
+    '--font-sans',
+    '--font-mono',
+    '--font-xs',
+    '--font-s',
+    '--font-base',
+    '--font-md',
+    '--font-code',
+    '--ease-in-out',
+    '--duration-ds',
+  ]
+
+  it.each(['dark.css', 'light.css'])('%s defines the dsh token set', (f) => {
+    const keys = tokenKeys(readThemeFile(f))
+    for (const required of DSH_KEYS) expect(keys).toContain(required)
+  })
+
   it.each(['dark.css', 'light.css'])(
-    '%s stores RGB colors as space-separated triplets',
+    '%s stores solid colors as RGB triplets or var() aliases',
     (f) => {
       const css = readThemeFile(f)
       const colorKeys = [
+        '--nb-950',
+        '--accent-fill',
+        '--accent-soft',
+        '--bubble-user',
+        '--approval',
+        '--code-keyword',
         '--bg',
         '--bg-elevated',
         '--bg-inset',
@@ -113,26 +235,52 @@ describe('theme tokens', () => {
         '--tone-cyan',
         '--tone-violet',
         '--tone-blue',
+        '--bg-base',
+        '--label-primary',
+        '--state-ok',
+        '--state-ok-soft',
+        '--state-ok-label',
+        '--state-warn',
+        '--state-warn-soft',
+        '--state-warn-label',
+        '--state-error',
+        '--state-error-soft',
+        '--state-error-label',
       ]
       for (const key of colorKeys) {
-        const re = new RegExp(`${key}:\\s*(\\d+ \\d+ \\d+)\\s*;`)
-        expect(css, `${key} must be an RGB triplet`).toMatch(re)
+        const re = new RegExp(
+          `${key}:\\s*(?:\\d+ \\d+ \\d+|var\\(--[\\w-]+\\))\\s*;`,
+        )
+        expect(css, `${key} must be an RGB triplet or alias`).toMatch(re)
       }
     },
   )
 
-  it('applies the unified canonical palette (codex-v2 values folded in)', () => {
+  it('keeps legacy keys as aliases of the dsh tokens', () => {
+    for (const f of ['dark.css', 'light.css']) {
+      const css = readThemeFile(f)
+      expect(css).toContain('--bg: var(--bg-base);')
+      expect(css).toContain('--fg: var(--label-primary);')
+      expect(css).toContain('--accent: var(--accent-fill);')
+      expect(css).toContain('--shadow-lg: var(--shadow-lv3);')
+      expect(css).toContain('--radius-lg: var(--radius-card);')
+    }
+  })
+
+  it('applies the dsh palette with Emperor gold in place of dsh blue', () => {
     const dark = readThemeFile('dark.css')
     const light = readThemeFile('light.css')
-    // codex-v2's :root block was the de-facto rendered palette; these lock it in
-    // as the single source of truth after the token dedupe.
-    expect(dark).toContain('--bg: 12 12 14;')
-    expect(dark).toContain('--border-strong: 62 62 70;')
-    expect(dark).toContain('--accent: 99 153 255;')
+    expect(dark).toContain('--bg-base: var(--nb-950);')
+    expect(dark).toContain('--nb-950: 21 21 23;')
     expect(dark).toContain('--brand: 203 158 72;')
-    expect(dark).toContain('--warn: 240 186 60;')
-    expect(light).toContain('--bg: 252 252 253;')
-    expect(light).toContain('--text-secondary: 0.55;')
+    expect(dark).toContain('--accent-fill: 214 172 92;')
+    expect(light).toContain('--bg-base: var(--nb-00);')
+    expect(light).toContain('--label-secondary: var(--nb-700);')
     expect(light).toContain('--brand: 155 111 35;')
+    expect(light).toContain('--accent-fill: 170 122 38;')
+    // No dsh deepseek blue survives in either table.
+    for (const css of [dark, light]) {
+      expect(css).not.toMatch(/65 118 230|103 158 254|86 134 254/)
+    }
   })
 })

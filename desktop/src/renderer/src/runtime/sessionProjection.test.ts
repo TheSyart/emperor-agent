@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RuntimeEventEnvelope, WsEvent } from '../types'
-import { adaptLegacyRuntimeEvent } from './legacyRuntimeAdapter'
+import type { WsEvent } from '../types'
 import {
   createSessionProjectionState,
   reduceSessionProjection,
@@ -75,44 +74,6 @@ describe('session action reducer', () => {
       lastSeq: 2,
     })
     expect(duplicate.state.activeLastSeq).toBe(2)
-  })
-
-  it('keeps continuation/finalization running but clears false running state on evaluation pause', () => {
-    let state = reduceSessionProjection(createSessionProjectionState('s1'), {
-      type: 'runtime_event_received',
-      origin: 'replay',
-      event: adaptLegacyRuntimeEvent({
-        event: 'turn_continuation_evaluated',
-        seq: 1,
-        session_id: 's1',
-        decision: 'continue',
-        reasonCode: 'work_remaining',
-        evaluationRound: 1,
-        totalIterations: 20,
-        grantedIterations: 8,
-        summary: 'continue',
-        nextActions: ['verify'],
-      } satisfies RuntimeEventEnvelope),
-    }).state
-    expect(state.sessions.s1?.running).toBe(true)
-
-    state = reduceSessionProjection(state, {
-      type: 'runtime_event_received',
-      origin: 'replay',
-      event: adaptLegacyRuntimeEvent({
-        event: 'turn_continuation_evaluated',
-        seq: 2,
-        session_id: 's1',
-        decision: 'pause',
-        reasonCode: 'no_progress',
-        evaluationRound: 2,
-        totalIterations: 28,
-        grantedIterations: 0,
-        summary: 'paused',
-        nextActions: ['inspect'],
-      } satisfies RuntimeEventEnvelope),
-    }).state
-    expect(state.sessions.s1?.running).toBe(false)
   })
 
   it('tracks foreign completion without moving the active cursor and clears attention on switch', () => {

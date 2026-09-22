@@ -3,8 +3,6 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { TaskManager } from '../tasks/manager'
-import { TaskKind, TaskStatus } from '../tasks/models'
 import {
   SchedulerActiveRun,
   SchedulerJob,
@@ -556,35 +554,30 @@ describe('SchedulerService durable admission', () => {
   })
 
   it.each([
-    { taskStatus: TaskStatus.COMPLETED, schedulerStatus: SchedulerStatus.OK },
-    { taskStatus: TaskStatus.FAILED, schedulerStatus: SchedulerStatus.ERROR },
+    { taskStatus: 'completed' as const, schedulerStatus: SchedulerStatus.OK },
+    { taskStatus: 'failed' as const, schedulerStatus: SchedulerStatus.ERROR },
     {
-      taskStatus: TaskStatus.CANCELLED,
+      taskStatus: 'cancelled' as const,
       schedulerStatus: SchedulerStatus.CANCELLED,
     },
     {
-      taskStatus: TaskStatus.INTERRUPTED,
+      taskStatus: 'interrupted' as const,
       schedulerStatus: SchedulerStatus.INTERRUPTED,
     },
   ])(
     'converges a Task $taskStatus / Scheduler running terminal gap without replay',
     async ({ taskStatus, schedulerStatus }) => {
       const stateRoot = root()
-      const taskManager = new TaskManager(stateRoot)
       const taskId = `scheduler_run_${'b'.repeat(32)}`
-      taskManager.startTask({
-        taskId,
-        kind: TaskKind.SCHEDULER_RUN,
-        title: 'terminal gap',
-        source: 'scheduler',
-      })
-      if (taskStatus === TaskStatus.COMPLETED)
-        taskManager.completeTask(taskId, { summary: 'done' })
-      else if (taskStatus === TaskStatus.FAILED)
-        taskManager.failTask(taskId, { error: 'failed' })
-      else if (taskStatus === TaskStatus.CANCELLED)
-        taskManager.cancelTask(taskId, { reason: 'cancelled' })
-      else taskManager.interruptTask(taskId, { reason: 'restart' })
+      const terminals = new Map([
+        [
+          taskId,
+          {
+            status: taskStatus,
+            error: taskStatus === 'completed' ? '' : taskStatus,
+          },
+        ],
+      ])
 
       const store = new SchedulerStore(stateRoot)
       const job = SchedulerJob.create({
@@ -617,21 +610,8 @@ describe('SchedulerService durable admission', () => {
         timeFunc: () => BASE + 10_000,
         setTimer: () => 1,
         clearTimer: () => undefined,
-        taskTerminal: (candidateTaskId) => {
-          const task = taskManager.store.get(candidateTaskId)
-          if (!task || task.status === TaskStatus.RUNNING) return null
-          return {
-            status:
-              task.status === TaskStatus.COMPLETED
-                ? 'completed'
-                : task.status === TaskStatus.CANCELLED
-                  ? 'cancelled'
-                  : task.status === TaskStatus.INTERRUPTED
-                    ? 'interrupted'
-                    : 'failed',
-            error: String(task.progress.error ?? task.progress.reason ?? ''),
-          }
-        },
+        taskTerminal: (candidateTaskId) =>
+          terminals.get(candidateTaskId) ?? null,
         onJob: async () => {
           calls += 1
         },

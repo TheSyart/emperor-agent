@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-07-21<br>
+> 最后核验：2026-09-22<br>
 > 事实源：GitHub Releases、模型设置页、Session/Project 创建入口
 
 ## 1. 安装
@@ -18,7 +18,7 @@
 
 ## 2. 添加并选择模型
 
-进入“设置 → 模型”，选择“添加模型”。设置页只负责管理配置；保存后回到聊天输入框选择当前要使用的模型。
+点击左侧会话栏底部的“设置”打开设置弹窗，进入“模型”分区，选择“添加模型”。设置只负责管理配置；保存后回到聊天输入框选择当前要使用的模型。
 
 按下面的顺序填写：
 
@@ -37,11 +37,11 @@
 
 ### Chat：普通对话
 
-选择“新建 Chat”，输入问题并发送。Chat 使用用户档案、全局长期记忆和当前会话历史，不绑定项目目录。
+选择“新建 Chat”，输入问题并发送。Chat 使用用户档案、全局长期记忆和当前会话历史，不绑定项目目录；需要写文件时，它的工作目录是 Emperor Home 下的 `workspace/`。
 
 ### Build：项目工作
 
-选择“新建 Build”，再从本机选择项目文件夹。Build 会把该目录作为 workspace，并读取项目中的 `AGENTS.md`。项目私有记忆保存在全局 `stateRoot`，不会自动写回项目的 `AGENTS.md`。
+选择“新建 Build”，再从本机选择项目文件夹。Build 会把该目录作为 workspace，并读取项目中的 `AGENTS.md` / `CLAUDE.md`。项目私有记忆保存在全局 `stateRoot`，不会写回项目文件。
 
 新建时界面先创建本地草稿；发送第一条消息后，Core 才会创建真实 session 并持久化。这意味着空白草稿不会留下无用会话目录。
 
@@ -54,14 +54,14 @@
 - 输入 `/model`，确认可以选择当前会话使用的模型；已安装 Skill 应以自己的 token 出现，例如 `/agent-reach`。
 - 创建 Build 后让 Agent 读取一个项目文件，确认路径属于刚才选择的 workspace。
 
-如果模型回复正常但文件或命令被拒绝，先查看当前权限模式，而不是反复重试。详见 [Plan 与 Goal](plan-goal.md) 和 [诊断与排障](diagnostics-troubleshooting.md)。
+如果模型回复正常但文件或命令被拒绝，先查看当前权限预设，而不是反复重试。新会话默认使用 `workspace-write`：可以写当前 workspace，超出范围时会弹出一次性批准。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上受系统沙箱限制；其他平台没有沙箱后端，只有切换到 `danger-full-access` 后才能运行 Shell 命令。详见 [Plan 与 Goal](plan-goal.md) 和 [诊断与排障](diagnostics-troubleshooting.md)。
 
 ## 5. 数据与联网
 
 会话、记忆、模型配置和附件保存在本机；默认 Emperor Home 是 `~/.emperor`。以下操作仍会把必要内容发送到外部：
 
 - 调用已配置的模型 Provider；
-- 使用网页搜索、网页抓取或远程 MCP；
+- 使用远程 MCP，或调用会联网的 Skill；
 - 运行会主动联网的本地命令、Hook 或 MCP server。
 
 不要把“本地运行”理解为完全离线。具体数据位置见 [模型、记忆与附件](models-memory-attachments.md)。

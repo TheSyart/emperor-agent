@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "baseline": {
-    "mainJsBytes": 4836436,
-    "initialJsBytes": 626199,
-    "chatJsBytes": 1197623,
-    "globalCssBytes": 390859,
+    "mainJsBytes": 3015010,
+    "initialJsBytes": 597227,
+    "chatJsBytes": 320333,
+    "globalCssBytes": 92488,
     "largestImageBytes": 1665624
   },
   "limits": {
     "mainJsBytes": 5250000,
     "initialJsBytes": 700000,
     "chatJsBytes": 1350000,
-    "globalCssBytes": 430000,
+    "globalCssBytes": 103000,
     "largestImageBytes": 2000000
   }
 }

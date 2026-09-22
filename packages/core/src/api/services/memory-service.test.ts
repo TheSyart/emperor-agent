@@ -1,58 +1,176 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AgentLoop } from '../../agent/loop'
-import type { ModelRoute, ProviderSnapshot } from '../../model/router'
+import '../../harness/compaction/events'
 import {
-  LLMProvider,
-  type ChatArgs,
-  type LLMResponse,
-} from '../../providers/base'
-import {
-  CompactionCursorStore,
-  CompactionLedger,
-} from '../../memory/compaction-ledger'
-import { writePromptSnapshot } from '../../prompts/manifest'
+  contextMessage,
+  createAssistantMessage,
+  userText,
+} from '../../llm/message'
+import { MemoryStore } from '../../memory/store'
+import { TokenTracker } from '../../memory/token-tracker'
+import { ProjectStore } from '../../projects/store'
+import { Session } from '../../session-log/session'
+import { SessionStore } from '../../sessions/store'
 import { WatchlistDecision } from '../../watchlist/models'
 import { WatchlistService } from '../../watchlist/service'
-import { CoreMemoryService } from './memory-service'
-
-const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', '..', 'templates')
+import {
+  CoreMemoryService,
+  type CoreContextMeasurement,
+  type CoreMemoryServiceDeps,
+} from './memory-service'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
 
-function appendCompletedTurns(loop: AgentLoop, turns: number): void {
-  for (let index = 1; index <= turns; index += 1) {
-    loop.activeMemoryStore.appendHistory('user', `request ${index}`, {
-      extra: { turn_id: `turn_${index}` },
+function runTurn(session: Session, turn: number, text: string): void {
+  session.append('turn/start', { turn })
+  session.append('step/start', { turn, step: 1 })
+  session.append('user/message', userText(text), { surfaceOp: 'append' })
+  session.append(
+    'assistant/message',
+    {
+      turn,
+      step: 1,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: `reply ${turn}` }],
+        source: { provider: 'openai', model: 'gpt-4.1' },
+      }),
+    },
+    { surfaceOp: 'append' },
+  )
+  session.append('step/end', { turn, step: 1 })
+  session.append('turn/end', { turn, reason: { kind: 'completed' } })
+}
+
+function appendCompaction(
+  session: Session,
+  id: string,
+  seqs: number[],
+  error?: string,
+): void {
+  session.append('compaction/start', { compactionId: id, turn: null })
+  if (!error) {
+    session.append('compaction/summary', {
+      compactionId: id,
+      summary: [{ type: 'text', text: 'summary' }],
+      shadowedRange: { start: 0, end: seqs.length },
+      shadowedSeqs: seqs,
+      shadowedTokenCount: 120,
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
     })
-    loop.activeMemoryStore.appendHistory('assistant', `reply ${index}`, {
-      extra: { turn_id: `turn_${index}` },
-    })
+  }
+  session.append('compaction/end', {
+    compactionId: id,
+    turn: null,
+    ...(error ? { error } : {}),
+  })
+}
+
+interface Harness {
+  root: string
+  deps: CoreMemoryServiceDeps
+  service: CoreMemoryService
+  logs: Map<string, Session>
+  refreshes: () => number
+  setActive: (id: string | null) => void
+  compactCalls: string[]
+  setCompact: (fn: CoreMemoryServiceDeps['compactNow']) => void
+  setMeasure: (value: CoreContextMeasurement | null) => void
+}
+
+function makeService(): Harness {
+  const root = tmp('emperor-memory-service-')
+  const memoryDir = join(root, 'memory')
+  mkdirSync(join(memoryDir, 'profile'), { recursive: true })
+  const userFile = join(memoryDir, 'profile', 'USER.local.md')
+  writeFileSync(userFile, '# User\n', 'utf8')
+  const sharedMemory = new MemoryStore(memoryDir, userFile)
+  const projectStore = new ProjectStore(root, {
+    versions: sharedMemory.versions,
+  })
+  const tokenTracker = new TokenTracker(join(root, 'tokens', 'tokens.jsonl'))
+  const sessionStore = new SessionStore(root)
+  const watchlist = new WatchlistService(root, {
+    decider: () => WatchlistDecision.skip('manual check'),
+    tokenTracker,
+  })
+  const logs = new Map<string, Session>()
+  let active: string | null = null
+  let refreshCount = 0
+  const compactCalls: string[] = []
+  let compactImpl: CoreMemoryServiceDeps['compactNow'] = async () => ({
+    compacted: false,
+  })
+  let measurement: CoreContextMeasurement | null = null
+  const deps: CoreMemoryServiceDeps = {
+    stateRoot: root,
+    sharedMemory,
+    projectStore,
+    tokenTracker,
+    watchlist,
+    sessionStore,
+    activeSessionId: () => active,
+    sessionLog: (id) => logs.get(id),
+    compactNow: async (id) => {
+      compactCalls.push(id)
+      return await compactImpl(id)
+    },
+    measureContext: () => measurement,
+    refreshRuntimeContext: () => {
+      refreshCount += 1
+    },
+  }
+  return {
+    root,
+    deps,
+    service: new CoreMemoryService(deps),
+    logs,
+    refreshes: () => refreshCount,
+    setActive: (id) => {
+      active = id
+    },
+    compactCalls,
+    setCompact: (fn) => {
+      compactImpl = fn
+    },
+    setMeasure: (value) => {
+      measurement = value
+    },
   }
 }
 
-describe('CoreMemoryService (MIG-IPC-007)', () => {
-  it('returns the Python-compatible memory payload with context, token, runtime, watchlist, and version summaries', async () => {
-    const { root, loop, service } = await makeService()
-    loop.sharedMemory.writeMemory('# Long\n\nKeep this fact.')
+function chatSession(h: Harness, turns = 0): Session {
+  const entry = h.deps.sessionStore.create('Chat', { mode: 'chat' })
+  const session = new Session({ version: 0, id: entry.id, createdAt: 0 })
+  for (let turn = 1; turn <= turns; turn += 1)
+    runTurn(session, turn, `request ${turn}`)
+  h.logs.set(entry.id, session)
+  h.setActive(entry.id)
+  return session
+}
+
+describe('CoreMemoryService (harness kernel)', () => {
+  it('returns the memory payload with context, token, session-log, watchlist, and version summaries', () => {
+    const h = makeService()
+    const { root, deps, service } = h
+    deps.sharedMemory.writeMemory('# Long\n\nKeep this fact.')
     writeFileSync(
       join(root, 'memory', '2026-05-01.md'),
       '# 2026-05-01\n\nEpisode.',
       'utf8',
     )
-    loop.activeMemoryStore.appendHistory('user', 'hello', {
-      extra: { turn_id: 'turn_1' },
-    })
-    loop.runtimeStore.append({
-      event: 'message_delta',
-      turn_id: 'turn_1',
-      content: 'hi',
-    })
-    loop.tokenTracker.record(
+    const session = chatSession(h, 1)
+    deps.tokenTracker.record(
       'gpt-4.1',
       { input: 10, output: 5, cache_read: 2 },
       { provider: 'openai', usageType: 'main_agent' },
@@ -69,6 +187,13 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
         'memory/MEMORY.local.md',
         'projects/index.json',
       ]),
+      sourceMap: expect.arrayContaining([
+        expect.objectContaining({
+          domain: 'session',
+          kind: 'session_log',
+          sessionId: session.id,
+        }),
+      ]),
     })
     expect(payload.tokensByModel['openai/gpt-4.1']).toMatchObject({
       provider: 'openai',
@@ -77,28 +202,55 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
     })
     expect(payload.tokensByUsageType.main_agent).toMatchObject({ total: 17 })
     expect(payload.tokenTotals).toMatchObject({ total: 17, calls: 1 })
-    expect(payload.history.active_lines).toBeGreaterThan(0)
-    expect(payload.runtime.activeTurns).toBe(1)
+    expect(payload.history).toMatchObject({
+      active_lines: 2,
+      latest_seq: session.seq - 1,
+      archive_files: 0,
+      needs_rotation: false,
+    })
+    expect(payload.runtime).toMatchObject({
+      events: session.seq,
+      activeTurns: 0,
+      archiveFiles: 0,
+      needsRotation: false,
+    })
     expect(payload.compaction).toMatchObject({
       cursor: { compactedUntilSeq: 0, archivedUntilSeq: 0, status: 'active' },
       archive: { compactedUntilSeq: 0, archivedUntilSeq: 0 },
+      omittedRanges: [],
+      latest: null,
+    })
+    expect(payload.schedulerMaintenance).toEqual({
+      jobs: 0,
+      enabled: 0,
+      nextRunAtMs: null,
+      lastError: null,
     })
     expect(payload.watchlist.content).toBe('- [ ] check later\n')
     expect(payload.versions).toHaveProperty('versions')
-
-    await loop.close()
+    expect(service.historyPayload()).toEqual([])
   })
 
-  it('reports memory source domains for build project private state', async () => {
-    const { root, loop, service } = await makeService()
+  it('returns neutral per-session keys when no session is active', () => {
+    const { service } = makeService()
+    const payload = service.getMemory()
+    expect(payload.compaction).toBeNull()
+    expect(payload.history).toMatchObject({ active_lines: 0, latest_seq: 0 })
+    expect(payload.runtime).toMatchObject({ events: 0, path: '' })
+  })
+
+  it('reports memory source domains for build project private state', () => {
+    const h = makeService()
+    const { root, deps, service } = h
     const projectDir = tmp('emperor-memory-service-project-')
-    const project = loop.projectStore.resolve(projectDir)
-    const session = loop.sessionStore.create('Build Project', {
+    const project = deps.projectStore.resolve(projectDir)
+    const entry = deps.sessionStore.create('Build Project', {
       mode: 'build',
       project: project as unknown as Record<string, unknown>,
     })
-    loop.activateSession(session.id)
-    loop.activeMemoryStore.writeMemory(
+    h.setActive(entry.id)
+    deps.projectStore.updateMemory(
+      project.project_id,
       '## Architecture Notes\n\n- Build context belongs to this project.',
     )
 
@@ -119,36 +271,26 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
           kind: 'private_memory',
           projectId: project.project_id,
           workspacePath: resolve(projectDir),
-          statePath: join(root, '.emperor', 'projects', project.project_id),
-          path: join(
-            root,
-            '.emperor',
-            'projects',
-            project.project_id,
-            'AGENTS.local.md',
-          ),
+          statePath: join(root, 'projects', project.project_id),
+          path: join(root, 'projects', project.project_id, 'AGENTS.local.md'),
         }),
       ]),
     })
     expect(existsSync(join(projectDir, 'AGENTS.md'))).toBe(false)
-
-    await loop.close()
   })
 
-  it('versions and restores project private memory through the shared memory version API', async () => {
-    const { loop, service } = await makeService()
+  it('versions and restores project private memory through the shared memory version API', () => {
+    const { deps, service } = makeService()
     const projectDir = tmp('emperor-memory-service-project-versions-')
-    const project = loop.projectStore.resolve(projectDir)
-    const session = loop.sessionStore.create('Build Project', {
-      mode: 'build',
-      project: project as unknown as Record<string, unknown>,
-    })
-    loop.activateSession(session.id)
-
-    loop.activeMemoryStore.writeMemory(
+    const project = deps.projectStore.resolve(projectDir)
+    deps.projectStore.updateMemory(
+      project.project_id,
       '## Architecture Notes\n\n- first version',
     )
-    loop.activeMemoryStore.writeMemory('## Build Commands\n\n- second version')
+    deps.projectStore.updateMemory(
+      project.project_id,
+      '## Build Commands\n\n- second version',
+    )
 
     const versions = service.listVersions({
       target: 'project',
@@ -161,19 +303,17 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
 
     service.restoreVersion(String(versions[0]!.id))
 
-    expect(loop.projectStore.readManagedMemory(project.project_id)).toContain(
+    expect(deps.projectStore.readManagedMemory(project.project_id)).toContain(
       'first version',
     )
-
-    await loop.close()
   })
 
-  it('saves global memory through section patches, restores versions, returns full watchlist check payloads, and refreshes runtime context', async () => {
-    const { root, loop, service, refreshes } = await makeService()
-    loop.sharedMemory.writeMemory(
+  it('saves global memory through section patches, restores versions, checks the watchlist, and refreshes runtime context', async () => {
+    const { root, deps, service, refreshes } = makeService()
+    deps.sharedMemory.writeMemory(
       '# Global Long-Term Memory\n\n## Cross-Project Decisions\n- keep this\n\n## Open Questions\n- old question\n',
     )
-    const initial = loop.sharedMemory.readMemory()
+    const initial = deps.sharedMemory.readMemory()
 
     const savedMemory = service.saveMemory(
       '## Open Questions\n\n- new question\n',
@@ -183,10 +323,7 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
       '## Cross-Project Decisions\n- keep this',
     )
     expect(savedMemory.content).toContain('- new question')
-    expect(loop.sharedMemory.readMemory()).toContain(
-      '## Cross-Project Decisions\n- keep this',
-    )
-    expect(loop.sharedMemory.readMemory()).toContain('- new question')
+    expect(deps.sharedMemory.readMemory()).toContain('- new question')
     expect(
       readFileSync(join(root, 'memory', 'patch-ledger.jsonl'), 'utf8'),
     ).toContain('save_global_memory')
@@ -208,12 +345,20 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
       content: 'Episode body\n',
     })
     expect(existsSync(join(root, 'memory', '2026-05-02.md'))).toBe(true)
+    service.saveEpisode('Episode body v2', '2026-05-02')
+    expect(
+      service.listVersions({ target: 'episode' }).versions.length,
+    ).toBeGreaterThanOrEqual(1)
+    expect(() => service.listVersions({ target: 'bogus' })).toThrow(
+      'Invalid version target',
+    )
 
     const versions = service.listVersions({
       target: 'memory',
       limit: 10,
     }).versions
     expect(versions.length).toBeGreaterThanOrEqual(1)
+    expect(service.getVersion(String(versions[0]!.id))).toBeTruthy()
     const restored = service.restoreVersion(String(versions[0]!.id))
     expect(restored).toMatchObject({
       restored: { path: 'memory/MEMORY.local.md', content: initial },
@@ -222,27 +367,35 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
     expect(refreshes()).toBe(2)
 
     service.saveWatchlist('- [ ] active item')
+    expect(service.getWatchlist()).toMatchObject({
+      content: '- [ ] active item\n',
+    })
     const checked = await service.checkWatchlist()
     expect(checked).toMatchObject({
       decision: { action: 'skip', reason: 'manual check' },
       watchlist: { content: '- [ ] active item\n' },
     })
-
-    await loop.close()
   })
 
-  it('returns the full token analytics payload used by the Tokens view', async () => {
-    const { loop, service } = await makeService()
-    loop.tokenTracker.record(
+  it('returns the full token analytics payload and counts messages from the active session log', () => {
+    const h = makeService()
+    const { deps, service } = h
+    deps.tokenTracker.record(
       'gpt-4.1',
       { input: 10, output: 2 },
       { provider: 'openai', usageType: 'main_agent' },
     )
-    loop.tokenTracker.record(
+    deps.tokenTracker.record(
       'gpt-4.1',
       { input: 5, output: 1, cache_read: 3 },
       { provider: 'openai', usageType: 'main_agent' },
     )
+
+    expect(service.tokens().messages).toBe(0)
+    const session = chatSession(h, 2)
+    session.append('user/message', contextMessage('runtime-context', 'ctx'), {
+      surfaceOp: 'append',
+    })
 
     const payload = service.tokens()
 
@@ -250,718 +403,221 @@ describe('CoreMemoryService (MIG-IPC-007)', () => {
       payload.byDateModel[Object.keys(payload.byDateModel)[0]!]![
         'openai/gpt-4.1'
       ],
-    ).toMatchObject({ total: 21 })
+    ).toMatchObject({
+      total: 21,
+    })
     expect(payload.byHour).toHaveProperty(
       new Date().getHours().toString().padStart(2, '0'),
     )
     expect(payload.streak).toHaveProperty('active_days')
     expect(payload.sessions).toBeGreaterThanOrEqual(1)
-    expect(payload.messages).toBe(0)
+    expect(payload.messages).toBe(4)
     expect(payload.recentCalls?.[0]).toMatchObject({
       model: 'gpt-4.1',
       total: 9,
     })
     expect(payload.recentCacheCalls?.[0]).toMatchObject({ cache_read: 3 })
     expect(payload.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
-
-    await loop.close()
   })
 
-  it('manual compact keeps the latest completed turns by default', async () => {
-    const provider = new FakeProvider()
-    provider.reply = JSON.stringify({
-      schemaVersion: 'emperor.compaction-draft.v1',
-      episode: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Summary',
-            content:
-              '- Summarized stable old chat turns while keeping recent tail.',
-            reason: 'manual compact summarized stable tail-safe range',
-            sourceSeqs: [1, 2, 3, 4],
-            confidence: 'high',
-          },
-        ],
-      },
-      globalMemory: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Cross-Project Decisions',
-            content:
-              '- Manual compact keeps recent conversation tail unless force is requested.',
-            reason: 'durable compaction behavior',
-            sourceSeqs: [1, 2],
-            confidence: 'high',
-          },
-        ],
-      },
-      decisions: [
-        {
-          sourceSeqs: [1, 2],
-          content:
-            'Manual compact keeps recent conversation tail unless force is requested.',
-          destination: 'global_memory',
-          classification: 'cross_session_fact',
-          reason: 'manual compaction default',
-          confidence: 'high',
-        },
-      ],
-      discarded: [],
+  it('requires a session for manual compaction and skips short sessions', async () => {
+    const h = makeService()
+    await expect(h.service.compact()).rejects.toThrow(
+      'session is required for compaction',
+    )
+
+    chatSession(h, 0)
+    const skipped = await h.service.compact()
+    expect(skipped).toMatchObject({
+      status: 'skipped',
+      count: 0,
+      unarchivedHistory: [],
     })
-    const { loop, service } = await makeService(provider)
-    appendCompletedTurns(loop, 6)
+    expect(skipped.message).toContain('已随旧内核退役')
+    expect(h.compactCalls).toEqual([])
+  })
 
-    const payload = await service.compact()
+  it('manual compact delegates to the harness and reports the session-log compaction', async () => {
+    const h = makeService()
+    const session = chatSession(h, 3)
+    const shadowed = session.surface.nodes.slice(0, 2)
+    h.setCompact(async () => {
+      appendCompaction(session, 'cmp_1', [...shadowed])
+      return { compacted: true, shadowedTokenCount: 120 }
+    })
 
-    expect(payload.error).toBeUndefined()
+    const payload = await h.service.compact({ force: true })
+
+    expect(h.compactCalls).toEqual([session.id])
+    expect(h.refreshes()).toBe(1)
     expect(payload).toMatchObject({
       status: 'compacted',
-      count: 12,
-      message: '已压缩 4 条稳定历史消息，保留最近未压缩上下文。',
+      count: 6,
+      unarchivedHistory: [],
+      runtime: { events: session.seq },
       compaction: {
-        range: { fromSeq: 1, toSeq: 4 },
-        cursor: { compactedUntilSeq: 4, archivedUntilSeq: 4 },
-        applied: expect.arrayContaining([
-          expect.objectContaining({
-            scope: { kind: 'episode', date: expect.any(String) },
-            operationCount: 1,
-          }),
-          expect.objectContaining({
-            scope: { kind: 'global' },
-            operationCount: 1,
-          }),
-        ]),
+        compactionId: 'cmp_1',
+        range: { fromSeq: shadowed[0], toSeq: shadowed[1] },
+        shadowedTokenCount: 120,
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        cursor: { compactedUntilSeq: shadowed[1], lastCompactionId: 'cmp_1' },
+        applied: [],
         discarded: [],
       },
     })
-    expect(payload.unarchivedHistory).toHaveLength(8)
-    expect(
-      loop.activeMemoryStore.loadUnarchivedHistory().map((row) => row.turn_id),
-    ).toEqual([
-      'turn_3',
-      'turn_3',
-      'turn_4',
-      'turn_4',
-      'turn_5',
-      'turn_5',
-      'turn_6',
-      'turn_6',
-    ])
-
-    await loop.close()
-  })
-
-  it('force-compacts chat history through the scoped JSON compactor and archives compacted session history', async () => {
-    const provider = new FakeProvider()
-    provider.reply = JSON.stringify({
-      schemaVersion: 'emperor.compaction-draft.v1',
-      episode: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Summary',
-            content: '- Summarized old chat messages.',
-            reason: 'manual compact summarized completed turn',
-            sourceSeqs: [1, 2],
-            confidence: 'high',
-          },
-        ],
-      },
-      userProfile: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Stable Preferences',
-            content: '- Prefers scoped memory compaction.',
-            reason: 'explicit stable preference in chat',
-            sourceSeqs: [1],
-            confidence: 'high',
-          },
-        ],
-      },
-      globalMemory: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Cross-Project Decisions',
-            content: '- Emperor uses scoped JSON memory compaction.',
-            reason: 'durable cross-session fact',
-            sourceSeqs: [2],
-            confidence: 'high',
-          },
-        ],
-      },
-      decisions: [
-        {
-          sourceSeqs: [1],
-          content: 'Prefers scoped memory compaction',
-          destination: 'user_profile',
-          classification: 'stable_user_preference',
-          reason: 'stable user preference',
-          confidence: 'high',
-        },
+    expect(payload.message).toContain('120 tokens')
+    expect(payload.memory.compaction).toMatchObject({
+      cursor: { compactedUntilSeq: shadowed[1] },
+      omittedRanges: [
+        { compactionId: 'cmp_1', fromSeq: shadowed[0], toSeq: shadowed[1] },
       ],
-      discarded: [],
+      latest: { compactionId: 'cmp_1', status: 'applied' },
+      count: 1,
     })
-    const { loop, service } = await makeService(provider)
-    loop.activeMemoryStore.appendHistory('user', 'first', {
-      extra: { turn_id: 'turn_1' },
-    })
-    loop.activeMemoryStore.appendHistory('assistant', 'reply', {
-      extra: { turn_id: 'turn_1' },
-    })
-    loop.runtimeStore.append({
-      event: 'message_delta',
-      turn_id: 'turn_1',
-      content: 'reply',
-    })
-
-    const payload = await service.compact({ force: true })
-
-    expect(payload.error).toBeUndefined()
-    expect(payload).toMatchObject({
-      status: 'compacted',
-      count: 2,
-      message: '已压缩 2 条稳定历史消息。',
-    })
-    expect(payload.unarchivedHistory).toHaveLength(0)
-    expect(payload.compaction).toMatchObject({
-      compactionId: expect.any(String),
-      range: { fromSeq: 1, toSeq: 2 },
-      cursor: { compactedUntilSeq: 2, archivedUntilSeq: 2 },
-      applied: expect.arrayContaining([
-        expect.objectContaining({
-          scope: { kind: 'episode', date: expect.any(String) },
-        }),
-        expect.objectContaining({ scope: { kind: 'user_profile' } }),
-        expect.objectContaining({ scope: { kind: 'global' } }),
-      ]),
-    })
-    expect(payload.memory.long_term).toContain(
-      'Emperor uses scoped JSON memory compaction',
-    )
-    expect(loop.sharedMemory.readUser()).toContain(
-      'Prefers scoped memory compaction',
-    )
-    expect(loop.sharedMemory.readTodayEpisode()).toContain(
-      'Summarized old chat messages',
-    )
-    expect(loop.activeMemoryStore.loadUnarchivedHistory()).toHaveLength(0)
-    expect(loop.runtimeStore.eventsForTurns(['turn_1'])).toHaveLength(0)
-    expect(provider.calls.at(-1)?.model).toBe('fake-mini')
-
-    const second = await service.compact({ force: true })
-    expect(second).toMatchObject({ status: 'skipped' })
-
-    await loop.close()
   })
 
-  it('compacts build history into project memory while still writing profile and episode through scoped targets', async () => {
-    const provider = new FakeProvider()
-    provider.reply = JSON.stringify({
-      schemaVersion: 'emperor.compaction-draft.v1',
-      episode: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Summary',
-            content: '- Build compaction captured completed project turn.',
-            reason: 'manual compact summarized build turn',
-            sourceSeqs: [1, 2],
-            confidence: 'high',
-          },
-        ],
-      },
-      userProfile: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Working Style',
-            content: '- Wants project facts kept out of global memory.',
-            reason: 'stable working style',
-            sourceSeqs: [1],
-            confidence: 'high',
-          },
-        ],
-      },
-      projectMemory: {
-        operations: [
-          {
-            op: 'append_section_item',
-            section: 'Build Commands',
-            content: '- npm test --workspace @emperor/core',
-            reason: 'verified build command belongs to project',
-            sourceSeqs: [2],
-            confidence: 'high',
-          },
-        ],
-      },
-      decisions: [
-        {
-          sourceSeqs: [2],
-          content: 'npm test --workspace @emperor/core',
-          destination: 'project_memory',
-          classification: 'project_command',
-          reason: 'project command',
-          confidence: 'high',
-        },
-      ],
-      discarded: [],
-    })
-    const { loop, service } = await makeService(provider)
-    const projectDir = tmp('emperor-memory-service-build-compact-project-')
-    const project = loop.projectStore.resolve(projectDir)
-    const session = loop.sessionStore.create('Build Project', {
-      mode: 'build',
-      project: project as unknown as Record<string, unknown>,
-    })
-    loop.activateSession(session.id)
-    loop.activeMemoryStore.appendHistory('user', 'build first', {
-      extra: { turn_id: 'turn_build_1' },
-    })
-    loop.activeMemoryStore.appendHistory('assistant', 'build reply', {
-      extra: { turn_id: 'turn_build_1' },
-    })
+  it('reports skipped and degraded compaction without touching the session log', async () => {
+    const h = makeService()
+    const session = chatSession(h, 2)
+    const before = session.seq
 
-    const payload = await service.compact({ force: true })
+    const skipped = await h.service.compact()
+    expect(skipped).toMatchObject({ status: 'skipped', count: 4 })
+    expect(skipped.message).toContain('没有可压缩的范围')
 
-    expect(payload.error).toBeUndefined()
-    expect(payload).toMatchObject({
-      status: 'compacted',
-      count: 2,
-      compaction: {
-        mode: 'build',
-        projectId: project.project_id,
-        range: { fromSeq: 1, toSeq: 2 },
-      },
+    h.setCompact(async () => {
+      throw new Error('summary model unavailable')
     })
-    expect(loop.projectStore.readManagedMemory(project.project_id)).toContain(
-      'npm test --workspace @emperor/core',
-    )
-    expect(loop.sharedMemory.readUser()).toContain(
-      'project facts kept out of global memory',
-    )
-    expect(loop.sharedMemory.readTodayEpisode()).toContain(
-      'Build compaction captured completed project turn',
-    )
-    expect(loop.sharedMemory.readMemory()).not.toContain(
-      'npm test --workspace @emperor/core',
-    )
-    expect(loop.activeMemoryStore.loadUnarchivedHistory()).toHaveLength(0)
-
-    await loop.close()
-  })
-
-  it('does not clear session history when memory compaction fails', async () => {
-    const provider = new FakeProvider()
-    provider.reply = 'not xml'
-    const { loop, service } = await makeService(provider)
-    loop.activeMemoryStore.appendHistory('user', 'first', {
-      extra: { turn_id: 'turn_1' },
-    })
-    loop.activeMemoryStore.appendHistory('assistant', 'reply', {
-      extra: { turn_id: 'turn_1' },
-    })
-
-    const payload = await service.compact({ force: true })
-
-    expect(payload).toMatchObject({
+    const degraded = await h.service.compact({ sessionId: session.id })
+    expect(degraded).toMatchObject({
       status: 'degraded',
-      count: 2,
+      count: 4,
+      error: 'summary model unavailable',
+      unarchivedHistory: [],
     })
-    expect(payload.message).toContain('压缩失败')
-    expect(loop.activeMemoryStore.loadUnarchivedHistory()).toHaveLength(2)
-
-    await loop.close()
+    expect(session.seq).toBe(before)
   })
 
-  it('explains the exact context plan, checkpoint, and compaction cursor for a model turn', async () => {
-    const { root, loop, service } = await makeService()
-    const sessionId = String(loop.activeSessionId)
-    const snapshotDir = join(
-      loop.sessionStore.sessionDir(sessionId),
-      'prompt-snapshots',
-    )
-    writePromptSnapshot({
-      dir: snapshotDir,
-      sessionId,
-      turnId: 'turn_explain_1',
-      model: 'fake-main',
-      provider: 'fake',
-      modelEntryId: 'active-entry',
-      estimatedInputTokens: 123,
-      sections: [
-        {
-          name: 'long_term_memory',
-          content: '# Long-term Memory\n\n- User prefers explicit audits.',
-          source: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-          priority: 80,
-          budgetChars: 12000,
-          version: null,
-          scope: 'global',
-        },
-      ],
-      contextPlan: {
-        version: 1,
-        mode: 'chat',
-        activeMemoryBinding: {
-          profile: {
-            scope: { kind: 'user_profile' },
-            readable: true,
-            writable: true,
-            path: join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
-          },
-          longTerm: {
-            scope: { kind: 'global' },
-            readable: true,
-            writable: true,
-            path: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-          },
-          episode: {
-            scope: { kind: 'episode', date: '2026-07-06' },
-            readable: false,
-            writable: true,
-            path: join(root, '.emperor', 'memory', '2026-07-06.md'),
-          },
-        },
-        items: [],
-        omitted: [
-          {
-            kind: 'project_memory',
-            source: 'projects/<project-id>/AGENTS.local.md',
-            reason: 'chat mode has no active bound project memory',
-          },
-        ],
-      },
-    })
-    loop.activeMemoryStore.writeCheckpoint([
-      { role: 'user', content: 'checkpoint draft' },
-    ])
-    const cursorStore = new CompactionCursorStore(loop.paths.stateRoot)
-    cursorStore.markCompacting(sessionId, {
-      lastHistorySeq: 2,
-      compactionId: 'compact_applied',
-    })
-    cursorStore.advance(sessionId, {
-      compactedUntilSeq: 2,
-      compactionId: 'compact_applied',
-      lastHistorySeq: 2,
-    })
-    cursorStore.markCompacting(sessionId, {
-      lastHistorySeq: 4,
-      compactionId: 'compact_failed',
-    })
-    cursorStore.markActive(sessionId)
-    const ledger = new CompactionLedger(loop.paths.stateRoot)
-    ledger.recordApplied({
-      compactionId: 'compact_applied',
-      sessionId,
-      mode: 'chat',
-      trigger: { kind: 'manual', force: true },
-      range: { fromSeq: 1, toSeq: 2 },
-      status: 'applied',
-      activeMemoryBinding: {
-        profile: {
-          scope: { kind: 'user_profile' },
-          readable: true,
-          writable: true,
-          path: join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
-        },
-        longTerm: {
-          scope: { kind: 'global' },
-          readable: true,
-          writable: true,
-          path: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-        },
-        episode: {
-          scope: { kind: 'episode', date: '2026-07-06' },
-          readable: false,
-          writable: true,
-          path: join(root, '.emperor', 'memory', '2026-07-06.md'),
-        },
-      },
-      input: {
-        historyHash: 'history_hash',
-        historyCount: 2,
-        userProfileHash: 'user_hash',
-        globalMemoryHash: 'global_hash',
-        episodeHash: 'episode_hash',
-      },
-      output: {
-        decisions: [
-          {
-            sourceSeqs: [1],
-            content: 'explicit audits',
-            destination: 'global_memory',
-            classification: 'cross_session_fact',
-            reason: 'durable preference',
-            confidence: 'high',
-          },
-        ],
-        discarded: [
-          {
-            sourceSeqs: [2],
-            summary: 'temporary tool output',
-            reason: 'temporary_tool_output',
-          },
-        ],
-        targetVersions: [
-          {
-            scope: { kind: 'global' },
-            beforeVersion: 1,
-            beforeHash: 'before_hash',
-            afterVersion: 2,
-            afterHash: 'after_hash',
-            operationCount: 1,
-          },
-        ],
-      },
-    })
-    ledger.recordFailed(
-      {
-        compactionId: 'compact_failed',
-        sessionId,
-        mode: 'chat',
-        trigger: { kind: 'manual', force: true },
-        range: { fromSeq: 3, toSeq: 4 },
-        status: 'started',
-        activeMemoryBinding: {
-          profile: {
-            scope: { kind: 'user_profile' },
-            readable: true,
-            writable: true,
-            path: join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
-          },
-          longTerm: {
-            scope: { kind: 'global' },
-            readable: true,
-            writable: true,
-            path: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-          },
-          episode: {
-            scope: { kind: 'episode', date: '2026-07-06' },
-            readable: false,
-            writable: true,
-            path: join(root, '.emperor', 'memory', '2026-07-06.md'),
-          },
-        },
-        input: {
-          historyHash: 'failed_history_hash',
-          historyCount: 2,
-          userProfileHash: 'user_hash',
-          globalMemoryHash: 'global_hash',
-          episodeHash: 'episode_hash',
-        },
-      },
-      {
-        code: 'apply_failed',
-        message: 'simulated failed compaction after applied baseline',
-      },
-    )
-
-    const payload = (service as any).explainContext({
-      sessionId,
-      turnId: 'turn_explain_1',
+  it('explains the context of a session from its log', () => {
+    const h = makeService()
+    expect(h.service.explainContext()).toMatchObject({
+      status: 'missing_session',
+      sessionId: null,
     })
 
-    expect(payload).toMatchObject({
+    const entry = h.deps.sessionStore.create('No log', { mode: 'chat' })
+    expect(h.service.explainContext({ sessionId: entry.id })).toMatchObject({
+      status: 'missing_snapshot',
+      sessionId: entry.id,
+      checkpoint: { exists: false, status: 'retired' },
+      microcompact: { records: [], omittedChars: 0 },
+      compaction: { cursor: { compactedUntilSeq: 0 } },
+    })
+
+    const session = chatSession(h, 1)
+    session.append('request/header', {
+      header: {
+        config: { provider: 'openai', model: 'gpt-4.1' },
+        system: 'You are Emperor.',
+        tools: [
+          {
+            name: 'read',
+            description: 'read a file',
+            parameters: { type: 'object' },
+          },
+        ],
+      },
+      reason: 'initial',
+    } as never)
+    session.append('request/context', {
+      provider: 'openai',
+      model: 'gpt-4.1',
+      contextWindow: 128000,
+    })
+    const ctx = contextMessage('agent-instructions', 'Follow AGENTS.md', {
+      form: 'instructions',
+    })
+    session.append('user/message', ctx, { surfaceOp: 'append' })
+    session.append('compaction/prune', {
+      shadowedRange: { start: 0, end: 1 },
+      shadowedSeqs: [3],
+      shadowedTokenCount: 40,
+    })
+    appendCompaction(session, 'cmp_fail', [], 'not smaller')
+    h.setMeasure({ totalTokens: 2048, contextWindow: 128000 })
+
+    const explained = h.service.explainContext()
+
+    expect(explained).toMatchObject({
       status: 'ok',
-      sessionId,
-      turnId: 'turn_explain_1',
+      sessionId: session.id,
+      turnId: '1',
       mode: 'chat',
-      activeMemoryBinding: {
-        profile: {
-          scope: { kind: 'user_profile' },
-          readable: true,
-          writable: true,
-        },
-        longTerm: {
-          scope: { kind: 'global' },
-          readable: true,
-          writable: true,
-        },
-      },
+      model: 'gpt-4.1',
+      provider: 'openai',
+      estimatedInputTokens: 2048,
+      contextWindow: 128000,
+      activeMemoryBinding: { kind: 'global' },
       injected: [
-        {
-          id: 'section:long_term_memory',
-          kind: 'long_term_memory',
-          source: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-          reason: 'included_by_context_builder',
-        },
+        expect.objectContaining({
+          id: ctx.id,
+          kind: 'instructions',
+          source: 'agent-instructions',
+          action: 'include',
+          charCount: 'Follow AGENTS.md'.length,
+        }),
       ],
-      omitted: [
-        {
-          kind: 'project_memory',
-          source: 'projects/<project-id>/AGENTS.local.md',
-          reason: 'chat mode has no active bound project memory',
-        },
+      omitted: [],
+      sections: [
+        expect.objectContaining({
+          id: 'system',
+          charCount: 'You are Emperor.'.length,
+        }),
+        expect.objectContaining({ id: 'tools', count: 1 }),
       ],
-      checkpoint: {
-        exists: true,
-        recoverable: true,
-        historyRows: 1,
-        schemaVersion: 'emperor.turn-checkpoint.v1',
-        phase: 'tool_calls_pending',
-        legacy: false,
+      surface: {
+        nodes: 3,
+        messages: 2,
+        user: 1,
+        assistant: 1,
+        context: 1,
+        toolResults: 0,
+      },
+      checkpoint: { exists: false, status: 'retired' },
+      microcompact: {
+        records: [expect.objectContaining({ shadowedTokenCount: 40 })],
+        omittedTokens: 40,
       },
       compaction: {
-        cursor: {
-          sessionId,
-          status: 'active',
-          lastHistorySeq: 4,
-          compactedUntilSeq: 2,
-          lastCompactionId: 'compact_failed',
-        },
-        omittedRanges: [
-          {
-            fromSeq: 1,
-            toSeq: 2,
-            compactionId: 'compact_applied',
-            reason: 'semantic_compaction_applied',
-          },
-        ],
+        cursor: { compactedUntilSeq: 0 },
+        omittedRanges: [],
         latest: {
-          compactionId: 'compact_applied',
-          status: 'applied',
-          range: { fromSeq: 1, toSeq: 2 },
-          patchTargets: [
-            {
-              scope: { kind: 'global' },
-              operationCount: 1,
-            },
-          ],
-          discardedCount: 1,
+          compactionId: 'cmp_fail',
+          status: 'failed',
+          error: { message: 'not smaller' },
         },
+        count: 0,
       },
-      microcompact: {
-        records: [],
-        omittedChars: 0,
+      snapshot: {
+        totals: { events: session.seq, surfaceNodes: 3, estimatedTokens: 2048 },
       },
     })
-    expect(payload.artifacts).toEqual(
+    const artifacts = (
+      explained as unknown as {
+        artifacts: Array<{ kind: string; path: string }>
+      }
+    ).artifacts
+    expect(artifacts.map((item) => item.kind)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'user_profile',
-          visibility: 'always_injected',
-          mutability: 'managed_patch',
-          injectedIn: ['chat', 'build'],
-          path: join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
-        }),
-        expect.objectContaining({
-          kind: 'global_memory',
-          visibility: 'chat_only',
-          injectedIn: ['chat'],
-          path: join(root, '.emperor', 'memory', 'MEMORY.local.md'),
-        }),
-        expect.objectContaining({
-          kind: 'runtime_event_log',
-          visibility: 'runtime_only',
-          injectedIn: [],
-          path: loop.runtimeStore.eventsFile,
-        }),
-        expect.objectContaining({
-          kind: 'prompt_snapshot',
-          visibility: 'debug_only',
-          injectedIn: [],
-          path: snapshotDir,
-        }),
+        'user_profile',
+        'global_memory',
+        'conversation_history',
       ]),
     )
-
-    await loop.close()
+    expect(artifacts.map((item) => item.kind)).not.toContain('checkpoint')
+    expect(
+      artifacts.find((item) => item.kind === 'conversation_history')?.path,
+    ).toBe(join(h.root, 'sessions', session.id, 'log.jsonl'))
   })
 })
-
-async function makeService(
-  provider: FakeProvider = new FakeProvider(),
-): Promise<{
-  root: string
-  loop: AgentLoop
-  service: CoreMemoryService
-  refreshes: () => number
-}> {
-  const root = tmp('emperor-memory-service-')
-  let refreshCount = 0
-  const loop = await AgentLoop.create({
-    root,
-    stateRoot: join(root, '.emperor'),
-    templatesDir: TEMPLATES_DIR,
-    modelRouter: fakeRouter(provider),
-    initializeMcp: false,
-  })
-  const watchlist = new WatchlistService(root, {
-    decider: () => WatchlistDecision.skip('manual check'),
-    tokenTracker: loop.tokenTracker,
-  })
-  const service = new CoreMemoryService(root, {
-    loop,
-    watchlist,
-    refreshRuntimeContext: () => {
-      refreshCount += 1
-    },
-  })
-  return { root, loop, service, refreshes: () => refreshCount }
-}
-
-class FakeProvider extends LLMProvider {
-  calls: ChatArgs[] = []
-  reply = 'pong'
-
-  constructor() {
-    super({ defaultModel: 'fake-main' })
-  }
-
-  async chat(args: ChatArgs): Promise<LLMResponse> {
-    this.calls.push(args)
-    return {
-      content: this.reply,
-      toolCalls: [],
-      finishReason: 'stop',
-      usage: { input: 1, output: 1 },
-      reasoningContent: null,
-      thinkingBlocks: null,
-    }
-  }
-}
-
-function fakeRouter(provider: FakeProvider): {
-  route: (useCase: string) => ModelRoute
-  payload: () => Record<string, unknown>
-} {
-  return {
-    route: (useCase: string) => ({
-      snapshot: snapshot(
-        provider,
-        useCase === 'main_agent' ? 'main' : 'secondary',
-      ),
-      fallback: null,
-      useCase,
-      reason: `${useCase}:fake`,
-      estimatedTokens: null,
-    }),
-    payload: () => ({ mainModel: 'fake-main', secondaryModel: 'fake-mini' }),
-  }
-}
-
-function snapshot(
-  provider: FakeProvider,
-  role: 'main' | 'secondary',
-): ProviderSnapshot {
-  return {
-    provider,
-    providerName: 'fake',
-    providerLabel: 'Fake',
-    model: role === 'main' ? 'fake-main' : 'fake-mini',
-    apiBase: null,
-    generation: { maxTokens: 2000, temperature: 0.1, reasoningEffort: null },
-    contextWindowTokens: 100000,
-    config: {},
-    supportsVision: false,
-    entryName: 'fake',
-    entryLabel: 'Fake',
-    modelRole: role,
-    routeReason: `${role}_model`,
-  }
-}

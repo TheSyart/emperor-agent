@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { CORE_EVENT_CHANNEL } from '../shared/ipc-contract'
+import {
+  CORE_EVENT_CHANNEL,
+  SESSION_EVENT_CHANNEL,
+} from '../shared/ipc-contract'
 import { createCoreEventBridge } from './core-events'
 
 describe('preload core event bridge (MIG-IPC-003)', () => {
@@ -17,6 +20,25 @@ describe('preload core event bridge (MIG-IPC-003)', () => {
 
     expect(seen).toEqual([{ event: 'ready' }])
     expect(ipc.listenerCount(CORE_EVENT_CHANNEL)).toBe(0)
+  })
+
+  it('subscribes to raw session event batches and drops malformed payloads', () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createCoreEventBridge(ipc)
+    const seen: unknown[] = []
+
+    const unsubscribe = bridge.onSessionEvents((batch) => {
+      seen.push(batch)
+    })
+    ipc.emit(SESSION_EVENT_CHANNEL, { sessionId: 's1', events: [{ seq: 0 }] })
+    ipc.emit(SESSION_EVENT_CHANNEL, { sessionId: 's1' })
+    ipc.emit(SESSION_EVENT_CHANNEL, null)
+    ipc.emit(CORE_EVENT_CHANNEL, { sessionId: 's1', events: [] })
+    unsubscribe()
+    ipc.emit(SESSION_EVENT_CHANNEL, { sessionId: 's1', events: [] })
+
+    expect(seen).toEqual([{ sessionId: 's1', events: [{ seq: 0 }] }])
+    expect(ipc.listenerCount(SESSION_EVENT_CHANNEL)).toBe(0)
   })
 })
 

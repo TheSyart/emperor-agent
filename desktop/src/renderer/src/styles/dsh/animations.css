@@ -1,0 +1,124 @@
+/* ── dsh 连续动效(glare 扫光 / shimmer 文字 / fade 淡入) ─────────────────────
+   蓝本:deepseek-harness ToolRow 运行扫光、TurnStatus shimmer。全局类 + 全局
+   keyframes,组件 scoped 样式可直接挂类名或引用 keyframes 名。
+   只动 transform / opacity / background-position(合成器友好)。
+   减弱动效降级集中在 styles/a11y.css(本文件不写减弱动效媒体查询)。 */
+
+/* 运行中扫光:给行容器挂 .ds-glare,仅在 [data-running] 时出现。
+   固定宽度的亮带(主题底色 60%)从左外侧滑到右外侧,尾部 10% 停顿。 */
+.ds-glare {
+  position: relative;
+  overflow: hidden;
+}
+
+.ds-glare[data-running]::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  /* 伪元素 = 行宽 + 亮带宽;亮带只画在左侧 300px,平移百分比相对伪元素自身,
+     终点 100% - 300px 恰好让亮带左缘抵达行的右缘。 */
+  width: calc(100% + var(--ds-glare-band));
+  background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(var(--bg-base) / 0.6) 55%,
+      transparent 100%
+    )
+    0 0 / var(--ds-glare-band) 100% no-repeat;
+  transform: translateX(calc(-1 * var(--ds-glare-band)));
+  animation: ds-glare-sweep 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.ds-glare {
+  --ds-glare-band: 300px;
+}
+
+@keyframes ds-glare-sweep {
+  0% {
+    transform: translateX(calc(-1 * var(--ds-glare-band)));
+  }
+
+  90%,
+  100% {
+    transform: translateX(calc(100% - var(--ds-glare-band)));
+  }
+}
+
+/* 文字 shimmer:金色文字上掠过一道浅金亮带(TurnStatus / 运行中状态)。 */
+.ds-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--accent-fill)) 0%,
+    rgb(var(--accent-fill)) 40%,
+    rgb(var(--accent-glare)) 50%,
+    rgb(var(--accent-fill)) 60%,
+    rgb(var(--accent-fill)) 100%
+  );
+  background-position: 100% 0;
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ds-shimmer 1.8s linear infinite;
+}
+
+/* 中性色 shimmer(次级文字,如 Think 流式行)。 */
+.ds-shimmer[data-tone='neutral'] {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--label-tertiary)) 0%,
+    rgb(var(--label-tertiary)) 40%,
+    rgb(var(--label-primary)) 50%,
+    rgb(var(--label-tertiary)) 60%,
+    rgb(var(--label-tertiary)) 100%
+  );
+}
+
+@keyframes ds-shimmer {
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* 淡入(浮层、toast、tooltip 进场)。 */
+.ds-fade-in {
+  animation: ds-fade-in var(--duration-ds) var(--ease-in-out) both;
+}
+
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ds-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* StateDot ongoing:3x3 像素矩阵外圈 8 格顺时针追逐(阶梯式亮度,无补间)。 */
+@keyframes ds-state-chase {
+  0%,
+  12.4% {
+    opacity: 1;
+  }
+
+  12.5%,
+  24.9% {
+    opacity: 0.6;
+  }
+
+  25%,
+  37.4% {
+    opacity: 0.35;
+  }
+
+  37.5%,
+  100% {
+    opacity: 0.15;
+  }
+}

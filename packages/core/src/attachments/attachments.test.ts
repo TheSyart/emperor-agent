@@ -1,14 +1,8 @@
-import { existsSync, mkdtempSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AttachmentStore, MAX_IMAGE_BYTES, TEXT_INLINE_LIMIT } from './store'
-import {
-  buildUserContent,
-  encodeForOpenAIBlock,
-  refToJson,
-  type UserContent,
-} from './encode'
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -96,77 +90,5 @@ describe('AttachmentStore (agent/attachments.py parity)', () => {
     const out = store.readText(ref)
     expect(out.length).toBeLessThan(text.length)
     expect(out).toContain('[truncated, total')
-  })
-})
-
-describe('attachment encoding and chat content assembly', () => {
-  it('encodes image refs to OpenAI image_url blocks and JSON refs', () => {
-    const store = new AttachmentStore(tmp('emperor-attachments-image-'))
-    const ref = store.save({
-      raw: Buffer.from([1, 2, 3, 4]),
-      name: 'pic.png',
-      mime: 'image/png',
-    })
-    const block = encodeForOpenAIBlock(ref, store)
-
-    expect(block).toEqual({
-      type: 'image_url',
-      image_url: { url: 'data:image/png;base64,AQIDBA==' },
-    })
-    expect(refToJson(ref)).toMatchObject({
-      id: ref.id,
-      name: 'pic.png',
-      hasText: false,
-      hasImage: true,
-      path: ref.rel_path,
-      textPath: null,
-    })
-    expect(statSync(join(store.root, ref.rel_path)).size).toBe(4)
-  })
-
-  it('builds model user content for document text plus vision image blocks', () => {
-    const store = new AttachmentStore(tmp('emperor-attachments-content-'))
-    const text = store.save({
-      raw: Buffer.from('line one'),
-      name: 'notes.txt',
-      mime: 'text/plain',
-    })
-    const image = store.save({
-      raw: Buffer.from([255]),
-      name: 'x.jpg',
-      mime: 'image/jpeg',
-    })
-
-    const content = buildUserContent(
-      'see attached',
-      [text.id, image.id],
-      store,
-      { supportsVision: true },
-    )
-    expect(Array.isArray(content)).toBe(true)
-    const blocks = content as Exclude<UserContent, string>
-    expect(blocks[0]).toMatchObject({ type: 'text' })
-    expect(String((blocks[0] as { text: string }).text)).toContain(
-      '[附件 notes.txt 提取文本]',
-    )
-    expect(String((blocks[0] as { text: string }).text)).toContain(
-      `[已落盘: ${text.rel_path}]`,
-    )
-    expect(blocks[1]).toMatchObject({ type: 'image_url' })
-  })
-
-  it('keeps non-vision image attachments visible as text fallback', () => {
-    const store = new AttachmentStore(tmp('emperor-attachments-no-vision-'))
-    const image = store.save({
-      raw: Buffer.from([9]),
-      name: 'x.webp',
-      mime: 'image/webp',
-    })
-    const content = buildUserContent('', [image.id], store, {
-      supportsVision: false,
-    })
-    expect(typeof content).toBe('string')
-    expect(content).toContain('当前模型未标记视觉')
-    expect(content).toContain(image.rel_path)
   })
 })

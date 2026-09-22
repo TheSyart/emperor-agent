@@ -1,8 +1,9 @@
 import type {
   ControlPayload,
   GoalOperationResult,
-  RuntimeGoalSummary,
+  RuntimeGoalView,
 } from '../types'
+import { isTerminalGoal } from '../runtime/goalRender'
 import type { GoalCaptureStatus } from './goalCapture'
 
 export type ComposerLifecycleMode = 'goal' | 'plan' | null
@@ -17,7 +18,7 @@ export interface LifecycleTransitionResult {
 
 interface ComposerLifecycleOptions {
   currentControl: () => ControlPayload | null | undefined
-  currentGoal: () => RuntimeGoalSummary | null
+  currentGoal: () => RuntimeGoalView | null
   currentGoalCaptureStatus: () => GoalCaptureStatus
   agentBusy: () => boolean
   setPlanEnabled: (enabled: boolean) => Promise<void>
@@ -28,20 +29,20 @@ interface ComposerLifecycleOptions {
   startCapturedGoal: (outcome: string) => Promise<GoalOperationResult>
 }
 
-const SWITCHABLE_GOAL_PHASES = new Set<RuntimeGoalSummary['phase']>([
+const SWITCHABLE_GOAL_PHASES = new Set<RuntimeGoalView['phase']>([
   'paused',
-  'awaiting_user',
+  'blocked',
 ])
 
 const BUSY_ERROR = '当前任务运行中，请先停止或暂停后再切换模式。'
 
 export function composerLifecycleMode(
   control: ControlPayload | null | undefined,
-  goal: RuntimeGoalSummary | null,
+  goal: RuntimeGoalView | null,
   captureStatus: GoalCaptureStatus,
 ): ComposerLifecycleMode {
-  if (goal || captureStatus !== 'idle') return 'goal'
-  return control?.mode === 'plan' ? 'plan' : null
+  if ((goal && !isTerminalGoal(goal)) || captureStatus !== 'idle') return 'goal'
+  return control?.plan === true ? 'plan' : null
 }
 
 export function createComposerLifecycleController(
@@ -202,7 +203,7 @@ export function createComposerLifecycleController(
     markHandledGoalTerminal(activeGoal.id)
     try {
       await options.cancelGoal(activeGoal.id, 'user_confirmed_cancel')
-      if (options.currentControl()?.mode === 'plan')
+      if (options.currentControl()?.plan === true)
         await options.setPlanEnabled(false)
       return ok(true, 'Goal 已取消。')
     } catch (error) {
@@ -217,7 +218,7 @@ export function createComposerLifecycleController(
     goalId: string,
   ): Promise<LifecycleTransitionResult> {
     if (handledGoalTerminals.has(goalId)) return ok(false)
-    if (options.currentControl()?.mode !== 'plan') return ok(false)
+    if (options.currentControl()?.plan !== true) return ok(false)
     try {
       await options.setPlanEnabled(false)
       return ok(true, 'Goal 已结束，执行权限已恢复。')

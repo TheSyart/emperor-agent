@@ -1,0 +1,71 @@
+/**
+ * Canonical renderer runtime event vocabulary.
+ *
+ * Exactly the events the session projector (`projector.ts`) and the host
+ * (`HarnessHost.emitHost`, kept services: scheduler, MCP, environment,
+ * skills, onboarding, sessions, git) put on the renderer wire. The renderer
+ * rejects anything else at the boundary (`isRuntimeEventWire`).
+ */
+export const RUNTIME_EVENT_NAMES = [
+  // Session projector (log-backed; replayed identically on bootstrap).
+  'agent_thought',
+  'ask_answered',
+  'ask_request',
+  'assistant_done',
+  'context_usage',
+  'control_mode_update',
+  'error',
+  'goal_updated',
+  'hook_decision_applied',
+  'hook_run_completed',
+  'hook_run_started',
+  'interaction_cancelled',
+  'message_delta',
+  'plan_approved',
+  'plan_comment_added',
+  'plan_draft',
+  'prompt_interjected',
+  'runtime_task_cancelled',
+  'subagent_done',
+  'task_cancelled',
+  'task_done',
+  'task_error',
+  'task_started',
+  'tool_call',
+  'tool_result',
+  'tool_run_failed',
+  'tool_run_started',
+  'turn_phase',
+  'user_message',
+  'workflow_finished',
+  'workflow_progress',
+  'workflow_started',
+  // Host-only events (seq 0, never replayed).
+  'environment_changed',
+  'environment_install_completed',
+  'environment_install_failed',
+  'environment_install_progress',
+  'environment_install_started',
+  'git_operation_completed',
+  'mcp_connection_state',
+  'profile_onboarding_status_changed',
+  'prompt_dequeued',
+  'prompt_queued',
+  'scheduler_run_cancelled',
+  'scheduler_run_done',
+  'scheduler_run_error',
+  'scheduler_run_interrupted',
+  'scheduler_run_skipped',
+  'scheduler_run_start',
+  'session_created',
+  'session_title_updated',
+  'skill_catalog_changed',
+  'subagent_delta',
+  'subagent_error',
+  'subagent_start',
+  'subagent_tool_call',
+  'subagent_tool_error',
+  'subagent_tool_result',
+] as const
+
+export type RuntimeEventName = (typeof RUNTIME_EVENT_NAMES)[number]

@@ -37,7 +37,7 @@ const emit = defineEmits<{
         class="composer-palette-item capability-picker-item"
         :class="{ active: item.id === props.activeId }"
         :data-action="item.action"
-        :data-tone="item.tone || item.capability?.tone || 'slate'"
+        :data-tone="item.tone || 'slate'"
         :aria-current="item.id === props.activeId ? 'true' : undefined"
         @click="emit('select', item)"
       >

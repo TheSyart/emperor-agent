@@ -7,14 +7,14 @@ const rendererRoot = join(__dirname, '..', '..')
 describe('first-run model setup flow', () => {
   it('routes the required-model prompt to settings without mounting a second wizard', () => {
     const appSource = readFileSync(join(rendererRoot, 'App.vue'), 'utf8')
-    const modelViewSource = readFileSync(
-      join(rendererRoot, 'views/ModelView.vue'),
+    const modelSectionSource = readFileSync(
+      join(rendererRoot, 'components/settings/ModelSection.vue'),
       'utf8',
     )
 
-    expect(appSource).toContain("router.push('/settings/model')")
+    expect(appSource).toContain("settingsRoute.openSettings('model')")
     expect(appSource).not.toContain('OnboardingWizard')
     expect(appSource).not.toContain('openOnboarding')
-    expect(modelViewSource).not.toContain('配置向导')
+    expect(modelSectionSource).not.toContain('配置向导')
   })
 })

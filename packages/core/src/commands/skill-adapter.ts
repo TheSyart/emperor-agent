@@ -10,9 +10,19 @@ export interface SkillCommandConflict {
   winnerSource: SkillInfoPayload['source'] | 'builtin'
 }
 
+/** Command metadata the kernel parses but cannot honor as written. */
+export interface SkillCommandWarning {
+  skillName: string
+  source: SkillInfoPayload['source']
+  field: 'agent' | 'allowed_tools' | 'effort'
+  reason: 'agent_definitions_unsupported' | 'inline_context_ignores_field'
+  message: string
+}
+
 export interface SkillCommandCatalog {
   descriptors: CommandDescriptor[]
   conflicts: SkillCommandConflict[]
+  warnings: SkillCommandWarning[]
 }
 
 export function skillCommandDescriptors(
@@ -28,6 +38,7 @@ export function resolveSkillCommandCatalog(
 ): SkillCommandCatalog {
   const descriptors: CommandDescriptor[] = []
   const conflicts: SkillCommandConflict[] = []
+  const warnings: SkillCommandWarning[] = []
   const claims = new Map<
     string,
     {
@@ -85,6 +96,7 @@ export function resolveSkillCommandCatalog(
       }
       uniqueAliases.push(alias)
     }
+    warnings.push(...metadataWarnings(skill))
     const claim = { skillName: skill.name, source: skill.source }
     claims.set(requestedName, claim)
     for (const alias of uniqueAliases) claims.set(alias, claim)
@@ -130,7 +142,39 @@ export function resolveSkillCommandCatalog(
       },
     })
   }
-  return { descriptors, conflicts }
+  return { descriptors, conflicts, warnings }
+}
+
+function metadataWarnings(skill: SkillInfoPayload): SkillCommandWarning[] {
+  const metadata = skill.command
+  if (!metadata) return []
+  const base = { skillName: skill.name, source: skill.source }
+  const out: SkillCommandWarning[] = []
+  if (metadata.agent)
+    out.push({
+      ...base,
+      field: 'agent',
+      reason: 'agent_definitions_unsupported',
+      message: `agent "${metadata.agent}" 已忽略：内核不再提供 AgentDefinition，fork 使用默认子代理。`,
+    })
+  if (metadata.context !== 'fork') {
+    if (metadata.allowedTools.length)
+      out.push({
+        ...base,
+        field: 'allowed_tools',
+        reason: 'inline_context_ignores_field',
+        message:
+          'allowed_tools 仅在 context: fork 时生效，inline Skill 已忽略。',
+      })
+    if (metadata.effort)
+      out.push({
+        ...base,
+        field: 'effort',
+        reason: 'inline_context_ignores_field',
+        message: 'effort 仅在 context: fork 时生效，inline Skill 已忽略。',
+      })
+  }
+  return out
 }
 
 function sourcePriority(source: SkillInfoPayload['source']): number {
@@ -147,6 +191,7 @@ function builtinReservedNames(): Set<string> {
     'model',
     'reasoning',
     'permissions',
+    'permission',
     'plan',
     'goal',
     'stop',

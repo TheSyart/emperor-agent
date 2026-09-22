@@ -18,20 +18,12 @@ const {
   sep,
 } = require('node:path')
 
+const OS_METADATA_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
+
 const TEMPLATE_RUNTIME_FILES = [
-  'SOUL.md',
-  'TOOL.md',
-  'agent/identity.md',
-  'agent/skills_section.md',
+  'agent/persona.md',
   'init/MEMORY.md',
   'init/USER.md',
-  'subagents/agents.json',
-  'subagents/dongchang_tanshi.md',
-  'subagents/neiguan_yingzao.md',
-  'subagents/shangbao_dianbu.md',
-  'subagents/sili_suitang.md',
-  'subagents/verification_reviewer.md',
-  'subagents/xiaohuangmen.md',
 ]
 
 const SOURCE_MAPPINGS = [
@@ -91,6 +83,8 @@ function collectMappingFiles(repoRoot, mapping) {
   while (stack.length) {
     const current = stack.pop()
     for (const name of readdirSync(current).sort().reverse()) {
+      // electron-builder never packages OS metadata files; neither may the manifest.
+      if (OS_METADATA_FILES.has(name)) continue
       const source = join(current, name)
       const stat = lstatSync(source)
       const rel = slash(relative(sourceRoot, source))
@@ -283,3 +277,4 @@ module.exports.createRuntimeManifest = createRuntimeManifest
 module.exports.validateRuntimeManifest = validateRuntimeManifest
 module.exports.SOURCE_MAPPINGS = SOURCE_MAPPINGS
 module.exports.TEMPLATE_RUNTIME_FILES = TEMPLATE_RUNTIME_FILES
+module.exports.OS_METADATA_FILES = OS_METADATA_FILES

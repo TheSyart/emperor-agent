@@ -20,7 +20,10 @@ interface SessionTransitionRecord {
   source: Pick<
     SessionEntry,
     'mode' | 'project_id' | 'project_path' | 'project_name' | 'lineage_root_id'
-  >
+  > & {
+    /** Permission preset of the source session (absent in older records). */
+    permissionPreset?: string | null
+  }
   createdAt: string
   updatedAt: string
 }
@@ -40,6 +43,13 @@ export interface SessionTransitionServiceDeps {
     sourceSessionId: string,
     targetSessionId: string,
   ) => void
+  /** The source session's current permission preset, captured at `/new`. */
+  permissionPresetOf?: (sessionId: string) => string | null
+  /**
+   * Seed the new session's permission preset (plan mode stays off: a new
+   * session never inherits plan mode).
+   */
+  applyPermissionPreset?: (sessionId: string, preset: string) => void
 }
 
 export class SessionTransitionService {
@@ -69,6 +79,7 @@ export class SessionTransitionService {
     const source = this.deps.sessions.get(sessionId)
     if (!source) throw new Error('session not found')
     const now = new Date().toISOString()
+    const permissionPreset = this.deps.permissionPresetOf?.(sessionId) ?? null
     const record: SessionTransitionRecord = {
       version: 1,
       invocationId,
@@ -81,6 +92,7 @@ export class SessionTransitionService {
         project_path: source.project_path,
         project_name: source.project_name,
         lineage_root_id: source.lineage_root_id,
+        ...(permissionPreset ? { permissionPreset } : {}),
       },
       createdAt: now,
       updatedAt: now,
@@ -134,6 +146,11 @@ export class SessionTransitionService {
         record.sourceSessionId,
         record.targetSessionId,
       )
+      if (record.source.permissionPreset)
+        this.deps.applyPermissionPreset?.(
+          record.targetSessionId,
+          record.source.permissionPreset,
+        )
       this.deps.activate(record.targetSessionId)
       record = this.advance(record, 'applied')
     }

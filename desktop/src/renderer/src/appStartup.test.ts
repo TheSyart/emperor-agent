@@ -6,7 +6,7 @@ describe('runInitialStartup', () => {
   it('routes session-load failures into bootstrap error handling instead of leaving the app loading', async () => {
     const loadBootstrap = vi.fn(async () => undefined)
     const switchSession = vi.fn()
-    const restoreFromHistory = vi.fn()
+    const restoreRuntimeState = vi.fn()
     const connectSocket = vi.fn()
 
     await runInitialStartup({
@@ -28,13 +28,13 @@ describe('runInitialStartup', () => {
         loadBootstrap,
       },
       switchSession,
-      restoreFromHistory,
+      restoreRuntimeState,
       connectSocket,
     })
 
     expect(loadBootstrap).toHaveBeenCalledWith(true, '')
     expect(switchSession).not.toHaveBeenCalled()
-    expect(restoreFromHistory).not.toHaveBeenCalled()
+    expect(restoreRuntimeState).not.toHaveBeenCalled()
     expect(connectSocket).not.toHaveBeenCalled()
   })
 })

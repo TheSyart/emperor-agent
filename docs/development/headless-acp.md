@@ -2,10 +2,10 @@
 
 > 文档状态：Active<br>
 > 面向读者：源码维护者、ACP 客户端开发者、自动化操作者<br>
-> 最后核验：2026-07-19<br>
+> 最后核验：2026-09-22<br>
 > 事实源：`packages/core/src/acp/`、`packages/core/src/api/core-api.ts`、`scripts/build-acp.mjs`、`scripts/test-acp-bundle.mjs`
 
-Emperor Agent 提供一个源码级、默认不随桌面安装包开放的 ACP V1 stdio 入口。它不是旧 Python CLI、HTTP server 或 WebSocket backend 的恢复，而是与 Electron host 并列地创建同一个 TypeScript `CoreApi`，复用同一套 Session、Agent loop、权限、workspace policy、模型配置、记忆和 `stateRoot`。
+Emperor Agent 提供一个源码级、默认不随桌面安装包开放的 ACP V1 stdio 入口。它不是旧 Python CLI、HTTP server 或 WebSocket backend 的恢复，而是与 Electron host 并列地创建同一个 TypeScript `CoreApi`，复用同一个 `HarnessHost` 内核、session log、权限预设、模型配置、记忆和 `stateRoot`。
 
 这一入口当前属于 operator preview：适合在本机由受信 ACP client 拉起，不是多人服务端，也没有远程监听端口。
 
@@ -35,12 +35,12 @@ EMPEROR_CONFIG_DIR=/absolute/private/state \
 | -------------- | ---------------- | ----------------------------------------------------------------------- |
 | client → agent | `initialize`     | 协商 V1；只声明已实现的 `loadSession` 与纯文本 prompt 能力              |
 | client → agent | `session/new`    | 对既存绝对 `cwd` 做 canonical 校验，创建绑定该目录的 Emperor Build 会话 |
-| client → agent | `session/load`   | 校验持久 workspace，并在响应前有序发送可见历史投影                      |
-| client → agent | `session/prompt` | 把纯文本交给同一 `chat.submit` / mainline turn                          |
+| client → agent | `session/load`   | 校验持久 workspace，并在响应前有序发送 session log 的可见投影           |
+| client → agent | `session/prompt` | 把纯文本交给同一个 `chat.submit`，进入该 session Agent 的 inbox         |
 | client → agent | `session/cancel` | 取消该 session 当前 prompt，并向模型、工具、进程与 MCP 传播 signal      |
 | agent → client | `session/update` | 投影可见文本、思考摘要、工具状态与 context usage                        |
 
-`session/load` 只回放持久事件，不重放 Agent 副作用。实时 `session/update` 与终态响应共用同一有序发送队列；取消或连接关闭后，迟到事件被 terminal fence 丢弃。
+`session/load` 只投影 session log，不重放 Agent 副作用。实时 `session/update` 与终态响应共用同一有序发送队列；取消或连接关闭后，迟到事件被 terminal fence 丢弃。
 
 ## 明确限制
 
@@ -50,7 +50,7 @@ EMPEROR_CONFIG_DIR=/absolute/private/state \
 - 请求正文、单条 NDJSON 和投影输出都有硬上限。超限或非法 UTF-8 / JSON 会关闭连接，防止无界缓冲。
 - JSON-RPC 请求 ID 的精确重试共享同一结果和副作用；同一 method 与 ID 若改用不同参数会被拒绝。终态 ledger 有界，不是永久幂等存储。
 - ACP 的工具状态没有 `cancelled` 枚举，因此 Emperor 的工具取消投影为 `failed`，并在 `_meta.emperor.terminalReason` 保留 `cancelled`。prompt 取消使用标准 `stopReason: "cancelled"`。
-- 暂停等待 Ask / Plan 交互时返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 标记需要回到当前支持交互的 Emperor 桌面入口处理。
+- ACP 不能回答交互。turn 中出现问题、提权审批或 Plan 审阅时，adapter 立即取消该交互（对应工具调用得到 `cancelled` 结果），本次 prompt 最终返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 与 `interactionId` 标记需要回到 Emperor 桌面处理。默认权限预设 `workspace-write` 下，workspace 外的写入因此无法在 ACP 中完成。
 - 当前没有 ACP client 文件系统、terminal、权限请求或会话模式切换能力，也没有桌面设置页中的启用开关。
 
 ## 开发与验证

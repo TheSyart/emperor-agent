@@ -38,6 +38,10 @@ function skill(name: string): SkillInfoPayload {
     name,
     description: 'Audit the project',
     path: `/skills/${name}/SKILL.md`,
+    root: `/skills/${name}`,
+    skillFile: `/skills/${name}/SKILL.md`,
+    flat: false,
+    warnings: [],
     tags: 'audit',
     always: false,
     source: 'project',
@@ -49,7 +53,7 @@ function skill(name: string): SkillInfoPayload {
 }
 
 describe('CommandPlatform', () => {
-  it('lists the nine Core-owned everyday commands without compatibility aliases', async () => {
+  it('lists the nine Core-owned everyday commands without visible aliases', async () => {
     const { platform } = setup()
     const listed = await platform.list({
       sessionId: 'session-1',
@@ -78,11 +82,9 @@ describe('CommandPlatform', () => {
         ?.argumentSchema[0]?.values,
     ).toEqual(
       expect.arrayContaining([
-        'ask',
-        'smart',
-        'full',
-        'edits',
-        'auto',
+        'read-only',
+        'workspace-write',
+        'danger-full-access',
         'status',
       ]),
     )
@@ -283,5 +285,24 @@ describe('CommandPlatform', () => {
         }),
       ]),
     )
+  })
+})
+
+describe('CommandPlatform aliases', () => {
+  it('resolves the hidden /permission alias to /permissions', async () => {
+    const { platform, executeBuiltin } = setup()
+    await platform.invoke({
+      sessionId: 'session-1',
+      commandId: 'builtin.permissions',
+      rawInput: '/permission read-only',
+      invocationId: 'permission-alias',
+      invocationSource: 'desktop',
+    })
+    expect(executeBuiltin).toHaveBeenCalledTimes(1)
+    expect(executeBuiltin.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        descriptor: expect.objectContaining({ id: 'builtin.permissions' }),
+      }),
+    ])
   })
 })

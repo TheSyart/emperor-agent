@@ -181,7 +181,7 @@ describe('Emperor ACP adapter', () => {
     const core = new FakeCore([session('paused', cwd)])
     core.submitBehavior = async (input) => {
       await input.emit?.({
-        event: 'turn_paused',
+        event: 'ask_request',
         interaction: { id: 'ask-1', kind: 'ask' },
       })
       return {

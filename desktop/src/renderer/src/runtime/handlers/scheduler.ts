@@ -17,9 +17,7 @@ export function applySchedulerEventToBootstrap(
   }
   const jobs = boot.scheduler.jobs || []
   const index = jobs.findIndex((job) => job.id === data.job!.id)
-  if (data.event === 'scheduler_job_update' && data.action === 'deleted') {
-    if (index >= 0) jobs.splice(index, 1)
-  } else if (index >= 0) {
+  if (index >= 0) {
     jobs[index] = data.job
   } else {
     jobs.push(data.job)

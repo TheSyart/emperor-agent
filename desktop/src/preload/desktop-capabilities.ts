@@ -7,6 +7,9 @@ import {
   PREVIEW_OPEN_CHANNEL,
   PREVIEW_STATE_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
+  SELECT_FILE_CHANNEL,
+  SKILLS_OPEN_FOLDER_CHANNEL,
+  type FileDialogFilter,
 } from '../shared/ipc-contract'
 
 interface IpcRendererLike {
@@ -38,6 +41,13 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(REFERENCE_REVEAL_CHANNEL, input),
     openExternal: (url: string) =>
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
+    openSkillsFolder: (input: {
+      scope: 'user' | 'project'
+      sessionId?: string | null
+    }) => ipcRenderer.invoke(SKILLS_OPEN_FOLDER_CHANNEL, input),
+    selectFile: (
+      input: { title?: string; filters?: FileDialogFilter[] } = {},
+    ) => ipcRenderer.invoke(SELECT_FILE_CHANNEL, input),
     previewOpen: (input: { sessionId: string; previewId: string }) =>
       ipcRenderer.invoke(PREVIEW_OPEN_CHANNEL, input),
     previewExternal: (input: { sessionId: string; previewId: string }) =>

@@ -7,7 +7,9 @@ import {
   type ModelConfigV2,
   type ModelEntryV2,
 } from '../../config/model-config'
-import { ModelRouter } from '../../model/router'
+import { LlmClient } from '../../llm/client'
+import type { GenerateOptions } from '../../llm/types'
+import { ScriptedAdapter, type ScriptedReply } from '../../harness/testing'
 import { CoreModelService } from './model-service'
 
 function tmp(prefix: string): string {
@@ -48,11 +50,14 @@ async function service(
   overrides: {
     refreshModelConfig?: () => void | Promise<void>
     afterConfigSaved?: () => any
+    replies?: ScriptedReply[]
   } = {},
 ): Promise<CoreModelService> {
+  const { replies, ...deps } = overrides
+  const adapter = new ScriptedAdapter(replies ?? [])
   return new CoreModelService(root, {
-    router: new ModelRouter(root, await loadModelConfig(root)),
-    ...overrides,
+    createLlm: (images) => new LlmClient({ adapterFor: () => adapter, images }),
+    ...deps,
   })
 }
 
@@ -319,29 +324,23 @@ describe('CoreModelService schema v2', () => {
       ],
       'active',
     )
-    const modelService = await service(root)
-    const chat = vi
-      .spyOn(
-        (modelService as any).snapshotForModelTest(
-          await loadModelConfig(root),
-          'target',
-        ).provider,
-        'chat',
-      )
-      .mockResolvedValue({
-        content: 'pong',
-        toolCalls: [],
-        finishReason: 'stop',
-        usage: { input: 1, output: 1 },
-        reasoningContent: null,
-        thinkingBlocks: null,
-      })
-    vi.spyOn(modelService as any, 'snapshotForModelTest').mockReturnValue({
-      ...(modelService as any).snapshotForModelTest(
-        await loadModelConfig(root),
-        'target',
-      ),
-      provider: { chat },
+    const requests: GenerateOptions[] = []
+    const modelService = await service(root, {
+      replies: [
+        (request) => {
+          requests.push(request)
+          return [
+            { type: 'block-start', index: 0, blockType: 'text' },
+            { type: 'text-delta', index: 0, text: 'pong' },
+            {
+              type: 'block-end',
+              index: 0,
+              block: { type: 'text', text: 'pong' },
+            },
+            { type: 'finish', reason: { kind: 'stop' } },
+          ]
+        },
+      ],
     })
 
     await expect(
@@ -352,6 +351,7 @@ describe('CoreModelService schema v2', () => {
       model: 'target-model',
       sample: 'pong',
     })
+    expect(requests[0]?.model).toBe('target-model')
     expect(
       JSON.stringify(
         await modelService.test({ entryId: 'missing', kind: 'text' }),
@@ -479,32 +479,25 @@ describe('CoreModelService schema v2', () => {
   it('keeps vision tests read-only and rejects descriptive negative answers', async () => {
     const root = tmp('emperor-model-service-vision-readonly-')
     writeConfig(root, [entry({ capabilityOverrides: { vision: false } })])
-    const modelService = await service(root)
-    const original = readFileSync(join(root, 'model_config.json'), 'utf8')
-    const chat = vi
-      .fn()
-      .mockResolvedValueOnce({
-        content: 'The image has no red color.',
-        toolCalls: [],
-        finishReason: 'stop',
-        usage: { input: 1, output: 1 },
-        reasoningContent: null,
-        thinkingBlocks: null,
-      })
-      .mockResolvedValueOnce({
-        content: 'red',
-        toolCalls: [],
-        finishReason: 'stop',
-        usage: { input: 1, output: 1 },
-        reasoningContent: null,
-        thinkingBlocks: null,
-      })
-    vi.spyOn(modelService as any, 'snapshotForModelTest').mockReturnValue({
-      model: 'gpt-5.2',
-      providerName: 'openai',
-      provider: { chat },
+    let sawImage = false
+    const answer =
+      (text: string): ScriptedReply =>
+      (request) => {
+        sawImage ||= request.messages.some((message) =>
+          message.content.some((block) => block.type === 'image'),
+        )
+        return [
+          { type: 'block-start', index: 0, blockType: 'text' },
+          { type: 'text-delta', index: 0, text },
+          { type: 'block-end', index: 0, block: { type: 'text', text } },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]
+      }
+    const modelService = await service(root, {
+      replies: [answer('The image has no red color.'), answer('red')],
     })
-
+    await loadModelConfig(root)
+    const original = readFileSync(join(root, 'model_config.json'), 'utf8')
     await expect(
       modelService.test({
         entryId: 'entry-openai',
@@ -520,6 +513,7 @@ describe('CoreModelService schema v2', () => {
       }),
     ).resolves.toMatchObject({ ok: true, sample: 'red' })
     expect(readFileSync(join(root, 'model_config.json'), 'utf8')).toBe(original)
+    expect(sawImage).toBe(true)
   })
 
   it('requires an explicit protocol for custom discovery and rejects removed providers', async () => {

@@ -1,5 +1,4 @@
-import { Tool, type ToolExecutionContext, type ToolResult } from '../tools/base'
-import type { ToolParamsSchema } from '../tools/schema'
+import type { ExecutionEnvironment } from '../environment/snapshot'
 import type { MCPConnection } from './connection'
 import {
   createBoundedExternalContentEnvelope,
@@ -7,18 +6,52 @@ import {
   renderExternalContentEnvelope,
 } from '../external-content'
 
-export class MCPToolAdapter extends Tool {
-  override readonly name: string
-  override readonly description: string
-  override readonly parameters: ToolParamsSchema
+/** Declared capability of one MCP tool (from config overrides or defaults). */
+export interface MCPToolProvenance {
+  kind: 'mcp_declaration'
+  serverName: string
+  toolName: string
+  transport: string
+  readOnlySource: 'tool_override' | 'config_default' | 'fallback_write'
+  exclusiveSource: 'tool_override' | 'config_default' | 'fallback_serialized'
+  generation: number | null
+  clientId: string | null
+}
+
+export interface MCPToolCallContext {
+  parentCallId?: string | null
+  signal?: AbortSignal | null
+  executionEnvironment?: ExecutionEnvironment | null
+}
+
+export interface MCPToolResult {
+  modelContent: string
+  displaySummary: string
+  rawContent: string
+  metadata: Record<string, unknown>
+  isError: boolean
+}
+
+/** Default bound of the external-content envelope handed to the model. */
+export const MCP_DEFAULT_MAX_RESULT_CHARS = 12_000
+
+/** One connected MCP server tool, exposed to the kernel as `mcp_<server>_<tool>`. */
+export class MCPToolAdapter {
+  readonly name: string
+  readonly description: string
+  readonly parameters: Record<string, unknown>
+  readonly readOnly: boolean
+  readonly exclusive: boolean
+  readonly maxResultChars: number
+  readonly capabilityProvenance: MCPToolProvenance
+  readonly evidencePolicy = 'context_only' as const
+  readonly externalContent = true
   private readonly serverName: string
   private readonly toolName: string
   readonly mcpServerName: string
   readonly mcpToolName: string
   private readonly connection: MCPConnection
   private readonly callTimeoutMs: number | null
-  override evidencePolicy = 'context_only' as const
-  override externalContent = true
 
   constructor(opts: {
     serverName: string
@@ -36,12 +69,11 @@ export class MCPToolAdapter extends Tool {
     generation?: number | null
     clientId?: string | null
   }) {
-    super()
     this.serverName = opts.serverName
     this.mcpServerName = opts.serverName
     this.name = `mcp_${opts.serverName}_${opts.toolName}`
     this.description = `[MCP:${opts.serverName}] ${opts.description}`
-    this.parameters = opts.parametersSchema as unknown as ToolParamsSchema
+    this.parameters = opts.parametersSchema
     this.connection = opts.connection
     this.toolName = opts.toolName
     this.mcpToolName = opts.toolName
@@ -64,14 +96,37 @@ export class MCPToolAdapter extends Tool {
       generation: opts.generation ?? null,
       clientId: opts.clientId ?? null,
     }
-    if (opts.maxResultChars && opts.maxResultChars > 0)
-      this.maxResultChars = opts.maxResultChars
+    this.maxResultChars =
+      opts.maxResultChars && opts.maxResultChars > 0
+        ? opts.maxResultChars
+        : MCP_DEFAULT_MAX_RESULT_CHARS
   }
 
-  override async execute(
+  /** Capability summary for diagnostics and the MCP snapshot. */
+  capabilityDescriptor(): {
+    version: 1
+    toolName: string
+    readMode: 'static_read_only' | 'mutating'
+    mutationScope: 'none' | 'external'
+    evidencePolicy: 'context_only'
+    externalContent: true
+    provenance: MCPToolProvenance
+  } {
+    return {
+      version: 1,
+      toolName: this.name,
+      readMode: this.readOnly ? 'static_read_only' : 'mutating',
+      mutationScope: this.readOnly ? 'none' : 'external',
+      evidencePolicy: this.evidencePolicy,
+      externalContent: this.externalContent,
+      provenance: structuredClone(this.capabilityProvenance),
+    }
+  }
+
+  async execute(
     args: Record<string, unknown>,
-    context?: ToolExecutionContext,
-  ): Promise<ToolResult> {
+    context?: MCPToolCallContext,
+  ): Promise<MCPToolResult> {
     const result = await this.connection.callToolRequest(this.toolName, args, {
       requestId: mcpRequestId(context?.parentCallId),
       signal: context?.signal ?? null,
@@ -83,10 +138,7 @@ export class MCPToolAdapter extends Tool {
       source: {
         kind: 'mcp',
         locator: `mcp://${this.serverName}/${this.toolName}`,
-        transport:
-          provenance.kind === 'mcp_declaration'
-            ? provenance.transport
-            : 'unknown',
+        transport: provenance.transport,
         provenance: {
           server: this.serverName,
           tool: this.toolName,
@@ -101,7 +153,6 @@ export class MCPToolAdapter extends Tool {
       modelContent: renderExternalContentEnvelope(envelope),
       displaySummary: result.content.slice(0, 120),
       rawContent: result.content,
-      artifacts: [],
       metadata: {
         tool: this.name,
         mcp: true,
@@ -113,7 +164,7 @@ export class MCPToolAdapter extends Tool {
         ...(result.generation ? { mcp_generation: result.generation } : {}),
         ...(result.clientId ? { mcp_client_id: result.clientId } : {}),
       },
-      isError: result.isError,
+      isError: result.isError === true,
     }
   }
 }

@@ -32,4 +32,32 @@ describe('floatingMenuLayout', () => {
     expect(layout.width).toBe(390)
     expect(layout.maxHeight).toBe(600)
   })
+
+  it('drops below the button when bottom is preferred and fits', () => {
+    const layout = floatingMenuLayout({
+      buttonRect: { top: 500, bottom: 532, right: 700 },
+      menuWidth: 240,
+      menuHeight: 120,
+      viewportWidth: 900,
+      viewportHeight: 700,
+      prefer: 'bottom',
+    })
+
+    expect(layout.placement).toBe('bottom')
+    expect(layout.top).toBe(540)
+  })
+
+  it('flips a bottom-preferred menu above when below lacks room', () => {
+    const layout = floatingMenuLayout({
+      buttonRect: { top: 600, bottom: 632, right: 700 },
+      menuWidth: 240,
+      menuHeight: 200,
+      viewportWidth: 900,
+      viewportHeight: 700,
+      prefer: 'bottom',
+    })
+
+    expect(layout.placement).toBe('top')
+    expect(layout.top).toBe(392)
+  })
 })

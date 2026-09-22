@@ -2,42 +2,37 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   ControlPayload,
   GoalOperationResult,
-  RuntimeGoalSummary,
+  RuntimeGoalView,
 } from '../types'
 import {
   composerLifecycleMode,
   createComposerLifecycleController,
 } from './composerLifecycle'
 
-function goal(
-  phase: RuntimeGoalSummary['phase'] = 'paused',
-): RuntimeGoalSummary {
+function goal(phase: RuntimeGoalView['phase'] = 'paused'): RuntimeGoalView {
   return {
     id: 'goal_1',
-    status: 'active',
+    revision: 1,
+    objective: '完成互斥切换',
     phase,
-    outcome: '完成互斥切换',
-    sessionId: 'session_1',
-    currentPlanId: null,
-    cyclesUsed: 1,
-    acceptance: { passed: 0, failed: 0, missing: 1, total: 1 },
-    createdAt: '2026-07-17T00:00:00.000Z',
-    updatedAt: '2026-07-17T00:01:00.000Z',
-    lastEventSeq: 1,
+    maxGoalRounds: 10,
+    roundsStarted: 1,
+    createdAt: 1_000,
+    updatedAt: 2_000,
   }
 }
 
+const PLAN_ON: ControlPayload = { preset: 'danger-full-access', plan: true }
+const PLAN_OFF: ControlPayload = { preset: 'workspace-write', plan: false }
+
 function setup(options?: {
   control?: ControlPayload
-  activeGoal?: RuntimeGoalSummary | null
+  activeGoal?: RuntimeGoalView | null
   capture?: 'idle' | 'armed' | 'starting'
   agentBusy?: boolean
   failPlanActivation?: boolean
 }) {
-  let control: ControlPayload = options?.control || {
-    mode: 'ask_before_edit',
-    previous_mode: null,
-  }
+  let control: ControlPayload = options?.control || PLAN_OFF
   let activeGoal = options?.activeGoal ?? null
   let capture = options?.capture || 'idle'
   const calls: string[] = []
@@ -45,19 +40,13 @@ function setup(options?: {
     calls.push(`plan:${enabled}`)
     if (enabled && options?.failPlanActivation)
       throw new Error('control unavailable')
-    control = enabled
-      ? { mode: 'plan', previous_mode: 'ask_before_edit' }
-      : { mode: 'ask_before_edit', previous_mode: null }
+    control = enabled ? PLAN_ON : PLAN_OFF
   })
   const cancelGoal = vi.fn(
     async (_goalId: string, reason: string): Promise<GoalOperationResult> => {
       calls.push(`cancel:${reason}`)
-      const cancelled = {
-        ...goal('terminal'),
-        status: 'cancelled' as const,
-      }
       activeGoal = null
-      return { accepted: true, goal: cancelled, activeTask: null }
+      return { accepted: true, goal: null }
     },
   )
   const armGoalCapture = vi.fn(() => {
@@ -71,9 +60,12 @@ function setup(options?: {
   })
   const startGoal = vi.fn(async (outcome: string) => {
     calls.push(`goal:start:${outcome}`)
-    const started = goal('contract')
+    const started = goal('active')
     activeGoal = started
-    return { accepted: true, goal: started, activeTask: null }
+    return {
+      accepted: true,
+      goal: { ...started, activation: 'armed' },
+    } as unknown as GoalOperationResult
   })
   const startCapturedGoal = vi.fn(startGoal)
   const controller = createComposerLifecycleController({
@@ -101,20 +93,14 @@ function setup(options?: {
 
 describe('Composer lifecycle projection', () => {
   it('gives Goal priority over Goal-owned internal Plan', () => {
-    expect(
-      composerLifecycleMode(
-        { mode: 'plan', previous_mode: 'full_access' },
-        goal('planning'),
-        'idle',
-      ),
-    ).toBe('goal')
+    expect(composerLifecycleMode(PLAN_ON, goal('active'), 'idle')).toBe('goal')
   })
 })
 
 describe('Composer lifecycle transitions', () => {
   it('exits Plan before arming Goal capture', async () => {
     const ctx = setup({
-      control: { mode: 'plan', previous_mode: 'ask_before_edit' },
+      control: PLAN_ON,
     })
 
     const result = await ctx.controller.activateGoalCapture()
@@ -135,7 +121,7 @@ describe('Composer lifecycle transitions', () => {
   it('cancels a paused Goal before enabling Plan', async () => {
     const ctx = setup({
       activeGoal: goal('paused'),
-      control: { mode: 'plan', previous_mode: 'full_access' },
+      control: PLAN_ON,
     })
 
     const result = await ctx.controller.activatePlan()
@@ -145,7 +131,7 @@ describe('Composer lifecycle transitions', () => {
   })
 
   it('rejects switching while Goal is running', async () => {
-    const ctx = setup({ activeGoal: goal('executing') })
+    const ctx = setup({ activeGoal: goal('active') })
 
     const result = await ctx.controller.activatePlan()
 
@@ -156,7 +142,7 @@ describe('Composer lifecycle transitions', () => {
 
   it('reports an irreversible partial failure after Goal cancellation', async () => {
     const ctx = setup({
-      activeGoal: goal('awaiting_user'),
+      activeGoal: goal('blocked'),
       failPlanActivation: true,
     })
 
@@ -169,7 +155,7 @@ describe('Composer lifecycle transitions', () => {
 
   it('restores the saved permission when an unhandled Goal terminal arrives', async () => {
     const ctx = setup({
-      control: { mode: 'plan', previous_mode: 'full_access' },
+      control: PLAN_ON,
     })
 
     const result = await ctx.controller.reconcileTerminalGoal('goal_1')
@@ -181,7 +167,7 @@ describe('Composer lifecycle transitions', () => {
   it('does not tear down the independent Plan created by a Goal switch', async () => {
     const ctx = setup({
       activeGoal: goal('paused'),
-      control: { mode: 'plan', previous_mode: 'full_access' },
+      control: PLAN_ON,
     })
 
     await ctx.controller.activatePlan()

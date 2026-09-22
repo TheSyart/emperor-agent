@@ -1,0 +1,9 @@
+{
+  "webui": { "host": "127.0.0.1", "port": 8765, "open_browser": false },
+  "desktop_pet": { "enabled": true, "auto_start_with_webui": false },
+  "permissions": {
+    "rules": [{ "id": "legacy-deny", "action": "deny", "tool": "write_file" }]
+  },
+  "workspace": { "git_rewind": { "mode": "eval" } },
+  "memory": { "hybrid_memory": "eval" }
+}

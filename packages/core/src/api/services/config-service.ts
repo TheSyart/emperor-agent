@@ -5,6 +5,12 @@ import {
   saveMcpConfig,
   type MCPConfig,
 } from '../../mcp/config'
+import {
+  importMcpServers,
+  removeMcpServer,
+  setMcpServerEnabled,
+  type McpImportPlan,
+} from '../../mcp/manage'
 import { ensureUserProfileFile } from '../../sessions/onboarding'
 import { applyUserProfileMarkdownPatch } from '../../memory/user-profile'
 import { MemoryVersionStore } from '../../memory/versions'
@@ -78,6 +84,47 @@ export class CoreConfigService {
     await saveMcpConfig(this.root, raw)
     await this.hooks.reloadMcp?.()
     return await this.getMcpConfig()
+  }
+
+  /** Merge pasted server config by name; reloads MCP only when something was written. */
+  async importMcpServers(input: {
+    raw: unknown
+    overwrite?: boolean | readonly string[]
+    dryRun?: boolean
+  }): Promise<McpImportPlan & { config: MCPConfig }> {
+    const plan = await importMcpServers(this.root, input.raw, {
+      ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+      ...(input.dryRun === undefined ? {} : { dryRun: input.dryRun }),
+    })
+    if (!plan.dryRun && (plan.added.length || plan.updated.length))
+      await this.hooks.reloadMcp?.()
+    return { ...plan, config: await this.getMcpConfig() }
+  }
+
+  async setMcpServerEnabled(input: {
+    name: string
+    enabled: boolean
+  }): Promise<{
+    name: string
+    enabled: boolean
+    changed: boolean
+    config: MCPConfig
+  }> {
+    const result = await setMcpServerEnabled(
+      this.root,
+      input.name,
+      input.enabled,
+    )
+    if (result.changed) await this.hooks.reloadMcp?.()
+    return { ...result, config: await this.getMcpConfig() }
+  }
+
+  async removeMcpServer(input: {
+    name: string
+  }): Promise<{ removed: string; config: MCPConfig }> {
+    const result = await removeMcpServer(this.root, input.name)
+    await this.hooks.reloadMcp?.()
+    return { ...result, config: await this.getMcpConfig() }
   }
 
   private userConfigPath(): string {

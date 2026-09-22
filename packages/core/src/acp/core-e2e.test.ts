@@ -9,9 +9,14 @@ import {
   type SessionNotification,
 } from '@agentclientprotocol/sdk'
 import { describe, expect, it } from 'vitest'
-import type { ModelRoute, ProviderSnapshot } from '../model/router'
-import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
 import { CoreApi } from '../api/core-api'
+import { LlmClient } from '../llm/client'
+import type { SandboxBackend } from '../harness/sandbox/backend'
+import {
+  ScriptedAdapter,
+  testRoute,
+  type ScriptedReply,
+} from '../harness/testing'
 import { EmperorAcpAdapter } from './adapter'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
@@ -21,14 +26,8 @@ describe('Emperor ACP real Core E2E', () => {
     const runtimeRoot = temp('emperor-acp-core-runtime-')
     const workspace = temp('emperor-acp-core-workspace-')
     const stateRoot = temp('emperor-acp-core-state-')
-    const provider = new FakeProvider()
-    const api = await CoreApi.create({
-      root: runtimeRoot,
-      stateRoot,
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(provider),
-      initializeMcp: false,
-    })
+    const adapterLlm = new ScriptedAdapter([{ text: 'pong' }])
+    const api = await createApi(runtimeRoot, stateRoot, adapterLlm)
     const adapter = new EmperorAcpAdapter(api, { version: 'test' })
     const updates: SessionNotification[] = []
     const connection = client({ name: 'core-e2e' })
@@ -51,7 +50,7 @@ describe('Emperor ACP real Core E2E', () => {
       )
 
       expect(response.stopReason).toBe('end_turn')
-      expect(provider.calls).toHaveLength(1)
+      expect(adapterLlm.requests).toHaveLength(1)
       expect(
         updates
           .filter((item) => item.update.sessionUpdate === 'agent_message_chunk')
@@ -76,10 +75,7 @@ describe('Emperor ACP real Core E2E', () => {
       expect(updates.map((item) => item.update.sessionUpdate)).toContain(
         'agent_message_chunk',
       )
-      const replay = api.runtime.replay({
-        sessionId: created.sessionId,
-        compact: false,
-      })
+      const replay = api.runtime.replay({ sessionId: created.sessionId })
       expect(replay.events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ event: 'user_message', source: 'acp' }),
@@ -97,14 +93,28 @@ describe('Emperor ACP real Core E2E', () => {
     const runtimeRoot = temp('emperor-acp-cancel-runtime-')
     const workspace = temp('emperor-acp-cancel-workspace-')
     const stateRoot = temp('emperor-acp-cancel-state-')
-    const provider = new DelayedProvider()
-    const api = await CoreApi.create({
-      root: runtimeRoot,
-      stateRoot,
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(provider),
-      initializeMcp: false,
+    let enter!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
     })
+    let aborted = false
+    const hang: ScriptedReply = (request) => {
+      enter()
+      return new Promise((_resolve, reject) => {
+        const signal = request.signal
+        const stop = () => {
+          aborted = true
+          reject(signal?.reason)
+        }
+        if (signal?.aborted) stop()
+        else signal?.addEventListener('abort', stop, { once: true })
+      })
+    }
+    const api = await createApi(
+      runtimeRoot,
+      stateRoot,
+      new ScriptedAdapter([hang]),
+    )
     const adapter = new EmperorAcpAdapter(api, { version: 'test' })
     const connection = client({ name: 'cancel-e2e' }).connect(adapter.agentApp)
     try {
@@ -117,17 +127,16 @@ describe('Emperor ACP real Core E2E', () => {
         sessionId: created.sessionId,
         prompt: [{ type: 'text', text: 'wait' }],
       })
-      await provider.entered
+      await entered
       await connection.agent.notify(methods.agent.session.cancel, {
         sessionId: created.sessionId,
       })
 
       await expect(prompt).resolves.toMatchObject({ stopReason: 'cancelled' })
-      expect(provider.aborted).toBe(true)
+      expect(aborted).toBe(true)
       await adapter.settle()
-      expect(api.loop.activeTasks.hasActiveForSession(created.sessionId)).toBe(
-        false,
-      )
+      await api.host.agentFor(created.sessionId).whenIdle()
+      expect(api.host.isBusy(created.sessionId)).toBe(false)
     } finally {
       connection.close()
       await adapter.settle()
@@ -136,105 +145,31 @@ describe('Emperor ACP real Core E2E', () => {
   })
 })
 
-class FakeProvider extends LLMProvider {
-  readonly calls: ChatArgs[] = []
-
-  constructor() {
-    super({ defaultModel: 'fake-main' })
-  }
-
-  async chat(args: ChatArgs): Promise<LLMResponse> {
-    this.calls.push(args)
-    return response('pong')
-  }
+const passthroughBackend: SandboxBackend = {
+  confine: (argv) => ({
+    argv: [...argv],
+    enforcement: 'full',
+    denialSignatures: [],
+    runnerFailureRules: [],
+  }),
 }
 
-class DelayedProvider extends FakeProvider {
-  private enter!: () => void
-  readonly entered = new Promise<void>((resolve) => {
-    this.enter = resolve
+async function createApi(
+  root: string,
+  stateRoot: string,
+  adapter: ScriptedAdapter,
+): Promise<CoreApi> {
+  const llm = new LlmClient({ adapterFor: () => adapter })
+  llm.setRoutes([testRoute()], 'test-route')
+  return await CoreApi.create({
+    root,
+    stateRoot,
+    stateRootSource: 'explicit',
+    templatesDir: TEMPLATES_DIR,
+    llm,
+    sandboxBackend: passthroughBackend,
+    initializeMcp: false,
   })
-  aborted = false
-
-  override async chat(args: ChatArgs): Promise<LLMResponse> {
-    this.calls.push(args)
-    this.enter()
-    await new Promise<void>((resolve, reject) => {
-      const signal = args.signal
-      if (signal?.aborted) {
-        this.aborted = true
-        reject(signal.reason)
-        return
-      }
-      signal?.addEventListener(
-        'abort',
-        () => {
-          this.aborted = true
-          reject(signal.reason)
-        },
-        { once: true },
-      )
-    })
-    return response('unreachable')
-  }
-}
-
-function fakeRouter(provider: FakeProvider): {
-  route: (
-    useCase: string,
-    agentType?: string | null,
-    task?: string | null,
-  ) => ModelRoute
-  payload: () => Record<string, unknown>
-} {
-  return {
-    route: (useCase: string) => ({
-      snapshot: snapshot(
-        provider,
-        useCase === 'main_agent' ? 'main' : 'secondary',
-      ),
-      fallback: null,
-      useCase,
-      reason: `${useCase}:fake`,
-      estimatedTokens: null,
-    }),
-    payload: () => ({
-      mainModel: 'fake-main',
-      secondaryModel: 'fake-secondary',
-    }),
-  }
-}
-
-function snapshot(
-  provider: FakeProvider,
-  role: 'main' | 'secondary',
-): ProviderSnapshot {
-  return {
-    provider,
-    providerName: 'fake',
-    providerLabel: 'Fake',
-    model: role === 'main' ? 'fake-main' : 'fake-secondary',
-    apiBase: null,
-    generation: { maxTokens: 2_000, temperature: 0.1, reasoningEffort: null },
-    contextWindowTokens: 100_000,
-    config: {},
-    supportsVision: false,
-    entryName: 'fake',
-    entryLabel: 'Fake',
-    modelRole: role,
-    routeReason: `${role}_model`,
-  }
-}
-
-function response(content: string): LLMResponse {
-  return {
-    content,
-    toolCalls: [],
-    finishReason: 'stop',
-    usage: { input: 1, output: 1 },
-    reasoningContent: null,
-    thinkingBlocks: null,
-  }
 }
 
 async function initialize(agentContext: ClientContext) {

@@ -10,7 +10,6 @@ import {
   saveModelEntry,
   saveModelPolicy,
   upsertModelEntryConfig,
-  type ModelConfig,
   type ModelEntry,
   type ModelEntryUpdate,
   type ModelEntryV2,
@@ -25,19 +24,19 @@ import {
   resolveModelProfile,
   type ResolvedModelProfile,
 } from '../../model/profile'
-import {
-  buildProviderSnapshot,
-  type ModelRoute,
-  type ProviderSnapshot,
-} from '../../model/router'
-import type { OpenAiMessage } from '../../providers/base'
+import { createLlmClient } from '../../llm'
+import type { LlmClient } from '../../llm/client'
+import type { ImageResolver } from '../../llm/content'
+import { createUserMessage } from '../../llm/message'
+import { routeFromEntry } from '../../llm/route'
+import type { ContentBlock } from '../../llm/types'
 import {
   findByName,
   normalizeApiBase,
   providerOptions,
   type ProviderOption,
   type ProviderSpec,
-} from '../../providers/registry'
+} from '../../llm/catalog'
 import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
 
 type Dict = Record<string, any>
@@ -46,17 +45,9 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
 const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models'
 const ANTHROPIC_VERSION = '2023-06-01'
 
-export interface CoreModelRouterLike {
-  route(
-    useCase: string,
-    agentType?: string | null,
-    task?: string | null,
-  ): ModelRoute
-  payload?(): Record<string, unknown>
-}
-
 export interface CoreModelServiceDeps {
-  router: CoreModelRouterLike | (() => CoreModelRouterLike)
+  /** Test hook: build the one-shot client used by `test()`. */
+  createLlm?: (images: ImageResolver) => LlmClient
   refreshModelConfig?: () => void | Promise<void>
   afterConfigSaved?: () =>
     ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
@@ -327,45 +318,74 @@ export class CoreModelService {
     if (!entry)
       return { ok: false, kind, error: `model entry not found: ${entryId}` }
 
-    let snapshot: ProviderSnapshot
+    const probeEntry =
+      kind === 'vision'
+        ? (findEntry(
+            parseModelConfig(
+              upsertModelEntryConfig(config.raw, {
+                entryId,
+                capabilityOverrides: {
+                  ...entry.capabilityOverrides,
+                  vision: true,
+                },
+              }),
+            ),
+            entryId,
+          ) ?? entry)
+        : entry
+    let llm: LlmClient
+    let model: string
+    let provider: string
     try {
-      snapshot = this.snapshotForModelTest(config, entryId, kind === 'vision')
+      const route = routeFromEntry(probeEntry)
+      llm = (this.deps.createLlm ?? ((images) => createLlmClient({ images })))(
+        async () => ({
+          data: Buffer.from(VISION_PROBE_PNG_BASE64, 'base64'),
+          mediaType: 'image/png',
+        }),
+      )
+      llm.setRoutes([route], route.id)
+      model = route.modelId
+      provider = route.catalogProvider
     } catch (error) {
       return {
         ok: false,
         kind,
-        error: `snapshot failed: ${error instanceof Error ? error.message : String(error)}`,
+        error: `route failed: ${error instanceof Error ? error.message : String(error)}`,
       }
     }
 
     const started = Date.now()
     try {
-      const response = await snapshot.provider.chat({
-        messages:
-          kind === 'vision'
-            ? visionProbeMessages()
-            : [{ role: 'user', content: 'Reply with exactly one word: pong' }],
-        tools: null,
-        model: snapshot.model,
+      const base = llm.defaultCallConfig()
+      const response = await llm.complete({
+        provider: base.provider,
+        model: base.model,
+        messages: [
+          createUserMessage({
+            content:
+              kind === 'vision'
+                ? visionProbeContent()
+                : [{ type: 'text', text: 'Reply with exactly one word: pong' }],
+            source: { kind: 'user' },
+          }),
+        ],
         maxTokens: 64,
         temperature: 0,
-        reasoningEffort: null,
+        purpose: 'auxiliary',
       })
-      const sample = String(response.content || '')
-        .trim()
-        .slice(0, 200)
+      const sample = response.text.trim().slice(0, 200)
       const ok = kind === 'vision' ? visionOk(sample) : /pong/i.test(sample)
-      const payload: Dict = {
+      return {
         ok,
         kind,
         entryId,
         latencyMs: Date.now() - started,
-        model: snapshot.model,
-        provider: snapshot.providerName,
+        model,
+        provider,
         sample,
-        finishReason: response.finishReason || 'stop',
+        finishReason: response.finish.kind,
       }
-      return payload
     } catch (error) {
       return {
         ok: false,
@@ -373,28 +393,10 @@ export class CoreModelService {
         entryId,
         error: error instanceof Error ? error.message : String(error),
         latencyMs: Date.now() - started,
-        model: snapshot.model,
-        provider: snapshot.providerName,
+        model,
+        provider,
       }
     }
-  }
-
-  private snapshotForModelTest(
-    config: ModelConfig,
-    entryId: string,
-    forceVision = false,
-  ): ProviderSnapshot {
-    if (!forceVision)
-      return buildProviderSnapshot(config, { modelOverride: entryId })
-    const entry = findEntry(config, entryId)
-    if (!entry) throw new Error(`model entry not found: ${entryId}`)
-    const raw = upsertModelEntryConfig(config.raw, {
-      entryId,
-      capabilityOverrides: { ...entry.capabilityOverrides, vision: true },
-    })
-    return buildProviderSnapshot(parseModelConfig(raw), {
-      modelOverride: entryId,
-    })
   }
 
   private async afterModelMutation(
@@ -738,23 +740,23 @@ function fetchErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function visionProbeMessages(): OpenAiMessage[] {
+// 1×1 opaque red RGBA PNG. Keep the expected answer aligned with visionOk().
+const VISION_PROBE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
+
+function visionProbeContent(): ContentBlock[] {
   return [
     {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'What is the color of this image? Reply with one word.',
-        },
-        {
-          type: 'image_url',
-          image_url: {
-            // 1×1 opaque red RGBA PNG. Keep the expected answer aligned with visionOk().
-            url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
-          },
-        },
-      ],
+      type: 'text',
+      text: 'What is the color of this image? Reply with one word.',
+    },
+    {
+      type: 'image',
+      attachment: {
+        attachmentId: 'model-test-probe',
+        mediaType: 'image/png',
+        bytes: Buffer.from(VISION_PROBE_PNG_BASE64, 'base64').length,
+      },
     },
   ]
 }

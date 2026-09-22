@@ -8,6 +8,7 @@ import type {
   CoreOperationResult,
   TerminalEvent,
 } from '@emperor/core/api'
+import type { WireSessionEvent } from '@emperor/core/runtime-contract'
 
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
   'Core IPC bridge is unavailable; use the Electron desktop window.'
@@ -25,11 +26,25 @@ interface EmperorBridge {
   openExternal?: (
     url: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
+  openSkillsFolder?: (input: {
+    scope: SkillFolderScope
+    sessionId?: string | null
+  }) => Promise<{
+    ok?: boolean
+    error?: string
+    code?: string
+    path?: string
+  } | void>
+  selectFile?: (input?: {
+    title?: string
+    filters?: FileDialogFilter[]
+  }) => Promise<string | null>
   invokeCore?: <Key extends CoreOperationKey>(
     operationKey: Key,
     ...args: CoreOperationArgs<Key>
   ) => Promise<CoreOperationResult<Key> | CoreIpcErrorEnvelope>
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
+  onSessionEvents?: (listener: (batch: SessionEventBatch) => void) => () => void
   onTerminalEvent?: (
     listener: (event: TerminalEvent) => void,
     scope: { sessionId: string; terminalId: string },
@@ -51,6 +66,20 @@ interface EmperorBridge {
   previewAction?: (action: 'back' | 'forward' | 'reload') => void
   previewClose?: () => void
   onPreviewState?: (listener: (state: PreviewViewState) => void) => () => void
+}
+
+export type SkillFolderScope = 'user' | 'project'
+
+/** Extension filter of the native file picker. */
+export interface FileDialogFilter {
+  name: string
+  extensions: string[]
+}
+
+/** One batch of raw session-log events of a watched session (`sessions.watch`). */
+export interface SessionEventBatch {
+  sessionId: string
+  events: WireSessionEvent[]
 }
 
 export interface PreviewViewState {
@@ -122,6 +151,46 @@ export async function openExternal(url: string): Promise<void> {
   }
 }
 
+/** A failed `openSkillsFolder`, carrying the Core error code when there is one. */
+export class SkillsFolderError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message)
+    this.name = 'SkillsFolderError'
+  }
+}
+
+/**
+ * Open the personal (`user`) or project Skills folder in the OS file manager;
+ * resolves the folder path. The user folder is created when missing, a project
+ * folder only exists once a project Skill was saved there.
+ */
+export async function openSkillsFolder(input: {
+  scope: SkillFolderScope
+  sessionId?: string | null
+}): Promise<string> {
+  const opener = bridge()?.openSkillsFolder
+  if (typeof opener !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await opener(input)
+  if (result && typeof result === 'object' && result.ok === false)
+    throw new SkillsFolderError(
+      result.error || 'Failed to open the Skills folder',
+      result.code ?? null,
+    )
+  return result && typeof result === 'object' ? String(result.path ?? '') : ''
+}
+
+/** Native single-file picker (e.g. `{ filters: [{ name: 'Zip', extensions: ['zip'] }] }`). */
+export async function selectFile(
+  input: { title?: string; filters?: FileDialogFilter[] } = {},
+): Promise<string | null> {
+  const picker = bridge()?.selectFile
+  return typeof picker === 'function' ? picker(input) : null
+}
+
 export async function invokeCore<Key extends CoreOperationKey>(
   operationKey: Key,
   ...args: CoreOperationArgs<Key>
@@ -151,6 +220,15 @@ export function hasCoreBridge(): boolean {
 
 export function onCoreEvent(listener: (event: unknown) => void): () => void {
   const subscribe = bridge()?.onCoreEvent
+  if (typeof subscribe !== 'function') return () => {}
+  return subscribe(listener)
+}
+
+/** Subscribe to raw session-log event batches; a no-op without the bridge. */
+export function onSessionEvents(
+  listener: (batch: SessionEventBatch) => void,
+): () => void {
+  const subscribe = bridge()?.onSessionEvents
   if (typeof subscribe !== 'function') return () => {}
   return subscribe(listener)
 }

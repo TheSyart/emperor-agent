@@ -1,4 +1,4 @@
-import type { TokenStatsRow, TokensPayload, TokensRange } from '../types'
+import type { TokenStatsRow, TokensRange } from '../types'
 
 export interface DateBucket {
   date: string
@@ -29,18 +29,6 @@ export interface HeatmapData {
   months: HeatmapMonthLabel[]
 }
 
-export interface BarSegment {
-  model: string
-  total: number
-  color: string
-}
-
-export interface BarColumn {
-  date: string
-  total: number
-  segments: BarSegment[]
-}
-
 export interface ModelRow {
   key: string
   model: string
@@ -53,7 +41,6 @@ export interface ModelRow {
   cacheTotal: number
   cacheMiss: number
   total: number
-  color: string
 }
 
 export interface TokenCompositionPart {
@@ -75,15 +62,6 @@ export interface TokenComposition {
 }
 
 const DAY = 24 * 60 * 60 * 1000
-
-const PALETTE = [
-  'rgb(var(--accent))',
-  'rgb(var(--warn))',
-  'rgb(var(--ok))',
-  'rgb(var(--fg) / 0.78)',
-  'rgb(var(--fg) / var(--text-secondary))',
-  'rgb(var(--accent) / 0.55)',
-]
 
 const MONTH_LABELS_CN = [
   '1月',
@@ -109,18 +87,6 @@ function tokenTotal(row?: TokenStatsRow | null): number {
   )
 }
 
-function hashKey(input: string): number {
-  let h = 5381
-  for (let i = 0; i < input.length; i++) {
-    h = (h * 33) ^ input.charCodeAt(i)
-  }
-  return Math.abs(h)
-}
-
-export function pickColor(key: string): string {
-  return PALETTE[hashKey(key) % PALETTE.length]
-}
-
 function startOfDay(value: Date): Date {
   const d = new Date(value)
   d.setHours(0, 0, 0, 0)
@@ -134,7 +100,7 @@ function isoDate(value: Date): string {
   return `${y}-${m}-${d}`
 }
 
-export function rangeDays(range: TokensRange): number | null {
+function rangeDays(range: TokensRange): number | null {
   if (range === '7d') return 7
   if (range === '30d') return 30
   return null
@@ -265,73 +231,6 @@ function providerLabel(key: string, info?: TokenStatsRow): string {
   return ''
 }
 
-function modelTotalsAcrossDates(
-  byDateModel: TokensPayload['byDateModel'],
-): Map<string, number> {
-  const totals = new Map<string, number>()
-  for (const dateMap of Object.values(byDateModel)) {
-    for (const [key, row] of Object.entries(dateMap)) {
-      totals.set(key, (totals.get(key) ?? 0) + tokenTotal(row))
-    }
-  }
-  return totals
-}
-
-export function topModels(
-  byDateModel: TokensPayload['byDateModel'],
-  topN = 5,
-): string[] {
-  const totals = modelTotalsAcrossDates(byDateModel)
-  return [...totals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN)
-    .map(([key]) => key)
-}
-
-export function buildStackedBars(
-  byDateModel: TokensPayload['byDateModel'],
-  byDate: Record<string, TokenStatsRow>,
-  range: TokensRange,
-  topN = 5,
-): { columns: BarColumn[]; topModelKeys: string[]; otherKey: string | null } {
-  const dateRange = filterByRange(byDate, range).map((b) => b.date)
-  const top = topModels(byDateModel, topN)
-  const topSet = new Set(top)
-  const otherKey = '__other__'
-  const columns: BarColumn[] = []
-  let otherSeen = false
-
-  for (const date of dateRange) {
-    const dateRows = byDateModel[date] ?? {}
-    const segments: BarSegment[] = []
-    let otherTotal = 0
-
-    for (const key of top) {
-      const row = dateRows[key]
-      const total = tokenTotal(row)
-      if (total > 0) {
-        segments.push({ model: key, total, color: pickColor(key) })
-      }
-    }
-    for (const [key, row] of Object.entries(dateRows)) {
-      if (topSet.has(key)) continue
-      const total = tokenTotal(row)
-      if (total > 0) otherTotal += total
-    }
-    if (otherTotal > 0) {
-      otherSeen = true
-      segments.push({
-        model: otherKey,
-        total: otherTotal,
-        color: 'rgb(var(--fg) / calc(var(--text-secondary) * 0.65))',
-      })
-    }
-    const total = segments.reduce((acc, s) => acc + s.total, 0)
-    columns.push({ date, total, segments })
-  }
-  return { columns, topModelKeys: top, otherKey: otherSeen ? otherKey : null }
-}
-
 export function buildModelRows(
   byModel: Record<string, TokenStatsRow>,
 ): ModelRow[] {
@@ -352,7 +251,6 @@ export function buildModelRows(
       cacheTotal: cacheRead + cacheCreate,
       cacheMiss: input + cacheCreate,
       total: input + cacheRead + cacheCreate + output,
-      color: pickColor(key),
     }
   })
   rows.sort((a, b) => b.total - a.total)
@@ -431,8 +329,4 @@ export function buildTokenComposition(
       },
     ].filter((part) => part.value > 0) as TokenCompositionPart[],
   }
-}
-
-export function modelDisplayName(key: string, info?: TokenStatsRow): string {
-  return modelLabel(key, info)
 }

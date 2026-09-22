@@ -13,6 +13,7 @@ import {
   applySessionTitleUpdated,
   createDraftSession,
   isDraftSessionId,
+  promoteDraftSession,
 } from '../runtime/sessionDrafts'
 
 const sessions = ref<SessionInfo[]>([])
@@ -43,7 +44,15 @@ export function useSession() {
         core('sessions.list', { includeArchived: false }),
         core('projects.list'),
       ])
-      sessions.value = sessionItems
+      // A draft lives only in the renderer, so a backend list never contains
+      // it: keep the one the user is writing in, or refreshing the list would
+      // drop the new conversation and move the route to another session.
+      const keptDraft =
+        isDraftSessionId(activeId.value) &&
+        !sessionItems.some((session) => session.id === activeId.value)
+          ? sessions.value.find((session) => session.id === activeId.value)
+          : undefined
+      sessions.value = keptDraft ? [keptDraft, ...sessionItems] : sessionItems
       projects.value = normalizeProjects(projectItems)
       if (!sessions.value.length) {
         await create({ mode: 'chat', title: '新会话' })
@@ -177,6 +186,13 @@ export function useSession() {
     }
   }
 
+  /** Promote a draft locally (slash commands create the session themselves). */
+  function promoteDraft(draftId: string, session: SessionInfo) {
+    sessions.value = promoteDraftSession(sessions.value, draftId, session)
+    upsertProject(projectFromSession(session))
+    if (activeId.value === draftId) activeId.value = session.id
+  }
+
   function applySessionTitleUpdatedEvent(
     event: Extract<WsEvent, { event: 'session_title_updated' }>,
   ) {
@@ -225,6 +241,7 @@ export function useSession() {
     archive,
     activate,
     applySessionCreatedEvent,
+    promoteDraft,
     applySessionTitleUpdatedEvent,
     applySessionControlPending,
     backendSessionId,

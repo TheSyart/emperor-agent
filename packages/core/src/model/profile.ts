@@ -3,7 +3,7 @@ import type {
   ModelEntryV2,
   ModelProtocol,
 } from '../config/model-config'
-import { findByName } from '../providers/registry'
+import { findByName } from '../llm/catalog'
 
 export const REASONING_EFFORT_ORDER = [
   'none',

@@ -394,3 +394,78 @@ export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
   next.splice(target, 0, item)
   return next
 }
+
+// ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早） ──
+
+export interface SidebarDayGroup {
+  key: 'today' | 'yesterday' | 'week' | 'month' | 'older'
+  label: string
+  sessions: SessionInfo[]
+}
+
+const DAY_GROUP_LABELS: Record<SidebarDayGroup['key'], string> = {
+  today: '今天',
+  yesterday: '昨天',
+  week: '7 天内',
+  month: '30 天内',
+  older: '更早',
+}
+
+function startOfDay(time: number): number {
+  const date = new Date(time)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+/** Day bucket of one timestamp relative to `now` (local calendar days). */
+export function sidebarDayKey(
+  iso: string | undefined,
+  now: number = Date.now(),
+): SidebarDayGroup['key'] {
+  const time = iso ? Date.parse(iso) : Number.NaN
+  if (!Number.isFinite(time)) return 'older'
+  const today = startOfDay(now)
+  const day = 24 * 60 * 60 * 1000
+  if (time >= today) return 'today'
+  if (time >= today - day) return 'yesterday'
+  if (time >= today - 7 * day) return 'week'
+  if (time >= today - 30 * day) return 'month'
+  return 'older'
+}
+
+/**
+ * Split an already-sorted session list into consecutive day groups by
+ * `updated_at`. Order inside and across groups follows the input (the
+ * sidebar sort), so a manual order stays intact — groups only break where
+ * the bucket changes.
+ */
+export function groupSessionsByDay(
+  sessions: SessionInfo[],
+  now: number = Date.now(),
+): SidebarDayGroup[] {
+  const groups: SidebarDayGroup[] = []
+  for (const session of sessions) {
+    const key = sidebarDayKey(session.updated_at || session.created_at, now)
+    const last = groups.at(-1)
+    if (last && last.key === key) last.sessions.push(session)
+    else groups.push({ key, label: DAY_GROUP_LABELS[key], sessions: [session] })
+  }
+  return groups
+}
+
+/** Compact relative time for a sidebar row (刚刚 / 5 分钟 / 3 小时 / 2 天 / 2026-01-02). */
+export function sidebarRelativeTime(
+  iso: string | undefined,
+  now: number = Date.now(),
+): string {
+  const time = iso ? Date.parse(iso) : Number.NaN
+  if (!Number.isFinite(time)) return ''
+  const diff = Math.max(0, now - time)
+  const minute = 60 * 1000
+  if (diff < minute) return '刚刚'
+  if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟`
+  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时`
+  if (diff < 30 * 24 * 60 * minute)
+    return `${Math.floor(diff / (24 * 60 * minute))} 天`
+  return (iso || '').slice(0, 10)
+}

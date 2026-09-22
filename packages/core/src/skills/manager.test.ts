@@ -1,10 +1,8 @@
-import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   renameSync,
   symlinkSync,
   writeFileSync,
@@ -115,10 +113,8 @@ describe('SkillManager', () => {
       status: 'active',
       files: ['blocked-skill/SKILL.md'],
     })
-    expect(manager.package({ name: 'blocked-skill' }).files).toEqual([
-      'blocked-skill/SKILL.md',
-    ])
   })
+
   it('creates a valid user Skill with only requested resource directories', () => {
     const { manager, stateRoot } = fixture()
 
@@ -134,11 +130,12 @@ describe('SkillManager', () => {
       status: 'active',
       readOnly: false,
     })
-    expect(created.files).toEqual([
-      'release-audit/SKILL.md',
-      'release-audit/assets/.gitkeep',
-      'release-audit/references/.gitkeep',
-    ])
+    expect(created.files).toEqual(['release-audit/SKILL.md'])
+    expect(
+      existsSync(
+        join(stateRoot, 'skills', 'release-audit', 'references', '.gitkeep'),
+      ),
+    ).toBe(true)
     expect(
       readFileSync(
         join(stateRoot, 'skills', 'release-audit', 'SKILL.md'),
@@ -154,9 +151,9 @@ describe('SkillManager', () => {
     const { manager } = fixture()
     for (const name of [
       'Release Audit',
+      'Release-audit',
       '../escape',
       '-release-audit',
-      'release_audit',
       'a'.repeat(65),
     ]) {
       expect(() =>
@@ -209,10 +206,7 @@ describe('SkillManager', () => {
           runtimes: ['node'],
           env: ['GITHUB_TOKEN'],
         },
-        files: [
-          'environment-report/SKILL.md',
-          'environment-report/scripts/inspect.mjs',
-        ],
+        files: ['environment-report/SKILL.md'],
       }),
     )
 
@@ -224,19 +218,13 @@ describe('SkillManager', () => {
     })
     expect(withAuxiliaryFiles.valid).toBe(true)
     expect(withAuxiliaryFiles.errors).toEqual([])
-    expect(withAuxiliaryFiles.files).toEqual(
-      expect.arrayContaining([
-        'environment-report/SKILL_en.md',
-        'environment-report/docs/notes.md',
-      ]),
-    )
 
-    expect(
-      manager.validate({
-        name: 'wrong-name',
-        content: '---\nname: another\ndescription: Valid text\n---\n',
-      }),
-    ).toMatchObject({ valid: false })
+    const renamed = manager.validate({
+      name: 'wrong-name',
+      content: '---\nname: another\ndescription: Valid text\n---\n',
+    })
+    expect(renamed).toMatchObject({ valid: true, name: 'another' })
+    expect(renamed.warnings.join('\n')).toMatch(/differs from frontmatter/)
     expect(
       manager
         .validate({
@@ -270,67 +258,27 @@ describe('SkillManager', () => {
     expect(JSON.stringify(result)).not.toContain('unsafe')
   })
 
-  it('packages sorted regular files into reproducible .skill archives', () => {
+  it('allows internal symlinks and rejects links that leave the Skill folder', () => {
     const { manager, stateRoot } = fixture()
     manager.create({
-      name: 'release-audit',
-      description: 'Audit release artifacts and report integrity failures.',
-      resources: ['scripts', 'references'],
-    })
-    writeFileSync(
-      join(stateRoot, 'skills', 'release-audit', 'references', 'policy.md'),
-      '# Policy\n',
-    )
-    writeFileSync(
-      join(stateRoot, 'skills', 'release-audit', 'scripts', 'verify.mjs'),
-      'export {}\n',
-    )
-
-    const first = manager.package({ name: 'release-audit' })
-    const firstBytes = readFileSync(first.path)
-    const second = manager.package({ name: 'release-audit' })
-    const secondBytes = readFileSync(second.path)
-
-    expect(first.files).toEqual([
-      'release-audit/SKILL.md',
-      'release-audit/references/.gitkeep',
-      'release-audit/references/policy.md',
-      'release-audit/scripts/.gitkeep',
-      'release-audit/scripts/verify.mjs',
-    ])
-    expect(secondBytes).toEqual(firstBytes)
-    expect(first.sha256).toBe(
-      createHash('sha256').update(firstBytes).digest('hex'),
-    )
-    expect(second.sha256).toBe(first.sha256)
-    expect(first.path).toBe(
-      join(realpathSync(stateRoot), 'skill-packages', 'release-audit.skill'),
-    )
-  })
-
-  it('rejects symlinks during validation and packaging', () => {
-    const { manager, stateRoot } = fixture()
-    manager.create({
-      name: 'unsafe-skill',
-      description: 'Exercise unsafe filesystem validation.',
+      name: 'linked-skill',
+      description: 'Exercise symlink validation.',
       resources: ['assets'],
     })
+    const skillRoot = join(stateRoot, 'skills', 'linked-skill')
+    writeFileSync(join(skillRoot, 'assets', 'logo.txt'), 'logo\n')
+    symlinkSync(join('assets', 'logo.txt'), join(skillRoot, 'logo.txt'))
+    expect(manager.validate({ name: 'linked-skill' }).valid).toBe(true)
+
     const outside = join(stateRoot, 'outside.txt')
     writeFileSync(outside, 'secret\n')
-    symlinkSync(
-      outside,
-      join(stateRoot, 'skills', 'unsafe-skill', 'assets', 'secret.txt'),
-    )
-
-    const result = manager.validate({ name: 'unsafe-skill' })
+    symlinkSync(outside, join(skillRoot, 'assets', 'secret.txt'))
+    const result = manager.validate({ name: 'linked-skill' })
     expect(result.valid).toBe(false)
-    expect(result.errors.join('\n')).toMatch(/symbolic link/i)
-    expect(() => manager.package({ name: 'unsafe-skill' })).toThrow(
-      /validation failed/i,
-    )
+    expect(result.errors.join('\n')).toMatch(/absolute target/i)
   })
 
-  it('rejects symlinked managed directories before create or package writes', () => {
+  it('rejects symlinked managed directories before create writes', () => {
     const createFixture = fixture()
     const createOutside = join(createFixture.stateRoot, '..', 'create-outside')
     mkdirSync(createFixture.stateRoot, { recursive: true })
@@ -344,27 +292,6 @@ describe('SkillManager', () => {
       }),
     ).toThrow(/symbolic link|managed directory/i)
     expect(existsSync(join(createOutside, 'escaped-skill'))).toBe(false)
-
-    const packageFixture = fixture()
-    packageFixture.manager.create({
-      name: 'package-safe',
-      description: 'Package without escaping the private state root.',
-    })
-    const packageOutside = join(
-      packageFixture.stateRoot,
-      '..',
-      'package-outside',
-    )
-    mkdirSync(packageOutside)
-    symlinkDirectory(
-      packageOutside,
-      join(packageFixture.stateRoot, 'skill-packages'),
-    )
-
-    expect(() =>
-      packageFixture.manager.package({ name: 'package-safe' }),
-    ).toThrow(/symbolic link|managed directory/i)
-    expect(existsSync(join(packageOutside, 'package-safe.skill'))).toBe(false)
   })
 
   it('uses a recoverable Windows replacement fallback for existing packages', () => {
@@ -411,8 +338,8 @@ describe('SkillManager', () => {
     writeFileSync(join(current, 'bottom.md'), 'too deep\n')
 
     const result = manager.validate({ name: 'deep-skill' })
-    expect(result.valid).toBe(false)
-    expect(result.errors.join('\n')).toMatch(/directory depth/i)
+    expect(result.valid).toBe(true)
+    expect(result.warnings.join('\n')).toMatch(/deeper than 32 levels/i)
   })
 })
 

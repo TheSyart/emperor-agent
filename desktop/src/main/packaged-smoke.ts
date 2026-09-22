@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import {
-  GlobTool,
-  GrepTool,
-  writeJsonAtomic,
-} from '@emperor/core/host-capabilities'
+import { searchProbe, writeJsonAtomic } from '@emperor/core/host-capabilities'
 import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 
@@ -123,7 +119,9 @@ export async function runPackagedSmoke(
 
     const diagnostics = asRecord(await opts.core.diagnostics.get())
     const sandbox = packagedSandboxReceipt(diagnostics.sandbox, opts.platform)
-    const lifecycle = packagedLifecycleReceipt(diagnostics.lifecycle)
+    const lifecycle = packagedLifecycleReceipt(
+      asRecord(diagnostics.kernel).lifecycle,
+    )
     const environmentBefore = asSmokeStatus(
       await opts.core.environment.getStatus({
         forceRefresh: true,
@@ -134,29 +132,14 @@ export async function runPackagedSmoke(
     if (jobsBefore !== 0)
       throw new Error('packaged smoke state must not contain install jobs')
 
-    const context = {
-      root: workspaceRoot,
-      workspaceRoot,
-      arguments: {},
-    }
-    const globOutput = String(
-      await new GlobTool(workspaceRoot).execute(
-        { pattern: '**/*.ts' },
-        { ...context, arguments: { pattern: '**/*.ts' } },
-      ),
-    )
-    const grepOutput = String(
-      await new GrepTool(workspaceRoot).execute(
-        { pattern: 'emperorSmokeNeedle', output_mode: 'files_with_matches' },
-        {
-          ...context,
-          arguments: {
-            pattern: 'emperorSmokeNeedle',
-            output_mode: 'files_with_matches',
-          },
-        },
-      ),
-    )
+    const globOutput = await searchProbe(workspaceRoot, {
+      kind: 'glob',
+      pattern: '**/*.ts',
+    })
+    const grepOutput = await searchProbe(workspaceRoot, {
+      kind: 'grep',
+      pattern: 'emperorSmokeNeedle',
+    })
     assertSearchResult(globOutput, 'src/smoke.ts', 'glob')
     assertSearchResult(grepOutput, 'src/smoke.ts', 'grep')
     const terminal = await verifyPackagedTerminal(
@@ -394,15 +377,7 @@ function packagedLifecycleReceipt(value: unknown): {
   if (!Array.isArray(lifecycle.services))
     throw new Error('packaged smoke requires lifecycle service receipts')
   const services = lifecycle.services.map(asRecord)
-  const expected = [
-    'process-runtime',
-    'code-intelligence',
-    'task-runtime',
-    'subagent-supervisor',
-    'session-runtime',
-    'mcp',
-    'scheduler',
-  ]
+  const expected = ['process-runtime', 'harness-kernel', 'mcp', 'scheduler']
   for (const id of expected) {
     const service = services.find((candidate) => candidate.id === id)
     if (!service || service.required !== true || service.state !== 'ready')

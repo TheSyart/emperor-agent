@@ -1,76 +1,80 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { createMemoryHistory, createRouter } from 'vue-router'
+
+async function makeRouter() {
+  const { routeRecords } = await import('./router')
+  return createRouter({ history: createMemoryHistory(), routes: routeRecords })
+}
+
+async function resolve(path: string) {
+  const router = await makeRouter()
+  await router.push(path)
+  return router.currentRoute.value
+}
 
 describe('renderer routes', () => {
-  it('keeps plugin and settings routes addressable', async () => {
-    const { routeRecords } = await import('./router')
-    const paths = routeRecords.map((route) => route.path)
+  it('serves chat and trajectory tabs per session', async () => {
+    const chat = await resolve('/chat/s_123')
+    expect(chat.name).toBe('chat')
+    expect(chat.params.sessionId).toBe('s_123')
 
-    expect(paths).toContain('/plugins')
-    expect(paths).toContain('/plugins/:tab?')
-    expect(paths).toContain('/skills/:name?')
-    expect(paths).toContain('/tools')
-    expect(paths).toContain('/mcp')
-    expect(paths).toContain('/settings/:section?')
+    const trajectory = await resolve('/chat/s_123/trajectory')
+    expect(trajectory.name).toBe('trajectory')
+    expect(trajectory.params.sessionId).toBe('s_123')
+
+    expect((await resolve('/chat')).name).toBe('chat')
+    expect((await resolve('/')).path).toBe('/chat')
   })
 
-  it('moves MCP configuration under the plugins hub while keeping legacy routes', async () => {
-    const { routeRecords } = await import('./router')
-    const mcp = routeRecords.find((route) => route.path === '/mcp')
-    const settingsIntegrations = routeRecords.find(
-      (route) => route.path === '/settings/integrations',
-    )
+  it.each([
+    ['/settings', 'general'],
+    ['/settings/model', 'model'],
+    ['/settings/appearance', 'general'],
+    ['/settings/archived', 'general'],
+    ['/settings/integrations', 'mcp'],
+    ['/settings/hooks', 'hooks'],
+    ['/plugins', 'plugins'],
+    ['/plugins/skills', 'skills'],
+    ['/plugins/tools', 'tools'],
+    ['/plugins/mcp', 'mcp'],
+    ['/tools', 'tools'],
+    ['/mcp', 'mcp'],
+    ['/model', 'model'],
+    ['/scheduler', 'scheduler'],
+    ['/configs', 'configs'],
+    ['/pet', 'pet'],
+    ['/memory', 'memory'],
+    ['/tokens', 'tokens'],
+    ['/skills', 'skills'],
+  ])(
+    'redirects legacy page %s into the settings modal (%s)',
+    async (path, section) => {
+      const route = await resolve(path)
+      expect(route.path).toBe('/chat')
+      expect(route.query.settings).toBe(section)
+    },
+  )
 
-    expect(mcp?.redirect).toBe('/plugins/mcp')
-    expect(settingsIntegrations?.redirect).toBe('/plugins/mcp')
+  it('keeps the selected skill of a legacy skill deep link', async () => {
+    const route = await resolve('/skills/agent-reach')
+    expect(route.query).toEqual({ settings: 'skills', skill: 'agent-reach' })
   })
 
-  it('redirects legacy team route to chat instead of exposing management UI', async () => {
-    const { routeRecords } = await import('./router')
-    const team = routeRecords.find((route) => route.path === '/team')
-
-    expect(team?.redirect).toBe('/chat')
-    expect(team?.component).toBeUndefined()
+  it('redirects the retired team route and unknown paths to chat', async () => {
+    expect((await resolve('/team')).path).toBe('/chat')
+    expect((await resolve('/nope/deeper')).path).toBe('/chat')
   })
 
-  it('redirects the legacy model route into the settings model page', async () => {
-    const { routeRecords } = await import('./router')
-    const model = routeRecords.find((route) => route.path === '/model')
-
-    expect(model?.redirect).toBe('/settings/model')
-    expect(model?.component).toBeUndefined()
-  })
-
-  it('marks settings as a standalone shell without the app sidebar', async () => {
-    const { routeRecords } = await import('./router')
-    const settings = routeRecords.find(
-      (route) => route.path === '/settings/:section?',
-    )
-    const chat = routeRecords.find((route) => route.path === '/chat')
-
-    expect(settings?.meta?.hideAppSidebar).toBe(true)
-    expect(chat?.meta?.hideAppSidebar).toBeUndefined()
-  })
-
-  it('does not expose Team as a settings category', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('./views/SettingsView.vue', import.meta.url)),
-      'utf8',
-    )
-
-    expect(source).not.toContain("key: 'team'")
-    expect(source).not.toContain('TeamView')
-  })
-
-  it('does not expose MCP as a settings category', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('./views/SettingsView.vue', import.meta.url)),
-      'utf8',
-    )
-
-    expect(source).not.toContain("key: 'integrations'")
-    expect(source).not.toContain('MCP / 集成')
-    expect(source).not.toContain('McpView')
+  it('builds session locations for both tabs', async () => {
+    const { sessionLocation } = await import('./router')
+    expect(sessionLocation('s1')).toEqual({
+      name: 'chat',
+      params: { sessionId: 's1' },
+    })
+    expect(sessionLocation('s1', 'trajectory')).toEqual({
+      name: 'trajectory',
+      params: { sessionId: 's1' },
+    })
+    expect(sessionLocation('')).toEqual({ name: 'chat' })
   })
 })

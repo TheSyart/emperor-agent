@@ -29,11 +29,11 @@ import type {
   CurrentModelConfig,
   ModelEntry,
   ProviderOption,
-  RuntimeGoalSummary,
+  RuntimeGoalView,
   ToolInfo,
 } from '../../types'
 import {
-  composerModeOptions,
+  composerPresetOptions,
   composerSendDisabled,
   composerStopPresentation,
   currentComposerPermission,
@@ -54,7 +54,7 @@ export interface ComposerControllerProps {
   providerOptions: ProviderOption[]
   supportsVision?: boolean
   sendBlockedReason?: string | null
-  goal?: RuntimeGoalSummary | null
+  goal?: RuntimeGoalView | null
   planPaused?: boolean
   goalCaptureStatus?: GoalCaptureStatus
   lifecycleMode?: ComposerLifecycleMode
@@ -83,6 +83,8 @@ export interface ComposerEmit {
 
 export const COMPOSER_ACCEPT_LIST =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json,text/csv,text/plain,text/markdown'
+/** dsh draft cap: 14 lines × 24px (the takeover bodies share it). */
+export const COMPOSER_TEXT_MAX_HEIGHT = 336
 export const COMPOSER_QUEUE_FULL_MESSAGE =
   '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
@@ -281,26 +283,29 @@ export function useComposerController(
     }
   })
 
-  const modeOptions = composerModeOptions.map((option) => ({
-    ...option,
-    icon:
-      option.value === 'ask_before_edit'
-        ? actionIcons.modeAskBeforeEdit
-        : option.value === 'smart_auto'
-          ? actionIcons.modeAcceptEdits
-          : actionIcons.modeAuto,
-  }))
+  const modeOptions = computed(() =>
+    composerPresetOptions(props.control).map((option) => ({
+      ...option,
+      icon:
+        option.value === 'read-only'
+          ? actionIcons.modeAskBeforeEdit
+          : option.value === 'workspace-write'
+            ? actionIcons.modeAcceptEdits
+            : actionIcons.modeAuto,
+    })),
+  )
   const currentMode = computed(() => {
     const option = currentComposerPermission(props.control)
     return (
-      modeOptions.find((item) => item.value === option.value) ?? modeOptions[0]!
+      modeOptions.value.find((item) => item.value === option.value) ??
+      modeOptions.value[1]!
     )
   })
   const modeTitle = computed(() =>
     props.busy ? '等待当前任务结束后再切换' : '切换执行权限',
   )
   const permissionAppliesAfterPlan = computed(
-    () => props.control?.mode === 'plan',
+    () => props.control?.plan === true,
   )
   const goalCaptureActive = computed(
     () =>
@@ -432,7 +437,7 @@ export function useComposerController(
     const element = input.value
     if (!element) return
     element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 180)}px`
+    element.style.height = `${Math.min(element.scrollHeight, COMPOSER_TEXT_MAX_HEIGHT)}px`
     syncHighlightScroll()
   }
 

@@ -31,7 +31,7 @@ import {
   resolveStaticAssetPath,
 } from './protocol'
 import { createCoreHost } from './core-host'
-import { CoreEventBridge } from './event-bridge'
+import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
 import { parsePackagedSmokeArgs, runPackagedSmoke } from './packaged-smoke'
 import {
@@ -78,6 +78,7 @@ const appIconPath = resolveAppIconPath({
 
 let coreApi: CoreApi | null = null
 const coreEventBridge = new CoreEventBridge()
+const sessionEventBridge = new SessionEventBridge()
 const terminalEventBridge = new TerminalEventBridge()
 let runtimeReady = false
 let mainWindow: BrowserWindow | null = null
@@ -276,6 +277,7 @@ function prepareMainRuntime(): void {
 function closeCoreHost(): void {
   previewViewHost?.close()
   previewViewHost = null
+  sessionEventBridge.dispose()
   if (!coreApi) return
   const current = coreApi
   coreApi = null
@@ -417,6 +419,7 @@ function createWindow(): void {
   })
   if (coreApi) previewViewHost = new PreviewViewHost(mainWindow, coreApi)
   coreEventBridge.attach(mainWindow.webContents)
+  sessionEventBridge.attach(mainWindow.webContents)
   terminalEventBridge.attach(mainWindow.webContents)
   secureWindowNavigation(mainWindow, trustedRendererPolicy)
 
@@ -453,6 +456,7 @@ function createWindow(): void {
     previewViewHost?.close()
     previewViewHost = null
     if (mainWindow) coreEventBridge.detach(mainWindow.webContents)
+    if (mainWindow) sessionEventBridge.detach(mainWindow.webContents)
     if (mainWindow) terminalEventBridge.detach(mainWindow.webContents)
     mainWindow = null
   })
@@ -584,9 +588,9 @@ async function startup(): Promise<void> {
       root: config.runtimeRoot,
       ipcMain,
       eventBridge: coreEventBridge,
+      sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
-        surface: 'desktop',
         appVersion: app.getVersion(),
         ...(packagedRuntimeRevision
           ? { runtimeRevision: packagedRuntimeRevision }
@@ -628,6 +632,25 @@ async function startup(): Promise<void> {
       },
       showItemInFolder: (target) => shell.showItemInFolder(target),
       openExternal: (url) => shell.openExternal(url),
+      skills: {
+        folderPath: (input) => {
+          if (!coreApi) throw new Error('core not ready')
+          return coreApi.skills.folderPath(input)
+        },
+      },
+      openPath: (target) => shell.openPath(target),
+      selectFile: async ({ title, filters }) => {
+        const options: OpenDialogOptions = {
+          properties: ['openFile'],
+          ...(title ? { title } : {}),
+          ...(filters.length ? { filters } : {}),
+        }
+        const result = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, options)
+          : await dialog.showOpenDialog(options)
+        if (result.canceled || !result.filePaths.length) return null
+        return result.filePaths[0] ?? null
+      },
     })
     registerAppProtocol()
     if (packagedSmoke) {

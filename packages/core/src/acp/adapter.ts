@@ -56,17 +56,21 @@ export interface EmperorAcpCore {
       sessionId: string
       afterSeq: number
       limit: number
-      includeArchive: boolean
-      compact: boolean
-      format: 'projection'
+      includeArchive?: boolean
+      compact?: boolean
+      format?: 'projection'
     }): {
       events: Row[]
       latestSeq: number
     }
   }
+  /** Interactions block inside the turn; ACP cannot answer them, so it cancels. */
+  readonly control?: {
+    cancelInteraction(id: string): unknown
+  }
   readonly chat: {
     submit(input: EmperorAcpSubmitInput): Promise<{
-      turnId: string
+      turnId: string | null
       content: string
       activeSessionId: string | null
     }>
@@ -313,10 +317,21 @@ export class EmperorAcpAdapter {
           signal: controller.signal,
           emit: async (event) => {
             if (active.phase !== 'running') return
-            if (cleanText(event.event) === 'turn_paused') {
+            const name = cleanText(event.event)
+            if (
+              (name === 'ask_request' || name === 'plan_draft') &&
+              !pause.interaction
+            ) {
               pause.interaction = isRecord(event.interaction)
                 ? event.interaction
                 : {}
+              const interactionId = cleanText(pause.interaction.id)
+              if (interactionId)
+                void Promise.resolve()
+                  .then(() =>
+                    this.core.control?.cancelInteraction(interactionId),
+                  )
+                  .catch(() => undefined)
             }
             for (const notification of projector.project(event)) {
               await context.client.notify(

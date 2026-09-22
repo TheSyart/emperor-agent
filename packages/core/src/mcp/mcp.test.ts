@@ -9,11 +9,11 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ToolRegistry } from '../tools/registry'
 import { createNodePersistenceAdapter } from '../store/persistence'
 import { MCPToolAdapter } from './adapter'
 import {
   loadMcpConfig,
+  loadMcpConfigRaw,
   loadMcpConfigUnresolved,
   MCP_EDITOR_SECRET_MARKER,
   resolveMcpConfig,
@@ -195,7 +195,7 @@ describe('MCP config', () => {
         servers: {
           remote: {
             transport: 'sse',
-            url: 'https://mcp.example.test',
+            url: 'https://mcp.example.test/sse?token=literal-url-token&mode=${MCP_MODE}',
             command: 'visible-command',
             args: ['--token=${MCP_SECRET_TOKEN}', 'literal-argument'],
             env: {
@@ -230,17 +230,17 @@ describe('MCP config', () => {
         API_TOKEN: '${MCP_SECRET_TOKEN}',
         STATIC_TOKEN: '[REDACTED]',
       },
-      url: '[REDACTED]',
+      url: 'https://mcp.example.test/sse?token=[REDACTED]&mode=${MCP_MODE}',
       headers: {
         Authorization: 'Bearer ${MCP_SECRET_TOKEN}',
         'X-Static': '[REDACTED]',
       },
     })
     expect(JSON.stringify(editor)).not.toContain('runtime-secret-value')
+    expect(JSON.stringify(editor)).not.toContain('literal-url-token')
     expect(JSON.stringify(editor)).not.toContain('literal-argument')
     expect(JSON.stringify(editor)).not.toContain('literal-env-secret')
     expect(JSON.stringify(editor)).not.toContain('literal-header-secret')
-    expect(JSON.stringify(editor)).not.toContain('https://mcp.example.test')
   })
 
   it('keeps the legacy loader result while exposing its user-layer provenance', async () => {
@@ -265,7 +265,7 @@ describe('MCP config', () => {
     const resolved = await resolveMcpConfig(root, {})
 
     expect(resolved.config).toEqual(runtime)
-    expect(editor.servers.remote?.url).toBe('[REDACTED]')
+    expect(editor.servers.remote?.url).toBe('https://mcp.example.test')
     expect(resolved.resolution.source).toMatchObject({
       kind: 'user',
       id: 'mcp_config.json',
@@ -421,6 +421,126 @@ describe('MCP config', () => {
       }),
     ).rejects.toThrow('servers.injected.env.TOKEN')
     expect(readFileSync(path, 'utf8')).toBe(original)
+  })
+
+  it('masks only URL query values, userinfo, and fragment and restores them on save', async () => {
+    const root = tmp('emperor-mcp-url-mask-')
+    const path = join(root, 'mcp_config.json')
+    const stored =
+      'https://user:pw@aihot.news/api/mcp?aihot_actor=secret-actor&lang=zh&lang=en#frag'
+    writeFileSync(
+      path,
+      JSON.stringify({
+        servers: { aihot: { transport: 'http', url: stored } },
+      }),
+      'utf8',
+    )
+    const editor = await loadMcpConfigUnresolved(root)
+    expect(editor.servers.aihot?.url).toBe(
+      'https://[REDACTED]@aihot.news/api/mcp?aihot_actor=[REDACTED]&lang=[REDACTED]&lang=[REDACTED]#[REDACTED]',
+    )
+    expect(JSON.stringify(editor)).not.toContain('secret-actor')
+
+    await saveMcpConfig(root, editor as unknown as Record<string, unknown>)
+    expect(JSON.parse(readFileSync(path, 'utf8')).servers.aihot.url).toBe(
+      stored,
+    )
+
+    // Edit the path and one value while keeping the other masked values.
+    const edited = await loadMcpConfigUnresolved(root)
+    edited.servers.aihot!.url =
+      'https://[REDACTED]@aihot.news/api/v2/mcp?aihot_actor=[REDACTED]&lang=fr&lang=[REDACTED]'
+    await saveMcpConfig(root, edited as unknown as Record<string, unknown>)
+    expect(JSON.parse(readFileSync(path, 'utf8')).servers.aihot.url).toBe(
+      'https://user:pw@aihot.news/api/v2/mcp?aihot_actor=secret-actor&lang=fr&lang=en',
+    )
+
+    await expect(
+      saveMcpConfig(root, {
+        servers: {
+          aihot: {
+            transport: 'http',
+            url: 'https://aihot.news/api/mcp?other=[REDACTED]',
+          },
+        },
+      }),
+    ).rejects.toThrow('servers.aihot.url')
+    // A masked token never follows the URL to a different host.
+    await expect(
+      saveMcpConfig(root, {
+        servers: {
+          aihot: {
+            transport: 'http',
+            url: 'https://evil.example/api/mcp?aihot_actor=[REDACTED]',
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'mcp_config_invalid' })
+    expect(JSON.parse(readFileSync(path, 'utf8')).servers.aihot.url).toBe(
+      'https://user:pw@aihot.news/api/v2/mcp?aihot_actor=secret-actor&lang=fr&lang=en',
+    )
+  })
+
+  it('normalizes transport spellings and defaults url-only servers to http', async () => {
+    const root = tmp('emperor-mcp-transport-')
+    writeFileSync(
+      join(root, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          urlOnly: { url: 'https://a.test/mcp' },
+          claudeType: { type: 'streamable-http', url: 'https://b.test/mcp' },
+          camel: { transport: 'streamableHttp', url: 'https://c.test/mcp' },
+          sse: { transport: 'sse', url: 'https://d.test/sse' },
+          local: { command: 'node' },
+          unknown: { transport: 'websocket', url: 'wss://e.test' },
+        },
+      }),
+      'utf8',
+    )
+    const config = await loadMcpConfig(root, {})
+    expect(
+      Object.fromEntries(
+        Object.entries(config.servers).map(([name, server]) => [
+          name,
+          server.transport,
+        ]),
+      ),
+    ).toEqual({
+      urlOnly: 'http',
+      claudeType: 'http',
+      camel: 'http',
+      sse: 'sse',
+      local: 'stdio',
+      unknown: 'websocket',
+    })
+  })
+
+  it('reads the stored raw config verbatim for merges', async () => {
+    const root = tmp('emperor-mcp-raw-')
+    await expect(loadMcpConfigRaw(root)).resolves.toMatchObject({
+      servers: {},
+    })
+    writeFileSync(
+      join(root, 'mcp_config.json'),
+      JSON.stringify({
+        servers: {
+          alpha: {
+            command: 'node',
+            env: { TOKEN: '${ALPHA_TOKEN}' },
+            vendorOption: { keep: true },
+          },
+        },
+      }),
+      'utf8',
+    )
+    const raw = await loadMcpConfigRaw(root)
+    expect(raw.servers).toEqual({
+      alpha: {
+        command: 'node',
+        env: { TOKEN: '${ALPHA_TOKEN}' },
+        vendorOption: { keep: true },
+      },
+    })
   })
 
   it('isolates truncated JSON and starts with no enabled servers', async () => {
@@ -630,14 +750,7 @@ describe('MCP adapter/client', () => {
       connection: conn,
     })
 
-    await adapter.execute(
-      { q: 'abortable' },
-      {
-        root: tmp('emperor-mcp-signal-'),
-        arguments: {},
-        signal: controller.signal,
-      },
-    )
+    await adapter.execute({ q: 'abortable' }, { signal: controller.signal })
     expect(observedSignal).toBe(controller.signal)
   })
 
@@ -655,10 +768,7 @@ describe('MCP adapter/client', () => {
       readOnly: true,
       exclusive: false,
     })
-    const registry = new ToolRegistry()
-    registry.register(adapter)
-
-    const result = await registry.executeResult('mcp_alpha_search', { q: 'x' })
+    const result = await adapter.execute({ q: 'x' })
 
     expect(result.isError).toBe(true)
     expect(result.metadata).toMatchObject({
@@ -683,10 +793,7 @@ describe('MCP adapter/client', () => {
       parametersSchema: { type: 'object', properties: {}, required: [] },
       connection: conn,
     })
-    const registry = new ToolRegistry()
-    registry.register(adapter)
-
-    const result = await registry.executeResult(adapter.name, { q: 'x' })
+    const result = await adapter.execute({ q: 'x' })
 
     expect(result.modelContent).toContain('instruction_policy: data_only')
     expect(result.modelContent).toContain(injection)
@@ -776,10 +883,11 @@ describe('MCP adapter/client', () => {
     ])
     expect(factoryCommands).toEqual(['/snapshot/mcp-server', null])
 
-    const registry = new ToolRegistry()
-    client.registerTools(registry)
-    expect(registry.has('mcp_alpha_search')).toBe(true)
-    expect(await registry.execute('mcp_alpha_search', { q: 'x' })).toContain(
+    const search = client
+      .getTools()
+      .find((tool) => tool.name === 'mcp_alpha_search')
+    expect(search).toBeDefined()
+    expect((await search!.execute({ q: 'x' })).rawContent).toContain(
       'ok:search',
     )
 
@@ -921,7 +1029,6 @@ describe('MCP adapter/client', () => {
   })
 
   it('stores the exact large MCP result as an artifact while bounding model content', async () => {
-    const root = tmp('emperor-mcp-large-result-')
     const full = 'large-result-'.repeat(2_000)
     const connection = new FakeConnection('alpha', [], { output: full })
     await connection.connect()
@@ -933,27 +1040,11 @@ describe('MCP adapter/client', () => {
       connection,
       maxResultChars: 1_000,
     })
-    const registry = new ToolRegistry(root)
-    registry.register(adapter)
+    const result = await adapter.execute({}, { parentCallId: 'call_large_mcp' })
 
-    const result = await registry.executeResult(
-      adapter.name,
-      {},
-      {
-        root,
-        turnId: 'turn_large_mcp',
-        parentCallId: 'call_large_mcp',
-      },
-    )
-
+    // The envelope is bounded here; the kernel spills oversized results to disk.
     expect(result.modelContent.length).toBeLessThanOrEqual(1_000)
     expect(result.modelContent).toContain('truncated: true')
-    const ref = String(result.metadata.full_output_ref ?? '')
-    expect(ref).toMatch(
-      new RegExp(
-        `^${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/memory/tool-results/[a-f0-9]+\\.txt$`,
-      ),
-    )
-    expect(readFileSync(ref, 'utf8')).toBe(`${full}:dump:{}`)
+    expect(result.rawContent).toBe(`${full}:dump:{}`)
   })
 })

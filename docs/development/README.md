@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-08-12<br>
+> 最后核验：2026-09-22<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`
 
 这里提供源码开发的最短入口，并维护公共的工程约束、关键目录和禁止提交项；系统边界先读[架构总览](../architecture/overview.md)。
@@ -51,21 +51,29 @@ npm --prefix desktop run package:verify
 
 ## 修改从哪里开始
 
-| 目标                   | 入口                                                                       |
-| ---------------------- | -------------------------------------------------------------------------- |
-| CoreApi 或服务         | `packages/core/src/api/core-api.ts`、`packages/core/src/api/services/`     |
-| Agent loop / runner    | `packages/core/src/agent/loop.ts`、`packages/core/src/agent/runner.ts`     |
-| Provider / 模型        | `packages/core/src/providers/`、`packages/core/src/config/model-config.ts` |
-| 工具                   | `packages/core/src/tools/`、`packages/core/src/agent/loop.ts`              |
-| Ask / Plan / 权限      | `packages/core/src/control/`、`plans/`、`permissions/`                     |
-| Session / Memory       | `packages/core/src/sessions/`、`memory/`、`projects/`                      |
-| Goal                   | `packages/core/src/goals/`、`packages/core/src/agent/goal-*`               |
-| Scheduler / Team / MCP | `packages/core/src/<domain>/` 与对应 API service                           |
-| Snapshot / Git / Files | `packages/core/src/workspace/`                                             |
-| 用户 Terminal          | `packages/core/src/workspace/terminal.ts`、`desktop/src/main/terminal-*`   |
-| Electron host / IPC    | `desktop/src/main/`、`desktop/src/preload/`                                |
-| Headless / ACP stdio   | `packages/core/src/acp/`、`scripts/build-acp.mjs`                          |
-| Vue UI                 | `desktop/src/renderer/src/`                                                |
+| 目标                     | 入口                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| 内核组合根               | `packages/core/src/harness/host/host.ts`、`harness/host/services.ts`                             |
+| CoreApi 或服务           | `packages/core/src/api/core-api.ts`、`api/operations.ts`、`api/services/`                        |
+| Agent loop / middleware  | `packages/core/src/harness/agent/`                                                               |
+| Session log              | `packages/core/src/session-log/`                                                                 |
+| Provider / 模型          | `packages/core/src/llm/catalog.ts`、`llm/route.ts`、`llm/adapters/`、`config/model-config.ts`    |
+| 工具                     | `packages/core/src/harness/tools/builtin/`、`harness/tools/registry.ts`                          |
+| 权限 / Plan / 问题       | `packages/core/src/harness/sandbox/`、`harness/approval/`、`harness/plan/`、`harness/questions/` |
+| 压缩                     | `packages/core/src/harness/compaction/`                                                          |
+| Goal                     | `packages/core/src/harness/goal/`、`api/services/goal-service.ts`                                |
+| 子代理 / 后台任务        | `packages/core/src/harness/subagent/`、`harness/jobs/`                                           |
+| Hooks                    | `packages/core/src/harness/hooks/`、`api/services/hooks-service.ts`                              |
+| 提示词 / 工作区说明      | `packages/core/src/harness/prompt/`、`templates/agent/persona.md`                                |
+| Runtime event 投影       | `packages/core/src/harness/projection/`                                                          |
+| Session 索引 / Memory    | `packages/core/src/sessions/`、`memory/`、`projects/`、`harness/memory/memory.ts`                |
+| Scheduler / MCP / Skills | `packages/core/src/scheduler/`、`mcp/`、`skills/`、`plugins/` 与对应 API service                 |
+| Snapshot / Git / Files   | `packages/core/src/workspace/`                                                                   |
+| 用户 Terminal            | `packages/core/src/workspace/terminal.ts`、`desktop/src/main/terminal-*`                         |
+| Electron host / IPC      | `desktop/src/main/`、`desktop/src/preload/`                                                      |
+| Headless / ACP stdio     | `packages/core/src/acp/`、`scripts/build-acp.mjs`                                                |
+| Vue UI                   | `desktop/src/renderer/src/`                                                                      |
+| 设置弹窗                 | `desktop/src/renderer/src/components/settings/`（分区、`ui/` 原语、`settingsHeader.ts`）         |
 
 跨层改动请使用[扩展 Emperor Agent](extending-emperor.md)的同步清单，不要只修改最先报错的一层。
 
@@ -73,7 +81,7 @@ Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/co
 
 ## 数据与测试隔离
 
-运行态数据默认写入 Emperor Home（`~/.emperor`）。测试必须使用临时 `HOME` 和临时 `stateRoot`，不能读取、迁移或覆盖开发者的真实模型配置、会话、Skills、受管环境、记忆和凭证。Build workspace 也不能承载 session、附件或 Goal 私有数据。
+运行态数据默认写入 Emperor Home（`~/.emperor`）。测试必须使用临时 `HOME` 和临时 `stateRoot`，不能读取、迁移或覆盖开发者的真实模型配置、会话、Skills、受管环境、记忆和凭证。Build workspace 也不能承载 session 或附件私有数据。内核测试可复用 `packages/core/src/harness/testing.ts` 中的脚本化模型适配器与内存 session store。
 
 不要提交 `memory/`、`sessions/`、`.emperor/`、`.team/`、`private-docs/`、本地配置、`.env`、`node_modules`、构建目录、screenshots 或 test results；完整规则以仓库 `.gitignore` 为准。
 

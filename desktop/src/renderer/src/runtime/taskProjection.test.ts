@@ -3,159 +3,107 @@ import {
   createTaskProjectionState,
   reduceTaskProjection,
   replayTaskProjection,
-  taskForPlanStep,
-  type TaskProjectionState,
+  type TaskRuntimeEvent,
 } from './taskProjection'
 
+function jobEvent(
+  event: TaskRuntimeEvent['event'],
+  seq: number,
+  status: string,
+  label = 'npm test',
+): TaskRuntimeEvent {
+  return {
+    event,
+    seq,
+    session_id: 'session_1',
+    task: {
+      id: 'job_1',
+      kind: 'bash',
+      label,
+      command: 'npm test',
+      status,
+      session_id: 'session_1',
+    },
+  } as TaskRuntimeEvent
+}
+
+function workflowEvent(
+  event: TaskRuntimeEvent['event'],
+  seq: number,
+  status: string,
+  rounds: number,
+): TaskRuntimeEvent {
+  return {
+    event,
+    seq,
+    session_id: 'session_1',
+    task: {
+      id: 'run_1',
+      kind: 'workflow',
+      label: 'audit',
+      status,
+      rounds,
+      workflow_tool: 'workflow',
+      session_id: 'session_1',
+    },
+  } as TaskRuntimeEvent
+}
+
 describe('task projection', () => {
-  it('creates and completes a task from replayed events', () => {
+  it('tracks a workflow run through started, progress, and finished events', () => {
+    const projection = replayTaskProjection([
+      workflowEvent('workflow_finished', 64, 'error', 2),
+      workflowEvent('workflow_started', 16, 'running', 0),
+      workflowEvent('workflow_progress', 32, 'running', 1),
+      workflowEvent('workflow_progress', 48, 'running', 2),
+    ])
+    expect(projection.tasks).toEqual([
+      expect.objectContaining({
+        id: 'run_1',
+        kind: 'workflow',
+        status: 'error',
+        rounds: 2,
+      }),
+    ])
+  })
+
+  it('creates and completes a job from task events and keeps the started label', () => {
     let projection = createTaskProjectionState()
     projection = reduceTaskProjection(projection, {
       type: 'task_event_received',
-      event: {
-        event: 'task_started',
-        seq: 1,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'running',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-          startedAt: 1,
-        },
-      },
+      event: jobEvent('task_started', 16, 'running', 'Run the tests'),
     }).state
     projection = reduceTaskProjection(projection, {
       type: 'task_event_received',
-      event: {
-        event: 'task_done',
-        seq: 2,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'completed',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-          startedAt: 1,
-          endedAt: 2,
-        },
-      },
+      event: jobEvent('task_done', 32, 'completed'),
     }).state
 
     expect(projection.tasks).toHaveLength(1)
-    expect(projection.tasks[0]?.status).toBe('completed')
+    expect(projection.tasks[0]).toMatchObject({
+      status: 'completed',
+      label: 'Run the tests',
+    })
   })
 
-  it('locates a task by plan step metadata', () => {
-    const projection: TaskProjectionState = {
-      tasks: [
-        {
-          id: 'planstep_1',
-          kind: 'plan_step',
-          status: 'running',
-          title: 'Edit runner',
-          source: 'plan_step',
-          metadata: {
-            plan_id: 'plan_1',
-            plan_step_id: 'step_1',
-            sequence: 1,
-          },
-        },
-      ],
-      lastSeqByTask: {},
-    }
-
-    expect(taskForPlanStep(projection.tasks, 'plan_1', 'step_1')?.id).toBe(
-      'planstep_1',
-    )
-    expect(taskForPlanStep(projection.tasks, 'plan_1', 'step_2')).toBeNull()
-  })
-
-  it('sorts replay and never regresses a terminal task on duplicates or stale progress', () => {
-    const done = {
-      event: 'task_done' as const,
-      seq: 3,
-      task: {
-        id: 'task_1',
-        kind: 'subagent' as const,
-        status: 'completed' as const,
-        title: 'inspect',
-        source: 'dispatch_subagent',
-        endedAt: 3,
-      },
-    }
-    const state = replayTaskProjection([
-      done,
-      {
-        event: 'task_progress',
-        seq: 2,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'running',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-        },
-        progress: { label: 'old' },
-      },
-      {
-        event: 'task_started',
-        seq: 1,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'running',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-          startedAt: 1,
-        },
-      },
-      done,
+  it('sorts replay and never regresses a terminal task on duplicates', () => {
+    const projection = replayTaskProjection([
+      jobEvent('task_error', 32, 'failed'),
+      jobEvent('task_started', 16, 'running'),
+      jobEvent('task_error', 32, 'failed'),
     ])
-
-    expect(state.tasks).toEqual([
-      expect.objectContaining({
-        id: 'task_1',
-        status: 'completed',
-        startedAt: 1,
-        endedAt: 3,
-      }),
-    ])
-    expect(state.lastSeqByTask).toEqual({ task_1: 3 })
+    expect(projection.tasks[0]?.status).toBe('failed')
+    expect(projection.lastSeqByTask.job_1).toBe(32)
   })
 
   it('keeps the first terminal outcome when a conflicting terminal arrives late', () => {
-    const state = replayTaskProjection([
-      {
-        event: 'task_done',
-        seq: 3,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'completed',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-          endedAt: 3,
-        },
-      },
-      {
-        event: 'task_error',
-        seq: 4,
-        task: {
-          id: 'task_1',
-          kind: 'subagent',
-          status: 'failed',
-          title: 'inspect',
-          source: 'dispatch_subagent',
-          endedAt: 4,
-        },
-      },
+    let projection = replayTaskProjection([
+      jobEvent('task_started', 16, 'running'),
+      jobEvent('task_cancelled', 32, 'killed'),
     ])
-
-    expect(state.tasks[0]).toMatchObject({
-      status: 'completed',
-      endedAt: 3,
-    })
-    expect(state.lastSeqByTask.task_1).toBe(4)
+    projection = reduceTaskProjection(projection, {
+      type: 'task_event_received',
+      event: jobEvent('task_done', 48, 'completed'),
+    }).state
+    expect(projection.tasks[0]?.status).toBe('killed')
   })
 })

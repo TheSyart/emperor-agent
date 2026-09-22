@@ -11,9 +11,24 @@ describe('Core production import graph', () => {
     const graphs = buildImportGraphs(SRC_ROOT)
 
     expect(cyclesIn(graphs.runtime).map(formatCycle)).toEqual([])
-    expect(cyclesIn(graphs.all).map(formatCycle)).toEqual([])
+    // The harness kernel's collaborators (middleware, prompt assembler, tool
+    // registry/definitions) take the `Agent` class as a type, and agent.ts
+    // composes them at runtime. That type-only strongly connected component
+    // around harness/agent/agent.ts is by design; every other type cycle fails.
+    expect(
+      cyclesIn(graphs.all)
+        .map(formatCycle)
+        .filter((cycle) => !isHarnessAgentTypeCycle(cycle)),
+    ).toEqual([])
   })
 })
+
+function isHarnessAgentTypeCycle(cycle: string[]): boolean {
+  return (
+    cycle.includes('harness/agent/agent.ts') &&
+    cycle.every((file) => file.startsWith('harness/'))
+  )
+}
 
 interface ImportGraphs {
   runtime: Map<string, Set<string>>

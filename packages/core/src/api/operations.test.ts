@@ -1,6 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { SessionEntry } from '../sessions/store'
-import { CoreUnavailableError } from '../runtime/lifecycle'
 import type { CoreApi } from './core-api'
 import {
   CORE_OPERATION_REGISTRY,
@@ -18,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(165)
+    expect(coreOperationKeys()).toHaveLength(156)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -57,118 +56,75 @@ describe('Core operation registry', () => {
         'terminals.write',
         'terminals.resize',
         'terminals.close',
-        'projectProcesses.readOutput',
-        'projectProcesses.stop',
-        'projectProcesses.restart',
         'references.resolve',
+        'sessions.history',
+        'sessions.event',
+        'sessions.lineage',
+        'sessions.children',
+        'sessions.watch',
       ]),
     )
+    for (const retired of [
+      'team.get',
+      'plans.list',
+      'fileCheckpoints.list',
+      'projectProcesses.stop',
+      'goals.replace',
+    ])
+      expect(isCoreOperationKey(retired)).toBe(false)
   })
 
-  it('validates the complete project runtime and reference operation boundary', () => {
+  it('validates the reference operation boundary', () => {
     const registry = CORE_OPERATION_REGISTRY as unknown as Record<
       string,
       { args: { parse(input: unknown): unknown } }
     >
-
-    expect(
-      registry['projectProcesses.readOutput']?.args.parse([
-        { sessionId: 'session-1', processId: 'process-1', afterSeq: 0 },
-      ]),
-    ).toEqual([{ sessionId: 'session-1', processId: 'process-1', afterSeq: 0 }])
-    expect(
-      registry['projectProcesses.stop']?.args.parse([
-        { sessionId: 'session-1', processId: 'process-1', expectedRevision: 2 },
-      ]),
-    ).toEqual([
-      { sessionId: 'session-1', processId: 'process-1', expectedRevision: 2 },
-    ])
-    expect(
-      registry['projectProcesses.restart']?.args.parse([
-        {
-          sessionId: 'session-1',
-          processId: 'process-1',
-          expectedRevision: 2,
-          confirmed: true,
-          invocationId: 'restart-1',
-        },
-      ]),
-    ).toEqual([
-      {
-        sessionId: 'session-1',
-        processId: 'process-1',
-        expectedRevision: 2,
-        confirmed: true,
-        invocationId: 'restart-1',
-      },
-    ])
-    expect(
-      registry['references.resolve']?.args.parse([
-        {
-          sessionId: 'session-1',
-          sourceMessageId: 'message-1',
-          href: 'docs/guide.md#L4',
-          label: 'Guide',
-        },
-      ]),
-    ).toEqual([
-      {
-        sessionId: 'session-1',
-        sourceMessageId: 'message-1',
-        href: 'docs/guide.md#L4',
-        label: 'Guide',
-      },
-    ])
-
-    expect(() =>
-      registry['projectProcesses.readOutput']?.args.parse([
-        { sessionId: 'session-1', processId: 'process-1', afterSeq: -1 },
-      ]),
-    ).toThrow()
-    expect(() =>
-      registry['projectProcesses.restart']?.args.parse([
-        {
-          sessionId: 'session-1',
-          processId: 'process-1',
-          expectedRevision: 2,
-          confirmed: false,
-          invocationId: 'restart-1',
-        },
-      ]),
-    ).toThrow()
+    const input = {
+      sessionId: 'session-1',
+      sourceMessageId: 'message-1',
+      href: 'docs/guide.md#L4',
+      label: 'Guide',
+    }
+    expect(registry['references.resolve']?.args.parse([input])).toEqual([input])
     expect(() =>
       registry['references.resolve']?.args.parse([
-        {
-          sessionId: 'session-1',
-          sourceMessageId: 'message-1',
-          href: 'docs/guide.md',
-          label: 'Guide',
-          absolutePath: '/forged/path',
-        },
+        { ...input, absolutePath: '/forged/path' },
       ]),
     ).toThrow()
   })
 
-  it('keeps Plan outside the public permission selector and validates Goal replacement input', () => {
+  it('accepts only the three permission presets and dsh goal start input', () => {
     expect(
       CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse([
-        'accept_edits',
+        'workspace-write',
       ]),
-    ).toEqual(['accept_edits'])
-    expect(() =>
-      CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse(['plan']),
-    ).toThrow()
-
+    ).toEqual(['workspace-write'])
     expect(
-      CORE_OPERATION_REGISTRY['goals.replace'].args.parse([
-        { goalId: 'goal_1', outcome: '新的结果', sessionId: 'session_1' },
+      CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse([
+        'read-only',
+        'session-1',
       ]),
-    ).toEqual([
-      { goalId: 'goal_1', outcome: '新的结果', sessionId: 'session_1' },
-    ])
+    ).toEqual(['read-only', 'session-1'])
+    for (const legacy of ['plan', 'accept_edits', 'full_access'])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['control.setPermissionMode'].args.parse([
+          legacy,
+        ]),
+      ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['control.setMode'].args.parse(['plan']),
+    ).toEqual(['plan'])
     expect(() =>
-      CORE_OPERATION_REGISTRY['goals.replace'].args.parse([
-        { goalId: 'goal_1', outcome: '   ', sessionId: 'session_1' },
+      CORE_OPERATION_REGISTRY['control.setMode'].args.parse(['auto']),
+    ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['goals.start'].args.parse([
+        { objective: '完成迁移', sessionId: 'session_1', maxRounds: 8 },
+      ]),
+    ).toEqual([{ objective: '完成迁移', sessionId: 'session_1', maxRounds: 8 }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['goals.start'].args.parse([
+        { outcome: '旧字段', sessionId: 'session_1' },
       ]),
     ).toThrow()
   })
@@ -213,22 +169,66 @@ describe('Core operation registry', () => {
     ).toThrow()
 
     expect(
-      CORE_OPERATION_REGISTRY['team.wakeMember'].args.parse([
-        'alice',
-        { purpose: 'recover', recovery: 'retry' },
+      CORE_OPERATION_REGISTRY['sessions.history'].args.parse([
+        { sessionId: 'sub-1', beforeSeq: 10, maxMessages: 20 },
       ]),
-    ).toEqual(['alice', { purpose: 'recover', recovery: 'retry' }])
+    ).toEqual([{ sessionId: 'sub-1', beforeSeq: 10, maxMessages: 20 }])
+    expect(
+      CORE_OPERATION_REGISTRY['sessions.history'].args.parse([
+        { sessionId: 's1' },
+      ]),
+    ).toEqual([{ sessionId: 's1' }])
+    for (const invalid of [
+      { sessionId: '../etc' },
+      { sessionId: 's1', beforeSeq: -1 },
+      { sessionId: 's1', maxMessages: 0 },
+      { sessionId: 's1', extra: true },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['sessions.history'].args.parse([invalid]),
+      ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['sessions.event'].args.parse([
+        { sessionId: 'sub-1', seq: 3 },
+      ]),
+    ).toEqual([{ sessionId: 'sub-1', seq: 3 }])
+    for (const invalid of [
+      { sessionId: 's1' },
+      { sessionId: 's1', seq: -1 },
+      { sessionId: '../x', seq: 1 },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['sessions.event'].args.parse([invalid]),
+      ).toThrow()
+    expect(
+      CORE_OPERATION_REGISTRY['sessions.lineage'].args.parse([
+        { sessionId: 's1' },
+      ]),
+    ).toEqual([{ sessionId: 's1' }])
     expect(() =>
-      CORE_OPERATION_REGISTRY['team.wakeMember'].args.parse([
-        'alice',
-        { recovery: 'force' },
-      ]),
+      CORE_OPERATION_REGISTRY['sessions.children'].args.parse(['s1']),
     ).toThrow()
     expect(
-      CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([
-        { sessionId: 's1', afterSeq: 0, format: 'envelope_v2' },
+      CORE_OPERATION_REGISTRY['sessions.watch'].args.parse([
+        { sessionIds: ['s1', 'sub-2'] },
       ]),
-    ).toEqual([{ sessionId: 's1', afterSeq: 0, format: 'envelope_v2' }])
+    ).toEqual([{ sessionIds: ['s1', 'sub-2'] }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['sessions.watch'].args.parse([
+        { sessionIds: Array.from({ length: 65 }, (_, i) => `s${i}`) },
+      ]),
+    ).toThrow()
+
+    expect(
+      CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([
+        { sessionId: 's1', afterSeq: 0, format: 'projection' },
+      ]),
+    ).toEqual([{ sessionId: 's1', afterSeq: 0, format: 'projection' }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([
+        { format: 'envelope_v2' },
+      ]),
+    ).toThrow()
     expect(() =>
       CORE_OPERATION_REGISTRY['runtime.replay'].args.parse([{ format: 'raw' }]),
     ).toThrow()
@@ -296,29 +296,6 @@ describe('Core operation registry', () => {
       CORE_OPERATION_REGISTRY['scheduler.updateJob'].args.parse([
         'job-1',
         { misfirePolicy: 'all' },
-      ]),
-    ).toThrow()
-    const gitRewind = {
-      sessionId: 'session-one',
-      checkpointId: 'fcp_0123456789abcdef01234567',
-      confirmed: true as const,
-      confirmedGitRisk: true as const,
-      previewRevision: 'a'.repeat(64),
-      dirtyStrategy: 'abort' as const,
-    }
-    expect(
-      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
-        gitRewind,
-      ]),
-    ).toEqual([gitRewind])
-    expect(() =>
-      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
-        { ...gitRewind, confirmedGitRisk: false },
-      ]),
-    ).toThrow()
-    expect(() =>
-      CORE_OPERATION_REGISTRY['fileCheckpoints.rewindGit'].args.parse([
-        { ...gitRewind, previewRevision: 'project-controlled-ref' },
       ]),
     ).toThrow()
   })
@@ -406,7 +383,7 @@ describe('Core operation registry', () => {
       ]),
     ).toThrow()
     expect(() =>
-      CORE_OPERATION_REGISTRY['skills.package'].args.parse([
+      CORE_OPERATION_REGISTRY['skills.copyToUser'].args.parse([
         { name: 'valid', output: '/tmp/untrusted' },
       ]),
     ).toThrow()
@@ -421,36 +398,20 @@ describe('Core operation registry', () => {
       ]),
     ).toThrow()
     expect(() =>
-      CORE_OPERATION_REGISTRY['skills.previewInstall'].args.parse([
-        { source: { kind: 'url', url: 'http://insecure.example/a.zip' } },
-      ]),
-    ).toThrow()
-    expect(
-      CORE_OPERATION_REGISTRY['fileCheckpoints.rewind'].args.parse([
+      CORE_OPERATION_REGISTRY['skills.import'].args.parse([
         {
-          sessionId: 'session-one',
-          checkpointId: 'fcp_0123456789abcdef01234567',
-          confirmed: true,
-        },
-      ]),
-    ).toHaveLength(1)
-    expect(() =>
-      CORE_OPERATION_REGISTRY['fileCheckpoints.rewind'].args.parse([
-        {
-          sessionId: 'session-one',
-          checkpointId: 'fcp_0123456789abcdef01234567',
-          confirmed: false,
+          source: { kind: 'url', url: 'http://insecure.example/a.zip' },
+          scope: 'user',
         },
       ]),
     ).toThrow()
     expect(() =>
-      CORE_OPERATION_REGISTRY['fileCheckpoints.preview'].args.parse([
-        {
-          sessionId: 'session-one',
-          checkpointId: 'fcp_0123456789abcdef01234567',
-          workspaceRoot: '/renderer-controlled',
-        },
+      CORE_OPERATION_REGISTRY['skills.import'].args.parse([
+        { source: { kind: 'folder', path: '/tmp/x' }, scope: 'global' },
       ]),
+    ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['skills.validate'].args.parse([{}]),
     ).toThrow()
   })
 
@@ -468,28 +429,77 @@ describe('Core operation registry', () => {
         { jobId: 'job_1', cursor: 0, limit: 50 },
       ]),
     ).toEqual([{ jobId: 'job_1', cursor: 0, limit: 50 }])
+    for (const source of [
+      { kind: 'content', content: '---\nname: a\n---\n', name: 'a' },
+      { kind: 'folder', path: '/tmp/skill' },
+      { kind: 'zip', path: '/tmp/skill.zip' },
+      { kind: 'url', url: 'https://github.com/o/r/tree/main/skills/x' },
+    ])
+      expect(
+        CORE_OPERATION_REGISTRY['skills.import'].args.parse([
+          { source, scope: 'project', sessionId: 's1', overwrite: true },
+        ]),
+      ).toEqual([
+        { source, scope: 'project', sessionId: 's1', overwrite: true },
+      ])
+    expect(CORE_OPERATION_REGISTRY['skills.list'].args.parse([])).toEqual([])
     expect(
-      CORE_OPERATION_REGISTRY['skills.previewInstall'].args.parse([
-        { source: { kind: 'local', path: '/tmp/skill.zip' } },
+      CORE_OPERATION_REGISTRY['skills.list'].args.parse([{ sessionId: 's1' }]),
+    ).toEqual([{ sessionId: 's1' }])
+    expect(
+      CORE_OPERATION_REGISTRY['skills.delete'].args.parse([
+        'my-skill',
+        { sessionId: 's1', scope: 'project' },
       ]),
-    ).toEqual([{ source: { kind: 'local', path: '/tmp/skill.zip' } }])
+    ).toEqual(['my-skill', { sessionId: 's1', scope: 'project' }])
     expect(
-      CORE_OPERATION_REGISTRY['skills.confirmInstall'].args.parse([
-        {
-          previewId: `preview_${'a'.repeat(24)}`,
-          digest: 'b'.repeat(64),
-          candidateId: `candidate_${'c'.repeat(20)}`,
-          permissionConfirmed: true,
-        },
+      CORE_OPERATION_REGISTRY['skills.copyToUser'].args.parse([
+        { name: 'skill-creator', overwrite: true },
+      ]),
+    ).toEqual([{ name: 'skill-creator', overwrite: true }])
+    for (const retired of [
+      'skills.previewInstall',
+      'skills.confirmInstall',
+      'skills.package',
+    ])
+      expect(Object.keys(CORE_OPERATION_REGISTRY)).not.toContain(retired)
+  })
+
+  it('validates the named MCP server operations', () => {
+    const registry = CORE_OPERATION_REGISTRY
+    expect(
+      registry['mcp.importServers'].args.parse([
+        { raw: '{"mcpServers":{}}', overwrite: ['aihot'], dryRun: true },
       ]),
     ).toEqual([
-      {
-        previewId: `preview_${'a'.repeat(24)}`,
-        digest: 'b'.repeat(64),
-        candidateId: `candidate_${'c'.repeat(20)}`,
-        permissionConfirmed: true,
-      },
+      { raw: '{"mcpServers":{}}', overwrite: ['aihot'], dryRun: true },
     ])
+    expect(
+      registry['mcp.importServers'].args.parse([
+        { raw: { mcpServers: { a: { url: 'https://a.test/mcp' } } } },
+      ]),
+    ).toEqual([{ raw: { mcpServers: { a: { url: 'https://a.test/mcp' } } } }])
+    expect(() =>
+      registry['mcp.importServers'].args.parse([{ raw: 42 }]),
+    ).toThrow()
+    expect(() =>
+      registry['mcp.importServers'].args.parse([
+        { raw: '{}', command: 'echo pwned' },
+      ]),
+    ).toThrow()
+    expect(
+      registry['mcp.setServerEnabled'].args.parse([
+        { name: ' aihot ', enabled: false },
+      ]),
+    ).toEqual([{ name: 'aihot', enabled: false }])
+    expect(() =>
+      registry['mcp.setServerEnabled'].args.parse([
+        { name: 'aihot', enabled: 'false' },
+      ]),
+    ).toThrow()
+    expect(() =>
+      registry['mcp.removeServer'].args.parse([{ name: '' }]),
+    ).toThrow()
   })
 
   it('preserves forward-compatible MCP fields while validating known fields', () => {
@@ -556,28 +566,6 @@ describe('Core operation registry', () => {
       invokeCoreOperation(api, 'sessions.rename', ['s1', { title: 'Renamed' }]),
     ).resolves.toEqual({ id: 's1', title: 'Renamed' })
     expect(rename).toHaveBeenCalledWith('s1', { title: 'Renamed' })
-  })
-
-  it('rejects every operation before lifecycle readiness without invoking the domain API', async () => {
-    const rename = vi.fn()
-    const api = {
-      loop: {
-        lifecycleSupervisor: {
-          assertReady: () => {
-            throw new CoreUnavailableError('starting')
-          },
-        },
-      },
-      sessions: { rename },
-    } as unknown as CoreApi
-
-    await expect(
-      invokeCoreOperation(api, 'sessions.rename', ['s1', { title: 'Blocked' }]),
-    ).rejects.toMatchObject({
-      code: 'core_unavailable',
-      message: 'Core runtime is not ready (starting).',
-    })
-    expect(rename).not.toHaveBeenCalled()
   })
 
   it('maps schema failures to a safe operation argument error', async () => {

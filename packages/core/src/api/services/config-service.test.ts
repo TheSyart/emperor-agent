@@ -135,7 +135,7 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
           remote: {
             transport: 'sse',
             enabled: true,
-            url: 'https://secret-endpoint.example.test',
+            url: 'https://secret-endpoint.example.test/sse?key=literal-url-secret',
             headers: { Authorization: 'literal-secret-token' },
           },
         },
@@ -151,9 +151,10 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
 
     const editor = await service.getMcpConfig()
     expect(editor.servers.remote).toMatchObject({
-      url: '[REDACTED]',
+      url: 'https://secret-endpoint.example.test/sse?key=[REDACTED]',
       headers: { Authorization: '[REDACTED]' },
     })
+    expect(JSON.stringify(editor)).not.toContain('literal-url-secret')
     editor.servers.remote!.enabled = false
     const saved = await service.saveMcpConfig(
       editor as unknown as Record<string, unknown>,
@@ -161,15 +162,148 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
 
     expect(saved.servers.remote).toMatchObject({
       enabled: false,
-      url: '[REDACTED]',
+      url: 'https://secret-endpoint.example.test/sse?key=[REDACTED]',
       headers: { Authorization: '[REDACTED]' },
     })
     const persisted = JSON.parse(readFileSync(path, 'utf8'))
     expect(persisted.servers.remote).toMatchObject({
       enabled: false,
-      url: 'https://secret-endpoint.example.test',
+      url: 'https://secret-endpoint.example.test/sse?key=literal-url-secret',
       headers: { Authorization: 'literal-secret-token' },
     })
     expect(reloads).toBe(1)
+  })
+
+  it('imports pasted servers by name, reporting conflicts and reloading once', async () => {
+    const root = tmp('emperor-config-mcp-import-')
+    const path = join(root, 'mcp_config.json')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        defaults: { read_only: true },
+        servers: {
+          docs: {
+            transport: 'stdio',
+            command: 'docs-mcp',
+            tool_overrides: { search: { read_only: true } },
+          },
+        },
+      }),
+      'utf8',
+    )
+    let reloads = 0
+    const service = new CoreConfigService(root, {
+      reloadMcp: () => {
+        reloads += 1
+      },
+    })
+    const raw = {
+      mcpServers: {
+        aihot: {
+          type: 'http',
+          url: 'https://aihot.news/api/mcp?aihot_actor=actor-secret',
+        },
+        docs: { command: 'docs-mcp-v2' },
+      },
+    }
+
+    const preview = await service.importMcpServers({ raw, dryRun: true })
+    expect(preview).toMatchObject({
+      dryRun: true,
+      added: ['aihot'],
+      skipped: ['docs'],
+      conflicts: ['docs'],
+    })
+    expect(preview.servers).toEqual([
+      {
+        name: 'aihot',
+        transport: 'http',
+        target: 'https://aihot.news/api/mcp?aihot_actor=[REDACTED]',
+        enabled: true,
+        action: 'add',
+        conflict: false,
+      },
+      {
+        name: 'docs',
+        transport: 'stdio',
+        target: 'docs-mcp-v2',
+        enabled: true,
+        action: 'skip',
+        conflict: true,
+      },
+    ])
+    expect(reloads).toBe(0)
+    expect(JSON.parse(readFileSync(path, 'utf8')).servers.aihot).toBeUndefined()
+
+    const imported = await service.importMcpServers({
+      raw: JSON.stringify(raw),
+    })
+    expect(imported).toMatchObject({ added: ['aihot'], skipped: ['docs'] })
+    expect(imported.warnings.join('\n')).toContain('未覆盖')
+    expect(imported.config.servers.aihot?.url).toBe(
+      'https://aihot.news/api/mcp?aihot_actor=[REDACTED]',
+    )
+    expect(JSON.stringify(imported)).not.toContain('actor-secret')
+    expect(reloads).toBe(1)
+
+    const again = await service.importMcpServers({ raw, overwrite: ['docs'] })
+    expect(again).toMatchObject({ added: [], updated: ['docs'] })
+    expect(again.warnings.join('\n')).toContain('配置相同')
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.defaults).toEqual({ read_only: true })
+    expect(persisted.servers.aihot).toEqual({
+      transport: 'http',
+      enabled: true,
+      url: 'https://aihot.news/api/mcp?aihot_actor=actor-secret',
+    })
+    expect(persisted.servers.docs).toEqual({
+      transport: 'stdio',
+      enabled: true,
+      command: 'docs-mcp-v2',
+      tool_overrides: { search: { read_only: true } },
+    })
+    expect(reloads).toBe(2)
+  })
+
+  it('enables, disables, and removes servers by name', async () => {
+    const root = tmp('emperor-config-mcp-named-')
+    const path = join(root, 'mcp_config.json')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        servers: {
+          alpha: { command: 'alpha', disabled: true },
+          beta: { url: 'https://beta.test/mcp' },
+        },
+      }),
+      'utf8',
+    )
+    let reloads = 0
+    const service = new CoreConfigService(root, {
+      reloadMcp: () => {
+        reloads += 1
+      },
+    })
+
+    await expect(
+      service.setMcpServerEnabled({ name: 'alpha', enabled: true }),
+    ).resolves.toMatchObject({ name: 'alpha', enabled: true, changed: true })
+    await expect(
+      service.setMcpServerEnabled({ name: 'alpha', enabled: true }),
+    ).resolves.toMatchObject({ changed: false })
+    expect(JSON.parse(readFileSync(path, 'utf8')).servers.alpha).toEqual({
+      command: 'alpha',
+      enabled: true,
+    })
+    const removed = await service.removeMcpServer({ name: 'beta' })
+    expect(removed.removed).toBe('beta')
+    expect(Object.keys(removed.config.servers)).toEqual(['alpha'])
+    await expect(
+      service.removeMcpServer({ name: 'missing' }),
+    ).rejects.toMatchObject({ code: 'mcp_server_not_found' })
+    await expect(
+      service.setMcpServerEnabled({ name: 'missing', enabled: false }),
+    ).rejects.toMatchObject({ code: 'mcp_server_not_found' })
+    expect(reloads).toBe(2)
   })
 })

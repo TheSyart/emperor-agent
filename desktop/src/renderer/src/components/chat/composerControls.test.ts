@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   composerModeOptions,
+  composerPresetOptions,
   composerSendDisabled,
   composerStopPresentation,
   currentComposerPermission,
@@ -12,7 +13,7 @@ import {
 describe('composer control model', () => {
   it('renders queue and stop actions while busy; interjection lives in the queue tray', () => {
     const source = readFileSync(
-      fileURLToPath(new URL('./Composer.vue', import.meta.url)),
+      fileURLToPath(new URL('../composer/ComposerCard.vue', import.meta.url)),
       'utf8',
     )
     expect(source).toContain("submit('queue')")
@@ -28,7 +29,7 @@ describe('composer control model', () => {
     expect(source).toContain(':disabled="goalCaptureStarting"')
     expect(source).not.toContain('等待当前任务结束后再添加')
     const queueTray = readFileSync(
-      fileURLToPath(new URL('./QueueTray.vue', import.meta.url)),
+      fileURLToPath(new URL('../composer/QueueDock.vue', import.meta.url)),
       'utf8',
     )
     expect(queueTray).toContain('编辑消息')
@@ -98,33 +99,33 @@ describe('composer control model', () => {
     ).toBe(false)
   })
 
-  it('exposes smart_auto as the middle permission mode', () => {
+  it('exposes the three Core permission presets', () => {
     expect(composerModeOptions.map((option) => option.value)).toEqual([
-      'ask_before_edit',
-      'smart_auto',
-      'full_access',
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
     ])
-    expect(currentComposerMode('smart_auto')).toMatchObject({
-      value: 'smart_auto',
-      short: '智能',
+    expect(currentComposerMode('danger-full-access')).toMatchObject({
+      value: 'danger-full-access',
+      short: '完全',
     })
-    expect(currentComposerMode('normal').value).toBe('ask_before_edit')
-    expect(currentComposerMode('full_access').description).toContain(
-      '宿主直执且免询问',
-    )
-    expect(currentComposerMode('full_access').description).toContain('明确拒绝')
+    expect(currentComposerMode('ask_before_edit').value).toBe('workspace-write')
   })
 
-  it('shows the saved execution permission while Plan remains active', () => {
+  it('keeps the preset while Plan is a separate toggle and prefers Core copy', () => {
     expect(
-      currentComposerPermission({ mode: 'plan', previous_mode: 'full_access' }),
-    ).toMatchObject({ value: 'full_access', short: '完全' })
-    expect(
-      currentComposerPermission({
-        mode: 'plan',
-        previous_mode: 'smart_auto',
-      }),
-    ).toMatchObject({ value: 'smart_auto', short: '智能' })
+      currentComposerPermission({ preset: 'read-only', plan: true }),
+    ).toMatchObject({ value: 'read-only', short: '只读' })
+    const options = composerPresetOptions({
+      presets: [
+        { value: 'read-only', name: 'Read only', description: 'core copy' },
+      ],
+    })
+    expect(options[0]).toMatchObject({
+      label: 'Read only',
+      description: 'core copy',
+    })
+    expect(options[1]?.value).toBe('workspace-write')
   })
 
   it('uses pause semantics while the owner session Goal is running', () => {

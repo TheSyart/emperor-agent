@@ -1,9 +1,4 @@
-import type { GoalSummary } from '../goals/models'
-import type { PlanRecord } from '../plans/models'
 import type { OwnedProcessReceipt } from '../processes/runtime'
-import type { ProjectProcessDescriptor } from './project-processes'
-import type { TaskRecord } from '../tasks/models'
-import type { TeamManagerPayload } from '../team/manager'
 import type { GitStatusResult } from './git'
 import type { GitOperationReceipt } from './git-receipts'
 import type { GitWorktreeSummary } from './git-worktrees'
@@ -19,10 +14,17 @@ export interface WorkspaceSnapshot {
     owned: GitWorktreeSummary[]
   }
   gitReceipts: GitOperationReceipt[]
+  /** Retired (plans live in the session log); always null. */
   plan: WorkspacePlanSummary | null
-  goal: WorkspaceGoalSummary | null
+  /** Current kernel goal (HarnessHost goalView), or null. */
+  goal: WorkspaceGoalView | null
+  /** Subagent jobs of this session, active first (max 12). */
   subagents: WorkspaceSubagentSummary[]
+  /** Kernel background jobs of this session (bash, subagent, ...). */
+  jobs: WorkspaceJobSummary[]
+  /** Retired (team runtime removed); always empty. */
   team: WorkspaceTeamSummary
+  /** Retired (project processes removed); always empty. */
   processes: WorkspaceProcessSummary[]
   terminals: WorkspaceTerminalSummary[]
   capturedAt: number
@@ -35,11 +37,19 @@ export interface WorkspacePlanSummary {
   steps: Array<{ id: string; title: string; status: string }>
 }
 
-export interface WorkspaceGoalSummary {
+/**
+ * GoalView-shaped record as projected by the kernel (`objective`, `phase`,
+ * `revision`, `maxGoalRounds`, `roundsStarted`, `createdAt`, `updatedAt`, ...).
+ */
+export type WorkspaceGoalView = Record<string, unknown>
+
+export interface WorkspaceJobSummary {
   id: string
-  outcome: string
-  phase: string
+  kind: string
+  label: string
   status: string
+  startedAt?: number
+  finishedAt?: number | null
 }
 
 export interface WorkspaceSubagentSummary {
@@ -107,62 +117,40 @@ export interface WorkspaceTerminalSummary {
  * Renderer-safe Environment projections. These deliberately omit transcripts,
  * message bodies, process identity/digests, terminal PIDs and working paths.
  */
-export function projectWorkspacePlan(
-  plan: PlanRecord | null,
-): WorkspacePlanSummary | null {
-  if (!plan) return null
-  return {
-    id: plan.id,
-    title: plan.title,
-    status: plan.status,
-    steps: plan.steps.map((step) => ({
-      id: step.id,
-      title: step.title,
-      status: step.status,
-    })),
-  }
+export function emptyWorkspaceTeam(): WorkspaceTeamSummary {
+  return { members: [], leadUnread: 0 }
 }
 
 export function projectWorkspaceGoal(
-  goal: GoalSummary | null,
-): WorkspaceGoalSummary | null {
-  if (!goal) return null
+  goal: Record<string, unknown> | null | undefined,
+): WorkspaceGoalView | null {
+  if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return null
+  return { ...goal }
+}
+
+export function projectWorkspaceJob(
+  job: WorkspaceJobSummary,
+): WorkspaceJobSummary {
   return {
-    id: goal.id,
-    outcome: goal.outcome,
-    phase: goal.phase,
-    status: goal.status,
+    id: job.id,
+    kind: safeMetadataText(job.kind),
+    label: safeMetadataText(job.label),
+    status: job.status,
+    ...(typeof job.startedAt === 'number' ? { startedAt: job.startedAt } : {}),
+    ...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
   }
 }
 
 export function projectWorkspaceSubagent(
-  task: TaskRecord,
+  job: WorkspaceJobSummary,
 ): WorkspaceSubagentSummary {
   return {
-    id: task.id,
-    title: task.title,
-    status: task.status,
-    started_at: task.started_at,
-    ended_at: task.ended_at,
-    metadata: {
-      agent_type: safeMetadataText(task.metadata.agent_type),
-      workspace_mode: safeMetadataText(task.metadata.workspace_mode),
-    },
-  }
-}
-
-export function projectWorkspaceTeam(
-  team: TeamManagerPayload | null,
-): WorkspaceTeamSummary {
-  return {
-    members: (team?.members ?? []).map((member) => ({
-      name: member.name,
-      role: member.role,
-      agent_type: member.agent_type,
-      status: member.status,
-      unread: member.unread,
-    })),
-    leadUnread: team?.leadUnread ?? 0,
+    id: job.id,
+    title: safeMetadataText(job.label),
+    status: job.status,
+    started_at: typeof job.startedAt === 'number' ? job.startedAt : 0,
+    ended_at: typeof job.finishedAt === 'number' ? job.finishedAt : null,
+    metadata: { agent_type: 'subagent', workspace_mode: '' },
   }
 }
 
@@ -174,35 +162,6 @@ export function projectWorkspaceProcess(
     label: process.owner.kind,
     status: process.status,
     startedAt: process.startedAt,
-  }
-}
-
-export function projectWorkspaceProjectProcess(
-  process: ProjectProcessDescriptor,
-): WorkspaceProcessSummary {
-  return {
-    id: process.id,
-    label: process.name,
-    ecosystem: process.ecosystem,
-    status: process.status,
-    health: process.health,
-    revision: process.revision,
-    primary: process.primary,
-    startedAt: process.startedAt,
-    finishedAt: process.finishedAt,
-    ...(process.errorSummary
-      ? { errorSummary: safeMetadataText(process.errorSummary) }
-      : {}),
-    preview: process.preview
-      ? {
-          id: process.preview.id,
-          revision: process.preview.revision,
-          title: process.preview.title,
-          url: process.preview.url,
-          status: process.preview.status,
-          primary: process.preview.primary,
-        }
-      : null,
   }
 }
 

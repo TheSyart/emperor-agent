@@ -7,22 +7,28 @@ function source(path: string): string {
 }
 
 describe('profile onboarding renderer flow', () => {
-  it('shows a compact pending prompt and dedicated onboarding Ask actions', () => {
-    const chat = source('../../views/ChatView.vue')
-    const ask = source('../chat/ActiveAskPanel.vue')
+  it('shows a compact pending onboarding prompt in the chat view', () => {
+    const chat = source('../conversation/ConversationView.vue')
 
-    expect(chat).toContain('profile-onboarding-banner')
+    expect(chat).toContain('showProfileOnboardingPrompt')
     expect(chat).toContain('开始访谈')
     expect(chat).toContain('不再提醒')
+  })
+
+  it('gives the onboarding Ask takeover dedicated actions', () => {
+    const ask = source('../conversation/takeover/QuestionComposer.vue')
+    const askModel = source('../conversation/takeover/questionModel.ts')
+
     expect(ask).toContain("'稍后再说'")
+    expect(ask).toContain('不再提醒')
     expect(ask).toContain('skipProfileInterview')
-    expect(ask).toContain('补充你的实际情况或其他说明（可选）')
+    expect(askModel).toContain('补充你的实际情况或其他说明（可选）')
     expect(ask).toContain('askFreeformPresentation')
     expect(ask).toContain('isProfileOnboardingAsk')
   })
 
   it('shows the active private profile path and allows skipped interviews to restart', () => {
-    const configs = source('../../views/ConfigsView.vue')
+    const configs = source('../settings/ConfigsSection.vue')
 
     expect(configs).toContain('memory/profile/USER.local.md')
     expect(configs).toContain('重新开始')

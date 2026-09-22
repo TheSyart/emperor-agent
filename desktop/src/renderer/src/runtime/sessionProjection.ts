@@ -1,5 +1,4 @@
 import type { RuntimeStatus, WsEvent } from '../types'
-import { adaptLegacyRuntimeEvent } from './legacyRuntimeAdapter'
 import type {
   ActionEffectDescriptor,
   ActionEffectTaskResult,
@@ -78,26 +77,21 @@ const DEFAULT_META: SessionProjectionMeta = {
   serverRestarted: false,
 }
 
-const RUNNING_EVENTS = new Set<string>([
-  'prompt_dequeued',
-  'prompt_interjected',
+export const RUNNING_EVENTS: ReadonlySet<string> = new Set<string>([
+  'turn_phase',
   'user_message',
+  'prompt_interjected',
   'message_delta',
   'agent_thought',
-  'plan_draft_delta',
   'tool_call',
-  'tool_run_queued',
   'tool_run_started',
   'tool_result',
-  'tool_run_completed',
   'tool_run_failed',
   'hook_run_started',
-  'hook_run_progress',
 ])
 
-const TERMINAL_EVENTS = new Set<string>([
+export const TERMINAL_EVENTS: ReadonlySet<string> = new Set<string>([
   'assistant_done',
-  'turn_paused',
   'runtime_task_cancelled',
   'error',
 ])
@@ -246,7 +240,7 @@ export function reduceSessionProjection(
     })
   }
 
-  return reduceRuntimeEvent(state, adaptLegacyRuntimeEvent(action.event))
+  return reduceRuntimeEvent(state, action.event)
 }
 
 export function eventOwnerSessionId(data: unknown): string {
@@ -296,21 +290,6 @@ function reduceRuntimeEvent(
   state: SessionProjectionState,
   event: WsEvent,
 ): SessionProjectionTransition {
-  if (event.event === 'ready') {
-    const latestSeq = Math.max(0, Number(event.latest_seq || 0))
-    const serverRestarted =
-      state.activeLastSeq > 0 && latestSeq < state.activeLastSeq
-    return {
-      state: {
-        ...state,
-        transport: 'ready',
-        activeLastSeq: serverRestarted ? latestSeq : state.activeLastSeq,
-      },
-      effects: [],
-      meta: { ...DEFAULT_META, serverRestarted },
-    }
-  }
-
   const owner = eventOwnerSessionId(event)
   const active = state.activeSessionId
   const draftMaterialization = Boolean(
@@ -352,14 +331,10 @@ function reduceRuntimeEvent(
           ? Math.max(current?.lastSeq ?? 0, seq)
           : (current?.lastSeq ?? 0),
     }
-    if (RUNNING_EVENTS.has(event.event)) next.running = true
+    if (isRunningEvent(event)) next.running = true
     if (TERMINAL_EVENTS.has(event.event)) {
       next.running = false
       next.attention = foreign
-    }
-    if (event.event === 'historical_runtime_activity') {
-      next.running = event.running
-      if (!event.running) next.attention = foreign
     }
     sessions = { ...state.sessions, [sessionKey]: next }
   }
@@ -381,6 +356,12 @@ function reduceRuntimeEvent(
       serverRestarted: false,
     },
   }
+}
+
+/** Turn activity; `turn_phase: interrupted` precedes the terminal events. */
+export function isRunningEvent(event: WsEvent): boolean {
+  if (event.event === 'turn_phase') return event.phase === 'started'
+  return RUNNING_EVENTS.has(event.event)
 }
 
 function transition(

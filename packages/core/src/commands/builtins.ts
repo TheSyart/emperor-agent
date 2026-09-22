@@ -25,6 +25,13 @@ interface BuiltinSpec {
   dangerous?: boolean
 }
 
+/** Permission presets a session can run under (`/permissions <preset>`). */
+export const PERMISSION_PRESET_VALUES = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const
+
 const specs: BuiltinSpec[] = [
   action(
     'new',
@@ -37,10 +44,6 @@ const specs: BuiltinSpec[] = [
     'Commands',
     'Free up context while keeping a summary',
     'after_turn',
-    {
-      argumentHint: '[instructions]',
-      args: [stringArg('instructions', true)],
-    },
   ),
   ui('model', 'Commands', 'Choose the model for this chat', 'model', {
     argumentHint: '[model-id]',
@@ -57,18 +60,17 @@ const specs: BuiltinSpec[] = [
     },
   ),
   ui('permissions', 'Commands', 'Choose what Emperor may do', 'permissions', {
-    argumentHint: '[ask|smart|full]',
-    args: [
-      enumArg('mode', ['ask', 'smart', 'full', 'edits', 'auto', 'status']),
-    ],
+    hiddenAliases: ['permission'],
+    argumentHint: `[${PERMISSION_PRESET_VALUES.join('|')}]`,
+    args: [enumArg('preset', [...PERMISSION_PRESET_VALUES, 'status'])],
   }),
-  action('plan', 'Commands', 'Plan before making changes', 'after_turn', {
-    argumentHint: '[on|off|status|open|description]',
-    args: [stringArg('action-or-description', true)],
+  action('plan', 'Commands', 'Plan before making changes', 'immediate', {
+    argumentHint: '[off|message]',
+    args: [stringArg('off-or-message', true)],
   }),
-  action('goal', 'Commands', 'Keep working toward an outcome', 'after_turn', {
-    argumentHint: '[start|status|list|pause|resume|cancel]',
-    args: [stringArg('action-or-outcome', true)],
+  action('goal', 'Commands', 'Keep working toward an outcome', 'immediate', {
+    argumentHint: '[<objective>|clear|edit <objective>|pause|resume]',
+    args: [stringArg('objective-or-action', true)],
   }),
   action('stop', 'Commands', 'Stop the current task', 'immediate', {
     sources: READ_SAFE,

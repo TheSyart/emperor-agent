@@ -2,9 +2,12 @@ import type { ServerConfig } from './config'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { ExecutionEnvironment } from '../environment/snapshot'
 import { EmperorError } from '../errors'
 import type { OwnedProcessRuntime } from '../processes/runtime'
+import { logger } from '../util/log'
 import { OwnedStdioClientTransport } from './owned-stdio-transport'
 
 export interface MCPToolDefinition {
@@ -24,6 +27,7 @@ export interface MCPCallToolResult {
 export type MCPConnectionErrorCode =
   | 'mcp_aborted'
   | 'mcp_auth_failed'
+  | 'mcp_config_invalid'
   | 'mcp_connection_failed'
   | 'mcp_protocol_error'
   | 'mcp_restart_exhausted'
@@ -354,7 +358,12 @@ export class StdioConnection extends MCPConnection {
   }
 }
 
-export class SSEConnection extends MCPConnection {
+/**
+ * Shared client plumbing of the network transports (SSE, Streamable HTTP):
+ * one SDK `Client` per successful `attach`, lifecycle forwarded to the
+ * supervisor, tool listing and calls delegated to the SDK.
+ */
+abstract class RemoteConnection extends MCPConnection {
   readonly config: ServerConfig
   private client: Client | null = null
   private intentionalDisconnect = false
@@ -364,44 +373,67 @@ export class SSEConnection extends MCPConnection {
     this.config = config
   }
 
-  async connect(): Promise<boolean> {
-    try {
-      if (!this.config.url) throw new Error('missing MCP SSE url')
-      const transport = new SSEClientTransport(new URL(this.config.url), {
-        eventSourceInit:
-          this.config.headers && Object.keys(this.config.headers).length
-            ? ({ fetch: withHeaders(this.config.headers) } as never)
-            : undefined,
-        requestInit: Object.keys(this.config.headers).length
-          ? { headers: this.config.headers }
-          : undefined,
+  /** Connect a fresh client over `transport`; throws on failure (client closed). */
+  protected async attach(transport: Transport): Promise<void> {
+    const client = new Client({ name: 'emperor-agent', version: '0.0.0' })
+    client.onclose = () => {
+      if (this.client === client) this.client = null
+      if (this.client === null) this.connected = false
+      this.reportLifecycle({
+        type: 'closed',
+        reason: this.intentionalDisconnect
+          ? 'intentional disconnect'
+          : 'transport closed',
+        intentional: this.intentionalDisconnect,
       })
-      const client = new Client({ name: 'emperor-agent', version: '0.0.0' })
-      client.onclose = () => {
-        if (this.client === client) this.client = null
-        this.connected = false
-        this.reportLifecycle({
-          type: 'closed',
-          reason: this.intentionalDisconnect
-            ? 'intentional disconnect'
-            : 'transport closed',
-          intentional: this.intentionalDisconnect,
-        })
-      }
-      client.onerror = (error) => {
-        this.connectionFailure = error
-        this.reportLifecycle({ type: 'error', error })
-      }
-      await client.connect(transport)
-      this.client = client
-      this.connected = true
-      this.connectionFailure = null
-      return true
-    } catch (error) {
+    }
+    client.onerror = (error) => {
       this.connectionFailure = error
-      this.client = null
-      this.connected = false
-      return false
+      this.reportLifecycle({ type: 'error', error })
+    }
+    try {
+      await client.connect(transport)
+    } catch (error) {
+      client.onclose = undefined
+      client.onerror = undefined
+      await client.close().catch(() => {})
+      throw error
+    }
+    this.client = client
+    this.connected = true
+    this.connectionFailure = null
+  }
+
+  protected requestHeaders(): Record<string, string> | undefined {
+    return Object.keys(this.config.headers).length
+      ? { ...this.config.headers }
+      : undefined
+  }
+
+  protected sseTransport(url: URL): SSEClientTransport {
+    const headers = this.requestHeaders()
+    return new SSEClientTransport(url, {
+      eventSourceInit: headers
+        ? ({ fetch: withHeaders(headers) } as never)
+        : undefined,
+      requestInit: headers ? { headers } : undefined,
+    })
+  }
+
+  protected configuredUrl(label: string): URL {
+    if (!this.config.url)
+      throw new MCPConnectionError(
+        'mcp_config_invalid',
+        `MCP server '${this.serverName}' has no ${label} url`,
+      )
+    try {
+      return new URL(this.config.url)
+    } catch (error) {
+      throw new MCPConnectionError(
+        'mcp_config_invalid',
+        `MCP server '${this.serverName}' has an invalid ${label} url`,
+        { cause: error },
+      )
     }
   }
 
@@ -450,6 +482,111 @@ export class SSEConnection extends MCPConnection {
       ),
     )
   }
+}
+
+export class SSEConnection extends RemoteConnection {
+  async connect(): Promise<boolean> {
+    try {
+      await this.attach(this.sseTransport(this.configuredUrl('SSE')))
+      return true
+    } catch (error) {
+      this.connectionFailure = error
+      this.connected = false
+      return false
+    }
+  }
+}
+
+/**
+ * Streamable HTTP (MCP 2025-03-26+). Servers that only speak the legacy
+ * HTTP+SSE transport are reached by falling back to SSE when the initial
+ * Streamable HTTP handshake fails (authentication failures do not fall back).
+ */
+export class HttpConnection extends RemoteConnection {
+  /** Transport actually in use after the last successful connect. */
+  activeTransport: 'http' | 'sse' | null = null
+
+  async connect(): Promise<boolean> {
+    this.activeTransport = null
+    let url: URL
+    try {
+      url = this.configuredUrl('HTTP')
+    } catch (error) {
+      this.connectionFailure = error
+      this.connected = false
+      return false
+    }
+    const headers = this.requestHeaders()
+    try {
+      await this.attach(
+        new StreamableHTTPClientTransport(url, {
+          ...(headers ? { requestInit: { headers } } : {}),
+        }),
+      )
+      this.activeTransport = 'http'
+      return true
+    } catch (httpError) {
+      if (isAuthFailure(httpError)) {
+        this.connectionFailure = httpError
+        this.connected = false
+        return false
+      }
+      logger.warn(
+        'MCP Streamable HTTP connect failed; falling back to legacy SSE',
+        { server: this.serverName, error: errorMessage(httpError) },
+      )
+      try {
+        await this.attach(this.sseTransport(url))
+        this.activeTransport = 'sse'
+        return true
+      } catch (sseError) {
+        this.connectionFailure = isAuthFailure(sseError) ? sseError : httpError
+        this.connected = false
+        return false
+      }
+    }
+  }
+}
+
+/** Placeholder for a server whose configuration cannot be connected (never spawns). */
+export class InvalidConfigConnection extends MCPConnection {
+  private readonly reason: string
+
+  constructor(serverName: string, reason: string) {
+    super(serverName)
+    this.reason = reason
+  }
+
+  async connect(): Promise<boolean> {
+    this.connected = false
+    this.connectionFailure = new MCPConnectionError(
+      'mcp_config_invalid',
+      this.reason,
+    )
+    return false
+  }
+
+  async disconnect(): Promise<void> {
+    this.connected = false
+  }
+
+  async listTools(): Promise<MCPToolDefinition[]> {
+    return []
+  }
+
+  async callTool(): Promise<MCPCallToolResult> {
+    throw new MCPConnectionError('mcp_config_invalid', this.reason)
+  }
+}
+
+function isAuthFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  if (code === 401 || code === 403) return true
+  return /\b(?:401|403)\b|unauthori[sz]ed|forbidden/i.test(errorMessage(error))
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? '')
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

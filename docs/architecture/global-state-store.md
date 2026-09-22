@@ -2,297 +2,161 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-08-12<br>
-> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、各领域 Store
+> 最后核验：2026-09-22<br>
+> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
 
-Emperor Agent 区分两个互不重叠的根目录概念：
-
-| 概念                        | 含义                                                      | 默认值                                                        | 环境变量                        |
+| 概念                        | 含义                                                      | 默认值                                                        | 覆盖方式                        |
 | --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `runtimeRoot`               | 应用内置资源根：模板、内置技能、静态资源                  | 开发模式为仓库根；Release 为只读 `resources/runtime-defaults` | `--root` / `EMPEROR_AGENT_ROOT` |
+| `runtimeRoot`               | 应用内置资源根：模板、内置 Skills、静态资源               | 开发模式为仓库根；Release 为只读 `resources/runtime-defaults` | `--root` / `EMPEROR_AGENT_ROOT` |
 | Emperor Home（`stateRoot`） | 全局私有数据根：会话、记忆、配置、附件、Skills 与受管环境 | `~/.emperor`                                                  | `EMPEROR_CONFIG_DIR`            |
 
-`runtimeRoot` 里的内容是只读或半只读的“应用资源”，例如 `templates/`、`skills/`、`model_config.example.json`、`mcp_config.example.json`；仓库中的两个配置示例源文件位于 `config/examples/`，打包后仍使用前述 runtime 文件名。`stateRoot` 里的内容是持续被读写的“用户私有状态”。两者刻意分离，且默认值**不再有包含关系**（旧模型里 `stateRoot` 是 `runtimeRoot/.emperor`，新模型里两者是完全独立的目录树）。
+`runtimeRoot` 里是只读或半只读的应用资源，例如 `templates/`（含 `templates/agent/persona.md`）、`skills/`、`model_config.example.json`、`mcp_config.example.json`；仓库中的两个配置示例源文件位于 `config/examples/`。`stateRoot` 里是持续读写的用户私有状态。两者互不包含。
 
-解析优先级（`packages/core/src/runtime/paths.ts` 的 `resolveRuntimePaths()`）：
+解析优先级（`resolveRuntimePaths()`）：
 
-- `runtimeRoot`：显式 `--root`/`root` 参数 > `EMPEROR_AGENT_ROOT` > 开发模式的仓库根 / Release 的 `resources/runtime-defaults`。
-- Emperor Home：显式 `stateRoot` 参数 > `EMPEROR_CONFIG_DIR` > `~/.emperor`（`defaultEmperorHome()`；`defaultStateRoot()` 是兼容别名）。
+- `runtimeRoot`：显式 `root` 参数 > `EMPEROR_AGENT_ROOT` > 开发模式的仓库根 / Release 的 `resources/runtime-defaults`。
+- Emperor Home：显式 `stateRoot` 参数 > `EMPEROR_CONFIG_DIR` > `~/.emperor`。
 
-## 目标目录模型
+## 目录模型
 
 ```text
 ~/.emperor/
-  installation.json      # layout/app/runtime revision 与首次启动/迁移状态
-  settings.json          # 用户通用配置；旧 emperor.local.json 仅作一次迁移输入
-  model_config.json       # schemaVersion 2；多个模型、单 active、可选显式 fallback/cost policy
+  installation.json        # layout/app/runtime revision 与首次启动、迁移状态
+  settings.json            # 用户通用配置
+  model_config.json        # schemaVersion 2；多个模型、单 active
   mcp_config.json
-  hooks_config.json
+  hooks.json               # Claude Code hooks.json 格式的 command hooks（可选）
   onboarding.json
-  agents/
-    agents.json           # 可选全局 user AgentDefinition source；strict schema/containment
-  skills/                # 用户全局裸 Skills；文件系统是事实源
-    <skill-name>/
-      SKILL.md
+  AGENTS.md                # 可选的全局工作区说明，用户手写
+  workspace/               # Chat 会话的工作目录
+  spill/                   # 超出内联上限的工具结果全文
+  skills/<skill-name>/SKILL.md   # 个人 Skills（也接受直接放置的 <name>.md）
   plugins/
     known_marketplaces.json
-    installed_plugins.json # 已物化版本；与 settings 中启用意图分离
+    installed_plugins.json # 已物化版本；启用意图在 settings.json
     marketplaces/
-    cache/               # 不可变版本内容
-    data/                # 跨版本持久数据
-    staging/             # 有界安装预览
+    cache/                 # 不可变版本内容
+    data/                  # 跨版本持久数据
+    staging/               # 有界安装预览
   environment/
-    bin/                 # Emperor ExecutionEnvironment 的 PATH 首位
-    tools/               # managed 不可变版本目录
-    data/                # 支持重定向的第三方数据根
-    downloads/           # 可删除的 SHA-256 内容寻址归档缓存
-    jobs/                # 安装计划与任务恢复状态
-    receipts/            # 来源、recipe trust、placement 与验证结果
-    registry.v1.json     # managed/external active version 与入口事实源
+    bin/                   # 受管执行环境的 PATH 首位
+    tools/
+    data/                  # 可重定向的第三方数据根
+    downloads/
+    receipts/
+    registry.v1.json
   memory/
-    profile/
-      USER.local.md      # 用户偏好档案；由 ensureUserProfileFile() 播种/维护
-    MEMORY.local.md      # 全局长期记忆；保留旧 MemoryStore 相对路径以便兼容迁移
-    YYYY-MM-DD.md        # 按日情景记忆
-    history.jsonl
-    history_archive/
-    history_index.json
-    versions/
-    plans/
-    compaction/
+    profile/USER.local.md  # 用户档案
+    MEMORY.local.md        # 全局长期记忆
+    YYYY-MM-DD.md          # 按日情景记忆
+    versions/              # 记忆版本快照
     watchlist.md
     watchlist_state.json
-    patch-ledger.jsonl
-    tool-results/         # 仅 legacy 兼容；新结果写入对应 session/tool-results
-    hybrid-index/
-      index.v1.json       # 可从 Markdown 权威记忆重建的派生检索索引
     attachments/<month>/
     media/<month>/
     desktop/window.json
     desktop_pet/window.json
-    sidebar_state.json    # 左侧导航和右侧工作区 V3 布局
+    sidebar_state.json     # 左侧导航和右侧工作台布局
   sessions/
-    index.json
+    .harness-kernel-v1     # 当前内核的会话目录标记
+    index.json             # 会话索引（标题、模式、项目绑定、归档）
+    .scratch/
     <session-id>/
-      meta.jsonl
-      history.jsonl
-      message_graph.v2.jsonl # append-only message/branch/prompt queue sidecar
-      runtime/events.jsonl # 兼容平面 V1 / EventEnvelope V2 的 renderer 回放日志
-      _checkpoint.json
-      scratch/            # 当前 session 的下载/clone 检查区；可清理、非事实源
-      tool-results/       # 当前 session 截断工具结果的完整正文与元数据
-      turn-changes/       # 活动/暂停 turn 的私有变更基线与归因账本
-      prompt-snapshots/
-      file-checkpoints/
-        index.json         # 受管文件工具的 before/after 元数据
-        artifacts/         # 二进制或大文本的私有快照制品
+      meta.jsonl           # 会话索引元数据，用于重建 index.json
+      log.jsonl            # append-only session log：会话全部事实
+  sessions.legacy-<ts>/    # 首次启动新内核时移走的旧会话目录（如存在）
   projects/
     index.json
     <project-id>/
       project.json
-      AGENTS.local.md     # 全局私有项目记忆（见下方"命名易混淆点"）
+      AGENTS.local.md      # 全局私有项目记忆
       prompt-overlay.md
-      team/               # 绑定项目的 Team 私有状态
   git/
-    worktree-leases.json  # Emperor 创建的 session worktree owner/lease
-    receipts/             # commit/push/pull/worktree/PR 的脱敏安全凭据
-  code-intelligence/
-    projects/
-      <workspace-digest>/
-        graph.v1.json.gz  # 可从 workspace 重建的受界派生符号图
-    lsp/
-      <owner-digest>/     # 受信 LSP 的隔离 scratch/HOME；不保存源码事实
-  tasks/
-    index.json
-    archive/
-    <task-id>/
-      transcript.jsonl
-      output.log          # 有界、cursor 可读的完整 task 输出
-      output.meta.json    # 配额与 dropped bytes；仅发生截断后出现
+    worktree-leases.json   # Emperor 创建的 worktree owner/lease
+    receipts/              # commit/push/pull/worktree/PR 的脱敏凭据
   processes/
-    receipts.v1.json      # 脱敏 owner/lease/PID identity/sandbox/quota 最小账本
+    receipts.v1.json       # 受管进程的最小账本
   tokens/
     tokens.jsonl
-    tokens_archive/
   scheduler/
-    jobs.json             # V1 Job snapshot；可选 misfire/pending/active/run receipt 字段
-    action.jsonl          # Scheduler Job 的 append-only action log
-  team/
-  subagent-worktrees/
-    .leases.json          # 统一 GitWorktreeManager 管理的子代理隔离 lease
+    jobs.json
+    action.jsonl
   control/
-    state.json
-    core-action.key
-    command-invocations.json      # Slash command 幂等调用的脱敏 receipt
-    session-transitions.json      # /new prepared → applied 会话转换事务
-    turn-continuation-diagnostics.jsonl # 历史版本续跑评估诊断；新主回合不再写入
-  hooks/
-    audit.jsonl
-    audit/
-    project-trust.json
-  goals/
-    index.json
-    diagnostics.json
-    gate-facts.json
-    gate-mutations.json
-    blocker-causes.json
-    blocker-facts.json
-    post-commit-cleanup-acks.jsonl
-    post-commit-cleanup-claims/
-    post-commit-diagnostics.jsonl
-    <goal-id>/
-      events.jsonl        # hash-chained 权威事件账本
-      goal.json           # 可从 events 重建的 snapshot
-      observations.jsonl  # Core 捕获的工具 observation
+    command-invocations.json   # Slash command 幂等调用记录
+    session-transitions.json   # /new 会话转换事务
   migrations/
     state-root-migration.json
 ```
 
-### Hybrid Memory 派生索引
+启动时仍会创建 `team/`、`tasks/`、`goals/`、`code-intelligence/` 等目录以兼容旧布局迁移，但当前内核不读写其中内容；旧的 `hooks_config.json` 与 `hooks/` 也不再使用。这些内容保留原位，不会自动删除。
 
-`memory/hybrid-index/index.v1.json` 不是记忆事实源。全局 `MEMORY.local.md`、项目 `AGENTS.local.md` 和相应 session/project scope 才是权威输入；索引只保存确定性分块、source/path/line provenance、source digest 和检索所需派生数据。文件损坏或被删除时，Core 忽略旧派生物并从 Markdown 重建，不会反向改写原始记忆。
+## Session log
 
-索引采用同目录临时文件、file `fsync`、rename 与 directory `fsync`，文件权限为 `0600`。Chat 只可检索 global 和同 session 的 unbound session 记忆；Build 只可检索精确 project 的 project/session 记忆，不能读 global 或其他 project。模式 `off` 不创建索引，`eval` 只记录影子结果，只有 provider-bound 评估门禁通过的 `on` 才能注入 prompt。embedding 失败会自动使用 FTS，并只暴露稳定原因码与计数，不记录 provider 原始异常。
+每个 session 的对话、工具调用、权限选择、Plan 模式、Goal、审批与问题记录、压缩和子代理委派都写在同一份 `sessions/<id>/log.jsonl` 中：
 
-### Code Intelligence 派生数据
+- 首行是 header（`{"type":"session",…}`），其后每行是一个事件或打包的 chunk 行。
+- 写入以 200 ms 为批次按序追加，从不原地改写。
+- 加载时容忍一条截断的尾行，并对中断的 turn 做崩溃修复（合成缺失的工具结果和 turn 收尾，把未决的审批与问题关闭为 `unavailable`）。修复不会重放副作用。
+- 子代理是独立的子 session，同样位于 `sessions/<child-id>/log.jsonl`，第一条事件记录父 session 与委派信息。
 
-`code-intelligence/projects/<workspace-digest>/graph.v1.json.gz` 不是源码事实源。它只保存 workspace-relative location、content digest 与 parser revision；损坏、revision/root digest 不匹配或删除后会从项目源码重建。写入使用 `0600` 临时文件、gzip、file `fsync`、rename 与 directory `fsync`；增量事件在 single owner 内更新 COW state，并以 debounce 合并派生 cache 写入，正常关闭强制 flush。
+**旧会话归档**：当前内核不读取旧的 `history.jsonl`、`_checkpoint.json`、`message_graph.v2.jsonl` 或 `runtime/events.jsonl`。首次启动时，如果 `sessions/` 没有 `.harness-kernel-v1` 标记且不为空，整个目录会被移到同级的 `sessions.legacy-<时间戳>/`，然后创建新的空目录和标记。旧数据不会删除；Diagnostics 的 `kernel.archivedLegacySessions` 显示本次移动的位置。
 
-Code Graph 最多索引 200 个受支持文件、累计 5 MiB、单文件 5 MiB；symlink、binary、unsupported、oversized、capacity 和 parse error 都只形成计数/稳定 limitation，不把原文写入 Diagnostics。`code-intelligence/lsp/<owner-digest>/` 只是 LSP 的隔离 scratch/HOME；实际项目以只读 root 提供，网络为 deny。模式 `off` 不创建这些目录；当前发行物默认关闭且没有 production LSP descriptor。
+不要在应用运行时手工编辑 `log.jsonl`。排障时先完整备份 session 目录。
 
-### Owned process receipt
+## 项目源码目录
 
-`stateRoot/processes/receipts.v1.json` 是进程审计与启动 orphan reconcile 的最小原子账本，最多保留最近 10,000 条。每条只含随机 process/lease ID、owner、lease revision、command/cwd/workspace digest、containment receipt、输出配额计数、PID、boot marker、stable start identity 和终态；不含命令正文、argv、环境变量、输出、stdin 或无法跨重启恢复的 stream/handle。
-
-账本中的 `starting` / `running` 不表示可以 resume。下次启动只会核对 live PID 的 boot marker 与 start identity：精确相同才终止进程树并验证退出；PID 消失或 identity 改变转为 `interrupted`；identity 不可验证时保留 `orphan_unverified`，避免误杀复用 PID。正常 session/app 关闭先取消 owned handle，显式 reparent 则以新 lease/revision 转移同 session owner。receipt 文件使用同目录临时文件、`fsync` 和 rename，并拒绝目标 symlink。
-
-### 桌面工作台状态与终端
-
-`memory/sidebar_state.json` 在原有左侧项目/会话折叠和排序字段之外保存 `right_workspace` V3：`workbenchOpen`、520–960px 的 `width`、`filesTreeWidth` 与 `launcher | review | terminal | files` 当前 pane。Environment 在桌面宽屏由布局规则常驻，不再保存可关闭偏好；打开工作区时原位替代，关闭后恢复。旧 V1/V2 状态在读取时迁移，已有 Review/Terminal/Files pane 和宽度继续保留。
-
-活动或暂停用户任务的 `turn-changes/<session>/<executionId>.json` 只保存归因所需的受控基线，不把文件正文写入聊天或 runtime event。Ask、Permission、Plan 审批与明确继续共享原 `executionId`；普通新请求建立新账本。受管文件工具成功后，Core 相对任务起点计算净创建、修改、删除、重命名、二进制与 `+/-` 行数；恢复原状的文件退出集合。任务终态后删除基线正文，只保留有界 V2 `turn_change_snapshot` 公开统计。已证明只读的 Shell 不触碰账本，只有成功且无法精确归因的 workspace 写入才降为 `partial`，不能伪造总数。
-
-`control/plan-execution-settlements.json` 保存 Plan 执行动作的私有 prepared/applied 事务，`control/core-action.key` 只用于本机 Core 签名。记录绑定 interaction、session、Plan、Step、审批代次和验证 requirement；不会把签名密钥、完整诊断或文件正文暴露给 renderer。启动恢复会幂等重放未完成结算，已写入 Plan metadata 的 receipt 防止同一动作重复生效。
-
-`control/command-invocations.json` 保存按 session + invocation ID 去重的命令摘要和结果，不保存敏感参数。`control/session-transitions.json` 保存 `/new` 的 `prepared → ended → created → applied` 事务；目标 session ID 在 prepare 时即固定，重启恢复不会创建第二个 child。新 SessionEntry 记录 `parent_session_id`、`lineage_root_id` 与内部兼容值 `transition_reason=clear`；旧 session 不删除，进入转换屏障后不再接收新的聊天提交。命令平台不创建项目内 `.emperor/commands/` 或其他动态代码目录。
-
-`git/worktree-leases.json`、`subagent-worktrees/.leases.json` 与 `git/receipts/*.jsonl` 均为 Core 私有数据。Session 和子代理 worktree 都由同一个 `GitWorktreeManager` 校验仓库身份、受控路径和 lease，只允许 Emperor 创建且归属可验证的目录被自动清理。Receipt 只保存 action、branch、commit OID、脱敏 remote host、PR 编号/HTTPS URL/状态和完成时间，不保存 argv、环境变量或凭据。
-
-用户直控 Terminal 不写入 `stateRoot`。Terminal ID、session owner、PTY handle、单调输出序号和有限滚动缓冲只存在于当前 Core 进程内；关闭工作台不会销毁，关闭标签、删除 owner session 或退出应用会终止。应用重启后 `terminals.list` 返回空集合，不根据历史 runtime event、process receipt 或 sidebar state 伪造终端恢复。终端输入和输出也不进入聊天历史、模型上下文、Diagnostics 或 runtime event 日志。
-
-### Scheduler V1 兼容与恢复
-
-`stateRoot/scheduler/jobs.json` 继续使用 version 1；升级只增加可选字段，不批量重写旧 Job。旧记录缺少 `misfire_policy` 时按最保守的 `skip` 读取，旧 run history 缺少 correlation 时使用 `run_id/task_id=null`、`trigger=timer` 和原 `run_at_ms` 作为计划时间。未知 policy 不能从持久数据升级为补跑；malformed pending/active identity、phase、时间或计数按现有 corrupt 隔离路径 fail closed。
-
-每个 active run 保存 Core 生成的 run/task ID、`queued|running` phase、trigger、计划/入队/开始时间、policy、missed count，以及 owner key 的 SHA-256 digest；不保存新的 session/project owner 原文副本。公开 CoreApi/EventEnvelope 投影会移除 `owner_key_digest` 和内部的 `resume_next_run_at_ms`。run history最多保留 20 条，错误摘要有界，不包含 prompt、argv、绝对路径或完整输出。
-
-`queued` 表示 handler 尚未被调用，启动时可用同一 identity恢复一次；`running` 可能已经产生非幂等副作用，绝不自动 replay。Scheduler 会用 `task_id` 只读检查 Task terminal：可证明 completed/failed/cancelled/interrupted 时只补齐 Scheduler receipt，否则收敛为 `interrupted`。完成 Task 与写 Scheduler terminal 之间的崩溃因此不会触发第二次 Agent effect。`latest` 和 `catch-up-one` 的启动补跑同样每个 Job 最多一个；`skip` 只写聚合 receipt并移动到未来触发点。
-
-`history.jsonl` 继续是旧安装和现有模型上下文读取的兼容事实源，升级时不原地重写。`message_graph.v2.jsonl` 是逐 session、append-only 的 V2 sidecar：节点先写 `partial`，对应 V1 行成功落盘后再写 `committed`；写入失败、取消、模型失败或插话替代则写 `tombstoned`。启动时，带相同 `message_id` 的 V1 行可确认已经落盘的 partial，其余孤儿 partial 被 tombstone。sidecar 还保存显式 leaf、compact boundary，以及 queued/running/interjected/completed/cancelled prompt 状态。
-
-Sidecar 只接受 regular file，拒绝 symlink，当前上限为 16 MiB / 50,000 个有效事件；损坏行被隔离并生成不回显原文的诊断。V1→V2→V1 投影保持 legacy 行内容，compact boundary 可回到压缩前捕获的精确 leaf。不要手工删除单条 tombstone 或重排 sidecar sequence；排障时应备份整个 session 目录。
-
-项目源码目录（用户在 UI 里选择的 build 项目路径）只允许保留：
+Build 项目目录只可能包含用户自己维护的内容：
 
 ```text
 <project>/
-  AGENTS.md               # 项目协作文档，可提交，Core 只读不改写
+  AGENTS.md / CLAUDE.md    # 工作区说明，Core 只读
+  AGENTS.local.md / CLAUDE.local.md
   .emperor/
-    settings.json
-    settings.local.json
-    rules/
-    skills/                # 项目级技能，只读，不由 Skill API 写入
+    skills/                # 项目 Skills；仅在绑定该项目的 Build 会话中可见、可写
+    settings.json          # 项目 scope 的 Plugin 启用意图（选择该 scope 时写入）
+    settings.local.json    # 本地项目 scope 的 Plugin 启用意图，不随仓库提交
 ```
 
-Core **不会**在项目源码目录下自动创建 `.emperor/sessions`、`.emperor/memory`、`.emperor/runtime`、`.emperor/attachments`、`.emperor/media` 或 `.emperor/goals`。如果这些目录已经因为旧版本或其他工具而存在，diagnostics 只会提示"检测到旧私有数据"，不会自动删除或搬移。
-
-## 文件检查点
-
-文件检查点是默认关闭的 Beta 能力。启用后，`write_file`、`edit_file`、`delete_file`、`rename_file` 和 `apply_patch` 在真实 ToolRegistry 边界记录受影响路径：Core 先把 before 快照和 `prepared` 索引 durable commit，再运行工具，最后记录 after 哈希并转为 `ready`。这套能力不拦截 `run_command`、MCP、外部程序或用户在编辑器中的任意写入，因此不是全盘文件系统快照。
-
-文本小快照可内联保存在私有索引；二进制和较大快照进入 `artifacts/`。默认单文件上限 8 MiB、单 turn 24 MiB、单 session 128 MiB；before 超限会在工具副作用前拒绝，after 超限只保留哈希并把该检查点标记为不可完整回退。索引和制品使用原子临时文件、file fsync、rename 与目录 fsync；私有目录链或制品出现 symlink、越界、长度或 SHA-256 不一致时 fail closed。
-
-进程在工具执行后、after 提交前终止时会留下 `prepared`。诊断页首次列出当前 session 时，Core 只对账当前受信 session/workspace：当前文件等于 before 就丢弃无变化记录，否则把当前字节作为 after 完成检查点；不会继续原工具 Promise，也不会重放命令。旧 session 没有 `file-checkpoints/` 时按空集合读取且不创建目录。
-
-回退前必须重新计算当前文件状态并与 after 精确比较；任一路径发生外部变化、变为 symlink、不可读取或制品校验失败，整组回退被否决，不发生部分写入。通过预览后仍须由 renderer 发送显式 `confirmed: true`；恢复使用原子替换并在中途失败时尽力按 after 回滚。它不会执行 `git reset --hard`。
-
-Soft Git rewind 的 transaction journal 位于 `stateRoot/git-rewind/transactions.v1.json`，scratch 也在该私有目录；项目目录只新增显式 rescue refs/reflog，以及用户选择 stash 策略时的 rescue stash。journal 先写 phase 再执行对应 Git effect，终态为 `completed`、`rolled_back` 或 `interrupted`。重启对账只读检查 FileCheckpoint status 与当前 HEAD：只有已 durable 完成的文件回退才能收敛为 completed，其余中间 phase 标记 interrupted 并保留救援引用，Core 不自动 reset、apply 或删除引用。journal 的 schema、容量、标识、OID、ref 与时间字段会在读取时完整校验；损坏文件被隔离为 `*.corrupt-*`，Diagnostics 显示计数和备份路径，不会静默把未知事务当作成功。
-
-该路径 fail closed：bare/unborn/nested repository、linked worktree、Git metadata 或 `stateRoot` 位于不受支持边界、merge/rebase/cherry-pick/bisect/sequencer、unmerged index、submodule、sparse checkout 都不可执行。需要 stash 且 local filter 可能运行项目命令时同样拒绝。Git executable 和 version 只来自签名 tool catalog/environment probe；所有固定 argv 经 OwnedProcessRuntime、required containment、network deny 和 session owner 执行。
-
-## Goal 私有状态
-
-Goal 是 TypeScript-only 的新能力，所有持续状态位于 `stateRoot/goals/`。`<goal-id>/events.jsonl` 是权威源，`goal.json` 与根级 `index.json` 是可重建投影；Evidence、Plan binding、cycle/terminal receipt 通过 typed event payload 保存，工具观察写入独立 `observations.jsonl`。Gate facts、mutation epoch、typed blocker 与 post-commit cleanup 使用根级账本，防止模型、renderer 或崩溃恢复路径绕过完成门禁。
-
-Goal store 不搬移或批量改写既有 `sessions/`、`plans/`、`control/` 与 runtime log。Session 删除时 Core 会先取消并 settle 对应 Goal，再删除 Goal 目录；删除失败会记入 Goal diagnostics 并 fail closed。完整状态机与恢复协议见 [`goal-mode.md`](goal-mode.md)。
-
-## Team checkpoint 恢复协议
-
-项目 Team 的私有状态位于 `stateRoot/projects/<project-id>/team/`。每次 teammate turn 使用独立的 `turn_id`，并把 `checkpoint_version`、phase、thread revision、Inbox cursor 区间、pending message ids 和最后 effect receipt 原子写入 checkpoint。恢复时先核对 durable thread revision 与 Inbox cursor/message ids，不能把 checkpoint 套到另一版 thread 或另一批消息上。
-
-状态转换为：
-
-```text
-prepared -> running -> terminal_pending -> cleared
-```
-
-- `prepared`：模型尚未开始，可用 checkpoint 中的完整 history 自动续跑，不重新拼接 Inbox。
-- `running`：进程终止点可能位于非幂等工具之后；自动恢复 fail closed。只有显式 `recovery: 'retry'` 才允许按 at-least-once 语义重试。
-- `terminal_pending`：结果和 final thread revision 已落盘；恢复只执行幂等收尾。自动 result 消息携带 `team_turn_id`，重复恢复会复用已有 receipt，不重复投递。
-
-旧版、损坏或 revision/cursor 不匹配的 checkpoint 不会被当成新任务执行。teammate 进入 Error，checkpoint 保留以便诊断。并发 shutdown 属于终态；迟到 runner 结果可以完成持久化收尾，但不能把成员状态改回 Idle。
+Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。只有在你把 Skill 保存或导入到项目 scope、打开项目 Skills 文件夹，或以项目 / 本地项目 scope 管理 Plugin 时，Core 才会写入上面 `.emperor/` 下的对应位置。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
 
 ## 命名易混淆点：两个 `AGENTS` 系文件
 
-- `<project>/AGENTS.md`：项目源码里的协作文档，用户手写、可提交、可 code review。Core 只读取，从不自动改写。
-- `~/.emperor/projects/<project-id>/AGENTS.local.md`：**全局私有 store** 下的项目记忆，由压缩算法维护，用户一般不直接编辑，物理上完全不在项目源码树里。
+- `<project>/AGENTS.md`（以及 `AGENTS.local.md`、`CLAUDE.md`、`CLAUDE.local.md`）：项目源码里的工作区说明，Core 只读取，按层级作为工作区说明注入。
+- `~/.emperor/projects/<project-id>/AGENTS.local.md`：全局私有 store 下的项目记忆，物理上不在项目源码树里，模型可以通过 `memory_edit` 的 `project` 目标修改。
 
-两者只差一个 `.local` 后缀，语义完全不同。任何 diagnostics/UI 文案提到后者时必须带"全局私有项目记忆"一类限定词，不能只显示裸文件名 `AGENTS.local.md`。
+任何界面文案提到后者时都应带“全局私有项目记忆”一类限定词。
 
-## 技能与模板加载顺序
+## Skill 加载顺序
 
-技能解析优先级（内容冲突时高优先级覆盖低优先级；列表展示时各层取并集）：
+1. 项目 Skills：`<project>/.emperor/skills`（仅绑定该项目的 Build 会话，可写）
+2. 个人 Skills：`~/.emperor/skills`（可写）
+3. 已启用并激活的 Plugin 内的 Skills（只读）
+4. 内置 Skills：`runtimeRoot/skills`（只读）
 
-1. 项目技能：`<project>/.emperor/skills`（只读，仅 build 会话且绑定了项目时生效）
-2. 用户全局技能：`~/.emperor/skills`（普通文件语义；写入仍需权限）
-3. 已启用、已物化 Plugin 内的技能（只读）
-4. 内置技能：`runtimeRoot/skills`（只读）
-
-`ContextBuilder`（系统提示词装配）与 `Skill` 工具共用同一个 `FileSkillsLoader` 实例，因此提示词里看到的技能摘要与工具实际加载到的内容一致。项目 Skill 可以覆盖同名用户、Plugin 或内置 Skill，但 Core 对项目和 Plugin 目录只读；模型不能把安装 scope、目标路径或内部确认字段塞进工具参数。
-
-裸 Skill 不需要 `skills/installed.v1.json` 才能 active；该文件和旧 `.staging` 只作为迁移/诊断输入保留，新 Home 不创建它们。需要版本和更新语义的扩展由 Plugin application service 管理：`settings.json` 中 `enabledPlugins` 保存 scope 启用意图，`plugins/installed_plugins.json` 保存物化记录，`plugins/cache` 保存不可变内容。外部 CLI 与 Skill/Plugin 是独立结果，通过普通命令权限和独立 probe 验证，不能因为 CLI 可执行就声称 Skill 已加载。
+同名时高优先级覆盖低优先级。`SkillLoaders` 为每个项目根缓存一个 `FileSkillsLoader`（Chat 会话使用无项目的 loader），同一 session 的 Skill 目录注入、`skill` 工具、`skill_manage` 与 `skills.*` 共用该 session 的 loader。只读来源可以通过 `skills.copyToUser` 或“复制为个人 Skill”得到个人副本。
 
 ## 迁移策略
 
-Release 在创建 CoreHost 前先验证 runtime manifest，再由 `bootstrapEmperorHome()` 执行默认根迁移：
+Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 
 1. 设置 `EMPEROR_CONFIG_DIR` 或显式 `stateRoot` 时不探测默认旧根。
-2. `~/.emperor` 不存在而 `~/.emperor-agent` 存在时，先在旧根写 prepared receipt，再在同一父目录原子 rename，随后规范化配置、路径字段、权限并写 applied receipt。
-3. 两个默认根并存时只使用 `~/.emperor`；不合并、不删除、不读取旧根，Diagnostics 报告遗留目录。
-4. 旧 `emperor.local.json` 在没有 `settings.json` 时原子改名；两者并存时新文件优先，旧文件移入迁移冲突区并停止读取。
+2. `~/.emperor` 不存在而 `~/.emperor-agent` 存在时，先写 prepared receipt，再原子 rename，随后规范化配置并写 applied receipt。
+3. 两个默认根并存时只使用 `~/.emperor`，不合并、不删除旧根，Diagnostics 报告遗留目录。
+4. 旧 `emperor.local.json` 在没有 `settings.json` 时原子改名；两者并存时新文件优先。
 5. `installation.json` 的 layout version 高于当前应用时拒绝写入并进入恢复页，防止降级破坏数据。
-6. Skill/Plugin 语义迁移只写幂等 receipt：统计现有裸 Skill 和陈旧 legacy registry，不创建缺失目录、不删除旧数据，也不改动 `environment/bin`。
 
-更早的仓库内/runtime 布局仍由 `packages/core/src/runtime/migrate-state-root.ts` 兼容处理，规则：
+更早的仓库内布局由 `migrate-state-root.ts` 兼容处理：只复制、不删除，不覆盖已有文件；每次迁移写入 `migrations/state-root-migration.json` 与 `migration-log.jsonl`。
 
-1. **只复制，不删除**：旧数据永远保留在原位置。
-2. **不覆盖已有文件**：目标路径已存在文件时跳过。
-3. **两代旧布局都处理**：
-   - 更早的"裸 runtimeRoot"布局（`runtimeRoot/memory`、`runtimeRoot/sessions`、`runtimeRoot/.team`，`.team` 改名为 `team`）。
-   - 上一版默认布局（`runtimeRoot/.emperor/*` 整体是旧的 `stateRoot`），整体搬迁到新 `stateRoot`，但排除 `templates/` 子目录。
-4. **`USER.local.md` 路径改名单独处理**：旧路径 `runtimeRoot/.emperor/templates/USER.local.md` 复制到新路径 `stateRoot/memory/profile/USER.local.md`（这是一次路径改名，不是原样搬运，所以第 3 步特意排除了 `templates/`）。
-5. 每次迁移写入两份审计材料：`stateRoot/migrations/state-root-migration.json` 是稳定 JSON report，`stateRoot/migration-log.jsonl` 是逐文件明细日志；CoreApi diagnostics 暴露 `legacyStateMigration`（检测到的旧目录列表、复制/跳过的文件数、report/log 路径）。
+`settings.json` 中旧内核的 `permissions.rules`、`workspace.fileCheckpoints`、`workspace.gitRewind`、`memory.hybridMemory` 和 `codeIntelligence` 在读取时被忽略，保存时不再写回。
 
 ## 诊断字段速查
 
-`CoreApi.diagnostics.get()` 返回的 payload 里，与本文档相关的字段：
+`diagnostics.get()` 中与存储相关的字段：
 
-- `paths.runtimeRoot` / `paths.stateRoot` / `paths.stateRootSource`：当前 runtimeRoot、Emperor Home 及其来源（`explicit` / `env` / `default`）。
-- `paths.sessionsRoot` / `paths.tasksRoot` / `paths.processesRoot` / `paths.attachmentsRoot` / `paths.mediaRoot` / `paths.mcpConfigPath`：具体子路径（`attachmentsRoot`/`mediaRoot` 已修正为 `stateRoot/memory/{attachments,media}` 的真实落盘位置）。
+- `paths.*`：当前 runtimeRoot、Emperor Home 及其来源（`explicit` / `env` / `default`）和各子路径。
 - `legacyStateMigration`：本次启动检测到的旧存储位置、已复制/跳过的文件数。
-- `projectLegacyPrivateData`：当前绑定项目的源码目录里检测到的私有旧数据（仅提示，不自动处理）。
-- `effectiveConfig`：从现有 local/MCP/Skill/AgentDefinition 事实源即时计算的脱敏值、source/trust 与覆盖轨迹；它不是落盘文件，snapshot revision 可重现，secret 值不在 payload 中。
-
-桌面端设置/诊断页的"存储路径"分组（`desktop/src/renderer/src/components/panels/diagnosticsPanelModel.ts`）直接渲染这些字段。
+- `projectLegacyPrivateData`：当前绑定项目的源码目录里检测到的旧私有数据（仅提示）。
+- `kernel.archivedLegacySessions`：首次启动新内核时旧会话目录被移到的位置。
+- `effectiveConfig`：从现有事实源即时计算的脱敏值与来源，不是落盘文件。

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { EnvironmentError, PromptQueueFullError } from '@emperor/core/api'
+import { EnvironmentError } from '@emperor/core/api'
 import { channelForCoreOperation } from '../shared/ipc-contract'
 import { registerCoreIpc, type CoreApiLike } from './ipc'
 
@@ -172,14 +172,23 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     expect(JSON.stringify(payload)).not.toContain('token=secret')
   })
 
-  it('preserves the single prompt queue capacity error for renderer recovery', async () => {
+  it('passes a domain error safe envelope through for renderer recovery', async () => {
+    class QueueFullError extends Error {
+      toSafe() {
+        return {
+          code: 'prompt_queue_full',
+          message: '已有一条消息排队，请先处理后再发送。',
+          action: 'manage_prompt_queue',
+        }
+      }
+    }
     const ipc = new FakeIpcMain()
     registerCoreIpc(
       ipc,
       asCoreApi({
         chat: {
           submit: () => {
-            throw new PromptQueueFullError('private-session-id')
+            throw new QueueFullError('private-session-id')
           },
         },
       }),

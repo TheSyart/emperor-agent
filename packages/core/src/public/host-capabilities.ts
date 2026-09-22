@@ -5,7 +5,7 @@ export type {
   PublicHttpTransportRequest,
   PublicHttpTransportResponse,
 } from '../network/public-http'
-export type { WebFetchClient } from '../tools/web-fetch'
+export type { WebFetchClient } from '../network/web-fetch-client'
 export {
   createEmperorPathCatalog,
   defaultEmperorHome,
@@ -41,7 +41,8 @@ export type {
   RuntimeManifest,
 } from '../runtime/resources'
 export type { PtyHandle, PtyHost } from '../workspace/terminal'
-export { GlobTool, GrepTool } from '../tools/search'
+export { searchProbe } from './search-probe'
+export type { SearchProbeRequest } from './search-probe'
 export { writeJsonAtomic } from '../store/atomic-json'
 export { loadBundledToolCatalog } from '../environment/catalog'
 export type { LoadedToolCatalog } from '../environment/catalog'

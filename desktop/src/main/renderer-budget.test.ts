@@ -66,7 +66,7 @@ function createFixture({ chatBytes }: { chatBytes: number }): {
   mkdirSync(assets, { recursive: true })
   writeBytes(join(main, 'index.js'), 12)
   writeBytes(join(assets, 'index-entry.js'), 14)
-  writeBytes(join(assets, 'ChatView-hash.js'), chatBytes)
+  writeBytes(join(assets, 'ConversationView-hash.js'), chatBytes)
   writeBytes(join(assets, 'index-style.css'), 16)
   writeBytes(join(assets, 'hero.png'), 20)
   writeFileSync(

@@ -15,12 +15,10 @@ import {
   SchedulerSchedule,
   SchedulerStatus,
   computeNextRunMs,
-  schedulerPayloadSessionId,
   validateSchedule,
 } from './models'
 import { SchedulerService } from './service'
 import { SchedulerStore, SchedulerStoreCorrupt } from './store'
-import { resetSchedulerRun, SchedulerTool, setSchedulerRun } from './tool'
 import { createNodeSyncPersistenceAdapter } from '../store/persistence'
 
 function tmp(prefix: string): string {
@@ -486,71 +484,5 @@ describe('scheduler service/tool', () => {
     expect(called).toEqual([job.id])
     expect(service.getJob(job.id)?.state.last_status).toBe(SchedulerStatus.OK)
     service.stop()
-  })
-
-  it('SchedulerTool adds, lists, pauses, resumes, runs, removes, and rejects recursive creation', async () => {
-    const root = tmp('emperor-scheduler-tool-')
-    const ran: string[] = []
-    const service = new SchedulerService(new SchedulerStore(root), {
-      onJob: async (job) => {
-        ran.push(job.id)
-      },
-    })
-    const tool = new SchedulerTool(service)
-
-    const created = await tool.execute(
-      {
-        action: 'add',
-        name: 'daily summary',
-        payload_kind: 'agent_turn',
-        message: 'Summarize today',
-        every_seconds: 60,
-      },
-      {
-        root,
-        arguments: {},
-        sessionId: 'session-tool-owner',
-      },
-    )
-    expect(created).toContain('Scheduler job created')
-    const job = service.listJobs()[0]!
-    expect(schedulerPayloadSessionId(job.payload)).toBe('session-tool-owner')
-    expect(await tool.execute({ action: 'list' })).toContain('daily summary')
-    expect(await tool.execute({ action: 'pause', job_id: job.id })).toContain(
-      'paused',
-    )
-    expect(service.getJob(job.id)?.enabled).toBe(false)
-    expect(await tool.execute({ action: 'resume', job_id: job.id })).toContain(
-      'resumed',
-    )
-    expect(await tool.execute({ action: 'run', job_id: job.id })).toContain(
-      'run finished',
-    )
-    expect(ran).toEqual([job.id])
-    expect(await tool.execute({ action: 'remove', job_id: job.id })).toContain(
-      'removed',
-    )
-
-    expect(
-      await tool.execute({
-        action: 'add',
-        payload_kind: 'system_event',
-        message: 'internal',
-        every_seconds: 60,
-      }),
-    ).toContain('system_event')
-    const token = setSchedulerRun(true)
-    try {
-      expect(
-        await tool.execute({
-          action: 'add',
-          payload_kind: 'agent_turn',
-          message: 'recursive',
-          every_seconds: 60,
-        }),
-      ).toContain('cannot create')
-    } finally {
-      resetSchedulerRun(token)
-    }
   })
 })

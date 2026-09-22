@@ -9,95 +9,15 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AgentLoop } from '../agent/loop'
-import { LLMProvider, type ChatArgs, type LLMResponse } from '../providers/base'
-import type { ModelRoute, ProviderSnapshot } from '../model/router'
 import {
   ProfileOnboardingCoordinator,
   claimProfileOnboardingTrigger,
   ensureUserProfileFile,
   isUserProfileStillDefault,
+  profileOnboardingAgentPrompt,
 } from './onboarding'
 
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
-
-class AskingFakeProvider extends LLMProvider {
-  calls: ChatArgs[] = []
-  constructor() {
-    super({ defaultModel: 'fake-main' })
-  }
-  async chat(args: ChatArgs): Promise<LLMResponse> {
-    this.calls.push(args)
-    if (this.calls.length === 1) {
-      return {
-        content:
-          '初次见面。我会根据个人偏好模板逐步了解你，并按你的回答决定是否继续追问。',
-        toolCalls: [
-          {
-            id: 'call_ask',
-            name: 'ask_user',
-            arguments: {
-              questions: [
-                {
-                  id: 'dynamic_priority',
-                  header: '优先了解',
-                  question: '你希望我先了解哪一类偏好？',
-                  options: [
-                    { label: '沟通方式', description: '先确定回复习惯' },
-                    { label: '工作背景', description: '先了解工作上下文' },
-                  ],
-                },
-              ],
-            },
-          },
-        ],
-        finishReason: 'tool_calls',
-        usage: { input: 1, output: 1 },
-        reasoningContent: null,
-        thinkingBlocks: null,
-      }
-    }
-    return {
-      content: '好的。',
-      toolCalls: [],
-      finishReason: 'stop',
-      usage: { input: 1, output: 1 },
-      reasoningContent: null,
-      thinkingBlocks: null,
-    }
-  }
-}
-
-function fakeRouter(provider: LLMProvider) {
-  const snap: ProviderSnapshot = {
-    provider,
-    providerName: 'fake',
-    providerLabel: 'Fake',
-    model: 'fake-main',
-    apiBase: null,
-    generation: { maxTokens: 2000, temperature: 0.1, reasoningEffort: null },
-    contextWindowTokens: 100_000,
-    config: {},
-    supportsVision: false,
-    entryName: 'fake',
-    entryLabel: 'Fake',
-    modelRole: 'main',
-    routeReason: 'fake',
-  }
-  return {
-    route: (useCase: string): ModelRoute => ({
-      snapshot: snap,
-      fallback: null,
-      useCase,
-      reason: `${useCase}:fake`,
-      estimatedTokens: null,
-    }),
-    payload: () => ({
-      mainModel: 'fake-main',
-      secondaryModel: 'fake-secondary',
-    }),
-  }
-}
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -391,235 +311,70 @@ describe('claimProfileOnboardingTrigger', () => {
   })
 })
 
-describe('AgentLoop.create() first-run onboarding integration (opt-in, 2026-07-06)', () => {
-  it('lets the Agent derive its first Ask from the profile template without a visible user message', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-fresh-'))
-    const provider = new AskingFakeProvider()
-    const events: Array<Record<string, unknown>> = []
-
-    const loop = await AgentLoop.create({
-      root,
-      stateRoot: join(root, '.emperor'),
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(provider),
-      enableFirstRunOnboarding: true,
-      eventSink: async (event) => {
-        events.push(event)
-      },
-    })
-
-    expect(provider.calls).toHaveLength(1)
-    expect(JSON.stringify(provider.calls[0]?.messages)).toContain(
-      '[PROFILE_ONBOARDING]',
+describe('profileOnboardingAgentPrompt', () => {
+  it('embeds the repo profile template and the current profile as data blocks', () => {
+    const template = readFileSync(
+      join(TEMPLATES_DIR, 'init', 'USER.md'),
+      'utf8',
     )
-    expect(JSON.stringify(provider.calls[0]?.messages)).toContain('## 基本信息')
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'user_message' &&
-          event.source === 'onboarding' &&
-          event.ui_hidden !== true,
-      ),
-    ).toBeUndefined()
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'user_message' && event.source === 'onboarding',
-      ),
-    ).toMatchObject({ ui_hidden: true, content: '' })
-    expect(
-      events.find((event) => event.event === 'message_delta'),
-    ).toMatchObject({
-      source: 'onboarding',
-      delta: expect.stringContaining('根据个人偏好模板'),
-    })
-    const askEvent = events.find((event) => event.event === 'ask_request')
-    expect(askEvent).toMatchObject({
-      source: 'onboarding',
-      interaction: {
-        questions: expect.arrayContaining([
-          expect.objectContaining({ id: 'dynamic_priority' }),
-        ]),
-        meta: { profileOnboardingVersion: 2 },
-      },
-    })
-    expect(
-      (askEvent?.interaction as { questions?: unknown[] }).questions,
-    ).toHaveLength(1)
-    expect(events.find((event) => event.event === 'turn_paused')).toMatchObject(
-      {
-        source: 'onboarding',
-      },
+    const prompt = profileOnboardingAgentPrompt(template, '  # 当前档案\n  ')
+    expect(prompt.startsWith('[PROFILE_ONBOARDING]\n')).toBe(true)
+    expect(prompt).toContain('ask_user_question')
+    expect(prompt).toContain('memory_edit')
+    expect(prompt).toContain(
+      `<profile_template>\n${template.trim()}\n</profile_template>`,
     )
-    const rows = readFileSync(loop.activeMemoryStore.historyFile, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-    expect(loop.history).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'assistant',
-          content: expect.stringContaining('根据个人偏好模板'),
-        }),
-      ]),
+    expect(prompt).toContain(
+      '<current_profile>\n# 当前档案\n</current_profile>',
     )
-    expect(rows.find((row) => row.role === 'user')).toMatchObject({
-      source: 'onboarding',
-      ui_hidden: true,
-    })
-    expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(true)
-
-    await loop.close()
   })
 
-  it('does not fire when the model is not configured yet and persists pending for a later retry', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-no-model-'))
-    const events: Array<Record<string, unknown>> = []
+  it('tolerates empty inputs', () => {
+    const prompt = profileOnboardingAgentPrompt('', '')
+    expect(prompt).toContain('<profile_template>\n\n</profile_template>')
+    expect(prompt).toContain('<current_profile>\n\n</current_profile>')
+  })
+})
 
-    // 不传 modelRouter：走真实 loadModelConfig 路径，全新安装下 models 为空数组
-    const loop = await AgentLoop.create({
-      root,
-      stateRoot: join(root, '.emperor'),
+describe('ProfileOnboardingCoordinator first-run flow (repo templates)', () => {
+  it('starts one automatic attempt per process, attaches the Ask, and completes after a profile edit', () => {
+    const root = tmp('emperor-onboarding-flow-')
+    const stateRoot = join(root, '.emperor')
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
       templatesDir: TEMPLATES_DIR,
-      enableFirstRunOnboarding: true,
-      eventSink: async (event) => {
-        events.push(event)
-      },
+    })
+    expect(existsSync(coordinator.userFile)).toBe(true)
+    expect(coordinator.payload()).toMatchObject({
+      status: 'pending',
+      canStart: true,
     })
 
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'user_message' && event.source === 'onboarding',
-      ),
-    ).toBeUndefined()
-    expect(
-      JSON.parse(
-        readFileSync(join(root, '.emperor', 'onboarding.json'), 'utf8'),
-      ),
-    ).toMatchObject({ version: 2, profile: { status: 'pending' } })
-
-    await loop.close()
-  })
-
-  it('does not fire for an already-customized profile (upgrade path) but does latch immediately', async () => {
-    const root = mkdtempSync(
-      join(tmpdir(), 'emperor-onboarding-e2e-existing-user-'),
+    const started = coordinator.beginAttempt('sess_1', { manual: false })
+    expect(started.started).toBe(true)
+    expect(coordinator.payload()).toMatchObject({
+      status: 'in_progress',
+      sessionId: 'sess_1',
+    })
+    expect(coordinator.beginAttempt('sess_2', { manual: false }).started).toBe(
+      false,
     )
-    mkdirSync(join(root, '.emperor', 'memory', 'profile'), { recursive: true })
+
+    const prompt = profileOnboardingAgentPrompt(
+      coordinator.seedContent,
+      readFileSync(coordinator.userFile, 'utf8'),
+    )
+    expect(prompt).toContain(coordinator.seedContent.trim())
+
+    expect(coordinator.attachInteraction('ask_1')).toMatchObject({
+      interactionId: 'ask_1',
+    })
     writeFileSync(
-      join(root, '.emperor', 'memory', 'profile', 'USER.local.md'),
+      coordinator.userFile,
       '# 用户档案\n\n- **称呼**：皇上\n',
       'utf8',
     )
-    const provider = new AskingFakeProvider()
-    const events: Array<Record<string, unknown>> = []
-
-    const loop = await AgentLoop.create({
-      root,
-      stateRoot: join(root, '.emperor'),
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(provider),
-      enableFirstRunOnboarding: true,
-      eventSink: async (event) => {
-        events.push(event)
-      },
-    })
-
-    expect(provider.calls.length).toBe(0)
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'user_message' && event.source === 'onboarding',
-      ),
-    ).toBeUndefined()
-    expect(existsSync(join(root, '.emperor', 'onboarding.json'))).toBe(true)
-
-    await loop.close()
-  })
-
-  it('does nothing when the caller does not opt in, even on a genuine first run with a configured model', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-e2e-optout-'))
-    const provider = new AskingFakeProvider()
-    const events: Array<Record<string, unknown>> = []
-
-    const loop = await AgentLoop.create({
-      root,
-      stateRoot: join(root, '.emperor'),
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(provider),
-      eventSink: async (event) => {
-        events.push(event)
-      },
-    })
-
-    expect(provider.calls.length).toBe(0)
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'user_message' && event.source === 'onboarding',
-      ),
-    ).toBeUndefined()
-    expect(
-      JSON.parse(
-        readFileSync(join(root, '.emperor', 'onboarding.json'), 'utf8'),
-      ),
-    ).toMatchObject({ version: 2, profile: { status: 'pending' } })
-
-    await loop.close()
-  })
-
-  it('supersedes a matching legacy model-generated onboarding Ask on restart', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-onboarding-legacy-ask-'))
-    const stateRoot = join(root, '.emperor')
-    const first = await AgentLoop.create({
-      root,
-      stateRoot,
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(new AskingFakeProvider()),
-      enableFirstRunOnboarding: true,
-    })
-    const oldPending = first.controlManager.payload().pending as {
-      id: string
-    }
-    const controlPath = first.controlManager.store.stateFile
-    await first.close()
-
-    const control = JSON.parse(readFileSync(controlPath, 'utf8')) as {
-      pending: { meta: Record<string, unknown> }
-    }
-    control.pending.meta = {}
-    writeFileSync(controlPath, `${JSON.stringify(control, null, 2)}\n`, 'utf8')
-    const events: Array<Record<string, unknown>> = []
-
-    const restarted = await AgentLoop.create({
-      root,
-      stateRoot,
-      templatesDir: TEMPLATES_DIR,
-      modelRouter: fakeRouter(new AskingFakeProvider()),
-      enableFirstRunOnboarding: true,
-      eventSink: async (event) => {
-        events.push(event)
-      },
-    })
-
-    const pending = restarted.controlManager.payload().pending as {
-      id: string
-      questions: unknown[]
-      meta: Record<string, unknown>
-    }
-    expect(pending.id).not.toBe(oldPending.id)
-    expect(pending.questions).toHaveLength(1)
-    expect(pending.meta).toMatchObject({ profileOnboardingVersion: 2 })
-    expect(
-      events.find(
-        (event) =>
-          event.event === 'interaction_cancelled' &&
-          (event.interaction as { id?: string } | undefined)?.id ===
-            oldPending.id,
-      ),
-    ).toBeTruthy()
-
-    await restarted.close()
+    expect(coordinator.reconcileProfile().status).toBe('completed')
+    expect(existsSync(join(stateRoot, 'onboarding.json'))).toBe(true)
   })
 })

@@ -1,77 +1,81 @@
-/* 手写 highlight.js 主题,仅作用于 Files 面板代码查看器(.file-code-view)。
-   全部 token 色(style-audit 强制),dark/light 随主题 token 自动切换。
-   作用域限定 .file-code-view,不外泄到 MarkdownBlock / GitReviewPane。 */
+/* 手写 highlight.js 主题:色值来自 dsh shiki css-variables 调色板(--code-* token),
+   dark/light 随主题 token 自动切换(style-audit 强制不写裸色值)。
+   作用域:Files 面板代码查看器(.file-code-view)与 ui 基础组件的高亮容器
+   (.ds-hl,CodeBlock / ReadBlock 使用),不外泄到其他 markdown 渲染。 */
 
-.file-code-view .hljs-comment,
-.file-code-view .hljs-quote {
-  color: rgb(var(--fg) / var(--text-tertiary));
+:is(.file-code-view, .ds-hl) .hljs-comment,
+:is(.file-code-view, .ds-hl) .hljs-quote {
+  color: rgb(var(--code-comment));
   font-style: italic;
 }
 
-.file-code-view .hljs-keyword,
-.file-code-view .hljs-selector-tag,
-.file-code-view .hljs-template-tag,
-.file-code-view .hljs-tag,
-.file-code-view .hljs-name,
-.file-code-view .hljs-selector-id,
-.file-code-view .hljs-selector-class,
-.file-code-view .hljs-selector-pseudo {
-  color: rgb(var(--accent));
+:is(.file-code-view, .ds-hl) .hljs-keyword,
+:is(.file-code-view, .ds-hl) .hljs-selector-tag,
+:is(.file-code-view, .ds-hl) .hljs-template-tag,
+:is(.file-code-view, .ds-hl) .hljs-tag,
+:is(.file-code-view, .ds-hl) .hljs-name,
+:is(.file-code-view, .ds-hl) .hljs-selector-pseudo {
+  color: rgb(var(--code-keyword));
 }
 
-.file-code-view .hljs-string,
-.file-code-view .hljs-regexp,
-.file-code-view .hljs-link,
-.file-code-view .hljs-meta .hljs-string,
-.file-code-view .hljs-addition {
-  color: rgb(var(--ok));
+:is(.file-code-view, .ds-hl) .hljs-string,
+:is(.file-code-view, .ds-hl) .hljs-regexp,
+:is(.file-code-view, .ds-hl) .hljs-meta .hljs-string,
+:is(.file-code-view, .ds-hl) .hljs-addition {
+  color: rgb(var(--code-string));
 }
 
-.file-code-view .hljs-number,
-.file-code-view .hljs-literal,
-.file-code-view .hljs-symbol,
-.file-code-view .hljs-bullet,
-.file-code-view .hljs-char.escape_ {
-  color: rgb(var(--warn));
+:is(.file-code-view, .ds-hl) .hljs-subst,
+:is(.file-code-view, .ds-hl) .hljs-template-variable {
+  color: rgb(var(--code-string-expression));
 }
 
-.file-code-view .hljs-title,
-.file-code-view .hljs-section,
-.file-code-view .hljs-title.function_ {
-  color: rgb(var(--brand));
+:is(.file-code-view, .ds-hl) .hljs-number,
+:is(.file-code-view, .ds-hl) .hljs-literal,
+:is(.file-code-view, .ds-hl) .hljs-symbol,
+:is(.file-code-view, .ds-hl) .hljs-bullet,
+:is(.file-code-view, .ds-hl) .hljs-char.escape_,
+:is(.file-code-view, .ds-hl) .hljs-built_in,
+:is(.file-code-view, .ds-hl) .hljs-type,
+:is(.file-code-view, .ds-hl) .hljs-title.class_,
+:is(.file-code-view, .ds-hl) .hljs-selector-id,
+:is(.file-code-view, .ds-hl) .hljs-selector-class {
+  color: rgb(var(--code-constant));
 }
 
-.file-code-view .hljs-title.class_,
-.file-code-view .hljs-type,
-.file-code-view .hljs-built_in {
-  color: rgb(var(--tone-cyan));
+:is(.file-code-view, .ds-hl) .hljs-title,
+:is(.file-code-view, .ds-hl) .hljs-section,
+:is(.file-code-view, .ds-hl) .hljs-title.function_ {
+  color: rgb(var(--code-function));
 }
 
-.file-code-view .hljs-attr,
-.file-code-view .hljs-attribute,
-.file-code-view .hljs-variable,
-.file-code-view .hljs-template-variable,
-.file-code-view .hljs-selector-attr {
-  color: rgb(var(--tone-blue));
+:is(.file-code-view, .ds-hl) .hljs-attr,
+:is(.file-code-view, .ds-hl) .hljs-attribute,
+:is(.file-code-view, .ds-hl) .hljs-params,
+:is(.file-code-view, .ds-hl) .hljs-variable,
+:is(.file-code-view, .ds-hl) .hljs-selector-attr {
+  color: rgb(var(--code-parameter));
 }
 
-.file-code-view .hljs-deletion {
+:is(.file-code-view, .ds-hl) .hljs-link {
+  color: rgb(var(--code-link));
+}
+
+:is(.file-code-view, .ds-hl) .hljs-deletion {
   color: rgb(var(--danger));
 }
 
-.file-code-view .hljs-operator,
-.file-code-view .hljs-punctuation,
-.file-code-view .hljs-subst,
-.file-code-view .hljs-params,
-.file-code-view .hljs-meta,
-.file-code-view .hljs-doctag {
-  color: rgb(var(--fg) / var(--text-secondary));
+:is(.file-code-view, .ds-hl) .hljs-operator,
+:is(.file-code-view, .ds-hl) .hljs-punctuation,
+:is(.file-code-view, .ds-hl) .hljs-meta,
+:is(.file-code-view, .ds-hl) .hljs-doctag {
+  color: rgb(var(--code-punctuation));
 }
 
-.file-code-view .hljs-emphasis {
+:is(.file-code-view, .ds-hl) .hljs-emphasis {
   font-style: italic;
 }
 
-.file-code-view .hljs-strong {
+:is(.file-code-view, .ds-hl) .hljs-strong {
   font-weight: 700;
 }

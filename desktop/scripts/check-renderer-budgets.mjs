@@ -64,7 +64,9 @@ function collectMetrics(root) {
   const initialScripts = referencedAssets(html, 'script', 'src', '.js')
   const globalStyles = referencedAssets(html, 'link', 'href', '.css')
   const assetNames = readdirSync(assetsDir)
-  const chatAssets = assetNames.filter((name) => /^ChatView-.+\.js$/.test(name))
+  const chatAssets = assetNames.filter((name) =>
+    /^ConversationView-.+\.js$/.test(name),
+  )
   const imageAssets = assetNames.filter((name) =>
     ['.avif', '.gif', '.jpeg', '.jpg', '.png', '.webp'].includes(
       extname(name).toLowerCase(),
@@ -76,7 +78,9 @@ function collectMetrics(root) {
   if (globalStyles.length === 0)
     throw new Error('renderer index.html has no global stylesheet')
   if (chatAssets.length === 0)
-    throw new Error('renderer assets contain no ChatView JavaScript chunk')
+    throw new Error(
+      'renderer assets contain no ConversationView JavaScript chunk',
+    )
   if (imageAssets.length === 0)
     throw new Error('renderer assets contain no image assets')
 
