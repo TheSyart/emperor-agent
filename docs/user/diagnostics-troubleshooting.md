@@ -24,6 +24,7 @@
 | 模型未配置或认证失败             | 设置 → 模型中的协议、API Base、模型 ID 和 API Key；输入框中的当前模型                                |
 | 模型偶发重试或长时间无响应       | 时间线中的重试提示；可重试错误最多重试 5 次，不会切换到其他模型                                      |
 | 升级后看不到以前的会话           | Diagnostics 的 `kernel.archivedLegacySessions`；旧会话被移到 `sessions.legacy-<时间戳>/`             |
+| 启动报 `installation_lock_busy`  | 另一个 Emperor 实例正在初始化；残留的锁会在持有进程退出或心跳过期后自动接管，稍后重开即可            |
 | 模型能回复但文件写入或命令被拒绝 | 当前权限预设、是否拒绝了提权请求、写入路径是否在 workspace 内                                        |
 | Windows 等平台上 `bash` 全部失败 | 该平台没有沙箱后端，需要切换到 `danger-full-access`                                                  |
 | 子代理请求提权总被拒绝           | 预期行为：子代理的审批策略固定为 `never`                                                             |

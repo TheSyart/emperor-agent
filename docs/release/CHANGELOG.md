@@ -6,7 +6,8 @@
 
 ### Added
 
-- 增加 Emperor Home（默认 `~/.emperor`）、旧根原子迁移、state layout 防降级与独立首次启动恢复页。
+- 更换 Agent 内核：每个会话的对话、工具调用、审批、Plan、Goal、压缩与子代理委派都写入同一份 append-only 的 `sessions/<id>/log.jsonl`，加载时自动做崩溃修复。首次启动新内核时，旧会话目录整体移到 `sessions.legacy-<时间戳>/`，不会删除。
+- 桌面端改为左侧会话、中间对话、右侧详情的三栏布局；新增「轨迹」视图，按时间线查看每一步的模型调用、工具调用与耗时；子代理作为独立的子会话打开，带返回父会话的路径导航。
 - 增加文件系统 Skills 与受管 Plugins：裸 Skill 无需 registry，Plugin 提供来源、版本、启用、更新和卸载语义，外部 CLI 通过普通命令与独立 probe 验证。
 - 增加与 Skill 无关的网络调研证据链：外部工具只登记 candidate，Core `web_fetch` 的 2xx 正文才能升级 verified source；最终答复执行逐事实单元引用校验和隔离 grounding review。
 - 精简 Core 权威 Slash command 平台为九个普通用户命令；`/new` 通过可恢复事务创建真正无旧会话历史的新上下文，每个 active Skill 直接注册自己的斜杠 token，并在任务完成或菜单打开时自动刷新。
@@ -28,6 +29,7 @@
 
 ### Changed
 
+- 移除 Team 多 Agent 协作功能；需要并行处理时使用子代理。
 - Prompt 动态注入产品、surface、main/plan/subagent 角色、真实 Skill 根、Plugin 解析、受管环境和 host/sandbox 边界；Skill、Plugin 与外部 CLI 必须分别报告。
 - 模型工具统一为 `Skill` 按需加载；不再暴露 `load_skill`、`install_skill` 或 `manage_environment`。Skills 页面变为解析结果 inventory，版本化安装移动到用户发起的 Plugins 页面。
 - Chat 移除顶部“对话 / 正在办差 · 模型”标题栏；Environment 在桌面宽屏常驻，Review、Terminal 或 Files 以 520–960px 宽工作区原位替代，并支持窄屏抽屉/全屏和布局状态恢复。
@@ -43,6 +45,11 @@
 
 ### Fixed
 
+- 修复新建对话后发送的消息落到之前某个历史会话的问题；Core 不再为缺少会话 id 的请求猜测目标会话。
+- 修复新对话发出第一条消息后，主画面显示「没有找到这个会话」、需要到侧栏再点一次的问题；在新对话里执行斜杠命令同样会直接进入新会话。
+- 修复 Agent 新增 MCP 时写进其他客户端配置的问题：MCP 只通过 Emperor 自己的 `mcp_config.json` 管理。
+- 修复上次启动被强杀或断电后，残留的启动锁导致应用一直报 `installation_lock_busy` 无法启动的问题。
+- write / edit 工具的原子写暂存文件改放在 Emperor Home，不再短暂出现在项目目录和 `git status` 里；在设置中打开项目 Skills 文件夹也不再为此在项目里创建目录。
 - 修复 `packages/core/src/memory/history.ts` 源码签名中的二进制 NUL 字节。
 - 完成 TypeScript / Electron 迁移审计后的主线加固与 parity 收尾。
 - 修复进程 exit 0、搜索线索和任务完成被混为一谈的问题；重复 URL、空输出、错误页和等价命令不再重置无进展保护。

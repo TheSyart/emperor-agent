@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
+> 最后核验：2026-09-23<br>
+> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
 
@@ -32,6 +32,7 @@
   AGENTS.md                # 可选的全局工作区说明，用户手写
   workspace/               # Chat 会话的工作目录
   spill/                   # 超出内联上限的工具结果全文
+  write-staging/           # write / edit 工具的原子写暂存区，写完即改名到目标位置
   skills/<skill-name>/SKILL.md   # 个人 Skills（也接受直接放置的 <name>.md）
   plugins/
     known_marketplaces.json
@@ -90,7 +91,9 @@
     state-root-migration.json
 ```
 
-启动时仍会创建 `team/`、`tasks/`、`goals/`、`code-intelligence/` 等目录以兼容旧布局迁移，但当前内核不读写其中内容；旧的 `hooks_config.json` 与 `hooks/` 也不再使用。这些内容保留原位，不会自动删除。
+旧版本可能留下 `team/`、`tasks/`、`goals/`、`code-intelligence/`、`memory/history.jsonl`、`memory/tool-results/` 等目录或文件。当前内核启动时不创建、也不读写它们；旧的 `hooks_config.json` 与 `hooks/` 同样不再使用。这些内容保留原位，不会自动删除，确认不需要后可以手动删除。
+
+Emperor Home 根目录及其主要子目录以 `0700` 创建，其他系统用户无法进入，因此其中的文件只有当前用户能访问。
 
 ## Session log
 
@@ -119,7 +122,23 @@ Build 项目目录只可能包含用户自己维护的内容：
     settings.local.json    # 本地项目 scope 的 Plugin 启用意图，不随仓库提交
 ```
 
-Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。只有在你把 Skill 保存或导入到项目 scope、打开项目 Skills 文件夹，或以项目 / 本地项目 scope 管理 Plugin 时，Core 才会写入上面 `.emperor/` 下的对应位置。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
+Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。只有在你把 Skill 保存或导入到项目 scope，或以项目 / 本地项目 scope 管理 Plugin 时，Core 才会写入上面 `.emperor/` 下的对应位置。在设置里打开项目 Skills 文件夹只是查看：目录还不存在时会提示，不会为此在项目里建目录。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
+
+Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor Home 的 `write-staging/` 写好内容，再整体改名到目标位置，项目里不会出现半写入的临时文件。如果项目和 Emperor Home 不在同一个文件系统上（例如外接盘），跨盘无法原子改名，这时退回在目标文件旁边暂存 `.<文件名>.<pid>.<uuid>.tmp` 再改名；写入依然原子，原有文件权限保留。
+
+## Emperor Home 之外的位置
+
+除 Emperor Home 和上面列出的项目 `.emperor/` 外，应用只会用到以下位置：
+
+| 位置                                                                     | 内容                                                                                                       |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`） | Chromium 的缓存、Cookies、Local Storage；界面主题、布局等浏览器侧偏好。不含会话、记忆等业务数据            |
+| `$HOME/.emperor.bootstrap.lock`                                          | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名 |
+| 系统临时目录                                                             | Skill 导入时的解压暂存，完成后删除                                                                         |
+
+启动锁记录持有者的进程号和心跳时间。如果上次启动被强杀或断电导致锁残留，下次启动发现持有进程已退出或心跳过期，会自动接管并记录警告；只有持有者仍在运行且心跳新鲜时，才会报 `installation_lock_busy`。
+
+`runtimeRoot` 只读：开发模式下它就是仓库根，应用不会向其中写入任何内容。
 
 ## 命名易混淆点：两个 `AGENTS` 系文件
 
