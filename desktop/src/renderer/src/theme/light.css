@@ -113,6 +113,14 @@
   --state-error-soft: 254 226 226;
   --state-error-label: 200 30 30;
 
+  /* ── 头像色(环境信息卡子智能体头像;按 id 哈希取 1..6,纯色圆点,无文字) ── */
+  --avatar-1: 37 99 235;
+  --avatar-2: 22 163 74;
+  --avatar-3: 234 88 12;
+  --avatar-4: 147 51 234;
+  --avatar-5: 219 39 119;
+  --avatar-6: 13 148 136;
+
   /* ── 代码高亮(dsh shiki css-variables 色值) ── */
   --code-fg: var(--label-primary);
   --code-constant: 28 126 214;

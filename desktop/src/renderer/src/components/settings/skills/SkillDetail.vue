@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * SkillDetail — the inline detail of one Skill inside Settings › Skills (it
+ * SkillDetail — the inline detail of one Skill inside 能力 › Skills (it
  * replaces the list; no nested modal). A bar with 「全部 Skills」 (back) and
  * the Skill's actions, the name with source / 只读 / 未保存 badges and its
  * description, the facts (DefinitionList: source, file, tags, requirements)

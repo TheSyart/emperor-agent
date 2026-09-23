@@ -24,6 +24,11 @@ import {
   type GoalProjectionState,
 } from '../runtime/handlers/goals'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
+import { isGitOperationCompletedEvent } from '../runtime/handlers/git'
+import {
+  runtimeNoticeFromEvent,
+  type RuntimeNotice,
+} from '../runtime/notifications'
 import type { TaskProjection } from '../runtime/handlers/tasks'
 import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
@@ -110,6 +115,13 @@ export function useRuntime(options: {
   refreshSessions?: () => Promise<void>
   /** Live subagent_* event of a session (sidebar child counts refresh). */
   onSubagentEvent?: (sessionId: string) => void
+  /**
+   * A live event worth a bell notification (scheduler run done / failed,
+   * a waiting question / approval / plan, a finished turn, a finished git
+   * operation) — of any session, not only the selected one. The caller
+   * applies the attention policy (runtime/notifications.ts).
+   */
+  onNotify?: (notice: RuntimeNotice) => void
 }) {
   const queuedPrompts = ref<QueuedPromptItem[]>([])
   const queueDraftRecovery = ref<QueueDraftRecovery | null>(null)
@@ -952,8 +964,10 @@ export function useRuntime(options: {
     const controllerDecision = runtimeControllers.accept(data, 'live')
     syncRuntimeControllerStates()
 
-    if (!controllerDecision.duplicate && !controllerDecision.stale)
+    if (!controllerDecision.duplicate && !controllerDecision.stale) {
       syncSessionControlPendingFromEvent(data)
+      notifyRuntimeEvent(data)
+    }
     if (controllerDecision.foreign) return
     if (!controllerDecision.accepted) return
 
@@ -972,6 +986,17 @@ export function useRuntime(options: {
 
     if (applyLiveTurnEffects(data)) return
     applyNonChatProjection(data, 'live')
+  }
+
+  /** Hand a live event of any session to the bell (`onNotify`). */
+  function notifyRuntimeEvent(data: WsEvent): void {
+    if (!options.onNotify) return
+    const notice = runtimeNoticeFromEvent(
+      data,
+      eventOwnerSessionId(data) || sessionId.value,
+      Date.now(),
+    )
+    if (notice) options.onNotify(notice)
   }
 
   function syncTaskProjection(state: TaskProjectionState): void {
@@ -1077,6 +1102,10 @@ export function useRuntime(options: {
       handleSchedulerEvent(data)
       return
     }
+
+    // Git receipts carry no view state: they only reach the bell
+    // (notifyRuntimeEvent), whichever session they belong to.
+    if (isGitOperationCompletedEvent(data)) return
 
     if (origin === 'live' && data.event.startsWith('subagent_'))
       options.onSubagentEvent?.(eventOwnerSessionId(data) || sessionId.value)

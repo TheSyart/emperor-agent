@@ -49,23 +49,11 @@ interface EmperorBridge {
     listener: (event: TerminalEvent) => void,
     scope: { sessionId: string; terminalId: string },
   ) => () => void
-  previewOpen?: (input: {
-    sessionId: string
-    previewId: string
-  }) => Promise<void>
-  previewExternal?: (input: {
-    sessionId: string
-    previewId: string
-  }) => Promise<void>
-  previewBounds?: (bounds: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }) => void
-  previewAction?: (action: 'back' | 'forward' | 'reload') => void
-  previewClose?: () => void
-  onPreviewState?: (listener: (state: PreviewViewState) => void) => () => void
+  openBrowserUrl?: (url: string) => Promise<unknown>
+  browserBounds?: (bounds: BrowserViewBounds | null) => void
+  browserAction?: (action: BrowserViewAction) => void
+  browserClose?: () => void
+  onBrowserState?: (listener: (state: BrowserViewState) => void) => () => void
 }
 
 export type SkillFolderScope = 'user' | 'project'
@@ -82,13 +70,32 @@ export interface SessionEventBatch {
   events: WireSessionEvent[]
 }
 
-export interface PreviewViewState {
-  sessionId: string
-  previewId: string
+/** Viewport rectangle of the embedded browser, in window CSS pixels. */
+export interface BrowserViewBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type BrowserViewAction = 'back' | 'forward' | 'reload' | 'stop'
+
+/** State of the embedded browser view pushed by main (`onBrowserState`). */
+export interface BrowserViewState {
   url: string
+  title: string
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  /** Only on the update reporting a failed main-frame load or crash. */
+  error?: string
+}
+
+export interface BrowserOpenResult {
+  ok: boolean
+  /** The normalized http(s) URL main started loading. */
+  url?: string
+  /** User-facing reason when the input was refused or the view is unavailable. */
   error?: string
 }
 
@@ -242,45 +249,62 @@ export function onTerminalEvent(
   return subscribe(listener, scope)
 }
 
-export async function openPreviewView(input: {
-  sessionId: string
-  previewId: string
-}): Promise<void> {
-  const fn = bridge()?.previewOpen
-  if (typeof fn !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  await fn(input)
+const BROWSER_OPEN_FAILED = '无法打开网址'
+
+/**
+ * Open what the user typed in the embedded browser. Trust boundary: only the
+ * BrowserPane address bar may call this, on an explicit user submit — never
+ * with URLs from markdown, tool output or model text (enforced by
+ * `desktop/src/main/trusted-renderer-usage.test.ts`). Main normalizes the
+ * input (bare hosts get http:// for this machine, https:// otherwise) and
+ * refuses anything but credential-free http(s).
+ */
+export async function openBrowserUrl(url: string): Promise<BrowserOpenResult> {
+  const open = bridge()?.openBrowserUrl
+  if (typeof open !== 'function')
+    return { ok: false, error: CORE_BRIDGE_UNAVAILABLE_MESSAGE }
+  let result: unknown
+  try {
+    result = await open(url)
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : BROWSER_OPEN_FAILED,
+    }
+  }
+  const record =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {}
+  if (record.ok === true && typeof record.url === 'string')
+    return { ok: true, url: record.url }
+  return {
+    ok: false,
+    error:
+      typeof record.error === 'string' && record.error
+        ? record.error
+        : BROWSER_OPEN_FAILED,
+  }
 }
 
-export async function openPreviewExternal(input: {
-  sessionId: string
-  previewId: string
-}): Promise<void> {
-  const fn = bridge()?.previewExternal
-  if (typeof fn !== 'function') throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  await fn(input)
+/** Place the native browser view; null hides it (it draws above the DOM). */
+export function setBrowserBounds(bounds: BrowserViewBounds | null): void {
+  bridge()?.browserBounds?.(bounds)
 }
 
-export function setPreviewBounds(bounds: {
-  x: number
-  y: number
-  width: number
-  height: number
-}): void {
-  bridge()?.previewBounds?.(bounds)
+export function browserAction(action: BrowserViewAction): void {
+  bridge()?.browserAction?.(action)
 }
 
-export function previewAction(action: 'back' | 'forward' | 'reload'): void {
-  bridge()?.previewAction?.(action)
+/** Close the view and wipe its in-memory browsing data. */
+export function closeBrowserView(): void {
+  bridge()?.browserClose?.()
 }
 
-export function closePreviewView(): void {
-  bridge()?.previewClose?.()
-}
-
-export function onPreviewState(
-  listener: (state: PreviewViewState) => void,
+export function onBrowserState(
+  listener: (state: BrowserViewState) => void,
 ): () => void {
-  return bridge()?.onPreviewState?.(listener) ?? (() => {})
+  return bridge()?.onBrowserState?.(listener) ?? (() => {})
 }
 
 function isCoreIpcErrorEnvelope(value: unknown): value is CoreIpcErrorEnvelope {

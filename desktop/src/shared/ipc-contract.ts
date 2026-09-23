@@ -8,18 +8,38 @@ export const PET_EVENT_CHANNEL = 'emperor:pet:event'
 export const PET_STATUS_CHANNEL = 'emperor:pet:status-event'
 export const TERMINAL_EVENT_CHANNEL = 'emperor:terminal:event'
 export const TERMINAL_SUBSCRIPTION_CHANNEL = 'emperor:terminal:subscription'
-export const PREVIEW_OPEN_CHANNEL = 'emperor:preview:open'
-export const PREVIEW_EXTERNAL_CHANNEL = 'emperor:preview:external'
-export const PREVIEW_BOUNDS_CHANNEL = 'emperor:preview:bounds'
-export const PREVIEW_ACTION_CHANNEL = 'emperor:preview:action'
-export const PREVIEW_CLOSE_CHANNEL = 'emperor:preview:close'
-export const PREVIEW_STATE_CHANNEL = 'emperor:preview:state'
+/**
+ * Main-only embedded browser (`BrowserViewHost`). Open takes `{ url }` typed by
+ * the user in the BrowserPane address bar; main normalizes it and answers
+ * `{ ok: true, url } | { ok: false, error }`.
+ */
+export const BROWSER_OPEN_CHANNEL = 'emperor:browser:open'
+/** Viewport rectangle of the browser view; null or too small hides it. */
+export const BROWSER_BOUNDS_CHANNEL = 'emperor:browser:bounds'
+/** One of {@link BrowserViewAction}. */
+export const BROWSER_ACTION_CHANNEL = 'emperor:browser:action'
+export const BROWSER_CLOSE_CHANNEL = 'emperor:browser:close'
+/** Main → renderer {@link BrowserViewState} updates. */
+export const BROWSER_STATE_CHANNEL = 'emperor:browser:state'
 export const REFERENCE_REVEAL_CHANNEL = 'emperor:reference:reveal'
 export const EXTERNAL_OPEN_CHANNEL = 'emperor:external:open'
 /** Main-only: open the personal or project Skills folder (created when missing). */
 export const SKILLS_OPEN_FOLDER_CHANNEL = 'emperor:skills:open-folder'
 /** Main-only: native single-file picker with extension filters. */
 export const SELECT_FILE_CHANNEL = 'emperor:select-file'
+
+export type BrowserViewAction = 'back' | 'forward' | 'reload' | 'stop'
+
+/** State of the embedded browser view, sent on {@link BROWSER_STATE_CHANNEL}. */
+export interface BrowserViewState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  /** Set on the update that reports a failed main-frame load or crash. */
+  error?: string
+}
 
 /** Extension filter of the native file picker (`SELECT_FILE_CHANNEL`). */
 export interface FileDialogFilter {

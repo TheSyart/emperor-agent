@@ -7,6 +7,7 @@ import {
 
 export const ENVIRONMENT_TOOL_IDS = [
   'git',
+  'gh',
   'ripgrep',
   'volta',
   'node',

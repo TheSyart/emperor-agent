@@ -14,6 +14,10 @@
  * Layout: 188px nav rail + content column. The content column is a 54px
  * header (section title, the section's header actions, close) over the
  * options area (padding 0 24 24, content ≤ 720px, scrolls vertically).
+ * 定时任务 / 插件 / Skills / MCP are full pages now (/scheduler,
+ * /capabilities/:tab); a `?settings=` link to one of them is redirected there by
+ * the router guard before the modal would open.
+ *
  * Section bodies are async chunks (`<Name>Section.vue`), each owning its
  * layout: they build on components/settings/ui (SettingsSection & co.) and
  * publish header actions through useSettingsHeader — the shell never styles
@@ -33,22 +37,19 @@ import { useModalLayer } from '../ui/modalStack'
 import SettingsHeaderBar from './SettingsHeaderBar.vue'
 import SettingsNav from './SettingsNav.vue'
 import { provideSettingsHeader } from './settingsHeader'
-import { SETTINGS_SECTIONS, type SettingsSectionKey } from './settingsSections'
+import {
+  SETTINGS_SECTIONS,
+  type SettingsModalSection,
+} from './settingsSections'
 import { useSettingsRoute } from './useSettingsRoute'
 
-const SECTION_BODIES: Record<SettingsSectionKey, Component> = {
+const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   general: defineAsyncComponent(() => import('./GeneralSection.vue')),
   model: defineAsyncComponent(() => import('./ModelSection.vue')),
-  plugins: defineAsyncComponent(() => import('./PluginsSection.vue')),
-  skills: defineAsyncComponent(() => import('./SkillsSection.vue')),
-  mcp: defineAsyncComponent(() => import('./McpSection.vue')),
   hooks: defineAsyncComponent(() => import('./HooksSection.vue')),
-  tools: defineAsyncComponent(() => import('./ToolsSection.vue')),
-  scheduler: defineAsyncComponent(() => import('./SchedulerSection.vue')),
   memory: defineAsyncComponent(() => import('./MemorySection.vue')),
   tokens: defineAsyncComponent(() => import('./TokensSection.vue')),
   pet: defineAsyncComponent(() => import('./PetSection.vue')),
-  configs: defineAsyncComponent(() => import('./ConfigsSection.vue')),
   diagnostics: defineAsyncComponent(() => import('./DiagnosticsSection.vue')),
 }
 
@@ -71,7 +72,7 @@ function close() {
   void settings.closeSettings()
 }
 
-function select(target: SettingsSectionKey) {
+function select(target: SettingsModalSection) {
   if (target === section.value) return
   void settings.selectSection(target)
 }

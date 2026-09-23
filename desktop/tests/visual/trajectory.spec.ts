@@ -109,7 +109,7 @@ for (const [name, query, tabs] of INSPECTOR_TABS) {
         .locator(`.traj-row[data-kind="${row[1]}"]`)
         .nth(Number(row[2]))
         .click()
-    const inspector = page.getByLabel('Event details', { exact: true })
+    const inspector = page.getByLabel('事件详情', { exact: true })
     await expect(inspector).toBeVisible()
     for (const label of tabs) {
       await inspector.getByRole('tab', { name: label, exact: true }).click()
@@ -125,7 +125,7 @@ test('inspector compaction + truncated tool + child session', async ({
   page,
 }) => {
   await open(page, 'scenario=rich')
-  const inspector = page.getByLabel('Event details', { exact: true })
+  const inspector = page.getByLabel('事件详情', { exact: true })
   await page.locator('.traj-row[data-kind="compacted"]').last().click()
   await expect(inspector.getByRole('tab', { name: 'Raw Output' })).toBeVisible()
   await shot(page, 'inspector-compacted-summary')
@@ -146,6 +146,44 @@ test('inspector compaction + truncated tool + child session', async ({
     .click()
   await expect(inspector.locator('[data-link="child-session"]')).toBeVisible()
   await shot(page, 'inspector-subagent')
+})
+
+test('inspector collapses, keeps the selection and reopens', async ({
+  page,
+}) => {
+  await open(page, 'scenario=rich&select=11')
+  const inspector = page.getByLabel('事件详情', { exact: true })
+  const toggle = page.getByRole('button', { name: '详情', exact: true })
+  await expect(inspector).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await shot(page, 'inspector-open')
+  await inspector.getByRole('button', { name: '收起详情' }).click()
+  await expect(inspector).toBeHidden()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.locator('.traj-row[data-selected="true"]')).toBeVisible()
+  await shot(page, 'inspector-collapsed')
+  await toggle.click()
+  await expect(inspector).toBeVisible()
+  await expect(
+    inspector.getByRole('tab', { name: 'Summary', exact: true }),
+  ).toBeVisible()
+})
+
+test('inspector empty state', async ({ page }) => {
+  await open(page, 'scenario=rich')
+  await page.getByRole('button', { name: '详情', exact: true }).click()
+  await expect(page.getByLabel('事件详情', { exact: true })).toContainText(
+    '在轨迹中选择一条记录查看详情',
+  )
+  await shot(page, 'inspector-empty')
+})
+
+test('narrow split overlays the inspector', async ({ page }) => {
+  await open(page, 'scenario=rich&select=11', { width: 600 })
+  const column = page.locator('.inspector-col')
+  await expect(column).toBeVisible()
+  await expect(column).toHaveCSS('position', 'absolute')
+  await shot(page, 'inspector-overlay')
 })
 
 test('inspect deep link focuses the call', async ({ page }) => {

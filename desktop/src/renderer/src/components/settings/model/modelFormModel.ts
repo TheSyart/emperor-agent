@@ -44,6 +44,17 @@ export interface ModelEntryDraft {
     protocol: 'openai' | 'anthropic'
     apiBase: string
   }
+  /**
+   * New entries under an existing provider: the saved entry whose key is
+   * reused while the key field stays empty and the endpoint is unchanged.
+   */
+  credentialsFrom?: {
+    entryId: string
+    label: string
+    provider: string
+    protocol: 'openai' | 'anthropic'
+    apiBase: string
+  }
 }
 
 export function providerProtocols(
@@ -150,6 +161,42 @@ export function createModelEntryDraft(
   }
 }
 
+/**
+ * A new entry under the same provider as `source`: same protocol and API
+ * base, and — when `source` has a saved key — that key is reused until the
+ * user types another one or changes the endpoint.
+ */
+export function createSiblingEntryDraft(
+  provider: ProviderOption,
+  source: ModelEntry,
+): ModelEntryDraft {
+  const draft = createModelEntryDraft(provider)
+  const protocols = providerProtocols(provider)
+  if (protocols.includes(source.protocol)) draft.protocol = source.protocol
+  draft.apiBase = source.apiBase || provider.apiBases?.[draft.protocol] || ''
+  if (source.apiKey)
+    draft.credentialsFrom = {
+      entryId: source.entryId,
+      label: modelEntryLabel(source),
+      provider: source.provider,
+      protocol: source.protocol,
+      apiBase: source.apiBase,
+    }
+  return draft
+}
+
+/** The inherited key applies: nothing typed and the same endpoint. */
+export function credentialsInherited(draft: ModelEntryDraft): boolean {
+  const source = draft.credentialsFrom
+  if (!source || draft.entryId || draft.apiKey.trim()) return false
+  return (
+    source.provider === draft.provider &&
+    source.protocol === draft.protocol &&
+    canonicalModelApiBase(draft.protocol, source.apiBase) ===
+      canonicalModelApiBase(draft.protocol, draft.apiBase)
+  )
+}
+
 export function applyProviderSelection(
   draft: ModelEntryDraft,
   provider: ProviderOption,
@@ -252,6 +299,9 @@ export function toModelEntrySaveInput(
     displayName: draft.displayNameCustomized ? draft.displayName.trim() : '',
     apiBase: draft.apiBase.trim(),
     ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(credentialsInherited(draft)
+      ? { credentialsFrom: draft.credentialsFrom!.entryId }
+      : {}),
     capabilityOverrides,
     contextWindowTokens: Math.max(1, Math.trunc(draft.contextWindowTokens)),
     maxTokens: Math.max(1, Math.trunc(draft.maxTokens)),
@@ -282,10 +332,7 @@ export const PROTOCOL_LABELS: Record<ModelProtocol, string> = {
   anthropic: 'Anthropic Messages',
 }
 
-export const PROTOCOL_SHORT_LABELS: Record<ModelProtocol, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-}
+export { PROTOCOL_SHORT_LABELS } from '../../../model/providerGroups'
 
 export const CAPABILITY_ROWS = [
   { key: 'toolCall', label: '工具调用' },
@@ -309,6 +356,20 @@ export const OUTPUT_TOKEN_PRESETS = [8_000, 16_000, 32_000, 64_000] as const
 
 export function formatTokenPreset(value: number): string {
   return `${value / 1000}K`
+}
+
+/** Compact token count for model rows: 8K, 128K, 1M, 1.05M. */
+export function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
+  return `${Math.round(value / 1000)}K`
+}
+
+/** Short capability tags of a model row, in CAPABILITY_ROWS order. */
+export const CAPABILITY_TAGS: Record<CapabilityKey, string> = {
+  toolCall: '工具',
+  vision: '识图',
+  reasoning: '思考',
 }
 
 /** 「支持 · 已识别」 status line of one capability, from the resolved profile. */

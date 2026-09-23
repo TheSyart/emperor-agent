@@ -2,12 +2,18 @@
 /**
  * TrajectorySession — TrajectoryView bound to one session (keyed by the
  * view on sessionId): wires the shared controller to the toolbar (duration
- * preference, fold all, throttled search with match stepping), the
- * timeline (brush focus, record select / focus) and the ledger.
+ * preference, fold all, throttled search with match stepping, inspector
+ * toggle), the timeline (brush focus, record select / focus), the ledger
+ * and the inspector column — the app's only inspector. The column shows
+ * while `frame.inspectorOpen`; selecting a record opens it, collapsing it
+ * keeps the selection. Its width is dragged through useResizable and
+ * persisted in frameState. Below a 640px split (container query) it
+ * overlays the ledger instead.
  *
  * Props / emits: see TrajectoryView.
  */
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { useResizable } from '../../composables/useResizable'
 import type { ConversationStore } from '../../conversation/store'
 import {
   TrajectorySearchIndex,
@@ -25,12 +31,18 @@ import TrajectoryTable from './TrajectoryTable.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import TrajectoryToolbar from './TrajectoryToolbar.vue'
 import InspectorPanel from './inspector/InspectorPanel.vue'
+import { focusCallStep } from './focusCallRetry'
 import { useTrajectory } from './useTrajectory'
+import {
+  INSPECTOR_DEFAULT,
+  INSPECTOR_MAX,
+  INSPECTOR_MIN,
+} from '../shell/columns'
+import { frameActions, useFrameState } from '../shell/frameState'
 
 const props = defineProps<{
   sessionId: string
   focusCallId: string | null
-  inlineInspector: boolean
   store?: ConversationStore
 }>()
 const emit = defineEmits<{
@@ -185,61 +197,61 @@ function toggleAllAssistants(): void {
   c.setCollapsedAssistants(next)
 }
 
+// ── inspector column ───────────────────────────────────────────────────
+const frame = useFrameState()
+const inspectorOpen = computed(() => frame.inspectorOpen)
+// Selecting (another) record or request brings the column back (registered
+// before the deep-link watcher so its immediate selection opens it too).
+watch(c.selection, (selection) => {
+  if (selection !== null) frameActions.openInspector(frame)
+})
+const inspectorWidth = computed({
+  get: () => frame.inspectorWidth,
+  set: (px: number) => frameActions.setInspectorWidth(frame, px),
+})
+const resizer = useResizable({
+  size: inspectorWidth,
+  min: INSPECTOR_MIN,
+  max: INSPECTOR_MAX,
+  edge: 'left',
+})
+function toggleInspector(): void {
+  frameActions.toggleInspector(frame)
+}
+function collapseInspector(): void {
+  frameActions.closeInspector(frame)
+}
+function resetInspectorWidth(): void {
+  frameActions.setInspectorWidth(frame, INSPECTOR_DEFAULT)
+}
+
 // ── Inspect deep link ──────────────────────────────────────────────────
+// A call outside the loaded window pages older history in (bounded) and
+// retries as the turns grow.
 let appliedCallId: string | null = null
+let huntedCallId: string | null = null
+let olderPagesLoaded = 0
 watch(
-  () => [props.focusCallId, c.turns.value] as const,
-  ([callId]) => {
+  () => [props.focusCallId, c.turns.value, c.windowState.value] as const,
+  ([callId, , sessionWindow]) => {
     if (callId === null || callId === appliedCallId) return
-    if (!c.focusCall(callId)) return
-    appliedCallId = callId
-    emit('inspect-applied', callId)
+    if (callId !== huntedCallId) {
+      huntedCallId = callId
+      olderPagesLoaded = 0
+    }
+    if (c.focusCall(callId)) {
+      appliedCallId = callId
+      emit('inspect-applied', callId)
+      return
+    }
+    if (focusCallStep(sessionWindow, olderPagesLoaded) !== 'load-older') return
+    olderPagesLoaded++
+    void c.loadOlder()
   },
   { immediate: true },
 )
 
 watch(c.selectedRecordId, (id) => emit('select', id))
-
-// ── inline inspector split ─────────────────────────────────────────────
-const inspectorWidth = ref<number | null>(null)
-const split = ref<HTMLElement | null>(null)
-let resize: { pointerId: number; startX: number; startWidth: number } | null =
-  null
-const INSPECTOR_MIN = 320
-const INSPECTOR_MAX = 720
-function clampWidth(width: number): number {
-  const total = split.value?.getBoundingClientRect().width ?? 1200
-  return Math.round(
-    Math.min(
-      Math.max(width, INSPECTOR_MIN),
-      Math.max(INSPECTOR_MIN, Math.min(INSPECTOR_MAX, total - 280)),
-    ),
-  )
-}
-function onResizeDown(event: PointerEvent): void {
-  if (event.button !== 0) return
-  const aside = (event.currentTarget as HTMLElement).parentElement
-  if (aside === null) return
-  resize = {
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startWidth: aside.getBoundingClientRect().width,
-  }
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-  event.preventDefault()
-}
-function onResizeMove(event: PointerEvent): void {
-  if (resize === null || resize.pointerId !== event.pointerId) return
-  inspectorWidth.value = clampWidth(
-    resize.startWidth + resize.startX - event.clientX,
-  )
-}
-function onResizeEnd(): void {
-  resize = null
-}
-const showInlineInspector = computed(
-  () => props.inlineInspector && c.selection.value !== null,
-)
 
 onBeforeUnmount(() => {
   clearTimeout(indexTimer)
@@ -261,11 +273,13 @@ onBeforeUnmount(() => {
       :query="query"
       :match-count="matchOrder.length"
       :match-position="matchPosition"
+      :inspector-open="inspectorOpen"
       @update:actual-duration="setActualDuration"
       @update:query="query = $event"
       @toggle-turns="toggleAllTurns"
       @toggle-calls="toggleAllAssistants"
       @step="stepMatch"
+      @toggle-inspector="toggleInspector"
     />
     <TrajectoryTimeline
       :turns="c.turns.value"
@@ -280,7 +294,7 @@ onBeforeUnmount(() => {
       @record-focus="onTimelineFocus"
       @load-earlier="c.loadOlder()"
     />
-    <div ref="split" class="split">
+    <div class="split">
       <TrajectoryTable
         :controller="c"
         :search-matches="searchMatchIndexes"
@@ -289,27 +303,22 @@ onBeforeUnmount(() => {
         @clear="timelineRange = null"
       />
       <div
-        v-if="showInlineInspector"
-        class="inline-inspector"
-        :style="
-          inspectorWidth === null ? undefined : { width: `${inspectorWidth}px` }
-        "
+        v-if="inspectorOpen"
+        class="inspector-col"
+        :data-resizing="resizer.resizing.value || undefined"
+        :style="{ '--inspector-width': `${inspectorWidth}px` }"
       >
         <div
           class="resize-handle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize event details"
-          title="Drag to resize. Double-click to reset."
-          @pointerdown="onResizeDown"
-          @pointermove="onResizeMove"
-          @pointerup="onResizeEnd"
-          @pointercancel="onResizeEnd"
-          @dblclick="inspectorWidth = null"
+          v-bind="resizer.separatorProps"
+          aria-label="调整详情宽度"
+          title="拖动调整宽度，双击恢复默认"
+          @dblclick="resetInspectorWidth"
         />
         <InspectorPanel
           :controller="c"
           @open-subagent="emit('open-subagent', $event)"
+          @collapse="collapseInspector"
         />
       </div>
     </div>
@@ -330,6 +339,7 @@ onBeforeUnmount(() => {
 }
 
 .split {
+  container: trajectory-split / inline-size;
   position: relative;
   isolation: isolate;
   display: flex;
@@ -339,15 +349,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.inline-inspector {
+/* The ledger keeps at least 280px beside the column. */
+.inspector-col {
   position: relative;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: clamp(320px, 38%, 440px);
+  width: var(--inspector-width);
   max-width: calc(100% - 280px);
   min-height: 0;
   border-left: 1px solid var(--border-l2);
+  background: rgb(var(--bg-layer-1));
 }
 
 .resize-handle {
@@ -356,19 +368,33 @@ onBeforeUnmount(() => {
   top: 0;
   bottom: 0;
   left: calc(-1 * var(--space-1));
-  width: 8px;
+  width: var(--space-2);
   cursor: col-resize;
   touch-action: none;
+  outline: none;
 }
 
-@media (max-width: 760px) {
-  .inline-inspector {
+.resize-handle:hover,
+.resize-handle:focus-visible,
+.inspector-col[data-resizing] .resize-handle {
+  background: linear-gradient(
+    90deg,
+    transparent calc(50% - 1px),
+    rgb(var(--focus-ring) / 0.5) calc(50% - 1px),
+    rgb(var(--focus-ring) / 0.5) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+}
+
+/* Narrow split: the column floats over the ledger. */
+@container trajectory-split (max-width: 639px) {
+  .inspector-col {
     position: absolute;
     z-index: var(--z-overlay);
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(92%, 420px);
+    width: min(92%, var(--inspector-width));
     max-width: 92%;
     box-shadow: var(--shadow-lv3);
   }

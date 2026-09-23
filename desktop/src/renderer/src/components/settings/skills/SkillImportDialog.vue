@@ -10,7 +10,11 @@
  * the result (SkillImportResult) instead of the form. Same-name conflicts
  * get 「覆盖同名 Skill」, which runs the import again with `overwrite`.
  *
- * Props: mode, folderPath? (mode 'folder'), scopeOptions, sessionId?.
+ * Opened with `initialUrl` (the 探索 page's Skill entries) it starts on the
+ * URL tab with that link filled in; nothing downloads until 「导入」.
+ *
+ * Props: mode, folderPath? (mode 'folder'), initialUrl? (mode 'archive'),
+ * scopeOptions, sessionId?.
  * v-model:open. Emits: imported(summary) whenever something was imported,
  * select(name) from a result row's 「查看」.
  */
@@ -39,10 +43,11 @@ const props = withDefaults(
   defineProps<{
     mode: 'archive' | 'folder'
     folderPath?: string
+    initialUrl?: string
     scopeOptions: readonly SelectOption<SkillScope>[]
     sessionId?: string | null
   }>(),
-  { folderPath: '', sessionId: null },
+  { folderPath: '', initialUrl: '', sessionId: null },
 )
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{
@@ -72,9 +77,9 @@ watch([tab, zipPath, url, folder, scope], () => {
 })
 
 function reset() {
-  tab.value = 'zip'
+  tab.value = props.initialUrl ? 'url' : 'zip'
   zipPath.value = ''
-  url.value = ''
+  url.value = props.initialUrl
   folder.value = props.folderPath
   scope.value = 'user'
   importing.value = false

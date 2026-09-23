@@ -10,7 +10,11 @@
  * a turn runs.
  *
  * Props: sessionId; store? (injected ConversationStore — tests/gallery).
- * Emits: inspect(callId), open-subagent(sessionId), edit-message(text).
+ * Emits: inspect(callId), open-subagent(sessionId), edit-message(text),
+ * first-visible(key | null) — the topmost visible row, reported once per
+ * frame while the reader scrolls (the turn scrubber's active tick).
+ * Exposes: scrollToBottom(), scrollToKey(key) — reveal a row near the top
+ * (the list is virtualized, so rows off screen are reachable only here).
  */
 import {
   computed,
@@ -49,6 +53,7 @@ const emit = defineEmits<{
   inspect: [callId: string]
   'open-subagent': [sessionId: string]
   'edit-message': [text: string]
+  'first-visible': [key: string | null]
 }>()
 
 provideChatContext({
@@ -100,6 +105,7 @@ const openError = computed(() => windowState.value?.error ?? null)
 // ── scrolling ───────────────────────────────────────────────────────────
 const scroller = ref<HTMLElement | null>(null)
 const column = ref<HTMLElement | null>(null)
+const list = ref<{ scrollToItem: (index: number) => void } | null>(null)
 const following = ref(true)
 /** Last scrollTop we wrote (reader input is anything that deviates). */
 let observedTop = 0
@@ -109,7 +115,17 @@ interface PagingAnchor {
   key: string
   top: number
   until: number
+  /** Set by scrollToKey: paging keeps the revealed row, not the top one. */
+  reveal?: true
 }
+
+/** Offset (px) a revealed row keeps below the scroller top (its padding). */
+const REVEAL_OFFSET = 16
+
+const nextFrame: (callback: () => void) => unknown =
+  typeof requestAnimationFrame === 'function'
+    ? (callback) => requestAnimationFrame(callback)
+    : (callback) => setTimeout(callback, 16)
 let anchor: PagingAnchor | null = null
 
 function pinToBottom(): void {
@@ -177,7 +193,7 @@ function restoreAnchor(): void {
 function loadOlder(): void {
   const current = handle.value
   if (current === null || !hasMore.value || loadingOlder.value) return
-  anchor = captureAnchor()
+  if (!anchor?.reveal || Date.now() > anchor.until) anchor = captureAnchor()
   void current.loadOlder().finally(() => {
     void nextTick(restoreAnchor)
   })
@@ -196,6 +212,48 @@ function onScroll(): void {
   }
   observedTop = el.scrollTop
   if (el.scrollTop < 160 && !following.value) loadOlder()
+  reportFirstVisible()
+}
+
+// ── first visible row / reveal ──────────────────────────────────────────
+let visibleQueued = false
+let lastVisibleKey: string | null | undefined
+
+function reportFirstVisible(): void {
+  if (visibleQueued) return
+  visibleQueued = true
+  nextFrame(() => {
+    visibleQueued = false
+    const key = captureAnchor()?.key ?? null
+    if (key === lastVisibleKey) return
+    lastVisibleKey = key
+    emit('first-visible', key)
+  })
+}
+
+/**
+ * Reveal the row `key` near the top. A rendered row scrolls directly; an
+ * off-screen one goes through the virtual list first, then the paging anchor
+ * settles it as the rows around it render and measure. False when the key is
+ * not in the loaded window.
+ */
+function scrollToKey(key: string): boolean {
+  const el = scroller.value
+  const index = order.value.indexOf(key)
+  if (el === null || index < 0) return false
+  following.value = false
+  anchor = { key, top: REVEAL_OFFSET, until: Date.now() + 1500, reveal: true }
+  const row = findRow(key)
+  if (row !== null) {
+    el.scrollTop += rowTop(row, el) - REVEAL_OFFSET
+    observedTop = el.scrollTop
+  } else list.value?.scrollToItem(index)
+  nextFrame(() => {
+    restoreAnchor()
+    nextFrame(restoreAnchor)
+  })
+  reportFirstVisible()
+  return true
 }
 
 function onContentResize(): void {
@@ -231,6 +289,7 @@ watch(
       return
     }
     if (following.value) void nextTick(pinToBottom)
+    reportFirstVisible()
   },
   { flush: 'post' },
 )
@@ -247,11 +306,12 @@ watch(
     following.value = true
     anchor = null
     lastKey = undefined
+    lastVisibleKey = undefined
     void nextTick(pinToBottom)
   },
 )
 
-defineExpose({ scrollToBottom })
+defineExpose({ scrollToBottom, scrollToKey })
 </script>
 
 <template>
@@ -283,6 +343,7 @@ defineExpose({ scrollToBottom })
           会话记录读取失败：{{ openError }}
         </div>
         <DynamicScroller
+          ref="list"
           class="list"
           :items="items"
           key-field="id"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * PluginCard — one installed Plugin in the Settings › 插件 grid (dsh plugin
+ * PluginCard — one installed Plugin in the 能力 › 插件 grid (dsh plugin
  * inventory card): a compact header button (name, runtime dot, 已启用 /
  * 已停用 tag, chevron) that discloses the facts (DefinitionList) and the
  * controls — the enable switch and an inline-confirmed 「卸载」. Managed

@@ -4,14 +4,16 @@
  * (recorded durations vs equal-width operations), fold / unfold every turn,
  * fold / unfold every assistant's tool calls, and the ledger search (the
  * query is debounced; ↑ / ↓ step through the matches with an `n / N`
- * counter; Enter = next, Shift+Enter = previous, Escape clears).
+ * counter; Enter = next, Shift+Enter = previous, Escape clears), and the
+ * right-aligned 详情 toggle that collapses / reopens the inspector column.
  *
  * Props: actualDuration; allTurnsCollapsed; allAssistantsCollapsed;
  * query (v-model:query, debounced by `debounceMs`, default 120);
- * matchCount; matchPosition (0-based cursor, -1 none).
+ * matchCount; matchPosition (0-based cursor, -1 none); inspectorOpen.
  * Emits: update:actualDuration, toggle-turns, toggle-calls,
- * update:query, step(direction ±1).
+ * update:query, step(direction ±1), toggle-inspector.
  */
+import { PanelRight } from 'lucide-vue-next'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import DsChevronDown from '../icons/ds/DsChevronDown.vue'
 import DsChevronUp from '../icons/ds/DsChevronUp.vue'
@@ -26,8 +28,9 @@ const props = withDefaults(
     matchCount?: number
     matchPosition?: number
     debounceMs?: number
+    inspectorOpen?: boolean
   }>(),
-  { matchCount: 0, matchPosition: -1, debounceMs: 120 },
+  { matchCount: 0, matchPosition: -1, debounceMs: 120, inspectorOpen: false },
 )
 const emit = defineEmits<{
   'update:actualDuration': [value: boolean]
@@ -35,6 +38,7 @@ const emit = defineEmits<{
   'toggle-calls': []
   'update:query': [value: string]
   step: [direction: 1 | -1]
+  'toggle-inspector': []
 }>()
 
 const draft = ref(props.query)
@@ -163,6 +167,17 @@ onBeforeUnmount(() => clearTimeout(timer))
         </button>
       </template>
     </div>
+    <button
+      type="button"
+      class="action inspector-toggle"
+      aria-label="详情"
+      :aria-pressed="inspectorOpen"
+      :title="inspectorOpen ? '收起详情' : '展开详情'"
+      @click="emit('toggle-inspector')"
+    >
+      <PanelRight :size="12" aria-hidden="true" />
+      详情
+    </button>
   </div>
 </template>
 

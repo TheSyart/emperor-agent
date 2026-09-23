@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "catalogId": "emperor-environment-tools",
-  "release": "2026.07-foundation",
+  "release": "2026.09-github-cli",
   "licenses": [
     {
       "id": "bsd-2-clause",
@@ -94,6 +94,82 @@
             "publisher": "The Rust Project Developers"
           },
           "estimatedBytes": 0,
+          "requiresElevation": false,
+          "requiresSeparateConfirmation": false
+        }
+      ]
+    },
+    {
+      "id": "gh",
+      "displayName": "GitHub CLI",
+      "category": "project",
+      "version": { "pinned": "2.101.0", "requirement": ">=2.40.0" },
+      "licenseId": "mit",
+      "dependencies": [],
+      "targets": [
+        { "platform": "darwin", "arch": "arm64" },
+        { "platform": "darwin", "arch": "x64" },
+        { "platform": "win32", "arch": "x64" },
+        { "platform": "linux", "arch": "x64" }
+      ],
+      "probe": {
+        "executables": ["gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"],
+        "args": ["--version"],
+        "versionPattern": "^gh version\\s+([0-9]+(?:\\.[0-9]+)+)"
+      },
+      "strategies": [
+        {
+          "id": "homebrew",
+          "kind": "package_manager",
+          "targets": [
+            { "platform": "darwin", "arch": "arm64" },
+            { "platform": "darwin", "arch": "x64" }
+          ],
+          "executable": "brew",
+          "args": ["install", "gh"],
+          "source": {
+            "url": "https://formulae.brew.sh/formula/gh",
+            "publisher": "Homebrew"
+          },
+          "estimatedBytes": 16000000,
+          "requiresElevation": false,
+          "requiresSeparateConfirmation": false
+        },
+        {
+          "id": "winget",
+          "kind": "package_manager",
+          "targets": [{ "platform": "win32", "arch": "x64" }],
+          "executable": "winget.exe",
+          "args": [
+            "install",
+            "--exact",
+            "--id",
+            "GitHub.cli",
+            "--source",
+            "winget",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--disable-interactivity"
+          ],
+          "source": {
+            "url": "https://github.com/cli/cli",
+            "publisher": "GitHub, Inc."
+          },
+          "estimatedBytes": 16000000,
+          "requiresElevation": true,
+          "requiresSeparateConfirmation": false
+        },
+        {
+          "id": "official-guided",
+          "kind": "system_prompt",
+          "targets": [{ "platform": "linux", "arch": "x64" }],
+          "executable": "gh",
+          "args": ["--version"],
+          "source": {
+            "url": "https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+            "publisher": "GitHub, Inc."
+          },
+          "estimatedBytes": 16000000,
           "requiresElevation": false,
           "requiresSeparateConfirmation": false
         }

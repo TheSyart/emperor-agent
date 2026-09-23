@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * McpAddDialog — Settings › MCP 「添加」: a ui/Modal with two Tabs.
+ * McpAddDialog — 能力 › MCP 「添加」 (and the 探索 page's MCP entries): a
+ * ui/Modal with two Tabs.
  * - 粘贴 JSON: paste any client's MCP config (Claude / Cursor `mcpServers`,
  *   VS Code `servers`, a single server, JSONC or a `"name": {…}` fragment).
  * - 表单: name + transport + URL / command, built into the same raw shape.
@@ -8,6 +9,10 @@
  * added / overwritten / skipped; 「导入」 performs the real import with the
  * chosen overwrite names, emits `imported(result)` and closes.
  *
+ * Opened with `initialText` (a catalog entry's config) the paste tab starts
+ * with it, so its dry-run preview shows before anything is written.
+ *
+ * Props: initialText? (JSON text for the paste tab).
  * v-model:open. Emits: imported(McpImportResult).
  */
 import { computed, ref, watch } from 'vue'
@@ -26,6 +31,9 @@ import {
 } from './mcpModel'
 import { useMcpImportPreview } from './useMcpImportPreview'
 
+const props = withDefaults(defineProps<{ initialText?: string }>(), {
+  initialText: '',
+})
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ imported: [result: McpImportResult] }>()
 
@@ -63,7 +71,7 @@ watch(open, (value) => {
 
 function reset() {
   tab.value = 'paste'
-  text.value = ''
+  text.value = props.initialText
   form.value = emptyMcpServerForm()
   submitError.value = ''
   preview.reset()

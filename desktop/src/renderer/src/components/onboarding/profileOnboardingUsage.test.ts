@@ -28,10 +28,15 @@ describe('profile onboarding renderer flow', () => {
   })
 
   it('shows the active private profile path and allows skipped interviews to restart', () => {
-    const configs = source('../settings/ConfigsSection.vue')
+    // 记忆 › 用户档案 edits the profile (the retired 配置 section did too).
+    const memory = source('../settings/MemorySection.vue')
+    const memoryModel = source('../settings/memory/memoryModel.ts')
 
-    expect(configs).toContain('memory/profile/USER.local.md')
-    expect(configs).toContain('重新开始')
-    expect(configs).toContain('profileOnboarding')
+    expect(memoryModel).toContain(
+      "USER_PROFILE_PATH = 'memory/profile/USER.local.md'",
+    )
+    expect(memory).toContain('USER_PROFILE_PATH')
+    expect(memory).toContain('重新开始')
+    expect(memory).toContain('profileOnboarding')
   })
 })

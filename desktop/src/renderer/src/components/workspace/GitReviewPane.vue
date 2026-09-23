@@ -1,4 +1,15 @@
 <script setup lang="ts">
+/**
+ * GitReviewPane — the right workspace's 审查 pane: branch / worktree / PR
+ * controls, grouped changes with diffs and the commit box.
+ *
+ * Props:
+ * - sessionId, hasProject, agentBusy (disables conflicting Git writes).
+ * - focusPaths?: limit the change list to these files (本次任务 filter).
+ * - commitFocus?: nonce; a new non-zero value scrolls to the commit box and
+ *   focuses it once the status has loaded (requestWorkspace focus 'commit').
+ * Emits: commitFocused — that request has been handled.
+ */
 import type {
   GitFileStatus,
   GitStatusResult,
@@ -21,7 +32,7 @@ import {
   Trash2,
   Workflow,
 } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { core } from '../../api/http'
 import {
   gitFileChangeLabel,
@@ -35,7 +46,9 @@ const props = defineProps<{
   hasProject: boolean
   agentBusy: boolean
   focusPaths?: string[]
+  commitFocus?: number
 }>()
+const emit = defineEmits<{ commitFocused: [] }>()
 
 const status = ref<GitStatusResult | null>(null)
 const loading = ref(false)
@@ -69,6 +82,13 @@ const branches = ref<
   Array<{ name: string; head: string; upstream: string | null }>
 >([])
 const focusFilterActive = ref(Boolean(props.focusPaths?.length))
+const paneRoot = ref<HTMLElement | null>(null)
+const commitForm = ref<HTMLFormElement | null>(null)
+const commitInput = ref<HTMLTextAreaElement | null>(null)
+const commitFocusPending = ref(false)
+/** Brief accent ring on the commit box after a focus request. */
+const commitAttention = ref(false)
+let attentionTimer: ReturnType<typeof setTimeout> | undefined
 let refreshGeneration = 0
 let diffGeneration = 0
 let pollTimer: number | undefined
@@ -105,6 +125,7 @@ onBeforeUnmount(() => {
   diffGeneration += 1
   window.removeEventListener('focus', refreshOnFocus)
   window.clearInterval(pollTimer)
+  clearTimeout(attentionTimer)
 })
 watch(
   () => props.sessionId,
@@ -133,6 +154,39 @@ watch(
     diff.value = ''
   },
 )
+
+// A commit-focus request waits for the status (the form renders with it).
+watch(
+  () => props.commitFocus,
+  (nonce) => {
+    if (nonce) commitFocusPending.value = true
+  },
+  { immediate: true },
+)
+watch([commitFocusPending, status], () => void revealCommitBox(), {
+  flush: 'post',
+})
+
+async function revealCommitBox(): Promise<void> {
+  if (!commitFocusPending.value || !status.value) return
+  await nextTick()
+  const root = paneRoot.value
+  const form = commitForm.value
+  if (!root || !form || !commitFocusPending.value) return
+  commitFocusPending.value = false
+  // Center the box in the pane's own scroller (never scroll the frame).
+  const rootRect = root.getBoundingClientRect()
+  const formRect = form.getBoundingClientRect()
+  root.scrollTop +=
+    formRect.top -
+    rootRect.top -
+    Math.max(0, rootRect.height - formRect.height) / 2
+  commitInput.value?.focus({ preventScroll: true })
+  commitAttention.value = true
+  clearTimeout(attentionTimer)
+  attentionTimer = setTimeout(() => (commitAttention.value = false), 1_600)
+  emit('commitFocused')
+}
 
 function refreshOnFocus(): void {
   if (!loading.value) void refresh()
@@ -574,11 +628,11 @@ function friendlyPullRequestError(value: unknown): string {
 </script>
 
 <template>
-  <div class="workspace-pane git-review-pane">
+  <div ref="paneRoot" class="workspace-pane git-review-pane">
     <div class="workspace-pane-heading">
       <div>
-        <span class="workspace-eyebrow">Review</span>
-        <strong>{{ status?.branch || 'Git working tree' }}</strong>
+        <GitBranch :size="14" class="workspace-eyebrow" aria-hidden="true" />
+        <strong>{{ status?.branch || 'Git' }}</strong>
       </div>
       <button
         type="button"
@@ -845,9 +899,16 @@ function friendlyPullRequestError(value: unknown): string {
         差异或文件预览超过安全上限，当前内容已截断。
       </p>
 
-      <form class="git-commit-form" @submit.prevent="commit">
+      <form
+        ref="commitForm"
+        class="git-commit-form"
+        :data-attention="commitAttention || undefined"
+        @submit.prevent="commit"
+      >
         <textarea
+          ref="commitInput"
           v-model="commitMessage"
+          aria-label="提交信息"
           rows="3"
           placeholder="提交信息"
           :disabled="gitWritesDisabled"
@@ -997,7 +1058,7 @@ function friendlyPullRequestError(value: unknown): string {
 .workspace-pane-heading > div {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
 }
 
@@ -1014,8 +1075,6 @@ function friendlyPullRequestError(value: unknown): string {
 .workspace-eyebrow {
   flex: none;
   color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
 }
 
 .workspace-icon-button {
@@ -1060,6 +1119,15 @@ function friendlyPullRequestError(value: unknown): string {
 .git-review-pane :is(input:not([type='checkbox']), select, textarea):focus {
   border-color: var(--border-l4);
   box-shadow: none;
+}
+
+.git-review-pane .git-commit-form textarea {
+  transition: box-shadow var(--duration-ds-slow) var(--ease-out);
+}
+
+.git-review-pane .git-commit-form[data-attention] textarea {
+  border-color: rgb(var(--accent-fill) / 0.7);
+  box-shadow: 0 0 0 3px rgb(var(--accent-fill) / 0.25);
 }
 
 .git-review-pane :is(input, textarea)::placeholder {

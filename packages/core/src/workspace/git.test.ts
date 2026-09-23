@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest'
 import {
   WorkspaceGitService,
   parsePorcelainV2,
+  remoteProvider,
+  remoteWebUrl,
   type GitCommandRequest,
 } from './git'
 
@@ -577,6 +579,198 @@ describe('WorkspaceGitService', () => {
       expectedRevision: resolution.revision,
     })
     expect(resolved.files.some((file) => file.conflict)).toBe(false)
+  })
+})
+
+describe('remoteWebUrl', () => {
+  it.each([
+    ['git@github.com:acme/widgets.git', 'https://github.com/acme/widgets'],
+    ['git@github.com:acme/widgets', 'https://github.com/acme/widgets'],
+    ['github.com:acme/widgets.git', 'https://github.com/acme/widgets'],
+    ['deploy@GitHub.COM:Acme/Widgets.GIT', 'https://github.com/Acme/Widgets'],
+    ['git@ssh.github.com:acme/widgets.git', 'https://github.com/acme/widgets'],
+    [
+      'ssh://git@github.com/acme/widgets.git',
+      'https://github.com/acme/widgets',
+    ],
+    [
+      'ssh://git@github.com:22/acme/widgets.git',
+      'https://github.com/acme/widgets',
+    ],
+    [
+      'ssh://git@ssh.github.com:443/acme/widgets.git',
+      'https://github.com/acme/widgets',
+    ],
+    ['ssh://github.com/acme/widgets/', 'https://github.com/acme/widgets'],
+    [
+      'ssh://git@altssh.gitlab.com:443/group/sub/project.git',
+      'https://gitlab.com/group/sub/project',
+    ],
+    ['https://github.com/acme/widgets.git', 'https://github.com/acme/widgets'],
+    ['https://github.com/acme/widgets', 'https://github.com/acme/widgets'],
+    ['https://github.com/acme/widgets/', 'https://github.com/acme/widgets'],
+    [
+      'https://x-access-token:ghp_secret123456789@github.com/acme/widgets.git',
+      'https://github.com/acme/widgets',
+    ],
+    [
+      'https://user@gitlab.com/group/sub/project.git',
+      'https://gitlab.com/group/sub/project',
+    ],
+    [
+      'https://git.example.com:8443/team/app.git',
+      'https://git.example.com:8443/team/app',
+    ],
+    [
+      'https://git.example.com:443/team/app.git',
+      'https://git.example.com/team/app',
+    ],
+    ['git@git.example.com:team/app.git', 'https://git.example.com/team/app'],
+    ['git@10.0.0.5:team/app.git', 'https://10.0.0.5/team/app'],
+    ['  git@github.com:acme/.github.git\n', 'https://github.com/acme/.github'],
+  ])('maps %s', (raw, expected) => {
+    expect(remoteWebUrl(raw)).toBe(expected)
+  })
+
+  it.each([
+    '',
+    '   ',
+    '/srv/git/app.git',
+    './relative/repo',
+    '../sibling.git',
+    'C:\\repos\\app',
+    'C:/repos/app',
+    'file:///srv/git/app.git',
+    'git://github.com/acme/widgets.git',
+    'http://github.com/acme/widgets.git',
+    'ftp://github.com/acme/widgets.git',
+    'git+ssh://git@github.com/acme/widgets.git',
+    'git@github.com:/acme/widgets.git',
+    'git@github-work:acme/widgets.git',
+    'git@localhost:acme/widgets.git',
+    'git@github.com:acme',
+    'https://github.com/acme',
+    'https://github.com/',
+    'https://github.com/acme/widgets/tree/main',
+    'https://github.com/acme/widgets?tab=readme',
+    'https://github.com/acme/widgets#readme',
+    'https://github.com/acme/wid%20gets',
+    'https://github.com/acme/../widgets',
+    'https://[::1]/acme/widgets',
+    'git@github.com:acme/widgets.git extra',
+    'git@github.com:acme/wid gets',
+    'https://exa_mple.com/acme/widgets',
+    `https://github.com/${'a/'.repeat(1200)}b`,
+  ])('rejects %j', (raw) => {
+    expect(remoteWebUrl(raw)).toBeNull()
+  })
+
+  it('classifies hosted providers by host', () => {
+    expect(remoteProvider('github.com')).toBe('github')
+    expect(remoteProvider('octo.ghe.com')).toBe('github')
+    expect(remoteProvider('gitlab.com')).toBe('gitlab')
+    expect(remoteProvider('gitlab.example.com')).toBe('gitlab')
+    expect(remoteProvider('git.example.com')).toBe('other')
+    expect(remoteProvider('notgithub.com')).toBe('other')
+  })
+})
+
+describe('WorkspaceGitService.remote', () => {
+  function remoteService(result: {
+    exitCode: number
+    stdout: string
+    stderr?: string
+  }): { service: WorkspaceGitService; calls: GitCommandRequest[] } {
+    const calls: GitCommandRequest[] = []
+    const service = new WorkspaceGitService({
+      resolveProject: () => ({ sessionId: 's1', projectRoot: '/repo' }),
+      resolveRuntime: async () => ({ executable: '/usr/bin/git', env: {} }),
+      run: async (request) => {
+        calls.push(request)
+        if (gitSubcommand(request.args) === 'rev-parse')
+          return { exitCode: 0, stdout: '/repo\n', stderr: '' }
+        if (gitSubcommand(request.args) === 'remote')
+          return { stderr: '', ...result }
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+    })
+    return { service, calls }
+  }
+
+  it('reads origin with fixed argv and maps it to a web URL', async () => {
+    const { service, calls } = remoteService({
+      exitCode: 0,
+      stdout: 'git@github.com:acme/widgets.git\n',
+    })
+    await expect(service.remote({ sessionId: 's1' })).resolves.toEqual({
+      name: 'origin',
+      webUrl: 'https://github.com/acme/widgets',
+      provider: 'github',
+    })
+    const remoteCall = calls.find(
+      (call) => gitSubcommand(call.args) === 'remote',
+    )!
+    expect(remoteCall.args.slice(-3)).toEqual(['remote', 'get-url', 'origin'])
+    expect(remoteCall.cwd).toBe('/repo')
+  })
+
+  it('returns nulls when the repository has no origin', async () => {
+    const { service } = remoteService({
+      exitCode: 2,
+      stdout: '',
+      stderr: "error: No such remote 'origin'",
+    })
+    await expect(service.remote({ sessionId: 's1' })).resolves.toEqual({
+      name: null,
+      webUrl: null,
+      provider: null,
+    })
+  })
+
+  it('keeps the remote name but no web URL for unsupported forms', async () => {
+    const { service } = remoteService({
+      exitCode: 0,
+      stdout: '/srv/git/app.git\n',
+    })
+    await expect(service.remote({ sessionId: 's1' })).resolves.toEqual({
+      name: 'origin',
+      webUrl: null,
+      provider: null,
+    })
+  })
+
+  it('classifies GitLab and self-hosted remotes', async () => {
+    await expect(
+      remoteService({
+        exitCode: 0,
+        stdout: 'https://gitlab.com/group/sub/project.git\n',
+      }).service.remote({ sessionId: 's1' }),
+    ).resolves.toEqual({
+      name: 'origin',
+      webUrl: 'https://gitlab.com/group/sub/project',
+      provider: 'gitlab',
+    })
+    await expect(
+      remoteService({
+        exitCode: 0,
+        stdout: 'ssh://git@git.example.com:2222/team/app.git\n',
+      }).service.remote({ sessionId: 's1' }),
+    ).resolves.toEqual({
+      name: 'origin',
+      webUrl: 'https://git.example.com/team/app',
+      provider: 'other',
+    })
+  })
+
+  it('surfaces unexpected git failures as errors', async () => {
+    const { service } = remoteService({
+      exitCode: 128,
+      stdout: '',
+      stderr: 'fatal: not a git repository',
+    })
+    await expect(service.remote({ sessionId: 's1' })).rejects.toMatchObject({
+      code: 'git_command_failed',
+    })
   })
 })
 

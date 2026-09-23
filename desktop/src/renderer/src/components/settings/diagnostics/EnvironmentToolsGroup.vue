@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
- * Diagnostics › 环境工具: the read-only environment probe (tools per
- * category: 基础工具 / 当前项目 / Skill 依赖 / 大型依赖) as rows with a
- * right-aligned status badge, plus the legacy install-job history when Core
- * still reports any. Data comes from DiagnosticsSection (environment
- * .getStatus); re-detection is the section header refresh.
+ * Diagnostics › 环境工具 card body: the read-only environment probe (tools
+ * per category: 基础工具 / 当前项目 / Skill 依赖 / 大型依赖), one compact row
+ * per tool (id + version on the first line, why it is needed on the second,
+ * a right-aligned status badge), plus the legacy install-job history when
+ * Core still reports any. Data comes from DiagnosticsSection
+ * (environment.getStatus); re-detection is the section header refresh.
  */
 import { computed } from 'vue'
 import { DsWarning } from '../../icons/ds'
-import { EmptyState, SettingsGroup, SettingsRow, StatusBadge } from '../ui'
+import { EmptyState, SettingsRow, StatusBadge } from '../ui'
 import {
   environmentJobStatusLabel,
   environmentJobTone,
@@ -28,18 +29,6 @@ const props = defineProps<{
 const sections = computed(() => environmentToolSections(props.status))
 const jobs = computed(() => props.status?.recentJobs ?? [])
 
-const platform = computed(() => {
-  const status = props.status?.status
-  if (!status) return props.loading ? '检测中' : '未检测'
-  const name =
-    status.platform === 'darwin'
-      ? 'macOS'
-      : status.platform === 'win32'
-        ? 'Windows'
-        : 'Linux'
-  return `${name} · ${status.arch}`
-})
-
 function badgeTone(tone: EnvironmentTone) {
   if (tone === 'running') return 'accent' as const
   if (tone === 'muted') return 'neutral' as const
@@ -48,11 +37,7 @@ function badgeTone(tone: EnvironmentTone) {
 </script>
 
 <template>
-  <SettingsGroup
-    title="环境工具"
-    :description="`${platform} · 只读取工具与版本；安装依赖由 Agent 通过普通命令权限执行，并用独立命令验证结果。`"
-    data-testid="environment-section"
-  >
+  <div class="env-tools" data-testid="environment-section">
     <div v-if="error" class="env-alert" role="alert">
       <DsWarning :size="16" class="alert-glyph" />
       <span>{{ error }}</span>
@@ -84,18 +69,18 @@ function badgeTone(tone: EnvironmentTone) {
       >
         <template #title>
           <code class="tool-id">{{ tool.id }}</code>
-        </template>
-        <template #description>
-          <span class="line">{{ tool.reason }}</span>
           <span
             v-if="tool.versionSummary || tool.requiredVersion"
-            class="line version"
+            class="version"
           >
             {{ tool.versionSummary || '未检测到版本' }}
             <template v-if="tool.requiredVersion">
               · 要求 {{ tool.requiredVersion }}
             </template>
           </span>
+        </template>
+        <template #description>
+          <span class="reason" :title="tool.reason">{{ tool.reason }}</span>
         </template>
         <StatusBadge :tone="badgeTone(environmentToolTone(tool.status))" dot>
           {{ environmentToolStatusLabel(tool.status) }}
@@ -117,7 +102,7 @@ function badgeTone(tone: EnvironmentTone) {
         </StatusBadge>
       </SettingsRow>
     </template>
-  </SettingsGroup>
+  </div>
 </template>
 
 <style scoped>
@@ -138,6 +123,12 @@ function badgeTone(tone: EnvironmentTone) {
 .alert-glyph {
   flex: none;
   margin-top: var(--space-0-5);
+}
+
+.env-tools {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .env-empty {
@@ -169,12 +160,22 @@ function badgeTone(tone: EnvironmentTone) {
   overflow-wrap: anywhere;
 }
 
-.line {
-  display: block;
+.subhead:first-of-type {
+  padding-top: 0;
 }
 
 .version {
+  margin-left: var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
+  font-weight: 400;
+  color: rgb(var(--label-tertiary));
+}
+
+.reason {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

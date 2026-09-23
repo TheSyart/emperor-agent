@@ -292,7 +292,14 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     })
 
     expect(validated).toEqual(generated)
-    expect(generated.files.length).toBeGreaterThan(20)
+    // Every desktop-pet frame strip ships: the pet window loads them by name.
+    const petStrips = fs
+      .readdirSync(path.join(repoRoot, 'assets', 'desktop-pet', 'xiaodan'))
+      .filter((file) => file.endsWith('.webp'))
+    expect(petStrips.length).toBeGreaterThan(0)
+    const packagedPaths = new Set(generated.files.map((file) => file.path))
+    for (const strip of petStrips)
+      expect(packagedPaths).toContain(`assets/desktop-pet/xiaodan/${strip}`)
     expect(generated.builtInSkills).toEqual(['skill-creator'])
     expect(
       generated.files

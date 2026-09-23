@@ -23,6 +23,7 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
     chat_order: [],
     project_session_order: {},
     collapsed_project_ids: [],
+    pinned_session_ids: [],
     right_workspace: {
       version: 3,
       workbenchOpen: false,
@@ -376,5 +377,93 @@ describe('manual ordering helpers (W6: moved out of SessionSidebar.vue)', () => 
     expect(moveId(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
     expect(moveId(['a', 'b', 'c'], 'c', 1)).toEqual(['a', 'b', 'c'])
     expect(moveId(['a', 'b', 'c'], 'missing', 1)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('pinned sessions', () => {
+  it('normalizes pinned ids like Core: strings, trimmed, deduped, capped at 50', async () => {
+    const { normalizeSidebarState, MAX_PINNED_SESSIONS } =
+      await import('./sidebarModel')
+    expect(normalizeSidebarState(undefined).pinned_session_ids).toEqual([])
+    expect(
+      normalizeSidebarState({
+        pinned_session_ids: [' s-1 ', 's-1', '', 7, null, 's-2'] as never,
+      }).pinned_session_ids,
+    ).toEqual(['s-1', 's-2'])
+    expect(
+      normalizeSidebarState({
+        pinned_session_ids: 'nope' as never,
+      }).pinned_session_ids,
+    ).toEqual([])
+    const many = Array.from({ length: 60 }, (_, index) => `s-${index}`)
+    const capped = normalizeSidebarState({ pinned_session_ids: many })
+    expect(capped.pinned_session_ids).toHaveLength(MAX_PINNED_SESSIONS)
+    expect(capped.pinned_session_ids[0]).toBe('s-0')
+  })
+
+  it('keeps the pins through a partial patch merged onto the full state', async () => {
+    const { normalizeSidebarState } = await import('./sidebarModel')
+    const current = normalizeSidebarState(
+      state({ pinned_session_ids: ['a', 'b'] }),
+    )
+    const merged = normalizeSidebarState({ ...current, chat_sort: 'manual' })
+    expect(merged.pinned_session_ids).toEqual(['a', 'b'])
+    expect(merged.chat_sort).toBe('manual')
+  })
+
+  it('lists pinned sessions in pin order and removes them from projects and chats', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups(
+      [
+        session({ id: 'chat-1', mode: 'chat' }),
+        session({ id: 'chat-2', mode: 'chat' }),
+        session({
+          id: 'build-1',
+          mode: 'build',
+          project_id: 'p1',
+          project_name: 'Alpha',
+          project_path: '/tmp/alpha',
+        }),
+        session({
+          id: 'build-2',
+          mode: 'build',
+          project_id: 'p1',
+          project_name: 'Alpha',
+          project_path: '/tmp/alpha',
+        }),
+        session({
+          id: 'archived',
+          archived_at: '2026-01-02T00:00:00+0800',
+        }),
+        session({ id: 'draft:x', draft: true }),
+      ],
+      state({
+        pinned_session_ids: [
+          'build-1',
+          'gone',
+          'chat-2',
+          'archived',
+          'draft:x',
+        ],
+      }),
+    )
+    expect(grouped.pinned.map((item) => item.id)).toEqual(['build-1', 'chat-2'])
+    expect(grouped.chats.map((item) => item.id)).toEqual(['chat-1'])
+    expect(grouped.projects[0]?.sessions.map((item) => item.id)).toEqual([
+      'build-2',
+    ])
+  })
+
+  it('pins at the top, refuses past the cap and unpins', async () => {
+    const { pinSessionId, unpinSessionId, MAX_PINNED_SESSIONS } =
+      await import('./sidebarModel')
+    expect(pinSessionId(['a'], 'b')).toEqual(['b', 'a'])
+    const same = ['a', 'b']
+    expect(pinSessionId(same, 'b')).toBe(same)
+    const full = Array.from({ length: MAX_PINNED_SESSIONS }, (_, i) => `s${i}`)
+    expect(pinSessionId(full, 'new')).toBeNull()
+    expect(unpinSessionId(['a', 'b'], 'a')).toEqual(['b'])
+    const untouched = ['a']
+    expect(unpinSessionId(untouched, 'z')).toBe(untouched)
   })
 })

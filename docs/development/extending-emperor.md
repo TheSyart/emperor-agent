@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/components/settings/`
+> 最后核验：2026-09-23<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`
 
 Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、renderer 投影和文档。先确定权威状态属于哪里：会话内的一切属于 session log；长期数据属于对应的保留服务。然后从内核或服务向外接入，不要把策略散落到组件或 prompt 文案。
 
@@ -124,8 +124,35 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 
 - 用 `components/settings/ui/` 的原语搭建：`SettingsSection`、`SettingsGroup`、`SettingsRow`、`SettingsCard`，表单控件包在 `Field` 里（`TextField`、`TextArea`、`CodeEditor`、`Select`、`Switch`、`Segmented`、`SearchField`），状态用 `StatusBadge` / `Metric` 和 `--state-*` token。开发模式下打开 `?settings-gallery` 可以查看全部原语。
 - 弹窗外壳负责标题栏，分区内不要再渲染标题或操作栏。刷新、主要和次要操作通过 `settingsHeader.ts` 的 `useSettingsHeader({ actions })` 与 `refreshAction()` 注册到标题栏，下拉菜单用 action 的 `menu`；注册在组件卸载时自动移除。
-- 新建或编辑优先在卡片内展开（参照模型、Scheduler 分区），确实需要对话框时使用 `ui/Modal`，Escape 只关闭最上层对话框。
+- 新建或编辑优先在卡片内展开（参照模型分区），确实需要对话框时使用 `ui/Modal`，Escape 只关闭最上层对话框。
 - 新增分区 key 时同步 `settingsSections.ts`、`SECTION_BODIES`、`settingsIcons.ts` 和相关测试，以及用户手册中的设置分区表。
+- 分区组件也可以被整页复用（能力页的四个标签就是 `PluginsSection`、`SkillsSection`、`McpSection`、`ToolsSection`）：分区用 `useSettingsHeader` 注册的操作会显示在整页标题栏，需要在页面重新显示时刷新的数据用 `onPageReactivated()` 重新读取。
+
+### 新整页
+
+定时任务、插件、Pull Request 和探索是整页路由，写法以 `components/pages/PageShell.vue` 与现有页面为准：
+
+- 在 `desktop/src/renderer/src/router.ts` 用 `() => import(...)` 懒加载页面组件并给路由命名，`meta` 带 `label` 与 `page: true`。整页的路由名不在 `CONVERSATION_ROUTE_NAMES` 中，`App.vue` 因此不显示右侧工作台，工作台相关快捷键也不响应。
+- 页面根组件渲染 `PageShell`：`title`、可选 `subtitle`、页面自己的标题栏操作 `actions`，以及 `tabs` 插槽。默认布局是最宽 880px、整体滚动的内容列；列表 + 详情这类双栏页面传 `fill`，取消宽度上限和外层滚动，由内部各栏自行滚动（参照 Pull Request 页）。`PageShell` 提供设置标题栏宿主并声明 `settings-panel` 容器，复用的设置分区无需修改。
+- 页面由 `App.vue` 的 `<keep-alive :max="6">` 缓存。首次挂载时自行加载数据；再次显示时用 `pages/pageLifecycle.ts` 的 `onPageReactivated(fn)` 刷新，它不会在首次挂载时触发。路由参数承载选择状态时，只在该页是当前路由时读取参数。
+- 侧栏入口登记在 `components/sidebar/sidebarNav.ts` 的 `SIDEBAR_PAGES`（`name` 与路由名一致），展开的导航与收起的图标栏共用这份列表。
+- 整页取代原有设置分区时，把分区 key 加入 `settingsSections.ts` 的 `SETTINGS_PAGE_SECTIONS`，并在 `router.ts` 的 `SETTINGS_PAGE_PATHS` 登记目标路径，让旧的 `?settings=<key>` 链接由全局守卫转到新页面。
+- 同步 `router.test.ts`、侧栏用例、视觉测试和用户手册的侧栏入口表。
+
+### 新工作台面板
+
+右侧工作台的面板在 `components/workspace/WorkspacePanel.vue` 中切换：
+
+- 在 `components/shell/frameState.ts` 的 `WorkspacePane` 与 `WORKSPACE_PANES` 中登记 pane id（持久化的面板值会按这份列表校验）。
+- 在 `components/workspace/workspacePanes.ts` 的 `WORKSPACE_PANE_ITEMS` 中登记标签和快捷键动作，在 `workspacePaneDisabledReason()` 中写可用条件，图标放在 `workspaceIcons.ts`。启动器和标题栏的分段切换都从这里生成。
+- 面板组件在 `WorkspacePanel.vue` 中用 `defineAsyncComponent` 单独分包，不进入首屏包。
+- 其他组件要打开面板或传内容时调用 `workspaceState.ts` 的 `requestWorkspace({ pane, ... })`，并在 `WorkspacePanel.vue` 的请求处理中消费新字段；不要持有面板的组件引用。
+- 需要项目 Git 状态时使用 `useWorkspaceSnapshot({ active })` 共享的快照，不要另起轮询。
+- 原生视图（例如浏览器的 `WebContentsView`）画在 DOM 之上，必须在弹窗、菜单、拖动和面板不可见时隐藏，参照 `useBrowserViewBounds.ts`。
+
+### 新快捷键
+
+快捷键只登记在 `desktop/src/renderer/src/shortcuts.ts` 的 `SHORTCUTS` 表中（新增 `ShortcutAction`），再在 `App.vue` 的 `useShortcuts({...})` 中接上处理函数；工作台启动器的按键提示从同一张表生成。每个绑定必须带 ⌘（`mod`，非 macOS 为 Ctrl）或 ⌃（`ctrl`），不能绑定无修饰键，也不能占用 Electron 默认菜单的 ⌘R / ⌘W / ⌘M / ⌘H / ⌘Q / ⌘0 / ⌘+ / ⌘- / ⌥⌘I / ⌃⌘F / ⇧⌘R。同步 `shortcuts.test.ts` 和用户手册的快捷键表。
 
 ## 新后台能力
 

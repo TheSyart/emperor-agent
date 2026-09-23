@@ -128,30 +128,16 @@ describe('WorkspaceReferenceService', () => {
     ).toThrow(/credential|凭据/i)
   })
 
-  it('allows HTTP only when Core resolves it to an owned preview', () => {
-    const root = mkdtempSync(join(tmpdir(), 'emperor-reference-preview-'))
-    const projectRoot = join(root, 'project')
-    mkdirSync(projectRoot, { recursive: true })
-    const service = new WorkspaceReferenceService({
-      resolveProject: (sessionId) => ({ sessionId, projectRoot }),
-      resolvePreview: (sessionId, url) =>
-        sessionId === 'session-1' && url === 'http://127.0.0.1:4173/'
-          ? { previewId: 'site-owned' }
-          : null,
-    })
-
-    expect(
+  it('rejects plain HTTP web references now that dev-server previews are retired', () => {
+    const { service } = fixture()
+    expect(() =>
       service.resolve({
         sessionId: 'session-1',
         sourceMessageId: 'message-1',
         href: 'http://127.0.0.1:4173',
         label: '本地预览',
       }),
-    ).toMatchObject({
-      kind: 'preview',
-      previewId: 'site-owned',
-      actions: ['open_preview', 'open_external'],
-    })
+    ).toThrow(/HTTPS/)
   })
 
   it('binds an opaque reference to its owner session', () => {

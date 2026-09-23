@@ -1,9 +1,32 @@
 import type { GitFileStatus } from '@emperor/core/api'
 
-/** Files tree section size (px) persisted as right_workspace.filesTreeWidth. */
+/** Files tree column width bounds (px; right_workspace.filesTreeWidth). */
+export const FILES_TREE_MIN = 240
+export const FILES_TREE_MAX = 320
+export const FILES_TREE_DEFAULT = 280
+
+/** Files tree column width (px) persisted as right_workspace.filesTreeWidth. */
 export function clampFilesTreeWidth(value: number): number {
-  if (!Number.isFinite(value)) return 280
-  return Math.max(240, Math.min(320, Math.round(value)))
+  if (!Number.isFinite(value)) return FILES_TREE_DEFAULT
+  return Math.max(FILES_TREE_MIN, Math.min(FILES_TREE_MAX, Math.round(value)))
+}
+
+export interface FilePathCrumb {
+  name: string
+  /** Project-relative path up to and including this segment. */
+  path: string
+}
+
+/** Breadcrumb segments of a project-relative path (`src/a.ts` → src, a.ts). */
+export function filePathCrumbs(path: string): FilePathCrumb[] {
+  const parts = path
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((part) => part && part !== '.')
+  return parts.map((name, index) => ({
+    name,
+    path: parts.slice(0, index + 1).join('/'),
+  }))
 }
 
 export function groupGitFiles(files: GitFileStatus[]): {

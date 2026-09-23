@@ -1,19 +1,21 @@
 <script setup lang="ts">
 /**
- * Settings › Skills — native section. The list view: SearchField + source
- * Segmented (全部 / 个人 / 项目 / 插件 / 内置), the 「不合格的 Skill (N)」
- * notice (InvalidSkillsNotice) and one SkillRow per Skill. Selecting a Skill
- * swaps the list for its inline detail (SkillDetail) — the choice lives in
- * the route (`?settings=skills&skill=<name>`), so /skills/:name deep links
- * land on it and 「全部 Skills」 goes back.
+ * 能力 › Skills — the Skills tab of the /capabilities page (PageShell). The list
+ * view: SearchField + source Segmented (全部 / 个人 / 项目 / 插件 / 内置), the
+ * 「不合格的 Skill (N)」 notice (InvalidSkillsNotice) and one SkillRow per
+ * Skill. Selecting a Skill swaps the list for its inline detail
+ * (SkillDetail) — the choice lives in the route (`/capabilities/skills?skill=
+ * <name>`, useSkillSelection), so /skills/:name deep links land on it and
+ * 「全部 Skills」 goes back.
  *
  * Header: refresh (`skills.list` for the current session) and 「新增」 with
  * the four ways to add a Skill — 粘贴 SKILL.md (SkillPasteDialog), 选择本地
  * 文件夹 and 导入 zip 或 GitHub 链接 (SkillImportDialog), and opening the
  * personal / project Skills folder in the file manager.
  *
- * Data: `boot.skills` / `boot.invalidSkills`, reloaded here on open and after
- * every change (the runtime also reloads them on `skill_catalog_changed`).
+ * Data: `boot.skills` / `boot.invalidSkills`, reloaded here on open, when
+ * the kept-alive page is shown again and after every change (the runtime
+ * also reloads them on `skill_catalog_changed`).
  * The current session scopes the catalog; its project (Build sessions only)
  * enables the 「当前项目」 scope.
  */
@@ -44,13 +46,14 @@ import { useSession } from '../../composables/useSession'
 import type { InvalidSkillInfo } from '../../types'
 import { EmptyState, SearchField, Segmented, SettingsSection } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
-import { useSettingsRoute } from './useSettingsRoute'
+import { onPageReactivated } from '../pages/pageLifecycle'
 import InvalidSkillsNotice from './skills/InvalidSkillsNotice.vue'
 import SkillConfirmDialog from './skills/SkillConfirmDialog.vue'
 import SkillDetail from './skills/SkillDetail.vue'
 import SkillImportDialog from './skills/SkillImportDialog.vue'
 import SkillPasteDialog from './skills/SkillPasteDialog.vue'
 import SkillRow from './skills/SkillRow.vue'
+import { useSkillSelection } from './skills/useSkillSelection'
 import {
   filterInvalidSkills,
   filterSkills,
@@ -68,7 +71,7 @@ import {
 } from './skills/skillsModel'
 
 const ctx = useAppContext()
-const settings = useSettingsRoute()
+const selection = useSkillSelection()
 const sessions = useSession()
 
 const query = ref('')
@@ -106,7 +109,7 @@ const countText = computed(() =>
   skillCountText(visible.value.length, skills.value.length),
 )
 
-const selected = computed(() => settings.skill.value)
+const selected = selection.selected
 const selectedSummary = computed(
   () => skills.value.find((skill) => skill.name === selected.value) ?? null,
 )
@@ -166,6 +169,7 @@ useSettingsHeader({
 onMounted(() => {
   void ctx.runSafely(reload)
 })
+onPageReactivated(() => ctx.runSafely(reload))
 
 async function reload() {
   const catalog = await listSkills({ sessionId: sessionId.value })
@@ -183,11 +187,11 @@ function refresh() {
 }
 
 function openSkill(name: string) {
-  void settings.selectSection('skills', { skill: name })
+  void selection.select(name)
 }
 
 function closeDetail() {
-  void settings.selectSection('skills')
+  void selection.select(null)
 }
 
 function onDetailChanged() {

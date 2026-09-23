@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * SkillConfirmDialog — the one confirmation step Settings › Skills needs
+ * SkillConfirmDialog — the one confirmation step 能力 › Skills needs
  * (delete a Skill, delete an invalid Skill folder, overwrite a personal copy):
  * a 380px ui/Modal with the question, an optional detail line (a path) and
  * 取消 / confirm. Escape closes only this dialog (ui/Modal's modal stack).

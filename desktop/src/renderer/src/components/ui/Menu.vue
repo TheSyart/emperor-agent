@@ -65,21 +65,40 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+// A menu whose content changes while open (a drill-down pane, a filtered
+// list) is re-placed as its height changes, so an upward menu keeps its
+// bottom edge on the trigger instead of growing off-screen.
+let resizeObserver: ResizeObserver | null = null
+
+function stopObserving() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+}
+
 watch(
   open,
   async (value) => {
     if (!value) {
       floating.removeListeners()
+      stopObserving()
       return
     }
     await nextTick()
     floating.position()
     floating.addListeners()
+    if (menu.value && typeof ResizeObserver !== 'undefined') {
+      stopObserving()
+      resizeObserver = new ResizeObserver(() => floating.position())
+      resizeObserver.observe(menu.value)
+    }
   },
   { immediate: true },
 )
 
-onBeforeUnmount(() => floating.removeListeners())
+onBeforeUnmount(() => {
+  floating.removeListeners()
+  stopObserving()
+})
 </script>
 
 <template>

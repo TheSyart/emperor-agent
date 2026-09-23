@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * InvalidSkillsNotice — the warn block on top of Settings › Skills: Skills
+ * InvalidSkillsNotice — the warn block on top of 能力 › Skills: Skills
  * whose SKILL.md failed validation are not loaded, and this is where their
  * reasons show. The head (「不合格的 Skill (N)」 + one-line explanation)
  * toggles the list; each entry is an expandable SettingsCard (name,

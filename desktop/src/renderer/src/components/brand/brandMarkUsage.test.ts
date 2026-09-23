@@ -24,7 +24,7 @@ describe('brand mark usage', () => {
 
   it('keeps key brand surfaces on project logo assets instead of brandIcon', () => {
     const files = [
-      'components/sidebar/SidebarRoot.vue',
+      'components/sidebar/SidebarBrandRow.vue',
       'components/sidebar/SidebarRail.vue',
     ]
 

@@ -153,32 +153,225 @@ export function diagnosticRows(
   ]
 }
 
+export type DiagnosticSectionId = 'runtime' | 'desktop' | 'paths' | 'config'
+
+export interface DiagnosticSection {
+  id: DiagnosticSectionId
+  title: string
+  rows: DiagnosticRow[]
+  /** Rows left out because Core returned no data for them. */
+  hidden: number
+}
+
 /**
- * Settings › 诊断 grouping of `diagnosticRows()`: 服务 (runtime, desktop
- * capabilities, dependencies), 路径 (storage roots + legacy-data warnings),
- * 配置 and 上下文 (when a ContextPlan explanation exists). Empty groups are
- * dropped; the environment tools group renders after 路径 in the view.
+ * Settings › 诊断 sections: 运行时, 桌面 (pet + build dependencies), 存储路径
+ * (roots + legacy-data warnings) and 配置 (config files, a condensed
+ * effective-config summary, the slash command catalog). Rows Core returned
+ * no data for are dropped (counted in `hidden`); home paths read `~`. The
+ * view slots 环境工具 (environment probe) after 运行时.
  */
-export function diagnosticSettingsGroups(
+export function diagnosticSections(
   payload: DiagnosticsPayload | null | undefined,
-): DiagnosticGroup[] {
-  const groups = diagnosticRows(payload)
+): DiagnosticSection[] {
+  const diagnostics = payload || {}
+  const groups = diagnosticRows(diagnostics)
   const rows = (id: string) =>
     groups.find((group) => group.id === id)?.rows ?? []
-  return [
+  const sections: Array<Omit<DiagnosticSection, 'hidden'>> = [
+    { id: 'runtime', title: '运行时', rows: rows('runtime') },
     {
-      id: 'services',
-      title: '服务',
-      rows: [...rows('runtime'), ...rows('desktop'), ...rows('dependencies')],
+      id: 'desktop',
+      title: '桌面',
+      rows: [...rows('desktop'), ...rows('dependencies')],
     },
     {
       id: 'paths',
-      title: '路径',
+      title: '存储路径',
       rows: [...rows('storage'), ...rows('legacy-data')],
     },
-    { id: 'config', title: '配置', rows: rows('config') },
-    { id: 'context', title: '上下文', rows: rows('context-explanation') },
-  ].filter((group) => group.rows.length)
+    {
+      id: 'config',
+      title: '配置',
+      rows: [
+        configRow('model-config', '模型配置', diagnostics.modelConfig),
+        configRow('local-config', '本地配置', diagnostics.localConfig),
+        ...effectiveConfigSummaryRows(diagnostics.effectiveConfig),
+        ...(diagnostics.commandCatalog
+          ? [commandCatalogRow(diagnostics.commandCatalog)]
+          : []),
+      ],
+    },
+  ]
+  return sections.map((section) => {
+    const visible = section.rows.filter((row) => !notReturned(row))
+    return {
+      ...section,
+      rows: visible.map((row) => ({
+        ...row,
+        value: shortenHomePaths(row.value),
+        detail: shortenHomePaths(row.detail),
+      })),
+      hidden: section.rows.length - visible.length,
+    }
+  })
+}
+
+function notReturned(row: DiagnosticRow): boolean {
+  return row.tone === 'muted' && row.value === '未返回'
+}
+
+/** `/Users/<name>`, `/home/<name>` and `C:\Users\<name>` read as `~`. */
+export function shortenHomePaths(text: string): string {
+  return text
+    .replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+(?=\/|\s|$|\))/g, '$1~')
+    .replace(/(^|[\s(])[A-Za-z]:\\Users\\[^\\\s]+(?=\\|\s|$|\))/g, '$1~')
+}
+
+export type DiagnosticIssueTone = 'warn' | 'error'
+
+export interface DiagnosticIssue {
+  /** Section to open (an environment tool issue points at 'environment'). */
+  sectionId: DiagnosticSectionId | 'environment'
+  id: string
+  label: string
+  value: string
+  detail: string
+  tone: DiagnosticIssueTone
+}
+
+export interface DiagnosticSectionCount {
+  total: number
+  ok: number
+  warn: number
+  error: number
+}
+
+export interface DiagnosticSummary {
+  tone: 'ok' | DiagnosticIssueTone
+  headline: string
+  counts: Record<DiagnosticSectionId | 'environment', DiagnosticSectionCount>
+  /** Errors first, then warnings. */
+  issues: DiagnosticIssue[]
+}
+
+export interface DiagnosticEnvironmentItem {
+  id: string
+  label: string
+  value: string
+  detail: string
+  tone: DiagnosticTone | 'running'
+}
+
+function countRows(
+  rows: ReadonlyArray<{ tone: string }>,
+): DiagnosticSectionCount {
+  return {
+    total: rows.length,
+    ok: rows.filter((row) => row.tone === 'ok').length,
+    warn: rows.filter((row) => row.tone === 'warn').length,
+    error: rows.filter((row) => row.tone === 'error').length,
+  }
+}
+
+/** Health of every section plus the rows that need attention. */
+export function diagnosticSummary(
+  sections: readonly DiagnosticSection[],
+  environment: readonly DiagnosticEnvironmentItem[],
+): DiagnosticSummary {
+  const counts = {
+    runtime: countRows([]),
+    desktop: countRows([]),
+    paths: countRows([]),
+    config: countRows([]),
+    environment: countRows(environment),
+  }
+  const issues: DiagnosticIssue[] = []
+  for (const section of sections) {
+    counts[section.id] = countRows(section.rows)
+    for (const row of section.rows)
+      if (row.tone === 'warn' || row.tone === 'error')
+        issues.push({
+          sectionId: section.id,
+          id: row.id,
+          label: row.label,
+          value: row.value,
+          detail: row.detail,
+          tone: row.tone,
+        })
+  }
+  for (const item of environment)
+    if (item.tone === 'warn' || item.tone === 'error')
+      issues.push({
+        sectionId: 'environment',
+        id: item.id,
+        label: item.label,
+        value: item.value,
+        detail: item.detail,
+        tone: item.tone,
+      })
+  issues.sort((a, b) => Number(b.tone === 'error') - Number(a.tone === 'error'))
+  const errors = issues.filter((issue) => issue.tone === 'error').length
+  const warnings = issues.length - errors
+  return {
+    tone: errors ? 'error' : warnings ? 'warn' : 'ok',
+    headline: errors
+      ? `有 ${errors} 项异常${warnings ? `，${warnings} 项需要关注` : ''}`
+      : warnings
+        ? `有 ${warnings} 项需要关注`
+        : '运行正常',
+    counts,
+    issues,
+  }
+}
+
+const TONE_TEXT: Record<string, string> = {
+  ok: '正常',
+  warn: '需关注',
+  error: '异常',
+  muted: '未启用',
+  running: '进行中',
+}
+
+/** Plain-text report of the page (the 「复制报告」 action). */
+export function diagnosticReportText(input: {
+  root?: string
+  summary: DiagnosticSummary
+  sections: readonly DiagnosticSection[]
+  environment: readonly DiagnosticEnvironmentItem[]
+  environmentLabel?: string
+}): string {
+  const lines = [
+    'Emperor 诊断报告',
+    input.root ? `运行根目录：${shortenHomePaths(input.root)}` : '',
+    `总体：${input.summary.headline}`,
+  ].filter(Boolean)
+  const block = (
+    title: string,
+    rows: ReadonlyArray<{
+      label: string
+      value: string
+      detail: string
+      tone: string
+    }>,
+  ) => {
+    lines.push('', `## ${title}`)
+    for (const row of rows)
+      lines.push(
+        `- [${TONE_TEXT[row.tone] ?? row.tone}] ${row.label}：${row.value}${
+          row.detail && row.detail !== row.value ? `（${row.detail}）` : ''
+        }`,
+      )
+  }
+  const [runtime, ...rest] = input.sections
+  if (runtime) block(runtime.title, runtime.rows)
+  block(
+    input.environmentLabel
+      ? `环境工具 · ${input.environmentLabel}`
+      : '环境工具',
+    input.environment,
+  )
+  for (const section of rest) block(section.title, section.rows)
+  return lines.join('\n')
 }
 
 /** Row ids whose path the section offers to open in the file manager. */
@@ -201,8 +394,8 @@ function commandCatalogRow(
     .join(' · ')
   return {
     id: 'slash-command-catalog',
-    label: 'Slash command catalog',
-    value: `${Number(catalog.registeredSkills || 0)} Skills · ${conflicts.length} conflicts`,
+    label: '斜杠命令',
+    value: `${Number(catalog.registeredSkills || 0)} 个 Skill · ${conflicts.length} 个冲突`,
     detail: detail || 'Skill token 无冲突',
     tone: conflicts.length ? 'warn' : 'ok',
   }
@@ -245,6 +438,63 @@ function effectiveConfigRows(
       tone: trust === 'untrusted' || rejected ? 'warn' : 'ok',
     }
   })
+}
+
+const EFFECTIVE_CONFIG_LABELS: Record<string, string> = {
+  'model.executionPolicy': '模型执行策略',
+  'sandbox.runtime': '沙箱策略',
+  'mcp.config': 'MCP 配置',
+}
+
+/**
+ * One row per effective config key, without the JSON value; all
+ * `skills.*` entries fold into a single 「Skills 配置」 row.
+ */
+function effectiveConfigSummaryRows(
+  snapshot: EffectiveConfigSnapshotPayload | undefined,
+): DiagnosticRow[] {
+  const entries = snapshot?.entries ?? []
+  const judged = entries.map((entry, index) => {
+    const source = entry.source ?? {}
+    const trace = entry.trace ?? []
+    const rejected = trace.filter((item) => item.status === 'rejected').length
+    const trust = String(source.trust || entry.trust || 'unknown')
+    const key = String(entry.key || `effective.${index}`)
+    return {
+      key,
+      source: `${String(source.kind || 'unknown')}:${String(source.id || 'unknown')}`,
+      layers: trace.length,
+      rejected,
+      untrusted: trust === 'untrusted',
+    }
+  })
+  const skills = judged.filter((item) => item.key.startsWith('skills.'))
+  const rows: DiagnosticRow[] = judged
+    .filter((item) => !item.key.startsWith('skills.'))
+    .map((item) => ({
+      id: `effective-config-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      label: EFFECTIVE_CONFIG_LABELS[item.key] ?? item.key,
+      value: item.rejected
+        ? `${item.rejected} 项被拒绝`
+        : item.untrusted
+          ? '来源不受信任'
+          : '生效',
+      detail: `来源 ${item.source} · ${item.layers} 层`,
+      tone: item.rejected || item.untrusted ? 'warn' : 'ok',
+    }))
+  if (skills.length) {
+    const flagged = skills.filter((item) => item.rejected || item.untrusted)
+    rows.push({
+      id: 'effective-config-skills',
+      label: 'Skills 配置',
+      value: `${skills.length} 项`,
+      detail: flagged.length
+        ? `${flagged.map((item) => item.key.slice('skills.'.length)).join('、')} 来源不受信任或被拒绝`
+        : '全部生效',
+      tone: flagged.length ? 'warn' : 'ok',
+    })
+  }
+  return rows
 }
 
 function compactEffectiveValue(value: unknown): string {
@@ -371,13 +621,13 @@ function storagePathRows(
   return [
     pathRow(
       'runtime-resources-root',
-      'Runtime 资源根',
+      '内置资源目录',
       paths?.runtimeRoot,
       '内置技能/模板等只读资源所在目录',
     ),
     {
       id: 'global-state-root',
-      label: '全局私有数据根',
+      label: 'Emperor Home',
       value: sourceLabel(paths?.stateRootSource),
       detail: paths?.stateRoot || '未返回',
       tone: paths?.stateRoot ? 'ok' : 'muted',
@@ -386,25 +636,25 @@ function storagePathRows(
     hasBoundProject
       ? pathRow(
           'active-project-path',
-          '当前项目路径',
+          '当前项目',
           activeProjectPath,
           '项目已绑定；私有会话仍保存到全局 Emperor store，不写入项目源码目录',
         )
       : {
           id: 'active-project-path',
-          label: '当前项目路径',
+          label: '当前项目',
           value: '未绑定',
           detail: '当前是 chat 会话，没有绑定项目目录',
           tone: 'muted',
         },
-    pathRow('sessions-path', 'Sessions 路径', paths?.sessionsRoot),
-    pathRow('attachments-path', '附件路径', paths?.attachmentsRoot),
+    pathRow('sessions-path', '会话目录', paths?.sessionsRoot),
+    pathRow('attachments-path', '附件目录', paths?.attachmentsRoot),
     pathRow(
       'model-config-path',
-      '模型配置路径',
+      '模型配置文件',
       modelConfig?.path || paths?.stateRoot,
     ),
-    pathRow('mcp-config-path', 'MCP 配置路径', paths?.mcpConfigPath),
+    pathRow('mcp-config-path', 'MCP 配置文件', paths?.mcpConfigPath),
   ]
 }
 
@@ -501,7 +751,7 @@ function schedulerRow(
   const hasError = errorCount > 0 || corruptCount > 0
   return {
     id: 'scheduler-store',
-    label: 'Scheduler Store',
+    label: '定时任务存储',
     value: hasError ? '异常' : summary ? '正常' : '未返回',
     detail: joinParts([
       errorCount ? `${errorCount} 个坏 action 行` : '',
@@ -516,7 +766,7 @@ function schedulerRow(
 function runtimeRow(runtime: RuntimeStats | undefined): DiagnosticRow {
   return {
     id: 'runtime-events',
-    label: 'Runtime Events',
+    label: '运行事件',
     value: runtime ? `${numberOrZero(runtime.events)} 条事件` : '未返回',
     detail: runtime
       ? joinParts([
@@ -534,7 +784,7 @@ function activeTasksRow(activeTasks: unknown[] | undefined): DiagnosticRow {
   const taskCount = count(activeTasks)
   return {
     id: 'active-tasks',
-    label: 'Active Tasks',
+    label: '运行中任务',
     value: taskCount ? `${taskCount} 个运行中` : '空闲',
     detail: taskCount ? '有可取消任务' : '当前没有登记的运行任务',
     tone: taskCount ? 'warn' : 'ok',
@@ -550,7 +800,7 @@ function hybridMemoryRow(
   const strategy = String(memory?.lastStrategy || 'idle')
   return {
     id: 'hybrid-memory',
-    label: 'Hybrid Memory',
+    label: '混合记忆检索',
     value: memory ? `${effective} · ${strategy}` : '未返回',
     detail: memory
       ? joinParts([
@@ -599,7 +849,7 @@ function codeIntelligenceRow(
   )
   return {
     id: 'code-intelligence',
-    label: 'Code Intelligence',
+    label: '代码索引',
     value: intelligence ? `${effective} · ${strategy}` : '未返回',
     detail: intelligence
       ? joinParts([
@@ -632,12 +882,18 @@ function workspacePolicyRow(
   const denyRoots = policy?.denyRoots ?? []
   const workspaceRoot = policy?.workspaceRoot || ''
   const stateRoot = policy?.stateRoot || ''
+  // Current Core reports only the workspace root; root lists are optional.
+  const listsRoots = Boolean(policy?.allowRoots || policy?.denyRoots)
   return {
     id: 'workspace-policy',
-    label: 'Workspace Fence',
-    value: policy
-      ? `${allowRoots.length} 个允许根 / ${denyRoots.length} 个禁止根`
-      : '未返回',
+    label: '工作区范围',
+    value: !policy
+      ? '未返回'
+      : listsRoots
+        ? `${allowRoots.length} 个允许根 / ${denyRoots.length} 个禁止根`
+        : workspaceRoot
+          ? '已设定'
+          : '未返回',
     detail: policy
       ? joinParts([
           workspaceRoot ? `workspace ${workspaceRoot}` : '',
@@ -645,7 +901,15 @@ function workspacePolicyRow(
           policy.outsideWorkspace ? `outside ${policy.outsideWorkspace}` : '',
         ])
       : '未返回详细信息',
-    tone: !policy ? 'muted' : allowRoots.length ? 'ok' : 'warn',
+    tone: !policy
+      ? 'muted'
+      : listsRoots
+        ? allowRoots.length
+          ? 'ok'
+          : 'warn'
+        : workspaceRoot
+          ? 'ok'
+          : 'muted',
     path: workspaceRoot || stateRoot || undefined,
   }
 }
@@ -656,7 +920,7 @@ function sandboxCapabilityRow(
   const status = String(capability?.status || 'unknown')
   return {
     id: 'process-sandbox',
-    label: 'Command OS Sandbox',
+    label: '命令沙箱',
     value: capability
       ? `${String(capability.backend || 'unknown')} · ${diagnosticStatusText(status)}`
       : '未返回',
@@ -694,7 +958,7 @@ function processRuntimeRow(
   const quota = runtime?.outputQuota
   return {
     id: 'owned-process-runtime',
-    label: 'Owned Process Runtime',
+    label: '进程托管',
     value: runtime
       ? `${ready ? 'owned' : 'degraded'} · ${String(runtime.processTree || 'unknown')}`
       : '未返回',
@@ -721,7 +985,7 @@ function lifecycleRow(
   const unavailable = services.filter((service) => service.state !== 'ready')
   return {
     id: 'lifecycle-supervisor',
-    label: 'Lifecycle Supervisor',
+    label: '服务生命周期',
     value: lifecycle
       ? `${state} · ${services.length - unavailable.length}/${services.length} ready`
       : '未返回',
@@ -761,8 +1025,8 @@ function subagentSupervisorRow(
     ).length
     return {
       id: 'subagent-supervisor',
-      label: 'Subagents',
-      value: `${running} running · ${value.length} total`,
+      label: '子代理',
+      value: `${running} 个运行中 · 共 ${value.length} 个`,
       detail: '当前会话树中的子代理',
       tone: 'ok',
     }
@@ -779,7 +1043,7 @@ function subagentSupervisorRow(
     sessions.some(([, count]) => maxPerSession > 0 && count >= maxPerSession)
   return {
     id: 'subagent-supervisor',
-    label: 'Subagent Supervisor',
+    label: '子代理',
     value: supervisor
       ? `${active} active · ${active}/${maxGlobal} capacity`
       : '未返回',
@@ -806,7 +1070,7 @@ function agentDefinitionsRow(
   )
   return {
     id: 'agent-definitions',
-    label: 'Agent Definitions',
+    label: 'Agent 定义',
     value: snapshot
       ? `${snapshot.agents?.length ?? 0} agents · ${activeSources.length}/${sources.length} sources`
       : '未返回',
@@ -837,7 +1101,7 @@ function promptCacheBreakRow(
   const stableHash = String(projection?.stablePrefix?.hash || '')
   return {
     id: 'prompt-cache-break',
-    label: 'Prompt Cache Break',
+    label: '提示词缓存',
     value: projection ? `${classification} · ${reasonCode}` : '暂无快照',
     detail: projection
       ? joinParts([
@@ -925,14 +1189,14 @@ function dependencyRows(
   return [
     dependencyRow(
       'node-runtime',
-      'Node.js Runtime',
+      'Node.js 运行时',
       dependencies?.nodeRuntime,
       '可用',
       '不可用',
     ),
     dependencyRow(
       'desktop-renderer',
-      '桌面 Renderer',
+      '桌面渲染层',
       dependencies?.desktopRenderer,
       '已构建',
       '缺少构建产物',

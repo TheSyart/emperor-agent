@@ -102,7 +102,7 @@ metadata:
       effort: high
 ```
 
-`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子代理运行：子代理的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子代理 ID，结果在 Task 面板与对话中的子代理卡片里查看。仅在 fork 时生效的字段：
+`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子代理运行：子代理的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子代理 ID，结果在对话中的子代理卡片里查看，点击可打开子会话。仅在 fork 时生效的字段：
 
 - `allowed_tools`：子代理可用工具的白名单，必须是已注册的工具名，否则命令被拒绝（`skill_fork_tool_scope_invalid`）。
 - `effort`：子代理的推理强度，映射到当前模型路由支持的档位；路由不支持时忽略。

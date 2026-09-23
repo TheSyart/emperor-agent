@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * McpServerCard — one MCP server in Settings › MCP (dsh McpSettingsTab card
+ * McpServerCard — one MCP server in 能力 › MCP (dsh McpSettingsTab card
  * on SettingsCard): status dot, name, transport badge, state · tool count,
  * enable Switch. Expanding shows the connection facts (DefinitionList: masked
  * URL or command line, header / env keys, last error), the discovered tools

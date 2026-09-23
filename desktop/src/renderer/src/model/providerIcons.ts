@@ -27,10 +27,12 @@ const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
   dashscope: new URL('../assets/provider-logos/qwen.svg', import.meta.url).href,
   moonshot: new URL('../assets/provider-logos/kimi.svg', import.meta.url).href,
   zhipu: new URL('../assets/provider-logos/zhipu.svg', import.meta.url).href,
-  volcengine: new URL('../assets/provider-logos/doubao.svg', import.meta.url)
-    .href,
+  volcengine: new URL(
+    '../assets/provider-logos/volcengine-color.svg',
+    import.meta.url,
+  ).href,
   volcengine_coding_plan: new URL(
-    '../assets/provider-logos/doubao.svg',
+    '../assets/provider-logos/volcengine-color.svg',
     import.meta.url,
   ).href,
   byteplus: new URL('../assets/provider-logos/bytedance.svg', import.meta.url)
@@ -49,10 +51,28 @@ const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
   ).href,
   qianfan: new URL('../assets/provider-logos/baidu.svg', import.meta.url).href,
   ollama: new URL('../assets/provider-logos/ollama.svg', import.meta.url).href,
+  groq: new URL('../assets/provider-logos/groq.svg', import.meta.url).href,
+  lm_studio: new URL('../assets/provider-logos/lmstudio.svg', import.meta.url)
+    .href,
+  vllm: new URL('../assets/provider-logos/vllm-color.svg', import.meta.url)
+    .href,
+}
+
+/**
+ * Providers without an upstream logo draw a generic glyph instead of the
+ * initial: a server for self-hosted model servers, a plug for Custom.
+ */
+export type ProviderIconGlyph = 'server' | 'custom'
+
+const PROVIDER_ICON_GLYPHS: Readonly<Record<string, ProviderIconGlyph>> = {
+  ovms: 'server',
+  custom: 'custom',
 }
 
 const MONOCHROME_PROVIDER_ICONS = new Set([
   'anthropic',
+  'groq',
+  'lm_studio',
   'longcat',
   'moonshot',
   'ollama',
@@ -74,6 +94,12 @@ export function providerIconAsset(
 ): string | null {
   const normalized = normalizeProviderIconId(iconId)
   return PROVIDER_ICON_ASSETS[normalized] ?? null
+}
+
+export function providerIconGlyph(
+  iconId: string | null | undefined,
+): ProviderIconGlyph | null {
+  return PROVIDER_ICON_GLYPHS[normalizeProviderIconId(iconId)] ?? null
 }
 
 export function providerIconIsMonochrome(

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * SkillRow — one Skill in the Settings › Skills list: a full-width button
+ * SkillRow — one Skill in the 能力 › Skills list: a full-width button
  * (14/22 medium name, source StatusBadge, 只读 / status badges, a warn glyph
  * with the loader-warning count) over a one-line 13/20 tertiary
  * description; a trailing chevron shows it opens the detail. Rows sit in

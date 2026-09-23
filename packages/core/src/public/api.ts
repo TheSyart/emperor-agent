@@ -20,9 +20,26 @@ export type {
   CompactionDecision,
   DiscardedItem,
 } from '../memory/compaction-models'
-export type { GitFileStatus, GitStatusResult } from '../workspace/git'
+export type {
+  GitFileStatus,
+  GitRemoteInfo,
+  GitRemoteProvider,
+  GitStatusResult,
+} from '../workspace/git'
 export type { GitWorktreeSummary } from '../workspace/git-worktrees'
 export type { PullRequestSummary } from '../workspace/git-pull-requests'
+export type {
+  PullRequestBrowserStatus,
+  PullRequestBrowserUnavailableReason,
+  PullRequestCheck,
+  PullRequestChecksState,
+  PullRequestDetail,
+  PullRequestDiffResult,
+  PullRequestListFilter,
+  PullRequestListItem,
+  PullRequestListResult,
+  PullRequestReviewDecision,
+} from '../workspace/pull-request-browser'
 export type {
   WorkspaceFileEntry,
   WorkspaceFileReadResult,

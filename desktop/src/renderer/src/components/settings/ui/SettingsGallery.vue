@@ -139,7 +139,7 @@ const facts = [
 <template>
   <div class="gallery" data-testid="settings-gallery">
     <div class="panel">
-      <SettingsNav active="mcp" title-id="gallery-title" @select="() => {}" />
+      <SettingsNav active="hooks" title-id="gallery-title" @select="() => {}" />
       <div class="content">
         <div class="header">
           <h2 class="title">组件库</h2>

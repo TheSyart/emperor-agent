@@ -1,16 +1,15 @@
 <script setup lang="ts">
 /**
  * TrajectoryView — the Trajectory tab of a conversation (dsh
- * ui-trajectory TrajectoryView): toolbar, timeline overview and the
- * turn-aware ledger over the session's raw events. The inspector is a
- * separate component (inspector/TrajectoryInspector.vue) the host renders
- * in its details column; both share one controller per session
- * (useTrajectory). `inlineInspector` renders it in a resizable split pane
- * instead (gallery / standalone use).
+ * ui-trajectory TrajectoryView): toolbar, timeline overview, the
+ * turn-aware ledger over the session's raw events and, right of it, the
+ * resizable inspector column (the app's only inspector; open state and
+ * width live in frameState). Ledger and inspector share one controller per
+ * session (useTrajectory).
  *
  * Props: sessionId; focusCallId? (Inspect deep link `?call=`: selected and
- * scrolled into view once loaded); inlineInspector?; store?
- * (ConversationStore — tests / gallery).
+ * scrolled into view once loaded, paging older history in when needed);
+ * store? (ConversationStore — tests / gallery).
  * Emits: select(recordId | null), open-subagent(sessionId),
  * inspect-applied(callId).
  */
@@ -21,10 +20,9 @@ withDefaults(
   defineProps<{
     sessionId: string
     focusCallId?: string | null
-    inlineInspector?: boolean
     store?: ConversationStore
   }>(),
-  { focusCallId: null, inlineInspector: false, store: undefined },
+  { focusCallId: null, store: undefined },
 )
 defineEmits<{
   select: [recordId: string | null]
@@ -38,7 +36,6 @@ defineEmits<{
     :key="sessionId"
     :session-id="sessionId"
     :focus-call-id="focusCallId"
-    :inline-inspector="inlineInspector"
     :store="store"
     @select="$emit('select', $event)"
     @open-subagent="$emit('open-subagent', $event)"

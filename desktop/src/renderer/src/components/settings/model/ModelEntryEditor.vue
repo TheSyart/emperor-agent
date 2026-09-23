@@ -8,6 +8,9 @@
  *
  * Props:
  * - entry: the saved entry to edit, or null to add a new one.
+ * - provider?: provider of a new entry (default DeepSeek, then the first).
+ * - source?: new entries under an existing provider start from this saved
+ *   entry's protocol / API base and reuse its key (`credentialsFrom`).
  * - providerOptions: Provider catalog from the model config payload.
  * Emits: saved(payload, label) after `model.saveEntry`; cancel.
  */
@@ -28,6 +31,7 @@ import type {
 } from '../../../types'
 import Button from '../../ui/Button.vue'
 import IconButton from '../../ui/IconButton.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
 import { DsRefresh } from '../../icons/ds'
 import {
   Field,
@@ -46,6 +50,8 @@ import {
   CAPABILITY_ROWS,
   capabilityStatus,
   createModelEntryDraft,
+  createSiblingEntryDraft,
+  credentialsInherited,
   formatTokenPreset,
   INPUT_TOKEN_PRESETS,
   OUTPUT_TOKEN_PRESETS,
@@ -61,9 +67,13 @@ import {
   type ModelEntryDraft,
   type ModelProtocol,
 } from './modelFormModel'
+import ProviderPicker from './ProviderPicker.vue'
+import { providerDisplayName } from '../../../model/providerGroups'
 
 const props = defineProps<{
   entry: ModelEntry | null
+  provider?: string | null
+  source?: ModelEntry | null
   providerOptions: readonly ProviderOption[]
 }>()
 const emit = defineEmits<{
@@ -91,9 +101,19 @@ function providerFor(name?: string | null): ProviderOption {
   )
 }
 
-const draft = ref<ModelEntryDraft>(
-  createModelEntryDraft(providerFor(props.entry?.provider), props.entry),
-)
+function initialDraft(): ModelEntryDraft {
+  if (props.entry)
+    return createModelEntryDraft(providerFor(props.entry.provider), props.entry)
+  if (props.source)
+    return createSiblingEntryDraft(
+      providerFor(props.source.provider),
+      props.source,
+    )
+  return createModelEntryDraft(providerFor(props.provider))
+}
+
+const draft = ref<ModelEntryDraft>(initialDraft())
+const choosingProvider = ref(false)
 const showApiKey = ref(false)
 const saving = ref(false)
 const attempted = ref(false)
@@ -117,18 +137,41 @@ const selectedProvider = computed<ProviderOption>(
     ) ?? FALLBACK_PROVIDER,
 )
 
-const providerSelectOptions = computed<SelectOption[]>(() => {
-  const options = props.providerOptions.map((provider) => ({
-    value: provider.name,
-    label: provider.displayName || provider.name,
-  }))
-  if (!options.some((option) => option.value === draft.value.provider))
-    options.unshift({
-      value: draft.value.provider,
-      label: selectedProvider.value.displayName || draft.value.provider,
-    })
-  return options
+const selectedProviderLabel = computed(() =>
+  providerDisplayName(draft.value.provider, selectedProvider.value),
+)
+
+const inheritsKey = computed(() => credentialsInherited(draft.value))
+
+/** A sibling key that no longer applies because the endpoint changed. */
+const inheritedKeyLost = computed(() => {
+  const source = draft.value.credentialsFrom
+  return Boolean(
+    source &&
+    source.provider === draft.value.provider &&
+    !draft.value.apiKey.trim() &&
+    !inheritsKey.value,
+  )
 })
+
+const apiKeyPlaceholder = computed(() => {
+  if (inheritsKey.value)
+    return `沿用「${draft.value.credentialsFrom!.label}」的 API Key`
+  return isNew.value ? '输入 API Key' : '留空保留现有凭证'
+})
+
+const apiKeyHint = computed(() => {
+  if (inheritsKey.value)
+    return '留空即沿用同一供应商已保存的 Key；填写则改用新的 Key'
+  if (inheritedKeyLost.value)
+    return '协议或 API 地址已改变，需要重新填写 API Key'
+  return isNew.value ? undefined : '留空则保留已保存的凭证'
+})
+
+function pickProvider(name: string): void {
+  providerName.value = name
+  choosingProvider.value = false
+}
 
 const protocolOptions = computed<SegmentedOption<ModelProtocol>[]>(() =>
   providerProtocols(selectedProvider.value).map((protocol) => ({
@@ -388,8 +431,11 @@ async function discoverModels(): Promise<void> {
   discovering.value = true
   resetDiscovery()
   try {
+    const credentialEntryId =
+      current.entryId ||
+      (credentialsInherited(current) ? current.credentialsFrom!.entryId : '')
     const result = await discoverProviderModels({
-      ...(current.entryId ? { entryId: current.entryId } : {}),
+      ...(credentialEntryId ? { entryId: credentialEntryId } : {}),
       provider: current.provider,
       protocol: current.protocol,
       apiBase: current.apiBase,
@@ -473,9 +519,31 @@ function cancel(): void {
   <div ref="root" class="model-editor" data-testid="model-editor">
     <section class="block">
       <h4 class="block-title">连接</h4>
-      <Field label="Provider" :error="errors.provider">
-        <Select v-model="providerName" :options="providerSelectOptions" block />
+      <Field label="供应商" :error="errors.provider">
+        <div class="provider-row" data-testid="model-editor-provider">
+          <ProviderLogo
+            :icon-id="selectedProvider.iconId || draft.provider"
+            :label="selectedProviderLabel"
+            size="sm"
+          />
+          <span class="provider-name">{{ selectedProviderLabel }}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            :aria-expanded="choosingProvider"
+            aria-label="更换供应商"
+            @click="choosingProvider = !choosingProvider"
+          >
+            {{ choosingProvider ? '收起' : '更换' }}
+          </Button>
+        </div>
       </Field>
+      <ProviderPicker
+        v-if="choosingProvider"
+        :options="providerOptions"
+        :selected="draft.provider"
+        @pick="pickProvider"
+      />
       <Field label="协议">
         <Segmented
           v-if="protocolOptions.length > 1"
@@ -497,16 +565,13 @@ function cancel(): void {
           placeholder="https://api.example.com/v1"
         />
       </Field>
-      <Field
-        label="API Key"
-        :hint="isNew ? undefined : '留空则保留已保存的凭证'"
-      >
+      <Field label="API Key" :hint="apiKeyHint">
         <TextField
           v-model="apiKey"
           :type="showApiKey ? 'text' : 'password'"
           autocomplete="off"
           :disabled="draft.clearApiKey"
-          :placeholder="isNew ? '输入 API Key' : '留空保留现有凭证'"
+          :placeholder="apiKeyPlaceholder"
         >
           <template #trailing>
             <IconButton
@@ -827,6 +892,26 @@ function cancel(): void {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--label-secondary));
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--space-8);
+}
+
+.provider-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  font-weight: 500;
+  color: rgb(var(--label-primary));
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .with-action {

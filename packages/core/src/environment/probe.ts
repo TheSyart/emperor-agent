@@ -63,6 +63,7 @@ const PRIMARY_RUNTIME: Partial<Record<EnvironmentToolId, ProjectEcosystem>> = {
 const REQUIREMENT_ALIASES: Record<string, EnvironmentToolId> = {
   cargo: 'cargo',
   cl: 'msvc-build-tools',
+  gh: 'gh',
   git: 'git',
   go: 'go',
   msbuild: 'msvc-build-tools',

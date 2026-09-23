@@ -14,13 +14,29 @@ import type {
   CommandSurface,
 } from '@emperor/core/api'
 import AppFrame from './components/shell/AppFrame.vue'
+import {
+  CENTER_MIN_CHAT,
+  CENTER_MIN_TRAJECTORY,
+} from './components/shell/columns'
+import {
+  frameActions,
+  useFrameState,
+  type WorkspacePane,
+} from './components/shell/frameState'
+import {
+  goBack,
+  goForward,
+  installNavHistory,
+} from './components/shell/navHistory'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
 import { useSubagentCounts } from './components/sidebar/subagentCounts'
-import { workspaceSourcesFromSnapshot } from './components/details/detailsSources'
+import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
+import { toggleWorkspacePane } from './components/workspace/workspaceState'
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
+import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
 import Toast from './components/ui/Toast.vue'
-import { sessionLocation } from './router'
+import { isConversationRoute, sessionLocation } from './router'
 import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
@@ -28,6 +44,7 @@ import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
 import { core } from './api/http'
 import { useBootstrap } from './composables/useBootstrap'
+import { useNotifications } from './composables/useNotifications'
 import { useRuntime } from './composables/useRuntime'
 import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
@@ -38,12 +55,16 @@ import { activeGoalForSession, hasProjectedGoal } from './runtime/selectors'
 import { normalizeGoal } from './runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
 import { shouldFollowActiveSession } from './runtime/routeFollow'
+import {
+  notificationFromNotice,
+  type RuntimeNotice,
+} from './runtime/notifications'
 import type { GoalOperationResult, RuntimeGoalView, SessionInfo } from './types'
 
-// The details column (git / files / xterm) and the settings modal are heavy
-// and not needed for first paint: split them out of the initial chunk.
-const DetailsPanel = defineAsyncComponent(
-  () => import('./components/details/DetailsPanel.vue'),
+// The right workspace (git / files / xterm panes) and the settings modal are
+// heavy and not needed for first paint: split them out of the initial chunk.
+const WorkspacePanel = defineAsyncComponent(
+  () => import('./components/workspace/WorkspacePanel.vue'),
 )
 const SettingsModal = defineAsyncComponent(
   () => import('./components/settings/SettingsModal.vue'),
@@ -71,6 +92,7 @@ function closeModelSetupPrompt() {
 
 const bootstrap = useBootstrap(showToast)
 const sessionStore = useSession()
+const notifications = useNotifications()
 const {
   boot,
   loading,
@@ -106,6 +128,7 @@ const runtime = useRuntime({
   onSessionControlPendingChanged: sessionStore.applySessionControlPending,
   refreshSessions: sessionStore.load,
   onSubagentEvent: (owner) => subagentCounts.schedule(owner),
+  onNotify: (notice) => notifyFromRuntime(notice),
 })
 const {
   queuedPrompts,
@@ -521,27 +544,97 @@ watch(
   },
 )
 
-// The details column follows the active session's raw-log conversation
-// (Environment sources; workspace refresh as the transcript grows).
-const activeConversation = useLazySessionConversation(() => sessionId.value)
-const detailsSources = computed(() =>
-  workspaceSourcesFromSnapshot(activeConversation.value?.snapshot.value),
-)
-const detailsRefreshKey = computed(
-  () => activeConversation.value?.order.value.length ?? 0,
-)
-/** Session of the active Trajectory tab (the details inspector follows it). */
-const trajectorySessionId = computed(() =>
-  route.name === 'trajectory' ? routeSessionId.value : '',
-)
-
-function openChildSession(childId: string): void {
-  void router.push(sessionLocation(childId)).catch(() => undefined)
-}
-
 const activeSessionInfo = computed(() =>
   sessionStore.getSession(sessionId.value),
 )
+
+// ── notifications (sidebar bell) ────────────────────────────────────────
+// The session on screen: the routed one on Chat / Trajectory, none on full
+// pages or while the window is hidden. Its questions and finished turns are
+// not news (runtime/notifications.ts attention policy).
+const viewedSessionId = computed(() =>
+  isConversationRoute(route.name)
+    ? routeSessionId.value || sessionId.value
+    : '',
+)
+
+function windowHidden(): boolean {
+  return (
+    typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  )
+}
+
+function notifyFromRuntime(notice: RuntimeNotice): void {
+  const hidden = windowHidden()
+  const input = notificationFromNotice(notice, {
+    sessionTitle: (id) => sessionStore.getSession(id)?.title || '',
+    viewedSessionId: hidden ? '' : viewedSessionId.value,
+    schedulerPageOpen: !hidden && route.name === 'scheduler',
+  })
+  if (input) notifications.add(input)
+}
+
+// Opening a session (or returning to the window showing it) reads its
+// notifications.
+watch(viewedSessionId, (id) => notifications.markSessionRead(id), {
+  immediate: true,
+})
+
+function onVisibilityChange(): void {
+  if (!windowHidden()) notifications.markSessionRead(viewedSessionId.value)
+}
+onMounted(() =>
+  document.addEventListener('visibilitychange', onVisibilityChange),
+)
+onBeforeUnmount(() =>
+  document.removeEventListener('visibilitychange', onVisibilityChange),
+)
+
+// ── shell: workspace snapshot, columns, shortcuts ───────────────────────
+// The shared workspace snapshot follows the active session; it refreshes as
+// the active transcript grows (the agent may have touched the project).
+const activeConversation = useLazySessionConversation(() => sessionId.value)
+bindWorkspaceSnapshotSource({
+  sessionId: () => sessionId.value,
+  projectPath: () => activeSessionInfo.value?.project_path || '',
+  refreshKey: () => activeConversation.value?.order.value.length ?? 0,
+})
+
+const frame = useFrameState()
+/** Full-page routes (scheduler, plugins, …) have no workspace column. */
+const workspaceAvailable = computed(() => isConversationRoute(route.name))
+const centerMin = computed(() =>
+  route.name === 'trajectory' ? CENTER_MIN_TRAJECTORY : CENTER_MIN_CHAT,
+)
+const sidebar = ref<{ focusSearch: () => void } | null>(null)
+
+const stopNavHistory = installNavHistory(router)
+onBeforeUnmount(stopNavHistory)
+
+async function newChatFromShortcut(): Promise<void> {
+  const session = await sessionStore.create({ mode: 'chat', title: '新会话' })
+  await router.push(sessionLocation(session.id)).catch(() => undefined)
+}
+
+function workspaceShortcut(pane?: WorkspacePane): () => void {
+  return () => {
+    if (workspaceAvailable.value) toggleWorkspacePane(pane)
+  }
+}
+
+useShortcuts({
+  'workspace.review': workspaceShortcut('review'),
+  'workspace.terminal': workspaceShortcut('terminal'),
+  'workspace.files': workspaceShortcut('files'),
+  'workspace.browser': workspaceShortcut('browser'),
+  'workspace.toggle': workspaceShortcut(),
+  'envCard.toggle': () => frameActions.toggleEnvCard(frame),
+  'sidebar.toggle': () => frameActions.toggleSidebar(frame),
+  'session.new': () => runSafely(newChatFromShortcut),
+  search: () => sidebar.value?.focusSearch(),
+  'nav.back': () => goBack(router),
+  'nav.forward': () => goForward(router),
+})
 
 provideAppContext({
   boot,
@@ -623,25 +716,22 @@ provideAppContext({
   </div>
 
   <template v-else>
-    <AppFrame>
+    <AppFrame :workspace-available="workspaceAvailable" :center-min="centerMin">
       <template #sidebar="{ collapsed, width, toggle }">
-        <SidebarRoot :collapsed="collapsed" :width="width" @toggle="toggle" />
+        <SidebarRoot
+          ref="sidebar"
+          :collapsed="collapsed"
+          :width="width"
+          @toggle="toggle"
+        />
       </template>
       <router-view v-slot="{ Component }">
-        <keep-alive>
+        <keep-alive :max="6">
           <component :is="Component" />
         </keep-alive>
       </router-view>
-      <template #details>
-        <DetailsPanel
-          :session-id="sessionId"
-          :project-path="activeSessionInfo?.project_path || ''"
-          :sources="detailsSources"
-          :agent-busy="busy"
-          :refresh-key="detailsRefreshKey"
-          :trajectory-session-id="trajectorySessionId"
-          @open-subagent="openChildSession"
-        />
+      <template #workspace="{ open }">
+        <WorkspacePanel :open="open" :agent-busy="busy" />
       </template>
     </AppFrame>
     <SettingsModal />

@@ -1,14 +1,25 @@
 // @vitest-environment jsdom
 // Trajectory UI (M7) over the recorded kernel log: ledger rows, folding,
-// search, keyboard, inspector tab sets per record kind, Inspect deep link.
+// search, keyboard, the inspector column (tab sets per record kind,
+// collapse / reopen), Inspect deep link (incl. paging older history in).
 import { createApp, h, nextTick, type App } from 'vue'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConversationScheduler } from '../../conversation/store'
 import { settle } from '../../conversation/testing/fixtures'
+import {
+  FRAME_STORAGE_KEY,
+  resetFrameStateForTest,
+  useFrameState,
+} from '../shell/frameState'
 import TrajectoryView from './TrajectoryView.vue'
-import TrajectoryInspector from './inspector/TrajectoryInspector.vue'
 import { createGalleryStore, type GalleryStore } from './gallery/galleryStore'
-import { kernelScenario, richScenario } from './gallery/galleryScenarios'
+import {
+  kernelScenario,
+  longScenario,
+  richScenario,
+  type GalleryScenario,
+} from './gallery/galleryScenarios'
+import { FOCUS_CALL_LOAD_LIMIT, focusCallStep } from './focusCallRetry'
 import { ledgerKeyAction } from './tableKeyboard'
 import { acquireTrajectory, type TrajectoryController } from './useTrajectory'
 import {
@@ -27,6 +38,8 @@ let gallery: GalleryStore | null = null
 let held: { release: () => void } | null = null
 
 beforeEach(() => {
+  window.localStorage.removeItem(FRAME_STORAGE_KEY)
+  resetFrameStateForTest()
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -46,27 +59,31 @@ afterEach(() => {
 })
 
 async function mountScenario(
-  scenario = kernelScenario(),
+  scenario: GalleryScenario = kernelScenario(),
   props: Record<string, unknown> = {},
+  options: {
+    pageEvents?: number
+    before?: (controller: TrajectoryController) => void
+  } = {},
 ): Promise<{
   root: HTMLElement
   controller: TrajectoryController
   sessionId: string
 }> {
   gallery = createGalleryStore(scenario.sessions, {
-    pageEvents: Number.MAX_SAFE_INTEGER,
+    pageEvents: options.pageEvents ?? Number.MAX_SAFE_INTEGER,
     scheduler: immediate,
   })
   const sessionId = scenario.sessions[0]!.id
   const acquired = acquireTrajectory(sessionId, gallery.store)
   held = acquired
+  options.before?.(acquired.controller)
   container = document.createElement('div')
   document.body.append(container)
   const store = gallery.store
   app = createApp(() =>
     h('div', { class: 'host' }, [
       h(TrajectoryView, { sessionId, store, ...props }),
-      h(TrajectoryInspector, { sessionId, store }),
     ]),
   )
   app.mount(container)
@@ -204,7 +221,7 @@ describe('TrajectoryTable over the kernel log', () => {
   })
 })
 
-describe('TrajectoryInspector', () => {
+describe('Trajectory inspector column', () => {
   it('shows the tab set of each record kind', async () => {
     const { root, controller } = await mountScenario()
     const expectTabs = async (index: number, tabs: string[]) => {
@@ -285,6 +302,79 @@ describe('TrajectoryInspector', () => {
   })
 })
 
+describe('Inspector column open state', () => {
+  function inspector(root: HTMLElement): HTMLElement | null {
+    return root.querySelector<HTMLElement>('[aria-label="事件详情"]')
+  }
+  function toggle(root: HTMLElement): HTMLButtonElement {
+    return root.querySelector<HTMLButtonElement>(
+      '.traj-toolbar button[aria-label="详情"]',
+    )!
+  }
+
+  it('stays collapsed until a record is selected, then opens', async () => {
+    const { root, controller } = await mountScenario()
+    expect(useFrameState().inspectorOpen).toBe(false)
+    expect(inspector(root)).toBeNull()
+    expect(toggle(root).getAttribute('aria-pressed')).toBe('false')
+    controller.selectRecord(11)
+    await nextTick()
+    expect(useFrameState().inspectorOpen).toBe(true)
+    expect(inspector(root)?.textContent).toContain('详情')
+    expect(toggle(root).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('collapses from its header without dropping the selection', async () => {
+    const { root, controller } = await mountScenario()
+    controller.selectRecord(11)
+    await nextTick()
+    inspector(root)!
+      .querySelector<HTMLButtonElement>('button[aria-label="收起详情"]')!
+      .click()
+    await nextTick()
+    expect(inspector(root)).toBeNull()
+    expect(controller.selectedRecord.value?.cell.index).toBe(11)
+    toggle(root).click()
+    await nextTick()
+    expect(tabLabels(root)).toEqual([
+      'Summary',
+      'Payload',
+      'Result',
+      'Schema',
+      'Timing',
+    ])
+  })
+
+  it('reopens empty with a hint when nothing is selected', async () => {
+    const { root } = await mountScenario()
+    toggle(root).click()
+    await nextTick()
+    expect(inspector(root)?.textContent).toContain(
+      '在轨迹中选择一条记录查看详情',
+    )
+  })
+
+  it('persists a dragged width through frameState', async () => {
+    const { root, controller } = await mountScenario()
+    controller.selectRecord(11)
+    await nextTick()
+    const handle = root.querySelector<HTMLElement>(
+      '[aria-label="调整详情宽度"]',
+    )!
+    const before = useFrameState().inspectorWidth
+    handle.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
+    )
+    await nextTick()
+    expect(useFrameState().inspectorWidth).toBe(before + 10)
+    expect(
+      root
+        .querySelector<HTMLElement>('.inspector-col')
+        ?.style.getPropertyValue('--inspector-width'),
+    ).toBe(`${before + 10}px`)
+  })
+})
+
 describe('Inspect deep link', () => {
   it('focusCall selects the record of the call', async () => {
     const { controller } = await mountScenario()
@@ -309,6 +399,60 @@ describe('Inspect deep link', () => {
       root.querySelector('.traj-row[data-selected="true"] .tool-args')
         ?.textContent,
     ).toContain('echo beta')
+    expect(useFrameState().inspectorOpen).toBe(true)
+  })
+
+  it('pages older history in until the call is loaded', async () => {
+    const emitted: string[] = []
+    const { controller } = await mountScenario(
+      longScenario(6),
+      {
+        focusCallId: 'call_bash_a',
+        onInspectApplied: (callId: string) => emitted.push(callId),
+      },
+      { pageEvents: 80 },
+    )
+    await vi.waitFor(() => expect(emitted).toEqual(['call_bash_a']))
+    expect(controller.selectedRecord.value?.cell.callId).toBe('call_bash_a')
+  })
+
+  it('gives up after a bounded number of older pages', async () => {
+    const emitted: string[] = []
+    let loads = 0
+    const { controller } = await mountScenario(
+      longScenario(40),
+      {
+        focusCallId: 'call_bash_a',
+        onInspectApplied: (callId: string) => emitted.push(callId),
+      },
+      {
+        pageEvents: 40,
+        before: (target) => {
+          const load = target.loadOlder
+          target.loadOlder = () => {
+            loads++
+            return load()
+          }
+        },
+      },
+    )
+    await vi.waitFor(() => expect(loads).toBe(FOCUS_CALL_LOAD_LIMIT))
+    await settle(30)
+    expect(loads).toBe(FOCUS_CALL_LOAD_LIMIT)
+    expect(controller.windowState.value.hasMore).toBe(true)
+    expect(emitted).toEqual([])
+  })
+})
+
+describe('focusCallStep', () => {
+  const open = { openState: 'open', hasMore: true, loadingOlder: false }
+  it('waits for the window, loads older pages, then gives up', () => {
+    expect(focusCallStep({ ...open, openState: 'opening' }, 0)).toBe('wait')
+    expect(focusCallStep({ ...open, loadingOlder: true }, 0)).toBe('wait')
+    expect(focusCallStep(open, 0)).toBe('load-older')
+    expect(focusCallStep(open, FOCUS_CALL_LOAD_LIMIT - 1)).toBe('load-older')
+    expect(focusCallStep(open, FOCUS_CALL_LOAD_LIMIT)).toBe('give-up')
+    expect(focusCallStep({ ...open, hasMore: false }, 0)).toBe('give-up')
   })
 })
 

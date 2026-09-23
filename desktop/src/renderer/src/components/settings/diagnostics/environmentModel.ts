@@ -87,3 +87,44 @@ export function environmentJobTone(status: string): EnvironmentTone {
   if (status === 'failed' || status === 'interrupted') return 'error'
   return 'muted'
 }
+
+/** 「macOS · arm64」 — the probed platform, or where the probe stands. */
+export function environmentPlatformLabel(
+  payload: EnvironmentStatusPayload | null | undefined,
+  loading = false,
+): string {
+  const status = payload?.status
+  if (!status) return loading ? '检测中' : '未检测'
+  const name =
+    status.platform === 'darwin'
+      ? 'macOS'
+      : status.platform === 'win32'
+        ? 'Windows'
+        : 'Linux'
+  return `${name} · ${status.arch}`
+}
+
+/** Probed tools as summary items for the diagnostics overview / report. */
+export function environmentDiagnosticItems(
+  payload: EnvironmentStatusPayload | null | undefined,
+): Array<{
+  id: string
+  label: string
+  value: string
+  detail: string
+  tone: EnvironmentTone
+}> {
+  return (payload?.status.tools ?? []).map((tool) => ({
+    id: `environment-${tool.id}`,
+    label: tool.id,
+    value: environmentToolStatusLabel(tool.status),
+    detail: [
+      tool.reason,
+      tool.versionSummary || (tool.requiredVersion ? '未检测到版本' : ''),
+      tool.requiredVersion ? `要求 ${tool.requiredVersion}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    tone: environmentToolTone(tool.status),
+  }))
+}

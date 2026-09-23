@@ -1,5 +1,5 @@
 /**
- * Settings › Skills view model: pure helpers for the list (source filter,
+ * 能力 › Skills view model: pure helpers for the list (source filter,
  * search, ordering), the invalid-Skill notice, the detail facts, read-only
  * rules, SKILL.md frontmatter name detection and `skills.import` result
  * mapping. No Vue, no IO — unit-tested in skillsModel.test.ts.

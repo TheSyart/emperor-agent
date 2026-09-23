@@ -17,6 +17,11 @@ export interface ModalLayer {
 }
 
 const layers: ModalLayer[] = []
+const changeListeners = new Set<() => void>()
+
+function notifyChange(): void {
+  for (const listener of [...changeListeners]) listener()
+}
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || event.defaultPrevented) return
@@ -32,11 +37,13 @@ export function pushModalLayer(layer: ModalLayer): () => void {
   if (typeof document === 'undefined') return () => {}
   if (layers.length === 0) document.addEventListener('keydown', onKeydown)
   layers.push(layer)
+  notifyChange()
   return () => {
     const index = layers.indexOf(layer)
     if (index < 0) return
     layers.splice(index, 1)
     if (layers.length === 0) document.removeEventListener('keydown', onKeydown)
+    notifyChange()
   }
 }
 
@@ -58,7 +65,18 @@ export function useModalLayer(open: Ref<boolean>, onEscape: () => void): void {
   onScopeDispose(release)
 }
 
-/** Number of open layers (tests / diagnostics). */
+/** Number of open layers. */
 export function modalLayerCount(): number {
   return layers.length
+}
+
+/**
+ * Call `listener` whenever a layer opens or closes (the embedded browser
+ * hides its native view under modals). Returns the unsubscribe function.
+ */
+export function onModalLayersChange(listener: () => void): () => void {
+  changeListeners.add(listener)
+  return () => {
+    changeListeners.delete(listener)
+  }
 }

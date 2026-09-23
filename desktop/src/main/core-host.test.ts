@@ -59,6 +59,11 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'mcp.removeServer',
         'skills.import',
         'skills.copyToUser',
+        'git.remote',
+        'pullRequests.status',
+        'pullRequests.list',
+        'pullRequests.view',
+        'pullRequests.diff',
       ]),
     )
     for (const retired of [
@@ -181,6 +186,84 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
       ['import', { raw, dryRun: true }],
       ['enabled', { name: 'aihot', enabled: false }],
       ['remove', { name: 'aihot' }],
+    ])
+  })
+
+  it('routes git.remote and the global pull request operations with validation', async () => {
+    const ipc = new FakeIpcMain()
+    const calls: unknown[] = []
+    registerCoreHostIpc(ipc, {
+      git: {
+        remote: (input: unknown) => {
+          calls.push(['remote', input])
+          return {
+            name: 'origin',
+            webUrl: 'https://github.com/acme/widgets',
+            provider: 'github',
+          }
+        },
+      },
+      pullRequests: {
+        status: () => {
+          calls.push(['status'])
+          return { available: true, login: 'octo-dev', version: '2.101.0' }
+        },
+        list: (input: unknown) => {
+          calls.push(['list', input])
+          return { items: [], total: 0 }
+        },
+        view: (input: unknown) => {
+          calls.push(['view', input])
+          return { repo: 'acme/widgets', number: 42 }
+        },
+        diff: (input: unknown) => {
+          calls.push(['diff', input])
+          return { diff: '', truncated: false }
+        },
+      },
+    } as unknown as CoreApiLike)
+
+    await expect(
+      ipc.invoke(channelForCoreOperation('git.remote'), { sessionId: 's1' }),
+    ).resolves.toMatchObject({ webUrl: 'https://github.com/acme/widgets' })
+    await expect(
+      ipc.invoke(channelForCoreOperation('pullRequests.status')),
+    ).resolves.toMatchObject({ available: true })
+    await expect(
+      ipc.invoke(channelForCoreOperation('pullRequests.list'), {
+        filter: 'mine',
+        query: 'label:bug',
+        limit: 20,
+      }),
+    ).resolves.toEqual({ items: [], total: 0 })
+    await expect(
+      ipc.invoke(channelForCoreOperation('pullRequests.view'), {
+        repo: 'acme/widgets',
+        number: 42,
+      }),
+    ).resolves.toMatchObject({ number: 42 })
+    await expect(
+      ipc.invoke(channelForCoreOperation('pullRequests.diff'), {
+        repo: 'acme/widgets',
+        number: 42,
+      }),
+    ).resolves.toEqual({ diff: '', truncated: false })
+    for (const [key, payload] of [
+      ['pullRequests.list', { filter: 'everyone' }],
+      ['pullRequests.list', { filter: 'all', limit: 500 }],
+      ['pullRequests.view', { repo: '../etc', number: 1 }],
+      ['pullRequests.diff', { repo: 'acme/widgets', number: -1 }],
+      ['git.remote', { sessionId: 's1', remote: 'upstream' }],
+    ] as const)
+      await expect(
+        ipc.invoke(channelForCoreOperation(key), payload),
+      ).resolves.toMatchObject({ ok: false })
+    expect(calls).toEqual([
+      ['remote', { sessionId: 's1' }],
+      ['status'],
+      ['list', { filter: 'mine', query: 'label:bug', limit: 20 }],
+      ['view', { repo: 'acme/widgets', number: 42 }],
+      ['diff', { repo: 'acme/widgets', number: 42 }],
     ])
   })
 

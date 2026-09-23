@@ -27,6 +27,11 @@ type VisualBridge = {
   onTerminalEvent: (listener: VisualCoreListener) => () => void
   onSessionEvents: (listener: VisualCoreListener) => () => void
   invokeCore: (operationKey: string, ...args: unknown[]) => Promise<unknown>
+  openBrowserUrl?: (url: string) => Promise<unknown>
+  browserBounds?: (bounds: unknown) => void
+  browserAction?: (action: string) => void
+  browserClose?: () => void
+  onBrowserState?: (listener: VisualCoreListener) => () => void
 }
 
 declare global {
@@ -270,8 +275,54 @@ export async function installVisualCoreBridge(
         displayName: 'Claude Visual',
         effectiveDisplayName: 'Claude Visual',
         apiBase: 'https://api.anthropic.com',
+        apiKey: '***a1b2',
         reasoningEffort: 'medium',
       }
+      const visualHaikuEntry = {
+        ...visualSecondaryEntry,
+        entryId: 'anthropic-haiku-entry',
+        modelId: 'claude-visual-haiku',
+        displayName: 'Claude Haiku Visual',
+        effectiveDisplayName: 'Claude Haiku Visual',
+        contextWindowTokens: 200000,
+        resolvedProfile: {
+          ...visualModelEntry.resolvedProfile,
+          vision: false,
+          contextWindowTokens: 200000,
+        },
+      }
+      const visualDeepSeekEntry = {
+        ...visualModelEntry,
+        entryId: 'deepseek-entry',
+        provider: 'deepseek',
+        modelId: 'deepseek-chat',
+        displayName: 'DeepSeek V4',
+        effectiveDisplayName: 'DeepSeek V4',
+        apiBase: 'https://api.deepseek.com',
+        apiKey: '***c3d4',
+        reasoningEffort: null,
+        resolvedProfile: {
+          ...visualModelEntry.resolvedProfile,
+          vision: false,
+          contextWindowTokens: 1000000,
+        },
+      }
+      const catalogOption = (
+        name: string,
+        displayName: string,
+        region: string,
+        apiBase = `https://api.${name}.example/v1`,
+      ) => ({
+        name,
+        displayName,
+        protocols: ['openai'],
+        defaultProtocol: 'openai',
+        apiBases: { openai: apiBase },
+        iconId: name,
+        region,
+        isLocal: region === 'local',
+        modelDiscovery: { openai: 'openai_compat' },
+      })
       const visualCurrent = {
         entryId: 'visual-entry',
         provider: 'visual',
@@ -316,7 +367,12 @@ export async function installVisualCoreBridge(
         activeModelId: modelUnavailable ? null : 'visual-entry',
         models: modelUnavailable
           ? []
-          : [visualModelEntry, visualSecondaryEntry],
+          : [
+              visualModelEntry,
+              visualSecondaryEntry,
+              visualDeepSeekEntry,
+              visualHaikuEntry,
+            ],
         availability: modelUnavailable
           ? {
               usable: false,
@@ -350,10 +406,47 @@ export async function installVisualCoreBridge(
             defaultProtocol: 'anthropic',
             apiBases: { anthropic: 'https://api.anthropic.com' },
             iconId: 'anthropic',
-            region: 'global',
+            region: 'foreign',
             isLocal: false,
             modelDiscovery: { anthropic: 'anthropic' },
           },
+          catalogOption(
+            'deepseek',
+            'DeepSeek',
+            'cn',
+            'https://api.deepseek.com',
+          ),
+          catalogOption('dashscope', 'Alibaba DashScope (Qwen)', 'cn'),
+          catalogOption('moonshot', 'Moonshot Kimi', 'cn'),
+          catalogOption('zhipu', 'Zhipu GLM (智谱)', 'cn'),
+          catalogOption('volcengine', 'VolcEngine 火山方舟 (含豆包)', 'cn'),
+          catalogOption('minimax', 'MiniMax', 'cn'),
+          catalogOption('openai', 'OpenAI', 'foreign'),
+          catalogOption('gemini', 'Google Gemini', 'foreign'),
+          catalogOption('xai', 'xAI Grok', 'foreign'),
+          catalogOption('groq', 'Groq', 'foreign'),
+          catalogOption('openrouter', 'OpenRouter', 'aggregator'),
+          catalogOption('siliconflow', 'SiliconFlow (硅基流动)', 'aggregator'),
+          catalogOption(
+            'ollama',
+            'Ollama',
+            'local',
+            'http://localhost:11434/v1',
+          ),
+          catalogOption(
+            'lm_studio',
+            'LM Studio',
+            'local',
+            'http://localhost:1234/v1',
+          ),
+          catalogOption('vllm', 'vLLM', 'local', 'http://localhost:8000/v1'),
+          catalogOption(
+            'ovms',
+            'OpenVINO Model Server',
+            'local',
+            'http://localhost:8000/v3',
+          ),
+          catalogOption('custom', 'Custom', 'other', ''),
         ],
       }
       const memory = {
@@ -450,8 +543,8 @@ export async function installVisualCoreBridge(
       const scheduler: Record<string, any> = {
         status: {
           running: true,
-          jobs: 3,
-          enabled: 2,
+          jobs: 5,
+          enabled: 3,
           nextRunAtMs: Date.now() + 3600000,
           lastError: null,
           active: 0,
@@ -538,6 +631,53 @@ export async function installVisualCoreBridge(
                   missedCount: 2,
                   countCapped: false,
                   error: 'app closed during run',
+                },
+              ],
+            },
+          },
+          // One-shot (`at`) jobs: one still scheduled, one that already ran
+          // (Core disabled it afterwards: the 已完成 tab).
+          {
+            id: 'job_release_reminder',
+            name: '版本发布提醒',
+            enabled: true,
+            schedule: { kind: 'at', atMs: Date.now() + 2 * 86400000 },
+            payload: {
+              kind: 'agent_turn',
+              message: '检查发布清单是否完成，并提醒我确认发布说明。',
+              deliver: true,
+            },
+            createdAtMs: Date.now() - 86400000,
+            updatedAtMs: Date.now() - 86400000,
+            state: {
+              nextRunAtMs: Date.now() + 2 * 86400000,
+              runHistory: [],
+            },
+          },
+          {
+            id: 'job_migration_check',
+            name: '迁移完成检查',
+            enabled: false,
+            schedule: { kind: 'at', atMs: Date.now() - 3 * 86400000 },
+            payload: {
+              kind: 'agent_turn',
+              message: '确认数据迁移脚本已跑完，并汇总异常记录。',
+              deliver: true,
+            },
+            createdAtMs: Date.now() - 5 * 86400000,
+            updatedAtMs: Date.now() - 3 * 86400000,
+            state: {
+              nextRunAtMs: null,
+              lastRunAtMs: Date.now() - 3 * 86400000,
+              lastStatus: 'ok',
+              runHistory: [
+                {
+                  runId: 'run_migration_1',
+                  taskId: 'task_77',
+                  runAtMs: Date.now() - 3 * 86400000,
+                  scheduledForMs: Date.now() - 3 * 86400000,
+                  status: 'ok',
+                  durationMs: 52000,
                 },
               ],
             },
@@ -831,6 +971,21 @@ export async function installVisualCoreBridge(
       const environmentListeners = new Set<VisualCoreListener>()
       const terminalListeners = new Set<VisualCoreListener>()
       const sessionEventListeners = new Set<VisualCoreListener>()
+      // Embedded browser stub: the native view cannot render here, so opens,
+      // bounds and actions are recorded on window and specs push page states
+      // through __visualEmitBrowserState. `…:9` addresses fail to load.
+      const browserListeners = new Set<VisualCoreListener>()
+      const visualBrowser = window as unknown as {
+        __visualBrowserOpened?: string[]
+        __visualBrowserBounds?: unknown[]
+        __visualBrowserActions?: string[]
+        __visualBrowserClosed?: number
+        __visualEmitBrowserState?: (state: unknown) => void
+      }
+      const emitBrowserState = (state: unknown) => {
+        for (const listener of browserListeners) listener(state)
+      }
+      visualBrowser.__visualEmitBrowserState = emitBrowserState
       const visualSidebarState = {
         section_order: ['projects', 'chats'],
         project_sort: 'updated_at',
@@ -839,6 +994,7 @@ export async function installVisualCoreBridge(
         chat_order: [],
         project_session_order: {},
         collapsed_project_ids: [],
+        pinned_session_ids: [] as string[],
         right_workspace: {
           open: true,
           width: 360,
@@ -897,6 +1053,171 @@ export async function installVisualCoreBridge(
         },
         truncated: false,
         revision: 'visual-git-revision',
+      }
+      /**
+       * `tasks.list` fixture (environment card 子智能体 / 后台任务): the
+       * Build session has five subagents (one running), a running background
+       * job, a running Ralph workflow run and a failed job; the plain chat
+       * has two finished subagents. Background times follow the real clock
+       * (elapsed / finish time read naturally); `tasks.cancel` stops a job
+       * or run for good (`visualCancelledTasks`).
+       */
+      const visualCancelledTasks = new Map<string, number>()
+      function visualBackgroundTask(
+        task: Record<string, unknown> & { id: string; kind: string },
+      ) {
+        const stoppedAt = visualCancelledTasks.get(task.id)
+        if (stoppedAt === undefined || task.status !== 'running') return task
+        return {
+          ...task,
+          status: task.kind === 'job' ? 'killed' : 'cancelled',
+          finished_at: stoppedAt,
+          ...(task.kind === 'job' ? { exit_code: 143 } : {}),
+        }
+      }
+      /** `tasks.transcript` fixture: job output, or a long workflow record. */
+      function visualTaskTranscript(taskId: string) {
+        if (taskId === 'job-visual-dev')
+          return [
+            {
+              role: 'output',
+              content: [
+                '> emperor-agent-desktop@0.1.0 dev',
+                '> electron-vite dev',
+                '',
+                'vite v6.3.5 building SSR bundle for development...',
+                '✓ 38 modules transformed.',
+                'out/main/index.js  182.40 kB',
+                'build the electron main process successfully',
+                '',
+                'dev server running for the electron renderer process at:',
+                '  ➜  Local:   http://localhost:5173/',
+                'start electron app...',
+              ].join('\n'),
+            },
+          ]
+        if (taskId === 'job-visual-test')
+          return [
+            {
+              role: 'output',
+              content:
+                ' FAIL  src/renderer/src/components/workspace/environmentModel.test.ts\n' +
+                'AssertionError: expected 2 to be 1\n[stderr]\nnpm ERR! Test failed.',
+            },
+          ]
+        if (taskId === 'wf-visual-ralph') {
+          const entries: Array<{ role: string; content: string }> = [
+            {
+              role: 'workflow',
+              content: 'ralph 修复视觉回归: 逐轮修到截图检查通过',
+            },
+          ]
+          // 12 rounds × 18 entries: more than one 200-entry page.
+          for (let round = 1; round <= 12; round++) {
+            entries.push(
+              { role: 'phase', content: `第 ${round} 轮` },
+              {
+                role: 'agent',
+                content: `#${round} 修复视觉回归 started (sub-ralph-${round})`,
+              },
+            )
+            for (let check = 1; check <= 15; check++)
+              entries.push({
+                role: 'log',
+                content: `截图 ${check}/15：${check % 4 ? '一致' : '差异 0.4%，继续修复'}`,
+              })
+            if (round < 12)
+              entries.push({ role: 'agent', content: `#${round} completed` })
+          }
+          return entries
+        }
+        return []
+      }
+      function visualTasksFor(sessionId: string) {
+        const started = Date.parse(now) - 600_000
+        const clock = Date.now()
+        const subagent = (
+          id: string,
+          description: string,
+          status: 'running' | 'idle',
+          offset: number,
+          lastStopReason?: string,
+        ) => ({
+          id,
+          kind: 'subagent',
+          label: description,
+          description,
+          status,
+          session_id: sessionId,
+          owner_id: sessionId,
+          started_at: started + offset,
+          finished_at: null,
+          depth: 1,
+          mode: 'spawn',
+          last_stop_reason: lastStopReason ?? null,
+        })
+        if (sessionId === 'build-ui')
+          return [
+            subagent('sub-visual-review', '审查 Git 服务', 'running', 50_000),
+            subagent('sub-visual-docs', '整理环境卡文档', 'idle', 40_000),
+            subagent('sub-visual-tests', '补充视觉测试', 'idle', 30_000),
+            subagent(
+              'sub-visual-icons',
+              '核对图标与配色',
+              'idle',
+              20_000,
+              'error',
+            ),
+            subagent('sub-visual-perf', '测量首屏体积', 'idle', 10_000),
+            ...[
+              {
+                id: 'job-visual-dev',
+                kind: 'job',
+                job_kind: 'bash',
+                label: 'npm run dev',
+                description: 'npm run dev',
+                status: 'running',
+                session_id: sessionId,
+                owner_id: sessionId,
+                started_at: clock - 185_000,
+                finished_at: null,
+              },
+              {
+                id: 'wf-visual-ralph',
+                kind: 'workflow',
+                label: '修复视觉回归',
+                description: '逐轮修到截图检查通过',
+                status: 'running',
+                session_id: sessionId,
+                owner_id: sessionId,
+                started_at: clock - 420_000,
+                finished_at: null,
+                detail: null,
+                workflow_tool: 'ralph',
+                rounds: 12,
+              },
+              {
+                id: 'job-visual-test',
+                kind: 'job',
+                job_kind: 'bash',
+                label: 'npm test -- --run environmentModel',
+                description: 'npm test -- --run environmentModel',
+                status: 'failed',
+                session_id: sessionId,
+                owner_id: sessionId,
+                started_at: clock - 900_000,
+                finished_at: clock - 840_000,
+                exit_code: 1,
+                detail: 'exit code: 1',
+              },
+            ].map(visualBackgroundTask),
+          ]
+        if (sessionId === 'chat-main')
+          return [
+            subagent('sub-chat-research', '调研 Codex 环境卡', 'idle', 20_000),
+            subagent('sub-chat-summary', '汇总参考截图', 'idle', 10_000),
+          ]
+        return []
       }
       const visualTerminal = {
         id: 'terminal_visual',
@@ -1291,13 +1612,70 @@ export async function installVisualCoreBridge(
           localConfig: { status: 'ok', exists: true },
           scheduler: { jobsFile: 'memory/scheduler/jobs.json' },
           runtime: { events: 0, latestSeq: 1 },
+          sandbox: {
+            platform: 'darwin',
+            backend: 'macos-seatbelt',
+            status: 'available',
+            filesystem: 'workspace-write',
+            network: 'allowed',
+            processTree: true,
+          },
+          processRuntime: {
+            ownership: true,
+            leases: true,
+            reparent: true,
+            orphanReconcile: true,
+            processTree: 'process_group',
+            terminal: { interactiveStdio: true, pty: true },
+            outputQuota: {
+              defaultBytes: 65536,
+              maximumBytes: 8388608,
+              defaultStrategy: 'terminate',
+            },
+          },
+          subagents: [],
+          effectiveConfig: {
+            entries: [
+              {
+                key: 'model.executionPolicy',
+                source: { kind: 'user', id: 'model_config', trust: 'trusted' },
+                trace: [{ source: { kind: 'user' }, status: 'applied' }],
+                value: {},
+              },
+              {
+                key: 'sandbox.runtime',
+                source: { kind: 'builtin', id: 'defaults', trust: 'trusted' },
+                trace: [{ source: { kind: 'builtin' }, status: 'applied' }],
+                value: {},
+              },
+              {
+                key: 'mcp.config',
+                source: { kind: 'user', id: 'mcp_config', trust: 'trusted' },
+                trace: [{ source: { kind: 'user' }, status: 'applied' }],
+                value: {},
+              },
+              ...['release-notes', 'web-research', 'visual-build-project'].map(
+                (name) => ({
+                  key: `skills.${name}`,
+                  source: { kind: 'user', id: name, trust: 'trusted' },
+                  trace: [{ source: { kind: 'user' }, status: 'applied' }],
+                  value: {},
+                }),
+              ),
+            ],
+          },
+          commandCatalog: { registeredSkills: 3, conflicts: [] },
           desktopPet: {
             enabled: false,
             running: false,
             autoStartWithWebui: false,
             installCommand: 'npm install',
           },
-          dependencies: { nodeRuntime: true, desktopRenderer: true },
+          dependencies: {
+            nodeRuntime: true,
+            desktopRenderer: true,
+            desktopPetModules: false,
+          },
           environment: {
             catalogRevision: 'a'.repeat(64),
             platform: 'darwin',
@@ -1949,6 +2327,340 @@ export async function installVisualCoreBridge(
         }
       }
 
+      // ── Pull Request fixture (pullRequests.* ops) ───────────────────
+      // Fictional repositories and logins only. `?visualGh=missing` |
+      // `unauthenticated` | `failed` switches the gh status; list / view /
+      // diff then reject with the matching coded error.
+      const visualGhMode = visualParams.get('visualGh')
+      const visualGhStatus: Record<string, unknown> =
+        visualGhMode === 'missing'
+          ? { available: false, reason: 'gh_missing' }
+          : visualGhMode === 'unauthenticated'
+            ? {
+                available: false,
+                reason: 'gh_unauthenticated',
+                version: '2.63.2',
+              }
+            : visualGhMode === 'failed'
+              ? {
+                  available: false,
+                  reason: 'gh_failed',
+                  version: '2.63.2',
+                  message: 'error connecting to api.github.com: i/o timeout',
+                }
+              : { available: true, login: 'lin-hai', version: '2.63.2' }
+      type VisualPr = {
+        repo: string
+        number: number
+        title: string
+        author: string
+        draft?: boolean
+        reviewing?: boolean
+        head: string
+        checks: string | null
+        review: string | null
+        updatedMin: number
+        createdMin: number
+        commits: number
+        body: string
+        files: Array<[string, number, number]>
+        runs: Array<[string, string, string | null]>
+        diff?: string[]
+      }
+      // Half a minute of slack so ages read whole minutes on screen.
+      const visualPrAgo = (minutes: number) =>
+        new Date(Date.now() - minutes * 60_000 - 30_000).toISOString()
+      const visualPulls: VisualPr[] = [
+        {
+          repo: 'aurora-labs/orbit-desktop',
+          number: 482,
+          title: '设置页：重做分区导航与键盘焦点管理',
+          author: 'lin-hai',
+          head: 'feat/settings-nav',
+          checks: 'success',
+          review: 'REVIEW_REQUIRED',
+          updatedMin: 120,
+          createdMin: 3 * 1440,
+          commits: 5,
+          body: [
+            '<!-- 请描述改动的动机和测试方式 -->',
+            '## 改动',
+            '',
+            '- 设置页左侧分区列表支持 ↑ / ↓ 移动焦点，Enter 打开分区',
+            '- 新增 `useFocusRing()`，焦点离开列表时回到当前分区',
+            '- 删除旧的 `legacyNav()` 查询',
+            '',
+            '## 测试',
+            '',
+            '- [x] `npm test`',
+            '- [x] 手动验证深色 / 浅色主题',
+            '- [ ] Windows 高对比度模式',
+            '',
+            '![设置页截图](https://example.com/settings-nav.png)',
+            '',
+            '相关讨论见 https://github.com/aurora-labs/orbit-desktop/issues/470',
+          ].join('\n'),
+          files: [
+            ['src/renderer/settings/SettingsNav.vue', 4, 2],
+            ['src/renderer/settings/focusRing.ts', 10, 0],
+            ['src/renderer/settings/legacyNav.ts', 0, 3],
+            ['docs/settings.md', 2, 1],
+          ],
+          runs: [
+            ['build (macos-14)', 'COMPLETED', 'SUCCESS'],
+            ['build (ubuntu-22.04)', 'COMPLETED', 'SUCCESS'],
+            ['lint', 'COMPLETED', 'SUCCESS'],
+            ['unit-tests', 'COMPLETED', 'SUCCESS'],
+            ['docs-preview', 'COMPLETED', 'SKIPPED'],
+          ],
+          diff: [
+            'diff --git a/src/renderer/settings/SettingsNav.vue b/src/renderer/settings/SettingsNav.vue',
+            'index 5c1e2a4..9b07d31 100644',
+            '--- a/src/renderer/settings/SettingsNav.vue',
+            '+++ b/src/renderer/settings/SettingsNav.vue',
+            '@@ -12,9 +12,11 @@ const props = defineProps<{',
+            '   sections: SettingsSection[]',
+            '   active: string',
+            ' }>()',
+            '-const emit = defineEmits<{ select: [id: string] }>()',
+            '+const emit = defineEmits<{ select: [id: string]; focusout: [] }>()',
+            '+const ring = useFocusRing()',
+            ' ',
+            ' function onKeydown(event: KeyboardEvent) {',
+            "-  if (event.key !== 'ArrowDown') return",
+            "+  if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return",
+            "+  ring.move(event.key === 'ArrowDown' ? 1 : -1)",
+            '   event.preventDefault()',
+            ' }',
+            'diff --git a/src/renderer/settings/focusRing.ts b/src/renderer/settings/focusRing.ts',
+            'new file mode 100644',
+            'index 0000000..3fa91c2',
+            '--- /dev/null',
+            '+++ b/src/renderer/settings/focusRing.ts',
+            '@@ -0,0 +1,10 @@',
+            "+import { ref } from 'vue'",
+            '+',
+            '+/** Roving focus over the settings navigation rows. */',
+            '+export function useFocusRing() {',
+            '+  const index = ref(0)',
+            '+  const move = (delta: number) => {',
+            '+    index.value = Math.max(0, index.value + delta)',
+            '+  }',
+            '+  return { index, move }',
+            '+}',
+            'diff --git a/src/renderer/settings/legacyNav.ts b/src/renderer/settings/legacyNav.ts',
+            'deleted file mode 100644',
+            'index 7d2c0e1..0000000',
+            '--- a/src/renderer/settings/legacyNav.ts',
+            '+++ /dev/null',
+            '@@ -1,3 +0,0 @@',
+            '-export function legacyNav() {',
+            "-  return document.querySelector('.settings-nav')",
+            '-}',
+            'diff --git a/docs/settings.md b/docs/settings.md',
+            'index 1a2b3c4..5d6e7f8 100644',
+            '--- a/docs/settings.md',
+            '+++ b/docs/settings.md',
+            '@@ -3,4 +3,5 @@',
+            ' ## 键盘导航',
+            ' ',
+            '-设置页只支持鼠标选择分区。',
+            '+在分区列表中用 ↑ / ↓ 移动焦点，Enter 打开分区。',
+            '+焦点离开列表时会回到当前分区。',
+            ' ',
+            '',
+          ],
+        },
+        {
+          repo: 'aurora-labs/orbit-core',
+          number: 1302,
+          title: 'Stream tool results through the projector in batches',
+          author: 'dmitri-v',
+          reviewing: true,
+          head: 'perf/projector-batches',
+          checks: 'pending',
+          review: 'REVIEW_REQUIRED',
+          updatedMin: 20,
+          createdMin: 2 * 1440,
+          commits: 3,
+          body: 'Batches `tool_result` projections so long shell output no longer re-renders the whole turn.\n\n- Flushes every 50 ms or 64 KiB\n- Keeps ordering per call id',
+          files: [
+            ['packages/core/src/projection/projector.ts', 48, 17],
+            ['packages/core/src/projection/projector.test.ts', 66, 4],
+          ],
+          runs: [
+            ['build', 'COMPLETED', 'SUCCESS'],
+            ['unit-tests', 'IN_PROGRESS', null],
+            ['e2e', 'QUEUED', null],
+          ],
+        },
+        {
+          repo: 'aurora-labs/orbit-core',
+          number: 1291,
+          title: 'Fix race in session log compaction when two writers flush',
+          author: 'k-sato',
+          reviewing: true,
+          head: 'fix/compaction-race',
+          checks: 'failure',
+          review: 'CHANGES_REQUESTED',
+          updatedMin: 1500,
+          createdMin: 6 * 1440,
+          commits: 4,
+          body: 'Two writers could both observe `seq = n` and append a compaction marker twice. This takes the append lock before reading the tail.',
+          files: [
+            ['packages/core/src/session-log/compaction.ts', 23, 11],
+            ['packages/core/src/session-log/compaction.test.ts', 41, 0],
+          ],
+          runs: [
+            ['build', 'COMPLETED', 'SUCCESS'],
+            ['unit-tests', 'COMPLETED', 'FAILURE'],
+            ['lint', 'COMPLETED', 'SUCCESS'],
+          ],
+        },
+        {
+          repo: 'nimbus-io/ledger-sync',
+          number: 77,
+          title: 'Add retry budget to webhook delivery',
+          author: 'ariel-w',
+          reviewing: true,
+          head: 'feat/webhook-retry-budget',
+          checks: 'success',
+          review: 'APPROVED',
+          updatedMin: 3 * 1440 + 60,
+          createdMin: 12 * 1440,
+          commits: 7,
+          body: 'Caps retries per endpoint with a token bucket so one failing receiver cannot starve the queue.',
+          files: [
+            ['internal/webhooks/deliver.go', 58, 12],
+            ['internal/webhooks/budget.go', 74, 0],
+            ['internal/webhooks/deliver_test.go', 96, 8],
+          ],
+          runs: [
+            ['go-test', 'COMPLETED', 'SUCCESS'],
+            ['golangci-lint', 'COMPLETED', 'SUCCESS'],
+          ],
+        },
+        {
+          repo: 'aurora-labs/orbit-desktop',
+          number: 479,
+          title: '桌宠动画改用 sprite sheet',
+          author: 'lin-hai',
+          draft: true,
+          head: 'wip/pet-sprites',
+          checks: null,
+          review: null,
+          updatedMin: 9 * 1440,
+          createdMin: 15 * 1440,
+          commits: 2,
+          body: '草稿：先把帧动画迁到单张 sprite sheet，性能数据稍后补充。',
+          files: [
+            ['desktop/src/pet/sprite.ts', 120, 0],
+            ['desktop/src/pet/PetCanvas.vue', 34, 52],
+          ],
+          runs: [],
+        },
+        {
+          repo: 'aurora-labs/orbit-core',
+          number: 1284,
+          title: 'chore(deps): bump vitest from 2.1.8 to 2.1.9',
+          author: 'dependabot',
+          head: 'dependabot/npm_and_yarn/vitest-2.1.9',
+          checks: 'success',
+          review: null,
+          updatedMin: 23 * 1440,
+          createdMin: 24 * 1440,
+          commits: 1,
+          body: 'Bumps vitest from 2.1.8 to 2.1.9.',
+          files: [
+            ['package.json', 1, 1],
+            ['package-lock.json', 18, 18],
+          ],
+          runs: [
+            ['build', 'COMPLETED', 'SUCCESS'],
+            ['unit-tests', 'COMPLETED', 'SUCCESS'],
+          ],
+        },
+        {
+          repo: 'nimbus-io/ledger-sync',
+          number: 71,
+          title: '文档：补充离线同步的冲突处理说明',
+          author: 'lin-hai',
+          head: 'docs/offline-conflicts',
+          checks: null,
+          review: 'CHANGES_REQUESTED',
+          updatedMin: 95 * 1440,
+          createdMin: 101 * 1440,
+          commits: 3,
+          body: '补充三种冲突场景的处理顺序和示例。',
+          files: [['docs/offline-sync.md', 64, 9]],
+          runs: [],
+        },
+      ]
+      const visualPrTotals = (pr: VisualPr) =>
+        pr.files.reduce(
+          (sum, [, add, del]) => [sum[0]! + add, sum[1]! + del],
+          [0, 0],
+        )
+      function visualPrItem(pr: VisualPr) {
+        const [additions, deletions] = visualPrTotals(pr)
+        return {
+          repo: pr.repo,
+          number: pr.number,
+          title: pr.title,
+          state: 'OPEN',
+          isDraft: Boolean(pr.draft),
+          url: `https://github.com/${pr.repo}/pull/${pr.number}`,
+          author: pr.author,
+          createdAt: visualPrAgo(pr.createdMin),
+          updatedAt: visualPrAgo(pr.updatedMin),
+          headRefName: pr.head,
+          additions,
+          deletions,
+          checks: pr.checks,
+          reviewDecision: pr.review,
+        }
+      }
+      function visualPrDiff(pr: VisualPr): string {
+        if (pr.diff) return pr.diff.join('\n')
+        return pr.files
+          .map(([path, add, del]) =>
+            [
+              `diff --git a/${path} b/${path}`,
+              '--- a/' + path,
+              '+++ b/' + path,
+              `@@ -1,${del + 1} +1,${add + 1} @@`,
+              ' // unchanged',
+              ...Array.from({ length: del }, (_, i) => `-old line ${i + 1}`),
+              ...Array.from({ length: add }, (_, i) => `+new line ${i + 1}`),
+            ].join('\n'),
+          )
+          .join('\n')
+      }
+      function visualPrFailure(): unknown {
+        const code =
+          visualGhMode === 'missing'
+            ? 'pull_request_gh_missing'
+            : visualGhMode === 'unauthenticated'
+              ? 'pull_request_gh_unauthenticated'
+              : 'pull_request_gh_failed'
+        return { ok: false, error: { message: 'gh unavailable', code } }
+      }
+      function visualPrLookup(input: unknown): VisualPr | null {
+        const ref = (input ?? {}) as { repo?: string; number?: number }
+        return (
+          visualPulls.find(
+            (pr) => pr.repo === ref.repo && pr.number === ref.number,
+          ) ?? null
+        )
+      }
+      const visualPrNotFound = {
+        ok: false,
+        error: {
+          message: '找不到该 Pull Request，或当前账户无权访问该仓库。',
+          code: 'pull_request_not_found',
+        },
+      }
+
       // ── MCP settings fixture (mcp.* ops) ────────────────────────────
       // Masked config view (Core shows every secret leaf as [REDACTED]);
       // `?visualMcp=empty` starts without servers. Imports connect at once.
@@ -2519,7 +3231,57 @@ export async function installVisualCoreBridge(
           ).__visualOpenedPaths ??= []).push(target)
           return { ok: true }
         },
+        openBrowserUrl: async (input: string) => {
+          const text = String(input ?? '').trim()
+          ;(visualBrowser.__visualBrowserOpened ??= []).push(text)
+          if (
+            /^[a-z][a-z0-9+.-]*:(?!\d)/i.test(text) &&
+            !/^https?:/i.test(text)
+          )
+            return { ok: false, error: '只支持 http 和 https 网址' }
+          const local = /^(localhost|127\.)/i.test(text)
+          const url = new URL(
+            /^https?:\/\//i.test(text)
+              ? text
+              : `${local ? 'http' : 'https'}://${text}`,
+          ).href
+          const base = { url, title: '', canGoBack: false, canGoForward: false }
+          emitBrowserState({ ...base, loading: true })
+          if (new URL(url).port === '9')
+            setTimeout(
+              () =>
+                emitBrowserState({
+                  ...base,
+                  loading: false,
+                  error: 'ERR_CONNECTION_REFUSED (-102)',
+                }),
+              30,
+            )
+          return { ok: true, url }
+        },
+        browserBounds: (bounds: unknown) => {
+          ;(visualBrowser.__visualBrowserBounds ??= []).push(bounds ?? null)
+        },
+        browserAction: (action: string) => {
+          ;(visualBrowser.__visualBrowserActions ??= []).push(action)
+        },
+        browserClose: () => {
+          visualBrowser.__visualBrowserClosed =
+            (visualBrowser.__visualBrowserClosed ?? 0) + 1
+        },
+        onBrowserState: (listener: VisualCoreListener) => {
+          browserListeners.add(listener)
+          return () => browserListeners.delete(listener)
+        },
         onCoreEvent: (listener: VisualCoreListener) => {
+          // Specs push host runtime events (git receipts, scheduler runs …).
+          ;(
+            window as unknown as {
+              __visualEmitCoreEvent?: (event: unknown) => void
+            }
+          ).__visualEmitCoreEvent = (event) => {
+            for (const target of environmentListeners) target(event)
+          }
           environmentListeners.add(listener)
           return () => environmentListeners.delete(listener)
         },
@@ -2618,8 +3380,35 @@ export async function installVisualCoreBridge(
               })
               return streamVisualReply(promoted.id, input)
             }
-            case 'tasks.cancel':
-              return true
+            case 'tasks.cancel': {
+              const id = String(args[0] ?? '')
+              if (!visualCancelledTasks.has(id))
+                visualCancelledTasks.set(id, Date.now())
+              return { id }
+            }
+            case 'tasks.transcript': {
+              const taskId = String(args[0] ?? '')
+              const options = (args[1] ?? {}) as {
+                offset?: number
+                limit?: number
+              }
+              const entries = visualTaskTranscript(taskId)
+              const offset = options.offset ?? 0
+              const limit = options.limit ?? 200
+              return {
+                taskId,
+                entries: entries.slice(offset, offset + limit),
+                offset,
+                total: entries.length,
+                eof: offset + limit >= entries.length,
+              }
+            }
+            case 'tasks.list':
+              return visualTasksFor(
+                String(
+                  ((args[0] ?? {}) as { sessionId?: string }).sessionId || '',
+                ),
+              )
             case 'sessions.watch':
               return {
                 watching: (args[0] as { sessionIds: string[] }).sessionIds,
@@ -2659,6 +3448,8 @@ export async function installVisualCoreBridge(
                   path: project.project_path,
                 },
                 git: visualGitStatus,
+                worktrees: { worktrees: [], owned: [] },
+                gitReceipts: [],
                 plan: {
                   id: 'plan_visual_workspace',
                   title: '完成右侧项目工作台',
@@ -2717,6 +3508,12 @@ export async function installVisualCoreBridge(
                     upstream: null,
                   },
                 ],
+              }
+            case 'git.remote':
+              return {
+                name: 'origin',
+                webUrl: 'https://github.com/emperor-agent/visual-build-project',
+                provider: 'github',
               }
             case 'git.worktrees':
               return {
@@ -3986,6 +4783,65 @@ export async function installVisualCoreBridge(
                 (args[0] as { content?: string } | undefined)?.content ?? '',
               )
               return { ...hooksPayload }
+            }
+            case 'pullRequests.status':
+              return { ...visualGhStatus }
+            case 'pullRequests.list': {
+              if (!visualGhStatus.available) return visualPrFailure()
+              const input = (args[0] ?? {}) as {
+                filter?: string
+                query?: string
+              }
+              const text = (input.query ?? '').trim().toLowerCase()
+              const items = visualPulls
+                .filter((pr) =>
+                  input.filter === 'mine'
+                    ? pr.author === visualGhStatus.login
+                    : input.filter === 'reviewing'
+                      ? Boolean(pr.reviewing)
+                      : true,
+                )
+                .filter(
+                  (pr) =>
+                    !text ||
+                    `${pr.title} ${pr.repo} ${pr.head}`
+                      .toLowerCase()
+                      .includes(text),
+                )
+                .map(visualPrItem)
+              return { items, total: items.length }
+            }
+            case 'pullRequests.view': {
+              if (!visualGhStatus.available) return visualPrFailure()
+              const pr = visualPrLookup(args[0])
+              if (!pr) return visualPrNotFound
+              const [additions, deletions] = visualPrTotals(pr)
+              return {
+                ...visualPrItem(pr),
+                body: pr.body,
+                headRefName: pr.head,
+                baseRefName: 'main',
+                additions,
+                deletions,
+                changedFiles: pr.files.length,
+                files: pr.files.map(([path, add, del]) => ({
+                  path,
+                  additions: add,
+                  deletions: del,
+                })),
+                commits: pr.commits,
+                checks: pr.runs.map(([name, status, conclusion]) => ({
+                  name,
+                  status,
+                  conclusion,
+                })),
+              }
+            }
+            case 'pullRequests.diff': {
+              if (!visualGhStatus.available) return visualPrFailure()
+              const pr = visualPrLookup(args[0])
+              if (!pr) return visualPrNotFound
+              return { diff: visualPrDiff(pr), truncated: false }
             }
             case 'chat.stopRuntime':
               return { cancelled: false }

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticsPayload } from '../../../types'
 import {
+  diagnosticReportText,
   diagnosticRows,
-  diagnosticSettingsGroups,
+  diagnosticSections,
   diagnosticStatusTone,
   diagnosticStatusText,
+  diagnosticSummary,
+  shortenHomePaths,
 } from './diagnosticsModel'
 
 describe('diagnostics settings model', () => {
@@ -297,18 +300,18 @@ describe('diagnostics settings model', () => {
     expect(
       rows.find((row) => row.id === 'runtime-resources-root'),
     ).toMatchObject({
-      label: 'Runtime 资源根',
+      label: '内置资源目录',
       value: '已定位',
       path: '/repo',
     })
     expect(rows.find((row) => row.id === 'global-state-root')).toMatchObject({
-      label: '全局私有数据根',
+      label: 'Emperor Home',
       value: '默认 ~/.emperor',
       detail: '/Users/me/.emperor-agent',
       path: '/Users/me/.emperor-agent',
     })
     expect(rows.find((row) => row.id === 'active-project-path')).toMatchObject({
-      label: '当前项目路径',
+      label: '当前项目',
       value: '已定位',
       path: '/repo/project',
     })
@@ -353,26 +356,26 @@ describe('diagnostics settings model', () => {
     expect(
       rows.find((row) => row.id === 'slash-command-catalog'),
     ).toMatchObject({
-      value: '3 Skills · 1 conflicts',
+      value: '3 个 Skill · 1 个冲突',
       tone: 'warn',
     })
     expect(
       rows.find((row) => row.id === 'slash-command-catalog')?.detail,
     ).toContain('/new · user:new → builtin (builtin_collision)')
     expect(rows.find((row) => row.id === 'scheduler-store')).toMatchObject({
-      label: 'Scheduler Store',
+      label: '定时任务存储',
       value: '异常',
       tone: 'error',
       detail: '1 个坏 action 行 · 1 个隔离文件',
     })
     expect(rows.find((row) => row.id === 'workspace-policy')).toMatchObject({
-      label: 'Workspace Fence',
+      label: '工作区范围',
       value: '1 个允许根 / 1 个禁止根',
       tone: 'ok',
       detail: 'workspace /repo/project · state /repo/.emperor · outside deny',
     })
     expect(rows.find((row) => row.id === 'process-sandbox')).toMatchObject({
-      label: 'Command OS Sandbox',
+      label: '命令沙箱',
       value: 'macos-seatbelt · 可用',
       tone: 'ok',
       detail:
@@ -381,14 +384,14 @@ describe('diagnostics settings model', () => {
     expect(
       rows.find((row) => row.id === 'owned-process-runtime'),
     ).toMatchObject({
-      label: 'Owned Process Runtime',
+      label: '进程托管',
       value: 'owned · process_group',
       tone: 'ok',
       detail:
         'lease on / reparent on / orphan on · interactive stdio; PTY/resize unavailable · quota 65536/8388608 terminate',
     })
     expect(rows.find((row) => row.id === 'hybrid-memory')).toMatchObject({
-      label: 'Hybrid Memory',
+      label: '混合记忆检索',
       value: 'eval · fts_fallback',
       tone: 'warn',
       path: '/Users/me/.emperor-agent/memory/hybrid-index/index.v1.json',
@@ -396,7 +399,7 @@ describe('diagnostics settings model', () => {
         'requested on / prompt off · reason embedding_unavailable · search 3 / mutations 0 / fallbacks 1 · results 4 / index 4096 bytes',
     })
     expect(rows.find((row) => row.id === 'code-intelligence')).toMatchObject({
-      label: 'Code Intelligence',
+      label: '代码索引',
       value: 'eval · graph_fallback',
       tone: 'warn',
       detail:
@@ -404,38 +407,38 @@ describe('diagnostics settings model', () => {
     })
     expect(rows.find((row) => row.id === 'lifecycle-supervisor')).toMatchObject(
       {
-        label: 'Lifecycle Supervisor',
+        label: '服务生命周期',
         value: 'ready · 7/7 ready',
         detail: '所有 required service 已就绪',
         tone: 'ok',
       },
     )
     expect(rows.find((row) => row.id === 'subagent-supervisor')).toMatchObject({
-      label: 'Subagent Supervisor',
+      label: '子代理',
       value: '2 active · 2/6 capacity',
       detail: 'per-session limit 3 · session_1: 2',
       tone: 'ok',
     })
     expect(rows.find((row) => row.id === 'agent-definitions')).toMatchObject({
-      label: 'Agent Definitions',
+      label: 'Agent 定义',
       value: '2 agents · 1/1 sources',
       detail: 'builtin:system',
       tone: 'ok',
     })
     expect(rows.find((row) => row.id === 'prompt-cache-break')).toMatchObject({
-      label: 'Prompt Cache Break',
+      label: '提示词缓存',
       value: 'unexpected · stable_section_changed_without_version',
       detail:
         'turn turn_2 · first section:section:bootstrap[0] · stable abcdef012345',
       tone: 'error',
     })
     expect(rows.find((row) => row.id === 'desktop-renderer')).toMatchObject({
-      label: '桌面 Renderer',
+      label: '桌面渲染层',
       value: '已构建',
       tone: 'ok',
     })
     expect(rows.find((row) => row.id === 'node-runtime')).toMatchObject({
-      label: 'Node.js Runtime',
+      label: 'Node.js 运行时',
       value: '可用',
       tone: 'ok',
     })
@@ -603,32 +606,163 @@ describe('diagnostics settings model', () => {
     })
   })
 
-  it('regroups rows for the settings section: services, paths, config, context', () => {
-    const groups = diagnosticSettingsGroups({
+  it('builds the settings sections: runtime, desktop, paths, config', () => {
+    const sections = diagnosticSections({
       root: '/repo',
       paths: {
-        runtimeRoot: '/repo',
-        stateRoot: '/state',
+        runtimeRoot: '/Applications/Emperor.app/Contents/Resources/app',
+        stateRoot: '/Users/me/.emperor',
         stateRootSource: 'default',
+        sessionsRoot: '/Users/me/.emperor/sessions',
       },
-      dependencies: { nodeRuntime: true },
-    })
+      workspacePolicy: { workspaceRoot: '/Users/me/code/app' },
+      scheduler: { jobsFile: 'memory/scheduler/jobs.json' },
+      runtime: { events: 3 },
+      dependencies: { nodeRuntime: true, desktopPetModules: false },
+      effectiveConfig: {
+        entries: [
+          {
+            key: 'sandbox.runtime',
+            source: { kind: 'builtin', id: 'defaults', trust: 'trusted' },
+            trace: [{ status: 'applied' }],
+            value: { shell: { presets: ['a', 'b'] } },
+          },
+          {
+            key: 'skills.writer',
+            source: { kind: 'user', id: 'writer', trust: 'trusted' },
+            trace: [{ status: 'applied' }],
+            value: {},
+          },
+          {
+            key: 'skills.web',
+            source: { kind: 'project', id: 'web', trust: 'untrusted' },
+            trace: [],
+            value: {},
+          },
+        ],
+      },
+    } as never)
 
-    expect(groups.map((group) => group.title)).toEqual(['服务', '路径', '配置'])
-    const services = groups[0].rows.map((row) => row.id)
-    expect(services).toContain('scheduler-store')
-    expect(services).toContain('desktop-pet')
-    expect(services).toContain('node-runtime')
+    expect(sections.map((section) => section.title)).toEqual([
+      '运行时',
+      '桌面',
+      '存储路径',
+      '配置',
+    ])
+    const runtime = sections[0]!
+    // Rows Core returned nothing for are dropped and counted.
+    expect(runtime.rows.map((row) => row.id)).toEqual([
+      'scheduler-store',
+      'runtime-events',
+      'workspace-policy',
+      'prompt-cache-break',
+      'active-tasks',
+    ])
+    expect(runtime.hidden).toBe(7)
+    // Core reports only the workspace root: no false 0-roots warning.
     expect(
-      groups[1].rows.find((row) => row.id === 'global-state-root'),
-    ).toMatchObject({ path: '/state', tone: 'ok' })
+      runtime.rows.find((row) => row.id === 'workspace-policy'),
+    ).toMatchObject({
+      value: '已设定',
+      tone: 'ok',
+      detail: 'workspace ~/code/app',
+    })
+    const desktop = sections[1]!
+    expect(desktop.rows.map((row) => row.id)).toEqual([
+      'desktop-pet',
+      'node-runtime',
+      'desktop-pet-modules',
+    ])
+    expect(desktop.hidden).toBe(1)
+    const paths = sections[2]!
     expect(
-      diagnosticSettingsGroups({
+      paths.rows.find((row) => row.id === 'global-state-root'),
+    ).toMatchObject({
+      label: 'Emperor Home',
+      detail: '~/.emperor',
+      path: '/Users/me/.emperor',
+    })
+    // Effective config: no JSON, skills folded into one row.
+    const config = sections[3]!
+    expect(config.rows.map((row) => [row.label, row.value, row.tone])).toEqual([
+      ['模型配置', '未知', 'muted'],
+      ['本地配置', '未知', 'muted'],
+      ['沙箱策略', '生效', 'ok'],
+      ['Skills 配置', '2 项', 'warn'],
+    ])
+    expect(
+      config.rows.find((row) => row.id === 'effective-config-skills')?.detail,
+    ).toBe('web 来源不受信任或被拒绝')
+    expect(JSON.stringify(config.rows)).not.toContain('presets')
+
+    expect(
+      diagnosticSections({
         legacyStateMigration: {
           copied: 1,
           legacyStateRoots: [{ path: '/old', existed: true }],
         },
-      } as never)[1].rows.map((row) => row.id),
+      } as never)[2]!.rows.map((row) => row.id),
     ).toContain('legacy-state-migration')
+  })
+
+  it('summarises section health and lists issues, errors first', () => {
+    const sections = diagnosticSections({
+      scheduler: { lastActionErrors: [{}] },
+      runtime: { events: 1 },
+      dependencies: { nodeRuntime: true, desktopPetModules: false },
+    } as never)
+    const summary = diagnosticSummary(sections, [
+      {
+        id: 'environment-git',
+        label: 'git',
+        value: '已就绪',
+        detail: '',
+        tone: 'ok',
+      },
+      {
+        id: 'environment-node',
+        label: 'node',
+        value: '版本不匹配',
+        detail: '要求 >=22',
+        tone: 'warn',
+      },
+    ])
+    expect(summary.tone).toBe('error')
+    expect(summary.headline).toBe('有 1 项异常，2 项需要关注')
+    expect(summary.issues.map((issue) => [issue.sectionId, issue.id])).toEqual([
+      ['runtime', 'scheduler-store'],
+      ['desktop', 'desktop-pet-modules'],
+      ['environment', 'environment-node'],
+    ])
+    expect(summary.counts.environment).toEqual({
+      total: 2,
+      ok: 1,
+      warn: 1,
+      error: 0,
+    })
+    expect(diagnosticSummary([], []).headline).toBe('运行正常')
+
+    const report = diagnosticReportText({
+      root: '/Users/me/code/app',
+      summary,
+      sections,
+      environment: [],
+      environmentLabel: 'macOS · arm64',
+    })
+    expect(report).toContain('运行根目录：~/code/app')
+    expect(report).toContain('总体：有 1 项异常，2 项需要关注')
+    expect(report).toContain('## 环境工具 · macOS · arm64')
+    expect(report).toContain('- [异常] 定时任务存储：异常')
+  })
+
+  it('reads home directories as ~', () => {
+    expect(shortenHomePaths('/Users/me/.emperor/sessions')).toBe(
+      '~/.emperor/sessions',
+    )
+    expect(shortenHomePaths('workspace /home/me/app · state /Users/me')).toBe(
+      'workspace ~/app · state ~',
+    )
+    expect(shortenHomePaths('C:\\Users\\me\\app')).toBe('~\\app')
+    expect(shortenHomePaths('/opt/app')).toBe('/opt/app')
   })
 })

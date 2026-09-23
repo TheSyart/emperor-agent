@@ -51,9 +51,45 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('payload.profileOnboarding.state.sessionId')
   })
 
-  it('routes review and file requests to the details column', () => {
-    expect(source).toContain("requestDetails({ tab: 'git', paths")
-    expect(source).toContain("tab: 'files'")
+  it('routes file references to the right workspace', () => {
+    expect(source).toContain('requestWorkspace({')
+    expect(source).toContain("pane: 'files'")
+    expect(source).not.toContain('requestDetails')
+    // The retired command event had no dispatcher.
+    expect(source).not.toContain('emperor:open-workspace')
+  })
+
+  it('sends tool-row Inspect to the trajectory inspector column', () => {
+    expect(source).toContain('frameActions.openInspector(frame)')
+    expect(source).toContain("sessionLocation(viewingId.value, 'trajectory')")
+    expect(source).toContain('query: { call: callId }')
+    expect(source).toContain('@inspect-applied="clearFocusCall"')
+    expect(source).not.toContain('selectCall')
+  })
+
+  it('keeps the header toggles on the hero phase and seats the environment card', () => {
+    expect(source).toContain(':slim="phase === \'hero\'"')
+    expect(source).toContain('@toggle-workspace="toggleWorkspace"')
+    expect(source).toContain('@toggle-env-card="toggleEnvCard"')
+    expect(source).toContain("import('./environment/EnvironmentCard.vue')")
+    expect(source).toContain('container: conversation / inline-size')
+  })
+
+  it('seats the environment card beside a wide chat and over a narrow one', () => {
+    expect(source).toContain('v-if="envCardShown"')
+    expect(source).toContain("phase.value !== 'hero'")
+    expect(source).toContain('@reveal="revealRow"')
+    expect(source).toContain('@close="closeEnvCard"')
+    expect(source).toContain('@container conversation (min-width: 1120px)')
+    expect(source).toContain('padding-inline-end: calc(var(--env-card-width)')
+  })
+
+  it('docks the changes pill and seats the async turn scrubber', () => {
+    expect(source).toContain('<ChangesPill')
+    expect(source).toContain("import('./TurnScrubber.vue')")
+    expect(source).toContain('ticks.length >= SCRUBBER_MIN_TURNS')
+    expect(source).toContain('timeline.value?.scrollToKey(key)')
+    expect(source).toContain('@first-visible="firstVisibleKey = $event"')
   })
 
   it('shows the read-only composer for child sessions', () => {

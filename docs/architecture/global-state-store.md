@@ -59,7 +59,7 @@
     media/<month>/
     desktop/window.json
     desktop_pet/window.json
-    sidebar_state.json     # 左侧导航和右侧工作台布局
+    sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）和文件树宽度等工作台偏好
   sessions/
     .harness-kernel-v1     # 当前内核的会话目录标记
     index.json             # 会话索引（标题、模式、项目绑定、归档）
@@ -130,11 +130,11 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 
 除 Emperor Home 和上面列出的项目 `.emperor/` 外，应用只会用到以下位置：
 
-| 位置                                                                     | 内容                                                                                                       |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`） | Chromium 的缓存、Cookies、Local Storage；界面主题、布局等浏览器侧偏好。不含会话、记忆等业务数据            |
-| `$HOME/.emperor.bootstrap.lock`                                          | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名 |
-| 系统临时目录                                                             | Skill 导入时的解压暂存，完成后删除                                                                         |
+| 位置                                                                     | 内容                                                                                                                                                                        |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`） | Chromium 的缓存、Cookies、Local Storage；界面主题、三栏布局和应用内通知列表等浏览器侧偏好。不含会话、记忆等业务数据。右侧工作台的内置浏览器使用不落盘的内存分区，不写入这里 |
+| `$HOME/.emperor.bootstrap.lock`                                          | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名                                                                  |
+| 系统临时目录                                                             | Skill 导入时的解压暂存，完成后删除                                                                                                                                          |
 
 启动锁记录持有者的进程号和心跳时间。如果上次启动被强杀或断电导致锁残留，下次启动发现持有进程已退出或心跳过期，会自动接管并记录警告；只有持有者仍在运行且心跳新鲜时，才会报 `installation_lock_busy`。
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Settings › 插件 — native section (dsh plugin inventory): search, then the
+ * 能力 › 插件 — the 插件 tab of the /capabilities page (dsh plugin inventory): search, then the
  * installed Plugins as a two-column grid of compact disclosure cards
  * (PluginCard: facts, enable switch, uninstall). The header carries refresh
  * and the 「安装」 menu — 选择本地文件夹 / 选择 zip 文件 (`plugins.inspect`
@@ -13,6 +13,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { core } from '../../api/http'
+import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
 import { DsDownload, DsFolderOpen, DsLink, DsPlus } from '../icons/ds'
 import PluginCard from './plugins/PluginCard.vue'
@@ -52,6 +53,14 @@ watch(filtered, (list) => {
   )
     expanded.value = null
 })
+
+// Shown again after another page: re-read the installed list only.
+onPageReactivated(() =>
+  ctx.runSafely(async () => {
+    const list = await core('plugins.list')
+    if (ctx.boot.value) ctx.boot.value.plugins = list
+  }),
+)
 
 useSettingsHeader({
   actions: () => [
@@ -153,7 +162,7 @@ function uninstall(plugin: PluginSummary): void {
 
 <template>
   <SettingsSection
-    intro="Plugin 打包 Skill、Hook、MCP 等能力；单个 Skill 请在 Skills 分区添加。"
+    intro="Plugin 打包 Skill、Hook、MCP 等能力；单个 Skill 请在 Skills 标签页添加。"
   >
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>

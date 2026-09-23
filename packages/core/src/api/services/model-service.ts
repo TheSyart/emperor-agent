@@ -53,7 +53,15 @@ export interface CoreModelServiceDeps {
     ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
 }
 
-export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'>
+export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
+  /**
+   * New entries only: copy the API key (and legacy extra headers) of this
+   * saved entry instead of submitting one. The source must be the same
+   * provider, protocol and API base, so a credential never reaches an
+   * endpoint it was not saved for.
+   */
+  credentialsFrom?: string
+}
 
 export interface ModelProfilePreviewInput {
   provider: string
@@ -150,7 +158,10 @@ export class CoreModelService {
   async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
     const before = await loadModelConfig(this.root)
     const wasUsable = modelAvailability(before).usable
-    const update = normalizeEntrySecret(input)
+    const { credentialsFrom, ...fields } = input
+    const update = normalizeEntrySecret(fields)
+    if (credentialsFrom)
+      inheritCredentials(before.raw.models, update, credentialsFrom)
     const prospective = upsertModelEntryConfig(before.raw, update)
     const prospectiveEntry = update.entryId
       ? prospective.models.find((entry) => entry.entryId === update.entryId)
@@ -425,6 +436,32 @@ function requiredId(value: string): string {
   return id
 }
 
+function inheritCredentials(
+  models: readonly ModelEntryV2[],
+  update: ModelEntryUpdate,
+  sourceId: string,
+): void {
+  if (update.entryId) throw new Error('credentialsFrom 只能用于新建模型')
+  if (update.apiKey !== undefined) return
+  const source = models.find((entry) => entry.entryId === sourceId)
+  if (!source) throw new Error(`找不到要沿用凭证的模型: ${sourceId}`)
+  const spec = findByName(update.provider || source.provider)
+  const protocol = (update.protocol ||
+    spec?.defaultProtocol ||
+    'openai') as ModelProtocol
+  const apiBase = normalizeApiBase(
+    protocol,
+    update.apiBase || spec?.apiBases[protocol] || '',
+  )
+  if (!spec || !discoveryIdentityMatches(source, spec, protocol, apiBase))
+    throw new Error(
+      '只能沿用同一供应商、协议和 API 地址的凭证，请重新填写 API Key',
+    )
+  update.apiKey = source.apiKey
+  const extraHeaders = source.legacy?.extraHeaders
+  if (extraHeaders) update.legacy = { extraHeaders: { ...extraHeaders } }
+}
+
 function normalizeEntrySecret(input: ModelEntrySaveInput): ModelEntryUpdate {
   const update = structuredClone(input) as ModelEntryUpdate
   if (
@@ -488,7 +525,7 @@ function currentModelPayload(entry: ModelEntry): CurrentModelPayload {
 }
 
 function discoveryIdentityMatches(
-  entry: ModelEntry | null,
+  entry: Pick<ModelEntry, 'provider' | 'protocol' | 'apiBase'> | null,
   spec: ProviderSpec,
   protocol: ModelProtocol,
   apiBase: string,

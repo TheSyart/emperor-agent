@@ -86,6 +86,16 @@ export interface GitStatusResult {
   revision: string
 }
 
+export type GitRemoteProvider = 'github' | 'gitlab' | 'other'
+
+export interface GitRemoteInfo {
+  /** `origin` when the repository has one, otherwise null. */
+  name: string | null
+  /** `https://host/owner/repo` derived from the remote, or null. */
+  webUrl: string | null
+  provider: GitRemoteProvider | null
+}
+
 export type ParsedPorcelainV2 = Omit<
   GitStatusResult,
   'repository' | 'root' | 'revision' | 'summary' | 'truncated'
@@ -744,6 +754,34 @@ export class WorkspaceGitService {
     return next
   }
 
+  /**
+   * The `origin` remote as a browsable web location. Uses the fixed argv
+   * `git remote get-url origin`; a repository without `origin` returns nulls
+   * rather than an error, and a remote that is not a recognised hosted form
+   * (local path, `file://`, `git://`, plain `http://`, SSH alias) keeps its
+   * name but gets no web URL.
+   */
+  async remote(input: { sessionId: string }): Promise<GitRemoteInfo> {
+    const scope = resolveOwnedProject(
+      this.options.resolveProject,
+      input.sessionId,
+    )
+    const context = await this.repositoryContext(scope.projectRoot)
+    const result = await this.command(
+      context.repositoryRoot,
+      ['remote', 'get-url', 'origin'],
+      { allowedExitCodes: [0, 2] },
+    )
+    const raw = result.exitCode === 0 ? result.stdout.trim() : ''
+    if (!raw) return { name: null, webUrl: null, provider: null }
+    const webUrl = remoteWebUrl(raw)
+    return {
+      name: 'origin',
+      webUrl,
+      provider: webUrl ? remoteProvider(new URL(webUrl).hostname) : null,
+    }
+  }
+
   async worktrees(input: { sessionId: string }) {
     const manager = this.requireWorktreeManager()
     const scope = resolveOwnedProject(
@@ -1304,6 +1342,85 @@ function remoteHost(value: string): string | null {
   }
   const scpLike = /^(?:[^@\s]+@)?([^:\s]+):/.exec(remote)
   return scpLike?.[1] || null
+}
+
+const REMOTE_HOST_PATTERN =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+const REMOTE_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,100}$/
+/** SSH-over-HTTPS endpoints whose web UI lives on the main host. */
+const SSH_HOST_ALIASES: Readonly<Record<string, string>> = {
+  'ssh.github.com': 'github.com',
+  'altssh.gitlab.com': 'gitlab.com',
+}
+
+/**
+ * Pure mapping from a Git remote URL to its web location. Accepts only
+ * scp-style `[user@]host:owner/repo(.git)`, `ssh://[user@]host[:port]/owner/repo`
+ * and `https://[userinfo@]host[:port]/owner/repo(.git)`; userinfo is always
+ * dropped and an SSH port never reaches the web URL. Anything else — local
+ * paths, `file:`/`git:`/`http:` URLs, SSH config aliases without a domain,
+ * query strings or unusual path characters — yields null.
+ */
+export function remoteWebUrl(raw: string): string | null {
+  const value = String(raw ?? '').trim()
+  if (!value || value.length > 2_048 || /[\s\0\\]/.test(value)) return null
+  let host: string
+  let port = ''
+  let path: string
+  let viaSsh: boolean
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch {
+      return null
+    }
+    if (url.search || url.hash) return null
+    if (url.protocol === 'https:') {
+      viaSsh = false
+      port = url.port && url.port !== '443' ? `:${url.port}` : ''
+    } else if (url.protocol === 'ssh:') {
+      viaSsh = true
+    } else return null
+    host = url.hostname
+    path = url.pathname
+  } else {
+    const scp = /^(?:[^@/:]+@)?([^@/:]+):(?!\/)(.+)$/.exec(value)
+    if (!scp) return null
+    viaSsh = true
+    host = scp[1] ?? ''
+    path = scp[2] ?? ''
+  }
+  host = host.toLowerCase()
+  if (viaSsh) host = SSH_HOST_ALIASES[host] ?? host
+  if (!REMOTE_HOST_PATTERN.test(host)) return null
+  const trimmed = path
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/i, '')
+  const segments = trimmed.split('/')
+  if (
+    segments.length < 2 ||
+    segments.length > 10 ||
+    !segments.every(
+      (segment) =>
+        REMOTE_PATH_SEGMENT.test(segment) &&
+        segment !== '.' &&
+        segment !== '..',
+    )
+  )
+    return null
+  if (remoteProvider(host) === 'github' && segments.length !== 2) return null
+  return `https://${host}${port}/${segments.join('/')}`
+}
+
+export function remoteProvider(host: string): GitRemoteProvider {
+  const normalized = host.toLowerCase()
+  if (normalized === 'github.com' || normalized.endsWith('.ghe.com'))
+    return 'github'
+  if (normalized === 'gitlab.com' || normalized.startsWith('gitlab.'))
+    return 'gitlab'
+  return 'other'
 }
 
 function validatePaths(paths: string[]): string[] {

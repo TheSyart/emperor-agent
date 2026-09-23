@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * McpSection — Settings › MCP, native on components/settings/ui (dsh
+ * McpSection — the MCP tab of the /capabilities page (能力 › MCP), on
+ * components/settings/ui (dsh
  * McpSettingsTab): one expandable McpServerCard per server of Emperor's own
  * `mcp_config.json` (status dot, transport, tool count, enable Switch,
  * facts + tools + 删除), the header 「添加」 dialog (paste JSON / form with a
@@ -11,7 +12,8 @@
  * `mcp.status` snapshot (mirrored into boot.mcp) and boot.tools for tool
  * descriptions — refreshed after every change so the rest of the app (Tools
  * section, composer) sees the new MCP tools. While a server is still
- * connecting the status is polled briefly.
+ * connecting the status is polled briefly. Showing the kept-alive page
+ * again re-reads the config and the status.
  */
 import {
   computed,
@@ -35,6 +37,7 @@ import {
   StatusBadge,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
+import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
 import { core } from '../../api/http'
 import {
@@ -188,6 +191,7 @@ function schedulePoll(restart = true) {
 }
 
 onMounted(() => void refresh())
+onPageReactivated(() => refresh())
 onBeforeUnmount(() => clearTimeout(pollTimer))
 
 async function toggle(name: string, enabled: boolean) {

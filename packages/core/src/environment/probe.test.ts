@@ -30,6 +30,7 @@ function project(): string {
 }
 
 const outputs: Record<string, string> = {
+  gh: 'gh version 2.101.0 (2026-09-15)\nhttps://github.com/cli/cli/releases/tag/v2.101.0',
   git: 'git version 2.55.0',
   ripgrep: 'ripgrep 15.1.0',
   volta: '2.0.2',
@@ -113,6 +114,18 @@ describe('EnvironmentProbe', () => {
       detectedVersion: '2.55.0',
       versionSummary: 'git version 2.55.0',
       required: true,
+    })
+    // gh is optional: only a project or Skill that needs it makes it required,
+    // so machines without it don't report a missing base tool.
+    expect(status.tools.find((tool) => tool.id === 'gh')).toMatchObject({
+      status: 'ready',
+      category: 'project',
+      required: false,
+      detectedVersion: '2.101.0',
+      requiredVersion: '>=2.40.0',
+      versionSummary: 'gh version 2.101.0',
+      installStrategy: 'homebrew',
+      sourceUrl: 'https://formulae.brew.sh/formula/gh',
     })
     expect(status.tools.find((tool) => tool.id === 'ripgrep')).toMatchObject({
       status: 'version_mismatch',
@@ -239,6 +252,35 @@ describe('EnvironmentProbe', () => {
     expect(status.tools.find((tool) => tool.id === 'rust')).toMatchObject({
       required: true,
       category: 'skill',
+    })
+  })
+
+  it('maps a Skill gh requirement to the signed GitHub CLI catalog entry', async () => {
+    const root = project()
+    const { probe } = createProbe({ missing: ['gh'] })
+    const status = await probe.getStatus({
+      projectRoot: root,
+      skillRequirements: [
+        {
+          skillName: 'github-triage',
+          skillStatus: 'active',
+          requirements: { bins: ['gh'], runtimes: [], env: [] },
+        },
+      ],
+    })
+    expect(status.skills).toEqual([
+      {
+        skillName: 'github-triage',
+        status: 'blocked',
+        requiredTools: ['gh'],
+        missing: ['gh'],
+        unsupported: [],
+      },
+    ])
+    expect(status.tools.find((tool) => tool.id === 'gh')).toMatchObject({
+      required: true,
+      status: 'missing',
+      executablePath: null,
     })
   })
 

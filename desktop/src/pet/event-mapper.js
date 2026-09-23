@@ -5,21 +5,65 @@
     window.EmperorPetMapper = factory()
   }
 })(function buildMapper() {
+  /** Every frame is one cell of the 小单 sheet; strips are frames × width. */
+  const SPRITE_FRAME = { width: 192, height: 208 }
+
+  /**
+   * Horizontal frame strips under assets/desktop-pet/xiaodan. `alternate`
+   * plays forward then back, for sequences (a head turn, a facepalm) whose
+   * last frame does not lead into the first.
+   */
+  const SPRITES = {
+    idle: { file: 'xiaodan-idle.webp', frames: 7, fps: 4, alternate: true },
+    run: { file: 'xiaodan-run.webp', frames: 8, fps: 12, alternate: false },
+    walk: { file: 'xiaodan-walk.webp', frames: 8, fps: 9, alternate: false },
+    wave: { file: 'xiaodan-wave.webp', frames: 4, fps: 4, alternate: true },
+    cheer: { file: 'xiaodan-cheer.webp', frames: 5, fps: 7, alternate: false },
+    facepalm: {
+      file: 'xiaodan-facepalm.webp',
+      frames: 8,
+      fps: 6,
+      alternate: true,
+    },
+    present: {
+      file: 'xiaodan-present.webp',
+      frames: 6,
+      fps: 5,
+      alternate: true,
+    },
+    laptop: {
+      file: 'xiaodan-laptop.webp',
+      frames: 6,
+      fps: 6,
+      alternate: false,
+    },
+    think: { file: 'xiaodan-think.webp', frames: 6, fps: 4, alternate: true },
+    lookup: { file: 'xiaodan-lookup.webp', frames: 8, fps: 5, alternate: true },
+    lookaround: {
+      file: 'xiaodan-lookaround.webp',
+      frames: 8,
+      fps: 5,
+      alternate: true,
+    },
+    doze: { file: 'xiaodan-doze.webp', frames: 2, fps: 1, alternate: false },
+  }
+
+  /** Runtime animation key → sprite strip. */
   const ASSETS = {
-    idle: 'clawd-idle-living.svg',
-    sleeping: 'clawd-sleeping.svg',
-    disconnected: 'clawd-disconnected.svg',
-    thinking: 'clawd-working-thinking.svg',
-    debugger: 'clawd-working-debugger.svg',
-    typing: 'clawd-working-typing.svg',
-    building: 'clawd-working-building.svg',
-    conducting: 'clawd-working-conducting.svg',
-    wizard: 'clawd-working-wizard.svg',
-    beacon: 'clawd-working-beacon.svg',
-    sweeping: 'clawd-working-sweeping.svg',
-    notification: 'clawd-notification.svg',
-    happy: 'clawd-happy.svg',
-    dizzy: 'clawd-dizzy.svg',
+    idle: 'idle',
+    sleeping: 'doze',
+    disconnected: 'lookaround',
+    thinking: 'think',
+    debugger: 'laptop',
+    typing: 'present',
+    building: 'run',
+    conducting: 'walk',
+    wizard: 'lookup',
+    beacon: 'laptop',
+    sweeping: 'walk',
+    notification: 'wave',
+    happy: 'cheer',
+    dizzy: 'facepalm',
   }
 
   const ACTIVITY_BUBBLES = {
@@ -73,5 +117,10 @@
     return null
   }
 
-  return { ASSETS, mapPetEvent }
+  /** The strip an animation key plays; unknown keys fall back to idle. */
+  function spriteFor(animation) {
+    return SPRITES[ASSETS[animation]] || SPRITES[ASSETS.idle]
+  }
+
+  return { ASSETS, SPRITES, SPRITE_FRAME, spriteFor, mapPetEvent }
 })

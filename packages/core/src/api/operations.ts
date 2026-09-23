@@ -226,6 +226,7 @@ const modelEntrySaveSchema = z
     contextWindowTokens: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
+    credentialsFrom: idSchema.optional(),
   })
   .strict()
 const modelEntryIdSchema = z.object({ entryId: idSchema }).strict()
@@ -414,6 +415,37 @@ const gitMergePullRequestSchema = gitPullRequestMutationSchema.extend({
   method: z.enum(['merge', 'squash', 'rebase']),
   deleteBranch: z.boolean(),
 })
+const pullRequestRepoSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/,
+    'invalid repository',
+  )
+  .refine((value) => !/\/\.{1,2}$/.test(value), 'invalid repository')
+const pullRequestRefSchema = z
+  .object({
+    repo: pullRequestRepoSchema,
+    number: z.number().int().min(1).max(1_000_000_000),
+  })
+  .strict()
+const pullRequestListSchema = z
+  .object({
+    filter: z.enum(['all', 'reviewing', 'mine']),
+    query: z
+      .string()
+      .max(200)
+      .refine(
+        (value) =>
+          ![...value].some((character) => {
+            const code = character.charCodeAt(0)
+            return code < 32 || code === 127
+          }),
+        'invalid search query',
+      )
+      .optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .strict()
 const terminalIdentitySchema = z
   .object({ sessionId: idSchema, terminalId: idSchema })
   .strict()
@@ -840,6 +872,9 @@ export const CORE_OPERATION_REGISTRY = {
   'git.repository': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
     api.git.repository(input),
   ),
+  'git.remote': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
+    api.git.remote(input),
+  ),
   'git.log': operation(z.tuple([gitLogSchema]), (api, [input]) =>
     api.git.log(input),
   ),
@@ -1067,6 +1102,21 @@ export const CORE_OPERATION_REGISTRY = {
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
+  ),
+  'pullRequests.status': operation(z.tuple([]), (api) =>
+    api.pullRequests.status(),
+  ),
+  'pullRequests.list': operation(
+    z.tuple([pullRequestListSchema]),
+    (api, [input]) => api.pullRequests.list(input),
+  ),
+  'pullRequests.view': operation(
+    z.tuple([pullRequestRefSchema]),
+    (api, [input]) => api.pullRequests.view(input),
+  ),
+  'pullRequests.diff': operation(
+    z.tuple([pullRequestRefSchema]),
+    (api, [input]) => api.pullRequests.diff(input),
   ),
   'runtime.replay': operation(
     z.tuple([runtimeReplayOptionsSchema.optional()]),

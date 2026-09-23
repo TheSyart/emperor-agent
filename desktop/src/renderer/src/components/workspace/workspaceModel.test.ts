@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampFilesTreeWidth,
+  filePathCrumbs,
   filterGitFilesByPaths,
   gitFileChangeLabel,
   gitTransientLabel,
@@ -13,6 +14,19 @@ describe('workspace model', () => {
     expect(clampFilesTreeWidth(999)).toBe(320)
     expect(clampFilesTreeWidth(Number.NaN)).toBe(280)
     expect(clampFilesTreeWidth(301.4)).toBe(301)
+  })
+
+  it('splits a project-relative path into breadcrumb segments', () => {
+    expect(filePathCrumbs('')).toEqual([])
+    expect(filePathCrumbs('src/app/a.ts')).toEqual([
+      { name: 'src', path: 'src' },
+      { name: 'app', path: 'src/app' },
+      { name: 'a.ts', path: 'src/app/a.ts' },
+    ])
+    expect(filePathCrumbs('./docs\\guide.md')).toEqual([
+      { name: 'docs', path: 'docs' },
+      { name: 'guide.md', path: 'docs/guide.md' },
+    ])
   })
 
   it('projects Git files into staged, unstaged, untracked and conflict groups', () => {

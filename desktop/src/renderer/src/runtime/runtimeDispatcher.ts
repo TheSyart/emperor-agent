@@ -28,6 +28,7 @@ const PRESENTATION_EVENTS = new Set<string>([
   'context_usage',
   'control_mode_update',
   'error',
+  'git_operation_completed',
   'goal_updated',
   'hook_decision_applied',
   'hook_run_started',

@@ -1,5 +1,5 @@
 /**
- * Settings › 工具 — pure helpers: filtering and grouping the registered tool
+ * 能力 › 工具 — pure helpers: filtering and grouping the registered tool
  * list (built-in first, then one group per MCP server) and reading a tool's
  * JSON-schema parameters into display rows.
  */

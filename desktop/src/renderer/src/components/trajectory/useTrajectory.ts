@@ -1,10 +1,9 @@
 // Shared trajectory controller of one session: activates the lazy
 // 'trajectory' target of the conversation store, memoizes the view model on
 // the snapshot fields it reads (streaming deltas never rebuild the finalized
-// layout), and owns the selection / fold / tab state that the ledger
-// (TrajectoryView) and the inspector (TrajectoryInspector, rendered by the
-// host in the details column) share. Both call `useTrajectory(sessionId)`
-// and receive the same ref-counted controller.
+// layout), and owns the selection / fold / tab state that the ledger and
+// the inspector column (both inside TrajectoryView) share. Callers use
+// `useTrajectory(sessionId)` and receive the same ref-counted controller.
 import {
   computed,
   effectScope,

@@ -1,15 +1,15 @@
 import {
+  BROWSER_ACTION_CHANNEL,
+  BROWSER_BOUNDS_CHANNEL,
+  BROWSER_CLOSE_CHANNEL,
+  BROWSER_OPEN_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
-  PREVIEW_ACTION_CHANNEL,
-  PREVIEW_BOUNDS_CHANNEL,
-  PREVIEW_CLOSE_CHANNEL,
-  PREVIEW_EXTERNAL_CHANNEL,
-  PREVIEW_OPEN_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
   type FileDialogFilter,
 } from '../shared/ipc-contract'
+import { normalizeBrowserInput } from './browser-view-policy'
 
 interface IpcMainLike {
   handle(
@@ -22,9 +22,9 @@ interface IpcMainLike {
   ): void
 }
 
-interface PreviewCapability {
-  open(input: { sessionId: string; previewId: string }): unknown
-  openExternal(input: { sessionId: string; previewId: string }): unknown
+interface BrowserCapability {
+  /** Receives an already normalized http(s) URL (`normalizeBrowserInput`). */
+  openUrl(input: { url: string }): Promise<{ ok: true; url: string }>
   setBounds(value: unknown): void
   action(action: string): void
   close(): void
@@ -45,7 +45,7 @@ interface SkillFolderCapability {
 export function registerDesktopCapabilityIpc(input: {
   ipcMain: IpcMainLike
   authorize(event: unknown): void
-  preview: PreviewCapability
+  browser: BrowserCapability
   references: ReferenceCapability
   showItemInFolder(path: string): void
   openExternal(url: string): Promise<unknown>
@@ -80,13 +80,17 @@ export function registerDesktopCapabilityIpc(input: {
       return await selectFile(fileDialogOptions(payload))
     })
 
-  input.ipcMain.handle(PREVIEW_OPEN_CHANNEL, async (event, payload) => {
+  // Only the BrowserPane address bar calls this, on an explicit user submit
+  // (see trusted-renderer-usage.test.ts); main still normalizes the input.
+  input.ipcMain.handle(BROWSER_OPEN_CHANNEL, async (event, payload) => {
     authorize(event)
-    return await input.preview.open(previewIdentity(payload))
-  })
-  input.ipcMain.handle(PREVIEW_EXTERNAL_CHANNEL, async (event, payload) => {
-    authorize(event)
-    return await input.preview.openExternal(previewIdentity(payload))
+    const normalized = normalizeBrowserInput(browserOpenInput(payload))
+    if (!normalized.ok) return { ok: false, error: normalized.reason }
+    try {
+      return await input.browser.openUrl({ url: normalized.url })
+    } catch {
+      return { ok: false, error: BROWSER_UNAVAILABLE }
+    }
   })
   input.ipcMain.handle(REFERENCE_REVEAL_CHANNEL, (event, payload) => {
     authorize(event)
@@ -101,29 +105,26 @@ export function registerDesktopCapabilityIpc(input: {
     await input.openExternal(url)
     return { ok: true }
   })
-  input.ipcMain.on(PREVIEW_BOUNDS_CHANNEL, (event, payload) => {
+  input.ipcMain.on(BROWSER_BOUNDS_CHANNEL, (event, payload) => {
     authorize(event)
-    input.preview.setBounds(payload)
+    input.browser.setBounds(payload)
   })
-  input.ipcMain.on(PREVIEW_ACTION_CHANNEL, (event, payload) => {
+  input.ipcMain.on(BROWSER_ACTION_CHANNEL, (event, payload) => {
     authorize(event)
-    input.preview.action(typeof payload === 'string' ? payload : '')
+    input.browser.action(typeof payload === 'string' ? payload : '')
   })
-  input.ipcMain.on(PREVIEW_CLOSE_CHANNEL, (event) => {
+  input.ipcMain.on(BROWSER_CLOSE_CHANNEL, (event) => {
     authorize(event)
-    input.preview.close()
+    input.browser.close()
   })
 }
 
-function previewIdentity(value: unknown): {
-  sessionId: string
-  previewId: string
-} {
-  const record = objectRecord(value)
-  return {
-    sessionId: requiredIdentity(record.sessionId, 'session'),
-    previewId: requiredIdentity(record.previewId, 'preview'),
-  }
+const BROWSER_UNAVAILABLE = '内置浏览器暂不可用'
+
+/** `{ url }` from the preload bridge; anything else fails normalization. */
+function browserOpenInput(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return (value as Record<string, unknown>).url
 }
 
 function referenceIdentity(value: unknown): {

@@ -14,6 +14,8 @@ export interface SessionApplicationServiceDeps {
   deleteSessionLog(sessionId: string): void
   /** Optional: interrupt a running turn when the session is archived (host.stop). */
   stopSession?(sessionId: string, reason: string): void
+  /** Optional: the session was deleted or archived and left the sidebar list. */
+  sessionLeftList?(sessionId: string): void
 }
 
 export class CoreSessionApplicationService {
@@ -60,6 +62,7 @@ export class CoreSessionApplicationService {
         ? this.deps.sessions.archive(sessionId)
         : this.deps.sessions.restore(sessionId)
       if (!entry) throw new Error('session not found')
+      if (patch.archived) this.deps.sessionLeftList?.(sessionId)
       return entry
     }
     const title =
@@ -85,6 +88,7 @@ export class CoreSessionApplicationService {
       throw new Error('cannot delete session')
     this.deps.closeTerminals(sessionId)
     this.deps.deleteSessionLog(sessionId)
+    this.deps.sessionLeftList?.(sessionId)
     return { deleted: true }
   }
 

@@ -3,7 +3,7 @@
  * One sidebar session row (dsh Rows: 32px, radius 8, 16px status slot, 14/20
  * title, 12/20 tertiary time). Running rows show the gold pixel chase and an
  * "N 个子代理运行中" subline; hover swaps the time for a more-actions button
- * (rename / archive / delete, plus move up/down under manual sort).
+ * (rename / pin / archive / delete, plus move up/down under manual sort).
  */
 import { computed, nextTick, ref } from 'vue'
 import { DsMore } from '../icons/ds'
@@ -24,6 +24,7 @@ const props = withDefaults(
     nested?: boolean
     canDelete?: boolean
     manual?: boolean
+    pinned?: boolean
   }>(),
   {
     active: false,
@@ -33,6 +34,7 @@ const props = withDefaults(
     nested: false,
     canDelete: true,
     manual: false,
+    pinned: false,
   },
 )
 
@@ -41,6 +43,7 @@ const emit = defineEmits<{
   rename: [title: string]
   archive: []
   delete: []
+  pin: []
   move: [delta: -1 | 1]
 }>()
 
@@ -156,6 +159,9 @@ defineExpose({ beginRename })
     label="会话操作"
   >
     <MenuItem @select="beginRename">重命名</MenuItem>
+    <MenuItem @select="emit('pin')">{{
+      pinned ? '取消置顶' : '置顶'
+    }}</MenuItem>
     <template v-if="manual">
       <MenuItem @select="emit('move', -1)">上移</MenuItem>
       <MenuItem @select="emit('move', 1)">下移</MenuItem>

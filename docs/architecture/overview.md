@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`
+> 最后核验：2026-09-23<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
 
@@ -33,21 +33,21 @@ flowchart LR
 
 ## 主要层次
 
-| 层次          | 责任                                                                                 | 主要位置                                                      |
-| ------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| Renderer      | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态            | `desktop/src/renderer/src/`                                   |
-| Preload / IPC | 限定 renderer 可调用的 operation、可订阅事件和少量桌面能力（文件选择、打开文件夹）   | `desktop/src/preload/`、`desktop/src/main/core-host.ts`       |
-| CoreApi       | 进程内 API 门面、输入校验、mutation guard、工作台与配置服务                          | `packages/core/src/api/`                                      |
-| HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子代理 | `packages/core/src/harness/host/`                             |
-| Agent loop    | turn → step 循环、inbox、工具调度、middleware                                        | `packages/core/src/harness/agent/`                            |
-| Session log   | 每个 session 一份 append-only `log.jsonl`、崩溃修复、fork                            | `packages/core/src/session-log/`                              |
-| LLM           | Provider catalog、model route、DeepSeek / pi-ai 适配器、重试策略                     | `packages/core/src/llm/`                                      |
-| 工具          | 内置工具、注册表、执行管线、大结果落盘                                               | `packages/core/src/harness/tools/`                            |
-| 权限          | 沙箱模式、审批策略、权限预设、一次性提权                                             | `packages/core/src/harness/sandbox/`、`harness/approval/`     |
-| 保留服务      | Session 索引、Memory、Projects、Skills、Plugins、MCP、Scheduler、Watchlist、环境探测 | `packages/core/src/<domain>/`、`harness/host/services.ts`     |
-| Workspace     | 右侧工作台的 Snapshot、Git、只读 Files 与用户直控 Terminal                           | `packages/core/src/workspace/`、`desktop/src/main/terminal-*` |
-| Projection    | Session log → renderer runtime event 的纯折叠                                        | `packages/core/src/harness/projection/`                       |
-| ACP adapter   | 有界 stdio、V1 request、Build 会话绑定、事件白名单投影和取消                         | `packages/core/src/acp/`                                      |
+| 层次          | 责任                                                                                               | 主要位置                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Renderer      | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态                          | `desktop/src/renderer/src/`                                   |
+| Preload / IPC | 限定 renderer 可调用的 operation、可订阅事件和少量桌面能力（文件选择、打开文件夹、内置浏览器视图） | `desktop/src/preload/`、`desktop/src/main/core-host.ts`       |
+| CoreApi       | 进程内 API 门面、输入校验、mutation guard、工作台与配置服务                                        | `packages/core/src/api/`                                      |
+| HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子代理               | `packages/core/src/harness/host/`                             |
+| Agent loop    | turn → step 循环、inbox、工具调度、middleware                                                      | `packages/core/src/harness/agent/`                            |
+| Session log   | 每个 session 一份 append-only `log.jsonl`、崩溃修复、fork                                          | `packages/core/src/session-log/`                              |
+| LLM           | Provider catalog、model route、DeepSeek / pi-ai 适配器、重试策略                                   | `packages/core/src/llm/`                                      |
+| 工具          | 内置工具、注册表、执行管线、大结果落盘                                                             | `packages/core/src/harness/tools/`                            |
+| 权限          | 沙箱模式、审批策略、权限预设、一次性提权                                                           | `packages/core/src/harness/sandbox/`、`harness/approval/`     |
+| 保留服务      | Session 索引、Memory、Projects、Skills、Plugins、MCP、Scheduler、Watchlist、环境探测               | `packages/core/src/<domain>/`、`harness/host/services.ts`     |
+| Workspace     | 右侧工作台与环境信息卡的 Snapshot、Git、只读 Files、用户直控 Terminal；全局只读 Pull Request 查询  | `packages/core/src/workspace/`、`desktop/src/main/terminal-*` |
+| Projection    | Session log → renderer runtime event 的纯折叠                                                      | `packages/core/src/harness/projection/`                       |
+| ACP adapter   | 有界 stdio、V1 request、Build 会话绑定、事件白名单投影和取消                                       | `packages/core/src/acp/`                                      |
 
 ## 一次会话请求
 
@@ -67,9 +67,38 @@ Scheduler 的 `agent_turn` 任务、Watchlist 检查和 Goal 续跑都通过同�
 
 子代理在进程内运行，是独立的子 session（最大嵌套深度 3）。它们继承父会话的沙箱模式，审批策略固定为 `never`，因此子代理内的提权请求会被自动拒绝。
 
-## 右侧工作台
+## 桌面外壳与路由
 
-Build 会话的右侧区域提供 Environment、Review、Terminal 和 Files。Environment 通过 `workspace.snapshot` 读取 Git/worktree/安全操作凭据、当前 Goal、后台任务、子代理和终端的聚合投影。Review 使用 Core 内的 Git 分层服务；Files 是只读、有界的项目文件浏览；Terminal 的 PTY 由 Electron main 注入 Core `TerminalService`。这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision 和确认由 Core 校验。Terminal 是用户直接操作系统 Shell，不进入 Agent loop 或 Agent 权限，也不写聊天记录或 session log。
+Renderer 外壳是 `components/shell/AppFrame.vue` 的三栏网格：左侧会话栏、中间列、右侧工作台。列宽由 `components/shell/columns.ts` 的纯函数 `computeColumns()` 求解：中间列有下限（对话 480px、轨迹 640px），空间不足时右侧工作台先在 360–960px 内缩窄，再自动关闭；这一让位只作用于渲染宽度，不改写用户的宽度偏好，窗口变宽后恢复。窗口宽度小于 1024px 时侧栏收起为 56px 图标栏。
+
+布局偏好由 `components/shell/frameState.ts` 管理，按窗口保存在 renderer 的 `localStorage`（键 `emperor.frame.v2`）：侧栏宽度、工作台开关与宽度、当前工作台面板（`launcher` / `review` / `terminal` / `files` / `browser`）、环境信息卡开关，以及轨迹「详情」列的开关与宽度。旧的 `emperor.frame.v1`（右侧详情栏）在首次读取时迁移一次后删除。
+
+路由定义在 `desktop/src/renderer/src/router.ts`，每个页面组件单独分包，并由 `<keep-alive :max="6">` 缓存：
+
+| 路由                                               | 页面                                       | 右侧工作台 |
+| -------------------------------------------------- | ------------------------------------------ | ---------- |
+| `/chat/:sessionId?`、`/chat/:sessionId/trajectory` | 对话与轨迹（`ConversationView`）           | 可用       |
+| `/scheduler`                                       | 定时任务                                   | 不显示     |
+| `/capabilities/:tab(plugins\|skills\|mcp\|tools)?` | 能力（插件 / Skills / MCP / 工具四个标签） | 不显示     |
+| `/pulls/:owner?/:repo?/:number?`                   | Pull Request                               | 不显示     |
+| `/explore`                                         | 探索                                       | 不显示     |
+
+设置弹窗由当前路由上的 `?settings=<分区>` 查询参数打开，对话页和整页都可以叠加它。定时任务、插件、Skills、MCP 与工具已从弹窗移到整页：`?settings=scheduler|plugins|skills|mcp|tools` 由全局 `beforeEach` 守卫转到对应页面，旧的 `/plugins/:tab?` 转到 `/capabilities/:tab`，`/skills/:name?` 转到 `/capabilities/skills?skill=<name>`，`/mcp`、`/tools` 转到对应标签；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 打开「记忆」；其余旧的独立设置路由仍转成 `/chat?settings=<分区>`。
+
+快捷键是 `desktop/src/renderer/src/shortcuts.ts` 中的一张纯映射表，由 `composables/useShortcuts.ts` 在捕获阶段安装唯一的 `keydown` 监听；有弹窗时不响应，并避开 Electron 默认菜单占用的组合键。侧栏通知由 `runtime/notifications.ts` 的纯 reducer 从 runtime event 推导，只保存在 renderer 本地，不经过 Core，也不发送系统通知。
+
+## 右侧工作台与环境信息卡
+
+右侧工作台（`components/workspace/WorkspacePanel.vue`）提供启动器和四个面板：审查、终端、文件、浏览器，每个面板单独分包。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
+
+- `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子代理和终端的投影。
+- 审查使用 Core 内的 Git 分层服务；环境信息卡的「比较分支」通过 `git.remote` 取得 `origin` 的网页地址。
+- 文件是只读、有界的项目文件浏览。
+- 终端的 PTY 由 Electron main 注入 Core `TerminalService`。它是用户直接操作的系统 Shell，不进入 Agent loop 或 Agent 权限，也不写聊天记录或 session log。
+- 浏览器不经过 CoreApi：Electron main 的 `BrowserViewHost`（`desktop/src/main/browser-view.ts`）在内存分区中托管一个 sandboxed `WebContentsView`，只加载经 `browser-view-policy.ts` 规范化的、用户在地址栏提交的 `http(s)` 地址，拒绝全部权限请求、下载和应用内弹窗。
+- 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。
+
+这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision、确认和浏览器地址由 Core 或 Electron main 校验。Trajectory 的「详情」列（Inspector）是轨迹视图内部的一列，不属于右侧工作台；对话中的 Inspect 跳转到 `/chat/:id/trajectory?call=<callId>` 并打开这一列。
 
 ## Headless ACP
 

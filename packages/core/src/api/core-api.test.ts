@@ -70,6 +70,7 @@ const EXPECTED_OPERATIONS = [
   'git.pullRequest',
   'git.push',
   'git.readyPullRequest',
+  'git.remote',
   'git.repository',
   'git.stage',
   'git.status',
@@ -132,6 +133,10 @@ const EXPECTED_OPERATIONS = [
   'processes.reparent',
   'projects.list',
   'projects.resolve',
+  'pullRequests.diff',
+  'pullRequests.list',
+  'pullRequests.status',
+  'pullRequests.view',
   'references.resolve',
   'runtime.replay',
   'scheduler.createJob',
@@ -1182,6 +1187,7 @@ describe('CoreApi sessions and kept services', () => {
       chat_order: [],
       project_session_order: {},
       collapsed_project_ids: [],
+      pinned_session_ids: [],
       right_workspace: {
         version: 3,
         workbenchOpen: false,
@@ -1221,6 +1227,63 @@ describe('CoreApi sessions and kept services', () => {
       right_workspace: { width: 960, pane: 'files', workbenchOpen: true },
     })
     expect(api.sidebar.get()).toEqual(patched)
+  })
+
+  it('normalizes pinned sessions and unpins deleted or archived sessions', async () => {
+    const { api, stateRoot } = await setup()
+    const keep = session(api, 'Keep')
+    const doomed = session(api, 'Doomed')
+    const archived = session(api, 'Archived')
+    const many = Array.from({ length: 60 }, (_, index) => `s-${index}`)
+
+    expect(
+      api.sidebar.patch({
+        pinned_session_ids: [' s-1 ', 's-1', '', 7, null, { id: 'x' }, 's-2'],
+      }).pinned_session_ids,
+    ).toEqual(['s-1', 's-2'])
+    expect(
+      api.sidebar.patch({ pinned_session_ids: many }).pinned_session_ids,
+    ).toEqual(many.slice(0, 50))
+    expect(
+      api.sidebar.patch({ pinned_session_ids: 'not-a-list' })
+        .pinned_session_ids,
+    ).toEqual([])
+
+    api.sidebar.patch({
+      chat_sort: 'created_at',
+      pinned_session_ids: [doomed, keep, archived],
+    })
+    await api.sessions.delete(doomed)
+    expect(api.sidebar.get().pinned_session_ids).toEqual([keep, archived])
+    await api.sessions.rename(archived, { archived: true })
+    expect(api.sidebar.get()).toMatchObject({
+      chat_sort: 'created_at',
+      pinned_session_ids: [keep],
+    })
+    await api.sessions.rename(archived, { archived: false })
+    expect(api.sidebar.get().pinned_session_ids).toEqual([keep])
+    expect(
+      JSON.parse(
+        readFileSync(join(stateRoot, 'memory', 'sidebar_state.json'), 'utf8'),
+      ).pinned_session_ids,
+    ).toEqual([keep])
+  })
+
+  it('routes the global pull request and git remote facades through validation', async () => {
+    const { api } = await setup()
+    await expect(
+      api.pullRequests.view({ repo: 'not a repo', number: 1 }),
+    ).rejects.toMatchObject({ code: 'pull_request_argument_invalid' })
+    await expect(
+      api.pullRequests.diff({ repo: 'acme/widgets', number: 0 }),
+    ).rejects.toMatchObject({ code: 'pull_request_argument_invalid' })
+    await expect(
+      api.pullRequests.list({ filter: 'all', limit: 51 }),
+    ).rejects.toMatchObject({ code: 'pull_request_argument_invalid' })
+    const chat = session(api)
+    await expect(api.git.remote({ sessionId: chat })).rejects.toMatchObject({
+      code: 'workspace_project_required',
+    })
   })
 
   it('reports diagnostics with a kernel section', async () => {

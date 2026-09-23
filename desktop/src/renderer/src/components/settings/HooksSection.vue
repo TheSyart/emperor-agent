@@ -32,7 +32,7 @@ useSettingsHeader({
 <template>
   <SettingsSection
     class="hooks-section"
-    intro="Claude Code 格式的 hooks.json：事件命令、匹配测试与运行审计。"
+    intro="在指定事件发生时自动运行命令：编辑 hooks.json、测试匹配规则、查看运行记录。"
   >
     <Tabs
       v-model="activeTab"

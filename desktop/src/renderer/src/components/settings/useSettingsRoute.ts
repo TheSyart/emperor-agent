@@ -1,27 +1,24 @@
 /**
  * Settings modal ⇄ route query. The modal is open while the current route
- * carries `?settings=<section>` (skills may add `&skill=<name>`); opening,
- * switching and closing only rewrite the query, so the conversation below
- * keeps its session and scroll.
+ * carries `?settings=<section>`; opening, switching and closing only rewrite
+ * the query, so the conversation below keeps its session and scroll.
+ * Opening a section that moved to a page (定时任务 / 插件 / Skills / MCP)
+ * lands on that page through the router guard.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import {
-  normalizeSettingsSection,
+  modalSettingsSection,
   type SettingsSectionKey,
 } from './settingsSections'
 
 export function settingsQuery(
   query: LocationQuery,
   section: SettingsSectionKey | null,
-  extra: Record<string, string | undefined> = {},
 ): LocationQuery {
   const next: LocationQuery = { ...query }
   delete next.settings
-  delete next.skill
   if (section) next.settings = section
-  for (const [key, value] of Object.entries(extra))
-    if (value !== undefined && section) next[key] = value
   return next
 }
 
@@ -30,34 +27,19 @@ export function useSettingsRoute() {
   const router = useRouter()
 
   const open = computed(() => route.query.settings != null)
-  const section = computed(() => normalizeSettingsSection(route.query.settings))
-  const skill = computed(() => {
-    const raw = route.query.skill
-    const value = Array.isArray(raw) ? raw[0] : raw
-    return typeof value === 'string' && value ? value : null
-  })
+  const section = computed(() => modalSettingsSection(route.query.settings))
 
   function openSettings(
     target: SettingsSectionKey = 'general',
-    extra: Record<string, string | undefined> = {},
   ): Promise<unknown> {
     return router
-      .push({
-        path: route.path,
-        query: settingsQuery(route.query, target, extra),
-      })
+      .push({ path: route.path, query: settingsQuery(route.query, target) })
       .catch(() => undefined)
   }
 
-  function selectSection(
-    target: SettingsSectionKey,
-    extra: Record<string, string | undefined> = {},
-  ): Promise<unknown> {
+  function selectSection(target: SettingsSectionKey): Promise<unknown> {
     return router
-      .replace({
-        path: route.path,
-        query: settingsQuery(route.query, target, extra),
-      })
+      .replace({ path: route.path, query: settingsQuery(route.query, target) })
       .catch(() => undefined)
   }
 
@@ -67,5 +49,5 @@ export function useSettingsRoute() {
       .catch(() => undefined)
   }
 
-  return { open, section, skill, openSettings, selectSection, closeSettings }
+  return { open, section, openSettings, selectSection, closeSettings }
 }

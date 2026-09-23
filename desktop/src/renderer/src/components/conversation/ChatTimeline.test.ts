@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadKernelLog } from '../../conversation/testing/fixtures'
 import ChatTimeline from './ChatTimeline.vue'
@@ -172,6 +172,29 @@ describe('ChatTimeline live flow', () => {
     expect(root.querySelector('.ds-md .ds-code')).not.toBeNull()
     const lint = root.querySelector('.tool-row[data-call-id="call_lint"]')
     expect(lint?.getAttribute('data-state')).toBe('error')
+  })
+})
+
+describe('ChatTimeline reveal', () => {
+  it('scrolls to a loaded row by key and rejects unknown keys', async () => {
+    const scenario = showcaseScenario(Date.now())
+    fixture = createFixtureStore(scenario.sessions, { scheduler: immediate })
+    container = document.createElement('div')
+    document.body.append(container)
+    const store = fixture.store
+    const timeline = ref<{ scrollToKey: (key: string) => boolean } | null>(null)
+    app = createApp({
+      render: () =>
+        h(ChatTimeline, { sessionId: 'showcase', store, ref: timeline }),
+    })
+    app.mount(container)
+    await settle()
+    const key = container
+      .querySelector<HTMLElement>('[data-chat-anchor-key]')
+      ?.getAttribute('data-chat-anchor-key')
+    expect(key).toBeTruthy()
+    expect(timeline.value?.scrollToKey(key!)).toBe(true)
+    expect(timeline.value?.scrollToKey('missing-key')).toBe(false)
   })
 })
 

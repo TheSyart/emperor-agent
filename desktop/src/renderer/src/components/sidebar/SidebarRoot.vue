@@ -1,54 +1,42 @@
 <script setup lang="ts">
 /**
- * Sidebar column (dsh SidebarRoot + WorkspaceBrowser): logo row with the
- * collapse toggle, the 38px New chat bar, a search capsule, the session list
- * (projects → sessions, chats grouped by day) and the settings/theme foot.
+ * Sidebar column. Top to bottom: SidebarTopRow (collapse, ← →),
+ * SidebarBrandRow (BrandMark + Emperor, search toggle, bell),
+ * SidebarNav (新对话 + the full pages), the search capsule while
+ * searching, then the session list — 置顶 (pinned, pin order), 项目
+ * (projects → sessions), 对话 (chats grouped by day) — and SidebarFooter
+ * (设置 / 明暗切换).
  * Collapsed, the column renders the 56px SidebarRail instead. Geometry is
- * owned by AppFrame; this fills the column it is given.
+ * owned by AppFrame; this fills the column it is given. The persisted
+ * layout (sorts, orders, pins) lives in useSidebarState.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { core } from '../../api/http'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
-  buildSidebarGroups,
-  completeManualOrder,
-  defaultSidebarState,
   groupSessionsByDay,
-  moveId,
-  normalizeSidebarState,
   searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
-import type {
-  ProjectInfo,
-  SessionInfo,
-  SidebarSortMode,
-  SidebarState,
-} from '../../types'
-import BrandMark from '../brand/BrandMark.vue'
-import {
-  DsChevronRight,
-  DsFolderClose,
-  DsFolderOpen,
-  DsMore,
-  DsNewChat,
-  DsPanelLeft,
-  DsPlus,
-  DsSearch,
-  DsClose,
-} from '../icons/ds'
+import type { ProjectInfo, SessionInfo } from '../../types'
+import { DsClose, DsFolderClose, DsMore, DsPlus, DsSearch } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import Tooltip from '../ui/Tooltip.vue'
 import SessionRow from './SessionRow.vue'
+import SidebarBrandRow from './SidebarBrandRow.vue'
 import SidebarFooter from './SidebarFooter.vue'
+import SidebarNav from './SidebarNav.vue'
+import SidebarProjectRow from './SidebarProjectRow.vue'
 import SidebarRail from './SidebarRail.vue'
+import SidebarSearchResults from './SidebarSearchResults.vue'
+import SidebarSectionHeader from './SidebarSectionHeader.vue'
+import SidebarTopRow from './SidebarTopRow.vue'
+import { useSidebarState } from './useSidebarState'
 import { useSubagentCounts } from './subagentCounts'
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
@@ -72,28 +60,35 @@ const {
   archive,
   isDraftSessionId,
 } = useSession()
+const layout = useSidebarState({
+  sessions,
+  projects,
+  showToast: (message) => ctx.showToast(message),
+})
+const { state: sidebarState, grouped } = layout
 
-const sidebarState = ref<SidebarState>({ ...defaultSidebarState })
 const searchQuery = ref('')
+const searchOpen = ref(false)
 const searchInput = ref<HTMLInputElement | null>(null)
 const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
 const projectMenuAnchor = ref<HTMLElement | null>(null)
+const newProjectMenuOpen = ref(false)
+const newProjectMenuAnchor = ref<HTMLElement | null>(null)
 const chatMenuOpen = ref(false)
 const chatMenuAnchor = ref<HTMLElement | null>(null)
+const pinnedCollapsed = ref(false)
 const projectsCollapsed = ref(false)
 const chatsCollapsed = ref(false)
 
-const grouped = computed(() =>
-  buildSidebarGroups(sessions.value, sidebarState.value, projects.value),
-)
 const chatDayGroups = computed(() =>
   sidebarState.value.chat_sort === 'manual'
     ? [{ key: 'manual', label: '', sessions: grouped.value.chats }]
     : groupSessionsByDay(grouped.value.chats),
 )
 const searching = computed(() => searchQuery.value.trim().length > 0)
+const searchVisible = computed(() => searchOpen.value || searching.value)
 const searchResults = computed(() =>
   searchSidebarSessions(sessions.value, searchQuery.value),
 )
@@ -116,24 +111,8 @@ function pendingLabel(session: SessionInfo): string {
   return sessionControlPendingTag(session)?.label || ''
 }
 
-async function loadSidebarState() {
-  try {
-    sidebarState.value = normalizeSidebarState(await core('sidebar.get'))
-  } catch {
-    sidebarState.value = { ...defaultSidebarState }
-  }
-}
-
-async function patchSidebarState(update: Partial<SidebarState>) {
-  const next = normalizeSidebarState({ ...sidebarState.value, ...update })
-  sidebarState.value = next
-  try {
-    sidebarState.value = normalizeSidebarState(
-      await core('sidebar.patch', update),
-    )
-  } catch {
-    sidebarState.value = next
-  }
+function canDelete(session: SessionInfo): boolean {
+  return Boolean(session.draft) || canDeletePersistedSession.value
 }
 
 function openSession(id: string) {
@@ -183,6 +162,11 @@ async function pickBuildProject(kind: 'empty' | 'existing') {
   }
 }
 
+function openNewProjectMenu(anchor: HTMLElement) {
+  newProjectMenuAnchor.value = anchor
+  newProjectMenuOpen.value = !newProjectMenuOpen.value
+}
+
 function firstOtherSession(id: string): SessionInfo | undefined {
   return sessions.value.find(
     (session) => session.id !== id && !session.archived_at,
@@ -201,6 +185,7 @@ async function doDelete(id: string) {
     ctx.showToast(sessionActionError.value || '删除会话失败')
     return
   }
+  layout.forgetPinned(id)
   if (wasActive && next) openSession(next.id)
 }
 
@@ -208,6 +193,7 @@ async function doArchive(id: string) {
   const wasActive = activeId.value === id
   const next = firstOtherSession(id)
   await archive(id, true)
+  layout.forgetPinned(id)
   if (wasActive && next) openSession(next.id)
 }
 
@@ -215,65 +201,38 @@ async function doRename(id: string, title: string) {
   await rename(id, title)
 }
 
-function setProjectSort(mode: SidebarSortMode) {
-  void patchSidebarState({ project_sort: mode })
-}
-
-function setChatSort(mode: SidebarSortMode) {
-  void patchSidebarState({ chat_sort: mode })
-}
-
-function isProjectCollapsed(projectId: string) {
-  return sidebarState.value.collapsed_project_ids.includes(projectId)
-}
-
-function toggleProject(projectId: string) {
-  const current = sidebarState.value.collapsed_project_ids
-  const next = current.includes(projectId)
-    ? current.filter((id) => id !== projectId)
-    : [...current, projectId]
-  void patchSidebarState({ collapsed_project_ids: next })
-}
-
-function moveChat(sessionId: string, delta: -1 | 1) {
-  const ids = grouped.value.chats.map((session) => session.id)
-  void patchSidebarState({
-    chat_sort: 'manual',
-    chat_order: moveId(
-      completeManualOrder(sidebarState.value.chat_order, ids),
-      sessionId,
-      delta,
-    ),
-  })
-}
-
-function moveProjectSession(
-  project: SidebarProjectGroup,
-  sessionId: string,
-  delta: -1 | 1,
-) {
-  const current = sidebarState.value.project_session_order
-  const order = completeManualOrder(
-    current[project.id] || [],
-    project.sessions.map((session) => session.id),
-  )
-  void patchSidebarState({
-    project_sort: 'manual',
-    project_session_order: {
-      ...current,
-      [project.id]: moveId(order, sessionId, delta),
-    },
-  })
-}
-
 function focusSearch() {
   if (props.collapsed) emit('toggle')
+  searchOpen.value = true
   void nextTick(() => searchInput.value?.focus())
+}
+
+/** Brand-row search icon: open + focus, or close an empty capsule. */
+function toggleSearch() {
+  if (searchVisible.value && !searching.value) {
+    searchOpen.value = false
+    return
+  }
+  focusSearch()
 }
 
 function clearSearch() {
   searchQuery.value = ''
   searchIndex.value = 0
+}
+
+/** Esc: clear the query, then close the capsule. */
+function escapeSearch() {
+  if (searching.value) {
+    clearSearch()
+    return
+  }
+  searchOpen.value = false
+  searchInput.value?.blur()
+}
+
+function onSearchBlur() {
+  if (!searching.value) searchOpen.value = false
 }
 
 function moveSearch(delta: number) {
@@ -282,11 +241,15 @@ function moveSearch(delta: number) {
   searchIndex.value = (searchIndex.value + delta + count) % count
 }
 
+function openSearchResult(id: string) {
+  clearSearch()
+  searchOpen.value = false
+  openSession(id)
+}
+
 function commitSearch() {
   const result = searchResults.value[searchIndex.value]
-  if (!result) return
-  clearSearch()
-  openSession(result.id)
+  if (result) openSearchResult(result.id)
 }
 
 watch(searchQuery, () => {
@@ -295,7 +258,7 @@ watch(searchQuery, () => {
 
 onMounted(async () => {
   await Promise.all([
-    loadSidebarState(),
+    layout.load(),
     sessions.value.length ? Promise.resolve() : load(),
   ])
 })
@@ -316,29 +279,19 @@ defineExpose({ focusSearch })
     aria-label="会话侧栏"
     :style="{ width: `${width}px` }"
   >
-    <div class="logo-row">
-      <button type="button" class="brand" aria-label="新对话" @click="newChat">
-        <BrandMark :size="24" />
-        <span class="brand-name">Emperor</span>
-      </button>
-      <Tooltip label="收起侧栏" :delay-ms="500">
-        <button
-          type="button"
-          class="head-button"
-          aria-label="收起侧栏"
-          @click="emit('toggle')"
-        >
-          <DsPanelLeft :size="16" />
-        </button>
-      </Tooltip>
-    </div>
+    <SidebarTopRow @toggle="emit('toggle')" />
+    <SidebarBrandRow :search-active="searchVisible" @search="toggleSearch" />
+    <SidebarNav
+      :project-menu-open="newProjectMenuOpen"
+      @new-chat="newChat"
+      @new-project="openNewProjectMenu"
+    />
 
-    <button type="button" class="new-session" @click="newChat">
-      <DsNewChat :size="14" />
-      <span>新对话</span>
-    </button>
-
-    <label class="search" :data-active="searching || undefined">
+    <label
+      v-if="searchVisible"
+      class="search"
+      :data-active="searching || undefined"
+    >
       <DsSearch :size="14" class="search-icon" />
       <input
         ref="searchInput"
@@ -349,13 +302,15 @@ defineExpose({ focusSearch })
         @keydown.down.prevent="moveSearch(1)"
         @keydown.up.prevent="moveSearch(-1)"
         @keydown.enter.prevent="commitSearch"
-        @keydown.esc.prevent="clearSearch"
+        @keydown.esc.prevent="escapeSearch"
+        @blur="onSearchBlur"
       />
       <button
         v-if="searching"
         type="button"
         class="search-clear"
         aria-label="清除搜索"
+        @mousedown.prevent
         @click="clearSearch"
       >
         <DsClose :size="12" />
@@ -365,94 +320,70 @@ defineExpose({ focusSearch })
     <div class="region">
       <div v-if="loading && !sessions.length" class="empty">加载中…</div>
 
-      <div
+      <SidebarSearchResults
         v-else-if="searching"
-        class="list"
-        role="listbox"
-        aria-label="搜索结果"
-      >
-        <button
-          v-for="(result, index) in searchResults"
-          :key="result.id"
-          type="button"
-          class="search-result"
-          :data-selected="index === searchIndex || undefined"
-          @mouseenter="searchIndex = index"
-          @click="(clearSearch(), openSession(result.id))"
-        >
-          <span class="search-title">{{ result.title }}</span>
-          <span class="search-meta">{{ result.subtitle }}</span>
-        </button>
-        <div v-if="!searchResults.length" class="empty">没有匹配的会话</div>
-      </div>
+        :results="searchResults"
+        :selected-index="searchIndex"
+        @hover="searchIndex = $event"
+        @open="openSearchResult"
+      />
 
       <div v-else class="list">
+        <section v-if="grouped.pinned.length" class="section" aria-label="置顶">
+          <SidebarSectionHeader
+            v-model:collapsed="pinnedCollapsed"
+            label="置顶"
+          />
+          <template v-if="!pinnedCollapsed">
+            <SessionRow
+              v-for="session in grouped.pinned"
+              :key="session.id"
+              pinned
+              manual
+              :session="session"
+              :active="session.id === activeId"
+              :indicator="indicator(session)"
+              :pending-label="pendingLabel(session)"
+              :subagents="subagents.counts[session.id] || 0"
+              :can-delete="canDelete(session)"
+              @open="openSession(session.id)"
+              @rename="doRename(session.id, $event)"
+              @pin="layout.togglePin(session.id)"
+              @archive="doArchive(session.id)"
+              @delete="doDelete(session.id)"
+              @move="layout.movePinned(session.id, $event)"
+            />
+          </template>
+        </section>
+
         <section
           v-if="sidebarState.section_order.includes('projects')"
           class="section"
         >
-          <header class="section-header">
+          <SidebarSectionHeader
+            v-model:collapsed="projectsCollapsed"
+            label="项目"
+          >
             <button
+              ref="projectMenuAnchor"
               type="button"
-              class="section-label"
-              :aria-expanded="!projectsCollapsed"
-              @click="projectsCollapsed = !projectsCollapsed"
+              class="head-button"
+              aria-label="项目操作"
+              :aria-expanded="projectMenuOpen"
+              @click="projectMenuOpen = !projectMenuOpen"
             >
-              项目
+              <DsPlus :size="16" />
             </button>
-            <div class="section-actions">
-              <button
-                ref="projectMenuAnchor"
-                type="button"
-                class="head-button"
-                aria-label="项目操作"
-                :aria-expanded="projectMenuOpen"
-                @click="projectMenuOpen = !projectMenuOpen"
-              >
-                <DsPlus :size="16" />
-              </button>
-            </div>
-          </header>
+          </SidebarSectionHeader>
           <template v-if="!projectsCollapsed">
             <template v-for="project in grouped.projects" :key="project.id">
-              <div
-                class="project-row"
-                role="button"
-                tabindex="0"
-                :title="project.path"
-                :aria-expanded="!isProjectCollapsed(project.id)"
-                @click="toggleProject(project.id)"
-                @keydown.enter.self="toggleProject(project.id)"
-              >
-                <span class="slot">
-                  <DsChevronRight
-                    :size="14"
-                    class="chevron"
-                    :data-open="!isProjectCollapsed(project.id) || undefined"
-                  />
-                  <component
-                    :is="
-                      isProjectCollapsed(project.id)
-                        ? DsFolderClose
-                        : DsFolderOpen
-                    "
-                    :size="16"
-                    class="folder"
-                  />
-                </span>
-                <span class="project-name">{{ project.name }}</span>
-                <span class="project-count">{{ project.sessions.length }}</span>
-                <button
-                  type="button"
-                  class="row-action"
-                  aria-label="新建该项目会话"
-                  title="新建该项目会话"
-                  @click.stop="newProjectSession(project)"
-                >
-                  <DsNewChat :size="14" />
-                </button>
-              </div>
-              <template v-if="!isProjectCollapsed(project.id)">
+              <SidebarProjectRow
+                :project="project"
+                :collapsed="layout.isProjectCollapsed(project.id)"
+                @toggle="layout.toggleProject(project.id)"
+                @new-session="newProjectSession(project)"
+              />
+              <template v-if="!layout.isProjectCollapsed(project.id)">
                 <SessionRow
                   v-for="session in project.sessions"
                   :key="session.id"
@@ -462,15 +393,14 @@ defineExpose({ focusSearch })
                   :indicator="indicator(session)"
                   :pending-label="pendingLabel(session)"
                   :subagents="subagents.counts[session.id] || 0"
-                  :can-delete="
-                    Boolean(session.draft) || canDeletePersistedSession
-                  "
+                  :can-delete="canDelete(session)"
                   :manual="sidebarState.project_sort === 'manual'"
                   @open="openSession(session.id)"
                   @rename="doRename(session.id, $event)"
+                  @pin="layout.togglePin(session.id)"
                   @archive="doArchive(session.id)"
                   @delete="doDelete(session.id)"
-                  @move="moveProjectSession(project, session.id, $event)"
+                  @move="layout.moveProjectSession(project, session.id, $event)"
                 />
                 <div v-if="!project.sessions.length" class="empty nested">
                   暂无会话
@@ -487,28 +417,18 @@ defineExpose({ focusSearch })
           v-if="sidebarState.section_order.includes('chats')"
           class="section"
         >
-          <header class="section-header">
+          <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
             <button
+              ref="chatMenuAnchor"
               type="button"
-              class="section-label"
-              :aria-expanded="!chatsCollapsed"
-              @click="chatsCollapsed = !chatsCollapsed"
+              class="head-button"
+              aria-label="对话排序"
+              :aria-expanded="chatMenuOpen"
+              @click="chatMenuOpen = !chatMenuOpen"
             >
-              对话
+              <DsMore :size="16" />
             </button>
-            <div class="section-actions">
-              <button
-                ref="chatMenuAnchor"
-                type="button"
-                class="head-button"
-                aria-label="对话排序"
-                :aria-expanded="chatMenuOpen"
-                @click="chatMenuOpen = !chatMenuOpen"
-              >
-                <DsMore :size="16" />
-              </button>
-            </div>
-          </header>
+          </SidebarSectionHeader>
           <template v-if="!chatsCollapsed">
             <template v-for="group in chatDayGroups" :key="group.key">
               <div v-if="group.label" class="day-label">{{ group.label }}</div>
@@ -520,15 +440,14 @@ defineExpose({ focusSearch })
                 :indicator="indicator(session)"
                 :pending-label="pendingLabel(session)"
                 :subagents="subagents.counts[session.id] || 0"
-                :can-delete="
-                  Boolean(session.draft) || canDeletePersistedSession
-                "
+                :can-delete="canDelete(session)"
                 :manual="sidebarState.chat_sort === 'manual'"
                 @open="openSession(session.id)"
                 @rename="doRename(session.id, $event)"
+                @pin="layout.togglePin(session.id)"
                 @archive="doArchive(session.id)"
                 @delete="doDelete(session.id)"
-                @move="moveChat(session.id, $event)"
+                @move="layout.moveChat(session.id, $event)"
               />
             </template>
             <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
@@ -538,6 +457,33 @@ defineExpose({ focusSearch })
     </div>
 
     <SidebarFooter />
+
+    <Menu
+      v-model:open="newProjectMenuOpen"
+      :anchor="newProjectMenuAnchor"
+      :width="220"
+      placement="bottom"
+      label="新建项目会话"
+    >
+      <template v-if="grouped.projects.length">
+        <MenuItem variant="label">在项目中新建会话</MenuItem>
+        <MenuItem
+          v-for="project in grouped.projects.slice(0, 6)"
+          :key="project.id"
+          @select="newProjectSession(project)"
+        >
+          <template #icon><DsFolderClose :size="16" /></template>
+          {{ project.name }}
+        </MenuItem>
+        <MenuItem variant="separator" />
+      </template>
+      <MenuItem
+        :disabled="creatingBuild"
+        @select="pickBuildProject('existing')"
+      >
+        选择项目文件夹…
+      </MenuItem>
+    </Menu>
 
     <Menu
       v-model:open="projectMenuOpen"
@@ -558,19 +504,19 @@ defineExpose({ focusSearch })
       <MenuItem variant="label">排序</MenuItem>
       <MenuItem
         :selected="sidebarState.project_sort === 'updated_at'"
-        @select="setProjectSort('updated_at')"
+        @select="layout.setProjectSort('updated_at')"
       >
         更新时间
       </MenuItem>
       <MenuItem
         :selected="sidebarState.project_sort === 'created_at'"
-        @select="setProjectSort('created_at')"
+        @select="layout.setProjectSort('created_at')"
       >
         创建时间
       </MenuItem>
       <MenuItem
         :selected="sidebarState.project_sort === 'manual'"
-        @select="setProjectSort('manual')"
+        @select="layout.setProjectSort('manual')"
       >
         手动排序
       </MenuItem>
@@ -585,19 +531,19 @@ defineExpose({ focusSearch })
       <MenuItem variant="label">排序</MenuItem>
       <MenuItem
         :selected="sidebarState.chat_sort === 'updated_at'"
-        @select="setChatSort('updated_at')"
+        @select="layout.setChatSort('updated_at')"
       >
         更新时间
       </MenuItem>
       <MenuItem
         :selected="sidebarState.chat_sort === 'created_at'"
-        @select="setChatSort('created_at')"
+        @select="layout.setChatSort('created_at')"
       >
         创建时间
       </MenuItem>
       <MenuItem
         :selected="sidebarState.chat_sort === 'manual'"
-        @select="setChatSort('manual')"
+        @select="layout.setChatSort('manual')"
       >
         手动排序
       </MenuItem>
@@ -617,40 +563,6 @@ defineExpose({ focusSearch })
   color: rgb(var(--label-primary));
   font-size: var(--fs-s);
   animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
-}
-
-.logo-row {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-2);
-  box-sizing: border-box;
-  height: 60px;
-  margin-bottom: var(--space-2);
-  padding: var(--space-2) 0 var(--space-2) var(--space-1);
-  overflow: hidden;
-}
-
-.brand {
-  display: inline-flex;
-  flex: 1;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.brand-name {
-  overflow: hidden;
-  font-size: 18px;
-  font-weight: 600;
-  line-height: var(--space-6);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
 }
 
 .head-button {
@@ -673,30 +585,6 @@ defineExpose({ focusSearch })
   background: var(--interactive-bg-hover);
 }
 
-.new-session {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1-5);
-  box-sizing: border-box;
-  height: 38px;
-  margin: 0 var(--space-0-5) var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-2));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-s);
-  font-weight: 500;
-  line-height: var(--lh-s);
-  cursor: pointer;
-}
-
-.new-session:hover {
-  background: rgb(var(--sidebar-item-hover));
-}
-
 .search {
   display: flex;
   flex: none;
@@ -710,6 +598,7 @@ defineExpose({ focusSearch })
   border-radius: var(--radius-cell);
   color: rgb(var(--label-caption));
   cursor: text;
+  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
 }
 
 .search:focus-within,
@@ -781,184 +670,11 @@ defineExpose({ focusSearch })
   margin-top: var(--space-2);
 }
 
-.section-header {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-raised);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-1);
-  height: 36px;
-  padding-left: var(--space-1);
-  background: rgb(var(--sidebar-fill));
-}
-
-.section-label {
-  padding: 0 var(--space-1);
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.section-label:hover {
-  color: rgb(var(--label-secondary));
-}
-
-.section-label[aria-expanded='false'] {
-  color: rgb(var(--label-caption));
-}
-
-.section-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .day-label {
   padding: var(--space-2) var(--space-2) var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--label-caption));
-}
-
-.project-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  box-sizing: border-box;
-  height: 34px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
-  cursor: pointer;
-  user-select: none;
-  outline: none;
-}
-
-.project-row:hover {
-  background: var(--interactive-bg-hover);
-}
-
-.project-row:focus-visible {
-  box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.slot {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-4);
-  height: var(--space-5);
-  color: rgb(var(--label-tertiary));
-}
-
-.slot .chevron {
-  display: none;
-  color: rgb(var(--label-caption));
-  transition: transform var(--duration-ds) var(--ease-in-out);
-}
-
-.slot .chevron[data-open] {
-  transform: rotate(90deg);
-}
-
-.project-row:hover .chevron {
-  display: inline-flex;
-}
-
-.project-row:hover .folder {
-  display: none;
-}
-
-.project-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--fs-s);
-  line-height: var(--space-5);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-count {
-  flex: none;
-  font-size: var(--fs-xxs);
-  line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
-}
-
-.row-action {
-  display: none;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-5);
-  height: var(--space-5);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.row-action:hover {
-  color: rgb(var(--label-primary));
-}
-
-.project-row:hover .row-action,
-.project-row:focus-within .row-action {
-  display: inline-flex;
-}
-
-.project-row:hover .project-count {
-  display: none;
-}
-
-.search-result {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 48px;
-  padding: var(--space-1) var(--space-2);
-  border: none;
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: rgb(var(--label-primary));
-  text-align: left;
-  cursor: pointer;
-}
-
-.search-result:hover,
-.search-result[data-selected] {
-  background: var(--interactive-bg-hover);
-}
-
-.search-title,
-.search-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-title {
-  font-size: var(--fs-s);
-  line-height: var(--space-5);
-}
-
-.search-meta {
-  font-size: var(--fs-xxs);
-  line-height: 17px;
-  color: rgb(var(--label-tertiary));
 }
 
 .empty {

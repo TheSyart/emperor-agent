@@ -1637,3 +1637,53 @@ function invokeCallback<T extends unknown[]>(
   if (!callback) throw new Error('callback not registered')
   callback(...args)
 }
+
+describe('useRuntime bell notices (onNotify)', () => {
+  it('hands notices of any session to onNotify, once per event', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const onNotify = vi.fn()
+    const runtime = useRuntime({ ...testOptions(), onNotify })
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+
+    // A background session finishes a turn (foreign to the selected one).
+    const done = {
+      event: 'assistant_done',
+      seq: 48,
+      session_id: 's2',
+      stop_reason: 'completed',
+    }
+    emitCoreEvent(listener, done)
+    emitCoreEvent(listener, done)
+    // A git receipt of the selected session.
+    emitCoreEvent(listener, {
+      event: 'git_operation_completed',
+      seq: 0,
+      session_id: 's1',
+      action: 'commit',
+      commitOid: 'abcdef1234',
+      completedAt: 42,
+    })
+    await flushPromises()
+
+    expect(onNotify).toHaveBeenCalledTimes(2)
+    expect(onNotify.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'turn',
+      sessionId: 's2',
+      outcome: 'completed',
+    })
+    expect(onNotify.mock.calls[1]?.[0]).toMatchObject({
+      kind: 'git',
+      sessionId: 's1',
+      summary: '已提交 · abcdef1',
+    })
+    expect(runtime.sessionRuntimeStates.s2?.attention).toBe(true)
+  })
+})

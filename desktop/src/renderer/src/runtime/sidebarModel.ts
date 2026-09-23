@@ -15,6 +15,8 @@ export interface SidebarProjectGroup {
 }
 
 export interface SidebarGroups {
+  /** Pinned sessions in pin order (stale / archived / draft ids dropped). */
+  pinned: SessionInfo[]
   projects: SidebarProjectGroup[]
   chats: SessionInfo[]
 }
@@ -58,6 +60,7 @@ export const defaultSidebarState: SidebarState = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  pinned_session_ids: [],
   right_workspace: {
     version: 3,
     workbenchOpen: false,
@@ -80,8 +83,48 @@ export function normalizeSidebarState(
       value?.project_session_order,
     ),
     collapsed_project_ids: arrayOfStrings(value?.collapsed_project_ids),
+    pinned_session_ids: normalizePinnedSessionIds(value?.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(value?.right_workspace),
   }
+}
+
+/** Max pinned sessions (mirrors Core `normalizeSidebarState`). */
+export const MAX_PINNED_SESSIONS = 50
+
+/**
+ * Pinned session ids in pin order: strings only, trimmed, first occurrence
+ * wins, capped at {@link MAX_PINNED_SESSIONS} (the first ones are kept).
+ * Same rules as Core, so a round trip never reorders or grows the list.
+ */
+export function normalizePinnedSessionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const id = item.trim()
+    if (!id || id.length > 256 || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    if (out.length >= MAX_PINNED_SESSIONS) break
+  }
+  return out
+}
+
+/**
+ * Pin `id` at the top of the pinned list. Returns null when the list is
+ * already full (the caller tells the user instead of silently dropping the
+ * oldest pin); an already pinned id keeps its place.
+ */
+export function pinSessionId(ids: string[], id: string): string[] | null {
+  const target = id.trim()
+  if (!target || ids.includes(target)) return ids
+  if (ids.length >= MAX_PINNED_SESSIONS) return null
+  return [target, ...ids]
+}
+
+export function unpinSessionId(ids: string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((item) => item !== id) : ids
 }
 
 function normalizeRightWorkspace(
@@ -172,9 +215,17 @@ export function buildSidebarGroups(
 ): SidebarGroups {
   const state = normalizeSidebarState(stateInput)
   // P1-6：draft 会话未发首条消息前不出现在侧边栏
-  const visible = sessions.filter(
+  const listed = sessions.filter(
     (session) => !session.archived_at && !session.draft,
   )
+  // Pinned sessions only show in the 置顶 section (pin order); ids that no
+  // longer match a listed session are stale and ignored.
+  const byId = new Map(listed.map((session) => [session.id, session]))
+  const pinned = state.pinned_session_ids
+    .map((id) => byId.get(id))
+    .filter((session): session is SessionInfo => Boolean(session))
+  const pinnedIds = new Set(pinned.map((session) => session.id))
+  const visible = listed.filter((session) => !pinnedIds.has(session.id))
   const chats = sortSessions(
     visible.filter((session) => session.mode !== 'build'),
     state.chat_sort,
@@ -218,6 +269,7 @@ export function buildSidebarGroups(
     ),
   }))
   return {
+    pinned,
     projects: sortProjects(projects, state.project_sort, state.project_order),
     chats,
   }

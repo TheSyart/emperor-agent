@@ -1,14 +1,15 @@
 import {
+  BROWSER_ACTION_CHANNEL,
+  BROWSER_BOUNDS_CHANNEL,
+  BROWSER_CLOSE_CHANNEL,
+  BROWSER_OPEN_CHANNEL,
+  BROWSER_STATE_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
-  PREVIEW_ACTION_CHANNEL,
-  PREVIEW_BOUNDS_CHANNEL,
-  PREVIEW_CLOSE_CHANNEL,
-  PREVIEW_EXTERNAL_CHANNEL,
-  PREVIEW_OPEN_CHANNEL,
-  PREVIEW_STATE_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  type BrowserViewAction,
+  type BrowserViewState,
   type FileDialogFilter,
 } from '../shared/ipc-contract'
 
@@ -25,16 +26,6 @@ interface IpcRendererLike {
   ): void
 }
 
-export interface PreviewViewState {
-  sessionId: string
-  previewId: string
-  url: string
-  loading: boolean
-  canGoBack: boolean
-  canGoForward: boolean
-  error?: string
-}
-
 export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
   return {
     revealReference: (input: { sessionId: string; referenceId: string }) =>
@@ -48,24 +39,21 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     selectFile: (
       input: { title?: string; filters?: FileDialogFilter[] } = {},
     ) => ipcRenderer.invoke(SELECT_FILE_CHANNEL, input),
-    previewOpen: (input: { sessionId: string; previewId: string }) =>
-      ipcRenderer.invoke(PREVIEW_OPEN_CHANNEL, input),
-    previewExternal: (input: { sessionId: string; previewId: string }) =>
-      ipcRenderer.invoke(PREVIEW_EXTERNAL_CHANNEL, input),
-    previewBounds: (bounds: {
-      x: number
-      y: number
-      width: number
-      height: number
-    }) => ipcRenderer.send(PREVIEW_BOUNDS_CHANNEL, bounds),
-    previewAction: (action: 'back' | 'forward' | 'reload') =>
-      ipcRenderer.send(PREVIEW_ACTION_CHANNEL, action),
-    previewClose: () => ipcRenderer.send(PREVIEW_CLOSE_CHANNEL),
-    onPreviewState: (listener: (state: PreviewViewState) => void) => {
+    /** Address-bar submit only; main normalizes and may answer ok:false. */
+    openBrowserUrl: (url: string) =>
+      ipcRenderer.invoke(BROWSER_OPEN_CHANNEL, { url }),
+    /** null hides the native view (it draws above the DOM). */
+    browserBounds: (
+      bounds: { x: number; y: number; width: number; height: number } | null,
+    ) => ipcRenderer.send(BROWSER_BOUNDS_CHANNEL, bounds),
+    browserAction: (action: BrowserViewAction) =>
+      ipcRenderer.send(BROWSER_ACTION_CHANNEL, action),
+    browserClose: () => ipcRenderer.send(BROWSER_CLOSE_CHANNEL),
+    onBrowserState: (listener: (state: BrowserViewState) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>
-        listener(payload as PreviewViewState)
-      ipcRenderer.on(PREVIEW_STATE_CHANNEL, wrapped)
-      return () => ipcRenderer.removeListener(PREVIEW_STATE_CHANNEL, wrapped)
+        listener(payload as BrowserViewState)
+      ipcRenderer.on(BROWSER_STATE_CHANNEL, wrapped)
+      return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, wrapped)
     },
   }
 }

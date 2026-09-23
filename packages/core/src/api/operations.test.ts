@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(156)
+    expect(coreOperationKeys()).toHaveLength(161)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -413,6 +413,71 @@ describe('Core operation registry', () => {
     expect(() =>
       CORE_OPERATION_REGISTRY['skills.validate'].args.parse([{}]),
     ).toThrow()
+  })
+
+  it('defines the git remote and global pull request tuples', () => {
+    expect(
+      CORE_OPERATION_REGISTRY['git.remote'].args.parse([{ sessionId: 's1' }]),
+    ).toEqual([{ sessionId: 's1' }])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['git.remote'].args.parse([
+        { sessionId: 's1', remote: 'upstream' },
+      ]),
+    ).toThrow()
+
+    expect(
+      CORE_OPERATION_REGISTRY['pullRequests.status'].args.parse([]),
+    ).toEqual([])
+    expect(() =>
+      CORE_OPERATION_REGISTRY['pullRequests.status'].args.parse([{}]),
+    ).toThrow()
+
+    const list = CORE_OPERATION_REGISTRY['pullRequests.list'].args
+    expect(list.parse([{ filter: 'mine' }])).toEqual([{ filter: 'mine' }])
+    expect(
+      list.parse([
+        { filter: 'reviewing', query: 'repo:acme/widgets 修复', limit: 50 },
+      ]),
+    ).toEqual([
+      { filter: 'reviewing', query: 'repo:acme/widgets 修复', limit: 50 },
+    ])
+    for (const input of [
+      {},
+      { filter: 'everyone' },
+      { filter: 'all', limit: 0 },
+      { filter: 'all', limit: 51 },
+      { filter: 'all', limit: 2.5 },
+      { filter: 'all', query: 'x'.repeat(201) },
+      { filter: 'all', query: 'bug\nlabel:x' },
+      { filter: 'all', query: 'bug\u0000' },
+      { filter: 'all', args: ['--hostname', 'evil.example'] },
+    ])
+      expect(() => list.parse([input]), JSON.stringify(input)).toThrow()
+
+    for (const key of ['pullRequests.view', 'pullRequests.diff'] as const) {
+      const args = CORE_OPERATION_REGISTRY[key].args
+      expect(args.parse([{ repo: 'acme/widgets.js', number: 42 }])).toEqual([
+        { repo: 'acme/widgets.js', number: 42 },
+      ])
+      for (const input of [
+        { repo: 'acme', number: 1 },
+        { repo: 'acme/widgets/extra', number: 1 },
+        { repo: '-acme/widgets', number: 1 },
+        { repo: 'ac me/widgets', number: 1 },
+        { repo: 'acme/..', number: 1 },
+        { repo: 'acme/.', number: 1 },
+        { repo: `${'a'.repeat(40)}/widgets`, number: 1 },
+        { repo: 'acme/widgets', number: 0 },
+        { repo: 'acme/widgets', number: 1.5 },
+        { repo: 'acme/widgets', number: 1_000_000_001 },
+        { repo: 'acme/widgets', number: '42' },
+        { repo: 'acme/widgets', number: 42, hostname: 'evil.example' },
+      ])
+        expect(
+          () => args.parse([input]),
+          `${key} ${JSON.stringify(input)}`,
+        ).toThrow()
+    }
   })
 
   it('defines exact Environment and Skill installation tuples', () => {

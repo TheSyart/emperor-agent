@@ -86,7 +86,6 @@ const {
   selectMode,
   selectModel,
   selectReasoning,
-  providerLabel,
 } = controller
 
 const addOpen = ref(false)
@@ -266,7 +265,7 @@ defineExpose(controller.expose)
             :reasoning-label="currentReasoningLabel"
             :reasoning-value="currentReasoningValue"
             :reasoning-options="reasoningOptions"
-            :provider-label="providerLabel"
+            :provider-options="props.providerOptions"
             :disabled="props.busy"
             :title="modelTitle"
             @select-model="selectModel"

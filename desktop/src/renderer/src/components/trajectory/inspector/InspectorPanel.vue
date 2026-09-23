@@ -1,15 +1,19 @@
 <script setup lang="ts">
 /**
- * InspectorPanel — the trajectory inspector over a shared controller:
- * 42px header (kind tag / request dot + location, close), 34px tab strip
- * (tab set per selection kind), and the scrolling tab body. Shows an empty
- * hint when nothing is selected.
+ * InspectorPanel — the trajectory inspector column over a shared
+ * controller, sidebar-style: a 42px header (「详情」, then the kind tag /
+ * request dot + location of the selection, and the collapse button), the
+ * 34px tab strip (tab set per selection kind) and the scrolling tab body.
+ * Collapsing only hides the column (the selection stays); with nothing
+ * selected the body shows an empty hint.
  *
- * Props: controller; closable? (default true).
- * Emits: open-subagent(sessionId), close.
+ * Props: controller.
+ * Emits: open-subagent(sessionId), collapse.
  */
+import { PanelRightClose } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { TrajectoryDetailTab } from '../../../trajectory/model'
+import IconButton from '../../ui/IconButton.vue'
 import Tabs from '../../ui/Tabs.vue'
 import TrajectoryKindTag from '../TrajectoryKindTag.vue'
 import type { TrajectoryController } from '../useTrajectory'
@@ -21,11 +25,11 @@ import {
   recordLocation,
 } from './inspectorModel'
 
-const props = withDefaults(
-  defineProps<{ controller: TrajectoryController; closable?: boolean }>(),
-  { closable: true },
-)
-const emit = defineEmits<{ 'open-subagent': [sessionId: string]; close: [] }>()
+const props = defineProps<{ controller: TrajectoryController }>()
+const emit = defineEmits<{
+  'open-subagent': [sessionId: string]
+  collapse: []
+}>()
 
 const c = props.controller
 const record = computed(() => c.selectedRecord.value)
@@ -56,48 +60,36 @@ const activeTab = computed({
 const tabItems = computed(() =>
   tabs.value.map((tab) => ({ id: tab.id, label: tab.label })),
 )
-
-function close(): void {
-  c.clearSelection()
-  emit('close')
-}
 </script>
 
 <template>
   <aside
     class="traj-inspector"
-    aria-label="Event details"
+    aria-label="事件详情"
     :data-selection="request !== undefined ? 'request' : record?.cell.kind"
   >
+    <header class="header">
+      <div class="title">
+        <span class="heading">详情</span>
+        <template v-if="request !== undefined">
+          <span class="request-dot" aria-hidden="true" />
+          <span class="request-name">Request #{{ request.number ?? '—' }}</span>
+          <span class="location">{{ request.location }}</span>
+        </template>
+        <template v-else-if="record !== undefined">
+          <TrajectoryKindTag :kind="record.cell.kind" />
+          <span class="location">{{
+            record.cell.kind === 'system'
+              ? record.cell.text
+              : recordLocation(record)
+          }}</span>
+        </template>
+      </div>
+      <IconButton label="收起详情" @click="emit('collapse')">
+        <PanelRightClose :size="16" />
+      </IconButton>
+    </header>
     <template v-if="request !== undefined || record !== undefined">
-      <header class="header">
-        <div class="title">
-          <template v-if="request !== undefined">
-            <span class="request-dot" aria-hidden="true" />
-            <span class="request-name"
-              >Request #{{ request.number ?? '—' }}</span
-            >
-            <span class="location">{{ request.location }}</span>
-          </template>
-          <template v-else-if="record !== undefined">
-            <TrajectoryKindTag :kind="record.cell.kind" />
-            <span class="location">{{
-              record.cell.kind === 'system'
-                ? record.cell.text
-                : recordLocation(record)
-            }}</span>
-          </template>
-        </div>
-        <button
-          v-if="closable"
-          type="button"
-          class="close"
-          aria-label="Close details"
-          @click="close"
-        >
-          <span aria-hidden="true">×</span>
-        </button>
-      </header>
       <Tabs v-model="activeTab" class="tabs" :tabs="tabItems" />
       <div
         class="body"
@@ -120,9 +112,7 @@ function close(): void {
         />
       </div>
     </template>
-    <p v-else class="empty">
-      Select a record or a request dot in the trajectory to inspect it.
-    </p>
+    <p v-else class="empty">在轨迹中选择一条记录查看详情</p>
   </aside>
 </template>
 
@@ -142,6 +132,7 @@ function close(): void {
   flex: none;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   box-sizing: border-box;
   height: 42px;
   padding: 0 var(--space-2) 0 var(--space-3);
@@ -153,6 +144,14 @@ function close(): void {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+
+.heading {
+  flex: none;
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 500;
 }
 
 .request-dot {
@@ -175,27 +174,6 @@ function close(): void {
   font: 11px / 16px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.close {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
-  background: transparent;
-  cursor: pointer;
-  font: 18px / 18px var(--font-sans);
-}
-
-.close:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
 }
 
 .tabs {

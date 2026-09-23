@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "anthropic-mcp-builder",
+      "kind": "skill",
+      "name": "MCP Builder",
+      "publisher": "Anthropic",
+      "description": "指导构建高质量的 MCP 服务器，把外部 API 或服务接给 Agent，覆盖 Python（FastMCP）与 Node/TypeScript（MCP SDK）两种实现。",
+      "homepage": "https://github.com/anthropics/skills/tree/main/skills/mcp-builder",
+      "tags": ["开发", "MCP"],
+      "install": {
+        "skillUrl": "https://github.com/anthropics/skills/tree/main/skills/mcp-builder"
+      }
+    },
+    {
+      "id": "anthropic-webapp-testing",
+      "kind": "skill",
+      "name": "Webapp Testing",
+      "publisher": "Anthropic",
+      "description": "用 Playwright 操作并测试本地 Web 应用：验证前端功能、排查界面问题、截图并查看浏览器日志。",
+      "homepage": "https://github.com/anthropics/skills/tree/main/skills/webapp-testing",
+      "tags": ["测试", "前端"],
+      "install": {
+        "skillUrl": "https://github.com/anthropics/skills/tree/main/skills/webapp-testing"
+      }
+    },
+    {
+      "id": "anthropic-frontend-design",
+      "kind": "skill",
+      "name": "Frontend Design",
+      "publisher": "Anthropic",
+      "description": "为新界面或改版提供视觉设计指导：确定审美方向、排版与细节取舍，避免看起来千篇一律的默认样式。",
+      "homepage": "https://github.com/anthropics/skills/tree/main/skills/frontend-design",
+      "tags": ["设计", "前端"],
+      "install": {
+        "skillUrl": "https://github.com/anthropics/skills/tree/main/skills/frontend-design"
+      }
+    },
+    {
+      "id": "anthropic-canvas-design",
+      "kind": "skill",
+      "name": "Canvas Design",
+      "publisher": "Anthropic",
+      "description": "先确定设计理念，再生成 PNG 或 PDF 格式的海报与视觉作品；坚持原创，不照搬现有艺术家的作品。",
+      "homepage": "https://github.com/anthropics/skills/tree/main/skills/canvas-design",
+      "tags": ["设计"],
+      "install": {
+        "skillUrl": "https://github.com/anthropics/skills/tree/main/skills/canvas-design"
+      }
+    },
+    {
+      "id": "mcp-memory",
+      "kind": "mcp",
+      "name": "Memory",
+      "publisher": "Model Context Protocol",
+      "description": "基于本地知识图谱的持久记忆：记录实体、关系与观察，在不同对话之间保留。",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "tags": ["记忆", "需要 Node.js"],
+      "install": {
+        "mcpConfig": {
+          "mcpServers": {
+            "memory": {
+              "command": "npx",
+              "args": ["-y", "@modelcontextprotocol/server-memory"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mcp-sequential-thinking",
+      "kind": "mcp",
+      "name": "Sequential Thinking",
+      "publisher": "Model Context Protocol",
+      "description": "把复杂问题拆成可修订、可分支的思考步骤，适合规划和需要反复推敲的分析。",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "tags": ["推理", "需要 Node.js"],
+      "install": {
+        "mcpConfig": {
+          "mcpServers": {
+            "sequential-thinking": {
+              "command": "npx",
+              "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mcp-time",
+      "kind": "mcp",
+      "name": "Time",
+      "publisher": "Model Context Protocol",
+      "description": "查询当前时间，并在不同 IANA 时区之间换算时间。",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+      "tags": ["时间", "需要 uv"],
+      "install": {
+        "mcpConfig": {
+          "mcpServers": {
+            "time": {
+              "command": "uvx",
+              "args": ["mcp-server-time"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "deepwiki",
+      "kind": "mcp",
+      "name": "DeepWiki",
+      "publisher": "Cognition",
+      "description": "远程 MCP 服务：阅读 GitHub 公开仓库的 DeepWiki 文档，并就代码库直接提问，无需 API 密钥。",
+      "homepage": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+      "tags": ["文档", "远程"],
+      "install": {
+        "mcpConfig": {
+          "mcpServers": {
+            "deepwiki": {
+              "type": "http",
+              "url": "https://mcp.deepwiki.com/mcp"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

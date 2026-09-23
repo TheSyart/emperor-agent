@@ -9,11 +9,14 @@
  * Props: active (current section), titleId (id for aria-labelledby).
  * Emits: select(section).
  */
-import { SETTINGS_SECTIONS, type SettingsSectionKey } from './settingsSections'
+import {
+  SETTINGS_SECTIONS,
+  type SettingsModalSection,
+} from './settingsSections'
 import { SETTINGS_SECTION_ICONS } from './settingsIcons'
 
-defineProps<{ active: SettingsSectionKey; titleId: string }>()
-const emit = defineEmits<{ select: [section: SettingsSectionKey] }>()
+defineProps<{ active: SettingsModalSection; titleId: string }>()
+const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
 </script>
 
 <template>

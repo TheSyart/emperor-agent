@@ -471,6 +471,8 @@ export interface ModelEntrySaveInput {
   maxTokens?: number
   reasoningEffort?: string | null
   pricing?: ModelPricing | null
+  /** New entries only: reuse this saved entry's key (same endpoint). */
+  credentialsFrom?: string
 }
 
 export interface ModelProfilePreviewInput {
@@ -1300,6 +1302,18 @@ export interface RuntimeTaskEventRecord {
 
 export type WsEvent = CoreRuntimeEvent & RendererRuntimePayloadProjection
 
+/**
+ * Host-only receipt of a finished workspace git operation (commit, push,
+ * PR publish …) in a Build session; seq 0, never replayed. The renderer
+ * surfaces it as a notification (runtime/handlers/git.ts).
+ */
+export type GitOperationCompletedEvent = Extract<
+  WsEvent,
+  { event: 'git_operation_completed' }
+>
+
+export type GitOperationAction = GitOperationCompletedEvent['action']
+
 export interface SessionInfo {
   id: string
   title: string
@@ -1349,5 +1363,7 @@ export interface SidebarState {
   chat_order: string[]
   project_session_order: Record<string, string[]>
   collapsed_project_ids: string[]
+  /** Pinned sessions in pin order (Core keeps ≤ 50, drops deleted/archived). */
+  pinned_session_ids: string[]
   right_workspace: RightWorkspaceState
 }

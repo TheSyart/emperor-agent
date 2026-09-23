@@ -1,5 +1,6 @@
 // Pure ChatTimeline logic: the running-turn status label, bottom-follow
-// geometry, and the markdown fence split used by the assistant body.
+// geometry, the turn scrubber ticks, and the markdown fence split used by
+// the assistant body.
 import type { ChatNode, ChatSnapshot } from '../../conversation/types'
 import { toolView } from './tools/registry'
 
@@ -81,6 +82,79 @@ export function closingAssistantKeys(
       keys.add(previous)
   }
   return keys
+}
+
+// ── turn scrubber ─────────────────────────────────────────────────────
+
+/** Characters of the prompt a scrubber tooltip shows. */
+export const TURN_TICK_LABEL_CHARS = 40
+
+/** One scrubber tick: a user message of the loaded window. */
+export interface TurnTick {
+  /** Chat node key (scroll target). */
+  key: string
+  /** Position in `snapshot.order`. */
+  index: number
+  /** 1-based turn number within the window. */
+  turn: number
+  /** First 40 characters of the prompt (whitespace collapsed). */
+  label: string
+}
+
+/** Prompt preview: whitespace collapsed, cut to `max` characters. */
+export function promptPreview(
+  text: string,
+  max = TURN_TICK_LABEL_CHARS,
+): string {
+  const flat = text.replace(/\s+/gu, ' ').trim()
+  const chars = [...flat]
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : flat
+}
+
+/** One tick per user message in render order. */
+export function turnTicks(
+  snapshot: Pick<ChatSnapshot, 'order' | 'nodes'> | null | undefined,
+): TurnTick[] {
+  if (!snapshot) return []
+  const ticks: TurnTick[] = []
+  snapshot.order.forEach((key, index) => {
+    const node = snapshot.nodes.get(key)
+    if (node?.kind !== 'user') return
+    const text = promptPreview(node.data.text)
+    ticks.push({
+      key,
+      index,
+      turn: ticks.length + 1,
+      label:
+        text ||
+        (node.data.attachments.length > 0
+          ? '（附件）'
+          : `第 ${ticks.length + 1} 轮`),
+    })
+  })
+  return ticks
+}
+
+/**
+ * Tick of the turn the reader is in: the last tick at or above the first
+ * visible row (the first tick while the reader is above every prompt).
+ * -1 without ticks.
+ */
+export function activeTurnTick(
+  ticks: readonly TurnTick[],
+  order: readonly string[],
+  firstVisibleKey: string | null,
+): number {
+  if (ticks.length === 0) return -1
+  const position =
+    firstVisibleKey === null ? -1 : order.indexOf(firstVisibleKey)
+  if (position < 0) return ticks.length - 1
+  let active = 0
+  for (let index = 0; index < ticks.length; index++) {
+    if ((ticks[index]?.index ?? Infinity) > position) break
+    active = index
+  }
+  return active
 }
 
 // ── markdown fences ─────────────────────────────────────────────────────

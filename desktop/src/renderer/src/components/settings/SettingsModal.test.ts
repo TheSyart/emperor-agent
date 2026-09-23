@@ -84,13 +84,41 @@ describe('SettingsModal', () => {
     expect(dialog).not.toBeNull()
     expect(dialog?.getAttribute('role')).toBe('dialog')
     expect(dialog?.textContent).toContain('设置')
-    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(13)
+    // 定时任务 and the 能力 tabs are full pages now; 配置 folded into 记忆.
+    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(7)
+    for (const moved of [
+      'scheduler',
+      'plugins',
+      'skills',
+      'mcp',
+      'tools',
+      'configs',
+    ])
+      expect(
+        dialog?.querySelector(`.nav-cell[data-section="${moved}"]`),
+      ).toBeNull()
+    expect(
+      dialog?.querySelector('.nav-cell[data-section="hooks"]'),
+    ).not.toBeNull()
     expect(
       dialog?.querySelector('.nav-cell.active')?.getAttribute('data-section'),
     ).toBe('general')
     await vi.waitFor(() => expect(dialog?.textContent).toContain('demo-model'))
     expect(dialog?.textContent).toContain('已归档对话')
     expect(document.activeElement).toBe(dialog)
+  })
+
+  it('shows general for a moved section key the router did not redirect', async () => {
+    // The app router sends `?settings=skills` to /plugins/skills; a bare
+    // router (no guard) must still not render a section the modal dropped.
+    await mount('/chat/s1?settings=skills')
+    const dialog = modal()
+    expect(
+      dialog?.querySelector('.nav-cell.active')?.getAttribute('data-section'),
+    ).toBe('general')
+    expect(
+      dialog?.querySelector('.settings-options')?.getAttribute('data-section'),
+    ).toBe('general')
   })
 
   it('switches sections through the route query', async () => {

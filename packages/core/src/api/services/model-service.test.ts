@@ -399,6 +399,68 @@ describe('CoreModelService schema v2', () => {
     expect(calls[0]?.headers.get('x-api-key')).toBe('sk-secret-1234')
   })
 
+  it('copies a sibling credential into a new entry only for the same provider endpoint', async () => {
+    const root = tmp('emperor-model-service-credentials-from-')
+    writeConfig(root, [
+      entry({
+        entryId: 'source',
+        legacy: { extraHeaders: { 'x-team': 'core' } },
+      }),
+    ])
+    const modelService = await service(root)
+    const capacity = { contextWindowTokens: 128_000, maxTokens: 16_000 }
+
+    const saved = await modelService.saveEntry({
+      ...capacity,
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-5.2-mini',
+      apiBase: 'https://api.openai.com/v1/',
+      apiKey: '',
+      credentialsFrom: 'source',
+    })
+    const added = saved.models.find((item) => item.modelId === 'gpt-5.2-mini')!
+    expect(added.apiKey).toBe('***1234')
+    const onDisk = JSON.parse(
+      readFileSync(join(root, 'model_config.json'), 'utf8'),
+    )
+    const stored = onDisk.models.find(
+      (item: ModelEntryV2) => item.entryId === added.entryId,
+    )
+    expect(stored.apiKey).toBe('sk-secret-1234')
+    expect(stored.legacy).toEqual({ extraHeaders: { 'x-team': 'core' } })
+
+    await expect(
+      modelService.saveEntry({
+        ...capacity,
+        provider: 'openai',
+        protocol: 'openai',
+        modelId: 'gpt-elsewhere',
+        apiBase: 'https://attacker.example/v1',
+        credentialsFrom: 'source',
+      }),
+    ).rejects.toThrow('只能沿用同一供应商')
+    await expect(
+      modelService.saveEntry({
+        entryId: 'source',
+        credentialsFrom: added.entryId,
+      }),
+    ).rejects.toThrow('只能用于新建模型')
+
+    const typed = await modelService.saveEntry({
+      ...capacity,
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-own-key',
+      apiBase: 'https://api.openai.com/v1',
+      apiKey: 'sk-own-5678',
+      credentialsFrom: 'source',
+    })
+    expect(
+      typed.models.find((item) => item.modelId === 'gpt-own-key')!.apiKey,
+    ).toBe('***5678')
+  })
+
   it('never reuses an entry credential for a changed discovery endpoint or explicit null key', async () => {
     const root = tmp('emperor-model-service-discover-secret-boundary-')
     writeConfig(root, [

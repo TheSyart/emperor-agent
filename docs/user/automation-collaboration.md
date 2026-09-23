@@ -1,17 +1,24 @@
-# Scheduler、Hooks 与桌宠
+# 定时任务、Hooks 与桌宠
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/settings/`（Scheduler / Hooks / 记忆 / 桌宠分区）
+> 最后核验：2026-09-23<br>
+> 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（Hooks / 记忆 / 桌宠分区）
 
 本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
 
-## Scheduler
+## 定时任务
 
-“设置 → Scheduler”可以创建、编辑、暂停、恢复、手动运行和删除任务，Agent 也可以通过 `scheduler` 工具管理任务。
+点击侧栏的「定时任务」打开定时任务页（`/scheduler`），可以创建、编辑、暂停、恢复、立即运行和删除任务。Agent 也可以通过 `scheduler` 工具管理任务。
 
-页面顶部用一行汇总服务状态、任务数、启用数、下次运行时间和并发占用。每个任务是一张卡片，显示名称、调度规则与下次运行时间、状态和启用开关（关闭即暂停，打开即恢复）；展开后查看任务详情、最近错误和运行历史，并在卡片内直接编辑，底部提供「删除」（需再次确认）、「立即运行」和「保存」。右上角「新增任务」会在列表顶部展开一张新建卡片。受保护的系统任务可以暂停、恢复或立即运行，但不能编辑或删除。
+- **列表**：顶部是搜索框和“全部 / 已开启 / 已暂停 / 已完成”四个标签。每行显示任务名称、调度规则与下次运行时间（例如「星期五（时间：18:00） · 下次运行 3天后」），运行中、排队中或上次失败时带状态标记。已运行过、已停用的一次性任务归入“已完成”。
+- **创建**：右上角「创建 ▾」提供「新建任务」和两个预填模板：「每日摘要」（工作日 09:00）和「每周回顾」（星期五 18:00）。模板只填好表单，保存前可以修改。
+- **编辑**：点击一行打开任务对话框，查看状态、启用开关、任务详情、最近错误和运行历史，底部提供「删除」（需再次确认）、「立即运行」和「保存」。
+- **行菜单**：每行右侧的 `⋯` 提供「立即运行」、「暂停」（已停用的任务显示「恢复」）和「删除」（删除前确认，任务和运行历史一并删除）。
+- 受保护的系统任务可以暂停、恢复或立即运行，但不能编辑或删除。
+- 列表下方显示服务状态（运行、并发和排队情况）以及关闭应用和错过触发点的处理规则。
+
+定时任务运行完成或失败时，侧栏的通知铃铛会收到一条通知；此时正在查看定时任务页的话，这条通知直接记为已读。
 
 任务支持：
 
@@ -31,11 +38,11 @@
 
 `misfirePolicy` 有三种：`skip`（默认）只记录错过并移到下一个未来触发点；`latest` 只补跑最后一个错过的触发点；`catch-up-one` 只补跑最早一个错过的触发点。无论错过多少次，每个任务每次启动最多补跑一次。
 
-Scheduler 最多同时运行 2 个任务、同一目标最多 1 个，最多排队 100 个，这些上限不能从界面或任务放宽。应用退出时 Scheduler 停止接收新任务并取消进行中的工作，它不会作为系统后台服务继续运行。重启后已经开始运行的任务不会自动重放，无法确认结果时记为 `interrupted`。
+定时任务最多同时运行 2 个、同一目标最多 1 个，最多排队 100 个，这些上限不能从界面或任务放宽。应用退出时 Scheduler 停止接收新任务并取消进行中的工作，它不会作为系统后台服务继续运行。重启后已经开始运行的任务不会自动重放，无法确认结果时记为 `interrupted`。
 
 ## Hooks
 
-入口是“设置 → Hooks”。Hooks 使用与 Claude Code 相同的 `hooks.json` 协议，只支持 `command` 类型的 handler。
+入口是“设置 → Hooks”。Hooks 在指定事件发生时自动运行命令，配置写在 `hooks.json` 中，只支持 `command` 类型的 handler。
 
 - 配置文件：`stateRoot/hooks.json`，按“事件 → matcher 分组 → hooks”组织，可以在“配置”标签编辑；保存时会校验并立即重新加载。
 - 支持的事件：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`。其他事件和非 `command` 类型的 handler 会被忽略，页面会列出被跳过的项。
@@ -63,7 +70,7 @@ Hook 输出中的 `updatedInput`、`systemMessage` 和 `continue: false` 会被�
 
 ## Watchlist
 
-Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”的“Watchlist”标签中编辑。可以在该标签点击右上角的「手动检查」，也可以由 Scheduler 的 `watchlist-check` 系统任务定期检查；判断需要处理时会发起一轮普通 Agent turn。它不提供 Slack、邮件或社交平台连接器。
+Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”的“Watchlist”标签中编辑。可以在该标签点击右上角的「手动检查」，也可以由定时任务中的 `watchlist-check` 系统任务定期检查；判断需要处理时会发起一轮普通 Agent turn。它不提供 Slack、邮件或社交平台连接器。
 
 ## 桌宠 companion
 

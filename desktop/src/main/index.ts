@@ -45,7 +45,7 @@ import {
 import { mainWindowWebPreferences } from './window-security'
 import { NodePtyHost } from './terminal-host'
 import { TerminalEventBridge } from './terminal-event-bridge'
-import { PreviewViewHost } from './preview-view'
+import { BrowserViewHost } from './browser-view'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
 import {
   createDesktopWebFetchClient,
@@ -85,7 +85,7 @@ let mainWindow: BrowserWindow | null = null
 let recoveryWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
 let petLastError: string | null = null
-let previewViewHost: PreviewViewHost | null = null
+let browserViewHost: BrowserViewHost | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://bundle/index.html',
@@ -275,8 +275,8 @@ function prepareMainRuntime(): void {
 }
 
 function closeCoreHost(): void {
-  previewViewHost?.close()
-  previewViewHost = null
+  browserViewHost?.close()
+  browserViewHost = null
   sessionEventBridge.dispose()
   if (!coreApi) return
   const current = coreApi
@@ -378,7 +378,7 @@ function registerAppProtocol(): void {
     else if (url.host === 'pet-assets')
       filePath = resolveStaticAssetPath(
         url.pathname,
-        path.join(config.runtimeRoot, 'assets', 'desktop-pet', 'clawd-tank'),
+        path.join(config.runtimeRoot, 'assets', 'desktop-pet', 'xiaodan'),
       )
     if (!filePath) return new Response('asset not found', { status: 404 })
     return net.fetch(pathToFileURL(filePath).toString())
@@ -417,10 +417,19 @@ function createWindow(): void {
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir),
   })
-  if (coreApi) previewViewHost = new PreviewViewHost(mainWindow, coreApi)
-  coreEventBridge.attach(mainWindow.webContents)
-  sessionEventBridge.attach(mainWindow.webContents)
-  terminalEventBridge.attach(mainWindow.webContents)
+  browserViewHost = new BrowserViewHost(mainWindow)
+  // A reloaded or crashed renderer lost the BrowserPane that placed the native
+  // view; drop it so it cannot linger above the new UI.
+  mainWindow.webContents.on('did-navigate', () => browserViewHost?.close())
+  mainWindow.webContents.on('render-process-gone', () =>
+    browserViewHost?.close(),
+  )
+  // Keep the reference: by 'closed' the window is destroyed and reading
+  // mainWindow.webContents throws "Object has been destroyed".
+  const mainContents = mainWindow.webContents
+  coreEventBridge.attach(mainContents)
+  sessionEventBridge.attach(mainContents)
+  terminalEventBridge.attach(mainContents)
   secureWindowNavigation(mainWindow, trustedRendererPolicy)
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
@@ -453,11 +462,11 @@ function createWindow(): void {
     }
   })
   mainWindow.on('closed', () => {
-    previewViewHost?.close()
-    previewViewHost = null
-    if (mainWindow) coreEventBridge.detach(mainWindow.webContents)
-    if (mainWindow) sessionEventBridge.detach(mainWindow.webContents)
-    if (mainWindow) terminalEventBridge.detach(mainWindow.webContents)
+    browserViewHost?.close()
+    browserViewHost = null
+    coreEventBridge.detach(mainContents)
+    sessionEventBridge.detach(mainContents)
+    terminalEventBridge.detach(mainContents)
     mainWindow = null
   })
 
@@ -546,10 +555,12 @@ function createPetWindow(): void {
     emitPetStatus()
   })
 
-  coreEventBridge.attachPet(win.webContents)
+  // Same as the main window: webContents is unreadable once 'closed' fires.
+  const petContents = win.webContents
+  coreEventBridge.attachPet(petContents)
 
   win.on('closed', () => {
-    coreEventBridge.detachPet(win.webContents)
+    coreEventBridge.detachPet(petContents)
     petWindow = null
     emitPetStatus()
   })
@@ -617,12 +628,11 @@ async function startup(): Promise<void> {
     registerDesktopCapabilityIpc({
       ipcMain,
       authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
-      preview: {
-        open: (input) => requirePreviewViewHost().open(input),
-        openExternal: (input) => requirePreviewViewHost().openExternal(input),
-        setBounds: (bounds) => requirePreviewViewHost().setBounds(bounds),
-        action: (action) => requirePreviewViewHost().action(action),
-        close: () => previewViewHost?.close(),
+      browser: {
+        openUrl: (input) => requireBrowserViewHost().openUrl(input),
+        setBounds: (bounds) => browserViewHost?.setBounds(bounds),
+        action: (action) => browserViewHost?.action(action),
+        close: () => browserViewHost?.close(),
       },
       references: {
         revealPath: (input) => {
@@ -731,7 +741,7 @@ app.on('before-quit', () => {
   closeCoreHost()
 })
 
-function requirePreviewViewHost(): PreviewViewHost {
-  if (!previewViewHost) throw new Error('preview host is not ready')
-  return previewViewHost
+function requireBrowserViewHost(): BrowserViewHost {
+  if (!browserViewHost) throw new Error('browser host is not ready')
+  return browserViewHost
 }

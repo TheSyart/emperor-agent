@@ -71,6 +71,16 @@ function payload(models: ModelEntry[]): ModelConfigPayload {
           anthropic: 'https://api.deepseek.com/anthropic',
         },
         modelDiscovery: { openai: 'openai_compat' },
+        region: 'cn',
+      },
+      {
+        name: 'anthropic',
+        displayName: 'Anthropic',
+        protocols: ['anthropic'],
+        defaultProtocol: 'anthropic',
+        apiBases: { anthropic: 'https://api.anthropic.com' },
+        iconId: 'anthropic',
+        region: 'foreign',
       },
     ],
   }
@@ -120,6 +130,15 @@ function input(label: string): HTMLInputElement {
   if (!(control instanceof HTMLInputElement))
     throw new Error(`input ${label} not found`)
   return control
+}
+
+async function pickProvider(name: string): Promise<void> {
+  const tile = container!.querySelector<HTMLButtonElement>(
+    `[data-testid="provider-picker"] button[title="${name}"]`,
+  )
+  if (!tile) throw new Error(`provider tile ${name} not found`)
+  tile.click()
+  await flush()
 }
 
 beforeEach(() => {
@@ -189,6 +208,11 @@ describe('ModelSection', () => {
     expect(container!.querySelector('[data-testid="model-add-card"]')).not.toBe(
       null,
     )
+    // The add card starts at the provider picker, grouped by region.
+    const picker = container!.querySelector('[data-testid="provider-picker"]')!
+    expect(picker.textContent).toContain('国内厂商')
+    expect(picker.textContent).toContain('海外厂商')
+    await pickProvider('DeepSeek')
 
     const modelId = input('模型 ID')
     modelId.value = 'deepseek-chat'
@@ -216,10 +240,94 @@ describe('ModelSection', () => {
 
   it('blocks saving an incomplete draft with field errors', async () => {
     await mount(payload([]))
+    await pickProvider('DeepSeek')
     button('保存模型').click()
     await flush()
     expect(api.saveModelEntry).not.toHaveBeenCalled()
     expect(container!.textContent).toContain('请填写模型 ID')
+  })
+
+  it('groups entries under one card per provider with key status', async () => {
+    await mount(
+      payload([
+        entry({}),
+        entry({
+          entryId: 'reasoner',
+          modelId: 'deepseek-reasoner',
+          displayName: 'Reasoner',
+          effectiveDisplayName: 'Reasoner',
+          apiKey: '',
+        }),
+        entry({
+          entryId: 'claude',
+          provider: 'anthropic',
+          protocol: 'anthropic',
+          modelId: 'claude-sonnet',
+          displayName: 'Claude',
+          effectiveDisplayName: 'Claude',
+          apiBase: 'https://api.anthropic.com',
+        }),
+      ]),
+    )
+    const cards = [...container!.querySelectorAll('[data-provider]')]
+    expect(cards.map((card) => card.getAttribute('data-provider'))).toEqual([
+      'deepseek',
+      'anthropic',
+    ])
+    const deepseek = cards[0]!
+    expect(deepseek.textContent).toContain('2 个模型')
+    expect(deepseek.textContent).toContain('缺少 API Key')
+    expect(deepseek.textContent).toContain('api.deepseek.com · OpenAI')
+    expect(deepseek.querySelector('[data-entry-id="main"]')).not.toBeNull()
+    expect(deepseek.querySelector('[data-entry-id="reasoner"]')).not.toBeNull()
+    expect(cards[1]!.textContent).toContain('Key 已配置')
+    expect(cards[1]!.textContent).toContain('1 个模型')
+    // Capability tags and the context window read from the resolved profile.
+    const row = deepseek.querySelector('[data-entry-id="main"]')!
+    expect(row.textContent).toContain('工具')
+    expect(row.textContent).toContain('思考')
+    expect(row.textContent).not.toContain('识图')
+    expect(row.textContent).toContain('128K 上下文')
+  })
+
+  it('adds a model under a provider reusing its saved key', async () => {
+    api.saveModelEntry.mockResolvedValue(payload([entry({})]))
+    await mount(payload([entry({})]))
+    button('在 DeepSeek 下添加模型').click()
+    await flush()
+    const card = container!.querySelector('[data-provider="deepseek"]')!
+    expect(card.querySelector('[data-testid="model-add-card"]')).not.toBeNull()
+    expect(input('API Key').placeholder).toBe('沿用「Main」的 API Key')
+
+    const modelId = input('模型 ID')
+    modelId.value = 'deepseek-reasoner'
+    modelId.dispatchEvent(new Event('input'))
+    await flush()
+    button('保存模型').click()
+    await flush()
+    const saved = api.saveModelEntry.mock.calls[0]![0]
+    expect(saved).toMatchObject({
+      provider: 'deepseek',
+      modelId: 'deepseek-reasoner',
+      apiBase: 'https://api.deepseek.com/v1',
+      credentialsFrom: 'main',
+    })
+    expect(saved).not.toHaveProperty('apiKey')
+    expect(saved).not.toHaveProperty('entryId')
+  })
+
+  it('drops the reused key once the endpoint changes', async () => {
+    await mount(payload([entry({})]))
+    button('在 DeepSeek 下添加模型').click()
+    await flush()
+    const base = input('API 地址')
+    base.value = 'https://proxy.example/v1'
+    base.dispatchEvent(new Event('input'))
+    await flush()
+    expect(input('API Key').placeholder).toBe('输入 API Key')
+    expect(container!.textContent).toContain(
+      '协议或 API 地址已改变，需要重新填写 API Key',
+    )
   })
 
   it('deletes an entry only after the inline confirmation', async () => {

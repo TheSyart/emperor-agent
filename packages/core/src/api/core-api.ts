@@ -77,6 +77,12 @@ import {
   type WorkspaceFileReadResult,
 } from '../workspace/files'
 import { WorkspaceGitService } from '../workspace/git'
+import { GH_ENV_ALLOWLIST } from '../workspace/git-pull-requests'
+import {
+  createGhCommandRunner,
+  PullRequestBrowserService,
+  type GhRuntime,
+} from '../workspace/pull-request-browser'
 import { WorkspaceBindingStore } from '../workspace/git-worktrees'
 import { GitOperationReceiptStore } from '../workspace/git-receipts'
 import { WorkspaceMutationCoordinator } from '../workspace/mutation-coordinator'
@@ -179,6 +185,7 @@ export class CoreApi {
   readonly onboardingService: OnboardingService
   readonly workspaceFilesService: WorkspaceFilesService
   readonly workspaceGitService: WorkspaceGitService
+  readonly pullRequestBrowser: PullRequestBrowserService
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
@@ -361,6 +368,7 @@ export class CoreApi {
       }
     }
     const gitProcessRunner = new NodeEnvironmentProcessRunner()
+    const runGh = createGhCommandRunner(new NodeEnvironmentProcessRunner())
     this.workspaceGitService = new WorkspaceGitService({
       resolveProject: resolveWorkspaceProject,
       resolveRuntime: async (projectRoot) => {
@@ -399,6 +407,13 @@ export class CoreApi {
           ...receipt,
         })
       },
+      resolveGhRuntime: (projectRoot) => this.resolveGhRuntime(projectRoot),
+      runGh,
+    })
+    this.pullRequestBrowser = new PullRequestBrowserService({
+      cwd: this.paths.stateRoot,
+      resolveRuntime: () => this.resolveGhRuntime(this.paths.stateRoot),
+      run: runGh,
     })
     this.workspaceFilesService = new WorkspaceFilesService({
       resolveProject: resolveWorkspaceProject,
@@ -407,7 +422,6 @@ export class CoreApi {
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
       resolveProject: resolveWorkspaceProject,
-      resolvePreview: () => null,
     })
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
@@ -448,6 +462,7 @@ export class CoreApi {
         this.terminalService.closeSession(sessionId),
       activateSession: (sessionId) => host.activateSession(sessionId),
       deleteSessionLog: (sessionId) => host.sessions.delete(sessionId),
+      sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
     })
     this.workspaceApplicationService = new CoreWorkspaceApplicationService({
       requireReadableSession: (sessionId, operation) =>
@@ -1263,6 +1278,8 @@ export class CoreApi {
       this.workspaceGitService.status(input),
     repository: (input: Parameters<WorkspaceGitService['repository']>[0]) =>
       this.workspaceGitService.repository(input),
+    remote: (input: Parameters<WorkspaceGitService['remote']>[0]) =>
+      this.workspaceGitService.remote(input),
     log: (input: Parameters<WorkspaceGitService['log']>[0]) =>
       this.workspaceGitService.log(input),
     worktrees: (input: Parameters<WorkspaceGitService['worktrees']>[0]) =>
@@ -1348,6 +1365,17 @@ export class CoreApi {
       this.withWorkspaceGitMutation(input.sessionId, () =>
         this.workspaceGitService.switchBranch(input),
       ),
+  }
+
+  /** Global read-only Pull Request browsing (signed gh; not session-scoped). */
+  readonly pullRequests = {
+    status: () => this.pullRequestBrowser.status(),
+    list: (input: Parameters<PullRequestBrowserService['list']>[0] = {}) =>
+      this.pullRequestBrowser.list(input),
+    view: (input: Parameters<PullRequestBrowserService['view']>[0]) =>
+      this.pullRequestBrowser.view(input),
+    diff: (input: Parameters<PullRequestBrowserService['diff']>[0]) =>
+      this.pullRequestBrowser.diff(input),
   }
 
   readonly files = {
@@ -1530,6 +1558,28 @@ export class CoreApi {
     },
   }
 
+  /**
+   * Drop a session that left the sidebar list (deleted or archived) from the
+   * pinned list. Best effort: the session change already succeeded.
+   */
+  private unpinSidebarSession(sessionId: string): void {
+    try {
+      const current = this.sidebar.get()
+      const pinned = current.pinned_session_ids as string[]
+      if (!pinned.includes(sessionId)) return
+      const next = normalizeSidebarState({
+        ...current,
+        pinned_session_ids: pinned.filter((id) => id !== sessionId),
+      })
+      atomicWriteText(
+        join(this.paths.memoryRoot, 'sidebar_state.json'),
+        JSON.stringify(next, null, 2) + '\n',
+      )
+    } catch {
+      // A stale pin is harmless: the renderer ignores ids it cannot list.
+    }
+  }
+
   readonly diagnostics = {
     get: async () => this.diagnosticsService.payload(),
   }
@@ -1538,19 +1588,6 @@ export class CoreApi {
     get: async () => this.desktopPetService.get(),
     setEnabled: (enabled: boolean) =>
       this.desktopPetService.setEnabled(enabled),
-  }
-
-  /** Electron main-only: dev-server previews were owned by the retired project-process manager. */
-  readonly projectProcesses = {
-    authorizePreview: (_input: {
-      sessionId: string
-      previewId: string
-    }): { url: string } => {
-      throw new OperationRetiredError(
-        '项目进程与预览已随新内核退役；请在终端中自行运行开发服务器并用浏览器打开。',
-        'use_terminal',
-      )
-    },
   }
 
   /** Task panel: background jobs and subagent sessions of a session tree. */
@@ -2040,6 +2077,36 @@ export class CoreApi {
     }
   }
 
+  /**
+   * The signed-catalog GitHub CLI: the executable the execution environment
+   * resolved for `gh`, accepted only when the ToolCatalog probe reports it
+   * `ready` at that same path. The env carries only the gh allowlist
+   * (process basics plus gh's config-location variables, never tokens).
+   */
+  private async resolveGhRuntime(
+    projectRoot: string,
+  ): Promise<GhRuntime | null> {
+    const kept = this.host.kept
+    const environment = await kept.executionEnvironmentService.create({
+      projectRoot,
+    })
+    const executable = environment.toolPaths.gh
+    if (!executable) return null
+    const status = await kept.environmentProbe.getStatus({
+      projectRoot,
+      skillRequirements: collectSkillEnvironmentRequirements(kept.skillManager),
+    })
+    const gh = status.tools.find(
+      (tool) => tool.id === 'gh' && tool.status === 'ready',
+    )
+    if (!gh?.detectedVersion || gh.executablePath !== executable) return null
+    return {
+      executable,
+      version: gh.detectedVersion,
+      env: { ...environment.selectEnv(GH_ENV_ALLOWLIST) },
+    }
+  }
+
   private assertClearBoundary(sessionId: string): void {
     this.requireReadableSession(sessionId, 'commands.clear')
     if (this.host.pending.hasPending(sessionId))
@@ -2211,6 +2278,7 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  pinned_session_ids: [],
   right_workspace: {
     version: 3,
     workbenchOpen: false,
@@ -2232,8 +2300,31 @@ function normalizeSidebarState(value: unknown): Dict {
       raw.project_session_order,
     ),
     collapsed_project_ids: stringList(raw.collapsed_project_ids),
+    pinned_session_ids: normalizePinnedSessionIds(raw.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(raw.right_workspace),
   }
+}
+
+/** Max pinned sessions kept in `sidebar_state.json`. */
+const MAX_PINNED_SESSIONS = 50
+
+/**
+ * Pinned session ids in pin order: strings only, trimmed, first occurrence
+ * wins, capped at {@link MAX_PINNED_SESSIONS} (the first ones are kept).
+ */
+function normalizePinnedSessionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const id = item.trim()
+    if (!id || id.length > 256 || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    if (out.length >= MAX_PINNED_SESSIONS) break
+  }
+  return out
 }
 
 function normalizeRightWorkspace(value: unknown): Dict {

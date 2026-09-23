@@ -455,6 +455,9 @@ function isSafeExecutable(value: string): boolean {
 
 const ALLOWED_PROBE_COMMANDS = new Set([
   commandKey('cargo', ['--version']),
+  commandKey('gh', ['--version']),
+  commandKey('/opt/homebrew/bin/gh', ['--version']),
+  commandKey('/usr/local/bin/gh', ['--version']),
   commandKey('git', ['--version']),
   commandKey('/usr/bin/git', ['--version']),
   commandKey('go', ['version']),
@@ -497,6 +500,19 @@ const ALLOWED_STRATEGY_COMMANDS = new Set([
     '--disable-interactivity',
   ]),
   commandKey('pkexec', ['apt-get', 'install', '-y', 'git']),
+  commandKey('brew', ['install', 'gh']),
+  commandKey('winget.exe', [
+    'install',
+    '--exact',
+    '--id',
+    'GitHub.cli',
+    '--source',
+    'winget',
+    '--accept-package-agreements',
+    '--accept-source-agreements',
+    '--disable-interactivity',
+  ]),
+  commandKey('gh', ['--version']),
   commandKey('go', ['version']),
   commandKey('winget.exe', [
     'install',

@@ -1,5 +1,5 @@
 /**
- * Settings › 插件 — install flow and display vocabulary.
+ * 能力 › 插件 — install flow and display vocabulary.
  *
  * Every install is two Core calls: `plugins.inspect(source)` stages the
  * Plugin and returns a preview (id, version, digest, signature,
@@ -186,9 +186,10 @@ export function usePluginInstall(
     state.error = ''
   }
 
-  function openUrl(): void {
+  /** Open the URL step, optionally prefilled (探索 catalog entries). */
+  function openUrl(url = ''): void {
     close()
-    state.url = ''
+    state.url = url
     state.scope = 'user'
     state.step = 'url'
   }

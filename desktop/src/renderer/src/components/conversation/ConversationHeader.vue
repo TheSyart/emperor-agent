@@ -2,36 +2,48 @@
 /**
  * ConversationHeader — dsh conversation header (padding 12 28 0 20, l2
  * hairline): breadcrumb row (project / ancestors / current title; ancestor
- * crumbs navigate) plus the details-column toggle, then the Chat |
- * Trajectory tab strip (13/16 medium, gap 36, 2px gold bar).
+ * crumbs navigate) with the right-hand toggles — 环境信息 (the chat
+ * environment card, Chat tab only; a floating-card glyph so it does not read
+ * as "about") and 工作台 (the right workspace column) — then the 对话 | 轨迹
+ * tab strip (13/16 medium, gap 36, 2px gold bar).
+ * `slim` (the empty hero phase) renders the 工作台 toggle only, so a new chat
+ * can still open the workspace (the browser works for a draft); the
+ * environment card has nothing to show before the first message and stays
+ * hidden there, so its toggle does too.
  */
-import { PanelRight } from 'lucide-vue-next'
+import { PanelRight, PictureInPicture2 } from 'lucide-vue-next'
 import IconButton from '../ui/IconButton.vue'
 import type { HeaderCrumb } from './conversationModel'
 
-defineProps<{
-  crumbs: HeaderCrumb[]
-  tab: 'chat' | 'trajectory'
-  detailsOpen: boolean
-  tabsDisabled?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    crumbs: HeaderCrumb[]
+    tab: 'chat' | 'trajectory'
+    workspaceOpen: boolean
+    envCardOpen: boolean
+    tabsDisabled?: boolean
+    slim?: boolean
+  }>(),
+  { tabsDisabled: false, slim: false },
+)
 
 const emit = defineEmits<{
   navigate: [sessionId: string]
   tab: [tab: 'chat' | 'trajectory']
-  'toggle-details': []
+  'toggle-workspace': []
+  'toggle-env-card': []
 }>()
 
 const tabs = [
-  { id: 'chat', label: 'Chat' },
-  { id: 'trajectory', label: 'Trajectory' },
+  { id: 'chat', label: '对话' },
+  { id: 'trajectory', label: '轨迹' },
 ] as const
 </script>
 
 <template>
-  <header class="conversation-header">
+  <header class="conversation-header" :data-slim="slim || undefined">
     <div class="title-row">
-      <nav class="crumbs" aria-label="会话路径">
+      <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>
           <button
@@ -58,15 +70,25 @@ const tabs = [
       <div class="actions">
         <slot name="actions" />
         <IconButton
-          :label="detailsOpen ? '收起详情栏' : '打开详情栏'"
-          :active="detailsOpen"
-          @click="emit('toggle-details')"
+          v-if="tab === 'chat' && !slim"
+          label="环境信息"
+          :active="envCardOpen"
+          :aria-pressed="envCardOpen"
+          @click="emit('toggle-env-card')"
+        >
+          <PictureInPicture2 :size="16" />
+        </IconButton>
+        <IconButton
+          label="工作台"
+          :active="workspaceOpen"
+          :aria-pressed="workspaceOpen"
+          @click="emit('toggle-workspace')"
         >
           <PanelRight :size="16" />
         </IconButton>
       </div>
     </div>
-    <div class="tabs" role="tablist" aria-label="会话视图">
+    <div v-if="!slim" class="tabs" role="tablist" aria-label="会话视图">
       <button
         v-for="item in tabs"
         :key="item.id"
@@ -99,6 +121,25 @@ const tabs = [
   height: 1px;
   background: var(--border-l2);
   pointer-events: none;
+}
+
+/* Hero phase: toggles only, floating over the centered hero (no hairline,
+   no layout shift). */
+.conversation-header[data-slim] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: var(--z-raised);
+  pointer-events: none;
+}
+
+.conversation-header[data-slim]::after {
+  content: none;
+}
+
+.conversation-header[data-slim] .actions {
+  pointer-events: auto;
 }
 
 .title-row {
@@ -166,6 +207,7 @@ button.crumb:hover {
   flex: none;
   align-items: center;
   gap: var(--space-2);
+  margin-left: auto;
 }
 
 .tabs {

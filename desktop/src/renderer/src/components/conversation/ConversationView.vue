@@ -1,18 +1,39 @@
 <script setup lang="ts">
 /**
  * ConversationView — center column shell (dsh ConversationRoot): header
- * (breadcrumb, Chat | Trajectory tabs, details toggle), the view area (the
- * raw-log ChatTimeline or the trajectory view), and the composer seat:
- * docks (todo / goal / queue) above the ComposerCard, or a takeover card
- * while an interaction is pending. A blank chat renders the hero phase: the
- * same seat centered with the headline.
+ * (breadcrumb, 对话 | 轨迹 tabs, environment-card and workspace toggles),
+ * the view area (the raw-log ChatTimeline with the turn scrubber, or the
+ * trajectory view with its inspector column), the environment card seat
+ * (Chat tab, active phase), and the composer seat: docks (changes pill /
+ * todo / goal / queue) above the ComposerCard, or a takeover card while an
+ * interaction is pending. A blank chat renders the hero phase: the same seat
+ * centered with the headline, under a slim header that keeps the two
+ * toggles.
+ *
+ * The environment card floats at the top right of the view area. From a
+ * 1120px conversation column (container query) the chat body and the
+ * composer stack pad their inline end by the card width so nothing sits
+ * under it; narrower, the card overlays the chat (Escape closes it).
+ *
+ * A tool row's Inspect opens the trajectory inspector column and routes to
+ * `/chat/:id/trajectory?call=<id>`; the trajectory selects that call (paging
+ * older history in when needed) and reports `inspect-applied`, which drops
+ * the query again.
  *
  * Child (subagent) sessions — ids outside the sidebar list whose lineage has
  * ancestors — render the same timeline (live through the watch set), the
  * lineage breadcrumb in the header and a read-only composer with a stop
  * button while the child runs.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
 import { openExternal, revealReference } from '../../api/backend'
@@ -35,15 +56,15 @@ import type {
   QueuedPromptItem,
   TodoItem,
 } from '../../types'
+import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
 import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
-import { openDetailsTab, requestDetails } from '../details/detailsState'
-import { selectCall } from '../details/inspectState'
 import { frameActions, useFrameState } from '../shell/frameState'
 import Button from '../ui/Button.vue'
+import { requestWorkspace } from '../workspace/workspaceState'
 import ChatTimeline from './ChatTimeline.vue'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
@@ -55,6 +76,14 @@ import {
 import { TrajectoryViewAsync } from '../trajectory/lazy'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import { activeTakeover } from './takeover/takeoverModel'
+import { activeTurnTick, turnTicks } from './timelineModel'
+
+const EnvironmentCard = defineAsyncComponent(
+  () => import('./environment/EnvironmentCard.vue'),
+)
+const TurnScrubber = defineAsyncComponent(() => import('./TurnScrubber.vue'))
+/** Fewest turns that earn the scrubber. */
+const SCRUBBER_MIN_TURNS = 3
 
 const ctx = useAppContext()
 const sessionStore = useSession()
@@ -67,6 +96,7 @@ const composer = ref<{
   focusInput: () => void
   restoreDraft: (payload: ChatSendPayload) => void
 } | null>(null)
+const timeline = ref<{ scrollToKey: (key: string) => boolean } | null>(null)
 
 // ── session identity / lineage ────────────────────────────────────────────
 const routeSessionId = computed(() => {
@@ -163,7 +193,39 @@ const crumbs = computed(() =>
 const parentCrumb = computed(() =>
   child.value ? crumbs.value.at(-2) : undefined,
 )
-const detailsOpen = computed(() => frame.details > 0)
+const workspaceOpen = computed(() => frameActions.workspaceOpen(frame))
+/** Environment card on screen: Chat tab, active phase, a session to show. */
+const envCardShown = computed(
+  () =>
+    tab.value === 'chat' &&
+    frame.envCardOpen &&
+    Boolean(viewingId.value) &&
+    phase.value !== 'hero',
+)
+/** A persisted Build session bound to a project (git rows, changes pill). */
+const buildSession = computed(
+  () =>
+    knownSession.value?.mode === 'build' &&
+    Boolean(knownSession.value.project_path) &&
+    !viewingDraft.value,
+)
+const agentBusyHere = computed(() => isActiveSession.value && ctx.busy.value)
+
+// ── turn scrubber ─────────────────────────────────────────────────────────
+/** Topmost visible chat row (ChatTimeline `first-visible`). */
+const firstVisibleKey = ref<string | null>(null)
+watch(viewingId, () => {
+  firstVisibleKey.value = null
+})
+const ticks = computed(() => turnTicks(snapshot.value))
+const activeTick = computed(() =>
+  activeTurnTick(ticks.value, snapshot.value.order, firstVisibleKey.value),
+)
+
+/** Reveal a chat row (scrubber tick, environment-card plan row). */
+function revealRow(key: string): void {
+  timeline.value?.scrollToKey(key)
+}
 
 function navigate(sessionId: string): void {
   void router.push(sessionLocation(sessionId, tab.value)).catch(() => undefined)
@@ -179,8 +241,16 @@ function switchTab(next: 'chat' | 'trajectory'): void {
     .catch(() => undefined)
 }
 
-function toggleDetails(): void {
-  frameActions.toggleDetails(frame)
+function toggleWorkspace(): void {
+  frameActions.toggleWorkspace(frame)
+}
+
+function toggleEnvCard(): void {
+  frameActions.toggleEnvCard(frame)
+}
+
+function closeEnvCard(): void {
+  frameActions.setEnvCard(frame, false)
 }
 
 function backToParent(): void {
@@ -241,19 +311,6 @@ const projectName = computed(() =>
 )
 
 // ── window events from commands / markdown links ─────────────────────────
-function openWorkspaceFromCommand(event: Event): void {
-  const detail = (
-    event as CustomEvent<{
-      pane?: 'review' | 'terminal' | 'files'
-      paths?: string[]
-    }>
-  ).detail
-  if (!detail?.pane) return
-  if (detail.pane === 'review')
-    requestDetails({ tab: 'git', paths: detail.paths ?? [] })
-  else requestDetails({ tab: detail.pane })
-}
-
 async function resolveMarkdownReference(event: Event): Promise<void> {
   const detail = (
     event as CustomEvent<{
@@ -276,8 +333,8 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       reference.relativePath &&
       reference.actions.includes('open_files')
     ) {
-      requestDetails({
-        tab: 'files',
+      requestWorkspace({
+        pane: 'files',
         file: {
           path: reference.relativePath,
           ...(reference.line ? { line: reference.line } : {}),
@@ -311,7 +368,6 @@ function setComposerDraftFromCommand(event: Event): void {
 }
 
 onMounted(() => {
-  window.addEventListener('emperor:open-workspace', openWorkspaceFromCommand)
   window.addEventListener('emperor:resolve-reference', resolveMarkdownReference)
   window.addEventListener(
     'emperor:set-composer-draft',
@@ -320,7 +376,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('emperor:open-workspace', openWorkspaceFromCommand)
   window.removeEventListener(
     'emperor:resolve-reference',
     resolveMarkdownReference,
@@ -352,8 +407,16 @@ watch(
 )
 
 // ── timeline actions ──────────────────────────────────────────────────────
+/** Tool-row Inspect: the trajectory's inspector column shows the call. */
 function inspectCall(callId: string): void {
-  if (viewingId.value) selectCall(viewingId.value, callId)
+  if (!viewingId.value || !callId) return
+  frameActions.openInspector(frame)
+  void router
+    .push({
+      ...(sessionLocation(viewingId.value, 'trajectory') as object),
+      query: { call: callId },
+    })
+    .catch(() => undefined)
 }
 
 function openSubagent(childId: string): void {
@@ -385,11 +448,6 @@ function clearFocusCall(): void {
   if (!focusCallId.value) return
   const { call: _call, ...query } = route.query
   void router.replace({ ...route, query }).catch(() => undefined)
-}
-
-/** A selected ledger record shows in the details column's inspector. */
-function onTrajectorySelect(recordId: string | null): void {
-  if (recordId) openDetailsTab('inspect')
 }
 
 // ── child session stop ───────────────────────────────────────────────────
@@ -517,17 +575,20 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     class="conversation-root"
     :data-phase="phase"
     :data-tab="tab"
+    :data-env-card="envCardShown || undefined"
     aria-label="对话"
   >
     <ConversationHeader
-      v-if="phase === 'active'"
       :crumbs="crumbs"
       :tab="tab"
-      :details-open="detailsOpen"
+      :slim="phase === 'hero'"
+      :workspace-open="workspaceOpen"
+      :env-card-open="frame.envCardOpen"
       :tabs-disabled="!viewingId"
       @navigate="navigate"
       @tab="switchTab"
-      @toggle-details="toggleDetails"
+      @toggle-workspace="toggleWorkspace"
+      @toggle-env-card="toggleEnvCard"
     />
 
     <div class="view-area">
@@ -536,7 +597,6 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :key="viewingId"
         :session-id="viewingId"
         :focus-call-id="focusCallId"
-        @select="onTrajectorySelect"
         @inspect-applied="clearFocusCall"
         @open-subagent="openSubagent"
       />
@@ -549,13 +609,35 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         class="chat-body-slot"
       >
         <ChatTimeline
+          ref="timeline"
           :key="viewingId"
           :session-id="viewingId"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
+          @first-visible="firstVisibleKey = $event"
+        />
+        <TurnScrubber
+          v-if="ticks.length >= SCRUBBER_MIN_TURNS"
+          :ticks="ticks"
+          :active="activeTick"
+          @select="revealRow"
         />
       </div>
+
+      <!-- Environment card seat (Chat tab): positioned by the card itself. -->
+      <EnvironmentCard
+        v-if="envCardShown"
+        :key="viewingId"
+        :session-id="viewingId"
+        :snapshot="snapshot"
+        :build="buildSession"
+        :agent-busy="agentBusyHere"
+        :child="child"
+        @reveal="revealRow"
+        @open-subagent="openSubagent"
+        @close="closeEnvCard"
+      />
     </div>
 
     <div v-if="tab === 'chat'" class="composer-seat">
@@ -585,6 +667,11 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
             >开始访谈</Button
           >
         </div>
+        <ChangesPill
+          v-if="!takeover && viewingId"
+          :session-id="viewingId"
+          :build="buildSession"
+        />
         <TodoDock v-if="!takeover" :todos="latestTodos" />
         <GoalBar
           v-if="activeGoal"
@@ -645,7 +732,10 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
 <style scoped>
 .conversation-root {
+  container: conversation / inline-size;
+  position: relative;
   --chat-content-width: 748px;
+  --env-card-width: 340px;
   --composer-card-max: calc(var(--chat-content-width) + var(--space-8));
   --composer-clearance: var(--space-4);
   --dock-inset: var(--space-2);
@@ -663,10 +753,20 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 }
 
 .view-area {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+/* Wide column: the chat and the composer make room for the environment card
+   (no transition on the padding — the card appears at once). */
+@container conversation (min-width: 1120px) {
+  .conversation-root[data-env-card] .chat-body-slot,
+  .conversation-root[data-env-card] .stack {
+    padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+  }
 }
 
 [data-phase='hero'] .view-area {

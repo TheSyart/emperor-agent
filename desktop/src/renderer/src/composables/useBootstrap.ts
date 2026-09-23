@@ -76,7 +76,7 @@ export function useBootstrap(showToast: (message: string) => void) {
     await core('config.save', { content })
     await loadBootstrap(false)
     await loadConfig()
-    showToast('配置已保存，并刷新了 Agent 上下文')
+    showToast('用户档案已保存，并刷新了 Agent 上下文')
   }
 
   async function loadMcpConfig() {

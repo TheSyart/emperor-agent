@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * SchedulerJobForm — the Scheduler create / edit fields, shown inside a
- * SettingsCard body (the create card or an expanded job card): name, the
+ * SchedulerJobForm — the Scheduler create / edit fields, shown in the
+ * /scheduler job dialog (pages/scheduler/SchedulerJobDialog.vue): name, the
  * prompt, schedule kind (Segmented) + its value, the misfire policy and the
  * deliver / delete-after-run switches.
  *

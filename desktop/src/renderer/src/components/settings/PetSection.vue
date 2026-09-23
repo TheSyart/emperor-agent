@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Settings › 桌宠 — the optional Clawd desktop companion: a preview stage
+ * Settings › 桌宠 — the optional 小单 desktop companion: a preview stage
  * (click a sprite to preview it), the enable Switch row (opens / closes the
  * pet window through ctx.setDesktopPetEnabled), the start-up mode and the
- * last window error, then the grid of the 14 runtime-state sprites. Sprite
- * URLs come from pet/petSprites.ts (import.meta.glob) so they resolve in the
- * packaged app too.
+ * last window error, then the grid of the 14 runtime states. Each state is a
+ * frame strip played by pet/PetSpriteView.vue; strip URLs come from
+ * pet/petSprites.ts (import.meta.glob) so they resolve in the packaged app
+ * too. Thumbnails hold their first frame until hovered, focused or selected.
  */
 import { computed, ref } from 'vue'
 import {
@@ -16,11 +17,14 @@ import {
   Switch,
 } from './ui'
 import { useAppContext } from '../../composables/useAppContext'
-import { PET_IDLE_SPRITE_ID, PET_SPRITES } from './pet/petSprites'
+import PetSpriteView from './pet/PetSpriteView.vue'
+import { PET_IDLE_SPRITE_ID, PET_NAME, PET_SPRITES } from './pet/petSprites'
 
 const ctx = useAppContext()
 const busy = ref(false)
 const previewId = ref(PET_IDLE_SPRITE_ID)
+/** Thumbnail under the pointer or keyboard focus; it plays while there. */
+const activeId = ref('')
 
 const pet = computed(() => ctx.boot.value?.desktopPet)
 const enabled = computed(() => Boolean(pet.value?.enabled))
@@ -41,7 +45,7 @@ const switchDescription = computed(() => {
   if (busy.value) return enabled.value ? '正在关闭桌宠…' : '正在启动桌宠…'
   if (pet.value?.running)
     return pet.value.pid ? `运行中 · PID ${pet.value.pid}` : '运行中'
-  return enabled.value ? '已开启，等待桌宠窗口启动' : '在桌面显示 Clawd'
+  return enabled.value ? '已开启，等待桌宠窗口启动' : `在桌面显示${PET_NAME}`
 })
 
 function setEnabled(next: boolean) {
@@ -61,17 +65,17 @@ function setEnabled(next: boolean) {
   <SettingsSection>
     <div class="pet-hero">
       <div class="stage" data-testid="pet-preview">
-        <img
+        <PetSpriteView
           v-if="preview"
           :key="preview.id"
-          :src="preview.url"
-          :alt="`Clawd ${preview.label}`"
-          class="stage-img"
+          :sprite="preview"
+          :height="136"
+          :label="`${PET_NAME} ${preview.label}`"
         />
       </div>
       <div class="hero-text">
         <div class="hero-title">
-          <span class="name">Clawd</span>
+          <span class="name">{{ PET_NAME }}</span>
           <StatusBadge :tone="status.tone" dot data-testid="pet-status">
             {{ status.text }}
           </StatusBadge>
@@ -109,7 +113,7 @@ function setEnabled(next: boolean) {
 
     <SettingsGroup
       title="动画精灵"
-      :description="`${PET_SPRITES.length} 种绑定到运行时事件的 SVG 动画状态，点选即可预览`"
+      :description="`${PET_SPRITES.length} 种绑定到运行时事件的帧动画状态，点选即可预览`"
     >
       <div class="sprite-grid" role="group" aria-label="动画精灵">
         <button
@@ -121,8 +125,16 @@ function setEnabled(next: boolean) {
           :aria-pressed="sprite.id === previewId"
           :data-sprite="sprite.id"
           @click="previewId = sprite.id"
+          @mouseenter="activeId = sprite.id"
+          @mouseleave="activeId = ''"
+          @focus="activeId = sprite.id"
+          @blur="activeId = ''"
         >
-          <img :src="sprite.url" alt="" class="sprite-img" />
+          <PetSpriteView
+            :sprite="sprite"
+            :height="64"
+            :playing="sprite.id === previewId || sprite.id === activeId"
+          />
           <span class="sprite-label">{{ sprite.label }}</span>
         </button>
       </div>
@@ -151,14 +163,6 @@ function setEnabled(next: boolean) {
   overflow: hidden;
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
-}
-
-/* The Clawd SVGs keep wide margins for bubbles / props: show them full
-   bleed so the character reads at a useful size. */
-.stage-img {
-  width: 144px;
-  height: 144px;
-  object-fit: contain;
 }
 
 .hero-text {
@@ -247,12 +251,6 @@ function setEnabled(next: boolean) {
 .sprite:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));
   outline-offset: 2px;
-}
-
-.sprite-img {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
 }
 
 .sprite-label {

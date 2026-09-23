@@ -71,7 +71,7 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 ## 用户直控 Terminal
 
-Build 工作台的 Terminal 是用户直接操作的系统 Shell，不属于 Agent 工具调用，不经过沙箱或审批，也不进入聊天记录、模型上下文或 session log。Core 仍校验 owner session、项目初始 cwd 和 terminal ID，并在 session 或应用关闭时清理。
+右侧工作台的「终端」（Terminal）是用户直接操作的系统 Shell，不属于 Agent 工具调用，不经过沙箱或审批，也不进入聊天记录、模型上下文或 session log。Core 仍校验 owner session、项目初始 cwd 和 terminal ID，并在 session 或应用关闭时清理。
 
 ## 修改时必须同步
 

@@ -1,18 +1,25 @@
 <script setup lang="ts">
 /**
- * Sidebar foot (dsh sidebar.settings seat): 42px settings row that opens the
- * settings modal, plus the theme toggle. `rail` renders both as 36px circles
- * stacked in the collapsed rail.
+ * Sidebar foot: the 设置 row (settings modal) and the light / dark theme
+ * toggle. `rail` renders both as 36px circles at the bottom of the
+ * collapsed rail, with right-side tooltips. The toggle pins an explicit
+ * theme; 跟随系统 is chosen in Settings › 常规.
  */
+import { computed } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { DsDark, DsLight, DsSettings } from '../icons/ds'
-import Tooltip from '../ui/Tooltip.vue'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
+import Tooltip from '../ui/Tooltip.vue'
 
 withDefaults(defineProps<{ rail?: boolean }>(), { rail: false })
 
-const { theme, toggle } = useTheme()
 const settings = useSettingsRoute()
+const { theme, toggle } = useTheme()
+
+const themeLabel = computed(() =>
+  theme.value === 'dark' ? '切换浅色' : '切换深色',
+)
+const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
 </script>
 
 <template>
@@ -28,18 +35,15 @@ const settings = useSettingsRoute()
         <span v-if="!rail" class="label">设置</span>
       </button>
     </Tooltip>
-    <Tooltip
-      :label="theme === 'dark' ? '切换浅色' : '切换深色'"
-      :side="rail ? 'right' : 'top'"
-      :delay-ms="500"
-    >
+    <Tooltip :label="themeLabel" :side="rail ? 'right' : 'top'" :delay-ms="500">
       <button
         type="button"
         class="theme"
-        :aria-label="theme === 'dark' ? '切换浅色' : '切换深色'"
+        :aria-label="themeLabel"
+        data-testid="sidebar-theme-toggle"
         @click="toggle()"
       >
-        <component :is="theme === 'dark' ? DsLight : DsDark" :size="16" />
+        <component :is="themeIcon" :size="rail ? 18 : 16" />
       </button>
     </Tooltip>
   </div>
@@ -61,7 +65,6 @@ const settings = useSettingsRoute()
 
 .sidebar-footer[data-rail] {
   flex-direction: column;
-  gap: var(--space-2);
   margin: var(--space-2) 0 var(--space-2-5);
 }
 
@@ -75,7 +78,7 @@ const settings = useSettingsRoute()
   gap: var(--space-2);
   box-sizing: border-box;
   width: 100%;
-  height: 42px;
+  height: calc(var(--space-8) + var(--space-2-5));
   padding: 0 var(--space-2-5) 0 var(--space-2);
   border: none;
   border-radius: var(--radius-card);
@@ -94,8 +97,8 @@ const settings = useSettingsRoute()
 
 [data-rail] .settings {
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: calc(var(--space-8) + var(--space-1));
+  height: calc(var(--space-8) + var(--space-1));
   padding: 0;
   border-radius: var(--radius-pill);
 }
@@ -109,13 +112,19 @@ const settings = useSettingsRoute()
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: calc(var(--space-8) + var(--space-1));
+  height: calc(var(--space-8) + var(--space-1));
   padding: 0;
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
   color: rgb(var(--label-secondary));
   cursor: pointer;
+}
+
+.settings:focus-visible,
+.theme:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 </style>

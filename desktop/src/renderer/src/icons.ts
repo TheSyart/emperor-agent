@@ -9,7 +9,6 @@ import {
   Wrench,
   Users,
   Clock,
-  Settings,
   Plug,
   Database,
   Paperclip,
@@ -48,6 +47,7 @@ import {
   ArrowDownToLine,
   Square,
   Ellipsis,
+  Server,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -63,7 +63,6 @@ export const navIconMap: Record<string, IconComponent> = {
   team: Users,
   project: ClipboardList,
   scheduler: Clock,
-  configs: Settings,
   mcp: Plug,
   memory: Database,
   pet: Cat,
@@ -105,6 +104,12 @@ export const actionIcons = {
   commandPlan: ClipboardList,
   commandGoal: Target,
   commandContinue: Play,
+} satisfies Record<string, IconComponent>
+
+// ── Model providers without an upstream logo ────────────────────────────────
+export const providerGlyphIcons = {
+  server: Server,
+  custom: Plug,
 } satisfies Record<string, IconComponent>
 
 // ── Tools ───────────────────────────────────────────────────────────────────

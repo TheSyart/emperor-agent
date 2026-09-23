@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /**
- * PluginInstallDialog — the Plugin install dialog of Settings › 插件 on
- * ui/Modal. Driven entirely by a PluginInstallFlow (pluginInstall.ts):
+ * PluginInstallDialog — the Plugin install dialog on ui/Modal, shared by
+ * 能力 › 插件 (「安装」 menu) and the 探索 page (a catalog entry's URL,
+ * prefilled through `flow.openUrl(url)`). Driven entirely by a
+ * PluginInstallFlow (pluginInstall.ts):
  * - step 'url': the https address field, the signature-verification notice
  *   and 「检查」 (`plugins.inspect`);
  * - step 'preview': what will be installed — source, version, digest,
@@ -9,7 +11,7 @@
  *   「确认安装」 (`plugins.install`). A local source opens here directly and
  *   shows its inspection progress / failure until the preview arrives.
  *
- * Escape closes this dialog only (ui/Modal's modal stack), not the settings
+ * Escape closes this dialog only (ui/Modal's modal stack), not the page or
  * modal underneath.
  */
 import { computed } from 'vue'

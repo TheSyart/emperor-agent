@@ -32,17 +32,19 @@ export interface PullRequestContext {
   truncated: boolean
 }
 
-interface GhCommandRequest {
+export interface GhCommandRequest {
   executable: string
   args: string[]
   cwd: string
   env: Record<string, string>
 }
 
-interface GhCommandResult {
+export interface GhCommandResult {
   exitCode: number
   stdout: string
   stderr: string
+  /** Set when stdout hit the runner's output cap (the output is a prefix). */
+  stdoutTruncated?: boolean
 }
 
 export interface GitPullRequestServiceOptions {
@@ -343,16 +345,7 @@ export class GitPullRequestService {
       executable: runtime.executable,
       args,
       cwd,
-      env: {
-        ...selectEnv(runtime.env),
-        GH_PROMPT_DISABLED: '1',
-        GH_FORCE_TTY: '0',
-        NO_COLOR: '1',
-        PAGER: 'cat',
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: devNull,
-      },
+      env: ghProcessEnvironment(runtime.env),
     })
     if (!allowedExitCodes.includes(result.exitCode))
       throw new WorkspaceOperationError(
@@ -364,21 +357,54 @@ export class GitPullRequestService {
   }
 }
 
-function selectEnv(env: Record<string, string>): Record<string, string> {
-  const allowed = new Set([
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'SystemRoot',
-    'TEMP',
-    'TMP',
-    'TMPDIR',
-    'LANG',
-    'LC_ALL',
-  ])
-  return Object.fromEntries(
-    Object.entries(env).filter(([key]) => allowed.has(key)),
-  )
+/**
+ * Host variables a gh child may inherit. Besides the base process variables,
+ * gh needs the variables that locate its own config/auth store
+ * (`GH_CONFIG_DIR` > `XDG_CONFIG_HOME` > `%AppData%/GitHub CLI` >
+ * `~/.config/gh`); without them a logged-in user looks unauthenticated.
+ * Token variables (`GH_TOKEN`, `GITHUB_TOKEN`, ...) are never forwarded.
+ */
+export const GH_ENV_ALLOWLIST: readonly string[] = Object.freeze([
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'SystemRoot',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'LANG',
+  'LC_ALL',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'XDG_CONFIG_HOME',
+  'GH_CONFIG_DIR',
+])
+
+/**
+ * The fixed, non-interactive environment for every gh child: filtered host
+ * variables plus prompt/pager/colour/update-check suppression and a Git
+ * config that ignores the user's global and system files. `GH_FORCE_TTY` is
+ * deliberately left unset — gh treats any non-empty value as "force TTY".
+ */
+export function ghProcessEnvironment(
+  env: Record<string, string>,
+): Record<string, string> {
+  const allowed = new Set(GH_ENV_ALLOWLIST)
+  return {
+    ...Object.fromEntries(
+      Object.entries(env).filter(([key]) => allowed.has(key)),
+    ),
+    GH_PROMPT_DISABLED: '1',
+    GH_NO_UPDATE_NOTIFIER: '1',
+    GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
+    GH_SPINNER_DISABLED: '1',
+    NO_COLOR: '1',
+    PAGER: 'cat',
+    GH_PAGER: 'cat',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: devNull,
+  }
 }
 
 function requireStableContext(context: PullRequestContext): void {

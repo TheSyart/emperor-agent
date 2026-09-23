@@ -2,7 +2,11 @@
 import { createApp, h, nextTick, ref, type App } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Modal from './Modal.vue'
-import { modalLayerCount, pushModalLayer } from './modalStack'
+import {
+  modalLayerCount,
+  onModalLayersChange,
+  pushModalLayer,
+} from './modalStack'
 
 function escape(target: EventTarget = document.body): KeyboardEvent {
   const event = new KeyboardEvent('keydown', {
@@ -119,5 +123,18 @@ describe('Modal Escape', () => {
     expect(modalLayerCount()).toBe(1)
     cleanups.pop()?.()
     expect(modalLayerCount()).toBe(0)
+  })
+
+  it('notifies subscribers when layers open and close', () => {
+    const listener = vi.fn()
+    const unsubscribe = onModalLayersChange(listener)
+    const pop = pushModalLayer({ onEscape: () => {} })
+    expect(listener).toHaveBeenCalledTimes(1)
+    pop()
+    pop()
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    pushModalLayer({ onEscape: () => {} })()
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 })

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * TrajectoryGallery — dev-only `?trajectory-gallery` page: TrajectoryView
- * with the inline inspector over an in-memory fixture store (no Electron).
+ * (ledger + inspector column) over an in-memory fixture store (no
+ * Electron).
  * Query params:
  * - scenario: kernel | rich | long | live (default rich)
  * - bare: hide the scenario bar (screenshots)
@@ -120,7 +121,6 @@ onBeforeUnmount(() => {
         :session-id="current"
         :store="gallery.store"
         :focus-call-id="focusCallId"
-        inline-inspector
         @open-subagent="openSubagent"
         @inspect-applied="applied = $event"
       />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Settings › 工具 — native section: every tool registered for the Agent
+ * 能力 › 工具 — native section: every tool registered for the Agent
  * (built-in first, then one group per MCP server) as compact disclosure rows
  * (ToolRow: name, read-only / writable badge, one-line description;
  * expanded: traits, parameters and the JSON schema). A search field filters
@@ -11,6 +11,7 @@ import { computed, ref } from 'vue'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type { ToolInfo } from '../../types'
+import { onPageReactivated } from '../pages/pageLifecycle'
 import ToolRow from './tools/ToolRow.vue'
 import { groupTools, toolMatches } from './tools/toolSchema'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
@@ -31,6 +32,7 @@ const groups = computed(() => groupTools(filtered.value))
 useSettingsHeader({
   actions: () => [refreshAction(() => reload(), { title: '刷新工具列表' })],
 })
+onPageReactivated(() => reload())
 
 async function reload(): Promise<void> {
   error.value = ''

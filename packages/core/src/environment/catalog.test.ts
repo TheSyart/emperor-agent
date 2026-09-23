@@ -311,10 +311,12 @@ describe('signed ToolCatalog', () => {
   it('ships an immutable catalog covering every planned tool id', () => {
     const bundled = loadBundledToolCatalog()
     expect(bundled.revision).toBe(
-      '3e12b926a9e9e32d3de284dbb6ec2f101ea9912a4f744deda856c0a78048d2d5',
+      'd925f4b1601eb50738cb71c6c0019521c2603f1695bdecc4e5ce659e8257d3bf',
     )
+    expect(bundled.catalog.release).toBe('2026.09-github-cli')
     expect(bundled.catalog.tools.map((tool) => tool.id)).toEqual([
       'cargo',
+      'gh',
       'git',
       'go',
       'msvc-build-tools',
@@ -337,6 +339,7 @@ describe('signed ToolCatalog', () => {
         bundled.catalog.tools.map((tool) => [tool.id, tool.version.pinned]),
       ),
     ).toMatchObject({
+      gh: '2.101.0',
       git: '2.55.0',
       go: '1.26.5',
       node: '24.18.0',
@@ -421,5 +424,214 @@ describe('signed ToolCatalog', () => {
           '6cec054c911fb925b629a09455775af6e95dc0f5694a4c28b63979ab9ef18037',
       },
     })
+  })
+  it('ships GitHub CLI with fixed probe and install argv only', () => {
+    const gh = loadBundledToolCatalog().catalog.tools.find(
+      (tool) => tool.id === 'gh',
+    )!
+    expect(gh).toMatchObject({
+      displayName: 'GitHub CLI',
+      category: 'project',
+      licenseId: 'mit',
+      dependencies: [],
+      version: { pinned: '2.101.0', requirement: '>=2.40.0' },
+      probe: {
+        executables: ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh'],
+        args: ['--version'],
+      },
+    })
+    expect(
+      new RegExp(gh.probe.versionPattern).exec(
+        'gh version 2.101.0 (2026-09-15)\nhttps://github.com/cli/cli/releases/tag/v2.101.0',
+      )?.[1],
+    ).toBe('2.101.0')
+    expect(
+      gh.strategies.map((strategy) => ({
+        id: strategy.id,
+        kind: strategy.kind,
+        executable: strategy.executable,
+        args: strategy.args,
+        targets: strategy.targets.map(
+          (target) => `${target.platform}/${target.arch}`,
+        ),
+      })),
+    ).toEqual([
+      {
+        id: 'homebrew',
+        kind: 'package_manager',
+        executable: 'brew',
+        args: ['install', 'gh'],
+        targets: ['darwin/arm64', 'darwin/x64'],
+      },
+      {
+        id: 'winget',
+        kind: 'package_manager',
+        executable: 'winget.exe',
+        args: [
+          'install',
+          '--exact',
+          '--id',
+          'GitHub.cli',
+          '--source',
+          'winget',
+          '--accept-package-agreements',
+          '--accept-source-agreements',
+          '--disable-interactivity',
+        ],
+        targets: ['win32/x64'],
+      },
+      {
+        id: 'official-guided',
+        kind: 'system_prompt',
+        executable: 'gh',
+        args: ['--version'],
+        targets: ['linux/x64'],
+      },
+    ])
+    // The Linux entry only guides the user to the official instructions; it
+    // never runs an installer.
+    expect(
+      gh.strategies.find((strategy) => strategy.id === 'official-guided')
+        ?.source,
+    ).toEqual({
+      url: 'https://github.com/cli/cli/blob/trunk/docs/install_linux.md',
+      publisher: 'GitHub, Inc.',
+    })
+  })
+
+  it('rejects GitHub CLI commands outside the static allowlist', () => {
+    const ghTool = () => {
+      const catalog = fixture()
+      catalog.licenses = [
+        {
+          id: 'mit',
+          name: 'MIT License',
+          spdx: 'MIT',
+          url: 'https://opensource.org/license/mit',
+        },
+      ]
+      catalog.tools = [
+        {
+          id: 'gh',
+          displayName: 'GitHub CLI',
+          category: 'base',
+          version: { pinned: '2.101.0', requirement: '>=2.40.0' },
+          licenseId: 'mit',
+          dependencies: [],
+          targets: [{ platform: 'darwin', arch: 'arm64' }],
+          probe: {
+            executables: ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh'],
+            args: ['--version'],
+            versionPattern: '^gh version\\s+([0-9]+(?:\\.[0-9]+)+)',
+          },
+          strategies: [
+            {
+              id: 'homebrew',
+              kind: 'package_manager',
+              targets: [{ platform: 'darwin', arch: 'arm64' }],
+              executable: 'brew',
+              args: ['install', 'gh'],
+              source: {
+                url: 'https://formulae.brew.sh/formula/gh',
+                publisher: 'Homebrew',
+              },
+              estimatedBytes: 16_000_000,
+              requiresElevation: false,
+              requiresSeparateConfirmation: false,
+            },
+          ],
+        },
+      ]
+      return catalog
+    }
+    expect(parseToolCatalog(ghTool()).catalog.tools[0]?.id).toBe('gh')
+
+    const tool = (catalog: Record<string, unknown>) =>
+      (catalog.tools as Array<Record<string, unknown>>)[0]!
+    const probe = (catalog: Record<string, unknown>) =>
+      tool(catalog).probe as Record<string, unknown>
+    const strategy = (catalog: Record<string, unknown>) =>
+      (tool(catalog).strategies as Array<Record<string, unknown>>)[0]!
+
+    for (const args of [
+      ['auth', 'status'],
+      ['--version', '--hostname', 'example.com'],
+      ['api', 'user'],
+    ]) {
+      const catalog = ghTool()
+      probe(catalog).args = args
+      expect(() => parseToolCatalog(catalog), args.join(' ')).toThrow(
+        /command/i,
+      )
+    }
+    for (const executable of ['/tmp/gh', 'gh.exe', '/usr/bin/gh']) {
+      const catalog = ghTool()
+      probe(catalog).executables = [executable]
+      expect(() => parseToolCatalog(catalog), executable).toThrow(/command/i)
+    }
+    for (const args of [
+      ['install', 'gh', '--HEAD'],
+      ['install', '--cask', 'gh'],
+      ['reinstall', 'gh'],
+      ['install', 'gh-dash'],
+    ]) {
+      const catalog = ghTool()
+      strategy(catalog).args = args
+      expect(() => parseToolCatalog(catalog), args.join(' ')).toThrow(
+        /command/i,
+      )
+    }
+    const winget = ghTool()
+    tool(winget).targets = [{ platform: 'win32', arch: 'x64' }]
+    Object.assign(strategy(winget), {
+      id: 'winget',
+      targets: [{ platform: 'win32', arch: 'x64' }],
+      executable: 'winget.exe',
+      args: [
+        'install',
+        '--exact',
+        '--id',
+        'GitHub.cli',
+        '--source',
+        'winget',
+        '--accept-package-agreements',
+        '--accept-source-agreements',
+        '--disable-interactivity',
+      ],
+      source: { url: 'https://github.com/cli/cli', publisher: 'GitHub, Inc.' },
+    })
+    expect(parseToolCatalog(winget).catalog.tools[0]?.id).toBe('gh')
+    for (const args of [
+      ['install', '--exact', '--id', 'GitHub.cli', '--source', 'msstore'],
+      [
+        'install',
+        '--exact',
+        '--id',
+        'GitHub.cli',
+        '--version',
+        '2.0.0',
+        '--source',
+        'winget',
+        '--accept-package-agreements',
+        '--accept-source-agreements',
+        '--disable-interactivity',
+      ],
+      [
+        'install',
+        '--id',
+        'GitHub.cli',
+        '--source',
+        'winget',
+        '--accept-package-agreements',
+        '--accept-source-agreements',
+        '--disable-interactivity',
+      ],
+    ]) {
+      const catalog = structuredClone(winget)
+      strategy(catalog).args = args
+      expect(() => parseToolCatalog(catalog), args.join(' ')).toThrow(
+        /command/i,
+      )
+    }
   })
 })

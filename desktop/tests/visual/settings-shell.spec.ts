@@ -115,7 +115,8 @@ test('narrow window folds the nav rail into a top strip', async ({ page }) => {
 test('content-heavy sections keep the 564px column without overflow', async ({
   page,
 }) => {
-  for (const section of ['scheduler', 'memory', 'tokens', 'configs']) {
+  // Scheduler left the modal for its own page (/scheduler).
+  for (const section of ['memory', 'tokens', 'diagnostics']) {
     const dialog = await openSettings(page, section)
     const options = dialog.locator('.settings-options')
     await expect(options).toBeVisible()

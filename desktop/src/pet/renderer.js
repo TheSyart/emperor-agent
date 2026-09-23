@@ -15,16 +15,39 @@ let idleSceneIndex = 0
 let subagentCount = 0
 let pendingInteractionActive = false
 
-function assetUrl(animation) {
-  const file = mapper.ASSETS[animation] || mapper.ASSETS.idle
-  return `${cfg.assetBaseUrl || ''}${file}`
+function spriteUrl(sprite) {
+  return `${cfg.assetBaseUrl || ''}${sprite.file}`
+}
+
+// Warm every strip once so a state change never flashes an empty frame.
+for (const sprite of Object.values(mapper.SPRITES)) {
+  const image = new Image()
+  image.src = spriteUrl(sprite)
+}
+
+/** Point #pet at a strip; renderer.css steps through its frames. */
+function showSprite(sprite) {
+  pet.style.backgroundImage = `url("${spriteUrl(sprite)}")`
+  pet.style.setProperty('--pet-frames', String(sprite.frames))
+  pet.style.setProperty('--pet-duration', `${sprite.frames / sprite.fps}s`)
+  pet.style.setProperty(
+    '--pet-direction',
+    sprite.alternate ? 'alternate' : 'normal',
+  )
+  // Restart from the first frame instead of mid-cycle of the old strip.
+  pet.style.animation = 'none'
+  void pet.offsetWidth
+  pet.style.animation = ''
 }
 
 function setAnimation(animation, options = {}) {
   const next = animation || 'idle'
   if (next !== currentAnimation) {
+    const previous = mapper.spriteFor(currentAnimation)
     currentAnimation = next
-    pet.src = `${assetUrl(next)}?v=${Date.now()}`
+    const sprite = mapper.spriteFor(next)
+    // Two states sharing a strip keep playing instead of restarting.
+    if (sprite !== previous || !pet.style.backgroundImage) showSprite(sprite)
   }
   if (options.idleScene) return
   if (next === 'idle') {

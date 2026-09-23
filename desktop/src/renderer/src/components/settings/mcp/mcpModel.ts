@@ -1,5 +1,5 @@
 /**
- * Settings › MCP view model: pure mapping from Core's masked
+ * 能力 › MCP view model: pure mapping from Core's masked
  * `mcp_config.json` view + `mcp.status` snapshot + bootstrap tool list to
  * server cards, the import preview rows, and the 「表单」 tab's raw builder.
  * No Vue, no IPC — McpSection / McpAddDialog own the effects.

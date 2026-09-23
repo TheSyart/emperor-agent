@@ -7,10 +7,9 @@ import {
   type ResolveWorkspaceProject,
 } from './common'
 
-export type ReferenceKind = 'project_file' | 'external_file' | 'web' | 'preview'
+export type ReferenceKind = 'project_file' | 'external_file' | 'web'
 
-export type ReferenceAction =
-  'open_files' | 'reveal' | 'open_preview' | 'open_external'
+export type ReferenceAction = 'open_files' | 'reveal' | 'open_external'
 
 export interface ReferenceDescriptor {
   id: string
@@ -20,7 +19,6 @@ export interface ReferenceDescriptor {
   available: boolean
   relativePath?: string
   line?: number
-  previewId?: string
   actions: ReferenceAction[]
 }
 
@@ -40,23 +38,17 @@ interface StoredReference {
 
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
-  resolvePreview?: (
-    sessionId: string,
-    url: string,
-  ) => { previewId: string } | null
   maxEntries?: number
 }
 
 export class WorkspaceReferenceService {
   private readonly resolveProject: ResolveWorkspaceProject
-  private readonly resolvePreview?: WorkspaceReferenceServiceOptions['resolvePreview']
   private readonly maxEntries: number
   private readonly references = new Map<string, StoredReference>()
   private readonly cache = new Map<string, string>()
 
   constructor(options: WorkspaceReferenceServiceOptions) {
     this.resolveProject = options.resolveProject
-    this.resolvePreview = options.resolvePreview
     this.maxEntries = options.maxEntries ?? 2_000
   }
 
@@ -134,27 +126,25 @@ export class WorkspaceReferenceService {
         '网站地址不能包含凭据。',
       )
     const normalized = url.toString()
-    const preview = this.resolvePreview?.(input.sessionId, normalized) ?? null
-    if (url.protocol !== 'https:' && !preview)
+    if (url.protocol !== 'https:')
       throw new WorkspaceOperationError(
         'reference_protocol_denied',
         '普通网站引用必须使用 HTTPS。',
       )
     const descriptor: ReferenceDescriptor = {
       id: referenceId(),
-      kind: preview ? 'preview' : 'web',
+      kind: 'web',
       label: cleanLabel(input.label, url.hostname),
       tooltip: normalized,
       available: true,
-      ...(preview ? { previewId: preview.previewId } : {}),
-      actions: preview ? ['open_preview', 'open_external'] : ['open_external'],
+      actions: ['open_external'],
     }
     return this.store(
       input.sessionId,
       input.sourceMessageId,
       descriptor,
       undefined,
-      `web\0${input.sessionId}\0${input.sourceMessageId}\0${normalized}\0${preview?.previewId ?? ''}`,
+      `web\0${input.sessionId}\0${input.sourceMessageId}\0${normalized}`,
     )
   }
 

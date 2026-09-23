@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * ToolRow — one registered tool in the Settings › 工具 list: a compact
+ * ToolRow — one registered tool in the 能力 › 工具 list: a compact
  * disclosure row (monospace name, read-only / writable badge, one-line
  * description, chevron). Expanded it shows the full description, the
  * execution traits, the parameters (type, required, enum values) and the

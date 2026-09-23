@@ -38,7 +38,6 @@ All paths below are relative to the pinned cc-switch commit:
 - `src/icons/extracted/qwen.svg`
 - `src/icons/extracted/kimi.svg`
 - `src/icons/extracted/zhipu.svg`
-- `src/icons/extracted/doubao.svg`
 - `src/icons/extracted/bytedance.svg`
 - `src/icons/extracted/minimax.svg`
 - `src/icons/extracted/stepfun.svg`
@@ -46,3 +45,17 @@ All paths below are relative to the pinned cc-switch commit:
 - `src/icons/extracted/longcat-color.svg`
 - `src/icons/extracted/baidu.svg`
 - `src/icons/extracted/ollama.svg`
+
+## Lobe Icons (direct copies)
+
+These files were copied unmodified from the npm package
+[`@lobehub/icons-static-svg`](https://www.npmjs.com/package/@lobehub/icons-static-svg)
+version `1.95.1` (MIT License, Copyright (c) LobeHub), directory `icons/`:
+
+- `icons/groq.svg` → `groq.svg`
+- `icons/lmstudio.svg` → `lmstudio.svg`
+- `icons/vllm-color.svg` → `vllm-color.svg`
+- `icons/volcengine-color.svg` → `volcengine-color.svg`
+
+OpenVINO Model Server and the Custom provider have no upstream logo; the UI
+draws a generic glyph for them instead.
