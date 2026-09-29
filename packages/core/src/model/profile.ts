@@ -228,6 +228,10 @@ function inferCapabilities(id: string): InferredCapabilities {
     result.toolCall = true
     result.reasoning = true
   }
+  // DeepSeek's Flash line takes image input; Pro does not (DeepSeek API
+  // guides/vision; deepseek-harness llm-deepseek DEFAULT_MODELS).
+  if (/deepseek[-_.]?(?:v\d+(?:\.\d+)?[-_.])?flash(?:[-_.]|$)/.test(id))
+    result.vision = true
   if (
     id.includes('vision') ||
     id.includes('multimodal') ||

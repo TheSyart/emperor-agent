@@ -34,6 +34,7 @@ describe('matchShortcut on macOS', () => {
     ['⌃`', key('`', { ctrlKey: true }), 'workspace.terminal'],
     ['⌘P', key('p', { metaKey: true }), 'workspace.files'],
     ['⌘T', key('t', { metaKey: true }), 'workspace.browser'],
+    ['⌃⇧D', key('D', { ctrlKey: true, shiftKey: true }), 'workspace.desktop'],
     // ⌥ rewrites the character (∫ / ´): the physical key decides.
     [
       '⌥⌘B',

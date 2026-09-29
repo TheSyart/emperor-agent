@@ -2,14 +2,20 @@ import {
   app,
   BrowserWindow,
   dialog,
+  globalShortcut,
   ipcMain,
+  Menu,
+  nativeImage,
   protocol,
   net,
   shell,
+  safeStorage,
+  Tray,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron'
 import * as fs from 'node:fs'
+import { userInfo } from 'node:os'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { CoreApi } from '@emperor/core/api'
@@ -19,6 +25,7 @@ import {
   loadBundledToolCatalog,
 } from '@emperor/core/host-capabilities'
 
+import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
 import { resolveAppIconPath } from './icon'
 import { preparePackagedRuntime, runtimeDefaultsRoot } from './runtime-root'
@@ -34,6 +41,7 @@ import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
 import { parsePackagedSmokeArgs, runPackagedSmoke } from './packaged-smoke'
+import { verifyPackagedSeatbelt } from './packaged-seatbelt-smoke'
 import {
   createPackagedSmokeAttachment,
   verifyPackagedRenderer,
@@ -48,6 +56,47 @@ import { TerminalEventBridge } from './terminal-event-bridge'
 import { BrowserViewHost } from './browser-view'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
 import {
+  createKillSwitch,
+  defaultKillSwitchAccelerator,
+  type KillSwitch,
+} from './computer-use/kill-switch'
+import {
+  createStopEntries,
+  type StopEntries,
+  type StopMenuItem,
+} from './computer-use/stop-entries'
+import { ControlOverlay } from './computer-use/control-overlay'
+import { PointerOverlay } from './computer-use/pointer-overlay'
+import { pointerAllowed } from './computer-use/pointer-overlay-view'
+import { EmbeddedBrowserDriver } from './computer-use/embedded-browser-driver'
+import { electronBrowserFactory } from './computer-use/electron-factory'
+import { nativeImageCodec } from './computer-use/images'
+import { DesktopComputerUsePort, hostPlatform } from './computer-use/port'
+import { AgentPreview } from './computer-use/preview'
+import { DesktopPreview, routedPreview } from './computer-use/desktop-preview'
+import { CredentialVault } from './computer-use/credential-vault'
+import { MacosDesktopDriver } from './computer-use/macos-desktop-driver'
+import {
+  launchMacosHelper,
+  macosHelperAppPath,
+  packagedMacosAppIsAdHoc,
+} from './computer-use/macos-launcher'
+import { NmBridgeServer } from './computer-use/nm-bridge'
+import {
+  EncryptedFilePairingStore,
+  electronPairingCipher,
+} from './computer-use/nm-bridge-store'
+import {
+  NmManifestRegistrar,
+  resolveNmHostPath,
+} from './computer-use/nm-manifest'
+import { ExternalBrowserDriver } from './computer-use/external-browser-driver'
+import { registerCredentialVaultIpc } from './computer-use/credential-vault-ipc'
+import {
+  authenticateCredentialReveal,
+  credentialAuthPath,
+} from './computer-use/credential-auth'
+import {
   createDesktopWebFetchClient,
   type ElectronRequestLike,
 } from './public-http-client'
@@ -59,6 +108,7 @@ import {
   recoveryWindowWebPreferences,
 } from './recovery'
 import {
+  AGENT_PREVIEW_FRAME_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
 } from '../shared/ipc-contract'
@@ -86,6 +136,20 @@ let recoveryWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
 let petLastError: string | null = null
 let browserViewHost: BrowserViewHost | null = null
+// Computer Use drivers are created here; the kernel owns all execution.
+let computerUsePort: DesktopComputerUsePort | null = null
+let embeddedBrowser: EmbeddedBrowserDriver | null = null
+let nativeDesktop: MacosDesktopDriver | null = null
+let nmBridge: NmBridgeServer | null = null
+let externalBrowser: ExternalBrowserDriver | null = null
+let credentialVault: CredentialVault | null = null
+let agentPreview: AgentPreview | null = null
+let desktopPreview: DesktopPreview | null = null
+let killSwitch: KillSwitch | null = null
+let stopEntries: StopEntries | null = null
+let stopTray: Tray | null = null
+let controlOverlay: ControlOverlay | null = null
+let pointerOverlay: PointerOverlay | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://bundle/index.html',
@@ -105,8 +169,87 @@ const trustedPetPolicy = createTrustedRendererPolicy({
   },
 })
 
+function syncControlOverlay(): void {
+  const view = coreApi?.host.computerUse?.service.statusView() ?? null
+  controlOverlay?.sync(view)
+  if (!pointerAllowed(view)) pointerOverlay?.clear()
+  stopEntries?.sync({
+    enabled: view?.enabled === true,
+    stopped: view?.stopped === true,
+    shortcutRegistered: killSwitch?.status().registered === true,
+  })
+}
+
+let retentionTimer: ReturnType<typeof setInterval> | null = null
+
+/** 00 §10 保留策略: sweep old inbox downloads now and every six hours. */
+function startDownloadRetention(): void {
+  const sweep = (): void => {
+    const days =
+      coreApi?.host.computerUse?.service.statusView().downloadRetentionDays ?? 0
+    void embeddedBrowser?.downloads?.sweep(days).catch(() => 0)
+  }
+  sweep()
+  retentionTimer ??= setInterval(sweep, 6 * 60 * 60 * 1000)
+  retentionTimer.unref?.()
+}
+
+function stopMenu(items: readonly StopMenuItem[]): Menu {
+  return Menu.buildFromTemplate(
+    items.map((item) => ({
+      label: item.label,
+      enabled: item.enabled,
+      ...(item.click === undefined ? {} : { click: item.click }),
+    })),
+  )
+}
+
+/** Dock menu and (when the shortcut is taken) a tray icon to stop (§6.6). */
+function createElectronStopEntries(): StopEntries {
+  return createStopEntries(
+    {
+      setDockMenu: (items) => {
+        app.dock?.setMenu(stopMenu(items ?? []))
+      },
+      showTray: (items, tooltip) => {
+        if (stopTray === null) {
+          const icon =
+            process.platform === 'darwin'
+              ? nativeImage.createFromNamedImage('NSStopProgressTemplate')
+              : nativeImage
+                  .createFromPath(appIconPath)
+                  .resize({ width: 16, height: 16 })
+          stopTray = new Tray(icon)
+        }
+        stopTray.setToolTip(tooltip)
+        stopTray.setContextMenu(stopMenu(items))
+      },
+      hideTray: () => {
+        stopTray?.destroy()
+        stopTray = null
+      },
+    },
+    {
+      stop: () => {
+        void coreApi?.computerUse.stop()
+      },
+      showApp: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show()
+          mainWindow.focus()
+        } else if (runtimeReady) createWindow()
+      },
+    },
+  )
+}
+
 ipcMain.on(TERMINAL_SUBSCRIPTION_CHANNEL, (event, payload: unknown) => {
-  trustedRendererPolicy.authorizeIpc(event)
+  // One-way: an untrusted or torn-down sender is dropped, never thrown.
+  try {
+    trustedRendererPolicy.authorizeIpc(event)
+  } catch {
+    return
+  }
   terminalEventBridge.setSubscription(
     event.sender,
     terminalSubscription(payload),
@@ -274,9 +417,164 @@ function prepareMainRuntime(): void {
   })
 }
 
+/**
+ * Computer use is always offered to Core; the user's master switch (off by
+ * default) decides whether any GUI tool is registered. The hidden host
+ * window is created on the first Agent tab only.
+ */
+function createComputerUseHost(): void {
+  credentialVault = new CredentialVault({
+    path: path.join(config.stateRoot, 'computer-use', 'vault.json'),
+    storage: safeStorage,
+  })
+  const driver = new EmbeddedBrowserDriver({
+    electron: electronBrowserFactory(),
+    images: nativeImageCodec,
+    platform: hostPlatform(process.platform),
+    profilesRoot: path.join(config.stateRoot, 'browser', 'profiles'),
+    downloadsRoot: path.join(config.stateRoot, 'browser', 'downloads'),
+    credentials: credentialVault,
+    credentialVisibility: (targetId, visible) =>
+      agentPreview?.setSensitive(targetId, visible),
+    // Uploads: the user picks files in the system dialog; the Agent never
+    // names a path (spec 00 §7.5).
+    pickFiles: async ({ title, multiple }) => {
+      const options: OpenDialogOptions = {
+        title,
+        message: title,
+        buttonLabel: '上传',
+        properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
+      }
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options)
+      return result.canceled ? null : result.filePaths
+    },
+  })
+  embeddedBrowser = driver
+  agentPreview = new AgentPreview({
+    manager: driver.manager,
+    send: (frame) => {
+      const contents = mainWindow?.webContents
+      if (contents && !contents.isDestroyed())
+        contents.send(AGENT_PREVIEW_FRAME_CHANNEL, frame)
+    },
+    canTakeInput: (targetId) =>
+      coreApi?.host.computerUse?.service.registry.get(targetId)?.control ===
+      'user-takeover',
+  })
+  desktopPreview = new DesktopPreview({
+    source: () => nativeDesktop,
+    send: (frame) => {
+      const contents = mainWindow?.webContents
+      if (contents && !contents.isDestroyed())
+        contents.send(AGENT_PREVIEW_FRAME_CHANNEL, frame)
+    },
+  })
+  if (process.platform === 'darwin') {
+    const launchOptions = {
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      desktopRoot: path.resolve(mainDir, '..', '..'),
+    }
+    if (fs.existsSync(macosHelperAppPath(launchOptions)))
+      nativeDesktop = new MacosDesktopDriver({
+        connect: () => launchMacosHelper(launchOptions),
+        credentials: credentialVault,
+        pointer: (signal) => {
+          if (
+            signal.kind !== 'move' ||
+            pointerAllowed(
+              coreApi?.host.computerUse?.service.statusView() ?? null,
+            )
+          )
+            pointerOverlay?.signal(signal)
+        },
+        previewBuild: app.isPackaged
+          ? packagedMacosAppIsAdHoc().catch(() => false)
+          : Promise.resolve(false),
+      })
+    nmBridge = new NmBridgeServer({
+      // The packaged smoke runs beside a user's live Emperor process. Use
+      // a short per-process socket path so it cannot interrupt the live
+      // Chrome connection or exceed macOS's Unix socket path limit.
+      ...(packagedSmoke
+        ? {
+            socketPath: path.join(
+              '/tmp',
+              `emperor-cu-smoke-${userInfo().uid}`,
+              `nm-${process.pid}.sock`,
+            ),
+          }
+        : {
+            // 01 §11: keep Chrome/Edge manifests on this app's host. A dev
+            // host outside an app bundle cannot verify main, so only a
+            // packaged build repoints or creates them.
+            manifests: new NmManifestRegistrar({
+              hostPath: app.isPackaged
+                ? resolveNmHostPath({
+                    packaged: true,
+                    resourcesPath: process.resourcesPath,
+                  })
+                : null,
+            }),
+          }),
+      pairings: new EncryptedFilePairingStore(
+        path.join(
+          config.stateRoot,
+          'computer-use',
+          'browser-pairings',
+          'pairings.json',
+        ),
+        electronPairingCipher(safeStorage),
+      ),
+    })
+    externalBrowser = new ExternalBrowserDriver(nmBridge)
+  }
+  computerUsePort = new DesktopComputerUsePort({
+    platform: process.platform,
+    embeddedBrowser: () => driver,
+    externalBrowser: () => externalBrowser,
+    credentials: () => credentialVault,
+    desktop: () => nativeDesktop,
+    indicate: () => queueMicrotask(syncControlOverlay),
+  })
+  killSwitch = createKillSwitch({
+    shortcuts: globalShortcut,
+    platform: process.platform,
+    onTrigger: () => {
+      void coreApi?.computerUse.stop()
+    },
+  })
+}
+
+function closeAgentBrowser(final: boolean): void {
+  // Save recovery hints before the driver emits target-lost events. On macOS
+  // the main window may close before CoreApi.close() gets to its shutdown.
+  coreApi?.host.computerUse?.service.rememberRestorableTabs()
+  agentPreview?.stopAll()
+  desktopPreview?.stopAll()
+  // Agent tabs live in a hidden window that would keep window-all-closed
+  // from firing; close them with the main window. The driver stays usable
+  // for a reopened window (the pet keeps the app alive) until Core closes.
+  const driver = embeddedBrowser
+  if (driver)
+    void (final ? driver.shutdown() : driver.closeAll()).catch(() => undefined)
+}
+
 function closeCoreHost(): void {
+  controlOverlay?.dispose()
+  controlOverlay = null
+  pointerOverlay?.dispose()
+  pointerOverlay = null
   browserViewHost?.close()
   browserViewHost = null
+  closeAgentBrowser(true)
+  void nativeDesktop?.shutdown().catch(() => undefined)
+  externalBrowser?.dispose()
+  externalBrowser = null
+  void nmBridge?.stop().catch(() => undefined)
+  nmBridge = null
   sessionEventBridge.dispose()
   if (!coreApi) return
   const current = coreApi
@@ -293,6 +591,8 @@ function fail(title: string, message: string): void {
 
 async function showBootstrapRecovery(error: unknown): Promise<void> {
   runtimeReady = false
+  // The recovery page shows only a code; keep the cause for diagnosis.
+  console.error(`Emperor startup failed: ${errMessage(error)}`)
   if (coreApi) await coreApi.close().catch(() => {})
   coreApi = null
   if (recoveryWindow && !recoveryWindow.isDestroyed()) recoveryWindow.close()
@@ -417,13 +717,24 @@ function createWindow(): void {
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir),
   })
+  controlOverlay ??= new ControlOverlay(() => {
+    void coreApi?.computerUse.stop()
+  })
+  pointerOverlay ??= new PointerOverlay()
+  syncControlOverlay()
   browserViewHost = new BrowserViewHost(mainWindow)
   // A reloaded or crashed renderer lost the BrowserPane that placed the native
   // view; drop it so it cannot linger above the new UI.
-  mainWindow.webContents.on('did-navigate', () => browserViewHost?.close())
-  mainWindow.webContents.on('render-process-gone', () =>
-    browserViewHost?.close(),
-  )
+  // 00 §12: while the UI is gone nobody can watch the Agent, so its targets
+  // pause (they stay open); the reloaded panes let the user resume or end.
+  const uiDisconnected = (): void => {
+    browserViewHost?.close()
+    agentPreview?.stopAll()
+    desktopPreview?.stopAll()
+    coreApi?.host.computerUse?.service.pauseForUiDisconnect()
+  }
+  mainWindow.webContents.on('did-navigate', uiDisconnected)
+  mainWindow.webContents.on('render-process-gone', uiDisconnected)
   // Keep the reference: by 'closed' the window is destroyed and reading
   // mainWindow.webContents throws "Object has been destroyed".
   const mainContents = mainWindow.webContents
@@ -462,8 +773,13 @@ function createWindow(): void {
     }
   })
   mainWindow.on('closed', () => {
+    controlOverlay?.dispose()
+    controlOverlay = null
+    pointerOverlay?.dispose()
+    pointerOverlay = null
     browserViewHost?.close()
     browserViewHost = null
+    closeAgentBrowser(false)
     coreEventBridge.detach(mainContents)
     sessionEventBridge.detach(mainContents)
     terminalEventBridge.detach(mainContents)
@@ -591,10 +907,41 @@ async function startup(): Promise<void> {
   if (process.platform === 'win32')
     app.setAppUserModelId('com.emperor.agent.desktop')
 
+  // Opened from its download location, the app runs from a random path
+  // and computer use permissions would reset each launch: offer the move.
+  if (
+    !packagedSmoke &&
+    (await offerMoveToApplications({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      executablePath: process.execPath,
+      ask: async (options) =>
+        (
+          await dialog.showMessageBox({
+            type: 'info',
+            message: options.message,
+            detail: options.detail,
+            buttons: [...options.buttons],
+            defaultId: 0,
+            cancelId: 1,
+          })
+        ).response,
+      moveToApplications: () => app.moveToApplicationsFolder(),
+    }))
+  )
+    return
+
   try {
     if (packagedSmoke && !app.isPackaged)
       throw new Error('packaged smoke mode requires a packaged application')
     prepareMainRuntime()
+    createComputerUseHost()
+    // The Chrome/Edge bridge is optional: if another Emperor holds its
+    // socket, start without it and let the driver report why.
+    if (nmBridge && !(await nmBridge.startOrDegrade()))
+      console.warn(
+        `Chrome/Edge connection unavailable: ${nmBridge.unavailableReason ?? 'unknown'}`,
+      )
     coreApi = await createCoreHost({
       root: config.runtimeRoot,
       ipcMain,
@@ -616,6 +963,28 @@ async function startup(): Promise<void> {
               : 'explicit',
         legacyRuntimeRoot: app.isPackaged ? legacyRuntimeRoot : null,
         legacyRuntimeSkillsHandled: app.isPackaged,
+        ...(computerUsePort
+          ? {
+              computerUsePort,
+              computerUseKillSwitch: () =>
+                killSwitch?.status() ?? { accelerator: '', registered: false },
+              // The emergency-stop shortcut is held only while computer use
+              // is on, so it never steals the combination otherwise.
+              computerUseEnabledChanged: (enabled: boolean) => {
+                if (enabled) killSwitch?.register()
+                else killSwitch?.unregister()
+                syncControlOverlay()
+              },
+              // Settings › 电脑操作 changed the stop shortcut: applied at
+              // once while on, remembered while off.
+              computerUseKillSwitchChanged: (accelerator: string | null) => {
+                killSwitch?.setAccelerator(
+                  accelerator ?? defaultKillSwitchAccelerator(process.platform),
+                )
+                syncControlOverlay()
+              },
+            }
+          : {}),
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
         webFetchClient: createDesktopWebFetchClient({
@@ -625,9 +994,19 @@ async function startup(): Promise<void> {
         }),
       },
     })
+    const savedAccelerator = coreApi.host.computerUseKillSwitchAccelerator()
+    if (savedAccelerator !== undefined)
+      killSwitch?.setAccelerator(savedAccelerator)
+    if (coreApi.host.computerUse?.enabled === true) killSwitch?.register()
+    if (computerUsePort) stopEntries ??= createElectronStopEntries()
+    syncControlOverlay()
+    startDownloadRetention()
     registerDesktopCapabilityIpc({
       ipcMain,
       authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+      ...(nativeDesktop ? { macHelper: nativeDesktop } : {}),
+      ...(nmBridge ? { browserPairings: nmBridge } : {}),
+      externalAttachedCount: () => externalBrowser?.listAttached().length ?? 0,
       browser: {
         openUrl: (input) => requireBrowserViewHost().openUrl(input),
         setBounds: (bounds) => browserViewHost?.setBounds(bounds),
@@ -661,9 +1040,92 @@ async function startup(): Promise<void> {
         if (result.canceled || !result.filePaths.length) return null
         return result.filePaths[0] ?? null
       },
+      ...(agentPreview
+        ? {
+            agentPreview: desktopPreview
+              ? routedPreview(agentPreview, desktopPreview)
+              : agentPreview,
+          }
+        : {}),
+      agentDownloads: {
+        reveal: (downloadId) => {
+          const file = embeddedBrowser?.downloads?.pathOf(downloadId)
+          if (file === undefined || !fs.existsSync(file)) return false
+          shell.showItemInFolder(file)
+          return true
+        },
+        // 00 §7.5: the user moves a download into the conversation's
+        // workspace; the Agent never picks the destination.
+        saveAs: async (downloadId) => {
+          const inbox = embeddedBrowser?.downloads
+          const from = inbox?.pathOf(downloadId)
+          if (!inbox || from === undefined || !fs.existsSync(from))
+            return undefined
+          const options = {
+            title: '另存下载的文件',
+            defaultPath: path.join(
+              app.getPath('downloads'),
+              path.basename(from),
+            ),
+          }
+          const picked = mainWindow
+            ? await dialog.showSaveDialog(mainWindow, options)
+            : await dialog.showSaveDialog(options)
+          if (picked.canceled || !picked.filePath) return null
+          return await inbox.moveToFile(downloadId, picked.filePath)
+        },
+        moveToWorkspace: async (downloadId) => {
+          const inbox = embeddedBrowser?.downloads
+          const owner = inbox?.ownerOf(downloadId)
+          if (!inbox || owner === undefined || !coreApi) return undefined
+          const workspace = coreApi.host.sessionWorkspaceRoot(owner)
+          return await inbox.moveTo(
+            downloadId,
+            path.join(workspace, 'downloads'),
+          )
+        },
+      },
     })
+    if (credentialVault)
+      registerCredentialVaultIpc({
+        ipcMain,
+        authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+        vault: credentialVault,
+        authenticateReveal:
+          process.platform === 'darwin'
+            ? () =>
+                authenticateCredentialReveal(
+                  credentialAuthPath({
+                    packaged: app.isPackaged,
+                    mainDir,
+                    resourcesPath: process.resourcesPath,
+                  }),
+                )
+            : undefined,
+      })
     registerAppProtocol()
     if (packagedSmoke) {
+      if (process.platform === 'darwin') {
+        const probe = 'emperor-packaged-safe-storage-probe'
+        if (
+          !safeStorage.isEncryptionAvailable() ||
+          safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
+        )
+          throw new Error('packaged safeStorage round trip failed')
+        // The master-password KDF must exist in Electron's crypto, which
+        // lacks some of Node's (no Argon2), so derive it here for real.
+        const vault = new CredentialVault({
+          path: path.join(config.stateRoot, 'packaged-smoke-vault.json'),
+          storage: safeStorage,
+        })
+        vault.setMasterPassword(`${probe}-master`, { biometric: true })
+        vault.lock()
+        vault.unlockWithBiometrics()
+        vault.lock()
+        if (!vault.unlock(`${probe}-master`))
+          throw new Error('packaged credential vault round trip failed')
+        vault.lock()
+      }
       const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,
@@ -675,6 +1137,7 @@ async function startup(): Promise<void> {
         commit: process.env.EMPEROR_BUILD_COMMIT || 'local',
         platform: process.platform,
         arch: process.arch,
+        verifySeatbelt: verifyPackagedSeatbelt,
         verifyRenderer: () => {
           const webPreferences = mainWindowWebPreferences(mainDir)
           return verifyPackagedRenderer({
@@ -739,6 +1202,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
   closeCoreHost()
+})
+
+app.on('will-quit', () => {
+  killSwitch?.dispose()
+  stopEntries?.dispose()
 })
 
 function requireBrowserViewHost(): BrowserViewHost {

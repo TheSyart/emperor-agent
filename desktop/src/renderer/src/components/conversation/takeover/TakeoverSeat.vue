@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import AppTransition from '../../motion/AppTransition.vue'
 import ApprovalPanel from './ApprovalPanel.vue'
+import GrantPanel from './GrantPanel.vue'
 import PlanReviewPanel from './PlanReviewPanel.vue'
 import QuestionComposer from './QuestionComposer.vue'
 import { activeTakeover } from './takeoverModel'
@@ -22,6 +23,11 @@ const takeover = computed(() => activeTakeover(props.interaction))
     <ApprovalPanel
       v-if="takeover?.kind === 'approval'"
       :key="`approval:${takeover.interaction.id}`"
+      :interaction="takeover.interaction"
+    />
+    <GrantPanel
+      v-else-if="takeover?.kind === 'grant'"
+      :key="`grant:${takeover.interaction.id}`"
       :interaction="takeover.interaction"
     />
     <QuestionComposer

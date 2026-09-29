@@ -14,6 +14,7 @@ function rendererReceipt() {
     nodeGlobalsAbsent: true,
     coreBridge: true,
     coreBootstrap: true,
+    deepLinkRenders: true,
     attachment: { ok: true, bytes: 34 },
     webPreferences: {
       sandbox: true,
@@ -39,7 +40,10 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
   const core: PackagedSmokeCore = {
     bootstrap: vi.fn(async () => ({
       app: 'Emperor Agent',
-      skills: [{ name: 'skill-creator', source: 'builtin' }],
+      skills: [
+        { name: 'skill-creator', source: 'builtin' },
+        { name: 'computer-use', source: 'builtin' },
+      ],
     })),
     diagnostics: {
       get: vi.fn(async () => ({
@@ -118,6 +122,12 @@ describe('packaged smoke contract', () => {
   it('runs bootstrap, diagnostics, environment and native search without installing', async () => {
     const fixture = smokeFixture()
     const { core, getStatus } = makeCore()
+    const verifySeatbelt = vi.fn(async () => ({
+      ok: true as const,
+      mode: 'workspace-write' as const,
+      commands: 18,
+      protectedStateDenied: true as const,
+    }))
 
     const receipt = await runPackagedSmoke({
       core,
@@ -129,6 +139,7 @@ describe('packaged smoke contract', () => {
       commit: 'b'.repeat(40),
       platform: 'darwin',
       arch: 'arm64',
+      verifySeatbelt,
       verifyRenderer: async () => rendererReceipt(),
     })
 
@@ -139,7 +150,10 @@ describe('packaged smoke contract', () => {
       projectRoot: path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
     })
     expect(receipt.operations).toMatchObject({
-      bootstrap: { ok: true, builtInSkills: ['skill-creator'] },
+      bootstrap: {
+        ok: true,
+        builtInSkills: ['computer-use', 'skill-creator'],
+      },
       diagnostics: {
         ok: true,
         sandbox: {
@@ -161,8 +175,18 @@ describe('packaged smoke contract', () => {
       glob: { ok: true },
       grep: { ok: true },
       terminal: { ok: true, outputBytes: 19 },
+      seatbelt: {
+        ok: true,
+        mode: 'workspace-write',
+        commands: 18,
+        protectedStateDenied: true,
+      },
       renderer: rendererReceipt(),
     })
+    expect(verifySeatbelt).toHaveBeenCalledWith(
+      path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
+      fixture.stateRoot,
+    )
     expect(receipt.installJobs).toEqual({ before: 0, after: 0 })
     expect(receipt.exitCode).toBe(0)
     expect(JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8'))).toEqual(
@@ -177,13 +201,14 @@ describe('packaged smoke contract', () => {
     expect(serialized).not.toContain(fixture.stateRoot)
   })
 
-  it('fails closed when bootstrap exposes anything beyond skill-creator', async () => {
+  it('fails closed when bootstrap exposes anything beyond the built-in skills', async () => {
     const fixture = smokeFixture()
     const { core } = makeCore({
       bootstrap: vi.fn(async () => ({
         app: 'Emperor Agent',
         skills: [
           { name: 'skill-creator', source: 'builtin' },
+          { name: 'computer-use', source: 'builtin' },
           { name: 'unexpected', source: 'builtin' },
         ],
       })),
@@ -228,6 +253,30 @@ describe('packaged smoke contract', () => {
         verifyRenderer: async () => rendererReceipt(),
       }),
     ).rejects.toThrow(/sandbox/i)
+  })
+
+  it('fails closed when a macOS package has no real Seatbelt command probe', async () => {
+    const fixture = smokeFixture()
+    const { core } = makeCore()
+
+    await expect(
+      runPackagedSmoke({
+        core,
+        runtimeRoot: fixture.runtimeRoot,
+        stateRoot: fixture.stateRoot,
+        receiptPath: fixture.receiptPath,
+        appVersion: '0.1.0',
+        runtimeRevision: 'a'.repeat(64),
+        commit: 'b'.repeat(40),
+        platform: 'darwin',
+        arch: 'arm64',
+        verifyRenderer: async () => rendererReceipt(),
+      }),
+    ).rejects.toThrow(/Seatbelt command probe/)
+    expect(
+      JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
+        .seatbelt,
+    ).toMatchObject({ ok: false, protectedStateDenied: false })
   })
 
   it('fails closed when a required lifecycle service is not ready', async () => {

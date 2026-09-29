@@ -15,9 +15,12 @@ import {
   answeredQuestionInteraction,
   approvalInteraction,
   decidedApprovalInteraction,
+  decidedGrantInteraction,
+  grantInteraction,
   questionInteraction,
   type InteractionPayload,
 } from './interactions'
+import '../computer-use/events'
 import '../subagent/manager'
 import '../compaction/events'
 import '../plan/plan-mode'
@@ -98,6 +101,7 @@ export class SessionProjector {
   private readonly toolArguments = new Map<string, Record<string, unknown>>()
   private readonly approvals = new Map<string, InteractionPayload>()
   private readonly questions = new Map<string, InteractionPayload>()
+  private readonly grants = new Map<string, InteractionPayload>()
   private turnText = ''
   private contextWindow: number | undefined
   private model: string | undefined
@@ -321,6 +325,29 @@ export class SessionProjector {
           event.time,
         )
         this.approvals.set(event.data.id, interaction)
+        emit(
+          interaction.status === 'cancelled'
+            ? 'interaction_cancelled'
+            : 'ask_answered',
+          { interaction },
+        )
+        break
+      }
+      case 'ui/grant-requested': {
+        const interaction = grantInteraction(event.data, event.time)
+        this.grants.set(event.data.requestId, interaction)
+        emit('ask_request', { interaction })
+        break
+      }
+      case 'ui/grant-decided': {
+        const base = this.grants.get(event.data.requestId)
+        if (base === undefined) break
+        const interaction = decidedGrantInteraction(
+          base,
+          event.data,
+          event.time,
+        )
+        this.grants.set(event.data.requestId, interaction)
         emit(
           interaction.status === 'cancelled'
             ? 'interaction_cancelled'
@@ -593,6 +620,7 @@ export class SessionProjector {
     for (const interaction of [
       ...this.approvals.values(),
       ...this.questions.values(),
+      ...this.grants.values(),
     ]) {
       if (interaction.status !== 'waiting') continue
       if (

@@ -89,6 +89,9 @@ function toolActivity(value: unknown): PetEvent {
   if (SHELL_TOOLS.has(tool)) return activity('building', 'running')
   if (tool === 'scheduler') return activity('thinking', 'scheduling')
   if (tool === 'web_search') return activity('wizard', 'browsing')
+  // Computer use: the Agent is operating a browser tab (spec 00 §6.6).
+  if (tool.startsWith('browser_') || tool.startsWith('ui_'))
+    return activity('wizard', 'browsing')
   if (DELEGATION_TOOLS.has(tool)) return activity('conducting', 'delegating')
   if (tool.startsWith('mcp_') && tool !== 'mcp_config')
     return activity('beacon', 'external')

@@ -6,6 +6,7 @@ const {
   rmSync,
 } = require('node:fs')
 const { join } = require('node:path')
+const { execFileSync } = require('node:child_process')
 const { extractFile, listPackage } = require('@electron/asar')
 const { validateRuntimeManifest } = require('./before-pack.cjs')
 const {
@@ -120,6 +121,47 @@ function validatePackagedAppResources(
     throw new Error('packaged TypeScript parser size is invalid')
   assertNoDevelopmentPaths(asarPath, archiveEntries)
   validatePackagedNodePty(resourcesRoot, platform, arch)
+  if (platform === 'darwin') {
+    const auth = join(resourcesRoot, 'native', 'credential-auth')
+    assertRegularFile(auth, 'native/credential-auth')
+    if ((lstatSync(auth).mode & 0o111) === 0)
+      throw new Error('credential-auth is not executable')
+    const helpersRoot = join(resourcesRoot, '..', 'Library', 'Helpers')
+    const expectedHelpers = ['Emperor Computer Helper.app', 'emperor-nm-host']
+    const actualHelpers = readdirSync(helpersRoot).sort()
+    if (
+      actualHelpers.length !== expectedHelpers.length ||
+      actualHelpers.some((name, index) => name !== expectedHelpers[index])
+    )
+      throw new Error('packaged Computer Use helpers do not match allowlist')
+    const helper = join(helpersRoot, 'Emperor Computer Helper.app')
+    if (
+      !existsSync(helper) ||
+      !lstatSync(helper).isDirectory() ||
+      lstatSync(helper).isSymbolicLink()
+    )
+      throw new Error('packaged Computer Use helper app is missing or unsafe')
+    const info = join(helper, 'Contents', 'Info.plist')
+    const executable = join(
+      helper,
+      'Contents',
+      'MacOS',
+      'emperor-computer-helper',
+    )
+    assertRegularFile(info, 'Computer Use helper Info.plist')
+    assertRegularFile(executable, 'Computer Use helper executable')
+    if (
+      !readFileSync(info, 'utf8').includes(
+        '<string>com.emperor.agent.desktop.computer-helper</string>',
+      ) ||
+      (lstatSync(executable).mode & 0o111) === 0
+    )
+      throw new Error('packaged Computer Use helper identity is invalid')
+    const messagingHost = join(helpersRoot, 'emperor-nm-host')
+    assertRegularFile(messagingHost, 'Native Messaging host')
+    if ((lstatSync(messagingHost).mode & 0o111) === 0)
+      throw new Error('Native Messaging host is not executable')
+  }
 
   const petRoot = join(resourcesRoot, 'desktop-pet')
   if (!existsSync(petRoot) || !lstatSync(petRoot).isDirectory())
@@ -263,6 +305,24 @@ async function afterPack(context) {
   const arch = electronBuilderArch(context.arch)
   prunePackagedNodePty(resourcesRoot, platform, arch)
   validatePackagedAppResources(resourcesRoot, platform, arch)
+  // Preview has no developer certificate. Seal the bundle with an ad-hoc
+  // signature so the main executable has a stable bundle identifier and the
+  // helper can bind a local peer to this exact build's cdhash. This remains
+  // an untrusted Preview for Gatekeeper and needs TCC re-authorization after
+  // every changed build.
+  if (
+    platform === 'darwin' &&
+    context.packager.config?.mac?.identity === null
+  ) {
+    const app = join(context.appOutDir, `${appInfo.productFilename}.app`)
+    execFileSync('codesign', ['--force', '--deep', '--sign', '-', app], {
+      stdio: 'inherit',
+    })
+    execFileSync('codesign', ['--verify', '--deep', '--strict', app], {
+      stdio: 'inherit',
+    })
+    require('./after-sign.cjs').validateMacPackage(app, arch)
+  }
 }
 
 function electronBuilderArch(value) {

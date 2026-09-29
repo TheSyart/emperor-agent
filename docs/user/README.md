@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-09-23<br>
-> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区、Composer 与 CoreApi 用户入口
+> 最后核验：2026-09-24<br>
+> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
 
@@ -15,7 +15,8 @@
 4. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
 5. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。
 6. [定时任务、Hooks 与桌宠](automation-collaboration.md)：定时任务、Hooks、Watchlist 和桌宠。
-7. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查。
+7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、凭据与急停。
+8. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查。
 
 ## 侧栏入口
 
@@ -38,15 +39,16 @@
 
 点击侧栏底部的「设置」打开设置弹窗。左侧导航列出下表中的分区，右上角是当前分区的操作，例如刷新或「添加模型」。
 
-| 分区  | 用途                                                                                            | 详细说明                                                    |
-| ----- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 常规  | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                    | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
-| 模型  | 模型配置卡片、连通测试、执行与成本策略                                                          | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
-| Hooks | “配置 / 测试 / 审计”三个标签                                                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
-| 记忆  | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈 | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |
-| 用量  | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                  | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
-| 桌宠  | 启用或关闭 companion，预览动画                                                                  | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
-| 诊断  | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                  | [诊断与排障](diagnostics-troubleshooting.md)                |
+| 分区     | 用途                                                                                            | 详细说明                                                    |
+| -------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                    | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
+| 模型     | 模型配置卡片、连通测试、执行与成本策略                                                          | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
+| Hooks    | “配置 / 测试 / 审计”三个标签                                                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
+| 电脑操作 | 总开关、驱动状态、授权、浏览器 profile、站点权限、凭据与急停                                    | [电脑操作（实验）](computer-use.md)                         |
+| 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈 | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |
+| 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                  | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
+| 桌宠     | 启用或关闭 companion，预览动画                                                                  | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
+| 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                  | [诊断与排障](diagnostics-troubleshooting.md)                |
 
 定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。
 

@@ -6,6 +6,7 @@ import { PiAiAdapter } from './adapters/pi-ai/adapter'
 import { LlmClient } from './client'
 import type { ImageResolver } from './content'
 import type { RouteSpec } from './route'
+import type { ImageAttachmentRef } from './types'
 
 export * from './types'
 export * from './message'
@@ -27,10 +28,16 @@ export function defaultAdapterFor(): (route: RouteSpec) => LlmAdapter {
 
 /** Create the process-wide client with production adapters. */
 export function createLlmClient(
-  options: { images?: ImageResolver } = {},
+  options: {
+    images?: ImageResolver
+    imageAvailable?: (ref: ImageAttachmentRef) => boolean
+  } = {},
 ): LlmClient {
   return new LlmClient({
     adapterFor: defaultAdapterFor(),
     ...(options.images === undefined ? {} : { images: options.images }),
+    ...(options.imageAvailable === undefined
+      ? {}
+      : { imageAvailable: options.imageAvailable }),
   })
 }

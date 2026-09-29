@@ -45,7 +45,7 @@ npm --prefix desktop run package:verify
 ```
 
 - 修改 renderer 视觉或交互时运行 `screenshots`，检查生成结果，不把临时产物混入提交。
-- 修改打包、资源路径、Electron main、preload、`app://` protocol 或 release contract 时运行 `package:verify`。该命令不只检查 Core：schema 2 smoke 会加载真实 sandboxed renderer，验证 CJS preload、Core bridge 和 attachment fetch；只跑 `package:dir` 不构成通过证据。
+- 修改打包、资源路径、Electron main、preload、`app://` protocol 或 release contract 时运行 `package:verify`。该命令生成本地 Preview 包并运行 schema 2 smoke，加载真实 sandboxed renderer，验证 CJS preload、Core bridge 和 attachment fetch；macOS 还在打包进程内使用生产 `LocalSandbox` 运行 18 条受限开发命令，核对实际产物和电脑操作状态拒读。只跑 `package:dir` 不构成通过证据。正式发布使用独立 release 配置。
 - 修改 Terminal 时还要运行 `npm --prefix desktop run terminal:smoke`，并在目标 Electron ABI 下创建真实 PTY；afterPack 必须验证目标 platform/arch 对应的 `pty.node`（Unix 还包括可执行 `spawn-helper`），三平台 Preview candidate 必须完成 native rebuild/package smoke。
 - 文档改动至少运行 `npm run format:check`、`git diff --check` 和相关 contract test。
 

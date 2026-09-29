@@ -121,6 +121,17 @@ export interface ToolApprovalView {
   readonly outcome?: SessionEventMap['approval/decided']['outcome']
 }
 
+/** Computer Use grant card attached to the GUI call that raised it. */
+export interface ToolGrantView {
+  readonly id: string
+  readonly actions: readonly string[]
+  /** Full URL(s) or the app shown on the card. */
+  readonly target: string
+  readonly highImpact?: boolean
+  readonly decision?: SessionEventMap['ui/grant-decided']['decision']
+  readonly cause?: SessionEventMap['ui/grant-decided']['cause']
+}
+
 /** ask_user_question interaction attached to its call. */
 export interface ToolQuestionView {
   readonly id: string
@@ -185,6 +196,8 @@ export interface ToolChatData {
   readonly subagent?: ToolSubagentView
   readonly workflow?: WorkflowRunView
   readonly approvals: readonly ToolApprovalView[]
+  /** Computer Use grant cards raised by this call. */
+  readonly grants?: readonly ToolGrantView[]
   readonly question?: ToolQuestionView
 }
 

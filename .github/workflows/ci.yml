@@ -45,6 +45,13 @@ jobs:
       - name: Desktop tests
         working-directory: desktop
         run: npm run test
+      - name: Browser extension tests
+        shell: bash
+        run: node --test desktop/extension/tests/*.test.js
+      - name: macOS helper Swift tests
+        if: runner.os == 'macOS'
+        working-directory: desktop/native/macos
+        run: swift test
       - name: Desktop test typecheck
         working-directory: desktop
         run: npm run typecheck:test

@@ -7,6 +7,9 @@ import type { ContentBlock, ImageAttachmentRef } from './types'
 export const OFFLOADED_IMAGE_TEXT =
   '[image omitted to keep the request within its image limit; older images are omitted first. If this image is still needed, read its file again when a path is available; otherwise ask the user to attach it again.]'
 
+/** Model-facing stand-in for an image whose attachment was cleared. */
+export const CLEARED_IMAGE_TEXT = '[附件已清除]'
+
 /** Stable text shown to a model that cannot accept images. */
 export function textOnlyImageText(ref: ImageAttachmentRef): string {
   return `[image omitted because this model accepts text only; attachment ${ref.attachmentId}]`
@@ -61,6 +64,27 @@ export function projectImagesForTextModel(
       type: 'text',
       text: textOnlyImageText(block.attachment),
     }))
+    return content === message.content ? message : { ...message, content }
+  })
+}
+
+/**
+ * Replace images whose stored attachment is gone (screenshot quota or a
+ * user clear, spec 00 §8.5) with {@link CLEARED_IMAGE_TEXT}, so replay
+ * never fails on a missing file.
+ */
+export function projectClearedImages(
+  messages: readonly Message[],
+  available: (ref: ImageAttachmentRef) => boolean,
+): Message[] {
+  if (!messages.some((message) => contentHasImage(message.content)))
+    return [...messages]
+  return messages.map((message) => {
+    const content = mapImages(message.content, (block) =>
+      available(block.attachment)
+        ? undefined
+        : { type: 'text', text: CLEARED_IMAGE_TEXT },
+    )
     return content === message.content ? message : { ...message, content }
   })
 }

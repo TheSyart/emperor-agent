@@ -72,6 +72,11 @@ describe('PetEventProjector', () => {
     expect(
       projectPetEvent({ event: 'tool_call', name: 'mcp_docs_search' }),
     ).toMatchObject({ label: 'external' })
+    for (const name of ['browser_click', 'browser_observe', 'ui_list_targets'])
+      expect(projectPetEvent({ event: 'tool_call', name })).toMatchObject({
+        animation: 'wizard',
+        label: 'browsing',
+      })
     expect(
       projectPetEvent({ event: 'subagent_done', parent_id: 'call_1' }),
     ).toMatchObject({ subagentDelta: -1 })

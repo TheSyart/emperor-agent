@@ -8,7 +8,10 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  canonicalPath,
   SandboxUnavailableError,
   writableRoots,
   type ConfinedSandboxMode,
@@ -77,8 +80,22 @@ function sbplString(path: string): string {
   return `"${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`
 }
 
+function canonicalChild(root: string, ...parts: string[]): string {
+  return parts.reduce(
+    (current, part) => canonicalPath(join(current, part)),
+    canonicalPath(root),
+  )
+}
+
+function pathPrefixRegex(path: string): string {
+  return `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
+}
+
 /** Seatbelt SBPL profile: allow default, deny file writes except /dev/null and writable roots. */
-export function seatbeltProfileArgs(policy: SandboxPolicy): string[] {
+export function seatbeltProfileArgs(
+  policy: SandboxPolicy,
+  protectedStateRoot?: string,
+): string[] {
   const forms = [
     '(version 1)',
     '(allow default)',
@@ -91,6 +108,30 @@ export function seatbeltProfileArgs(policy: SandboxPolicy): string[] {
       `(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')})`,
     )
   }
+  // E-M13: these operations were checked against a real sandbox-exec child.
+  // They apply only to confined Shell modes, never danger-full-access.
+  forms.push(
+    '(deny appleevent-send)',
+    '(deny mach-lookup (global-name "com.apple.windowserver.active"))',
+    '(deny mach-lookup (global-name "com.apple.windowserver"))',
+  )
+  const socketDirectories = new Set([
+    canonicalChild(homedir(), '.emperor', 'run'),
+    canonicalChild(tmpdir(), `emperor-${process.getuid?.() ?? 0}`),
+  ])
+  for (const directory of socketDirectories)
+    forms.push(
+      `(deny network-outbound (remote unix-socket (path-regex ${sbplString(pathPrefixRegex(directory))})))`,
+    )
+  if (protectedStateRoot !== undefined) {
+    // Browser state: profiles (cookies), the download inbox, remembered
+    // tabs (URLs), site permissions and profile metadata.
+    for (const directory of [
+      canonicalChild(protectedStateRoot, 'computer-use'),
+      canonicalChild(protectedStateRoot, 'browser'),
+    ])
+      forms.push(`(deny file-read* (subpath ${sbplString(directory)}))`)
+  }
   return ['-p', forms.join(' ')]
 }
 
@@ -101,6 +142,8 @@ export interface LocalSandboxOptions {
   probeBwrap?: () => boolean
   /** Test hook: replace the sandbox-exec executable. */
   seatbeltExec?: string
+  /** App state whose Computer Use grants, vault and browser profiles Shell must not read. */
+  protectedStateRoot?: string
 }
 
 export class LocalSandbox implements SandboxBackend {
@@ -121,7 +164,7 @@ export class LocalSandbox implements SandboxBackend {
         ? ['bwrap', ...bwrapProfileArgs(policy)]
         : [
             this.options.seatbeltExec ?? 'sandbox-exec',
-            ...seatbeltProfileArgs(policy),
+            ...seatbeltProfileArgs(policy, this.options.protectedStateRoot),
           ]
     return {
       argv: [...runnerArgv, '--', ...argv],

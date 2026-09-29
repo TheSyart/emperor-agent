@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-09-24<br>
 > 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
@@ -87,6 +87,21 @@
   control/
     command-invocations.json   # Slash command 幂等调用记录
     session-transitions.json   # /new 会话转换事务
+  computer-use/              # 启用电脑操作后按需创建
+    config.json              # 总开关、授权模式、各驱动开关、急停快捷键、用户应用名单、下载保留天数
+    grants.json              # 会话与定时授权、急停挂起状态；不含凭据明文；损坏时隔离并挂起
+    screenshots.json         # 截图配额清单（附件 ID、会话、大小、时间）
+    vault.json               # Electron main 加密的凭据库
+    browser-pairings/pairings.json  # 加密的外部浏览器配对信息
+  browser/                   # 受限 Shell 的 Seatbelt 规则拒绝读取整个目录
+    profiles.json            # 临时与持久 profile 元数据
+    profiles/<profile-id>/   # 持久 profile 的网站数据
+    site-permissions.json    # 精确 origin、profile 与权限
+    restorable.json          # 正常退出时记下的持久 profile 标签页（7 天）
+    downloads/               # Agent 下载收件箱，按保留天数清理
+      .index.json            # 下载 ID → 当前位置与所属会话（重启后仍可显示、移动）
+  run/                       # 本机 Helper 和浏览器 bridge socket
+  native-helpers/<cdhash>/   # 签名 Helper 的独立安装版本（macOS）
   migrations/
     state-root-migration.json
 ```
@@ -130,11 +145,12 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 
 除 Emperor Home 和上面列出的项目 `.emperor/` 外，应用只会用到以下位置：
 
-| 位置                                                                     | 内容                                                                                                                                                                        |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`） | Chromium 的缓存、Cookies、Local Storage；界面主题、三栏布局和应用内通知列表等浏览器侧偏好。不含会话、记忆等业务数据。右侧工作台的内置浏览器使用不落盘的内存分区，不写入这里 |
-| `$HOME/.emperor.bootstrap.lock`                                          | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名                                                                  |
-| 系统临时目录                                                             | Skill 导入时的解压暂存，完成后删除                                                                                                                                          |
+| 位置                                                                       | 内容                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`）   | Chromium 的缓存、Cookies、Local Storage；界面主题、三栏布局和应用内通知列表等浏览器侧偏好。不含会话、记忆等业务数据。用户操作的工作台浏览器使用不落盘的内存分区；Agent 持久 profile 的网站数据另存于 Emperor Home 的 `browser/profiles/` |
+| Chrome / Edge 用户级 `NativeMessagingHosts/com.emperor.agent.browser.json` | 启用外部浏览器连接时登记当前 host 路径，并为每个已配对扩展 ID 写入一条精确的 `allowed_origins`；仅在已使用的浏览器用户配置目录中登记。撤销最后一个配对后移除对应 manifest。                                                              |
+| `$HOME/.emperor.bootstrap.lock`                                            | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名                                                                                                                               |
+| 系统临时目录                                                               | Skill 导入时的解压暂存，完成后删除                                                                                                                                                                                                       |
 
 启动锁记录持有者的进程号和心跳时间。如果上次启动被强杀或断电导致锁残留，下次启动发现持有进程已退出或心跳过期，会自动接管并记录警告；只有持有者仍在运行且心跳新鲜时，才会报 `installation_lock_busy`。
 

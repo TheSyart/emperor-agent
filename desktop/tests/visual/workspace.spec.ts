@@ -93,7 +93,7 @@ for (const theme of ['dark', 'light'] as const) {
     await open(page, '/chat/build-ui?visualProgress=final', theme, 'launcher')
     const body = page.locator('.workspace-body')
     const list = page.locator('.launcher-list')
-    await expect(list.locator('.launcher-row')).toHaveCount(4)
+    await expect(list.locator('.launcher-row')).toHaveCount(5)
     const bodyBox = (await body.boundingBox())!
     const listBox = (await list.boundingBox())!
     expect(listBox.width).toBeLessThanOrEqual(700)
@@ -167,6 +167,47 @@ for (const theme of ['dark', 'light'] as const) {
       'title',
       'README.md',
     )
+  })
+
+  test(`browser: Agent tab preview and takeover (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/chat-main?visualAgentTab=agent', theme, 'browser')
+    const pane = page.locator('.browser-pane')
+    await expect(pane).toHaveAttribute('data-state', 'agent')
+    await expect(pane.locator('.browser-tab')).toHaveText([
+      '我的浏览',
+      'Fixture form',
+    ])
+    await expect(pane.locator('.agent-tab-state')).toHaveText('Agent 操作中')
+    await expect(pane.locator('.agent-tab-canvas')).toHaveAttribute(
+      'data-phase',
+      'live',
+    )
+    await expectBoundsHidden(page)
+    await shot(page, `browser-agent-tab-${theme}`)
+
+    await pane.getByRole('button', { name: '接管' }).click()
+    await expect(pane.locator('.agent-tab-state')).toHaveText('你在操作')
+    await expect(pane.getByRole('button', { name: '交还' })).toBeVisible()
+    await expect(pane.locator('.agent-tab-hint')).toHaveCount(0)
+    const canvas = pane.locator('.agent-tab-canvas')
+    const box = (await canvas.boundingBox())!
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    const inputs = await page.evaluate(
+      () =>
+        (window as unknown as { __visualPreviewInput?: unknown[] })
+          .__visualPreviewInput ?? [],
+    )
+    expect(inputs).toContainEqual(
+      expect.objectContaining({
+        event: expect.objectContaining({ type: 'mouseDown', x: 640, y: 400 }),
+      }),
+    )
+    await shot(page, `browser-agent-takeover-${theme}`)
+
+    await pane.getByRole('button', { name: '我的浏览' }).click()
+    await expect(pane).toHaveAttribute('data-state', 'empty')
   })
 
   test(`browser: empty and failed load (${theme})`, async ({ page }) => {

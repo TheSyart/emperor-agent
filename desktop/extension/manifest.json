@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Emperor Agent Browser Connector",
+  "description": "Connect a tab you choose to Emperor Agent.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "105",
+  "permissions": ["nativeMessaging", "tabs", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Emperor Agent",
+    "default_popup": "popup.html"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwudKIo0JdhSDQzre0+c0GDjmACvhckaUnfE6DrAtIQrfCMxqmUd4YQz1BzpgOlzL7zuhCe+AuwfHz/ppQhOfCvHej7aYilak5IQceEGVMZ69zKcmzuI3Fou2RcFojKqifkGntJ3vKBAMqruATo33QIQkmMqMq1vGCRdterotnNf1zTrqvASaZSUTPbRTvnk6xRMPOK5ngaUx+qQYPANzaJ73XIY2xppodlcU0ws/p5jmdMeVYxWNoOMV3P/ZoXv63q6W4U7oGV2GUX+10xAvV+ahVHS5t69CaTWM1CIqWR+IwqWrFehaWhnaI1zJXI2zY2w7LiVhrFwHFe6843H9WQIDAQAB"
+}

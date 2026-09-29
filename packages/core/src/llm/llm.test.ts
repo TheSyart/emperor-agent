@@ -11,6 +11,7 @@ import { serializeRequest } from './adapters/deepseek/serialize'
 import { toStreamChunks } from './adapters/pi-ai/stream'
 import { toPiContext } from './adapters/pi-ai/context'
 import { LlmClient } from './client'
+import { CLEARED_IMAGE_TEXT } from './content'
 import { LlmError } from './error'
 import {
   createAssistantMessage,
@@ -480,6 +481,32 @@ describe('LlmClient', () => {
     expect(adapter.calls[0]?.messages[0]?.content[0]).toMatchObject({
       type: 'text',
     })
+  })
+
+  it('replays cleared image attachments as text on vision routes', async () => {
+    const adapter = scripted(okRun)
+    const client = new LlmClient({
+      adapterFor: () => adapter,
+      imageAvailable: (ref) => ref.attachmentId !== 'gone',
+    })
+    client.setRoutes([route({ vision: true })], 'm1')
+    const image = (attachmentId: string) => ({
+      type: 'image' as const,
+      attachment: { attachmentId, mediaType: 'image/png', bytes: 1 },
+    })
+    await collect(
+      client.stream({
+        provider: 'm1',
+        model: 'deepseek-chat',
+        messages: [
+          { ...userText('x'), content: [image('gone'), image('kept')] },
+        ],
+      }),
+    )
+    expect(adapter.calls[0]?.messages[0]?.content).toEqual([
+      { type: 'text', text: CLEARED_IMAGE_TEXT },
+      image('kept'),
+    ])
   })
 })
 

@@ -7,6 +7,7 @@ import {
   capabilityStatus,
   createModelEntryDraft,
   formatTokenPreset,
+  modelTestSummary,
   policyDraftFrom,
   policyDraftsEqual,
   providerProtocols,
@@ -16,6 +17,24 @@ import {
   updateModelDraftId,
   validateModelDraft,
 } from './modelFormModel'
+
+describe('modelTestSummary', () => {
+  it('says why a test failed', () => {
+    expect(modelTestSummary({ ok: true, kind: 'text', latencyMs: 812 })).toBe(
+      '通过 · 812ms',
+    )
+    expect(
+      modelTestSummary({ ok: false, kind: 'vision', error: 'HTTP 400' }),
+    ).toBe('HTTP 400')
+    // The request went through but the reply missed the probe image.
+    expect(
+      modelTestSummary({ ok: false, kind: 'vision', sample: '我无法查看图片' }),
+    ).toBe('没有认出测试图片，这个模型可能看不到图片（回答：我无法查看图片）')
+    expect(modelTestSummary({ ok: false, kind: 'text', sample: '' })).toBe(
+      '没有按要求回答',
+    )
+  })
+})
 
 const dualProvider: ProviderOption = {
   name: 'deepseek',

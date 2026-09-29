@@ -20,13 +20,23 @@ esac
 
 APP="$APP_DIR/Emperor Agent.app"
 BINARY="$APP/Contents/MacOS/Emperor Agent"
-DMG="$(find "$DIST" -maxdepth 1 -type f -name "Emperor-Agent-*-mac-$ARCH.dmg" -print -quit)"
-ZIP="$(find "$DIST" -maxdepth 1 -type f -name "Emperor-Agent-*-mac-$ARCH.zip" -print -quit)"
+DMG_FILES=("$DIST"/Emperor-Agent-*-mac-"$ARCH".dmg)
+ZIP_FILES=("$DIST"/Emperor-Agent-*-mac-"$ARCH".zip)
+
+if [[ ${#DMG_FILES[@]} -ne 1 || ! -f ${DMG_FILES[0]} ||
+      ${#ZIP_FILES[@]} -ne 1 || ! -f ${ZIP_FILES[0]} ]]; then
+  echo "Expected exactly one macOS $ARCH DMG and ZIP candidate" >&2
+  exit 1
+fi
+DMG="${DMG_FILES[0]}"
+ZIP="${ZIP_FILES[0]}"
+if [[ ${DMG%.dmg} != "${ZIP%.zip}" ]]; then
+  echo "macOS DMG and ZIP candidate versions differ" >&2
+  exit 1
+fi
 
 test -d "$APP"
 test -x "$BINARY"
-test -n "$DMG"
-test -n "$ZIP"
 
 verify_app() {
   local app="$1"
@@ -44,20 +54,26 @@ verify_app() {
 verify_app "$APP"
 
 MOUNT="$(mktemp -d "${TMPDIR:-/tmp}/emperor-dmg.XXXXXX")"
+ZIP_EXTRACT="$(mktemp -d "${TMPDIR:-/tmp}/emperor-zip.XXXXXX")"
 cleanup() {
   hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
   rmdir "$MOUNT" >/dev/null 2>&1 || true
+  rm -rf "$ZIP_EXTRACT"
 }
 trap cleanup EXIT
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT"
 MOUNTED_APP="$MOUNT/Emperor Agent.app"
 verify_app "$MOUNTED_APP"
 
+ditto -x -k "$ZIP" "$ZIP_EXTRACT"
+verify_app "$ZIP_EXTRACT/Emperor Agent.app"
+
 EMPEROR_SMOKE_APP="$MOUNTED_APP/Contents/MacOS/Emperor Agent" \
   node "$ROOT/desktop/scripts/run-packaged-smoke.cjs"
 
 hdiutil detach "$MOUNT" -quiet
 rmdir "$MOUNT"
+rm -rf "$ZIP_EXTRACT"
 trap - EXIT
 
 (

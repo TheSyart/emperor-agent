@@ -1,8 +1,8 @@
 // Tool call Definition: tool/call (running) → tool/result (settled), with
 // the interactions the call owns attached through links: background jobs
 // (`job/finished`), delegated subagents (`subagent/*`), workflow / ralph
-// runs (`tool-workflow/*`), approval escalations (`approval/*`) and
-// ask_user_question (`question/*`).
+// runs (`tool-workflow/*`), approval escalations (`approval/*`), Computer
+// Use grant cards (`ui/grant-*`) and ask_user_question (`question/*`).
 import type { WireSessionEvent } from '@emperor/core/runtime-contract'
 import type {
   ConversationDefinition,
@@ -14,6 +14,7 @@ import { isAppendSurfaceEvent, isEvent } from '../events'
 import type {
   ToolApprovalView,
   ToolChatData,
+  ToolGrantView,
   ToolJobView,
   ToolQuestionView,
   ToolResultView,
@@ -46,6 +47,7 @@ interface ToolState {
   readonly subagent: ToolSubagentView | undefined
   readonly workflow: ReturnType<typeof foldWorkflow>
   readonly approvals: readonly ToolApprovalView[]
+  readonly grants: readonly ToolGrantView[]
   readonly question: ToolQuestionView | undefined
 }
 
@@ -56,6 +58,7 @@ const EMPTY_STATE: ToolState = {
   subagent: undefined,
   workflow: undefined,
   approvals: [],
+  grants: [],
   question: undefined,
 }
 
@@ -180,6 +183,42 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
       ),
     }
   }
+  if (isEvent(event, 'ui/grant-requested')) {
+    const data = event.data
+    const scope = data.targetScope
+    const target =
+      data.display?.url ??
+      (scope.kind === 'browser'
+        ? scope.origins.join(' ')
+        : (data.display?.appName ?? scope.appId))
+    return {
+      ...state,
+      grants: [
+        ...state.grants,
+        {
+          id: data.requestId,
+          actions: data.actions,
+          target,
+          ...(data.highImpact === true ? { highImpact: true } : {}),
+        },
+      ],
+    }
+  }
+  if (isEvent(event, 'ui/grant-decided')) {
+    const data = event.data
+    return {
+      ...state,
+      grants: state.grants.map((grant) =>
+        grant.id === data.requestId
+          ? {
+              ...grant,
+              decision: data.decision,
+              ...(data.cause === undefined ? {} : { cause: data.cause }),
+            }
+          : grant,
+      ),
+    }
+  }
   if (isEvent(event, 'question/asked')) {
     const data = event.data
     return {
@@ -240,6 +279,12 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
       links.push({ ns: 'approval', key: event.data.id, id: event.data.callId })
     if (isEvent(event, 'question/asked') && event.data.callId !== undefined)
       links.push({ ns: 'question', key: event.data.id, id: event.data.callId })
+    if (isEvent(event, 'ui/grant-requested') && event.data.callId !== undefined)
+      links.push({
+        ns: 'grant',
+        key: event.data.requestId,
+        id: event.data.callId,
+      })
     return links
   },
   match: (event) => {
@@ -269,6 +314,15 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
       return event.data.callId === undefined
         ? null
         : { id: event.data.callId, role: 'update' }
+    if (isEvent(event, 'ui/grant-requested'))
+      return event.data.callId === undefined
+        ? null
+        : { id: event.data.callId, role: 'update' }
+    if (isEvent(event, 'ui/grant-decided'))
+      return {
+        via: { ns: 'grant', key: event.data.requestId },
+        role: 'update',
+      }
     if (isEvent(event, 'approval/decided'))
       return { via: { ns: 'approval', key: event.data.id }, role: 'update' }
     if (isEvent(event, 'question/answered'))
@@ -302,6 +356,7 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
             ? 'interrupted'
             : 'running',
       approvals: state.approvals,
+      ...(state.grants.length === 0 ? {} : { grants: state.grants }),
       ...(call?.argsTruncated === true ? { argsTruncated: true } : {}),
       ...(result === undefined ? {} : { result }),
       ...(state.job === undefined ? {} : { job: state.job }),

@@ -4,7 +4,7 @@ export const EXTERNAL_CONTENT_SCHEMA_VERSION =
   'emperor.external_content.v1' as const
 
 export type ExternalContentSourceKind =
-  'web_fetch' | 'web_search' | 'mcp' | 'hook_http'
+  'web_fetch' | 'web_search' | 'mcp' | 'hook_http' | 'browser' | 'desktop'
 
 export interface ExternalContentSource {
   readonly kind: ExternalContentSourceKind

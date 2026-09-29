@@ -34,6 +34,9 @@ const summary = computed(() => failure.value ?? view.value.summary(props.data))
 const suffix = computed(() =>
   failure.value === null ? (view.value.suffix?.(props.data) ?? null) : null,
 )
+const suffixTone = computed(() =>
+  suffix.value === null ? null : (view.value.suffixTone?.(props.data) ?? null),
+)
 const expandable = computed(
   () => !(props.data.status === 'running' && RESULT_ONLY.has(view.value.body)),
 )
@@ -83,7 +86,12 @@ const stateLabel = computed(() => {
             :data-path="(view.pathSummary && failure === null) || undefined"
             >{{ summary }}</span
           >
-          <span v-if="suffix" class="summary-suffix">{{ suffix }}</span>
+          <span
+            v-if="suffix"
+            class="summary-suffix"
+            :data-tone="suffixTone || undefined"
+            >{{ suffix }}</span
+          >
         </span>
       </template>
       <div class="body-wrap">
@@ -141,6 +149,15 @@ const stateLabel = computed(() => {
 .summary-suffix {
   flex: none;
   margin-left: var(--space-1);
+}
+
+.summary-suffix[data-tone='warn'] {
+  color: rgb(var(--warn));
+  font-weight: 500;
+}
+
+.summary-suffix[data-tone='accent'] {
+  color: rgb(var(--accent));
 }
 
 .body-wrap {

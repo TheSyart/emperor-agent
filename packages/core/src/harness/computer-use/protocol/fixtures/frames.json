@@ -1,0 +1,23 @@
+{
+  "$comment": "Golden frame encodings (hex). Native helper tests decode these and must re-encode the same bytes.",
+  "frames": [
+    {
+      "name": "json-ping",
+      "message": {
+        "type": "ping",
+        "seq": 7
+      },
+      "hex": "00000018017b2274797065223a2270696e67222c22736571223a377d"
+    },
+    {
+      "name": "blob-small",
+      "blobId": "b-77",
+      "bytes": [
+        1,
+        2,
+        3
+      ],
+      "hex": "000000090204622d3737010203"
+    }
+  ]
+}

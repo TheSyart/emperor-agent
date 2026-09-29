@@ -400,8 +400,8 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     await expect(dialog).toBeVisible()
     const nav = dialog.getByRole('navigation', { name: '设置分区' })
-    await expect(nav.getByRole('button')).toHaveCount(7)
-    for (const label of ['Hooks', '记忆', '诊断'])
+    await expect(nav.getByRole('button')).toHaveCount(8)
+    for (const label of ['Hooks', '电脑操作', '记忆', '诊断'])
       await expect(
         nav.getByRole('button', { name: label, exact: true }),
       ).toBeVisible()

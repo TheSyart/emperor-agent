@@ -19,6 +19,8 @@ export interface WorkspaceRequest {
   file?: { path: string; line?: number }
   /** Address to prefill (pane 'browser'); never opened without a user submit. */
   url?: string
+  /** Agent tab to show (pane 'browser'); only selects a tab Core lists. */
+  agentTargetId?: string
   /** Control to focus once the pane shows ('commit': the review commit box). */
   focus?: 'commit'
   nonce: number

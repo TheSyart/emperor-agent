@@ -64,6 +64,17 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'pullRequests.list',
         'pullRequests.view',
         'pullRequests.diff',
+        'computerUse.status',
+        'computerUse.stop',
+        'computerUse.resume',
+        'computerUse.listGrants',
+        'computerUse.revokeGrant',
+        'computerUse.setEnabled',
+        'computerUse.controlTarget',
+        'computerUse.listProfiles',
+        'computerUse.manageProfile',
+        'computerUse.listSitePermissions',
+        'computerUse.setSitePermission',
       ]),
     )
     for (const retired of [

@@ -84,6 +84,8 @@ export interface CoreDiagnosticsServiceDeps {
   environmentSummary?: () => Dict | Promise<Dict>
   goalDiagnostics?: () => Dict | Promise<Dict>
   externalToolConfig?: () => Dict
+  /** Computer use summary (switch, drivers, kill switch); no grants or URLs. */
+  computerUse?: () => Promise<Dict>
 }
 
 export interface CoreDiagnosticsPayload {
@@ -111,6 +113,7 @@ export interface CoreDiagnosticsPayload {
   dependencies: Dict
   optionalCapabilities: OptionalCapabilityPortfolioEntry[]
   externalToolConfig: Dict
+  computerUse: Dict
 }
 
 export class CoreDiagnosticsService {
@@ -155,6 +158,16 @@ export class CoreDiagnosticsService {
       dependencies: this.dependencies(),
       optionalCapabilities: optionalCapabilityPortfolio(),
       externalToolConfig: this.deps.externalToolConfig?.() ?? {},
+      computerUse: await this.computerUsePayload(),
+    }
+  }
+
+  private async computerUsePayload(): Promise<Dict> {
+    if (!this.deps.computerUse) return {}
+    try {
+      return await this.deps.computerUse()
+    } catch {
+      return {}
     }
   }
 

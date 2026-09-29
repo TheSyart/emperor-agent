@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装 Preview 的用户<br>
-> 最后核验：2026-07-16<br>
+> 最后核验：2026-09-29<br>
 > 事实源：`.github/workflows/release-preview.yml`、Preview electron-builder 配置与发布 contract
 
 > **Unsigned Preview / 未签名预览版**  
@@ -21,9 +21,15 @@ This public preview is for testing and is not a Stable release. The macOS files 
 
 ## macOS 单应用确认 / Per-app confirmation
 
-首次打开并看到系统拦截后，确认 SHA-256 无误，再进入 **System Settings → Privacy & Security → Open Anyway**，仅为 Emperor Agent 创建例外。Apple 的风险说明与官方步骤见 [Safely open apps on your Mac](https://support.apple.com/en-us/102445)。不要更改整机 Gatekeeper 安全策略。
+先把 Emperor Agent 拖到「应用程序」文件夹再打开：直接在下载位置运行时，macOS 会把它放到随机路径运行，电脑操作的授权每次启动都要重来。首次打开并看到系统拦截后，确认 SHA-256 无误，再进入 **System Settings → Privacy & Security → Open Anyway**，仅为 Emperor Agent 创建例外。Apple 的风险说明与官方步骤见 [Safely open apps on your Mac](https://support.apple.com/en-us/102445)。不要更改整机 Gatekeeper 安全策略。
 
-After the first blocked launch, verify the SHA-256 digest, then use **System Settings → Privacy & Security → Open Anyway** to create an exception only for Emperor Agent. Keep system-wide Gatekeeper protections enabled.
+Move Emperor Agent to the Applications folder before opening it: launched from the download location, macOS runs it from a random path and computer use permissions have to be granted again at every launch. After the first blocked launch, verify the SHA-256 digest, then use **System Settings → Privacy & Security → Open Anyway** to create an exception only for Emperor Agent. Keep system-wide Gatekeeper protections enabled.
+
+## macOS 电脑操作 / Computer use on macOS
+
+电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，所以每次安装新版本后，macOS 都会把 Helper 当作新应用：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。使用凭据库时，钥匙串可能再请求一次确认。
+
+Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity, so after each update macOS treats the Helper as a new app: re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on). The credential vault may ask for Keychain access once more.
 
 ## Windows 单应用确认 / Per-app confirmation
 

@@ -25,7 +25,7 @@ import {
 
 /** Right workspace panes; `launcher` is the pane picker (home). */
 export type WorkspacePane =
-  'launcher' | 'review' | 'terminal' | 'files' | 'browser'
+  'launcher' | 'review' | 'terminal' | 'files' | 'browser' | 'desktop'
 
 export const WORKSPACE_PANES: readonly WorkspacePane[] = [
   'launcher',
@@ -33,6 +33,7 @@ export const WORKSPACE_PANES: readonly WorkspacePane[] = [
   'terminal',
   'files',
   'browser',
+  'desktop',
 ]
 
 export interface FrameState {

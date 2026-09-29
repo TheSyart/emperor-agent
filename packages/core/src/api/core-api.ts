@@ -13,6 +13,18 @@ import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
 import type { UiAnswers } from '../harness/host/interactions'
 import { runGoalCommand } from '../harness/goal'
 import type { Agent } from '../harness/agent/agent'
+import type {
+  SitePermission,
+  SitePermissionKind,
+} from '../harness/computer-use/site-permissions'
+import type {
+  BrowserProfileView,
+  ComputerUseStatusView,
+  DriverKind,
+  UiActionClass,
+  UiGrantView,
+  UiTargetView,
+} from '../harness/computer-use/types'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
 import {
@@ -600,6 +612,8 @@ export class CoreApi {
       mcp: () => kept.mcpClient.snapshot(),
       activeTasks: () => this.activeTaskInfos(),
       desktopPetPayload: () => this.desktopPet.get(),
+      computerUse: async () =>
+        computerUseDiagnostics(await this.computerUse.status()),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
       externalToolConfig: () => {
         const projectPath = host.activeSession()?.project_path
@@ -1584,6 +1598,187 @@ export class CoreApi {
     get: async () => this.diagnosticsService.payload(),
   }
 
+  /**
+   * Computer Use (GUI control). Stop, revoke and resume never call
+   * `assertMutation`: narrowing capability must work while a grant card or
+   * plan mode is pending.
+   */
+  readonly computerUse = {
+    status: async (): Promise<ComputerUseStatusView> =>
+      (await this.host.computerUse?.service.status()) ??
+      unsupportedComputerUseStatus(),
+    stop: async (): Promise<ComputerUseStatusView> => {
+      await this.host.computerUse?.service.emergencyStop()
+      return await this.computerUse.status()
+    },
+    resume: async (): Promise<ComputerUseStatusView> => {
+      this.host.computerUse?.service.resume()
+      return await this.computerUse.status()
+    },
+    listGrants: (): UiGrantView[] =>
+      this.host.computerUse?.service.statusView().grants.slice() ?? [],
+    revokeGrant: (grantId: string): { revoked: boolean } => ({
+      revoked: this.host.computerUse?.service.revokeGrant(grantId) ?? false,
+    }),
+    /**
+     * Drop actions or origins from a grant (never guarded: it only takes
+     * access away). Removing everything revokes it.
+     */
+    narrowGrant: (input: {
+      grantId: string
+      allowedActions?: UiActionClass[]
+      origins?: string[]
+    }): { found: boolean; revoked: boolean } => {
+      const service = this.host.computerUse?.service
+      const before = service
+        ?.statusView()
+        .grants.some((grant) => grant.grantId === input.grantId)
+      if (service === undefined || before !== true)
+        return { found: false, revoked: false }
+      const after = service.narrowGrant(input.grantId, {
+        ...(input.allowedActions === undefined
+          ? {}
+          : { allowedActions: input.allowedActions }),
+        ...(input.origins === undefined ? {} : { origins: input.origins }),
+      })
+      return { found: true, revoked: after === undefined }
+    },
+    /** One driver's switch. Turning on is guarded; turning off never is. */
+    setDriverEnabled: async (input: {
+      driver: DriverKind
+      enabled: boolean
+    }): Promise<ComputerUseStatusView> => {
+      if (input.enabled) this.assertMutation('computerUse', 'enable')
+      this.host.setComputerUseDriverEnabled(input.driver, input.enabled)
+      return await this.computerUse.status()
+    },
+    /**
+     * Delete saved screenshots of one conversation, or all (spec 00 §8.5).
+     * Never guarded: it only removes data.
+     */
+    clearScreenshots: (
+      input: { sessionId?: string } = {},
+    ): { removed: number; bytes: number } =>
+      this.host.computerUse?.service.clearScreenshots(input.sessionId) ?? {
+        removed: 0,
+        bytes: 0,
+      },
+    /**
+     * Replace the user's protected / high-risk / sensitive app lists.
+     * Removing an entry widens access, so any removal is guarded; adding
+     * never is.
+     */
+    setAppLists: async (
+      input: Partial<Record<'protected' | 'highRisk' | 'sensitive', string[]>>,
+    ): Promise<ComputerUseStatusView> => {
+      const current = this.host.computerUse?.service.statusView().appLists
+      const widened = (Object.keys(input) as Array<keyof typeof input>).some(
+        (kind) =>
+          (current?.[kind] ?? []).some((id) => !input[kind]!.includes(id)),
+      )
+      if (widened) this.assertMutation('computerUse', 'app-lists')
+      this.host.setComputerUseAppLists(input)
+      return await this.computerUse.status()
+    },
+    /** Download inbox retention (never guarded: it only deletes sooner). */
+    setDownloadRetention: async (input: {
+      days: 0 | 7 | 30 | 90
+    }): Promise<ComputerUseStatusView> => {
+      this.host.setComputerUseDownloadRetention(input.days)
+      return await this.computerUse.status()
+    },
+    /** The emergency-stop shortcut (`null` restores the platform default). */
+    setKillSwitch: async (input: {
+      accelerator: string | null
+    }): Promise<ComputerUseStatusView> => {
+      this.host.setComputerUseKillSwitch(input.accelerator)
+      return await this.computerUse.status()
+    },
+    /** Master switch. Turning on is a guarded mutation; turning off never is. */
+    setEnabled: async (enabled: boolean): Promise<ComputerUseStatusView> => {
+      if (enabled) this.assertMutation('computerUse', 'enable')
+      this.host.setComputerUseEnabled(enabled)
+      return await this.computerUse.status()
+    },
+    setAuthorizationMode: async (
+      mode: 'unrestricted' | 'scoped',
+    ): Promise<ComputerUseStatusView> => {
+      this.host.setComputerUseAuthorizationMode(mode)
+      return await this.computerUse.status()
+    },
+    /** Browser profiles: the temporary one and every persistent one. */
+    listProfiles: (): BrowserProfileView[] =>
+      this.host.computerUse?.service.listProfiles() ?? [],
+    /**
+     * Create or rename a persistent profile (guarded mutations), or wipe /
+     * delete one (never guarded: it only removes data and grants).
+     */
+    manageProfile: async (input: {
+      action: 'create' | 'rename' | 'clear' | 'delete'
+      profileId?: string
+      name?: string
+    }): Promise<{ profile?: BrowserProfileView; revokedGrants?: number }> => {
+      const service = this.host.computerUse?.service
+      if (service === undefined)
+        throw new Error('computer use is not available on this host')
+      if (input.action === 'create' || input.action === 'rename') {
+        this.assertMutation('computerUse', `${input.action}Profile`)
+        if (input.name === undefined)
+          throw new Error('a profile name is required')
+        if (input.action === 'create')
+          return { profile: service.createProfile(input.name) }
+        if (input.profileId === undefined)
+          throw new Error('profileId is required')
+        return { profile: service.renameProfile(input.profileId, input.name) }
+      }
+      if (input.profileId === undefined)
+        throw new Error('profileId is required')
+      const result = await service.clearProfile(input.profileId, {
+        remove: input.action === 'delete',
+      })
+      return { revokedGrants: result.revokedGrants }
+    },
+    /** Site permissions the user allowed (camera, location, …). */
+    listSitePermissions: (): SitePermission[] =>
+      this.host.computerUse?.service.listSitePermissions() ?? [],
+    /** Allow (guarded mutation) or revoke (never guarded) a site permission. */
+    setSitePermission: (input: {
+      profileId: string
+      origin: string
+      kind: SitePermissionKind
+      allow: boolean
+      minutes?: number
+    }): { permissions: SitePermission[] } => {
+      const service = this.host.computerUse?.service
+      if (service === undefined)
+        throw new Error('computer use is not available on this host')
+      if (input.allow) {
+        this.assertMutation('computerUse', 'allowSitePermission')
+        service.allowSitePermission({
+          profileId: input.profileId,
+          origin: input.origin,
+          kind: input.kind,
+          ...(input.minutes === undefined ? {} : { minutes: input.minutes }),
+        })
+      } else
+        service.revokeSitePermission({
+          profileId: input.profileId,
+          origin: input.origin,
+          kind: input.kind,
+        })
+      return { permissions: service.listSitePermissions() }
+    },
+    /** User control of one target: pause, resume, take over, hand back, close. */
+    controlTarget: async (input: {
+      targetId: string
+      action: 'pause' | 'resume' | 'takeover' | 'handback' | 'close'
+    }): Promise<UiTargetView | null> =>
+      (await this.host.computerUse?.service.controlTarget(
+        input.targetId,
+        input.action,
+      )) ?? null,
+  }
+
   readonly desktopPet = {
     get: async () => this.desktopPetService.get(),
     setEnabled: (enabled: boolean) =>
@@ -2217,6 +2412,20 @@ export class CoreApi {
   }
 }
 
+function unsupportedComputerUseStatus(): ComputerUseStatusView {
+  return {
+    supported: false,
+    enabled: false,
+    authorizationMode: 'unrestricted',
+    platform: null,
+    stopped: false,
+    drivers: [],
+    targets: [],
+    grants: [],
+    killSwitch: { accelerator: '', registered: false },
+  }
+}
+
 function jobTask(job: JobSnapshot, sessionId: string): CoreTaskRecord {
   return {
     id: job.id,
@@ -2489,4 +2698,31 @@ function schedulerMisfirePolicyFromApi(value: unknown): SchedulerMisfirePolicy {
   throw new Error(
     'scheduler misfirePolicy must be skip, latest, or catch-up-one',
   )
+}
+
+/** Diagnostics view of computer use: states and counts, never URLs or grants. */
+function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
+  return {
+    supported: status.supported,
+    enabled: status.enabled,
+    platform: status.platform,
+    stopped: status.stopped,
+    drivers: status.drivers.map((driver) => ({
+      driver: driver.driver,
+      stage: driver.stage,
+      label: driver.label,
+      enabled: driver.enabled,
+      available: driver.available,
+      ...(driver.reason === undefined ? {} : { reason: driver.reason }),
+    })),
+    targets: status.targets.length,
+    grants: status.grants.length,
+    killSwitch: {
+      accelerator: status.killSwitch.accelerator,
+      registered: status.killSwitch.registered,
+      ...(status.killSwitch.error === undefined
+        ? {}
+        : { error: status.killSwitch.error }),
+    },
+  }
 }

@@ -169,6 +169,36 @@ describe('resolveModelProfile', () => {
     ).toBe(true)
   })
 
+  it('knows which DeepSeek models take images', () => {
+    const vision = (modelId: string) =>
+      resolveModelProfile(entry({ provider: 'deepseek', modelId }))
+    for (const modelId of [
+      'deepseek-flash',
+      'deepseek-v4-flash',
+      'DeepSeek-V4.1-Flash',
+      'deepseek-v4-flash-vision-exp',
+    ])
+      expect(vision(modelId)).toMatchObject({
+        vision: true,
+        sources: { vision: 'inferred' },
+      })
+    for (const modelId of [
+      'deepseek-v4-pro',
+      'deepseek-reasoner',
+      'deepseek-chat',
+    ])
+      expect(vision(modelId).vision).toBe(false)
+    // An explicit setting still wins.
+    expect(
+      resolveModelProfile(
+        entry({
+          modelId: 'deepseek-v4-flash',
+          capabilityOverrides: { vision: false },
+        }),
+      ).vision,
+    ).toBe(false)
+  })
+
   it('keeps xhigh and max as distinct ordered effort values', () => {
     expect(REASONING_EFFORT_ORDER).toEqual([
       'none',

@@ -37,6 +37,45 @@ describe('AttachmentStore (agent/attachments.py parity)', () => {
     )
   })
 
+  it('removes an attachment and its sidecar, then no longer finds it', () => {
+    const root = tmp('emperor-attachments-remove-')
+    const store = new AttachmentStore(root)
+    const ref = store.save({
+      raw: Buffer.from('notes', 'utf8'),
+      name: 'a.md',
+      mime: 'text/markdown',
+    })
+    expect(store.remove(ref.id)).toBeGreaterThan(0)
+    expect(existsSync(join(root, ref.rel_path))).toBe(false)
+    expect(existsSync(join(root, ref.text_rel_path!))).toBe(false)
+    expect(store.get(ref.id)).toBeNull()
+    expect(store.remove(ref.id)).toBe(0)
+  })
+
+  it('removes every copy saved under one id', () => {
+    const root = tmp('emperor-attachments-copies-')
+    const store = new AttachmentStore(root)
+    const bytes = Buffer.from('same screenshot bytes', 'utf8')
+    const first = store.save({
+      raw: bytes,
+      name: 'shot-1.md',
+      mime: 'text/markdown',
+    })
+    const second = store.save({
+      raw: bytes,
+      name: 'shot-2.md',
+      mime: 'text/markdown',
+    })
+    expect(second.id).toBe(first.id)
+    expect(second.rel_path).not.toBe(first.rel_path)
+    expect(store.remove(second.id)).toBeGreaterThan(0)
+    for (const ref of [first, second]) {
+      expect(existsSync(join(root, ref.rel_path))).toBe(false)
+      expect(existsSync(join(root, ref.text_rel_path!))).toBe(false)
+    }
+    expect(new AttachmentStore(root).get(first.id)).toBeNull()
+  })
+
   it('validates mime and size limits', () => {
     const store = new AttachmentStore(tmp('emperor-attachments-limits-'))
     expect(() =>

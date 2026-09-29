@@ -18,6 +18,7 @@ export const WORKSPACE_PANE_ITEMS: readonly WorkspacePaneItem[] = [
   { pane: 'terminal', label: '终端', shortcut: 'workspace.terminal' },
   { pane: 'files', label: '文件', shortcut: 'workspace.files' },
   { pane: 'browser', label: '浏览器', shortcut: 'workspace.browser' },
+  { pane: 'desktop', label: '电脑', shortcut: 'workspace.desktop' },
 ]
 
 export interface WorkspaceAvailability {
@@ -36,7 +37,7 @@ export function workspacePaneDisabledReason(
   pane: WorkspaceContentPane,
   availability: WorkspaceAvailability,
 ): string {
-  if (pane === 'browser') return ''
+  if (pane === 'browser' || pane === 'desktop') return ''
   if (!availability.hasProject) return NO_PROJECT_REASON
   // Unknown until the first snapshot lands: keep review reachable meanwhile.
   if (pane === 'review' && availability.snapshotLoaded && !availability.hasGit)

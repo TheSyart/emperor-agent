@@ -62,6 +62,24 @@ import {
 } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
+import { ComputerUseConfigStore } from '../computer-use/config'
+import { computerUseRepair } from '../computer-use/events'
+import {
+  browserStateDir,
+  computerUseStateDir,
+  installComputerUse,
+  type InstalledComputerUse,
+} from '../computer-use/install'
+import type { ComputerUseHostPort } from '../computer-use/port'
+import type { DriverKind } from '../computer-use/types'
+import type { AppListKind } from '../computer-use/service/service'
+import { createBrowserTools } from '../computer-use/tools/browser-tools'
+import { createDesktopTools } from '../computer-use/tools/desktop-tools'
+import { createExternalTools } from '../computer-use/tools/external-tools'
+import type {
+  ComputerUseSettings,
+  KillSwitchStatus,
+} from '../computer-use/service/service'
 import { createMemoryTool, memoryMiddleware } from '../memory/memory'
 import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
@@ -115,6 +133,7 @@ import { createSpillMiddleware } from '../tools/spill'
 import { PendingInteractions, type UiAnswers } from './interactions'
 import { McpToolBridge } from './mcp-tools'
 import { createSchedulerExecutor } from './scheduler'
+import { currentTurnSource } from './turn-source'
 import {
   createKeptServices,
   type KeptServices,
@@ -148,6 +167,19 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   sandboxBackend?: SandboxBackend
   /** Test hook: replace the LLM client. */
   llm?: LlmClient
+  /** Desktop host port for GUI control; absent → no computer-use tools. */
+  computerUsePort?: ComputerUseHostPort | null
+  /** Computer-use master switch and per-driver switches. */
+  computerUseSettings?: () => ComputerUseSettings
+  /** Emergency-stop shortcut registration status (desktop). */
+  computerUseKillSwitch?: () => KillSwitchStatus
+  /** The master switch changed (desktop registers the kill switch only while on). */
+  computerUseEnabledChanged?: (enabled: boolean) => void
+  /**
+   * The user changed the emergency-stop shortcut (`null`: the platform
+   * default); the desktop re-registers it and reports the result.
+   */
+  computerUseKillSwitchChanged?: (accelerator: string | null) => void
 }
 
 export interface SubmitInput {
@@ -206,6 +238,12 @@ export class HarnessHost {
   readonly attachments: AttachmentStore
   readonly watchlist: WatchlistService
   readonly mcpTools: McpToolBridge
+  /** GUI control kernel; null on hosts without a computer-use port. */
+  computerUse: InstalledComputerUse | null = null
+  private computerUseConfig: ComputerUseConfigStore | null = null
+  private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
+  private computerUseKillSwitchChanged:
+    ((accelerator: string | null) => void) | undefined
   readonly defaultPreset: string
   activeSessionId: string | null = null
   private readonly agents = new Map<string, Agent>()
@@ -238,6 +276,9 @@ export class HarnessHost {
             mediaType: stored.mime,
           }
         },
+        // Screenshots removed by the quota or a user clear replay as text.
+        imageAvailable: (ref) =>
+          this.attachments.get(ref.attachmentId) !== null,
       })
     if (options.llm === undefined) this.applyModelConfig(kept.modelConfig)
     this.watchlist = new WatchlistService(kept.paths.stateRoot, {
@@ -246,13 +287,15 @@ export class HarnessHost {
     })
     this.sessions = new SessionLogStore({
       root: kept.paths.sessionsRoot,
-      repairContributors: [approvalRepair, questionRepair],
+      repairContributors: [approvalRepair, questionRepair, computerUseRepair],
     })
     this.sandbox = new SandboxPolicyService({
       defaultMode: 'workspace-write',
       workspaceRoot: this.chatWorkspace(),
     })
-    this.sandboxBackend = options.sandboxBackend ?? new LocalSandbox()
+    this.sandboxBackend =
+      options.sandboxBackend ??
+      new LocalSandbox({ protectedStateRoot: kept.paths.stateRoot })
     this.presets = new PermissionPresetService(this.sandbox, this.approval)
     this.compaction = new CompactionEngine(this.llm, new ToolResultPruner())
     this.subagents = new SubagentManager({
@@ -417,7 +460,8 @@ export class HarnessHost {
         inSchedulerRun: (agent) =>
           agent === undefined
             ? false
-            : currentTurnSource(this.rootOf(agent)) === 'scheduler',
+            : currentTurnSource(this.rootOf(agent).session.events) ===
+              'scheduler',
       }),
     )
     // Emperor's own MCP config; writes ask unless danger-full-access, then reload.
@@ -474,6 +518,8 @@ export class HarnessHost {
     middleware.preStep.push(reminder.preStep)
     tools.postExecute.push(reminder)
     this.hooks.install(middleware, tools)
+    // After hooks: a hook's deny short-circuits before any grant card.
+    if (options.computerUsePort) this.installComputerUse(options)
     tools.postExecute.push(createSpillMiddleware({ root: services.spillRoot }))
     // Pending interactions change the control payload.
     this.pending.onChange((sessionId) => {
@@ -494,6 +540,137 @@ export class HarnessHost {
       },
     })
     return goal
+  }
+
+  /** Master switch: persist, (un)register the GUI tools, tell the desktop. */
+  setComputerUseEnabled(enabled: boolean): void {
+    const installed = this.computerUse
+    if (installed === null) return
+    this.computerUseConfig?.update({ enabled })
+    installed.setEnabled(enabled)
+    // Switching off ends every Agent target; nothing keeps running unseen.
+    if (!enabled) void installed.service.closeAll('revoked')
+    this.computerUseEnabledChanged?.(enabled)
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
+  }
+
+  /** Persist the GUI permission mode without changing Shell sandbox access. */
+  setComputerUseAuthorizationMode(mode: 'unrestricted' | 'scoped'): void {
+    if (this.computerUse === null) return
+    this.computerUseConfig?.update({ authorizationMode: mode })
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
+  }
+
+  /**
+   * One driver's switch (spec 00 §8.4): the tools stay registered and
+   * answer CAPABILITY_DISABLED; switching off ends that driver's targets.
+   */
+  setComputerUseDriverEnabled(driver: DriverKind, enabled: boolean): void {
+    const installed = this.computerUse
+    if (installed === null) return
+    this.computerUseConfig?.update({ drivers: { [driver]: enabled } })
+    if (!enabled) void installed.service.closeDriver(driver, 'revoked')
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
+  }
+
+  /**
+   * The user's additions to the protected / high-risk / sensitive app lists
+   * (01 §4.4, §5.2). Whole lists are replaced.
+   */
+  setComputerUseAppLists(
+    lists: Partial<Record<AppListKind, readonly string[]>>,
+  ): void {
+    if (this.computerUse === null) return
+    this.computerUseConfig?.update({ appLists: lists })
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
+  }
+
+  /** How long downloads stay in the inbox (0: until the user removes them). */
+  setComputerUseDownloadRetention(days: 0 | 7 | 30 | 90): void {
+    if (this.computerUse === null) return
+    this.computerUseConfig?.update({ downloadRetentionDays: days })
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
+  }
+
+  /** The user's emergency-stop shortcut (`null`: the platform default). */
+  setComputerUseKillSwitch(accelerator: string | null): void {
+    if (this.computerUse === null) return
+    this.computerUseConfig?.update({ killSwitchAccelerator: accelerator })
+    this.computerUseKillSwitchChanged?.(accelerator)
+    this.emitHost({ event: 'computer_use_changed', reason: 'kill-switch' })
+  }
+
+  /** The persisted emergency-stop shortcut, if the user changed it. */
+  computerUseKillSwitchAccelerator(): string | undefined {
+    return this.computerUseConfig?.get().killSwitchAccelerator
+  }
+
+  private installComputerUse(options: HarnessHostOptions): void {
+    const port = options.computerUsePort
+    if (!port) return
+    const stateDir = computerUseStateDir(this.kept.paths.stateRoot)
+    if (options.computerUseSettings === undefined)
+      this.computerUseConfig = new ComputerUseConfigStore(stateDir)
+    const config = this.computerUseConfig
+    const settings =
+      options.computerUseSettings ?? (() => config?.get() ?? { enabled: false })
+    this.computerUseEnabledChanged = options.computerUseEnabledChanged
+    this.computerUseKillSwitchChanged = options.computerUseKillSwitchChanged
+    this.computerUse = installComputerUse({
+      port,
+      tools: this.tools,
+      prompt: this.prompt,
+      pending: this.pending,
+      stateDir,
+      profilesDir: browserStateDir(this.kept.paths.stateRoot),
+      attachments: this.attachments,
+      sessionFor: (sessionId) =>
+        this.agents.get(sessionId)?.session ?? this.sessions.get(sessionId),
+      rootOf: (agent) => this.rootOf(agent),
+      isDirectChild: (parentSessionId, childId) =>
+        this.subagents.record(childId)?.parentId === parentSessionId,
+      planActive: (agent) => {
+        const plan = this.planMode.get(this.rootOf(agent).session)
+        return plan.active || plan.pending === true
+      },
+      routeVision: (agent) => this.routeVision(agent),
+      toolFamilies: [
+        createBrowserTools,
+        createDesktopTools,
+        createExternalTools,
+      ],
+      settings,
+      ...(options.computerUseKillSwitch === undefined
+        ? {}
+        : { killSwitch: options.computerUseKillSwitch }),
+      onChanged: (reason, sessionId) => {
+        this.emitHost({
+          event: 'computer_use_changed',
+          reason,
+          ...(sessionId === undefined ? {} : { session_id: sessionId }),
+        })
+      },
+    })
+    // Once / task grants end with the turn that asked for them.
+    this.rawTap((sessionId, event) => {
+      if (event.type === 'turn/end')
+        queueMicrotask(() => this.computerUse?.service.endTask(sessionId))
+    })
+  }
+
+  /** Whether the route that served the agent's latest request can see images. */
+  private routeVision(agent: Agent): boolean {
+    const events = agent.session.events
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]!
+      if (event.type !== 'request/header') continue
+      try {
+        return this.llm.route(event.data.header.config.provider).vision
+      } catch {
+        return false
+      }
+    }
+    return this.llm.activeRoute()?.vision ?? false
   }
 
   private async start(options: HarnessHostOptions): Promise<void> {
@@ -654,6 +831,11 @@ export class HarnessHost {
     if (entry?.mode === 'build' && entry.project_path)
       return resolve(entry.project_path)
     return this.chatWorkspace()
+  }
+
+  /** A conversation's workspace (project root, or the chat workspace). */
+  sessionWorkspaceRoot(sessionId: string): string {
+    return this.workspaceRootFor(this.kept.sessionStore.get(sessionId))
   }
 
   activeWorkspaceRoot(): string {
@@ -1308,12 +1490,14 @@ export class HarnessHost {
     this.projectors.delete(sessionId)
     this.announcedQueue.delete(sessionId)
     void this.jobs.disposeOwner(sessionId)
+    void this.computerUse?.service.onSessionDeleted(sessionId)
     this.sessions.delete(sessionId)
   }
 
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    await this.computerUse?.dispose().catch(() => {})
     for (const agent of this.agents.values()) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()
     await this.jobs.dispose()
@@ -1330,33 +1514,6 @@ export class HarnessHost {
     await this.kept.mcpClient.close().catch(() => {})
     await this.kept.processRuntime.shutdown?.('host closing').catch?.(() => {})
   }
-}
-
-/** `host/user-meta` source of the prompt that opened the agent's latest turn. */
-function currentTurnSource(agent: Agent): string | undefined {
-  const events = agent.session.events
-  const sources = new Map<string, string>()
-  for (const event of events) {
-    if (event.type === 'host/user-meta' && event.data.source !== undefined)
-      sources.set(event.data.messageId, event.data.source)
-  }
-  let lastTurnStart = -1
-  for (let index = events.length - 1; index >= 0; index--) {
-    if (events[index]?.type === 'turn/start') {
-      lastTurnStart = index
-      break
-    }
-  }
-  if (lastTurnStart < 0) return undefined
-  for (let index = lastTurnStart + 1; index < events.length; index++) {
-    const event = events[index]
-    if (event?.type === 'user/message') {
-      const source = sources.get(event.data.id)
-      if (source !== undefined) return source
-    }
-    if (event?.type === 'turn/end') break
-  }
-  return undefined
 }
 
 /** The turn that consumed a message, and that turn's final assistant text. */

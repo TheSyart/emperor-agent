@@ -5,6 +5,7 @@
  */
 
 import type { SessionEventMap } from '../../session-log/types'
+import { GRANT_QUESTION_ID, grantOptions } from '../computer-use/grants/answer'
 import type { UserAnswers, UserQuestionItem } from '../questions/service'
 
 export type InteractionPayload = Record<string, unknown> & {
@@ -229,5 +230,108 @@ export function answeredQuestionInteraction(
       answers: uiAnswers,
     },
     outcome: 'answered',
+  }
+}
+
+export function grantInteractionId(requestId: string): string {
+  return `grant_${requestId}`
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  observe: '查看',
+  interact: '操作',
+  navigate: '跳转',
+  transfer: '上传或下载',
+  'high-impact': '高影响操作',
+}
+
+/** A pending Computer Use grant card. */
+export function grantInteraction(
+  asked: SessionEventMap['ui/grant-requested'],
+  time: number,
+): InteractionPayload {
+  const scope = asked.targetScope
+  const target =
+    asked.display?.url ??
+    (scope.kind === 'browser'
+      ? scope.origins.join('、')
+      : (asked.display?.appName ?? scope.appId))
+  const actions = asked.actions
+    .map((action) => ACTION_LABELS[action] ?? action)
+    .join('、')
+  const question = `允许 Agent ${actions}：${target}`
+  return {
+    id: grantInteractionId(asked.requestId),
+    kind: 'ask',
+    status: 'waiting',
+    created_at: time,
+    updated_at: time,
+    parent_call_id: asked.callId ?? null,
+    ...(asked.reason === undefined ? {} : { context: asked.reason }),
+    questions: [
+      {
+        id: GRANT_QUESTION_ID,
+        header: '电脑操作',
+        question,
+        options: grantOptions(asked.allowedScopes),
+      },
+    ],
+    answers: {},
+    meta: {
+      interaction_type: 'computer_use_grant',
+      request_id: asked.requestId,
+      grant: {
+        subject: asked.subject,
+        driver: asked.driver,
+        target_scope: asked.targetScope,
+        actions: asked.actions,
+        allowed_scopes: asked.allowedScopes,
+        display: asked.display ?? null,
+        tool_name: asked.toolName ?? null,
+        reason: asked.reason ?? null,
+        reason_unverified: true,
+        high_impact: asked.highImpact === true,
+        high_risk_app: asked.highRiskApp === true,
+        background: asked.background === true,
+      },
+    },
+  }
+}
+
+export function decidedGrantInteraction(
+  base: InteractionPayload,
+  decided: SessionEventMap['ui/grant-decided'],
+  time: number,
+): InteractionPayload {
+  const byUser = decided.cause === undefined || decided.cause === 'user'
+  if (!byUser)
+    return { ...base, status: 'cancelled', updated_at: time, answers: {} }
+  const optionId =
+    decided.decision === 'denied'
+      ? 'deny'
+      : decided.decision === 'timed' && decided.minutes !== undefined
+        ? `timed:${decided.minutes}`
+        : decided.decision
+  const questions = Array.isArray(base.questions)
+    ? (base.questions as Array<{
+        options?: Array<{ id: string; label: string }>
+      }>)
+    : []
+  const label =
+    questions[0]?.options?.find((option) => option.id === optionId)?.label ??
+    optionId
+  return {
+    ...base,
+    status: 'answered',
+    updated_at: time,
+    answers: {
+      [GRANT_QUESTION_ID]: { option_id: optionId, choice: label, freeform: '' },
+    },
+    meta: {
+      ...(base.meta as Record<string, unknown>),
+      decision: decided.decision,
+      grant_id: decided.grantId ?? null,
+      expires_at: decided.expiresAt ?? null,
+    },
   }
 }

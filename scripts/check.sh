@@ -37,6 +37,14 @@ node scripts/test-acp-bundle.mjs
 echo "== desktop vitest =="
 npm --prefix desktop run test
 
+echo "== browser extension node:test =="
+node --test desktop/extension/tests/*.test.js
+
+if [ "$(uname -s)" = "Darwin" ] && command -v swift >/dev/null 2>&1; then
+  echo "== macOS helper swift test =="
+  (cd desktop/native/macos && swift test)
+fi
+
 echo "== desktop test typecheck =="
 npm --prefix desktop run typecheck:test
 

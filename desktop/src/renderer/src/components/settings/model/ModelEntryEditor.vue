@@ -54,6 +54,7 @@ import {
   credentialsInherited,
   formatTokenPreset,
   INPUT_TOKEN_PRESETS,
+  modelTestSummary,
   OUTPUT_TOKEN_PRESETS,
   PROTOCOL_LABELS,
   providerProtocols,
@@ -316,13 +317,9 @@ const displayNameHint = computed(() =>
     : '自动与模型 ID 同步，不会重复写入配置',
 )
 
-const testSummary = computed(() => {
-  const result = testResult.value
-  if (!result) return ''
-  return result.ok
-    ? `通过 · ${result.latencyMs || 0}ms`
-    : result.error || '测试失败'
-})
+const testSummary = computed(() =>
+  testResult.value ? modelTestSummary(testResult.value) : '',
+)
 
 watch(
   () => {

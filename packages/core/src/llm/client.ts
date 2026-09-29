@@ -9,6 +9,7 @@ import type { LlmAdapter } from './adapter'
 import { BlockAssembler } from './assembler'
 import {
   contentHasImage,
+  projectClearedImages,
   projectImagesForTextModel,
   type ImageResolver,
 } from './content'
@@ -24,6 +25,7 @@ import type { RouteSpec } from './route'
 import type {
   FinishReason,
   GenerateOptions,
+  ImageAttachmentRef,
   LlmFailure,
   LlmResolvedModelInfo,
   ModelModality,
@@ -65,6 +67,8 @@ export interface LlmClientOptions {
   /** Chooses the adapter implementation for a route. */
   adapterFor: (route: RouteSpec) => LlmAdapter
   images?: ImageResolver
+  /** False for an image whose stored bytes were cleared (sent as text). */
+  imageAvailable?: (ref: ImageAttachmentRef) => boolean
   /**
    * Observes every request as dispatched to an adapter (after call-config
    * resolution). Tests install request invariants here; a throw fails the call.
@@ -237,14 +241,23 @@ export class LlmClient {
     this.options.onRequest?.(options)
     let iterator: AsyncIterator<StreamChunk>
     try {
-      const projected =
-        !route.vision &&
-        options.messages.some((message) => contentHasImage(message.content))
+      const hasImages = options.messages.some((message) =>
+        contentHasImage(message.content),
+      )
+      const available = this.options.imageAvailable
+      const projected = !hasImages
+        ? options
+        : !route.vision
           ? {
               ...options,
               messages: projectImagesForTextModel(options.messages),
             }
-          : options
+          : available !== undefined
+            ? {
+                ...options,
+                messages: projectClearedImages(options.messages, available),
+              }
+            : options
       const adapter = this.options.adapterFor(route)
       const stream = adapter.stream(route, projected, {
         ...(this.options.images === undefined

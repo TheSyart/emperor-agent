@@ -109,6 +109,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('runtime-defaults')
     expect(config).toContain('beforePack: scripts/before-pack.cjs')
     expect(config).toContain('afterPack: scripts/after-pack.cjs')
+    expect(config).toContain('afterSign: scripts/after-sign.cjs')
     expect(config).toContain('runtime-defaults-manifest.json')
     expect(config).toContain('!node_modules{,/**/*}')
     expect(config).toContain('node_modules/typescript/package.json')
@@ -118,6 +119,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain("'!node_modules/node-pty/lib/**/*.test.js'")
     expect(config).toContain('node_modules/node-pty/prebuilds/**/*')
     expect(config).toContain('node_modules/node-pty/build/Release/**/*')
+    expect(config).toContain('from: out/native/Emperor Computer Helper.app')
+    expect(config).toContain('from: out/native/emperor-nm-host')
     expect(config).not.toContain('node_modules/node-pty/**/*')
     expect(config).toContain('from: ../assets/desktop-pet')
     expect(config).toContain(
@@ -154,6 +157,9 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(pkg.scripts?.['package:smoke']).toBe(
       'node scripts/run-packaged-smoke.cjs',
     )
+    expect(pkg.scripts?.['package:dir']).toContain(
+      '--config electron-builder.preview.cjs',
+    )
     expect(pkg.scripts?.['package:verify']).toContain('package:dir')
     expect(pkg.scripts?.['package:verify']).toContain('package:smoke')
     expect(pkg.dependencies?.typescript).toMatch(/^\d+\.\d+\.\d+$/)
@@ -181,6 +187,65 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       binding: path.join('/native', 'build', 'Release', 'pty.node'),
       helper: path.join('/native', 'build', 'Release', 'spawn-helper'),
     })
+  })
+
+  it('rejects inconsistent Computer Use signatures and wrong helper architecture', () => {
+    const signing = require(
+      path.join(desktopRoot, 'scripts', 'after-sign.cjs'),
+    ) as {
+      validateMacSignatureEntries: (
+        entries: Array<{
+          label: string
+          architectures: string[]
+          teamId: string | null
+          authority: string | null
+          adHoc: boolean
+        }>,
+        arch: string,
+      ) => void
+    }
+    const entries = [
+      'app',
+      'Electron Framework',
+      'Computer Helper',
+      'Native Messaging host',
+      'credential-auth',
+    ].map((label) => ({
+      label,
+      architectures: ['arm64'],
+      teamId: 'ABCDE12345',
+      authority: 'Apple Distribution: Example Developer (ABCDE12345)',
+      adHoc: false,
+    }))
+    expect(() =>
+      signing.validateMacSignatureEntries(entries, 'arm64'),
+    ).not.toThrow()
+    expect(() =>
+      signing.validateMacSignatureEntries(
+        entries.map((entry) =>
+          entry.label === 'Computer Helper'
+            ? { ...entry, authority: 'Apple Development: different' }
+            : entry,
+        ),
+        'arm64',
+      ),
+    ).toThrow(/signing identity/i)
+    expect(() =>
+      signing.validateMacSignatureEntries(
+        entries.map((entry) =>
+          entry.label === 'Native Messaging host'
+            ? { ...entry, architectures: ['x86_64'] }
+            : entry,
+        ),
+        'arm64',
+      ),
+    ).toThrow(/architecture/i)
+    expect(() =>
+      signing.validateMacSignatureEntries(
+        entries.map((entry) => ({ ...entry, architectures: ['x86_64'] })),
+        'x64',
+      ),
+    ).not.toThrow()
   })
 
   it('rejects ESM, Node builtins and oversized sandbox preload bundles', () => {
@@ -300,12 +365,12 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     const packagedPaths = new Set(generated.files.map((file) => file.path))
     for (const strip of petStrips)
       expect(packagedPaths).toContain(`assets/desktop-pet/xiaodan/${strip}`)
-    expect(generated.builtInSkills).toEqual(['skill-creator'])
+    expect(generated.builtInSkills).toEqual(['computer-use', 'skill-creator'])
     expect(
       generated.files
         .filter((file) => file.path.startsWith('skills/'))
         .map((file) => file.path),
-    ).toEqual(['skills/skill-creator/SKILL.md'])
+    ).toEqual(['skills/computer-use/SKILL.md', 'skills/skill-creator/SKILL.md'])
     expect(generated.files.some((file) => file.path.endsWith('.py'))).toBe(
       false,
     )
@@ -419,6 +484,35 @@ describe('desktop release packaging (MIG-REL-001)', () => {
           ? 'const electron=require("electron"); electron.contextBridge.exposeInMainWorld("emperorPet", {})\n'
           : 'fixture\n',
       )
+    const authRoot = path.join(appOutDir, 'resources', 'native')
+    fs.mkdirSync(authRoot, { recursive: true })
+    fs.writeFileSync(path.join(authRoot, 'credential-auth'), 'native-fixture', {
+      mode: 0o755,
+    })
+    const helper = path.join(
+      appOutDir,
+      'Library',
+      'Helpers',
+      'Emperor Computer Helper.app',
+      'Contents',
+    )
+    fs.mkdirSync(path.join(helper, 'MacOS'), { recursive: true })
+    fs.writeFileSync(
+      path.join(helper, 'Info.plist'),
+      '<string>com.emperor.agent.desktop.computer-helper</string>',
+    )
+    fs.writeFileSync(
+      path.join(helper, 'MacOS', 'emperor-computer-helper'),
+      'native-fixture',
+      { mode: 0o755 },
+    )
+    const messagingHost = path.join(
+      appOutDir,
+      'Library',
+      'Helpers',
+      'emperor-nm-host',
+    )
+    fs.writeFileSync(messagingHost, 'native-fixture', { mode: 0o755 })
 
     const afterPack = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
@@ -441,6 +535,25 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         'arm64',
       ),
     ).not.toThrow()
+    fs.rmSync(messagingHost)
+    expect(() =>
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      ),
+    ).toThrow(/allowlist/i)
+    fs.writeFileSync(messagingHost, 'native-fixture', { mode: 0o755 })
+    const strayHelper = path.join(appOutDir, 'Library', 'Helpers', 'unexpected')
+    fs.writeFileSync(strayHelper, 'x')
+    expect(() =>
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      ),
+    ).toThrow(/allowlist/i)
+    fs.rmSync(strayHelper)
     fs.writeFileSync(path.join(petRoot, 'package.json'), '{}')
     expect(() =>
       afterPack.validatePackagedAppResources(

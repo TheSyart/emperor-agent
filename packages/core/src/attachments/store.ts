@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join, relative, sep } from 'node:path'
@@ -185,6 +186,36 @@ export class AttachmentStore {
       return ref
     }
     return null
+  }
+
+  /**
+   * Delete a stored attachment and its text sidecar (Computer Use
+   * screenshot quota and "clear screenshots"). Returns the bytes freed;
+   * 0 when it was already gone.
+   */
+  remove(attId: string): number {
+    this.cache.delete(attId)
+    const match = /^att_(\d{4}-\d{2})_([0-9a-f]{8})$/.exec(attId)
+    if (!match) return 0
+    const [, month, hash8] = match
+    const monthDir = join(this.base, month!)
+    // The id names the content, but each save names its file: the same
+    // bytes saved twice (two identical screenshots) are two files under one
+    // id. Remove them all, sidecars included, or a copy outlives the clear.
+    let freed = 0
+    for (const name of readDirSafe(monthDir)) {
+      if (!name.startsWith(`${hash8}-`)) continue
+      const path = join(monthDir, name)
+      try {
+        const stats = statSync(path)
+        if (!stats.isFile()) continue
+        unlinkSync(path)
+        freed += stats.size
+      } catch {
+        // already gone
+      }
+    }
+    return freed
   }
 
   readBytes(ref: AttachmentRef): Buffer {

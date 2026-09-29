@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 const ATTACHMENT_CONTENT = 'emperor-packaged-renderer-smoke-v1'
 const ATTACHMENT_MONTH = '2099-01'
 const PRODUCTION_RENDERER_URL = 'app://bundle/index.html'
+const DEEP_LINK_RENDERER_URL = 'app://bundle/chat/packaged-smoke'
 
 export interface PackagedSmokeWindowLike {
   loadURL(url: string): Promise<unknown>
@@ -20,6 +21,7 @@ export interface PackagedRendererSmokeReceipt {
   nodeGlobalsAbsent: boolean
   coreBridge: boolean
   coreBootstrap: boolean
+  deepLinkRenders: boolean
   attachment: { ok: boolean; bytes: number }
   webPreferences: {
     sandbox: boolean
@@ -81,12 +83,23 @@ export async function verifyPackagedRenderer(opts: {
         timeoutMs,
       ),
     )
+    await withTimeout(win.loadURL(DEEP_LINK_RENDERER_URL), timeoutMs)
+    const deepProbe = asRecord(
+      await withTimeout(
+        win.webContents.executeJavaScript(
+          rendererProbeSource(opts.attachmentUrl, opts.attachmentContent),
+        ),
+        timeoutMs,
+      ),
+    )
     const preferences = opts.webPreferences
     const receipt: PackagedRendererSmokeReceipt = {
       ok: true,
       nodeGlobalsAbsent: probe.nodeGlobalsAbsent === true,
       coreBridge: probe.bridgeExposed === true,
       coreBootstrap: probe.bootstrapOk === true,
+      deepLinkRenders:
+        probe.appMounted === true && deepProbe.appMounted === true,
       attachment: {
         ok: probe.attachmentOk === true,
         bytes: boundedInteger(probe.attachmentBytes),
@@ -106,6 +119,7 @@ export async function verifyPackagedRenderer(opts: {
       !receipt.nodeGlobalsAbsent && 'node-globals',
       !receipt.coreBridge && 'core-bridge',
       !receipt.coreBootstrap && 'core-bootstrap',
+      !receipt.deepLinkRenders && 'deep-link-render',
       (!receipt.attachment.ok || receipt.attachment.bytes !== expectedBytes) &&
         'attachment',
       !receipt.webPreferences.sandbox && 'sandbox-preference',
@@ -139,6 +153,17 @@ export function rendererProbeSource(
       bridge && typeof bridge.invokeCore === 'function'
     )
     const rendererSandboxed = bridgeExposed && bridge.sandboxed === true
+    const appMounted = await new Promise((resolve) => {
+      const app = document.querySelector('#app')
+      if (app?.childElementCount) return resolve(true)
+      const observer = new MutationObserver(() => {
+        if (!app?.childElementCount) return
+        observer.disconnect()
+        resolve(true)
+      })
+      if (app) observer.observe(app, { childList: true })
+      setTimeout(() => { observer.disconnect(); resolve(false) }, 3000)
+    })
     let bootstrapOk = false
     if (bridgeExposed) {
       const boot = await bridge.invokeCore('bootstrap')
@@ -155,6 +180,7 @@ export function rendererProbeSource(
       nodeGlobalsAbsent,
       bridgeExposed,
       rendererSandboxed,
+      appMounted,
       bootstrapOk,
       attachmentOk: response.ok && body === ${content},
       attachmentBytes: new TextEncoder().encode(body).byteLength,

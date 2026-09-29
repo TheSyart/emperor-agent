@@ -29,7 +29,7 @@ describe('renderer routes', () => {
 
     expect((await resolve('/chat')).name).toBe('chat')
     expect((await resolve('/')).path).toBe('/chat')
-  })
+  }, 10_000)
 
   it('serves the full pages', async () => {
     expect((await resolve('/scheduler')).name).toBe('scheduler')

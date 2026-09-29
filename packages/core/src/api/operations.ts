@@ -1,3 +1,13 @@
+import {
+  APP_IDENTITY,
+  APP_LIST_LIMIT,
+  KILL_SWITCH_ACCELERATOR,
+} from '../harness/computer-use/config'
+import {
+  UI_ACTION_CLASSES,
+  type UiActionClass,
+} from '../harness/computer-use/types'
+import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
 import { SKILL_NAME, SKILL_NAME_MAX_LENGTH } from '../skills/name'
@@ -797,6 +807,166 @@ export const CORE_OPERATION_REGISTRY = {
   'control.setMode': operation(
     z.tuple([z.enum(['plan', 'default']), nullableStringSchema]),
     (api, [mode, sessionId]) => api.control.setMode(mode, sessionId),
+  ),
+  'computerUse.status': operation(z.tuple([]), (api) =>
+    api.computerUse.status(),
+  ),
+  'computerUse.stop': operation(z.tuple([]), (api) => api.computerUse.stop()),
+  'computerUse.resume': operation(z.tuple([]), (api) =>
+    api.computerUse.resume(),
+  ),
+  'computerUse.listGrants': operation(z.tuple([]), (api) =>
+    api.computerUse.listGrants(),
+  ),
+  'computerUse.revokeGrant': operation(
+    z.tuple([z.string().min(1).max(128)]),
+    (api, [grantId]) => api.computerUse.revokeGrant(grantId),
+  ),
+  'computerUse.listProfiles': operation(z.tuple([]), (api) =>
+    api.computerUse.listProfiles(),
+  ),
+  'computerUse.manageProfile': operation(
+    z.tuple([
+      z
+        .object({
+          action: z.enum(['create', 'rename', 'clear', 'delete']),
+          profileId: z
+            .string()
+            .regex(/^p_[0-9a-f]{12}$/)
+            .optional(),
+          name: z.string().min(1).max(60).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.manageProfile(input),
+  ),
+  'computerUse.listSitePermissions': operation(z.tuple([]), (api) =>
+    api.computerUse.listSitePermissions(),
+  ),
+  'computerUse.setSitePermission': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().regex(/^(temporary|p_[0-9a-f]{12})$/),
+          origin: z.string().min(1).max(512),
+          kind: z.enum(SITE_PERMISSION_KINDS),
+          allow: z.boolean(),
+          minutes: z
+            .number()
+            .int()
+            .min(1)
+            .max(60 * 24 * 365)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setSitePermission(input),
+  ),
+  'computerUse.setEnabled': operation(
+    z.tuple([z.boolean()]),
+    (api, [enabled]) => api.computerUse.setEnabled(enabled),
+  ),
+  'computerUse.setAuthorizationMode': operation(
+    z.tuple([z.enum(['unrestricted', 'scoped'])]),
+    (api, [mode]) => api.computerUse.setAuthorizationMode(mode),
+  ),
+  'computerUse.setDriverEnabled': operation(
+    z.tuple([
+      z
+        .object({
+          driver: z.enum(['embedded-browser', 'external-browser', 'desktop']),
+          enabled: z.boolean(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setDriverEnabled(input),
+  ),
+  'computerUse.setKillSwitch': operation(
+    z.tuple([
+      z
+        .object({
+          accelerator: z
+            .string()
+            .max(64)
+            .regex(KILL_SWITCH_ACCELERATOR)
+            .nullable(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setKillSwitch(input),
+  ),
+  'computerUse.setAppLists': operation(
+    z.tuple([
+      z
+        .object({
+          protected: z
+            .array(z.string().regex(APP_IDENTITY))
+            .max(APP_LIST_LIMIT)
+            .optional(),
+          highRisk: z
+            .array(z.string().regex(APP_IDENTITY))
+            .max(APP_LIST_LIMIT)
+            .optional(),
+          sensitive: z
+            .array(z.string().regex(APP_IDENTITY))
+            .max(APP_LIST_LIMIT)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setAppLists(input),
+  ),
+  'computerUse.setDownloadRetention': operation(
+    z.tuple([
+      z
+        .object({
+          days: z.union([
+            z.literal(0),
+            z.literal(7),
+            z.literal(30),
+            z.literal(90),
+          ]),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setDownloadRetention(input),
+  ),
+  'computerUse.clearScreenshots': operation(
+    z.tuple([
+      z
+        .object({ sessionId: z.string().min(1).max(256).optional() })
+        .strict()
+        .optional(),
+    ]),
+    (api, [input]) => api.computerUse.clearScreenshots(input ?? {}),
+  ),
+  'computerUse.narrowGrant': operation(
+    z.tuple([
+      z
+        .object({
+          grantId: z.string().min(1).max(128),
+          allowedActions: z
+            .array(
+              z.enum(UI_ACTION_CLASSES as [UiActionClass, ...UiActionClass[]]),
+            )
+            .max(8)
+            .optional(),
+          origins: z.array(z.string().min(1).max(2048)).max(64).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.narrowGrant(input),
+  ),
+  'computerUse.controlTarget': operation(
+    z.tuple([
+      z
+        .object({
+          targetId: z.string().min(1).max(256),
+          action: z.enum(['pause', 'resume', 'takeover', 'handback', 'close']),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.controlTarget(input),
   ),
   'desktopPet.get': operation(z.tuple([]), (api) => api.desktopPet.get()),
   'desktopPet.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>

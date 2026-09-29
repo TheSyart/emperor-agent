@@ -1,0 +1,6 @@
+{
+  "name": "emperor-electron-ax-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs"
+}

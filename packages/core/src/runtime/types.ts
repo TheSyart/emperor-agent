@@ -244,6 +244,10 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         last_error?: RuntimeEventPayload | null
       }
     | { event: 'skill_catalog_changed'; catalog_version?: number }
+    | {
+        event: 'computer_use_changed'
+        reason: 'state' | 'targets' | 'grants' | 'kill-switch'
+      }
     | (EnvironmentRuntimeEventFields & {
         event: 'environment_install_started'
       })

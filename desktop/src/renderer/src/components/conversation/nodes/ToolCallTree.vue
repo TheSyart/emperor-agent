@@ -9,7 +9,7 @@
  * Props: node (tool).
  */
 import { computed } from 'vue'
-import type { ToolChatNode } from '../../../conversation/types'
+import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
 import { DsChevronRight, DsShieldAlert } from '../../icons/ds'
 import StateDot from '../../ui/StateDot.vue'
 import type { StateDotState } from '../../ui/stateDot'
@@ -52,11 +52,26 @@ const APPROVAL_LABEL: Record<string, string> = {
   unavailable: '无法审批',
 }
 
+const GRANT_LABEL: Record<string, string> = {
+  once: '已允许本次',
+  task: '本任务内允许',
+  session: '本会话内允许',
+  timed: '限时允许',
+  denied: '已拒绝',
+}
+
+function grantStatus(grant: ToolGrantView): string {
+  if (grant.decision === undefined) return '等待决定'
+  if (grant.cause !== undefined && grant.cause !== 'user') return '已取消'
+  return GRANT_LABEL[grant.decision] ?? grant.decision
+}
+
 const hasChildren = computed(
   () =>
     data.value.workflow !== undefined ||
     data.value.subagent !== undefined ||
-    data.value.approvals.length > 0,
+    data.value.approvals.length > 0 ||
+    (data.value.grants?.length ?? 0) > 0,
 )
 </script>
 
@@ -79,6 +94,29 @@ const hasChildren = computed(
             ? '等待决定'
             : (APPROVAL_LABEL[approval.outcome] ?? approval.outcome)
         }}</span>
+      </div>
+      <div
+        v-for="grant in data.grants ?? []"
+        :key="grant.id"
+        class="sub-line"
+        data-grant
+        :data-outcome="
+          grant.decision === undefined
+            ? 'pending'
+            : grant.decision === 'denied'
+              ? 'rejected'
+              : grant.cause && grant.cause !== 'user'
+                ? 'cancelled'
+                : 'allowed-once'
+        "
+      >
+        <span class="sub-leading"><DsShieldAlert :size="14" /></span>
+        <span class="sub-title">{{
+          grant.highImpact ? '高影响操作确认' : '电脑操作授权'
+        }}</span>
+        <span class="sep" aria-hidden="true" />
+        <span class="sub-text">{{ grant.target }}</span>
+        <span class="sub-status">{{ grantStatus(grant) }}</span>
       </div>
       <div
         v-if="data.subagent"

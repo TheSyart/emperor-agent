@@ -1,0 +1,481 @@
+{
+  "$comment": "Golden helper protocol messages shared by the TypeScript and native helper test suites. Every entry must parse; `method` entries must also match that method's params or result schema.",
+  "messages": [
+    {
+      "name": "hello",
+      "message": {
+        "type": "hello",
+        "protocol": 1,
+        "helperVersion": "0.1.0",
+        "platform": "macos",
+        "arch": "arm64",
+        "capabilities": ["observe.semantic", "observe.screenshot", "act"],
+        "permissions": {
+          "accessibility": "granted",
+          "screen-recording": "denied"
+        }
+      }
+    },
+    {
+      "name": "welcome",
+      "message": {
+        "type": "welcome",
+        "protocol": 1,
+        "nonce": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "request-permissions-status",
+      "method": "permissions.status",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 1,
+        "method": "permissions.status",
+        "params": {},
+        "deadlineMs": 2000
+      }
+    },
+    {
+      "name": "request-windows-list",
+      "method": "windows.list",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 2,
+        "method": "windows.list",
+        "params": { "appId": "com.apple.TextEdit" },
+        "deadlineMs": 3000
+      }
+    },
+    {
+      "name": "response-windows-list",
+      "method": "windows.list",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 2,
+        "ok": true,
+        "result": {
+          "windows": [
+            {
+              "windowRef": "w-4f2a",
+              "appId": "com.apple.TextEdit",
+              "appName": "TextEdit",
+              "pid": 812,
+              "title": "未命名",
+              "minimized": false,
+              "main": true,
+              "bounds": { "x": 120, "y": 80, "width": 800, "height": 600 }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "request-observe-semantic",
+      "method": "observe.semantic",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 3,
+        "method": "observe.semantic",
+        "params": {
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "budget": {
+            "maxElements": 200,
+            "maxTextBytes": 16384,
+            "maxDepth": 8,
+            "timeoutMs": 3000
+          },
+          "query": { "role": "button" },
+          "includeText": true
+        },
+        "deadlineMs": 5000
+      }
+    },
+    {
+      "name": "response-observe-semantic",
+      "method": "observe.semantic",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 3,
+        "ok": true,
+        "result": {
+          "generation": 1,
+          "revision": 4,
+          "title": "未命名",
+          "urlOrApp": "com.apple.TextEdit",
+          "focus": true,
+          "frameOrWindowId": "w-4f2a",
+          "viewport": { "width": 800, "height": 600, "scale": 2 },
+          "elements": [
+            {
+              "ref": "r4.1",
+              "role": "button",
+              "nativeRole": "AXButton",
+              "name": "保存",
+              "states": ["enabled"],
+              "bounds": { "x": 12, "y": 8, "width": 60, "height": 24 },
+              "actions": ["AXPress"],
+              "depth": 2
+            },
+            {
+              "ref": "r4.2",
+              "role": "textbox",
+              "nativeRole": "AXSecureTextField",
+              "name": "密码",
+              "value": "[has content]",
+              "actions": [],
+              "depth": 2
+            }
+          ],
+          "truncated": false,
+          "redactions": 1
+        }
+      }
+    },
+    {
+      "name": "request-observe-screenshot",
+      "method": "observe.screenshot",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 4,
+        "method": "observe.screenshot",
+        "params": {
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "modelCopy": false,
+          "modelMaxEdge": 1600
+        },
+        "deadlineMs": 5000
+      }
+    },
+    {
+      "name": "response-observe-screenshot",
+      "method": "observe.screenshot",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 4,
+        "ok": true,
+        "result": {
+          "screenshotId": "s-77",
+          "generation": 1,
+          "revision": 4,
+          "width": 1600,
+          "height": 1200,
+          "scale": 2,
+          "blobId": "b-77"
+        }
+      }
+    },
+    {
+      "name": "request-observe-menu",
+      "method": "observe.menu",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 7,
+        "method": "observe.menu",
+        "params": { "targetId": "t-9c1e", "generation": 1, "path": ["View"] },
+        "deadlineMs": 5000
+      }
+    },
+    {
+      "name": "response-observe-menu",
+      "method": "observe.menu",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 7,
+        "ok": true,
+        "result": {
+          "items": [
+            {
+              "title": "Command Palette...",
+              "enabled": true,
+              "submenu": false,
+              "shortcut": "Shift+Meta+P"
+            },
+            { "title": "Appearance", "enabled": true, "submenu": true }
+          ],
+          "truncated": false
+        }
+      }
+    },
+    {
+      "name": "request-target-capture",
+      "method": "target.capture",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 10,
+        "method": "target.capture",
+        "params": { "targetId": "t-9c1e", "generation": 1, "active": true },
+        "deadlineMs": 10000
+      }
+    },
+    {
+      "name": "response-target-capture",
+      "method": "target.capture",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 10,
+        "ok": true,
+        "result": { "active": true }
+      }
+    },
+    {
+      "name": "request-target-preview",
+      "method": "target.preview",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 11,
+        "method": "target.preview",
+        "params": {
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "maxEdge": 480,
+          "afterSeq": 12
+        },
+        "deadlineMs": 3000
+      }
+    },
+    {
+      "name": "response-target-preview",
+      "method": "target.preview",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 11,
+        "ok": true,
+        "result": {
+          "seq": 14,
+          "live": true,
+          "blobId": "b-78",
+          "width": 480,
+          "height": 406
+        }
+      }
+    },
+    {
+      "name": "request-front-restore",
+      "method": "front.restore",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 12,
+        "method": "front.restore",
+        "params": { "targetId": "t-9c1e", "generation": 1 },
+        "deadlineMs": 5000
+      }
+    },
+    {
+      "name": "response-front-restore",
+      "method": "front.restore",
+      "part": "result",
+      "message": {
+        "type": "response",
+        "id": 12,
+        "ok": true,
+        "result": { "restored": true }
+      }
+    },
+    {
+      "name": "request-act-click",
+      "method": "act",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 5,
+        "method": "act",
+        "params": {
+          "operationId": "op-1",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "action": { "kind": "click", "ref": "r4.1" }
+        },
+        "deadlineMs": 10000
+      }
+    },
+    {
+      "name": "request-act-menu",
+      "method": "act",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 8,
+        "method": "act",
+        "params": {
+          "operationId": "op-3",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "action": { "kind": "menu", "path": ["View", "Command Palette..."] }
+        },
+        "deadlineMs": 15000
+      }
+    },
+    {
+      "name": "request-act-activate",
+      "method": "act",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 9,
+        "method": "act",
+        "params": {
+          "operationId": "op-4",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "action": { "kind": "activate" }
+        },
+        "deadlineMs": 15000
+      }
+    },
+    {
+      "name": "request-act-bring-forward",
+      "method": "act",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 13,
+        "method": "act",
+        "params": {
+          "operationId": "op-6",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "action": {
+            "kind": "clickPoint",
+            "point": { "screenshotId": "s-77", "x": 40, "y": 60 }
+          },
+          "bringForward": true
+        },
+        "deadlineMs": 15000
+      }
+    },
+    {
+      "name": "request-act-append-text",
+      "method": "act",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 14,
+        "method": "act",
+        "params": {
+          "operationId": "op-7",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "action": {
+            "kind": "appendText",
+            "ref": "r4.2",
+            "text": "\n追加的一行"
+          }
+        },
+        "deadlineMs": 15000
+      }
+    },
+    {
+      "name": "request-act-fill-secret",
+      "method": "act.fillSecret",
+      "part": "params",
+      "message": {
+        "type": "request",
+        "id": 6,
+        "method": "act.fillSecret",
+        "params": {
+          "operationId": "op-2",
+          "targetId": "t-9c1e",
+          "generation": 1,
+          "expectedRevision": 4,
+          "ref": "r4.2",
+          "field": "password",
+          "secret": "hunter2-golden-fixture",
+          "binding": {
+            "bundleId": "com.example.Writer",
+            "teamId": "EXAMPLE123"
+          }
+        },
+        "deadlineMs": 10000
+      }
+    },
+    {
+      "name": "response-error",
+      "message": {
+        "type": "response",
+        "id": 5,
+        "ok": false,
+        "error": {
+          "code": "STALE_ELEMENT",
+          "message": "r4.1 is from revision 4; current is 6"
+        }
+      }
+    },
+    {
+      "name": "event-act-dispatched",
+      "event": "act.dispatched",
+      "message": {
+        "type": "event",
+        "name": "act.dispatched",
+        "data": { "operationId": "op-1" }
+      }
+    },
+    {
+      "name": "event-act-dispatched-pointer",
+      "event": "act.dispatched",
+      "message": {
+        "type": "event",
+        "name": "act.dispatched",
+        "data": {
+          "operationId": "op-5",
+          "pointer": {
+            "x": 412.5,
+            "y": 230,
+            "visible": true,
+            "to": { "x": 600, "y": 230 }
+          }
+        }
+      }
+    },
+    {
+      "name": "event-target-changed",
+      "event": "target.changed",
+      "message": {
+        "type": "event",
+        "name": "target.changed",
+        "data": { "targetId": "t-9c1e", "revision": 5 }
+      }
+    },
+    {
+      "name": "event-target-capture-stopped",
+      "event": "target.capture.stopped",
+      "message": {
+        "type": "event",
+        "name": "target.capture.stopped",
+        "data": { "targetId": "t-9c1e", "reason": "user" }
+      }
+    },
+    {
+      "name": "cancel",
+      "message": { "type": "cancel", "id": 5 }
+    },
+    {
+      "name": "ping",
+      "message": { "type": "ping", "seq": 7 }
+    },
+    {
+      "name": "pong",
+      "message": { "type": "pong", "seq": 7 }
+    }
+  ]
+}

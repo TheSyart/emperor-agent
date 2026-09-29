@@ -43,6 +43,7 @@ coverage/
 # Build and test outputs
 /build/
 /desktop/out/
+/desktop/out-e2e/
 /desktop/dist/
 /desktop/build/backend/
 /desktop/build/runtime-defaults-manifest.json*

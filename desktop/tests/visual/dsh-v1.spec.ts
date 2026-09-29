@@ -233,6 +233,7 @@ const settingsSections = [
   'general',
   'model',
   'hooks',
+  'computer',
   'memory',
   'tokens',
   'pet',
@@ -296,7 +297,7 @@ for (const theme of ['dark', 'light'] as const) {
     const workspace = page.locator('.workspace-col')
     const launcher = workspace.locator('.workspace-launcher')
     await expect(launcher).toBeVisible()
-    await expect(launcher.locator('.launcher-row')).toHaveCount(4)
+    await expect(launcher.locator('.launcher-row')).toHaveCount(5)
     await expect(
       launcher.locator('.launcher-row[data-pane="browser"]'),
     ).toBeEnabled()
@@ -304,7 +305,7 @@ for (const theme of ['dark', 'light'] as const) {
     const box = (await workspace.boundingBox())!
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(360)
     await shot(page, `workspace-launcher-${theme}`)
-    for (const pane of ['review', 'terminal', 'files', 'browser']) {
+    for (const pane of ['review', 'terminal', 'files', 'browser', 'desktop']) {
       const segment = workspace.locator(`.segments [data-pane="${pane}"]`)
       if (await segment.isDisabled()) continue
       await segment.click()
@@ -535,6 +536,34 @@ test('permission takeover approves once and returns the composer', async ({
   await card.getByRole('button', { name: '允许本次' }).click()
   await expect(card).toBeHidden()
   await expect(page.locator('.composer-root .card')).toBeVisible()
+})
+
+test('computer use grant takeover picks a scope and returns the composer', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualControl=grant')
+  const card = page.locator('[data-takeover="grant"]')
+  await expect(card).toBeVisible()
+  await expect(card.getByTestId('grant-target')).toHaveText(
+    'https://fixture.test/form?utm=1',
+  )
+  await expect(card).toContainText('来自 Agent，未经验证')
+  await shot(page, 'app-grant-card')
+  await card.getByRole('radio', { name: '本会话' }).click()
+  await card.getByRole('button', { name: '允许' }).click()
+  await expect(card).toBeHidden()
+  await expect(page.locator('.composer-root .card')).toBeVisible()
+})
+
+test('computer use grant takeover warns on high-impact actions', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualControl=grant&visualGrant=high-impact')
+  const card = page.locator('[data-takeover="grant"]')
+  await expect(card.getByTestId('grant-high-impact')).toBeVisible()
+  await shot(page, 'app-grant-card-high-impact')
+  await card.getByRole('button', { name: '拒绝' }).click()
+  await expect(card).toBeHidden()
 })
 
 test('plan takeover approves the plan and returns the composer', async ({
@@ -1287,7 +1316,7 @@ test('pet section previews bundled sprites and toggles the pet', async ({
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  for (const section of ['hooks', 'pet', 'diagnostics'] as const) {
+  for (const section of ['hooks', 'computer', 'pet', 'diagnostics'] as const) {
     test(`settings ${section} section fits the column (${theme})`, async ({
       page,
     }) => {
@@ -1307,6 +1336,76 @@ for (const theme of ['dark', 'light'] as const) {
       await shot(page, `settings-${section}-${theme}`)
     })
   }
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`settings computer use: switch, stop and grants (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/build-ui?settings=computer&visualComputerUse=on', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
+    await expect(dialog.locator('[data-driver]')).toHaveCount(3)
+    await expect(dialog).toContainText('⌃⌥⌘.')
+    await expect(dialog).toContainText('http://127.0.0.1:5173')
+    await expect(dialog).toContainText('完全放行')
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `settings-computer-on-${theme}`)
+
+    await dialog
+      .getByRole('button', { name: '撤销 https://docs.example.com 的授权' })
+      .click()
+    await expect(dialog).not.toContainText('https://docs.example.com')
+    await dialog.getByRole('button', { name: '立即停止' }).click()
+    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已急停')
+    await dialog.getByRole('button', { name: '恢复' }).click()
+    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
+
+    // One driver off: spec 00 §6.9 wording, the others stay on.
+    await expect(
+      dialog.locator('#computer-use-driver-desktop'),
+    ).toHaveAttribute('aria-checked', 'true')
+    await dialog.locator('#computer-use-driver-desktop').click()
+    await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
+      'Emperor 内建桌面控制已关闭',
+    )
+    // Narrow a grant one action at a time.
+    await dialog.getByRole('button', { name: '不再允许操作' }).first().click()
+    await expect(
+      dialog.getByRole('button', { name: '不再允许操作' }),
+    ).toHaveCount(0)
+    // Screenshots against the quota, and the stop-shortcut editor.
+    await expect(dialog).toContainText('已保存 14 张截图')
+    await dialog.getByTestId('kill-switch-edit').click()
+    await expect(dialog.getByTestId('kill-switch-capture')).toBeFocused()
+    await page.keyboard.press('Control+Shift+K')
+    await expect(dialog.getByTestId('kill-switch-capture')).toContainText('K')
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `settings-computer-controls-${theme}`)
+    await dialog.getByRole('button', { name: '保存' }).click()
+    await expect(dialog.getByRole('button', { name: '恢复默认' })).toBeVisible()
+
+    // The user's own app lists and the download retention.
+    const sensitive = dialog.getByLabel('添加到敏感应用')
+    await sensitive.fill('com.apple.Notes')
+    await sensitive.press('Enter')
+    await expect(dialog.locator('[data-app-list="sensitive"]')).toContainText(
+      'com.apple.Notes',
+    )
+    await expect(
+      dialog.getByTestId('computer-use-download-retention'),
+    ).toContainText('30 天')
+    await dialog.locator('[data-app-list="protected"]').scrollIntoViewIfNeeded()
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `settings-computer-lists-${theme}`)
+
+    await dialog.locator('#computer-use-enabled').click()
+    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已关闭')
+  })
 }
 
 // ── 插件 › MCP (server cards, add dialog, paste import) ────────────────

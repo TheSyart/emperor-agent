@@ -41,6 +41,7 @@ export const RUNTIME_EVENT_NAMES = [
   'workflow_progress',
   'workflow_started',
   // Host-only events (seq 0, never replayed).
+  'computer_use_changed',
   'environment_changed',
   'environment_install_completed',
   'environment_install_failed',

@@ -26,6 +26,7 @@ describe('settings sections', () => {
       'general',
       'model',
       'hooks',
+      'computer',
       'memory',
       'tokens',
       'pet',

@@ -1,4 +1,4 @@
-export type OptionalCapabilityId = 'watchlist'
+export type OptionalCapabilityId = 'watchlist' | 'computer_use'
 
 export interface OptionalCapabilityPortfolioEntry {
   readonly id: OptionalCapabilityId
@@ -42,6 +42,30 @@ const PORTFOLIO: readonly OptionalCapabilityPortfolioEntry[] = Object.freeze([
     nextReviewOn: NEXT_REVIEW_ON,
     retireCriteria: [
       'The Memory panel and Scheduler entry are both removed',
+      'No owner is assigned by the next scheduled portfolio review',
+    ],
+  }),
+  entry({
+    id: 'computer_use',
+    owner: 'ComputerUseService',
+    status: 'evaluation_gated',
+    defaultMode: 'off',
+    userEntry:
+      'Settings › 电脑操作; workspace 浏览器 / 电脑 panes; permission cards in the conversation',
+    dataAuthority:
+      'grants.json is canonical for GUI grants; vault.json (safeStorage-encrypted) is canonical for credentials; the session log records requests, decisions, auto-approvals and every action without secret values; browser profiles live under ~/.emperor/browser/profiles; computer-use/config.json holds the switches',
+    evaluation: {
+      command: 'npm test --workspace @emperor/core -- src/harness/computer-use',
+      receiptRequiredForMutation: true,
+    },
+    maintenance: {
+      budget: 'high',
+      suite:
+        'src/harness/computer-use, desktop/src/main/computer-use and the platform helpers (plus the Electron fixture-site suite: npm --prefix desktop run e2e:cu)',
+    },
+    nextReviewOn: NEXT_REVIEW_ON,
+    retireCriteria: [
+      'All drivers are disabled for two review cycles with no active grants',
       'No owner is assigned by the next scheduled portfolio review',
     ],
   }),

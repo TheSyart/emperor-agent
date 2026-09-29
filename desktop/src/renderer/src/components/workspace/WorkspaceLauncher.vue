@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
  * WorkspaceLauncher — the right workspace's home: one card row per pane
- * (审查 / 终端 / 文件 / 浏览器) with its glyph, label and shortcut chips (from
+ * (审查 / 终端 / 文件 / 浏览器 / 电脑) with its glyph, label and shortcut chips (from
  * the shortcuts.ts table), vertically centered in the pane at a readable
  * max width. Rows the session cannot use are disabled and say why (no Build
- * project / no git); 浏览器 works for any session.
+ * project / no git); 浏览器 and 电脑 work for any session.
  *
  * Props: availability (hasProject / snapshotLoaded / hasGit).
  * Emits: open(pane).

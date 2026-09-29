@@ -46,6 +46,7 @@
 - [ ] 在对应平台 internal workflow 生成 adapter receipt；receipt 不含 HOME、用户名、token 或完整 PATH。
 - [ ] packaged smoke 证明最小 PATH 下应用可启动，且不会自动安装工具。
 - [ ] packaged smoke 的 Diagnostics receipt 包含 `sandbox.backend/status/provenance=host-os`；macOS 必须是可用 Seatbelt，Linux 必须明确 bwrap available/unavailable/error，Windows 必须明确 unsupported。receipt 不包含 helper 绝对路径、profile、HOME 或 PATH。
+- [ ] macOS packaged smoke 的 Seatbelt receipt 显示 18 条开发命令成功且电脑操作状态拒读；这些命令须在实际打包进程中通过生产 `LocalSandbox` 执行，不能只引用源码单测。
 - [ ] PR/commit 记录 catalog revision、来源、摘要核验方式、许可结论和平台 receipt。
 
 任一项不能确认时，不合并 catalog 变更，也不通过修改 Zod schema、allowlist 或 failure mode 绕过审核。

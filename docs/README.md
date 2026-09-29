@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-09-24<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南和发布流程。
@@ -19,6 +19,7 @@
 | 使用 Tools、Skills、Plugins 或 MCP       | [工具与扩展能力](user/tools-skills-mcp.md)                   |
 | 使用 `/` 命令和真正的新上下文            | [Slash command 平台](architecture/slash-command-platform.md) |
 | 使用定时任务、Hooks 或桌宠               | [定时任务、Hooks 与桌宠](user/automation-collaboration.md)   |
+| 使用受控浏览器或 macOS 桌面操作          | [电脑操作（实验）](user/computer-use.md)                     |
 | 排查启动、模型、数据或打包问题           | [诊断与排障](user/diagnostics-troubleshooting.md)            |
 | 了解系统为什么这样设计                   | [架构总览](architecture/overview.md)                         |
 | 修改或扩展项目                           | [开发指南](development/README.md)                            |
@@ -36,6 +37,7 @@
 - [模型、记忆与附件](user/models-memory-attachments.md)
 - [Tools、Skills 与 MCP](user/tools-skills-mcp.md)
 - [定时任务、Hooks 与桌宠](user/automation-collaboration.md)
+- [电脑操作（实验）](user/computer-use.md)
 - [诊断与排障](user/diagnostics-troubleshooting.md)
 
 ### 架构与开发

@@ -2,6 +2,7 @@
 import type { Component } from 'vue'
 import AskQuestionView from './AskQuestionView.vue'
 import BashView from './BashView.vue'
+import ComputerUseView from './ComputerUseView.vue'
 import DiffView from './DiffView.vue'
 import ExitPlanView from './ExitPlanView.vue'
 import GenericToolCard from './GenericToolCard.vue'
@@ -34,5 +35,6 @@ export const TOOL_BODIES: Readonly<Record<ToolBodyKind, Component>> = {
   scheduler: SchedulerView,
   skill: SkillView,
   workflow: WorkflowView,
+  computer: ComputerUseView,
   generic: GenericToolCard,
 }

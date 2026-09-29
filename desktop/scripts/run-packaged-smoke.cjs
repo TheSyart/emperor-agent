@@ -113,10 +113,16 @@ function resolveAppPath(argv) {
 
 function smokeEnvironment() {
   const env = {
-    HOME: homeRoot,
+    // macOS safeStorage resolves the login Keychain through the account's real
+    // home. State and Chromium data remain isolated by EMPEROR_CONFIG_DIR and
+    // the smoke's temporary cwd; a synthetic HOME makes the encryption probe fail.
+    HOME:
+      process.platform === 'darwin' ? process.env.HOME || homeRoot : homeRoot,
     USERPROFILE: homeRoot,
     EMPEROR_CONFIG_DIR: stateRoot,
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),
+    EMPEROR_SMOKE_NODE: process.execPath,
+    EMPEROR_SMOKE_NPM_CLI: process.env.npm_execpath || '',
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
     APPDATA: join(homeRoot, 'AppData', 'Roaming'),
     LOCALAPPDATA: join(homeRoot, 'AppData', 'Local'),
@@ -159,10 +165,18 @@ function run(executable, args, env) {
       clearTimeout(timer)
       resolvePromise({ code: code ?? 1, stdout, stderr })
     })
+    const timeoutMs = Math.min(
+      180_000,
+      Math.max(5_000, Number(process.env.EMPEROR_SMOKE_TIMEOUT_MS) || 60_000),
+    )
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
-      reject(new Error('packaged smoke timed out after 60 seconds'))
-    }, 60_000)
+      reject(
+        new Error(
+          `packaged smoke timed out after ${Math.ceil(timeoutMs / 1000)} seconds\n${bounded(stderr || stdout)}`,
+        ),
+      )
+    }, timeoutMs)
     timer.unref()
   })
 }
@@ -185,16 +199,25 @@ function validateReceipt(receipt) {
     'glob',
     'grep',
     'terminal',
+    'seatbelt',
     'renderer',
   ]) {
     if (receipt.operations?.[name]?.ok !== true)
       throw new Error(`packaged smoke operation failed: ${name}`)
   }
+  if (
+    receipt.platform === 'darwin' &&
+    (receipt.operations.seatbelt.mode !== 'workspace-write' ||
+      receipt.operations.seatbelt.commands < 18 ||
+      receipt.operations.seatbelt.protectedStateDenied !== true)
+  )
+    throw new Error('packaged macOS Seatbelt command matrix is invalid')
   const renderer = receipt.operations.renderer
   if (
     renderer.nodeGlobalsAbsent !== true ||
     renderer.coreBridge !== true ||
     renderer.coreBootstrap !== true ||
+    renderer.deepLinkRenders !== true ||
     renderer.attachment?.ok !== true ||
     !Number.isSafeInteger(renderer.attachment?.bytes) ||
     renderer.attachment.bytes <= 0 ||

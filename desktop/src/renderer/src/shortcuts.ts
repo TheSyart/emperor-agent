@@ -18,6 +18,7 @@ export type ShortcutAction =
   | 'workspace.terminal'
   | 'workspace.files'
   | 'workspace.browser'
+  | 'workspace.desktop'
   | 'workspace.toggle'
   | 'envCard.toggle'
   | 'sidebar.toggle'
@@ -53,6 +54,13 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { action: 'workspace.terminal', key: '`', ctrl: true, label: '终端' },
   { action: 'workspace.files', key: 'p', mod: true, label: '文件' },
   { action: 'workspace.browser', key: 't', mod: true, label: '浏览器' },
+  {
+    action: 'workspace.desktop',
+    key: 'd',
+    ctrl: true,
+    shift: true,
+    label: '电脑',
+  },
   {
     action: 'workspace.toggle',
     key: 'b',

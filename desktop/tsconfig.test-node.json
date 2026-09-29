@@ -10,6 +10,7 @@
     "src/pet/**/*.js",
     "src/pet/**/*.ts",
     "tests/visual/**/*.ts",
+    "tests/electron/**/*.ts",
     "electron.vite.config.ts",
     "playwright.config.ts"
   ],

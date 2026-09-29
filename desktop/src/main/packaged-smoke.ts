@@ -5,6 +5,9 @@ import { searchProbe, writeJsonAtomic } from '@emperor/core/host-capabilities'
 import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 
+/** The built-in Skills a packaged runtime ships (sorted), nothing more. */
+export const PACKAGED_BUILT_IN_SKILLS = ['computer-use', 'skill-creator']
+
 export interface PackagedSmokeCore {
   bootstrap(): Promise<unknown>
   diagnostics: { get(): Promise<unknown> }
@@ -47,6 +50,15 @@ export interface PackagedSmokeOptions {
   platform: NodeJS.Platform | string
   arch: string
   now?: () => string
+  verifySeatbelt?(
+    workspaceRoot: string,
+    stateRoot: string,
+  ): Promise<{
+    ok: true
+    mode: 'workspace-write'
+    commands: number
+    protectedStateDenied: true
+  }>
   verifyRenderer(): Promise<PackagedRendererSmokeReceipt>
 }
 
@@ -72,6 +84,12 @@ export interface PackagedSmokeReceipt {
     glob: { ok: boolean; matches: number }
     grep: { ok: boolean; matches: number }
     terminal: { ok: boolean; outputBytes: number }
+    seatbelt: {
+      ok: boolean
+      mode: 'workspace-write' | 'not-macos'
+      commands: number
+      protectedStateDenied: boolean
+    }
     renderer: PackagedRendererSmokeReceipt
   }
   installJobs: { before: number; after: number }
@@ -114,8 +132,10 @@ export async function runPackagedSmoke(
     await createSmokeWorkspace(workspaceRoot)
     const bootstrap = asRecord(await opts.core.bootstrap())
     const builtInSkills = skillNames(bootstrap.skills)
-    if (builtInSkills.length !== 1 || builtInSkills[0] !== 'skill-creator')
-      throw new Error('packaged smoke requires only built-in skill-creator')
+    if (builtInSkills.join(',') !== PACKAGED_BUILT_IN_SKILLS.join(','))
+      throw new Error(
+        `packaged smoke requires exactly the built-in skills ${PACKAGED_BUILT_IN_SKILLS.join(', ')}`,
+      )
 
     const diagnostics = asRecord(await opts.core.diagnostics.get())
     const sandbox = packagedSandboxReceipt(diagnostics.sandbox, opts.platform)
@@ -147,6 +167,17 @@ export async function runPackagedSmoke(
       workspaceRoot,
       opts.platform,
     )
+    const seatbelt =
+      opts.platform === 'darwin'
+        ? assertSeatbeltReceipt(
+            await requiredSeatbeltProbe(opts)(workspaceRoot, stateRoot),
+          )
+        : {
+            ok: true as const,
+            mode: 'not-macos' as const,
+            commands: 0,
+            protectedStateDenied: false,
+          }
 
     const environmentAfter = asSmokeStatus(
       await opts.core.environment.getStatus({
@@ -179,6 +210,7 @@ export async function runPackagedSmoke(
         glob: { ok: true, matches: lineCount(globOutput) },
         grep: { ok: true, matches: lineCount(grepOutput) },
         terminal,
+        seatbelt,
         renderer,
       },
       installJobs: { before: jobsBefore, after: jobsAfter },
@@ -205,6 +237,12 @@ export async function runPackagedSmoke(
         glob: { ok: false, matches: 0 },
         grep: { ok: false, matches: 0 },
         terminal: { ok: false, outputBytes: 0 },
+        seatbelt: {
+          ok: false,
+          mode: opts.platform === 'darwin' ? 'workspace-write' : 'not-macos',
+          commands: 0,
+          protectedStateDenied: false,
+        },
         renderer: failedRendererReceipt(),
       },
       installJobs: { before: 0, after: 0 },
@@ -217,6 +255,36 @@ export async function runPackagedSmoke(
     await writeJsonAtomic(receiptPath, receipt).catch(() => {})
     throw error
   }
+}
+
+function requiredSeatbeltProbe(
+  opts: PackagedSmokeOptions,
+): NonNullable<PackagedSmokeOptions['verifySeatbelt']> {
+  if (!opts.verifySeatbelt)
+    throw new Error('packaged macOS smoke requires a Seatbelt command probe')
+  return opts.verifySeatbelt
+}
+
+function assertSeatbeltReceipt(value: {
+  ok: true
+  mode: 'workspace-write'
+  commands: number
+  protectedStateDenied: true
+}): {
+  ok: true
+  mode: 'workspace-write'
+  commands: number
+  protectedStateDenied: true
+} {
+  if (
+    value.ok !== true ||
+    value.mode !== 'workspace-write' ||
+    !Number.isSafeInteger(value.commands) ||
+    value.commands < 18 ||
+    value.protectedStateDenied !== true
+  )
+    throw new Error('packaged Seatbelt command matrix failed')
+  return value
 }
 
 export type PackagedSmokeCoreApi = Pick<
@@ -403,6 +471,7 @@ function assertRendererReceipt(
     value.nodeGlobalsAbsent === true &&
     value.coreBridge === true &&
     value.coreBootstrap === true &&
+    value.deepLinkRenders === true &&
     value.attachment?.ok === true &&
     Number.isSafeInteger(value.attachment.bytes) &&
     value.attachment.bytes > 0 &&
@@ -424,6 +493,7 @@ function assertRendererReceipt(
     nodeGlobalsAbsent: true,
     coreBridge: true,
     coreBootstrap: true,
+    deepLinkRenders: true,
     attachment: { ok: true, bytes: value.attachment.bytes },
     webPreferences: {
       sandbox: true,
@@ -440,6 +510,7 @@ function failedRendererReceipt(): PackagedRendererSmokeReceipt {
     nodeGlobalsAbsent: false,
     coreBridge: false,
     coreBootstrap: false,
+    deepLinkRenders: false,
     attachment: { ok: false, bytes: 0 },
     webPreferences: {
       sandbox: false,

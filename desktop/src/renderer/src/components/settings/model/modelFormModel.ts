@@ -10,9 +10,27 @@ import type {
   ModelExecutionPolicy,
   ModelFallbackTrigger,
   ModelPricing,
+  ModelTestResult,
   ProviderOption,
   ResolvedModelProfile,
 } from '../../../types'
+
+/**
+ * One line for a model test: the latency on success, otherwise why it
+ * failed. A reply that misses the probe (no API error) is named as such,
+ * with the start of the reply, instead of a bare "failed".
+ */
+export function modelTestSummary(result: ModelTestResult): string {
+  if (result.ok) return `通过 · ${result.latencyMs || 0}ms`
+  if (result.error) return result.error
+  const sample = result.sample?.trim() ?? ''
+  const reply = sample
+    ? `（回答：${sample.slice(0, 40)}${sample.length > 40 ? '…' : ''}）`
+    : ''
+  return result.kind === 'vision'
+    ? `没有认出测试图片，这个模型可能看不到图片${reply}`
+    : `没有按要求回答${reply}`
+}
 
 export type ModelProtocol = 'openai' | 'anthropic'
 

@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Emperor Debugger UX Probe",
+  "version": "0.1.0",
+  "description": "Local fixture for E-X2 Chrome debugger warning acceptance.",
+  "permissions": ["activeTab", "debugger", "storage"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "worker.js"
+  }
+}

@@ -1,7 +1,8 @@
 // Tool view registry: wire tool name → leading icon, row title, collapsed
 // summary and the expanded body kind (dsh `tool.call.toolview` keyed slot,
 // as a plain table). Unknown tools fall back to the generic IN/OUT card;
-// `mcp_<server>_<tool>` resolves to the MCP view.
+// `mcp_<server>_<tool>` resolves to the MCP view and `ui_*` / `browser_*` /
+// `desktop_*` to the Computer Use view.
 import type { Component } from 'vue'
 import {
   DsAgent,
@@ -12,6 +13,7 @@ import {
   DsEdit,
   DsGlobe,
   DsGoal,
+  DsInspect,
   DsPlan,
   DsQuestion,
   DsSearch,
@@ -44,6 +46,13 @@ import {
   truncate,
   webCard,
 } from './toolModel'
+import {
+  computerUseSummary,
+  computerUseSuffix,
+  computerUseSuffixTone,
+  computerUseTitle,
+  isComputerUseTool,
+} from './computerUseModel'
 
 /** Expanded-body renderer family (see `bodies.ts`). */
 export type ToolBodyKind =
@@ -62,6 +71,7 @@ export type ToolBodyKind =
   | 'scheduler'
   | 'skill'
   | 'workflow'
+  | 'computer'
   | 'generic'
 
 export interface ToolViewSpec {
@@ -72,6 +82,8 @@ export interface ToolViewSpec {
   summary(data: ToolChatData): string
   /** Non-shrinking summary tail (dsh summarySuffix), e.g. `+2`. */
   suffix?(data: ToolChatData): string | null
+  /** Emphasis of the tail: 'warn' for results the user must notice. */
+  suffixTone?(data: ToolChatData): 'warn' | 'accent' | null
   readonly body: ToolBodyKind
   /** Summary is a file path (rendered as a path link). */
   readonly pathSummary?: boolean
@@ -447,6 +459,17 @@ const mcp: ToolViewSpec = {
   },
 }
 
+const computerUse = (icon: Component): ToolViewSpec => ({
+  icon,
+  body: 'computer',
+  title: (data) => computerUseTitle(data.name),
+  summary: computerUseSummary,
+  suffix: computerUseSuffix,
+  suffixTone: computerUseSuffixTone,
+})
+const browserTool = computerUse(DsBrowse)
+const uiTool = computerUse(DsInspect)
+
 const generic: ToolViewSpec = {
   icon: DsSparkle,
   body: 'generic',
@@ -491,6 +514,13 @@ export const REGISTERED_TOOLS: readonly string[] = Object.keys(REGISTRY)
 /** Resolve one wire tool name. */
 export function toolView(name: string): ToolViewSpec {
   return (
-    REGISTRY[name] ?? (name.startsWith('mcp_') ? mcp : undefined) ?? generic
+    REGISTRY[name] ??
+    (name.startsWith('mcp_') ? mcp : undefined) ??
+    (isComputerUseTool(name)
+      ? name.startsWith('ui_')
+        ? uiTool
+        : browserTool
+      : undefined) ??
+    generic
   )
 }

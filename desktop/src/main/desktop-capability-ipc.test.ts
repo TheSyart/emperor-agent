@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  AGENT_PREVIEW_INPUT_CHANNEL,
+  AGENT_DOWNLOAD_MOVE_CHANNEL,
+  AGENT_DOWNLOAD_REVEAL_CHANNEL,
+  AGENT_PREVIEW_START_CHANNEL,
+  AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
+  BROWSER_PAIRING_APPROVE_CHANNEL,
+  BROWSER_PAIRING_DENY_CHANNEL,
+  BROWSER_PAIRING_REVOKE_CHANNEL,
+  BROWSER_CONNECT_CHANNEL,
+  BROWSER_PAIRING_STATUS_CHANNEL,
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  MAC_HELPER_PERMISSION_CHANNEL,
+  MAC_HELPER_RECONNECT_CHANNEL,
+  MAC_HELPER_STATUS_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
@@ -25,6 +38,218 @@ function fakeBrowser() {
 }
 
 describe('desktop capability IPC', () => {
+  it('redacts pairing secrets and accepts only canonical pairing identities', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const pairingId = 'A'.repeat(21) + 'Q'
+    const bridge = {
+      isListening: true,
+      pendingPairings: () => [
+        {
+          pairingId,
+          extensionId: 'a'.repeat(32),
+          code: '123456',
+          displayed: true,
+          secret: 'must-not-cross-ipc',
+        },
+      ],
+      readyPairings: () => [pairingId],
+      approvePairing: vi.fn(async () => true),
+      denyPairing: vi.fn(() => true),
+      revokePairing: vi.fn(async () => undefined),
+      connectBrowsers: vi.fn(async () => ({
+        browsers: ['chrome', '../evil'],
+      })),
+    }
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      browserPairings: bridge,
+      externalAttachedCount: () => 2,
+    })
+    const status = await ipc.invoke(BROWSER_PAIRING_STATUS_CHANNEL)
+    expect(status).toEqual({
+      bridgeListening: true,
+      pendingPairings: [
+        {
+          pairingId,
+          extensionId: 'a'.repeat(32),
+          code: '123456',
+          displayed: true,
+        },
+      ],
+      pairedConnections: [pairingId],
+      attachedTabs: 2,
+    })
+    expect(JSON.stringify(status)).not.toContain('must-not-cross-ipc')
+    await expect(
+      ipc.invoke(BROWSER_PAIRING_APPROVE_CHANNEL, { pairingId }),
+    ).resolves.toEqual({ approved: true })
+    await expect(
+      ipc.invoke(BROWSER_PAIRING_DENY_CHANNEL, { pairingId }),
+    ).resolves.toEqual({ denied: true })
+    await expect(
+      ipc.invoke(BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }),
+    ).resolves.toEqual({ revoked: true })
+    await expect(
+      ipc.invoke(BROWSER_PAIRING_APPROVE_CHANNEL, { pairingId: '../secret' }),
+    ).rejects.toThrow('invalid browser pairing id')
+    expect(bridge.approvePairing).toHaveBeenCalledTimes(1)
+    expect(bridge.denyPairing).toHaveBeenCalledTimes(1)
+    expect(bridge.revokePairing).toHaveBeenCalledTimes(1)
+    // Only plain browser keys cross back to the renderer.
+    await expect(ipc.invoke(BROWSER_CONNECT_CHANNEL)).resolves.toEqual({
+      browsers: ['chrome'],
+    })
+    expect(authorize).toHaveBeenCalledTimes(6)
+  })
+  it('exposes bounded helper diagnostics and only explicit permission requests', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const requestPermission = vi.fn(async () => ({ opened: true }))
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      macHelper: {
+        status: async () =>
+          ({
+            available: true,
+            connected: true,
+            helperVersion: '1.0',
+            protocol: 1,
+            permissions: {
+              accessibility: 'granted',
+              'screen-recording': 'denied',
+            },
+            lastErrorCode: null,
+            nonce: 'must-not-cross-ipc',
+          }) as never,
+        requestPermission,
+        resetPermission: vi.fn(),
+      },
+    })
+    const status = await ipc.invoke(MAC_HELPER_STATUS_CHANNEL)
+    expect(status).toMatchObject({
+      connected: true,
+      helperVersion: '1.0',
+      protocol: 1,
+      permissions: { accessibility: 'granted', 'screen-recording': 'denied' },
+    })
+    expect(JSON.stringify(status)).not.toContain('must-not-cross-ipc')
+    expect(requestPermission).not.toHaveBeenCalled()
+    await expect(
+      ipc.invoke(MAC_HELPER_PERMISSION_CHANNEL, {
+        permission: 'accessibility',
+      }),
+    ).resolves.toEqual({ opened: true })
+    expect(requestPermission).toHaveBeenCalledWith('accessibility')
+    await expect(
+      ipc.invoke(MAC_HELPER_PERMISSION_CHANNEL, {
+        permission: 'tccutil-reset',
+      }),
+    ).rejects.toThrow(/invalid helper permission/)
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    expect(authorize).toHaveBeenCalledTimes(3)
+  })
+  it('resets only a named helper permission after trusted renderer authorization', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const resetPermission = vi.fn(async () => ({ reset: true }))
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      macHelper: {
+        status: vi.fn(),
+        requestPermission: vi.fn(),
+        resetPermission,
+      } as never,
+    })
+    expect(resetPermission).not.toHaveBeenCalled()
+    await expect(
+      ipc.invoke('emperor:computer-use:mac-helper-reset', {
+        permission: 'screen-recording',
+      }),
+    ).resolves.toEqual({ reset: true })
+    await expect(
+      ipc.invoke('emperor:computer-use:mac-helper-reset', {
+        permission: 'FullDiskAccess',
+      }),
+    ).rejects.toThrow(/invalid helper permission/)
+    expect(resetPermission).toHaveBeenCalledOnce()
+    expect(resetPermission).toHaveBeenCalledWith('screen-recording')
+    expect(authorize).toHaveBeenCalledTimes(2)
+  })
+  it('reconnects the helper only after authorization and returns bounded status', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const reconnect = vi.fn(
+      async () =>
+        ({
+          available: true,
+          connected: false,
+          helperVersion: null,
+          protocol: null,
+          permissions: {
+            accessibility: 'unknown',
+            'screen-recording': 'unknown',
+          },
+          lastErrorCode: 'DRIVER_UNAVAILABLE',
+          reason: 'Helper 在一分钟内崩溃超过 3 次，已停止自动重启',
+          autoRestartSuspended: true,
+          nonce: 'must-not-cross-ipc',
+        }) as never,
+    )
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      macHelper: {
+        status: vi.fn(),
+        requestPermission: vi.fn(),
+        resetPermission: vi.fn(),
+        reconnect,
+      } as never,
+    })
+    expect(reconnect).not.toHaveBeenCalled()
+    const status = await ipc.invoke(MAC_HELPER_RECONNECT_CHANNEL)
+    expect(status).toMatchObject({
+      connected: false,
+      lastErrorCode: 'DRIVER_UNAVAILABLE',
+      autoRestartSuspended: true,
+    })
+    expect(JSON.stringify(status)).not.toContain('must-not-cross-ipc')
+    expect(reconnect).toHaveBeenCalledOnce()
+    reconnect.mockRejectedValueOnce(new Error('/private/path nonce'))
+    const failed = await ipc.invoke(MAC_HELPER_RECONNECT_CHANNEL)
+    expect(failed).toMatchObject({
+      connected: false,
+      reason: '无法连接 Emperor Computer Helper',
+    })
+    expect(JSON.stringify(failed)).not.toContain('/private/path')
+    authorize.mockImplementationOnce(() => {
+      throw new Error('untrusted renderer')
+    })
+    await expect(ipc.invoke(MAC_HELPER_RECONNECT_CHANNEL)).rejects.toThrow(
+      /untrusted renderer/,
+    )
+    expect(reconnect).toHaveBeenCalledTimes(2)
+    expect(authorize).toHaveBeenCalledTimes(3)
+  })
   it('authorizes every request and delegates only capability-shaped inputs', async () => {
     const ipc = new FakeIpcMain()
     const authorize = vi.fn()
@@ -140,13 +365,13 @@ describe('desktop capability IPC', () => {
     await expect(
       ipc.invoke(BROWSER_OPEN_CHANNEL, { url: 'https://example.com/' }),
     ).rejects.toThrow(/not trusted/)
+    // One-way messages are dropped quietly: nothing reaches the view and
+    // nothing is thrown into the main process.
     expect(() =>
       ipc.emit(BROWSER_BOUNDS_CHANNEL, { x: 0, y: 0, width: 640, height: 480 }),
-    ).toThrow(/not trusted/)
-    expect(() => ipc.emit(BROWSER_ACTION_CHANNEL, 'reload')).toThrow(
-      /not trusted/,
-    )
-    expect(() => ipc.emit(BROWSER_CLOSE_CHANNEL)).toThrow(/not trusted/)
+    ).not.toThrow()
+    expect(() => ipc.emit(BROWSER_ACTION_CHANNEL, 'reload')).not.toThrow()
+    expect(() => ipc.emit(BROWSER_CLOSE_CHANNEL)).not.toThrow()
     expect(browser.openUrl).not.toHaveBeenCalled()
     expect(browser.setBounds).not.toHaveBeenCalled()
     expect(browser.action).not.toHaveBeenCalled()
@@ -246,6 +471,118 @@ describe('desktop capability IPC', () => {
 
 type Handler = (event: unknown, payload?: unknown) => unknown
 
+describe('agent preview IPC', () => {
+  const id = 'tab_0f8fad5b-d9cb-469f-a165-70867728950e'
+  function setup(authorize = vi.fn()) {
+    const ipc = new FakeIpcMain()
+    const preview = {
+      start: vi.fn(() => ({ ok: true as const, width: 1280, height: 800 })),
+      stop: vi.fn(),
+      input: vi.fn(() => true),
+    }
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      agentPreview: preview,
+    })
+    return { ipc, preview, authorize }
+  }
+
+  it('starts, stops and forwards input by tab id only', async () => {
+    const { ipc, preview, authorize } = setup()
+    await expect(
+      ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: id }),
+    ).resolves.toEqual({
+      ok: true,
+      width: 1280,
+      height: 800,
+    })
+    ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
+      targetId: id,
+      event: {
+        type: 'mouseDown',
+        x: 10,
+        y: 20,
+        button: 'left',
+        clickCount: 1,
+        url: 'https://x',
+      },
+    })
+    ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
+      targetId: id,
+      event: { type: 'keyDown', key: 'Enter', modifiers: ['meta'] },
+    })
+    ipc.emit(AGENT_PREVIEW_STOP_CHANNEL, { targetId: id })
+    expect(preview.start).toHaveBeenCalledWith(id)
+    expect(preview.input.mock.calls).toEqual([
+      [id, { type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1 }],
+      [id, { type: 'keyDown', key: 'Enter', modifiers: ['meta'] }],
+    ])
+    expect(preview.stop).toHaveBeenCalledWith(id)
+    expect(authorize).toHaveBeenCalledTimes(4)
+  })
+
+  it('accepts a helper desktop window id for the live preview', async () => {
+    const { ipc, preview } = setup()
+    const desktop = 't-256F5CF2-A23D-4041-8ACA-E3C082832F8B'
+    await ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: desktop })
+    ipc.emit(AGENT_PREVIEW_STOP_CHANNEL, { targetId: desktop })
+    expect(preview.start).toHaveBeenCalledWith(desktop)
+    expect(preview.stop).toHaveBeenCalledWith(desktop)
+  })
+
+  it('rejects bad ids, bad input and untrusted senders before delegating', async () => {
+    const { ipc, preview } = setup()
+    await expect(
+      ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: '../x' }),
+    ).rejects.toThrow(/agent target id/)
+    await expect(
+      ipc.invoke(AGENT_PREVIEW_START_CHANNEL, {
+        targetId: 't-256f5cf2-a23d-4041-8aca-e3c082832f8b/../x',
+      }),
+    ).rejects.toThrow(/agent target id/)
+    await expect(
+      ipc.invoke(AGENT_PREVIEW_START_CHANNEL, {
+        targetId: 'https://example.com/',
+      }),
+    ).rejects.toThrow()
+    for (const event of [
+      { type: 'eval', code: 'x' },
+      { type: 'mouseDown', x: 'NaN', y: 1 },
+      { type: 'keyDown', key: 'Enter', modifiers: ['hyper'] },
+      { type: 'text', text: 'x'.repeat(5_000) },
+      { type: 'mouseDown', x: 1, y: 1, button: 'back' },
+    ])
+      expect(() =>
+        ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, { targetId: id, event }),
+      ).not.toThrow()
+    expect(preview.start).not.toHaveBeenCalled()
+    expect(preview.input).not.toHaveBeenCalled()
+
+    const refused = setup(
+      vi.fn(() => {
+        throw new Error('forbidden_ipc_caller')
+      }),
+    )
+    await expect(
+      refused.ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: id }),
+    ).rejects.toThrow(/forbidden/)
+    expect(refused.preview.start).not.toHaveBeenCalled()
+    // A one-way input from an untrusted sender is dropped without throwing.
+    expect(() =>
+      refused.ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
+        targetId: id,
+        event: { type: 'keyDown', key: 'Enter', modifiers: [] },
+      }),
+    ).not.toThrow()
+    expect(refused.preview.input).not.toHaveBeenCalled()
+  })
+})
+
 class FakeIpcMain {
   private readonly handlers = new Map<string, Handler>()
   private readonly listeners = new Map<string, Handler>()
@@ -270,3 +607,73 @@ class FakeIpcMain {
     handler({ sender: 'renderer' }, payload)
   }
 }
+
+describe('agent download reveal IPC', () => {
+  it('reveals inbox files by download id only', async () => {
+    const ipc = new FakeIpcMain()
+    const reveal = vi.fn((id: string) => id === 'dl_0123456789ab')
+    const authorize = vi.fn()
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      agentDownloads: { reveal },
+    })
+    await expect(
+      ipc.invoke(AGENT_DOWNLOAD_REVEAL_CHANNEL, {
+        downloadId: 'dl_0123456789ab',
+      }),
+    ).resolves.toEqual({ ok: true })
+    await expect(
+      ipc.invoke(AGENT_DOWNLOAD_REVEAL_CHANNEL, {
+        downloadId: 'dl_ffffffffffff',
+      }),
+    ).resolves.toMatchObject({ ok: false })
+    for (const downloadId of [
+      '../../etc/passwd',
+      '/Users/me/.ssh/id_rsa',
+      'dl_x',
+    ])
+      await expect(
+        ipc.invoke(AGENT_DOWNLOAD_REVEAL_CHANNEL, { downloadId }),
+      ).rejects.toThrow(/download id/)
+    expect(reveal.mock.calls).toEqual([
+      ['dl_0123456789ab'],
+      ['dl_ffffffffffff'],
+    ])
+    expect(authorize).toHaveBeenCalledTimes(5)
+  })
+
+  it('moves inbox files into the workspace by download id only', async () => {
+    const ipc = new FakeIpcMain()
+    const moveToWorkspace = vi.fn(async (id: string) =>
+      id === 'dl_0123456789ab' ? '/work/downloads/report.csv' : undefined,
+    )
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize: vi.fn(),
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      agentDownloads: { reveal: vi.fn(() => true), moveToWorkspace },
+    })
+    await expect(
+      ipc.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, {
+        downloadId: 'dl_0123456789ab',
+      }),
+    ).resolves.toEqual({ ok: true, path: '/work/downloads/report.csv' })
+    await expect(
+      ipc.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, {
+        downloadId: 'dl_ffffffffffff',
+      }),
+    ).resolves.toMatchObject({ ok: false })
+    await expect(
+      ipc.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, { downloadId: '../x' }),
+    ).rejects.toThrow(/download id/)
+    expect(moveToWorkspace).toHaveBeenCalledTimes(2)
+  })
+})

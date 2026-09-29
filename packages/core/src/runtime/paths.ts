@@ -52,6 +52,8 @@ export type EmperorPathId =
   | 'control'
   | 'goals'
   | 'git'
+  | 'computerUse'
+  | 'browser'
   | 'codeIntelligence'
   | 'migrations'
   | 'writeStaging'
@@ -125,6 +127,8 @@ export interface RuntimePaths {
   controlRoot: string
   goalsRoot: string
   gitRoot: string
+  computerUseRoot: string
+  browserRoot: string
   codeIntelligenceRoot: string
   migrationsRoot: string
   writeStagingRoot: string
@@ -609,6 +613,24 @@ export function createEmperorPathCatalog(
       'lazy',
     ),
     descriptor(
+      'computerUse',
+      join(emperorHome, 'computer-use'),
+      'user',
+      source,
+      true,
+      true,
+      'lazy',
+    ),
+    descriptor(
+      'browser',
+      join(emperorHome, 'browser'),
+      'user',
+      source,
+      true,
+      true,
+      'lazy',
+    ),
+    descriptor(
       'codeIntelligence',
       join(emperorHome, 'code-intelligence'),
       'user',
@@ -721,6 +743,8 @@ export function createEmperorPathCatalog(
         controlRoot: path('control')!,
         goalsRoot: path('goals')!,
         gitRoot: path('git')!,
+        computerUseRoot: path('computerUse')!,
+        browserRoot: path('browser')!,
         codeIntelligenceRoot: path('codeIntelligence')!,
         migrationsRoot: path('migrations')!,
         writeStagingRoot: path('writeStaging')!,

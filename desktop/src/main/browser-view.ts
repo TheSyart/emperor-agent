@@ -13,6 +13,8 @@ import {
   browserNavigationAllowed,
   normalizedBrowserBounds,
 } from './browser-view-policy'
+import { subframeNavigationAllowed } from './computer-use/agent-navigation-policy'
+import { hardenSession } from './computer-use/session-hardening'
 import {
   BROWSER_STATE_CHANNEL,
   type BrowserViewState,
@@ -29,9 +31,6 @@ export const BROWSER_PARTITION = 'emperor-browser'
 export const BROWSER_EXTERNAL_OPEN_INTERVAL_MS = 1_000
 
 const ERR_ABORTED = -3
-
-/** Sessions that already carry the browser hardening (process-wide). */
-const hardenedSessions = new WeakSet<Session>()
 
 export function browserViewWebPreferences(): WebPreferences {
   return {
@@ -131,6 +130,11 @@ export class BrowserViewHost {
     }
     contents.on('will-navigate', (details) => guard(details))
     contents.on('will-redirect', (details) => guard(details))
+    // Sub-frames never reach local files or browser-internal pages.
+    contents.on('will-frame-navigate', (details) => {
+      if (!details.isMainFrame && !subframeNavigationAllowed(details.url))
+        details.preventDefault()
+    })
     contents.on('will-attach-webview', (event) => event.preventDefault())
     // Electron would otherwise answer with the first client certificate.
     contents.on('select-client-certificate', (event, _url, _list, callback) => {
@@ -200,17 +204,6 @@ export class BrowserViewHost {
     }
     this.window.webContents.send(BROWSER_STATE_CHANNEL, state)
   }
-}
-
-function hardenSession(session: Session): void {
-  if (hardenedSessions.has(session)) return
-  hardenedSessions.add(session)
-  session.setPermissionRequestHandler((_contents, _permission, callback) =>
-    callback(false),
-  )
-  session.setPermissionCheckHandler(() => false)
-  session.setDevicePermissionHandler(() => false)
-  session.on('will-download', (event) => event.preventDefault())
 }
 
 async function clearBrowsingData(session: Session): Promise<void> {

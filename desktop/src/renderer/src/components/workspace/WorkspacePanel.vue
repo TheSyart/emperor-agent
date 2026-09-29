@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * WorkspacePanel — the AppFrame's right workspace column: a header (pane
- * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器, launcher home,
+ * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器 / 电脑, launcher home,
  * close) over one pane body. The launcher lists the panes with their
  * shortcuts; every pane is its own async chunk (xterm, the file
  * highlighter and the diff views stay out of the shell bundle). The
@@ -26,6 +26,7 @@
  *   the native view. The pane is keyed by session, so a session switch
  *   remounts it and closes the view.
  * - terminal: session only.
+ * - desktop: session-owned native windows, latest screenshot and target controls.
  *
  * Props:
  * - open: the column is visible (width > 0).
@@ -73,6 +74,7 @@ const GitReviewPane = defineAsyncComponent(() => import('./GitReviewPane.vue'))
 const TerminalPane = defineAsyncComponent(() => import('./TerminalPane.vue'))
 const FilesPane = defineAsyncComponent(() => import('./FilesPane.vue'))
 const BrowserPane = defineAsyncComponent(() => import('./BrowserPane.vue'))
+const DesktopPane = defineAsyncComponent(() => import('./DesktopPane.vue'))
 
 const props = defineProps<{ open: boolean; agentBusy: boolean }>()
 
@@ -88,6 +90,7 @@ const filesPane = ref<{
 const pendingFile = ref<{ path: string; line?: number } | null>(null)
 /** Address a request asked to prefill (BrowserPane never auto-loads it). */
 const browserPrefill = ref<{ url: string; nonce: number } | null>(null)
+const browserAgentFocus = ref<{ targetId: string; nonce: number } | null>(null)
 /** Nonce of a pending review commit-box focus request (0 = none). */
 const commitFocus = ref(0)
 let storedRightWorkspace: RightWorkspaceState | null = null
@@ -126,12 +129,16 @@ watch(sessionId, () => {
   reviewFilterPaths.value = []
   pendingFile.value = null
   browserPrefill.value = null
+  browserAgentFocus.value = null
   commitFocus.value = 0
 })
 // Focus / prefill requests are one-shot: they target the pane showing now.
 watch(pane, (next) => {
   if (next !== 'review') commitFocus.value = 0
-  if (next !== 'browser') browserPrefill.value = null
+  if (next !== 'browser') {
+    browserPrefill.value = null
+    browserAgentFocus.value = null
+  }
 })
 
 // Chat asks for content via requestWorkspace(); the request may predate
@@ -157,6 +164,11 @@ function handleRequest(request: WorkspaceRequest): void {
     }
   if (request.pane === 'browser' && request.url)
     browserPrefill.value = { url: request.url, nonce: request.nonce }
+  if (request.pane === 'browser' && request.agentTargetId)
+    browserAgentFocus.value = {
+      targetId: request.agentTargetId,
+      nonce: request.nonce,
+    }
   void workspace.refresh()
   void nextTick(flushPendingFile)
 }
@@ -259,11 +271,18 @@ async function persistFilesTreeWidth(): Promise<void> {
         <TerminalPane v-if="hasProject" :session-id="sessionId" />
         <p v-else class="workspace-empty">{{ NO_PROJECT_REASON }}</p>
       </template>
+      <DesktopPane
+        v-else-if="pane === 'desktop'"
+        :key="sessionId"
+        :session-id="sessionId"
+      />
       <BrowserPane
-        v-else
+        v-else-if="pane === 'browser'"
         :key="sessionId"
         :visible="open"
         :prefill="browserPrefill"
+        :agent-focus="browserAgentFocus"
+        :session-id="sessionId"
       />
     </div>
   </div>

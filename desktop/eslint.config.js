@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       'out/**',
+      'out-e2e/**',
       'dist/**',
       'build/**',
       'test-results/**',

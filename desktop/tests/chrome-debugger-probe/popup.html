@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Emperor Debugger UX Probe</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        min-width: 280px;
+        margin: 16px;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+      p {
+        line-height: 1.45;
+      }
+      button {
+        display: block;
+        width: 100%;
+        margin-top: 8px;
+        padding: 8px;
+      }
+      #status {
+        min-height: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Chrome 调试提示条实验</h1>
+    <p>
+      只允许附着到
+      <code>http://127.0.0.1:8765/</code>
+      的当前标签页；不读取页面内容，也不发送调试命令。
+    </p>
+    <button id="attach" type="button">附着本机测试页</button>
+    <button id="detach" type="button">结束调试连接</button>
+    <p id="status" role="status" aria-live="polite"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -6,6 +6,7 @@ import {
   Cat,
   Coins,
   Cpu,
+  MousePointerClick,
   Settings,
   Webhook,
 } from 'lucide-vue-next'
@@ -15,6 +16,7 @@ export const SETTINGS_SECTION_ICONS: Record<SettingsModalSection, Component> = {
   general: Settings,
   model: Cpu,
   hooks: Webhook,
+  computer: MousePointerClick,
   memory: Brain,
   tokens: Coins,
   pet: Cat,

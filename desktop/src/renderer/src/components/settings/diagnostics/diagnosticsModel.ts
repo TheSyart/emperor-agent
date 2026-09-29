@@ -1,6 +1,7 @@
 import type {
   AgentDefinitionDiagnosticsPayload,
   CodeIntelligenceDiagnosticsPayload,
+  ComputerUseDiagnosticsPayload,
   DesktopPetPayload,
   DiagnosticsConfigSummary,
   DiagnosticsDependencyPayload,
@@ -20,6 +21,7 @@ import type {
   SubagentSupervisorDiagnosticsPayload,
   WorkspacePolicyDiagnosticsPayload,
 } from '../../../types'
+import { acceleratorLabel } from '../computer/shortcut'
 
 export type DiagnosticTone = 'ok' | 'warn' | 'error' | 'muted'
 
@@ -143,7 +145,10 @@ export function diagnosticRows(
     {
       id: 'desktop',
       title: '桌面能力',
-      rows: [desktopPetRow(diagnostics.desktopPet)],
+      rows: [
+        desktopPetRow(diagnostics.desktopPet),
+        computerUseRow(diagnostics.computerUse),
+      ],
     },
     {
       id: 'dependencies',
@@ -1180,6 +1185,38 @@ function desktopPetRow(
       pet?.autoStartWithWebui ? '跟随 WebUI' : '手动',
     ]),
     tone: lastError ? 'error' : running ? 'ok' : enabled ? 'warn' : 'muted',
+  }
+}
+
+function computerUseRow(
+  computerUse: ComputerUseDiagnosticsPayload | undefined,
+): DiagnosticRow {
+  const base = { id: 'computer-use', label: '电脑操作' }
+  if (!computerUse || computerUse.supported === undefined)
+    return { ...base, value: '未返回', detail: '', tone: 'muted' }
+  if (!computerUse.supported)
+    return { ...base, value: '不可用', detail: '需要桌面应用', tone: 'muted' }
+  if (!computerUse.enabled)
+    return { ...base, value: '已关闭', detail: '', tone: 'muted' }
+  const drivers = (computerUse.drivers ?? [])
+    .filter((driver) => driver.available)
+    .map((driver) => driver.label)
+  const shortcut = computerUse.killSwitch
+  const shortcutText = shortcut?.registered
+    ? `急停 ${acceleratorLabel(shortcut.accelerator)}`
+    : `急停快捷键未注册${shortcut?.error ? `：${shortcut.error}` : ''}`
+  return {
+    ...base,
+    value: computerUse.stopped ? '已急停' : '已开启',
+    detail: joinParts([
+      drivers.length ? drivers.join('、') : '没有可用驱动',
+      `${computerUse.targets ?? 0} 个目标`,
+      shortcutText,
+    ]),
+    tone:
+      computerUse.stopped || !shortcut?.registered || drivers.length === 0
+        ? 'warn'
+        : 'ok',
   }
 }
 

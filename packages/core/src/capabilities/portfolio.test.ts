@@ -7,7 +7,10 @@ describe('optional capability portfolio lifecycle', () => {
   it('registers every maintained optional capability with a complete lifecycle', () => {
     const portfolio = optionalCapabilityPortfolio()
 
-    expect(portfolio.map((item) => item.id)).toEqual(['watchlist'])
+    expect(portfolio.map((item) => item.id)).toEqual([
+      'watchlist',
+      'computer_use',
+    ])
     for (const item of portfolio) {
       expect(item.owner).not.toBe('')
       expect(item.userEntry).not.toBe('')
@@ -22,6 +25,32 @@ describe('optional capability portfolio lifecycle', () => {
         .filter((item) => item.status === 'evaluation_gated')
         .every((item) => item.defaultMode === 'off'),
     ).toBe(true)
+  })
+
+  it('registers computer use exactly as spec 00 §14.4 describes it', () => {
+    const item = optionalCapabilityPortfolio().find(
+      (entry) => entry.id === 'computer_use',
+    )!
+    expect(item).toMatchObject({
+      owner: 'ComputerUseService',
+      status: 'evaluation_gated',
+      defaultMode: 'off',
+      evaluation: {
+        command:
+          'npm test --workspace @emperor/core -- src/harness/computer-use',
+        receiptRequiredForMutation: true,
+      },
+      maintenance: { budget: 'high' },
+      retireCriteria: [
+        'All drivers are disabled for two review cycles with no active grants',
+        'No owner is assigned by the next scheduled portfolio review',
+      ],
+    })
+    expect(item.userEntry).toContain('Settings › 电脑操作')
+    expect(item.userEntry).toContain('permission cards')
+    for (const store of ['grants.json', 'vault.json', 'browser/profiles'])
+      expect(item.dataAuthority).toContain(store)
+    expect(item.maintenance.suite).toContain('platform helpers')
   })
 
   it('returns detached diagnostics data instead of mutable registry authority', () => {

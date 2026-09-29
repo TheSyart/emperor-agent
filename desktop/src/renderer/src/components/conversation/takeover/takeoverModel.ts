@@ -6,11 +6,11 @@ import type {
 
 /**
  * Composer takeover routing: a waiting control interaction replaces the
- * composer with one of three cards. Permission asks become the approval
- * card, other asks the question composer, and (non-provisional) plans the
- * plan review.
+ * composer with one of four cards. Permission asks become the approval
+ * card, Computer Use grant asks the grant card, other asks the question
+ * composer, and (non-provisional) plans the plan review.
  */
-export type TakeoverKind = 'approval' | 'question' | 'plan'
+export type TakeoverKind = 'approval' | 'grant' | 'question' | 'plan'
 
 export interface Takeover {
   kind: TakeoverKind
@@ -26,11 +26,14 @@ export function activeTakeover(
     return { kind: 'plan', interaction }
   }
   if (interaction.kind === 'ask') {
+    const type = interaction.meta?.interaction_type
     return {
       kind:
-        interaction.meta?.interaction_type === 'permission'
+        type === 'permission'
           ? 'approval'
-          : 'question',
+          : type === 'computer_use_grant'
+            ? 'grant'
+            : 'question',
       interaction,
     }
   }

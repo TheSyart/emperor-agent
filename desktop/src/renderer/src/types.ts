@@ -946,6 +946,26 @@ export interface DiagnosticsPayload {
   desktopPet?: DesktopPetPayload & Record<string, unknown>
   environment?: DiagnosticsEnvironmentSummary
   dependencies?: DiagnosticsDependencyPayload
+  computerUse?: ComputerUseDiagnosticsPayload
+}
+
+/** Core diagnostics summary of computer use (no URLs, no grants). */
+export interface ComputerUseDiagnosticsPayload {
+  supported?: boolean
+  enabled?: boolean
+  platform?: string | null
+  stopped?: boolean
+  drivers?: Array<{
+    driver: string
+    stage: string
+    label: string
+    enabled: boolean
+    available: boolean
+    reason?: string
+  }>
+  targets?: number
+  grants?: number
+  killSwitch?: { accelerator: string; registered: boolean; error?: string }
 }
 
 export interface MemoryContextExplanationPayload {

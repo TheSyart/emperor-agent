@@ -88,7 +88,7 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 | `/permissions workspace-write`    | 默认。可以写当前 workspace 和临时目录；超出范围时逐次请求批准 |
 | `/permissions danger-full-access` | 不限制写入，也不弹出审批                                      |
 
-批准只对那一次工具调用有效。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上由系统沙箱执行；其他平台没有沙箱后端，只有 `danger-full-access` 才能运行 Shell 命令。沙箱只限制文件写入，不限制读取和网络。
+批准只对那一次工具调用有效。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上由系统沙箱执行；其他平台没有沙箱后端，只有 `danger-full-access` 才能运行 Shell 命令。受限预设主要限制文件写入；macOS 还拒读 Emperor 的电脑操作状态与浏览器数据，并阻止部分系统 GUI 连接。普通文件读取和互联网访问仍不受此文件沙箱普遍限制。
 
 ### Plan：先规划再执行
 
@@ -274,7 +274,7 @@ npm --prefix desktop run screenshots
 npm --prefix desktop run package:verify
 ```
 
-`package:verify` 会加载真实打包后的 sandboxed renderer，并验证 preload Core bridge 与受管附件协议；仅生成未打包目录不能替代该门禁。
+`package:verify` 使用本地 Preview 配置打包并加载真实的 sandboxed renderer，验证 preload Core bridge 与受管附件协议；在 macOS 上还运行受限 Seatbelt 的开发命令矩阵及电脑操作状态拒读检查。仅生成未打包目录不能替代该门禁。正式签名发布使用独立 release 配置。
 
 分支、目录约定、不应提交的数据和扩展方式统一记录在[开发指南](docs/development/README.md)，README 不重复维护这些规则。
 

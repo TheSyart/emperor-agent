@@ -166,6 +166,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     })
     expect(payload.optionalCapabilities.map((item) => item.id)).toEqual([
       'watchlist',
+      'computer_use',
     ])
     expect(payload.promptSnapshots).toEqual({ count: 0, recent: [] })
     expect(payload.localConfig).not.toHaveProperty('permissions')

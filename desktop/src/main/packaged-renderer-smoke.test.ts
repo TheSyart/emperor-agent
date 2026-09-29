@@ -26,6 +26,7 @@ function fakeWindow(
             bridgeExposed: true,
             rendererSandboxed: true,
             bootstrapOk: true,
+            appMounted: true,
             attachmentOk: true,
             attachmentBytes: 22,
           },
@@ -52,12 +53,14 @@ describe('packaged renderer smoke', () => {
     })
 
     expect(win.loadURL).toHaveBeenCalledWith('app://bundle/index.html')
-    expect(win.webContents.executeJavaScript).toHaveBeenCalledOnce()
+    expect(win.loadURL).toHaveBeenCalledWith('app://bundle/chat/packaged-smoke')
+    expect(win.webContents.executeJavaScript).toHaveBeenCalledTimes(2)
     expect(receipt).toEqual({
       ok: true,
       nodeGlobalsAbsent: true,
       coreBridge: true,
       coreBootstrap: true,
+      deepLinkRenders: true,
       attachment: { ok: true, bytes: 22 },
       webPreferences: {
         sandbox: true,
@@ -94,6 +97,36 @@ describe('packaged renderer smoke', () => {
         },
       }),
     ).rejects.toThrow(/renderer sandbox/i)
+    expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a deep-link reload whose renderer stays blank', async () => {
+    const { win, destroy } = fakeWindow()
+    vi.mocked(win.webContents.executeJavaScript)
+      .mockResolvedValueOnce({
+        nodeGlobalsAbsent: true,
+        bridgeExposed: true,
+        rendererSandboxed: true,
+        bootstrapOk: true,
+        appMounted: true,
+        attachmentOk: true,
+        attachmentBytes: 22,
+      })
+      .mockResolvedValueOnce({ appMounted: false })
+
+    await expect(
+      verifyPackagedRenderer({
+        createWindow: () => win,
+        attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
+        attachmentContent: 'emperor-renderer-smoke',
+        chromiumSandboxDisabledForTest: false,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      }),
+    ).rejects.toThrow(/deep-link-render/)
     expect(destroy).toHaveBeenCalledOnce()
   })
 

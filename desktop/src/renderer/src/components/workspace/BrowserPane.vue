@@ -17,13 +17,23 @@
  * WorkspacePanel keys the pane by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
  *
+ * Agent tabs (computer use): when this session's Agent holds browser tabs, a
+ * tab strip lists them next to 「我的浏览」. Selecting one hides the native
+ * view and shows AgentTabView (frame preview plus pause / take over /
+ * close). Agent tabs belong to Core, not to the pane: unmounting only stops
+ * their preview. The list follows `computer_use_changed` host events.
+ *
  * Props:
  * - visible: the pane is on screen (the workspace column is open).
  * - prefill?: { url, nonce } — address to prefill; a new nonce refills.
+ * - sessionId?: the session whose Agent tabs are listed.
+ * - agentFocus?: { targetId, nonce } — show that Agent tab once it is listed.
  */
+import type { ComputerUseStatusView } from '@emperor/core/runtime-contract'
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   ExternalLink,
   Globe,
   LockKeyhole,
@@ -35,12 +45,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   browserAction,
   closeBrowserView,
+  hasCoreBridge,
+  invokeCore,
   onBrowserState,
+  onCoreEvent,
   openBrowserUrl,
   openExternal,
   type BrowserViewAction,
 } from '../../api/backend'
 import IconButton from '../ui/IconButton.vue'
+import AgentTabView from './AgentTabView.vue'
+import { agentTabsFor, type AgentTabControlAction } from './agentTabsModel'
 import {
   applyBrowserState,
   clearBrowserError,
@@ -53,6 +68,8 @@ import { useBrowserViewBounds } from './useBrowserViewBounds'
 const props = defineProps<{
   visible: boolean
   prefill?: { url: string; nonce: number } | null
+  sessionId?: string | null
+  agentFocus?: { targetId: string; nonce: number } | null
 }>()
 
 const OPEN_FAILED = '无法打开网址'
@@ -80,22 +97,154 @@ const externalLabel = computed(() =>
 )
 const pageLabel = computed(() => state.value?.title || hostOf(pageUrl.value))
 
+// --- Agent tabs (computer use) ---------------------------------------------
+
+const USER_TAB = 'user'
+const computerUse = ref<ComputerUseStatusView | null>(null)
+const selected = ref<string>(USER_TAB)
+const controlBusy = ref(false)
+const controlError = ref('')
+
+const agentTabs = computed(() =>
+  agentTabsFor(computerUse.value, props.sessionId),
+)
+const selectedAgentTab = computed(
+  () => agentTabs.value.find((tab) => tab.targetId === selected.value) ?? null,
+)
+
 useBrowserViewBounds({
   viewport,
-  shown: () => props.visible && !page.value.error,
+  shown: () =>
+    props.visible && !page.value.error && selectedAgentTab.value === null,
 })
 
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+async function refreshAgentTabs(): Promise<void> {
+  if (!hasCoreBridge()) return
+  try {
+    computerUse.value = await invokeCore('computerUse.status')
+  } catch {
+    computerUse.value = null
+  }
+}
+
+function scheduleAgentTabsRefresh(): void {
+  if (refreshTimer !== null) return
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    void refreshAgentTabs()
+  }, 60)
+}
+
+// A renderer reload keeps showing the Agent tab the user was watching.
+const storageKey = (): string | null =>
+  props.sessionId ? `emperor.browserPane.agentTab.${props.sessionId}` : null
+let restoreId: string | null = (() => {
+  try {
+    const key = storageKey()
+    return key === null ? null : sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+})()
+
+watch(selected, (id) => {
+  try {
+    const key = storageKey()
+    if (key === null) return
+    if (id === USER_TAB) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, id)
+  } catch {
+    // per-viewer convenience only
+  }
+})
+
+// A tab that went away falls back to the user's own browsing; the first
+// Agent tab is shown when the user has nothing open.
+watch(agentTabs, (tabs, previous) => {
+  if (restoreId !== null && tabs.some((tab) => tab.targetId === restoreId)) {
+    selected.value = restoreId
+    restoreId = null
+    return
+  }
+  applyFocusRequest()
+  if (selected.value !== USER_TAB && !selectedAgentTab.value)
+    selected.value = USER_TAB
+  const known = new Set((previous ?? []).map((tab) => tab.targetId))
+  const added = tabs.find((tab) => !known.has(tab.targetId))
+  if (added && selected.value === USER_TAB && !hasPage.value)
+    selected.value = added.targetId
+})
+
+// A tool row asked to show its tab: select it now or once the list has it.
+let focusRequest: string | null = null
+watch(
+  () => props.agentFocus,
+  (focus) => {
+    if (!focus?.targetId) return
+    focusRequest = focus.targetId
+    applyFocusRequest()
+    void refreshAgentTabs()
+  },
+  { immediate: true },
+)
+
+function applyFocusRequest(): void {
+  if (focusRequest === null) return
+  if (!agentTabs.value.some((tab) => tab.targetId === focusRequest)) return
+  selected.value = focusRequest
+  focusRequest = null
+}
+
+async function controlAgentTab(action: AgentTabControlAction): Promise<void> {
+  const tab = selectedAgentTab.value
+  if (!tab || controlBusy.value) return
+  controlBusy.value = true
+  controlError.value = ''
+  try {
+    await invokeCore('computerUse.controlTarget', {
+      targetId: tab.targetId,
+      action,
+    })
+    if (action === 'close') selected.value = USER_TAB
+    await refreshAgentTabs()
+  } catch (cause) {
+    controlError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    controlBusy.value = false
+  }
+}
+
+function selectTab(id: string): void {
+  selected.value = id
+  controlError.value = ''
+}
+
 let unsubscribe = () => {}
+let unsubscribeCore = () => {}
 
 onMounted(() => {
   unsubscribe = onBrowserState((next) => {
     page.value = applyBrowserState(page.value, next)
     if (!editing.value) address.value = page.value.state?.url ?? ''
   })
+  unsubscribeCore = onCoreEvent((event) => {
+    if (
+      event &&
+      typeof event === 'object' &&
+      (event as { event?: unknown }).event === 'computer_use_changed'
+    )
+      scheduleAgentTabsRefresh()
+  })
+  void refreshAgentTabs()
 })
 
 onBeforeUnmount(() => {
   unsubscribe()
+  unsubscribeCore()
+  if (refreshTimer !== null) clearTimeout(refreshTimer)
+  // The user's view closes with the pane; Agent tabs keep running in Core.
   closeBrowserView()
 })
 
@@ -104,6 +253,7 @@ watch(
   () => props.prefill,
   (prefill) => {
     if (!prefill?.url) return
+    selected.value = USER_TAB
     address.value = prefill.url
     inputError.value = ''
     void nextTick(() => {
@@ -176,9 +326,53 @@ function hostOf(url: string): string {
 <template>
   <div
     class="browser-pane"
-    :data-state="page.error ? 'error' : hasPage ? 'page' : 'empty'"
+    :data-state="
+      selectedAgentTab
+        ? 'agent'
+        : page.error
+          ? 'error'
+          : hasPage
+            ? 'page'
+            : 'empty'
+    "
   >
-    <header class="browser-toolbar">
+    <nav v-if="agentTabs.length" class="browser-tabs" aria-label="浏览器标签页">
+      <button
+        type="button"
+        class="browser-tab"
+        :aria-pressed="selected === USER_TAB"
+        @click="selectTab(USER_TAB)"
+      >
+        <Globe :size="12" aria-hidden="true" />
+        <span class="browser-tab-title">我的浏览</span>
+      </button>
+      <button
+        v-for="tab in agentTabs"
+        :key="tab.targetId"
+        type="button"
+        class="browser-tab"
+        :data-tone="tab.tone"
+        :aria-pressed="selected === tab.targetId"
+        :title="`${tab.title} · ${tab.label}`"
+        @click="selectTab(tab.targetId)"
+      >
+        <Bot :size="12" aria-hidden="true" />
+        <span class="browser-tab-title">{{ tab.title }}</span>
+        <span class="browser-tab-dot" aria-hidden="true"></span>
+      </button>
+    </nav>
+    <template v-if="selectedAgentTab">
+      <p v-if="controlError" class="browser-input-error" role="alert">
+        {{ controlError }}
+      </p>
+      <AgentTabView
+        class="browser-agent-tab"
+        :tab="selectedAgentTab"
+        :busy="controlBusy"
+        @control="controlAgentTab"
+      />
+    </template>
+    <header v-if="!selectedAgentTab" class="browser-toolbar">
       <IconButton
         label="后退"
         :disabled="!state?.canGoBack"
@@ -244,10 +438,15 @@ function hostOf(url: string): string {
         aria-label="正在加载"
       ></div>
     </header>
-    <p v-if="inputError" class="browser-input-error" role="alert">
+    <p
+      v-if="inputError && !selectedAgentTab"
+      class="browser-input-error"
+      role="alert"
+    >
       {{ inputError }}
     </p>
     <div
+      v-show="!selectedAgentTab"
       ref="viewport"
       class="browser-viewport"
       :aria-busy="loading || undefined"
@@ -284,6 +483,82 @@ function hostOf(url: string): string {
   height: 100%;
   min-height: 0;
   flex-direction: column;
+}
+
+.browser-tabs {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: var(--space-1);
+  overflow-x: auto;
+  padding: var(--space-1-5) var(--space-2) 0;
+  border-bottom: 1px solid var(--border-l1);
+  scrollbar-width: none;
+}
+
+.browser-tab {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 180px;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin-bottom: -1px;
+  padding: var(--space-1) var(--space-2-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-row) var(--radius-row) 0 0;
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  transition: background-color var(--duration-ds-fast) ease;
+}
+
+.browser-tab:hover {
+  background: var(--interactive-bg-hover);
+}
+
+.browser-tab[aria-pressed='true'] {
+  border-color: var(--border-l1);
+  border-bottom-color: rgb(var(--bg-layer-1));
+  background: rgb(var(--bg-layer-1));
+  color: rgb(var(--label-primary));
+}
+
+.browser-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+.browser-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-tab-dot {
+  width: var(--space-1-5);
+  height: var(--space-1-5);
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-fill));
+}
+
+.browser-tab[data-tone='paused'] .browser-tab-dot {
+  background: rgb(var(--warn));
+}
+
+.browser-tab[data-tone='user'] .browser-tab-dot {
+  background: rgb(var(--ok));
+}
+
+.browser-tab[data-tone='stopped'] .browser-tab-dot {
+  background: rgb(var(--danger));
+}
+
+.browser-agent-tab {
+  min-height: 0;
+  flex: 1;
 }
 
 .browser-toolbar {

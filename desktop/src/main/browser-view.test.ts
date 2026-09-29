@@ -289,6 +289,25 @@ describe('BrowserViewHost', () => {
       }
     }
 
+    // Sub-frames: web and inline documents load; local and internal pages do not.
+    for (const [url, allowed] of [
+      ['https://ads.example.net/frame', true],
+      ['about:blank', true],
+      ['about:srcdoc', true],
+      ['data:text/html,hi', true],
+      ['file:///etc/passwd', false],
+      ['chrome://settings', false],
+      ['app://bundle/index.html', false],
+      ['https://token@example.com/', false],
+    ] as const) {
+      const event = { ...navigationEvent(url), isMainFrame: false }
+      contents.emit('will-frame-navigate', event)
+      expect(event.preventDefault, url).toHaveBeenCalledTimes(allowed ? 0 : 1)
+    }
+    const mainFrame = { ...navigationEvent('file:///x'), isMainFrame: true }
+    contents.emit('will-frame-navigate', mainFrame)
+    expect(mainFrame.preventDefault).not.toHaveBeenCalled()
+
     const attach = { preventDefault: vi.fn() }
     contents.emit('will-attach-webview', attach, {}, {})
     expect(attach.preventDefault).toHaveBeenCalledTimes(1)

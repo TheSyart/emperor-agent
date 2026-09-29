@@ -1,0 +1,11 @@
+# E-M3b · ScreenCaptureKit system picker probe
+
+This separate macOS 15.2+ App tests whether a window chosen through `SCContentSharingPicker` can be captured when this **probe's** Screen Recording TCC permission is initially absent. It does not change Emperor's production capture path. Before capturing, it verifies that the picker returned exactly one window owned by the sibling `EmperorAXFixture.app`, whose live bundle ID and signed Team ID match the probe's Team ID. It repeats the live identity check immediately before capture; every other selection is rejected.
+
+Build with `EMPEROR_DEV_SIGN_IDENTITY='<your signing identity>' desktop/native/macos/scripts/assemble-picker-probe.sh`. Before launching, confirm the fixture App is visible and this probe has no existing Screen Recording grant. Open the built App via the GUI, click **Choose fixture window**, and select **Emperor AX Fixture** only. The probe logs preflight permission, picker outcome and capture dimensions to `/tmp/emperor-cu-picker-probe.jsonl`; it discards image pixels and does not log window titles or UI text.
+
+An `capture-succeeded` row with `preflightBefore=false` supports the picker alternative for one selected window. A prior grant, cancellation or capture error does not settle that question. Real macOS UI and TCC observations are required before marking E-M3b complete.
+
+## E-M16 · continuous window stream
+
+E-M16 asks whether a continuous `SCStream` of one window, unlike the one-shot E-M3b capture, gives that window the system's purple sharing badge, and whether that depends on how the filter was made. The picker selection now starts a stream instead of one screenshot (mode `picker`). **Stream fixture directly** builds the filter the Helper itself would use: the signed fixture window from `SCShareableContent`, wrapped in `SCContentFilter(desktopIndependentWindow:)` (mode `direct`; needs the probe's own Screen Recording grant). Both stream at 2 fps with the longest edge at most 640 and no cursor, count complete frames and discard them. **Stop stream** ends the current stream; a stop from the menu-bar sharing control is logged as `stream-stopped` with `reason=system` and its error code. Each stream also logs frame-status changes (for a minimized or off-Space window), frame counts every 5 s and the probe's CPU use.

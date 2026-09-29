@@ -673,7 +673,8 @@ describe('diagnostics settings model', () => {
       'node-runtime',
       'desktop-pet-modules',
     ])
-    expect(desktop.hidden).toBe(1)
+    // Neither the renderer build nor computer use was reported.
+    expect(desktop.hidden).toBe(2)
     const paths = sections[2]!
     expect(
       paths.rows.find((row) => row.id === 'global-state-root'),
@@ -764,5 +765,64 @@ describe('diagnostics settings model', () => {
     )
     expect(shortenHomePaths('C:\\Users\\me\\app')).toBe('~\\app')
     expect(shortenHomePaths('/opt/app')).toBe('/opt/app')
+  })
+})
+
+describe('computer use diagnostics row', () => {
+  const row = (computerUse: Record<string, unknown>) =>
+    diagnosticSections({ computerUse } as never)
+      .find((section) => section.id === 'desktop')!
+      .rows.find((item) => item.id === 'computer-use')
+
+  it('reads off, unsupported, enabled and stopped states', () => {
+    expect(row({ supported: false })).toMatchObject({
+      value: '不可用',
+      tone: 'muted',
+    })
+    expect(row({ supported: true, enabled: false })).toMatchObject({
+      value: '已关闭',
+    })
+    const drivers = [
+      {
+        driver: 'embedded-browser',
+        stage: 'experimental',
+        label: '内置浏览器（基础）',
+        enabled: true,
+        available: true,
+      },
+    ]
+    expect(
+      row({
+        supported: true,
+        enabled: true,
+        stopped: false,
+        drivers,
+        targets: 1,
+        killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
+      }),
+    ).toMatchObject({
+      value: '已开启',
+      tone: 'ok',
+      detail: '内置浏览器（基础） · 1 个目标 · 急停 ⌃⌥⌘.',
+    })
+    expect(
+      row({
+        supported: true,
+        enabled: true,
+        stopped: true,
+        drivers,
+        killSwitch: {
+          accelerator: 'Control+Alt+Shift+.',
+          registered: false,
+          error: '快捷键已被其他应用占用',
+        },
+      }),
+    ).toMatchObject({
+      value: '已急停',
+      tone: 'warn',
+      detail: expect.stringContaining(
+        '急停快捷键未注册：快捷键已被其他应用占用',
+      ),
+    })
   })
 })

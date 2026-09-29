@@ -15,6 +15,7 @@ import type * as _agentRetry from '../harness/agent/retry'
 import type * as _approvalPresets from '../harness/approval/presets'
 import type * as _approvalService from '../harness/approval/service'
 import type * as _compactionEvents from '../harness/compaction/events'
+import type * as _computerUseEvents from '../harness/computer-use/events'
 import type * as _goalTypes from '../harness/goal/types'
 import type * as _hooksTypes from '../harness/hooks/types'
 import type * as _jobsRegistry from '../harness/jobs/registry'
@@ -35,6 +36,7 @@ export type SessionEventAugmentations = [
   typeof _approvalPresets,
   typeof _approvalService,
   typeof _compactionEvents,
+  typeof _computerUseEvents,
   typeof _goalTypes,
   typeof _hooksTypes,
   typeof _jobsRegistry,

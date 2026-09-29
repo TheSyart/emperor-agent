@@ -1,0 +1,69 @@
+:root {
+  font:
+    14px -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #152326;
+  background: #f8faf9;
+}
+body {
+  margin: 0;
+  width: 300px;
+}
+main {
+  padding: 18px;
+}
+h1 {
+  font-size: 17px;
+  margin: 0 0 12px;
+}
+p {
+  line-height: 1.45;
+  margin: 8px 0 12px;
+}
+button {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #164d41;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover {
+  background: #0f3e34;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+button[hidden],
+div[hidden] {
+  display: none;
+}
+#pairing {
+  padding: 10px;
+  background: #e8f1ec;
+  border-radius: 8px;
+}
+#code {
+  display: block;
+  text-align: center;
+  font-size: 28px;
+  letter-spacing: 0.16em;
+  font-variant-numeric: tabular-nums;
+}
+#origin {
+  overflow-wrap: anywhere;
+}
+#message {
+  color: #8b2525;
+}
+.footnote {
+  color: #536967;
+  font-size: 12px;
+}

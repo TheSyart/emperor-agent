@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Emperor Agent</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Emperor Agent</h1>
+      <p id="status" role="status">正在检查连接…</p>
+      <div id="pairing" hidden>
+        <p>请核对 Emperor 中显示的六位码，然后在 Emperor 中确认：</p>
+        <strong id="code" aria-label="配对码"></strong>
+      </div>
+      <p id="origin"></p>
+      <p id="message" role="alert"></p>
+      <button id="connect" type="button" hidden>连接 Emperor</button>
+      <button id="pair" type="button" hidden>开始配对</button>
+      <button id="attach" type="button" hidden>连接当前标签页</button>
+      <button id="disconnect" type="button" hidden>断开本次连接</button>
+      <button id="forget" type="button" hidden>清除配对</button>
+      <p class="footnote">
+        仅在你为当前网站授权并连接标签页后读取页面。密码和输入框内容不会进入语义快照。
+      </p>
+    </main>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

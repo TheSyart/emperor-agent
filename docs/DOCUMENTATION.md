@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、文档作者<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-09-24<br>
 > 事实源：仓库文档结构、`scripts/check.sh`、`scripts/check_public_docs.mjs`
 
 本规范解决三个问题：一份说明应该放在哪里，什么变化必须同步哪些文档，怎样判断文档可以合并。
@@ -61,6 +61,7 @@ Active 文档使用下面的四行状态头：
 | 设置弹窗分区                         | `desktop/src/renderer/src/components/settings/`（`settingsSections.ts`、各 `*Section.vue`、`ui/`）                                    | 用户手册首页的设置分区表、相关用户手册、扩展指南                                   |
 | 外壳、路由、侧栏、快捷键或通知       | `renderer/src/router.ts`、`components/shell/`、`components/sidebar/`、`components/pages/`、`shortcuts.ts`、`runtime/notifications.ts` | 用户手册首页的侧栏入口表、Chat/Build、自动化手册、工具手册、架构总览、扩展指南     |
 | 右侧工作台、环境信息卡或内置浏览器   | `components/workspace/`、`components/conversation/environment/`、`desktop/src/main/browser-view*.ts`、`desktop-capability-ipc.ts`     | Chat/Build、诊断、架构总览、IPC 文档、扩展指南、Changelog                          |
+| 电脑操作驱动、授权、凭据或浏览器配对 | `harness/computer-use/`、`desktop/src/main/computer-use/`、`desktop/extension/`、`desktop/native/`、电脑操作设置页                    | 电脑操作手册、诊断、权限架构、IPC 文档、存储架构、Changelog                        |
 | ToolCatalog 工具或 Pull Request 查询 | `environment/tool-catalog.json`、`environment/catalog.ts`、`workspace/pull-request-browser.ts`、`components/pages/pulls/`             | Chat/Build、诊断、IPC 文档、[ToolCatalog 发布审核](release/tool-catalog-review.md) |
 | Release workflow                     | `.github/workflows/release*.yml` 与发布脚本                                                                                           | Preview/Stable 手册、安全说明、README                                              |
 | 安全边界                             | IPC trust、沙箱与审批、network/store policy                                                                                           | SECURITY、用户安全说明、架构文档                                                   |

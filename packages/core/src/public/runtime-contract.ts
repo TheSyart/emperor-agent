@@ -10,6 +10,36 @@ export type {
 } from '../runtime/types'
 export { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 export type {
+  ActionOutcome,
+  BrowserProfileView,
+  DownloadRecord,
+  DownloadState,
+  UploadRecord,
+  ComputerUseStatusView,
+  ControlIndicatorState,
+  ControlState,
+  CredentialField,
+  CredentialBinding,
+  CredentialHandle,
+  CredentialFillOutcome,
+  DriverCapability,
+  DriverKind,
+  DriverStage,
+  HostPlatform,
+  PermissionStatus,
+  RedactedUiAction,
+  TargetKind,
+  TargetState,
+  UiAction,
+  UiActionClass,
+  UiElement,
+  UiRole,
+  UiGrantScope,
+  UiGrantView,
+  UiTargetScope,
+  UiTargetView,
+} from '../harness/computer-use/types'
+export type {
   AssistantMessage,
   ContentBlock,
   EpochHeader,
@@ -37,3 +67,8 @@ export type {
   WireSessionEvent,
   WireTruncation,
 } from './session-event-types'
+export {
+  SITE_PERMISSION_KINDS,
+  type SitePermission,
+  type SitePermissionKind,
+} from '../harness/computer-use/types'

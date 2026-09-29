@@ -4,10 +4,17 @@
  * through `control.*`; the answer resolves the waiting promise directly (no
  * turn pause, no resume-as-new-turn).
  *
- * Interaction ids on the wire: `approval_<id>`, `ask_<id>`, `plan_<id>`.
+ * Interaction ids on the wire: `approval_<id>`, `ask_<id>`, `plan_<id>`,
+ * `grant_<id>` (Computer Use grant cards).
  */
 
 import type { ApprovalAnswerer, ApprovalOutcome } from '../approval/service'
+import {
+  parseGrantAnswer,
+  type GrantAnswer,
+} from '../computer-use/grants/answer'
+import type { GrantAnswerer } from '../computer-use/grants/ask'
+import type { UiGrantScope } from '../computer-use/types'
 import {
   PERMISSION_ALLOW,
   PERMISSION_DENY,
@@ -46,7 +53,16 @@ interface PendingQuestion {
   reject(error: Error): void
 }
 
-type Pending = PendingApproval | PendingQuestion
+interface PendingGrant {
+  kind: 'grant'
+  id: string
+  sessionId: string
+  allowedScopes: readonly UiGrantScope[]
+  backgroundOffered: boolean
+  resolve(answer: GrantAnswer): void
+}
+
+type Pending = PendingApproval | PendingQuestion | PendingGrant
 
 /** UI answer shape: `{ [questionId]: { option_id?, choice, freeform } }` (legacy `answers` arrays also accepted). */
 export type UiAnswers = Record<string, unknown>
@@ -114,7 +130,9 @@ export class PendingInteractions {
       ? `approval_${entry.id}`
       : entry.kind === 'plan'
         ? `plan_${entry.id}`
-        : `ask_${entry.id}`
+        : entry.kind === 'grant'
+          ? `grant_${entry.id}`
+          : `ask_${entry.id}`
   }
 
   private take(wireId: string): Pending {
@@ -173,6 +191,49 @@ export class PendingInteractions {
       this.changed(entry.sessionId)
     })
 
+  /** Computer Use grant cards (`grant_<id>`); keyed by the root session. */
+  readonly grantAnswerer: GrantAnswerer = (request) =>
+    new Promise<GrantAnswer>((resolve) => {
+      const entry: PendingGrant = {
+        kind: 'grant',
+        id: request.id,
+        sessionId: request.session.id,
+        allowedScopes: request.allowedScopes,
+        backgroundOffered: request.background === true,
+        resolve,
+      }
+      const wireId = this.wireId(entry)
+      this.pending.set(wireId, entry)
+      request.signal?.addEventListener(
+        'abort',
+        () => {
+          if (this.pending.get(wireId) === entry) {
+            this.pending.delete(wireId)
+            this.changed(entry.sessionId)
+            resolve({
+              decision: 'denied',
+              backgroundAllowed: false,
+              cancelled: true,
+            })
+          }
+        },
+        { once: true },
+      )
+      this.changed(entry.sessionId)
+    })
+
+  /** Dismiss every pending grant card (emergency stop); optionally one session. */
+  cancelGrants(sessionId?: string): number {
+    let count = 0
+    for (const [wireId, entry] of [...this.pending]) {
+      if (entry.kind !== 'grant') continue
+      if (sessionId !== undefined && entry.sessionId !== sessionId) continue
+      this.cancel(wireId)
+      count += 1
+    }
+    return count
+  }
+
   /** Session that owns a pending interaction, if pending. */
   sessionOf(wireId: string): string | undefined {
     return this.pending.get(wireId)?.sessionId
@@ -182,6 +243,13 @@ export class PendingInteractions {
   answer(wireId: string, answers: UiAnswers): void {
     const entry = this.pending.get(wireId)
     if (entry === undefined) throw new InteractionNotPendingError(wireId)
+    if (entry.kind === 'grant') {
+      this.take(wireId)
+      entry.resolve(
+        parseGrantAnswer(answers, entry.allowedScopes, entry.backgroundOffered),
+      )
+      return
+    }
     if (entry.kind === 'approval') {
       const answer = uiAnswer(
         answers[PERMISSION_QUESTION_ID] ?? Object.values(answers)[0],
@@ -265,6 +333,12 @@ export class PendingInteractions {
   cancel(wireId: string): void {
     const entry = this.take(wireId)
     if (entry.kind === 'approval') entry.resolve('cancelled')
+    else if (entry.kind === 'grant')
+      entry.resolve({
+        decision: 'denied',
+        backgroundAllowed: false,
+        cancelled: true,
+      })
     else
       entry.reject(new UserQuestionDismissed('the user dismissed the question'))
   }
