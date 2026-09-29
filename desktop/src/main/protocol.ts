@@ -7,6 +7,7 @@ const TRUSTED_CROSS_ORIGIN: Readonly<Record<string, string>> = {
   bundle: 'app://bundle',
   pet: 'app://pet',
   'pet-assets': 'app://pet',
+  'plugin-assets': 'app://bundle',
 }
 
 export function appAssetRequestAccess(

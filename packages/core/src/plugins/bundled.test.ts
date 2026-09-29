@@ -1,6 +1,7 @@
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { checkPluginLogo } from './logo'
 import { resolvePluginPackage } from './manifest-resolver'
 
 const BUNDLED = join(__dirname, '..', '..', 'bundled-plugins')
@@ -37,5 +38,20 @@ describe('packages shipped with Emperor', () => {
         description: '与 GitHub 集成',
       },
     ])
+  })
+
+  it('carry their logo as a small PNG under assets/', () => {
+    for (const name of ['computer-use', 'github']) {
+      const resolved = resolvePluginPackage(join(BUNDLED, name), {
+        strict: true,
+      })
+      expect(resolved.logoPath).toBe(join(BUNDLED, name, 'assets', 'logo.png'))
+      expect(resolved.logoIssue).toBeNull()
+      expect(checkPluginLogo(resolved.logoPath!)).toEqual({ mime: 'image/png' })
+      const png = readFileSync(resolved.logoPath!)
+      // IHDR width and height; the art is scaled down only, never redrawn.
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([384, 384])
+      expect(statSync(resolved.logoPath!).size).toBeLessThan(256 * 1024)
+    }
   })
 })

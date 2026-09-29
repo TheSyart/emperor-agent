@@ -2,10 +2,10 @@
 
 > 文档状态：Active<br>
 > 面向读者：插件设计者、前端开发者、维护者<br>
-> 最后核验：2026-09-29<br>
-> 事实源：`assets/generated/plugin-logos/`、`assets/generated/emperor-agent-logo-mark.png`、`desktop/src/renderer/src/theme/{dark,light}.css`
+> 最后核验：2026-09-30<br>
+> 事实源：`assets/generated/plugin-logos/`、`packages/core/bundled-plugins/*/assets/logo.png`、`assets/generated/emperor-agent-logo-mark.png`、`desktop/src/renderer/src/theme/{dark,light}.css`
 
-本规范约束 Emperor Agent **插件包的展示 Logo**。当前两张设计源图是 [Computer Use](../../assets/generated/plugin-logos/computer-use.png) 和 [GitHub](../../assets/generated/plugin-logos/github.png)。它们已生成并保存在仓库；插件包内的资源加载与界面接入仍按开发任务实施，不能因为文件存在就宣称插件详情已显示这些 Logo。
+本规范约束 Emperor Agent **插件包的展示 Logo**。当前两张设计源图是 [Computer Use](../../assets/generated/plugin-logos/computer-use.png) 和 [GitHub](../../assets/generated/plugin-logos/github.png)。两个受管插件的包内资源是 `packages/core/bundled-plugins/<name>/assets/logo.png`，由源图等比缩小到 384 × 384（`sips -Z 384`，没有其他改动，约 200 KB）；插件列表与详情通过宿主地址显示它们。
 
 ## 共同视觉语言
 
@@ -31,8 +31,8 @@
 ## 资源与接入约定
 
 1. 设计源图存放在 `assets/generated/plugin-logos/<plugin-name>.png`。当前两张源图均为 1254 × 1254 RGBA PNG；四角 alpha 为 0。
-2. 插件包实现时，将选定成品放入各自的 `assets/logo.png`，由根 `plugin.json` 的 `extensions.com.openai.interface.logo` 使用相对路径 `./assets/logo.png` 指向。展示资源仍须经过宿主的安全读取与尺寸限制，不能直接开放任意本地路径。
-3. 列表和详情使用**同一张** Logo，根据容器缩放；不要为同一插件生成材质或渐变方向不同的大小版本。缺失或损坏时显示稳定的回退图标。
+2. 插件包里的成品放在各自的 `assets/logo.png`，由根 `plugin.json` 的 `extensions.com.openai.interface.logo` 用相对路径 `./assets/logo.png` 指向。宿主只读取包内 `./assets/` 下的普通文件，按文件头只接受 PNG、JPEG、WebP，单个不超过 1 MiB；界面拿到的是 `app://plugin-assets/<范围>/<插件 ID>/logo` 这样的地址，碰不到本地路径。
+3. 列表和详情使用**同一张** Logo，根据容器缩放；不要为同一插件生成材质或渐变方向不同的大小版本。缺失、不合规或加载失败时，显示由插件名决定的首字母色块。
 4. 新增插件时，先并排查看现有两张源图，再写新图的提示词：固定方框、渐变、光照和材质，仅替换中心识别图形及必要的对比衬底。第三方插件自带品牌资源可以保留自身身份，不强制改色；受管插件采用本规范。
 
 ## 验收
@@ -41,5 +41,6 @@
 - 按 16、32、64、128 px 检查：16 px 仍能区分光标与猫形；不能只在原始大图中清楚。
 - 检查 PNG 实际 alpha：画布四角透明，方框外没有可见杂点，方框内部不露出背景。
 - 检查包内引用和打包后的真实渲染；设计源图存在不等于插件 UI 已接入。
+- 2026-09-30 在高像素密度下核对过深浅两色的 16、32、64、128 px：两张图都能辨认；16 px 时 Computer Use 的光标位于左上浅金区域，对比略弱，但仍能与猫形区分。
 
 生成方式：使用内置 ImageGen，以 Computer Use 成品作为材质参照编辑 GitHub，要求保留各自中心图形并匹配方框的多段金色渐变、内缘高光和底边深度。后续迭代也应采用**一张目标图 + 一张当前标准图**的对照方式，避免分别生成造成质感漂移。

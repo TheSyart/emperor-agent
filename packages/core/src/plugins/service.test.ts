@@ -850,6 +850,90 @@ describe('PluginApplicationService list and detail', () => {
   })
 })
 
+describe('PluginApplicationService logos', () => {
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(24),
+  ])
+
+  async function withLogo(logo: string, files: PackageFiles) {
+    const home = tempDirectory()
+    const service = new PluginApplicationService({ emperorHome: home })
+    const source = writePackage(
+      join(tempDirectory(), 'kit'),
+      portablePackage('logo-kit', files, {
+        extensions: { 'com.openai': { interface: { logo } } },
+      }),
+    )
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    return { service, digest: preview.digest, home }
+  }
+
+  it('gives a valid logo a host address and serves its bytes to the host', async () => {
+    const { service, digest, home } = await withLogo('./assets/logo.png', {
+      'assets/logo.png': PNG,
+    })
+    const url = `app://plugin-assets/user/logo-kit/logo?v=${digest.slice(0, 8)}`
+    expect(service.list()[0]).toMatchObject({ logo: url })
+    expect(
+      service.detail({ pluginId: 'logo-kit', scope: 'user' }),
+    ).toMatchObject({
+      logo: url,
+      logoIssue: null,
+    })
+    expect(
+      JSON.stringify(service.detail({ pluginId: 'logo-kit', scope: 'user' })),
+    ).not.toContain(home)
+    expect(service.logo({ pluginId: 'logo-kit', scope: 'user' })).toEqual({
+      mime: 'image/png',
+      bytes: PNG,
+    })
+    expect(service.logo({ pluginId: 'nobody', scope: 'user' })).toBeNull()
+  })
+
+  it.each<[string, string, PackageFiles, string]>([
+    [
+      'a broken image',
+      './assets/logo.png',
+      { 'assets/logo.png': 'not an image' },
+      'Logo 不是 PNG、JPEG 或 WebP 图片',
+    ],
+    [
+      'a path outside assets/',
+      '../logo.png',
+      {},
+      'Logo 必须是包内 ./assets/ 下的文件',
+    ],
+    [
+      'an external URL',
+      'https://cdn.example/logo.png',
+      {},
+      'Logo 必须是包内 ./assets/ 下的文件',
+    ],
+    [
+      'a missing file',
+      './assets/gone.png',
+      {},
+      '找不到 Logo：./assets/gone.png',
+    ],
+  ])('falls back for %s and says why', async (_name, logo, files, issue) => {
+    const { service } = await withLogo(logo, files)
+    expect(service.list()[0]).toMatchObject({ logo: null })
+    expect(
+      service.detail({ pluginId: 'logo-kit', scope: 'user' }),
+    ).toMatchObject({
+      logo: null,
+      logoIssue: issue,
+    })
+    expect(service.logo({ pluginId: 'logo-kit', scope: 'user' })).toBeNull()
+  })
+})
+
 describe('PluginApplicationService managed packages', () => {
   function bundled(version = '1.0.0'): string {
     const root = tempDirectory()

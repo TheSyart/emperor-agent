@@ -3,7 +3,9 @@
   "name": "computer-use",
   "version": "1.0.0",
   "description": "让 Emperor 操作浏览器和 Mac 上的应用",
-  "author": { "name": "Emperor Agent" },
+  "author": {
+    "name": "Emperor Agent"
+  },
   "extensions": {
     "com.openai": {
       "interface": {
@@ -11,7 +13,8 @@
         "shortDescription": "让 Emperor 操作浏览器和 Mac 上的应用",
         "longDescription": "开启后，Emperor 可以在内置浏览器、Chrome 和 Mac 应用里观察和操作。开关与「设置 › 电脑操作」的总开关是同一个。",
         "developerName": "Emperor Agent",
-        "category": "效率"
+        "category": "效率",
+        "logo": "./assets/logo.png"
       }
     }
   }

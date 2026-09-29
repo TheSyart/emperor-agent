@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { showcaseScenario } from '../../src/renderer/src/components/conversation/gallery/scenarios'
 import { ShowcaseLog } from '../../src/renderer/src/components/conversation/gallery/showcaseLog'
@@ -124,12 +125,29 @@ function replyTemplate(): VisualSessionLog['events'] {
   return log.events as unknown as VisualSessionLog['events']
 }
 
+/** The logos shipped with Emperor, as data URLs (the harness has no app:// host). */
+function bundledPluginLogos(): Record<string, string> {
+  const root = resolve(
+    process.cwd(),
+    '..',
+    'packages',
+    'core',
+    'bundled-plugins',
+  )
+  return Object.fromEntries(
+    ['github', 'computer-use'].map((name) => [
+      name,
+      `data:image/png;base64,${readFileSync(resolve(root, name, 'assets', 'logo.png')).toString('base64')}`,
+    ]),
+  )
+}
+
 export async function installVisualCoreBridge(
   page: Page,
   options: { sessionLogs?: VisualSessionLog[] } = {},
 ) {
   await page.addInitScript(
-    ({ projectDir, sessionLogs, replyEvents }) => {
+    ({ projectDir, sessionLogs, replyEvents, pluginLogos }) => {
       const now = '2026-06-26T12:00:00.000Z'
       const visualParams = new URLSearchParams(window.location.search)
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
@@ -1701,7 +1719,8 @@ export async function installVisualCoreBridge(
             description: '根据提交生成发布说明',
             developerName: 'Acme',
             format: 'emperor-v1',
-            logo: null,
+            // Unreachable in the harness: the row must fall back to its monogram.
+            logo: 'app://plugin-assets/project/acme%2Frelease-notes/logo?v=cccccccc',
             effective: false,
             toggleable: true,
             uninstallable: true,
@@ -1759,7 +1778,7 @@ export async function installVisualCoreBridge(
             description: '让 Emperor 操作浏览器和 Mac 上的应用',
             developerName: 'Emperor Agent',
             format: 'portable',
-            logo: null,
+            logo: pluginLogos['computer-use'],
             effective: true,
             toggleable: true,
             uninstallable: false,
@@ -1788,7 +1807,7 @@ export async function installVisualCoreBridge(
             description: '与 GitHub 集成',
             developerName: 'Emperor Agent',
             format: 'portable',
-            logo: null,
+            logo: pluginLogos.github,
             effective: true,
             toggleable: true,
             uninstallable: false,
@@ -5068,7 +5087,7 @@ export async function installVisualCoreBridge(
                 category: plugin.scope === 'managed' ? '效率' : null,
                 homepage: null,
                 license: null,
-                logo: null,
+                logo: plugin.logo ?? null,
                 logoIssue: null,
                 prompts: prompts[String(plugin.pluginId)] ?? [],
                 enabled: plugin.enabled,
@@ -5363,6 +5382,7 @@ export async function installVisualCoreBridge(
       projectDir: visualProjectDir,
       sessionLogs: options.sessionLogs ?? defaultSessionLogs(),
       replyEvents: replyTemplate(),
+      pluginLogos: bundledPluginLogos(),
     },
   )
 }

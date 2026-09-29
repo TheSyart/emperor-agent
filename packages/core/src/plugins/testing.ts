@@ -1,6 +1,6 @@
 /**
  * Test fixtures for plugin packages: write a package tree from a file map.
- * JSON values are serialized; strings are written as they are.
+ * JSON values are serialized; strings and buffers are written as they are.
  */
 
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -12,7 +12,7 @@ export const PLUGIN_SCHEMA_URL =
 export const MCP_SCHEMA_URL =
   'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json'
 
-export type PackageFiles = Record<string, string | object>
+export type PackageFiles = Record<string, string | Buffer | object>
 
 export function tempDirectory(prefix = 'emperor-plugin-'): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -25,7 +25,9 @@ export function writePackage(root: string, files: PackageFiles): string {
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(
       target,
-      typeof content === 'string' ? content : JSON.stringify(content, null, 2),
+      typeof content === 'string' || Buffer.isBuffer(content)
+        ? content
+        : JSON.stringify(content, null, 2),
     )
   }
   return root

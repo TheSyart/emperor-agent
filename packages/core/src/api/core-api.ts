@@ -1623,6 +1623,9 @@ export class CoreApi {
     list: () => this.pluginService.list(),
     getDetail: (input: Parameters<PluginApplicationService['detail']>[0]) =>
       this.pluginService.detail(input),
+    /** Electron main-only: a logo's bytes for the `app://plugin-assets` handler. */
+    logo: (input: Parameters<PluginApplicationService['logo']>[0]) =>
+      this.pluginService.logo(input),
     inspect: (input: Parameters<PluginApplicationService['inspect']>[0]) =>
       this.pluginService.inspect(input),
     // Each mutation resolves once its MCP servers and hooks are applied.

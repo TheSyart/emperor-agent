@@ -37,6 +37,7 @@ import {
   resolveMediaRawPath,
   resolveStaticAssetPath,
 } from './protocol'
+import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
@@ -661,6 +662,11 @@ function registerAppProtocol(): void {
         return new Response('attachment not found', { status: 404 })
       return net.fetch(pathToFileURL(attachmentPath).toString())
     }
+    if (url.host === 'plugin-assets')
+      return pluginAssetResponse(
+        url,
+        (input) => coreApi?.plugins.logo(input) ?? null,
+      )
     if (url.host === 'media') {
       const mediaPath = resolveMediaRawPath(request.url, {
         stateRoot: config.stateRoot,

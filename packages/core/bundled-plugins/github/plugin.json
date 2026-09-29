@@ -3,7 +3,9 @@
   "name": "github",
   "version": "1.0.0",
   "description": "与 GitHub 集成",
-  "author": { "name": "Emperor Agent" },
+  "author": {
+    "name": "Emperor Agent"
+  },
   "extensions": {
     "com.openai": {
       "interface": {
@@ -11,7 +13,8 @@
         "shortDescription": "与 GitHub 集成",
         "longDescription": "用本机已登录的 gh 查看 Pull Request、Issue 和 CI 运行记录。只读，不会替你提交、评论或合并。",
         "developerName": "Emperor Agent",
-        "category": "开发"
+        "category": "开发",
+        "logo": "./assets/logo.png"
       }
     }
   }

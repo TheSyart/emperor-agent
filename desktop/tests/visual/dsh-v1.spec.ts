@@ -864,6 +864,63 @@ test('plugin detail fits a narrow window and links Computer Use to its settings'
   await expect(page).toHaveURL(/settings=computer/)
 })
 
+test.describe('plugin logos on a high-density screen', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`logos at 16, 32, 64 and 128 px, and the fallback (${theme})`, async ({
+      page,
+    }) => {
+      await open(page, '/capabilities', { width: 1280, height: 860, theme })
+      const shell = fullPage(page)
+      const github = shell.locator('[data-plugin-id="github"] img.plugin-logo')
+      await expect(github).toBeVisible()
+      // Loaded, not broken.
+      expect(
+        await github.evaluate(
+          (image) => (image as HTMLImageElement).naturalWidth,
+        ),
+      ).toBe(384)
+      // An address that cannot load falls back to the monogram tile.
+      await expect(
+        shell.locator(
+          '[data-plugin-id="acme/release-notes"] .plugin-logo.monogram',
+        ),
+      ).toBeVisible()
+      await shot(page, `plugins-logos-list-${theme}`)
+
+      const sources = await shell
+        .locator('[data-plugin-group="preinstalled"] img.plugin-logo')
+        .evaluateAll((images) =>
+          images.map((image) => (image as HTMLImageElement).src),
+        )
+      await page.evaluate((srcs) => {
+        const board = document.createElement('div')
+        board.id = 'logo-board'
+        board.style.cssText =
+          'position:fixed;inset:auto 24px 24px auto;display:grid;gap:16px;padding:16px;border-radius:12px;background:rgb(var(--bg-layer-2));z-index:99999'
+        for (const src of srcs) {
+          const row = document.createElement('div')
+          row.style.cssText = 'display:flex;align-items:end;gap:16px'
+          for (const size of [16, 32, 64, 128]) {
+            const image = document.createElement('img')
+            image.src = src
+            image.width = size
+            image.height = size
+            row.append(image)
+          }
+          board.append(row)
+        }
+        document.body.append(board)
+      }, sources)
+      await page.waitForTimeout(250)
+      await page.locator('#logo-board').screenshot({
+        path: resolve(screenshotDir, `plugins-logos-sizes-${theme}.png`),
+      })
+    })
+  }
+})
+
 test('plugins page installs a local folder after the preview', async ({
   page,
 }) => {

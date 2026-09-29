@@ -28,6 +28,7 @@ import {
   type PluginPackageVerdict,
 } from './detail'
 import { PluginPackageError } from './errors'
+import { checkPluginLogo, pluginLogoUrl, readPluginLogo } from './logo'
 import {
   findPluginPackageRoot,
   pluginVersionSegment,
@@ -100,6 +101,11 @@ export class PluginApplicationService {
   private readonly bundledPluginRoots: readonly string[]
   private readonly computerUse: PluginComputerUseSwitch | null
   private managedEntries: Map<string, InstalledPluginEntry> | null = null
+  /** Logo checks per file and package digest (content-addressed, so reusable). */
+  private readonly logoChecks = new Map<
+    string,
+    ReturnType<typeof checkPluginLogo>
+  >()
   private readonly previews = new Map<string, PreviewState>()
   /** Installed caches are content-addressed, so a resolution is reusable per path and digest. */
   private readonly resolutions = new Map<string, ResolvedPluginPackage | null>()
@@ -162,7 +168,12 @@ export class PluginApplicationService {
       homepage: resolved?.homepage ?? null,
       license: resolved?.license ?? null,
       logo: summary.logo,
-      logoIssue: resolved?.logoIssue ? scrub(resolved.logoIssue) : null,
+      logoIssue: (() => {
+        const issue =
+          resolved?.logoIssue ??
+          (entry ? this.logoOf(entry, resolved).issue : null)
+        return issue ? scrub(issue) : null
+      })(),
       prompts: [...(resolved?.prompts ?? [])],
       enabled: summary.enabled,
       effective: summary.effective,
@@ -422,6 +433,19 @@ export class PluginApplicationService {
     })
   }
 
+  /** A logo's bytes for the host's asset handler; `null` unless it passes the checks. */
+  logo(input: PluginScopeTarget): { mime: string; bytes: Buffer } | null {
+    let pluginId: string
+    try {
+      pluginId = assertPluginId(input.pluginId)
+    } catch {
+      return null
+    }
+    const entry = this.entryOf(pluginId, input.scope)
+    const resolved = entry ? this.resolveInstalled(entry) : null
+    return resolved?.logoPath ? readPluginLogo(resolved.logoPath) : null
+  }
+
   /** Packages in effect for one project (`null` = chat): active and winning their scope. */
   effectivePackages(
     projectRoot: string | null = this.activeWorkspaceRoot(),
@@ -486,7 +510,7 @@ export class PluginApplicationService {
       description: resolved?.description ?? null,
       developerName: resolved?.developerName ?? null,
       format: resolved?.format ?? null,
-      logo: null,
+      logo: entry ? this.logoOf(entry, resolved).url : null,
       scope,
       version: entry?.version ?? null,
       digest: entry?.digest ?? '',
@@ -513,6 +537,29 @@ export class PluginApplicationService {
         commands: members.commands.length,
         apps: members.apps.length,
       },
+    }
+  }
+
+  /** The host address of a package's logo, or why there is none. */
+  private logoOf(
+    entry: InstalledPluginEntry,
+    resolved: ResolvedPluginPackage | null,
+  ): { url: string | null; issue: string | null } {
+    if (!resolved?.logoPath) return { url: null, issue: null }
+    const key = `${resolved.logoPath}\0${entry.digest}`
+    let check = this.logoChecks.get(key)
+    if (!check) {
+      check = checkPluginLogo(resolved.logoPath)
+      this.logoChecks.set(key, check)
+    }
+    if ('issue' in check) return { url: null, issue: check.issue }
+    return {
+      url: pluginLogoUrl({
+        pluginId: entry.pluginId,
+        scope: entry.scope,
+        digest: entry.digest,
+      }),
+      issue: null,
     }
   }
 
