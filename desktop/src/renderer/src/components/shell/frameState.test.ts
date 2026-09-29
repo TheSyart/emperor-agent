@@ -157,6 +157,14 @@ describe('frame state', () => {
       ),
     ).toEqual(defaultFrameState())
   })
+
+  it('restores the retired 电脑 pane as the launcher', () => {
+    const restored = restoreFrameState(
+      JSON.stringify({ workspace: 640, workspacePane: 'desktop' }),
+    )
+    expect(restored.workspacePane).toBe('launcher')
+    expect(restored.workspace).toBe(640)
+  })
 })
 
 describe('v1 → v2 frame migration', () => {

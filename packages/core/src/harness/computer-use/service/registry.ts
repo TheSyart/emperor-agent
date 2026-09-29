@@ -24,6 +24,7 @@ export interface ScreenshotRecord {
   readonly height: number
   readonly scale: number
   readonly attachmentId: string
+  readonly takenAt: string
 }
 
 export interface TargetRecord {
@@ -35,6 +36,10 @@ export interface TargetRecord {
   readonly appId?: string
   readonly windowRef?: string
   readonly openedAt: string
+  /** The Agent's latest operation on this target. */
+  lastActiveAt: string
+  /** Generation at a credential fill: its picture stays out of previews. */
+  credentialFilledGeneration?: number
   generation: number
   revision: number
   state: TargetState
@@ -74,6 +79,7 @@ export class TargetRegistry {
         ? {}
         : { windowRef: snapshot.windowRef }),
       openedAt: now.toISOString(),
+      lastActiveAt: now.toISOString(),
       generation: snapshot.generation,
       revision: snapshot.revision,
       state: 'attached',
@@ -166,8 +172,28 @@ export function targetOrigin(record: Pick<TargetRecord, 'url'>): string | null {
   return normalizeOrigin(record.url)
 }
 
-export function targetView(record: TargetRecord): UiTargetView {
+/**
+ * Why a preview must not show `record`: a sensitive app, or a credential fill
+ * (desktop windows for good; a browser tab until it navigates).
+ */
+export function previewBlocked(
+  record: TargetRecord,
+  sensitiveApp: boolean,
+): UiTargetView['previewBlocked'] {
+  if (sensitiveApp) return 'sensitive-app'
+  const filled = record.credentialFilledGeneration
+  if (filled === undefined) return undefined
+  return record.driver === 'desktop' || filled === record.generation
+    ? 'credential-filled'
+    : undefined
+}
+
+export function targetView(
+  record: TargetRecord,
+  options: { sensitiveApp?: boolean } = {},
+): UiTargetView {
   const shot = record.screenshots.at(-1)
+  const blocked = previewBlocked(record, options.sensitiveApp === true)
   return {
     targetId: record.targetId,
     ownerSessionId: record.ownerSessionId,
@@ -182,6 +208,8 @@ export function targetView(record: TargetRecord): UiTargetView {
     origin: targetOrigin(record),
     profileId: record.profileId,
     openedAt: record.openedAt,
+    lastActiveAt: record.lastActiveAt,
+    ...(blocked === undefined ? {} : { previewBlocked: blocked }),
     ...(shot === undefined
       ? {}
       : {
@@ -189,6 +217,7 @@ export function targetView(record: TargetRecord): UiTargetView {
             attachmentId: shot.attachmentId,
             width: shot.width,
             height: shot.height,
+            takenAt: shot.takenAt,
           },
         }),
   }

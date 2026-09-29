@@ -178,7 +178,7 @@ describe('WorkspacePanel', () => {
     const panes = [...root.querySelectorAll<HTMLElement>('.launcher-row')].map(
       (el) => el.dataset.pane,
     )
-    expect(panes).toEqual(['review', 'terminal', 'files', 'browser', 'desktop'])
+    expect(panes).toEqual(['review', 'terminal', 'files', 'browser'])
     for (const pane of panes)
       expect(row(root, pane!).querySelectorAll('.kbd').length).toBeGreaterThan(
         1,
@@ -190,7 +190,6 @@ describe('WorkspacePanel', () => {
     expect(row(root, 'terminal').disabled).toBe(false)
     expect(row(root, 'files').disabled).toBe(false)
     expect(row(root, 'browser').disabled).toBe(false)
-    expect(row(root, 'desktop').disabled).toBe(false)
   })
 
   it('disables project panes without a project, keeping the browser', async () => {
@@ -203,7 +202,6 @@ describe('WorkspacePanel', () => {
       expect(segment(root, pane).disabled).toBe(true)
     }
     expect(row(root, 'browser').disabled).toBe(false)
-    expect(row(root, 'desktop').disabled).toBe(false)
     expect(core).not.toHaveBeenCalledWith(
       'workspace.snapshot',
       expect.anything(),
@@ -221,10 +219,11 @@ describe('WorkspacePanel', () => {
     segment(root, 'files').click()
     await flush()
     expect(useFrameState().workspacePane).toBe('files')
-    segment(root, 'desktop').click()
+    segment(root, 'browser').click()
     await flush()
-    expect(useFrameState().workspacePane).toBe('desktop')
-    expect(root.querySelector('.workspace-title')?.textContent).toBe('电脑')
+    expect(useFrameState().workspacePane).toBe('browser')
+    expect(root.querySelector('.workspace-title')?.textContent).toBe('浏览器')
+    expect(segment(root, 'desktop')).toBeNull()
     root
       .querySelector<HTMLButtonElement>('button[aria-label="工作台首页"]')!
       .click()

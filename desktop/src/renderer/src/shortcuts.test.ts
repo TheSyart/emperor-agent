@@ -34,7 +34,6 @@ describe('matchShortcut on macOS', () => {
     ['⌃`', key('`', { ctrlKey: true }), 'workspace.terminal'],
     ['⌘P', key('p', { metaKey: true }), 'workspace.files'],
     ['⌘T', key('t', { metaKey: true }), 'workspace.browser'],
-    ['⌃⇧D', key('D', { ctrlKey: true, shiftKey: true }), 'workspace.desktop'],
     // ⌥ rewrites the character (∫ / ´): the physical key decides.
     [
       '⌥⌘B',
@@ -53,6 +52,12 @@ describe('matchShortcut on macOS', () => {
     ['⌘]', key(']', { metaKey: true }), 'nav.forward'],
   ])('%s', (_label, event, action) => {
     expect(matchShortcut(event, MAC)).toBe(action)
+  })
+
+  it('no longer binds the retired 电脑 pane shortcut', () => {
+    expect(
+      matchShortcut(key('D', { ctrlKey: true, shiftKey: true }), MAC),
+    ).toBeNull()
   })
 
   it('requires the exact modifier set', () => {

@@ -107,6 +107,7 @@ import {
   openWorkspacePane,
   requestWorkspace,
 } from '../../workspace/workspaceState'
+import { previewLayout } from '../computer-use/computerUsePreviewState'
 import { isGitStatus } from '../../workspace/workspaceTypes'
 
 /**
@@ -184,6 +185,8 @@ onDeactivated(() => {
   activated.value = false
 })
 
+let measureHost: (() => void) | null = null
+
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   const host = root.value?.closest<HTMLElement>('.conversation-root')
@@ -195,16 +198,23 @@ onMounted(() => {
       inlineMaxHeight.value = null
       return
     }
+    // The computer-use preview below keeps the column bottom for itself.
     const available =
       host.getBoundingClientRect().bottom -
       card.getBoundingClientRect().top -
-      INLINE_BOTTOM_GAP
+      Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight)
     inlineMaxHeight.value = Math.max(160, Math.round(available))
   }
+  measureHost = measure
   measure()
   resizeObserver = new ResizeObserver(measure)
   resizeObserver.observe(host)
 })
+
+watch(
+  () => previewLayout.reservedHeight,
+  () => measureHost?.(),
+)
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)

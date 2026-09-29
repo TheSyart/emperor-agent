@@ -139,8 +139,9 @@ export async function installVisualCoreBridge(
       const visualQueueEnabled = visualParams.get('visualQueue') === 'on'
       const visualControlMode = visualParams.get('visualControl')
       const visualProgressMode = visualParams.get('visualProgress')
-      // Agent tabs in the Browser pane: `agent` (Agent in control) or
-      // `takeover` (the user took over).
+      // Targets the Agent of chat-main controls: `agent` (one built-in
+      // browser tab) or `stack` (two Mac windows and the tab, for the
+      // conversation's computer-use preview).
       const visualAgentTab = visualParams.get('visualAgentTab')
       // Settings › 电脑操作 with the switch on and two grants.
       const visualComputerUseOn =
@@ -1007,15 +1008,55 @@ export async function installVisualCoreBridge(
         generation: 1,
         revision: 4,
         state: 'attached',
-        control: (visualAgentTab === 'takeover'
-          ? 'user-takeover'
-          : 'agent') as string,
+        control: 'agent' as string,
         title: 'Fixture form',
         url: 'http://127.0.0.1:5173/form',
         origin: 'http://127.0.0.1:5173',
         profileId: 'temporary',
         openedAt: now,
+        lastActiveAt: new Date(Date.parse(now) - 60_000).toISOString(),
       }
+      const visualWindow = (
+        targetId: string,
+        title: string,
+        appId: string,
+        ageMs: number,
+      ) => ({
+        targetId,
+        ownerSessionId: 'chat-main',
+        kind: 'desktop-window',
+        driver: 'desktop',
+        generation: 1,
+        revision: 3,
+        state: 'attached',
+        control: 'agent',
+        title,
+        url: `app:${appId}`,
+        origin: null,
+        profileId: 'desktop',
+        openedAt: now,
+        lastActiveAt: new Date(Date.parse(now) - ageMs).toISOString(),
+      })
+      const visualTargets = () =>
+        visualAgentTab === 'stack'
+          ? [
+              visualWindow(
+                't-6F1C2E00-0000-4000-8000-000000000001',
+                '季度计划.rtf',
+                'com.apple.TextEdit',
+                5_000,
+              ),
+              visualWindow(
+                't-6F1C2E00-0000-4000-8000-000000000002',
+                '下载',
+                'com.apple.finder',
+                30_000,
+              ),
+              visualAgentTarget,
+            ]
+          : visualAgentTab
+            ? [visualAgentTarget]
+            : []
       const visualComputerUseState = {
         enabled: visualComputerUseOn,
         stopped: false,
@@ -1119,7 +1160,7 @@ export async function installVisualCoreBridge(
               reason: '尚未开放',
             },
           ],
-          targets: visualAgentTab ? [visualAgentTarget] : [],
+          targets: visualTargets(),
           grants: on ? visualComputerUseState.grants : [],
           screenshots: visualComputerUseState.screenshots,
           downloadRetentionDays: visualComputerUseState.downloadRetentionDays,
@@ -1143,7 +1184,13 @@ export async function installVisualCoreBridge(
         ctx.fillRect(0, 0, 1280, 800)
         ctx.fillStyle = '#1f2937'
         ctx.font = '600 40px -apple-system, sans-serif'
-        ctx.fillText('Sign up for the fixture newsletter', 80, 120)
+        ctx.fillText(
+          targetId.startsWith('t-')
+            ? `Window ${targetId.slice(-1)}: quarterly plan`
+            : 'Sign up for the fixture newsletter',
+          80,
+          120,
+        )
         ctx.font = '28px -apple-system, sans-serif'
         const fields = ['Name', 'Email', 'Password', 'Country']
         fields.forEach((label, index) => {

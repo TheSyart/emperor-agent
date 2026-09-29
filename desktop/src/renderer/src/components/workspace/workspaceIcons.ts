@@ -3,7 +3,6 @@ import {
   FileText,
   GitCompareArrows,
   Globe,
-  Monitor,
   SquareTerminal,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
@@ -14,5 +13,4 @@ export const WORKSPACE_PANE_ICONS: Record<WorkspaceContentPane, Component> = {
   terminal: SquareTerminal,
   files: FileText,
   browser: Globe,
-  desktop: Monitor,
 }

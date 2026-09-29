@@ -627,7 +627,6 @@ useShortcuts({
   'workspace.terminal': workspaceShortcut('terminal'),
   'workspace.files': workspaceShortcut('files'),
   'workspace.browser': workspaceShortcut('browser'),
-  'workspace.desktop': workspaceShortcut('desktop'),
   'workspace.toggle': workspaceShortcut(),
   'envCard.toggle': () => frameActions.toggleEnvCard(frame),
   'sidebar.toggle': () => frameActions.toggleSidebar(frame),

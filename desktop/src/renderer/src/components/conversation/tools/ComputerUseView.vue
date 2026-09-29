@@ -3,9 +3,9 @@
  * ComputerUseView — expanded body for GUI tool rows: driver and approval
  * badges, the target (title + URL as plain text), a prominent "result
  * unknown" notice, the structured error with its hint, a screenshot
- * thumbnail when the result saved one, then the raw IN/OUT card. Rows of
- * an embedded-browser target offer 「在浏览器面板查看」, which opens the
- * workspace Browser pane on that Agent tab (if it is still open).
+ * thumbnail when the result saved one, then the raw IN/OUT card. Rows of a
+ * target the conversation preview still shows offer 「查看画面」, which
+ * brings it to the front of the preview and enlarges it.
  */
 import { computed, ref } from 'vue'
 import { attachmentRawUrl } from '../../../api/attachments'
@@ -16,7 +16,10 @@ import {
 } from '../../../api/backend'
 import type { ToolChatData } from '../../../conversation/types'
 import Pill from '../../ui/Pill.vue'
-import { requestWorkspace } from '../../workspace/workspaceState'
+import {
+  previewShownTargets,
+  requestPreviewFocus,
+} from '../computer-use/computerUsePreviewState'
 import GenericToolCard from './GenericToolCard.vue'
 import {
   DOWNLOAD_STATE_LABEL,
@@ -33,13 +36,15 @@ const props = defineProps<{ data: ToolChatData }>()
 const meta = computed(() => computerUseMeta(props.data))
 const unknown = computed(() => computerUseUnknown(meta.value))
 const shot = computed(() => meta.value?.screenshot)
-const agentTab = computed(() =>
-  meta.value?.driver === 'embedded-browser' ? meta.value.targetId : undefined,
-)
+const previewTarget = computed(() => {
+  const targetId = meta.value?.targetId
+  return targetId && previewShownTargets().value.has(targetId)
+    ? targetId
+    : undefined
+})
 
-function showAgentTab(): void {
-  if (agentTab.value)
-    requestWorkspace({ pane: 'browser', agentTargetId: agentTab.value })
+function showPreview(): void {
+  if (previewTarget.value) requestPreviewFocus(previewTarget.value)
 }
 
 const mismatch = computed(() => computerUseBindingMismatch(props.data))
@@ -100,12 +105,12 @@ async function moveDownload(): Promise<void> {
         >{{ OUTCOME_LABEL[meta.outcome] ?? meta.outcome }}</Pill
       >
       <button
-        v-if="agentTab"
+        v-if="previewTarget"
         type="button"
         class="show-tab"
-        @click="showAgentTab"
+        @click="showPreview"
       >
-        在浏览器面板查看
+        查看画面
       </button>
     </div>
     <div v-if="meta?.title || meta?.url" class="target">

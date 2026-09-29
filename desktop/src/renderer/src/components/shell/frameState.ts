@@ -23,9 +23,13 @@ import {
   WORKSPACE_MIN,
 } from './columns'
 
-/** Right workspace panes; `launcher` is the pane picker (home). */
+/**
+ * Right workspace panes; `launcher` is the pane picker (home). The retired
+ * 电脑 pane (`desktop`, now the conversation's computer-use preview) is not a
+ * pane any more: a persisted `desktop` restores as the launcher.
+ */
 export type WorkspacePane =
-  'launcher' | 'review' | 'terminal' | 'files' | 'browser' | 'desktop'
+  'launcher' | 'review' | 'terminal' | 'files' | 'browser'
 
 export const WORKSPACE_PANES: readonly WorkspacePane[] = [
   'launcher',
@@ -33,7 +37,6 @@ export const WORKSPACE_PANES: readonly WorkspacePane[] = [
   'terminal',
   'files',
   'browser',
-  'desktop',
 ]
 
 export interface FrameState {

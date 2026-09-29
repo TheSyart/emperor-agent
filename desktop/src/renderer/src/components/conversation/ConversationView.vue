@@ -15,6 +15,11 @@
  * composer stack pad their inline end by the card width so nothing sits
  * under it; narrower, the card overlays the chat (Escape closes it).
  *
+ * The computer-use preview (read-only pictures of the windows and tabs the
+ * Agent controls) sits at the bottom right of the view area, below the
+ * environment card; from 1120px the chat body pads for it as well,
+ * narrower it folds into a chip.
+ *
  * A tool row's Inspect opens the trajectory inspector column and routes to
  * `/chat/:id/trajectory?call=<id>`; the trajectory selects that call (paging
  * older history in when needed) and reports `inspect-applied`, which drops
@@ -74,12 +79,16 @@ import {
   isChildLineage,
 } from './conversationModel'
 import { TrajectoryViewAsync } from '../trajectory/lazy'
+import { previewShownTargets } from './computer-use/computerUsePreviewState'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import { activeTakeover } from './takeover/takeoverModel'
 import { activeTurnTick, turnTicks } from './timelineModel'
 
 const EnvironmentCard = defineAsyncComponent(
   () => import('./environment/EnvironmentCard.vue'),
+)
+const ComputerUsePreviewStack = defineAsyncComponent(
+  () => import('./computer-use/ComputerUsePreviewStack.vue'),
 )
 const TurnScrubber = defineAsyncComponent(() => import('./TurnScrubber.vue'))
 /** Fewest turns that earn the scrubber. */
@@ -201,6 +210,22 @@ const envCardShown = computed(
     frame.envCardOpen &&
     Boolean(viewingId.value) &&
     phase.value !== 'hero',
+)
+/** The computer-use preview seat: Chat tab, active phase, a root session. */
+const cuPreviewSeat = computed(
+  () =>
+    tab.value === 'chat' &&
+    phase.value === 'active' &&
+    Boolean(viewingId.value) &&
+    !viewingDraft.value &&
+    !child.value,
+)
+const cuPreviewShown = computed(
+  () => cuPreviewSeat.value && previewShownTargets().value.size > 0,
+)
+/** A question or card waits for the user in the viewed session. */
+const awaitingUser = computed(() =>
+  Boolean(viewingId.value && ctx.pendingInteractionsBySession[viewingId.value]),
 )
 /** A persisted Build session bound to a project (git rows, changes pill). */
 const buildSession = computed(
@@ -576,6 +601,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     :data-phase="phase"
     :data-tab="tab"
     :data-env-card="envCardShown || undefined"
+    :data-cu-preview="cuPreviewShown || undefined"
     aria-label="对话"
   >
     <ConversationHeader
@@ -637,6 +663,14 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         @reveal="revealRow"
         @open-subagent="openSubagent"
         @close="closeEnvCard"
+      />
+
+      <!-- Computer-use preview seat (Chat tab): bottom right, read-only. -->
+      <ComputerUsePreviewStack
+        v-if="cuPreviewSeat && viewingId"
+        :key="viewingId"
+        :session-id="viewingId"
+        :awaiting="awaitingUser"
       />
     </div>
 
@@ -764,7 +798,8 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
    (no transition on the padding — the card appears at once). */
 @container conversation (min-width: 1120px) {
   .conversation-root[data-env-card] .chat-body-slot,
-  .conversation-root[data-env-card] .stack {
+  .conversation-root[data-env-card] .stack,
+  .conversation-root[data-cu-preview] .chat-body-slot {
     padding-inline-end: calc(var(--env-card-width) + var(--space-4));
   }
 }

@@ -422,10 +422,19 @@ export interface UiTargetView {
   readonly origin: string | null
   readonly profileId: string
   readonly openedAt: string
+  /** The Agent's latest operation on this target (the preview stacks by it). */
+  readonly lastActiveAt?: string
+  /**
+   * The conversation preview must not show this target's picture: an app the
+   * user marked sensitive, or a window / page that received a credential
+   * (a browser tab until it navigates).
+   */
+  readonly previewBlocked?: 'sensitive-app' | 'credential-filled'
   readonly lastScreenshot?: {
     readonly attachmentId: string
     readonly width: number
     readonly height: number
+    readonly takenAt: string
   }
 }
 

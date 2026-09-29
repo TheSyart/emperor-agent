@@ -724,7 +724,33 @@ export class ComputerUseService {
   }
 
   listTargets(ownerSessionId?: string): UiTargetView[] {
-    return this.registry.live(ownerSessionId).map(targetView)
+    return this.registry.live(ownerSessionId).map((record) =>
+      targetView(record, {
+        sensitiveApp:
+          record.appId !== undefined && this.isSensitiveApp(record.appId),
+      }),
+    )
+  }
+
+  /**
+   * Stamp the Agent's operation on a target; the conversation preview stacks
+   * the latest on top, so a change of the latest target is announced.
+   */
+  private touch(targetId: string): void {
+    const record = this.registry.get(targetId)
+    if (record === undefined) return
+    const latest = this.registry
+      .live(record.ownerSessionId)
+      .reduce<TargetRecord | undefined>(
+        (best, item) =>
+          best === undefined || item.lastActiveAt > best.lastActiveAt
+            ? item
+            : best,
+        undefined,
+      )
+    record.lastActiveAt = this.now().toISOString()
+    if (latest !== undefined && latest !== record)
+      this.changed('targets', record.ownerSessionId)
   }
 
   select(identity: UiCallerIdentity, targetId: string): TargetRecord {
@@ -852,6 +878,7 @@ export class ComputerUseService {
     try {
       release = await this.mutex.acquire(lockKey, signal)
       if (signal.aborted) throw new Error(ABORTED)
+      this.touch(lockKey)
       const value = await body(signal)
       const detail = settle(value)
       this.journal.settle(op, detail.outcome ?? 'observed', {
@@ -1392,6 +1419,7 @@ export class ComputerUseService {
       height: capture.height,
       scale: capture.scale,
       attachmentId: audit.attachmentId,
+      takenAt: this.now().toISOString(),
     })
     this.changed('targets', record.ownerSessionId)
     return {
@@ -1802,6 +1830,9 @@ export class ComputerUseService {
       }),
     )
     this.refresh(record, driver)
+    // A window or page that received a secret stays out of previews.
+    record.credentialFilledGeneration = record.generation
+    this.changed('targets', record.ownerSessionId)
     this.append(record.ownerSessionId, 'ui/credential-used', {
       operationId: op.operationId,
       handleId: input.handleId,
@@ -1890,6 +1921,9 @@ export class ComputerUseService {
       }),
     )
     this.refresh(record, driver)
+    // A window or page that received a secret stays out of previews.
+    record.credentialFilledGeneration = record.generation
+    this.changed('targets', record.ownerSessionId)
     this.append(record.ownerSessionId, 'ui/credential-used', {
       operationId: op.operationId,
       handleId: input.handleId,

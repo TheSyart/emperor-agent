@@ -469,6 +469,8 @@ describe('desktop_* tools', () => {
     })
     expect(k.credentialFills).toBe(1)
     expect(JSON.stringify(filled)).not.toContain('private-password')
+    // The conversation preview never shows a window that received a secret.
+    expect(k.service.listTargets()[0]?.previewBlocked).toBe('credential-filled')
   })
 
   it('lists, binds, observes and screenshots with an exact-window grant', async () => {
@@ -834,6 +836,10 @@ describe('desktop_* tools', () => {
     await sensitive.run('desktop_list_windows')
     await sensitive.run('desktop_bind', { windowRef: 'window-1' })
     expect(sensitive.captures).toEqual([false])
+    expect(sensitive.service.listTargets()[0]?.previewBlocked).toBe(
+      'sensitive-app',
+    )
+    expect(k.service.listTargets()[0]?.previewBlocked).toBeUndefined()
   })
 
   it('treats the menu-bar Stop Sharing as the user taking the window over', async () => {

@@ -18,6 +18,7 @@ function setup(
     enabled?: boolean
     mode?: 'unrestricted' | 'scoped'
     screenshots?: ScreenshotLedger
+    now?: () => Date
   } = {},
 ) {
   let mode = options.mode ?? 'unrestricted'
@@ -59,6 +60,7 @@ function setup(
       authorizationMode: mode,
     }),
     onChanged: (reason) => changes.push(reason),
+    ...(options.now === undefined ? {} : { now: options.now }),
   })
   return {
     store,
@@ -730,6 +732,45 @@ describe('ComputerUseService', () => {
     expect(k.service.listTargets()[0]!.lastScreenshot?.attachmentId).toBe(
       'att_2',
     )
+  })
+
+  it('orders targets by their latest operation and dates their screenshots', async () => {
+    let clock = Date.parse('2026-09-29T10:00:00.000Z')
+    const k = setup({ now: () => new Date(clock) })
+    const first = await openForm(k)
+    clock += 1_000
+    const second = await openForm(k, '/spa')
+    const view = (targetId: string) =>
+      k.service.listTargets().find((target) => target.targetId === targetId)!
+    expect(view(first.record.targetId).lastActiveAt).toBe(
+      '2026-09-29T10:00:00.000Z',
+    )
+    expect(view(second.record.targetId).lastActiveAt).toBe(
+      '2026-09-29T10:00:01.000Z',
+    )
+    clock += 1_000
+    await k.service.act(ctx(), {
+      targetId: first.record.targetId,
+      action: { kind: 'fill', ref: first.ref('Name'), text: 'a' },
+    })
+    expect(view(first.record.targetId).lastActiveAt).toBe(
+      '2026-09-29T10:00:02.000Z',
+    )
+    clock += 1_000
+    await k.service.screenshot(ctx(), { targetId: second.record.targetId })
+    expect(view(second.record.targetId).lastScreenshot).toMatchObject({
+      takenAt: '2026-09-29T10:00:03.000Z',
+    })
+    expect(view(second.record.targetId).lastActiveAt).toBe(
+      '2026-09-29T10:00:03.000Z',
+    )
+    // Operations on a target that is already the latest do not re-announce it.
+    const announced = k.changes.length
+    await k.service.observe(
+      ctx({ ticket: { kind: 'auto', actionClass: 'observe' } }),
+      { targetId: second.record.targetId },
+    )
+    expect(k.changes.length).toBe(announced)
   })
 
   it('deletes the oldest screenshots past the quota and clears on request', async () => {
