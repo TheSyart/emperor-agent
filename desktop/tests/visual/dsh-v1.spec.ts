@@ -793,12 +793,35 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
     })
     const dialog = fullPage(page)
-    await dialog.getByRole('button', { name: 'Release Notes' }).click()
-    const card = dialog.locator('[data-plugin-id="acme/release-notes"]')
-    await expect(card.getByText('签名未验证 · 未激活')).toBeVisible()
-    await expect(card.getByRole('switch', { name: '启用' })).toBeVisible()
+    // Installed and preinstalled lists, then a plugin's detail.
+    await expect(
+      dialog.locator('[data-plugin-group="installed"]'),
+    ).toBeVisible()
+    await expect(
+      dialog.locator(
+        '[data-plugin-group="preinstalled"] [data-plugin-id="github"]',
+      ),
+    ).toBeVisible()
+    await shot(page, `settings-plugins-list-${theme}`)
+    await dialog.locator('[data-plugin-id="acme/release-notes"]').click()
+    const detail = dialog.locator('[data-plugin-detail="acme/release-notes"]')
+    await expect(detail.getByText('签名未验证 · 未激活')).toBeVisible()
+    await expect(detail.getByRole('switch', { name: '启用' })).toBeVisible()
     await expectPageColumnFits(page)
     await shot(page, `settings-plugins-card-${theme}`)
+    await detail.getByRole('button', { name: '全部插件' }).click()
+    await dialog.locator('[data-plugin-id="emperor/web-research"]').click()
+    const members = dialog.locator(
+      '[data-plugin-detail="emperor/web-research"]',
+    )
+    await expect(members.locator('[data-member-group="skill"]')).toBeVisible()
+    await expect(
+      members.getByText('与个人的同名 Skill 冲突，未生效'),
+    ).toBeVisible()
+    await expect(members.locator('[data-action="try-prompt"]')).toBeVisible()
+    await expectPageColumnFits(page)
+    await shot(page, `settings-plugins-detail-${theme}`)
+    await members.getByRole('button', { name: '全部插件' }).click()
 
     await dialog.locator('[data-action="install-plugin"]').click()
     await page.locator('[data-menu-item="url"]').click()
@@ -819,6 +842,27 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog).toBeVisible()
   })
 }
+
+test('plugin detail fits a narrow window and links Computer Use to its settings', async ({
+  page,
+}) => {
+  await open(page, '/capabilities?plugin=computer-use&scope=managed', {
+    width: 760,
+    height: 860,
+  })
+  const shell = fullPage(page)
+  const detail = shell.locator('[data-plugin-detail="computer-use"]')
+  await expect(
+    detail.getByText('这个插件的开关就是电脑操作总开关'),
+  ).toBeVisible()
+  await expect(detail.locator('[data-plugin-empty]')).toContainText(
+    '仅展示元数据',
+  )
+  await expectPageColumnFits(page)
+  await shot(page, 'page-plugins-detail-narrow')
+  await detail.locator('[data-action="open-computer-settings"]').click()
+  await expect(page).toHaveURL(/settings=computer/)
+})
 
 test('plugins page installs a local folder after the preview', async ({
   page,

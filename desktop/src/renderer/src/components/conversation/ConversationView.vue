@@ -67,6 +67,7 @@ import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
+import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
 import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
@@ -476,6 +477,19 @@ watch(
     if (!previousInteractionId || interactionId) return
     void nextTick(() => composer.value?.focusInput())
   },
+)
+
+// A draft another page handed over (plugin 「立即试用」): fill it, never send it.
+watch(
+  [() => draftHandoff.value, () => ctx.sessionId.value],
+  ([handoff, ownerSessionId]) => {
+    if (!handoff || handoff.sessionId !== ownerSessionId) return
+    void nextTick(() => {
+      const text = takeDraftHandoff(ownerSessionId)
+      if (text) composer.value?.setDraft(text)
+    })
+  },
+  { flush: 'post', immediate: true },
 )
 
 watch(

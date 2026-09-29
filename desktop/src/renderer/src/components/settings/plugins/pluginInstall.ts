@@ -67,13 +67,19 @@ export function sourceLabel(source: PluginPreview['source']): string {
 export type PluginTone = 'ok' | 'warn' | 'error' | 'neutral'
 
 /** Runtime state of an installed Plugin (dot / badge copy and tone). */
-export function activationState(plugin: PluginSummary): {
+export function activationState(
+  plugin: Pick<PluginSummary, 'activation'> &
+    Partial<Pick<PluginSummary, 'effective'>>,
+): {
   label: string
   tone: PluginTone
 } {
   switch (plugin.activation) {
     case 'active':
-      return { label: '已激活', tone: 'ok' }
+      // Active in another scope that wins (contract §2).
+      return plugin.effective === false
+        ? { label: '被其他范围覆盖', tone: 'neutral' }
+        : { label: '已激活', tone: 'ok' }
     case 'blocked_unverified':
       return { label: '签名未验证 · 未激活', tone: 'warn' }
     case 'missing':

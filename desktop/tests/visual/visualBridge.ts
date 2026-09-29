@@ -1752,6 +1752,64 @@ export async function installVisualCoreBridge(
               apps: 0,
             },
           },
+          {
+            pluginId: 'computer-use',
+            name: 'Computer Use',
+            displayName: 'Computer Use',
+            description: '让 Emperor 操作浏览器和 Mac 上的应用',
+            developerName: 'Emperor Agent',
+            format: 'portable',
+            logo: null,
+            effective: true,
+            toggleable: true,
+            uninstallable: false,
+            scope: 'managed',
+            version: '1.0.0',
+            digest: 'f'.repeat(64),
+            source: { kind: 'managed' },
+            signature: { status: 'verified', publisher: 'Emperor' },
+            enabled: true,
+            materialization: 'installed',
+            activation: 'active',
+            capabilities: {
+              skills: 1,
+              agents: 0,
+              hooks: 0,
+              mcpServers: 0,
+              lspServers: 0,
+              commands: 0,
+              apps: 0,
+            },
+          },
+          {
+            pluginId: 'github',
+            name: 'GitHub',
+            displayName: 'GitHub',
+            description: '与 GitHub 集成',
+            developerName: 'Emperor Agent',
+            format: 'portable',
+            logo: null,
+            effective: true,
+            toggleable: true,
+            uninstallable: false,
+            scope: 'managed',
+            version: '1.0.0',
+            digest: '9'.repeat(64),
+            source: { kind: 'managed' },
+            signature: { status: 'verified', publisher: 'Emperor' },
+            enabled: true,
+            materialization: 'installed',
+            activation: 'active',
+            capabilities: {
+              skills: 1,
+              agents: 0,
+              hooks: 0,
+              mcpServers: 0,
+              lspServers: 0,
+              commands: 0,
+              apps: 0,
+            },
+          },
         ] as Array<Record<string, any>>,
         skills: [
           {
@@ -4914,6 +4972,124 @@ export async function installVisualCoreBridge(
               }
               if (local) boot.plugins.push(plugin)
               return { changed: true, plugin }
+            }
+            case 'plugins.getDetail': {
+              const input = (args[0] ?? {}) as {
+                pluginId?: string
+                scope?: string
+              }
+              const plugin = boot.plugins.find(
+                (item) =>
+                  item.pluginId === input.pluginId &&
+                  item.scope === input.scope,
+              )
+              if (!plugin) throw new Error('找不到这个插件')
+              const members: Record<string, Array<Record<string, unknown>>> = {
+                'emperor/web-research': [
+                  {
+                    kind: 'skill',
+                    id: 'web-research',
+                    title: 'web-research',
+                    description: '搜索网页并整理来源',
+                    state: 'available',
+                    reason: null,
+                  },
+                  {
+                    kind: 'skill',
+                    id: 'cite-sources',
+                    title: 'cite-sources',
+                    description: '为结论附上可点击的来源',
+                    state: 'failed',
+                    reason: '与个人的同名 Skill 冲突，未生效',
+                  },
+                  {
+                    kind: 'mcp',
+                    id: 'search',
+                    title: 'search',
+                    description: 'http · search.example.com',
+                    state: 'running',
+                    reason: null,
+                  },
+                  {
+                    kind: 'app',
+                    id: 'drive',
+                    title: 'drive',
+                    description: '',
+                    state: 'unsupported',
+                    reason: 'Emperor 还不支持这个应用连接',
+                  },
+                  {
+                    kind: 'hook',
+                    id: 'PreToolUse#1',
+                    title: 'PreToolUse · bash',
+                    description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
+                    state: 'available',
+                    reason: null,
+                  },
+                  {
+                    kind: 'hook',
+                    id: 'PostToolUse#1',
+                    title: 'PostToolUse · WebFetch',
+                    description: 'log.sh',
+                    state: 'unsupported',
+                    reason: 'Emperor 没有与「WebFetch」对应的工具',
+                  },
+                  {
+                    kind: 'agent',
+                    id: 'agents/reviewer.md',
+                    title: 'reviewer',
+                    description: '',
+                    state: 'unsupported',
+                    reason: 'Emperor 不支持插件里的子代理',
+                  },
+                ],
+              }
+              const prompts: Record<string, string[]> = {
+                'emperor/web-research': [
+                  '帮我查一下这周 Electron 的安全公告，并列出来源',
+                ],
+                github: [
+                  '看看我名下还开着的 Pull Request',
+                  '最近一次 CI 为什么失败',
+                ],
+              }
+              return {
+                pluginId: plugin.pluginId,
+                scope: plugin.scope,
+                format: plugin.format,
+                version: plugin.version,
+                displayName: plugin.displayName,
+                description: plugin.description,
+                longDescription:
+                  plugin.pluginId === 'computer-use'
+                    ? '开启后，Emperor 可以在内置浏览器、Chrome 和 Mac 应用里观察和操作。开关与「设置 › 电脑操作」的总开关是同一个。'
+                    : null,
+                developerName: plugin.developerName,
+                category: plugin.scope === 'managed' ? '效率' : null,
+                homepage: null,
+                license: null,
+                logo: null,
+                logoIssue: null,
+                prompts: prompts[String(plugin.pluginId)] ?? [],
+                enabled: plugin.enabled,
+                effective: plugin.effective,
+                activation: plugin.activation,
+                materialization: plugin.materialization,
+                toggleable: plugin.toggleable,
+                uninstallable: plugin.uninstallable,
+                source: plugin.source,
+                signature: plugin.signature,
+                digest: plugin.digest,
+                installedAt:
+                  plugin.scope === 'managed'
+                    ? null
+                    : '2026-09-28T09:30:00.000Z',
+                permissions: {
+                  runsCommands: plugin.pluginId === 'emperor/web-research',
+                  network: plugin.pluginId === 'emperor/web-research',
+                },
+                components: members[String(plugin.pluginId)] ?? [],
+              }
             }
             case 'plugins.setEnabled': {
               const input = (args[0] ?? {}) as {

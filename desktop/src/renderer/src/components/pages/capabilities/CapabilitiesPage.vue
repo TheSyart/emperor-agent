@@ -58,7 +58,13 @@ watch(
 function select(value: string): void {
   const tab = normalizeTab(value)
   if (tab === active.value) return
-  const { skill: _skill, ...query } = route.query
+  // The open Skill or plugin belongs to its own tab.
+  const {
+    skill: _skill,
+    plugin: _plugin,
+    scope: _scope,
+    ...query
+  } = route.query
   void router
     .replace({
       path: tab === 'plugins' ? '/capabilities' : `/capabilities/${tab}`,
