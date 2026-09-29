@@ -169,9 +169,9 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 
 ### 电脑操作
 
-上面的普通工作台浏览器和 Agent 受控浏览器属于不同的会话。Agent 标签页、profile、授权和动作由 `ComputerUseService` 管理；普通浏览器的 `emperor:browser:*` 通道不能取得 Agent 目标或凭据。`computerUse.status`、`stop`、`resume`、授权撤销、profile 与站点权限管理、目标接管等通过 CoreApi operation；`computer_use_changed` 通知 renderer 刷新状态。动作审计的 `ui/*` 事件写入 session log，恢复投影将已派发但未完成的动作标记为结果未知，不执行重放。
+上面的普通工作台浏览器和 Agent 受控浏览器属于不同的会话。Agent 标签页、profile、授权和动作由 `ComputerUseService` 管理；普通浏览器的 `emperor:browser:*` 通道不能取得 Agent 目标或凭据。`computerUse.status`、`stop`、`resume`、总开关与驱动开关、profile 与站点权限管理等通过 CoreApi operation；已没有人工控制目标或管理授权列表的 operation（2026-09-29 移除）。`computer_use_changed` 通知 renderer 刷新状态；对话右下角的只读预览据此列出本会话的目标，任务结束释放后整组消失。动作审计的 `ui/*` 事件写入 session log（包括任务结束时的 `ui/target-released` 与 `ui/task-released`），恢复投影将已派发但未完成的动作标记为结果未知，不执行重放。
 
-Electron main 托管 macOS Helper、Chrome Native Messaging bridge 和凭据库。Helper 权限状态与定向 TCC 重置、浏览器配对确认与“连接 Chrome/Edge”（登记 Native Messaging manifest）、Agent 预览帧和输入、下载的显示 / 移到工作区 / 另存为（只按下载 ID 寻址，路径由 main 决定或由用户在系统对话框中选择）、凭据增删、锁定、解锁及查看使用 `emperor:computer-use:*` 的受信 renderer IPC。Main 校验调用者窗口、参数和目标；密码只在受信设置界面提交，CoreApi 与模型工具只看到凭据句柄。`browser_fill_credential` 与 `desktop_fill_credential` 把句柄交给 main 驱动，由驱动核对精确 origin 或 App 身份后代填。新增秘密通道须保持这一边界，并补 main/preload/renderer 的契约测试。
+Electron main 托管 macOS Helper、Chrome Native Messaging bridge 和凭据库。Helper 权限状态与定向 TCC 重置、浏览器配对确认与“连接 Chrome/Edge”（登记 Native Messaging manifest）、Agent 预览帧的开始与停止（只读，没有输入通道）、下载的显示 / 移到工作区 / 另存为（只按下载 ID 寻址，路径由 main 决定或由用户在系统对话框中选择）、凭据增删、锁定、解锁及查看使用 `emperor:computer-use:*` 的受信 renderer IPC。Main 校验调用者窗口、参数和目标；密码只在受信设置界面提交，CoreApi 与模型工具只看到凭据句柄。`browser_fill_credential` 与 `desktop_fill_credential` 把句柄交给 main 驱动，由驱动核对精确 origin 或 App 身份后代填。新增秘密通道须保持这一边界，并补 main/preload/renderer 的契约测试。
 
 ## 本地资源协议
 

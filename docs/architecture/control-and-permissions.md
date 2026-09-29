@@ -67,13 +67,17 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 ## 电脑操作授权
 
-`ComputerUseService` 是内置浏览器、外部浏览器和桌面驱动的唯一执行入口。总开关默认关闭，各驱动另有开关；关闭的驱动保留工具，调用返回 `CAPABILITY_DISABLED`。开启后，目标由当前会话持有，动作需要有效租约、目标 generation、观察 revision 和匹配的授权。网站授权按精确 origin、profile、主体和动作范围匹配；作用在跨源 iframe 内元素上的动作按该 iframe 的 origin 授权（元素带 `frameOrigin`），页面授权不覆盖嵌入的其他网站。桌面授权按 App 身份与动作范围匹配。用户接管或暂停期间页面打开的弹窗继承用户控制。普通文件或 Shell 权限预设本身不授予 GUI 目标控制权。
+`ComputerUseService` 是内置浏览器、外部浏览器和桌面驱动的唯一执行入口。总开关默认关闭，各驱动另有开关；关闭的驱动保留工具，调用返回 `CAPABILITY_DISABLED`。开启后，目标由当前会话持有，动作需要有效租约、目标 generation 和观察 revision。普通文件或 Shell 权限预设本身不授予 GUI 目标控制权；反过来，电脑操作总开关也不限制 Shell。
 
-保护名单由内置名单与用户在设置中追加的 bundle ID 组成：保护的应用从列表中隐藏且返回 `TARGET_FORBIDDEN`；高风险应用在 `scoped` 模式下逐次确认；敏感应用只读结构，观察不含值，截图在弹卡前拒绝。用户授权可以逐项收窄；删除用户名单中的条目属于放宽，受 CoreApi mutation guard 约束。
+总开关打开后由 AI 连续操作（2026-09-29 起）：普通观察、交互、跳转和传输自动允许，身份的 `fullAccess` 就是总开关本身，与 Shell 预设独立。不再有逐项授权模式、人工暂停 / 接管 / 交还和控制浮层；旧版本保存的 `scoped` 设置在升级时让总开关关闭一次，并在设置页说明原因。只有三类情况暂停：高影响动作和凭据代填弹出 `grant_` 确认卡（每次都问，只允许这一次；凭据的绑定、字段类型与系统加密可用性在弹卡前检查，用户拒绝一次代填只记住该站点的代填），以及模型通过 `ask_user_question` 提问。子代理可执行普通动作，但不能弹卡：高影响动作和凭据代填返回 `PERMISSION_REQUIRED`（原因 `subagent-cannot-ask`），由父任务处理。
 
-`computerUseGate` 在工具执行前准备授权决定，`UiActionPolicy` 处理风险等级和主体，驱动在副作用前再次检查目标身份和版本。Computer Use 的持久 `authorizationMode` 与 Shell 预设独立：默认 `unrestricted` 自动允许普通观察、交互、跳转和传输；`scoped` 使用目标授权。凭据代填和高影响操作仍逐次确认；凭据的绑定、字段类型与系统加密可用性在弹卡前检查，用户拒绝一次代填只记住该站点的代填。子代理以独立主体执行，不继承父任务的限定授权；在持久 `unrestricted` 模式下可自动执行普通动作。
+保护名单由内置名单与用户在设置中追加的 bundle ID 组成：保护的应用从列表中隐藏且返回 `TARGET_FORBIDDEN`；高风险应用（终端与脚本类）在确认卡上注明其执行不受命令沙箱约束；敏感应用只读结构，观察不含值，截图在弹卡前拒绝，也不录制预览画面。删除用户名单中的条目属于放宽，受 CoreApi mutation guard 约束。
 
-授权询问使用 `grant_` 交互，决定和动作状态进入 session log；无应答方、取消或急停均按拒绝处理。动作日志区分 prepared、dispatched 与 settled；若已经派发而结果无法确认，返回 `OUTCOME_UNKNOWN`，恢复时不重放该动作。急停挂起授权、取消动作并要求驱动释放输入。具体使用和已开放范围见[电脑操作（实验）](../user/computer-use.md)。
+`computerUseGate` 在工具执行前准备授权决定，`UiActionPolicy` 处理风险等级和主体，驱动在副作用前再次检查目标身份和版本。授权询问使用 `grant_` 交互，决定和动作状态进入 session log；无应答方、取消或急停均按拒绝处理。动作日志区分 prepared、dispatched 与 settled；若已经派发而结果无法确认，返回 `OUTCOME_UNKNOWN`，恢复时不重放该动作。
+
+**任务结束释放。** 根会话的 turn 结束且其下没有运行中的后台子代理时（或此后最后一个子代理结束时），宿主调用 `releaseTask`：中止并等待在途动作（已派发的记 `OUTCOME_UNKNOWN`，不重放）；桌面窗口依次停录制流、`input.releaseAll`、`front.restore`（仅本任务激活过的窗口，须在解绑前）、`target.release`；内置浏览器标签页保留页面，只让 ref 失效，下一任务可用 `browser_tab_select` 取回；外部 Chrome 标签页只解除认领，保持扩展连接；once 授权撤销。全部完成后目标同时进入 `released` 状态，预览整组消失；session log 记录 `ui/target-released` 与 `ui/task-released`。旧句柄返回 `STALE_TARGET`（原因 `released-at-task-end`），与“窗口已关闭”区分。释放失败的目标禁止新动作并带 `releaseFailed`，桌面失败时断开 Helper 连接以终止录制流。`ask_user_question` 在 turn 内阻塞，等待回答不会触发释放；急停、关闭总开关、删除会话走同一流程，后两者随后关闭剩余的内置页面。
+
+应用窗口重载期间 Agent 目标暂停，窗口加载完成后由主进程恢复；这期间页面打开的弹窗随之暂停和恢复。急停取消动作、撤掉待回答的卡片、挂起授权、要求驱动释放输入，并释放全部目标。具体使用和已开放范围见[电脑操作（实验）](../user/computer-use.md)。
 
 ## CoreApi mutation guard
 

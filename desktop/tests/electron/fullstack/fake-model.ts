@@ -25,7 +25,8 @@ export type StepReply =
   | { text: string }
   | { tools: Array<{ name: string; args: Record<string, unknown> }> }
 
-export type Step = (request: ChatRequest) => StepReply
+/** A step may wait (the turn stays open meanwhile) before it answers. */
+export type Step = (request: ChatRequest) => StepReply | Promise<StepReply>
 
 export interface FakeModel {
   readonly apiBase: string
@@ -60,6 +61,21 @@ export function lastToolResult(request: ChatRequest): string {
     if (message.role === 'user') break
   }
   return ''
+}
+
+/** The JSON summary a GUI tool puts first in its result (tools/result.ts). */
+export function summaryIn(request: ChatRequest): Record<string, unknown> {
+  // The result's text blocks arrive joined without a separator: the summary,
+  // then any untrusted envelope.
+  const text = lastToolResult(request)
+  const summary = text.split('[external_content]')[0]!.trim()
+  try {
+    return JSON.parse(summary) as Record<string, unknown>
+  } catch {
+    throw new Error(
+      `no JSON summary in the last tool result: ${text.slice(0, 300)}`,
+    )
+  }
 }
 
 /** Decode the untrusted envelope around page text (see external-content.ts). */
@@ -171,7 +187,7 @@ export async function startFakeModel(): Promise<FakeModel> {
         else {
           step += 1
           try {
-            reply = next(body)
+            reply = await next(body)
           } catch (error) {
             errors.push(error)
             reply = {

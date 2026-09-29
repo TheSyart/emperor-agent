@@ -1,12 +1,17 @@
 /**
  * Full-stack computer use suite: the real desktop app (dev build, isolated
  * Emperor Home) driven through its UI by Playwright, with a scripted model
- * server and the local fixture site. Covers the M1 exit path:
- *   switch on in Settings → grant card → open / observe / fill / click / wait
- *   → screenshot thumbnail → Browser pane preview survives a pane switch →
- *   cross-origin asks again (denied) → full access auto-approves navigation
- *   but a high-impact click still asks → emergency stop blocks the next call
- *   → resume → switching off closes every Agent tab.
+ * server and the local fixture site. Covers the path of the AI-driven
+ * experience (2026-09-29):
+ *   switch on in Settings → trusted settings (profile, site permission,
+ *   credential) → open / observe / fill / click / wait with no card → the
+ *   conversation preview shows the tab while the task runs → the task end
+ *   releases it (the preview goes, the page stays) → the next task's stale
+ *   handle says released-at-task-end, it takes the tab back and moves to
+ *   another site without a card → a high-impact click still asks, once →
+ *   the emergency stop releases and blocks the next call → resume → a
+ *   credential fill asks once and leaks nowhere → switching off closes
+ *   every Agent tab.
  * Prints `E2E-RESULT {json}` lines like the Electron harness.
  *
  *   node out-e2e/fullstack.cjs            (via scripts/e2e-cu.mjs --mode=fullstack)
@@ -26,7 +31,15 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
 import { startFixtureSite, type FixtureSite } from '../fixtures/site'
-import { refIn, startFakeModel, type FakeModel, type Step } from './fake-model'
+import {
+  lastToolResult,
+  refIn,
+  startFakeModel,
+  summaryIn,
+  type FakeModel,
+  type Step,
+  type StepReply,
+} from './fake-model'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'fullstack')
@@ -146,25 +159,25 @@ async function openSettings(page: Page): Promise<void> {
   )
 }
 
-/** A settings switch by id (the section has several). */
-function settingsSwitch(
-  page: Page,
-  id: 'computer-use-enabled' | 'computer-use-unrestricted',
-) {
-  return page.getByRole('dialog', { name: '设置' }).locator(`#${id}`)
+/** Unfold 高级 (profiles, credentials, downloads …) in the open section. */
+async function openAdvanced(page: Page): Promise<void> {
+  const advanced = page
+    .getByRole('dialog', { name: '设置' })
+    .getByTestId('computer-use-advanced')
+  if ((await advanced.getAttribute('open')) === null)
+    await advanced.locator('summary').click()
+  await until(
+    async () => (await advanced.getAttribute('open')) !== null,
+    5_000,
+    '高级 open',
+  )
 }
 
-async function setUnrestricted(page: Page, on: boolean): Promise<void> {
-  await openSettings(page)
-  const toggle = settingsSwitch(page, 'computer-use-unrestricted')
-  if (((await toggle.getAttribute('aria-checked')) === 'true') !== on)
-    await toggle.click()
-  await until(
-    async () => ((await toggle.getAttribute('aria-checked')) === 'true') === on,
-    10_000,
-    `持续允许 ${on ? 'on' : 'off'}`,
-  )
-  await closeSettings(page)
+/** The master switch. */
+function settingsSwitch(page: Page) {
+  return page
+    .getByRole('dialog', { name: '设置' })
+    .locator('#computer-use-enabled')
 }
 
 async function closeSettings(page: Page): Promise<void> {
@@ -188,14 +201,15 @@ async function send(page: Page, text: string): Promise<void> {
   await box.press('Enter')
 }
 
-/** Answer grant cards as they come until `done` holds; returns the targets seen. */
+/**
+ * Answer grant cards as they come until `done` holds; returns the targets
+ * seen. Only high-impact actions and credential fills show a card now, and
+ * a card allows this one call only.
+ */
 async function answerCardsUntil(
   page: Page,
   done: () => Promise<boolean>,
-  answer: (card: {
-    target: string
-    highImpact: boolean
-  }) => 'session' | 'once' | 'deny',
+  answer: (card: { target: string; highImpact: boolean }) => 'once' | 'deny',
   timeoutMs = 60_000,
 ): Promise<Array<{ target: string; highImpact: boolean; answer: string }>> {
   const seen: Array<{ target: string; highImpact: boolean; answer: string }> =
@@ -211,15 +225,9 @@ async function answerCardsUntil(
         .isVisible()
         .catch(() => false)
       const choice = answer({ target, highImpact })
-      if (choice === 'deny')
-        await card.getByRole('button', { name: '拒绝' }).click()
-      else {
-        if (choice === 'session') {
-          const radio = card.getByRole('radio', { name: '本会话' })
-          if (await radio.isVisible().catch(() => false)) await radio.click()
-        }
-        await card.getByRole('button', { name: '允许' }).click()
-      }
+      await card
+        .getByRole('button', { name: choice === 'deny' ? '拒绝' : '允许' })
+        .click()
       seen.push({ target, highImpact, answer: choice })
       await card.waitFor({ state: 'hidden' }).catch(() => undefined)
       continue
@@ -264,6 +272,52 @@ const call =
 const say =
   (text: string): Step =>
   () => ({ text })
+
+/**
+ * A step that waits until `release()` before answering: the turn (and the
+ * task) stays open meanwhile, so its controlled targets can be looked at.
+ */
+function hold(reply: StepReply): {
+  step: Step
+  readonly reached: boolean
+  release: () => void
+} {
+  let reached = false
+  let release!: () => void
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return {
+    step: async () => {
+      reached = true
+      await released
+      return reply
+    },
+    get reached() {
+      return reached
+    },
+    release: () => release(),
+  }
+}
+
+/** Tool rows (`tool:state`) in the conversation. */
+async function toolStates(page: Page): Promise<string[]> {
+  return await page
+    .locator('.tool-row')
+    .evaluateAll((rows) =>
+      rows.map(
+        (row) =>
+          `${row.getAttribute('data-tool')}:${row.getAttribute('data-state')}`,
+      ),
+    )
+}
+
+async function cardShown(page: Page): Promise<boolean> {
+  return await page
+    .locator('[data-takeover="grant"]')
+    .isVisible()
+    .catch(() => false)
+}
 
 function prepareHome(home: string, model: FakeModel | null): void {
   mkdirSync(home, { recursive: true })
@@ -329,7 +383,6 @@ async function launch(
 // ---------------------------------------------------------------------------
 
 async function fullstack(
-  app: ElectronApplication,
   page: Page,
   model: FakeModel,
   site: FixtureSite,
@@ -347,15 +400,7 @@ async function fullstack(
       await openSettings(page)
       if ((await statusBadge(page)) !== '已关闭')
         throw new Error(`initial badge ${await statusBadge(page)}`)
-      // The persistent 持续允许 mode is the default; the card flows below
-      // run in scoped mode and turn 3 switches it back on.
-      if (
-        (await settingsSwitch(page, 'computer-use-unrestricted').getAttribute(
-          'aria-checked',
-        )) !== 'true'
-      )
-        throw new Error('持续允许 is not the default mode')
-      await settingsSwitch(page, 'computer-use-enabled').click()
+      await settingsSwitch(page).click()
       await until(
         async () => (await statusBadge(page)) === '已开启',
         10_000,
@@ -363,7 +408,6 @@ async function fullstack(
       )
       await page.screenshot({ path: join(shots, 'settings-on.png') })
       await closeSettings(page)
-      await setUnrestricted(page, false)
     },
     { critical: true },
   )
@@ -373,6 +417,7 @@ async function fullstack(
     'M2 settings manage profile, permission and credential through trusted UI',
     async () => {
       await openSettings(page)
+      await openAdvanced(page)
       const dialog = page.getByRole('dialog', { name: '设置' })
       const profileForm = dialog.locator('.cu-settings-form').first()
       await profileForm.locator('input').fill('E2E profile')
@@ -481,7 +526,9 @@ async function fullstack(
     { critical: true },
   )
 
-  // Turn 1: grant card → open / observe / fill / click / wait / screenshot.
+  // Turn 1: open / observe / fill / click / wait / screenshot, no card. The
+  // last step waits so the preview can be looked at while the task runs.
+  const last = hold({ text: '表单已提交，页面显示 Thanks for signing up。' })
   model.enqueue(
     call('browser_open', { url: `${origin}/form` }),
     call('browser_observe'),
@@ -514,29 +561,17 @@ async function fullstack(
       timeoutMs: 5000,
     }),
     call('browser_screenshot'),
-    say('表单已提交，页面显示 Thanks for signing up。'),
+    last.step,
   )
   await check(
     page,
-    'turn 1: grant card then open, observe, fill, click, wait',
+    'turn 1: open, observe, fill, click and wait run without a card',
     async () => {
       await send(page, `请打开 ${origin}/form，填写姓名和邮箱后提交。`)
-      const cards = await answerCardsUntil(
-        page,
-        () => assistantSaid(page, '表单已提交'),
-        () => 'session',
-      )
-      if (cards.length === 0) throw new Error('no grant card was shown')
-      if (!cards[0]!.target.includes(new URL(origin).host))
-        throw new Error(`first card target ${cards[0]!.target}`)
-      const tools = await page
-        .locator('.tool-row')
-        .evaluateAll((rows) =>
-          rows.map(
-            (row) =>
-              `${row.getAttribute('data-tool')}:${row.getAttribute('data-state')}`,
-          ),
-        )
+      await until(() => last.reached, 60_000, 'the last step of the task')
+      if (await cardShown(page))
+        throw new Error('a grant card was shown for ordinary actions')
+      const tools = await toolStates(page)
       const failed = tools.filter(
         (entry) => entry.startsWith('browser_') && !entry.endsWith(':ok'),
       )
@@ -544,9 +579,64 @@ async function fullstack(
         throw new Error(
           `failed rows: ${failed.join(', ')} (all: ${tools.join(', ')})`,
         )
-      return { cards: cards.length, tools }
+      return { tools }
     },
     { critical: true },
+  )
+
+  await check(
+    page,
+    'the conversation preview shows the tab read-only while the task runs',
+    async () => {
+      const preview = page.locator('.cu-preview')
+      await preview.waitFor({ timeout: 10_000 })
+      const card = preview.locator('.cu-card').first()
+      const status = (await card.locator('.cu-card-status').innerText()).trim()
+      if (status !== '操作中') throw new Error(`card status ${status}`)
+      await until(
+        async () =>
+          ((await card.locator('img').first().getAttribute('src')) ?? '')
+            .length > 0,
+        15_000,
+        'a frame in the card',
+      )
+      const text = await preview.innerText()
+      for (const word of ['暂停', '接管', '交还'])
+        if (text.includes(word)) throw new Error(`preview offers ${word}`)
+      await page.screenshot({ path: join(shots, 'preview-live.png') })
+      return {
+        title: (await card.locator('.cu-card-title').innerText()).trim(),
+      }
+    },
+  )
+
+  await check(
+    page,
+    'the task end releases the tab: the preview goes, the page stays',
+    async () => {
+      last.release()
+      await until(
+        () => assistantSaid(page, '表单已提交'),
+        30_000,
+        'the closing reply',
+      )
+      await until(
+        async () =>
+          !(await page
+            .locator('.cu-preview')
+            .isVisible()
+            .catch(() => false)),
+        15_000,
+        'the preview group to go',
+      )
+      const status = await core<{ targets: unknown[] }>(
+        page,
+        'computerUse.status',
+      )
+      if (status.targets.length !== 0)
+        throw new Error(`targets after the task: ${JSON.stringify(status)}`)
+      await page.screenshot({ path: join(shots, 'after-release.png') })
+    },
   )
 
   await check(page, 'screenshot row shows a thumbnail', async () => {
@@ -564,123 +654,77 @@ async function fullstack(
     await page.screenshot({ path: join(shots, 'turn1-tools.png') })
   })
 
-  await check(
-    page,
-    'controlled target shows the floating stop control',
-    async () => {
-      await until(
-        async () =>
-          (await app.windows()).some(
-            (window) =>
-              window.url().startsWith('data:text/html') && window !== page,
-          ),
-        10_000,
-        'control overlay window',
-      )
-      const overlay = (await app.windows()).find(
-        (window) =>
-          window !== page && window.url().startsWith('data:text/html'),
-      )
-      if (!overlay) throw new Error('control overlay window missing')
-      await overlay.getByText('Emperor 正在操作', { exact: false }).waitFor()
-      await overlay.getByRole('button', { name: '停止' }).waitFor()
-      return { text: await overlay.locator('body').innerText() }
-    },
-  )
-
-  await check(
-    page,
-    'browser pane previews the Agent tab and survives a pane switch',
-    async () => {
-      const row = toolRow(page, 'browser_screenshot').last()
-      await row.getByRole('button', { name: '在浏览器面板查看' }).click()
-      const pane = page.locator('.browser-pane')
-      await pane.waitFor()
-      await until(
-        async () => (await pane.getAttribute('data-state')) === 'agent',
-        10_000,
-        'agent tab selected',
-      )
-      await until(
-        async () =>
-          (await pane
-            .locator('.agent-tab-canvas')
-            .getAttribute('data-phase')) === 'live',
-        10_000,
-        'live frame',
-      )
-      await page.screenshot({ path: join(shots, 'browser-pane-agent.png') })
-      // Leave the session (the pane is keyed by session and unmounts), come
-      // back: the Agent tab is still there.
-      const chatUrl = page.url()
-      const mounted = await pane.elementHandle()
-      await page.getByRole('button', { name: '新对话' }).first().click()
-      await until(() => page.url() !== chatUrl, 10_000, 'left the chat')
-      await until(
-        async () =>
-          (await mounted!.evaluate((node) => !node.isConnected)) === true,
-        10_000,
-        'the pane unmounted',
-      )
-      const status = await core<{
-        targets: Array<{ state: string; title: string }>
-      }>(page, 'computerUse.status')
-      const live = status.targets.filter(
-        (target) => target.state !== 'closed' && target.state !== 'lost',
-      )
-      if (live.length !== 1)
-        throw new Error(
-          `targets after pane switch: ${JSON.stringify(status.targets)}`,
-        )
-      await page.goBack()
-      await until(() => page.url() === chatUrl, 10_000, 'back on the chat')
-      const segments = page.getByRole('group', { name: '工作台面板' })
-      if (await segments.isVisible().catch(() => false))
-        await segments.getByRole('button', { name: '浏览器' }).click()
-      await page.locator('.browser-tab', { hasText: live[0]!.title }).waitFor()
-      await page.screenshot({
-        path: join(shots, 'browser-pane-after-switch.png'),
-      })
-      return { title: live[0]!.title }
-    },
-  )
-
-  // Turn 2: another origin asks again; the user refuses.
+  // Turn 2: the old handle says it was released; the task takes the tab
+  // back and moves to another site, with no card.
+  let staleResult = ''
+  let listed: unknown
   model.enqueue(
-    call('browser_navigate', { url: `${other}/embed` }),
+    call('browser_observe'),
     (request) => {
-      const text = JSON.stringify(
-        request.messages[request.messages.length - 1]?.content ?? '',
-      )
+      staleResult = lastToolResult(request)
+      return { tools: [{ name: 'browser_tab_list', args: {} }] }
+    },
+    (request) => {
+      listed = summaryIn(request)
+      const tabs = (listed as { tabs?: Array<Record<string, unknown>> }).tabs
+      const tab = tabs?.find((item) => item.released === true)
+      if (tab === undefined)
+        throw new Error(`no released tab listed: ${JSON.stringify(listed)}`)
       return {
-        text: text.includes('PERMISSION_DENIED')
-          ? '用户拒绝了跳转，已停止。'
-          : `意外结果：${text.slice(0, 200)}`,
+        tools: [
+          { name: 'browser_tab_select', args: { targetId: tab.targetId } },
+        ],
       }
     },
+    call('browser_observe'),
+    call('browser_navigate', { url: `${other}/embed` }),
+    say('已重新接手标签页并打开另一个站点。'),
   )
   await check(
     page,
-    'turn 2: cross-origin navigation asks again and a refusal stops it',
+    'turn 2: a stale handle says released, the tab is taken back and moves on without a card',
     async () => {
-      await send(page, `再打开 ${other}/embed 看看。`)
+      await send(page, `继续用刚才的标签页，再打开 ${other}/embed。`)
       const cards = await answerCardsUntil(
         page,
-        () => assistantSaid(page, '已停止'),
+        () => assistantSaid(page, '已重新接手'),
         () => 'deny',
       )
-      if (cards.length !== 1 || !cards[0]!.target.includes(new URL(other).host))
-        throw new Error(`cards: ${JSON.stringify(cards)}`)
-      if (await assistantSaid(page, '意外结果'))
-        throw new Error('model did not see PERMISSION_DENIED')
-      return { card: cards[0]!.target }
+      if (cards.length !== 0)
+        throw new Error(`unexpected cards: ${JSON.stringify(cards)}`)
+      if (!staleResult.includes('released-at-task-end'))
+        throw new Error(`first observe answered: ${staleResult.slice(0, 300)}`)
+      for (const tool of [
+        'browser_tab_select',
+        'browser_observe',
+        'browser_navigate',
+      ]) {
+        const state = await toolRow(page, tool)
+          .last()
+          .getAttribute('data-state')
+        if (state !== 'ok') throw new Error(`${tool} ${state}`)
+      }
+      return { listed }
     },
   )
 
-  // Turn 3: 持续允许 auto-approves the navigation; a high-impact click still asks.
-  await setUnrestricted(page, true)
+  // Turn 3: a high-impact click asks for this one action.
   model.enqueue(
-    call('browser_navigate', { url: `${other}/embed` }),
+    call('browser_tab_list'),
+    (request) => {
+      const tabs = (
+        summaryIn(request) as {
+          tabs?: Array<Record<string, unknown>>
+        }
+      ).tabs
+      const tab = tabs?.find((item) => item.released === true)
+      if (tab === undefined) throw new Error('no released tab to take back')
+      return {
+        tools: [
+          { name: 'browser_tab_select', args: { targetId: tab.targetId } },
+        ],
+      }
+    },
     call('browser_navigate', { url: `${origin}/checkout` }),
     call('browser_observe'),
     (request) => ({
@@ -692,9 +736,9 @@ async function fullstack(
   )
   await check(
     page,
-    'turn 3: 持续允许 auto-approves navigation, high impact still asks',
+    'turn 3: a high-impact click still asks, for this action only',
     async () => {
-      await send(page, '现在去对方页面，然后回到结账页点击付款。')
+      await send(page, '回到结账页点击付款。')
       const cards = await answerCardsUntil(
         page,
         () => assistantSaid(page, '已完成付款确认'),
@@ -702,14 +746,6 @@ async function fullstack(
       )
       if (cards.length !== 1 || !cards[0]!.highImpact)
         throw new Error(`cards: ${JSON.stringify(cards)}`)
-      // The hop to the other origin is auto-approved (持续允许); the way back
-      // uses the session grant from turn 1.
-      const suffix = toolRow(page, 'browser_navigate').locator(
-        '.summary-suffix',
-        { hasText: '自动放行' },
-      )
-      if ((await suffix.count()) < 1)
-        throw new Error('no auto-approved navigation row')
       await page.screenshot({ path: join(shots, 'turn3-high-impact.png') })
       return { cards: cards.length }
     },
@@ -720,29 +756,11 @@ async function fullstack(
     page,
     'emergency stop blocks the next action; resume restores',
     async () => {
-      const overlay = (await app.windows()).find(
-        (window) =>
-          window !== page && window.url().startsWith('data:text/html'),
-      )
-      if (!overlay) throw new Error('control overlay window missing')
-      // The click synchronously hides this non-focusable window. Playwright may
-      // keep waiting for actionability after the main process has already
-      // stopped control, so assert the Core state instead of the click promise.
-      const clickError = await overlay
-        .getByRole('button', { name: '停止' })
-        .click({ noWaitAfter: true, timeout: 5_000 })
-        .then(
-          () => null,
-          (error: unknown) => error,
-        )
-      await until(
-        async () =>
-          (await core<{ stopped: boolean }>(page, 'computerUse.status'))
-            .stopped,
-        10_000,
-        `overlay stop effect${clickError ? ` (${String(clickError)})` : ''}`,
-      )
       await openSettings(page)
+      await page
+        .getByRole('dialog', { name: '设置' })
+        .getByRole('button', { name: '立即停止' })
+        .click()
       await until(
         async () => (await statusBadge(page)) === '已急停',
         10_000,
@@ -750,9 +768,7 @@ async function fullstack(
       )
       await closeSettings(page)
       model.enqueue(call('browser_observe'), (request) => {
-        const text = JSON.stringify(
-          request.messages[request.messages.length - 1]?.content ?? '',
-        )
+        const text = lastToolResult(request)
         return {
           text: text.includes('emergency-stop')
             ? '操作已被急停。'
@@ -802,7 +818,7 @@ async function fullstack(
     'M2 fullstack credential handle reaches real browser without leaking',
     async () => {
       await send(page, '打开登录表单，用保存的凭据句柄填入密码，并确认已填入。')
-      // Credential fills always ask, once, even in 持续允许 mode.
+      // Credential fills always ask, once.
       const cards = await answerCardsUntil(
         page,
         () => assistantSaid(page, '凭据代填已完成'),
@@ -831,6 +847,7 @@ async function fullstack(
         })
       if (scan(home)) throw new Error('password appeared in Emperor Home files')
       await openSettings(page)
+      await openAdvanced(page)
       const dialog = page.getByRole('dialog', { name: '设置' })
       page.once('dialog', (prompt) => {
         void prompt.accept()
@@ -860,7 +877,7 @@ async function fullstack(
     'switching off closes every Agent tab and removes the tools',
     async () => {
       await openSettings(page)
-      await settingsSwitch(page, 'computer-use-enabled').click()
+      await settingsSwitch(page).click()
       await until(
         async () => (await statusBadge(page)) === '已关闭',
         10_000,
@@ -895,7 +912,7 @@ async function realModel(page: Page, site: FixtureSite): Promise<void> {
     async () => {
       await openSettings(page)
       if ((await statusBadge(page)) !== '已开启')
-        await settingsSwitch(page, 'computer-use-enabled').click()
+        await settingsSwitch(page).click()
       await until(
         async () => (await statusBadge(page)) === '已开启',
         10_000,
@@ -938,7 +955,7 @@ async function realModel(page: Page, site: FixtureSite): Promise<void> {
             .catch(() => false)
           return submitted && idle && !stopVisible
         },
-        () => 'session',
+        () => 'once',
         5 * 60_000,
       )
       await page.waitForTimeout(3000)
@@ -984,7 +1001,7 @@ async function main(): Promise<void> {
     const launched = await launch(home)
     app = launched.app
     if (real) await realModel(launched.page, site)
-    else await fullstack(launched.app, launched.page, model!, site, home)
+    else await fullstack(launched.page, model!, site, home)
   } catch (error) {
     if (!(error instanceof Abort))
       report({
