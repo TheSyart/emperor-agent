@@ -10,8 +10,11 @@
  *
  * A Plugin can bring Skills, Hooks and MCP servers, so every change
  * refreshes the whole workbench (ctx.refreshAll) as the legacy panel did.
+ * Core's `plugins_changed` (installs, toggles, a different active project)
+ * re-reads the list.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onCoreEvent } from '../../api/backend'
 import { core } from '../../api/http'
 import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
@@ -54,13 +57,33 @@ watch(filtered, (list) => {
     expanded.value = null
 })
 
+async function reloadList(): Promise<void> {
+  const list = await core('plugins.list')
+  if (ctx.boot.value) ctx.boot.value.plugins = list
+}
+
 // Shown again after another page: re-read the installed list only.
-onPageReactivated(() =>
-  ctx.runSafely(async () => {
-    const list = await core('plugins.list')
-    if (ctx.boot.value) ctx.boot.value.plugins = list
-  }),
-)
+onPageReactivated(() => ctx.runSafely(reloadList))
+
+let unsubscribe = () => {}
+let pending: ReturnType<typeof setTimeout> | null = null
+onMounted(() => {
+  unsubscribe = onCoreEvent((event) => {
+    if (
+      (event as { event?: unknown } | null)?.event !== 'plugins_changed' ||
+      pending !== null
+    )
+      return
+    pending = setTimeout(() => {
+      pending = null
+      void ctx.runSafely(reloadList)
+    }, 80)
+  })
+})
+onBeforeUnmount(() => {
+  unsubscribe()
+  if (pending !== null) clearTimeout(pending)
+})
 
 useSettingsHeader({
   actions: () => [

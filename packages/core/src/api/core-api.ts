@@ -313,15 +313,28 @@ export class CoreApi {
       emperorHome: this.paths.stateRoot,
       webFetchClient: opts.webFetchClient ?? null,
       activeWorkspaceRoot: () => this.activeProjectRoot(),
+      runtime: {
+        // Plugin MCP servers are not run yet; their members show as connecting.
+        mcpServer: () => null,
+        effectiveSkills: (projectRoot) =>
+          new Map(
+            kept.skillLoaders
+              .forProject(projectRoot)
+              .resolvedSkills()
+              .map((skill) => [
+                skill.name,
+                { source: skill.source, skillFile: skill.skillFile },
+              ]),
+          ),
+      },
       onChanged: () => {
-        kept.skillLoaders.setPluginSkillsRoots(
-          this.pluginService.enabledSkillRoots(),
-        )
+        kept.skillLoaders.refreshPluginSkillsRoots()
         kept.skillChangeDetector.notify()
+        this.emitPluginsChanged('plugins')
       },
     })
-    kept.skillLoaders.setPluginSkillsRoots(
-      this.pluginService.enabledSkillRoots(),
+    kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
+      this.pluginService.enabledSkillRoots(projectRoot),
     )
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
@@ -532,7 +545,7 @@ export class CoreApi {
       },
       closeTerminals: (sessionId) =>
         this.terminalService.closeSession(sessionId),
-      activateSession: (sessionId) => host.activateSession(sessionId),
+      activateSession: (sessionId) => this.activateSession(sessionId),
       deleteSessionLog: (sessionId) => host.sessions.delete(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
     })
@@ -553,7 +566,7 @@ export class CoreApi {
       runSessionEnd: async (sessionId) => {
         host.stop(sessionId)
       },
-      activate: (sessionId) => host.activateSession(sessionId),
+      activate: (sessionId) => this.activateSession(sessionId),
       inheritWorkspaceBinding: (sourceSessionId, targetSessionId) =>
         this.workspaceBindings.inherit(sourceSessionId, targetSessionId),
       permissionPresetOf: (sessionId) => {
@@ -724,7 +737,7 @@ export class CoreApi {
   async bootstrap(opts: { sessionId?: string | null } = {}) {
     const sessionId = String(opts.sessionId ?? '').trim()
     if (sessionId)
-      this.host.activateSession(
+      this.activateSession(
         this.requireReadableSession(sessionId, 'bootstrap').id,
       )
     const kept = this.host.kept
@@ -1579,6 +1592,8 @@ export class CoreApi {
 
   readonly plugins = {
     list: () => this.pluginService.list(),
+    getDetail: (input: Parameters<PluginApplicationService['detail']>[0]) =>
+      this.pluginService.detail(input),
     inspect: (input: Parameters<PluginApplicationService['inspect']>[0]) =>
       this.pluginService.inspect(input),
     install: (input: Parameters<PluginApplicationService['install']>[0]) => {
@@ -1959,6 +1974,18 @@ export class CoreApi {
   private activeProjectRoot(): string | null {
     const session = this.host.activeSession()
     return session?.mode === 'build' ? (session.project_path ?? null) : null
+  }
+
+  /** Activate a session; the plugin list depends on its project, so say when that changes. */
+  private activateSession(sessionId: string) {
+    const before = this.activeProjectRoot()
+    const entry = this.host.activateSession(sessionId)
+    if (this.activeProjectRoot() !== before) this.emitPluginsChanged('project')
+    return entry
+  }
+
+  private emitPluginsChanged(reason: 'plugins' | 'project'): void {
+    this.host.emitHost({ event: 'plugins_changed', reason })
   }
 
   private controlSessionId(sessionId?: string | null): string | null {

@@ -49,6 +49,7 @@ export const RUNTIME_EVENT_NAMES = [
   'environment_install_started',
   'git_operation_completed',
   'mcp_connection_state',
+  'plugins_changed',
   'profile_onboarding_status_changed',
   'prompt_dequeued',
   'prompt_queued',

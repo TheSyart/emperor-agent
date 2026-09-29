@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { PluginApplicationService } from './service'
 import {
+  MCP_SCHEMA_URL,
   PLUGIN_SCHEMA_URL,
   portablePackage,
   skillMarkdown,
@@ -566,6 +567,257 @@ describe('PluginApplicationService package formats', () => {
       }),
     ])
     expect(readFileSync(manifestPath, 'utf8')).toBe(before)
+  })
+})
+
+describe('PluginApplicationService list and detail', () => {
+  const DESCRIBED = portablePackage(
+    'hello-kit',
+    {
+      'skills/hello/SKILL.md': skillMarkdown('hello', 'Say hello'),
+      'skills/wave/SKILL.md': skillMarkdown('wave', 'Wave'),
+      'mcp.json': {
+        $schema: MCP_SCHEMA_URL,
+        mcpServers: {
+          search: {
+            type: 'streamable-http',
+            url: 'https://search.example/mcp',
+            headers: { authorization: 'Bearer secret-token' },
+          },
+        },
+      },
+      'hooks/hooks.json': {
+        hooks: {
+          PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'check.sh' }] }],
+        },
+      },
+    },
+    {
+      version: '1.0.0',
+      description: 'Greets people',
+      author: { name: 'Acme' },
+      extensions: {
+        'com.openai': {
+          interface: {
+            displayName: 'Hello Kit',
+            shortDescription: 'Say hello',
+            defaultPrompt: ['Greet the team'],
+          },
+        },
+      },
+    },
+  )
+
+  async function installed(
+    files: PackageFiles = DESCRIBED,
+    scope: 'user' | 'project' = 'user',
+    options: { home?: string; workspace?: string | null } = {},
+  ) {
+    const home = options.home ?? tempDirectory()
+    let workspace = options.workspace ?? null
+    const service = new PluginApplicationService({
+      emperorHome: home,
+      activeWorkspaceRoot: () => workspace,
+    })
+    const source = writePackage(join(tempDirectory(), 'source'), files)
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope,
+    })
+    return {
+      home,
+      service,
+      setWorkspace: (next: string | null) => {
+        workspace = next
+      },
+    }
+  }
+
+  it('lists display fields, flags and real member counts', async () => {
+    const { service } = await installed()
+    expect(service.list()).toEqual([
+      expect.objectContaining({
+        pluginId: 'hello-kit',
+        name: 'Hello Kit',
+        displayName: 'Hello Kit',
+        description: 'Say hello',
+        developerName: 'Acme',
+        format: 'portable',
+        logo: null,
+        version: '1.0.0',
+        activation: 'active',
+        effective: true,
+        toggleable: true,
+        uninstallable: true,
+        capabilities: {
+          skills: 2,
+          agents: 0,
+          hooks: 1,
+          mcpServers: 1,
+          lspServers: 0,
+          commands: 0,
+          apps: 0,
+        },
+      }),
+    ])
+  })
+
+  it('returns a detail with members, permissions and no path or secret', async () => {
+    const { home, service } = await installed()
+    const detail = service.detail({ pluginId: 'hello-kit', scope: 'user' })
+    expect(detail).toMatchObject({
+      pluginId: 'hello-kit',
+      scope: 'user',
+      format: 'portable',
+      version: '1.0.0',
+      displayName: 'Hello Kit',
+      description: 'Say hello',
+      developerName: 'Acme',
+      prompts: ['Greet the team'],
+      enabled: true,
+      effective: true,
+      activation: 'active',
+      materialization: 'installed',
+      source: { kind: 'local', label: 'source' },
+      permissions: { runsCommands: true, network: true },
+      installedAt: expect.any(String),
+    })
+    expect(
+      detail.components.map(({ kind, id, state }) => [kind, id, state]),
+    ).toEqual([
+      ['skill', 'hello', 'available'],
+      ['skill', 'wave', 'available'],
+      ['mcp', 'search', 'starting'],
+      ['hook', 'PreToolUse#1', 'available'],
+    ])
+    const text = JSON.stringify(detail)
+    expect(text).not.toContain(home)
+    expect(text).not.toContain('secret-token')
+    expect(detail).not.toHaveProperty('rootPath')
+  })
+
+  it('reports disabled, missing and unknown packages', async () => {
+    const { service } = await installed()
+    service.setEnabled({ pluginId: 'hello-kit', scope: 'user', enabled: false })
+    expect(
+      service.detail({ pluginId: 'hello-kit', scope: 'user' }),
+    ).toMatchObject({
+      activation: 'disabled',
+      components: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'hello',
+          state: 'disabled',
+          reason: '插件已停用',
+        }),
+      ]),
+    })
+    rmSync(service.store.get('hello-kit', 'user')!.installPath, {
+      recursive: true,
+      force: true,
+    })
+    // Missing content outranks the disabled intent.
+    expect(
+      service.detail({ pluginId: 'hello-kit', scope: 'user' }),
+    ).toMatchObject({
+      activation: 'missing',
+      materialization: 'missing',
+      format: null,
+      components: [],
+    })
+    expect(() => service.detail({ pluginId: 'nobody', scope: 'user' })).toThrow(
+      expect.objectContaining({ code: 'plugin_not_found' }),
+    )
+  })
+
+  it('uninstalls without leaving a ghost row', async () => {
+    const { home, service } = await installed()
+    service.uninstall({ pluginId: 'hello-kit', scope: 'user' })
+    expect(service.list()).toEqual([])
+    const settings = JSON.parse(
+      readFileSync(join(home, 'settings.json'), 'utf8'),
+    )
+    expect(settings.enabledPlugins).toEqual({})
+  })
+
+  it('lets the closest scope win when one plugin is active in two', async () => {
+    const workspace = tempDirectory()
+    const { home, service } = await installed(DESCRIBED, 'user', { workspace })
+    const second = await installed(DESCRIBED, 'project', { home, workspace })
+    const list = second.service.list()
+    expect(
+      list.map(({ scope, activation, effective }) => [
+        scope,
+        activation,
+        effective,
+      ]),
+    ).toEqual([
+      ['project', 'active', true],
+      ['user', 'active', false],
+    ])
+    expect(
+      service.detail({ pluginId: 'hello-kit', scope: 'user' }).components[0],
+    ).toMatchObject({
+      state: 'disabled',
+      reason: '已由项目范围的同一插件提供',
+    })
+    const projectEntry = service.store.get('hello-kit', 'project')!
+    expect(service.enabledSkillRoots(workspace)).toEqual([
+      join(projectEntry.installPath, 'skills'),
+    ])
+  })
+
+  it('computes Skill roots per project so project plugins stay in their project', async () => {
+    const projectA = tempDirectory()
+    const projectB = tempDirectory()
+    const { service, setWorkspace } = await installed(DESCRIBED, 'project', {
+      workspace: projectA,
+    })
+    const entry = service.store.get('hello-kit', 'project')!
+    setWorkspace(projectB)
+    expect(service.enabledSkillRoots(projectA)).toEqual([
+      join(entry.installPath, 'skills'),
+    ])
+    expect(service.enabledSkillRoots(projectB)).toEqual([])
+    expect(service.enabledSkillRoots(null)).toEqual([])
+  })
+
+  it('layers live runtime facts onto the members', async () => {
+    const home = tempDirectory()
+    const service = new PluginApplicationService({
+      emperorHome: home,
+      runtime: {
+        mcpServer: () => ({ state: 'ready', toolCount: 2 }),
+        effectiveSkills: () =>
+          new Map([
+            [
+              'hello',
+              {
+                source: 'user' as const,
+                skillFile: join(home, 'skills', 'hello', 'SKILL.md'),
+              },
+            ],
+          ]),
+      },
+    })
+    const source = writePackage(join(tempDirectory(), 'source'), DESCRIBED)
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(
+      service
+        .detail({ pluginId: 'hello-kit', scope: 'user' })
+        .components.map(({ id, state }) => [id, state]),
+    ).toEqual([
+      ['hello', 'failed'],
+      ['wave', 'available'],
+      ['search', 'running'],
+      ['PreToolUse#1', 'available'],
+    ])
   })
 })
 

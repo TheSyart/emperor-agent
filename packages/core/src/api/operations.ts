@@ -1250,6 +1250,10 @@ export const CORE_OPERATION_REGISTRY = {
   'plugins.install': operation(z.tuple([pluginInstallSchema]), (api, [input]) =>
     api.plugins.install(input),
   ),
+  'plugins.getDetail': operation(
+    z.tuple([pluginTargetSchema]),
+    (api, [input]) => api.plugins.getDetail(input),
+  ),
   'plugins.list': operation(z.tuple([]), (api) => api.plugins.list()),
   'plugins.setEnabled': operation(
     z.tuple([pluginTargetSchema.extend({ enabled: z.boolean() }).strict()]),

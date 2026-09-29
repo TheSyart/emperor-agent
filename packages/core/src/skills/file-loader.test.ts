@@ -231,4 +231,45 @@ describe('FileSkillsLoader', () => {
     expect(rootsChanged).toBe(3)
     expect(loaders.watchRoots()).toContain(join(root, 'plugin'))
   })
+
+  it('asks for Plugin roots per project so a project Plugin stays in its project', () => {
+    const { root, stateRoot, runtimeRoot } = roots()
+    const alpha = join(root, 'alpha')
+    const beta = join(root, 'beta')
+    const everywhere = join(root, 'plugins', 'user-kit', 'skills')
+    const alphaOnly = join(root, 'plugins', 'alpha-kit', 'skills')
+    skill(join(everywhere, 'user-kit'), 'name: user-kit\ndescription: u')
+    skill(join(alphaOnly, 'alpha-kit'), 'name: alpha-kit\ndescription: a')
+    const loaders = new SkillLoaders({ runtimeRoot, stateRoot })
+    const asked: Array<string | null> = []
+    let rootsChanged = 0
+    loaders.onRootsChanged(() => {
+      rootsChanged += 1
+    })
+    loaders.setPluginSkillsResolver((projectRoot) => {
+      asked.push(projectRoot)
+      return projectRoot === alpha ? [everywhere, alphaOnly] : [everywhere]
+    })
+    expect(rootsChanged).toBe(1)
+
+    const names = (projectRoot: string | null) =>
+      loaders
+        .forProject(projectRoot)
+        .resolvedSkills()
+        .map((entry) => entry.name)
+    expect(names(alpha)).toEqual(['alpha-kit', 'user-kit'])
+    expect(names(beta)).toEqual(['user-kit'])
+    expect(names(null)).toEqual(['user-kit'])
+    expect(asked).toEqual(expect.arrayContaining([alpha, beta, null]))
+    expect(loaders.pluginSkillsRoots(alpha)).toEqual(
+      [alphaOnly, everywhere].sort(),
+    )
+    expect(loaders.watchRoots()).toEqual(
+      expect.arrayContaining([everywhere, alphaOnly]),
+    )
+
+    const before = rootsChanged
+    loaders.refreshPluginSkillsRoots()
+    expect(rootsChanged).toBe(before + 1)
+  })
 })

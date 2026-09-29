@@ -136,6 +136,7 @@ const EXPECTED_OPERATIONS = [
   'onboarding.getProfileStatus',
   'onboarding.skipProfileInterview',
   'onboarding.startProfileInterview',
+  'plugins.getDetail',
   'plugins.inspect',
   'plugins.install',
   'plugins.list',

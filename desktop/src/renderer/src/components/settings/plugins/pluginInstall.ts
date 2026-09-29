@@ -19,6 +19,7 @@ import { core } from '../../../api/http'
 
 export type PluginSummary = CoreOperationResult<'plugins.list'>[number]
 export type PluginPreview = CoreOperationResult<'plugins.inspect'>
+export type PluginDetail = CoreOperationResult<'plugins.getDetail'>
 export type PluginInstallScope = 'user' | 'project' | 'local'
 export type PluginInstallStep = 'closed' | 'url' | 'preview'
 

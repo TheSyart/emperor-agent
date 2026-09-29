@@ -253,6 +253,11 @@ export type RuntimeEvent = RuntimeEventEnvelope &
       }
     | { event: 'skill_catalog_changed'; catalog_version?: number }
     | {
+        /** Installed plugins, their toggles, or the active project changed. */
+        event: 'plugins_changed'
+        reason: 'plugins' | 'project'
+      }
+    | {
         event: 'computer_use_changed'
         reason: 'state' | 'targets' | 'grants' | 'kill-switch'
       }

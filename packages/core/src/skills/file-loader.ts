@@ -419,15 +419,18 @@ function byName(left: ResolvedSkill, right: ResolvedSkill): number {
 }
 
 /**
- * Per-project loader cache plus the shared Plugin Skill roots. `forProject(null)`
+ * Per-project loader cache plus the Plugin Skill roots. `forProject(null)`
  * is the chat loader; a build session gets the loader of its project root.
+ * Plugin roots are asked for per project, because project-scoped plugins
+ * belong to one project only.
  */
 export class SkillLoaders {
   readonly runtimeRoot: string
   readonly stateRoot: string
   readonly userDir: string
   readonly builtinDir: string
-  private plugins: string[] = []
+  private pluginResolver: (projectRoot: string | null) => readonly string[] =
+    () => []
   private readonly chat: FileSkillsLoader
   private readonly projects = new Map<string, FileSkillsLoader>()
   private readonly listeners = new Set<() => void>()
@@ -451,27 +454,45 @@ export class SkillLoaders {
     return loader
   }
 
-  setPluginSkillsRoots(roots: readonly string[]): void {
-    const next = [...new Set(roots.map((root) => resolve(root)))].sort()
-    if (next.join('\0') === this.plugins.join('\0')) return
-    this.plugins = next
+  /** Plugin Skill roots for each project (`null` = chat); read on every scan. */
+  setPluginSkillsResolver(
+    resolver: (projectRoot: string | null) => readonly string[],
+  ): void {
+    this.pluginResolver = resolver
     this.notify()
   }
 
-  pluginSkillsRoots(): string[] {
-    return [...this.plugins]
+  /** The same roots for every project. */
+  setPluginSkillsRoots(roots: readonly string[]): void {
+    const fixed = [...roots]
+    this.setPluginSkillsResolver(() => fixed)
+  }
+
+  /** Tell observers the plugin roots may have changed (installs, toggles). */
+  refreshPluginSkillsRoots(): void {
+    this.notify()
+  }
+
+  pluginSkillsRoots(projectRoot: string | null = null): string[] {
+    return [
+      ...new Set(this.pluginResolver(projectRoot).map((root) => resolve(root))),
+    ].sort()
   }
 
   projectRoots(): string[] {
     return [...this.projects.keys()].sort()
   }
 
-  /** Writable user + known project Skill folders and Plugin roots. */
+  /** Writable user + known project Skill folders and every project's Plugin roots. */
   watchRoots(): string[] {
+    const plugins = new Set(this.pluginSkillsRoots(null))
+    for (const root of this.projectRoots())
+      for (const pluginRoot of this.pluginSkillsRoots(root))
+        plugins.add(pluginRoot)
     return [
       this.userDir,
       ...this.projectRoots().map((root) => projectSkillsDir(root)),
-      ...this.plugins,
+      ...[...plugins].sort(),
     ]
   }
 
@@ -488,7 +509,7 @@ export class SkillLoaders {
       runtimeRoot: this.runtimeRoot,
       stateRoot: this.stateRoot,
       projectRoot,
-      pluginRoots: () => this.plugins,
+      pluginRoots: () => this.pluginSkillsRoots(projectRoot),
     })
   }
 

@@ -664,12 +664,16 @@ function unsupported(
   }
 }
 
+/** Transport and program or host only: arguments, headers and paths may carry secrets. */
 function describeServer(server: PluginMcpServerSpec): string {
-  if (server.transport === 'stdio') return `stdio · ${server.command ?? ''}`
+  if (server.transport === 'stdio') {
+    const program = (server.command ?? '').trim().split(/\s+/)[0] ?? ''
+    return `stdio · ${program.split(/[\\/]/).pop() ?? program}`
+  }
   try {
     return `${server.transport} · ${new URL(server.url ?? '').host}`
   } catch {
-    return `${server.transport} · ${server.url ?? ''}`
+    return server.transport
   }
 }
 

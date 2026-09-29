@@ -17,6 +17,15 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { extractBoundedZip } from '../environment/zip'
 import { isPublicHttpRedirectResponse } from '../network/public-http'
 import type { WebFetchClient } from '../network/web-fetch-client'
+import { EmperorError } from '../errors'
+import {
+  NO_PLUGIN_RUNTIME,
+  PLUGIN_SCOPE_PRECEDENCE,
+  pathScrubber,
+  pluginComponentViews,
+  pluginPermissions,
+  type PluginPackageVerdict,
+} from './detail'
 import { PluginPackageError } from './errors'
 import {
   findPluginPackageRoot,
@@ -29,8 +38,10 @@ import {
   type ConfirmedPluginInstall,
   type InstalledPluginEntry,
   type PluginInstallPreview,
+  type PluginDetail,
   type PluginInstallSource,
   type PluginOperationResult,
+  type PluginRuntimeView,
   type PluginScope,
   type PluginScopeTarget,
   type PluginSource,
@@ -57,6 +68,8 @@ export interface PluginApplicationServiceOptions {
   readonly now?: () => Date
   readonly idFactory?: () => string
   readonly webFetchClient?: WebFetchClient | null
+  /** Live MCP and Skill facts for member states; defaults to none. */
+  readonly runtime?: PluginRuntimeView | null
 }
 
 export class PluginApplicationService {
@@ -70,6 +83,7 @@ export class PluginApplicationService {
   private readonly now: () => Date
   private readonly idFactory: () => string
   private readonly webFetchClient: WebFetchClient | null
+  private readonly runtime: PluginRuntimeView
   private readonly previews = new Map<string, PreviewState>()
   /** Installed caches are content-addressed, so a resolution is reusable per path and digest. */
   private readonly resolutions = new Map<string, ResolvedPluginPackage | null>()
@@ -87,6 +101,7 @@ export class PluginApplicationService {
       opts.idFactory ??
       (() => `plugin_preview_${randomBytes(12).toString('hex')}`)
     this.webFetchClient = opts.webFetchClient ?? null
+    this.runtime = opts.runtime ?? NO_PLUGIN_RUNTIME
     mkdirPrivate(this.stagingRoot)
     mkdirPrivate(this.cacheRoot)
     mkdirPrivate(join(this.pluginsRoot, 'data'))
@@ -94,25 +109,97 @@ export class PluginApplicationService {
     this.removeStalePreviews()
   }
 
+  /** Installed packages as the active session's project sees them. */
   list(): PluginSummary[] {
-    const installed = this.store.list()
-    const keys = new Set(
-      installed.map((entry) => `${entry.pluginId}\0${entry.scope}`),
+    return this.summariesFor(this.activeWorkspaceRoot())
+  }
+
+  /** Everything the detail page shows (contract §6.2); throws `plugin_not_found`. */
+  detail(input: PluginScopeTarget): PluginDetail {
+    const pluginId = assertPluginId(input.pluginId)
+    const workspace = this.activeWorkspaceRoot()
+    const summaries = this.summariesFor(workspace)
+    const summary = summaries.find(
+      (item) => item.pluginId === pluginId && item.scope === input.scope,
     )
-    for (const scope of ['user', 'project', 'local'] as const) {
-      for (const pluginId of Object.keys(this.readIntent(scope)))
-        keys.add(`${pluginId}\0${scope}`)
+    if (!summary) throw new EmperorError('找不到这个插件', 'plugin_not_found')
+    const entry = this.store.get(pluginId, input.scope)
+    const resolved = entry ? this.resolveInstalled(entry) : null
+    const verdict = verdictOf(summary, summaries)
+    const scrub = resolved
+      ? pathScrubber(resolved.rootPath)
+      : (text: string) => text
+    return {
+      pluginId,
+      scope: input.scope,
+      format: summary.format,
+      version: summary.version,
+      displayName: summary.displayName,
+      description: summary.description,
+      longDescription: resolved?.longDescription ?? null,
+      developerName: summary.developerName,
+      category: resolved?.category ?? null,
+      homepage: resolved?.homepage ?? null,
+      license: resolved?.license ?? null,
+      logo: summary.logo,
+      logoIssue: resolved?.logoIssue ? scrub(resolved.logoIssue) : null,
+      prompts: [...(resolved?.prompts ?? [])],
+      enabled: summary.enabled,
+      effective: summary.effective,
+      activation: summary.activation,
+      materialization: summary.materialization,
+      toggleable: summary.toggleable,
+      uninstallable: summary.uninstallable,
+      source: summary.source,
+      signature: summary.signature,
+      digest: summary.digest || null,
+      installedAt: entry?.installedAt ?? null,
+      permissions: pluginPermissions(resolved),
+      components: pluginComponentViews({
+        pluginId,
+        scope: input.scope,
+        resolved,
+        verdict,
+        projectRoot: workspace,
+        runtime: this.runtime,
+      }),
     }
-    return [...keys]
-      .map((key) => {
-        const [pluginId, scope] = key.split('\0') as [string, PluginScope]
-        return this.summary(pluginId, scope)
-      })
+  }
+
+  /** Every registered package for one workspace, with the scope in effect marked. */
+  private summariesFor(workspace: string | null): PluginSummary[] {
+    const base = this.store
+      .list()
+      .map((entry) => this.baseSummary(entry.pluginId, entry.scope, workspace))
+    const winners = new Map<string, PluginScope>()
+    for (const scope of PLUGIN_SCOPE_PRECEDENCE)
+      for (const summary of base)
+        if (
+          summary.scope === scope &&
+          summary.activation === 'active' &&
+          !winners.has(summary.pluginId)
+        )
+          winners.set(summary.pluginId, scope)
+    return base
+      .map((summary) => ({
+        ...summary,
+        effective: winners.get(summary.pluginId) === summary.scope,
+      }))
       .sort((left, right) =>
         `${left.pluginId}:${left.scope}`.localeCompare(
           `${right.pluginId}:${right.scope}`,
         ),
       )
+  }
+
+  /** The result row of a mutation, including a package that is no longer registered. */
+  private summaryOf(pluginId: string, scope: PluginScope): PluginSummary {
+    const workspace = this.activeWorkspaceRoot()
+    return (
+      this.summariesFor(workspace).find(
+        (item) => item.pluginId === pluginId && item.scope === scope,
+      ) ?? this.baseSummary(pluginId, scope, workspace)
+    )
   }
 
   async inspect(source: PluginInstallSource): Promise<PluginInstallPreview> {
@@ -257,7 +344,7 @@ export class PluginApplicationService {
     this.onChanged()
     return {
       changed: true,
-      plugin: this.summary(preview.pluginId, input.scope),
+      plugin: this.summaryOf(preview.pluginId, input.scope),
     }
   }
 
@@ -266,27 +353,35 @@ export class PluginApplicationService {
   ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     this.assertMutableScope(input.scope)
-    const before = this.readIntent(input.scope)[pluginId] === true
+    const workspace = this.activeWorkspaceRoot()
+    const before = this.readIntent(input.scope, workspace)[pluginId] === true
     this.writeIntent(input.scope, pluginId, input.enabled)
     this.onChanged()
     return {
       changed: before !== input.enabled,
-      plugin: this.summary(pluginId, input.scope),
+      plugin: this.summaryOf(pluginId, input.scope),
     }
   }
 
+  /** Remove the registration and its intent; the immutable cache stays. */
   uninstall(input: PluginScopeTarget): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     this.assertMutableScope(input.scope)
     const changed = this.store.remove(pluginId, input.scope)
-    this.writeIntent(input.scope, pluginId, false)
+    this.deleteIntent(input.scope, pluginId)
     this.onChanged()
-    return { changed, plugin: this.summary(pluginId, input.scope) }
+    return { changed, plugin: this.summaryOf(pluginId, input.scope) }
   }
 
-  enabledSkillRoots(): string[] {
-    return this.list().flatMap((summary) => {
-      if (summary.activation !== 'active') return []
+  /**
+   * Skill folders of the packages in effect for one project (`null` = chat),
+   * so project-scoped plugins never leak into chat or other projects.
+   */
+  enabledSkillRoots(
+    projectRoot: string | null = this.activeWorkspaceRoot(),
+  ): string[] {
+    return this.summariesFor(projectRoot).flatMap((summary) => {
+      if (!summary.effective) return []
       const entry = this.store.get(summary.pluginId, summary.scope)
       return entry ? [...(this.resolveInstalled(entry)?.skillRoots ?? [])] : []
     })
@@ -310,23 +405,36 @@ export class PluginApplicationService {
     return resolved
   }
 
-  private summary(pluginId: string, scope: PluginScope): PluginSummary {
+  private baseSummary(
+    pluginId: string,
+    scope: PluginScope,
+    workspace: string | null,
+  ): PluginSummary {
     const entry = this.store.get(pluginId, scope)
-    const enabled = this.readIntent(scope)[pluginId] === true
+    const enabled = this.readIntent(scope, workspace)[pluginId] === true
     const resolved = entry ? this.resolveInstalled(entry) : null
     const signature = pluginEntrySignature(entry)
     const materialization = entry && resolved ? 'installed' : 'missing'
-    const activation = !enabled
-      ? 'disabled'
-      : materialization === 'missing'
+    // Contract §2: missing content outranks the intent, then the signature gate.
+    const activation =
+      materialization === 'missing'
         ? 'missing'
-        : signature.status === 'unverified'
-          ? 'blocked_unverified'
-          : 'active'
+        : !enabled
+          ? 'disabled'
+          : signature.status === 'unverified'
+            ? 'blocked_unverified'
+            : 'active'
     const members = memberIds(resolved)
+    const displayName =
+      resolved?.displayName ?? pluginId.split('/').at(-1) ?? pluginId
     return {
       pluginId,
-      name: resolved?.displayName ?? pluginId.split('/').at(-1) ?? pluginId,
+      name: displayName,
+      displayName,
+      description: resolved?.description ?? null,
+      developerName: resolved?.developerName ?? null,
+      format: resolved?.format ?? null,
+      logo: null,
       scope,
       version: entry?.version ?? null,
       digest: entry?.digest ?? '',
@@ -338,6 +446,9 @@ export class PluginApplicationService {
       enabled,
       materialization,
       activation,
+      effective: false,
+      toggleable: true,
+      uninstallable: scope !== 'managed',
       capabilities: {
         skills: members.skills.length,
         agents: members.agents.length,
@@ -389,9 +500,11 @@ export class PluginApplicationService {
       throw new Error('Plugin project scope requires an active workspace')
   }
 
-  private settingsPath(scope: PluginScope): string {
+  private settingsPath(
+    scope: PluginScope,
+    workspace: string | null = this.activeWorkspaceRoot(),
+  ): string {
     if (scope === 'user') return join(this.emperorHome, 'settings.json')
-    const workspace = this.activeWorkspaceRoot()
     if (!workspace) return ''
     return join(
       resolve(workspace),
@@ -400,8 +513,11 @@ export class PluginApplicationService {
     )
   }
 
-  private readIntent(scope: PluginScope): Record<string, boolean> {
-    const path = this.settingsPath(scope)
+  private readIntent(
+    scope: PluginScope,
+    workspace: string | null,
+  ): Record<string, boolean> {
+    const path = this.settingsPath(scope, workspace)
     if (!path || !existsSync(path)) return {}
     let raw: Record<string, unknown>
     try {
@@ -446,6 +562,42 @@ export class PluginApplicationService {
     settings.enabledPlugins = current
     writePrivateJsonAtomic(path, settings)
   }
+
+  /** Drop the intent key so an uninstalled package leaves no row behind. */
+  private deleteIntent(scope: PluginScope, pluginId: string): void {
+    const path = this.settingsPath(scope)
+    if (!path || !existsSync(path)) return
+    const settings = readJsonObject(path)
+    const current = settings.enabledPlugins
+    if (
+      !current ||
+      typeof current !== 'object' ||
+      Array.isArray(current) ||
+      !(pluginId in current)
+    )
+      return
+    const next = { ...(current as Record<string, unknown>) }
+    delete next[pluginId]
+    settings.enabledPlugins = next
+    writePrivateJsonAtomic(path, settings)
+  }
+}
+
+function verdictOf(
+  summary: PluginSummary,
+  all: readonly PluginSummary[],
+): PluginPackageVerdict {
+  if (summary.activation === 'missing') return { kind: 'missing' }
+  if (summary.activation === 'disabled') return { kind: 'disabled' }
+  if (summary.activation === 'blocked_unverified')
+    return { kind: 'blocked_unverified' }
+  if (!summary.effective) {
+    const winner = all.find(
+      (item) => item.pluginId === summary.pluginId && item.effective,
+    )
+    return { kind: 'shadowed', by: winner?.scope ?? summary.scope }
+  }
+  return { kind: 'active' }
 }
 
 function pluginEntrySignature(entry: InstalledPluginEntry | null) {

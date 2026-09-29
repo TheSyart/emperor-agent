@@ -144,9 +144,21 @@ export interface PluginScopeIntent {
   readonly enabled: boolean
 }
 
+export type PluginActivation =
+  'active' | 'disabled' | 'missing' | 'blocked_unverified'
+
 export interface PluginSummary {
   readonly pluginId: string
+  /** Same as `displayName`; kept for older callers. */
   readonly name: string
+  readonly displayName: string
+  /** Short description. */
+  readonly description: string | null
+  readonly developerName: string | null
+  /** `null` when the package content is missing. */
+  readonly format: PluginFormat | null
+  /** Logo address from the host, or `null` for the generated fallback. */
+  readonly logo: string | null
   readonly scope: PluginScope
   readonly version: string | null
   readonly digest: string
@@ -154,7 +166,11 @@ export interface PluginSummary {
   readonly signature: PluginSignature
   readonly enabled: boolean
   readonly materialization: 'installed' | 'missing'
-  readonly activation: 'active' | 'disabled' | 'missing' | 'blocked_unverified'
+  readonly activation: PluginActivation
+  /** Whether this scope is the one in effect when several are active (contract §2). */
+  readonly effective: boolean
+  readonly toggleable: boolean
+  readonly uninstallable: boolean
   /** Real member counts (contract §2). */
   readonly capabilities: {
     readonly skills: number
@@ -165,6 +181,83 @@ export interface PluginSummary {
     readonly commands: number
     readonly apps: number
   }
+}
+
+export interface PluginComponentView {
+  readonly kind: PluginComponentKind
+  readonly id: string
+  readonly title: string
+  readonly description: string
+  readonly state: PluginComponentState
+  readonly reason: string | null
+}
+
+/** `plugins.getDetail`: everything the detail page shows; never an absolute path (contract §6.2). */
+export interface PluginDetail {
+  readonly pluginId: string
+  readonly scope: PluginScope
+  readonly format: PluginFormat | null
+  readonly version: string | null
+  readonly displayName: string
+  readonly description: string | null
+  readonly longDescription: string | null
+  readonly developerName: string | null
+  readonly category: string | null
+  readonly homepage: string | null
+  readonly license: string | null
+  readonly logo: string | null
+  readonly logoIssue: string | null
+  readonly prompts: readonly string[]
+  readonly enabled: boolean
+  readonly effective: boolean
+  readonly activation: PluginActivation
+  readonly materialization: 'installed' | 'missing'
+  readonly toggleable: boolean
+  readonly uninstallable: boolean
+  readonly source: PluginSource
+  readonly signature: PluginSignature
+  readonly digest: string | null
+  readonly installedAt: string | null
+  readonly permissions: {
+    readonly runsCommands: boolean
+    readonly network: boolean
+  }
+  readonly components: readonly PluginComponentView[]
+}
+
+/** What a running plugin MCP server reports; the host fills it in (contract §2). */
+export interface PluginMcpRuntimeState {
+  readonly state:
+    | 'connecting'
+    | 'ready'
+    | 'degraded'
+    | 'backoff'
+    | 'auth_failed'
+    | 'failed'
+    | 'stopped'
+  readonly toolCount?: number
+  readonly lastError?: string | null
+  /** Tools skipped because their Emperor name was already taken (contract §3.2). */
+  readonly skippedTools?: readonly string[]
+  /** Why the server was not started (for example a missing variable). */
+  readonly blocked?: string | null
+}
+
+/** Live facts the detail view layers onto a package's own verdicts. */
+export interface PluginRuntimeView {
+  mcpServer(
+    pluginId: string,
+    scope: PluginScope,
+    server: string,
+  ): PluginMcpRuntimeState | null
+  /** The Skills in effect for a project (`null` = chat), by name. */
+  effectiveSkills(projectRoot: string | null): ReadonlyMap<
+    string,
+    {
+      readonly source: 'project' | 'user' | 'plugin' | 'builtin'
+      readonly skillFile: string
+    }
+  >
 }
 
 export type PluginInstallSource =

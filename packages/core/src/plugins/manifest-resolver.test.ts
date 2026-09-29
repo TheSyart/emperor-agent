@@ -99,7 +99,7 @@ describe('portable packages', () => {
       expect.objectContaining({
         kind: 'mcp',
         id: 'files',
-        description: 'stdio · ${PLUGIN_ROOT}/bin/files',
+        description: 'stdio · files',
       }),
       expect.objectContaining({
         kind: 'mcp',
