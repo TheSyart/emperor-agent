@@ -8,6 +8,9 @@ jobs:
   ts-desktop:
     name: ts-desktop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Windows is not a supported platform: its job still runs and reports
+    # (POSIX file modes and paths fail there), but does not fail the run.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
