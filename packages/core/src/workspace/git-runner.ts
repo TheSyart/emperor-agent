@@ -14,6 +14,8 @@ export interface GitCommandRequest {
   cwd: string
   env: Record<string, string>
   stdin?: string
+  /** Overrides the host's default time limit for this command. */
+  timeoutMs?: number
 }
 
 export interface GitCommandResult {
@@ -38,6 +40,17 @@ const NETWORK_COMMANDS = new Set([
   'clone',
   'submodule',
 ])
+/**
+ * Variables a caller may add for one command: a temporary index (turn
+ * snapshots) and the identity of the commits they write.
+ */
+const COMMAND_ENV = new Set([
+  'GIT_INDEX_FILE',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
+])
 const ENV_ALLOWLIST = new Set([
   'PATH',
   'HOME',
@@ -60,8 +73,18 @@ export class HardenedGitRunner {
       stdin?: string
       network?: boolean
       allowedExitCodes?: number[]
+      env?: Record<string, string>
+      timeoutMs?: number
     } = {},
   ): Promise<GitCommandResult> {
+    const extra = Object.keys(options.env ?? {}).find(
+      (key) => !COMMAND_ENV.has(key),
+    )
+    if (extra !== undefined)
+      throw new WorkspaceOperationError(
+        'git_env_not_allowed',
+        `Git 命令不接受环境变量 ${extra}。`,
+      )
     const subcommand = gitSubcommand(args)
     if (NETWORK_COMMANDS.has(subcommand) && options.network !== true)
       throw new WorkspaceOperationError(
@@ -109,8 +132,12 @@ export class HardenedGitRunner {
         PAGER: 'cat',
         GIT_EXTERNAL_DIFF: '',
         GIT_OPTIONAL_LOCKS: isReadOnlyGitCommand(args) ? '0' : '1',
+        ...options.env,
       },
       ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.timeoutMs }),
     })
     const allowed = options.allowedExitCodes ?? [0]
     if (!allowed.includes(result.exitCode))

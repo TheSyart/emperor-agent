@@ -49,6 +49,7 @@ turn/end
 - **Inbox**：两个待处理列表。`next-turn` 中一条消息开启一个 turn；`next-step` 中的全部消息进入下一个 step。每次变化记录为 `agent/inbox/spliced`，恢复时从 log 精确重建。
 - **Followup / steer**：普通提交是 followup（排队到 `next-turn`）；运行中的插话是 steer（进入 `next-step`）。`chat.manageQueuedPrompt` 的 `interject` 把排队项提升到 `next-step`，`cancel` 移除尚未开始的项。
 - **没有最大步数**：内核不限制 step 数。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
+- **回合改动记录**：根会话的 turn 改过文件时，宿主在 `turn/end` 之后追加一条 `turn/files`；撤销这一轮时追加 `turn/files-reverted`。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
 - **取消**：`chat.stopRuntime` 或 `/stop` 取消当前 turn，并清理该 session 的待处理交互和子代理；由提交方 AbortSignal 触发的取消会保留 inbox。
 
 ## 模型调用

@@ -7,6 +7,9 @@
  *   links show type icons and file names; Core marks a missing file; a file
  *   link opens the file in 文件 at its line, a folder link opens the folder
  *   in the tree, and a missing file opens nothing.
+ *   RF-05: a turn that writes files and runs the shell records `turn/files`
+ *   matching `git diff` against the project's start, without touching the
+ *   user's index; undo puts the files back.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=references        (after `npm run build`)
@@ -14,10 +17,14 @@
  *     EMPEROR_E2E_MODEL_CONFIG points at a model_config.json to copy)
  */
 
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -152,7 +159,55 @@ function prepareHome(home: string, model: FakeModel | null): void {
   )
 }
 
-/** A small project: two source files, a folder and a document. */
+function git(cwd: string, ...args: string[]): string {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'E2E',
+      GIT_AUTHOR_EMAIL: 'e2e@example.com',
+      GIT_COMMITTER_NAME: 'E2E',
+      GIT_COMMITTER_EMAIL: 'e2e@example.com',
+    },
+  })
+  if (result.status !== 0)
+    throw new Error(result.stderr || `git ${args.join(' ')} failed`)
+  return result.stdout.trim()
+}
+
+function indexHash(project: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join(project, '.git', 'index')))
+    .digest('hex')
+}
+
+async function core<T>(page: Page, op: string, ...args: unknown[]): Promise<T> {
+  return (await page.evaluate(
+    async ({ op, args }) => {
+      const bridge = (
+        window as unknown as {
+          emperor: {
+            invokeCore: (op: string, ...args: unknown[]) => Promise<unknown>
+          }
+        }
+      ).emperor
+      return await bridge.invokeCore(op, ...args)
+    },
+    { op, args },
+  )) as T
+}
+
+/** The session the page shows (`/chat/<id>`). */
+async function sessionIdOf(page: Page): Promise<string> {
+  const id = await page.evaluate(
+    () => /\/chat\/([^/?#]+)/.exec(location.pathname)?.[1] ?? '',
+  )
+  if (!id) throw new Error('no session in the address')
+  return decodeURIComponent(id)
+}
+
+/** A small Git project: two source files, a folder and a document. */
 function prepareProject(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-e2e-refs-')))
   mkdirSync(join(root, 'src', 'lib'), { recursive: true })
@@ -163,6 +218,9 @@ function prepareProject(): string {
   )
   writeFileSync(join(root, 'src', 'lib', 'util.ts'), 'export {}\n')
   writeFileSync(join(root, 'docs', 'guide.md'), '# Guide\n\nHello.\n')
+  git(root, 'init', '-q', '-b', 'main')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'init')
   return root
 }
 
@@ -346,6 +404,158 @@ async function documentLinks(
     throw new Error(`model step errors: ${String(model.errors[0])}`)
 }
 
+interface TurnFiles {
+  turn: number
+  mode: string
+  status: string
+  files: Array<{
+    path: string
+    status: string
+    additions: number | null
+    deletions: number | null
+  }>
+  totals: { files: number; additions: number; deletions: number }
+  snapshot?: { before: string; after: string }
+}
+
+async function turnRecords(page: Page, sessionId: string) {
+  const history = await core<{
+    events: Array<{ type: string; data: unknown }>
+  }>(page, 'sessions.history', { sessionId, maxMessages: 50 })
+  return history.events
+    .filter((event) => event.type === 'turn/files')
+    .map((event) => event.data as TurnFiles)
+}
+
+async function turnFileRecord(
+  page: Page,
+  model: FakeModel,
+  project: string,
+): Promise<void> {
+  const index = indexHash(project)
+  let sessionId = ''
+  let record: TurnFiles | undefined
+  await check(
+    page,
+    'a turn that writes and runs the shell is recorded like git diff',
+    async () => {
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: {
+                file_path: 'src/new.ts',
+                content: 'export const fresh = true\n',
+              },
+            },
+            {
+              name: 'bash',
+              args: {
+                command:
+                  "printf 'export const fourth = 4\\n' >> src/app.ts && rm docs/guide.md",
+                description: 'Edit two files',
+              },
+            },
+          ],
+        }),
+        () => ({ text: '改好了。' }),
+      )
+      await send(page, '加一个常量，删掉说明文档，再新建一个文件。')
+      sessionId = await sessionIdOf(page)
+      await until(
+        async () => (await turnRecords(page, sessionId)).length > 0,
+        30_000,
+        'turn/files',
+      )
+      record = (await turnRecords(page, sessionId)).at(-1)!
+      // What Git says changed since the project's start.
+      const numstat = git(project, 'diff', 'HEAD', '--numstat')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\t'))
+      const untracked = git(
+        project,
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+      )
+        .split('\n')
+        .filter(Boolean)
+      const expected = [
+        ...numstat.map(([added, deleted, path]) => ({
+          path: path!,
+          additions: Number(added),
+          deletions: Number(deleted),
+        })),
+        ...untracked.map((path) => ({
+          path,
+          additions: readFileSync(join(project, path), 'utf8')
+            .split('\n')
+            .filter(Boolean).length,
+          deletions: 0,
+        })),
+      ].sort((a, b) => a.path.localeCompare(b.path))
+      const listed = record.files.map(({ path, additions, deletions }) => ({
+        path,
+        additions,
+        deletions,
+      }))
+      if (JSON.stringify(listed) !== JSON.stringify(expected))
+        throw new Error(
+          `listed ${JSON.stringify(listed)} but git says ${JSON.stringify(expected)}`,
+        )
+      if (record.mode !== 'git' || record.snapshot === undefined)
+        throw new Error(`record ${JSON.stringify(record)}`)
+      if (indexHash(project) !== index)
+        throw new Error('the user index changed')
+      const refs = git(
+        project,
+        'for-each-ref',
+        '--format=%(refname)',
+        'refs/emperor/',
+      ).split('\n')
+      return {
+        files: record.files.map((file) => `${file.status} ${file.path}`),
+        totals: record.totals,
+        refs: refs.length,
+      }
+    },
+  )
+
+  await check(
+    page,
+    'undo puts the turn back and leaves Git clean',
+    async () => {
+      if (record === undefined) throw new Error('no record')
+      const diff = await core<{ diff: string }>(page, 'workspace.turnDiff', {
+        sessionId,
+        turn: record.turn,
+        path: 'src/app.ts',
+      })
+      if (!diff.diff.includes('+export const fourth = 4'))
+        throw new Error(`diff ${diff.diff.slice(0, 300)}`)
+      const result = await core<{
+        reverted: string[]
+        skipped: unknown[]
+      }>(page, 'workspace.revertTurn', { sessionId, turn: record.turn })
+      // Before `git status`, which may refresh the index's file stamps.
+      if (indexHash(project) !== index)
+        throw new Error('the user index changed')
+      const status = git(
+        project,
+        '--no-optional-locks',
+        'status',
+        '--porcelain',
+      )
+      if (status !== '') throw new Error(`git status after undo: ${status}`)
+      if (!existsSync(join(project, 'docs', 'guide.md')))
+        throw new Error('guide.md not restored')
+      return result
+    },
+  )
+}
+
 /** A real model, once: its reply links the files it names. */
 async function realModel(page: Page): Promise<void> {
   await check(page, 'a real reply links the files it names', async () => {
@@ -421,7 +631,10 @@ async function main(): Promise<void> {
     app = launched.app
     await openBuildSession(app, launched.page, project)
     if (model === null) await realModel(launched.page)
-    else await documentLinks(launched.page, model, project)
+    else {
+      await documentLinks(launched.page, model, project)
+      await turnFileRecord(launched.page, model, project)
+    }
   } catch (error) {
     if (!(error instanceof Abort))
       report({

@@ -5,7 +5,7 @@
 // skills, desktop pet, stateRoot layout, model config, hooks, onboarding).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '../llm/types'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
@@ -194,7 +194,9 @@ const EXPECTED_OPERATIONS = [
   'terminals.resize',
   'terminals.write',
   'tools.readResult',
+  'workspace.revertTurn',
   'workspace.snapshot',
+  'workspace.turnDiff',
 ]
 
 const apis: CoreApi[] = []
@@ -1171,7 +1173,10 @@ describe('CoreApi sessions and kept services', () => {
     const doomed = session(api, 'Doomed')
     await api.chat.submit({ content: 'hi', sessionId: doomed })
     expect(api.host.sessions.has(doomed)).toBe(true)
+    const forget = vi.spyOn(api.turnFiles, 'forgetSession')
     await api.sessions.delete(doomed)
+    // Its kept turn snapshots go first, while the project is still known.
+    expect(forget).toHaveBeenCalledWith(doomed)
     expect(api.host.sessions.has(doomed)).toBe(false)
     expect(api.host.kept.sessionStore.get(doomed)).toBeNull()
     expect(api.host.kept.sessionStore.get(keep)).not.toBeNull()

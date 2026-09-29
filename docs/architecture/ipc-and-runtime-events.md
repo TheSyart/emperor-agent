@@ -63,6 +63,13 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 - `git.*` 由 Core 解析 Build 项目、worktree 与 Git root，使用签名环境 Git、参数数组、私有 HOME/XDG，并禁用 pager、hooks、alias、fsmonitor、全局配置与交互凭据。Renderer 只提交项目相对路径。写操作使用 status revision 和显式确认，并与 Agent 写入共享 workspace mutation coordinator。PR 操作只使用通过签名工具目录审核的 GitHub CLI；成功的写操作形成 `git_operation_completed` receipt。`git.remote({ sessionId })` 用固定参数 `git remote get-url origin` 读取远端，只把 scp、`ssh://` 和 `https://` 三种写法映射为去掉用户信息和 SSH 端口的 `https://host/owner/repo`，并给出 `provider`（`github`、`gitlab` 或 `other`）；本地路径、`git://`、`http://` 等写法保留名称但没有网页地址，没有 `origin` 时返回空值而不报错。它是只读 operation，环境信息卡用它拼出比较分支页面。
 - `pullRequests.status/list/view/diff` 不绑定会话或项目：Core 在 Emperor Home 下运行签名工具目录中 probe 为 ready 的 `gh`，参数数组固定，仓库名、PR 编号、搜索文本和条数先经校验，再作为单个 argv 或 GraphQL 变量传入。列表只查询 `is:pr is:open` 加 `involves:@me` / `review-requested:@me` / `author:@me`；diff 上限 4 MiB。`status` 从不因 gh 问题抛错：gh 缺失或探测未就绪、未登录、调用失败时分别返回 `gh_missing`、`gh_unauthenticated` 或 `gh_failed`（附脱敏消息）。`list`、`view`、`diff` 失败时抛出带稳定 code 的错误，例如 `pull_request_gh_missing`、`pull_request_gh_unauthenticated`、`pull_request_not_found`、`pull_request_argument_invalid`、`pull_request_output_too_large`。gh 子进程只继承基础进程变量和定位 gh 配置目录的变量，不传递 `GH_TOKEN`、`GITHUB_TOKEN` 等 token 类环境变量。这组 operation 只读，不经过 mutation guard。
 - `files.list/search/read` 只接受项目相对路径，执行 realpath containment、symlink escape、防 traversal、大小和 MIME 限制；`.git` 不可读取。
+- **回合改动记录**（`packages/core/src/harness/host/turn-files.ts`，Git 机制在 `workspace/turn-snapshots.ts`）：
+  - **快照时机**：Build 项目在 Git 中时，一轮里第一次可能写文件的调用（`write`、`edit`、shell、`skill_manage`、`mcp_*`，根会话或子代理发起）先等一次影子快照；根会话的 turn 结束时再拍一次。
+  - **快照做法**：复制用户 index 为临时 index，执行 `add -A`、`write-tree`、`commit-tree`，不改用户的 index 和文件。未跟踪文件超过 10 MB 的排除，并标为过大。单次快照限时 5 秒，超时本轮记为未记录。
+  - **记录**：有改动时写 `turn/files` 事件，两次快照留在 `refs/emperor/turns/<会话>/<回合>/{before,after}`。每个会话保留最近 50 轮，删除会话时一并删除；普通 `git push` 不会推送这些引用。
+  - **非 Git 目录**：只统计 Emperor 文件工具的写入，`mode` 为 `tools`，不能撤销。
+  - **查看与撤销**：`workspace.turnDiff({ sessionId, turn, path })` 返回一个文件在两次快照间的 diff（上限 2 MiB）。`workspace.revertTurn({ sessionId, turn, paths? })` 只恢复仍与回合结束时一致的文件，其余记 `changed-since`；快照已清理的记 `missing`。撤销结果写 `turn/files-reverted`，每轮只能撤销一次。
+  - **撤销限制**：同一工作区有 Agent 运行时拒绝撤销；撤销与快照都经 workspace mutation coordinator，与 `git.*` 写操作串行。
 - `terminals.*` 以 session owner 和 terminal ID 双重授权，PTY 初始 cwd 来自受信 Build session 的项目路径。
 
 Terminal 高频输出不进入 runtime event，而使用独立的 `emperor:terminal:event` 主窗口通道，事件只有 owner `sessionId`、`terminalId`、单调 `seq` 和输出或退出信息，按 16 ms / 256 KiB 有界批次发送。Core 保留有界的内存滚动缓冲，renderer 可用 `afterSeq` 补读；应用重启后没有终端可恢复。

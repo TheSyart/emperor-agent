@@ -33,6 +33,38 @@ describe('HardenedGitRunner', () => {
     expect(calls[0]?.env.SECRET).toBeUndefined()
   })
 
+  it('passes a temporary index, a commit identity and a time limit, nothing else', async () => {
+    const calls: Array<{ env: Record<string, string>; timeoutMs?: number }> = []
+    const runner = new HardenedGitRunner({
+      resolveRuntime: async () => ({ executable: '/signed/git', env: {} }),
+      run: async (request) => {
+        calls.push({
+          env: request.env,
+          ...(request.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: request.timeoutMs }),
+        })
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+    })
+    await runner.execute('/repo', ['write-tree'], {
+      env: {
+        GIT_INDEX_FILE: '/tmp/index',
+        GIT_AUTHOR_NAME: 'Emperor',
+        GIT_COMMITTER_EMAIL: 'emperor@localhost',
+      },
+      timeoutMs: 1200,
+    })
+    expect(calls[0]).toMatchObject({
+      env: { GIT_INDEX_FILE: '/tmp/index', GIT_AUTHOR_NAME: 'Emperor' },
+      timeoutMs: 1200,
+    })
+    await expect(
+      runner.execute('/repo', ['status'], { env: { GIT_DIR: '/elsewhere' } }),
+    ).rejects.toMatchObject({ code: 'git_env_not_allowed' })
+    expect(calls).toHaveLength(1)
+  })
+
   it('uses a private HOME and XDG root when the host supplies one', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-git-home-'))
     let env: Record<string, string> = {}

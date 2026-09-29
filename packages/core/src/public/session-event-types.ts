@@ -17,6 +17,7 @@ import type * as _approvalService from '../harness/approval/service'
 import type * as _compactionEvents from '../harness/compaction/events'
 import type * as _computerUseEvents from '../harness/computer-use/events'
 import type * as _goalTypes from '../harness/goal/types'
+import type * as _turnFiles from '../harness/host/turn-files'
 import type * as _hooksTypes from '../harness/hooks/types'
 import type * as _jobsRegistry from '../harness/jobs/registry'
 import type * as _memory from '../harness/memory/memory'
@@ -38,6 +39,7 @@ export type SessionEventAugmentations = [
   typeof _compactionEvents,
   typeof _computerUseEvents,
   typeof _goalTypes,
+  typeof _turnFiles,
   typeof _hooksTypes,
   typeof _jobsRegistry,
   typeof _memory,
@@ -92,3 +94,8 @@ export type {
   SubagentMode,
   SubagentStopReason,
 } from '../harness/subagent/manager'
+export type {
+  TurnFileEntry,
+  TurnFilesRecord,
+  TurnFilesReverted,
+} from '../harness/host/turn-files'

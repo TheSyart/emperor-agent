@@ -20,7 +20,7 @@ export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
     action: () => Promise<T>,
     signal?: AbortSignal | null,
   ): Promise<T> {
-    const key = mutationDomain(workspaceRoot)
+    const key = workspaceMutationDomain(workspaceRoot)
     const previous = this.tails.get(key) ?? Promise.resolve()
     let release!: () => void
     const gate = new Promise<void>((done) => {
@@ -45,7 +45,7 @@ export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
 }
 
 /** Sibling projects inside one Git worktree must share the same mutation lease. */
-function mutationDomain(workspaceRoot: string): string {
+export function workspaceMutationDomain(workspaceRoot: string): string {
   const absolute = resolve(workspaceRoot)
   const canonical = existsSync(absolute) ? realpathSync(absolute) : absolute
   let current = canonical

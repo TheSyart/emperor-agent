@@ -1528,6 +1528,34 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([workspaceSessionSchema]),
     (api, [input]) => api.workspace.snapshot(input),
   ),
+  'workspace.turnDiff': operation(
+    z.tuple([
+      z
+        .object({
+          sessionId: idSchema,
+          turn: z.number().int().positive(),
+          path: workspaceRelativePathSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.workspace.turnDiff(input),
+  ),
+  'workspace.revertTurn': operation(
+    z.tuple([
+      z
+        .object({
+          sessionId: idSchema,
+          turn: z.number().int().positive(),
+          paths: z
+            .array(workspaceRelativePathSchema)
+            .min(1)
+            .max(200)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.workspace.revertTurn(input),
+  ),
 } as const
 
 export type CoreOperationKey = keyof typeof CORE_OPERATION_REGISTRY

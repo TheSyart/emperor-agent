@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(174)
+    expect(coreOperationKeys()).toHaveLength(176)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -34,6 +34,8 @@ describe('Core operation registry', () => {
     expect(coreOperationKeys()).toEqual(
       expect.arrayContaining([
         'workspace.snapshot',
+        'workspace.turnDiff',
+        'workspace.revertTurn',
         'git.status',
         'git.diff',
         'git.branches',
@@ -91,6 +93,25 @@ describe('Core operation registry', () => {
         { ...input, absolutePath: '/forged/path' },
       ]),
     ).toThrow()
+  })
+
+  it('validates the turn file record operations', () => {
+    const diff = CORE_OPERATION_REGISTRY['workspace.turnDiff'].args
+    const revert = CORE_OPERATION_REGISTRY['workspace.revertTurn'].args
+    expect(
+      diff.parse([{ sessionId: 's1', turn: 2, path: 'src/a.ts' }]),
+    ).toEqual([{ sessionId: 's1', turn: 2, path: 'src/a.ts' }])
+    expect(revert.parse([{ sessionId: 's1', turn: 2 }])).toEqual([
+      { sessionId: 's1', turn: 2 },
+    ])
+    for (const bad of [
+      { sessionId: 's1', turn: 0 },
+      { sessionId: 's1', turn: 1.5 },
+      { sessionId: 's1', turn: 1, paths: [] },
+      { sessionId: 's1', turn: 1, paths: ['a\0b'] },
+      { sessionId: 's1', turn: 1, extra: true },
+    ])
+      expect(() => revert.parse([bad]), JSON.stringify(bad)).toThrow()
   })
 
   it('accepts only the three permission presets and dsh goal start input', () => {

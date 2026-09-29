@@ -86,7 +86,7 @@ import {
   type WorkspaceFileListResult,
   type WorkspaceFileReadResult,
 } from '../workspace/files'
-import { WorkspaceGitService } from '../workspace/git'
+import { WorkspaceGitService, type GitCommandRequest } from '../workspace/git'
 import { GH_ENV_ALLOWLIST } from '../workspace/git-pull-requests'
 import {
   createGhCommandRunner,
@@ -95,7 +95,16 @@ import {
 } from '../workspace/pull-request-browser'
 import { WorkspaceBindingStore } from '../workspace/git-worktrees'
 import { GitOperationReceiptStore } from '../workspace/git-receipts'
-import { WorkspaceMutationCoordinator } from '../workspace/mutation-coordinator'
+import {
+  WorkspaceMutationCoordinator,
+  workspaceMutationDomain,
+} from '../workspace/mutation-coordinator'
+import { HardenedGitRunner } from '../workspace/git-runner'
+import { TurnSnapshots } from '../workspace/turn-snapshots'
+import {
+  TurnFileRecorder,
+  type TurnFilesReverted,
+} from '../harness/host/turn-files'
 import {
   TerminalService,
   type PtyHost,
@@ -199,6 +208,8 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  /** Per-turn file records of Build projects (E-track contract §5). */
+  readonly turnFiles: TurnFileRecorder
   readonly gitReceipts: GitOperationReceiptStore
   readonly terminalService: TerminalService
   readonly sessionApplicationService: CoreSessionApplicationService
@@ -379,33 +390,35 @@ export class CoreApi {
     }
     const gitProcessRunner = new NodeEnvironmentProcessRunner()
     const runGh = createGhCommandRunner(new NodeEnvironmentProcessRunner())
+    const resolveGit = async (projectRoot: string) => {
+      const runtime = await this.resolveGitRuntime(projectRoot)
+      if (!runtime)
+        throw new WorkspaceOperationError(
+          'git_unavailable',
+          '当前签名执行环境中没有可用 Git。',
+        )
+      return runtime
+    }
+    const runGit = async (request: GitCommandRequest) => {
+      const result = await gitProcessRunner.run({
+        ...request,
+        timeoutMs: request.timeoutMs ?? 120_000,
+        maxOutputBytes: 4 * 1024 * 1024,
+        outputPolicy: 'truncate_tail',
+        outputQuotaScope: 'per_stream',
+      })
+      return {
+        exitCode: result.exitCode ?? (result.status === 'completed' ? 0 : 1),
+        stdout: result.stdout,
+        stderr: result.stderr || result.error || '',
+        stdoutTruncated: result.stdoutTruncated === true,
+        stderrTruncated: result.stderrTruncated === true,
+      }
+    }
     this.workspaceGitService = new WorkspaceGitService({
       resolveProject: resolveWorkspaceProject,
-      resolveRuntime: async (projectRoot) => {
-        const runtime = await this.resolveGitRuntime(projectRoot)
-        if (!runtime)
-          throw new WorkspaceOperationError(
-            'git_unavailable',
-            '当前签名执行环境中没有可用 Git。',
-          )
-        return runtime
-      },
-      run: async (request) => {
-        const result = await gitProcessRunner.run({
-          ...request,
-          timeoutMs: 120_000,
-          maxOutputBytes: 4 * 1024 * 1024,
-          outputPolicy: 'truncate_tail',
-          outputQuotaScope: 'per_stream',
-        })
-        return {
-          exitCode: result.exitCode ?? (result.status === 'completed' ? 0 : 1),
-          stdout: result.stdout,
-          stderr: result.stderr || result.error || '',
-          stdoutTruncated: result.stdoutTruncated === true,
-          stderrTruncated: result.stderrTruncated === true,
-        }
-      },
+      resolveRuntime: resolveGit,
+      run: runGit,
       hasActiveWriter: (sessionId) => host.isBusy(sessionId),
       stateRoot: this.paths.stateRoot,
       bindings: this.workspaceBindings,
@@ -420,6 +433,41 @@ export class CoreApi {
       resolveGhRuntime: (projectRoot) => this.resolveGhRuntime(projectRoot),
       runGh,
     })
+    const turnGit = new HardenedGitRunner({
+      resolveRuntime: resolveGit,
+      run: runGit,
+      privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
+    })
+    const projectRootOf = (sessionId: string): string | null => {
+      try {
+        return resolveWorkspaceProject(sessionId).projectRoot
+      } catch {
+        return null
+      }
+    }
+    this.turnFiles = new TurnFileRecorder({
+      snapshots: new TurnSnapshots({
+        exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
+        tempDir: resolve(this.paths.stateRoot, 'git', 'turn-index'),
+      }),
+      projectRoot: projectRootOf,
+      workspaceRoot: (sessionId) => host.sessionWorkspaceRoot(sessionId),
+      rootOf: (agent) => host.rootOf(agent),
+      sessionLog: (sessionId) => host.sessionLog(sessionId),
+      workspaceBusy: (projectRoot) => {
+        const domain = workspaceMutationDomain(projectRoot)
+        return host
+          .busySessions()
+          .some(
+            (sessionId) =>
+              workspaceMutationDomain(host.sessionWorkspaceRoot(sessionId)) ===
+              domain,
+          )
+      },
+      runExclusive: (workspaceRoot, owner, action) =>
+        this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
+    })
+    this.turnFiles.install(host)
     this.pullRequestBrowser = new PullRequestBrowserService({
       cwd: this.paths.stateRoot,
       resolveRuntime: () => this.resolveGhRuntime(this.paths.stateRoot),
@@ -463,6 +511,7 @@ export class CoreApi {
       resolveProject: (projectPath) =>
         kept.projectStore.resolve(projectPath) as unknown as Dict,
       endSession: async (sessionId) => {
+        await this.turnFiles.forgetSession(sessionId)
         host.deleteSession(sessionId)
       },
       stopSession: (sessionId) => {
@@ -1286,6 +1335,19 @@ export class CoreApi {
   readonly workspace = {
     snapshot: (input: { sessionId: string }): Promise<WorkspaceSnapshot> =>
       this.workspaceApplicationService.snapshot(input),
+    /** One file of a recorded turn: the diff between its snapshots. */
+    turnDiff: (input: {
+      sessionId: string
+      turn: number
+      path: string
+    }): Promise<{ path: string; diff: string; truncated: boolean }> =>
+      this.turnFiles.diff(input),
+    /** Undo a recorded turn (its files that did not change since). */
+    revertTurn: (input: {
+      sessionId: string
+      turn: number
+      paths?: string[]
+    }): Promise<TurnFilesReverted> => this.turnFiles.revert(input),
   }
 
   readonly git = {
