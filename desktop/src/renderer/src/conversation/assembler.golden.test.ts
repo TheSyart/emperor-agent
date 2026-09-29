@@ -91,7 +91,9 @@ describe('chat assembly over the recorded kernel log', () => {
       turn: null,
       status: 'done',
       shadowedItemCount: 10,
-      shadowedTokenCount: 415,
+      // The golden normalizes this estimate: it depends on the length of
+      // the machine's temporary path.
+      shadowedTokenCount: 0,
     })
     const tail = nodeOf(snapshot, 'turnTail')
     expect(tail.data).toMatchObject({

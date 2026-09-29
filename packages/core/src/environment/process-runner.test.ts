@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   managedEnvironmentOperationFingerprint,
   NodeEnvironmentProcessRunner,
@@ -111,16 +111,20 @@ describe('NodeEnvironmentProcessRunner', () => {
   })
 
   it('terminates the spawned process tree on cancellation', async () => {
-    const marker = join(
-      mkdtempSync(join(tmpdir(), 'emperor-process-tree-')),
-      'grandchild-ran',
-    )
+    const dir = mkdtempSync(join(tmpdir(), 'emperor-process-tree-'))
+    const marker = join(dir, 'grandchild-ran')
+    const spawned = join(dir, 'grandchild-spawned')
     const runner = new NodeEnvironmentProcessRunner()
     const controller = new AbortController()
+    // The grandchild writes its marker 1.5 s after it starts. Cancel only
+    // once it exists: cancelling while the child was still spawning it
+    // raced on a loaded CI runner.
     const childScript = [
       'const {spawn}=require("node:child_process")',
-      `spawn(process.execPath,["-e",${JSON.stringify(`setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'ran'),400)`)}])`,
-      'setTimeout(()=>{},5000)',
+      'const fs=require("node:fs")',
+      `const grandchild=spawn(process.execPath,["-e",${JSON.stringify(`setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'ran'),1500)`)}])`,
+      `grandchild.on("spawn",()=>fs.writeFileSync(${JSON.stringify(spawned)},"1"))`,
+      'setTimeout(()=>{},10000)',
     ].join(';')
     const running = runner.run({
       executable: process.execPath,
@@ -128,11 +132,16 @@ describe('NodeEnvironmentProcessRunner', () => {
       env: { PATH: process.env.PATH ?? '' },
       signal: controller.signal,
     })
-    await delay(100)
+    await vi.waitFor(
+      () => {
+        if (!existsSync(spawned)) throw new Error('grandchild not spawned yet')
+      },
+      { timeout: 5_000 },
+    )
     controller.abort()
 
     await expect(running).resolves.toMatchObject({ status: 'cancelled' })
-    await delay(600)
+    await delay(2_000)
     expect(existsSync(marker)).toBe(false)
   })
 })
