@@ -181,7 +181,10 @@ describe('OwnedProcessRuntime receipts', () => {
       const ready = join(root, 'grandchild-started')
       const marker = join(root, 'grandchild-finished')
       const runtime = new OwnedProcessRuntime(root)
-      const childScript = `require('node:fs').writeFileSync(${JSON.stringify(ready)},'ready');setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'done'),500)`
+      // The grandchild writes its marker 1.5 s after it starts. On macOS the
+      // tree kill first walks descendants with pgrep and ps, which on a
+      // loaded CI runner outlasted a 500 ms marker delay.
+      const childScript = `require('node:fs').writeFileSync(${JSON.stringify(ready)},'ready');setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'done'),1500)`
       const parentScript = [
         'const {spawn}=require("node:child_process")',
         `spawn(process.execPath,['-e',${JSON.stringify(childScript)}],{detached:true,stdio:'ignore'}).unref()`,
@@ -201,7 +204,7 @@ describe('OwnedProcessRuntime receipts', () => {
 
       await runtime.cancelOwner(owner, 'session closed')
       await expect(running).resolves.toMatchObject({ status: 'cancelled' })
-      await delay(700)
+      await delay(2_000)
       expect(existsSync(marker)).toBe(false)
       expect(runtime.list()[0]).toMatchObject({
         status: 'cancelled',
