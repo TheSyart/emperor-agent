@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real|userbrowser-app]
 // `real` needs EMPEROR_E2E_MODEL_CONFIG (a model_config.json to copy).
 // In --mode=overlay, EMPEROR_E2E_PHYSICAL_OVERLAY=1 waits up to 45 seconds
 // for a real click on the visible stop button instead of clicking via JS.
@@ -21,13 +21,22 @@ const mode =
   process.argv.find((arg) => arg.startsWith('--mode=')) ?? '--mode=smoke'
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
-// fullstack / real: the dev app (out/, run `npm run build` first) driven by
-// Playwright from plain Node; the other modes run the harness in Electron.
-const appMode = mode === '--mode=fullstack' || mode === '--mode=real'
-const entry = appMode
-  ? 'tests/electron/fullstack/run.ts'
-  : 'tests/electron/harness/main.ts'
-const bundle = appMode ? join(desktop, 'out-e2e', 'fullstack.cjs') : outfile
+// fullstack / real / userbrowser-app: the dev app (out/, run `npm run build`
+// first) driven by Playwright from plain Node; the other modes run the
+// harness in Electron.
+const userBrowserApp = mode === '--mode=userbrowser-app'
+const appMode =
+  mode === '--mode=fullstack' || mode === '--mode=real' || userBrowserApp
+const entry = userBrowserApp
+  ? 'tests/electron/user-browser-app/run.ts'
+  : appMode
+    ? 'tests/electron/fullstack/run.ts'
+    : 'tests/electron/harness/main.ts'
+const bundle = userBrowserApp
+  ? join(desktop, 'out-e2e', 'user-browser-app.cjs')
+  : appMode
+    ? join(desktop, 'out-e2e', 'fullstack.cjs')
+    : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],

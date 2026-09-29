@@ -3,7 +3,8 @@
  * `POST /v1/chat/completions` (stream) answers the Agent's requests from a
  * queue of steps; each step sees the request (so it can read refs out of the
  * last observation) and returns tool calls or text. Requests without the
- * browser tools (titles, summaries) get a short text and leave the queue alone.
+ * agent's tools (titles, summaries) get a short text and leave the queue
+ * alone; the agent is recognised by `browser_open`, or by `agentTool`.
  */
 
 import { createServer, type IncomingMessage, type Server } from 'node:http'
@@ -144,7 +145,10 @@ function stream(reply: StepReply): string {
   return out + usage() + 'data: [DONE]\n\n'
 }
 
-export async function startFakeModel(): Promise<FakeModel> {
+export async function startFakeModel(
+  options: { agentTool?: string } = {},
+): Promise<FakeModel> {
+  const agentTool = options.agentTool ?? 'browser_open'
   const queue: Step[] = []
   const served: FakeModel['served'] = []
   const errors: unknown[] = []
@@ -161,7 +165,7 @@ export async function startFakeModel(): Promise<FakeModel> {
       }
       const body = JSON.parse(await readBody(request)) as ChatRequest
       const agent = (body.tools ?? []).some(
-        (tool) => tool.function?.name === 'browser_open',
+        (tool) => tool.function?.name === agentTool,
       )
       let reply: StepReply
       if (!agent) reply = { text: '网页操作' }
