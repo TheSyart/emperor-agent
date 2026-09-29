@@ -138,7 +138,7 @@
           "content": [
             {
               "type": "text",
-              "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"/private<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval policy: ask. Operations that require approval ask the user; without an available answerer, the request fails closed."
+              "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval policy: ask. Operations that require approval ask the user; without an available answerer, the request fails closed."
             }
           ],
           "source": {
@@ -2467,7 +2467,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"/private<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).\n\nYou are a delegated subagent: your permission scope was fixed when you were started and cannot be widened from inside this session — operations that require approval are rejected automatically. When the task needs access beyond that scope, do not retry the denied operation; state the limitation in your reply so the delegating agent can handle it."
+                "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent file policy: workspace-write. Sandboxed operations may modify files under the session workspace: \"<root>/home/workspace\". Some platform temporary areas may also be writable.\n\nApproval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).\n\nYou are a delegated subagent: your permission scope was fixed when you were started and cannot be widened from inside this session — operations that require approval are rejected automatically. When the task needs access beyond that scope, do not retry the denied operation; state the limitation in your reply so the delegating agent can handle it."
               }
             ],
             "source": {

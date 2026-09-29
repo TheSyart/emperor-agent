@@ -13,7 +13,13 @@
  * Refresh after an intentional log-shape change:
  *   UPDATE_GOLDEN=1 npx vitest run src/harness/projection/raw-golden.test.ts
  */
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -49,25 +55,24 @@ const TIME_STEP = 100
 
 function normalize(
   value: unknown,
-  root: string,
+  roots: readonly string[],
   ids: Map<string, string>,
 ): unknown {
   if (typeof value === 'string') {
-    return value
-      .split(root)
-      .join('<root>')
+    return roots
+      .reduce((text, root) => text.split(root).join('<root>'), value)
       .replace(UUID, (match) => {
         if (!ids.has(match)) ids.set(match, `<id${ids.size + 1}>`)
         return ids.get(match)!
       })
   }
   if (Array.isArray(value))
-    return value.map((item) => normalize(item, root, ids))
+    return value.map((item) => normalize(item, roots, ids))
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(value)) {
       if (VOLATILE_KEYS.has(key)) out[key] = typeof item === 'string' ? '' : 0
-      else out[key] = normalize(item, root, ids)
+      else out[key] = normalize(item, roots, ids)
     }
     return out
   }
@@ -205,9 +210,11 @@ describe('raw session-log golden', () => {
       expect(types.has(type as never)).toBe(true)
 
     const ids = new Map<string, string>()
+    // The resolved path first: on macOS the runtime reports /private/var/…
+    // for a temporary root under /var/…, and Linux has no such prefix.
     const fixture = normalize(
       { root: retime(page), children: children.map(retime) },
-      root,
+      [realpathSync(root), root],
       ids,
     )
     const sessionPattern = new RegExp(entry.id, 'g')

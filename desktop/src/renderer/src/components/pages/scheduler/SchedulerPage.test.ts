@@ -44,7 +44,9 @@ const JOBS = [
   job({
     id: 'job_digest',
     name: '每日摘要',
-    schedule: { kind: 'cron', expr: '0 18 * * 5', tz: 'UTC' },
+    // A zone no machine runs in, so the label always names it (a job in
+    // the local zone does not): UTC was the CI runner's own zone.
+    schedule: { kind: 'cron', expr: '0 18 * * 5', tz: 'Pacific/Chatham' },
     state: { nextRunAtMs: NOW + 3 * 24 * HOUR },
   }),
   job({ id: 'job_weekly', name: '周报整理', enabled: false }),
@@ -171,7 +173,7 @@ describe('SchedulerPage', () => {
       'memory-maintenance',
     ])
     expect(row('job_digest').textContent).toContain(
-      '星期五（时间：18:00，UTC） · 下次运行 3天后',
+      '星期五（时间：18:00，Pacific/Chatham） · 下次运行 3天后',
     )
     expect(row('job_weekly').textContent).toContain('每 2 小时 · 已暂停')
     expect(row('job_once').textContent).toContain('一次 · 已完成')
