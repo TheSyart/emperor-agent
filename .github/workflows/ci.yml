@@ -26,6 +26,11 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      # node-gyp (the node-pty rebuild while packaging) still imports
+      # distutils, which Python 3.12 removed.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install core dependencies
         run: npm ci
       - name: Install desktop dependencies

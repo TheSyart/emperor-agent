@@ -522,51 +522,55 @@ describe('connecting Chrome/Edge from Settings', () => {
     expect(id).toBe(EMPEROR_EXTENSION_ID)
   })
 
-  it('registers the host for the Emperor extension in every browser that has run', async () => {
-    const f = await fixture()
-    await mkdir(f.browserRoot('chrome'), { recursive: true })
-    await mkdir(f.browserRoot('edge'), { recursive: true })
-    const pairings: PairingStore = {
-      get: async () => null,
-      put: async () => undefined,
-      remove: async () => undefined,
-      list: async () => [],
-    }
-    const bridge = new NmBridgeServer({
-      pairings,
-      manifests: f.registrar(),
-      socketPath: join(f.root, 'nm.sock'),
-      heartbeatMs: 0,
-    })
-    await bridge.start()
-    try {
-      await expect(bridge.connectBrowsers()).resolves.toEqual({
-        browsers: ['chrome', 'edge'],
-      })
-      expect((await f.read('chrome')).allowed_origins).toEqual([
-        `chrome-extension://${EMPEROR_EXTENSION_ID}/`,
-      ])
-      expect(existsSync(f.browserRoot('chromium'))).toBe(false)
-      // A build without a registrable host says so instead of pretending.
-      const devBridge = new NmBridgeServer({
+  // The Native Messaging bridge exists only on macOS.
+  it.skipIf(process.platform !== 'darwin')(
+    'registers the host for the Emperor extension in every browser that has run',
+    async () => {
+      const f = await fixture()
+      await mkdir(f.browserRoot('chrome'), { recursive: true })
+      await mkdir(f.browserRoot('edge'), { recursive: true })
+      const pairings: PairingStore = {
+        get: async () => null,
+        put: async () => undefined,
+        remove: async () => undefined,
+        list: async () => [],
+      }
+      const bridge = new NmBridgeServer({
         pairings,
-        manifests: f.registrar({ hostPath: null }),
-        socketPath: join(f.root, 'nm2.sock'),
+        manifests: f.registrar(),
+        socketPath: join(f.root, 'nm.sock'),
         heartbeatMs: 0,
       })
-      await devBridge.start()
+      await bridge.start()
       try {
-        await rm(f.manifest('chrome'))
-        await rm(f.manifest('edge'))
-        await expect(devBridge.connectBrowsers()).resolves.toEqual({
-          browsers: [],
-          reason: 'no-host',
+        await expect(bridge.connectBrowsers()).resolves.toEqual({
+          browsers: ['chrome', 'edge'],
         })
+        expect((await f.read('chrome')).allowed_origins).toEqual([
+          `chrome-extension://${EMPEROR_EXTENSION_ID}/`,
+        ])
+        expect(existsSync(f.browserRoot('chromium'))).toBe(false)
+        // A build without a registrable host says so instead of pretending.
+        const devBridge = new NmBridgeServer({
+          pairings,
+          manifests: f.registrar({ hostPath: null }),
+          socketPath: join(f.root, 'nm2.sock'),
+          heartbeatMs: 0,
+        })
+        await devBridge.start()
+        try {
+          await rm(f.manifest('chrome'))
+          await rm(f.manifest('edge'))
+          await expect(devBridge.connectBrowsers()).resolves.toEqual({
+            browsers: [],
+            reason: 'no-host',
+          })
+        } finally {
+          await devBridge.stop()
+        }
       } finally {
-        await devBridge.stop()
+        await bridge.stop()
       }
-    } finally {
-      await bridge.stop()
-    }
-  })
+    },
+  )
 })
