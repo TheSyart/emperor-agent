@@ -574,3 +574,110 @@ describe('messages and notices', () => {
     expectConverges(log)
   })
 })
+
+describe('turn files', () => {
+  const record = {
+    turn: 1,
+    mode: 'git' as const,
+    status: 'recorded' as const,
+    files: [
+      {
+        path: 'src/a.ts',
+        status: 'modified' as const,
+        additions: 2,
+        deletions: 1,
+      },
+    ],
+    totals: { files: 1, additions: 2, deletions: 1 },
+    snapshot: { before: 'b'.repeat(40), after: 'a'.repeat(40) },
+  }
+
+  function turnWithFiles(): LogBuilder {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'done' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    // The next turn starts before the snapshot finishes.
+    log.add('turn/start', { turn: 2 })
+    log.add('turn/files', record)
+    return log
+  }
+
+  it('shows the card after the turn’s footer, even when it lands late', () => {
+    const log = turnWithFiles()
+    const { snapshot } = replay(log.events)
+    const kinds = describeNodes(snapshot)
+    expect(kinds.slice(-2)).toEqual([
+      'turnTail: turn 1 steps=1',
+      'turnFiles: turn 1 files=1',
+    ])
+    expect(nodeOf(snapshot, 'turnFiles').data).toMatchObject({
+      turn: 1,
+      mode: 'git',
+      status: 'recorded',
+      reviewable: true,
+      concurrent: false,
+      truncated: false,
+      files: record.files,
+      totals: record.totals,
+    })
+    expectConverges(log)
+  })
+
+  it('marks the card undone once the turn is reverted', () => {
+    const log = turnWithFiles()
+    log.add('turn/files-reverted', {
+      turn: 1,
+      reverted: [],
+      skipped: [{ path: 'src/a.ts', reason: 'changed-since' }],
+    })
+    const { snapshot } = replay(log.events)
+    expect(nodeOf(snapshot, 'turnFiles').data.reverted).toEqual({
+      reverted: [],
+      skipped: [{ path: 'src/a.ts', reason: 'changed-since' }],
+    })
+    expectConverges(log)
+  })
+
+  it('keeps a skipped or tools-only record without review', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('turn/end', {
+      turn: 1,
+      reason: { kind: 'aborted', reason: { kind: 'user' } },
+    })
+    log.add('turn/files', {
+      turn: 1,
+      mode: 'git',
+      status: 'skipped',
+      skipReason: 'timeout',
+      files: [],
+      totals: { files: 0, additions: 0, deletions: 0 },
+    })
+    log.add('turn/start', { turn: 2 })
+    log.add('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    log.add('turn/files', {
+      turn: 2,
+      mode: 'tools',
+      status: 'recorded',
+      files: [{ path: 'a.txt', status: 'added', additions: 1, deletions: 0 }],
+      totals: { files: 1, additions: 1, deletions: 0 },
+    })
+    const { snapshot } = replay(log.events)
+    expect(nodeOf(snapshot, 'turnFiles', 0).data).toMatchObject({
+      status: 'skipped',
+      skipReason: 'timeout',
+      reviewable: false,
+    })
+    expect(nodeOf(snapshot, 'turnFiles', 1).data).toMatchObject({
+      mode: 'tools',
+      reviewable: false,
+    })
+    // A turn that changed nothing has no card.
+    expect(
+      describeNodes(snapshot).filter((line) => line.startsWith('turnFiles')),
+    ).toHaveLength(2)
+  })
+})

@@ -25,6 +25,8 @@ export interface ExpansionStore {
 export interface ChatContext {
   readonly actions: ChatActions
   readonly expansion: ExpansionStore
+  /** The session the timeline shows ('' in galleries without one). */
+  readonly sessionId: () => string
 }
 
 const CHAT_CONTEXT: InjectionKey<ChatContext> = Symbol('chat-context')
@@ -51,6 +53,7 @@ const NOOP_CONTEXT: ChatContext = {
     editMessage: () => undefined,
   },
   expansion: createExpansionStore(),
+  sessionId: () => '',
 }
 
 export function useChatContext(): ChatContext {

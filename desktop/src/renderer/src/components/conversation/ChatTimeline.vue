@@ -63,6 +63,7 @@ provideChatContext({
     editMessage: (text) => emit('edit-message', text),
   },
   expansion: createExpansionStore(),
+  sessionId: () => props.sessionId,
 })
 
 // ── conversation handle (re-opened when the session changes) ────────────

@@ -3,7 +3,8 @@
  * ChatGallery — dev-only `?chat-gallery` page: ChatTimeline over an
  * in-memory fixture store (no Electron). Query params:
  * - scenario: showcase | notices | workflow | interactions | streaming |
- *   streaming-reasoning | long | links | kernel (default showcase)
+ *   streaming-reasoning | long | links | turn-files | kernel (default
+ *   showcase)
  * - bare: hide the scenario bar (screenshots)
  * - interval: live replay interval in ms (streaming scenarios)
  * `open-subagent` navigates into fixture child sessions (with a back link);

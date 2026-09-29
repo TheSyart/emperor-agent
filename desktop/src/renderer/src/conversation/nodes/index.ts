@@ -12,6 +12,7 @@ import {
   turnMaxTokensDefinition,
 } from './notices'
 import { toolDefinition } from './tool'
+import { turnFilesDefinition } from './turnFiles'
 import {
   compactionDefinition,
   requestContextFactDefinition,
@@ -38,6 +39,7 @@ export const CHAT_DEFINITIONS: readonly ConversationDefinition[] = [
   goalDefinition,
   workflowRunDefinition,
   turnTailDefinition,
+  turnFilesDefinition,
   todosFactDefinition,
   requestContextFactDefinition,
 ] as readonly ConversationDefinition[]

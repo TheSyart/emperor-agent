@@ -5,11 +5,21 @@
  * column on the requested pane, and WorkspacePanel consumes the payload.
  */
 import { shallowRef } from 'vue'
+import type { TurnFileEntry } from '@emperor/core/runtime-contract'
 import {
   frameActions,
   useFrameState,
   type WorkspacePane,
 } from '../shell/frameState'
+
+/** A recorded turn to review (pane 'review', 本轮改动). */
+export interface TurnReviewRequest {
+  sessionId: string
+  turn: number
+  files: readonly TurnFileEntry[]
+  /** The file to show first. */
+  path?: string
+}
 
 export interface WorkspaceRequest {
   pane: WorkspacePane
@@ -21,6 +31,8 @@ export interface WorkspaceRequest {
   directory?: string
   /** Address to prefill (pane 'browser'); never opened without a user submit. */
   url?: string
+  /** Review one recorded turn instead of the working tree (pane 'review'). */
+  turn?: TurnReviewRequest
   /** Control to focus once the pane shows ('commit': the review commit box). */
   focus?: 'commit'
   nonce: number

@@ -93,6 +93,20 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
         truncated: false,
         bytes: 12,
       })
+    case 'workspace.turnDiff':
+      return Promise.resolve({
+        path: payload?.path,
+        diff: [
+          'diff --git a/src/a.ts b/src/a.ts',
+          '--- a/src/a.ts',
+          '+++ b/src/a.ts',
+          '@@ -1 +1,2 @@',
+          ' const a = 1',
+          '+const b = 2',
+          '',
+        ].join('\n'),
+        truncated: false,
+      })
     default:
       return Promise.resolve(null)
   }
@@ -275,6 +289,55 @@ describe('WorkspacePanel', () => {
     expect(core).not.toHaveBeenCalledWith('files.read', expect.anything())
     expect(workspaceRequest().value).toBeNull()
     void root
+  })
+
+  it('requestWorkspace({ pane: review, turn }) shows that turn, and 返回 the Git review', async () => {
+    withGit = true
+    const root = mount()
+    await flush()
+    requestWorkspace({
+      pane: 'review',
+      turn: {
+        sessionId: 's1',
+        turn: 4,
+        files: [
+          { path: 'src/a.ts', status: 'modified', additions: 1, deletions: 0 },
+          {
+            path: 'logo.png',
+            status: 'added',
+            additions: null,
+            deletions: null,
+            binary: true,
+          },
+        ],
+      },
+    })
+    await vi.waitFor(() =>
+      expect(root.querySelector('[data-turn-review="4"]')).not.toBeNull(),
+    )
+    await vi.waitFor(() =>
+      expect(core).toHaveBeenCalledWith('workspace.turnDiff', {
+        sessionId: 's1',
+        turn: 4,
+        path: 'src/a.ts',
+      }),
+    )
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector('.turn-review [data-diff]')?.textContent,
+      ).toContain('const b = 2'),
+    )
+    // A binary file has no diff to fetch.
+    root.querySelectorAll<HTMLButtonElement>('.turn-review .file')[1]!.click()
+    await flush()
+    expect(root.querySelector('.turn-review .diff')?.textContent).toContain(
+      '二进制，没有可显示的差异。',
+    )
+    root
+      .querySelector<HTMLButtonElement>('.turn-review [aria-label="返回审查"]')!
+      .click()
+    await flush()
+    expect(root.querySelector('[data-turn-review]')).toBeNull()
   })
 
   it('does not poll the snapshot while the column is closed', async () => {

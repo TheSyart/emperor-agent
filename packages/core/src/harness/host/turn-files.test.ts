@@ -70,7 +70,12 @@ function gitProject(root: string): string {
 
 async function setup(
   replies: ScriptedReply[],
-  options: { git?: boolean; budgetMs?: number; busy?: () => boolean } = {},
+  options: {
+    git?: boolean
+    budgetMs?: number
+    busy?: () => boolean
+    others?: () => boolean
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-turn-files-')))
   const project = options.git === false ? join(root, 'plain') : gitProject(root)
@@ -127,6 +132,7 @@ async function setup(
     rootOf: (agent) => host.rootOf(agent),
     sessionLog: (sessionId) => host.sessionLog(sessionId),
     workspaceBusy: options.busy ?? (() => false),
+    ...(options.others === undefined ? {} : { othersRunning: options.others }),
     runExclusive: (workspace, owner, action) =>
       coordinator.runExclusive(workspace, owner, action),
     ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
@@ -231,6 +237,15 @@ describe('TurnFileRecorder', () => {
     await expect(recorder.revert({ sessionId, turn: 1 })).rejects.toMatchObject(
       { code: 'turn_already_reverted' },
     )
+  })
+
+  it('notes another session running in the workspace during the turn', async () => {
+    const { host, sessionId } = await setup([writeAndShell, { text: 'done' }], {
+      others: () => true,
+    })
+    await host.submit({ sessionId, content: 'change things' })
+    await waitFor(() => records(host, sessionId).length === 1)
+    expect(records(host, sessionId)[0]).toMatchObject({ concurrent: true })
   })
 
   it('waits for a Git action from the review pane before undoing', async () => {

@@ -66,6 +66,7 @@ import {
 import {
   consumeWorkspaceRequest,
   workspaceRequest,
+  type TurnReviewRequest,
   type WorkspaceRequest,
 } from './workspaceState'
 
@@ -74,6 +75,9 @@ const GitReviewPane = defineAsyncComponent(() => import('./GitReviewPane.vue'))
 const TerminalPane = defineAsyncComponent(() => import('./TerminalPane.vue'))
 const FilesPane = defineAsyncComponent(() => import('./FilesPane.vue'))
 const BrowserPane = defineAsyncComponent(() => import('./BrowserPane.vue'))
+const TurnReviewView = defineAsyncComponent(
+  () => import('./TurnReviewView.vue'),
+)
 
 const props = defineProps<{ open: boolean; agentBusy: boolean }>()
 
@@ -96,6 +100,8 @@ const pendingFile = ref<{
 const browserPrefill = ref<{ url: string; nonce: number } | null>(null)
 /** Nonce of a pending review commit-box focus request (0 = none). */
 const commitFocus = ref(0)
+/** The review pane shows one recorded turn (本轮改动) instead of Git status. */
+const turnReview = ref<TurnReviewRequest | null>(null)
 let storedRightWorkspace: RightWorkspaceState | null = null
 
 const pane = computed<WorkspacePane>(() => frame.workspacePane)
@@ -133,6 +139,7 @@ watch(sessionId, () => {
   pendingFile.value = null
   browserPrefill.value = null
   commitFocus.value = 0
+  turnReview.value = null
 })
 // Focus / prefill requests are one-shot: they target the pane showing now.
 watch(pane, (next) => {
@@ -151,6 +158,7 @@ watch(filesPane, () => void flushPendingFile())
 function handleRequest(request: WorkspaceRequest): void {
   consumeWorkspaceRequest(request)
   if (request.pane === 'review') {
+    turnReview.value = request.turn ?? null
     reviewFilterPaths.value = [
       ...new Set((request.paths ?? []).filter(Boolean)),
     ]
@@ -243,6 +251,11 @@ async function persistFilesTreeWidth(): Promise<void> {
       />
       <template v-else-if="pane === 'review'">
         <p v-if="reviewReason" class="workspace-empty">{{ reviewReason }}</p>
+        <TurnReviewView
+          v-else-if="turnReview"
+          :request="turnReview"
+          @close="turnReview = null"
+        />
         <GitReviewPane
           v-else
           :session-id="sessionId"

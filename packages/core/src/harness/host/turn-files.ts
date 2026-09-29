@@ -52,6 +52,11 @@ export interface TurnFilesRecord {
   files: TurnFileEntry[]
   totals: { files: number; additions: number; deletions: number }
   truncated?: true
+  /**
+   * Another session was running in the same workspace during the turn:
+   * its changes may be in this list (the undo dialog says so).
+   */
+  concurrent?: true
   /** The snapshot commits (Git mode, recorded). */
   snapshot?: { before: string; after: string }
 }
@@ -79,6 +84,8 @@ export interface TurnFilesOptions {
   sessionLog(sessionId: string): Session | undefined
   /** An agent is running in this workspace (undo waits for it). */
   workspaceBusy(projectRoot: string): boolean
+  /** Another root session is running in this session's workspace. */
+  othersRunning?(sessionId: string): boolean
   runExclusive<T>(
     workspaceRoot: string,
     owner: 'agent' | 'renderer_git',
@@ -107,6 +114,8 @@ interface TurnState {
   ready?: Setup
   /** Tools mode: what the file tools reported, by path. */
   files: Map<string, TurnFileEntry>
+  /** Another session ran in the workspace at some point of the turn. */
+  concurrent: boolean
 }
 
 const LIST_LIMIT = 200
@@ -162,19 +171,27 @@ export class TurnFileRecorder {
     const turn = root.position.turn
     const current = this.turns.get(root.id)
     if (current?.turn === turn) {
+      this.noteOthers(root.id, current)
       await current.setup
       return
     }
     const state: TurnState = {
       turn,
       files: new Map(),
+      concurrent: false,
       setup: this.queued(root.id, () => this.setup(root.id)),
     }
     void state.setup.then((ready) => {
       state.ready = ready
     })
     this.turns.set(root.id, state)
+    this.noteOthers(root.id, state)
     await state.setup
+  }
+
+  private noteOthers(sessionId: string, state: TurnState): void {
+    if (this.options.othersRunning?.(sessionId) === true)
+      state.concurrent = true
   }
 
   /** The view of one recorded file: a unified diff between the snapshots. */
@@ -354,6 +371,7 @@ export class TurnFileRecorder {
     const state = this.turns.get(sessionId)
     if (state === undefined || state.turn !== turn) return
     this.turns.delete(sessionId)
+    this.noteOthers(sessionId, state)
     await this.queued(sessionId, async () => {
       const record = await this.record(turn, sessionId, state)
       const session = this.options.sessionLog(sessionId)
@@ -415,6 +433,7 @@ export class TurnFileRecorder {
     }
     return {
       ...listed(turn, 'git', changes),
+      ...(state.concurrent ? { concurrent: true as const } : {}),
       ...(kept
         ? { snapshot: { before: setup.before.commit, after: after.commit } }
         : {}),

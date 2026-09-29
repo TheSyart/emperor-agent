@@ -128,6 +128,8 @@ export function describeNode(node: ChatNode): string {
       return `compaction[${node.data.status}]: ${node.data.summary ?? ''}`
     case 'turnTail':
       return `turnTail: turn ${node.data.turn} steps=${node.data.steps}`
+    case 'turnFiles':
+      return `turnFiles: turn ${node.data.turn} files=${node.data.totals.files}`
     case 'turnError':
       return `turnError: ${node.data.message}`
     case 'turnMaxTokens':

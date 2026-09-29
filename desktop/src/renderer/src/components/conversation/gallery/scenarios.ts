@@ -1091,6 +1091,100 @@ export function linksScenario(now = Date.now()): Scenario {
   }
 }
 
+/** Turns that changed files: a recorded card, an undone one, an unrecorded one. */
+export function turnFilesScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 8 * 60_000)
+  const files = [
+    {
+      path: 'src/pages/Login.vue',
+      status: 'modified',
+      additions: 18,
+      deletions: 6,
+    },
+    {
+      path: 'src/pages/login.test.ts',
+      status: 'added',
+      additions: 42,
+      deletions: 0,
+    },
+    {
+      path: 'src/styles/login-old.css',
+      status: 'deleted',
+      additions: 0,
+      deletions: 31,
+    },
+    {
+      path: 'src/api/auth.ts',
+      oldPath: 'src/api/login.ts',
+      status: 'renamed',
+      additions: 2,
+      deletions: 2,
+    },
+    {
+      path: 'public/login-hero.png',
+      status: 'added',
+      additions: null,
+      deletions: null,
+      binary: true,
+    },
+    { path: 'docs/login.md', status: 'modified', additions: 5, deletions: 1 },
+    { path: 'package.json', status: 'modified', additions: 1, deletions: 1 },
+  ]
+  const turn = (number: number, prompt: string, reply: string) => {
+    log.user(prompt)
+    log.turnStart(number)
+    log.stepStart(number, 1)
+    log.stream(number, 1, [{ text: reply }])
+    log.stepEnd(number, 1)
+    log.turnEnd(number)
+  }
+  turn(
+    1,
+    '把登录页改成响应式，并补上测试。',
+    '改好了：表单容器改为响应式宽度，旧样式删掉，补了登录测试。',
+  )
+  log.add('turn/files', {
+    turn: 1,
+    mode: 'git',
+    status: 'recorded',
+    files,
+    totals: { files: 7, additions: 68, deletions: 41 },
+    concurrent: true,
+    snapshot: { before: 'b'.repeat(40), after: 'a'.repeat(40) },
+  })
+  turn(2, '顺便更新一下 README。', 'README 已更新。')
+  log.add('turn/files', {
+    turn: 2,
+    mode: 'git',
+    status: 'recorded',
+    files: [
+      { path: 'README.md', status: 'modified', additions: 4, deletions: 2 },
+      { path: 'CHANGELOG.md', status: 'modified', additions: 1, deletions: 0 },
+    ],
+    totals: { files: 2, additions: 5, deletions: 2 },
+    snapshot: { before: 'c'.repeat(40), after: 'd'.repeat(40) },
+  })
+  log.add('turn/files-reverted', {
+    turn: 2,
+    reverted: ['README.md'],
+    skipped: [{ path: 'CHANGELOG.md', reason: 'changed-since' }],
+  })
+  turn(3, '整理一下 dist 目录。', '整理完成。')
+  log.add('turn/files', {
+    turn: 3,
+    mode: 'git',
+    status: 'skipped',
+    skipReason: 'timeout',
+    files: [],
+    totals: { files: 0, additions: 0, deletions: 0 },
+  })
+  return {
+    id: 'turn-files',
+    label: '本轮改动',
+    sessions: [{ id: 'turn-files', events: log.events }],
+  }
+}
+
 export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   showcase: showcaseScenario,
   notices: noticesScenario,
@@ -1103,6 +1197,7 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   },
   long: longScenario,
   links: linksScenario,
+  'turn-files': turnFilesScenario,
 }
 
 /** History page over one fixture session (cut at turn boundaries). */

@@ -12,6 +12,8 @@ import type {
   SubagentStopReason,
   TodoItem,
   TokenUsage,
+  TurnFileEntry,
+  TurnFilesReverted,
 } from '@emperor/core/runtime-contract'
 import type { ConversationTimeline } from './locationIndex'
 import type { MessageReference } from '../types'
@@ -351,6 +353,32 @@ export interface TurnTailChatData {
   readonly closingText: string | null
 }
 
+/** `turnFiles`: the files one turn changed (E-track contract §5). */
+export interface TurnFilesChatData {
+  readonly turn: number
+  /** tools: not a Git project; only Emperor's file tools were counted. */
+  readonly mode: 'git' | 'tools'
+  readonly status: 'recorded' | 'skipped'
+  readonly skipReason?: 'timeout' | 'git-error'
+  readonly files: readonly TurnFileEntry[]
+  readonly totals: {
+    readonly files: number
+    readonly additions: number
+    readonly deletions: number
+  }
+  /** More than the listed files changed. */
+  readonly truncated: boolean
+  /** Another session ran in the workspace during the turn. */
+  readonly concurrent: boolean
+  /** Snapshots were kept: the turn can be reviewed and undone. */
+  readonly reviewable: boolean
+  /** The turn was undone (`turn/files-reverted`). */
+  readonly reverted?: {
+    readonly reverted: readonly string[]
+    readonly skipped: TurnFilesReverted['skipped']
+  }
+}
+
 /** `goal`: one goal mutation, rendered inline. */
 export interface GoalChatData {
   readonly seq: number
@@ -399,6 +427,7 @@ export type CompactionChatNode = ChatNodeBase<'compaction', CompactionChatData>
 export type ContextChatNode = ChatNodeBase<'context', ContextChatData>
 export type HookChatNode = ChatNodeBase<'hook', HookChatData>
 export type TurnTailChatNode = ChatNodeBase<'turnTail', TurnTailChatData>
+export type TurnFilesChatNode = ChatNodeBase<'turnFiles', TurnFilesChatData>
 export type GoalChatNode = ChatNodeBase<'goal', GoalChatData>
 export type WorkflowRunChatNode = ChatNodeBase<'workflowRun', WorkflowRunView>
 
@@ -416,6 +445,7 @@ export type ChatNode =
   | ContextChatNode
   | HookChatNode
   | TurnTailChatNode
+  | TurnFilesChatNode
   | GoalChatNode
   | WorkflowRunChatNode
 

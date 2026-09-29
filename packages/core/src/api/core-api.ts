@@ -464,6 +464,19 @@ export class CoreApi {
               domain,
           )
       },
+      othersRunning: (sessionId) => {
+        const projectRoot = projectRootOf(sessionId)
+        if (projectRoot === null) return false
+        const domain = workspaceMutationDomain(projectRoot)
+        return host
+          .busySessions()
+          .some(
+            (other) =>
+              other !== sessionId &&
+              workspaceMutationDomain(host.sessionWorkspaceRoot(other)) ===
+                domain,
+          )
+      },
       runExclusive: (workspaceRoot, owner, action) =>
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })

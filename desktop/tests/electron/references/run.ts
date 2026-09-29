@@ -7,9 +7,10 @@
  *   links show type icons and file names; Core marks a missing file; a file
  *   link opens the file in 文件 at its line, a folder link opens the folder
  *   in the tree, and a missing file opens nothing.
- *   RF-05: a turn that writes files and runs the shell records `turn/files`
- *   matching `git diff` against the project's start, without touching the
- *   user's index; undo puts the files back.
+ *   RF-05/06: a turn that writes files and runs the shell records
+ *   `turn/files` matching `git diff` against the project's start, without
+ *   touching the user's index; the turn ends with the 「已编辑 N 个文件」
+ *   card, 审核 shows its diff in 审查, and 撤销 puts the files back.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=references        (after `npm run build`)
@@ -523,22 +524,50 @@ async function turnFileRecord(
     },
   )
 
+  await check(page, 'the turn ends with an edited-files card', async () => {
+    if (record === undefined) throw new Error('no record')
+    const card = page.locator(`[data-turn-files="${record.turn}"]`)
+    await card.waitFor({ timeout: 10_000 })
+    const headline = (await card.locator('.headline').innerText()).trim()
+    if (headline !== '已编辑 3 个文件') throw new Error(`headline ${headline}`)
+    const names = await card.locator('.file .name').allInnerTexts()
+    await page.screenshot({ path: join(shots, 'turn-files-card.png') })
+    return { headline, names }
+  })
+
+  await check(page, '审核 shows the turn’s diff in 审查', async () => {
+    if (record === undefined) throw new Error('no record')
+    const card = page.locator(`[data-turn-files="${record.turn}"]`)
+    await card.locator('[data-action="review"]').click()
+    const view = page.locator(`[data-turn-review="${record.turn}"]`)
+    await view.waitFor({ timeout: 10_000 })
+    await view.locator('.file', { hasText: 'app.ts' }).click()
+    await until(
+      async () =>
+        (await view.locator('[data-diff]').innerText()).includes(
+          'export const fourth = 4',
+        ),
+      10_000,
+      'the app.ts diff',
+    )
+    await page.screenshot({ path: join(shots, 'turn-review.png') })
+  })
+
   await check(
     page,
-    'undo puts the turn back and leaves Git clean',
+    '撤销 from the card restores the turn and leaves Git clean',
     async () => {
       if (record === undefined) throw new Error('no record')
-      const diff = await core<{ diff: string }>(page, 'workspace.turnDiff', {
-        sessionId,
-        turn: record.turn,
-        path: 'src/app.ts',
-      })
-      if (!diff.diff.includes('+export const fourth = 4'))
-        throw new Error(`diff ${diff.diff.slice(0, 300)}`)
-      const result = await core<{
-        reverted: string[]
-        skipped: unknown[]
-      }>(page, 'workspace.revertTurn', { sessionId, turn: record.turn })
+      const card = page.locator(`[data-turn-files="${record.turn}"]`)
+      await card.locator('[data-action="undo"]').click()
+      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      await dialog.waitFor({ timeout: 5_000 })
+      await dialog.locator('[data-action="confirm"]').click()
+      await until(
+        async () => (await card.getAttribute('data-state')) === 'reverted',
+        10_000,
+        'the card to say it was undone',
+      )
       // Before `git status`, which may refresh the index's file stamps.
       if (indexHash(project) !== index)
         throw new Error('the user index changed')
@@ -551,7 +580,10 @@ async function turnFileRecord(
       if (status !== '') throw new Error(`git status after undo: ${status}`)
       if (!existsSync(join(project, 'docs', 'guide.md')))
         throw new Error('guide.md not restored')
-      return result
+      await page.screenshot({ path: join(shots, 'turn-files-undone.png') })
+      return {
+        summary: (await card.locator('.reverted').innerText()).trim(),
+      }
     },
   )
 }

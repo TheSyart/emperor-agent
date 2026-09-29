@@ -22,6 +22,7 @@ import HookRow from './nodes/HookRow.vue'
 import RetryRow from './nodes/RetryRow.vue'
 import ToolCallTree from './nodes/ToolCallTree.vue'
 import TurnErrorRow from './nodes/TurnErrorRow.vue'
+import TurnFilesCard from './nodes/TurnFilesCard.vue'
 import TurnMaxTokensRow from './nodes/TurnMaxTokensRow.vue'
 import TurnTail from './nodes/TurnTail.vue'
 import UserBubble from './nodes/UserBubble.vue'
@@ -49,6 +50,7 @@ const RENDERERS: Record<ChatNodeKind, Component> = {
   context: ContextRow,
   hook: HookRow,
   turnTail: TurnTail,
+  turnFiles: TurnFilesCard,
   goal: GoalRow,
   workflowRun: WorkflowRunNode,
 }

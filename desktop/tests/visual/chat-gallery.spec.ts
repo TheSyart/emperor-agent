@@ -213,3 +213,47 @@ for (const theme of ['light', 'dark'] as const) {
     await shot(page, `chat-document-links-${theme}`)
   })
 }
+
+// RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded turns,
+// expanding the list and the undo confirmation.
+for (const theme of ['light', 'dark'] as const) {
+  test(`turn files card (${theme})`, async ({ page }) => {
+    await open(page, 'turn-files', theme, { width: 1000, height: 1300 })
+    await toTop(page)
+    const cards = page.locator('[data-turn-files]')
+    await expect(cards).toHaveCount(3)
+    const first = page.locator('[data-turn-files="1"]')
+    await expect(first.locator('.headline')).toHaveText('已编辑 7 个文件')
+    await expect(first.locator('.file')).toHaveCount(5)
+    await first.getByRole('button', { name: '展开其余 2 个' }).click()
+    await expect(first.locator('.file')).toHaveCount(7)
+    await expect(page.locator('[data-turn-files="2"] .reverted')).toHaveText(
+      '已撤销，跳过 1 个',
+    )
+    await expect(page.locator('[data-turn-files="3"]')).toHaveText(
+      '本轮改动未记录：项目快照超过 5 秒',
+    )
+    // The card sits after the turn's footer, before the next prompt.
+    const order = await page
+      .locator('[data-chat-flow-kind]')
+      .evaluateAll((rows) =>
+        rows.map((row) => row.getAttribute('data-chat-flow-kind')),
+      )
+    expect(order.slice(0, 5)).toEqual([
+      'user',
+      'assistant',
+      'turnTail',
+      'turnFiles',
+      'user',
+    ])
+    await shot(page, `chat-turn-files-${theme}`)
+    await first.locator('[data-action="undo"]').click()
+    const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('[data-turn-revert-concurrent]')).toBeVisible()
+    await expect(dialog.locator('[data-action="confirm"]')).toHaveText(
+      '撤销 7 个文件',
+    )
+    await shot(page, `chat-turn-files-undo-${theme}`)
+  })
+}
