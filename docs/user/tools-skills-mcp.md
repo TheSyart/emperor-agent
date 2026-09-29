@@ -123,6 +123,14 @@ Agent 使用 `skill_manage` 工具管理 Skills，不应使用文件或 Shell �
 - **选择 zip 文件**：从本地 Plugin 压缩包安装；
 - **从 URL 安装**：填写 `https://` 地址。
 
+Emperor 识别三种包格式，按以下顺序判断：
+
+1. 根目录有 `plugin.json`（agent-plugins.org 的可移植格式，至少写 `$schema` 和 `name`）；
+2. 只有 `.codex-plugin/plugin.json`（OpenAI Codex 格式）；
+3. 只有 `.emperor-plugin/plugin.json`（Emperor 旧格式，原样读取）。
+
+文件夹或压缩包里只能有一个插件包；子目录里的清单算作包内容。清单无法解析、名称不合规、路径越出包目录、含符号链接、超过大小上限、同名 Skill 或 MCP server 重复时，检查会失败并说明原因，不会留下任何内容。
+
 每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（写入当前项目的 `.emperor/settings.json`）或本地项目（写入当前项目的 `.emperor/settings.local.json`，不随仓库提交）。确认后才会安装。
 
 本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。

@@ -1683,6 +1683,7 @@ export async function installVisualCoreBridge(
               mcpServers: 1,
               lspServers: 0,
               commands: 0,
+              apps: 0,
             },
           },
           {
@@ -1703,6 +1704,7 @@ export async function installVisualCoreBridge(
               mcpServers: 0,
               lspServers: 0,
               commands: 1,
+              apps: 0,
             },
           },
           {
@@ -1723,6 +1725,7 @@ export async function installVisualCoreBridge(
               mcpServers: 0,
               lspServers: 0,
               commands: 0,
+              apps: 0,
             },
           },
         ] as Array<Record<string, any>>,
@@ -4837,13 +4840,15 @@ export async function installVisualCoreBridge(
                   status: local ? 'local_user_source' : 'unverified',
                   publisher: null,
                 },
+                format: 'portable',
                 capabilities: {
-                  skills: ['skills/visual'],
+                  skills: ['visual'],
                   agents: [],
-                  hooks: ['hooks/hooks.json'],
+                  hooks: ['PreToolUse#1'],
                   mcpServers: [],
                   lspServers: [],
                   commands: [],
+                  apps: [],
                 },
                 fileCount: 6,
                 totalBytes: 18_432,
@@ -4872,6 +4877,7 @@ export async function installVisualCoreBridge(
                   mcpServers: 0,
                   lspServers: 0,
                   commands: 0,
+                  apps: 0,
                 },
               }
               if (local) boot.plugins.push(plugin)

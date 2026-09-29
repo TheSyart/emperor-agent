@@ -24,6 +24,7 @@ function preview(patch: Partial<PluginPreview> = {}): PluginPreview {
   return {
     previewId: 'plugin_preview_aaaaaaaaaaaaaaaaaaaaaaaa',
     pluginId: 'official/agent-reach',
+    format: 'emperor-v1',
     name: 'Agent Reach',
     version: '1.2.3',
     description: 'Reach the web',
@@ -31,12 +32,13 @@ function preview(patch: Partial<PluginPreview> = {}): PluginPreview {
     source: { kind: 'url', url: 'https://example.test/plugin.zip' },
     signature: { status: 'unverified', publisher: null },
     capabilities: {
-      skills: ['skills'],
+      skills: ['agent-reach'],
       agents: [],
-      hooks: ['hooks/hooks.json'],
+      hooks: ['PreToolUse#1'],
       mcpServers: [],
       lspServers: [],
       commands: [],
+      apps: [],
     },
     fileCount: 4,
     totalBytes: 128,
@@ -97,8 +99,9 @@ describe('plugin display vocabulary', () => {
         mcpServers: 2,
         lspServers: 0,
         commands: 1,
+        apps: 1,
       }),
-    ).toEqual(['MCP · 2', 'Command · 1'])
+    ).toEqual(['MCP · 2', 'Command · 1', '应用连接 · 1'])
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(18_432)).toBe('18.0 KB')
   })

@@ -52,7 +52,7 @@ const facts = computed<DefinitionItem[]>(() => {
   if (!current) return []
   return [
     { term: 'Plugin ID', value: current.pluginId, mono: true },
-    { term: '版本', value: current.version, mono: true },
+    { term: '版本', value: current.version ?? '未提供', mono: true },
     { term: '来源', value: sourceLabel(current.source) },
     { term: '签名', value: signatureLabel(current.signature.status) },
     { term: 'Digest', value: shortDigest(current.digest), mono: true },

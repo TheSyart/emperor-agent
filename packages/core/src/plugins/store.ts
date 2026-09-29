@@ -130,13 +130,15 @@ export class PluginStore {
       throw new Error('Plugin installPath must be inside the canonical cache')
     if (!/^[a-f0-9]{64}$/i.test(String(entry.digest ?? '')))
       throw new Error('Plugin digest must be a SHA-256 value')
-    if (!String(entry.version ?? '').trim())
-      throw new Error('Plugin version is required')
+    // A portable package may declare no version; a declared one must not be blank.
+    const version =
+      entry.version === null ? null : String(entry.version ?? '').trim()
+    if (version === '') throw new Error('Plugin version is required')
     return {
       ...entry,
       pluginId,
       installPath,
-      version: String(entry.version).trim(),
+      version,
       digest: String(entry.digest).toLowerCase(),
       signature: parseSignature(entry.signature, entry.source.kind),
     }

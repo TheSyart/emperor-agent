@@ -13,19 +13,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from 'node:path'
-import { canonicalizeExistingPath, isPathWithin } from '../util/paths'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { extractBoundedZip } from '../environment/zip'
 import { isPublicHttpRedirectResponse } from '../network/public-http'
 import type { WebFetchClient } from '../network/web-fetch-client'
+import { PluginPackageError } from './errors'
+import {
+  findPluginPackageRoot,
+  pluginVersionSegment,
+  resolvePluginPackage,
+} from './manifest-resolver'
 import {
   assertPluginId,
   isPluginScope,
@@ -33,24 +30,24 @@ import {
   type InstalledPluginEntry,
   type PluginInstallPreview,
   type PluginInstallSource,
-  type PluginManifestV1,
   type PluginOperationResult,
   type PluginScope,
   type PluginScopeTarget,
   type PluginSource,
   type PluginSummary,
+  type ResolvedPluginPackage,
 } from './models'
 import { PluginStore } from './store'
 
-const MANIFEST_PATH = join('.emperor-plugin', 'plugin.json')
 const MAX_PLUGIN_FILES = 4_000
 const MAX_PLUGIN_FILE_BYTES = 20 * 1024 * 1024
 const MAX_PLUGIN_TOTAL_BYTES = 200 * 1024 * 1024
 const PREVIEW_ID = /^plugin_preview_[a-f0-9]{24}$/
+/** Previews live only in memory; their folders outlive a restart. */
+const STALE_PREVIEW_MS = 24 * 60 * 60 * 1000
 
 interface PreviewState extends PluginInstallPreview {
   readonly payloadRoot: string
-  readonly manifest: PluginManifestV1
 }
 
 export interface PluginApplicationServiceOptions {
@@ -74,6 +71,8 @@ export class PluginApplicationService {
   private readonly idFactory: () => string
   private readonly webFetchClient: WebFetchClient | null
   private readonly previews = new Map<string, PreviewState>()
+  /** Installed caches are content-addressed, so a resolution is reusable per path and digest. */
+  private readonly resolutions = new Map<string, ResolvedPluginPackage | null>()
 
   constructor(opts: PluginApplicationServiceOptions) {
     this.emperorHome = resolve(opts.emperorHome)
@@ -92,6 +91,7 @@ export class PluginApplicationService {
     mkdirPrivate(this.cacheRoot)
     mkdirPrivate(join(this.pluginsRoot, 'data'))
     this.store.ensure()
+    this.removeStalePreviews()
   }
 
   list(): PluginSummary[] {
@@ -128,23 +128,23 @@ export class PluginApplicationService {
         source,
         previewRoot,
       )
-      const sourceRoot = resolvedSource.root
-      const tree = inspectTree(sourceRoot)
-      cpSync(sourceRoot, payloadRoot, {
+      const packageRoot = findPluginPackageRoot(resolvedSource.root)
+      const tree = inspectTree(packageRoot)
+      cpSync(packageRoot, payloadRoot, {
         recursive: true,
         force: false,
         errorOnExist: true,
         dereference: false,
       })
-      const manifest = readManifest(payloadRoot)
-      validateManifestPaths(payloadRoot, manifest)
+      const resolved = resolvePluginPackage(payloadRoot, { strict: true })
       const digest = digestTree(payloadRoot)
       const preview: PreviewState = {
         previewId,
-        pluginId: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        description: manifest.description ?? '',
+        pluginId: resolved.pluginId,
+        format: resolved.format,
+        name: resolved.displayName,
+        version: resolved.version,
+        description: resolved.description ?? '',
         digest,
         source: resolvedSource.source,
         signature: {
@@ -154,11 +154,10 @@ export class PluginApplicationService {
               : 'unverified',
           publisher: null,
         },
-        capabilities: manifestCapabilities(manifest),
+        capabilities: memberIds(resolved),
         fileCount: tree.fileCount,
         totalBytes: tree.totalBytes,
         payloadRoot,
-        manifest,
       }
       this.previews.set(previewId, preview)
       return publicPreview(preview)
@@ -221,10 +220,11 @@ export class PluginApplicationService {
       throw new Error('Plugin preview digest mismatch')
     if (!isPluginScope(input.scope) || input.scope === 'managed')
       throw new Error('Plugin install scope is not user-mutable')
+    // Checked before anything is written: a refused scope leaves no registry row.
+    this.assertMutableScope(input.scope)
     const currentDigest = digestTree(preview.payloadRoot)
     if (currentDigest !== preview.digest)
       throw new Error('Plugin preview content changed after inspection')
-    validateManifestPaths(preview.payloadRoot, preview.manifest)
     const cachePath = this.cachePath(preview)
     mkdirPrivate(dirname(cachePath))
     if (existsSync(cachePath)) {
@@ -288,20 +288,34 @@ export class PluginApplicationService {
     return this.list().flatMap((summary) => {
       if (summary.activation !== 'active') return []
       const entry = this.store.get(summary.pluginId, summary.scope)
-      if (!entry) return []
-      const manifest = readManifest(entry.installPath)
-      return (manifest.skills ?? []).map((path) =>
-        resolveContainedManifestPath(entry.installPath, path),
-      )
+      return entry ? [...(this.resolveInstalled(entry)?.skillRoots ?? [])] : []
     })
+  }
+
+  /** The installed package, resolved leniently; `null` when its cache or manifest is gone. */
+  private resolveInstalled(
+    entry: InstalledPluginEntry,
+  ): ResolvedPluginPackage | null {
+    const key = `${entry.installPath}\0${entry.digest}`
+    const cached = this.resolutions.get(key)
+    if (cached && existsSync(cached.manifestPath)) return cached
+    let resolved: ResolvedPluginPackage | null
+    try {
+      resolved = resolvePluginPackage(entry.installPath, { strict: false })
+    } catch {
+      resolved = null
+    }
+    if (resolved) this.resolutions.set(key, resolved)
+    else this.resolutions.delete(key)
+    return resolved
   }
 
   private summary(pluginId: string, scope: PluginScope): PluginSummary {
     const entry = this.store.get(pluginId, scope)
     const enabled = this.readIntent(scope)[pluginId] === true
-    const manifest = entry ? tryReadManifest(entry.installPath) : null
+    const resolved = entry ? this.resolveInstalled(entry) : null
     const signature = pluginEntrySignature(entry)
-    const materialization = entry && manifest ? 'installed' : 'missing'
+    const materialization = entry && resolved ? 'installed' : 'missing'
     const activation = !enabled
       ? 'disabled'
       : materialization === 'missing'
@@ -309,12 +323,12 @@ export class PluginApplicationService {
         : signature.status === 'unverified'
           ? 'blocked_unverified'
           : 'active'
-    const capabilities = manifestCapabilities(manifest)
+    const members = memberIds(resolved)
     return {
       pluginId,
-      name: manifest?.name ?? pluginId.split('/').at(-1) ?? pluginId,
+      name: resolved?.displayName ?? pluginId.split('/').at(-1) ?? pluginId,
       scope,
-      version: entry?.version ?? '',
+      version: entry?.version ?? null,
       digest: entry?.digest ?? '',
       source: entry?.source ?? {
         kind: 'marketplace',
@@ -325,22 +339,44 @@ export class PluginApplicationService {
       materialization,
       activation,
       capabilities: {
-        skills: capabilities.skills.length,
-        agents: capabilities.agents.length,
-        hooks: capabilities.hooks.length,
-        mcpServers: capabilities.mcpServers.length,
-        lspServers: capabilities.lspServers.length,
-        commands: capabilities.commands.length,
+        skills: members.skills.length,
+        agents: members.agents.length,
+        hooks: members.hooks.length,
+        mcpServers: members.mcpServers.length,
+        lspServers: members.lspServers.length,
+        commands: members.commands.length,
+        apps: members.apps.length,
       },
     }
   }
 
   private cachePath(preview: PluginInstallPreview): string {
-    const segments = preview.pluginId.split('/')
-    const version = String(preview.version).trim()
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(version))
-      throw new Error('invalid Plugin version')
-    return join(this.cacheRoot, ...segments, version, preview.digest)
+    return join(
+      this.cacheRoot,
+      ...preview.pluginId.split('/'),
+      pluginVersionSegment(preview.version),
+      preview.digest,
+    )
+  }
+
+  private removeStalePreviews(): void {
+    const cutoff = this.now().getTime() - STALE_PREVIEW_MS
+    let names: string[]
+    try {
+      names = readdirSync(this.stagingRoot)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (!PREVIEW_ID.test(name)) continue
+      const path = join(this.stagingRoot, name)
+      try {
+        if (lstatSync(path).mtimeMs < cutoff)
+          rmSync(path, { recursive: true, force: true })
+      } catch {
+        // Another process may be removing it; the next start retries.
+      }
+    }
   }
 
   private assertMutableScope(scope: PluginScope): void {
@@ -412,93 +448,11 @@ export class PluginApplicationService {
   }
 }
 
-function readManifest(root: string): PluginManifestV1 {
-  const manifestPath = resolveContainedManifestPath(root, MANIFEST_PATH)
-  const raw = readJsonObject(manifestPath)
-  if (Number(raw.schemaVersion) !== 1) throw new Error('invalid Plugin schema')
-  const id = assertPluginId(String(raw.id ?? ''))
-  const name = String(raw.name ?? '').trim()
-  const version = String(raw.version ?? '').trim()
-  if (!name || !version) throw new Error('Plugin name and version are required')
-  return {
-    schemaVersion: 1,
-    id,
-    name,
-    version,
-    ...(typeof raw.description === 'string'
-      ? { description: raw.description }
-      : {}),
-    ...manifestPathLists(raw),
-    ...(typeof raw.dataRoot === 'string' ? { dataRoot: raw.dataRoot } : {}),
-  }
-}
-
-function tryReadManifest(root: string): PluginManifestV1 | null {
-  try {
-    return readManifest(root)
-  } catch {
-    return null
-  }
-}
-
 function pluginEntrySignature(entry: InstalledPluginEntry | null) {
   if (entry?.signature) return { ...entry.signature }
   if (entry?.source.kind === 'local')
     return { status: 'local_user_source' as const, publisher: null }
   return { status: 'unverified' as const, publisher: null }
-}
-
-function manifestPathLists(raw: Record<string, unknown>) {
-  const list = (key: string): string[] => {
-    const value = raw[key]
-    if (value === undefined) return []
-    if (
-      !Array.isArray(value) ||
-      !value.every((item) => typeof item === 'string')
-    )
-      throw new Error(`Plugin ${key} must be a relative path list`)
-    return [...new Set(value.map((item) => item.trim()).filter(Boolean))]
-  }
-  return {
-    skills: list('skills'),
-    agents: list('agents'),
-    hooks: list('hooks'),
-    mcpServers: list('mcpServers'),
-    lspServers: list('lspServers'),
-    commands: list('commands'),
-  }
-}
-
-function validateManifestPaths(root: string, manifest: PluginManifestV1): void {
-  for (const path of [
-    ...(manifest.skills ?? []),
-    ...(manifest.agents ?? []),
-    ...(manifest.hooks ?? []),
-    ...(manifest.mcpServers ?? []),
-    ...(manifest.lspServers ?? []),
-    ...(manifest.commands ?? []),
-    ...(manifest.dataRoot ? [manifest.dataRoot] : []),
-  ]) {
-    const resolved = resolveContainedManifestPath(root, path)
-    if (!existsSync(resolved))
-      throw new Error(`Plugin manifest path is missing: ${path}`)
-  }
-}
-
-function resolveContainedManifestPath(root: string, path: string): string {
-  const clean = String(path ?? '').trim()
-  if (!clean || isAbsolute(clean) || clean.includes('\0'))
-    throw new Error('Plugin manifest requires a contained relative path')
-  const target = resolve(root, clean)
-  if (
-    !isPathWithin(target, root) ||
-    !isPathWithin(
-      canonicalizeExistingPath(target),
-      canonicalizeExistingPath(root),
-    )
-  )
-    throw new Error('Plugin manifest containment violation')
-  return target
 }
 
 function inspectTree(root: string): { fileCount: number; totalBytes: number } {
@@ -507,62 +461,63 @@ function inspectTree(root: string): { fileCount: number; totalBytes: number } {
   const visit = (dir: string): void => {
     for (const name of readdirSync(dir).sort()) {
       const path = join(dir, name)
+      const label = relative(root, path).split(sep).join('/')
       const stat = lstatSync(path)
       if (stat.isSymbolicLink())
-        throw new Error('Plugin source cannot contain symlinks')
+        throw new PluginPackageError(
+          'path_unsafe',
+          `插件包里不能有符号链接：${label}`,
+        )
       if (stat.isDirectory()) visit(path)
       else if (stat.isFile()) {
         fileCount += 1
         totalBytes += stat.size
         if (stat.size > MAX_PLUGIN_FILE_BYTES)
-          throw new Error('Plugin file exceeds size limit')
+          throw new PluginPackageError('too_large', `文件 ${label} 超过 20 MiB`)
         if (fileCount > MAX_PLUGIN_FILES || totalBytes > MAX_PLUGIN_TOTAL_BYTES)
-          throw new Error('Plugin source exceeds bounded extraction limits')
-      } else throw new Error('Plugin source contains an unsupported file type')
+          throw new PluginPackageError(
+            'too_large',
+            '插件包超过 4000 个文件或 200 MiB',
+          )
+      } else
+        throw new PluginPackageError(
+          'path_unsafe',
+          `插件包里有不支持的文件类型：${label}`,
+        )
     }
   }
   visit(root)
   return { fileCount, totalBytes }
 }
 
-/** Extract a Plugin archive into the preview folder and locate its single manifest root. */
+/** Extract a Plugin archive into the preview folder; the caller locates the package root. */
 function extractPluginArchive(archive: string, previewRoot: string): string {
   const extracted = join(previewRoot, 'extracted')
-  extractBoundedZip({
-    archive,
-    destination: extracted,
-    maxArchiveBytes: MAX_PLUGIN_TOTAL_BYTES,
-    maxFiles: MAX_PLUGIN_FILES,
-    maxFileBytes: MAX_PLUGIN_FILE_BYTES,
-    maxTotalBytes: MAX_PLUGIN_TOTAL_BYTES,
-    maxPathDepth: 32,
-  })
-  return findSinglePluginRoot(extracted)
-}
-
-function findSinglePluginRoot(extractedRoot: string): string {
-  const roots: string[] = []
-  const visit = (dir: string, depth: number): void => {
-    if (depth > 16) throw new Error('Plugin archive nesting exceeds limit')
-    const manifest = join(dir, MANIFEST_PATH)
-    if (existsSync(manifest)) roots.push(dir)
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name)
-      if (path === join(dir, '.emperor-plugin')) continue
-      const stat = lstatSync(path)
-      if (stat.isSymbolicLink())
-        throw new Error('Plugin archive cannot contain symlinks')
-      if (stat.isDirectory()) visit(path, depth + 1)
-    }
-  }
-  visit(extractedRoot, 0)
-  if (roots.length !== 1)
-    throw new Error(
-      roots.length
-        ? 'Plugin archive contains multiple manifests'
-        : 'Plugin archive is missing .emperor-plugin/plugin.json',
+  try {
+    extractBoundedZip({
+      archive,
+      destination: extracted,
+      maxArchiveBytes: MAX_PLUGIN_TOTAL_BYTES,
+      maxFiles: MAX_PLUGIN_FILES,
+      maxFileBytes: MAX_PLUGIN_FILE_BYTES,
+      maxTotalBytes: MAX_PLUGIN_TOTAL_BYTES,
+      maxPathDepth: 32,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/limit exceeded/.test(message))
+      throw new PluginPackageError('too_large', `压缩包超过上限：${message}`)
+    if (/unsafe/.test(message))
+      throw new PluginPackageError(
+        'path_unsafe',
+        `压缩包里有不安全的条目：${message}`,
+      )
+    throw new PluginPackageError(
+      'archive_invalid',
+      `压缩包无法读取：${message}`,
     )
-  return roots[0]!
+  }
+  return extracted
 }
 
 function digestTree(root: string): string {
@@ -587,19 +542,25 @@ function digestTree(root: string): string {
   return hash.digest('hex')
 }
 
-function manifestCapabilities(manifest: PluginManifestV1 | null) {
+/** Member ids per kind; every list is empty for a package that is not there. */
+function memberIds(resolved: ResolvedPluginPackage | null) {
+  const ids = (kind: string) =>
+    (resolved?.components ?? [])
+      .filter((component) => component.kind === kind)
+      .map((component) => component.id)
   return {
-    skills: [...(manifest?.skills ?? [])],
-    agents: [...(manifest?.agents ?? [])],
-    hooks: [...(manifest?.hooks ?? [])],
-    mcpServers: [...(manifest?.mcpServers ?? [])],
-    lspServers: [...(manifest?.lspServers ?? [])],
-    commands: [...(manifest?.commands ?? [])],
+    skills: ids('skill'),
+    agents: ids('agent'),
+    hooks: ids('hook'),
+    mcpServers: ids('mcp'),
+    lspServers: ids('lsp'),
+    commands: ids('command'),
+    apps: ids('app'),
   }
 }
 
 function publicPreview(preview: PreviewState): PluginInstallPreview {
-  const { payloadRoot: _payloadRoot, manifest: _manifest, ...value } = preview
+  const { payloadRoot: _payloadRoot, ...value } = preview
   return structuredClone(value)
 }
 

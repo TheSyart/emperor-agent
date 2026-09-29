@@ -88,6 +88,7 @@ const CAPABILITY_LABELS = [
   ['mcpServers', 'MCP'],
   ['lspServers', 'LSP'],
   ['commands', 'Command'],
+  ['apps', '应用连接'],
 ] as const
 
 type CapabilityCounts = Record<(typeof CAPABILITY_LABELS)[number][0], number>

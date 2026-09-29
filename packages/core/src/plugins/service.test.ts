@@ -2,14 +2,25 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { PluginApplicationService } from './service'
+import {
+  PLUGIN_SCHEMA_URL,
+  portablePackage,
+  skillMarkdown,
+  tempDirectory,
+  writePackage,
+  type PackageFiles,
+} from './testing'
 
 function fixture(version = '1.0.0') {
   const emperorHome = mkdtempSync(join(tmpdir(), 'emperor-plugin-service-'))
@@ -47,7 +58,7 @@ describe('PluginApplicationService', () => {
       pluginId: 'official/agent-reach',
       version: '1.0.0',
       signature: { status: 'local_user_source' },
-      capabilities: { skills: ['skills'] },
+      capabilities: { skills: ['agent-reach'] },
     })
     const installed = await service.install({
       previewId: preview.previewId,
@@ -138,7 +149,7 @@ describe('PluginApplicationService', () => {
         kind: 'local',
         path: pluginRoot,
       }),
-    ).rejects.toThrow(/containment|relative path/i)
+    ).rejects.toMatchObject({ code: 'plugin_preview_path_unsafe' })
   })
 
   it('keeps enabled intent distinct from missing materialization', () => {
@@ -288,6 +299,273 @@ describe('PluginApplicationService', () => {
     })
     expect(installed.plugin).toMatchObject({ enabled: true })
     expect(service.enabledSkillRoots()).toHaveLength(1)
+  })
+})
+
+describe('PluginApplicationService package formats', () => {
+  function portableSource(
+    home: string,
+    extra: PackageFiles = {},
+    manifest: Record<string, unknown> = {},
+  ): string {
+    return writePackage(
+      join(home, 'src-portable'),
+      portablePackage(
+        'hello-kit',
+        {
+          'skills/hello/SKILL.md': skillMarkdown('hello', 'Say hello'),
+          ...extra,
+        },
+        manifest,
+      ),
+    )
+  }
+
+  function stagingEntries(home: string): string[] {
+    return readdirSync(join(home, 'plugins', 'staging'))
+  }
+
+  it('previews and installs a portable package without a version', async () => {
+    const home = tempDirectory()
+    const source = portableSource(home)
+    const service = new PluginApplicationService({ emperorHome: home })
+
+    const preview = await service.inspect({ kind: 'local', path: source })
+    expect(preview).toMatchObject({
+      pluginId: 'hello-kit',
+      format: 'portable',
+      name: 'hello-kit',
+      version: null,
+      capabilities: { skills: ['hello'], mcpServers: [], apps: [] },
+    })
+    const installed = await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(installed.plugin).toMatchObject({
+      version: null,
+      activation: 'active',
+      capabilities: { skills: 1, mcpServers: 0, apps: 0 },
+    })
+    const entry = service.store.get('hello-kit', 'user')!
+    expect(entry.version).toBeNull()
+    expect(entry.installPath).toBe(
+      join(
+        home,
+        'plugins',
+        'cache',
+        'hello-kit',
+        'unversioned',
+        preview.digest,
+      ),
+    )
+    expect(service.enabledSkillRoots()).toEqual([
+      join(entry.installPath, 'skills'),
+    ])
+  })
+
+  it('computes one digest for the preview, a second preview and the installed copy', async () => {
+    const home = tempDirectory()
+    const source = portableSource(home)
+    const service = new PluginApplicationService({ emperorHome: home })
+    const first = await service.inspect({ kind: 'local', path: source })
+    const second = await service.inspect({ kind: 'local', path: source })
+    expect(second.digest).toBe(first.digest)
+    await service.install({
+      previewId: first.previewId,
+      digest: first.digest,
+      scope: 'user',
+    })
+    const again = await service.inspect({
+      kind: 'local',
+      path: service.store.get('hello-kit', 'user')!.installPath,
+    })
+    expect(again.digest).toBe(first.digest)
+  })
+
+  it('keeps build metadata in the version and a safe cache segment', async () => {
+    const home = tempDirectory()
+    const source = portableSource(home, {}, { version: '1.0.0+build.5' })
+    const service = new PluginApplicationService({ emperorHome: home })
+    const preview = await service.inspect({ kind: 'local', path: source })
+    expect(preview.version).toBe('1.0.0+build.5')
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(service.store.get('hello-kit', 'user')!.installPath).toBe(
+      join(
+        home,
+        'plugins',
+        'cache',
+        'hello-kit',
+        '1.0.0_build.5',
+        preview.digest,
+      ),
+    )
+  })
+
+  it('finds a single package root inside a ZIP and rejects two', async () => {
+    const home = tempDirectory()
+    const nested = join(home, 'nested.zip')
+    writeFileSync(
+      nested,
+      zip([
+        {
+          name: 'bundle/hello-kit/plugin.json',
+          data: JSON.stringify({
+            $schema: PLUGIN_SCHEMA_URL,
+            name: 'hello-kit',
+          }),
+        },
+        {
+          name: 'bundle/hello-kit/skills/hello/SKILL.md',
+          data: skillMarkdown('hello', 'Zipped'),
+        },
+      ]),
+    )
+    const twoRoots = join(home, 'two.zip')
+    writeFileSync(
+      twoRoots,
+      zip([
+        {
+          name: 'one/plugin.json',
+          data: JSON.stringify({ $schema: PLUGIN_SCHEMA_URL, name: 'one' }),
+        },
+        {
+          name: 'two/.codex-plugin/plugin.json',
+          data: JSON.stringify({ name: 'two' }),
+        },
+      ]),
+    )
+    const service = new PluginApplicationService({ emperorHome: home })
+
+    await expect(
+      service.inspect({ kind: 'local', path: nested }),
+    ).resolves.toMatchObject({
+      pluginId: 'hello-kit',
+      capabilities: { skills: ['hello'] },
+    })
+    await expect(
+      service.inspect({ kind: 'local', path: twoRoots }),
+    ).rejects.toMatchObject({
+      code: 'plugin_preview_multiple_roots',
+    })
+  })
+
+  it.each<[string, (home: string) => string, string]>([
+    [
+      'a symlink',
+      (home) => {
+        const source = portableSource(home)
+        symlinkSync('/etc/hosts', join(source, 'hosts'))
+        return source
+      },
+      'plugin_preview_path_unsafe',
+    ],
+    [
+      'an unparseable MCP file',
+      (home) => portableSource(home, { 'mcp.json': '{nope' }),
+      'plugin_preview_member_invalid',
+    ],
+    [
+      'a duplicate Skill',
+      (home) =>
+        writePackage(join(home, 'dup'), {
+          '.codex-plugin/plugin.json': {
+            name: 'dup-kit',
+            skills: ['./a', './b'],
+          },
+          'a/same/SKILL.md': skillMarkdown('same', 'One'),
+          'b/same/SKILL.md': skillMarkdown('same', 'Two'),
+        }),
+      'plugin_preview_duplicate_member',
+    ],
+  ])(
+    'fails the preview for %s and leaves nothing behind',
+    async (_name, make, code) => {
+      const home = tempDirectory()
+      const service = new PluginApplicationService({ emperorHome: home })
+      await expect(
+        service.inspect({ kind: 'local', path: make(home) }),
+      ).rejects.toMatchObject({
+        code,
+      })
+      expect(stagingEntries(home)).toEqual([])
+      expect(service.list()).toEqual([])
+      expect(service.enabledSkillRoots()).toEqual([])
+    },
+  )
+
+  it('checks the install scope before writing anything', async () => {
+    const home = tempDirectory()
+    const source = portableSource(home)
+    const service = new PluginApplicationService({ emperorHome: home })
+    const preview = await service.inspect({ kind: 'local', path: source })
+
+    await expect(
+      service.install({
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'project',
+      }),
+    ).rejects.toThrow(/active workspace/)
+    expect(service.store.list()).toEqual([])
+    expect(service.list()).toEqual([])
+    // The preview survives, so the user can pick another scope.
+    await expect(
+      service.install({
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'user',
+      }),
+    ).resolves.toMatchObject({
+      plugin: { pluginId: 'hello-kit', scope: 'user' },
+    })
+  })
+
+  it('removes abandoned previews older than a day at startup', () => {
+    const home = tempDirectory()
+    const staging = join(home, 'plugins', 'staging')
+    const stale = join(staging, `plugin_preview_${'a'.repeat(24)}`)
+    const fresh = join(staging, `plugin_preview_${'b'.repeat(24)}`)
+    const other = join(staging, 'keep-me')
+    for (const dir of [stale, fresh, other])
+      mkdirSync(join(dir, 'payload'), { recursive: true })
+    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+    utimesSync(stale, old, old)
+    utimesSync(other, old, old)
+
+    new PluginApplicationService({ emperorHome: home })
+
+    expect(existsSync(stale)).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
+    expect(existsSync(other)).toBe(true)
+  })
+
+  it('still installs and reads an emperor-v1 package unchanged', async () => {
+    const { emperorHome, pluginRoot } = fixture()
+    const manifestPath = join(pluginRoot, '.emperor-plugin', 'plugin.json')
+    const before = readFileSync(manifestPath, 'utf8')
+    const service = new PluginApplicationService({ emperorHome })
+    const preview = await service.inspect({ kind: 'local', path: pluginRoot })
+    expect(preview).toMatchObject({ format: 'emperor-v1', name: 'Agent Reach' })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(service.list()).toEqual([
+      expect.objectContaining({
+        pluginId: 'official/agent-reach',
+        name: 'Agent Reach',
+        version: '1.0.0',
+        activation: 'active',
+      }),
+    ])
+    expect(readFileSync(manifestPath, 'utf8')).toBe(before)
   })
 })
 

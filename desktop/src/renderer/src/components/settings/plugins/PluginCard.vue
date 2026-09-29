@@ -47,7 +47,14 @@ const facts = computed<DefinitionItem[]>(() => {
   const plugin = props.plugin
   const capabilities = capabilityChips(plugin.capabilities)
   return [
-    { term: '版本', value: plugin.version || '未物化', mono: true },
+    {
+      term: '版本',
+      value:
+        plugin.materialization === 'missing'
+          ? '未物化'
+          : (plugin.version ?? '未提供'),
+      mono: true,
+    },
     { term: '范围', value: scopeLabel(plugin.scope) },
     { term: '状态', value: state.value.label },
     { term: '来源', value: sourceLabel(plugin.source) },
