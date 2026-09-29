@@ -75,6 +75,13 @@ export class McpToolBridge {
     }
   }
 
+  /** Registered tool names that are not this bridge's MCP tools (plugin tools must not take them). */
+  reservedNames(): ReadonlySet<string> {
+    return new Set(
+      this.tools.names().filter((name) => !this.disposers.has(name)),
+    )
+  }
+
   dispose(): void {
     for (const dispose of this.disposers.values()) dispose()
     this.disposers.clear()

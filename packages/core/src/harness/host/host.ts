@@ -317,6 +317,7 @@ export class HarnessHost {
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
     })
     this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
+    kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
     this.goalInstall = this.compose(options)
   }
 

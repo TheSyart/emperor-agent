@@ -22,6 +22,8 @@ export interface OwnedStdioClientTransportOptions {
   args?: string[]
   env?: Record<string, string>
   cwd?: string
+  /** Folders inside the state root the server may use anyway (see ProcessContainmentPolicy). */
+  stateGrants?: { read: string[]; write: string[] }
 }
 
 /** MCP stdio transport whose child is born inside the shared process runtime. */
@@ -68,6 +70,9 @@ export class OwnedStdioClientTransport implements Transport {
           tempRoot: this.opts.workspaceRoot,
           readOnlyRoots: [],
           network: 'allow',
+          ...(this.opts.stateGrants
+            ? { stateGrants: this.opts.stateGrants }
+            : {}),
         },
       },
     })

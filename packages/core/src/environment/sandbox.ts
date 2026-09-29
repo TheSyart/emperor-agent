@@ -32,6 +32,13 @@ export interface ProcessContainmentPolicy {
   tempRoot: string
   readOnlyRoots: string[]
   network: ProcessNetworkPolicy
+  /**
+   * Folders strictly inside the state root this process may use anyway: a
+   * plugin's own package (`read`) and its data folder (`write`, which also
+   * reads). The rest of the state root stays out of reach; any other path
+   * given here is dropped.
+   */
+  stateGrants?: { read: string[]; write: string[] }
 }
 
 export interface ProcessContainmentReceipt {
@@ -343,6 +350,16 @@ function normalizePolicy(
       !isPathWithin(workspaceRoot, root) &&
       !(stateRoot && isPathWithin(root, stateRoot)),
   )
+  const grant = (roots: readonly string[] | undefined) =>
+    stateRoot
+      ? uniqueRoots((roots ?? []).map(canonicalRoot)).filter(
+          (root) => root !== stateRoot && isPathWithin(root, stateRoot),
+        )
+      : []
+  const stateGrants = {
+    read: grant(policy.stateGrants?.read),
+    write: grant(policy.stateGrants?.write),
+  }
   return {
     mode: policy.mode,
     workspaceRoot,
@@ -350,6 +367,9 @@ function normalizePolicy(
     tempRoot,
     readOnlyRoots,
     network: policy.network,
+    ...(stateGrants.read.length || stateGrants.write.length
+      ? { stateGrants }
+      : {}),
   }
 }
 
@@ -365,8 +385,11 @@ function macosSeatbeltProfile(
     ...MACOS_SYSTEM_READ_ROOTS.filter(pathExists).map(canonicalRoot),
     ...policy.readOnlyRoots,
   ])
+  const grants = policy.stateGrants ?? { read: [], write: [] }
   const metadataRoots = uniqueRoots(
-    readRoots.flatMap((root) => pathAncestors(root)),
+    [...readRoots, ...grants.read, ...grants.write].flatMap((root) =>
+      pathAncestors(root),
+    ),
   )
   const workspaceFilter = seatbeltRootFilter(
     policy.workspaceRoot,
@@ -392,6 +415,13 @@ function macosSeatbeltProfile(
     ),
     `(allow file-read* ${workspaceFilter} ${tempFilter})`,
     `(allow file-write* ${workspaceFilter} ${tempFilter} (literal "/dev/null"))`,
+    ...grants.read.map(
+      (root) => `(allow file-read* (subpath ${seatbeltString(root)}))`,
+    ),
+    ...grants.write.map(
+      (root) =>
+        `(allow file-read* file-write* (subpath ${seatbeltString(root)}))`,
+    ),
     policy.network === 'allow' ? '(allow network*)' : '(deny network*)',
   ]
   return rules.join(' ')
@@ -428,6 +458,11 @@ function linuxBwrapArgs(
     out.push('--bind', policy.tempRoot, policy.tempRoot)
   if (policy.stateRoot && pathExists(policy.stateRoot))
     out.push('--tmpfs', policy.stateRoot)
+  // Granted state folders are mounted back on top of the hidden state root.
+  for (const root of policy.stateGrants?.read ?? [])
+    if (pathExists(root)) out.push('--ro-bind', root, root)
+  for (const root of policy.stateGrants?.write ?? [])
+    if (pathExists(root)) out.push('--bind', root, root)
   out.push('--chdir', policy.workspaceRoot, '--', executable, ...args)
   return out
 }
@@ -442,6 +477,14 @@ function containmentPolicyHash(policy: ProcessContainmentPolicy): string {
         tempRoot: policy.tempRoot,
         readOnlyRoots: [...policy.readOnlyRoots].sort(),
         network: policy.network,
+        ...(policy.stateGrants
+          ? {
+              stateGrants: {
+                read: [...policy.stateGrants.read].sort(),
+                write: [...policy.stateGrants.write].sort(),
+              },
+            }
+          : {}),
       }),
     )
     .digest('hex')

@@ -27,6 +27,10 @@ export interface ServerConfig {
   url: string | null
   headers: Record<string, string>
   tool_overrides: Record<string, Record<string, unknown>>
+  /** Working directory of a stdio server; plugin servers run in their package. Never read from `mcp_config.json`. */
+  cwd?: string | null
+  /** Folders inside Emperor Home a sandboxed stdio server may use (a plugin's package and data). Never read from `mcp_config.json`. */
+  stateGrants?: { read: string[]; write: string[] } | null
 }
 
 export interface MCPConfig {

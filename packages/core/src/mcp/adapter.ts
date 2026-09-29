@@ -50,12 +50,17 @@ export class MCPToolAdapter {
   private readonly toolName: string
   readonly mcpServerName: string
   readonly mcpToolName: string
+  /** The plugin that contributes this server, when it is not the user's own. */
+  readonly pluginId: string | null
   private readonly connection: MCPConnection
   private readonly callTimeoutMs: number | null
 
   constructor(opts: {
     serverName: string
     toolName: string
+    /** Registered name; defaults to `mcp_<server>_<tool>`. Plugin tools pass the contract name. */
+    name?: string
+    pluginId?: string | null
     description: string
     parametersSchema: Record<string, unknown>
     connection: MCPConnection
@@ -71,7 +76,8 @@ export class MCPToolAdapter {
   }) {
     this.serverName = opts.serverName
     this.mcpServerName = opts.serverName
-    this.name = `mcp_${opts.serverName}_${opts.toolName}`
+    this.name = opts.name ?? `mcp_${opts.serverName}_${opts.toolName}`
+    this.pluginId = opts.pluginId ?? null
     this.description = `[MCP:${opts.serverName}] ${opts.description}`
     this.parameters = opts.parametersSchema
     this.connection = opts.connection

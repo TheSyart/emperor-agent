@@ -27,6 +27,8 @@ export interface ExtractBoundedZipOptions {
   maxTotalBytes?: number
   maxPathBytes?: number
   maxPathDepth?: number
+  /** Write Unix entries with an execute bit as 0700 (plugin scripts); everything else stays 0600. */
+  preserveExecutable?: boolean
 }
 
 export interface ExtractBoundedZipResult {
@@ -43,6 +45,8 @@ interface ZipEntry {
   compressedSize: number
   uncompressedSize: number
   localOffset: number
+  /** A Unix-made entry with any execute bit set. */
+  executable: boolean
 }
 
 export function extractBoundedZip(
@@ -90,7 +94,10 @@ export function extractBoundedZip(
         throw new Error('ZIP total size limit exceeded')
       const target = join(stage, ...entry.name.split('/'))
       mkdirSync(dirname(target), { recursive: true })
-      writeFileSync(target, data, { flag: 'wx', mode: 0o600 })
+      writeFileSync(target, data, {
+        flag: 'wx',
+        mode: opts.preserveExecutable && entry.executable ? 0o700 : 0o600,
+      })
       files.push(entry.name)
     }
     renameSync(stage, opts.destination)
@@ -180,6 +187,8 @@ function readEntries(
         compressedSize,
         uncompressedSize,
         localOffset,
+        executable:
+          madeBy >>> 8 === 3 && ((externalAttributes >>> 16) & 0o111) !== 0,
       })
     }
     offset += recordLength

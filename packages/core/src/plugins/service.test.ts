@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -500,6 +501,34 @@ describe('PluginApplicationService package formats', () => {
     },
   )
 
+  it('keeps execute bits of a ZIP package so its scripts can run', async () => {
+    const home = tempDirectory()
+    const archive = join(home, 'exec.zip')
+    writeFileSync(
+      archive,
+      zip([
+        {
+          name: 'exec-kit/plugin.json',
+          data: JSON.stringify({
+            $schema: PLUGIN_SCHEMA_URL,
+            name: 'exec-kit',
+          }),
+        },
+        { name: 'exec-kit/bin/run', data: '#!/bin/sh\n', mode: 0o100755 },
+      ]),
+    )
+    const service = new PluginApplicationService({ emperorHome: home })
+    const preview = await service.inspect({ kind: 'local', path: archive })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    const installed = service.store.get('exec-kit', 'user')!.installPath
+    expect(statSync(join(installed, 'bin', 'run')).mode & 0o777).toBe(0o700)
+    expect(statSync(join(installed, 'plugin.json')).mode & 0o777).toBe(0o600)
+  })
+
   it('checks the install scope before writing anything', async () => {
     const home = tempDirectory()
     const source = portableSource(home)
@@ -821,7 +850,9 @@ describe('PluginApplicationService list and detail', () => {
   })
 })
 
-function zip(entries: Array<{ name: string; data: string | Buffer }>): Buffer {
+function zip(
+  entries: Array<{ name: string; data: string | Buffer; mode?: number }>,
+): Buffer {
   const localParts: Buffer[] = []
   const centralParts: Buffer[] = []
   let localOffset = 0
@@ -847,7 +878,7 @@ function zip(entries: Array<{ name: string; data: string | Buffer }>): Buffer {
     central.writeUInt32LE(data.byteLength, 20)
     central.writeUInt32LE(data.byteLength, 24)
     central.writeUInt16LE(name.byteLength, 28)
-    central.writeUInt32LE((0o100644 << 16) >>> 0, 38)
+    central.writeUInt32LE(((entry.mode ?? 0o100644) << 16) >>> 0, 38)
     central.writeUInt32LE(localOffset, 42)
     centralParts.push(central, name)
     localOffset += local.byteLength + name.byteLength + data.byteLength

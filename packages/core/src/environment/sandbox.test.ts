@@ -110,6 +110,41 @@ describe('OsSandboxController capability and preparation', () => {
     )
   })
 
+  it('grants named folders inside the state root and drops any other grant', () => {
+    const controller = new OsSandboxController({
+      platform: 'darwin',
+      pathExists: (path) => path === '/usr/bin/sandbox-exec',
+      probeProcess: () => ({ ok: true, detail: 'seatbelt probe passed' }),
+    })
+    const base = policy()
+    const read = '/workspace/.emperor/plugins/cache/kit'
+    const write = '/workspace/.emperor/plugins/data/kit'
+    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], {
+      ...base,
+      stateGrants: {
+        read: [read, '/elsewhere/package', '/workspace/.emperor'],
+        write: [write, '/workspace'],
+      },
+    })
+    const profile = prepared.args[1]!
+    expect(profile).toContain(`(allow file-read* (subpath "${read}"))`)
+    expect(profile).toContain(
+      `(allow file-read* file-write* (subpath "${write}"))`,
+    )
+    // Only strict subfolders of the state root are granted.
+    expect(profile).not.toContain('(subpath "/elsewhere/package")')
+    expect(profile).not.toContain(
+      '(allow file-read* (subpath "/workspace/.emperor"))',
+    )
+    expect(profile).not.toContain(
+      '(allow file-read* file-write* (subpath "/workspace"))',
+    )
+    // Grants change the policy hash.
+    expect(prepared.receipt.policyHash).not.toBe(
+      controller.prepare('/bin/sh', ['-c', 'pwd'], base).receipt.policyHash,
+    )
+  })
+
   it('prepares Linux bwrap without a read-only bind of the whole host root', () => {
     const controller = new OsSandboxController({
       platform: 'linux',
@@ -160,6 +195,59 @@ describe('OsSandboxController capability and preparation', () => {
 describe('NodeOwnedProcessRunner containment', () => {
   const realController = new OsSandboxController()
   const runnable = realController.capability().status === 'available'
+
+  it.runIf(runnable)(
+    'lets a process read its granted package and write its granted data folder, and nothing else in the state root',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'emperor-sandbox-grants-'))
+      cleanup.push(workspace)
+      const stateRoot = join(workspace, '.emperor')
+      const packageRoot = join(stateRoot, 'plugins', 'cache', 'kit')
+      const dataRoot = join(stateRoot, 'plugins', 'data', 'kit')
+      const tempRoot = join(workspace, '.sandbox-tmp')
+      for (const dir of [packageRoot, dataRoot, tempRoot])
+        mkdirSync(dir, { recursive: true })
+      writeFileSync(join(packageRoot, 'server.txt'), 'package', 'utf8')
+      writeFileSync(join(stateRoot, 'secret.txt'), 'state-secret', 'utf8')
+      const runner = new NodeOwnedProcessRunner({ sandbox: realController })
+      const run = (command: string) =>
+        runner.run({
+          cwd: packageRoot,
+          env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: workspace },
+          timeoutMs: 5_000,
+          execution: {
+            kind: 'sandbox' as const,
+            policy: {
+              mode: 'required' as const,
+              workspaceRoot: workspace,
+              stateRoot,
+              tempRoot,
+              readOnlyRoots: [],
+              network: 'deny' as const,
+              stateGrants: { read: [packageRoot], write: [dataRoot] },
+            },
+          },
+          executable: '/bin/sh',
+          args: ['-c', command],
+        })
+
+      const readPackage = await run('cat server.txt')
+      expect(readPackage).toMatchObject({ exitCode: 0 })
+      expect(readPackage.stdout).toBe('package')
+      expect(
+        (await run(`printf data > "${join(dataRoot, 'out.txt')}"`)).exitCode,
+      ).toBe(0)
+      expect(readFileSync(join(dataRoot, 'out.txt'), 'utf8')).toBe('data')
+      for (const command of [
+        `printf x > "${join(packageRoot, 'tampered.txt')}"`,
+        `cat "${join(stateRoot, 'secret.txt')}"`,
+      ]) {
+        const result = await run(command)
+        expect(result.exitCode, command).not.toBe(0)
+      }
+      expect(existsSync(join(packageRoot, 'tampered.txt'))).toBe(false)
+    },
+  )
 
   it.runIf(runnable)(
     'blocks outside read/write, state-root access, symlink escape, child escape, and network while allowing workspace writes',

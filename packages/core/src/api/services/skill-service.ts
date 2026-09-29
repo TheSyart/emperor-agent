@@ -58,6 +58,8 @@ export interface SkillServiceToolEntry {
   concurrencySafe?: boolean
   /** MCP server name from the tool's adapter (`MCPToolAdapter.mcpServerName`); absent for builtins. */
   mcpServer?: string
+  /** Contributing plugin of an MCP tool (`MCPToolAdapter.pluginId`). */
+  pluginId?: string
 }
 
 export interface SkillInfoPayload {
@@ -112,6 +114,8 @@ export interface ToolInfoPayload {
   concurrency_safe: boolean
   source: 'builtin' | 'mcp'
   server: string
+  /** The plugin that contributes this MCP tool, when it is not the user's own server. */
+  plugin_id?: string
 }
 
 export interface SkillDeletePayload {
@@ -185,6 +189,7 @@ export class CoreSkillService {
         concurrency_safe: Boolean(tool.concurrencySafe),
         source: isMcp ? 'mcp' : 'builtin',
         server,
+        ...(tool.pluginId ? { plugin_id: tool.pluginId } : {}),
       }
     })
   }

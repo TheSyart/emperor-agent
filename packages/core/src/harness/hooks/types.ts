@@ -50,6 +50,8 @@ export interface CommandHook {
 export interface MatcherGroup {
   matcher?: string
   hooks: CommandHook[]
+  /** Extra environment for these hooks only (a plugin's `PLUGIN_ROOT`, `PLUGIN_DATA`). */
+  env?: Record<string, string>
 }
 
 /**

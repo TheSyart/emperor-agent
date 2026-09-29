@@ -46,3 +46,51 @@ export function portablePackage(
     ...files,
   }
 }
+
+/**
+ * A dependency-free stdio MCP server (newline-delimited JSON-RPC) with one
+ * tool, `where`, that reports its working directory and `PLUGIN_ROOT`, and
+ * appends a line to `$PLUGIN_DATA/calls.log` when that variable is set.
+ */
+export const STDIO_MCP_SERVER = `
+const { appendFileSync, mkdirSync } = require('node:fs')
+const { join } = require('node:path')
+const readline = require('node:readline')
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  let message
+  try { message = JSON.parse(line) } catch { return }
+  if (message.id === undefined) return
+  const reply = (result) => send({ jsonrpc: '2.0', id: message.id, result })
+  switch (message.method) {
+    case 'initialize':
+      return reply({
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'plugin-fixture', version: '1.0.0' },
+      })
+    case 'ping':
+      return reply({})
+    case 'tools/list':
+      return reply({ tools: [{
+        name: 'where',
+        description: 'Report where the server runs.',
+        inputSchema: { type: 'object', properties: { note: { type: 'string' } } },
+      }] })
+    case 'tools/call': {
+      const note = (message.params.arguments || {}).note || ''
+      if (process.env.PLUGIN_DATA) {
+        mkdirSync(process.env.PLUGIN_DATA, { recursive: true })
+        appendFileSync(join(process.env.PLUGIN_DATA, 'calls.log'), note + '\\n')
+      }
+      return reply({ content: [{ type: 'text', text: JSON.stringify({
+        cwd: process.cwd(),
+        root: process.env.PLUGIN_ROOT || null,
+        note,
+      }) }] })
+    }
+    default:
+      return send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'unknown method' } })
+  }
+})
+`

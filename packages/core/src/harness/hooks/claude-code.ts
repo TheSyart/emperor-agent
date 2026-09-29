@@ -93,8 +93,17 @@ export interface ClaudeCodeHooksDescription {
   events: Record<string, number>
   /** Config files that were read and parsed successfully. */
   files: string[]
+  /** Plugin hook sets in effect, by id. */
+  plugins: string[]
   /** Per-file read/parse errors of the last reload. */
   errors: string[]
+}
+
+/** Hooks one plugin contributes: already in Emperor's shape, with its own variables. */
+export interface PluginHookSet {
+  readonly id: string
+  readonly env: Readonly<Record<string, string>>
+  readonly config: ClaudeCodeHookConfig
 }
 
 interface RunPointOptions {
@@ -132,6 +141,7 @@ function openTurn(agent: Agent | undefined): number | undefined {
 
 export class ClaudeCodeHooks {
   private config: ClaudeCodeHookConfig = {}
+  private pluginSets: readonly PluginHookSet[] = []
   private files: string[] = []
   private errors: string[] = []
   private readonly log: Logger
@@ -216,9 +226,30 @@ export class ClaudeCodeHooks {
         )
       }
     }
+    // Plugin sets run after the user's files, each group carrying its plugin's variables.
+    for (const set of this.pluginSets) {
+      for (const [event, groups] of Object.entries(set.config) as Array<
+        [ClaudeHookEvent, NonNullable<ClaudeCodeHookConfig[ClaudeHookEvent]>]
+      >) {
+        merged[event] = [
+          ...(merged[event] ?? []),
+          ...groups.map((group) => ({ ...group, env: { ...set.env } })),
+        ]
+      }
+    }
     this.config = merged
     this.files = files
     this.errors = errors
+  }
+
+  /** Replace the plugin hook sets; the user's files are re-read, never written. */
+  setPluginHooks(sets: readonly PluginHookSet[]): void {
+    this.pluginSets = sets.map((set) => ({
+      id: set.id,
+      env: { ...set.env },
+      config: set.config,
+    }))
+    this.reload()
   }
 
   describe(): ClaudeCodeHooksDescription {
@@ -229,7 +260,12 @@ export class ClaudeCodeHooks {
         0,
       )
     }
-    return { events, files: [...this.files], errors: [...this.errors] }
+    return {
+      events,
+      files: [...this.files],
+      plugins: this.pluginSets.map((set) => set.id),
+      errors: [...this.errors],
+    }
   }
 
   /** Whether any hook is configured for `event`. */
@@ -543,7 +579,7 @@ export class ClaudeCodeHooks {
         }
         const { output, durationMs } = await runHook(hook, {
           payload,
-          env,
+          env: group.env ? { ...env, ...group.env } : env,
           cwd,
           signal,
           trailingNewline: true,

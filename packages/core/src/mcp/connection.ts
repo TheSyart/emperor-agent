@@ -238,12 +238,14 @@ export class StdioConnection extends MCPConnection {
     command: string
     args: string[]
     env: Record<string, string> | undefined
+    cwd?: string
   } {
     const childEnv = buildStdioEnv(this.config, env)
     return {
       command: this.config.command ?? '',
       args: this.config.args,
       env: Object.keys(childEnv).length ? childEnv : undefined,
+      ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
     }
   }
 
@@ -262,6 +264,10 @@ export class StdioConnection extends MCPConnection {
             command: params.command,
             args: params.args,
             ...(params.env ? { env: params.env } : {}),
+            ...(params.cwd ? { cwd: params.cwd } : {}),
+            ...(this.config.stateGrants
+              ? { stateGrants: this.config.stateGrants }
+              : {}),
           })
         : new StdioClientTransport({ ...params, stderr: 'inherit' })
       const client = new Client({ name: 'emperor-agent', version: '0.0.0' })

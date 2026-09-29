@@ -135,7 +135,16 @@ Emperor 识别三种包格式，按以下顺序判断：
 
 本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。
 
-已安装的 Plugin 可以启用、停用或卸载，只有已激活 Plugin 内的 Skill 会进入 Skill 目录。用户范围的启用意图保存在 `stateRoot/settings.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
+已安装的 Plugin 可以启用、停用或卸载。已激活 Plugin 的成员这样接入：
+
+- **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。
+- **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，在沙箱中只能读自己的插件目录、写自己的数据目录（`stateRoot/plugins/data/<插件名>`），读不到 Emperor Home 里的其他内容。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
+- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。
+- **应用连接**：暂不支持，详情里列出。
+
+停用或卸载后，这个 Plugin 的 MCP server 立即断开，Hook 不再运行。Plugin 的 MCP server 和 Hook 不写入你的 `mcp_config.json` 或 `hooks.json`，也不在「能力 › MCP」里显示；项目范围的 Plugin 跟随当前会话所在的项目。
+
+用户范围的启用意图保存在 `stateRoot/settings.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
 
 旧的 Skill 安装接口和环境配方安装接口已下线；需要外部 CLI 依赖时，在权限允许的情况下用普通命令安装，并单独验证结果。
 

@@ -64,7 +64,10 @@ import { CoreMemoryService } from './services/memory-service'
 import { CoreModelService } from './services/model-service'
 import { CoreSkillService } from './services/skill-service'
 import { OnboardingService } from './services/onboarding-service'
+import { PluginActivationController } from '../plugins/activation'
 import { PluginApplicationService } from '../plugins/service'
+import { loadMcpConfig } from '../mcp/config'
+import { logger } from '../util/log'
 import { OperationRetiredError } from '../errors'
 import { CoreSessionApplicationService } from './services/session-application-service'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
@@ -200,6 +203,8 @@ export class CoreApi {
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
+  /** Runs what active plugins contribute: MCP servers and hooks. */
+  readonly pluginActivation: PluginActivationController
   readonly goalService: GoalService
   readonly onboardingService: OnboardingService
   readonly workspaceFilesService: WorkspaceFilesService
@@ -314,8 +319,8 @@ export class CoreApi {
       webFetchClient: opts.webFetchClient ?? null,
       activeWorkspaceRoot: () => this.activeProjectRoot(),
       runtime: {
-        // Plugin MCP servers are not run yet; their members show as connecting.
-        mcpServer: () => null,
+        mcpServer: (pluginId, scope, server) =>
+          this.pluginActivation.mcpServer(pluginId, scope, server),
         effectiveSkills: (projectRoot) =>
           new Map(
             kept.skillLoaders
@@ -330,8 +335,24 @@ export class CoreApi {
       onChanged: () => {
         kept.skillLoaders.refreshPluginSkillsRoots()
         kept.skillChangeDetector.notify()
+        void this.syncPlugins()
         this.emitPluginsChanged('plugins')
       },
+    })
+    this.pluginActivation = new PluginActivationController({
+      packages: () =>
+        this.pluginService.effectivePackages(this.activeProjectRoot()),
+      userServerNames: async () =>
+        Object.keys((await loadMcpConfig(this.paths.stateRoot)).servers),
+      emperorHome: this.paths.stateRoot,
+      env: () => process.env,
+      mcp: {
+        setPluginServers: (servers) => kept.mcpClient.setPluginServers(servers),
+        reload: () => host.reloadMcp(),
+        pluginServerSnapshot: (key) => kept.mcpClient.pluginServerSnapshot(key),
+        pluginSkippedTools: (key) => kept.mcpClient.pluginSkippedTools(key),
+      },
+      hooks: host.hooks,
     })
     kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
       this.pluginService.enabledSkillRoots(projectRoot),
@@ -341,14 +362,17 @@ export class CoreApi {
       manager: kept.skillManager,
       installService: kept.skillInstallService,
       toolNames: () => {
-        const servers = new Map(
-          kept.mcpClient
-            .getTools()
-            .map((tool) => [tool.name, tool.mcpServerName] as const),
+        const adapters = new Map(
+          kept.mcpClient.getTools().map((tool) => [tool.name, tool] as const),
         )
         return host.tools.schemas().map((schema) => {
-          const mcpServer = servers.get(schema.name)
-          return mcpServer === undefined ? schema : { ...schema, mcpServer }
+          const adapter = adapters.get(schema.name)
+          if (adapter === undefined) return schema
+          return {
+            ...schema,
+            mcpServer: adapter.mcpServerName,
+            ...(adapter.pluginId ? { pluginId: adapter.pluginId } : {}),
+          }
         })
       },
       library: kept.skillLibrary,
@@ -720,6 +744,7 @@ export class CoreApi {
       api = new CoreApi(root, host, opts)
       await api.environmentService.initialize()
       await api.sessionTransitionService.recover()
+      await api.syncPlugins()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -1596,21 +1621,30 @@ export class CoreApi {
       this.pluginService.detail(input),
     inspect: (input: Parameters<PluginApplicationService['inspect']>[0]) =>
       this.pluginService.inspect(input),
-    install: (input: Parameters<PluginApplicationService['install']>[0]) => {
+    // Each mutation resolves once its MCP servers and hooks are applied.
+    install: async (
+      input: Parameters<PluginApplicationService['install']>[0],
+    ) => {
       this.assertMutation('plugins', 'install')
-      return this.pluginService.install(input)
+      const result = await this.pluginService.install(input)
+      await this.pluginActivation.settled()
+      return result
     },
-    uninstall: (
+    uninstall: async (
       input: Parameters<PluginApplicationService['uninstall']>[0],
     ) => {
       this.assertMutation('plugins', 'uninstall')
-      return this.pluginService.uninstall(input)
+      const result = this.pluginService.uninstall(input)
+      await this.pluginActivation.settled()
+      return result
     },
-    setEnabled: (
+    setEnabled: async (
       input: Parameters<PluginApplicationService['setEnabled']>[0],
     ) => {
       this.assertMutation('plugins', input.enabled ? 'enable' : 'disable')
-      return this.pluginService.setEnabled(input)
+      const result = this.pluginService.setEnabled(input)
+      await this.pluginActivation.settled()
+      return result
     },
   }
 
@@ -1980,8 +2014,21 @@ export class CoreApi {
   private activateSession(sessionId: string) {
     const before = this.activeProjectRoot()
     const entry = this.host.activateSession(sessionId)
-    if (this.activeProjectRoot() !== before) this.emitPluginsChanged('project')
+    if (this.activeProjectRoot() !== before) {
+      // Project-scoped plugins follow the active session's project.
+      void this.syncPlugins()
+      this.emitPluginsChanged('project')
+    }
     return entry
+  }
+
+  /** Apply plugin MCP servers and hooks; a failure is logged, never thrown into callers. */
+  private async syncPlugins(): Promise<void> {
+    try {
+      await this.pluginActivation.sync()
+    } catch (error) {
+      logger.warn('plugin activation failed', { error: String(error) })
+    }
   }
 
   private emitPluginsChanged(reason: 'plugins' | 'project'): void {

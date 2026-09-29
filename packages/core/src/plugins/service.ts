@@ -18,6 +18,7 @@ import { extractBoundedZip } from '../environment/zip'
 import { isPublicHttpRedirectResponse } from '../network/public-http'
 import type { WebFetchClient } from '../network/web-fetch-client'
 import { EmperorError } from '../errors'
+import type { ActivePluginPackage } from './activation'
 import {
   NO_PLUGIN_RUNTIME,
   PLUGIN_SCOPE_PRECEDENCE,
@@ -387,6 +388,20 @@ export class PluginApplicationService {
     })
   }
 
+  /** Packages in effect for one project (`null` = chat): active and winning their scope. */
+  effectivePackages(
+    projectRoot: string | null = this.activeWorkspaceRoot(),
+  ): ActivePluginPackage[] {
+    return this.summariesFor(projectRoot).flatMap((summary) => {
+      if (!summary.effective) return []
+      const entry = this.store.get(summary.pluginId, summary.scope)
+      const resolved = entry ? this.resolveInstalled(entry) : null
+      return resolved
+        ? [{ pluginId: summary.pluginId, scope: summary.scope, resolved }]
+        : []
+    })
+  }
+
   /** The installed package, resolved leniently; `null` when its cache or manifest is gone. */
   private resolveInstalled(
     entry: InstalledPluginEntry,
@@ -654,6 +669,8 @@ function extractPluginArchive(archive: string, previewRoot: string): string {
       maxFileBytes: MAX_PLUGIN_FILE_BYTES,
       maxTotalBytes: MAX_PLUGIN_TOTAL_BYTES,
       maxPathDepth: 32,
+      // Hook scripts and stdio servers may be run directly (`./server`).
+      preserveExecutable: true,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

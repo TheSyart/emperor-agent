@@ -216,8 +216,8 @@ export class CoreHooksService {
       matcher: {
         matchAll: ['', '*', '(omitted)'],
         literal:
-          '仅含 [A-Za-z0-9_|] 的模式按 | 分隔做精确匹配，例如 "Bash|Write"',
-        regex: '其他模式按非锚定正则匹配，例如 "mcp__.*"',
+          '仅含 [A-Za-z0-9_|] 的模式按 | 分隔做精确匹配，例如 "bash|write"（写 Emperor 的工具名）',
+        regex: '其他模式按非锚定正则匹配，例如 "mcp_.*"',
       },
       substitutions: ['${CLAUDE_PROJECT_DIR}', '${CLAUDE_PLUGIN_ROOT}'],
       defaults: { timeoutSec: 600 },
@@ -507,7 +507,7 @@ function samplePayload(
     cwd,
     hook_event_name: eventName,
   }
-  const toolName = stringField(input, 'toolName', 'tool_name') || 'Bash'
+  const toolName = stringField(input, 'toolName', 'tool_name') || 'bash'
   const toolInput = isRecord(input.toolInput)
     ? input.toolInput
     : isRecord(input.tool_input)

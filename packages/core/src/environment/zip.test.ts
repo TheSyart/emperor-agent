@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -27,6 +33,30 @@ describe('extractBoundedZip', () => {
     expect(readFileSync(join(destination, 'bin', 'rg.exe'), 'utf8')).toBe(
       'binary',
     )
+  })
+
+  it('keeps the owner execute bit only when asked, as 0700; everything else is 0600', () => {
+    const base = root()
+    const archive = join(base, 'plugin.zip')
+    writeFileSync(
+      archive,
+      zip([
+        {
+          name: 'bin/server',
+          data: Buffer.from('#!/bin/sh'),
+          unixMode: 0o100755,
+        },
+        { name: 'README.md', data: Buffer.from('readme'), unixMode: 0o100644 },
+      ]),
+    )
+    const mode = (path: string) => statSync(path).mode & 0o777
+    const kept = join(base, 'kept')
+    extractBoundedZip({ archive, destination: kept, preserveExecutable: true })
+    expect(mode(join(kept, 'bin', 'server'))).toBe(0o700)
+    expect(mode(join(kept, 'README.md'))).toBe(0o600)
+    const plain = join(base, 'plain')
+    extractBoundedZip({ archive, destination: plain })
+    expect(mode(join(plain, 'bin', 'server'))).toBe(0o600)
   })
 
   it('rejects traversal, absolute, and drive-letter members', () => {

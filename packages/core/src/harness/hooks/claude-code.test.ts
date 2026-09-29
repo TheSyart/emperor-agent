@@ -152,6 +152,7 @@ describe('config parsing and discovery', () => {
     expect(bridge.describe()).toEqual({
       events: { PreToolUse: 1 },
       files: [paths[0]],
+      plugins: [],
       errors: [expect.stringContaining(paths[1]!)],
     })
     expect(bridge.lastError).toContain(paths[1]!)
@@ -583,6 +584,66 @@ describe.skipIf(process.platform === 'win32')(
       await bridge.dispose()
       expect(Date.now() - started).toBeLessThan(5_000)
       expect(agent.inbox.nextStep).toHaveLength(0)
+    })
+
+    it('runs plugin hook sets after user hooks with their own variables, and drops them on replace', async () => {
+      const calls: string[] = []
+      const { h, agent, dir, bridge } = setup(
+        {
+          PreToolUse: [
+            { matcher: 'echo', hooks: [command('echo "user" >> order.txt')] },
+          ],
+        },
+        {
+          replies: [
+            { tools: [{ id: 'c1', name: 'echo', args: { value: 'x' } }] },
+            { text: 'ok' },
+            { tools: [{ id: 'c2', name: 'echo', args: { value: 'y' } }] },
+            { text: 'done' },
+          ],
+        },
+      )
+      const hooksJson = readFileSync(join(dir, 'hooks.json'), 'utf8')
+      bridge.setPluginHooks([
+        {
+          id: 'kit@user',
+          env: { PLUGIN_ROOT: '/plugins/kit', PLUGIN_DATA: '/data/kit' },
+          config: {
+            PreToolUse: [
+              {
+                matcher: 'echo',
+                hooks: [
+                  {
+                    command:
+                      'echo "plugin $PLUGIN_ROOT $PLUGIN_DATA" >> order.txt',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ])
+      expect(bridge.describe()).toMatchObject({
+        events: { PreToolUse: 2 },
+        plugins: ['kit@user'],
+      })
+      h.tools.register(echoTool(calls))
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      expect(readFileSync(join(dir, 'order.txt'), 'utf8')).toBe(
+        'user\nplugin /plugins/kit /data/kit\n',
+      )
+
+      bridge.setPluginHooks([])
+      expect(bridge.describe().events).toEqual({ PreToolUse: 1 })
+      agent.followup(userText('again'))
+      await agent.whenIdle()
+      expect(readFileSync(join(dir, 'order.txt'), 'utf8')).toBe(
+        'user\nplugin /plugins/kit /data/kit\nuser\n',
+      )
+      expect(calls).toEqual(['x', 'y'])
+      // The user's file is never rewritten.
+      expect(readFileSync(join(dir, 'hooks.json'), 'utf8')).toBe(hooksJson)
     })
 
     it('uninstall removes every registered handler', () => {
