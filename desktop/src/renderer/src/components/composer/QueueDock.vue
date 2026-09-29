@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import type { QueuedPromptItem } from '../../types'
 import { DsChevronDown, DsEdit, DsQueue, DsSend, DsTrash } from '../icons/ds'
+import ReferencedText from '../conversation/parts/ReferencedText.vue'
 
 const props = defineProps<{ items: QueuedPromptItem[] }>()
 
@@ -56,7 +57,12 @@ const headline = computed(() => {
             <span v-if="item.status === 'interjecting'" class="state"
               >准备插入 ·</span
             >
-            {{ item.content || '（附件消息）' }}
+            <ReferencedText
+              v-if="item.content"
+              :text="item.content"
+              :references="item.references"
+            />
+            <template v-else>（附件消息）</template>
           </span>
           <span class="actions">
             <button

@@ -5,6 +5,7 @@ import type {
   BootstrapPayload,
   ChatSendPayload,
   ControlInteraction,
+  MessageReference,
   PendingState,
   QueueDraftRecovery,
   QueuedPromptItem,
@@ -278,12 +279,14 @@ export function useRuntime(options: {
             attachments: [] as AttachmentRef[],
             requestedSkills: [],
             displayContent: payload,
+            references: [] as MessageReference[],
           }
         : {
             content: payload.content,
             attachments: payload.attachments || [],
             requestedSkills: payload.requestedSkills || [],
             displayContent: payload.displayContent || payload.content,
+            references: payload.references || [],
             delivery: payload.delivery,
           }
     const text = normalized.content.trim()
@@ -313,6 +316,8 @@ export function useRuntime(options: {
         displayText,
         attachments,
         requestedSkills: normalized.requestedSkills,
+        // Offsets were taken on the text as sent; a trim elsewhere voids them.
+        references: text === normalized.content ? normalized.references : [],
         delivery,
       })
     }
@@ -343,6 +348,7 @@ export function useRuntime(options: {
     attachments: AttachmentRef[],
     requestedSkills: RequestedSkill[],
     hasCapabilityRefs: boolean,
+    references: MessageReference[] = [],
   ): QueuedPromptItem {
     const id = nextId('prompt')
     const prompt: QueuedPromptItem = {
@@ -359,7 +365,8 @@ export function useRuntime(options: {
       createdOrder: Date.now(),
       attachmentCount: attachments.length,
       requestedSkillNames: requestedSkills.map((skill) => skill.name),
-      hasCapabilityRefs,
+      hasCapabilityRefs: hasCapabilityRefs || references.length > 0,
+      ...(references.length ? { references } : {}),
     }
     queuedPrompts.value.push(prompt)
     return prompt
@@ -370,6 +377,7 @@ export function useRuntime(options: {
     displayText: string
     attachments: AttachmentRef[]
     requestedSkills: RequestedSkill[]
+    references: MessageReference[]
     delivery?: 'queue' | 'interject'
   }) {
     const activeSessionId = sessionId.value
@@ -388,6 +396,7 @@ export function useRuntime(options: {
           opts.attachments,
           opts.requestedSkills,
           opts.displayText !== opts.text,
+          opts.references,
         )
       : beginLocalTurn()
     status.value = 'ready'
@@ -396,6 +405,7 @@ export function useRuntime(options: {
       displayContent: opts.displayText || opts.text,
       attachments: opts.attachments.map((item) => item.id),
       requestedSkills: opts.requestedSkills,
+      ...(opts.references.length ? { references: opts.references } : {}),
       clientMessageId: userMsg.id,
       sessionId: activeSessionId,
       ...(opts.delivery ? { delivery: opts.delivery } : {}),
@@ -415,6 +425,9 @@ export function useRuntime(options: {
               delivery: opts.delivery,
               requestedSkills: [...opts.requestedSkills],
               attachments: [...opts.attachments],
+              ...(opts.references.length
+                ? { references: [...opts.references] }
+                : {}),
             },
           }
           options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
@@ -471,8 +484,10 @@ export function useRuntime(options: {
         requestedSkillNames: record.requestedSkills.map((skill) => skill.name),
         hasCapabilityRefs:
           record.requestedSkills.length > 0 ||
+          (record.references?.length ?? 0) > 0 ||
           (Boolean(record.displayContent) &&
             record.displayContent !== record.content),
+        ...(record.references?.length ? { references: record.references } : {}),
       }))
     } catch (error) {
       options.showToast(displayError(error))

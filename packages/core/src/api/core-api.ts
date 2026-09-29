@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
@@ -720,6 +721,7 @@ export class CoreApi {
       draftSession?: DraftSessionInput | null
       attachments?: string[] | null
       requestedSkills?: Array<{ name: string; source?: string }> | null
+      references?: MessageReference[] | null
       /** In-process adapters only; IPC validation never accepts AbortSignal objects. */
       signal?: AbortSignal | null
       /** Trusted in-process adapter provenance. Browser IPC remains `chat`. */
@@ -740,6 +742,7 @@ export class CoreApi {
         draftSession: opts.draftSession ?? null,
         attachmentIds: opts.attachments ?? null,
         requestedSkills: opts.requestedSkills ?? null,
+        references: opts.references ?? null,
         signal: opts.signal ?? null,
         source: opts.source ?? 'chat',
         emit: opts.emit ?? null,
@@ -791,6 +794,7 @@ export class CoreApi {
       invocationId: string
       invocationSource: CommandInvocationSource
       attachments?: string[]
+      references?: MessageReference[]
     }): Promise<CommandInvocationResult> => this.commandPlatform.invoke(input),
   }
 

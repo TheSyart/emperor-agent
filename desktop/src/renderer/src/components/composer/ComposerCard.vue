@@ -1,11 +1,15 @@
 <script setup lang="ts">
 /**
  * ComposerCard — dsh InputBar card (max 780 = content 748 + 32, radius 22,
- * input-major fill, lv2 shadow; textarea 16/24 growing to 336px). Left
+ * input-major fill, lv2 shadow; input 16/24 growing to 336px). Left
  * toolbar: `+` (attach / plan / goal / capabilities), PermissionChip,
  * PlanChip; right: ModelPicker, ContextMeter, 34px send / stop. All
- * behaviour (drafts, slash palette, capability tokens, attachments, queue
+ * behaviour (drafts, slash palette, reference chips, attachments, queue
  * rules, goal capture) lives in composerController.ts — this is its view.
+ *
+ * The input is the rich ComposerEditor (skill chips, RF-02); the old
+ * textarea with its marker overlay stays behind COMPOSER_INPUT_FLAG until
+ * the editor is accepted.
  */
 import { computed, ref } from 'vue'
 import AttachmentChip from '../chat/AttachmentChip.vue'
@@ -31,6 +35,7 @@ import {
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import ContextMeter from './ContextMeter.vue'
+import ComposerEditor from './editor/ComposerEditor.vue'
 import ModelPicker from './ModelPicker.vue'
 import PermissionChip from './PermissionChip.vue'
 import PlanChip from './PlanChip.vue'
@@ -40,6 +45,12 @@ const emit = defineEmits<ComposerEmit>()
 const controller = useComposerController(props, emit)
 const {
   value,
+  richInput,
+  editor,
+  catalog,
+  onEditorChange,
+  onEditorTrigger,
+  focusInput,
   shell,
   input,
   highlightLayer,
@@ -117,8 +128,13 @@ function openCapabilities(): void {
 
 function focusCard(event: MouseEvent): void {
   const target = event.target as HTMLElement
-  if (target.closest('button, a, input, textarea, [role="menu"]')) return
-  input.value?.focus()
+  if (
+    target.closest(
+      'button, a, input, textarea, [role="menu"], [contenteditable="true"]',
+    )
+  )
+    return
+  focusInput()
 }
 
 defineExpose(controller.expose)
@@ -184,7 +200,20 @@ defineExpose(controller.expose)
         </div>
       </div>
 
-      <div class="scroll">
+      <ComposerEditor
+        v-if="richInput"
+        ref="editor"
+        class="rich-input"
+        :placeholder="placeholder"
+        :disabled="goalCaptureStarting || props.interactionBlocked"
+        :hero="hero"
+        :catalog="catalog"
+        :keydown="handleKeydown"
+        @change="onEditorChange"
+        @trigger="onEditorTrigger"
+        @focus="closeComposerMenus"
+      />
+      <div v-else class="scroll">
         <div
           v-if="composerSlashParts || hasInlineTokens"
           ref="highlightLayer"
@@ -328,7 +357,7 @@ defineExpose(controller.expose)
       </MenuItem>
       <MenuItem @select="openCapabilities">
         <template #icon><DsSkill :size="16" /></template>
-        插入 Skill / MCP
+        {{ richInput ? '插入 Skill' : '插入 Skill / MCP' }}
       </MenuItem>
       <MenuItem variant="separator" />
       <MenuItem

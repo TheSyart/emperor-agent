@@ -131,6 +131,49 @@ describe('Core operation registry', () => {
 
   it('uses exact Zod tuples for no-arg, optional, single, and multi-arg operations', () => {
     expect(CORE_OPERATION_REGISTRY['memory.tokens'].args.parse([])).toEqual([])
+  })
+
+  it('accepts chips that sit in the text and refuses ones that do not', () => {
+    const submit = CORE_OPERATION_REGISTRY['chat.submit']
+    const chip = {
+      kind: 'skill' as const,
+      id: 'reviewer',
+      label: 'Reviewer',
+      start: 2,
+      end: 11,
+    }
+    expect(() =>
+      submit.args.parse([{ content: '请 /reviewer 看看', references: [chip] }]),
+    ).not.toThrow()
+    for (const bad of [
+      { ...chip, start: 1, end: 10 },
+      { ...chip, id: 'Reviewer' },
+      { ...chip, kind: 'plugin' as const },
+      { ...chip, end: 99 },
+    ])
+      expect(
+        () =>
+          submit.args.parse([
+            { content: '请 /reviewer 看看', references: [bad] },
+          ]),
+        JSON.stringify(bad),
+      ).toThrow()
+    const invoke = CORE_OPERATION_REGISTRY['commands.invoke']
+    const request = {
+      sessionId: 's1',
+      commandId: 'skill.user.reviewer',
+      rawInput: '/reviewer 看看',
+      invocationId: 'inv-1',
+      invocationSource: 'desktop' as const,
+    }
+    expect(() =>
+      invoke.args.parse([
+        { ...request, references: [{ ...chip, start: 0, end: 9 }] },
+      ]),
+    ).not.toThrow()
+    expect(() =>
+      invoke.args.parse([{ ...request, references: [chip] }]),
+    ).toThrow()
     expect(() =>
       CORE_OPERATION_REGISTRY['memory.tokens'].args.parse([{}]),
     ).toThrow()

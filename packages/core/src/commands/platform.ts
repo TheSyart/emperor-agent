@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import {
+  referencesFit,
+  type MessageReference,
+} from '../harness/host/message-references'
 import type { SkillInfoPayload } from '../api/services/skill-service'
 import { builtinCommandDescriptors } from './builtins'
 import {
@@ -36,6 +40,8 @@ export interface CommandExecutionContext {
   parsed: ParsedCommandInput
   arguments: ValidatedCommandArguments
   attachments: string[]
+  /** Chips in `parsed.raw` (a message starting with a skill chip). */
+  references?: MessageReference[]
 }
 
 export interface CommandPlatformDeps {
@@ -137,6 +143,7 @@ export class CommandPlatform {
     invocationId: string
     invocationSource: CommandInvocationSource
     attachments?: string[]
+    references?: MessageReference[]
   }): Promise<CommandInvocationResult> {
     const invocationId = String(input.invocationId ?? '').trim()
     if (!invocationId)
@@ -209,6 +216,11 @@ export class CommandPlatform {
       parsed,
       arguments: args,
       attachments,
+      // Offsets hold only for the text as parsed.
+      ...(input.references?.length &&
+      referencesFit(parsed.raw, input.references)
+        ? { references: input.references }
+        : {}),
     }
     const execute = async () => {
       let result: CommandInvocationResult

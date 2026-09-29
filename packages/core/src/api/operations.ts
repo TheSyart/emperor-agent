@@ -6,6 +6,10 @@ import {
 import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
+import {
+  MAX_MESSAGE_REFERENCES,
+  referencesFit,
+} from '../harness/host/message-references'
 import { SKILL_NAME, SKILL_NAME_MAX_LENGTH } from '../skills/name'
 import {
   environmentIdSchema,
@@ -302,6 +306,21 @@ const commandCompleteSchema = z
     invocationSource: commandInvocationSourceSchema,
   })
   .strict()
+/** Chips in a message's text (E-track contract §2). */
+const messageReferencesSchema = z
+  .array(
+    z
+      .object({
+        kind: z.enum(['skill', 'plugin']),
+        id: z.string().min(1).max(160),
+        label: z.string().max(80),
+        start: z.number().int().min(0),
+        end: z.number().int().min(0),
+      })
+      .strict(),
+  )
+  .max(MAX_MESSAGE_REFERENCES)
+
 const commandInvokeSchema = z
   .object({
     sessionId: idSchema,
@@ -310,8 +329,15 @@ const commandInvokeSchema = z
     invocationId: idSchema,
     invocationSource: commandInvocationSourceSchema,
     attachments: z.array(idSchema).max(64).optional(),
+    references: messageReferencesSchema.optional(),
   })
   .strict()
+  .refine(
+    (value) =>
+      value.references === undefined ||
+      referencesFit(value.rawInput, value.references),
+    { message: 'references do not match the input', path: ['references'] },
+  )
 
 const workspaceSessionSchema = z.object({ sessionId: idSchema }).strict()
 const workspaceRelativePathSchema = z
@@ -587,8 +613,15 @@ const chatSubmitSchema = z
       )
       .max(16)
       .optional(),
+    references: messageReferencesSchema.optional(),
   })
   .passthrough()
+  .refine(
+    (value) =>
+      value.references === undefined ||
+      referencesFit(value.content, value.references),
+    { message: 'references do not match the content', path: ['references'] },
+  )
 
 const hookAuditOptionsSchema = z
   .object({

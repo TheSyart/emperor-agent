@@ -150,6 +150,19 @@ export interface RequestedSkill {
   source: 'slash'
 }
 
+/**
+ * A skill or plugin chip in a sent message (E-track contract §2):
+ * `content.slice(start, end)` is `/id` or `@id`; `label` is what the chip
+ * shows.
+ */
+export interface MessageReference {
+  kind: 'skill' | 'plugin'
+  id: string
+  label: string
+  start: number
+  end: number
+}
+
 export interface TokenStatsRow {
   input?: number
   output?: number
@@ -501,6 +514,8 @@ export interface ChatSendPayload {
   attachments?: AttachmentRef[]
   requestedSkills?: RequestedSkill[]
   displayContent?: string
+  /** Chips in `content` (the rich composer). */
+  references?: MessageReference[]
   delivery?: 'queue' | 'interject'
 }
 
@@ -1174,6 +1189,8 @@ export interface QueuedPromptItem {
   attachmentCount: number
   requestedSkillNames: string[]
   hasCapabilityRefs: boolean
+  /** Chips in `content`, when it was sent from the rich composer. */
+  references?: MessageReference[]
 }
 
 export interface PendingState {

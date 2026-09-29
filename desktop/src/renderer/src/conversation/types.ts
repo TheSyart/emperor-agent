@@ -14,6 +14,7 @@ import type {
   TokenUsage,
 } from '@emperor/core/runtime-contract'
 import type { ConversationTimeline } from './locationIndex'
+import type { MessageReference } from '../types'
 
 export type { TodoItem, TokenUsage }
 
@@ -52,6 +53,8 @@ export interface UserChatData {
   readonly content: readonly ContentBlock[]
   /** Text to display: host `displayContent`, else the joined text blocks. */
   readonly text: string
+  /** Skill / plugin chips in `text` (the rich composer). */
+  readonly references?: readonly MessageReference[]
   /** Host attachment descriptors (id, name, mime, size, kind). */
   readonly attachments: readonly Record<string, unknown>[]
   /** Host delivery source (e.g. `scheduler`), when not a plain prompt. */

@@ -3,6 +3,7 @@ import { createApp, nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SlashPaletteItem } from '../../commands'
 import Composer from './ComposerCard.vue'
+import { composerView, typeInto, visibleText } from './editor/editorTesting'
 
 let container: HTMLDivElement | null = null
 
@@ -27,18 +28,16 @@ describe('Composer slash palette refresh', () => {
       refreshCommands,
     }).mount(container)
 
-    const textarea = container.querySelector('textarea')!
-    textarea.value = '/'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    typeInto(composerView(container), '/')
     await nextTick()
 
     expect(refreshCommands).toHaveBeenCalledOnce()
   })
 
-  it('inserts the selected Skill own slash token without a /skill intermediary', async () => {
+  it('inserts the selected Skill as a chip that sends its own slash token', async () => {
     container = document.createElement('div')
     document.body.append(container)
-    createApp(Composer, {
+    const component = createApp(Composer, {
       busy: false,
       commands: [command('model'), skill('agent-reach')],
       tools: [],
@@ -46,11 +45,12 @@ describe('Composer slash palette refresh', () => {
       contextMax: 0,
       modelEntries: [],
       providerOptions: [],
-    }).mount(container)
+    }).mount(container) as unknown as {
+      setDraft: (text: string) => void
+    }
 
-    const textarea = container.querySelector('textarea')!
-    textarea.value = '/'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    const view = composerView(container)
+    typeInto(view, '/')
     await nextTick()
     const skillButton = [
       ...container.querySelectorAll<HTMLButtonElement>('button'),
@@ -59,20 +59,20 @@ describe('Composer slash palette refresh', () => {
     await nextTick()
 
     expect(skillButton).toBeDefined()
-    expect(textarea.value).toBe('/agent-reach ')
+    const chip = container.querySelector('.composer-chip')
+    expect(chip?.textContent).toBe('Agent Reach')
+    expect(chip?.getAttribute('aria-label')).toBe('技能 Agent Reach')
+    expect(visibleText(view)).toBe('Agent Reach ')
     expect(container.textContent).not.toContain('/skill ')
 
-    textarea.value = '/agent-reach research query'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    // A draft names a known skill: it becomes a chip; unknown names stay.
+    component.setDraft('/agent-reach research query')
     await nextTick()
-    expect(container.querySelector('.composer-skill-slash')?.textContent).toBe(
-      '/agent-reach',
-    )
-
-    textarea.value = '/unknown research query'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(container.querySelectorAll('.composer-chip')).toHaveLength(1)
+    component.setDraft('/unknown research query')
     await nextTick()
-    expect(container.querySelector('.composer-skill-slash')).toBeNull()
+    expect(container.querySelector('.composer-chip')).toBeNull()
+    expect(visibleText(view)).toBe('/unknown research query')
   })
 })
 

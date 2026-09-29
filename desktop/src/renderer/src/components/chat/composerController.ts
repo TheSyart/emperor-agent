@@ -1,7 +1,10 @@
 import type { CommandCompletion } from '@emperor/core/api'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { CapabilityPickerItem } from '../../capabilities/capabilityPicker'
-import { buildCapabilityPickerGroups } from '../../capabilities/capabilityPickerModel'
+import {
+  buildCapabilityPickerGroups,
+  skillChipItem,
+} from '../../capabilities/capabilityPickerModel'
 import {
   hasComposerCapabilityTokens,
   normalizeComposerCapabilityInput,
@@ -11,6 +14,7 @@ import {
   buildSlashPaletteGroups,
   isPathLikeSlashToken,
   rankSlashPaletteItems,
+  skillIdOf,
 } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
 import type { GoalCaptureStatus } from '../../composables/goalCapture'
@@ -27,11 +31,19 @@ import type {
   ChatSendPayload,
   ControlPayload,
   CurrentModelConfig,
+  MessageReference,
   ModelEntry,
   ProviderOption,
+  RequestedSkill,
   RuntimeGoalView,
   ToolInfo,
 } from '../../types'
+import type {
+  ComposerCatalog,
+  ComposerOutput,
+  ComposerReferenceKind,
+  ComposerTrigger,
+} from '../composer/editor/composerDocument'
 import {
   composerPresetOptions,
   composerSendDisabled,
@@ -88,11 +100,50 @@ export const COMPOSER_TEXT_MAX_HEIGHT = 336
 export const COMPOSER_QUEUE_FULL_MESSAGE =
   '已有一条消息排队，请先编辑、插入或删除后再发送。'
 
+/**
+ * Until the rich editor is accepted (RF-02), setting
+ * `localStorage['emperor.composer.input'] = 'textarea'` brings back the old
+ * text box with its `@skill()` markers.
+ */
+export const COMPOSER_INPUT_FLAG = 'emperor.composer.input'
+
+function legacyInputRequested(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(COMPOSER_INPUT_FLAG) === 'textarea'
+  } catch {
+    return false
+  }
+}
+
+/** What the controller asks of the rich editor (ComposerEditor's expose). */
+export interface ComposerEditorHandle {
+  focus(): void
+  setContent(text: string, references?: readonly MessageReference[]): void
+  insertChip(kind: ComposerReferenceKind, id: string, label: string): void
+  replaceWithChip(
+    from: number,
+    to: number,
+    kind: ComposerReferenceKind,
+    id: string,
+    label: string,
+  ): void
+  chipifyTyped(): void
+  output(): ComposerOutput
+}
+
 export function useComposerController(
   props: Readonly<ComposerControllerProps>,
   emit: ComposerEmit,
 ) {
   const value = ref('')
+  /** The rich editor (default) or the old text box (COMPOSER_INPUT_FLAG). */
+  const richInput = !legacyInputRequested()
+  const editor = ref<ComposerEditorHandle | null>(null)
+  /** Chips in `value` (rich editor only). */
+  const references = ref<MessageReference[]>([])
+  /** A `/` or `@` being typed at the caret (rich editor only). */
+  const trigger = ref<ComposerTrigger | null>(null)
+  const dismissedTrigger = ref('')
   const shell = ref<HTMLElement | null>(null)
   const input = ref<HTMLTextAreaElement | null>(null)
   const highlightLayer = ref<HTMLElement | null>(null)
@@ -142,6 +193,19 @@ export function useComposerController(
   const paletteSelectionIndex = ref(0)
   const dismissedSlashInput = ref('')
   let completionGeneration = 0
+
+  const skillItems = computed(() =>
+    props.commands.filter((item) => item.kind === 'skill'),
+  )
+  const skillLabels = computed(
+    () =>
+      new Map(skillItems.value.map((item) => [skillIdOf(item), item.title])),
+  )
+  /** Names that become chips when typed or pasted (plugins: RF-03). */
+  const catalog: ComposerCatalog = {
+    skill: (id) => skillLabels.value.get(id),
+    plugin: () => undefined,
+  }
 
   const suggestions = computed(() => {
     const text = value.value
@@ -199,7 +263,12 @@ export function useComposerController(
       },
     ).map(({ label, items }) => ({
       label,
-      items: items.map((item) => paletteItemFromSlash(item, label)),
+      // In the rich editor a skill becomes a chip, not text.
+      items: items.map((item) =>
+        richInput && item.kind === 'skill'
+          ? skillChipItem(item)
+          : paletteItemFromSlash(item, label),
+      ),
     }))
   })
   const addPaletteGroups = computed(() =>
@@ -207,17 +276,32 @@ export function useComposerController(
       commands: props.commands,
       tools: props.tools,
       mcpContent: props.mcpContent || '',
+      chips: richInput,
     }),
   )
-  const paletteMode = computed<'add' | 'slash' | null>(() => {
+  /** ` /name` in the middle of a message: skills only (commands start it). */
+  const mentionGroups = computed(() => {
+    const current = trigger.value
+    if (!richInput || !current || current.atStart || current.sigil !== '/')
+      return []
+    if (dismissedTrigger.value === triggerKey(current)) return []
+    const items = rankSlashPaletteItems(skillItems.value, current.query)
+      .slice(0, 12)
+      .map(skillChipItem)
+    return items.length ? [{ label: 'Skills', items }] : []
+  })
+  const paletteMode = computed<'add' | 'slash' | 'mention' | null>(() => {
     if (addMenuOpen.value) return 'add'
     if (slashPaletteGroups.value.length) return 'slash'
+    if (mentionGroups.value.length) return 'mention'
     return null
   })
   const paletteGroups = computed(() =>
     paletteMode.value === 'add'
       ? addPaletteGroups.value
-      : slashPaletteGroups.value,
+      : paletteMode.value === 'mention'
+        ? mentionGroups.value
+        : slashPaletteGroups.value,
   )
   const flatPaletteItems = computed(() =>
     paletteGroups.value.flatMap((group) => group.items),
@@ -229,11 +313,17 @@ export function useComposerController(
     ]
   })
   const paletteHeading = computed(() =>
-    paletteMode.value === 'add' ? '添加能力' : '斜杠命令',
+    paletteMode.value === 'add'
+      ? '添加能力'
+      : paletteMode.value === 'mention'
+        ? '技能'
+        : '斜杠命令',
   )
   const paletteHint = computed(() =>
     paletteMode.value === 'add'
-      ? '插入附件、Skill 或 MCP 占位符'
+      ? richInput
+        ? '插入附件或 Skill'
+        : '插入附件、Skill 或 MCP 占位符'
       : 'Tab 补全第一项',
   )
 
@@ -446,14 +536,59 @@ export function useComposerController(
     highlightLayer.value.scrollTop = input.value.scrollTop
   }
 
+  /**
+   * The message to send. Rich editor: typed known names become chips
+   * first, and offsets follow the trim. Old text box: its markers.
+   */
+  function composed(): {
+    content: string
+    displayContent: string
+    requestedSkills: RequestedSkill[]
+    references: MessageReference[]
+  } {
+    if (!richInput) {
+      const normalized = normalizeComposerCapabilityInput(value.value.trim())
+      return { ...normalized, references: [] }
+    }
+    editor.value?.chipifyTyped()
+    const raw = value.value
+    const leading = raw.length - raw.trimStart().length
+    const content = raw.trim()
+    const refs = references.value
+      .map((reference) => ({
+        ...reference,
+        start: reference.start - leading,
+        end: reference.end - leading,
+      }))
+      .filter(
+        (reference) => reference.start >= 0 && reference.end <= content.length,
+      )
+    const requestedSkills = [
+      ...new Set(
+        refs
+          .filter((reference) => reference.kind === 'skill')
+          .map((reference) => reference.id),
+      ),
+    ].map((name) => ({ name, source: 'slash' as const }))
+    return {
+      content,
+      displayContent: content,
+      requestedSkills,
+      references: refs,
+    }
+  }
+
   function submit(delivery?: 'queue' | 'interject'): void {
     if (goalCaptureStarting.value) return
     if (props.sendBlockedReason) {
       emit('error', props.sendBlockedReason)
       return
     }
-    const normalized = normalizeComposerCapabilityInput(value.value.trim())
+    const normalized = composed()
     const content = normalized.content.trim()
+    const sentReferences = normalized.references.length
+      ? { references: normalized.references }
+      : {}
     if (props.busy) {
       if (!content && drafts.value.length === 0) return
       if (props.queueOccupied) {
@@ -469,9 +604,10 @@ export function useComposerController(
         attachments: takeDrafts(),
         requestedSkills: normalized.requestedSkills,
         displayContent: normalized.displayContent,
+        ...sentReferences,
         delivery: delivery || 'queue',
       })
-      value.value = ''
+      setText('')
       closeComposerMenus()
       void nextTick(resize)
       return
@@ -481,11 +617,14 @@ export function useComposerController(
         drafts.value.length > 0 ||
         uploading.value.size > 0 ||
         normalized.requestedSkills.length > 0 ||
+        normalized.references.length > 0 ||
         hasInlineTokens.value
       ) {
         emit(
           'error',
-          'Goal Outcome 暂仅支持纯文字；请先移除附件、Skill 或 MCP 引用。',
+          richInput
+            ? 'Goal Outcome 暂仅支持纯文字；请先移除附件或 Skill 引用。'
+            : 'Goal Outcome 暂仅支持纯文字；请先移除附件、Skill 或 MCP 引用。',
         )
         return
       }
@@ -500,8 +639,9 @@ export function useComposerController(
       attachments: takeDrafts(),
       requestedSkills: normalized.requestedSkills,
       displayContent: normalized.displayContent,
+      ...sentReferences,
     })
-    value.value = ''
+    setText('')
     closeComposerMenus()
     void nextTick(resize)
   }
@@ -523,18 +663,31 @@ export function useComposerController(
       dismissedSlashInput.value = value.value
       return
     }
+    if (event.key === 'Escape' && paletteMode.value === 'mention') {
+      event.preventDefault()
+      if (trigger.value) dismissedTrigger.value = triggerKey(trigger.value)
+      return
+    }
     if (event.key === 'Tab' && activePaletteItem.value) {
       event.preventDefault()
       applyPaletteItem(activePaletteItem.value)
       return
     }
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+    // An input method's Enter confirms its candidate, never sends.
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.isComposing ||
+      event.keyCode === 229
+    )
+      return
     event.preventDefault()
     const exact = exactComposerCommand.value
     const token = value.value.match(/^\/\S+/)?.[0] || ''
     if (
       activePaletteItem.value &&
-      (!exact ||
+      (paletteMode.value === 'mention' ||
+        !exact ||
         paletteSelectionIndex.value > 0 ||
         argumentCompletions.value.length > 0)
     ) {
@@ -545,31 +698,64 @@ export function useComposerController(
       exact?.requiresArguments &&
       value.value.trim().toLowerCase() === token.toLowerCase()
     ) {
-      value.value = `${token} `
+      setText(`${value.value.trimEnd()} `, references.value)
       void nextTick(resize)
       return
     }
     submit()
   }
 
-  function setDraft(text: string): void {
+  /**
+   * Replace the draft. The rich editor rebuilds its chips: from
+   * `references` when given, else from the known names in the text.
+   */
+  function setText(text: string, refs?: readonly MessageReference[]): void {
+    if (richInput && editor.value) {
+      editor.value.setContent(text, refs)
+      return
+    }
     value.value = text
+    references.value = []
+  }
+
+  function onEditorChange(output: ComposerOutput): void {
+    value.value = output.content
+    references.value = output.references
+  }
+
+  function onEditorTrigger(next: ComposerTrigger | null): void {
+    trigger.value = next
+    // Esc hides one typed `/query`; typing on shows the list again.
+    if (next === null) dismissedTrigger.value = ''
+  }
+
+  // A draft set before the editor mounted (a restored draft) moves in.
+  watch(editor, (instance) => {
+    if (instance && value.value) instance.setContent(value.value)
+  })
+
+  function setDraft(text: string, refs?: readonly MessageReference[]): void {
+    setText(text, refs)
     void nextTick(() => {
       resize()
-      input.value?.focus()
+      focusInput()
     })
   }
 
   function focusInput(): void {
-    input.value?.focus()
+    if (richInput && editor.value) editor.value.focus()
+    else input.value?.focus()
   }
 
   function restoreDraft(payload: ChatSendPayload): void {
-    value.value = String(payload.displayContent || payload.content || '')
+    setText(
+      String(payload.displayContent || payload.content || ''),
+      payload.references,
+    )
     restoreDrafts(payload.attachments || [])
     void nextTick(() => {
       resize()
-      input.value?.focus()
+      focusInput()
     })
   }
 
@@ -585,22 +771,53 @@ export function useComposerController(
       closeComposerMenus()
       return
     }
+    if (item.action === 'insert_reference' && item.reference) {
+      insertReference(item.reference)
+      return
+    }
     if (item.action === 'activate_plan' || item.action === 'activate_goal') {
-      if (paletteMode.value === 'slash') value.value = ''
+      if (paletteMode.value === 'slash') setText('')
       closeComposerMenus()
       if (item.action === 'activate_plan') emit('activate-plan')
       else emit('activate-goal')
-      input.value?.focus()
+      focusInput()
       void nextTick(resize)
       return
     }
     if (!item.completion) return
-    value.value = item.completion
+    setText(item.completion)
     paletteSelectionIndex.value = 0
     dismissedSlashInput.value = ''
     closeComposerMenus()
-    input.value?.focus()
+    focusInput()
     void nextTick(resize)
+  }
+
+  /**
+   * A chip from a list: in place of the typed `/query`, or at the caret
+   * from the + menu.
+   */
+  function insertReference(reference: {
+    kind: ComposerReferenceKind
+    id: string
+    label: string
+  }): void {
+    const fromTyping = paletteMode.value !== 'add'
+    const current = trigger.value
+    closeComposerMenus()
+    paletteSelectionIndex.value = 0
+    dismissedSlashInput.value = ''
+    const handle = editor.value
+    if (!handle) return
+    if (fromTyping && current)
+      handle.replaceWithChip(
+        current.from,
+        current.to,
+        reference.kind,
+        reference.id,
+        reference.label,
+      )
+    else handle.insertChip(reference.kind, reference.id, reference.label)
   }
 
   function insertInlineToken(token: string): void {
@@ -646,7 +863,7 @@ export function useComposerController(
     if (props.busy) return
     closeModeMenu()
     if (mode !== currentMode.value.value) emit('set-permission', mode)
-    input.value?.focus()
+    focusInput()
   }
 
   async function toggleModelMenu(): Promise<void> {
@@ -704,7 +921,7 @@ export function useComposerController(
     if (props.busy) return
     closeModelMenu()
     if (entryId !== activeModelId.value) emit('switch-model', entryId)
-    input.value?.focus()
+    focusInput()
   }
 
   function selectReasoning(value: string | null): void {
@@ -782,7 +999,7 @@ export function useComposerController(
     () => props.goalCaptureStatus,
     (status, previous) => {
       if (previous !== 'starting' || status !== 'idle') return
-      value.value = ''
+      setText('')
       void nextTick(resize)
     },
   )
@@ -792,6 +1009,13 @@ export function useComposerController(
   return {
     actionIcons,
     value,
+    richInput,
+    editor,
+    references,
+    catalog,
+    onEditorChange,
+    onEditorTrigger,
+    focusInput,
     shell,
     input,
     highlightLayer,
@@ -909,6 +1133,11 @@ function commandIcon(name: string): IconComponent {
   if (name === '/stop') return actionIcons.stop
   if (name === '/continue') return actionIcons.commandContinue
   return toolIcon('skill')
+}
+
+/** Identifies one typed `/query` (Esc hides its list until it changes). */
+function triggerKey(trigger: ComposerTrigger): string {
+  return `${trigger.sigil}${trigger.from}:${trigger.query}`
 }
 
 function appendInlineToken(text: string, token: string): string {

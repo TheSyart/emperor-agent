@@ -11,6 +11,7 @@
 
 import { messageText, type UserMessage } from '../../llm/message'
 import type { SessionEvent, SessionEventMap } from '../../session-log/types'
+import type { MessageReference } from '../host/message-references'
 import {
   answeredQuestionInteraction,
   approvalInteraction,
@@ -57,6 +58,8 @@ declare module '../../session-log/types' {
       messageId: string
       clientMessageId?: string
       displayContent?: string
+      /** Skill / plugin chips in `displayContent` (E-track contract §2). */
+      references?: MessageReference[]
       attachments?: Array<Record<string, unknown>>
       source?: string
       scheduler?: Record<string, unknown>
@@ -645,6 +648,9 @@ export class SessionProjector {
         ...(meta?.clientMessageId === undefined
           ? {}
           : { client_message_id: meta.clientMessageId }),
+        ...(meta?.references === undefined
+          ? {}
+          : { references: meta.references }),
         ...(meta?.attachments === undefined
           ? {}
           : { attachments: meta.attachments }),

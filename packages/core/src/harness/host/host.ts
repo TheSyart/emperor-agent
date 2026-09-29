@@ -11,6 +11,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { AttachmentStore, type AttachmentRef } from '../../attachments/store'
+import type { MessageReference } from './message-references'
 import {
   findEntry,
   loadModelConfig,
@@ -186,6 +187,8 @@ export interface SubmitInput {
   sessionId: string
   content: string
   displayContent?: string | null
+  /** Chips in the displayed text (renderer-only; validated by the caller). */
+  references?: MessageReference[] | null
   clientMessageId?: string | null
   attachmentIds?: string[] | null
   source?: string | null
@@ -1169,6 +1172,7 @@ export class HarnessHost {
         ? { clientMessageId: input.clientMessageId }
         : {}),
       ...(input.displayContent ? { displayContent: input.displayContent } : {}),
+      ...(input.references?.length ? { references: input.references } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(input.source ? { source: input.source } : {}),
       ...(input.scheduler ? { scheduler: input.scheduler } : {}),

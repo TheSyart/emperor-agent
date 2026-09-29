@@ -51,8 +51,8 @@ flowchart LR
 
 ## 一次会话请求
 
-1. Renderer 提交 `chat.submit`，附带 session、文本、附件和可选 Skill。草稿 session 在第一条消息时才被提升为真实 session。
-2. `ChatService` 把请求交给 `HarnessHost.submit()`：先在 session log 写入仅供界面使用的 `host/user-meta`，再把用户消息放入该 session Agent 的 inbox（`followup`，或运行中插话时 `steer`）。
+1. Renderer 提交 `chat.submit`，附带 session、文本、附件和可选 Skill，以及输入框芯片的位置 `references`（`kind`、`id`、`label`、`start`、`end`；每项在文本中的切片必须正是 `/名称` 或 `@ID`，否则请求被拒）。草稿 session 在第一条消息时才被提升为真实 session。
+2. `ChatService` 把请求交给 `HarnessHost.submit()`：先在 session log 写入仅供界面使用的 `host/user-meta`（显示文本、附件、`references` 等），再把用户消息放入该 session Agent 的 inbox（`followup`，或运行中插话时 `steer`）。文本里已有某个 Skill 的 `/名称` 手势时，`requestedSkills` 不再在前面重复添加。
 3. `Agent` 空闲时启动驱动循环：一个 turn 由若干 step 组成；每个 step 认领 inbox、执行 pre-step middleware（工作区说明、长期记忆、Skill 目录、压缩、Hooks、Goal、Plan）、从 session log 推导模型请求并调用 LLM。
 4. 模型的流式输出逐块写入 log。模型提出工具调用时，`ToolRegistry` 依次执行参数校验、pre-execute middleware（Hooks）、审批、guard、工具体、post-execute middleware（重复提醒、大结果落盘、Hooks）。并发安全的调用可重叠执行，其余调用形成屏障，结果按模型顺序提交。
 5. 需要用户介入的调用（`ask_user_question`、`exit_plan_mode` 审批、一次性提权审批）在工具调用内部阻塞，直到用户在界面回答、取消或 turn 被中止。

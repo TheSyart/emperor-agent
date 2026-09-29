@@ -514,6 +514,51 @@ describe('CoreApi chat', () => {
     })
   })
 
+  it('keeps a skill chip where the user put it and records the chip', async () => {
+    const root = tmp('emperor-core-api-skill-chip-')
+    const stateRoot = join(root, 'home')
+    mkdirSync(join(stateRoot, 'skills', 'reviewer'), { recursive: true })
+    writeFileSync(
+      join(stateRoot, 'skills', 'reviewer', 'SKILL.md'),
+      '---\nname: reviewer\ndescription: Review code\n---\n\nREVIEWER-SKILL-BODY\n',
+    )
+    const { api, adapter, events } = await setup({
+      root,
+      stateRoot,
+      replies: [{ text: 'reviewed' }],
+    })
+    const id = session(api)
+    const references = [
+      {
+        kind: 'skill' as const,
+        id: 'reviewer',
+        label: 'Reviewer',
+        start: 2,
+        end: 11,
+      },
+    ]
+    await api.chat.submit({
+      content: '请 /reviewer 看看',
+      displayContent: '请 /reviewer 看看',
+      sessionId: id,
+      requestedSkills: [{ name: 'reviewer', source: 'slash' }],
+      references,
+    })
+    const request = JSON.stringify(adapter.requests[0]!.messages)
+    // The chip's gesture is in the text: no second one in front of it.
+    expect(request).toContain('请 /reviewer 看看')
+    expect(request).not.toContain('/reviewer\\n')
+    expect(request).toContain('REVIEWER-SKILL-BODY')
+    expect(eventOf(events, 'user_message')).toMatchObject({
+      content: '请 /reviewer 看看',
+      references,
+    })
+    const meta = api.host
+      .agentFor(id)
+      .session.events.find((event) => event.type === 'host/user-meta')
+    expect(meta?.data).toMatchObject({ references })
+  })
+
   it('runs context: fork skill commands as a scoped forked subagent', async () => {
     const root = tmp('emperor-core-api-fork-skill-')
     const stateRoot = join(root, 'home')

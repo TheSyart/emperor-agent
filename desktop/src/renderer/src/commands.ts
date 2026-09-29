@@ -130,6 +130,11 @@ export function rankSlashPaletteItems(
     .map((entry) => entry.item)
 }
 
+/** The name a skill item is referenced by (`/name`, the kernel's gesture). */
+export function skillIdOf(item: SlashPaletteItem): string {
+  return item.skillName || item.name.replace(/^\//, '')
+}
+
 export function isPathLikeSlashToken(token: string): boolean {
   const text = token.trim()
   if (!text.startsWith('/') || text === '/') return false

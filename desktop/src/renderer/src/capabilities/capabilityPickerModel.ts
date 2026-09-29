@@ -1,4 +1,4 @@
-import type { SlashPaletteItem } from '../commands'
+import { skillIdOf, type SlashPaletteItem } from '../commands'
 import { actionIcons, navIcon, toolIcon } from '../icons'
 import type { ToolInfo } from '../types'
 import type {
@@ -10,6 +10,12 @@ export interface CapabilityPickerModelInput {
   commands: SlashPaletteItem[]
   tools: ToolInfo[]
   mcpContent?: string
+  /**
+   * The rich composer: Skills insert chips and MCP servers are not offered
+   * (they cannot be referenced; plugins take that place in RF-03). Off: the
+   * old `@skill()` / `@mcp()` markers.
+   */
+  chips?: boolean
 }
 
 export function buildCapabilityPickerGroups(
@@ -19,10 +25,10 @@ export function buildCapabilityPickerGroups(
   const skillItems = input.commands
     .filter((item) => item.kind === 'skill')
     .slice(0, 8)
-    .map(skillPickerItem)
-  const mcpItems = mcpServerNames(input.tools, input.mcpContent).map(
-    mcpPickerItem,
-  )
+    .map(input.chips ? skillChipItem : skillPickerItem)
+  const mcpItems = input.chips
+    ? []
+    : mcpServerNames(input.tools, input.mcpContent).map(mcpPickerItem)
 
   return [
     {
@@ -89,6 +95,20 @@ function skillPickerItem(item: SlashPaletteItem): CapabilityPickerItem {
     description: item.description,
     meta: item.tags || 'Skill',
     completion: `@skill(${name})`,
+    icon: toolIcon('skill'),
+    tone: 'cyan',
+  }
+}
+
+/** A skill chip; also used by the composer's `/` lists. */
+export function skillChipItem(item: SlashPaletteItem): CapabilityPickerItem {
+  return {
+    id: item.id,
+    action: 'insert_reference',
+    label: item.title,
+    description: item.description,
+    meta: item.tags || 'Skill',
+    reference: { kind: 'skill', id: skillIdOf(item), label: item.title },
     icon: toolIcon('skill'),
     tone: 'cyan',
   }

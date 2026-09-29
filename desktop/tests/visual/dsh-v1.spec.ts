@@ -202,7 +202,7 @@ test('composer slash palette and plan chip', async ({ page }) => {
   await open(page, '/chat/build-ui?visualPlan=on&visualProgress=final')
   const card = page.locator('.composer-root .card')
   await expect(card.locator('.plan-chip')).toBeVisible()
-  await card.locator('textarea').fill('/')
+  await card.getByLabel('消息输入框').fill('/')
   await expect(page.locator('.composer-palette')).toBeVisible()
   await shot(page, 'composer-slash-plan')
 })
@@ -297,7 +297,9 @@ for (const theme of ['dark', 'light'] as const) {
     const workspace = page.locator('.workspace-col')
     const launcher = workspace.locator('.workspace-launcher')
     await expect(launcher).toBeVisible()
-    await expect(launcher.locator('.launcher-row')).toHaveCount(5)
+    // 审查 / 终端 / 文件 / 浏览器 (the 电脑 pane left for the conversation
+    // preview, CU-02).
+    await expect(launcher.locator('.launcher-row')).toHaveCount(4)
     await expect(
       launcher.locator('.launcher-row[data-pane="browser"]'),
     ).toBeEnabled()
@@ -305,7 +307,7 @@ for (const theme of ['dark', 'light'] as const) {
     const box = (await workspace.boundingBox())!
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(360)
     await shot(page, `workspace-launcher-${theme}`)
-    for (const pane of ['review', 'terminal', 'files', 'browser', 'desktop']) {
+    for (const pane of ['review', 'terminal', 'files', 'browser']) {
       const segment = workspace.locator(`.segments [data-pane="${pane}"]`)
       if (await segment.isDisabled()) continue
       await segment.click()

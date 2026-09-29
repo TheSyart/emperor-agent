@@ -453,6 +453,32 @@ describe('messages and notices', () => {
     expectConverges(log)
   })
 
+  it('keeps the chips of a message sent from the rich composer', () => {
+    const log = new LogBuilder()
+    const references = [
+      {
+        kind: 'skill' as const,
+        id: 'image-gen',
+        label: 'Image Gen',
+        start: 3,
+        end: 13,
+      },
+    ]
+    log.add('host/user-meta', {
+      messageId: 'u1',
+      displayContent: '请用 /image-gen 画猫',
+      references,
+    })
+    log.add('turn/start', { turn: 1 })
+    log.user('u1', '请用 /image-gen 画猫')
+    const { snapshot } = replay(log.events)
+    const user = [...snapshot.nodes.values()].find(
+      (node) => node.kind === 'user',
+    )
+    expect(user?.kind === 'user' && user.data.references).toEqual(references)
+    expectConverges(log)
+  })
+
   it('renders turn-level notices, goal rows, hooks and facts', () => {
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })

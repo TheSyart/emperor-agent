@@ -2,6 +2,12 @@
 import { createApp, nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Composer from './ComposerCard.vue'
+import {
+  composerView,
+  pressKey,
+  typeInto,
+  visibleText,
+} from './editor/editorTesting'
 
 let container: HTMLDivElement | null = null
 
@@ -29,20 +35,17 @@ describe('Composer single queue slot', () => {
       onError,
     }).mount(container)
 
-    const textarea = container.querySelector('textarea')!
-    textarea.value = 'second queued message'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    const view = composerView(container)
+    typeInto(view, 'second queued message')
     await nextTick()
-    textarea.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-    )
+    pressKey(view, 'Enter')
     await nextTick()
 
     expect(onSend).not.toHaveBeenCalled()
     expect(onError).toHaveBeenCalledWith(
       '已有一条消息排队，请先编辑、插入或删除后再发送。',
     )
-    expect(textarea.value).toBe('second queued message')
+    expect(visibleText(view)).toBe('second queued message')
   })
 
   it('restores text, capability display content and attachments after a Core race rejection', async () => {
@@ -79,9 +82,7 @@ describe('Composer single queue slot', () => {
     })
     await nextTick()
 
-    expect(
-      container.querySelector<HTMLTextAreaElement>('textarea')?.value,
-    ).toBe('继续处理 /agent-reach')
+    expect(visibleText(composerView(container))).toBe('继续处理 /agent-reach')
     expect(container.textContent).toContain('evidence.md')
   })
 
@@ -120,12 +121,11 @@ describe('Composer single queue slot', () => {
 
     const card = container.querySelector('.card')!
     const tray = card.querySelector('.composer-attachments-tray')!
-    const textarea = card.querySelector('textarea')!
+    const input = card.querySelector('.composer-editor')!
     expect(tray).not.toBeNull()
     expect(
       Boolean(
-        tray.compareDocumentPosition(textarea) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+        tray.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true)
   })

@@ -7,6 +7,8 @@ export type CapabilityPickerAction =
   | 'files'
   | 'insert_command'
   | 'insert_capability_token'
+  /** A skill or plugin chip (the rich composer). */
+  | 'insert_reference'
   | 'activate_plan'
   | 'activate_goal'
 
@@ -17,6 +19,8 @@ export interface CapabilityPickerItem {
   description: string
   meta?: string
   completion?: string
+  /** What `insert_reference` inserts. */
+  reference?: { kind: 'skill' | 'plugin'; id: string; label: string }
   icon: IconComponent
   tone?: CapabilityTone
 }

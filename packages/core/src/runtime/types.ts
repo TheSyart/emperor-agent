@@ -81,6 +81,14 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         event: 'user_message'
         content?: string
         message_id?: string
+        /** Skill / plugin chips in `content` (offsets into it). */
+        references?: Array<{
+          kind: 'skill' | 'plugin'
+          id: string
+          label: string
+          start: number
+          end: number
+        }>
         attachments?: RuntimeEventPayload[]
         scheduler?: RuntimeEventPayload
         ui_hidden?: boolean

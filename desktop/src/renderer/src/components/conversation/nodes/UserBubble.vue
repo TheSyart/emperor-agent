@@ -5,6 +5,9 @@
  * the bubble (image thumbnails / file chips); copy + edit-resend actions
  * and the send time sit below, revealed on hover.
  *
+ * Skill / plugin chips show as in the composer (ReferencedText); copying
+ * gives their `/name` text and editing puts them back as chips.
+ *
  * Props: node (user). Emits through chat context: editMessage(text).
  */
 import { computed } from 'vue'
@@ -14,6 +17,7 @@ import { DsPaperclip } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
 import { formatBytes } from '../chatFormat'
 import MessageIconActions from '../parts/MessageIconActions.vue'
+import ReferencedText from '../parts/ReferencedText.vue'
 
 const props = defineProps<{ node: UserChatNode }>()
 const { actions } = useChatContext()
@@ -84,7 +88,12 @@ const sourceLabel = computed(() => {
           }}</span>
         </span>
       </div>
-      <div v-if="node.data.text" class="user-bubble">{{ node.data.text }}</div>
+      <div v-if="node.data.text" class="user-bubble">
+        <ReferencedText
+          :text="node.data.text"
+          :references="node.data.references"
+        />
+      </div>
       <span v-if="sourceLabel" class="source">{{ sourceLabel }}</span>
     </div>
     <MessageIconActions

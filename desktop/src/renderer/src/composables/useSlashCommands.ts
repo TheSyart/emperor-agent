@@ -15,6 +15,7 @@ import type {
   ChatSendPayload,
   ControlPayload,
   GoalOperationResult,
+  MessageReference,
   PermissionPreset,
   RuntimeGoalView,
   SessionInfo,
@@ -98,6 +99,8 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       invocation.raw,
       invocation.descriptor,
       (normalized.attachments ?? []).map((attachment) => attachment.id),
+      // Chip offsets hold for the raw input only when it is the same text.
+      invocation.raw === normalized.content ? normalized.references : undefined,
     )
   }
 
@@ -105,6 +108,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     rawInput: string,
     knownDescriptor?: CommandDescriptor,
     attachments: string[] = [],
+    references?: MessageReference[],
   ): Promise<CommandInvocationResult | null> {
     const invocation = resolveSlashInvocation(
       rawInput,
@@ -123,6 +127,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         invocationId: createInvocationId(),
         invocationSource: 'desktop',
         attachments,
+        ...(references?.length ? { references } : {}),
       } as const
       const result = await core('commands.invoke', request)
       await projectInvocationResult(result)

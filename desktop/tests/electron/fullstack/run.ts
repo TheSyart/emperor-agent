@@ -195,7 +195,7 @@ async function statusBadge(page: Page): Promise<string> {
 }
 
 async function send(page: Page, text: string): Promise<void> {
-  const box = page.locator('.composer-root textarea').first()
+  const box = page.getByLabel('消息输入框').first()
   await box.click()
   await box.fill(text)
   await box.press('Enter')

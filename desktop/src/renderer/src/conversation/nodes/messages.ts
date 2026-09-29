@@ -43,6 +43,9 @@ export const userDefinition: ConversationDefinition<UserState> = {
       time: event.time,
       content: event.data.content,
       text: meta?.displayContent ?? contentText(event.data.content),
+      ...(meta?.displayContent !== undefined && meta.references?.length
+        ? { references: meta.references }
+        : {}),
       attachments: meta?.attachments ?? [],
       steering,
       ...(meta?.source === undefined ? {} : { source: meta.source }),

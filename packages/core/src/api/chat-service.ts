@@ -11,12 +11,19 @@ import { fallbackSessionTitle, sanitizeSessionTitle } from '../sessions/title'
 import type { SessionEntry } from '../sessions/store'
 import type { HarnessHost } from '../harness/host/host'
 import { isSkillName } from '../skills/name'
+import {
+  hasSkillGesture,
+  referencesFit,
+  type MessageReference,
+} from '../harness/host/message-references'
 
 export interface MainlineSubmitInput {
   content: string
   displayContent?: string | null
   attachmentIds?: string[] | null
   requestedSkills?: Array<{ name: string; source?: string }> | null
+  /** Chips in `content` (the rich composer); kept for the user's bubble. */
+  references?: MessageReference[] | null
   clientMessageId?: string | null
   sessionId?: string | null
   source?: string | null
@@ -76,6 +83,8 @@ export interface QueuedPromptRecord {
   uiHidden: boolean
   attachmentIds: string[]
   requestedSkills: Array<{ name: string; source?: string }>
+  /** Chips in `displayContent` (the rich composer). */
+  references?: MessageReference[]
   createdOrder: number
   supportsInterjection: boolean
   state: 'queued'
@@ -95,10 +104,18 @@ export class ChatService {
       `${source}.submit`,
     )
     const sessionId = materialized.session.id
+    // A skill chip already puts its gesture in the text; only skills asked
+    // for outside the text get one in front.
     const gestures = (input.requestedSkills ?? [])
       .map((skill) => String(skill.name ?? '').trim())
-      .filter((name) => isSkillName(name))
+      .filter((name) => isSkillName(name) && !hasSkillGesture(content, name))
       .map((name) => `/${name}`)
+    const displayContent = input.displayContent ?? content
+    const references =
+      input.references?.length &&
+      referencesFit(displayContent, input.references)
+        ? input.references
+        : null
     const modelContent =
       gestures.length > 0 ? `${gestures.join(' ')}\n${content}` : content
     let replyResolve: (reply: string) => void = () => {}
@@ -119,7 +136,8 @@ export class ChatService {
       const result = await this.host.submit({
         sessionId,
         content: modelContent,
-        displayContent: input.displayContent ?? content,
+        displayContent,
+        ...(references === null ? {} : { references }),
         clientMessageId: input.clientMessageId ?? null,
         attachmentIds: input.attachmentIds ?? null,
         source,
@@ -236,6 +254,9 @@ export class ChatService {
           .map((item) => String(item.id ?? ''))
           .filter(Boolean),
         requestedSkills: [],
+        ...(Array.isArray(meta.references) && meta.references.length > 0
+          ? { references: meta.references as MessageReference[] }
+          : {}),
         createdOrder: index,
         supportsInterjection: prompt.target === 'next-turn',
         state: 'queued',

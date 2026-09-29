@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { PERMISSION_PRESET_VALUES } from '../../commands/builtins'
 import type { CommandExecutionContext } from '../../commands/platform'
+import type { MessageReference } from '../../harness/host/message-references'
 import type { ParsedCommandInput } from '../../commands/parser'
 import type { SessionTransitionService } from '../../commands/session-transition'
 import type {
@@ -31,6 +32,8 @@ export interface CommandPromptSubmission {
   sessionId: string
   content: string
   displayContent: string
+  /** Chips in `displayContent` (kept for the user's bubble). */
+  references?: MessageReference[]
   clientMessageId: string
   delivery: 'queue'
   source: 'command'
@@ -355,6 +358,9 @@ export class CoreCommandApplicationService {
         sessionId: context.sessionId,
         content,
         displayContent,
+        ...(context.references && displayContent === context.parsed.raw
+          ? { references: context.references }
+          : {}),
         clientMessageId: promptId,
         delivery: 'queue',
         source: 'command',

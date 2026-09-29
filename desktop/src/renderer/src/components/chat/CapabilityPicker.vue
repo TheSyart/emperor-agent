@@ -8,7 +8,7 @@ const props = defineProps<{
   groups: CapabilityPickerGroup[]
   heading: string
   hint: string
-  mode: 'add' | 'slash'
+  mode: 'add' | 'slash' | 'mention'
   activeId?: string
 }>()
 
