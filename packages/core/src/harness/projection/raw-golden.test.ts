@@ -47,8 +47,17 @@ afterEach(async () => {
 })
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
-/** Wall-clock values replaced by 0 (event `time` is rewritten separately). */
-const VOLATILE_KEYS = new Set(['createdAt', 'durationMs', 'digest'])
+/**
+ * Values replaced by 0 (event `time` is rewritten separately): wall-clock
+ * values, and a token estimate taken over text that still holds the
+ * machine's temporary path, whose length differs between macOS and Linux.
+ */
+const VOLATILE_KEYS = new Set([
+  'createdAt',
+  'durationMs',
+  'digest',
+  'shadowedTokenCount',
+])
 /** Fixture clock: event `time` becomes BASE_TIME + seq * TIME_STEP. */
 const BASE_TIME = 1_700_000_000_000
 const TIME_STEP = 100

@@ -2263,7 +2263,7 @@
             58,
             62
           ],
-          "shadowedTokenCount": 415,
+          "shadowedTokenCount": 0,
           "provider": "test-route",
           "model": "test-model",
           "maxTokens": 8192,

@@ -3,7 +3,7 @@
 // the worker evals, exercised where main-process assertions can see them.
 import * as vm from 'node:vm'
 import { MessageChannel, type MessagePort } from 'node:worker_threads'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createJsonSchemaKit } from '../tools/json-schema'
 import { createRealmKit } from './realm'
 import { createExecutionKit } from './runtime'
@@ -221,8 +221,16 @@ describe('runWorkerSession over an in-process MessageChannel', () => {
   it('a child-failed message is fatal AGENT_RESULT with the paired failed outcome', async () => {
     const host = fakeHost({ manual: true })
     void runWorkerSession(host.port, init(`return await agent('x')`))
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const start = host.ofType('child-start')[0]!
+    // Wait for the start request itself: a fixed 10 ms was too short on a
+    // loaded CI runner.
+    const start = await vi.waitFor(
+      () => {
+        const message = host.ofType('child-start')[0]
+        if (!message) throw new Error('no child-start yet')
+        return message
+      },
+      { timeout: 5_000 },
+    )
     host.send({ type: 'child-started', callId: start.callId, childId: 'c' })
     host.send({
       type: 'child-failed',
