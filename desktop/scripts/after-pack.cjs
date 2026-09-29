@@ -218,10 +218,11 @@ function targetNodePtyFiles(root, platform, arch) {
       binding: join(root, 'prebuilds', `win32-${arch}`, 'pty.node'),
       helper: null,
     }
+  // node-pty builds spawn-helper for macOS only; Linux forks directly.
   if (platform === 'linux')
     return {
       binding: join(root, 'build', 'Release', 'pty.node'),
-      helper: join(root, 'build', 'Release', 'spawn-helper'),
+      helper: null,
     }
   throw new Error(`unsupported node-pty package target: ${platform}-${arch}`)
 }

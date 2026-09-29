@@ -183,9 +183,10 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       binding: path.join('/native', 'prebuilds', 'win32-x64', 'pty.node'),
       helper: null,
     })
+    // node-pty builds spawn-helper for macOS only.
     expect(hook.targetNodePtyFiles('/native', 'linux', 'x64')).toEqual({
       binding: path.join('/native', 'build', 'Release', 'pty.node'),
-      helper: path.join('/native', 'build', 'Release', 'spawn-helper'),
+      helper: null,
     })
   })
 
