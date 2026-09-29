@@ -427,6 +427,49 @@ describe('MacosDesktopDriver', () => {
     ).toBe(false)
   })
 
+  it('releases a window at the end of a task, surfacing a helper that does not answer', async () => {
+    const k = fixture()
+    const signal = new AbortController().signal
+    await bound(k, signal)
+    await k.driver.release('t-1')
+    expect(k.request).toHaveBeenCalledWith(
+      'target.release',
+      { targetId: 't-1' },
+      expect.objectContaining({ deadlineMs: 2_000 }),
+    )
+    expect(k.driver.snapshot('t-1')).toBeNull()
+
+    await bound(k, signal)
+    const original = k.request.getMockImplementation()!
+    k.request.mockImplementation(async (method, params) => {
+      if (method !== 'target.release') return original(method, params)
+      throw new Error('deadline exceeded')
+    })
+    await expect(k.driver.release('t-1')).rejects.toThrow('deadline exceeded')
+    // Already gone in the helper: that is released too.
+    await bound(k, signal)
+    k.request.mockImplementation(async (method, params) => {
+      if (method !== 'target.release') return original(method, params)
+      throw new UiError('STALE_TARGET', 'Target no longer exists')
+    })
+    await expect(k.driver.release('t-1')).resolves.toBeUndefined()
+  })
+
+  it('resets the helper connection when a window cannot be released', async () => {
+    const k = fixture()
+    const signal = new AbortController().signal
+    await bound(k, signal)
+    const events: unknown[] = []
+    k.driver.subscribe((event) => events.push(event))
+    await k.driver.resetConnection('release failed')
+    expect(k.client.close).toHaveBeenCalled()
+    expect(events).toEqual([
+      { type: 'lost', targetId: 't-1', reason: 'release failed' },
+    ])
+    // The next use starts the helper again.
+    await k.driver.listWindows({}, signal)
+  })
+
   it('rejects stale generation before contacting the helper', async () => {
     const k = fixture()
     await bound(k)

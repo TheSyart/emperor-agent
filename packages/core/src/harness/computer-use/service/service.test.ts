@@ -410,7 +410,7 @@ describe('ComputerUseService', () => {
     expect(k.service.lookup(other, record.targetId)).toBeUndefined()
   })
 
-  it('emergency stop cancels, pauses, suspends and dismisses cards; resume restores', async () => {
+  it('emergency stop cancels, releases every task, suspends and dismisses cards', async () => {
     const k = setup()
     const { record, ref } = await openForm(k)
     k.port.browser.faults = { hangAfterDispatch: true }
@@ -422,19 +422,22 @@ describe('ComputerUseService', () => {
     await expectUiError(inflight, 'OUTCOME_UNKNOWN')
     expect(k.cancelled).toEqual([undefined])
     expect(k.grants.suspended?.by).toBe('kill-switch')
-    expect(k.service.listTargets()[0]!.control).toBe('stopped')
+    // Released like at a task's end (§3.3): the page stays, nothing is shown.
+    expect(k.service.listTargets()).toEqual([])
+    expect(k.port.browser.list()).toHaveLength(1)
     expect(k.port.indicator.at(-1)).toMatchObject({
       stopped: true,
       active: false,
     })
     await expectUiError(
       k.service.observe(ctx(), { targetId: record.targetId }),
-      'PERMISSION_DENIED',
-      'emergency-stop',
+      'STALE_TARGET',
+      'released-at-task-end',
     )
     k.service.resume()
     expect(k.grants.suspended).toBeNull()
-    expect(k.service.listTargets()[0]!.control).toBe('agent')
+    // The next task takes the tab back and observes it anew.
+    await k.service.select(who(), record.targetId)
     await k.service.observe(ctx(), {})
   })
 
@@ -511,15 +514,16 @@ describe('ComputerUseService', () => {
     await k.service.emergencyStop()
     await expectUiError(inflight, 'OUTCOME_UNKNOWN')
     expect(setPaused).toHaveBeenCalledWith(snapshot.targetId, true)
-    expect(releaseAll).toHaveBeenCalledOnce()
+    expect(releaseAll).toHaveBeenCalled()
     expect(abortedAtRelease).toBe(true)
+    // Released too: the window has to be bound again (after a resume).
     await expectUiError(
       k.service.act(ctx(), {
         targetId: snapshot.targetId,
         action: { kind: 'press', key: 'A' },
       }),
-      'PERMISSION_DENIED',
-      'emergency-stop',
+      'STALE_TARGET',
+      'released-at-task-end',
     )
   })
 
@@ -557,15 +561,17 @@ describe('ComputerUseService', () => {
     expect(k.service.listTargets()[0]!.control).toBe('agent')
   })
 
-  it('keeps a stopped target stopped when the window comes back', async () => {
+  it('keeps a target the emergency stop released released when the window comes back', async () => {
     const k = setup()
     await openForm(k)
     k.service.pauseForUiDisconnect()
     await k.service.emergencyStop()
-    k.service.resumeAfterUiReconnect()
-    expect(k.service.listTargets()[0]!.control).toBe('stopped')
+    expect(k.service.resumeAfterUiReconnect()).toBe(0)
     k.service.resume()
-    expect(k.service.listTargets()[0]!.control).toBe('agent')
+    expect(k.service.listTargets()).toEqual([])
+    expect(k.service.listTabs('s1').map((tab) => tab.state)).toEqual([
+      'released',
+    ])
   })
 
   it('offers no user takeover: the Agent keeps control of its targets', () => {
@@ -809,7 +815,7 @@ describe('ComputerUseService', () => {
     k.grants.issue({ ...base, scope: 'task', taskId: 's1:1' })
     k.grants.issue({ ...base, scope: 'once', callId: 'c' })
     k.grants.issue({ ...base, scope: 'session' })
-    k.service.endTask('s1')
+    await k.service.releaseTask('s1', 'task-end')
     expect(k.grants.list().map((grant) => grant.scope)).toEqual(['session'])
     await openForm(k)
     await k.service.onSessionDeleted('s1')

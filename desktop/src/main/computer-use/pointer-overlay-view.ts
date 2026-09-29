@@ -66,13 +66,17 @@ interface PointerStatus {
   }[]
 }
 
-/** The pointer shows only while the Agent controls a desktop window. */
+/**
+ * The pointer shows only while the Agent controls a desktop window (one the
+ * end of its task released is not controlled, even if releasing failed).
+ */
 export function pointerAllowed(status: PointerStatus | null): boolean {
   if (!status?.enabled || status.stopped) return false
   return status.targets.some(
     (target) =>
       target.driver === 'desktop' &&
       target.control === 'agent' &&
+      target.state !== 'released' &&
       target.state !== 'closed' &&
       target.state !== 'lost',
   )

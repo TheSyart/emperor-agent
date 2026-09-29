@@ -10,6 +10,8 @@
  *   only have tool screenshots. Blocked targets never show a picture.
  * - After the user's "Stop Sharing" a window keeps its last frame, marked as
  *   stopped; the Agent carries on working on it.
+ * - When the task ends, Core releases every target and the whole group goes
+ *   (2026-09-29 §3.3). A target whose release failed stays, saying so.
  */
 import type { UiTargetView } from '@emperor/core/runtime-contract'
 
@@ -28,7 +30,10 @@ function activity(target: UiTargetView): string {
   return target.lastActiveAt ?? target.openedAt
 }
 
-/** This session's live targets, the Agent's latest operation first. */
+/**
+ * This session's live targets (and any whose release failed), the Agent's
+ * latest operation first.
+ */
 export function previewTargetsFor(
   targets: readonly UiTargetView[] | undefined,
   sessionId: string | null | undefined,
@@ -37,7 +42,8 @@ export function previewTargetsFor(
   return targets
     .filter(
       (target) =>
-        target.ownerSessionId === sessionId && LIVE_STATES.has(target.state),
+        target.ownerSessionId === sessionId &&
+        (LIVE_STATES.has(target.state) || releaseFailed(target)),
     )
     .sort(
       (a, b) =>
@@ -79,10 +85,15 @@ export function stackOrder(
   return [picked, ...targets.filter((target) => target !== picked)]
 }
 
+function releaseFailed(target: UiTargetView): boolean {
+  return target.state === 'released' && target.releaseFailed !== undefined
+}
+
 function streamable(target: UiTargetView): boolean {
   return (
     (target.driver === 'desktop' || target.driver === 'embedded-browser') &&
     target.control === 'agent' &&
+    LIVE_STATES.has(target.state) &&
     target.state !== 'recovering' &&
     target.previewBlocked === undefined &&
     target.sharingStopped !== true
@@ -110,6 +121,7 @@ export function previewStatus(
   target: UiTargetView,
   options: { readonly stopped: boolean; readonly awaiting: boolean },
 ): { label: string; tone: PreviewTone } {
+  if (releaseFailed(target)) return { label: '释放失败', tone: 'lost' }
   if (options.stopped || target.control === 'stopped')
     return { label: '已急停', tone: 'stopped' }
   if (target.state === 'recovering') return { label: '失联', tone: 'lost' }

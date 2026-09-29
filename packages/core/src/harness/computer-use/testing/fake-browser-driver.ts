@@ -235,6 +235,19 @@ export class FakeBrowserDriver implements BrowserDriver {
     if (target !== undefined) target.closed = true
   }
 
+  /** Targets whose task ended (their pages stay open). */
+  readonly released: string[] = []
+
+  /** The task ended: refs go stale, the page stays (2026-09-29 §3.3). */
+  async release(targetId: string): Promise<void> {
+    const target = this.targets.get(targetId)
+    if (target === undefined || target.closed) return
+    this.released.push(targetId)
+    target.refs.clear()
+    target.snapshots.clear()
+    target.revision += 1
+  }
+
   readonly downloads: DownloadRecord[] = []
 
   async download(

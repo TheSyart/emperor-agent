@@ -389,6 +389,19 @@ export class ExternalBrowserDriver implements BrowserDriver {
     return tab
   }
 
+  /**
+   * The task ended (2026-09-29 §3.3): the tab stays attached in the
+   * extension and paired; only this task's claim ends, so the next task can
+   * attach it again without the user connecting it anew. Its refs go stale.
+   */
+  async release(targetId: string): Promise<void> {
+    const tab = this.tabs.get(targetId)
+    if (!tab) return
+    tab.claimedBy = null
+    tab.elements.clear()
+    tab.revision += 1
+  }
+
   async close(targetId: string, _reason: TargetCloseReason): Promise<void> {
     const tab = this.tabs.get(targetId)
     if (!tab) return

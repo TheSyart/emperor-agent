@@ -823,9 +823,11 @@ describe('desktop_* tools', () => {
     await k.run('desktop_bind', { windowRef: 'window-1' })
     k.service.pauseForUiDisconnect()
     k.service.resumeAfterUiReconnect()
+    // The emergency stop turns the picture off and releases the window (its
+    // release turns it off once more); a resume binds nothing again.
     await k.service.emergencyStop()
     k.service.resume()
-    expect(k.captures).toEqual([true, false, true, false, true])
+    expect(k.captures).toEqual([true, false, true, false, false])
 
     const sensitive = kit(false, true, true)
     sensitive.markSensitive('com.example.Writer')
@@ -851,15 +853,20 @@ describe('desktop_* tools', () => {
       control: 'agent',
       sharingStopped: true,
     })
-    // Stopping and resuming does not start the picture again this binding.
-    await k.service.emergencyStop()
-    k.service.resume()
-    expect(k.captures.filter(Boolean)).toEqual([true])
     const observed = await k.run('desktop_observe', {
       targetId: 'desktop-target-1',
     })
     expect(observed.denied).toBeUndefined()
     expect(JSON.stringify(observed)).toContain('stopped screen sharing')
+    // The picture never comes back for this binding; the emergency stop
+    // then releases the window like a task's end.
+    await k.service.emergencyStop()
+    k.service.resume()
+    expect(k.captures.filter(Boolean)).toEqual([true])
+    const stale = await k.run('desktop_observe', {
+      targetId: 'desktop-target-1',
+    })
+    expect(JSON.stringify(stale)).toContain('released-at-task-end')
   })
 
   it('lists the bound app menu as untrusted content without dispatching anything', async () => {
@@ -939,7 +946,7 @@ describe('desktop_* tools', () => {
     // Any action may bring the window forward when it needs to.
     await k.run('desktop_press', { targetId: 'desktop-target-1', key: 'Tab' })
     expect(k.bringForward).toEqual([false, true])
-    k.service.endTask(owner)
+    await k.service.releaseTask(owner, 'task-end')
     expect(k.restored).toEqual(['desktop-target-1'])
   })
 

@@ -48,6 +48,10 @@ export interface TargetRecord {
   control: ControlState
   /** Control state before an emergency stop, restored on resume. */
   controlBeforeStop?: ControlState
+  /** The task's end is releasing it: no new action starts (§3.3). */
+  releasing?: true
+  /** Released, but giving up control failed: why (no action runs on it). */
+  releaseError?: string
   title: string
   url: string
   /** Recent screenshots, newest last (bounded). */
@@ -60,6 +64,26 @@ export interface TargetRecord {
 }
 
 const SCREENSHOTS_KEPT = 8
+
+/** Neither released, closed nor lost: the Agent may act on it. */
+export function isLive(record: TargetRecord): boolean {
+  return (
+    record.state !== 'released' &&
+    record.state !== 'closed' &&
+    record.state !== 'lost'
+  )
+}
+
+/**
+ * Still holds something of ours: a live target, or a released built-in
+ * browser tab (its page stays open for the next task to take back).
+ */
+export function isHeld(record: TargetRecord): boolean {
+  return (
+    isLive(record) ||
+    (record.state === 'released' && record.driver === 'embedded-browser')
+  )
+}
 
 export class TargetRegistry {
   private readonly targets = new Map<string, TargetRecord>()
@@ -100,31 +124,53 @@ export class TargetRegistry {
     return this.targets.get(targetId)
   }
 
-  /** Live (not closed / lost) targets, optionally of one owner. */
+  /** Live targets (see `isLive`), optionally of one owner. */
   live(ownerSessionId?: string): TargetRecord[] {
+    return this.filter(isLive, ownerSessionId)
+  }
+
+  /** Live targets and released built-in tabs (see `isHeld`). */
+  held(ownerSessionId?: string): TargetRecord[] {
+    return this.filter(isHeld, ownerSessionId)
+  }
+
+  /** Released targets, optionally of one owner. */
+  released(ownerSessionId?: string): TargetRecord[] {
+    return this.filter((record) => record.state === 'released', ownerSessionId)
+  }
+
+  private filter(
+    keep: (record: TargetRecord) => boolean,
+    ownerSessionId: string | undefined,
+  ): TargetRecord[] {
     return [...this.targets.values()].filter(
       (record) =>
-        record.state !== 'closed' &&
-        record.state !== 'lost' &&
+        keep(record) &&
         (ownerSessionId === undefined ||
           record.ownerSessionId === ownerSessionId),
     )
   }
 
+  /**
+   * The owner's current target, or its latest live one. With nothing live
+   * the pointer stays on a released target, so a call without a targetId
+   * can say why it is gone (`lastCurrent`).
+   */
   currentFor(ownerSessionId: string): TargetRecord | undefined {
     const id = this.current.get(ownerSessionId)
     const record = id === undefined ? undefined : this.targets.get(id)
-    if (
-      record === undefined ||
-      record.state === 'closed' ||
-      record.state === 'lost'
-    ) {
-      const fallback = this.live(ownerSessionId).at(-1)
-      if (fallback === undefined) this.current.delete(ownerSessionId)
-      else this.current.set(ownerSessionId, fallback.targetId)
-      return fallback
-    }
-    return record
+    if (record !== undefined && isLive(record)) return record
+    const fallback = this.live(ownerSessionId).at(-1)
+    if (fallback !== undefined)
+      this.current.set(ownerSessionId, fallback.targetId)
+    else if (record?.state !== 'released') this.current.delete(ownerSessionId)
+    return fallback
+  }
+
+  /** Where the owner's current pointer is, whatever its state. */
+  lastCurrent(ownerSessionId: string): TargetRecord | undefined {
+    const id = this.current.get(ownerSessionId)
+    return id === undefined ? undefined : this.targets.get(id)
   }
 
   select(ownerSessionId: string, targetId: string): void {
@@ -136,18 +182,35 @@ export class TargetRegistry {
     const record = this.targets.get(targetId)
     if (record === undefined) return undefined
     record.state = state
+    record.releasing = undefined
     if (this.current.get(record.ownerSessionId) === targetId)
       this.current.delete(record.ownerSessionId)
     return record
   }
 
-  /** Drop terminal records (bounded memory). */
+  /**
+   * The task ended (§3.3): the handle goes stale, the current pointer stays
+   * (see `currentFor`). `error`: giving up control failed.
+   */
+  release(targetId: string, error?: string): TargetRecord | undefined {
+    const record = this.targets.get(targetId)
+    if (record === undefined || !isLive(record)) return undefined
+    record.state = 'released'
+    record.releasing = undefined
+    record.elements.clear()
+    if (error === undefined) delete record.releaseError
+    else record.releaseError = error
+    return record
+  }
+
+  /** Drop records that hold nothing any more (bounded memory). */
   prune(keep = 64): void {
-    const ended = [...this.targets.values()].filter(
-      (record) => record.state === 'closed' || record.state === 'lost',
-    )
-    for (const record of ended.slice(0, Math.max(0, ended.length - keep)))
+    const ended = [...this.targets.values()].filter((record) => !isHeld(record))
+    for (const record of ended.slice(0, Math.max(0, ended.length - keep))) {
       this.targets.delete(record.targetId)
+      if (this.current.get(record.ownerSessionId) === record.targetId)
+        this.current.delete(record.ownerSessionId)
+    }
   }
 
   addScreenshot(record: TargetRecord, shot: ScreenshotRecord): void {
@@ -213,6 +276,9 @@ export function targetView(
     lastActiveAt: record.lastActiveAt,
     ...(blocked === undefined ? {} : { previewBlocked: blocked }),
     ...(record.sharingStopped === true ? { sharingStopped: true } : {}),
+    ...(record.state === 'released' && record.releaseError !== undefined
+      ? { releaseFailed: record.releaseError }
+      : {}),
     ...(shot === undefined
       ? {}
       : {

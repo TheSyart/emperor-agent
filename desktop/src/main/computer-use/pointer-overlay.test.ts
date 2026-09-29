@@ -112,6 +112,7 @@ describe('pointer overlay view', () => {
       { ...target, control: 'user-takeover' },
       { ...target, control: 'paused' },
       { ...target, state: 'lost' },
+      { ...target, state: 'released' },
       { ...target, driver: 'embedded-browser' },
     ])
       expect(pointerAllowed({ ...status, targets: [other] })).toBe(false)

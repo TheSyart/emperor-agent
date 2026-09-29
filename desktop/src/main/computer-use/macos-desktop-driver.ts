@@ -575,6 +575,38 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
         .catch(() => undefined)
   }
 
+  /**
+   * The task ended (2026-09-29 §3.3): unbind the window, which stays open;
+   * the helper stops its capture stream with it. Unlike `close`, a helper
+   * that does not answer fails the release, so the kernel can reset the
+   * connection. A window the helper no longer knows is released already.
+   */
+  async release(targetId: string): Promise<void> {
+    this.targets.delete(targetId)
+    this.paused.delete(targetId)
+    this.sensitive.delete(targetId)
+    if (!this.client) return
+    try {
+      await this.client.request(
+        'target.release',
+        { targetId },
+        { deadlineMs: 2_000 },
+      )
+    } catch (error) {
+      if (error instanceof UiError && error.code === 'STALE_TARGET') return
+      throw error
+    }
+  }
+
+  /**
+   * A window could not be released: drop the helper, which quits and takes
+   * every capture stream with it. Its targets are lost; the next use starts
+   * it again.
+   */
+  async resetConnection(reason: string): Promise<void> {
+    await this.closeIntentionally(reason)
+  }
+
   private live(targetId: string, generation: number): TargetSnapshot {
     const target = this.targets.get(targetId)
     if (!target || target.generation !== generation)

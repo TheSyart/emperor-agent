@@ -307,9 +307,19 @@ export type WaitCondition =
       readonly state: 'present' | 'absent'
     }
 
-/** Target lifecycle (§5.7). `closed` and `lost` are terminal. */
+/**
+ * Target lifecycle (§5.7). `closed` and `lost` are terminal. `released`: the
+ * task that controlled it ended (2026-09-29 §3.3); the window, tab or page
+ * stays, the handle is stale until the next task takes it again.
+ */
 export type TargetState =
-  'created' | 'attached' | 'paused' | 'recovering' | 'closed' | 'lost'
+  | 'created'
+  | 'attached'
+  | 'paused'
+  | 'recovering'
+  | 'released'
+  | 'closed'
+  | 'lost'
 
 /** Who is steering a target right now (§6.6). */
 /**
@@ -439,6 +449,11 @@ export interface UiTargetView {
    * on it, the conversation shows its last picture marked as stopped.
    */
   readonly sharingStopped?: boolean
+  /**
+   * Releasing it at the end of the task failed (state `released`): why. No
+   * new action runs on it; the preview says so instead of vanishing.
+   */
+  readonly releaseFailed?: string
   readonly lastScreenshot?: {
     readonly attachmentId: string
     readonly width: number

@@ -16,7 +16,11 @@
 import type { Session } from '../../../session-log/session'
 import type { SessionEventMap } from '../../../session-log/types'
 import { asUiError, UiError } from '../errors'
-import { redactAction, type TargetClosedReason } from '../events'
+import {
+  redactAction,
+  type TargetClosedReason,
+  type TaskReleaseReason,
+} from '../events'
 import type { GrantStore } from '../grants/store'
 import { grantCovers, normalizeOrigin } from '../grants/match'
 import type { UiCallerIdentity } from '../identity'
@@ -78,6 +82,7 @@ import { KeyedMutex } from './mutex'
 import { highRiskMacApp, protectedMacApp } from '../protected-apps'
 import {
   TargetRegistry,
+  isLive,
   targetOrigin,
   targetRef,
   targetView,
@@ -215,6 +220,20 @@ export const COMPUTER_USE_BUDGET = {
   downloadTimeoutMs: 110_000,
 } as const
 
+/** What the end of a task released (2026-09-29 §3.3). */
+export interface TaskReleaseSummary {
+  readonly released: readonly string[]
+  readonly failed: readonly {
+    readonly targetId: string
+    readonly error: string
+  }[]
+}
+
+/** How long the release waits for one driver step (it never hangs a task). */
+const RELEASE_STEP_MS = 10_000
+/** How long the release waits for an aborted action to leave its target. */
+const RELEASE_DRAIN_MS = 5_000
+
 export interface CredentialFillResult {
   readonly target: TargetRecord
   readonly operationId: string
@@ -291,6 +310,8 @@ export class ComputerUseService {
   >()
   private readonly subscribed = new Set<TargetDriver>()
   private readonly unsubscribers: Array<() => void> = []
+  /** Task releases in progress, by owner (a second call joins the first). */
+  private readonly releases = new Map<string, Promise<TaskReleaseSummary>>()
   private stoppedAt: string | undefined
   private closed = false
 
@@ -678,13 +699,54 @@ export class ComputerUseService {
         : this.registry.get(targetId)
     if (record === undefined) return undefined
     if (record.ownerSessionId !== identity.ownerSessionId) return undefined
-    if (record.state === 'closed' || record.state === 'lost') return undefined
+    if (!isLive(record) || record.releasing === true) return undefined
     return record
+  }
+
+  /**
+   * A target of this owner that the end of an earlier task released (or is
+   * releasing): its handle is stale. Without a targetId: the current one.
+   */
+  releasedTarget(
+    identity: UiCallerIdentity,
+    targetId?: string,
+  ): TargetRecord | undefined {
+    const record =
+      targetId === undefined
+        ? this.registry.lastCurrent(identity.ownerSessionId)
+        : this.registry.get(targetId)
+    if (record?.ownerSessionId !== identity.ownerSessionId) return undefined
+    return record.state === 'released' || record.releasing === true
+      ? record
+      : undefined
+  }
+
+  /**
+   * The error for a released handle: it says what to call to get the window
+   * or tab again, and never that it was closed (it was not).
+   */
+  releasedError(record: TargetRecord): UiError {
+    const what = record.driver === 'desktop' ? 'window' : 'tab'
+    return new UiError(
+      'STALE_TARGET',
+      `this ${what} was released when the last task ended; it is still open`,
+      {
+        reason: 'released-at-task-end',
+        hint:
+          record.driver === 'desktop'
+            ? 'Call desktop_list_windows, then desktop_bind the window again.'
+            : record.driver === 'external-browser'
+              ? 'Call external_tab_list, then external_tab_attach the tab again.'
+              : 'Call browser_tab_list, then browser_tab_select the tab to take it back.',
+      },
+    )
   }
 
   private resolve(identity: UiCallerIdentity, targetId?: string): TargetRecord {
     const record = this.lookup(identity, targetId)
     if (record !== undefined) return record
+    const released = this.releasedTarget(identity, targetId)
+    if (released !== undefined) throw this.releasedError(released)
     throw new UiError(
       'INVALID_REQUEST',
       targetId === undefined
@@ -725,13 +787,36 @@ export class ComputerUseService {
     }
   }
 
+  /** Live targets, and released ones whose release failed (they say so). */
   listTargets(ownerSessionId?: string): UiTargetView[] {
-    return this.registry.live(ownerSessionId).map((record) =>
-      targetView(record, {
-        sensitiveApp:
-          record.appId !== undefined && this.isSensitiveApp(record.appId),
-      }),
-    )
+    return this.registry
+      .all()
+      .filter(
+        (record) =>
+          (ownerSessionId === undefined ||
+            record.ownerSessionId === ownerSessionId) &&
+          (isLive(record) ||
+            (record.state === 'released' && record.releaseError !== undefined)),
+      )
+      .map((record) => this.view(record))
+  }
+
+  /**
+   * The browser tabs of this owner: live ones, and built-in tabs released at
+   * the end of an earlier task (browser_tab_select takes one back).
+   */
+  listTabs(ownerSessionId: string): UiTargetView[] {
+    return this.registry
+      .held(ownerSessionId)
+      .filter((record) => record.driver !== 'desktop')
+      .map((record) => this.view(record))
+  }
+
+  private view(record: TargetRecord): UiTargetView {
+    return targetView(record, {
+      sensitiveApp:
+        record.appId !== undefined && this.isSensitiveApp(record.appId),
+    })
   }
 
   /**
@@ -755,10 +840,106 @@ export class ComputerUseService {
       this.changed('targets', record.ownerSessionId)
   }
 
-  select(identity: UiCallerIdentity, targetId: string): TargetRecord {
+  /**
+   * Make one of the owner's tabs current. A built-in tab released at the end
+   * of an earlier task is taken back: refs from before are stale (observe it
+   * again). A released window or external tab is bound or attached anew.
+   */
+  async select(
+    identity: UiCallerIdentity,
+    targetId: string,
+  ): Promise<TargetRecord> {
+    await this.releases.get(identity.ownerSessionId)
+    const released = this.releasedTarget(identity, targetId)
+    if (released !== undefined) return this.takeBack(identity, released)
     const record = this.resolve(identity, targetId)
     this.registry.select(identity.ownerSessionId, targetId)
     return record
+  }
+
+  private takeBack(
+    identity: UiCallerIdentity,
+    record: TargetRecord,
+  ): TargetRecord {
+    if (record.driver !== 'embedded-browser' || record.releasing === true)
+      throw this.releasedError(record)
+    if (this.stopped)
+      throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
+        reason: 'emergency-stop',
+      })
+    const snapshot = this.browserDriver('embedded-browser').snapshot(
+      record.targetId,
+    )
+    if (snapshot === null) {
+      this.registry.end(record.targetId, 'lost')
+      this.changed('targets', record.ownerSessionId)
+      throw new UiError('STALE_TARGET', 'the tab is gone', {
+        hint: 'Call browser_tab_list, or open a new tab.',
+      })
+    }
+    record.generation = snapshot.generation
+    record.revision = snapshot.revision
+    record.url = snapshot.url
+    record.title = snapshot.title
+    record.state = 'attached'
+    record.control = 'agent'
+    delete record.releaseError
+    record.lastActiveAt = this.now().toISOString()
+    this.registry.select(record.ownerSessionId, record.targetId)
+    this.lastIdentity.set(record.ownerSessionId, identity)
+    const origin = targetOrigin(record)
+    this.append(record.ownerSessionId, 'ui/target-opened', {
+      targetId: record.targetId,
+      kind: record.kind,
+      driver: record.driver,
+      generation: record.generation,
+      profileId: record.profileId,
+      ...(record.title === '' ? {} : { title: record.title.slice(0, 200) }),
+      ...(origin === null ? {} : { origin }),
+    })
+    this.append(record.ownerSessionId, 'ui/control-state', {
+      targetId: record.targetId,
+      state: 'agent',
+    })
+    this.changed('targets', record.ownerSessionId)
+    return record
+  }
+
+  /**
+   * Budget room for one more target: released built-in tabs count (their
+   * pages are open), so the oldest go first when a new target needs room.
+   */
+  private makeRoom(ownerSessionId: string): void {
+    const over = (): boolean =>
+      this.registry.held(ownerSessionId).length >=
+        COMPUTER_USE_BUDGET.targetsPerSession ||
+      this.registry.held().length >= COMPUTER_USE_BUDGET.targetsTotal
+    while (over()) {
+      const mine =
+        this.registry.held(ownerSessionId).length >=
+        COMPUTER_USE_BUDGET.targetsPerSession
+      const victim = this.registry
+        .released(mine ? ownerSessionId : undefined)
+        .filter((record) => record.driver === 'embedded-browser')
+        .sort((a, b) => a.lastActiveAt.localeCompare(b.lastActiveAt))[0]
+      if (victim === undefined) return
+      // Ends the record at once; the page closes behind it.
+      void this.closeTarget(victim, 'agent')
+    }
+  }
+
+  private assertRoom(ownerSessionId: string, message: string): void {
+    this.makeRoom(ownerSessionId)
+    if (
+      this.registry.held(ownerSessionId).length >=
+      COMPUTER_USE_BUDGET.targetsPerSession
+    )
+      throw new UiError(
+        'BUDGET_EXCEEDED',
+        `${message} in this session; close one first`,
+      )
+    if (this.registry.held().length >= COMPUTER_USE_BUDGET.targetsTotal)
+      throw new UiError('BUDGET_EXCEEDED', `${message}; close one first`)
   }
 
   // -------------------------------------------------------------------------
@@ -956,12 +1137,8 @@ export class ComputerUseService {
       ctx.ticket.requirement.windowRef !== windowRef
     )
       throw new UiError('PERMISSION_DENIED', 'window authorization changed')
-    if (
-      this.registry.live(ctx.identity.ownerSessionId).length >=
-        COMPUTER_USE_BUDGET.targetsPerSession ||
-      this.registry.live().length >= COMPUTER_USE_BUDGET.targetsTotal
-    )
-      throw new UiError('BUDGET_EXCEEDED', 'too many open targets')
+    await this.releases.get(ctx.identity.ownerSessionId)
+    this.assertRoom(ctx.identity.ownerSessionId, 'too many open targets')
     this.chargeBudget(ctx.identity)
     this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
     const op = this.prepare(
@@ -1039,12 +1216,8 @@ export class ComputerUseService {
         'external browser attachment is unavailable',
       )
     this.revalidate(ctx, undefined)
-    if (
-      this.registry.live(ctx.identity.ownerSessionId).length >=
-        COMPUTER_USE_BUDGET.targetsPerSession ||
-      this.registry.live().length >= COMPUTER_USE_BUDGET.targetsTotal
-    )
-      throw new UiError('BUDGET_EXCEEDED', 'too many open targets')
+    await this.releases.get(ctx.identity.ownerSessionId)
+    this.assertRoom(ctx.identity.ownerSessionId, 'too many open targets')
     this.chargeBudget(ctx.identity)
     this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
     const op = this.prepare(
@@ -1126,17 +1299,8 @@ export class ComputerUseService {
         'INVALID_REQUEST',
         `there is no browser profile ${profile.profileId}; call browser_profile_list`,
       )
-    const owned = this.registry.live(ctx.identity.ownerSessionId).length
-    if (owned >= COMPUTER_USE_BUDGET.targetsPerSession)
-      throw new UiError(
-        'BUDGET_EXCEEDED',
-        'too many open targets in this session; close one first',
-      )
-    if (this.registry.live().length >= COMPUTER_USE_BUDGET.targetsTotal)
-      throw new UiError(
-        'BUDGET_EXCEEDED',
-        'too many open targets; close one first',
-      )
+    await this.releases.get(ctx.identity.ownerSessionId)
+    this.assertRoom(ctx.identity.ownerSessionId, 'too many open targets')
     this.chargeBudget(ctx.identity)
     this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
     const op = this.prepare(ctx, 'new', { kind: 'open', url: input.url }, 0)
@@ -2026,7 +2190,13 @@ export class ComputerUseService {
     ctx: OpContext,
     input: { targetId?: string },
   ): Promise<TargetRecord> {
-    const record = this.resolve(ctx.identity, input.targetId)
+    // A built-in tab released at the end of an earlier task still has its
+    // page: the Agent may close it without taking it back first.
+    const released = this.releasedTarget(ctx.identity, input.targetId)
+    const record =
+      released?.driver === 'embedded-browser' && released.releasing !== true
+        ? released
+        : this.resolve(ctx.identity, input.targetId)
     await this.closeTarget(record, 'agent')
     return record
   }
@@ -2037,20 +2207,16 @@ export class ComputerUseService {
     reason: TargetClosedReason,
   ): Promise<void> {
     if (record.state === 'closed' || record.state === 'lost') return
+    // A released window or external tab holds nothing of ours any more:
+    // closing it must not unbind or detach what the user still has.
+    const holding = isLive(record) || record.driver === 'embedded-browser'
     this.registry.end(record.targetId, 'closed')
-    try {
-      const port = this.deps.port
-      const driver =
-        port === null
-          ? null
-          : record.driver === 'embedded-browser'
-            ? port.embeddedBrowser()
-            : record.driver === 'external-browser'
-              ? port.externalBrowser()
-              : port.desktop()
-      await driver?.close(record.targetId, reason)
-    } catch {
-      // the target is closed from the kernel's point of view either way
+    if (holding) {
+      try {
+        await this.portDriver(record.driver)?.close(record.targetId, reason)
+      } catch {
+        // the target is closed from the kernel's point of view either way
+      }
     }
     for (const op of this.journal.inFlight())
       if (op.targetId === record.targetId) op.controller.abort()
@@ -2060,6 +2226,17 @@ export class ComputerUseService {
     })
     this.registry.prune()
     this.changed('targets', record.ownerSessionId)
+  }
+
+  /** The port's driver of this kind, or null (never throws). */
+  private portDriver(kind: DriverKind): TargetDriver | null {
+    const port = this.deps.port
+    if (port === null) return null
+    return kind === 'embedded-browser'
+      ? port.embeddedBrowser()
+      : kind === 'external-browser'
+        ? port.externalBrowser()
+        : port.desktop()
   }
 
   private refresh(record: TargetRecord, driver: TargetDriver): void {
@@ -2132,9 +2309,9 @@ export class ComputerUseService {
 
   /** The temporary profile plus every persistent one, with open tab counts. */
   listProfiles(): BrowserProfileView[] {
-    const live = this.registry.live()
+    const held = this.registry.held()
     const open = (profileId: string): number =>
-      live.filter((record) => record.profileId === profileId).length
+      held.filter((record) => record.profileId === profileId).length
     return [
       {
         profileId: TEMPORARY_PROFILE,
@@ -2177,7 +2354,7 @@ export class ComputerUseService {
       kind: 'persistent',
       createdAt: renamed.createdAt,
       openTargets: this.registry
-        .live()
+        .held()
         .filter((record) => record.profileId === profileId).length,
     }
   }
@@ -2197,7 +2374,7 @@ export class ComputerUseService {
         'INVALID_REQUEST',
         `there is no browser profile ${profileId}`,
       )
-    for (const record of this.registry.live())
+    for (const record of this.registry.held())
       if (record.profileId === profileId)
         await this.closeTarget(record, 'revoked')
     // Narrowing first: the grants and site permissions go even when the
@@ -2309,12 +2486,7 @@ export class ComputerUseService {
     for (const targetId of [...this.uiPaused]) {
       this.uiPaused.delete(targetId)
       const record = this.registry.get(targetId)
-      if (
-        record === undefined ||
-        record.state === 'closed' ||
-        record.state === 'lost'
-      )
-        continue
+      if (record === undefined || !isLive(record)) continue
       // Stopped meanwhile: the kill switch's resume brings it back to work.
       if (record.control === 'stopped') {
         if (record.controlBeforeStop === 'paused')
@@ -2371,8 +2543,8 @@ export class ComputerUseService {
       record.control === 'agent' &&
       record.sharingStopped !== true &&
       this.stoppedAt === undefined &&
-      record.state !== 'closed' &&
-      record.state !== 'lost' &&
+      isLive(record) &&
+      record.releasing !== true &&
       (record.appId === undefined || !this.isSensitiveApp(record.appId))
     driver
       .setCapture(
@@ -2383,9 +2555,11 @@ export class ComputerUseService {
   }
 
   /**
-   * Emergency stop (§6.6): cancel in-flight actions, pause every target,
+   * Emergency stop (§6.6): cancel in-flight actions, stop every target,
    * suspend every grant (persisted), dismiss pending grant cards and release
-   * any held keys. Nothing runs again until the user resumes.
+   * any held keys; then every task's targets are released like at a task's
+   * end (2026-09-29 §3.3), so no window stays badged. Nothing runs again
+   * until the user resumes; the next task takes its windows and tabs anew.
    */
   async emergencyStop(): Promise<void> {
     if (this.stoppedAt === undefined) this.stoppedAt = this.now().toISOString()
@@ -2404,6 +2578,7 @@ export class ComputerUseService {
       // best effort; the helper also releases on disconnect
     }
     this.changed('kill-switch')
+    await this.releaseEveryTask('emergency-stop')
   }
 
   resume(): void {
@@ -2428,29 +2603,207 @@ export class ComputerUseService {
     this.activatedThisTask.set(owner, activated)
   }
 
-  /** Hand the front back to where the user was, for windows activated this task. */
-  private restoreFront(ownerSessionId: string): void {
+  /**
+   * The task ended (2026-09-29 §3.3): give every window and tab this owner
+   * controls back, without closing any. Per target, asynchronously:
+   * in-flight actions are aborted and waited for (a dispatched one settles
+   * `unknown` and is never replayed); a desktop window's capture stream
+   * stops, held input is released, the front goes back to where the user
+   * was and the window is unbound; a built-in tab keeps its page (its refs
+   * go stale; browser_tab_select takes it back); an external tab stays
+   * attached in the extension, only unclaimed. Once / task grants end.
+   *
+   * The targets flip to `released` together once every step is done, then
+   * one `computer_use_changed` lets the preview drop the whole group; a
+   * target whose release failed says so (and a desktop failure restarts the
+   * helper connection so no capture stream survives). A second call while
+   * one runs joins it; afterwards it finds nothing left to release.
+   */
+  releaseTask(
+    ownerSessionId: string,
+    reason: TaskReleaseReason,
+  ): Promise<TaskReleaseSummary> {
+    const running = this.releases.get(ownerSessionId)
+    if (running !== undefined) return running
+    const release = this.releaseOwner(ownerSessionId, reason).finally(() => {
+      if (this.releases.get(ownerSessionId) === release)
+        this.releases.delete(ownerSessionId)
+    })
+    this.releases.set(ownerSessionId, release)
+    return release
+  }
+
+  private async releaseEveryTask(reason: TaskReleaseReason): Promise<void> {
+    const owners = new Set(
+      this.registry.live().map((record) => record.ownerSessionId),
+    )
+    await Promise.all(
+      [...owners].map((owner) => this.releaseTask(owner, reason)),
+    )
+  }
+
+  private async releaseOwner(
+    ownerSessionId: string,
+    reason: TaskReleaseReason,
+  ): Promise<TaskReleaseSummary> {
+    // A target the Agent is releasing itself (ui_release_control) finishes there.
+    const records = this.registry
+      .live(ownerSessionId)
+      .filter((record) => record.releasing !== true)
     const activated = this.activatedThisTask.get(ownerSessionId)
     this.activatedThisTask.delete(ownerSessionId)
-    const driver = this.deps.port?.desktop()
-    if (activated === undefined || driver?.restoreFront === undefined) return
-    for (const targetId of activated) {
-      const record = this.registry.get(targetId)
-      if (
-        record === undefined ||
-        record.state === 'closed' ||
-        record.state === 'lost'
+    this.endTaskGrants(ownerSessionId)
+    if (records.length === 0) return { released: [], failed: [] }
+    const summary = await this.releaseRecords(
+      ownerSessionId,
+      records,
+      reason,
+      activated,
+    )
+    this.append(ownerSessionId, 'ui/task-released', {
+      reason,
+      released: summary.released.length,
+      failed: summary.failed.length,
+    })
+    return summary
+  }
+
+  /**
+   * The Agent is done with one window or tab before the task ends
+   * (ui_release_control): the same release, for that target alone.
+   */
+  async releaseTarget(ctx: OpContext, targetId: string): Promise<TargetRecord> {
+    const record = this.resolve(ctx.identity, targetId)
+    const owner = record.ownerSessionId
+    const activated = this.activatedThisTask.get(owner)
+    const wasActivated = activated?.delete(record.targetId) === true
+    const summary = await this.releaseRecords(
+      owner,
+      [record],
+      'agent',
+      wasActivated ? new Set([record.targetId]) : undefined,
+    )
+    const failure = summary.failed[0]
+    if (failure !== undefined)
+      throw new UiError('DRIVER_UNAVAILABLE', failure.error, {
+        reason: 'release-failed',
+      })
+    return record
+  }
+
+  private async releaseRecords(
+    ownerSessionId: string,
+    records: readonly TargetRecord[],
+    reason: TaskReleaseReason,
+    activated: ReadonlySet<string> | undefined,
+  ): Promise<TaskReleaseSummary> {
+    for (const record of records) {
+      record.releasing = true
+      this.uiPaused.delete(record.targetId)
+    }
+    const ids = new Set(records.map((record) => record.targetId))
+    for (const op of this.journal.inFlight())
+      if (op.targetId !== undefined && ids.has(op.targetId))
+        op.controller.abort()
+    await Promise.all(records.map((record) => this.drain(record.targetId)))
+
+    const errors = new Map<string, string>()
+    const fail = (record: TargetRecord, error: unknown): void => {
+      if (!errors.has(record.targetId))
+        errors.set(record.targetId, releaseErrorText(error))
+    }
+    const windows = records.filter((record) => record.driver === 'desktop')
+    const desktop = this.deps.port?.desktop() ?? null
+    if (windows.length > 0 && desktop !== null) {
+      // The badge first, then input; the front needs the window still bound.
+      for (const record of windows)
+        if (desktop.setCapture !== undefined)
+          await withinStep(() =>
+            desktop.setCapture!(
+              { targetId: record.targetId, generation: record.generation },
+              false,
+            ),
+          ).catch((error: unknown) => fail(record, error))
+      await withinStep(() => desktop.releaseAll()).catch((error: unknown) => {
+        for (const record of windows) fail(record, error)
+      })
+      for (const record of windows)
+        if (
+          activated?.has(record.targetId) === true &&
+          desktop.restoreFront !== undefined
+        )
+          await withinStep(() =>
+            desktop.restoreFront!({
+              targetId: record.targetId,
+              generation: record.generation,
+            }),
+          ).catch(() => undefined) // the front is a courtesy, not a release
+      for (const record of windows)
+        await withinStep(() =>
+          desktop.release !== undefined
+            ? desktop.release(record.targetId)
+            : desktop.close(record.targetId, 'agent'),
+        ).catch((error: unknown) => {
+          if (!(error instanceof UiError && error.code === 'STALE_TARGET'))
+            fail(record, error)
+        })
+    }
+    for (const record of records) {
+      if (record.driver === 'desktop') continue
+      const driver = this.portDriver(record.driver)
+      if (driver?.release === undefined) continue
+      await withinStep(() => driver.release!(record.targetId)).catch(
+        (error: unknown) => {
+          if (!(error instanceof UiError && error.code === 'STALE_TARGET'))
+            fail(record, error)
+        },
       )
-        continue
-      driver
-        .restoreFront({ targetId, generation: record.generation })
-        .catch(() => undefined)
+    }
+
+    const released: string[] = []
+    const failed: Array<{ targetId: string; error: string }> = []
+    for (const record of records) {
+      const error = errors.get(record.targetId)
+      // Ended meanwhile (the window closed, the tab crashed): nothing to say.
+      if (this.registry.release(record.targetId, error) === undefined) continue
+      if (error === undefined) released.push(record.targetId)
+      else failed.push({ targetId: record.targetId, error })
+      this.append(ownerSessionId, 'ui/target-released', {
+        targetId: record.targetId,
+        reason,
+        outcome: error === undefined ? 'released' : 'failed',
+        ...(error === undefined ? {} : { error }),
+      })
+    }
+    this.registry.prune()
+    this.changed('targets', ownerSessionId)
+    // A window we could not release may still be badged: the helper goes
+    // (and every stream with it); its windows come back on the next bind.
+    if (
+      desktop?.resetConnection !== undefined &&
+      windows.some((record) => errors.has(record.targetId))
+    )
+      await withinStep(() => desktop.resetConnection!('release failed')).catch(
+        () => undefined,
+      )
+    return { released, failed }
+  }
+
+  /** Wait (bounded) until an aborted action has left the target's lock. */
+  private async drain(targetId: string): Promise<void> {
+    try {
+      const release = await this.mutex.acquire(
+        targetId,
+        AbortSignal.timeout(RELEASE_DRAIN_MS),
+      )
+      release()
+    } catch {
+      // the action ignores its abort; release anyway (it cannot act again)
     }
   }
 
-  /** Once / task grants end with the turn that asked for them. */
-  endTask(ownerSessionId: string): void {
-    this.restoreFront(ownerSessionId)
+  /** Once / task grants end with the task that asked for them. */
+  private endTaskGrants(ownerSessionId: string): void {
     const revoked = this.deps.grants.revokeWhere(
       (grant) =>
         grant.ownerSessionId === ownerSessionId &&
@@ -2462,12 +2815,14 @@ export class ComputerUseService {
 
   /**
    * Computer use switched off: dismiss pending grant cards (they read as a
-   * refusal), cancel in-flight actions and close every live target.
+   * refusal), cancel in-flight actions, release every task's targets
+   * (§3.3), then close the built-in pages nobody can take back now.
    */
   async closeAll(reason: TargetClosedReason): Promise<void> {
     this.deps.cancelGrantCards()
     for (const op of this.journal.inFlight()) op.controller.abort()
-    for (const record of this.registry.live())
+    await this.releaseEveryTask('switched-off')
+    for (const record of this.registry.held())
       await this.closeTarget(record, reason)
   }
 
@@ -2477,7 +2832,7 @@ export class ComputerUseService {
     reason: TargetClosedReason,
   ): Promise<void> {
     const records = this.registry
-      .live()
+      .held()
       .filter((record) => record.driver === driver)
     const ids = new Set(records.map((record) => record.targetId))
     for (const op of this.journal.inFlight())
@@ -2505,7 +2860,7 @@ export class ComputerUseService {
   rememberRestorableTabs(): void {
     this.deps.restorable?.remember(
       this.registry
-        .live()
+        .held()
         .filter(
           (record) =>
             record.profileId !== TEMPORARY_PROFILE &&
@@ -2526,7 +2881,9 @@ export class ComputerUseService {
     for (const key of this.desktopCandidates.keys())
       if (key.startsWith(`${sessionId}|`)) this.desktopCandidates.delete(key)
     this.deps.cancelGrantCards(sessionId)
-    for (const record of this.registry.live(sessionId))
+    await this.releaseTask(sessionId, 'session-deleted')
+    // Nobody can take the conversation's pages back: they close.
+    for (const record of this.registry.held(sessionId))
       await this.closeTarget(record, 'shutdown')
     this.deps.grants.revokeWhere(
       (grant) => grant.ownerSessionId === sessionId,
@@ -2543,7 +2900,7 @@ export class ComputerUseService {
     // Persistent-profile pages can be reopened after the restart.
     this.rememberRestorableTabs()
     for (const op of this.journal.inFlight()) op.controller.abort()
-    for (const record of this.registry.live())
+    for (const record of this.registry.held())
       await this.closeTarget(record, 'shutdown')
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe()
     this.subscribed.clear()
@@ -2633,16 +2990,19 @@ export class ComputerUseService {
       opener.driver === 'embedded-browser'
         ? this.deps.port?.embeddedBrowser()
         : this.deps.port?.externalBrowser()
+    if (!this.stopped && isLive(opener)) this.makeRoom(owner)
     if (
       this.stopped ||
-      this.registry.live(owner).length >=
+      !isLive(opener) ||
+      opener.releasing === true ||
+      this.registry.held(owner).length >=
         COMPUTER_USE_BUDGET.targetsPerSession ||
-      this.registry.live().length >= COMPUTER_USE_BUDGET.targetsTotal
+      this.registry.held().length >= COMPUTER_USE_BUDGET.targetsTotal
     ) {
       void driver?.close(popup.targetId, 'agent').catch(() => undefined)
       this.note(
         opener.targetId,
-        `a popup to ${popup.url.slice(0, 300)} was closed: ${this.stopped ? 'computer use is stopped' : 'too many open tabs'}`,
+        `a popup to ${popup.url.slice(0, 300)} was closed: ${this.stopped ? 'computer use is stopped' : !isLive(opener) || opener.releasing === true ? 'its tab was released when the task ended' : 'too many open tabs'}`,
       )
       return
     }
@@ -2723,6 +3083,8 @@ export class ComputerUseService {
         this.changed('targets', record.ownerSessionId)
         break
       case 'detached':
+        // A released target reconnects when it is taken back.
+        if (record.state === 'released') break
         record.state = 'recovering'
         this.note(
           record.targetId,
@@ -2765,5 +3127,31 @@ export class ComputerUseService {
         this.changed('targets', record.ownerSessionId)
         break
     }
+  }
+}
+
+function releaseErrorText(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+  return text.slice(0, 300) || 'release failed'
+}
+
+/**
+ * One release step, bounded: a driver that throws or never answers fails
+ * the step, never the whole release.
+ */
+async function withinStep<T>(step: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve().then(step),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('the driver did not answer in time')),
+          RELEASE_STEP_MS,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }

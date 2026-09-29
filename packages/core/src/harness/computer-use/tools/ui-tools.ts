@@ -73,7 +73,9 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
       execute: async (_args, context) =>
         await runGuiTool(runtime, 'ui_list_targets', context, async (op) => {
           const current = service.lookup(op.identity)?.targetId
-          const targets = service.listTargets(op.identity.ownerSessionId)
+          const targets = service
+            .listTargets(op.identity.ownerSessionId)
+            .filter((target) => target.state !== 'released')
           return uiResult({
             tool: 'ui_list_targets',
             summary: {
@@ -110,12 +112,12 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'ui_release_control',
       description:
-        'Release a window or tab before the task ends, when you are done with it: its screen sharing stops and its handle stops working. Everything you control is released at the end of the task anyway.',
+        'Release a window or tab before the task ends, when you are done with it: its screen sharing stops and its handle stops working; the window or tab itself stays open. Everything you control is released at the end of the task anyway.',
       input: uiReleaseControlInput,
       timeoutMs: 30_000,
       execute: async (args, context) =>
         await runGuiTool(runtime, 'ui_release_control', context, async (op) => {
-          const record = await service.close(op, { targetId: args.targetId })
+          const record = await service.releaseTarget(op, args.targetId)
           return uiResult({
             tool: 'ui_release_control',
             summary: { released: 'target', targetId: record.targetId },

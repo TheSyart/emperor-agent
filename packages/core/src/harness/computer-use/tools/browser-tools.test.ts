@@ -1,7 +1,7 @@
 // browser_* tools through the real stack (CoreApi → registry → gate →
 // tools → kernel → fake driver), driven by a scripted model that reads refs
 // out of the observations it receives.
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   eventOf,
   makeApi,
@@ -343,10 +343,19 @@ describe('browser_* tools end to end', () => {
     expect(list.find((tab) => tab.url.endsWith('/popup'))?.current).toBe(true)
     expect(list.some((tab) => tab.url.endsWith('/done'))).toBe(true)
     expect(notes).toContain('in a new tab')
+    // The task ended: both tabs are released (the preview drops them), their
+    // pages kept for the next task.
+    const service = api.host.computerUse!.service
+    await vi.waitFor(() =>
+      expect(service.listTabs(id).map((tab) => tab.state)).toEqual([
+        'released',
+        'released',
+      ]),
+    )
     const status = await api.computerUse.status()
     expect(
       status.targets.filter((target) => target.ownerSessionId === id),
-    ).toHaveLength(2)
+    ).toEqual([])
   })
 
   it('keeps a popup of a tab paused for a window reload paused until the window is back', async () => {
@@ -355,8 +364,25 @@ describe('browser_* tools end to end', () => {
       { text: 'opened' },
     ])
     await api.chat.submit({ content: 'open', sessionId: id })
-    const opener = (await api.computerUse.status()).targets[0]!
     const service = api.host.computerUse!.service
+    // That task released the tab; the next one takes it back.
+    await vi.waitFor(() =>
+      expect(service.listTabs(id)[0]?.state).toBe('released'),
+    )
+    const opener = await service.select(
+      {
+        subject: `session:${id}`,
+        kind: 'session',
+        ownerSessionId: id,
+        callerSessionId: id,
+        taskId: `${id}:2`,
+        turn: 2,
+        background: false,
+        canAsk: true,
+        fullAccess: true,
+      },
+      service.listTabs(id)[0]!.targetId,
+    )
     expect(service.pauseForUiDisconnect()).toBe(1)
     // The page opens another site in a new window meanwhile.
     const popupId = port.browser.pageOpenPopup(

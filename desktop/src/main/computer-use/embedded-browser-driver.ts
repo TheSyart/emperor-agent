@@ -312,6 +312,18 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
     await this.manager.close(targetId)
   }
 
+  /**
+   * The task ended (2026-09-29 §3.3): the page stays open for the next task
+   * to take back; every ref handed out so far goes stale.
+   */
+  async release(targetId: string): Promise<void> {
+    const runtime = this.runtimes.get(targetId)
+    if (runtime === undefined) return
+    runtime.refs.clear()
+    runtime.stored.clear()
+    runtime.tab.revision += 1
+  }
+
   async download(
     request: DownloadRequest,
     hooks: ActHooks,

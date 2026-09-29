@@ -7,14 +7,16 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   eventOf,
   makeApi,
+  pendingInteractionId,
   waitFor,
   type ApiFixture,
 } from '../../api/test-helpers'
-import { replyChunks } from '../testing'
+import type { GenerateOptions } from '../../llm/types'
+import { replyChunks, type ScriptedReply } from '../testing'
 import { COMPUTER_USE_CONFIG_FILE, ComputerUseConfigStore } from './config'
 import { computerUseStateDir } from './install'
 import { FakeComputerUsePort } from './testing/fake-port'
@@ -723,11 +725,17 @@ describe('computer use restorable tabs', () => {
       content: `use ${profile!.profileId}`,
       sessionId: id,
     })
-    const beforeRestart = await first.api.computerUse.status()
-    expect(beforeRestart.targets).toHaveLength(2)
-    const oldTargetId = beforeRestart.targets.find((target) =>
-      target.url.includes('mail.test'),
-    )!.targetId
+    // The task ended: both tabs are released, their pages kept.
+    const firstService = first.api.host.computerUse!.service
+    await vi.waitFor(() =>
+      expect(firstService.listTabs(id).map((tab) => tab.state)).toEqual([
+        'released',
+        'released',
+      ]),
+    )
+    const oldTargetId = firstService
+      .listTabs(id)
+      .find((target) => target.url.includes('mail.test'))!.targetId
     // The desktop closes hidden Agent tabs with its main window before
     // CoreApi.close() runs; recovery hints must survive that order.
     first.api.host.computerUse!.service.rememberRestorableTabs()
@@ -780,8 +788,136 @@ describe('computer use restorable tabs', () => {
       content: 'reopen the saved page',
       sessionId: id,
     })
-    const reopened = (await second.api.computerUse.status()).targets
-    expect(reopened).toHaveLength(1)
-    expect(reopened[0]!.targetId).not.toBe(oldTargetId)
+    const secondService = second.api.host.computerUse!.service
+    await vi.waitFor(() => expect(secondService.listTabs(id)).toHaveLength(1))
+    expect(secondService.listTabs(id)[0]!.targetId).not.toBe(oldTargetId)
+  })
+})
+
+describe('computer use task end (CU-04)', () => {
+  const OPEN = {
+    tools: [
+      { name: 'browser_open', args: { url: 'https://fixture.test/form' } },
+    ],
+  }
+
+  async function started(replies: ScriptedReply[]) {
+    const fixture = await api({
+      replies,
+      extra: {
+        computerUsePort: new FakeComputerUsePort(),
+        computerUseSettings: () => ({ enabled: true }),
+      },
+    })
+    const id = String(fixture.api.sessions.create({ title: 'GUI' }).id)
+    fixture.api.control.setPermissionMode('danger-full-access', id)
+    return { ...fixture, id, service: fixture.api.host.computerUse!.service }
+  }
+
+  it('releases the tab when the turn ends, even after a question asked in plain text', async () => {
+    const {
+      api: core,
+      id,
+      service,
+    } = await started([OPEN, { text: 'Which account should I use?' }])
+    await core.chat.submit({ content: 'log in', sessionId: id })
+    await waitFor(() => service.listTabs(id)[0]?.state === 'released')
+    expect(service.listTargets(id)).toEqual([])
+  })
+
+  it('keeps the tab while ask_user_question waits for the answer', async () => {
+    const {
+      api: core,
+      id,
+      service,
+      events,
+    } = await started([
+      OPEN,
+      {
+        tools: [
+          {
+            name: 'ask_user_question',
+            args: {
+              questions: [
+                {
+                  id: 'account',
+                  question: 'Which account?',
+                  options: [{ label: 'work' }, { label: 'home' }],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      { text: 'using work' },
+    ])
+    const submitted = core.chat.submit({ content: 'log in', sessionId: id })
+    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(service.listTargets(id)).toHaveLength(1)
+    await core.control.answerInteraction(
+      pendingInteractionId(events, 'ask_request'),
+      { account: { choice: 'work', freeform: '' } },
+    )
+    await submitted
+    await waitFor(() => service.listTabs(id)[0]?.state === 'released')
+  })
+
+  it('keeps the tab while a background subagent runs, and releases once it settles', async () => {
+    let finishChild!: () => void
+    const childMayFinish = new Promise<void>((resolve) => {
+      finishChild = resolve
+    })
+    // The child's own prompt arrives as a user message (the root only has it
+    // inside its tool call).
+    const route = async (request: GenerateOptions) => {
+      const child = request.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          JSON.stringify(message.content).includes('watch the page quietly'),
+      )
+      if (child) {
+        await childMayFinish
+        return replyChunks({ text: 'nothing changed' })
+      }
+      return replyChunks({ text: 'noted' })
+    }
+    const {
+      api: core,
+      id,
+      service,
+    } = await started([
+      OPEN,
+      {
+        tools: [
+          {
+            name: 'subagent',
+            args: {
+              description: 'watch',
+              prompt: 'watch the page quietly',
+              run_in_background: true,
+            },
+          },
+        ],
+      },
+      route,
+      route,
+      route,
+    ])
+    await core.chat.submit({ content: 'go', sessionId: id })
+    // The root turn is over while the child still runs: the task goes on.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(service.listTargets(id)).toHaveLength(1)
+    finishChild()
+    await waitFor(() => service.listTabs(id)[0]?.state === 'released')
+  })
+
+  it('releases when the user stops the turn', async () => {
+    const { api: core, id, service } = await started([OPEN, { hang: true }])
+    const submitted = core.chat.submit({ content: 'go', sessionId: id })
+    await waitFor(() => service.listTargets(id).length === 1)
+    core.host.stop(id)
+    await submitted.catch(() => undefined)
+    await waitFor(() => service.listTabs(id)[0]?.state === 'released')
   })
 })

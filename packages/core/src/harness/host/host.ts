@@ -642,11 +642,37 @@ export class HarnessHost {
         })
       },
     })
-    // Once / task grants end with the turn that asked for them.
+    // The task ends when the root's turn ends with no background subagent
+    // still running, or when the last one settles after that (2026-09-29
+    // §3.3): every window and tab it controlled is released, nothing closed.
+    // A question asked with ask_user_question keeps the turn open. In a
+    // microtask: session listeners run inside a non-reentrant append.
     this.rawTap((sessionId, event) => {
       if (event.type === 'turn/end')
-        queueMicrotask(() => this.computerUse?.service.endTask(sessionId))
+        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(sessionId))
     })
+    this.subagents.observe({
+      settled: (child) =>
+        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(child.id)),
+    })
+  }
+
+  /** See `installComputerUse`: release when this agent's task has ended. */
+  private releaseComputerUseIfTaskEnded(sessionId: string): void {
+    const service = this.computerUse?.service
+    const agent = this.agents.get(sessionId)
+    if (service === undefined || agent === undefined) return
+    const root = this.rootOf(agent)
+    // The root's turn goes on (a subagent's turn ended, or a follow-up
+    // already started the next turn): the task is not over.
+    if (root.session.hasOpenTurn()) return
+    if (
+      this.subagents
+        .list(root, 'descendants')
+        .some((child) => child.status === 'running')
+    )
+      return
+    void service.releaseTask(root.id, 'task-end')
   }
 
   /** Whether the route that served the agent's latest request can see images. */

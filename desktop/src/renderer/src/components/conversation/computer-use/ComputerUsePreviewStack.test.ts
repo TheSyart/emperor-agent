@@ -374,6 +374,52 @@ describe('ComputerUsePreviewStack', () => {
     expect(bridge.agentPreviewStop).toHaveBeenCalledWith('t-1')
   })
 
+  it('drops the whole group once the task released it, freeing every frame', async () => {
+    setTargets([
+      target({ targetId: 't-a' }),
+      target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
+    ])
+    const root = await mount()
+    for (const targetId of ['t-a', 't-b'])
+      frameListeners[0]!({
+        targetId,
+        seq: 1,
+        width: 1,
+        height: 1,
+        jpeg: Uint8Array.of(1),
+      })
+    await flush()
+    setTargets([
+      target({ targetId: 't-a', state: 'released' }),
+      target({
+        targetId: 't-b',
+        state: 'released',
+        lastActiveAt: '2026-09-29T10:00:05Z',
+      }),
+    ])
+    await announce()
+    expect(root.querySelector('.cu-preview')).toBeNull()
+    expect(
+      bridge.agentPreviewStop.mock.calls.map((call) => call[0]).sort(),
+    ).toEqual(['t-a', 't-b'])
+    expect(revoked.sort()).toEqual([...created].sort())
+    expect(previewShownTargets().value.size).toBe(0)
+
+    // A window whose release failed stays, saying so, without a live picture.
+    setTargets([
+      target({
+        targetId: 't-a',
+        state: 'released',
+        releaseFailed: 'the helper did not answer',
+      }),
+    ])
+    await announce()
+    expect(card(root)?.querySelector('.cu-card-status')?.textContent).toBe(
+      '释放失败',
+    )
+    expect(bridge.agentPreviewStart).toHaveBeenCalledTimes(2)
+  })
+
   it('stops every subscription and releases every frame on a session switch', async () => {
     setTargets([
       target({ targetId: 't-a' }),

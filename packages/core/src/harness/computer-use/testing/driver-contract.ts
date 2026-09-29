@@ -774,6 +774,45 @@ export const DRIVER_CONTRACT_CASES: readonly ContractCase[] = [
       }),
   },
   {
+    name: 'releasing keeps the page open and makes old refs stale',
+    run: async (env) =>
+      await withTarget(env, '/form', async (target) => {
+        const release = env.driver.release?.bind(env.driver)
+        if (release === undefined) return
+        const before = await observe(env, target)
+        await release(target.targetId)
+        const snapshot = env.driver.snapshot(target.targetId)
+        check(snapshot !== null, 'the page stays open after release')
+        check(
+          snapshot.revision > before.revision,
+          'release moves the revision on',
+        )
+        const hooks = counter()
+        await expectCode(
+          env.driver.act(
+            {
+              operationId: 'op-released',
+              targetId: target.targetId,
+              generation: snapshot.generation,
+              expectedRevision: before.revision,
+              action: { kind: 'click', ref: refOf(before, 'I agree') },
+              deadlineMs: 5_000,
+            },
+            hooks,
+            signal(),
+          ),
+          ['STALE_ELEMENT'],
+          'a ref from before the release',
+        )
+        check(hooks.count === 0, 'nothing is sent with an old ref')
+        const fresh = await observe(env, target)
+        await act(env, target, fresh, {
+          kind: 'click',
+          ref: refOf(fresh, 'I agree'),
+        })
+      }),
+  },
+  {
     name: 'closing ends the target',
     run: async (env) => {
       const target = await open(env, '/form')

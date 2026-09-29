@@ -346,6 +346,13 @@ export interface TargetDriver {
   wait(request: WaitRequest, signal: AbortSignal): Promise<WaitOutcome>
   /** Paused targets reject every action until resumed. */
   setPaused(targetId: string, paused: boolean): void
+  /**
+   * The task that controlled this target ended (2026-09-29 §3.3): give up
+   * control without closing anything. The window, tab and page stay; refs
+   * handed out so far become stale. A target the driver no longer knows
+   * resolves (it is released either way).
+   */
+  release?(targetId: string): Promise<void>
   subscribe(listener: DriverEventListener): () => void
 }
 
@@ -502,6 +509,12 @@ export interface NativeDesktopDriver extends TargetDriver {
   ): Promise<DesktopMenuListing>
   /** Release every held key and mouse button (§12). */
   releaseAll(): Promise<void>
+  /**
+   * Drop the helper connection (the helper quits, every capture stream with
+   * it) when a window could not be released; the next use starts it again.
+   * Every desktop target of the driver is lost.
+   */
+  resetConnection?(reason: string): Promise<void>
 }
 
 export interface ComputerUseHostPort {

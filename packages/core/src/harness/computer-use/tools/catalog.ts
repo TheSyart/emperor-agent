@@ -55,12 +55,14 @@ function currentTarget(
   const targetId =
     typeof input.args.targetId === 'string' ? input.args.targetId : undefined
   const record = input.service.lookup(input.identity, targetId)
-  if (record === undefined)
-    throw new UiError(
-      'INVALID_REQUEST',
-      targetId === undefined ? missing : `unknown target ${targetId}`,
-    )
-  return record
+  if (record !== undefined) return record
+  // Released at the end of an earlier task: say so (it was not closed).
+  const released = input.service.releasedTarget(input.identity, targetId)
+  if (released !== undefined) throw input.service.releasedError(released)
+  throw new UiError(
+    'INVALID_REQUEST',
+    targetId === undefined ? missing : `unknown target ${targetId}`,
+  )
 }
 
 function onTarget(

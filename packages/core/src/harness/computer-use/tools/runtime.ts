@@ -40,7 +40,12 @@ export async function runGuiTool(
     })
   } catch (error) {
     const uiError = asUiError(error, 'DRIVER_UNAVAILABLE')
-    if (toolName === 'desktop_observe' && uiError.code === 'STALE_TARGET') {
+    // A handle released at the end of a task keeps its own advice.
+    if (
+      toolName === 'desktop_observe' &&
+      uiError.code === 'STALE_TARGET' &&
+      uiError.reason !== 'released-at-task-end'
+    ) {
       return uiErrorResult(
         toolName,
         new UiError('STALE_TARGET', uiError.message, {

@@ -30,6 +30,12 @@ import type {
 
 export type TargetClosedReason =
   'user' | 'agent' | 'lost' | 'revoked' | 'shutdown'
+/**
+ * Why targets were released (2026-09-29 §3.3); `agent`: the Agent released
+ * one early (ui_release_control).
+ */
+export type TaskReleaseReason =
+  'task-end' | 'session-deleted' | 'switched-off' | 'emergency-stop' | 'agent'
 export type GrantDecision = UiGrantScope | 'denied'
 export type GrantDecisionCause =
   'user' | 'cancelled' | 'unavailable' | 'invalid' | 'repair' | 'kill-switch'
@@ -47,6 +53,19 @@ declare module '../../session-log/types' {
       origin?: string
     }
     'ui/target-closed': { targetId: string; reason: TargetClosedReason }
+    /** The task ended: control given up, nothing closed (§3.3). */
+    'ui/target-released': {
+      targetId: string
+      reason: TaskReleaseReason
+      outcome: 'released' | 'failed'
+      error?: string
+    }
+    /** Written once every target of the task is released (or failed). */
+    'ui/task-released': {
+      reason: TaskReleaseReason
+      released: number
+      failed: number
+    }
     'ui/grant-requested': {
       requestId: string
       subject: string
@@ -180,7 +199,7 @@ type Repair = Omit<SessionEvent, 'seq' | 'time'>
  * - prepared, never dispatched → settled `cancelled`
  * - dispatched, never settled → settled `unknown` (never replayed)
  * - grant asked, never decided → decided `denied` (fail closed)
- * - target opened, never closed → closed `shutdown`
+ * - target opened, never closed or released → closed `shutdown`
  */
 export const computerUseRepair: RepairContributor = (events) => {
   const prepared = new Map<string, true>()
@@ -210,6 +229,7 @@ export const computerUseRepair: RepairContributor = (events) => {
         targets.set(event.data.targetId, true)
         break
       case 'ui/target-closed':
+      case 'ui/target-released':
         targets.delete(event.data.targetId)
         break
       default:

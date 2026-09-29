@@ -158,16 +158,15 @@ export function createBrowserTools(runtime: ToolRuntime): ToolDefinition[] {
     }),
     defineTool({
       name: 'browser_tab_list',
-      description: 'List the built-in browser tabs this conversation controls.',
+      description:
+        'List the browser tabs of this conversation: the ones you control, and built-in tabs released when an earlier task ended (released: true; browser_tab_select takes one back).',
       input: browserTabListInput,
       isConcurrencySafe: () => true,
       timeoutMs: 15_000,
       execute: async (_args, context) =>
         await runGuiTool(runtime, 'browser_tab_list', context, async (op) => {
           const current = service.lookup(op.identity)?.targetId
-          const tabs = service
-            .listTargets(op.identity.ownerSessionId)
-            .filter((target) => target.driver !== 'desktop')
+          const tabs = service.listTabs(op.identity.ownerSessionId)
           const restorable = service.restorableFor(op.identity.ownerSessionId)
           const titles = [
             ...tabs.map(
@@ -185,7 +184,9 @@ export function createBrowserTools(runtime: ToolRuntime): ToolDefinition[] {
               tabs: tabs.map((tab) => ({
                 targetId: tab.targetId,
                 url: tab.url,
-                control: tab.control,
+                ...(tab.state === 'released'
+                  ? { released: true }
+                  : { control: tab.control }),
                 current: tab.targetId === current,
               })),
               ...(restorable.length === 0
@@ -438,12 +439,12 @@ export function createBrowserTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'browser_tab_select',
       description:
-        'Make one of your tabs the current tab for later browser_* calls.',
+        'Make one of your tabs the current tab for later browser_* calls. A tab released when an earlier task ended is taken back; observe it again (its old refs are gone).',
       input: browserTabSelectInput,
       timeoutMs: 15_000,
       execute: async (args, context) =>
         await runGuiTool(runtime, 'browser_tab_select', context, async (op) => {
-          const record = service.select(op.identity, args.targetId)
+          const record = await service.select(op.identity, args.targetId)
           return uiResult({
             tool: 'browser_tab_select',
             summary: { targetId: record.targetId, url: record.url },

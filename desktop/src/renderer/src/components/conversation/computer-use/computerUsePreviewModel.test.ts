@@ -55,6 +55,31 @@ describe('conversation computer-use preview model', () => {
     ).toEqual(['t-1'])
   })
 
+  it('drops the whole group once the task released it, keeping failures', () => {
+    const released = [
+      target({ state: 'released' }),
+      target({
+        targetId: 'tab',
+        driver: 'embedded-browser',
+        state: 'released',
+      }),
+    ]
+    expect(previewTargetsFor(released, 's1')).toEqual([])
+    const failed = target({
+      targetId: 'stuck',
+      state: 'released',
+      releaseFailed: 'the helper did not answer',
+    })
+    const shown = previewTargetsFor([...released, failed], 's1')
+    expect(ids(shown)).toEqual(['stuck'])
+    expect(previewStatus(failed, { stopped: false, awaiting: false })).toEqual({
+      label: '释放失败',
+      tone: 'lost',
+    })
+    // A failed release shows no live picture.
+    expect(liveTargetIds(shown, { stopped: false, onScreen: true })).toEqual([])
+  })
+
   it('stacks the latest operation on top across windows and tabs', () => {
     const mixed = previewTargetsFor(
       [

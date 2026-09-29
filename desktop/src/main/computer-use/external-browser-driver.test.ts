@@ -63,6 +63,70 @@ function fixture() {
 }
 
 describe('external browser attachment', () => {
+  it('releases a tab at the end of a task without detaching it', async () => {
+    const { bridge, emit, request } = fixture()
+    const driver = new ExternalBrowserDriver(bridge)
+    emit({
+      type: 'target-attached',
+      pairingId,
+      targetId,
+      tabId: 7,
+      windowId: 2,
+      origin: 'https://example.com',
+      generation: 1,
+    })
+    await driver.claimAttachedTarget(
+      targetId,
+      'owner-1',
+      new AbortController().signal,
+    )
+    await driver.observe(
+      {
+        targetId,
+        generation: 1,
+        budget: {
+          maxElements: 50,
+          maxTextBytes: 1000,
+          maxDepth: 10,
+          timeoutMs: 1000,
+        },
+        includeText: false,
+      },
+      new AbortController().signal,
+    )
+    await driver.release(targetId)
+    // Still connected in Chrome, claimable by the next task; nothing sent.
+    expect(request.mock.calls.map((call) => call[1])).not.toContain(
+      'target.detach',
+    )
+    expect(driver.listAttached()).toEqual([
+      expect.objectContaining({ targetId, claimedBy: null }),
+    ])
+    await expect(
+      driver.observe(
+        {
+          targetId,
+          generation: 1,
+          budget: {
+            maxElements: 50,
+            maxTextBytes: 1000,
+            maxDepth: 10,
+            timeoutMs: 1000,
+          },
+          includeText: false,
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'STALE_TARGET' })
+    await driver.claimAttachedTarget(
+      targetId,
+      'owner-2',
+      new AbortController().signal,
+    )
+    expect(driver.snapshot(targetId)).toMatchObject({ revision: 2 })
+    driver.dispose()
+  })
+
   it('ends an element wait when its budget expires during observation', async () => {
     const { bridge, emit, request } = fixture()
     const originalRequest = request.getMockImplementation()!
