@@ -558,16 +558,14 @@ const CASES: Record<string, Case> = {
         observeAfterClose,
       }
     },
-  'E-B5: preview streams frames and forwards takeover input': async (
+  'E-B5: preview streams frames of an Agent tab (read-only)': async (
     driver,
     site,
   ) => {
     const frames: AgentPreviewFrame[] = []
-    let takeover = false
     const preview = new AgentPreview({
       manager: driver.manager,
       send: (frame) => frames.push(frame),
-      canTakeInput: () => takeover,
     })
     const animated = await open(driver, site, '/animate')
     preview.start(animated.targetId)
@@ -577,51 +575,14 @@ const CASES: Record<string, Case> = {
     const bytes = frames.reduce((sum, frame) => sum + frame.jpeg.byteLength, 0)
     const size =
       frames[0] === undefined ? null : `${frames[0].width}x${frames[0].height}`
-
-    const form = await open(driver, site, '/form')
-    const first = await observe(driver, form)
-    const name = first.elements.find((item) => item.name === 'Name')!
-    const x = name.bounds!.x + name.bounds!.width / 2
-    const y = name.bounds!.y + name.bounds!.height / 2
-    preview.start(form.targetId)
-    const refused = preview.input(form.targetId, {
-      type: 'text',
-      text: 'blocked',
-    })
-    takeover = true
-    preview.input(form.targetId, {
-      type: 'mouseDown',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1,
-    })
-    preview.input(form.targetId, {
-      type: 'mouseUp',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1,
-    })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    preview.input(form.targetId, { type: 'text', text: '你好 Zhang' })
-    preview.input(form.targetId, { type: 'keyDown', key: 'Backspace' })
-    preview.input(form.targetId, { type: 'keyUp', key: 'Backspace' })
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    preview.stopAll()
-    const after = await observe(driver, form)
-    const value = after.elements.find((item) => item.name === 'Name')?.value
     check(streamed > 0, 'no frames streamed')
-    check(refused === false, 'input was forwarded without takeover')
-    check(
-      value === '你好 Zhan',
-      `forwarded typing gave ${JSON.stringify(value)}`,
-    )
+    // The user does not take Agent tabs over (2026-09-29): nothing can be
+    // sent back through the preview.
+    check(!('input' in preview), 'the preview still accepts input')
     return {
       framesIn2s: streamed,
       avgJpegBytes: Math.round(bytes / Math.max(1, streamed)),
       size,
-      typed: value,
     }
   },
   // webContents.debugger is one object per tab, so a second attach from this

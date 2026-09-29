@@ -299,7 +299,6 @@ describe('BrowserPane and Agent tabs', () => {
       stopped: false,
       drivers: [],
       targets: [agentTarget()],
-      grants: [],
       killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     }
     const root = mount()

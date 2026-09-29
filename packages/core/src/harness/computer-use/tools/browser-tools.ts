@@ -302,7 +302,7 @@ export function createBrowserTools(runtime: ToolRuntime): ToolDefinition[] {
                 operationId,
                 next: outcome.filled
                   ? VERIFY
-                  : 'The field still looks empty; observe the page or ask the user to take over.',
+                  : 'The field still looks empty; observe the page again, or ask the user with ask_user_question to type it in themselves.',
               },
               meta: {
                 ...targetMeta(target),

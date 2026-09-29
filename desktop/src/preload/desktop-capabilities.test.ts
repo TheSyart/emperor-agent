@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
-  AGENT_PREVIEW_INPUT_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
@@ -76,7 +75,6 @@ describe('desktop capability preload bridge', () => {
       'agentDownloadMove',
       'agentDownloadReveal',
       'agentDownloadSaveAs',
-      'agentPreviewInput',
       'agentPreviewStart',
       'agentPreviewStop',
       'approveBrowserPairing',
@@ -128,12 +126,12 @@ describe('desktop capability preload bridge', () => {
     ])
   })
 
-  it('addresses Agent tab previews by id only', async () => {
+  it('addresses Agent tab previews by id only, and sends nothing back to the tab', async () => {
     const ipc = new FakeIpcRenderer()
     const bridge = createDesktopCapabilityBridge(ipc)
     const id = 'tab_00000000-0000-0000-0000-000000000000'
     await bridge.agentPreviewStart(id)
-    bridge.agentPreviewInput(id, { type: 'text', text: '你好' })
+    expect(bridge).not.toHaveProperty('agentPreviewInput')
     bridge.agentPreviewStop(id)
     const listener = vi.fn()
     const dispose = bridge.onAgentPreviewFrame(listener)
@@ -150,13 +148,7 @@ describe('desktop capability preload bridge', () => {
     expect(ipc.invoked).toEqual([
       [AGENT_PREVIEW_START_CHANNEL, { targetId: id }],
     ])
-    expect(ipc.sent).toEqual([
-      [
-        AGENT_PREVIEW_INPUT_CHANNEL,
-        { targetId: id, event: { type: 'text', text: '你好' } },
-      ],
-      [AGENT_PREVIEW_STOP_CHANNEL, { targetId: id }],
-    ])
+    expect(ipc.sent).toEqual([[AGENT_PREVIEW_STOP_CHANNEL, { targetId: id }]])
     expect(listener).toHaveBeenCalledTimes(1)
   })
 

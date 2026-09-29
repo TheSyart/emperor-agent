@@ -17,7 +17,6 @@ import { app, BaseWindow, WebContentsView } from 'electron'
 import { startFixtureSite } from '../fixtures/site'
 import { runContract } from './contract'
 import { runExtra } from './extra'
-import { runOverlay } from './overlay'
 import { runRestartPhase } from './restart'
 
 export interface E2eResult {
@@ -105,7 +104,6 @@ if (mode === 'restart_phase') {
     .then(async () => {
       if (mode === 'contract') await runContract(report)
       else if (mode === 'extra') await runExtra(report)
-      else if (mode === 'overlay') await runOverlay(report)
       else await smoke()
     })
     .catch((error: unknown) => {

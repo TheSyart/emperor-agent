@@ -1,13 +1,11 @@
 import type {
   ComputerUseStatusView,
   DriverCapability,
-  UiGrantView,
 } from '@emperor/core/runtime-contract'
 import { describe, expect, it } from 'vitest'
 import {
   computerUseHeadline,
   driverRows,
-  grantRows,
   killSwitchRow,
   screenshotRow,
 } from './computerUseSettingsModel'
@@ -50,7 +48,6 @@ function status(
     stopped: false,
     drivers: [embedded, desktop],
     targets: [],
-    grants: [],
     killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     ...patch,
   }
@@ -145,43 +142,14 @@ describe('computer use settings model', () => {
     })
   })
 
-  it('describes grants by origin, actions and lifetime', () => {
-    const grant: UiGrantView = {
-      grantId: 'g1',
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://example.com'],
-      },
-      allowedActions: ['observe', 'interact'],
-      scope: 'session',
-      createdAt: '2026-09-24T00:00:00.000Z',
-      backgroundAllowed: true,
-    }
-    expect(grantRows([grant])).toEqual([
-      {
-        grantId: 'g1',
-        title: 'https://example.com',
-        detail: '查看、操作 · 本会话 · 允许后台',
-        actions: [
-          { value: 'observe', label: '查看' },
-          { value: 'interact', label: '操作' },
-        ],
-        origins: ['https://example.com'],
-      },
-    ])
-    const timed = grantRows([
-      {
-        ...grant,
-        scope: 'timed',
-        expiresAt: new Date(2026, 8, 24, 14, 5).toISOString(),
-        backgroundAllowed: false,
-      },
-    ])[0]!
-    expect(timed.detail).toBe('查看、操作 · 到 14:05')
+  it('explains a switch turned off by the retired per-item mode', () => {
+    expect(
+      computerUseHeadline(status({ enabled: false, scopedRetired: true })),
+    ).toMatchObject({
+      tone: 'warn',
+      badge: '已关闭',
+      description: expect.stringContaining('逐项授权已停用'),
+    })
   })
 
   it('reports saved screenshots against the quota', () => {

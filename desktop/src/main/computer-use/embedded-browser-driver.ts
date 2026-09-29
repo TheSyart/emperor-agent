@@ -190,7 +190,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
         'history',
       ],
       missing: [
-        '跨源 iframe 内文本输入与接管',
+        '跨源 iframe 内文本输入',
         ...(this.options.credentials?.available ? [] : ['凭据代填']),
         '截图坐标操作（需要能看图的模型）',
       ],

@@ -4,8 +4,11 @@
  * (`meta.interaction_type === 'computer_use_grant'`). Shows what the Agent
  * wants to do and exactly where (the full URL as plain text), warns on
  * high-impact actions and high-risk apps, labels the Agent's reason as
- * unverified, and lets the user pick one of the scopes Core offered.
- * One-shot like ApprovalPanel; Esc dismisses (Core records a denial).
+ * unverified, and allows or refuses this one action (Core offers only
+ * 「本次」: the AI drives continuously and only high-impact actions and
+ * credential fills ask, 2026-09-29). A scope picker appears only if Core
+ * ever offers more than one. One-shot like ApprovalPanel; Esc dismisses
+ * (Core records a denial).
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
@@ -21,14 +24,12 @@ const root = ref<HTMLElement | null>(null)
 
 const presentation = computed(() => grantPresentation(props.interaction))
 const scope = ref(presentation.value.defaultScope)
-const background = ref(false)
 
 watch(
   () => props.interaction.id,
   () => {
     answered.value = false
     scope.value = presentation.value.defaultScope
-    background.value = false
   },
 )
 
@@ -41,11 +42,7 @@ function send(optionId: string) {
   answered.value = true
   const ok = ctx.sendInteractionAnswer(
     props.interaction.id,
-    grantAnswer(
-      props.interaction,
-      optionId,
-      optionId !== GRANT_DENY && background.value,
-    ),
+    grantAnswer(props.interaction, optionId, false),
   )
   if (!ok) answered.value = false
 }
@@ -83,14 +80,14 @@ function cancel() {
         >
           这是嵌入在
           {{ presentation.embeddedIn }}
-          页面中的另一个网站（例如付款或登录框），需要单独授权。
+          页面中的另一个网站（例如付款或登录框）。
         </div>
         <div
           v-if="presentation.highImpact"
           class="warning"
           data-testid="grant-high-impact"
         >
-          这可能是付款、删除、发送或发布等高影响操作，只能单次允许。请确认目标和内容无误。
+          这可能是付款、删除、发送或发布等高影响操作，只允许这一次。请确认目标和内容无误。
         </div>
         <div v-if="presentation.input" class="input" data-testid="grant-input">
           <span class="input-label">{{
@@ -105,7 +102,7 @@ function cancel() {
           >
         </div>
         <div v-if="presentation.highRiskApp" class="warning">
-          向终端或脚本类应用输入等于在命令沙箱之外执行命令，只能允许本次或本任务。
+          向终端或脚本类应用输入等于在命令沙箱之外执行命令。
         </div>
         <div v-if="presentation.reason" class="reason">
           <span class="reason-label">来自 Agent，未经验证：</span
@@ -119,10 +116,6 @@ function cancel() {
             aria-label="授权范围"
           />
         </div>
-        <label v-if="presentation.backgroundOffered" class="background">
-          <input v-model="background" type="checkbox" />
-          <span>允许在我不在时（定时任务、目标轮次）继续</span>
-        </label>
       </div>
       <div class="actions">
         <Button
@@ -265,26 +258,10 @@ function cancel() {
   gap: var(--space-2);
 }
 
-.scope-label,
-.background {
+.scope-label {
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xs);
   line-height: 20px;
-}
-
-.background {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  gap: var(--space-1-5);
-  cursor: pointer;
-}
-
-.background input {
-  flex: none;
-  width: auto;
-  margin: 0;
-  accent-color: rgb(var(--accent-primary, var(--approval-line)));
 }
 
 .actions {

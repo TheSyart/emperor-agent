@@ -205,11 +205,8 @@ describe('GrantPanel', () => {
     const radios = [...root.querySelectorAll('[role="radio"]')] as HTMLElement[]
     radios.find((radio) => radio.textContent?.includes('本会话'))!.click()
     await nextTick()
-    const checkbox = root.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement
-    checkbox.click()
-    await nextTick()
+    // No "allow in background" choice any more: a card answers one action.
+    expect(root.querySelector('input[type="checkbox"]')).toBeNull()
     const allow = [...root.querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === '允许',
     )!
@@ -219,7 +216,6 @@ describe('GrantPanel', () => {
         option_id: 'session',
         choice: '本会话',
         freeform: '',
-        background: true,
       },
     })
     // One-shot: a second click is ignored.

@@ -8,9 +8,11 @@
  * - scheduler turn → `scheduler:<jobId>` (background)
  * - goal round → `session:<rootId>` (background)
  *
- * GUI full access follows the persisted Computer Use setting. It is independent
- * of the Shell sandbox and applies to child agents too; sensitive actions
- * still require a fresh per-action confirmation.
+ * GUI full access is the master switch itself: while Computer Use is on, the
+ * AI drives continuously (2026-09-29; the per-item mode was retired). It is
+ * independent of the Shell sandbox and applies to child agents too;
+ * high-impact actions and credential fills still need a fresh per-action
+ * confirmation, which a subagent cannot ask for.
  */
 
 import type { Agent } from '../agent/agent'
@@ -38,7 +40,8 @@ export interface UiCallerIdentity {
 
 export interface IdentityDeps {
   rootOf(agent: Agent): Agent
-  authorizationMode(): 'unrestricted' | 'scoped'
+  /** The Computer Use master switch. */
+  enabled(): boolean
 }
 
 export function resolveIdentity(
@@ -54,7 +57,7 @@ export function resolveIdentity(
   const root = deps.rootOf(agent)
   const turn = currentTurnInfo(root.session.events)
   const turnKey = turn.turn === undefined ? '0' : String(turn.turn)
-  const fullAccess = deps.authorizationMode() === 'unrestricted'
+  const fullAccess = deps.enabled()
   const base = {
     ownerSessionId: root.id,
     callerSessionId: agent.id,

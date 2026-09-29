@@ -3,7 +3,6 @@ import {
   AGENT_DOWNLOAD_REVEAL_CHANNEL,
   AGENT_DOWNLOAD_SAVE_AS_CHANNEL,
   AGENT_PREVIEW_FRAME_CHANNEL,
-  AGENT_PREVIEW_INPUT_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
@@ -34,7 +33,6 @@ import {
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
   type AgentPreviewFrame,
-  type AgentPreviewInput,
   type BrowserViewAction,
   type BrowserViewState,
   type FileDialogFilter,
@@ -133,9 +131,6 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     connectBrowsers: () => ipcRenderer.invoke(BROWSER_CONNECT_CHANNEL),
     agentPreviewStop: (targetId: string) =>
       ipcRenderer.send(AGENT_PREVIEW_STOP_CHANNEL, { targetId }),
-    /** Forwarded only while the user has taken the tab over. */
-    agentPreviewInput: (targetId: string, event: AgentPreviewInput) =>
-      ipcRenderer.send(AGENT_PREVIEW_INPUT_CHANNEL, { targetId, event }),
     onAgentPreviewFrame: (listener: (frame: AgentPreviewFrame) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>
         listener(payload as AgentPreviewFrame)

@@ -15,6 +15,7 @@ import {
   normalizeOrigin,
   type GrantRequirement,
 } from './match'
+import { GRANTS_CODEC } from './codec'
 import { GRANTS_FILE, GrantStore, type GrantIssueInput } from './store'
 
 function root(): string {
@@ -68,7 +69,7 @@ const need = (over: Partial<GrantRequirement> = {}): GrantRequirement => ({
 })
 
 describe('GrantStore', () => {
-  it('persists session and timed grants with 0600 / 0700 and keeps once/task in memory', () => {
+  it('writes with 0600 / 0700, keeps once/task in memory and drops retired session and timed grants on load', () => {
     const dir = root()
     const store = new GrantStore({ root: dir, idFactory: ids })
     store.issue(browserGrant())
@@ -90,13 +91,13 @@ describe('GrantStore', () => {
       'timed',
     ])
 
+    // Session and timed grants are retired (2026-09-29): a restart drops
+    // them and rewrites the file without them.
     const reloaded = new GrantStore({ root: dir })
+    expect(reloaded.list()).toEqual([])
     expect(
-      reloaded
-        .list()
-        .map((grant) => grant.scope)
-        .sort(),
-    ).toEqual(['session', 'timed'])
+      (JSON.parse(readFileSync(file, 'utf8')) as { grants: UiGrant[] }).grants,
+    ).toEqual([])
   })
 
   it('drops expired grants on load and on listing', () => {
@@ -143,10 +144,13 @@ describe('GrantStore', () => {
       grantId: 'evil',
       allowedActions: ['everything'],
     })
-    writeFileSync(join(dir, GRANTS_FILE), JSON.stringify(document))
+    // The codec keeps the valid entry and drops the widened one.
     expect(
-      new GrantStore({ root: dir }).list().map((grant) => grant.grantId),
+      GRANTS_CODEC.decode(document).value.grants.map((grant) => grant.grantId),
     ).toEqual([good.grantId])
+    // Loading never fails closed over one bad entry (the store is usable).
+    writeFileSync(join(dir, GRANTS_FILE), JSON.stringify(document))
+    expect(new GrantStore({ root: dir }).suspended).toBeNull()
   })
 
   it('bumps the revision on narrowing and revokes when nothing is left', () => {

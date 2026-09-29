@@ -225,6 +225,42 @@ describe('conversation computer-use preview model', () => {
     ).toEqual({ kind: 'blocked', note: '不可预览：已代填凭据' })
   })
 
+  it('keeps the last frame after Stop Sharing, marked, and stops streaming it', () => {
+    const now = new Date(2026, 8, 29, 18, 30)
+    const stopped = target({ sharingStopped: true })
+    expect(
+      liveTargetIds([stopped], { stopped: false, onScreen: true }),
+    ).toEqual([])
+    expect(previewFrame(stopped, 'blob:last', now)).toEqual({
+      kind: 'frozen',
+      url: 'blob:last',
+      note: '画面已停止共享 · 最后一帧',
+    })
+    expect(
+      previewFrame(
+        target({
+          sharingStopped: true,
+          lastScreenshot: {
+            attachmentId: 'att_2',
+            width: 1,
+            height: 1,
+            takenAt: new Date(2026, 8, 29, 18, 1).toISOString(),
+          },
+        }),
+        undefined,
+        now,
+      ).note,
+    ).toBe('画面已停止共享 · 最近截图 · 18:01')
+    expect(previewFrame(stopped, undefined, now)).toEqual({
+      kind: 'none',
+      note: '画面已停止共享',
+    })
+    // The Agent keeps working: the card still reads 操作中.
+    expect(
+      previewStatus(stopped, { stopped: false, awaiting: false }).label,
+    ).toBe('操作中')
+  })
+
   it('dates screenshots from another day', () => {
     const now = new Date(2026, 8, 29, 9, 0)
     expect(shotTime(new Date(2026, 8, 28, 23, 7).toISOString(), now)).toBe(

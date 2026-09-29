@@ -9,10 +9,11 @@
  * 3. the user already refused the same thing in this task → deny (no
  *    retrying around a refusal);
  * 4. a covering grant → allow;
- * 5. full GUI access + ordinary action (including transfer and terminal
- *    input), except high-impact or credential confirmation → auto-allow;
+ * 5. full GUI access (the master switch is on) + ordinary action (including
+ *    transfer and terminal input), except high-impact or credential
+ *    confirmation → auto-allow;
  * 6. the caller cannot ask (subagent) → `PERMISSION_REQUIRED`;
- * 7. otherwise → ask, with scopes limited by the action's risk.
+ * 7. otherwise → ask for this one action (the card only offers 「本次」).
  */
 
 import type { UiCallerIdentity } from './identity'
@@ -186,7 +187,7 @@ export class UiActionPolicy {
         ),
       )
 
-    const plan = this.askPlan(identity, requirement)
+    const plan = this.askPlan(requirement)
     if (plan === null)
       return deny(
         new UiError('INVALID_REQUEST', 'the target has no grantable identity', {
@@ -222,10 +223,7 @@ export class UiActionPolicy {
     return [identity.taskId, requirement.driver, target, kind].join('|')
   }
 
-  private askPlan(
-    identity: UiCallerIdentity,
-    requirement: UiRequirement,
-  ): AskPlan | null {
+  private askPlan(requirement: UiRequirement): AskPlan | null {
     const actionClass = this.effectiveClass(requirement)
     let targetScope: UiTargetScope
     if (requirement.driver === 'desktop') {
@@ -262,17 +260,10 @@ export class UiActionPolicy {
             'observe' as const,
           ]),
         ].filter((action) => action !== 'transfer' && action !== 'high-impact')
-    const allowedScopes: UiGrantScope[] = risky
-      ? ['once']
-      : requirement.highRiskApp === true
-        ? ['once', 'task']
-        : ['once', 'task', 'session', 'timed']
-    return {
-      targetScope,
-      actions,
-      allowedScopes,
-      background: identity.background,
-    }
+    // 2026-09-29: the AI drives continuously; what still asks is decided
+    // one action at a time (no task / session / timed scopes).
+    const allowedScopes: UiGrantScope[] = ['once']
+    return { targetScope, actions, allowedScopes, background: false }
   }
 }
 

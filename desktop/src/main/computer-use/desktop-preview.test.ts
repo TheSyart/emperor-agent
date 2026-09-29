@@ -99,11 +99,10 @@ describe('DesktopPreview', () => {
     })
   })
 
-  it('routes desktop windows to the polled preview and never forwards input to them', () => {
+  it('routes desktop windows to the polled preview and browser tabs to theirs', () => {
     const browser = {
       start: vi.fn(() => ({ ok: true as const, width: 1280, height: 800 })),
       stop: vi.fn(),
-      input: vi.fn(() => true),
     }
     const k = harness([])
     const routed = routedPreview(browser, k.preview)
@@ -112,14 +111,14 @@ describe('DesktopPreview', () => {
     routed.start(ID)
     expect(k.preview.active).toEqual([ID])
     expect(browser.start).not.toHaveBeenCalled()
-    expect(routed.input(ID, { type: 'text', text: 'x' } as never)).toBe(false)
-    expect(browser.input).not.toHaveBeenCalled()
     routed.stop(ID)
     expect(k.preview.active).toEqual([])
     const tab = 'tab_00000000-0000-0000-0000-000000000000'
     routed.start(tab)
-    routed.input(tab, { type: 'text', text: 'x' } as never)
+    routed.stop(tab)
     expect(browser.start).toHaveBeenCalledWith(tab)
-    expect(browser.input).toHaveBeenCalled()
+    expect(browser.stop).toHaveBeenCalledWith(tab)
+    // Nothing is forwarded back to either kind of target.
+    expect(routed).not.toHaveProperty('input')
   })
 })

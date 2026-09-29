@@ -1,12 +1,12 @@
 /**
  * `ui_*` tools (spec 00 §9.1, S0): capability discovery, target listing,
- * proactive grant requests, release, and operation status / cancellation.
+ * early release of a target, credential handles, and operation status /
+ * cancellation. The AI drives continuously while computer use is on
+ * (2026-09-29): nothing is requested up front or delegated.
  */
 
 import { defineTool, type ToolDefinition } from '../../tools/definition'
 import { UiError } from '../errors'
-import { requestGrant } from '../gate'
-import { normalizeOrigin } from '../grants/match'
 import { AUTO_APPROVED_CLASSES } from '../policy'
 import { uiResult } from './result'
 import { runGuiTool, type ToolRuntime } from './runtime'
@@ -14,11 +14,9 @@ import {
   uiActionStatusInput,
   uiCancelActionInput,
   uiCredentialListInput,
-  uiDelegateGrantInput,
   uiGetCapabilitiesInput,
   uiListTargetsInput,
   uiReleaseControlInput,
-  uiRequestControlInput,
 } from './schemas'
 
 export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
@@ -27,7 +25,7 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'ui_get_capabilities',
       description:
-        'Report which computer-use drivers are available right now (built-in browser, desktop), what each can do, what is missing, whether computer use is stopped, and which actions the persistent GUI authorization mode approves automatically. Call this before starting GUI work.',
+        'Report which computer-use drivers are available right now (built-in browser, desktop), what each can do, what is missing, whether computer use is stopped, and which actions run without asking. Call this before starting GUI work.',
       input: uiGetCapabilitiesInput,
       isConcurrencySafe: () => true,
       timeoutMs: 15_000,
@@ -110,247 +108,18 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
         }),
     }),
     defineTool({
-      name: 'ui_request_control',
-      description:
-        'Ask the user up front for permission to observe, interact with, or navigate within the given origins in the built-in browser, instead of being asked action by action. Returns the granted scope, or "auto" when the persistent GUI mode already approves these actions. The reason you give is shown to the user as unverified.',
-      input: uiRequestControlInput,
-      execute: async (args, context) =>
-        await runGuiTool(runtime, 'ui_request_control', context, async (op) => {
-          const origins = args.origins.map((origin) => normalizeOrigin(origin))
-          if (origins.some((origin) => origin === null))
-            throw new UiError(
-              'INVALID_REQUEST',
-              'origins must be http(s) origins',
-            )
-          const unique = [...new Set(origins as string[])]
-          if (
-            op.identity.fullAccess &&
-            args.actions.every((action) =>
-              AUTO_APPROVED_CLASSES.includes(action),
-            )
-          )
-            return uiResult({
-              tool: 'ui_request_control',
-              summary: {
-                granted: 'auto',
-                origins: unique,
-                actions: args.actions,
-                note: 'The persistent Computer Use authorization mode approves these actions automatically.',
-              },
-              meta: { granted: 'auto' },
-            })
-          const requirement = {
-            driver: args.driver,
-            actionClass: args.actions.includes('navigate')
-              ? ('navigate' as const)
-              : args.actions.includes('interact')
-                ? ('interact' as const)
-                : ('observe' as const),
-            askActions: args.actions,
-            profileId: 'temporary',
-            origin: unique[0]!,
-            callId: op.callId,
-            toolName: 'ui_request_control',
-            display: { url: unique.join('、') },
-            ...(args.reason === undefined ? {} : { reason: args.reason }),
-          }
-          const verdict = runtime.gate.policy.evaluate(
-            {
-              ...op.identity,
-              background: op.identity.background || args.background === true,
-            },
-            requirement,
-          )
-          if (verdict.kind === 'deny') throw verdict.error
-          if (verdict.kind === 'allow' && verdict.via === 'grant')
-            return uiResult({
-              tool: 'ui_request_control',
-              summary: {
-                granted: verdict.grant.scope,
-                grantId: verdict.grant.grantId,
-                origins:
-                  verdict.grant.targetScope.kind === 'browser'
-                    ? verdict.grant.targetScope.origins
-                    : [],
-                actions: verdict.grant.allowedActions,
-                note: 'An existing grant already covers this.',
-              },
-              meta: {
-                granted: verdict.grant.scope,
-                grantId: verdict.grant.grantId,
-              },
-            })
-          const plan =
-            verdict.kind === 'ask'
-              ? verdict.plan
-              : {
-                  targetScope: {
-                    kind: 'browser' as const,
-                    profileId: 'temporary',
-                    origins: unique,
-                  },
-                  actions: args.actions,
-                  allowedScopes: ['once', 'task', 'session', 'timed'] as const,
-                  background: args.background === true,
-                }
-          const grant = await requestGrant(runtime.gate, {
-            identity: op.identity,
-            agent: context.agent!,
-            requirement,
-            plan: {
-              ...plan,
-              targetScope: {
-                kind: 'browser',
-                profileId: 'temporary',
-                origins: unique,
-              },
-              actions: [...new Set([...args.actions, 'observe' as const])],
-              allowedScopes: plan.allowedScopes.filter(
-                (scope) => scope !== 'once',
-              ),
-              background: args.background === true || plan.background,
-            },
-            callId: op.callId,
-            toolName: 'ui_request_control',
-            signal: op.signal,
-          })
-          return uiResult({
-            tool: 'ui_request_control',
-            summary: {
-              granted: grant.scope,
-              grantId: grant.grantId,
-              origins: unique,
-              actions: grant.allowedActions,
-              ...(grant.expiresAt === undefined
-                ? {}
-                : { expiresAt: grant.expiresAt }),
-              backgroundAllowed: grant.backgroundAllowed,
-            },
-            meta: { granted: grant.scope, grantId: grant.grantId },
-          })
-        }),
-    }),
-    defineTool({
-      name: 'ui_delegate_grant',
-      description:
-        'Explicitly delegate a subset of one of your existing GUI grants to a direct subagent. The source grant must already allow background use. The child receives only the requested actions and origins for this task; revoking or narrowing the source immediately invalidates the delegation.',
-      input: uiDelegateGrantInput,
-      timeoutMs: 15_000,
-      execute: async (args, context) =>
-        await runGuiTool(runtime, 'ui_delegate_grant', context, async (op) => {
-          if (!runtime.isDirectChild(op.identity.callerSessionId, args.childId))
-            throw new UiError(
-              'PERMISSION_DENIED',
-              'the target is not your direct subagent',
-            )
-          const source = runtime.gate.grants.get(args.grantId)
-          if (
-            !source ||
-            source.subject !== op.identity.subject ||
-            source.ownerSessionId !== op.identity.ownerSessionId ||
-            source.scope === 'once' ||
-            !source.backgroundAllowed ||
-            (source.scope === 'task' && source.taskId !== op.identity.taskId)
-          )
-            throw new UiError(
-              'PERMISSION_DENIED',
-              'the grant cannot be delegated to this subagent',
-            )
-          const actions = [...new Set(args.actions)]
-          if (
-            !actions.every((action) => source.allowedActions.includes(action))
-          )
-            throw new UiError(
-              'PERMISSION_DENIED',
-              'delegated actions exceed the source grant',
-            )
-          let targetScope = source.targetScope
-          if (args.origins !== undefined) {
-            if (source.targetScope.kind !== 'browser')
-              throw new UiError(
-                'INVALID_REQUEST',
-                'origins only apply to browser grants',
-              )
-            const sourceScope = source.targetScope
-            const origins = [
-              ...new Set(args.origins.map((origin) => normalizeOrigin(origin))),
-            ]
-            if (
-              origins.some(
-                (origin) =>
-                  origin === null || !sourceScope.origins.includes(origin),
-              )
-            )
-              throw new UiError(
-                'PERMISSION_DENIED',
-                'delegated origins exceed the source grant',
-              )
-            targetScope = { ...sourceScope, origins: origins as string[] }
-          }
-          const grant = runtime.gate.grants.issue({
-            subject: `subagent:${args.childId}`,
-            ownerSessionId: op.identity.ownerSessionId,
-            driver: source.driver,
-            targetScope,
-            allowedActions: actions,
-            scope: 'task',
-            taskId: op.identity.taskId,
-            ...(source.expiresAt === undefined
-              ? {}
-              : { expiresAt: source.expiresAt }),
-            backgroundAllowed: true,
-            delegatedFrom: {
-              grantId: source.grantId,
-              revision: source.revision,
-            },
-          })
-          context.agent!.session.append('ui/grant-delegated', {
-            grantId: grant.grantId,
-            sourceGrantId: source.grantId,
-            childId: args.childId,
-            actions,
-            targetScope,
-          })
-          return uiResult({
-            tool: 'ui_delegate_grant',
-            summary: {
-              grantId: grant.grantId,
-              childId: args.childId,
-              actions,
-              targetScope,
-              expiresAt: grant.expiresAt,
-            },
-            meta: { grantId: grant.grantId, childId: args.childId },
-          })
-        }),
-    }),
-    defineTool({
       name: 'ui_release_control',
       description:
-        'Give back control: close a tab or window you opened (targetId), or drop a grant you no longer need (grantId).',
+        'Release a window or tab before the task ends, when you are done with it: its screen sharing stops and its handle stops working. Everything you control is released at the end of the task anyway.',
       input: uiReleaseControlInput,
       timeoutMs: 30_000,
       execute: async (args, context) =>
         await runGuiTool(runtime, 'ui_release_control', context, async (op) => {
-          if (args.targetId !== undefined) {
-            const record = await service.close(op, { targetId: args.targetId })
-            return uiResult({
-              tool: 'ui_release_control',
-              summary: { released: 'target', targetId: record.targetId },
-              meta: { targetId: record.targetId },
-            })
-          }
-          const grant = runtime.gate.grants.get(args.grantId!)
-          if (grant === undefined || grant.subject !== op.identity.subject)
-            throw new UiError(
-              'INVALID_REQUEST',
-              `unknown grant ${args.grantId}`,
-            )
-          service.revokeGrant(grant.grantId)
+          const record = await service.close(op, { targetId: args.targetId })
           return uiResult({
             tool: 'ui_release_control',
-            summary: { released: 'grant', grantId: grant.grantId },
-            meta: { grantId: grant.grantId },
+            summary: { released: 'target', targetId: record.targetId },
+            meta: { targetId: record.targetId },
           })
         }),
     }),
@@ -391,7 +160,7 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
               })),
               ...(handles.length === 0
                 ? {
-                    next: 'No saved credential matches; ask the user to sign in themselves (take over) or to save one in Settings.',
+                    next: 'No saved credential matches; ask the user with ask_user_question to sign in themselves in that window, or to save one in Settings.',
                   }
                 : {}),
             },

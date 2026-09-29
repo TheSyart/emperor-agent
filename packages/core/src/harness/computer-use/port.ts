@@ -312,7 +312,14 @@ export type DriverEvent =
       readonly targetId: string
       readonly popup: TargetSnapshot
     }
-  | { readonly type: 'user-input'; readonly targetId: string }
+  | {
+      /**
+       * The user pressed "Stop Sharing" for the window (its capture stream
+       * ended): only the picture stops, the Agent keeps control.
+       */
+      readonly type: 'sharing-stopped'
+      readonly targetId: string
+    }
 
 export type DriverEventListener = (event: DriverEvent) => void
 

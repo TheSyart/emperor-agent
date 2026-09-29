@@ -31,7 +31,7 @@ final class HelperPlatformTests: XCTestCase {
         try gate.postUnheld { posted += 1 }
         gate.cancel(keyUp: { _ in XCTFail("nothing is held") }, mouseUp: { _ in XCTFail("nothing is held") })
         XCTAssertThrowsError(try gate.postUnheld { posted += 1 }) { error in
-            XCTAssertEqual((error as? NativeError)?.code, "USER_TAKEOVER")
+            XCTAssertEqual((error as? NativeError)?.code, "TIMEOUT_NO_EFFECT")
         }
         XCTAssertEqual(posted, 1, "no event may leave after the stop")
         gate.begin()

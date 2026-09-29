@@ -74,7 +74,6 @@ function setTargets(targets: UiTargetView[], stopped = false): void {
     stopped,
     drivers: [],
     targets,
-    grants: [],
     killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
   }
 }
@@ -332,6 +331,32 @@ describe('ComputerUsePreviewStack', () => {
       'app://attachments/att_1/raw',
     )
     expect(root.textContent).toContain('最近截图 · 09:05')
+  })
+
+  it('keeps the last frame, marked, after the user stops sharing a window', async () => {
+    setTargets([target()])
+    const root = await mount()
+    frameListeners[0]!({
+      targetId: 't-1',
+      seq: 1,
+      width: 1,
+      height: 1,
+      jpeg: Uint8Array.of(1),
+    })
+    await flush()
+    setTargets([target({ sharingStopped: true })])
+    await announce()
+    expect(bridge.agentPreviewStop).toHaveBeenCalledWith('t-1')
+    expect(revoked).toEqual([])
+    expect(card(root)?.querySelector('img')?.getAttribute('src')).toBe(
+      'blob:frame-1',
+    )
+    expect(
+      card(root)?.querySelector('.cu-card-note')?.textContent?.trim(),
+    ).toBe('画面已停止共享 · 最后一帧')
+    expect(card(root)?.querySelector('.cu-card-status')?.textContent).toBe(
+      '操作中',
+    )
   })
 
   it('marks cards waiting for the user and emergency-stopped cards', async () => {

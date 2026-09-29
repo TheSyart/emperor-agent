@@ -61,16 +61,14 @@ const deps = {
     while (current.owner !== undefined) current = current.owner
     return current as unknown as Agent
   },
-  authorizationMode: () => 'scoped' as const,
+  enabled: () => false,
 }
 
-const identity = (
-  value: FakeAgent,
-  mode: 'scoped' | 'unrestricted' = 'scoped',
-) =>
+/** `enabled`: the Computer Use master switch (full GUI access while on). */
+const identity = (value: FakeAgent, enabled = false) =>
   resolveIdentity(value as unknown as Agent, {
     ...deps,
-    authorizationMode: () => mode,
+    enabled: () => enabled,
   })
 
 describe('currentTurnInfo', () => {
@@ -124,7 +122,7 @@ describe('resolveIdentity', () => {
   it('marks subagents as unable to ask and keys them by their own id', () => {
     const root = agent('s1', userTurn(1), 'danger-full-access')
     const child = agent('c1', [], 'danger-full-access', root)
-    const id = identity(child, 'unrestricted')
+    const id = identity(child, true)
     expect(id).toMatchObject({
       subject: 'subagent:c1',
       kind: 'subagent',
@@ -140,15 +138,15 @@ describe('resolveIdentity', () => {
   it('keeps GUI access independent of the root and child Shell modes', () => {
     const root = agent('s1', userTurn(1), 'workspace-write')
     const child = agent('c1', [], 'danger-full-access', root)
-    expect(identity(child, 'unrestricted').fullAccess).toBe(true)
+    expect(identity(child, true).fullAccess).toBe(true)
     const child2 = agent(
       'c2',
       [],
       'read-only',
       agent('s2', userTurn(1), 'danger-full-access'),
     )
-    expect(identity(child2, 'unrestricted').fullAccess).toBe(true)
-    expect(identity(child2, 'scoped').fullAccess).toBe(false)
+    expect(identity(child2, true).fullAccess).toBe(true)
+    expect(identity(child2, false).fullAccess).toBe(false)
   })
 
   it('attributes scheduler turns to the job and goal rounds as background', () => {

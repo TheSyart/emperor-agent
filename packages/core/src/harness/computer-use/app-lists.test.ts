@@ -264,7 +264,7 @@ describe('user app lists', () => {
     ).rejects.toMatchObject({ code: 'CAPABILITY_DISABLED' })
   })
 
-  it('confirms every input to a user-added high-risk app in scoped mode', async () => {
+  it('marks a user-added high-risk app without confirming each input', async () => {
     const k = setup({ highRisk: ['com.example.Shell'] })
     const signal = new AbortController().signal
     await k.service.listDesktopWindows(identity(true), undefined, signal)
@@ -278,12 +278,10 @@ describe('user app lists', () => {
         callId: 'c',
         toolName: 'desktop_type',
       }).requirement
-    expect(classify(false)).toMatchObject({
-      highRiskApp: true,
-      confirmEachTime: true,
-    })
-    expect(classify(true)).toMatchObject({ highRiskApp: true })
-    expect(classify(true).confirmEachTime).toBeUndefined()
+    for (const fullAccess of [false, true]) {
+      expect(classify(fullAccess)).toMatchObject({ highRiskApp: true })
+      expect(classify(fullAccess).confirmEachTime).toBeUndefined()
+    }
   })
 
   it('persists the lists through CoreApi, deduplicated', async () => {

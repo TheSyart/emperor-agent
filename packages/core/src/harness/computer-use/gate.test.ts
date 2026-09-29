@@ -152,36 +152,20 @@ describe('computerUseGate', () => {
     expect(k.pending.hasPending('s1')).toBe(false)
   })
 
-  it('asks in restricted presets, then reuses the grant without asking again', async () => {
+  it('asks for one action at a time when full access is off, never for longer', async () => {
     const k = setup()
     const open = k.call('browser_open', { url: 'https://fixture.test/form' })
     const decision = k.gate(open)
     await tick()
     const [card] = k.pending.forSession('s1')
     expect(card).toMatch(/^grant_/)
+    expect(k.session.events.at(-1)).toMatchObject({
+      type: 'ui/grant-requested',
+      data: { allowedScopes: ['once'] },
+    })
+    // A wider scope is not on offer and reads as a refusal.
     k.pending.answer(card!, { grant: { option_id: 'session' } })
-    expect(await decision).toEqual({ kind: 'allow' })
-    const ticket = k.service.takeTicket('s1', open.callId)
-    expect(ticket).toMatchObject({ kind: 'grant', grantRevision: 1 })
-    expect(k.grants.get(ticket.grantId!)?.allowedActions).toEqual([
-      'observe',
-      'interact',
-      'navigate',
-    ])
-    await k.service.open(
-      {
-        identity: k.state.identity,
-        callId: open.callId,
-        toolName: 'browser_open',
-        signal: open.signal,
-        ticket,
-        vision: false,
-      },
-      { url: 'https://fixture.test/form' },
-    )
-    const observe = k.call('browser_observe')
-    expect(await k.gate(observe)).toEqual({ kind: 'allow' })
-    expect(k.pending.hasPending('s1')).toBe(false)
+    expect(await decision).toMatchObject({ kind: 'deny' })
   })
 
   it('remembers a refusal for the rest of the task', async () => {

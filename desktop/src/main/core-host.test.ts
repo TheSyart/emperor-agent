@@ -67,10 +67,7 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'computerUse.status',
         'computerUse.stop',
         'computerUse.resume',
-        'computerUse.listGrants',
-        'computerUse.revokeGrant',
         'computerUse.setEnabled',
-        'computerUse.controlTarget',
         'computerUse.listProfiles',
         'computerUse.manageProfile',
         'computerUse.listSitePermissions',
@@ -86,6 +83,12 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
       'plans.list',
       'projectProcesses.stop',
       'goals.replace',
+      // 2026-09-29: the AI drives computer use continuously.
+      'computerUse.controlTarget',
+      'computerUse.setAuthorizationMode',
+      'computerUse.listGrants',
+      'computerUse.revokeGrant',
+      'computerUse.narrowGrant',
     ])
       expect(coreOperationKeys()).not.toContain(retired)
   })

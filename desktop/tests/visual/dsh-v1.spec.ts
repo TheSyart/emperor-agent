@@ -538,7 +538,7 @@ test('permission takeover approves once and returns the composer', async ({
   await expect(page.locator('.composer-root .card')).toBeVisible()
 })
 
-test('computer use grant takeover picks a scope and returns the composer', async ({
+test('computer use grant card allows this one action and returns the composer', async ({
   page,
 }) => {
   await open(page, '/chat/build-ui?visualControl=grant')
@@ -548,8 +548,10 @@ test('computer use grant takeover picks a scope and returns the composer', async
     'https://fixture.test/form?utm=1',
   )
   await expect(card).toContainText('来自 Agent，未经验证')
+  // Only 「本次」 is on offer: no scope picker, no background checkbox.
+  await expect(card.getByRole('radio')).toHaveCount(0)
+  await expect(card.locator('input[type="checkbox"]')).toHaveCount(0)
   await shot(page, 'app-grant-card')
-  await card.getByRole('radio', { name: '本会话' }).click()
   await card.getByRole('button', { name: '允许' }).click()
   await expect(card).toBeHidden()
   await expect(page.locator('.composer-root .card')).toBeVisible()
@@ -1339,7 +1341,7 @@ for (const theme of ['dark', 'light'] as const) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`settings computer use: switch, stop and grants (${theme})`, async ({
+  test(`settings computer use: four groups, stop and 高级 (${theme})`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?settings=computer&visualComputerUse=on', {
@@ -1351,15 +1353,13 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
     await expect(dialog.locator('[data-driver]')).toHaveCount(3)
     await expect(dialog).toContainText('⌃⌥⌘.')
-    await expect(dialog).toContainText('http://127.0.0.1:5173')
-    await expect(dialog).toContainText('完全放行')
+    await expect(dialog).not.toContainText('持续允许电脑操作')
+    await expect(
+      dialog.getByTestId('computer-use-advanced'),
+    ).not.toHaveAttribute('open', '')
     await expectNoHorizontalOverflow(page)
     await shot(page, `settings-computer-on-${theme}`)
 
-    await dialog
-      .getByRole('button', { name: '撤销 https://docs.example.com 的授权' })
-      .click()
-    await expect(dialog).not.toContainText('https://docs.example.com')
     await dialog.getByRole('button', { name: '立即停止' }).click()
     await expect(dialog.getByTestId('computer-use-status')).toHaveText('已急停')
     await dialog.getByRole('button', { name: '恢复' }).click()
@@ -1373,13 +1373,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
       'Emperor 内建桌面控制已关闭',
     )
-    // Narrow a grant one action at a time.
-    await dialog.getByRole('button', { name: '不再允许操作' }).first().click()
-    await expect(
-      dialog.getByRole('button', { name: '不再允许操作' }),
-    ).toHaveCount(0)
-    // Screenshots against the quota, and the stop-shortcut editor.
-    await expect(dialog).toContainText('已保存 14 张截图')
+    // The stop-shortcut editor.
     await dialog.getByTestId('kill-switch-edit').click()
     await expect(dialog.getByTestId('kill-switch-capture')).toBeFocused()
     await page.keyboard.press('Control+Shift+K')
@@ -1389,7 +1383,14 @@ for (const theme of ['dark', 'light'] as const) {
     await dialog.getByRole('button', { name: '保存' }).click()
     await expect(dialog.getByRole('button', { name: '恢复默认' })).toBeVisible()
 
-    // The user's own app lists and the download retention.
+    // 「高级」: the user's own app lists, saved screenshots and the download
+    // retention, reached from the protected apps row.
+    await dialog.getByTestId('computer-use-app-lists').click()
+    await expect(dialog.getByTestId('computer-use-advanced')).toHaveAttribute(
+      'open',
+      '',
+    )
+    await expect(dialog).toContainText('已保存 14 张截图')
     const sensitive = dialog.getByLabel('添加到敏感应用')
     await sensitive.fill('com.apple.Notes')
     await sensitive.press('Enter')

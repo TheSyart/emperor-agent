@@ -268,7 +268,6 @@ function kit(
     gate: gateDeps,
     identity: () => identity,
     vision: () => vision,
-    isDirectChild: () => false,
   }
   const gate = createComputerUseGate(gateDeps)
   const tools = new Map(
@@ -822,14 +821,11 @@ describe('desktop_* tools', () => {
     const k = kit(false, true, true)
     await k.run('desktop_list_windows')
     await k.run('desktop_bind', { windowRef: 'window-1' })
-    const id = 'desktop-target-1'
-    await k.service.controlTarget(id, 'pause')
-    await k.service.controlTarget(id, 'resume')
-    await k.service.controlTarget(id, 'takeover')
-    await k.service.controlTarget(id, 'handback')
+    k.service.pauseForUiDisconnect()
+    k.service.resumeAfterUiReconnect()
     await k.service.emergencyStop()
     k.service.resume()
-    expect(k.captures).toEqual([true, false, true, false, true, false, true])
+    expect(k.captures).toEqual([true, false, true, false, true])
 
     const sensitive = kit(false, true, true)
     sensitive.markSensitive('com.example.Writer')
@@ -842,16 +838,28 @@ describe('desktop_* tools', () => {
     expect(k.service.listTargets()[0]?.previewBlocked).toBeUndefined()
   })
 
-  it('treats the menu-bar Stop Sharing as the user taking the window over', async () => {
+  it('keeps working after the menu-bar Stop Sharing, without reopening the stream', async () => {
     const k = kit(false, true, true)
     await k.run('desktop_list_windows')
     await k.run('desktop_bind', { windowRef: 'window-1' })
-    k.emitDriver({ type: 'user-input', targetId: 'desktop-target-1' })
+    expect(k.captures).toEqual([true])
+    k.emitDriver({ type: 'sharing-stopped', targetId: 'desktop-target-1' })
     await Promise.resolve()
-    expect(k.service.lookup(k.identity, 'desktop-target-1')?.control).toBe(
-      'user-takeover',
-    )
-    expect(k.captures.at(-1)).toBe(false)
+    const record = k.service.lookup(k.identity, 'desktop-target-1')!
+    expect(record.control).toBe('agent')
+    expect(k.service.listTargets()[0]).toMatchObject({
+      control: 'agent',
+      sharingStopped: true,
+    })
+    // Stopping and resuming does not start the picture again this binding.
+    await k.service.emergencyStop()
+    k.service.resume()
+    expect(k.captures.filter(Boolean)).toEqual([true])
+    const observed = await k.run('desktop_observe', {
+      targetId: 'desktop-target-1',
+    })
+    expect(observed.denied).toBeUndefined()
+    expect(JSON.stringify(observed)).toContain('stopped screen sharing')
   })
 
   it('lists the bound app menu as untrusted content without dispatching anything', async () => {
@@ -922,15 +930,13 @@ describe('desktop_* tools', () => {
     }).requirement
     expect(requirement.confirmEachTime).toBeUndefined()
     expect(requirement.highImpact).toBeUndefined()
-    expect(requirement.display?.title).toContain('切到前台')
 
     const activated = await k.run('desktop_activate', {
       targetId: 'desktop-target-1',
     })
     expect(activated.denied).toBeUndefined()
     expect(k.actions).toEqual([{ kind: 'activate' }])
-    expect(k.service.hasForegroundConsent(owner, 'desktop-target-1')).toBe(true)
-    // Any action in this mode may bring the window forward when it needs to.
+    // Any action may bring the window forward when it needs to.
     await k.run('desktop_press', { targetId: 'desktop-target-1', key: 'Tab' })
     expect(k.bringForward).toEqual([false, true])
     k.service.endTask(owner)
@@ -948,29 +954,6 @@ describe('desktop_* tools', () => {
     expect(quit.denied).toBeUndefined()
     // The card took the front; the confirmed command gets it back itself.
     expect(k.bringForward).toEqual([true])
-  })
-
-  it('asks once per task in per-item mode, then lets later actions bring the window forward', async () => {
-    const k = kit(false, true, false, undefined, true)
-    await k.run('desktop_list_windows')
-    await k.run('desktop_bind', { windowRef: 'window-1' })
-    const owner = k.identity.ownerSessionId
-    const press = () =>
-      k.run('desktop_press', { targetId: 'desktop-target-1', key: 'Tab' })
-    await press()
-    expect(k.bringForward.at(-1)).toBe(false)
-    await k.run('desktop_activate', { targetId: 'desktop-target-1' })
-    expect(k.service.hasForegroundConsent(owner, 'desktop-target-1')).toBe(true)
-    await press()
-    expect(k.bringForward.at(-1)).toBe(true)
-    k.service.endTask(owner)
-    expect(k.restored).toEqual(['desktop-target-1'])
-    // A new task starts without that agreement.
-    expect(k.service.hasForegroundConsent(owner, 'desktop-target-1')).toBe(
-      false,
-    )
-    await press()
-    expect(k.bringForward.at(-1)).toBe(false)
   })
 
   it('requires vision for screenshot coordinates and keeps browser tools away from desktop targets', async () => {
@@ -1048,7 +1031,7 @@ describe('desktop_* tools', () => {
     expect(chordKey('Option+Meta+Escape')).toBe('meta+option+escape')
   })
 
-  it('classifies desktop clicks against the observed element and confirms high-risk app input each time', async () => {
+  it('classifies desktop clicks against the observed element and lets high-risk app input run', async () => {
     const k = kit(true)
     k.grants.issue({
       subject: k.identity.subject,
@@ -1134,15 +1117,9 @@ describe('desktop_* tools', () => {
       callId: 'type-1',
       toolName: 'desktop_type',
     }).requirement
-    expect(requirement).toMatchObject({
-      highRiskApp: true,
-      confirmEachTime: true,
-      // The per-input card must show exactly what reaches the shell.
-      display: {
-        appName: 'com.apple.Terminal',
-        input: { kind: 'text', text: 'pwd' },
-      },
-    })
+    // Marked, but not confirmed input by input (the user's decision).
+    expect(requirement).toMatchObject({ highRiskApp: true })
+    expect(requirement.confirmEachTime).toBeUndefined()
     const press = GUI_TOOL_CATALOG.desktop_press!.classify!({
       args: { targetId: 'desktop-target-1', key: 'Enter' },
       identity: terminal.identity,
@@ -1151,16 +1128,10 @@ describe('desktop_* tools', () => {
       callId: 'press-1',
       toolName: 'desktop_press',
     }).requirement
-    expect(press).toMatchObject({
-      confirmEachTime: true,
-      display: {
-        appName: 'com.apple.Terminal',
-        input: { kind: 'key', key: 'Enter' },
-      },
-    })
+    expect(press.confirmEachTime).toBeUndefined()
   })
 
-  it('auto-allows ordinary Terminal input in unrestricted Computer Use mode', async () => {
+  it('auto-allows ordinary Terminal input while computer use is on', async () => {
     const k = kit(true, false, true)
     k.setWindow({
       windowRef: 'terminal-1',

@@ -554,13 +554,6 @@ export class HarnessHost {
     this.emitHost({ event: 'computer_use_changed', reason: 'state' })
   }
 
-  /** Persist the GUI permission mode without changing Shell sandbox access. */
-  setComputerUseAuthorizationMode(mode: 'unrestricted' | 'scoped'): void {
-    if (this.computerUse === null) return
-    this.computerUseConfig?.update({ authorizationMode: mode })
-    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
-  }
-
   /**
    * One driver's switch (spec 00 §8.4): the tools stay registered and
    * answer CAPABILITY_DISABLED; switching off ends that driver's targets.
@@ -627,8 +620,6 @@ export class HarnessHost {
       sessionFor: (sessionId) =>
         this.agents.get(sessionId)?.session ?? this.sessions.get(sessionId),
       rootOf: (agent) => this.rootOf(agent),
-      isDirectChild: (parentSessionId, childId) =>
-        this.subagents.record(childId)?.parentId === parentSessionId,
       planActive: (agent) => {
         const plan = this.planMode.get(this.rootOf(agent).session)
         return plan.active || plan.pending === true

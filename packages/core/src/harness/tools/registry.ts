@@ -117,6 +117,8 @@ export class ToolRegistry {
     string,
     (agent: Agent | undefined) => boolean
   >()
+  /** Removed tool names → why (a call gets that instead of "unknown tool"). */
+  private readonly retired = new Map<string, string>()
   readonly preExecute: PreExecuteMiddleware[] = []
   readonly postExecute: PostExecuteMiddleware[] = []
   readonly guards: ToolGuard[] = []
@@ -141,6 +143,17 @@ export class ToolRegistry {
       if (this.tools.get(definition.name) !== definition) return
       this.tools.delete(definition.name)
       this.visibility.delete(definition.name)
+    }
+  }
+
+  /**
+   * Mark a removed tool: it is never listed, and a call to it (from an older
+   * conversation, or a model that remembers it) says it was removed and why.
+   */
+  retire(name: string, note: string): () => void {
+    this.retired.set(name, note)
+    return () => {
+      if (this.retired.get(name) === note) this.retired.delete(name)
     }
   }
 
@@ -257,7 +270,9 @@ export class ToolRegistry {
       return {
         kind: 'final-result',
         context: makeContext(call.arguments),
-        result: toolErrorResult(new ToolNotFoundError(call.name)),
+        result: toolErrorResult(
+          new ToolNotFoundError(call.name, this.retired.get(call.name)),
+        ),
       }
     }
     let args: unknown

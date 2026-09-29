@@ -14,7 +14,6 @@ export interface ToolRuntime {
   identity(agent: Agent | undefined): UiCallerIdentity
   /** The route serving this agent can see images. */
   vision(agent: Agent): boolean
-  isDirectChild(parentSessionId: string, childId: string): boolean
 }
 
 /**

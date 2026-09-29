@@ -55,8 +55,8 @@ export function assertTypable(target: RefTarget): void {
       'typing into a cross-origin frame is not available yet',
       {
         reason: 'cross-origin-frame-input',
-        // E-B3: takeover input does not reach such frames in this view.
-        hint: 'Ask the user to type it in their own browser; takeover in the Agent tab cannot reach this frame either.',
+        // E-B3: input does not reach such frames in this view.
+        hint: 'Ask the user with ask_user_question to do this step in their own browser.',
       },
     )
 }
@@ -277,7 +277,8 @@ export async function fillTarget(
       'secret fields cannot be filled with text',
       {
         reason: 'secret-field',
-        hint: 'Ask the user to take over and type it themselves.',
+        // The user cannot type into a built-in browser tab (no takeover).
+        hint: 'Fill a saved credential with browser_fill_credential. Without one, ask the user with ask_user_question to save it in Settings › 电脑操作 › 凭据, or to do this step in their own browser.',
       },
     )
   if (!field.editable)

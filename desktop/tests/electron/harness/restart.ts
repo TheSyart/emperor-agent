@@ -202,10 +202,7 @@ export async function runRestartPhase(): Promise<void> {
     extra: {
       templatesDir: resolve(__dirname, '..', '..', 'templates'),
       computerUsePort: port,
-      computerUseSettings: () => ({
-        enabled: true,
-        authorizationMode: 'unrestricted',
-      }),
+      computerUseSettings: () => ({ enabled: true }),
     },
   })
   const { api } = fixture

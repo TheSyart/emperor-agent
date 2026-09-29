@@ -10,9 +10,10 @@ import UniformTypeIdentifiers
 /// One low-rate stream per window the agent controls (E-M16). macOS marks a
 /// streamed window with its purple sharing badge and lists the helper under
 /// screen sharing in the menu bar, so the user sees which window is being
-/// controlled and can stop it there ("Stop Sharing" reaches main as
-/// `target.capture.stopped` with reason `user`, which is a takeover). Only the
-/// latest complete frame is kept, for the live preview.
+/// controlled. "Stop Sharing" there reaches main as `target.capture.stopped`
+/// with reason `user`: only the picture stops (the stream is not restarted),
+/// the agent keeps working on the window. Only the latest complete frame is
+/// kept, for the live preview.
 final class TargetCaptureStreams {
     private final class Sink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
         private let lock = NSLock()

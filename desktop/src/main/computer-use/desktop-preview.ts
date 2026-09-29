@@ -7,10 +7,7 @@
  * `routedPreview` sends each target id to the right one.
  */
 
-import type {
-  AgentPreviewFrame,
-  AgentPreviewInput,
-} from '../../shared/ipc-contract'
+import type { AgentPreviewFrame } from '../../shared/ipc-contract'
 
 /** Desktop target ids come from the helper: `t-` + an uppercase UUID. */
 export const DESKTOP_TARGET_ID =
@@ -130,10 +127,9 @@ export class DesktopPreview {
 export interface PreviewCapability {
   start(targetId: string): StartResult
   stop(targetId: string): void
-  input(targetId: string, event: AgentPreviewInput): boolean
 }
 
-/** Desktop windows get the polled preview; input forwarding stays browser-only. */
+/** Desktop windows get the polled preview; browser tabs their paint frames. */
 export function routedPreview(
   browser: PreviewCapability,
   desktop: DesktopPreview,
@@ -147,7 +143,5 @@ export function routedPreview(
       DESKTOP_TARGET_ID.test(targetId)
         ? desktop.stop(targetId)
         : browser.stop(targetId),
-    input: (targetId, event) =>
-      DESKTOP_TARGET_ID.test(targetId) ? false : browser.input(targetId, event),
   }
 }

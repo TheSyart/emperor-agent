@@ -3,6 +3,12 @@
  * per-driver switches (0600, atomic replace). Off by default — the
  * capability is evaluation-gated (`capabilities/portfolio.ts`). A corrupt
  * file reads as "off".
+ *
+ * The retired per-item mode (`authorizationMode: 'scoped'`, 2026-09-29):
+ * the AI now drives continuously while the switch is on, so a file that
+ * still asks for the per-item mode reads as switched off with a notice for
+ * Settings, and is written back once without the field. Switching on again
+ * clears the notice. Permissions never widen without the user knowing.
  */
 
 import { join } from 'node:path'
@@ -15,7 +21,11 @@ export const COMPUTER_USE_CONFIG_FILE = 'config.json'
 
 export interface ComputerUseConfig extends ComputerUseSettings {
   readonly enabled: boolean
-  readonly authorizationMode: 'unrestricted' | 'scoped'
+  /**
+   * The saved per-item mode was retired and switched computer use off; set
+   * until the user switches it on again (Settings shows why it is off).
+   */
+  readonly scopedRetired?: true
   readonly drivers: Partial<Record<DriverKind, boolean>>
   /** The user's emergency-stop shortcut (absent: the platform default). */
   readonly killSwitchAccelerator?: string
@@ -47,7 +57,9 @@ const schema = z
   .object({
     schemaVersion: z.literal(1),
     enabled: z.boolean(),
+    /** Retired: read once to switch a per-item file off, never written. */
     authorizationMode: z.enum(['unrestricted', 'scoped']).optional(),
+    scopedRetired: z.literal(true).optional(),
     killSwitchAccelerator: z
       .string()
       .max(64)
@@ -80,7 +92,7 @@ const CODEC: SnapshotCodec<ComputerUseConfig> = {
   encode: (value) => ({
     schemaVersion: 1,
     enabled: value.enabled,
-    authorizationMode: value.authorizationMode,
+    ...(value.scopedRetired === true ? { scopedRetired: true } : {}),
     drivers: value.drivers,
     appLists: value.appLists,
     downloadRetentionDays: value.downloadRetentionDays,
@@ -90,11 +102,14 @@ const CODEC: SnapshotCodec<ComputerUseConfig> = {
   }),
   decode(input) {
     const parsed = schema.parse(input)
+    const retiring = parsed.authorizationMode === 'scoped'
     return {
       value: {
-        enabled: parsed.enabled,
+        enabled: retiring ? false : parsed.enabled,
+        ...(retiring || parsed.scopedRetired === true
+          ? { scopedRetired: true as const }
+          : {}),
         drivers: parsed.drivers,
-        authorizationMode: parsed.authorizationMode ?? 'unrestricted',
         appLists: parsed.appLists ?? EMPTY_LISTS,
         downloadRetentionDays:
           parsed.downloadRetentionDays ?? DEFAULT_DOWNLOAD_RETENTION_DAYS,
@@ -103,6 +118,7 @@ const CODEC: SnapshotCodec<ComputerUseConfig> = {
           : { killSwitchAccelerator: parsed.killSwitchAccelerator }),
       },
       schemaVersion: 1,
+      ...(parsed.authorizationMode === undefined ? {} : { migrated: true }),
     }
   },
 }
@@ -116,7 +132,6 @@ const EMPTY_LISTS: Record<AppListKind, readonly string[]> = {
 const DEFAULTS: ComputerUseConfig = {
   enabled: false,
   drivers: {},
-  authorizationMode: 'unrestricted',
   appLists: EMPTY_LISTS,
   downloadRetentionDays: DEFAULT_DOWNLOAD_RETENTION_DAYS,
 }
@@ -136,14 +151,18 @@ export class ComputerUseConfigStore {
   }
 
   get(): ComputerUseConfig {
-    if (this.cached === null)
-      this.cached = this.snapshot.read({ fallback: DEFAULTS }).value
+    if (this.cached === null) {
+      const result = this.snapshot.read({ fallback: DEFAULTS })
+      this.cached = result.value
+      // Drop the retired field from disk once (the value is already safe).
+      if (result.receipt.recoveryAction === 'migrated_in_memory')
+        this.snapshot.write(result.value)
+    }
     return this.cached
   }
 
   update(change: {
     enabled?: boolean
-    authorizationMode?: 'unrestricted' | 'scoped'
     drivers?: Partial<Record<DriverKind, boolean>>
     /** `null` restores the platform default. */
     killSwitchAccelerator?: string | null
@@ -156,9 +175,13 @@ export class ComputerUseConfigStore {
       change.killSwitchAccelerator === undefined
         ? current.killSwitchAccelerator
         : (change.killSwitchAccelerator ?? undefined)
+    const enabled = change.enabled ?? current.enabled
     const next: ComputerUseConfig = {
-      enabled: change.enabled ?? current.enabled,
-      authorizationMode: change.authorizationMode ?? current.authorizationMode,
+      enabled,
+      // Switching on again is the user's confirmation after the notice.
+      ...(current.scopedRetired === true && !enabled
+        ? { scopedRetired: true as const }
+        : {}),
       drivers: { ...current.drivers, ...(change.drivers ?? {}) },
       downloadRetentionDays:
         change.downloadRetentionDays ?? current.downloadRetentionDays,

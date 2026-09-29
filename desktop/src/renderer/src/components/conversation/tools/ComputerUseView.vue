@@ -97,7 +97,6 @@ async function moveDownload(): Promise<void> {
       <Pill v-if="meta.driver">{{
         DRIVER_LABEL[meta.driver] ?? meta.driver
       }}</Pill>
-      <Pill v-if="meta.autoApproved" tone="accent">完全放行 · 自动放行</Pill>
       <Pill v-if="meta.granted" tone="accent">授权 · {{ meta.granted }}</Pill>
       <Pill
         v-if="meta.outcome && !unknown"

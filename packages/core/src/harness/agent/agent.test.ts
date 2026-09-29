@@ -192,6 +192,31 @@ describe('Agent loop', () => {
     ).toBe(true)
   })
 
+  it('tells the model a retired tool was removed, and why', async () => {
+    const h = createTestHarness({
+      replies: [{ tools: [{ id: 'a', name: 'old_tool' }] }, { text: 'ok' }],
+    })
+    const restore = h.tools.retire(
+      'old_tool',
+      'use new_tool instead; nothing needs asking up front',
+    )
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await agent.whenIdle()
+    const result = agent.session.events.find(
+      (e): e is SessionEvent<'tool/result'> => e.type === 'tool/result',
+    )!
+    expect(result.data.error?.code).toBe('UNKNOWN_TOOL')
+    const content = result.data.message.content[0]!
+    expect(content.type === 'tool-result' && JSON.stringify(content)).toContain(
+      'tool \\"old_tool\\" was removed: use new_tool instead',
+    )
+    expect(h.tools.schemas().map((schema) => schema.name)).not.toContain(
+      'old_tool',
+    )
+    restore()
+  })
+
   it('logs an interrupted assistant message and an aborted turn on cancel mid-stream', async () => {
     const h = createTestHarness({ replies: [{ hang: true }] })
     const agent = h.agent()

@@ -37,11 +37,11 @@ const HELPER_REASON_HINTS: Readonly<Record<string, string>> = {
   'background-delivery-unconfirmed':
     'The keys may not have reached the app. Observe first; retry once only if the text is absent.',
   'foreground-required':
-    'The app is in the background and this step needs the front, so nothing was sent. Prefer a background route (an element with a press action, desktop_fill, desktop_menu_select); otherwise call desktop_activate (in per-item mode the user is asked), then retry.',
+    'The app is in the background and this step needs the front, so nothing was sent. Prefer a background route (an element with a press action, desktop_fill, desktop_menu_select); otherwise call desktop_activate, then retry.',
   'background-keys-ignored':
-    'This app ignores keys while it is in the background, so nothing was sent. Set text with desktop_fill and click elements that have a press action; otherwise call desktop_activate (in per-item mode the user is asked) and retry.',
+    'This app ignores keys while it is in the background, so nothing was sent. Set text with desktop_fill and click elements that have a press action; otherwise call desktop_activate and retry.',
   'menu-needs-front':
-    "The app greys out this command while it is in the background, so nothing was sent. Look for a background route (a window's close button, an element with a press action); otherwise call desktop_activate (in per-item mode the user is asked), then run the command again right away.",
+    "The app greys out this command while it is in the background, so nothing was sent. Look for a background route (a window's close button, an element with a press action); otherwise call desktop_activate, then run the command again right away.",
   'menu-item-not-found':
     'List the menu with desktop_menu and use the exact titles it returns.',
   'target-closed-after-dispatch':

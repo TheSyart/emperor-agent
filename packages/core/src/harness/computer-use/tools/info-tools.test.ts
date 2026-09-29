@@ -65,12 +65,7 @@ async function setup(
 
 describe('browser_profile_list', () => {
   it('lists the temporary and persistent profiles with open tabs, without a grant card', async () => {
-    const settings = {
-      current: {
-        enabled: true,
-        authorizationMode: 'scoped',
-      } as ComputerUseSettings,
-    }
+    const settings = { current: { enabled: true } as ComputerUseSettings }
     const seen: Array<Record<string, unknown>> = []
     let profileId = ''
     const { api, events, id } = await setup(
@@ -95,7 +90,7 @@ describe('browser_profile_list', () => {
     })
     profileId = profile!.profileId
 
-    // Scoped mode: an info tool never asks.
+    // An info tool never asks.
     await api.chat.submit({ content: 'which profiles?', sessionId: id })
     expect(eventOf(events, 'ask_request')).toBeUndefined()
     expect(seen[0]).toEqual({
@@ -112,8 +107,7 @@ describe('browser_profile_list', () => {
       ],
     })
 
-    // Open a tab in the profile (unrestricted: no card), then list again.
-    settings.current = { enabled: true, authorizationMode: 'unrestricted' }
+    // Open a tab in the profile (no card), then list again.
     await api.chat.submit({ content: 'use the mail profile', sessionId: id })
     const profiles = seen[1]!.profiles as Array<Record<string, unknown>>
     expect(seen[1]!.status).toBe('ok')

@@ -509,7 +509,7 @@ describe('HelperClient', () => {
         code: 'TARGET_NOT_VISIBLE',
         message: 'Target app is in the background',
         reason: 'foreground-required',
-        hint: 'The app is in the background and this step needs the front, so nothing was sent. Prefer a background route (an element with a press action, desktop_fill, desktop_menu_select); otherwise call desktop_activate (in per-item mode the user is asked), then retry.',
+        hint: 'The app is in the background and this step needs the front, so nothing was sent. Prefer a background route (an element with a press action, desktop_fill, desktop_menu_select); otherwise call desktop_activate, then retry.',
       },
       {
         code: 'TARGET_NOT_VISIBLE',

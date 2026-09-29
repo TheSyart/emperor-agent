@@ -16,12 +16,11 @@ import { ComputerUseService, type GateTicket, type OpContext } from './service'
 function setup(
   options: {
     enabled?: boolean
-    mode?: 'unrestricted' | 'scoped'
     screenshots?: ScreenshotLedger
     now?: () => Date
   } = {},
 ) {
-  let mode = options.mode ?? 'unrestricted'
+  let enabled = options.enabled ?? true
   const store = new SessionLogStore({ root: '/tmp/unused', persist: false })
   store.create({ id: 's1' })
   store.create({ id: 's2' })
@@ -55,10 +54,7 @@ function setup(
       }
     },
     cancelGrantCards: (sessionId) => cancelled.push(sessionId),
-    settings: () => ({
-      enabled: options.enabled ?? true,
-      authorizationMode: mode,
-    }),
+    settings: () => ({ enabled }),
     onChanged: (reason) => changes.push(reason),
     ...(options.now === undefined ? {} : { now: options.now }),
   })
@@ -72,8 +68,8 @@ function setup(
     cancelled,
     changes,
     deleted,
-    setMode: (next: 'unrestricted' | 'scoped') => {
-      mode = next
+    setEnabled: (next: boolean) => {
+      enabled = next
     },
   }
 }
@@ -371,7 +367,7 @@ describe('ComputerUseService', () => {
     await k.service.act(ctx({ identity, ticket }), {
       action: { kind: 'click', ref: ref('I agree') },
     })
-    k.service.revokeGrant(grant.grantId)
+    k.grants.revoke(grant.grantId, 'user')
     await expectUiError(
       k.service.act(ctx({ identity, ticket }), {
         action: { kind: 'click', ref: ref('I agree') },
@@ -379,14 +375,13 @@ describe('ComputerUseService', () => {
       'PERMISSION_DENIED',
       'grant-revoked',
     )
-    // An auto ticket is refused once the GUI authorization mode is narrowed.
-    k.setMode('scoped')
+    // An auto ticket is refused once computer use is switched off.
+    k.setEnabled(false)
     await expectUiError(
       k.service.act(ctx({ identity }), {
         action: { kind: 'click', ref: ref('I agree') },
       }),
-      'PERMISSION_REQUIRED',
-      'preset-changed',
+      'CAPABILITY_DISABLED',
     )
   })
 
@@ -543,37 +538,41 @@ describe('ComputerUseService', () => {
     expect(k.port.browser.list()).toEqual([])
   })
 
-  it('pauses Agent-driven targets when the UI disconnects, until resumed', async () => {
+  it('pauses Agent-driven targets while the app window reloads, and resumes with it', async () => {
     const k = setup()
     const { record } = await openForm(k)
     expect(k.service.pauseForUiDisconnect()).toBe(1)
     expect(k.service.listTargets()[0]!.control).toBe('paused')
-    // Already paused or held by the user: untouched.
+    // Already paused: untouched.
     expect(k.service.pauseForUiDisconnect()).toBe(0)
     await expectUiError(
       k.service.observe(ctx(), { targetId: record.targetId }),
       'TARGET_BUSY',
+      'ui-reloading',
     )
-    await k.service.controlTarget(record.targetId, 'resume')
+    expect(k.service.resumeAfterUiReconnect()).toBe(1)
+    expect(k.service.resumeAfterUiReconnect()).toBe(0)
     const observation = await k.service.observe(ctx(), {})
-    expect(observation.notes?.join(' ')).toContain('app window reloaded')
+    expect(observation.notes?.join(' ')).toContain('app window is reloading')
+    expect(k.service.listTargets()[0]!.control).toBe('agent')
   })
 
-  it('honours user pause, takeover and hand-back', async () => {
+  it('keeps a stopped target stopped when the window comes back', async () => {
     const k = setup()
-    const { record } = await openForm(k)
-    await k.service.controlTarget(record.targetId, 'takeover')
-    await expectUiError(k.service.observe(ctx(), {}), 'USER_TAKEOVER')
-    await k.service.controlTarget(record.targetId, 'pause')
-    await expectUiError(k.service.observe(ctx(), {}), 'TARGET_BUSY', 'paused')
-    await k.service.controlTarget(record.targetId, 'handback')
-    await k.service.observe(ctx(), {})
-    await k.service.controlTarget(record.targetId, 'close')
-    expect(k.service.listTargets()).toEqual([])
-    expect(k.store.get('s1')!.events.at(-1)).toMatchObject({
-      type: 'ui/target-closed',
-      data: { reason: 'user' },
-    })
+    await openForm(k)
+    k.service.pauseForUiDisconnect()
+    await k.service.emergencyStop()
+    k.service.resumeAfterUiReconnect()
+    expect(k.service.listTargets()[0]!.control).toBe('stopped')
+    k.service.resume()
+    expect(k.service.listTargets()[0]!.control).toBe('agent')
+  })
+
+  it('offers no user takeover: the Agent keeps control of its targets', () => {
+    const k = setup()
+    expect(k.service).not.toHaveProperty('controlTarget')
+    expect(k.service).not.toHaveProperty('revokeGrant')
+    expect(k.service).not.toHaveProperty('narrowGrant')
   })
 
   it('caps open targets per session', async () => {
@@ -586,39 +585,11 @@ describe('ComputerUseService', () => {
     )
   })
 
-  it('blocks page-initiated navigation to an unauthorized origin in restricted presets', async () => {
-    const k = setup({ mode: 'scoped' })
-    const restricted = who({ fullAccess: false })
-    const grant = k.grants.issue({
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://fixture.test'],
-      },
-      allowedActions: ['observe', 'interact', 'navigate'],
-      scope: 'session',
-      backgroundAllowed: false,
-    })
-    const ticket: GateTicket = {
-      kind: 'grant',
-      grantId: grant.grantId,
-      grantRevision: 1,
-      actionClass: 'navigate',
-    }
-    const record = await k.service.open(ctx({ identity: restricted, ticket }), {
+  it('lets a page move to any origin while computer use is on', async () => {
+    const k = setup()
+    const record = await k.service.open(ctx(), {
       url: k.port.browser.url('/form'),
     })
-    expect(
-      k.service.navigationVerdict({
-        targetId: record.targetId,
-        url: 'https://other.test/',
-        frame: 'main',
-        initiator: 'page',
-      }),
-    ).toBe('block')
     expect(
       k.service.navigationVerdict({
         targetId: record.targetId,
@@ -635,15 +606,16 @@ describe('ComputerUseService', () => {
         initiator: 'page',
       }),
     ).toBe('allow')
-    const observation = await k.service.observe(
-      ctx({ identity: restricted, ticket }),
-      {},
-    )
-    expect(observation.notes?.join('\n')).toContain(
-      'https://other.test was blocked',
-    )
-
-    k.setMode('unrestricted')
+    // A tab nobody owns yet cannot move on its own.
+    expect(
+      k.service.navigationVerdict({
+        targetId: 'tab_unknown',
+        url: 'https://other.test/',
+        frame: 'main',
+        initiator: 'page',
+        ownerSessionId: 'nobody',
+      }),
+    ).toBe('block')
     const open = await k.service.open(ctx(), {
       url: k.port.browser.url('/form'),
     })
@@ -657,14 +629,18 @@ describe('ComputerUseService', () => {
     ).toBe('allow')
   })
 
-  it('treats a crashed target as lost and a detached one as needing recovery', async () => {
+  it('treats a crashed target as lost and reconnects a detached one on the next action', async () => {
     const k = setup()
     const { record } = await openForm(k)
     k.port.browser.detach(record.targetId)
     await new Promise((resolve) => setTimeout(resolve, 0))
-    await expectUiError(k.service.observe(ctx(), {}), 'TARGET_BUSY')
-    await k.service.controlTarget(record.targetId, 'resume')
-    await k.service.observe(ctx(), {})
+    expect(k.service.listTargets()[0]).toMatchObject({
+      state: 'recovering',
+      control: 'agent',
+    })
+    const recovered = await k.service.observe(ctx(), {})
+    expect(recovered.notes?.join(' ')).toContain('lost contact')
+    expect(k.service.listTargets()[0]!.state).toBe('attached')
     k.port.browser.crash(record.targetId)
     await new Promise((resolve) => setTimeout(resolve, 0))
     await expectUiError(k.service.observe(ctx(), {}), 'INVALID_REQUEST')

@@ -29,16 +29,14 @@ export const SKILLS_OPEN_FOLDER_CHANNEL = 'emperor:skills:open-folder'
 export const SELECT_FILE_CHANNEL = 'emperor:select-file'
 
 /**
- * Agent tab preview (Computer Use). Agent tabs render offscreen; the
- * renderer asks main to stream frames of one tab by id (never a URL) and,
- * only while the user has taken the tab over, sends input back.
+ * Agent tab and window preview (Computer Use). Agent tabs render offscreen;
+ * the renderer asks main to stream frames of one target by id (never a URL)
+ * for the conversation's read-only preview. Nothing is sent back.
  */
 export const AGENT_PREVIEW_START_CHANNEL = 'emperor:computer-use:preview-start'
 export const AGENT_PREVIEW_STOP_CHANNEL = 'emperor:computer-use:preview-stop'
 /** Main → renderer {@link AgentPreviewFrame}. */
 export const AGENT_PREVIEW_FRAME_CHANNEL = 'emperor:computer-use:preview-frame'
-/** Renderer → main `{ targetId, event: AgentPreviewInput }`. */
-export const AGENT_PREVIEW_INPUT_CHANNEL = 'emperor:computer-use:preview-input'
 /** Renderer → main `{ downloadId }`: show an inbox file in Finder / Explorer. */
 export const AGENT_DOWNLOAD_REVEAL_CHANNEL =
   'emperor:computer-use:download-reveal'
@@ -138,24 +136,6 @@ export interface AgentPreviewFrame {
   height: number
   jpeg: Uint8Array
 }
-
-export type AgentPreviewModifier = 'shift' | 'control' | 'alt' | 'meta'
-
-export type AgentPreviewInput =
-  | {
-      type: 'mouseDown' | 'mouseUp' | 'mouseMove'
-      x: number
-      y: number
-      button?: 'left' | 'right' | 'middle'
-      clickCount?: number
-    }
-  | { type: 'wheel'; x: number; y: number; deltaX: number; deltaY: number }
-  | {
-      type: 'keyDown' | 'keyUp'
-      key: string
-      modifiers?: AgentPreviewModifier[]
-    }
-  | { type: 'text'; text: string }
 
 export type BrowserViewAction = 'back' | 'forward' | 'reload' | 'stop'
 

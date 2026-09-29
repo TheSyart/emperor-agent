@@ -177,7 +177,6 @@ function kit(identity: Partial<UiCallerIdentity> = {}) {
     gate: gateDeps,
     identity: () => who,
     vision: () => false,
-    isDirectChild: (parent, child) => parent === 's1' && child === 'c1',
   }
   const gate = createComputerUseGate(gateDeps)
   const tools = new Map(createUiTools(runtime).map((tool) => [tool.name, tool]))
@@ -218,94 +217,6 @@ function kit(identity: Partial<UiCallerIdentity> = {}) {
 }
 
 describe('ui_* tools', () => {
-  it('delegates only a bounded parent grant to a direct child and invalidates it when source narrows', async () => {
-    const k = kit()
-    const source = k.grants.issue({
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://a.test', 'https://b.test'],
-      },
-      allowedActions: ['observe', 'interact', 'navigate'],
-      scope: 'session',
-      backgroundAllowed: true,
-    })
-    const rejected = await k.run('ui_delegate_grant', {
-      grantId: source.grantId,
-      childId: 'c2',
-      actions: ['observe'],
-    })
-    expect(rejected.json).toMatchObject({
-      status: 'error',
-      code: 'PERMISSION_DENIED',
-    })
-    const expanded = await k.run('ui_delegate_grant', {
-      grantId: source.grantId,
-      childId: 'c1',
-      actions: ['observe'],
-      origins: ['https://evil.test'],
-    })
-    expect(expanded.json).toMatchObject({
-      status: 'error',
-      code: 'PERMISSION_DENIED',
-    })
-    const allowed = await k.run('ui_delegate_grant', {
-      grantId: source.grantId,
-      childId: 'c1',
-      actions: ['observe'],
-      origins: ['https://a.test'],
-    })
-    expect(allowed.json).toMatchObject({
-      status: 'ok',
-      childId: 'c1',
-      actions: ['observe'],
-    })
-    const childGrant = k.grants.get(String(allowed.json?.grantId))!
-    expect(childGrant).toMatchObject({
-      subject: 'subagent:c1',
-      scope: 'task',
-      taskId: 's1:1',
-      backgroundAllowed: true,
-      targetScope: { kind: 'browser', origins: ['https://a.test'] },
-      delegatedFrom: { grantId: source.grantId, revision: source.revision },
-    })
-    k.grants.narrow(source.grantId, { allowedActions: ['observe'] })
-    expect(k.grants.get(childGrant.grantId)).toBeUndefined()
-    expect(
-      k.session.events.some((event) => event.type === 'ui/grant-delegated'),
-    ).toBe(true)
-  })
-
-  it('ends a delegated grant when the parent grant is revoked', async () => {
-    const k = kit()
-    const source = k.grants.issue({
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://a.test'],
-      },
-      allowedActions: ['observe', 'interact'],
-      scope: 'session',
-      backgroundAllowed: true,
-    })
-    const allowed = await k.run('ui_delegate_grant', {
-      grantId: source.grantId,
-      childId: 'c1',
-      actions: ['observe'],
-      origins: ['https://a.test'],
-    })
-    const childId = String(allowed.json?.grantId)
-    expect(k.grants.get(childId)).toBeDefined()
-    k.grants.revoke(source.grantId, 'user')
-    expect(k.grants.get(childId)).toBeUndefined()
-  })
-
   it('covers exactly the catalog entries for ui_*', () => {
     const k = kit()
     void k
@@ -319,7 +230,7 @@ describe('ui_* tools', () => {
     )
   })
 
-  it('reports capabilities and the preset’s auto-approval', async () => {
+  it('reports capabilities and what runs without asking', async () => {
     const restricted = await kit().run('ui_get_capabilities')
     expect(restricted.json).toMatchObject({
       status: 'ok',
@@ -371,55 +282,21 @@ describe('ui_* tools', () => {
     )
   })
 
-  it('requests control up front and returns the grant', async () => {
-    const k = kit()
-    const pending = k.run('ui_request_control', {
-      origins: ['https://Example.com/path', 'https://example.com'],
-      actions: ['observe', 'interact'],
-      reason: 'fill the signup form',
-    })
-    await new Promise((resolve) => setImmediate(resolve))
-    const card = k.pending.forSession('s1')[0]!
-    const requested = k.session.events.at(-1)!
-    expect(requested).toMatchObject({
-      type: 'ui/grant-requested',
-      data: {
-        targetScope: { origins: ['https://example.com'] },
-        allowedScopes: ['task', 'session', 'timed'],
-        reason: 'fill the signup form',
-      },
-    })
-    k.pending.answer(card, { grant: { option_id: 'task' } })
-    const done = await pending
-    expect(done.json).toMatchObject({
-      granted: 'task',
-      origins: ['https://example.com'],
-    })
-    const again = await k.run('ui_request_control', {
-      origins: ['https://example.com'],
-      actions: ['observe'],
-    })
-    expect(again.json).toMatchObject({
-      granted: 'task',
-      note: expect.stringContaining('already'),
-    })
+  it('has no tool to request control up front or delegate grants', () => {
+    const names = createUiTools({} as ToolRuntime).map((tool) => tool.name)
+    expect(names).not.toContain('ui_request_control')
+    expect(names).not.toContain('ui_delegate_grant')
   })
 
-  it('short-circuits under full access', async () => {
-    const done = await kit({ fullAccess: true }).run('ui_request_control', {
-      origins: ['https://example.com'],
-      actions: ['navigate'],
-    })
-    expect(done.json).toMatchObject({ granted: 'auto' })
-  })
-
-  it('reports unknown operations and grants as structured errors', async () => {
+  it('reports unknown operations and targets as structured errors', async () => {
     const k = kit()
     const status = await k.run('ui_action_status', { operationId: 'op_nope' })
     expect(status.result?.isError).toBe(true)
     expect(status.json).toMatchObject({ code: 'INVALID_REQUEST' })
-    const release = await k.run('ui_release_control', { grantId: 'grant_nope' })
-    expect(release.json).toMatchObject({ code: 'INVALID_REQUEST' })
+    const release = await k.run('ui_release_control', {
+      targetId: 'tab_00000000-0000-4000-8000-000000000000',
+    })
+    expect(release.result?.isError).toBe(true)
     const cancel = await k.run('ui_cancel_action', { operationId: 'op_nope' })
     expect(cancel.json).toMatchObject({ cancelled: false })
   })
@@ -428,9 +305,8 @@ describe('ui_* tools', () => {
     const tool = createUiTools({} as ToolRuntime).find(
       (item) => item.name === 'ui_release_control',
     )!
-    expect(() => tool.parse({ targetId: 'a', grantId: 'b' })).toThrow(
-      /exactly one/,
-    )
-    expect(() => tool.parse({})).toThrow(/exactly one/)
+    // Only a target can be released; grants are not the model's to drop.
+    expect(() => tool.parse({ grantId: 'grant_1' })).toThrow()
+    expect(() => tool.parse({})).toThrow()
   })
 })

@@ -372,7 +372,7 @@ describe('MacosDesktopDriver', () => {
     ).rejects.toMatchObject({ code: 'STALE_TARGET' })
   })
 
-  it('turns the menu-bar Stop Sharing into a takeover and streams only bound windows', async () => {
+  it('reports the menu-bar Stop Sharing as sharing stopped (not a takeover) and streams only bound windows', async () => {
     const k = fixture()
     const signal = new AbortController().signal
     await bound(k, signal)
@@ -397,7 +397,10 @@ describe('MacosDesktopDriver', () => {
       name: 'target.capture.stopped',
       data: { targetId: 't-1', reason: 'user' },
     })
-    expect(events).toEqual([{ type: 'user-input', targetId: 't-1' }])
+    expect(events).toEqual([{ type: 'sharing-stopped', targetId: 't-1' }])
+    // A helper that still sends the retired user-activity event is ignored.
+    k.emitHelper({ name: 'user.input', data: { targetId: 't-1' } })
+    expect(events).toHaveLength(1)
     vi.mocked(k.client.diagnostics).mockReturnValue({
       ...k.client.diagnostics(),
       capabilities: ['observe.semantic', 'act'],

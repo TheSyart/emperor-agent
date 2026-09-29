@@ -117,7 +117,6 @@ interface EmperorBridge {
   agentDownloadReveal?: (downloadId: string) => Promise<unknown>
   agentDownloadMove?: (downloadId: string) => Promise<unknown>
   agentDownloadSaveAs?: (downloadId: string) => Promise<unknown>
-  agentPreviewInput?: (targetId: string, event: AgentPreviewInput) => void
   macHelperStatus?: () => Promise<MacHelperStatus>
   macHelperRequestPermission?: (
     permission: MacHelperPermission,
@@ -188,26 +187,7 @@ export interface AgentPreviewFrame {
   jpeg: Uint8Array
 }
 
-export type AgentPreviewModifier = 'shift' | 'control' | 'alt' | 'meta'
-
-/** User input on a taken-over Agent tab, in page CSS pixels. */
-export type AgentPreviewInput =
-  | {
-      type: 'mouseDown' | 'mouseUp' | 'mouseMove'
-      x: number
-      y: number
-      button?: 'left' | 'right' | 'middle'
-      clickCount?: number
-    }
-  | { type: 'wheel'; x: number; y: number; deltaX: number; deltaY: number }
-  | {
-      type: 'keyDown' | 'keyUp'
-      key: string
-      modifiers?: AgentPreviewModifier[]
-    }
-  | { type: 'text'; text: string }
-
-/** The started preview's page viewport, the coordinate space of input. */
+/** The started preview's page viewport. */
 export type AgentPreviewStart =
   { ok: true; width: number; height: number } | { ok: false; error: string }
 
@@ -646,14 +626,6 @@ export async function saveAgentDownloadAs(
 /** Stop the frame stream; the Agent tab itself keeps running. */
 export function agentPreviewStop(targetId: string): void {
   bridge()?.agentPreviewStop?.(targetId)
-}
-
-/** Main forwards input only while the user has taken the tab over. */
-export function agentPreviewInput(
-  targetId: string,
-  event: AgentPreviewInput,
-): void {
-  bridge()?.agentPreviewInput?.(targetId, event)
 }
 
 export function onAgentPreviewFrame(

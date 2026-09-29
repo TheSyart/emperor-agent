@@ -1,4 +1,13 @@
 <script setup lang="ts">
+/**
+ * BrowserPairingSettings — the Chrome / Edge extension connection: register
+ * the Native Messaging host, confirm a pairing by its 6-digit code, revoke a
+ * pairing, count the tabs the user connected. Polls every 2 s.
+ *
+ * Props: embedded (render the rows only, inside the 应用与浏览器 group).
+ * Emits: connection-changed (pairings or tabs changed), summary (counts for
+ * the Chrome row; a pending pairing asks the parent to show this panel).
+ */
 import type { BrowserPairingStatus } from '../../../../../shared/ipc-contract'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import {
@@ -11,7 +20,13 @@ import {
 import Button from '../../ui/Button.vue'
 import { EmptyState, SettingsGroup, SettingsRow, StatusBadge } from '../ui'
 
-const emit = defineEmits<{ 'connection-changed': [] }>()
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
+const emit = defineEmits<{
+  'connection-changed': []
+  summary: [value: { pending: number; paired: number; tabs: number }]
+}>()
 const status = ref<BrowserPairingStatus>({
   bridgeListening: false,
   pendingPairings: [],
@@ -35,6 +50,11 @@ async function refresh(): Promise<void> {
     )
       error.value = ''
     status.value = next
+    emit('summary', {
+      pending: next.pendingPairings.length,
+      paired: next.pairedConnections.length,
+      tabs: next.attachedTabs,
+    })
     const signature = JSON.stringify([
       next.bridgeListening,
       [...next.pairedConnections].sort(),
@@ -78,6 +98,8 @@ const BROWSER_NAMES: Readonly<Record<string, string>> = {
   edge: 'Edge',
 }
 const connected = ref('')
+const PAIRING_NOTE =
+  '在浏览器扩展中发起配对，对照两端的 6 位验证码后在这里确认；只会控制你在扩展中主动连接的标签页。'
 
 /** 01 §11: write the Native Messaging host for the Emperor extension. */
 async function connect(): Promise<void> {
@@ -118,10 +140,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <SettingsGroup
-    title="Chrome / Edge 扩展"
-    description="在浏览器扩展中发起配对，对照两端的 6 位验证码后在这里确认；只会控制你在扩展中主动连接的标签页。"
+  <component
+    :is="props.embedded ? 'div' : SettingsGroup"
+    v-bind="
+      props.embedded
+        ? { class: 'pairing-embedded' }
+        : {
+            title: 'Chrome / Edge 扩展',
+            description: PAIRING_NOTE,
+          }
+    "
   >
+    <p v-if="props.embedded" class="pairing-note">{{ PAIRING_NOTE }}</p>
     <p v-if="error" class="pairing-error" role="alert">{{ error }}</p>
     <SettingsRow
       title="连接 Chrome/Edge"
@@ -211,7 +241,7 @@ onBeforeUnmount(() => {
       title="没有浏览器连接"
       description="从扩展弹窗发起配对后，这里会显示验证码。"
     />
-  </SettingsGroup>
+  </component>
 </template>
 
 <style scoped>
@@ -231,5 +261,15 @@ onBeforeUnmount(() => {
 .pairing-error {
   color: rgb(var(--danger));
   font-size: var(--fs-xs);
+}
+.pairing-embedded {
+  padding: var(--space-1) 0 var(--space-2) var(--space-4);
+  border-left: 2px solid var(--border-l1);
+}
+.pairing-note {
+  margin: var(--space-1) 0 var(--space-2);
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
 }
 </style>

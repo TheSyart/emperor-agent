@@ -212,7 +212,9 @@ export async function requestGrant(
         targetScope: plan.targetScope,
         allowedActions: plan.actions,
         scope: answer.decision,
-        backgroundAllowed: answer.backgroundAllowed,
+        // A once grant answers this very call, in the foreground or not.
+        backgroundAllowed:
+          answer.decision === 'once' ? true : answer.backgroundAllowed,
         ...(answer.decision === 'task' ? { taskId: identity.taskId } : {}),
         ...(answer.decision === 'once' ? { callId: input.callId } : {}),
         ...(answer.decision === 'timed'

@@ -1214,7 +1214,7 @@ private func runModifierExperiment(_ wire: Wire, targetID: String, generation: I
             "action": ["kind": "typeText", "text": cancelText, "ref": cancelRef]],
             cancelOnDispatch: true)
         throw HelperFailure(code: "TYPE_CANCEL_NOT_REJECTED")
-    } catch let error as HelperFailure where error.code == "USER_TAKEOVER" || error.code == "CANCELLED" {
+    } catch let error as HelperFailure where error.code == "TIMEOUT_NO_EFFECT" || error.code == "CANCELLED" {
         // Some chunks may have landed before the stop. Never replay the action.
     }
     guard wire.dispatched.contains(cancelID) else { throw HelperFailure(code: "TYPE_CANCEL_NOT_DISPATCHED") }
@@ -1291,7 +1291,7 @@ private func runModifierExperiment(_ wire: Wire, targetID: String, generation: I
                 cancelWhenPointerDownAt: pointerPath,
                 releaseAllAfterPointerCancel: true)
             throw HelperFailure(code: "HELD_DRAG_CANCEL_NOT_REJECTED")
-        } catch let error as HelperFailure where error.code == "USER_TAKEOVER" || error.code == "CANCELLED" {
+        } catch let error as HelperFailure where error.code == "TIMEOUT_NO_EFFECT" || error.code == "CANCELLED" {
             // The disposable canvas may have received some drag events before cancellation.
             dragCancelled = true
             break

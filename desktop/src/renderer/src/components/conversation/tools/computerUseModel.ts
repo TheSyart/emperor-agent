@@ -231,23 +231,20 @@ export function computerUseUnknown(meta: ComputerUseMeta | null): boolean {
   return meta?.outcome === 'unknown' || meta?.error?.code === 'OUTCOME_UNKNOWN'
 }
 
-/** The unknown-outcome tail is a warning; the auto-approval tail a note. */
+/** The unknown-outcome tail is a warning. */
 export function computerUseSuffixTone(
   data: ToolChatData,
 ): 'warn' | 'accent' | null {
-  const meta = computerUseMeta(data)
-  if (computerUseUnknown(meta)) return 'warn'
-  return meta?.autoApproved ? 'accent' : null
+  return computerUseUnknown(computerUseMeta(data)) ? 'warn' : null
 }
 
-/** Non-shrinking tail: flags an unknown outcome or an auto-approval. */
+/**
+ * Non-shrinking tail: flags an unknown outcome. Auto-approval is not
+ * flagged: while computer use is on every ordinary action runs without a
+ * card (2026-09-29), so it would sit on every row.
+ */
 export function computerUseSuffix(data: ToolChatData): string | null {
-  const meta = computerUseMeta(data)
-  if (meta === null) return null
-  if (meta.outcome === 'unknown' || meta.error?.code === 'OUTCOME_UNKNOWN')
-    return '结果不确定'
-  if (meta.autoApproved) return '自动放行'
-  return null
+  return computerUseUnknown(computerUseMeta(data)) ? '结果不确定' : null
 }
 
 export const DOWNLOAD_STATE_LABEL: Readonly<Record<string, string>> = {

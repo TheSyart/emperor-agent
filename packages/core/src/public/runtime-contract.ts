@@ -35,7 +35,6 @@ export type {
   UiElement,
   UiRole,
   UiGrantScope,
-  UiGrantView,
   UiTargetScope,
   UiTargetView,
 } from '../harness/computer-use/types'

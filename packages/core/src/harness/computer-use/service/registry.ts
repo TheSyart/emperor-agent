@@ -40,6 +40,8 @@ export interface TargetRecord {
   lastActiveAt: string
   /** Generation at a credential fill: its picture stays out of previews. */
   credentialFilledGeneration?: number
+  /** The user's "Stop Sharing" ended this window's capture stream. */
+  sharingStopped?: true
   generation: number
   revision: number
   state: TargetState
@@ -210,6 +212,7 @@ export function targetView(
     openedAt: record.openedAt,
     lastActiveAt: record.lastActiveAt,
     ...(blocked === undefined ? {} : { previewBlocked: blocked }),
+    ...(record.sharingStopped === true ? { sharingStopped: true } : {}),
     ...(shot === undefined
       ? {}
       : {

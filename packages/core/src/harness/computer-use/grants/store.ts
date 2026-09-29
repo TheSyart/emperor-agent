@@ -9,6 +9,11 @@
  * - the emergency stop suspends every grant, persisted across restarts;
  * - revoking or narrowing a grant bumps its revision, so a ticket issued
  *   against the old revision stops matching.
+ *
+ * Since 2026-09-29 only per-action (`once`) grants are issued: the AI drives
+ * continuously while computer use is on, and what still asks is answered
+ * one action at a time. Session and timed grants of older versions are
+ * dropped when the file is read (and the file is rewritten without them).
  */
 
 import { randomUUID } from 'node:crypto'
@@ -22,6 +27,12 @@ import {
 } from './codec'
 
 export const GRANTS_FILE = 'grants.json'
+
+/** Scopes older versions issued; ignored and dropped on load. */
+const RETIRED_SCOPES: ReadonlySet<UiGrant['scope']> = new Set([
+  'session',
+  'timed',
+])
 
 export type GrantRevokeCause =
   'user' | 'expiry' | 'kill-switch' | 'session-end' | 'task-end'
@@ -80,7 +91,8 @@ export class GrantStore {
       this.suspension = { at: this.now().toISOString(), by: 'corrupt-store' }
     }
     for (const grant of result.value.grants)
-      if (!this.expired(grant)) this.grants.set(grant.grantId, grant)
+      if (!this.expired(grant) && !RETIRED_SCOPES.has(grant.scope))
+        this.grants.set(grant.grantId, grant)
     this.loaded = true
     if (
       result.receipt.recoveryAction === 'quarantined_corrupt_snapshot' ||

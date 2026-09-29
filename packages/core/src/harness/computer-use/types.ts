@@ -312,7 +312,11 @@ export type TargetState =
   'created' | 'attached' | 'paused' | 'recovering' | 'closed' | 'lost'
 
 /** Who is steering a target right now (§6.6). */
-export type ControlState = 'agent' | 'paused' | 'user-takeover' | 'stopped'
+/**
+ * `paused`: the app window is reloading (resumes with it); `stopped`: the
+ * kill switch. The user no longer takes a target over (2026-09-29).
+ */
+export type ControlState = 'agent' | 'paused' | 'stopped'
 
 /** Action lifecycle (§5.7). */
 export type OperationState =
@@ -430,6 +434,11 @@ export interface UiTargetView {
    * (a browser tab until it navigates).
    */
   readonly previewBlocked?: 'sensitive-app' | 'credential-filled'
+  /**
+   * The user pressed "Stop Sharing" for this window: the Agent still works
+   * on it, the conversation shows its last picture marked as stopped.
+   */
+  readonly sharingStopped?: boolean
   readonly lastScreenshot?: {
     readonly attachmentId: string
     readonly width: number
@@ -438,26 +447,16 @@ export interface UiTargetView {
   }
 }
 
-export interface UiGrantView {
-  readonly grantId: string
-  readonly subject: string
-  readonly ownerSessionId?: string
-  readonly driver: DriverKind
-  readonly targetScope: UiTargetScope
-  readonly allowedActions: readonly UiActionClass[]
-  readonly scope: UiGrantScope
-  readonly createdAt: string
-  readonly expiresAt?: string
-  readonly backgroundAllowed: boolean
-}
-
 export interface ComputerUseStatusView {
   /** A host port is present (desktop app). */
   readonly supported: boolean
   /** The user's master switch. */
   readonly enabled: boolean
-  /** Persisted GUI authorization mode, independent of Shell permissions. */
-  readonly authorizationMode?: 'unrestricted' | 'scoped'
+  /**
+   * The saved per-item mode was retired and switched computer use off; set
+   * until the user switches it on again (Settings says why it is off).
+   */
+  readonly scopedRetired?: boolean
   readonly platform: HostPlatform | null
   /** The emergency stop is engaged; all grants are suspended. */
   readonly stopped: boolean
@@ -479,7 +478,6 @@ export interface ComputerUseStatusView {
   }
   readonly drivers: readonly DriverCapability[]
   readonly targets: readonly UiTargetView[]
-  readonly grants: readonly UiGrantView[]
   readonly killSwitch: {
     readonly accelerator: string
     readonly registered: boolean

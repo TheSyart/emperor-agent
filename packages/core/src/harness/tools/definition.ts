@@ -93,8 +93,14 @@ export class ToolArgsError extends HarnessError {
 }
 
 export class ToolNotFoundError extends HarnessError {
-  constructor(toolName: string) {
-    super(`unknown tool "${toolName}"`, UNKNOWN_TOOL)
+  /** `retired`: why a tool that used to exist was removed (read by the model). */
+  constructor(toolName: string, retired?: string) {
+    super(
+      retired === undefined
+        ? `unknown tool "${toolName}"`
+        : `tool "${toolName}" was removed: ${retired}`,
+      UNKNOWN_TOOL,
+    )
   }
 }
 

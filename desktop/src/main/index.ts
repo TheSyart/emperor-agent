@@ -65,7 +65,6 @@ import {
   type StopEntries,
   type StopMenuItem,
 } from './computer-use/stop-entries'
-import { ControlOverlay } from './computer-use/control-overlay'
 import { PointerOverlay } from './computer-use/pointer-overlay'
 import { pointerAllowed } from './computer-use/pointer-overlay-view'
 import { EmbeddedBrowserDriver } from './computer-use/embedded-browser-driver'
@@ -148,7 +147,6 @@ let desktopPreview: DesktopPreview | null = null
 let killSwitch: KillSwitch | null = null
 let stopEntries: StopEntries | null = null
 let stopTray: Tray | null = null
-let controlOverlay: ControlOverlay | null = null
 let pointerOverlay: PointerOverlay | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
@@ -169,9 +167,15 @@ const trustedPetPolicy = createTrustedRendererPolicy({
   },
 })
 
-function syncControlOverlay(): void {
+/**
+ * What shows that the Agent works: the helper's capture streams give macOS
+ * its purple sharing mark, the conversation shows a read-only preview, and
+ * the virtual pointer follows desktop actions. Emperor draws no "正在操控"
+ * bar of its own (2026-09-29); stopping stays with the kill switch, the
+ * Dock menu and the tray fallback kept in sync here.
+ */
+function syncControlIndicators(): void {
   const view = coreApi?.host.computerUse?.service.statusView() ?? null
-  controlOverlay?.sync(view)
   if (!pointerAllowed(view)) pointerOverlay?.clear()
   stopEntries?.sync({
     enabled: view?.enabled === true,
@@ -459,9 +463,6 @@ function createComputerUseHost(): void {
       if (contents && !contents.isDestroyed())
         contents.send(AGENT_PREVIEW_FRAME_CHANNEL, frame)
     },
-    canTakeInput: (targetId) =>
-      coreApi?.host.computerUse?.service.registry.get(targetId)?.control ===
-      'user-takeover',
   })
   desktopPreview = new DesktopPreview({
     source: () => nativeDesktop,
@@ -537,7 +538,7 @@ function createComputerUseHost(): void {
     externalBrowser: () => externalBrowser,
     credentials: () => credentialVault,
     desktop: () => nativeDesktop,
-    indicate: () => queueMicrotask(syncControlOverlay),
+    indicate: () => queueMicrotask(syncControlIndicators),
   })
   killSwitch = createKillSwitch({
     shortcuts: globalShortcut,
@@ -563,8 +564,6 @@ function closeAgentBrowser(final: boolean): void {
 }
 
 function closeCoreHost(): void {
-  controlOverlay?.dispose()
-  controlOverlay = null
   pointerOverlay?.dispose()
   pointerOverlay = null
   browserViewHost?.close()
@@ -717,16 +716,13 @@ function createWindow(): void {
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir),
   })
-  controlOverlay ??= new ControlOverlay(() => {
-    void coreApi?.computerUse.stop()
-  })
   pointerOverlay ??= new PointerOverlay()
-  syncControlOverlay()
+  syncControlIndicators()
   browserViewHost = new BrowserViewHost(mainWindow)
   // A reloaded or crashed renderer lost the BrowserPane that placed the native
   // view; drop it so it cannot linger above the new UI.
   // 00 §12: while the UI is gone nobody can watch the Agent, so its targets
-  // pause (they stay open); the reloaded panes let the user resume or end.
+  // pause (they stay open) and carry on once the window has loaded again.
   const uiDisconnected = (): void => {
     browserViewHost?.close()
     agentPreview?.stopAll()
@@ -735,6 +731,9 @@ function createWindow(): void {
   }
   mainWindow.webContents.on('did-navigate', uiDisconnected)
   mainWindow.webContents.on('render-process-gone', uiDisconnected)
+  mainWindow.webContents.on('did-finish-load', () => {
+    coreApi?.host.computerUse?.service.resumeAfterUiReconnect()
+  })
   // Keep the reference: by 'closed' the window is destroyed and reading
   // mainWindow.webContents throws "Object has been destroyed".
   const mainContents = mainWindow.webContents
@@ -773,8 +772,6 @@ function createWindow(): void {
     }
   })
   mainWindow.on('closed', () => {
-    controlOverlay?.dispose()
-    controlOverlay = null
     pointerOverlay?.dispose()
     pointerOverlay = null
     browserViewHost?.close()
@@ -973,7 +970,7 @@ async function startup(): Promise<void> {
               computerUseEnabledChanged: (enabled: boolean) => {
                 if (enabled) killSwitch?.register()
                 else killSwitch?.unregister()
-                syncControlOverlay()
+                syncControlIndicators()
               },
               // Settings › 电脑操作 changed the stop shortcut: applied at
               // once while on, remembered while off.
@@ -981,7 +978,7 @@ async function startup(): Promise<void> {
                 killSwitch?.setAccelerator(
                   accelerator ?? defaultKillSwitchAccelerator(process.platform),
                 )
-                syncControlOverlay()
+                syncControlIndicators()
               },
             }
           : {}),
@@ -999,7 +996,7 @@ async function startup(): Promise<void> {
       killSwitch?.setAccelerator(savedAccelerator)
     if (coreApi.host.computerUse?.enabled === true) killSwitch?.register()
     if (computerUsePort) stopEntries ??= createElectronStopEntries()
-    syncControlOverlay()
+    syncControlIndicators()
     startDownloadRetention()
     registerDesktopCapabilityIpc({
       ipcMain,

@@ -50,7 +50,9 @@ export const UI_ERROR_CODES = {
   },
   USER_TAKEOVER: {
     retryable: false,
-    hint: 'The user is controlling this target; wait until it is handed back.',
+    // Retired 2026-09-29: the user no longer takes targets over. Kept so
+    // older logs and helpers still decode.
+    hint: 'Observe the target again before you continue.',
   },
   VISION_UNAVAILABLE: {
     retryable: false,

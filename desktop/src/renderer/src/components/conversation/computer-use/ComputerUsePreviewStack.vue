@@ -11,6 +11,7 @@
  *   (desktop capture streams, built-in browser paint frames); the rest, and
  *   external browser tabs, show their latest tool screenshot with its time.
  *   Sensitive apps and targets that received a credential show no picture.
+ *   After the user's "Stop Sharing" a window keeps its last frame, marked.
  * - The front card's picture opens a larger read-only view (Esc returns).
  * - Beside the chat (1120px column) the stack sits in the right column and
  *   publishes its height so the environment card above stops short.
@@ -140,7 +141,7 @@ function frameOf(target: UiTargetView): PreviewFrame {
 }
 
 function frameSrc(frame: PreviewFrame): string {
-  if (frame.kind === 'live') return frame.url
+  if (frame.kind === 'live' || frame.kind === 'frozen') return frame.url
   if (frame.kind === 'shot') return attachmentRawUrl(frame.attachmentId)
   return ''
 }
@@ -191,11 +192,17 @@ function dropFrame(targetId: string): void {
 
 function syncLive(): void {
   const wanted = new Set(liveIds.value)
+  // A window whose sharing the user stopped keeps its last frame.
+  const frozen = new Set(
+    targets.value
+      .filter((target) => target.sharingStopped === true)
+      .map((target) => target.targetId),
+  )
   for (const targetId of [...streaming])
     if (!wanted.has(targetId)) {
       streaming.delete(targetId)
       agentPreviewStop(targetId)
-      dropFrame(targetId)
+      if (!frozen.has(targetId)) dropFrame(targetId)
     }
   for (const targetId of wanted)
     if (!streaming.has(targetId)) {
@@ -466,7 +473,7 @@ onBeforeUnmount(() => {
         >
           <img
             :src="frameSrc(frameOf(front))"
-            :alt="`${previewTitle(front)}的${frameOf(front).kind === 'live' ? '实时画面' : '最近截图'}`"
+            :alt="`${previewTitle(front)}的${frameOf(front).kind === 'shot' ? '最近截图' : '画面'}`"
           />
         </button>
         <p v-else class="cu-card-empty" :data-kind="frameOf(front).kind">
@@ -491,7 +498,7 @@ onBeforeUnmount(() => {
           v-if="frameSrc(frameOf(enlarged))"
           class="cu-enlarged"
           :src="frameSrc(frameOf(enlarged))"
-          :alt="`${previewTitle(enlarged)}的${frameOf(enlarged).kind === 'live' ? '实时画面' : '最近截图'}`"
+          :alt="`${previewTitle(enlarged)}的${frameOf(enlarged).kind === 'shot' ? '最近截图' : '画面'}`"
         />
         <p class="cu-enlarged-note">
           {{ statusOf(enlarged).label }} · {{ frameOf(enlarged).note }}
@@ -675,6 +682,10 @@ onBeforeUnmount(() => {
 
 .cu-card-note[data-kind='live'] {
   color: rgb(var(--accent));
+}
+
+.cu-card-note[data-kind='frozen'] {
+  color: rgb(var(--warn));
 }
 
 .cu-strip:focus-visible,

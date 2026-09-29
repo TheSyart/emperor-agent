@@ -2,7 +2,6 @@ import {
   AGENT_DOWNLOAD_MOVE_CHANNEL,
   AGENT_DOWNLOAD_REVEAL_CHANNEL,
   AGENT_DOWNLOAD_SAVE_AS_CHANNEL,
-  AGENT_PREVIEW_INPUT_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
@@ -22,7 +21,6 @@ import {
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
-  type AgentPreviewInput,
   type BrowserConnectResult,
   type BrowserPairingStatus,
   type FileDialogFilter,
@@ -50,13 +48,12 @@ interface BrowserCapability {
   close(): void
 }
 
-/** Computer Use: stream an Agent tab and forward takeover input (by id only). */
+/** Computer Use: stream an Agent tab or window for the preview (by id only). */
 interface AgentPreviewCapability {
   start(
     targetId: string,
   ): { ok: true; width: number; height: number } | { ok: false; error: string }
   stop(targetId: string): void
-  input(targetId: string, event: AgentPreviewInput): boolean
 }
 
 interface ReferenceCapability {
@@ -379,10 +376,6 @@ export function registerDesktopCapabilityIpc(input: {
     oneWay(AGENT_PREVIEW_STOP_CHANNEL, (payload) => {
       preview.stop(previewTarget(payload))
     })
-    oneWay(AGENT_PREVIEW_INPUT_CHANNEL, (payload) => {
-      const record = objectRecord(payload)
-      preview.input(previewTarget(record.targetId), previewInput(record.event))
-    })
   }
 }
 
@@ -450,84 +443,6 @@ function previewTarget(value: unknown): string {
       : String(objectRecord(value).targetId ?? '')
   if (!TARGET_ID.test(raw)) throw new Error('invalid agent target id')
   return raw
-}
-
-const MODIFIERS = new Set(['shift', 'control', 'alt', 'meta'])
-
-function finite(value: unknown, name: string, limit = 20_000): number {
-  const number = Number(value)
-  if (!Number.isFinite(number) || Math.abs(number) > limit)
-    throw new Error(`invalid ${name}`)
-  return number
-}
-
-function previewInput(value: unknown): AgentPreviewInput {
-  const record = objectRecord(value)
-  switch (record.type) {
-    case 'mouseDown':
-    case 'mouseUp':
-    case 'mouseMove': {
-      const button = record.button
-      if (
-        button !== undefined &&
-        !['left', 'right', 'middle'].includes(String(button))
-      )
-        throw new Error('invalid button')
-      return {
-        type: record.type,
-        x: finite(record.x, 'x'),
-        y: finite(record.y, 'y'),
-        ...(button === undefined
-          ? {}
-          : { button: button as 'left' | 'right' | 'middle' }),
-        ...(record.clickCount === undefined
-          ? {}
-          : {
-              clickCount: Math.min(
-                3,
-                Math.max(
-                  1,
-                  Math.round(finite(record.clickCount, 'clickCount', 3)),
-                ),
-              ),
-            }),
-      }
-    }
-    case 'wheel':
-      return {
-        type: 'wheel',
-        x: finite(record.x, 'x'),
-        y: finite(record.y, 'y'),
-        deltaX: finite(record.deltaX, 'deltaX'),
-        deltaY: finite(record.deltaY, 'deltaY'),
-      }
-    case 'keyDown':
-    case 'keyUp': {
-      const key = typeof record.key === 'string' ? record.key : ''
-      if (key === '' || key.length > 32) throw new Error('invalid key')
-      const modifiers = Array.isArray(record.modifiers)
-        ? record.modifiers.map(String)
-        : []
-      if (modifiers.some((item) => !MODIFIERS.has(item)))
-        throw new Error('invalid modifier')
-      return {
-        type: record.type,
-        key,
-        ...(modifiers.length === 0
-          ? {}
-          : {
-              modifiers: modifiers as ('shift' | 'control' | 'alt' | 'meta')[],
-            }),
-      }
-    }
-    case 'text': {
-      const text = typeof record.text === 'string' ? record.text : ''
-      if (text.length > 4_096) throw new Error('text too long')
-      return { type: 'text', text }
-    }
-    default:
-      throw new Error('invalid preview input')
-  }
 }
 
 const BROWSER_UNAVAILABLE = '内置浏览器暂不可用'

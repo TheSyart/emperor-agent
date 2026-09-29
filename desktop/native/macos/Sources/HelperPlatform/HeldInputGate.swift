@@ -16,7 +16,7 @@ final class HeldInputGate: @unchecked Sendable {
 
     func checkCancellation() throws {
         lock.lock(); let stopped = cancelled; lock.unlock()
-        if stopped { throw NativeError.denied(code: "USER_TAKEOVER", message: "Action cancelled") }
+        if stopped { throw Self.cancelledError() }
     }
 
     func postKeyDown(_ key: CGKeyCode, post: () -> Void) throws {
@@ -61,7 +61,14 @@ final class HeldInputGate: @unchecked Sendable {
     }
 
     private func requireRunning() throws {
-        if cancelled { throw NativeError.denied(code: "USER_TAKEOVER", message: "Action cancelled") }
+        if cancelled { throw Self.cancelledError() }
+    }
+
+    /// A cancelled action stops before its next event. The user never takes a
+    /// target over (2026-09-29), so this is no longer USER_TAKEOVER; if part
+    /// of the action was already sent, main reports OUTCOME_UNKNOWN instead.
+    private static func cancelledError() -> NativeError {
+        NativeError.denied(code: "TIMEOUT_NO_EFFECT", message: "Action cancelled")
     }
 
     private func releaseLocked(keyUp: (CGKeyCode) -> Void, mouseUp: (CGMouseButton) -> Void) {

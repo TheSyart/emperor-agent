@@ -21,9 +21,6 @@ import type {
   BrowserProfileView,
   ComputerUseStatusView,
   DriverKind,
-  UiActionClass,
-  UiGrantView,
-  UiTargetView,
 } from '../harness/computer-use/types'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
@@ -1615,34 +1612,6 @@ export class CoreApi {
       this.host.computerUse?.service.resume()
       return await this.computerUse.status()
     },
-    listGrants: (): UiGrantView[] =>
-      this.host.computerUse?.service.statusView().grants.slice() ?? [],
-    revokeGrant: (grantId: string): { revoked: boolean } => ({
-      revoked: this.host.computerUse?.service.revokeGrant(grantId) ?? false,
-    }),
-    /**
-     * Drop actions or origins from a grant (never guarded: it only takes
-     * access away). Removing everything revokes it.
-     */
-    narrowGrant: (input: {
-      grantId: string
-      allowedActions?: UiActionClass[]
-      origins?: string[]
-    }): { found: boolean; revoked: boolean } => {
-      const service = this.host.computerUse?.service
-      const before = service
-        ?.statusView()
-        .grants.some((grant) => grant.grantId === input.grantId)
-      if (service === undefined || before !== true)
-        return { found: false, revoked: false }
-      const after = service.narrowGrant(input.grantId, {
-        ...(input.allowedActions === undefined
-          ? {}
-          : { allowedActions: input.allowedActions }),
-        ...(input.origins === undefined ? {} : { origins: input.origins }),
-      })
-      return { found: true, revoked: after === undefined }
-    },
     /** One driver's switch. Turning on is guarded; turning off never is. */
     setDriverEnabled: async (input: {
       driver: DriverKind
@@ -1698,12 +1667,6 @@ export class CoreApi {
     setEnabled: async (enabled: boolean): Promise<ComputerUseStatusView> => {
       if (enabled) this.assertMutation('computerUse', 'enable')
       this.host.setComputerUseEnabled(enabled)
-      return await this.computerUse.status()
-    },
-    setAuthorizationMode: async (
-      mode: 'unrestricted' | 'scoped',
-    ): Promise<ComputerUseStatusView> => {
-      this.host.setComputerUseAuthorizationMode(mode)
       return await this.computerUse.status()
     },
     /** Browser profiles: the temporary one and every persistent one. */
@@ -1768,15 +1731,6 @@ export class CoreApi {
         })
       return { permissions: service.listSitePermissions() }
     },
-    /** User control of one target: pause, resume, take over, hand back, close. */
-    controlTarget: async (input: {
-      targetId: string
-      action: 'pause' | 'resume' | 'takeover' | 'handback' | 'close'
-    }): Promise<UiTargetView | null> =>
-      (await this.host.computerUse?.service.controlTarget(
-        input.targetId,
-        input.action,
-      )) ?? null,
   }
 
   readonly desktopPet = {
@@ -2416,12 +2370,10 @@ function unsupportedComputerUseStatus(): ComputerUseStatusView {
   return {
     supported: false,
     enabled: false,
-    authorizationMode: 'unrestricted',
     platform: null,
     stopped: false,
     drivers: [],
     targets: [],
-    grants: [],
     killSwitch: { accelerator: '', registered: false },
   }
 }
@@ -2716,7 +2668,6 @@ function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
       ...(driver.reason === undefined ? {} : { reason: driver.reason }),
     })),
     targets: status.targets.length,
-    grants: status.grants.length,
     killSwitch: {
       accelerator: status.killSwitch.accelerator,
       registered: status.killSwitch.registered,

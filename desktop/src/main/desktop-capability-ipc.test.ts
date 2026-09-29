@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  AGENT_PREVIEW_INPUT_CHANNEL,
   AGENT_DOWNLOAD_MOVE_CHANNEL,
   AGENT_DOWNLOAD_REVEAL_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
@@ -478,7 +477,6 @@ describe('agent preview IPC', () => {
     const preview = {
       start: vi.fn(() => ({ ok: true as const, width: 1280, height: 800 })),
       stop: vi.fn(),
-      input: vi.fn(() => true),
     }
     registerDesktopCapabilityIpc({
       ipcMain: ipc,
@@ -492,7 +490,7 @@ describe('agent preview IPC', () => {
     return { ipc, preview, authorize }
   }
 
-  it('starts, stops and forwards input by tab id only', async () => {
+  it('starts and stops by tab id only, and takes no input back', async () => {
     const { ipc, preview, authorize } = setup()
     await expect(
       ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: id }),
@@ -501,29 +499,12 @@ describe('agent preview IPC', () => {
       width: 1280,
       height: 800,
     })
-    ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
-      targetId: id,
-      event: {
-        type: 'mouseDown',
-        x: 10,
-        y: 20,
-        button: 'left',
-        clickCount: 1,
-        url: 'https://x',
-      },
-    })
-    ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
-      targetId: id,
-      event: { type: 'keyDown', key: 'Enter', modifiers: ['meta'] },
-    })
     ipc.emit(AGENT_PREVIEW_STOP_CHANNEL, { targetId: id })
     expect(preview.start).toHaveBeenCalledWith(id)
-    expect(preview.input.mock.calls).toEqual([
-      [id, { type: 'mouseDown', x: 10, y: 20, button: 'left', clickCount: 1 }],
-      [id, { type: 'keyDown', key: 'Enter', modifiers: ['meta'] }],
-    ])
     expect(preview.stop).toHaveBeenCalledWith(id)
-    expect(authorize).toHaveBeenCalledTimes(4)
+    expect(authorize).toHaveBeenCalledTimes(2)
+    // The retired takeover input channel has no listener.
+    expect(ipc.hasListener('emperor:computer-use:preview-input')).toBe(false)
   })
 
   it('accepts a helper desktop window id for the live preview', async () => {
@@ -535,7 +516,7 @@ describe('agent preview IPC', () => {
     expect(preview.stop).toHaveBeenCalledWith(desktop)
   })
 
-  it('rejects bad ids, bad input and untrusted senders before delegating', async () => {
+  it('rejects bad ids and untrusted senders before delegating', async () => {
     const { ipc, preview } = setup()
     await expect(
       ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: '../x' }),
@@ -550,18 +531,7 @@ describe('agent preview IPC', () => {
         targetId: 'https://example.com/',
       }),
     ).rejects.toThrow()
-    for (const event of [
-      { type: 'eval', code: 'x' },
-      { type: 'mouseDown', x: 'NaN', y: 1 },
-      { type: 'keyDown', key: 'Enter', modifiers: ['hyper'] },
-      { type: 'text', text: 'x'.repeat(5_000) },
-      { type: 'mouseDown', x: 1, y: 1, button: 'back' },
-    ])
-      expect(() =>
-        ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, { targetId: id, event }),
-      ).not.toThrow()
     expect(preview.start).not.toHaveBeenCalled()
-    expect(preview.input).not.toHaveBeenCalled()
 
     const refused = setup(
       vi.fn(() => {
@@ -572,14 +542,11 @@ describe('agent preview IPC', () => {
       refused.ipc.invoke(AGENT_PREVIEW_START_CHANNEL, { targetId: id }),
     ).rejects.toThrow(/forbidden/)
     expect(refused.preview.start).not.toHaveBeenCalled()
-    // A one-way input from an untrusted sender is dropped without throwing.
+    // A one-way stop from an untrusted sender is dropped without throwing.
     expect(() =>
-      refused.ipc.emit(AGENT_PREVIEW_INPUT_CHANNEL, {
-        targetId: id,
-        event: { type: 'keyDown', key: 'Enter', modifiers: [] },
-      }),
+      refused.ipc.emit(AGENT_PREVIEW_STOP_CHANNEL, { targetId: id }),
     ).not.toThrow()
-    expect(refused.preview.input).not.toHaveBeenCalled()
+    expect(refused.preview.stop).not.toHaveBeenCalled()
   })
 })
 
@@ -605,6 +572,10 @@ class FakeIpcMain {
     const handler = this.listeners.get(channel)
     if (!handler) throw new Error(`missing listener: ${channel}`)
     handler({ sender: 'renderer' }, payload)
+  }
+
+  hasListener(channel: string): boolean {
+    return this.listeners.has(channel) || this.handlers.has(channel)
   }
 }
 

@@ -339,7 +339,7 @@ export function createDesktopTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'desktop_click',
       description:
-        'Click an element from the latest desktop observation, or a point from a current screenshot when image vision is available. Elements with a press action are clicked in the background without moving the pointer. Other clicks use the real pointer and need the app in front: the window is brought forward when the authorization mode allows it, otherwise the click is refused before anything is sent. Coordinate clicks also require one-time confirmation. Re-observe after the action.',
+        'Click an element from the latest desktop observation, or a point from a current screenshot when image vision is available. Elements with a press action are clicked in the background without moving the pointer. Other clicks use the real pointer and need the app in front, so the window is brought forward for them. Coordinate clicks also require one-time confirmation. Re-observe after the action.',
       input: desktopClickInput,
       timeoutMs: 30_000,
       execute: act(
@@ -426,7 +426,7 @@ export function createDesktopTools(runtime: ToolRuntime): ToolDefinition[] {
                 operationId,
                 next: outcome.filled
                   ? VERIFY
-                  : 'The field may still be empty; observe the window or ask the user to take over.',
+                  : 'The field may still be empty; observe the window again, or ask the user with ask_user_question to type it in themselves.',
               },
               meta: {
                 ...targetMeta(target),
@@ -470,7 +470,7 @@ export function createDesktopTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'desktop_scroll',
       description:
-        "Scroll the desktop window or an element by pages or lines. Paging a native app's document or list (pass its ref or its scroll area's) runs in the background; otherwise the window is brought forward when the authorization mode allows it. To read text, use desktop_observe with includeText instead of scrolling.",
+        "Scroll the desktop window or an element by pages or lines. Paging a native app's document or list (pass its ref or its scroll area's) runs in the background; otherwise the window is brought forward. To read text, use desktop_observe with includeText instead of scrolling.",
       input: desktopScrollInput,
       timeoutMs: 30_000,
       execute: act(
@@ -556,7 +556,7 @@ export function createDesktopTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'desktop_activate',
       description:
-        "Bring the bound window's app to the front, restoring a minimized window; the front goes back to the user's app when the task ends. In continuous-allow mode this needs no confirmation, and actions that need the front (keys or menus in a Chrome, Edge or Electron app such as VS Code, a coordinate click, a drag) bring the window forward themselves, so you rarely need this tool. In per-item mode the user is asked once per task, and after that those actions bring the window forward themselves. Never use it only to take a screenshot: verify with desktop_observe, which works in the background.",
+        "Bring the bound window's app to the front, restoring a minimized window; the front goes back to the user's app when the task ends. It needs no confirmation, and actions that need the front (keys or menus in a Chrome, Edge or Electron app such as VS Code, a coordinate click, a drag) bring the window forward themselves, so you rarely need this tool. Never use it only to take a screenshot: verify with desktop_observe, which works in the background.",
       input: desktopActivateInput,
       timeoutMs: 30_000,
       execute: act('desktop_activate', () => ({ kind: 'activate' })) as never,

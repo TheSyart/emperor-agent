@@ -8,6 +8,8 @@
  * - Live frames: the first four streamable cards (a desktop window's capture
  *   stream or a built-in browser tab's paint frames). External browser tabs
  *   only have tool screenshots. Blocked targets never show a picture.
+ * - After the user's "Stop Sharing" a window keeps its last frame, marked as
+ *   stopped; the Agent carries on working on it.
  */
 import type { UiTargetView } from '@emperor/core/runtime-contract'
 
@@ -82,7 +84,8 @@ function streamable(target: UiTargetView): boolean {
     (target.driver === 'desktop' || target.driver === 'embedded-browser') &&
     target.control === 'agent' &&
     target.state !== 'recovering' &&
-    target.previewBlocked === undefined
+    target.previewBlocked === undefined &&
+    target.sharingStopped !== true
   )
 }
 
@@ -111,14 +114,14 @@ export function previewStatus(
     return { label: '已急停', tone: 'stopped' }
   if (target.state === 'recovering') return { label: '失联', tone: 'lost' }
   if (target.control === 'paused') return { label: '已暂停', tone: 'paused' }
-  if (target.control === 'user-takeover')
-    return { label: '你已接管', tone: 'paused' }
   if (options.awaiting) return { label: '等待回复', tone: 'waiting' }
   return { label: '操作中', tone: 'active' }
 }
 
 export type PreviewFrame =
   | { readonly kind: 'live'; readonly url: string; readonly note: string }
+  /** The last live frame of a window whose sharing the user stopped. */
+  | { readonly kind: 'frozen'; readonly url: string; readonly note: string }
   | {
       readonly kind: 'shot'
       readonly attachmentId: string
@@ -151,24 +154,33 @@ export function shotTime(iso: string, now: Date): string {
   return sameDay ? time : `${at.getMonth() + 1}月${at.getDate()}日 ${time}`
 }
 
-/** What a card shows: a live frame, the latest screenshot, or why neither. */
+/**
+ * What a card shows: a live frame (or the last one after "Stop Sharing"),
+ * the latest screenshot, or why neither.
+ */
 export function previewFrame(
   target: UiTargetView,
-  liveUrl: string | undefined,
+  frameUrl: string | undefined,
   now: Date,
 ): PreviewFrame {
   if (target.previewBlocked)
     return { kind: 'blocked', note: BLOCKED_NOTE[target.previewBlocked] }
-  if (liveUrl) return { kind: 'live', url: liveUrl, note: '实时画面' }
+  const stopped = target.sharingStopped === true
+  if (frameUrl)
+    return stopped
+      ? { kind: 'frozen', url: frameUrl, note: '画面已停止共享 · 最后一帧' }
+      : { kind: 'live', url: frameUrl, note: '实时画面' }
   const shot = target.lastScreenshot
   if (shot) {
     const time = shotTime(shot.takenAt, now)
+    const note = time ? `最近截图 · ${time}` : '最近截图'
     return {
       kind: 'shot',
       attachmentId: shot.attachmentId,
-      note: time ? `最近截图 · ${time}` : '最近截图',
+      note: stopped ? `画面已停止共享 · ${note}` : note,
     }
   }
+  if (stopped) return { kind: 'none', note: '画面已停止共享' }
   return {
     kind: 'none',
     note: target.driver === 'external-browser' ? '暂无截图' : '等待画面',

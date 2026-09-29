@@ -3,10 +3,6 @@ import {
   APP_LIST_LIMIT,
   KILL_SWITCH_ACCELERATOR,
 } from '../harness/computer-use/config'
-import {
-  UI_ACTION_CLASSES,
-  type UiActionClass,
-} from '../harness/computer-use/types'
 import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
@@ -815,13 +811,6 @@ export const CORE_OPERATION_REGISTRY = {
   'computerUse.resume': operation(z.tuple([]), (api) =>
     api.computerUse.resume(),
   ),
-  'computerUse.listGrants': operation(z.tuple([]), (api) =>
-    api.computerUse.listGrants(),
-  ),
-  'computerUse.revokeGrant': operation(
-    z.tuple([z.string().min(1).max(128)]),
-    (api, [grantId]) => api.computerUse.revokeGrant(grantId),
-  ),
   'computerUse.listProfiles': operation(z.tuple([]), (api) =>
     api.computerUse.listProfiles(),
   ),
@@ -865,10 +854,6 @@ export const CORE_OPERATION_REGISTRY = {
   'computerUse.setEnabled': operation(
     z.tuple([z.boolean()]),
     (api, [enabled]) => api.computerUse.setEnabled(enabled),
-  ),
-  'computerUse.setAuthorizationMode': operation(
-    z.tuple([z.enum(['unrestricted', 'scoped'])]),
-    (api, [mode]) => api.computerUse.setAuthorizationMode(mode),
   ),
   'computerUse.setDriverEnabled': operation(
     z.tuple([
@@ -939,34 +924,6 @@ export const CORE_OPERATION_REGISTRY = {
         .optional(),
     ]),
     (api, [input]) => api.computerUse.clearScreenshots(input ?? {}),
-  ),
-  'computerUse.narrowGrant': operation(
-    z.tuple([
-      z
-        .object({
-          grantId: z.string().min(1).max(128),
-          allowedActions: z
-            .array(
-              z.enum(UI_ACTION_CLASSES as [UiActionClass, ...UiActionClass[]]),
-            )
-            .max(8)
-            .optional(),
-          origins: z.array(z.string().min(1).max(2048)).max(64).optional(),
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.computerUse.narrowGrant(input),
-  ),
-  'computerUse.controlTarget': operation(
-    z.tuple([
-      z
-        .object({
-          targetId: z.string().min(1).max(256),
-          action: z.enum(['pause', 'resume', 'takeover', 'handback', 'close']),
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.computerUse.controlTarget(input),
   ),
   'desktopPet.get': operation(z.tuple([]), (api) => api.desktopPet.get()),
   'desktopPet.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>

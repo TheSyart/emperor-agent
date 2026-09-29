@@ -93,16 +93,17 @@ describe('computer use tool rows', () => {
     })
     expect(computerUseSuffix(settled)).toBe('结果不确定')
     expect(computerUseSuffixTone(settled)).toBe('warn')
+    // Auto-approval is the norm while computer use is on: no tail for it.
     expect(
       computerUseSuffix(
         data('browser_click', {}, { outcome: 'observed', autoApproved: true }),
       ),
-    ).toBe('自动放行')
+    ).toBeNull()
     expect(
       computerUseSuffixTone(
         data('browser_click', {}, { outcome: 'observed', autoApproved: true }),
       ),
-    ).toBe('accent')
+    ).toBeNull()
     expect(
       computerUseSuffixTone(data('browser_click', {}, { outcome: 'observed' })),
     ).toBeNull()

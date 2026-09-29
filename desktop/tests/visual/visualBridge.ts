@@ -34,7 +34,6 @@ type VisualBridge = {
   onBrowserState?: (listener: VisualCoreListener) => () => void
   agentPreviewStart?: (targetId: string) => Promise<unknown>
   agentPreviewStop?: (targetId: string) => void
-  agentPreviewInput?: (targetId: string, event: unknown) => void
   onAgentPreviewFrame?: (listener: VisualCoreListener) => () => void
 }
 
@@ -1069,39 +1068,6 @@ export async function installVisualCoreBridge(
           highRisk: [] as string[],
           sensitive: [] as string[],
         } as Record<'protected' | 'highRisk' | 'sensitive', string[]>,
-        grants: [
-          {
-            grantId: 'grant_visual_form',
-            subject: 'session:chat-main',
-            ownerSessionId: 'chat-main',
-            driver: 'embedded-browser',
-            targetScope: {
-              kind: 'browser',
-              profileId: 'temporary',
-              origins: ['http://127.0.0.1:5173'],
-            },
-            allowedActions: ['observe', 'interact'],
-            scope: 'session',
-            createdAt: now,
-            backgroundAllowed: false,
-          },
-          {
-            grantId: 'grant_visual_docs',
-            subject: 'session:build-ui',
-            ownerSessionId: 'build-ui',
-            driver: 'embedded-browser',
-            targetScope: {
-              kind: 'browser',
-              profileId: 'temporary',
-              origins: ['https://docs.example.com'],
-            },
-            allowedActions: ['observe', 'interact', 'navigate'],
-            scope: 'timed',
-            createdAt: now,
-            expiresAt: '2026-06-26T13:00:00.000Z',
-            backgroundAllowed: true,
-          },
-        ],
       }
       const visualComputerUse = () => {
         const on = visualComputerUseState.enabled
@@ -1161,7 +1127,6 @@ export async function installVisualCoreBridge(
             },
           ],
           targets: visualTargets(),
-          grants: on ? visualComputerUseState.grants : [],
           screenshots: visualComputerUseState.screenshots,
           downloadRetentionDays: visualComputerUseState.downloadRetentionDays,
           appLists: visualComputerUseState.appLists,
@@ -1172,10 +1137,6 @@ export async function installVisualCoreBridge(
         }
       }
       const previewListeners = new Set<VisualCoreListener>()
-      const visualPreview = window as unknown as {
-        __visualPreviewInput?: unknown[]
-        __visualControlTarget?: unknown[]
-      }
       const drawVisualFrame = async (targetId: string) => {
         const canvas = new OffscreenCanvas(1280, 800)
         const ctx = canvas.getContext('2d')
@@ -2092,6 +2053,8 @@ export async function installVisualCoreBridge(
       }
       const visualGrantHighImpact =
         visualParams.get('visualGrant') === 'high-impact'
+      // Since 2026-09-29 a card asks only for a high-impact action or a
+      // credential fill, and only for that one action.
       const visualGrantInteraction = {
         ...visualAskInteraction,
         id: 'grant_visual_grant',
@@ -2100,20 +2063,13 @@ export async function installVisualCoreBridge(
           {
             id: 'grant',
             header: '电脑操作',
-            question: '允许 Agent 操作、查看：https://fixture.test/form?utm=1',
-            options: visualGrantHighImpact
-              ? [
-                  { id: 'once', label: '仅本次' },
-                  { id: 'deny', label: '拒绝' },
-                ]
-              : [
-                  { id: 'once', label: '仅本次' },
-                  { id: 'task', label: '本任务' },
-                  { id: 'session', label: '本会话' },
-                  { id: 'timed:15', label: '15 分钟' },
-                  { id: 'timed:60', label: '1 小时' },
-                  { id: 'deny', label: '拒绝' },
-                ],
+            question: visualGrantHighImpact
+              ? '允许 Agent 执行高影响操作：https://fixture.test/form?utm=1'
+              : '允许 Agent 代填密码：https://fixture.test/form?utm=1',
+            options: [
+              { id: 'once', label: '仅本次' },
+              { id: 'deny', label: '拒绝' },
+            ],
           },
         ],
         meta: {
@@ -2128,19 +2084,17 @@ export async function installVisualCoreBridge(
               profileId: 'temporary',
               origins: ['https://fixture.test'],
             },
-            actions: visualGrantHighImpact
-              ? ['high-impact']
-              : ['interact', 'observe'],
-            allowed_scopes: visualGrantHighImpact
-              ? ['once']
-              : ['once', 'task', 'session', 'timed'],
+            actions: visualGrantHighImpact ? ['high-impact'] : ['interact'],
+            allowed_scopes: ['once'],
             display: { url: 'https://fixture.test/form?utm=1' },
-            tool_name: 'browser_click',
+            tool_name: visualGrantHighImpact
+              ? 'browser_click'
+              : 'browser_fill_credential',
             reason: '填写报名表并提交',
             reason_unverified: true,
             high_impact: visualGrantHighImpact,
             high_risk_app: false,
-            background: true,
+            background: false,
           },
         },
       }
@@ -3562,12 +3516,6 @@ export async function installVisualCoreBridge(
           return { ok: true, width: 1280, height: 800 }
         },
         agentPreviewStop: () => {},
-        agentPreviewInput: (targetId: string, event: unknown) => {
-          ;(visualPreview.__visualPreviewInput ??= []).push({
-            targetId,
-            event,
-          })
-        },
         onAgentPreviewFrame: (listener: VisualCoreListener) => {
           previewListeners.add(listener)
           return () => previewListeners.delete(listener)
@@ -5190,63 +5138,6 @@ export async function installVisualCoreBridge(
               const removed = visualComputerUseState.screenshots.count
               visualComputerUseState.screenshots = { count: 0, bytes: 0 }
               return { removed, bytes: 0 }
-            }
-            case 'computerUse.narrowGrant': {
-              const input = (args[0] || {}) as {
-                grantId?: string
-                allowedActions?: string[]
-                origins?: string[]
-              }
-              visualComputerUseState.grants = visualComputerUseState.grants
-                .map((grant) =>
-                  grant.grantId !== input.grantId
-                    ? grant
-                    : {
-                        ...grant,
-                        allowedActions: input.allowedActions
-                          ? grant.allowedActions.filter((action) =>
-                              input.allowedActions!.includes(action),
-                            )
-                          : grant.allowedActions,
-                        targetScope: input.origins
-                          ? {
-                              ...grant.targetScope,
-                              origins: grant.targetScope.origins.filter(
-                                (origin) => input.origins!.includes(origin),
-                              ),
-                            }
-                          : grant.targetScope,
-                      },
-                )
-                .filter(
-                  (grant) =>
-                    grant.allowedActions.length > 0 &&
-                    grant.targetScope.origins.length > 0,
-                )
-              return { found: true, revoked: false }
-            }
-            case 'computerUse.revokeGrant': {
-              const before = visualComputerUseState.grants.length
-              visualComputerUseState.grants =
-                visualComputerUseState.grants.filter(
-                  (grant) => grant.grantId !== args[0],
-                )
-              return {
-                revoked: visualComputerUseState.grants.length < before,
-              }
-            }
-            case 'computerUse.controlTarget': {
-              const input = (args[0] || {}) as { action?: string }
-              ;(visualPreview.__visualControlTarget ??= []).push(input)
-              if (input.action === 'takeover')
-                visualAgentTarget.control = 'user-takeover'
-              else if (input.action === 'handback' || input.action === 'resume')
-                visualAgentTarget.control = 'agent'
-              else if (input.action === 'pause')
-                visualAgentTarget.control = 'paused'
-              for (const target of environmentListeners)
-                target({ event: 'computer_use_changed', reason: 'state' })
-              return visualAgentTarget
             }
             default:
               return {}

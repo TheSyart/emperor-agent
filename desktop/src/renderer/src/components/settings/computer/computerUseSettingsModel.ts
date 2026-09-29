@@ -1,13 +1,11 @@
 /**
  * Settings › 电脑操作 view model: the master switch text, one row per driver
  * (stage, what is missing, why it is unavailable), the kill switch and the
- * grant list — all derived from `computerUse.status`.
+ * saved screenshots — all derived from `computerUse.status`.
  */
 import type {
   ComputerUseStatusView,
   DriverCapability,
-  UiActionClass,
-  UiGrantView,
 } from '@emperor/core/runtime-contract'
 import { acceleratorLabel } from './shortcut'
 
@@ -36,24 +34,32 @@ export function computerUseHeadline(
       badge: '不可用',
       description: '电脑操作需要 Emperor 桌面应用',
     }
+  if (!status.enabled && status.scopedRetired)
+    return {
+      tone: 'warn',
+      badge: '已关闭',
+      description:
+        '电脑操作改为由 AI 连续操作，之前选择的逐项授权已停用；确认后重新打开',
+    }
   if (!status.enabled)
     return {
       tone: 'neutral',
       badge: '已关闭',
-      description: '开启后，Agent 可以在内置浏览器中打开网页、查看页面并操作',
+      description:
+        '开启后，Agent 可以在内置浏览器、已连接的 Chrome 标签页和 Mac 窗口中连续操作',
     }
   if (status.stopped && status.stopReason === 'corrupt-store')
     return {
       tone: 'warn',
       badge: '已暂停',
       description:
-        '授权记录文件损坏，已隔离备份并暂停所有授权；恢复后需要重新授权网站与应用',
+        '授权记录文件损坏，已隔离备份并暂停电脑操作；恢复后 Agent 才能继续',
     }
   if (status.stopped)
     return {
       tone: 'warn',
       badge: '已急停',
-      description: '所有授权已挂起，恢复后 Agent 才能继续操作',
+      description: '所有动作已停止，恢复后 Agent 才能继续操作',
     }
   const available = status.drivers.filter((driver) => driver.available)
   return {
@@ -157,68 +163,6 @@ export function killSwitchRow(
       ? `${kill.error}；仍可用下方按钮停止`
       : '快捷键未注册；仍可用下方按钮停止',
   }
-}
-
-const ACTION_LABELS: Readonly<Record<string, string>> = {
-  observe: '查看',
-  interact: '操作',
-  navigate: '跳转',
-  transfer: '上传或下载',
-  'high-impact': '高影响操作',
-}
-
-const SCOPE_LABELS: Readonly<Record<UiGrantView['scope'], string>> = {
-  once: '仅本次',
-  task: '本任务',
-  session: '本会话',
-  timed: '限时',
-}
-
-export interface GrantRow {
-  readonly grantId: string
-  readonly title: string
-  readonly detail: string
-  /** What can be taken away one at a time (narrowing, spec 00 §6.3). */
-  readonly actions: ReadonlyArray<{ value: UiActionClass; label: string }>
-  readonly origins: readonly string[]
-}
-
-function clock(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-export function grantRows(grants: readonly UiGrantView[]): GrantRow[] {
-  return grants.map((grant) => {
-    const scope = grant.targetScope
-    const title =
-      scope.kind === 'browser'
-        ? scope.origins.join('、') || '任意网站'
-        : scope.appId
-    const detail = [
-      grant.allowedActions
-        .map((action) => ACTION_LABELS[action] ?? action)
-        .join('、'),
-      grant.scope === 'timed' && grant.expiresAt
-        ? `到 ${clock(grant.expiresAt)}`
-        : SCOPE_LABELS[grant.scope],
-      grant.backgroundAllowed ? '允许后台' : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
-    return {
-      grantId: grant.grantId,
-      title,
-      detail,
-      actions: grant.allowedActions.map((action) => ({
-        value: action,
-        label: ACTION_LABELS[action] ?? action,
-      })),
-      origins: scope.kind === 'browser' ? scope.origins : [],
-    }
-  })
 }
 
 export interface ScreenshotRow {

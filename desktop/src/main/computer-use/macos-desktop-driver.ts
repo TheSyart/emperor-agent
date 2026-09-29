@@ -222,7 +222,7 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
       missing: [
         ...(accessibility === 'granted' ? [] : ['辅助功能权限']),
         ...(screenRecording === 'granted' ? [] : ['屏幕录制权限']),
-        '自动用户活动检测（请用接管或急停）',
+        '自动用户活动检测',
         '真实动作矩阵与桌面凭据验收',
       ],
       permissions: { accessibility, 'screen-recording': screenRecording },
@@ -328,14 +328,13 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
           targetId: data.targetId,
           reason: data.reason,
         })
-      } else if (event.name === 'user.input') {
-        const data = event.data as { targetId: string }
-        this.emit({ type: 'user-input', targetId: data.targetId })
       } else if (event.name === 'target.capture.stopped') {
-        // "Stop Sharing" in the menu bar is the user taking the window back.
+        // "Stop Sharing" in the menu bar: only the picture stops; the Agent
+        // keeps working on the window (2026-09-29). The helper does not
+        // restart that stream. An error stop is retried by the helper.
         const data = event.data as { targetId: string; reason: string }
         if (data.reason === 'user')
-          this.emit({ type: 'user-input', targetId: data.targetId })
+          this.emit({ type: 'sharing-stopped', targetId: data.targetId })
       }
     })
     client.onDisconnected(() => this.disconnected(client))

@@ -730,7 +730,7 @@ export const DRIVER_CONTRACT_CASES: readonly ContractCase[] = [
               kind: 'click',
               ref: refOf(observation, 'I agree'),
             }),
-            ['TARGET_BUSY', 'USER_TAKEOVER'],
+            ['TARGET_BUSY'],
             'paused target',
           )
         } finally {

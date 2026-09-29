@@ -29,10 +29,17 @@ vi.mock('./computer/BrowserProfileSettings.vue', () => ({
 vi.mock('./computer/CredentialVaultSettings.vue', () => ({
   default: { render: () => null },
 }))
+const pairingSummary = vi.hoisted(() => ({
+  value: { pending: 0, paired: 0, tabs: 0 },
+}))
 vi.mock('./computer/BrowserPairingSettings.vue', () => ({
   default: {
-    emits: ['connection-changed'],
-    render: () => h('div', '浏览器配对设置'),
+    props: ['embedded'],
+    emits: ['connection-changed', 'summary'],
+    mounted(this: { $emit: (name: string, value: unknown) => void }) {
+      this.$emit('summary', pairingSummary.value)
+    },
+    render: () => h('div', { class: 'pairing-mock' }, '浏览器配对设置'),
   },
 }))
 
@@ -57,7 +64,6 @@ const status: ComputerUseStatusView = {
     },
   ],
   targets: [],
-  grants: [],
   killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
 }
 
@@ -88,12 +94,13 @@ afterEach(() => {
   requestPermission.mockReset()
   resetPermission.mockReset()
   reconnect.mockReset()
+  pairingSummary.value = { pending: 0, paired: 0, tabs: 0 }
   vi.restoreAllMocks()
 })
 
 describe('ComputerUseSection macOS helper', () => {
-  it('shows persisted unrestricted GUI mode independently of Shell and can narrow it', async () => {
-    core.mockResolvedValue({ ...status, authorizationMode: 'unrestricted' })
+  it('shows four groups, folds the rest under 高级, and has no per-item mode or grant list', async () => {
+    core.mockResolvedValue(status)
     helperStatus.mockResolvedValue({
       available: true,
       connected: true,
@@ -101,18 +108,37 @@ describe('ComputerUseSection macOS helper', () => {
     })
     const root = mount()
     await settle()
-    const mode = root.querySelector<HTMLButtonElement>(
-      '#computer-use-unrestricted',
-    )!
-    expect(mode.getAttribute('aria-checked')).toBe('true')
-    expect(root.textContent).toContain('账号密码代填及高影响操作')
-    expect(root.textContent).toContain('与会话的 Shell 权限独立')
-    mode.click()
-    await settle()
-    expect(core).toHaveBeenCalledWith(
-      'computerUse.setAuthorizationMode',
-      'scoped',
+    const text = root.textContent ?? ''
+    const order = ['电脑操作', '应用与浏览器', '系统权限', '紧急停止'].map(
+      (title) => text.indexOf(title),
     )
+    expect(order.every((index) => index >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    const advanced = root.querySelector<HTMLDetailsElement>(
+      '[data-testid="computer-use-advanced"]',
+    )!
+    expect(advanced.open).toBe(false)
+    expect(advanced.textContent).toContain('截图与下载')
+    expect(advanced.textContent).toContain('须知')
+    expect(advanced.textContent).toContain('「停止共享」只停止该窗口')
+    expect(text.indexOf('紧急停止')).toBeLessThan(text.indexOf('截图与下载'))
+    expect(root.querySelector('#computer-use-unrestricted')).toBeNull()
+    expect(text).not.toContain('持续允许电脑操作')
+    expect(text).not.toContain('没有生效的授权')
+  })
+
+  it('explains that a saved per-item mode switched computer use off', async () => {
+    core.mockResolvedValue({ ...status, enabled: false, scopedRetired: true })
+    helperStatus.mockResolvedValue({ connected: false, permissions: {} })
+    const root = mount()
+    await settle()
+    expect(
+      root.querySelector('[data-testid="computer-use-scoped-retired"]')
+        ?.textContent,
+    ).toContain('不再逐项授权')
+    root.querySelector<HTMLButtonElement>('#computer-use-enabled')!.click()
+    await settle()
+    expect(core).toHaveBeenCalledWith('computerUse.setEnabled', true)
   })
 
   it('shows permission and diagnostic status and requests permission only after a user click', async () => {
@@ -194,8 +220,11 @@ describe('ComputerUseSection macOS helper', () => {
     })
     const root = mount()
     await settle()
-    expect(root.textContent).toContain('可交互（实验）')
-    expect(root.textContent).not.toContain('只读')
+    const badges = [...root.querySelectorAll('.ds-status-badge')].map((badge) =>
+      badge.textContent?.trim(),
+    )
+    expect(badges).toContain('可交互（实验）')
+    expect(badges).not.toContain('只读')
   })
 
   it('warns that an ad-hoc Preview must regain macOS permissions after updates', async () => {
@@ -217,36 +246,75 @@ describe('ComputerUseSection macOS helper', () => {
 })
 
 describe('ComputerUseSection controls', () => {
-  it('shows browser pairing before the long driver and macOS settings', async () => {
+  it('shows the Chrome pairing from its row, and by itself while a code waits', async () => {
+    const withChrome: ComputerUseStatusView = {
+      ...status,
+      drivers: [
+        ...status.drivers,
+        {
+          driver: 'external-browser',
+          platform: 'macos',
+          stage: 'experimental',
+          label: 'Chrome/Edge 连接',
+          enabled: true,
+          available: true,
+          actions: [],
+          missing: [],
+        },
+      ],
+    }
+    core.mockResolvedValue(withChrome)
+    helperStatus.mockResolvedValue({ connected: false, permissions: {} })
+    pairingSummary.value = { pending: 0, paired: 1, tabs: 2 }
+    const root = mount()
+    await settle()
+    const panel = root.querySelector<HTMLElement>('#computer-use-pairing')!
+    expect(panel.style.display).toBe('none')
+    expect(
+      root.querySelector('[data-testid="browser-pairing-summary"]')
+        ?.textContent,
+    ).toBe('已连接 1 个浏览器 · 2 个可操作标签页')
+    root
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="browser-pairing-manage"]',
+      )!
+      .click()
+    await settle()
+    expect(panel.style.display).toBe('')
+    app?.unmount()
+    container?.remove()
+
+    pairingSummary.value = { pending: 1, paired: 0, tabs: 0 }
+    const waiting = mount()
+    await settle()
+    expect(
+      waiting.querySelector<HTMLElement>('#computer-use-pairing')!.style
+        .display,
+    ).toBe('')
+  })
+
+  it('opens 高级 at the app lists from the protected apps row', async () => {
     core.mockResolvedValue(status)
     helperStatus.mockResolvedValue({ connected: false, permissions: {} })
     const root = mount()
     await settle()
-    const text = root.textContent ?? ''
-    expect(text.indexOf('浏览器配对设置')).toBeGreaterThan(-1)
-    expect(text.indexOf('浏览器配对设置')).toBeLessThan(text.indexOf('驱动'))
+    Element.prototype.scrollIntoView = vi.fn()
+    root
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="computer-use-app-lists"]',
+      )!
+      .click()
+    await settle()
+    expect(
+      root.querySelector<HTMLDetailsElement>(
+        '[data-testid="computer-use-advanced"]',
+      )!.open,
+    ).toBe(true)
   })
 
-  const grant = {
-    grantId: 'g1',
-    subject: 'session:s1',
-    ownerSessionId: 's1',
-    driver: 'embedded-browser' as const,
-    targetScope: {
-      kind: 'browser' as const,
-      profileId: 'temporary',
-      origins: ['https://a.test', 'https://b.test'],
-    },
-    allowedActions: ['observe' as const, 'interact' as const],
-    scope: 'session' as const,
-    createdAt: '2026-09-26T00:00:00.000Z',
-    backgroundAllowed: false,
-  }
-
-  it('switches one driver, narrows a grant and clears screenshots', async () => {
+  it('switches one driver and clears screenshots', async () => {
     core.mockResolvedValue({
       ...status,
-      grants: [grant],
       screenshots: { count: 3, bytes: 1024 },
     })
     helperStatus.mockResolvedValue({ connected: false, permissions: {} })
@@ -261,25 +329,6 @@ describe('ComputerUseSection controls', () => {
     expect(core).toHaveBeenCalledWith('computerUse.setDriverEnabled', {
       driver: 'desktop',
       enabled: false,
-    })
-
-    root
-      .querySelector<HTMLButtonElement>(
-        '[aria-label="不再允许 https://b.test"]',
-      )!
-      .click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.narrowGrant', {
-      grantId: 'g1',
-      origins: ['https://a.test'],
-    })
-    root
-      .querySelector<HTMLButtonElement>('[aria-label="不再允许操作"]')!
-      .click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.narrowGrant', {
-      grantId: 'g1',
-      allowedActions: ['observe'],
     })
 
     expect(root.textContent).toContain('已保存 3 张截图')

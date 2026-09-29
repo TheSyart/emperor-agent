@@ -60,7 +60,6 @@ export interface InstallComputerUseOptions {
   readonly attachments: AttachmentSaver
   sessionFor(sessionId: string): Session | undefined
   rootOf(agent: Agent): Agent
-  isDirectChild?(parentSessionId: string, childId: string): boolean
   planActive(agent: Agent): boolean
   routeVision(agent: Agent): boolean
   settings(): ComputerUseSettings
@@ -146,8 +145,7 @@ export function installComputerUse(
   const identity = (agent: Agent | undefined) =>
     resolveIdentity(agent, {
       rootOf: options.rootOf,
-      authorizationMode: () =>
-        options.settings().authorizationMode ?? 'unrestricted',
+      enabled: () => options.settings().enabled,
     })
   const gateDeps: GateDeps = {
     service,
@@ -165,7 +163,6 @@ export function installComputerUse(
     gate: gateDeps,
     identity,
     vision: options.routeVision,
-    isDirectChild: options.isDirectChild ?? (() => false),
   }
 
   const gate = createComputerUseGate(gateDeps)
@@ -174,6 +171,18 @@ export function installComputerUse(
   options.tools.preExecute.push(gate)
   options.tools.guards.push(guard)
   options.tools.observers.push(cleanup)
+  // Removed 2026-09-29 (the AI drives continuously): a call from an older
+  // conversation, or from a model that remembers them, says why.
+  const retired = [
+    options.tools.retire(
+      'ui_request_control',
+      'nothing needs asking up front any more; while computer use is on, ordinary actions run directly and only high-impact actions and credential fills show a confirmation card',
+    ),
+    options.tools.retire(
+      'ui_delegate_grant',
+      'there is nothing to delegate; subagents act on ordinary targets while computer use is on and report high-impact actions or credential fills back to their parent',
+    ),
+  ]
   grants.onChange((change) => {
     if (
       change.kind === 'issued' ||
@@ -218,6 +227,7 @@ export function installComputerUse(
       remove(options.tools.preExecute, gate)
       remove(options.tools.guards, guard)
       remove(options.tools.observers, cleanup)
+      for (const restore of retired) restore()
       ask.setAnswerer(undefined)
       await service.shutdown()
     },

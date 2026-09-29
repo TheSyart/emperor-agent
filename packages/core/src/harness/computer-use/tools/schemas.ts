@@ -22,52 +22,13 @@ export const uiGetCapabilitiesInput = z.object({}).strict()
 
 export const uiListTargetsInput = z.object({}).strict()
 
-export const uiRequestControlInput = z
-  .object({
-    driver: z.literal('embedded-browser').default('embedded-browser'),
-    origins: z
-      .array(z.string().min(1).max(512))
-      .min(1)
-      .max(8)
-      .describe('Exact origins such as https://example.com'),
-    actions: z
-      .array(z.enum(['observe', 'interact', 'navigate']))
-      .min(1)
-      .max(3),
-    background: z
-      .boolean()
-      .optional()
-      .describe(
-        'Ask to keep working while the user is away (scheduler / goal runs).',
-      ),
-    reason: z.string().min(1).max(300).optional(),
-  })
-  .strict()
-
-export const uiDelegateGrantInput = z
-  .object({
-    grantId: z.string().min(1).max(128),
-    childId: z.string().min(1).max(256),
-    actions: z
-      .array(z.enum(['observe', 'interact', 'navigate']))
-      .min(1)
-      .max(3),
-    origins: z.array(z.string().min(1).max(512)).min(1).max(8).optional(),
-  })
-  .strict()
-
 export const uiReleaseControlInput = z
   .object({
-    targetId: targetId.optional(),
-    grantId: z.string().min(1).max(128).optional(),
+    targetId: targetId.describe(
+      'The window or tab to release before the task ends.',
+    ),
   })
   .strict()
-  .refine(
-    (value) => (value.targetId === undefined) !== (value.grantId === undefined),
-    {
-      message: 'give exactly one of targetId or grantId',
-    },
-  )
 
 export const uiActionStatusInput = z
   .object({

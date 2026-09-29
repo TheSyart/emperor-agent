@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   eventOf,
   makeApi,
-  pendingInteractionId,
   waitFor,
   type ApiFixture,
 } from '../../../api/test-helpers'
@@ -21,17 +20,14 @@ afterEach(async () => {
 
 async function setup(
   replies: ScriptedReply[],
-  options: { vision?: boolean; mode?: 'unrestricted' | 'scoped' } = {},
+  options: { vision?: boolean } = {},
 ) {
   const port = new FakeComputerUsePort()
   const fixture = await makeApi({
     replies,
     extra: {
       computerUsePort: port,
-      computerUseSettings: () => ({
-        enabled: true,
-        authorizationMode: options.mode ?? 'unrestricted',
-      }),
+      computerUseSettings: () => ({ enabled: true }),
     },
   })
   fixtures.push(fixture)
@@ -107,7 +103,7 @@ const then =
   }
 
 describe('browser_* tools end to end', () => {
-  it('opens, observes, fills and submits with unrestricted GUI mode and workspace Shell', async () => {
+  it('opens, observes, fills and submits while computer use is on, under workspace Shell', async () => {
     const seen: Array<Record<string, unknown>> = []
     let observationText = ''
     const { api, events, id } = await setup([
@@ -184,119 +180,46 @@ describe('browser_* tools end to end', () => {
     )
   })
 
-  it('asks once in restricted presets, then asks again for a new origin', async () => {
-    let refused = ''
-    const { api, events, id } = await setup(
-      [
-        call('browser_open', { url: 'https://fixture.test/form' }),
-        call('browser_observe', {}),
-        call('browser_navigate', { url: 'https://other.test/' }),
-        then((request) => {
-          // A gate denial reaches the model as one structured text line.
-          refused = lastResult(request)
-            .map((block) => block.text ?? '')
-            .join('')
-          return { text: 'stopped' }
-        }),
-      ],
-      { mode: 'scoped' },
-    )
-    const submitted = api.chat.submit({ content: 'go', sessionId: id })
-    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await api.control.answerInteraction(
-      pendingInteractionId(events, 'ask_request'),
-      {
-        grant: { option_id: 'session' },
-      },
-    )
-    await waitFor(
-      () =>
-        events.filter((event) => event.event === 'ask_request').length === 2,
-    )
-    const second = events.filter((event) => event.event === 'ask_request')[1]!
-    const interaction = second.interaction as {
-      id: string
-      meta: { grant: Record<string, unknown> }
-    }
-    expect(interaction.meta.grant).toMatchObject({
-      target_scope: { origins: ['https://other.test'] },
-      display: { url: 'https://other.test/' },
-    })
-    await api.control.answerInteraction(interaction.id, {
-      grant: { option_id: 'deny' },
-    })
-    expect((await submitted).content).toBe('stopped')
-    expect(refused).toMatch(
-      /computer-use PERMISSION_DENIED: the user refused this action \(retryable: false; reason: user-denied/,
-    )
-  })
-
-  it('asks for the frame origin before acting inside a cross-origin frame', async () => {
-    const { api, events, id } = await setup(
-      [
-        call('browser_open', { url: 'https://fixture.test/embedded-pay' }),
-        call('browser_observe', {}),
-        then((request) =>
-          call('browser_click', { ref: refIn(request, 'Apply coupon') }),
-        ),
-        then((request) => {
-          expect(summary(request)).toMatchObject({ outcome: 'observed' })
-          return call('browser_observe', {})
-        }),
-        then((request) =>
-          call('browser_click', { ref: refIn(request, 'Continue with card') }),
-        ),
-        then((request) => {
-          expect(summary(request)).toMatchObject({ outcome: 'observed' })
-          return { text: 'done' }
-        }),
-      ],
-      { mode: 'scoped' },
-    )
-    const submitted = api.chat.submit({ content: 'pay', sessionId: id })
-    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await api.control.answerInteraction(
-      pendingInteractionId(events, 'ask_request'),
-      { grant: { option_id: 'session' } },
-    )
-    // The session grant for the shop covers the shop's own button but not
-    // the payment frame of another site.
-    await waitFor(
-      () =>
-        events.filter((event) => event.event === 'ask_request').length === 2,
-    )
-    const second = events.filter((event) => event.event === 'ask_request')[1]!
-    const card = second.interaction as {
-      id: string
-      meta: { grant: Record<string, unknown> }
-    }
-    expect(card.meta.grant).toMatchObject({
-      target_scope: { origins: ['https://other.test'] },
-      display: {
-        url: 'https://other.test',
-        embeddedIn: 'https://fixture.test/embedded-pay',
-      },
-    })
-    await api.control.answerInteraction(card.id, {
-      grant: { option_id: 'once' },
-    })
-    expect((await submitted).content).toBe('done')
+  it('follows the task to a new origin and into a cross-origin frame without asking', async () => {
+    const { api, events, id } = await setup([
+      call('browser_open', { url: 'https://fixture.test/embedded-pay' }),
+      call('browser_observe', {}),
+      then((request) =>
+        call('browser_click', { ref: refIn(request, 'Apply coupon') }),
+      ),
+      then((request) => {
+        expect(summary(request)).toMatchObject({ outcome: 'observed' })
+        return call('browser_observe', {})
+      }),
+      then((request) =>
+        call('browser_click', { ref: refIn(request, 'Continue with card') }),
+      ),
+      then((request) => {
+        expect(summary(request)).toMatchObject({ outcome: 'observed' })
+        return call('browser_navigate', { url: 'https://other.test/' })
+      }),
+      then((request) => {
+        expect(summary(request)).toMatchObject({ status: 'ok' })
+        return { text: 'done' }
+      }),
+    ])
+    expect(
+      (await api.chat.submit({ content: 'pay', sessionId: id })).content,
+    ).toBe('done')
+    expect(eventOf(events, 'ask_request')).toBeUndefined()
   })
 
   it('shows no card when a user hook already refused the call', async () => {
     let refused = ''
-    const { api, events, id } = await setup(
-      [
-        call('browser_open', { url: 'https://fixture.test/form' }),
-        then((request) => {
-          refused = lastResult(request)
-            .map((block) => block.text ?? '')
-            .join('')
-          return { text: 'blocked' }
-        }),
-      ],
-      { mode: 'scoped' },
-    )
+    const { api, events, id } = await setup([
+      call('browser_open', { url: 'https://fixture.test/form' }),
+      then((request) => {
+        refused = lastResult(request)
+          .map((block) => block.text ?? '')
+          .join('')
+        return { text: 'blocked' }
+      }),
+    ])
     await api.hooks.saveConfig(
       JSON.stringify({
         hooks: {
@@ -426,39 +349,30 @@ describe('browser_* tools end to end', () => {
     ).toHaveLength(2)
   })
 
-  it('keeps a popup opened during user takeover with the user', async () => {
-    const { api, events, id, port } = await setup(
-      [
-        call('browser_open', { url: 'https://fixture.test/form' }),
-        { text: 'opened' },
-      ],
-      { mode: 'scoped' },
-    )
-    const submitted = api.chat.submit({ content: 'open', sessionId: id })
-    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await api.control.answerInteraction(
-      pendingInteractionId(events, 'ask_request'),
-      { grant: { option_id: 'session' } },
-    )
-    await submitted
+  it('keeps a popup of a tab paused for a window reload paused until the window is back', async () => {
+    const { api, id, port } = await setup([
+      call('browser_open', { url: 'https://fixture.test/form' }),
+      { text: 'opened' },
+    ])
+    await api.chat.submit({ content: 'open', sessionId: id })
     const opener = (await api.computerUse.status()).targets[0]!
-    await api.computerUse.controlTarget({
-      targetId: opener.targetId,
-      action: 'takeover',
-    })
-    // The user clicks a link that opens another site in a new window.
+    const service = api.host.computerUse!.service
+    expect(service.pauseForUiDisconnect()).toBe(1)
+    // The page opens another site in a new window meanwhile.
     const popupId = port.browser.pageOpenPopup(
       opener.targetId,
       'https://other.test/',
     )
     expect(popupId).not.toBeNull()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    const popup = (await api.computerUse.status()).targets.find(
-      (target) => target.targetId === popupId,
-    )!
-    // Never judged against the Agent's grants: it stays with the user.
-    expect(popup.control).toBe('user-takeover')
-    expect(port.browser.snapshot(popupId!)).not.toBeNull()
+    const control = async (targetId: string) =>
+      (await api.computerUse.status()).targets.find(
+        (target) => target.targetId === targetId,
+      )!.control
+    expect(await control(popupId!)).toBe('paused')
+    expect(service.resumeAfterUiReconnect()).toBe(2)
+    expect(await control(opener.targetId)).toBe('agent')
+    expect(await control(popupId!)).toBe('agent')
   })
 
   it('automatically allows downloads but still refuses executable files', async () => {
@@ -651,39 +565,28 @@ describe('browser_* tools end to end', () => {
 
   it('refuses a credential for the wrong kind of field before any card', async () => {
     let refusal = ''
-    const { api, events, id } = await setup(
-      [
-        call('browser_open', { url: 'https://fixture.test/login' }),
-        call('browser_observe', {}),
-        then((request) =>
-          call('browser_fill_credential', {
-            ref: refIn(request, 'Username'),
-            handleId: 'cred_000000000000000000000001',
-            field: 'password',
-          }),
-        ),
-        then((request) => {
-          refusal = lastResult(request)
-            .map((block) => block.text ?? '')
-            .join('')
-          return { text: 'stopped' }
+    const { api, events, id } = await setup([
+      call('browser_open', { url: 'https://fixture.test/login' }),
+      call('browser_observe', {}),
+      then((request) =>
+        call('browser_fill_credential', {
+          ref: refIn(request, 'Username'),
+          handleId: 'cred_000000000000000000000001',
+          field: 'password',
         }),
-      ],
-      { mode: 'scoped' },
-    )
+      ),
+      then((request) => {
+        refusal = lastResult(request)
+          .map((block) => block.text ?? '')
+          .join('')
+        return { text: 'stopped' }
+      }),
+    ])
     const submitted = api.chat.submit({ content: 'log in', sessionId: id })
-    // The page itself still needs the ordinary grant card.
-    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await api.control.answerInteraction(
-      pendingInteractionId(events, 'ask_request'),
-      { grant: { option_id: 'session' } },
-    )
     expect((await submitted).content).toBe('stopped')
     expect(refusal).toMatch(/INVALID_REQUEST.*credential-field-type/)
-    // Only the site card was shown, never a credential card.
-    expect(
-      events.filter((event) => event.event === 'ask_request'),
-    ).toHaveLength(1)
+    // Refused before the credential card: no card at all.
+    expect(eventOf(events, 'ask_request')).toBeUndefined()
   })
 
   it('refuses a credential before any card when encryption is unavailable', async () => {

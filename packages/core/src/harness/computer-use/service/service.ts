@@ -54,7 +54,6 @@ import type {
   RedactedUiAction,
   UiAction,
   UiActionClass,
-  UiGrant,
   UiObservation,
   UiTargetView,
   WaitCondition,
@@ -86,16 +85,20 @@ import {
 } from './registry'
 
 export interface ComputerUseSettings {
-  /** The user's master switch. */
+  /**
+   * The user's master switch. While it is on the AI drives continuously;
+   * only high-impact actions and credential fills ask (2026-09-29).
+   */
   readonly enabled: boolean
-  /** Missing in older host implementations; defaults to unrestricted. */
-  readonly authorizationMode?: 'unrestricted' | 'scoped'
+  /** A saved per-item mode switched computer use off (Settings explains). */
+  readonly scopedRetired?: true
   /** Per-driver switches; missing means on. */
   readonly drivers?: Partial<Record<DriverKind, boolean>>
   /**
    * The user's own additions (01 §4.4, §5.2): more protected apps (never
-   * controlled), high-risk apps (confirmed each time in scoped mode) and
-   * sensitive apps (structure only: no values, no screenshots).
+   * controlled), high-risk apps (shown as such; their ordinary input runs
+   * like any other while computer use is on) and sensitive apps (structure
+   * only: no values, no screenshots).
    */
   readonly appLists?: Partial<Record<AppListKind, readonly string[]>>
   /** Inbox retention in days; 0 keeps downloads (default 30). */
@@ -279,7 +282,8 @@ export class ComputerUseService {
    * the rest of the task, and the targets activated this task (their front is
    * handed back when the task ends).
    */
-  private readonly foregroundConsent = new Set<string>()
+  /** Targets paused while the app window reloads (they resume with it). */
+  private readonly uiPaused = new Set<string>()
   private readonly activatedThisTask = new Map<string, Set<string>>()
   private readonly desktopCandidates = new Map<
     string,
@@ -700,15 +704,12 @@ export class ComputerUseService {
         },
       )
     switch (record.control) {
-      case 'user-takeover':
-        throw new UiError(
-          'USER_TAKEOVER',
-          'the user has taken over this target',
-        )
       case 'paused':
-        throw new UiError('TARGET_BUSY', 'this target is paused', {
-          reason: 'paused',
-        })
+        throw new UiError(
+          'TARGET_BUSY',
+          'the app window is reloading; actions on this target resume by themselves once it is back',
+          { reason: 'ui-reloading' },
+        )
       case 'stopped':
         throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
           reason: 'emergency-stop',
@@ -716,11 +717,12 @@ export class ComputerUseService {
       default:
         break
     }
-    if (record.state === 'recovering' || record.state === 'paused')
-      throw new UiError(
-        'DRIVER_UNAVAILABLE',
-        'the driver lost this target; it must be recovered',
-      )
+    // The driver lost contact: this action reconnects it (with a new
+    // generation, so earlier refs are stale and the model observes again).
+    if (record.state === 'recovering') {
+      record.state = 'attached'
+      this.changed('targets', record.ownerSessionId)
+    }
   }
 
   listTargets(ownerSessionId?: string): UiTargetView[] {
@@ -770,16 +772,11 @@ export class ComputerUseService {
         reason: 'emergency-stop',
       })
     if (ticket.kind === 'auto') {
-      if (
-        (this.deps.settings().authorizationMode ?? 'unrestricted') !==
-        'unrestricted'
-      )
+      if (!this.deps.settings().enabled)
         throw new UiError(
-          'PERMISSION_REQUIRED',
-          'the preset changed; ask again',
-          {
-            reason: 'preset-changed',
-          },
+          'CAPABILITY_DISABLED',
+          'computer use was switched off',
+          { reason: 'switched-off' },
         )
     } else {
       const grant =
@@ -1512,19 +1509,14 @@ export class ComputerUseService {
     }
     this.chargeBudget(ctx.identity)
     this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
-    if (action.kind === 'activate') this.noteActivation(ctx, record)
-    // An action that needs the front brings the window forward itself when
-    // the user allows that: in continuous-allow mode (including a
-    // high-impact action they just confirmed), or after they agreed for
-    // this task. A card that took the focus away in between no longer
-    // leaves it refused.
-    const bringForward =
-      record.driver === 'desktop' &&
-      action.kind !== 'activate' &&
-      (ctx.identity.fullAccess ||
-        this.hasForegroundConsent(ctx.identity.ownerSessionId, record.targetId))
-    if (bringForward)
+    // The AI drives continuously: an action that needs the front brings the
+    // window forward itself (also a high-impact action the user just
+    // confirmed, whose card took the focus away). The front goes back to
+    // where the user was when the task ends.
+    if (record.driver === 'desktop')
       this.noteActivated(ctx.identity.ownerSessionId, record.targetId)
+    const bringForward =
+      record.driver === 'desktop' && action.kind !== 'activate'
     const expectedRevision =
       input.expectedRevision ?? actionRefRevision(action) ?? record.revision
     const beforeRevision = record.revision
@@ -2288,12 +2280,13 @@ export class ComputerUseService {
   }
 
   // -------------------------------------------------------------------------
-  // User control (UI operations; they only ever narrow capability)
+  // The app window (00 §12) and the kill switch
 
   /**
    * The UI went away (renderer crash or reload, 00 §12): pause every target
-   * the Agent is driving so nothing changes unseen. The panes list them as
-   * paused; the user resumes or ends each one. Returns how many paused.
+   * the Agent is driving so nothing changes unseen. Nobody resumes them by
+   * hand any more (2026-09-29): they resume when the window is back
+   * (`resumeAfterUiReconnect`). Returns how many paused.
    */
   pauseForUiDisconnect(): number {
     let paused = 0
@@ -2301,43 +2294,38 @@ export class ComputerUseService {
       if (record.control !== 'agent') continue
       this.note(
         record.targetId,
-        'the app window reloaded; the user must resume this target before you continue',
+        'the app window is reloading; actions on this target resume by themselves once it is back',
       )
+      this.uiPaused.add(record.targetId)
       this.setControl(record, 'paused')
       paused += 1
     }
     return paused
   }
 
-  async controlTarget(
-    targetId: string,
-    action: 'pause' | 'resume' | 'takeover' | 'handback' | 'close',
-  ): Promise<UiTargetView | undefined> {
-    const record = this.registry.get(targetId)
-    if (
-      record === undefined ||
-      record.state === 'closed' ||
-      record.state === 'lost'
-    )
-      return undefined
-    if (action === 'close') {
-      await this.closeTarget(record, 'user')
-      return targetView(record)
+  /** The app window is back: the targets paused for it carry on. */
+  resumeAfterUiReconnect(): number {
+    let resumed = 0
+    for (const targetId of [...this.uiPaused]) {
+      this.uiPaused.delete(targetId)
+      const record = this.registry.get(targetId)
+      if (
+        record === undefined ||
+        record.state === 'closed' ||
+        record.state === 'lost'
+      )
+        continue
+      // Stopped meanwhile: the kill switch's resume brings it back to work.
+      if (record.control === 'stopped') {
+        if (record.controlBeforeStop === 'paused')
+          record.controlBeforeStop = 'agent'
+        continue
+      }
+      if (record.control !== 'paused') continue
+      this.setControl(record, this.stopped ? 'stopped' : 'agent')
+      resumed += 1
     }
-    const next: ControlState =
-      action === 'pause'
-        ? 'paused'
-        : action === 'takeover'
-          ? 'user-takeover'
-          : this.stopped
-            ? 'stopped'
-            : 'agent'
-    // The user resuming a target the driver lost contact with: the driver
-    // reconnects on the next command (with a new generation).
-    if (next === 'agent' && record.state === 'recovering')
-      record.state = 'attached'
-    this.setControl(record, next)
-    return targetView(record)
+    return resumed
   }
 
   private setControl(record: TargetRecord, state: ControlState): void {
@@ -2370,9 +2358,10 @@ export class ComputerUseService {
   /**
    * E-M16: while the Agent controls a desktop window, the helper keeps a
    * low-rate capture stream on it, so macOS badges that window and lists it
-   * under screen sharing; "Stop Sharing" there comes back as a takeover.
-   * Paused, taken-over and stopped targets and sensitive apps have none; the
-   * helper also refuses a window that received a credential.
+   * under screen sharing. Paused and stopped targets and sensitive apps have
+   * none; the helper also refuses a window that received a credential. After
+   * the user's "Stop Sharing" the stream stays off for this binding: the
+   * Agent keeps working (observations and screenshots do not need it).
    */
   private syncCapture(record: TargetRecord): void {
     if (record.driver !== 'desktop') return
@@ -2380,6 +2369,7 @@ export class ComputerUseService {
     if (driver?.setCapture === undefined) return
     const active =
       record.control === 'agent' &&
+      record.sharingStopped !== true &&
       this.stoppedAt === undefined &&
       record.state !== 'closed' &&
       record.state !== 'lost' &&
@@ -2431,31 +2421,6 @@ export class ComputerUseService {
     this.changed('kill-switch')
   }
 
-  revokeGrant(grantId: string): boolean {
-    const grant = this.deps.grants.revoke(grantId, 'user')
-    if (grant === undefined) return false
-    if (grant.ownerSessionId !== undefined)
-      this.append(grant.ownerSessionId, 'ui/grant-revoked', {
-        grantId,
-        by: 'user',
-      })
-    this.changed('grants', grant.ownerSessionId)
-    return true
-  }
-
-  /** The user already let the Agent bring this window forward this task. */
-  hasForegroundConsent(ownerSessionId: string, targetId: string): boolean {
-    return this.foregroundConsent.has(`${ownerSessionId}|${targetId}`)
-  }
-
-  private noteActivation(ctx: OpContext, record: TargetRecord): void {
-    const owner = ctx.identity.ownerSessionId
-    // The user's answer on a card, or their continuous-allow mode.
-    if (ctx.ticket.kind === 'grant' || ctx.ticket.kind === 'auto')
-      this.foregroundConsent.add(`${owner}|${record.targetId}`)
-    this.noteActivated(owner, record.targetId)
-  }
-
   /** Its front goes back to the user's app when the task ends. */
   private noteActivated(owner: string, targetId: string): void {
     const activated = this.activatedThisTask.get(owner) ?? new Set<string>()
@@ -2467,9 +2432,6 @@ export class ComputerUseService {
   private restoreFront(ownerSessionId: string): void {
     const activated = this.activatedThisTask.get(ownerSessionId)
     this.activatedThisTask.delete(ownerSessionId)
-    for (const key of [...this.foregroundConsent])
-      if (key.startsWith(`${ownerSessionId}|`))
-        this.foregroundConsent.delete(key)
     const driver = this.deps.port?.desktop()
     if (activated === undefined || driver?.restoreFront === undefined) return
     for (const targetId of activated) {
@@ -2529,27 +2491,6 @@ export class ComputerUseService {
    * nothing left revokes it. In-flight tickets of the old revision stop
    * matching.
    */
-  narrowGrant(
-    grantId: string,
-    change: {
-      allowedActions?: readonly UiActionClass[]
-      origins?: readonly string[]
-    },
-  ): UiGrant | undefined {
-    const before = this.deps.grants.list().find((g) => g.grantId === grantId)
-    if (before === undefined) return undefined
-    const after = this.deps.grants.narrow(grantId, change)
-    if (after === undefined) {
-      if (before.ownerSessionId !== undefined)
-        this.append(before.ownerSessionId, 'ui/grant-revoked', {
-          grantId,
-          by: 'user',
-        })
-    }
-    this.changed('grants', before.ownerSessionId)
-    return after
-  }
-
   /** Pages of this conversation's persistent profiles open before a restart. */
   restorableFor(ownerSessionId: string): RestorableTab[] {
     const known = new Set(
@@ -2613,7 +2554,7 @@ export class ComputerUseService {
     return {
       supported: this.deps.port !== null,
       enabled: settings.enabled,
-      authorizationMode: settings.authorizationMode ?? 'unrestricted',
+      ...(settings.scopedRetired === true ? { scopedRetired: true } : {}),
       platform: this.platform,
       stopped: this.stopped,
       ...(this.stoppedAt === undefined ? {} : { stoppedAt: this.stoppedAt }),
@@ -2631,22 +2572,6 @@ export class ComputerUseService {
         : {}),
       drivers: [],
       targets: this.listTargets(),
-      grants: this.deps.grants.list().map((grant) => ({
-        grantId: grant.grantId,
-        subject: grant.subject,
-        ...(grant.ownerSessionId === undefined
-          ? {}
-          : { ownerSessionId: grant.ownerSessionId }),
-        driver: grant.driver,
-        targetScope: grant.targetScope,
-        allowedActions: grant.allowedActions,
-        scope: grant.scope,
-        createdAt: grant.createdAt,
-        ...(grant.expiresAt === undefined
-          ? {}
-          : { expiresAt: grant.expiresAt }),
-        backgroundAllowed: grant.backgroundAllowed,
-      })),
       killSwitch: this.deps.killSwitch?.() ?? {
         accelerator: '',
         registered: false,
@@ -2670,10 +2595,9 @@ export class ComputerUseService {
 
   /**
    * Synchronous verdict for navigations the driver sees. Sub-frames only get
-   * the scheme check (done by the driver); a main-frame move to an origin the
-   * owner holds no navigate grant for is blocked unless the owner runs full
-   * access (D1). The model sees the block in its next observation and can
-   * ask through `browser_navigate`.
+   * the scheme check (done by the driver). While computer use is on the AI
+   * may follow a page to any origin (D1); a page of a stopped target, or of
+   * a tab nobody owns yet, cannot move.
    */
   navigationVerdict(request: NavigationRequest): 'allow' | 'block' {
     if (this.stopped) return 'block'
@@ -2690,55 +2614,12 @@ export class ComputerUseService {
         request.ownerSessionId === undefined
           ? undefined
           : this.lastIdentity.get(request.ownerSessionId)
-      if (identity === undefined) return 'block'
-      return (this.deps.settings().authorizationMode ?? 'unrestricted') ===
-        'unrestricted' ||
-        this.navigationCovered(
-          identity,
-          'embedded-browser',
-          request.profileId ?? TEMPORARY_PROFILE,
-          origin,
-        )
-        ? 'allow'
-        : 'block'
+      return identity === undefined ? 'block' : 'allow'
     }
     if (record.control !== 'agent')
       return request.initiator === 'agent' ? 'block' : 'allow'
     if (targetOrigin(record) === origin) return 'allow'
-    const identity = this.lastIdentity.get(record.ownerSessionId)
-    if (identity === undefined) return 'block'
-    if (
-      (this.deps.settings().authorizationMode ?? 'unrestricted') ===
-      'unrestricted'
-    )
-      return 'allow'
-    if (
-      this.navigationCovered(identity, record.driver, record.profileId, origin)
-    )
-      return 'allow'
-    this.note(
-      record.targetId,
-      `navigation to ${origin} was blocked: it needs permission (use browser_navigate to ask)`,
-    )
-    return 'block'
-  }
-
-  private navigationCovered(
-    identity: UiCallerIdentity,
-    driver: DriverKind,
-    profileId: string,
-    origin: string,
-  ): boolean {
-    return this.deps.grants
-      .list()
-      .some((grant) =>
-        grantCovers(
-          grant,
-          { driver, actionClass: 'navigate', profileId, origin, callId: '' },
-          identity,
-          this.now(),
-        ),
-      )
+    return this.lastIdentity.has(record.ownerSessionId) ? 'allow' : 'block'
   }
 
   /**
@@ -2767,11 +2648,13 @@ export class ComputerUseService {
     }
     const record = this.registry.add(owner, popup, this.now())
     this.registry.select(owner, opener.targetId)
-    // A popup the page opened while the user held the opener (paused or
-    // taken over) was never judged against the Agent's grants: it stays
-    // with the user until they hand it back.
+    // A popup opened while the opener is paused (the app window reloading)
+    // or stopped shares that state, and resumes with it.
     if (opener.control !== 'agent') {
       record.control = opener.control
+      if (this.uiPaused.has(opener.targetId)) this.uiPaused.add(record.targetId)
+      if (opener.control === 'stopped')
+        record.controlBeforeStop = opener.controlBeforeStop ?? 'agent'
       try {
         driver?.setPaused(record.targetId, true)
       } catch {
@@ -2796,7 +2679,7 @@ export class ComputerUseService {
       opener.targetId,
       record.control === 'agent'
         ? `the page opened ${popup.url.slice(0, 300)} in a new tab ${record.targetId}; use browser_tab_select to work in it`
-        : `the page opened ${popup.url.slice(0, 300)} in a new tab ${record.targetId} while the user held this tab; it stays with the user until they hand it back`,
+        : `the page opened ${popup.url.slice(0, 300)} in a new tab ${record.targetId}; it waits with this tab until computer use can carry on`,
     )
     this.changed('targets', owner)
   }
@@ -2843,9 +2726,11 @@ export class ComputerUseService {
         record.state = 'recovering'
         this.note(
           record.targetId,
-          `the driver detached (${event.reason}); the target needs recovery`,
+          `the driver lost contact (${event.reason}); your next action on this target reconnects it, so observe it again first`,
         )
-        this.setControl(record, 'paused')
+        for (const op of this.journal.inFlight())
+          if (op.targetId === record.targetId) op.controller.abort()
+        this.changed('targets', record.ownerSessionId)
         break
       case 'navigation-blocked':
         this.note(
@@ -2868,8 +2753,16 @@ export class ComputerUseService {
           `a download of ${event.url.slice(0, 300)} was blocked; use browser_download to save a file (the user confirms it)`,
         )
         break
-      case 'user-input':
-        if (record.control === 'agent') this.setControl(record, 'user-takeover')
+      case 'sharing-stopped':
+        // The user's "Stop Sharing" in the menu bar (2026-09-29): only the
+        // picture stops. Control, grants and the task carry on unchanged.
+        if (record.sharingStopped === true) break
+        record.sharingStopped = true
+        this.note(
+          record.targetId,
+          'the user stopped screen sharing for this window; keep working (observations and screenshots still work), only the live picture in the conversation is off',
+        )
+        this.changed('targets', record.ownerSessionId)
         break
     }
   }

@@ -250,7 +250,7 @@ describe('UiActionPolicy rules', () => {
     })
   })
 
-  it('plans cards by risk: scopes, actions and background', () => {
+  it('plans cards by risk: actions, and only this one action as the scope', () => {
     const { policy } = setup()
     const plain = policy.evaluate(who({ background: true }), need())
     expect(plain).toEqual({
@@ -262,8 +262,8 @@ describe('UiActionPolicy rules', () => {
           origins: ['https://example.com'],
         },
         actions: ['interact', 'observe'],
-        allowedScopes: ['once', 'task', 'session', 'timed'],
-        background: true,
+        allowedScopes: ['once'],
+        background: false,
       },
     })
     const risky = policy.evaluate(who(), need({ highImpact: true }))
@@ -295,7 +295,7 @@ describe('UiActionPolicy rules', () => {
     expect(terminal).toMatchObject({
       plan: {
         targetScope: { kind: 'desktop', appId: 'com.apple.Terminal' },
-        allowedScopes: ['once', 'task'],
+        allowedScopes: ['once'],
       },
     })
   })

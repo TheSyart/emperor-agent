@@ -4,7 +4,8 @@
  * to the built-in ones:
  * - 保护：the Agent never sees or controls these apps (password managers,
  *   banking clients…);
- * - 高风险：every input is confirmed in scoped mode (terminals, script tools);
+ * - 高风险：apps that run commands (terminals, script tools): marked on the
+ *   confirmation card; their ordinary input runs like any other;
  * - 敏感：structure only — no field values, no screenshots.
  *
  * Props: lists (current), busy. Emits: change(kind, next list).
@@ -36,7 +37,7 @@ const ROWS: ReadonlyArray<{
     kind: 'highRisk',
     title: '高风险应用',
     description:
-      '逐项授权时，每次输入都要单独确认。终端与脚本类应用已内置在名单中。',
+      '能执行命令的应用，例如终端。确认卡上会特别提示；普通输入照常自动进行。终端与脚本类应用已内置在名单中。',
   },
   {
     kind: 'sensitive',

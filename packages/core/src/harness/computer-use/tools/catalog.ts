@@ -140,10 +140,10 @@ function onDesktopTarget(
         actionClass,
         appId: target.appId,
         windowRef: target.windowRef,
+        // High-risk apps (terminals, script editors) are marked, but their
+        // ordinary input runs like any other while computer use is on (the
+        // user's decision); high-impact keys and menus still ask each time.
         ...(highRisk ? { highRiskApp: true } : {}),
-        ...(highRisk && actionClass !== 'observe' && !input.identity.fullAccess
-          ? { confirmEachTime: true }
-          : {}),
         callId: input.callId,
         toolName: input.toolName,
         display: { appName: target.appId, title: target.title, ...display },
@@ -166,8 +166,6 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
   ui_list_targets: info,
   ui_action_status: info,
   ui_credential_list: info,
-  ui_request_control: { kind: 'control', planSafe: false },
-  ui_delegate_grant: { kind: 'control', planSafe: false },
   ui_release_control: control,
   ui_cancel_action: control,
 
@@ -600,21 +598,8 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
   desktop_activate: {
     kind: 'target',
     planSafe: false,
-    // An ordinary, reversible step (the front goes back when the task
-    // ends): it follows the user's mode like any interaction. Continuous
-    // allow proceeds; per-item mode asks, then not again this task.
-    classify: onDesktopTarget('interact', (input, target) =>
-      input.service.hasForegroundConsent(
-        input.identity.ownerSessionId,
-        target.targetId,
-      )
-        ? {}
-        : {
-            display: {
-              title: `把「${target.title.slice(0, 80)}」切到前台（本任务结束后还原）`,
-            },
-          },
-    ),
+    // An ordinary, reversible step: the front goes back when the task ends.
+    classify: onDesktopTarget('interact'),
   },
   desktop_secondary: {
     kind: 'target',

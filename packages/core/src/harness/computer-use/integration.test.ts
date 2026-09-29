@@ -1,7 +1,9 @@
 // Computer Use through the real stack: CoreApi → HarnessHost → ToolRegistry
-// (hooks, gate, guards) → ui_* tools → kernel, with a scripted model and the
-// fake host port. Covers the grant card round trip, D1 auto-approval, plan
-// mode, the emergency stop while a card is pending, and fail-closed stop.
+// (hooks, gate, guards) → GUI tools → kernel, with a scripted model and the
+// fake host port. Covers continuous AI control (no card for ordinary
+// actions), the per-action card for a high-impact click, plan mode, the
+// emergency stop while a card is pending, fail-closed stop, and the removed
+// up-front control tools.
 import { afterEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '../../llm/types'
 import {
@@ -20,15 +22,12 @@ afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.api.close()
 })
 
-async function setup(
-  replies: ScriptedReply[],
-  mode: 'unrestricted' | 'scoped' = 'unrestricted',
-) {
+async function setup(replies: ScriptedReply[]) {
   const fixture = await makeApi({
     replies,
     extra: {
       computerUsePort: new FakeComputerUsePort(),
-      computerUseSettings: () => ({ enabled: true, authorizationMode: mode }),
+      computerUseSettings: () => ({ enabled: true }),
     },
   })
   fixtures.push(fixture)
@@ -36,8 +35,8 @@ async function setup(
   return { ...fixture, id }
 }
 
-/** The last tool result the model saw, parsed from its first text block. */
-function lastToolResult(request: GenerateOptions): Record<string, unknown> {
+/** Text of the last tool result the model saw. */
+function lastResultText(request: GenerateOptions): string {
   const message = request.messages.at(-1)
   const blocks = (message?.content ?? []) as Array<{
     type: string
@@ -45,84 +44,118 @@ function lastToolResult(request: GenerateOptions): Record<string, unknown> {
     text?: string
   }>
   const result = blocks.find((block) => block.type === 'tool-result')
-  const text =
+  return (
     result?.content?.find((block) => block.type === 'text')?.text ??
     blocks.find((block) => block.type === 'text')?.text ??
     ''
-  const json = text.slice(text.indexOf('{'))
-  return JSON.parse(json) as Record<string, unknown>
+  )
 }
 
-const requestControl = {
+/** The last tool result the model saw, parsed from its first text block. */
+function lastToolResult(request: GenerateOptions): Record<string, unknown> {
+  const text = lastResultText(request)
+  return JSON.parse(text.slice(text.indexOf('{'))) as Record<string, unknown>
+}
+
+/** Every text block of the last tool result the model saw. */
+function lastResultTexts(request: GenerateOptions): string {
+  const message = request.messages.at(-1)
+  const blocks = (message?.content ?? []) as Array<{
+    type: string
+    content?: Array<{ type: string; text?: string }>
+  }>
+  const result = blocks.find((block) => block.type === 'tool-result')
+  return (result?.content ?? [])
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('\n')
+}
+
+/** The ref of a named element in the last observation. */
+function refIn(request: GenerateOptions, name: string): string {
+  const envelope = lastResultTexts(request)
+  const decoded = envelope.includes('content_begin')
+    ? (JSON.parse(
+        envelope.split('content_begin\n')[1]!.split('\ncontent_end')[0]!,
+      ) as string)
+    : envelope
+  const line = decoded.split('\n').find((row) => row.includes(`"${name}"`))
+  if (line === undefined) throw new Error(`no element "${name}"`)
+  return line.split(' ')[0]!
+}
+
+const openCheckout: ScriptedReply = {
   tools: [
-    {
-      name: 'ui_request_control',
-      args: {
-        origins: ['https://example.com'],
-        actions: ['observe', 'interact'],
-        reason: 'fill the signup form',
-      },
-    },
+    { name: 'browser_open', args: { url: 'https://fixture.test/checkout' } },
   ],
 }
+const observe: ScriptedReply = { tools: [{ name: 'browser_observe' }] }
+const clickPay: ScriptedReply = (request) =>
+  replyChunks({
+    tools: [
+      { name: 'browser_click', args: { ref: refIn(request, 'Pay now') } },
+    ],
+  })
 
 describe('computer use end to end (scripted model, fake port)', () => {
-  it('shows a grant card in restricted presets and returns the chosen scope', async () => {
+  it('runs ordinary actions without asking while computer use is on', async () => {
     let seen: Record<string, unknown> | undefined
-    const { api, events, id } = await setup(
-      [
-        requestControl,
-        (request) => {
-          seen = lastToolResult(request)
-          return replyChunks({ text: 'granted' })
-        },
-      ],
-      'scoped',
-    )
-    const submitted = api.chat.submit({ content: 'go', sessionId: id })
+    const { api, events, id } = await setup([
+      openCheckout,
+      (request) => {
+        seen = lastToolResult(request)
+        return replyChunks({ text: 'opened' })
+      },
+    ])
+    await api.chat.submit({ content: 'go', sessionId: id })
+    expect(eventOf(events, 'ask_request')).toBeUndefined()
+    expect(seen).toMatchObject({ status: 'ok', tool: 'browser_open' })
+    const log = api.host.sessionLog(id)!.events.map((event) => event.type)
+    expect(log).toContain('ui/auto-approved')
+  })
+
+  it('asks for a high-impact action one action at a time', async () => {
+    let seen: Record<string, unknown> | undefined
+    const { api, events, id } = await setup([
+      openCheckout,
+      observe,
+      clickPay,
+      (request) => {
+        seen = lastToolResult(request)
+        return replyChunks({ text: 'paid' })
+      },
+    ])
+    const submitted = api.chat.submit({ content: 'pay', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
     const interactionId = pendingInteractionId(events, 'ask_request')
     expect(interactionId).toMatch(/^grant_/)
-    expect(api.control.get(id).pending).toMatchObject({
-      id: interactionId,
-      meta: { interaction_type: 'computer_use_grant' },
+    const pending = api.control.get(id).pending as {
+      meta: { interaction_type: string; grant: { high_impact?: boolean } }
+      questions: Array<{ options: Array<{ id: string }> }>
+    }
+    expect(pending.meta).toMatchObject({
+      interaction_type: 'computer_use_grant',
+      grant: { high_impact: true },
     })
-    await api.control.answerInteraction(interactionId, {
-      grant: { option_id: 'session' },
-    })
-    expect((await submitted).content).toBe('granted')
-    expect(seen).toMatchObject({
-      status: 'ok',
-      tool: 'ui_request_control',
-      granted: 'session',
-      origins: ['https://example.com'],
-    })
-    expect(api.computerUse.listGrants()).toEqual([
-      expect.objectContaining({ scope: 'session', ownerSessionId: id }),
+    // Only this one action can be allowed; no task / session / timed scope.
+    expect(pending.questions[0]!.options.map((option) => option.id)).toEqual([
+      'once',
+      'deny',
     ])
+    await api.control.answerInteraction(interactionId, {
+      grant: { option_id: 'once' },
+    })
+    expect((await submitted).content).toBe('paid')
+    expect(seen).toMatchObject({ status: 'ok', tool: 'browser_click' })
     const log = api.host.sessionLog(id)!.events.map((event) => event.type)
     expect(log).toContain('ui/grant-requested')
     expect(log).toContain('ui/grant-decided')
   })
 
-  it('auto-approves with persistent GUI access under workspace Shell mode', async () => {
-    let seen: Record<string, unknown> | undefined
-    const { api, events, id } = await setup([
-      requestControl,
-      (request) => {
-        seen = lastToolResult(request)
-        return replyChunks({ text: 'ok' })
-      },
-    ])
-    await api.chat.submit({ content: 'go', sessionId: id })
-    expect(eventOf(events, 'ask_request')).toBeUndefined()
-    expect(seen).toMatchObject({ granted: 'auto' })
-  })
-
   it('refuses GUI requests while plan mode is on', async () => {
     let seen: Record<string, unknown> | undefined
     const { api, events, id } = await setup([
-      requestControl,
+      openCheckout,
       (request) => {
         const message = JSON.stringify(request.messages.at(-1)?.content)
         seen = { denied: message.includes('PLAN_MODE_ACTION_DENIED') }
@@ -137,17 +170,16 @@ describe('computer use end to end (scripted model, fake port)', () => {
 
   it('the emergency stop dismisses a pending card and is not blocked by it', async () => {
     let seen: string | undefined
-    const { api, events, id } = await setup(
-      [
-        requestControl,
-        (request) => {
-          seen = JSON.stringify(request.messages.at(-1)?.content)
-          return replyChunks({ text: 'stopped' })
-        },
-      ],
-      'scoped',
-    )
-    const submitted = api.chat.submit({ content: 'go', sessionId: id })
+    const { api, events, id } = await setup([
+      openCheckout,
+      observe,
+      clickPay,
+      (request) => {
+        seen = JSON.stringify(request.messages.at(-1)?.content)
+        return replyChunks({ text: 'stopped' })
+      },
+    ])
+    const submitted = api.chat.submit({ content: 'pay', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
     const status = await api.computerUse.stop()
     expect(status.stopped).toBe(true)
@@ -155,14 +187,13 @@ describe('computer use end to end (scripted model, fake port)', () => {
     expect(seen).toContain('PERMISSION_DENIED')
     expect(api.control.get(id).pending).toBeNull()
     expect(eventOf(events, 'interaction_cancelled')).toBeDefined()
-    expect(api.computerUse.listGrants()).toEqual([])
     await api.computerUse.resume()
   })
 
   it('stays stopped across a refusal: a stopped kernel refuses new requests', async () => {
     let seen: string | undefined
     const { api, events, id } = await setup([
-      requestControl,
+      openCheckout,
       (request) => {
         seen = JSON.stringify(request.messages.at(-1)?.content)
         return replyChunks({ text: 'refused' })
@@ -172,5 +203,28 @@ describe('computer use end to end (scripted model, fake port)', () => {
     await api.chat.submit({ content: 'go', sessionId: id })
     expect(eventOf(events, 'ask_request')).toBeUndefined()
     expect(seen).toContain('emergency-stop')
+  })
+
+  it('tells the model the up-front control tools were removed', async () => {
+    let seen: string | undefined
+    const { api, events, id } = await setup([
+      {
+        tools: [
+          {
+            name: 'ui_request_control',
+            args: { origins: ['https://example.com'], actions: ['observe'] },
+          },
+        ],
+      },
+      (request) => {
+        seen = lastResultText(request)
+        return replyChunks({ text: 'noted' })
+      },
+    ])
+    await api.chat.submit({ content: 'go', sessionId: id })
+    expect(eventOf(events, 'ask_request')).toBeUndefined()
+    expect(seen).toContain('tool "ui_request_control" was removed')
+    expect(api.host.tools.names()).not.toContain('ui_request_control')
+    expect(api.host.tools.names()).not.toContain('ui_delegate_grant')
   })
 })

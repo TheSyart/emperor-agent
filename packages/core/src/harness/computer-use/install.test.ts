@@ -85,10 +85,9 @@ describe('computer use host wiring', () => {
       drivers: [],
     })
     expect(await core.computerUse.stop()).toMatchObject({ stopped: false })
-    expect(core.computerUse.revokeGrant('nope')).toEqual({ revoked: false })
   })
 
-  it('stops, resumes and revokes through CoreApi and emits changes', async () => {
+  it('stops and resumes through CoreApi and emits changes', async () => {
     const { api: core, events } = await api({
       extra: {
         computerUsePort: new FakeComputerUsePort(),
@@ -103,35 +102,34 @@ describe('computer use host wiring', () => {
       stopped: false,
       drivers: [{ driver: 'embedded-browser', enabled: true, available: true }],
     })
-    const grant = core.host.computerUse!.grants.issue({
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://example.com'],
-      },
-      allowedActions: ['observe'],
-      scope: 'session',
-      backgroundAllowed: false,
-    })
-    expect(core.computerUse.listGrants().map((item) => item.grantId)).toEqual([
-      grant.grantId,
-    ])
     const stopped = await core.computerUse.stop()
     expect(stopped.stopped).toBe(true)
     expect(stopped.drivers[0]).toMatchObject({ available: false })
     const resumed = await core.computerUse.resume()
     expect(resumed.stopped).toBe(false)
-    expect(core.computerUse.revokeGrant(grant.grantId)).toEqual({
-      revoked: true,
-    })
-    expect(core.computerUse.listGrants()).toEqual([])
     const reasons = events
       .filter((event) => event.event === 'computer_use_changed')
       .map((event) => event.reason)
-    expect(reasons).toEqual(expect.arrayContaining(['grants', 'kill-switch']))
+    expect(reasons).toEqual(expect.arrayContaining(['kill-switch']))
+  })
+
+  it('has no manual control, per-item mode or grant list operations', async () => {
+    const { api: core } = await api({
+      extra: {
+        computerUsePort: new FakeComputerUsePort(),
+        computerUseSettings: () => ({ enabled: true }),
+      },
+    })
+    for (const name of [
+      'controlTarget',
+      'setAuthorizationMode',
+      'listGrants',
+      'revokeGrant',
+      'narrowGrant',
+    ])
+      expect(core.computerUse).not.toHaveProperty(name)
+    const status = await core.computerUse.status()
+    expect(status).not.toHaveProperty('authorizationMode')
   })
 
   it('reports a URL-free computer use summary in diagnostics', async () => {
@@ -162,9 +160,9 @@ describe('computer use host wiring', () => {
       enabled: true,
       stopped: false,
       targets: 0,
-      grants: 1,
       drivers: [{ driver: 'embedded-browser', available: true }],
     })
+    expect(payload.computerUse).not.toHaveProperty('grants')
     // Counts only: no origin, URL or grant detail leaves the machine.
     expect(JSON.stringify(payload)).not.toContain('secret-origin')
     const { api: bare } = await api()
@@ -193,7 +191,6 @@ describe('computer use master switch', () => {
     expect(store.get()).toEqual({
       enabled: false,
       drivers: {},
-      authorizationMode: 'unrestricted',
       appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
@@ -207,14 +204,9 @@ describe('computer use master switch', () => {
     expect(new ComputerUseConfigStore(root).get()).toEqual({
       enabled: true,
       drivers: { 'embedded-browser': true },
-      authorizationMode: 'unrestricted',
       appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
-    store.update({ authorizationMode: 'scoped' })
-    expect(new ComputerUseConfigStore(root).get().authorizationMode).toBe(
-      'scoped',
-    )
     writeFileSync(
       path,
       '{"schemaVersion":1,"enabled":true,"drivers":{"desktop":false}}',
@@ -223,7 +215,6 @@ describe('computer use master switch', () => {
     expect(new ComputerUseConfigStore(root).get()).toEqual({
       enabled: true,
       drivers: { desktop: false },
-      authorizationMode: 'unrestricted',
       appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
@@ -231,6 +222,60 @@ describe('computer use master switch', () => {
     expect(new ComputerUseConfigStore(root).get().downloadRetentionDays).toBe(7)
     writeFileSync(path, '{"schemaVersion":1,"enabled":"yes"}')
     expect(new ComputerUseConfigStore(root).get().enabled).toBe(false)
+  })
+
+  it('switches a saved per-item mode off once, with a notice until the user switches on', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-cu-scoped-'))
+    const path = join(root, COMPUTER_USE_CONFIG_FILE)
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        authorizationMode: 'scoped',
+        drivers: { desktop: true },
+      }),
+    )
+    const store = new ComputerUseConfigStore(root)
+    expect(store.get()).toMatchObject({
+      enabled: false,
+      scopedRetired: true,
+      drivers: { desktop: true },
+    })
+    // Written back at once without the retired field.
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    expect(saved).toMatchObject({ enabled: false, scopedRetired: true })
+    expect(saved).not.toHaveProperty('authorizationMode')
+    expect(new ComputerUseConfigStore(root).get().enabled).toBe(false)
+    // An unrestricted file only loses the field.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        authorizationMode: 'unrestricted',
+      }),
+    )
+    const unrestricted = new ComputerUseConfigStore(root).get()
+    expect(unrestricted.enabled).toBe(true)
+    expect(unrestricted.scopedRetired).toBeUndefined()
+    expect(JSON.parse(readFileSync(path, 'utf8'))).not.toHaveProperty(
+      'authorizationMode',
+    )
+    // Switching on is the confirmation: the notice goes away.
+    writeFileSync(
+      path,
+      JSON.stringify({ schemaVersion: 1, enabled: false, scopedRetired: true }),
+    )
+    const again = new ComputerUseConfigStore(root)
+    expect(again.update({ drivers: { desktop: false } }).scopedRetired).toBe(
+      true,
+    )
+    expect(again.update({ enabled: true }).scopedRetired).toBeUndefined()
+    expect(JSON.parse(readFileSync(path, 'utf8'))).not.toHaveProperty(
+      'scopedRetired',
+    )
   })
 
   it('persists the switch through CoreApi and adds or removes the tools', async () => {
@@ -248,17 +293,6 @@ describe('computer use master switch', () => {
     })
     expect(guiTools(core.host.tools.names())).toEqual([])
     expect((await core.computerUse.status()).enabled).toBe(false)
-    expect((await core.computerUse.status()).authorizationMode).toBe(
-      'unrestricted',
-    )
-
-    expect(
-      (await core.computerUse.setAuthorizationMode('scoped')).authorizationMode,
-    ).toBe('scoped')
-    expect(
-      new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get()
-        .authorizationMode,
-    ).toBe('scoped')
 
     expect((await core.computerUse.setEnabled(true)).enabled).toBe(true)
     expect(guiTools(core.host.tools.names())).toHaveLength(GUI_TOOLS)
@@ -273,7 +307,6 @@ describe('computer use master switch', () => {
       extra: { computerUsePort: new FakeComputerUsePort() },
     })
     expect(guiTools(again.host.tools.names())).toHaveLength(GUI_TOOLS)
-    expect((await again.computerUse.status()).authorizationMode).toBe('scoped')
 
     expect((await core.computerUse.setEnabled(false)).enabled).toBe(false)
     expect(guiTools(core.host.tools.names())).toEqual([])
@@ -283,7 +316,7 @@ describe('computer use master switch', () => {
         (event) =>
           event.event === 'computer_use_changed' && event.reason === 'state',
       ),
-    ).toHaveLength(3)
+    ).toHaveLength(2)
   })
 
   it('switches one driver, keeps its tools and persists the stop shortcut', async () => {
@@ -326,46 +359,6 @@ describe('computer use master switch', () => {
     expect(shortcuts).toEqual(['Control+Shift+K', null])
   })
 
-  it('narrows a grant and revokes it once nothing is left', async () => {
-    const { api: core } = await api({
-      extra: {
-        computerUsePort: new FakeComputerUsePort(),
-        computerUseSettings: () => ({ enabled: true }),
-      },
-    })
-    const grant = core.host.computerUse!.grants.issue({
-      subject: 'session:s1',
-      ownerSessionId: 's1',
-      driver: 'embedded-browser',
-      targetScope: {
-        kind: 'browser',
-        profileId: 'temporary',
-        origins: ['https://a.test', 'https://b.test'],
-      },
-      allowedActions: ['observe', 'interact', 'navigate'],
-      scope: 'session',
-      backgroundAllowed: false,
-    })
-    expect(
-      core.computerUse.narrowGrant({
-        grantId: grant.grantId,
-        allowedActions: ['observe'],
-        origins: ['https://a.test'],
-      }),
-    ).toEqual({ found: true, revoked: false })
-    expect(core.computerUse.listGrants()[0]).toMatchObject({
-      allowedActions: ['observe'],
-      targetScope: { origins: ['https://a.test'] },
-    })
-    expect(
-      core.computerUse.narrowGrant({ grantId: grant.grantId, origins: [] }),
-    ).toEqual({ found: true, revoked: true })
-    expect(core.computerUse.listGrants()).toEqual([])
-    expect(
-      core.computerUse.narrowGrant({ grantId: 'nope', origins: [] }),
-    ).toEqual({ found: false, revoked: false })
-  })
-
   it('switches off while a grant card is pending, refusing the card', async () => {
     let refused = ''
     const { api: core, events } = await api({
@@ -374,10 +367,13 @@ describe('computer use master switch', () => {
           tools: [
             {
               name: 'browser_open',
-              args: { url: 'https://fixture.test/form' },
+              args: { url: 'https://fixture.test/checkout' },
             },
           ],
         },
+        { tools: [{ name: 'browser_observe' }] },
+        // High-impact: a card is still asked for, one action at a time.
+        { tools: [{ name: 'browser_click', args: { ref: 'r1.1' } }] },
         (request) => {
           const messages = request.messages
           refused = JSON.stringify(messages[messages.length - 1]?.content ?? '')
@@ -386,7 +382,6 @@ describe('computer use master switch', () => {
       ],
       extra: { computerUsePort: new FakeComputerUsePort() },
     })
-    await core.computerUse.setAuthorizationMode('scoped')
     await core.computerUse.setEnabled(true)
     const id = String(core.sessions.create({ title: 'GUI' }).id)
     const submitted = core.chat.submit({ content: 'go', sessionId: id })
@@ -398,50 +393,10 @@ describe('computer use master switch', () => {
     expect(refused).toContain('PERMISSION_DENIED')
     expect((await core.computerUse.status()).targets).toEqual([])
   })
-
-  it('lets the user pause, take over and close a target through CoreApi', async () => {
-    const { api: core } = await api({
-      replies: [
-        {
-          tools: [
-            {
-              name: 'browser_open',
-              args: { url: 'https://fixture.test/form' },
-            },
-          ],
-        },
-        { text: 'opened' },
-      ],
-      extra: {
-        computerUsePort: new FakeComputerUsePort(),
-        computerUseSettings: () => ({ enabled: true }),
-      },
-    })
-    const id = String(core.sessions.create({ title: 'GUI' }).id)
-    core.control.setPermissionMode('danger-full-access', id)
-    await core.chat.submit({ content: 'open it', sessionId: id })
-    const [target] = (await core.computerUse.status()).targets
-    const targetId = target!.targetId
-    expect(
-      await core.computerUse.controlTarget({ targetId, action: 'pause' }),
-    ).toMatchObject({ control: 'paused' })
-    expect(
-      await core.computerUse.controlTarget({ targetId, action: 'takeover' }),
-    ).toMatchObject({ control: 'user-takeover' })
-    expect(
-      await core.computerUse.controlTarget({ targetId, action: 'handback' }),
-    ).toMatchObject({ control: 'agent' })
-    expect(
-      await core.computerUse.controlTarget({ targetId, action: 'close' }),
-    ).toMatchObject({ state: 'closed' })
-    expect(
-      await core.computerUse.controlTarget({ targetId, action: 'resume' }),
-    ).toBeNull()
-  })
 })
 
 describe('computer use browser profiles', () => {
-  it('opens a tab in a persistent profile and asks per profile', async () => {
+  it('opens a tab in a persistent profile and asks per profile for a high-impact action', async () => {
     const port = new FakeComputerUsePort()
     const { api: core, events } = await api({
       replies: [
@@ -462,11 +417,17 @@ describe('computer use browser profiles', () => {
             tools: [
               {
                 name: 'browser_open',
-                args: { url: 'https://fixture.test/form', profile: profileId },
+                args: {
+                  url: 'https://fixture.test/checkout',
+                  profile: profileId,
+                },
               },
             ],
           })
         },
+        { tools: [{ name: 'browser_observe' }] },
+        // Opening ran without a card; paying asks, scoped to this profile.
+        { tools: [{ name: 'browser_click', args: { ref: 'r1.1' } }] },
         {
           tools: [
             {
@@ -479,10 +440,7 @@ describe('computer use browser profiles', () => {
       ],
       extra: {
         computerUsePort: port,
-        computerUseSettings: () => ({
-          enabled: true,
-          authorizationMode: 'scoped',
-        }),
+        computerUseSettings: () => ({ enabled: true }),
       },
     })
     const id = String(core.sessions.create({ title: 'GUI' }).id)
@@ -498,7 +456,7 @@ describe('computer use browser profiles', () => {
     expect(profile).toMatchObject({ name: '工作' })
     expect(card.meta.grant.target_scope.profileId).toBe(profile!.profileId)
     await core.control.answerInteraction(card.id, {
-      grant: { option_id: 'session' },
+      grant: { option_id: 'once' },
     })
     expect((await submitted).content).toBe('done')
     const target = port.browser.list()[0]!
@@ -590,7 +548,7 @@ describe('computer use browser profiles', () => {
       core.computerUse.manageProfile({ action: 'clear', profileId }),
     ).resolves.toEqual({ revokedGrants: 1 })
     expect(port.browser.clearedProfiles).toEqual([{ profileId, remove: false }])
-    expect(core.computerUse.listGrants()).toHaveLength(1)
+    expect(core.host.computerUse!.grants.list()).toHaveLength(1)
     await core.computerUse.manageProfile({ action: 'delete', profileId })
     expect(port.browser.clearedProfiles.at(-1)).toEqual({
       profileId,
@@ -636,7 +594,7 @@ describe('computer use browser profiles', () => {
     await expect(
       core.computerUse.manageProfile({ action: 'delete', profileId }),
     ).rejects.toThrow(/disk busy/)
-    expect(core.computerUse.listGrants()).toEqual([])
+    expect(core.host.computerUse!.grants.list()).toEqual([])
     // The profile is kept so the user can retry the wipe.
     expect(
       core.computerUse
