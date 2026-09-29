@@ -82,10 +82,16 @@ export class BrowserViewHost {
     return { ok: true, url }
   }
 
-  /** Place the view; null or a rectangle too small for a page hides it. */
+  /**
+   * Place the view; null or a rectangle too small for a page hides it. A
+   * pane that just appeared (for a link main opened before it mounted) gets
+   * the current page state.
+   */
   setBounds(value: unknown): void {
+    const hidden = this.bounds === null
     this.bounds = normalizedBrowserBounds(value)
     this.applyBounds()
+    if (hidden && this.bounds !== null && this.view) this.emitState(this.view)
   }
 
   action(action: string): void {

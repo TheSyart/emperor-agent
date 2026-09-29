@@ -24,7 +24,8 @@
  * - browser: `prefill` ({ url, nonce }) only fills the address bar — a page
  *   loads on the user's submit alone; `visible` (the column is open) gates
  *   the native view. The pane is keyed by session, so a session switch
- *   remounts it and closes the view.
+ *   remounts it and closes the view. While 设置 › 浏览器 has the built-in
+ *   browser off, the pane says so instead (useBrowserPreferences).
  * - terminal: session only.
  * - desktop: session-owned native windows, latest screenshot and target controls.
  *
@@ -42,6 +43,7 @@ import {
   watch,
 } from 'vue'
 import { core } from '../../api/http'
+import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import { normalizeSidebarState } from '../../runtime/sidebarModel'
 import type { RightWorkspaceState, SidebarState } from '../../types'
 import { DsClose } from '../icons/ds'
@@ -80,6 +82,7 @@ const props = defineProps<{ open: boolean; agentBusy: boolean }>()
 
 const frame = useFrameState()
 const workspace = useWorkspaceSnapshot({ active: () => props.open })
+const { preferences: browserPreferences } = useBrowserPreferences()
 const { sessionId, projectPath, snapshot, hasProject, hasGit } = workspace
 
 const reviewFilterPaths = ref<string[]>([])
@@ -101,6 +104,7 @@ const availability = computed<WorkspaceAvailability>(() => ({
   hasProject: hasProject.value,
   snapshotLoaded: Boolean(snapshot.value),
   hasGit: hasGit.value,
+  browserEnabled: browserPreferences.value.enabled,
 }))
 const segments = computed(() =>
   WORKSPACE_PANE_ITEMS.map((item) => ({
@@ -111,6 +115,9 @@ const segments = computed(() =>
 )
 const reviewReason = computed(() =>
   workspacePaneDisabledReason('review', availability.value),
+)
+const browserReason = computed(() =>
+  workspacePaneDisabledReason('browser', availability.value),
 )
 
 onMounted(async () => {
@@ -276,14 +283,17 @@ async function persistFilesTreeWidth(): Promise<void> {
         :key="sessionId"
         :session-id="sessionId"
       />
-      <BrowserPane
-        v-else-if="pane === 'browser'"
-        :key="sessionId"
-        :visible="open"
-        :prefill="browserPrefill"
-        :agent-focus="browserAgentFocus"
-        :session-id="sessionId"
-      />
+      <template v-else-if="pane === 'browser'">
+        <p v-if="browserReason" class="workspace-empty">{{ browserReason }}</p>
+        <BrowserPane
+          v-else
+          :key="sessionId"
+          :visible="open"
+          :prefill="browserPrefill"
+          :agent-focus="browserAgentFocus"
+          :session-id="sessionId"
+        />
+      </template>
     </div>
   </div>
 </template>

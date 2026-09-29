@@ -5,6 +5,7 @@ import {
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
+  BROWSER_REVEAL_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
@@ -15,6 +16,7 @@ import {
   BROWSER_OPEN_CHANNEL,
   BROWSER_STATE_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  LINK_OPEN_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
@@ -91,9 +93,11 @@ describe('desktop capability preload bridge', () => {
       'macHelperResetPermission',
       'macHelperStatus',
       'onAgentPreviewFrame',
+      'onBrowserReveal',
       'onBrowserState',
       'openBrowserUrl',
       'openExternal',
+      'openLink',
       'openSkillsFolder',
       'revealReference',
       'revokeBrowserPairing',
@@ -108,6 +112,23 @@ describe('desktop capability preload bridge', () => {
       'vaultStatus',
       'vaultUnlock',
     ])
+  })
+
+  it('sends clicked links to main for routing and relays reveals', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.openLink('https://example.com/')
+    expect(ipc.invoked.at(-1)).toEqual([
+      LINK_OPEN_CHANNEL,
+      'https://example.com/',
+    ])
+    const listener = vi.fn()
+    const dispose = bridge.onBrowserReveal(listener)
+    ipc.emit(BROWSER_REVEAL_CHANNEL, { url: 'http://localhost:5173/' })
+    ipc.emit(BROWSER_REVEAL_CHANNEL, { url: 42 })
+    dispose()
+    ipc.emit(BROWSER_REVEAL_CHANNEL, { url: 'https://late.example/' })
+    expect(listener.mock.calls).toEqual([[{ url: 'http://localhost:5173/' }]])
   })
 
   it('routes browser pairing only through fixed channels', async () => {

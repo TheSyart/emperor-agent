@@ -15,6 +15,7 @@ import {
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_STATUS_CHANNEL,
@@ -607,6 +608,53 @@ class FakeIpcMain {
     handler({ sender: 'renderer' }, payload)
   }
 }
+
+describe('clicked link IPC', () => {
+  it('routes a link through main and reports where it opened', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const openLink = vi.fn(async (url: string) =>
+      url.includes('localhost') ? ('builtin' as const) : ('refused' as const),
+    )
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      openLink,
+    })
+    await expect(
+      ipc.invoke(LINK_OPEN_CHANNEL, 'http://localhost:5173/'),
+    ).resolves.toEqual({ ok: true, opened: 'builtin' })
+    await expect(
+      ipc.invoke(LINK_OPEN_CHANNEL, 'file:///etc/hosts'),
+    ).resolves.toEqual({ ok: false, opened: 'refused' })
+    await expect(ipc.invoke(LINK_OPEN_CHANNEL, { url: 'x' })).resolves.toEqual({
+      ok: false,
+      opened: 'refused',
+    })
+    expect(openLink).toHaveBeenLastCalledWith('')
+    expect(authorize).toHaveBeenCalledTimes(3)
+
+    const refused = new FakeIpcMain()
+    registerDesktopCapabilityIpc({
+      ipcMain: refused,
+      authorize: () => {
+        throw new Error('forbidden_ipc_caller')
+      },
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      openLink,
+    })
+    await expect(
+      refused.invoke(LINK_OPEN_CHANNEL, 'https://example.com/'),
+    ).rejects.toThrow(/forbidden/)
+  })
+})
 
 describe('agent download reveal IPC', () => {
   it('reveals inbox files by download id only', async () => {

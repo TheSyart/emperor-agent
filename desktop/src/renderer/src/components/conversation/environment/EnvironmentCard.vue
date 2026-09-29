@@ -9,7 +9,7 @@
  *   (`git.summary`, opens 审查) · 本地 / worktree ▾ (`git.enterWorktree` /
  *   `git.exitWorktree`) · branch ▾ (`git.branches` / `git.switchBranch`) ·
  *   提交或推送 (审查 focused on the commit box) · 比较分支 ↗ (`git.remote`
- *   → provider compare page through `openExternal`). Writes follow the
+ *   → provider compare page through `openLink`). Writes follow the
  *   审查 pane rules: confirmed, carrying the snapshot's `expectedRevision`,
  *   disabled while the agent runs or a git operation is unfinished.
  *   Other sessions show one muted line instead.
@@ -66,7 +66,7 @@ import {
   type Component,
 } from 'vue'
 import { useRouter } from 'vue-router'
-import { openExternal } from '../../../api/backend'
+import { openLink } from '../../../api/backend'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import {
@@ -413,7 +413,7 @@ async function openCompare(): Promise<void> {
   const url = compare.value.url
   if (!url) return
   try {
-    await openExternal(url)
+    await openLink(url)
   } catch (cause) {
     ctx.showToast(message(cause))
   }

@@ -75,6 +75,26 @@ describe('trusted renderer policy', () => {
     expect(openExternal).toHaveBeenCalledWith('https://example.com/')
   })
 
+  it('routes a user link through the browser settings when main supplies a router', async () => {
+    const openExternal = vi.fn(async () => undefined)
+    const openLink = vi.fn(async () => undefined)
+    const policy = createTrustedRendererPolicy({
+      productionUrl: 'app://bundle/index.html',
+      mainWebContents: () => null,
+      openExternal,
+      openLink,
+    })
+    policy.handleWindowOpen({ url: 'http://localhost:5173/app' })
+    policy.handleNavigation({ preventDefault: vi.fn() }, 'https://example.com')
+    policy.handleWindowOpen({ url: 'file:///etc/hosts' })
+    await Promise.resolve()
+    expect(openLink.mock.calls).toEqual([
+      ['http://localhost:5173/app'],
+      ['https://example.com/'],
+    ])
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
   it('authorizes only the trusted top frame of the main webContents', () => {
     const mainWebContents = {}
     const policy = makePolicy({ mainWebContents: () => mainWebContents })

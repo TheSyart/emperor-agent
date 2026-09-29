@@ -5,6 +5,7 @@ import {
   browserViewBounds,
   clearBrowserError,
   emptyBrowserPage,
+  addressText,
   externalOpenAllowed,
   isLoopbackUrl,
   rectsIntersect,
@@ -59,6 +60,17 @@ describe('browser model', () => {
     expect(externalOpenAllowed('https://user:pw@example.com/')).toBe(false)
     expect(externalOpenAllowed('file:///etc/hosts')).toBe(false)
     expect(externalOpenAllowed('')).toBe(false)
+  })
+
+  it('shows the whole address, or only the site when the setting says so', () => {
+    const url = 'https://docs.example.com/guide/intro?tab=2#setup'
+    expect(addressText(url, true)).toBe(url)
+    expect(addressText(url, false)).toBe('docs.example.com')
+    expect(addressText('http://localhost:5173/app', false)).toBe(
+      'localhost:5173',
+    )
+    expect(addressText('', false)).toBe('')
+    expect(addressText('not a url', false)).toBe('not a url')
   })
 
   it('keeps a load error until the page leaves that URL or the user acts', () => {

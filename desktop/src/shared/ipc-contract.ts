@@ -23,6 +23,15 @@ export const BROWSER_CLOSE_CHANNEL = 'emperor:browser:close'
 export const BROWSER_STATE_CHANNEL = 'emperor:browser:state'
 export const REFERENCE_REVEAL_CHANNEL = 'emperor:reference:reveal'
 export const EXTERNAL_OPEN_CHANNEL = 'emperor:external:open'
+/**
+ * Renderer → main `url`: a web link the user clicked in Emperor's UI. Main
+ * routes it by the user's browser settings (system or built-in browser)
+ * and answers `{ ok, opened }`; EXTERNAL_OPEN_CHANNEL always means the
+ * system browser.
+ */
+export const LINK_OPEN_CHANNEL = 'emperor:link:open'
+/** Main → renderer `{ url }`: a link opened in the built-in browser; show it. */
+export const BROWSER_REVEAL_CHANNEL = 'emperor:browser:reveal'
 /** Main-only: open the personal or project Skills folder (created when missing). */
 export const SKILLS_OPEN_FOLDER_CHANNEL = 'emperor:skills:open-folder'
 /** Main-only: native single-file picker with extension filters. */

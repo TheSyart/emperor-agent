@@ -12,7 +12,10 @@
  *
  * Page state comes from main (`onBrowserState`). A failed load hides the
  * native view and shows the pane's own error state until the next user
- * action. Loopback pages cannot open externally (main refuses them).
+ * action. Loopback pages cannot open externally (main refuses them). A link
+ * the user clicked elsewhere in Emperor may open here too: main loads it
+ * (设置 › 浏览器) and the state push shows it. With 地址栏显示完整网址 off
+ * the bar shows only the site until the user edits it.
  *
  * WorkspacePanel keys the pane by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
@@ -53,10 +56,12 @@ import {
   openExternal,
   type BrowserViewAction,
 } from '../../api/backend'
+import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import IconButton from '../ui/IconButton.vue'
 import AgentTabView from './AgentTabView.vue'
 import { agentTabsFor, type AgentTabControlAction } from './agentTabsModel'
 import {
+  addressText,
   applyBrowserState,
   clearBrowserError,
   emptyBrowserPage,
@@ -73,6 +78,8 @@ const props = defineProps<{
 }>()
 
 const OPEN_FAILED = '无法打开网址'
+
+const { preferences } = useBrowserPreferences()
 
 const page = ref(emptyBrowserPage())
 const address = ref('')
@@ -96,6 +103,10 @@ const externalLabel = computed(() =>
     : '在外部打开',
 )
 const pageLabel = computed(() => state.value?.title || hostOf(pageUrl.value))
+/** The bar while not editing: the page address, whole or just the site. */
+const idleAddress = computed(() =>
+  addressText(pageUrl.value, preferences.value.showFullUrl),
+)
 
 // --- Agent tabs (computer use) ---------------------------------------------
 
@@ -227,7 +238,7 @@ let unsubscribeCore = () => {}
 onMounted(() => {
   unsubscribe = onBrowserState((next) => {
     page.value = applyBrowserState(page.value, next)
-    if (!editing.value) address.value = page.value.state?.url ?? ''
+    if (!editing.value) address.value = idleAddress.value
   })
   unsubscribeCore = onCoreEvent((event) => {
     if (
@@ -292,12 +303,20 @@ function reloadOrStop(): void {
 
 function onAddressFocus(): void {
   editing.value = true
-  addressInput.value?.select()
+  // Editing shows the whole address; text the user left typed stays.
+  if (address.value === idleAddress.value) address.value = pageUrl.value
+  void nextTick(() => addressInput.value?.select())
 }
 
 function onAddressBlur(): void {
   editing.value = false
+  if (address.value === pageUrl.value) address.value = idleAddress.value
 }
+
+// 地址栏显示完整网址 changed (设置 › 浏览器): an idle bar follows at once.
+watch(idleAddress, (next, previous) => {
+  if (!editing.value && address.value === previous) address.value = next
+})
 
 function revertAddress(): void {
   address.value = pageUrl.value

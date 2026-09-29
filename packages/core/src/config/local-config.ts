@@ -1,11 +1,15 @@
 import { existsSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import type { BrowserPreferences } from '../runtime/types'
 import {
   AtomicSnapshot,
+  NODE_PERSISTENCE_ADAPTER,
   type PersistenceAdapter,
   type SnapshotCodec,
 } from '../store/persistence'
+
+export type { BrowserPreferences }
 
 export const LOCAL_CONFIG_FILE = 'settings.json'
 export const LEGACY_LOCAL_CONFIG_FILE = 'emperor.local.json'
@@ -37,9 +41,22 @@ export interface LocalConfig {
   webui: WebUIPreferences
   desktopPet: DesktopPetPreferences
   prompt: PromptPreferences
+  browser: BrowserPreferences
 }
 
-export type LocalConfigInput = LocalConfig
+/** What a save takes: a missing `browser` keeps its defaults. */
+export type LocalConfigInput = Omit<LocalConfig, 'browser'> & {
+  browser?: BrowserPreferences
+}
+
+export function defaultBrowserPreferences(): BrowserPreferences {
+  return {
+    enabled: true,
+    linkTarget: 'system',
+    showFullUrl: true,
+    history: true,
+  }
+}
 
 export interface LocalConfigBackup {
   path: string
@@ -64,6 +81,7 @@ function defaultLocalConfig(): LocalConfig {
     webui: { host: '127.0.0.1', port: 8765, openBrowser: false },
     desktopPet: { enabled: false, autoStartWithWebui: true },
     prompt: { profile: 'technical' },
+    browser: defaultBrowserPreferences(),
   }
 }
 
@@ -90,6 +108,7 @@ export function parseLocalConfig(
   if (Object.keys(desktopPet).length === 0)
     desktopPet = objectOrEmpty(data.desktop_pet)
   const prompt = objectOrEmpty(data.prompt)
+  const browser = normalizeBrowserPreferences(data.browser)
   return {
     webui: {
       host: String(webui.host || '127.0.0.1'),
@@ -107,6 +126,29 @@ export function parseLocalConfig(
     prompt: {
       profile: normalizePromptProfile(prompt.profile),
     },
+    browser,
+  }
+}
+
+/** Unknown or malformed fields fall back to the defaults one by one. */
+export function normalizeBrowserPreferences(
+  value: unknown,
+): BrowserPreferences {
+  const data = objectOrEmpty(value)
+  const defaults = defaultBrowserPreferences()
+  return {
+    enabled:
+      typeof data.enabled === 'boolean' ? data.enabled : defaults.enabled,
+    linkTarget:
+      data.linkTarget === 'builtin' || data.linkTarget === 'system'
+        ? data.linkTarget
+        : defaults.linkTarget,
+    showFullUrl:
+      typeof data.showFullUrl === 'boolean'
+        ? data.showFullUrl
+        : defaults.showFullUrl,
+    history:
+      typeof data.history === 'boolean' ? data.history : defaults.history,
   }
 }
 
@@ -153,9 +195,39 @@ export async function saveLocalConfig(
     prompt: {
       profile: normalizePromptProfile(config.prompt?.profile),
     },
+    browser: normalizeBrowserPreferences(config.browser),
   }
-  await localConfigSnapshot(path, opts.persistenceAdapter).write(payload)
+  const shared = await sharedSettings(path, opts.persistenceAdapter)
+  await localConfigSnapshot(path, opts.persistenceAdapter).write({
+    ...shared,
+    ...payload,
+  })
   return path
+}
+
+/**
+ * settings.json keys other services own (plugins/service.ts writes
+ * `enabledPlugins`): a save keeps them; retired and unknown keys go.
+ */
+const SHARED_SETTINGS_KEYS = ['enabledPlugins'] as const
+
+async function sharedSettings(
+  path: string,
+  adapter: PersistenceAdapter = NODE_PERSISTENCE_ADAPTER,
+): Promise<Record<string, unknown>> {
+  let raw: Record<string, unknown>
+  try {
+    if (!(await adapter.exists(path))) return {}
+    raw = objectOrEmpty(JSON.parse(await adapter.readText(path)))
+  } catch {
+    return {}
+  }
+  return Object.fromEntries(
+    SHARED_SETTINGS_KEYS.filter((key) => key in raw).map((key) => [
+      key,
+      raw[key],
+    ]),
+  )
 }
 
 const LOCAL_CONFIG_CODEC: SnapshotCodec<LocalConfig> = {

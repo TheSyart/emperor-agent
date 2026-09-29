@@ -12,7 +12,7 @@
  * the page chunk). Props: body.
  */
 import { computed, inject } from 'vue'
-import { openExternal } from '../../../api/backend'
+import { openLink } from '../../../api/backend'
 import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
 import { useMarkdown } from '../../../composables/useMarkdown'
 import { externalHref, neutralizeRemoteImages } from './pullBodyHtml'
@@ -32,7 +32,7 @@ function onClick(event: MouseEvent): void {
   event.stopPropagation()
   const href = externalHref(anchor)
   if (!href) return
-  openExternal(href).catch(() => app?.showToast('无法在浏览器中打开链接'))
+  openLink(href).catch(() => app?.showToast('无法在浏览器中打开链接'))
 }
 </script>
 

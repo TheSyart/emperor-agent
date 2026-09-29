@@ -18,7 +18,7 @@ const { core, invokeCore } = vi.hoisted(() => ({
 vi.mock('../../../api/http', () => ({ core }))
 vi.mock('../../../api/backend', () => ({
   invokeCore,
-  openExternal: vi.fn(async () => {}),
+  openLink: vi.fn(async () => 'system'),
   selectDirectory: vi.fn(async () => null),
   selectFile: vi.fn(async () => null),
 }))

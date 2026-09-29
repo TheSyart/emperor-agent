@@ -15,8 +15,10 @@ import {
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
+  BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_RESET_CHANNEL,
@@ -60,6 +62,8 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(REFERENCE_REVEAL_CHANNEL, input),
     openExternal: (url: string) =>
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
+    /** A clicked web link: main picks the system or the built-in browser. */
+    openLink: (url: string) => ipcRenderer.invoke(LINK_OPEN_CHANNEL, url),
     openSkillsFolder: (input: {
       scope: 'user' | 'project'
       sessionId?: string | null
@@ -106,6 +110,15 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
         listener(payload as BrowserViewState)
       ipcRenderer.on(BROWSER_STATE_CHANNEL, wrapped)
       return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, wrapped)
+    },
+    /** Main opened a clicked link in the built-in browser: show the pane. */
+    onBrowserReveal: (listener: (payload: { url: string }) => void) => {
+      const wrapped = (_event: unknown, payload: unknown) => {
+        const url = (payload as { url?: unknown } | null)?.url
+        if (typeof url === 'string') listener({ url })
+      }
+      ipcRenderer.on(BROWSER_REVEAL_CHANNEL, wrapped)
+      return () => ipcRenderer.removeListener(BROWSER_REVEAL_CHANNEL, wrapped)
     },
     /** Computer Use: stream frames of one Agent tab (by id). */
     agentPreviewStart: (targetId: string) =>

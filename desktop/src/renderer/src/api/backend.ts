@@ -84,6 +84,10 @@ interface EmperorBridge {
   openExternal?: (
     url: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
+  openLink?: (
+    url: string,
+  ) => Promise<{ ok?: boolean; opened?: 'builtin' | 'system' | 'refused' }>
+  onBrowserReveal?: (listener: (payload: { url: string }) => void) => () => void
   openSkillsFolder?: (input: {
     scope: SkillFolderScope
     sessionId?: string | null
@@ -335,6 +339,36 @@ export async function openExternal(url: string): Promise<void> {
         : 'Failed to open external url',
     )
   }
+}
+
+export const LINK_REFUSED_MESSAGE = '无法打开这个链接'
+
+/**
+ * A web link the user clicked in Emperor's UI: main opens it in the system
+ * browser or the built-in one (设置 › 浏览器; addresses of this machine
+ * only in the built-in one). `openExternal` stays the explicit "open in the
+ * system browser" action. Resolves where it opened; throws when main
+ * refused it (not http(s), URL credentials, or a local address while the
+ * built-in browser is off).
+ */
+export async function openLink(url: string): Promise<'builtin' | 'system'> {
+  const opener = bridge()?.openLink
+  if (typeof opener !== 'function') {
+    // A bridge without link routing (tests, the visual harness).
+    await openExternal(url)
+    return 'system'
+  }
+  const result = await opener(url)
+  if (result?.opened === 'builtin' || result?.opened === 'system')
+    return result.opened
+  throw new Error(LINK_REFUSED_MESSAGE)
+}
+
+/** Main opened a clicked link in the built-in browser. */
+export function onBrowserReveal(
+  listener: (payload: { url: string }) => void,
+): () => void {
+  return bridge()?.onBrowserReveal?.(listener) ?? (() => {})
 }
 
 /** A failed `openSkillsFolder`, carrying the Core error code when there is one. */

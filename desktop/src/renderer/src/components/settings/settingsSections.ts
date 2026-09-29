@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'model', label: '模型' },
   { key: 'hooks', label: 'Hooks' },
   { key: 'computer', label: '电脑操作' },
+  { key: 'browser', label: '浏览器' },
   { key: 'memory', label: '记忆' },
   { key: 'tokens', label: '用量' },
   { key: 'pet', label: '桌宠' },

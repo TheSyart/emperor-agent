@@ -439,6 +439,22 @@ describe('BrowserViewHost', () => {
     expect(electron.views[1]!.setBounds).not.toHaveBeenCalled()
   })
 
+  it('tells a pane that appears after a link opened what page it shows', async () => {
+    const { window, host } = setup()
+    // Main opened a clicked link before the 浏览器 pane mounted.
+    await host.openUrl({ url: 'https://example.com/docs' })
+    window.webContents.send.mockClear()
+    host.setBounds({ x: 10, y: 20, width: 640, height: 480 })
+    expect(window.webContents.send).toHaveBeenCalledWith(
+      BROWSER_STATE_CHANNEL,
+      expect.objectContaining({ url: 'https://example.com/docs' }),
+    )
+    // Moving a visible view does not repeat the state.
+    window.webContents.send.mockClear()
+    host.setBounds({ x: 12, y: 20, width: 640, height: 480 })
+    expect(window.webContents.send).not.toHaveBeenCalled()
+  })
+
   it('runs history actions on the live view only', async () => {
     const { host } = setup()
     host.action('reload')

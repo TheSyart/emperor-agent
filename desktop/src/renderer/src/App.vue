@@ -31,7 +31,10 @@ import {
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
 import { useSubagentCounts } from './components/sidebar/subagentCounts'
 import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
-import { toggleWorkspacePane } from './components/workspace/workspaceState'
+import {
+  openWorkspacePane,
+  toggleWorkspacePane,
+} from './components/workspace/workspaceState'
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
 import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
@@ -42,6 +45,7 @@ import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDi
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
+import { onBrowserReveal } from './api/backend'
 import { core } from './api/http'
 import { useBootstrap } from './composables/useBootstrap'
 import { useNotifications } from './composables/useNotifications'
@@ -636,6 +640,16 @@ useShortcuts({
   'nav.back': () => goBack(router),
   'nav.forward': () => goForward(router),
 })
+
+// Main opened a link the user clicked in the built-in browser (设置 ›
+// 浏览器): show the 浏览器 pane, back in the session when the link came from
+// a full page (a pull request, Explore) that has no workspace column.
+const stopBrowserReveal = onBrowserReveal(() => {
+  openWorkspacePane('browser')
+  if (!workspaceAvailable.value)
+    void router.push(sessionLocation(sessionId.value)).catch(() => undefined)
+})
+onBeforeUnmount(stopBrowserReveal)
 
 provideAppContext({
   boot,

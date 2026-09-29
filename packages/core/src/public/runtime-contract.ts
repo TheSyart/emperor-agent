@@ -4,6 +4,7 @@ export {
 } from '../runtime/wire-discriminant'
 export type { RuntimeEventName } from '../runtime/wire-discriminant'
 export type {
+  BrowserPreferences,
   RuntimeEvent,
   RuntimeEventEnvelope,
   RuntimeGoalView,

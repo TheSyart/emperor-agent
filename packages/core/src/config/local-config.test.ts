@@ -33,6 +33,12 @@ describe('local config', () => {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
+      browser: {
+        enabled: true,
+        linkTarget: 'system',
+        showFullUrl: true,
+        history: true,
+      },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -90,6 +96,53 @@ describe('local config', () => {
     ).toEqual([])
   })
 
+  it('keeps the user browser preferences and repairs bad fields one by one', async () => {
+    const saved = parseLocalConfig({})
+    await saveLocalConfig(dir, {
+      ...saved,
+      browser: {
+        enabled: false,
+        linkTarget: 'builtin',
+        showFullUrl: false,
+        history: false,
+      },
+    })
+    expect((await loadLocalConfig(dir)).browser).toEqual({
+      enabled: false,
+      linkTarget: 'builtin',
+      showFullUrl: false,
+      history: false,
+    })
+    expect(
+      parseLocalConfig({
+        browser: { enabled: 'yes', linkTarget: 'tab', showFullUrl: false },
+      }).browser,
+    ).toEqual({
+      enabled: true,
+      linkTarget: 'system',
+      showFullUrl: false,
+      history: true,
+    })
+  })
+
+  it('keeps the settings.json keys other services own', async () => {
+    await writeFile(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        webui: { host: '127.0.0.1', port: 8765 },
+        enabledPlugins: { 'acme/github': true },
+      }),
+    )
+    const loaded = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, {
+      ...loaded,
+      browser: { ...loaded.browser, linkTarget: 'builtin' },
+    })
+    const raw = JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8'))
+    expect(raw.enabledPlugins).toEqual({ 'acme/github': true })
+    expect(raw.browser.linkTarget).toBe('builtin')
+  })
+
   it('parses legacy snake_case desktop pet and open_browser keys', () => {
     const parsed = parseLocalConfig({
       webui: { host: '0.0.0.0', port: '70000', open_browser: true },
@@ -118,6 +171,7 @@ describe('local config', () => {
     })
     expect(parsed.prompt).toEqual({ profile: 'technical' })
     expect(Object.keys(parsed).sort()).toEqual([
+      'browser',
       'desktopPet',
       'prompt',
       'webui',
@@ -145,6 +199,7 @@ describe('local config', () => {
     const loaded = await loadLocalConfig(dir)
     expect(loaded.webui.port).toBe(9100)
     expect(Object.keys(loaded).sort()).toEqual([
+      'browser',
       'desktopPet',
       'prompt',
       'webui',
@@ -158,7 +213,7 @@ describe('local config', () => {
     await saveLocalConfig(dir, loaded)
     expect(
       Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(),
-    ).toEqual(['desktopPet', 'prompt', 'webui'])
+    ).toEqual(['browser', 'desktopPet', 'prompt', 'webui'])
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {

@@ -14,7 +14,7 @@
  * Emits: retry, load-diff (the diff tab wants its data), retry-diff, back.
  */
 import { computed, defineAsyncComponent, inject, ref, watch } from 'vue'
-import { openExternal } from '../../../api/backend'
+import { openLink } from '../../../api/backend'
 import type {
   PullRequestDetail,
   PullRequestDiffResult,
@@ -139,7 +139,7 @@ const failed = computed(() => !data.value && Boolean(props.entry.error))
 const loading = computed(() => !data.value && !props.entry.error)
 
 function openOnGithub(): void {
-  openExternal(head.value.url).catch(() =>
+  openLink(head.value.url).catch(() =>
     app?.showToast('无法在浏览器中打开 GitHub'),
   )
 }

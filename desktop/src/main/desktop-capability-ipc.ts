@@ -15,6 +15,7 @@ import {
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_RESET_CHANNEL,
@@ -93,6 +94,11 @@ export function registerDesktopCapabilityIpc(input: {
   references: ReferenceCapability
   showItemInFolder(path: string): void
   openExternal(url: string): Promise<unknown>
+  /**
+   * A web link the user clicked: main routes it (system or built-in browser,
+   * see link-routing.ts) and reports where it went.
+   */
+  openLink?(url: string): Promise<'builtin' | 'system' | 'refused'>
   skills?: SkillFolderCapability
   /** `shell.openPath`: resolves '' on success, else an error message. */
   openPath?: (path: string) => Promise<string>
@@ -304,6 +310,14 @@ export function registerDesktopCapabilityIpc(input: {
     await input.openExternal(url)
     return { ok: true }
   })
+  const openLink = input.openLink
+  if (openLink)
+    input.ipcMain.handle(LINK_OPEN_CHANNEL, async (event, payload) => {
+      authorize(event)
+      const url = typeof payload === 'string' ? payload.slice(0, 4096) : ''
+      const opened = await openLink(url)
+      return { ok: opened !== 'refused', opened }
+    })
   // One-way messages have no caller to reject: an untrusted sender (e.g. a
   // frame already torn down while its window closes) or a malformed payload
   // is dropped. Throwing here would surface as an uncaught main-process

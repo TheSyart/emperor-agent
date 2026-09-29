@@ -969,6 +969,22 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input]) => api.computerUse.controlTarget(input),
   ),
   'desktopPet.get': operation(z.tuple([]), (api) => api.desktopPet.get()),
+  'browser.preferences': operation(z.tuple([]), (api) =>
+    api.browser.preferences(),
+  ),
+  'browser.setPreferences': operation(
+    z.tuple([
+      z
+        .object({
+          enabled: z.boolean().optional(),
+          linkTarget: z.enum(['system', 'builtin']).optional(),
+          showFullUrl: z.boolean().optional(),
+          history: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change]) => api.browser.setPreferences(change),
+  ),
   'desktopPet.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>
     api.desktopPet.setEnabled(enabled),
   ),

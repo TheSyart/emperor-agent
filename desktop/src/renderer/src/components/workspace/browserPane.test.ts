@@ -6,6 +6,7 @@ import type {
   UiTargetView,
 } from '@emperor/core/runtime-contract'
 import type { BrowserViewState } from '../../api/backend'
+import { resetBrowserPreferencesForTest } from '../../composables/useBrowserPreferences'
 import { pushModalLayer } from '../ui/modalStack'
 import BrowserPane from './BrowserPane.vue'
 
@@ -103,8 +104,12 @@ async function submit(root: HTMLElement, text: string): Promise<void> {
   await flush()
 }
 
+let preferences: unknown = null
+
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+  resetBrowserPreferencesForTest()
+  preferences = null
   listeners = []
   visible.value = true
   prefill.value = null
@@ -112,7 +117,11 @@ beforeEach(() => {
   coreListeners = []
   computerUse = null
   bridge.invokeCore.mockImplementation(async (key: string) =>
-    key === 'computerUse.status' ? computerUse : { ok: true },
+    key === 'computerUse.status'
+      ? computerUse
+      : key === 'browser.preferences'
+        ? preferences
+        : { ok: true },
   )
   bridge.onCoreEvent.mockImplementation(
     (listener: (event: unknown) => void) => {
@@ -217,6 +226,34 @@ describe('BrowserPane', () => {
     expect(bridge.browserAction).toHaveBeenLastCalledWith('reload')
     expect(pane.getAttribute('data-state')).toBe('page')
     await expectBounds({ x: 880, y: 110, width: 560, height: 720 })
+  })
+
+  it('shows only the site until the user edits, when full addresses are off', async () => {
+    preferences = {
+      enabled: true,
+      linkTarget: 'system',
+      showFullUrl: false,
+      history: true,
+    }
+    const root = mount()
+    await flush()
+    push({ url: 'https://docs.example.com/guide?tab=2' })
+    await flush()
+    expect(input(root).value).toBe('docs.example.com')
+    input(root).dispatchEvent(new Event('focus'))
+    await flush()
+    expect(input(root).value).toBe('https://docs.example.com/guide?tab=2')
+    input(root).dispatchEvent(new Event('blur'))
+    await flush()
+    expect(input(root).value).toBe('docs.example.com')
+    // Turned on in the settings: the idle bar shows the whole address.
+    for (const listener of coreListeners)
+      listener({
+        event: 'browser_preferences_changed',
+        preferences: { ...(preferences as object), showFullUrl: true },
+      })
+    await flush()
+    expect(input(root).value).toBe('https://docs.example.com/guide?tab=2')
   })
 
   it('opens remote pages externally but never loopback ones', async () => {

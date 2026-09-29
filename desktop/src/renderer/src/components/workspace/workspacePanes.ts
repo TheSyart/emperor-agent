@@ -27,17 +27,22 @@ export interface WorkspaceAvailability {
   /** A snapshot has loaded (git presence is unknown before). */
   snapshotLoaded: boolean
   hasGit: boolean
+  /** 设置 › 浏览器 › 启用内置浏览器 (absent: on). */
+  browserEnabled?: boolean
 }
 
 export const NO_PROJECT_REASON = '当前会话未绑定项目'
 export const NO_GIT_REASON = '当前项目未初始化 Git'
+export const BROWSER_OFF_REASON = '内置浏览器已关闭，可在 设置 › 浏览器 中开启'
 
 /** Why `pane` is unavailable, or '' when it can open. */
 export function workspacePaneDisabledReason(
   pane: WorkspaceContentPane,
   availability: WorkspaceAvailability,
 ): string {
-  if (pane === 'browser' || pane === 'desktop') return ''
+  if (pane === 'browser')
+    return availability.browserEnabled === false ? BROWSER_OFF_REASON : ''
+  if (pane === 'desktop') return ''
   if (!availability.hasProject) return NO_PROJECT_REASON
   // Unknown until the first snapshot lands: keep review reachable meanwhile.
   if (pane === 'review' && availability.snapshotLoaded && !availability.hasGit)

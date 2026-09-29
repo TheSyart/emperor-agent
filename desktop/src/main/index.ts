@@ -50,6 +50,7 @@ import {
   createTrustedRendererPolicy,
   type TrustedRendererPolicy,
 } from './trusted-renderer'
+import { linkDestination } from './link-routing'
 import { mainWindowWebPreferences } from './window-security'
 import { NodePtyHost } from './terminal-host'
 import { TerminalEventBridge } from './terminal-event-bridge'
@@ -109,6 +110,7 @@ import {
 } from './recovery'
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
+  BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
 } from '../shared/ipc-contract'
@@ -156,6 +158,7 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
   developmentUrl: process.env.ELECTRON_RENDERER_URL ?? null,
   mainWebContents: () => mainWindow?.webContents ?? null,
   openExternal: (url) => shell.openExternal(url),
+  openLink: (url) => openUserLink(url),
   onExternalOpenError: (error, url) => {
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
@@ -1021,6 +1024,7 @@ async function startup(): Promise<void> {
       },
       showItemInFolder: (target) => shell.showItemInFolder(target),
       openExternal: (url) => shell.openExternal(url),
+      openLink: (url) => openUserLink(url),
       skills: {
         folderPath: (input) => {
           if (!coreApi) throw new Error('core not ready')
@@ -1208,6 +1212,31 @@ app.on('will-quit', () => {
   killSwitch?.dispose()
   stopEntries?.dispose()
 })
+
+/**
+ * A web link the user clicked in Emperor's UI (chat links, a window the main
+ * window tried to open): the system browser, or the built-in browser when
+ * the user chose it, and always for an address of this machine
+ * (link-routing.ts). The built-in browser shows it in the 浏览器 pane.
+ */
+async function openUserLink(
+  url: string,
+): Promise<'builtin' | 'system' | 'refused'> {
+  const preferences = (await coreApi?.browser
+    .preferences()
+    .catch(() => null)) ?? { enabled: true, linkTarget: 'system' as const }
+  const destination = linkDestination(url, preferences)
+  if (destination === 'builtin' && mainWindow && !mainWindow.isDestroyed()) {
+    await requireBrowserViewHost().openUrl({ url })
+    mainWindow.webContents.send(BROWSER_REVEAL_CHANNEL, { url })
+    return 'builtin'
+  }
+  if (destination === 'system') {
+    await shell.openExternal(url)
+    return 'system'
+  }
+  return 'refused'
+}
 
 function requireBrowserViewHost(): BrowserViewHost {
   if (!browserViewHost) throw new Error('browser host is not ready')

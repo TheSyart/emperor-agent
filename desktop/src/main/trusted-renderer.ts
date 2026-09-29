@@ -38,6 +38,11 @@ export function createTrustedRendererPolicy(opts: {
   developmentUrl?: string | null
   mainWebContents: () => unknown | null
   openExternal: (url: string) => Promise<unknown>
+  /**
+   * Route a user's link through the browser settings instead of always
+   * handing it to the system browser (main window only).
+   */
+  openLink?: (url: string) => Promise<unknown>
   onExternalOpenError?: (error: unknown, url: string) => void
 }): TrustedRendererPolicy {
   const production = parseUrl(opts.productionUrl)
@@ -63,8 +68,9 @@ export function createTrustedRendererPolicy(opts: {
       !['http:', 'https:'].includes(candidate.protocol)
     )
       return
+    const open = opts.openLink ?? opts.openExternal
     void Promise.resolve()
-      .then(() => opts.openExternal(candidate.toString()))
+      .then(() => open(candidate.toString()))
       .catch((error) => opts.onExternalOpenError?.(error, candidate.toString()))
   }
 
