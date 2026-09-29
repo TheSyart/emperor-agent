@@ -17,6 +17,8 @@ export interface WorkspaceRequest {
   paths?: string[]
   /** Project-relative file to open (pane 'files'). */
   file?: { path: string; line?: number }
+  /** Project-relative directory to show opened in the tree ('' = root). */
+  directory?: string
   /** Address to prefill (pane 'browser'); never opened without a user submit. */
   url?: string
   /** Control to focus once the pane shows ('commit': the review commit box). */

@@ -1,6 +1,8 @@
 import DOMPurify from 'isomorphic-dompurify'
 import MarkdownIt from 'markdown-it'
+import type Token from 'markdown-it/lib/token.mjs'
 import { computed, type Ref } from 'vue'
+import { documentGlyph, pathLinkLabel } from '../documentKind'
 
 const md = new MarkdownIt({
   html: false,
@@ -44,7 +46,8 @@ export type MdLinkKind = 'web' | 'file'
 
 /**
  * 分类 markdown 链接：http(s) 视为网页，file:// 与绝对路径视为本地文件；
- * 其余（mailto / #anchor / app: / 相对路径）返回 null，保持普通链接样式。
+ * 相对路径带扩展名、或以 `/` 结尾（目录）时也视为本地文件；
+ * 其余（mailto / #anchor / app: / 其他相对路径）返回 null，保持普通链接样式。
  */
 export function classifyMdLink(href: string): MdLinkKind | null {
   if (/^https?:\/\//i.test(href)) return 'web'
@@ -54,6 +57,7 @@ export function classifyMdLink(href: string): MdLinkKind | null {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null
   if (/^(?:\.\.?\/)?[^?#]+\.[a-z0-9]{1,12}(?:#L\d+)?$/i.test(href))
     return 'file'
+  if (/^(?:\.\.?\/)?[^?#\s]+\/$/.test(href)) return 'file'
   return null
 }
 
@@ -90,8 +94,10 @@ md.validateLink = (url: string) =>
   defaultValidateLink(url) || url.startsWith('file://')
 
 /**
- * 把内联链接升级成 chip 卡：附加 class / data-md-link / data-md-ext / target / rel。
- * 纯 HTML 属性，全部在 sanitize 白名单内；图标交给外部 CSS mask。
+ * 把内联链接升级成 chip 卡：附加 class / data-md-link / data-md-ext / target / rel，
+ * 以及类型图标 data-md-icon（语言另有 data-md-badge 徽标文字与 data-md-tone 色调）。
+ * 纯 HTML 属性，全部在 sanitize 白名单内；图标交给外部 CSS。
+ * 本地文件链接的文字本身就是路径时，只显示文件名（完整路径留在 title）。
  * 裸 URL（linkify 自动链）把可见文本缩短为「域名+路径」，给出域名感而无需 favicon。
  * 注意：markdown-it 会把 Windows 反斜杠 percent-encode 成 %5C，所以分类前先解码，
  * 才能识别出 `C:\…` 这种盘符形式。
@@ -121,6 +127,11 @@ md.core.ruler.push('md_link_chips', (state) => {
         .exec(decoded)?.[1]
         ?.toLowerCase()
       if (kind === 'file' && ext) child.attrSet('data-md-ext', ext)
+      const glyph = documentGlyph(decoded)
+      child.attrSet('data-md-icon', glyph.kind)
+      if (glyph.badge) child.attrSet('data-md-badge', glyph.badge)
+      if (glyph.tone) child.attrSet('data-md-tone', glyph.tone)
+      if (kind === 'file') showFileName(children, index, decoded)
       if (child.markup === 'linkify') {
         const textToken = children[index + 1]
         if (textToken?.type === 'text') {
@@ -138,6 +149,23 @@ md.core.ruler.push('md_link_chips', (state) => {
   }
   return false
 })
+
+/** A lone label (text or code) that is the link's path → the file name. */
+function showFileName(
+  children: NonNullable<Token['children']>,
+  open: number,
+  target: string,
+): void {
+  const label = children[open + 1]
+  if (children[open + 2]?.type !== 'link_close') return
+  if (label?.type !== 'text' && label?.type !== 'code_inline') return
+  const name = pathLinkLabel(label.content, target)
+  if (name === null) return
+  label.type = 'text'
+  label.tag = ''
+  label.markup = ''
+  label.content = name
+}
 
 export function useMarkdown(content: Ref<string>) {
   const rendered = computed(() => sanitizeHtml(md.render(content.value || '')))

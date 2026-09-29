@@ -59,6 +59,14 @@ describe('ConversationView composer seat integration', () => {
     expect(source).not.toContain('emperor:open-workspace')
   })
 
+  it('checks reply file links against Core and opens folders in the tree', () => {
+    expect(source).toContain('provide(LINK_STATUS_KEY, linkStatus)')
+    expect(source).toContain('linkStatus.record(detail.href, reference)')
+    expect(source).toContain('directory: reference.relativePath')
+    // Statuses are checked again for a new session and after each turn.
+    expect(source.match(/linkStatus\.refresh\(\)/g)).toHaveLength(2)
+  })
+
   it('sends tool-row Inspect to the trajectory inspector column', () => {
     expect(source).toContain('frameActions.openInspector(frame)')
     expect(source).toContain("sessionLocation(viewingId.value, 'trajectory')")

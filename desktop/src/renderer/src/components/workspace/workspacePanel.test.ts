@@ -260,6 +260,23 @@ describe('WorkspacePanel', () => {
     expect(workspaceRequest().value).toBeNull()
   })
 
+  it('requestWorkspace({ pane: files, directory }) opens the folder in the tree', async () => {
+    const root = mount()
+    await flush()
+    requestWorkspace({ pane: 'files', directory: 'src' })
+    await vi.waitFor(() =>
+      expect(core).toHaveBeenCalledWith('files.list', {
+        sessionId: 's1',
+        relativePath: 'src',
+        limit: 500,
+      }),
+    )
+    expect(useFrameState().workspacePane).toBe('files')
+    expect(core).not.toHaveBeenCalledWith('files.read', expect.anything())
+    expect(workspaceRequest().value).toBeNull()
+    void root
+  })
+
   it('does not poll the snapshot while the column is closed', async () => {
     open.value = false
     mount()

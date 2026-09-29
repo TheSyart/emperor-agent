@@ -3,14 +3,15 @@
  * ChatGallery — dev-only `?chat-gallery` page: ChatTimeline over an
  * in-memory fixture store (no Electron). Query params:
  * - scenario: showcase | notices | workflow | interactions | streaming |
- *   streaming-reasoning | long | kernel (default showcase)
+ *   streaming-reasoning | long | links | kernel (default showcase)
  * - bare: hide the scenario bar (screenshots)
  * - interval: live replay interval in ms (streaming scenarios)
  * `open-subagent` navigates into fixture child sessions (with a back link);
  * `inspect` shows the call id in a transient note.
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, provide, ref } from 'vue'
 import ChatTimeline from '../ChatTimeline.vue'
+import { LINK_STATUS_KEY } from '../parts/linkStatus'
 import { createFixtureStore } from './fixtureStore'
 import { kernelScenario } from './kernelScenario'
 import { SCENARIO_BUILDERS, type Scenario } from './scenarios'
@@ -64,6 +65,19 @@ onBeforeUnmount(() => {
 })
 
 const scenarios = [...Object.keys(SCENARIO_BUILDERS), 'kernel']
+
+// Fixture link statuses: folders end in `/`; one deleted file is missing.
+provide(LINK_STATUS_KEY, {
+  version: ref(0),
+  status: async (href) => ({
+    state: href.includes('login-old')
+      ? 'missing'
+      : href.endsWith('/')
+        ? 'directory'
+        : 'file',
+    path: `/workspace/web/${href}`,
+  }),
+})
 </script>
 
 <template>

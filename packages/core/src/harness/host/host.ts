@@ -132,6 +132,7 @@ import { createRepeatReminder } from '../tools/repeat-reminder'
 import type { ToolServices } from '../tools/services'
 import { createSpillMiddleware } from '../tools/spill'
 import { PendingInteractions, type UiAnswers } from './interactions'
+import { installLinkGuidancePromptSection } from './link-guidance'
 import { McpToolBridge } from './mcp-tools'
 import { createSchedulerExecutor } from './scheduler'
 import { currentTurnSource } from './turn-source'
@@ -396,6 +397,7 @@ export class HarnessHost {
       ({ agent }) => agent?.session.header.cwd ?? this.chatWorkspace(),
     )
     prompt.section({ name: 'persona', order: 0, text: this.personaText() })
+    installLinkGuidancePromptSection(prompt)
     this.sandbox.install(prompt)
     this.approval.install(prompt)
     this.planMode.install(prompt, middleware)

@@ -126,6 +126,20 @@ describe('HarnessHost', () => {
     expect(host.replay(entry.id).events).toEqual(live)
   })
 
+  it('tells the model to link local files, the same text on every turn', async () => {
+    const { host, adapter } = await makeHost([{ text: 'one' }, { text: 'two' }])
+    const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
+    await host.submit({ sessionId: entry.id, content: 'a' })
+    await host.submit({ sessionId: entry.id, content: 'b' })
+    const [first, second] = adapter.requests.map((request) => request.system!)
+    expect(first).toContain('[readable name](path)')
+    expect(first).toContain('code formatting')
+    expect(first!.indexOf('[readable name](path)')).toBeGreaterThan(
+      first!.indexOf('Emperor Agent'),
+    )
+    expect(second).toBe(first)
+  })
+
   it('asks for approval on sandbox escalation and runs once when allowed', async () => {
     const { host, events } = await makeHost()
     const entry = host.kept.sessionStore.create('t', { mode: 'chat' })

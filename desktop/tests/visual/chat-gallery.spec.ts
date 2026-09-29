@@ -156,3 +156,60 @@ test('long history loads older pages at the top', async ({ page }) => {
     .toBeGreaterThan(before)
   await shot(page, 'chat-long-light')
 })
+
+// RF-04: document links in a reply — type icons, language badges, file
+// names for path labels, a missing file struck through (fixture statuses).
+for (const theme of ['light', 'dark'] as const) {
+  test(`document links (${theme})`, async ({ page }) => {
+    await open(page, 'links', theme, { width: 1000, height: 900 })
+    const link = (href: string) =>
+      page.locator(`.ds-md a.md-link-chip[href="${href}"]`)
+    const before = (href: string) =>
+      link(href).evaluate((element) => {
+        const style = getComputedStyle(element, '::before')
+        return {
+          content: style.content,
+          mask: style.maskImage || style.webkitMaskImage,
+        }
+      })
+    // A path label shows only the file name, with the language badge.
+    await expect(link('src/pages/Login.vue')).toHaveText('Login.vue')
+    expect((await before('src/pages/Login.vue')).content).toContain('VUE')
+    await expect(link('src/api/login.ts#L42')).toHaveText('login.ts:42')
+    expect((await before('src/api/login.ts#L42')).content).toContain('TS')
+    // Icons: a document, a folder, the web.
+    for (const href of [
+      'docs/login-layout.md',
+      'src/components/',
+      'https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries',
+    ])
+      expect((await before(href)).mask, href).toContain('data:image/svg+xml')
+    await expect(link('src/components/')).toHaveText('components')
+    await expect(link('src/components/')).toHaveAttribute(
+      'data-md-icon',
+      'folder',
+    )
+    // The deleted file: struck through, with the full path on hover.
+    const gone = link('src/styles/login-old.css')
+    await expect(gone).toHaveAttribute('data-md-state', 'missing')
+    await expect(gone).toHaveAttribute(
+      'title',
+      '不存在：/workspace/web/src/styles/login-old.css',
+    )
+    expect(
+      await gone.evaluate(
+        (element) => getComputedStyle(element).textDecorationLine,
+      ),
+    ).toBe('line-through')
+    // Links keep the body line height (no bordered chip).
+    const [lineHeight, border] = await link('package.json').evaluate(
+      (element) => {
+        const style = getComputedStyle(element)
+        return [style.lineHeight, style.borderTopWidth]
+      },
+    )
+    expect(lineHeight).toBe('28px')
+    expect(border).toBe('0px')
+    await shot(page, `chat-document-links-${theme}`)
+  })
+}

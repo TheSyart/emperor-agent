@@ -43,7 +43,10 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
 
 let app: App | null = null
 let container: HTMLDivElement | null = null
-let exposed: { openPath: (path: string, line?: number) => Promise<void> }
+let exposed: {
+  openPath: (path: string, line?: number) => Promise<void>
+  openDirectory: (path: string) => Promise<void>
+}
 const treeWidths: number[] = []
 
 async function flush(): Promise<void> {
@@ -183,6 +186,42 @@ describe('FilesPane', () => {
         .querySelector('.file-code-line.reference-line-active')
         ?.getAttribute('data-line'),
     ).toBe('2')
+  })
+
+  it('keeps the tree when a file opens while the tree is still loading', async () => {
+    const root = mount()
+    // No flush: the root listing is still in flight.
+    await exposed.openPath('a.ts')
+    await flush()
+    expect(tabLabels(root)).toEqual(['a.ts'])
+    expect(
+      [...root.querySelectorAll('.file-tree-row')].map((row) =>
+        row.getAttribute('data-path'),
+      ),
+    ).toEqual(['src', 'README.md', 'a.ts'])
+  })
+
+  it('openDirectory opens a folder in the tree and focuses its row', async () => {
+    const scrolled: Element[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this)
+    }
+    const root = mount()
+    await flush()
+    await exposed.openDirectory('./src/')
+    await flush()
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    const row = root.querySelector<HTMLElement>('[data-path="src"]')
+    expect(row?.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(row)
+    expect(scrolled).toEqual([row])
+    expect(core).toHaveBeenCalledWith('files.list', {
+      sessionId: 's1',
+      relativePath: 'src',
+      limit: 500,
+    })
+    // No file tab opens; the draft stays.
+    expect(tabLabels(root)).toEqual(['打开文件'])
   })
 
   it('closes the active tab on Ctrl/⌘W only while focus is inside the pane', async () => {

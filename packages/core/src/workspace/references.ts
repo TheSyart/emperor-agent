@@ -17,6 +17,8 @@ export interface ReferenceDescriptor {
   label: string
   tooltip: string
   available: boolean
+  /** The target is an existing directory (else a file, or missing). */
+  directory?: true
   relativePath?: string
   line?: number
   actions: ReferenceAction[]
@@ -172,7 +174,13 @@ export class WorkspaceReferenceService {
     const canonicalTarget = exists ? realpathSync(lexicalTarget) : lexicalTarget
     const canonicalWithin =
       lexicalWithin && within(projectRoot, canonicalTarget)
-    const fileAvailable = exists && statSync(canonicalTarget).isFile()
+    const stats = exists ? statSync(canonicalTarget) : undefined
+    const directory = stats?.isDirectory() === true
+    const available = stats?.isFile() === true || directory
+    const shape = {
+      available,
+      ...(directory ? { directory: true as const } : {}),
+    }
     const fallback = basename(target) || target
 
     if (canonicalWithin) {
@@ -182,10 +190,10 @@ export class WorkspaceReferenceService {
         kind: 'project_file',
         label: cleanLabel(input.label, fallback),
         tooltip: lexicalTarget,
-        available: fileAvailable,
+        ...shape,
         relativePath,
         ...(line ? { line } : {}),
-        actions: fileAvailable ? ['open_files'] : [],
+        actions: available ? ['open_files'] : [],
       }
       return this.store(
         input.sessionId,
@@ -205,10 +213,10 @@ export class WorkspaceReferenceService {
           kind: 'external_file',
           label: cleanLabel(input.label, fallback),
           tooltip: canonicalTarget,
-          available: fileAvailable,
-          actions: fileAvailable ? ['reveal'] : [],
+          ...shape,
+          actions: available ? ['reveal'] : [],
         },
-        fileAvailable ? canonicalTarget : undefined,
+        available ? canonicalTarget : undefined,
         `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
       )
 
@@ -226,10 +234,10 @@ export class WorkspaceReferenceService {
         kind: 'external_file',
         label: cleanLabel(input.label, fallback),
         tooltip: canonicalTarget,
-        available: fileAvailable,
-        actions: fileAvailable ? ['reveal'] : [],
+        ...shape,
+        actions: available ? ['reveal'] : [],
       },
-      fileAvailable ? canonicalTarget : undefined,
+      available ? canonicalTarget : undefined,
       `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
     )
   }
@@ -243,8 +251,13 @@ export class WorkspaceReferenceService {
   ): ReferenceDescriptor {
     const cachedId = cacheKey ? this.cache.get(cacheKey) : undefined
     const cached = cachedId ? this.references.get(cachedId) : undefined
-    if (cached)
+    if (cached) {
+      // Same binding, same id; what the target is now (a file may have been
+      // created or removed since) comes from this resolution.
+      cached.descriptor = { ...descriptor, id: cached.descriptor.id }
+      cached.canonicalPath = canonicalPath
       return { ...cached.descriptor, actions: [...cached.descriptor.actions] }
+    }
     this.references.set(descriptor.id, {
       sessionId,
       sourceMessageId,

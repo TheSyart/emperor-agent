@@ -77,6 +77,7 @@ const platform = detectShortcutPlatform()
 const paneRoot = ref<HTMLElement | null>(null)
 const tabStrip = ref<HTMLElement | null>(null)
 const previewBody = ref<HTMLElement | null>(null)
+const treeList = ref<HTMLElement | null>(null)
 const filterInput = ref<HTMLInputElement | null>(null)
 const treeByDirectory = ref<Record<string, WorkspaceFileEntry[]>>({})
 const expanded = ref(new Set<string>())
@@ -95,6 +96,12 @@ const treeVisible = ref(true)
 const activeLine = ref<number | null>(null)
 const columnWidth = ref(clampFilesTreeWidth(props.treeWidth))
 let requestGeneration = 0
+/**
+ * Directory listings belong to the tree, not to the latest request: they
+ * go stale only when the tree starts over (a new session, a reload), so
+ * opening a file while the root still loads keeps the tree.
+ */
+let treeGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const activeTab = computed(
@@ -179,6 +186,7 @@ function isDirectory(entry: WorkspaceFileEntry) {
 
 async function resetSession(): Promise<void> {
   requestGeneration += 1
+  treeGeneration += 1
   clearTimeout(searchTimer)
   treeByDirectory.value = {}
   expanded.value = new Set()
@@ -193,6 +201,7 @@ async function resetSession(): Promise<void> {
 }
 
 async function reloadTree(): Promise<void> {
+  treeGeneration += 1
   treeByDirectory.value = {}
   expanded.value = new Set()
   searchResults.value = null
@@ -202,7 +211,8 @@ async function reloadTree(): Promise<void> {
 
 async function loadDirectory(path: string): Promise<void> {
   const owner = props.sessionId
-  const generation = ++requestGeneration
+  const tree = treeGeneration
+  const current = () => props.sessionId === owner && treeGeneration === tree
   loading.value = true
   treeError.value = ''
   try {
@@ -211,7 +221,7 @@ async function loadDirectory(path: string): Promise<void> {
       relativePath: path,
       limit: 500,
     })
-    if (!isCurrent(owner, generation)) return
+    if (!current()) return
     projectRoot.value = result.projectRoot
     treeByDirectory.value = {
       ...treeByDirectory.value,
@@ -219,9 +229,9 @@ async function loadDirectory(path: string): Promise<void> {
     }
     resultsTruncated.value = Boolean(result.truncated || result.nextCursor)
   } catch (cause) {
-    if (isCurrent(owner, generation)) treeError.value = message(cause)
+    if (current()) treeError.value = message(cause)
   } finally {
-    if (isCurrent(owner, generation)) loading.value = false
+    if (current()) loading.value = false
   }
 }
 
@@ -286,6 +296,22 @@ async function openEntry(entry: WorkspaceFileEntry): Promise<void> {
   // A directory among filter results: back to the tree, opened there.
   clearQuery()
   await expandAncestors(`${entry.path}/`)
+}
+
+/** Show a directory opened in the tree, scrolled to and focused. */
+async function openDirectory(relativePath: string): Promise<void> {
+  const path = relativePath
+    .replaceAll('\\', '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/+$/, '')
+  if (query.value) clearQuery()
+  if (path) await expandAncestors(`${path}/`)
+  await nextTick()
+  const row = [
+    ...(treeList.value?.querySelectorAll<HTMLElement>('[data-path]') ?? []),
+  ].find((element) => element.dataset.path === path)
+  row?.scrollIntoView({ block: 'nearest' })
+  row?.focus({ preventScroll: true })
 }
 
 async function openPath(relativePath: string, line?: number): Promise<void> {
@@ -361,7 +387,7 @@ function handleMarkdownClick(event: MouseEvent): void {
   )
 }
 
-defineExpose({ openPath })
+defineExpose({ openPath, openDirectory })
 
 function activateTab(path: string): void {
   activePath.value = path
@@ -657,12 +683,18 @@ function message(value: unknown): string {
       <div v-if="resultsTruncated" class="files-inline-warning">
         当前列表已达到安全扫描上限。
       </div>
-      <div class="file-tree-list" role="tree" aria-label="项目文件">
+      <div
+        ref="treeList"
+        class="file-tree-list"
+        role="tree"
+        aria-label="项目文件"
+      >
         <button
           v-for="row in treeRows"
           :key="row.entry.path"
           type="button"
           class="file-tree-row"
+          :data-path="row.entry.path"
           :class="{ active: row.entry.path === activePath }"
           :style="{
             paddingLeft: `calc(var(--space-2) + ${row.level} * var(--space-3-5))`,

@@ -36,6 +36,7 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
+  provide,
   ref,
   watch,
 } from 'vue'
@@ -80,6 +81,7 @@ import {
 } from './conversationModel'
 import { TrajectoryViewAsync } from '../trajectory/lazy'
 import { previewShownTargets } from './computer-use/computerUsePreviewState'
+import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import { activeTakeover } from './takeover/takeoverModel'
 import { activeTurnTick, turnTicks } from './timelineModel'
@@ -335,6 +337,29 @@ const projectName = computed(() =>
     : '',
 )
 
+// ── document links in replies ──────────────────────────────────────────────
+/** What reply file links point at in the active session (MarkdownHtml). */
+const linkStatus = createLinkStatusSource((href) =>
+  core('references.resolve', {
+    sessionId: ctx.sessionId.value,
+    sourceMessageId: 'conversation',
+    href,
+    label: href,
+  }),
+)
+provide(LINK_STATUS_KEY, linkStatus)
+// Files come and go: check again for a new session and after each turn.
+watch(
+  () => ctx.sessionId.value,
+  () => linkStatus.refresh(),
+)
+watch(
+  () => ctx.busy.value,
+  (busy, wasBusy) => {
+    if (wasBusy && !busy) linkStatus.refresh()
+  },
+)
+
 // ── window events from commands / markdown links ─────────────────────────
 async function resolveMarkdownReference(event: Event): Promise<void> {
   const detail = (
@@ -352,7 +377,19 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       href: detail.href,
       label: detail.label || detail.href,
     })
+    linkStatus.record(detail.href, reference)
     if (!reference.available) return
+    if (
+      reference.kind === 'project_file' &&
+      reference.directory &&
+      reference.actions.includes('open_files')
+    ) {
+      requestWorkspace({
+        pane: 'files',
+        directory: reference.relativePath ?? '',
+      })
+      return
+    }
     if (
       reference.kind === 'project_file' &&
       reference.relativePath &&

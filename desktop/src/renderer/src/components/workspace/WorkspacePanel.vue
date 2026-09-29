@@ -18,8 +18,8 @@
  * - review: `focus-paths` (request.paths) and `commit-focus` (the request
  *   nonce of focus 'commit'; the pane scrolls to and focuses the commit box,
  *   then emits commitFocused and the nonce resets).
- * - files: `openPath(path, line)` on the pane instance (queued until the
- *   async chunk has mounted); `tree-width` in, `treeWidth` out (persisted as
+ * - files: `openPath(path, line)` or `openDirectory(path)` on the pane
+ *   instance (queued until the async chunk has mounted); `tree-width` in, `treeWidth` out (persisted as
  *   right_workspace.filesTreeWidth).
  * - browser: `prefill` ({ url, nonce }) only fills the address bar — a page
  *   loads on the user's submit alone; `visible` (the column is open) gates
@@ -85,8 +85,13 @@ const reviewFilterPaths = ref<string[]>([])
 const filesTreeWidth = ref(FILES_TREE_DEFAULT)
 const filesPane = ref<{
   openPath: (path: string, line?: number) => Promise<void>
+  openDirectory: (path: string) => Promise<void>
 } | null>(null)
-const pendingFile = ref<{ path: string; line?: number } | null>(null)
+const pendingFile = ref<{
+  path: string
+  line?: number
+  directory?: boolean
+} | null>(null)
 /** Address a request asked to prefill (BrowserPane never auto-loads it). */
 const browserPrefill = ref<{ url: string; nonce: number } | null>(null)
 /** Nonce of a pending review commit-box focus request (0 = none). */
@@ -156,6 +161,8 @@ function handleRequest(request: WorkspaceRequest): void {
       path: request.file.path,
       ...(request.file.line ? { line: request.file.line } : {}),
     }
+  if (request.pane === 'files' && request.directory !== undefined)
+    pendingFile.value = { path: request.directory, directory: true }
   if (request.pane === 'browser' && request.url)
     browserPrefill.value = { url: request.url, nonce: request.nonce }
   void workspace.refresh()
@@ -166,7 +173,8 @@ async function flushPendingFile(): Promise<void> {
   const request = pendingFile.value
   if (!request || !filesPane.value) return
   pendingFile.value = null
-  await filesPane.value.openPath(request.path, request.line)
+  if (request.directory) await filesPane.value.openDirectory(request.path)
+  else await filesPane.value.openPath(request.path, request.line)
 }
 
 function selectPane(target: WorkspaceContentPane): void {

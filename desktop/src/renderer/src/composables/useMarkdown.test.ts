@@ -121,6 +121,42 @@ describe('link chips', () => {
   })
 })
 
+describe('document links (E-track contract §4)', () => {
+  it('marks each link with its type icon', () => {
+    expect(render('[a](src/app.ts)')).toMatch(
+      /data-md-icon="language"[^>]*data-md-badge="TS"[^>]*data-md-tone="blue"/,
+    )
+    expect(render('[a](docs/guide.md)')).toContain('data-md-icon="document"')
+    expect(render('[a](/Users/a/data.json)')).toContain('data-md-icon="data"')
+    expect(render('[a](https://example.com)')).toContain('data-md-icon="web"')
+    expect(render('[a](file:///Users/a/r.pdf)')).toContain('data-md-icon="pdf"')
+  })
+
+  it('treats a relative path ending in / as a folder link', () => {
+    const html = render('[packages/core/](packages/core/)')
+    expect(html).toContain('data-md-link="file"')
+    expect(html).toContain('data-md-icon="folder"')
+    expect(html).toContain('>core</a>')
+  })
+
+  it('shows only the file name when the label is the path', () => {
+    expect(render('[src/app.ts](src/app.ts)')).toContain('>app.ts</a>')
+    expect(render('[src/app.ts:12](src/app.ts#L12)')).toContain(
+      '>app.ts:12</a>',
+    )
+    // A path written as code still becomes the plain file name.
+    expect(render('[`src/app.ts`](src/app.ts)')).toContain('>app.ts</a>')
+    expect(render('[设计说明](docs/design.md)')).toContain('>设计说明</a>')
+    expect(render('[input/output](docs/io.md)')).toContain('>input/output</a>')
+    // Web links keep their text.
+    expect(render('[a/b](https://example.com/a/b)')).toContain('>a/b</a>')
+  })
+
+  it('keeps the full path for the hover title', () => {
+    expect(render('[src/app.ts](src/app.ts)')).toContain('title="src/app.ts"')
+  })
+})
+
 describe('classifyMdLink', () => {
   it('classifies web, file, and non-chip links', () => {
     expect(classifyMdLink('https://a.com')).toBe('web')

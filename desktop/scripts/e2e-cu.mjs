@@ -2,8 +2,10 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|fullstack|real]
-// `real` needs EMPEROR_E2E_MODEL_CONFIG (a model_config.json to copy).
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|fullstack|real|references|references-real]
+// `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
+// model_config.json to copy). `references` runs the E-track suite (reply
+// links in a Build session); `references-real` asks a real model once.
 // In --mode=overlay, EMPEROR_E2E_PHYSICAL_OVERLAY=1 waits up to 45 seconds
 // for a real click on the visible stop button instead of clicking via JS.
 import { spawn } from 'node:child_process'
@@ -21,13 +23,24 @@ const mode =
   process.argv.find((arg) => arg.startsWith('--mode=')) ?? '--mode=smoke'
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
-// fullstack / real: the dev app (out/, run `npm run build` first) driven by
-// Playwright from plain Node; the other modes run the harness in Electron.
-const appMode = mode === '--mode=fullstack' || mode === '--mode=real'
-const entry = appMode
-  ? 'tests/electron/fullstack/run.ts'
-  : 'tests/electron/harness/main.ts'
-const bundle = appMode ? join(desktop, 'out-e2e', 'fullstack.cjs') : outfile
+// fullstack / real / references: the dev app (out/, run `npm run build`
+// first) driven by Playwright from plain Node; the other modes run the
+// harness in Electron.
+const references =
+  mode === '--mode=references' || mode === '--mode=references-real'
+const realModel = mode === '--mode=real' || mode === '--mode=references-real'
+const appMode =
+  mode === '--mode=fullstack' || mode === '--mode=real' || references
+const entry = references
+  ? 'tests/electron/references/run.ts'
+  : appMode
+    ? 'tests/electron/fullstack/run.ts'
+    : 'tests/electron/harness/main.ts'
+const bundle = references
+  ? join(desktop, 'out-e2e', 'references.cjs')
+  : appMode
+    ? join(desktop, 'out-e2e', 'fullstack.cjs')
+    : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],
@@ -45,15 +58,11 @@ const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-cu-'))
 const env = { ...process.env, EMPEROR_CONFIG_DIR: home }
 delete env.ELECTRON_RUN_AS_NODE
 const child = appMode
-  ? spawn(
-      process.execPath,
-      [bundle, ...(mode === '--mode=real' ? ['--real'] : [])],
-      {
-        cwd: desktop,
-        env,
-        stdio: ['ignore', 'pipe', 'inherit'],
-      },
-    )
+  ? spawn(process.execPath, [bundle, ...(realModel ? ['--real'] : [])], {
+      cwd: desktop,
+      env,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
   : spawn(electronBinary, [outfile, mode], {
       cwd: desktop,
       env,

@@ -1058,6 +1058,39 @@ export function longScenario(now = Date.now()): Scenario {
   }
 }
 
+/** A reply that links files of every kind (E-track contract §4). */
+export function linksScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 4 * 60_000)
+  log.user('这一轮改了哪些文件？')
+  log.turnStart(1)
+  log.stepStart(1, 1)
+  log.stream(1, 1, [
+    {
+      text: [
+        '这一轮改了这些文件：',
+        '',
+        '- [src/pages/Login.vue](src/pages/Login.vue)：表单容器改成响应式宽度',
+        '- [login.ts:42](src/api/login.ts#L42)：接口错误提示',
+        '- [布局修复说明](docs/login-layout.md) 与 [src/components/](src/components/)',
+        '- [已删除的旧样式](src/styles/login-old.css)',
+        '',
+        '同目录的其他文件：[package.json](package.json)、[logo.png](public/logo.png)、[report.pdf](docs/report.pdf)、[data.xlsx](docs/data.xlsx)、[dist.zip](dist.zip)、[Main.java](app/Main.java)、[Dockerfile.dev](Dockerfile.dev)。',
+        '',
+        '脚本与原生代码：[main.py](scripts/main.py)、[deploy.sh](scripts/deploy.sh)、[App.swift](ios/App.swift)、[server.go](cmd/server.go)、[lib.rs](core/lib.rs)、[index.html](public/index.html)、[app.css](src/app.css)、[main.js](src/main.js)。',
+        '',
+        '参考 [MDN 媒体查询](https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries)。',
+      ].join('\n'),
+    },
+  ])
+  log.stepEnd(1, 1)
+  log.turnEnd(1)
+  return {
+    id: 'links',
+    label: '文档链接',
+    sessions: [{ id: 'links', events: log.events }],
+  }
+}
+
 export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   showcase: showcaseScenario,
   notices: noticesScenario,
@@ -1069,6 +1102,7 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
     return { ...scenario, id: 'streaming-reasoning' }
   },
   long: longScenario,
+  links: linksScenario,
 }
 
 /** History page over one fixture session (cut at turn boundaries). */

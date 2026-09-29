@@ -158,6 +158,69 @@ describe('WorkspaceReferenceService', () => {
     )
   })
 
+  it('resolves directories so a link can open them in the Files tree', () => {
+    const { projectRoot, outsideRoot, service } = fixture()
+    for (const href of ['docs/', 'docs', join(projectRoot, 'docs')])
+      expect(
+        service.resolve({
+          sessionId: 'session-1',
+          sourceMessageId: 'message-1',
+          href,
+          label: 'docs',
+        }),
+        href,
+      ).toMatchObject({
+        kind: 'project_file',
+        available: true,
+        directory: true,
+        relativePath: 'docs',
+        actions: ['open_files'],
+      })
+    expect(
+      service.resolve({
+        sessionId: 'session-1',
+        sourceMessageId: 'message-1',
+        href: outsideRoot,
+        label: 'outside',
+      }),
+    ).toMatchObject({
+      kind: 'external_file',
+      available: true,
+      directory: true,
+      actions: ['reveal'],
+    })
+    expect(
+      service.resolve({
+        sessionId: 'session-1',
+        sourceMessageId: 'message-1',
+        href: 'docs/设计.md',
+        label: '设计',
+      }),
+    ).not.toHaveProperty('directory')
+  })
+
+  it('reports a missing file, and sees it once it exists', () => {
+    const { projectRoot, service } = fixture()
+    const input = {
+      sessionId: 'session-1',
+      sourceMessageId: 'message-1',
+      href: 'docs/later.md',
+      label: 'later',
+    }
+    const missing = service.resolve(input)
+    expect(missing).toMatchObject({
+      kind: 'project_file',
+      available: false,
+      relativePath: 'docs/later.md',
+      actions: [],
+    })
+    writeFileSync(join(projectRoot, 'docs', 'later.md'), 'now\n', 'utf8')
+    const found = service.resolve(input)
+    expect(found).toMatchObject({ available: true, actions: ['open_files'] })
+    expect(found.id).toBe(missing.id)
+    expect(service.authorize(found.id, 'session-1').available).toBe(true)
+  })
+
   it('caches only the same source-message and normalized target binding', () => {
     const { service } = fixture()
     const first = service.resolve({
