@@ -73,7 +73,6 @@ pnpm-debug.log*
 /docs/qa/
 /docs/plans/
 /docs/specs/
-/docs/design/
 /docs/tasks/
 /docs/migration/
 /PROJECT_AUDIT_REPORT.md

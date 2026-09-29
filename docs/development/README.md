@@ -78,6 +78,7 @@ npm --prefix desktop run package:verify
 | 侧栏与通知               | `renderer/src/components/sidebar/`、`runtime/notifications.ts`、`composables/useNotifications.ts`              |
 | 右侧工作台与环境信息卡   | `renderer/src/components/workspace/`、`components/conversation/environment/`                                   |
 | 整页（定时任务、插件等） | `renderer/src/components/pages/`（`PageShell.vue`、`pageLifecycle.ts`）                                        |
+| 受管插件 Logo            | `assets/generated/plugin-logos/`；材质、透明边界与包内引用见[插件 Logo 设计规范](../design/plugin-logos.md)    |
 | 内置浏览器               | `desktop/src/main/browser-view.ts`、`browser-view-policy.ts`、`desktop-capability-ipc.ts`                      |
 | 设置弹窗                 | `desktop/src/renderer/src/components/settings/`（分区、`ui/` 原语、`settingsHeader.ts`）                       |
 

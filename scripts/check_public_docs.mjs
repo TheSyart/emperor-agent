@@ -16,6 +16,7 @@ const allowedPrefixes = [
   'docs/architecture/',
   'docs/development/',
   'docs/release/',
+  'docs/design/',
 ]
 
 const trackedDocs = execFileSync('git', ['ls-files', '-z', '--', 'docs'], {

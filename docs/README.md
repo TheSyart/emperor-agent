@@ -2,10 +2,10 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-09-29<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
-这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南和发布流程。
+这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、设计规范和发布流程。
 
 ## 我想做什么
 
@@ -23,6 +23,7 @@
 | 排查启动、模型、数据或打包问题           | [诊断与排障](user/diagnostics-troubleshooting.md)            |
 | 了解系统为什么这样设计                   | [架构总览](architecture/overview.md)                         |
 | 修改或扩展项目                           | [开发指南](development/README.md)                            |
+| 查看品牌、主题与插件 Logo 等设计规范     | [设计规范](design/README.md)                                 |
 | 通过 ACP stdio 运行 Headless Core        | [Headless ACP operator preview](development/headless-acp.md) |
 | 构建公开 Preview                         | [Preview 发布手册](release/preview-release-runbook.md)       |
 
@@ -53,6 +54,11 @@
 - [开发指南](development/README.md)
 - [扩展 Emperor Agent](development/extending-emperor.md)
 - [Headless ACP operator preview](development/headless-acp.md)
+
+### 设计规范
+
+- [设计规范首页](design/README.md)
+- [插件 Logo 设计规范](design/plugin-logos.md)
 
 ### 发布与安全
 
