@@ -14,6 +14,9 @@ import {
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
+  BROWSER_HISTORY_CHANNEL,
+  BROWSER_HISTORY_OPEN_CHANNEL,
+  BROWSER_CLEAR_DATA_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
@@ -35,6 +38,15 @@ function fakeBrowser() {
     setBounds: vi.fn(),
     action: vi.fn(),
     close: vi.fn(),
+    history: vi.fn(async () => [
+      { id: 'h2', url: 'https://example.com/b', title: 'B', time: 2 },
+      { id: 'h1', url: 'https://example.com/a', title: 'A', time: 1 },
+    ]),
+    openHistory: vi.fn(async (id: string) => ({
+      ok: true as const,
+      url: `https://example.com/${id}`,
+    })),
+    clearData: vi.fn(async () => ({ ok: true as const })),
   }
 }
 
@@ -349,6 +361,58 @@ describe('desktop capability IPC', () => {
     expect(authorize).toHaveBeenCalledTimes(12)
   })
 
+  it('serves the temporary history, reopens entries by id and clears the data', async () => {
+    const ipc = new FakeIpcMain()
+    const browser = fakeBrowser()
+    const authorize = vi.fn()
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser,
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+    })
+    await expect(ipc.invoke(BROWSER_HISTORY_CHANNEL)).resolves.toEqual(
+      await browser.history(),
+    )
+    await expect(
+      ipc.invoke(BROWSER_HISTORY_OPEN_CHANNEL, 'h1'),
+    ).resolves.toEqual({ ok: true, url: 'https://example.com/h1' })
+    expect(browser.openHistory).toHaveBeenLastCalledWith('h1')
+    // Only an id travels; anything else never reaches the view.
+    for (const payload of [{ url: 'https://evil.test/' }, 42, 'h'.repeat(80)])
+      await expect(
+        ipc.invoke(BROWSER_HISTORY_OPEN_CHANNEL, payload),
+      ).resolves.toEqual({ ok: false, error: '这条记录已不存在' })
+    expect(browser.openHistory).toHaveBeenCalledTimes(1)
+    browser.openHistory.mockRejectedValueOnce(
+      new Error('browser data is being cleared'),
+    )
+    await expect(
+      ipc.invoke(BROWSER_HISTORY_OPEN_CHANNEL, 'h2'),
+    ).resolves.toEqual({ ok: false, error: '正在清空临时浏览数据' })
+    browser.openHistory.mockRejectedValueOnce(
+      new Error('unknown history entry'),
+    )
+    await expect(
+      ipc.invoke(BROWSER_HISTORY_OPEN_CHANNEL, 'h9'),
+    ).resolves.toEqual({ ok: false, error: '这条记录已不存在' })
+    // Clearing takes no argument: the partition is fixed in main.
+    await expect(
+      ipc.invoke(BROWSER_CLEAR_DATA_CHANNEL, { partition: 'persist:agent' }),
+    ).resolves.toEqual({ ok: true })
+    expect(browser.clearData).toHaveBeenCalledWith()
+    browser.clearData.mockRejectedValueOnce(new Error('host gone'))
+    await expect(ipc.invoke(BROWSER_CLEAR_DATA_CHANNEL)).resolves.toEqual({
+      ok: false,
+      error: '内置浏览器暂不可用',
+    })
+    browser.history.mockRejectedValueOnce(new Error('host gone'))
+    await expect(ipc.invoke(BROWSER_HISTORY_CHANNEL)).resolves.toEqual([])
+    expect(authorize).toHaveBeenCalledTimes(10)
+  })
+
   it('refuses browser requests from untrusted callers before touching the view', async () => {
     const ipc = new FakeIpcMain()
     const browser = fakeBrowser()
@@ -366,6 +430,15 @@ describe('desktop capability IPC', () => {
     await expect(
       ipc.invoke(BROWSER_OPEN_CHANNEL, { url: 'https://example.com/' }),
     ).rejects.toThrow(/not trusted/)
+    for (const channel of [
+      BROWSER_HISTORY_CHANNEL,
+      BROWSER_HISTORY_OPEN_CHANNEL,
+      BROWSER_CLEAR_DATA_CHANNEL,
+    ])
+      await expect(ipc.invoke(channel, 'h1')).rejects.toThrow(/not trusted/)
+    expect(browser.history).not.toHaveBeenCalled()
+    expect(browser.openHistory).not.toHaveBeenCalled()
+    expect(browser.clearData).not.toHaveBeenCalled()
     // One-way messages are dropped quietly: nothing reaches the view and
     // nothing is thrown into the main process.
     expect(() =>

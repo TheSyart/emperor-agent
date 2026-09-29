@@ -17,6 +17,8 @@ const bridge = {
   browserBounds: vi.fn(),
   browserAction: vi.fn(),
   browserClose: vi.fn(),
+  browserHistory: vi.fn(),
+  openBrowserHistory: vi.fn(),
   openExternal: vi.fn(),
   onBrowserState: vi.fn(),
   invokeCore: vi.fn(),
@@ -300,6 +302,71 @@ describe('BrowserPane', () => {
     await expectBounds(null)
     visible.value = true
     await expectBounds(rect)
+  })
+
+  it('lists the temporary history and reopens a page by its id', async () => {
+    bridge.browserHistory.mockResolvedValue([
+      { id: 'h2', url: 'https://example.com/docs', title: 'Docs', time: 2 },
+      { id: 'h1', url: 'http://localhost:5173/', title: '', time: 1 },
+    ])
+    bridge.openBrowserHistory.mockResolvedValueOnce({
+      ok: true,
+      url: 'https://example.com/docs',
+    })
+    const root = mount()
+    await flush()
+    button(root, '临时历史').click()
+    await flush()
+    const menu = document.body.querySelector('[role="menu"]')!
+    const items = [...menu.querySelectorAll('[role="menuitem"]')]
+    expect(
+      items.map((item) => item.textContent?.replace(/\s+/g, ' ').trim()),
+    ).toEqual([
+      expect.stringContaining('Docs'),
+      expect.stringContaining('localhost:5173'),
+    ])
+    ;(items[0] as HTMLElement).click()
+    await flush()
+    expect(bridge.openBrowserHistory).toHaveBeenCalledWith('h2')
+    // Only the id travels; the address bar path is not used.
+    expect(bridge.openBrowserUrl).not.toHaveBeenCalled()
+  })
+
+  it('says when a history page cannot open, and when there is none', async () => {
+    bridge.browserHistory.mockResolvedValueOnce([
+      { id: 'h1', url: 'https://example.com/', title: 'Example', time: 1 },
+    ])
+    bridge.openBrowserHistory.mockResolvedValueOnce({
+      ok: false,
+      error: '这条记录已不存在',
+    })
+    const root = mount()
+    await flush()
+    button(root, '临时历史').click()
+    await flush()
+    ;(document.body.querySelector('[role="menuitem"]') as HTMLElement).click()
+    await flush()
+    expect(root.querySelector('.browser-input-error')?.textContent).toContain(
+      '这条记录已不存在',
+    )
+    bridge.browserHistory.mockResolvedValueOnce([])
+    button(root, '临时历史').click()
+    await flush()
+    expect(document.body.querySelector('[role="menu"]')?.textContent).toContain(
+      '还没有浏览记录',
+    )
+  })
+
+  it('has no history button while temporary history is off', async () => {
+    preferences = {
+      enabled: true,
+      linkTarget: 'system',
+      showFullUrl: true,
+      history: false,
+    }
+    const root = mount()
+    await flush()
+    expect(button(root, '临时历史')).toBeNull()
   })
 
   it('closes the view when it unmounts', async () => {

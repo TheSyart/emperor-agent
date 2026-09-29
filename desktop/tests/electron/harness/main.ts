@@ -8,6 +8,8 @@
  *   --mode=contract  driver contract cases against the embedded driver
  *   --mode=extra     iframes, overlays, dialogs, crashes, debugger loss,
  *                    profile isolation, restart recovery
+ *   --mode=userbrowser  the user's built-in browser: temporary history and
+ *                    clearing its data without touching Agent profiles
  *
  * `--mode=restart_phase` is internal: one launch of the M2.7 restart case
  * (restart.ts), spawned by the extra suite.
@@ -19,6 +21,7 @@ import { runContract } from './contract'
 import { runExtra } from './extra'
 import { runOverlay } from './overlay'
 import { runRestartPhase } from './restart'
+import { runUserBrowser } from './user-browser'
 
 export interface E2eResult {
   readonly suite: string
@@ -106,6 +109,7 @@ if (mode === 'restart_phase') {
       if (mode === 'contract') await runContract(report)
       else if (mode === 'extra') await runExtra(report)
       else if (mode === 'overlay') await runOverlay(report)
+      else if (mode === 'userbrowser') await runUserBrowser(report)
       else await smoke()
     })
     .catch((error: unknown) => {

@@ -725,7 +725,11 @@ function createWindow(): void {
   })
   pointerOverlay ??= new PointerOverlay()
   syncControlOverlay()
-  browserViewHost = new BrowserViewHost(mainWindow)
+  browserViewHost = new BrowserViewHost(mainWindow, Date.now, {
+    // 设置 › 浏览器 › 临时历史; unknown (Core not ready) counts as on.
+    historyEnabled: async () =>
+      (await coreApi?.browser.preferences().catch(() => null))?.history ?? true,
+  })
   // A reloaded or crashed renderer lost the BrowserPane that placed the native
   // view; drop it so it cannot linger above the new UI.
   // 00 §12: while the UI is gone nobody can watch the Agent, so its targets
@@ -1015,6 +1019,9 @@ async function startup(): Promise<void> {
         setBounds: (bounds) => browserViewHost?.setBounds(bounds),
         action: (action) => browserViewHost?.action(action),
         close: () => browserViewHost?.close(),
+        history: async () => (await browserViewHost?.history()) ?? [],
+        openHistory: (id) => requireBrowserViewHost().openHistory(id),
+        clearData: () => requireBrowserViewHost().clearData(),
       },
       references: {
         revealPath: (input) => {

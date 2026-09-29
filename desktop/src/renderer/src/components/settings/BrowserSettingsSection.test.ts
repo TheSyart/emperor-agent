@@ -109,6 +109,58 @@ describe('BrowserSettingsSection', () => {
     expect(control(root, 'browser-full-url').disabled).toBe(true)
   })
 
+  it('turns the temporary history off and on', async () => {
+    const root = mount()
+    await settle()
+    const history = control(root, 'browser-history')
+    expect(history.getAttribute('aria-checked')).toBe('true')
+    history.click()
+    await settle()
+    expect(calls).toContainEqual(['browser.setPreferences', { history: false }])
+    expect(control(root, 'browser-history').getAttribute('aria-checked')).toBe(
+      'false',
+    )
+    control(root, 'browser-enabled').click()
+    await settle()
+    expect(control(root, 'browser-history').disabled).toBe(true)
+  })
+
+  it('clears the temporary browsing data on request and says how it went', async () => {
+    let finish: (value: unknown) => void = () => undefined
+    const clear = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finish = resolve)),
+      )
+      .mockResolvedValueOnce({ ok: false, error: 'disk busy' })
+    ;(
+      window as unknown as { emperor: Record<string, unknown> }
+    ).emperor.clearBrowserData = clear
+    const root = mount()
+    await settle()
+    const button = () =>
+      root.querySelector<HTMLButtonElement>(
+        '[data-action="clear-browser-data"]',
+      )!
+    button().click()
+    await settle()
+    expect(button().disabled).toBe(true)
+    expect(button().textContent?.trim()).toBe('正在清空…')
+    // Pressed again meanwhile: nothing more is asked of main.
+    button().click()
+    finish({ ok: true })
+    await settle()
+    expect(clear).toHaveBeenCalledTimes(1)
+    expect(root.querySelector('[data-clear-status]')?.textContent).toContain(
+      '已清空',
+    )
+    button().click()
+    await settle()
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      'disk busy',
+    )
+  })
+
   it('follows a change another window made', async () => {
     const root = mount()
     await settle()

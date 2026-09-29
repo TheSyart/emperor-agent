@@ -17,6 +17,10 @@
  * (设置 › 浏览器) and the state push shows it. With 地址栏显示完整网址 off
  * the bar shows only the site until the user edits it.
  *
+ * 临时历史 (设置 › 浏览器, main's temporary history): the pages committed in
+ * this browser session, newest first. Picking one sends only its id; main
+ * checks the stored address again before loading it.
+ *
  * WorkspacePanel keys the pane by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
  *
@@ -39,25 +43,39 @@ import {
   Bot,
   ExternalLink,
   Globe,
+  History,
   LockKeyhole,
   RotateCw,
   TriangleAlert,
   X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import {
   browserAction,
   closeBrowserView,
+  fetchBrowserHistory,
   hasCoreBridge,
   invokeCore,
   onBrowserState,
   onCoreEvent,
+  openBrowserHistoryEntry,
   openBrowserUrl,
   openExternal,
+  type BrowserHistoryEntry,
   type BrowserViewAction,
 } from '../../api/backend'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import IconButton from '../ui/IconButton.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
 import AgentTabView from './AgentTabView.vue'
 import { agentTabsFor, type AgentTabControlAction } from './agentTabsModel'
 import {
@@ -275,6 +293,44 @@ watch(
   { immediate: true },
 )
 
+// ── 临时历史 ─────────────────────────────────────────────────────────────
+const historyShown = computed(
+  () => preferences.value.enabled && preferences.value.history,
+)
+const historyAnchor = ref<HTMLElement | null>(null)
+const historyOpen = ref(false)
+const historyEntries = shallowRef<BrowserHistoryEntry[]>([])
+
+async function toggleHistory(): Promise<void> {
+  if (historyOpen.value) {
+    historyOpen.value = false
+    return
+  }
+  historyEntries.value = await fetchBrowserHistory()
+  historyOpen.value = true
+}
+
+async function openHistoryEntry(entry: BrowserHistoryEntry): Promise<void> {
+  historyOpen.value = false
+  inputError.value = ''
+  const result = await openBrowserHistoryEntry(entry.id)
+  if (!result.ok) inputError.value = result.error ?? '无法打开这条记录'
+}
+
+function historySite(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+function historyTime(time: number): string {
+  const date = new Date(time)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 async function submitAddress(): Promise<void> {
   const input = address.value.trim()
   if (!input || submitting.value) return
@@ -414,6 +470,16 @@ function hostOf(url: string): string {
         <X v-if="state?.loading" :size="15" />
         <RotateCw v-else :size="14" />
       </IconButton>
+      <span v-if="historyShown" ref="historyAnchor" class="history-anchor">
+        <IconButton
+          label="临时历史"
+          aria-haspopup="menu"
+          :aria-expanded="historyOpen"
+          @click="toggleHistory"
+        >
+          <History :size="14" />
+        </IconButton>
+      </span>
       <form
         class="browser-address"
         role="search"
@@ -456,6 +522,27 @@ function hostOf(url: string): string {
         role="progressbar"
         aria-label="正在加载"
       ></div>
+      <Menu
+        v-model:open="historyOpen"
+        :anchor="historyAnchor"
+        placement="bottom"
+        :width="300"
+        dense
+        label="临时历史"
+      >
+        <MenuItem variant="label">临时历史 · 关闭浏览器后清空</MenuItem>
+        <MenuItem v-if="!historyEntries.length" disabled
+          >还没有浏览记录</MenuItem
+        >
+        <MenuItem
+          v-for="entry in historyEntries"
+          :key="entry.id"
+          :description="`${historySite(entry.url)} · ${historyTime(entry.time)}`"
+          @select="openHistoryEntry(entry)"
+        >
+          {{ entry.title || historySite(entry.url) }}
+        </MenuItem>
+      </Menu>
     </header>
     <p
       v-if="inputError && !selectedAgentTab"
@@ -578,6 +665,10 @@ function hostOf(url: string): string {
 .browser-agent-tab {
   min-height: 0;
   flex: 1;
+}
+
+.history-anchor {
+  display: inline-flex;
 }
 
 .browser-toolbar {

@@ -14,6 +14,9 @@ import {
   BROWSER_PAIRING_STATUS_CHANNEL,
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
+  BROWSER_HISTORY_CHANNEL,
+  BROWSER_HISTORY_OPEN_CHANNEL,
+  BROWSER_CLEAR_DATA_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
@@ -105,6 +108,13 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     browserAction: (action: BrowserViewAction) =>
       ipcRenderer.send(BROWSER_ACTION_CHANNEL, action),
     browserClose: () => ipcRenderer.send(BROWSER_CLOSE_CHANNEL),
+    /** The built-in browser's temporary history, newest first. */
+    browserHistory: () => ipcRenderer.invoke(BROWSER_HISTORY_CHANNEL),
+    /** Reopen a history entry by id; main checks its address again. */
+    openBrowserHistory: (id: string) =>
+      ipcRenderer.invoke(BROWSER_HISTORY_OPEN_CHANNEL, id),
+    /** Clear the built-in browser's data (its own partition only). */
+    clearBrowserData: () => ipcRenderer.invoke(BROWSER_CLEAR_DATA_CHANNEL),
     onBrowserState: (listener: (state: BrowserViewState) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>
         listener(payload as BrowserViewState)

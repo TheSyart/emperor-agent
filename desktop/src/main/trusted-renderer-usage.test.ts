@@ -185,7 +185,11 @@ async function submitAddress(
     expect(host).toContain("BROWSER_PARTITION = 'emperor-browser'")
     expect(host).not.toMatch(/['"`]persist:/)
     expect(host).not.toMatch(/\bpreload\s*:/)
-    expect(source).toContain('new BrowserViewHost(mainWindow)')
+    expect(source).toMatch(/new BrowserViewHost\(mainWindow[,)]/)
     expect(source).not.toMatch(/new WebContentsView\(/)
+    // Clearing its data reaches no other partition (the Agent's profiles).
+    expect(host.match(/fromPartition\(([^)]*)\)/g)).toEqual([
+      'fromPartition(BROWSER_PARTITION)',
+    ])
   })
 })

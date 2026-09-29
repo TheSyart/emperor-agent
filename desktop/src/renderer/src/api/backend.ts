@@ -115,6 +115,9 @@ interface EmperorBridge {
   browserBounds?: (bounds: BrowserViewBounds | null) => void
   browserAction?: (action: BrowserViewAction) => void
   browserClose?: () => void
+  browserHistory?: () => Promise<unknown>
+  openBrowserHistory?: (id: string) => Promise<unknown>
+  clearBrowserData?: () => Promise<unknown>
   onBrowserState?: (listener: (state: BrowserViewState) => void) => () => void
   agentPreviewStart?: (targetId: string) => Promise<unknown>
   agentPreviewStop?: (targetId: string) => void
@@ -518,6 +521,89 @@ export function onBrowserState(
   listener: (state: BrowserViewState) => void,
 ): () => void {
   return bridge()?.onBrowserState?.(listener) ?? (() => {})
+}
+
+/** One page of the built-in browser's temporary history. */
+export interface BrowserHistoryEntry {
+  id: string
+  url: string
+  title: string
+  time: number
+}
+
+/** The temporary history, newest first (empty without a bridge or when off). */
+export async function fetchBrowserHistory(): Promise<BrowserHistoryEntry[]> {
+  const read = bridge()?.browserHistory
+  if (typeof read !== 'function') return []
+  let result: unknown
+  try {
+    result = await read()
+  } catch {
+    return []
+  }
+  if (!Array.isArray(result)) return []
+  return result.flatMap((item) => {
+    const entry = item as Partial<BrowserHistoryEntry> | null
+    return entry &&
+      typeof entry.id === 'string' &&
+      typeof entry.url === 'string' &&
+      typeof entry.title === 'string' &&
+      typeof entry.time === 'number'
+      ? [
+          {
+            id: entry.id,
+            url: entry.url,
+            title: entry.title,
+            time: entry.time,
+          },
+        ]
+      : []
+  })
+}
+
+/** Reopen a history entry: only its id goes to main, which checks it again. */
+export async function openBrowserHistoryEntry(
+  id: string,
+): Promise<BrowserOpenResult> {
+  return await okOrError(bridge()?.openBrowserHistory, [id], (record) =>
+    typeof record.url === 'string' ? { ok: true, url: record.url } : null,
+  )
+}
+
+/** Clear the built-in browser's data; resolves once main finished. */
+export async function clearBrowserData(): Promise<BrowserOpenResult> {
+  return await okOrError(bridge()?.clearBrowserData, [], () => ({ ok: true }))
+}
+
+async function okOrError(
+  call: ((...args: string[]) => Promise<unknown>) | undefined,
+  args: string[],
+  success: (record: Record<string, unknown>) => BrowserOpenResult | null,
+): Promise<BrowserOpenResult> {
+  if (typeof call !== 'function')
+    return { ok: false, error: CORE_BRIDGE_UNAVAILABLE_MESSAGE }
+  let result: unknown
+  try {
+    result = await call(...args)
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : BROWSER_OPEN_FAILED,
+    }
+  }
+  const record =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {}
+  const done = record.ok === true ? success(record) : null
+  if (done) return done
+  return {
+    ok: false,
+    error:
+      typeof record.error === 'string' && record.error
+        ? record.error
+        : BROWSER_OPEN_FAILED,
+  }
 }
 
 export async function macHelperStatus(): Promise<MacHelperStatus> {

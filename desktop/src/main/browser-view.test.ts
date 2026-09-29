@@ -28,6 +28,7 @@ const electron = vi.hoisted(() => {
     setDevicePermissionHandler = vi.fn()
     clearStorageData = vi.fn(async () => undefined)
     clearCache = vi.fn(async () => undefined)
+    clearAuthCache = vi.fn(async () => undefined)
   }
 
   class FakeWebContents extends FakeEmitter {
@@ -78,6 +79,14 @@ const electron = vi.hoisted(() => {
 
   const sessions = new Map<string, FakeSession>()
   const views: FakeWebContentsView[] = []
+  const sessionFor = (partition: string): FakeSession => {
+    let found = sessions.get(partition)
+    if (!found) {
+      found = new FakeSession()
+      sessions.set(partition, found)
+    }
+    return found
+  }
 
   class FakeWebContentsView {
     readonly webContents: FakeWebContents
@@ -90,13 +99,9 @@ const electron = vi.hoisted(() => {
         any
       >,
     ) {
-      const partition = options.webPreferences.partition
-      let session = sessions.get(partition)
-      if (!session) {
-        session = new FakeSession()
-        sessions.set(partition, session)
-      }
-      this.webContents = new FakeWebContents(session)
+      this.webContents = new FakeWebContents(
+        sessionFor(options.webPreferences.partition),
+      )
       views.push(this)
     }
   }
@@ -107,11 +112,15 @@ const electron = vi.hoisted(() => {
     sessions,
     views,
     shell: { openExternal: vi.fn(async () => undefined) },
+    session: {
+      fromPartition: vi.fn((partition: string) => sessionFor(partition)),
+    },
   }
 })
 
 vi.mock('electron', () => ({
   shell: electron.shell,
+  session: electron.session,
   WebContentsView: electron.FakeWebContentsView,
 }))
 
@@ -137,9 +146,16 @@ function fakeWindow() {
   return window
 }
 
-function setup(now: () => number = () => 0) {
+function setup(
+  now: () => number = () => 0,
+  options: { historyEnabled?: () => boolean | Promise<boolean> } = {},
+) {
   const window = fakeWindow()
-  const host = new BrowserViewHost(window as unknown as BrowserWindow, now)
+  const host = new BrowserViewHost(
+    window as unknown as BrowserWindow,
+    now,
+    options,
+  )
   return { window, host }
 }
 
@@ -156,6 +172,7 @@ beforeEach(() => {
   electron.sessions.clear()
   electron.views.length = 0
   electron.shell.openExternal.mockClear()
+  electron.session.fromPartition.mockClear()
 })
 
 describe('browser view webPreferences', () => {
@@ -527,5 +544,152 @@ describe('BrowserViewHost', () => {
       /closed/,
     )
     expect(electron.views).toHaveLength(0)
+  })
+})
+
+describe('BrowserViewHost temporary history', () => {
+  async function browse(host: BrowserViewHost) {
+    await host.openUrl({ url: 'https://example.com/' })
+    const contents = onlyView().webContents
+    const visit = (url: string, title = '', channel = 'did-navigate') => {
+      contents.url = url
+      contents.title = title
+      contents.emit(channel, {}, url, true)
+    }
+    return { contents, visit }
+  }
+
+  it('keeps the pages committed in this session, newest first', async () => {
+    const { host } = setup(() => 5)
+    const { contents, visit } = await browse(host)
+    visit('https://example.com/', 'Example')
+    visit('https://example.com/docs')
+    contents.title = 'Docs'
+    contents.emit('page-title-updated', {}, 'Docs')
+    // A sub-frame's in-page navigation is not the page's.
+    contents.url = 'https://example.com/docs#frame'
+    contents.emit('did-navigate-in-page', {}, contents.url, false)
+    visit('https://example.com/docs#part', 'Docs', 'did-navigate-in-page')
+    await expect(host.history()).resolves.toEqual([
+      {
+        id: 'h3',
+        url: 'https://example.com/docs#part',
+        title: 'Docs',
+        time: 5,
+      },
+      { id: 'h2', url: 'https://example.com/docs', title: 'Docs', time: 5 },
+      { id: 'h1', url: 'https://example.com/', title: 'Example', time: 5 },
+    ])
+  })
+
+  it('records nothing while temporary history is off, and forgets on turning it off', async () => {
+    let enabled = true
+    const { host } = setup(() => 0, { historyEnabled: async () => enabled })
+    const { visit } = await browse(host)
+    visit('https://example.com/', 'Example')
+    await Promise.resolve()
+    enabled = false
+    await expect(host.history()).resolves.toEqual([])
+    visit('https://example.com/other', 'Other')
+    enabled = true
+    await Promise.resolve()
+    await expect(host.history()).resolves.toEqual([])
+  })
+
+  it('reopens an entry by its id, checking the address again', async () => {
+    const { host } = setup()
+    const { contents, visit } = await browse(host)
+    visit('https://example.com/a', 'A')
+    visit('https://example.com/b', 'B')
+    await expect(host.openHistory('h1')).resolves.toEqual({
+      ok: true,
+      url: 'https://example.com/a',
+    })
+    expect(contents.loadURL).toHaveBeenLastCalledWith('https://example.com/a')
+    await expect(host.openHistory('h404')).rejects.toThrow(/history/)
+  })
+
+  it('empties when the view closes', async () => {
+    const { host } = setup()
+    const { visit } = await browse(host)
+    visit('https://example.com/', 'Example')
+    host.close()
+    await expect(host.history()).resolves.toEqual([])
+  })
+})
+
+describe('BrowserViewHost clearing browsing data', () => {
+  it('closes the view, wipes only its partition and says when it is done', async () => {
+    const { window, host } = setup()
+    await host.openUrl({ url: 'https://example.com/' })
+    const view = onlyView()
+    const session = view.webContents.session!
+    const states: string[] = []
+    host.onClearState((state) => states.push(state))
+    await expect(host.clearData()).resolves.toEqual({ ok: true })
+    expect(view.webContents.stop).toHaveBeenCalled()
+    expect(view.webContents.close).toHaveBeenCalled()
+    expect(window.contentView.removeChildView).toHaveBeenCalledWith(view)
+    expect(session.clearStorageData).toHaveBeenCalled()
+    expect(session.clearCache).toHaveBeenCalled()
+    expect(session.clearAuthCache).toHaveBeenCalled()
+    expect(states).toEqual(['closing', 'clearing', 'idle'])
+    expect(host.clearState).toBe('idle')
+    for (const [partition] of electron.session.fromPartition.mock.calls)
+      expect(partition).toBe(BROWSER_PARTITION)
+    expect([...electron.sessions.keys()]).toEqual([BROWSER_PARTITION])
+  })
+
+  it('clears the partition even when no page was opened', async () => {
+    const { host } = setup()
+    await expect(host.clearData()).resolves.toEqual({ ok: true })
+    expect(electron.session.fromPartition).toHaveBeenCalledWith(
+      BROWSER_PARTITION,
+    )
+    expect(
+      electron.sessions.get(BROWSER_PARTITION)!.clearStorageData,
+    ).toHaveBeenCalled()
+  })
+
+  it('refuses new pages and a second clearing while it clears', async () => {
+    const { host } = setup()
+    await host.openUrl({ url: 'https://example.com/' })
+    const session = onlyView().webContents.session!
+    let finish = () => {}
+    session.clearStorageData.mockImplementationOnce(
+      () =>
+        new Promise<undefined>(
+          (resolve) => (finish = () => resolve(undefined)),
+        ),
+    )
+    const first = host.clearData()
+    const second = host.clearData()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(host.clearState).toBe('clearing')
+    await expect(
+      host.openUrl({ url: 'https://example.com/again' }),
+    ).rejects.toThrow(/clear/)
+    await expect(host.openHistory('h1')).rejects.toThrow(/clear/)
+    finish()
+    await expect(first).resolves.toEqual({ ok: true })
+    await expect(second).resolves.toEqual({ ok: true })
+    expect(session.clearStorageData).toHaveBeenCalledTimes(1)
+    await expect(
+      host.openUrl({ url: 'https://example.com/again' }),
+    ).resolves.toMatchObject({ ok: true })
+  })
+
+  it('reports a wipe that failed, and can try again', async () => {
+    const { host } = setup()
+    const session = electron.session.fromPartition(BROWSER_PARTITION)
+    session.clearCache.mockRejectedValueOnce(new Error('disk busy'))
+    await expect(host.clearData()).resolves.toEqual({
+      ok: false,
+      error: expect.stringContaining('disk busy'),
+    })
+    expect(host.clearState).toBe('failed')
+    await expect(host.clearData()).resolves.toEqual({ ok: true })
+    expect(host.clearState).toBe('idle')
   })
 })

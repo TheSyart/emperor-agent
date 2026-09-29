@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|fullstack|real]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real]
 // `real` needs EMPEROR_E2E_MODEL_CONFIG (a model_config.json to copy).
 // In --mode=overlay, EMPEROR_E2E_PHYSICAL_OVERLAY=1 waits up to 45 seconds
 // for a real click on the visible stop button instead of clicking via JS.

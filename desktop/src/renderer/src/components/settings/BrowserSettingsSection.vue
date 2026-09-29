@@ -2,8 +2,11 @@
 /**
  * Settings › 浏览器 — the user's own built-in browser (the workspace 浏览器
  * pane), not the one the Agent drives (电脑操作): whether the pane is
- * available, where a web link clicked in Emperor opens, and the address
- * bar. Its pages are temporary: the session is wiped when the pane closes.
+ * available, where a web link clicked in Emperor opens, the address bar,
+ * the temporary history, and clearing its data. Its pages are temporary:
+ * the session is wiped when the pane closes; 清空 does it on demand and
+ * reports once main has finished (it clears this browser's partition only,
+ * never the Agent's profiles).
  * Addresses of this machine never go to the system browser (main,
  * link-routing.ts), so they open here or not at all.
  *
@@ -12,8 +15,10 @@
  */
 import type { BrowserPreferences } from '@emperor/core/runtime-contract'
 import { ref } from 'vue'
+import { clearBrowserData } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
+import Button from '../ui/Button.vue'
 import {
   Select,
   SettingsRow,
@@ -39,6 +44,22 @@ const LINK_TARGETS: readonly SelectOption<BrowserPreferences['linkTarget']>[] =
       description: '在右侧工作台打开，关闭后不保留登录和浏览数据',
     },
   ]
+
+/** 清空临时浏览数据: idle, running, or how the last run went. */
+const clearing = ref<'idle' | 'running' | 'done' | 'failed'>('idle')
+const clearError = ref('')
+
+async function clearData(): Promise<void> {
+  if (clearing.value === 'running') return
+  clearing.value = 'running'
+  clearError.value = ''
+  const result = await clearBrowserData()
+  if (result.ok) clearing.value = 'done'
+  else {
+    clearing.value = 'failed'
+    clearError.value = result.error ?? '清空失败'
+  }
+}
 
 function save(change: Partial<BrowserPreferences>): void {
   if (saving.value) return
@@ -96,5 +117,64 @@ function save(change: Partial<BrowserPreferences>): void {
         @update:model-value="(value: boolean) => save({ showFullUrl: value })"
       />
     </SettingsRow>
+    <SettingsRow
+      title="临时历史"
+      description="记录本次在内置浏览器中打开过的网页，可从浏览器面板的历史中再次打开。只保存在内存里，关闭浏览器或退出应用即清空。"
+      label-for="browser-history"
+    >
+      <Switch
+        id="browser-history"
+        :model-value="preferences.history"
+        :disabled="saving || !preferences.enabled"
+        @update:model-value="(value: boolean) => save({ history: value })"
+      />
+    </SettingsRow>
+    <SettingsRow
+      title="清空临时浏览数据"
+      description="关闭当前网页，清除内置浏览器的 Cookie、网站数据、缓存、登录凭据和临时历史。Agent 操作网页用的浏览器不受影响。"
+    >
+      <div class="clear-control">
+        <span
+          v-if="clearing === 'done'"
+          class="clear-status"
+          data-clear-status
+          role="status"
+          >已清空</span
+        >
+        <span
+          v-else-if="clearing === 'failed'"
+          class="clear-status failed"
+          data-clear-status
+          role="alert"
+          >清空失败：{{ clearError }}</span
+        >
+        <Button
+          variant="outline"
+          size="sm"
+          data-action="clear-browser-data"
+          :disabled="clearing === 'running'"
+          @click="clearData"
+        >
+          {{ clearing === 'running' ? '正在清空…' : '清空' }}
+        </Button>
+      </div>
+    </SettingsRow>
   </SettingsSection>
 </template>
+
+<style scoped>
+.clear-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.clear-status {
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xs);
+}
+
+.clear-status.failed {
+  color: rgb(var(--danger));
+}
+</style>
