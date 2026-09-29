@@ -2,17 +2,22 @@
 /**
  * EnvironmentCard — 环境信息, the chat-tab card floating at the top right of
  * the conversation (async chunk; ConversationView seats it while
- * `frame.envCardOpen` on an active chat).
+ * `frameActions.envCardVisible` on an active chat: beside a wide chat by
+ * default until closed by hand, over a narrow one on demand).
+ *
+ * Title: the project name in a Build session, else 环境信息. The 「…」 menu
+ * holds 打开工作台 and the Git actions: 工作位置 ▸ 本地 / worktree
+ * (`git.enterWorktree` / `git.exitWorktree`), 切换分支 ▸ (`git.branches` /
+ * `git.switchBranch`), 提交或推送 (审查 focused on the commit box) and
+ * 比较分支 ↗ (`git.remote` → provider compare page through `openExternal`).
+ * Writes follow the 审查 pane rules: confirmed, carrying the snapshot's
+ * `expectedRevision`, disabled while the agent runs or a git operation is
+ * unfinished.
  *
  * Rows and their sources:
- * - Build sessions (git, from the shared workspace snapshot): 变更 +A −D
- *   (`git.summary`, opens 审查) · 本地 / worktree ▾ (`git.enterWorktree` /
- *   `git.exitWorktree`) · branch ▾ (`git.branches` / `git.switchBranch`) ·
- *   提交或推送 (审查 focused on the commit box) · 比较分支 ↗ (`git.remote`
- *   → provider compare page through `openExternal`). Writes follow the
- *   审查 pane rules: confirmed, carrying the snapshot's `expectedRevision`,
- *   disabled while the agent runs or a git operation is unfinished.
- *   Other sessions show one muted line instead.
+ * - Build sessions (git, from the shared workspace snapshot): one row
+ *   「± 分支 +A −D」 (`git.summary`, opens 审查), plus a warning while a
+ *   merge or rebase is unfinished. Other sessions show one muted line.
  * - 计划: the latest `exit_plan_mode` call (conversation/planSummary.ts);
  *   click reveals its row.
  * - 子智能体: `tasks.list` of the session, active first; deterministic
@@ -23,7 +28,8 @@
  *   `tasks.transcript`) and, while running, 「停止」 (`tasks.cancel`;
  *   a workflow run asks first — its subagents stop with it).
  * - 来源: attachments, 网页搜索, MCP servers, Skills of the loaded window
- *   (sourcesFromSnapshot); three shown, 「查看全部」 lists every one.
+ *   (sourcesFromSnapshot); images as thumbnails, files by their type icon
+ *   (ui/DocumentIcon); three shown, 「查看全部」 lists every one.
  * The goal is not repeated here (GoalBar shows it).
  *
  * Layout: absolute inside the view area. From a 1120px conversation column
@@ -31,12 +37,14 @@
  * narrower, it overlays the chat and Escape closes it.
  *
  * Props: sessionId, snapshot (the viewed chat window), build (a Build session
- * bound to a project), agentBusy (a turn runs in it), child (a subagent view).
+ * bound to a project), agentBusy (a turn runs in it), child (a subagent view),
+ * title (the project name; '' for 环境信息).
  * Emits: reveal(nodeKey), open-subagent(sessionId), close.
  */
 import {
   ArrowUpRight,
   ChevronDown,
+  Ellipsis,
   FileDiff,
   FolderGit2,
   GitBranch,
@@ -46,6 +54,7 @@ import {
   Image,
   Laptop,
   ListChecks,
+  PanelRight,
   Paperclip,
   Plug,
   Plus,
@@ -66,6 +75,7 @@ import {
   type Component,
 } from 'vue'
 import { useRouter } from 'vue-router'
+import { attachmentRawUrl } from '../../../api/attachments'
 import { openExternal } from '../../../api/backend'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -77,6 +87,7 @@ import {
 import type { ChatSnapshot } from '../../../conversation/types'
 import type { RuntimeTaskRecord } from '../../../types'
 import { DsSkill } from '../../icons/ds'
+import DocumentIcon from '../../ui/DocumentIcon.vue'
 import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
@@ -130,8 +141,9 @@ const props = withDefaults(
     build?: boolean
     agentBusy?: boolean
     child?: boolean
+    title?: string
   }>(),
-  { build: false, agentBusy: false, child: false },
+  { build: false, agentBusy: false, child: false, title: '' },
 )
 
 const emit = defineEmits<{
@@ -166,8 +178,14 @@ const inlineMaxHeight = ref<number | null>(null)
 function onKeydown(event: KeyboardEvent): void {
   if (!activated.value || event.key !== 'Escape') return
   if (event.defaultPrevented || event.isComposing) return
-  if (worktreeMenu.value || branchMenu.value || sourcesMenu.value) {
+  if (
+    moreMenu.value ||
+    worktreeMenu.value ||
+    branchMenu.value ||
+    sourcesMenu.value
+  ) {
     event.preventDefault()
+    moreMenu.value = false
     worktreeMenu.value = false
     branchMenu.value = false
     sourcesMenu.value = false
@@ -270,6 +288,13 @@ const gitLine = computed(() => {
       : '正在读取工作区…'
   return git.value ? '' : '项目还不是 Git 仓库'
 })
+const branchLabel = computed(() => {
+  const status = git.value
+  if (!status) return ''
+  return (
+    status.branch || (status.repository.unborn ? '未提交的分支' : '分离 HEAD')
+  )
+})
 const aheadBehind = computed(() => {
   const status = git.value
   if (!status?.upstream) return ''
@@ -301,8 +326,21 @@ function openCommit(): void {
   requestWorkspace({ pane: 'review', focus: 'commit' })
 }
 
-// 本地 / worktree ▾
-const worktreeButton = ref<HTMLElement | null>(null)
+// 「…」: 打开工作台 and the Git actions; its submenus open at the same spot.
+const moreAnchor = ref<HTMLElement | null>(null)
+const moreMenu = ref(false)
+
+function openWorktreeMenu(): void {
+  moreMenu.value = false
+  worktreeMenu.value = true
+}
+
+function openBranchMenu(): void {
+  moreMenu.value = false
+  if (!branchMenu.value) void toggleBranchMenu()
+}
+
+// 工作位置 ▸ 本地 / worktree
 const worktreeMenu = ref(false)
 
 async function enterWorktree(): Promise<void> {
@@ -341,8 +379,7 @@ async function exitWorktree(action: 'keep' | 'remove'): Promise<void> {
   )
 }
 
-// branch ▾
-const branchButton = ref<HTMLElement | null>(null)
+// 切换分支 ▸
 const branchMenu = ref(false)
 const branches = shallowRef<Array<{ name: string; upstream: string | null }>>(
   [],
@@ -720,10 +757,19 @@ function openLauncher(): void {
     aria-label="环境信息"
   >
     <header class="card-head">
-      <h2 class="card-title">环境信息</h2>
-      <IconButton label="打开工作台" @click="openLauncher">
-        <Plus :size="15" />
-      </IconButton>
+      <h2 class="card-title" :title="title || '环境信息'">
+        {{ title || '环境信息' }}
+      </h2>
+      <span ref="moreAnchor" class="head-anchor">
+        <IconButton
+          label="更多操作"
+          aria-haspopup="menu"
+          :aria-expanded="moreMenu"
+          @click="moreMenu = !moreMenu"
+        >
+          <Ellipsis :size="15" />
+        </IconButton>
+      </span>
       <IconButton v-if="overlay" label="关闭环境信息" @click="emit('close')">
         <X :size="15" />
       </IconButton>
@@ -736,79 +782,24 @@ function openLauncher(): void {
           <button
             type="button"
             class="row"
-            data-row="changes"
+            data-row="branch"
+            :title="`${branchLabel} · 在审查中查看改动`"
             @click="openReview"
           >
             <FileDiff :size="15" class="row-icon" />
-            <span class="row-label">变更</span>
+            <span class="row-label mono">{{ branchLabel }}</span>
+            <span v-if="activeWorktree" class="row-tag">worktree</span>
+            <span v-if="aheadBehind" class="row-meta">{{ aheadBehind }}</span>
             <span v-if="git.summary.changedFiles" class="row-value changes">
               <b>+{{ git.summary.additions }}</b>
               <i>−{{ git.summary.deletions }}</i>
             </span>
             <span v-else class="row-value">无改动</span>
           </button>
-          <button
-            ref="worktreeButton"
-            type="button"
-            class="row"
-            data-row="worktree"
-            aria-haspopup="menu"
-            :aria-expanded="worktreeMenu"
-            @click="worktreeMenu = !worktreeMenu"
-          >
-            <FolderGit2 v-if="activeWorktree" :size="15" class="row-icon" />
-            <Laptop v-else :size="15" class="row-icon" />
-            <span class="row-label">{{
-              activeWorktree ? 'Worktree' : '本地'
-            }}</span>
-            <span v-if="activeWorktree?.branch" class="row-value">{{
-              activeWorktree.branch
-            }}</span>
-            <ChevronDown :size="14" class="row-caret" />
-          </button>
-          <button
-            ref="branchButton"
-            type="button"
-            class="row"
-            data-row="branch"
-            aria-haspopup="menu"
-            :aria-expanded="branchMenu"
-            @click="toggleBranchMenu"
-          >
-            <GitBranch :size="15" class="row-icon" />
-            <span class="row-label mono">{{
-              git.branch ||
-              (git.repository.unborn ? '未提交的分支' : '分离 HEAD')
-            }}</span>
-            <span v-if="aheadBehind" class="row-value">{{ aheadBehind }}</span>
-            <ChevronDown :size="14" class="row-caret" />
-          </button>
           <p v-if="transient" class="row static warn" role="status">
             <TriangleAlert :size="15" class="row-icon" />
             <span class="row-label">{{ transient }}</span>
           </p>
-          <button
-            type="button"
-            class="row"
-            data-row="commit"
-            @click="openCommit"
-          >
-            <GitCommitHorizontal :size="15" class="row-icon" />
-            <span class="row-label">提交或推送</span>
-          </button>
-          <button
-            type="button"
-            class="row"
-            data-row="compare"
-            :aria-disabled="!compare.url || undefined"
-            :title="compareHint"
-            @click="openCompare"
-          >
-            <GitCompareArrows :size="15" class="row-icon" />
-            <span class="row-label">比较分支</span>
-            <span v-if="!compare.url" class="row-value">{{ compareHint }}</span>
-            <ArrowUpRight v-else :size="14" class="row-caret" />
-          </button>
         </template>
       </section>
       <p v-else class="section muted-line" data-section="git">
@@ -976,8 +967,21 @@ function openLauncher(): void {
           :title="`${SOURCE_KIND_LABEL[source.kind]} · ${source.name}`"
           @click="openSource(source)"
         >
+          <img
+            v-if="source.image && source.attachmentId"
+            class="row-thumb"
+            :src="attachmentRawUrl(source.attachmentId)"
+            alt=""
+            loading="lazy"
+          />
+          <DocumentIcon
+            v-else-if="source.kind === 'attachment'"
+            :path="source.name"
+            class="row-icon"
+          />
           <component
             :is="SOURCE_ICON[source.kind]"
+            v-else
             :size="15"
             class="row-icon"
           />
@@ -1001,8 +1005,53 @@ function openLauncher(): void {
     </div>
 
     <Menu
+      v-model:open="moreMenu"
+      :anchor="moreAnchor"
+      placement="bottom"
+      :width="232"
+      label="更多操作"
+    >
+      <MenuItem @select="openLauncher">
+        打开工作台
+        <template #icon><PanelRight :size="15" /></template>
+      </MenuItem>
+      <template v-if="build && git">
+        <MenuItem variant="separator" />
+        <MenuItem
+          :description="activeWorktree ? 'Worktree' : '本地'"
+          @select="openWorktreeMenu"
+        >
+          工作位置
+          <template #icon>
+            <FolderGit2 v-if="activeWorktree" :size="15" />
+            <Laptop v-else :size="15" />
+          </template>
+        </MenuItem>
+        <MenuItem :description="branchLabel" @select="openBranchMenu">
+          切换分支
+          <template #icon><GitBranch :size="15" /></template>
+        </MenuItem>
+        <MenuItem @select="openCommit">
+          提交或推送
+          <template #icon><GitCommitHorizontal :size="15" /></template>
+        </MenuItem>
+        <MenuItem
+          :disabled="!compare.url"
+          :description="compare.url ? undefined : compareHint"
+          @select="openCompare"
+        >
+          比较分支
+          <template #icon><GitCompareArrows :size="15" /></template>
+          <template #trailing>
+            <ArrowUpRight v-if="compare.url" :size="14" />
+          </template>
+        </MenuItem>
+      </template>
+    </Menu>
+
+    <Menu
       v-model:open="worktreeMenu"
-      :anchor="worktreeButton"
+      :anchor="moreAnchor"
       placement="bottom"
       :width="248"
       label="工作位置"
@@ -1054,7 +1103,7 @@ function openLauncher(): void {
 
     <Menu
       v-model:open="branchMenu"
-      :anchor="branchButton"
+      :anchor="moreAnchor"
       placement="bottom"
       :width="248"
       dense
@@ -1110,7 +1159,18 @@ function openLauncher(): void {
       >
         {{ source.name }}
         <template #icon>
-          <component :is="SOURCE_ICON[source.kind]" :size="15" />
+          <img
+            v-if="source.image && source.attachmentId"
+            class="menu-thumb"
+            :src="attachmentRawUrl(source.attachmentId)"
+            alt=""
+            loading="lazy"
+          />
+          <DocumentIcon
+            v-else-if="source.kind === 'attachment'"
+            :path="source.name"
+          />
+          <component :is="SOURCE_ICON[source.kind]" v-else :size="15" />
         </template>
         <template #trailing>
           <span class="menu-count">{{ source.count }}</span>
@@ -1161,9 +1221,12 @@ function openLauncher(): void {
   flex: 1;
   min-width: 0;
   margin: 0;
+  overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-body {
@@ -1288,6 +1351,34 @@ button.row[aria-disabled='true'] .row-label {
 .row-label.mono {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
+}
+
+.row-tag,
+.row-meta {
+  flex: none;
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.row-tag {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  background: rgb(var(--fg) / var(--hover-bg-a));
+}
+
+.row-thumb,
+.menu-thumb {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-xs);
+  object-fit: cover;
+  background: rgb(var(--bg-inset));
+}
+
+.head-anchor {
+  display: inline-flex;
 }
 
 .row-value {

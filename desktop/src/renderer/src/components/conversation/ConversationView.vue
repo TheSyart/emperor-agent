@@ -34,6 +34,7 @@ import {
   computed,
   defineAsyncComponent,
   nextTick,
+  onActivated,
   onBeforeUnmount,
   onMounted,
   provide,
@@ -209,10 +210,31 @@ const workspaceOpen = computed(() => frameActions.workspaceOpen(frame))
 const envCardShown = computed(
   () =>
     tab.value === 'chat' &&
-    frame.envCardOpen &&
+    frameActions.envCardVisible(frame) &&
     Boolean(viewingId.value) &&
     phase.value !== 'hero',
 )
+/**
+ * Column width from which the card sits beside the chat and shows by
+ * default (the `@container conversation (min-width: 1120px)` rule below).
+ */
+const ENV_CARD_INLINE_MIN = 1120
+const rootElement = ref<HTMLElement | null>(null)
+let widthObserver: ResizeObserver | null = null
+function reportWidth(): void {
+  const width = rootElement.value?.clientWidth ?? 0
+  if (width > 0)
+    frameActions.setEnvCardWide(frame, width >= ENV_CARD_INLINE_MIN)
+}
+onMounted(() => {
+  reportWidth()
+  if (typeof ResizeObserver === 'undefined' || !rootElement.value) return
+  widthObserver = new ResizeObserver(reportWidth)
+  widthObserver.observe(rootElement.value)
+})
+// Kept alive: the view shown again reports its own column.
+onActivated(reportWidth)
+onBeforeUnmount(() => widthObserver?.disconnect())
 /** The computer-use preview seat: Chat tab, active phase, a root session. */
 const cuPreviewSeat = computed(
   () =>
@@ -634,6 +656,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
 <template>
   <section
+    ref="rootElement"
     class="conversation-root"
     :data-phase="phase"
     :data-tab="tab"
@@ -646,7 +669,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
       :tab="tab"
       :slim="phase === 'hero'"
       :workspace-open="workspaceOpen"
-      :env-card-open="frame.envCardOpen"
+      :env-card-open="envCardShown"
       :tabs-disabled="!viewingId"
       @navigate="navigate"
       @tab="switchTab"
@@ -697,6 +720,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :build="buildSession"
         :agent-busy="agentBusyHere"
         :child="child"
+        :title="projectName"
         @reveal="revealRow"
         @open-subagent="openSubagent"
         @close="closeEnvCard"

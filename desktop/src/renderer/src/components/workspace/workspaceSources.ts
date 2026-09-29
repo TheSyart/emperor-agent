@@ -56,6 +56,10 @@ export interface EnvironmentSource {
   count: number
   /** Order position of the latest use (sources sort most recent first). */
   last: number
+  /** An attachment or tool image: the stored attachment behind it. */
+  attachmentId?: string
+  /** Shown as a thumbnail (image attachments and tool images). */
+  image?: boolean
 }
 
 /** Tool descriptor subset (`skills.tools` / bootstrap `tools`). */
@@ -126,6 +130,7 @@ export function sourcesFromSnapshot(
     kind: EnvironmentSourceKind,
     position: number,
     once = false,
+    picture?: { attachmentId: string; image: boolean },
   ) => {
     const existing = byId.get(id)
     if (existing) {
@@ -133,7 +138,7 @@ export function sourcesFromSnapshot(
       existing.last = position
       return
     }
-    byId.set(id, { id, name, kind, count: 1, last: position })
+    byId.set(id, { id, name, kind, count: 1, last: position, ...picture })
   }
   snapshot.order.forEach((key, position) => {
     const node = snapshot.nodes.get(key)
@@ -142,7 +147,11 @@ export function sourcesFromSnapshot(
         const id = typeof attachment.id === 'string' ? attachment.id : ''
         if (!id) continue
         const name = typeof attachment.name === 'string' ? attachment.name : id
-        use(`attachment:${id}`, name, 'attachment', position, true)
+        const mime = typeof attachment.mime === 'string' ? attachment.mime : ''
+        use(`attachment:${id}`, name, 'attachment', position, true, {
+          attachmentId: id,
+          image: attachment.kind === 'image' || mime.startsWith('image/'),
+        })
       }
       return
     }
@@ -151,7 +160,11 @@ export function sourcesFromSnapshot(
     for (const block of data.result?.content ?? []) {
       if (block.type !== 'image') continue
       const id = block.attachment.attachmentId
-      if (id) use(`media:${id}`, id, 'media', position, true)
+      if (id)
+        use(`media:${id}`, id, 'media', position, true, {
+          attachmentId: id,
+          image: true,
+        })
     }
     if (WEB_SOURCE_TOOLS.has(data.name)) {
       use('web', '网页搜索', 'web', position)

@@ -100,6 +100,45 @@ describe('sourcesFromSnapshot', () => {
   })
 })
 
+describe('source pictures', () => {
+  it('marks image attachments and tool images for a thumbnail', () => {
+    const log = new LogBuilder()
+    log.add('host/user-meta', {
+      messageId: 'u1',
+      attachments: [
+        { id: 'att-img', name: 'shot.png', kind: 'image', mime: 'image/png' },
+        {
+          id: 'att-doc',
+          name: 'spec.pdf',
+          kind: 'file',
+          mime: 'application/pdf',
+        },
+        { id: 'att-jpg', name: 'photo.jpg', mime: 'image/jpeg' },
+      ],
+    })
+    log.user('u1', 'look')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    imageResult(log, 'c_shot', 'img-1')
+    const sources = sourcesFromSnapshot(replay(log.events).snapshot)
+    const byId = new Map(sources.map((source) => [source.id, source]))
+    expect(byId.get('attachment:att-img')).toMatchObject({
+      image: true,
+      attachmentId: 'att-img',
+    })
+    expect(byId.get('attachment:att-jpg')).toMatchObject({ image: true })
+    expect(byId.get('attachment:att-doc')).toMatchObject({
+      image: false,
+      attachmentId: 'att-doc',
+    })
+    expect(byId.get('media:img-1')).toMatchObject({
+      image: true,
+      attachmentId: 'img-1',
+    })
+    expect(byId.get('web')).toBeUndefined()
+  })
+})
+
 describe('mcpServerOf', () => {
   const tools = new Map(TOOLS.map((tool) => [tool.name, tool]))
 

@@ -118,11 +118,35 @@ describe('frame state', () => {
     expect(state.workspace).toBe(0)
   })
 
-  it('toggles the environment card and the inspector column', () => {
+  it('shows the environment card beside a wide chat until closed, on demand when narrow', () => {
     const state = defaultFrameState()
-    expect(state.envCardOpen).toBe(false)
+    expect(state.envCard).toBe('auto')
+    expect(frameActions.envCardVisible(state)).toBe(false)
+    frameActions.setEnvCardWide(state, true)
+    expect(frameActions.envCardVisible(state)).toBe(true)
+    // Closed by hand on a wide chat: remembered.
     frameActions.toggleEnvCard(state)
-    expect(state.envCardOpen).toBe(true)
+    expect(state.envCard).toBe('closed')
+    expect(frameActions.envCardVisible(state)).toBe(false)
+    frameActions.setEnvCardWide(state, false)
+    expect(frameActions.envCardVisible(state)).toBe(false)
+    // Opened on demand over a narrow chat; Escape or ✕ puts it back to auto.
+    frameActions.toggleEnvCard(state)
+    expect(state.envCard).toBe('open')
+    expect(frameActions.envCardVisible(state)).toBe(true)
+    frameActions.setEnvCard(state, false)
+    expect(state.envCard).toBe('auto')
+    expect(frameActions.envCardVisible(state)).toBe(false)
+    frameActions.setEnvCardWide(state, true)
+    expect(frameActions.envCardVisible(state)).toBe(true)
+    // Reopened on a wide chat after closing: back to auto.
+    frameActions.toggleEnvCard(state)
+    frameActions.toggleEnvCard(state)
+    expect(state.envCard).toBe('auto')
+  })
+
+  it('toggles the inspector column', () => {
+    const state = defaultFrameState()
     expect(state.inspectorOpen).toBe(false)
     frameActions.openInspector(state)
     expect(state.inspectorOpen).toBe(true)
@@ -140,7 +164,7 @@ describe('frame state', () => {
     state.sidebar = 0
     state.workspace = 640
     state.workspacePane = 'terminal'
-    state.envCardOpen = true
+    state.envCard = 'closed'
     state.inspectorOpen = true
     state.inspectorWidth = 500
     const restored = restoreFrameState(serializeFrameState(state))
@@ -151,11 +175,24 @@ describe('frame state', () => {
         JSON.stringify({
           workspacePane: 'nope',
           sidebar: 'x',
-          envCardOpen: 'yes',
+          envCard: 'yes',
           inspectorWidth: 'wide',
         }),
       ),
     ).toEqual(defaultFrameState())
+  })
+
+  it('reads the old open flag: open stays open, closed becomes auto', () => {
+    expect(
+      restoreFrameState(JSON.stringify({ envCardOpen: true })).envCard,
+    ).toBe('open')
+    expect(
+      restoreFrameState(JSON.stringify({ envCardOpen: false })).envCard,
+    ).toBe('auto')
+    // The runtime width reading is never persisted.
+    const state = defaultFrameState()
+    frameActions.setEnvCardWide(state, true)
+    expect(serializeFrameState(state)).not.toContain('Wide')
   })
 
   it('restores the retired 电脑 pane as the launcher', () => {
@@ -171,7 +208,7 @@ describe('v1 → v2 frame migration', () => {
   type Expected = Partial<
     Pick<
       FrameState,
-      'workspace' | 'workspacePane' | 'envCardOpen' | 'inspectorOpen'
+      'workspace' | 'workspacePane' | 'envCard' | 'inspectorOpen'
     >
   >
   // [v1 detailsTab, v1 details width (0 = closed), expected v2 fields]
@@ -184,13 +221,13 @@ describe('v1 → v2 frame migration', () => {
     [
       'environment',
       360,
-      { workspacePane: 'launcher', workspace: 0, envCardOpen: true },
+      { workspacePane: 'launcher', workspace: 0, envCard: 'open' },
     ],
     // v1 defaulted the tab to 'environment': a closed column opens nothing.
     [
       'environment',
       0,
-      { workspacePane: 'launcher', workspace: 0, envCardOpen: false },
+      { workspacePane: 'launcher', workspace: 0, envCard: 'auto' },
     ],
     [
       'inspect',

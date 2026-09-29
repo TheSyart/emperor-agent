@@ -47,8 +47,14 @@ export interface FrameState {
   /** Last open workspace width, restored on reopen. */
   workspaceWidth: number
   workspacePane: WorkspacePane
-  /** Chat-tab environment card (floats right of the conversation). */
-  envCardOpen: boolean
+  /**
+   * Chat-tab environment card: `auto` shows it beside a wide conversation
+   * (≥ 1120px) and hides it over a narrow one, `open` shows it either way
+   * (opened on demand), `closed` hides it (closed by hand, remembered).
+   */
+  envCard: EnvCardPreference
+  /** The conversation column is wide enough for the card (not persisted). */
+  envCardWide: boolean
   /** Trajectory inspector column. */
   inspectorOpen: boolean
   inspectorWidth: number
@@ -57,6 +63,8 @@ export interface FrameState {
   /** Manual re-expand of the auto-collapsed sidebar on narrow viewports. */
   narrowExpanded: boolean
 }
+
+export type EnvCardPreference = 'auto' | 'open' | 'closed'
 
 export const FRAME_STORAGE_KEY = 'emperor.frame.v2'
 /** Retired v1 key (details column); read once by the migration. */
@@ -67,6 +75,8 @@ interface PersistedFrame {
   workspace?: number
   workspaceWidth?: number
   workspacePane?: string
+  envCard?: string
+  /** Before 2026-09-30: an explicit open flag (false meant never opened). */
   envCardOpen?: boolean
   inspectorOpen?: boolean
   inspectorWidth?: number
@@ -92,7 +102,8 @@ export function defaultFrameState(): FrameState {
     workspace: 0,
     workspaceWidth: WORKSPACE_DEFAULT,
     workspacePane: 'launcher',
-    envCardOpen: false,
+    envCard: 'auto',
+    envCardWide: false,
     inspectorOpen: false,
     inspectorWidth: INSPECTOR_DEFAULT,
     narrow: false,
@@ -132,8 +143,13 @@ export function restoreFrameState(raw: string | null | undefined): FrameState {
     state.workspace = clampWidth(data.workspace, WORKSPACE_MIN, WORKSPACE_MAX)
   if (isWorkspacePane(data.workspacePane))
     state.workspacePane = data.workspacePane
-  if (typeof data.envCardOpen === 'boolean')
-    state.envCardOpen = data.envCardOpen
+  if (
+    data.envCard === 'auto' ||
+    data.envCard === 'open' ||
+    data.envCard === 'closed'
+  )
+    state.envCard = data.envCard
+  else if (data.envCardOpen === true) state.envCard = 'open'
   if (typeof data.inspectorOpen === 'boolean')
     state.inspectorOpen = data.inspectorOpen
   if (typeof data.inspectorWidth === 'number')
@@ -187,7 +203,7 @@ export function migrateFrameV1(raw: string | null | undefined): FrameState {
   if (mapped) state.workspacePane = mapped.pane
   const wasOpen = typeof data.details === 'number' && data.details > 0
   if (!wasOpen || !mapped) return state
-  if (mapped.envCardOpen) state.envCardOpen = true
+  if (mapped.envCardOpen) state.envCard = 'open'
   else if (mapped.inspectorOpen) state.inspectorOpen = true
   else
     state.workspace = clampWidth(
@@ -204,7 +220,7 @@ export function serializeFrameState(state: FrameState): string {
     workspace: state.workspace,
     workspaceWidth: state.workspaceWidth,
     workspacePane: state.workspacePane,
-    envCardOpen: state.envCardOpen,
+    envCard: state.envCard,
     inspectorOpen: state.inspectorOpen,
     inspectorWidth: state.inspectorWidth,
   }
@@ -312,11 +328,26 @@ export const frameActions = {
     state.workspacePane = pane
   },
 
+  /** Whether the environment card shows now (preference × column width). */
+  envCardVisible(state: FrameState): boolean {
+    if (state.envCard === 'auto') return state.envCardWide
+    return state.envCard === 'open'
+  },
+  /** ConversationView reports whether its column fits the card beside it. */
+  setEnvCardWide(state: FrameState, wide: boolean): void {
+    state.envCardWide = wide
+  },
+  /**
+   * Open or close the card by hand. Closing beside a wide chat is
+   * remembered; closing an overlay (narrow) returns to `auto`; opening
+   * over a narrow chat is on demand (`open`), beside a wide one `auto`.
+   */
   setEnvCard(state: FrameState, open: boolean): void {
-    state.envCardOpen = open
+    if (open) state.envCard = state.envCardWide ? 'auto' : 'open'
+    else state.envCard = state.envCardWide ? 'closed' : 'auto'
   },
   toggleEnvCard(state: FrameState): void {
-    state.envCardOpen = !state.envCardOpen
+    frameActions.setEnvCard(state, !frameActions.envCardVisible(state))
   },
 
   openInspector(state: FrameState): void {

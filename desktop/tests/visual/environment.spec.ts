@@ -43,6 +43,13 @@ function buildLog(): VisualSessionLog {
         size: 4_210,
         kind: 'file',
       },
+      {
+        id: 'att-card-mock',
+        name: 'card-mock.png',
+        mime: 'image/png',
+        size: 81_920,
+        kind: 'image',
+      },
     ],
   })
   log.turnStart(1)
@@ -188,15 +195,16 @@ async function open(
     width?: number
     height?: number
     theme?: Theme
-    envCard?: boolean
+    /** The saved card preference (frameState `envCard`). */
+    envCard?: 'auto' | 'open' | 'closed'
   } = {},
 ) {
-  await page.addInitScript((envCardOpen) => {
+  await page.addInitScript((envCard) => {
     localStorage.setItem(
       'emperor.frame.v2',
-      JSON.stringify({ sidebar: 280, envCardOpen }),
+      JSON.stringify({ sidebar: 280, envCard }),
     )
-  }, options.envCard ?? true)
+  }, options.envCard ?? 'open')
   await page.setViewportSize({
     width: options.width ?? 1600,
     height: options.height ?? 900,
@@ -233,12 +241,16 @@ for (const theme of ['dark', 'light'] as const) {
     const envCard = card(page)
     await expect(envCard).toBeVisible()
     await expect(envCard).not.toHaveAttribute('data-overlay', /.*/)
-    await expect(envCard.locator('[data-row="changes"]')).toContainText('+18')
-    await expect(envCard.locator('[data-row="changes"]')).toContainText('−4')
-    await expect(envCard.locator('[data-row="branch"]')).toContainText('main')
-    await expect(envCard.locator('[data-row="compare"]')).toContainText(
-      '当前就是 main',
+    // A Build session's card is titled with the project.
+    await expect(envCard.locator('.card-title')).toHaveText(
+      'Visual Build Project',
     )
+    // One row: ± branch +A −D.
+    const branchRow = envCard.locator('[data-row="branch"]')
+    await expect(branchRow).toContainText('main')
+    await expect(branchRow).toContainText('+18')
+    await expect(branchRow).toContainText('−4')
+    await expect(envCard.locator('[data-section="git"] .row')).toHaveCount(1)
     await expect(envCard.locator('[data-row="plan"]')).toContainText(
       '重做环境信息卡',
     )
@@ -254,7 +266,7 @@ for (const theme of ['dark', 'light'] as const) {
     const sources = envCard.locator('[data-section="sources"] .row')
     await expect(sources).toHaveCount(3)
     await expect(sources.first()).toContainText('visual-audit')
-    await expect(envCard.getByText('查看全部 · 4')).toBeVisible()
+    await expect(envCard.getByText('查看全部 · 5')).toBeVisible()
 
     // The chat body and the composer make room for the card.
     const cardBox = (await envCard.boundingBox())!
@@ -294,7 +306,8 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(envCard).toContainText(
       '未绑定项目 · Build 会话可查看变更与分支',
     )
-    await expect(envCard.locator('[data-row="changes"]')).toHaveCount(0)
+    await expect(envCard.locator('[data-row="branch"]')).toHaveCount(0)
+    await expect(envCard.locator('.card-title')).toHaveText('环境信息')
     await expect(
       envCard.locator('[data-section="subagents"] .row.agent'),
     ).toHaveCount(2)
@@ -306,7 +319,7 @@ for (const theme of ['dark', 'light'] as const) {
   })
 
   test(`changes pill above the composer (${theme})`, async ({ page }) => {
-    await open(page, '/chat/build-ui', { theme, envCard: false })
+    await open(page, '/chat/build-ui', { theme, envCard: 'closed' })
     const pill = page.locator('.changes-pill')
     await expect(pill).toBeVisible()
     await expect(pill).toContainText('3 个文件已更改')
@@ -325,7 +338,7 @@ for (const theme of ['dark', 'light'] as const) {
   })
 
   test(`turn scrubber (${theme})`, async ({ page }) => {
-    await open(page, '/chat/build-ui', { theme, envCard: false })
+    await open(page, '/chat/build-ui', { theme, envCard: 'closed' })
     const scrubber = page.locator('.turn-scrubber')
     await expect(scrubber).toBeVisible()
     const ticks = scrubber.locator('.tick')
@@ -346,6 +359,36 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+test('the card shows beside a wide chat by default and remembers a close', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui', { envCard: 'auto' })
+  const envCard = card(page)
+  await expect(envCard).toBeVisible()
+  const toggle = page.getByRole('button', { name: '环境信息', exact: true })
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await toggle.click()
+  await expect(envCard).toHaveCount(0)
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  const saved = () =>
+    page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem('emperor.frame.v2') ?? '{}').envCard,
+    )
+  await expect.poll(saved).toBe('closed')
+  await toggle.click()
+  await expect(envCard).toBeVisible()
+  await expect.poll(saved).toBe('auto')
+  // Over a narrow chat the same preference keeps it closed until asked.
+  await page.setViewportSize({ width: 1180, height: 900 })
+  await expect(envCard).toHaveCount(0)
+  await toggle.click()
+  await expect(envCard).toHaveAttribute('data-overlay', 'true')
+  await page.keyboard.press('Escape')
+  await expect(envCard).toHaveCount(0)
+  await expect.poll(saved).toBe('auto')
+})
+
 test('card rows open the plan row, subagents, branches and all sources', async ({
   page,
 }) => {
@@ -359,7 +402,17 @@ test('card rows open the plan row, subagents, branches and all sources', async (
   ).toHaveCount(5)
   await expect(envCard.getByRole('button', { name: '收起' })).toBeVisible()
 
-  await envCard.locator('[data-row="branch"]').click()
+  // 「…」 holds 打开工作台 and the Git actions.
+  const more = envCard.getByRole('button', { name: '更多操作' })
+  await more.click()
+  const moreMenu = page.getByRole('menu', { name: '更多操作' })
+  await expect(moreMenu).toContainText('打开工作台')
+  await expect(moreMenu).toContainText('提交或推送')
+  await expect(
+    moreMenu.getByRole('menuitem', { name: /比较分支/ }),
+  ).toContainText('当前就是 main')
+  await shot(page, 'card-more-menu')
+  await moreMenu.getByRole('menuitem', { name: /切换分支/ }).click()
   const branchMenu = page.getByRole('menu', { name: '切换分支' })
   await expect(branchMenu).toBeVisible()
   await expect(branchMenu).toContainText('codex/workspace-panel')
@@ -369,17 +422,24 @@ test('card rows open the plan row, subagents, branches and all sources', async (
   // A menu's Escape never closes the card.
   await expect(envCard).toBeVisible()
 
-  await envCard.locator('[data-row="worktree"]').click()
+  await more.click()
+  await moreMenu.getByRole('menuitem', { name: /工作位置/ }).click()
   const worktreeMenu = page.getByRole('menu', { name: '工作位置' })
   await expect(worktreeMenu).toContainText('新建 worktree')
   await page.keyboard.press('Escape')
 
-  await envCard.getByText('查看全部 · 4').click()
+  await envCard.getByText('查看全部 · 5').click()
   const sourcesMenu = page.getByRole('menu', { name: '全部来源' })
   await expect(sourcesMenu).toBeVisible()
   await expect(sourcesMenu).toContainText('网页搜索')
   await expect(sourcesMenu).toContainText('github')
   await expect(sourcesMenu).toContainText('codex-environment-notes.md')
+  // An image attachment as a thumbnail, a file by its type icon.
+  await expect(sourcesMenu.locator('img.menu-thumb')).toHaveAttribute(
+    'src',
+    'app://attachments/att-card-mock/raw',
+  )
+  await expect(sourcesMenu.locator('svg[data-kind="document"]')).toHaveCount(1)
   await shot(page, 'card-sources-menu')
   await page.keyboard.press('Escape')
 
@@ -499,7 +559,7 @@ for (const theme of ['dark', 'light'] as const) {
 }
 
 test('scrubber hides in a narrow column', async ({ page }) => {
-  await open(page, '/chat/build-ui', { width: 600, envCard: false })
+  await open(page, '/chat/build-ui', { width: 600, envCard: 'closed' })
   await expect(page.locator('.turn-scrubber')).toBeHidden()
   await page.setViewportSize({ width: 1440, height: 900 })
   await expect(page.locator('.turn-scrubber')).toBeVisible()

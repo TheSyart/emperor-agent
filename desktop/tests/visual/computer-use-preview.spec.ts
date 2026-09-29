@@ -53,10 +53,10 @@ async function open(
   page: Page,
   options: { width: number; theme: Theme; envCard: boolean },
 ) {
-  await page.addInitScript((envCardOpen) => {
+  await page.addInitScript((open) => {
     localStorage.setItem(
       'emperor.frame.v2',
-      JSON.stringify({ sidebar: 280, envCardOpen }),
+      JSON.stringify({ sidebar: 280, envCard: open ? 'open' : 'closed' }),
     )
   }, options.envCard)
   await page.setViewportSize({ width: options.width, height: 900 })
