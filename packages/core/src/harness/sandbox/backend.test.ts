@@ -56,9 +56,11 @@ describe('Computer Use Seatbelt confinement', () => {
         expect(restorableDenied.status).not.toBe(0)
         expect(restorableDenied.stdout).not.toContain('private.test')
         const working = sandbox.confine(['/usr/bin/git', '--version'], policy)
+        // A fresh machine's first git call resolves the developer tools,
+        // which can take several seconds.
         const allowed = spawnSync(working.argv[0]!, working.argv.slice(1), {
           encoding: 'utf8',
-          timeout: 5_000,
+          timeout: 30_000,
         })
         expect(allowed.status).toBe(0)
         expect(allowed.stdout).toContain('git version')
@@ -120,8 +122,12 @@ describe('Computer Use Seatbelt confinement', () => {
           ['/usr/bin/make', '-s'],
           ['/usr/bin/cc', '-o', join(root, 'hello-c'), join(root, 'hello.c')],
           [join(root, 'hello-c')],
+          // Its module cache lives in the workspace: a fresh machine has no
+          // user cache to read, and the profile keeps that directory closed.
           [
             '/usr/bin/swiftc',
+            '-module-cache-path',
+            join(root, 'module-cache'),
             '-o',
             join(root, 'hello'),
             join(root, 'main.swift'),
