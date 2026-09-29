@@ -150,6 +150,58 @@ function bashTurn(id: string) {
   ]
 }
 
+describe('packages shipped with Emperor through CoreApi', () => {
+  it('lists them as managed, keeps their toggles across restarts and refuses to uninstall them', async () => {
+    const root = tmp('emperor-plugin-bundled-')
+    writePackage(
+      join(root, 'bundled-plugins', 'github'),
+      portablePackage('github', {}, { version: '1.0.0' }),
+    )
+    writePackage(
+      join(root, 'bundled-plugins', 'computer-use'),
+      portablePackage('computer-use'),
+    )
+    fixture = await makeApi({ root })
+    const { api, stateRoot } = fixture
+    const rows = () =>
+      fixture!.api.plugins
+        .list()
+        .map(({ pluginId, scope, enabled, toggleable, uninstallable }) => [
+          pluginId,
+          scope,
+          enabled,
+          toggleable,
+          uninstallable,
+        ])
+    // This host runs without Computer Use, so its package cannot be switched on.
+    expect(rows()).toEqual([
+      ['computer-use', 'managed', false, false, false],
+      ['github', 'managed', true, true, false],
+    ])
+    await invokeCoreOperation(api, 'plugins.setEnabled', [
+      { pluginId: 'github', scope: 'managed', enabled: false },
+    ])
+    await expect(
+      invokeCoreOperation(api, 'plugins.uninstall', [
+        { pluginId: 'github', scope: 'managed' },
+      ]),
+    ).rejects.toMatchObject({ code: 'plugin_managed_uninstall_denied' })
+    await expect(
+      invokeCoreOperation(api, 'plugins.install', [
+        {
+          previewId: `plugin_preview_${'a'.repeat(24)}`,
+          digest: 'a'.repeat(64),
+          scope: 'managed',
+        },
+      ]),
+    ).rejects.toMatchObject({ name: 'CoreOperationArgumentsError' })
+
+    await api.close()
+    fixture = await makeApi({ root, stateRoot })
+    expect(rows()[1]).toEqual(['github', 'managed', false, true, false])
+  })
+})
+
 describe('plugin MCP servers and hooks through CoreApi', () => {
   it('runs them for real, stops them when disabled, and never touches user files', async () => {
     fixture = await makeApi({ replies: [...bashTurn('b1'), ...bashTurn('b2')] })

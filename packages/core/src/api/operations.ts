@@ -158,7 +158,10 @@ const pluginIdSchema = z
     /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)?$/,
     'invalid Plugin id',
   )
-const pluginScopeSchema = z.enum(['user', 'project', 'local'])
+/** Where a package can be installed. */
+const pluginInstallScopeSchema = z.enum(['user', 'project', 'local'])
+/** Where a package can live: also `managed`, the packages shipped with Emperor. */
+const pluginScopeSchema = z.enum(['user', 'project', 'local', 'managed'])
 const pluginInstallSourceSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('local'), path: z.string().min(1).max(4_096) })
@@ -174,7 +177,7 @@ const pluginInstallSchema = z
   .object({
     previewId: z.string().regex(/^plugin_preview_[a-f0-9]{24}$/),
     digest: sha256Schema,
-    scope: pluginScopeSchema,
+    scope: pluginInstallScopeSchema,
   })
   .strict()
 const pluginTargetSchema = z

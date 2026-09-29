@@ -32,6 +32,8 @@ extraResources:
       - init/USER.md
   - from: ../skills
     to: runtime-defaults/skills
+  - from: ../packages/core/bundled-plugins
+    to: runtime-defaults/bundled-plugins
   - from: ../assets/desktop-pet
     to: runtime-defaults/assets/desktop-pet
   - from: ../config/examples/model_config.example.json

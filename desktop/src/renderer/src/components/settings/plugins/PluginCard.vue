@@ -37,7 +37,8 @@ const open = defineModel<boolean>('open', { default: false })
 const uid = settingsId('plugin-card')
 const confirming = ref(false)
 
-const readOnly = computed(() => props.plugin.scope === 'managed')
+/** Shipped with Emperor: can be switched off, never uninstalled. */
+const managed = computed(() => props.plugin.scope === 'managed')
 const state = computed(() => activationState(props.plugin))
 const configuration = computed(() =>
   props.plugin.enabled ? '已启用' : '已停用',
@@ -108,10 +109,7 @@ function toggle(enabled: boolean): void {
       <code class="plugin-id">{{ plugin.pluginId }}</code>
       <DefinitionList :items="facts" />
       <div class="card-actions">
-        <p v-if="readOnly" class="managed-note">
-          受管 Plugin 由组织策略控制，不能在这里修改。
-        </p>
-        <template v-else-if="confirming">
+        <template v-if="confirming && plugin.uninstallable">
           <span class="confirm-text">卸载后持久数据保留。确认卸载？</span>
           <Button
             size="sm"
@@ -136,12 +134,13 @@ function toggle(enabled: boolean): void {
             <Switch
               :id="`${uid}-enabled`"
               :model-value="plugin.enabled"
-              :disabled="busy"
+              :disabled="busy || !plugin.toggleable"
               @update:model-value="toggle"
             />
             启用
           </label>
           <Button
+            v-if="plugin.uninstallable"
             size="sm"
             variant="danger"
             :disabled="busy"
@@ -150,6 +149,9 @@ function toggle(enabled: boolean): void {
           >
             卸载
           </Button>
+          <p v-else-if="managed" class="managed-note">
+            随 Emperor 提供，可以停用，不能卸载。
+          </p>
         </template>
       </div>
     </div>

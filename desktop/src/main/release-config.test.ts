@@ -367,6 +367,18 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     for (const strip of petStrips)
       expect(packagedPaths).toContain(`assets/desktop-pet/xiaodan/${strip}`)
     expect(generated.builtInSkills).toEqual(['computer-use', 'skill-creator'])
+    // Plugins shipped with Emperor ride along, hash-checked like every file.
+    expect(hook.SOURCE_MAPPINGS).toContainEqual({
+      source: 'packages/core/bundled-plugins',
+      target: 'bundled-plugins',
+    })
+    expect(
+      fs.readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8'),
+    ).toContain(
+      '- from: ../packages/core/bundled-plugins\n    to: runtime-defaults/bundled-plugins',
+    )
+    expect(packagedPaths).toContain('bundled-plugins/github/plugin.json')
+    expect(packagedPaths).toContain('bundled-plugins/computer-use/plugin.json')
     expect(
       generated.files
         .filter((file) => file.path.startsWith('skills/'))

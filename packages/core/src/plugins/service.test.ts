@@ -850,6 +850,237 @@ describe('PluginApplicationService list and detail', () => {
   })
 })
 
+describe('PluginApplicationService managed packages', () => {
+  function bundled(version = '1.0.0'): string {
+    const root = tempDirectory()
+    writePackage(
+      join(root, 'github'),
+      portablePackage(
+        'github',
+        {},
+        {
+          version,
+          extensions: {
+            'com.openai': {
+              interface: {
+                displayName: 'GitHub',
+                developerName: 'Emperor Agent',
+              },
+            },
+          },
+        },
+      ),
+    )
+    writePackage(
+      join(root, 'computer-use'),
+      portablePackage(
+        'computer-use',
+        {},
+        {
+          version: '1.0.0',
+          extensions: {
+            'com.openai': { interface: { displayName: 'Computer Use' } },
+          },
+        },
+      ),
+    )
+    return root
+  }
+
+  function computerUse(enabled: boolean | null) {
+    const state = { enabled, calls: [] as boolean[] }
+    return {
+      state,
+      port: {
+        enabled: () => state.enabled,
+        setEnabled: (value: boolean) => {
+          state.calls.push(value)
+          state.enabled = value
+        },
+      },
+    }
+  }
+
+  function managedService(
+    home: string,
+    roots: string[],
+    cu = computerUse(false),
+    workspace: string | null = null,
+  ) {
+    return new PluginApplicationService({
+      emperorHome: home,
+      bundledPluginRoots: roots,
+      computerUse: cu.port,
+      activeWorkspaceRoot: () => workspace,
+    })
+  }
+
+  it('lists the bundled packages as managed, enabled by default, not uninstallable', () => {
+    const home = tempDirectory()
+    const root = bundled()
+    const service = managedService(
+      home,
+      [join(home, 'missing'), root],
+      computerUse(true),
+    )
+    expect(service.list()).toEqual([
+      expect.objectContaining({
+        pluginId: 'computer-use',
+        scope: 'managed',
+        displayName: 'Computer Use',
+        enabled: true,
+        activation: 'active',
+        toggleable: true,
+        uninstallable: false,
+        source: { kind: 'managed' },
+        signature: { status: 'verified', publisher: 'Emperor' },
+      }),
+      expect.objectContaining({
+        pluginId: 'github',
+        scope: 'managed',
+        displayName: 'GitHub',
+        version: '1.0.0',
+        enabled: true,
+        activation: 'active',
+        effective: true,
+        toggleable: true,
+        uninstallable: false,
+        format: 'portable',
+      }),
+    ])
+    expect(
+      service.detail({ pluginId: 'github', scope: 'managed' }),
+    ).toMatchObject({
+      source: { kind: 'managed' },
+      installedAt: null,
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
+  })
+
+  it('keeps the toggle in its own file across restarts and upgrades', () => {
+    const home = tempDirectory()
+    const root = bundled('1.0.0')
+    managedService(home, [root]).setEnabled({
+      pluginId: 'github',
+      scope: 'managed',
+      enabled: false,
+    })
+    expect(
+      JSON.parse(readFileSync(join(home, 'plugins', 'managed.json'), 'utf8')),
+    ).toEqual({
+      schemaVersion: 1,
+      enabled: { github: false },
+    })
+    expect(existsSync(join(home, 'settings.json'))).toBe(false)
+    // Restart after an upgrade: new metadata, same intent.
+    writePackage(
+      join(root, 'github'),
+      portablePackage('github', {}, { version: '1.1.0' }),
+    )
+    const restarted = managedService(home, [root])
+    expect(
+      restarted.list().find((item) => item.pluginId === 'github'),
+    ).toMatchObject({
+      version: '1.1.0',
+      enabled: false,
+      activation: 'disabled',
+    })
+  })
+
+  it('makes the Computer Use package the master switch, with no second state', () => {
+    const home = tempDirectory()
+    const cu = computerUse(false)
+    const service = managedService(home, [bundled()], cu)
+    expect(service.list()[0]).toMatchObject({
+      pluginId: 'computer-use',
+      enabled: false,
+    })
+    service.setEnabled({
+      pluginId: 'computer-use',
+      scope: 'managed',
+      enabled: true,
+    })
+    expect(cu.state.calls).toEqual([true])
+    expect(service.list()[0]).toMatchObject({
+      enabled: true,
+      activation: 'active',
+    })
+    // The switch changed elsewhere (the settings page): the package follows.
+    cu.state.enabled = false
+    expect(service.list()[0]).toMatchObject({ enabled: false })
+    expect(existsSync(join(home, 'plugins', 'managed.json'))).toBe(false)
+  })
+
+  it('cannot toggle Computer Use where it is not supported', () => {
+    const home = tempDirectory()
+    const service = managedService(home, [bundled()], computerUse(null))
+    expect(service.list()[0]).toMatchObject({
+      pluginId: 'computer-use',
+      enabled: false,
+      toggleable: false,
+    })
+    expect(() =>
+      service.setEnabled({
+        pluginId: 'computer-use',
+        scope: 'managed',
+        enabled: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'plugin_toggle_unavailable' }))
+  })
+
+  it('refuses to uninstall a managed package but still uninstalls ordinary ones', async () => {
+    const home = tempDirectory()
+    const service = managedService(home, [bundled()])
+    expect(() =>
+      service.uninstall({ pluginId: 'github', scope: 'managed' }),
+    ).toThrow(
+      expect.objectContaining({ code: 'plugin_managed_uninstall_denied' }),
+    )
+    expect(() =>
+      service.setEnabled({
+        pluginId: 'nobody',
+        scope: 'managed',
+        enabled: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'plugin_not_found' }))
+    const source = writePackage(
+      join(tempDirectory(), 'kit'),
+      portablePackage('hello-kit', {
+        'skills/hello/SKILL.md': skillMarkdown('hello', 'Hi'),
+      }),
+    )
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(
+      service.uninstall({ pluginId: 'hello-kit', scope: 'user' }).changed,
+    ).toBe(true)
+  })
+
+  it('lets a package the user installs override the managed one of the same name', async () => {
+    const home = tempDirectory()
+    const service = managedService(home, [bundled()])
+    const source = writePackage(
+      join(tempDirectory(), 'mine'),
+      portablePackage('github'),
+    )
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    const rows = service.list().filter((item) => item.pluginId === 'github')
+    expect(rows.map(({ scope, effective }) => [scope, effective])).toEqual([
+      ['managed', false],
+      ['user', true],
+    ])
+  })
+})
+
 function zip(
   entries: Array<{ name: string; data: string | Buffer; mode?: number }>,
 ): Buffer {

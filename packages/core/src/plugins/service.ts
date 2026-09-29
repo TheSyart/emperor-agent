@@ -62,8 +62,20 @@ interface PreviewState extends PluginInstallPreview {
   readonly payloadRoot: string
 }
 
+/** The Computer Use master switch, which the `computer-use` package mirrors (contract §5). */
+export interface PluginComputerUseSwitch {
+  /** The switch, or `null` where Computer Use is not supported. */
+  enabled(): boolean | null
+  setEnabled(enabled: boolean): void
+}
+
+export const COMPUTER_USE_PLUGIN_ID = 'computer-use'
+
 export interface PluginApplicationServiceOptions {
   readonly emperorHome: string
+  /** Folders that may hold the packages shipped with Emperor; the first that exists is used. */
+  readonly bundledPluginRoots?: readonly string[]
+  readonly computerUse?: PluginComputerUseSwitch | null
   readonly activeWorkspaceRoot?: (() => string | null) | null
   readonly onChanged?: (() => void) | null
   readonly now?: () => Date
@@ -85,6 +97,9 @@ export class PluginApplicationService {
   private readonly idFactory: () => string
   private readonly webFetchClient: WebFetchClient | null
   private readonly runtime: PluginRuntimeView
+  private readonly bundledPluginRoots: readonly string[]
+  private readonly computerUse: PluginComputerUseSwitch | null
+  private managedEntries: Map<string, InstalledPluginEntry> | null = null
   private readonly previews = new Map<string, PreviewState>()
   /** Installed caches are content-addressed, so a resolution is reusable per path and digest. */
   private readonly resolutions = new Map<string, ResolvedPluginPackage | null>()
@@ -103,6 +118,10 @@ export class PluginApplicationService {
       (() => `plugin_preview_${randomBytes(12).toString('hex')}`)
     this.webFetchClient = opts.webFetchClient ?? null
     this.runtime = opts.runtime ?? NO_PLUGIN_RUNTIME
+    this.bundledPluginRoots = (opts.bundledPluginRoots ?? []).map((root) =>
+      resolve(root),
+    )
+    this.computerUse = opts.computerUse ?? null
     mkdirPrivate(this.stagingRoot)
     mkdirPrivate(this.cacheRoot)
     mkdirPrivate(join(this.pluginsRoot, 'data'))
@@ -124,7 +143,7 @@ export class PluginApplicationService {
       (item) => item.pluginId === pluginId && item.scope === input.scope,
     )
     if (!summary) throw new EmperorError('找不到这个插件', 'plugin_not_found')
-    const entry = this.store.get(pluginId, input.scope)
+    const entry = this.entryOf(pluginId, input.scope)
     const resolved = entry ? this.resolveInstalled(entry) : null
     const verdict = verdictOf(summary, summaries)
     const scrub = resolved
@@ -154,7 +173,7 @@ export class PluginApplicationService {
       source: summary.source,
       signature: summary.signature,
       digest: summary.digest || null,
-      installedAt: entry?.installedAt ?? null,
+      installedAt: entry?.installedAt || null,
       permissions: pluginPermissions(resolved),
       components: pluginComponentViews({
         pluginId,
@@ -169,9 +188,17 @@ export class PluginApplicationService {
 
   /** Every registered package for one workspace, with the scope in effect marked. */
   private summariesFor(workspace: string | null): PluginSummary[] {
-    const base = this.store
-      .list()
-      .map((entry) => this.baseSummary(entry.pluginId, entry.scope, workspace))
+    const base = [
+      ...this.store
+        .list()
+        .filter((entry) => entry.scope !== 'managed')
+        .map((entry) =>
+          this.baseSummary(entry.pluginId, entry.scope, workspace),
+        ),
+      ...[...this.managed().keys()].map((pluginId) =>
+        this.baseSummary(pluginId, 'managed', workspace),
+      ),
+    ]
     const winners = new Map<string, PluginScope>()
     for (const scope of PLUGIN_SCOPE_PRECEDENCE)
       for (const summary of base)
@@ -353,6 +380,8 @@ export class PluginApplicationService {
     input: PluginScopeTarget & { enabled: boolean },
   ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
+    if (input.scope === 'managed')
+      return this.setManagedEnabled(pluginId, input.enabled)
     this.assertMutableScope(input.scope)
     const workspace = this.activeWorkspaceRoot()
     const before = this.readIntent(input.scope, workspace)[pluginId] === true
@@ -367,6 +396,11 @@ export class PluginApplicationService {
   /** Remove the registration and its intent; the immutable cache stays. */
   uninstall(input: PluginScopeTarget): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
+    if (input.scope === 'managed')
+      throw new EmperorError(
+        '随 Emperor 提供的插件不能卸载，可以停用',
+        'plugin_managed_uninstall_denied',
+      )
     this.assertMutableScope(input.scope)
     const changed = this.store.remove(pluginId, input.scope)
     this.deleteIntent(input.scope, pluginId)
@@ -383,7 +417,7 @@ export class PluginApplicationService {
   ): string[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
-      const entry = this.store.get(summary.pluginId, summary.scope)
+      const entry = this.entryOf(summary.pluginId, summary.scope)
       return entry ? [...(this.resolveInstalled(entry)?.skillRoots ?? [])] : []
     })
   }
@@ -394,7 +428,7 @@ export class PluginApplicationService {
   ): ActivePluginPackage[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
-      const entry = this.store.get(summary.pluginId, summary.scope)
+      const entry = this.entryOf(summary.pluginId, summary.scope)
       const resolved = entry ? this.resolveInstalled(entry) : null
       return resolved
         ? [{ pluginId: summary.pluginId, scope: summary.scope, resolved }]
@@ -425,8 +459,11 @@ export class PluginApplicationService {
     scope: PluginScope,
     workspace: string | null,
   ): PluginSummary {
-    const entry = this.store.get(pluginId, scope)
-    const enabled = this.readIntent(scope, workspace)[pluginId] === true
+    const entry = this.entryOf(pluginId, scope)
+    const enabled =
+      scope === 'managed'
+        ? this.managedEnabled(pluginId)
+        : this.readIntent(scope, workspace)[pluginId] === true
     const resolved = entry ? this.resolveInstalled(entry) : null
     const signature = pluginEntrySignature(entry)
     const materialization = entry && resolved ? 'installed' : 'missing'
@@ -462,7 +499,10 @@ export class PluginApplicationService {
       materialization,
       activation,
       effective: false,
-      toggleable: true,
+      toggleable:
+        scope !== 'managed' ||
+        pluginId !== COMPUTER_USE_PLUGIN_ID ||
+        this.computerUse?.enabled() != null,
       uninstallable: scope !== 'managed',
       capabilities: {
         skills: members.skills.length,
@@ -473,6 +513,106 @@ export class PluginApplicationService {
         commands: members.commands.length,
         apps: members.apps.length,
       },
+    }
+  }
+
+  /** A registered package: an install record, or a package shipped with Emperor. */
+  private entryOf(
+    pluginId: string,
+    scope: PluginScope,
+  ): InstalledPluginEntry | null {
+    if (scope === 'managed') return this.managed().get(pluginId) ?? null
+    return this.store.get(pluginId, scope)
+  }
+
+  /**
+   * Packages shipped with Emperor, found once per start: never written to
+   * installed_plugins.json, verified as Emperor's, digests computed here.
+   */
+  private managed(): Map<string, InstalledPluginEntry> {
+    if (this.managedEntries) return this.managedEntries
+    const entries = new Map<string, InstalledPluginEntry>()
+    const root = this.bundledPluginRoots.find(
+      (path) => existsSync(path) && lstatSync(path).isDirectory(),
+    )
+    for (const name of root ? readdirSync(root).sort() : []) {
+      const installPath = join(root!, name)
+      try {
+        if (!lstatSync(installPath).isDirectory()) continue
+        const resolved = resolvePluginPackage(installPath, { strict: false })
+        entries.set(resolved.pluginId, {
+          pluginId: resolved.pluginId,
+          scope: 'managed',
+          version: resolved.version,
+          digest: digestTree(installPath),
+          installPath,
+          source: { kind: 'managed' },
+          signature: { status: 'verified', publisher: 'Emperor' },
+          installedAt: '',
+          updatedAt: '',
+        })
+      } catch {
+        // A broken bundled folder is skipped; the rest still load.
+      }
+    }
+    this.managedEntries = entries
+    return entries
+  }
+
+  private managedEnabled(pluginId: string): boolean {
+    if (pluginId === COMPUTER_USE_PLUGIN_ID)
+      return this.computerUse?.enabled() === true
+    return this.readManagedIntents()[pluginId] ?? true
+  }
+
+  private setManagedEnabled(
+    pluginId: string,
+    enabled: boolean,
+  ): PluginOperationResult {
+    if (!this.managed().has(pluginId))
+      throw new EmperorError('找不到这个插件', 'plugin_not_found')
+    const before = this.managedEnabled(pluginId)
+    if (pluginId === COMPUTER_USE_PLUGIN_ID) {
+      // One switch: the package toggle is the Computer Use master switch.
+      if (!this.computerUse || this.computerUse.enabled() === null)
+        throw new EmperorError(
+          '这台电脑上不能使用电脑操作',
+          'plugin_toggle_unavailable',
+        )
+      this.computerUse.setEnabled(enabled)
+    } else {
+      writePrivateJsonAtomic(this.managedIntentsPath(), {
+        schemaVersion: 1,
+        enabled: { ...this.readManagedIntents(), [pluginId]: enabled },
+      })
+    }
+    this.onChanged()
+    return {
+      changed: before !== enabled,
+      plugin: this.summaryOf(pluginId, 'managed'),
+    }
+  }
+
+  private managedIntentsPath(): string {
+    return join(this.pluginsRoot, 'managed.json')
+  }
+
+  /** `plugins/managed.json`; a missing or unreadable file means every package keeps its default. */
+  private readManagedIntents(): Record<string, boolean> {
+    const path = this.managedIntentsPath()
+    if (!existsSync(path)) return {}
+    try {
+      const enabled = readJsonObject(path).enabled
+      if (!enabled || typeof enabled !== 'object' || Array.isArray(enabled))
+        return {}
+      return Object.fromEntries(
+        Object.entries(enabled as Record<string, unknown>).filter(
+          (entry): entry is [string, boolean] =>
+            typeof entry[1] === 'boolean' && isValidPluginId(entry[0]),
+        ),
+      )
+    } catch {
+      return {}
     }
   }
 
@@ -595,6 +735,15 @@ export class PluginApplicationService {
     delete next[pluginId]
     settings.enabledPlugins = next
     writePrivateJsonAtomic(path, settings)
+  }
+}
+
+function isValidPluginId(value: string): boolean {
+  try {
+    assertPluginId(value)
+    return true
+  } catch {
+    return false
   }
 }
 

@@ -162,7 +162,7 @@ async function mutate(
 }
 
 function setEnabled(plugin: PluginSummary, enabled: boolean): void {
-  if (plugin.scope === 'managed') return
+  if (!plugin.toggleable) return
   const scope = plugin.scope
   void mutate(
     plugin,
@@ -173,7 +173,7 @@ function setEnabled(plugin: PluginSummary, enabled: boolean): void {
 }
 
 function uninstall(plugin: PluginSummary): void {
-  if (plugin.scope === 'managed') return
+  if (!plugin.uninstallable || plugin.scope === 'managed') return
   const scope = plugin.scope
   void mutate(
     plugin,

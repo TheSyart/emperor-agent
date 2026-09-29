@@ -32,6 +32,7 @@ const SOURCE_MAPPINGS = [
     target: `templates/${path}`,
   })),
   { source: 'skills', target: 'skills' },
+  { source: 'packages/core/bundled-plugins', target: 'bundled-plugins' },
   { source: 'assets/desktop-pet', target: 'assets/desktop-pet' },
   {
     source: 'config/examples/model_config.example.json',

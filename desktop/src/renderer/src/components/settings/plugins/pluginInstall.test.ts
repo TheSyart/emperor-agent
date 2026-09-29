@@ -73,6 +73,7 @@ describe('plugin display vocabulary', () => {
     expect(signatureLabel('local_user_source')).toBe('本地来源')
     expect(signatureLabel('unverified')).toBe('未验证签名')
     expect(sourceLabel({ kind: 'local', label: 'kit' })).toBe('本地 · kit')
+    expect(sourceLabel({ kind: 'managed' })).toBe('随 Emperor 提供')
     expect(sourceLabel({ kind: 'url', url: 'https://x.test/a.zip' })).toBe(
       'https://x.test/a.zip',
     )

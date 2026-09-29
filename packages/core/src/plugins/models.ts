@@ -4,6 +4,8 @@ export type PluginSource =
   | { readonly kind: 'marketplace'; readonly marketplace: string }
   | { readonly kind: 'url'; readonly url: string }
   | { readonly kind: 'local'; readonly label: string }
+  /** Ships with Emperor (plugin contract §5). */
+  | { readonly kind: 'managed' }
 
 export interface PluginSignature {
   readonly status: 'local_user_source' | 'verified' | 'unverified'

@@ -135,6 +135,8 @@ Emperor 识别三种包格式，按以下顺序判断：
 
 本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。
 
+Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为「随 Emperor 提供」。它们可以停用，不能卸载；GitHub 的开关记在 `stateRoot/plugins/managed.json`，升级 Emperor 不会改变。Computer Use 的开关就是「设置 › 电脑操作」的总开关，两处看到的始终一致；不支持电脑操作的电脑上它不能开启。你自己安装的同名 Plugin 会覆盖自带的那个。
+
 已安装的 Plugin 可以启用、停用或卸载。已激活 Plugin 的成员这样接入：
 
 - **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。

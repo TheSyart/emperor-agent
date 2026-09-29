@@ -316,6 +316,15 @@ export class CoreApi {
     })
     this.pluginService = new PluginApplicationService({
       emperorHome: this.paths.stateRoot,
+      // Packaged: <Resources>/runtime-defaults/bundled-plugins; dev: the repo's packages/core.
+      bundledPluginRoots: [
+        join(this.paths.runtimeRoot, 'bundled-plugins'),
+        join(this.paths.runtimeRoot, 'packages', 'core', 'bundled-plugins'),
+      ],
+      computerUse: {
+        enabled: () => host.computerUse?.enabled ?? null,
+        setEnabled: (enabled) => host.setComputerUseEnabled(enabled),
+      },
       webFetchClient: opts.webFetchClient ?? null,
       activeWorkspaceRoot: () => this.activeProjectRoot(),
       runtime: {
@@ -332,12 +341,7 @@ export class CoreApi {
               ]),
           ),
       },
-      onChanged: () => {
-        kept.skillLoaders.refreshPluginSkillsRoots()
-        kept.skillChangeDetector.notify()
-        void this.syncPlugins()
-        this.emitPluginsChanged('plugins')
-      },
+      onChanged: () => this.pluginsChanged(),
     })
     this.pluginActivation = new PluginActivationController({
       packages: () =>
@@ -1795,6 +1799,9 @@ export class CoreApi {
     setEnabled: async (enabled: boolean): Promise<ComputerUseStatusView> => {
       if (enabled) this.assertMutation('computerUse', 'enable')
       this.host.setComputerUseEnabled(enabled)
+      // The Computer Use plugin mirrors this switch (plugin contract §5).
+      this.pluginsChanged()
+      await this.pluginActivation.settled()
       return await this.computerUse.status()
     },
     /** Browser profiles: the temporary one and every persistent one. */
@@ -2020,6 +2027,14 @@ export class CoreApi {
       this.emitPluginsChanged('project')
     }
     return entry
+  }
+
+  /** Installed plugins or their toggles changed: refresh Skills, contributions and the renderer. */
+  private pluginsChanged(): void {
+    this.host.kept.skillLoaders.refreshPluginSkillsRoots()
+    this.host.kept.skillChangeDetector.notify()
+    void this.syncPlugins()
+    this.emitPluginsChanged('plugins')
   }
 
   /** Apply plugin MCP servers and hooks; a failure is logged, never thrown into callers. */

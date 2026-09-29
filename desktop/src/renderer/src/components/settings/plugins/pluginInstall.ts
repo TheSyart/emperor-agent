@@ -60,6 +60,7 @@ export function signatureLabel(status: string): string {
 export function sourceLabel(source: PluginPreview['source']): string {
   if (source.kind === 'url') return source.url
   if (source.kind === 'local') return `本地 · ${source.label}`
+  if (source.kind === 'managed') return '随 Emperor 提供'
   return source.marketplace
 }
 
