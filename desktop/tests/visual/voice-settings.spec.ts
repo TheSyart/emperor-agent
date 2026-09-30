@@ -49,10 +49,11 @@ async function noHorizontalOverflow(page: Page) {
 for (const theme of ['dark', 'light'] as const) {
   test(`voice settings on this Mac (${theme})`, async ({ page }) => {
     const dialog = await openVoice(page, { theme })
-    await expect(dialog.getByTestId('dictation-helper')).toHaveText('可用')
-    await expect(
-      dialog.getByText('本机识别 · SFSpeechRecognizer'),
-    ).toBeVisible()
+    // A working helper and two granted permissions need no decision.
+    await expect(dialog.getByTestId('dictation-helper')).toHaveCount(0)
+    await expect(dialog.getByTestId('dictation-permissions')).toContainText(
+      '已允许',
+    )
     await expect(
       dialog.getByRole('button', { name: '听写识别的语言' }),
     ).toContainText('跟随系统（中文（中国大陆））')

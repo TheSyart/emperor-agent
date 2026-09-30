@@ -157,7 +157,18 @@ describe('VoiceSettingsSection', () => {
       .onClick!()
     await settle()
     expect(dictationStatus).toHaveBeenCalledTimes(2)
-    expect(row(root, '听写组件').textContent).toContain('本机识别')
+    // Available again: the row has nothing to say any more.
+    expect(() => row(root, '听写组件')).toThrow()
+  })
+
+  it('keeps quiet about a working helper and merges two granted permissions', async () => {
+    const root = await mount()
+    expect(() => row(root, '听写组件')).toThrow()
+    expect(root.querySelector('[data-testid="dictation-helper"]')).toBeNull()
+    const both = row(root, '麦克风和语音识别')
+    expect(both.textContent).toContain('已允许')
+    expect(() => row(root, '麦克风权限')).toThrow()
+    expect(() => row(root, '语音识别权限')).toThrow()
   })
 
   it('checks again when the window comes back from System Settings', async () => {
@@ -167,7 +178,7 @@ describe('VoiceSettingsSection', () => {
     expect(dictationStatus).toHaveBeenCalledTimes(2)
   })
 
-  it('shows both permissions and opens System Settings for a denied one', async () => {
+  it('shows both permissions, one row each, until both are granted', async () => {
     dictationStatus.mockResolvedValue({
       ...ready,
       permissions: { microphone: 'denied', speech: 'undetermined' },

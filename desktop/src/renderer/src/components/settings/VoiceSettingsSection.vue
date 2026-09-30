@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * Settings › 语音 — editor dictation (VO-02; macOS only for now): the
- * dictation helper's state, the two permissions macOS asks for the first
- * time you dictate, and this window's microphone, language and shortcut
- * (dictation/settings.ts). Only the devices and languages the helper
+ * Settings › 语音 — editor dictation (VO-02; macOS only for now): the two
+ * permissions macOS asks for the first time you dictate (one row once both
+ * are granted), and this window's microphone, language and shortcut
+ * (dictation/settings.ts). The dictation helper gets a row only when it is
+ * unavailable, to say why. Only the devices and languages the helper
  * reports are offered (voice/voiceSettingsModel.ts). The helper is asked
  * again from the header's refresh and whenever the window regains focus,
  * e.g. after changing a permission in System Settings. Elsewhere the page
@@ -62,6 +63,12 @@ const microphone = computed(() =>
 )
 const speech = computed(() =>
   permissionView('speech', status.value?.permissions.speech ?? 'unknown'),
+)
+/** Nothing to decide about the permissions: one row says so. */
+const permissionsGranted = computed(
+  () =>
+    status.value?.permissions.microphone === 'granted' &&
+    status.value.permissions.speech === 'granted',
 )
 const device = computed(() =>
   status.value ? deviceChoice(status.value, settings.value) : null,
@@ -146,7 +153,11 @@ onBeforeUnmount(() => {
       :description="status?.reason ?? '听写目前只支持 macOS'"
     />
     <template v-else>
-      <SettingsRow title="听写组件" :description="helper.description">
+      <SettingsRow
+        v-if="status && !status.available"
+        title="听写组件"
+        :description="helper.description"
+      >
         <StatusBadge :tone="helper.tone" dot data-testid="dictation-helper">{{
           helper.badge
         }}</StatusBadge>
@@ -154,34 +165,48 @@ onBeforeUnmount(() => {
 
       <SettingsGroup
         title="系统权限"
-        description="第一次听写时 macOS 会询问这两项；以后可以在系统设置里更改。"
+        :description="
+          permissionsGranted
+            ? undefined
+            : '第一次听写时 macOS 会询问这两项；以后可以在系统设置里更改。'
+        "
       >
-        <SettingsRow title="麦克风权限" :description="microphone.hint">
-          <div class="voice-permission">
-            <StatusBadge :tone="microphone.tone">{{
-              microphone.label
-            }}</StatusBadge>
-            <Button
-              v-if="microphone.canOpen"
-              size="sm"
-              variant="outline"
-              @click="openPrivacy('microphone')"
-              >打开系统设置</Button
-            >
-          </div>
+        <SettingsRow
+          v-if="permissionsGranted"
+          title="麦克风和语音识别"
+          description="只在听写时打开麦克风，在这台 Mac 上识别，不联网"
+          data-testid="dictation-permissions"
+        >
+          <StatusBadge tone="ok">已允许</StatusBadge>
         </SettingsRow>
-        <SettingsRow title="语音识别权限" :description="speech.hint">
-          <div class="voice-permission">
-            <StatusBadge :tone="speech.tone">{{ speech.label }}</StatusBadge>
-            <Button
-              v-if="speech.canOpen"
-              size="sm"
-              variant="outline"
-              @click="openPrivacy('speech')"
-              >打开系统设置</Button
-            >
-          </div>
-        </SettingsRow>
+        <template v-else>
+          <SettingsRow title="麦克风权限" :description="microphone.hint">
+            <div class="voice-permission">
+              <StatusBadge :tone="microphone.tone">{{
+                microphone.label
+              }}</StatusBadge>
+              <Button
+                v-if="microphone.canOpen"
+                size="sm"
+                variant="outline"
+                @click="openPrivacy('microphone')"
+                >打开系统设置</Button
+              >
+            </div>
+          </SettingsRow>
+          <SettingsRow title="语音识别权限" :description="speech.hint">
+            <div class="voice-permission">
+              <StatusBadge :tone="speech.tone">{{ speech.label }}</StatusBadge>
+              <Button
+                v-if="speech.canOpen"
+                size="sm"
+                variant="outline"
+                @click="openPrivacy('speech')"
+                >打开系统设置</Button
+              >
+            </div>
+          </SettingsRow>
+        </template>
         <p v-if="openFailed" class="voice-note" role="alert">
           没能打开系统设置，请手动前往「系统设置 › 隐私与安全性 ›
           {{ openFailed === 'microphone' ? '麦克风' : '语音识别' }}」。
