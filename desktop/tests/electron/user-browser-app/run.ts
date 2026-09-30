@@ -276,6 +276,22 @@ async function userBrowser(
         15_000,
         'the page cookie',
       )
+      // The cookie comes with the response, before the page commits and
+      // joins the history: wait until main lists it, then open the menu.
+      await until(
+        async () =>
+          await page.evaluate(async () => {
+            const bridge = (
+              window as unknown as {
+                emperor: { browserHistory(): Promise<{ url: string }[]> }
+              }
+            ).emperor
+            const entries = await bridge.browserHistory()
+            return entries.some((entry) => entry.url.includes('/storage'))
+          }),
+        10_000,
+        'the page in the temporary history',
+      )
       await page.getByRole('button', { name: '临时历史' }).click()
       const menu = page.getByRole('menu', { name: '临时历史' })
       await menu.waitFor({ timeout: 5_000 })

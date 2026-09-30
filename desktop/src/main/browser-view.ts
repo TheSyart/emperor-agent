@@ -238,7 +238,10 @@ export class BrowserViewHost {
     if (enabled === true) this.visited.record(url, title)
     else if (enabled !== false)
       void enabled.then((on) => {
-        if (on && view === this.view) this.visited.record(url, title)
+        if (!on || view !== this.view) return
+        // The page may have reported its title while the setting was read.
+        const still = !contents.isDestroyed() && contents.getURL() === url
+        this.visited.record(url, still ? contents.getTitle() : title)
       })
   }
 

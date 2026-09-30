@@ -596,6 +596,33 @@ describe('BrowserViewHost temporary history', () => {
     await expect(host.history()).resolves.toEqual([])
   })
 
+  it('keeps a title that arrived while the setting was being read', async () => {
+    let answer: (on: boolean) => void = () => {}
+    const { host } = setup(() => 0, {
+      historyEnabled: () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve
+        }),
+    })
+    const { contents, visit } = await browse(host)
+    visit('https://example.com/storage')
+    const pending = answer
+    contents.title = 'Storage'
+    contents.emit('page-title-updated', {}, 'Storage')
+    pending(true)
+    await Promise.resolve()
+    const history = host.history()
+    answer(true)
+    await expect(history).resolves.toEqual([
+      {
+        id: 'h1',
+        url: 'https://example.com/storage',
+        title: 'Storage',
+        time: 0,
+      },
+    ])
+  })
+
   it('reopens an entry by its id, checking the address again', async () => {
     const { host } = setup()
     const { contents, visit } = await browse(host)
