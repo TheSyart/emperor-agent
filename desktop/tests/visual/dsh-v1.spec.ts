@@ -1446,72 +1446,7 @@ for (const theme of ['dark', 'light'] as const) {
   }
 }
 
-for (const theme of ['dark', 'light'] as const) {
-  test(`settings computer use: four groups, stop and 高级 (${theme})`, async ({
-    page,
-  }) => {
-    await open(page, '/chat/build-ui?settings=computer&visualComputerUse=on', {
-      width: 1280,
-      height: 860,
-      theme,
-    })
-    const dialog = page.getByRole('dialog', { name: '设置' })
-    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
-    // The built-in browser's switch is in 设置 › 浏览器.
-    await expect(dialog.locator('[data-driver]')).toHaveCount(2)
-    await expect(dialog).toContainText('⌃⌥⌘.')
-    await expect(dialog).not.toContainText('持续允许电脑操作')
-    await expect(
-      dialog.getByTestId('computer-use-advanced'),
-    ).not.toHaveAttribute('open', '')
-    await expectNoHorizontalOverflow(page)
-    await shot(page, `settings-computer-on-${theme}`)
-
-    await dialog.getByRole('button', { name: '立即停止' }).click()
-    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已急停')
-    await dialog.getByRole('button', { name: '恢复' }).click()
-    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
-
-    // One driver off: spec 00 §6.9 wording, the others stay on.
-    await expect(
-      dialog.locator('#computer-use-driver-desktop'),
-    ).toHaveAttribute('aria-checked', 'true')
-    await dialog.locator('#computer-use-driver-desktop').click()
-    await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
-      'Emperor 内建桌面控制已关闭',
-    )
-    // The stop-shortcut editor.
-    await dialog.getByTestId('kill-switch-edit').click()
-    await expect(dialog.getByTestId('kill-switch-capture')).toBeFocused()
-    await page.keyboard.press('Control+Shift+K')
-    await expect(dialog.getByTestId('kill-switch-capture')).toContainText('K')
-    await expectNoHorizontalOverflow(page)
-    await shot(page, `settings-computer-controls-${theme}`)
-    await dialog.getByRole('button', { name: '保存' }).click()
-    await expect(dialog.getByRole('button', { name: '恢复默认' })).toBeVisible()
-
-    // 「高级」: the user's own app lists and saved screenshots, reached from
-    // the protected apps row.
-    await dialog.getByTestId('computer-use-app-lists').click()
-    await expect(dialog.getByTestId('computer-use-advanced')).toHaveAttribute(
-      'open',
-      '',
-    )
-    await expect(dialog).toContainText('已保存 14 张截图')
-    const sensitive = dialog.getByLabel('添加到敏感应用')
-    await sensitive.fill('com.apple.Notes')
-    await sensitive.press('Enter')
-    await expect(dialog.locator('[data-app-list="sensitive"]')).toContainText(
-      'com.apple.Notes',
-    )
-    await dialog.locator('[data-app-list="protected"]').scrollIntoViewIfNeeded()
-    await expectNoHorizontalOverflow(page)
-    await shot(page, `settings-computer-lists-${theme}`)
-
-    await dialog.locator('#computer-use-enabled').click()
-    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已关闭')
-  })
-}
+// 设置 › 电脑操作 has its own spec: computer-settings.spec.ts.
 
 // ── 插件 › MCP (server cards, add dialog, paste import) ────────────────
 

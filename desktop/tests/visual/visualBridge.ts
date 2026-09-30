@@ -55,6 +55,15 @@ type VisualBridge = {
   vaultBiometricUnlock?: () => Promise<{ unlocked: boolean }>
   vaultBiometricDisable?: () => Promise<{ ok: boolean }>
   clearBrowserData?: () => Promise<{ ok: boolean }>
+  macHelperStatus?: () => Promise<unknown>
+  macHelperRequestPermission?: (permission: string) => Promise<unknown>
+  macHelperResetPermission?: (permission: string) => Promise<unknown>
+  macHelperReconnect?: () => Promise<unknown>
+  browserPairings?: () => Promise<unknown>
+  connectBrowsers?: () => Promise<unknown>
+  approveBrowserPairing?: (pairingId: string) => Promise<boolean>
+  denyBrowserPairing?: (pairingId: string) => Promise<boolean>
+  revokeBrowserPairing?: (pairingId: string) => Promise<boolean>
 }
 
 declare global {
@@ -1209,28 +1218,34 @@ export async function installVisualCoreBridge(
               ],
             },
             {
+              // Paired in the visual bridge (browserPairings: one browser,
+              // two attached tabs), like external-browser-driver.ts.
               driver: 'external-browser',
               platform: 'macos',
-              stage: 'unavailable',
+              stage: 'experimental',
               label: 'Chrome/Edge 连接',
               enabled:
                 on &&
                 visualComputerUseState.drivers['external-browser'] !== false,
-              available: false,
-              actions: [],
-              missing: [],
-              reason: '尚未开放',
+              available:
+                on &&
+                !visualComputerUseState.stopped &&
+                visualComputerUseState.drivers['external-browser'] !== false,
+              actions: ['click', 'fill'],
+              missing: ['外部浏览器新建标签页', '截图与坐标操作'],
             },
             {
               driver: 'desktop',
               platform: 'macos',
-              stage: 'unavailable',
+              stage: 'experimental',
               label: 'macOS 桌面',
               enabled: on && visualComputerUseState.drivers.desktop !== false,
-              available: false,
-              actions: [],
-              missing: [],
-              reason: '尚未开放',
+              available:
+                on &&
+                !visualComputerUseState.stopped &&
+                visualComputerUseState.drivers.desktop !== false,
+              actions: ['click', 'fill', 'typeText', 'press', 'select'],
+              missing: ['自动用户活动检测'],
             },
           ],
           targets: visualTargets(),
@@ -3999,6 +4014,55 @@ export async function installVisualCoreBridge(
         vaultBiometricUnlock: async () => ({ unlocked: true }),
         vaultBiometricDisable: async () => ({ ok: true }),
         clearBrowserData: async () => ({ ok: true }),
+        // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility off;
+        // `?visualPairing=pending` has a pairing code waiting.
+        macHelperStatus: async () => ({
+          available: true,
+          connected: true,
+          helperVersion: '0.3.0',
+          protocol: 1,
+          permissions: {
+            accessibility:
+              visualParams.get('visualHelper') === 'denied'
+                ? 'denied'
+                : 'granted',
+            'screen-recording': 'granted',
+          },
+          lastErrorCode: null,
+        }),
+        macHelperRequestPermission: async () => ({ opened: true }),
+        macHelperResetPermission: async () => ({ reset: true }),
+        macHelperReconnect: async () => ({
+          available: true,
+          connected: true,
+          helperVersion: '0.3.0',
+          protocol: 1,
+          permissions: {
+            accessibility: 'granted',
+            'screen-recording': 'granted',
+          },
+          lastErrorCode: null,
+        }),
+        browserPairings: async () => ({
+          bridgeListening: true,
+          pendingPairings:
+            visualParams.get('visualPairing') === 'pending'
+              ? [
+                  {
+                    pairingId: 'pair-visual-2',
+                    extensionId: 'aofcidkmgjlbaidneiodhljmoleejnpe',
+                    code: '482913',
+                    displayed: true,
+                  },
+                ]
+              : [],
+          pairedConnections: ['pair-visual-1'],
+          attachedTabs: 2,
+        }),
+        connectBrowsers: async () => ({ browsers: ['chrome'] }),
+        approveBrowserPairing: async () => true,
+        denyBrowserPairing: async () => true,
+        revokeBrowserPairing: async () => true,
         dictationOpenPrivacy: async (pane: string) => {
           ;((
             window as unknown as { __visualPrivacyOpened?: string[] }

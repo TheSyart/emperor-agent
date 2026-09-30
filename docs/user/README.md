@@ -44,7 +44,7 @@
 | 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                                                   | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
 | 模型     | 模型配置卡片、连通测试、执行与成本策略                                                                                         | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
 | Hooks    | “配置 / 测试 / 审计”三个标签                                                                                                   | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
-| 电脑操作 | 总开关、Chrome 与 Mac 应用驱动、系统授权、应用名单与急停                                                                       | [电脑操作（实验）](computer-use.md)                         |
+| 电脑操作 | 总开关；任意应用、Chrome 和 Edge 两个驱动及其二级页（系统权限、应用名单、截图、扩展配对）；不让 Emperor 操作的应用；紧急停止   | [电脑操作（实验）](computer-use.md)                         |
 | 浏览器   | 让 Emperor 控制内置浏览器；链接与本地 URL 打开位置、完整网址、浏览数据与浏览历史；密码管理器、登录状态、下载保留时间、网站设置 | [Chat 与 Build](chat-build.md#浏览器设置与数据)             |
 | 语音     | 听写组件状态、麦克风与语音识别权限、麦克风、识别语言与听写快捷键（macOS）                                                      | [Chat 与 Build](chat-build.md#语音听写)                     |
 | 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈                                | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |

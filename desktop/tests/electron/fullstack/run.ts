@@ -152,11 +152,11 @@ async function openSettings(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog', { name: '设置' })
   await dialog.waitFor()
   await dialog.locator('.nav-cell[data-section="computer"]').click()
-  const badge = dialog.getByTestId('computer-use-status')
-  await badge.waitFor()
-  // The first status read is asynchronous; wait until it has landed.
+  const toggle = dialog.locator('#computer-use-enabled')
+  await toggle.waitFor()
+  // The first status read is asynchronous; the switch waits for it.
   await until(
-    async () => (await badge.innerText()).trim() !== '读取中',
+    async () => await toggle.isEnabled(),
     10_000,
     'computer use status loaded',
   )
@@ -191,13 +191,17 @@ async function closeSettings(page: Page): Promise<void> {
   await page.getByRole('dialog', { name: '设置' }).waitFor({ state: 'hidden' })
 }
 
+/**
+ * 已开启 / 已关闭 from the master switch, or what the card names when it is
+ * neither simply on nor off (已停止 after an emergency stop).
+ */
 async function statusBadge(page: Page): Promise<string> {
-  return (
-    await page
-      .getByRole('dialog', { name: '设置' })
-      .getByTestId('computer-use-status')
-      .innerText()
-  ).trim()
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  const badge = dialog.getByTestId('computer-use-status')
+  if ((await badge.count()) > 0) return (await badge.innerText()).trim()
+  return (await settingsSwitch(page).getAttribute('aria-checked')) === 'true'
+    ? '已开启'
+    : '已关闭'
 }
 
 async function send(page: Page, text: string): Promise<void> {
@@ -782,9 +786,9 @@ async function fullstack(
         .getByRole('button', { name: '立即停止' })
         .click()
       await until(
-        async () => (await statusBadge(page)) === '已急停',
+        async () => (await statusBadge(page)) === '已停止',
         10_000,
-        'badge 已急停',
+        'card 已停止',
       )
       await closeSettings(page)
       model.enqueue(call('browser_observe'), (request) => {
@@ -805,6 +809,8 @@ async function fullstack(
       await page
         .getByRole('dialog', { name: '设置' })
         .getByRole('button', { name: '恢复' })
+        // The card and the stop row both offer it.
+        .first()
         .click()
       await until(
         async () => (await statusBadge(page)) === '已开启',

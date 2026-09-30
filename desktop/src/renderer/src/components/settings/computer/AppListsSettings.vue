@@ -2,75 +2,67 @@
 /**
  * AppListsSettings — the user's own app lists (spec 01 §4.4, §5.2), added
  * to the built-in ones:
- * - 保护：the Agent never sees or controls these apps (password managers,
- *   banking clients…);
- * - 高风险：apps that run commands (terminals, script tools): marked on the
+ * - 保护 (不让 Emperor 操作的应用): the Agent never sees or controls these
+ *   apps (password managers, banking clients…);
+ * - 高风险: apps that run commands (terminals, script tools): marked on the
  *   confirmation card; their ordinary input runs like any other;
- * - 敏感：structure only — no field values, no screenshots.
+ * - 敏感 (不截图的应用): structure only — no field values, no screenshots.
+ * Each list shows its apps as chips (× removes one); 添加 asks for a bundle
+ * ID in a dialog (AppIdDialog).
  *
- * Props: lists (current), busy. Emits: change(kind, next list).
+ * Props: lists (current), busy, kinds (which lists to show, in order).
+ * Emits: change(kind, next list).
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import Button from '../../ui/Button.vue'
-import { SettingsGroup, SettingsRow, TextField } from '../ui'
+import { SettingsGroup, SettingsRow } from '../ui'
+import AppIdDialog from './AppIdDialog.vue'
 
 type ListKind = 'protected' | 'highRisk' | 'sensitive'
 
-const props = defineProps<{
-  lists: Readonly<Record<ListKind, readonly string[]>>
-  busy: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    lists: Readonly<Record<ListKind, readonly string[]>>
+    busy: boolean
+    kinds?: readonly ListKind[]
+  }>(),
+  { kinds: () => ['protected', 'highRisk', 'sensitive'] },
+)
 const emit = defineEmits<{ change: [kind: ListKind, next: string[]] }>()
 
-const ROWS: ReadonlyArray<{
-  kind: ListKind
-  title: string
-  description: string
-}> = [
+const ROWS: Readonly<Record<ListKind, { title: string; description: string }>> =
   {
-    kind: 'protected',
-    title: '保护的应用',
-    description:
-      'Agent 看不到也不能操作这些应用，例如密码管理器、网银客户端。系统授权界面与 Emperor 自身已内置保护。',
-  },
-  {
-    kind: 'highRisk',
-    title: '高风险应用',
-    description:
-      '能执行命令的应用，例如终端。确认卡上会特别提示；普通输入照常自动进行。终端与脚本类应用已内置在名单中。',
-  },
-  {
-    kind: 'sensitive',
-    title: '敏感应用',
-    description: '只获取界面结构，不读取输入框内容，也不截图。',
-  },
-]
+    protected: {
+      title: '不让 Emperor 操作的应用',
+      description:
+        'Emperor 看不到也不能操作这些应用，例如密码管理器、网银客户端。系统授权界面与 Emperor 自身已内置保护。',
+    },
+    highRisk: {
+      title: '高风险应用',
+      description:
+        '能执行命令的应用，例如终端：确认卡上会特别提示，普通输入照常自动进行。终端与脚本类应用已内置在名单中。',
+    },
+    sensitive: {
+      title: '不截图的应用',
+      description: '只读取界面结构，不读取输入框内容，也不截图。',
+    },
+  }
 
-const APP_IDENTITY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/
-const drafts = ref<Record<ListKind, string>>({
-  protected: '',
-  highRisk: '',
-  sensitive: '',
-})
-const errors = ref<Record<ListKind, string>>({
-  protected: '',
-  highRisk: '',
-  sensitive: '',
+const rows = computed(() =>
+  props.kinds.map((kind) => ({ kind, ...ROWS[kind] })),
+)
+const adding = ref<ListKind | null>(null)
+const dialogOpen = computed({
+  get: () => adding.value !== null,
+  set: (value: boolean) => {
+    if (!value) adding.value = null
+  },
 })
 
-function add(kind: ListKind): void {
-  const id = drafts.value[kind].trim()
-  errors.value[kind] = ''
-  if (!APP_IDENTITY.test(id)) {
-    errors.value[kind] = '请输入应用的 bundle ID，例如 com.example.App'
-    return
-  }
-  if (props.lists[kind].includes(id)) {
-    drafts.value[kind] = ''
-    return
-  }
+function add(id: string): void {
+  const kind = adding.value
+  if (!kind || props.lists[kind].includes(id)) return
   emit('change', kind, [...props.lists[kind], id])
-  drafts.value[kind] = ''
 }
 
 function remove(kind: ListKind, id: string): void {
@@ -85,10 +77,10 @@ function remove(kind: ListKind, id: string): void {
 <template>
   <SettingsGroup
     title="应用名单"
-    description="在内置名单之外，追加你自己的应用。按 bundle ID 识别（可在“关于本机 › 系统报告”或应用的 Info.plist 中找到）。"
+    description="在内置名单之外追加你自己的应用，按 bundle ID 识别。"
   >
     <SettingsRow
-      v-for="row in ROWS"
+      v-for="row in rows"
       :key="row.kind"
       :title="row.title"
       :data-app-list="row.kind"
@@ -119,32 +111,23 @@ function remove(kind: ListKind, id: string): void {
             </button>
           </span>
         </span>
-        <span v-if="errors[row.kind]" class="app-error" role="alert">{{
-          errors[row.kind]
-        }}</span>
       </template>
-      <form class="app-add" @submit.prevent="add(row.kind)">
-        <TextField
-          v-model="drafts[row.kind]"
-          class="app-input"
-          size="sm"
-          monospace
-          :invalid="errors[row.kind] !== ''"
-          :aria-label="`添加到${row.title}`"
-          placeholder="com.example.App"
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          type="submit"
-          :disabled="busy || drafts[row.kind].trim() === ''"
-          >添加</Button
-        >
-      </form>
+      <Button
+        size="sm"
+        variant="outline"
+        :disabled="busy"
+        :aria-label="`添加到${row.title}`"
+        @click="adding = row.kind"
+        >添加</Button
+      >
     </SettingsRow>
   </SettingsGroup>
+  <AppIdDialog
+    v-model:open="dialogOpen"
+    :title="adding ? `添加到${ROWS[adding].title}` : ''"
+    :busy="busy"
+    @save="add"
+  />
 </template>
 
 <style scoped>
@@ -179,21 +162,5 @@ function remove(kind: ListKind, id: string): void {
 
 .app-chip-remove:hover:not(:disabled) {
   color: rgb(var(--danger));
-}
-
-.app-error {
-  display: block;
-  margin-top: var(--space-0-5);
-  color: rgb(var(--danger));
-}
-
-.app-add {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.app-input {
-  width: calc(var(--space-4) * 11);
 }
 </style>

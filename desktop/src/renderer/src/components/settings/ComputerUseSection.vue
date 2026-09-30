@@ -1,22 +1,26 @@
 <script setup lang="ts">
 /**
- * Settings › 电脑操作 — computer use (spec 00 §3.3, §6.6, §6.9, §10.4,
- * revised 2026-09-29: the AI drives continuously while it is on). Four
- * groups, the rest folded under 「高级」:
- * 1. 电脑操作 — the master switch (off by default; turning it on registers
- *    the GUI tools), with a notice when a saved per-item mode switched it
- *    off;
- * 2. 应用与浏览器 — one switch per driver with its stage and what it lacks
- *    (tools stay registered, §8.4); the Chrome row's 「管理」 shows the
- *    extension pairing (it opens by itself while a code waits); the user's
- *    protected apps;
- * 3. 系统权限 (macOS) — Emperor Computer Helper, Accessibility and Screen
- *    Recording with their repair actions;
- * 4. 紧急停止 — the shortcut (修改 / 恢复默认) and 立即停止 / 恢复.
- * 「高级」: the app lists, saved screenshots, the desktop driver's current
- * capability and diagnostics, and 须知. Emperor's control of the built-in
- * browser, passwords, sign-ins, site permissions and download retention
- * live in 设置 › 浏览器.
+ * Settings › 电脑操作 — laid out like Codex's 电脑操控 (spec 00 §3.3, §6.6,
+ * §6.9, revised 2026-09-29: the AI drives continuously while it is on):
+ * - the master card: 电脑操作 on or off (off by default; turning it on
+ *   registers the GUI tools); after an emergency stop it says 已停止 and
+ *   offers 恢复. A notice explains when a saved per-item mode switched it
+ *   off;
+ * - 控制: 任意应用 (the macOS desktop driver) and Chrome 和 Edge (the
+ *   extension connection), each with 管理 (its sub page) and its own
+ *   switch (tools stay registered, §8.4); the stage is named only when it
+ *   is not simply available;
+ * - 不让 Emperor 操作的应用: the user's protected apps (添加 / 移除);
+ * - 紧急停止: the shortcut (修改) and 立即停止 / 恢复.
+ * Sub pages (`useSettingsPages`):
+ * - 任意应用: Emperor Computer Helper, Accessibility and Screen Recording
+ *   with their repair actions (shown only when needed), the high-risk and
+ *   no-screenshot app lists, and saved screenshots;
+ * - Chrome 和 Edge: the extension pairing. The pairing panel stays mounted
+ *   (hidden elsewhere) so the main page shows its summary, and a pairing
+ *   code that starts waiting opens this page.
+ * Emperor's control of the built-in browser, passwords, sign-ins, site
+ * permissions and download retention live in 设置 › 浏览器.
  * Everything comes from `computerUse.status` and refreshes on the host's
  * `computer_use_changed` events. Stopping and resuming never wait on a
  * pending card (Core does not guard them).
@@ -27,7 +31,8 @@ import type {
   MacHelperPermissionStatus,
   MacHelperStatus,
 } from '../../../../shared/ipc-contract'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { MousePointerClick } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   macHelperRequestPermission,
   macHelperReconnect,
@@ -39,13 +44,19 @@ import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import Button from '../ui/Button.vue'
 import {
+  EmptyState,
+  SettingsCard,
   SettingsGroup,
   SettingsRow,
   SettingsSection,
   StatusBadge,
   Switch,
 } from './ui'
-import { refreshAction, useSettingsHeader } from './settingsHeader'
+import {
+  refreshAction,
+  useSettingsHeader,
+  useSettingsPages,
+} from './settingsHeader'
 import {
   computerUseHeadline,
   driverRows,
@@ -53,10 +64,15 @@ import {
   screenshotRow,
 } from './computer/computerUseSettingsModel'
 import KillSwitchEditor from './computer/KillSwitchEditor.vue'
+import AppIdDialog from './computer/AppIdDialog.vue'
 import AppListsSettings from './computer/AppListsSettings.vue'
 import BrowserPairingSettings from './computer/BrowserPairingSettings.vue'
 
 const ctx = useAppContext()
+const { page, open: openPage } = useSettingsPages({
+  apps: '任意应用',
+  chrome: 'Chrome 和 Edge',
+})
 const status = ref<ComputerUseStatusView | null>(null)
 const loaded = ref(false)
 const busy = ref(false)
@@ -64,55 +80,93 @@ const error = ref('')
 const helper = ref<MacHelperStatus | null>(null)
 
 const headline = computed(() => computerUseHeadline(status.value, loaded.value))
-// The built-in browser's switch is in 设置 › 浏览器.
-const drivers = computed(() =>
-  driverRows(status.value).filter((row) => row.driver !== 'embedded-browser'),
-)
 const killSwitch = computed(() => killSwitchRow(status.value))
 const screenshots = computed(() => screenshotRow(status.value))
 const supported = computed(() => Boolean(status.value?.supported))
 const enabled = computed(() => Boolean(status.value?.enabled))
+const stopped = computed(() => Boolean(status.value?.stopped))
 const macDesktop = computed(() => status.value?.platform === 'macos')
 
-// 「高级」 and the Chrome pairing panel fold away; a waiting pairing code
-// opens the panel, 「管理」 on the protected apps row opens 「高级」.
-const advancedOpen = ref(false)
-const pairingOpen = ref(false)
+const rows = computed(() => driverRows(status.value))
+const desktopRow = computed(() =>
+  rows.value.find((row) => row.driver === 'desktop'),
+)
+const chromeRow = computed(() =>
+  rows.value.find((row) => row.driver === 'external-browser'),
+)
+
+/** The card names its state only when it is not simply on or off. */
+const cardBadge = computed(() =>
+  ['已急停', '已暂停', '不可用'].includes(headline.value.badge)
+    ? {
+        tone: headline.value.tone,
+        text:
+          headline.value.badge === '已急停' ? '已停止' : headline.value.badge,
+      }
+    : null,
+)
+const cardDescription = computed(() =>
+  stopped.value || !supported.value || status.value?.scopedRetired
+    ? headline.value.description
+    : '允许 Emperor 在对话里操作应用和网页',
+)
+
+// ── Chrome 和 Edge ───────────────────────────────────────────────────────
 const pairing = ref({ pending: 0, paired: 0, tabs: 0 })
-const appListsAnchor = ref<HTMLElement | null>(null)
 
 function onPairingSummary(value: {
   pending: number
   paired: number
   tabs: number
 }): void {
+  // A code that starts waiting needs the user now: show the pairing page.
+  if (value.pending > pairing.value.pending && page.value === null)
+    openPage('chrome')
   pairing.value = value
-  if (value.pending > 0) pairingOpen.value = true
 }
 
-const pairingSummary = computed(() =>
-  pairing.value.paired > 0
-    ? `已连接 ${pairing.value.paired} 个浏览器 · ${pairing.value.tabs} 个可操作标签页`
-    : pairing.value.pending > 0
-      ? '有配对等待确认'
-      : '尚未配对',
-)
+const chromeDescription = computed(() => {
+  const row = chromeRow.value
+  if (row && (!row.switchedOn || row.stage === '不可用')) return row.description
+  if (pairing.value.pending > 0) return '有配对等待确认'
+  if (pairing.value.paired > 0)
+    return `已连接 ${pairing.value.paired} 个浏览器 · ${pairing.value.tabs} 个可操作标签页`
+  return '尚未连接'
+})
 
-const protectedCount = computed(
-  () => status.value?.appLists?.protected.length ?? 0,
+// ── 任意应用 ─────────────────────────────────────────────────────────────
+const permissionsMissing = computed(
+  () =>
+    macDesktop.value &&
+    helper.value !== null &&
+    (helper.value.permissions.accessibility !== 'granted' ||
+      helper.value.permissions['screen-recording'] !== 'granted'),
 )
+const desktopDescription = computed(() => {
+  const row = desktopRow.value
+  if (row && enabled.value && !row.switchedOn) return row.description
+  if (row?.stage === '不可用') return row.description
+  if (permissionsMissing.value) return '需要辅助功能和屏幕录制权限'
+  return '允许 Emperor 操作你 Mac 上的应用'
+})
 
-function showAppLists(): void {
-  advancedOpen.value = true
-  void nextTick(() => appListsAnchor.value?.scrollIntoView({ block: 'start' }))
-}
-
-function onAdvancedToggle(event: Event): void {
-  advancedOpen.value = (event.target as HTMLDetailsElement).open
-}
-const desktopDriver = computed(() =>
-  status.value?.drivers.find((driver) => driver.driver === 'desktop'),
-)
+const helperDescription = computed(() => {
+  const value = helper.value
+  if (!value) return '正在检查连接状态'
+  if (!value.connected)
+    return (
+      value.reason ??
+      (value.autoRestartSuspended
+        ? 'Helper 已停止自动重启'
+        : '正在检查连接状态')
+    )
+  const parts = [
+    `版本 ${value.helperVersion ?? '未知'}`,
+    `协议 ${value.protocol ?? '未知'}`,
+  ]
+  if (value.lastErrorCode) parts.push(`最近错误码：${value.lastErrorCode}`)
+  return parts.join(' · ')
+})
 
 const permissionLabels: Record<MacHelperPermissionStatus, string> = {
   granted: '已授权',
@@ -136,6 +190,13 @@ function permissionTone(
       : 'neutral'
 }
 
+function needsReset(permission: MacHelperPermission): boolean {
+  return ['denied', 'stale'].includes(
+    helper.value?.permissions[permission] ?? '',
+  )
+}
+
+// ── Loading and actions ──────────────────────────────────────────────────
 async function refreshHelper(): Promise<void> {
   if (!macDesktop.value) {
     helper.value = null
@@ -188,7 +249,7 @@ function resumeAll(): void {
 }
 
 function setDriverEnabled(
-  driver: 'embedded-browser' | 'external-browser' | 'desktop',
+  driver: 'external-browser' | 'desktop',
   next: boolean,
 ): void {
   void act(() =>
@@ -211,6 +272,20 @@ function setAppList(
   next: string[],
 ): void {
   void act(() => core('computerUse.setAppLists', { [kind]: next }))
+}
+
+const addingProtected = ref(false)
+
+function addProtected(id: string): void {
+  if (appLists.value.protected.includes(id)) return
+  setAppList('protected', [...appLists.value.protected, id])
+}
+
+function removeProtected(id: string): void {
+  setAppList(
+    'protected',
+    appLists.value.protected.filter((item) => item !== id),
+  )
 }
 
 function clearScreenshots(): void {
@@ -286,283 +361,119 @@ onBeforeUnmount(() => {
 
 <template>
   <SettingsSection
-    intro="让 Agent 在内置浏览器、已连接的 Chrome 标签页和 macOS 桌面窗口中连续操作。受控窗口会以只读预览显示在对话里；只有高影响操作、需要输入密码或 Agent 有问题要问时才会停下来等你。每个动作都记入会话日志，随时可以急停。"
+    :intro="
+      page === 'apps'
+        ? '让 Emperor 操作你 Mac 上的应用所需的系统权限、另外的应用名单，以及保存的截图。'
+        : undefined
+    "
   >
     <p v-if="error" class="cu-error" role="alert">{{ error }}</p>
-    <p
-      v-if="status?.scopedRetired && !enabled"
-      class="cu-notice"
-      role="status"
-      data-testid="computer-use-scoped-retired"
-    >
-      电脑操作改为由 AI
-      连续操作，不再逐项授权。你之前选择的「逐项授权」已停用，电脑操作因此已关闭；确认后重新打开即可。
-    </p>
 
-    <SettingsGroup title="电脑操作">
-      <SettingsRow
-        title="启用电脑操作"
-        :description="headline.description"
-        label-for="computer-use-enabled"
+    <!-- 任意应用 -->
+    <template v-if="page === 'apps'">
+      <p v-if="desktopRow?.missing.length" class="cu-note">
+        实验阶段，尚不支持：{{ desktopRow.missing.join('、') }}
+      </p>
+      <SettingsGroup
+        v-if="macDesktop"
+        title="系统权限"
+        description="桌面权限只授予 Emperor Computer Helper，不授予主应用"
       >
-        <div class="cu-control">
-          <StatusBadge
-            :tone="headline.tone"
-            dot
-            data-testid="computer-use-status"
-          >
-            {{ headline.badge }}
-          </StatusBadge>
-          <Switch
-            id="computer-use-enabled"
-            :model-value="enabled"
-            :disabled="busy || !supported"
-            @update:model-value="setEnabled"
-          />
-        </div>
-      </SettingsRow>
-    </SettingsGroup>
-
-    <SettingsGroup
-      title="应用与浏览器"
-      description="每种驱动单独标注阶段；尚不支持的动作会直接告知 Agent「能力未启用」"
-    >
-      <template v-for="driver in drivers" :key="driver.driver">
+        <p v-if="helper?.previewBuild" class="cu-notice" role="status">
+          预览版每次更新后需重新授权辅助功能和屏幕录制；如系统开关显示已开启但权限失效，请使用“重置授权”重新登记。
+        </p>
         <SettingsRow
-          :title="driver.label"
-          :description="driver.description"
-          :data-driver="driver.driver"
+          title="Emperor Computer Helper"
+          :description="helperDescription"
         >
-          <template #description>
-            <span>{{ driver.description }}</span>
-            <span v-if="driver.missing.length" class="cu-missing"
-              >尚不支持：{{ driver.missing.join('、') }}</span
-            >
-            <span
-              v-if="driver.driver === 'external-browser'"
-              class="cu-missing"
-              data-testid="browser-pairing-summary"
-              >{{ pairingSummary }}</span
-            >
-          </template>
           <div class="cu-control">
-            <StatusBadge :tone="driver.tone">{{ driver.stage }}</StatusBadge>
+            <StatusBadge :tone="helper?.connected ? 'ok' : 'warn'">
+              {{ helper?.connected ? '已连接' : '未连接' }}
+            </StatusBadge>
             <Button
-              v-if="driver.driver === 'external-browser'"
+              v-if="helper?.available && !helper.connected"
               size="sm"
               variant="outline"
-              :aria-expanded="pairingOpen"
-              aria-controls="computer-use-pairing"
-              data-testid="browser-pairing-manage"
-              @click="pairingOpen = !pairingOpen"
-              >管理</Button
+              :disabled="busy"
+              data-testid="mac-helper-reconnect"
+              @click="reconnectHelper"
+              >重新连接</Button
             >
-            <Switch
-              :id="`computer-use-driver-${driver.driver}`"
-              :model-value="driver.switchedOn"
-              :disabled="busy || !enabled"
-              :aria-label="`${driver.label}开关`"
-              @update:model-value="setDriverEnabled(driver.driver, $event)"
-            />
           </div>
         </SettingsRow>
-        <div
-          v-if="driver.driver === 'external-browser'"
-          v-show="pairingOpen"
-          id="computer-use-pairing"
+        <SettingsRow
+          title="辅助功能"
+          description="读取其他应用的窗口和控件。系统设置里没有 Helper 时，先点“请求权限”让它登记。"
         >
-          <BrowserPairingSettings
-            embedded
-            @connection-changed="reload"
-            @summary="onPairingSummary"
-          />
-        </div>
-      </template>
-      <SettingsRow
+          <div class="cu-control">
+            <StatusBadge :tone="permissionTone('accessibility')">{{
+              permissionLabel('accessibility')
+            }}</StatusBadge>
+            <Button
+              v-if="helper?.permissions.accessibility !== 'granted'"
+              size="sm"
+              variant="outline"
+              :disabled="busy || !helper?.connected"
+              @click="requestPermission('accessibility')"
+              >请求权限</Button
+            >
+            <Button
+              v-if="needsReset('accessibility')"
+              size="sm"
+              variant="outline"
+              :disabled="busy"
+              @click="resetPermission('accessibility')"
+              >重置授权</Button
+            >
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title="屏幕录制"
+          description="截图和对话里的实时画面需要。打开系统开关后点“重启 Helper”生效；列表里没有 Helper 时，点“＋”在 ~/.emperor/native-helpers/ 中选择 Emperor Computer Helper.app。"
+        >
+          <div class="cu-control">
+            <StatusBadge :tone="permissionTone('screen-recording')">{{
+              permissionLabel('screen-recording')
+            }}</StatusBadge>
+            <Button
+              v-if="helper?.permissions['screen-recording'] !== 'granted'"
+              size="sm"
+              variant="outline"
+              :disabled="busy || !helper?.connected"
+              @click="requestPermission('screen-recording')"
+              >请求权限</Button
+            >
+            <!-- A running helper keeps its first screen-recording answer. -->
+            <Button
+              v-if="
+                helper?.connected &&
+                helper.permissions['screen-recording'] !== 'granted'
+              "
+              size="sm"
+              variant="outline"
+              :disabled="busy"
+              data-testid="mac-helper-restart"
+              @click="reconnectHelper"
+              >重启 Helper</Button
+            >
+            <Button
+              v-if="needsReset('screen-recording')"
+              size="sm"
+              variant="outline"
+              :disabled="busy"
+              @click="resetPermission('screen-recording')"
+              >重置授权</Button
+            >
+          </div>
+        </SettingsRow>
+      </SettingsGroup>
+      <AppListsSettings
         v-if="macDesktop"
-        title="不让 Agent 操作的应用"
-        :description="
-          protectedCount
-            ? `你另外保护了 ${protectedCount} 个应用；系统授权界面和 Emperor 自身已内置保护`
-            : '系统授权界面和 Emperor 自身已内置保护；可以另外添加密码管理器、网银等应用'
-        "
-      >
-        <Button
-          size="sm"
-          variant="outline"
-          data-testid="computer-use-app-lists"
-          @click="showAppLists"
-          >管理</Button
-        >
-      </SettingsRow>
-    </SettingsGroup>
-
-    <SettingsGroup
-      v-if="macDesktop"
-      title="系统权限"
-      description="桌面权限只授予 Emperor Computer Helper，不授予主应用"
-    >
-      <p v-if="helper?.previewBuild" class="cu-missing" role="status">
-        预览版每次更新后需重新授权辅助功能和屏幕录制；如系统开关显示已开启但权限失效，请使用下方的“重置授权”重新登记。
-      </p>
-      <SettingsRow
-        title="Emperor Computer Helper"
-        :description="
-          helper?.connected
-            ? `版本 ${helper.helperVersion ?? '未知'} · 协议 ${helper.protocol ?? '未知'}`
-            : (helper?.reason ?? '正在检查连接状态')
-        "
-      >
-        <div class="cu-control">
-          <StatusBadge :tone="helper?.connected ? 'ok' : 'warn'">
-            {{ helper?.connected ? '已连接' : '未连接' }}
-          </StatusBadge>
-          <Button
-            v-if="helper?.available && !helper.connected"
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            data-testid="mac-helper-reconnect"
-            @click="reconnectHelper"
-            >重新连接</Button
-          >
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        title="辅助功能"
-        description="允许 Helper 读取其他应用的窗口和控件。若系统设置列表中没有 Helper，先点“请求权限”使它登记，再打开开关。"
-      >
-        <div class="cu-control">
-          <StatusBadge :tone="permissionTone('accessibility')">{{
-            permissionLabel('accessibility')
-          }}</StatusBadge>
-          <Button
-            v-if="helper?.permissions.accessibility !== 'granted'"
-            size="sm"
-            variant="outline"
-            :disabled="busy || !helper?.connected"
-            @click="requestPermission('accessibility')"
-            >请求权限</Button
-          >
-          <Button
-            v-if="
-              ['denied', 'stale'].includes(
-                helper?.permissions.accessibility ?? '',
-              )
-            "
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            @click="resetPermission('accessibility')"
-            >重置授权</Button
-          >
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        title="屏幕录制"
-        description="截图和对话里的实时画面需要。点“请求权限”后到系统设置的“录屏与系统录音”打开开关；若列表没有 Helper，点“＋ 添加”，在 ~/.emperor/native-helpers/ 中选择本次安装的 Emperor Computer Helper.app。macOS 要到 Helper 重新启动后才生效，打开开关后点“重启 Helper”。"
-      >
-        <div class="cu-control">
-          <StatusBadge :tone="permissionTone('screen-recording')">{{
-            permissionLabel('screen-recording')
-          }}</StatusBadge>
-          <Button
-            v-if="helper?.permissions['screen-recording'] !== 'granted'"
-            size="sm"
-            variant="outline"
-            :disabled="busy || !helper?.connected"
-            @click="requestPermission('screen-recording')"
-            >请求权限</Button
-          >
-          <!-- A running helper keeps its first screen-recording answer. -->
-          <Button
-            v-if="
-              helper?.connected &&
-              helper.permissions['screen-recording'] !== 'granted'
-            "
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            data-testid="mac-helper-restart"
-            @click="reconnectHelper"
-            >重启 Helper</Button
-          >
-          <Button
-            v-if="
-              ['denied', 'stale'].includes(
-                helper?.permissions['screen-recording'] ?? '',
-              )
-            "
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            @click="resetPermission('screen-recording')"
-            >重置授权</Button
-          >
-        </div>
-      </SettingsRow>
-    </SettingsGroup>
-
-    <SettingsGroup title="紧急停止">
-      <SettingsRow title="全局快捷键" :description="killSwitch.description">
-        <div class="cu-control">
-          <kbd v-if="killSwitch.shortcut" class="cu-kbd">{{
-            killSwitch.shortcut
-          }}</kbd>
-          <StatusBadge :tone="killSwitch.tone">{{
-            killSwitch.badge
-          }}</StatusBadge>
-          <KillSwitchEditor
-            :accelerator="status?.killSwitch.accelerator ?? ''"
-            :busy="busy"
-            @save="setKillSwitch"
-          />
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        :title="status?.stopped ? '已停止' : '停止所有操作'"
-        :description="
-          status?.stopped
-            ? '已停止，所有窗口和标签页已释放（没有关闭）。恢复后 Agent 可以重新接手。'
-            : '取消进行中的动作，释放所有窗口和标签页（不关闭它们）；也可以用 Dock 菜单的「停止电脑操作」'
-        "
-      >
-        <Button
-          v-if="status?.stopped"
-          size="sm"
-          variant="outline"
-          :disabled="busy"
-          @click="resumeAll"
-        >
-          恢复
-        </Button>
-        <Button
-          v-else
-          size="sm"
-          variant="danger"
-          :disabled="busy || !enabled"
-          @click="stopAll"
-        >
-          立即停止
-        </Button>
-      </SettingsRow>
-    </SettingsGroup>
-
-    <details
-      class="cu-advanced"
-      :open="advancedOpen"
-      data-testid="computer-use-advanced"
-      @toggle="onAdvancedToggle"
-    >
-      <summary class="cu-advanced-summary">高级</summary>
-      <div ref="appListsAnchor">
-        <AppListsSettings
-          v-if="macDesktop"
-          :lists="appLists"
-          :busy="busy"
-          @change="setAppList"
-        />
-      </div>
+        :lists="appLists"
+        :busy="busy"
+        :kinds="['highRisk', 'sensitive']"
+        @change="setAppList"
+      />
       <SettingsGroup title="截图">
         <SettingsRow
           title="已保存的截图"
@@ -579,68 +490,206 @@ onBeforeUnmount(() => {
           </Button>
         </SettingsRow>
       </SettingsGroup>
+    </template>
 
-      <SettingsGroup v-if="macDesktop" title="桌面驱动">
-        <SettingsRow
-          title="当前能力"
-          :description="
-            desktopDriver?.available
-              ? desktopDriver.actions.length
-                ? '可列出应用、窗口并读取控件，点击与输入已开放。桌面凭据代填和真实动作矩阵尚待验收。'
-                : '可列出应用与窗口、读取控件；获得屏幕录制权限后可截图。点击、键盘鼠标输入和凭据代填尚未开放。'
-              : '桌面驱动当前不可用；点击、键盘鼠标输入和凭据代填尚未开放。'
-          "
-        >
+    <!-- Main page -->
+    <template v-else-if="page === null">
+      <p
+        v-if="status?.scopedRetired && !enabled"
+        class="cu-notice"
+        role="status"
+        data-testid="computer-use-scoped-retired"
+      >
+        电脑操作改为由 AI
+        连续操作，不再逐项授权。你之前选择的「逐项授权」已停用，电脑操作因此已关闭；确认后重新打开即可。
+      </p>
+      <SettingsCard
+        class="cu-card"
+        data-testid="computer-use-card"
+        title="电脑操作"
+        :description="cardDescription"
+      >
+        <template #leading><MousePointerClick :size="20" /></template>
+        <template v-if="cardBadge" #meta>
           <StatusBadge
-            :tone="desktopDriver?.actions.length ? 'warn' : 'accent'"
+            :tone="cardBadge.tone"
+            dot
+            data-testid="computer-use-status"
+            >{{ cardBadge.text }}</StatusBadge
           >
-            {{ desktopDriver?.actions.length ? '可交互（实验）' : '只读' }}
-          </StatusBadge>
+        </template>
+        <template #actions>
+          <Button
+            v-if="stopped"
+            size="sm"
+            variant="outline"
+            :disabled="busy"
+            @click="resumeAll"
+            >恢复</Button
+          >
+          <Switch
+            id="computer-use-enabled"
+            :model-value="enabled"
+            :disabled="busy || !supported"
+            aria-label="电脑操作"
+            @update:model-value="setEnabled"
+          />
+        </template>
+      </SettingsCard>
+
+      <SettingsGroup title="控制">
+        <SettingsRow
+          v-if="macDesktop && desktopRow"
+          title="任意应用"
+          :description="desktopDescription"
+          data-driver="desktop"
+        >
+          <template v-if="desktopRow.stage !== '可用'" #badge>
+            <StatusBadge :tone="desktopRow.tone">{{
+              desktopRow.stage
+            }}</StatusBadge>
+          </template>
+          <div class="cu-control">
+            <Button
+              size="sm"
+              variant="outline"
+              data-action="manage-apps"
+              @click="openPage('apps')"
+              >管理</Button
+            >
+            <Switch
+              id="computer-use-driver-desktop"
+              :model-value="desktopRow.switchedOn"
+              :disabled="busy || !enabled"
+              aria-label="任意应用开关"
+              @update:model-value="setDriverEnabled('desktop', $event)"
+            />
+          </div>
         </SettingsRow>
         <SettingsRow
-          title="诊断"
-          :description="
-            helper?.autoRestartSuspended
-              ? (helper.reason ?? 'Helper 已停止自动重启')
-              : helper?.lastErrorCode
-                ? `最近错误码：${helper.lastErrorCode}`
-                : helper?.connected
-                  ? '连接正常'
-                  : (helper?.reason ?? '等待 Helper 连接')
-          "
-          dense
-        />
+          v-if="chromeRow"
+          title="Chrome 和 Edge"
+          data-driver="external-browser"
+        >
+          <template v-if="chromeRow.stage !== '可用'" #badge>
+            <StatusBadge :tone="chromeRow.tone">{{
+              chromeRow.stage
+            }}</StatusBadge>
+          </template>
+          <template #description>
+            <span data-testid="browser-pairing-summary">{{
+              chromeDescription
+            }}</span>
+          </template>
+          <div class="cu-control">
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="browser-pairing-manage"
+              @click="openPage('chrome')"
+              >管理</Button
+            >
+            <Switch
+              id="computer-use-driver-external-browser"
+              :model-value="chromeRow.switchedOn"
+              :disabled="busy || !enabled"
+              aria-label="Chrome 和 Edge 开关"
+              @update:model-value="setDriverEnabled('external-browser', $event)"
+            />
+          </div>
+        </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup title="须知">
-        <ul class="cu-notes">
-          <li>
-            电脑操作打开后，由 AI
-            连续操作：普通的查看、点击、输入（包括终端）、跳转和文件传输都会直接进行。付款、删除、发送等高影响操作和账号密码代填逐次确认；AI
-            需要你时会在对话里提问。
-          </li>
-          <li>
-            菜单栏的「停止共享」只停止该窗口在对话里的画面，不会停止
-            Agent；要停止 Agent，请使用急停快捷键、Dock
-            菜单或上方的「立即停止」。
-          </li>
-          <li>
-            如果也向 Emperor Agent 主应用授予屏幕录制权限，它启动的 Shell
-            子进程可能直接截图。受限 Shell 的现有隔离规则不能阻止这种继承。
-          </li>
-          <li>
-            Shell 权限独立于电脑操作；完全放行的 Shell
-            可以绕开这里的限制。关闭电脑操作只停用 Emperor
-            内建的图形界面操作，不代表 Agent 只能操作浏览器或桌面窗口。
-          </li>
-          <li>
-            页面和桌面窗口内容一律视为不可信内容；Agent
-            不会把其中的文字当作你的指令。
-          </li>
-        </ul>
+      <SettingsGroup v-if="macDesktop" title="不让 Emperor 操作的应用">
+        <template #actions>
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="busy"
+            data-action="add-protected-app"
+            @click="addingProtected = true"
+            >添加</Button
+          >
+        </template>
+        <EmptyState
+          v-if="!appLists.protected.length"
+          compact
+          title="暂无"
+          description="系统授权界面和 Emperor 自身已内置保护"
+        />
+        <SettingsRow
+          v-for="id in appLists.protected"
+          :key="id"
+          :title="id"
+          :data-protected-app="id"
+          dense
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="busy"
+            :aria-label="`移除 ${id}`"
+            @click="removeProtected(id)"
+            >移除</Button
+          >
+        </SettingsRow>
       </SettingsGroup>
-    </details>
+
+      <SettingsGroup title="紧急停止">
+        <SettingsRow
+          :title="stopped ? '已停止' : '停止所有操作'"
+          :description="
+            stopped
+              ? '所有窗口和标签页已释放（没有关闭）；恢复后 Emperor 可以重新接手。'
+              : killSwitch.description
+          "
+        >
+          <div class="cu-control">
+            <KillSwitchEditor
+              :accelerator="status?.killSwitch.accelerator ?? ''"
+              :busy="busy"
+              @save="setKillSwitch"
+            />
+            <Button
+              v-if="stopped"
+              size="sm"
+              variant="outline"
+              :disabled="busy"
+              @click="resumeAll"
+              >恢复</Button
+            >
+            <Button
+              v-else
+              size="sm"
+              variant="danger"
+              :disabled="busy || !enabled"
+              @click="stopAll"
+              >立即停止</Button
+            >
+          </div>
+        </SettingsRow>
+      </SettingsGroup>
+    </template>
+
+    <!-- Chrome 和 Edge: always mounted, for the summary and the auto-open. -->
+    <div v-show="page === 'chrome'" id="computer-use-pairing">
+      <p v-if="chromeRow?.missing.length" class="cu-note">
+        实验阶段，尚不支持：{{ chromeRow.missing.join('、') }}
+      </p>
+      <BrowserPairingSettings
+        @connection-changed="reload"
+        @summary="onPairingSummary"
+      />
+    </div>
   </SettingsSection>
+
+  <AppIdDialog
+    v-model:open="addingProtected"
+    title="添加不让 Emperor 操作的应用"
+    description="Emperor 看不到也不能操作这些应用，例如密码管理器、网银客户端。"
+    :busy="busy"
+    @save="addProtected"
+  />
 </template>
 
 <style scoped>
@@ -654,24 +703,19 @@ onBeforeUnmount(() => {
   line-height: var(--lh-xs);
 }
 
+.cu-card {
+  margin-top: var(--space-2);
+}
+
 .cu-control {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.cu-missing {
-  display: block;
-  margin-top: var(--space-0-5);
+.cu-note {
+  margin: var(--space-2) 0 0;
   color: rgb(var(--label-tertiary));
-}
-
-.cu-kbd {
-  padding: var(--space-0-5) var(--space-1-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -684,35 +728,5 @@ onBeforeUnmount(() => {
   color: rgb(var(--label-primary));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-}
-
-.cu-advanced {
-  margin-top: var(--space-4);
-}
-
-.cu-advanced-summary {
-  padding: var(--space-2) 0;
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-s);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cu-advanced-summary:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 2px;
-  border-radius: var(--radius-row);
-}
-
-.cu-notes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-3) 0 var(--space-1) var(--space-4);
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  text-wrap: pretty;
 }
 </style>

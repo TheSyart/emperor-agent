@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
       props.embedded
         ? { class: 'pairing-embedded' }
         : {
-            title: 'Chrome / Edge 扩展',
+            title: '扩展连接',
             description: PAIRING_NOTE,
           }
     "
