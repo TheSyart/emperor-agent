@@ -1,4 +1,5 @@
 import {
+  session as electronSession,
   shell,
   WebContentsView,
   type BrowserWindow,
@@ -16,7 +17,12 @@ import {
 import { subframeNavigationAllowed } from './computer-use/agent-navigation-policy'
 import { hardenSession } from './computer-use/session-hardening'
 import {
+  UserBrowserHistory,
+  type UserBrowserHistoryEntry,
+} from './user-browser-history'
+import {
   BROWSER_STATE_CHANNEL,
+  type BrowserClearResult,
   type BrowserViewState,
 } from '../shared/ipc-contract'
 
@@ -31,6 +37,18 @@ export const BROWSER_PARTITION = 'emperor-browser'
 export const BROWSER_EXTERNAL_OPEN_INTERVAL_MS = 1_000
 
 const ERR_ABORTED = -3
+
+/**
+ * Clearing the browsing data (plan 5): `closing` stops and destroys the view,
+ * `clearing` waits for the partition wipe; then `idle`, or `failed` with the
+ * reason. No page opens and no second clearing starts meanwhile.
+ */
+export type BrowserClearState = 'idle' | 'closing' | 'clearing' | 'failed'
+
+export interface BrowserViewHostOptions {
+  /** 设置 › 浏览器 › 临时历史 (default on). */
+  historyEnabled?: () => boolean | Promise<boolean>
+}
 
 export function browserViewWebPreferences(): WebPreferences {
   return {
@@ -61,15 +79,37 @@ export class BrowserViewHost {
   private bounds: Rectangle | null = null
   private clearing: Promise<void> = Promise.resolve()
   private lastExternalOpen = Number.NEGATIVE_INFINITY
+  private readonly visited: UserBrowserHistory
+  private readonly historyEnabled: () => boolean | Promise<boolean>
+  private clearRun: Promise<BrowserClearResult> | null = null
+  private clearStateValue: BrowserClearState = 'idle'
+  private readonly clearListeners = new Set<
+    (state: BrowserClearState) => void
+  >()
 
   constructor(
     private readonly window: BrowserWindow,
     private readonly now: () => number = Date.now,
-  ) {}
+    options: BrowserViewHostOptions = {},
+  ) {
+    this.visited = new UserBrowserHistory({ now })
+    this.historyEnabled = options.historyEnabled ?? (() => true)
+  }
+
+  get clearState(): BrowserClearState {
+    return this.clearStateValue
+  }
+
+  /** Follow the clearing state; returns an unsubscribe. */
+  onClearState(listener: (state: BrowserClearState) => void): () => void {
+    this.clearListeners.add(listener)
+    return () => this.clearListeners.delete(listener)
+  }
 
   async openUrl(input: { url: string }): Promise<{ ok: true; url: string }> {
     const url = typeof input?.url === 'string' ? input.url : ''
     if (!browserNavigationAllowed(url)) throw new Error('invalid browser url')
+    if (this.clearRun) throw new Error('browser data is being cleared')
     // A previous close may still be wiping the partition.
     await this.clearing
     if (this.window.isDestroyed()) throw new Error('browser window is closed')
@@ -82,10 +122,16 @@ export class BrowserViewHost {
     return { ok: true, url }
   }
 
-  /** Place the view; null or a rectangle too small for a page hides it. */
+  /**
+   * Place the view; null or a rectangle too small for a page hides it. A
+   * pane that just appeared (for a link main opened before it mounted) gets
+   * the current page state.
+   */
   setBounds(value: unknown): void {
+    const hidden = this.bounds === null
     this.bounds = normalizedBrowserBounds(value)
     this.applyBounds()
+    if (hidden && this.bounds !== null && this.view) this.emitState(this.view)
   }
 
   action(action: string): void {
@@ -99,20 +145,101 @@ export class BrowserViewHost {
   }
 
   close(): void {
+    this.visited.clear()
+    const view = this.detachView()
+    if (!view) return
+    const session = view.webContents.session
+    view.webContents.close()
+    this.clearing = clearBrowsingData(session)
+  }
+
+  /** The temporary history, newest first (empty while it is turned off). */
+  async history(): Promise<UserBrowserHistoryEntry[]> {
+    if (!(await this.historyEnabled())) {
+      this.visited.clear()
+      return []
+    }
+    return this.visited.list()
+  }
+
+  /** Reopen a history entry; its address is checked again like a typed one. */
+  async openHistory(id: string): Promise<{ ok: true; url: string }> {
+    if (this.clearRun) throw new Error('browser data is being cleared')
+    const entry = this.visited.find(typeof id === 'string' ? id : '')
+    if (entry === undefined) throw new Error('unknown history entry')
+    return await this.openUrl({ url: entry.url })
+  }
+
+  /**
+   * Clear the temporary browsing data of this browser's partition only:
+   * stop and destroy the view, forget the history, then wipe storage,
+   * cookies, cache and HTTP auth. A call while one runs joins it.
+   */
+  clearData(): Promise<BrowserClearResult> {
+    this.clearRun ??= this.runClear().finally(() => {
+      this.clearRun = null
+    })
+    return this.clearRun
+  }
+
+  private async runClear(): Promise<BrowserClearResult> {
+    this.setClearState('closing')
+    this.visited.clear()
+    const view = this.detachView()
+    let session: Session | null = null
+    if (view) {
+      session = view.webContents.session
+      view.webContents.stop()
+      view.webContents.close()
+    }
+    // A close just before may still be wiping.
+    await this.clearing.catch(() => undefined)
+    this.setClearState('clearing')
+    try {
+      await wipe(session ?? electronSession.fromPartition(BROWSER_PARTITION))
+      this.setClearState('idle')
+      return { ok: true }
+    } catch (error) {
+      this.setClearState('failed')
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  private setClearState(state: BrowserClearState): void {
+    this.clearStateValue = state
+    for (const listener of this.clearListeners) listener(state)
+  }
+
+  /** Take the view out of the window; returns it when it is still alive. */
+  private detachView(): WebContentsView | null {
     const view = this.view
     this.view = null
     this.pendingUrl = ''
-    if (!view) return
+    if (!view) return null
     try {
       this.window.contentView.removeChildView(view)
     } catch {
       // Shutdown may have already detached the child view from the window.
     }
+    return view.webContents.isDestroyed() ? null : view
+  }
+
+  /** A committed main-frame page of this view (temporary history). */
+  private remember(view: WebContentsView): void {
+    if (view !== this.view) return
     const contents = view.webContents
     if (contents.isDestroyed()) return
-    const session = contents.session
-    contents.close()
-    this.clearing = clearBrowsingData(session)
+    const url = contents.getURL()
+    const title = contents.getTitle()
+    const enabled = this.historyEnabled()
+    if (enabled === true) this.visited.record(url, title)
+    else if (enabled !== false)
+      void enabled.then((on) => {
+        if (on && view === this.view) this.visited.record(url, title)
+      })
   }
 
   private createView(): WebContentsView {
@@ -144,9 +271,22 @@ export class BrowserViewHost {
     const emit = () => this.emitState(view)
     contents.on('did-start-loading', emit)
     contents.on('did-stop-loading', emit)
-    contents.on('did-navigate', emit)
-    contents.on('did-navigate-in-page', emit)
-    contents.on('page-title-updated', emit)
+    contents.on('did-navigate', () => {
+      this.remember(view)
+      emit()
+    })
+    contents.on(
+      'did-navigate-in-page',
+      (_event: unknown, _url: unknown, isMainFrame?: boolean) => {
+        if (isMainFrame !== false) this.remember(view)
+        emit()
+      },
+    )
+    contents.on('page-title-updated', () => {
+      if (view === this.view && !contents.isDestroyed())
+        this.visited.retitle(contents.getURL(), contents.getTitle())
+      emit()
+    })
     contents.on(
       'did-fail-load',
       (_event, code, description, _url, isMainFrame) => {
@@ -208,4 +348,13 @@ export class BrowserViewHost {
 
 async function clearBrowsingData(session: Session): Promise<void> {
   await Promise.allSettled([session.clearStorageData(), session.clearCache()])
+}
+
+/** Every kind of stored browsing data; fails when any part fails. */
+async function wipe(session: Session): Promise<void> {
+  await Promise.all([
+    session.clearStorageData(),
+    session.clearCache(),
+    session.clearAuthCache(),
+  ])
 }

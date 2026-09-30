@@ -12,7 +12,14 @@
  *
  * Page state comes from main (`onBrowserState`). A failed load hides the
  * native view and shows the pane's own error state until the next user
- * action. Loopback pages cannot open externally (main refuses them).
+ * action. Loopback pages cannot open externally (main refuses them). A link
+ * the user clicked elsewhere in Emperor may open here too: main loads it
+ * (设置 › 浏览器) and the state push shows it. With 地址栏显示完整网址 off
+ * the bar shows only the site until the user edits it.
+ *
+ * 临时历史 (设置 › 浏览器, main's temporary history): the pages committed in
+ * this browser session, newest first. Picking one sends only its id; main
+ * checks the stored address again before loading it.
  *
  * WorkspacePanel keys the pane by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
@@ -29,22 +36,38 @@ import {
   ArrowRight,
   ExternalLink,
   Globe,
+  History,
   LockKeyhole,
   RotateCw,
   TriangleAlert,
   X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import {
   browserAction,
   closeBrowserView,
+  fetchBrowserHistory,
   onBrowserState,
+  openBrowserHistoryEntry,
   openBrowserUrl,
   openExternal,
+  type BrowserHistoryEntry,
   type BrowserViewAction,
 } from '../../api/backend'
+import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import IconButton from '../ui/IconButton.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
 import {
+  addressText,
   applyBrowserState,
   clearBrowserError,
   emptyBrowserPage,
@@ -59,6 +82,8 @@ const props = defineProps<{
 }>()
 
 const OPEN_FAILED = '无法打开网址'
+
+const { preferences } = useBrowserPreferences()
 
 const page = ref(emptyBrowserPage())
 const address = ref('')
@@ -82,6 +107,10 @@ const externalLabel = computed(() =>
     : '在外部打开',
 )
 const pageLabel = computed(() => state.value?.title || hostOf(pageUrl.value))
+/** The bar while not editing: the page address, whole or just the site. */
+const idleAddress = computed(() =>
+  addressText(pageUrl.value, preferences.value.showFullUrl),
+)
 
 useBrowserViewBounds({
   viewport,
@@ -93,7 +122,7 @@ let unsubscribe = () => {}
 onMounted(() => {
   unsubscribe = onBrowserState((next) => {
     page.value = applyBrowserState(page.value, next)
-    if (!editing.value) address.value = page.value.state?.url ?? ''
+    if (!editing.value) address.value = idleAddress.value
   })
 })
 
@@ -117,6 +146,44 @@ watch(
   },
   { immediate: true },
 )
+
+// ── 临时历史 ─────────────────────────────────────────────────────────────
+const historyShown = computed(
+  () => preferences.value.enabled && preferences.value.history,
+)
+const historyAnchor = ref<HTMLElement | null>(null)
+const historyOpen = ref(false)
+const historyEntries = shallowRef<BrowserHistoryEntry[]>([])
+
+async function toggleHistory(): Promise<void> {
+  if (historyOpen.value) {
+    historyOpen.value = false
+    return
+  }
+  historyEntries.value = await fetchBrowserHistory()
+  historyOpen.value = true
+}
+
+async function openHistoryEntry(entry: BrowserHistoryEntry): Promise<void> {
+  historyOpen.value = false
+  inputError.value = ''
+  const result = await openBrowserHistoryEntry(entry.id)
+  if (!result.ok) inputError.value = result.error ?? '无法打开这条记录'
+}
+
+function historySite(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+function historyTime(time: number): string {
+  const date = new Date(time)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 
 async function submitAddress(): Promise<void> {
   const input = address.value.trim()
@@ -146,12 +213,20 @@ function reloadOrStop(): void {
 
 function onAddressFocus(): void {
   editing.value = true
-  addressInput.value?.select()
+  // Editing shows the whole address; text the user left typed stays.
+  if (address.value === idleAddress.value) address.value = pageUrl.value
+  void nextTick(() => addressInput.value?.select())
 }
 
 function onAddressBlur(): void {
   editing.value = false
+  if (address.value === pageUrl.value) address.value = idleAddress.value
 }
+
+// 地址栏显示完整网址 changed (设置 › 浏览器): an idle bar follows at once.
+watch(idleAddress, (next, previous) => {
+  if (!editing.value && address.value === previous) address.value = next
+})
 
 function revertAddress(): void {
   address.value = pageUrl.value
@@ -205,6 +280,16 @@ function hostOf(url: string): string {
         <X v-if="state?.loading" :size="15" />
         <RotateCw v-else :size="14" />
       </IconButton>
+      <span v-if="historyShown" ref="historyAnchor" class="history-anchor">
+        <IconButton
+          label="临时历史"
+          aria-haspopup="menu"
+          :aria-expanded="historyOpen"
+          @click="toggleHistory"
+        >
+          <History :size="14" />
+        </IconButton>
+      </span>
       <form
         class="browser-address"
         role="search"
@@ -247,6 +332,27 @@ function hostOf(url: string): string {
         role="progressbar"
         aria-label="正在加载"
       ></div>
+      <Menu
+        v-model:open="historyOpen"
+        :anchor="historyAnchor"
+        placement="bottom"
+        :width="300"
+        dense
+        label="临时历史"
+      >
+        <MenuItem variant="label">临时历史 · 关闭浏览器后清空</MenuItem>
+        <MenuItem v-if="!historyEntries.length" disabled
+          >还没有浏览记录</MenuItem
+        >
+        <MenuItem
+          v-for="entry in historyEntries"
+          :key="entry.id"
+          :description="`${historySite(entry.url)} · ${historyTime(entry.time)}`"
+          @select="openHistoryEntry(entry)"
+        >
+          {{ entry.title || historySite(entry.url) }}
+        </MenuItem>
+      </Menu>
     </header>
     <p v-if="inputError" class="browser-input-error" role="alert">
       {{ inputError }}
@@ -288,6 +394,10 @@ function hostOf(url: string): string {
   height: 100%;
   min-height: 0;
   flex-direction: column;
+}
+
+.history-anchor {
+  display: inline-flex;
 }
 
 .browser-toolbar {

@@ -13,7 +13,13 @@ import {
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
+  BROWSER_HISTORY_CHANNEL,
+  BROWSER_HISTORY_OPEN_CHANNEL,
+  BROWSER_CLEAR_DATA_CHANNEL,
+  type BrowserClearResult,
+  type BrowserHistoryEntry,
   EXTERNAL_OPEN_CHANNEL,
+  LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_RESET_CHANNEL,
@@ -46,6 +52,12 @@ interface BrowserCapability {
   setBounds(value: unknown): void
   action(action: string): void
   close(): void
+  /** The temporary history, newest first. */
+  history(): Promise<BrowserHistoryEntry[]>
+  /** Reopen a history entry by id (its address is checked again). */
+  openHistory(id: string): Promise<{ ok: true; url: string }>
+  /** Clear the built-in browser's own partition and history. */
+  clearData(): Promise<BrowserClearResult>
 }
 
 /** Computer Use: stream an Agent tab or window for the preview (by id only). */
@@ -90,6 +102,11 @@ export function registerDesktopCapabilityIpc(input: {
   references: ReferenceCapability
   showItemInFolder(path: string): void
   openExternal(url: string): Promise<unknown>
+  /**
+   * A web link the user clicked: main routes it (system or built-in browser,
+   * see link-routing.ts) and reports where it went.
+   */
+  openLink?(url: string): Promise<'builtin' | 'system' | 'refused'>
   skills?: SkillFolderCapability
   /** `shell.openPath`: resolves '' on success, else an error message. */
   openPath?: (path: string) => Promise<string>
@@ -288,6 +305,39 @@ export function registerDesktopCapabilityIpc(input: {
       return { ok: false, error: BROWSER_UNAVAILABLE }
     }
   })
+  input.ipcMain.handle(BROWSER_HISTORY_CHANNEL, async (event) => {
+    authorize(event)
+    try {
+      return await input.browser.history()
+    } catch {
+      return []
+    }
+  })
+  input.ipcMain.handle(BROWSER_HISTORY_OPEN_CHANNEL, async (event, payload) => {
+    authorize(event)
+    const id =
+      typeof payload === 'string' && /^h\d{1,12}$/.test(payload) ? payload : ''
+    if (!id) return { ok: false, error: HISTORY_ENTRY_GONE }
+    try {
+      return await input.browser.openHistory(id)
+    } catch (error) {
+      return {
+        ok: false,
+        error: /clear/.test(String(error))
+          ? BROWSER_CLEARING
+          : HISTORY_ENTRY_GONE,
+      }
+    }
+  })
+  // No argument is read: the partition to clear is fixed in main.
+  input.ipcMain.handle(BROWSER_CLEAR_DATA_CHANNEL, async (event) => {
+    authorize(event)
+    try {
+      return await input.browser.clearData()
+    } catch {
+      return { ok: false, error: BROWSER_UNAVAILABLE }
+    }
+  })
   input.ipcMain.handle(REFERENCE_REVEAL_CHANNEL, (event, payload) => {
     authorize(event)
     const reference = referenceIdentity(payload)
@@ -301,6 +351,14 @@ export function registerDesktopCapabilityIpc(input: {
     await input.openExternal(url)
     return { ok: true }
   })
+  const openLink = input.openLink
+  if (openLink)
+    input.ipcMain.handle(LINK_OPEN_CHANNEL, async (event, payload) => {
+      authorize(event)
+      const url = typeof payload === 'string' ? payload.slice(0, 4096) : ''
+      const opened = await openLink(url)
+      return { ok: opened !== 'refused', opened }
+    })
   // One-way messages have no caller to reject: an untrusted sender (e.g. a
   // frame already torn down while its window closes) or a malformed payload
   // is dropped. Throwing here would surface as an uncaught main-process
@@ -446,6 +504,8 @@ function previewTarget(value: unknown): string {
 }
 
 const BROWSER_UNAVAILABLE = '内置浏览器暂不可用'
+const BROWSER_CLEARING = '正在清空临时浏览数据'
+const HISTORY_ENTRY_GONE = '这条记录已不存在'
 
 /** `{ url }` from the preload bridge; anything else fails normalization. */
 function browserOpenInput(value: unknown): unknown {

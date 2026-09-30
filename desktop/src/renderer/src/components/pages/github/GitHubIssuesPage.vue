@@ -19,7 +19,7 @@ import {
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { openExternal } from '../../../api/backend'
+import { openLink } from '../../../api/backend'
 import {
   listGitHubIssues,
   viewGitHubIssue,
@@ -166,7 +166,7 @@ function back(): void {
 }
 
 function openOnGitHub(url: string): void {
-  openExternal(url).catch(() => ctx.showToast('无法在浏览器中打开链接'))
+  openLink(url).catch(() => ctx.showToast('无法在浏览器中打开链接'))
 }
 
 const actions = computed(() =>

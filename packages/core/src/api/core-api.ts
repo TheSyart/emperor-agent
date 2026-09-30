@@ -57,6 +57,8 @@ import {
 } from './services/config-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
+import type { BrowserPreferences } from '../config/local-config'
+import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
@@ -215,6 +217,7 @@ export class CoreApi {
   readonly configService: CoreConfigService
   readonly effectiveConfigService: CoreEffectiveConfigService
   readonly desktopPetService: CoreDesktopPetService
+  readonly browserPreferencesService: CoreBrowserPreferencesService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
@@ -305,6 +308,15 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
       assertMutation: (area, action) => this.assertMutation(area, action),
     })
+    this.browserPreferencesService = new CoreBrowserPreferencesService(
+      this.root,
+      {
+        stateRoot: this.paths.stateRoot,
+        assertMutation: (area, action) => this.assertMutation(area, action),
+        changed: (preferences) =>
+          host.emitHost({ event: 'browser_preferences_changed', preferences }),
+      },
+    )
     this.modelService = new CoreModelService(this.paths.stateRoot, {
       refreshModelConfig: () => host.refreshModelConfig(),
       afterConfigSaved: () => this.onboardingService.start({ manual: false }),
@@ -1993,6 +2005,16 @@ export class CoreApi {
     get: async () => this.desktopPetService.get(),
     setEnabled: (enabled: boolean) =>
       this.desktopPetService.setEnabled(enabled),
+  }
+
+  /** The user's own built-in browser (not the Agent's). */
+  readonly browser = {
+    preferences: async (): Promise<BrowserPreferences> =>
+      this.browserPreferencesService.get(),
+    setPreferences: async (
+      change: Partial<BrowserPreferences>,
+    ): Promise<BrowserPreferences> =>
+      this.browserPreferencesService.update(change),
   }
 
   /** Task panel: background jobs and subagent sessions of a session tree. */

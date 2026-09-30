@@ -44,7 +44,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { pluginDetailLocation } from '../../capabilities/pluginChoices'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
-import { openExternal, revealReference } from '../../api/backend'
+import { openLink, revealReference } from '../../api/backend'
 import { core } from '../../api/http'
 import { activateModelEntry, setModelReasoningEffort } from '../../api/model'
 import { fetchSessionLineage } from '../../api/sessions'
@@ -439,7 +439,7 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       return
     }
     if (reference.actions.includes('open_external'))
-      await openExternal(reference.tooltip)
+      await openLink(reference.tooltip)
   } catch {
     // A stale or unavailable reference remains inert; chat must stay usable.
   }

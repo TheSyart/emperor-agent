@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CORE_BRIDGE_UNAVAILABLE_MESSAGE,
   browserAction,
+  clearBrowserData,
   closeBrowserView,
+  fetchBrowserHistory,
+  openBrowserHistoryEntry,
   onBrowserState,
   openBrowserUrl,
   setBrowserBounds,
@@ -95,5 +98,57 @@ describe('embedded browser bridge', () => {
     g.window = { emperor: {} }
     expect(() => setBrowserBounds(null)).not.toThrow()
     expect(onBrowserState(listener)).toBeTypeOf('function')
+  })
+})
+
+describe('built-in browser history and clearing', () => {
+  it('reads well-formed entries only, and nothing without a bridge', async () => {
+    await expect(fetchBrowserHistory()).resolves.toEqual([])
+    g.window = {
+      emperor: {
+        browserHistory: async () => [
+          { id: 'h2', url: 'https://example.com/b', title: 'B', time: 2 },
+          { id: 'h1', url: 'https://example.com/a' },
+          'junk',
+        ],
+      },
+    }
+    await expect(fetchBrowserHistory()).resolves.toEqual([
+      { id: 'h2', url: 'https://example.com/b', title: 'B', time: 2 },
+    ])
+  })
+
+  it('reopens by id and clears, reporting refusals', async () => {
+    const open = vi.fn(async (id: string) =>
+      id === 'h1'
+        ? { ok: true, url: 'https://example.com/a' }
+        : { ok: false, error: '这条记录已不存在' },
+    )
+    const clear = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, error: 'disk busy' })
+    g.window = {
+      emperor: { openBrowserHistory: open, clearBrowserData: clear },
+    }
+    await expect(openBrowserHistoryEntry('h1')).resolves.toEqual({
+      ok: true,
+      url: 'https://example.com/a',
+    })
+    await expect(openBrowserHistoryEntry('h9')).resolves.toEqual({
+      ok: false,
+      error: '这条记录已不存在',
+    })
+    expect(open).toHaveBeenCalledWith('h1')
+    await expect(clearBrowserData()).resolves.toEqual({ ok: true })
+    await expect(clearBrowserData()).resolves.toEqual({
+      ok: false,
+      error: 'disk busy',
+    })
+    delete g.window
+    await expect(clearBrowserData()).resolves.toEqual({
+      ok: false,
+      error: CORE_BRIDGE_UNAVAILABLE_MESSAGE,
+    })
   })
 })

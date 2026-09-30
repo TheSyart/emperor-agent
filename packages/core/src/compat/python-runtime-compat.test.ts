@@ -25,10 +25,18 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
       autoStartWithWebui: false,
     })
     expect(Object.keys(settings).sort()).toEqual([
+      'browser',
       'desktopPet',
       'prompt',
       'webui',
     ])
+    // Settings from before the 浏览器 section get its defaults.
+    expect(settings.browser).toEqual({
+      enabled: true,
+      linkTarget: 'system',
+      showFullUrl: true,
+      history: true,
+    })
 
     const model = await loadModelConfig(root, { create: false })
     expect(activeEntry(model)).toMatchObject({

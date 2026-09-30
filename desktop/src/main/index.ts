@@ -51,6 +51,7 @@ import {
   createTrustedRendererPolicy,
   type TrustedRendererPolicy,
 } from './trusted-renderer'
+import { linkDestination } from './link-routing'
 import { mainWindowWebPreferences } from './window-security'
 import { NodePtyHost } from './terminal-host'
 import { TerminalEventBridge } from './terminal-event-bridge'
@@ -116,6 +117,7 @@ import {
 } from './recovery'
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
+  BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
 } from '../shared/ipc-contract'
@@ -163,6 +165,7 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
   developmentUrl: process.env.ELECTRON_RENDERER_URL ?? null,
   mainWebContents: () => mainWindow?.webContents ?? null,
   openExternal: (url) => shell.openExternal(url),
+  openLink: (url) => openUserLink(url),
   onExternalOpenError: (error, url) => {
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
@@ -732,7 +735,11 @@ function createWindow(): void {
   })
   pointerOverlay ??= new PointerOverlay()
   syncControlIndicators()
-  browserViewHost = new BrowserViewHost(mainWindow)
+  browserViewHost = new BrowserViewHost(mainWindow, Date.now, {
+    // 设置 › 浏览器 › 临时历史; unknown (Core not ready) counts as on.
+    historyEnabled: async () =>
+      (await coreApi?.browser.preferences().catch(() => null))?.history ?? true,
+  })
   // A reloaded or crashed renderer lost the BrowserPane that placed the native
   // view; drop it so it cannot linger above the new UI.
   // 00 §12: while the UI is gone nobody can watch the Agent, so its targets
@@ -1023,6 +1030,9 @@ async function startup(): Promise<void> {
         setBounds: (bounds) => browserViewHost?.setBounds(bounds),
         action: (action) => browserViewHost?.action(action),
         close: () => browserViewHost?.close(),
+        history: async () => (await browserViewHost?.history()) ?? [],
+        openHistory: (id) => requireBrowserViewHost().openHistory(id),
+        clearData: () => requireBrowserViewHost().clearData(),
       },
       references: {
         revealPath: (input) => {
@@ -1032,6 +1042,7 @@ async function startup(): Promise<void> {
       },
       showItemInFolder: (target) => shell.showItemInFolder(target),
       openExternal: (url) => shell.openExternal(url),
+      openLink: (url) => openUserLink(url),
       skills: {
         folderPath: (input) => {
           if (!coreApi) throw new Error('core not ready')
@@ -1259,6 +1270,31 @@ function createDictationService(): DictationService {
         }
       : {}),
   })
+}
+
+/**
+ * A web link the user clicked in Emperor's UI (chat links, a window the main
+ * window tried to open): the system browser, or the built-in browser when
+ * the user chose it, and always for an address of this machine
+ * (link-routing.ts). The built-in browser shows it in the 浏览器 pane.
+ */
+async function openUserLink(
+  url: string,
+): Promise<'builtin' | 'system' | 'refused'> {
+  const preferences = (await coreApi?.browser
+    .preferences()
+    .catch(() => null)) ?? { enabled: true, linkTarget: 'system' as const }
+  const destination = linkDestination(url, preferences)
+  if (destination === 'builtin' && mainWindow && !mainWindow.isDestroyed()) {
+    await requireBrowserViewHost().openUrl({ url })
+    mainWindow.webContents.send(BROWSER_REVEAL_CHANNEL, { url })
+    return 'builtin'
+  }
+  if (destination === 'system') {
+    await shell.openExternal(url)
+    return 'system'
+  }
+  return 'refused'
 }
 
 function requireBrowserViewHost(): BrowserViewHost {

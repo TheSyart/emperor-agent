@@ -6,7 +6,7 @@
  * max width. Rows the session cannot use are disabled and say why (no Build
  * project / no git); 浏览器 and 电脑 work for any session.
  *
- * Props: availability (hasProject / snapshotLoaded / hasGit).
+ * Props: availability (hasProject / snapshotLoaded / hasGit / browserEnabled).
  * Emits: open(pane).
  */
 import { computed } from 'vue'

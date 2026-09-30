@@ -172,6 +172,12 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 - 页面内的 `will-navigate` / `will-redirect` 只放行不含用户信息的 `http(s)`；`webview` 附加、客户端证书选择、权限请求与检查、设备权限和下载全部拒绝。
 - `window.open` 一律拒绝；非本机的 `http(s)` 目标按至少 1 秒的间隔交给系统浏览器，本机地址直接丢弃。
 - 关闭视图时清空该分区的存储和缓存；主窗口重新加载或其渲染进程退出时，main 也会关闭视图。
+- **临时历史**（`user-browser-history.ts`）：只在 main 的内存中记录本次浏览器会话里主框架已提交的页面（地址、标题、时间），不含 Cookie 或页面数据；「设置 › 浏览器 › 临时历史」关闭时不记录并清空已有记录，关闭视图、清空数据或退出应用后也不保留。
+  - `emperor:browser:history` 返回记录，最新的在前。
+  - `emperor:browser:history-open` 只接受记录 id（`h` 加数字）；main 取出存下的地址，按地址栏的规则重新校验后加载，渲染层不能借此传入任意网址。
+- **清空临时浏览数据**：`emperor:browser:clear-data` 不读取任何参数，分区固定为 `emperor-browser`，Agent 的 profile 与任务分区不受影响（源码断言守护）。
+  - 过程：先停止并销毁视图、清空历史（`closing`），再等 Cookie、站点存储、缓存和 HTTP 认证全部清除（`clearing`），完成后回到 `idle`；任何一项失败时进入 `failed` 并返回原因。
+  - 清空期间拒绝打开新页面和历史记录；重复请求合并到同一次清空。
 - `trusted-renderer-usage.test.ts` 用源码断言保证只有 `BrowserPane` 地址栏的提交会调用 `openBrowserUrl`。原生视图画在 DOM 之上，renderer 在弹窗、菜单、拖动和面板不可见时发送 `null` 隐藏它。
 
 旧的 `preview*` 通道（`emperor:preview:*`）和 `previewId` 授权路径已删除，由上面的 `emperor:browser:*` 通道取代。

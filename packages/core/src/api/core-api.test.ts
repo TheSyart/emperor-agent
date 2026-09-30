@@ -24,6 +24,8 @@ const EXPECTED_OPERATIONS = [
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
+  'browser.preferences',
+  'browser.setPreferences',
   'chat.listQueuedPrompts',
   'chat.manageQueuedPrompt',
   'chat.stopRuntime',

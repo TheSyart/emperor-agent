@@ -21,8 +21,30 @@ export const BROWSER_ACTION_CHANNEL = 'emperor:browser:action'
 export const BROWSER_CLOSE_CHANNEL = 'emperor:browser:close'
 /** Main → renderer {@link BrowserViewState} updates. */
 export const BROWSER_STATE_CHANNEL = 'emperor:browser:state'
+/** Renderer → main: the temporary history, newest first ({@link BrowserHistoryEntry}[]). */
+export const BROWSER_HISTORY_CHANNEL = 'emperor:browser:history'
+/**
+ * Renderer → main history entry id: reopen that page. Only the id travels;
+ * main checks the stored address again like a typed one.
+ */
+export const BROWSER_HISTORY_OPEN_CHANNEL = 'emperor:browser:history-open'
+/**
+ * Renderer → main (no argument): clear the built-in browser's own partition
+ * — cookies, storage, cache, HTTP auth — and its history; answers
+ * {@link BrowserClearResult} once the wipe finished or failed.
+ */
+export const BROWSER_CLEAR_DATA_CHANNEL = 'emperor:browser:clear-data'
 export const REFERENCE_REVEAL_CHANNEL = 'emperor:reference:reveal'
 export const EXTERNAL_OPEN_CHANNEL = 'emperor:external:open'
+/**
+ * Renderer → main `url`: a web link the user clicked in Emperor's UI. Main
+ * routes it by the user's browser settings (system or built-in browser)
+ * and answers `{ ok, opened }`; EXTERNAL_OPEN_CHANNEL always means the
+ * system browser.
+ */
+export const LINK_OPEN_CHANNEL = 'emperor:link:open'
+/** Main → renderer `{ url }`: a link opened in the built-in browser; show it. */
+export const BROWSER_REVEAL_CHANNEL = 'emperor:browser:reveal'
 /** Main-only: open the personal or project Skills folder (created when missing). */
 export const SKILLS_OPEN_FOLDER_CHANNEL = 'emperor:skills:open-folder'
 /** Main-only: native single-file picker with extension filters. */
@@ -149,6 +171,16 @@ export interface BrowserViewState {
   /** Set on the update that reports a failed main-frame load or crash. */
   error?: string
 }
+
+/** One page of the built-in browser's temporary history. */
+export interface BrowserHistoryEntry {
+  id: string
+  url: string
+  title: string
+  time: number
+}
+
+export type BrowserClearResult = { ok: true } | { ok: false; error: string }
 
 /** Extension filter of the native file picker (`SELECT_FILE_CHANNEL`). */
 export interface FileDialogFilter {

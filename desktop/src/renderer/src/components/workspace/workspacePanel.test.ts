@@ -11,6 +11,7 @@ vi.mock('../../api/backend', async (importOriginal) => ({
 }))
 
 import WorkspacePanel from './WorkspacePanel.vue'
+import { resetBrowserPreferencesForTest } from '../../composables/useBrowserPreferences'
 import {
   FRAME_STORAGE_KEY,
   frameActions,
@@ -159,6 +160,7 @@ beforeEach(() => {
   window.localStorage.removeItem(FRAME_STORAGE_KEY)
   resetFrameStateForTest()
   resetWorkspaceSnapshotForTest()
+  resetBrowserPreferencesForTest()
   const pending = workspaceRequest().value
   if (pending) consumeWorkspaceRequest(pending)
   sessionId.value = 's1'
@@ -220,6 +222,46 @@ describe('WorkspacePanel', () => {
       'workspace.snapshot',
       expect.anything(),
     )
+  })
+
+  it('says the built-in browser is off instead of opening its pane', async () => {
+    const off = {
+      enabled: false,
+      linkTarget: 'system',
+      showFullUrl: true,
+      history: true,
+    }
+    let emit: (event: unknown) => void = () => undefined
+    ;(window as unknown as { emperor: unknown }).emperor = {
+      invokeCore: vi.fn(async (operation: string) =>
+        operation === 'browser.preferences' ? off : null,
+      ),
+      onCoreEvent: (listener: (event: unknown) => void) => {
+        emit = listener
+        return () => undefined
+      },
+    }
+    const root = mount()
+    await flush()
+    expect(row(root, 'browser').disabled).toBe(true)
+    expect(row(root, 'browser').textContent).toContain('内置浏览器已关闭')
+    expect(segment(root, 'browser').disabled).toBe(true)
+    // A shortcut still lands on the pane: it explains, no view opens.
+    frameActions.openWorkspace(useFrameState(), 'browser')
+    await flush()
+    expect(root.querySelector('.browser-pane')).toBeNull()
+    expect(root.querySelector('.workspace-empty')?.textContent).toContain(
+      '设置 › 浏览器',
+    )
+    // Turned back on (the settings, another window): the pane is available.
+    frameActions.openWorkspace(useFrameState(), 'launcher')
+    emit({
+      event: 'browser_preferences_changed',
+      preferences: { ...off, enabled: true },
+    })
+    await flush()
+    expect(row(root, 'browser').disabled).toBe(false)
+    expect(segment(root, 'browser').disabled).toBe(false)
   })
 
   it('switches panes from the launcher and the header, home returns', async () => {

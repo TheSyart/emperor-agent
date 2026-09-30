@@ -1,6 +1,7 @@
 /**
  * Embedded browser pane model (pure): loopback detection for 在外部打开, the
- * sticky load-error reducer, and the placement rule of the native view.
+ * address bar text, the sticky load-error reducer, and the placement rule of
+ * the native view.
  *
  * The native view is drawn by main above the whole DOM, so the pane hides it
  * (bounds null) whenever DOM content must show where it sits: the pane or its
@@ -54,6 +55,20 @@ export function externalOpenAllowed(url: string): boolean {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
   if (parsed.username || parsed.password || !parsed.hostname) return false
   return !isLoopbackUrl(url)
+}
+
+/**
+ * The address bar text while the user is not editing it: the whole URL, or
+ * only the site (host and port) when 设置 › 浏览器 › 地址栏显示完整网址 is
+ * off. Editing always shows the whole URL.
+ */
+export function addressText(url: string, showFullUrl: boolean): string {
+  if (showFullUrl || !url) return url
+  try {
+    return new URL(url).host || url
+  } catch {
+    return url
+  }
 }
 
 /** What the pane knows about the page: the last pushed state + load error. */

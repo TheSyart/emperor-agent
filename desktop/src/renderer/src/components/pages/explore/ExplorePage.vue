@@ -15,7 +15,7 @@
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { openExternal } from '../../../api/backend'
+import { openLink } from '../../../api/backend'
 import { listSkills } from '../../../api/skills'
 import type { McpImportResult } from '../../../api/mcp'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -110,7 +110,9 @@ function install(entry: ExploreEntry) {
 }
 
 function openHomepage(entry: ExploreEntry) {
-  void ctx.runSafely(() => openExternal(entry.homepage))
+  void ctx.runSafely(async () => {
+    await openLink(entry.homepage)
+  })
 }
 
 async function reloadSkills() {
