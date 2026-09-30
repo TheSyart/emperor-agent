@@ -8,6 +8,7 @@ import {
   nativeImage,
   protocol,
   net,
+  session,
   shell,
   safeStorage,
   Tray,
@@ -58,6 +59,11 @@ import { TerminalEventBridge } from './terminal-event-bridge'
 import { BrowserViewHost } from './browser-view'
 import { BrowserPreferencesCache } from './browser-preferences-cache'
 import { UserDownloads } from './user-downloads'
+import {
+  ImportError,
+  importBrowserData,
+  listImportSources,
+} from './browser-import'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
 import {
   createKillSwitch,
@@ -1160,6 +1166,45 @@ async function startup(): Promise<void> {
             : await dialog.showOpenDialog(options)
           if (result.canceled || !result.filePaths.length) return null
           return result.filePaths[0] ?? null
+        },
+      },
+      browserImport: {
+        // Reading and decrypting stay in main; the renderer sees only counts.
+        sources: () => listImportSources(),
+        run: async (request) => {
+          try {
+            return await importBrowserData(request, {
+              ...(credentialVault ? { vault: credentialVault } : {}),
+              // Only an existing persistent profile may receive cookies;
+              // checked before anything is read or written.
+              profileExists: (profileId) =>
+                coreApi?.host.computerUse?.service
+                  .listProfiles()
+                  .some(
+                    (profile) =>
+                      profile.profileId === profileId &&
+                      profile.kind === 'persistent',
+                  ) ?? false,
+              // Cookies go into the chosen persistent profile's own session
+              // (same path as computer-use), then the store is flushed.
+              cookieSink: (profileId) => {
+                const store = session.fromPath(
+                  path.join(config.stateRoot, 'browser', 'profiles', profileId),
+                ).cookies
+                return {
+                  set: (cookie) => store.set(cookie),
+                  flush: () => store.flushStore(),
+                }
+              },
+              log: (message, counts) =>
+                console.info(`[browser-import] ${message}`, counts),
+            })
+          } catch (error) {
+            return {
+              ok: false,
+              reason: error instanceof ImportError ? error.reason : 'internal',
+            }
+          }
         },
       },
     })

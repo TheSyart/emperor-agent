@@ -17,6 +17,10 @@ import type {
   AgentDownloadView,
   AgentPreviewPointer,
   BrowserConnectResult,
+  BrowserImportRequest,
+  BrowserImportResult,
+  BrowserImportSource,
+  BrowserImportSources,
   BrowserPairingStatus,
   DownloadHistory,
   MacHelperPermission,
@@ -24,7 +28,15 @@ import type {
   UserDownloadView,
 } from '../../../shared/ipc-contract'
 
-export type { AgentDownloadView, DownloadHistory, UserDownloadView }
+export type {
+  AgentDownloadView,
+  BrowserImportRequest,
+  BrowserImportResult,
+  BrowserImportSource,
+  BrowserImportSources,
+  DownloadHistory,
+  UserDownloadView,
+}
 
 export interface VaultDraft {
   handleId?: string
@@ -130,6 +142,8 @@ interface EmperorBridge {
   revealBrowserDownload?: (id: string) => Promise<unknown>
   removeBrowserDownload?: (id: string) => Promise<unknown>
   chooseDownloadFolder?: () => Promise<unknown>
+  browserImportSources?: () => Promise<unknown>
+  runBrowserImport?: (request: BrowserImportRequest) => Promise<unknown>
   onBrowserDownload?: (
     listener: (download: UserDownloadView) => void,
   ) => () => void
@@ -570,6 +584,34 @@ export async function openBrowserHistoryEntry(
 /** Clear the built-in browser's data; resolves once main finished. */
 export async function clearBrowserData(): Promise<BrowserOpenResult> {
   return await okOrError(bridge()?.clearBrowserData, [], () => ({ ok: true }))
+}
+
+// ── 从浏览器导入 (ST-06) ──────────────────────────────────────────────────
+
+/** The browsers to import from and their running state (empty without a bridge). */
+export async function fetchBrowserImportSources(): Promise<BrowserImportSources> {
+  const read = bridge()?.browserImportSources
+  if (typeof read !== 'function') return { browsers: [] }
+  try {
+    const result = await read()
+    const browsers = (result as BrowserImportSources)?.browsers
+    return { browsers: Array.isArray(browsers) ? browsers : [] }
+  } catch {
+    return { browsers: [] }
+  }
+}
+
+/** Run one import in main; resolves counts on success, or a failure reason. */
+export async function runBrowserImport(
+  request: BrowserImportRequest,
+): Promise<BrowserImportResult> {
+  const run = bridge()?.runBrowserImport
+  if (typeof run !== 'function') return { ok: false, reason: 'internal' }
+  try {
+    return (await run(request)) as BrowserImportResult
+  } catch {
+    return { ok: false, reason: 'internal' }
+  }
 }
 
 // ── Your downloads (设置 › 浏览器 › 下载) ─────────────────────────────────

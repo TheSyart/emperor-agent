@@ -36,6 +36,7 @@ import { useAppContext } from '../../composables/useAppContext'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import Button from '../ui/Button.vue'
 import DownloadsPage from './browser/DownloadsPage.vue'
+import ImportDialog from './browser/ImportDialog.vue'
 import PasswordManagerPage from './browser/PasswordManagerPage.vue'
 import SignInProfilesPage from './browser/SignInProfilesPage.vue'
 import SiteSettingsPage from './browser/SiteSettingsPage.vue'
@@ -93,6 +94,9 @@ function save(change: Partial<BrowserPreferences>): void {
 /** 清除浏览数据: idle, running, or how the last run went. */
 const clearing = ref<'idle' | 'running' | 'done' | 'failed'>('idle')
 const clearError = ref('')
+
+/** 从浏览器导入 dialog (ST-06). */
+const importOpen = ref(false)
 
 async function clearData(): Promise<void> {
   if (clearing.value === 'running') return
@@ -262,6 +266,15 @@ onBeforeUnmount(() => {
     </SettingsCard>
 
     <SettingsGroup title="常规">
+      <template #actions>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid="open-import"
+          @click="importOpen = true"
+          >导入…</Button
+        >
+      </template>
       <SettingsRow
         title="网页 URL 和链接打开位置"
         description="在会话、Pull Request 等界面中点击的网页链接"
@@ -466,6 +479,7 @@ onBeforeUnmount(() => {
         >
       </SettingsRow>
     </SettingsGroup>
+    <ImportDialog v-model:open="importOpen" />
   </SettingsSection>
 </template>
 

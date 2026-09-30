@@ -219,6 +219,73 @@ export const BROWSER_DOWNLOAD_FOLDER_CHANNEL = 'emperor:browser:download-folder'
 /** Main → renderer {@link UserDownloadView}: a download started, moved on or ended. */
 export const BROWSER_DOWNLOAD_EVENT_CHANNEL = 'emperor:browser:download'
 
+/**
+ * 从浏览器导入 (ST-06). Renderer → main, no argument: the browsers found on
+ * this machine, each with its profiles and whether it is still running
+ * ({@link BrowserImportSources}). No secret ever crosses; the renderer sees a
+ * source list, running state and, after a run, only counts.
+ */
+export const BROWSER_IMPORT_SOURCES_CHANNEL = 'emperor:browser:import-sources'
+/**
+ * Renderer → main {@link BrowserImportRequest}: read the chosen profile, save
+ * passwords into the vault and cookies into the selected persistent profile,
+ * all in main. Answers {@link BrowserImportResult}. Decryption needs macOS
+ * Keychain approval (a system prompt); the renderer never sees a value.
+ */
+export const BROWSER_IMPORT_RUN_CHANNEL = 'emperor:browser:import-run'
+
+/** Which browser a source is; matches the main-side `BrowserId`. */
+export type BrowserImportBrowser = 'chrome' | 'edge'
+
+/** One installed browser profile offered as an import source. */
+export interface BrowserImportProfile {
+  /** Profile directory name, e.g. `Default` or `Profile 1`. */
+  dir: string
+  /** Display name from the browser's Local State. */
+  name: string
+}
+
+/** One browser found on this machine (or not), with its running state. */
+export interface BrowserImportSource {
+  browser: BrowserImportBrowser
+  /** Product name, e.g. `Google Chrome`. */
+  name: string
+  installed: boolean
+  /** The browser is still open; import must wait until it is closed. */
+  running: boolean
+  profiles: BrowserImportProfile[]
+}
+
+/** The source dropdown's contents. */
+export interface BrowserImportSources {
+  browsers: BrowserImportSource[]
+}
+
+/** What the dialog asks main to import. */
+export interface BrowserImportRequest {
+  browser: BrowserImportBrowser
+  profileDir: string
+  passwords: boolean
+  cookies: boolean
+  /** Persistent profile id (`p_…`) for cookies; the renderer resolves it. */
+  targetProfileId?: string
+}
+
+/** Why an import could not run; the renderer maps it to a message. */
+export type BrowserImportErrorReason =
+  | 'nothing-selected'
+  | 'browser-running'
+  | 'vault-locked'
+  | 'vault-unavailable'
+  | 'no-target-profile'
+  | 'read-failed'
+  | 'internal'
+
+/** The outcome the dialog shows: counts on success, a reason otherwise. */
+export type BrowserImportResult =
+  | { ok: true; passwords: number; sites: number }
+  | { ok: false; reason: BrowserImportErrorReason }
+
 export type UserDownloadState =
   'progressing' | 'completed' | 'cancelled' | 'interrupted' | 'blocked'
 

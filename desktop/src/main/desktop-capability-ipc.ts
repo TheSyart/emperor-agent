@@ -21,7 +21,13 @@ import {
   BROWSER_DOWNLOAD_OPEN_CHANNEL,
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
+  BROWSER_IMPORT_RUN_CHANNEL,
+  BROWSER_IMPORT_SOURCES_CHANNEL,
   type AgentDownloadView,
+  type BrowserImportBrowser,
+  type BrowserImportRequest,
+  type BrowserImportResult,
+  type BrowserImportSources,
   type BrowserClearResult,
   type BrowserHistoryEntry,
   type DownloadHistory,
@@ -161,6 +167,23 @@ export function registerDesktopCapabilityIpc(input: {
   }
   /** 设置 › 浏览器 › 下载 and the 浏览器 pane: your own downloads. */
   userDownloads?: UserDownloadsCapability
+  /** 从浏览器导入 (ST-06): read Chrome/Edge, save into vault + a profile. */
+  browserImport?: {
+    /** The source list and each browser's running state (no secrets). The
+     *  importer's readonly shape is accepted; the handler rebuilds the wire
+     *  object. */
+    sources(): {
+      browsers: ReadonlyArray<{
+        browser: BrowserImportBrowser
+        name: string
+        installed: boolean
+        running: boolean
+        profiles: ReadonlyArray<{ dir: string; name: string }>
+      }>
+    }
+    /** Run one import; resolves counts, never a value. */
+    run(request: BrowserImportRequest): Promise<BrowserImportResult>
+  }
   /** Main-owned helper status and OS permission prompt; never receives a path or nonce from renderer. */
   macHelper?: {
     status(): Promise<MacHelperStatus>
@@ -499,6 +522,23 @@ export function registerDesktopCapabilityIpc(input: {
       return await userDownloads.chooseFolder()
     })
   }
+  const browserImport = input.browserImport
+  if (browserImport) {
+    input.ipcMain.handle(
+      BROWSER_IMPORT_SOURCES_CHANNEL,
+      (event): BrowserImportSources => {
+        authorize(event)
+        return sanitizeImportSources(browserImport.sources())
+      },
+    )
+    input.ipcMain.handle(
+      BROWSER_IMPORT_RUN_CHANNEL,
+      async (event, payload): Promise<BrowserImportResult> => {
+        authorize(event)
+        return await browserImport.run(browserImportRequest(payload))
+      },
+    )
+  }
   const preview = input.agentPreview
   if (preview) {
     input.ipcMain.handle(AGENT_PREVIEW_START_CHANNEL, (event, payload) => {
@@ -694,6 +734,74 @@ function objectRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('invalid capability input')
   return value as Record<string, unknown>
+}
+
+const PROFILE_ID = /^p_[0-9a-f]{12}$/
+
+/** Validates a 从浏览器导入 request before it reaches the importer. */
+function browserImportRequest(payload: unknown): BrowserImportRequest {
+  const input = objectRecord(payload)
+  if (input.browser !== 'chrome' && input.browser !== 'edge')
+    throw new Error('invalid import browser')
+  const profileDir =
+    typeof input.profileDir === 'string' ? input.profileDir : ''
+  // Chrome/Edge profile dirs are plain names like `Default` or `Profile 1`.
+  if (!/^[\w .-]{1,64}$/.test(profileDir))
+    throw new Error('invalid import profile')
+  if (
+    typeof input.passwords !== 'boolean' ||
+    typeof input.cookies !== 'boolean'
+  )
+    throw new Error('invalid import selection')
+  if (
+    input.targetProfileId !== undefined &&
+    !(
+      typeof input.targetProfileId === 'string' &&
+      PROFILE_ID.test(input.targetProfileId)
+    )
+  )
+    throw new Error('invalid import target profile')
+  return {
+    browser: input.browser,
+    profileDir,
+    passwords: input.passwords,
+    cookies: input.cookies,
+    ...(input.targetProfileId === undefined
+      ? {}
+      : { targetProfileId: input.targetProfileId as string }),
+  }
+}
+
+/** Whitelists the source list so nothing but names/dirs/flags crosses IPC.
+ *  Accepts the importer's readonly shape and rebuilds mutable wire objects. */
+function sanitizeImportSources(value: {
+  browsers?: ReadonlyArray<{
+    browser?: unknown
+    name?: unknown
+    installed?: unknown
+    running?: unknown
+    profiles?: ReadonlyArray<{ dir?: unknown; name?: unknown }>
+  }>
+}): BrowserImportSources {
+  const clip = (text: unknown): string =>
+    typeof text === 'string' ? text.slice(0, 200) : ''
+  return {
+    browsers: (Array.isArray(value?.browsers) ? value.browsers : [])
+      .filter((item) => item?.browser === 'chrome' || item?.browser === 'edge')
+      .slice(0, 8)
+      .map((item) => ({
+        browser: item.browser === 'edge' ? 'edge' : 'chrome',
+        name: clip(item.name),
+        installed: item.installed === true,
+        running: item.running === true,
+        profiles: (Array.isArray(item.profiles) ? item.profiles : [])
+          .slice(0, 50)
+          .map((profile: { dir?: unknown; name?: unknown }) => ({
+            dir: clip(profile?.dir),
+            name: clip(profile?.name),
+          })),
+      })),
+  }
 }
 
 function pairingIdValid(value: unknown): value is string {

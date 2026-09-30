@@ -21,6 +21,8 @@ import {
   BROWSER_DOWNLOAD_OPEN_CHANNEL,
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
+  BROWSER_IMPORT_RUN_CHANNEL,
+  BROWSER_IMPORT_SOURCES_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
@@ -925,5 +927,142 @@ describe('download history IPC (设置 › 浏览器 › 下载)', () => {
     expect(userDownloads.reveal).not.toHaveBeenCalled()
     expect(userDownloads.remove).not.toHaveBeenCalled()
     expect(userDownloads.chooseFolder).not.toHaveBeenCalled()
+  })
+})
+
+describe('browser import IPC (ST-06)', () => {
+  function importCapability() {
+    return {
+      sources: vi.fn(() => ({
+        browsers: [
+          {
+            browser: 'chrome' as const,
+            name: 'Google Chrome',
+            installed: true,
+            running: true,
+            profiles: [{ dir: 'Default', name: 'Person 1' }],
+          },
+        ],
+      })),
+      run: vi.fn(async () => ({ ok: true as const, passwords: 2, sites: 3 })),
+    }
+  }
+
+  it('returns a sanitized source list and runs a validated import', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const browserImport = importCapability()
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      browserImport,
+    })
+
+    const sources = await ipc.invoke(BROWSER_IMPORT_SOURCES_CHANNEL)
+    expect(sources).toEqual({
+      browsers: [
+        {
+          browser: 'chrome',
+          name: 'Google Chrome',
+          installed: true,
+          running: true,
+          profiles: [{ dir: 'Default', name: 'Person 1' }],
+        },
+      ],
+    })
+
+    const result = await ipc.invoke(BROWSER_IMPORT_RUN_CHANNEL, {
+      browser: 'chrome',
+      profileDir: 'Default',
+      passwords: true,
+      cookies: true,
+      targetProfileId: 'p_0123456789ab',
+    })
+    expect(result).toEqual({ ok: true, passwords: 2, sites: 3 })
+    expect(browserImport.run).toHaveBeenCalledWith({
+      browser: 'chrome',
+      profileDir: 'Default',
+      passwords: true,
+      cookies: true,
+      targetProfileId: 'p_0123456789ab',
+    })
+  })
+
+  it('rejects malformed import requests before running', async () => {
+    const ipc = new FakeIpcMain()
+    const browserImport = importCapability()
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize: vi.fn(),
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      browserImport,
+    })
+    for (const payload of [
+      {
+        browser: 'safari',
+        profileDir: 'Default',
+        passwords: true,
+        cookies: false,
+      },
+      {
+        browser: 'chrome',
+        profileDir: '../etc',
+        passwords: true,
+        cookies: false,
+      },
+      {
+        browser: 'chrome',
+        profileDir: 'Default',
+        passwords: 'yes',
+        cookies: false,
+      },
+      {
+        browser: 'chrome',
+        profileDir: 'Default',
+        passwords: false,
+        cookies: true,
+        targetProfileId: 'temporary',
+      },
+    ])
+      await expect(
+        ipc.invoke(BROWSER_IMPORT_RUN_CHANNEL, payload),
+      ).rejects.toThrow(/invalid import/)
+    expect(browserImport.run).not.toHaveBeenCalled()
+  })
+
+  it('refuses both import channels from untrusted callers', async () => {
+    const ipc = new FakeIpcMain()
+    const browserImport = importCapability()
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize: () => {
+        throw new Error('IPC caller is not trusted')
+      },
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      browserImport,
+    })
+    await expect(ipc.invoke(BROWSER_IMPORT_SOURCES_CHANNEL)).rejects.toThrow(
+      /not trusted/,
+    )
+    await expect(
+      ipc.invoke(BROWSER_IMPORT_RUN_CHANNEL, {
+        browser: 'chrome',
+        profileDir: 'Default',
+        passwords: true,
+        cookies: false,
+      }),
+    ).rejects.toThrow(/not trusted/)
+    expect(browserImport.sources).not.toHaveBeenCalled()
+    expect(browserImport.run).not.toHaveBeenCalled()
   })
 })

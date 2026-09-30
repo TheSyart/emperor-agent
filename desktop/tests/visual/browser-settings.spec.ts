@@ -209,7 +209,38 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(allow).toBeVisible()
     await shot(page, `sites-allow-${theme}`)
   })
+
+  test(`从浏览器导入 dialog (${theme})`, async ({ page }) => {
+    const dialog = await openBrowser(page, { theme })
+    await dialog.getByTestId('open-import').click()
+    const importDialog = page.getByRole('dialog', { name: '从浏览器导入' })
+    await expect(importDialog).toBeVisible()
+    await expect(importDialog).toContainText('选择要导入到内置浏览器的数据')
+    await expect(importDialog.getByTestId('import-source')).toBeVisible()
+    await expect(importDialog.getByTestId('import-passwords')).toBeVisible()
+    await expect(importDialog.getByTestId('import-cookies')).toBeVisible()
+    await expect(importDialog.getByTestId('import-target')).toBeVisible()
+    await noHorizontalOverflow(page)
+    await shot(page, `import-${theme}`)
+  })
 }
+
+test('从浏览器导入 blocks import while the browser is still running', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.goto(
+    '/chat/build-ui?settings=browser&visualComputerUse=on&visualImport=running&visualTheme=dark',
+  )
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await dialog.getByTestId('open-import').click()
+  const importDialog = page.getByRole('dialog', { name: '从浏览器导入' })
+  await expect(importDialog.getByTestId('import-running')).toContainText(
+    '请完全关闭 Google Chrome',
+  )
+  await expect(importDialog.getByTestId('import-run')).toBeDisabled()
+  await shot(page, 'import-running')
+})
 
 test('deep links to a sub page and fits a narrow window', async ({ page }) => {
   const dialog = await openBrowser(page, { width: 700, page: 'sites' })

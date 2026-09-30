@@ -23,6 +23,8 @@ import {
   BROWSER_DOWNLOAD_OPEN_CHANNEL,
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
+  BROWSER_IMPORT_RUN_CHANNEL,
+  BROWSER_IMPORT_SOURCES_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
@@ -50,6 +52,7 @@ import {
   type BrowserViewState,
   type FileDialogFilter,
   type MacHelperPermission,
+  type BrowserImportRequest,
   type UserDownloadView,
 } from '../shared/ipc-contract'
 
@@ -139,6 +142,12 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     /** The system folder picker for 设置 › 浏览器 › 下载 › 位置. */
     chooseDownloadFolder: () =>
       ipcRenderer.invoke(BROWSER_DOWNLOAD_FOLDER_CHANNEL),
+    /** 从浏览器导入: the source list and each browser's running state. */
+    browserImportSources: () =>
+      ipcRenderer.invoke(BROWSER_IMPORT_SOURCES_CHANNEL),
+    /** 从浏览器导入: run one import in main; resolves counts, never a value. */
+    runBrowserImport: (request: BrowserImportRequest) =>
+      ipcRenderer.invoke(BROWSER_IMPORT_RUN_CHANNEL, request),
     /** One of your downloads started, moved on or ended. */
     onBrowserDownload: (listener: (download: UserDownloadView) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>

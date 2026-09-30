@@ -70,6 +70,8 @@ type VisualBridge = {
   revealBrowserDownload?: (id: string) => Promise<unknown>
   removeBrowserDownload?: (id: string) => Promise<unknown>
   chooseDownloadFolder?: () => Promise<string | null>
+  browserImportSources?: () => Promise<unknown>
+  runBrowserImport?: (request: Record<string, unknown>) => Promise<unknown>
   onBrowserDownload?: (listener: VisualCoreListener) => () => void
   agentDownloadReveal?: (id: string) => Promise<unknown>
   agentDownloadMove?: (id: string) => Promise<unknown>
@@ -4309,6 +4311,30 @@ export async function installVisualCoreBridge(
           return { ok: true }
         },
         chooseDownloadFolder: async () => '/Users/visual/Downloads/Emperor',
+        // 从浏览器导入 (ST-06). `?visualImport=running` shows the "close it
+        // first" warning; otherwise Chrome/Edge read as closed.
+        browserImportSources: async () => ({
+          browsers: [
+            {
+              browser: 'chrome',
+              name: 'Google Chrome',
+              installed: true,
+              running: visualParams.get('visualImport') === 'running',
+              profiles: [
+                { dir: 'Default', name: '个人' },
+                { dir: 'Profile 1', name: '工作' },
+              ],
+            },
+            {
+              browser: 'edge',
+              name: 'Microsoft Edge',
+              installed: true,
+              running: false,
+              profiles: [{ dir: 'Default', name: '默认' }],
+            },
+          ],
+        }),
+        runBrowserImport: async () => ({ ok: true, passwords: 12, sites: 5 }),
         onBrowserDownload: (listener: VisualCoreListener) => {
           downloadListeners.add(listener)
           return () => downloadListeners.delete(listener)
