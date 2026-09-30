@@ -17,6 +17,23 @@ describe('download inbox rules', () => {
     'App.app',
   ])('refuses %s', (name) => expect(isExecutableDownload(name)).toBe(true))
 
+  // macOS files that run a command or open a local app when opened.
+  it.each([
+    'Open me.terminal',
+    'report.fileloc',
+    'link.inetloc',
+    'site.webloc',
+    'Helper.prefPane',
+    'script.scpt',
+    'Script.scptd',
+    'script.applescript',
+    'Driver.kext',
+    'Tool.action',
+    'Addition.osax',
+  ])('refuses the macOS launcher %s', (name) =>
+    expect(isExecutableDownload(name)).toBe(true),
+  )
+
   it.each(['report.pdf', 'data.csv', 'archive.zip', 'photo.png', 'README'])(
     'accepts %s',
     (name) => expect(isExecutableDownload(name)).toBe(false),

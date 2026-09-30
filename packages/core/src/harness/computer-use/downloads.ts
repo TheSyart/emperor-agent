@@ -1,7 +1,9 @@
 /**
- * Download inbox rules shared by every browser driver (spec 00 §7.5):
- * executables and installers are refused by default, file names are made
- * safe for the inbox directory, and task ids become safe bucket names.
+ * Download rules shared by every browser driver (spec 00 §7.5) and by the
+ * user's own browsing (设置 › 浏览器 › 下载): executables, installers and
+ * macOS files that run a command or open a local app are refused, file
+ * names are made safe for the download directory, and task ids become safe
+ * bucket names.
  */
 
 import { createHash } from 'node:crypto'
@@ -56,6 +58,18 @@ const EXECUTABLE_EXTENSIONS = new Set([
   'wsf',
   'xpi',
   'crx',
+  // macOS files that run a command or open a local app when opened.
+  'action',
+  'applescript',
+  'fileloc',
+  'inetloc',
+  'kext',
+  'osax',
+  'prefpane',
+  'scpt',
+  'scptd',
+  'terminal',
+  'webloc',
 ])
 
 const EXECUTABLE_MIME = [
