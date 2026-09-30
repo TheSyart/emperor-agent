@@ -606,6 +606,12 @@ async function runsForReal(
     async () => {
       const calls = read('calls.log')
       const hooks = read('hook.log')
+      const listed = async () =>
+        (await core<Array<{ name: string }>>(page, 'skills.tools')).some(
+          (tool) => tool.name === MCP_TOOL,
+        )
+      if (!(await listed()))
+        throw new Error('the plugin tool was not in the catalog while on')
       const detail = await openDetail(page, 'where-kit')
       await detail.locator('[data-plugin-toggle] [role="switch"]').click()
       await until(
@@ -622,6 +628,13 @@ async function runsForReal(
           ),
         10_000,
         'the plugin to be off',
+      )
+      // The list says 停用 as soon as the switch is saved; the MCP server and
+      // its tool go a moment later (the switch's own call waits for that).
+      await until(
+        async () => !(await listed()),
+        10_000,
+        'the plugin tool to leave the catalog',
       )
       let refused = ''
       model.enqueue(
