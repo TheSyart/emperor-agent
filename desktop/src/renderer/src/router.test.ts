@@ -111,6 +111,8 @@ describe('renderer routes', () => {
     ['/chat?settings=tools', '/capabilities/tools', {}],
     // `skill` only travels with the Skills section.
     ['/chat?settings=plugins&skill=web', '/capabilities', {}],
+    // Nor does a settings sub page.
+    ['/chat?settings=tools&page=chrome', '/capabilities/tools', {}],
   ])(
     'redirects the moved settings section %s to %s',
     async (path, target, query) => {

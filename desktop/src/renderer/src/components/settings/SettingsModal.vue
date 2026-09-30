@@ -18,6 +18,12 @@
  * /capabilities/:tab); a `?settings=` link to one of them is redirected there by
  * the router guard before the modal would open.
  *
+ * On a section's sub page (`&page=<key>`, see useSettingsPages) the title
+ * becomes 「分区 › 页面」: the section name is a button back to the main
+ * page, as is the section's own nav cell. The options area scrolls back to
+ * the top on every page change; focus moves to that button when a page
+ * opens and back to the panel when it closes.
+ *
  * Section bodies are async chunks (`<Name>Section.vue`), each owning its
  * layout: they build on components/settings/ui (SettingsSection & co.) and
  * publish header actions through useSettingsHeader — the shell never styles
@@ -32,7 +38,7 @@ import {
   watch,
   type Component,
 } from 'vue'
-import { DsClose } from '../icons/ds'
+import { DsChevronRight, DsClose } from '../icons/ds'
 import { useModalLayer } from '../ui/modalStack'
 import SettingsHeaderBar from './SettingsHeaderBar.vue'
 import SettingsNav from './SettingsNav.vue'
@@ -58,11 +64,16 @@ const SECTION_BODIES: Record<SettingsModalSection, Component> = {
 
 const settings = useSettingsRoute()
 const { open, section } = settings
-const header = provideSettingsHeader()
+const header = provideSettingsHeader({
+  page: () => settings.page.value,
+  go: (page) => void settings.openPage(page),
+})
 
 const titleId = 'settings-modal-title'
 const sectionTitleId = 'settings-section-title'
 const panel = ref<HTMLElement | null>(null)
+const options = ref<HTMLElement | null>(null)
+const crumb = ref<HTMLButtonElement | null>(null)
 let restoreFocus: HTMLElement | null = null
 
 const body = computed(() => SECTION_BODIES[section.value])
@@ -76,11 +87,25 @@ function close() {
 }
 
 function select(target: SettingsModalSection) {
-  if (target === section.value) return
+  if (target === section.value) {
+    if (header.page.value !== null) header.back()
+    return
+  }
   void settings.selectSection(target)
 }
 
 useModalLayer(open, close)
+
+watch(
+  () => header.page.value,
+  (next, previous) => {
+    if (options.value) options.value.scrollTop = 0
+    void nextTick(() => {
+      if (next !== null) crumb.value?.focus({ preventScroll: true })
+      else if (previous !== null) panel.value?.focus({ preventScroll: true })
+    })
+  },
+)
 
 watch(
   open,
@@ -120,7 +145,28 @@ watch(
           <div class="settings-content">
             <div class="settings-header">
               <h2 :id="sectionTitleId" class="section-title">
-                {{ sectionLabel }}
+                <template v-if="header.trail.value">
+                  <button
+                    ref="crumb"
+                    type="button"
+                    class="section-crumb"
+                    data-testid="settings-crumb"
+                    @click="header.back()"
+                  >
+                    {{ sectionLabel }}
+                  </button>
+                  <DsChevronRight
+                    class="section-crumb-separator"
+                    :size="12"
+                    aria-hidden="true"
+                  />
+                  <span
+                    class="section-page"
+                    data-testid="settings-page-title"
+                    >{{ header.trail.value }}</span
+                  >
+                </template>
+                <template v-else>{{ sectionLabel }}</template>
               </h2>
               <div class="header-actions">
                 <SettingsHeaderBar :actions="header.actions.value" />
@@ -136,10 +182,12 @@ watch(
               </div>
             </div>
             <div
+              ref="options"
               class="settings-options"
               role="region"
               :aria-labelledby="sectionTitleId"
               :data-section="section"
+              :data-page="header.page.value ?? undefined"
             >
               <component :is="body" :key="section" />
             </div>
@@ -218,6 +266,45 @@ watch(
   color: rgb(var(--label-primary));
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.section-title:has(.section-crumb) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The section name on a sub page: a quiet link back to its main page. */
+.section-crumb {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: rgb(var(--label-tertiary));
+  font: inherit;
+  cursor: pointer;
+}
+
+.section-crumb:hover {
+  color: rgb(var(--label-primary));
+}
+
+.section-crumb:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 2px;
+}
+
+.section-crumb-separator {
+  flex: none;
+  color: rgb(var(--label-tertiary));
+}
+
+.section-page {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-actions {

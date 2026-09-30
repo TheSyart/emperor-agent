@@ -169,7 +169,7 @@ export function settingsPageRedirect(
   const section = firstParam(to.query.settings)
   const path = SETTINGS_PAGE_PATHS[section]
   if (!path) return null
-  const { settings: _settings, skill, ...rest } = to.query
+  const { settings: _settings, page: _page, skill, ...rest } = to.query
   const query: LocationQuery = { ...rest }
   const name = firstParam(skill)
   if (section === 'skills' && name) query.skill = name

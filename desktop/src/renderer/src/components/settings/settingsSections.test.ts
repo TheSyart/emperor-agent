@@ -9,7 +9,7 @@ import {
   normalizeSettingsSection,
 } from './settingsSections'
 import { SETTINGS_SECTION_ICONS } from './settingsIcons'
-import { settingsQuery } from './useSettingsRoute'
+import { settingsPageKey, settingsQuery } from './useSettingsRoute'
 
 describe('settings sections', () => {
   it('lists every section once, each with a nav icon', () => {
@@ -114,5 +114,38 @@ describe('settingsQuery', () => {
     expect(settingsQuery({ settings: 'tools', foo: 'bar' }, null)).toEqual({
       foo: 'bar',
     })
+  })
+
+  it('carries a sub page with its section and drops it otherwise', () => {
+    expect(settingsQuery({ foo: 'bar' }, 'computer', 'chrome')).toEqual({
+      foo: 'bar',
+      settings: 'computer',
+      page: 'chrome',
+    })
+    expect(
+      settingsQuery({ settings: 'computer', page: 'chrome' }, 'browser'),
+    ).toEqual({ settings: 'browser' })
+    expect(
+      settingsQuery({ settings: 'computer', page: 'chrome', foo: 'bar' }, null),
+    ).toEqual({ foo: 'bar' })
+  })
+})
+
+describe('settingsPageKey', () => {
+  it('accepts a short lower-case key only', () => {
+    expect(settingsPageKey('chrome')).toBe('chrome')
+    expect(settingsPageKey(['apps', 'other'])).toBe('apps')
+    expect(settingsPageKey('download-history')).toBe('download-history')
+    for (const value of [
+      undefined,
+      null,
+      '',
+      'Chrome',
+      '1abc',
+      'a'.repeat(33),
+      '../x',
+      'a b',
+    ])
+      expect(settingsPageKey(value)).toBeNull()
   })
 })

@@ -7,8 +7,10 @@ import {
   createSettingsHeader,
   refreshAction,
   useSettingsHeader,
+  useSettingsPages,
   type SettingsHeaderAction,
   type SettingsHeaderHost,
+  type SettingsPages,
 } from './settingsHeader'
 
 let app: App | null = null
@@ -148,5 +150,73 @@ describe('SettingsHeaderBar', () => {
     await nextTick()
     expect(onPaste).toHaveBeenCalledTimes(1)
     expect(document.body.querySelector('[role="menu"]')).toBeNull()
+  })
+})
+
+describe('settings sub pages', () => {
+  it('names the open sub page only while the section declares it', async () => {
+    const host = createSettingsHeader()
+    const show = ref(true)
+    let pages: SettingsPages | null = null
+    const Section = defineComponent({
+      setup() {
+        pages = useSettingsPages({ chrome: 'Chrome 和 Edge', apps: '任意应用' })
+        return () => h('div')
+      },
+    })
+    mount(() => (show.value ? h(Section) : h('div')), host)
+
+    expect(host.page.value).toBeNull()
+    expect(host.trail.value).toBeNull()
+    pages!.open('chrome')
+    expect(pages!.page.value).toBe('chrome')
+    expect(host.trail.value).toBe('Chrome 和 Edge')
+    // A key the section did not declare is its main page.
+    host.openPage('nope')
+    expect(host.page.value).toBeNull()
+    expect(host.trail.value).toBeNull()
+    host.openPage('apps')
+    pages!.back()
+    expect(host.page.value).toBeNull()
+
+    host.openPage('apps')
+    show.value = false
+    await nextTick()
+    expect(host.trail.value).toBeNull()
+  })
+
+  it('follows the navigation the shell gives it', () => {
+    const requested = ref<string | null>('chrome')
+    const go = vi.fn((page: string | null) => {
+      requested.value = page
+    })
+    const host = createSettingsHeader({ page: () => requested.value, go })
+    const undeclare = host.registerPages(() => ({ chrome: 'Chrome 和 Edge' }))
+    expect(host.trail.value).toBe('Chrome 和 Edge')
+    host.back()
+    expect(go).toHaveBeenLastCalledWith(null)
+    expect(host.trail.value).toBeNull()
+    host.openPage('chrome')
+    expect(go).toHaveBeenLastCalledWith('chrome')
+    undeclare()
+    expect(host.page.value).toBeNull()
+  })
+
+  it('keeps the open sub page in memory outside a settings shell', async () => {
+    let pages: SettingsPages | null = null
+    const Section = defineComponent({
+      setup() {
+        pages = useSettingsPages({ detail: '详情' })
+        return () => h('p', pages!.page.value ?? 'main')
+      },
+    })
+    const root = mount(() => h(Section))
+    expect(root.textContent).toBe('main')
+    pages!.open('detail')
+    await nextTick()
+    expect(root.textContent).toBe('detail')
+    pages!.back()
+    await nextTick()
+    expect(root.textContent).toBe('main')
   })
 })

@@ -9,6 +9,32 @@ import SettingsModal from './SettingsModal.vue'
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../api/http', () => ({ core }))
 
+// 桌宠 stands in for a section with a sub page.
+vi.mock('./PetSection.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  const { useSettingsPages } = await import('./settingsHeader')
+  return {
+    __esModule: true,
+    default: defineComponent({
+      setup() {
+        const pages = useSettingsPages({ detail: '动画详情' })
+        return () =>
+          pages.page.value === 'detail'
+            ? h('p', { 'data-testid': 'pet-detail' }, '详情')
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  'data-testid': 'pet-open',
+                  onClick: () => pages.open('detail'),
+                },
+                '管理',
+              )
+      },
+    }),
+  }
+})
+
 async function flushPromises(): Promise<void> {
   for (let i = 0; i < 5; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -135,6 +161,85 @@ describe('SettingsModal', () => {
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/chat/s1')
     expect(router.currentRoute.value.query.settings).toBe('tokens')
+  })
+
+  it('opens a sub page with the section name as a way back', async () => {
+    const { router } = await mount('/chat/s1?settings=pet')
+    const dialog = modal()
+    await vi.waitFor(() =>
+      expect(dialog?.querySelector('[data-testid="pet-open"]')).not.toBeNull(),
+    )
+    expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
+
+    dialog
+      ?.querySelector<HTMLButtonElement>('[data-testid="pet-open"]')
+      ?.click()
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      settings: 'pet',
+      page: 'detail',
+    })
+    const crumb = dialog?.querySelector<HTMLButtonElement>(
+      '[data-testid="settings-crumb"]',
+    )
+    expect(crumb?.textContent?.trim()).toBe('桌宠')
+    expect(
+      dialog?.querySelector('[data-testid="settings-page-title"]')?.textContent,
+    ).toBe('动画详情')
+    expect(
+      dialog?.querySelector('.settings-options')?.getAttribute('data-page'),
+    ).toBe('detail')
+    expect(dialog?.querySelector('[data-testid="pet-detail"]')).not.toBeNull()
+    expect(document.activeElement).toBe(crumb)
+
+    crumb?.click()
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ settings: 'pet' })
+    expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
+    expect(dialog?.querySelector('.section-title')?.textContent?.trim()).toBe(
+      '桌宠',
+    )
+    expect(document.activeElement).toBe(dialog)
+  })
+
+  it('deep links to a sub page; the nav leaves it', async () => {
+    const { router } = await mount('/chat/s1?settings=pet&page=detail')
+    const dialog = modal()
+    await vi.waitFor(() =>
+      expect(
+        dialog?.querySelector('[data-testid="pet-detail"]'),
+      ).not.toBeNull(),
+    )
+    expect(
+      dialog?.querySelector('[data-testid="settings-page-title"]')?.textContent,
+    ).toBe('动画详情')
+
+    // The section's own nav cell leads back to its main page.
+    dialog
+      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="pet"]')
+      ?.click()
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ settings: 'pet' })
+
+    await router.replace('/chat/s1?settings=pet&page=detail')
+    await flushPromises()
+    dialog
+      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="tokens"]')
+      ?.click()
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ settings: 'tokens' })
+  })
+
+  it('shows the main page for a sub page the section does not have', async () => {
+    await mount('/chat/s1?settings=pet&page=nope')
+    const dialog = modal()
+    await vi.waitFor(() =>
+      expect(dialog?.querySelector('[data-testid="pet-open"]')).not.toBeNull(),
+    )
+    expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
+    expect(dialog?.querySelector('.section-title')?.textContent?.trim()).toBe(
+      '桌宠',
+    )
   })
 
   it('closes on Escape, the close button and a mask click', async () => {
