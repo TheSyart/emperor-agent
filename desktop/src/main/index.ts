@@ -1102,6 +1102,9 @@ async function startup(): Promise<void> {
       ipcMain,
       authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
       service: dictation,
+      ...(process.platform === 'darwin'
+        ? { openExternal: (url: string) => shell.openExternal(url) }
+        : {}),
     })
     if (credentialVault)
       registerCredentialVaultIpc({

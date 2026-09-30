@@ -186,7 +186,7 @@ Electron main 托管 macOS Helper、Chrome Native Messaging bridge 和凭据库�
 
 ### 听写
 
-编辑器听写（macOS）不经过 CoreApi。受信 renderer 通过 `emperor:dictation:status`、`start`、`stop`、`cancel` 读取听写 Helper 的状态，开始或结束一段听写。会话 ID 由 main 生成；事件经 `emperor:dictation:event`（main → renderer）只发给发起听写的窗口，`seq` 单调递增：`started`，若干 `partial`（到目前为止的完整转写），最多一个 `final`，最后恰好一个 `ended`（失败时之前先有 `error`）。同一时间只有一段听写；发起的窗口关闭或渲染进程退出时，main 取消它。
+编辑器听写（macOS）不经过 CoreApi。受信 renderer 通过 `emperor:dictation:status`、`start`、`stop`、`cancel` 读取听写 Helper 的状态，开始或结束一段听写。会话 ID 由 main 生成；事件经 `emperor:dictation:event`（main → renderer）只发给发起听写的窗口，`seq` 单调递增：`started`，若干 `partial`（到目前为止的完整转写），最多一个 `final`，最后恰好一个 `ended`（失败时之前先有 `error`）。同一时间只有一段听写；发起的窗口关闭或渲染进程退出时，main 取消它。设置 › 语音用 `emperor:dictation:open-privacy` 打开系统设置的麦克风或语音识别隐私列表：renderer 只能传 `microphone` 或 `speech`，地址由 main 固定。麦克风、语言和编辑器快捷键是这个窗口的偏好，保存在 renderer 的 localStorage。
 
 `Emperor Dictation Helper.app` 作为 Emperor 的子进程运行。打包时位于 `Contents/Library/Helpers`，首次启动前核对它的签名与主程序一致。双方在 stdin/stdout 上每行一个 JSON，单行最多 64 KiB，协议版本为 1。识别强制在本机进行（`SFSpeechRecognizer` 设 `requiresOnDeviceRecognition`）；当前语言没有本机模型时直接失败，不改用云端。音频只留在 Helper 的内存里，转写不写入会话日志。Helper 崩溃、输出无法解析或不按时响应时，main 以 `helper_exited` 或 `timeout` 结束当前听写；一分钟内异常退出三次后，一分钟内不再启动它。
 

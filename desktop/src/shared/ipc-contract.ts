@@ -190,6 +190,13 @@ export const DICTATION_STOP_CHANNEL = 'emperor:dictation:stop'
 export const DICTATION_CANCEL_CHANNEL = 'emperor:dictation:cancel'
 /** Main → renderer {@link DictationEvent}. */
 export const DICTATION_EVENT_CHANNEL = 'emperor:dictation:event'
+/**
+ * `{ pane }`: open System Settings at the microphone or speech recognition
+ * privacy list (main owns the URLs). Answers `{ opened }`.
+ */
+export const DICTATION_PRIVACY_CHANNEL = 'emperor:dictation:open-privacy'
+
+export type DictationPrivacyPane = 'microphone' | 'speech'
 
 /** `unknown`: the helper could not be asked. */
 export type DictationPermission =

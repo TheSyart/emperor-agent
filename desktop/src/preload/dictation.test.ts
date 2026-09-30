@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_EVENT_CHANNEL,
+  DICTATION_PRIVACY_CHANNEL,
   DICTATION_START_CHANNEL,
   DICTATION_STATUS_CHANNEL,
   DICTATION_STOP_CHANNEL,
@@ -40,6 +41,7 @@ describe('dictation preload bridge', () => {
     const bridge = createDictationBridge(ipc)
     expect(Object.keys(bridge).sort()).toEqual([
       'dictationCancel',
+      'dictationOpenPrivacy',
       'dictationStart',
       'dictationStatus',
       'dictationStop',
@@ -50,12 +52,14 @@ describe('dictation preload bridge', () => {
     await bridge.dictationStart({ locale: 'zh-CN', device: null })
     await bridge.dictationStop('session-0001')
     await bridge.dictationCancel('session-0001')
+    await bridge.dictationOpenPrivacy('speech')
     expect(ipc.invoked).toEqual([
       [DICTATION_STATUS_CHANNEL, undefined],
       [DICTATION_START_CHANNEL, {}],
       [DICTATION_START_CHANNEL, { locale: 'zh-CN', device: null }],
       [DICTATION_STOP_CHANNEL, { session: 'session-0001' }],
       [DICTATION_CANCEL_CHANNEL, { session: 'session-0001' }],
+      [DICTATION_PRIVACY_CHANNEL, { pane: 'speech' }],
     ])
   })
 

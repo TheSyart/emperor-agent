@@ -1,10 +1,12 @@
 import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_EVENT_CHANNEL,
+  DICTATION_PRIVACY_CHANNEL,
   DICTATION_START_CHANNEL,
   DICTATION_STATUS_CHANNEL,
   DICTATION_STOP_CHANNEL,
   type DictationEvent,
+  type DictationPrivacyPane,
   type DictationStartRequest,
 } from '../shared/ipc-contract'
 
@@ -33,6 +35,9 @@ export function createDictationBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(DICTATION_STOP_CHANNEL, { session }),
     dictationCancel: (session: string) =>
       ipcRenderer.invoke(DICTATION_CANCEL_CHANNEL, { session }),
+    /** Settings › 语音: System Settings at one privacy list. */
+    dictationOpenPrivacy: (pane: DictationPrivacyPane) =>
+      ipcRenderer.invoke(DICTATION_PRIVACY_CHANNEL, { pane }),
     onDictationEvent: (listener: (event: DictationEvent) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>
         listener(payload as DictationEvent)

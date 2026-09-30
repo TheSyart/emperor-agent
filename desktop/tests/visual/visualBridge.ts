@@ -36,6 +36,12 @@ type VisualBridge = {
   agentPreviewStart?: (targetId: string) => Promise<unknown>
   agentPreviewStop?: (targetId: string) => void
   onAgentPreviewFrame?: (listener: VisualCoreListener) => () => void
+  dictationStatus?: () => Promise<unknown>
+  dictationOpenPrivacy?: (pane: string) => Promise<{ opened: boolean }>
+  dictationStart?: () => Promise<unknown>
+  dictationStop?: () => Promise<{ ok: boolean }>
+  dictationCancel?: () => Promise<{ ok: boolean }>
+  onDictationEvent?: (listener: VisualCoreListener) => () => void
 }
 
 declare global {
@@ -3725,6 +3731,61 @@ export async function installVisualCoreBridge(
         return result
       }
 
+      // Settings › 语音 (VO-02): `?visualDictation=denied|unavailable|unsupported`.
+      const visualDictationStatus = () => {
+        const mode = visualParams.get('visualDictation')
+        const ready = {
+          supported: true,
+          available: true,
+          engine: 'sf-speech',
+          permissions: { microphone: 'granted', speech: 'granted' },
+          devices: [
+            {
+              id: 'BuiltInMicrophoneDevice',
+              name: 'MacBook Pro麦克风',
+              default: true,
+            },
+            { id: 'USB-Mic-1', name: 'Blue Yeti', default: false },
+          ],
+          locales: [
+            { id: 'en-GB', name: '英语（英国）' },
+            { id: 'en-US', name: '英语（美国）' },
+            { id: 'yue-CN', name: '粤语（中国大陆）' },
+            { id: 'zh-CN', name: '中文（中国大陆）' },
+            { id: 'zh-TW', name: '中文（台湾）' },
+          ],
+          systemLocale: 'zh-Hans-US',
+          active: false,
+        }
+        const gone = {
+          available: false,
+          engine: null,
+          devices: [],
+          locales: [],
+          systemLocale: null,
+          permissions: { microphone: 'unknown', speech: 'unknown' },
+        }
+        if (mode === 'denied')
+          return {
+            ...ready,
+            permissions: { microphone: 'denied', speech: 'undetermined' },
+          }
+        if (mode === 'unavailable')
+          return {
+            ...ready,
+            ...gone,
+            reason: 'Emperor Dictation Helper 无法启动',
+          }
+        if (mode === 'unsupported')
+          return {
+            ...ready,
+            ...gone,
+            supported: false,
+            reason: '听写目前只支持 macOS',
+          }
+        return ready
+      }
+
       window.emperor = {
         version: '0.1.0-visual',
         platform: 'visual',
@@ -3798,6 +3859,21 @@ export async function installVisualCoreBridge(
           previewListeners.add(listener)
           return () => previewListeners.delete(listener)
         },
+        dictationStatus: async () => visualDictationStatus(),
+        dictationOpenPrivacy: async (pane: string) => {
+          ;((
+            window as unknown as { __visualPrivacyOpened?: string[] }
+          ).__visualPrivacyOpened ??= []).push(pane)
+          return { opened: true }
+        },
+        dictationStart: async () => ({
+          ok: false,
+          code: 'unavailable',
+          message: '视觉测试里没有听写组件',
+        }),
+        dictationStop: async () => ({ ok: false }),
+        dictationCancel: async () => ({ ok: false }),
+        onDictationEvent: () => () => {},
         onCoreEvent: (listener: VisualCoreListener) => {
           // Specs push host runtime events (git receipts, scheduler runs …).
           ;(

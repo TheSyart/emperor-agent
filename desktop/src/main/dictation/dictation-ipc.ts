@@ -7,9 +7,11 @@
 import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_EVENT_CHANNEL,
+  DICTATION_PRIVACY_CHANNEL,
   DICTATION_START_CHANNEL,
   DICTATION_STATUS_CHANNEL,
   DICTATION_STOP_CHANNEL,
+  type DictationPrivacyPane,
   type DictationStartRequest,
   type DictationStartResult,
   type DictationStatus,
@@ -40,6 +42,14 @@ interface DictationCapability {
   ): Promise<DictationStartResult>
   stop(session: string): boolean
   cancel(session: string): boolean
+}
+
+/** System Settings privacy lists; the renderer only names one. */
+const PRIVACY_URLS: Readonly<Record<DictationPrivacyPane, string>> = {
+  microphone:
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+  speech:
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition',
 }
 
 /** Window events after which nobody will read the dictation any more. */
@@ -80,6 +90,8 @@ export function registerDictationIpc(input: {
   ipcMain: IpcMainLike
   authorize(event: unknown): void
   service: DictationCapability
+  /** `shell.openExternal` on macOS; absent: the privacy lists cannot open. */
+  openExternal?: (url: string) => Promise<unknown>
 }): void {
   const { ipcMain, service } = input
 
@@ -138,5 +150,19 @@ export function registerDictationIpc(input: {
     input.authorize(event)
     const session = sessionOf(payload)
     return { ok: session !== undefined && service.cancel(session) }
+  })
+
+  ipcMain.handle(DICTATION_PRIVACY_CHANNEL, async (event, payload) => {
+    input.authorize(event)
+    const pane = (payload as { pane?: unknown } | null | undefined)?.pane
+    const url =
+      pane === 'microphone' || pane === 'speech' ? PRIVACY_URLS[pane] : null
+    if (url === null || !input.openExternal) return { opened: false }
+    try {
+      await input.openExternal(url)
+      return { opened: true }
+    } catch {
+      return { opened: false }
+    }
   })
 }

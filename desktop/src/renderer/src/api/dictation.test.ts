@@ -3,6 +3,7 @@ import {
   cancelDictation,
   dictationStatus,
   onDictationEvent,
+  openDictationPrivacy,
   startDictation,
   stopDictation,
 } from './dictation'
@@ -26,7 +27,15 @@ describe('dictation API', () => {
     })
     expect(await stopDictation('session-0001')).toBe(false)
     expect(await cancelDictation('session-0001')).toBe(false)
+    expect(await openDictationPrivacy('microphone')).toBe(false)
     expect(typeof onDictationEvent(() => {})).toBe('function')
+  })
+
+  it('opens a privacy list through the bridge', async () => {
+    const dictationOpenPrivacy = vi.fn(async () => ({ opened: true }))
+    g.window = { emperor: { dictationOpenPrivacy } }
+    expect(await openDictationPrivacy('speech')).toBe(true)
+    expect(dictationOpenPrivacy).toHaveBeenCalledWith('speech')
   })
 
   it('passes calls through, and turns bridge failures into answers', async () => {

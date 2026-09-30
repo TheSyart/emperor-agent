@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_EVENT_CHANNEL,
+  DICTATION_PRIVACY_CHANNEL,
   DICTATION_START_CHANNEL,
   DICTATION_STATUS_CHANNEL,
   DICTATION_STOP_CHANNEL,
@@ -38,6 +39,7 @@ function setup() {
     cancel: vi.fn(() => true),
   }
   const authorize = vi.fn()
+  const openExternal = vi.fn(async () => undefined)
   registerDictationIpc({
     ipcMain: {
       handle: (channel, handler) => {
@@ -46,11 +48,12 @@ function setup() {
     },
     authorize,
     service,
+    openExternal,
   })
   const sender = new FakeSender()
   const call = async (channel: string, payload?: unknown) =>
     await handlers.get(channel)!({ sender }, payload)
-  return { handlers, service, authorize, sender, call, listeners }
+  return { handlers, service, authorize, sender, call, listeners, openExternal }
 }
 
 const started: DictationEvent = {
@@ -61,11 +64,12 @@ const started: DictationEvent = {
 }
 
 describe('dictation IPC', () => {
-  it('registers the four channels and authorizes each before reading it', async () => {
+  it('registers its channels and authorizes each before reading it', async () => {
     const { handlers, authorize, service, call } = setup()
     expect([...handlers.keys()].sort()).toEqual(
       [
         DICTATION_CANCEL_CHANNEL,
+        DICTATION_PRIVACY_CHANNEL,
         DICTATION_START_CHANNEL,
         DICTATION_STATUS_CHANNEL,
         DICTATION_STOP_CHANNEL,
@@ -154,6 +158,39 @@ describe('dictation IPC', () => {
     }
     expect(service.stop).toHaveBeenCalledTimes(1)
     expect(service.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens only the two privacy lists, by fixed address', async () => {
+    const { call, openExternal } = setup()
+    expect(
+      await call(DICTATION_PRIVACY_CHANNEL, { pane: 'microphone' }),
+    ).toEqual({
+      opened: true,
+    })
+    expect(await call(DICTATION_PRIVACY_CHANNEL, { pane: 'speech' })).toEqual({
+      opened: true,
+    })
+    expect(openExternal.mock.calls).toEqual([
+      [
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+      ],
+      [
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition',
+      ],
+    ])
+    for (const payload of [
+      undefined,
+      { pane: 'camera' },
+      { pane: 'https://example.com' },
+    ])
+      expect(await call(DICTATION_PRIVACY_CHANNEL, payload)).toEqual({
+        opened: false,
+      })
+    expect(openExternal).toHaveBeenCalledTimes(2)
+    openExternal.mockRejectedValueOnce(new Error('no handler'))
+    expect(await call(DICTATION_PRIVACY_CHANNEL, { pane: 'speech' })).toEqual({
+      opened: false,
+    })
   })
 
   it('answers the status as the service reports it', async () => {

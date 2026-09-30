@@ -85,8 +85,11 @@ describe('SettingsModal', () => {
     expect(dialog?.getAttribute('role')).toBe('dialog')
     expect(dialog?.textContent).toContain('设置')
     // 定时任务 and the 能力 tabs are full pages now; 配置 folded into 记忆;
-    // 电脑操作 joined.
-    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(8)
+    // 电脑操作 and 语音 joined.
+    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(9)
+    expect(
+      dialog?.querySelector('.nav-cell[data-section="voice"]'),
+    ).not.toBeNull()
     for (const moved of [
       'scheduler',
       'plugins',

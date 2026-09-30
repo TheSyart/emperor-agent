@@ -4,6 +4,7 @@
 
 import type {
   DictationEvent,
+  DictationPrivacyPane,
   DictationStartRequest,
   DictationStartResult,
   DictationStatus,
@@ -16,6 +17,7 @@ export type {
   DictationEvent,
   DictationLocale,
   DictationPermission,
+  DictationPrivacyPane,
   DictationStartRequest,
   DictationStartResult,
   DictationStatus,
@@ -28,6 +30,9 @@ interface DictationBridge {
   ) => Promise<DictationStartResult>
   dictationStop?: (session: string) => Promise<{ ok: boolean }>
   dictationCancel?: (session: string) => Promise<{ ok: boolean }>
+  dictationOpenPrivacy?: (
+    pane: DictationPrivacyPane,
+  ) => Promise<{ opened: boolean }>
   onDictationEvent?: (listener: (event: DictationEvent) => void) => () => void
 }
 
@@ -88,6 +93,17 @@ export async function stopDictation(session: string): Promise<boolean> {
 export async function cancelDictation(session: string): Promise<boolean> {
   try {
     return (await bridge()?.dictationCancel?.(session))?.ok === true
+  } catch {
+    return false
+  }
+}
+
+/** System Settings at the microphone or speech recognition privacy list. */
+export async function openDictationPrivacy(
+  pane: DictationPrivacyPane,
+): Promise<boolean> {
+  try {
+    return (await bridge()?.dictationOpenPrivacy?.(pane))?.opened === true
   } catch {
     return false
   }
