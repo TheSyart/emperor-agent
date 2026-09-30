@@ -176,14 +176,15 @@ async function secureDirectory(
   if ((info.mode & 0o077) !== 0) await fs.chmod(path, 0o700)
 }
 
-interface CodeIdentity {
+export interface CodeIdentity {
   readonly identifier: string
   readonly team: string | null
   readonly cdHash: string
   readonly adHoc: boolean
 }
 
-async function signedIdentity(
+/** A bundle's verified code signature; also checks the dictation helper. */
+export async function signedIdentity(
   path: string,
   system: MacosHelperInstallSystem = nodeInstallSystem,
 ): Promise<CodeIdentity> {

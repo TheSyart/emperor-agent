@@ -127,7 +127,11 @@ function validatePackagedAppResources(
     if ((lstatSync(auth).mode & 0o111) === 0)
       throw new Error('credential-auth is not executable')
     const helpersRoot = join(resourcesRoot, '..', 'Library', 'Helpers')
-    const expectedHelpers = ['Emperor Computer Helper.app', 'emperor-nm-host']
+    const expectedHelpers = [
+      'Emperor Computer Helper.app',
+      'Emperor Dictation Helper.app',
+      'emperor-nm-host',
+    ]
     const actualHelpers = readdirSync(helpersRoot).sort()
     if (
       actualHelpers.length !== expectedHelpers.length ||
@@ -157,6 +161,7 @@ function validatePackagedAppResources(
       (lstatSync(executable).mode & 0o111) === 0
     )
       throw new Error('packaged Computer Use helper identity is invalid')
+    validateDictationHelper(join(helpersRoot, 'Emperor Dictation Helper.app'))
     const messagingHost = join(helpersRoot, 'emperor-nm-host')
     assertRegularFile(messagingHost, 'Native Messaging host')
     if ((lstatSync(messagingHost).mode & 0o111) === 0)
@@ -182,6 +187,35 @@ function validatePackagedAppResources(
     if (existsSync(join(resourcesRoot, forbidden)))
       throw new Error(`packaged resources contain forbidden path: ${forbidden}`)
   }
+}
+
+/** Editor dictation helper: its identity and the two usage strings. */
+function validateDictationHelper(helper) {
+  if (
+    !existsSync(helper) ||
+    !lstatSync(helper).isDirectory() ||
+    lstatSync(helper).isSymbolicLink()
+  )
+    throw new Error('packaged dictation helper app is missing or unsafe')
+  const info = join(helper, 'Contents', 'Info.plist')
+  const executable = join(
+    helper,
+    'Contents',
+    'MacOS',
+    'emperor-dictation-helper',
+  )
+  assertRegularFile(info, 'dictation helper Info.plist')
+  assertRegularFile(executable, 'dictation helper executable')
+  const plist = readFileSync(info, 'utf8')
+  if (
+    !plist.includes(
+      '<string>com.emperor.agent.desktop.dictation-helper</string>',
+    ) ||
+    !plist.includes('<key>NSMicrophoneUsageDescription</key>') ||
+    !plist.includes('<key>NSSpeechRecognitionUsageDescription</key>') ||
+    (lstatSync(executable).mode & 0o111) === 0
+  )
+    throw new Error('packaged dictation helper identity is invalid')
 }
 
 function validatePackagedNodePty(resourcesRoot, platform, arch) {

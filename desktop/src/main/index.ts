@@ -100,6 +100,13 @@ import {
   createDesktopWebFetchClient,
   type ElectronRequestLike,
 } from './public-http-client'
+import { DictationService } from './dictation/dictation-service'
+import { registerDictationIpc } from './dictation/dictation-ipc'
+import {
+  dictationHelperAppPath,
+  dictationHelperExecutable,
+  verifyDictationHelper,
+} from './dictation/helper-location'
 import {
   RECOVERY_ACTION_CHANNEL,
   createRecoveryActionHandler,
@@ -143,6 +150,7 @@ let nativeDesktop: MacosDesktopDriver | null = null
 let nmBridge: NmBridgeServer | null = null
 let externalBrowser: ExternalBrowserDriver | null = null
 let credentialVault: CredentialVault | null = null
+let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
 let desktopPreview: DesktopPreview | null = null
 let killSwitch: KillSwitch | null = null
@@ -1089,6 +1097,12 @@ async function startup(): Promise<void> {
         },
       },
     })
+    dictation = createDictationService()
+    registerDictationIpc({
+      ipcMain,
+      authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+      service: dictation,
+    })
     if (credentialVault)
       registerCredentialVaultIpc({
         ipcMain,
@@ -1210,7 +1224,39 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   killSwitch?.dispose()
   stopEntries?.dispose()
+  dictation?.dispose()
 })
+
+/**
+ * Editor dictation (VO-01): the macOS helper runs as Emperor's own child,
+ * from inside the app when packaged (its signature checked first).
+ */
+function createDictationService(): DictationService {
+  const helperApp =
+    process.platform === 'darwin'
+      ? dictationHelperAppPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          desktopRoot: path.resolve(mainDir, '..', '..'),
+        })
+      : null
+  return new DictationService({
+    executable: () => {
+      if (!helperApp) return null
+      const executable = dictationHelperExecutable(helperApp)
+      return fs.existsSync(executable) ? executable : null
+    },
+    ...(app.isPackaged && helperApp
+      ? {
+          verify: async () =>
+            await verifyDictationHelper(
+              helperApp,
+              path.resolve(fs.realpathSync(process.execPath), '..', '..', '..'),
+            ),
+        }
+      : {}),
+  })
+}
 
 function requireBrowserViewHost(): BrowserViewHost {
   if (!browserViewHost) throw new Error('browser host is not ready')

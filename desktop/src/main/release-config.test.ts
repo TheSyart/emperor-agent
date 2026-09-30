@@ -98,6 +98,45 @@ async function waitForCompleteAsar(
 }
 
 describe('desktop release packaging (MIG-REL-001)', () => {
+  it('says why dictation needs the microphone and speech recognition', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    expect(config).toMatch(
+      /extendInfo:\r?\n\s+NSMicrophoneUsageDescription: \S/,
+    )
+    expect(config).toMatch(/\n\s+NSSpeechRecognitionUsageDescription: \S/)
+    for (const file of [
+      'entitlements.mac.plist',
+      'entitlements.mac.inherit.plist',
+    ])
+      expect(
+        fs.readFileSync(path.join(desktopRoot, 'build', file), 'utf8'),
+      ).toMatch(
+        /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/,
+      )
+    const assemble = fs.readFileSync(
+      path.join(
+        desktopRoot,
+        'native',
+        'macos',
+        'scripts',
+        'assemble-dictation-app.sh',
+      ),
+      'utf8',
+    )
+    expect(assemble).toContain('com.emperor.agent.desktop.dictation-helper')
+    expect(assemble).toContain('<key>NSMicrophoneUsageDescription</key>')
+    expect(assemble).toContain('<key>NSSpeechRecognitionUsageDescription</key>')
+    expect(
+      fs.readFileSync(
+        path.join(desktopRoot, 'scripts', 'build-native-mac.mjs'),
+        'utf8',
+      ),
+    ).toContain('assemble-dictation-app.sh')
+  })
+
   it('does not bundle the legacy Python backend by default', () => {
     const config = fs.readFileSync(
       path.join(desktopRoot, 'electron-builder.yml'),
@@ -121,6 +160,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(config).toContain('node_modules/node-pty/build/Release/**/*')
     expect(config).toContain('from: out/native/Emperor Computer Helper.app')
     expect(config).toContain('from: out/native/emperor-nm-host')
+    expect(config).toContain('from: out/native/Emperor Dictation Helper.app')
     expect(config).not.toContain('node_modules/node-pty/**/*')
     expect(config).toContain('from: ../assets/desktop-pet')
     expect(config).toContain(
@@ -209,6 +249,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'app',
       'Electron Framework',
       'Computer Helper',
+      'Dictation Helper',
       'Native Messaging host',
       'credential-auth',
     ].map((label) => ({
@@ -527,6 +568,25 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'native-fixture',
       { mode: 0o755 },
     )
+    const dictation = path.join(
+      appOutDir,
+      'Library',
+      'Helpers',
+      'Emperor Dictation Helper.app',
+      'Contents',
+    )
+    fs.mkdirSync(path.join(dictation, 'MacOS'), { recursive: true })
+    const dictationInfo = [
+      '<string>com.emperor.agent.desktop.dictation-helper</string>',
+      '<key>NSMicrophoneUsageDescription</key>',
+      '<key>NSSpeechRecognitionUsageDescription</key>',
+    ].join('\n')
+    fs.writeFileSync(path.join(dictation, 'Info.plist'), dictationInfo)
+    fs.writeFileSync(
+      path.join(dictation, 'MacOS', 'emperor-dictation-helper'),
+      'native-fixture',
+      { mode: 0o755 },
+    )
     const messagingHost = path.join(
       appOutDir,
       'Library',
@@ -565,6 +625,19 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ),
     ).toThrow(/allowlist/i)
     fs.writeFileSync(messagingHost, 'native-fixture', { mode: 0o755 })
+    // The dictation helper must keep both usage strings.
+    fs.writeFileSync(
+      path.join(dictation, 'Info.plist'),
+      '<string>com.emperor.agent.desktop.dictation-helper</string>',
+    )
+    expect(() =>
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      ),
+    ).toThrow(/dictation helper/i)
+    fs.writeFileSync(path.join(dictation, 'Info.plist'), dictationInfo)
     const strayHelper = path.join(appOutDir, 'Library', 'Helpers', 'unexpected')
     fs.writeFileSync(strayHelper, 'x')
     expect(() =>

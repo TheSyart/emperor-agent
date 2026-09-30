@@ -65,6 +65,13 @@ mac:
       to: Library/Helpers/Emperor Computer Helper.app
     - from: out/native/emperor-nm-host
       to: Library/Helpers/emperor-nm-host
+    - from: out/native/Emperor Dictation Helper.app
+      to: Library/Helpers/Emperor Dictation Helper.app
+  # Editor dictation runs its helper as Emperor's child; macOS may show these
+  # strings under Emperor's name (experiment E-D1).
+  extendInfo:
+    NSMicrophoneUsageDescription: Emperor 只在你向聊天输入框听写时使用麦克风；声音只在这台 Mac 上处理，不会保存。
+    NSSpeechRecognitionUsageDescription: Emperor 在这台 Mac 上把你说的话识别成文字，填进聊天输入框；不会发送到网络。
   extraResources:
     - from: out/native/credential-auth
       to: native/credential-auth

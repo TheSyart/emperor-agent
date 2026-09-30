@@ -5,6 +5,7 @@ const EXPECTED_LABELS = [
   'app',
   'Electron Framework',
   'Computer Helper',
+  'Dictation Helper',
   'Native Messaging host',
   'credential-auth',
 ]
@@ -71,6 +72,12 @@ function validateMacPackage(app, arch) {
     'Helpers',
     'Emperor Computer Helper.app',
   )
+  const dictation = join(
+    contents,
+    'Library',
+    'Helpers',
+    'Emperor Dictation Helper.app',
+  )
   const host = join(contents, 'Library', 'Helpers', 'emperor-nm-host')
   const credentialAuth = join(
     contents,
@@ -89,6 +96,11 @@ function validateMacPackage(app, arch) {
       'Computer Helper',
       helper,
       join(helper, 'Contents', 'MacOS', 'emperor-computer-helper'),
+    ),
+    signatureEntry(
+      'Dictation Helper',
+      dictation,
+      join(dictation, 'Contents', 'MacOS', 'emperor-dictation-helper'),
     ),
     signatureEntry('Native Messaging host', host, host),
     signatureEntry('credential-auth', credentialAuth, credentialAuth),

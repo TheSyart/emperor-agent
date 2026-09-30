@@ -39,6 +39,24 @@ if (process.platform === 'darwin') {
     { recursive: true },
   )
 
+  // Editor dictation (VO-01): its own helper, run as Emperor's child.
+  const assembleDictation = resolve(
+    desktop,
+    'native/macos/scripts/assemble-dictation-app.sh',
+  )
+  const dictationBuild = spawnSync('bash', [assembleDictation, arch], {
+    stdio: 'inherit',
+  })
+  if (dictationBuild.status !== 0)
+    throw new Error('macOS dictation helper build failed')
+  const dictation = resolve(desktop, 'out/native/Emperor Dictation Helper.app')
+  rmSync(dictation, { recursive: true, force: true })
+  cpSync(
+    resolve(desktop, `native/macos/build/${arch}/Emperor Dictation Helper.app`),
+    dictation,
+    { recursive: true },
+  )
+
   const nativeMessagingBuild = resolve(desktop, 'native/browser-host/build.sh')
   const nativeMessaging = spawnSync(
     'bash',

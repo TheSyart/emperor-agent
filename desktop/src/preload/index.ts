@@ -3,6 +3,7 @@ import { createCoreBridge } from './core-ipc'
 import { createCoreEventBridge } from './core-events'
 import { createTerminalEventBridge } from './terminal-events'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
+import { createDictationBridge } from './dictation'
 import { PET_STATUS_CHANNEL } from '../shared/ipc-contract'
 
 // Expose a minimal, read-only desktop surface to the renderer.
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('emperor', {
     return () => ipcRenderer.removeListener(PET_STATUS_CHANNEL, wrapped)
   },
   ...createDesktopCapabilityBridge(ipcRenderer),
+  ...createDictationBridge(ipcRenderer),
   ...createCoreBridge(ipcRenderer),
   ...createCoreEventBridge(ipcRenderer),
   ...createTerminalEventBridge(ipcRenderer),
