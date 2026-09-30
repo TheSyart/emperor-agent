@@ -3731,6 +3731,18 @@ export async function installVisualCoreBridge(
         return result
       }
 
+      const dictationListeners = new Set<VisualCoreListener>()
+      const visualDictation = { session: 'visual-dictation-1', seq: 0 }
+      const emitDictation = (event: Record<string, unknown>) => {
+        visualDictation.seq += 1
+        const full = {
+          ...event,
+          session: visualDictation.session,
+          seq: visualDictation.seq,
+        }
+        for (const listener of dictationListeners) listener(full)
+      }
+
       // Settings › 语音 (VO-02): `?visualDictation=denied|unavailable|unsupported`.
       const visualDictationStatus = () => {
         const mode = visualParams.get('visualDictation')
@@ -3788,7 +3800,9 @@ export async function installVisualCoreBridge(
 
       window.emperor = {
         version: '0.1.0-visual',
-        platform: 'visual',
+        // `?visualDictation=live` is a Mac, so the composer shows its mic.
+        platform:
+          visualParams.get('visualDictation') === 'live' ? 'darwin' : 'visual',
         selectDirectory: async () => projectDir,
         getPathForFile: () => `${projectDir}/visual-skill.zip`,
         selectFile: async () => `${projectDir}/visual-skills.zip`,
@@ -3866,14 +3880,42 @@ export async function installVisualCoreBridge(
           ).__visualPrivacyOpened ??= []).push(pane)
           return { opened: true }
         },
-        dictationStart: async () => ({
-          ok: false,
-          code: 'unavailable',
-          message: '视觉测试里没有听写组件',
-        }),
-        dictationStop: async () => ({ ok: false }),
-        dictationCancel: async () => ({ ok: false }),
-        onDictationEvent: () => () => {},
+        // `?visualDictation=live`: a scripted dictation — started and two
+        // partial results after a start, the final and the end on stop.
+        dictationStart: async () => {
+          if (visualParams.get('visualDictation') !== 'live')
+            return {
+              ok: false,
+              code: 'unavailable',
+              message: '视觉测试里没有听写组件',
+            }
+          visualDictation.seq = 0
+          const heard = [
+            { type: 'started', locale: 'zh-CN' },
+            { type: 'partial', text: '帮我看一下' },
+            { type: 'partial', text: '帮我看一下今天的构建为什么失败' },
+          ]
+          heard.forEach((event, index) =>
+            setTimeout(() => emitDictation(event), 30 * (index + 1)),
+          )
+          return { ok: true, session: visualDictation.session }
+        },
+        dictationStop: async () => {
+          emitDictation({
+            type: 'final',
+            text: '帮我看一下今天的构建为什么失败。',
+          })
+          emitDictation({ type: 'ended', reason: 'stopped' })
+          return { ok: true }
+        },
+        dictationCancel: async () => {
+          emitDictation({ type: 'ended', reason: 'cancelled' })
+          return { ok: true }
+        },
+        onDictationEvent: (listener: VisualCoreListener) => {
+          dictationListeners.add(listener)
+          return () => dictationListeners.delete(listener)
+        },
         onCoreEvent: (listener: VisualCoreListener) => {
           // Specs push host runtime events (git receipts, scheduler runs …).
           ;(

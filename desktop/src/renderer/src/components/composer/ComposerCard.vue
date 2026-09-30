@@ -10,6 +10,12 @@
  * The input is the rich ComposerEditor (skill chips, RF-02); the old
  * textarea with its marker overlay stays behind COMPOSER_INPUT_FLAG until
  * the editor is accepted.
+ *
+ * Dictation (VO-03, composerDictation.ts): the mic before send and the
+ * shortcut from 设置 › 语音, on macOS and in the rich editor only.
+ * `dictationChat` names the chat on screen; a change stops the recording,
+ * and a result that arrives afterwards waits above the input of its own
+ * chat (插入 / 丢弃).
  */
 import { computed, ref } from 'vue'
 import AttachmentChip from '../chat/AttachmentChip.vue'
@@ -36,11 +42,15 @@ import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import ContextMeter from './ContextMeter.vue'
 import ComposerEditor from './editor/ComposerEditor.vue'
+import DictationButton from './DictationButton.vue'
+import { useComposerDictation } from './composerDictation'
 import ModelPicker from './ModelPicker.vue'
 import PermissionChip from './PermissionChip.vue'
 import PlanChip from './PlanChip.vue'
 
-const props = defineProps<ComposerControllerProps & { hero?: boolean }>()
+const props = defineProps<
+  ComposerControllerProps & { hero?: boolean; dictationChat?: string | null }
+>()
 const emit = defineEmits<ComposerEmit>()
 const controller = useComposerController(props, emit)
 const {
@@ -98,6 +108,24 @@ const {
   selectModel,
   selectReasoning,
 } = controller
+
+const dictation = useComposerDictation({
+  editor,
+  chat: () => props.dictationChat ?? null,
+  onError: (message) => emit('error', message),
+})
+const {
+  supported: dictationSupported,
+  phase: dictationPhase,
+  shortcut: dictationShortcut,
+  keptText: dictationKept,
+} = dictation
+
+/** The dictation shortcut first, then the composer's own keys. */
+function editorKeydown(event: KeyboardEvent): void {
+  if (dictation.handleKey(event)) return
+  handleKeydown(event)
+}
 
 const addOpen = ref(false)
 const addAnchor = ref<HTMLElement | null>(null)
@@ -200,6 +228,32 @@ defineExpose(controller.expose)
         </div>
       </div>
 
+      <div
+        v-if="richInput && dictationKept"
+        class="accessory dictation-kept"
+        role="status"
+      >
+        <span class="dictation-kept-text"
+          >听写结果还没放进输入框：{{ dictationKept }}</span
+        >
+        <button
+          type="button"
+          class="dictation-kept-action"
+          aria-label="插入听写内容"
+          @click="dictation.insertKept()"
+        >
+          插入
+        </button>
+        <button
+          type="button"
+          class="dictation-kept-action"
+          aria-label="丢弃听写内容"
+          @click="dictation.discardKept()"
+        >
+          丢弃
+        </button>
+      </div>
+
       <ComposerEditor
         v-if="richInput"
         ref="editor"
@@ -208,7 +262,7 @@ defineExpose(controller.expose)
         :disabled="goalCaptureStarting || props.interactionBlocked"
         :hero="hero"
         :catalog="catalog"
-        :keydown="handleKeydown"
+        :keydown="editorKeydown"
         @change="onEditorChange"
         @trigger="onEditorTrigger"
         @focus="closeComposerMenus"
@@ -304,6 +358,14 @@ defineExpose(controller.expose)
             v-if="props.contextMax > 0"
             :used="props.contextUsed"
             :max="props.contextMax"
+          />
+          <DictationButton
+            v-if="richInput && dictationSupported"
+            :phase="dictationPhase"
+            :shortcut="dictationShortcut"
+            :disabled="goalCaptureStarting || props.interactionBlocked"
+            @toggle="dictation.toggle()"
+            @cancel="dictation.cancel()"
           />
           <template v-if="props.busy">
             <button
@@ -439,6 +501,38 @@ defineExpose(controller.expose)
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-3);
+}
+
+.dictation-kept {
+  flex-wrap: nowrap;
+  padding: 0 var(--space-4);
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.dictation-kept-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dictation-kept-action {
+  flex: none;
+  padding: var(--space-0-5) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--selector-fill));
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  cursor: pointer;
+}
+
+.dictation-kept-action:hover {
+  background: rgb(var(--interactive-bg-hover-solid));
 }
 
 .uploading {

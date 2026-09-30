@@ -18,7 +18,9 @@
  * - focus.
  * Exposes: focus(), setContent(text, references?), insertChip(kind, id,
  * label), replaceWithChip(from, to, kind, id, label), chipifyTyped(),
- * output().
+ * output(), and for dictation (dictationDraft.ts) dictationBegin(session),
+ * dictationPartial(session, text), dictationFinal(session, text) and
+ * dictationEnd(session).
  *
  * Enter is left to the controller; Shift+Enter starts a new line; Enter
  * while an input method composes is never a send (the browser's
@@ -56,6 +58,13 @@ import {
   type ComposerReferenceKind,
   type ComposerTrigger,
 } from './composerDocument'
+import {
+  beginDictation,
+  commitDictation,
+  dictationDraftPlugin,
+  endDictation,
+  showDictationPartial,
+} from './dictationDraft'
 import { trackEditorView } from './editorViews'
 
 const props = withDefaults(
@@ -193,6 +202,7 @@ function createState(doc?: PMNode): EditorState {
     ...(doc ? { doc } : {}),
     plugins: [
       placeholderPlugin,
+      dictationDraftPlugin,
       history(),
       keymap({
         'Mod-z': undo,
@@ -396,6 +406,29 @@ function output(): ComposerOutput {
     : { content: '', references: [] }
 }
 
+/** Dictation begins at the caret or selection as it is now. */
+function dictationBegin(session: string): void {
+  if (view) view.dispatch(beginDictation(view.state, session))
+}
+
+function dictationPartial(session: string, text: string): void {
+  if (view) view.dispatch(showDictationPartial(view.state, session, text))
+}
+
+/** Inserts the final once, as one undo step; true when text went in. */
+function dictationFinal(session: string, text: string): boolean {
+  if (!view) return false
+  const tr = commitDictation(view.state, session, text)
+  if (!tr) return false
+  view.dispatch(tr)
+  view.dispatch(closeHistory(view.state.tr))
+  return tr.docChanged
+}
+
+function dictationEnd(session: string): void {
+  if (view) view.dispatch(endDictation(view.state, session))
+}
+
 defineExpose({
   focus,
   setContent,
@@ -403,6 +436,10 @@ defineExpose({
   replaceWithChip,
   chipifyTyped,
   output,
+  dictationBegin,
+  dictationPartial,
+  dictationFinal,
+  dictationEnd,
 })
 </script>
 
@@ -457,6 +494,24 @@ defineExpose({
   height: 0;
   color: rgb(var(--label-caption));
   pointer-events: none;
+}
+
+/* Dictation (dictationDraft.ts): what is being heard, not yet text. */
+.composer-editor :deep(.composer-dictation-draft) {
+  color: rgb(var(--label-tertiary));
+  text-decoration: underline dotted rgb(var(--label-tertiary));
+  text-underline-offset: 0.2em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.composer-editor :deep(.composer-dictation-draft:empty)::after {
+  content: '…';
+}
+
+.composer-editor :deep(.composer-dictation-replaced) {
+  color: rgb(var(--label-tertiary));
+  text-decoration: line-through;
 }
 
 .composer-editor :deep(.composer-chip) {

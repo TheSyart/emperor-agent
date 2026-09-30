@@ -24,6 +24,7 @@ export type {
 } from '../../../shared/ipc-contract'
 
 interface DictationBridge {
+  platform?: string
   dictationStatus?: () => Promise<DictationStatus>
   dictationStart?: (
     request?: DictationStartRequest,
@@ -55,6 +56,18 @@ function unavailable(reason: string): DictationStatus {
     systemLocale: null,
     active: false,
   }
+}
+
+/**
+ * Dictation exists here (the desktop app on macOS). Answered without
+ * starting the helper; `dictationStatus` asks the helper itself.
+ */
+export function dictationSupported(): boolean {
+  const current = bridge()
+  return (
+    current?.platform === 'darwin' &&
+    typeof current.dictationStart === 'function'
+  )
 }
 
 export async function dictationStatus(): Promise<DictationStatus> {

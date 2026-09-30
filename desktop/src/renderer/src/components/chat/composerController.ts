@@ -140,6 +140,10 @@ export interface ComposerEditorHandle {
   ): void
   chipifyTyped(): void
   output(): ComposerOutput
+  dictationBegin(session: string): void
+  dictationPartial(session: string, text: string): void
+  dictationFinal(session: string, text: string): boolean
+  dictationEnd(session: string): void
 }
 
 export function useComposerController(

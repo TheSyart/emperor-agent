@@ -805,6 +805,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         <ComposerCard
           v-show="!takeover"
           ref="composer"
+          :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"
           :busy="ctx.busy.value"
           :interaction-blocked="Boolean(pendingInteraction)"
