@@ -6,14 +6,27 @@
  *     浏览器 pane once 设置 › 浏览器 says so;
  *   - a page typed in the address bar keeps a cookie and appears in the
  *     temporary history;
- *   - 清除浏览数据 in settings wipes the partition (checked in main);
+ *   - with 设置 › 浏览器 › 下载 › 位置 set to a temporary folder, a file
+ *     downloads there (with the macOS quarantine mark) and shows in the pane
+ *     and in 下载历史记录; an installer is blocked and never written;
+ *   - 清除浏览数据 in settings wipes the partition (checked in main) and the
+ *     download list, and leaves the downloaded file alone;
  *   - a new session closes the view: the history starts empty.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=userbrowser-app   (after `npm run build`)
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -163,6 +176,24 @@ async function userCookies(app: ElectronApplication): Promise<string[]> {
   )
 }
 
+/** Your downloads as the settings page reads them (preload bridge). */
+async function userDownloads(
+  page: Page,
+): Promise<Array<{ name: string; state: string; reason?: string }>> {
+  return await page.evaluate(async () => {
+    const bridge = (
+      window as unknown as {
+        emperor: {
+          browserDownloads(): Promise<{
+            user: Array<{ name: string; state: string; reason?: string }>
+          }>
+        }
+      }
+    ).emperor
+    return (await bridge.browserDownloads()).user
+  })
+}
+
 async function openBrowserSettings(page: Page) {
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const dialog = page.getByRole('dialog', { name: '设置' })
@@ -188,6 +219,7 @@ async function userBrowser(
   page: Page,
   model: FakeModel,
   site: FixtureSite,
+  downloads: string,
 ): Promise<void> {
   const docs = 'https://example.com/docs'
   const other = 'https://example.org/'
@@ -304,19 +336,126 @@ async function userBrowser(
     },
   )
 
-  await check(page, '清除浏览数据 wipes the partition', async () => {
-    const dialog = await openBrowserSettings(page)
-    await dialog.locator('[data-action="clear-browser-data"]').click()
-    await dialog
-      .locator('[data-clear-status]')
-      .filter({ hasText: '已清除' })
-      .waitFor({ timeout: 15_000 })
-    await page.screenshot({ path: join(shots, 'cleared.png') })
-    await closeSettings(page)
-    const left = await userCookies(app)
-    if (left.length > 0) throw new Error(`cookies left: ${left.join(', ')}`)
-    return { cookies: left }
-  })
+  // Before 清除浏览数据, which also empties the download list.
+  const report = join(downloads, 'report.csv')
+  await check(
+    page,
+    'a download goes to the chosen folder and into the history',
+    async () => {
+      // Core stores the choice; main's copy follows its change event.
+      await page.evaluate(async (folder) => {
+        const bridge = (
+          window as unknown as {
+            emperor: {
+              invokeCore(key: string, input: unknown): Promise<unknown>
+            }
+          }
+        ).emperor
+        await bridge.invokeCore('browser.setPreferences', {
+          downloadDirectory: folder,
+          askWhereToSave: false,
+        })
+      }, downloads)
+      const address = page.locator('.browser-pane .browser-address input')
+      const local = new URL(site.origin).host
+      await address.fill(`${local}/files/report.csv`)
+      await address.press('Enter')
+      await until(
+        async () =>
+          (await userDownloads(page)).some(
+            (entry) =>
+              entry.name === 'report.csv' && entry.state === 'completed',
+          ),
+        15_000,
+        'report.csv to complete in the download history',
+      )
+      if (!existsSync(report))
+        throw new Error(
+          `not in the folder: ${readdirSync(downloads).join(', ')}`,
+        )
+      if (readFileSync(report, 'utf8') !== 'month,total\n2026-08,42\n')
+        throw new Error('the saved file differs from what the site sent')
+      // macOS: marked like a browser download, so Gatekeeper checks it
+      // (xattr fails when the mark is missing; Emperor's reads `…;Emperor
+      // Agent;`).
+      const quarantine =
+        process.platform === 'darwin'
+          ? execFileSync(
+              '/usr/bin/xattr',
+              ['-p', 'com.apple.quarantine', report],
+              { encoding: 'utf8' },
+            ).trim()
+          : 'not macOS'
+      await page
+        .locator('.browser-pane [data-testid="browser-download"]')
+        .filter({ hasText: '已下载 report.csv' })
+        .waitFor({ timeout: 5_000 })
+      await page.screenshot({ path: join(shots, 'download-done.png') })
+      return { files: readdirSync(downloads), quarantine }
+    },
+  )
+
+  await check(
+    page,
+    'an installer is blocked, never written, and both show in 下载历史记录',
+    async () => {
+      const address = page.locator('.browser-pane .browser-address input')
+      const local = new URL(site.origin).host
+      await address.fill(`${local}/files/setup.dmg`)
+      await address.press('Enter')
+      await until(
+        async () =>
+          (await userDownloads(page)).some(
+            (entry) => entry.name === 'setup.dmg' && entry.state === 'blocked',
+          ),
+        15_000,
+        'setup.dmg to be blocked in the download history',
+      )
+      if (existsSync(join(downloads, 'setup.dmg')))
+        throw new Error('the installer was written')
+      await page
+        .locator('.browser-pane [data-testid="browser-download"]')
+        .filter({ hasText: '已拦截 setup.dmg' })
+        .waitFor({ timeout: 5_000 })
+      await page.screenshot({ path: join(shots, 'download-blocked.png') })
+      const dialog = await openBrowserSettings(page)
+      await dialog.locator('[data-action="manage-downloads"]').click()
+      const mine = dialog
+        .locator('.ds-settings-group')
+        .filter({ hasText: '你的下载' })
+      await mine.getByText('report.csv', { exact: true }).waitFor()
+      await mine.getByText('setup.dmg', { exact: true }).waitFor()
+      await page.screenshot({ path: join(shots, 'download-history.png') })
+      await closeSettings(page)
+      return {
+        files: readdirSync(downloads),
+        history: await userDownloads(page),
+      }
+    },
+  )
+
+  await check(
+    page,
+    '清除浏览数据 wipes the partition and the download list',
+    async () => {
+      const dialog = await openBrowserSettings(page)
+      await dialog.locator('[data-action="clear-browser-data"]').click()
+      await dialog
+        .locator('[data-clear-status]')
+        .filter({ hasText: '已清除' })
+        .waitFor({ timeout: 15_000 })
+      await page.screenshot({ path: join(shots, 'cleared.png') })
+      await closeSettings(page)
+      const left = await userCookies(app)
+      if (left.length > 0) throw new Error(`cookies left: ${left.join(', ')}`)
+      const listed = await userDownloads(page)
+      if (listed.length > 0)
+        throw new Error(`downloads still listed: ${JSON.stringify(listed)}`)
+      // The list goes; the file stays.
+      if (!existsSync(report)) throw new Error('the downloaded file went too')
+      return { cookies: left, downloads: listed.length }
+    },
+  )
 
   await check(
     page,
@@ -351,12 +490,13 @@ async function main(): Promise<void> {
   const site = await startFixtureSite()
   const model = await startFakeModel({ agentTool: 'read' })
   const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-user-browser-'))
+  const downloads = mkdtempSync(join(tmpdir(), 'emperor-e2e-user-downloads-'))
   let app: ElectronApplication | null = null
   try {
     prepareHome(home, model)
     const launched = await launch(home)
     app = launched.app
-    await userBrowser(app, launched.page, model, site)
+    await userBrowser(app, launched.page, model, site, downloads)
   } catch (error) {
     if (!(error instanceof Abort))
       report({
@@ -374,6 +514,7 @@ async function main(): Promise<void> {
     await model.close()
     await site.close()
     rmSync(home, { recursive: true, force: true })
+    rmSync(downloads, { recursive: true, force: true })
     process.stdout.write('E2E-DONE\n')
   }
 }

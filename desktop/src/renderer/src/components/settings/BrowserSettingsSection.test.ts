@@ -25,12 +25,18 @@ vi.mock('./browser/SiteSettingsPage.vue', () => ({
   __esModule: true,
   default: { render: () => h('p', { 'data-testid': 'sites-page' }) },
 }))
+vi.mock('./browser/DownloadsPage.vue', () => ({
+  __esModule: true,
+  default: { render: () => h('p', { 'data-testid': 'downloads-page' }) },
+}))
 
 type Preferences = {
   linkTarget: 'system' | 'builtin'
   localTarget: 'builtin' | 'system'
   showFullUrl: boolean
   history: boolean
+  downloadDirectory: string | null
+  askWhereToSave: boolean
 }
 
 let app: App | null = null
@@ -129,6 +135,8 @@ beforeEach(() => {
     localTarget: 'builtin',
     showFullUrl: true,
     history: true,
+    downloadDirectory: null,
+    askWhereToSave: false,
   }
   computerUse = status()
   calls = []
@@ -177,10 +185,24 @@ describe('BrowserSettingsSection', () => {
       '浏览历史',
       '密码管理器',
       '登录状态',
+      '位置',
+      '下载前询问保存位置',
+      '下载历史记录',
       '下载保留时间',
       '网站设置',
     ])
       expect(row(root, title)).toBeTruthy()
+    // 下载 reads like Codex's, with Emperor's retention last.
+    const downloads = [...root.querySelectorAll('.ds-settings-group')].find(
+      (group) => group.querySelector('.head .title')?.textContent === '下载',
+    )!
+    expect(
+      [...downloads.querySelectorAll('.ds-settings-row .title')].map((title) =>
+        title.textContent?.trim(),
+      ),
+    ).toEqual(['位置', '下载前询问保存位置', '下载历史记录', '下载保留时间'])
+    // The main page stays free of inputs: the folder is picked in a dialog.
+    expect(root.querySelector('input')).toBeNull()
     for (const gone of [
       '启用内置浏览器',
       '批注截图',
@@ -290,6 +312,65 @@ describe('BrowserSettingsSection', () => {
     )
   })
 
+  it('picks the download folder in the system dialog and can go back to the default', async () => {
+    const choose = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('/Users/me/Downloads/web')
+    ;(
+      window as unknown as { emperor: Record<string, unknown> }
+    ).emperor.chooseDownloadFolder = choose
+    const root = await mount()
+    const location = () => row(root, '位置')
+    expect(location().textContent).toContain('系统下载文件夹')
+    expect(
+      location().querySelector('[data-action="reset-download-folder"]'),
+    ).toBeNull()
+    const change = () =>
+      location().querySelector<HTMLButtonElement>(
+        '[data-action="change-download-folder"]',
+      )!
+    expect(change().textContent?.trim()).toBe('更改')
+    // Cancelled in the dialog: nothing is saved.
+    change().click()
+    await settle()
+    expect(calls.filter(([key]) => key === 'browser.setPreferences')).toEqual(
+      [],
+    )
+    change().click()
+    await settle()
+    expect(calls).toContainEqual([
+      'browser.setPreferences',
+      { downloadDirectory: '/Users/me/Downloads/web' },
+    ])
+    expect(location().textContent).toContain('/Users/me/Downloads/web')
+    location()
+      .querySelector<HTMLButtonElement>(
+        '[data-action="reset-download-folder"]',
+      )!
+      .click()
+    await settle()
+    expect(calls).toContainEqual([
+      'browser.setPreferences',
+      { downloadDirectory: null },
+    ])
+    expect(location().textContent).toContain('系统下载文件夹')
+    expect(choose).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks where to save once switched on', async () => {
+    const root = await mount()
+    const ask = control(root, 'browser-ask-save')
+    expect(ask.getAttribute('aria-checked')).toBe('false')
+    ask.click()
+    await settle()
+    expect(calls).toContainEqual([
+      'browser.setPreferences',
+      { askWhereToSave: true },
+    ])
+    expect(ask.getAttribute('aria-checked')).toBe('true')
+  })
+
   it('keeps Emperor’s downloads for the chosen time', async () => {
     const root = await mount()
     expect(
@@ -308,6 +389,7 @@ describe('BrowserSettingsSection', () => {
     for (const [title, page, testId] of [
       ['密码管理器', 'passwords', 'passwords-page'],
       ['登录状态', 'profiles', 'profiles-page'],
+      ['下载历史记录', 'downloads', 'downloads-page'],
       ['网站设置', 'sites', 'sites-page'],
     ] as const) {
       row(root, title).querySelector('button')!.click()

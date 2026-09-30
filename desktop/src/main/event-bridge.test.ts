@@ -68,6 +68,32 @@ describe('CoreEventBridge (MIG-IPC-003)', () => {
     expect(JSON.stringify(pet.sent)).not.toContain('secret-token')
     expect(JSON.stringify(pet.sent)).not.toContain(CORE_EVENT_CHANNEL)
   })
+
+  it('lets main follow every event before the windows do', () => {
+    const bridge = new CoreEventBridge()
+    const main = new FakeWebContents()
+    bridge.attach(main)
+    const order: string[] = []
+    const seen: unknown[] = []
+    main.send = (channel: string) => {
+      order.push(`window:${channel}`)
+    }
+    const stop = bridge.listen((event) => {
+      order.push('main')
+      seen.push(event)
+    })
+    // A listener that throws never keeps the event from the others.
+    bridge.listen(() => {
+      throw new Error('broken cache')
+    })
+    const event = { event: 'browser_preferences_changed', preferences: {} }
+    expect(() => bridge.emit(event)).not.toThrow()
+    expect(seen).toEqual([event])
+    expect(order).toEqual(['main', `window:${CORE_EVENT_CHANNEL}`])
+    stop()
+    bridge.emit({ event: 'ready' })
+    expect(seen).toHaveLength(1)
+  })
 })
 
 describe('SessionEventBridge', () => {

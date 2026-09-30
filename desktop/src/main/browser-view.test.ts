@@ -129,6 +129,7 @@ import {
   BROWSER_PARTITION,
   BrowserViewHost,
   browserViewWebPreferences,
+  type BrowserViewHostOptions,
 } from './browser-view'
 
 type FakeView = InstanceType<typeof electron.FakeWebContentsView>
@@ -148,7 +149,7 @@ function fakeWindow() {
 
 function setup(
   now: () => number = () => 0,
-  options: { historyEnabled?: () => boolean | Promise<boolean> } = {},
+  options: BrowserViewHostOptions = {},
 ) {
   const window = fakeWindow()
   const host = new BrowserViewHost(
@@ -264,6 +265,18 @@ describe('BrowserViewHost', () => {
     const download = { preventDefault: vi.fn() }
     session.emit('will-download', download)
     expect(download.preventDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands downloads to the handler main gives it', async () => {
+    const onDownload = vi.fn()
+    const { host } = setup(() => 0, { onDownload })
+    await host.openUrl({ url: 'https://example.com/' })
+    const contents = onlyView().webContents
+    const download = { preventDefault: vi.fn() }
+    const item = { getFilename: () => 'report.csv' }
+    contents.session!.emit('will-download', download, item, contents)
+    expect(onDownload).toHaveBeenCalledWith(download, item, contents)
+    expect(download.preventDefault).not.toHaveBeenCalled()
   })
 
   it('hardens the shared partition session only once across reopened views', async () => {
@@ -665,6 +678,16 @@ describe('BrowserViewHost clearing browsing data', () => {
     for (const [partition] of electron.session.fromPartition.mock.calls)
       expect(partition).toBe(BROWSER_PARTITION)
     expect([...electron.sessions.keys()]).toEqual([BROWSER_PARTITION])
+  })
+
+  it('forgets the download list with the rest, but not when the view only closes', async () => {
+    const forgetDownloads = vi.fn()
+    const { host } = setup(() => 0, { forgetDownloads })
+    await host.openUrl({ url: 'https://example.com/' })
+    host.close()
+    expect(forgetDownloads).not.toHaveBeenCalled()
+    await expect(host.clearData()).resolves.toEqual({ ok: true })
+    expect(forgetDownloads).toHaveBeenCalledTimes(1)
   })
 
   it('clears the partition even when no page was opened', async () => {

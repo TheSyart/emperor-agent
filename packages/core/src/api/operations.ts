@@ -4,6 +4,7 @@ import {
   KILL_SWITCH_ACCELERATOR,
 } from '../harness/computer-use/config'
 import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
+import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
 import {
@@ -1010,6 +1011,16 @@ export const CORE_OPERATION_REGISTRY = {
           localTarget: z.enum(['builtin', 'system']).optional(),
           showFullUrl: z.boolean().optional(),
           history: z.boolean().optional(),
+          // An absolute folder, or null for the system Downloads folder.
+          downloadDirectory: z
+            .string()
+            .refine(
+              (value) => validDownloadDirectory(value) !== null,
+              'invalid download directory',
+            )
+            .nullable()
+            .optional(),
+          askWhereToSave: z.boolean().optional(),
         })
         .strict(),
     ]),

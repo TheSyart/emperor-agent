@@ -170,7 +170,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 内置浏览器不经过 CoreApi。Electron main 的 `BrowserViewHost` 为主窗口托管唯一一个 `WebContentsView`：`sandbox`、`contextIsolation`，关闭 Node integration 和 `webview` 标签，没有 preload，使用不带 `persist:` 前缀的独立内存分区 `emperor-browser`，因此不写磁盘，也接触不到 `app://` 协议和应用自身的存储。
 
 - `browser-view-policy.ts` 的 `normalizeBrowserInput` 只接受 `http(s)`：裸地址中本机地址补 `http://`、其他补 `https://`；拒绝用户信息、控制字符、超过 2048 个字符的输入，以及 `file:`、`javascript:`、`data:`、`blob:`、`chrome:`、`devtools:` 等协议。
-- 页面内的 `will-navigate` / `will-redirect` 只放行不含用户信息的 `http(s)`；`webview` 附加、客户端证书选择、权限请求与检查、设备权限和下载全部拒绝。
+- 页面内的 `will-navigate` / `will-redirect` 只放行不含用户信息的 `http(s)`；`webview` 附加、客户端证书选择、权限请求与检查、设备权限全部拒绝，下载交给下面的「你的下载」。
 - `window.open` 一律拒绝；非本机的 `http(s)` 目标按至少 1 秒的间隔交给系统浏览器，本机地址直接丢弃。
 - 关闭视图时清空该分区的存储和缓存；主窗口重新加载或其渲染进程退出时，main 也会关闭视图。
 - **浏览历史**（`user-browser-history.ts`）：只在 main 的内存中记录本次浏览器会话里主框架已提交的页面（地址、标题、时间），不含 Cookie 或页面数据；「设置 › 浏览器 › 浏览历史」关闭时不记录并清空已有记录，关闭视图、清除数据或退出应用后也不保留。
@@ -180,6 +180,17 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
   - 过程：先停止并销毁视图、清空历史（`closing`），再等 Cookie、站点存储、缓存和 HTTP 认证全部清除（`clearing`），完成后回到 `idle`；任何一项失败时进入 `failed` 并返回原因。
   - 清空期间拒绝打开新页面和历史记录；重复请求合并到同一次清空。
 - `trusted-renderer-usage.test.ts` 用源码断言保证只有 `BrowserPane` 地址栏的提交会调用 `openBrowserUrl`。原生视图画在 DOM 之上，renderer 在弹窗、菜单、拖动和面板不可见时发送 `null` 隐藏它。
+- **你的下载**（`user-downloads.ts`）：分区的 `will-download` 由 `BrowserViewHost` 交给 `UserDownloads.offer`，必须在回调里同步决定保存位置。
+  - 「设置 › 浏览器 › 下载」的两项来自 main 的同步副本 `browser-preferences-cache.ts`：Core 就绪后读一次 `browser.preferences`，之后跟随 `browser_preferences_changed`（`CoreEventBridge.listen` 在窗口之前收到）；链接去向和浏览历史开关也读它。
+  - 「下载前询问保存位置」开着时只设 `setSaveDialogOptions({ defaultPath })`，用 Electron 自己的保存框；关着时 `setSavePath` 到下载位置下不重名的文件（`report (1).csv`），同时进行的下载不会分到同一个名字。下载位置不存在或不是目录时用 `app.getPath('downloads')`。
+  - 检查沿用 Agent 收件箱（`isExecutableDownload`、`safeDownloadName`）：可执行文件和安装包在开始前拦下（`preventDefault`）；保存框改出这类名字时，第一次拿到路径就取消，完成时再查一次并删除已写出的文件；超过 2 GiB 的在开始前拒绝，下载中超过的取消。完成的文件在 macOS 上用 `/usr/bin/xattr` 写 `com.apple.quarantine`（`0083;<十六进制秒>;Emperor Agent;`）。
+  - 记录写 `<Emperor Home>/browser/user-downloads.json`（0600，临时文件加 rename 替换）：ID、名称、网站（页面 origin，没有时用下载地址的 origin）、路径、时间、状态（`progressing` / `completed` / `cancelled` / `interrupted` / `blocked`，被拦的带原因）和大小，不存下载地址，保留最近 200 条；读回时仍是 `progressing` 的记为 `interrupted`。
+  - 「清除浏览数据」经 `BrowserViewHost` 一并清掉已结束的记录，文件不动，正在进行的下载继续。
+  - 受信 renderer 的通道只按 ID 寻址，路径不出 main：
+    - `browserDownloads()` → `emperor:browser:downloads`：下载历史记录的「你的下载」和「Emperor 的下载」（`DownloadInbox.list()`）两组，最新的在前，只有 ID、名称、网站、时间、状态、大小和文件是否还在。
+    - `openBrowserDownload(id)`、`revealBrowserDownload(id)`、`removeBrowserDownload(id)` → `emperor:browser:download-open`、`-reveal`、`-remove`：只接受你的下载 ID（`ud_` 加 12 位十六进制）；打开和在访达中显示只对已完成且文件仍在的下载，移除只从列表去掉，文件保留。「Emperor 的下载」的操作仍走上面 `emperor:computer-use:download-*` 三个通道。
+    - `chooseDownloadFolder()` → `emperor:browser:download-folder`：不读取参数，main 弹出目录选择框（从当前下载位置开始），返回路径或 `null`，renderer 再用 `browser.setPreferences` 保存。
+    - `onBrowserDownload(listener)` ← `emperor:browser:download`（main → renderer）：你的一次下载开始、进行中（每个下载至多每 250 ms 一次）或结束时推送它的状态，浏览器面板据此显示一行。
 
 旧的 `preview*` 通道（`emperor:preview:*`）和 `previewId` 授权路径已删除，由上面的 `emperor:browser:*` 通道取代。
 

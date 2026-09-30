@@ -65,6 +65,15 @@ type VisualBridge = {
   approveBrowserPairing?: (pairingId: string) => Promise<boolean>
   denyBrowserPairing?: (pairingId: string) => Promise<boolean>
   revokeBrowserPairing?: (pairingId: string) => Promise<boolean>
+  browserDownloads?: () => Promise<unknown>
+  openBrowserDownload?: (id: string) => Promise<unknown>
+  revealBrowserDownload?: (id: string) => Promise<unknown>
+  removeBrowserDownload?: (id: string) => Promise<unknown>
+  chooseDownloadFolder?: () => Promise<string | null>
+  onBrowserDownload?: (listener: VisualCoreListener) => () => void
+  agentDownloadReveal?: (id: string) => Promise<unknown>
+  agentDownloadMove?: (id: string) => Promise<unknown>
+  agentDownloadSaveAs?: (id: string) => Promise<unknown>
 }
 
 declare global {
@@ -1044,6 +1053,16 @@ export async function installVisualCoreBridge(
         for (const listener of browserListeners) listener(state)
       }
       visualBrowser.__visualEmitBrowserState = emitBrowserState
+      // Your downloads as main reports them: specs push one through
+      // __visualEmitDownload (the 浏览器 pane's line, the history page).
+      const downloadListeners = new Set<VisualCoreListener>()
+      ;(
+        window as unknown as {
+          __visualEmitDownload?: (view: unknown) => void
+        }
+      ).__visualEmitDownload = (view: unknown) => {
+        for (const listener of downloadListeners) listener(view)
+      }
       // Computer use: one Agent tab of chat-main whose preview frame is drawn
       // here (a fixture form) and streamed like main's JPEG frames.
       const visualAgentTarget = {
@@ -1124,7 +1143,70 @@ export async function installVisualCoreBridge(
           localTarget: 'builtin',
           showFullUrl: true,
           history: true,
+          downloadDirectory: null,
+          askWhereToSave: false,
         } as Record<string, unknown>,
+        // 设置 › 浏览器 › 下载历史记录: yours, and Emperor's inbox.
+        downloads: {
+          user: [
+            {
+              id: 'ud_00000000000a',
+              name: 'Q3-report.csv',
+              site: 'https://news.example.com',
+              time: Date.parse(now) - 20 * 60_000,
+              state: 'completed',
+              bytes: 24_576,
+              exists: true,
+            },
+            {
+              id: 'ud_00000000000b',
+              name: 'setup.dmg',
+              site: 'https://downloads.example.com',
+              time: Date.parse(now) - 45 * 60_000,
+              state: 'blocked',
+              reason: 'executable',
+              bytes: 0,
+            },
+            {
+              id: 'ud_00000000000c',
+              name: 'dataset-2026.zip',
+              site: 'https://data.example.org',
+              time: Date.parse(now) - 2 * 60_000,
+              state: 'progressing',
+              bytes: 42 * 1024 * 1024,
+              totalBytes: 100 * 1024 * 1024,
+            },
+            {
+              id: 'ud_00000000000d',
+              name: 'slides.pdf',
+              site: 'https://talks.example.com',
+              time: Date.parse(now) - 26 * 60 * 60_000,
+              state: 'completed',
+              bytes: 3_400_000,
+              exists: false,
+            },
+          ].sort((a, b) => b.time - a.time) as Array<Record<string, unknown>>,
+          agent: [
+            {
+              id: 'dl_00000000000a',
+              name: 'invoice-2026-09.pdf',
+              site: 'https://billing.example.com',
+              sessionId: 'chat-main',
+              time: Date.parse(now) - 3 * 60 * 60_000,
+              bytes: 186_000,
+              exists: true,
+            },
+            {
+              id: 'dl_00000000000b',
+              name: 'export.csv',
+              site: '',
+              sessionId: null,
+              time: Date.parse(now) - 9 * 24 * 60 * 60_000,
+              bytes: 5_120,
+              exists: false,
+            },
+          ] as Array<Record<string, unknown>>,
+        },
         profiles: [
           {
             profileId: 'temporary',
@@ -4029,6 +4111,29 @@ export async function installVisualCoreBridge(
         vaultBiometricUnlock: async () => ({ unlocked: true }),
         vaultBiometricDisable: async () => ({ ok: true }),
         clearBrowserData: async () => ({ ok: true }),
+        // `?visualDownloads=none`: both lists are empty.
+        browserDownloads: async () =>
+          visualParams.get('visualDownloads') === 'none'
+            ? { user: [], agent: [] }
+            : visualBrowserState.downloads,
+        openBrowserDownload: async () => ({ ok: true }),
+        revealBrowserDownload: async () => ({ ok: true }),
+        removeBrowserDownload: async (id: string) => {
+          visualBrowserState.downloads.user =
+            visualBrowserState.downloads.user.filter((entry) => entry.id !== id)
+          return { ok: true }
+        },
+        chooseDownloadFolder: async () => '/Users/visual/Downloads/Emperor',
+        onBrowserDownload: (listener: VisualCoreListener) => {
+          downloadListeners.add(listener)
+          return () => downloadListeners.delete(listener)
+        },
+        agentDownloadReveal: async () => ({ ok: true }),
+        agentDownloadMove: async () => ({
+          ok: true,
+          path: `${projectDir}/downloads/invoice-2026-09.pdf`,
+        }),
+        agentDownloadSaveAs: async () => ({ ok: false, cancelled: true }),
         // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility off;
         // `?visualPairing=pending` has a pairing code waiting.
         macHelperStatus: async () => ({

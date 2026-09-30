@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { BrowserViewState } from '../../api/backend'
+import type { BrowserViewState, UserDownloadView } from '../../api/backend'
 import {
   applyBrowserState,
   browserViewBounds,
   clearBrowserError,
+  downloadLine,
+  downloadProgress,
   emptyBrowserPage,
   addressText,
   externalOpenAllowed,
+  followDownload,
+  formatDownloadSize,
   isLoopbackUrl,
   rectsIntersect,
   type BrowserPlacement,
@@ -150,5 +154,80 @@ describe('browser model', () => {
       hidden([{ ...overlay, rect: { ...over, width: 0 } }]),
       'collapsed popover',
     ).toBe(false)
+  })
+})
+
+describe('download line', () => {
+  const view = (patch: Partial<UserDownloadView> = {}): UserDownloadView => ({
+    id: 'ud_000000000001',
+    name: 'report.csv',
+    site: 'https://news.example',
+    time: 1,
+    state: 'progressing',
+    bytes: 0,
+    ...patch,
+  })
+
+  it('sizes files the way browsers do', () => {
+    expect(formatDownloadSize(0)).toBe('0 B')
+    expect(formatDownloadSize(1023)).toBe('1023 B')
+    expect(formatDownloadSize(2048)).toBe('2.0 KB')
+    expect(formatDownloadSize(15 * 1024 * 1024)).toBe('15 MB')
+    expect(formatDownloadSize(1.5 * 1024 * 1024 * 1024)).toBe('1.5 GB')
+  })
+
+  it('shows progress against the announced size, else the bytes so far', () => {
+    expect(downloadProgress(view({ bytes: 50, totalBytes: 200 }))).toBe('25%')
+    expect(downloadProgress(view({ bytes: 4096, totalBytes: 0 }))).toBe(
+      '4.0 KB',
+    )
+  })
+
+  it('follows the newest download and drops one the user cancelled', () => {
+    const first = view()
+    const second = view({ id: 'ud_000000000002', time: 2 })
+    expect(followDownload(null, first)).toBe(first)
+    expect(followDownload(second, first)).toBe(second)
+    expect(followDownload(first, second)).toBe(second)
+    const done = view({ state: 'completed', bytes: 3, exists: true })
+    expect(followDownload(second, done)).toBe(second)
+    expect(followDownload(first, done)).toBe(done)
+    expect(followDownload(first, view({ state: 'cancelled' }))).toBeNull()
+    expect(
+      followDownload(
+        first,
+        view({ id: 'ud_000000000003', time: 3, state: 'cancelled' }),
+      ),
+    ).toBe(first)
+  })
+
+  it('says what happened in one line', () => {
+    expect(downloadLine(view({ bytes: 1, totalBytes: 4 }))).toEqual({
+      tone: 'progress',
+      text: '正在下载 report.csv',
+      detail: '25%',
+      reveal: false,
+    })
+    expect(
+      downloadLine(view({ state: 'completed', exists: true })),
+    ).toMatchObject({
+      tone: 'done',
+      reveal: true,
+    })
+    expect(
+      downloadLine(view({ state: 'completed', exists: false })),
+    ).toMatchObject({
+      detail: '文件已移走或删除',
+      reveal: false,
+    })
+    expect(
+      downloadLine(view({ state: 'blocked', reason: 'too-large' })),
+    ).toMatchObject({
+      text: '已拦截 report.csv',
+      detail: '超过 2 GB 的文件不会下载',
+    })
+    expect(downloadLine(view({ state: 'interrupted' }))?.tone).toBe('failed')
+    expect(downloadLine(view({ state: 'cancelled' }))).toBeNull()
+    expect(downloadLine(null)).toBeNull()
   })
 })

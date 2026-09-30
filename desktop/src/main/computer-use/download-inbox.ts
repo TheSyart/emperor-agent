@@ -12,6 +12,7 @@ import {
   existsSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import {
@@ -72,6 +73,22 @@ export interface DownloadInboxOptions {
   hashFile?(path: string): Promise<string>
   makeDirectory?(path: string): Promise<void>
   exists?(path: string): boolean
+  now?(): number
+}
+
+/** A completed download of the inbox (设置 › 浏览器 › 下载历史记录). */
+export interface InboxDownload {
+  readonly downloadId: string
+  readonly name: string
+  readonly path: string
+  readonly ownerSessionId?: string
+  /** Where it came from; absent for downloads saved before it was kept. */
+  readonly origin?: string
+  /** When it completed (ms), or 0 when unknown. */
+  readonly time: number
+  readonly bytes: number
+  /** The file is still where the inbox last put it. */
+  readonly exists: boolean
 }
 
 interface Armed {
@@ -87,6 +104,26 @@ const INDEX_LIMIT = 500
 interface SavedDownload {
   readonly path: string
   readonly ownerSessionId?: string
+  readonly origin?: string
+  readonly savedAt?: number
+  readonly bytes?: number
+}
+
+/**
+ * `filename` inside `directory`, or `stem (1).ext`, `stem (2).ext`… while
+ * `taken` says the name is in use (shared with the user's own downloads).
+ */
+export function uniqueDownloadPath(
+  directory: string,
+  filename: string,
+  taken: (path: string) => boolean,
+): string {
+  const extension = extname(filename)
+  const stem = filename.slice(0, filename.length - extension.length)
+  let candidate = join(directory, filename)
+  for (let index = 1; taken(candidate) && index < 1000; index += 1)
+    candidate = join(directory, `${stem} (${index})${extension}`)
+  return candidate
 }
 
 function originOf(url: string): string | null {
@@ -253,6 +290,9 @@ export class DownloadInbox {
             ...(entry.request.ownerSessionId === undefined
               ? {}
               : { ownerSessionId: entry.request.ownerSessionId }),
+            ...(base.origin === null ? {} : { origin: base.origin }),
+            savedAt: (this.options.now ?? Date.now)(),
+            bytes,
           })
           entry.settle({
             ...base,
@@ -286,6 +326,38 @@ export class DownloadInbox {
     if (!DOWNLOAD_ID.test(downloadId)) return undefined
     this.loadIndex()
     return this.saved.get(downloadId)?.ownerSessionId
+  }
+
+  /**
+   * The completed downloads the inbox remembers, newest first, and whether
+   * each file is still there. Entries saved before time and size were kept
+   * read them from the file.
+   */
+  list(): InboxDownload[] {
+    this.loadIndex()
+    const exists = this.options.exists ?? existsSync
+    return [...this.saved]
+      .reverse()
+      .map(([downloadId, entry]) => {
+        const present = exists(entry.path)
+        const file =
+          present && (entry.savedAt === undefined || entry.bytes === undefined)
+            ? fileFacts(entry.path)
+            : null
+        return {
+          downloadId,
+          name: basename(entry.path),
+          path: entry.path,
+          ...(entry.ownerSessionId === undefined
+            ? {}
+            : { ownerSessionId: entry.ownerSessionId }),
+          ...(entry.origin === undefined ? {} : { origin: entry.origin }),
+          time: entry.savedAt ?? file?.time ?? 0,
+          bytes: entry.bytes ?? file?.bytes ?? 0,
+          exists: present,
+        }
+      })
+      .sort((a, b) => b.time - a.time)
   }
 
   /**
@@ -427,7 +499,13 @@ export class DownloadInbox {
       for (const item of parsed.entries.slice(-INDEX_LIMIT)) {
         if (!Array.isArray(item) || item.length !== 2) continue
         const [id, value] = item as [unknown, unknown]
-        const entry = value as { path?: unknown; ownerSessionId?: unknown }
+        const entry = value as {
+          path?: unknown
+          ownerSessionId?: unknown
+          origin?: unknown
+          savedAt?: unknown
+          bytes?: unknown
+        }
         if (
           typeof id !== 'string' ||
           !DOWNLOAD_ID.test(id) ||
@@ -440,6 +518,11 @@ export class DownloadInbox {
           ...(typeof entry.ownerSessionId === 'string'
             ? { ownerSessionId: entry.ownerSessionId.slice(0, 256) }
             : {}),
+          ...(typeof entry.origin === 'string'
+            ? { origin: entry.origin.slice(0, 512) }
+            : {}),
+          ...(count(entry.savedAt) ? { savedAt: entry.savedAt } : {}),
+          ...(count(entry.bytes) ? { bytes: entry.bytes } : {}),
         })
       }
     } catch {
@@ -452,12 +535,25 @@ export class DownloadInbox {
   }
 
   private uniquePath(directory: string, filename: string): string {
-    const exists = this.options.exists ?? existsSync
-    const extension = extname(filename)
-    const stem = filename.slice(0, filename.length - extension.length)
-    let candidate = join(directory, filename)
-    for (let index = 1; exists(candidate) && index < 1000; index += 1)
-      candidate = join(directory, `${stem} (${index})${extension}`)
-    return candidate
+    return uniqueDownloadPath(
+      directory,
+      filename,
+      this.options.exists ?? existsSync,
+    )
+  }
+}
+
+/** A whole, non-negative number (time and size read from the index). */
+function count(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+/** When the file last changed and how big it is; null when unreadable. */
+function fileFacts(path: string): { time: number; bytes: number } | null {
+  try {
+    const info = statSync(path)
+    return { time: Math.round(info.mtimeMs), bytes: info.size }
+  } catch {
+    return null
   }
 }

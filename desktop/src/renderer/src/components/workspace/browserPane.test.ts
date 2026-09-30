@@ -5,7 +5,7 @@ import type {
   ComputerUseStatusView,
   UiTargetView,
 } from '@emperor/core/runtime-contract'
-import type { BrowserViewState } from '../../api/backend'
+import type { BrowserViewState, UserDownloadView } from '../../api/backend'
 import { resetBrowserPreferencesForTest } from '../../composables/useBrowserPreferences'
 import { pushModalLayer } from '../ui/modalStack'
 import BrowserPane from './BrowserPane.vue'
@@ -27,8 +27,11 @@ const bridge = {
   agentPreviewStop: vi.fn(),
   agentPreviewInput: vi.fn(),
   onAgentPreviewFrame: vi.fn(),
+  onBrowserDownload: vi.fn(),
+  revealBrowserDownload: vi.fn(),
 }
 let listeners: StateListener[] = []
+let downloadListeners: Array<(view: UserDownloadView) => void> = []
 let coreListeners: Array<(event: unknown) => void> = []
 let computerUse: ComputerUseStatusView | null = null
 
@@ -147,6 +150,18 @@ beforeEach(() => {
       listeners = listeners.filter((entry) => entry !== listener)
     }
   })
+  downloadListeners = []
+  bridge.onBrowserDownload.mockImplementation(
+    (listener: (view: UserDownloadView) => void) => {
+      downloadListeners.push(listener)
+      return () => {
+        downloadListeners = downloadListeners.filter(
+          (entry) => entry !== listener,
+        )
+      }
+    },
+  )
+  bridge.revealBrowserDownload.mockResolvedValue({ ok: true })
   ;(window as unknown as { emperor: typeof bridge }).emperor = bridge
 })
 
@@ -233,6 +248,8 @@ describe('BrowserPane', () => {
       localTarget: 'builtin',
       showFullUrl: false,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     }
     const root = mount()
     await flush()
@@ -360,10 +377,96 @@ describe('BrowserPane', () => {
       localTarget: 'builtin',
       showFullUrl: true,
       history: false,
+      downloadDirectory: null,
+      askWhereToSave: false,
     }
     const root = mount()
     await flush()
     expect(button(root, '浏览历史')).toBeNull()
+  })
+
+  it('shows a download on its own line under the page, and follows it', async () => {
+    const root = mount()
+    await flush()
+    const report = (patch: Partial<UserDownloadView>): void => {
+      for (const listener of downloadListeners)
+        listener({
+          id: 'ud_0123456789ab',
+          name: 'report.csv',
+          site: 'http://localhost:5173',
+          time: 1,
+          state: 'progressing',
+          bytes: 0,
+          totalBytes: 200,
+          ...patch,
+        })
+    }
+    const line = () =>
+      root.querySelector<HTMLElement>('[data-testid="browser-download"]')
+    expect(line()).toBeNull()
+    report({ bytes: 50 })
+    await flush()
+    // Never inside the slot the native page covers.
+    expect(root.querySelector('.browser-viewport')?.contains(line())).toBe(
+      false,
+    )
+    expect(line()?.textContent).toContain('正在下载 report.csv')
+    expect(line()?.textContent).toContain('25%')
+    report({ state: 'completed', bytes: 200, exists: true })
+    await flush()
+    expect(line()?.textContent).toContain('已下载 report.csv')
+    ;[...line()!.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === '在访达中显示')!
+      .click()
+    await flush()
+    expect(bridge.revealBrowserDownload).toHaveBeenCalledWith('ud_0123456789ab')
+    button(root, '关闭下载提示').click()
+    await flush()
+    expect(line()).toBeNull()
+  })
+
+  it('says why a download was stopped, and drops one the user cancelled', async () => {
+    const root = mount()
+    await flush()
+    const report = (view: Partial<UserDownloadView>): void => {
+      for (const listener of downloadListeners)
+        listener({
+          id: 'ud_0123456789ac',
+          name: 'setup.dmg',
+          site: 'https://example.com',
+          time: 2,
+          state: 'blocked',
+          bytes: 0,
+          ...view,
+        } as UserDownloadView)
+    }
+    const line = () =>
+      root.querySelector<HTMLElement>('[data-testid="browser-download"]')
+    report({ reason: 'executable' })
+    await flush()
+    expect(line()?.textContent).toContain('已拦截 setup.dmg')
+    expect(line()?.textContent).toContain('可执行文件和安装包不会下载')
+    expect(line()?.querySelector('button.download-action')).toBeNull()
+    report({ id: 'ud_0123456789ad', name: 'movie.mkv', reason: 'too-large' })
+    await flush()
+    expect(line()?.textContent).toContain('超过 2 GB')
+    // The save dialog was cancelled: nothing to report.
+    report({
+      id: 'ud_0123456789ae',
+      name: 'notes.txt',
+      time: 3,
+      state: 'progressing',
+      reason: undefined,
+    })
+    report({
+      id: 'ud_0123456789ae',
+      name: 'notes.txt',
+      time: 3,
+      state: 'cancelled',
+      reason: undefined,
+    })
+    await flush()
+    expect(line()).toBeNull()
   })
 
   it('closes the view when it unmounts', async () => {

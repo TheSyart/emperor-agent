@@ -21,6 +21,11 @@
  * this browser session, newest first. Picking one sends only its id; main
  * checks the stored address again before loading it.
  *
+ * Downloads (设置 › 浏览器 › 下载, saved by main): a line under the page says
+ * how the latest one goes — 正在下载, 已下载 with 在访达中显示, or 已拦截 and
+ * why. It takes its own row, so the native page shrinks rather than being
+ * covered; closing it hides that download for good.
+ *
  * WorkspacePanel keys the pane by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
  *
@@ -34,11 +39,14 @@
 import {
   ArrowLeft,
   ArrowRight,
+  CircleCheck,
+  Download,
   ExternalLink,
   Globe,
   History,
   LockKeyhole,
   RotateCw,
+  ShieldAlert,
   TriangleAlert,
   X,
 } from 'lucide-vue-next'
@@ -56,11 +64,14 @@ import {
   closeBrowserView,
   fetchBrowserHistory,
   onBrowserState,
+  onUserDownload,
   openBrowserHistoryEntry,
   openBrowserUrl,
   openExternal,
+  revealUserDownload,
   type BrowserHistoryEntry,
   type BrowserViewAction,
+  type UserDownloadView,
 } from '../../api/backend'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import IconButton from '../ui/IconButton.vue'
@@ -70,8 +81,10 @@ import {
   addressText,
   applyBrowserState,
   clearBrowserError,
+  downloadLine,
   emptyBrowserPage,
   externalOpenAllowed,
+  followDownload,
   isLoopbackUrl,
 } from './browserModel'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
@@ -117,17 +130,44 @@ useBrowserViewBounds({
   shown: () => props.visible && !page.value.error,
 })
 
+// ── 下载 ─────────────────────────────────────────────────────────────────
+const download = shallowRef<UserDownloadView | null>(null)
+const downloadStatus = computed(() => downloadLine(download.value))
+/** Downloads whose line the user closed. */
+const dismissed = new Set<string>()
+
+async function revealDownload(): Promise<void> {
+  const shown = download.value
+  if (!shown) return
+  try {
+    await revealUserDownload(shown.id)
+  } catch (cause) {
+    inputError.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
+function dismissDownload(): void {
+  if (download.value) dismissed.add(download.value.id)
+  download.value = null
+}
+
 let unsubscribe = () => {}
+let unsubscribeDownloads = () => {}
 
 onMounted(() => {
   unsubscribe = onBrowserState((next) => {
     page.value = applyBrowserState(page.value, next)
     if (!editing.value) address.value = idleAddress.value
   })
+  unsubscribeDownloads = onUserDownload((next) => {
+    if (!dismissed.has(next.id))
+      download.value = followDownload(download.value, next)
+  })
 })
 
 onBeforeUnmount(() => {
   unsubscribe()
+  unsubscribeDownloads()
   // The user's view closes with the pane (its partition is wiped).
   closeBrowserView()
 })
@@ -383,6 +423,48 @@ function hostOf(url: string): string {
         <p class="state-note">页面在独立沙箱中打开，关闭后不保留浏览数据</p>
       </div>
     </div>
+    <div
+      v-if="downloadStatus"
+      class="browser-download"
+      :data-tone="downloadStatus.tone"
+      data-testid="browser-download"
+      role="status"
+    >
+      <ShieldAlert
+        v-if="downloadStatus.tone === 'blocked'"
+        :size="14"
+        class="download-glyph"
+        aria-hidden="true"
+      />
+      <CircleCheck
+        v-else-if="downloadStatus.tone === 'done'"
+        :size="14"
+        class="download-glyph"
+        aria-hidden="true"
+      />
+      <TriangleAlert
+        v-else-if="downloadStatus.tone === 'failed'"
+        :size="14"
+        class="download-glyph"
+        aria-hidden="true"
+      />
+      <Download v-else :size="14" class="download-glyph" aria-hidden="true" />
+      <span class="download-text">{{ downloadStatus.text }}</span>
+      <span v-if="downloadStatus.detail" class="download-detail">{{
+        downloadStatus.detail
+      }}</span>
+      <button
+        v-if="downloadStatus.reveal"
+        type="button"
+        class="download-action"
+        @click="revealDownload"
+      >
+        在访达中显示
+      </button>
+      <IconButton label="关闭下载提示" @click="dismissDownload">
+        <X :size="13" />
+      </IconButton>
+    </div>
   </div>
 </template>
 
@@ -577,5 +659,76 @@ function hostOf(url: string): string {
 .state-action:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+/* One status row under the page (the native view shrinks, never covered). */
+.browser-download {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-top: 1px solid var(--border-l1);
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.download-glyph {
+  flex: none;
+  color: rgb(var(--label-tertiary));
+}
+
+.browser-download[data-tone='done'] .download-glyph {
+  color: rgb(var(--state-ok));
+}
+
+.browser-download[data-tone='blocked'] .download-glyph,
+.browser-download[data-tone='failed'] .download-glyph {
+  color: rgb(var(--danger));
+}
+
+.download-text {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(var(--label-primary));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-detail {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: rgb(var(--label-tertiary));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-action {
+  flex: none;
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-pill);
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xs);
+  transition: background-color var(--duration-ds-fast) ease;
+}
+
+.download-action:hover {
+  background: var(--interactive-bg-hover);
+}
+
+.download-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+.download-detail + .ds-icon-button,
+.download-text + .ds-icon-button {
+  margin-left: auto;
 }
 </style>

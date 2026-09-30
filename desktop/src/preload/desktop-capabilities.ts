@@ -17,6 +17,12 @@ import {
   BROWSER_HISTORY_CHANNEL,
   BROWSER_HISTORY_OPEN_CHANNEL,
   BROWSER_CLEAR_DATA_CHANNEL,
+  BROWSER_DOWNLOADS_CHANNEL,
+  BROWSER_DOWNLOAD_EVENT_CHANNEL,
+  BROWSER_DOWNLOAD_FOLDER_CHANNEL,
+  BROWSER_DOWNLOAD_OPEN_CHANNEL,
+  BROWSER_DOWNLOAD_REMOVE_CHANNEL,
+  BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
@@ -44,6 +50,7 @@ import {
   type BrowserViewState,
   type FileDialogFilter,
   type MacHelperPermission,
+  type UserDownloadView,
 } from '../shared/ipc-contract'
 
 interface IpcRendererLike {
@@ -120,6 +127,25 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
         listener(payload as BrowserViewState)
       ipcRenderer.on(BROWSER_STATE_CHANNEL, wrapped)
       return () => ipcRenderer.removeListener(BROWSER_STATE_CHANNEL, wrapped)
+    },
+    /** 设置 › 浏览器 › 下载历史记录: your downloads and Emperor's. */
+    browserDownloads: () => ipcRenderer.invoke(BROWSER_DOWNLOADS_CHANNEL),
+    openBrowserDownload: (id: string) =>
+      ipcRenderer.invoke(BROWSER_DOWNLOAD_OPEN_CHANNEL, { id }),
+    revealBrowserDownload: (id: string) =>
+      ipcRenderer.invoke(BROWSER_DOWNLOAD_REVEAL_CHANNEL, { id }),
+    removeBrowserDownload: (id: string) =>
+      ipcRenderer.invoke(BROWSER_DOWNLOAD_REMOVE_CHANNEL, { id }),
+    /** The system folder picker for 设置 › 浏览器 › 下载 › 位置. */
+    chooseDownloadFolder: () =>
+      ipcRenderer.invoke(BROWSER_DOWNLOAD_FOLDER_CHANNEL),
+    /** One of your downloads started, moved on or ended. */
+    onBrowserDownload: (listener: (download: UserDownloadView) => void) => {
+      const wrapped = (_event: unknown, payload: unknown) =>
+        listener(payload as UserDownloadView)
+      ipcRenderer.on(BROWSER_DOWNLOAD_EVENT_CHANNEL, wrapped)
+      return () =>
+        ipcRenderer.removeListener(BROWSER_DOWNLOAD_EVENT_CHANNEL, wrapped)
     },
     /** Main opened a clicked link in the built-in browser: show the pane. */
     onBrowserReveal: (listener: (payload: { url: string }) => void) => {

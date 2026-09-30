@@ -1,7 +1,7 @@
 /**
  * Embedded browser pane model (pure): loopback detection for 在外部打开, the
- * address bar text, the sticky load-error reducer, and the placement rule of
- * the native view.
+ * address bar text, the sticky load-error reducer, the download line, and
+ * the placement rule of the native view.
  *
  * The native view is drawn by main above the whole DOM, so the pane hides it
  * (bounds null) whenever DOM content must show where it sits: the pane or its
@@ -9,7 +9,11 @@
  * layer or a floating menu is open, a floating popover overlaps it, or the
  * page failed (the pane draws its own error state instead).
  */
-import type { BrowserViewBounds, BrowserViewState } from '../../api/backend'
+import type {
+  BrowserViewBounds,
+  BrowserViewState,
+  UserDownloadView,
+} from '../../api/backend'
 
 /** Smallest rectangle main accepts; anything smaller hides the view. */
 export const BROWSER_MIN_WIDTH = 120
@@ -168,5 +172,95 @@ export function browserViewBounds(
     y: Math.round(rect.y),
     width: Math.round(rect.width),
     height: Math.round(rect.height),
+  }
+}
+
+/** Why the built-in browser stopped a download (设置 › 浏览器 › 下载). */
+export const DOWNLOAD_BLOCK_TEXT: Readonly<
+  Record<NonNullable<UserDownloadView['reason']>, string>
+> = {
+  executable: '可执行文件和安装包不会下载',
+  'too-large': '超过 2 GB 的文件不会下载',
+}
+
+/** `24 B`, `2.0 KB`, `18 MB`, `1.4 GB`. */
+export function formatDownloadSize(bytes: number): string {
+  if (!(bytes >= 1024)) return `${Math.max(0, Math.round(bytes || 0))} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`
+}
+
+/** How far a running download is: `42%`, or the bytes when the size is unknown. */
+export function downloadProgress(view: UserDownloadView): string {
+  const total = view.totalBytes ?? 0
+  return total > 0
+    ? `${Math.min(100, Math.floor((view.bytes / total) * 100))}%`
+    : formatDownloadSize(view.bytes)
+}
+
+/**
+ * The download the pane's line follows: the one it shows, or a newer one.
+ * A download the user cancelled (the save dialog) leaves nothing to say.
+ */
+export function followDownload(
+  shown: UserDownloadView | null,
+  next: UserDownloadView,
+): UserDownloadView | null {
+  if (shown !== null && next.id !== shown.id && next.time < shown.time)
+    return shown
+  if (next.state === 'cancelled') return next.id === shown?.id ? null : shown
+  return next
+}
+
+export interface DownloadLine {
+  tone: 'progress' | 'done' | 'blocked' | 'failed'
+  text: string
+  detail: string
+  /** 在访达中显示 is offered (a finished file that is still there). */
+  reveal: boolean
+}
+
+/** The pane's one-line download status. */
+export function downloadLine(
+  view: UserDownloadView | null,
+): DownloadLine | null {
+  if (view === null) return null
+  switch (view.state) {
+    case 'progressing':
+      return {
+        tone: 'progress',
+        text: `正在下载 ${view.name}`,
+        detail: downloadProgress(view),
+        reveal: false,
+      }
+    case 'completed':
+      return {
+        tone: 'done',
+        text: `已下载 ${view.name}`,
+        detail: view.exists === false ? '文件已移走或删除' : '',
+        reveal: view.exists !== false,
+      }
+    case 'blocked':
+      return {
+        tone: 'blocked',
+        text: `已拦截 ${view.name}`,
+        detail: view.reason ? DOWNLOAD_BLOCK_TEXT[view.reason] : '',
+        reveal: false,
+      }
+    case 'interrupted':
+      return {
+        tone: 'failed',
+        text: `下载中断 ${view.name}`,
+        detail: '',
+        reveal: false,
+      }
+    default:
+      return null
   }
 }

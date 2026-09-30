@@ -16,8 +16,16 @@ import {
   BROWSER_HISTORY_CHANNEL,
   BROWSER_HISTORY_OPEN_CHANNEL,
   BROWSER_CLEAR_DATA_CHANNEL,
+  BROWSER_DOWNLOADS_CHANNEL,
+  BROWSER_DOWNLOAD_FOLDER_CHANNEL,
+  BROWSER_DOWNLOAD_OPEN_CHANNEL,
+  BROWSER_DOWNLOAD_REMOVE_CHANNEL,
+  BROWSER_DOWNLOAD_REVEAL_CHANNEL,
+  type AgentDownloadView,
   type BrowserClearResult,
   type BrowserHistoryEntry,
+  type DownloadHistory,
+  type UserDownloadView,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
@@ -58,6 +66,31 @@ interface BrowserCapability {
   openHistory(id: string): Promise<{ ok: true; url: string }>
   /** Clear the built-in browser's own partition and history. */
   clearData(): Promise<BrowserClearResult>
+}
+
+/** Your own downloads in the built-in browser (user-downloads.ts), by id. */
+interface UserDownloadsCapability {
+  /** Newest first; no paths. */
+  list(): UserDownloadView[]
+  /** Open a finished download; '' once it opened, else why not. */
+  open(id: string): Promise<string>
+  /** Show a finished download in Finder; false when its file is gone. */
+  reveal(id: string): boolean
+  /** Take it off the list (the file stays). */
+  remove(id: string): boolean
+  /** The system folder picker for 位置; null when cancelled. */
+  chooseFolder(): Promise<string | null>
+}
+
+/** A completed download of the Agent inbox (`DownloadInbox.list`). */
+interface InboxDownloadLike {
+  readonly downloadId: string
+  readonly name: string
+  readonly ownerSessionId?: string
+  readonly origin?: string
+  readonly time: number
+  readonly bytes: number
+  readonly exists: boolean
 }
 
 /** Computer Use: stream an Agent tab or window for the preview (by id only). */
@@ -123,7 +156,11 @@ export function registerDesktopCapabilityIpc(input: {
     moveToWorkspace?(downloadId: string): Promise<string | undefined>
     /** Ask where to put it (system save dialog) and move it there. */
     saveAs?(downloadId: string): Promise<string | null | undefined>
+    /** 设置 › 浏览器 › 下载历史记录: the inbox, newest first. */
+    list?(): readonly InboxDownloadLike[]
   }
+  /** 设置 › 浏览器 › 下载 and the 浏览器 pane: your own downloads. */
+  userDownloads?: UserDownloadsCapability
   /** Main-owned helper status and OS permission prompt; never receives a path or nonce from renderer. */
   macHelper?: {
     status(): Promise<MacHelperStatus>
@@ -425,6 +462,43 @@ export function registerDesktopCapabilityIpc(input: {
           : { ok: true, path: moved }
       },
     )
+  const userDownloads = input.userDownloads
+  if (userDownloads) {
+    // Paths stay in main: the renderer gets names and ids only.
+    input.ipcMain.handle(
+      BROWSER_DOWNLOADS_CHANNEL,
+      (event): DownloadHistory => {
+        authorize(event)
+        return {
+          user: userDownloads.list(),
+          agent: (input.agentDownloads?.list?.() ?? []).map(agentDownloadView),
+        }
+      },
+    )
+    input.ipcMain.handle(
+      BROWSER_DOWNLOAD_OPEN_CHANNEL,
+      async (event, payload) => {
+        authorize(event)
+        const error = await userDownloads.open(userDownloadId(payload))
+        return error ? { ok: false, error } : { ok: true }
+      },
+    )
+    input.ipcMain.handle(BROWSER_DOWNLOAD_REVEAL_CHANNEL, (event, payload) => {
+      authorize(event)
+      return userDownloads.reveal(userDownloadId(payload))
+        ? { ok: true }
+        : { ok: false, error: '找不到这个下载文件，可能已被移走或删除' }
+    })
+    input.ipcMain.handle(BROWSER_DOWNLOAD_REMOVE_CHANNEL, (event, payload) => {
+      authorize(event)
+      return { ok: userDownloads.remove(userDownloadId(payload)) }
+    })
+    // No argument is read: main picks the dialog's starting folder.
+    input.ipcMain.handle(BROWSER_DOWNLOAD_FOLDER_CHANNEL, async (event) => {
+      authorize(event)
+      return await userDownloads.chooseFolder()
+    })
+  }
   const preview = input.agentPreview
   if (preview) {
     input.ipcMain.handle(AGENT_PREVIEW_START_CHANNEL, (event, payload) => {
@@ -493,6 +567,30 @@ function sanitizeMacHelperStatus(value: MacHelperStatus): MacHelperStatus {
 const TARGET_ID =
   /^(?:tab_[0-9a-f-]{36}|t-[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12})$/
 const DOWNLOAD_ID = /^dl_[0-9a-f]{12}$/
+const USER_DOWNLOAD_ID = /^ud_[0-9a-f]{12}$/
+
+/** `{ id }` of one of your downloads. */
+function userDownloadId(payload: unknown): string {
+  const id =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).id
+      : undefined
+  if (typeof id !== 'string' || !USER_DOWNLOAD_ID.test(id))
+    throw new Error('invalid download id')
+  return id
+}
+
+function agentDownloadView(entry: InboxDownloadLike): AgentDownloadView {
+  return {
+    id: entry.downloadId,
+    name: entry.name,
+    site: entry.origin ?? '',
+    sessionId: entry.ownerSessionId ?? null,
+    time: entry.time,
+    bytes: entry.bytes,
+    exists: entry.exists,
+  }
+}
 
 function previewTarget(value: unknown): string {
   const raw =

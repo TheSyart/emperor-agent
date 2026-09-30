@@ -15,7 +15,10 @@ import {
   normalizedBrowserBounds,
 } from './browser-view-policy'
 import { subframeNavigationAllowed } from './computer-use/agent-navigation-policy'
-import { hardenSession } from './computer-use/session-hardening'
+import {
+  hardenSession,
+  type HardenOptions,
+} from './computer-use/session-hardening'
 import {
   UserBrowserHistory,
   type UserBrowserHistoryEntry,
@@ -48,6 +51,13 @@ export type BrowserClearState = 'idle' | 'closing' | 'clearing' | 'failed'
 export interface BrowserViewHostOptions {
   /** 设置 › 浏览器 › 临时历史 (default on). */
   historyEnabled?: () => boolean | Promise<boolean>
+  /**
+   * The user's downloads (user-downloads.ts); without it every download is
+   * cancelled. Bound to the shared partition once, with its first view.
+   */
+  onDownload?: HardenOptions['onDownload']
+  /** 清除浏览数据 also forgets the download list (never the files). */
+  forgetDownloads?: () => void
 }
 
 export function browserViewWebPreferences(): WebPreferences {
@@ -81,6 +91,8 @@ export class BrowserViewHost {
   private lastExternalOpen = Number.NEGATIVE_INFINITY
   private readonly visited: UserBrowserHistory
   private readonly historyEnabled: () => boolean | Promise<boolean>
+  private readonly onDownload: HardenOptions['onDownload']
+  private readonly forgetDownloads: () => void
   private clearRun: Promise<BrowserClearResult> | null = null
   private clearStateValue: BrowserClearState = 'idle'
   private readonly clearListeners = new Set<
@@ -94,6 +106,8 @@ export class BrowserViewHost {
   ) {
     this.visited = new UserBrowserHistory({ now })
     this.historyEnabled = options.historyEnabled ?? (() => true)
+    this.onDownload = options.onDownload
+    this.forgetDownloads = options.forgetDownloads ?? (() => {})
   }
 
   get clearState(): BrowserClearState {
@@ -172,8 +186,9 @@ export class BrowserViewHost {
 
   /**
    * Clear the temporary browsing data of this browser's partition only:
-   * stop and destroy the view, forget the history, then wipe storage,
-   * cookies, cache and HTTP auth. A call while one runs joins it.
+   * stop and destroy the view, forget the history and the download list,
+   * then wipe storage, cookies, cache and HTTP auth. A call while one runs
+   * joins it.
    */
   clearData(): Promise<BrowserClearResult> {
     this.clearRun ??= this.runClear().finally(() => {
@@ -185,6 +200,7 @@ export class BrowserViewHost {
   private async runClear(): Promise<BrowserClearResult> {
     this.setClearState('closing')
     this.visited.clear()
+    this.forgetDownloads()
     const view = this.detachView()
     let session: Session | null = null
     if (view) {
@@ -250,7 +266,10 @@ export class BrowserViewHost {
       webPreferences: browserViewWebPreferences(),
     })
     const contents = view.webContents
-    hardenSession(contents.session)
+    hardenSession(
+      contents.session,
+      this.onDownload === undefined ? {} : { onDownload: this.onDownload },
+    )
     contents.setWindowOpenHandler(({ url }) => {
       this.openExternal(url)
       return { action: 'deny' }

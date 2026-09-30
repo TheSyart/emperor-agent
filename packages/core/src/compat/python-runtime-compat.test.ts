@@ -36,6 +36,8 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
       localTarget: 'builtin',
       showFullUrl: true,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     })
 
     const model = await loadModelConfig(root, { create: false })

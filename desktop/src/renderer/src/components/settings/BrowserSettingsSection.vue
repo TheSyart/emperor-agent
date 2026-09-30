@@ -9,11 +9,14 @@
  *   address bar, clearing the browsing data and the temporary history of the
  *   user's own browsing (the workspace 浏览器 pane, a memory-only session);
  * - 自动填充和密码: 密码管理器 and 登录状态 (sub pages);
- * - 下载: how long Emperor's downloads stay in its inbox;
+ * - 下载: where the user's own downloads go (位置, picked in the system
+ *   folder dialog main shows), whether to ask each time, the history of
+ *   theirs and Emperor's downloads (sub page), and how long Emperor's
+ *   downloads stay in its inbox;
  * - 浏览器权限: 网站设置 (sub page).
  *
- * The link and history choices save at once through
- * `browser.setPreferences` (Core tells every window,
+ * The link, history and download choices save at once through
+ * `browser.setPreferences` (Core tells every window and main,
  * `browser_preferences_changed`); the rest are computer use settings
  * (`computerUse.status`, refreshed on `computer_use_changed`).
  */
@@ -23,11 +26,16 @@ import type {
 } from '@emperor/core/runtime-contract'
 import { Globe } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { clearBrowserData, onCoreEvent } from '../../api/backend'
+import {
+  chooseDownloadFolder,
+  clearBrowserData,
+  onCoreEvent,
+} from '../../api/backend'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
 import Button from '../ui/Button.vue'
+import DownloadsPage from './browser/DownloadsPage.vue'
 import PasswordManagerPage from './browser/PasswordManagerPage.vue'
 import SignInProfilesPage from './browser/SignInProfilesPage.vue'
 import SiteSettingsPage from './browser/SiteSettingsPage.vue'
@@ -50,6 +58,7 @@ const { preferences, update } = useBrowserPreferences()
 const { page, open: openPage } = useSettingsPages({
   passwords: '密码管理器',
   profiles: '登录状态',
+  downloads: '下载历史记录',
   sites: '网站设置',
 })
 const settingsRoute = useSettingsRoute()
@@ -94,6 +103,21 @@ async function clearData(): Promise<void> {
   else {
     clearing.value = 'failed'
     clearError.value = result.error ?? '清除失败'
+  }
+}
+
+// ── 下载 · 位置 ──────────────────────────────────────────────────────────
+const choosingFolder = ref(false)
+
+/** Main shows the system folder picker; a cancel changes nothing. */
+async function changeDownloadFolder(): Promise<void> {
+  if (choosingFolder.value) return
+  choosingFolder.value = true
+  try {
+    const folder = await chooseDownloadFolder()
+    if (folder) save({ downloadDirectory: folder })
+  } finally {
+    choosingFolder.value = false
   }
 }
 
@@ -200,6 +224,7 @@ onBeforeUnmount(() => {
 <template>
   <PasswordManagerPage v-if="page === 'passwords'" />
   <SignInProfilesPage v-else-if="page === 'profiles'" />
+  <DownloadsPage v-else-if="page === 'downloads'" />
   <SiteSettingsPage v-else-if="page === 'sites'" />
   <SettingsSection
     v-else
@@ -285,7 +310,7 @@ onBeforeUnmount(() => {
       </SettingsRow>
       <SettingsRow
         title="浏览数据"
-        description="清除内置浏览器里的 Cookie、网站数据、缓存和浏览历史"
+        description="清除内置浏览器里的 Cookie、网站数据、缓存、浏览历史和下载记录"
       >
         <div class="browser-inline">
           <span
@@ -355,6 +380,61 @@ onBeforeUnmount(() => {
     </SettingsGroup>
 
     <SettingsGroup title="下载">
+      <SettingsRow title="位置">
+        <template #description>
+          <span
+            class="download-folder"
+            data-testid="download-folder"
+            :title="preferences.downloadDirectory ?? undefined"
+            >{{ preferences.downloadDirectory ?? '系统下载文件夹' }}</span
+          >
+        </template>
+        <div class="browser-inline">
+          <Button
+            v-if="preferences.downloadDirectory"
+            variant="outline"
+            size="sm"
+            data-action="reset-download-folder"
+            :disabled="saving"
+            @click="save({ downloadDirectory: null })"
+            >恢复默认</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            data-action="change-download-folder"
+            :disabled="saving || choosingFolder"
+            @click="changeDownloadFolder"
+            >更改</Button
+          >
+        </div>
+      </SettingsRow>
+      <SettingsRow
+        title="下载前询问保存位置"
+        description="在内置浏览器中下载时，先显示保存对话框"
+        label-for="browser-ask-save"
+      >
+        <Switch
+          id="browser-ask-save"
+          :model-value="preferences.askWhereToSave"
+          :disabled="saving"
+          @update:model-value="
+            (value: boolean) => save({ askWhereToSave: value })
+          "
+        />
+      </SettingsRow>
+      <SettingsRow
+        title="下载历史记录"
+        description="查看和管理你在内置浏览器里下载的文件，以及 Emperor 下载的文件"
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          data-action="manage-downloads"
+          @click="openPage('downloads')"
+          >管理</Button
+        >
+      </SettingsRow>
       <SettingsRow
         title="下载保留时间"
         description="Emperor 下载的文件在收件箱中保留的时间，到期自动删除"
@@ -414,6 +494,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.download-folder {
+  overflow-wrap: anywhere;
 }
 
 .browser-status {

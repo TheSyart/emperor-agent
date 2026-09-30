@@ -7,7 +7,9 @@ import { installVisualCoreBridge } from './visualBridge'
 // Settings › 浏览器 (ST-04, laid out like Codex's 浏览器 settings): the
 // control card, 常规 / 自动填充和密码 / 下载 / 浏览器权限, and the
 // 密码管理器 / 登录状态 / 网站设置 sub pages behind the 「浏览器 › …」
-// breadcrumb (ST-02).
+// breadcrumb (ST-02). ST-05 adds the download rows (位置, 下载前询问保存位置,
+// 下载历史记录), the 下载历史记录 sub page and the 浏览器 pane's download
+// line.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'browser-settings')
 
 test.beforeAll(() => {
@@ -131,6 +133,58 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page).not.toHaveURL(/page=/)
   })
 
+  test(`download rows and the download history (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openBrowser(page, { theme })
+    const group = dialog.locator('.ds-settings-group').filter({
+      has: page.locator('.head .title', { hasText: /^下载$/ }),
+    })
+    await expect(group.locator('.ds-settings-row .title')).toHaveText([
+      '位置',
+      '下载前询问保存位置',
+      '下载历史记录',
+      '下载保留时间',
+    ])
+    await expect(dialog.getByTestId('download-folder')).toHaveText(
+      '系统下载文件夹',
+    )
+    await expect(
+      dialog.locator('[data-action="reset-download-folder"]'),
+    ).toHaveCount(0)
+    await group.scrollIntoViewIfNeeded()
+    await shot(page, `downloads-rows-${theme}`)
+
+    // 更改 opens main's folder picker; the bridge answers with a folder.
+    await dialog.locator('[data-action="change-download-folder"]').click()
+    await expect(dialog.getByTestId('download-folder')).toHaveText(
+      '/Users/visual/Downloads/Emperor',
+    )
+    await expect(
+      dialog.locator('[data-action="reset-download-folder"]'),
+    ).toBeVisible()
+    await dialog.locator('#browser-ask-save').click()
+    await expect(dialog.locator('#browser-ask-save')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await expect(dialog.locator('input')).toHaveCount(0)
+    await shot(page, `downloads-rows-custom-${theme}`)
+
+    await dialog.locator('[data-action="manage-downloads"]').click()
+    await expect(dialog.getByTestId('settings-page-title')).toHaveText(
+      '下载历史记录',
+    )
+    await expect(page).toHaveURL(/page=downloads/)
+    await expect(groupTitles(dialog)).toHaveText(['你的下载', 'Emperor 的下载'])
+    await expect(dialog).toContainText('Q3-report.csv')
+    await expect(dialog).toContainText('已拦截：可执行文件')
+    await expect(dialog).toContainText('正在下载 42%')
+    await expect(dialog).toContainText('invoice-2026-09.pdf')
+    await noHorizontalOverflow(page)
+    await shot(page, `downloads-${theme}`)
+  })
+
   test(`sign-in profiles and site settings (${theme})`, async ({ page }) => {
     const dialog = await openBrowser(page, { theme })
     await dialog.locator('[data-action="manage-profiles"]').click()
@@ -179,4 +233,99 @@ test('the control card waits for 电脑操作 and leads there', async ({
   await shot(page, 'browser-computer-off')
   await dialog.getByRole('button', { name: '打开电脑操作' }).click()
   await expect(page).toHaveURL(/settings=computer/)
+})
+
+test('the download history fits a narrow window, and an empty one says 暂无', async ({
+  page,
+}) => {
+  await openBrowser(page, { width: 700, page: 'downloads' })
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await expect(dialog.getByTestId('settings-page-title')).toHaveText(
+    '下载历史记录',
+  )
+  await expect(dialog).toContainText('Q3-report.csv')
+  await noHorizontalOverflow(page)
+  await shot(page, 'downloads-narrow')
+
+  await page.goto(
+    '/chat/build-ui?settings=browser&page=downloads&visualDownloads=none&visualTheme=dark',
+  )
+  const empty = page.getByRole('dialog', { name: '设置' })
+  await expect(empty.locator('.ds-empty-state')).toHaveCount(2)
+  await expect(empty.locator('.ds-empty-state').first()).toContainText('暂无')
+  await shot(page, 'downloads-empty')
+})
+
+test.describe('the 浏览器 pane’s download line', () => {
+  for (const theme of ['dark', 'light'] as const)
+    test(`progress, done and blocked (${theme})`, async ({ page }) => {
+      await page.addInitScript(() => {
+        localStorage.setItem(
+          'emperor.frame.v2',
+          JSON.stringify({
+            workspace: 680,
+            workspaceWidth: 680,
+            workspacePane: 'browser',
+          }),
+        )
+      })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto(`/chat/chat-main?visualTheme=${theme}`)
+      const pane = page.locator('.browser-pane')
+      await expect(pane).toBeVisible()
+      await page.waitForTimeout(400)
+      const address = pane.getByRole('textbox', { name: '网址' })
+      await address.fill('news.example.com')
+      await address.press('Enter')
+      const emit = (view: Record<string, unknown>) =>
+        page.evaluate(
+          (value) =>
+            (
+              window as unknown as {
+                __visualEmitDownload?: (view: unknown) => void
+              }
+            ).__visualEmitDownload?.(value),
+          view,
+        )
+      const report = {
+        id: 'ud_00000000000e',
+        name: 'Q3-report.csv',
+        site: 'https://news.example.com',
+        time: 10,
+        bytes: 12_288,
+        totalBytes: 24_576,
+        state: 'progressing',
+      }
+      await emit(report)
+      const line = pane.getByTestId('browser-download')
+      await expect(line).toContainText('正在下载 Q3-report.csv')
+      await expect(line).toContainText('50%')
+      // Its own row under the page, never inside the slot the page covers.
+      const slot = (await pane.locator('.browser-viewport').boundingBox())!
+      const row = (await line.boundingBox())!
+      expect(row.y).toBeGreaterThanOrEqual(slot.y + slot.height - 1)
+      await shot(page, `pane-downloading-${theme}`)
+
+      await emit({ ...report, state: 'completed', bytes: 24_576, exists: true })
+      await expect(line).toContainText('已下载 Q3-report.csv')
+      await expect(
+        line.getByRole('button', { name: '在访达中显示' }),
+      ).toBeVisible()
+      await shot(page, `pane-downloaded-${theme}`)
+
+      await emit({
+        id: 'ud_00000000000f',
+        name: 'setup.dmg',
+        site: 'https://downloads.example.com',
+        time: 11,
+        bytes: 0,
+        state: 'blocked',
+        reason: 'executable',
+      })
+      await expect(line).toContainText('已拦截 setup.dmg')
+      await expect(line).toContainText('可执行文件和安装包不会下载')
+      await shot(page, `pane-blocked-${theme}`)
+      await line.getByRole('button', { name: '关闭下载提示' }).click()
+      await expect(line).toHaveCount(0)
+    })
 })

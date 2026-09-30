@@ -15,6 +15,20 @@ export interface WebContentsLike {
 export class CoreEventBridge {
   private readonly targets = new Set<WebContentsLike>()
   private readonly petTargets = new Set<WebContentsLike>()
+  private readonly listeners = new Set<
+    (event: Record<string, unknown>) => void
+  >()
+
+  /**
+   * Follow every event inside main (main's own caches, such as the browser
+   * preferences), before the windows get it. Returns the unsubscribe.
+   */
+  listen(listener: (event: Record<string, unknown>) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
 
   attach(webContents: WebContentsLike): void {
     if (!webContents.isDestroyed?.()) this.targets.add(webContents)
@@ -33,6 +47,13 @@ export class CoreEventBridge {
   }
 
   emit(event: Record<string, unknown>): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(event)
+      } catch {
+        // A listener in main never keeps the event from the windows.
+      }
+    }
     for (const target of [...this.targets]) {
       if (target.isDestroyed?.()) {
         this.targets.delete(target)

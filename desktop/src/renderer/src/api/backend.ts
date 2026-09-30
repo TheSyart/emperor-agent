@@ -14,12 +14,17 @@ import type {
   WireSessionEvent,
 } from '@emperor/core/runtime-contract'
 import type {
+  AgentDownloadView,
   AgentPreviewPointer,
   BrowserConnectResult,
   BrowserPairingStatus,
+  DownloadHistory,
   MacHelperPermission,
   MacHelperStatus,
+  UserDownloadView,
 } from '../../../shared/ipc-contract'
+
+export type { AgentDownloadView, DownloadHistory, UserDownloadView }
 
 export interface VaultDraft {
   handleId?: string
@@ -120,6 +125,14 @@ interface EmperorBridge {
   openBrowserHistory?: (id: string) => Promise<unknown>
   clearBrowserData?: () => Promise<unknown>
   onBrowserState?: (listener: (state: BrowserViewState) => void) => () => void
+  browserDownloads?: () => Promise<unknown>
+  openBrowserDownload?: (id: string) => Promise<unknown>
+  revealBrowserDownload?: (id: string) => Promise<unknown>
+  removeBrowserDownload?: (id: string) => Promise<unknown>
+  chooseDownloadFolder?: () => Promise<unknown>
+  onBrowserDownload?: (
+    listener: (download: UserDownloadView) => void,
+  ) => () => void
   agentPreviewStart?: (targetId: string) => Promise<unknown>
   agentPreviewStop?: (targetId: string) => void
   agentDownloadReveal?: (downloadId: string) => Promise<unknown>
@@ -557,6 +570,100 @@ export async function openBrowserHistoryEntry(
 /** Clear the built-in browser's data; resolves once main finished. */
 export async function clearBrowserData(): Promise<BrowserOpenResult> {
   return await okOrError(bridge()?.clearBrowserData, [], () => ({ ok: true }))
+}
+
+// ── Your downloads (设置 › 浏览器 › 下载) ─────────────────────────────────
+
+/** The download history, newest first (empty without a bridge). */
+export async function fetchDownloadHistory(): Promise<DownloadHistory> {
+  const read = bridge()?.browserDownloads
+  if (typeof read !== 'function') return { user: [], agent: [] }
+  let result: unknown
+  try {
+    result = await read()
+  } catch {
+    return { user: [], agent: [] }
+  }
+  const record =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {}
+  return {
+    user: Array.isArray(record.user) ? record.user.filter(isUserDownload) : [],
+    agent: Array.isArray(record.agent)
+      ? record.agent.filter(isAgentDownload)
+      : [],
+  }
+}
+
+function isUserDownload(value: unknown): value is UserDownloadView {
+  const entry = value as Partial<UserDownloadView> | null
+  return Boolean(
+    entry &&
+    typeof entry.id === 'string' &&
+    typeof entry.name === 'string' &&
+    typeof entry.site === 'string' &&
+    typeof entry.time === 'number' &&
+    typeof entry.state === 'string' &&
+    typeof entry.bytes === 'number',
+  )
+}
+
+function isAgentDownload(value: unknown): value is AgentDownloadView {
+  const entry = value as Partial<AgentDownloadView> | null
+  return Boolean(
+    entry &&
+    typeof entry.id === 'string' &&
+    typeof entry.name === 'string' &&
+    typeof entry.site === 'string' &&
+    typeof entry.time === 'number' &&
+    typeof entry.bytes === 'number' &&
+    typeof entry.exists === 'boolean',
+  )
+}
+
+async function downloadCall(
+  call: ((id: string) => Promise<unknown>) | undefined,
+  id: string,
+  fallback: string,
+): Promise<void> {
+  if (typeof call !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = (await call(id)) as { ok?: boolean; error?: string } | null
+  if (result?.ok !== true) throw new Error(result?.error || fallback)
+}
+
+/** Open a finished download of yours; throws with the reason. */
+export async function openUserDownload(id: string): Promise<void> {
+  await downloadCall(bridge()?.openBrowserDownload, id, '无法打开这个文件')
+}
+
+/** Show a finished download of yours in Finder. */
+export async function revealUserDownload(id: string): Promise<void> {
+  await downloadCall(bridge()?.revealBrowserDownload, id, '找不到这个下载文件')
+}
+
+/** Take a download off your list; the file stays. */
+export async function removeUserDownload(id: string): Promise<void> {
+  await downloadCall(bridge()?.removeBrowserDownload, id, '无法从列表中移除')
+}
+
+/**
+ * 设置 › 浏览器 › 下载 › 位置: main shows the system folder picker; the
+ * chosen folder, or null when cancelled.
+ */
+export async function chooseDownloadFolder(): Promise<string | null> {
+  const choose = bridge()?.chooseDownloadFolder
+  if (typeof choose !== 'function') return null
+  const folder = await choose()
+  return typeof folder === 'string' && folder ? folder : null
+}
+
+/** One of your downloads started, moved on or ended. */
+export function onUserDownload(
+  listener: (download: UserDownloadView) => void,
+): () => void {
+  return bridge()?.onBrowserDownload?.(listener) ?? (() => {})
 }
 
 async function okOrError(

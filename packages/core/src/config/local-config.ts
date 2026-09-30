@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { BrowserPreferences } from '../runtime/types'
 import {
   AtomicSnapshot,
@@ -55,7 +55,25 @@ export function defaultBrowserPreferences(): BrowserPreferences {
     localTarget: 'builtin',
     showFullUrl: true,
     history: true,
+    downloadDirectory: null,
+    askWhereToSave: false,
   }
+}
+
+/** Longest download folder path kept (longer ones go back to the default). */
+export const DOWNLOAD_DIRECTORY_MAX_LENGTH = 4_096
+
+/**
+ * The user's download folder when it is a usable absolute path, else null
+ * (the system Downloads folder).
+ */
+export function validDownloadDirectory(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length <= DOWNLOAD_DIRECTORY_MAX_LENGTH &&
+    !value.includes('\0') &&
+    isAbsolute(value)
+    ? value
+    : null
 }
 
 export interface LocalConfigBackup {
@@ -131,7 +149,8 @@ export function parseLocalConfig(
 }
 
 /**
- * Unknown or malformed fields fall back to the defaults one by one; the
+ * Unknown or malformed fields fall back to the defaults one by one (a
+ * download folder that is not an absolute path means the system one); the
  * retired `enabled` switch is dropped.
  */
 export function normalizeBrowserPreferences(
@@ -154,6 +173,11 @@ export function normalizeBrowserPreferences(
         : defaults.showFullUrl,
     history:
       typeof data.history === 'boolean' ? data.history : defaults.history,
+    downloadDirectory: validDownloadDirectory(data.downloadDirectory),
+    askWhereToSave:
+      typeof data.askWhereToSave === 'boolean'
+        ? data.askWhereToSave
+        : defaults.askWhereToSave,
   }
 }
 

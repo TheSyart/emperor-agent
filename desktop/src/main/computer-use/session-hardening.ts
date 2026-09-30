@@ -1,8 +1,8 @@
 /**
  * Hardening shared by every browser session Emperor creates — the user's
  * embedded browser and the Agent's task profiles: no site permissions, no
- * device access, no downloads (the Agent download inbox opts in per
- * session later), applied once per session.
+ * device access, no downloads unless the session hands them on (the Agent
+ * download inbox, the user's own downloads), applied once per session.
  */
 
 import type { DownloadItem, Event, Session, WebContents } from 'electron'
@@ -10,7 +10,10 @@ import type { DownloadItem, Event, Session, WebContents } from 'electron'
 const hardenedSessions = new WeakSet<Session>()
 
 export interface HardenOptions {
-  /** Agent sessions route downloads to the inbox; the default cancels all. */
+  /**
+   * Agent sessions route downloads to the inbox, the user's browser to
+   * user-downloads.ts; the default cancels all.
+   */
   onDownload?(
     event: Event,
     item: DownloadItem,

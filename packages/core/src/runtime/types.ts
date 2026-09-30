@@ -39,6 +39,13 @@ export interface BrowserPreferences {
   showFullUrl: boolean
   /** Keep this session's visited pages for back-lookups (cleared on close). */
   history: boolean
+  /**
+   * Where the user's own downloads go (an absolute folder); null: the
+   * system Downloads folder.
+   */
+  downloadDirectory: string | null
+  /** Show the system save dialog for each download instead. */
+  askWhereToSave: boolean
 }
 
 export interface RuntimeGoalView {

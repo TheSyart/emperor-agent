@@ -196,6 +196,74 @@ export interface BrowserHistoryEntry {
 
 export type BrowserClearResult = { ok: true } | { ok: false; error: string }
 
+/**
+ * Your own downloads in the built-in browser (设置 › 浏览器 › 下载). Renderer
+ * → main, no argument: the download history ({@link DownloadHistory}). Only
+ * ids travel: no path crosses to the renderer. Emperor's downloads (the
+ * Agent inbox) are listed here too; their actions stay on the
+ * AGENT_DOWNLOAD_* channels.
+ */
+export const BROWSER_DOWNLOADS_CHANNEL = 'emperor:browser:downloads'
+/** Renderer → main `{ id }`: open a finished download of yours. */
+export const BROWSER_DOWNLOAD_OPEN_CHANNEL = 'emperor:browser:download-open'
+/** Renderer → main `{ id }`: show a finished download in Finder / Explorer. */
+export const BROWSER_DOWNLOAD_REVEAL_CHANNEL = 'emperor:browser:download-reveal'
+/** Renderer → main `{ id }`: take a download off the list (the file stays). */
+export const BROWSER_DOWNLOAD_REMOVE_CHANNEL = 'emperor:browser:download-remove'
+/**
+ * Renderer → main, no argument: pick the download folder in the system
+ * dialog; answers the path or null. The renderer saves the choice with
+ * `browser.setPreferences`.
+ */
+export const BROWSER_DOWNLOAD_FOLDER_CHANNEL = 'emperor:browser:download-folder'
+/** Main → renderer {@link UserDownloadView}: a download started, moved on or ended. */
+export const BROWSER_DOWNLOAD_EVENT_CHANNEL = 'emperor:browser:download'
+
+export type UserDownloadState =
+  'progressing' | 'completed' | 'cancelled' | 'interrupted' | 'blocked'
+
+/** Why a download was stopped: a program or installer, or over the size limit. */
+export type UserDownloadBlock = 'executable' | 'too-large'
+
+/** One of your downloads. */
+export interface UserDownloadView {
+  /** `ud_` + 12 hex digits. */
+  id: string
+  name: string
+  /** The page's origin, else the file's; '' when neither is known. */
+  site: string
+  /** When it started (ms). */
+  time: number
+  state: UserDownloadState
+  /** Bytes received so far; the size once completed. */
+  bytes: number
+  /** While progressing: the announced size, 0 when unknown. */
+  totalBytes?: number
+  reason?: UserDownloadBlock
+  /** Completed: the file is still where it was saved. */
+  exists?: boolean
+}
+
+/** One of Emperor's downloads (the Agent inbox). */
+export interface AgentDownloadView {
+  /** `dl_` + 12 hex digits (the AGENT_DOWNLOAD_* channels take it). */
+  id: string
+  name: string
+  /** The origin it came from; '' for downloads saved before it was kept. */
+  site: string
+  /** The conversation it belongs to (for 移到工作区). */
+  sessionId: string | null
+  time: number
+  bytes: number
+  exists: boolean
+}
+
+/** 设置 › 浏览器 › 下载历史记录, newest first in each group. */
+export interface DownloadHistory {
+  user: UserDownloadView[]
+  agent: AgentDownloadView[]
+}
+
 /** Extension filter of the native file picker (`SELECT_FILE_CHANNEL`). */
 export interface FileDialogFilter {
   name: string

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   statSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -260,6 +261,114 @@ describe('download inbox across restarts', () => {
     await expect(
       again.moveTo(record.downloadId, 'relative/dir'),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('download inbox list (设置 › 浏览器 › 下载历史记录)', () => {
+  it('lists completed downloads newest first, with their conversation, site, time and size', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-list-'))
+    const indexPath = join(root, '.index.json')
+    const clock = { now: 1_000 }
+    const box = new DownloadInbox({
+      root,
+      indexPath,
+      hashFile: async () => 'd'.repeat(64),
+      now: () => clock.now,
+    })
+    const receive = async (name: string, ownerSessionId?: string) => {
+      const item = new FakeItem(name)
+      const record = await box.receive(
+        'tab_1',
+        { ...request, ...(ownerSessionId ? { ownerSessionId } : {}) },
+        async () => {
+          box.offer('tab_1', event(), item)
+          writeFileSync(item.savePath, 'abc')
+          item.progress(3)
+          item.finish()
+        },
+        new AbortController().signal,
+      )
+      return { record, path: item.savePath }
+    }
+    const first = await receive('a.csv', 's1')
+    clock.now = 2_000
+    const second = await receive('b.csv')
+    // Refused and unfinished downloads never reach the inbox list.
+    await box.receive(
+      'tab_1',
+      request,
+      async () => {
+        box.offer('tab_1', event(), new FakeItem('setup.dmg'))
+      },
+      new AbortController().signal,
+    )
+    expect(box.list()).toEqual([
+      {
+        downloadId: second.record.downloadId,
+        name: 'b.csv',
+        path: second.path,
+        origin: 'https://files.test',
+        time: 2_000,
+        bytes: 3,
+        exists: true,
+      },
+      {
+        downloadId: first.record.downloadId,
+        name: 'a.csv',
+        path: first.path,
+        ownerSessionId: 's1',
+        origin: 'https://files.test',
+        time: 1_000,
+        bytes: 3,
+        exists: true,
+      },
+    ])
+    // Moved away by the user: still listed after a restart, as gone.
+    unlinkSync(first.path)
+    expect(new DownloadInbox({ root, indexPath }).list()[1]).toMatchObject({
+      downloadId: first.record.downloadId,
+      time: 1_000,
+      bytes: 3,
+      exists: false,
+    })
+  })
+
+  it('reads the time and size of an entry saved before they were recorded', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-legacy-'))
+    const indexPath = join(root, '.index.json')
+    const file = join(root, 'task-abcdef12', 'old.csv')
+    mkdirSync(join(root, 'task-abcdef12'))
+    writeFileSync(file, 'hello')
+    utimesSync(file, 1_700_000_000, 1_700_000_000)
+    writeFileSync(
+      indexPath,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          ['dl_0123456789ab', { path: file, ownerSessionId: 's9' }],
+          ['dl_0123456789ac', { path: join(root, 'gone.csv') }],
+        ],
+      }),
+    )
+    expect(new DownloadInbox({ root, indexPath }).list()).toEqual([
+      {
+        downloadId: 'dl_0123456789ab',
+        name: 'old.csv',
+        path: file,
+        ownerSessionId: 's9',
+        time: 1_700_000_000_000,
+        bytes: 5,
+        exists: true,
+      },
+      {
+        downloadId: 'dl_0123456789ac',
+        name: 'gone.csv',
+        path: join(root, 'gone.csv'),
+        time: 0,
+        bytes: 0,
+        exists: false,
+      },
+    ])
   })
 })
 

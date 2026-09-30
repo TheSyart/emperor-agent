@@ -16,6 +16,11 @@ import {
   BROWSER_HISTORY_CHANNEL,
   BROWSER_HISTORY_OPEN_CHANNEL,
   BROWSER_CLEAR_DATA_CHANNEL,
+  BROWSER_DOWNLOADS_CHANNEL,
+  BROWSER_DOWNLOAD_FOLDER_CHANNEL,
+  BROWSER_DOWNLOAD_OPEN_CHANNEL,
+  BROWSER_DOWNLOAD_REMOVE_CHANNEL,
+  BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
@@ -767,5 +772,158 @@ describe('agent download reveal IPC', () => {
       ipc.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, { downloadId: '../x' }),
     ).rejects.toThrow(/download id/)
     expect(moveToWorkspace).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('download history IPC (设置 › 浏览器 › 下载)', () => {
+  const userView = {
+    id: 'ud_0123456789ab',
+    name: 'report.csv',
+    site: 'https://news.example',
+    time: 5,
+    state: 'completed' as const,
+    bytes: 24,
+    exists: true,
+  }
+
+  function register(authorize: (event: unknown) => void = vi.fn()) {
+    const ipc = new FakeIpcMain()
+    const userDownloads = {
+      list: vi.fn(() => [userView]),
+      open: vi.fn(async (id: string) =>
+        id === 'ud_0123456789ab' ? '' : '找不到这个下载文件',
+      ),
+      reveal: vi.fn((id: string) => id === 'ud_0123456789ab'),
+      remove: vi.fn((id: string) => id === 'ud_0123456789ab'),
+      chooseFolder: vi.fn(
+        async (): Promise<string | null> => '/Users/me/Downloads/web',
+      ),
+    }
+    const agentList = vi.fn(() => [
+      {
+        downloadId: 'dl_0123456789ab',
+        name: 'invoice.pdf',
+        path: '/Users/me/.emperor/browser/downloads/turn-1/invoice.pdf',
+        ownerSessionId: 's1',
+        origin: 'https://files.test',
+        time: 7,
+        bytes: 3,
+        exists: true,
+      },
+      {
+        downloadId: 'dl_0123456789ac',
+        name: 'old.csv',
+        path: '/Users/me/.emperor/browser/downloads/turn-2/old.csv',
+        time: 1,
+        bytes: 0,
+        exists: false,
+      },
+    ])
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn(() => '') },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(async () => undefined),
+      userDownloads,
+      agentDownloads: { reveal: vi.fn(() => true), list: agentList },
+    })
+    return { ipc, userDownloads, agentList }
+  }
+
+  it('lists your downloads and Emperor’s, and no path crosses', async () => {
+    const authorize = vi.fn()
+    const { ipc } = register(authorize)
+    const history = await ipc.invoke(BROWSER_DOWNLOADS_CHANNEL)
+    expect(history).toEqual({
+      user: [userView],
+      agent: [
+        {
+          id: 'dl_0123456789ab',
+          name: 'invoice.pdf',
+          site: 'https://files.test',
+          sessionId: 's1',
+          time: 7,
+          bytes: 3,
+          exists: true,
+        },
+        {
+          id: 'dl_0123456789ac',
+          name: 'old.csv',
+          site: '',
+          sessionId: null,
+          time: 1,
+          bytes: 0,
+          exists: false,
+        },
+      ],
+    })
+    expect(JSON.stringify(history)).not.toContain('/Users/me')
+    expect(authorize).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens, reveals and removes your downloads by id only', async () => {
+    const { ipc, userDownloads } = register()
+    const id = 'ud_0123456789ab'
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_OPEN_CHANNEL, { id }),
+    ).resolves.toEqual({ ok: true })
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_OPEN_CHANNEL, { id: 'ud_ffffffffffff' }),
+    ).resolves.toEqual({ ok: false, error: '找不到这个下载文件' })
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_REVEAL_CHANNEL, { id }),
+    ).resolves.toEqual({ ok: true })
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_REVEAL_CHANNEL, { id: 'ud_ffffffffffff' }),
+    ).resolves.toMatchObject({ ok: false })
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_REMOVE_CHANNEL, { id }),
+    ).resolves.toEqual({ ok: true })
+    for (const [channel, payload] of [
+      [BROWSER_DOWNLOAD_OPEN_CHANNEL, { id: '/Users/me/report.csv' }],
+      [BROWSER_DOWNLOAD_REVEAL_CHANNEL, { id: 'dl_0123456789ab' }],
+      [BROWSER_DOWNLOAD_REMOVE_CHANNEL, 'ud_0123456789ab'],
+      [BROWSER_DOWNLOAD_OPEN_CHANNEL, { path: '/etc/passwd' }],
+    ] as const)
+      await expect(ipc.invoke(channel, payload)).rejects.toThrow(/download id/)
+    expect(userDownloads.open).toHaveBeenCalledTimes(2)
+    expect(userDownloads.reveal).toHaveBeenCalledTimes(2)
+    expect(userDownloads.remove).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets main pick the download folder, reading nothing from the renderer', async () => {
+    const { ipc, userDownloads } = register()
+    await expect(
+      ipc.invoke(BROWSER_DOWNLOAD_FOLDER_CHANNEL, { defaultPath: '/etc' }),
+    ).resolves.toBe('/Users/me/Downloads/web')
+    expect(userDownloads.chooseFolder).toHaveBeenCalledWith()
+    userDownloads.chooseFolder.mockResolvedValueOnce(null)
+    await expect(ipc.invoke(BROWSER_DOWNLOAD_FOLDER_CHANNEL)).resolves.toBe(
+      null,
+    )
+  })
+
+  it('refuses untrusted callers before touching the downloads', async () => {
+    const { ipc, userDownloads, agentList } = register(() => {
+      throw new Error('IPC caller is not trusted')
+    })
+    for (const channel of [
+      BROWSER_DOWNLOADS_CHANNEL,
+      BROWSER_DOWNLOAD_OPEN_CHANNEL,
+      BROWSER_DOWNLOAD_REVEAL_CHANNEL,
+      BROWSER_DOWNLOAD_REMOVE_CHANNEL,
+      BROWSER_DOWNLOAD_FOLDER_CHANNEL,
+    ])
+      await expect(
+        ipc.invoke(channel, { id: 'ud_0123456789ab' }),
+      ).rejects.toThrow(/not trusted/)
+    expect(userDownloads.list).not.toHaveBeenCalled()
+    expect(agentList).not.toHaveBeenCalled()
+    expect(userDownloads.open).not.toHaveBeenCalled()
+    expect(userDownloads.reveal).not.toHaveBeenCalled()
+    expect(userDownloads.remove).not.toHaveBeenCalled()
+    expect(userDownloads.chooseFolder).not.toHaveBeenCalled()
   })
 })

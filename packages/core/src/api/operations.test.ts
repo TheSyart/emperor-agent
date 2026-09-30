@@ -100,12 +100,28 @@ describe('Core operation registry', () => {
     expect(args.parse([{ localTarget: 'system', history: false }])).toEqual([
       { localTarget: 'system', history: false },
     ])
+    // Your downloads: a folder of your own, or null for the system one.
+    expect(
+      args.parse([
+        { downloadDirectory: '/Users/me/Downloads/web', askWhereToSave: true },
+      ]),
+    ).toEqual([
+      { downloadDirectory: '/Users/me/Downloads/web', askWhereToSave: true },
+    ])
+    expect(args.parse([{ downloadDirectory: null }])).toEqual([
+      { downloadDirectory: null },
+    ])
     for (const bad of [
       { localTarget: 'tab' },
       // The built-in browser can no longer be turned off.
       { enabled: false },
+      { downloadDirectory: 'Downloads/web' },
+      { downloadDirectory: '' },
+      { downloadDirectory: '/tmp/a\0b' },
+      { downloadDirectory: `/${'x'.repeat(5000)}` },
+      { askWhereToSave: 'yes' },
     ])
-      expect(() => args.parse([bad])).toThrow()
+      expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
   })
 
   it('validates the turn file record operations', () => {

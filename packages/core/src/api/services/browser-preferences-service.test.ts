@@ -14,6 +14,8 @@ describe('CoreBrowserPreferencesService', () => {
       localTarget: 'builtin',
       showFullUrl: true,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     })
     await service.update({ linkTarget: 'builtin', showFullUrl: false })
     expect(changed).toHaveBeenCalledWith({
@@ -21,6 +23,8 @@ describe('CoreBrowserPreferencesService', () => {
       localTarget: 'builtin',
       showFullUrl: false,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     })
     await service.update({ localTarget: 'system' })
     expect((await service.get()).localTarget).toBe('system')
@@ -30,6 +34,29 @@ describe('CoreBrowserPreferencesService', () => {
       await readFile(join(root, 'settings.json'), 'utf8'),
     )
     expect(onDisk.browser).toMatchObject({ linkTarget: 'builtin' })
+  })
+
+  it('keeps the download folder and the ask-first choice, and goes back to the system folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'emperor-browser-prefs-'))
+    const changed = vi.fn()
+    const service = new CoreBrowserPreferencesService(root, { changed })
+    await service.update({
+      downloadDirectory: '/Users/me/Downloads/web',
+      askWhereToSave: true,
+    })
+    expect(changed).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        downloadDirectory: '/Users/me/Downloads/web',
+        askWhereToSave: true,
+      }),
+    )
+    const again = new CoreBrowserPreferencesService(root)
+    expect(await again.get()).toMatchObject({
+      downloadDirectory: '/Users/me/Downloads/web',
+      askWhereToSave: true,
+    })
+    await again.update({ downloadDirectory: null })
+    expect((await service.get()).downloadDirectory).toBeNull()
   })
 
   it('is a guarded mutation', async () => {

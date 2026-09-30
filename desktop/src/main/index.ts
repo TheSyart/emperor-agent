@@ -56,6 +56,8 @@ import { mainWindowWebPreferences } from './window-security'
 import { NodePtyHost } from './terminal-host'
 import { TerminalEventBridge } from './terminal-event-bridge'
 import { BrowserViewHost } from './browser-view'
+import { BrowserPreferencesCache } from './browser-preferences-cache'
+import { UserDownloads } from './user-downloads'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
 import {
   createKillSwitch,
@@ -119,6 +121,7 @@ import {
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
   AGENT_PREVIEW_POINTER_CHANNEL,
+  BROWSER_DOWNLOAD_EVENT_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
@@ -147,6 +150,12 @@ let recoveryWindow: BrowserWindow | null = null
 let petWindow: BrowserWindow | null = null
 let petLastError: string | null = null
 let browserViewHost: BrowserViewHost | null = null
+// 设置 › 浏览器, read synchronously (will-download, link routing, history):
+// loaded once Core is up, then kept current by its change events.
+const browserPreferences = new BrowserPreferencesCache()
+coreEventBridge.listen((event) => browserPreferences.observe(event))
+// The user's own downloads in the built-in browser (设置 › 浏览器 › 下载).
+let userDownloads: UserDownloads | null = null
 // Computer Use drivers are created here; the kernel owns all execution.
 let computerUsePort: DesktopComputerUsePort | null = null
 let embeddedBrowser: EmbeddedBrowserDriver | null = null
@@ -754,9 +763,13 @@ function createWindow(): void {
   pointerOverlay ??= new PointerOverlay()
   syncControlIndicators()
   browserViewHost = new BrowserViewHost(mainWindow, Date.now, {
-    // 设置 › 浏览器 › 临时历史; unknown (Core not ready) counts as on.
-    historyEnabled: async () =>
-      (await coreApi?.browser.preferences().catch(() => null))?.history ?? true,
+    // 设置 › 浏览器 › 浏览历史; unknown (Core not ready) counts as on.
+    historyEnabled: () => browserPreferences.current.history,
+    onDownload: (event, item, contents) => {
+      if (userDownloads) userDownloads.offer(event, item, contents)
+      else event.preventDefault()
+    },
+    forgetDownloads: () => userDownloads?.clear(),
   })
   // A reloaded or crashed renderer lost the BrowserPane that placed the native
   // view; drop it so it cannot linger above the new UI.
@@ -972,6 +985,7 @@ async function startup(): Promise<void> {
       throw new Error('packaged smoke mode requires a packaged application')
     prepareMainRuntime()
     createComputerUseHost()
+    userDownloads = createUserDownloads()
     // The Chrome/Edge bridge is optional: if another Emperor holds its
     // socket, start without it and let the driver report why.
     if (nmBridge && !(await nmBridge.startOrDegrade()))
@@ -1030,6 +1044,8 @@ async function startup(): Promise<void> {
         }),
       },
     })
+    const core = coreApi
+    await browserPreferences.load(() => core.browser.preferences())
     const savedAccelerator = coreApi.host.computerUseKillSwitchAccelerator()
     if (savedAccelerator !== undefined)
       killSwitch?.setAccelerator(savedAccelerator)
@@ -1123,6 +1139,27 @@ async function startup(): Promise<void> {
             downloadId,
             path.join(workspace, 'downloads'),
           )
+        },
+        list: () => embeddedBrowser?.downloads?.list() ?? [],
+      },
+      userDownloads: {
+        list: () => userDownloads?.list() ?? [],
+        open: async (id) =>
+          (await userDownloads?.open(id)) ?? '找不到这个下载文件',
+        reveal: (id) => userDownloads?.reveal(id) ?? false,
+        remove: (id) => userDownloads?.remove(id) ?? false,
+        chooseFolder: async () => {
+          const options: OpenDialogOptions = {
+            title: '选择下载位置',
+            buttonLabel: '选择',
+            defaultPath: userDownloads?.folder() ?? app.getPath('downloads'),
+            properties: ['openDirectory', 'createDirectory'],
+          }
+          const result = mainWindow
+            ? await dialog.showOpenDialog(mainWindow, options)
+            : await dialog.showOpenDialog(options)
+          if (result.canceled || !result.filePaths.length) return null
+          return result.filePaths[0] ?? null
         },
       },
     })
@@ -1260,6 +1297,27 @@ app.on('will-quit', () => {
 })
 
 /**
+ * The user's own downloads (设置 › 浏览器 › 下载): the folder and the ask
+ * choice come from the preference copy, the history lives in
+ * `~/.emperor/browser/user-downloads.json`, and the 浏览器 pane hears about
+ * each download.
+ */
+function createUserDownloads(): UserDownloads {
+  return new UserDownloads({
+    recordPath: path.join(config.stateRoot, 'browser', 'user-downloads.json'),
+    preferences: () => browserPreferences.current,
+    systemDownloads: () => app.getPath('downloads'),
+    notify: (view) => {
+      const contents = mainWindow?.webContents
+      if (contents && !contents.isDestroyed())
+        contents.send(BROWSER_DOWNLOAD_EVENT_CHANNEL, view)
+    },
+    openPath: (target) => shell.openPath(target),
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+  })
+}
+
+/**
  * Editor dictation (VO-01): the macOS helper runs as Emperor's own child,
  * from inside the app when packaged (its signature checked first).
  */
@@ -1299,13 +1357,7 @@ function createDictationService(): DictationService {
 async function openUserLink(
   url: string,
 ): Promise<'builtin' | 'system' | 'refused'> {
-  const preferences = (await coreApi?.browser
-    .preferences()
-    .catch(() => null)) ?? {
-    linkTarget: 'system' as const,
-    localTarget: 'builtin' as const,
-  }
-  const destination = linkDestination(url, preferences)
+  const destination = linkDestination(url, browserPreferences.current)
   if (destination === 'builtin' && mainWindow && !mainWindow.isDestroyed()) {
     await requireBrowserViewHost().openUrl({ url })
     mainWindow.webContents.send(BROWSER_REVEAL_CHANNEL, { url })

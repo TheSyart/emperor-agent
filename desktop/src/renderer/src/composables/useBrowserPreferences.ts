@@ -5,7 +5,8 @@ import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 /**
  * The user's own built-in browser settings (设置 › 浏览器, settings.json ›
  * `browser`), shared by the settings section and BrowserPane (the address
- * bar, the history button). One Core read on first use;
+ * bar, the history button; downloads follow them in main). One Core read on
+ * first use;
  * `browser_preferences_changed` host events keep every reader current,
  * whichever window changed them.
  */
@@ -14,6 +15,8 @@ export const DEFAULT_BROWSER_PREFERENCES: Readonly<BrowserPreferences> = {
   localTarget: 'builtin',
   showFullUrl: true,
   history: true,
+  downloadDirectory: null,
+  askWhereToSave: false,
 }
 
 const preferences = ref<BrowserPreferences>({ ...DEFAULT_BROWSER_PREFERENCES })
@@ -28,7 +31,10 @@ export function isBrowserPreferences(
     (data.linkTarget === 'system' || data.linkTarget === 'builtin') &&
     (data.localTarget === 'builtin' || data.localTarget === 'system') &&
     typeof data.showFullUrl === 'boolean' &&
-    typeof data.history === 'boolean'
+    typeof data.history === 'boolean' &&
+    (data.downloadDirectory === null ||
+      typeof data.downloadDirectory === 'string') &&
+    typeof data.askWhereToSave === 'boolean'
   )
 }
 

@@ -38,6 +38,8 @@ describe('local config', () => {
         localTarget: 'builtin',
         showFullUrl: true,
         history: true,
+        downloadDirectory: null,
+        askWhereToSave: false,
       },
     })
 
@@ -105,6 +107,8 @@ describe('local config', () => {
         localTarget: 'system',
         showFullUrl: false,
         history: false,
+        downloadDirectory: '/Users/me/Downloads/web',
+        askWhereToSave: true,
       },
     })
     expect((await loadLocalConfig(dir)).browser).toEqual({
@@ -112,6 +116,8 @@ describe('local config', () => {
       localTarget: 'system',
       showFullUrl: false,
       history: false,
+      downloadDirectory: '/Users/me/Downloads/web',
+      askWhereToSave: true,
     })
     expect(
       parseLocalConfig({
@@ -119,6 +125,8 @@ describe('local config', () => {
           linkTarget: 'tab',
           localTarget: 'nowhere',
           showFullUrl: false,
+          downloadDirectory: 'Downloads/web',
+          askWhereToSave: 'yes',
         },
       }).browser,
     ).toEqual({
@@ -126,7 +134,23 @@ describe('local config', () => {
       localTarget: 'builtin',
       showFullUrl: false,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     })
+  })
+
+  it('keeps only an absolute download folder', () => {
+    // null means the system Downloads folder; anything else goes back to it.
+    for (const bad of ['', 'relative/dir', './here', 42, {}, '/tmp/a\0b'])
+      expect(
+        parseLocalConfig({ browser: { downloadDirectory: bad } }).browser
+          .downloadDirectory,
+        JSON.stringify(bad),
+      ).toBeNull()
+    expect(
+      parseLocalConfig({ browser: { downloadDirectory: '/Volumes/Data/dl' } })
+        .browser.downloadDirectory,
+    ).toBe('/Volumes/Data/dl')
   })
 
   it('drops the retired browser switch', () => {
@@ -139,6 +163,8 @@ describe('local config', () => {
       localTarget: 'builtin',
       showFullUrl: true,
       history: true,
+      downloadDirectory: null,
+      askWhereToSave: false,
     })
   })
 

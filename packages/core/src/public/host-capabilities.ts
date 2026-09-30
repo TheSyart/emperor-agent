@@ -83,6 +83,10 @@ export {
   isExecutableDownload,
   safeDownloadName,
 } from '../harness/computer-use/downloads'
+export {
+  defaultBrowserPreferences,
+  normalizeBrowserPreferences,
+} from '../config/local-config'
 export type { UiErrorCode } from '../harness/computer-use/errors'
 export { searchProbe } from './search-probe'
 export type { SearchProbeRequest } from './search-probe'

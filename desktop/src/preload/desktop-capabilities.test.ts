@@ -23,6 +23,12 @@ import {
   BROWSER_HISTORY_CHANNEL,
   BROWSER_HISTORY_OPEN_CHANNEL,
   BROWSER_CLEAR_DATA_CHANNEL,
+  BROWSER_DOWNLOADS_CHANNEL,
+  BROWSER_DOWNLOAD_EVENT_CHANNEL,
+  BROWSER_DOWNLOAD_FOLDER_CHANNEL,
+  BROWSER_DOWNLOAD_OPEN_CHANNEL,
+  BROWSER_DOWNLOAD_REMOVE_CHANNEL,
+  BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
@@ -93,8 +99,10 @@ describe('desktop capability preload bridge', () => {
       'browserAction',
       'browserBounds',
       'browserClose',
+      'browserDownloads',
       'browserHistory',
       'browserPairings',
+      'chooseDownloadFolder',
       'clearBrowserData',
       'connectBrowsers',
       'denyBrowserPairing',
@@ -104,13 +112,17 @@ describe('desktop capability preload bridge', () => {
       'macHelperStatus',
       'onAgentPreviewFrame',
       'onAgentPreviewPointer',
+      'onBrowserDownload',
       'onBrowserReveal',
       'onBrowserState',
+      'openBrowserDownload',
       'openBrowserHistory',
       'openBrowserUrl',
       'openExternal',
       'openLink',
       'openSkillsFolder',
+      'removeBrowserDownload',
+      'revealBrowserDownload',
       'revealReference',
       'revokeBrowserPairing',
       'selectFile',
@@ -231,6 +243,39 @@ describe('desktop capability preload bridge', () => {
       ],
       [SELECT_FILE_CHANNEL, {}],
     ])
+  })
+
+  it('reaches the download history by id only, and relays download pushes', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    const id = 'ud_0123456789ab'
+    await bridge.browserDownloads()
+    await bridge.openBrowserDownload(id)
+    await bridge.revealBrowserDownload(id)
+    await bridge.removeBrowserDownload(id)
+    await bridge.chooseDownloadFolder()
+    expect(ipc.invoked).toEqual([
+      [BROWSER_DOWNLOADS_CHANNEL, undefined],
+      [BROWSER_DOWNLOAD_OPEN_CHANNEL, { id }],
+      [BROWSER_DOWNLOAD_REVEAL_CHANNEL, { id }],
+      [BROWSER_DOWNLOAD_REMOVE_CHANNEL, { id }],
+      [BROWSER_DOWNLOAD_FOLDER_CHANNEL, undefined],
+    ])
+    const listener = vi.fn()
+    const dispose = bridge.onBrowserDownload(listener)
+    const view = {
+      id,
+      name: 'report.csv',
+      site: 'https://news.example',
+      time: 1,
+      state: 'progressing',
+      bytes: 0,
+    }
+    ipc.emit(BROWSER_DOWNLOAD_EVENT_CHANNEL, view)
+    dispose()
+    ipc.emit(BROWSER_DOWNLOAD_EVENT_CHANNEL, view)
+    expect(listener.mock.calls).toEqual([[view]])
+    expect(ipc.removed).toHaveLength(1)
   })
 
   it('reconnects the macOS Helper through a fixed channel without payload', async () => {
