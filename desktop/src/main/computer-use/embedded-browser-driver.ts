@@ -41,6 +41,7 @@ import type {
   UiAction,
   UiElement,
 } from '@emperor/core/runtime-contract'
+import type { AgentPreviewPointer } from '../../shared/ipc-contract'
 import {
   BrowserSessionManager,
   type AgentTab,
@@ -58,6 +59,7 @@ import {
   selectOption,
   strokeFor,
   typeText,
+  type RendererActHooks,
   type RendererPage,
 } from './cdp/renderer-actions'
 import { CdpSession, type DebuggerLike } from './cdp/session'
@@ -67,6 +69,7 @@ import {
   type AxNode,
   type RefTarget,
 } from './cdp/snapshot'
+import { withPreviewPointer } from './preview-pointer'
 
 const KEPT_REVISIONS = 3
 const SETTLE_MS = 150
@@ -132,6 +135,11 @@ export interface EmbeddedBrowserDriverOptions {
   }): Promise<string[] | null>
   /** File sizes for the upload summary (tests inject a fake). */
   statFile?(path: string): Promise<{ size: number; isFile: boolean }>
+  /**
+   * The Agent's pointer on the conversation preview: where a click, fill,
+   * choice or element scroll lands, as a share of the tab's viewport.
+   */
+  previewPointer?(pointer: AgentPreviewPointer): void
 }
 
 export class EmbeddedBrowserDriver implements BrowserDriver {
@@ -986,6 +994,12 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
     const cdp = await this.connect(runtime)
     this.manager.touch(runtime.tab.targetId)
     const action = request.action
+    // Clicks, fills, choices and element scrolls also say where they land.
+    const pointed = withPreviewPointer(
+      hooks,
+      request.targetId,
+      this.options.previewPointer,
+    )
     switch (action.kind) {
       case 'click':
         return await this.click(
@@ -993,7 +1007,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
           cdp,
           action,
           request.expectedRevision,
-          hooks,
+          pointed,
           signal,
         )
       case 'fill': {
@@ -1007,7 +1021,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
           target,
           action.ref,
           action.text,
-          hooks,
+          pointed,
           signal,
         )
         return this.outcome(runtime, changes, warnings)
@@ -1059,7 +1073,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
             target,
             action.ref,
             action.option,
-            hooks,
+            pointed,
             signal,
           ),
         )
@@ -1073,7 +1087,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
           this.page(runtime, cdp),
           target,
           action,
-          hooks,
+          pointed,
           signal,
         )
         return moved
@@ -1139,7 +1153,7 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
     cdp: CdpSession,
     action: Extract<UiAction, { kind: 'click' }>,
     expectedRevision: number,
-    hooks: ActHooks,
+    hooks: RendererActHooks,
     signal: AbortSignal,
   ): Promise<ActOutcome> {
     const target = this.resolve(runtime, action.ref, expectedRevision)

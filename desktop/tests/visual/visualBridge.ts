@@ -36,6 +36,7 @@ type VisualBridge = {
   agentPreviewStart?: (targetId: string) => Promise<unknown>
   agentPreviewStop?: (targetId: string) => void
   onAgentPreviewFrame?: (listener: VisualCoreListener) => () => void
+  onAgentPreviewPointer?: (listener: VisualCoreListener) => () => void
   dictationStatus?: () => Promise<unknown>
   dictationOpenPrivacy?: (pane: string) => Promise<{ opened: boolean }>
   dictationStart?: () => Promise<unknown>
@@ -1295,6 +1296,16 @@ export async function installVisualCoreBridge(
         const jpeg = new Uint8Array(await blob.arrayBuffer())
         for (const listener of previewListeners)
           listener({ targetId, seq: 1, width: 1280, height: 800, jpeg })
+      }
+      // Where the Agent's latest action landed (main's preview-pointer
+      // event): specs push `{ targetId, x, y }` through this.
+      const pointerListeners = new Set<VisualCoreListener>()
+      ;(
+        window as unknown as {
+          __visualEmitPreviewPointer?: (pointer: unknown) => void
+        }
+      ).__visualEmitPreviewPointer = (pointer) => {
+        for (const listener of pointerListeners) listener(pointer)
       }
       const visualSidebarState = {
         section_order: ['projects', 'chats'],
@@ -3970,6 +3981,10 @@ export async function installVisualCoreBridge(
         onAgentPreviewFrame: (listener: VisualCoreListener) => {
           previewListeners.add(listener)
           return () => previewListeners.delete(listener)
+        },
+        onAgentPreviewPointer: (listener: VisualCoreListener) => {
+          pointerListeners.add(listener)
+          return () => pointerListeners.delete(listener)
         },
         dictationStatus: async () => visualDictationStatus(),
         vaultStatus: async () => ({

@@ -12,12 +12,20 @@
  *   stopped; the Agent carries on working on it.
  * - When the task ends, Core releases every target and the whole group goes
  *   (2026-09-29 §3.3). A target whose release failed stays, saying so.
+ * - The Agent's pointer: where its latest desktop or built-in browser action
+ *   landed, drawn on that target's live picture for about two seconds.
  */
 import type { UiTargetView } from '@emperor/core/runtime-contract'
 
 export const LIVE_PREVIEW_LIMIT = 4
 /** Cards drawn in the stack; the count still covers every target. */
 export const STACK_DEPTH = 4
+/** A card's picture box (`.cu-card-frame img`: `aspect-ratio: 16 / 10`). */
+export const FRAME_ASPECT = 16 / 10
+/** The pointer starts fading this long after the latest action… */
+export const POINTER_FADE_MS = 1_600
+/** …and is gone this long after it. */
+export const POINTER_GONE_MS = 2_000
 
 const LIVE_STATES = new Set<UiTargetView['state']>([
   'created',
@@ -196,6 +204,29 @@ export function previewFrame(
   return {
     kind: 'none',
     note: target.driver === 'external-browser' ? '暂无截图' : '等待画面',
+  }
+}
+
+/**
+ * Where the Agent's pointer sits on a card, in percent of the picture box.
+ * `pointer` is a share (0–1) of the window or page; the picture is
+ * letterboxed in the box (`object-fit: contain`). Without the picture's
+ * size, it is taken to fill the box.
+ */
+export function pointerPlacement(
+  pointer: { readonly x: number; readonly y: number },
+  picture?: { readonly width: number; readonly height: number },
+  box: number = FRAME_ASPECT,
+): { left: number; top: number } {
+  const ratio =
+    picture !== undefined && picture.width > 0 && picture.height > 0
+      ? picture.width / picture.height
+      : box
+  const width = ratio >= box ? 1 : ratio / box
+  const height = ratio >= box ? box / ratio : 1
+  return {
+    left: ((1 - width) / 2 + pointer.x * width) * 100,
+    top: ((1 - height) / 2 + pointer.y * height) * 100,
   }
 }
 

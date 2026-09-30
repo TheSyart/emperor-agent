@@ -19,6 +19,11 @@ type FrameListener = (frame: {
   height: number
   jpeg: Uint8Array
 }) => void
+type PointerListener = (pointer: {
+  targetId: string
+  x: number
+  y: number
+}) => void
 
 const bridge = {
   invokeCore: vi.fn(),
@@ -26,9 +31,11 @@ const bridge = {
   agentPreviewStart: vi.fn(),
   agentPreviewStop: vi.fn(),
   onAgentPreviewFrame: vi.fn(),
+  onAgentPreviewPointer: vi.fn(),
 }
 let status: ComputerUseStatusView | null = null
 let frameListeners: FrameListener[] = []
+let pointerListeners: PointerListener[] = []
 let coreListeners: Array<(event: unknown) => void> = []
 let created: string[] = []
 let revoked: string[] = []
@@ -114,6 +121,37 @@ function card(root: HTMLElement): HTMLElement | null {
   return root.querySelector<HTMLElement>('.cu-card')
 }
 
+/** A live frame of a target, of the given size. */
+async function live(targetId: string, width = 1280, height = 800) {
+  frameListeners[0]!({
+    targetId,
+    seq: 1,
+    width,
+    height,
+    jpeg: Uint8Array.of(1),
+  })
+  await flush()
+}
+
+/** The Agent's latest action on a target landed here (shares of its picture). */
+async function point(targetId: string, x: number, y: number) {
+  for (const listener of pointerListeners) listener({ targetId, x, y })
+  await flush()
+}
+
+function arrow(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>('.cu-card .cu-pointer')
+}
+
+function reduceMotion(): void {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(prefers-reduced-motion: reduce)',
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }))
+}
+
 function strips(root: HTMLElement): string[] {
   return [...root.querySelectorAll('.cu-strip-title')].map(
     (item) => item.textContent?.trim() ?? '',
@@ -124,6 +162,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   status = null
   frameListeners = []
+  pointerListeners = []
   coreListeners = []
   created = []
   revoked = []
@@ -157,10 +196,21 @@ beforeEach(() => {
       frameListeners = frameListeners.filter((entry) => entry !== listener)
     }
   })
+  bridge.onAgentPreviewPointer.mockImplementation(
+    (listener: PointerListener) => {
+      pointerListeners.push(listener)
+      return () => {
+        pointerListeners = pointerListeners.filter(
+          (entry) => entry !== listener,
+        )
+      }
+    },
+  )
   ;(window as unknown as { emperor: typeof bridge }).emperor = bridge
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   app?.unmount()
   app = null
   host?.remove()
@@ -494,5 +544,103 @@ describe('ComputerUsePreviewStack', () => {
     )
     await flush()
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('draws the Agent’s pointer where its action landed on the live picture, then fades it out', async () => {
+    setTargets([target()])
+    const root = await mount()
+    await live('t-1')
+    vi.useFakeTimers()
+    await point('t-1', 0.25, 0.5)
+    const drawn = arrow(root)!
+    expect(drawn.getAttribute('aria-hidden')).toBe('true')
+    expect(drawn.style.transform).toBe('translate(25%, 50%)')
+    expect(drawn.hasAttribute('data-fading')).toBe(false)
+    // The next action glides the same arrow to its point.
+    expect(drawn.hasAttribute('data-glide')).toBe(true)
+    await point('t-1', 0.75, 0.25)
+    expect(arrow(root)).toBe(drawn)
+    expect(drawn.style.transform).toBe('translate(75%, 25%)')
+    // About two seconds after the latest action it fades out, then goes.
+    vi.advanceTimersByTime(1_599)
+    await flush()
+    expect(arrow(root)?.hasAttribute('data-fading')).toBe(false)
+    vi.advanceTimersByTime(1)
+    await flush()
+    expect(arrow(root)?.hasAttribute('data-fading')).toBe(true)
+    vi.advanceTimersByTime(400)
+    await flush()
+    expect(arrow(root)).toBeNull()
+  })
+
+  it('places the pointer on a letterboxed picture', async () => {
+    setTargets([target()])
+    const root = await mount()
+    await live('t-1', 800, 1000)
+    await point('t-1', 0, 0.5)
+    expect(arrow(root)?.style.transform).toBe('translate(25%, 50%)')
+  })
+
+  it('draws the pointer only on its own target’s live picture', async () => {
+    setTargets([
+      target({ targetId: 't-a', title: '访达' }),
+      target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
+    ])
+    const root = await mount()
+    await live('t-a')
+    await live('t-b')
+    // t-b is the front card: a pointer for t-a waits behind it.
+    await point('t-a', 0.5, 0.5)
+    expect(card(root)?.dataset.target).toBe('t-b')
+    expect(arrow(root)).toBeNull()
+    await point('t-b', 0.5, 0.5)
+    expect(arrow(root)).not.toBeNull()
+    // The Agent acts in t-a again: it comes forward with its own pointer.
+    await point('t-a', 0.1, 0.2)
+    setTargets([
+      target({
+        targetId: 't-a',
+        title: '访达',
+        lastActiveAt: '2026-09-29T10:00:09Z',
+      }),
+      target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
+    ])
+    await announce()
+    expect(card(root)?.dataset.target).toBe('t-a')
+    expect(arrow(root)?.style.transform).toBe('translate(10%, 20%)')
+  })
+
+  it('draws no pointer over a screenshot or a blocked picture', async () => {
+    const shot = {
+      attachmentId: 'att_1',
+      width: 1,
+      height: 1,
+      takenAt: new Date().toISOString(),
+    }
+    setTargets([target({ control: 'paused', lastScreenshot: shot })])
+    const root = await mount()
+    await point('t-1', 0.5, 0.5)
+    expect(card(root)?.querySelector('img')).not.toBeNull()
+    expect(arrow(root)).toBeNull()
+    setTargets([target({ previewBlocked: 'sensitive-app' })])
+    await announce()
+    await point('t-1', 0.5, 0.5)
+    expect(arrow(root)).toBeNull()
+  })
+
+  it('shows the pointer in place, without gliding, when the system reduces motion', async () => {
+    reduceMotion()
+    setTargets([target()])
+    const root = await mount()
+    await live('t-1')
+    vi.useFakeTimers()
+    await point('t-1', 0.25, 0.5)
+    expect(arrow(root)?.hasAttribute('data-glide')).toBe(false)
+    await point('t-1', 0.75, 0.5)
+    expect(arrow(root)?.style.transform).toBe('translate(75%, 50%)')
+    expect(arrow(root)?.hasAttribute('data-glide')).toBe(false)
+    vi.advanceTimersByTime(2_000)
+    await flush()
+    expect(arrow(root)).toBeNull()
   })
 })

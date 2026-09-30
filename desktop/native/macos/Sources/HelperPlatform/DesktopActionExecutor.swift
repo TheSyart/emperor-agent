@@ -819,15 +819,16 @@ public final class DesktopActionExecutor {
         }
     }
 
-    /// The `act.dispatched` pointer: where the action lands, and whether the
-    /// user can see that point (the target window is frontmost there).
+    /// The `act.dispatched` pointer: where the action lands, whether the user
+    /// can see that point (the target window is frontmost there), and the
+    /// window's frame, for the conversation preview when it is covered.
     private func pointerPayload(at point: CGPoint, to end: CGPoint?, target: BoundTarget) -> [String: Any] {
+        let at = Point(x: point.x, y: point.y)
         let visible = PointerVisibility.visible(
-            at: Point(x: point.x, y: point.y), windows: CGWindowInventory.onScreen(),
+            at: at, windows: CGWindowInventory.onScreen(),
             targetWindowID: target.cgWindowID, targetPID: target.pid, mainPID: verifiedMainPID)
-        var payload: [String: Any] = ["x": Double(point.x), "y": Double(point.y), "visible": visible]
-        if let end { payload["to"] = ["x": Double(end.x), "y": Double(end.y)] }
-        return payload
+        return PointerPayload.make(at: at, to: end.map { Point(x: $0.x, y: $0.y) },
+                                   visible: visible, window: target.frame)
     }
 
     private func observedResult(target: BoundTarget, generation: Int, before: Int,

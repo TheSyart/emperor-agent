@@ -35,3 +35,24 @@ public enum PointerVisibility {
             point.x < rect.x + rect.width && point.y < rect.y + rect.height
     }
 }
+
+/// The `act.dispatched` pointer: where the action lands (global screen
+/// points), whether the user can see it there, where a drag ends, and the
+/// target window's frame in the same space, so the conversation preview can
+/// place the point on the window's picture even while the window is covered.
+/// Main accepts only a positive, finite frame; any other is left out.
+public enum PointerPayload {
+    public static func make(at point: Point, to end: Point?, visible: Bool, window: Rect?) -> [String: Any] {
+        var payload: [String: Any] = ["x": point.x, "y": point.y, "visible": visible]
+        if let end { payload["to"] = ["x": end.x, "y": end.y] }
+        if let window, usable(window) {
+            payload["window"] = ["x": window.x, "y": window.y, "width": window.width, "height": window.height]
+        }
+        return payload
+    }
+
+    static func usable(_ frame: Rect) -> Bool {
+        [frame.x, frame.y, frame.width, frame.height].allSatisfy(\.isFinite) &&
+            frame.width > 0 && frame.height > 0
+    }
+}

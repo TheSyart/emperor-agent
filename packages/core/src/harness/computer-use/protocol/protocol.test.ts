@@ -103,6 +103,35 @@ describe('helper protocol messages', () => {
     }
   })
 
+  it('lets a dispatched pointer carry its target window, only with a size', () => {
+    const dispatched = HELPER_EVENTS['act.dispatched']
+    const pointer = { x: 412.5, y: 230, visible: false }
+    const window = { x: 200, y: 120, width: 850, height: 600 }
+    expect(
+      dispatched.safeParse({
+        operationId: 'op',
+        pointer: { ...pointer, window },
+      }).success,
+    ).toBe(true)
+    // An older helper sends no window: still a valid pointer.
+    expect(dispatched.safeParse({ operationId: 'op', pointer }).success).toBe(
+      true,
+    )
+    for (const bad of [
+      { ...window, width: 0 },
+      { ...window, height: -1 },
+      { ...window, x: Number.POSITIVE_INFINITY },
+      { x: 200, y: 120, width: 850 },
+      { ...window, scale: 2 },
+    ])
+      expect(
+        dispatched.safeParse({
+          operationId: 'op',
+          pointer: { ...pointer, window: bad },
+        }).success,
+      ).toBe(false)
+  })
+
   it('keeps schema.json in sync with the zod source', () => {
     const path = resolve(here, 'schema.json')
     const generated = `${JSON.stringify(helperProtocolJsonSchema(), null, 2)}\n`

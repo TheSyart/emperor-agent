@@ -3,6 +3,7 @@ import {
   AGENT_DOWNLOAD_REVEAL_CHANNEL,
   AGENT_DOWNLOAD_SAVE_AS_CHANNEL,
   AGENT_PREVIEW_FRAME_CHANNEL,
+  AGENT_PREVIEW_POINTER_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
@@ -38,6 +39,7 @@ import {
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
   type AgentPreviewFrame,
+  type AgentPreviewPointer,
   type BrowserViewAction,
   type BrowserViewState,
   type FileDialogFilter,
@@ -161,5 +163,28 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       return () =>
         ipcRenderer.removeListener(AGENT_PREVIEW_FRAME_CHANNEL, wrapped)
     },
+    /** Where the Agent's latest action landed, for its preview card. */
+    onAgentPreviewPointer: (
+      listener: (pointer: AgentPreviewPointer) => void,
+    ) => {
+      const wrapped = (_event: unknown, payload: unknown) => {
+        const pointer = previewPointerOf(payload)
+        if (pointer !== null) listener(pointer)
+      }
+      ipcRenderer.on(AGENT_PREVIEW_POINTER_CHANNEL, wrapped)
+      return () =>
+        ipcRenderer.removeListener(AGENT_PREVIEW_POINTER_CHANNEL, wrapped)
+    },
   }
+}
+
+const share = (value: unknown): value is number =>
+  typeof value === 'number' && value >= 0 && value <= 1
+
+/** A target id and two shares (0–1); anything else is dropped. */
+function previewPointerOf(payload: unknown): AgentPreviewPointer | null {
+  if (payload === null || typeof payload !== 'object') return null
+  const { targetId, x, y } = payload as Record<string, unknown>
+  if (typeof targetId !== 'string' || targetId === '') return null
+  return share(x) && share(y) ? { targetId, x, y } : null
 }

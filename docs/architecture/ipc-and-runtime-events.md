@@ -191,6 +191,8 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 
 Electron main 托管 macOS Helper、Chrome Native Messaging bridge 和凭据库。Helper 权限状态与定向 TCC 重置、浏览器配对确认与“连接 Chrome/Edge”（登记 Native Messaging manifest）、Agent 预览帧的开始与停止（只读，没有输入通道）、下载的显示 / 移到工作区 / 另存为（只按下载 ID 寻址，路径由 main 决定或由用户在系统对话框中选择）、凭据增删、锁定、解锁及查看使用 `emperor:computer-use:*` 的受信 renderer IPC。Main 校验调用者窗口、参数和目标；密码只在受信设置界面提交，CoreApi 与模型工具只看到凭据句柄。`browser_fill_credential` 与 `desktop_fill_credential` 把句柄交给 main 驱动，由驱动核对精确 origin 或 App 身份后代填。新增秘密通道须保持这一边界，并补 main/preload/renderer 的契约测试。
 
+预览上的 Agent 指针经 `emperor:computer-use:preview-pointer`（main → renderer）发送 `{ targetId, x, y }`：`x`、`y` 是落点在目标窗口或页面上的比例（0–1），对话预览中这个目标的卡片在实时画面的对应位置画箭头，约 2 秒后淡出。桌面动作的落点来自 Helper `act.dispatched` 事件的 `pointer`，其中可选的 `window { x, y, width, height }` 是目标窗口边框，与落点同为全局屏幕坐标（旧 Helper 不带时不发送，协议版本不变）；main 用它换算比例，落点在窗口外时不发送。内置浏览器的点击、填写、选择和元素滚动用 CDP 的落点和视口大小换算，跨源 iframe 内的动作和整页滚动不发送。只有该目标是 Agent 控制的桌面窗口或内置浏览器标签页、且电脑操作开启并未急停时才发送；已连接的 Chrome 标签页（预览只是截图）不发送。屏幕上的虚拟指针不变，仍只在落点处目标窗口位于最前时显示。Preload 只转交非空 `targetId` 和 0–1 之间的 `x`、`y`，没有回传通道。
+
 ### 听写
 
 编辑器听写（macOS）不经过 CoreApi。受信 renderer 通过 `emperor:dictation:status`、`start`、`stop`、`cancel` 读取听写 Helper 的状态，开始或结束一段听写。会话 ID 由 main 生成；事件经 `emperor:dictation:event`（main → renderer）只发给发起听写的窗口，`seq` 单调递增：`started`，若干 `partial`（到目前为止的完整转写），最多一个 `final`，最后恰好一个 `ended`（失败时之前先有 `error`）。同一时间只有一段听写；发起的窗口关闭或渲染进程退出时，main 取消它。设置 › 语音用 `emperor:dictation:open-privacy` 打开系统设置的麦克风或语音识别隐私列表：renderer 只能传 `microphone` 或 `speech`，地址由 main 固定。麦克风、语言和编辑器快捷键是这个窗口的偏好，保存在 renderer 的 localStorage。

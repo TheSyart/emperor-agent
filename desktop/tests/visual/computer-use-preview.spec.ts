@@ -7,8 +7,14 @@ import { installVisualCoreBridge, type VisualSessionLog } from './visualBridge'
 
 // The conversation's computer-use preview (bottom right, read-only): two Mac
 // windows and a built-in browser tab staggered beside the chat, next to the
-// environment card; the counted chip of a narrow column; the enlarged view.
+// environment card; the counted chip of a narrow column; the enlarged view;
+// the Agent's pointer on the card of the target it acted in.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'computer-use')
+
+const WINDOW_ID = 't-6F1C2E00-0000-4000-8000-000000000001'
+const TAB_ID = 'tab_00000000-0000-4000-8000-00000000a9e1'
+/** The fixture picture's Submit button (80–260 × 660–724 of 1280 × 800). */
+const SUBMIT = { x: 170 / 1280, y: 692 / 800 }
 
 type Theme = 'dark' | 'light'
 
@@ -83,6 +89,33 @@ async function box(locator: Locator) {
   return rect!
 }
 
+/** Main's preview-pointer event, pushed through the visual bridge. */
+async function pointAt(page: Page, targetId: string, x: number, y: number) {
+  await page.evaluate(
+    (pointer) =>
+      (
+        window as unknown as {
+          __visualEmitPreviewPointer?: (pointer: unknown) => void
+        }
+      ).__visualEmitPreviewPointer?.(pointer),
+    { targetId, x, y },
+  )
+}
+
+/** The arrow's tip (its top-left corner) sits at this share of the picture. */
+async function expectTipAt(card: Locator, x: number, y: number) {
+  await expect(async () => {
+    const picture = await box(card.locator('.cu-card-frame img'))
+    const arrow = await box(card.locator('.cu-pointer-arrow'))
+    expect(
+      Math.abs(arrow.x - (picture.x + x * picture.width)),
+    ).toBeLessThanOrEqual(1.5)
+    expect(
+      Math.abs(arrow.y - (picture.y + y * picture.height)),
+    ).toBeLessThanOrEqual(1.5)
+  }).toPass({ timeout: 1_500 })
+}
+
 for (const theme of ['light', 'dark'] as const) {
   test(`preview beside the chat, under the environment card (${theme})`, async ({
     page,
@@ -152,4 +185,62 @@ test('the front picture opens a larger read-only view', async ({ page }) => {
   await shot(page, 'enlarged')
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
+})
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`the Agent's pointer on the card of the target it acted in (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, { width: 1600, theme, envCard: false })
+    const preview = page.locator('.cu-preview')
+    const card = preview.locator('.cu-card')
+    await expect(card.locator('.cu-card-note')).toHaveText('实时画面')
+    await expect(card).toHaveAttribute('data-target', WINDOW_ID)
+    // An action in the tab behind: nothing on the window's card.
+    await pointAt(page, TAB_ID, SUBMIT.x, SUBMIT.y)
+    await expect(card.locator('.cu-pointer')).toHaveCount(0)
+    // An action in the window: its arrow points at the Submit button.
+    await pointAt(page, WINDOW_ID, SUBMIT.x, SUBMIT.y)
+    await expect(card.locator('.cu-pointer')).toHaveCount(1)
+    await expectTipAt(card, SUBMIT.x, SUBMIT.y)
+    await shot(page, `pointer-${theme}`)
+    await card.screenshot({
+      path: resolve(screenshotDir, `pointer-card-${theme}.png`),
+      animations: 'disabled',
+    })
+
+    // The built-in browser tab, brought forward, draws its own pointer.
+    await preview.getByRole('button', { name: '切换到 Fixture form' }).click()
+    await expect(card).toHaveAttribute('data-target', TAB_ID)
+    await pointAt(page, TAB_ID, 0.5, 0.25)
+    await expectTipAt(card, 0.5, 0.25)
+    await card.screenshot({
+      path: resolve(screenshotDir, `pointer-tab-${theme}.png`),
+      animations: 'disabled',
+    })
+  })
+}
+
+test('with reduced motion the pointer jumps to each point, then goes', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await open(page, { width: 1600, theme: 'dark', envCard: false })
+  const card = page.locator('.cu-preview .cu-card')
+  await expect(card.locator('.cu-card-note')).toHaveText('实时画面')
+  await pointAt(page, WINDOW_ID, 0.25, 0.25)
+  const pointer = card.locator('.cu-pointer')
+  await expect(pointer).toHaveCount(1)
+  await expect(pointer).not.toHaveAttribute('data-glide')
+  const durations = await pointer.evaluate(
+    (element) => getComputedStyle(element).transitionDuration,
+  )
+  for (const value of durations.split(','))
+    expect(
+      Number.parseFloat(value) * (value.trim().endsWith('ms') ? 1 : 1000),
+    ).toBeLessThanOrEqual(1)
+  await pointAt(page, WINDOW_ID, 0.75, 0.5)
+  await expectTipAt(card, 0.75, 0.5)
+  // About two seconds after the latest action it is gone.
+  await expect(pointer).toHaveCount(0, { timeout: 4_000 })
 })

@@ -13,6 +13,10 @@
  *   Sensitive apps and targets that received a credential show no picture.
  *   After the user's "Stop Sharing" a window keeps its last frame, marked.
  * - The front card's picture opens a larger read-only view (Esc returns).
+ * - The Agent's pointer: where its latest desktop or built-in browser action
+ *   landed, drawn on that target's live picture with the on-screen arrow,
+ *   also while the window itself is covered. It glides from point to point
+ *   (not when the system reduces motion) and fades out after about 2 s.
  * - Beside the chat (1120px column) the stack sits in the right column and
  *   publishes its height so the environment card above stops short.
  *   Narrower, it folds into a counted chip that expands over the chat;
@@ -46,14 +50,19 @@ import {
   hasCoreBridge,
   invokeCore,
   onAgentPreviewFrame,
+  onAgentPreviewPointer,
   onCoreEvent,
 } from '../../../api/backend'
+import { useReducedMotion } from '../../../composables/useReducedMotion'
 import Modal from '../../ui/Modal.vue'
 import { modalLayerCount } from '../../ui/modalStack'
 import {
+  POINTER_FADE_MS,
+  POINTER_GONE_MS,
   STACK_DEPTH,
   liveTargetIds,
   pickTarget,
+  pointerPlacement,
   previewFrame,
   previewSource,
   previewStatus,
@@ -179,6 +188,8 @@ function scheduleRefresh(): void {
 // --- live frames (object URLs) -------------------------------------------
 
 const frames = ref<Record<string, string>>({})
+/** Each live frame's size: the pointer goes on the letterboxed picture. */
+const frameSizes = ref<Record<string, { width: number; height: number }>>({})
 const streaming = new Set<string>()
 let stopFrames = () => {}
 
@@ -188,6 +199,8 @@ function dropFrame(targetId: string): void {
   URL.revokeObjectURL(url)
   const { [targetId]: _dropped, ...rest } = frames.value
   frames.value = rest
+  const { [targetId]: _size, ...sizes } = frameSizes.value
+  frameSizes.value = sizes
 }
 
 function syncLive(): void {
@@ -216,9 +229,15 @@ function stopAllLive(): void {
   streaming.clear()
   for (const url of Object.values(frames.value)) URL.revokeObjectURL(url)
   frames.value = {}
+  frameSizes.value = {}
 }
 
-function onFrame(frame: { targetId: string; jpeg: Uint8Array }): void {
+function onFrame(frame: {
+  targetId: string
+  width: number
+  height: number
+  jpeg: Uint8Array
+}): void {
   if (!streaming.has(frame.targetId)) return
   const url = URL.createObjectURL(
     new Blob([new Uint8Array(frame.jpeg)], { type: 'image/jpeg' }),
@@ -226,6 +245,73 @@ function onFrame(frame: { targetId: string; jpeg: Uint8Array }): void {
   const previous = frames.value[frame.targetId]
   frames.value = { ...frames.value, [frame.targetId]: url }
   if (previous) URL.revokeObjectURL(previous)
+  const size = frameSizes.value[frame.targetId]
+  if (size?.width !== frame.width || size?.height !== frame.height)
+    frameSizes.value = {
+      ...frameSizes.value,
+      [frame.targetId]: { width: frame.width, height: frame.height },
+    }
+}
+
+// --- the Agent's pointer -------------------------------------------------
+
+/** A share (0–1) of the target's picture, and whether it is fading out. */
+interface ShownPointer {
+  readonly x: number
+  readonly y: number
+  readonly fading: boolean
+}
+
+/** Where the Agent's latest action landed on each target, for about 2 s. */
+const pointers = ref<Record<string, ShownPointer>>({})
+const pointerTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
+const reducedMotion = useReducedMotion()
+let stopPointers = () => {}
+
+/** The front card's pointer, placed on its live picture only. */
+const frontPointer = computed(() => {
+  const target = front.value
+  const shown = target ? pointers.value[target.targetId] : undefined
+  if (!target || !shown || frameOf(target).kind !== 'live') return null
+  return {
+    ...pointerPlacement(shown, frameSizes.value[target.targetId]),
+    fading: shown.fading,
+  }
+})
+
+function clearPointerTimers(targetId: string): void {
+  for (const timer of pointerTimers.get(targetId) ?? []) clearTimeout(timer)
+  pointerTimers.delete(targetId)
+}
+
+function forgetPointer(targetId: string): void {
+  clearPointerTimers(targetId)
+  if (!(targetId in pointers.value)) return
+  const { [targetId]: _gone, ...rest } = pointers.value
+  pointers.value = rest
+}
+
+function forgetPointers(): void {
+  for (const timer of [...pointerTimers.values()].flat()) clearTimeout(timer)
+  pointerTimers.clear()
+  pointers.value = {}
+}
+
+function onPointer(pointer: { targetId: string; x: number; y: number }): void {
+  const { targetId, x, y } = pointer
+  clearPointerTimers(targetId)
+  pointers.value = { ...pointers.value, [targetId]: { x, y, fading: false } }
+  pointerTimers.set(targetId, [
+    setTimeout(() => {
+      const shown = pointers.value[targetId]
+      if (shown)
+        pointers.value = {
+          ...pointers.value,
+          [targetId]: { ...shown, fading: true },
+        }
+    }, POINTER_FADE_MS),
+    setTimeout(() => forgetPointer(targetId), POINTER_GONE_MS),
+  ])
 }
 
 // --- interaction ---------------------------------------------------------
@@ -358,6 +444,7 @@ watch(
 
 onMounted(() => {
   stopFrames = onAgentPreviewFrame(onFrame)
+  stopPointers = onAgentPreviewPointer(onPointer)
   unsubscribeCore = onCoreEvent((event) => {
     if (
       event &&
@@ -383,6 +470,7 @@ onDeactivated(() => {
   expanded.value = false
   enlargedId.value = null
   stopAllLive()
+  forgetPointers()
   setPreviewShownTargets([])
   publishReserve()
 })
@@ -391,7 +479,9 @@ onBeforeUnmount(() => {
   alive = false
   unsubscribeCore()
   stopFrames()
+  stopPointers()
   stopAllLive()
+  forgetPointers()
   document.removeEventListener('keydown', onDocumentKeydown)
   document.removeEventListener('visibilitychange', onVisibility)
   hostObserver?.disconnect()
@@ -475,6 +565,29 @@ onBeforeUnmount(() => {
             :src="frameSrc(frameOf(front))"
             :alt="`${previewTitle(front)}的${frameOf(front).kind === 'shot' ? '最近截图' : '画面'}`"
           />
+          <span
+            v-if="frontPointer"
+            :key="front.targetId"
+            class="cu-pointer"
+            :data-glide="reducedMotion ? undefined : ''"
+            :data-fading="frontPointer.fading || undefined"
+            :style="{
+              transform: `translate(${frontPointer.left}%, ${frontPointer.top}%)`,
+            }"
+            aria-hidden="true"
+          >
+            <svg
+              class="cu-pointer-arrow"
+              width="20"
+              height="20"
+              viewBox="0 0 32 32"
+              focusable="false"
+            >
+              <path
+                d="M1 1 L1 23 L7 17.5 L11 26.5 L15 24.8 L11 16 L18.5 16 Z"
+              />
+            </svg>
+          </span>
         </button>
         <p v-else class="cu-card-empty" :data-kind="frameOf(front).kind">
           {{ frameOf(front).note }}
@@ -644,6 +757,7 @@ onBeforeUnmount(() => {
 }
 
 .cu-card-frame {
+  position: relative;
   display: block;
   width: 100%;
   padding: 0;
@@ -657,8 +771,48 @@ onBeforeUnmount(() => {
 .cu-card-frame img {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 10; /* FRAME_ASPECT */
   object-fit: contain;
+}
+
+/* The Agent's pointer: the on-screen arrow, its tip where the latest action
+   landed. The layer covers the picture and moves by a share of its own
+   size, so only transform and opacity animate. */
+.cu-pointer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: cu-pointer-in var(--duration-fast) var(--ease-out);
+  transition: opacity var(--duration-slow) var(--ease-out);
+}
+
+.cu-pointer[data-glide] {
+  transition:
+    transform var(--duration) var(--ease-out),
+    opacity var(--duration-slow) var(--ease-out);
+}
+
+.cu-pointer[data-fading] {
+  opacity: 0;
+}
+
+.cu-pointer-arrow {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgb(var(--nb-1000) / 0.45));
+}
+
+.cu-pointer-arrow path {
+  fill: rgb(var(--nb-1000) / 0.55);
+  stroke: rgb(var(--accent-fill));
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+@keyframes cu-pointer-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .cu-card-empty {

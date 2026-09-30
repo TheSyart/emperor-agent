@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
+  AGENT_PREVIEW_POINTER_CHANNEL,
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
@@ -102,6 +103,7 @@ describe('desktop capability preload bridge', () => {
       'macHelperResetPermission',
       'macHelperStatus',
       'onAgentPreviewFrame',
+      'onAgentPreviewPointer',
       'onBrowserReveal',
       'onBrowserState',
       'openBrowserHistory',
@@ -183,6 +185,34 @@ describe('desktop capability preload bridge', () => {
     ])
     expect(ipc.sent).toEqual([[AGENT_PREVIEW_STOP_CHANNEL, { targetId: id }]])
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('relays only well-formed Agent pointers for the preview cards', () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    const listener = vi.fn()
+    const dispose = bridge.onAgentPreviewPointer(listener)
+    ipc.emit(AGENT_PREVIEW_POINTER_CHANNEL, {
+      targetId: 't-1',
+      x: 0.25,
+      y: 1,
+      extra: 'dropped',
+    })
+    for (const bad of [
+      null,
+      'pointer',
+      { targetId: '', x: 0.5, y: 0.5 },
+      { targetId: 42, x: 0.5, y: 0.5 },
+      { targetId: 't-1', x: 1.5, y: 0.5 },
+      { targetId: 't-1', x: 0.5, y: -0.1 },
+      { targetId: 't-1', x: Number.NaN, y: 0.5 },
+      { targetId: 't-1', x: '0.5', y: 0.5 },
+    ])
+      ipc.emit(AGENT_PREVIEW_POINTER_CHANNEL, bad)
+    dispose()
+    ipc.emit(AGENT_PREVIEW_POINTER_CHANNEL, { targetId: 't-1', x: 0, y: 0 })
+    expect(listener.mock.calls).toEqual([[{ targetId: 't-1', x: 0.25, y: 1 }]])
+    expect(ipc.removed).toHaveLength(1)
   })
 
   it('exposes the Skills folder and file picker channels', async () => {

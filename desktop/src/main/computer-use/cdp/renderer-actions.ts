@@ -31,6 +31,34 @@ export interface FieldState {
   value: string | null
 }
 
+/**
+ * Where an action lands on the page, for the Agent's pointer on the
+ * conversation preview: viewport CSS pixels, and the viewport's size.
+ */
+export interface LandingPoint {
+  readonly x: number
+  readonly y: number
+  readonly viewport: { readonly width: number; readonly height: number }
+}
+
+/**
+ * `ActHooks`; `landed` hears where a click, fill, choice or element scroll
+ * lands, right after `dispatched`. Only for the page itself: a cross-origin
+ * frame works in its own coordinates.
+ */
+export interface RendererActHooks extends ActHooks {
+  landed?(point: LandingPoint): void
+}
+
+interface LayoutMetrics {
+  cssVisualViewport?: {
+    pageX: number
+    pageY: number
+    clientWidth?: number
+    clientHeight?: number
+  }
+}
+
 /** Area of a CDP quad (x1,y1 … x4,y4). */
 export function quadArea(quad: readonly number[]): number {
   let area = 0
@@ -42,6 +70,53 @@ export function quadArea(quad: readonly number[]): number {
     area += (x1 * y2 - x2 * y1) / 2
   }
   return Math.abs(area)
+}
+
+function quadCentre(quad: readonly number[]): { x: number; y: number } {
+  return {
+    x: (quad[0]! + quad[2]! + quad[4]! + quad[6]!) / 4,
+    y: (quad[1]! + quad[3]! + quad[5]! + quad[7]!) / 4,
+  }
+}
+
+function viewportOf(metrics: LayoutMetrics): LandingPoint['viewport'] | null {
+  const width = metrics.cssVisualViewport?.clientWidth ?? 0
+  const height = metrics.cssVisualViewport?.clientHeight ?? 0
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
+/**
+ * The centre of a ref of the page itself, for `hooks.landed`: null when
+ * nobody listens, for a cross-origin frame, or when the page cannot say.
+ * Measuring never fails the action (an abort still stops it).
+ */
+async function landingOf(
+  page: RendererPage,
+  target: RefTarget,
+  hooks: RendererActHooks,
+  signal: AbortSignal,
+): Promise<LandingPoint | null> {
+  if (hooks.landed === undefined || target.sessionId !== undefined) return null
+  try {
+    const { quads } = await page.cdp.send<{ quads: number[][] }>(
+      'DOM.getContentQuads',
+      { backendNodeId: target.backendNodeId },
+      { signal },
+    )
+    const quad = quads.find((item) => quadArea(item) > 1)
+    if (quad === undefined) return null
+    const viewport = viewportOf(
+      await page.cdp.send<LayoutMetrics>(
+        'Page.getLayoutMetrics',
+        {},
+        { signal },
+      ),
+    )
+    return viewport === null ? null : { ...quadCentre(quad), viewport }
+  } catch (error) {
+    if (signal.aborted) throw error
+    return null
+  }
 }
 
 /**
@@ -168,7 +243,7 @@ export async function clickTarget(
   target: RefTarget,
   ref: string,
   options: { button?: 'left' | 'right' | 'middle'; count?: 1 | 2 },
-  hooks: ActHooks,
+  hooks: RendererActHooks,
   signal: AbortSignal,
 ): Promise<string[]> {
   const { cdp } = page
@@ -204,18 +279,11 @@ export async function clickTarget(
   const quad = quads.find((item) => quadArea(item) > 1)
   if (quad === undefined)
     throw new UiError('STALE_ELEMENT', `${ref} has no clickable area`)
-  const x = (quad[0]! + quad[2]! + quad[4]! + quad[6]!) / 4
-  const y = (quad[1]! + quad[3]! + quad[5]! + quad[7]!) / 4
+  const { x, y } = quadCentre(quad)
   // getNodeForLocation takes document coordinates: add the scroll offset.
   const metrics = await cdp
-    .send<{ cssVisualViewport?: { pageX: number; pageY: number } }>(
-      'Page.getLayoutMetrics',
-      {},
-      send,
-    )
-    .catch(
-      () => ({}) as { cssVisualViewport?: { pageX: number; pageY: number } },
-    )
+    .send<LayoutMetrics>('Page.getLayoutMetrics', {}, send)
+    .catch(() => ({}) as LayoutMetrics)
   const pageX = metrics.cssVisualViewport?.pageX ?? 0
   const pageY = metrics.cssVisualViewport?.pageY ?? 0
   const hit = await cdp
@@ -243,7 +311,9 @@ export async function clickTarget(
     )
   const button = options.button ?? 'left'
   const clickCount = options.count ?? 1
+  const viewport = target.sessionId === undefined ? viewportOf(metrics) : null
   hooks.dispatched()
+  if (viewport !== null) hooks.landed?.({ x, y, viewport })
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, send)
   for (let n = 1; n <= clickCount; n += 1) {
     await cdp.send(
@@ -266,7 +336,7 @@ export async function fillTarget(
   target: RefTarget,
   ref: string,
   text: string,
-  hooks: ActHooks,
+  hooks: RendererActHooks,
   signal: AbortSignal,
 ): Promise<{ changes: string[]; warnings: string[] }> {
   assertTypable(target)
@@ -292,7 +362,10 @@ export async function fillTarget(
     [],
     signal,
   )
+  // Measured after focusing, which scrolls the field into view.
+  const landing = await landingOf(page, target, hooks, signal)
   hooks.dispatched()
+  if (landing !== null) hooks.landed?.(landing)
   if (text === '') await pressStroke(page.cdp, parseKey('Delete'), signal)
   else await page.cdp.send('Input.insertText', { text }, { signal })
   const after = await fieldState(page, target, signal)
@@ -387,7 +460,7 @@ export async function selectOption(
   target: RefTarget,
   ref: string,
   option: string,
-  hooks: ActHooks,
+  hooks: RendererActHooks,
   signal: AbortSignal,
 ): Promise<string[]> {
   if (!target.select)
@@ -395,7 +468,9 @@ export async function selectOption(
       'INVALID_REQUEST',
       `${ref} is not a drop-down list; click it instead`,
     )
+  const landing = await landingOf(page, target, hooks, signal)
   hooks.dispatched()
+  if (landing !== null) hooks.landed?.(landing)
   const result = await page.worlds.callOnElement<{
     ok: boolean
     reason?: string
@@ -412,7 +487,10 @@ export async function selectOption(
   return [`${target.name || ref} = ${result.value ?? option}`]
 }
 
-/** Scroll a ref or the page; `moved` is false at an edge. */
+/**
+ * Scroll a ref or the page; `moved` is false at an edge. Only a ref has a
+ * point to show where the scroll lands.
+ */
 export async function scrollIn(
   page: RendererPage,
   target: RefTarget | undefined,
@@ -421,7 +499,7 @@ export async function scrollIn(
     amount: number
     unit: 'page' | 'line'
   },
-  hooks: ActHooks,
+  hooks: RendererActHooks,
   signal: AbortSignal,
 ): Promise<boolean> {
   const dx =
@@ -436,7 +514,10 @@ export async function scrollIn(
       : scroll.direction === 'down'
         ? scroll.amount
         : 0
+  const landing =
+    target === undefined ? null : await landingOf(page, target, hooks, signal)
   hooks.dispatched()
+  if (landing !== null) hooks.landed?.(landing)
   const moved: { moved: boolean } =
     target !== undefined
       ? await page.worlds.callOnElement(

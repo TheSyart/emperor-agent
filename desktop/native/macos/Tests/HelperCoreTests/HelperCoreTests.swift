@@ -497,6 +497,35 @@ final class HelperCoreTests: XCTestCase {
                                                  targetWindowID: 7, targetPID: target, mainPID: main))
     }
 
+    func testThePointerPayloadCarriesTheTargetWindowFrame() throws {
+        let entries = try XCTUnwrap(fixture("messages")["messages"] as? [[String: Any]])
+        func golden(_ name: String) throws -> [String: Any] {
+            let entry = try XCTUnwrap(entries.first { $0["name"] as? String == name })
+            let data = try XCTUnwrap((entry["message"] as? [String: Any])?["data"] as? [String: Any])
+            return try XCTUnwrap(data["pointer"] as? [String: Any])
+        }
+        func json(_ object: [String: Any]) throws -> Data {
+            try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        }
+        let window = Rect(x: 200, y: 120, width: 850, height: 600)
+        // Built the way the helper builds it, the pointer is the shared golden one.
+        let hidden = PointerPayload.make(at: Point(x: 412.5, y: 230), to: nil, visible: false, window: window)
+        XCTAssertEqual(try json(hidden), try json(golden("event-act-dispatched-pointer-window")))
+        let drag = PointerPayload.make(at: Point(x: 412.5, y: 230), to: Point(x: 600, y: 230),
+                                       visible: true, window: nil)
+        XCTAssertEqual(try json(drag), try json(golden("event-act-dispatched-pointer")))
+        // A window without a usable frame is left out, never sent empty.
+        for frame in [Rect(x: 200, y: 120, width: 0, height: 600),
+                      Rect(x: 200, y: 120, width: 850, height: -1),
+                      Rect(x: .infinity, y: 120, width: 850, height: 600)] {
+            XCTAssertNil(PointerPayload.make(at: Point(x: 1, y: 1), to: nil, visible: true, window: frame)["window"])
+        }
+        // And it passes the wire check as part of `act.dispatched`.
+        let event: [String: Any] = ["type": "event", "name": "act.dispatched",
+                                    "data": ["operationId": "op-6", "pointer": hidden]]
+        XCTAssertNoThrow(try HelperProtocol.decode(HelperProtocol.encode(event)))
+    }
+
     func testMenuShortcutsMatchOnlyTheExactChord() {
         // Undo: Command+Z (bits 0 = Command only).
         XCTAssertTrue(MenuPath.shortcutMatches(character: "Z", modifierBits: 0, key: "z", modifiers: ["command"]))

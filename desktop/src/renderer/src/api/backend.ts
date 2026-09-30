@@ -14,6 +14,7 @@ import type {
   WireSessionEvent,
 } from '@emperor/core/runtime-contract'
 import type {
+  AgentPreviewPointer,
   BrowserConnectResult,
   BrowserPairingStatus,
   MacHelperPermission,
@@ -139,6 +140,9 @@ interface EmperorBridge {
   connectBrowsers?: () => Promise<BrowserConnectResult>
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewFrame) => void,
+  ) => () => void
+  onAgentPreviewPointer?: (
+    listener: (pointer: AgentPreviewPointer) => void,
   ) => () => void
 }
 
@@ -752,6 +756,16 @@ export function onAgentPreviewFrame(
   listener: (frame: AgentPreviewFrame) => void,
 ): () => void {
   return bridge()?.onAgentPreviewFrame?.(listener) ?? (() => {})
+}
+
+/**
+ * Where the Agent's latest action landed on a target, as shares (0–1) of
+ * its picture: the preview card draws the pointer there.
+ */
+export function onAgentPreviewPointer(
+  listener: (pointer: AgentPreviewPointer) => void,
+): () => void {
+  return bridge()?.onAgentPreviewPointer?.(listener) ?? (() => {})
 }
 
 function isCoreIpcErrorEnvelope(value: unknown): value is CoreIpcErrorEnvelope {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { IsolatedWorlds } from './isolated'
 import {
   clickTarget,
@@ -10,6 +10,7 @@ import {
   strokeFor,
   typeText,
   type FieldState,
+  type LandingPoint,
   type RendererPage,
 } from './renderer-actions'
 import type { CdpSession } from './session'
@@ -73,7 +74,14 @@ function kit(
         return { quads: options.quads ?? [[10, 10, 30, 10, 30, 30, 10, 30]] }
       }
       if (method === 'Page.getLayoutMetrics')
-        return { cssVisualViewport: { pageX: 0, pageY: 100 } }
+        return {
+          cssVisualViewport: {
+            pageX: 0,
+            pageY: 100,
+            clientWidth: 1280,
+            clientHeight: 800,
+          },
+        }
       if (method === 'DOM.getNodeForLocation')
         return options.hit === undefined ? {} : { backendNodeId: options.hit }
       return {}
@@ -371,5 +379,115 @@ describe('renderer actions', () => {
       ),
     ).toBe(false)
     expect(edge.calls).toEqual([{ name: 'scrollPage', args: [1, 0, 'page'] }])
+  })
+
+  it('tells where a click lands on the viewport, right after dispatching it', async () => {
+    const order: string[] = []
+    const landed: LandingPoint[] = []
+    const k = kit({ hit: 9 })
+    await clickTarget(
+      k.page,
+      target(),
+      'r3.1',
+      {},
+      {
+        dispatched: () => order.push('dispatched'),
+        landed: (point) => {
+          order.push('landed')
+          landed.push(point)
+        },
+      },
+      signal,
+    )
+    expect(order).toEqual(['dispatched', 'landed'])
+    // The hit point itself (viewport pixels), not the document point.
+    expect(landed).toEqual([
+      { x: 20, y: 20, viewport: { width: 1280, height: 800 } },
+    ])
+    // A cross-origin frame clicks in its own coordinates: nothing to place.
+    const framed = kit({ hit: 9 })
+    await clickTarget(
+      framed.page,
+      target({ sessionId: 'S1' }),
+      'r3.1',
+      {},
+      { ...framed.hooks, landed: (point) => landed.push(point) },
+      signal,
+    )
+    expect(landed).toHaveLength(1)
+  })
+
+  it('tells where a fill, a choice or an element scroll lands, measuring only when asked', async () => {
+    const landed: LandingPoint[] = []
+    const listening = (k: ReturnType<typeof kit>) => ({
+      ...k.hooks,
+      landed: (point: LandingPoint) => landed.push(point),
+    })
+    const filled = kit()
+    await fillTarget(
+      filled.page,
+      target({ role: 'textbox' }),
+      'r3.2',
+      'x',
+      listening(filled),
+      signal,
+    )
+    const chosen = kit()
+    await selectOption(
+      chosen.page,
+      target({ select: true }),
+      'r3.4',
+      'Large',
+      listening(chosen),
+      signal,
+    )
+    const scrolled = kit()
+    await scrollIn(
+      scrolled.page,
+      target(),
+      { direction: 'down', amount: 1, unit: 'line' },
+      listening(scrolled),
+      signal,
+    )
+    const centre = { x: 20, y: 20, viewport: { width: 1280, height: 800 } }
+    expect(landed).toEqual([centre, centre, centre])
+    // Scrolling the page itself has no element to point at.
+    const page = kit()
+    await scrollIn(
+      page.page,
+      undefined,
+      { direction: 'down', amount: 1, unit: 'page' },
+      listening(page),
+      signal,
+    )
+    expect(landed).toHaveLength(3)
+    // Nobody listening: nothing more is asked of the page.
+    const quiet = kit()
+    await fillTarget(
+      quiet.page,
+      target({ role: 'textbox' }),
+      'r3.2',
+      'x',
+      quiet.hooks,
+      signal,
+    )
+    expect(quiet.sent.map((item) => item.method)).toEqual(['Input.insertText'])
+  })
+
+  it('never lets measuring where an action lands stop the action', async () => {
+    const k = kit({ quads: new Error('detached') })
+    const landed = vi.fn()
+    expect(
+      await selectOption(
+        k.page,
+        target({ select: true, name: 'Size' }),
+        'r3.4',
+        'Large',
+        { ...k.hooks, landed },
+        signal,
+      ),
+    ).toEqual(['Size = Large'])
+    expect(k.dispatched).toBe(1)
+    expect(landed).not.toHaveBeenCalled()
   })
 })

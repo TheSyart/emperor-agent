@@ -37,8 +37,14 @@ import {
   type UiRole,
 } from '../../../../packages/core/src/harness/computer-use/types'
 import type { DesktopPreviewFrame } from './desktop-preview'
-import type { DesktopPointer, PointerSignal } from './pointer-overlay-view'
+import {
+  DRAG_GLIDE_DELAY_MS,
+  type DesktopPointer,
+  type PointerSignal,
+} from './pointer-overlay-view'
+import { desktopPreviewPointer } from './preview-pointer'
 import type {
+  AgentPreviewPointer,
   MacHelperPermission,
   MacHelperStatus,
 } from '../../shared/ipc-contract'
@@ -134,6 +140,11 @@ export interface MacosDesktopDriverOptions {
   ) => Promise<ReadonlyMap<number, string>>
   /** The on-screen virtual pointer: where each action lands. */
   pointer?(signal: PointerSignal): void
+  /**
+   * The same point on the conversation preview, as a share of the target
+   * window: drawn there even while the window is covered.
+   */
+  previewPointer?(pointer: AgentPreviewPointer): void
 }
 
 /**
@@ -166,6 +177,8 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
   /** Set once restarts are exhausted; only an explicit user action clears it. */
   private latched: string | null = null
   private pendingWait: { handle: unknown; wake(): void } | null = null
+  /** A drag's end, sent to the preview after the same pause as on screen. */
+  private previewGlide: unknown = null
   /** Bumped by reconnect, reset and shutdown; stale launches are discarded. */
   private epoch = 0
   private stopped = false
@@ -874,6 +887,28 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
     }
   }
 
+  /**
+   * The point on the conversation preview: now, and a drag's end after the
+   * same pause as on screen. An older Helper sends no window: nothing.
+   */
+  private previewPointer(targetId: string, pointer: DesktopPointer): void {
+    const send = this.options.previewPointer
+    if (send === undefined) return
+    if (this.previewGlide !== null) this.clock.clearTimeout(this.previewGlide)
+    this.previewGlide = null
+    const start = desktopPreviewPointer(targetId, pointer, pointer.window)
+    if (start !== null) send(start)
+    const end =
+      pointer.to === undefined
+        ? null
+        : desktopPreviewPointer(targetId, pointer.to, pointer.window)
+    if (end !== null)
+      this.previewGlide = this.clock.setTimeout(() => {
+        this.previewGlide = null
+        send(end)
+      }, DRAG_GLIDE_DELAY_MS)
+  }
+
   /** One helper `act` request; reports when the dispatch carried a point. */
   private async sendAct(
     request: ActRequest,
@@ -895,6 +930,7 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
         if (data.pointer !== undefined) {
           pointerMoved()
           this.options.pointer?.({ kind: 'move', pointer: data.pointer })
+          this.previewPointer(request.targetId, data.pointer)
         }
       })
       try {

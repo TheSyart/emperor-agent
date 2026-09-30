@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, systemPreferences } from 'electron'
 import {
+  DRAG_GLIDE_DELAY_MS,
   POINTER_SIZE,
   onSomeDisplay,
   pointerOverlayHtml,
@@ -7,9 +8,6 @@ import {
   type DesktopPointer,
   type PointerSignal,
 } from './pointer-overlay-view'
-
-/** How long a drag's pointer rests at its start before gliding to the end. */
-const DRAG_GLIDE_DELAY_MS = 150
 
 /**
  * A click-through, non-focusable window that draws the Agent's pointer where

@@ -69,6 +69,7 @@ import {
 } from './computer-use/stop-entries'
 import { PointerOverlay } from './computer-use/pointer-overlay'
 import { pointerAllowed } from './computer-use/pointer-overlay-view'
+import { createPreviewPointerRelay } from './computer-use/preview-pointer'
 import { EmbeddedBrowserDriver } from './computer-use/embedded-browser-driver'
 import { electronBrowserFactory } from './computer-use/electron-factory'
 import { nativeImageCodec } from './computer-use/images'
@@ -117,6 +118,7 @@ import {
 } from './recovery'
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
+  AGENT_PREVIEW_POINTER_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
@@ -195,6 +197,20 @@ function syncControlIndicators(): void {
     shortcutRegistered: killSwitch?.status().registered === true,
   })
 }
+
+/**
+ * The Agent's pointer on the conversation preview: where a desktop or
+ * built-in browser action lands, for a target the Agent controls. The
+ * on-screen pointer above still shows only where the window is in front.
+ */
+const relayPreviewPointer = createPreviewPointerRelay({
+  status: () => coreApi?.host.computerUse?.service.statusView() ?? null,
+  send: (pointer) => {
+    const contents = mainWindow?.webContents
+    if (contents && !contents.isDestroyed())
+      contents.send(AGENT_PREVIEW_POINTER_CHANNEL, pointer)
+  },
+})
 
 let retentionTimer: ReturnType<typeof setInterval> | null = null
 
@@ -452,6 +468,7 @@ function createComputerUseHost(): void {
     credentials: credentialVault,
     credentialVisibility: (targetId, visible) =>
       agentPreview?.setSensitive(targetId, visible),
+    previewPointer: relayPreviewPointer,
     // Uploads: the user picks files in the system dialog; the Agent never
     // names a path (spec 00 §7.5).
     pickFiles: async ({ title, multiple }) => {
@@ -503,6 +520,7 @@ function createComputerUseHost(): void {
           )
             pointerOverlay?.signal(signal)
         },
+        previewPointer: relayPreviewPointer,
         previewBuild: app.isPackaged
           ? packagedMacosAppIsAdHoc().catch(() => false)
           : Promise.resolve(false),

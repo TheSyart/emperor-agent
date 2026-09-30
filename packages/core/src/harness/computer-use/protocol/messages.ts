@@ -459,7 +459,9 @@ export const HELPER_EVENTS = {
       /**
        * Where the action lands, in global screen points, for the on-screen
        * virtual pointer; `visible` when the target window is frontmost there.
-       * A drag also carries where it ends.
+       * A drag also carries where it ends. `window` is the target window's
+       * frame in the same space, so the conversation preview can place the
+       * point on the window's picture even while the window is covered.
        */
       pointer: z
         .object({
@@ -468,6 +470,15 @@ export const HELPER_EVENTS = {
           visible: z.boolean(),
           to: z
             .object({ x: z.number().finite(), y: z.number().finite() })
+            .strict()
+            .optional(),
+          window: z
+            .object({
+              x: z.number().finite(),
+              y: z.number().finite(),
+              width: z.number().finite().positive(),
+              height: z.number().finite().positive(),
+            })
             .strict()
             .optional(),
         })

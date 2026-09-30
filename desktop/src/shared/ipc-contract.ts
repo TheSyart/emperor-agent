@@ -59,6 +59,13 @@ export const AGENT_PREVIEW_START_CHANNEL = 'emperor:computer-use:preview-start'
 export const AGENT_PREVIEW_STOP_CHANNEL = 'emperor:computer-use:preview-stop'
 /** Main → renderer {@link AgentPreviewFrame}. */
 export const AGENT_PREVIEW_FRAME_CHANNEL = 'emperor:computer-use:preview-frame'
+/**
+ * Main → renderer {@link AgentPreviewPointer}: where the Agent's latest
+ * desktop or built-in browser action landed, for its preview card to draw
+ * the pointer there. Sent only for a target the Agent controls.
+ */
+export const AGENT_PREVIEW_POINTER_CHANNEL =
+  'emperor:computer-use:preview-pointer'
 /** Renderer → main `{ downloadId }`: show an inbox file in Finder / Explorer. */
 export const AGENT_DOWNLOAD_REVEAL_CHANNEL =
   'emperor:computer-use:download-reveal'
@@ -157,6 +164,13 @@ export interface AgentPreviewFrame {
   width: number
   height: number
   jpeg: Uint8Array
+}
+
+/** Where an action landed: `x`, `y` are shares (0–1) of the window or page. */
+export interface AgentPreviewPointer {
+  targetId: string
+  x: number
+  y: number
 }
 
 export type BrowserViewAction = 'back' | 'forward' | 'reload' | 'stop'

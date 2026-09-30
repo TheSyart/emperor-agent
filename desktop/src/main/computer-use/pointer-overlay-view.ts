@@ -12,6 +12,11 @@ export interface DesktopPointer {
   readonly visible: boolean
   /** Where a drag ends. */
   readonly to?: { readonly x: number; readonly y: number }
+  /**
+   * The target window's frame, same space: the conversation preview places
+   * the point on the window's picture (absent from an older Helper).
+   */
+  readonly window?: Bounds
 }
 
 /** What the desktop driver tells the overlay around an action. */
@@ -24,7 +29,10 @@ export type PointerSignal =
 
 export const POINTER_SIZE = 32
 
-interface Bounds {
+/** How long a drag's pointer rests at its start before gliding to the end. */
+export const DRAG_GLIDE_DELAY_MS = 150
+
+export interface Bounds {
   readonly x: number
   readonly y: number
   readonly width: number
@@ -67,18 +75,26 @@ interface PointerStatus {
 }
 
 /**
- * The pointer shows only while the Agent controls a desktop window (one the
- * end of its task released is not controlled, even if releasing failed).
+ * The Agent controls this target now (one the end of its task released is
+ * not controlled, even if releasing failed).
  */
+export function agentControls(target: {
+  readonly state: string
+  readonly control: string
+}): boolean {
+  return (
+    target.control === 'agent' &&
+    target.state !== 'released' &&
+    target.state !== 'closed' &&
+    target.state !== 'lost'
+  )
+}
+
+/** The pointer shows only while the Agent controls a desktop window. */
 export function pointerAllowed(status: PointerStatus | null): boolean {
   if (!status?.enabled || status.stopped) return false
   return status.targets.some(
-    (target) =>
-      target.driver === 'desktop' &&
-      target.control === 'agent' &&
-      target.state !== 'released' &&
-      target.state !== 'closed' &&
-      target.state !== 'lost',
+    (target) => target.driver === 'desktop' && agentControls(target),
   )
 }
 

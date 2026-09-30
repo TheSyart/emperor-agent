@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { UiTargetView } from '@emperor/core/runtime-contract'
 import {
+  FRAME_ASPECT,
   liveTargetIds,
   pickTarget,
+  pointerPlacement,
   previewFrame,
   previewSource,
   previewStatus,
@@ -316,5 +318,44 @@ describe('conversation computer-use preview model', () => {
         }),
       ),
     ).toBe('example.com')
+  })
+
+  it('places the Agent’s pointer on a card’s letterboxed picture', () => {
+    const near = (
+      placement: { left: number; top: number },
+      left: number,
+      top: number,
+    ) => {
+      expect(placement.left).toBeCloseTo(left, 6)
+      expect(placement.top).toBeCloseTo(top, 6)
+    }
+    expect(FRAME_ASPECT).toBe(16 / 10)
+    // A picture as wide as the box fills it.
+    near(
+      pointerPlacement({ x: 0.25, y: 0.5 }, { width: 1280, height: 800 }),
+      25,
+      50,
+    )
+    // Wider: bands above and below (a 2.5 picture takes 64% of the height).
+    near(
+      pointerPlacement({ x: 0.5, y: 0 }, { width: 2000, height: 800 }),
+      50,
+      18,
+    )
+    near(
+      pointerPlacement({ x: 1, y: 1 }, { width: 2000, height: 800 }),
+      100,
+      82,
+    )
+    // Taller: bands left and right (a 0.8 picture takes half the width).
+    near(pointerPlacement({ x: 0, y: 0 }, { width: 800, height: 1000 }), 25, 0)
+    near(
+      pointerPlacement({ x: 1, y: 0.5 }, { width: 800, height: 1000 }),
+      75,
+      50,
+    )
+    // Without a picture size, the picture is taken to fill the box.
+    near(pointerPlacement({ x: 0.3, y: 0.6 }), 30, 60)
+    near(pointerPlacement({ x: 0.3, y: 0.6 }, { width: 0, height: 0 }), 30, 60)
   })
 })

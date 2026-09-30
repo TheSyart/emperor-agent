@@ -448,6 +448,23 @@
       }
     },
     {
+      "name": "event-act-dispatched-pointer-window",
+      "event": "act.dispatched",
+      "message": {
+        "type": "event",
+        "name": "act.dispatched",
+        "data": {
+          "operationId": "op-6",
+          "pointer": {
+            "x": 412.5,
+            "y": 230,
+            "visible": false,
+            "window": { "x": 200, "y": 120, "width": 850, "height": 600 }
+          }
+        }
+      }
+    },
+    {
       "name": "event-target-changed",
       "event": "target.changed",
       "message": {

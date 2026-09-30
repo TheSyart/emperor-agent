@@ -34,6 +34,7 @@ function fixture(
   credentials?: MacosDesktopDriverOptions['credentials'],
   secretOutcome: 'filled' | 'unknown' = 'filled',
   pointer?: MacosDesktopDriverOptions['pointer'],
+  options: Partial<MacosDesktopDriverOptions> = {},
 ) {
   let disconnected: (() => void) | undefined
   let currentPermissions = {
@@ -173,6 +174,7 @@ function fixture(
     processPaths: async () => new Map(),
     ...(credentials ? { credentials } : {}),
     ...(pointer ? { pointer } : {}),
+    ...options,
   })
   return {
     driver,
@@ -591,6 +593,86 @@ describe('MacosDesktopDriver', () => {
     k.request.mockImplementationOnce(dispatchesAt(4))
     await act('op-p3', { kind: 'typeText', text: 'hi', ref: 'r1.1' })
     expect(signals).toEqual([{ kind: 'move', pointer }])
+  })
+
+  it('puts the pointer on the conversation preview as a share of the target window', async () => {
+    const signals: unknown[] = []
+    const previews: unknown[] = []
+    const glides: Array<{ run: () => void; ms: number }> = []
+    const k = fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (signal) => signals.push(signal),
+      {
+        previewPointer: (pointer) => previews.push(pointer),
+        clock: {
+          now: () => 0,
+          setTimeout: (run, ms) => glides.push({ run, ms }),
+          clearTimeout: () => undefined,
+        },
+      },
+    )
+    const signal = new AbortController().signal
+    const target = await bound(k, signal)
+    const act = (operationId: string, action: object, pointer: object) => {
+      k.request.mockImplementationOnce((async (
+        _method: string,
+        params?: { operationId?: string },
+      ) => {
+        k.emitHelper({
+          name: 'act.dispatched',
+          data: { operationId: params?.operationId, pointer },
+        })
+        return { outcome: 'observed', afterRevision: 3 }
+      }) as never)
+      return k.driver.act(
+        {
+          operationId,
+          targetId: target.targetId,
+          generation: target.generation,
+          expectedRevision: target.revision,
+          action: action as never,
+          deadlineMs: 5_000,
+        },
+        { dispatched: () => undefined },
+        signal,
+      )
+    }
+    const window = { x: 200, y: 120, width: 850, height: 600 }
+
+    // Behind another window: nothing on screen, but the preview shows it.
+    const hidden = { x: 412.5, y: 270, visible: false, window }
+    await act('op-v1', { kind: 'click', ref: 'r1.1' }, hidden)
+    expect(signals).toEqual([
+      { kind: 'hide' },
+      { kind: 'move', pointer: hidden },
+    ])
+    expect(previews).toEqual([{ targetId: 't-1', x: 0.25, y: 0.25 }])
+
+    // A drag: its start now, its end after the same pause as on screen.
+    previews.length = 0
+    await act(
+      'op-v2',
+      { kind: 'drag', from: { ref: 'r1.1' }, to: { ref: 'r1.2' } },
+      { x: 200, y: 120, visible: true, window, to: { x: 1050, y: 720 } },
+    )
+    expect(previews).toEqual([{ targetId: 't-1', x: 0, y: 0 }])
+    expect(glides.map((glide) => glide.ms)).toEqual([150])
+    glides[0]!.run()
+    expect(previews).toEqual([
+      { targetId: 't-1', x: 0, y: 0 },
+      { targetId: 't-1', x: 1, y: 1 },
+    ])
+
+    // An older Helper sends no window: the screen pointer alone.
+    previews.length = 0
+    signals.length = 0
+    const bare = { x: 412.5, y: 270, visible: true }
+    await act('op-v3', { kind: 'click', ref: 'r1.1' }, bare)
+    expect(signals).toEqual([{ kind: 'hide' }, { kind: 'move', pointer: bare }])
+    expect(previews).toEqual([])
   })
 
   it('tells the helper when the user let the window come forward this task', async () => {
