@@ -19,6 +19,11 @@ import type {
   RuntimeGoalView as CoreRuntimeGoalView,
 } from '@emperor/core/runtime-contract'
 
+/** What a builtin tool is for (Core's `category`; 能力 › 工具 groups by it). */
+export type ToolCategory = NonNullable<
+  CoreOperationResult<'skills.tools'>[number]['category']
+>
+
 export interface ToolInfo {
   name: string
   description: string
@@ -28,6 +33,10 @@ export interface ToolInfo {
   concurrency_safe?: boolean
   source?: 'builtin' | 'mcp'
   server?: string
+  /** A builtin tool's group on 能力 › 工具 (absent: 其他). */
+  category?: ToolCategory
+  /** The plugin that brings the tool (its MCP server, or Computer Use). */
+  plugin_id?: string
 }
 
 export interface McpServerConfig {

@@ -23,6 +23,7 @@ import type {
   ComputerUseStatusView,
   DriverKind,
 } from '../harness/computer-use/types'
+import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
 import {
@@ -410,7 +411,14 @@ export class CoreApi {
         )
         return host.tools.schemas().map((schema) => {
           const adapter = adapters.get(schema.name)
-          if (adapter === undefined) return schema
+          if (adapter === undefined) {
+            // The GUI tools come with the Computer Use plugin (its detail
+            // lists them); every other builtin names its category.
+            if (Object.hasOwn(GUI_TOOL_CATALOG, schema.name))
+              return { ...schema, pluginId: COMPUTER_USE_PLUGIN_ID }
+            const category = host.tools.get(schema.name)?.category
+            return category === undefined ? schema : { ...schema, category }
+          }
           return {
             ...schema,
             mcpServer: adapter.mcpServerName,

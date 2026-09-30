@@ -73,6 +73,7 @@
 - 对话中工具行的 Inspect 改为跳到「轨迹」并在轨迹右侧的「详情」列中定位该调用；「详情」列可拖宽、收起并记住宽度。原右侧详情栏及其 Inspect / Environment 标签移除：子代理在子会话中查看和停止；后台命令和工作流的输出查看与停止移到「环境信息」卡的「后台任务」中（展开后每个任务有「输出」和「停止」，停止工作流前会确认）。
 - `computer-use` Skill 不再是内置 Skill，改由 Computer Use 插件提供：电脑操作关闭时它不再出现在 Skill 列表里。电脑操作设置中，未配对的 Chrome/Edge 连接显示为“实验性”并写明需要配对；macOS 上缺少 Helper 时写明“没有找到 Emperor Computer Helper”。
 - 定时任务、插件、Skills 和 MCP 从设置弹窗移到整页，设置弹窗保留常规、模型、Hooks、工具、记忆、用量、桌宠、配置和诊断；旧的 `?settings=scheduler|plugins|skills|mcp`、`/skills/<名称>` 与 `/mcp` 链接会跳到对应页面。
+- 能力 › 工具只列 Emperor 内建的工具，按用途分为基础工具、网络、任务与规划、子代理与工作流，以及技能、记忆与配置五组，每组标题带数量，保留搜索；每行是工具名和一句说明，展开后仍可查看参数和 JSON schema。MCP server 的工具在「MCP」标签按 server 列出，插件带来的工具不再列在这一页，页首有这两处的链接。
 
 ### Fixed
 

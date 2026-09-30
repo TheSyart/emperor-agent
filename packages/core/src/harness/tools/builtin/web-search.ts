@@ -261,6 +261,7 @@ export function createWebSearchTool(
   const maxQueries = options.maxQueries ?? WEB_SEARCH_MAX_QUERIES
   return defineTool({
     name: 'web_search',
+    category: 'network',
     description: `Search the web for current information. Provide 1–${maxQueries} queries in the required queries array. Returns an optional summary answer and a list of source URLs.`,
     input: z.object({
       queries: z

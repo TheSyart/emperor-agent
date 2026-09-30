@@ -89,6 +89,7 @@ export type EditArgs = z.output<typeof editInput>
 export function createEditTool(state: FsToolState): ToolDefinition<EditArgs> {
   return defineTool({
     name: 'edit',
+    category: 'basic',
     description: 'Edit an existing UTF-8 text file by replacing literal text.',
     input: editInput,
     async execute(args, context) {

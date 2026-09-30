@@ -75,6 +75,7 @@ function delegationTool(
   const words = wording(mode)
   return defineTool({
     name,
+    category: 'agents',
     description: words.description + CONTINUABLE_NOTE,
     input: z.object({
       description: z
@@ -154,6 +155,7 @@ export function createSubagentTools(
     delegationTool(manager, 'fork', 'subagent_fork'),
     defineTool({
       name: 'send_message',
+      category: 'agents',
       description:
         'Send a message to a background subagent by its subagent id, continuing the same conversation. It ' +
         "becomes the subagent's next turn: if it is still working, the message waits until its current turn " +
@@ -184,6 +186,7 @@ export function createSubagentTools(
     }),
     defineTool({
       name: 'interrupt_agent',
+      category: 'agents',
       description:
         "Request cancellation of a background agent's current turn by its agent id. The target may be your " +
         'direct child or a deeper agent created under you. Only the current turn stops: messages already ' +
@@ -211,6 +214,7 @@ export function createSubagentTools(
     }),
     defineTool({
       name: 'list_agents',
+      category: 'agents',
       description:
         'List the background agents you started (children) or every agent under you (descendants), with their status.',
       input: z.object({
@@ -240,6 +244,7 @@ export function createSubagentTools(
 export function createReportTool(manager: SubagentManager): ToolDefinition {
   return defineTool({
     name: 'report',
+    category: 'agents',
     description:
       'Report selected content to the agent that started you. Call this once before you finish, with a ' +
       'self-contained final result, and earlier for progress or findings that change what that agent does ' +
@@ -287,6 +292,7 @@ export function createStructuredOutputTool(
 ): ToolDefinition<Record<string, unknown>> {
   return {
     name: STRUCTURED_OUTPUT_TOOL,
+    category: 'agents',
     description:
       'Report your final structured result. Call this exactly once, when your answer is complete; ' +
       "the arguments must match this tool's parameter schema exactly.",

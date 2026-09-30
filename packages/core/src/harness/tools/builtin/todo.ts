@@ -154,6 +154,7 @@ export function createTodoTool(
   const allowParallel = config.allowParallelInProgress
   return defineTool({
     name: 'todo_write',
+    category: 'planning',
     description: describeTool(allowParallel),
     input: todoInput,
     async execute(args, context) {

@@ -110,6 +110,40 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     ])
   })
 
+  it('carries a builtin tool’s category and the plugin that brings a tool', () => {
+    const service = new CoreSkillService(tmp('emperor-skill-service-kinds-'), {
+      toolNames: () => [
+        { name: 'read', description: 'Read a file', category: 'basic' },
+        {
+          name: 'browser_open',
+          description: 'Open a tab',
+          pluginId: 'computer-use',
+        },
+        {
+          name: 'mcp_kit-docs_search',
+          description: 'Search',
+          mcpServer: 'kit-docs',
+          pluginId: 'kit',
+        },
+      ],
+    })
+
+    const [read, browser, mcp] = service.tools()
+    expect(read).toMatchObject({ source: 'builtin', category: 'basic' })
+    expect(read).not.toHaveProperty('plugin_id')
+    expect(browser).toMatchObject({
+      source: 'builtin',
+      plugin_id: 'computer-use',
+    })
+    expect(browser).not.toHaveProperty('category')
+    expect(mcp).toMatchObject({
+      source: 'mcp',
+      server: 'kit-docs',
+      plugin_id: 'kit',
+    })
+    expect(mcp).not.toHaveProperty('category')
+  })
+
   it('lists, reads, writes, and deletes skills with frontmatter metadata', () => {
     const { stateRoot, runtimeRoot } = roots('emperor-skill-service-skills-')
     writeSkill(

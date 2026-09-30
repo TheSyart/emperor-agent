@@ -162,6 +162,7 @@ export function createGlobTool(
   const maxResults = options.maxResults ?? GLOB_MAX_RESULTS
   return defineTool({
     name: 'glob',
+    category: 'basic',
     description:
       'Find files whose paths match a glob pattern. Returns matching file paths — never directories — ' +
       'including hidden and ignored files (VCS metadata directories are excluded). ' +

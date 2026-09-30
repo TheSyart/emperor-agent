@@ -161,6 +161,7 @@ export function createSkillManageTool(
 
   return defineTool({
     name: 'skill_manage',
+    category: 'config',
     description: DESCRIPTION,
     input: skillManageInput,
     isConcurrencySafe: (args) =>

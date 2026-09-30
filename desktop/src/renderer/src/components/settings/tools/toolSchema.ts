@@ -1,9 +1,10 @@
 /**
- * 能力 › 工具 — pure helpers: filtering and grouping the registered tool
- * list (built-in first, then one group per MCP server) and reading a tool's
- * JSON-schema parameters into display rows.
+ * 能力 › 工具 — pure helpers: which tools the page lists (Emperor's own, not
+ * an MCP server's or a plugin's), filtering and grouping them by Core's
+ * category, a tool's one-sentence summary, and its JSON-schema parameters
+ * as display rows.
  */
-import type { ToolInfo } from '../../../types'
+import type { ToolCategory, ToolInfo } from '../../../types'
 
 export interface ToolParam {
   name: string
@@ -16,10 +17,22 @@ export interface ToolParam {
 }
 
 export interface ToolGroup {
-  id: string
+  id: ToolCategory | 'other'
   title: string
   tools: ToolInfo[]
 }
+
+/** The page's groups in order; a tool without a known category goes to 其他. */
+export const TOOL_CATEGORY_GROUPS: ReadonlyArray<{
+  id: ToolCategory
+  title: string
+}> = [
+  { id: 'basic', title: '基础工具' },
+  { id: 'network', title: '网络' },
+  { id: 'planning', title: '任务与规划' },
+  { id: 'agents', title: '子代理与工作流' },
+  { id: 'config', title: '技能、记忆与配置' },
+]
 
 type Schema = Record<string, unknown>
 
@@ -70,6 +83,21 @@ export function toolSchemaText(parameters?: Record<string, unknown>): string {
   return JSON.stringify(parameters, null, 2)
 }
 
+// A full stop that ends a sentence: not the one inside "e.g." or "i.e.".
+const SENTENCE_END = /(?<!\b(?:e\.g|i\.e|etc|vs))[.!?](?=\s)|[。！？]/
+
+/** The first sentence of a tool's description (the row's one-line summary). */
+export function toolSummary(description: string): string {
+  const text = description.trim()
+  const end = SENTENCE_END.exec(text)
+  return end ? text.slice(0, end.index + 1) : text
+}
+
+/** A tool Emperor itself registers: not an MCP server's, not a plugin's. */
+export function isBuiltinTool(tool: ToolInfo): boolean {
+  return tool.source !== 'mcp' && !tool.plugin_id
+}
+
 export function toolMatches(tool: ToolInfo, query: string): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
@@ -78,24 +106,17 @@ export function toolMatches(tool: ToolInfo, query: string): boolean {
     .includes(needle)
 }
 
-/** Built-in tools first, then one group per MCP server (name order). */
+/** Tools by category in page order, then 其他; empty groups are left out. */
 export function groupTools(tools: readonly ToolInfo[]): ToolGroup[] {
-  const builtin: ToolInfo[] = []
-  const servers = new Map<string, ToolInfo[]>()
-  for (const tool of tools) {
-    if (tool.source === 'mcp') {
-      const server = tool.server || 'MCP'
-      servers.set(server, [...(servers.get(server) ?? []), tool])
-    } else builtin.push(tool)
-  }
-  const groups: ToolGroup[] = []
-  if (builtin.length)
-    groups.push({ id: 'builtin', title: '内建工具', tools: builtin })
-  for (const server of [...servers.keys()].sort((a, b) => a.localeCompare(b)))
-    groups.push({
-      id: `mcp:${server}`,
-      title: `MCP · ${server}`,
-      tools: servers.get(server) ?? [],
-    })
-  return groups
+  const known = new Set<string>(TOOL_CATEGORY_GROUPS.map((group) => group.id))
+  const groups: ToolGroup[] = TOOL_CATEGORY_GROUPS.map((group) => ({
+    ...group,
+    tools: tools.filter((tool) => tool.category === group.id),
+  }))
+  groups.push({
+    id: 'other',
+    title: '其他',
+    tools: tools.filter((tool) => !tool.category || !known.has(tool.category)),
+  })
+  return groups.filter((group) => group.tools.length > 0)
 }

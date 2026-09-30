@@ -951,17 +951,71 @@ test('capabilities tools tab filters and expands parameters with the schema', as
     height: 860,
   })
   const shell = fullPage(page)
-  await shell.getByRole('searchbox', { name: '筛选工具' }).fill('run')
+  await shell.getByRole('searchbox', { name: '筛选工具' }).fill('bash')
   await expect(shell.locator('[data-tool]')).toHaveCount(1)
-  await shell.getByRole('button', { name: /run_command/ }).click()
-  const row = shell.locator('[data-tool="run_command"]')
-  await expect(row.getByText('必填')).toBeVisible()
+  await shell.getByRole('button', { name: /bash/ }).click()
+  const row = shell.locator('[data-tool="bash"]')
+  await expect(row.getByText('必填')).toHaveCount(2)
   await expect(
-    row.getByText('可选值：read-only / workspace-write'),
+    row.getByText('可选值：workspace-write / danger-full-access'),
   ).toBeVisible()
   await expect(row.getByRole('textbox')).toHaveValue(/"command"/)
   await expectPageColumnFits(page)
   await shot(page, 'capabilities-tools-expanded')
+})
+
+// 能力 › 工具 (ST-08): Emperor's own tools by category, each with its count.
+const TOOL_GROUPS = [
+  /^基础工具\s*9$/,
+  /^网络\s*1$/,
+  /^任务与规划\s*7$/,
+  /^子代理与工作流\s*7$/,
+  /^技能、记忆与配置\s*4$/,
+]
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`capabilities tools grouped by category (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/capabilities/tools', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const shell = fullPage(page)
+    await expect(shell.locator('[data-group] h3')).toHaveText(TOOL_GROUPS)
+    // MCP servers' tools and the plugins' tools are on their own tabs
+    // (mcp_config is Emperor's own).
+    await expect(shell.locator('[data-tool="mcp_config"]')).toHaveCount(1)
+    for (const name of [
+      'mcp_github_search_repositories',
+      'ui_get_capabilities',
+      'browser_open',
+      'desktop_click',
+    ])
+      await expect(shell.locator(`[data-tool="${name}"]`)).toHaveCount(0)
+    await expect(shell.getByText('共 28 个')).toBeVisible()
+    await expectPageColumnFits(page)
+    await shot(page, `capabilities-tools-groups-${theme}`)
+    // Every group, in a window tall enough for all of them.
+    await page.setViewportSize({ width: 1280, height: 2300 })
+    await shot(page, `capabilities-tools-all-${theme}`)
+    await page.setViewportSize({ width: 1280, height: 860 })
+
+    await shell.locator('[data-link="mcp"]').click()
+    await expect(page).toHaveURL(/\/capabilities\/mcp/)
+    await expect(shell.locator('.mcp-server-card').first()).toBeVisible()
+  })
+}
+
+test('capabilities tools fit a narrow window', async ({ page }) => {
+  await open(page, '/capabilities/tools', { width: 700, height: 860 })
+  const shell = fullPage(page)
+  await expect(shell.locator('[data-group] h3')).toHaveText(TOOL_GROUPS)
+  await expectPageColumnFits(page)
+  await shot(page, 'capabilities-tools-narrow')
+  await shell.locator('[data-link="plugins"]').click()
+  await expect(page).toHaveURL(/\/capabilities(\?|$)/)
 })
 
 test('first-run model prompt opens the settings model section', async ({

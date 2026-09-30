@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
  * ToolRow — one registered tool in the 能力 › 工具 list: a compact
- * disclosure row (monospace name, read-only / writable badge, one-line
- * description, chevron). Expanded it shows the full description, the
- * execution traits, the parameters (type, required, enum values) and the
- * raw JSON schema (read-only CodeEditor).
+ * disclosure row (monospace name, the description's first sentence,
+ * chevron). Expanded it shows the full description, the execution traits
+ * (source, 只读 when the tool only reads, concurrency), the parameters
+ * (type, required, enum values) and the raw JSON schema (read-only
+ * CodeEditor).
  *
  * Props: tool. v-model:open — disclosure state.
  */
@@ -12,12 +13,13 @@ import { computed } from 'vue'
 import type { ToolInfo } from '../../../types'
 import { DsChevronDown } from '../../icons/ds'
 import { CodeEditor, StatusBadge, settingsId } from '../ui'
-import { toolParams, toolSchemaText } from './toolSchema'
+import { toolParams, toolSchemaText, toolSummary } from './toolSchema'
 
 const props = defineProps<{ tool: ToolInfo }>()
 const open = defineModel<boolean>('open', { default: false })
 
 const uid = settingsId('tool-row')
+const summary = computed(() => toolSummary(props.tool.description ?? ''))
 const params = computed(() => toolParams(props.tool.parameters))
 const schema = computed(() => toolSchemaText(props.tool.parameters))
 const source = computed(() =>
@@ -37,15 +39,8 @@ const source = computed(() =>
       @click="open = !open"
     >
       <span class="row-text">
-        <span class="row-title">
-          <code class="name">{{ tool.name }}</code>
-          <StatusBadge :tone="tool.read_only ? 'ok' : 'warn'">
-            {{ tool.read_only ? '只读' : '可写' }}
-          </StatusBadge>
-        </span>
-        <span v-if="!open" class="summary">
-          {{ tool.description || '无描述' }}
-        </span>
+        <code class="name">{{ tool.name }}</code>
+        <span v-if="!open" class="summary">{{ summary || '无描述' }}</span>
       </span>
       <DsChevronDown :size="14" class="chevron" aria-hidden="true" />
     </button>
@@ -54,6 +49,7 @@ const source = computed(() =>
       <p v-if="tool.description" class="description">{{ tool.description }}</p>
       <div class="traits">
         <StatusBadge mono>{{ source }}</StatusBadge>
+        <StatusBadge v-if="tool.read_only" tone="ok">只读</StatusBadge>
         <StatusBadge v-if="tool.concurrency_safe" tone="ok"
           >并发安全</StatusBadge
         >
@@ -141,13 +137,6 @@ const source = computed(() =>
   flex: 1;
   flex-direction: column;
   gap: var(--space-0-5);
-  min-width: 0;
-}
-
-.row-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   min-width: 0;
 }
 

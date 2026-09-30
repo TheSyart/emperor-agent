@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
+import type { ToolCategory } from '../../harness/tools/definition'
 import type { WebFetchClient } from '../../network/web-fetch-client'
 import {
   SkillLoaders,
@@ -56,9 +57,11 @@ export interface SkillServiceToolEntry {
   readOnly?: boolean
   exclusive?: boolean
   concurrencySafe?: boolean
+  /** Where 能力 › 工具 lists a builtin tool (`ToolDefinition.category`). */
+  category?: ToolCategory
   /** MCP server name from the tool's adapter (`MCPToolAdapter.mcpServerName`); absent for builtins. */
   mcpServer?: string
-  /** Contributing plugin of an MCP tool (`MCPToolAdapter.pluginId`). */
+  /** Contributing plugin: an MCP tool's (`MCPToolAdapter.pluginId`), or `computer-use` for the GUI tools. */
   pluginId?: string
 }
 
@@ -114,7 +117,12 @@ export interface ToolInfoPayload {
   concurrency_safe: boolean
   source: 'builtin' | 'mcp'
   server: string
-  /** The plugin that contributes this MCP tool, when it is not the user's own server. */
+  /** A builtin tool's group on 能力 › 工具 (absent: 其他); MCP and plugin tools have none. */
+  category?: ToolCategory
+  /**
+   * The plugin that brings this tool: a plugin's MCP server, or Computer Use
+   * for its GUI tools. Such tools are listed in the plugin's detail.
+   */
   plugin_id?: string
 }
 
@@ -189,6 +197,9 @@ export class CoreSkillService {
         concurrency_safe: Boolean(tool.concurrencySafe),
         source: isMcp ? 'mcp' : 'builtin',
         server,
+        ...(tool.category && !isMcp && !tool.pluginId
+          ? { category: tool.category }
+          : {}),
         ...(tool.pluginId ? { plugin_id: tool.pluginId } : {}),
       }
     })

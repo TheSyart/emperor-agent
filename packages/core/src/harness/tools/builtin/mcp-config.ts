@@ -149,6 +149,7 @@ export function createMcpConfigTool(
 
   return defineTool({
     name: 'mcp_config',
+    category: 'config',
     description: DESCRIPTION,
     input: mcpConfigInput,
     isConcurrencySafe: (args) => args.action === 'list',

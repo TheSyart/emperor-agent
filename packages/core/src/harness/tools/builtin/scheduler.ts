@@ -75,6 +75,7 @@ export function createSchedulerTool(
   const { service } = deps
   return defineTool({
     name: 'scheduler',
+    category: 'planning',
     description: DESCRIPTION,
     input: schedulerInput,
     isConcurrencySafe: (args) => args.action === 'list',

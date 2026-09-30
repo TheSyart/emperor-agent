@@ -276,6 +276,7 @@ export function createGrepTool(
   const maxLineBytes = options.maxLineBytes ?? GREP_MAX_LINE_BYTES
   return defineTool({
     name: 'grep',
+    category: 'basic',
     description:
       'Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. ' +
       `Returns the first ${maxMatches} matches inline; a capped result reports where the complete match list was saved. ` +

@@ -68,6 +68,7 @@ export function createJobTools(
 
   const jobOutput = defineTool({
     name: 'job_output',
+    category: 'basic',
     description:
       'Read a background job. Stream jobs return only output since the previous read; ' +
       'final-output jobs return their result after settlement. Every response ends with ' +
@@ -115,6 +116,7 @@ export function createJobTools(
 
   const jobList = defineTool({
     name: 'job_list',
+    category: 'basic',
     description:
       'List your background jobs (running and finished) with their ids, kinds, and statuses.',
     input: z.object({}),
@@ -138,6 +140,7 @@ export function createJobTools(
 
   const jobKill = defineTool({
     name: 'job_kill',
+    category: 'basic',
     description:
       'Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.',
     input: z.object({

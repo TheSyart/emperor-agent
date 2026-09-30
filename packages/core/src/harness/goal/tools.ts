@@ -140,6 +140,7 @@ function callingAgent(context: ToolRunContext): Agent {
 export function createGoalTools(service: GoalService): ToolDefinition[] {
   const getGoal = defineTool({
     name: GET_GOAL,
+    category: 'planning',
     description: GET_DESCRIPTION,
     input: getInput,
     async execute(_args, context) {
@@ -149,6 +150,7 @@ export function createGoalTools(service: GoalService): ToolDefinition[] {
 
   const createGoal = defineTool({
     name: CREATE_GOAL,
+    category: 'planning',
     description: CREATE_DESCRIPTION,
     input: createInput,
     async execute(args, context) {
@@ -168,6 +170,7 @@ export function createGoalTools(service: GoalService): ToolDefinition[] {
 
   const updateGoal = defineTool({
     name: UPDATE_GOAL,
+    category: 'planning',
     description: UPDATE_DESCRIPTION,
     input: updateInput,
     async execute(args, context) {

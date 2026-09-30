@@ -54,6 +54,7 @@ export type WriteArgs = z.output<typeof writeInput>
 export function createWriteTool(state: FsToolState): ToolDefinition<WriteArgs> {
   return defineTool({
     name: 'write',
+    category: 'basic',
     description: 'Create or fully replace a UTF-8 text file.',
     input: writeInput,
     async execute(args, context) {

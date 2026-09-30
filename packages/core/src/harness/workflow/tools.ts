@@ -184,6 +184,7 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
     deps.maxResultChars ?? DEFAULT_WORKFLOW_MAX_RESULT_CHARS
   return defineTool({
     name: toolName,
+    category: 'agents',
     description: WORKFLOW_DESCRIPTION,
     input: workflowInput,
     async execute(args, context) {
@@ -681,6 +682,7 @@ export function createRalphTool(deps: RalphToolDeps): ToolDefinition {
   const resolved = resolveRalphConfig(deps.config)
   return defineTool({
     name: 'ralph',
+    category: 'agents',
     description: RALPH_DESCRIPTION,
     input: ralphInput,
     async execute(args, context) {

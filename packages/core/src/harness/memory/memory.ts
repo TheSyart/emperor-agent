@@ -138,6 +138,7 @@ export function memoryMiddleware(deps: MemoryDeps): PreStepMiddleware {
 export function createMemoryTool(deps: MemoryDeps): ToolDefinition {
   return defineTool({
     name: 'memory_edit',
+    category: 'config',
     description:
       'Edit the user\'s long-term memory. target "memory" is MEMORY.md (durable facts across conversations), "user" is USER.md (the user\'s profile and preferences), "project" is the current Build project\'s memory (markdown `##` sections). ' +
       'Replace an exact unique old_string with new_string, or omit old_string to append new_string. Only record information the user would want remembered; never store secrets.',

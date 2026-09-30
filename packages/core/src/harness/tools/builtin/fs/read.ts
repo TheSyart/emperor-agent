@@ -216,6 +216,7 @@ export type ReadArgs = z.output<typeof readInput>
 export function createReadTool(state: FsToolState): ToolDefinition<ReadArgs> {
   return defineTool({
     name: 'read',
+    category: 'basic',
     description: 'Read a UTF-8 text file and return line-numbered content.',
     input: readInput,
     // Observation races fail closed: guarded mutations re-check the version in-lock.

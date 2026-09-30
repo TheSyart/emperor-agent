@@ -183,6 +183,7 @@ export class PlanModeController {
   tool(): ToolDefinition {
     return defineTool({
       name: EXIT_PLAN_MODE,
+      category: 'planning',
       description: EXIT_DESCRIPTION,
       input: z.object({
         plan: z

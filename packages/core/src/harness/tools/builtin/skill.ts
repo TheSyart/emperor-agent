@@ -169,6 +169,7 @@ function catalogHistory(session: Session): {
 export function createSkillTool(source: SkillSource): ToolDefinition {
   return defineTool({
     name: 'skill',
+    category: 'config',
     description:
       'Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.',
     input: z.object({

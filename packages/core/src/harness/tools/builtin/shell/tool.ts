@@ -540,6 +540,7 @@ export function createShellTool(
 
   return defineTool({
     name: toolName,
+    category: 'basic',
     description: shellDescription(platform, jobs !== undefined),
     input: shellInput,
     isConcurrencySafe: () => false,

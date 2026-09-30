@@ -2,31 +2,27 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-09-30<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
 - 侧栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
 - 侧栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
-- 能力页的“工具”标签（`/capabilities/tools`）查看当前注册给 Agent 的全部工具。
+- 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 
 ## Tools
 
-| 类别       | 工具                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------- |
-| 文件       | `read`、`write`、`edit`                                                                              |
-| 搜索       | `glob`、`grep`                                                                                       |
-| 命令       | `bash`；后台命令用 `job_output`、`job_list`、`job_kill` 管理                                         |
-| 规划与交互 | `todo_write`、`ask_user_question`、`exit_plan_mode`                                                  |
-| 子代理     | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`；子代理内另有 `report` |
-| 编排       | `workflow`、`ralph`                                                                                  |
-| 上下文     | `skill`、`memory_edit`                                                                               |
-| 扩展管理   | `skill_manage`、`mcp_config`                                                                         |
-| 目标与定时 | `get_goal`、`create_goal`、`update_goal`、`scheduler`                                                |
-| MCP        | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个                                                |
+| 分类             | 工具                                                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理             |
+| 网络             | `web_search`                                                                                                                     |
+| 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`             |
+| 子代理与工作流   | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`（子代理内另有 `report`）；编排 `workflow`、`ralph` |
+| 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                             |
+| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个                                                                            |
 
-打开能力页的“工具”标签查看当前实际注册的工具：内置工具在前，MCP 工具按 server 分组，可以按名称、描述和 server 搜索，展开后查看参数和 JSON schema。
+能力页的“工具”标签只列 Emperor 内建的工具，按上表的五类分组，每组标题带数量；每行是工具名和一句说明，展开后查看完整说明、参数和 JSON schema，可以按名称和说明搜索。MCP server 的工具在“MCP”标签里按 server 列出，插件带来的工具不在这一页；页首有这两处的链接。
 
 要点：
 
@@ -39,7 +35,7 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 - **扩展管理**：`skill_manage` 管理 Skills，`mcp_config` 管理 MCP server，见下文。查看、校验和重新连接不需要审批；修改 Skill 文件或 MCP 配置的动作跟随当前权限预设，除 `danger-full-access` 外每次写入都会先请求你批准。
 - **Scheduler**：`scheduler` 让 Agent 创建和管理定时任务，不需要审批。
 - **大结果**：超过 50,000 字节的纯文本结果会完整保存到 `stateRoot/spill/`，模型只看到首尾预览和文件路径。
-- **网页**：默认没有网页抓取工具。`web_search` 只在宿主配置了搜索后端时才会出现，桌面版当前没有配置。需要联网时可以使用 MCP server、会联网的 Skill，或在权限允许时用 `bash` 调用命令行工具。
+- **网页**：默认没有网页抓取工具。`web_search` 只在宿主配置了搜索后端时才会出现，桌面版当前没有配置，所以“工具”标签里暂时没有“网络”一组。需要联网时可以使用 MCP server、会联网的 Skill，或在权限允许时用 `bash` 调用命令行工具。
 
 工具卡显示的是执行投影；真实状态以 session log 为准。
 

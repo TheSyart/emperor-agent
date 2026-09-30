@@ -37,9 +37,25 @@ export type ToolReturn =
       isError?: boolean
     }
 
+/**
+ * What a builtin tool is for, as 能力 › 工具 groups them: 基础工具 (files and
+ * commands), 网络, 任务与规划, 子代理与工作流, and 技能、记忆与配置.
+ */
+export const TOOL_CATEGORIES = [
+  'basic',
+  'network',
+  'planning',
+  'agents',
+  'config',
+] as const
+
+export type ToolCategory = (typeof TOOL_CATEGORIES)[number]
+
 export interface ToolDefinition<A = unknown> {
   readonly name: string
   readonly description: string
+  /** Where 能力 › 工具 lists a builtin tool (absent: 其他; never sent to the model). */
+  readonly category?: ToolCategory
   /** JSON Schema object for the arguments, as sent to the model. */
   readonly parameters: Record<string, unknown>
   /**
@@ -133,6 +149,7 @@ function describeIssues(error: z.ZodError): string {
 export interface DefineToolSpec<S extends z.ZodType> {
   name: string
   description: string
+  category?: ToolCategory
   input: S
   execute(args: z.output<S>, context: ToolRunContext): Promise<ToolReturn>
   isConcurrencySafe?(args: z.output<S>): boolean
@@ -148,6 +165,7 @@ export function defineTool<S extends z.ZodType>(
   return {
     name: spec.name,
     description: spec.description,
+    ...(spec.category === undefined ? {} : { category: spec.category }),
     parameters,
     parse(raw: unknown): z.output<S> {
       if (typeof raw === 'string') {

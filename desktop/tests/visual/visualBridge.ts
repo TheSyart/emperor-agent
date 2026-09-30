@@ -1835,49 +1835,234 @@ export async function installVisualCoreBridge(
         model: 'visual-main',
         provider: 'visual',
         providerLabel: 'Visual Provider',
+        // Core's builtin tools (skills.tools) with their category; the
+        // Computer Use tools carry their plugin and stay off 能力 › 工具.
         tools: [
           {
-            name: 'read_file',
-            description: 'Read a file',
-            read_only: true,
+            name: 'read',
+            description:
+              'Read a UTF-8 text file and return line-numbered content.',
+            category: 'basic',
             source: 'builtin',
-            concurrency_safe: true,
+            server: '',
             parameters: {
               type: 'object',
               properties: {
-                path: {
+                file_path: {
                   type: 'string',
-                  description: '要读取的文件路径（相对工作区）。',
+                  description:
+                    'Path to read: absolute, or relative to the session working directory.',
                 },
-                offset: { type: 'integer', description: '起始行号。' },
-                limit: { type: 'integer', description: '最多读取的行数。' },
+                offset: {
+                  type: 'number',
+                  description: '1-based first line to return. Defaults to 1.',
+                },
+                limit: {
+                  type: 'number',
+                  description:
+                    'Maximum number of lines to return. Defaults to 2000.',
+                },
               },
-              required: ['path'],
+              required: ['file_path'],
             },
           },
           {
-            name: 'run_command',
-            description: 'Run a command',
-            read_only: false,
+            name: 'bash',
+            description:
+              'Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Set `run_in_background: true` for long-running commands.',
+            category: 'basic',
             source: 'builtin',
-            exclusive: true,
+            server: '',
             parameters: {
               type: 'object',
               properties: {
                 command: {
                   type: 'string',
-                  description: '要执行的 shell 命令。',
+                  description: 'The command to execute.',
                 },
-                timeout_ms: { type: 'integer', description: '超时时间。' },
-                sandbox: {
+                description: {
                   type: 'string',
-                  enum: ['read-only', 'workspace-write'],
-                  description: '执行时的沙箱模式。',
+                  description:
+                    'Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI).',
+                },
+                timeoutMs: {
+                  type: 'number',
+                  description:
+                    'Timeout in milliseconds (default 60000, max 600000).',
+                },
+                run_in_background: {
+                  type: 'boolean',
+                  description:
+                    'Run in the background and return a job id immediately.',
+                },
+                sandbox_permissions: {
+                  type: 'string',
+                  enum: ['workspace-write', 'danger-full-access'],
+                  description:
+                    'Request a wider sandbox mode for this one call (requires user approval).',
                 },
               },
-              required: ['command'],
+              required: ['command', 'description'],
             },
           },
+          ...(
+            [
+              ['write', 'basic', 'Create or fully replace a UTF-8 text file.'],
+              [
+                'edit',
+                'basic',
+                'Edit an existing UTF-8 text file by replacing literal text.',
+              ],
+              [
+                'glob',
+                'basic',
+                'Find files whose paths match a glob pattern. Returns matching file paths — never directories.',
+              ],
+              [
+                'grep',
+                'basic',
+                'Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file.',
+              ],
+              [
+                'job_output',
+                'basic',
+                'Read a background job. Stream jobs return only output since the previous read.',
+              ],
+              [
+                'job_list',
+                'basic',
+                'List your background jobs (running and finished) with their ids, kinds, and statuses.',
+              ],
+              [
+                'job_kill',
+                'basic',
+                'Request cancellation of a running background job by job id.',
+              ],
+              [
+                'web_search',
+                'network',
+                'Search the web for current information. Provide 1–4 queries in the required queries array.',
+              ],
+              [
+                'todo_write',
+                'planning',
+                'Record and update a structured task list for the current work. Send the ENTIRE list every call.',
+              ],
+              [
+                'ask_user_question',
+                'planning',
+                'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.',
+              ],
+              [
+                'exit_plan_mode',
+                'planning',
+                "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode.",
+              ],
+              [
+                'get_goal',
+                'planning',
+                'Read the current same-session goal, including its exact id/revision, objective, phase and round limit.',
+              ],
+              [
+                'create_goal',
+                'planning',
+                'Create one persisted same-session completion goal when the current direct human request is a long-running objective.',
+              ],
+              [
+                'update_goal',
+                'planning',
+                'Update the exact current goal revision. Edit, pause and resume require a direct human request.',
+              ],
+              [
+                'scheduler',
+                'planning',
+                '管理本地持久定时任务：查看、创建、更新、暂停、恢复、删除或手动运行。只读检查使用 list。',
+              ],
+              [
+                'subagent',
+                'agents',
+                'Delegate a self-contained task to a subagent that works in its own context. The subagent returns its result, not its intermediate steps.',
+              ],
+              [
+                'subagent_fork',
+                'agents',
+                'Delegate a task to a subagent that inherits this conversation. It is seeded with all completed turns so far.',
+              ],
+              [
+                'list_agents',
+                'agents',
+                'List the background agents you started (children) or every agent under you (descendants), with their status.',
+              ],
+              [
+                'send_message',
+                'agents',
+                'Send a message to a background subagent by its subagent id, continuing the same conversation.',
+              ],
+              [
+                'interrupt_agent',
+                'agents',
+                "Request cancellation of a background agent's current turn by its agent id.",
+              ],
+              [
+                'workflow',
+                'agents',
+                'Run a JavaScript workflow script that orchestrates subagents at scale.',
+              ],
+              [
+                'ralph',
+                'agents',
+                'Run a foreground fresh-agent Ralph loop toward one immutable objective.',
+              ],
+              [
+                'skill',
+                'config',
+                'Load the full instructions for an available skill.',
+              ],
+              [
+                'skill_manage',
+                'config',
+                'Manage Emperor Skills. Read-only: list and validate; writes: create, update, delete and import.',
+              ],
+              [
+                'memory_edit',
+                'config',
+                "Edit the user's long-term memory. Replace an exact unique old_string, or append new text.",
+              ],
+              [
+                'mcp_config',
+                'config',
+                '管理 Emperor 自己的 MCP server 配置（Emperor Home 下的 mcp_config.json；Emperor 只读取这一个文件）。',
+              ],
+            ] as const
+          ).map(([name, category, description]) => ({
+            name,
+            description,
+            category,
+            source: 'builtin',
+            server: '',
+          })),
+          ...(
+            [
+              [
+                'ui_get_capabilities',
+                'Report which computer-use drivers are available right now.',
+              ],
+              [
+                'browser_open',
+                'Open a URL in a new tab of the built-in browser.',
+              ],
+              [
+                'desktop_click',
+                'Click an element from the latest desktop observation.',
+              ],
+            ] as const
+          ).map(([name, description]) => ({
+            name,
+            description,
+            source: 'builtin',
+            server: '',
+            plugin_id: 'computer-use',
+          })),
         ],
         plugins: [
           {

@@ -81,6 +81,7 @@ export function createAskUserQuestionTool(
 ): ToolDefinition<AskArgs> {
   return defineTool({
     name: 'ask_user_question',
+    category: 'planning',
     description: DESCRIPTION,
     input: askInput,
     async execute(args, context) {
