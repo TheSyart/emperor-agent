@@ -26,6 +26,7 @@ import MenuItem from '../../ui/MenuItem.vue'
 import { DsChevronDown } from '../../icons/ds'
 import { useFieldControl } from './fieldContext'
 import type { SelectOption } from './types'
+import { useSurface } from '../../ui/surface'
 
 defineOptions({ inheritAttrs: false })
 
@@ -54,6 +55,10 @@ const props = withDefaults(
 const model = defineModel<T>()
 const emit = defineEmits<{ change: [value: T] }>()
 const control = useFieldControl(props, 'ds-select')
+// In a card the selector fill would vanish into the card: use the card's
+// control fill and a hairline instead.
+const surface = useSurface()
+const inCard = computed(() => surface.value === 'card')
 
 const trigger = ref<HTMLButtonElement | null>(null)
 const list = ref<HTMLElement | null>(null)
@@ -135,6 +140,7 @@ function onListKeydown(event: KeyboardEvent) {
     class="ds-select"
     :data-size="size"
     :data-block="block || undefined"
+    :data-in-card="inCard || undefined"
     :data-invalid="control.invalid.value || undefined"
     :data-placeholder="current ? undefined : true"
     :disabled="disabled"
@@ -192,6 +198,11 @@ function onListKeydown(event: KeyboardEvent) {
   color: rgb(var(--label-primary));
   cursor: pointer;
   transition: background-color var(--duration-ds-fast) ease;
+}
+
+.ds-select[data-in-card] {
+  border-color: var(--border-l2);
+  background: rgb(var(--settings-card-control-fill));
 }
 
 .ds-select[data-size='sm'] {

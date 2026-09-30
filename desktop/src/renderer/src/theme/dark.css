@@ -41,6 +41,11 @@
   --sidebar-item-active: var(--nb-750);
   --menu-fill: var(--bg-layer-3);
   --selector-fill: var(--nb-800);
+  /* Settings cards (RV-01): the card a group's rows sit in, and the fill of
+     selects / key caps / path boxes inside it (the selector fill equals
+     the card in dark and the panel in light). */
+  --settings-card-fill: 50 50 53;
+  --settings-card-control-fill: 40 40 42;
   --tip-fill: var(--nb-800);
   --input-major: var(--nb-850);
   --code-block-bg: var(--nb-900);
@@ -171,6 +176,9 @@
   --lh-base: 24px;
   --fs-md: 16px;
   --lh-md: 28px;
+  /* Page title inside a settings sub page (SettingsHero). */
+  --fs-hero: 20px;
+  --lh-hero: 28px;
   --fs-code: 13px;
   --lh-code: 22px;
   --font-xxxs: var(--fs-xxxs) / var(--lh-xxxs) var(--font-sans);

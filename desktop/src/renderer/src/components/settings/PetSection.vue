@@ -88,32 +88,35 @@ function setEnabled(next: boolean) {
       </div>
     </div>
 
-    <SettingsRow
-      title="启用桌宠"
-      :description="switchDescription"
-      label-for="pet-enabled"
-    >
-      <Switch
-        id="pet-enabled"
-        :model-value="enabled"
-        :disabled="busy"
-        @update:model-value="setEnabled"
-      />
-    </SettingsRow>
-    <SettingsRow title="启动方式" description="桌宠窗口随应用启动的方式">
-      <span class="value">
-        {{ pet?.autoStartWithWebui ? '跟随 WebUI 自动启动' : '手动控制' }}
-      </span>
-    </SettingsRow>
-    <SettingsRow v-if="pet?.lastError" title="最近错误">
-      <template #description>
-        <span class="error-text">{{ pet.lastError }}</span>
-      </template>
-    </SettingsRow>
+    <SettingsGroup>
+      <SettingsRow
+        title="启用桌宠"
+        :description="switchDescription"
+        label-for="pet-enabled"
+      >
+        <Switch
+          id="pet-enabled"
+          :model-value="enabled"
+          :disabled="busy"
+          @update:model-value="setEnabled"
+        />
+      </SettingsRow>
+      <SettingsRow title="启动方式" description="桌宠窗口随应用启动的方式">
+        <span class="value">
+          {{ pet?.autoStartWithWebui ? '跟随 WebUI 自动启动' : '手动控制' }}
+        </span>
+      </SettingsRow>
+      <SettingsRow v-if="pet?.lastError" title="最近错误">
+        <template #description>
+          <span class="error-text">{{ pet.lastError }}</span>
+        </template>
+      </SettingsRow>
+    </SettingsGroup>
 
     <SettingsGroup
       title="动画精灵"
       :description="`${PET_SPRITES.length} 种绑定到运行时事件的帧动画状态，点选即可预览`"
+      plain
     >
       <div class="sprite-grid" role="group" aria-label="动画精灵">
         <button

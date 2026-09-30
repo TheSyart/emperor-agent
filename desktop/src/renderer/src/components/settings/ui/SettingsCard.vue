@@ -11,7 +11,7 @@
  * - title?, description?: header text (or the `title` / `description` slots).
  * - expandable?: body shows only while open; header gets a chevron.
  * - open (v-model:open): expanded state (ignored unless expandable).
- * - variant: 'default' (layer-3 fill + l2 border) | 'outline' (transparent,
+ * - variant: 'default' (settings card fill + l2 border) | 'outline' (transparent,
  *   l2 border — rows on the panel) | 'filled' (selector fill, no border —
  *   editors / add forms nested under a row).
  * - disabled?: dims the header and blocks toggling.
@@ -23,6 +23,7 @@
 import { useSlots } from 'vue'
 import { DsChevronDown } from '../../icons/ds'
 import { settingsId } from './fieldContext'
+import { provideSurface } from '../../ui/surface'
 
 const props = withDefaults(
   defineProps<{
@@ -44,6 +45,8 @@ const props = withDefaults(
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ toggle: [open: boolean] }>()
 const slots = useSlots()
+// Rows in the card body keep the body's own padding, not the card-group look.
+provideSurface(() => 'panel')
 const bodyId = settingsId('settings-card-body')
 
 // Slots are not reactive: evaluate these during render (the template calls
@@ -136,7 +139,7 @@ function onHeaderClick(event: MouseEvent) {
   min-width: 0;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--settings-card-fill));
   transition:
     border-color var(--duration-ds-fast) ease,
     background-color var(--duration-ds-fast) ease;

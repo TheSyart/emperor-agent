@@ -9,7 +9,14 @@
 import { ref } from 'vue'
 import Button from '../../ui/Button.vue'
 import StateDot from '../../ui/StateDot.vue'
-import { DsClose, DsCode, DsFolderOpen, DsLink, DsPlus } from '../../icons/ds'
+import {
+  DsClose,
+  DsCode,
+  DsFolderOpen,
+  DsLink,
+  DsPlus,
+  DsWarning,
+} from '../../icons/ds'
 import SettingsHeaderBar from '../SettingsHeaderBar.vue'
 import SettingsNav from '../SettingsNav.vue'
 import { createSettingsHeader, refreshAction } from '../settingsHeader'
@@ -24,14 +31,34 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
+  SettingsHero,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
+  SettingsTable,
+  SettingsTableRow,
   StatusBadge,
   Switch,
   TextArea,
   TextField,
 } from './index'
 
+const fullAccess = ref(false)
+const tableColumns = [
+  { key: 'site', label: '网站或模式' },
+  { key: 'browse', label: '浏览' },
+  { key: 'download', label: '下载' },
+  { key: 'remove', label: '', width: '28px' },
+]
+const ruleOptions = [
+  { value: 'allow', label: '允许' },
+  { value: 'ask', label: '需要批准' },
+  { value: 'block', label: '阻止' },
+]
+const tableRows = ref([
+  { site: '默认', browse: 'allow', download: 'ask' },
+  { site: 'github.com', browse: 'allow', download: 'allow' },
+])
 const header = createSettingsHeader()
 const saving = ref(false)
 header.register(() => [
@@ -154,51 +181,113 @@ const facts = [
           <SettingsSection
             intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按 dsh 设置面板，内容区 564px。"
           >
-            <SettingsRow
-              title="自动压缩"
-              description="上下文接近上限时自动整理历史"
-              label-for="gallery-compact"
+            <SettingsNotice
+              tone="warn"
+              title="还缺 2 项系统权限"
+              description="SettingsNotice：只在出问题时出现在页面最上面，写明缺什么、怎么修。"
             >
-              <Switch id="gallery-compact" v-model="autoCompact" />
-            </SettingsRow>
-            <SettingsRow title="失败回退" label-for="gallery-fallback">
-              <template #badge>
-                <StatusBadge tone="accent">实验</StatusBadge>
+              <template #actions>
+                <Button size="sm" variant="primary">请求权限</Button>
+                <Button size="sm" variant="outline">打开系统设置</Button>
               </template>
-              <Switch id="gallery-fallback" v-model="fallback" />
-            </SettingsRow>
-            <SettingsRow
-              title="托管锁定"
-              description="由组织策略控制，不能在这里修改"
+            </SettingsNotice>
+            <SettingsHero
+              title="Chrome 和 Edge"
+              description="SettingsHero：只用于讲一件事的二级页"
             >
-              <Switch v-model="lockedSwitch" disabled aria-label="托管锁定" />
-            </SettingsRow>
-            <SettingsRow
-              title="思考强度"
-              description="影响推理深度与耗时（Select，基于 ui/Menu）"
+              <template #badge>
+                <StatusBadge tone="ok" dot>已连接 1 个浏览器</StatusBadge>
+              </template>
+              <template #actions>
+                <Button size="sm" variant="outline">重新安装扩展程序</Button>
+              </template>
+            </SettingsHero>
+            <SettingsGroup
+              title="卡片分组"
+              description="行默认装进卡片：左右 16px，行间细线内缩"
             >
-              <Select
-                v-model="reasoning"
-                :options="reasoningOptions"
-                aria-label="思考强度"
-                data-testid="gallery-select"
-              />
-            </SettingsRow>
-            <SettingsRow title="统计范围" description="Segmented">
-              <Segmented
-                v-model="range"
-                :options="rangeOptions"
-                aria-label="统计范围"
-              />
-            </SettingsRow>
-            <SettingsRow title="服务器名称" description="行内 TextField（sm）">
-              <TextField
-                v-model="name"
-                size="sm"
-                class="inline-field"
-                aria-label="服务器名称"
-              />
-            </SettingsRow>
+              <SettingsRow
+                title="自动压缩"
+                description="上下文接近上限时自动整理历史"
+                label-for="gallery-compact"
+              >
+                <Switch id="gallery-compact" v-model="autoCompact" />
+              </SettingsRow>
+              <SettingsRow title="失败回退" label-for="gallery-fallback">
+                <template #badge>
+                  <StatusBadge tone="accent">实验</StatusBadge>
+                </template>
+                <Switch id="gallery-fallback" v-model="fallback" />
+              </SettingsRow>
+              <SettingsRow
+                title="托管锁定"
+                description="由组织策略控制，不能在这里修改"
+              >
+                <Switch v-model="lockedSwitch" disabled aria-label="托管锁定" />
+              </SettingsRow>
+              <SettingsRow
+                title="思考强度"
+                description="影响推理深度与耗时（Select，基于 ui/Menu）"
+              >
+                <Select
+                  v-model="reasoning"
+                  :options="reasoningOptions"
+                  aria-label="思考强度"
+                  data-testid="gallery-select"
+                />
+              </SettingsRow>
+              <SettingsRow title="统计范围" description="Segmented">
+                <Segmented
+                  v-model="range"
+                  :options="rangeOptions"
+                  aria-label="统计范围"
+                />
+              </SettingsRow>
+              <SettingsRow
+                title="服务器名称"
+                description="行内 TextField（sm）"
+              >
+                <TextField
+                  v-model="name"
+                  size="sm"
+                  class="inline-field"
+                  aria-label="服务器名称"
+                />
+              </SettingsRow>
+              <SettingsRow
+                title="启用完整访问"
+                description="eyebrow 插槽：标题上方的风险标签"
+              >
+                <template #eyebrow>
+                  <DsWarning :size="13" aria-hidden="true" />风险升高
+                </template>
+                <Switch v-model="fullAccess" aria-label="启用完整访问" />
+              </SettingsRow>
+            </SettingsGroup>
+
+            <SettingsGroup
+              title="表格"
+              description="SettingsTable + SettingsTableRow，列宽由 columns 决定"
+            >
+              <SettingsTable :columns="tableColumns" aria-label="示例表格">
+                <SettingsTableRow v-for="row in tableRows" :key="row.site">
+                  <span>{{ row.site }}</span>
+                  <Select
+                    v-model="row.browse"
+                    size="sm"
+                    :options="ruleOptions"
+                    :aria-label="`${row.site} 浏览`"
+                  />
+                  <Select
+                    v-model="row.download"
+                    size="sm"
+                    :options="ruleOptions"
+                    :aria-label="`${row.site} 下载`"
+                  />
+                  <span />
+                </SettingsTableRow>
+              </SettingsTable>
+            </SettingsGroup>
 
             <SettingsGroup
               title="表单"

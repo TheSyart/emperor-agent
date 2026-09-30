@@ -103,37 +103,49 @@ function archivedMeta(session: SessionInfo) {
 
 <template>
   <SettingsSection>
-    <SettingsRow title="运行状态" description="当前本地 Agent 服务状态">
-      <StatusBadge :tone="runtime.tone" dot data-testid="runtime-status">
-        {{ runtime.text }}
-      </StatusBadge>
-    </SettingsRow>
-    <SettingsRow
-      title="当前模型"
-      description="在聊天输入框中选择，新的请求会使用该模型"
-    >
-      <code class="value">{{ currentModel }}</code>
-    </SettingsRow>
-    <SettingsRow title="已绑定项目" description="Build 模式可用的本地项目数量">
-      <code class="value">{{ projectCount }}</code>
-    </SettingsRow>
-    <SettingsRow title="外观" layout="stacked">
-      <div class="cube-row" role="group" aria-label="外观">
-        <button
-          v-for="item in themes"
-          :key="item.key"
-          type="button"
-          class="theme-cube"
-          :class="{ selected: theme.preference.value === item.key }"
-          :aria-pressed="theme.preference.value === item.key"
-          :data-theme-option="item.key"
-          @click="theme.set(item.key)"
-        >
-          <component :is="item.icon" :size="16" />
-          {{ item.label }}
-        </button>
-      </div>
-    </SettingsRow>
+    <SettingsGroup>
+      <SettingsRow title="运行状态" description="当前本地 Agent 服务状态">
+        <StatusBadge :tone="runtime.tone" dot data-testid="runtime-status">
+          {{ runtime.text }}
+        </StatusBadge>
+      </SettingsRow>
+      <SettingsRow
+        title="当前模型"
+        description="在聊天输入框中选择，新的请求会使用该模型"
+      >
+        <code class="value">{{ currentModel }}</code>
+      </SettingsRow>
+      <SettingsRow
+        title="已绑定项目"
+        description="Build 模式可用的本地项目数量"
+      >
+        <code class="value">{{ projectCount }}</code>
+      </SettingsRow>
+    </SettingsGroup>
+
+    <SettingsGroup title="外观">
+      <SettingsRow
+        title="主题"
+        description="跟随系统时随 macOS 自动切换"
+        layout="stacked"
+      >
+        <div class="cube-row" role="group" aria-label="外观">
+          <button
+            v-for="item in themes"
+            :key="item.key"
+            type="button"
+            class="theme-cube"
+            :class="{ selected: theme.preference.value === item.key }"
+            :aria-pressed="theme.preference.value === item.key"
+            :data-theme-option="item.key"
+            @click="theme.set(item.key)"
+          >
+            <component :is="item.icon" :size="16" />
+            {{ item.label }}
+          </button>
+        </div>
+      </SettingsRow>
+    </SettingsGroup>
 
     <SettingsGroup title="已归档对话" description="恢复后会重新出现在主侧边栏">
       <EmptyState

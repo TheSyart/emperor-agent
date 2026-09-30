@@ -12,13 +12,18 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
+  SettingsHero,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
+  SettingsTable,
+  SettingsTableRow,
   StatusBadge,
   Switch,
   TextArea,
   TextField,
 } from './index'
+import Modal from '../../ui/Modal.vue'
 
 let app: App | null = null
 let container: HTMLDivElement | null = null
@@ -356,5 +361,178 @@ describe('display primitives', () => {
     expect(root.querySelector('.ds-empty-state .title')?.textContent).toBe(
       '暂无',
     )
+  })
+})
+
+describe('card layout', () => {
+  it('boxes a rows group in a card; plain and stack groups and card bodies stay flat', () => {
+    const root = mount(() =>
+      h(SettingsSection, null, {
+        default: () => [
+          h(SettingsGroup, { title: '控制' }, () => [
+            h(SettingsRow, { title: '任意应用' }),
+            h(SettingsRow, { title: 'Chrome 和 Edge' }),
+          ]),
+          h(SettingsGroup, { title: '平铺', plain: true }, () =>
+            h(SettingsRow, { title: '平铺行' }),
+          ),
+          h(SettingsGroup, { title: '服务器', variant: 'stack' }, () =>
+            h(SettingsCard, { title: '卡片' }, () =>
+              h(SettingsRow, { title: '卡片里的行' }),
+            ),
+          ),
+        ],
+      }),
+    )
+    const groups = [...root.querySelectorAll('.ds-settings-group')]
+    expect(groups.map((g) => g.hasAttribute('data-card'))).toEqual([
+      true,
+      false,
+      false,
+    ])
+    const inCard = (title: string) =>
+      [...root.querySelectorAll('.ds-settings-row')]
+        .find((row) => row.querySelector('.title')?.textContent === title)
+        ?.hasAttribute('data-in-card')
+    expect(inCard('任意应用')).toBe(true)
+    expect(inCard('Chrome 和 Edge')).toBe(true)
+    expect(inCard('平铺行')).toBe(false)
+    expect(inCard('卡片里的行')).toBe(false)
+  })
+
+  it('gives empty states and selects the card look inside a card group', () => {
+    const root = mount(() =>
+      h(SettingsGroup, { title: '名单' }, () => [
+        h(EmptyState, { title: '暂无' }),
+        h(SettingsRow, { title: '语言' }, () =>
+          h(Select, {
+            modelValue: 'zh',
+            options: [{ value: 'zh', label: '中文' }],
+            ariaLabel: '语言',
+          }),
+        ),
+      ]),
+    )
+    const empty = root.querySelector('.ds-empty-state')!
+    expect(empty.getAttribute('data-variant')).toBe('plain')
+    expect(empty.hasAttribute('data-in-card')).toBe(true)
+    expect(root.querySelector('.ds-select')!.hasAttribute('data-in-card')).toBe(
+      true,
+    )
+  })
+
+  it('keeps rows in a dialog opened from a card group flat', async () => {
+    mount(() =>
+      h(SettingsGroup, { title: '名单' }, () => [
+        h(SettingsRow, { title: '行' }),
+        h(Modal, { open: true, title: '添加' }, () =>
+          h(SettingsRow, { title: '弹窗里的行' }),
+        ),
+      ]),
+    )
+    await flush()
+    const dialogRow = document.body.querySelector('.ds-modal .ds-settings-row')!
+    expect(dialogRow.hasAttribute('data-in-card')).toBe(false)
+  })
+
+  it('shows an eyebrow above a row title', () => {
+    const root = mount(() =>
+      h(
+        SettingsRow,
+        { title: '启用完整访问' },
+        {
+          eyebrow: () => '风险升高',
+          default: () => h(Switch, { ariaLabel: 'x' }),
+        },
+      ),
+    )
+    const text = root.querySelector('.ds-settings-row > .text')!
+    expect(text.firstElementChild?.className).toBe('eyebrow')
+    expect(text.querySelector('.eyebrow')?.textContent).toBe('风险升高')
+  })
+
+  it('renders a notice with its tone, title, text and actions', () => {
+    const root = mount(() =>
+      h('div', null, [
+        h(
+          SettingsNotice,
+          { tone: 'warn', title: '还缺 2 项系统权限' },
+          {
+            default: () => '辅助功能和屏幕录制要授予 Helper。',
+            actions: () => h('button', { type: 'button' }, '请求权限'),
+          },
+        ),
+        h(SettingsNotice, { tone: 'info', title: '这些应用现在可以操作了' }),
+      ]),
+    )
+    const [warn, info] = [...root.querySelectorAll('.ds-settings-notice')]
+    expect(warn.getAttribute('data-tone')).toBe('warn')
+    expect(warn.getAttribute('role')).toBe('alert')
+    expect(warn.querySelector('.title')?.textContent).toBe('还缺 2 项系统权限')
+    expect(warn.querySelector('.description')?.textContent).toContain('Helper')
+    expect(warn.querySelector('.actions button')?.textContent).toBe('请求权限')
+    expect(info.getAttribute('role')).toBe('status')
+    expect(info.querySelector('.description')).toBeNull()
+  })
+
+  it('renders a hero with a large title, badge, description and actions', () => {
+    const root = mount(() =>
+      h(
+        SettingsHero,
+        { title: 'Chrome 和 Edge', description: '扩展 0.2.0' },
+        {
+          badge: () => h(StatusBadge, { tone: 'ok' }, () => '已连接'),
+          actions: () => h('button', { type: 'button' }, '移除扩展程序'),
+        },
+      ),
+    )
+    const hero = root.querySelector('.ds-settings-hero')!
+    expect(hero.querySelector('h2.title')?.textContent).toBe('Chrome 和 Edge')
+    expect(hero.querySelector('.meta .ds-status-badge')?.textContent).toContain(
+      '已连接',
+    )
+    expect(hero.querySelector('.meta .description')?.textContent).toBe(
+      '扩展 0.2.0',
+    )
+    expect(hero.querySelector('.actions button')?.textContent).toBe(
+      '移除扩展程序',
+    )
+  })
+
+  it('lays out a table with column headers and rows', () => {
+    const root = mount(() =>
+      h(
+        SettingsTable,
+        {
+          ariaLabel: '智能体权限',
+          columns: [
+            { key: 'site', label: '网站或模式' },
+            { key: 'browse', label: '浏览' },
+            { key: 'download', label: '下载' },
+            { key: 'remove', label: '', width: '28px' },
+          ],
+        },
+        () =>
+          ['默认', 'github.com'].map((site) =>
+            h(SettingsTableRow, { key: site }, () => [
+              h('span', site),
+              h('span', '允许'),
+              h('span', '需要批准'),
+              h('span'),
+            ]),
+          ),
+      ),
+    )
+    const table = root.querySelector('[role="table"]')!
+    expect(table.getAttribute('aria-label')).toBe('智能体权限')
+    expect(
+      [...table.querySelectorAll('[role="columnheader"]')].map(
+        (cell) => cell.textContent,
+      ),
+    ).toEqual(['网站或模式', '浏览', '下载', ''])
+    const rows = table.querySelectorAll('.ds-settings-table-row[role="row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[1].querySelectorAll('[role="cell"]')).toHaveLength(4)
+    expect((table as HTMLElement).style.gridTemplateColumns).toContain('28px')
   })
 })

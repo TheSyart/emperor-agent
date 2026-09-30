@@ -113,6 +113,7 @@ const validationState = computed(() => {
     <SettingsGroup
       title="hooks.json"
       description="编辑全局配置；保存前自动校验，⌘S 保存"
+      plain
     >
       <template #actions>
         <StatusBadge v-if="dirty" tone="warn" dot>未保存</StatusBadge>

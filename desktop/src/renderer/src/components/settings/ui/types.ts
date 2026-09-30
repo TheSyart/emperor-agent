@@ -25,3 +25,10 @@ export interface DefinitionItem {
   /** Monospace value (paths, ids, commands). */
   mono?: boolean
 }
+
+/** A SettingsTable column: width is a grid track size (default minmax(0, 1fr)). */
+export interface SettingsTableColumn {
+  key: string
+  label: string
+  width?: string
+}

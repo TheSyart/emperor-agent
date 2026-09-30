@@ -12,9 +12,10 @@
  * - compact?: 12px padding, left-aligned single row (inside cards / groups).
  * Slots: `icon`, `description`, default (actions — Buttons).
  */
-import type { Component } from 'vue'
+import { computed, type Component } from 'vue'
+import { useSurface } from '../../ui/surface'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     title: string
     description?: string
@@ -29,13 +30,19 @@ withDefaults(
     compact: false,
   },
 )
+
+// Inside a card group the card is the frame: no dashed box of its own.
+const surface = useSurface()
+const inCard = computed(() => surface.value === 'card')
+const shownVariant = computed(() => (inCard.value ? 'plain' : props.variant))
 </script>
 
 <template>
   <div
     class="ds-empty-state"
-    :data-variant="variant"
+    :data-variant="shownVariant"
     :data-compact="compact || undefined"
+    :data-in-card="inCard || undefined"
   >
     <span v-if="$slots.icon || icon" class="icon" aria-hidden="true">
       <slot name="icon"><component :is="icon" :size="20" /></slot>
@@ -77,6 +84,14 @@ withDefaults(
 
 .ds-empty-state[data-compact][data-variant='plain'] {
   padding: var(--space-3) 0;
+}
+
+.ds-empty-state[data-in-card] {
+  padding: var(--space-4);
+}
+
+.ds-empty-state[data-in-card][data-compact] {
+  padding: var(--space-3) var(--space-4);
 }
 
 .icon {

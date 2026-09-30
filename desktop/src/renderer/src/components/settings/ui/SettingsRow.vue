@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /**
- * SettingsRow — the dsh Setting-Cell: text on the left (14/22 title +
- * 13/20 tertiary description), control on the right, 16px vertical
+ * SettingsRow — the dsh Setting-Cell: text on the left (14/22 medium title +
+ * 12/18 tertiary description), control on the right, 16px vertical
  * padding and an l2 hairline under it (dropped on the last row of its
  * container). The text keeps ≥ 240px: a control that does not fit beside
  * it wraps onto its own line under the text (small ones such as Switch stay
  * inline); under a narrow section container (< 440px, @container) the text
- * drops its 48px trailing air.
+ * drops its trailing air.
+ *
+ * Inside a card group (the 'card' surface, ui/surface.ts) the row takes the
+ * card look: 12px / 16px padding and an inset l1 hairline.
  *
  * Props:
  * - title?: row title.
@@ -16,9 +19,16 @@
  * - divider (default true): draw the bottom hairline.
  * - labelFor?: id of the control the title labels (renders a <label>).
  * - dense?: 10px vertical padding (list rows: archived sessions, entries).
- * Slots: `title`, `description`, `badge` (inline after the title, e.g. a
+ * Slots: `eyebrow` (a small label above the title, e.g. ⚠ 风险升高),
+ * `title`, `description`, `badge` (inline after the title, e.g. a
  * StatusBadge), default (the control / value).
  */
+import { computed } from 'vue'
+import { useSurface } from '../../ui/surface'
+
+const surface = useSurface()
+const inCard = computed(() => surface.value === 'card')
+
 withDefaults(
   defineProps<{
     title?: string
@@ -45,11 +55,19 @@ withDefaults(
     :data-layout="layout"
     :data-divider="divider || undefined"
     :data-dense="dense || undefined"
+    :data-in-card="inCard || undefined"
   >
     <div
-      v-if="$slots.title || title || $slots.description || description"
+      v-if="
+        $slots.eyebrow ||
+        $slots.title ||
+        title ||
+        $slots.description ||
+        description
+      "
       class="text"
     >
+      <div v-if="$slots.eyebrow" class="eyebrow"><slot name="eyebrow" /></div>
       <div v-if="$slots.title || title || $slots.badge" class="title-line">
         <component
           :is="labelFor ? 'label' : 'div'"
@@ -112,14 +130,24 @@ withDefaults(
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 400;
+  font-weight: 500;
   color: rgb(var(--label-primary));
   overflow-wrap: anywhere;
 }
 
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  font-weight: 500;
+  color: rgb(var(--state-warn-label));
+}
+
 .description {
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));
   overflow-wrap: anywhere;
   text-wrap: pretty;
@@ -153,7 +181,35 @@ withDefaults(
   display: block;
 }
 
-/* Very narrow sections: drop the 48px air so the wrap point moves out. */
+/* In a card: 16px sides, an inset hairline, less air before the control. */
+.ds-settings-row[data-in-card] {
+  position: relative;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.ds-settings-row[data-in-card][data-dense] {
+  padding: var(--space-2-5) var(--space-4);
+}
+
+.ds-settings-row[data-in-card][data-divider] {
+  border-bottom: none;
+}
+
+.ds-settings-row[data-in-card][data-divider]:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: var(--space-4);
+  bottom: 0;
+  left: var(--space-4);
+  border-bottom: 1px solid var(--border-l1);
+}
+
+.ds-settings-row[data-in-card] .text {
+  padding-right: var(--space-4);
+}
+
+/* Very narrow sections: drop the trailing air so the wrap point moves out. */
 @container (max-width: 439px) {
   .text {
     flex-basis: 200px;

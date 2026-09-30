@@ -56,10 +56,26 @@
  *        </SettingsGroup>
  *      </SettingsSection>
  *
- *    - SettingsRow: text left / control right, 16px vertical padding, l2
- *      hairline (last row drops it); `layout="stacked"` puts the control
- *      under the text; `dense` for list rows. Rows stack automatically when
+ *    - A SettingsGroup of rows is a card: the title (and one-line
+ *      description) above it, the rows inside with 16px sides and inset
+ *      hairlines. Put every row of a page in a group — a group without a
+ *      title is just the card. `plain` keeps a group flat for content that
+ *      brings its own frame (a CodeEditor); `variant="stack"` holds
+ *      SettingsCards. Rows, EmptyStates and Selects switch to their card
+ *      look by themselves (ui/surface.ts); SettingsCard and Modal reset it.
+ *    - Order a page by what the user decides: the switches and choices
+ *      first, then the rest. When something is wrong, show one
+ *      SettingsNotice at the top (tone warn / error / info, with the fix
+ *      buttons) instead of status rows; a page that is fine shows none.
+ *    - SettingsRow: text left / control right; `layout="stacked"` puts the
+ *      control under the text; `dense` for list rows; `#eyebrow` for a small
+ *      label above the title (⚠ 风险升高). Rows stack automatically when
  *      the section container is < 440px (@container, not the viewport).
+ *    - Columns of settings (per-site rules): SettingsTable + SettingsTableRow
+ *      in a group.
+ *    - A sub page about one thing (电脑操作 › Chrome 和 Edge) may open with
+ *      SettingsHero (20/28 title, status badge, its own actions); it is the
+ *      only heading a section body renders.
  *    - Forms: wrap each control in <Field label hint error> — it wires id,
  *      aria-describedby and aria-invalid into TextField / TextArea /
  *      CodeEditor / Select / SearchField. Buttons stay ui/Button (size="sm"
@@ -78,6 +94,10 @@
  */
 export { default as SettingsSection } from './SettingsSection.vue'
 export { default as SettingsGroup } from './SettingsGroup.vue'
+export { default as SettingsHero } from './SettingsHero.vue'
+export { default as SettingsNotice } from './SettingsNotice.vue'
+export { default as SettingsTable } from './SettingsTable.vue'
+export { default as SettingsTableRow } from './SettingsTableRow.vue'
 export { default as SettingsRow } from './SettingsRow.vue'
 export { default as SettingsCard } from './SettingsCard.vue'
 export { default as Field } from './Field.vue'
@@ -92,7 +112,12 @@ export { default as EmptyState } from './EmptyState.vue'
 export { default as DefinitionList } from './DefinitionList.vue'
 export { default as StatusBadge } from './StatusBadge.vue'
 export { default as Metric } from './Metric.vue'
-export type { DefinitionItem, SegmentedOption, SelectOption } from './types'
+export type {
+  DefinitionItem,
+  SegmentedOption,
+  SelectOption,
+  SettingsTableColumn,
+} from './types'
 export { FIELD_CONTEXT, settingsId, useFieldControl } from './fieldContext'
 export {
   refreshAction,

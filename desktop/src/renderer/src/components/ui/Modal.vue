@@ -18,6 +18,7 @@
  */
 import { DsClose } from '../icons/ds'
 import { useModalLayer } from './modalStack'
+import { provideSurface } from './surface'
 
 const props = withDefaults(
   defineProps<{
@@ -45,6 +46,9 @@ function close() {
 useModalLayer(open, () => {
   if (props.closable) close()
 })
+
+// A dialog opened from a settings card is its own surface.
+provideSurface(() => 'panel')
 </script>
 
 <template>
