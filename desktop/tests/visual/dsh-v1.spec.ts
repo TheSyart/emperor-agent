@@ -280,7 +280,8 @@ for (const section of settingsSections) {
 
 test('settings modal light + legacy route redirect', async ({ page }) => {
   await open(page, '/settings/model', { theme: 'light' })
-  await expect(page).toHaveURL(/\/chat\?settings=model/)
+  // The legacy route lands on /chat, which then follows the active session.
+  await expect(page).toHaveURL(/\/chat\/build-ui\?settings=model$/)
   await expect(page.getByRole('dialog').first()).toBeVisible()
   await shot(page, 'settings-model-light')
   await page.keyboard.press('Escape')

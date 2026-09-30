@@ -57,5 +57,9 @@ if (
       createApp(TrajectoryGallery).mount('#app'),
   )
 } else {
-  createApp(App).use(router).mount('#app')
+  const app = createApp(App).use(router)
+  // Mount once the first navigation (a lazily loaded route) settles: a
+  // sidebar click before that would be taken as the first navigation and
+  // replace the start entry, leaving 后退 with nowhere to go.
+  void router.isReady().finally(() => app.mount('#app'))
 }
