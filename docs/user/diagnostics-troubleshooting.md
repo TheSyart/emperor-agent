@@ -111,7 +111,7 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 
 ## GitHub CLI（gh）
 
-「Pull Request」页和「审查」中的 PR 操作都依赖本机的 GitHub CLI。`gh` 是签名工具目录中的可选工具，要求 2.40.0 或更高版本；Emperor 只探测它，不会替你安装或登录。
+「Pull Request」页（包括 GitHub 插件的 Issue、CI 标签）和「审查」中的 PR 操作都依赖本机的 GitHub CLI。`gh` 是签名工具目录中的可选工具，要求 2.40.0 或更高版本；Emperor 只探测它，不会替你安装或登录。
 
 1. 在“设置 → 诊断 → 环境工具”的“当前项目”分组中查看 `gh` 的状态和版本。
 2. 未安装时按平台安装：macOS 用 Homebrew（`brew install gh`），Windows 用 winget（`winget install GitHub.cli`），Linux 按 [GitHub CLI 官方安装说明](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) 安装。
@@ -125,6 +125,15 @@ Pull Request 页的三种不可用状态：
 | 需要 GitHub CLI（gh） | 没有探测到可用的 `gh`，或版本低于要求；页面给出安装命令和「前往诊断」 |
 | GitHub CLI 尚未登录   | `gh` 可用但没有登录，运行 `gh auth login` 后重新检测                  |
 | 无法连接 GitHub CLI   | `gh` 调用失败，页面显示脱敏后的错误信息，可以「重试」                 |
+
+`gh` 可用时，单次读取还可能遇到：
+
+| 提示                               | 含义                                                                |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| GitHub 暂时限流，请稍后再试        | GitHub 对当前账户限流（包括二级限流），过一会儿再刷新               |
+| 当前账户没有读取这个仓库的权限     | 仓库存在，但 `gh` 登录的账户或其令牌权限不够读取                    |
+| 找不到……，或当前账户无权访问该仓库 | 仓库、Issue 或运行记录不存在；GitHub 对无权查看的私有仓库也这样回应 |
+| GitHub 插件已停用                  | Issue、CI 标签属于 GitHub 插件，在「能力 › 插件」里重新启用         |
 
 Emperor 运行 `gh` 时不传递 `GH_TOKEN`、`GITHUB_TOKEN` 等 token 类环境变量，只使用 `gh` 自己保存的登录状态（会保留 `GH_CONFIG_DIR`、`XDG_CONFIG_HOME` 等定位 `gh` 配置目录的变量）。只在 shell 里设置了 token 环境变量、没有执行 `gh auth login` 时，页面会显示未登录。
 

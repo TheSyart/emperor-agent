@@ -29,6 +29,16 @@ export type {
 export type { GitWorktreeSummary } from '../workspace/git-worktrees'
 export type { PullRequestSummary } from '../workspace/git-pull-requests'
 export type {
+  GitHubIssueComment,
+  GitHubIssueDetail,
+  GitHubIssueListFilter,
+  GitHubIssueListItem,
+  GitHubIssueListResult,
+  GitHubLabel,
+  GitHubRunDetail,
+  GitHubRunJob,
+  GitHubRunListItem,
+  GitHubRunListResult,
   PullRequestBrowserStatus,
   PullRequestBrowserUnavailableReason,
   PullRequestCheck,

@@ -14,8 +14,14 @@
         "longDescription": "用本机已登录的 gh 查看 Pull Request、Issue 和 CI 运行记录。只读，不会替你提交、评论或合并。",
         "developerName": "Emperor Agent",
         "category": "开发",
-        "logo": "./assets/logo.png"
-      }
+        "logo": "./assets/logo.png",
+        "defaultPrompt": [
+          "看看我名下还开着的 Pull Request，哪些在等我审查",
+          "这个仓库最近一次 CI 为什么失败？",
+          "列出分配给我的 Issue，按更新时间排好"
+        ]
+      },
+      "apps": "./.app.json"
     }
   }
 }

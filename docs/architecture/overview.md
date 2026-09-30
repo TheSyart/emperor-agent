@@ -81,6 +81,8 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的三栏网格：左侧会�
 | `/scheduler`                                       | 定时任务                                   | 不显示     |
 | `/capabilities/:tab(plugins\|skills\|mcp\|tools)?` | 能力（插件 / Skills / MCP / 工具四个标签） | 不显示     |
 | `/pulls/:owner?/:repo?/:number?`                   | Pull Request                               | 不显示     |
+| `/github/issues/:owner?/:repo?/:number?`           | GitHub 插件的 Issue 标签                   | 不显示     |
+| `/github/ci/:owner?/:repo?/:runId?`                | GitHub 插件的 CI 标签                      | 不显示     |
 | `/explore`                                         | 探索                                       | 不显示     |
 
 设置弹窗由当前路由上的 `?settings=<分区>` 查询参数打开，对话页和整页都可以叠加它。定时任务、插件、Skills、MCP 与工具已从弹窗移到整页：`?settings=scheduler|plugins|skills|mcp|tools` 由全局 `beforeEach` 守卫转到对应页面，旧的 `/plugins/:tab?` 转到 `/capabilities/:tab`，`/skills/:name?` 转到 `/capabilities/skills?skill=<name>`，`/mcp`、`/tools` 转到对应标签；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 打开「记忆」；其余旧的独立设置路由仍转成 `/chat?settings=<分区>`。
@@ -96,7 +98,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的三栏网格：左侧会�
 - 文件是只读、有界的项目文件浏览。
 - 终端的 PTY 由 Electron main 注入 Core `TerminalService`。它是用户直接操作的系统 Shell，不进入 Agent loop 或 Agent 权限，也不写聊天记录或 session log。
 - 浏览器不经过 CoreApi：Electron main 的 `BrowserViewHost`（`desktop/src/main/browser-view.ts`）在内存分区中托管一个 sandboxed `WebContentsView`，只加载经 `browser-view-policy.ts` 规范化的、用户在地址栏提交的 `http(s)` 地址，拒绝全部权限请求、下载和应用内弹窗。
-- 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。
+- 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。GitHub 插件启用时页面加上 Issue、CI 两个标签（`github.*`，同样只读）；插件停用时标签消失，Core 拒绝 `github.*`。
 
 这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision、确认和浏览器地址由 Core 或 Electron main 校验。Trajectory 的「详情」列（Inspector）是轨迹视图内部的一列，不属于右侧工作台；对话中的 Inspect 跳转到 `/chat/:id/trajectory?call=<callId>` 并打开这一列。
 

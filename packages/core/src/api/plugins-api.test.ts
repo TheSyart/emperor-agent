@@ -87,9 +87,9 @@ describe('plugins through CoreApi', () => {
     )
     await installKit(api)
     expect(
-      api.plugins
-        .getDetail({ pluginId: 'hello-kit', scope: 'user' })
-        .components.map(({ id, state, reason }) => [id, state, reason]),
+      (
+        await api.plugins.getDetail({ pluginId: 'hello-kit', scope: 'user' })
+      ).components.map(({ id, state, reason }) => [id, state, reason]),
     ).toEqual([
       ['hello', 'failed', '与个人的同名 Skill 冲突，未生效'],
       ['wave', 'available', null],
@@ -98,9 +98,9 @@ describe('plugins through CoreApi', () => {
 
   it('rejects an unknown plugin with a stable code', async () => {
     fixture = await makeApi()
-    expect(() =>
+    await expect(
       fixture!.api.plugins.getDetail({ pluginId: 'nobody', scope: 'user' }),
-    ).toThrow(expect.objectContaining({ code: 'plugin_not_found' }))
+    ).rejects.toMatchObject({ code: 'plugin_not_found' })
   })
 })
 
@@ -202,6 +202,124 @@ describe('packages shipped with Emperor through CoreApi', () => {
   })
 })
 
+/** No real gh in unit tests: an absent CLI, or a scripted one. */
+const NO_GH = { github: { resolveRuntime: async () => null } }
+
+describe('GitHub reads through CoreApi', () => {
+  it('serves Issue and CI reads only while the GitHub plugin is on', async () => {
+    const root = tmp('emperor-plugin-github-')
+    writePackage(
+      join(root, 'bundled-plugins', 'github'),
+      portablePackage('github', {}, { version: '1.0.0' }),
+    )
+    fixture = await makeApi({ root, extra: NO_GH })
+    const { api } = fixture
+    // On: the call reaches gh (none in this sandbox), not the plugin gate.
+    await expect(
+      invokeCoreOperation(api, 'github.listIssues', [{ filter: 'assigned' }]),
+    ).rejects.toMatchObject({ code: 'pull_request_gh_missing' })
+    await api.plugins.setEnabled({
+      pluginId: 'github',
+      scope: 'managed',
+      enabled: false,
+    })
+    for (const [key, input] of [
+      ['github.listIssues', {}],
+      ['github.viewIssue', { repo: 'acme/widgets', number: 1 }],
+      ['github.listRuns', { repo: 'acme/widgets' }],
+      ['github.viewRun', { repo: 'acme/widgets', runId: 1 }],
+    ] as const)
+      await expect(
+        invokeCoreOperation(api, key, [input]),
+      ).rejects.toMatchObject({
+        code: 'github_plugin_disabled',
+      })
+  })
+
+  it('shows whether the GitHub plugin can reach gh in its detail', async () => {
+    const root = tmp('emperor-plugin-github-')
+    writePackage(
+      join(root, 'bundled-plugins', 'github'),
+      portablePackage(
+        'github',
+        { '.app.json': { apps: { github: { title: 'GitHub（本机 gh）' } } } },
+        { extensions: { 'com.openai': { apps: './.app.json' } } },
+      ),
+    )
+    fixture = await makeApi({ root, extra: NO_GH })
+    const detail = await fixture.api.plugins.getDetail({
+      pluginId: 'github',
+      scope: 'managed',
+    })
+    expect(detail.components).toEqual([
+      expect.objectContaining({
+        kind: 'app',
+        id: 'github',
+        state: 'needs_connection',
+        reason: expect.stringContaining('gh'),
+      }),
+    ])
+    await fixture.api.close()
+
+    // A logged-in gh: the member is available and names the account.
+    fixture = await makeApi({
+      root,
+      extra: {
+        github: {
+          resolveRuntime: async () => ({
+            executable: '/fake/gh',
+            env: {},
+            version: '2.73.0',
+          }),
+          run: async () => ({ exitCode: 0, stdout: 'octo-dev\n', stderr: '' }),
+        },
+      },
+    })
+    expect(
+      (
+        await fixture.api.plugins.getDetail({
+          pluginId: 'github',
+          scope: 'managed',
+        })
+      ).components[0],
+    ).toMatchObject({ state: 'available', reason: '已登录 octo-dev' })
+
+    // Another package's app of the same name is not the shipped GitHub app:
+    // it stays unsupported instead of borrowing the gh login.
+    const source = writePackage(
+      join(tmp('emperor-plugin-app-'), 'lookalike'),
+      portablePackage(
+        'lookalike',
+        { '.app.json': { apps: { github: { title: 'GitHub' } } } },
+        { extensions: { 'com.openai': { apps: './.app.json' } } },
+      ),
+    )
+    const preview = await fixture.api.plugins.inspect({
+      kind: 'local',
+      path: source,
+    })
+    await fixture.api.plugins.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    expect(
+      (
+        await fixture.api.plugins.getDetail({
+          pluginId: 'lookalike',
+          scope: 'user',
+        })
+      ).components,
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'app',
+        id: 'github',
+        state: 'unsupported',
+      }),
+    ])
+  })
+})
+
 describe('plugin MCP servers and hooks through CoreApi', () => {
   it('runs them for real, stops them when disabled, and never touches user files', async () => {
     fixture = await makeApi({ replies: [...bashTurn('b1'), ...bashTurn('b2')] })
@@ -252,9 +370,9 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
     const data = join(stateRoot, 'plugins', 'data', 'where-kit')
     expect(readFileSync(join(data, 'calls.log'), 'utf8')).toBe('one\n')
     expect(
-      api.plugins
-        .getDetail({ pluginId: 'where-kit', scope: 'user' })
-        .components.map(({ kind, state }) => [kind, state]),
+      (
+        await api.plugins.getDetail({ pluginId: 'where-kit', scope: 'user' })
+      ).components.map(({ kind, state }) => [kind, state]),
     ).toEqual([
       ['mcp', 'running'],
       ['hook', 'available'],

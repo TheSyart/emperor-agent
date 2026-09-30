@@ -79,6 +79,9 @@ export type PullRequestErrorCode =
   | 'pull_request_gh_failed'
   | 'pull_request_invalid_response'
   | 'pull_request_output_too_large'
+  | 'pull_request_rate_limited'
+  | 'pull_request_forbidden'
+  | 'github_plugin_disabled'
 
 /**
  * How the page reacts to a failure:
@@ -107,6 +110,9 @@ const ERROR_MESSAGES: Readonly<Record<PullRequestErrorCode, string>> = {
   pull_request_gh_failed: 'GitHub CLI 操作失败。',
   pull_request_invalid_response: 'GitHub CLI 返回了无法识别的数据。',
   pull_request_output_too_large: 'GitHub 返回的数据超过了安全读取上限。',
+  pull_request_rate_limited: 'GitHub 暂时限流，请稍后再试。',
+  pull_request_forbidden: '当前账户没有读取这个仓库的权限。',
+  github_plugin_disabled: 'GitHub 插件已停用。',
 }
 
 const ERROR_KINDS: Readonly<
@@ -119,6 +125,9 @@ const ERROR_KINDS: Readonly<
   pull_request_gh_failed: 'failed',
   pull_request_invalid_response: 'failed',
   pull_request_output_too_large: 'failed',
+  pull_request_rate_limited: 'failed',
+  pull_request_forbidden: 'not_found',
+  github_plugin_disabled: 'failed',
 }
 
 function isPullRequestErrorCode(value: unknown): value is PullRequestErrorCode {
@@ -146,8 +155,11 @@ export function pullRequestErrorInfo(error: unknown): PullRequestErrorInfo {
   return {
     code,
     kind: ERROR_KINDS[code],
+    // Core names what failed (gh's detail, or which Issue / run is missing).
     message:
-      code === 'pull_request_gh_failed' && detail
+      (code === 'pull_request_gh_failed' ||
+        code === 'pull_request_not_found') &&
+      detail
         ? detail
         : ERROR_MESSAGES[code],
   }

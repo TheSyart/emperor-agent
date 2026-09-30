@@ -43,6 +43,7 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
       skills: [
         { name: 'skill-creator', source: 'builtin' },
         { name: 'computer-use', source: 'builtin' },
+        { name: 'github', source: 'plugin' },
       ],
     })),
     diagnostics: {
@@ -153,6 +154,7 @@ describe('packaged smoke contract', () => {
       bootstrap: {
         ok: true,
         builtInSkills: ['computer-use', 'skill-creator'],
+        pluginSkills: ['github'],
       },
       diagnostics: {
         ok: true,
@@ -199,6 +201,47 @@ describe('packaged smoke contract', () => {
     expect(serialized).not.toContain(os.homedir())
     expect(serialized).not.toContain(process.env.PATH || '__missing_path__')
     expect(serialized).not.toContain(fixture.stateRoot)
+  })
+
+  it.each([
+    [
+      'without the GitHub plugin Skill',
+      [
+        { name: 'skill-creator', source: 'builtin' },
+        { name: 'computer-use', source: 'builtin' },
+      ],
+    ],
+    [
+      'with a Skill from another source',
+      [
+        { name: 'skill-creator', source: 'builtin' },
+        { name: 'computer-use', source: 'builtin' },
+        { name: 'github', source: 'plugin' },
+        { name: 'mine', source: 'user' },
+      ],
+    ],
+  ])('fails closed %s', async (_name, skills) => {
+    const fixture = smokeFixture()
+    const { core } = makeCore({
+      bootstrap: vi.fn(async () => ({ app: 'Emperor Agent', skills })),
+    })
+    await expect(
+      runPackagedSmoke({
+        core,
+        runtimeRoot: fixture.runtimeRoot,
+        stateRoot: fixture.stateRoot,
+        receiptPath: fixture.receiptPath,
+        appVersion: '0.1.0',
+        runtimeRevision: 'a'.repeat(64),
+        commit: 'local',
+        platform: 'linux',
+        arch: 'x64',
+        verifyRenderer: async () => rendererReceipt(),
+      }),
+    ).rejects.toThrow(/skills/i)
+    expect(
+      JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')),
+    ).toMatchObject({ exitCode: 1, error: { code: 'smoke_failed' } })
   })
 
   it('fails closed when bootstrap exposes anything beyond the built-in skills', async () => {

@@ -23,6 +23,10 @@ const CapabilitiesPage = () =>
   import('./components/pages/capabilities/CapabilitiesPage.vue')
 const PullRequestsPage = () =>
   import('./components/pages/pulls/PullRequestsPage.vue')
+const GitHubIssuesPage = () =>
+  import('./components/pages/github/GitHubIssuesPage.vue')
+const GitHubRunsPage = () =>
+  import('./components/pages/github/GitHubRunsPage.vue')
 const ExplorePage = () => import('./components/pages/explore/ExplorePage.vue')
 
 /** Routes that render inside the conversation shell (workspace available). */
@@ -98,6 +102,20 @@ export const routeRecords: RouteRecordRaw[] = [
     component: PullRequestsPage,
     meta: { label: 'Pull Request', page: true },
   },
+  // The GitHub plugin's Issue and CI views (tabs of the Pull Request page).
+  {
+    path: '/github/issues/:owner?/:repo?/:number?',
+    name: 'github-issues',
+    component: GitHubIssuesPage,
+    meta: { label: 'Issue', page: true },
+  },
+  {
+    path: '/github/ci/:owner?/:repo?/:runId?',
+    name: 'github-ci',
+    component: GitHubRunsPage,
+    meta: { label: 'CI', page: true },
+  },
+  { path: '/github', redirect: '/github/issues' },
   {
     path: '/explore',
     name: 'explore',

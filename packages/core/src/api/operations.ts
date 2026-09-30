@@ -481,6 +481,43 @@ const pullRequestListSchema = z
     limit: z.number().int().min(1).max(50).optional(),
   })
   .strict()
+const githubQuerySchema = z
+  .string()
+  .max(200)
+  .refine(
+    (value) =>
+      ![...value].some((character) => {
+        const code = character.charCodeAt(0)
+        return code < 32 || code === 127
+      }),
+    'invalid search query',
+  )
+const githubIssueListSchema = z
+  .object({
+    filter: z
+      .enum(['involved', 'owned', 'assigned', 'created', 'mentioned'])
+      .optional(),
+    query: githubQuerySchema.optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .strict()
+const githubRunListSchema = z
+  .object({
+    repo: pullRequestRepoSchema,
+    branch: z
+      .string()
+      .regex(/^(?!-)[A-Za-z0-9._/-]{1,200}$/, 'invalid branch')
+      .refine((value) => !value.includes('..'), 'invalid branch')
+      .optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .strict()
+const githubRunRefSchema = z
+  .object({
+    repo: pullRequestRepoSchema,
+    runId: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict()
 const terminalIdentitySchema = z
   .object({ sessionId: idSchema, terminalId: idSchema })
   .strict()
@@ -1269,6 +1306,20 @@ export const CORE_OPERATION_REGISTRY = {
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
+  ),
+  'github.listIssues': operation(
+    z.tuple([githubIssueListSchema]),
+    (api, [input]) => api.github.listIssues(input),
+  ),
+  'github.viewIssue': operation(
+    z.tuple([pullRequestRefSchema]),
+    (api, [input]) => api.github.viewIssue(input),
+  ),
+  'github.listRuns': operation(z.tuple([githubRunListSchema]), (api, [input]) =>
+    api.github.listRuns(input),
+  ),
+  'github.viewRun': operation(z.tuple([githubRunRefSchema]), (api, [input]) =>
+    api.github.viewRun(input),
   ),
   'pullRequests.status': operation(z.tuple([]), (api) =>
     api.pullRequests.status(),

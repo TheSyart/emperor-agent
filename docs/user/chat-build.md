@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
 > 最后核验：2026-09-23<br>
-> 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/main/browser-view.ts`
+> 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
 
@@ -167,6 +167,16 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
 - 这个页面只读，不能合并、关闭或检出 PR；当前分支 PR 的发布、合并和关闭在右侧工作台的「审查」中完成。
 
 `gh` 未安装、版本过低或未登录时，页面显示对应的说明和「重新检测」按钮，处理方法见[诊断与排障](diagnostics-troubleshooting.md#github-cligh)。
+
+### Issue 与 CI（GitHub 插件）
+
+自带的 GitHub 插件启用时（默认启用，见[插件](tools-skills-mcp.md)），这个页面的标题变为「GitHub」，标题下多出「Pull Request」「Issue」「CI」三个标签。三个标签都只读，都通过同一个 `gh` 读取：
+
+- **Issue**：列出打开状态的 Issue，分「与我相关」（你创建、被分配、被提到或评论过）、「我的仓库」（你名下仓库里的 Issue，包括别人开的）、「分配给我」「我创建的」「提到我」，可以按文本搜索；上次选的分类会记住。点开一个 Issue 在原处显示状态、标签、负责人、描述和最近 30 条评论，「在 GitHub 打开」查看其余内容。路径为 `/github/issues/<owner>/<repo>/<number>`。
+- **CI**：列出一个仓库最近 30 次 GitHub Actions 运行。仓库默认取当前项目的 GitHub `origin`，也可以输入 `owner/name` 后按「查看」。点开一次运行显示各个作业及其步骤的结果和用时；日志在 GitHub 上查看（「日志」按钮）。路径为 `/github/ci/<owner>/<repo>/<运行 ID>`。仓库没有运行记录或没有启用 Actions 时显示「没有运行记录」。
+- 标题和描述都按文字显示，描述中的 HTML 不会执行，链接在系统浏览器中打开。
+
+插件还带一个 GitHub Skill，让 Agent 在终端里用 `gh` 做同样的只读查询。在「能力 › 插件」里停用 GitHub 插件后，这两个标签和 Skill 一起撤下，页面恢复为「Pull Request」，已登录的 `gh` 不受影响；直接打开 `/github/…` 地址时，页面说明插件已停用并给出打开插件的按钮。
 
 ## 斜杠命令
 

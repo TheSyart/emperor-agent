@@ -6,7 +6,8 @@ import { installVisualCoreBridge } from './visualBridge'
 
 // Pull Request page (/pulls): list column (tabs, search, filter menu,
 // keyboard), detail overview + diff tab, the empty selection and the
-// gh missing / not-logged-in states, in both themes.
+// gh missing / not-logged-in states, in both themes. The GitHub plugin's
+// Issue / CI tabs are covered by github.spec.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'pulls')
 const DETAIL = '/pulls/aurora-labs/orbit-desktop/482'
 
@@ -41,8 +42,13 @@ async function openPulls(
   const params = new URLSearchParams({ visualTheme: options.theme ?? 'dark' })
   if (options.gh) params.set('visualGh', options.gh)
   await page.goto(`${path}?${params}`)
+  // The fixture has the GitHub plugin on: the page is titled GitHub and
+  // carries its tabs (github.spec covers the plugin turned off).
   await expect(
-    page.getByRole('heading', { name: 'Pull Request', level: 1 }),
+    page.getByRole('heading', { name: 'GitHub', level: 1 }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('tab', { name: 'Pull Request', selected: true }),
   ).toBeVisible()
 }
 

@@ -8,6 +8,12 @@ import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 /** The built-in Skills a packaged runtime ships (sorted), nothing more. */
 export const PACKAGED_BUILT_IN_SKILLS = ['computer-use', 'skill-creator']
 
+/**
+ * Skills of the plugins that ship with Emperor and start switched on
+ * (sorted). Computer Use's plugin starts off with its master switch.
+ */
+export const PACKAGED_PLUGIN_SKILLS = ['github']
+
 export interface PackagedSmokeCore {
   bootstrap(): Promise<unknown>
   diagnostics: { get(): Promise<unknown> }
@@ -74,7 +80,7 @@ export interface PackagedSmokeReceipt {
   startedAt: string
   finishedAt: string
   operations: {
-    bootstrap: { ok: boolean; builtInSkills: string[] }
+    bootstrap: { ok: boolean; builtInSkills: string[]; pluginSkills: string[] }
     diagnostics: {
       ok: boolean
       sandbox: { backend: string; status: string; provenance: 'host-os' }
@@ -131,10 +137,18 @@ export async function runPackagedSmoke(
   try {
     await createSmokeWorkspace(workspaceRoot)
     const bootstrap = asRecord(await opts.core.bootstrap())
-    const builtInSkills = skillNames(bootstrap.skills)
-    if (builtInSkills.join(',') !== PACKAGED_BUILT_IN_SKILLS.join(','))
+    const builtInSkills = skillNames(bootstrap.skills, 'builtin')
+    const pluginSkills = skillNames(bootstrap.skills, 'plugin')
+    const otherSkills = skillNames(bootstrap.skills).filter(
+      (name) => !builtInSkills.includes(name) && !pluginSkills.includes(name),
+    )
+    if (
+      builtInSkills.join(',') !== PACKAGED_BUILT_IN_SKILLS.join(',') ||
+      pluginSkills.join(',') !== PACKAGED_PLUGIN_SKILLS.join(',') ||
+      otherSkills.length
+    )
       throw new Error(
-        `packaged smoke requires exactly the built-in skills ${PACKAGED_BUILT_IN_SKILLS.join(', ')}`,
+        `packaged smoke requires exactly the built-in skills ${PACKAGED_BUILT_IN_SKILLS.join(', ')} and the shipped plugin skills ${PACKAGED_PLUGIN_SKILLS.join(', ')}`,
       )
 
     const diagnostics = asRecord(await opts.core.diagnostics.get())
@@ -197,7 +211,7 @@ export async function runPackagedSmoke(
       ...base,
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
-        bootstrap: { ok: true, builtInSkills },
+        bootstrap: { ok: true, builtInSkills, pluginSkills },
         diagnostics: { ok: true, sandbox, lifecycle },
         environment: {
           ok: true,
@@ -223,7 +237,7 @@ export async function runPackagedSmoke(
       ...base,
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
-        bootstrap: { ok: false, builtInSkills: [] },
+        bootstrap: { ok: false, builtInSkills: [], pluginSkills: [] },
         diagnostics: {
           ok: false,
           sandbox: {
@@ -398,10 +412,13 @@ function containsPath(parent: string, candidate: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-function skillNames(value: unknown): string[] {
+/** Skill names, optionally only those from one source. */
+function skillNames(value: unknown, source?: string): string[] {
   if (!Array.isArray(value)) return []
   return value
-    .map((item) => asRecord(item).name)
+    .map(asRecord)
+    .filter((item) => source === undefined || item.source === source)
+    .map((item) => item.name)
     .filter((name): name is string => typeof name === 'string')
     .sort()
 }

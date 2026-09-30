@@ -1993,6 +1993,15 @@ export async function installVisualCoreBridge(
         unarchivedHistory: [],
         context_used: 12000,
       }
+      // `?visualGithub=off`: the GitHub plugin is turned off, so its Issue /
+      // CI tabs go away and github.* reads are refused.
+      if (visualParams.get('visualGithub') === 'off') {
+        const github = boot.plugins.find((item) => item.pluginId === 'github')
+        if (github) {
+          github.enabled = false
+          github.activation = 'disabled'
+        }
+      }
       const visualQueuedPrompts = visualQueueEnabled
         ? [
             {
@@ -3001,6 +3010,171 @@ export async function installVisualCoreBridge(
           message: '找不到该 Pull Request，或当前账户无权访问该仓库。',
           code: 'pull_request_not_found',
         },
+      }
+
+      // ── GitHub plugin fixture (github.* ops) ────────────────────────
+      // Issues that involve lin-hai and the Actions runs of two fictional
+      // repositories. One title is markup on purpose: the page must show it
+      // as text. Reads are refused while the plugin is off
+      // (`?visualGithub=off`) and follow `?visualGh=` like the PR fixture.
+      const visualIssueNow = Date.now()
+      const visualAgo = (minutes: number) =>
+        new Date(visualIssueNow - minutes * 60_000).toISOString()
+      const visualIssues = [
+        {
+          repo: 'aurora-labs/orbit-desktop',
+          number: 511,
+          title: 'Sidebar loses its width after the window is restored',
+          author: 'mei-chen',
+          updated: 25,
+          labels: [
+            { name: 'bug', color: 'd73a4a' },
+            { name: 'ui', color: '1d76db' },
+          ],
+          comments: 4,
+          assignees: ['lin-hai'],
+          filters: ['involved', 'assigned', 'owned'],
+        },
+        {
+          repo: 'aurora-labs/orbit-desktop',
+          number: 498,
+          title:
+            '<img src=x onerror=alert(1)> Markdown preview renders raw HTML',
+          author: 'lin-hai',
+          updated: 180,
+          labels: [{ name: 'security', color: 'b60205' }],
+          comments: 41,
+          assignees: [],
+          filters: ['involved', 'created'],
+        },
+        {
+          repo: 'emperor-agent/visual-build-project',
+          number: 77,
+          title: 'Document the release checklist',
+          author: 'ops-bot',
+          updated: 60 * 26,
+          labels: [{ name: 'docs', color: 'not-a-color' }],
+          comments: 0,
+          assignees: [],
+          filters: ['involved', 'mentioned', 'owned'],
+        },
+      ]
+      function visualIssueItem(issue: (typeof visualIssues)[number]) {
+        return {
+          repo: issue.repo,
+          number: issue.number,
+          title: issue.title,
+          state: 'OPEN',
+          url: `https://github.com/${issue.repo}/issues/${issue.number}`,
+          author: issue.author,
+          createdAt: visualAgo(issue.updated + 60 * 24 * 3),
+          updatedAt: visualAgo(issue.updated),
+          labels: issue.labels,
+          commentCount: issue.comments,
+        }
+      }
+      const visualRuns = [
+        [
+          'emperor-agent/visual-build-project',
+          9101,
+          'ci',
+          'Stream tool results in batches',
+          'completed',
+          'success',
+          'push',
+          'main',
+          212,
+          12,
+        ],
+        [
+          'emperor-agent/visual-build-project',
+          9100,
+          'ci',
+          'Retry flaky terminal test',
+          'completed',
+          'failure',
+          'pull_request',
+          'fix/terminal',
+          211,
+          95,
+        ],
+        [
+          'emperor-agent/visual-build-project',
+          9099,
+          'release',
+          'Nightly package',
+          'in_progress',
+          null,
+          'schedule',
+          'main',
+          58,
+          3,
+        ],
+        [
+          'emperor-agent/visual-build-project',
+          9098,
+          'ci',
+          'Update dependencies',
+          'completed',
+          'cancelled',
+          'workflow_dispatch',
+          'deps',
+          210,
+          60 * 30,
+        ],
+        [
+          'aurora-labs/orbit-desktop',
+          8001,
+          'build',
+          'Sidebar width fix',
+          'completed',
+          'success',
+          'push',
+          'main',
+          40,
+          30,
+        ],
+      ] as const
+      function visualRunItem(run: (typeof visualRuns)[number]) {
+        const [
+          repo,
+          id,
+          name,
+          title,
+          status,
+          conclusion,
+          event,
+          branch,
+          runNumber,
+          minutes,
+        ] = run
+        return {
+          id,
+          name,
+          title,
+          status,
+          conclusion,
+          event,
+          branch,
+          runNumber,
+          createdAt: visualAgo(minutes),
+          updatedAt: visualAgo(Math.max(0, minutes - 9)),
+          url: `https://github.com/${repo}/actions/runs/${id}`,
+          actor: 'lin-hai',
+        }
+      }
+      function visualGithubRefusal(): unknown | null {
+        const github = boot.plugins.find((item) => item.pluginId === 'github')
+        if (github?.activation !== 'active')
+          return {
+            ok: false,
+            error: {
+              message:
+                'GitHub 插件已停用；在「能力 › 插件」里启用后再查看 Issue 与 CI。',
+              code: 'github_plugin_disabled',
+            },
+          }
+        return visualGhStatus.available ? null : visualPrFailure()
       }
 
       // ── MCP settings fixture (mcp.* ops) ────────────────────────────
@@ -5322,6 +5496,143 @@ export async function installVisualCoreBridge(
               const pr = visualPrLookup(args[0])
               if (!pr) return visualPrNotFound
               return { diff: visualPrDiff(pr), truncated: false }
+            }
+            case 'github.listIssues': {
+              const refused = visualGithubRefusal()
+              if (refused) return refused
+              const input = (args[0] ?? {}) as {
+                filter?: string
+                query?: string
+              }
+              const text = (input.query ?? '').trim().toLowerCase()
+              const items = visualIssues
+                .filter((issue) =>
+                  issue.filters.includes(input.filter ?? 'involved'),
+                )
+                .filter(
+                  (issue) =>
+                    !text ||
+                    `${issue.title} ${issue.repo}`.toLowerCase().includes(text),
+                )
+                .map(visualIssueItem)
+              return { items, total: items.length }
+            }
+            case 'github.viewIssue': {
+              const refused = visualGithubRefusal()
+              if (refused) return refused
+              const ref = (args[0] ?? {}) as { repo?: string; number?: number }
+              const issue = visualIssues.find(
+                (item) => item.repo === ref.repo && item.number === ref.number,
+              )
+              if (!issue)
+                return {
+                  ok: false,
+                  error: {
+                    message: `找不到 Issue ${ref.repo}#${ref.number}，或当前账户无权访问。`,
+                    code: 'pull_request_not_found',
+                  },
+                }
+              const shownComments =
+                issue.comments > 2
+                  ? [
+                      {
+                        author: 'mei-chen',
+                        body: 'Reproduced on a second display. Restoring from the Dock keeps the width; restoring with ⌘⇧M does not.',
+                        createdAt: visualAgo(issue.updated + 40),
+                      },
+                      {
+                        author: 'lin-hai',
+                        body: 'The saved width is read before the window has its final size. See `restoreBounds()`.',
+                        createdAt: visualAgo(issue.updated),
+                      },
+                    ]
+                  : []
+              return {
+                ...visualIssueItem(issue),
+                body:
+                  issue.number === 498
+                    ? 'The preview shows `<script>` blocks as HTML.\n\n<img src=x onerror=alert(1)>\n\n- [x] Found in 2.3\n- [ ] Fixed'
+                    : 'After minimizing and restoring the window, the sidebar goes back to its default width.\n\n**Steps**\n1. Drag the sidebar wider\n2. Minimize the window\n3. Restore it',
+                stateReason: null,
+                closedAt: null,
+                assignees: issue.assignees,
+                comments: shownComments,
+              }
+            }
+            case 'github.listRuns': {
+              const refused = visualGithubRefusal()
+              if (refused) return refused
+              const input = (args[0] ?? {}) as { repo?: string }
+              const items = visualRuns
+                .filter((run) => run[0] === input.repo)
+                .map(visualRunItem)
+              return { items, total: items.length }
+            }
+            case 'github.viewRun': {
+              const refused = visualGithubRefusal()
+              if (refused) return refused
+              const ref = (args[0] ?? {}) as { repo?: string; runId?: number }
+              const run = visualRuns.find(
+                (item) => item[0] === ref.repo && item[1] === ref.runId,
+              )
+              if (!run)
+                return {
+                  ok: false,
+                  error: {
+                    message: `找不到运行记录 ${ref.runId}，或当前账户无权访问。`,
+                    code: 'pull_request_not_found',
+                  },
+                }
+              const item = visualRunItem(run)
+              const failed = item.conclusion === 'failure'
+              const job = (
+                id: number,
+                name: string,
+                conclusion: string | null,
+                seconds: number,
+                steps: Array<[string, string | null]>,
+              ) => ({
+                id,
+                name,
+                status: conclusion === null ? 'in_progress' : 'completed',
+                conclusion,
+                startedAt: item.createdAt,
+                completedAt:
+                  conclusion === null
+                    ? null
+                    : new Date(
+                        Date.parse(item.createdAt) + seconds * 1000,
+                      ).toISOString(),
+                url: `${item.url}/job/${id}`,
+                steps: steps.map(([stepName, stepConclusion], index) => ({
+                  number: index + 1,
+                  name: stepName,
+                  status: stepConclusion === null ? 'in_progress' : 'completed',
+                  conclusion: stepConclusion,
+                })),
+              })
+              return {
+                run: item,
+                jobs: [
+                  job(run[1] * 10 + 1, 'lint', 'success', 42, [
+                    ['Set up job', 'success'],
+                    ['Checkout', 'success'],
+                    ['npm run lint', 'success'],
+                  ]),
+                  job(
+                    run[1] * 10 + 2,
+                    'test (macos-latest)',
+                    failed ? 'failure' : item.conclusion,
+                    9 * 60,
+                    [
+                      ['Set up job', 'success'],
+                      ['Checkout', 'success'],
+                      ['make check', failed ? 'failure' : item.conclusion],
+                      ['Upload report', failed ? 'skipped' : item.conclusion],
+                    ],
+                  ),
+                ],
+              }
             }
             case 'chat.stopRuntime':
               return { cancelled: false }

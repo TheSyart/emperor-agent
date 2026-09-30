@@ -65,10 +65,15 @@ import { CoreModelService } from './services/model-service'
 import { CoreSkillService } from './services/skill-service'
 import { OnboardingService } from './services/onboarding-service'
 import { PluginActivationController } from '../plugins/activation'
+import {
+  AppConnectionRegistry,
+  appConnectionKey,
+  type AppConnectionState,
+} from '../plugins/connections'
 import { PluginApplicationService } from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
-import { OperationRetiredError } from '../errors'
+import { EmperorError, OperationRetiredError } from '../errors'
 import { CoreSessionApplicationService } from './services/session-application-service'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
@@ -138,6 +143,13 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
+  /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
+  github?: Partial<
+    Pick<
+      ConstructorParameters<typeof PullRequestBrowserService>[0],
+      'resolveRuntime' | 'run'
+    >
+  > | null
 }
 
 export interface CoreRuntimeEventPayload {
@@ -205,6 +217,8 @@ export class CoreApi {
   readonly pluginService: PluginApplicationService
   /** Runs what active plugins contribute: MCP servers and hooks. */
   readonly pluginActivation: PluginActivationController
+  /** App members Emperor can connect (the GitHub plugin's local gh). */
+  readonly appConnections: AppConnectionRegistry
   readonly goalService: GoalService
   readonly onboardingService: OnboardingService
   readonly workspaceFilesService: WorkspaceFilesService
@@ -330,6 +344,10 @@ export class CoreApi {
       runtime: {
         mcpServer: (pluginId, scope, server) =>
           this.pluginActivation.mcpServer(pluginId, scope, server),
+        appConnection: (pluginId, scope, appId) =>
+          this.appConnections.state(
+            appConnectionKey({ scope, pluginId, appId }),
+          ),
         effectiveSkills: (projectRoot) =>
           new Map(
             kept.skillLoaders
@@ -522,10 +540,18 @@ export class CoreApi {
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })
     this.turnFiles.install(host)
+    this.appConnections = new AppConnectionRegistry({
+      [appConnectionKey(GITHUB_APP)]: {
+        check: async () =>
+          githubConnectionState(await this.pullRequestBrowser.status()),
+      },
+    })
     this.pullRequestBrowser = new PullRequestBrowserService({
       cwd: this.paths.stateRoot,
-      resolveRuntime: () => this.resolveGhRuntime(this.paths.stateRoot),
-      run: runGh,
+      resolveRuntime:
+        opts.github?.resolveRuntime ??
+        (() => this.resolveGhRuntime(this.paths.stateRoot)),
+      run: opts.github?.run ?? runGh,
     })
     this.workspaceFilesService = new WorkspaceFilesService({
       resolveProject: resolveWorkspaceProject,
@@ -1621,8 +1647,25 @@ export class CoreApi {
 
   readonly plugins = {
     list: () => this.pluginService.list(),
-    getDetail: (input: Parameters<PluginApplicationService['detail']>[0]) =>
-      this.pluginService.detail(input),
+    /** Connection checks (such as gh) run first, so app members show their real state. */
+    getDetail: async (
+      input: Parameters<PluginApplicationService['detail']>[0],
+    ) => {
+      const detail = this.pluginService.detail(input)
+      const apps = detail.components
+        .filter((component) => component.kind === 'app')
+        .map((component) =>
+          appConnectionKey({
+            scope: detail.scope,
+            pluginId: detail.pluginId,
+            appId: component.id,
+          }),
+        )
+        .filter((key) => this.appConnections.has(key))
+      if (!apps.length) return detail
+      await this.appConnections.refresh(apps)
+      return this.pluginService.detail(input)
+    },
     /** Electron main-only: a logo's bytes for the `app://plugin-assets` handler. */
     logo: (input: Parameters<PluginApplicationService['logo']>[0]) =>
       this.pluginService.logo(input),
@@ -1652,6 +1695,34 @@ export class CoreApi {
       const result = this.pluginService.setEnabled(input)
       await this.pluginActivation.settled()
       return result
+    },
+  }
+
+  /** Read-only Issue and CI views of the GitHub plugin; refused while it is off. */
+  readonly github = {
+    listIssues: async (
+      input: Parameters<PullRequestBrowserService['listIssues']>[0],
+    ) => {
+      this.requireGitHubPlugin()
+      return await this.pullRequestBrowser.listIssues(input)
+    },
+    viewIssue: async (
+      input: Parameters<PullRequestBrowserService['viewIssue']>[0],
+    ) => {
+      this.requireGitHubPlugin()
+      return await this.pullRequestBrowser.viewIssue(input)
+    },
+    listRuns: async (
+      input: Parameters<PullRequestBrowserService['listRuns']>[0],
+    ) => {
+      this.requireGitHubPlugin()
+      return await this.pullRequestBrowser.listRuns(input)
+    },
+    viewRun: async (
+      input: Parameters<PullRequestBrowserService['viewRun']>[0],
+    ) => {
+      this.requireGitHubPlugin()
+      return await this.pullRequestBrowser.viewRun(input)
     },
   }
 
@@ -2030,6 +2101,22 @@ export class CoreApi {
       this.emitPluginsChanged('project')
     }
     return entry
+  }
+
+  private requireGitHubPlugin(): void {
+    const on = this.pluginService
+      .list()
+      .some(
+        (plugin) =>
+          plugin.pluginId === 'github' &&
+          plugin.effective &&
+          plugin.activation === 'active',
+      )
+    if (!on)
+      throw new EmperorError(
+        'GitHub 插件已停用；在「能力 › 插件」里启用后再查看 Issue 与 CI。',
+        'github_plugin_disabled',
+      )
   }
 
   /** Installed plugins or their toggles changed: refresh Skills, contributions and the renderer. */
@@ -2847,4 +2934,33 @@ function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
         : { error: status.killSwitch.error }),
     },
   }
+}
+
+/** The shipped GitHub package's app member, the one connected through the local gh. */
+const GITHUB_APP = {
+  scope: 'managed',
+  pluginId: 'github',
+  appId: 'github',
+} as const
+
+/** What the GitHub plugin's app member shows for the local gh. */
+function githubConnectionState(
+  status: Awaited<ReturnType<PullRequestBrowserService['status']>>,
+): AppConnectionState {
+  if (status.available)
+    return {
+      state: 'connected',
+      reason: status.login ? `已登录 ${status.login}` : null,
+    }
+  if (status.reason === 'gh_missing')
+    return {
+      state: 'needs_connection',
+      reason: '没有可用的 GitHub CLI（gh）；可在「设置 › 诊断」里查看',
+    }
+  if (status.reason === 'gh_unauthenticated')
+    return {
+      state: 'needs_connection',
+      reason: '在终端运行 gh auth login 登录 GitHub',
+    }
+  return { state: 'failed', reason: status.message ?? 'GitHub CLI 操作失败' }
 }

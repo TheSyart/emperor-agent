@@ -45,6 +45,18 @@ describe('renderer routes', () => {
     expect(pulls.name).toBe('pulls')
     expect(pulls.params).toEqual({ owner: 'acme', repo: 'app', number: '42' })
     expect((await resolve('/pulls')).name).toBe('pulls')
+    const issue = await resolve('/github/issues/acme/app/7')
+    expect(issue.name).toBe('github-issues')
+    expect(issue.params).toEqual({ owner: 'acme', repo: 'app', number: '7' })
+    const run = await resolve('/github/ci/acme/app/36566264518')
+    expect(run.name).toBe('github-ci')
+    expect(run.params).toEqual({
+      owner: 'acme',
+      repo: 'app',
+      runId: '36566264518',
+    })
+    expect((await resolve('/github/ci')).name).toBe('github-ci')
+    expect((await resolve('/github')).name).toBe('github-issues')
     expect((await resolve('/explore')).name).toBe('explore')
   })
 
@@ -56,6 +68,8 @@ describe('renderer routes', () => {
       'scheduler',
       'capabilities',
       'pulls',
+      'github-issues',
+      'github-ci',
       'explore',
       undefined,
     ])

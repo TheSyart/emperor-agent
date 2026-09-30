@@ -41,10 +41,18 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
   { name: 'explore', label: '探索', to: { name: 'explore' }, icon: Compass },
 ]
 
+/** Pages reached from another entry: the GitHub plugin's tabs live under Pull Request. */
+const PAGE_OWNERS: Readonly<Record<string, SidebarPageEntry['name']>> = {
+  'github-issues': 'pulls',
+  'github-ci': 'pulls',
+}
+
 /** The page entry `routeName` belongs to (null on conversation routes). */
 export function activeSidebarPage(
   routeName: unknown,
 ): SidebarPageEntry['name'] | null {
+  if (typeof routeName === 'string' && Object.hasOwn(PAGE_OWNERS, routeName))
+    return PAGE_OWNERS[routeName]!
   return SIDEBAR_PAGES.find((entry) => entry.name === routeName)?.name ?? null
 }
 

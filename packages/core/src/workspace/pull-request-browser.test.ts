@@ -204,7 +204,8 @@ describe('PullRequestBrowserService.status', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({
       executable: '/signed/gh',
-      args: ['api', 'user', '--jq', '.login'],
+      // Every REST read names its method: gh would switch to POST on fields.
+      args: ['api', '--method', 'GET', 'user', '--jq', '.login'],
       cwd: '/state-root',
     })
   })
@@ -447,7 +448,7 @@ describe('PullRequestBrowserService.list', () => {
           }),
         ),
       ).service.list({ filter: 'all' }),
-    ).rejects.toMatchObject({ code: 'pull_request_gh_failed' })
+    ).rejects.toMatchObject({ code: 'pull_request_rate_limited' })
     await expect(
       browser(() => ok('{"data":', { stdoutTruncated: true })).service.list({
         filter: 'all',

@@ -1,0 +1,8 @@
+{
+  "apps": {
+    "github": {
+      "title": "GitHub（本机 gh）",
+      "description": "用本机已登录的 gh 读取 Issue、CI 运行记录和 PR 检查"
+    }
+  }
+}

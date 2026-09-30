@@ -59,7 +59,11 @@ describe('sidebar nav', () => {
   it('highlights a page entry only on its own route', () => {
     expect(activeSidebarPage('scheduler')).toBe('scheduler')
     expect(activeSidebarPage('capabilities')).toBe('capabilities')
+    // The GitHub plugin's Issue and CI tabs sit under Pull Request.
+    expect(activeSidebarPage('github-issues')).toBe('pulls')
+    expect(activeSidebarPage('github-ci')).toBe('pulls')
     expect(activeSidebarPage('chat')).toBeNull()
+    expect(activeSidebarPage('hasOwnProperty')).toBeNull()
     expect(activeSidebarPage(undefined)).toBeNull()
   })
 

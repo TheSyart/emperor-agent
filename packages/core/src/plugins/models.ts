@@ -252,6 +252,18 @@ export interface PluginRuntimeView {
     scope: PluginScope,
     server: string,
   ): PluginMcpRuntimeState | null
+  /**
+   * An app member's connection, when Emperor has an adapter for that member
+   * of that package; `null` means no adapter, so the member stays unsupported.
+   */
+  appConnection?(
+    pluginId: string,
+    scope: PluginScope,
+    appId: string,
+  ): {
+    readonly state: 'connected' | 'needs_connection' | 'failed'
+    readonly reason: string | null
+  } | null
   /** The Skills in effect for a project (`null` = chat), by name. */
   effectiveSkills(projectRoot: string | null): ReadonlyMap<
     string,

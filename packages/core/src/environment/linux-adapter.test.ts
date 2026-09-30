@@ -396,7 +396,9 @@ describe('LinuxEnvironmentAdapter', () => {
         '1.97.0',
       ],
     })
-    expect(runner.calls[0]!.executable).not.toMatch(/sh|bash/)
+    // Not through a shell. Only the file name counts: the temporary
+    // directory's random suffix can contain "sh".
+    expect(runner.calls[0]!.executable).not.toMatch(/(^|\/)(ba|z)?sh$/)
   })
 
   it('reports AppImage FUSE constraints without trying to install them', () => {

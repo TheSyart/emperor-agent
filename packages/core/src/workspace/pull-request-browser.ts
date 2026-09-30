@@ -106,6 +106,102 @@ export interface PullRequestDiffResult {
   truncated: boolean
 }
 
+/**
+ * Which open issues to list: involving the account (author, assignee,
+ * mention or comment), in repositories the account owns (`involves:` leaves
+ * those out when others opened them), assigned to it, opened by it, or
+ * mentioning it.
+ */
+export type GitHubIssueListFilter =
+  'involved' | 'owned' | 'assigned' | 'created' | 'mentioned'
+
+export interface GitHubLabel {
+  name: string
+  /** Hex color without `#`, as GitHub stores it. */
+  color: string
+}
+
+export interface GitHubIssueListItem {
+  /** `owner/name`. */
+  repo: string
+  number: number
+  title: string
+  /** OPEN | CLOSED. */
+  state: string
+  url: string
+  author: string
+  createdAt: string
+  updatedAt: string
+  labels: GitHubLabel[]
+  commentCount: number
+}
+
+export interface GitHubIssueListResult {
+  items: GitHubIssueListItem[]
+  total: number
+}
+
+export interface GitHubIssueComment {
+  author: string
+  body: string
+  createdAt: string
+}
+
+export interface GitHubIssueDetail extends GitHubIssueListItem {
+  body: string
+  /** COMPLETED | NOT_PLANNED | REOPENED, when GitHub gives one. */
+  stateReason: string | null
+  closedAt: string | null
+  assignees: string[]
+  /** The latest {@link GITHUB_ISSUE_COMMENT_LIMIT} comments, oldest first. */
+  comments: GitHubIssueComment[]
+}
+
+export interface GitHubRunListItem {
+  id: number
+  /** Workflow name. */
+  name: string
+  /** Commit or PR title the run shows. */
+  title: string
+  /** queued | in_progress | completed | … */
+  status: string
+  /** success | failure | cancelled | …; null until the run ends. */
+  conclusion: string | null
+  event: string
+  branch: string | null
+  runNumber: number | null
+  createdAt: string
+  updatedAt: string
+  url: string
+  actor: string
+}
+
+export interface GitHubRunListResult {
+  items: GitHubRunListItem[]
+  total: number
+}
+
+export interface GitHubRunJob {
+  id: number
+  name: string
+  status: string
+  conclusion: string | null
+  startedAt: string | null
+  completedAt: string | null
+  url: string | null
+  steps: Array<{
+    number: number
+    name: string
+    status: string
+    conclusion: string | null
+  }>
+}
+
+export interface GitHubRunDetail {
+  run: GitHubRunListItem
+  jobs: GitHubRunJob[]
+}
+
 export interface PullRequestBrowserOptions {
   /** Directory gh runs in; the Emperor Home, never a project. */
   cwd: string
@@ -130,6 +226,27 @@ export const PULL_REQUEST_NUMBER_MAX = 1_000_000_000
 export const PULL_REQUEST_DIFF_MAX_BYTES = 4 * 1024 * 1024
 export const PULL_REQUEST_VIEW_FILE_LIMIT = 100
 export const PULL_REQUEST_VIEW_CHECK_LIMIT = 100
+export const GITHUB_ISSUE_COMMENT_LIMIT = 30
+export const GITHUB_RUN_ID_MAX = Number.MAX_SAFE_INTEGER
+/** Branch names Emperor passes to gh: no leading `-`, no whitespace or shell-significant characters. */
+const GITHUB_BRANCH_PATTERN = /^(?!-)[A-Za-z0-9._/-]{1,200}$/
+
+const ISSUE_FILTER_QUALIFIERS: Readonly<Record<GitHubIssueListFilter, string>> =
+  {
+    involved: 'involves:@me',
+    owned: 'user:@me',
+    assigned: 'assignee:@me',
+    created: 'author:@me',
+    mentioned: 'mentions:@me',
+  }
+
+type GhSubject = 'pull_request' | 'issue' | 'run'
+
+const NOT_FOUND_MESSAGES: Readonly<Record<GhSubject, string>> = {
+  pull_request: '找不到该 Pull Request，或当前账户无权访问该仓库。',
+  issue: '找不到该 Issue，或当前账户无权访问该仓库。',
+  run: '找不到该运行记录，或当前账户无权访问该仓库。',
+}
 
 const FILTER_QUALIFIERS: Readonly<Record<PullRequestListFilter, string>> = {
   all: 'involves:@me',
@@ -202,6 +319,50 @@ export const PULL_REQUEST_VIEW_QUERY = `query EmperorPullRequestView($owner: Str
   }
 }`
 
+export const GITHUB_ISSUE_SEARCH_QUERY = `query EmperorIssueSearch($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    issueCount
+    nodes {
+      ... on Issue {
+        number
+        title
+        state
+        url
+        createdAt
+        updatedAt
+        author { login }
+        repository { nameWithOwner }
+        labels(first: 5) { nodes { name color } }
+        comments { totalCount }
+      }
+    }
+  }
+}`
+
+export const GITHUB_ISSUE_VIEW_QUERY = `query EmperorIssueView($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      number
+      title
+      body
+      state
+      stateReason
+      url
+      createdAt
+      updatedAt
+      closedAt
+      author { login }
+      repository { nameWithOwner }
+      labels(first: 20) { nodes { name color } }
+      assignees(first: 10) { nodes { login } }
+      comments(last: ${GITHUB_ISSUE_COMMENT_LIMIT}) {
+        totalCount
+        nodes { author { login } body createdAt }
+      }
+    }
+  }
+}`
+
 type JsonRecord = Record<string, unknown>
 
 export class PullRequestBrowserService {
@@ -220,7 +381,14 @@ export class PullRequestBrowserService {
     if (!runtime) return { available: false, reason: 'gh_missing' }
     const version = runtime.version ? { version: runtime.version } : {}
     try {
-      const result = await this.gh(runtime, ['api', 'user', '--jq', '.login'])
+      const result = await this.gh(runtime, [
+        'api',
+        '--method',
+        'GET',
+        'user',
+        '--jq',
+        '.login',
+      ])
       const login = result.stdout.trim()
       if (!/^[A-Za-z0-9-]{1,39}$/.test(login))
         return {
@@ -327,6 +495,156 @@ export class PullRequestBrowserService {
     }
   }
 
+  /** Open issues that involve the account, found through GitHub search. */
+  async listIssues(
+    input: {
+      filter?: GitHubIssueListFilter
+      query?: string
+      limit?: number
+    } = {},
+  ): Promise<GitHubIssueListResult> {
+    const filter = input.filter ?? 'involved'
+    if (!Object.hasOwn(ISSUE_FILTER_QUALIFIERS, filter))
+      invalidArgument('Issue 筛选条件不合法。')
+    const limit = validLimit(input.limit)
+    const text = sanitizePullRequestQuery(input.query)
+    const search = [
+      'is:issue',
+      'is:open',
+      ISSUE_FILTER_QUALIFIERS[filter],
+      text,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const runtime = await this.requireRuntime()
+    const result = await this.gh(
+      runtime,
+      [
+        'api',
+        'graphql',
+        '-f',
+        `query=${GITHUB_ISSUE_SEARCH_QUERY}`,
+        '-f',
+        `q=${search}`,
+        '-F',
+        `n=${limit}`,
+      ],
+      { subject: 'issue' },
+    )
+    const searchResult = record(graphqlData(result, 'issue').search)
+    const items = records(searchResult.nodes)
+      .map(issueListItem)
+      .filter((item): item is GitHubIssueListItem => item !== null)
+    const total = nonNegativeInteger(searchResult.issueCount) ?? items.length
+    return { items, total: Math.max(total, items.length) }
+  }
+
+  async viewIssue(input: {
+    repo: string
+    number: number
+  }): Promise<GitHubIssueDetail> {
+    const { owner, name } = splitRepo(validRepo(input.repo))
+    const number = validNumber(input.number, 'Issue 编号不合法。')
+    const runtime = await this.requireRuntime()
+    const result = await this.gh(
+      runtime,
+      [
+        'api',
+        'graphql',
+        '-f',
+        `query=${GITHUB_ISSUE_VIEW_QUERY}`,
+        '-f',
+        `owner=${owner}`,
+        '-f',
+        `name=${name}`,
+        '-F',
+        `number=${number}`,
+      ],
+      { subject: 'issue' },
+    )
+    const issue = issueDetail(
+      record(record(graphqlData(result, 'issue').repository).issue),
+    )
+    if (!issue) notFound('issue')
+    return issue
+  }
+
+  /** Recent GitHub Actions runs of one repository (REST, always an explicit GET). */
+  async listRuns(input: {
+    repo: string
+    branch?: string
+    limit?: number
+  }): Promise<GitHubRunListResult> {
+    const repo = validRepo(input.repo)
+    const limit = validLimit(input.limit)
+    if (
+      input.branch !== undefined &&
+      (typeof input.branch !== 'string' ||
+        !GITHUB_BRANCH_PATTERN.test(input.branch) ||
+        input.branch.includes('..'))
+    )
+      invalidArgument('分支名称不合法。')
+    const runtime = await this.requireRuntime()
+    const result = await this.gh(
+      runtime,
+      [
+        'api',
+        '--method',
+        'GET',
+        `repos/${repo}/actions/runs`,
+        '-F',
+        `per_page=${limit}`,
+        ...(input.branch ? ['-f', `branch=${input.branch}`] : []),
+      ],
+      { subject: 'run' },
+    )
+    const payload = restData(result)
+    const items = records(payload.workflow_runs)
+      .map(runListItem)
+      .filter((item): item is GitHubRunListItem => item !== null)
+    const total = nonNegativeInteger(payload.total_count) ?? items.length
+    return { items, total: Math.max(total, items.length) }
+  }
+
+  async viewRun(input: {
+    repo: string
+    runId: number
+  }): Promise<GitHubRunDetail> {
+    const repo = validRepo(input.repo)
+    const runId = input.runId
+    if (
+      typeof runId !== 'number' ||
+      !Number.isInteger(runId) ||
+      runId < 1 ||
+      runId > GITHUB_RUN_ID_MAX
+    )
+      invalidArgument('运行记录编号不合法。')
+    const runtime = await this.requireRuntime()
+    const runResult = await this.gh(
+      runtime,
+      ['api', '--method', 'GET', `repos/${repo}/actions/runs/${runId}`],
+      { subject: 'run' },
+    )
+    const run = runListItem(restData(runResult))
+    if (!run) notFound('run')
+    const jobsResult = await this.gh(
+      runtime,
+      [
+        'api',
+        '--method',
+        'GET',
+        `repos/${repo}/actions/runs/${runId}/jobs`,
+        '-F',
+        'per_page=100',
+      ],
+      { subject: 'run' },
+    )
+    const jobs = records(restData(jobsResult).jobs)
+      .map(runJob)
+      .filter((job): job is GitHubRunJob => job !== null)
+    return { run, jobs }
+  }
+
   private async resolveRuntime(fresh: boolean): Promise<GhRuntime | null> {
     const now = (this.options.now ?? Date.now)()
     const ttl = this.options.runtimeCacheMs ?? 30_000
@@ -351,7 +669,7 @@ export class PullRequestBrowserService {
   private async gh(
     runtime: GhRuntime,
     args: string[],
-    options: { allowTruncated?: boolean } = {},
+    options: { allowTruncated?: boolean; subject?: GhSubject } = {},
   ): Promise<GhCommandResult> {
     const result = await this.options.run({
       executable: runtime.executable,
@@ -359,7 +677,8 @@ export class PullRequestBrowserService {
       cwd: this.options.cwd,
       env: ghProcessEnvironment(runtime.env),
     })
-    if (result.exitCode !== 0) throw ghFailure(result)
+    if (result.exitCode !== 0)
+      throw ghFailure(result, options.subject ?? 'pull_request')
     if (result.stdoutTruncated && !options.allowTruncated)
       throw new WorkspaceOperationError(
         'pull_request_output_too_large',
@@ -440,14 +759,17 @@ export function validRepo(value: unknown): string {
   return repo
 }
 
-function validNumber(value: unknown): number {
+function validNumber(
+  value: unknown,
+  message = 'Pull Request 编号不合法。',
+): number {
   if (
     typeof value !== 'number' ||
     !Number.isInteger(value) ||
     value < 1 ||
     value > PULL_REQUEST_NUMBER_MAX
   )
-    invalidArgument('Pull Request 编号不合法。')
+    invalidArgument(message)
   return value
 }
 
@@ -477,7 +799,10 @@ function hasControlCharacter(value: string): boolean {
   return false
 }
 
-function ghFailure(result: GhCommandResult): WorkspaceOperationError {
+function ghFailure(
+  result: GhCommandResult,
+  subject: GhSubject = 'pull_request',
+): WorkspaceOperationError {
   const output = `${result.stderr}\n${result.stdout}`
   if (
     result.exitCode === 4 ||
@@ -489,14 +814,29 @@ function ghFailure(result: GhCommandResult): WorkspaceOperationError {
       'pull_request_gh_unauthenticated',
       'GitHub CLI 尚未登录；请在终端运行 gh auth login。',
     )
+  // Rate limits answer 403 or 429, so they come before the plain 403.
+  if (/rate limit|HTTP 429/i.test(output))
+    return new WorkspaceOperationError(
+      'pull_request_rate_limited',
+      'GitHub 暂时限流，请稍后再试。',
+    )
   if (
-    /Could not resolve to a (?:Repository|PullRequest)|"type"\s*:\s*"NOT_FOUND"|HTTP 404|no pull requests? found/i.test(
+    /HTTP 403|Resource not accessible|must have (?:admin|push) (?:rights|access)|\bForbidden\b/i.test(
+      output,
+    )
+  )
+    return new WorkspaceOperationError(
+      'pull_request_forbidden',
+      '当前账户没有读取这个仓库的权限。',
+    )
+  if (
+    /Could not resolve to an? (?:Repository|PullRequest|Issue)|"type"\s*:\s*"NOT_FOUND"|HTTP 404|no pull requests? found|\bNot Found\b/i.test(
       output,
     )
   )
     return new WorkspaceOperationError(
       'pull_request_not_found',
-      '找不到该 Pull Request，或当前账户无权访问该仓库。',
+      NOT_FOUND_MESSAGES[subject],
     )
   const detail = sanitizeGitError(result.stderr || result.stdout)
     .replace(/\s+/g, ' ')
@@ -507,7 +847,10 @@ function ghFailure(result: GhCommandResult): WorkspaceOperationError {
   )
 }
 
-function graphqlData(result: GhCommandResult): JsonRecord {
+function graphqlData(
+  result: GhCommandResult,
+  subject: GhSubject = 'pull_request',
+): JsonRecord {
   let parsed: unknown
   try {
     parsed = JSON.parse(result.stdout)
@@ -520,13 +863,121 @@ function graphqlData(result: GhCommandResult): JsonRecord {
   }
   const payload = record(parsed)
   if (Array.isArray(payload.errors) && payload.errors.length)
-    throw ghFailure({ ...result, exitCode: 1 })
+    throw ghFailure({ ...result, exitCode: 1 }, subject)
   if (!isRecord(payload.data))
     throw new WorkspaceOperationError(
       'pull_request_invalid_response',
       'GitHub CLI 返回了无效数据。',
     )
   return payload.data
+}
+
+/** A REST response body; gh prints the JSON as it came. */
+function restData(result: GhCommandResult): JsonRecord {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(result.stdout)
+  } catch (error) {
+    throw new WorkspaceOperationError(
+      'pull_request_invalid_response',
+      'GitHub CLI 返回了无效数据。',
+      { cause: error },
+    )
+  }
+  if (!isRecord(parsed))
+    throw new WorkspaceOperationError(
+      'pull_request_invalid_response',
+      'GitHub CLI 返回了无效数据。',
+    )
+  return parsed
+}
+
+function labels(value: unknown): GitHubLabel[] {
+  return records(record(value).nodes)
+    .map((label) => ({ name: text(label.name), color: text(label.color) }))
+    .filter((label) => label.name)
+}
+
+function issueListItem(node: JsonRecord): GitHubIssueListItem | null {
+  const repo = text(record(node.repository).nameWithOwner)
+  const number = positiveInteger(node.number)
+  const url = safeGithubUrl(node.url)
+  if (!PULL_REQUEST_REPO_PATTERN.test(repo) || number === null || !url)
+    return null
+  return {
+    repo,
+    number,
+    title: text(node.title),
+    state: text(node.state),
+    url,
+    author: text(record(node.author).login) || 'ghost',
+    createdAt: text(node.createdAt),
+    updatedAt: text(node.updatedAt),
+    labels: labels(node.labels),
+    commentCount: nonNegativeInteger(record(node.comments).totalCount) ?? 0,
+  }
+}
+
+function issueDetail(node: JsonRecord): GitHubIssueDetail | null {
+  const base = issueListItem(node)
+  if (!base) return null
+  const comments = record(node.comments)
+  const latest = records(comments.nodes).map((comment) => ({
+    author: text(record(comment.author).login) || 'ghost',
+    body: text(comment.body),
+    createdAt: text(comment.createdAt),
+  }))
+  return {
+    ...base,
+    body: text(node.body),
+    stateReason: text(node.stateReason) || null,
+    closedAt: text(node.closedAt) || null,
+    assignees: records(record(node.assignees).nodes)
+      .map((assignee) => text(assignee.login))
+      .filter(Boolean),
+    commentCount: nonNegativeInteger(comments.totalCount) ?? latest.length,
+    comments: latest,
+  }
+}
+
+function runListItem(node: JsonRecord): GitHubRunListItem | null {
+  const id = positiveInteger(node.id)
+  const url = safeGithubUrl(node.html_url)
+  if (id === null || !url) return null
+  return {
+    id,
+    name: text(node.name),
+    title: text(node.display_title),
+    status: text(node.status),
+    conclusion: text(node.conclusion) || null,
+    event: text(node.event),
+    branch: text(node.head_branch) || null,
+    runNumber: positiveInteger(node.run_number),
+    createdAt: text(node.created_at),
+    updatedAt: text(node.updated_at),
+    url,
+    actor: text(record(node.actor).login) || 'ghost',
+  }
+}
+
+function runJob(node: JsonRecord): GitHubRunJob | null {
+  const id = positiveInteger(node.id)
+  if (id === null) return null
+  return {
+    id,
+    name: text(node.name),
+    status: text(node.status),
+    conclusion: text(node.conclusion) || null,
+    startedAt: text(node.started_at) || null,
+    completedAt: text(node.completed_at) || null,
+    url: safeGithubUrl(node.html_url),
+    steps: records(node.steps).map((step) => ({
+      number: nonNegativeInteger(step.number) ?? 0,
+      name: text(step.name),
+      status: text(step.status),
+      conclusion: text(step.conclusion) || null,
+    })),
+  }
 }
 
 function listItem(node: JsonRecord): PullRequestListItem | null {
@@ -687,9 +1138,9 @@ function invalidArgument(message: string): never {
   throw new WorkspaceOperationError('pull_request_argument_invalid', message)
 }
 
-function notFound(): never {
+function notFound(subject: GhSubject = 'pull_request'): never {
   throw new WorkspaceOperationError(
     'pull_request_not_found',
-    '找不到该 Pull Request，或当前账户无权访问该仓库。',
+    NOT_FOUND_MESSAGES[subject],
   )
 }

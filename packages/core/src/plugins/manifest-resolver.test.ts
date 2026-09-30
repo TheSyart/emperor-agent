@@ -287,6 +287,42 @@ describe('codex-compat packages', () => {
     ])
   })
 
+  it('reads only a title and a description from each app entry', () => {
+    const root = packageAt(
+      portablePackage(
+        'apps-kit',
+        {
+          '.app.json': {
+            apps: {
+              calendar: {
+                title: '  Calendar  ',
+                description: 'd'.repeat(300),
+                connector: { url: 'https://calendar.example' },
+              },
+              drive: { title: 42, description: '   ' },
+            },
+          },
+        },
+        { extensions: { 'com.openai': { apps: './.app.json' } } },
+      ),
+    )
+    const apps = resolveStrict(root).components.filter(
+      (component) => component.kind === 'app',
+    )
+    expect(
+      apps.map(({ id, title, description, state }) => [
+        id,
+        title,
+        description,
+        state,
+      ]),
+    ).toEqual([
+      ['calendar', 'Calendar', 'd'.repeat(200), 'unsupported'],
+      // Not text: the key is the title and there is no description.
+      ['drive', 'drive', '', 'unsupported'],
+    ])
+  })
+
   it('accepts inline hooks and MCP servers in the manifest', () => {
     const root = packageAt({
       '.codex-plugin/plugin.json': {

@@ -142,6 +142,18 @@ function memberState(
   },
   skills: ReturnType<PluginRuntimeView['effectiveSkills']>,
 ): Pick<PluginComponentView, 'state' | 'reason'> {
+  if (component.kind === 'app') {
+    const connection =
+      input.runtime.appConnection?.(
+        input.pluginId,
+        input.scope,
+        component.id,
+      ) ?? null
+    if (connection)
+      return connection.state === 'connected'
+        ? { state: 'available', reason: connection.reason }
+        : { state: connection.state, reason: connection.reason }
+  }
   if (component.state !== 'available')
     return { state: component.state, reason: component.reason }
   if (component.kind === 'skill') {

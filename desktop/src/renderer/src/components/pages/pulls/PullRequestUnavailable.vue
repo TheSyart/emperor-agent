@@ -15,10 +15,15 @@ import Button from '../../ui/Button.vue'
 import EmptyState from '../../settings/ui/EmptyState.vue'
 import { pullIcons } from './pullIcons'
 
-const props = defineProps<{
-  status: PullRequestBrowserStatus
-  busy: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    status: PullRequestBrowserStatus
+    busy: boolean
+    /** What this page reads through gh (Pull Request, Issue, CI 运行记录). */
+    subject?: string
+  }>(),
+  { subject: 'Pull Request' },
+)
 const emit = defineEmits<{ retry: []; diagnose: [] }>()
 
 const reason = computed(() => props.status.reason ?? 'gh_failed')
@@ -46,7 +51,7 @@ const title = computed(() =>
       </template>
       <template #description>
         <span v-if="reason === 'gh_missing'" class="lines">
-          <span>此页通过本机的 GitHub CLI 读取你的 Pull Request。</span>
+          <span>此页通过本机的 GitHub CLI 读取你的 {{ subject }}。</span>
           <span class="install">
             <span>macOS：<code>brew install gh</code></span>
             <span>Windows：<code>winget install GitHub.cli</code></span>

@@ -137,14 +137,14 @@ Emperor 识别三种包格式，按以下顺序判断：
 
 能力页的「插件」标签分「已安装」和「预装」两组列出插件，可以按名称、说明或开发者搜索。点开一个插件会显示它的详情：名称、说明、开发者、版本和启用开关；示例提示旁的「立即试用」会新建一个对话，把提示填进输入框，由你决定是否发送；下面按 Skill、MCP、应用连接、Hook、不支持的成员分组列出真实成员，每个成员都带状态和原因，最后是来源、格式、权限、安装时间等信息。没有任何成员的插件只展示元数据。「全部插件」回到列表，搜索词保留。
 
-Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为「随 Emperor 提供」。它们可以停用，不能卸载；GitHub 的开关记在 `stateRoot/plugins/managed.json`，升级 Emperor 不会改变。Computer Use 的开关就是「设置 › 电脑操作」的总开关，两处看到的始终一致；不支持电脑操作的电脑上它不能开启。你自己安装的同名 Plugin 会覆盖自带的那个。
+Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为「随 Emperor 提供」。它们可以停用，不能卸载；GitHub 的开关记在 `stateRoot/plugins/managed.json`，升级 Emperor 不会改变。GitHub 插件带一个只读查询的 GitHub Skill、Pull Request 页的 Issue 与 CI 标签（见[对话与 Build](chat-build.md#issue-与-cigithub-插件)），以及应用连接「GitHub（本机 gh）」：它的状态按 `gh` 实况显示，已登录为可用并写明账户，`gh` 未安装或未登录为需要连接；只装了 `gh` 不算已连接。停用它只撤下这些入口，不影响 `gh` 的登录。Computer Use 的开关就是「设置 › 电脑操作」的总开关，两处看到的始终一致；不支持电脑操作的电脑上它不能开启。你自己安装的同名 Plugin 会覆盖自带的那个。
 
 已安装的 Plugin 可以启用、停用或卸载。已激活 Plugin 的成员这样接入：
 
 - **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。
 - **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，在沙箱中只能读自己的插件目录、写自己的数据目录（`stateRoot/plugins/data/<插件名>`），读不到 Emperor Home 里的其他内容。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
 - **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。
-- **应用连接**：暂不支持，详情里列出。
+- **应用连接**：自带 GitHub 插件的「GitHub（本机 gh）」按上文显示真实状态；其他插件的应用连接暂不支持，详情里列出。
 
 停用或卸载后，这个 Plugin 的 MCP server 立即断开，Hook 不再运行。Plugin 的 MCP server 和 Hook 不写入你的 `mcp_config.json` 或 `hooks.json`，也不在「能力 › MCP」里显示；项目范围的 Plugin 跟随当前会话所在的项目。
 

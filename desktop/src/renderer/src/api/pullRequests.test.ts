@@ -31,7 +31,7 @@ describe('pullRequestErrorInfo', () => {
     expect(info.message).toBeTruthy()
   })
 
-  it('keeps the sanitized gh detail only for gh_failed', () => {
+  it("keeps Core's text for gh_failed and not_found, fixed text otherwise", () => {
     expect(
       pullRequestErrorInfo(
         codedError('pull_request_gh_failed', 'HTTP 502 from api.github.com'),
@@ -40,10 +40,34 @@ describe('pullRequestErrorInfo', () => {
     expect(
       pullRequestErrorInfo(codedError('pull_request_gh_failed', '')).message,
     ).toBe('GitHub CLI 操作失败。')
+    // Core's not_found text is fixed per subject (Pull Request, Issue, run).
     expect(
-      pullRequestErrorInfo(codedError('pull_request_not_found', 'raw detail'))
-        .message,
+      pullRequestErrorInfo(
+        codedError(
+          'pull_request_not_found',
+          '找不到该 Issue，或当前账户无权访问该仓库。',
+        ),
+      ).message,
+    ).toBe('找不到该 Issue，或当前账户无权访问该仓库。')
+    expect(
+      pullRequestErrorInfo(codedError('pull_request_not_found', '')).message,
     ).toBe('找不到该 Pull Request，或当前账户无权访问该仓库。')
+    expect(
+      pullRequestErrorInfo(
+        codedError('pull_request_rate_limited', 'API rate limit exceeded'),
+      ),
+    ).toEqual({
+      code: 'pull_request_rate_limited',
+      kind: 'failed',
+      message: 'GitHub 暂时限流，请稍后再试。',
+    })
+    expect(
+      pullRequestErrorInfo(codedError('pull_request_forbidden', 'HTTP 403')),
+    ).toEqual({
+      code: 'pull_request_forbidden',
+      kind: 'not_found',
+      message: '当前账户没有读取这个仓库的权限。',
+    })
   })
 
   it('treats unknown failures as retryable', () => {

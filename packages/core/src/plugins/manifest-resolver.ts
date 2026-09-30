@@ -502,17 +502,19 @@ class Members {
             'member_invalid',
             `${ref} 缺少 apps 对象`,
           )
-        for (const name of Object.keys(apps)) {
+        for (const [name, value] of Object.entries(apps)) {
           if (this.appNames.has(name)) {
             this.duplicate('app', name, path, `有两个应用连接都叫「${name}」`)
             continue
           }
           this.appNames.add(name)
+          // Only a title and a description are read; the rest is for its host.
+          const entry = objectOf(value)
           this.components.push({
             kind: 'app',
             id: name,
-            title: name,
-            description: '',
+            title: clip(entry?.title, 80) ?? name,
+            description: clip(entry?.description, 200) ?? '',
             sourcePath: path,
             state: 'unsupported',
             reason: 'Emperor 还不支持这个应用连接',

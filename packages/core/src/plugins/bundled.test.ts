@@ -40,6 +40,30 @@ describe('packages shipped with Emperor', () => {
     ])
   })
 
+  it('give GitHub a read-only Skill, example prompts and its gh connection', () => {
+    const github = resolvePluginPackage(join(BUNDLED, 'github'), {
+      strict: true,
+    })
+    expect(
+      github.components.map(({ kind, id, title, state }) => [
+        kind,
+        id,
+        title,
+        state,
+      ]),
+    ).toEqual([
+      ['skill', 'github', 'github', 'available'],
+      ['app', 'github', 'GitHub（本机 gh）', 'unsupported'],
+    ])
+    expect(github.prompts).toHaveLength(3)
+    const skill = readFileSync(
+      join(BUNDLED, 'github', 'skills', 'github', 'SKILL.md'),
+      'utf8',
+    )
+    expect(skill).toContain('--method GET')
+    expect(skill).toContain('只读')
+  })
+
   it('carry their logo as a small PNG under assets/', () => {
     for (const name of ['computer-use', 'github']) {
       const resolved = resolvePluginPackage(join(BUNDLED, name), {
