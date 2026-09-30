@@ -34,6 +34,8 @@ export interface CommandPromptSubmission {
   displayContent: string
   /** Chips in `displayContent` (kept for the user's bubble). */
   references?: MessageReference[]
+  /** Chips were sent but could not be kept (contract §2.3). */
+  referencesDropped?: true
   clientMessageId: string
   delivery: 'queue'
   source: 'command'
@@ -360,6 +362,11 @@ export class CoreCommandApplicationService {
         displayContent,
         ...(context.references && displayContent === context.parsed.raw
           ? { references: context.references }
+          : {}),
+        // Chips sent with the command but not kept (contract §2.3).
+        ...(context.referencesDropped ||
+        (context.references && displayContent !== context.parsed.raw)
+          ? { referencesDropped: true }
           : {}),
         clientMessageId: promptId,
         delivery: 'queue',

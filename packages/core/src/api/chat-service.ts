@@ -24,6 +24,8 @@ export interface MainlineSubmitInput {
   requestedSkills?: Array<{ name: string; source?: string }> | null
   /** Chips in `content` (the rich composer); kept for the user's bubble. */
   references?: MessageReference[] | null
+  /** The caller already dropped chips that did not fit (commands). */
+  referencesDropped?: boolean
   clientMessageId?: string | null
   sessionId?: string | null
   source?: string | null
@@ -138,6 +140,10 @@ export class ChatService {
         content: modelContent,
         displayContent,
         ...(references === null ? {} : { references }),
+        ...(input.referencesDropped ||
+        (references === null && input.references?.length)
+          ? { referencesDropped: true }
+          : {}),
         clientMessageId: input.clientMessageId ?? null,
         attachmentIds: input.attachmentIds ?? null,
         source,

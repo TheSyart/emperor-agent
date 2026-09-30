@@ -566,6 +566,26 @@ describe('CoreApi chat', () => {
     expect(meta?.data).toMatchObject({ references })
   })
 
+  it('records that chips were dropped when they no longer fit the shown text', async () => {
+    // E-track contract §2.3: offsets that do not fit what is stored are
+    // dropped, and the metadata says so instead of losing them silently.
+    const { api } = await setup({ replies: [{ text: 'ok' }] })
+    const id = session(api)
+    await api.chat.submit({
+      content: '@github 看看',
+      displayContent: '看看 GitHub',
+      sessionId: id,
+      references: [
+        { kind: 'plugin', id: 'github', label: 'GitHub', start: 0, end: 7 },
+      ],
+    })
+    const meta = api.host
+      .agentFor(id)
+      .session.events.find((event) => event.type === 'host/user-meta')
+    expect(meta?.data).toMatchObject({ referencesDropped: true })
+    expect(meta?.data).not.toHaveProperty('references')
+  })
+
   it('runs context: fork skill commands as a scoped forked subagent', async () => {
     const root = tmp('emperor-core-api-fork-skill-')
     const stateRoot = join(root, 'home')

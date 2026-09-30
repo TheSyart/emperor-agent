@@ -60,6 +60,8 @@ declare module '../../session-log/types' {
       displayContent?: string
       /** Skill / plugin chips in `displayContent` (E-track contract §2). */
       references?: MessageReference[]
+      /** Chips were sent but their offsets no longer fit the text (§2.3). */
+      referencesDropped?: true
       attachments?: Array<Record<string, unknown>>
       source?: string
       scheduler?: Record<string, unknown>

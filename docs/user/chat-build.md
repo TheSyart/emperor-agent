@@ -192,7 +192,7 @@ Composer 输入 `/` 后显示 Core 返回的命令和 active Skill，分为 `Com
 
 未知命令只显示本地错误，不会发给模型；模型回复中的斜杠文本也不会执行。只有 Skill 命令可以携带附件。完整规则见 [Slash command 平台](../architecture/slash-command-platform.md)。
 
-### Skill 与插件芯片
+### 在消息里引用技能和插件
 
 在消息中间（空格之后）输入 `/` 时只列出 Skill；`a/b`、网址和路径里的 `/` 不会弹出列表，输入空格或按 Esc 即关闭。选中的 Skill 在输入框里变成带图标的芯片，发送时模型收到 `/Skill 名`，Agent 随即载入该 Skill 的说明。
 

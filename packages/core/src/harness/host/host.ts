@@ -194,6 +194,8 @@ export interface SubmitInput {
   displayContent?: string | null
   /** Chips in the displayed text (renderer-only; validated by the caller). */
   references?: MessageReference[] | null
+  /** The caller had chips whose offsets no longer fit the shown text (contract §2.3). */
+  referencesDropped?: boolean | null
   clientMessageId?: string | null
   attachmentIds?: string[] | null
   source?: string | null
@@ -1191,6 +1193,7 @@ export class HarnessHost {
         : {}),
       ...(input.displayContent ? { displayContent: input.displayContent } : {}),
       ...(input.references?.length ? { references: input.references } : {}),
+      ...(input.referencesDropped ? { referencesDropped: true } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(input.source ? { source: input.source } : {}),
       ...(input.scheduler ? { scheduler: input.scheduler } : {}),

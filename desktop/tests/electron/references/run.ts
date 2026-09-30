@@ -33,6 +33,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
+import { startFixtureSite } from '../fixtures/site'
 import {
   startFakeModel,
   type ChatRequest,
@@ -588,6 +589,235 @@ async function turnFileRecord(
   )
 }
 
+/** A message's text, whether the wire sent a string or text parts. */
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content))
+    return content
+      .map((part) =>
+        part && typeof part === 'object' && 'text' in part
+          ? String((part as { text: unknown }).text)
+          : '',
+      )
+      .join('\n')
+  return ''
+}
+
+async function assistantSaid(page: Page, text: string): Promise<boolean> {
+  return (
+    (await page.locator('.assistant-step').filter({ hasText: text }).count()) >
+    0
+  )
+}
+
+async function chipsIn(
+  scope: ReturnType<Page['locator']>,
+  selector: string,
+): Promise<string[]> {
+  return await scope
+    .locator(selector)
+    .evaluateAll((nodes) =>
+      nodes.map(
+        (node) =>
+          `${(node as HTMLElement).dataset.kind}:${(node as HTMLElement).dataset.id ?? node.textContent?.trim()}`,
+      ),
+    )
+}
+
+/**
+ * RF-08: skill and plugin chips end to end (the gestures, both injections,
+ * the bubble, edit and resend, a reload), undo that skips a file changed
+ * after the turn, and the environment card of a Build session.
+ */
+async function referencesAndCard(
+  page: Page,
+  model: FakeModel,
+  project: string,
+): Promise<void> {
+  const box = page.getByLabel('消息输入框').first()
+  const lastBubble = () => page.locator('.user-row').last()
+
+  await check(
+    page,
+    'skill and plugin chips go out as their gestures, and both are injected',
+    async () => {
+      let request: ChatRequest | null = null
+      model.enqueue((captured) => {
+        request = captured
+        return { text: '技能和插件都收到了。' }
+      })
+      await box.click()
+      await box.pressSequentially('请用 /skill-creator ')
+      await box.pressSequentially('和 @github ')
+      await box.pressSequentially('整理一下')
+      const typed = await chipsIn(box, '.composer-chip')
+      if (JSON.stringify(typed) !== '["skill:skill-creator","plugin:github"]')
+        throw new Error(`chips in the box: ${JSON.stringify(typed)}`)
+      await box.press('Enter')
+      await until(
+        () => assistantSaid(page, '技能和插件都收到了'),
+        30_000,
+        'the reply',
+      )
+      if (!request) throw new Error('no request')
+      const texts = (request as ChatRequest).messages.map((message) =>
+        textOf(message.content),
+      )
+      if (
+        !texts.some((text) =>
+          text.includes('请用 /skill-creator 和 @github 整理一下'),
+        )
+      )
+        throw new Error('the gestures are not in the user message')
+      if (
+        !texts.some((text) =>
+          text.includes('<skill_content name="skill-creator">'),
+        )
+      )
+        throw new Error('the skill instructions were not injected')
+      if (
+        !texts.some((text) =>
+          text.includes('<plugin_reference id="github" status="enabled">'),
+        )
+      )
+        throw new Error('the plugin reference was not injected')
+      const shown = await chipsIn(lastBubble(), '.reference-chip')
+      if (shown.length !== 2) throw new Error(`bubble chips: ${shown}`)
+      await page.screenshot({ path: join(shots, 'chips-sent.png') })
+      return { bubble: shown }
+    },
+  )
+
+  await check(page, '编辑后重新发送 puts both chips back', async () => {
+    const row = lastBubble()
+    await row.hover()
+    await row.getByRole('button', { name: '编辑后重新发送' }).click()
+    await until(
+      async () => (await box.locator('.composer-chip').count()) === 2,
+      5_000,
+      'the chips back in the box',
+    )
+    const back = await chipsIn(box, '.composer-chip')
+    await box.click()
+    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('Backspace')
+    return { back }
+  })
+
+  await check(page, 'after a reload the bubble keeps its chips', async () => {
+    await page.reload()
+    await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+    const bubble = page
+      .locator('.user-row')
+      .filter({ hasText: '整理一下' })
+      .last()
+    await bubble.waitFor({ timeout: 20_000 })
+    const replayed = await chipsIn(bubble, '.reference-chip')
+    if (replayed.length !== 2) throw new Error(`replayed: ${replayed}`)
+    return { replayed }
+  })
+
+  await check(
+    page,
+    '撤销 skips a file changed after the turn and restores the rest',
+    async () => {
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: { file_path: 'notes/keep.md', content: '# Keep\n' },
+            },
+            {
+              name: 'write',
+              args: { file_path: 'notes/drop.md', content: '# Drop\n' },
+            },
+          ],
+        }),
+        () => ({ text: '两份笔记写好了。' }),
+      )
+      await send(page, '写两份笔记。')
+      await until(
+        () => assistantSaid(page, '两份笔记写好了'),
+        30_000,
+        'the reply',
+      )
+      const sessionId = await sessionIdOf(page)
+      // The turn's record lands as the turn ends, just after the reply.
+      await until(
+        async () =>
+          (await turnRecords(page, sessionId))
+            .at(-1)
+            ?.files.some((file) => file.path === 'notes/keep.md') === true,
+        10_000,
+        'the notes turn record',
+      )
+      const record = (await turnRecords(page, sessionId)).at(-1)!
+      // The user changes one of them afterwards.
+      writeFileSync(join(project, 'notes', 'keep.md'), '# Keep, edited later\n')
+      const card = page.locator(`[data-turn-files="${record.turn}"]`)
+      await card.waitFor({ timeout: 10_000 })
+      await card.locator('[data-action="undo"]').click()
+      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      await dialog.waitFor({ timeout: 5_000 })
+      await dialog.locator('[data-action="confirm"]').click()
+      await until(
+        async () => (await card.getAttribute('data-state')) === 'reverted',
+        10_000,
+        'the card to say it was undone',
+      )
+      const summary = (await card.locator('.reverted').innerText()).trim()
+      if (!summary.includes('跳过 1 个')) throw new Error(`summary: ${summary}`)
+      if (existsSync(join(project, 'notes', 'drop.md')))
+        throw new Error('drop.md was not removed')
+      if (
+        readFileSync(join(project, 'notes', 'keep.md'), 'utf8') !==
+        '# Keep, edited later\n'
+      )
+        throw new Error('the later edit was overwritten')
+      await page.screenshot({ path: join(shots, 'turn-files-skipped.png') })
+      return { summary }
+    },
+  )
+
+  await check(page, 'the environment card of a Build session', async () => {
+    // With a workspace pane open the card is not shown by default: open it
+    // with its toggle in the conversation header (same label as the card).
+    const card = page.locator('.environment-card')
+    if (!(await card.isVisible().catch(() => false)))
+      await page
+        .getByRole('button', { name: '环境信息', exact: true })
+        .first()
+        .click()
+    await card.waitFor({ timeout: 10_000 })
+    const title = (await card.locator('.card-title').innerText()).trim()
+    const name = project.split('/').filter(Boolean).at(-1)!
+    if (title !== name) throw new Error(`title ${title}, project ${name}`)
+    const branch = (
+      await card.locator('[data-row="branch"]').innerText()
+    ).trim()
+    if (!branch.includes('main')) throw new Error(`branch row: ${branch}`)
+    await card.getByRole('button', { name: '更多操作' }).click()
+    const menu = page.getByRole('menu', { name: '更多操作' })
+    await menu.waitFor({ timeout: 5_000 })
+    const items = (await menu.getByRole('menuitem').allInnerTexts()).map(
+      (text) => text.split('\n')[0]!.trim(),
+    )
+    for (const item of [
+      '打开工作台',
+      '工作位置',
+      '切换分支',
+      '提交或推送',
+      '比较分支',
+    ])
+      if (!items.includes(item)) throw new Error(`menu: ${items}`)
+    await page.waitForTimeout(400) // let the menu finish fading in
+    await page.screenshot({ path: join(shots, 'environment-card.png') })
+    await page.keyboard.press('Escape')
+    return { title: '<project>', branch, items }
+  })
+}
+
 /** A real model, once: its reply links the files it names. */
 async function realModel(page: Page): Promise<void> {
   await check(page, 'a real reply links the files it names', async () => {
@@ -649,6 +879,74 @@ async function realModel(page: Page): Promise<void> {
     )
     return { chips, reply }
   })
+
+  // RF-03: naming the Computer Use plugin sends a real model down the
+  // computer-use route (the local fixture site; no card is expected).
+  await check(
+    page,
+    'with @computer-use a real model reads the page in the built-in browser',
+    async () => {
+      const site = await startFixtureSite()
+      try {
+        await core(page, 'computerUse.setEnabled', true)
+        const box = page.getByLabel('消息输入框').first()
+        await box.click()
+        await box.pressSequentially('@comp')
+        const row = page
+          .locator('.composer-palette .capability-picker-item')
+          .filter({ hasText: 'Computer Use' })
+        await until(
+          async () =>
+            (await row.count()) > 0 &&
+            (await row.getAttribute('data-unavailable')) === null,
+          15_000,
+          'Computer Use to be offered as a chip',
+        )
+        await row.click()
+        await box.locator('.composer-chip[data-kind="plugin"]').waitFor()
+        await box.pressSequentially(
+          `用内置浏览器打开 ${site.origin}/long ，告诉我页面标题是什么。`,
+        )
+        await box.press('Enter')
+        const step = page.locator('.assistant-step').last()
+        await until(
+          async () => {
+            const stop = await page
+              .getByRole('button', { name: /停止/ })
+              .first()
+              .isVisible()
+              .catch(() => false)
+            return (
+              !stop &&
+              (await page
+                .locator('.tool-row[data-tool="browser_open"]')
+                .count()) > 0 &&
+              (await step.innerText()).trim().length > 0
+            )
+          },
+          4 * 60_000,
+          'the browser task',
+        )
+        await page.waitForTimeout(1500)
+        const tools = await page
+          .locator('.tool-row')
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute('data-tool')),
+          )
+        const reply = (await step.innerText()).slice(0, 400)
+        await page.screenshot({ path: join(shots, 'real-computer-use.png') })
+        if (!reply.includes('Long list'))
+          throw new Error(`the reply does not name the page: ${reply}`)
+        return {
+          tools: tools.filter((tool) => tool?.startsWith('browser_')),
+          reply,
+        }
+      } finally {
+        await core(page, 'computerUse.setEnabled', false).catch(() => undefined)
+        await site.close()
+      }
+    },
+  )
 }
 
 async function main(): Promise<void> {
@@ -666,6 +964,7 @@ async function main(): Promise<void> {
     else {
       await documentLinks(launched.page, model, project)
       await turnFileRecord(launched.page, model, project)
+      await referencesAndCard(launched.page, model, project)
     }
   } catch (error) {
     if (!(error instanceof Abort))

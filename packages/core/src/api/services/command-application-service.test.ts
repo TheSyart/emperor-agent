@@ -248,6 +248,20 @@ describe('CoreCommandApplicationService', () => {
     )
   })
 
+  it('passes on that the platform dropped chips that did not fit', async () => {
+    const { service, deps } = setup()
+    await service.executeBuiltin({
+      ...context('/continue'),
+      referencesDropped: true,
+    })
+    expect(deps.submitPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ referencesDropped: true }),
+    )
+    expect(vi.mocked(deps.submitPrompt).mock.calls[0]![0]).not.toHaveProperty(
+      'references',
+    )
+  })
+
   it('submits skill commands as kernel /skill gestures with attachments', async () => {
     const { service, deps } = setup()
     const descriptor: CommandDescriptor = {

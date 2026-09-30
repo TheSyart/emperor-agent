@@ -42,6 +42,8 @@ export interface CommandExecutionContext {
   attachments: string[]
   /** Chips in `parsed.raw` (a message starting with a skill chip). */
   references?: MessageReference[]
+  /** Chips were sent but did not fit the parsed text (contract §2.3). */
+  referencesDropped?: true
 }
 
 export interface CommandPlatformDeps {
@@ -217,9 +219,10 @@ export class CommandPlatform {
       arguments: args,
       attachments,
       // Offsets hold only for the text as parsed.
-      ...(input.references?.length &&
-      referencesFit(parsed.raw, input.references)
-        ? { references: input.references }
+      ...(input.references?.length
+        ? referencesFit(parsed.raw, input.references)
+          ? { references: input.references }
+          : { referencesDropped: true }
         : {}),
     }
     const execute = async () => {
