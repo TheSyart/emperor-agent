@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者<br>
-> 最后核验：2026-09-24<br>
-> 事实源：`packages/core/src/capabilities/portfolio.ts`、Core diagnostics、`desktop/src/renderer/src/components/settings/MemorySection.vue`
+> 最后核验：2026-09-30<br>
+> 事实源：`packages/core/src/capabilities/portfolio.ts`、`packages/core/src/plugins/service.ts`、Core diagnostics、`desktop/src/renderer/src/components/settings/MemorySection.vue`
 
 默认关闭或低频使用不等于无人负责。每一项长期保留的可选能力都必须登记唯一 owner、默认状态、真实用户入口、数据权威、评估命令、维护预算、下次复审日期和可执行的退役条件。Core diagnostics 的 `optionalCapabilities` 返回这份脱敏登记。
 

@@ -31,6 +31,10 @@
 - 能力页的 Skills 标签支持粘贴 `SKILL.md`、导入本地文件夹、zip 或 GitHub 链接，并可打开个人或项目 Skills 文件夹；列出不合格的 Skill 及原因，只读 Skill 可以复制为个人 Skill，文件夹变化后列表自动刷新。
 - 增加 `skill_manage` 与 `mcp_config` 工具，让 Agent 管理 Skills 和 Emperor 自己的 MCP 配置；写入跟随权限预设，`danger-full-access` 以外每次写入都需要批准。
 - 能力页支持从本地文件夹或 zip 安装 Plugin；从 URL 安装的 Plugin 在签名验证通过前不会激活。
+- Plugin 包支持三种格式：可移植（带 `$schema` 的根 `plugin.json`）、Codex 兼容和旧的 Emperor 格式；安装前的预览按类别列出 Skill、MCP、Hook、应用连接和不支持的成员，包不合规时给出具体原因，不会留下半装的内容。
+- 已启用插件的 MCP server 和 Hook 真正运行：stdio server 在插件目录中启动，沙箱里只能读自己的包、写自己的数据目录；Hook 只在事件和匹配条件都能对应到 Emperor 时运行。停用或卸载后立即停止，也不会写入你的 `mcp_config.json` 或 `hooks.json`。
+- 能力 › 插件改为「已安装 / 预装」两组列表和插件详情页：Logo、示例提示（「立即试用」把提示放进新对话的输入框）、每个成员的实际状态与原因，以及来源、格式、权限等信息。
+- 随应用提供 GitHub 与 Computer Use 两个插件，可以停用，不能卸载。GitHub 插件带只读的 GitHub Skill、Pull Request 页的 Issue 与 CI 标签（Issue 可按「与我相关 / 我的仓库 / 分配给我 / 我创建的 / 提到我」查看，CI 显示仓库的 Actions 运行、作业和步骤），以及按本机 `gh` 登录状态显示的应用连接；停用后这些入口一起撤下，不影响 `gh` 登录。Computer Use 插件的开关就是“设置 › 电脑操作”的总开关，详情列出内置浏览器、Chrome/Edge 连接和 macOS 桌面各自的实际状态。
 - 侧栏重做：顶部是收起与后退 / 前进，Emperor 标志、搜索和通知铃铛；「新对话」下新增 Pull Request、定时任务、能力、探索四个整页入口；底部是「设置」和明暗切换按钮；会话可以置顶，置顶组内可调整顺序。
 - 增加应用内通知：定时任务运行结果、其他会话中等待回答的问题 / 审批 / 计划、不在屏幕上的会话完成的回复，以及 Git 操作回执；点击跳到对应会话、定时任务页或「审查」。
 - 增加定时任务页：搜索、“全部 / 已开启 / 已暂停 / 已完成”标签、「创建 ▾」中的每日摘要与每周回顾模板、行菜单（立即运行 / 暂停或恢复 / 删除）和任务编辑对话框。
@@ -62,6 +66,7 @@
 - 设置弹窗的全部分区改用统一的设置组件重写：记忆按“长期 / 用户档案 / 情景 / Watchlist / 版本”切换，用量提供活跃度、趋势、模型和缓存视图，Hooks 分为配置 / 测试 / 审计，常规外观支持跟随系统。
 - Skill 校验放宽为只检查 `SKILL.md` 及其引用的文件，名称以 frontmatter 为准；项目 Skills 在对应 Build 会话中可以写入，每个项目使用独立的 Skill 目录。`skills.previewInstall`、`skills.confirmInstall` 与 `skills.package` 已移除，Skill 安装统一使用 `skills.import`。
 - 对话中工具行的 Inspect 改为跳到「轨迹」并在轨迹右侧的「详情」列中定位该调用；「详情」列可拖宽、收起并记住宽度。原右侧详情栏及其 Inspect / Environment 标签移除：子代理在子会话中查看和停止；后台命令和工作流的输出查看与停止移到「环境信息」卡的「后台任务」中（展开后每个任务有「输出」和「停止」，停止工作流前会确认）。
+- `computer-use` Skill 不再是内置 Skill，改由 Computer Use 插件提供：电脑操作关闭时它不再出现在 Skill 列表里。电脑操作设置中，未配对的 Chrome/Edge 连接显示为“实验性”并写明需要配对；macOS 上缺少 Helper 时写明“没有找到 Emperor Computer Helper”。
 - 定时任务、插件、Skills 和 MCP 从设置弹窗移到整页，设置弹窗保留常规、模型、Hooks、工具、记忆、用量、桌宠、配置和诊断；旧的 `?settings=scheduler|plugins|skills|mcp`、`/skills/<名称>` 与 `/mcp` 链接会跳到对应页面。
 
 ### Fixed

@@ -51,7 +51,7 @@ const PORTFOLIO: readonly OptionalCapabilityPortfolioEntry[] = Object.freeze([
     status: 'evaluation_gated',
     defaultMode: 'off',
     userEntry:
-      'Settings › 电脑操作; workspace 浏览器 / 电脑 panes; permission cards in the conversation',
+      'Settings › 电脑操作 (the Computer Use plugin in 能力 › 插件 is the same switch); read-only previews and permission cards in the conversation',
     dataAuthority:
       'grants.json is canonical for GUI grants; vault.json (safeStorage-encrypted) is canonical for credentials; the session log records requests, decisions, auto-approvals and every action without secret values; browser profiles live under ~/.emperor/browser/profiles; computer-use/config.json holds the switches',
     evaluation: {
