@@ -3,6 +3,7 @@
 > 文档状态：Frozen<br>
 > 面向读者：未来的发布维护者<br>
 > 冻结说明：workflow 和验证链已保留，但当前公开渠道不是 Stable；Stable tag 不会自动触发，仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 在解冻前必须保持未设置<br>
+> 签名决定：2026-10-01 起 GitHub 发布包不签名（见[未签名 Preview 发布手册](preview-release-runbook.md#发布包不签名)）。本手册的签名与公证链不再是启用目标，不要为它申请证书或配置签名密钥，除非这个决定被撤销<br>
 > 最后核验：2026-07-19<br>
 > 事实源：`.github/workflows/release.yml`、`scripts/build_desktop_release.sh`、`scripts/verify-*-release.*`、`scripts/publish-release.sh`
 

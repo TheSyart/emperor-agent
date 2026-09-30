@@ -201,6 +201,17 @@ describe('unsigned preview release channel', () => {
     expect(previewRunbook).toContain('annotated tag')
     expect(stableRunbook).toContain('Frozen')
     expect(stableRunbook).toContain('.github/workflows/release.yml')
+
+    // Decided 2026-10-01: packages on GitHub Releases are never signed.
+    const devGuide = fs.readFileSync(
+      path.join(repoRoot, 'docs', 'development', 'README.md'),
+      'utf8',
+    )
+    expect(previewRunbook).toContain('## 发布包不签名')
+    expect(stableRunbook).toContain('preview-release-runbook.md#发布包不签名')
+    expect(devGuide).toContain('electron-builder.preview.cjs')
+    expect(devGuide).toContain('preview-release-runbook.md#发布包不签名')
+    expect(readme).toContain('公开安装包不做代码签名')
   })
 
   it('strictly classifies Stable, Preview and unsupported tags', () => {

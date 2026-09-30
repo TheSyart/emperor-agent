@@ -54,7 +54,7 @@ Emperor Agent 里有几组名称看起来相似，实际处在不同层级：
 
 1. 打开 [GitHub Releases](https://github.com/TheSyart/emperor-agent/releases)。
 2. 根据设备选择 macOS、Windows 或 Linux 安装包。
-3. 当前公开安装包是未签名 Preview，不是 Stable。运行前请阅读[未签名预览版安全说明](docs/release/unsigned-preview-notice.md)。
+3. 公开安装包不做代码签名，以后也是如此：macOS 版没有 Developer ID 签名和 Apple 公证，Windows 版没有发布者签名。当前渠道是 Preview，不是 Stable。运行前请阅读[未签名预览版安全说明](docs/release/unsigned-preview-notice.md)。
 4. 第一次启动后进入设置页，添加模型 Provider、API Key 和模型 ID。
 5. 创建 Chat 开始普通对话，或者选择本地目录创建 Build 会话。
 

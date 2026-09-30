@@ -7,6 +7,15 @@
 
 当前公开安装包使用未签名 Preview 渠道。它通过独立 workflow 构建、验证和发布为 GitHub Pre-release，不应被描述为 Stable，也不能混入受信签名渠道的产物。
 
+## 发布包不签名
+
+项目决定（2026-10-01）：GitHub Releases 上的安装包一律不做代码签名，以后也不改为签名发布。
+
+- macOS：没有 Developer ID 签名，不做 Apple 公证；应用和各个 Helper 只有打包时的 ad-hoc 封签。
+- Windows：没有 Authenticode 发布者签名。
+- 来源和完整性由 `SHA256SUMS.txt` 与 GitHub attestation 证明，它们不是代码签名，照常生成。
+- 本地打包同样不签名，做法见[开发指南](../development/README.md#质量门禁)。
+
 ## 发布前条件
 
 - 目标 commit 已进入仓库默认分支，或 Preview tag 的 commit 可从默认分支到达。
