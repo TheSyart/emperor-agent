@@ -212,7 +212,11 @@ export interface ComposerTrigger {
   atStart: boolean
 }
 
-const TRIGGER = /(^|\s)([/@])([^\s/@￼]*)$/
+/**
+ * `/query` (no further `/`) or `@query` (a plugin id may carry one
+ * `/namespace`), at the start or after whitespace.
+ */
+const TRIGGER = /(^|\s)(?:(\/)([^\s/@￼]*)|(@)([^\s/@￼]*(?:\/[^\s/@￼]*)?))$/
 
 export function triggerAt(state: EditorState): ComposerTrigger | null {
   const { selection } = state
@@ -227,13 +231,13 @@ export function triggerAt(state: EditorState): ComposerTrigger | null {
   )
   const match = TRIGGER.exec(before)
   if (!match) return null
-  const query = match[3]!
+  const query = match[3] ?? match[5]!
   const to = selection.from
   const from = to - query.length - 1
   const atStart =
     $from.index(0) === 0 && $from.parentOffset === query.length + 1
   return {
-    sigil: match[2] as '/' | '@',
+    sigil: (match[2] ?? match[4]) as '/' | '@',
     query,
     from,
     to,

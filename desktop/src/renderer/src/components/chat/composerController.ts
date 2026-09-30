@@ -6,6 +6,12 @@ import {
   skillChipItem,
 } from '../../capabilities/capabilityPickerModel'
 import {
+  pluginCatalog,
+  pluginChipItem,
+  pluginChoices,
+  rankPluginChoices,
+} from '../../capabilities/pluginChoices'
+import {
   hasComposerCapabilityTokens,
   normalizeComposerCapabilityInput,
   renderComposerInlineTokens,
@@ -33,6 +39,7 @@ import type {
   CurrentModelConfig,
   MessageReference,
   ModelEntry,
+  PluginSummary,
   ProviderOption,
   RequestedSkill,
   RuntimeGoalView,
@@ -56,6 +63,8 @@ import { useFloatingMenu } from './floatingMenu'
 export interface ComposerControllerProps {
   busy: boolean
   commands: SlashPaletteItem[]
+  /** Installed plugins (`@` references, RF-03); none: no `@` list. */
+  plugins?: readonly PluginSummary[]
   tools: ToolInfo[]
   mcpContent?: string
   contextUsed: number
@@ -91,6 +100,8 @@ export interface ComposerEmit {
   (event: 'activate-goal'): void
   (event: 'dismiss-lifecycle'): void
   (event: 'start-goal', outcome: string): void
+  /** A plugin that cannot be referenced now was picked: show its detail. */
+  (event: 'open-plugin', target: { pluginId: string; scope: string }): void
 }
 
 export const COMPOSER_ACCEPT_LIST =
@@ -201,10 +212,13 @@ export function useComposerController(
     () =>
       new Map(skillItems.value.map((item) => [skillIdOf(item), item.title])),
   )
-  /** Names that become chips when typed or pasted (plugins: RF-03). */
+  const plugins = computed(() => pluginChoices(props.plugins ?? []))
+  const pluginNames = computed(() => pluginCatalog(plugins.value))
+  /** Names that become chips when typed or pasted: skills and usable plugins. */
   const catalog: ComposerCatalog = {
     skill: (id) => skillLabels.value.get(id),
-    plugin: () => undefined,
+    plugin: (id) => pluginNames.value.label(id),
+    pluginLogo: (id) => pluginNames.value.logo(id),
   }
 
   const suggestions = computed(() => {
@@ -277,14 +291,24 @@ export function useComposerController(
       tools: props.tools,
       mcpContent: props.mcpContent || '',
       chips: richInput,
+      plugins: richInput ? plugins.value : [],
     }),
   )
-  /** ` /name` in the middle of a message: skills only (commands start it). */
+  /**
+   * `@query` anywhere: plugins only, usable first. ` /name` in the middle
+   * of a message: skills only (commands start it).
+   */
   const mentionGroups = computed(() => {
     const current = trigger.value
-    if (!richInput || !current || current.atStart || current.sigil !== '/')
-      return []
+    if (!richInput || !current) return []
     if (dismissedTrigger.value === triggerKey(current)) return []
+    if (current.sigil === '@') {
+      const items = rankPluginChoices(plugins.value, current.query)
+        .slice(0, 12)
+        .map(pluginChipItem)
+      return items.length ? [{ label: '插件', items }] : []
+    }
+    if (current.atStart) return []
     const items = rankSlashPaletteItems(skillItems.value, current.query)
       .slice(0, 12)
       .map(skillChipItem)
@@ -316,13 +340,15 @@ export function useComposerController(
     paletteMode.value === 'add'
       ? '添加能力'
       : paletteMode.value === 'mention'
-        ? '技能'
+        ? trigger.value?.sigil === '@'
+          ? '插件'
+          : '技能'
         : '斜杠命令',
   )
   const paletteHint = computed(() =>
     paletteMode.value === 'add'
       ? richInput
-        ? '插入附件或 Skill'
+        ? '插入附件、Skill 或插件'
         : '插入附件、Skill 或 MCP 占位符'
       : 'Tab 补全第一项',
   )
@@ -773,6 +799,14 @@ export function useComposerController(
     }
     if (item.action === 'insert_reference' && item.reference) {
       insertReference(item.reference)
+      return
+    }
+    if (item.action === 'open_plugin' && item.plugin) {
+      // Nothing is inserted; the typed `@query` stays and its list closes.
+      if (trigger.value) dismissedTrigger.value = triggerKey(trigger.value)
+      closeComposerMenus()
+      paletteSelectionIndex.value = 0
+      emit('open-plugin', item.plugin)
       return
     }
     if (item.action === 'activate_plan' || item.action === 'activate_goal') {

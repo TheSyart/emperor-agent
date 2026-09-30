@@ -42,6 +42,7 @@ import {
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { pluginDetailLocation } from '../../capabilities/pluginChoices'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
 import { openExternal, revealReference } from '../../api/backend'
 import { core } from '../../api/http'
@@ -602,6 +603,11 @@ async function startGoalWithLifecycle(outcome: string): Promise<void> {
   }
 }
 
+/** A plugin picked in the composer that cannot be referenced now: its detail. */
+function openPlugin(target: { pluginId: string; scope: string }): void {
+  void router.push(pluginDetailLocation(target)).catch(() => undefined)
+}
+
 async function dismissLifecycle(): Promise<void> {
   const result = await ctx.dismissLifecycle()
   if (!result.ok && result.error) ctx.showToast(result.error)
@@ -807,6 +813,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :goal-capture-status="goalCaptureStatus"
           :lifecycle-mode="composerLifecycleMode"
           :commands="ctx.commands.value"
+          :plugins="ctx.boot.value?.plugins ?? []"
           :tools="ctx.boot.value?.tools || []"
           :mcp-content="ctx.mcpContent.value"
           :context-used="ctx.boot.value?.context_used ?? 0"
@@ -824,6 +831,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :complete-command="ctx.completeSlashCommand"
           :refresh-commands="ctx.refreshCommands"
           @set-permission="ctx.setPermissionMode"
+          @open-plugin="openPlugin"
           @activate-plan="activatePlan"
           @activate-goal="activateGoalCapture"
           @dismiss-lifecycle="dismissLifecycle"

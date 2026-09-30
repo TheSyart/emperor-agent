@@ -27,7 +27,12 @@
 import { baseKeymap, splitBlock } from 'prosemirror-commands'
 import { closeHistory, history, redo, undo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
-import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model'
+import {
+  DOMSerializer,
+  Fragment,
+  Slice,
+  type Node as PMNode,
+} from 'prosemirror-model'
 import {
   EditorState,
   Plugin,
@@ -200,10 +205,45 @@ function createState(doc?: PMNode): EditorState {
   })
 }
 
+/** A plugin chip's leading glyph: its logo, or a neutral fallback when it has none or fails to load. */
+function pluginGlyph(logo: string | null): HTMLElement {
+  const fallback = () => {
+    const glyph = document.createElement('span')
+    glyph.className = 'composer-chip-glyph'
+    glyph.dataset.chipFallback = ''
+    glyph.setAttribute('aria-hidden', 'true')
+    return glyph
+  }
+  if (!logo) return fallback()
+  const image = document.createElement('img')
+  image.className = 'composer-chip-logo'
+  image.src = logo
+  image.alt = ''
+  image.setAttribute('aria-hidden', 'true')
+  image.addEventListener('error', () => image.replaceWith(fallback()), {
+    once: true,
+  })
+  return image
+}
+
 onMounted(() => {
   view = new EditorView(host.value!, {
     state: createState(),
     attributes,
+    nodeViews: {
+      // The schema's toDOM, plus the plugin's logo in front of its name.
+      chip: (node) => {
+        const spec = node.type.spec.toDOM!(node)
+        const { dom } = DOMSerializer.renderSpec(document, spec)
+        if (node.attrs.kind === 'plugin')
+          (dom as HTMLElement).prepend(
+            pluginGlyph(
+              props.catalog.pluginLogo?.(String(node.attrs.id)) ?? null,
+            ),
+          )
+        return { dom, ignoreMutation: () => true }
+      },
+    },
     editable: () => !props.disabled,
     dispatchTransaction: dispatch,
     handleKeyDown: (_view, event) => {
@@ -435,7 +475,7 @@ defineExpose({
   user-select: none;
 }
 
-.composer-editor :deep(.composer-chip)::before {
+.composer-editor :deep(.composer-chip[data-kind='skill'])::before {
   content: '';
   flex: none;
   width: 0.875em;
@@ -443,6 +483,25 @@ defineExpose({
   background-color: currentColor;
   -webkit-mask: var(--composer-chip-icon) center / contain no-repeat;
   mask: var(--composer-chip-icon) center / contain no-repeat;
+}
+
+.composer-editor :deep(.composer-chip-logo) {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+/* A plugin without a usable logo: a neutral block glyph. */
+.composer-editor :deep(.composer-chip-glyph) {
+  flex: none;
+  width: 0.875em;
+  height: 0.875em;
+  background-color: currentColor;
+  -webkit-mask: var(--composer-plugin-icon) center / contain no-repeat;
+  mask: var(--composer-plugin-icon) center / contain no-repeat;
+  --composer-plugin-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='14' y='3' width='7' height='7' rx='1'/%3E%3Cpath d='M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3'/%3E%3C/svg%3E");
 }
 
 .composer-editor :deep(.composer-chip[data-kind='skill']) {

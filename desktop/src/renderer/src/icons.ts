@@ -2,6 +2,7 @@
 // line icons. All exports are Vue components (lucide-vue-next) that inherit
 // currentColor, so they theme automatically. Render with <component :is="..." />.
 import {
+  Blocks,
   MessageSquare,
   Cpu,
   Coins,
@@ -64,6 +65,7 @@ export const navIconMap: Record<string, IconComponent> = {
   project: ClipboardList,
   scheduler: Clock,
   mcp: Plug,
+  plugins: Blocks,
   memory: Database,
   pet: Cat,
 }

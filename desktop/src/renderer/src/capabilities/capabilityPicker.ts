@@ -9,6 +9,8 @@ export type CapabilityPickerAction =
   | 'insert_capability_token'
   /** A skill or plugin chip (the rich composer). */
   | 'insert_reference'
+  /** A plugin that cannot be referenced now: open its detail instead. */
+  | 'open_plugin'
   | 'activate_plan'
   | 'activate_goal'
 
@@ -21,6 +23,12 @@ export interface CapabilityPickerItem {
   completion?: string
   /** What `insert_reference` inserts. */
   reference?: { kind: 'skill' | 'plugin'; id: string; label: string }
+  /** What `open_plugin` opens. */
+  plugin?: { pluginId: string; scope: string }
+  /** Shown in place of the icon (a plugin's logo, or its monogram). */
+  logo?: { name: string; url: string | null }
+  /** Greyed: selecting it does not insert anything. */
+  disabled?: boolean
   icon: IconComponent
   tone?: CapabilityTone
 }

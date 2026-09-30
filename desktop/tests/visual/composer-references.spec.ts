@@ -5,7 +5,9 @@ import { resolve } from 'node:path'
 import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 
 // RF-02 in real Chromium: skill chips in the composer with real keys — the
-// list, the chip, Backspace, undo and an input method's composition.
+// list, the chip, Backspace, undo and an input method's composition. RF-03:
+// plugin chips from the `@` list, with the plugin's logo, and plugins that
+// cannot be used greyed and opening their detail.
 
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'composer')
 
@@ -56,6 +58,90 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `composer-skill-chip-${theme}`)
   })
 }
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`a plugin chip from the @ list, with its logo (${theme})`, async ({
+    page,
+  }) => {
+    const editor = await open(page, theme)
+    await page.keyboard.type('看看 @')
+    const palette = page.locator('.composer-palette')
+    await expect(palette).toHaveAttribute('data-mode', 'mention')
+    const rows = palette.locator('.capability-picker-item')
+    await expect(rows.locator('strong')).toHaveText([
+      'Computer Use',
+      'GitHub',
+      'Web Research',
+      'PDF Tools',
+      'Release Notes',
+    ])
+    await expect(rows.nth(3)).toHaveAttribute('data-unavailable', 'true')
+    await expect(rows.nth(3).locator('b')).toHaveText('已停用')
+    await expect(rows.nth(4).locator('b')).toHaveText('来源未验证')
+    await shot(page, `composer-plugin-list-${theme}`)
+    await page.keyboard.type('git')
+    await page.keyboard.press('Enter')
+    await expect(palette).toBeHidden()
+    const chip = editor.locator('.composer-chip[data-kind="plugin"]')
+    await expect(chip).toHaveText('GitHub')
+    await expect(chip).toHaveAttribute('aria-label', '插件 GitHub')
+    const logo = chip.locator('img')
+    await expect
+      .poll(() =>
+        logo.evaluate((node) => (node as HTMLImageElement).naturalWidth),
+      )
+      .toBeGreaterThan(0)
+    await page.keyboard.type('的 Pull Request')
+    await expect(editor).toHaveText('看看 GitHub 的 Pull Request')
+    await shot(page, `composer-plugin-chip-${theme}`)
+  })
+}
+
+test('a plugin that cannot be used opens its detail instead of a chip', async ({
+  page,
+}) => {
+  const editor = await open(page)
+  await page.keyboard.type('用 @pdf')
+  await page
+    .locator('.composer-palette .capability-picker-item')
+    .filter({ hasText: 'PDF Tools' })
+    .click()
+  await expect(page).toHaveURL(
+    /\/capabilities\?plugin=emperor(\/|%2F)pdf-tools&scope=user/,
+  )
+  await expect(
+    page.locator('[data-plugin-detail="emperor/pdf-tools"]'),
+  ).toBeVisible()
+  await page.goBack()
+  await expect(editor).toHaveText('用 @pdf')
+  await expect(editor.locator('.composer-chip')).toHaveCount(0)
+})
+
+test('a sent plugin chip goes to Core as @id with its reference', async ({
+  page,
+}) => {
+  await open(page)
+  await page.keyboard.type('@github ')
+  await page.keyboard.type('看看我的 PR')
+  await page.keyboard.press('Enter')
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __visualSubmits?: Array<Record<string, unknown>>
+            }
+          ).__visualSubmits?.at(-1) ?? null,
+      ),
+    )
+    .toMatchObject({
+      content: '@github 看看我的 PR',
+      references: [
+        { kind: 'plugin', id: 'github', label: 'GitHub', start: 0, end: 7 },
+      ],
+    })
+})
 
 test('Backspace removes a chip whole and undo brings it back', async ({
   page,

@@ -51,6 +51,7 @@ import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
 import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
+import { followPluginList } from './composables/pluginListSync'
 import { activeGoalForSession, hasProjectedGoal } from './runtime/selectors'
 import { normalizeGoal } from './runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
@@ -294,6 +295,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => disposeRuntime())
+
+// Plugins change from other pages too (their switches, installs): keep the
+// list the composer and message chips read current.
+const stopPluginList = followPluginList(boot)
+onBeforeUnmount(stopPluginList)
 
 async function refreshAll() {
   await loadBootstrap(false, sessionStore.backendSessionId())

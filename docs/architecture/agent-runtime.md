@@ -33,7 +33,7 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 
 系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加。
 
-Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
+Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
 
 ## Turn 与 step
 
@@ -98,6 +98,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 - `skills/file-loader.ts` 的 `SkillLoaders` 按项目根缓存 `FileSkillsLoader`：`forProject(null)` 服务 Chat 会话，每个 Build 项目根各有一个 loader，并发 session 不会互相改写共享实例。每个 loader 按 project（`<project>/.emperor/skills`）> user（`stateRoot/skills`）> Plugin > builtin 合并来源，每次读取重新扫描；未通过校验的文件夹进入 `SkillScan.invalid` 并附原因。
 - `HarnessHost.skillsLoaderFor(agent)` 按 session 的 Build 项目选择 loader，Skill 目录 middleware、`skill` 工具与 `skill_manage` 共用它；CoreApi 的 `skills.*` 通过 `sessionId` 走同一选择（`skillsForSession()`）。
+- 插件引用（`harness/host/plugin-references.ts`）：本步进入的用户消息里每个 `@插件 ID`（消息开头或空白之后，ID 可带一段 `/命名空间`），每条消息各注入一次上下文消息（producer `plugin-invocation`，`summary` 为 `plugin:<ID>`），追加在本步消息之后，不改系统提示。插件数据由 CoreApi 通过 `setPluginReferenceResolver` 提供：取生效范围的那一行；启用时读插件详情（先检查应用连接），列出 Skill、MCP（工具数）、应用连接和 Hook 各自能否使用，并附上插件可用 Skill 的说明，合计超过 16 KiB 时只给目录；停用、不存在、来源未验证或读取失败时只有一行说明，Computer Use 关闭时提示在「设置 › 电脑操作」打开。清单里的名称、描述与原因都按 JSON 字符串写入，`<`、`>`、`&` 转义，不能闭合标签。
 - Skill 名称规则只有一处：`skills/name.ts` 的 `SKILL_NAME`（`^[a-z0-9][a-z0-9._-]*$`，最多 64 个字符），loader、Skill 服务、`requestedSkills` 和 `/name` 手势共用。名称取自 frontmatter `name`，文件夹名不同只产生警告。
 - `skills/validate.ts` 是宽松校验：只检查 `SKILL.md` 及其引用的相对路径文件，跳过 `node_modules`、`.venv`、`venv`、`.git`、`__pycache__`，允许指向文件夹内部的符号链接，拒绝绝对链接与越界链接，frontmatter YAML 宽松解析并以警告报告。
 - 写入侧是 `skills/library.ts` 的 `SkillLibrary`（个人与项目 scope 可写，builtin 与 Plugin 只读，`copyToUser` 生成个人副本）；导入由 `skills/import.ts` 把粘贴内容、本地文件夹、本地 zip 或 https 链接（GitHub 仓库 / `tree/<ref>/<dir>` / 直接 zip）物化到私有 staging 后逐个校验、复制。

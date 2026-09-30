@@ -70,6 +70,10 @@ import {
   appConnectionKey,
   type AppConnectionState,
 } from '../plugins/connections'
+import type {
+  PluginReference,
+  PluginReferenceMember,
+} from '../harness/host/plugin-references'
 import {
   COMPUTER_USE_PLUGIN_ID,
   PluginApplicationService,
@@ -382,6 +386,8 @@ export class CoreApi {
     kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
       this.pluginService.enabledSkillRoots(projectRoot),
     )
+    // `@plugin` gestures read the plugin service (E-track contract §3).
+    host.setPluginReferenceResolver((id) => this.pluginReference(id))
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: kept.skillManager,
@@ -2169,6 +2175,68 @@ export class CoreApi {
   }
 
   /** Apply plugin MCP servers and hooks; a failure is logged, never thrown into callers. */
+  /**
+   * What a `@plugin` gesture tells the model: the plugin in effect with this
+   * id and, when active, its members and whether each can be used (app
+   * connections are checked first, as in the detail).
+   */
+  private async pluginReference(id: string): Promise<PluginReference> {
+    const rows = this.pluginService
+      .list()
+      .filter((plugin) => plugin.pluginId === id)
+    if (rows.length === 0) return { status: 'missing', id, name: null }
+    const row = rows.find((plugin) => plugin.effective) ?? rows[0]!
+    if (row.activation === 'blocked_unverified')
+      return { status: 'blocked_unverified', id, name: row.displayName }
+    if (row.activation === 'missing')
+      return { status: 'missing', id, name: row.displayName }
+    if (row.activation !== 'active')
+      return {
+        status: 'disabled',
+        id,
+        name: row.displayName,
+        computerUseOff:
+          row.scope === 'managed' && id === COMPUTER_USE_PLUGIN_ID,
+      }
+    const detail = await this.plugins.getDetail({
+      pluginId: id,
+      scope: row.scope,
+    })
+    const members: PluginReferenceMember[] = []
+    for (const component of detail.components) {
+      if (
+        component.kind !== 'skill' &&
+        component.kind !== 'mcp' &&
+        component.kind !== 'app' &&
+        component.kind !== 'hook'
+      )
+        continue
+      const usable =
+        component.kind === 'mcp'
+          ? component.state === 'running'
+          : component.state === 'available'
+      members.push({
+        kind: component.kind,
+        id: component.id,
+        unavailable: usable ? null : (component.reason ?? component.state),
+        ...(component.kind === 'mcp'
+          ? {
+              tools:
+                this.pluginActivation.mcpServer(id, row.scope, component.id)
+                  ?.toolCount ?? 0,
+            }
+          : {}),
+      })
+    }
+    return {
+      status: 'enabled',
+      id,
+      name: detail.displayName,
+      description: detail.description,
+      members,
+    }
+  }
+
   private async syncPlugins(): Promise<void> {
     try {
       await this.pluginActivation.sync()

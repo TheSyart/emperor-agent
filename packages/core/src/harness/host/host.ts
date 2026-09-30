@@ -112,6 +112,10 @@ import {
 } from '../tools/builtin/shell'
 import { createSkillTool, skillMiddleware } from '../tools/builtin/skill'
 import {
+  pluginReferenceMiddleware,
+  type PluginReferenceResolver,
+} from './plugin-references'
+import {
   createSkillManageTool,
   installSkillManagePromptSection,
 } from '../tools/builtin/skill-manage'
@@ -245,6 +249,8 @@ export class HarnessHost {
   /** GUI control kernel; null on hosts without a computer-use port. */
   computerUse: InstalledComputerUse | null = null
   private computerUseConfig: ComputerUseConfigStore | null = null
+  /** What `@plugin` gestures learn about a plugin (set by CoreApi's plugin service). */
+  private pluginReferences: PluginReferenceResolver | null = null
   private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
   private computerUseKillSwitchChanged:
     ((accelerator: string | null) => void) | undefined
@@ -510,6 +516,10 @@ export class HarnessHost {
         (agent) => tools.get('skill', agent) !== undefined,
       ),
     )
+    // `@plugin` gestures: the plugin's reference after the step's messages.
+    middleware.preStep.push(
+      pluginReferenceMiddleware(skills, () => this.pluginReferences),
+    )
     this.compaction.install(middleware)
     middleware.requestError.push(retryMiddleware())
     // Saved model execution policy: fallback after retries give up, per-turn cost cap.
@@ -549,6 +559,11 @@ export class HarnessHost {
   }
 
   /** Master switch: persist, (un)register the GUI tools, tell the desktop. */
+  /** Answer `@plugin` gestures from the plugin service (CoreApi). */
+  setPluginReferenceResolver(resolver: PluginReferenceResolver | null): void {
+    this.pluginReferences = resolver
+  }
+
   setComputerUseEnabled(enabled: boolean): void {
     const installed = this.computerUse
     if (installed === null) return

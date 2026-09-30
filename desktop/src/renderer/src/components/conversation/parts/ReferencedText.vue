@@ -2,16 +2,19 @@
 /**
  * ReferencedText — a sent message's text with its skill / plugin chips
  * (E-track §2.4): the saved `references` when they fit the text, else the
- * names the app knows now (older messages). A chip whose skill or plugin is
- * gone is greyed and says so. Inline; the parent sets the text style.
+ * names the app knows now (older messages). A plugin chip shows the
+ * plugin's logo (or its monogram). A chip whose skill or plugin is gone or
+ * off is greyed and says so. Inline; the parent sets the text style.
  *
  * Props: text, references?.
  */
 import { computed } from 'vue'
+import { navIcon } from '../../../icons'
 import type { MessageReference } from '../../../types'
 import { DsSkill } from '../../icons/ds'
 import { useReferenceCatalog } from '../../composer/editor/referenceCatalog'
 import { messageSegments } from '../../composer/editor/referenceText'
+import PluginLogo from '../../settings/plugins/PluginLogo.vue'
 
 const props = defineProps<{
   text: string
@@ -22,6 +25,7 @@ const catalog = useReferenceCatalog()
 const segments = computed(() =>
   messageSegments(props.text, props.references, catalog),
 )
+const pluginGlyph = navIcon('plugins')
 
 function chipName(kind: string, label: string): string {
   return `${kind === 'skill' ? '技能' : '插件'} ${label}`
@@ -42,7 +46,18 @@ function chipName(kind: string, label: string): string {
           : `${chipName(segment.chip.kind, segment.chip.label)}（已不可用）`
       "
       :title="segment.available ? undefined : '已不可用'"
-      ><DsSkill :size="14" class="reference-chip-icon" />{{
+      ><PluginLogo
+        v-if="segment.chip.kind === 'plugin' && segment.available"
+        class="reference-chip-icon"
+        :name="segment.chip.label"
+        :logo="catalog.pluginLogo?.(segment.chip.id) ?? null"
+        :size="14"
+      /><component
+        :is="pluginGlyph"
+        v-else-if="segment.chip.kind === 'plugin'"
+        :size="14"
+        class="reference-chip-icon"
+      /><DsSkill v-else :size="14" class="reference-chip-icon" />{{
         segment.chip.label
       }}</span
     ><template v-else>{{ segment.text }}</template></template

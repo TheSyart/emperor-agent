@@ -40,6 +40,7 @@ import {
 import {
   lastToolResult,
   startFakeModel,
+  type ChatRequest,
   type FakeModel,
   type Step,
 } from '../fullstack/fake-model'
@@ -380,6 +381,69 @@ async function assistantSaid(page: Page, text: string): Promise<boolean> {
   )
 }
 
+/** The system prompt of a model request (the first system message). */
+function systemOf(request: ChatRequest): string {
+  const system = request.messages.find((message) => message.role === 'system')
+  return textOf(system?.content)
+}
+
+/** A message's text, whether the wire sent a string or text parts. */
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content))
+    return content
+      .map((part) =>
+        part && typeof part === 'object' && 'text' in part
+          ? String((part as { text: unknown }).text)
+          : '',
+      )
+      .join('\n')
+  return ''
+}
+
+/** The `<plugin_reference …>` blocks in a request, in order. */
+function pluginReferences(request: ChatRequest): string[] {
+  return request.messages
+    .map((message) => textOf(message.content))
+    .filter((text) => text.includes('<plugin_reference'))
+}
+
+/**
+ * Send `text` (typed after anything already in the box) and return the
+ * model request the agent made for it.
+ */
+async function sendAndCapture(
+  page: Page,
+  model: FakeModel,
+  text: string,
+  reply: string,
+): Promise<ChatRequest> {
+  let captured: ChatRequest | null = null
+  model.enqueue((request) => {
+    captured = request
+    return { text: reply }
+  })
+  // Typed after what is already there (a chip), not filled over it.
+  const box = page.getByLabel('消息输入框').first()
+  await box.click()
+  await page.keyboard.press('End')
+  await box.pressSequentially(text)
+  await box.press('Enter')
+  await until(() => assistantSaid(page, reply), 40_000, `the reply ${reply}`)
+  if (!captured) throw new Error('the model saw no request')
+  return captured
+}
+
+/** Type `@id ` into the composer so it becomes a chip. */
+async function typeChip(page: Page, id: string): Promise<string | null> {
+  const box = page.getByLabel('消息输入框').first()
+  await box.click()
+  await box.pressSequentially(`@${id} `)
+  const chip = box.locator('.composer-chip[data-kind="plugin"]').last()
+  await chip.waitFor()
+  return await chip.getAttribute('aria-label')
+}
+
 async function memberStates(
   page: Page,
   pluginId: string,
@@ -597,7 +661,7 @@ async function runsForReal(
   )
 }
 
-async function managed(page: Page): Promise<void> {
+async function managed(page: Page, model: FakeModel): Promise<void> {
   await check(
     page,
     'GitHub shows the logged-in gh, and its tabs follow its switch',
@@ -631,6 +695,38 @@ async function managed(page: Page): Promise<void> {
     },
   )
 
+  // RF-03: `@github` tells the model the plugin's state; the system prompt
+  // is the same as without it (the reference is a message after it).
+  await check(
+    page,
+    '@github reaches the model with the gh state, the system prompt unchanged',
+    async () => {
+      await newChat(page)
+      const plain = await sendAndCapture(
+        page,
+        model,
+        '先随便聊一句。',
+        '好的。',
+      )
+      const chip = await typeChip(page, 'github')
+      const request = await sendAndCapture(
+        page,
+        model,
+        '看看我的 PR',
+        'GitHub 已引用。',
+      )
+      const [reference] = pluginReferences(request)
+      if (!reference?.includes('id="github" status="enabled"'))
+        throw new Error(`reference: ${String(reference).slice(0, 300)}`)
+      if (!reference.includes('- app "github": connected'))
+        throw new Error(`app line: ${reference.slice(0, 600)}`)
+      if (systemOf(request) !== systemOf(plain))
+        throw new Error('the system prompt changed with a plugin reference')
+      await page.screenshot({ path: join(shots, 'reference-github.png') })
+      return { chip }
+    },
+  )
+
   await check(
     page,
     'Computer Use is the Settings switch, both ways',
@@ -661,9 +757,72 @@ async function managed(page: Page): Promise<void> {
       }
     },
   )
+
+  await check(
+    page,
+    '@computer-use says it is off, and brings its Skill once on',
+    async () => {
+      await newChat(page)
+      // Off: no chip can be made, but the typed gesture still reaches Core.
+      const off = await sendAndCapture(
+        page,
+        model,
+        '@computer-use 打开示例网页',
+        '电脑操作没开。',
+      )
+      const [line] = pluginReferences(off)
+      if (!line?.includes('电脑操作未开启（设置 › 电脑操作）'))
+        throw new Error(`off: ${String(line).slice(0, 300)}`)
+      await core(page, 'computerUse.setEnabled', true)
+      await until(
+        async () =>
+          (
+            await core<Array<{ pluginId: string; activation: string }>>(
+              page,
+              'plugins.list',
+            )
+          ).some(
+            (plugin) =>
+              plugin.pluginId === 'computer-use' &&
+              plugin.activation === 'active',
+          ),
+        10_000,
+        'Computer Use to be on',
+      )
+      // The composer learns of the change from plugins_changed: pick it
+      // from the @ list once it is no longer greyed.
+      const box = page.getByLabel('消息输入框').first()
+      await box.click()
+      await box.pressSequentially('@comp')
+      const row = page
+        .locator('.composer-palette .capability-picker-item')
+        .filter({ hasText: 'Computer Use' })
+      await until(
+        async () =>
+          (await row.count()) > 0 &&
+          (await row.getAttribute('data-unavailable')) === null,
+        10_000,
+        'Computer Use to be offered as a chip',
+      )
+      await row.click()
+      await box.locator('.composer-chip[data-kind="plugin"]').waitFor()
+      const on = await sendAndCapture(
+        page,
+        model,
+        '打开示例网页',
+        '好的，开始。',
+      )
+      // The earlier "off" line stays in history; this message's comes last.
+      const reference = pluginReferences(on).at(-1)
+      if (!reference?.includes('<skill_content name="computer-use">'))
+        throw new Error(`on: ${String(reference).slice(0, 300)}`)
+      await core(page, 'computerUse.setEnabled', false)
+      return { off: 'one line', on: 'skill instructions' }
+    },
+  )
 }
 
-async function loggedOut(page: Page): Promise<void> {
+async function loggedOut(page: Page, model: FakeModel): Promise<void> {
   await check(
     page,
     'GitHub with gh logged out: the app needs a connection and the pages say so',
@@ -691,6 +850,27 @@ async function loggedOut(page: Page): Promise<void> {
       return { member: text.split('\n').pop() }
     },
   )
+
+  await check(
+    page,
+    '@github with gh logged out tells the model so',
+    async () => {
+      await newChat(page)
+      await typeChip(page, 'github')
+      const request = await sendAndCapture(
+        page,
+        model,
+        '看看我的 PR',
+        'GitHub 未登录。',
+      )
+      const [reference] = pluginReferences(request)
+      const line =
+        '- app "github": unavailable: "在终端运行 gh auth login 登录 GitHub"'
+      if (!reference?.includes(line))
+        throw new Error(`reference: ${String(reference).slice(0, 600)}`)
+      return { told: 'gh auth login' }
+    },
+  )
 }
 
 async function main(): Promise<void> {
@@ -708,12 +888,12 @@ async function main(): Promise<void> {
     app = launched.app
     await installs(app, launched.page, packages)
     await runsForReal(launched.page, model, home)
-    await managed(launched.page)
+    await managed(launched.page, model)
     await app.close()
     // gh logged out, without touching the real login: an empty config dir.
     launched = await launch(home, { GH_CONFIG_DIR: emptyGh })
     app = launched.app
-    await loggedOut(launched.page)
+    await loggedOut(launched.page, model)
     if (model.errors.length > 0)
       throw new Error(`model step errors: ${String(model.errors[0])}`)
   } catch (error) {

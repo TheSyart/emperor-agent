@@ -3,6 +3,7 @@ import type {
   CapabilityPickerGroup,
   CapabilityPickerItem,
 } from '../../capabilities/capabilityPicker'
+import PluginLogo from '../settings/plugins/PluginLogo.vue'
 
 const props = defineProps<{
   groups: CapabilityPickerGroup[]
@@ -38,11 +39,18 @@ const emit = defineEmits<{
         :class="{ active: item.id === props.activeId }"
         :data-action="item.action"
         :data-tone="item.tone || 'slate'"
+        :data-unavailable="item.disabled || undefined"
         :aria-current="item.id === props.activeId ? 'true' : undefined"
         @click="emit('select', item)"
       >
         <span class="composer-palette-item-icon">
-          <component :is="item.icon" :size="15" />
+          <PluginLogo
+            v-if="item.logo"
+            :name="item.logo.name"
+            :logo="item.logo.url"
+            :size="16"
+          />
+          <component :is="item.icon" v-else :size="15" />
         </span>
         <strong>{{ item.label }}</strong>
         <span>{{ item.description }}</span>

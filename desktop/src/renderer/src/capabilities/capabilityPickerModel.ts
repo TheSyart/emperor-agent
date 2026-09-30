@@ -5,6 +5,11 @@ import type {
   CapabilityPickerGroup,
   CapabilityPickerItem,
 } from './capabilityPicker'
+import {
+  pluginChipItem,
+  rankPluginChoices,
+  type PluginChoice,
+} from './pluginChoices'
 
 export interface CapabilityPickerModelInput {
   commands: SlashPaletteItem[]
@@ -16,6 +21,8 @@ export interface CapabilityPickerModelInput {
    * old `@skill()` / `@mcp()` markers.
    */
   chips?: boolean
+  /** Plugins for the 插件 group (rich composer only). */
+  plugins?: readonly PluginChoice[]
 }
 
 export function buildCapabilityPickerGroups(
@@ -29,6 +36,11 @@ export function buildCapabilityPickerGroups(
   const mcpItems = input.chips
     ? []
     : mcpServerNames(input.tools, input.mcpContent).map(mcpPickerItem)
+  const pluginItems = input.chips
+    ? rankPluginChoices(input.plugins ?? [], '')
+        .slice(0, 8)
+        .map(pluginChipItem)
+    : []
 
   return [
     {
@@ -48,6 +60,10 @@ export function buildCapabilityPickerGroups(
     {
       label: 'Skills',
       items: skillItems,
+    },
+    {
+      label: '插件',
+      items: pluginItems,
     },
     {
       label: 'MCP',

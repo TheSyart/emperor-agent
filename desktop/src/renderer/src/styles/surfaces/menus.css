@@ -98,6 +98,16 @@
   color: rgb(var(--fg) / var(--text-secondary));
 }
 
+/* A plugin that cannot be referenced now: greyed; selecting it opens its detail. */
+.composer-palette-item[data-unavailable] strong {
+  color: rgb(var(--fg) / var(--text-tertiary));
+}
+
+.composer-palette-item[data-unavailable] .composer-palette-item-icon {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+
 .composer-palette-item strong {
   min-width: 0;
   overflow: hidden;
@@ -109,7 +119,8 @@
   white-space: nowrap;
 }
 
-.composer-palette-item span:not(.composer-palette-item-icon) {
+/* Direct children only: a plugin logo in the icon slot has spans of its own. */
+.composer-palette-item > span:not(.composer-palette-item-icon) {
   min-width: 0;
   overflow: hidden;
   color: rgb(var(--fg) / var(--text-tertiary));

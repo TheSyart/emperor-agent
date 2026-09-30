@@ -13,6 +13,8 @@ export type ReferenceKind = MessageReference['kind']
 export interface ComposerCatalog {
   skill(id: string): string | undefined
   plugin(id: string): string | undefined
+  /** A plugin's logo address, when it has one (chips show it). */
+  pluginLogo?(id: string): string | null
 }
 
 export const EMPTY_CATALOG: ComposerCatalog = {

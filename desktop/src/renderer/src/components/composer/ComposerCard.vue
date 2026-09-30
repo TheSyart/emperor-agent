@@ -357,7 +357,7 @@ defineExpose(controller.expose)
       </MenuItem>
       <MenuItem @select="openCapabilities">
         <template #icon><DsSkill :size="16" /></template>
-        {{ richInput ? '插入 Skill' : '插入 Skill / MCP' }}
+        {{ richInput ? '插入 Skill 或插件' : '插入 Skill / MCP' }}
       </MenuItem>
       <MenuItem variant="separator" />
       <MenuItem

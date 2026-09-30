@@ -137,7 +137,21 @@ describe('composer document', () => {
       sigil: '@',
       query: 'gi',
     })
-    for (const text of ['a/b', 'https://x.test/', 'x@y.com', '/ima ', '画'])
+    // A plugin id may carry one `/namespace`; the list stays open over it.
+    expect(triggerAt(stateAt('@acme/to'))).toMatchObject({
+      sigil: '@',
+      query: 'acme/to',
+      atStart: true,
+    })
+    for (const text of [
+      'a/b',
+      'https://x.test/',
+      'x@y.com',
+      '/ima ',
+      '画',
+      '/a/b',
+      '@acme/tools/x',
+    ])
       expect(triggerAt(stateAt(text)), text).toBeNull()
   })
 
