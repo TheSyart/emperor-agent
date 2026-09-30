@@ -450,6 +450,65 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
     expect(api.host.tools.names()).not.toContain(TOOL)
     expect(api.host.hooks.describe().plugins).toEqual([])
   })
+
+  // The detail's 工具 (PLAN-CAP-001 ST-09): each MCP member's tools while
+  // its server runs, and a plain word when it does not.
+  it('lists an MCP member’s tools in the detail while its server runs', async () => {
+    fixture = await makeApi()
+    const { api } = fixture
+    const source = writePackage(
+      join(tmp('emperor-plugin-api-'), 'where-kit'),
+      WHERE_KIT,
+    )
+    const preview = await api.plugins.inspect({ kind: 'local', path: source })
+    await api.plugins.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    const tools = async () =>
+      (await api.plugins.getDetail({ pluginId: 'where-kit', scope: 'user' }))
+        .tools
+
+    expect(await tools()).toEqual({
+      note: null,
+      groups: [
+        {
+          id: 'where',
+          kind: 'mcp',
+          title: 'where',
+          note: null,
+          tools: [
+            {
+              name: TOOL,
+              description:
+                '[MCP:where-kit-where] Report where the server runs.',
+              parameters: {
+                type: 'object',
+                properties: { note: { type: 'string' } },
+              },
+              readOnly: false,
+            },
+          ],
+        },
+      ],
+    })
+
+    await api.plugins.setEnabled({
+      pluginId: 'where-kit',
+      scope: 'user',
+      enabled: false,
+    })
+    expect((await tools()).groups).toEqual([
+      {
+        id: 'where',
+        kind: 'mcp',
+        title: 'where',
+        note: '服务器没有运行',
+        tools: [],
+      },
+    ])
+  })
 })
 
 /** A stored (uncompressed) ZIP of every file under `root`. */

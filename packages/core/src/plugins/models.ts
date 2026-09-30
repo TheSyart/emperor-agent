@@ -194,6 +194,36 @@ export interface PluginComponentView {
   readonly reason: string | null
 }
 
+/** One tool a plugin brings, as its detail lists it. */
+export interface PluginToolView {
+  /** The name the Agent calls it by. */
+  readonly name: string
+  /** The tool's own description (what the model reads). */
+  readonly description: string
+  /** JSON Schema of its arguments. */
+  readonly parameters: Readonly<Record<string, unknown>>
+  /** It only reads (looks, lists or waits). */
+  readonly readOnly: boolean
+}
+
+/** A plugin's tools under one member: a Computer Use driver, or an MCP server. */
+export interface PluginToolGroup {
+  /** Computer Use: `ui`, `embedded-browser`, `external-browser` or `desktop`; MCP: the member's id. */
+  readonly id: string
+  readonly kind: 'computer-use' | 'mcp'
+  readonly title: string
+  /** Why the group lists no tools now (its server does not run), else `null`. */
+  readonly note: string | null
+  readonly tools: readonly PluginToolView[]
+}
+
+/** The 工具 of a plugin's detail (contract §6.2). */
+export interface PluginToolsView {
+  /** Why none of them can be used now (电脑操作 is off), else `null`. */
+  readonly note: string | null
+  readonly groups: readonly PluginToolGroup[]
+}
+
 /** `plugins.getDetail`: everything the detail page shows; never an absolute path (contract §6.2). */
 export interface PluginDetail {
   readonly pluginId: string
@@ -225,6 +255,7 @@ export interface PluginDetail {
     readonly network: boolean
   }
   readonly components: readonly PluginComponentView[]
+  readonly tools: PluginToolsView
 }
 
 /** What a running plugin MCP server reports; the host fills it in (contract §2). */
@@ -265,6 +296,17 @@ export interface PluginRuntimeView {
       'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'
     readonly reason: string | null
   } | null
+  /** The tools one plugin MCP server has registered while it runs (none otherwise). */
+  mcpTools?(
+    pluginId: string,
+    scope: PluginScope,
+    server: string,
+  ): readonly PluginToolView[]
+  /** Computer Use's GUI tools by family (`ui` and each driver); static, so listed while it is off. */
+  computerUseTools?(): ReadonlyArray<{
+    readonly family: string
+    readonly tools: readonly PluginToolView[]
+  }>
   /** The Skills in effect for a project (`null` = chat), by name. */
   effectiveSkills(projectRoot: string | null): ReadonlyMap<
     string,

@@ -76,8 +76,61 @@ function detailOf(plugin: Dict, patch: Dict = {}): Dict {
     installedAt: null,
     permissions: { runsCommands: false, network: false },
     components: [],
+    tools: { note: null, groups: [] },
     ...patch,
   }
+}
+
+function tool(name: string): Dict {
+  return {
+    name,
+    description: `${name} does one thing. More detail follows.`,
+    parameters: { type: 'object' },
+    readOnly: false,
+  }
+}
+
+const CU = summary({
+  pluginId: 'computer-use',
+  displayName: 'Computer Use',
+  scope: 'managed',
+  source: { kind: 'managed' },
+  uninstallable: false,
+})
+
+function driverGroup(id: string, title: string, names: string[]): Dict {
+  return { id, kind: 'computer-use', title, note: null, tools: names.map(tool) }
+}
+
+const CU_TOOLS = {
+  note: null,
+  groups: [
+    driverGroup('ui', '通用', ['ui_list_targets']),
+    driverGroup('embedded-browser', '内置浏览器', [
+      'browser_open',
+      'browser_click',
+    ]),
+    driverGroup('external-browser', 'Chrome 和 Edge', ['external_tab_list']),
+    driverGroup('desktop', 'Mac 应用', ['desktop_click']),
+  ],
+}
+
+/** [group, title with count, tool rows] of the detail's 工具. */
+function toolGroups(): Array<[string, string, string[]]> {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      '[data-plugin-tools] [data-tool-group]',
+    ),
+  ].map((group) => [
+    group.dataset.toolGroup!,
+    group
+      .querySelector('.tool-group-title')!
+      .textContent!.replace(/\s+/g, ' ')
+      .trim(),
+    [...group.querySelectorAll<HTMLElement>('[data-tool]')].map(
+      (row) => row.dataset.tool!,
+    ),
+  ])
 }
 
 const HELLO = summary({})
@@ -325,6 +378,107 @@ describe('能力 › 插件', () => {
       .click()
     await until(() => router.currentRoute.value.query.settings === 'computer')
     expect(router.currentRoute.value.query.settings).toBe('computer')
+  })
+
+  it('lists Computer Use’s tools by driver and opens each driver’s settings', async () => {
+    installBridge()
+    details['computer-use:managed'] = detailOf(CU, { tools: CU_TOOLS })
+    const router = await mount(
+      '/capabilities?plugin=computer-use&scope=managed',
+    )
+    await until(() => Boolean(document.querySelector('[data-plugin-tools]')))
+    const section = document.querySelector('[data-plugin-tools]')!
+    expect(section.querySelector('h4')!.textContent).toMatch(/工具\s*5/)
+    expect(toolGroups()).toEqual([
+      ['ui', '通用 1', ['ui_list_targets']],
+      ['embedded-browser', '内置浏览器 2', ['browser_open', 'browser_click']],
+      ['external-browser', 'Chrome 和 Edge 1', ['external_tab_list']],
+      ['desktop', 'Mac 应用 1', ['desktop_click']],
+    ])
+    // One sentence per row, as on 能力 › 工具.
+    expect(
+      section.querySelector('[data-tool="browser_open"]')!.textContent,
+    ).not.toContain('More detail follows')
+    expect(section.querySelector('[data-tools-note]')).toBeNull()
+    // 通用 belongs to every driver: no settings page of its own.
+    expect(
+      section.querySelector('[data-tool-group="ui"] [data-driver-settings]'),
+    ).toBeNull()
+    for (const [driver, settings, page] of [
+      ['embedded-browser', 'browser', undefined],
+      ['external-browser', 'computer', 'chrome'],
+      ['desktop', 'computer', 'apps'],
+    ] as const) {
+      section
+        .querySelector<HTMLElement>(`[data-driver-settings="${driver}"]`)!
+        .click()
+      await until(
+        () =>
+          router.currentRoute.value.query.settings === settings &&
+          router.currentRoute.value.query.page === page,
+      )
+      expect(router.currentRoute.value.query.settings).toBe(settings)
+      expect(router.currentRoute.value.query.page).toBe(page)
+    }
+  })
+
+  it('still lists Computer Use’s tools while it is off, saying they wait for it', async () => {
+    installBridge()
+    details['computer-use:managed'] = detailOf(
+      { ...CU, enabled: false, activation: 'disabled' },
+      { tools: { ...CU_TOOLS, note: '打开电脑操作后可用' } },
+    )
+    await mount('/capabilities?plugin=computer-use&scope=managed')
+    await until(() => Boolean(document.querySelector('[data-tools-note]')))
+    expect(document.querySelector('[data-tools-note]')!.textContent).toContain(
+      '打开电脑操作后可用',
+    )
+    expect(
+      document.querySelectorAll('[data-plugin-tools] [data-tool]'),
+    ).toHaveLength(5)
+  })
+
+  it('lists a plugin’s MCP tools by member and says when a server does not run', async () => {
+    installBridge()
+    details['hello-kit:user'] = detailOf(HELLO, {
+      tools: {
+        note: null,
+        groups: [
+          {
+            id: 'search',
+            kind: 'mcp',
+            title: 'search',
+            note: null,
+            tools: [tool('mcp_hello-kit-search_find')],
+          },
+          {
+            id: 'docs',
+            kind: 'mcp',
+            title: 'docs',
+            note: '服务器没有运行',
+            tools: [],
+          },
+        ],
+      },
+    })
+    await mount('/capabilities?plugin=hello-kit&scope=user')
+    await until(() => Boolean(document.querySelector('[data-plugin-tools]')))
+    expect(toolGroups()).toEqual([
+      ['search', 'search 1', ['mcp_hello-kit-search_find']],
+      ['docs', 'docs 0', []],
+    ])
+    expect(
+      document.querySelector('[data-tool-group="docs"]')!.textContent,
+    ).toContain('服务器没有运行')
+    expect(document.querySelector('[data-driver-settings]')).toBeNull()
+  })
+
+  it('shows no 工具 for a plugin that brings none', async () => {
+    installBridge()
+    details['github:managed'] = detailOf(GITHUB)
+    await mount('/capabilities?plugin=github&scope=managed')
+    await until(() => Boolean(document.querySelector('[data-plugin-info]')))
+    expect(document.querySelector('[data-plugin-tools]')).toBeNull()
   })
 
   it('re-reads the Computer Use detail when Computer Use changes, and only then', async () => {

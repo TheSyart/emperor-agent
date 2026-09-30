@@ -8,6 +8,7 @@ import {
   pluginKey,
   pluginMonogram,
   pluginSourceTag,
+  pluginToolGroups,
 } from './pluginsModel'
 import type { PluginDetail, PluginSummary } from './pluginInstall'
 
@@ -72,7 +73,17 @@ function detail(patch: Partial<PluginDetail> = {}): PluginDetail {
     installedAt: '2026-09-30T08:00:00.000Z',
     permissions: { runsCommands: false, network: false },
     components: [],
+    tools: { note: null, groups: [] },
     ...patch,
+  }
+}
+
+function tool(name: string, readOnly = false) {
+  return {
+    name,
+    description: `${name} does one thing.`,
+    parameters: { type: 'object' },
+    readOnly,
   }
 }
 
@@ -268,6 +279,129 @@ describe('plugin detail model', () => {
       ['格式', '可移植插件'],
       ['版本', '未提供'],
       ['权限', '无'],
+    ])
+  })
+
+  it('lists Computer Use’s tools by driver, each driver with its settings page', () => {
+    const groups = pluginToolGroups(
+      detail({
+        pluginId: 'computer-use',
+        scope: 'managed',
+        tools: {
+          note: '打开电脑操作后可用',
+          groups: [
+            {
+              id: 'ui',
+              kind: 'computer-use',
+              title: '通用',
+              note: null,
+              tools: [tool('ui_list_targets', true)],
+            },
+            {
+              id: 'embedded-browser',
+              kind: 'computer-use',
+              title: '内置浏览器',
+              note: null,
+              tools: [tool('browser_open')],
+            },
+            {
+              id: 'external-browser',
+              kind: 'computer-use',
+              title: 'Chrome 和 Edge',
+              note: null,
+              tools: [tool('external_tab_list', true)],
+            },
+            {
+              id: 'desktop',
+              kind: 'computer-use',
+              title: 'Mac 应用',
+              note: null,
+              tools: [tool('desktop_click')],
+            },
+          ],
+        },
+      }),
+    )
+    expect(
+      groups.map((group) => [group.id, group.title, group.settings]),
+    ).toEqual([
+      ['ui', '通用', null],
+      [
+        'embedded-browser',
+        '内置浏览器',
+        { section: 'browser', page: null, label: '设置 › 浏览器' },
+      ],
+      [
+        'external-browser',
+        'Chrome 和 Edge',
+        {
+          section: 'computer',
+          page: 'chrome',
+          label: '设置 › 电脑操作 › Chrome 和 Edge',
+        },
+      ],
+      [
+        'desktop',
+        'Mac 应用',
+        {
+          section: 'computer',
+          page: 'apps',
+          label: '设置 › 电脑操作 › 任意应用',
+        },
+      ],
+    ])
+    // The rows are tool rows, as 能力 › 工具 draws them.
+    expect(groups[0]!.tools).toEqual([
+      {
+        name: 'ui_list_targets',
+        description: 'ui_list_targets does one thing.',
+        parameters: { type: 'object' },
+        read_only: true,
+        source: 'builtin',
+        plugin_id: 'computer-use',
+      },
+    ])
+  })
+
+  it('lists a plugin’s MCP tools by member, with no settings page', () => {
+    const groups = pluginToolGroups(
+      detail({
+        tools: {
+          note: null,
+          groups: [
+            {
+              id: 'search',
+              kind: 'mcp',
+              title: 'search',
+              note: null,
+              tools: [tool('mcp_hello-kit-search_find', true)],
+            },
+            {
+              id: 'docs',
+              kind: 'mcp',
+              title: 'docs',
+              note: '服务器没有运行',
+              tools: [],
+            },
+          ],
+        },
+      }),
+    )
+    expect(
+      groups.map((group) => [
+        group.id,
+        group.note,
+        group.settings,
+        group.tools.map((item) => [item.name, item.source, item.plugin_id]),
+      ]),
+    ).toEqual([
+      [
+        'search',
+        null,
+        null,
+        [['mcp_hello-kit-search_find', 'mcp', 'hello-kit']],
+      ],
+      ['docs', '服务器没有运行', null, []],
     ])
   })
 })

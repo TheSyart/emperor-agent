@@ -6,7 +6,10 @@
  * short description, developer and version, and the enable switch; the
  * example prompts with 「立即试用」 (opens a new chat with the prompt in its
  * composer, never sends it); then the real members grouped by kind with
- * each member's state and reason, and the 信息 group.
+ * each member's state and reason; the 工具 it brings, one group per member
+ * with the rows of 能力 › 工具 (Computer Use by driver, each driver with a
+ * way to its settings page; an MCP server's while it runs); and the 信息
+ * group.
  *
  * Data: `plugins.getDetail`, re-read on `plugins_changed`, on MCP
  * connection changes (member states follow the servers) and, for Computer
@@ -26,6 +29,7 @@ import { handDraftTo } from '../../chat/draftHandoff'
 import { DsChevronLeft, DsNewChat, DsSettings, DsTrash } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
 import SkillConfirmDialog from '../skills/SkillConfirmDialog.vue'
+import ToolRow from '../tools/ToolRow.vue'
 import { DefinitionList, EmptyState, StatusBadge, Switch } from '../ui'
 import { useSettingsRoute } from '../useSettingsRoute'
 import {
@@ -40,6 +44,7 @@ import {
   memberGroups,
   pluginFacts,
   pluginSourceTag,
+  pluginToolGroups,
 } from './pluginsModel'
 import type { PluginSelectionScope } from './usePluginSelection'
 
@@ -72,6 +77,13 @@ const state = computed(() =>
   shown.value ? activationState(shown.value) : null,
 )
 const groups = computed(() => (shown.value ? memberGroups(shown.value) : []))
+const toolGroups = computed(() =>
+  shown.value ? pluginToolGroups(shown.value) : [],
+)
+const toolCount = computed(() =>
+  toolGroups.value.reduce((total, group) => total + group.tools.length, 0),
+)
+const openTool = ref<string | null>(null)
 const facts = computed(() => (shown.value ? pluginFacts(shown.value) : []))
 const missing = computed(() => shown.value?.materialization === 'missing')
 
@@ -96,6 +108,7 @@ watch(
   () => {
     detail.value = null
     actionError.value = ''
+    openTool.value = null
     void load()
   },
   { immediate: true },
@@ -325,6 +338,52 @@ defineExpose({ reload: load })
             : '仅展示元数据：这个插件没有 Skill、MCP、Hook 或应用连接。'
         }}
       </p>
+
+      <section v-if="toolGroups.length" class="block" data-plugin-tools>
+        <h4 class="block-title">
+          工具 <span class="count">{{ toolCount }}</span>
+        </h4>
+        <p v-if="shown.tools.note" class="note" data-tools-note>
+          {{ shown.tools.note }}
+        </p>
+        <div
+          v-for="group in toolGroups"
+          :key="group.id"
+          class="tool-group"
+          :data-tool-group="group.id"
+        >
+          <div class="tool-group-head">
+            <span class="tool-group-title">
+              {{ group.title }}
+              <span class="count">{{ group.tools.length }}</span>
+            </span>
+            <Button
+              v-if="group.settings"
+              size="sm"
+              variant="ghost"
+              :data-driver-settings="group.id"
+              :title="group.settings.label"
+              :aria-label="`打开 ${group.settings.label}`"
+              @click="openSettings(group.settings.section, group.settings.page)"
+            >
+              <template #icon><DsSettings :size="14" /></template>
+              设置
+            </Button>
+          </div>
+          <p v-if="group.note" class="note">{{ group.note }}</p>
+          <ul v-if="group.tools.length" class="tool-list">
+            <ToolRow
+              v-for="tool in group.tools"
+              :key="tool.name"
+              :tool="tool"
+              :open="openTool === tool.name"
+              @update:open="
+                (value: boolean) => (openTool = value ? tool.name : null)
+              "
+            />
+          </ul>
+        </div>
+      </section>
 
       <section class="block" data-plugin-info>
         <h4 class="block-title">信息</h4>
@@ -556,6 +615,48 @@ defineExpose({ reload: load })
 
 .member-reason {
   color: rgb(var(--label-secondary));
+}
+
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.tool-group + .tool-group {
+  margin-top: var(--space-2);
+}
+
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--space-7);
+}
+
+.tool-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1-5);
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 500;
+  color: rgb(var(--label-secondary));
+}
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-card);
+  list-style: none;
 }
 
 .cross-link {

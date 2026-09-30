@@ -51,6 +51,7 @@ import {
   type ResolvedPluginPackage,
 } from './models'
 import { PluginStore } from './store'
+import { pluginToolsView } from './tools'
 
 const MAX_PLUGIN_FILES = 4_000
 const MAX_PLUGIN_FILE_BYTES = 20 * 1024 * 1024
@@ -155,6 +156,14 @@ export class PluginApplicationService {
     const scrub = resolved
       ? pathScrubber(resolved.rootPath)
       : (text: string) => text
+    const components = pluginComponentViews({
+      pluginId,
+      scope: input.scope,
+      resolved,
+      verdict,
+      projectRoot: workspace,
+      runtime: this.runtime,
+    })
     return {
       pluginId,
       scope: input.scope,
@@ -186,13 +195,16 @@ export class PluginApplicationService {
       digest: summary.digest || null,
       installedAt: entry?.installedAt || null,
       permissions: pluginPermissions(resolved),
-      components: pluginComponentViews({
+      components,
+      tools: pluginToolsView({
         pluginId,
         scope: input.scope,
-        resolved,
-        verdict,
-        projectRoot: workspace,
+        ...(pluginId === COMPUTER_USE_PLUGIN_ID && input.scope === 'managed'
+          ? { computerUse: this.computerUse?.enabled() ?? null }
+          : {}),
+        components,
         runtime: this.runtime,
+        scrub,
       }),
     }
   }

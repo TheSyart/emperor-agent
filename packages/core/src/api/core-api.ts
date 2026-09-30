@@ -24,6 +24,7 @@ import type {
   DriverKind,
 } from '../harness/computer-use/types'
 import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
+import { listGuiTools } from '../harness/computer-use/tools/listing'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
 import {
@@ -364,6 +365,30 @@ export class CoreApi {
       runtime: {
         mcpServer: (pluginId, scope, server) =>
           this.pluginActivation.mcpServer(pluginId, scope, server),
+        // The detail's 工具: what a running server registered, and the GUI
+        // tools' own definitions (never run to list them).
+        mcpTools: (pluginId, scope, server) => {
+          const key = this.pluginActivation.mcpServerKey(
+            pluginId,
+            scope,
+            server,
+          )
+          return key === null
+            ? []
+            : kept.mcpClient
+                .getTools()
+                .filter(
+                  (tool) =>
+                    tool.mcpServerName === key && tool.pluginId === pluginId,
+                )
+                .map((tool) => ({
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: { ...tool.parameters },
+                  readOnly: tool.readOnly,
+                }))
+        },
+        computerUseTools: () => listGuiTools(),
         appConnection: (pluginId, scope, appId) =>
           this.appConnections.state(
             appConnectionKey({ scope, pluginId, appId }),

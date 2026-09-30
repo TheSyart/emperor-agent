@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import type { PluginMcpRuntimeState } from './models'
 import { PluginApplicationService } from './service'
 import {
   MCP_SCHEMA_URL,
@@ -848,6 +849,66 @@ describe('PluginApplicationService list and detail', () => {
       ['PreToolUse#1', 'available'],
     ])
   })
+
+  it('lists an MCP member’s tools only while its server runs, and says why not', async () => {
+    let state: PluginMcpRuntimeState['state'] = 'connecting'
+    let root = ''
+    const asked: string[] = []
+    const service = new PluginApplicationService({
+      emperorHome: tempDirectory(),
+      runtime: {
+        mcpServer: () => ({ state }),
+        mcpTools: (pluginId, scope, server) => {
+          asked.push(`${pluginId}:${scope}:${server}`)
+          return [
+            {
+              name: 'mcp_hello-kit-search_find',
+              description: `[MCP:hello-kit-search] Find in ${root}/docs`,
+              parameters: { type: 'object' },
+              readOnly: true,
+            },
+          ]
+        },
+        effectiveSkills: () => new Map(),
+      },
+    })
+    const source = writePackage(join(tempDirectory(), 'source'), DESCRIBED)
+    const preview = await service.inspect({ kind: 'local', path: source })
+    await service.install({
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    })
+    root = service.store.get('hello-kit', 'user')!.installPath
+    const group = () =>
+      service.detail({ pluginId: 'hello-kit', scope: 'user' }).tools.groups[0]!
+
+    expect(group()).toEqual({
+      id: 'search',
+      kind: 'mcp',
+      title: 'search',
+      note: '正在连接服务器，连上后列出它的工具',
+      tools: [],
+    })
+    state = 'ready'
+    expect(group()).toMatchObject({
+      note: null,
+      tools: [
+        {
+          name: 'mcp_hello-kit-search_find',
+          // Never a path on this machine (contract §6.2).
+          description: '[MCP:hello-kit-search] Find in docs',
+          readOnly: true,
+        },
+      ],
+    })
+    expect(asked).toEqual(['hello-kit:user:search'])
+    state = 'failed'
+    expect(group()).toMatchObject({ note: '服务器没有运行', tools: [] })
+    state = 'ready'
+    service.setEnabled({ pluginId: 'hello-kit', scope: 'user', enabled: false })
+    expect(group()).toMatchObject({ note: '服务器没有运行', tools: [] })
+  })
 })
 
 describe('PluginApplicationService logos', () => {
@@ -1039,6 +1100,60 @@ describe('PluginApplicationService managed packages', () => {
       installedAt: null,
       digest: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
+  })
+
+  it('lists Computer Use’s tools by driver and says when they cannot be used', () => {
+    const cu = computerUse(null)
+    const tool = (name: string) => ({
+      name,
+      description: `${name} does one thing.`,
+      parameters: { type: 'object' },
+      readOnly: false,
+    })
+    const service = new PluginApplicationService({
+      emperorHome: tempDirectory(),
+      bundledPluginRoots: [bundled()],
+      computerUse: cu.port,
+      runtime: {
+        mcpServer: () => null,
+        effectiveSkills: () => new Map(),
+        computerUseTools: () => [
+          { family: 'desktop', tools: [tool('desktop_click')] },
+          { family: 'ui', tools: [tool('ui_list_targets')] },
+        ],
+      },
+    })
+    const tools = () =>
+      service.detail({ pluginId: 'computer-use', scope: 'managed' }).tools
+
+    // In driver order; a driver without tools is left out.
+    expect(tools()).toEqual({
+      note: '这台电脑不能使用电脑操作',
+      groups: [
+        {
+          id: 'ui',
+          kind: 'computer-use',
+          title: '通用',
+          note: null,
+          tools: [tool('ui_list_targets')],
+        },
+        {
+          id: 'desktop',
+          kind: 'computer-use',
+          title: 'Mac 应用',
+          note: null,
+          tools: [tool('desktop_click')],
+        },
+      ],
+    })
+    cu.state.enabled = false
+    expect(tools().note).toBe('打开电脑操作后可用')
+    cu.state.enabled = true
+    expect(tools().note).toBeNull()
+    // Other plugins without MCP members bring no tools.
+    expect(
+      service.detail({ pluginId: 'github', scope: 'managed' }).tools,
+    ).toEqual({ note: null, groups: [] })
   })
 
   it('keeps the toggle in its own file across restarts and upgrades', () => {

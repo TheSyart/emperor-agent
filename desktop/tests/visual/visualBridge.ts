@@ -5917,6 +5917,327 @@ export async function installVisualCoreBridge(
                   '最近一次 CI 为什么失败',
                 ],
               }
+              // 工具 (ST-09): Computer Use's GUI tools by driver as Core
+              // lists them (listed while it is off too), and the MCP
+              // member's tools while its server runs.
+              const toolRows = (
+                rows: ReadonlyArray<readonly [string, string, boolean]>,
+              ) =>
+                rows.map(([name, description, readOnly]) => ({
+                  name,
+                  description,
+                  parameters: { type: 'object', properties: {} },
+                  readOnly,
+                }))
+              const running = plugin.activation === 'active'
+              const pluginTools: Record<
+                string,
+                { note: string | null; groups: Array<Record<string, unknown>> }
+              > = {
+                'computer-use': {
+                  note: plugin.enabled ? null : '打开电脑操作后可用',
+                  groups: [
+                    {
+                      id: 'ui',
+                      kind: 'computer-use',
+                      title: '通用',
+                      note: null,
+                      tools: toolRows([
+                        [
+                          'ui_get_capabilities',
+                          'Report which computer-use drivers are available right now, what each can do and what is missing.',
+                          true,
+                        ],
+                        [
+                          'ui_list_targets',
+                          'List the tabs and windows this conversation currently controls, with their ids, state and which one is current.',
+                          true,
+                        ],
+                        [
+                          'ui_release_control',
+                          'Release a window or tab before the task ends, when you are done with it.',
+                          false,
+                        ],
+                        [
+                          'ui_credential_list',
+                          'List the user’s saved credentials as handles (label, registered sites and apps, and username when allowed).',
+                          true,
+                        ],
+                        [
+                          'ui_action_status',
+                          'Look up what happened to an earlier GUI action by operationId or callId.',
+                          true,
+                        ],
+                        [
+                          'ui_cancel_action',
+                          'Cancel a GUI action that is still running.',
+                          false,
+                        ],
+                      ]),
+                    },
+                    {
+                      id: 'embedded-browser',
+                      kind: 'computer-use',
+                      title: '内置浏览器',
+                      note: null,
+                      tools: [
+                        {
+                          name: 'browser_open',
+                          description:
+                            'Open a URL in a new tab of the built-in browser, which the user can watch in the Browser pane. By default the tab uses a private temporary profile that is wiped when it closes.',
+                          parameters: {
+                            type: 'object',
+                            properties: {
+                              url: {
+                                type: 'string',
+                                description:
+                                  'http(s) URL to open in a new agent tab.',
+                              },
+                              profile: {
+                                type: 'string',
+                                description:
+                                  'Browser profile id from browser_profile_list (default: temporary, cleared when the tab closes).',
+                              },
+                              reason: { type: 'string' },
+                            },
+                            required: ['url'],
+                            additionalProperties: false,
+                          },
+                          readOnly: false,
+                        },
+                        ...toolRows([
+                          [
+                            'browser_tab_list',
+                            'List the browser tabs of this conversation: the ones you control, and built-in tabs released when an earlier task ended.',
+                            true,
+                          ],
+                          [
+                            'browser_download',
+                            'Download one file into the download inbox by clicking a download link (ref) or fetching a URL.',
+                            false,
+                          ],
+                          [
+                            'browser_fill_credential',
+                            'Fill a username, password or one-time code from the user’s credential vault into a field, by handle.',
+                            false,
+                          ],
+                          [
+                            'browser_upload',
+                            'Upload files through a page’s file input.',
+                            false,
+                          ],
+                          [
+                            'browser_profile_list',
+                            'List browser profiles: the temporary one and persistent ones that keep cookies and logins between tasks.',
+                            true,
+                          ],
+                          [
+                            'browser_profile_manage',
+                            'Create a persistent browser profile (a separate cookie jar that keeps logins between tasks).',
+                            false,
+                          ],
+                          [
+                            'browser_tab_select',
+                            'Make one of your tabs the current tab for later browser_* calls.',
+                            false,
+                          ],
+                          [
+                            'browser_close',
+                            'Close one of your built-in browser tabs (the current one by default).',
+                            false,
+                          ],
+                          [
+                            'browser_observe',
+                            'Read the current page as a list of interactive elements with refs, their roles, names, values and states, plus a text excerpt.',
+                            true,
+                          ],
+                          [
+                            'browser_screenshot',
+                            'Capture the visible part of the current tab.',
+                            true,
+                          ],
+                          [
+                            'browser_click',
+                            'Click an element by its ref from the latest observation.',
+                            false,
+                          ],
+                          [
+                            'browser_fill',
+                            'Replace the text of an input field.',
+                            false,
+                          ],
+                          [
+                            'browser_type',
+                            'Type text into the focused element (or the element ref).',
+                            false,
+                          ],
+                          [
+                            'browser_press',
+                            'Press a key or key combination, e.g. Enter, Tab, Escape, Meta+A.',
+                            false,
+                          ],
+                          [
+                            'browser_select',
+                            'Choose an option of a drop-down list (select element) by its label.',
+                            false,
+                          ],
+                          [
+                            'browser_scroll',
+                            'Scroll the page or a scrollable element by pages or lines.',
+                            false,
+                          ],
+                          [
+                            'browser_navigate',
+                            'Go to a URL in the current tab, or move back / forward / reload.',
+                            false,
+                          ],
+                          [
+                            'browser_wait',
+                            'Wait until a condition holds: navigation, an element present / absent / enabled, page text, or network idle.',
+                            true,
+                          ],
+                        ]),
+                      ],
+                    },
+                    {
+                      id: 'external-browser',
+                      kind: 'computer-use',
+                      title: 'Chrome 和 Edge',
+                      note: null,
+                      tools: toolRows([
+                        [
+                          'external_tab_list',
+                          'List Chrome tabs the user explicitly attached in the Emperor extension.',
+                          true,
+                        ],
+                        [
+                          'external_tab_attach',
+                          'Claim one Chrome tab that the user connected from the Emperor extension.',
+                          false,
+                        ],
+                      ]),
+                    },
+                    {
+                      id: 'desktop',
+                      kind: 'computer-use',
+                      title: 'Mac 应用',
+                      note: null,
+                      tools: toolRows([
+                        [
+                          'desktop_list_apps',
+                          'List running desktop applications.',
+                          true,
+                        ],
+                        [
+                          'desktop_list_windows',
+                          'List currently addressable desktop windows, optionally for one appId.',
+                          true,
+                        ],
+                        [
+                          'desktop_bind',
+                          'Bind one recently listed desktop window as a target for observation.',
+                          false,
+                        ],
+                        [
+                          'desktop_observe',
+                          'Read a bound desktop window as semantic elements.',
+                          true,
+                        ],
+                        [
+                          'desktop_screenshot',
+                          'Capture a bound desktop window.',
+                          true,
+                        ],
+                        [
+                          'desktop_click',
+                          'Click an element from the latest desktop observation, or a point from a current screenshot when image vision is available.',
+                          false,
+                        ],
+                        [
+                          'desktop_fill',
+                          "Set an input field's text with non-secret text, in the background.",
+                          false,
+                        ],
+                        [
+                          'desktop_select',
+                          'Choose one non-secret option from an observed desktop drop-down by its exact label.',
+                          false,
+                        ],
+                        [
+                          'desktop_fill_credential',
+                          'Fill a saved credential into an observed desktop field by handle.',
+                          false,
+                        ],
+                        [
+                          'desktop_type',
+                          'Type non-secret text into a text field of the bound app.',
+                          false,
+                        ],
+                        [
+                          'desktop_press',
+                          'Press a key or key combination in the bound app.',
+                          false,
+                        ],
+                        [
+                          'desktop_scroll',
+                          'Scroll the desktop window or an element by pages or lines.',
+                          false,
+                        ],
+                        [
+                          'desktop_drag',
+                          'Drag from one observed element or screenshot point to another with the real pointer.',
+                          false,
+                        ],
+                        [
+                          'desktop_menu',
+                          "List the bound app's menu bar, or the menu under path.",
+                          true,
+                        ],
+                        [
+                          'desktop_menu_select',
+                          'Run a menu command of the bound app by its exact titles from desktop_menu.',
+                          false,
+                        ],
+                        [
+                          'desktop_activate',
+                          "Bring the bound window's app to the front, restoring a minimized window.",
+                          false,
+                        ],
+                        [
+                          'desktop_secondary',
+                          'Perform an action explicitly listed for an element in the latest desktop observation.',
+                          false,
+                        ],
+                      ]),
+                    },
+                  ],
+                },
+                'emperor/web-research': {
+                  note: null,
+                  groups: [
+                    {
+                      id: 'search',
+                      kind: 'mcp',
+                      title: 'search',
+                      note: running ? null : '服务器没有运行',
+                      tools: running
+                        ? toolRows([
+                            [
+                              'mcp_web-research-search_search',
+                              '[MCP:web-research-search] Search the web and return ranked results with snippets.',
+                              true,
+                            ],
+                            [
+                              'mcp_web-research-search_fetch_page',
+                              '[MCP:web-research-search] Fetch one page as readable text.',
+                              true,
+                            ],
+                          ])
+                        : [],
+                    },
+                  ],
+                },
+              }
               return {
                 pluginId: plugin.pluginId,
                 scope: plugin.scope,
@@ -5961,6 +6282,10 @@ export async function installVisualCoreBridge(
                       ? { ...member, state: 'disabled', reason: '插件已停用' }
                       : member,
                 ),
+                tools: pluginTools[String(plugin.pluginId)] ?? {
+                  note: null,
+                  groups: [],
+                },
               }
             }
             case 'plugins.setEnabled': {

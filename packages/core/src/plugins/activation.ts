@@ -294,12 +294,7 @@ export class PluginActivationController {
     scope: PluginScope,
     serverName: string,
   ): PluginMcpRuntimeState | null {
-    const contribution = this.contributions.mcp.find(
-      (item) =>
-        item.pluginId === pluginId &&
-        item.scope === scope &&
-        item.serverName === serverName,
-    )
+    const contribution = this.contribution(pluginId, scope, serverName)
     if (!contribution) return null
     if (contribution.blocked)
       return { state: 'connecting', blocked: contribution.blocked }
@@ -311,6 +306,29 @@ export class PluginActivationController {
       lastError: snapshot.lastError?.message ?? null,
       skippedTools: this.deps.mcp.pluginSkippedTools(contribution.key),
     }
+  }
+
+  /** The name one plugin MCP server runs under (its tools' server), or `null` when it cannot start. */
+  mcpServerKey(
+    pluginId: string,
+    scope: PluginScope,
+    serverName: string,
+  ): string | null {
+    const contribution = this.contribution(pluginId, scope, serverName)
+    return contribution?.config ? contribution.key : null
+  }
+
+  private contribution(
+    pluginId: string,
+    scope: PluginScope,
+    serverName: string,
+  ): PluginMcpContribution | undefined {
+    return this.contributions.mcp.find(
+      (item) =>
+        item.pluginId === pluginId &&
+        item.scope === scope &&
+        item.serverName === serverName,
+    )
   }
 
   private async apply(): Promise<void> {

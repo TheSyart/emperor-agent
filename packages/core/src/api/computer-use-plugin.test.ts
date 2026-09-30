@@ -2,7 +2,15 @@ import { cpSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
-import { isGuiToolName } from '../harness/computer-use/tools/catalog'
+import { createBrowserTools } from '../harness/computer-use/tools/browser-tools'
+import {
+  GUI_TOOL_CATALOG,
+  isGuiToolName,
+} from '../harness/computer-use/tools/catalog'
+import { createDesktopTools } from '../harness/computer-use/tools/desktop-tools'
+import { createExternalTools } from '../harness/computer-use/tools/external-tools'
+import type { ToolRuntime } from '../harness/computer-use/tools/runtime'
+import { createUiTools } from '../harness/computer-use/tools/ui-tools'
 import { FakeComputerUsePort } from '../harness/computer-use/testing/fake-port'
 import type { DriverCapability } from '../harness/computer-use/types'
 import { eventOf, makeApi, tmp, waitFor, type ApiFixture } from './test-helpers'
@@ -333,5 +341,91 @@ describe('the Computer Use plugin', () => {
       code: 'plugin_managed_uninstall_denied',
     })
     expect(row(api).uninstallable).toBe(false)
+  })
+})
+
+// Its 工具 (PLAN-CAP-001 ST-09): the four factories' own definitions by
+// driver, listed while it is off too, and never run to list them.
+describe('the Computer Use plugin’s tools', () => {
+  /** The definitions each factory makes (a runtime it never touches here). */
+  const FACTORIES = [
+    ['ui', createUiTools],
+    ['embedded-browser', createBrowserTools],
+    ['external-browser', createExternalTools],
+    ['desktop', createDesktopTools],
+  ] as const
+
+  function defined(factory: (typeof FACTORIES)[number][1]) {
+    return factory({} as ToolRuntime).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }))
+  }
+
+  it('lists the 44 tools by driver, as the factories define them', async () => {
+    const { api } = await cuApi()
+    await api.computerUse.setEnabled(true)
+    const { tools } = await api.plugins.getDetail(REF)
+    expect(tools.note).toBeNull()
+    expect(
+      tools.groups.map((group) => [
+        group.id,
+        group.kind,
+        group.title,
+        group.tools.length,
+      ]),
+    ).toEqual([
+      ['ui', 'computer-use', '通用', 6],
+      ['embedded-browser', 'computer-use', '内置浏览器', 19],
+      ['external-browser', 'computer-use', 'Chrome 和 Edge', 2],
+      ['desktop', 'computer-use', 'Mac 应用', 17],
+    ])
+    for (const [id, factory] of FACTORIES)
+      expect(
+        tools.groups
+          .find((group) => group.id === id)!
+          .tools.map(({ name, description, parameters }) => ({
+            name,
+            description,
+            parameters,
+          })),
+      ).toEqual(defined(factory))
+    const all = tools.groups.flatMap((group) => group.tools)
+    expect(all.map((tool) => tool.name).sort()).toEqual(
+      Object.keys(GUI_TOOL_CATALOG).sort(),
+    )
+    // Looking, listing and waiting only read; acting and closing do not.
+    const readOnly = (name: string) =>
+      all.find((tool) => tool.name === name)!.readOnly
+    for (const name of [
+      'ui_get_capabilities',
+      'browser_observe',
+      'browser_wait',
+      'external_tab_list',
+      'desktop_menu',
+    ])
+      expect(readOnly(name)).toBe(true)
+    for (const name of ['browser_click', 'browser_close', 'desktop_type'])
+      expect(readOnly(name)).toBe(false)
+    expect(tools.groups.every((group) => group.note === null)).toBe(true)
+  })
+
+  it('lists them while computer use is off, saying they wait for it', async () => {
+    const { api, port } = await cuApi()
+    const before = port.capabilityCalls
+    const { tools } = await api.plugins.getDetail(REF)
+    expect(tools.note).toBe('打开电脑操作后可用')
+    expect(tools.groups.flatMap((group) => group.tools)).toHaveLength(44)
+    // Listing them asks the host nothing.
+    expect(port.capabilityCalls).toBe(before)
+  })
+
+  it('lists no tools for a plugin without MCP servers', async () => {
+    const { api } = await cuApi()
+    expect(
+      (await api.plugins.getDetail({ pluginId: 'github', scope: 'managed' }))
+        .tools,
+    ).toEqual({ note: null, groups: [] })
   })
 })

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * ToolRow — one registered tool in the 能力 › 工具 list: a compact
- * disclosure row (monospace name, the description's first sentence,
- * chevron). Expanded it shows the full description, the execution traits
- * (source, 只读 when the tool only reads, concurrency), the parameters
- * (type, required, enum values) and the raw JSON schema (read-only
- * CodeEditor).
+ * ToolRow — one registered tool in the 能力 › 工具 list (and in a plugin's
+ * detail): a compact disclosure row (monospace name, the description's
+ * first sentence, chevron). Expanded it shows the full description, the
+ * execution traits (内建 or its MCP server, except for a plugin's tool;
+ * 只读 when the tool only reads; concurrency), the parameters (type,
+ * required, enum values) and the raw JSON schema (read-only CodeEditor).
  *
  * Props: tool. v-model:open — disclosure state.
  */
@@ -23,9 +23,11 @@ const summary = computed(() => toolSummary(props.tool.description ?? ''))
 const params = computed(() => toolParams(props.tool.parameters))
 const schema = computed(() => toolSchemaText(props.tool.parameters))
 const source = computed(() =>
-  props.tool.source === 'mcp'
-    ? `MCP · ${props.tool.server || 'server'}`
-    : '内建',
+  props.tool.plugin_id
+    ? null
+    : props.tool.source === 'mcp'
+      ? `MCP · ${props.tool.server || 'server'}`
+      : '内建',
 )
 </script>
 
@@ -48,7 +50,7 @@ const source = computed(() =>
     <div v-if="open" :id="`${uid}-details`" class="details">
       <p v-if="tool.description" class="description">{{ tool.description }}</p>
       <div class="traits">
-        <StatusBadge mono>{{ source }}</StatusBadge>
+        <StatusBadge v-if="source" mono>{{ source }}</StatusBadge>
         <StatusBadge v-if="tool.read_only" tone="ok">只读</StatusBadge>
         <StatusBadge v-if="tool.concurrency_safe" tone="ok"
           >并发安全</StatusBadge

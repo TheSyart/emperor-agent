@@ -867,6 +867,97 @@ test('plugin detail fits a narrow window and links Computer Use to its settings'
   await expect(page).toHaveURL(/settings=computer/)
 })
 
+// 插件详情里的工具 (ST-09): Computer Use's tools by driver, each driver with
+// a way to its settings page; an MCP plugin's tools under its server.
+const CU_TOOL_GROUPS = [
+  /^\s*通用\s*6\s*$/,
+  /^\s*内置浏览器\s*19\s*$/,
+  /^\s*Chrome 和 Edge\s*2\s*$/,
+  /^\s*Mac 应用\s*17\s*$/,
+]
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`plugin detail lists its tools by member (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/capabilities?plugin=computer-use&scope=managed', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const shell = fullPage(page)
+    const tools = shell.locator(
+      '[data-plugin-detail="computer-use"] [data-plugin-tools]',
+    )
+    await expect(tools.locator('h4')).toHaveText(/^\s*工具\s*44\s*$/)
+    await expect(tools.locator('.tool-group-title')).toHaveText(CU_TOOL_GROUPS)
+    await expect(tools.locator('[data-tool]')).toHaveCount(44)
+    await expect(tools.locator('[data-tools-note]')).toHaveCount(0)
+    await expect(tools.locator('[data-driver-settings]')).toHaveCount(3)
+    await tools.scrollIntoViewIfNeeded()
+    await expectPageColumnFits(page)
+    await shot(page, `page-plugins-tools-${theme}`)
+    // All four groups, in a window tall enough for them.
+    await page.setViewportSize({ width: 1280, height: 3900 })
+    await shot(page, `page-plugins-tools-all-${theme}`)
+    await page.setViewportSize({ width: 1280, height: 860 })
+
+    // A plugin's MCP tools are listed under its server.
+    await shell.getByRole('button', { name: '全部插件' }).click()
+    await shell.locator('[data-plugin-id="emperor/web-research"]').click()
+    const mcp = shell.locator(
+      '[data-plugin-detail="emperor/web-research"] [data-plugin-tools]',
+    )
+    await expect(mcp.locator('.tool-group-title')).toHaveText([
+      /^\s*search\s*2\s*$/,
+    ])
+    await expect(mcp.locator('[data-tool]')).toHaveCount(2)
+    await expect(mcp.locator('[data-driver-settings]')).toHaveCount(0)
+    await mcp.scrollIntoViewIfNeeded()
+    await shot(page, `page-plugins-tools-mcp-${theme}`)
+  })
+}
+
+test('plugin detail lists Computer Use tools while it is off and links each driver to its settings', async ({
+  page,
+}) => {
+  await open(page, '/capabilities?plugin=computer-use&scope=managed', {
+    width: 700,
+    height: 860,
+  })
+  const shell = fullPage(page)
+  const detail = shell.locator('[data-plugin-detail="computer-use"]')
+  const tools = detail.locator('[data-plugin-tools]')
+  await expect(tools.locator('.tool-group-title')).toHaveText(CU_TOOL_GROUPS)
+  await expectPageColumnFits(page)
+  await tools.scrollIntoViewIfNeeded()
+  await shot(page, 'page-plugins-tools-narrow')
+
+  // Off: still listed, with a note.
+  await detail.getByRole('switch', { name: '启用' }).click()
+  await expect(tools.locator('[data-tools-note]')).toHaveText(
+    '打开电脑操作后可用',
+  )
+  await expect(tools.locator('[data-tool]')).toHaveCount(44)
+  // The refresh toast after the switch goes by itself.
+  await expect(page.locator('.ds-toast')).toHaveCount(0)
+  await tools.evaluate((section) => section.scrollIntoView({ block: 'start' }))
+  await shot(page, 'page-plugins-tools-off')
+
+  // Each driver opens its own settings page.
+  for (const [driver, url] of [
+    ['embedded-browser', /settings=browser(&|$)/],
+    ['external-browser', /settings=computer&page=chrome/],
+    ['desktop', /settings=computer&page=apps/],
+  ] as const) {
+    await tools.locator(`[data-driver-settings="${driver}"]`).click()
+    await expect(page).toHaveURL(url)
+    await expect(page.getByRole('dialog', { name: '设置' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page).not.toHaveURL(/settings=/)
+  }
+})
+
 test.describe('plugin logos on a high-density screen', () => {
   test.use({ deviceScaleFactor: 2 })
 

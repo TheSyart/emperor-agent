@@ -1,7 +1,9 @@
 /**
  * Pure view model of 能力 › 插件: grouping and search for the list, and the
- * member groups, state badges and facts of one plugin's detail.
+ * member groups, state badges, tools and facts of one plugin's detail.
  */
+import type { ToolInfo } from '../../../types'
+import type { SettingsSectionKey } from '../settingsSections'
 import type { DefinitionItem } from '../ui'
 import {
   scopeLabel,
@@ -177,4 +179,64 @@ export function isComputerUsePlugin(
   detail: Pick<PluginDetail, 'pluginId' | 'scope'>,
 ): boolean {
   return detail.pluginId === 'computer-use' && detail.scope === 'managed'
+}
+
+/** Where a Computer Use driver is set up: a 设置 section and its sub page. */
+export interface DriverSettings {
+  section: SettingsSectionKey
+  page: string | null
+  /** The destination, for the link's name. */
+  label: string
+}
+
+const DRIVER_SETTINGS: Record<string, DriverSettings> = {
+  'embedded-browser': {
+    section: 'browser',
+    page: null,
+    label: '设置 › 浏览器',
+  },
+  'external-browser': {
+    section: 'computer',
+    page: 'chrome',
+    label: '设置 › 电脑操作 › Chrome 和 Edge',
+  },
+  desktop: {
+    section: 'computer',
+    page: 'apps',
+    label: '设置 › 电脑操作 › 任意应用',
+  },
+}
+
+export interface PluginToolGroupView {
+  id: string
+  title: string
+  /** Why the group lists no tools now (its server does not run). */
+  note: string | null
+  /** Rows as 能力 › 工具 draws them (ToolRow). */
+  tools: ToolInfo[]
+  /** A Computer Use driver's settings page; `null` for the others. */
+  settings: DriverSettings | null
+}
+
+/** The detail's 工具: one group per member, rows ready for ToolRow. */
+export function pluginToolGroups(
+  detail: Pick<PluginDetail, 'pluginId' | 'tools'>,
+): PluginToolGroupView[] {
+  return detail.tools.groups.map((group) => ({
+    id: group.id,
+    title: group.title,
+    note: group.note,
+    tools: group.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: { ...tool.parameters },
+      read_only: tool.readOnly,
+      source: group.kind === 'mcp' ? 'mcp' : 'builtin',
+      plugin_id: detail.pluginId,
+    })),
+    settings:
+      group.kind === 'computer-use'
+        ? (DRIVER_SETTINGS[group.id] ?? null)
+        : null,
+  }))
 }
