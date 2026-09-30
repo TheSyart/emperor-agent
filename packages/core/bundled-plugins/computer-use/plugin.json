@@ -15,7 +15,8 @@
         "developerName": "Emperor Agent",
         "category": "效率",
         "logo": "./assets/logo.png"
-      }
+      },
+      "apps": "./.app.json"
     }
   }
 }

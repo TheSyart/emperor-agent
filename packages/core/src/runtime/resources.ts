@@ -199,6 +199,15 @@ const legacySkillMigrationReceiptSchema = z
   })
   .strict()
 
+/**
+ * Skills older runtimes shipped as built-ins that a managed plugin ships now
+ * (plugin contract §5). A legacy copy is never migrated: as a personal Skill
+ * it would shadow the plugin's.
+ */
+export const SKILLS_MOVED_TO_MANAGED_PLUGINS: readonly string[] = [
+  'computer-use',
+]
+
 export function migrateLegacyRuntimeSkills(
   opts: MigrateLegacyRuntimeSkillsOptions,
 ): LegacySkillMigrationResult {
@@ -222,7 +231,10 @@ export function migrateLegacyRuntimeSkills(
     join(legacyRuntimeRoot, 'skills'),
   ]
   const destinationSkillsRoot = join(stateRoot, 'skills')
-  const builtInSkills = new Set(opts.builtInSkills)
+  const builtInSkills = new Set([
+    ...opts.builtInSkills,
+    ...SKILLS_MOVED_TO_MANAGED_PLUGINS,
+  ])
   const seenNames = new Set<string>()
 
   for (const sourceSkillsRoot of sourceSkillsRoots) {

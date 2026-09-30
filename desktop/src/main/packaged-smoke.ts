@@ -6,11 +6,12 @@ import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
 
 /** The built-in Skills a packaged runtime ships (sorted), nothing more. */
-export const PACKAGED_BUILT_IN_SKILLS = ['computer-use', 'skill-creator']
+export const PACKAGED_BUILT_IN_SKILLS = ['skill-creator']
 
 /**
  * Skills of the plugins that ship with Emperor and start switched on
- * (sorted). Computer Use's plugin starts off with its master switch.
+ * (sorted). The Computer Use plugin, the only home of the computer-use
+ * Skill, starts off with its master switch, so a fresh runtime lists none.
  */
 export const PACKAGED_PLUGIN_SKILLS = ['github']
 

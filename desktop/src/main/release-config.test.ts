@@ -366,7 +366,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     const packagedPaths = new Set(generated.files.map((file) => file.path))
     for (const strip of petStrips)
       expect(packagedPaths).toContain(`assets/desktop-pet/xiaodan/${strip}`)
-    expect(generated.builtInSkills).toEqual(['computer-use', 'skill-creator'])
+    // computer-use lives in its managed plugin now (plugin contract §5).
+    expect(generated.builtInSkills).toEqual(['skill-creator'])
     // Plugins shipped with Emperor ride along, hash-checked like every file.
     expect(hook.SOURCE_MAPPINGS).toContainEqual({
       source: 'packages/core/bundled-plugins',
@@ -379,11 +380,18 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     )
     expect(packagedPaths).toContain('bundled-plugins/github/plugin.json')
     expect(packagedPaths).toContain('bundled-plugins/computer-use/plugin.json')
+    for (const file of [
+      'bundled-plugins/computer-use/.app.json',
+      'bundled-plugins/computer-use/skills/computer-use/SKILL.md',
+      'bundled-plugins/github/.app.json',
+      'bundled-plugins/github/skills/github/SKILL.md',
+    ])
+      expect(packagedPaths).toContain(file)
     expect(
       generated.files
         .filter((file) => file.path.startsWith('skills/'))
         .map((file) => file.path),
-    ).toEqual(['skills/computer-use/SKILL.md', 'skills/skill-creator/SKILL.md'])
+    ).toEqual(['skills/skill-creator/SKILL.md'])
     expect(generated.files.some((file) => file.path.endsWith('.py'))).toBe(
       false,
     )

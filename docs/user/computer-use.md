@@ -5,7 +5,7 @@
 > 最后核验：2026-09-30<br>
 > 事实源：`desktop/src/renderer/src/components/settings/ComputerUseSection.vue`、`desktop/src/renderer/src/components/settings/computer/`、`desktop/src/renderer/src/components/conversation/computer-use/`、`desktop/src/main/computer-use/`、`packages/core/src/harness/computer-use/`
 
-在“设置 → 电脑操作”打开总开关后，Agent 才能使用图形界面工具。打开后由 Agent 连续操作：观察、点击、输入（包括终端）、跳转、上传和下载都直接进行，只有高影响操作、代填账号密码，或 Agent 需要你决定时才会停下来等你（见[确认、急停与任务结束](#确认急停与任务结束)）。
+在“设置 → 电脑操作”打开总开关后，Agent 才能使用图形界面工具和 `computer-use` Skill。「能力 › 插件」里的 Computer Use 插件是同一个开关，两处看到的状态始终一致，插件详情还列出各驱动的实际状态。打开后由 Agent 连续操作：观察、点击、输入（包括终端）、跳转、上传和下载都直接进行，只有高影响操作、代填账号密码，或 Agent 需要你决定时才会停下来等你（见[确认、急停与任务结束](#确认急停与任务结束)）。
 
 “应用与浏览器”一组分别显示内置浏览器、Chrome / Edge 扩展连接和 macOS 桌面驱动的阶段与缺失能力，每个驱动旁还有单独的开关：关掉某个驱动后，Agent 调用它会得到“能力未启用”，已打开的对应目标随之结束。各驱动仍处于实验阶段；总开关开启不等于所有驱动均已连接或获得系统权限。浏览器 profile、网站权限、凭据、应用名单、截图与下载等设置收在页面底部的“高级”中。
 

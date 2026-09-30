@@ -40,9 +40,10 @@ function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
   const core: PackagedSmokeCore = {
     bootstrap: vi.fn(async () => ({
       app: 'Emperor Agent',
+      // computer-use ships in its plugin, which starts off with its
+      // master switch, so a fresh packaged runtime does not list it.
       skills: [
         { name: 'skill-creator', source: 'builtin' },
-        { name: 'computer-use', source: 'builtin' },
         { name: 'github', source: 'plugin' },
       ],
     })),
@@ -153,7 +154,7 @@ describe('packaged smoke contract', () => {
     expect(receipt.operations).toMatchObject({
       bootstrap: {
         ok: true,
-        builtInSkills: ['computer-use', 'skill-creator'],
+        builtInSkills: ['skill-creator'],
         pluginSkills: ['github'],
       },
       diagnostics: {
@@ -206,16 +207,20 @@ describe('packaged smoke contract', () => {
   it.each([
     [
       'without the GitHub plugin Skill',
+      [{ name: 'skill-creator', source: 'builtin' }],
+    ],
+    [
+      'with computer-use back among the built-ins',
       [
         { name: 'skill-creator', source: 'builtin' },
         { name: 'computer-use', source: 'builtin' },
+        { name: 'github', source: 'plugin' },
       ],
     ],
     [
       'with a Skill from another source',
       [
         { name: 'skill-creator', source: 'builtin' },
-        { name: 'computer-use', source: 'builtin' },
         { name: 'github', source: 'plugin' },
         { name: 'mine', source: 'user' },
       ],
@@ -251,7 +256,6 @@ describe('packaged smoke contract', () => {
         app: 'Emperor Agent',
         skills: [
           { name: 'skill-creator', source: 'builtin' },
-          { name: 'computer-use', source: 'builtin' },
           { name: 'unexpected', source: 'builtin' },
         ],
       })),

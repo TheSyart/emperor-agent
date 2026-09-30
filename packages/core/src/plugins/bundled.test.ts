@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { checkPluginLogo } from './logo'
@@ -62,6 +62,29 @@ describe('packages shipped with Emperor', () => {
     )
     expect(skill).toContain('--method GET')
     expect(skill).toContain('只读')
+  })
+
+  it('make Computer Use the only home of its Skill, with one member per driver', () => {
+    const computerUse = resolvePluginPackage(join(BUNDLED, 'computer-use'), {
+      strict: true,
+    })
+    expect(
+      computerUse.components.map(({ kind, id, title, state }) => [
+        kind,
+        id,
+        title,
+        state,
+      ]),
+    ).toEqual([
+      ['skill', 'computer-use', 'computer-use', 'available'],
+      ['app', 'desktop', 'macOS 桌面', 'unsupported'],
+      ['app', 'embedded-browser', '内置浏览器', 'unsupported'],
+      ['app', 'external-browser', 'Chrome/Edge 连接', 'unsupported'],
+    ])
+    // Not a built-in any more: one physical copy, in the package.
+    const repo = join(__dirname, '..', '..', '..', '..')
+    expect(existsSync(join(repo, 'skills', 'computer-use'))).toBe(false)
+    expect(readdirSync(join(repo, 'skills')).sort()).toEqual(['skill-creator'])
   })
 
   it('carry their logo as a small PNG under assets/', () => {

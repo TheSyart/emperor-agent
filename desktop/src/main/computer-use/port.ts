@@ -84,11 +84,14 @@ export class DesktopComputerUsePort implements ComputerUseHostPort {
       external?.capability() ??
         unavailable('external-browser', 'Chrome/Edge 连接', '尚未开放'),
       desktop?.capability() ??
-        unavailable(
-          'desktop',
-          this.platform === 'macos' ? 'macOS 桌面' : '桌面',
-          '尚未开放',
-        ),
+        // On macOS the desktop driver exists whenever the Helper app does.
+        (this.platform === 'macos'
+          ? unavailable(
+              'desktop',
+              'macOS 桌面',
+              '没有找到 Emperor Computer Helper',
+            )
+          : unavailable('desktop', '桌面', '尚未开放')),
     ]
   }
 

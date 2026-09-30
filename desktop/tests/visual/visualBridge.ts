@@ -1797,7 +1797,7 @@ export async function installVisualCoreBridge(
               mcpServers: 0,
               lspServers: 0,
               commands: 0,
-              apps: 0,
+              apps: 3,
             },
           },
           {
@@ -1826,7 +1826,7 @@ export async function installVisualCoreBridge(
               mcpServers: 0,
               lspServers: 0,
               commands: 0,
-              apps: 0,
+              apps: 1,
             },
           },
         ] as Array<Record<string, any>>,
@@ -5178,6 +5178,65 @@ export async function installVisualCoreBridge(
               )
               if (!plugin) throw new Error('找不到这个插件')
               const members: Record<string, Array<Record<string, unknown>>> = {
+                // The drivers as a Mac without the Helper's permissions and
+                // without a paired Chrome would show them.
+                'computer-use': [
+                  {
+                    kind: 'skill',
+                    id: 'computer-use',
+                    title: 'computer-use',
+                    description:
+                      'Operate web pages in the built-in browser and macOS app windows',
+                    state: 'available',
+                    reason: null,
+                  },
+                  {
+                    kind: 'app',
+                    id: 'desktop',
+                    title: 'macOS 桌面',
+                    description:
+                      '通过 Emperor Computer Helper 操作 Mac 上的应用窗口',
+                    state: 'needs_connection',
+                    reason: '请在电脑操作设置中连接 helper 并授予辅助功能权限',
+                  },
+                  {
+                    kind: 'app',
+                    id: 'embedded-browser',
+                    title: '内置浏览器',
+                    description:
+                      'Emperor 自带的浏览器标签页，与你自己的浏览器分开',
+                    state: 'available',
+                    reason: null,
+                  },
+                  {
+                    kind: 'app',
+                    id: 'external-browser',
+                    title: 'Chrome/Edge 连接',
+                    description:
+                      '通过扩展操作你在 Chrome 或 Edge 里连接的标签页',
+                    state: 'needs_connection',
+                    reason: '请在扩展中完成配对并连接标签页',
+                  },
+                ],
+                github: [
+                  {
+                    kind: 'skill',
+                    id: 'github',
+                    title: 'github',
+                    description: '用本机已登录的 GitHub CLI（gh）只读地查询',
+                    state: 'available',
+                    reason: null,
+                  },
+                  {
+                    kind: 'app',
+                    id: 'github',
+                    title: 'GitHub（本机 gh）',
+                    description:
+                      '用本机已登录的 gh 读取 Issue、CI 运行记录和 PR 检查',
+                    state: 'available',
+                    reason: '已登录 lin-hai',
+                  },
+                ],
                 'emperor/web-research': [
                   {
                     kind: 'skill',
@@ -5279,9 +5338,17 @@ export async function installVisualCoreBridge(
                     : '2026-09-28T09:30:00.000Z',
                 permissions: {
                   runsCommands: plugin.pluginId === 'emperor/web-research',
-                  network: plugin.pluginId === 'emperor/web-research',
+                  // Remote MCP or app members (GitHub's gh, Computer Use's drivers).
+                  network:
+                    plugin.scope === 'managed' ||
+                    plugin.pluginId === 'emperor/web-research',
                 },
-                components: members[String(plugin.pluginId)] ?? [],
+                components: (members[String(plugin.pluginId)] ?? []).map(
+                  (member) =>
+                    plugin.activation === 'disabled'
+                      ? { ...member, state: 'disabled', reason: '插件已停用' }
+                      : member,
+                ),
               }
             }
             case 'plugins.setEnabled': {

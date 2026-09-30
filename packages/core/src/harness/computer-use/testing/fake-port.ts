@@ -10,6 +10,10 @@ export class FakeComputerUsePort implements ComputerUseHostPort {
   readonly browser: FakeBrowserDriver
   readonly indicator: ControlIndicatorState[] = []
   readonly vault: FakeCredentialVault
+  /** Further drivers to report (Chrome pairing, the macOS Helper) as the host would. */
+  extraDrivers: DriverCapability[] = []
+  /** How often the service asked for capabilities (a real host may launch the Helper). */
+  capabilityCalls = 0
 
   constructor(
     browser = new FakeBrowserDriver(),
@@ -37,7 +41,8 @@ export class FakeComputerUsePort implements ComputerUseHostPort {
   }
 
   async capabilities(): Promise<DriverCapability[]> {
-    return [this.browser.capability()]
+    this.capabilityCalls += 1
+    return [this.browser.capability(), ...this.extraDrivers]
   }
 
   indicateControl(state: ControlIndicatorState): void {

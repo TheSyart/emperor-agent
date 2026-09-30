@@ -4,7 +4,9 @@
  * queue of steps; each step sees the request (so it can read refs out of the
  * last observation) and returns tool calls or text. Requests without the
  * agent's tools (titles, summaries) get a short text and leave the queue
- * alone; the agent is recognised by `browser_open`, or by `agentTool`.
+ * alone; the agent is recognised by `browser_open`, or by any of
+ * `agentTool` (the full-stack suite also names `bash`, so the agent is still
+ * recognised once computer use is off and its tools are gone).
  */
 
 import { createServer, type IncomingMessage, type Server } from 'node:http'
@@ -162,9 +164,13 @@ function stream(reply: StepReply): string {
 }
 
 export async function startFakeModel(
-  options: { agentTool?: string } = {},
+  options: { agentTool?: string | readonly string[] } = {},
 ): Promise<FakeModel> {
-  const agentTool = options.agentTool ?? 'browser_open'
+  const agentTools = new Set(
+    typeof options.agentTool === 'string'
+      ? [options.agentTool]
+      : (options.agentTool ?? ['browser_open']),
+  )
   const queue: Step[] = []
   const served: FakeModel['served'] = []
   const errors: unknown[] = []
@@ -180,8 +186,8 @@ export async function startFakeModel(
         return
       }
       const body = JSON.parse(await readBody(request)) as ChatRequest
-      const agent = (body.tools ?? []).some(
-        (tool) => tool.function?.name === agentTool,
+      const agent = (body.tools ?? []).some((tool) =>
+        agentTools.has(tool.function?.name ?? ''),
       )
       let reply: StepReply
       if (!agent) reply = { text: '网页操作' }

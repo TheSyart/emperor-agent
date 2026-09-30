@@ -238,7 +238,8 @@ export class ExternalBrowserDriver implements BrowserDriver {
     return {
       driver: 'external-browser',
       platform: this.platform,
-      stage: available ? 'experimental' : 'unavailable',
+      // What the driver is; `available` says whether it can act now.
+      stage: 'experimental',
       label: 'Chrome/Edge 连接',
       enabled: true,
       available,

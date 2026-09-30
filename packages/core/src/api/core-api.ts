@@ -70,7 +70,10 @@ import {
   appConnectionKey,
   type AppConnectionState,
 } from '../plugins/connections'
-import { PluginApplicationService } from '../plugins/service'
+import {
+  COMPUTER_USE_PLUGIN_ID,
+  PluginApplicationService,
+} from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
 import { EmperorError, OperationRetiredError } from '../errors'
@@ -545,6 +548,24 @@ export class CoreApi {
         check: async () =>
           githubConnectionState(await this.pullRequestBrowser.status()),
       },
+      // The Computer Use package's drivers: local and cheap, read fresh.
+      ...Object.fromEntries(
+        COMPUTER_USE_DRIVERS.map((driver) => [
+          appConnectionKey({
+            scope: 'managed',
+            pluginId: COMPUTER_USE_PLUGIN_ID,
+            appId: driver,
+          }),
+          {
+            ttlMs: 0,
+            check: async () =>
+              computerUseDriverState(
+                await this.computerUseStatusOnce(),
+                driver,
+              ),
+          },
+        ]),
+      ),
     })
     this.pullRequestBrowser = new PullRequestBrowserService({
       cwd: this.paths.stateRoot,
@@ -1358,6 +1379,15 @@ export class CoreApi {
   }
 
   private watchedSessions = new Set<string>()
+  private statusRead: Promise<ComputerUseStatusView> | null = null
+
+  /** One Computer Use status read, shared by the driver checks of one refresh. */
+  private computerUseStatusOnce(): Promise<ComputerUseStatusView> {
+    this.statusRead ??= this.computerUse.status().finally(() => {
+      this.statusRead = null
+    })
+    return this.statusRead
+  }
 
   /** Whether the renderer asked for this session's raw events (`sessions.watch`). */
   isSessionWatched(sessionId: string): boolean {
@@ -1652,6 +1682,10 @@ export class CoreApi {
       input: Parameters<PluginApplicationService['detail']>[0],
     ) => {
       const detail = this.pluginService.detail(input)
+      // Only an active package shows its members' own states, so nothing
+      // is checked otherwise (asking a Computer Use driver can launch the
+      // macOS Helper).
+      if (detail.activation !== 'active' || !detail.effective) return detail
       const apps = detail.components
         .filter((component) => component.kind === 'app')
         .map((component) =>
@@ -1691,7 +1725,14 @@ export class CoreApi {
     setEnabled: async (
       input: Parameters<PluginApplicationService['setEnabled']>[0],
     ) => {
-      this.assertMutation('plugins', input.enabled ? 'enable' : 'disable')
+      // Switching Computer Use off narrows what the Agent can do: like its
+      // Settings switch, a pending card never blocks it.
+      const narrowsComputerUse =
+        input.scope === 'managed' &&
+        input.pluginId === COMPUTER_USE_PLUGIN_ID &&
+        !input.enabled
+      if (!narrowsComputerUse)
+        this.assertMutation('plugins', input.enabled ? 'enable' : 'disable')
       const result = this.pluginService.setEnabled(input)
       await this.pluginActivation.settled()
       return result
@@ -2933,6 +2974,48 @@ function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
         ? {}
         : { error: status.killSwitch.error }),
     },
+  }
+}
+
+/** The Computer Use package's app members: one per driver (its `.app.json`). */
+const COMPUTER_USE_DRIVERS: readonly DriverKind[] = [
+  'embedded-browser',
+  'external-browser',
+  'desktop',
+]
+
+/** What a Computer Use driver shows in the plugin detail (plugin contract §5). */
+function computerUseDriverState(
+  status: ComputerUseStatusView,
+  kind: DriverKind,
+): AppConnectionState {
+  const driver = status.drivers.find((item) => item.driver === kind)
+  if (!driver || driver.stage === 'unavailable')
+    return {
+      state: 'unsupported',
+      reason: driver?.reason ?? '这台电脑上不能使用',
+    }
+  if (status.stopped)
+    return {
+      state: 'disabled',
+      reason: '已急停；在「设置 › 电脑操作」里恢复后可用',
+    }
+  if (!driver.enabled)
+    return { state: 'disabled', reason: '已在「设置 › 电脑操作」里关闭' }
+  if (driver.available)
+    return {
+      state: 'connected',
+      reason: driver.missing.length
+        ? `暂不支持：${driver.missing.join('、')}`
+        : null,
+    }
+  return {
+    state: 'needs_connection',
+    reason:
+      driver.reason ??
+      (driver.missing.length
+        ? `缺少${driver.missing.join('、')}`
+        : '暂时不可用'),
   }
 }
 

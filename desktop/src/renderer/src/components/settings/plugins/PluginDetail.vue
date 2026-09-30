@@ -8,8 +8,10 @@
  * composer, never sends it); then the real members grouped by kind with
  * each member's state and reason, and the 信息 group.
  *
- * Data: `plugins.getDetail`, re-read on `plugins_changed` and on MCP
- * connection changes (member states follow the servers).
+ * Data: `plugins.getDetail`, re-read on `plugins_changed`, on MCP
+ * connection changes (member states follow the servers) and, for Computer
+ * Use, on `computer_use_changed` (its drivers follow the stop and the
+ * driver switches).
  *
  * Props: pluginId, scope, summary? (the list row, shown while loading).
  * Emits: back, changed (a toggle happened: reload the list), uninstalled.
@@ -158,7 +160,16 @@ let pending: ReturnType<typeof setTimeout> | null = null
 onMounted(() => {
   unsubscribe = onCoreEvent((event) => {
     const name = (event as { event?: unknown } | null)?.event
-    if (name !== 'plugins_changed' && name !== 'mcp_connection_state') return
+    // Computer Use's drivers change with its own event (stop, driver switches).
+    const computerUse =
+      name === 'computer_use_changed' &&
+      isComputerUsePlugin({ pluginId: props.pluginId, scope: props.scope })
+    if (
+      name !== 'plugins_changed' &&
+      name !== 'mcp_connection_state' &&
+      !computerUse
+    )
+      return
     if (pending !== null) return
     pending = setTimeout(() => {
       pending = null
@@ -293,7 +304,13 @@ defineExpose({ reload: load })
                   {{ componentStateBadge(item.state).label }}
                 </StatusBadge>
               </div>
-              <p v-if="item.description" class="member-description">
+              <p
+                v-if="item.description"
+                class="member-description"
+                :data-code="
+                  item.kind === 'mcp' || item.kind === 'hook' || undefined
+                "
+              >
                 {{ item.description }}
               </p>
               <p v-if="item.reason" class="member-reason">{{ item.reason }}</p>
@@ -530,6 +547,10 @@ defineExpose({ reload: load })
 
 .member-description {
   color: rgb(var(--label-tertiary));
+}
+
+/* MCP transports and Hook commands read as code; other descriptions are prose. */
+.member-description[data-code] {
   font-family: var(--font-mono);
 }
 

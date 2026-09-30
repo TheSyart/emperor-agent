@@ -167,6 +167,30 @@ describe('legacy packaged runtime Skill migration', () => {
     expect(existsSync(result.receiptPath)).toBe(true)
   })
 
+  it('never copies a Skill that moved from the built-ins into a managed plugin', () => {
+    // Older runtimes shipped computer-use as a built-in; the Computer Use
+    // plugin ships it now, and a personal copy would shadow the plugin's.
+    const legacyRuntimeRoot = tmp('emperor-legacy-runtime-')
+    const stateRoot = tmp('emperor-legacy-state-')
+    writeLegacySkill(legacyRuntimeRoot, 'computer-use', '# Old built-in\n')
+
+    const result = migrateLegacyRuntimeSkills({
+      legacyRuntimeRoot,
+      stateRoot,
+      builtInSkills: ['skill-creator'],
+      runtimeRevision: 'rev-3',
+      now: () => '2026-09-30T00:00:00.000Z',
+    })
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({
+        name: 'computer-use',
+        action: 'skipped_builtin',
+      }),
+    ])
+    expect(existsSync(join(stateRoot, 'skills', 'computer-use'))).toBe(false)
+  })
+
   it('copies only unknown Skills and marks them blocked pending review', () => {
     const legacyRuntimeRoot = tmp('emperor-legacy-runtime-')
     const stateRoot = tmp('emperor-legacy-state-')

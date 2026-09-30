@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Operate web pages in Emperor's built-in browser with the browser_* tools, and macOS app windows with the desktop_* tools — open or bind a target, read it, fill, click or type, and verify the result. Use when a task needs a real web page or app window (a form, a dashboard, a site or app without an API or CLI). Requires Settings › 电脑操作 to be switched on.
+description: Operate web pages in Emperor's built-in browser with the browser_* tools, and macOS app windows with the desktop_* tools — open or bind a target, read it, fill, click or type, and verify the result. Use when a task needs a real web page or app window (a form, a dashboard, a site or app without an API or CLI). Listed only while computer use is switched on (Settings › 电脑操作, or the Computer Use plugin).
 ---
 
 # Computer Use
@@ -10,7 +10,7 @@ How to work in web pages through Emperor's built-in browser and in macOS app win
 ## Before you start
 
 - **Is the GUI needed?** Prefer an API, a CLI, `web_fetch` or a file tool when one can do the job. Use the browser only for the part that must happen in a page.
-- **Are the tools there?** If no `browser_*` tools are in your tool list, computer use is switched off. Tell the user they can turn it on in 设置 › 电脑操作; do not try to drive a browser another way.
+- **Are the tools there?** This Skill is listed only while computer use is on. If the `browser_*` tools disappear during a task, the user switched it off: stop and say so; do not try to drive a browser another way. They can turn it back on in 设置 › 电脑操作 or with the Computer Use plugin.
 - **What can the driver do right now?** Call `ui_get_capabilities` once when unsure. It lists the available drivers, their actions and current limitations. Cross-origin iframe observation and clicking work; typing into one is disabled.
 
 ## The loop: observe → act → verify

@@ -13,6 +13,7 @@ let app: App | null = null
 let container: HTMLDivElement | null = null
 let calls: Array<[string, unknown]> = []
 let details: Record<string, Dict> = {}
+let listeners: Array<(event: unknown) => void> = []
 
 function summary(patch: Dict): Dict {
   return {
@@ -117,8 +118,17 @@ function installBridge() {
       if (key === 'plugins.list') return context.boot.value.plugins
       return { changed: true }
     },
-    onCoreEvent: () => () => {},
+    onCoreEvent: (listener: (event: unknown) => void) => {
+      listeners.push(listener)
+      return () => {
+        listeners = listeners.filter((item) => item !== listener)
+      }
+    },
   }
+}
+
+function emit(event: Dict): void {
+  for (const listener of [...listeners]) listener(event)
 }
 
 async function settle() {
@@ -172,6 +182,7 @@ function rows(group: string): string[] {
 }
 
 afterEach(() => {
+  listeners = []
   app?.unmount()
   app = null
   container?.remove()
@@ -314,5 +325,39 @@ describe('能力 › 插件', () => {
       .click()
     await until(() => router.currentRoute.value.query.settings === 'computer')
     expect(router.currentRoute.value.query.settings).toBe('computer')
+  })
+
+  it('re-reads the Computer Use detail when Computer Use changes, and only then', async () => {
+    installBridge()
+    const cu = summary({
+      pluginId: 'computer-use',
+      displayName: 'Computer Use',
+      scope: 'managed',
+      source: { kind: 'managed' },
+      uninstallable: false,
+    })
+    details['computer-use:managed'] = detailOf(cu)
+    details['hello-kit:user'] = detailOf(HELLO)
+    const reads = (id: string) =>
+      calls.filter(
+        ([key, input]) =>
+          key === 'plugins.getDetail' && (input as Dict).pluginId === id,
+      ).length
+    const router = await mount(
+      '/capabilities?plugin=computer-use&scope=managed',
+    )
+    await until(() => reads('computer-use') === 1)
+
+    // The emergency stop and the driver switches only say computer_use_changed.
+    emit({ event: 'computer_use_changed', reason: 'kill-switch' })
+    await until(() => reads('computer-use') === 2)
+    expect(reads('computer-use')).toBe(2)
+
+    await router.push('/capabilities?plugin=hello-kit&scope=user')
+    await until(() => reads('hello-kit') === 1)
+    emit({ event: 'computer_use_changed', reason: 'state' })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await settle()
+    expect(reads('hello-kit')).toBe(1)
   })
 })

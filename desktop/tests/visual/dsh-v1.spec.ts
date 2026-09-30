@@ -855,9 +855,12 @@ test('plugin detail fits a narrow window and links Computer Use to its settings'
   await expect(
     detail.getByText('这个插件的开关就是电脑操作总开关'),
   ).toBeVisible()
-  await expect(detail.locator('[data-plugin-empty]')).toContainText(
-    '仅展示元数据',
-  )
+  // Its Skill and one member per driver, each with its real state.
+  await expect(detail.getByText('computer-use', { exact: true })).toBeVisible()
+  for (const driver of ['内置浏览器', 'Chrome/Edge 连接', 'macOS 桌面'])
+    await expect(detail.getByText(driver, { exact: true })).toBeVisible()
+  await expect(detail.getByText('请在扩展中完成配对并连接标签页')).toBeVisible()
+  await expect(detail.locator('[data-plugin-empty]')).toHaveCount(0)
   await expectPageColumnFits(page)
   await shot(page, 'page-plugins-detail-narrow')
   await detail.locator('[data-action="open-computer-settings"]').click()

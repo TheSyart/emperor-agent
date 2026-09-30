@@ -261,7 +261,8 @@ export interface PluginRuntimeView {
     scope: PluginScope,
     appId: string,
   ): {
-    readonly state: 'connected' | 'needs_connection' | 'failed'
+    readonly state:
+      'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'
     readonly reason: string | null
   } | null
   /** The Skills in effect for a project (`null` = chat), by name. */

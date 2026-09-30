@@ -629,3 +629,40 @@ describe('external browser attachment', () => {
     driver.dispose()
   })
 })
+
+describe('external browser capability', () => {
+  function driverWith(bridge: Partial<NmBridgeServer>): ExternalBrowserDriver {
+    return new ExternalBrowserDriver({
+      subscribe: () => () => {},
+      request: vi.fn(),
+      readyPairings: () => [],
+      unavailableReason: null,
+      ...bridge,
+    } as unknown as NmBridgeServer)
+  }
+
+  it('is an experimental driver that is not ready until a tab is paired', () => {
+    // The stage says what the driver is; availability says whether it can
+    // act now (as the macOS desktop driver does). `unavailable` is left for
+    // a driver this machine does not have at all.
+    expect(driverWith({}).capability()).toMatchObject({
+      driver: 'external-browser',
+      stage: 'experimental',
+      available: false,
+      reason: '请在扩展中完成配对并连接标签页',
+    })
+    expect(
+      driverWith({ readyPairings: () => ['pairing-1'] }).capability(),
+    ).toMatchObject({ stage: 'experimental', available: true })
+    expect(
+      driverWith({
+        unavailableReason: 'socket already in use',
+      } as Partial<NmBridgeServer>).capability(),
+    ).toMatchObject({
+      stage: 'experimental',
+      available: false,
+      reason:
+        '另一个 Emperor 正在使用 Chrome/Edge 连接；退出它后本应用会自动恢复',
+    })
+  })
+})

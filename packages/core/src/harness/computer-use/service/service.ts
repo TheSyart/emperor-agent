@@ -668,14 +668,18 @@ export class ComputerUseService {
     return live.map((capability) => {
       const enabled =
         settings.enabled && settings.drivers?.[capability.driver] !== false
-      // Say why the model cannot use a driver the port could offer.
-      const reason = this.stopped
-        ? 'emergency stop is engaged'
-        : !settings.enabled
-          ? 'computer use is turned off in Settings'
-          : !enabled
-            ? 'the user switched this driver off in Settings'
-            : capability.reason
+      // Say why the model cannot use a driver the port could offer; a
+      // driver this machine lacks keeps the port's own reason.
+      const reason =
+        capability.stage === 'unavailable'
+          ? capability.reason
+          : this.stopped
+            ? 'emergency stop is engaged'
+            : !settings.enabled
+              ? 'computer use is turned off in Settings'
+              : !enabled
+                ? 'the user switched this driver off in Settings'
+                : capability.reason
       return {
         ...capability,
         enabled,

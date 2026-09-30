@@ -17,12 +17,20 @@ export function appConnectionKey(member: {
 }
 
 export interface AppConnectionState {
-  readonly state: 'connected' | 'needs_connection' | 'failed'
+  /**
+   * `disabled`: switched off by the user (a Computer Use driver in
+   * Settings, or the emergency stop); `unsupported`: this machine cannot
+   * provide it.
+   */
+  readonly state:
+    'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'
   readonly reason: string | null
 }
 
 export interface AppConnectionAdapter {
   check(): Promise<AppConnectionState>
+  /** How long a result is reused (default: the registry's window). */
+  readonly ttlMs?: number
 }
 
 export class AppConnectionRegistry {
@@ -54,7 +62,7 @@ export class AppConnectionRegistry {
         .filter((id) => this.has(id))
         .filter((id) => {
           const cached = this.states.get(id)
-          return !cached || now - cached.at >= ttl
+          return !cached || now - cached.at >= (this.adapters[id]!.ttlMs ?? ttl)
         })
         .map(async (id) => {
           let value: AppConnectionState

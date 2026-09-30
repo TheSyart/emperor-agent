@@ -10,8 +10,11 @@
  *   handle says released-at-task-end, it takes the tab back and moves to
  *   another site without a card → a high-impact click still asks, once →
  *   the emergency stop releases and blocks the next call → resume → a
- *   credential fill asks once and leaks nowhere → switching off closes
- *   every Agent tab.
+ *   credential fill asks once and leaks nowhere → the Computer Use plugin
+ *   (能力 › 插件) shows its drivers, and turning it off refuses the next
+ *   call and turns Settings off (and back on from Settings) → the plugin
+ *   switch never clears the emergency stop → switching off closes every
+ *   Agent tab.
  * Prints `E2E-RESULT {json}` lines like the Electron harness.
  *
  *   node out-e2e/fullstack.cjs            (via scripts/e2e-cu.mjs --mode=fullstack)
@@ -872,6 +875,137 @@ async function fullstack(
     { critical: true },
   )
 
+  // PL-09: the Computer Use plugin is the master switch under another name.
+  await check(
+    page,
+    'turning the Computer Use plugin off blocks the next action, and Settings follows',
+    async () => {
+      await page
+        .getByRole('navigation', { name: '侧栏导航' })
+        .getByRole('button', { name: '能力', exact: true })
+        .click()
+      await page.locator('[data-plugin-id="computer-use"]').first().click()
+      const detail = page.locator('[data-plugin-detail="computer-use"]')
+      await detail.waitFor()
+      // Its Skill and the three drivers, each with a state.
+      for (const member of [
+        'computer-use',
+        'embedded-browser',
+        'external-browser',
+        'desktop',
+      ])
+        await detail.locator(`[data-member="${member}"]`).waitFor()
+      await page.screenshot({ path: join(shots, 'plugin-detail-on.png') })
+
+      await detail.getByRole('switch', { name: '启用' }).click()
+      await until(
+        async () =>
+          !(await core<{ enabled: boolean }>(page, 'computerUse.status'))
+            .enabled,
+        10_000,
+        'the master switch to follow the plugin',
+      )
+      // Back to the conversation (the list, then the detail, were pushed).
+      const composer = page.getByLabel('消息输入框').first()
+      for (let step = 0; step < 3 && !(await composer.isVisible()); step += 1)
+        await page.goBack()
+      await composer.waitFor({ timeout: 10_000 })
+      // Once off, the agent's request carries no GUI tools; the model
+      // calls one anyway and must be refused.
+      let refused = ''
+      model.enqueue(call('browser_observe'), (request) => {
+        refused = lastToolResult(request)
+        return {
+          text: refused.includes('unknown tool')
+            ? '电脑操作已关闭。'
+            : `意外结果：${refused.slice(0, 200)}`,
+        }
+      })
+      await send(page, '再看一下刚才的页面。')
+      // What the model was told is the evidence; the reply may still be
+      // below the fold of a long conversation.
+      await until(
+        async () => refused !== '',
+        30_000,
+        'the model to see the refused call',
+      )
+      if (!refused.includes('unknown tool'))
+        throw new Error(`observe answered: ${refused.slice(0, 300)}`)
+      await until(
+        async () => {
+          const bottom = page.getByRole('button', { name: '回到底部' })
+          if (await bottom.isVisible().catch(() => false))
+            await bottom.click().catch(() => undefined)
+          return await assistantSaid(page, '电脑操作已关闭')
+        },
+        30_000,
+        'the reply',
+      )
+      await page.screenshot({ path: join(shots, 'plugin-off-refused.png') })
+      const skills = await core<{ skills: Array<{ name: string }> }>(
+        page,
+        'skills.list',
+      )
+      if (skills.skills.some((skill) => skill.name === 'computer-use'))
+        throw new Error('the computer-use Skill is still listed')
+
+      // Settings shows it off; turning it on there turns the plugin on.
+      await openSettings(page)
+      if ((await statusBadge(page)) !== '已关闭')
+        throw new Error(`badge ${await statusBadge(page)}`)
+      await settingsSwitch(page).click()
+      await until(
+        async () => (await statusBadge(page)) === '已开启',
+        10_000,
+        'badge 已开启',
+      )
+      await closeSettings(page)
+      await until(
+        async () =>
+          (
+            await core<Array<{ pluginId: string; activation: string }>>(
+              page,
+              'plugins.list',
+            )
+          ).some(
+            (plugin) =>
+              plugin.pluginId === 'computer-use' &&
+              plugin.activation === 'active',
+          ),
+        10_000,
+        'the plugin to follow Settings',
+      )
+      return { refused: refused.slice(0, 120) }
+    },
+  )
+
+  await check(
+    page,
+    'the plugin switch never clears the emergency stop',
+    async () => {
+      await core(page, 'computerUse.stop')
+      const ref = { pluginId: 'computer-use', scope: 'managed' }
+      await core(page, 'plugins.setEnabled', { ...ref, enabled: false })
+      await core(page, 'plugins.setEnabled', { ...ref, enabled: true })
+      const status = await core<{ enabled: boolean; stopped: boolean }>(
+        page,
+        'computerUse.status',
+      )
+      if (!status.enabled || !status.stopped)
+        throw new Error(`after off and on: ${JSON.stringify(status)}`)
+      const detail = await core<{
+        components: Array<{ id: string; state: string; reason: string | null }>
+      }>(page, 'plugins.getDetail', ref)
+      const browser = detail.components.find(
+        (member) => member.id === 'embedded-browser',
+      )
+      if (browser?.state !== 'disabled' || !browser.reason?.includes('急停'))
+        throw new Error(`built-in browser: ${JSON.stringify(browser)}`)
+      await core(page, 'computerUse.resume')
+      return { drivers: detail.components.map((member) => member.state) }
+    },
+  )
+
   await check(
     page,
     'switching off closes every Agent tab and removes the tools',
@@ -993,7 +1127,9 @@ async function realModel(page: Page, site: FixtureSite): Promise<void> {
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const site = await startFixtureSite()
-  const model = real ? null : await startFakeModel()
+  const model = real
+    ? null
+    : await startFakeModel({ agentTool: ['browser_open', 'bash'] })
   const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-fullstack-'))
   let app: ElectronApplication | null = null
   try {

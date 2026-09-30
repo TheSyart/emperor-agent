@@ -1,0 +1,16 @@
+{
+  "apps": {
+    "embedded-browser": {
+      "title": "内置浏览器",
+      "description": "Emperor 自带的浏览器标签页，与你自己的浏览器分开"
+    },
+    "external-browser": {
+      "title": "Chrome/Edge 连接",
+      "description": "通过扩展操作你在 Chrome 或 Edge 里连接的标签页"
+    },
+    "desktop": {
+      "title": "macOS 桌面",
+      "description": "通过 Emperor Computer Helper 操作 Mac 上的应用窗口"
+    }
+  }
+}

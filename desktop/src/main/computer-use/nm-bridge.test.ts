@@ -166,8 +166,9 @@ describe.skipIf(process.platform !== 'darwin')(
         )
         expect(records.has('pairing-1')).toBe(true)
         expect(degraded.calls).toEqual([])
+        // Still the experimental driver, just not able to act here.
         expect(new ExternalBrowserDriver(second).capability()).toMatchObject({
-          stage: 'unavailable',
+          stage: 'experimental',
           available: false,
           reason: expect.stringContaining('另一个 Emperor'),
         })

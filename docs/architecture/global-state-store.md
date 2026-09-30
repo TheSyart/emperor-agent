@@ -168,7 +168,7 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 1. 项目 Skills：`<project>/.emperor/skills`（仅绑定该项目的 Build 会话，可写）
 2. 个人 Skills：`~/.emperor/skills`（可写）
 3. 已启用并激活的 Plugin 内的 Skills（只读）
-4. 内置 Skills：`runtimeRoot/skills`（只读）
+4. 内置 Skills：`runtimeRoot/skills`（只读，目前只有 `skill-creator`；`computer-use` 由 Computer Use 插件提供，从旧运行时迁移 Skill 时不会把它复制成个人 Skill）
 
 同名时高优先级覆盖低优先级。`SkillLoaders` 为每个项目根缓存一个 `FileSkillsLoader`（Chat 会话使用无项目的 loader），同一 session 的 Skill 目录注入、`skill` 工具、`skill_manage` 与 `skills.*` 共用该 session 的 loader。只读来源可以通过 `skills.copyToUser` 或“复制为个人 Skill”得到个人副本。
 
