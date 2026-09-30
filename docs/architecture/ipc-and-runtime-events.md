@@ -195,7 +195,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
     - `onBrowserDownload(listener)` ← `emperor:browser:download`（main → renderer）：你的一次下载开始、进行中（每个下载至多每 250 ms 一次）或结束时推送它的状态，浏览器面板据此显示一行。
 - **从浏览器导入**（ST-06，`browser-import/`）：
   - `browserImportSources()` → `emperor:browser:import-sources`：不读取参数，返回本机 Chrome、Edge 及其个人资料，以及每个浏览器是否仍在运行（读用户数据目录的 `Local State` 与 `SingletonLock`）；只回名称、目录名和运行标志，不含任何值。
-  - `runBrowserImport(request)` → `emperor:browser:import-run`：`request` 为 `{ browser, profileDir, passwords, cookies, targetProfileId? }`（`browser` 限 `chrome`/`edge`，`targetProfileId` 限 `p_` 加 12 位十六进制）。main 把 `Login Data`/`Cookies` 复制到临时目录后用 `node:sqlite` 只读打开、用钥匙串 Safe Storage 密钥解密，密码经 `CredentialVault.save`（跳过非 http(s) realm 和已存在的同一网站同一用户名）、Cookie 经选定持久 profile 的 `session.cookies.set` 写入并 `flushStore`。只返回 `{ ok: true, passwords, sites }` 或 `{ ok: false, reason }`；读取密码会触发 macOS 钥匙串授权框，渲染层拿不到密码或 Cookie 值，日志只记数量。
+  - `runBrowserImport(request)` → `emperor:browser:import-run`：`request` 为 `{ browser, profileDir, passwords, cookies, targetProfileId? }`（`browser` 限 `chrome`/`edge`，`targetProfileId` 限 `p_` 加 12 位十六进制）。导入 Cookie 时 `targetProfileId` 必须是电脑操作里已有的持久 profile，不是就在读取任何数据之前以 `no-target-profile` 拒绝。main 把 `Login Data`/`Cookies` 复制到临时目录后用 `node:sqlite` 只读打开、用钥匙串 Safe Storage 密钥解密，密码经 `CredentialVault.save`（跳过非 http(s) realm 和已存在的同一网站同一用户名）、Cookie 经选定持久 profile 的 `session.cookies.set` 写入并 `flushStore`。只返回 `{ ok: true, passwords, sites }` 或 `{ ok: false, reason }`；读取密码会触发 macOS 钥匙串授权框，渲染层拿不到密码或 Cookie 值，日志只记数量。
 
 旧的 `preview*` 通道（`emperor:preview:*`）和 `previewId` 授权路径已删除，由上面的 `emperor:browser:*` 通道取代。
 

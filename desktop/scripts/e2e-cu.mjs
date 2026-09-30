@@ -2,14 +2,15 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real|references|references-real|plugins|userbrowser-app]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real|references|references-real|plugins|userbrowser-app|settings]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
 // `plugins` runs the B-track acceptance (install, run and switch plugins in
 // 能力 › 插件; GitHub's gh logged in, then out through an empty config dir).
-// `userbrowser-app` runs the C-track acceptance (设置 › 浏览器, link routing
-// and the temporary history in the real app).
+// `userbrowser-app` runs the C-track acceptance (设置 › 浏览器, link routing,
+// the browsing history and your own downloads in the real app). `settings`
+// opens every settings section and sub page in the real app (F track).
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -25,38 +26,44 @@ const mode =
   process.argv.find((arg) => arg.startsWith('--mode=')) ?? '--mode=smoke'
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
-// fullstack / real / references / plugins / userbrowser-app: the dev app
+// fullstack / real / references / plugins / userbrowser-app / settings: the dev app
 // (out/, run `npm run build` first) driven by Playwright from plain Node;
 // the other modes run the harness in Electron.
 const references =
   mode === '--mode=references' || mode === '--mode=references-real'
 const plugins = mode === '--mode=plugins'
 const userBrowserApp = mode === '--mode=userbrowser-app'
+const settingsApp = mode === '--mode=settings'
 const realModel = mode === '--mode=real' || mode === '--mode=references-real'
 const appMode =
   mode === '--mode=fullstack' ||
   mode === '--mode=real' ||
   references ||
   plugins ||
-  userBrowserApp
+  userBrowserApp ||
+  settingsApp
 const entry = references
   ? 'tests/electron/references/run.ts'
   : plugins
     ? 'tests/electron/plugins/run.ts'
     : userBrowserApp
       ? 'tests/electron/user-browser-app/run.ts'
-      : appMode
-        ? 'tests/electron/fullstack/run.ts'
-        : 'tests/electron/harness/main.ts'
+      : settingsApp
+        ? 'tests/electron/settings/run.ts'
+        : appMode
+          ? 'tests/electron/fullstack/run.ts'
+          : 'tests/electron/harness/main.ts'
 const bundle = references
   ? join(desktop, 'out-e2e', 'references.cjs')
   : plugins
     ? join(desktop, 'out-e2e', 'plugins.cjs')
     : userBrowserApp
       ? join(desktop, 'out-e2e', 'user-browser-app.cjs')
-      : appMode
-        ? join(desktop, 'out-e2e', 'fullstack.cjs')
-        : outfile
+      : settingsApp
+        ? join(desktop, 'out-e2e', 'settings.cjs')
+        : appMode
+          ? join(desktop, 'out-e2e', 'fullstack.cjs')
+          : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],
