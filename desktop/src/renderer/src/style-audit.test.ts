@@ -240,6 +240,31 @@ describe('style audit: unified tokens (hard rules, must stay zero)', () => {
     }
     expect(offenders, offenders.join('\n')).toEqual([])
   })
+
+  it('every design token a style uses is defined somewhere', () => {
+    // An undefined var() drops the declaration without an error, so a typo
+    // like --fs-sm silently renders the inherited size (and a missing
+    // --accent-* color the inherited color).
+    const used =
+      /var\((--(?:fs|lh|accent|label|bg|fg|border|radius|space|shadow|material|glass|scrim|mask|state|danger|warn|z|duration|ease)-?[a-z0-9-]*)/g
+    const defined = new Set<string>()
+    for (const rel of SCANNED)
+      for (const m of read(rel).matchAll(/(--[a-z0-9-]+)\s*:/g))
+        defined.add(m[1])
+    const offenders: string[] = []
+    const targets = [
+      ...STYLE_FILES.map((rel) => [rel, read(rel)] as const),
+      ...VUE_FILES.map((rel) => [rel, styleBlocks(rel)] as const),
+    ]
+    for (const [rel, text] of targets) {
+      const missing = [...text.matchAll(used)]
+        .map((m) => m[1])
+        .filter((name) => !defined.has(name))
+      if (missing.length)
+        offenders.push(`${rel}: ${[...new Set(missing)].join(', ')}`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
 })
 
 describe('style audit: ratchets (only-ever-decrease baselines)', () => {

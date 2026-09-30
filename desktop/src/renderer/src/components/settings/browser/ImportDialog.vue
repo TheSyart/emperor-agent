@@ -353,7 +353,7 @@ watch(
 }
 
 .import-label {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-s);
   color: rgb(var(--label-secondary));
 }
 
@@ -367,7 +367,7 @@ watch(
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--accent-warning, var(--label-secondary)));
+  color: rgb(var(--label-secondary));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -377,9 +377,13 @@ watch(
   border: none;
   background: none;
   padding: 0;
-  color: rgb(var(--accent-primary));
+  color: rgb(var(--accent-strong));
   cursor: pointer;
   font: inherit;
+}
+
+.import-recheck:hover {
+  text-decoration: underline;
 }
 
 .import-toggles {
@@ -393,7 +397,7 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-s);
   color: rgb(var(--label-primary));
 }
 
@@ -416,19 +420,19 @@ watch(
 
 .import-empty {
   margin: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-s);
   color: rgb(var(--label-secondary));
 }
 
 .import-result {
   margin: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-s);
   color: rgb(var(--label-primary));
 }
 
 .import-error {
   margin: 0;
-  font-size: var(--fs-sm);
-  color: rgb(var(--accent-danger, var(--label-primary)));
+  font-size: var(--fs-s);
+  color: rgb(var(--state-error-label));
 }
 </style>

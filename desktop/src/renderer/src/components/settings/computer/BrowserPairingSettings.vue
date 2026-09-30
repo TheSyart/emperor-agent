@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
 }
 .pairing-code {
   font-family: var(--font-mono);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 700;
   letter-spacing: 0.15em;
   font-variant-numeric: tabular-nums;
