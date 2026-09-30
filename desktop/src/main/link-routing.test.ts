@@ -3,9 +3,9 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { linkDestination } from './link-routing'
 
-const system = { enabled: true, linkTarget: 'system' as const }
-const builtin = { enabled: true, linkTarget: 'builtin' as const }
-const off = { enabled: false, linkTarget: 'builtin' as const }
+const system = { linkTarget: 'system', localTarget: 'builtin' } as const
+const builtin = { linkTarget: 'builtin', localTarget: 'builtin' } as const
+const localSystem = { linkTarget: 'builtin', localTarget: 'system' } as const
 
 describe('linkDestination', () => {
   it('sends web links to the system browser by default', () => {
@@ -17,17 +17,20 @@ describe('linkDestination', () => {
     expect(linkDestination('http://example.com/', builtin)).toBe('builtin')
   })
 
-  it('never hands an address of this machine to the system browser', () => {
+  it('opens an address of this machine where 本地 URL 打开位置 says', () => {
     for (const url of [
       'http://localhost:5173/',
       'http://127.0.0.1:8080/x',
       'http://app.localhost/',
       'http://[::1]:3000/',
     ]) {
+      // Built-in by default, whatever web links do.
       expect(linkDestination(url, system)).toBe('builtin')
       expect(linkDestination(url, builtin)).toBe('builtin')
-      expect(linkDestination(url, off)).toBe('refuse')
+      expect(linkDestination(url, localSystem)).toBe('system')
     }
+    // Web links keep their own choice.
+    expect(linkDestination('https://example.com/', localSystem)).toBe('builtin')
   })
 
   it('refuses credentials and anything that is not http(s)', () => {
@@ -41,11 +44,8 @@ describe('linkDestination', () => {
     ]) {
       expect(linkDestination(url, builtin)).toBe('refuse')
       expect(linkDestination(url, system)).toBe('refuse')
+      expect(linkDestination(url, localSystem)).toBe('refuse')
     }
-  })
-
-  it('sends everything to the system browser while the built-in one is off', () => {
-    expect(linkDestination('https://example.com/', off)).toBe('system')
   })
 })
 

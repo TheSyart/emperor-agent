@@ -4,14 +4,14 @@ import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
 
 /**
  * The user's own built-in browser settings (设置 › 浏览器, settings.json ›
- * `browser`), shared by the settings section, the workspace (whether the
- * 浏览器 pane is available) and BrowserPane (the address bar). One Core
- * read on first use; `browser_preferences_changed` host events keep every
- * reader current, whichever window changed them.
+ * `browser`), shared by the settings section and BrowserPane (the address
+ * bar, the history button). One Core read on first use;
+ * `browser_preferences_changed` host events keep every reader current,
+ * whichever window changed them.
  */
 export const DEFAULT_BROWSER_PREFERENCES: Readonly<BrowserPreferences> = {
-  enabled: true,
   linkTarget: 'system',
+  localTarget: 'builtin',
   showFullUrl: true,
   history: true,
 }
@@ -25,8 +25,8 @@ export function isBrowserPreferences(
   if (!value || typeof value !== 'object') return false
   const data = value as Record<string, unknown>
   return (
-    typeof data.enabled === 'boolean' &&
     (data.linkTarget === 'system' || data.linkTarget === 'builtin') &&
+    (data.localTarget === 'builtin' || data.localTarget === 'system') &&
     typeof data.showFullUrl === 'boolean' &&
     typeof data.history === 'boolean'
   )

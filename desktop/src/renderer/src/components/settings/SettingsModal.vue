@@ -21,8 +21,9 @@
  * On a section's sub page (`&page=<key>`, see useSettingsPages) the title
  * becomes 「分区 › 页面」: the section name is a button back to the main
  * page, as is the section's own nav cell. The options area scrolls back to
- * the top on every page change; focus moves to that button when a page
- * opens and back to the panel when it closes.
+ * the top on every page change. Focus follows the user: opened from inside
+ * the section (its 管理 button goes away), it moves to that button; left by
+ * that button, it returns to the panel. A deep link leaves it alone.
  *
  * Section bodies are async chunks (`<Name>Section.vue`), each owning its
  * layout: they build on components/settings/ui (SettingsSection & co.) and
@@ -98,11 +99,18 @@ useModalLayer(open, close)
 
 watch(
   () => header.page.value,
-  (next, previous) => {
+  (next) => {
     if (options.value) options.value.scrollTop = 0
+    // Read before the page re-renders and the focused control is gone.
+    const active =
+      typeof document === 'undefined' ? null : document.activeElement
+    const fromSection = Boolean(active && options.value?.contains(active))
+    const fromCrumb = active !== null && active === crumb.value
     void nextTick(() => {
-      if (next !== null) crumb.value?.focus({ preventScroll: true })
-      else if (previous !== null) panel.value?.focus({ preventScroll: true })
+      if (next !== null && fromSection)
+        crumb.value?.focus({ preventScroll: true })
+      else if (next === null && fromCrumb)
+        panel.value?.focus({ preventScroll: true })
     })
   },
 )

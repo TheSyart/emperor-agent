@@ -42,6 +42,19 @@ type VisualBridge = {
   dictationStop?: () => Promise<{ ok: boolean }>
   dictationCancel?: () => Promise<{ ok: boolean }>
   onDictationEvent?: (listener: VisualCoreListener) => () => void
+  vaultStatus?: () => Promise<unknown>
+  vaultSave?: (draft: Record<string, unknown>) => Promise<unknown>
+  vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
+  vaultUnlock?: (password: string, biometric?: boolean) => Promise<unknown>
+  vaultLock?: () => Promise<{ ok: boolean }>
+  vaultSetMaster?: (
+    password: string | null,
+    biometric?: boolean,
+  ) => Promise<{ ok: boolean }>
+  vaultReveal?: (handleId: string) => Promise<{ password: string }>
+  vaultBiometricUnlock?: () => Promise<{ unlocked: boolean }>
+  vaultBiometricDisable?: () => Promise<{ ok: boolean }>
+  clearBrowserData?: () => Promise<{ ok: boolean }>
 }
 
 declare global {
@@ -1092,6 +1105,76 @@ export async function installVisualCoreBridge(
           highRisk: [] as string[],
           sensitive: [] as string[],
         } as Record<'protected' | 'highRisk' | 'sensitive', string[]>,
+      }
+      // 设置 › 浏览器: the user's browser choices, Emperor's sign-in
+      // profiles, site permissions and the credential vault.
+      const visualBrowserState = {
+        preferences: {
+          linkTarget: 'system',
+          localTarget: 'builtin',
+          showFullUrl: true,
+          history: true,
+        } as Record<string, unknown>,
+        profiles: [
+          {
+            profileId: 'temporary',
+            name: '临时',
+            kind: 'temporary',
+            openTargets: 1,
+          },
+          {
+            profileId: 'profile-work',
+            name: '工作',
+            kind: 'persistent',
+            openTargets: 2,
+          },
+          {
+            profileId: 'profile-shop',
+            name: '购物',
+            kind: 'persistent',
+            openTargets: 0,
+          },
+        ],
+        permissions: [
+          {
+            profileId: 'profile-work',
+            origin: 'https://meet.example.com',
+            kind: 'camera',
+          },
+          {
+            profileId: 'profile-work',
+            origin: 'https://meet.example.com',
+            kind: 'microphone',
+            expiresAt: '2026-10-01 18:00',
+          },
+        ] as Array<Record<string, unknown>>,
+        vault: [
+          {
+            handleId: 'cred_visual_github',
+            label: 'GitHub',
+            bindings: [{ kind: 'origin', origin: 'https://github.com' }],
+            fields: ['username', 'password', 'totp'],
+            fillMode: 'confirm',
+            revealUsername: true,
+            username: 'thesyart',
+            lastUsedAt: Date.parse('2026-06-26T09:00:00.000Z'),
+            lastUsedTarget: 'https://github.com',
+          },
+          {
+            handleId: 'cred_visual_mail',
+            label: '公司邮箱',
+            bindings: [
+              {
+                kind: 'app',
+                bundleId: 'com.apple.mail',
+                teamId: 'APPLECOMPUTER',
+              },
+            ],
+            fields: ['password'],
+            fillMode: 'confirm',
+            revealUsername: false,
+          },
+        ] as Array<Record<string, unknown>>,
       }
       const visualComputerUse = () => {
         const on = visualComputerUseState.enabled
@@ -3874,6 +3957,48 @@ export async function installVisualCoreBridge(
           return () => previewListeners.delete(listener)
         },
         dictationStatus: async () => visualDictationStatus(),
+        vaultStatus: async () => ({
+          available: true,
+          backend: 'keychain',
+          locked: false,
+          hasMasterPassword: false,
+          biometricSupported: true,
+          biometricUnlock: false,
+          handles: visualBrowserState.vault,
+        }),
+        vaultSave: async (draft: Record<string, unknown>) => {
+          const handleId =
+            (draft.handleId as string | undefined) ??
+            `cred_visual_${visualBrowserState.vault.length + 1}`
+          const entry = {
+            handleId,
+            label: draft.label,
+            bindings: draft.bindings,
+            fields: ['password'],
+            fillMode: 'confirm',
+            revealUsername: draft.revealUsername === true,
+          }
+          visualBrowserState.vault = [
+            ...visualBrowserState.vault.filter(
+              (item) => item.handleId !== handleId,
+            ),
+            entry,
+          ]
+          return entry
+        },
+        vaultRemove: async (handleId: string) => {
+          visualBrowserState.vault = visualBrowserState.vault.filter(
+            (item) => item.handleId !== handleId,
+          )
+          return { ok: true }
+        },
+        vaultUnlock: async () => ({ unlocked: true }),
+        vaultLock: async () => ({ ok: true }),
+        vaultSetMaster: async () => ({ ok: true }),
+        vaultReveal: async () => ({ password: 'visual-only' }),
+        vaultBiometricUnlock: async () => ({ unlocked: true }),
+        vaultBiometricDisable: async () => ({ ok: true }),
+        clearBrowserData: async () => ({ ok: true }),
         dictationOpenPrivacy: async (pane: string) => {
           ;((
             window as unknown as { __visualPrivacyOpened?: string[] }
@@ -5823,6 +5948,48 @@ export async function installVisualCoreBridge(
               return { cancelled: false }
             case 'computerUse.status':
               return visualComputerUse()
+            case 'browser.preferences':
+              return visualBrowserState.preferences
+            case 'browser.setPreferences':
+              visualBrowserState.preferences = {
+                ...visualBrowserState.preferences,
+                ...((args[0] || {}) as Record<string, unknown>),
+              }
+              return visualBrowserState.preferences
+            case 'computerUse.listProfiles':
+              return visualBrowserState.profiles
+            case 'computerUse.manageProfile': {
+              const input = (args[0] || {}) as {
+                action?: string
+                profileId?: string
+                name?: string
+              }
+              if (input.action === 'create' && input.name)
+                visualBrowserState.profiles.push({
+                  profileId: `profile-${visualBrowserState.profiles.length}`,
+                  name: input.name,
+                  kind: 'persistent',
+                  openTargets: 0,
+                })
+              if (input.action === 'delete')
+                visualBrowserState.profiles =
+                  visualBrowserState.profiles.filter(
+                    (item) => item.profileId !== input.profileId,
+                  )
+              return {}
+            }
+            case 'computerUse.listSitePermissions':
+              return visualBrowserState.permissions
+            case 'computerUse.setSitePermission': {
+              const input = (args[0] || {}) as Record<string, unknown>
+              visualBrowserState.permissions = input.allow
+                ? [...visualBrowserState.permissions, input]
+                : visualBrowserState.permissions.filter(
+                    (item) =>
+                      item.origin !== input.origin || item.kind !== input.kind,
+                  )
+              return {}
+            }
             case 'computerUse.setEnabled':
               visualComputerUseState.enabled = args[0] === true
               return visualComputerUse()

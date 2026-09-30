@@ -13,9 +13,10 @@
  * 3. 系统权限 (macOS) — Emperor Computer Helper, Accessibility and Screen
  *    Recording with their repair actions;
  * 4. 紧急停止 — the shortcut (修改 / 恢复默认) and 立即停止 / 恢复.
- * 「高级」: the app lists, the credential vault, browser profiles and site
- * permissions, download retention and saved screenshots, the desktop
- * driver's current capability and diagnostics, and 须知.
+ * 「高级」: the app lists, saved screenshots, the desktop driver's current
+ * capability and diagnostics, and 须知. Emperor's control of the built-in
+ * browser, passwords, sign-ins, site permissions and download retention
+ * live in 设置 › 浏览器.
  * Everything comes from `computerUse.status` and refreshes on the host's
  * `computer_use_changed` events. Stopping and resuming never wait on a
  * pending card (Core does not guard them).
@@ -38,7 +39,6 @@ import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import Button from '../ui/Button.vue'
 import {
-  Select,
   SettingsGroup,
   SettingsRow,
   SettingsSection,
@@ -54,8 +54,6 @@ import {
 } from './computer/computerUseSettingsModel'
 import KillSwitchEditor from './computer/KillSwitchEditor.vue'
 import AppListsSettings from './computer/AppListsSettings.vue'
-import CredentialVaultSettings from './computer/CredentialVaultSettings.vue'
-import BrowserProfileSettings from './computer/BrowserProfileSettings.vue'
 import BrowserPairingSettings from './computer/BrowserPairingSettings.vue'
 
 const ctx = useAppContext()
@@ -66,7 +64,10 @@ const error = ref('')
 const helper = ref<MacHelperStatus | null>(null)
 
 const headline = computed(() => computerUseHeadline(status.value, loaded.value))
-const drivers = computed(() => driverRows(status.value))
+// The built-in browser's switch is in 设置 › 浏览器.
+const drivers = computed(() =>
+  driverRows(status.value).filter((row) => row.driver !== 'embedded-browser'),
+)
 const killSwitch = computed(() => killSwitchRow(status.value))
 const screenshots = computed(() => screenshotRow(status.value))
 const supported = computed(() => Boolean(status.value?.supported))
@@ -210,23 +211,6 @@ function setAppList(
   next: string[],
 ): void {
   void act(() => core('computerUse.setAppLists', { [kind]: next }))
-}
-
-const RETENTION_OPTIONS = [
-  { value: 7, label: '7 天' },
-  { value: 30, label: '30 天' },
-  { value: 90, label: '90 天' },
-  { value: 0, label: '一直保留' },
-]
-const retention = computed(() => status.value?.downloadRetentionDays ?? 30)
-
-function setRetention(days: number | undefined): void {
-  if (days === undefined || days === retention.value) return
-  void act(() =>
-    core('computerUse.setDownloadRetention', {
-      days: days as 0 | 7 | 30 | 90,
-    }),
-  )
 }
 
 function clearScreenshots(): void {
@@ -579,24 +563,7 @@ onBeforeUnmount(() => {
           @change="setAppList"
         />
       </div>
-      <CredentialVaultSettings />
-      <BrowserProfileSettings />
-
-      <SettingsGroup title="截图与下载">
-        <SettingsRow
-          title="下载保留时间"
-          description="Agent 下载的文件在收件箱中保留的时间，到期自动删除；已移到工作区或另存的文件不受影响。"
-        >
-          <Select
-            :model-value="retention"
-            :options="RETENTION_OPTIONS"
-            size="sm"
-            :disabled="busy || !supported"
-            aria-label="下载保留时间"
-            data-testid="computer-use-download-retention"
-            @update:model-value="setRetention"
-          />
-        </SettingsRow>
+      <SettingsGroup title="截图">
         <SettingsRow
           title="已保存的截图"
           :description="screenshots.description"

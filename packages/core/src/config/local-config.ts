@@ -51,8 +51,8 @@ export type LocalConfigInput = Omit<LocalConfig, 'browser'> & {
 
 export function defaultBrowserPreferences(): BrowserPreferences {
   return {
-    enabled: true,
     linkTarget: 'system',
+    localTarget: 'builtin',
     showFullUrl: true,
     history: true,
   }
@@ -130,19 +130,24 @@ export function parseLocalConfig(
   }
 }
 
-/** Unknown or malformed fields fall back to the defaults one by one. */
+/**
+ * Unknown or malformed fields fall back to the defaults one by one; the
+ * retired `enabled` switch is dropped.
+ */
 export function normalizeBrowserPreferences(
   value: unknown,
 ): BrowserPreferences {
   const data = objectOrEmpty(value)
   const defaults = defaultBrowserPreferences()
   return {
-    enabled:
-      typeof data.enabled === 'boolean' ? data.enabled : defaults.enabled,
     linkTarget:
       data.linkTarget === 'builtin' || data.linkTarget === 'system'
         ? data.linkTarget
         : defaults.linkTarget,
+    localTarget:
+      data.localTarget === 'builtin' || data.localTarget === 'system'
+        ? data.localTarget
+        : defaults.localTarget,
     showFullUrl:
       typeof data.showFullUrl === 'boolean'
         ? data.showFullUrl

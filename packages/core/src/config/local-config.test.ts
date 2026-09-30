@@ -34,8 +34,8 @@ describe('local config', () => {
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
       browser: {
-        enabled: true,
         linkTarget: 'system',
+        localTarget: 'builtin',
         showFullUrl: true,
         history: true,
       },
@@ -101,26 +101,43 @@ describe('local config', () => {
     await saveLocalConfig(dir, {
       ...saved,
       browser: {
-        enabled: false,
         linkTarget: 'builtin',
+        localTarget: 'system',
         showFullUrl: false,
         history: false,
       },
     })
     expect((await loadLocalConfig(dir)).browser).toEqual({
-      enabled: false,
       linkTarget: 'builtin',
+      localTarget: 'system',
       showFullUrl: false,
       history: false,
     })
     expect(
       parseLocalConfig({
-        browser: { enabled: 'yes', linkTarget: 'tab', showFullUrl: false },
+        browser: {
+          linkTarget: 'tab',
+          localTarget: 'nowhere',
+          showFullUrl: false,
+        },
       }).browser,
     ).toEqual({
-      enabled: true,
       linkTarget: 'system',
+      localTarget: 'builtin',
       showFullUrl: false,
+      history: true,
+    })
+  })
+
+  it('drops the retired browser switch', () => {
+    // 设置 › 浏览器 no longer turns the built-in browser off (2026-09-30).
+    expect(
+      parseLocalConfig({ browser: { enabled: false, linkTarget: 'builtin' } })
+        .browser,
+    ).toEqual({
+      linkTarget: 'builtin',
+      localTarget: 'builtin',
+      showFullUrl: true,
       history: true,
     })
   })

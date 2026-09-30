@@ -14,9 +14,9 @@ export interface CoreBrowserPreferencesServiceDeps {
 }
 
 /**
- * The user's own built-in browser (`settings.json` › `browser`): whether the
- * 浏览器 pane is available, where a clicked web link opens, the address bar
- * and the temporary history. Not the Agent's browser (computer use).
+ * The user's own built-in browser (`settings.json` › `browser`): where a
+ * clicked web link and a link to this machine open, the address bar and the
+ * temporary history. Not the Agent's browser (computer use).
  */
 export class CoreBrowserPreferencesService {
   readonly stateRoot: string

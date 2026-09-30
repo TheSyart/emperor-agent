@@ -229,8 +229,8 @@ describe('BrowserPane', () => {
 
   it('shows only the site until the user edits, when full addresses are off', async () => {
     preferences = {
-      enabled: true,
       linkTarget: 'system',
+      localTarget: 'builtin',
       showFullUrl: false,
       history: true,
     }
@@ -312,7 +312,7 @@ describe('BrowserPane', () => {
     })
     const root = mount()
     await flush()
-    button(root, '临时历史').click()
+    button(root, '浏览历史').click()
     await flush()
     const menu = document.body.querySelector('[role="menu"]')!
     const items = [...menu.querySelectorAll('[role="menuitem"]')]
@@ -339,7 +339,7 @@ describe('BrowserPane', () => {
     })
     const root = mount()
     await flush()
-    button(root, '临时历史').click()
+    button(root, '浏览历史').click()
     await flush()
     ;(document.body.querySelector('[role="menuitem"]') as HTMLElement).click()
     await flush()
@@ -347,7 +347,7 @@ describe('BrowserPane', () => {
       '这条记录已不存在',
     )
     bridge.browserHistory.mockResolvedValueOnce([])
-    button(root, '临时历史').click()
+    button(root, '浏览历史').click()
     await flush()
     expect(document.body.querySelector('[role="menu"]')?.textContent).toContain(
       '还没有浏览记录',
@@ -356,14 +356,14 @@ describe('BrowserPane', () => {
 
   it('has no history button while temporary history is off', async () => {
     preferences = {
-      enabled: true,
       linkTarget: 'system',
+      localTarget: 'builtin',
       showFullUrl: true,
       history: false,
     }
     const root = mount()
     await flush()
-    expect(button(root, '临时历史')).toBeNull()
+    expect(button(root, '浏览历史')).toBeNull()
   })
 
   it('closes the view when it unmounts', async () => {

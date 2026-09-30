@@ -2,7 +2,12 @@
 import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { VaultEntry, VaultStatus } from '../../../api/backend'
-import CredentialVaultSettings from './CredentialVaultSettings.vue'
+import {
+  createSettingsHeader,
+  SETTINGS_HEADER_KEY,
+  type SettingsHeaderHost,
+} from '../settingsHeader'
+import PasswordManagerPage from './PasswordManagerPage.vue'
 
 const api = vi.hoisted(() => ({
   vaultStatus: vi.fn(),
@@ -19,6 +24,7 @@ vi.mock('../../../api/backend', () => api)
 
 let app: App | null = null
 let container: HTMLDivElement | null = null
+let host: SettingsHeaderHost
 
 const site: VaultEntry = {
   handleId: 'cred_aaaaaaaaaaaaaaaaaaaaaaaa',
@@ -45,13 +51,50 @@ async function settle(): Promise<void> {
   await nextTick()
 }
 
+function render(root: HTMLElement): void {
+  host = createSettingsHeader()
+  app = createApp({ render: () => h(PasswordManagerPage) })
+  app.provide(SETTINGS_HEADER_KEY, host)
+  app.mount(root)
+}
+
 async function mount(): Promise<HTMLDivElement> {
   container = document.createElement('div')
   document.body.append(container)
-  app = createApp({ render: () => h(CredentialVaultSettings) })
-  app.mount(container)
+  render(container)
   await settle()
   return container
+}
+
+/** The header's 添加, when the vault takes new entries. */
+function addAction() {
+  return host.actions.value.find((action) => action.id === 'add-credential')
+}
+
+async function openAdd(): Promise<void> {
+  addAction()!.onClick!()
+  await settle()
+}
+
+/** Submit the master password / Touch ID dialog. */
+async function submitProtect(): Promise<void> {
+  document.body
+    .querySelector('form.vault-protect')!
+    .dispatchEvent(new Event('submit', { cancelable: true }))
+  await settle()
+}
+
+function dialogInput(label: string): HTMLInputElement {
+  const input = document.body.querySelector<HTMLInputElement>(
+    `form.vault-protect input[aria-label="${label}"]`,
+  )
+  if (!input) throw new Error(`no dialog input ${label}`)
+  return input
+}
+
+/** The entry form (in its dialog). */
+function form(): HTMLFormElement | null {
+  return document.body.querySelector<HTMLFormElement>('form.vault-form')
 }
 
 function button(root: HTMLElement, text: string, index = 0): HTMLButtonElement {
@@ -62,9 +105,9 @@ function button(root: HTMLElement, text: string, index = 0): HTMLButtonElement {
   return found
 }
 
-function checkbox(root: HTMLElement, label: string): HTMLInputElement {
-  const found = [...root.querySelectorAll('label.vault-check')].find((item) =>
-    item.textContent?.includes(label),
+function checkbox(_root: HTMLElement, label: string): HTMLInputElement {
+  const found = [...document.body.querySelectorAll('label.vault-check')].find(
+    (item) => item.textContent?.includes(label),
   )
   const input = found?.querySelector<HTMLInputElement>('input[type="checkbox"]')
   if (!input) throw new Error(`no checkbox ${label}`)
@@ -83,19 +126,17 @@ async function tick(input: HTMLInputElement): Promise<void> {
   await settle()
 }
 
-function field(root: HTMLElement, label: string): HTMLInputElement {
-  const found = [...root.querySelectorAll('.vault-form label')].find((item) =>
-    item.textContent?.includes(label),
+function field(_root: HTMLElement, label: string): HTMLInputElement {
+  const found = [...document.body.querySelectorAll('.vault-form label')].find(
+    (item) => item.textContent?.includes(label),
   )
   const input = found?.querySelector('input')
   if (!input) throw new Error(`no field ${label}`)
   return input
 }
 
-async function submit(root: HTMLElement): Promise<void> {
-  root
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { cancelable: true }))
+async function submit(_root: HTMLElement): Promise<void> {
+  form()!.dispatchEvent(new Event('submit', { cancelable: true }))
   await settle()
 }
 
@@ -104,6 +145,7 @@ afterEach(() => {
   container?.remove()
   app = null
   container = null
+  document.body.innerHTML = ''
   for (const mock of Object.values(api)) mock.mockReset()
 })
 
@@ -174,7 +216,8 @@ describe('credential vault settings', () => {
     expect(root.textContent).toContain('basic_text')
     expect(root.textContent).toContain('GNOME Keyring 或 KWallet')
     expect(root.textContent).toContain('凭据库已停用')
-    expect(root.querySelector('form')).toBeNull()
+    expect(addAction()).toBeUndefined()
+    expect(form()).toBeNull()
   })
 
   it('shows protection strength and each entry’s last fill', async () => {
@@ -198,8 +241,7 @@ describe('credential vault settings', () => {
     api.vaultStatus.mockResolvedValue(
       status({ backend: 'gnome_libsecret', hasMasterPassword: true }),
     )
-    app = createApp({ render: () => h(CredentialVaultSettings) })
-    app.mount(root)
+    render(root)
     await settle()
     expect(root.textContent).toContain('系统加密 + 主密码')
     expect(root.textContent).toContain('GNOME Keyring')
@@ -221,9 +263,10 @@ describe('credential vault settings', () => {
   it('warns that a TOTP secret beside the password leaves one factor', async () => {
     api.vaultStatus.mockResolvedValue(status({ handles: [] }))
     const root = await mount()
-    expect(root.textContent).not.toContain('两步验证就退化成了一步')
+    await openAdd()
+    expect(document.body.textContent).not.toContain('两步验证就退化成了一步')
     await type(field(root, 'TOTP 密钥'), 'JBSWY3DPEHPK3PXP')
-    expect(root.querySelector('.vault-warning')?.textContent).toContain(
+    expect(form()?.querySelector('.vault-warning')?.textContent).toContain(
       '把 TOTP 密钥和密码放在一起，两步验证就退化成了一步',
     )
   })
@@ -285,15 +328,16 @@ describe('credential vault settings', () => {
       'com.example.Unsigned：该应用未签名，身份校验较弱',
     ])
     // Registration shows the same warning (01 §7.9).
-    const textarea = [...root.querySelectorAll('.vault-form label')]
+    await openAdd()
+    const textarea = [...document.body.querySelectorAll('.vault-form label')]
       .find((item) => item.textContent?.includes('macOS App 绑定'))!
       .querySelector('textarea')!
     textarea.value = 'com.example.Other | | /Applications/Other.app'
     textarea.dispatchEvent(new Event('input'))
     await settle()
-    expect(
-      root.querySelector('.vault-form .vault-warning')?.textContent,
-    ).toContain('com.example.Other：该应用未签名，身份校验较弱')
+    expect(form()?.querySelector('.vault-warning')?.textContent).toContain(
+      'com.example.Other：该应用未签名，身份校验较弱',
+    )
   })
 
   it('unlocks with Touch ID once the user opted in with the password', async () => {
@@ -308,16 +352,17 @@ describe('credential vault settings', () => {
     api.vaultUnlock.mockResolvedValue(true)
     const root = await mount()
     expect(() => button(root, '使用 Touch ID')).toThrow()
-    await type(
-      root.querySelector<HTMLInputElement>('input[aria-label="主密码"]')!,
-      'correct horse battery',
-    )
-    await tick(checkbox(root, '允许 Touch ID 解锁'))
+    // The page has no password field: 解锁 asks in a dialog.
+    expect(root.querySelector('input[type="password"]')).toBeNull()
     button(root, '解锁').click()
     await settle()
+    await type(dialogInput('主密码'), 'correct horse battery')
+    await tick(checkbox(root, '允许 Touch ID 解锁'))
+    await submitProtect()
     expect(api.vaultUnlock).toHaveBeenCalledWith('correct horse battery', {
       biometric: true,
     })
+    expect(document.body.querySelector('form.vault-protect')).toBeNull()
 
     app?.unmount()
     api.vaultStatus.mockResolvedValue(
@@ -330,8 +375,7 @@ describe('credential vault settings', () => {
     )
     api.vaultBiometricUnlock.mockResolvedValue(true)
     api.vaultBiometricDisable.mockResolvedValue(undefined)
-    app = createApp({ render: () => h(CredentialVaultSettings) })
-    app.mount(root)
+    render(root)
     await settle()
     expect(root.textContent).toContain('用主密码或 Touch ID 解锁后')
     expect(() => checkbox(root, '允许 Touch ID 解锁')).toThrow()
@@ -348,13 +392,14 @@ describe('credential vault settings', () => {
     api.vaultStatus.mockResolvedValue(status({ biometricSupported: true }))
     api.vaultSetMaster.mockResolvedValue(undefined)
     const root = await mount()
-    const input = root.querySelector<HTMLInputElement>(
-      'input[aria-label="新的主密码"]',
-    )!
-    await type(input, 'correct horse battery')
-    await tick(checkbox(root, '允许 Touch ID 解锁'))
-    button(root, '保存').click()
+    expect(root.querySelector('input[type="password"]')).toBeNull()
+    button(root, '设置').click()
     await settle()
+    // The Touch ID choice shows up once there is a password to go with it.
+    expect(() => checkbox(root, '允许 Touch ID 解锁')).toThrow()
+    await type(dialogInput('新的主密码'), 'correct horse battery')
+    await tick(checkbox(root, '允许 Touch ID 解锁'))
+    await submitProtect()
     expect(api.vaultSetMaster).toHaveBeenCalledWith('correct horse battery', {
       biometric: true,
     })
@@ -368,16 +413,13 @@ describe('credential vault settings', () => {
       }),
     )
     api.vaultUnlock.mockResolvedValue(true)
-    app = createApp({ render: () => h(CredentialVaultSettings) })
-    app.mount(root)
+    render(root)
     await settle()
     // Unlocked and not yet on: re-enter the master password to opt in.
-    await type(
-      root.querySelector<HTMLInputElement>('input[aria-label="确认主密码"]')!,
-      'correct horse battery',
-    )
     button(root, '开启').click()
     await settle()
+    await type(dialogInput('确认主密码'), 'correct horse battery')
+    await submitProtect()
     expect(api.vaultUnlock).toHaveBeenCalledWith('correct horse battery', {
       biometric: true,
     })
@@ -386,8 +428,7 @@ describe('credential vault settings', () => {
     api.vaultStatus.mockResolvedValue(
       status({ hasMasterPassword: true, locked: true }),
     )
-    app = createApp({ render: () => h(CredentialVaultSettings) })
-    app.mount(root)
+    render(root)
     await settle()
     expect(root.textContent).not.toContain('Touch ID')
   })
@@ -410,6 +451,7 @@ describe('credential vault settings', () => {
     expect(api.vaultStatus).toHaveBeenCalledTimes(2)
     expect(root.textContent).toContain('已锁定')
     expect(button(root, '解锁')).toBeTruthy()
-    expect(root.querySelector('form')).toBeNull()
+    expect(addAction()).toBeUndefined()
+    expect(form()).toBeNull()
   })
 })

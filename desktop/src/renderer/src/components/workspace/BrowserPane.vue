@@ -17,7 +17,7 @@
  * (设置 › 浏览器) and the state push shows it. With 地址栏显示完整网址 off
  * the bar shows only the site until the user edits it.
  *
- * 临时历史 (设置 › 浏览器, main's temporary history): the pages committed in
+ * 浏览历史 (设置 › 浏览器, main's temporary history): the pages committed in
  * this browser session, newest first. Picking one sends only its id; main
  * checks the stored address again before loading it.
  *
@@ -147,10 +147,8 @@ watch(
   { immediate: true },
 )
 
-// ── 临时历史 ─────────────────────────────────────────────────────────────
-const historyShown = computed(
-  () => preferences.value.enabled && preferences.value.history,
-)
+// ── 浏览历史 ─────────────────────────────────────────────────────────────
+const historyShown = computed(() => preferences.value.history)
 const historyAnchor = ref<HTMLElement | null>(null)
 const historyOpen = ref(false)
 const historyEntries = shallowRef<BrowserHistoryEntry[]>([])
@@ -282,7 +280,7 @@ function hostOf(url: string): string {
       </IconButton>
       <span v-if="historyShown" ref="historyAnchor" class="history-anchor">
         <IconButton
-          label="临时历史"
+          label="浏览历史"
           aria-haspopup="menu"
           :aria-expanded="historyOpen"
           @click="toggleHistory"
@@ -338,9 +336,9 @@ function hostOf(url: string): string {
         placement="bottom"
         :width="300"
         dense
-        label="临时历史"
+        label="浏览历史"
       >
-        <MenuItem variant="label">临时历史 · 关闭浏览器后清空</MenuItem>
+        <MenuItem variant="label">浏览历史 · 关闭浏览器后清空</MenuItem>
         <MenuItem v-if="!historyEntries.length" disabled
           >还没有浏览记录</MenuItem
         >

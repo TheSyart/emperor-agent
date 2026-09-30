@@ -6,7 +6,7 @@
  *     浏览器 pane once 设置 › 浏览器 says so;
  *   - a page typed in the address bar keeps a cookie and appears in the
  *     temporary history;
- *   - 清空临时浏览数据 in settings wipes the partition (checked in main);
+ *   - 清除浏览数据 in settings wipes the partition (checked in main);
  *   - a new session closes the view: the history starts empty.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
@@ -168,7 +168,7 @@ async function openBrowserSettings(page: Page) {
   const dialog = page.getByRole('dialog', { name: '设置' })
   await dialog.waitFor()
   await dialog.locator('.nav-cell[data-section="browser"]').click()
-  await dialog.locator('#browser-link-target').waitFor()
+  await dialog.getByTestId('browser-agent-card').waitFor()
   return dialog
 }
 
@@ -237,11 +237,11 @@ async function userBrowser(
     async () => {
       const dialog = await openBrowserSettings(page)
       await dialog.locator('#browser-link-target').click()
-      await page.getByRole('menuitem', { name: /Emperor 内置浏览器/ }).click()
+      await page.getByRole('menuitem', { name: /^Emperor/ }).click()
       await until(
         async () =>
           (await dialog.locator('#browser-link-target').innerText()).includes(
-            'Emperor 内置浏览器',
+            'Emperor',
           ),
         5_000,
         'the setting to show the built-in browser',
@@ -292,8 +292,8 @@ async function userBrowser(
         10_000,
         'the page in the temporary history',
       )
-      await page.getByRole('button', { name: '临时历史' }).click()
-      const menu = page.getByRole('menu', { name: '临时历史' })
+      await page.getByRole('button', { name: '浏览历史' }).click()
+      const menu = page.getByRole('menu', { name: '浏览历史' })
       await menu.waitFor({ timeout: 5_000 })
       const entries = await menu.getByRole('menuitem').allInnerTexts()
       await page.screenshot({ path: join(shots, 'history-menu.png') })
@@ -304,12 +304,12 @@ async function userBrowser(
     },
   )
 
-  await check(page, '清空临时浏览数据 wipes the partition', async () => {
+  await check(page, '清除浏览数据 wipes the partition', async () => {
     const dialog = await openBrowserSettings(page)
     await dialog.locator('[data-action="clear-browser-data"]').click()
     await dialog
       .locator('[data-clear-status]')
-      .filter({ hasText: '已清空' })
+      .filter({ hasText: '已清除' })
       .waitFor({ timeout: 15_000 })
     await page.screenshot({ path: join(shots, 'cleared.png') })
     await closeSettings(page)
@@ -331,8 +331,8 @@ async function userBrowser(
       await page.waitForTimeout(800)
       // The pane remounted for the new session: the old view and its history
       // are gone.
-      await page.getByRole('button', { name: '临时历史' }).click()
-      const menu = page.getByRole('menu', { name: '临时历史' })
+      await page.getByRole('button', { name: '浏览历史' }).click()
+      const menu = page.getByRole('menu', { name: '浏览历史' })
       await menu.waitFor({ timeout: 5_000 })
       const text = await menu.innerText()
       await page.keyboard.press('Escape')

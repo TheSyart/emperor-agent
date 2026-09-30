@@ -1457,7 +1457,8 @@ for (const theme of ['dark', 'light'] as const) {
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
     await expect(dialog.getByTestId('computer-use-status')).toHaveText('已开启')
-    await expect(dialog.locator('[data-driver]')).toHaveCount(3)
+    // The built-in browser's switch is in 设置 › 浏览器.
+    await expect(dialog.locator('[data-driver]')).toHaveCount(2)
     await expect(dialog).toContainText('⌃⌥⌘.')
     await expect(dialog).not.toContainText('持续允许电脑操作')
     await expect(
@@ -1489,8 +1490,8 @@ for (const theme of ['dark', 'light'] as const) {
     await dialog.getByRole('button', { name: '保存' }).click()
     await expect(dialog.getByRole('button', { name: '恢复默认' })).toBeVisible()
 
-    // 「高级」: the user's own app lists, saved screenshots and the download
-    // retention, reached from the protected apps row.
+    // 「高级」: the user's own app lists and saved screenshots, reached from
+    // the protected apps row.
     await dialog.getByTestId('computer-use-app-lists').click()
     await expect(dialog.getByTestId('computer-use-advanced')).toHaveAttribute(
       'open',
@@ -1503,9 +1504,6 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-app-list="sensitive"]')).toContainText(
       'com.apple.Notes',
     )
-    await expect(
-      dialog.getByTestId('computer-use-download-retention'),
-    ).toContainText('30 天')
     await dialog.locator('[data-app-list="protected"]').scrollIntoViewIfNeeded()
     await expectNoHorizontalOverflow(page)
     await shot(page, `settings-computer-lists-${theme}`)

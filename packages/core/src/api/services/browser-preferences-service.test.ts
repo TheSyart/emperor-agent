@@ -10,18 +10,20 @@ describe('CoreBrowserPreferencesService', () => {
     const changed = vi.fn()
     const service = new CoreBrowserPreferencesService(root, { changed })
     expect(await service.get()).toEqual({
-      enabled: true,
       linkTarget: 'system',
+      localTarget: 'builtin',
       showFullUrl: true,
       history: true,
     })
     await service.update({ linkTarget: 'builtin', showFullUrl: false })
     expect(changed).toHaveBeenCalledWith({
-      enabled: true,
       linkTarget: 'builtin',
+      localTarget: 'builtin',
       showFullUrl: false,
       history: true,
     })
+    await service.update({ localTarget: 'system' })
+    expect((await service.get()).localTarget).toBe('system')
     const again = new CoreBrowserPreferencesService(root)
     expect((await again.get()).linkTarget).toBe('builtin')
     const onDisk = JSON.parse(
@@ -37,9 +39,9 @@ describe('CoreBrowserPreferencesService', () => {
         throw new Error('a card is pending')
       },
     })
-    await expect(service.update({ enabled: false })).rejects.toThrow(
+    await expect(service.update({ history: false })).rejects.toThrow(
       /card is pending/,
     )
-    expect((await service.get()).enabled).toBe(true)
+    expect((await service.get()).history).toBe(true)
   })
 })

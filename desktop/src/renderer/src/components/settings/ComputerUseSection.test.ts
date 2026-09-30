@@ -23,12 +23,6 @@ vi.mock('../../api/backend', () => ({
   macHelperReconnect: reconnect,
   onCoreEvent: () => () => {},
 }))
-vi.mock('./computer/BrowserProfileSettings.vue', () => ({
-  default: { render: () => null },
-}))
-vi.mock('./computer/CredentialVaultSettings.vue', () => ({
-  default: { render: () => null },
-}))
 const pairingSummary = vi.hoisted(() => ({
   value: { pending: 0, paired: 0, tabs: 0 },
 }))
@@ -118,10 +112,10 @@ describe('ComputerUseSection macOS helper', () => {
       '[data-testid="computer-use-advanced"]',
     )!
     expect(advanced.open).toBe(false)
-    expect(advanced.textContent).toContain('截图与下载')
+    expect(advanced.textContent).toContain('截图')
     expect(advanced.textContent).toContain('须知')
     expect(advanced.textContent).toContain('「停止共享」只停止该窗口')
-    expect(text.indexOf('紧急停止')).toBeLessThan(text.indexOf('截图与下载'))
+    expect(text.indexOf('紧急停止')).toBeLessThan(text.indexOf('已保存的截图'))
     expect(root.querySelector('#computer-use-unrestricted')).toBeNull()
     expect(text).not.toContain('持续允许电脑操作')
     expect(text).not.toContain('没有生效的授权')
@@ -375,20 +369,40 @@ describe('ComputerUseSection controls', () => {
   })
 })
 
-describe('ComputerUseSection app lists and retention', () => {
-  it('saves a new sensitive app and shows the download retention', async () => {
+describe('ComputerUseSection app lists', () => {
+  it('saves a new sensitive app; browser settings live in 设置 › 浏览器', async () => {
     core.mockResolvedValue({
       ...status,
+      drivers: [
+        ...status.drivers,
+        {
+          driver: 'embedded-browser',
+          stage: 'available',
+          label: '内置浏览器',
+          enabled: true,
+          available: true,
+          actions: [],
+          missing: [],
+        },
+      ],
       downloadRetentionDays: 7,
       appLists: { protected: [], highRisk: [], sensitive: [] },
     })
     helperStatus.mockResolvedValue({ connected: false, permissions: {} })
     const root = mount()
     await settle()
+    // Moved to 设置 › 浏览器 (2026-09-30): Emperor's control of the built-in
+    // browser, passwords, sign-ins, site permissions and download retention.
+    expect(root.querySelector('[data-driver="embedded-browser"]')).toBeNull()
     expect(
-      root.querySelector('[data-testid="computer-use-download-retention"]')
-        ?.textContent,
-    ).toContain('7 天')
+      root.querySelector('[data-testid="computer-use-download-retention"]'),
+    ).toBeNull()
+    const titles = [
+      ...root.querySelectorAll('.ds-settings-group > .head .title'),
+      ...root.querySelectorAll('.ds-settings-row .title'),
+    ].map((title) => title.textContent?.trim())
+    for (const moved of ['凭据', '浏览器 profile', '网站权限', '下载保留时间'])
+      expect(titles).not.toContain(moved)
     const input = root.querySelector<HTMLInputElement>(
       'input[aria-label="添加到敏感应用"]',
     )!

@@ -32,8 +32,8 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
     ])
     // Settings from before the 浏览器 section get its defaults.
     expect(settings.browser).toEqual({
-      enabled: true,
       linkTarget: 'system',
+      localTarget: 'builtin',
       showFullUrl: true,
       history: true,
     })

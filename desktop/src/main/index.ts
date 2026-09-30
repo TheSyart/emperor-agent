@@ -1274,8 +1274,8 @@ function createDictationService(): DictationService {
 
 /**
  * A web link the user clicked in Emperor's UI (chat links, a window the main
- * window tried to open): the system browser, or the built-in browser when
- * the user chose it, and always for an address of this machine
+ * window tried to open): the system or the built-in browser, as 设置 ›
+ * 浏览器 says for web links and for addresses of this machine
  * (link-routing.ts). The built-in browser shows it in the 浏览器 pane.
  */
 async function openUserLink(
@@ -1283,7 +1283,10 @@ async function openUserLink(
 ): Promise<'builtin' | 'system' | 'refused'> {
   const preferences = (await coreApi?.browser
     .preferences()
-    .catch(() => null)) ?? { enabled: true, linkTarget: 'system' as const }
+    .catch(() => null)) ?? {
+    linkTarget: 'system' as const,
+    localTarget: 'builtin' as const,
+  }
   const destination = linkDestination(url, preferences)
   if (destination === 'builtin' && mainWindow && !mainWindow.isDestroyed()) {
     await requireBrowserViewHost().openUrl({ url })

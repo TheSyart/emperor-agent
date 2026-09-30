@@ -162,18 +162,21 @@ async function openSettings(page: Page): Promise<void> {
   )
 }
 
-/** Unfold 高级 (profiles, credentials, downloads …) in the open section. */
-async function openAdvanced(page: Page): Promise<void> {
-  const advanced = page
-    .getByRole('dialog', { name: '设置' })
-    .getByTestId('computer-use-advanced')
-  if ((await advanced.getAttribute('open')) === null)
-    await advanced.locator('summary').click()
-  await until(
-    async () => (await advanced.getAttribute('open')) !== null,
-    5_000,
-    '高级 open',
-  )
+/** 设置 › 浏览器, open on its main page. */
+async function openBrowserSettings(page: Page) {
+  await page.getByRole('button', { name: '设置', exact: true }).first().click()
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await dialog.waitFor()
+  await dialog.locator('.nav-cell[data-section="browser"]').click()
+  await dialog.getByTestId('browser-agent-card').waitFor()
+  return dialog
+}
+
+/** One of 设置 › 浏览器's sub pages, by its 管理 button. */
+async function openBrowserPage(page: Page, action: string): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await dialog.locator(`[data-action="${action}"]`).click()
+  await dialog.getByTestId('settings-crumb').waitFor()
 }
 
 /** The master switch. */
@@ -419,31 +422,39 @@ async function fullstack(
     page,
     'M2 settings manage profile, permission and credential through trusted UI',
     async () => {
-      await openSettings(page)
-      await openAdvanced(page)
-      const dialog = page.getByRole('dialog', { name: '设置' })
-      const profileForm = dialog.locator('.cu-settings-form').first()
+      // 设置 › 浏览器 › 登录状态 / 网站设置 / 密码管理器 (2026-09-30).
+      const dialog = await openBrowserSettings(page)
+      await openBrowserPage(page, 'manage-profiles')
+      await dialog.locator('[data-action="new-profile"]').click()
+      const profileForm = page.locator('form.profile-form')
       await profileForm.locator('input').fill('E2E profile')
-      await profileForm.getByRole('button', { name: '新建 profile' }).click()
+      await page
+        .getByRole('dialog', { name: '新建 profile' })
+        .getByRole('button', { name: '新建' })
+        .click()
+      await profileForm.waitFor({ state: 'hidden' })
       const profiles = await core<Array<{ profileId: string; name: string }>>(
         page,
         'computerUse.listProfiles',
       )
       const profile = profiles.find((item) => item.name === 'E2E profile')
       if (!profile) throw new Error('profile was not created')
-      const permissionForm = dialog.locator('.cu-settings-form').nth(1)
-      await permissionForm
-        .locator('select')
-        .first()
-        .selectOption(profile.profileId)
-      await permissionForm.locator('input').first().fill(origin)
-      await permissionForm
-        .locator('select')
-        .nth(1)
-        .selectOption('notifications')
-      await permissionForm
-        .getByRole('button', { name: '放行此站点权限' })
+
+      await dialog.getByTestId('settings-crumb').click()
+      await openBrowserPage(page, 'manage-sites')
+      await dialog.locator('[data-action="allow-site"]').click()
+      const siteForm = page.locator('form.site-form')
+      await siteForm
+        .locator('input[placeholder="https://example.com"]')
+        .fill(origin)
+      // 权限 defaults to 通知; pick the new profile.
+      await siteForm.locator('.ds-select').nth(1).click()
+      await page.getByRole('menuitem', { name: 'E2E profile' }).click()
+      await page
+        .getByRole('dialog', { name: '放行网站权限' })
+        .getByRole('button', { name: '放行', exact: true })
         .click()
+      await siteForm.waitFor({ state: 'hidden' })
       const allowed = await core<
         Array<{ profileId: string; origin: string; kind: string }>
       >(page, 'computerUse.listSitePermissions')
@@ -456,19 +467,22 @@ async function fullstack(
         )
       )
         throw new Error('site permission was not saved')
-      await dialog
-        .getByText('凭据', { exact: true })
-        .first()
-        .scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(shots, 'settings-m2.png') })
-      const vaultForm = dialog.locator('.vault-form')
+
+      await dialog.getByTestId('settings-crumb').click()
+      await openBrowserPage(page, 'manage-passwords')
+      await dialog.locator('[data-action="add-credential"]').click()
+      const vaultForm = page.locator('form.vault-form')
       await vaultForm.locator('input').nth(0).fill('E2E credential')
       await vaultForm
         .getByRole('textbox', { name: '网站 origin（每行一个）' })
         .fill(origin)
       await vaultForm.locator('input').nth(1).fill('e2e-user')
       await vaultForm.locator('input').nth(2).fill(fixturePassword)
-      await vaultForm.getByRole('button', { name: '添加凭据' }).click()
+      await page.screenshot({ path: join(shots, 'settings-m2.png') })
+      await page
+        .getByRole('dialog', { name: '添加凭据' })
+        .getByRole('button', { name: '添加', exact: true })
+        .click()
       await until(
         async () =>
           (await dialog.getByText('E2E credential', { exact: true }).count()) >
@@ -492,8 +506,11 @@ async function fullstack(
         vault.handles.find((item) => item.label === 'E2E credential')
           ?.handleId ?? ''
       if (!credentialHandleId) throw new Error('credential handle missing')
-      if ((await dialog.innerText()).includes(fixturePassword))
+      if ((await page.locator('body').innerText()).includes(fixturePassword))
         throw new Error('password appeared in Settings text')
+
+      await dialog.getByTestId('settings-crumb').click()
+      await openBrowserPage(page, 'manage-profiles')
       page.once('dialog', (prompt) => {
         void prompt.accept()
       })
@@ -849,9 +866,8 @@ async function fullstack(
           )
         })
       if (scan(home)) throw new Error('password appeared in Emperor Home files')
-      await openSettings(page)
-      await openAdvanced(page)
-      const dialog = page.getByRole('dialog', { name: '设置' })
+      const dialog = await openBrowserSettings(page)
+      await openBrowserPage(page, 'manage-passwords')
       page.once('dialog', (prompt) => {
         void prompt.accept()
       })

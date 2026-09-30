@@ -95,6 +95,19 @@ describe('Core operation registry', () => {
     ).toThrow()
   })
 
+  it('validates the user browser preferences change', () => {
+    const args = CORE_OPERATION_REGISTRY['browser.setPreferences'].args
+    expect(args.parse([{ localTarget: 'system', history: false }])).toEqual([
+      { localTarget: 'system', history: false },
+    ])
+    for (const bad of [
+      { localTarget: 'tab' },
+      // The built-in browser can no longer be turned off.
+      { enabled: false },
+    ])
+      expect(() => args.parse([bad])).toThrow()
+  })
+
   it('validates the turn file record operations', () => {
     const diff = CORE_OPERATION_REGISTRY['workspace.turnDiff'].args
     const revert = CORE_OPERATION_REGISTRY['workspace.revertTurn'].args

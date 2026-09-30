@@ -224,44 +224,30 @@ describe('WorkspacePanel', () => {
     )
   })
 
-  it('says the built-in browser is off instead of opening its pane', async () => {
-    const off = {
-      enabled: false,
-      linkTarget: 'system',
-      showFullUrl: true,
-      history: true,
-    }
-    let emit: (event: unknown) => void = () => undefined
+  it('always offers the 浏览器 pane, whatever an old setting says', async () => {
+    // 设置 › 浏览器 no longer turns the built-in browser off.
     ;(window as unknown as { emperor: unknown }).emperor = {
       invokeCore: vi.fn(async (operation: string) =>
-        operation === 'browser.preferences' ? off : null,
+        operation === 'browser.preferences'
+          ? {
+              enabled: false,
+              linkTarget: 'system',
+              localTarget: 'builtin',
+              showFullUrl: true,
+              history: true,
+            }
+          : null,
       ),
-      onCoreEvent: (listener: (event: unknown) => void) => {
-        emit = listener
-        return () => undefined
-      },
+      onCoreEvent: () => () => undefined,
     }
     const root = mount()
     await flush()
-    expect(row(root, 'browser').disabled).toBe(true)
-    expect(row(root, 'browser').textContent).toContain('内置浏览器已关闭')
-    expect(segment(root, 'browser').disabled).toBe(true)
-    // A shortcut still lands on the pane: it explains, no view opens.
-    frameActions.openWorkspace(useFrameState(), 'browser')
-    await flush()
-    expect(root.querySelector('.browser-pane')).toBeNull()
-    expect(root.querySelector('.workspace-empty')?.textContent).toContain(
-      '设置 › 浏览器',
-    )
-    // Turned back on (the settings, another window): the pane is available.
-    frameActions.openWorkspace(useFrameState(), 'launcher')
-    emit({
-      event: 'browser_preferences_changed',
-      preferences: { ...off, enabled: true },
-    })
-    await flush()
     expect(row(root, 'browser').disabled).toBe(false)
     expect(segment(root, 'browser').disabled).toBe(false)
+    frameActions.openWorkspace(useFrameState(), 'browser')
+    await flush()
+    expect(useFrameState().workspacePane).toBe('browser')
+    expect(root.querySelector('.workspace-empty')).toBeNull()
   })
 
   it('switches panes from the launcher and the header, home returns', async () => {

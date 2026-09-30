@@ -39,18 +39,18 @@
 
 点击侧栏底部的「设置」打开设置弹窗。左侧导航列出下表中的分区，右上角是当前分区的操作，例如刷新或「添加模型」。
 
-| 分区     | 用途                                                                                            | 详细说明                                                    |
-| -------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                    | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
-| 模型     | 模型配置卡片、连通测试、执行与成本策略                                                          | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
-| Hooks    | “配置 / 测试 / 审计”三个标签                                                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
-| 电脑操作 | 总开关、驱动状态、授权、浏览器 profile、站点权限、凭据与急停                                    | [电脑操作（实验）](computer-use.md)                         |
-| 浏览器   | 你自己用的内置浏览器：启用、网页链接打开位置、地址栏完整网址、临时历史与清空数据                | [Chat 与 Build](chat-build.md#浏览器设置与数据)             |
-| 语音     | 听写组件状态、麦克风与语音识别权限、麦克风、识别语言与听写快捷键（macOS）                       | [Chat 与 Build](chat-build.md#语音听写)                     |
-| 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈 | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |
-| 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                  | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
-| 桌宠     | 启用或关闭 companion，预览动画                                                                  | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
-| 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                  | [诊断与排障](diagnostics-troubleshooting.md)                |
+| 分区     | 用途                                                                                                                           | 详细说明                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                                                   | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
+| 模型     | 模型配置卡片、连通测试、执行与成本策略                                                                                         | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
+| Hooks    | “配置 / 测试 / 审计”三个标签                                                                                                   | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
+| 电脑操作 | 总开关、Chrome 与 Mac 应用驱动、系统授权、应用名单与急停                                                                       | [电脑操作（实验）](computer-use.md)                         |
+| 浏览器   | 让 Emperor 控制内置浏览器；链接与本地 URL 打开位置、完整网址、浏览数据与浏览历史；密码管理器、登录状态、下载保留时间、网站设置 | [Chat 与 Build](chat-build.md#浏览器设置与数据)             |
+| 语音     | 听写组件状态、麦克风与语音识别权限、麦克风、识别语言与听写快捷键（macOS）                                                      | [Chat 与 Build](chat-build.md#语音听写)                     |
+| 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈                                | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |
+| 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                                                 | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
+| 桌宠     | 启用或关闭 companion，预览动画                                                                                                 | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
+| 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                                                 | [诊断与排障](diagnostics-troubleshooting.md)                |
 
 定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。
 

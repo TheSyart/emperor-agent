@@ -171,9 +171,12 @@ describe('SettingsModal', () => {
     )
     expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
 
-    dialog
-      ?.querySelector<HTMLButtonElement>('[data-testid="pet-open"]')
-      ?.click()
+    // Clicking a button focuses it first, as in Chromium.
+    const manage = dialog?.querySelector<HTMLButtonElement>(
+      '[data-testid="pet-open"]',
+    )
+    manage?.focus()
+    manage?.click()
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({
       settings: 'pet',
@@ -192,6 +195,7 @@ describe('SettingsModal', () => {
     expect(dialog?.querySelector('[data-testid="pet-detail"]')).not.toBeNull()
     expect(document.activeElement).toBe(crumb)
 
+    crumb?.focus()
     crumb?.click()
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ settings: 'pet' })
@@ -213,6 +217,8 @@ describe('SettingsModal', () => {
     expect(
       dialog?.querySelector('[data-testid="settings-page-title"]')?.textContent,
     ).toBe('动画详情')
+    // A deep link does not pull focus onto the breadcrumb.
+    expect(document.activeElement).toBe(dialog)
 
     // The section's own nav cell leads back to its main page.
     dialog

@@ -28,13 +28,13 @@ export interface RuntimeEventEnvelope {
  * The user's own built-in browser (the workspace 浏览器 pane), stored in
  * settings.json › `browser`: not the Agent's browser, which computer use
  * owns. Its pages are temporary: the memory-only partition is wiped when the
- * view closes.
+ * view closes. (A former `enabled` switch is ignored when read.)
  */
 export interface BrowserPreferences {
-  /** The pane is available; off sends every link to the system browser. */
-  enabled: boolean
   /** Where a web link the user clicks in Emperor opens. */
   linkTarget: 'system' | 'builtin'
+  /** Where such a link to this machine (localhost…) opens. */
+  localTarget: 'builtin' | 'system'
   /** The address bar shows the whole URL, not only the site. */
   showFullUrl: boolean
   /** Keep this session's visited pages for back-lookups (cleared on close). */

@@ -1006,8 +1006,8 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([
       z
         .object({
-          enabled: z.boolean().optional(),
           linkTarget: z.enum(['system', 'builtin']).optional(),
+          localTarget: z.enum(['builtin', 'system']).optional(),
           showFullUrl: z.boolean().optional(),
           history: z.boolean().optional(),
         })
