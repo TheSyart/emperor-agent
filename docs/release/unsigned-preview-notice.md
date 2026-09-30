@@ -31,6 +31,12 @@ Move Emperor Agent to the Applications folder before opening it: launched from t
 
 Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity, so after each update macOS treats the Helper as a new app: re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on). The credential vault may ask for Keychain access once more.
 
+## macOS 语音听写 / Dictation on macOS
+
+输入框的听写在这台 Mac 上本机识别，需要「麦克风」与「语音识别」两项权限，第一次听写时 macOS 会询问。未签名版本没有固定的签名身份，安装新版本后，macOS 可能不再认可之前的授权：再次听写时如果重新弹出询问，允许即可；如果系统设置里的开关显示已开启、听写却仍提示没有权限，到 **设置 › 语音** 查看状态，用「打开系统设置」把对应开关关掉再打开。仍然无效时，在终端运行 `tccutil reset Microphone com.emperor.agent.desktop` 与 `tccutil reset SpeechRecognition com.emperor.agent.desktop`，下次听写时重新允许。
+
+Dictation in the composer recognizes speech on this Mac and needs **Microphone** and **Speech Recognition**, which macOS asks for at the first dictation. An unsigned build has no stable signing identity, so after an update macOS may no longer honor the earlier grants: allow again if asked; if the system switches look on but dictation still reports a missing permission, check **Settings › 语音** and use 「打开系统设置」 to turn the switch off and on. If that does not help, run `tccutil reset Microphone com.emperor.agent.desktop` and `tccutil reset SpeechRecognition com.emperor.agent.desktop` in Terminal and allow again at the next dictation.
+
 ## Windows 单应用确认 / Per-app confirmation
 
 确认 SHA-256 无误后，如果 SmartScreen 对话框和设备策略允许，可选择 **More info → Run anyway**。界面没有该选项时，不要绕过组织策略；请停止安装或联系管理员。Microsoft 对 unsigned app 警告的说明见 [Publish your first Windows app](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/publish-first-app)。不要更改整机 Defender 或 SmartScreen 安全策略。
