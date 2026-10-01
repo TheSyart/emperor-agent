@@ -6,6 +6,9 @@ import { installVisualCoreBridge } from './visualBridge'
 
 // Settings › 语音 (VO-02): the dictation helper, the two permissions, and
 // the microphone, language and shortcut choices, on the real renderer.
+// RV-05: 听写 first, the permissions as the last card (one line while they
+// agree), and a notice on top while the helper or a permission stops
+// dictation.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'voice-settings')
 
 test.beforeAll(() => {
@@ -49,8 +52,13 @@ async function noHorizontalOverflow(page: Page) {
 for (const theme of ['dark', 'light'] as const) {
   test(`voice settings on this Mac (${theme})`, async ({ page }) => {
     const dialog = await openVoice(page, { theme })
-    // A working helper and two granted permissions need no decision.
-    await expect(dialog.getByTestId('dictation-helper')).toHaveCount(0)
+    // A working helper and two granted permissions need no decision: 听写
+    // first, the permissions as one line in the last card, no notice.
+    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
+    await expect(
+      dialog.locator('.ds-settings-group > .head .title'),
+    ).toHaveText(['听写', '系统权限'])
     await expect(dialog.getByTestId('dictation-permissions')).toContainText(
       '已允许',
     )
@@ -81,32 +89,48 @@ test('lists only this Mac’s languages and remembers a pick', async ({
   ).toContainText('英语（美国）')
 })
 
-test('a denied permission offers System Settings', async ({ page }) => {
-  const dialog = await openVoice(page, { variant: 'denied' })
-  await expect(dialog.getByText('已拒绝')).toBeVisible()
-  await expect(dialog.getByText('尚未询问')).toBeVisible()
-  await dialog.getByRole('button', { name: '打开系统设置' }).click()
-  expect(
-    await page.evaluate(
-      () =>
-        (window as unknown as { __visualPrivacyOpened?: string[] })
-          .__visualPrivacyOpened,
-    ),
-  ).toEqual(['microphone'])
-  await shot(page, 'voice-denied')
-})
+for (const theme of ['dark', 'light'] as const) {
+  test(`a denied permission raises a notice with System Settings (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openVoice(page, { variant: 'denied', theme })
+    const notice = dialog.locator('[data-voice-notice="permissions"]')
+    await expect(notice).toContainText('听写需要麦克风权限')
+    await expect(notice).toContainText('「系统设置 › 隐私与安全性 › 麦克风」')
+    // The permission card stays last and only reports, a row each.
+    await expect(
+      dialog.locator('.ds-settings-group > .head .title'),
+    ).toHaveText(['听写', '系统权限'])
+    await expect(dialog.getByText('已拒绝')).toBeVisible()
+    await expect(dialog.getByText('尚未询问')).toBeVisible()
+    await noHorizontalOverflow(page)
+    await shot(page, `voice-denied-${theme}`)
+    await notice.getByRole('button', { name: '打开系统设置' }).click()
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __visualPrivacyOpened?: string[] })
+            .__visualPrivacyOpened,
+      ),
+    ).toEqual(['microphone'])
+  })
 
-test('an unavailable helper says why', async ({ page }) => {
-  const dialog = await openVoice(page, { variant: 'unavailable' })
-  await expect(dialog.getByTestId('dictation-helper')).toHaveText('不可用')
-  await expect(
-    dialog.getByText('Emperor Dictation Helper 无法启动'),
-  ).toBeVisible()
-  await expect(
-    dialog.getByRole('button', { name: '听写识别的语言' }),
-  ).toBeDisabled()
-  await shot(page, 'voice-unavailable')
-})
+  test(`an unavailable helper says why in a notice (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openVoice(page, { variant: 'unavailable', theme })
+    const notice = dialog.locator('[data-voice-notice="helper"]')
+    await expect(notice).toContainText('听写组件不可用')
+    await expect(notice).toContainText('Emperor Dictation Helper 无法启动')
+    await expect(notice.getByRole('button', { name: '重新检测' })).toBeVisible()
+    await expect(dialog.getByTestId('dictation-helper')).toHaveCount(0)
+    await expect(
+      dialog.getByRole('button', { name: '听写识别的语言' }),
+    ).toBeDisabled()
+    await noHorizontalOverflow(page)
+    await shot(page, `voice-unavailable-${theme}`)
+  })
+}
 
 test('Windows and Linux say 暂不支持', async ({ page }) => {
   const dialog = await openVoice(page, { variant: 'unsupported' })
