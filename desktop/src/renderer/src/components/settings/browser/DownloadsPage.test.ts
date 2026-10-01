@@ -205,9 +205,24 @@ describe('下载历史记录', () => {
     const root = await mount()
     click(rowOf(root, 'ud_0123456789ab'), '打开')
     await settle()
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
-      '没有可以打开它的应用',
-    )
+    // One notice at the top of the page, in the error tone.
+    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    expect(notice?.dataset.tone).toBe('error')
+    expect(notice?.getAttribute('role')).toBe('alert')
+    expect(notice?.textContent).toContain('没有可以打开它的应用')
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(notice)
+  })
+
+  it('says what the page is in one short sentence', async () => {
+    const root = await mount()
+    const intro =
+      root.querySelector('.ds-settings-section .intro')?.textContent?.trim() ??
+      ''
+    expect(intro).not.toBe('')
+    expect(intro.split(/[。！？；]/).filter(Boolean)).toHaveLength(1)
+    expect(intro.length).toBeLessThanOrEqual(42)
   })
 
   it('reveals, moves and saves Emperor’s downloads through the inbox', async () => {
@@ -221,6 +236,9 @@ describe('下载历史记录', () => {
     expect(root.querySelector('[role="status"]')?.textContent).toContain(
       '已移到工作区',
     )
+    expect(
+      root.querySelector<HTMLElement>('.ds-settings-notice')?.dataset.tone,
+    ).toBe('info')
     click(rowOf(root, 'dl_0123456789ab'), '另存为…')
     await settle()
     expect(bridge.agentDownloadReveal).toHaveBeenCalledWith('dl_0123456789ab')

@@ -29,6 +29,7 @@ import { useSettingsHeader } from '../settingsHeader'
 import {
   EmptyState,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   StatusBadge,
@@ -276,9 +277,9 @@ onBeforeUnmount(hidePassword)
 
 <template>
   <SettingsSection
-    intro="保存网站或 macOS App 的账号密码，供 Emperor 操作网页和应用时代填。Emperor 只拿到名称和句柄；密码在主进程解密，由受信驱动代填到精确绑定的目标，每次代填前都会请你确认。"
+    intro="Emperor 操作网页和 App 时用来代填的账号密码，每次代填前都会请你确认。"
   >
-    <p v-if="pageError" class="vault-error" role="alert">{{ error }}</p>
+    <SettingsNotice v-if="pageError" tone="error" :title="pageError" />
     <SettingsGroup title="保护">
       <SettingsRow title="保护状态" :description="availability.description">
         <StatusBadge :tone="availability.tone">{{
@@ -442,7 +443,7 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="submitProtect"
       >
-        <p v-if="error" class="vault-error" role="alert">{{ error }}</p>
+        <SettingsNotice v-if="error" tone="error" :title="error" />
         <label v-if="protect === 'touch-id'"
           >主密码<input
             v-model="confirmMaster"
@@ -521,7 +522,7 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="save"
       >
-        <p v-if="error" class="vault-error" role="alert">{{ error }}</p>
+        <SettingsNotice v-if="error" tone="error" :title="error" />
         <label
           >名称<input v-model="form.label" required maxlength="120"
         /></label>
@@ -599,10 +600,6 @@ onBeforeUnmount(hidePassword)
 </template>
 
 <style scoped>
-.vault-error {
-  color: rgb(var(--danger));
-  font-size: var(--fs-xs);
-}
 .vault-inline {
   display: flex;
   align-items: center;

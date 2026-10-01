@@ -126,4 +126,37 @@ describe('网站设置', () => {
     })
     expect(document.body.querySelector('form.site-form')).toBeNull()
   })
+
+  it('says why a revoke failed, in a notice at the top', async () => {
+    permissions = [
+      { profileId: 'p1', origin: 'https://meet.example.com', kind: 'camera' },
+    ] as SitePermission[]
+    const root = await mount()
+    core.mockImplementation(async (key: string) => {
+      if (key === 'computerUse.setSitePermission')
+        throw new Error('网站权限没有保存')
+      return key === 'computerUse.listProfiles' ? profiles : permissions
+    })
+    ;[...root.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === '撤销')!
+      .click()
+    await settle()
+    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    expect(notice?.dataset.tone).toBe('error')
+    expect(notice?.textContent).toContain('网站权限没有保存')
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(notice)
+    expect(root.querySelector('.site-error')).toBeNull()
+  })
+
+  it('says what the page is in one short sentence', async () => {
+    const root = await mount()
+    const intro =
+      root.querySelector('.ds-settings-section .intro')?.textContent?.trim() ??
+      ''
+    expect(intro).toContain('默认一律拒绝')
+    expect(intro.split(/[。！？；]/).filter(Boolean)).toHaveLength(1)
+    expect(intro.length).toBeLessThanOrEqual(42)
+  })
 })

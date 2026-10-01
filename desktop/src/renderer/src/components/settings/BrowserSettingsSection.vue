@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
  * Settings › 浏览器 — everything about Emperor's built-in browser, laid out
- * like Codex's 浏览器 settings:
+ * like Codex's 浏览器 settings, one card per group (no lead-in paragraph):
+ * - a SettingsNotice first, only while a computer use call failed;
  * - the control card: whether Emperor may operate the built-in browser
  *   (computer use's embedded-browser driver; greyed out, with a way there,
  *   while 电脑操作 is off);
  * - 常规: where a clicked web link and a link to this machine open, the
- *   address bar, clearing the browsing data and the temporary history of the
- *   user's own browsing (the workspace 浏览器 pane, a memory-only session);
- * - 自动填充和密码: 密码管理器 and 登录状态 (sub pages);
+ *   address bar, clearing the browsing data (its outcome is a badge in the
+ *   row) and the temporary history of the user's own browsing (the
+ *   workspace 浏览器 pane, a memory-only session);
+ * - 自动填充和密码: 密码管理器 and 登录状态 (sub pages), with 导入… beside
+ *   the title, since it brings in exactly those;
  * - 下载: where the user's own downloads go (位置, picked in the system
  *   folder dialog main shows), whether to ask each time, the history of
  *   theirs and Emperor's downloads (sub page), and how long Emperor's
@@ -46,6 +49,7 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   StatusBadge,
@@ -230,18 +234,17 @@ onBeforeUnmount(() => {
   <SignInProfilesPage v-else-if="page === 'profiles'" />
   <DownloadsPage v-else-if="page === 'downloads'" />
   <SiteSettingsPage v-else-if="page === 'sites'" />
-  <SettingsSection
-    v-else
-    intro="你自己浏览网页，以及 Emperor 操作网页，用的都是内置浏览器。"
-  >
-    <p v-if="error" class="browser-error" role="alert">{{ error }}</p>
+  <SettingsSection v-else>
+    <SettingsNotice v-if="error" tone="error" :title="error" />
     <SettingsCard
       class="agent-card"
       data-testid="browser-agent-card"
-      title="浏览器"
       :description="agentDescription"
     >
-      <template #leading><Globe :size="20" /></template>
+      <template #leading>
+        <span class="agent-glyph"><Globe :size="18" /></span>
+      </template>
+      <template #title><span class="agent-title">浏览器</span></template>
       <template v-if="agentStage" #meta>
         <StatusBadge :tone="agentStage.tone">{{
           agentStage.stage
@@ -266,18 +269,9 @@ onBeforeUnmount(() => {
     </SettingsCard>
 
     <SettingsGroup title="常规">
-      <template #actions>
-        <Button
-          size="sm"
-          variant="outline"
-          data-testid="open-import"
-          @click="importOpen = true"
-          >导入…</Button
-        >
-      </template>
       <SettingsRow
         title="网页 URL 和链接打开位置"
-        description="在会话、Pull Request 等界面中点击的网页链接"
+        description="在会话、Pull Request 等界面点击的网页链接"
         label-for="browser-link-target"
       >
         <Select
@@ -321,39 +315,43 @@ onBeforeUnmount(() => {
           @update:model-value="(value: boolean) => save({ showFullUrl: value })"
         />
       </SettingsRow>
-      <SettingsRow
-        title="浏览数据"
-        description="清除内置浏览器里的 Cookie、网站数据、缓存、浏览历史和下载记录"
-      >
-        <div class="browser-inline">
-          <span
-            v-if="clearing === 'done'"
-            class="browser-status"
-            data-clear-status
-            role="status"
-            >已清除</span
+      <SettingsRow title="浏览数据">
+        <template #description>
+          <span v-if="clearing === 'failed'" class="browser-failed" role="alert"
+            >没能清除：{{ clearError }}</span
           >
-          <span
-            v-else-if="clearing === 'failed'"
-            class="browser-status failed"
-            data-clear-status
-            role="alert"
-            >清除失败：{{ clearError }}</span
+          <template v-else
+            >清除 Cookie、网站数据、缓存、浏览历史和下载记录</template
           >
-          <Button
-            variant="outline"
-            size="sm"
-            data-action="clear-browser-data"
-            :disabled="clearing === 'running'"
-            @click="clearData"
-          >
-            {{ clearing === 'running' ? '正在清除…' : '清除浏览数据' }}
-          </Button>
-        </div>
+        </template>
+        <StatusBadge
+          v-if="clearing === 'done'"
+          tone="ok"
+          dot
+          data-clear-status
+          role="status"
+          >已清除</StatusBadge
+        >
+        <StatusBadge
+          v-else-if="clearing === 'failed'"
+          tone="error"
+          dot
+          data-clear-status
+          >清除失败</StatusBadge
+        >
+        <Button
+          variant="outline"
+          size="sm"
+          data-action="clear-browser-data"
+          :disabled="clearing === 'running'"
+          @click="clearData"
+        >
+          {{ clearing === 'running' ? '正在清除…' : '清除浏览数据' }}
+        </Button>
       </SettingsRow>
       <SettingsRow
         title="浏览历史"
-        description="记录你在内置浏览器里打开过的网页；只在内存里，关闭即清空"
+        description="只在内存里记录你打开过的网页，关闭即清空"
         label-for="browser-history"
       >
         <Switch
@@ -366,9 +364,18 @@ onBeforeUnmount(() => {
     </SettingsGroup>
 
     <SettingsGroup title="自动填充和密码">
+      <template #actions>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid="open-import"
+          @click="importOpen = true"
+          >导入…</Button
+        >
+      </template>
       <SettingsRow
         title="密码管理器"
-        description="添加、删除和编辑 Emperor 代填用的密码"
+        description="Emperor 代填用的密码，保存在这台 Mac 的 Emperor 目录里"
       >
         <Button
           size="sm"
@@ -402,29 +409,27 @@ onBeforeUnmount(() => {
             >{{ preferences.downloadDirectory ?? '系统下载文件夹' }}</span
           >
         </template>
-        <div class="browser-inline">
-          <Button
-            v-if="preferences.downloadDirectory"
-            variant="outline"
-            size="sm"
-            data-action="reset-download-folder"
-            :disabled="saving"
-            @click="save({ downloadDirectory: null })"
-            >恢复默认</Button
-          >
-          <Button
-            variant="outline"
-            size="sm"
-            data-action="change-download-folder"
-            :disabled="saving || choosingFolder"
-            @click="changeDownloadFolder"
-            >更改</Button
-          >
-        </div>
+        <Button
+          v-if="preferences.downloadDirectory"
+          variant="outline"
+          size="sm"
+          data-action="reset-download-folder"
+          :disabled="saving"
+          @click="save({ downloadDirectory: null })"
+          >恢复默认</Button
+        >
+        <Button
+          variant="outline"
+          size="sm"
+          data-action="change-download-folder"
+          :disabled="saving || choosingFolder"
+          @click="changeDownloadFolder"
+          >更改</Button
+        >
       </SettingsRow>
       <SettingsRow
         title="下载前询问保存位置"
-        description="在内置浏览器中下载时，先显示保存对话框"
+        description="每次下载先弹出系统的保存对话框"
         label-for="browser-ask-save"
       >
         <Switch
@@ -436,10 +441,7 @@ onBeforeUnmount(() => {
           "
         />
       </SettingsRow>
-      <SettingsRow
-        title="下载历史记录"
-        description="查看和管理你在内置浏览器里下载的文件，以及 Emperor 下载的文件"
-      >
+      <SettingsRow title="下载历史记录" description="你的下载和 Emperor 的下载">
         <Button
           size="sm"
           variant="outline"
@@ -450,7 +452,7 @@ onBeforeUnmount(() => {
       </SettingsRow>
       <SettingsRow
         title="下载保留时间"
-        description="Emperor 下载的文件在收件箱中保留的时间，到期自动删除"
+        description="Emperor 下载的文件在收件箱中保留的时间"
         label-for="browser-download-retention"
       >
         <Select
@@ -468,7 +470,7 @@ onBeforeUnmount(() => {
     <SettingsGroup title="浏览器权限">
       <SettingsRow
         title="网站设置"
-        description="管理摄像头、麦克风、位置、通知等网站权限"
+        description="摄像头、麦克风、位置、通知等网站权限"
       >
         <Button
           size="sm"
@@ -484,18 +486,25 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.browser-error {
-  margin: var(--space-2) 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-row);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+/* After the notice, the control card keeps the groups' 20px rhythm. */
+.agent-card:not(:first-child) {
+  margin-top: var(--space-5);
 }
 
-.agent-card {
-  margin-top: var(--space-2);
+/* The page's master switch: its glyph on a gold tile, a heavier title. */
+.agent-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--space-8) + var(--space-1));
+  height: calc(var(--space-8) + var(--space-1));
+  border-radius: var(--radius-cell);
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-strong));
+}
+
+.agent-title {
+  font-weight: 600;
 }
 
 .browser-note {
@@ -504,22 +513,11 @@ onBeforeUnmount(() => {
   color: rgb(var(--state-warn-label));
 }
 
-.browser-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
+.browser-failed {
+  color: rgb(var(--state-error-label));
 }
 
 .download-folder {
   overflow-wrap: anywhere;
-}
-
-.browser-status {
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-}
-
-.browser-status.failed {
-  color: rgb(var(--danger));
 }
 </style>

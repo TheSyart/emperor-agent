@@ -8,9 +8,10 @@
  *   as its tool rows: 在访达中显示, 移到工作区 (the conversation's
  *   workspace) and 另存为….
  * Each row reads 「网站 · 时间 · 状态」 under the file name; an empty list
- * says 暂无. Main reports each of your downloads as it goes
- * (`onUserDownload`) and the list follows. Only ids go back to main; no
- * path reaches this page.
+ * says 暂无. How the last action went is a SettingsNotice at the top (an
+ * error, or a one-line info such as 已另存). Main reports each of your
+ * downloads as it goes (`onUserDownload`) and the list follows. Only ids go
+ * back to main; no path reaches this page.
  */
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
@@ -26,7 +27,13 @@ import {
   type UserDownloadView,
 } from '../../../api/backend'
 import Button from '../../ui/Button.vue'
-import { EmptyState, SettingsGroup, SettingsRow, SettingsSection } from '../ui'
+import {
+  EmptyState,
+  SettingsGroup,
+  SettingsNotice,
+  SettingsRow,
+  SettingsSection,
+} from '../ui'
 import {
   agentDownloadDescription,
   userDownloadDescription,
@@ -87,14 +94,10 @@ onBeforeUnmount(() => unsubscribe())
 
 <template>
   <SettingsSection
-    intro="你在内置浏览器里下载的文件，以及 Emperor 在对话里下载的文件。从列表移除不会删除文件。"
+    intro="这里列出你和 Emperor 下载的文件，从列表移除不会删除文件。"
   >
-    <p v-if="error" class="downloads-message failed" role="alert">
-      {{ error }}
-    </p>
-    <p v-else-if="notice" class="downloads-message" role="status">
-      {{ notice }}
-    </p>
+    <SettingsNotice v-if="error" tone="error" :title="error" />
+    <SettingsNotice v-else-if="notice" tone="info" :title="notice" />
     <SettingsGroup title="你的下载">
       <EmptyState v-if="!mine.length" compact title="暂无" />
       <SettingsRow
@@ -183,16 +186,3 @@ onBeforeUnmount(() => unsubscribe())
     </SettingsGroup>
   </SettingsSection>
 </template>
-
-<style scoped>
-.downloads-message {
-  margin: var(--space-2) 0 0;
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.downloads-message.failed {
-  color: rgb(var(--danger));
-}
-</style>

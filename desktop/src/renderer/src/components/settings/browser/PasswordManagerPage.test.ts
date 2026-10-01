@@ -448,10 +448,27 @@ describe('credential vault settings', () => {
     expect(root.querySelector('[role="alert"]')?.textContent).toBe(
       '凭据库已锁定，请先用主密码解锁。',
     )
+    // A notice at the top of the page, not a loose line.
+    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    expect(notice?.dataset.tone).toBe('error')
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(notice)
     expect(api.vaultStatus).toHaveBeenCalledTimes(2)
     expect(root.textContent).toContain('已锁定')
     expect(button(root, '解锁')).toBeTruthy()
     expect(addAction()).toBeUndefined()
     expect(form()).toBeNull()
+  })
+
+  it('says what the page is in one short sentence', async () => {
+    api.vaultStatus.mockResolvedValue(status())
+    const root = await mount()
+    const intro =
+      root.querySelector('.ds-settings-section .intro')?.textContent?.trim() ??
+      ''
+    expect(intro).not.toBe('')
+    expect(intro.split(/[。！？；]/).filter(Boolean)).toHaveLength(1)
+    expect(intro.length).toBeLessThanOrEqual(42)
   })
 })
